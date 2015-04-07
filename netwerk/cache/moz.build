@@ -15,14 +15,14 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'necko_cache'
 
-MODULE = 'nkcache'
-
 EXPORTS += [
     'nsApplicationCacheService.h',
     'nsCacheService.h',
+    'nsDeleteDir.h'
 ]
 
-CPP_SOURCES += [
+# These files cannot be built in unified mode because they force NSPR logging.
+SOURCES += [
     'nsApplicationCacheService.cpp',
     'nsCache.cpp',
     'nsCacheEntry.cpp',
@@ -42,5 +42,12 @@ CPP_SOURCES += [
     'nsMemoryCacheDevice.cpp',
 ]
 
-LIBRARY_NAME = 'nkcache_s'
+FAIL_ON_WARNINGS = True
 
+MSVC_ENABLE_PGO = True
+
+FINAL_LIBRARY = 'necko'
+
+LOCAL_INCLUDES += [
+    '../base/src',
+]

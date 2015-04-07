@@ -18,9 +18,9 @@ public class SyncConstants {
                                                    GlobalConstants.MOZ_APP_VERSION + "." +
                                                    SYNC_MINOR_VERSION;
 
-  public static final String SYNC_USER_AGENT = "Firefox AndroidSync " +
-                                               SYNC_VERSION_STRING + " (" +
-                                               GlobalConstants.MOZ_APP_DISPLAYNAME + ")";
+  public static final String USER_AGENT = "Firefox AndroidSync " +
+                                          SYNC_VERSION_STRING + " (" +
+                                          GlobalConstants.MOZ_APP_DISPLAYNAME + ")";
 
   public static final String ACCOUNTTYPE_SYNC = "@MOZ_ANDROID_SHARED_ACCOUNT_TYPE@";
 
@@ -53,4 +53,9 @@ public class SyncConstants {
    * Account type.
    */
   public static final String PER_ACCOUNT_TYPE_PERMISSION = "@MOZ_ANDROID_SHARED_ACCOUNT_TYPE@.permission.PER_ACCOUNT_TYPE";
+
+  public static final String DEFAULT_AUTH_SERVER = "https://auth.services.mozilla.com/";
+
+  // Used for BackoffHandler storage for Sync 1.1's SyncAdapter.
+  public static final String BACKOFF_PREF_SUFFIX_11 = "sync";
 }

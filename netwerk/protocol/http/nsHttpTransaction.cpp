@@ -9,21 +9,16 @@
 
 #include "base/basictypes.h"
 
-#include "nsIOService.h"
 #include "nsHttpHandler.h"
 #include "nsHttpTransaction.h"
-#include "nsHttpConnection.h"
 #include "nsHttpRequestHead.h"
 #include "nsHttpResponseHead.h"
 #include "nsHttpChunkedDecoder.h"
 #include "nsTransportUtils.h"
 #include "nsNetUtil.h"
-#include "nsProxyRelease.h"
-#include "nsIOService.h"
-#include "nsAtomicRefcnt.h"
+#include "nsCRT.h"
 
 #include "nsISeekableStream.h"
-#include "nsISocketTransport.h"
 #include "nsMultiplexInputStream.h"
 #include "nsStringStream.h"
 #include "mozilla/VisualEventTracer.h"
@@ -32,10 +27,17 @@
 #include "nsServiceManagerUtils.h"   // do_GetService
 #include "nsIHttpActivityObserver.h"
 #include "nsSocketTransportService2.h"
+#include "nsICancelable.h"
+#include "nsIEventTarget.h"
+#include "nsIHttpChannelInternal.h"
+#include "nsIInputStream.h"
+#include "nsITransport.h"
+#include "nsIOService.h"
 #include <algorithm>
 
-
-using namespace mozilla;
+#ifdef MOZ_WIDGET_GONK
+#include "NetStatistics.h"
+#endif
 
 //-----------------------------------------------------------------------------
 
@@ -51,6 +53,11 @@ static NS_DEFINE_CID(kMultiplexInputStream, NS_MULTIPLEXINPUTSTREAM_CID);
 // Place a limit on how much non-compliant HTTP can be skipped while
 // looking for a response header
 #define MAX_INVALID_RESPONSE_BODY_SIZE (1024 * 128)
+
+using namespace mozilla::net;
+
+namespace mozilla {
+namespace net {
 
 //-----------------------------------------------------------------------------
 // helpers
@@ -81,7 +88,7 @@ LogHeaders(const char *lineStart)
 //-----------------------------------------------------------------------------
 
 nsHttpTransaction::nsHttpTransaction()
-    : mCallbacksLock("transaction mCallbacks lock")
+    : mLock("transaction lock")
     , mRequestSize(0)
     , mConnection(nullptr)
     , mConnInfo(nullptr)
@@ -95,6 +102,7 @@ nsHttpTransaction::nsHttpTransaction()
     , mPriority(0)
     , mRestartCount(0)
     , mCaps(0)
+    , mCapsToClear(0)
     , mClassification(CLASS_GENERAL)
     , mPipelinePosition(0)
     , mHttpVersion(NS_HTTP_VERSION_UNKNOWN)
@@ -114,6 +122,7 @@ nsHttpTransaction::nsHttpTransaction()
     , mHttpResponseMatched(false)
     , mPreserveStream(false)
     , mDispatchedAsBlocking(false)
+    , mResponseTimeoutEnabled(true)
     , mReportedStart(false)
     , mReportedResponseHeader(false)
     , mForTakeResponseHead(nullptr)
@@ -121,14 +130,17 @@ nsHttpTransaction::nsHttpTransaction()
     , mSubmittedRatePacing(false)
     , mPassedRatePacing(false)
     , mSynchronousRatePaceRequest(false)
+    , mCountRecv(0)
+    , mCountSent(0)
+    , mAppId(NECKO_NO_APP_ID)
 {
-    LOG(("Creating nsHttpTransaction @%x\n", this));
+    LOG(("Creating nsHttpTransaction @%p\n", this));
     gHttpHandler->GetMaxPipelineObjectSize(&mMaxPipelineObjectSize);
 }
 
 nsHttpTransaction::~nsHttpTransaction()
 {
-    LOG(("Destroying nsHttpTransaction @%x\n", this));
+    LOG(("Destroying nsHttpTransaction @%p\n", this));
 
     if (mTokenBucketCancel) {
         mTokenBucketCancel->Cancel(NS_ERROR_ABORT);
@@ -224,6 +236,31 @@ nsHttpTransaction::Init(uint32_t caps,
         mActivityDistributor = nullptr;
     }
 
+    nsCOMPtr<nsIChannel> channel = do_QueryInterface(eventsink);
+    if (channel) {
+        bool isInBrowser;
+        NS_GetAppInfo(channel, &mAppId, &isInBrowser);
+    }
+
+#ifdef MOZ_WIDGET_GONK
+    if (mAppId != NECKO_NO_APP_ID) {
+        nsCOMPtr<nsINetworkInterface> activeNetwork;
+        GetActiveNetworkInterface(activeNetwork);
+        mActiveNetwork =
+            new nsMainThreadPtrHolder<nsINetworkInterface>(activeNetwork);
+    }
+#endif
+
+    nsCOMPtr<nsIHttpChannelInternal> httpChannelInternal =
+        do_QueryInterface(eventsink);
+    if (httpChannelInternal) {
+        rv = httpChannelInternal->GetResponseTimeoutEnabled(
+            &mResponseTimeoutEnabled);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+        }
+    }
+
     // create transport event sink proxy. it coalesces all events if and only
     // if the activity observer is not active. when the observer is active
     // we need not to coalesce any events to get all expected notifications
@@ -238,8 +275,9 @@ nsHttpTransaction::Init(uint32_t caps,
     mConsumerTarget = target;
     mCaps = caps;
 
-    if (requestHead->Method() == nsHttp::Head)
+    if (requestHead->IsHead()) {
         mNoContent = true;
+    }
 
     // Make sure that there is "Content-Length: 0" header in the requestHead
     // in case of POST and PUT methods when there is no requestBody and
@@ -253,7 +291,7 @@ nsHttpTransaction::Init(uint32_t caps,
     //   For compatibility with HTTP/1.0 applications, HTTP/1.1 requests
     //   containing a message-body MUST include a valid Content-Length header
     //   field unless the server is known to be HTTP/1.1 compliant.
-    if ((requestHead->Method() == nsHttp::Post || requestHead->Method() == nsHttp::Put) &&
+    if ((requestHead->IsPost() || requestHead->IsPut()) &&
         !requestBody && !requestHead->PeekHeader(nsHttp::Transfer_Encoding)) {
         requestHead->SetHeader(nsHttp::Content_Length, NS_LITERAL_CSTRING("0"));
     }
@@ -340,10 +378,19 @@ nsHttpTransaction::Init(uint32_t caps,
     return NS_OK;
 }
 
+// This method should only be used on the socket thread
 nsAHttpConnection *
 nsHttpTransaction::Connection()
 {
     return mConnection;
+}
+
+already_AddRefed<nsAHttpConnection>
+nsHttpTransaction::GetConnectionReference()
+{
+    MutexAutoLock lock(mLock);
+    nsRefPtr<nsAHttpConnection> connection = mConnection;
+    return connection.forget();
 }
 
 nsHttpResponseHead *
@@ -409,8 +456,11 @@ nsHttpTransaction::TakeSubTransactions(
 void
 nsHttpTransaction::SetConnection(nsAHttpConnection *conn)
 {
-    NS_IF_RELEASE(mConnection);
-    NS_IF_ADDREF(mConnection = conn);
+    {
+        MutexAutoLock lock(mLock);
+        NS_IF_RELEASE(mConnection);
+        NS_IF_ADDREF(mConnection = conn);
+    }
 
     if (conn) {
         MOZ_EVENT_TRACER_EXEC(static_cast<nsAHttpTransaction*>(this),
@@ -421,7 +471,7 @@ nsHttpTransaction::SetConnection(nsAHttpConnection *conn)
 void
 nsHttpTransaction::GetSecurityCallbacks(nsIInterfaceRequestor **cb)
 {
-    MutexAutoLock lock(mCallbacksLock);
+    MutexAutoLock lock(mLock);
     NS_IF_ADDREF(*cb = mCallbacks);
 }
 
@@ -429,7 +479,7 @@ void
 nsHttpTransaction::SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks)
 {
     {
-        MutexAutoLock lock(mCallbacksLock);
+        MutexAutoLock lock(mLock);
         mCallbacks = aCallbacks;
     }
 
@@ -531,7 +581,14 @@ nsHttpTransaction::Status()
 uint32_t
 nsHttpTransaction::Caps()
 {
-    return mCaps;
+    return mCaps & ~mCapsToClear;
+}
+
+void
+nsHttpTransaction::SetDNSWasRefreshed()
+{
+    MOZ_ASSERT(NS_IsMainThread(), "SetDNSWasRefreshed on main thread only!");
+    mCapsToClear |= NS_HTTP_REFRESH_DNS;
 }
 
 uint64_t
@@ -565,6 +622,7 @@ nsHttpTransaction::ReadRequestSegment(nsIInputStream *stream,
                               "net::http::first-write");
     }
 
+    trans->CountSentBytes(*countRead);
     trans->mSentData = true;
     return NS_OK;
 }
@@ -641,6 +699,7 @@ nsHttpTransaction::WritePipeSegment(nsIOutputStream *stream,
     }
 
     MOZ_ASSERT(*countWritten > 0, "bad writer");
+    trans->CountRecvBytes(*countWritten);
     trans->mReceivedData = true;
 
     // Let the transaction "play" with the buffer.  It is free to modify
@@ -685,6 +744,45 @@ nsHttpTransaction::WriteSegments(nsAHttpSegmentWriter *writer,
     }
 
     return rv;
+}
+
+nsresult
+nsHttpTransaction::SaveNetworkStats(bool enforce)
+{
+#ifdef MOZ_WIDGET_GONK
+    // Check if active network and appid are valid.
+    if (!mActiveNetwork || mAppId == NECKO_NO_APP_ID) {
+        return NS_OK;
+    }
+
+    if (mCountRecv <= 0 && mCountSent <= 0) {
+        // There is no traffic, no need to save.
+        return NS_OK;
+    }
+
+    // If |enforce| is false, the traffic amount is saved
+    // only when the total amount exceeds the predefined
+    // threshold.
+    uint64_t totalBytes = mCountRecv + mCountSent;
+    if (!enforce && totalBytes < NETWORK_STATS_THRESHOLD) {
+        return NS_OK;
+    }
+
+    // Create the event to save the network statistics.
+    // the event is then dispathed to the main thread.
+    nsRefPtr<nsRunnable> event =
+        new SaveNetworkStatsEvent(mAppId, mActiveNetwork,
+                                  mCountRecv, mCountSent, false);
+    NS_DispatchToMainThread(event);
+
+    // Reset the counters after saving.
+    mCountSent = 0;
+    mCountRecv = 0;
+
+    return NS_OK;
+#else
+    return NS_ERROR_NOT_IMPLEMENTED;
+#endif
 }
 
 void
@@ -825,8 +923,13 @@ nsHttpTransaction::Close(nsresult reason)
         mTimings.responseEnd.IsNull() && !mTimings.responseStart.IsNull())
         mTimings.responseEnd = TimeStamp::Now();
 
-    if (relConn && mConnection)
+    if (relConn && mConnection) {
+        MutexAutoLock lock(mLock);
         NS_RELEASE(mConnection);
+    }
+
+    // save network statistics in the end of transaction
+    SaveNetworkStats(true);
 
     mStatus = reason;
     mTransactionDone = true; // forcibly flag the transaction as complete
@@ -872,6 +975,24 @@ int32_t
 nsHttpTransaction::PipelinePosition()
 {
     return mPipelinePosition;
+}
+
+bool // NOTE BASE CLASS
+nsAHttpTransaction::ResponseTimeoutEnabled() const
+{
+    return false;
+}
+
+PRIntervalTime // NOTE BASE CLASS
+nsAHttpTransaction::ResponseTimeout()
+{
+    return gHttpHandler->ResponseTimeout();
+}
+
+bool
+nsHttpTransaction::ResponseTimeoutEnabled() const
+{
+    return mResponseTimeoutEnabled;
 }
 
 //-----------------------------------------------------------------------------
@@ -946,11 +1067,11 @@ nsHttpTransaction::Restart()
 
     // limit the number of restart attempts - bug 92224
     if (++mRestartCount >= gHttpHandler->MaxRequestAttempts()) {
-        LOG(("reached max request attempts, failing transaction @%x\n", this));
+        LOG(("reached max request attempts, failing transaction @%p\n", this));
         return NS_ERROR_NET_RESET;
     }
 
-    LOG(("restarting transaction @%x\n", this));
+    LOG(("restarting transaction @%p\n", this));
 
     // rewind streams in case we already wrote out the request
     nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(mRequestStream);
@@ -959,7 +1080,10 @@ nsHttpTransaction::Restart()
 
     // clear old connection state...
     mSecurityInfo = 0;
-    NS_IF_RELEASE(mConnection);
+    if (mConnection) {
+        MutexAutoLock lock(mLock);
+        NS_RELEASE(mConnection);
+    }
 
     // disable pipelining for the next attempt in case pipelining caused the
     // reset.  this is being overly cautious since we don't know if pipelining
@@ -1157,7 +1281,7 @@ nsHttpTransaction::ParseHead(char *buf,
             char *p = LocateHttpStart(buf, std::min<uint32_t>(count, 11), true);
             if (!p) {
                 // Treat any 0.9 style response of a put as a failure.
-                if (mRequestHead->Method() == nsHttp::Put)
+                if (mRequestHead->IsPut())
                     return NS_ERROR_ABORT;
 
                 mResponseHead->ParseStatusLine("");
@@ -1340,7 +1464,7 @@ nsHttpTransaction::HandleContentStart()
 
     // The verifier only initializes itself once (from the first iteration of
     // a transaction that gets far enough to have response headers)
-    if (mRequestHead->Method() == nsHttp::Get)
+    if (mRequestHead->IsGet())
         mRestartInProgressVerifier.Set(mContentLength, mResponseHead);
 
     return NS_OK;
@@ -1681,14 +1805,14 @@ nsHttpTransaction::CancelPacing(nsresult reason)
 // nsHttpTransaction::nsISupports
 //-----------------------------------------------------------------------------
 
-NS_IMPL_THREADSAFE_ADDREF(nsHttpTransaction)
+NS_IMPL_ADDREF(nsHttpTransaction)
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsHttpTransaction::Release()
 {
     nsrefcnt count;
     NS_PRECONDITION(0 != mRefCnt, "dup release");
-    count = NS_AtomicDecrementRefcnt(mRefCnt);
+    count = --mRefCnt;
     NS_LOG_RELEASE(this, count, "nsHttpTransaction");
     if (0 == count) {
         mRefCnt = 1; /* stablize */
@@ -1700,9 +1824,9 @@ nsHttpTransaction::Release()
     return count;
 }
 
-NS_IMPL_THREADSAFE_QUERY_INTERFACE2(nsHttpTransaction,
-                                    nsIInputStreamCallback,
-                                    nsIOutputStreamCallback)
+NS_IMPL_QUERY_INTERFACE(nsHttpTransaction,
+                        nsIInputStreamCallback,
+                        nsIOutputStreamCallback)
 
 //-----------------------------------------------------------------------------
 // nsHttpTransaction::nsIInputStreamCallback
@@ -1825,3 +1949,6 @@ nsHttpTransaction::RestartVerifier::Set(int64_t contentLength,
         mSetup = true;
     }
 }
+
+} // namespace mozilla::net
+} // namespace mozilla

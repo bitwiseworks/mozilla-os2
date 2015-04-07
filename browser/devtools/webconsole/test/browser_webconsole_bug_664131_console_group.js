@@ -5,129 +5,75 @@
  */
 
 // Tests that console.group/groupEnd works as intended.
-const GROUP_INDENT = 12;
-
-let testDriver, hud;
+const TEST_URI = "data:text/html;charset=utf-8,Web Console test for bug 664131: Expand console object with group methods";
 
 function test() {
-  addTab("data:text/html;charset=utf-8,Web Console test for bug 664131: Expand console " +
-         "object with group methods");
-  browser.addEventListener("load", function onLoad(aEvent) {
-    browser.removeEventListener(aEvent.type, onLoad, true);
-    openConsole(null, function(aHud) {
-      hud = aHud;
-      testDriver = testGen();
-      testNext();
+  Task.spawn(runner).then(finishTest);
+
+  function* runner() {
+    let {tab} = yield loadTab(TEST_URI);
+    let hud = yield openConsole(tab);
+    let outputNode = hud.outputNode;
+
+    hud.jsterm.clearOutput();
+
+    content.console.group("bug664131a");
+
+    yield waitForMessages({
+      webconsole: hud,
+      messages: [{
+        text: "bug664131a",
+        consoleGroup: 1,
+      }],
     });
-  }, true);
+
+    content.console.log("bug664131a-inside");
+
+    yield waitForMessages({
+      webconsole: hud,
+      messages: [{
+        text: "bug664131a-inside",
+        category: CATEGORY_WEBDEV,
+        severity: SEVERITY_LOG,
+        groupDepth: 1,
+      }],
+    });
+
+    content.console.groupEnd("bug664131a");
+    content.console.log("bug664131-outside");
+
+    yield waitForMessages({
+      webconsole: hud,
+      messages: [{
+        text: "bug664131-outside",
+        category: CATEGORY_WEBDEV,
+        severity: SEVERITY_LOG,
+        groupDepth: 0,
+      }],
+    });
+
+    content.console.groupCollapsed("bug664131b");
+
+    yield waitForMessages({
+      webconsole: hud,
+      messages: [{
+        text: "bug664131b",
+        consoleGroup: 1,
+      }],
+    });
+
+    // Test that clearing the console removes the indentation.
+    hud.jsterm.clearOutput();
+    content.console.log("bug664131-cleared");
+
+    yield waitForMessages({
+      webconsole: hud,
+      messages: [{
+        text: "bug664131-cleared",
+        category: CATEGORY_WEBDEV,
+        severity: SEVERITY_LOG,
+        groupDepth: 0,
+      }],
+    });
+  }
 }
-
-function testNext() {
-  testDriver.next();
-}
-
-function testGen() {
-  outputNode = hud.outputNode;
-
-  hud.jsterm.clearOutput();
-
-  content.console.group("bug664131a");
-
-  waitForSuccess({
-    name: "console.group displayed",
-    validatorFn: function()
-    {
-      return outputNode.textContent.indexOf("bug664131a") > -1;
-    },
-    successFn: testNext,
-    failureFn: finishTest,
-  });
-
-  yield;
-
-  let msg = outputNode.querySelectorAll(".webconsole-msg-icon-container");
-  is(msg.length, 1, "one message node displayed");
-  is(msg[0].style.marginLeft, GROUP_INDENT + "px", "correct group indent found");
-
-  content.console.log("bug664131a-inside");
-
-  waitForSuccess({
-    name: "console.log message displayed",
-    validatorFn: function()
-    {
-      return outputNode.textContent.indexOf("bug664131a-inside") > -1;
-    },
-    successFn: testNext,
-    failureFn: finishTest,
-  });
-
-  yield;
-
-  msg = outputNode.querySelectorAll(".webconsole-msg-icon-container");
-  is(msg.length, 2, "two message nodes displayed");
-  is(msg[1].style.marginLeft, GROUP_INDENT + "px", "correct group indent found");
-
-  content.console.groupEnd("bug664131a");
-  content.console.log("bug664131-outside");
-
-  waitForSuccess({
-    name: "console.log message displayed after groupEnd()",
-    validatorFn: function()
-    {
-      return outputNode.textContent.indexOf("bug664131-outside") > -1;
-    },
-    successFn: testNext,
-    failureFn: finishTest,
-  });
-
-  yield;
-
-  msg = outputNode.querySelectorAll(".webconsole-msg-icon-container");
-  is(msg.length, 3, "three message nodes displayed");
-  is(msg[2].style.marginLeft, "0px", "correct group indent found");
-
-  content.console.groupCollapsed("bug664131b");
-
-  waitForSuccess({
-    name: "console.groupCollapsed displayed",
-    validatorFn: function()
-    {
-      return outputNode.textContent.indexOf("bug664131b") > -1;
-    },
-    successFn: testNext,
-    failureFn: finishTest,
-  });
-
-  yield;
-
-  msg = outputNode.querySelectorAll(".webconsole-msg-icon-container");
-  is(msg.length, 4, "four message nodes displayed");
-  is(msg[3].style.marginLeft, GROUP_INDENT + "px", "correct group indent found");
-
-
-  // Test that clearing the console removes the indentation.
-  hud.jsterm.clearOutput();
-  content.console.log("bug664131-cleared");
-
-  waitForSuccess({
-    name: "console.log displayed after clearOutput",
-    validatorFn: function()
-    {
-      return outputNode.textContent.indexOf("bug664131-cleared") > -1;
-    },
-    successFn: testNext,
-    failureFn: finishTest,
-  });
-
-  yield;
-
-  msg = outputNode.querySelectorAll(".webconsole-msg-icon-container");
-  is(msg.length, 1, "one message node displayed");
-  is(msg[0].style.marginLeft, "0px", "correct group indent found");
-
-  testDriver = hud = null;
-  finishTest();
-
-  yield;
-}
-

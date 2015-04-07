@@ -9,6 +9,11 @@
 #include "base/thread_local.h"
 #include "base/waitable_event.h"
 #include "GeckoProfiler.h"
+#include "mozilla/IOInterposer.h"
+
+#ifdef MOZ_TASK_TRACER
+#include "GeckoTaskTracer.h"
+#endif
 
 namespace base {
 
@@ -139,6 +144,7 @@ void Thread::StopSoon() {
 void Thread::ThreadMain() {
   char aLocal;
   profiler_register_thread(name_.c_str(), &aLocal);
+  mozilla::IOInterposer::RegisterCurrentThread();
 
   // The message loop for this thread.
   MessageLoop message_loop(startup_data_->options.message_loop_type);
@@ -147,6 +153,8 @@ void Thread::ThreadMain() {
   thread_id_ = PlatformThread::CurrentId();
   PlatformThread::SetName(name_.c_str());
   message_loop.set_thread_name(name_);
+  message_loop.set_hang_timeouts(startup_data_->options.transient_hang_timeout,
+                                 startup_data_->options.permanent_hang_timeout);
   message_loop_ = &message_loop;
 
   // Let the thread do extra initialization.
@@ -165,7 +173,12 @@ void Thread::ThreadMain() {
   // Assert that MessageLoop::Quit was called by ThreadQuitTask.
   DCHECK(GetThreadWasQuitProperly());
 
+  mozilla::IOInterposer::UnregisterCurrentThread();
   profiler_unregister_thread();
+
+#ifdef MOZ_TASK_TRACER
+  mozilla::tasktracer::FreeTraceInfo();
+#endif
 
   // We can't receive messages anymore.
   message_loop_ = NULL;

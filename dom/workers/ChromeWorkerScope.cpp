@@ -9,7 +9,7 @@
 
 #include "nsXPCOM.h"
 #include "nsNativeCharsetUtils.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 
 #include "WorkerPrivate.h"
 
@@ -55,7 +55,7 @@ DefineChromeWorkerFunctions(JSContext* aCx, JS::Handle<JSObject*> aGlobal)
   {
     JS::Rooted<JS::Value> ctypes(aCx);
     if (!JS_InitCTypesClass(aCx, aGlobal) ||
-        !JS_GetProperty(aCx, aGlobal, "ctypes", ctypes.address())) {
+        !JS_GetProperty(aCx, aGlobal, "ctypes", &ctypes)) {
       return false;
     }
 

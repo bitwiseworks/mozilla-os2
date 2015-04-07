@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+"use strict";
+
 var EIDETICKER_BASE_URL = "http://eideticker.wrla.ch/";
 
 var gDebugLog = false;
@@ -182,6 +184,7 @@ function ProfileTreeManager() {
 
   // If this is set when the tree changes the snapshot is immediately restored.
   this._savedSnapshot = null;
+  this._allowNonContiguous = false;
 }
 ProfileTreeManager.prototype = {
   getContainer: function ProfileTreeManager_getContainer() {
@@ -208,8 +211,8 @@ ProfileTreeManager.prototype = {
   restoreSerializedSelectionSnapshot: function ProfileTreeManager_restoreSerializedSelectionSnapshot(selection) {
     this._savedSnapshot = JSON.parse(selection);
   },
-  _restoreSelectionSnapshot: function ProfileTreeManager__restoreSelectionSnapshot(snapshot, allowNonContigous) {
-    return this.treeView.restoreSelectionSnapshot(snapshot, allowNonContigous);
+  _restoreSelectionSnapshot: function ProfileTreeManager__restoreSelectionSnapshot(snapshot, allowNonContiguous) {
+    return this.treeView.restoreSelectionSnapshot(snapshot, allowNonContiguous);
   },
   setSelection: function ProfileTreeManager_setSelection(frames) {
     return this.treeView.setSelection(frames);
@@ -265,16 +268,16 @@ ProfileTreeManager.prototype = {
       focusOnCallstack(focusedCallstack, node.name);
     }
   },
-  setAllowNonContigous: function ProfileTreeManager_setAllowNonContigous() {
-    this._allowNonContigous = true;
+  setAllowNonContiguous: function ProfileTreeManager_setAllowNonContiguous() {
+    this._allowNonContiguous = true;
   },
   display: function ProfileTreeManager_display(tree, symbols, functions, resources, useFunctions, filterByName) {
     this.treeView.display(this.convertToJSTreeData(tree, symbols, functions, useFunctions), resources, filterByName);
     if (this._savedSnapshot) {
       var old = this._savedSnapshot.clone();
-      this._restoreSelectionSnapshot(this._savedSnapshot, this._allowNonContigous);
+      this._restoreSelectionSnapshot(this._savedSnapshot, this._allowNonContiguous);
       this._savedSnapshot = old;
-      this._allowNonContigous = false;
+      this._allowNonContiguous = false;
     }
   },
   convertToJSTreeData: function ProfileTreeManager__convertToJSTreeData(rootNode, symbols, functions, useFunctions) {
@@ -540,16 +543,6 @@ HistogramView.prototype = {
       }
       var roundedHeight = Math.round(step.value * height);
       ctx.fillRect(step.x, height - roundedHeight, step.width, roundedHeight);
-      if (step.marker) {
-        var x = step.x + step.width + 2;
-        var endPoint = x + ctx.measureText(step.marker).width;
-        var lastDataPoint = this._histogramData[this._histogramData.length-1];
-        if (endPoint >= lastDataPoint.x + lastDataPoint.width) {
-          x -= endPoint - (lastDataPoint.x + lastDataPoint.width) - 1;
-        }
-        ctx.fillText(step.marker, x, 15 + ((markerCount % 2) == 0 ? 0 : 20));
-        markerCount++;
-      }
     }
 
     this._finishedRendering = true;
@@ -627,7 +620,6 @@ RangeSelector.prototype = {
   },
   // echo the location off the mouse on the histogram
   drawMouseMarker: function RangeSelector_drawMouseMarker(x) {
-    console.log("Draw");
     var mouseMarker = this._mouseMarker;
     mouseMarker.style.left = x + "px";
   },
@@ -814,12 +806,10 @@ window.onpopstate = function(ev) {
   return; // Conflicts with document url
   if (!gBreadcrumbTrail)
     return;
-  console.log("pop: " + JSON.stringify(ev.state));
+
   gBreadcrumbTrail.pop();
   if (ev.state) {
-    console.log("state");
     if (ev.state.action === "popbreadcrumb") {
-      console.log("bread");
       //gBreadcrumbTrail.pop();
     }
   }
@@ -908,8 +898,7 @@ BreadcrumbTrail.prototype = {
       //var state = {action: "popbreadcrumb",};
       //window.history.pushState(state, "Cleopatra");
     }
-    if (!li)
-      console.log("li at index " + index + " is null!");
+
     delete li.breadcrumbIsTransient;
     li.classList.add("selected");
     this._deleteBeyond(index);
@@ -1462,14 +1451,12 @@ function loadRawProfile(reporter, rawProfile, profileId) {
     appendVideoCapture : gAppendVideoCapture,  
     profileId: profileId,
   });
-  gVideoCapture = null;
   parseRequest.addEventListener("progress", function (progress, action) {
     if (action)
       reporter.setAction(action);
     reporter.setProgress(progress);
   });
   parseRequest.addEventListener("finished", function (result) {
-    console.log("parsing (in worker): " + (Date.now() - startTime) + "ms");
     reporter.finish();
     gMeta = result.meta;
     gNumSamples = result.numSamples;
@@ -1518,7 +1505,6 @@ function toggleInvertCallStack() {
   gInvertCallstack = !gInvertCallstack;
   var startTime = Date.now();
   viewOptionsChanged();
-  console.log("invert time: " + (Date.now() - startTime) + "ms");
 }
 
 var gMergeUnbranched = false;
@@ -1551,7 +1537,7 @@ function toggleJavascriptOnly() {
     // When going from JS only to non js there's going to be new C++
     // frames in the selection so we need to restore the selection
     // while allowing non contigous symbols to be in the stack (the c++ ones)
-    gTreeManager.setAllowNonContigous();
+    gTreeManager.setAllowNonContiguous();
   }
   gJavascriptOnly = !gJavascriptOnly;
   gTreeManager.saveSelectionSnapshot(gJavascriptOnly);
@@ -1675,7 +1661,6 @@ function enterProgressUI() {
   totalProgressReporter.addListener(function (r) {
     var progress = r.getProgress();
     progressLabel.innerHTML = r.getAction();
-    console.log("Action: " + r.getAction());
     if (isNaN(progress))
       progressBar.removeAttribute("value");
     else
@@ -1852,7 +1837,6 @@ function filtersChanged() {
   });
   var start = Date.now();
   updateRequest.addEventListener("finished", function (filteredSamples) {
-    console.log("profile filtering (in worker): " + (Date.now() - start) + "ms.");
     gCurrentlyShownSampleData = filteredSamples;
     gInfoBar.display();
 
@@ -1860,7 +1844,6 @@ function filtersChanged() {
       start = Date.now();
       gPluginView.display(gSampleFilters[gSampleFilters.length-1].pluginName, gSampleFilters[gSampleFilters.length-1].param,
                           gCurrentlyShownSampleData, gHighlightedCallstack);
-      console.log("plugin displaying: " + (Date.now() - start) + "ms.");
     } else {
       gPluginView.hide();
     }
@@ -1872,7 +1855,6 @@ function filtersChanged() {
     gHistogramView.display(data.histogramData, data.frameStart, data.widthSum, gHighlightedCallstack);
     if (gFrameView)
       gFrameView.display(data.histogramData, data.frameStart, data.widthSum, gHighlightedCallstack);
-    console.log("histogram displaying: " + (Date.now() - start) + "ms.");
   });
 
   if (gDiagnosticBar) {
@@ -1880,7 +1862,6 @@ function filtersChanged() {
     diagnosticsRequest.addEventListener("finished", function (diagnosticItems) {
       start = Date.now();
       gDiagnosticBar.display(diagnosticItems);
-      console.log("diagnostic items displaying: " + (Date.now() - start) + "ms.");
     });
   }
 
@@ -1897,13 +1878,11 @@ function viewOptionsChanged() {
   updateViewOptionsRequest.addEventListener("finished", function (calltree) {
     var start = Date.now();
     gTreeManager.display(calltree, gSymbols, gFunctions, gResources, gMergeFunctions, filterNameInput && filterNameInput.value);
-    console.log("tree displaying: " + (Date.now() - start) + "ms.");
   });
 }
 
-function loadQueryData(queryData) {
+function loadQueryData(queryDataOriginal) {
   var isFiltersChanged = false;
-  var queryDataOriginal = queryData;
   var queryData = {};
   for (var i in queryDataOriginal) {
     queryData[i] = unQueryEscape(queryDataOriginal[i]);

@@ -3,39 +3,24 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH     = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir    = @srcdir@
-VPATH     = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 # Don't link the updater against libmozglue. See bug 687139
 MOZ_GLUE_LDFLAGS =
 MOZ_GLUE_PROGRAM_LDFLAGS =
 
-LOCAL_INCLUDES += \
-  -I$(srcdir)/../common \
-  $(NULL)
+ifeq ($(OS_ARCH),WINNT)
+LIBS += $(call EXPAND_LIBNAME_PATH,updatecommon-standalone,../common-standalone)
+else
+LIBS += $(call EXPAND_LIBNAME_PATH,updatecommon,../common)
+endif
 
 LIBS += \
-  ../common/$(LIB_PREFIX)updatecommon.$(LIB_SUFFIX) \
-  $(DEPTH)/modules/libmar/src/$(LIB_PREFIX)mar.$(LIB_SUFFIX) \
+  $(call EXPAND_LIBNAME_PATH,mar,$(DEPTH)/modules/libmar/src) \
   $(MOZ_BZ2_LIBS) \
   $(NULL)
 
 ifeq ($(OS_ARCH),WINNT)
-LIBS += $(DEPTH)/modules/libmar/verify/$(LIB_PREFIX)verifymar.$(LIB_SUFFIX)
-USE_STATIC_LIBS = 1
-RCINCLUDE = updater.rc
-OS_LIBS += $(call EXPAND_LIBNAME,delayimp comctl32 ws2_32 shell32 shlwapi)
-DEFINES += -DUNICODE -D_UNICODE
-ifndef GNU_CC
-RCFLAGS += -I$(srcdir)
-else
-RCFLAGS += --include-dir $(srcdir)
-endif
-
+LIBS += $(call EXPAND_LIBNAME_PATH,verifymar,$(DEPTH)/modules/libmar/verify)
+OS_LIBS += $(call EXPAND_LIBNAME,comctl32 ws2_32 shell32 shlwapi)
 endif
 
 ifdef MOZ_WIDGET_GTK
@@ -43,13 +28,7 @@ OS_CXXFLAGS += $(TK_CFLAGS)
 OS_LIBS += $(TK_LIBS)
 endif
 
-ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
-DISABLED_CMMSRCS += progressui_osx.mm launchchild_osx.mm
-OS_LIBS += -framework Cocoa
-endif
-
 ifeq (gonk,$(MOZ_WIDGET_TOOLKIT)) #{
-STL_FLAGS =
 OS_LIBS += -lcutils -lsysutils
 # clear out all the --wrap flags and remove dependency on mozglue for Gonk
 WRAP_LDFLAGS :=
@@ -65,16 +44,6 @@ endif
 
 include $(topsrcdir)/config/rules.mk
 
-DEFINES += -DNS_NO_XPCOM \
-  -DMAR_CHANNEL_ID='"$(MAR_CHANNEL_ID)"' \
-  -DMOZ_APP_VERSION='"$(MOZ_APP_VERSION)"' \
-  $(NULL)
-
-ifdef _MSC_VER
-WIN32_EXE_LDFLAGS += -ENTRY:wmainCRTStartup
-WIN32_EXE_LDFLAGS += -DELAYLOAD:wsock32.dll -DELAYLOAD:crypt32.dll -DELAYLOAD:userenv.dll
-endif
-
 ifdef MOZ_WIDGET_GTK
 libs:: updater.png
 	$(NSINSTALL) -D $(DIST)/bin/icons
@@ -84,17 +53,12 @@ endif
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
 libs::
 	$(NSINSTALL) -D $(DIST)/bin/updater.app
-	rsync -a -C --exclude "*.in" $(srcdir)/macbuild/Contents $(DIST)/bin/updater.app 
-	sed -e "s/%APP_NAME%/$(MOZ_APP_DISPLAYNAME)/" $(srcdir)/macbuild/Contents/Resources/English.lproj/InfoPlist.strings.in | \
+	rsync -a -C --exclude '*.in' $(srcdir)/macbuild/Contents $(DIST)/bin/updater.app 
+	sed -e 's/%APP_NAME%/$(MOZ_APP_DISPLAYNAME)/' $(srcdir)/macbuild/Contents/Resources/English.lproj/InfoPlist.strings.in | \
 	  iconv -f UTF-8 -t UTF-16 > $(DIST)/bin/updater.app/Contents/Resources/English.lproj/InfoPlist.strings
 	$(NSINSTALL) -D $(DIST)/bin/updater.app/Contents/MacOS
 	$(NSINSTALL) $(DIST)/bin/updater $(DIST)/bin/updater.app/Contents/MacOS
 	rm -f $(DIST)/bin/updater
-endif
-
-ifeq (,$(filter-out WINNT,$(OS_ARCH)))
-# Pick up nsWindowsRestart.cpp
-LOCAL_INCLUDES += -I$(topsrcdir)/toolkit/xre
 endif
 
 ifeq ($(OS_ARCH),WINNT)
@@ -103,11 +67,3 @@ EXTRA_LIBS += $(call EXPAND_LIBNAME,advapi32)
 endif
 
 CXXFLAGS += $(MOZ_BZ2_CFLAGS)
-
-ifneq (,$(filter beta release esr,$(MOZ_UPDATE_CHANNEL)))
-RCFLAGS += -DMAR_SIGNING_RELEASE_BETA=1
-else
-ifneq (,$(filter nightly aurora nightly-elm nightly-profiling nightly-oak,$(MOZ_UPDATE_CHANNEL)))
-RCFLAGS += -DMAR_SIGNING_AURORA_NIGHTLY=1
-endif
-endif

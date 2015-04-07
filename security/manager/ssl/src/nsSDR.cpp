@@ -34,7 +34,7 @@ using namespace mozilla;
 
 // Standard ISupports implementation
 // NOTE: Should these be the thread-safe versions?
-NS_IMPL_ISUPPORTS2(nsSecretDecoderRing, nsISecretDecoderRing, nsISecretDecoderRingConfig)
+NS_IMPL_ISUPPORTS(nsSecretDecoderRing, nsISecretDecoderRing, nsISecretDecoderRingConfig)
 
 // nsSecretDecoderRing constructor
 nsSecretDecoderRing::nsSecretDecoderRing()
@@ -232,11 +232,11 @@ ChangePassword()
   return rv;
 }
 
-static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
-
 NS_IMETHODIMP nsSecretDecoderRing::
 Logout()
 {
+  static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+
   nsresult rv;
   nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));
   if (NS_FAILED(rv))
@@ -254,6 +254,8 @@ Logout()
 NS_IMETHODIMP nsSecretDecoderRing::
 LogoutAndTeardown()
 {
+  static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+
   nsresult rv;
   nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));
   if (NS_FAILED(rv))

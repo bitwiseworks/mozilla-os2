@@ -6,23 +6,18 @@
 #define nsScreen_h___
 
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/BindingUtils.h"
-#include "mozilla/dom/EventHandlerBinding.h"
 #include "mozilla/dom/ScreenOrientation.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/ErrorResult.h"
-#include "mozilla/Hal.h"
+#include "mozilla/HalScreenConfiguration.h"
 #include "nsIDOMScreen.h"
-#include "nsISupports.h"
-#include "nsIScriptContext.h"
 #include "nsCOMPtr.h"
-#include "nsDOMEventTargetHelper.h"
 #include "nsRect.h"
 
-class nsIDocShell;
 class nsDeviceContext;
 
 // Script "screen" object
-class nsScreen : public nsDOMEventTargetHelper
+class nsScreen : public mozilla::DOMEventTargetHelper
                , public nsIDOMScreen
                , public mozilla::hal::ScreenConfigurationObserver
 {
@@ -32,7 +27,7 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIDOMSCREEN
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(mozilla::DOMEventTargetHelper)
 
   nsPIDOMWindow* GetParentObject() const
   {
@@ -56,6 +51,15 @@ public:
   int32_t GetWidth(ErrorResult& aRv)
   {
     nsRect rect;
+    if (IsDeviceSizePageSize()) {
+      nsCOMPtr<nsPIDOMWindow> owner = GetOwner();
+      if (owner) {
+        int32_t innerWidth = 0;
+        aRv = owner->GetInnerWidth(&innerWidth);
+        return innerWidth;
+      }
+    }
+
     aRv = GetRect(rect);
     return rect.width;
   }
@@ -63,6 +67,15 @@ public:
   int32_t GetHeight(ErrorResult& aRv)
   {
     nsRect rect;
+    if (IsDeviceSizePageSize()) {
+      nsCOMPtr<nsPIDOMWindow> owner = GetOwner();
+      if (owner) {
+        int32_t innerHeight = 0;
+        aRv = owner->GetInnerHeight(&innerHeight);
+        return innerHeight;
+      }
+    }
+
     aRv = GetRect(rect);
     return rect.height;
   }
@@ -109,11 +122,7 @@ public:
   bool MozLockOrientation(const mozilla::dom::Sequence<nsString>& aOrientations, ErrorResult& aRv);
   void MozUnlockOrientation();
 
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsScreen,
-                                           nsDOMEventTargetHelper)
-
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   void Notify(const mozilla::hal::ScreenConfiguration& aConfiguration);
 
@@ -134,7 +143,7 @@ private:
     NS_DECL_NSIDOMEVENTLISTENER
   };
 
-  nsScreen();
+  nsScreen(nsPIDOMWindow* aWindow);
   virtual ~nsScreen();
 
   enum LockPermission {
@@ -144,6 +153,8 @@ private:
   };
 
   LockPermission GetLockOrientationPermission() const;
+
+  bool IsDeviceSizePageSize();
 
   nsRefPtr<FullScreenEventListener> mEventListener;
 };

@@ -7,7 +7,7 @@
 interface nsIURI;
 interface nsIInputStream;
 
-[scriptable, uuid(58e4f602-a7c8-4cd1-9dca-716705e826ef)]
+[scriptable, uuid(5799251f-5b55-4df7-a9e7-0c27812c469a)]
 interface nsISearchSubmission : nsISupports
 {
   /**
@@ -20,15 +20,9 @@ interface nsISearchSubmission : nsISupports
    * The URI to submit a search to.
    */
   readonly attribute nsIURI uri;
-
-  /**
-   * The POST data associated with a search submission as an
-   * application/x-www-form-urlencoded string. May be null.
-   */
-  readonly attribute AString postDataString;
 };
 
-[scriptable, uuid(ccf6aa20-10a9-4a0c-a81d-31b10ea846de)]
+[scriptable, uuid(77de6680-57ec-4105-a183-cc7cf7e84b09)]
 interface nsISearchEngine : nsISupports
 {
   /**
@@ -90,6 +84,25 @@ interface nsISearchEngine : nsISupports
   boolean supportsResponseType(in AString responseType);
 
   /**
+   * Returns a string with the URL to an engine's icon matching both width and
+   * height. Returns null if icon with specified dimensions is not found.
+   *
+   * @param width
+   *        Width of the requested icon.
+   * @param height
+   *        Height of the requested icon.
+   */
+  AString getIconURLBySize(in long width, in long height);
+
+  /**
+   * Gets an array of all available icons. Each entry is an object with
+   * width, height and url properties. width and height are numeric and
+   * represent the icon's dimensions. url is a string with the URL for
+   * the icon.
+   */
+  jsval getIcons();
+
+  /**
    * Supported search engine types.
    */
   const unsigned long TYPE_MOZSEARCH     = 1;
@@ -144,6 +157,18 @@ interface nsISearchEngine : nsISupports
    */
   readonly attribute AString identifier;
 
+  /**
+   * Gets a string representing the hostname from which search results for a
+   * given responseType are returned, minus the leading "www." (if present).
+   * This can be specified as an url attribute in the engine description file,
+   * but will default to host from the <Url>'s template otherwise.
+   *
+   * @param  responseType [optional]
+   *         The MIME type to get resultDomain for.  Defaults to "text/html".
+   *
+   * @return the resultDomain for the given responseType.
+   */
+  AString getResultDomain([optional] in AString responseType);
 };
 
 [scriptable, uuid(9fc39136-f08b-46d3-b232-96f4b7b0e235)]

@@ -11,13 +11,13 @@
  {0xa21bfa01, 0xf349, 0x4394, {0xa8, 0x4c, 0x8d, 0xe5, 0xcf, 0x7, 0x37, 0xd0}}
 
 #include "nsCOMPtr.h"
-#include "jspubtd.h"
 #include "mozilla/Mutex.h"
 #include "nsIWindowCreator.h" // for stupid compilers
 #include "nsIWindowWatcher.h"
 #include "nsIPromptFactory.h"
 #include "nsPIWindowWatcher.h"
 #include "nsTArray.h"
+#include "js/TypeDecls.h"
 
 class  nsIURI;
 class  nsIDocShellTreeItem;
@@ -27,8 +27,6 @@ class  nsString;
 class  nsWatcherWindowEnumerator;
 class  nsIScriptContext;
 class  nsPromptService;
-struct JSContext;
-class JSObject;
 struct nsWatcherWindowEntry;
 struct SizeSpec;
 
@@ -66,9 +64,8 @@ protected:
   
   // Unlike GetWindowByName this will look for a caller on the JS
   // stack, and then fall back on aCurrentWindow if it can't find one.
-  nsresult SafeGetWindowByName(const nsAString& aName,
-                               nsIDOMWindow* aCurrentWindow,
-                               nsIDOMWindow** aResult);
+  already_AddRefed<nsIDOMWindow>
+    SafeGetWindowByName(const nsAString& aName, nsIDOMWindow* aCurrentWindow);
 
   // Just like OpenWindowJS, but knows whether it got called via OpenWindowJS
   // (which means called from script) or called via OpenWindow.

@@ -17,12 +17,13 @@ class DualPattern;
 class SourceSurfaceDual : public SourceSurface
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SourceSurfaceDual)
   SourceSurfaceDual(DrawTarget *aDTA, DrawTarget *aDTB)
     : mA(aDTA->Snapshot())
     , mB(aDTB->Snapshot())
   { }
 
-  virtual SurfaceType GetType() const { return SURFACE_DUAL_DT; }
+  virtual SurfaceType GetType() const { return SurfaceType::DUAL_DT; }
   virtual IntSize GetSize() const { return mA->GetSize(); }
   virtual SurfaceFormat GetFormat() const { return mA->GetFormat(); }
 

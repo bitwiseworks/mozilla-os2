@@ -25,38 +25,38 @@ class nsTDependentString_CharT : public nsTString_CharT
     public:
 
         /**
-         * verify restrictions
-         */
-      void AssertValid()
-        {
-          NS_ASSERTION(mData, "nsTDependentString must wrap a non-NULL buffer");
-          NS_ASSERTION(mLength != size_type(-1), "nsTDependentString has bogus length");
-          NS_ASSERTION(mData[mLength] == 0, "nsTDependentString must wrap only null-terminated strings");
-        }
-
-
-        /**
          * constructors
          */
 
       nsTDependentString_CharT( const char_type* start, const char_type* end )
         : string_type(const_cast<char_type*>(start), uint32_t(end - start), F_TERMINATED)
         {
-          AssertValid();
+          AssertValidDepedentString();
         }
 
       nsTDependentString_CharT( const char_type* data, uint32_t length )
         : string_type(const_cast<char_type*>(data), length, F_TERMINATED)
         {
-          AssertValid();
+          AssertValidDepedentString();
         }
+
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      nsTDependentString_CharT( char16ptr_t data, uint32_t length )
+        : nsTDependentString_CharT(static_cast<const char16_t*>(data), length) {}
+#endif
 
       explicit
       nsTDependentString_CharT( const char_type* data )
         : string_type(const_cast<char_type*>(data), uint32_t(char_traits::length(data)), F_TERMINATED)
         {
-          AssertValid();
+          AssertValidDepedentString();
         }
+
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      explicit
+      nsTDependentString_CharT( char16ptr_t data )
+        : nsTDependentString_CharT( static_cast<const char16_t*>(data)) {}
+#endif
 
       nsTDependentString_CharT( const string_type& str, uint32_t startPos )
         : string_type()
@@ -78,12 +78,11 @@ class nsTDependentString_CharT : public nsTString_CharT
          * allow this class to be bound to a different string...
          */
 
+      using nsTString_CharT::Rebind;
       void Rebind( const char_type* data )
         {
           Rebind(data, uint32_t(char_traits::length(data)));
         }
-
-      void Rebind( const char_type* data, size_type length );
 
       void Rebind( const char_type* start, const char_type* end )
         {

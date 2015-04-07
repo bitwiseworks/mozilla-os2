@@ -4,6 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/EventStates.h"
+#include "mozilla/TextEvents.h"
 
 #include "nsCRT.h"
 
@@ -27,6 +29,7 @@
 #include "nsIDocumentInlines.h"
 #include "nsIDOMEventTarget.h" 
 #include "nsIDOMKeyEvent.h"
+#include "nsIDOMMouseEvent.h"
 #include "nsIDOMHTMLAnchorElement.h"
 #include "nsISelectionController.h"
 #include "nsIDOMHTMLDocument.h"
@@ -66,12 +69,14 @@
 
 #include "nsIFrame.h"
 #include "nsIParserService.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/HTMLBodyElement.h"
 #include "nsTextFragment.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 using namespace mozilla::widget;
 
 // Some utilities to handle annoying overloading of "A" tag for link and named anchor
@@ -159,6 +164,8 @@ nsHTMLEditor::HideAnonymousEditingUIs()
     HideResizers();
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsHTMLEditor)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsHTMLEditor, nsPlaintextEditor)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTypeInState)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mStyleSheets)
@@ -219,10 +226,12 @@ NS_IMETHODIMP
 nsHTMLEditor::Init(nsIDOMDocument *aDoc,
                    nsIContent *aRoot,
                    nsISelectionController *aSelCon,
-                   uint32_t aFlags)
+                   uint32_t aFlags,
+                   const nsAString& aInitialValue)
 {
   NS_PRECONDITION(aDoc && !aSelCon, "bad arg");
   NS_ENSURE_TRUE(aDoc, NS_ERROR_NULL_POINTER);
+  MOZ_ASSERT(aInitialValue.IsEmpty(), "Non-empty initial values not supported");
 
   nsresult result = NS_OK, rulesRes = NS_OK;
    
@@ -232,7 +241,7 @@ nsHTMLEditor::Init(nsIDOMDocument *aDoc,
     nsAutoEditInitRulesTrigger rulesTrigger(static_cast<nsPlaintextEditor*>(this), rulesRes);
 
     // Init the plaintext editor
-    result = nsPlaintextEditor::Init(aDoc, aRoot, nullptr, aFlags);
+    result = nsPlaintextEditor::Init(aDoc, aRoot, nullptr, aFlags, aInitialValue);
     if (NS_FAILED(result)) { return result; }
 
     // Init mutation observer
@@ -588,7 +597,8 @@ nsHTMLEditor::HandleKeyPressEvent(nsIDOMKeyEvent* aKeyEvent)
     return nsEditor::HandleKeyPressEvent(aKeyEvent);
   }
 
-  nsKeyEvent* nativeKeyEvent = GetNativeKeyEvent(aKeyEvent);
+  WidgetKeyboardEvent* nativeKeyEvent =
+    aKeyEvent->GetInternalNSEvent()->AsKeyboardEvent();
   NS_ENSURE_TRUE(nativeKeyEvent, NS_ERROR_UNEXPECTED);
   NS_ASSERTION(nativeKeyEvent->message == NS_KEY_PRESS,
                "HandleKeyPressEvent gets non-keypress event");
@@ -664,7 +674,6 @@ nsHTMLEditor::HandleKeyPressEvent(nsIDOMKeyEvent* aKeyEvent)
       return TypedText(NS_LITERAL_STRING("\t"), eTypedText);
     }
     case nsIDOMKeyEvent::DOM_VK_RETURN:
-    case nsIDOMKeyEvent::DOM_VK_ENTER:
       if (nativeKeyEvent->IsControl() || nativeKeyEvent->IsAlt() ||
           nativeKeyEvent->IsMeta() || nativeKeyEvent->IsOS()) {
         return NS_OK;
@@ -848,7 +857,7 @@ nsHTMLEditor::GetBlockNodeParent(nsIDOMNode *aNode)
   return p.forget();
 }
 
-static const PRUnichar nbsp = 160;
+static const char16_t nbsp = 160;
 
 ///////////////////////////////////////////////////////////////////////////////
 // IsNextCharInNodeWhitespace: checks the adjacent content in the same node to
@@ -872,7 +881,7 @@ nsHTMLEditor::IsNextCharInNodeWhitespace(nsIContent* aContent,
 
   if (aContent->IsNodeOfType(nsINode::eTEXT) &&
       (uint32_t)aOffset < aContent->Length()) {
-    PRUnichar ch = aContent->GetText()->CharAt(aOffset);
+    char16_t ch = aContent->GetText()->CharAt(aOffset);
     *outIsSpace = nsCRT::IsAsciiSpace(ch);
     *outIsNBSP = (ch == nbsp);
     if (outNode && outOffset) {
@@ -905,7 +914,7 @@ nsHTMLEditor::IsPrevCharInNodeWhitespace(nsIContent* aContent,
   }
 
   if (aContent->IsNodeOfType(nsINode::eTEXT) && aOffset > 0) {
-    PRUnichar ch = aContent->GetText()->CharAt(aOffset - 1);
+    char16_t ch = aContent->GetText()->CharAt(aOffset - 1);
     *outIsSpace = nsCRT::IsAsciiSpace(ch);
     *outIsNBSP = (ch == nbsp);
     if (outNode && outOffset) {
@@ -1207,12 +1216,12 @@ nsHTMLEditor::ReplaceHeadContentsWithHTML(const nsAString& aSourceToInsert)
   nsAutoString inputString (aSourceToInsert);  // hope this does copy-on-write
  
   // Windows linebreaks: Map CRLF to LF:
-  inputString.ReplaceSubstring(NS_LITERAL_STRING("\r\n").get(),
-                               NS_LITERAL_STRING("\n").get());
+  inputString.ReplaceSubstring(MOZ_UTF16("\r\n"),
+                               MOZ_UTF16("\n"));
  
   // Mac linebreaks: Map any remaining CR to LF:
-  inputString.ReplaceSubstring(NS_LITERAL_STRING("\r").get(),
-                               NS_LITERAL_STRING("\n").get());
+  inputString.ReplaceSubstring(MOZ_UTF16("\r"),
+                               MOZ_UTF16("\n"));
 
   nsAutoEditBatch beginBatching(this);
 
@@ -1286,15 +1295,15 @@ nsHTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
   NS_ENSURE_TRUE(bodyElement, NS_ERROR_NULL_POINTER);
 
   // Find where the <body> tag starts.
-  nsReadingIterator<PRUnichar> beginbody;
-  nsReadingIterator<PRUnichar> endbody;
+  nsReadingIterator<char16_t> beginbody;
+  nsReadingIterator<char16_t> endbody;
   aSourceString.BeginReading(beginbody);
   aSourceString.EndReading(endbody);
   bool foundbody = CaseInsensitiveFindInReadable(NS_LITERAL_STRING("<body"),
                                                    beginbody, endbody);
 
-  nsReadingIterator<PRUnichar> beginhead;
-  nsReadingIterator<PRUnichar> endhead;
+  nsReadingIterator<char16_t> beginhead;
+  nsReadingIterator<char16_t> endhead;
   aSourceString.BeginReading(beginhead);
   aSourceString.EndReading(endhead);
   bool foundhead = CaseInsensitiveFindInReadable(NS_LITERAL_STRING("<head"),
@@ -1303,8 +1312,8 @@ nsHTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
   if (foundbody && beginhead.get() > beginbody.get())
     foundhead = false;
 
-  nsReadingIterator<PRUnichar> beginclosehead;
-  nsReadingIterator<PRUnichar> endclosehead;
+  nsReadingIterator<char16_t> beginclosehead;
+  nsReadingIterator<char16_t> endclosehead;
   aSourceString.BeginReading(beginclosehead);
   aSourceString.EndReading(endclosehead);
 
@@ -1321,7 +1330,7 @@ nsHTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
   // Time to change the document
   nsAutoEditBatch beginBatching(this);
 
-  nsReadingIterator<PRUnichar> endtotal;
+  nsReadingIterator<char16_t> endtotal;
   aSourceString.EndReading(endtotal);
 
   if (foundhead) {
@@ -1335,7 +1344,7 @@ nsHTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
       // so we assume that there is no body
       res = ReplaceHeadContentsWithHTML(Substring(beginhead, endtotal));
   } else {
-    nsReadingIterator<PRUnichar> begintotal;
+    nsReadingIterator<char16_t> begintotal;
     aSourceString.BeginReading(begintotal);
     NS_NAMED_LITERAL_STRING(head, "<head>");
     if (foundclosehead)
@@ -1383,8 +1392,8 @@ nsHTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
   //  will never return a body node in the DOM fragment
   
   // We already know where "<body" begins
-  nsReadingIterator<PRUnichar> beginclosebody = beginbody;
-  nsReadingIterator<PRUnichar> endclosebody;
+  nsReadingIterator<char16_t> beginclosebody = beginbody;
+  nsReadingIterator<char16_t> endclosebody;
   aSourceString.EndReading(endclosebody);
   if (!FindInReadable(NS_LITERAL_STRING(">"),beginclosebody,endclosebody))
     return NS_ERROR_FAILURE;
@@ -2283,7 +2292,7 @@ nsHTMLEditor::GetElementOrParentByTagName(const nsAString& aTagName, nsIDOMNode 
 
     // Try to get the actual selected node
     if (anchorNode->HasChildNodes() && anchorNode->IsContent()) {
-      int32_t offset = selection->GetAnchorOffset();
+      uint32_t offset = selection->AnchorOffset();
       current = anchorNode->GetChildAt(offset);
     }
     // anchor node is probably a text node - just use that
@@ -3222,12 +3231,22 @@ nsHTMLEditor::ContentAppended(nsIDocument *aDocument, nsIContent* aContainer,
                               nsIContent* aFirstNewContent,
                               int32_t aIndexInContainer)
 {
-  ContentInserted(aDocument, aContainer, aFirstNewContent, aIndexInContainer);
+  DoContentInserted(aDocument, aContainer, aFirstNewContent, aIndexInContainer,
+                    eAppended);
 }
 
 void
 nsHTMLEditor::ContentInserted(nsIDocument *aDocument, nsIContent* aContainer,
                               nsIContent* aChild, int32_t aIndexInContainer)
+{
+  DoContentInserted(aDocument, aContainer, aChild, aIndexInContainer,
+                    eInserted);
+}
+
+void
+nsHTMLEditor::DoContentInserted(nsIDocument* aDocument, nsIContent* aContainer,
+                                nsIContent* aChild, int32_t aIndexInContainer,
+                                InsertedOrAppended aInsertedOrAppended)
 {
   if (!aChild) {
     return;
@@ -3252,8 +3271,17 @@ nsHTMLEditor::ContentInserted(nsIDocument *aDocument, nsIContent* aContainer,
     // Update spellcheck for only the newly-inserted node (bug 743819)
     if (mInlineSpellChecker) {
       nsRefPtr<nsRange> range = new nsRange(aChild);
+      int32_t endIndex = aIndexInContainer + 1;
+      if (aInsertedOrAppended == eAppended) {
+        // Count all the appended nodes
+        nsIContent* sibling = aChild->GetNextSibling();
+        while (sibling) {
+          endIndex++;
+          sibling = sibling->GetNextSibling();
+        }
+      }
       nsresult res = range->Set(aContainer, aIndexInContainer,
-                                aContainer, aIndexInContainer + 1);
+                                aContainer, endIndex);
       if (NS_SUCCEEDED(res)) {
         mInlineSpellChecker->SpellCheckRange(range);
       }
@@ -3366,21 +3394,21 @@ nsHTMLEditor::GetHeadContentsAsHTML(nsAString& aOutputString)
   {
     // Selection always includes <body></body>,
     //  so terminate there
-    nsReadingIterator<PRUnichar> findIter,endFindIter;
+    nsReadingIterator<char16_t> findIter,endFindIter;
     aOutputString.BeginReading(findIter);
     aOutputString.EndReading(endFindIter);
     //counting on our parser to always lower case!!!
     if (CaseInsensitiveFindInReadable(NS_LITERAL_STRING("<body"),
                                       findIter, endFindIter))
     {
-      nsReadingIterator<PRUnichar> beginIter;
+      nsReadingIterator<char16_t> beginIter;
       aOutputString.BeginReading(beginIter);
       int32_t offset = Distance(beginIter, findIter);//get the distance
 
-      nsWritingIterator<PRUnichar> writeIter;
+      nsWritingIterator<char16_t> writeIter;
       aOutputString.BeginWriting(writeIter);
       // Ensure the string ends in a newline
-      PRUnichar newline ('\n');
+      char16_t newline ('\n');
       findIter.advance(-1);
       if (offset ==0 || (offset >0 &&  (*findIter) != newline)) //check for 0
       {
@@ -5214,14 +5242,14 @@ nsHTMLEditor::GetActiveEditingHost()
   return content->GetEditingHost();
 }
 
-already_AddRefed<nsIDOMEventTarget>
+already_AddRefed<mozilla::dom::EventTarget>
 nsHTMLEditor::GetDOMEventTarget()
 {
   // Don't use getDocument here, because we have no way of knowing
   // whether Init() was ever called.  So we need to get the document
   // ourselves, if it exists.
   NS_PRECONDITION(mDocWeak, "This editor has not been initialized yet");
-  nsCOMPtr<nsIDOMEventTarget> target = do_QueryReferent(mDocWeak.get());
+  nsCOMPtr<mozilla::dom::EventTarget> target = do_QueryReferent(mDocWeak);
   return target.forget();
 }
 

@@ -26,11 +26,11 @@ body {
 }
 
 .sans-serif {
-  font-family: "Open Sans",sans-serif;
+  font-family: sans-serif;
 }
 
 .serif {
-  font-family: "Charis SIL",serif;
+  font-family: serif;
 }
 
 .message {
@@ -48,7 +48,7 @@ body {
 
 .domain,
 .credits {
-  font-family: "Open Sans", sans-serif;
+  font-family: sans-serif;
 }
 
 .domain {
@@ -59,23 +59,20 @@ body {
 }
 
 .domain-border {
+  margin-top: 15px;
   border-bottom: 1.5px solid #777777;
   width: 50%;
 }
 
 .header > h1 {
   font-size: 2.625em;
-  font-weight: 300;
+  font-weight: 700;
   line-height: 1.1em;
   width: 100%;
   margin: 0px;
   margin-top: 32px;
   margin-bottom: 16px;
   padding: 0px;
-}
-
-.serif > .header > h1 {
-  font-weight: 700;
 }
 
 .header > .credits {
@@ -236,7 +233,7 @@ body {
 .content .caption,
 .content .wp-caption-text,
 .content figcaption {
-  font-family: "Open Sans", sans-serif;
+  font-family: sans-serif;
   margin: 0px !important;
   padding-top: 4px !important;
 }
@@ -324,7 +321,7 @@ body {
 }
 
 .toolbar {
-  font-family: "Droid Sans",helvetica,arial,clean,sans-serif;
+  font-family: "Clear Sans",sans-serif;
   transition-property: visibility, opacity;
   transition-duration: 0.7s;
   visibility: visible;
@@ -337,6 +334,7 @@ body {
   padding: 0;
   list-style: none;
   background-color: #ced7de;
+  -moz-user-select: none;
 }
 
 .toolbar-hidden {
@@ -348,7 +346,7 @@ body {
 
 .toolbar > * {
   float: right;
-  width: 25%;
+  width: 33%;
 }
 
 .button {
@@ -357,10 +355,6 @@ body {
   background-position: center;
   background-size: 30px 24px;
   background-repeat: no-repeat;
-}
-
-.button:active {
-  background-color: #ff9500;
 }
 
 .dropdown {
@@ -471,7 +465,7 @@ body {
 .segmented-button > li > a {
   display: block;
   padding: 5px 0;
-  font-family: "Roboto",sans-serif;
+  font-family: "Clear Sans",sans-serif;
   font-weight: lighter;
 }
 
@@ -502,14 +496,6 @@ body {
   background-image: url('chrome://browser/skin/images/reader-toggle-off-icon-mdpi.png');
 }
 
-.list-button.on {
-  background-image: url('chrome://browser/skin/images/reader-list-on-icon-mdpi.png');
-}
-
-.list-button {
-  background-image: url('chrome://browser/skin/images/reader-list-off-icon-mdpi.png');
-}
-
 .share-button {
   background-image: url('chrome://browser/skin/images/reader-share-icon-mdpi.png');
 }
@@ -518,7 +504,7 @@ body {
   background-image: url('chrome://browser/skin/images/reader-style-icon-mdpi.png');
 }
 
-@media screen and (min-resolution: 200dpi) {
+@media screen and (min-resolution: 1.25dppx) {
   .dropdown-arrow {
     background-image: url('chrome://browser/skin/images/reader-dropdown-arrow-hdpi.png');
   }
@@ -539,14 +525,6 @@ body {
     background-image: url('chrome://browser/skin/images/reader-toggle-off-icon-hdpi.png');
   }
 
-  .list-button.on {
-    background-image: url('chrome://browser/skin/images/reader-list-on-icon-hdpi.png');
-  }
-
-  .list-button {
-    background-image: url('chrome://browser/skin/images/reader-list-off-icon-hdpi.png');
-  }
-
   .share-button {
     background-image: url('chrome://browser/skin/images/reader-share-icon-hdpi.png');
   }
@@ -556,7 +534,7 @@ body {
   }
 }
 
-@media screen and (min-resolution: 300dpi) {
+@media screen and (min-resolution: 2dppx) {
   .dropdown-arrow {
     background-image: url('chrome://browser/skin/images/reader-dropdown-arrow-xhdpi.png');
   }
@@ -575,14 +553,6 @@ body {
 
   .toggle-button {
     background-image: url('chrome://browser/skin/images/reader-toggle-off-icon-xhdpi.png');
-  }
-
-  .list-button.on {
-    background-image: url('chrome://browser/skin/images/reader-list-on-icon-xhdpi.png');
-  }
-
-  .list-button {
-    background-image: url('chrome://browser/skin/images/reader-list-off-icon-xhdpi.png');
   }
 
   .share-button {

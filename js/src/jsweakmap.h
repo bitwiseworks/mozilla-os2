@@ -7,9 +7,8 @@
 #ifndef jsweakmap_h
 #define jsweakmap_h
 
-#include "jsapi.h"
-#include "jsfriendapi.h"
 #include "jscompartment.h"
+#include "jsfriendapi.h"
 #include "jsobj.h"
 
 #include "gc/Marking.h"
@@ -49,7 +48,7 @@ class WeakMapBase {
             // many keys as possible have been marked, and add ourselves to the list of
             // known-live WeakMaps to be scanned in the iterative marking phase, by
             // markAllIteratively.
-            JS_ASSERT(tracer->eagerlyTraceWeakMaps == DoNotTraceWeakMaps);
+            JS_ASSERT(tracer->eagerlyTraceWeakMaps() == DoNotTraceWeakMaps);
 
             // Add ourselves to the list if we are not already in the list. We can already
             // be in the list if the weak map is marked more than once due delayed marking.
@@ -62,11 +61,11 @@ class WeakMapBase {
             // nicely as needed by the true ephemeral marking algorithm --- custom tracers
             // such as the cycle collector must use their own means for cycle detection.
             // So here we do a conservative approximation: pretend all keys are live.
-            if (tracer->eagerlyTraceWeakMaps == DoNotTraceWeakMaps)
+            if (tracer->eagerlyTraceWeakMaps() == DoNotTraceWeakMaps)
                 return;
 
             nonMarkingTraceValues(tracer);
-            if (tracer->eagerlyTraceWeakMaps == TraceWeakMapKeysValues)
+            if (tracer->eagerlyTraceWeakMaps() == TraceWeakMapKeysValues)
                 nonMarkingTraceKeys(tracer);
         }
     }
@@ -86,7 +85,8 @@ class WeakMapBase {
     // Trace all delayed weak map bindings. Used by the cycle collector.
     static void traceAllMappings(WeakMapTracer *tracer);
 
-    void check() { JS_ASSERT(next == WeakMapNotInList); }
+    bool isInList() { return next != WeakMapNotInList; }
+    void check() { JS_ASSERT(!isInList()); }
 
     // Remove everything from the weak map list for a compartment.
     static void resetCompartmentWeakMapList(JSCompartment *c);
@@ -118,9 +118,10 @@ class WeakMapBase {
   private:
     // Link in a list of WeakMaps to mark iteratively and sweep in this garbage
     // collection, headed by JSCompartment::gcWeakMapList. The last element of
-    // the list has NULL as its next. Maps not in the list have WeakMapNotInList
-    // as their next.  We must distinguish these cases to avoid creating
-    // infinite lists when a weak map gets traced twice due to delayed marking.
+    // the list has nullptr as its next. Maps not in the list have
+    // WeakMapNotInList as their next.  We must distinguish these cases to
+    // avoid creating infinite lists when a weak map gets traced twice due to
+    // delayed marking.
     WeakMapBase *next;
 };
 
@@ -131,32 +132,33 @@ class WeakMap : public HashMap<Key, Value, HashPolicy, RuntimeAllocPolicy>, publ
   public:
     typedef HashMap<Key, Value, HashPolicy, RuntimeAllocPolicy> Base;
     typedef typename Base::Enum Enum;
+    typedef typename Base::Lookup Lookup;
     typedef typename Base::Range Range;
 
-    explicit WeakMap(JSContext *cx, JSObject *memOf=NULL)
-        : Base(cx), WeakMapBase(memOf, cx->compartment()) { }
+    explicit WeakMap(JSContext *cx, JSObject *memOf = nullptr)
+        : Base(cx->runtime()), WeakMapBase(memOf, cx->compartment()) { }
 
   private:
     bool markValue(JSTracer *trc, Value *x) {
         if (gc::IsMarked(x))
             return false;
-        gc::Mark(trc, x, "WeakMap entry");
+        gc::Mark(trc, x, "WeakMap entry value");
         JS_ASSERT(gc::IsMarked(x));
         return true;
     }
 
     void nonMarkingTraceKeys(JSTracer *trc) {
         for (Enum e(*this); !e.empty(); e.popFront()) {
-            Key key(e.front().key);
-            gc::Mark(trc, &key, "WeakMap Key");
-            if (key != e.front().key)
-                e.rekeyFront(key, key);
+            Key key(e.front().key());
+            gc::Mark(trc, &key, "WeakMap entry key");
+            if (key != e.front().key())
+                entryMoved(e, key);
         }
     }
 
     void nonMarkingTraceValues(JSTracer *trc) {
         for (Range r = Base::all(); !r.empty(); r.popFront())
-            gc::Mark(trc, &r.front().value, "WeakMap entry");
+            gc::Mark(trc, &r.front().value(), "WeakMap entry value");
     }
 
     bool keyNeedsMark(JSObject *key) {
@@ -180,19 +182,20 @@ class WeakMap : public HashMap<Key, Value, HashPolicy, RuntimeAllocPolicy>, publ
         bool markedAny = false;
         for (Enum e(*this); !e.empty(); e.popFront()) {
             /* If the entry is live, ensure its key and value are marked. */
-            Key prior(e.front().key);
-            if (gc::IsMarked(const_cast<Key *>(&e.front().key))) {
-                if (markValue(trc, &e.front().value))
+            Key key(e.front().key());
+            if (gc::IsMarked(const_cast<Key *>(&key))) {
+                if (markValue(trc, &e.front().value()))
                     markedAny = true;
-                if (prior != e.front().key)
-                    e.rekeyFront(e.front().key);
-            } else if (keyNeedsMark(e.front().key)) {
-                gc::Mark(trc, const_cast<Key *>(&e.front().key), "proxy-preserved WeakMap key");
-                if (prior != e.front().key)
-                    e.rekeyFront(e.front().key);
-                gc::Mark(trc, &e.front().value, "WeakMap entry");
+                if (e.front().key() != key)
+                    entryMoved(e, key);
+            } else if (keyNeedsMark(key)) {
+                gc::Mark(trc, &e.front().value(), "WeakMap entry value");
+                gc::Mark(trc, &key, "proxy-preserved WeakMap entry key");
+                if (e.front().key() != key)
+                    entryMoved(e, key);
                 markedAny = true;
             }
+            key.unsafeSet(nullptr);
         }
         return markedAny;
     }
@@ -200,11 +203,11 @@ class WeakMap : public HashMap<Key, Value, HashPolicy, RuntimeAllocPolicy>, publ
     void sweep() {
         /* Remove all entries whose keys remain unmarked. */
         for (Enum e(*this); !e.empty(); e.popFront()) {
-            Key k(e.front().key);
+            Key k(e.front().key());
             if (gc::IsAboutToBeFinalized(&k))
                 e.removeFront();
-            else if (k != e.front().key)
-                e.rekeyFront(k, k);
+            else if (k != e.front().key())
+                entryMoved(e, k);
         }
         /*
          * Once we've swept, all remaining edges should stay within the
@@ -213,27 +216,37 @@ class WeakMap : public HashMap<Key, Value, HashPolicy, RuntimeAllocPolicy>, publ
         assertEntriesNotAboutToBeFinalized();
     }
 
-    /* memberOf can be NULL, which means that the map is not part of a JSObject. */
+    /* memberOf can be nullptr, which means that the map is not part of a JSObject. */
     void traceMappings(WeakMapTracer *tracer) {
         for (Range r = Base::all(); !r.empty(); r.popFront()) {
-            gc::Cell *key = gc::ToMarkable(r.front().key);
-            gc::Cell *value = gc::ToMarkable(r.front().value);
+            gc::Cell *key = gc::ToMarkable(r.front().key());
+            gc::Cell *value = gc::ToMarkable(r.front().value());
             if (key && value) {
                 tracer->callback(tracer, memberOf,
-                                 key, gc::TraceKind(r.front().key),
-                                 value, gc::TraceKind(r.front().value));
+                                 key, gc::TraceKind(r.front().key()),
+                                 value, gc::TraceKind(r.front().value()));
             }
         }
+    }
+
+    /* Rekey an entry when moved, ensuring we do not trigger barriers. */
+    void entryMoved(Enum &eArg, const Key &k) {
+        typedef typename HashMap<typename Unbarriered<Key>::type,
+                                 typename Unbarriered<Value>::type,
+                                 typename Unbarriered<HashPolicy>::type,
+                                 RuntimeAllocPolicy>::Enum UnbarrieredEnum;
+        UnbarrieredEnum &e = reinterpret_cast<UnbarrieredEnum &>(eArg);
+        e.rekeyFront(reinterpret_cast<const typename Unbarriered<Key>::type &>(k));
     }
 
 protected:
     void assertEntriesNotAboutToBeFinalized() {
 #if DEBUG
         for (Range r = Base::all(); !r.empty(); r.popFront()) {
-            Key k(r.front().key);
+            Key k(r.front().key());
             JS_ASSERT(!gc::IsAboutToBeFinalized(&k));
-            JS_ASSERT(!gc::IsAboutToBeFinalized(&r.front().value));
-            JS_ASSERT(k == r.front().key);
+            JS_ASSERT(!gc::IsAboutToBeFinalized(&r.front().value()));
+            JS_ASSERT(k == r.front().key());
         }
 #endif
     }

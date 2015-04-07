@@ -20,7 +20,6 @@
 #undef _WIN32_WINNT
 #endif
 #define _WIN32_WINNT 0x0600
-#define INITGUID
 #include <shlobj.h>
 
 class nsMIMEInfoWin;
@@ -45,7 +44,7 @@ public:
   /** Get the string value of a registry value and store it in result.
    * @return true on success, false on failure
    */
-  static bool GetValueString(HKEY hKey, const PRUnichar* pValueName, nsAString& result);
+  static bool GetValueString(HKEY hKey, const char16_t* pValueName, nsAString& result);
 
   // Removes registry command handler parameters, quotes, and expands environment strings.
   static bool CleanupCmdHandlerPath(nsAString& aCommandHandler);
@@ -58,7 +57,7 @@ protected:
 
   static nsresult GetMIMEInfoFromRegistry(const nsAFlatString& fileType, nsIMIMEInfo *pInfo);
   /// Looks up the type for the extension aExt and compares it to aType
-  static bool typeFromExtEquals(const PRUnichar* aExt, const char *aType);
+  static bool typeFromExtEquals(const char16_t* aExt, const char *aType);
 
 private:
   IApplicationAssociationRegistration* mAppAssoc;

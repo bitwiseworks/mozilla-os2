@@ -3,29 +3,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-
-SIMPLECSRCS	+= \
-		leakstats.c \
-		tmstats.c \
-		$(NULL)
-
-SIMPLECPPSRCS	= \
-		leaksoup.cpp \
-		bloatblame.cpp \
-		$(NULL)
-
-SIMPLE_PROGRAMS	= \
-		$(SIMPLECSRCS:.c=$(BIN_SUFFIX)) \
-		$(SIMPLECPPSRCS:.cpp=$(BIN_SUFFIX)) \
-		$(NULL)
-
 EXTRACSRCS = tmreader.c
 EXTRACPPSRCS = adreader.cpp
 
@@ -40,10 +17,7 @@ PROGCSRCS = \
 PROGOBJS = $(PROGCSRCS:.c=.$(OBJ_SUFFIX))
 endif
 
-CSRCS = $(SIMPLECSRCS) $(EXTRACSRCS) $(PROGCSRCS)
-ifeq ($(OS_ARCH),WINNT)
-LOCAL_INCLUDES	+= -I$(topsrcdir)/config/os2
-endif
+CPPSRCS += $(EXTRACPPSRCS)
 
 include $(topsrcdir)/config/config.mk
 
@@ -62,11 +36,11 @@ endif
 ifdef HAVE_BOUTELL_GD
 ifeq ($(OS_ARCH),WINNT)
 LOCAL_INCLUDES	+= \
-		-I"$(HAVE_BOUTELL_GD)" \
+		-I'$(HAVE_BOUTELL_GD)' \
 		$(NULL)
 LIBS		+= \
 		-lmozz_s \
-		"$(HAVE_BOUTELL_GD)/gd.lib" \
+		'$(HAVE_BOUTELL_GD)/gd.lib' \
 		$(NULL)
 else
 LIBS		+= \
@@ -86,7 +60,3 @@ include $(topsrcdir)/config/rules.mk
 # install rules.txt along with spacetrace executable
 libs:: rules.txt
 	$(INSTALL) $< $(DIST)/bin
-
-libs:: spacetrace.css
-	$(INSTALL) $< $(DIST)/bin/res
-

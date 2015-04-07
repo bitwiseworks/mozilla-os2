@@ -4,21 +4,31 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'tracemalloc'
-
 EXPORTS += [
     'nsTraceMalloc.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
+    'nsTraceMalloc.c',
+]
+
+SOURCES += [
     'nsTypeInfo.cpp',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
-    CPP_SOURCES += [
+    SOURCES += [
         'nsDebugHelpWin32.cpp',
         'nsWinTraceMalloc.cpp',
     ]
 
-LIBRARY_NAME = 'tracemalloc'
+FINAL_LIBRARY = 'xpcom_core'
 
+if CONFIG['WRAP_SYSTEM_INCLUDES']:
+    DEFINES['WRAP_SYSTEM_INCLUDES'] = True
+
+DEFINES['MOZ_NO_MOZALLOC'] = True
+
+DEFFILE = SRCDIR + '/tm.def'
+
+DISABLE_STL_WRAPPING = True

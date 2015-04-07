@@ -28,11 +28,10 @@ private:
   {
     NS_ABORT_IF_FALSE(mNodeInfo->NodeType() == nsIDOMNode::TEXT_NODE,
                       "Bad NodeType in aNodeInfo");
-    SetIsDOMBinding();
   }
 
 public:
-  nsTextNode(already_AddRefed<nsINodeInfo> aNodeInfo)
+  nsTextNode(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : mozilla::dom::Text(aNodeInfo)
   {
     Init();
@@ -54,6 +53,7 @@ public:
 
   // nsIDOMCharacterData
   NS_FORWARD_NSIDOMCHARACTERDATA(nsGenericDOMDataNode::)
+  using nsGenericDOMDataNode::SetData; // Prevent hiding overloaded virtual function.
 
   // nsIDOMText
   NS_FORWARD_NSIDOMTEXT(nsGenericDOMDataNode::)
@@ -70,7 +70,7 @@ public:
   virtual void UnbindFromTree(bool aDeep = true,
                               bool aNullParent = true) MOZ_OVERRIDE;
 
-  nsresult AppendTextForNormalize(const PRUnichar* aBuffer, uint32_t aLength,
+  nsresult AppendTextForNormalize(const char16_t* aBuffer, uint32_t aLength,
                                   bool aNotify, nsIContent* aNextSibling);
 
   virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
@@ -81,8 +81,7 @@ public:
 #endif
 
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 };
 
 #endif // nsTextNode_h

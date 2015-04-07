@@ -8,12 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "video_capture_qtkit.h"
-#import "video_capture_qtkit_objc.h"
-#import "video_capture_qtkit_info_objc.h"
-#include "trace.h"
-#include "critical_section_wrapper.h"
-#include "../../video_capture_config.h"
+#include "webrtc/modules/video_capture/mac/qtkit/video_capture_qtkit.h"
+#import "webrtc/modules/video_capture/mac/qtkit/video_capture_qtkit_info_objc.h"
+#import "webrtc/modules/video_capture/mac/qtkit/video_capture_qtkit_objc.h"
+#include "webrtc/modules/video_capture/video_capture_config.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/trace.h"
 
 class nsAutoreleasePool {
 public:
@@ -35,7 +35,7 @@ namespace webrtc
 namespace videocapturemodule
 {
 
-VideoCaptureMacQTKit::VideoCaptureMacQTKit(const WebRtc_Word32 id) :
+VideoCaptureMacQTKit::VideoCaptureMacQTKit(const int32_t id) :
     VideoCaptureImpl(id),
     _captureDevice(NULL),
     _captureInfo(NULL),
@@ -60,6 +60,7 @@ VideoCaptureMacQTKit::~VideoCaptureMacQTKit()
                  "~VideoCaptureMacQTKit() called");
     if(_captureDevice)
     {
+        [_captureDevice registerOwner:nil];
         [_captureDevice stopCapture];
         [_captureDevice release];
     }
@@ -70,14 +71,14 @@ VideoCaptureMacQTKit::~VideoCaptureMacQTKit()
     }
 }
 
-WebRtc_Word32 VideoCaptureMacQTKit::Init(
-    const WebRtc_Word32 id, const char* iDeviceUniqueIdUTF8)
+int32_t VideoCaptureMacQTKit::Init(
+    const int32_t id, const char* iDeviceUniqueIdUTF8)
 {
     CriticalSectionScoped cs(&_apiCs);
 
 
-    const WebRtc_Word32 nameLength =
-        (WebRtc_Word32) strlen((char*)iDeviceUniqueIdUTF8);
+    const int32_t nameLength =
+        (int32_t) strlen((char*)iDeviceUniqueIdUTF8);
     if(nameLength>kVideoCaptureUniqueNameLength)
         return -1;
 
@@ -96,12 +97,7 @@ WebRtc_Word32 VideoCaptureMacQTKit::Init(
         return -1;
     }
 
-    if(-1 == [[_captureDevice registerOwner:this]intValue])
-    {
-        WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, id,
-                     "Failed to register owner for _captureDevice");
-        return -1;
-    }
+    [_captureDevice registerOwner:this];
 
     if(0 == strcmp((char*)iDeviceUniqueIdUTF8, ""))
     {
@@ -165,8 +161,7 @@ WebRtc_Word32 VideoCaptureMacQTKit::Init(
 
     // at this point we know that the user has passed in a valid camera. Let's
     // set it as the current.
-    if(-1 == [[_captureDevice
-               setCaptureDeviceById:(char*)deviceUniqueIdUTF8]intValue])
+    if(![_captureDevice setCaptureDeviceById:(char*)deviceUniqueIdUTF8])
     {
         strcpy((char*)_deviceUniqueId, (char*)deviceUniqueIdUTF8);
         WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,
@@ -182,7 +177,7 @@ WebRtc_Word32 VideoCaptureMacQTKit::Init(
     return 0;
 }
 
-WebRtc_Word32 VideoCaptureMacQTKit::StartCapture(
+int32_t VideoCaptureMacQTKit::StartCapture(
     const VideoCaptureCapability& capability)
 {
 
@@ -192,28 +187,19 @@ WebRtc_Word32 VideoCaptureMacQTKit::StartCapture(
     _captureFrameRate = capability.maxFPS;
     _captureDelay = 120;
 
-    if(-1 == [[_captureDevice setCaptureHeight:_captureHeight
-               AndWidth:_captureWidth AndFrameRate:_captureFrameRate]intValue])
-    {
-        WEBRTC_TRACE(webrtc::kTraceInfo, webrtc::kTraceVideoCapture, _id,
-                     "Could not set width=%d height=%d frameRate=%d",
-                     _captureWidth, _captureHeight, _captureFrameRate);
-        return -1;
-    }
+    [_captureDevice setCaptureHeight:_captureHeight
+                               width:_captureWidth
+                           frameRate:_captureFrameRate];
 
-    if(-1 == [[_captureDevice startCapture]intValue])
-    {
-        return -1;
-    }
+    [_captureDevice startCapture];
     _isCapturing = true;
     return 0;
 }
 
-WebRtc_Word32 VideoCaptureMacQTKit::StopCapture()
+int32_t VideoCaptureMacQTKit::StopCapture()
 {
     nsAutoreleasePool localPool;
     [_captureDevice stopCapture];
-
     _isCapturing = false;
     return 0;
 }
@@ -223,7 +209,7 @@ bool VideoCaptureMacQTKit::CaptureStarted()
     return _isCapturing;
 }
 
-WebRtc_Word32 VideoCaptureMacQTKit::CaptureSettings(VideoCaptureCapability& settings)
+int32_t VideoCaptureMacQTKit::CaptureSettings(VideoCaptureCapability& settings)
 {
     settings.width = _captureWidth;
     settings.height = _captureHeight;
@@ -242,4 +228,3 @@ struct VideoCaptureCapabilityMacQTKit:public VideoCaptureCapability
 };
 }  // namespace videocapturemodule
 }  // namespace webrtc
-

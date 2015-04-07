@@ -100,6 +100,12 @@ class Channel : public Message::Sender {
   // immediately.
   virtual bool Send(Message* message);
 
+  // Unsound_IsClosed() and Unsound_NumQueuedMessages() are safe to call from
+  // any thread, but the value returned may be out of date, because we don't
+  // use any synchronization when reading or writing it.
+  bool Unsound_IsClosed() const;
+  uint32_t Unsound_NumQueuedMessages() const;
+
 #if defined(OS_POSIX)
   // On POSIX an IPC::Channel wraps a socketpair(), this method returns the
   // FD # for the client end of the socket and the equivalent FD# to use for
@@ -111,8 +117,15 @@ class Channel : public Message::Sender {
   // socketpair() in which case this method returns -1 for both parameters.
   void GetClientFileDescriptorMapping(int *src_fd, int *dest_fd) const;
 
-  // Return the server side of the socketpair.
-  int GetServerFileDescriptor() const;
+  // Return the file descriptor for communication with the peer.
+  int GetFileDescriptor() const;
+
+  // Reset the file descriptor for communication with the peer.
+  void ResetFileDescriptor(int fd);
+
+  // Close the client side of the socketpair.
+  void CloseClientFileDescriptor();
+
 #elif defined(OS_WIN)
   // Return the server pipe handle.
   void* GetServerPipeHandle() const;

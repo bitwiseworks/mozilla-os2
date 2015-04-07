@@ -10,7 +10,7 @@ const dm = Cc["@mozilla.org/download-manager;1"].getService(nsIDownloadManager);
 
 function test_retry_canceled()
 {
-  var dl = addDownload();
+  var dl = addDownload(httpserv);
 
   // since we are going to be retrying a failed download, we need to inflate
   // this so it doesn't stop our server
@@ -39,9 +39,13 @@ var tests = [test_retry_canceled, test_retry_bad];
 var httpserv = null;
 function run_test()
 {
+  if (oldDownloadManagerDisabled()) {
+    return;
+  }
+
   httpserv = new HttpServer();
   httpserv.registerDirectory("/", do_get_cwd());
-  httpserv.start(4444);
+  httpserv.start(-1);
 
   dm.addListener(getDownloadListener());
 

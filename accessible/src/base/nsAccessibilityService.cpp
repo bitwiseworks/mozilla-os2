@@ -6,7 +6,6 @@
 #include "nsAccessibilityService.h"
 
 // NOTE: alphabetically ordered
-#include "Accessible-inl.h"
 #include "ApplicationAccessibleWrap.h"
 #include "ARIAGridAccessibleWrap.h"
 #include "ARIAMap.h"
@@ -20,14 +19,18 @@
 #include "HTMLSelectAccessible.h"
 #include "HTMLTableAccessibleWrap.h"
 #include "HyperTextAccessibleWrap.h"
+#include "RootAccessible.h"
 #include "nsAccessiblePivot.h"
 #include "nsAccUtils.h"
+#include "nsAttrName.h"
 #include "nsEventShell.h"
-#include "nsIAccessibleProvider.h"
+#include "nsIURI.h"
 #include "OuterDocAccessible.h"
 #include "Platform.h"
 #include "Role.h"
+#ifdef MOZ_ACCESSIBILITY_ATK
 #include "RootAccessibleWrap.h"
+#endif
 #include "States.h"
 #include "Statistics.h"
 #include "TextLeafAccessibleWrap.h"
@@ -39,6 +42,7 @@
 #ifdef XP_WIN
 #include "mozilla/a11y/Compatibility.h"
 #include "HTMLWin32ObjectAccessible.h"
+#include "mozilla/StaticPtr.h"
 #endif
 
 #ifdef A11Y_LOG
@@ -49,23 +53,20 @@
 #include "nsExceptionHandler.h"
 #endif
 
-#include "nsIDOMDocument.h"
-#include "nsIDOMHTMLObjectElement.h"
-#include "nsIDOMXULElement.h"
 #include "nsImageFrame.h"
 #include "nsIObserverService.h"
 #include "nsLayoutUtils.h"
-#include "nsNPAPIPluginInstance.h"
 #include "nsObjectFrame.h"
 #include "nsSVGPathGeometryFrame.h"
 #include "nsTreeBodyFrame.h"
 #include "nsTreeColumns.h"
 #include "nsTreeUtils.h"
-#include "mozilla/dom/Element.h"
+#include "nsXBLPrototypeBinding.h"
+#include "nsXBLBinding.h"
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/dom/DOMStringList.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
-#include "mozilla/StaticPtr.h"
-#include "mozilla/Util.h"
 #include "nsDeckFrame.h"
 
 #ifdef MOZ_XUL
@@ -81,8 +82,13 @@
 #include "XULTreeGridAccessibleWrap.h"
 #endif
 
+#if defined(XP_WIN) || defined(MOZ_ACCESSIBILITY_ATK)
+#include "nsNPAPIPluginInstance.h"
+#endif
+
 using namespace mozilla;
 using namespace mozilla::a11y;
+using namespace mozilla::dom;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Statics
@@ -146,19 +152,19 @@ nsAccessibilityService::~nsAccessibilityService()
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports
 
-NS_IMPL_ISUPPORTS_INHERITED4(nsAccessibilityService,
-                             DocManager,
-                             nsIAccessibilityService,
-                             nsIAccessibleRetrieval,
-                             nsIObserver,
-                             nsISelectionListener) // from SelectionManager
+NS_IMPL_ISUPPORTS_INHERITED(nsAccessibilityService,
+                            DocManager,
+                            nsIAccessibilityService,
+                            nsIAccessibleRetrieval,
+                            nsIObserver,
+                            nsISelectionListener) // from SelectionManager
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIObserver
 
 NS_IMETHODIMP
 nsAccessibilityService::Observe(nsISupports *aSubject, const char *aTopic,
-                         const PRUnichar *aData)
+                         const char16_t *aData)
 {
   if (!nsCRT::strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID))
     Shutdown();
@@ -196,8 +202,7 @@ nsAccessibilityService::GetRootDocumentAccessible(nsIPresShell* aPresShell,
   nsIPresShell* ps = aPresShell;
   nsIDocument* documentNode = aPresShell->GetDocument();
   if (documentNode) {
-    nsCOMPtr<nsISupports> container = documentNode->GetContainer();
-    nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(container));
+    nsCOMPtr<nsIDocShellTreeItem> treeItem(documentNode->GetDocShell());
     if (treeItem) {
       nsCOMPtr<nsIDocShellTreeItem> rootTreeItem;
       treeItem->GetRootTreeItem(getter_AddRefs(rootTreeItem));
@@ -225,6 +230,9 @@ public:
 
   NS_IMETHODIMP Notify(nsITimer* aTimer) MOZ_FINAL
   {
+    if (!mContent->IsInDoc())
+      return NS_OK;
+
     nsIPresShell* ps = mContent->OwnerDoc()->GetShell();
     if (ps) {
       DocAccessible* doc = ps->GetDocAccessible();
@@ -248,7 +256,7 @@ private:
   nsCOMPtr<nsIContent> mContent;
 };
 
-NS_IMPL_ISUPPORTS1(PluginTimerCallBack, nsITimerCallback)
+NS_IMPL_ISUPPORTS(PluginTimerCallBack, nsITimerCallback)
 #endif
 
 already_AddRefed<Accessible>
@@ -569,10 +577,9 @@ nsAccessibilityService::GetStringRole(uint32_t aRole, nsAString& aString)
 
 NS_IMETHODIMP
 nsAccessibilityService::GetStringStates(uint32_t aState, uint32_t aExtraState,
-                                        nsIDOMDOMStringList **aStringStates)
+                                        nsISupports **aStringStates)
 {
-  nsAccessibleDOMStringList* stringStates = new nsAccessibleDOMStringList();
-  NS_ENSURE_TRUE(stringStates, NS_ERROR_OUT_OF_MEMORY);
+  nsRefPtr<DOMStringList> stringStates = new DOMStringList();
 
   uint64_t state = nsAccUtils::To64State(aState, aExtraState);
 
@@ -675,12 +682,10 @@ nsAccessibilityService::GetStringStates(uint32_t aState, uint32_t aExtraState,
     stringStates->Add(NS_LITERAL_STRING("expandable"));
 
   //unknown states
-  uint32_t stringStatesLength = 0;
-  stringStates->GetLength(&stringStatesLength);
-  if (!stringStatesLength)
+  if (!stringStates->Length())
     stringStates->Add(NS_LITERAL_STRING("unknown"));
 
-  NS_ADDREF(*aStringStates = stringStates);
+  stringStates.forget(aStringStates);
   return NS_OK;
 }
 
@@ -706,13 +711,22 @@ NS_IMETHODIMP
 nsAccessibilityService::GetStringRelationType(uint32_t aRelationType,
                                               nsAString& aString)
 {
-  if (aRelationType >= ArrayLength(kRelationTypeNames)) {
-    aString.AssignLiteral("unknown");
+  NS_ENSURE_ARG(aRelationType <= static_cast<uint32_t>(RelationType::LAST));
+
+#define RELATIONTYPE(geckoType, geckoTypeName, atkType, msaaType, ia2Type) \
+  case RelationType::geckoType: \
+    aString.AssignLiteral(geckoTypeName); \
     return NS_OK;
+
+  RelationType relationType = static_cast<RelationType>(aRelationType);
+  switch (relationType) {
+#include "RelationTypeMap.h"
+    default:
+      aString.AssignLiteral("unknown");
+      return NS_OK;
   }
 
-  CopyUTF8toUTF16(kRelationTypeNames[aRelationType], aString);
-  return NS_OK;
+#undef RELATIONTYPE
 }
 
 NS_IMETHODIMP
@@ -871,7 +885,10 @@ nsAccessibilityService::GetOrCreateAccessible(nsINode* aNode,
   if (content->IsNodeOfType(nsINode::eTEXT)) {
     nsAutoString text;
     frame->GetRenderedText(&text, nullptr, nullptr, 0, UINT32_MAX);
-    if (text.IsEmpty()) {
+    // Ignore not rendered text nodes and whitespace text nodes between table
+    // cells.
+    if (text.IsEmpty() ||
+        (aContext->IsTableRow() && nsCoreUtils::IsWhitespaceString(text))) {
       if (aIsSubtreeHidden)
         *aIsSubtreeHidden = true;
 
@@ -879,12 +896,12 @@ nsAccessibilityService::GetOrCreateAccessible(nsINode* aNode,
     }
 
     newAcc = CreateAccessibleByFrameType(frame, content, aContext);
-    if (document->BindToDocument(newAcc, nullptr)) {
-      newAcc->AsTextLeaf()->SetText(text);
-      return newAcc;
-    }
+    if (!aContext->IsAcceptableChild(newAcc))
+      return nullptr;
 
-    return nullptr;
+    document->BindToDocument(newAcc, nullptr);
+    newAcc->AsTextLeaf()->SetText(text);
+    return newAcc;
   }
 
   bool isHTML = content->IsHTML();
@@ -906,9 +923,11 @@ nsAccessibilityService::GetOrCreateAccessible(nsINode* aNode,
     }
 
     newAcc = new HyperTextAccessibleWrap(content, document);
-    if (document->BindToDocument(newAcc, aria::GetRoleMap(aNode)))
-      return newAcc;
-    return nullptr;
+    if (!aContext->IsAcceptableChild(newAcc))
+      return nullptr;
+
+    document->BindToDocument(newAcc, aria::GetRoleMap(aNode));
+    return newAcc;
   }
 
   nsRoleMapEntry* roleMapEntry = aria::GetRoleMap(aNode);
@@ -986,8 +1005,8 @@ nsAccessibilityService::GetOrCreateAccessible(nsINode* aNode,
       }
     }
 
-    // Elements may implement nsIAccessibleProvider via XBL. This allows them to
-    // say what kind of accessible to create.
+    // XBL bindings may use @role attribute to point the accessible type
+    // they belong to.
     newAcc = CreateAccessibleByType(content, document);
 
     // Any XUL box can be used as tabpanel, make sure we create a proper
@@ -1013,8 +1032,11 @@ nsAccessibilityService::GetOrCreateAccessible(nsINode* aNode,
       } else if (content->Tag() == nsGkAtoms::svg) {
         newAcc = new EnumRoleAccessible(content, document, roles::DIAGRAM);
       }
-    } else if (content->IsMathML(nsGkAtoms::math)) {
-      newAcc = new EnumRoleAccessible(content, document, roles::EQUATION);
+    } else if (content->IsMathML()){
+      if (content->Tag() == nsGkAtoms::math)
+        newAcc = new EnumRoleAccessible(content, document, roles::EQUATION);
+      else
+        newAcc = new HyperTextAccessible(content, document);
     }
   }
 
@@ -1037,7 +1059,11 @@ nsAccessibilityService::GetOrCreateAccessible(nsINode* aNode,
     }
   }
 
-  return document->BindToDocument(newAcc, roleMapEntry) ? newAcc : nullptr;
+  if (!newAcc || !aContext->IsAcceptableChild(newAcc))
+    return nullptr;
+
+  document->BindToDocument(newAcc, roleMapEntry);
+  return newAcc;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1058,7 +1084,7 @@ nsAccessibilityService::Init()
 
   observerService->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
 
-  static const PRUnichar kInitIndicator[] = { '1', 0 };
+  static const char16_t kInitIndicator[] = { '1', 0 };
   observerService->NotifyObservers(nullptr, "a11y-init-or-shutdown", kInitIndicator);
 
 #ifdef A11Y_LOG
@@ -1096,7 +1122,7 @@ nsAccessibilityService::Shutdown()
   if (observerService) {
     observerService->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
 
-    static const PRUnichar kShutdownIndicator[] = { '0', 0 };
+    static const char16_t kShutdownIndicator[] = { '0', 0 };
     observerService->NotifyObservers(nullptr, "a11y-init-or-shutdown", kShutdownIndicator);
   }
 
@@ -1134,204 +1160,183 @@ already_AddRefed<Accessible>
 nsAccessibilityService::CreateAccessibleByType(nsIContent* aContent,
                                                DocAccessible* aDoc)
 {
-  nsCOMPtr<nsIAccessibleProvider> accessibleProvider(do_QueryInterface(aContent));
-  if (!accessibleProvider)
+  nsAutoString role;
+  for (const nsXBLBinding* binding = aContent->GetXBLBinding(); binding; binding = binding->GetBaseBinding()) {
+    nsIContent* bindingElm = binding->PrototypeBinding()->GetBindingElement();
+    bindingElm->GetAttr(kNameSpaceID_None, nsGkAtoms::role, role);
+    if (!role.IsEmpty())
+      break;
+  }
+
+  if (role.IsEmpty() || role.EqualsLiteral("none"))
     return nullptr;
 
-  int32_t type;
-  nsresult rv = accessibleProvider->GetAccessibleType(&type);
-  if (NS_FAILED(rv))
-    return nullptr;
-
-  if (type == nsIAccessibleProvider::OuterDoc) {
+  if (role.EqualsLiteral("outerdoc")) {
     nsRefPtr<Accessible> accessible = new OuterDocAccessible(aContent, aDoc);
     return accessible.forget();
   }
-
+ 
   nsRefPtr<Accessible> accessible;
-  switch (type)
-  {
 #ifdef MOZ_XUL
-    case nsIAccessibleProvider::NoAccessible:
-      return nullptr;
+  // XUL controls
+  if (role.EqualsLiteral("xul:alert")) {
+    accessible = new XULAlertAccessible(aContent, aDoc);
 
-    // XUL controls
-    case nsIAccessibleProvider::XULAlert:
-      accessible = new XULAlertAccessible(aContent, aDoc);
-      break;
+  } else if (role.EqualsLiteral("xul:button")) {
+    accessible = new XULButtonAccessible(aContent, aDoc);
 
-    case nsIAccessibleProvider::XULButton:
-      accessible = new XULButtonAccessible(aContent, aDoc);
-      break;
+  } else if (role.EqualsLiteral("xul:checkbox")) {
+    accessible = new XULCheckboxAccessible(aContent, aDoc);
 
-    case nsIAccessibleProvider::XULCheckbox:
-      accessible = new XULCheckboxAccessible(aContent, aDoc);
-      break;
+  } else if (role.EqualsLiteral("xul:colorpicker")) {
+    accessible = new XULColorPickerAccessible(aContent, aDoc);
 
-    case nsIAccessibleProvider::XULColorPicker:
-      accessible = new XULColorPickerAccessible(aContent, aDoc);
-      break;
+  } else if (role.EqualsLiteral("xul:colorpickertile")) {
+    accessible = new XULColorPickerTileAccessible(aContent, aDoc);
 
-    case nsIAccessibleProvider::XULColorPickerTile:
-      accessible = new XULColorPickerTileAccessible(aContent, aDoc);
-      break;
+  } else if (role.EqualsLiteral("xul:combobox")) {
+    accessible = new XULComboboxAccessible(aContent, aDoc);
 
-    case nsIAccessibleProvider::XULCombobox:
-      accessible = new XULComboboxAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULTabpanels:
+  } else if (role.EqualsLiteral("xul:tabpanels")) {
       accessible = new XULTabpanelsAccessible(aContent, aDoc);
-      break;
 
-    case nsIAccessibleProvider::XULDropmarker:
+  } else if (role.EqualsLiteral("xul:dropmarker")) {
       accessible = new XULDropmarkerAccessible(aContent, aDoc);
-      break;
 
-    case nsIAccessibleProvider::XULGroupbox:
+  } else if (role.EqualsLiteral("xul:groupbox")) {
       accessible = new XULGroupboxAccessible(aContent, aDoc);
-      break;
 
-    case nsIAccessibleProvider::XULImage:
-    {
+  } else if (role.EqualsLiteral("xul:image")) {
+    if (aContent->HasAttr(kNameSpaceID_None, nsGkAtoms::onclick)) {
+      accessible = new XULToolbarButtonAccessible(aContent, aDoc);
+
+    } else {
       // Don't include nameless images in accessible tree.
       if (!aContent->HasAttr(kNameSpaceID_None,
                              nsGkAtoms::tooltiptext))
         return nullptr;
 
       accessible = new ImageAccessibleWrap(aContent, aDoc);
-      break;
-
     }
-    case nsIAccessibleProvider::XULLink:
-      accessible = new XULLinkAccessible(aContent, aDoc);
-      break;
 
-    case nsIAccessibleProvider::XULListbox:
+  } else if (role.EqualsLiteral("xul:link")) {
+    accessible = new XULLinkAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:listbox")) {
       accessible = new XULListboxAccessibleWrap(aContent, aDoc);
-      break;
 
-    case nsIAccessibleProvider::XULListCell:
-      accessible = new XULListCellAccessibleWrap(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULListHead:
-      accessible = new XULColumAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULListHeader:
-      accessible = new XULColumnItemAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULListitem:
-      accessible = new XULListitemAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULMenubar:
-      accessible = new XULMenubarAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULMenuitem:
-      accessible = new XULMenuitemAccessibleWrap(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULMenupopup:
-    {
-#ifdef MOZ_ACCESSIBILITY_ATK
-      // ATK considers this node to be redundant when within menubars, and it makes menu
-      // navigation with assistive technologies more difficult
-      // XXX In the future we will should this for consistency across the nsIAccessible
-      // implementations on each platform for a consistent scripting environment, but
-      // then strip out redundant accessibles in the AccessibleWrap class for each platform.
-      nsIContent *parent = aContent->GetParent();
-      if (parent && parent->NodeInfo()->Equals(nsGkAtoms::menu,
-                                               kNameSpaceID_XUL))
-        return nullptr;
-#endif
-      accessible = new XULMenupopupAccessible(aContent, aDoc);
-      break;
-
-    }
-    case nsIAccessibleProvider::XULMenuSeparator:
-      accessible = new XULMenuSeparatorAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULPane:
-      accessible = new EnumRoleAccessible(aContent, aDoc, roles::PANE);
-      break;
-
-    case nsIAccessibleProvider::XULProgressMeter:
-      accessible = new XULProgressMeterAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULStatusBar:
-      accessible = new XULStatusBarAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULScale:
-      accessible = new XULSliderAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULRadioButton:
-      accessible = new XULRadioButtonAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULRadioGroup:
-      accessible = new XULRadioGroupAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULTab:
-      accessible = new XULTabAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULTabs:
-      accessible = new XULTabsAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULText:
-      accessible = new XULLabelAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULTextBox:
-      accessible = new XULTextFieldAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULThumb:
-      accessible = new XULThumbAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULTree:
-      return CreateAccessibleForXULTree(aContent, aDoc);
-
-    case nsIAccessibleProvider::XULTreeColumns:
-      accessible = new XULTreeColumAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULTreeColumnItem:
-      accessible = new XULColumnItemAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULToolbar:
-      accessible = new XULToolbarAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULToolbarSeparator:
-      accessible = new XULToolbarSeparatorAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULTooltip:
-      accessible = new XULTooltipAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XULToolbarButton:
-      accessible = new XULToolbarButtonAccessible(aContent, aDoc);
-      break;
-
-#endif // MOZ_XUL
-
-    default:
+  } else if (role.EqualsLiteral("xul:listcell")) {
+    // Only create cells if there's more than one per row.
+    nsIContent* listItem = aContent->GetParent();
+    if (!listItem)
       return nullptr;
+
+    for (nsIContent* child = listItem->GetFirstChild(); child;
+         child = child->GetNextSibling()) {
+      if (child->IsXUL(nsGkAtoms::listcell) && child != aContent) {
+        accessible = new XULListCellAccessibleWrap(aContent, aDoc);
+        break;
+      }
+    }
+
+  } else if (role.EqualsLiteral("xul:listhead")) {
+    accessible = new XULColumAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:listheader")) {
+    accessible = new XULColumnItemAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:listitem")) {
+    accessible = new XULListitemAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:menubar")) {
+    accessible = new XULMenubarAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:menulist")) {
+    accessible = new XULComboboxAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:menuitem")) {
+    accessible = new XULMenuitemAccessibleWrap(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:menupopup")) {
+#ifdef MOZ_ACCESSIBILITY_ATK
+    // ATK considers this node to be redundant when within menubars, and it makes menu
+    // navigation with assistive technologies more difficult
+    // XXX In the future we will should this for consistency across the nsIAccessible
+    // implementations on each platform for a consistent scripting environment, but
+    // then strip out redundant accessibles in the AccessibleWrap class for each platform.
+    nsIContent *parent = aContent->GetParent();
+    if (parent && parent->IsXUL() && parent->Tag() == nsGkAtoms::menu)
+      return nullptr;
+#endif
+
+    accessible = new XULMenupopupAccessible(aContent, aDoc);
+
+  } else if(role.EqualsLiteral("xul:menuseparator")) {
+    accessible = new XULMenuSeparatorAccessible(aContent, aDoc);
+
+  } else if(role.EqualsLiteral("xul:pane")) {
+    accessible = new EnumRoleAccessible(aContent, aDoc, roles::PANE);
+
+  } else if (role.EqualsLiteral("xul:panel")) {
+    if (aContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::noautofocus,
+                              nsGkAtoms::_true, eCaseMatters))
+      accessible = new XULAlertAccessible(aContent, aDoc);
+    else
+      accessible = new EnumRoleAccessible(aContent, aDoc, roles::PANE);
+
+  } else if (role.EqualsLiteral("xul:progressmeter")) {
+    accessible = new XULProgressMeterAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xulstatusbar")) {
+    accessible = new XULStatusBarAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:scale")) {
+    accessible = new XULSliderAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:radiobutton")) {
+    accessible = new XULRadioButtonAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:radiogroup")) {
+    accessible = new XULRadioGroupAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:tab")) {
+    accessible = new XULTabAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:tabs")) {
+    accessible = new XULTabsAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:text")) {
+    accessible = new XULLabelAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:textbox")) {
+    accessible = new EnumRoleAccessible(aContent, aDoc, roles::SECTION);
+
+  } else if (role.EqualsLiteral("xul:thumb")) {
+    accessible = new XULThumbAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:tree")) {
+    accessible = CreateAccessibleForXULTree(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:treecolumns")) {
+    accessible = new XULTreeColumAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:treecolumnitem")) {
+    accessible = new XULColumnItemAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:toolbar")) {
+    accessible = new XULToolbarAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:toolbarseparator")) {
+    accessible = new XULToolbarSeparatorAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:tooltip")) {
+    accessible = new XULTooltipAccessible(aContent, aDoc);
+
+  } else if (role.EqualsLiteral("xul:toolbarbutton")) {
+    accessible = new XULToolbarButtonAccessible(aContent, aDoc);
+
   }
+#endif // MOZ_XUL
 
   return accessible.forget();
 }
@@ -1431,17 +1436,29 @@ nsAccessibilityService::CreateHTMLAccessibleByMarkup(nsIFrame* aFrame,
 
   if (tag == nsGkAtoms::abbr ||
       tag == nsGkAtoms::acronym ||
+      tag == nsGkAtoms::article ||
+      tag == nsGkAtoms::aside ||
       tag == nsGkAtoms::blockquote ||
       tag == nsGkAtoms::form ||
+      tag == nsGkAtoms::footer ||
+      tag == nsGkAtoms::header ||
       tag == nsGkAtoms::h1 ||
       tag == nsGkAtoms::h2 ||
       tag == nsGkAtoms::h3 ||
       tag == nsGkAtoms::h4 ||
       tag == nsGkAtoms::h5 ||
       tag == nsGkAtoms::h6 ||
-      tag == nsGkAtoms::q) {
+      tag == nsGkAtoms::nav ||
+      tag == nsGkAtoms::q ||
+      tag == nsGkAtoms::section) {
     nsRefPtr<Accessible> accessible =
       new HyperTextAccessibleWrap(aContent, document);
+    return accessible.forget();
+  }
+
+  if (tag == nsGkAtoms::label) {
+    nsRefPtr<Accessible> accessible =
+      new HTMLLabelAccessible(aContent, document);
     return accessible.forget();
   }
 
@@ -1504,9 +1521,6 @@ nsAccessibilityService::CreateAccessibleByFrameType(nsIFrame* aFrame,
     case eHTMLImageMapType:
       newAcc = new HTMLImageMapAccessible(aContent, document);
       break;
-    case eHTMLLabelType:
-      newAcc = new HTMLLabelAccessible(aContent, document);
-      break;
     case eHTMLLiType:
       if (aContext->IsList() &&
           aContext->GetContent() == aContent->GetParent()) {
@@ -1525,6 +1539,9 @@ nsAccessibilityService::CreateAccessibleByFrameType(nsIFrame* aFrame,
     case eHTMLRangeType:
       newAcc = new HTMLRangeAccessible(aContent, document);
       break;
+    case eHTMLSpinnerType:
+      newAcc = new HTMLSpinnerAccessible(aContent, document);
+      break;
     case eHTMLTableType:
       newAcc = new HTMLTableAccessibleWrap(aContent, document);
       break;
@@ -1532,8 +1549,12 @@ nsAccessibilityService::CreateAccessibleByFrameType(nsIFrame* aFrame,
       // Accessible HTML table cell should be a child of accessible HTML table
       // or its row (CSS HTML tables are polite to the used markup at
       // certain degree).
+      // Otherwise create a generic text accessible to avoid text jamming
+      // when reading by AT.
       if (aContext->IsHTMLTableRow() || aContext->IsHTMLTable())
         newAcc = new HTMLTableCellAccessibleWrap(aContent, document);
+      else
+        newAcc = new HyperTextAccessibleWrap(aContent, document);
       break;
 
     case eHTMLTableRowType: {

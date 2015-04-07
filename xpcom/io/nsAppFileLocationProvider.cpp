@@ -17,10 +17,6 @@
 #if defined(MOZ_WIDGET_COCOA)
 #include <Carbon/Carbon.h>
 #include "nsILocalFileMac.h"
-#elif defined(XP_OS2)
-#define INCL_DOSPROCESS
-#define INCL_DOSMODULEMGR
-#include <os2.h>
 #elif defined(XP_WIN)
 #include <windows.h>
 #include <shlobj.h>
@@ -37,7 +33,7 @@
 #if defined(MOZ_WIDGET_COCOA)
 #define APP_REGISTRY_NAME NS_LITERAL_CSTRING("Application Registry")
 #define ESSENTIAL_FILES   NS_LITERAL_CSTRING("Essential Files")
-#elif defined(XP_WIN) || defined(XP_OS2)
+#elif defined(XP_WIN)
 #define APP_REGISTRY_NAME NS_LITERAL_CSTRING("registry.dat")
 #else
 #define APP_REGISTRY_NAME NS_LITERAL_CSTRING("appreg")
@@ -78,7 +74,7 @@ nsAppFileLocationProvider::nsAppFileLocationProvider()
 // nsAppFileLocationProvider::nsISupports
 //*****************************************************************************
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsAppFileLocationProvider, nsIDirectoryServiceProvider, nsIDirectoryServiceProvider2)
+NS_IMPL_ISUPPORTS(nsAppFileLocationProvider, nsIDirectoryServiceProvider, nsIDirectoryServiceProvider2)
 
 //*****************************************************************************
 // nsAppFileLocationProvider::nsIDirectoryServiceProvider
@@ -87,10 +83,12 @@ NS_IMPL_THREADSAFE_ISUPPORTS2(nsAppFileLocationProvider, nsIDirectoryServiceProv
 NS_IMETHODIMP
 nsAppFileLocationProvider::GetFile(const char *prop, bool *persistent, nsIFile **_retval)
 {
+    if (NS_WARN_IF(!prop))
+        return NS_ERROR_INVALID_ARG;
+
     nsCOMPtr<nsIFile>  localFile;
     nsresult rv = NS_ERROR_FAILURE;
 
-    NS_ENSURE_ARG(prop);
     *_retval = nullptr;
     *persistent = true;
 
@@ -250,7 +248,8 @@ nsAppFileLocationProvider::GetFile(const char *prop, bool *persistent, nsIFile *
 
 NS_METHOD nsAppFileLocationProvider::CloneMozBinDirectory(nsIFile **aLocalFile)
 {
-    NS_ENSURE_ARG_POINTER(aLocalFile);
+    if (NS_WARN_IF(!aLocalFile))
+        return NS_ERROR_INVALID_ARG;
     nsresult rv;
 
     if (!mMozBinDirectory)
@@ -291,7 +290,8 @@ NS_METHOD nsAppFileLocationProvider::CloneMozBinDirectory(nsIFile **aLocalFile)
 //----------------------------------------------------------------------------------------
 NS_METHOD nsAppFileLocationProvider::GetProductDirectory(nsIFile **aLocalFile, bool aLocal)
 {
-    NS_ENSURE_ARG_POINTER(aLocalFile);
+    if (NS_WARN_IF(!aLocalFile))
+        return NS_ERROR_INVALID_ARG;
 
     nsresult rv;
     bool exists;
@@ -306,12 +306,6 @@ NS_METHOD nsAppFileLocationProvider::GetProductDirectory(nsIFile **aLocalFile, b
     if (!localDir) return NS_ERROR_FAILURE;
     nsCOMPtr<nsILocalFileMac> localDirMac(do_QueryInterface(localDir));
     rv = localDirMac->InitWithFSRef(&fsRef);
-    if (NS_FAILED(rv)) return rv;
-#elif defined(XP_OS2)
-    nsCOMPtr<nsIProperties> directoryService = 
-             do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID, &rv);
-    if (NS_FAILED(rv)) return rv;
-    rv = directoryService->Get(NS_OS2_HOME_DIR, NS_GET_IID(nsIFile), getter_AddRefs(localDir));
     if (NS_FAILED(rv)) return rv;
 #elif defined(XP_WIN)
     nsCOMPtr<nsIProperties> directoryService = 
@@ -352,7 +346,8 @@ NS_METHOD nsAppFileLocationProvider::GetProductDirectory(nsIFile **aLocalFile, b
 //----------------------------------------------------------------------------------------
 NS_METHOD nsAppFileLocationProvider::GetDefaultUserProfileRoot(nsIFile **aLocalFile, bool aLocal)
 {
-    NS_ENSURE_ARG_POINTER(aLocalFile);
+    if (NS_WARN_IF(!aLocalFile))
+        return NS_ERROR_INVALID_ARG;
 
     nsresult rv;
     nsCOMPtr<nsIFile> localDir;
@@ -360,7 +355,7 @@ NS_METHOD nsAppFileLocationProvider::GetDefaultUserProfileRoot(nsIFile **aLocalF
     rv = GetProductDirectory(getter_AddRefs(localDir), aLocal);
     if (NS_FAILED(rv)) return rv;
 
-#if defined(MOZ_WIDGET_COCOA) || defined(XP_OS2) || defined(XP_WIN)
+#if defined(MOZ_WIDGET_COCOA) || defined(XP_WIN)
     // These 3 platforms share this part of the path - do them as one
     rv = localDir->AppendRelativeNativePath(NS_LITERAL_CSTRING("Profiles"));
     if (NS_FAILED(rv)) return rv;
@@ -416,7 +411,8 @@ class nsAppDirectoryEnumerator : public nsISimpleEnumerator
 
     NS_IMETHOD GetNext(nsISupports **result) 
     {
-        NS_ENSURE_ARG_POINTER(result);
+        if (NS_WARN_IF(!result))
+            return NS_ERROR_INVALID_ARG;
         *result = nullptr;
 
         bool hasMore;
@@ -444,12 +440,12 @@ class nsAppDirectoryEnumerator : public nsISimpleEnumerator
     nsCOMPtr<nsIFile> mNext;
 };
 
-NS_IMPL_ISUPPORTS1(nsAppDirectoryEnumerator, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS(nsAppDirectoryEnumerator, nsISimpleEnumerator)
 
 /* nsPathsDirectoryEnumerator and PATH_SEPARATOR
  * are not used on MacOS/X. */
 
-#if defined(XP_WIN) || defined(XP_OS2) /* Win32 and OS/2 */
+#if defined(XP_WIN) /* Win32 */
 #define PATH_SEPARATOR ';'
 #else
 #define PATH_SEPARATOR ':'
@@ -511,7 +507,8 @@ class nsPathsDirectoryEnumerator : public nsAppDirectoryEnumerator
 NS_IMETHODIMP
 nsAppFileLocationProvider::GetFiles(const char *prop, nsISimpleEnumerator **_retval)
 {
-    NS_ENSURE_ARG_POINTER(_retval);
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
     *_retval = nullptr;
     nsresult rv = NS_ERROR_FAILURE;
     

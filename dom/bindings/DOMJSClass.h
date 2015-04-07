@@ -6,53 +6,24 @@
 #ifndef mozilla_dom_DOMJSClass_h
 #define mozilla_dom_DOMJSClass_h
 
-#include "jsapi.h"
 #include "jsfriendapi.h"
 #include "mozilla/Assertions.h"
 
 #include "mozilla/dom/PrototypeList.h" // auto-generated
 
+#include "mozilla/dom/JSSlots.h"
+
 class nsCycleCollectionParticipant;
-
-// We use slot 0 for holding the raw object.  This is safe for both
-// globals and non-globals.
-#define DOM_OBJECT_SLOT 0
-
-// We use slot 1 for holding the expando object. This is not safe for globals
-// until bug 760095 is fixed, so that bug blocks converting Window to new
-// bindings.
-#define DOM_XRAY_EXPANDO_SLOT 1
-
-// We use slot 2 for holding either a JS::ObjectValue which points to the cached
-// SOW or JS::UndefinedValue if this class doesn't need SOWs. This is not safe
-// for globals until bug 760095 is fixed, so that bug blocks converting Window
-// to new bindings.
-#define DOM_OBJECT_SLOT_SOW 2
 
 // All DOM globals must have a slot at DOM_PROTOTYPE_SLOT.
 #define DOM_PROTOTYPE_SLOT JSCLASS_GLOBAL_SLOT_COUNT
 
+// Keep this count up to date with any extra global slots added above.
+#define DOM_GLOBAL_SLOTS 1
+
 // We use these flag bits for the new bindings.
 #define JSCLASS_DOM_GLOBAL JSCLASS_USERBIT1
 #define JSCLASS_IS_DOMIFACEANDPROTOJSCLASS JSCLASS_USERBIT2
-
-// NOTE: This is baked into the Ion JIT as 0 in codegen for LGetDOMProperty and
-// LSetDOMProperty. Those constants need to be changed accordingly if this value
-// changes.
-#define DOM_PROTO_INSTANCE_CLASS_SLOT 0
-
-// Interface objects store a number of reserved slots equal to
-// DOM_INTERFACE_SLOTS_BASE + number of named constructors.
-#define DOM_INTERFACE_SLOTS_BASE (DOM_XRAY_EXPANDO_SLOT + 1)
-
-// Interface prototype objects store a number of reserved slots equal to
-// DOM_INTERFACE_PROTO_SLOTS_BASE or DOM_INTERFACE_PROTO_SLOTS_BASE + 1 if a
-// slot for the unforgeable holder is needed.
-#define DOM_INTERFACE_PROTO_SLOTS_BASE (DOM_XRAY_EXPANDO_SLOT + 1)
-
-MOZ_STATIC_ASSERT(DOM_PROTO_INSTANCE_CLASS_SLOT != DOM_XRAY_EXPANDO_SLOT,
-                  "Interface prototype object use both of these, so they must "
-                  "not be the same slot.");
 
 namespace mozilla {
 namespace dom {
@@ -60,7 +31,7 @@ namespace dom {
 typedef bool
 (* ResolveOwnProperty)(JSContext* cx, JS::Handle<JSObject*> wrapper,
                        JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
-                       JSPropertyDescriptor* desc, unsigned flags);
+                       JS::MutableHandle<JSPropertyDescriptor> desc);
 
 typedef bool
 (* EnumerateOwnProperties)(JSContext* cx, JS::Handle<JSObject*> wrapper,
@@ -78,17 +49,36 @@ typedef bool (*PropertyEnabled)(JSContext* cx, JSObject* global);
 template<typename T>
 struct Prefable {
   inline bool isEnabled(JSContext* cx, JSObject* obj) const {
-    return enabled &&
-      (!enabledFunc ||
-       enabledFunc(cx, js::GetGlobalForObjectCrossCompartment(obj)));
+    if (!enabled) {
+      return false;
+    }
+    if (!enabledFunc && !availableFunc) {
+      return true;
+    }
+    // Just go ahead and root obj, in case enabledFunc GCs
+    JS::Rooted<JSObject*> rootedObj(cx, obj);
+    if (enabledFunc &&
+        !enabledFunc(cx, js::GetGlobalForObjectCrossCompartment(rootedObj))) {
+      return false;
+    }
+    if (availableFunc &&
+        !availableFunc(cx, js::GetGlobalForObjectCrossCompartment(rootedObj))) {
+      return false;
+    }
+    return true;
   }
 
   // A boolean indicating whether this set of specs is enabled
   bool enabled;
   // A function pointer to a function that can say the property is disabled
   // even if "enabled" is set to true.  If the pointer is null the value of
-  // "enabled" is used as-is.
+  // "enabled" is used as-is unless availableFunc overrides.
   PropertyEnabled enabledFunc;
+  // A function pointer to a function that can be used to disable a
+  // property even if "enabled" is true and enabledFunc allowed.  This
+  // is basically a hack to avoid having to codegen PropertyEnabled
+  // implementations in case when we need to do two separate checks.
+  PropertyEnabled availableFunc;
   // Array of specs, terminated in whatever way is customary for T.
   // Null to indicate a end-of-array for Prefable, when such an
   // indicator is needed.
@@ -197,27 +187,20 @@ struct DOMJSClass
   // It would be nice to just inherit from JSClass, but that precludes pure
   // compile-time initialization of the form |DOMJSClass = {...};|, since C++
   // only allows brace initialization for aggregate/POD types.
-  JSClass mBase;
+  const js::Class mBase;
 
-  DOMClass mClass;
+  const DOMClass mClass;
 
-  static DOMJSClass* FromJSClass(JSClass* base) {
-    MOZ_ASSERT(base->flags & JSCLASS_IS_DOMJSCLASS);
-    return reinterpret_cast<DOMJSClass*>(base);
-  }
   static const DOMJSClass* FromJSClass(const JSClass* base) {
     MOZ_ASSERT(base->flags & JSCLASS_IS_DOMJSCLASS);
     return reinterpret_cast<const DOMJSClass*>(base);
   }
 
-  static DOMJSClass* FromJSClass(js::Class* base) {
-    return FromJSClass(Jsvalify(base));
-  }
   static const DOMJSClass* FromJSClass(const js::Class* base) {
     return FromJSClass(Jsvalify(base));
   }
 
-  JSClass* ToJSClass() { return &mBase; }
+  const JSClass* ToJSClass() const { return Jsvalify(&mBase); }
 };
 
 // Special JSClass for DOM interface and interface prototype objects.
@@ -227,7 +210,7 @@ struct DOMIfaceAndProtoJSClass
   // compile-time initialization of the form
   // |DOMJSInterfaceAndPrototypeClass = {...};|, since C++ only allows brace
   // initialization for aggregate/POD types.
-  JSClass mBase;
+  const JSClass mBase;
 
   // Either eInterface or eInterfacePrototype
   DOMObjectType mType;
@@ -249,22 +232,24 @@ struct DOMIfaceAndProtoJSClass
     return FromJSClass(Jsvalify(base));
   }
 
-  JSClass* ToJSClass() { return &mBase; }
+  const JSClass* ToJSClass() const { return &mBase; }
 };
 
+class ProtoAndIfaceCache;
+
 inline bool
-HasProtoAndIfaceArray(JSObject* global)
+HasProtoAndIfaceCache(JSObject* global)
 {
   MOZ_ASSERT(js::GetObjectClass(global)->flags & JSCLASS_DOM_GLOBAL);
   // This can be undefined if we GC while creating the global
   return !js::GetReservedSlot(global, DOM_PROTOTYPE_SLOT).isUndefined();
 }
 
-inline JSObject**
-GetProtoAndIfaceArray(JSObject* global)
+inline ProtoAndIfaceCache*
+GetProtoAndIfaceCache(JSObject* global)
 {
   MOZ_ASSERT(js::GetObjectClass(global)->flags & JSCLASS_DOM_GLOBAL);
-  return static_cast<JSObject**>(
+  return static_cast<ProtoAndIfaceCache*>(
     js::GetReservedSlot(global, DOM_PROTOTYPE_SLOT).toPrivate());
 }
 

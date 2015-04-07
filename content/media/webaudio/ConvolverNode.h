@@ -9,7 +9,6 @@
 
 #include "AudioNode.h"
 #include "AudioBuffer.h"
-#include "PlayingRefChangeHandler.h"
 
 namespace mozilla {
 namespace dom {
@@ -22,8 +21,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ConvolverNode, AudioNode);
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   AudioBuffer* GetBuffer(JSContext* aCx) const
   {
@@ -39,25 +37,33 @@ public:
 
   void SetNormalize(bool aNormal);
 
-  virtual void NotifyInputConnected() MOZ_OVERRIDE
+  virtual void SetChannelCount(uint32_t aChannelCount, ErrorResult& aRv) MOZ_OVERRIDE
   {
-    mMediaStreamGraphUpdateIndexAtLastInputConnection =
-      mStream->Graph()->GetCurrentGraphUpdateIndex();
+    if (aChannelCount > 2) {
+      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+      return;
+    }
+    AudioNode::SetChannelCount(aChannelCount, aRv);
   }
-  bool AcceptPlayingRefRelease(int64_t aLastGraphUpdateIndexProcessed) const
+  virtual void SetChannelCountModeValue(ChannelCountMode aMode, ErrorResult& aRv) MOZ_OVERRIDE
   {
-    // Reject any requests to release mPlayingRef if the request was issued
-    // before the MediaStreamGraph was aware of the most-recently-added input
-    // connection.
-    return aLastGraphUpdateIndexProcessed >= mMediaStreamGraphUpdateIndexAtLastInputConnection;
+    if (aMode == ChannelCountMode::Max) {
+      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+      return;
+    }
+    AudioNode::SetChannelCountModeValue(aMode, aRv);
   }
+
+  virtual const char* NodeType() const
+  {
+    return "ConvolverNode";
+  }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
 
 private:
-  friend class PlayingRefChangeHandler<ConvolverNode>;
-
-  int64_t mMediaStreamGraphUpdateIndexAtLastInputConnection;
   nsRefPtr<AudioBuffer> mBuffer;
-  SelfReference<ConvolverNode> mPlayingRef;
   bool mNormalize;
 };
 

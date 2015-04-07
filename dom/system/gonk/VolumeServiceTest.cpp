@@ -89,12 +89,12 @@ public:
 };
 static nsCOMPtr<VolumeTestObserver>  sTestObserver;
 
-NS_IMPL_ISUPPORTS1(VolumeTestObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(VolumeTestObserver, nsIObserver)
 
 NS_IMETHODIMP
 VolumeTestObserver::Observe(nsISupports* aSubject,
                             const char* aTopic,
-                            const PRUnichar* aData)
+                            const char16_t* aData)
 {
   LOG("TestObserver: topic: %s", aTopic);
 
@@ -193,7 +193,7 @@ ShutdownVolumeServiceTest()
 {
 #if TEST_NSVOLUME_OBSERVER
   DBG("ShutdownVolumeServiceTestIOThread called");
-  sTestObserver = NULL;
+  sTestObserver = nullptr;
 #endif
 }
 

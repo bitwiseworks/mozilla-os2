@@ -15,7 +15,7 @@
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
 
-class nsIAccessibleTraversalRule;
+class RuleCache;
 
 /**
  * Class represents an accessible pivot.
@@ -73,6 +73,12 @@ private:
                              nsresult* aResult);
 
   /*
+   * Search in preorder for the first text accessible.
+   */
+  mozilla::a11y::HyperTextAccessible* SearchForText(Accessible* aAccessible,
+                                                    bool aBackward);
+
+  /*
    * Get the effective root for this pivot, either the true root or modal root.
    */
   Accessible* GetActiveRoot() const
@@ -89,6 +95,18 @@ private:
    * Update the pivot, and notify observers. Return true if it moved.
    */
   bool MovePivotInternal(Accessible* aPosition, PivotMoveReason aReason);
+
+  /*
+   * Get initial node we should start a search from with a given rule.
+   *
+   * When we do a move operation from one position to another,
+   * the initial position can be inside of a subtree that is ignored by
+   * the given rule. We need to step out of the ignored subtree and start
+   * the search from there.
+   *
+   */
+  Accessible* AdjustStartPosition(Accessible* aAccessible, RuleCache& aCache,
+                                  uint16_t* aFilterResult, nsresult* aResult);
 
   /*
    * The root accessible.

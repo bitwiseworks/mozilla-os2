@@ -16,6 +16,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
+#include "mozilla/NullPtr.h"
 
 using std::string;
 using std::istream;
@@ -34,8 +35,8 @@ string       gSettingsPath;
 int          gArgc;
 char**       gArgv;
 
-static auto_ptr<ofstream> gLogStream(NULL);
-static string             gDumpFile;
+static auto_ptr<ofstream> gLogStream(nullptr);
+static string             gReporterDumpFile;
 static string             gExtraFile;
 
 static string kExtraDataExtension = ".extra";
@@ -322,8 +323,8 @@ void DeleteDump()
 {
   const char* noDelete = getenv("MOZ_CRASHREPORTER_NO_DELETE_DUMP");
   if (!noDelete || *noDelete == '\0') {
-    if (!gDumpFile.empty())
-      UIDeleteFile(gDumpFile);
+    if (!gReporterDumpFile.empty())
+      UIDeleteFile(gReporterDumpFile);
     if (!gExtraFile.empty())
       UIDeleteFile(gExtraFile);
   }
@@ -336,7 +337,7 @@ void SendCompleted(bool success, const string& serverResponse)
       DeleteDump();
     }
     else {
-      string directory = gDumpFile;
+      string directory = gReporterDumpFile;
       int slashpos = directory.find_last_of("/\\");
       if (slashpos < 2)
         return;
@@ -445,14 +446,14 @@ int main(int argc, char** argv)
     return 0;
 
   if (argc > 1) {
-    gDumpFile = argv[1];
+    gReporterDumpFile = argv[1];
   }
 
-  if (gDumpFile.empty()) {
+  if (gReporterDumpFile.empty()) {
     // no dump file specified, run the default UI
     UIShowDefaultUI();
   } else {
-    gExtraFile = GetExtraDataFilename(gDumpFile);
+    gExtraFile = GetExtraDataFilename(gReporterDumpFile);
     if (gExtraFile.empty()) {
       UIError(gStrings[ST_ERROR_BADARGUMENTS]);
       return 0;
@@ -513,13 +514,13 @@ int main(int argc, char** argv)
 
     OpenLogFile();
 
-    if (!UIFileExists(gDumpFile)) {
+    if (!UIFileExists(gReporterDumpFile)) {
       UIError(gStrings[ST_ERROR_DUMPFILEEXISTS]);
       return 0;
     }
 
     string pendingDir = gSettingsPath + UI_DIR_SEPARATOR + "pending";
-    if (!MoveCrashData(pendingDir, gDumpFile, gExtraFile)) {
+    if (!MoveCrashData(pendingDir, gReporterDumpFile, gExtraFile)) {
       return 0;
     }
 
@@ -574,7 +575,7 @@ int main(int argc, char** argv)
        return 0;
      }
 
-    if (!UIShowCrashUI(gDumpFile, queryParameters, sendURL, restartArgs))
+    if (!UIShowCrashUI(gReporterDumpFile, queryParameters, sendURL, restartArgs))
       DeleteDump();
   }
 
@@ -594,13 +595,13 @@ int WINAPI wWinMain( HINSTANCE, HINSTANCE, LPWSTR args, int )
   {
     HKEY hkApp;
     RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\Applications", 0,
-                    NULL, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, NULL, &hkApp,
-                    NULL);
+                    nullptr, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr,
+                    &hkApp, nullptr);
     RegCloseKey(hkApp);
     if (RegCreateKeyExW(HKEY_CURRENT_USER,
                         L"Software\\Classes\\Applications\\crashreporter.exe",
-                        0, NULL, REG_OPTION_VOLATILE, KEY_SET_VALUE, NULL,
-                        &hkApp, NULL) == ERROR_SUCCESS) {
+                        0, nullptr, REG_OPTION_VOLATILE, KEY_SET_VALUE,
+                        nullptr, &hkApp, nullptr) == ERROR_SUCCESS) {
       RegSetValueExW(hkApp, L"IsHostApp", 0, REG_NONE, 0, 0);
       RegSetValueExW(hkApp, L"NoOpenWith", 0, REG_NONE, 0, 0);
       RegSetValueExW(hkApp, L"NoStartPage", 0, REG_NONE, 0, 0);

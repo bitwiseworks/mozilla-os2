@@ -13,13 +13,7 @@
 
 [Constructor]
 interface DocumentFragment : Node {
-  // NEW
-  /*
-    FIXME: not implemented yet
-
-  void prepend((Node or DOMString)... nodes);
-  void append((Node or DOMString)... nodes);
-  */
+  Element? getElementById(DOMString elementId);
 };
 
 // http://www.w3.org/TR/2012/WD-selectors-api-20120628/#interface-definitions
@@ -29,3 +23,5 @@ partial interface DocumentFragment {
   [Throws]
   NodeList  querySelectorAll(DOMString selectors);
 };
+
+DocumentFragment implements ParentNode;

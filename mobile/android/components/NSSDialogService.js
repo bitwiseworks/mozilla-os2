@@ -137,8 +137,8 @@ NSSDialogs.prototype = {
                           ["certmgr.certdetail.cn", aCert.issuerCommonName,
                            "certmgr.certdetail.o", aCert.issuerOrganization,
                            "certmgr.certdetail.ou", aCert.issuerOrganizationUnit])})
-     .addLabel({ label: this.certInfoSection("certmgr.validity.label",
-                          ["certmgr.issued", aCert.validity.notBeforeLocalDay,
+     .addLabel({ label: this.certInfoSection("certmgr.periodofvalidity.label",
+                          ["certmgr.begins", aCert.validity.notBeforeLocalDay,
                            "certmgr.expires", aCert.validity.notAfterLocalDay])})
      .addLabel({ label: this.certInfoSection("certmgr.fingerprints.label",
                           ["certmgr.certdetail.sha1fingerprint", aCert.sha1Fingerprint,
@@ -182,7 +182,7 @@ NSSDialogs.prototype = {
                                        this.getString("nssdialogs.cancel.label")
                                      ])
       .addLabel({ id: "requestedDetails", label: serverRequestedDetails } )
-      .addMenuList({
+      .addMenulist({
         id: "nicknames",
         label: this.getString("clientAuthAsk.message2"),
         values: certNickList, selected: selectedIndex

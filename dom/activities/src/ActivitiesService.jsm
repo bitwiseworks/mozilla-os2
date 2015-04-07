@@ -11,15 +11,19 @@ const Ci = Components.interfaces;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/IndexedDBHelper.jsm");
-Cu.import("resource://gre/modules/ActivitiesServiceFilter.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "ActivitiesServiceFilter",
+  "resource://gre/modules/ActivitiesServiceFilter.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
                                    "@mozilla.org/parentprocessmessagemanager;1",
                                    "nsIMessageBroadcaster");
 
-this.EXPORTED_SYMBOLS = [];
+XPCOMUtils.defineLazyServiceGetter(this, "NetUtil",
+                                   "@mozilla.org/network/util;1",
+                                   "nsINetUtil");
 
-let idbGlobal = this;
+this.EXPORTED_SYMBOLS = [];
 
 function debug(aMsg) {
   //dump("-- ActivitiesService.jsm " + Date.now() + " " + aMsg + "\n");
@@ -37,10 +41,7 @@ ActivitiesDb.prototype = {
   __proto__: IndexedDBHelper.prototype,
 
   init: function actdb_init() {
-    let idbManager = Cc["@mozilla.org/dom/indexeddb/manager;1"]
-                       .getService(Ci.nsIIndexedDatabaseManager);
-    idbManager.initWindowless(idbGlobal);
-    this.initDBHelper(DB_NAME, DB_VERSION, [STORE_NAME], idbGlobal);
+    this.initDBHelper(DB_NAME, DB_VERSION, [STORE_NAME]);
   },
 
   /**
@@ -152,12 +153,18 @@ let Activities = {
     // ActivityProxy.js
     "Activity:Start",
 
+    // ActivityWrapper.js
+    "Activity:Ready",
+
     // ActivityRequestHandler.js
     "Activity:PostResult",
     "Activity:PostError",
 
     "Activities:Register",
     "Activities:Unregister",
+    "Activities:GetContentTypes",
+
+    "child-process-shutdown"
   ],
 
   init: function activities_init() {
@@ -216,7 +223,7 @@ let Activities = {
         if (aChoice === -1) {
           Activities.callers[aMsg.id].mm.sendAsyncMessage("Activity:FireError", {
             "id": aMsg.id,
-            "error": "USER_ABORT"
+            "error": "ActivityCanceled"
           });
           delete Activities.callers[aMsg.id];
           return;
@@ -226,6 +233,7 @@ let Activities = {
                       .getService(Ci.nsISystemMessagesInternal);
         if (!sysmm) {
           // System message is not present, what should we do?
+          delete Activities.callers[aMsg.id];
           return;
         }
 
@@ -237,7 +245,11 @@ let Activities = {
             "target": result.description
           },
           Services.io.newURI(result.description.href, null, null),
-          Services.io.newURI(result.manifest, null, null));
+          Services.io.newURI(result.manifest, null, null),
+          {
+            "manifestURL": Activities.callers[aMsg.id].manifestURL,
+            "pageURL": Activities.callers[aMsg.id].pageURL
+          });
 
         if (!result.description.returnValue) {
           Activities.callers[aMsg.id].mm.sendAsyncMessage("Activity:FireSuccess", {
@@ -276,7 +288,8 @@ let Activities = {
     let obsData;
 
     if (aMessage.name == "Activity:PostResult" ||
-        aMessage.name == "Activity:PostError") {
+        aMessage.name == "Activity:PostError" ||
+        aMessage.name == "Activity:Ready") {
       caller = this.callers[msg.id];
       if (!caller) {
         debug("!! caller is null for msg.id=" + msg.id);
@@ -289,27 +302,38 @@ let Activities = {
 
     switch(aMessage.name) {
       case "Activity:Start":
-        this.callers[msg.id] = { mm: aMessage.target,
+        this.callers[msg.id] = { mm: mm,
                                  manifestURL: msg.manifestURL,
                                  pageURL: msg.pageURL };
         this.startActivity(msg);
         break;
 
+      case "Activity:Ready":
+        caller.childMM = mm;
+        break;
+
       case "Activity:PostResult":
         caller.mm.sendAsyncMessage("Activity:FireSuccess", msg);
-        Services.obs.notifyObservers(null, "activity-done", obsData);
         delete this.callers[msg.id];
         break;
       case "Activity:PostError":
         caller.mm.sendAsyncMessage("Activity:FireError", msg);
-        Services.obs.notifyObservers(null, "activity-done", obsData);
         delete this.callers[msg.id];
         break;
 
       case "Activities:Register":
+        let self = this;
         this.db.add(msg,
           function onSuccess(aEvent) {
             mm.sendAsyncMessage("Activities:Register:OK", null);
+            let res = [];
+            msg.forEach(function(aActivity) {
+              self.updateContentTypeList(aActivity, res);
+            });
+            if (res.length) {
+              ppmm.broadcastAsyncMessage("Activities:RegisterContentTypes",
+                                         { contentTypes: res });
+            }
           },
           function onError(aEvent) {
             msg.error = "REGISTER_ERROR";
@@ -318,8 +342,72 @@ let Activities = {
         break;
       case "Activities:Unregister":
         this.db.remove(msg);
+        let res = [];
+        msg.forEach(function(aActivity) {
+          this.updateContentTypeList(aActivity, res);
+        }, this);
+        if (res.length) {
+          ppmm.broadcastAsyncMessage("Activities:UnregisterContentTypes",
+                                     { contentTypes: res });
+        }
+        break;
+      case "Activities:GetContentTypes":
+        this.sendContentTypes(mm);
+        break;
+      case "child-process-shutdown":
+        for (let id in this.callers) {
+          if (this.callers[id].childMM == mm) {
+            this.callers[id].mm.sendAsyncMessage("Activity:FireError", {
+              "id": id,
+              "error": "ActivityCanceled"
+            });
+            delete this.callers[id];
+            break;
+          }
+        }
         break;
     }
+  },
+
+  updateContentTypeList: function updateContentTypeList(aActivity, aResult) {
+    // Bail out if this is not a "view" activity.
+    if (aActivity.name != "view") {
+      return;
+    }
+
+    let types = aActivity.description.filters.type;
+    if (typeof types == "string") {
+      types = [types];
+    }
+
+    // Check that this is a real content type and sanitize it.
+    types.forEach(function(aContentType) {
+      let hadCharset = { };
+      let charset = { };
+      let contentType =
+        NetUtil.parseContentType(aContentType, charset, hadCharset);
+      if (contentType) {
+        aResult.push(contentType);
+      }
+    });
+  },
+
+  sendContentTypes: function sendContentTypes(aMm) {
+    let res = [];
+    let self = this;
+    this.db.find({ options: { name: "view" } },
+      function() { // Success callback.
+        if (res.length) {
+          aMm.sendAsyncMessage("Activities:RegisterContentTypes",
+                               { contentTypes: res });
+        }
+      },
+      null, // Error callback.
+      function(aActivity) { // Matching callback.
+        self.updateContentTypeList(aActivity, res)
+        return false;
+      }
+    );
   }
 }
 

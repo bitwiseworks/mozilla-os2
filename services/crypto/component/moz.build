@@ -12,11 +12,10 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'services-crypto-component'
 
-MODULE = 'services-crypto'
-
-CPP_SOURCES += [
+SOURCES += [
     'nsSyncJPAKE.cpp',
 ]
 
-LIBRARY_NAME = 'services-crypto'
+FAIL_ON_WARNINGS = True
 
+FINAL_LIBRARY = 'xul'

@@ -7,21 +7,40 @@
 #ifndef nsHttp_h__
 #define nsHttp_h__
 
-#include "plstr.h"
+#include <stdint.h>
 #include "prtime.h"
-#include "nsISupportsUtils.h"
-#include "nsPromiseFlatString.h"
-#include "nsURLHelper.h"
-#include "netCore.h"
-#include "mozilla/Mutex.h"
+#include "nsString.h"
+#include "nsError.h"
 
 // http version codes
 #define NS_HTTP_VERSION_UNKNOWN  0
 #define NS_HTTP_VERSION_0_9      9
 #define NS_HTTP_VERSION_1_0     10
 #define NS_HTTP_VERSION_1_1     11
+#define NS_HTTP_VERSION_2_0     20
+
+namespace mozilla {
+
+class Mutex;
+
+namespace net {
+    enum {
+        SPDY_VERSION_2_REMOVED = 2,
+        SPDY_VERSION_3 = 3,
+        SPDY_VERSION_31 = 4,
+
+        // leave room for official versions. telem goes to 48
+        // 24 was a internal spdy/3.1
+        // 25 was spdy/4a2
+        // 26 was http/2-draft08 and http/2-draft07 (they were the same)
+        // 27 was also http/2-draft09
+        HTTP2_VERSION_DRAFT10 = 27
+    };
 
 typedef uint8_t nsHttpVersion;
+
+#define NS_HTTP2_DRAFT_VERSION HTTP2_VERSION_DRAFT10
+#define NS_HTTP2_DRAFT_TOKEN "h2-10"
 
 //-----------------------------------------------------------------------------
 // http connection capabilities
@@ -58,6 +77,10 @@ typedef uint8_t nsHttpVersion;
 // group is currently blocking on some resources
 #define NS_HTTP_LOAD_UNBLOCKED       (1<<8)
 
+// These flags allow a transaction to use TLS false start with
+// weaker security profiles based on past history
+#define NS_HTTP_ALLOW_RSA_FALSESTART (1<<9)
+
 //-----------------------------------------------------------------------------
 // some default values
 //-----------------------------------------------------------------------------
@@ -91,7 +114,7 @@ struct nsHttp
     // The mutex is valid any time the Atom Table is valid
     // This mutex is used in the unusual case that the network thread and
     // main thread might access the same data
-    static mozilla::Mutex *GetLock();
+    static Mutex *GetLock();
 
     // will dynamically add atoms to the table if they don't already exist
     static nsHttpAtom ResolveAtom(const char *);
@@ -138,14 +161,6 @@ struct nsHttp
     // Return whether the HTTP status code represents a permanent redirect
     static bool IsPermanentRedirect(uint32_t httpStatus);
 
-    // Return whether upon a redirect code of httpStatus for method, the
-    // request method should be rewritten to GET.
-    static bool ShouldRewriteRedirectToGET(uint32_t httpStatus, nsHttpAtom method);
-
-    // Return whether the specified method is safe as per RFC 2616,
-    // Section 9.1.1.
-    static bool IsSafeMethod(nsHttpAtom method);
-
     // Declare all atoms
     //
     // The atom names and values are stored in nsHttpAtomList.h and are brought
@@ -174,5 +189,8 @@ PRTimeToSeconds(PRTime t_usec)
 
 #define HTTP_LWS " \t"
 #define HTTP_HEADER_VALUE_SEPS HTTP_LWS ","
+
+} // namespace mozilla::net
+} // namespace mozilla
 
 #endif // nsHttp_h__

@@ -8,16 +8,89 @@
 #ifndef nsCSSRendering_h___
 #define nsCSSRendering_h___
 
-#include "nsStyleConsts.h"
 #include "gfxBlur.h"
 #include "gfxContext.h"
-#include "gfxImageSurface.h"
 #include "nsLayoutUtils.h"
+#include "nsStyleStruct.h"
+#include "nsIFrame.h"
 
-struct nsPoint;
 class nsStyleContext;
 class nsPresContext;
 class nsRenderingContext;
+
+namespace mozilla {
+
+namespace layers {
+class ImageContainer;
+}
+
+// A CSSSizeOrRatio represents a (possibly partially specified) size for use
+// in computing image sizes. Either or both of the width and height might be
+// given. A ratio of width to height may also be given. If we at least two
+// of these then we can compute a concrete size, that is a width and height.
+struct CSSSizeOrRatio
+{
+  CSSSizeOrRatio()
+    : mRatio(0, 0)
+    , mHasWidth(false)
+    , mHasHeight(false) {}
+
+  bool CanComputeConcreteSize() const
+  {
+    return mHasWidth + mHasHeight + HasRatio() >= 2;
+  }
+  bool IsConcrete() const { return mHasWidth && mHasHeight; }
+  bool HasRatio() const { return mRatio.width > 0 && mRatio.height > 0; }
+  bool IsEmpty() const
+  {
+    return (mHasWidth && mWidth <= 0) ||
+           (mHasHeight && mHeight <= 0) ||
+           mRatio.width <= 0 || mRatio.height <= 0; 
+  }
+
+  // CanComputeConcreteSize must return true when ComputeConcreteSize is
+  // called.
+  nsSize ComputeConcreteSize() const;
+
+  void SetWidth(nscoord aWidth)
+  {
+    mWidth = aWidth;
+    mHasWidth = true;
+    if (mHasHeight) {
+      mRatio = nsSize(mWidth, mHeight);
+    }
+  }
+  void SetHeight(nscoord aHeight)
+  {
+    mHeight = aHeight;
+    mHasHeight = true;
+    if (mHasWidth) {
+      mRatio = nsSize(mWidth, mHeight);
+    }
+  }
+  void SetSize(const nsSize& aSize)
+  {
+    mWidth = aSize.width;
+    mHeight = aSize.height;
+    mHasWidth = true;
+    mHasHeight = true;
+    mRatio = aSize;    
+  }
+  void SetRatio(const nsSize& aRatio)
+  {
+    MOZ_ASSERT(!mHasWidth || !mHasHeight,
+               "Probably shouldn't be setting a ratio if we have a concrete size");
+    mRatio = aRatio;
+  }
+
+  nsSize mRatio;
+  nscoord mWidth;
+  nscoord mHeight;
+  bool mHasWidth;
+  bool mHasHeight;
+};
+
+}
 
 /**
  * This is a small wrapper class to encapsulate image drawing that can draw an
@@ -25,7 +98,7 @@ class nsRenderingContext;
  * CSS gradient.
  *
  * @note Always call the member functions in the order of PrepareImage(),
- * ComputeSize(), and Draw().
+ * SetSize(), and Draw*().
  */
 class nsImageRenderer {
 public:
@@ -36,6 +109,12 @@ public:
     FLAG_SYNC_DECODE_IMAGES = 0x01,
     FLAG_PAINTING_TO_WINDOW = 0x02
   };
+  enum FitType
+  {
+    CONTAIN,
+    COVER
+  };
+
   nsImageRenderer(nsIFrame* aForFrame, const nsStyleImage* aImage, uint32_t aFlags);
   ~nsImageRenderer();
   /**
@@ -44,51 +123,108 @@ public:
    * draw.
    */
   bool PrepareImage();
+
   /**
-   * @return the image size in appunits when rendered, after accounting for the
-   * background positioning area, background-size, and the image's intrinsic
-   * dimensions (if any).
+   * The three Compute*Size functions correspond to the sizing algorthms and
+   * definitions from the CSS Image Values and Replaced Content spec. See
+   * http://dev.w3.org/csswg/css-images-3/#sizing .
    */
-  nsSize ComputeSize(const nsStyleBackground::Size& aLayerSize,
-                     const nsSize& aBgPositioningArea);
+   
+  /**
+   * Compute the intrinsic size of the image as defined in the CSS Image Values
+   * spec. The intrinsic size is the unscaled size which the image would ideally
+   * like to be in app units.
+   */
+  mozilla::CSSSizeOrRatio ComputeIntrinsicSize();
+
+  /**
+   * Compute the size of the rendered image using either the 'cover' or
+   * 'contain' constraints (aFitType).
+   * aIntrinsicRatio may be an invalid ratio, that is one or both of its
+   * dimensions can be less than or equal to zero.
+   */
+  static nsSize ComputeConstrainedSize(const nsSize& aConstrainingSize,
+                                       const nsSize& aIntrinsicRatio,
+                                       FitType aFitType);
+  /**
+   * Compute the size of the rendered image (the concrete size) where no cover/
+   * contain constraints are given. The 'default algorithm' from the CSS Image
+   * Values spec.
+   */
+  static nsSize ComputeConcreteSize(const mozilla::CSSSizeOrRatio& aSpecifiedSize,
+                                    const mozilla::CSSSizeOrRatio& aIntrinsicSize,
+                                    const nsSize& aDefaultSize);
+
+  /**
+   * Set this image's preferred size. This will be its intrinsic size where
+   * specified and the default size where it is not. Used as the unscaled size
+   * when rendering the image.
+   */
+  void SetPreferredSize(const mozilla::CSSSizeOrRatio& aIntrinsicSize,
+                        const nsSize& aDefaultSize);
+
   /**
    * Draws the image to the target rendering context.
-   * @see nsLayoutUtils::DrawImage() for other parameters
+   * aSrc is a rect on the source image which will be mapped to aDest.
+   * @see nsLayoutUtils::DrawImage() for other parameters.
    */
   void Draw(nsPresContext*       aPresContext,
-            nsRenderingContext& aRenderingContext,
-            const nsRect&        aDest,
+            nsRenderingContext&  aRenderingContext,
+            const nsRect&        aDirtyRect,
             const nsRect&        aFill,
-            const nsPoint&       aAnchor,
-            const nsRect&        aDirty);
+            const nsRect&        aDest,
+            const mozilla::CSSIntRect& aSrc);
+  /**
+   * Draws the image to the target rendering context using background-specific
+   * arguments.
+   * @see nsLayoutUtils::DrawImage() for parameters.
+   */
+  void DrawBackground(nsPresContext*       aPresContext,
+                      nsRenderingContext&  aRenderingContext,
+                      const nsRect&        aDest,
+                      const nsRect&        aFill,
+                      const nsPoint&       aAnchor,
+                      const nsRect&        aDirty);
+
+  /**
+   * Draw the image to a single component of a border-image style rendering.
+   * aFill The destination rect to be drawn into
+   * aSrc is the part of the image to be rendered into a tile (aUnitSize in
+   * aFill), if aSrc and the dest tile are different sizes, the image will be
+   * scaled to map aSrc onto the dest tile.
+   * aHFill and aVFill are the repeat patterns for the component -
+   * NS_STYLE_BORDER_IMAGE_REPEAT_*
+   * aUnitSize The scaled size of a single source rect (in destination coords)
+   * aIndex identifies the component: 0 1 2
+   *                                  3 4 5
+   *                                  6 7 8
+   */
+  void
+  DrawBorderImageComponent(nsPresContext*       aPresContext,
+                           nsRenderingContext&  aRenderingContext,
+                           const nsRect&        aDirtyRect,
+                           const nsRect&        aFill,
+                           const mozilla::CSSIntRect& aSrc,
+                           uint8_t              aHFill,
+                           uint8_t              aVFill,
+                           const nsSize&        aUnitSize,
+                           uint8_t              aIndex);
 
   bool IsRasterImage();
   bool IsAnimatedImage();
   already_AddRefed<ImageContainer> GetContainer(LayerManager* aManager);
 
-private:
-  /*
-   * Compute the "unscaled" dimensions of the image in aUnscaled{Width,Height}
-   * and aRatio.  Whether the image has a height and width are indicated by
-   * aHaveWidth and aHaveHeight.  If the image doesn't have a ratio, aRatio will
-   * be (0, 0).
-   */
-  void ComputeUnscaledDimensions(const nsSize& aBgPositioningArea,
-                                 nscoord& aUnscaledWidth, bool& aHaveWidth,
-                                 nscoord& aUnscaledHeight, bool& aHaveHeight,
-                                 nsSize& aRatio);
+  bool IsReady() { return mIsReady; }
 
-  /*
-   * Using the previously-computed unscaled width and height (if each are
-   * valid, as indicated by aHaveWidth/aHaveHeight), compute the size at which
-   * the image should actually render.
+private:
+  /**
+   * Helper method for creating a gfxDrawable from mPaintServerFrame or 
+   * mImageElementSurface.
+   * Requires mType is eStyleImageType_Element.
+   * Returns null if we cannot create the drawable.
    */
-  nsSize
-  ComputeDrawnSize(const nsStyleBackground::Size& aLayerSize,
-                   const nsSize& aBgPositioningArea,
-                   nscoord aUnscaledWidth, bool aHaveWidth,
-                   nscoord aUnscaledHeight, bool aHaveHeight,
-                   const nsSize& aIntrinsicRatio);
+  already_AddRefed<gfxDrawable> DrawableForElement(const nsRect& aImageRect,
+                                                   nsRenderingContext&  aRenderingContext);
 
   nsIFrame*                 mForFrame;
   const nsStyleImage*       mImage;
@@ -112,7 +248,7 @@ struct nsBackgroundLayerState {
    * @param aFlags some combination of nsCSSRendering::PAINTBG_* flags
    */
   nsBackgroundLayerState(nsIFrame* aForFrame, const nsStyleImage* aImage, uint32_t aFlags)
-    : mImageRenderer(aForFrame, aImage, aFlags) {}
+    : mImageRenderer(aForFrame, aImage, aFlags), mCompositingOp(gfxContext::OPERATOR_OVER) {}
 
   /**
    * The nsImageRenderer that will be used to draw the background.
@@ -136,6 +272,10 @@ struct nsBackgroundLayerState {
    * PrepareBackgroundLayer.
    */
   nsPoint mAnchor;
+  /**
+   * The compositing operation that the image should use
+   */
+  gfxContext::GraphicsOperator mCompositingOp;
 };
 
 struct nsCSSRendering {
@@ -159,7 +299,8 @@ struct nsCSSRendering {
                                   nsRenderingContext& aRenderingContext,
                                   nsIFrame* aForFrame,
                                   const nsRect& aFrameArea,
-                                  const nsRect& aDirtyRect);
+                                  const nsRect& aDirtyRect,
+                                  float aOpacity = 1.0);
 
   static void ComputePixelRadii(const nscoord *aAppUnitsRadii,
                                 nscoord aAppUnitsPerPixel,
@@ -217,13 +358,22 @@ struct nsCSSRendering {
 
   /**
    * Render a gradient for an element.
+   * aDest is the rect for a single tile of the gradient on the destination.
+   * aFill is the rect on the destination to be covered by repeated tiling of
+   * the gradient.
+   * aSrc is the part of the gradient to be rendered into a tile (aDest), if
+   * aSrc and aDest are different sizes, the image will be scaled to map aSrc
+   * onto aDest.
+   * aIntrinsicSize is the size of the source gradient.
    */
   static void PaintGradient(nsPresContext* aPresContext,
                             nsRenderingContext& aRenderingContext,
                             nsStyleGradient* aGradient,
                             const nsRect& aDirtyRect,
-                            const nsRect& aOneCellArea,
-                            const nsRect& aFillArea);
+                            const nsRect& aDest,
+                            const nsRect& aFill,
+                            const mozilla::CSSIntRect& aSrc,
+                            const nsSize& aIntrinsiceSize);
 
   /**
    * Find the frame whose background style should be used to draw the
@@ -397,6 +547,18 @@ struct nsCSSRendering {
                                        uint32_t aFlags);
 
   /**
+   * Checks if image in layer aLayer of aBackground is currently decoded.
+   */
+  static bool IsBackgroundImageDecodedForStyleContextAndLayer(
+    const nsStyleBackground *aBackground, uint32_t aLayer);
+
+  /**
+   * Checks if all images that are part of the background for aFrame are
+   * currently decoded.
+   */
+  static bool AreAllBackgroundImagesDecodedForFrame(nsIFrame* aFrame);
+
+  /**
    * Called when we start creating a display list. The frame tree will not
    * change until a matching EndFrameTreeLocked is called.
    */
@@ -534,6 +696,30 @@ struct nsCSSRendering {
                                       const uint8_t aStyle,
                                       const gfxFloat aDescentLimit = -1.0);
 
+  static gfxContext::GraphicsOperator GetGFXBlendMode(uint8_t mBlendMode) {
+    switch (mBlendMode) {
+      case NS_STYLE_BLEND_NORMAL:      return gfxContext::OPERATOR_OVER;
+      case NS_STYLE_BLEND_MULTIPLY:    return gfxContext::OPERATOR_MULTIPLY;
+      case NS_STYLE_BLEND_SCREEN:      return gfxContext::OPERATOR_SCREEN;
+      case NS_STYLE_BLEND_OVERLAY:     return gfxContext::OPERATOR_OVERLAY;
+      case NS_STYLE_BLEND_DARKEN:      return gfxContext::OPERATOR_DARKEN;
+      case NS_STYLE_BLEND_LIGHTEN:     return gfxContext::OPERATOR_LIGHTEN;
+      case NS_STYLE_BLEND_COLOR_DODGE: return gfxContext::OPERATOR_COLOR_DODGE;
+      case NS_STYLE_BLEND_COLOR_BURN:  return gfxContext::OPERATOR_COLOR_BURN;
+      case NS_STYLE_BLEND_HARD_LIGHT:  return gfxContext::OPERATOR_HARD_LIGHT;
+      case NS_STYLE_BLEND_SOFT_LIGHT:  return gfxContext::OPERATOR_SOFT_LIGHT;
+      case NS_STYLE_BLEND_DIFFERENCE:  return gfxContext::OPERATOR_DIFFERENCE;
+      case NS_STYLE_BLEND_EXCLUSION:   return gfxContext::OPERATOR_EXCLUSION;
+      case NS_STYLE_BLEND_HUE:         return gfxContext::OPERATOR_HUE;
+      case NS_STYLE_BLEND_SATURATION:  return gfxContext::OPERATOR_SATURATION;
+      case NS_STYLE_BLEND_COLOR:       return gfxContext::OPERATOR_COLOR;
+      case NS_STYLE_BLEND_LUMINOSITY:  return gfxContext::OPERATOR_LUMINOSITY;
+      default:                         MOZ_ASSERT(false); return gfxContext::OPERATOR_OVER;
+    }
+
+    return gfxContext::OPERATOR_OVER;
+  }
+
 protected:
   static gfxRect GetTextDecorationRectInternal(const gfxPoint& aPt,
                                                const gfxSize& aLineSize,
@@ -643,13 +829,6 @@ public:
                    uint32_t aFlags = 0);
 
   /**
-   * Does the actual blurring/spreading. Users of this object *must*
-   * have called Init() first, then have drawn whatever they want to be
-   * blurred onto the internal gfxContext before calling this.
-   */
-  void DoEffects();
-  
-  /**
    * Does the actual blurring and mask applying. Users of this object *must*
    * have called Init() first, then have drawn whatever they want to be
    * blurred onto the internal gfxContext before calling this.
@@ -671,6 +850,36 @@ public:
    */
   static nsMargin GetBlurRadiusMargin(nscoord aBlurRadius,
                                       int32_t aAppUnitsPerDevPixel);
+
+  /**
+   * Blurs a coloured rectangle onto aDestinationCtx. This is equivalent
+   * to calling Init(), drawing a rectangle onto the returned surface
+   * and then calling DoPaint, but may let us optimize better in the
+   * backend.
+   *
+   * @param aDestinationCtx      The destination to blur to.
+   * @param aRect                The rectangle to blur in app units.
+   * @param aAppUnitsPerDevPixel The number of app units in a device pixel,
+   *                             for conversion.  Most of the time you'll
+   *                             pass this from the current PresContext if
+   *                             available.
+   * @param aCornerRadii         Corner radii for aRect, if it is a rounded
+   *                             rectangle.
+   * @param aBlurRadius          The blur radius in app units.
+   * @param aShadowColor         The color to draw the blurred shadow.
+   * @param aDirtyRect           The absolute dirty rect in app units. Used to
+   *                             optimize the temporary surface size and speed up blur.
+   * @param aSkipRect            An area in device pixels (NOT app units!) to avoid
+   *                             blurring over, to prevent unnecessary work.
+   */
+  static void BlurRectangle(gfxContext* aDestinationCtx,
+                            const nsRect& aRect,
+                            int32_t aAppUnitsPerDevPixel,
+                            gfxCornerSizes* aCornerRadii,
+                            nscoord aBlurRadius,
+                            const gfxRGBA& aShadowColor,
+                            const nsRect& aDirtyRect,
+                            const gfxRect& aSkipRect);
 
 protected:
   gfxAlphaBoxBlur blur;

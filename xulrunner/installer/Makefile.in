@@ -2,13 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 STANDALONE_MAKEFILE := 1
 
 NO_PKG_FILES = \
@@ -17,11 +10,12 @@ NO_PKG_FILES = \
 	regxpcom* \
 	$(NULL)
 
-# We want xpcshell and run-mozilla in the SDK but not in the binary package.
+# We want xpcshell, run-mozilla and install_app.py in the SDK but not in the binary package.
 ifndef STAGE_SDK
 NO_PKG_FILES += \
 	xpcshell* \
 	run-mozilla* \
+	install_app.py \
 	$(NULL)
 endif
 
@@ -37,9 +31,6 @@ endif
 include $(topsrcdir)/config/rules.mk
 
 INSTALL_SDK = 1
-ifndef MOZ_PLATFORM_MAEMO
-GENERATE_CACHE = 1
-endif
 
 include $(topsrcdir)/toolkit/mozapps/installer/signing.mk
 include $(topsrcdir)/toolkit/mozapps/installer/packager.mk
@@ -104,7 +95,6 @@ GARBAGE += debian/changelog
 
 DEBDESTDIR=debian/$(MOZ_BUILD_APP)
 
-GRE_MILESTONE = $(shell $(PYTHON) $(topsrcdir)/config/printconfigsetting.py $(LIBXUL_DIST)/bin/platform.ini Build Milestone)
 GRE_BUILDID = $(shell $(PYTHON) $(topsrcdir)/config/printconfigsetting.py $(LIBXUL_DIST)/bin/platform.ini Build BuildID)
 MOZ_DEB_TIMESTAMP = "$(shell date  +"%a, %d  %b %Y %T %z" )"
 
@@ -118,25 +108,24 @@ DEFINES += \
 
 ifeq ($(OS_TARGET),Linux)
 debian/changelog: $(srcdir)/debian/changelog.in  $(LIBXUL_DIST)/bin/platform.ini
-	mkdir -p debian
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
-        $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $^ > $@
+	$(call py_action,preprocessor, \
+        $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $^ -o $@)
 
 debian/xulrunner.links: $(srcdir)/debian/xulrunner.links.in
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
-        $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $^ > $@
+	$(call py_action,preprocessor, \
+        $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $^ -o $@)
 
 debian/xulrunner.service: $(srcdir)/debian/xulrunner.service.in
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
-        $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $^ > $@
+	$(call py_action,preprocessor, \
+        $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $^ -o $@)
 
 debian/prerm: $(srcdir)/debian/prerm.in
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
-        $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $^ > $@
+	$(call py_action,preprocessor, \
+        $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $^ -o $@)
 
 debian/postinst: $(srcdir)/debian/postinst.in
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
-        $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $^ > $@
+	$(call py_action,preprocessor, \
+        $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $^ -o $@)
 
 package:
 	$(MAKE) package -C $(DEPTH)

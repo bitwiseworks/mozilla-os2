@@ -3,24 +3,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
 CC_WRAPPER =
 CXX_WRAPPER =
 
-ifdef MOZ_FOLD_LIBS
-# TODO: The library name can be changed when bug 845217 is fixed.
-LIBRARY_NAME = nss3
-FORCE_SHARED_LIB = 1
-endif
-
 default::
 
-include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/config/makefiles/functions.mk
 
 NSS_LIBS = \
   nss3 \
@@ -46,7 +34,7 @@ endif
 
 SDK_LIBS = crmf
 
-ifneq (,$(filter OS2 WINNT,$(OS_ARCH)))
+ifneq (,$(filter WINNT,$(OS_ARCH)))
 SDK_LIBS += $(NSS_DLLS)
 endif
 
@@ -95,7 +83,7 @@ NSS_EXTRA_DLLS += freebl_64int_3
 NSS_EXTRA_DLLS += freebl_64fpu_3
 endif
 
-ABS_DIST := $(call core_abspath,$(DIST))
+ABS_DIST := $(abspath $(DIST))
 ifeq ($(HOST_OS_ARCH),WINNT)
 ifdef CYGDRIVE_MOUNT
 ABS_DIST := $(shell cygpath -w $(ABS_DIST) | sed -e 's|\\|/|g')
@@ -128,7 +116,7 @@ endif
 export MOZ_DEBUG_SYMBOLS
 
 DEFAULT_GMAKE_FLAGS =
-DEFAULT_GMAKE_FLAGS += CC="$(CC)"
+DEFAULT_GMAKE_FLAGS += CC='$(CC)'
 DEFAULT_GMAKE_FLAGS += SOURCE_MD_DIR=$(ABS_DIST)
 DEFAULT_GMAKE_FLAGS += SOURCE_MDHEADERS_DIR=$(NSPR_INCLUDE_DIR)
 DEFAULT_GMAKE_FLAGS += DIST=$(ABS_DIST)
@@ -137,12 +125,8 @@ DEFAULT_GMAKE_FLAGS += NSPR_LIB_DIR=$(NSPR_LIB_DIR)
 DEFAULT_GMAKE_FLAGS += MOZILLA_CLIENT=1
 DEFAULT_GMAKE_FLAGS += NO_MDUPDATE=1
 DEFAULT_GMAKE_FLAGS += NSS_ENABLE_ECC=1
-DEFAULT_GMAKE_FLAGS += NSINSTALL="$(NSINSTALL)"
-ifeq ($(OS_ARCH),WINNT)
-DEFAULT_GMAKE_FLAGS += INSTALL="$(NSINSTALL) -t"
-endif
 ifeq ($(OS_ARCH)_$(GNU_CC),WINNT_1)
-DEFAULT_GMAKE_FLAGS += OS_DLLFLAGS="-static-libgcc"
+DEFAULT_GMAKE_FLAGS += OS_DLLFLAGS='-static-libgcc'
 endif
 ifndef MOZ_NATIVE_SQLITE
 ifdef MOZ_FOLD_LIBS
@@ -155,14 +139,11 @@ endif
 ifdef NSS_DISABLE_DBM 
 DEFAULT_GMAKE_FLAGS += NSS_DISABLE_DBM=1
 endif
-ABS_topsrcdir   := $(shell cd $(topsrcdir); pwd)
-ifeq ($(HOST_OS_ARCH),WINNT)
-ifdef .PYMAKE
-ABS_topsrcdir   := $(shell cd $(topsrcdir); pwd -W)
-endif
-endif
 # Hack to force NSS build system to use "normal" object directories
-DEFAULT_GMAKE_FLAGS += BUILD='$(MOZ_BUILD_ROOT)/security/$$(subst $(ABS_topsrcdir)/security/,,$$(CURDIR))'
+DEFAULT_GMAKE_FLAGS += topsrcdir='$(topsrcdir)'
+# topsrcdir can't be expanded here because msys path mangling likes to break
+# paths in that case.
+DEFAULT_GMAKE_FLAGS += BUILD='$(MOZ_BUILD_ROOT)/security/$$(subst $$(topsrcdir)/security/,,$$(CURDIR))'
 DEFAULT_GMAKE_FLAGS += BUILD_TREE='$$(BUILD)' OBJDIR='$$(BUILD)' DEPENDENCIES='$$(BUILD)/.deps' SINGLE_SHLIB_DIR='$$(BUILD)'
 DEFAULT_GMAKE_FLAGS += SOURCE_XP_DIR=$(ABS_DIST)
 ifndef MOZ_DEBUG
@@ -189,11 +170,6 @@ DEFAULT_GMAKE_FLAGS += USE_DEBUG_RTL=1
 endif
 endif
 endif # WINNT
-ifeq ($(OS_ARCH),OS2)
-ifdef MOZ_OS2_HIGH_MEMORY
-DEFAULT_GMAKE_FLAGS += MOZ_OS2_HIGH_MEMORY=1
-endif
-endif # OS2
 ifeq ($(OS_ARCH),Darwin)
 # Make nsinstall use absolute symlinks by default when building NSS
 # for Mozilla on Mac OS X. (Bugzilla bug 193164)
@@ -219,35 +195,34 @@ DEFAULT_GMAKE_FLAGS += CHECKLOC=
 ifdef CROSS_COMPILE
 
 DEFAULT_GMAKE_FLAGS += \
-	NATIVE_CC="$(HOST_CC)" \
-	CC="$(CC)" \
-	CCC="$(CXX)" \
-	LINK="$(LD)" \
-	AS="$(AS)" \
+	NATIVE_CC='$(HOST_CC)' \
+	CC='$(CC)' \
+	CCC='$(CXX)' \
+	LINK='$(LD)' \
+	AS='$(AS)' \
 	AR='$(AR) $(AR_FLAGS:$@=$$@)' \
-	RANLIB="$(RANLIB)" \
-	RC="$(RC) $(RCFLAGS)" \
-	OS_ARCH="$(OS_ARCH)" \
-	OS_TEST="$(OS_TEST)" \
-	CPU_ARCH="$(TARGET_CPU)" \
+	RANLIB='$(RANLIB)' \
+	RC='$(RC) $(RCFLAGS)' \
+	OS_ARCH='$(OS_ARCH)' \
+	OS_TEST='$(OS_TEST)' \
+	CPU_ARCH='$(TARGET_CPU)' \
 	$(NULL)
 
 # Android has pthreads integrated into -lc, so OS_PTHREAD is set to nothing
 ifeq ($(OS_TARGET), Android)
 DEFAULT_GMAKE_FLAGS += \
-	OS_RELEASE="2.6" \
+	OS_RELEASE='2.6' \
 	OS_PTHREAD= \
-	STANDARDS_CFLAGS="-std=gnu89" \
 	$(NULL)
 
-DEFAULT_GMAKE_FLAGS += ARCHFLAG="$(CFLAGS) -DCHECK_FORK_GETPID -DRTLD_NOLOAD=0 -include $(ABS_topsrcdir)/security/manager/android_stub.h"
+DEFAULT_GMAKE_FLAGS += ARCHFLAG='$(CFLAGS) -DCHECK_FORK_GETPID -DRTLD_NOLOAD=0 -include $(topsrcdir)/security/manager/android_stub.h'
 endif
 endif
 
 ifdef WRAP_LDFLAGS
 DEFAULT_GMAKE_FLAGS += \
-	LDFLAGS="$(LDFLAGS) $(WRAP_LDFLAGS)" \
-	DSO_LDOPTS="$(DSO_LDOPTS) $(LDFLAGS) $(WRAP_LDFLAGS)" \
+	LDFLAGS='$(LDFLAGS) $(WRAP_LDFLAGS)' \
+	DSO_LDOPTS='$(DSO_LDOPTS) $(LDFLAGS) $(WRAP_LDFLAGS)' \
 	$(NULL)
 endif
 
@@ -260,8 +235,8 @@ ifdef MOZ_NO_WLZDEFS
 DEFAULT_GMAKE_FLAGS += ZDEFS_FLAG=
 endif
 ifdef MOZ_CFLAGS_NSS
-DEFAULT_GMAKE_FLAGS += XCFLAGS="$(CFLAGS)"
-DEFAULT_GMAKE_FLAGS += DARWIN_DYLIB_VERSIONS="-compatibility_version 1 -current_version 1 $(LDFLAGS)"
+DEFAULT_GMAKE_FLAGS += XCFLAGS='$(CFLAGS)'
+DEFAULT_GMAKE_FLAGS += DARWIN_DYLIB_VERSIONS='-compatibility_version 1 -current_version 1 $(LDFLAGS)'
 endif
 
 DEFAULT_GMAKE_FLAGS += NSS_NO_PKCS11_BYPASS=1
@@ -298,7 +273,7 @@ export::
 	cp -Rp $(topsrcdir)/security/coreconf $(NSS_SRCDIR)/security
 	cp -Rp $(topsrcdir)/security/dbm $(NSS_SRCDIR)/security
 	cp -Rp $(topsrcdir)/dbm $(NSS_SRCDIR)
-	(cd $(NSS_SRCDIR) && patch -p1 < $(call core_abspath,$(MOZ_NSS_PATCH)))
+	(cd $(NSS_SRCDIR) && patch -p1 < $(abspath $(MOZ_NSS_PATCH)))
 else
 NSS_SRCDIR = $(topsrcdir)
 endif
@@ -332,7 +307,9 @@ ifdef MOZ_FOLD_LIBS
 # TODO: The following can be replaced by something simpler when bug 844880
 # is fixed.
 # All static libraries required for nss, smime, ssl and nssutil.
-NSS_STATIC_LIBS := $(shell $(MAKE) --no-print-directory -f $(srcdir)/nss.mk DEPTH="$(DEPTH)" topsrcdir="$(topsrcdir)" srcdir="$(srcdir)" echo-variable-libs)
+# The strip is needed to remove potential linefeed characters, since they hang
+# around in some cases on Windows.
+NSS_STATIC_LIBS := $(strip $(shell $(MAKE) --no-print-directory -f $(srcdir)/nss.mk DEPTH='$(DEPTH)' topsrcdir='$(topsrcdir)' srcdir='$(srcdir)' echo-variable-libs))
 # Corresponding build directories
 NSS_STATIC_DIRS := $(foreach lib,$(NSS_STATIC_LIBS),$(patsubst %/,%,$(dir $(lib))))
 NSS_DIRS += $(NSS_STATIC_DIRS)
@@ -385,7 +362,6 @@ ifeq (WINNT,$(OS_TARGET))
 # Create a .def file based on the various .def files for nss, smime, ssl and
 # nssutil.
 NSS_STATIC_LIBS_DEFS := $(wildcard $(addprefix $(srcdir)/../,$(NSS_STATIC_LIBS:.$(LIB_SUFFIX)=.def)))
-DEFFILE = nss3.def
 
 nss3.def: $(NSS_STATIC_LIBS_DEFS) $(DEPTH)/db/sqlite3/src/sqlite-processed.def
 	echo LIBRARY nss3$(DLL_SUFFIX) > $@.tmp
@@ -394,15 +370,20 @@ nss3.def: $(NSS_STATIC_LIBS_DEFS) $(DEPTH)/db/sqlite3/src/sqlite-processed.def
 	mv $@.tmp $@
 endif
 
-# Force the linker to include everything from the static libraries.
-EXPAND_LIBS_EXEC += --extract
+ifneq (,$(filter WINNT,$(OS_ARCH)))
+SDK_LIBRARY = $(IMPORT_LIBRARY)
 else
-$(NSS_DIST_DLL_FILES) $(NSS_SDK_LIB_FILES): libs-nss/lib
+SDK_LIBRARY = $(SHARED_LIBRARY)
+endif
+
 endif # MOZ_FOLD_LIBS
 
 include $(topsrcdir)/config/rules.mk
 
 ifdef MOZ_FOLD_LIBS
+# Force the linker to include everything from the static libraries.
+EXPAND_LIBS_EXEC += --extract
+
 $(SHARED_LIBRARY): $(SHARED_LIBRARY_LIBS)
 
 EXTRA_DSO_LDOPTS += $(REALTIME_LIBS)
@@ -455,8 +436,20 @@ libs-nss/lib/freebl: $(DIST)/lib/$(IMPORT_PREFIX)nssutil3$(IMPORT_SUFFIX) $(NSPR
 # For each directory where we build static libraries, force the NSS build system
 # to only build static libraries.
 $(addprefix libs-,$(NSS_STATIC_DIRS)): DEFAULT_GMAKE_FLAGS += SHARED_LIBRARY= IMPORT_LIBRARY=
+else
+$(NSS_DIST_DLL_FILES) $(NSS_SDK_LIB_FILES): libs-nss/lib
 endif # MOZ_FOLD_LIBS
 
+ifeq ($(NSINSTALL_PY),$(NSINSTALL))
+DEFAULT_GMAKE_FLAGS += PYTHON='$(PYTHON)'
+DEFAULT_GMAKE_FLAGS += NSINSTALL_PY='$(abspath $(topsrcdir)/config/nsinstall.py)'
+DEFAULT_GMAKE_FLAGS += NSINSTALL='$$(PYTHON) $$(NSINSTALL_PY)'
+else
+DEFAULT_GMAKE_FLAGS += NSINSTALL='$(NSINSTALL)'
+endif
+ifeq ($(OS_ARCH),WINNT)
+DEFAULT_GMAKE_FLAGS += INSTALL='$$(NSINSTALL) -t'
+endif
 DEFAULT_GMAKE_FLAGS += $(EXTRA_GMAKE_FLAGS)
 
 $(addprefix libs-,$(NSS_DIRS)): libs-%:

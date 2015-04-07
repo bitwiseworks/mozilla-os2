@@ -18,7 +18,8 @@ XPCOMUtils.defineLazyGetter(this, "BROWSER_NEW_TAB_URL", function () {
           !PrivateBrowsingUtils.permanentPrivateBrowsing)
         return "about:privatebrowsing";
     }
-    return Services.prefs.getCharPref(PREF) || "about:blank";
+    let url = Services.prefs.getComplexValue(PREF, Ci.nsISupportsString).data;
+    return url || "about:blank";
   }
 
   function update() {
@@ -183,6 +184,7 @@ function whereToOpenLink( e, ignoreButton, ignoreAlt )
  *   postData             (nsIInputStream)
  *   referrerURI          (nsIURI)
  *   relatedToCurrent     (boolean)
+ *   skipTabAnimation     (boolean)
  */
 function openUILinkIn(url, where, aAllowThirdPartyFixup, aPostData, aReferrerURI) {
   var params;
@@ -212,12 +214,12 @@ function openLinkIn(url, where, params) {
   var aCharset              = params.charset;
   var aReferrerURI          = params.referrerURI;
   var aRelatedToCurrent     = params.relatedToCurrent;
+  var aDisableMCB           = params.disableMCB;
   var aInBackground         = params.inBackground;
   var aDisallowInheritPrincipal = params.disallowInheritPrincipal;
-  // Currently, this parameter works only for where=="tab" or "current"
-  var aIsUTF8               = params.isUTF8;
   var aInitiatingDoc        = params.initiatingDoc;
   var aIsPrivate            = params.private;
+  var aSkipTabAnimation     = params.skipTabAnimation;
 
   if (where == "save") {
     if (!aInitiatingDoc) {
@@ -300,12 +302,12 @@ function openLinkIn(url, where, params) {
   switch (where) {
   case "current":
     let flags = Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
-    if (aAllowThirdPartyFixup)
+    if (aAllowThirdPartyFixup) {
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP;
+      flags |= Ci.nsIWebNavigation.LOAD_FLAGS_FIXUP_SCHEME_TYPOS;
+    }
     if (aDisallowInheritPrincipal)
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_OWNER;
-    if (aIsUTF8)
-      flags |= Ci.nsIWebNavigation.LOAD_FLAGS_URI_IS_UTF8;
     w.gBrowser.loadURIWithFlags(url, flags, aReferrerURI, null, aPostData);
     break;
   case "tabshifted":
@@ -320,7 +322,8 @@ function openLinkIn(url, where, params) {
                        inBackground: loadInBackground,
                        allowThirdPartyFixup: aAllowThirdPartyFixup,
                        relatedToCurrent: aRelatedToCurrent,
-                       isUTF8: aIsUTF8});
+                       skipAnimation: aSkipTabAnimation,
+                       disableMCB: aDisableMCB});
     break;
   }
 
@@ -379,11 +382,10 @@ function gatherTextUnder ( root )
       // Add this text to our collection.
       text += " " + node.data;
     } else if ( node instanceof HTMLImageElement) {
-      // If it has an alt= attribute, use that.
+      // If it has an "alt" attribute, add that.
       var altText = node.getAttribute( "alt" );
       if ( altText && altText != "" ) {
-        text = altText;
-        break;
+        text += " " + altText;
       }
     }
     // Find next node to test.
@@ -403,10 +405,8 @@ function gatherTextUnder ( root )
       }
     }
   }
-  // Strip leading whitespace.
-  text = text.replace( /^\s+/, "" );
-  // Strip trailing whitespace.
-  text = text.replace( /\s+$/, "" );
+  // Strip leading and tailing whitespace.
+  text = text.trim();
   // Compress remaining whitespace.
   text = text.replace( /\s+/g, " " );
   return text;
@@ -428,8 +428,13 @@ function isBidiEnabled() {
   if (getBoolPref("bidi.browser.ui", false))
     return true;
 
-  // if the pref isn't set, check for an RTL locale and force the pref to true
-  // if we find one.
+  // then check intl.uidirection.<locale>
+  var chromeReg = Components.classes["@mozilla.org/chrome/chrome-registry;1"].
+                  getService(Components.interfaces.nsIXULChromeRegistry);
+  if (chromeReg.isLocaleRTL("global"))
+    return true;
+
+  // now see if the system locale is an RTL one.
   var rv = false;
 
   try {
@@ -441,6 +446,7 @@ function isBidiEnabled() {
       case "ar-":
       case "he-":
       case "fa-":
+      case "ug-":
       case "ur-":
       case "syr":
         rv = true;
@@ -456,6 +462,9 @@ function openAboutDialog() {
   while (enumerator.hasMoreElements()) {
     // Only open one about window (Bug 599573)
     let win = enumerator.getNext();
+    if (win.closed) {
+      continue;
+    }
     win.focus();
     return;
   }
@@ -472,8 +481,37 @@ function openAboutDialog() {
 
 function openPreferences(paneID, extraArgs)
 {
-  if (Services.prefs.getBoolPref("browser.preferences.inContent")) {
-    openUILinkIn("about:preferences", "tab");
+  function switchToAdvancedSubPane(doc) {
+    if (extraArgs && extraArgs["advancedTab"]) {
+      let advancedPaneTabs = doc.getElementById("advancedPrefs");
+      advancedPaneTabs.selectedTab = doc.getElementById(extraArgs["advancedTab"]);
+    }
+  }
+
+  if (getBoolPref("browser.preferences.inContent")) {
+    let win = Services.wm.getMostRecentWindow("navigator:browser");
+    if (!win) {
+      return;
+    }
+
+    let newLoad = !win.switchToTabHavingURI("about:preferences", true);
+    let browser = win.gBrowser.selectedBrowser;
+
+    function switchToPane() {
+      if (paneID) {
+        browser.contentWindow.selectCategory(paneID);
+      }
+      switchToAdvancedSubPane(browser.contentDocument);
+    }
+
+    if (newLoad) {
+      browser.addEventListener("load", function onload() {
+        browser.removeEventListener("load", onload, true);
+        switchToPane();
+      }, true);
+    } else {
+      switchToPane();
+    }
   } else {
     var instantApply = getBoolPref("browser.preferences.instantApply", false);
     var features = "chrome,titlebar,toolbar,centerscreen" + (instantApply ? ",dialog=no" : ",modal");
@@ -486,16 +524,11 @@ function openPreferences(paneID, extraArgs)
         win.document.documentElement.showPane(pane);
       }
 
-      if (extraArgs && extraArgs["advancedTab"]) {
-        var advancedPaneTabs = win.document.getElementById("advancedPrefs");
-        advancedPaneTabs.selectedTab = win.document.getElementById(extraArgs["advancedTab"]);
-      }
-
-     return;
+      switchToAdvancedSubPane(win.document);
+    } else {
+      openDialog("chrome://browser/content/preferences/preferences.xul",
+                 "Preferences", features, paneID, extraArgs);
     }
-
-    openDialog("chrome://browser/content/preferences/preferences.xul",
-               "Preferences", features, paneID, extraArgs);
   }
 }
 
@@ -529,7 +562,17 @@ function openHealthReport()
  */
 function openFeedbackPage()
 {
-  openUILinkIn("https://input.mozilla.org/feedback", "tab");
+  var url = Components.classes["@mozilla.org/toolkit/URLFormatterService;1"]
+                      .getService(Components.interfaces.nsIURLFormatter)
+                      .formatURLPref("app.feedback.baseURL");
+  openUILinkIn(url, "tab");
+}
+
+function openTourPage()
+{
+  let scope = {}
+  Components.utils.import("resource:///modules/UITour.jsm", scope);
+  openUILinkIn(scope.UITour.url, "tab");
 }
 
 function buildHelpMenu()
@@ -556,17 +599,14 @@ function makeURLAbsolute(aBase, aUrl)
   return makeURI(aUrl, null, makeURI(aBase)).spec;
 }
 
-
 /**
  * openNewTabWith: opens a new tab with the given URL.
  *
  * @param aURL
  *        The URL to open (as a string).
  * @param aDocument
- *        The document from which the URL came, or null. This is used to set the
- *        referrer header and to do a security check of whether the document is
- *        allowed to reference the URL. If null, there will be no referrer
- *        header and no security check.
+ *        Note this parameter is now ignored. There is no security check & no
+ *        referrer header derived from aDocument (null case).
  * @param aPostData
  *        Form POST data, or null.
  * @param aEvent
@@ -577,91 +617,53 @@ function makeURLAbsolute(aBase, aUrl)
  *        (e.g., Google's I Feel Lucky) for interpretation. This parameter may
  *        be undefined in which case it is treated as false.
  * @param [optional] aReferrer
- *        If aDocument is null, then this will be used as the referrer.
- *        There will be no security check.
+ *        This will be used as the referrer. There will be no security check.
  */ 
 function openNewTabWith(aURL, aDocument, aPostData, aEvent,
                         aAllowThirdPartyFixup, aReferrer) {
-  if (aDocument)
-    urlSecurityCheck(aURL, aDocument.nodePrincipal);
 
   // As in openNewWindowWith(), we want to pass the charset of the
   // current document over to a new tab.
-  var originCharset = aDocument && aDocument.characterSet;
-  if (!originCharset &&
-      document.documentElement.getAttribute("windowtype") == "navigator:browser")
-    originCharset = window.content.document.characterSet;
+  let originCharset = null;
+  if (document.documentElement.getAttribute("windowtype") == "navigator:browser")
+    originCharset = gBrowser.selectedBrowser.characterSet;
 
   openLinkIn(aURL, aEvent && aEvent.shiftKey ? "tabshifted" : "tab",
              { charset: originCharset,
                postData: aPostData,
                allowThirdPartyFixup: aAllowThirdPartyFixup,
-               referrerURI: aDocument ? aDocument.documentURIObject : aReferrer });
+               referrerURI: aReferrer });
 }
 
+/**
+ * @param aDocument
+ *        Note this parameter is ignored. See openNewTabWith()
+ */
 function openNewWindowWith(aURL, aDocument, aPostData, aAllowThirdPartyFixup, aReferrer) {
-  if (aDocument)
-    urlSecurityCheck(aURL, aDocument.nodePrincipal);
-
-  // if and only if the current window is a browser window and it has a
-  // document with a character set, then extract the current charset menu
-  // setting from the current document and use it to initialize the new browser
-  // window...
-  var originCharset = aDocument && aDocument.characterSet;
-  if (!originCharset &&
-      document.documentElement.getAttribute("windowtype") == "navigator:browser")
-    originCharset = window.content.document.characterSet;
+  // Extract the current charset menu setting from the current document and
+  // use it to initialize the new browser window...
+  let originCharset = null;
+  if (document.documentElement.getAttribute("windowtype") == "navigator:browser")
+    originCharset = gBrowser.selectedBrowser.characterSet;
 
   openLinkIn(aURL, "window",
              { charset: originCharset,
                postData: aPostData,
                allowThirdPartyFixup: aAllowThirdPartyFixup,
-               referrerURI: aDocument ? aDocument.documentURIObject : aReferrer });
-}
-
-/**
- * isValidFeed: checks whether the given data represents a valid feed.
- *
- * @param  aLink
- *         An object representing a feed with title, href and type.
- * @param  aPrincipal
- *         The principal of the document, used for security check.
- * @param  aIsFeed
- *         Whether this is already a known feed or not, if true only a security
- *         check will be performed.
- */ 
-function isValidFeed(aLink, aPrincipal, aIsFeed)
-{
-  if (!aLink || !aPrincipal)
-    return false;
-
-  var type = aLink.type.toLowerCase().replace(/^\s+|\s*(?:;.*)?$/g, "");
-  if (!aIsFeed) {
-    aIsFeed = (type == "application/rss+xml" ||
-               type == "application/atom+xml");
-  }
-
-  if (aIsFeed) {
-    try {
-      urlSecurityCheck(aLink.href, aPrincipal,
-                       Components.interfaces.nsIScriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL);
-      return type || "application/rss+xml";
-    }
-    catch(ex) {
-    }
-  }
-
-  return null;
+               referrerURI: aReferrer });
 }
 
 // aCalledFromModal is optional
-function openHelpLink(aHelpTopic, aCalledFromModal) {
+function openHelpLink(aHelpTopic, aCalledFromModal, aWhere) {
   var url = Components.classes["@mozilla.org/toolkit/URLFormatterService;1"]
                       .getService(Components.interfaces.nsIURLFormatter)
                       .formatURLPref("app.support.baseURL");
   url += aHelpTopic;
 
-  var where = aCalledFromModal ? "window" : "tab";
+  var where = aWhere;
+  if (!aWhere)
+    where = aCalledFromModal ? "window" : "tab";
+
   openUILinkIn(url, where);
 }
 

@@ -5,16 +5,19 @@
 
 #include "mozilla/dom/SVGFEDistantLightElement.h"
 #include "mozilla/dom/SVGFEDistantLightElementBinding.h"
+#include "nsSVGFilterInstance.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FEDistantLight)
+
+using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEDistantLightElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+SVGFEDistantLightElement::WrapNode(JSContext* aCx)
 {
-  return SVGFEDistantLightElementBinding::Wrap(aCx, aScope, this);
+  return SVGFEDistantLightElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::NumberInfo SVGFEDistantLightElement::sNumberInfo[2] =
@@ -40,13 +43,26 @@ SVGFEDistantLightElement::AttributeAffectsRendering(int32_t aNameSpaceID,
           aAttribute == nsGkAtoms::elevation);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedNumber>
+AttributeMap
+SVGFEDistantLightElement::ComputeLightAttributes(nsSVGFilterInstance* aInstance)
+{
+  float azimuth, elevation;
+  GetAnimatedNumberValues(&azimuth, &elevation, nullptr);
+
+  AttributeMap map;
+  map.Set(eLightType, (uint32_t)eLightTypeDistant);
+  map.Set(eDistantLightAzimuth, azimuth);
+  map.Set(eDistantLightElevation, elevation);
+  return map;
+}
+
+already_AddRefed<SVGAnimatedNumber>
 SVGFEDistantLightElement::Azimuth()
 {
   return mNumberAttributes[AZIMUTH].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedNumber>
+already_AddRefed<SVGAnimatedNumber>
 SVGFEDistantLightElement::Elevation()
 {
   return mNumberAttributes[ELEVATION].ToDOMAnimatedNumber(this);

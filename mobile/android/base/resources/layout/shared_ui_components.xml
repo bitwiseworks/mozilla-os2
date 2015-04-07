@@ -6,11 +6,13 @@
 <!-- This file is used to include shared UI components in different gecko app
      layouts, such as gecko_app.xml and web_app.xml -->
 
-<merge xmlns:android="http://schemas.android.com/apk/res/android">
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+       xmlns:gecko="http://schemas.android.com/apk/res-auto">
 
-    <org.mozilla.gecko.gfx.LayerView android:id="@+id/layer_view"
-                                     android:layout_width="fill_parent"
-                                     android:layout_height="fill_parent"/>
+    <org.mozilla.gecko.GeckoView android:id="@+id/layer_view"
+                                 gecko:doinit="false"
+                                 android:layout_width="fill_parent"
+                                 android:layout_height="fill_parent"/>
 
     <AbsoluteLayout android:id="@+id/plugin_container"
                     android:background="@android:color/transparent"
@@ -23,5 +25,12 @@
                                        android:visibility="gone"/>
 
     <include layout="@layout/text_selection_handles"/>
+
+    <FrameLayout android:id="@+id/camera_layout"
+                 android:layout_height="wrap_content"
+                 android:layout_width="wrap_content"
+                 android:layout_alignParentRight="true"
+                 android:layout_alignParentBottom="true">
+    </FrameLayout>
 
 </merge>

@@ -93,7 +93,7 @@ function end_test() {
     globalDir.append(do_get_expected_addon_name("addon4@tests.mozilla.org"));
     globalDir.remove(true);
   }
-  do_test_finished();
+  do_execute_soon(do_test_finished);
 }
 
 // Test that the test extensions are all installed
@@ -119,7 +119,7 @@ function run_test_1() {
     do_check_true(isExtensionInAddonsList(globalDir, a4.id));
     do_check_eq(a4.version, "1.0");
 
-    run_test_2();
+    do_execute_soon(run_test_2);
   });
 }
 
@@ -158,7 +158,7 @@ function run_test_2() {
     do_check_true(isExtensionInAddonsList(globalDir, a4.id));
     do_check_eq(a4.version, "2.0");
 
-    run_test_3();
+    do_execute_soon(run_test_3);
   });
 }
 
@@ -179,9 +179,7 @@ function run_test_3() {
 
   // Simulates a simple Build ID change, the platform deletes extensions.ini
   // whenever the application is changed.
-  var file = gProfD.clone();
-  file.append("extensions.ini");
-  file.remove(true);
+  gExtensionsINI.remove(true);
   restartManager();
 
   AddonManager.getAddonsByIDs(["addon1@tests.mozilla.org",

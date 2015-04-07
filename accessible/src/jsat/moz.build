@@ -4,9 +4,19 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'alerts'
+JS_MODULES_PATH = 'modules/accessibility'
 
-CPP_SOURCES += [
-    'nsAccessibilityFactory.cpp',
+EXTRA_JS_MODULES += [
+    'AccessFu.jsm',
+    'Constants.jsm',
+    'ContentControl.jsm',
+    'EventManager.jsm',
+    'Gestures.jsm',
+    'OutputGenerator.jsm',
+    'PointerAdapter.jsm',
+    'Presentation.jsm',
+    'TraversalRules.jsm',
+    'Utils.jsm'
 ]
 
+JAR_MANIFESTS += ['jar.mn']

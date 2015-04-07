@@ -4,7 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/EventDispatcher.h"
+#include "mozilla/EventListenerManager.h"
+#include "mozilla/EventStateManager.h"
+#include "mozilla/EventStates.h"
+#include "mozilla/MouseEvents.h"
 #include "mozilla/Likely.h"
 
 #include "nscore.h"
@@ -12,6 +17,7 @@
 #include "nsAttrValueInlines.h"
 #include "nsCOMPtr.h"
 #include "nsIAtom.h"
+#include "nsIContentInlines.h"
 #include "nsIContentViewer.h"
 #include "mozilla/css/StyleRule.h"
 #include "nsIDocument.h"
@@ -24,17 +30,15 @@
 #include "nsIDOMElementCSSInlineStyle.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMDocument.h"
-#include "nsEventListenerManager.h"
 #include "nsMappedAttributes.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsIHTMLDocument.h"
-#include "nsILink.h"
 #include "nsPIDOMWindow.h"
 #include "nsIStyleRule.h"
 #include "nsIURL.h"
 #include "nsNetUtil.h"
 #include "nsEscape.h"
-#include "nsIFrame.h"
+#include "nsIFrameInlines.h"
 #include "nsIScrollableFrame.h"
 #include "nsView.h"
 #include "nsViewManager.h"
@@ -43,10 +47,11 @@
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsIDocShell.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsError.h"
 #include "nsScriptLoader.h"
 #include "nsRuleData.h"
+#include "nsIPrincipal.h"
 
 #include "nsPresState.h"
 #include "nsILayoutHistoryState.h"
@@ -57,7 +62,6 @@
 #include "nsString.h"
 #include "nsUnicharUtils.h"
 #include "nsGkAtoms.h"
-#include "nsEventStateManager.h"
 #include "nsIDOMEvent.h"
 #include "nsDOMCSSDeclaration.h"
 #include "nsITextControlFrame.h"
@@ -68,12 +72,11 @@
 #include "nsFocusManager.h"
 #include "nsAttrValueOrString.h"
 
-#include "nsMutationEvent.h"
+#include "mozilla/InternalMutationEvent.h"
 #include "nsDOMStringMap.h"
 
 #include "nsIEditor.h"
 #include "nsIEditorIMESupport.h"
-#include "nsEventDispatcher.h"
 #include "nsLayoutUtils.h"
 #include "mozAutoDocUpdate.h"
 #include "nsHtml5Module.h"
@@ -81,10 +84,10 @@
 #include "mozilla/dom/Element.h"
 #include "HTMLFieldSetElement.h"
 #include "HTMLMenuElement.h"
-#include "nsAsyncDOMEvent.h"
 #include "nsDOMMutationObserver.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/FromParser.h"
+#include "mozilla/dom/Link.h"
 #include "mozilla/dom/UndoManager.h"
 #include "mozilla/BloomFilter.h"
 
@@ -94,72 +97,15 @@
 #include "nsThreadUtils.h"
 #include "nsTextFragment.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/TouchEvent.h"
 #include "mozilla/ErrorResult.h"
 #include "nsHTMLDocument.h"
-#include "nsDOMTouchEvent.h"
 #include "nsGlobalWindow.h"
 #include "mozilla/dom/HTMLBodyElement.h"
+#include "imgIContainer.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
-
-class nsINodeInfo;
-class nsIDOMNodeList;
-class nsRuleWalker;
-
-// XXX todo: add in missing out-of-memory checks
-
-//----------------------------------------------------------------------
-
-#ifdef GATHER_ELEMENT_USEAGE_STATISTICS
-
-// static objects that have constructors are kinda bad, but we don't
-// care here, this is only debugging code!
-
-static nsHashtable sGEUS_ElementCounts;
-
-void GEUS_ElementCreated(nsINodeInfo *aNodeInfo)
-{
-  nsAutoString name;
-  aNodeInfo->GetName(name);
-
-  nsStringKey key(name);
-
-  int32_t count = (int32_t)sGEUS_ElementCounts.Get(&key);
-
-  count++;
-
-  sGEUS_ElementCounts.Put(&key, (void *)count);
-}
-
-bool GEUS_enum_func(nsHashKey *aKey, void *aData, void *aClosure)
-{
-  const PRUnichar *name_chars = ((nsStringKey *)aKey)->GetString();
-  NS_ConvertUTF16toUTF8 name(name_chars);
-
-  printf ("%s %d\n", name.get(), aData);
-
-  return true;
-}
-
-void GEUS_DumpElementCounts()
-{
-  printf ("Element count statistics:\n");
-
-  sGEUS_ElementCounts.Enumerate(GEUS_enum_func, nullptr);
-
-  printf ("End of element count statistics:\n");
-}
-
-nsresult
-nsGenericHTMLElement::Init(nsINodeInfo *aNodeInfo)
-{
-  GEUS_ElementCreated(aNodeInfo);
-
-  return nsGenericHTMLElementBase::Init(aNodeInfo);
-}
-
-#endif
 
 /**
  * nsAutoFocusEvent is used to dispatch a focus event when a
@@ -243,37 +189,27 @@ private:
   nsRefPtr<nsGenericHTMLElement> mElement;
 };
 
-NS_IMPL_CYCLE_COLLECTION_1(nsGenericHTMLElementTearoff, mElement)
+NS_IMPL_CYCLE_COLLECTION(nsGenericHTMLElementTearoff, mElement)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsGenericHTMLElementTearoff)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsGenericHTMLElementTearoff)
 
 NS_INTERFACE_TABLE_HEAD(nsGenericHTMLElementTearoff)
-  NS_INTERFACE_TABLE_INHERITED1(nsGenericHTMLElementTearoff,
-                                nsIDOMElementCSSInlineStyle)
+  NS_INTERFACE_TABLE_INHERITED(nsGenericHTMLElementTearoff,
+                               nsIDOMElementCSSInlineStyle)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsGenericHTMLElementTearoff)
 NS_INTERFACE_MAP_END_AGGREGATED(mElement)
 
-nsresult
-nsGenericHTMLElement::DOMQueryInterface(nsIDOMHTMLElement *aElement,
-                                        REFNSIID aIID, void **aInstancePtr)
-{
-  NS_PRECONDITION(aInstancePtr, "null out param");
+NS_IMPL_ADDREF_INHERITED(nsGenericHTMLElement, nsGenericHTMLElementBase)
+NS_IMPL_RELEASE_INHERITED(nsGenericHTMLElement, nsGenericHTMLElementBase)
 
-  nsresult rv = NS_ERROR_FAILURE;
-
-  NS_INTERFACE_TABLE_BEGIN
-    NS_INTERFACE_TABLE_ENTRY(nsIDOMHTMLElement, nsIDOMNode)
-    NS_INTERFACE_TABLE_ENTRY(nsIDOMHTMLElement, nsIDOMElement)
-    NS_INTERFACE_TABLE_ENTRY(nsIDOMHTMLElement, nsIDOMHTMLElement)
-  NS_INTERFACE_TABLE_END_WITH_PTR(aElement)
-
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+NS_INTERFACE_MAP_BEGIN(nsGenericHTMLElement)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMHTMLElement)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMElement)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMNode)
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMElementCSSInlineStyle,
                                  new nsGenericHTMLElementTearoff(this))
-  NS_INTERFACE_MAP_END
-
-// No closing bracket, because NS_INTERFACE_MAP_END does that for us.
+NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElementBase)
 
 nsresult
 nsGenericHTMLElement::CopyInnerTo(Element* aDst)
@@ -325,10 +261,10 @@ nsGenericHTMLElement::Dataset()
   return ret.forget();
 }
 
-nsresult
+NS_IMETHODIMP
 nsGenericHTMLElement::GetDataset(nsISupports** aDataset)
 {
-  *aDataset = Dataset().get();
+  *aDataset = Dataset().take();
   return NS_OK;
 }
 
@@ -352,7 +288,7 @@ static const nsAttrValue::EnumTable kDirTable[] = {
 };
 
 void
-nsGenericHTMLElement::GetAccessKeyLabel(nsAString& aLabel)
+nsGenericHTMLElement::GetAccessKeyLabel(nsString& aLabel)
 {
   nsPresContext *presContext = GetPresContext();
 
@@ -528,7 +464,7 @@ nsGenericHTMLElement::Spellcheck()
   }
 
   // Anything else that's not a form control is not spellchecked by default
-  nsCOMPtr<nsIFormControl> formControl = do_QueryInterface(this);
+  nsCOMPtr<nsIFormControl> formControl = do_QueryObject(this);
   if (!formControl) {
     return false;                       // Not spellchecked by default
   }
@@ -572,10 +508,10 @@ nsGenericHTMLElement::UpdateEditableState(bool aNotify)
   nsStyledElement::UpdateEditableState(aNotify);
 }
 
-nsEventStates
+EventStates
 nsGenericHTMLElement::IntrinsicState() const
 {
-  nsEventStates state = nsGenericHTMLElementBase::IntrinsicState();
+  EventStates state = nsGenericHTMLElementBase::IntrinsicState();
 
   if (GetDirectionality() == eDir_RTL) {
     state |= NS_EVENT_STATE_RTL;
@@ -702,10 +638,11 @@ nsGenericHTMLElement::FindAncestorForm(HTMLFormElement* aCurrentForm)
 }
 
 bool
-nsGenericHTMLElement::CheckHandleEventForAnchorsPreconditions(nsEventChainVisitor& aVisitor)
+nsGenericHTMLElement::CheckHandleEventForAnchorsPreconditions(
+                        EventChainVisitor& aVisitor)
 {
-  NS_PRECONDITION(nsCOMPtr<nsILink>(do_QueryInterface(this)),
-                  "should be called only when |this| implements |nsILink|");
+  NS_PRECONDITION(nsCOMPtr<Link>(do_QueryObject(this)),
+                  "should be called only when |this| implements |Link|");
 
   if (!aVisitor.mPresContext) {
     // We need a pres context to do link stuff. Some events (e.g. mutation
@@ -724,7 +661,7 @@ nsGenericHTMLElement::CheckHandleEventForAnchorsPreconditions(nsEventChainVisito
 }
 
 nsresult
-nsGenericHTMLElement::PreHandleEventForAnchors(nsEventChainPreVisitor& aVisitor)
+nsGenericHTMLElement::PreHandleEventForAnchors(EventChainPreVisitor& aVisitor)
 {
   nsresult rv = nsGenericHTMLElementBase::PreHandleEvent(aVisitor);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -737,7 +674,7 @@ nsGenericHTMLElement::PreHandleEventForAnchors(nsEventChainPreVisitor& aVisitor)
 }
 
 nsresult
-nsGenericHTMLElement::PostHandleEventForAnchors(nsEventChainPostVisitor& aVisitor)
+nsGenericHTMLElement::PostHandleEventForAnchors(EventChainPostVisitor& aVisitor)
 {
   if (!CheckHandleEventForAnchorsPreconditions(aVisitor)) {
     return NS_OK;
@@ -751,7 +688,7 @@ nsGenericHTMLElement::IsHTMLLink(nsIURI** aURI) const
 {
   NS_PRECONDITION(aURI, "Must provide aURI out param");
 
-  *aURI = GetHrefURIForAnchors().get();
+  *aURI = GetHrefURIForAnchors().take();
   // We promise out param is non-null if we return true, so base rv on it
   return *aURI != nullptr;
 }
@@ -759,7 +696,7 @@ nsGenericHTMLElement::IsHTMLLink(nsIURI** aURI) const
 already_AddRefed<nsIURI>
 nsGenericHTMLElement::GetHrefURIForAnchors() const
 {
-  // This is used by the three nsILink implementations and
+  // This is used by the three Link implementations and
   // nsHTMLStyleElement.
 
   // Get href= attribute (relative URI).
@@ -817,7 +754,7 @@ nsGenericHTMLElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
                                                 aValue, aNotify);
 }
 
-nsEventListenerManager*
+EventListenerManager*
 nsGenericHTMLElement::GetEventListenerManagerForAttr(nsIAtom* aAttrName,
                                                      bool* aDefer)
 {
@@ -830,7 +767,7 @@ nsGenericHTMLElement::GetEventListenerManagerForAttr(nsIAtom* aAttrName,
 #define FORWARDED_EVENT(name_, id_, type_, struct_) \
        || nsGkAtoms::on##name_ == aAttrName
 #define WINDOW_EVENT FORWARDED_EVENT
-#include "nsEventNameList.h"
+#include "mozilla/EventNameList.h" // IWYU pragma: keep
 #undef WINDOW_EVENT
 #undef FORWARDED_EVENT
 #undef EVENT
@@ -849,7 +786,7 @@ nsGenericHTMLElement::GetEventListenerManagerForAttr(nsIAtom* aAttrName,
     if ((win = document->GetInnerWindow())) {
       nsCOMPtr<EventTarget> piTarget(do_QueryInterface(win));
 
-      return piTarget->GetListenerManager(true);
+      return piTarget->GetOrCreateListenerManager();
     }
 
     return nullptr;
@@ -878,8 +815,7 @@ nsGenericHTMLElement::GetOn##name_()                                          \
   return nsINode::GetOn##name_();                                             \
 }                                                                             \
 void                                                                          \
-nsGenericHTMLElement::SetOn##name_(EventHandlerNonNull* handler,              \
-                                   ErrorResult& error)                        \
+nsGenericHTMLElement::SetOn##name_(EventHandlerNonNull* handler)              \
 {                                                                             \
   if (Tag() == nsGkAtoms::body || Tag() == nsGkAtoms::frameset) {             \
     nsPIDOMWindow* win = OwnerDoc()->GetInnerWindow();                        \
@@ -889,10 +825,10 @@ nsGenericHTMLElement::SetOn##name_(EventHandlerNonNull* handler,              \
                                                                               \
     nsCOMPtr<nsISupports> supports = do_QueryInterface(win);                  \
     nsGlobalWindow* globalWin = nsGlobalWindow::FromSupports(supports);       \
-    return globalWin->SetOn##name_(handler, error);                           \
+    return globalWin->SetOn##name_(handler);                                  \
   }                                                                           \
                                                                               \
-  return nsINode::SetOn##name_(handler, error);                               \
+  return nsINode::SetOn##name_(handler);                                      \
 }
 #define ERROR_EVENT(name_, id_, type_, struct_)                               \
 already_AddRefed<EventHandlerNonNull>                                         \
@@ -918,8 +854,7 @@ nsGenericHTMLElement::GetOn##name_()                                          \
   return handler.forget();                                                    \
 }                                                                             \
 void                                                                          \
-nsGenericHTMLElement::SetOn##name_(EventHandlerNonNull* handler,              \
-                                   ErrorResult& error)                        \
+nsGenericHTMLElement::SetOn##name_(EventHandlerNonNull* handler)              \
 {                                                                             \
   if (Tag() == nsGkAtoms::body || Tag() == nsGkAtoms::frameset) {             \
     nsPIDOMWindow* win = OwnerDoc()->GetInnerWindow();                        \
@@ -933,12 +868,12 @@ nsGenericHTMLElement::SetOn##name_(EventHandlerNonNull* handler,              \
     if (handler) {                                                            \
       errorHandler = new OnErrorEventHandlerNonNull(handler);                 \
     }                                                                         \
-    return globalWin->SetOn##name_(errorHandler, error);                      \
+    return globalWin->SetOn##name_(errorHandler);                             \
   }                                                                           \
                                                                               \
-  return nsINode::SetOn##name_(handler, error);                               \
+  return nsINode::SetOn##name_(handler);                                      \
 }
-#include "nsEventNameList.h"
+#include "mozilla/EventNameList.h" // IWYU pragma: keep
 #undef ERROR_EVENT
 #undef FORWARDED_EVENT
 #undef EVENT
@@ -1018,9 +953,8 @@ nsGenericHTMLElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
       UnsetFlags(NODE_HAS_ACCESSKEY);
     }
     else if (IsEventAttributeName(aAttribute)) {
-      nsEventListenerManager* manager = GetListenerManager(false);
-      if (manager) {
-        manager->RemoveEventHandler(aAttribute);
+      if (EventListenerManager* manager = GetExistingListenerManager()) {
+        manager->RemoveEventHandler(aAttribute, EmptyString());
       }
     }
   }
@@ -1085,7 +1019,8 @@ nsGenericHTMLElement::ParseAttribute(int32_t aNamespaceID,
 
     if (aAttribute == nsGkAtoms::itemref ||
         aAttribute == nsGkAtoms::itemprop ||
-        aAttribute == nsGkAtoms::itemtype) {
+        aAttribute == nsGkAtoms::itemtype ||
+        aAttribute == nsGkAtoms::rel) {
       aResult.ParseAtomArray(aValue);
       return true;
     }
@@ -1175,98 +1110,6 @@ nsGenericHTMLElement::GetFormControlFrame(bool aFlushFrames)
   return nullptr;
 }
 
-/* static */ nsresult
-nsGenericHTMLElement::GetPrimaryPresState(nsGenericHTMLElement* aContent,
-                                          nsPresState** aPresState)
-{
-  NS_ENSURE_ARG_POINTER(aPresState);
-  *aPresState = nullptr;
-
-  nsresult result = NS_OK;
-
-  nsAutoCString key;
-  nsCOMPtr<nsILayoutHistoryState> history = GetLayoutHistoryAndKey(aContent, false, key);
-
-  if (history) {
-    // Get the pres state for this key, if it doesn't exist, create one
-    result = history->GetState(key, aPresState);
-    if (!*aPresState) {
-      *aPresState = new nsPresState();
-      result = history->AddState(key, *aPresState);
-    }
-  }
-
-  return result;
-}
-
-
-already_AddRefed<nsILayoutHistoryState>
-nsGenericHTMLElement::GetLayoutHistoryAndKey(nsGenericHTMLElement* aContent,
-                                             bool aRead,
-                                             nsACString& aKey)
-{
-  //
-  // Get the pres shell
-  //
-  nsCOMPtr<nsIDocument> doc = aContent->GetDocument();
-  if (!doc) {
-    return nullptr;
-  }
-
-  //
-  // Get the history (don't bother with the key if the history is not there)
-  //
-  nsCOMPtr<nsILayoutHistoryState> history = doc->GetLayoutHistoryState();
-  if (!history) {
-    return nullptr;
-  }
-
-  if (aRead && !history->HasStates()) {
-    return nullptr;
-  }
-
-  //
-  // Get the state key
-  //
-  nsresult rv = nsContentUtils::GenerateStateKey(aContent, doc, aKey);
-  if (NS_FAILED(rv)) {
-    return nullptr;
-  }
-
-  // If the state key is blank, this is anonymous content or for
-  // whatever reason we are not supposed to save/restore state.
-  if (aKey.IsEmpty()) {
-    return nullptr;
-  }
-
-  // Add something unique to content so layout doesn't muck us up
-  aKey += "-C";
-
-  return history.forget();
-}
-
-bool
-nsGenericHTMLElement::RestoreFormControlState(nsGenericHTMLElement* aContent,
-                                              nsIFormControl* aControl)
-{
-  nsAutoCString key;
-  nsCOMPtr<nsILayoutHistoryState> history = GetLayoutHistoryAndKey(aContent, true, key);
-  if (!history) {
-    return false;
-  }
-
-  nsPresState *state;
-  // Get the pres state for this key
-  nsresult rv = history->GetState(key, &state);
-  if (NS_SUCCEEDED(rv) && state) {
-    bool result = aControl->RestoreState(state);
-    history->RemoveState(key);
-    return result;
-  }
-
-  return false;
-}
-
 // XXX This creates a dependency between content and frames
 nsPresContext*
 nsGenericHTMLElement::GetPresContext()
@@ -1283,24 +1126,6 @@ nsGenericHTMLElement::GetPresContext()
 
   return nullptr;
 }
-
-static const nsAttrValue::EnumTable kAlignTable[] = {
-  { "left",      NS_STYLE_TEXT_ALIGN_LEFT },
-  { "right",     NS_STYLE_TEXT_ALIGN_RIGHT },
-
-  { "top",       NS_STYLE_VERTICAL_ALIGN_TOP },
-  { "middle",    NS_STYLE_VERTICAL_ALIGN_MIDDLE_WITH_BASELINE },
-  { "bottom",    NS_STYLE_VERTICAL_ALIGN_BASELINE },
-
-  { "center",    NS_STYLE_VERTICAL_ALIGN_MIDDLE_WITH_BASELINE },
-  { "baseline",  NS_STYLE_VERTICAL_ALIGN_BASELINE },
-
-  { "texttop",   NS_STYLE_VERTICAL_ALIGN_TEXT_TOP },
-  { "absmiddle", NS_STYLE_VERTICAL_ALIGN_MIDDLE },
-  { "abscenter", NS_STYLE_VERTICAL_ALIGN_MIDDLE },
-  { "absbottom", NS_STYLE_VERTICAL_ALIGN_BOTTOM },
-  { 0 }
-};
 
 static const nsAttrValue::EnumTable kDivAlignTable[] = {
   { "left", NS_STYLE_TEXT_ALIGN_MOZ_LEFT },
@@ -1342,6 +1167,24 @@ bool
 nsGenericHTMLElement::ParseAlignValue(const nsAString& aString,
                                       nsAttrValue& aResult)
 {
+  static const nsAttrValue::EnumTable kAlignTable[] = {
+    { "left",      NS_STYLE_TEXT_ALIGN_LEFT },
+    { "right",     NS_STYLE_TEXT_ALIGN_RIGHT },
+
+    { "top",       NS_STYLE_VERTICAL_ALIGN_TOP },
+    { "middle",    NS_STYLE_VERTICAL_ALIGN_MIDDLE_WITH_BASELINE },
+    { "bottom",    NS_STYLE_VERTICAL_ALIGN_BASELINE },
+
+    { "center",    NS_STYLE_VERTICAL_ALIGN_MIDDLE_WITH_BASELINE },
+    { "baseline",  NS_STYLE_VERTICAL_ALIGN_BASELINE },
+
+    { "texttop",   NS_STYLE_VERTICAL_ALIGN_TEXT_TOP },
+    { "absmiddle", NS_STYLE_VERTICAL_ALIGN_MIDDLE },
+    { "abscenter", NS_STYLE_VERTICAL_ALIGN_MIDDLE },
+    { "absbottom", NS_STYLE_VERTICAL_ALIGN_BOTTOM },
+    { 0 }
+  };
+
   return aResult.ParseEnumValue(aString, kAlignTable, false);
 }
 
@@ -1529,12 +1372,6 @@ nsGenericHTMLElement::sBackgroundAttributeMap[] = {
 /* static */ const Element::MappedAttributeEntry
 nsGenericHTMLElement::sBackgroundColorAttributeMap[] = {
   { &nsGkAtoms::bgcolor },
-  { nullptr }
-};
-
-/* static */ const Element::MappedAttributeEntry
-nsGenericHTMLElement::sScrollingAttributeMap[] = {
-  { &nsGkAtoms::scrolling },
   { nullptr }
 };
 
@@ -1776,51 +1613,6 @@ nsGenericHTMLElement::MapBackgroundAttributesInto(const nsMappedAttributes* aAtt
   MapBGColorInto(aAttributes, aData);
 }
 
-void
-nsGenericHTMLElement::MapScrollingAttributeInto(const nsMappedAttributes* aAttributes,
-                                                nsRuleData* aData)
-{
-  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Display)))
-    return;
-
-  // scrolling
-  nsCSSValue* overflowValues[2] = {
-    aData->ValueForOverflowX(),
-    aData->ValueForOverflowY(),
-  };
-  for (uint32_t i = 0; i < ArrayLength(overflowValues); ++i) {
-    if (overflowValues[i]->GetUnit() == eCSSUnit_Null) {
-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::scrolling);
-      if (value && value->Type() == nsAttrValue::eEnum) {
-        int32_t mappedValue;
-        switch (value->GetEnumValue()) {
-          case NS_STYLE_FRAME_ON:
-          case NS_STYLE_FRAME_SCROLL:
-          case NS_STYLE_FRAME_YES:
-            mappedValue = NS_STYLE_OVERFLOW_SCROLL;
-            break;
-
-          case NS_STYLE_FRAME_OFF:
-          case NS_STYLE_FRAME_NOSCROLL:
-          case NS_STYLE_FRAME_NO:
-            mappedValue = NS_STYLE_OVERFLOW_HIDDEN;
-            break;
-        
-          case NS_STYLE_FRAME_AUTO:
-            mappedValue = NS_STYLE_OVERFLOW_AUTO;
-            break;
-
-          default:
-            NS_NOTREACHED("unexpected value");
-            mappedValue = NS_STYLE_OVERFLOW_AUTO;
-            break;
-        }
-        overflowValues[i]->SetIntValue(mappedValue, eCSSUnit_Enumerated);
-      }
-    }
-  }
-}
-
 //----------------------------------------------------------------------
 
 nsresult
@@ -1858,15 +1650,6 @@ nsGenericHTMLElement::GetUnsignedIntAttr(nsIAtom* aAttr,
   }
 
   return attrVal->GetIntegerValue();
-}
-
-nsresult
-nsGenericHTMLElement::SetDoubleAttr(nsIAtom* aAttr, double aValue)
-{
-  nsAutoString value;
-  value.AppendFloat(aValue);
-
-  return SetAttr(kNameSpaceID_None, aAttr, value, true);
 }
 
 void
@@ -1926,6 +1709,15 @@ nsGenericHTMLElement::GetURIAttr(nsIAtom* aAttr, nsIAtom* aBaseAttr, nsIURI** aU
   return true;
 }
 
+/* static */ bool
+nsGenericHTMLElement::IsScrollGrabAllowed(JSContext*, JSObject*)
+{
+  // Only allow scroll grabbing in chrome and certified apps.
+  nsIPrincipal* prin = nsContentUtils::GetSubjectPrincipal();
+  return nsContentUtils::IsSystemPrincipal(prin) ||
+    prin->GetAppStatus() == nsIPrincipal::APP_STATUS_CERTIFIED;
+}
+
 nsresult
 nsGenericHTMLElement::GetURIListAttr(nsIAtom* aAttr, nsAString& aResult)
 {
@@ -1939,9 +1731,9 @@ nsGenericHTMLElement::GetURIListAttr(nsIAtom* aAttr, nsAString& aResult)
   nsCOMPtr<nsIURI> baseURI = GetBaseURI();
 
   // Value contains relative URIs split on spaces (U+0020)
-  const PRUnichar *start = value.BeginReading();
-  const PRUnichar *end   = value.EndReading();
-  const PRUnichar *iter  = start;
+  const char16_t *start = value.BeginReading();
+  const char16_t *end   = value.EndReading();
+  const char16_t *iter  = start;
   for (;;) {
     if (iter < end && *iter != ' ') {
       ++iter;
@@ -1950,7 +1742,7 @@ nsGenericHTMLElement::GetURIListAttr(nsIAtom* aAttr, nsAString& aResult)
         ++start;
       if (iter != start) {
         if (!aResult.IsEmpty())
-          aResult.Append(PRUnichar(' '));
+          aResult.Append(char16_t(' '));
         const nsSubstring& uriPart = Substring(start, iter);
         nsCOMPtr<nsIURI> attrURI;
         nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(attrURI),
@@ -2017,10 +1809,11 @@ nsGenericHTMLElement::GetContextMenu() const
   return nullptr;
 }
 
-void
-nsGenericHTMLElement::GetContextMenu(nsIDOMHTMLMenuElement** aContextMenu) const
+NS_IMETHODIMP
+nsGenericHTMLElement::GetContextMenu(nsIDOMHTMLMenuElement** aContextMenu)
 {
   NS_IF_ADDREF(*aContextMenu = GetContextMenu());
+  return NS_OK;
 }
 
 bool
@@ -2106,12 +1899,12 @@ nsGenericHTMLElement::SetUndoScopeInternal(bool aUndoScope)
 bool
 nsGenericHTMLElement::TouchEventsEnabled(JSContext* /* unused */, JSObject* /* unused */)
 {
-  return nsDOMTouchEvent::PrefEnabled();
+  return TouchEvent::PrefEnabled();
 }
 
 //----------------------------------------------------------------------
 
-nsGenericHTMLFormElement::nsGenericHTMLFormElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+nsGenericHTMLFormElement::nsGenericHTMLFormElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
   , mForm(nullptr)
   , mFieldSet(nullptr)
@@ -2131,16 +1924,18 @@ nsGenericHTMLFormElement::~nsGenericHTMLFormElement()
   NS_ASSERTION(!mForm, "mForm should be null at this point!");
 }
 
-NS_IMPL_QUERY_INTERFACE_INHERITED1(nsGenericHTMLFormElement,
-                                   nsGenericHTMLElement,
-                                   nsIFormControl)
+NS_IMPL_ISUPPORTS_INHERITED(nsGenericHTMLFormElement,
+                            nsGenericHTMLElement,
+                            nsIFormControl)
 
-nsINode*
+mozilla::dom::ParentObject
 nsGenericHTMLFormElement::GetParentObject() const
 {
   // We use the parent chain to implement the scope for event handlers.
-  return mForm ? static_cast<nsINode*>(mForm)
-               : static_cast<nsINode*>(OwnerDoc());
+  if (mForm) {
+    return GetParentObjectInternal(mForm);
+  }
+  return nsGenericHTMLElement::GetParentObject();
 }
 
 bool
@@ -2204,6 +1999,12 @@ Element*
 nsGenericHTMLFormElement::GetFormElement()
 {
   return mForm;
+}
+
+HTMLFieldSetElement*
+nsGenericHTMLFormElement::GetFieldSet()
+{
+  return mFieldSet;
 }
 
 nsresult
@@ -2429,7 +2230,7 @@ nsGenericHTMLFormElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 }
 
 nsresult
-nsGenericHTMLFormElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+nsGenericHTMLFormElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
   if (aVisitor.mEvent->mFlags.mIsTrusted) {
     switch (aVisitor.mEvent->message) {
@@ -2500,13 +2301,13 @@ nsGenericHTMLFormElement::IsHTMLFocusable(bool aWithMouse,
   return false;
 }
 
-nsEventStates
+EventStates
 nsGenericHTMLFormElement::IntrinsicState() const
 {
   // If you add attribute-dependent states here, you need to add them them to
   // AfterSetAttr too.  And add them to AfterSetAttr for all subclasses that
   // implement IntrinsicState() and are affected by that attribute.
-  nsEventStates state = nsGenericHTMLElement::IntrinsicState();
+  EventStates state = nsGenericHTMLElement::IntrinsicState();
 
   if (CanBeDisabled()) {
     // :enabled/:disabled
@@ -2808,8 +2609,7 @@ nsGenericHTMLElement::Focus(ErrorResult& aError)
 {
   nsIFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm) {
-    nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(this);
-    aError = fm->SetFocus(elem, 0);
+    aError = fm->SetFocus(this, 0);
   }
 }
 
@@ -2836,11 +2636,11 @@ nsGenericHTMLElement::Click()
   // Click() is never called from native code, but it may be
   // called from chrome JS. Mark this event trusted if Click()
   // is called from chrome code.
-  nsMouseEvent event(nsContentUtils::IsCallerChrome(),
-                     NS_MOUSE_CLICK, nullptr, nsMouseEvent::eReal);
+  WidgetMouseEvent event(nsContentUtils::IsCallerChrome(),
+                         NS_MOUSE_CLICK, nullptr, WidgetMouseEvent::eReal);
   event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
 
-  nsEventDispatcher::Dispatch(this, context, &event);
+  EventDispatcher::Dispatch(static_cast<nsIContent*>(this), context, &event);
 
   ClearHandlingClick();
 }
@@ -2912,7 +2712,7 @@ nsGenericHTMLElement::RegUnRegAccessKey(bool aDoReg)
   nsPresContext *presContext = GetPresContext();
 
   if (presContext) {
-    nsEventStateManager *esm = presContext->EventStateManager();
+    EventStateManager* esm = presContext->EventStateManager();
 
     // Register or unregister as appropriate.
     if (aDoReg) {
@@ -2934,20 +2734,20 @@ nsGenericHTMLElement::PerformAccesskey(bool aKeyCausesActivation,
   // It's hard to say what HTML4 wants us to do in all cases.
   nsIFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm) {
-    nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(this);
-    fm->SetFocus(elem, nsIFocusManager::FLAG_BYKEY);
+    fm->SetFocus(this, nsIFocusManager::FLAG_BYKEY);
   }
 
   if (aKeyCausesActivation) {
     // Click on it if the users prefs indicate to do so.
-    nsMouseEvent event(aIsTrustedEvent, NS_MOUSE_CLICK,
-                       nullptr, nsMouseEvent::eReal);
+    WidgetMouseEvent event(aIsTrustedEvent, NS_MOUSE_CLICK, nullptr,
+                           WidgetMouseEvent::eReal);
     event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_KEYBOARD;
 
     nsAutoPopupStatePusher popupStatePusher(aIsTrustedEvent ?
                                             openAllowed : openAbused);
 
-    nsEventDispatcher::Dispatch(this, presContext, &event);
+    EventDispatcher::Dispatch(static_cast<nsIContent*>(this),
+                              presContext, &event);
   }
 }
 
@@ -3122,32 +2922,149 @@ nsGenericHTMLElement::ChangeEditableState(int32_t aChange)
   MakeContentDescendantsEditable(this, document);
 }
 
-JS::Value
+
+//----------------------------------------------------------------------
+
+nsGenericHTMLFormElementWithState::nsGenericHTMLFormElementWithState(
+    already_AddRefed<nsINodeInfo>& aNodeInfo
+  )
+  : nsGenericHTMLFormElement(aNodeInfo)
+{
+  mStateKey.SetIsVoid(true);
+}
+
+nsresult
+nsGenericHTMLFormElementWithState::GenerateStateKey()
+{
+  // Keep the key if already computed
+  if (!mStateKey.IsVoid()) {
+    return NS_OK;
+  }
+
+  nsIDocument* doc = GetDocument();
+  if (!doc) {
+    return NS_OK;
+  }
+
+  // Generate the state key
+  nsresult rv = nsContentUtils::GenerateStateKey(this, doc, mStateKey);
+
+  if (NS_FAILED(rv)) {
+    mStateKey.SetIsVoid(true);
+    return rv;
+  }
+
+  // If the state key is blank, this is anonymous content or for whatever
+  // reason we are not supposed to save/restore state: keep it as such.
+  if (!mStateKey.IsEmpty()) {
+    // Add something unique to content so layout doesn't muck us up.
+    mStateKey += "-C";
+  }
+  return NS_OK;
+}
+
+nsPresState*
+nsGenericHTMLFormElementWithState::GetPrimaryPresState()
+{
+  if (mStateKey.IsEmpty()) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsILayoutHistoryState> history = GetLayoutHistory(false);
+
+  if (!history) {
+    return nullptr;
+  }
+
+  // Get the pres state for this key, if it doesn't exist, create one.
+  nsPresState* result = history->GetState(mStateKey);
+  if (!result) {
+    result = new nsPresState();
+    history->AddState(mStateKey, result);
+  }
+
+  return result;
+}
+
+already_AddRefed<nsILayoutHistoryState>
+nsGenericHTMLFormElementWithState::GetLayoutHistory(bool aRead)
+{
+  nsCOMPtr<nsIDocument> doc = GetDocument();
+  if (!doc) {
+    return nullptr;
+  }
+
+  //
+  // Get the history
+  //
+  nsCOMPtr<nsILayoutHistoryState> history = doc->GetLayoutHistoryState();
+  if (!history) {
+    return nullptr;
+  }
+
+  if (aRead && !history->HasStates()) {
+    return nullptr;
+  }
+
+  return history.forget();
+}
+
+bool
+nsGenericHTMLFormElementWithState::RestoreFormControlState()
+{
+  if (mStateKey.IsEmpty()) {
+    return false;
+  }
+
+  nsCOMPtr<nsILayoutHistoryState> history =
+    GetLayoutHistory(true);
+  if (!history) {
+    return false;
+  }
+
+  nsPresState *state;
+  // Get the pres state for this key
+  state = history->GetState(mStateKey);
+  if (state) {
+    bool result = RestoreState(state);
+    history->RemoveState(mStateKey);
+    return result;
+  }
+
+  return false;
+}
+
+void
+nsGenericHTMLFormElementWithState::NodeInfoChanged(nsINodeInfo* aOldNodeInfo)
+{
+  mStateKey.SetIsVoid(true);
+}
+
+void
 nsGenericHTMLElement::GetItemValue(JSContext* aCx, JSObject* aScope,
+                                   JS::MutableHandle<JS::Value> aRetval,
                                    ErrorResult& aError)
 {
   JS::Rooted<JSObject*> scope(aCx, aScope);
   if (!HasAttr(kNameSpaceID_None, nsGkAtoms::itemprop)) {
-    return JS::NullValue();
+    aRetval.setNull();
+    return;
   }
 
   if (ItemScope()) {
     JS::Rooted<JS::Value> v(aCx);
-    if (!mozilla::dom::WrapObject(aCx, scope, this, &v)) {
+    JSAutoCompartment ac(aCx, scope);
+    if (!mozilla::dom::WrapObject(aCx, this, aRetval)) {
       aError.Throw(NS_ERROR_FAILURE);
-      return JS::UndefinedValue();
     }
-    return v;
+    return;
   }
 
   nsString string;
   GetItemValueText(string);
-  JS::Value v;
-  if (!xpc::NonVoidStringToJsval(aCx, string, &v)) {
+  if (!xpc::NonVoidStringToJsval(aCx, string, aRetval)) {
     aError.Throw(NS_ERROR_FAILURE);
-    return JS::UndefinedValue();
   }
-  return v;
 }
 
 NS_IMETHODIMP
@@ -3162,7 +3079,7 @@ nsGenericHTMLElement::GetItemValue(nsIVariant** aValue)
   }
 
   if (ItemScope()) {
-    out->SetAsISupports(static_cast<nsISupports*>(this));
+    out->SetAsISupports(static_cast<nsIContent*>(this));
   } else {
     nsAutoString string;
     GetItemValueText(string);
@@ -3183,7 +3100,7 @@ nsGenericHTMLElement::SetItemValue(JSContext* aCx, JS::Value aValue,
     return;
   }
 
-  FakeDependentString string;
+  binding_detail::FakeDependentString string;
   JS::Rooted<JS::Value> value(aCx, aValue);
   if (!ConvertJSValueToString(aCx, value, &value, eStringify, eStringify, string)) {
     aError.Throw(NS_ERROR_UNEXPECTED);
@@ -3225,13 +3142,43 @@ nsDOMSettableTokenListPropertyDestructor(void *aObject, nsIAtom *aProperty,
 {
   nsDOMSettableTokenList* list =
     static_cast<nsDOMSettableTokenList*>(aPropertyValue);
-  list->DropReference();
   NS_RELEASE(list);
+}
+
+static nsIAtom** sPropertiesToTraverseAndUnlink[] =
+  {
+    &nsGkAtoms::microdataProperties,
+    &nsGkAtoms::itemtype,
+    &nsGkAtoms::itemref,
+    &nsGkAtoms::itemprop,
+    &nsGkAtoms::sandbox,
+    &nsGkAtoms::sizes,
+    nullptr
+  };
+
+// static
+nsIAtom***
+nsGenericHTMLElement::PropertiesToTraverseAndUnlink()
+{
+  return sPropertiesToTraverseAndUnlink;
 }
 
 nsDOMSettableTokenList*
 nsGenericHTMLElement::GetTokenList(nsIAtom* aAtom)
 {
+#ifdef DEBUG
+    nsIAtom*** props =
+      nsGenericHTMLElement::PropertiesToTraverseAndUnlink();
+    bool found = false;
+    for (uint32_t i = 0; props[i]; ++i) {
+      if (*props[i] == aAtom) {
+        found = true;
+        break;
+      }
+    }
+    MOZ_ASSERT(found, "Trying to use an unknown tokenlist!");
+#endif
+
   nsDOMSettableTokenList* list = nullptr;
   if (HasProperties()) {
     list = static_cast<nsDOMSettableTokenList*>(GetProperty(aAtom));
@@ -3286,10 +3233,11 @@ nsGenericHTMLElement::Properties()
   return properties;
 }
 
-void
+NS_IMETHODIMP
 nsGenericHTMLElement::GetProperties(nsISupports** aProperties)
 {
   NS_ADDREF(*aProperties = static_cast<nsIHTMLCollection*>(Properties()));
+  return NS_OK;
 }
 
 nsSize

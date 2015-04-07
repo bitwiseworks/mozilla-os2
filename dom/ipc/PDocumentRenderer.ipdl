@@ -5,7 +5,9 @@
 
 include protocol PBrowser;
 
-using nsIntSize;
+include "mozilla/GfxMessageUtils.h";
+
+using struct nsIntSize from "nsSize.h";
 
 namespace mozilla {
 namespace ipc {

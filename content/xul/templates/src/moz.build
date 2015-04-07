@@ -4,9 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'xultmpl'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsContentSupportMap.cpp',
     'nsContentTestNode.cpp',
     'nsInstantiationNode.cpp',
@@ -35,5 +33,13 @@ CPP_SOURCES += [
     'nsXULTreeBuilder.cpp',
 ]
 
-LIBRARY_NAME = 'gkconxultmpl_s'
+MSVC_ENABLE_PGO = True
 
+LOCAL_INCLUDES += [
+    '../../content/src',
+    '/content/base/src',
+    '/dom/base',
+    '/layout/xul/tree/',
+]
+
+FINAL_LIBRARY = 'gklayout'

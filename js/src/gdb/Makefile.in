@@ -4,20 +4,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@ @srcdir@/tests
+LIBS = ../$(LIB_PREFIX)js_static.$(LIB_SUFFIX) $(NSPR_LIBS) $(MOZ_ZLIB_LIBS)
 
-include $(DEPTH)/config/autoconf.mk
-
-# Building against js_static requires that we declare mfbt sybols "exported"
-# on its behalf.
-DEFINES += -DEXPORT_JS_API -DIMPL_MFBT
-
-LIBS = $(DEPTH)/$(LIB_PREFIX)js_static.$(LIB_SUFFIX) $(NSPR_LIBS) $(MOZ_ZLIB_LIBS)
-
-LOCAL_INCLUDES += -I$(topsrcdir) -I..
+ifdef MOZ_SHARED_ICU
+EXTRA_LIBS += $(MOZ_ICU_LIBS)
+endif
 
 EXTRA_LIBS += $(MOZ_FFI_LIBS)
 
@@ -25,10 +16,8 @@ EXTRA_LIBS += $(MOZ_FFI_LIBS)
 # in the build directory and in the dist/bin directory.
 PP_TARGETS += GDB_AUTOLOAD
 GDB_AUTOLOAD := gdb-tests-gdb.py.in
-GDB_AUTOLOAD_FLAGS := -Dtopsrcdir=$(abspath $(topsrcdir))
+GDB_AUTOLOAD_FLAGS := -Dtopsrcdir=$(abspath $(srcdir)/..)
 
 INSTALL_TARGETS += GDB_INSTALL_AUTOLOAD
 GDB_INSTALL_AUTOLOAD_FILES := $(CURDIR)/gdb-tests-gdb.py
 GDB_INSTALL_AUTOLOAD_DEST := $(DIST)/bin
-
-include $(topsrcdir)/config/rules.mk

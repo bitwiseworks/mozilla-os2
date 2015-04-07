@@ -9,22 +9,16 @@
 #define nsHTMLFrameset_h___
 
 #include "mozilla/Attributes.h"
-#include "nsGkAtoms.h"
 #include "nsContainerFrame.h"
 #include "nsColor.h"
-#include "nsIObserver.h"
-#include "nsWeakPtr.h"
 
 class  nsIContent;
-class  nsIFrame;
 class  nsPresContext;
-class  nsRenderingContext;
 struct nsRect;
 struct nsHTMLReflowState;
 struct nsSize;
 class  nsIAtom;
 class  nsHTMLFramesetBorderFrame;
-class  nsGUIEvent;
 class  nsHTMLFramesetFrame;
 
 #define NO_COLOR 0xFFFFFFFA
@@ -82,8 +76,8 @@ public:
                     nsIFrame*        aParent,
                     nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 
-  NS_IMETHOD SetInitialChildList(ChildListID  aListID,
-                                 nsFrameList& aChildList) MOZ_OVERRIDE;
+  virtual nsresult SetInitialChildList(ChildListID  aListID,
+                                       nsFrameList& aChildList) MOZ_OVERRIDE;
 
   static bool    gDragInProgress;
 
@@ -93,35 +87,35 @@ public:
                         nsSize&  aSize, 
                         nsIntPoint& aCellIndex);
 
-  NS_IMETHOD HandleEvent(nsPresContext* aPresContext, 
-                         nsGUIEvent*     aEvent,
-                         nsEventStatus*  aEventStatus) MOZ_OVERRIDE;
+  virtual nsresult HandleEvent(nsPresContext* aPresContext, 
+                               mozilla::WidgetGUIEvent* aEvent,
+                               nsEventStatus* aEventStatus) MOZ_OVERRIDE;
 
-  NS_IMETHOD GetCursor(const nsPoint&    aPoint,
-                       nsIFrame::Cursor& aCursor) MOZ_OVERRIDE;
+  virtual nsresult GetCursor(const nsPoint&    aPoint,
+                             nsIFrame::Cursor& aCursor) MOZ_OVERRIDE;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  NS_IMETHOD Reflow(nsPresContext*          aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*           aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
-#ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+#ifdef DEBUG_FRAME_DUMP
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   virtual bool IsLeaf() const MOZ_OVERRIDE;
   
-  void StartMouseDrag(nsPresContext*            aPresContext, 
-                      nsHTMLFramesetBorderFrame* aBorder, 
-                      nsGUIEvent*                aEvent);
+  void StartMouseDrag(nsPresContext* aPresContext,
+                      nsHTMLFramesetBorderFrame* aBorder,
+                      mozilla::WidgetGUIEvent* aEvent);
 
   void MouseDrag(nsPresContext* aPresContext, 
-                 nsGUIEvent*     aEvent);
+                 mozilla::WidgetGUIEvent* aEvent);
 
   void EndMouseDrag(nsPresContext* aPresContext);
 
@@ -191,7 +185,7 @@ protected:
   
   void SetBorderResize(nsHTMLFramesetBorderFrame* aBorderFrame);
 
-  static int FrameResizePrefCallback(const char* aPref, void* aClosure);
+  static void FrameResizePrefCallback(const char* aPref, void* aClosure);
 
   nsFramesetDrag   mDrag;
   nsBorderColor    mEdgeColors;

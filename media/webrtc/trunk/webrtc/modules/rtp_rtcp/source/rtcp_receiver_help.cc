@@ -8,12 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "rtcp_receiver_help.h"
+#include "webrtc/modules/rtp_rtcp/source/rtcp_receiver_help.h"
 
+#include <assert.h>  // assert
 #include <string.h>  // memset
-#include <cassert>  // assert
 
-#include "modules/rtp_rtcp/source/rtp_utility.h"
+#include "webrtc/modules/rtp_rtcp/source/rtp_utility.h"
 
 namespace webrtc {
 using namespace RTCPHelp;
@@ -21,17 +21,12 @@ using namespace RTCPHelp;
 RTCPPacketInformation::RTCPPacketInformation()
     : rtcpPacketTypeFlags(0),
       remoteSSRC(0),
-      nackSequenceNumbers(0),
-      nackSequenceNumbersLength(0),
+      nackSequenceNumbers(),
       applicationSubType(0),
       applicationName(0),
       applicationData(),
       applicationLength(0),
-      reportBlock(false),
-      fractionLost(0),
-      roundTripTime(0),
-      lastReceivedExtendedHighSeqNum(0),
-      jitter(0),
+      rtt(0),
       interArrivalJitter(0),
       sliPictureId(0),
       rpsiPictureId(0),
@@ -44,7 +39,6 @@ RTCPPacketInformation::RTCPPacketInformation()
 
 RTCPPacketInformation::~RTCPPacketInformation()
 {
-    delete [] nackSequenceNumbers;
     delete [] applicationData;
     delete VoIPMetric;
 }
@@ -56,19 +50,19 @@ RTCPPacketInformation::AddVoIPMetric(const RTCPVoIPMetric* metric)
     memcpy(VoIPMetric, metric, sizeof(RTCPVoIPMetric));
 }
 
-void RTCPPacketInformation::AddApplicationData(const WebRtc_UWord8* data,
-                                               const WebRtc_UWord16 size) {
-    WebRtc_UWord8* oldData = applicationData;
-    WebRtc_UWord16 oldLength = applicationLength;
+void RTCPPacketInformation::AddApplicationData(const uint8_t* data,
+                                               const uint16_t size) {
+    uint8_t* oldData = applicationData;
+    uint16_t oldLength = applicationLength;
 
     // Don't copy more than kRtcpAppCode_DATA_SIZE bytes.
-    WebRtc_UWord16 copySize = size;
+    uint16_t copySize = size;
     if (size > kRtcpAppCode_DATA_SIZE) {
         copySize = kRtcpAppCode_DATA_SIZE;
     }
 
     applicationLength += copySize;
-    applicationData = new WebRtc_UWord8[applicationLength];
+    applicationData = new uint8_t[applicationLength];
 
     if (oldData)
     {
@@ -84,41 +78,33 @@ void RTCPPacketInformation::AddApplicationData(const WebRtc_UWord8* data,
 void
 RTCPPacketInformation::ResetNACKPacketIdArray()
 {
-    if (NULL == nackSequenceNumbers)
-    {
-        nackSequenceNumbers = new WebRtc_UWord16[NACK_PACKETS_MAX_SIZE];
-    }
-    nackSequenceNumbersLength = 0;
+  nackSequenceNumbers.clear();
 }
 
 void
-RTCPPacketInformation::AddNACKPacket(const WebRtc_UWord16 packetID)
+RTCPPacketInformation::AddNACKPacket(const uint16_t packetID)
 {
-    assert(nackSequenceNumbers);
-
-    WebRtc_UWord16& idx = nackSequenceNumbersLength;
-    if (idx < NACK_PACKETS_MAX_SIZE)
-    {
-        nackSequenceNumbers[idx++] = packetID;
-    }
+  if (nackSequenceNumbers.size() >= kSendSideNackListSizeSanity) {
+    return;
+  }
+  nackSequenceNumbers.push_back(packetID);
 }
 
 void
-RTCPPacketInformation::AddReportInfo(const WebRtc_UWord8 fraction,
-                                     const WebRtc_UWord16 rtt,
-                                     const WebRtc_UWord32 extendedHighSeqNum,
-                                     const WebRtc_UWord32 j)
+RTCPPacketInformation::AddReportInfo(
+    const RTCPReportBlockInformation& report_block_info)
 {
-    reportBlock = true;
-    fractionLost = fraction;
-    roundTripTime = rtt;
-    jitter = j;
-    lastReceivedExtendedHighSeqNum = extendedHighSeqNum;
+  this->rtt = report_block_info.RTT;
+  report_blocks.push_back(report_block_info.remoteReceiveBlock);
 }
 
 RTCPReportBlockInformation::RTCPReportBlockInformation():
     remoteReceiveBlock(),
     remoteMaxJitter(0),
+    remotePacketsReceived(0),
+    remoteOctetsReceived(0),
+    lastReceivedRRNTPsecs(0),
+    lastReceivedRRNTPfrac(0),
     RTT(0),
     minRTT(0),
     maxRTT(0),
@@ -145,7 +131,7 @@ RTCPReceiveInformation::~RTCPReceiveInformation() {
 // Increase size of TMMBRSet if needed, and also take care of
 // the _tmmbrSetTimeouts vector.
 void RTCPReceiveInformation::VerifyAndAllocateTMMBRSet(
-    const WebRtc_UWord32 minimumSize) {
+    const uint32_t minimumSize) {
   if (minimumSize > TmmbrSet.sizeOfSet()) {
     TmmbrSet.VerifyAndAllocateSetKeepingData(minimumSize);
     // make sure that our buffers are big enough
@@ -154,11 +140,11 @@ void RTCPReceiveInformation::VerifyAndAllocateTMMBRSet(
 }
 
 void RTCPReceiveInformation::InsertTMMBRItem(
-    const WebRtc_UWord32 senderSSRC,
+    const uint32_t senderSSRC,
     const RTCPUtility::RTCPPacketRTPFBTMMBRItem& TMMBRItem,
-    const WebRtc_Word64 currentTimeMS) {
+    const int64_t currentTimeMS) {
   // serach to see if we have it in our list
-  for (WebRtc_UWord32 i = 0; i < TmmbrSet.lengthOfSet(); i++)  {
+  for (uint32_t i = 0; i < TmmbrSet.lengthOfSet(); i++)  {
     if (TmmbrSet.Ssrc(i) == senderSSRC) {
       // we already have this SSRC in our list update it
       TmmbrSet.SetEntry(i,
@@ -176,11 +162,11 @@ void RTCPReceiveInformation::InsertTMMBRItem(
   _tmmbrSetTimeouts.push_back(currentTimeMS);
 }
 
-WebRtc_Word32 RTCPReceiveInformation::GetTMMBRSet(
-    const WebRtc_UWord32 sourceIdx,
-    const WebRtc_UWord32 targetIdx,
+int32_t RTCPReceiveInformation::GetTMMBRSet(
+    const uint32_t sourceIdx,
+    const uint32_t targetIdx,
     TMMBRSet* candidateSet,
-    const WebRtc_Word64 currentTimeMS) {
+    const int64_t currentTimeMS) {
   if (sourceIdx >= TmmbrSet.lengthOfSet()) {
     return -1;
   }
@@ -203,7 +189,7 @@ WebRtc_Word32 RTCPReceiveInformation::GetTMMBRSet(
 }
 
 void RTCPReceiveInformation::VerifyAndAllocateBoundingSet(
-    const WebRtc_UWord32 minimumSize) {
+    const uint32_t minimumSize) {
   TmmbnBoundingSet.VerifyAndAllocateSet(minimumSize);
 }
-} // namespace webrtc
+}  // namespace webrtc

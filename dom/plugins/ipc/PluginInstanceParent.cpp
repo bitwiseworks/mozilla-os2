@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/DebugOnly.h"
-#include "mozilla/StandardInteger.h" // for intptr_t
+#include <stdint.h> // for intptr_t
 
 #include "PluginInstanceParent.h"
 #include "BrowserStreamParent.h"
@@ -26,11 +26,15 @@
 #include "gfxContext.h"
 #include "gfxColor.h"
 #include "gfxUtils.h"
-#include "nsNPAPIPluginInstance.h"
+#include "mozilla/gfx/2D.h"
 #include "Layers.h"
 #include "SharedTextureImage.h"
 #include "GLContext.h"
 #include "GLContextProvider.h"
+
+#ifdef XP_MACOSX
+#include "MacIOSurfaceImage.h"
+#endif
 
 #if defined(OS_WIN)
 #include <windowsx.h>
@@ -38,10 +42,10 @@
 #include "mozilla/plugins/PluginSurfaceParent.h"
 
 // Plugin focus event for widget.
-extern const PRUnichar* kOOPPPluginFocusEventId;
+extern const wchar_t* kOOPPPluginFocusEventId;
 UINT gOOPPPluginFocusEvent =
     RegisterWindowMessage(kOOPPPluginFocusEventId);
-extern const PRUnichar* kFlashFullscreenClass;
+extern const wchar_t* kFlashFullscreenClass;
 #elif defined(MOZ_WIDGET_GTK)
 #include <gdk/gdk.h>
 #elif defined(XP_MACOSX)
@@ -70,8 +74,8 @@ PluginInstanceParent::PluginInstanceParent(PluginModuleParent* parent,
     , mWindowType(NPWindowTypeWindow)
     , mDrawingModel(kDefaultDrawingModel)
 #if defined(OS_WIN)
-    , mPluginHWND(NULL)
-    , mPluginWndProc(NULL)
+    , mPluginHWND(nullptr)
+    , mPluginWndProc(nullptr)
     , mNestedEventState(false)
 #endif // defined(XP_WIN)
 #if defined(XP_MACOSX)
@@ -80,15 +84,12 @@ PluginInstanceParent::PluginInstanceParent(PluginModuleParent* parent,
     , mShColorSpace(nullptr)
 #endif
 {
-#ifdef OS_WIN
-    mTextureMap.Init();
-#endif
 }
 
 PluginInstanceParent::~PluginInstanceParent()
 {
     if (mNPP)
-        mNPP->pdata = NULL;
+        mNPP->pdata = nullptr;
 
 #if defined(OS_WIN)
     NS_ASSERTION(!(mPluginHWND || mPluginWndProc),
@@ -113,7 +114,6 @@ PluginInstanceParent::~PluginInstanceParent()
 bool
 PluginInstanceParent::Init()
 {
-    mScriptableObjects.Init();
     return true;
 }
 
@@ -132,7 +132,7 @@ PluginInstanceParent::ActorDestroy(ActorDestroyReason why)
     // longer be valid. The X surface may be destroyed, or the shared
     // memory backing this surface may no longer be valid.
     if (mFrontSurface) {
-        mFrontSurface = NULL;
+        mFrontSurface = nullptr;
         if (mImageContainer) {
             mImageContainer->SetCurrentImage(nullptr);
         }
@@ -158,37 +158,37 @@ PluginInstanceParent::Destroy()
 }
 
 PBrowserStreamParent*
-PluginInstanceParent::AllocPBrowserStream(const nsCString& url,
-                                          const uint32_t& length,
-                                          const uint32_t& lastmodified,
-                                          PStreamNotifyParent* notifyData,
-                                          const nsCString& headers,
-                                          const nsCString& mimeType,
-                                          const bool& seekable,
-                                          NPError* rv,
-                                          uint16_t *stype)
+PluginInstanceParent::AllocPBrowserStreamParent(const nsCString& url,
+                                                const uint32_t& length,
+                                                const uint32_t& lastmodified,
+                                                PStreamNotifyParent* notifyData,
+                                                const nsCString& headers,
+                                                const nsCString& mimeType,
+                                                const bool& seekable,
+                                                NPError* rv,
+                                                uint16_t *stype)
 {
     NS_RUNTIMEABORT("Not reachable");
-    return NULL;
+    return nullptr;
 }
 
 bool
-PluginInstanceParent::DeallocPBrowserStream(PBrowserStreamParent* stream)
+PluginInstanceParent::DeallocPBrowserStreamParent(PBrowserStreamParent* stream)
 {
     delete stream;
     return true;
 }
 
 PPluginStreamParent*
-PluginInstanceParent::AllocPPluginStream(const nsCString& mimeType,
-                                         const nsCString& target,
-                                         NPError* result)
+PluginInstanceParent::AllocPPluginStreamParent(const nsCString& mimeType,
+                                               const nsCString& target,
+                                               NPError* result)
 {
     return new PluginStreamParent(this, mimeType, target, result);
 }
 
 bool
-PluginInstanceParent::DeallocPPluginStream(PPluginStreamParent* stream)
+PluginInstanceParent::DeallocPPluginStreamParent(PPluginStreamParent* stream)
 {
     delete stream;
     return true;
@@ -432,7 +432,7 @@ PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginDrawingModel(
                 mImageContainer->SetCompositionNotifySink(nullptr);
             }
             DeallocShmem(mRemoteImageDataShmem);
-            mRemoteImageDataMutex = NULL;
+            mRemoteImageDataMutex = nullptr;
         }
     } else {
         *result = NPERR_GENERIC_ERROR;
@@ -478,12 +478,12 @@ PluginInstanceParent::AnswerNPN_PostURL(const nsCString& url,
 }
 
 PStreamNotifyParent*
-PluginInstanceParent::AllocPStreamNotify(const nsCString& url,
-                                         const nsCString& target,
-                                         const bool& post,
-                                         const nsCString& buffer,
-                                         const bool& file,
-                                         NPError* result)
+PluginInstanceParent::AllocPStreamNotifyParent(const nsCString& url,
+                                               const nsCString& target,
+                                               const bool& post,
+                                               const nsCString& buffer,
+                                               const bool& file,
+                                               NPError* result)
 {
     return new StreamNotifyParent();
 }
@@ -532,7 +532,7 @@ PluginInstanceParent::AnswerPStreamNotifyConstructor(PStreamNotifyParent* actor,
 }
 
 bool
-PluginInstanceParent::DeallocPStreamNotify(PStreamNotifyParent* notifyData)
+PluginInstanceParent::DeallocPStreamNotifyParent(PStreamNotifyParent* notifyData)
 {
     delete notifyData;
     return true;
@@ -556,6 +556,7 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
          updatedRect.right - updatedRect.left,
          updatedRect.bottom - updatedRect.top));
 
+    // XXXjwatt rewrite to use Moz2D
     nsRefPtr<gfxASurface> surface;
     if (newSurface.type() == SurfaceDescriptor::TShmem) {
         if (!newSurface.get_Shmem().IsReadable()) {
@@ -611,7 +612,7 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
         // the plugin.  We might still have drawing operations
         // referencing it.
 #ifdef MOZ_X11
-        if (mFrontSurface->GetType() == gfxASurface::SurfaceTypeXlib) {
+        if (mFrontSurface->GetType() == gfxSurfaceType::Xlib) {
             // Finish with the surface and XSync here to ensure the server has
             // finished operations on the surface before the plugin starts
             // scribbling on it again, or worse, destroys it.
@@ -638,13 +639,12 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
         surface->MarkDirty(ur);
 
         ImageContainer *container = GetImageContainer();
-        ImageFormat format = CAIRO_SURFACE;
-        nsRefPtr<Image> image = container->CreateImage(&format, 1);
-        NS_ASSERTION(image->GetFormat() == CAIRO_SURFACE, "Wrong format?");
+        nsRefPtr<Image> image = container->CreateImage(ImageFormat::CAIRO_SURFACE);
+        NS_ASSERTION(image->GetFormat() == ImageFormat::CAIRO_SURFACE, "Wrong format?");
         CairoImage* cairoImage = static_cast<CairoImage*>(image.get());
         CairoImage::Data cairoData;
-        cairoData.mSurface = surface;
-        cairoData.mSize = surface->GetSize();
+        cairoData.mSize = surface->GetSize().ToIntSize();
+        cairoData.mSourceSurface = gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr, surface);
         cairoImage->SetData(cairoData);
 
         container->SetCurrentImage(cairoImage);
@@ -686,36 +686,11 @@ PluginInstanceParent::AsyncSetWindow(NPWindow* aWindow)
     return NS_OK;
 }
 
-#if defined(MOZ_WIDGET_QT) && (MOZ_PLATFORM_MAEMO == 6)
-nsresult
-PluginInstanceParent::HandleGUIEvent(const nsGUIEvent& anEvent, bool* handled)
-{
-    switch (anEvent.eventStructType) {
-    case NS_KEY_EVENT:
-        if (!CallHandleKeyEvent(static_cast<const nsKeyEvent&>(anEvent),
-                                handled)) {
-            return NS_ERROR_FAILURE;
-        }
-        break;
-    case NS_TEXT_EVENT:
-        if (!CallHandleTextEvent(static_cast<const nsTextEvent&>(anEvent),
-                                 handled)) {
-            return NS_ERROR_FAILURE;
-        }
-        break;
-    default:
-        NS_ERROR("Not implemented for this event type");
-        return NS_ERROR_FAILURE;
-    }
-    return NS_OK;
-}
-#endif
-
 nsresult
 PluginInstanceParent::GetImageContainer(ImageContainer** aContainer)
 {
 #ifdef XP_MACOSX
-    MacIOSurface* ioSurface = NULL;
+    MacIOSurface* ioSurface = nullptr;
   
     if (mFrontIOSurface) {
       ioSurface = mFrontIOSurface;
@@ -743,26 +718,15 @@ PluginInstanceParent::GetImageContainer(ImageContainer** aContainer)
 
 #ifdef XP_MACOSX
     if (ioSurface) {
-        ImageFormat format = SHARED_TEXTURE;
-        nsRefPtr<Image> image = container->CreateImage(&format, 1);
+        nsRefPtr<Image> image = container->CreateImage(ImageFormat::MAC_IOSURFACE);
         if (!image) {
             return NS_ERROR_FAILURE;
         }
 
-        NS_ASSERTION(image->GetFormat() == SHARED_TEXTURE, "Wrong format?");
+        NS_ASSERTION(image->GetFormat() == ImageFormat::MAC_IOSURFACE, "Wrong format?");
 
-        SharedTextureImage::Data data;
-        data.mShareType = GLContext::SameProcess;
-        data.mHandle = GLContextProviderCGL::CreateSharedHandle(data.mShareType,
-                                                                ioSurface,
-                                                                GLContext::IOSurface);
-        data.mInverted = false;
-        // Use the device pixel size of the IOSurface, since layers handles resolution scaling
-        // already.
-        data.mSize = gfxIntSize(ioSurface->GetDevicePixelWidth(), ioSurface->GetDevicePixelHeight());
-
-        SharedTextureImage* pluginImage = static_cast<SharedTextureImage*>(image.get());
-        pluginImage->SetData(data);
+        MacIOSurfaceImage* pluginImage = static_cast<MacIOSurfaceImage*>(image.get());
+        pluginImage->SetSurface(ioSurface);
 
         container->SetCurrentImageInTransaction(pluginImage);
 
@@ -850,14 +814,16 @@ PluginInstanceParent::BeginUpdateBackground(const nsIntRect& aRect,
         }
     }
 
-#ifdef DEBUG
     gfxIntSize sz = mBackground->GetSize();
+#ifdef DEBUG
     NS_ABORT_IF_FALSE(nsIntRect(0, 0, sz.width, sz.height).Contains(aRect),
                       "Update outside of background area");
 #endif
 
-    nsRefPtr<gfxContext> ctx = new gfxContext(mBackground);
-    *aCtx = ctx.forget().get();
+    RefPtr<gfx::DrawTarget> dt = gfxPlatform::GetPlatform()->
+      CreateDrawTargetForSurface(mBackground, gfx::IntSize(sz.width, sz.height));
+    nsRefPtr<gfxContext> ctx = new gfxContext(dt);
+    ctx.forget(aCtx);
 
     return NS_OK;
 }
@@ -909,7 +875,7 @@ PluginInstanceParent::CreateBackground(const nsIntSize& aSize)
         gfxSharedImageSurface::CreateUnsafe(
             this,
             gfxIntSize(aSize.width, aSize.height),
-            gfxASurface::ImageFormatRGB24);
+            gfxImageFormat::RGB24);
     return !!mBackground;
 #else
     return nullptr;
@@ -970,14 +936,14 @@ PluginInstanceParent::GetImageContainer()
 }
 
 PPluginBackgroundDestroyerParent*
-PluginInstanceParent::AllocPPluginBackgroundDestroyer()
+PluginInstanceParent::AllocPPluginBackgroundDestroyerParent()
 {
     NS_RUNTIMEABORT("'Power-user' ctor is used exclusively");
     return nullptr;
 }
 
 bool
-PluginInstanceParent::DeallocPPluginBackgroundDestroyer(
+PluginInstanceParent::DeallocPPluginBackgroundDestroyerParent(
     PPluginBackgroundDestroyerParent* aActor)
 {
     delete aActor;
@@ -1246,11 +1212,11 @@ PluginInstanceParent::NPP_HandleEvent(void* event)
               // which fires WM_KILLFOCUS. Delayed delivery causes Flash to
               // misinterpret the event, dropping back out of fullscreen. Trap
               // this event and drop it.
-              PRUnichar szClass[26];
+              wchar_t szClass[26];
               HWND hwnd = GetForegroundWindow();
               if (hwnd && hwnd != mPluginHWND &&
                   GetClassNameW(hwnd, szClass,
-                                sizeof(szClass)/sizeof(PRUnichar)) &&
+                                sizeof(szClass)/sizeof(char16_t)) &&
                   !wcscmp(szClass, kFlashFullscreenClass)) {
                   return 0;
               }
@@ -1472,7 +1438,7 @@ PluginInstanceParent::NPP_Print(NPPrint* platformPrint)
 }
 
 PPluginScriptableObjectParent*
-PluginInstanceParent::AllocPPluginScriptableObject()
+PluginInstanceParent::AllocPPluginScriptableObjectParent()
 {
     return new PluginScriptableObjectParent(Proxy);
 }
@@ -1503,7 +1469,7 @@ ActorSearch(NPObject* aKey,
 #endif // DEBUG
 
 bool
-PluginInstanceParent::DeallocPPluginScriptableObject(
+PluginInstanceParent::DeallocPPluginScriptableObjectParent(
                                          PPluginScriptableObjectParent* aObject)
 {
     PluginScriptableObjectParent* actor =
@@ -1562,7 +1528,6 @@ PluginInstanceParent::RegisterNPObjectForActor(
                                            PluginScriptableObjectParent* aActor)
 {
     NS_ASSERTION(aObject && aActor, "Null pointers!");
-    NS_ASSERTION(mScriptableObjects.IsInitialized(), "Hash not initialized!");
     NS_ASSERTION(!mScriptableObjects.Get(aObject, nullptr), "Duplicate entry!");
     mScriptableObjects.Put(aObject, aActor);
     return true;
@@ -1572,7 +1537,6 @@ void
 PluginInstanceParent::UnregisterNPObject(NPObject* aObject)
 {
     NS_ASSERTION(aObject, "Null pointer!");
-    NS_ASSERTION(mScriptableObjects.IsInitialized(), "Hash not initialized!");
     NS_ASSERTION(mScriptableObjects.Get(aObject, nullptr), "Unknown entry!");
     mScriptableObjects.Remove(aObject);
 }
@@ -1610,20 +1574,20 @@ PluginInstanceParent::GetActorForNPObject(NPObject* aObject)
 }
 
 PPluginSurfaceParent*
-PluginInstanceParent::AllocPPluginSurface(const WindowsSharedMemoryHandle& handle,
-                                          const gfxIntSize& size,
-                                          const bool& transparent)
+PluginInstanceParent::AllocPPluginSurfaceParent(const WindowsSharedMemoryHandle& handle,
+                                                const gfxIntSize& size,
+                                                const bool& transparent)
 {
 #ifdef XP_WIN
     return new PluginSurfaceParent(handle, size, transparent);
 #else
     NS_ERROR("This shouldn't be called!");
-    return NULL;
+    return nullptr;
 #endif
 }
 
 bool
-PluginInstanceParent::DeallocPPluginSurface(PPluginSurfaceParent* s)
+PluginInstanceParent::DeallocPPluginSurfaceParent(PPluginSurfaceParent* s)
 {
 #ifdef XP_WIN
     delete s;
@@ -1757,7 +1721,7 @@ PluginInstanceParent::AnswerNPN_InitAsyncSurface(const gfxIntSize& size,
             CD3D10_TEXTURE2D_DESC desc(DXGI_FORMAT_B8G8R8A8_UNORM, size.width, size.height, 1, 1);
             desc.MiscFlags = D3D10_RESOURCE_MISC_SHARED_KEYEDMUTEX;
             desc.BindFlags = D3D10_BIND_RENDER_TARGET | D3D10_BIND_SHADER_RESOURCE;
-            if (FAILED(device->CreateTexture2D(&desc, NULL, getter_AddRefs(texture)))) {
+            if (FAILED(device->CreateTexture2D(&desc, nullptr, getter_AddRefs(texture)))) {
                 *result = false;
                 return true;
             }
@@ -1836,7 +1800,7 @@ PluginInstanceParent::RecvReleaseDXGISharedSurface(const DXGISharedSurfaceHandle
     which fires off a gui event letting the browser know.
 */
 
-static const PRUnichar kPluginInstanceParentProperty[] =
+static const wchar_t kPluginInstanceParentProperty[] =
                          L"PluginInstanceParentProperty";
 
 // static
@@ -1904,8 +1868,8 @@ PluginInstanceParent::UnsubclassPluginWindow()
 
         ::RemovePropW(mPluginHWND, kPluginInstanceParentProperty);
 
-        mPluginWndProc = NULL;
-        mPluginHWND = NULL;
+        mPluginWndProc = nullptr;
+        mPluginHWND = nullptr;
     }
 }
 

@@ -2,31 +2,10 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 MARIONETTE_TIMEOUT = 30000;
-
-SpecialPowers.addPermission("mobileconnection", true, document);
-
-let icc = navigator.mozIccManager;
-ok(icc instanceof MozIccManager, "icc is instanceof " + icc.constructor);
-
-/* Reset pin retries by passing correct pin code. */
-function resetPinRetries(pin, callback) {
-  let request = icc.setCardLock(
-    {lockType: "pin",
-     pin: pin,
-     newPin: pin});
-
-  request.onsuccess = function onsuccess() {
-    callback();
-  };
-
-  request.onerror = function onerror() {
-    is(false, "Reset pin retries got error: " + request.error.name);
-    callback();
-  };
-}
+MARIONETTE_HEAD_JS = "icc_header.js";
 
 /* Test PIN code changes fail */
-function testPinChangeFailed() {
+taskHelper.push(function testPinChangeFailed() {
   // The default pin is '0000' in emulator
   let request = icc.setCardLock(
     {lockType: "pin",
@@ -38,35 +17,29 @@ function testPinChangeFailed() {
 
   request.onerror = function onerror() {
     is(request.error.name, "IncorrectPassword");
-
-    resetPinRetries("0000", runNextTest);
-  };
-}
-
-/* Test PIN code changes fail notification */
-function testPinChangeFailedNotification() {
-  icc.addEventListener("icccardlockerror", function onicccardlockerror(result) {
-    icc.removeEventListener("icccardlockerror", onicccardlockerror);
-
-    is(result.lockType, "pin");
+    is(request.error.lockType, "pin");
     // The default pin retries is 3, failed once becomes to 2
-    is(result.retryCount, 2);
+    is(request.error.retryCount, 2);
 
-    resetPinRetries("0000", runNextTest);
-  });
+    // Reset pin retries by passing correct pin code.
+    let resetRequest = icc.setCardLock(
+      {lockType: "pin",
+       pin: "0000",
+       newPin: "0000"});
 
-  // The default pin is '0000' in emulator
-  let request = icc.setCardLock(
-    {lockType: "pin",
-     pin: "1111",
-     newPin: "0000"});
+    resetRequest.onsuccess = function onsuccess() {
+      taskHelper.runNext();
+    };
 
-  ok(request instanceof DOMRequest,
-     "request instanceof " + request.constructor);
-}
+    resetRequest.onerror = function onerror() {
+      ok(false, "Reset pin retries got error: " + request.error.name);
+      taskHelper.runNext();
+    };
+  };
+});
 
 /* Test PIN code changes success */
-function testPinChangeSuccess() {
+taskHelper.push(function testPinChangeSuccess() {
   // The default pin is '0000' in emulator
   let request = icc.setCardLock(
     {lockType: "pin",
@@ -79,37 +52,83 @@ function testPinChangeSuccess() {
   request.onerror = function onerror() {
     ok(false, "Should not fail, got error: " + request.error.name);
 
-    runNextTest();
+    taskHelper.runNext();
   };
 
   request.onsuccess = function onsuccess() {
     is(request.result.lockType, "pin");
     is(request.result.success, true);
 
-    runNextTest();
+    taskHelper.runNext();
   };
-}
+});
 
-let tests = [
-  testPinChangeFailed,
-  testPinChangeFailedNotification,
-  testPinChangeSuccess,
-];
+/* Read PIN-lock retry count */
+taskHelper.push(function testPinCardLockRetryCount() {
+  let request = icc.getCardLockRetryCount('pin');
 
-function runNextTest() {
-  let test = tests.shift();
-  if (!test) {
-    cleanUp();
-    return;
-  }
+  ok(request instanceof DOMRequest,
+     'request instanceof ' + request.constructor);
 
-  test();
-}
+  request.onsuccess = function onsuccess() {
+    is(request.result.lockType, 'pin',
+        'lockType is ' + request.result.lockType);
+    ok(request.result.retryCount >= 0,
+        'retryCount is ' + request.result.retryCount);
+    taskHelper.runNext();
+  };
+  request.onerror = function onerror() {
+    // The operation is optional any might not be supported for all
+    // all locks. In this case, we generate 'NotSupportedError' for
+    // the valid lock types.
+    is(request.error.name, 'RequestNotSupported',
+        'error name is ' + request.error.name);
+    taskHelper.runNext();
+  };
+});
 
-function cleanUp() {
-  SpecialPowers.removePermission("mobileconnection", document);
+/* Read PUK-lock retry count */
+taskHelper.push(function testPukCardLockRetryCount() {
+  let request = icc.getCardLockRetryCount('puk');
 
-  finish();
-}
+  ok(request instanceof DOMRequest,
+     'request instanceof ' + request.constructor);
 
-runNextTest();
+  request.onsuccess = function onsuccess() {
+    is(request.result.lockType, 'puk',
+        'lockType is ' + request.result.lockType);
+    ok(request.result.retryCount >= 0,
+        'retryCount is ' + request.result.retryCount);
+    taskHelper.runNext();
+  };
+  request.onerror = function onerror() {
+    // The operation is optional any might not be supported for all
+    // all locks. In this case, we generate 'NotSupportedError' for
+    // the valid lock types.
+    is(request.error.name, 'RequestNotSupported',
+        'error name is ' + request.error.name);
+    taskHelper.runNext();
+  };
+});
+
+/* Read lock retry count for an invalid entries  */
+taskHelper.push(function testInvalidCardLockRetryCount() {
+  let request = icc.getCardLockRetryCount('invalid-lock-type');
+
+  ok(request instanceof DOMRequest,
+     'request instanceof ' + request.constructor);
+
+  request.onsuccess = function onsuccess() {
+    ok(false,
+        'request should never return success for an invalid lock type');
+    taskHelper.runNext();
+  };
+  request.onerror = function onerror() {
+    is(request.error.name, 'GenericFailure',
+        'error name is ' + request.error.name);
+    taskHelper.runNext();
+  };
+});
+
+// Start test
+taskHelper.runNext();

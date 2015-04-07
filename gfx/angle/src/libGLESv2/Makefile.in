@@ -1,95 +1,25 @@
-# 
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH     = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir    = @srcdir@
-VPATH     = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-# On Windows, we don't automatically get "lib" prepended, but we need it.
-FORCE_SHARED_LIB = 1
-
-# ANGLE uses the STL, so we can't use our derpy STL wrappers.
-STL_FLAGS =
-
-# ANGLE uses exceptions internally, so we need to have exception handling
-# support
-ENABLE_CXX_EXCEPTIONS = 1
-
 ifndef GNU_CC
 # Enable unwind semantics for exception handlers in response to warning C4530.
 OS_CPPFLAGS += -EHsc
+else
+OS_CXXFLAGS := $(filter-out -fno-exceptions,$(OS_CXXFLAGS)) -fexceptions
 endif
-
-# Since we're building off in our own world, we don't want to have
-#
-# we just overwrite OS_COMPILE_C(XX)FLAGS.
-OS_COMPILE_CFLAGS   = $(OS_CPPFLAGS)
-OS_COMPILE_CXXFLAGS = $(OS_CPPFLAGS)
-
-DEFINES += -DANGLE_BUILD -DNOMINMAX -DLIBGLESV2_EXPORTS -D_CRT_SECURE_NO_DEPRECATE
-
-ifndef MOZ_DEBUG
-DEFINES += -D_SECURE_SCL=0
-endif
-
-# The below is a rough translation of build_angle.gypi,
-# copied from src/Makefile.in.
-
-DEFINES += -DANGLE_DISABLE_TRACE
-DEFINES += -DANGLE_COMPILE_OPTIMIZATION_LEVEL=D3DCOMPILE_OPTIMIZATION_LEVEL1
-
-# Target: 'preprocessor'
-# src/compiler/preprocessor:
-VPATH += $(srcdir)/../compiler/preprocessor
-
-# Target: 'translator_common'
-#   Requires: 'preprocessor'
-LOCAL_INCLUDES += \
-  -I$(srcdir)/../../include \
-  -I$(srcdir)/../../include/KHR \
-  -I$(srcdir)/..
-
-DEFINES += -DCOMPILER_IMPLEMENTATION
-
-VPATH += $(srcdir)/../compiler
-VPATH += $(srcdir)/../compiler/depgraph
-VPATH += $(srcdir)/../compiler/timing
-VPATH += $(srcdir)/../third_party/compiler
-
-# Above should match the relevant targets from angle/Makefile.in.
-
-# Below is a transcription of more targets from build_angle.gypi.
-
-# Target: 'translator_hlsl'
-#   Requires: 'translator_common'
-
-# Target: 'libGLESv2'
-#   Requires: 'translator_hlsl'
-LOCAL_INCLUDES += -I"$(MOZ_DIRECTX_SDK_PATH)/include"
-
-VPATH += $(srcdir)/../common
-# src/common:
-DEFFILE = $(srcdir)/libGLESv2.def
-RCFILE  = $(srcdir)/libGLESv2.rc
 
 # End build_angle.gypi transcription.
 
 include $(topsrcdir)/config/rules.mk
 
-ifdef GNU_CC
-
-TextureSSE2.$(OBJ_SUFFIX): CXXFLAGS+=-msse2
-
-OS_CXXFLAGS := $(filter-out -fno-exceptions,$(OS_CXXFLAGS)) -fexceptions
-OS_LIBS += -ld3d9
-
-else
-
-EXTRA_DSO_LDOPTS = "$(MOZ_DIRECTX_SDK_PATH)/lib/$(MOZ_DIRECTX_SDK_CPU_SUFFIX)/d3d9.lib"
-
+ifndef MOZ_HAS_WINSDK_WITH_D3D
+CXXFLAGS += -I'$(MOZ_DIRECTX_SDK_PATH)/include'
 endif
+
+ifdef MOZ_HAS_WINSDK_WITH_D3D
+EXTRA_DSO_LDOPTS = $(call EXPAND_LIBNAME,d3d9 dxguid)
+else
+EXTRA_DSO_LDOPTS = $(call EXPAND_LIBNAME_PATH,d3d9 dxguid,'$(MOZ_DIRECTX_SDK_PATH)/lib/$(MOZ_DIRECTX_SDK_CPU_SUFFIX)')
+endif
+EXTRA_DSO_LDOPTS += $(call EXPAND_LIBNAME,delayimp)

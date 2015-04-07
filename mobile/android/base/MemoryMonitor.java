@@ -7,6 +7,7 @@ package org.mozilla.gecko;
 
 import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.favicons.Favicons;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.BroadcastReceiver;
@@ -55,6 +56,7 @@ class MemoryMonitor extends BroadcastReceiver {
     private final PressureDecrementer mPressureDecrementer;
     private int mMemoryPressure;
     private boolean mStoragePressure;
+    private boolean mInited;
 
     private MemoryMonitor() {
         mPressureDecrementer = new PressureDecrementer();
@@ -62,13 +64,18 @@ class MemoryMonitor extends BroadcastReceiver {
         mStoragePressure = false;
     }
 
-    public void init(Context context) {
+    public void init(final Context context) {
+        if (mInited) {
+            return;
+        }
+
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_DEVICE_STORAGE_LOW);
         filter.addAction(Intent.ACTION_DEVICE_STORAGE_OK);
         filter.addAction(ACTION_MEMORY_DUMP);
         filter.addAction(ACTION_FORCE_PRESSURE);
         context.getApplicationContext().registerReceiver(this, filter);
+        mInited = true;
     }
 
     public void onLowMemory() {
@@ -151,10 +158,10 @@ class MemoryMonitor extends BroadcastReceiver {
         if (level >= MEMORY_PRESSURE_MEDIUM) {
             //Only send medium or higher events because that's all that is used right now
             if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
-                GeckoAppShell.sendEventToGecko(GeckoEvent.createLowMemoryEvent(level));
+                GeckoAppShell.dispatchMemoryPressure();
             }
 
-            Favicons.getInstance().clearMemCache();
+            Favicons.clearMemCache();
         }
         return true;
     }

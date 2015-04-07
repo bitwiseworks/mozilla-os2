@@ -5,7 +5,8 @@
 
 #include "nsArray.h"
 #include "nsArrayEnumerator.h"
-#include "nsWeakReference.h"
+#include "nsIWeakReference.h"
+#include "nsIWeakReferenceUtils.h"
 #include "nsThreadUtils.h"
 
 // used by IndexOf()
@@ -38,6 +39,8 @@ nsArray::~nsArray()
 
 NS_IMPL_ADDREF(nsArray)
 NS_IMPL_RELEASE(nsArray)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsArrayCC)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsArrayCC)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsArrayCC)

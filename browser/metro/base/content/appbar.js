@@ -4,8 +4,6 @@
 "use strict";
 
 var Appbar = {
-  get consoleButton() { return document.getElementById('console-button'); },
-  get jsShellButton() { return document.getElementById('jsshell-button'); },
   get starButton()    { return document.getElementById('star-button'); },
   get pinButton()     { return document.getElementById('pin-button'); },
   get menuButton()    { return document.getElementById('menu-button'); },
@@ -14,21 +12,36 @@ var Appbar = {
   activeTileset: null,
 
   init: function Appbar_init() {
-    window.addEventListener('MozContextUIShow', this);
-    window.addEventListener('MozContextUIDismiss', this);
-    window.addEventListener('MozAppbarDismiss', this);
+    // fired from appbar bindings
     Elements.contextappbar.addEventListener('MozAppbarShowing', this, false);
     Elements.contextappbar.addEventListener('MozAppbarDismissing', this, false);
+
+    // fired when a context sensitive item (bookmarks) changes state
     window.addEventListener('MozContextActionsChange', this, false);
+
+    // browser events we need to update button state on
     Elements.browsers.addEventListener('URLChanged', this, true);
     Elements.tabList.addEventListener('TabSelect', this, true);
-    Elements.panelUI.addEventListener('ToolPanelShown', this, false);
-    Elements.panelUI.addEventListener('ToolPanelHidden', this, false);
-
-    this._updateDebugButtons();
 
     // tilegroup selection events for all modules get bubbled up
     window.addEventListener("selectionchange", this, false);
+    Services.obs.addObserver(this, "metro_on_async_tile_created", false);
+
+    // gather appbar telemetry data
+    try {
+      UITelemetry.addSimpleMeasureFunction("metro-appbar",
+                                           this.getAppbarMeasures.bind(this));
+    } catch (ex) {
+      // swallow exception that occurs if metro-appbar measure is already set up
+    }
+  },
+
+  observe: function(aSubject, aTopic, aData) {
+    switch (aTopic) {
+      case "metro_on_async_tile_created":
+        this._updatePinButton();
+        break;
+    }
   },
 
   handleEvent: function Appbar_handleEvent(aEvent) {
@@ -36,33 +49,28 @@ var Appbar = {
       case 'URLChanged':
       case 'TabSelect':
         this.update();
-        Elements.navbar.dismiss();
-        Elements.contextappbar.dismiss();
+        this.flushActiveTileset(aEvent.lastTab);
         break;
-      case 'MozContextUIShow':
-        Elements.navbar.show();
-        break;
-      case 'MozAppbarDismiss':
-      case 'MozContextUIDismiss':
-      case 'ToolPanelShown':
-      case 'ToolPanelHidden':
-        Elements.navbar.dismiss();
-        Elements.contextappbar.dismiss();
-        break;
+
       case 'MozAppbarShowing':
+        this.update();
         break;
+
       case 'MozAppbarDismissing':
-        if (this.activeTileset) {
+        if (this.activeTileset && ('isBound' in this.activeTileset)) {
           this.activeTileset.clearSelection();
         }
-        this.clearContextualActions();
+        this._clearContextualActions();
         this.activeTileset = null;
         break;
+
       case 'MozContextActionsChange':
         let actions = aEvent.actions;
+        let setName = aEvent.target.contextSetName;
         // could transition in old, new buttons?
-        this.showContextualActions(actions);
+        this.showContextualActions(actions, setName);
         break;
+
       case "selectionchange":
         let nodeName = aEvent.target.nodeName;
         if ('richgrid' === nodeName) {
@@ -70,6 +78,21 @@ var Appbar = {
         }
         break;
     }
+  },
+
+  flushActiveTileset: function flushActiveTileset(aTab) {
+    try {
+      let tab = aTab || Browser.selectedTab;
+      // Switching away from or loading a site into a startui tab that has actions
+      // pending, we consider this confirmation that the user wants to flush changes.
+      if (this.activeTileset && tab && tab.browser && tab.browser.currentURI.spec == kStartURI) {
+        ContextUI.dismiss();
+      }
+    } catch (ex) {}
+  },
+
+  shutdown: function shutdown() {
+    this.flushActiveTileset();
   },
 
   /*
@@ -80,11 +103,6 @@ var Appbar = {
   update: function update() {
     this._updatePinButton();
     this._updateStarButton();
-  },
-
-  onDownloadButton: function() {
-    PanelUI.show("downloads-container");
-    ContextUI.dismiss();
   },
 
   onPinButton: function() {
@@ -112,20 +130,27 @@ var Appbar = {
   },
 
   onMenuButton: function(aEvent) {
-      var typesArray = ["find-in-page"];
-      try {
-        // If we have a valid http or https URI then show the view on desktop
-        // menu item.
-        var uri = Services.io.newURI(Browser.selectedBrowser.currentURI.spec,
-                                     null, null);
-        if (uri.schemeIs('http') || uri.schemeIs('https')) {
-          typesArray.push("view-on-desktop");
-        }
-      } catch(ex) {
+      let typesArray = [];
+
+      if (BrowserUI.isPrivateBrowsingEnabled) {
+        typesArray.push("private-browsing");
       }
+      if (!BrowserUI.isStartTabVisible) {
+        typesArray.push("find-in-page");
+        if (ContextCommands.getPageSource())
+          typesArray.push("view-page-source");
+      }
+      if (ContextCommands.getStoreLink())
+        typesArray.push("ms-meta-data");
+      if (ConsolePanelView.enabled)
+        typesArray.push("open-error-console");
+      if (!Services.metro.immersive)
+        typesArray.push("open-jsshell");
+
+      typesArray.push("view-on-desktop");
 
       var x = this.menuButton.getBoundingClientRect().left;
-      var y = Elements.navbar.getBoundingClientRect().top;
+      var y = Elements.toolbar.getBoundingClientRect().top;
       ContextMenuUI.showContextMenu({
         json: {
           types: typesArray,
@@ -140,32 +165,22 @@ var Appbar = {
   },
 
   onViewOnDesktop: function() {
-    try {
-      // Make sure we have a valid URI so Windows doesn't prompt
-      // with an unrecognized command, select default program window
-      var uri = Services.io.newURI(Browser.selectedBrowser.currentURI.spec,
-                                   null, null);
-      if (uri.schemeIs('http') || uri.schemeIs('https')) {
-        MetroUtils.launchInDesktop(Browser.selectedBrowser.currentURI.spec, "");
-      }
-    } catch(ex) {
-    }
+    let appStartup = Components.classes["@mozilla.org/toolkit/app-startup;1"].
+      getService(Components.interfaces.nsIAppStartup);
+
+    Services.prefs.setBoolPref('browser.sessionstore.resume_session_once', true);
+    this._incrementCountableEvent("switch-to-desktop-button");
+    appStartup.quit(Components.interfaces.nsIAppStartup.eAttemptQuit |
+                    Components.interfaces.nsIAppStartup.eRestart);
   },
 
-  onConsoleButton: function() {
-    PanelUI.show("console-container");
-  },
-
-  onJSShellButton: function() {
-    // XXX for debugging, this only works when running on the desktop.
-    if (!MetroUtils.immersive)
-      window.openDialog("chrome://browser/content/shell.xul", "_blank",
-                        "all=no,scrollbars=yes,resizable=yes,dialog=no");
+  onAutocompleteCloseButton: function () {
+    Elements.autocomplete.closePopup();
   },
 
   dispatchContextualAction: function(aActionName){
     let activeTileset = this.activeTileset;
-    if (activeTileset) {
+    if (activeTileset && ('isBound' in this.activeTileset)) {
       // fire event on the richgrid, others can listen
       // but we keep coupling loose so grid doesn't need to know about appbar
       let event = document.createEvent("Events");
@@ -179,35 +194,53 @@ var Appbar = {
     }
   },
 
-  showContextualActions: function(aVerbs) {
-    if (aVerbs.length)
-      Elements.contextappbar.show();
-    else
-      Elements.contextappbar.hide();
+  showContextualActions: function(aVerbs, aSetName) {
+    // When the appbar is not visible, we want the icons to refresh right away
+    let immediate = !Elements.contextappbar.isShowing;
 
-    let doc = document;
-    // button element id to action verb lookup
-    let buttonsMap = new Map();
+    if (aVerbs.length) {
+      Elements.contextappbar.show();
+    }
+
+    // Look up all of the buttons for the verbs that should be visible.
+    let idsToVisibleVerbs = new Map();
     for (let verb of aVerbs) {
       let id = verb + "-selected-button";
-      if (!doc.getElementById(id)) {
+      if (!document.getElementById(id)) {
         throw new Error("Appbar.showContextualActions: no button for " + verb);
       }
-      buttonsMap.set(id, verb);
+      idsToVisibleVerbs.set(id, verb);
     }
 
-    // sort buttons into 2 buckets - needing showing and needing hiding
-    let toHide = [],
-        toShow = [];
-    for (let btnNode of Elements.contextappbar.querySelectorAll("#contextualactions-tray > toolbarbutton")) {
-      // correct the hidden state for each button;
-      // .. buttons present in the map should be visible, otherwise not
-      if (buttonsMap.has(btnNode.id)) {
-        if (btnNode.hidden) toShow.push(btnNode);
-      } else if (!btnNode.hidden) {
-        toHide.push(btnNode);
+    // Sort buttons into 2 buckets - needing showing and needing hiding.
+    let toHide = [], toShow = [];
+    let buttons = Elements.contextappbar.getElementsByTagName("toolbarbutton");
+    for (let button of buttons) {
+      let verb = idsToVisibleVerbs.get(button.id);
+      if (verb != undefined) {
+        // Button should be visible, and may or may not be showing.
+        this._updateContextualActionLabel(button, verb, aSetName);
+        if (button.hidden) {
+          toShow.push(button);
+        }
+      } else if (!button.hidden) {
+        // Button is visible, but shouldn't be.
+        toHide.push(button);
       }
     }
+
+    if (immediate) {
+      toShow.forEach(function(element) {
+        element.removeAttribute("fade");
+        element.hidden = false;
+      });
+      toHide.forEach(function(element) {
+        element.setAttribute("fade", true);
+        element.hidden = true;
+      });
+      return;
+    }
+
     return Task.spawn(function() {
       if (toHide.length) {
         yield Util.transitionElementVisibility(toHide, false);
@@ -218,15 +251,26 @@ var Appbar = {
     });
   },
 
-  clearContextualActions: function() {
+  _clearContextualActions: function() {
     this.showContextualActions([]);
+  },
+
+  _updateContextualActionLabel: function(aButton, aVerb, aSetName) {
+    // True if the action's label string contains the set name and
+    // thus has to be selected based on the list passed in.
+    let usesSetName = aButton.hasAttribute("label-uses-set-name");
+    let name = "contextAppbar2." + aVerb + (usesSetName ? "." + aSetName : "");
+    aButton.label = Strings.browser.GetStringFromName(name);
   },
 
   _onTileSelectionChanged: function _onTileSelectionChanged(aEvent){
     let activeTileset = aEvent.target;
 
-    // deselect tiles in other tile groups
-    if (this.activeTileset && this.activeTileset !== activeTileset) {
+    // deselect tiles in other tile groups,
+    // ensure previousyl-activeTileset is bound before calling methods on it
+    if (this.activeTileset &&
+          ('isBound' in this.activeTileset) &&
+          this.activeTileset !== activeTileset) {
       this.activeTileset.clearSelection();
     }
     // keep track of which view is the target/scope for the contextual actions
@@ -241,13 +285,29 @@ var Appbar = {
     let event = document.createEvent("Events");
     event.actions = verbs;
     event.initEvent("MozContextActionsChange", true, false);
-    Elements.contextappbar.dispatchEvent(event);
+    activeTileset.dispatchEvent(event);
 
     if (verbs.length) {
       Elements.contextappbar.show(); // should be no-op if we're already showing
     } else {
       Elements.contextappbar.dismiss();
     }
+  },
+
+  // track certain appbar events and interactions for the UITelemetry probe
+  _countableEvents: {},
+
+  _incrementCountableEvent: function(aName) {
+    if (!(aName in this._countableEvents)) {
+      this._countableEvents[aName] = 0;
+    }
+    this._countableEvents[aName]++;
+  },
+
+  getAppbarMeasures: function() {
+    return {
+      countableEvents: this._countableEvents
+    };
   },
 
   _updatePinButton: function() {
@@ -260,8 +320,4 @@ var Appbar = {
     }.bind(this));
   },
 
-  _updateDebugButtons: function() {
-    this.consoleButton.disabled = !ConsolePanelView.enabled;
-    this.jsShellButton.disabled = MetroUtils.immersive;
-  },
-  };
+};

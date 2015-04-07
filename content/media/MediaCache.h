@@ -8,8 +8,11 @@
 #define MediaCache_h_
 
 #include "nsTArray.h"
-#include "nsIPrincipal.h"
 #include "nsCOMPtr.h"
+#include "nsHashKeys.h"
+#include "nsTHashtable.h"
+
+class nsIPrincipal;
 
 namespace mozilla {
 // defined in MediaResource.h
@@ -191,17 +194,7 @@ public:
 
   // aClient provides the underlying transport that cache will use to read
   // data for this stream.
-  MediaCacheStream(ChannelMediaResource* aClient)
-    : mClient(aClient), mInitialized(false),
-      mHasHadUpdate(false),
-      mClosed(false),
-      mDidNotifyDataEnded(false), mResourceID(0),
-      mIsTransportSeekable(false), mCacheSuspended(false),
-      mChannelEnded(false),
-      mChannelOffset(0), mStreamLength(-1),  
-      mStreamOffset(0), mPlaybackBytesPerSecond(10000),
-      mPinCount(0), mCurrentMode(MODE_PLAYBACK),
-      mMetadataInPartialBlockBuffer(false) {}
+  MediaCacheStream(ChannelMediaResource* aClient);
   ~MediaCacheStream();
 
   // Set up this stream with the cache. Can fail on OOM. One
@@ -345,6 +338,12 @@ public:
   // this will block until the data is available or the stream is
   // closed, otherwise it won't block.
   nsresult Read(char* aBuffer, uint32_t aCount, uint32_t* aBytes);
+  // Seeks to aOffset in the stream then performs a Read operation. See
+  // 'Read' for argument and return details.
+  nsresult ReadAt(int64_t aOffset, char* aBuffer,
+                  uint32_t aCount, uint32_t* aBytes);
+
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
 
 private:
   friend class MediaCache;
@@ -360,7 +359,7 @@ private:
    */
   class BlockList {
   public:
-    BlockList() : mFirstBlock(-1), mCount(0) { mEntries.Init(); }
+    BlockList() : mFirstBlock(-1), mCount(0) {}
     ~BlockList() {
       NS_ASSERTION(mFirstBlock == -1 && mCount == 0,
                    "Destroying non-empty block list");
@@ -388,6 +387,8 @@ private:
 #else
     void Verify() {}
 #endif
+
+    size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   private:
     struct Entry : public nsUint32HashKey {
@@ -503,7 +504,9 @@ private:
   // mChannelOffset%BLOCK_SIZE bytes have been filled in with good data,
   // the rest are garbage.
   // Use int64_t so that the data is well-aligned.
-  int64_t           mPartialBlockBuffer[BLOCK_SIZE/sizeof(int64_t)];
+  // Heap allocate this buffer since the exact power-of-2 will cause allocation
+  // slop when combined with the rest of the object members.
+  nsAutoArrayPtr<int64_t> mPartialBlockBuffer;
 };
 
 } // namespace mozilla

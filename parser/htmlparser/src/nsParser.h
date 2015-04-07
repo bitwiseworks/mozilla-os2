@@ -43,21 +43,19 @@
 
 #include "nsIParser.h"
 #include "nsDeque.h"
-#include "nsParserNode.h"
 #include "nsIURL.h"
 #include "CParserContext.h"
 #include "nsParserCIID.h"
 #include "nsITokenizer.h"
 #include "nsHTMLTags.h"
-#include "nsDTDUtils.h"
 #include "nsIContentSink.h"
 #include "nsCOMArray.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWeakReference.h"
 
-class nsICharsetConverterManager;
 class nsIDTD;
 class nsScanner;
+class nsIRunnable;
 
 #ifdef _MSC_VER
 #pragma warning( disable : 4275 )
@@ -98,7 +96,7 @@ class nsParser : public nsIParser,
      * Select given content sink into parser for parser output
      * @update	gess5/11/98
      * @param   aSink is the new sink to be used by parser
-     * @return  old sink, or NULL
+     * @return  old sink, or nullptr
      */
     NS_IMETHOD_(void) SetContentSink(nsIContentSink* aSink);
 
@@ -106,7 +104,7 @@ class nsParser : public nsIParser,
      * retrive the sink set into the parser 
      * @update	gess5/11/98
      * @param   aSink is the new sink to be used by parser
-     * @return  old sink, or NULL
+     * @return  old sink, or nullptr
      */
     NS_IMETHOD_(nsIContentSink*) GetContentSink(void);
     
@@ -301,10 +299,6 @@ class nsParser : public nsIParser,
      */
     void HandleParserContinueEvent(class nsParserContinueEvent *);
 
-    static nsICharsetConverterManager* GetCharsetConverterManager() {
-      return sCharsetConverterManager;
-    }
-
     virtual void Reset() {
       Cleanup();
       Initialize();
@@ -368,17 +362,6 @@ private:
     nsresult Tokenize(bool aIsFinalChunk = false);
 
     /**
-     *  This is the tail-end of the code sandwich for the
-     *  tokenization process. It gets called once tokenziation
-     *  has completed.
-     *  
-     *  @update  gess 3/25/98
-     *  @param   
-     *  @return  TRUE if all went well
-     */
-    bool DidTokenize(bool aIsFinalChunk = false);
-
-    /**
      * Pushes XML fragment parsing data to expat without an input stream.
      */
     nsresult Parse(const nsAString& aSourceBuffer,
@@ -396,9 +379,7 @@ protected:
     nsCOMPtr<nsIRequestObserver> mObserver;
     nsCOMPtr<nsIContentSink>     mSink;
     nsIRunnable*                 mContinueEvent;  // weak ref
-   
-    nsTokenAllocator          mTokenAllocator;
-    
+
     eParserCommands     mCommand;
     nsresult            mInternalState;
     nsresult            mStreamStatus;
@@ -412,8 +393,6 @@ protected:
 
     bool                mProcessingNetworkData;
     bool                mIsAboutBlank;
-
-    static nsICharsetConverterManager* sCharsetConverterManager;
 };
 
 #endif 

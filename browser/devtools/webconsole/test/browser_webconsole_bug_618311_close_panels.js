@@ -25,14 +25,13 @@ function test() {
   }, true);
 }
 
-function performTest() {
-  let hudId = HUDService.getHudIdByWindow(content);
-  let HUD = HUDService.hudReferences[hudId];
+function performTest(results) {
+  let HUD = HUDService.getHudByWindow(content);
 
-  let networkMessage = HUD.outputNode.querySelector(".webconsole-msg-network");
-  ok(networkMessage, "found network message");
+  let networkMessage = [...results[0].matched][0];
+  ok(networkMessage, "network message element");
 
-  let networkLink = networkMessage.querySelector(".webconsole-msg-link");
+  let networkLink = networkMessage.querySelector(".url");
   ok(networkLink, "found network message link");
 
   let popupset = document.getElementById("mainPopupSet");
@@ -46,7 +45,7 @@ function performTest() {
     popupsShown++;
 
     executeSoon(function() {
-      let popups = popupset.querySelectorAll("panel[hudId=" + hudId + "]");
+      let popups = popupset.querySelectorAll("panel[hudId=" + HUD.hudId + "]");
       is(popups.length, 1, "found one popup");
 
       document.addEventListener("popuphidden", onpopuphidden, false);
@@ -67,7 +66,7 @@ function performTest() {
     hiddenPopups++;
 
     executeSoon(function() {
-      let popups = popupset.querySelectorAll("panel[hudId=" + hudId + "]");
+      let popups = popupset.querySelectorAll("panel[hudId=" + HUD.hudId + "]");
       is(popups.length, 0, "no popups found");
 
       executeSoon(finishTest);

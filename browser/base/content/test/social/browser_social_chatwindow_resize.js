@@ -11,7 +11,7 @@ function test() {
     origin: "https://example.com",
     sidebarURL: "https://example.com/browser/browser/base/content/test/social/social_sidebar.html",
     workerURL: "https://example.com/browser/browser/base/content/test/social/social_worker.js",
-    iconURL: "https://example.com/browser/browser/base/content/test/moz.png",
+    iconURL: "https://example.com/browser/browser/base/content/test/general/moz.png",
     // added for test purposes
     chatURL: "https://example.com/browser/browser/base/content/test/social/social_chat.html"
   };
@@ -25,15 +25,16 @@ function test() {
   };
 
   runSocialTestWithProvider(manifest, function (finishcb) {
-    let port = Social.provider.getWorkerPort();
+    SocialSidebar.show();
+    let port = SocialSidebar.provider.getWorkerPort();
     ok(port, "provider has a port");
     port.postMessage({topic: "test-init"});
     // we require a logged in user for chats, wait for that
     waitForCondition(function() {
       let sbrowser = document.getElementById("social-sidebar-browser");
-      return Social.provider &&
-             Social.provider.profile &&
-             Social.provider.profile.displayName &&
+      return SocialSidebar.provider &&
+             SocialSidebar.provider.profile &&
+             SocialSidebar.provider.profile.displayName &&
              sbrowser.docShellIsActive;
     }, function() {
       // executeSoon to let the browser UI observers run first

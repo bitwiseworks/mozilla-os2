@@ -11,16 +11,17 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'necko_file'
 
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/netwerk/base/public',
-]
-
-MODULE = 'necko'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsFileChannel.cpp',
     'nsFileProtocolHandler.cpp',
 ]
 
-LIBRARY_NAME = 'nkfile_s'
+FAIL_ON_WARNINGS = True
 
+MSVC_ENABLE_PGO = True
+
+FINAL_LIBRARY = 'necko'
+
+LOCAL_INCLUDES += [
+    '../../base/src',
+]

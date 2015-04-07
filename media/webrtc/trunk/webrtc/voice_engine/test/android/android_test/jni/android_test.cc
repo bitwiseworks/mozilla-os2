@@ -8,28 +8,27 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <android/log.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <android/log.h>
 
-#include "org_webrtc_voiceengine_test_AndroidTest.h"
+#include "webrtc/voice_engine/test/android/android_test/jni/org_webrtc_voiceengine_test_AndroidTest.h"
 
-#include "thread_wrapper.h"
+#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 
-#include "voe_base.h"
-#include "voe_codec.h"
-#include "voe_file.h"
-#include "voe_network.h"
-#include "voe_audio_processing.h"
-#include "voe_volume_control.h"
-#include "voe_hardware.h"
-#include "voe_rtp_rtcp.h"
-#include "voe_encryption.h"
+#include "webrtc/voice_engine/include/voe_audio_processing.h"
+#include "webrtc/voice_engine/include/voe_base.h"
+#include "webrtc/voice_engine/include/voe_codec.h"
+#include "webrtc/voice_engine/include/voe_encryption.h"
+#include "webrtc/voice_engine/include/voe_file.h"
+#include "webrtc/voice_engine/include/voe_hardware.h"
+#include "webrtc/voice_engine/include/voe_network.h"
+#include "webrtc/voice_engine/include/voe_rtp_rtcp.h"
+#include "webrtc/voice_engine/include/voe_volume_control.h"
 
-#include "voe_test_interface.h"
+#include "webrtc/voice_engine/test/auto_test/voe_test_interface.h"
 
-//#define USE_SRTP
 //#define INIT_FROM_THREAD
 //#define START_CALL_FROM_THREAD
 
@@ -767,20 +766,6 @@ JNIEXPORT jint JNICALL Java_org_webrtc_voiceengine_test_AndroidTest_StartListen(
         jobject,
         jint channel)
 {
-#ifdef USE_SRTP
-    VALIDATE_ENCRYPT_POINTER;
-    bool useForRTCP = false;
-    if (veData1.encrypt->EnableSRTPReceive(
-                    channel,CIPHER_AES_128_COUNTER_MODE,30,AUTH_HMAC_SHA1,
-                    16,4, ENCRYPTION_AND_AUTHENTICATION,
-                    (unsigned char*)nikkey, useForRTCP) != 0)
-    {
-        __android_log_write(ANDROID_LOG_ERROR, WEBRTC_LOG_TAG,
-                "Failed to enable SRTP receive");
-        return -1;
-    }
-#endif
-
     VALIDATE_BASE_POINTER;
     int retVal = veData1.base->StartReceive(channel);
 
@@ -834,19 +819,6 @@ JNIEXPORT jint JNICALL Java_org_webrtc_voiceengine_test_AndroidTest_StartSend(
          "Failed to enable FEC");
      return -1;
      } */
-#ifdef USE_SRTP
-    VALIDATE_ENCRYPT_POINTER;
-    bool useForRTCP = false;
-    if (veData1.encrypt->EnableSRTPSend(
-                    channel,CIPHER_AES_128_COUNTER_MODE,30,AUTH_HMAC_SHA1,
-                    16,4, ENCRYPTION_AND_AUTHENTICATION,
-                    (unsigned char*)nikkey, useForRTCP) != 0)
-    {
-        __android_log_write(ANDROID_LOG_ERROR, WEBRTC_LOG_TAG,
-                "Failed to enable SRTP send");
-        return -1;
-    }
-#endif
 
     VALIDATE_BASE_POINTER;
     int retVal = veData1.base->StartSend(channel);
@@ -862,16 +834,6 @@ JNIEXPORT jint JNICALL Java_org_webrtc_voiceengine_test_AndroidTest_StopListen(
         jobject,
         jint channel)
 {
-#ifdef USE_SRTP
-    VALIDATE_ENCRYPT_POINTER;
-    if (veData1.encrypt->DisableSRTPReceive(channel) != 0)
-    {
-        __android_log_write(ANDROID_LOG_ERROR, WEBRTC_LOG_TAG,
-                "Failed to disable SRTP receive");
-        return -1;
-    }
-#endif
-
     VALIDATE_BASE_POINTER;
     return veData1.base->StopReceive(channel);
 }
@@ -902,16 +864,6 @@ JNIEXPORT jint JNICALL Java_org_webrtc_voiceengine_test_AndroidTest_StopSend(
          "Failed to disable FEC");
      return -1;
      } */
-
-#ifdef USE_SRTP
-    VALIDATE_ENCRYPT_POINTER;
-    if (veData1.encrypt->DisableSRTPSend(channel) != 0)
-    {
-        __android_log_write(ANDROID_LOG_ERROR, WEBRTC_LOG_TAG,
-                "Failed to disable SRTP send");
-        return -1;
-    }
-#endif
 
     VALIDATE_BASE_POINTER;
     return veData1.base->StopSend(channel);

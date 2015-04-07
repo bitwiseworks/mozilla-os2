@@ -21,17 +21,25 @@ public:
   ProgressMeterAccessible(nsIContent* aContent, DocAccessible* aDoc) :
     LeafAccessible(aContent, aDoc)
   {
-    mStateFlags |= eHasNumericValue;
+    // Ignore 'ValueChange' DOM event in lieu of @value attribute change
+    // notifications.
+    mStateFlags |= eHasNumericValue | eIgnoreDOMUIEvent;
     mType = eProgressType;
   }
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIACCESSIBLEVALUE
 
   // Accessible
   virtual void Value(nsString& aValue);
   virtual mozilla::a11y::role NativeRole();
   virtual uint64_t NativeState();
+
+  // Value
+  virtual double MaxValue() const MOZ_OVERRIDE;
+  virtual double MinValue() const MOZ_OVERRIDE;
+  virtual double CurValue() const MOZ_OVERRIDE;
+  virtual double Step() const MOZ_OVERRIDE;
+  virtual bool SetCurValue(double aValue) MOZ_OVERRIDE;
 
   // Widgets
   virtual bool IsWidget() const;

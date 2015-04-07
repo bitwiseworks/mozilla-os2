@@ -163,16 +163,14 @@ public:
   virtual bool IsProbablyLayoutTable();
   virtual Accessible* AsAccessible() { return this; }
 
-  // nsAccessNode
-  virtual void Shutdown();
-
   // Accessible
+  virtual void Shutdown();
   virtual TableAccessible* AsTable() { return this; }
   virtual void Description(nsString& aDescription);
   virtual a11y::role NativeRole();
   virtual uint64_t NativeState();
   virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() MOZ_OVERRIDE;
-  virtual Relation RelationByType(uint32_t aRelationType);
+  virtual Relation RelationByType(RelationType aRelationType) MOZ_OVERRIDE;
 
 protected:
   // Accessible
@@ -231,7 +229,7 @@ public:
 
   // Accessible
   virtual a11y::role NativeRole();
-  virtual Relation RelationByType(uint32_t aRelationType);
+  virtual Relation RelationByType(RelationType aRelationType) MOZ_OVERRIDE;
 };
 
 } // namespace a11y

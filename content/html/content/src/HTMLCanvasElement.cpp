@@ -5,22 +5,23 @@
 
 #include "mozilla/dom/HTMLCanvasElement.h"
 
-#include "BasicLayers.h"
-#include "imgIEncoder.h"
+#include "ImageEncoder.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "Layers.h"
 #include "mozilla/Base64.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/dom/CanvasRenderingContext2D.h"
 #include "mozilla/dom/HTMLCanvasElementBinding.h"
+#include "mozilla/dom/UnionTypes.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
-#include "nsAsyncDOMEvent.h"
 #include "nsAttrValueInlines.h"
 #include "nsContentUtils.h"
 #include "nsDisplayList.h"
 #include "nsDOMFile.h"
+#include "nsDOMJSUtils.h"
 #include "nsFrameManager.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsITimer.h"
@@ -30,8 +31,14 @@
 #include "nsMathUtils.h"
 #include "nsNetUtil.h"
 #include "nsStreamUtils.h"
+#include "ActiveLayerTracker.h"
+
+#ifdef MOZ_WEBGL
+#include "../canvas/src/WebGL2Context.h"
+#endif
 
 using namespace mozilla::layers;
+using namespace mozilla::gfx;
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Canvas)
 
@@ -40,111 +47,75 @@ namespace {
 typedef mozilla::dom::HTMLImageElementOrHTMLCanvasElementOrHTMLVideoElement
 HTMLImageOrCanvasOrVideoElement;
 
-class ToBlobRunnable : public nsRunnable
-{
-public:
-  ToBlobRunnable(nsIFileCallback* aCallback,
-                 nsIDOMBlob* aBlob)
-    : mCallback(aCallback),
-      mBlob(aBlob)
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  }
-
-  NS_IMETHOD Run()
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-    mCallback->Receive(mBlob);
-    return NS_OK;
-  }
-private:
-  nsCOMPtr<nsIFileCallback> mCallback;
-  nsCOMPtr<nsIDOMBlob> mBlob;
-};
-
 } // anonymous namespace
 
 namespace mozilla {
 namespace dom {
 
-class HTMLCanvasPrintState : public nsIDOMMozCanvasPrintState
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_3(HTMLCanvasPrintState, mCanvas,
+                                        mContext, mCallback)
+
+NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(HTMLCanvasPrintState, AddRef)
+NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(HTMLCanvasPrintState, Release)
+
+HTMLCanvasPrintState::HTMLCanvasPrintState(HTMLCanvasElement* aCanvas,
+                                           nsICanvasRenderingContextInternal* aContext,
+                                           nsITimerCallback* aCallback)
+  : mIsDone(false), mPendingNotify(false), mCanvas(aCanvas),
+    mContext(aContext), mCallback(aCallback)
 {
-public:
-  HTMLCanvasPrintState(HTMLCanvasElement* aCanvas,
-                       nsICanvasRenderingContextInternal* aContext,
-                       nsITimerCallback* aCallback)
-    : mIsDone(false), mPendingNotify(false), mCanvas(aCanvas),
-      mContext(aContext), mCallback(aCallback)
-  {
-  }
+  SetIsDOMBinding();
+}
 
-  NS_IMETHOD GetContext(nsISupports** aContext)
-  {
-    NS_ADDREF(*aContext = mContext);
-    return NS_OK;
-  }
+HTMLCanvasPrintState::~HTMLCanvasPrintState()
+{
+}
 
-  NS_IMETHOD Done()
-  {
-    if (!mPendingNotify && !mIsDone) {
-      // The canvas needs to be invalidated for printing reftests on linux to
-      // work.
-      if (mCanvas) {
-        mCanvas->InvalidateCanvas();
-      }
-      nsRefPtr<nsRunnableMethod<HTMLCanvasPrintState> > doneEvent =
-        NS_NewRunnableMethod(this, &HTMLCanvasPrintState::NotifyDone);
-      if (NS_SUCCEEDED(NS_DispatchToCurrentThread(doneEvent))) {
-        mPendingNotify = true;
-      }
+/* virtual */ JSObject*
+HTMLCanvasPrintState::WrapObject(JSContext* aCx)
+{
+  return MozCanvasPrintStateBinding::Wrap(aCx, this);
+}
+
+nsISupports*
+HTMLCanvasPrintState::Context() const
+{
+  return mContext;
+}
+
+void
+HTMLCanvasPrintState::Done()
+{
+  if (!mPendingNotify && !mIsDone) {
+    // The canvas needs to be invalidated for printing reftests on linux to
+    // work.
+    if (mCanvas) {
+      mCanvas->InvalidateCanvas();
     }
-    return NS_OK;
-  }
-
-  void NotifyDone()
-  {
-    mIsDone = true;
-    mPendingNotify = false;
-    if (mCallback) {
-      mCallback->Notify(nullptr);
+    nsRefPtr<nsRunnableMethod<HTMLCanvasPrintState> > doneEvent =
+      NS_NewRunnableMethod(this, &HTMLCanvasPrintState::NotifyDone);
+    if (NS_SUCCEEDED(NS_DispatchToCurrentThread(doneEvent))) {
+      mPendingNotify = true;
     }
   }
+}
 
-  bool mIsDone;
-
-  // CC
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS(HTMLCanvasPrintState)
-private:
-  virtual ~HTMLCanvasPrintState()
-  {
+void
+HTMLCanvasPrintState::NotifyDone()
+{
+  mIsDone = true;
+  mPendingNotify = false;
+  if (mCallback) {
+    mCallback->Notify(nullptr);
   }
-  bool mPendingNotify;
-
-protected:
-  nsRefPtr<HTMLCanvasElement> mCanvas;
-  nsCOMPtr<nsICanvasRenderingContextInternal> mContext;
-  nsCOMPtr<nsITimerCallback> mCallback;
-};
-
-NS_IMPL_CYCLE_COLLECTING_ADDREF(HTMLCanvasPrintState)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(HTMLCanvasPrintState)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(HTMLCanvasPrintState)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMMozCanvasPrintState)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MozCanvasPrintState)
-NS_INTERFACE_MAP_END
-
-NS_IMPL_CYCLE_COLLECTION_3(HTMLCanvasPrintState, mCanvas, mContext, mCallback)
+}
 
 // ---------------------------------------------------------------------------
 
-HTMLCanvasElement::HTMLCanvasElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+HTMLCanvasElement::HTMLCanvasElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo),
     mWriteOnly(false)
 {
-  SetIsDOMBinding();
 }
 
 HTMLCanvasElement::~HTMLCanvasElement()
@@ -152,27 +123,23 @@ HTMLCanvasElement::~HTMLCanvasElement()
   ResetPrintCallback();
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_4(HTMLCanvasElement, nsGenericHTMLElement,
-                                     mCurrentContext, mPrintCallback,
-                                     mPrintState, mOriginalCanvas)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLCanvasElement, nsGenericHTMLElement,
+                                   mCurrentContext, mPrintCallback,
+                                   mPrintState, mOriginalCanvas)
 
 NS_IMPL_ADDREF_INHERITED(HTMLCanvasElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLCanvasElement, Element)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLCanvasElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED2(HTMLCanvasElement,
-                                nsIDOMHTMLCanvasElement,
-                                nsICanvasElementExternal)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
+  NS_INTERFACE_TABLE_INHERITED(HTMLCanvasElement, nsIDOMHTMLCanvasElement)
+NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLCanvasElement)
 
 /* virtual */ JSObject*
-HTMLCanvasElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLCanvasElement::WrapNode(JSContext* aCx)
 {
-  return HTMLCanvasElementBinding::Wrap(aCx, aScope, this);
+  return HTMLCanvasElementBinding::Wrap(aCx, this);
 }
 
 nsIntSize
@@ -208,12 +175,28 @@ HTMLCanvasElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
   nsresult rv = nsGenericHTMLElement::SetAttr(aNameSpaceID, aName, aPrefix, aValue,
                                               aNotify);
   if (NS_SUCCEEDED(rv) && mCurrentContext &&
+      aNameSpaceID == kNameSpaceID_None &&
       (aName == nsGkAtoms::width || aName == nsGkAtoms::height || aName == nsGkAtoms::moz_opaque))
   {
     rv = UpdateContext(nullptr, JS::NullHandleValue);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
+  return rv;
+}
+
+nsresult
+HTMLCanvasElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                             bool aNotify)
+{
+  nsresult rv = nsGenericHTMLElement::UnsetAttr(aNameSpaceID, aName, aNotify);
+  if (NS_SUCCEEDED(rv) && mCurrentContext &&
+      aNameSpaceID == kNameSpaceID_None &&
+      (aName == nsGkAtoms::width || aName == nsGkAtoms::height || aName == nsGkAtoms::moz_opaque))
+  {
+    rv = UpdateContext(nullptr, JS::NullHandleValue);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
   return rv;
 }
 
@@ -224,11 +207,9 @@ HTMLCanvasElement::HandlePrintCallback(nsPresContext::nsPresContextType aType)
   // print preview mode, 2) the canvas has a print callback and 3) the callback
   // hasn't already been called. For real printing the callback is handled in
   // nsSimplePageSequenceFrame::PrePrintNextPage.
-  nsCOMPtr<nsIPrintCallback> printCallback;
   if ((aType == nsPresContext::eContext_PageLayout ||
        aType == nsPresContext::eContext_PrintPreview) &&
-      !mPrintState &&
-      NS_SUCCEEDED(GetMozPrintCallback(getter_AddRefs(printCallback))) && printCallback) {
+      !mPrintState && GetMozPrintCallback()) {
     DispatchPrintCallback(nullptr);
   }
 }
@@ -254,9 +235,8 @@ HTMLCanvasElement::DispatchPrintCallback(nsITimerCallback* aCallback)
 void
 HTMLCanvasElement::CallPrintCallback()
 {
-  nsCOMPtr<nsIPrintCallback> printCallback;
-  GetMozPrintCallback(getter_AddRefs(printCallback));
-  printCallback->Render(mPrintState);
+  ErrorResult rv;
+  GetMozPrintCallback()->Call(*mPrintState, rv);
 }
 
 void
@@ -344,7 +324,7 @@ HTMLCanvasElement::ParseAttribute(int32_t aNamespaceID,
 // HTMLCanvasElement::toDataURL
 
 NS_IMETHODIMP
-HTMLCanvasElement::ToDataURL(const nsAString& aType, const JS::Value& aParams,
+HTMLCanvasElement::ToDataURL(const nsAString& aType, JS::Handle<JS::Value> aParams,
                              JSContext* aCx, nsAString& aDataURL)
 {
   // do a trust check if this is a write-only canvas
@@ -365,10 +345,10 @@ HTMLCanvasElement::MozFetchAsStream(nsIInputStreamCallback *aCallback,
     return NS_ERROR_FAILURE;
 
   nsresult rv;
-  bool fellBackToPNG = false;
   nsCOMPtr<nsIInputStream> inputData;
 
-  rv = ExtractData(aType, EmptyString(), getter_AddRefs(inputData), fellBackToPNG);
+  nsAutoString type(aType);
+  rv = ExtractData(type, EmptyString(), getter_AddRefs(inputData));
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIAsyncInputStream> asyncData = do_QueryInterface(inputData, &rv);
@@ -384,14 +364,13 @@ HTMLCanvasElement::MozFetchAsStream(nsIInputStreamCallback *aCallback,
   return asyncCallback->OnInputStreamReady(asyncData);
 }
 
-NS_IMETHODIMP
-HTMLCanvasElement::SetMozPrintCallback(nsIPrintCallback *aCallback)
+void
+HTMLCanvasElement::SetMozPrintCallback(PrintCallback* aCallback)
 {
   mPrintCallback = aCallback;
-  return NS_OK;
 }
 
-nsIPrintCallback*
+PrintCallback*
 HTMLCanvasElement::GetMozPrintCallback() const
 {
   if (mOriginalCanvas) {
@@ -400,75 +379,57 @@ HTMLCanvasElement::GetMozPrintCallback() const
   return mPrintCallback;
 }
 
-NS_IMETHODIMP
-HTMLCanvasElement::GetMozPrintCallback(nsIPrintCallback** aCallback)
+nsresult
+HTMLCanvasElement::ExtractData(nsAString& aType,
+                               const nsAString& aOptions,
+                               nsIInputStream** aStream)
 {
-  NS_IF_ADDREF(*aCallback = GetMozPrintCallback());
-  return NS_OK;
+  return ImageEncoder::ExtractData(aType,
+                                   aOptions,
+                                   GetSize(),
+                                   mCurrentContext,
+                                   aStream);
 }
 
 nsresult
-HTMLCanvasElement::ExtractData(const nsAString& aType,
-                               const nsAString& aOptions,
-                               nsIInputStream** aStream,
-                               bool& aFellBackToPNG)
+HTMLCanvasElement::ParseParams(JSContext* aCx,
+                               const nsAString& aType,
+                               const JS::Value& aEncoderOptions,
+                               nsAString& aParams,
+                               bool* usingCustomParseOptions)
 {
-  // note that if we don't have a current context, the spec says we're
-  // supposed to just return transparent black pixels of the canvas
-  // dimensions.
-  nsRefPtr<gfxImageSurface> emptyCanvas;
-  nsIntSize size = GetWidthHeight();
-  if (!mCurrentContext) {
-    emptyCanvas = new gfxImageSurface(gfxIntSize(size.width, size.height), gfxASurface::ImageFormatARGB32);
-    if (emptyCanvas->CairoStatus()) {
-      return NS_ERROR_INVALID_ARG;
-    }
-  }
-
-  nsresult rv;
-
-  // get image bytes
-  nsCOMPtr<nsIInputStream> imgStream;
-  NS_ConvertUTF16toUTF8 encoderType(aType);
-
- try_again:
-  if (mCurrentContext) {
-    rv = mCurrentContext->GetInputStream(encoderType.get(),
-                                         nsPromiseFlatString(aOptions).get(),
-                                         getter_AddRefs(imgStream));
-  } else {
-    // no context, so we have to encode the empty image we created above
-    nsCString enccid("@mozilla.org/image/encoder;2?type=");
-    enccid += encoderType;
-
-    nsCOMPtr<imgIEncoder> encoder = do_CreateInstance(enccid.get(), &rv);
-    if (NS_SUCCEEDED(rv) && encoder) {
-      rv = encoder->InitFromData(emptyCanvas->Data(),
-                                 size.width * size.height * 4,
-                                 size.width,
-                                 size.height,
-                                 size.width * 4,
-                                 imgIEncoder::INPUT_FORMAT_HOSTARGB,
-                                 aOptions);
-      if (NS_SUCCEEDED(rv)) {
-        imgStream = do_QueryInterface(encoder);
+  // Quality parameter is only valid for the image/jpeg MIME type
+  if (aType.EqualsLiteral("image/jpeg")) {
+    if (aEncoderOptions.isNumber()) {
+      double quality = aEncoderOptions.toNumber();
+      // Quality must be between 0.0 and 1.0, inclusive
+      if (quality >= 0.0 && quality <= 1.0) {
+        aParams.AppendLiteral("quality=");
+        aParams.AppendInt(NS_lround(quality * 100.0));
       }
-    } else {
-      rv = NS_ERROR_FAILURE;
     }
   }
 
-  if (NS_FAILED(rv) && !aFellBackToPNG) {
-    // Try image/png instead.
-    // XXX ERRMSG we need to report an error to developers here! (bug 329026)
-    aFellBackToPNG = true;
-    encoderType.AssignLiteral("image/png");
-    goto try_again;
+  // If we haven't parsed the aParams check for proprietary options.
+  // The proprietary option -moz-parse-options will take a image lib encoder
+  // parse options string as is and pass it to the encoder.
+  *usingCustomParseOptions = false;
+  if (aParams.Length() == 0 && aEncoderOptions.isString()) {
+    NS_NAMED_LITERAL_STRING(mozParseOptions, "-moz-parse-options:");
+    nsDependentJSString paramString;
+    if (!paramString.init(aCx, aEncoderOptions.toString())) {
+      return NS_ERROR_FAILURE;
+    }
+    if (StringBeginsWith(paramString, mozParseOptions)) {
+      nsDependentSubstring parseOptions = Substring(paramString,
+                                                    mozParseOptions.Length(),
+                                                    paramString.Length() -
+                                                    mozParseOptions.Length());
+      aParams.Append(parseOptions);
+      *usingCustomParseOptions = true;
+    }
   }
 
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  imgStream.forget(aStream);
   return NS_OK;
 }
 
@@ -478,8 +439,6 @@ HTMLCanvasElement::ToDataURLImpl(JSContext* aCx,
                                  const JS::Value& aEncoderOptions,
                                  nsAString& aDataURL)
 {
-  bool fallbackToPNG = false;
-
   nsIntSize size = GetWidthHeight();
   if (size.height == 0 || size.width == 0) {
     aDataURL = NS_LITERAL_STRING("data:,");
@@ -493,57 +452,25 @@ HTMLCanvasElement::ToDataURLImpl(JSContext* aCx,
   }
 
   nsAutoString params;
-
-  // Quality parameter is only valid for the image/jpeg MIME type
-  if (type.EqualsLiteral("image/jpeg")) {
-    if (aEncoderOptions.isNumber()) {
-      double quality = aEncoderOptions.toNumber();
-      // Quality must be between 0.0 and 1.0, inclusive
-      if (quality >= 0.0 && quality <= 1.0) {
-        params.AppendLiteral("quality=");
-        params.AppendInt(NS_lround(quality * 100.0));
-      }
-    }
-  }
-
-  // If we haven't parsed the params check for proprietary options.
-  // The proprietary option -moz-parse-options will take a image lib encoder
-  // parse options string as is and pass it to the encoder.
-  bool usingCustomParseOptions = false;
-  if (params.Length() == 0 && aEncoderOptions.isString()) {
-    NS_NAMED_LITERAL_STRING(mozParseOptions, "-moz-parse-options:");
-    nsDependentJSString paramString;
-    if (!paramString.init(aCx, aEncoderOptions.toString())) {
-      return NS_ERROR_FAILURE;
-    }
-    if (StringBeginsWith(paramString, mozParseOptions)) {
-      nsDependentSubstring parseOptions = Substring(paramString,
-                                                    mozParseOptions.Length(),
-                                                    paramString.Length() -
-                                                    mozParseOptions.Length());
-      params.Append(parseOptions);
-      usingCustomParseOptions = true;
-    }
+  bool usingCustomParseOptions;
+  rv = ParseParams(aCx, type, aEncoderOptions, params, &usingCustomParseOptions);
+  if (NS_FAILED(rv)) {
+    return rv;
   }
 
   nsCOMPtr<nsIInputStream> stream;
-  rv = ExtractData(type, params, getter_AddRefs(stream), fallbackToPNG);
+  rv = ExtractData(type, params, getter_AddRefs(stream));
 
   // If there are unrecognized custom parse options, we should fall back to
   // the default values for the encoder without any options at all.
   if (rv == NS_ERROR_INVALID_ARG && usingCustomParseOptions) {
-    fallbackToPNG = false;
-    rv = ExtractData(type, EmptyString(), getter_AddRefs(stream), fallbackToPNG);
+    rv = ExtractData(type, EmptyString(), getter_AddRefs(stream));
   }
 
   NS_ENSURE_SUCCESS(rv, rv);
 
   // build data URL string
-  if (fallbackToPNG)
-    aDataURL = NS_LITERAL_STRING("data:image/png;base64,");
-  else
-    aDataURL = NS_LITERAL_STRING("data:") + type +
-      NS_LITERAL_STRING(";base64,");
+  aDataURL = NS_LITERAL_STRING("data:") + type + NS_LITERAL_STRING(";base64,");
 
   uint64_t count;
   rv = stream->Available(&count);
@@ -553,56 +480,63 @@ HTMLCanvasElement::ToDataURLImpl(JSContext* aCx,
   return Base64EncodeInputStream(stream, aDataURL, (uint32_t)count, aDataURL.Length());
 }
 
-// XXXkhuey the encoding should be off the main thread, but we're lazy.
-NS_IMETHODIMP
-HTMLCanvasElement::ToBlob(nsIFileCallback* aCallback,
-                          const nsAString& aType)
+void
+HTMLCanvasElement::ToBlob(JSContext* aCx,
+                          FileCallback& aCallback,
+                          const nsAString& aType,
+                          JS::Handle<JS::Value> aParams,
+                          ErrorResult& aRv)
 {
   // do a trust check if this is a write-only canvas
   if (mWriteOnly && !nsContentUtils::IsCallerChrome()) {
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
-
-  if (!aCallback) {
-    return NS_ERROR_UNEXPECTED;
+    aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
+    return;
   }
 
   nsAutoString type;
-  nsresult rv = nsContentUtils::ASCIIToLower(aType, type);
-  if (NS_FAILED(rv)) {
-    return rv;
+  aRv = nsContentUtils::ASCIIToLower(aType, type);
+  if (aRv.Failed()) {
+    return;
   }
 
-  bool fallbackToPNG = false;
-
-  nsCOMPtr<nsIInputStream> stream;
-  rv = ExtractData(type, EmptyString(), getter_AddRefs(stream), fallbackToPNG);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (fallbackToPNG) {
-    type.AssignLiteral("image/png");
+  nsAutoString params;
+  bool usingCustomParseOptions;
+  aRv = ParseParams(aCx, type, aParams, params, &usingCustomParseOptions);
+  if (aRv.Failed()) {
+    return;
   }
 
-  uint64_t imgSize;
-  rv = stream->Available(&imgSize);
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_ENSURE_TRUE(imgSize <= UINT32_MAX, NS_ERROR_FILE_TOO_BIG);
+#ifdef DEBUG
+  if (mCurrentContext) {
+    // We disallow canvases of width or height zero, and set them to 1, so
+    // we will have a discrepancy with the sizes of the canvas and the context.
+    // That discrepancy is OK, the rest are not.
+    nsIntSize elementSize = GetWidthHeight();
+    MOZ_ASSERT(elementSize.width == mCurrentContext->GetWidth() ||
+               (elementSize.width == 0 && mCurrentContext->GetWidth() == 1));
+    MOZ_ASSERT(elementSize.height == mCurrentContext->GetHeight() ||
+               (elementSize.height == 0 && mCurrentContext->GetHeight() == 1));
+  }
+#endif
 
-  void* imgData = nullptr;
-  rv = NS_ReadInputStreamToBuffer(stream, &imgData, imgSize);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIScriptContext> scriptContext =
+    GetScriptContextFromJSContext(nsContentUtils::GetCurrentJSContext());
 
-  // The DOMFile takes ownership of the buffer
-  nsRefPtr<nsDOMMemoryFile> blob =
-    new nsDOMMemoryFile(imgData, imgSize, type);
-
-  JSContext* cx = nsContentUtils::GetCurrentJSContext();
-  if (cx) {
-    JS_updateMallocCounter(cx, imgSize);
+  uint8_t* imageBuffer = nullptr;
+  int32_t format = 0;
+  if (mCurrentContext) {
+    mCurrentContext->GetImageBuffer(&imageBuffer, &format);
   }
 
-  nsRefPtr<ToBlobRunnable> runnable = new ToBlobRunnable(aCallback, blob);
-  return NS_DispatchToCurrentThread(runnable);
+  aRv = ImageEncoder::ExtractDataAsync(type,
+                                       params,
+                                       usingCustomParseOptions,
+                                       imageBuffer,
+                                       format,
+                                       GetSize(),
+                                       mCurrentContext,
+                                       scriptContext,
+                                       aCallback);
 }
 
 already_AddRefed<nsIDOMFile>
@@ -620,6 +554,8 @@ HTMLCanvasElement::MozGetAsFile(const nsAString& aName,
                                 const nsAString& aType,
                                 nsIDOMFile** aResult)
 {
+  OwnerDoc()->WarnOnceAbout(nsIDocument::eMozGetAsFile);
+
   // do a trust check if this is a write-only canvas
   if ((mWriteOnly) &&
       !nsContentUtils::IsCallerChrome()) {
@@ -634,17 +570,10 @@ HTMLCanvasElement::MozGetAsFileImpl(const nsAString& aName,
                                     const nsAString& aType,
                                     nsIDOMFile** aResult)
 {
-  bool fallbackToPNG = false;
-
   nsCOMPtr<nsIInputStream> stream;
-  nsresult rv = ExtractData(aType, EmptyString(), getter_AddRefs(stream),
-                            fallbackToPNG);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   nsAutoString type(aType);
-  if (fallbackToPNG) {
-    type.AssignLiteral("image/png");
-  }
+  nsresult rv = ExtractData(type, EmptyString(), getter_AddRefs(stream));
+  NS_ENSURE_SUCCESS(rv, rv);
 
   uint64_t imgSize;
   rv = stream->Available(&imgSize);
@@ -683,6 +612,22 @@ HTMLCanvasElement::GetContextHelper(const nsAString& aContextId,
     ctx.forget(aContext);
     return NS_OK;
   }
+#ifdef MOZ_WEBGL
+  if (WebGL2Context::IsSupported() &&
+      aContextId.EqualsLiteral("experimental-webgl2"))
+  {
+    Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_USED, 1);
+    nsRefPtr<WebGL2Context> ctx = WebGL2Context::Create();
+
+    if (ctx == nullptr) {
+      return NS_ERROR_NOT_IMPLEMENTED;
+    }
+
+    ctx->SetCanvasElement(this);
+    ctx.forget(aContext);
+    return NS_OK;
+  }
+#endif
 
   NS_ConvertUTF16toUTF8 ctxId(aContextId);
 
@@ -725,8 +670,16 @@ HTMLCanvasElement::GetContext(const nsAString& aContextId,
                               nsISupports** aContext)
 {
   ErrorResult rv;
-  *aContext = GetContext(nullptr, aContextId, JS::NullHandleValue, rv).get();
+  *aContext =
+    GetContext(nullptr, aContextId, JS::NullHandleValue, rv).take();
   return rv.ErrorCode();
+}
+
+static bool
+IsContextIdWebGL(const nsAString& str)
+{
+  return str.EqualsLiteral("webgl") ||
+         str.EqualsLiteral("experimental-webgl");
 }
 
 already_AddRefed<nsISupports>
@@ -753,12 +706,27 @@ HTMLCanvasElement::GetContext(JSContext* aCx,
 
     rv = UpdateContext(aCx, aContextOptions);
     if (rv.Failed()) {
+      rv = NS_OK; // See bug 645792
       return nullptr;
     }
     mCurrentContextId.Assign(aContextId);
   }
 
   if (!mCurrentContextId.Equals(aContextId)) {
+    if (IsContextIdWebGL(aContextId) &&
+        IsContextIdWebGL(mCurrentContextId))
+    {
+      // Warn when we get a request for a webgl context with an id that differs
+      // from the id it was created with.
+      nsCString creationId = NS_LossyConvertUTF16toASCII(mCurrentContextId);
+      nsCString requestId = NS_LossyConvertUTF16toASCII(aContextId);
+      JS_ReportWarning(aCx, "WebGL: Retrieving a WebGL context from a canvas "
+                            "via a request id ('%s') different from the id used "
+                            "to create the context ('%s') is not allowed.",
+                            requestId.get(),
+                            creationId.get());
+    }
+    
     //XXX eventually allow for more than one active context on a given canvas
     return nullptr;
   }
@@ -810,7 +778,7 @@ HTMLCanvasElement::UpdateContext(JSContext* aCx, JS::Handle<JS::Value> aNewConte
 
   nsIntSize sz = GetWidthHeight();
 
-  nsresult rv = mCurrentContext->SetIsOpaque(GetIsOpaque());
+  nsresult rv = mCurrentContext->SetIsOpaque(HasAttr(kNameSpaceID_None, nsGkAtoms::moz_opaque));
   if (NS_FAILED(rv)) {
     mCurrentContext = nullptr;
     mCurrentContextId.Truncate();
@@ -861,7 +829,7 @@ HTMLCanvasElement::InvalidateCanvasContent(const gfx::Rect* damageRect)
   if (!frame)
     return;
 
-  frame->MarkLayersActive(nsChangeHint(0));
+  ActiveLayerTracker::NotifyContentChange(frame);
 
   Layer* layer = nullptr;
   if (damageRect) {
@@ -932,6 +900,10 @@ HTMLCanvasElement::GetContextAtIndex(int32_t index)
 bool
 HTMLCanvasElement::GetIsOpaque()
 {
+  if (mCurrentContext) {
+    return mCurrentContext->GetIsOpaque();
+  }
+
   return HasAttr(kNameSpaceID_None, nsGkAtoms::moz_opaque);
 }
 
@@ -961,22 +933,14 @@ HTMLCanvasElement::MarkContextClean()
   mCurrentContext->MarkContextClean();
 }
 
-NS_IMETHODIMP_(nsIntSize)
-HTMLCanvasElement::GetSizeExternal()
-{
-  return GetWidthHeight();
-}
-
-NS_IMETHODIMP
-HTMLCanvasElement::RenderContextsExternal(gfxContext *aContext, gfxPattern::GraphicsFilter aFilter, uint32_t aFlags)
+TemporaryRef<SourceSurface>
+HTMLCanvasElement::GetSurfaceSnapshot(bool* aPremultAlpha)
 {
   if (!mCurrentContext)
-    return NS_OK;
+    return nullptr;
 
-  return mCurrentContext->Render(aContext, aFilter, aFlags);
+  return mCurrentContext->GetSurfaceSnapshot(aPremultAlpha);
 }
 
 } // namespace dom
 } // namespace mozilla
-
-DOMCI_DATA(MozCanvasPrintState, mozilla::dom::HTMLCanvasPrintState)

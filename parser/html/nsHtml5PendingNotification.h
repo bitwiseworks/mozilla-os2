@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsHtml5PendingNotification_h__
-#define nsHtml5PendingNotification_h__
+#ifndef nsHtml5PendingNotification_h
+#define nsHtml5PendingNotification_h
 
 #include "nsNodeUtils.h"
 
@@ -19,20 +19,24 @@ class nsHtml5PendingNotification {
       MOZ_COUNT_CTOR(nsHtml5PendingNotification);
     }
 
-    ~nsHtml5PendingNotification() {
+    ~nsHtml5PendingNotification()
+    {
       MOZ_COUNT_DTOR(nsHtml5PendingNotification);
     }
 
-    inline void Fire() {
+    inline void Fire()
+    {
       nsNodeUtils::ContentAppended(mParent, mParent->GetChildAt(mChildCount),
                                    mChildCount);
     }
 
-    inline bool Contains(nsIContent* aNode) {
+    inline bool Contains(nsIContent* aNode)
+    {
       return !!(mParent == aNode);
     }
     
-    inline bool HaveNotifiedIndex(uint32_t index) {
+    inline bool HaveNotifiedIndex(uint32_t index)
+    {
       return index < mChildCount;
     }
 
@@ -48,4 +52,4 @@ class nsHtml5PendingNotification {
     uint32_t    mChildCount;
 };
 
-#endif // nsHtml5PendingNotification_h__
+#endif // nsHtml5PendingNotification_h

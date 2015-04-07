@@ -15,12 +15,11 @@
   <script type="application/javascript" src="utils.js"></script>
   <script type="application/javascript">
   SimpleTest.waitForExplicitFinish();
+  setTestPluginEnabledState(SpecialPowers.Ci.nsIPluginTag.STATE_ENABLED);
 
   var didPaint = function() {};
 
   function startTest() {
-    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-
     if (SimpleTest.testPluginIsOOP()) {
       if (p.getPaintCount() < 1) {
         setTimeout(startTest, 0);

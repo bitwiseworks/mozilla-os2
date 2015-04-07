@@ -6,42 +6,83 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.mozglue.GeckoLoader;
+import org.mozilla.gecko.mozglue.RobocopTarget;
 import org.mozilla.gecko.util.GeckoEventListener;
+import org.mozilla.gecko.util.ThreadUtils;
 
 import org.json.JSONObject;
 
-import android.content.Intent;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
-import android.app.Activity;
 
-
+import java.io.IOException;
 import java.util.Locale;
 
 public class GeckoThread extends Thread implements GeckoEventListener {
     private static final String LOGTAG = "GeckoThread";
 
+    @RobocopTarget
     public enum LaunchState {
         Launching,
         WaitForDebugger,
         Launched,
         GeckoRunning,
-        GeckoExiting
+        GeckoExiting,
+        GeckoExited
     };
 
     private static LaunchState sLaunchState = LaunchState.Launching;
 
-    private Intent mIntent;
+    private static GeckoThread sGeckoThread;
+
+    private final String mArgs;
+    private final String mAction;
     private final String mUri;
 
-    GeckoThread(Intent intent, String uri) {
-        mIntent = intent;
+    public static boolean ensureInit() {
+        ThreadUtils.assertOnUiThread();
+        if (isCreated())
+            return false;
+        sGeckoThread = new GeckoThread(sArgs, sAction, sUri);
+        return true;
+    }
+
+    public static String sArgs;
+    public static String sAction;
+    public static String sUri;
+
+    public static void setArgs(String args) {
+        sArgs = args;
+    }
+
+    public static void setAction(String action) {
+        sAction = action;
+    }
+
+    public static void setUri(String uri) {
+        sUri = uri;
+    }
+
+    GeckoThread(String args, String action, String uri) {
+        mArgs = args;
+        mAction = action;
         mUri = uri;
         setName("Gecko");
         GeckoAppShell.getEventDispatcher().registerEventListener("Gecko:Ready", this);
+    }
+
+    public static boolean isCreated() {
+        return sGeckoThread != null;
+    }
+
+    public static void createAndStart() {
+        if (ensureInit())
+            sGeckoThread.start();
     }
 
     private String initGeckoEnvironment() {
@@ -54,7 +95,7 @@ public class GeckoThread extends Thread implements GeckoEventListener {
             Locale.setDefault(locale);
         }
 
-        Context app = GeckoAppShell.getContext();
+        Context context = GeckoAppShell.getContext();
         String resourcePath = "";
         Resources res  = null;
         String[] pluginDirs = null;
@@ -63,16 +104,15 @@ public class GeckoThread extends Thread implements GeckoEventListener {
         } catch (Exception e) {
             Log.w(LOGTAG, "Caught exception getting plugin dirs.", e);
         }
-        
-        if (app instanceof Activity) {
-            Activity activity = (Activity)app;
-            resourcePath = activity.getApplication().getPackageResourcePath();
-            res = activity.getBaseContext().getResources();
-            GeckoLoader.setupGeckoEnvironment(activity, pluginDirs, GeckoProfile.get(app).getFilesDir().getPath());
-        }
-        GeckoLoader.loadSQLiteLibs(app, resourcePath);
-        GeckoLoader.loadNSSLibs(app, resourcePath);
-        GeckoLoader.loadGeckoLibs(app, resourcePath);
+
+        resourcePath = context.getPackageResourcePath();
+        res = context.getResources();
+        GeckoLoader.setupGeckoEnvironment(context, pluginDirs, context.getFilesDir().getPath());
+
+        GeckoLoader.loadSQLiteLibs(context, resourcePath);
+        GeckoLoader.loadNSSLibs(context, resourcePath);
+        GeckoLoader.loadGeckoLibs(context, resourcePath);
+        GeckoJavaSampler.setLibsLoaded();
 
         Locale.setDefault(locale);
 
@@ -94,24 +134,47 @@ public class GeckoThread extends Thread implements GeckoEventListener {
     }
 
     private String addCustomProfileArg(String args) {
-        String profile = GeckoAppShell.getGeckoInterface() == null || GeckoApp.sIsUsingCustomProfile ? "" : (" -P " + GeckoAppShell.getGeckoInterface().getProfile().getName());
-        return (args != null ? args : "") + profile;
+        String profile = "";
+        String guest = "";
+        if (GeckoAppShell.getGeckoInterface() != null) {
+            if (GeckoAppShell.getGeckoInterface().getProfile().inGuestMode()) {
+                try {
+                    profile = " -profile " + GeckoAppShell.getGeckoInterface().getProfile().getDir().getCanonicalPath();
+                } catch (IOException ioe) { Log.e(LOGTAG, "error getting guest profile path", ioe); }
+
+                if (args == null || !args.contains(BrowserApp.GUEST_BROWSING_ARG)) {
+                    guest = " " + BrowserApp.GUEST_BROWSING_ARG;
+                }
+            } else if (!GeckoProfile.sIsUsingCustomProfile) {
+                // If nothing was passed in in the intent, force Gecko to use the default profile for
+                // for this activity
+                profile = " -P " + GeckoAppShell.getGeckoInterface().getProfile().getName();
+            }
+        }
+
+        return (args != null ? args : "") + profile + guest;
     }
 
     @Override
     public void run() {
+        Looper.prepare();
+        ThreadUtils.sGeckoThread = this;
+        ThreadUtils.sGeckoHandler = new Handler();
+        ThreadUtils.sGeckoQueue = Looper.myQueue();
+
         String path = initGeckoEnvironment();
 
         Log.w(LOGTAG, "zerdatime " + SystemClock.uptimeMillis() + " - runGecko");
 
-        String args = addCustomProfileArg(mIntent.getStringExtra("args"));
-        String type = getTypeFromAction(mIntent.getAction());
-        mIntent = null;
+        String args = addCustomProfileArg(mArgs);
+        String type = getTypeFromAction(mAction);
 
         // and then fire us up
         Log.i(LOGTAG, "RunGecko - args = " + args);
         GeckoAppShell.runGecko(path, args, mUri, type);
     }
+
+    private static Object sLock = new Object();
 
     @Override
     public void handleMessage(String event, JSONObject message) {
@@ -122,14 +185,15 @@ public class GeckoThread extends Thread implements GeckoEventListener {
         }
     }
 
+    @RobocopTarget
     public static boolean checkLaunchState(LaunchState checkState) {
-        synchronized (sLaunchState) {
+        synchronized (sLock) {
             return sLaunchState == checkState;
         }
     }
 
     static void setLaunchState(LaunchState setState) {
-        synchronized (sLaunchState) {
+        synchronized (sLock) {
             sLaunchState = setState;
         }
     }
@@ -139,7 +203,7 @@ public class GeckoThread extends Thread implements GeckoEventListener {
      * state is <code>checkState</code>; otherwise do nothing and return false.
      */
     static boolean checkAndSetLaunchState(LaunchState checkState, LaunchState setState) {
-        synchronized (sLaunchState) {
+        synchronized (sLock) {
             if (sLaunchState != checkState)
                 return false;
             sLaunchState = setState;

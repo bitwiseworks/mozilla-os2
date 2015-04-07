@@ -6,14 +6,13 @@
 #include <algorithm>
 #include "ArrayBufferInputStream.h"
 #include "nsStreamUtils.h"
+#include "jsapi.h"
 #include "jsfriendapi.h"
 
-NS_IMPL_ISUPPORTS2(ArrayBufferInputStream, nsIArrayBufferInputStream, nsIInputStream);
+NS_IMPL_ISUPPORTS(ArrayBufferInputStream, nsIArrayBufferInputStream, nsIInputStream);
 
 ArrayBufferInputStream::ArrayBufferInputStream()
-: mRt(nullptr)
-, mArrayBuffer(JSVAL_VOID)
-, mBuffer(nullptr)
+: mBuffer(nullptr)
 , mBufferLength(0)
 , mOffset(0)
 , mPos(0)
@@ -21,15 +20,8 @@ ArrayBufferInputStream::ArrayBufferInputStream()
 {
 }
 
-ArrayBufferInputStream::~ArrayBufferInputStream()
-{
-  if (mRt) {
-    JS_RemoveValueRootRT(mRt, &mArrayBuffer);
-  }
-}
-
 NS_IMETHODIMP
-ArrayBufferInputStream::SetData(const JS::Value& aBuffer,
+ArrayBufferInputStream::SetData(JS::Handle<JS::Value> aBuffer,
                                 uint32_t aByteOffset,
                                 uint32_t aLength,
                                 JSContext* aCx)
@@ -42,14 +34,15 @@ ArrayBufferInputStream::SetData(const JS::Value& aBuffer,
     return NS_ERROR_FAILURE;
   }
 
-  mRt = JS_GetRuntime(aCx);
-  mArrayBuffer = aBuffer;
-  JS_AddNamedValueRootRT(mRt, &mArrayBuffer, "mArrayBuffer");
+  mArrayBuffer.construct(aCx, aBuffer);
 
   uint32_t buflen = JS_GetArrayBufferByteLength(arrayBuffer);
   mOffset = std::min(buflen, aByteOffset);
   mBufferLength = std::min(buflen - mOffset, aLength);
-  mBuffer = JS_GetArrayBufferData(arrayBuffer);
+  mBuffer = JS_GetStableArrayBufferData(aCx, arrayBuffer);
+  if (!mBuffer) {
+      return NS_ERROR_FAILURE;
+  }
   return NS_OK;
 }
 
@@ -88,8 +81,8 @@ ArrayBufferInputStream::ReadSegments(nsWriteSegmentFun writer, void *closure,
   }
 
   uint32_t remaining = mBufferLength - mPos;
-  if (!mArrayBuffer.isUndefined()) {
-    JSObject* buf = &mArrayBuffer.toObject();
+  if (!mArrayBuffer.empty()) {
+    JSObject* buf = &mArrayBuffer.ref().get().toObject();
     uint32_t byteLength = JS_GetArrayBufferByteLength(buf);
     if (byteLength == 0 && remaining != 0) {
       mClosed = true;

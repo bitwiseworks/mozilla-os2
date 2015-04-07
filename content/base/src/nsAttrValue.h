@@ -21,6 +21,7 @@
 #include "SVGAttrValueWrapper.h"
 #include "nsTArrayForwardDeclare.h"
 #include "nsIAtom.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/BindingDeclarations.h"
 
 class nsAString;
@@ -56,13 +57,20 @@ struct ImageValue;
 /**
  * A class used to construct a nsString from a nsStringBuffer (we might
  * want to move this to nsString at some point).
+ *
+ * WARNING: Note that nsCheapString doesn't take an explicit length -- it
+ * assumes the string is maximally large, given the nsStringBuffer's storage
+ * size.  This means the given string buffer *must* be sized exactly correctly
+ * for the string it contains (including one byte for a null terminator).  If
+ * it has any unused storage space, then that will result in bogus characters
+ * at the end of our nsCheapString.
  */
 class nsCheapString : public nsString {
 public:
   nsCheapString(nsStringBuffer* aBuf)
   {
     if (aBuf)
-      aBuf->ToString(aBuf->StorageSize()/2 - 1, *this);
+      aBuf->ToString(aBuf->StorageSize()/sizeof(char16_t) - 1, *this);
   }
 };
 
@@ -371,7 +379,7 @@ public:
   bool ParseStyleAttribute(const nsAString& aString,
                            nsStyledElementNotElementCSSInlineStyle* aElement);
 
-  size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
 private:
   // These have to be the same as in ValueType
@@ -476,7 +484,7 @@ nsAttrValue::ToString(mozilla::dom::DOMString& aResult) const
     {
       nsStringBuffer* str = static_cast<nsStringBuffer*>(GetPtr());
       if (str) {
-        aResult.SetStringBuffer(str, str->StorageSize()/sizeof(PRUnichar) - 1);
+        aResult.SetStringBuffer(str, str->StorageSize()/sizeof(char16_t) - 1);
       }
       // else aResult is already empty
       return;

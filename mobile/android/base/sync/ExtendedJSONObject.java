@@ -15,6 +15,8 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
+import org.mozilla.apache.commons.codec.binary.Base64;
+import org.mozilla.gecko.sync.UnexpectedJSONException.BadRequiredFieldJSONException;
 
 /**
  * Extend JSONObject to do little things, like, y'know, accessing members.
@@ -48,7 +50,12 @@ public class ExtendedJSONObject {
    * @throws IOException
    */
   protected static Object parseRaw(Reader in) throws ParseException, IOException {
-    return getJSONParser().parse(in);
+    try {
+      return getJSONParser().parse(in);
+    } catch (Error e) {
+      // Don't be stupid, org.json.simple. Bug 1042929.
+      throw new ParseException(ParseException.ERROR_UNEXPECTED_EXCEPTION);
+    }
   }
 
   /**
@@ -61,7 +68,12 @@ public class ExtendedJSONObject {
    * @throws ParseException
    */
   protected static Object parseRaw(String input) throws ParseException {
-    return getJSONParser().parse(input);
+    try {
+      return getJSONParser().parse(input);
+    } catch (Error e) {
+      // Don't be stupid, org.json.simple. Bug 1042929.
+      throw new ParseException(ParseException.ERROR_UNEXPECTED_EXCEPTION);
+    }
   }
 
   /**
@@ -84,7 +96,7 @@ public class ExtendedJSONObject {
       return (JSONArray) o;
     }
 
-    throw new NonArrayJSONException(o);
+    throw new NonArrayJSONException("value must be a JSON array");
   }
 
   /**
@@ -109,7 +121,7 @@ public class ExtendedJSONObject {
       return (JSONArray) o;
     }
 
-    throw new NonArrayJSONException(o);
+    throw new NonArrayJSONException("value must be a JSON array");
   }
 
   /**
@@ -171,7 +183,7 @@ public class ExtendedJSONObject {
     if (obj instanceof JSONObject) {
       this.object = ((JSONObject) obj);
     } else {
-      throw new NonObjectJSONException(obj);
+      throw new NonObjectJSONException("value must be a JSON object");
     }
   }
 
@@ -183,11 +195,17 @@ public class ExtendedJSONObject {
   public Object get(String key) {
     return this.object.get(key);
   }
+
   public Long getLong(String key) {
     return (Long) this.get(key);
   }
+
   public String getString(String key) {
     return (String) this.get(key);
+  }
+
+  public Boolean getBoolean(String key) {
+    return (Boolean) this.get(key);
   }
 
   /**
@@ -258,6 +276,11 @@ public class ExtendedJSONObject {
     map.put(key, value);
   }
 
+  @SuppressWarnings({ "unchecked", "rawtypes" })
+  public void putAll(Map map) {
+    this.object.putAll(map);
+  }
+
   /**
    * Remove key-value pair from JSONObject.
    *
@@ -281,7 +304,7 @@ public class ExtendedJSONObject {
     if (o instanceof JSONObject) {
       return new ExtendedJSONObject((JSONObject) o);
     }
-    throw new NonObjectJSONException(o);
+    throw new NonObjectJSONException("key must be a JSON object: " + key);
   }
 
   @SuppressWarnings("unchecked")
@@ -302,7 +325,7 @@ public class ExtendedJSONObject {
     if (o instanceof JSONArray) {
       return (JSONArray) o;
     }
-    throw new NonArrayJSONException(o);
+    throw new NonArrayJSONException("key must be a JSON array: " + key);
   }
 
   public int size() {
@@ -330,5 +353,47 @@ public class ExtendedJSONObject {
       return other.object == null;
     }
     return this.object.equals(other.object);
+  }
+
+  /**
+   * Throw if keys are missing or values have wrong types.
+   *
+   * @param requiredFields list of required keys.
+   * @param requiredFieldClass class that values must be coercable to; may be null, which means don't check.
+   * @throws UnexpectedJSONException
+   */
+  public void throwIfFieldsMissingOrMisTyped(String[] requiredFields, Class<?> requiredFieldClass) throws BadRequiredFieldJSONException {
+    // Defensive as possible: verify object has expected key(s) with string value.
+    for (String k : requiredFields) {
+      Object value = get(k);
+      if (value == null) {
+        throw new BadRequiredFieldJSONException("Expected key not present in result: " + k);
+      }
+      if (requiredFieldClass != null && !(requiredFieldClass.isInstance(value))) {
+        throw new BadRequiredFieldJSONException("Value for key not an instance of " + requiredFieldClass + ": " + k);
+      }
+    }
+  }
+
+  /**
+   * Return a base64-encoded string value as a byte array.
+   */
+  public byte[] getByteArrayBase64(String key) {
+    String s = (String) this.object.get(key);
+    if (s == null) {
+      return null;
+    }
+    return Base64.decodeBase64(s);
+  }
+
+  /**
+   * Return a hex-encoded string value as a byte array.
+   */
+  public byte[] getByteArrayHex(String key) {
+    String s = (String) this.object.get(key);
+    if (s == null) {
+      return null;
+    }
+    return Utils.hex2Byte(s);
   }
 }

@@ -11,7 +11,6 @@ interfaces = [
     'html',
     'events',
     'devicestorage',
-    'contacts',
     'settings',
     'stylesheets',
     'sidebar',
@@ -27,7 +26,6 @@ interfaces = [
     'geolocation',
     'notification',
     'permission',
-    'push',
     'svg',
     'smil',
     'apps',
@@ -47,9 +45,14 @@ PARALLEL_DIRS += [
     'contacts',
     'phonenumberutils',
     'alarm',
+    'datastore',
     'devicestorage',
     'encoding',
+    'events',
     'file',
+    'filesystem',
+    'fmradio',
+    'asmjscache',
     'media',
     'messages',
     'power',
@@ -71,24 +74,32 @@ PARALLEL_DIRS += [
     'workers',
     'camera',
     'audiochannel',
-    'future',
-    'wappush'
+    'promise',
+    'smil',
+    'telephony',
+    'inputmethod',
+    'webidl',
+    'xbl',
+    'xslt',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     PARALLEL_DIRS += ['plugins/ipc/hangui']
 
-if CONFIG['MOZ_B2G_RIL']:
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     PARALLEL_DIRS += [
-        'telephony',
+        'speakermanager',
         'wifi',
-        'icc',
-        'cellbroadcast',
-        'voicemail',
     ]
 
-if CONFIG['MOZ_B2G_FM']:
-    PARALLEL_DIRS += ['fm']
+if CONFIG['MOZ_B2G_RIL']:
+    PARALLEL_DIRS += [
+        'icc',
+        'cellbroadcast',
+        'mobileconnection',
+        'voicemail',
+        'wappush',
+    ]
 
 if CONFIG['MOZ_PAY']:
     PARALLEL_DIRS += ['payment']
@@ -96,16 +107,17 @@ if CONFIG['MOZ_PAY']:
 if CONFIG['MOZ_GAMEPAD']:
     PARALLEL_DIRS += ['gamepad']
 
-# bindings/test is here, because it needs to build after bindings/, and
-# we build subdirectories before ourselves.
+if CONFIG['MOZ_NFC']:
+    PARALLEL_DIRS += ['nfc']
+
+if CONFIG['MOZ_B2G']:
+    PARALLEL_DIRS += ['downloads']
+
 TEST_DIRS += [
     'tests',
     'imptests',
-    'bindings/test',
 ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk2', 'cocoa', 'windows', 'android', 'qt', 'os2'):
+if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk2', 'cocoa', 'windows', 'android', 'qt'):
     TEST_DIRS += ['plugins/test']
-
-MODULE = 'dom'
 

@@ -7,6 +7,8 @@
 #define _CANVASUTILS_H_
 
 #include "mozilla/CheckedInt.h"
+#include "mozilla/dom/ToJSValue.h"
+#include "jsapi.h"
 
 class nsIPrincipal;
 
@@ -119,7 +121,7 @@ JSValToDashArray(JSContext* cx, const JS::Value& patternArray,
         for (uint32_t i = 0; i < length; ++i) {
             JS::Rooted<JS::Value> elt(cx);
             double d;
-            if (!JS_GetElement(cx, obj, i, elt.address())) {
+            if (!JS_GetElement(cx, obj, i, &elt)) {
                 return NS_ERROR_FAILURE;
             }
             if (!(CoerceDouble(elt, &d) &&
@@ -149,28 +151,20 @@ JSValToDashArray(JSContext* cx, const JS::Value& patternArray,
 }
 
 template<typename T>
-JS::Value
+void
 DashArrayToJSVal(FallibleTArray<T>& dashes,
-                 JSContext* cx, mozilla::ErrorResult& rv)
+                 JSContext* cx,
+                 JS::MutableHandle<JS::Value> retval,
+                 mozilla::ErrorResult& rv)
 {
     if (dashes.IsEmpty()) {
-        return JSVAL_NULL;
+        retval.setNull();
+        return;
     }
-    JS::Rooted<JSObject*> obj(cx,
-        JS_NewArrayObject(cx, dashes.Length(), nullptr));
-    if (!obj) {
+    JS::Rooted<JS::Value> val(cx);
+    if (!mozilla::dom::ToJSValue(cx, dashes, retval)) {
         rv.Throw(NS_ERROR_OUT_OF_MEMORY);
-        return JSVAL_NULL;
     }
-    for (uint32_t i = 0; i < dashes.Length(); ++i) {
-        double d = dashes[i];
-        JS::Value elt = DOUBLE_TO_JSVAL(d);
-        if (!JS_DefineElement(cx, obj, i, elt, nullptr, nullptr, 0)) {
-            rv.Throw(NS_ERROR_FAILURE);
-            return JSVAL_NULL;
-        }
-    }
-    return OBJECT_TO_JSVAL(obj);
 }
 
 }

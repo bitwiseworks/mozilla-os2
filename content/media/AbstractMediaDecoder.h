@@ -55,7 +55,7 @@ public:
 
   // Called by the decode thread to keep track of the number of bytes read
   // from the resource.
-  virtual void NotifyBytesConsumed(int64_t aBytes) = 0;
+  virtual void NotifyBytesConsumed(int64_t aBytes, int64_t aOffset) = 0;
 
   // Increments the parsed and decoded frame counters by the passed in counts.
   // Can be called on any thread.
@@ -71,6 +71,11 @@ public:
 
   // Set the duration of the media in microseconds.
   virtual void SetMediaDuration(int64_t aDuration) = 0;
+
+  // Sets the duration of the media in microseconds. The MediaDecoder
+  // fires a durationchange event to its owner (e.g., an HTML audio
+  // tag).
+  virtual void UpdateEstimatedMediaDuration(int64_t aDuration) = 0;
 
   // Set the media as being seekable or not.
   virtual void SetMediaSeekable(bool aMediaSeekable) = 0;
@@ -106,6 +111,16 @@ public:
   // Returns the owner of this media decoder. The owner should only be used
   // on the main thread.
   virtual MediaDecoderOwner* GetOwner() = 0;
+
+  // May be called by the reader to notify the decoder that the resources
+  // required to begin playback have been acquired. Can be called on any thread.
+  virtual void NotifyWaitingForResourcesStatusChanged() = 0;
+
+  // Called by Reader if the current audio track can be offloaded
+  virtual void SetCanOffloadAudio(bool aCanOffloadAudio) {}
+
+  // Called from HTMLMediaElement when owner document activity changes
+  virtual void SetElementVisibility(bool aIsVisible) {}
 
   // Stack based class to assist in notifying the frame statistics of
   // parsed and decoded frames. Use inside video demux & decode functions

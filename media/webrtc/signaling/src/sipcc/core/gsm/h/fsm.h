@@ -201,12 +201,21 @@ typedef struct fsmdef_media_t_ {
     /* ICE Candidates */
     char **candidatesp;
     int candidate_ct;
-
     /*
      * rtcp-mux indicates media stream is muxed for RTP and RTCP
      */
     boolean        rtcp_mux;
+    /*
+     * Flag to indicate if RTP Header extension for audio level is used
+     * and the id to be used for it
+     */
+    boolean         audio_level;
+    uint8_t         audio_level_id;
 
+    /*
+     * The value of the a=setup line
+     */
+    sdp_setup_type_e setup;
     /*
      * port number used in m= data channel line
      */
@@ -216,7 +225,7 @@ typedef struct fsmdef_media_t_ {
     /*
      * Data Channel properties
      */
-#define WEBRTC_DATACHANNEL_STREAMS_DEFAULT 16
+#define WEBRTC_DATACHANNEL_STREAMS_DEFAULT 256
     uint32         datachannel_streams;
     char           datachannel_protocol[SDP_MAX_STRING_LEN + 1];
 
@@ -424,6 +433,7 @@ typedef struct {
     char digest_alg[FSMDEF_MAX_DIGEST_ALG_LEN];
     char digest[FSMDEF_MAX_DIGEST_LEN];
 
+    sll_lite_list_t candidate_list;
 } fsmdef_dcb_t;
 
 typedef enum fsm_types_t_ {
@@ -492,6 +502,11 @@ typedef enum fsmxfr_modes_t_ {
     FSMXFR_MODE_TRANSFEREE,
     FSMXFR_MODE_TARGET
 } fsmxfr_modes_t;
+
+typedef struct fsmdef_candidate_t_ {
+    sll_lite_node_t node;     /* link node, must be first member of struct */
+    string_t candidate;       /* the candidate value */
+} fsmdef_candidate_t;
 
 struct fsmxfr_xcb_t_;
 typedef struct fsmxfr_xcb_t_ {

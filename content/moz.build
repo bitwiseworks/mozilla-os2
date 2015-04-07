@@ -7,19 +7,13 @@
 PARALLEL_DIRS += [
     'base',
     'canvas',
-    'events',
     'html',
     'mathml/content/src',
     'media',
-    'smil',
     'svg',
     'xml',
     'xul',
-    'xbl',
-    'xslt',
 ]
 
 TEST_TOOL_DIRS += ['test']
-
-MODULE = 'content'
 

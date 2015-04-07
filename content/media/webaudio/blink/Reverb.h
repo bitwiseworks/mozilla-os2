@@ -32,12 +32,17 @@
 #include "ReverbConvolver.h"
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
+#include "AudioSegment.h"
+#include "mozilla/MemoryReporting.h"
 
 namespace mozilla {
 class ThreadSharedFloatArrayBufferList;
 }
 
 namespace WebCore {
+
+class DirectConvolver;
+class FFTConvolver;
 
 // Multi-channel convolution reverb with channel matrixing - one or more ReverbConvolver objects are used internally.
 
@@ -54,8 +59,10 @@ public:
     size_t impulseResponseLength() const { return m_impulseResponseLength; }
     size_t latencyFrames() const;
 
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+
 private:
-    void initialize(mozilla::ThreadSharedFloatArrayBufferList* impulseResponseBuffer, size_t impulseResponseBufferLength, size_t renderSliceSize, size_t maxFFTSize, size_t numberOfChannels, bool useBackgroundThreads);
+    void initialize(const nsTArray<const float*>& impulseResponseBuffer, size_t impulseResponseBufferLength, size_t renderSliceSize, size_t maxFFTSize, size_t numberOfChannels, bool useBackgroundThreads);
 
     size_t m_impulseResponseLength;
 

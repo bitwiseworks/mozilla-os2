@@ -64,6 +64,7 @@ struct cubeb_stream {
   HANDLE event;
   HWAVEOUT waveout;
   CRITICAL_SECTION lock;
+  uint64_t written;
 };
 
 static size_t
@@ -144,6 +145,7 @@ winmm_refill_stream(cubeb_stream * stm)
   } else if (got < wanted) {
     stm->draining = 1;
   }
+  stm->written += got;
 
   assert(hdr->dwFlags & WHDR_PREPARED);
 
@@ -235,7 +237,7 @@ calculate_minimum_latency(void)
     return 200;
   }
 
-  return 0;
+  return 100;
 }
 
 static void winmm_destroy(cubeb * ctx);
@@ -263,7 +265,7 @@ winmm_init(cubeb ** context, char const * context_name)
     return CUBEB_ERROR;
   }
 
-  ctx->thread = (HANDLE) _beginthreadex(NULL, 64 * 1024, winmm_buffer_thread, ctx, 0, NULL);
+  ctx->thread = (HANDLE) _beginthreadex(NULL, 64 * 1024, winmm_buffer_thread, ctx, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
   if (!ctx->thread) {
     winmm_destroy(ctx);
     return CUBEB_ERROR;
@@ -389,6 +391,7 @@ winmm_stream_init(cubeb * context, cubeb_stream ** stream, char const * stream_n
   stm->data_callback = data_callback;
   stm->state_callback = state_callback;
   stm->user_ptr = user_ptr;
+  stm->written = 0;
 
   if (latency < context->minimum_latency) {
     latency = context->minimum_latency;
@@ -505,15 +508,45 @@ winmm_stream_destroy(cubeb_stream * stm)
   free(stm);
 }
 
-int
+static int
 winmm_get_max_channel_count(cubeb * ctx, uint32_t * max_channels)
 {
-  MMRESULT rv;
-  LPWAVEOUTCAPS waveout_caps;
   assert(ctx && max_channels);
 
   /* We don't support more than two channels in this backend. */
   *max_channels = 2;
+
+  return CUBEB_OK;
+}
+
+static int
+winmm_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * latency)
+{
+  // 100ms minimum, if we are not in a bizarre configuration.
+  *latency = ctx->minimum_latency;
+
+  return CUBEB_OK;
+}
+
+static int
+winmm_get_preferred_sample_rate(cubeb * ctx, uint32_t * rate)
+{
+  WAVEOUTCAPS woc;
+  MMRESULT r;
+
+  r = waveOutGetDevCaps(WAVE_MAPPER, &woc, sizeof(WAVEOUTCAPS));
+  if (r != MMSYSERR_NOERROR) {
+    return CUBEB_ERROR;
+  }
+
+  /* Check if we support 48kHz, but not 44.1kHz. */
+  if (!(woc.dwFormats & WAVE_FORMAT_4S16) &&
+      woc.dwFormats & WAVE_FORMAT_48S16) {
+    *rate = 48000;
+    return CUBEB_OK;
+  }
+  /* Prefer 44.1kHz between 44.1kHz and 48kHz. */
+  *rate = 44100;
 
   return CUBEB_OK;
 }
@@ -574,14 +607,35 @@ winmm_stream_get_position(cubeb_stream * stm, uint64_t * position)
   return CUBEB_OK;
 }
 
+static int
+winmm_stream_get_latency(cubeb_stream * stm, uint32_t * latency)
+{
+  MMRESULT r;
+  MMTIME time;
+  uint64_t written;
+
+  EnterCriticalSection(&stm->lock);
+  time.wType = TIME_SAMPLES;
+  r = waveOutGetPosition(stm->waveout, &time, sizeof(time));
+  written = stm->written;
+  LeaveCriticalSection(&stm->lock);
+
+  *latency = written - time.u.sample;
+
+  return CUBEB_OK;
+}
+
 static struct cubeb_ops const winmm_ops = {
   /*.init =*/ winmm_init,
   /*.get_backend_id =*/ winmm_get_backend_id,
   /*.get_max_channel_count=*/ winmm_get_max_channel_count,
+  /*.get_min_latency=*/ winmm_get_min_latency,
+  /*.get_preferred_sample_rate =*/ winmm_get_preferred_sample_rate,
   /*.destroy =*/ winmm_destroy,
   /*.stream_init =*/ winmm_stream_init,
   /*.stream_destroy =*/ winmm_stream_destroy,
   /*.stream_start =*/ winmm_stream_start,
   /*.stream_stop =*/ winmm_stream_stop,
-  /*.stream_get_position =*/ winmm_stream_get_position
+  /*.stream_get_position =*/ winmm_stream_get_position,
+  /*.stream_get_latency = */ winmm_stream_get_latency
 };

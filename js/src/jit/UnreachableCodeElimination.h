@@ -7,8 +7,7 @@
 #ifndef jit_UnreachableCodeElimination_h
 #define jit_UnreachableCodeElimination_h
 
-#include "MIR.h"
-#include "MIRGraph.h"
+#include "jit/MIRGraph.h"
 
 namespace js {
 namespace jit {
@@ -24,6 +23,7 @@ class UnreachableCodeElimination
     uint32_t marked_;
     bool redundantPhis_;
     bool rerunAliasAnalysis_;
+    bool disableAliasAnalysis_;
 
     bool prunePointlessBranchesAndMarkReachableBlocks();
     void checkDependencyAndRemoveUsesFromUnmarkedBlocks(MDefinition *instr);
@@ -39,7 +39,8 @@ class UnreachableCodeElimination
         graph_(graph),
         marked_(0),
         redundantPhis_(false),
-        rerunAliasAnalysis_(false)
+        rerunAliasAnalysis_(false),
+        disableAliasAnalysis_(false)
     {}
 
     // Walks the graph and discovers what is reachable. Removes everything else.
@@ -49,6 +50,12 @@ class UnreachableCodeElimination
     // reachable.  The parameter |marked| should be the number of blocks that
     // are marked.
     bool removeUnmarkedBlocks(size_t marked);
+
+    // Call this function to prevent alias analysis to run a second time if we
+    // do not need it.
+    void disableAliasAnalysis() {
+        disableAliasAnalysis_ = true;
+    }
 };
 
 } /* namespace jit */

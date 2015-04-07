@@ -2,6 +2,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+// IWYU pragma: private, include "GeckoProfiler.h"
 
 #ifndef TOOLS_SPS_SAMPLER_H_
 #define TOOLS_SPS_SAMPLER_H_
@@ -9,17 +10,16 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <stdarg.h>
-#include <algorithm>
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/TimeStamp.h"
-#include "mozilla/Util.h"
-#include "nsAlgorithm.h"
 #include "nscore.h"
-#include "jsfriendapi.h"
 #include "GeckoProfilerFunc.h"
 #include "PseudoStack.h"
 #include "nsISupports.h"
+
+#ifdef MOZ_TASK_TRACER
+#include "GeckoTaskTracerImpl.h"
+#endif
 
 /* QT has a #define for the word "slots" and jsfriendapi.h has a struct with
  * this variable name, causing compilation problems. Alleviate this for now by
@@ -33,12 +33,16 @@
 #undef min
 #endif
 
-struct PseudoStack;
 class TableTicker;
 class JSCustomObject;
 
+namespace mozilla {
+class TimeStamp;
+}
+
 extern mozilla::ThreadLocal<PseudoStack *> tlsPseudoStack;
 extern mozilla::ThreadLocal<TableTicker *> tlsTicker;
+extern mozilla::ThreadLocal<void *> tlsStackTop;
 extern bool stack_key_initialized;
 
 #ifndef SAMPLE_FUNCTION_NAME
@@ -54,12 +58,18 @@ extern bool stack_key_initialized;
 static inline
 void profiler_init(void* stackTop)
 {
+#ifdef MOZ_TASK_TRACER
+  mozilla::tasktracer::InitTaskTracer();
+#endif
   mozilla_sampler_init(stackTop);
 }
 
 static inline
 void profiler_shutdown()
 {
+#ifdef MOZ_TASK_TRACER
+  mozilla::tasktracer::ShutdownTaskTracer();
+#endif
   mozilla_sampler_shutdown();
 }
 
@@ -78,13 +88,43 @@ void profiler_stop()
 }
 
 static inline
+bool profiler_is_paused()
+{
+  return mozilla_sampler_is_paused();
+}
+
+static inline
+void profiler_pause()
+{
+  mozilla_sampler_pause();
+}
+
+static inline
+void profiler_resume()
+{
+  mozilla_sampler_resume();
+}
+
+static inline
+ProfilerBacktrace* profiler_get_backtrace()
+{
+  return mozilla_sampler_get_backtrace();
+}
+
+static inline
+void profiler_free_backtrace(ProfilerBacktrace* aBacktrace)
+{
+  mozilla_sampler_free_backtrace(aBacktrace);
+}
+
+static inline
 bool profiler_is_active()
 {
   return mozilla_sampler_is_active();
 }
 
 static inline
-void profiler_responsiveness(const TimeStamp& aTime)
+void profiler_responsiveness(const mozilla::TimeStamp& aTime)
 {
   mozilla_sampler_responsiveness(aTime);
 }
@@ -111,6 +151,12 @@ static inline
 JSObject* profiler_get_profile_jsobject(JSContext* aCx)
 {
   return mozilla_sampler_get_profile_data(aCx);
+}
+
+static inline
+void profiler_save_profile_to_file(const char* aFilename)
+{
+  return mozilla_sampler_save_profile_to_file(aFilename);
 }
 
 static inline
@@ -154,6 +200,18 @@ void profiler_unregister_thread()
 }
 
 static inline
+void profiler_sleep_start()
+{
+  mozilla_sampler_sleep_start();
+}
+
+static inline
+void profiler_sleep_end()
+{
+  mozilla_sampler_sleep_end();
+}
+
+static inline
 void profiler_js_operation_callback()
 {
   PseudoStack *stack = tlsPseudoStack.get();
@@ -171,6 +229,12 @@ double profiler_time()
 }
 
 static inline
+double profiler_time(const mozilla::TimeStamp& aTime)
+{
+  return mozilla_sampler_time(aTime);
+}
+
+static inline
 bool profiler_in_privacy_mode()
 {
   PseudoStack *stack = tlsPseudoStack.get();
@@ -180,6 +244,42 @@ bool profiler_in_privacy_mode()
   return stack->mPrivacyMode;
 }
 
+static inline void profiler_tracing(const char* aCategory, const char* aInfo,
+                                    TracingMetadata aMetaData = TRACING_DEFAULT)
+{
+  if (!stack_key_initialized)
+    return;
+
+  // Don't insert a marker if we're not profiling to avoid
+  // the heap copy (malloc).
+  if (!profiler_is_active()) {
+    return;
+  }
+
+  mozilla_sampler_tracing(aCategory, aInfo, aMetaData);
+}
+
+// Uncomment this to turn on systrace or build with
+// ac_add_options --enable-systace
+//#define MOZ_USE_SYSTRACE
+#ifdef MOZ_USE_SYSTRACE
+# define ATRACE_TAG ATRACE_TAG_GRAPHICS
+// We need HAVE_ANDROID_OS to be defined for Trace.h.
+// If its not set we will set it temporary and remove it.
+# ifndef HAVE_ANDROID_OS
+#   define HAVE_ANDROID_OS
+#   define REMOVE_HAVE_ANDROID_OS
+# endif
+# include <utils/Trace.h>
+# define MOZ_PLATFORM_TRACING ATRACE_CALL();
+# ifdef REMOVE_HAVE_ANDROID_OS
+#  undef HAVE_ANDROID_OS
+#  undef REMOVE_HAVE_ANDROID_OS
+# endif
+#else
+# define MOZ_PLATFORM_TRACING
+#endif
+
 // we want the class and function name but can't easily get that using preprocessor macros
 // __func__ doesn't have the class name and __PRETTY_FUNCTION__ has the parameters
 
@@ -187,12 +287,15 @@ bool profiler_in_privacy_mode()
 #define SAMPLER_APPEND_LINE_NUMBER_EXPAND(id, line) SAMPLER_APPEND_LINE_NUMBER_PASTE(id, line)
 #define SAMPLER_APPEND_LINE_NUMBER(id) SAMPLER_APPEND_LINE_NUMBER_EXPAND(id, __LINE__)
 
-#define PROFILER_LABEL(name_space, info) mozilla::SamplerStackFrameRAII SAMPLER_APPEND_LINE_NUMBER(sampler_raii)(name_space "::" info, __LINE__)
-#define PROFILER_LABEL_PRINTF(name_space, info, ...) mozilla::SamplerStackFramePrintfRAII SAMPLER_APPEND_LINE_NUMBER(sampler_raii)(name_space "::" info, __LINE__, __VA_ARGS__)
+#define PROFILER_LABEL(name_space, info) MOZ_PLATFORM_TRACING mozilla::SamplerStackFrameRAII SAMPLER_APPEND_LINE_NUMBER(sampler_raii)(name_space "::" info, __LINE__)
+#define PROFILER_LABEL_PRINTF(name_space, info, ...) MOZ_PLATFORM_TRACING mozilla::SamplerStackFramePrintfRAII SAMPLER_APPEND_LINE_NUMBER(sampler_raii)(name_space "::" info, __LINE__, __VA_ARGS__)
+
 #define PROFILER_MARKER(info) mozilla_sampler_add_marker(info)
+#define PROFILER_MARKER_PAYLOAD(info, payload) mozilla_sampler_add_marker(info, payload)
+#define PROFILER_MAIN_THREAD_MARKER(info)  MOZ_ASSERT(NS_IsMainThread(), "This can only be called on the main thread"); mozilla_sampler_add_marker(info)
+
 #define PROFILER_MAIN_THREAD_LABEL(name_space, info)  MOZ_ASSERT(NS_IsMainThread(), "This can only be called on the main thread"); mozilla::SamplerStackFrameRAII SAMPLER_APPEND_LINE_NUMBER(sampler_raii)(name_space "::" info, __LINE__)
 #define PROFILER_MAIN_THREAD_LABEL_PRINTF(name_space, info, ...)  MOZ_ASSERT(NS_IsMainThread(), "This can only be called on the main thread"); mozilla::SamplerStackFramePrintfRAII SAMPLER_APPEND_LINE_NUMBER(sampler_raii)(name_space "::" info, __LINE__, __VA_ARGS__)
-#define PROFILER_MAIN_THREAD_MARKER(info)  MOZ_ASSERT(NS_IsMainThread(), "This can only be called on the main thread"); mozilla_sampler_add_marker(info)
 
 
 /* FIXME/bug 789667: memory constraints wouldn't much of a problem for
@@ -207,6 +310,10 @@ bool profiler_in_privacy_mode()
 #else
 # define PROFILE_DEFAULT_ENTRY 100000
 #endif
+
+// In the case of profiler_get_backtrace we know that we only need enough space
+// for a single backtrace.
+#define GET_BACKTRACE_DEFAULT_ENTRY 1000
 
 #if defined(PLATFORM_LIKELY_MEMORY_CONSTRAINED)
 /* A 1ms sampling interval has been shown to be a large perf hit
@@ -263,13 +370,13 @@ public:
       _vsnprintf(buff, SAMPLER_MAX_STRING, aFormat, args);
       _snprintf(mDest, SAMPLER_MAX_STRING, "%s %s", aDefault, buff);
 #else
-      vsnprintf(buff, SAMPLER_MAX_STRING, aFormat, args);
-      snprintf(mDest, SAMPLER_MAX_STRING, "%s %s", aDefault, buff);
+      ::vsnprintf(buff, SAMPLER_MAX_STRING, aFormat, args);
+      ::snprintf(mDest, SAMPLER_MAX_STRING, "%s %s", aDefault, buff);
 #endif
       mHandle = mozilla_sampler_call_enter(mDest, this, true, line);
       va_end(args);
     } else {
-      mHandle = mozilla_sampler_call_enter(aDefault, NULL, false, line);
+      mHandle = mozilla_sampler_call_enter(aDefault, this, false, line);
     }
   }
   ~SamplerStackFramePrintfRAII() {
@@ -285,7 +392,7 @@ private:
 inline PseudoStack* mozilla_get_pseudo_stack(void)
 {
   if (!stack_key_initialized)
-    return NULL;
+    return nullptr;
   return tlsPseudoStack.get();
 }
 
@@ -295,7 +402,7 @@ inline void* mozilla_sampler_call_enter(const char *aInfo, void *aFrameAddress,
   // check if we've been initialized to avoid calling pthread_getspecific
   // with a null tlsStack which will return undefined results.
   if (!stack_key_initialized)
-    return NULL;
+    return nullptr;
 
   PseudoStack *stack = tlsPseudoStack.get();
   // we can't infer whether 'stack' has been initialized
@@ -324,27 +431,6 @@ inline void mozilla_sampler_call_exit(void *aHandle)
   stack->pop();
 }
 
-inline void mozilla_sampler_add_marker(const char *aMarker)
-{
-  if (!stack_key_initialized)
-    return;
-
-  // Don't insert a marker if we're not profiling to avoid
-  // the heap copy (malloc).
-  if (!profiler_is_active()) {
-    return;
-  }
-
-  // Don't add a marker if we don't want to include personal information
-  if (profiler_in_privacy_mode()) {
-    return;
-  }
-
-  PseudoStack *stack = tlsPseudoStack.get();
-  if (!stack) {
-    return;
-  }
-  stack->addMarker(aMarker);
-}
+void mozilla_sampler_add_marker(const char *aMarker, ProfilerMarkerPayload *aPayload);
 
 #endif /* ndef TOOLS_SPS_SAMPLER_H_ */

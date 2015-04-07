@@ -14,7 +14,7 @@ public:
   NS_DECL_NSISIMPLETEST
 };
 
-NS_IMPL_ISUPPORTS1(SimpleTest, nsISimpleTest)
+NS_IMPL_ISUPPORTS(SimpleTest, nsISimpleTest)
 
 NS_IMETHODIMP
 SimpleTest::Add(int32_t a, int32_t b, int32_t *r)
@@ -35,13 +35,13 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(SimpleTest)
 NS_DEFINE_NAMED_CID(SIMPLETEST_CID);
 
 static const mozilla::Module::CIDEntry kSimpleCIDs[] = {
-  { &kSIMPLETEST_CID, false, NULL, SimpleTestConstructor },
-  { NULL }
+  { &kSIMPLETEST_CID, false, nullptr, SimpleTestConstructor },
+  { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kSimpleContracts[] = {
   { "@test.mozilla.org/simple-test;1?impl=c++", &kSIMPLETEST_CID },
-  { NULL }
+  { nullptr }
 };
 
 static const mozilla::Module kSimpleModule = {

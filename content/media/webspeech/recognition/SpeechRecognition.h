@@ -4,33 +4,33 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#pragma once
+#ifndef mozilla_dom_SpeechRecognition_h
+#define mozilla_dom_SpeechRecognition_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "nsCOMPtr.h"
-#include "nsDOMEventTargetHelper.h"
 #include "nsString.h"
 #include "nsWrapperCache.h"
-#include "nsIDOMNavigatorUserMedia.h"
 #include "nsTArray.h"
+#include "js/TypeDecls.h"
 
-#include "MediaManager.h"
+#include "nsIDOMNavigatorUserMedia.h"
+#include "nsITimer.h"
 #include "MediaEngine.h"
 #include "MediaStreamGraph.h"
 #include "AudioSegment.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/Preferences.h"
 
-#include "EnableWebSpeechRecognitionCheck.h"
 #include "SpeechGrammarList.h"
 #include "SpeechRecognitionResultList.h"
 #include "SpeechStreamListener.h"
 #include "nsISpeechRecognitionService.h"
 #include "endpointer.h"
 
-#include "nsIDOMSpeechRecognitionError.h"
+#include "mozilla/dom/SpeechRecognitionError.h"
 
-struct JSContext;
 class nsIDOMWindow;
 
 namespace mozilla {
@@ -53,13 +53,13 @@ PRLogModuleInfo* GetSpeechRecognitionLog();
 #define SR_LOG(...)
 #endif
 
-class SpeechRecognition MOZ_FINAL : public nsDOMEventTargetHelper,
+class SpeechRecognition MOZ_FINAL : public DOMEventTargetHelper,
                                     public nsIObserver,
-                                    public EnableWebSpeechRecognitionCheck,
                                     public SupportsWeakPtr<SpeechRecognition>
 {
 public:
-  SpeechRecognition();
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(SpeechRecognition)
+  SpeechRecognition(nsPIDOMWindow* aOwnerWindow);
   virtual ~SpeechRecognition() {};
 
   NS_DECL_ISUPPORTS_INHERITED
@@ -68,10 +68,10 @@ public:
 
   nsISupports* GetParentObject() const;
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
-  static already_AddRefed<SpeechRecognition> Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
+  static already_AddRefed<SpeechRecognition>
+  Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
 
   already_AddRefed<SpeechGrammarList> GetGrammars(ErrorResult& aRv) const;
 
@@ -127,10 +127,10 @@ public:
     EVENT_COUNT
   };
 
-  void DispatchError(EventType aErrorType, int aErrorCode, const nsAString& aMessage);
+  void DispatchError(EventType aErrorType, SpeechRecognitionErrorCode aErrorCode, const nsAString& aMessage);
   uint32_t FillSamplesBuffer(const int16_t* aSamples, uint32_t aSampleCount);
-  uint32_t SplitSamplesBuffer(const int16_t* aSamplesBuffer, uint32_t aSampleCount, nsTArray<already_AddRefed<SharedBuffer> >& aResult);
-  AudioSegment* CreateAudioSegment(nsTArray<already_AddRefed<SharedBuffer> >& aChunks);
+  uint32_t SplitSamplesBuffer(const int16_t* aSamplesBuffer, uint32_t aSampleCount, nsTArray<nsRefPtr<SharedBuffer>>& aResult);
+  AudioSegment* CreateAudioSegment(nsTArray<nsRefPtr<SharedBuffer>>& aChunks);
   void FeedAudioData(already_AddRefed<SharedBuffer> aSamples, uint32_t aDuration, MediaStreamListener* aProvider);
 
   static struct TestConfig
@@ -169,22 +169,11 @@ private:
     STATE_WAITING_FOR_SPEECH,
     STATE_RECOGNIZING,
     STATE_WAITING_FOR_RESULT,
-    STATE_ABORTING,
     STATE_COUNT
   };
 
   void SetState(FSMState state);
   bool StateBetween(FSMState begin, FSMState end);
-
-  class GetUserMediaStreamOptions : public nsIMediaStreamOptions
-  {
-  public:
-    NS_DECL_ISUPPORTS
-    NS_DECL_NSIMEDIASTREAMOPTIONS
-
-    GetUserMediaStreamOptions() {}
-    virtual ~GetUserMediaStreamOptions() {}
-  };
 
   class GetUserMediaSuccessCallback : public nsIDOMGetUserMediaSuccessCallback
   {
@@ -247,7 +236,6 @@ private:
   void GetRecognitionServiceCID(nsACString& aResultCID);
 
   FSMState mCurrentState;
-  nsTArray<nsRefPtr<SpeechEvent> > mPriorityEvents;
 
   Endpointer mEndpointer;
   uint32_t mEstimationSamples;
@@ -260,6 +248,7 @@ private:
   uint32_t mBufferedSamples;
 
   nsCOMPtr<nsITimer> mSpeechDetectionTimer;
+  bool mAborted;
 
   void ProcessTestEventRequest(nsISupports* aSubject, const nsAString& aEventName);
 
@@ -284,7 +273,7 @@ public:
   NS_IMETHOD Run() MOZ_OVERRIDE;
   AudioSegment* mAudioSegment;
   nsRefPtr<SpeechRecognitionResultList> mRecognitionResultList; // TODO: make this a session being passed which also has index and stuff
-  nsCOMPtr<nsIDOMSpeechRecognitionError> mError;
+  nsRefPtr<SpeechRecognitionError> mError;
 
   friend class SpeechRecognition;
 private:
@@ -303,6 +292,8 @@ private:
 inline nsISupports*
 ToSupports(dom::SpeechRecognition* aRec)
 {
-  return ToSupports(static_cast<nsDOMEventTargetHelper*>(aRec));
+  return ToSupports(static_cast<DOMEventTargetHelper*>(aRec));
 }
 } // namespace mozilla
+
+#endif

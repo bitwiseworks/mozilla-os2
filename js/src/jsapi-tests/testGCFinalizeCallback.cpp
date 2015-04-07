@@ -2,29 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "tests.h"
+#include "jsapi-tests/tests.h"
 
-#include <stdarg.h>
-
-#include "jsfriendapi.h"
-#include "jscntxt.h"
-
-#include "vm/ObjectImpl-inl.h"
-
-const unsigned BufferSize = 20;
+static const unsigned BufferSize = 20;
 static unsigned FinalizeCalls = 0;
 static JSFinalizeStatus StatusBuffer[BufferSize];
 static bool IsCompartmentGCBuffer[BufferSize];
-
-static void
-FinalizeCallback(JSFreeOp *fop, JSFinalizeStatus status, JSBool isCompartmentGC)
-{
-    if (FinalizeCalls < BufferSize) {
-        StatusBuffer[FinalizeCalls] = status;
-        IsCompartmentGCBuffer[FinalizeCalls] = isCompartmentGC;
-    }
-    ++FinalizeCalls;
-}
 
 BEGIN_TEST(testGCFinalizeCallback)
 {
@@ -133,7 +116,7 @@ BEGIN_TEST(testGCFinalizeCallback)
     CHECK(JS_IsGlobalObject(global2));
     CHECK(JS_IsGlobalObject(global3));
 
-    JS_SetFinalizeCallback(rt, NULL);
+    JS_SetFinalizeCallback(rt, nullptr);
     return true;
 }
 
@@ -178,4 +161,13 @@ bool checkFinalizeIsCompartmentGC(bool isCompartmentGC)
     return true;
 }
 
+static void
+FinalizeCallback(JSFreeOp *fop, JSFinalizeStatus status, bool isCompartmentGC)
+{
+    if (FinalizeCalls < BufferSize) {
+        StatusBuffer[FinalizeCalls] = status;
+        IsCompartmentGCBuffer[FinalizeCalls] = isCompartmentGC;
+    }
+    ++FinalizeCalls;
+}
 END_TEST(testGCFinalizeCallback)

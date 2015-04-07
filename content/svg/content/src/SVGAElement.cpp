@@ -4,13 +4,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/SVGAElement.h"
-#include "base/compiler_specific.h"
+
+#include "mozilla/Attributes.h"
+#include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/dom/SVGAElementBinding.h"
-#include "nsILink.h"
-#include "nsSVGString.h"
 #include "nsCOMPtr.h"
-#include "nsGkAtoms.h"
 #include "nsContentUtils.h"
+#include "nsGkAtoms.h"
+#include "nsSVGString.h"
+#include "nsIURI.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(A)
 
@@ -18,9 +21,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGAElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGAElement::WrapNode(JSContext *aCx)
 {
-  return SVGAElementBinding::Wrap(aCx, aScope, this);
+  return SVGAElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::StringInfo SVGAElement::sStringInfo[2] =
@@ -33,20 +36,35 @@ nsSVGElement::StringInfo SVGAElement::sStringInfo[2] =
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_ISUPPORTS_INHERITED5(SVGAElement, SVGAElementBase,
-                             nsIDOMNode,
-                             nsIDOMElement,
-                             nsIDOMSVGElement,
-                             nsILink,
-                             Link)
+NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(SVGAElement)
+  NS_INTERFACE_TABLE_INHERITED(SVGAElement,
+                               nsIDOMNode,
+                               nsIDOMElement,
+                               nsIDOMSVGElement,
+                               Link)
+NS_INTERFACE_TABLE_TAIL_INHERITING(SVGAElementBase)
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(SVGAElement)
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(SVGAElement,
+                                                  SVGAElementBase)
+  tmp->Link::Traverse(cb);
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(SVGAElement,
+                                                SVGAElementBase)
+  tmp->Link::Unlink();
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_ADDREF_INHERITED(SVGAElement, SVGAElementBase)
+NS_IMPL_RELEASE_INHERITED(SVGAElement, SVGAElementBase)
 
 //----------------------------------------------------------------------
 // Implementation
 
-SVGAElement::SVGAElement(already_AddRefed<nsINodeInfo> aNodeInfo)
-  : SVGAElementBase(aNodeInfo),
-    ALLOW_THIS_IN_INITIALIZER_LIST(Link(this))
+SVGAElement::SVGAElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  : SVGAElementBase(aNodeInfo)
+  , Link(MOZ_THIS_IN_INITIALIZER_LIST())
 {
 }
 
@@ -60,7 +78,7 @@ SVGAElement::Href()
 // nsINode methods
 
 nsresult
-SVGAElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+SVGAElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
   nsresult rv = Element::PreHandleEvent(aVisitor);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -69,7 +87,7 @@ SVGAElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
 }
 
 nsresult
-SVGAElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
+SVGAElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
 {
   return PostHandleEventForLinks(aVisitor);
 }
@@ -161,7 +179,7 @@ SVGAElement::IsAttributeMapped(const nsIAtom* name) const
 }
 
 bool
-SVGAElement::IsFocusable(int32_t *aTabIndex, bool aWithMouse)
+SVGAElement::IsFocusableInternal(int32_t *aTabIndex, bool aWithMouse)
 {
   nsCOMPtr<nsIURI> uri;
   if (IsLink(getter_AddRefs(uri))) {
@@ -251,7 +269,7 @@ SVGAElement::GetLinkTarget(nsAString& aTarget)
   }
 }
 
-nsEventStates
+EventStates
 SVGAElement::IntrinsicState() const
 {
   return Link::LinkState() | SVGAElementBase::IntrinsicState();

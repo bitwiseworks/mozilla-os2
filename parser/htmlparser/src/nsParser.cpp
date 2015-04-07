@@ -14,7 +14,6 @@
 #include "nsIChannel.h"
 #include "nsICachingChannel.h"
 #include "nsICacheEntryDescriptor.h"
-#include "nsICharsetConverterManager.h"
 #include "nsIInputStream.h"
 #include "CNavDTD.h"
 #include "prenv.h"
@@ -40,6 +39,8 @@
 #include "nsParserConstants.h"
 #include "nsCharsetSource.h"
 #include "nsContentUtils.h"
+#include "nsThreadUtils.h"
+#include "nsIHTMLContentSink.h"
 
 #include "mozilla/dom/EncodingUtils.h"
 
@@ -51,10 +52,6 @@ using mozilla::dom::EncodingUtils;
 #define NS_PARSER_FLAG_PENDING_CONTINUE_EVENT 0x00000008
 #define NS_PARSER_FLAG_FLUSH_TOKENS           0x00000020
 #define NS_PARSER_FLAG_CAN_TOKENIZE           0x00000040
-
-static NS_DEFINE_IID(kISupportsIID, NS_ISUPPORTS_IID);
-static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
-static NS_DEFINE_IID(kIParserIID, NS_IPARSER_IID);
 
 //-------------- Begin ParseContinue Event Definition ------------------------
 /*
@@ -130,40 +127,6 @@ public:
 
 //-------------- End ParseContinue Event Definition ------------------------
 
-nsICharsetConverterManager* nsParser::sCharsetConverterManager = nullptr;
-
-/**
- *  This gets called when the htmlparser module is initialized.
- */
-// static
-nsresult
-nsParser::Init()
-{
-  nsresult rv;
-
-  nsCOMPtr<nsICharsetConverterManager> charsetConverter =
-    do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  charsetConverter.swap(sCharsetConverterManager);
-
-  return NS_OK;
-}
-
-
-/**
- *  This gets called when the htmlparser module is shutdown.
- */
-// static
-void nsParser::Shutdown()
-{
-  NS_IF_RELEASE(sCharsetConverterManager);
-}
-
-#ifdef DEBUG
-static bool gDumpContent=false;
-#endif
-
 /**
  *  default constructor
  */
@@ -180,12 +143,6 @@ nsParser::~nsParser()
 void
 nsParser::Initialize(bool aConstructor)
 {
-#ifdef DEBUG
-  if (!gDumpContent) {
-    gDumpContent = PR_GetEnv("PARSER_DUMP_CONTENT") != nullptr;
-  }
-#endif
-
   if (aConstructor) {
     // Raw pointer
     mParserContext = 0;
@@ -214,20 +171,6 @@ void
 nsParser::Cleanup()
 {
 #ifdef DEBUG
-  if (gDumpContent) {
-    if (mSink) {
-      // Sink (HTMLContentSink at this time) supports nsIDebugDumpContent
-      // interface. We can get to the content model through the sink.
-      nsresult result = NS_OK;
-      nsCOMPtr<nsIDebugDumpContent> trigger = do_QueryInterface(mSink, &result);
-      if (NS_SUCCEEDED(result)) {
-        trigger->DumpContentModel();
-      }
-    }
-  }
-#endif
-
-#ifdef DEBUG
   if (mParserContext && mParserContext->mPrevContext) {
     NS_WARNING("Extra parser contexts still on the parser stack");
   }
@@ -244,6 +187,8 @@ nsParser::Cleanup()
   // has an owning reference to |this|.
   NS_ASSERTION(!(mFlags & NS_PARSER_FLAG_PENDING_CONTINUE_EVENT), "bad");
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsParser)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsParser)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDTD)
@@ -409,13 +354,13 @@ static int32_t
 ParsePS(const nsString& aBuffer, int32_t aIndex)
 {
   for (;;) {
-    PRUnichar ch = aBuffer.CharAt(aIndex);
-    if ((ch == PRUnichar(' ')) || (ch == PRUnichar('\t')) ||
-        (ch == PRUnichar('\n')) || (ch == PRUnichar('\r'))) {
+    char16_t ch = aBuffer.CharAt(aIndex);
+    if ((ch == char16_t(' ')) || (ch == char16_t('\t')) ||
+        (ch == char16_t('\n')) || (ch == char16_t('\r'))) {
       ++aIndex;
-    } else if (ch == PRUnichar('-')) {
+    } else if (ch == char16_t('-')) {
       int32_t tmpIndex;
-      if (aBuffer.CharAt(aIndex+1) == PRUnichar('-') &&
+      if (aBuffer.CharAt(aIndex+1) == char16_t('-') &&
           kNotFound != (tmpIndex=aBuffer.Find("--",false,aIndex+2,-1))) {
         aIndex = tmpIndex + 2;
       } else {
@@ -448,8 +393,8 @@ ParseDocTypeDecl(const nsString &aBuffer,
   do {
     theIndex = aBuffer.FindChar('<', theIndex);
     if (theIndex == kNotFound) break;
-    PRUnichar nextChar = aBuffer.CharAt(theIndex+1);
-    if (nextChar == PRUnichar('!')) {
+    char16_t nextChar = aBuffer.CharAt(theIndex+1);
+    if (nextChar == char16_t('!')) {
       int32_t tmpIndex = theIndex + 2;
       if (kNotFound !=
           (theIndex=aBuffer.Find("DOCTYPE", true, tmpIndex, 0))) {
@@ -459,7 +404,7 @@ ParseDocTypeDecl(const nsString &aBuffer,
       }
       theIndex = ParsePS(aBuffer, tmpIndex);
       theIndex = aBuffer.FindChar('>', theIndex);
-    } else if (nextChar == PRUnichar('?')) {
+    } else if (nextChar == char16_t('?')) {
       theIndex = aBuffer.FindChar('>', theIndex);
     } else {
       break;
@@ -486,8 +431,8 @@ ParseDocTypeDecl(const nsString &aBuffer,
     // Now find the beginning and end of the public identifier
     // and the system identifier (if present).
 
-    PRUnichar lit = aBuffer.CharAt(theIndex);
-    if ((lit != PRUnichar('\"')) && (lit != PRUnichar('\'')))
+    char16_t lit = aBuffer.CharAt(theIndex);
+    if ((lit != char16_t('\"')) && (lit != char16_t('\'')))
       return false;
 
     // Start is the first character, excluding the quote, and End is
@@ -498,15 +443,15 @@ ParseDocTypeDecl(const nsString &aBuffer,
     if (kNotFound == PublicIDEnd)
       return false;
     theIndex = ParsePS(aBuffer, PublicIDEnd + 1);
-    PRUnichar next = aBuffer.CharAt(theIndex);
-    if (next == PRUnichar('>')) {
+    char16_t next = aBuffer.CharAt(theIndex);
+    if (next == char16_t('>')) {
       // There was a public identifier, but no system
       // identifier,
       // so do nothing.
       // This is needed to avoid the else at the end, and it's
       // also the most common case.
-    } else if ((next == PRUnichar('\"')) ||
-               (next == PRUnichar('\''))) {
+    } else if ((next == char16_t('\"')) ||
+               (next == char16_t('\''))) {
       // We found a system identifier.
       *aResultFlags |= PARSE_DTD_HAVE_SYSTEM_ID;
       int32_t SystemIDStart = theIndex + 1;
@@ -515,7 +460,7 @@ ParseDocTypeDecl(const nsString &aBuffer,
         return false;
       aSystemID =
         Substring(aBuffer, SystemIDStart, SystemIDEnd - SystemIDStart);
-    } else if (next == PRUnichar('[')) {
+    } else if (next == char16_t('[')) {
       // We found an internal subset.
       *aResultFlags |= PARSE_DTD_HAVE_INTERNAL_SUBSET;
     } else {
@@ -535,8 +480,8 @@ ParseDocTypeDecl(const nsString &aBuffer,
       *aResultFlags |= PARSE_DTD_HAVE_SYSTEM_ID;
 
       theIndex = ParsePS(aBuffer, tmpIndex+6);
-      PRUnichar next = aBuffer.CharAt(theIndex);
-      if (next != PRUnichar('\"') && next != PRUnichar('\''))
+      char16_t next = aBuffer.CharAt(theIndex);
+      if (next != char16_t('\"') && next != char16_t('\''))
         return false;
 
       int32_t SystemIDStart = theIndex + 1;
@@ -549,10 +494,10 @@ ParseDocTypeDecl(const nsString &aBuffer,
       theIndex = ParsePS(aBuffer, SystemIDEnd + 1);
     }
 
-    PRUnichar nextChar = aBuffer.CharAt(theIndex);
-    if (nextChar == PRUnichar('['))
+    char16_t nextChar = aBuffer.CharAt(theIndex);
+    if (nextChar == char16_t('['))
       *aResultFlags |= PARSE_DTD_HAVE_INTERNAL_SUBSET;
-    else if (nextChar != PRUnichar('>'))
+    else if (nextChar != char16_t('>'))
       return false;
   }
   return true;
@@ -905,7 +850,7 @@ nsParser::WillBuildModel(nsString& aFilename)
 
   if (eDTDMode_unknown == mParserContext->mDTDMode ||
       eDTDMode_autodetect == mParserContext->mDTDMode) {
-    PRUnichar buf[1025];
+    char16_t buf[1025];
     nsFixedString theBuffer(buf, 1024, 0);
 
     // Grab 1024 characters, starting at the first non-whitespace
@@ -1006,12 +951,6 @@ nsParser::PopContext()
       // but don't override onStop state to guarantee the call to DidBuildModel().
       if (mParserContext->mStreamListenerState != eOnStop) {
         mParserContext->mStreamListenerState = oldContext->mStreamListenerState;
-      }
-      // Update the current context's tokenizer to any information gleaned
-      // while parsing document.write() calls (such as "a plaintext tag was
-      // found")
-      if (mParserContext->mTokenizer) {
-        mParserContext->mTokenizer->CopyState(oldContext->mTokenizer);
       }
     }
   }
@@ -1446,7 +1385,7 @@ nsParser::ParseFragment(const nsAString& aSourceBuffer,
 
         nsString& thisTag = aTagStack[theIndex];
         // was there an xmlns=?
-        int32_t endOfTag = thisTag.FindChar(PRUnichar(' '));
+        int32_t endOfTag = thisTag.FindChar(char16_t(' '));
         if (endOfTag == -1) {
           endContext.Append(thisTag);
         } else {
@@ -1617,11 +1556,7 @@ nsParser::BuildModel()
 
   if (NS_SUCCEEDED(result)) {
     if (mDTD) {
-      bool inDocWrite = !!mParserContext->mPrevContext;
-      result = mDTD->BuildModel(theTokenizer,
-                                // ignore interruptions in document.write
-                                !inDocWrite, // don't count lines in document.write
-                                &mCharset);
+      result = mDTD->BuildModel(theTokenizer, mSink);
     }
   } else {
     mInternalState = result = NS_ERROR_HTMLPARSER_BADTOKENIZER;
@@ -1663,20 +1598,6 @@ nsParser::OnStartRequest(nsIRequest *request, nsISupports* aContext)
   rv = NS_OK;
 
   return rv;
-}
-
-
-static inline bool IsSecondMarker(unsigned char aChar)
-{
-  switch (aChar) {
-    case '!':
-    case '?':
-    case 'h':
-    case 'H':
-      return true;
-    default:
-      return false;
-  }
 }
 
 static bool
@@ -1992,8 +1913,7 @@ nsParser::WillTokenize(bool aIsFinalChunk)
   nsITokenizer* theTokenizer;
   nsresult result = mParserContext->GetTokenizer(mDTD, mSink, theTokenizer);
   NS_ENSURE_SUCCESS(result, false);
-  return NS_SUCCEEDED(theTokenizer->WillTokenize(aIsFinalChunk,
-                                                 &mTokenAllocator));
+  return NS_SUCCEEDED(theTokenizer->WillTokenize(aIsFinalChunk));
 }
 
 
@@ -2012,27 +1932,13 @@ nsresult nsParser::Tokenize(bool aIsFinalChunk)
   }
 
   if (NS_SUCCEEDED(result)) {
-    if (mFlags & NS_PARSER_FLAG_FLUSH_TOKENS) {
-      // For some reason tokens didn't get flushed (probably
-      // the parser got blocked before all the tokens in the
-      // stack got handled). Flush 'em now. Ref. bug 104856
-      if (theTokenizer->GetCount() != 0) {
-        return result;
-      }
-
-      // Reset since the tokens have been flushed.
-      mFlags &= ~NS_PARSER_FLAG_FLUSH_TOKENS;
-    }
-
     bool flushTokens = false;
-
-    mParserContext->mNumConsumed = 0;
 
     bool killSink = false;
 
     WillTokenize(aIsFinalChunk);
     while (NS_SUCCEEDED(result)) {
-      mParserContext->mNumConsumed += mParserContext->mScanner->Mark();
+      mParserContext->mScanner->Mark();
       result = theTokenizer->ConsumeToken(*mParserContext->mScanner,
                                           flushTokens);
       if (NS_FAILED(result)) {
@@ -2050,11 +1956,10 @@ nsresult nsParser::Tokenize(bool aIsFinalChunk)
         // Flush tokens on seeing </SCRIPT> -- Ref: Bug# 22485 --
         // Also remember to update the marked position.
         mFlags |= NS_PARSER_FLAG_FLUSH_TOKENS;
-        mParserContext->mNumConsumed += mParserContext->mScanner->Mark();
+        mParserContext->mScanner->Mark();
         break;
       }
     }
-    DidTokenize(aIsFinalChunk);
 
     if (killSink) {
       mSink = nullptr;
@@ -2064,26 +1969,6 @@ nsresult nsParser::Tokenize(bool aIsFinalChunk)
   }
 
   return result;
-}
-
-/**
- *  This is the tail-end of the code sandwich for the
- *  tokenization process. It gets called once tokenziation
- *  has completed for each phase.
- */
-bool
-nsParser::DidTokenize(bool aIsFinalChunk)
-{
-  if (!mParserContext) {
-    return true;
-  }
-
-  nsITokenizer* theTokenizer;
-  nsresult rv = mParserContext->GetTokenizer(mDTD, mSink, theTokenizer);
-  NS_ENSURE_SUCCESS(rv, false);
-
-  rv = theTokenizer->DidTokenize(aIsFinalChunk);
-  return NS_SUCCEEDED(rv);
 }
 
 /**

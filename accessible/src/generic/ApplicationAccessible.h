@@ -57,10 +57,8 @@ public:
   // nsIAccessibleApplication
   NS_DECL_NSIACCESSIBLEAPPLICATION
 
-  // nsAccessNode
-  virtual void Shutdown();
-
   // Accessible
+  virtual void Shutdown();
   virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() MOZ_OVERRIDE;
   virtual GroupPos GroupPosition();
   virtual ENameValueFlag Name(nsString& aName);
@@ -70,7 +68,7 @@ public:
   virtual mozilla::a11y::role NativeRole();
   virtual uint64_t State();
   virtual uint64_t NativeState();
-  virtual Relation RelationByType(uint32_t aRelType);
+  virtual Relation RelationByType(RelationType aType) MOZ_OVERRIDE;
 
   virtual Accessible* ChildAtPoint(int32_t aX, int32_t aY,
                                    EWhichChildAtPoint aWhichChild);

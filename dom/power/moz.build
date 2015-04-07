@@ -4,26 +4,33 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    TEST_DIRS += ['test']
+TEST_DIRS += ['test']
 
 XPIDL_SOURCES += [
-    'nsIDOMPowerManager.idl',
-    'nsIDOMWakeLock.idl',
     'nsIDOMWakeLockListener.idl',
     'nsIPowerManagerService.idl',
 ]
 
 XPIDL_MODULE = 'dom_power'
 
+EXPORTS.mozilla.dom += [
+    'PowerManager.h',
+    'WakeLock.h',
+]
+
 EXPORTS.mozilla.dom.power += [
     'PowerManagerService.h',
     'Types.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'PowerManager.cpp',
     'PowerManagerService.cpp',
     'WakeLock.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'

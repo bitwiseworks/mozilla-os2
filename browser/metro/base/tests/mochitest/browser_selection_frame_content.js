@@ -8,7 +8,7 @@
 let gWindow = null;
 var gFrame = null;
 
-const kMarkerOffsetY = 12;
+const kMarkerOffsetY = 6;
 const kCommonWaitMs = 5000;
 const kCommonPollMs = 100;
 
@@ -25,6 +25,8 @@ function setUpAndTearDown() {
   yield waitForCondition(function () {
       return !SelectionHelperUI.isSelectionUIVisible;
     }, kCommonWaitMs, kCommonPollMs);
+  InputSourceHelper.isPrecise = false;
+  InputSourceHelper.fireUpdate();
 }
 
 gTests.push({
@@ -36,15 +38,13 @@ gTests.push({
     yield addTab(chromeRoot + "browser_selection_frame_content.html");
 
     yield waitForCondition(function () {
-      return !StartUI.isStartPageVisible;
+      return !BrowserUI.isStartTabVisible;
       }, 10000, 100);
 
     yield hideContextUI();
 
     gWindow = Browser.selectedTab.browser.contentWindow;
     gFrame = gWindow.document.getElementById("frame1");
-
-    InputSourceHelper.isPrecise = false;
   },
 });
 
@@ -134,17 +134,17 @@ gTests.push({
     is(getTrimmedSelection(gFrame).toString(), "started", "selection test");
 
     let promise = waitForEvent(document, "popupshown");
-    sendContextMenuClick(527, 188);
+    sendContextMenuClickToSelection(gFrame.contentDocument.defaultView);
 
     yield promise;
     ok(promise && !(promise instanceof Error), "promise error");
-    ok(ContextMenuUI._menuPopup._visible, "is visible");
+    ok(ContextMenuUI._menuPopup.visible, "is visible");
 
     let menuItem = document.getElementById("context-copy");
     ok(menuItem, "menu item exists");
     ok(!menuItem.hidden, "menu item visible");
     let popupPromise = waitForEvent(document, "popuphidden");
-    EventUtils.synthesizeMouse(menuItem, 10, 10, {}, gWindow);
+    sendElementTap(gWindow, menuItem);
     yield popupPromise;
     ok(popupPromise && !(popupPromise instanceof Error), "promise error");
 
@@ -185,7 +185,6 @@ gTests.push({
     gFrame.contentDocument.defaultView.scrollBy(0, 200);
     yield scrollPromise;
 
-    InputSourceHelper.isPrecise = false;
     sendContextMenuClick(114, 130);
 
     yield waitForCondition(function () {
@@ -217,7 +216,5 @@ function test() {
     todo(false, "browser_selection_tests need landscape mode to run.");
     return;
   }
-
-  requestLongerTimeout(3);
   runTests();
 }

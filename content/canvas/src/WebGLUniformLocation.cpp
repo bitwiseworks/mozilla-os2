@@ -12,9 +12,9 @@
 using namespace mozilla;
 
 JSObject*
-WebGLUniformLocation::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+WebGLUniformLocation::WrapObject(JSContext *cx)
 {
-    return dom::WebGLUniformLocationBinding::Wrap(cx, scope, this);
+    return dom::WebGLUniformLocationBinding::Wrap(cx, this);
 }
 
 WebGLUniformLocation::WebGLUniformLocation(WebGLContext *context, WebGLProgram *program, GLint location, const WebGLUniformInfo& info)
@@ -27,11 +27,7 @@ WebGLUniformLocation::WebGLUniformLocation(WebGLContext *context, WebGLProgram *
     mElementSize = info.ElementSize();
 }
 
-NS_IMPL_CYCLE_COLLECTION_1(WebGLUniformLocation, mProgram)
+NS_IMPL_CYCLE_COLLECTION(WebGLUniformLocation, mProgram)
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(WebGLUniformLocation)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(WebGLUniformLocation)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(WebGLUniformLocation)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
+NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(WebGLUniformLocation, AddRef)
+NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(WebGLUniformLocation, Release)

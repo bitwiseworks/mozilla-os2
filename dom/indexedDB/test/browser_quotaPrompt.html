@@ -38,6 +38,7 @@
         let request = indexedDB.open(window.location.pathname, version++);
         request.onerror = errorHandler;
         request.onupgradeneeded = function(event) {
+          let db = event.target.result;
           db.deleteObjectStore("foo");
           db.onversionchange = function () { db.close(); };
           request.transaction.oncomplete = function(event) {
@@ -58,7 +59,7 @@
         let request = indexedDB.open(name, version++);
         request.onerror = errorHandler;
         request.onupgradeneeded = grabEventAndContinueHandler;
-        let event = yield;
+        let event = yield undefined;
 
         db = event.target.result;
 
@@ -67,10 +68,10 @@
         db.createObjectStore("foo", { autoIncrement: true });
 
         request.onsuccess = grabEventAndContinueHandler;
-        yield;
+        yield undefined;
 
         setTimeout(testFinishedCallback, 0, "ready");
-        yield;
+        yield undefined;
       }
     </script>
 

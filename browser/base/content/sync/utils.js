@@ -14,6 +14,13 @@ let gSyncUtils = {
     return this.bundle = Services.strings.createBundle("chrome://browser/locale/syncSetup.properties");
   },
 
+  get fxAccountsEnabled() {
+    let service = Components.classes["@mozilla.org/weave/service;1"]
+                            .getService(Components.interfaces.nsISupports)
+                            .wrappedJSObject;
+    return service.fxAccountsEnabled;
+  },
+
   // opens in a new window if we're in a modal prefwindow world, in a new tab otherwise
   _openLink: function (url) {
     let thisDocEl = document.documentElement,
@@ -71,11 +78,19 @@ let gSyncUtils = {
   },
 
   openToS: function () {
-    this._openLink(Weave.Svc.Prefs.get("termsURL"));
+    let root = this.fxAccountsEnabled ? "fxa." : "";
+    this._openLink(Weave.Svc.Prefs.get(root + "termsURL"));
   },
 
   openPrivacyPolicy: function () {
-    this._openLink(Weave.Svc.Prefs.get("privacyURL"));
+    let root = this.fxAccountsEnabled ? "fxa." : "";
+    this._openLink(Weave.Svc.Prefs.get(root + "privacyURL"));
+  },
+
+  openMPInfoPage: function (event) {
+    event.stopPropagation();
+    let baseURL = Services.urlFormatter.formatURLPref("app.support.baseURL");
+    this._openLink(baseURL + "sync-master-password");
   },
 
   openFirstSyncProgressPage: function () {

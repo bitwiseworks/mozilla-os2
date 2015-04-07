@@ -6,11 +6,10 @@
  * Selection handler for chrome text inputs
  */
 
-const kCaretMode = 1;
-const kSelectionMode = 2;
+let Ci = Components.interfaces;
 
 var ChromeSelectionHandler = {
-  _mode: kSelectionMode,
+  _mode: this._SELECTION_MODE,
 
   /*************************************************
    * Messaging wrapper
@@ -31,13 +30,17 @@ var ChromeSelectionHandler = {
    * General selection start method for both caret and selection mode.
    */
   _onSelectionAttach: function _onSelectionAttach(aJson) {
+    // Clear previous ChromeSelectionHandler state.
+    this._deactivate();
+
+    // Initialize ChromeSelectionHandler state.
     this._domWinUtils = Util.getWindowUtils(window);
     this._contentWindow = window;
-    this._targetElement = this._domWinUtils.elementFromPoint(aJson.xPos, aJson.yPos, true, false);
-
-    this._targetIsEditable = this._targetElement instanceof Components.interfaces.nsIDOMXULTextBoxElement;
+    this._targetElement = aJson.target;
+    this._targetIsEditable = Util.isTextInput(this._targetElement) ||
+        this._targetElement instanceof Ci.nsIDOMXULTextBoxElement;
     if (!this._targetIsEditable) {
-      this._onFail("not an editable?");
+      this._onFail("not an editable?", this._targetElement);
       return;
     }
 
@@ -47,14 +50,23 @@ var ChromeSelectionHandler = {
       return;
     }
 
+    if (!this._getTargetElementValue()) {
+      this._onFail("Target element does not contain any content to select.");
+      return;
+    }
+
+    // Add a listener to respond to programmatic selection changes.
+    selection.QueryInterface(Ci.nsISelectionPrivate).addSelectionListener(this);
+
     if (!selection.isCollapsed) {
-      this._mode = kSelectionMode;
+      this._mode = this._SELECTION_MODE;
       this._updateSelectionUI("start", true, true);
     } else {
-      this._mode = kCaretMode;
+      this._mode = this._CARET_MODE;
       this._updateSelectionUI("caret", false, false, true);
     }
 
+    this._targetElement.addEventListener("blur", this, false);
   },
 
   /*
@@ -100,14 +112,7 @@ var ChromeSelectionHandler = {
       return;
     }
 
-    // Update selection in the doc
-    let pos = null;
-    if (aMsg.change == "start") {
-      pos = aMsg.start;
-    } else {
-      pos = aMsg.end;
-    }
-    this._handleSelectionPoint(aMsg.change, pos, false);
+    this._handleSelectionPoint(aMsg, false);
   },
 
   /*
@@ -124,19 +129,25 @@ var ChromeSelectionHandler = {
       return;
     }
 
-    // Update selection in the doc
-    let pos = null;
-    if (aMsg.change == "start") {
-      pos = aMsg.start;
-    } else {
-      pos = aMsg.end;
-    }
-
-    this._handleSelectionPoint(aMsg.change, pos, true);
+    this._handleSelectionPoint(aMsg, true);
     this._selectionMoveActive = false;
     
+    // Clear any existing scroll timers
+    this._clearTimers();
+
     // Update the position of our selection monocles
     this._updateSelectionUI("end", true, true);
+  },
+
+  _onSelectionUpdate: function _onSelectionUpdate() {
+    if (!this._targetHasFocus()) {
+      this._closeSelection();
+      return;
+    }
+    this._updateSelectionUI("update",
+                            this._mode == this._SELECTION_MODE,
+                            this._mode == this._SELECTION_MODE,
+                            this._mode == this._CARET_MODE);
   },
 
   /*
@@ -166,7 +177,7 @@ var ChromeSelectionHandler = {
 
     // We bail if things get out of sync here implying we missed a message.
     this._selectionMoveActive = true;
-    this._mode = kSelectionMode;
+    this._mode = this._SELECTION_MODE;
 
     // Update the position of the selection marker that is *not*
     // being dragged.
@@ -244,7 +255,7 @@ var ChromeSelectionHandler = {
   /*
    * _clearSelection
    *
-   * Clear existing selection if it exists and reset our internla state.
+   * Clear existing selection if it exists and reset our internal state.
    */
   _clearSelection: function _clearSelection() {
     let selection = this._getSelection();
@@ -256,17 +267,57 @@ var ChromeSelectionHandler = {
   /*
    * _closeSelection
    *
-   * Shuts SelectionHandler down.
+   * Shuts ChromeSelectionHandler and SelectionHelperUI down.
    */
   _closeSelection: function _closeSelection() {
+    this._deactivate();
+    this.sendAsync("Content:HandlerShutdown", {});
+  },
+
+  /*
+   * _deactivate
+   *
+   * Resets ChromeSelectionHandler state, previously initialized in
+   * general selection start-method |_onSelectionAttach()|.
+   */
+  _deactivate: function _deactivate() {
+    // Remove our selection notification listener.
+    let selection = this._getSelection();
+    if (selection) {
+      try {
+        selection.QueryInterface(Ci.nsISelectionPrivate).removeSelectionListener(this);
+      } catch(e) {
+        // Fail safe during multiple _deactivate() calls.
+      }
+    }
+
     this._clearTimers();
     this._cache = null;
     this._contentWindow = null;
-    this._targetElement = null;
+    if (this._targetElement) {
+      this._targetElement.removeEventListener("blur", this, true);
+      this._targetElement = null;
+    }
     this._selectionMoveActive = false;
     this._domWinUtils = null;
     this._targetIsEditable = false;
-    this.sendAsync("Content:HandlerShutdown", {});
+    this._mode = null;
+  },
+
+  get hasSelection() {
+    if (!this._targetElement) {
+      return false;
+    }
+    let selection = this._getSelection();
+    return (selection && !selection.isCollapsed);
+  },
+
+  _targetHasFocus: function() {
+    if (!this._targetElement || !document.commandDispatcher.focusedElement) {
+      return false;
+    }
+    let bindingParent = this._contentWindow.document.getBindingParent(document.commandDispatcher.focusedElement);
+    return (bindingParent && this._targetElement == bindingParent);
   },
 
   /*************************************************
@@ -282,6 +333,12 @@ var ChromeSelectionHandler = {
     // Update monocle position and speed if we've dragged off to one side
     if (result.trigger) {
       ChromeSelectionHandler._updateSelectionUI("update", result.start, result.end);
+    }
+  },
+
+  handleEvent: function handleEvent(aEvent) {
+    if (aEvent.type == "blur" && !this._targetHasFocus()) {
+      this._closeSelection();
     }
   },
 
@@ -307,10 +364,7 @@ var ChromeSelectionHandler = {
       break;
 
       case "Browser:SelectionUpdate":
-        this._updateSelectionUI("update",
-                                this._mode == kSelectionMode,
-                                this._mode == kSelectionMode,
-                                this._mode == kCaretMode);
+        this._onSelectionUpdate();
       break;
 
       case "Browser:SelectionMoveStart":
@@ -344,19 +398,36 @@ var ChromeSelectionHandler = {
    */
 
   _getSelection: function _getSelection() {
+    let targetElementEditor = this._getTargetElementEditor();
+
+    return targetElementEditor ? targetElementEditor.selection : null;
+  },
+
+  _getTargetElementValue: function _getTargetElementValue() {
     if (this._targetElement instanceof Ci.nsIDOMXULTextBoxElement) {
-      return this._targetElement
-                 .QueryInterface(Components.interfaces.nsIDOMXULTextBoxElement)
-                 .editor.selection;
+      return this._targetElement.inputField.value;
+    } else if (Util.isTextInput(this._targetElement)) {
+      return this._targetElement.value;
     }
     return null;
   },
 
   _getSelectController: function _getSelectController() {
-    return this._targetElement
-                .QueryInterface(Components.interfaces.nsIDOMXULTextBoxElement)
-                .editor.selectionController;
+    let targetElementEditor = this._getTargetElementEditor();
+
+    return targetElementEditor ? targetElementEditor.selectionController : null;
   },
+
+  _getTargetElementEditor: function() {
+    if (this._targetElement instanceof Ci.nsIDOMXULTextBoxElement) {
+      return this._targetElement.QueryInterface(Ci.nsIDOMXULTextBoxElement)
+          .editor;
+    } else if (Util.isTextInput(this._targetElement)) {
+      return this._targetElement.QueryInterface(Ci.nsIDOMNSEditableElement)
+          .editor;
+    }
+    return null;
+  }
 };
 
 ChromeSelectionHandler.__proto__ = new SelectionPrototype();

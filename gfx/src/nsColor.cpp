@@ -3,19 +3,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"         // for ArrayLength
+#include "mozilla/mozalloc.h"           // for operator delete, etc
 
-#include "plstr.h"
 #include "nsColor.h"
-#include "nsColorNames.h"
-#include "nsString.h"
-#include "nscore.h"
-#include "nsCoord.h"
-#include "nsCOMPtr.h"
-#include "nsIServiceManager.h"
-#include <math.h>
-#include "prprf.h"
+#include <sys/types.h>                  // for int32_t
+#include "nsColorNames.h"               // for nsColorNames
+#include "nsDebug.h"                    // for NS_ASSERTION, etc
 #include "nsStaticNameTable.h"
+#include "nsString.h"                   // for nsAutoCString, nsString, etc
+#include "nscore.h"                     // for nsAString, etc
 
 using namespace mozilla;
 
@@ -68,7 +65,7 @@ void nsColorNames::ReleaseTable(void)
   }
 }
 
-static int ComponentValue(const PRUnichar* aColorSpec, int aLen, int color, int dpc)
+static int ComponentValue(const char16_t* aColorSpec, int aLen, int color, int dpc)
 {
   int component = 0;
   int index = (color * dpc);
@@ -76,7 +73,7 @@ static int ComponentValue(const PRUnichar* aColorSpec, int aLen, int color, int 
     dpc = 2;
   }
   while (--dpc >= 0) {
-    PRUnichar ch = ((index < aLen) ? aColorSpec[index++] : '0');
+    char16_t ch = ((index < aLen) ? aColorSpec[index++] : '0');
     if (('0' <= ch) && (ch <= '9')) {
       component = (component * 16) + (ch - '0');
     } else if ((('a' <= ch) && (ch <= 'f')) || 
@@ -91,16 +88,16 @@ static int ComponentValue(const PRUnichar* aColorSpec, int aLen, int color, int 
   return component;
 }
 
-NS_GFX_(bool) NS_HexToRGB(const nsString& aColorSpec,
+NS_GFX_(bool) NS_HexToRGB(const nsAString& aColorSpec,
                                        nscolor* aResult)
 {
-  const PRUnichar* buffer = aColorSpec.get();
+  const char16_t* buffer = aColorSpec.BeginReading();
 
   int nameLen = aColorSpec.Length();
   if ((nameLen == 3) || (nameLen == 6)) {
     // Make sure the digits are legal
     for (int i = 0; i < nameLen; i++) {
-      PRUnichar ch = buffer[i];
+      char16_t ch = buffer[i];
       if (((ch >= '0') && (ch <= '9')) ||
           ((ch >= 'a') && (ch <= 'f')) ||
           ((ch >= 'A') && (ch <= 'F'))) {
@@ -144,7 +141,7 @@ NS_GFX_(bool) NS_LooseHexToRGB(const nsString& aColorSpec, nscolor* aResult)
   }
 
   int nameLen = aColorSpec.Length();
-  const PRUnichar* colorSpec = aColorSpec.get();
+  const char16_t* colorSpec = aColorSpec.get();
   if (nameLen > 128) {
     nameLen = 128;
   }
@@ -173,7 +170,7 @@ NS_GFX_(bool) NS_LooseHexToRGB(const nsString& aColorSpec, nscolor* aResult)
     for (int c = 0; c < 3; ++c) {
       NS_ABORT_IF_FALSE(c * dpc < nameLen,
                         "should not pass end of string while newdpc > 2");
-      PRUnichar ch = colorSpec[c * dpc];
+      char16_t ch = colorSpec[c * dpc];
       if (('1' <= ch && ch <= '9') ||
           ('A' <= ch && ch <= 'F') ||
           ('a' <= ch && ch <= 'f')) {
@@ -215,6 +212,14 @@ NS_GFX_(bool) NS_ColorNameToRGB(const nsAString& aColorName, nscolor* aResult)
     return true;
   }
   return false;
+}
+
+// Returns kColorNames, an array of all possible color names, and sets
+// *aSizeArray to the size of that array. Do NOT call free() on this array.
+NS_GFX_(const char * const *) NS_AllColorNames(size_t *aSizeArray)
+{
+  *aSizeArray = ArrayLength(kColorNames);
+  return kColorNames;
 }
 
 // Macro to blend two colors

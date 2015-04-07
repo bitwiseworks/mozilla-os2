@@ -7,7 +7,7 @@
 #ifndef frontend_FoldConstants_h
 #define frontend_FoldConstants_h
 
-#include "jsprvtd.h"
+#include "frontend/SyntaxParseHandler.h"
 
 namespace js {
 namespace frontend {
@@ -25,11 +25,15 @@ namespace frontend {
 //        return false;
 //    if (!FoldConstants(cx, &pn, parser))
 //        return false;
-template <typename ParseHandler>
 bool
-FoldConstants(JSContext *cx, typename ParseHandler::Node *pnp,
-              Parser<ParseHandler> *parser,
-              bool inGenexpLambda = false, bool inCond = false);
+FoldConstants(ExclusiveContext *cx, ParseNode **pnp, Parser<FullParseHandler> *parser);
+
+inline bool
+FoldConstants(ExclusiveContext *cx, SyntaxParseHandler::Node *pnp,
+              Parser<SyntaxParseHandler> *parser)
+{
+    return true;
+}
 
 } /* namespace frontend */
 } /* namespace js */

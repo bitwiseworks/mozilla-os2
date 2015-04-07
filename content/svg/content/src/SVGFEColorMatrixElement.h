@@ -11,36 +11,30 @@
 #include "SVGAnimatedNumberList.h"
 
 nsresult NS_NewSVGFEColorMatrixElement(nsIContent **aResult,
-                                       already_AddRefed<nsINodeInfo> aNodeInfo);
+                                       already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
 
 typedef nsSVGFE SVGFEColorMatrixElementBase;
 
-static const unsigned short SVG_FECOLORMATRIX_TYPE_UNKNOWN = 0;
-static const unsigned short SVG_FECOLORMATRIX_TYPE_MATRIX = 1;
-static const unsigned short SVG_FECOLORMATRIX_TYPE_SATURATE = 2;
-static const unsigned short SVG_FECOLORMATRIX_TYPE_HUE_ROTATE = 3;
-static const unsigned short SVG_FECOLORMATRIX_TYPE_LUMINANCE_TO_ALPHA = 4;
-
 class SVGFEColorMatrixElement : public SVGFEColorMatrixElementBase
 {
   friend nsresult (::NS_NewSVGFEColorMatrixElement(nsIContent **aResult,
-                                                   already_AddRefed<nsINodeInfo> aNodeInfo));
+                                                   already_AddRefed<nsINodeInfo>&& aNodeInfo));
 protected:
-  SVGFEColorMatrixElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  SVGFEColorMatrixElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : SVGFEColorMatrixElementBase(aNodeInfo)
   {
   }
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
 public:
-  virtual nsresult Filter(nsSVGFilterInstance* aInstance,
-                          const nsTArray<const Image*>& aSources,
-                          const Image* aTarget,
-                          const nsIntRect& aDataRect) MOZ_OVERRIDE;
+  virtual FilterPrimitiveDescription
+    GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
+                            const IntRect& aFilterSubregion,
+                            const nsTArray<bool>& aInputsAreTainted,
+                            nsTArray<mozilla::RefPtr<SourceSurface>>& aInputImages) MOZ_OVERRIDE;
   virtual bool AttributeAffectsRendering(
           int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
   virtual nsSVGString& GetResultImageName() MOZ_OVERRIDE { return mStringAttributes[RESULT]; }
@@ -50,12 +44,10 @@ public:
 
   // WebIDL
   already_AddRefed<SVGAnimatedString> In1();
-  already_AddRefed<nsIDOMSVGAnimatedEnumeration> Type();
+  already_AddRefed<SVGAnimatedEnumeration> Type();
   already_AddRefed<DOMSVGAnimatedNumberList> Values();
 
  protected:
-  virtual bool OperatesOnPremultipledAlpha(int32_t) MOZ_OVERRIDE { return false; }
-
   virtual EnumAttributesInfo GetEnumInfo() MOZ_OVERRIDE;
   virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
   virtual NumberListAttributesInfo GetNumberListInfo() MOZ_OVERRIDE;

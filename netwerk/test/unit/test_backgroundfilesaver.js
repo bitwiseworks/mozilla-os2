@@ -7,11 +7,6 @@
  * This file tests components that implement nsIBackgroundFileSaver.
  */
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
-
 ////////////////////////////////////////////////////////////////////////////////
 //// Globals
 
@@ -22,7 +17,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-                                  "resource://gre/modules/commonjs/sdk/core/promise.js");
+                                  "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 
@@ -45,13 +40,17 @@ const TEST_FILE_NAME_1 = "test-backgroundfilesaver-1.txt";
 const TEST_FILE_NAME_2 = "test-backgroundfilesaver-2.txt";
 const TEST_FILE_NAME_3 = "test-backgroundfilesaver-3.txt";
 
-// A map of test data length to the expected hash
+// A map of test data length to the expected SHA-256 hashes
 const EXPECTED_HASHES = {
-  // SHA-256 hash of TEST_DATA_SHORT
+  // No data
+  0 : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  // TEST_DATA_SHORT
   40 : "f37176b690e8744ee990a206c086cba54d1502aa2456c3b0c84ef6345d72a192",
-  // SHA-256 hash of TEST_DATA_SHORT + TEST_DATA_SHORT
+  // TEST_DATA_SHORT + TEST_DATA_SHORT
   80 : "780c0e91f50bb7ec922cc11e16859e6d5df283c0d9470f61772e3d79f41eeb58",
-  // SHA-256 hash of a bunch of dashes
+  // TEST_DATA_LONG
+  8388608 : "e3611a47714c42bdf326acfb2eb6ed9fa4cca65cb7d7be55217770a5bf5e7ff0",
+  // TEST_DATA_LONG + TEST_DATA_LONG
   16777216 : "03a0db69a30140f307587ee746a539247c181bafd85b85c8516a3533c7d9ea1d"
 };
 
@@ -296,6 +295,14 @@ add_task(function test_combinations()
   let initialFile = getTempFile(TEST_FILE_NAME_1);
   let renamedFile = getTempFile(TEST_FILE_NAME_2);
 
+  // Keep track of the current file.
+  let currentFile = null;
+  function onTargetChange(aTarget) {
+    currentFile = null;
+    do_print("Target file changed to: " + aTarget.leafName);
+    currentFile = aTarget;
+  }
+
   // Tests various combinations of events and behaviors for both the stream
   // listener and the output stream implementations.
   for (let testFlags = 0; testFlags < 32; testFlags++) {
@@ -312,14 +319,8 @@ add_task(function test_combinations()
                     ", useStreamListener = " + useStreamListener +
                     ", useLongData = " + useLongData);
 
-    // Keep track of the current file.
-    let currentFile = null;
-    function onTargetChange(aTarget) {
-      do_print("Target file changed to: " + aTarget.leafName);
-      currentFile = aTarget;
-    }
-
     // Create the object and register the observers.
+    currentFile = null;
     let saver = useStreamListener
                 ? new BackgroundFileSaverStreamListener()
                 : new BackgroundFileSaverOutputStream();
@@ -366,7 +367,7 @@ add_task(function test_combinations()
     if (!cancelAtSomePoint) {
       // In this case, the file must exist.
       do_check_true(currentFile.exists());
-      expectedContents = testData + testData;
+      let expectedContents = testData + testData;
       yield promiseVerifyContents(currentFile, expectedContents);
       do_check_eq(EXPECTED_HASHES[expectedContents.length],
                   toHex(saver.sha256Hash));
@@ -408,18 +409,18 @@ add_task(function test_setTarget_after_close_stream()
     let saver = new BackgroundFileSaverOutputStream();
     saver.enableSha256();
     let completionPromise = promiseSaverComplete(saver);
-  
+
     // Copy some data to the output stream of the file saver.  This data must
     // be shorter than the internal component's pipe buffer for the test to
     // succeed, because otherwise the test would block waiting for the write to
     // complete.
     yield promiseCopyToSaver(TEST_DATA_SHORT, saver, true);
-  
+
     // Set the target file and wait for the output to finish.
     saver.setTarget(destFile, false);
     saver.finish(Cr.NS_OK);
     yield completionPromise;
-  
+
     // Verify results.
     yield promiseVerifyContents(destFile, TEST_DATA_SHORT);
     do_check_eq(EXPECTED_HASHES[TEST_DATA_SHORT.length],
@@ -428,6 +429,29 @@ add_task(function test_setTarget_after_close_stream()
 
   // Clean up.
   destFile.remove(false);
+});
+
+add_task(function test_setTarget_fast()
+{
+  // This test checks a fast rename of the target file.
+  let destFile1 = getTempFile(TEST_FILE_NAME_1);
+  let destFile2 = getTempFile(TEST_FILE_NAME_2);
+  let saver = new BackgroundFileSaverOutputStream();
+  let completionPromise = promiseSaverComplete(saver);
+
+  // Set the initial name after the stream is closed, then rename immediately.
+  yield promiseCopyToSaver(TEST_DATA_SHORT, saver, true);
+  saver.setTarget(destFile1, false);
+  saver.setTarget(destFile2, false);
+
+  // Wait for all the operations to complete.
+  saver.finish(Cr.NS_OK);
+  yield completionPromise;
+
+  // Verify results and clean up.
+  do_check_false(destFile1.exists());
+  yield promiseVerifyContents(destFile2, TEST_DATA_SHORT);
+  destFile2.remove(false);
 });
 
 add_task(function test_setTarget_multiple()
@@ -455,6 +479,103 @@ add_task(function test_setTarget_multiple()
   destFile.remove(false);
 });
 
+add_task(function test_enableAppend()
+{
+  // This test checks append mode with hashing disabled.
+  let destFile = getTempFile(TEST_FILE_NAME_1);
+
+  // Test the case where the file does not already exists first, then the case
+  // where the file already exists.
+  for (let i = 0; i < 2; i++) {
+    let saver = new BackgroundFileSaverOutputStream();
+    saver.enableAppend();
+    let completionPromise = promiseSaverComplete(saver);
+
+    saver.setTarget(destFile, false);
+    yield promiseCopyToSaver(TEST_DATA_LONG, saver, true);
+
+    saver.finish(Cr.NS_OK);
+    yield completionPromise;
+
+    // Verify results.
+    let expectedContents = (i == 0 ? TEST_DATA_LONG
+                                   : TEST_DATA_LONG + TEST_DATA_LONG);
+    yield promiseVerifyContents(destFile, expectedContents);
+  }
+
+  // Clean up.
+  destFile.remove(false);
+});
+
+add_task(function test_enableAppend_setTarget_fast()
+{
+  // This test checks a fast rename of the target file in append mode.
+  let destFile1 = getTempFile(TEST_FILE_NAME_1);
+  let destFile2 = getTempFile(TEST_FILE_NAME_2);
+
+  // Test the case where the file does not already exists first, then the case
+  // where the file already exists.
+  for (let i = 0; i < 2; i++) {
+    let saver = new BackgroundFileSaverOutputStream();
+    saver.enableAppend();
+    let completionPromise = promiseSaverComplete(saver);
+
+    yield promiseCopyToSaver(TEST_DATA_SHORT, saver, true);
+
+    // The first time, we start appending to the first file and rename to the
+    // second file.  The second time, we start appending to the second file,
+    // that was created the first time, and rename back to the first file.
+    let firstFile = (i == 0) ? destFile1 : destFile2;
+    let secondFile = (i == 0) ? destFile2 : destFile1;
+    saver.setTarget(firstFile, false);
+    saver.setTarget(secondFile, false);
+
+    saver.finish(Cr.NS_OK);
+    yield completionPromise;
+
+    // Verify results.
+    do_check_false(firstFile.exists());
+    let expectedContents = (i == 0 ? TEST_DATA_SHORT
+                                   : TEST_DATA_SHORT + TEST_DATA_SHORT);
+    yield promiseVerifyContents(secondFile, expectedContents);
+  }
+
+  // Clean up.
+  destFile1.remove(false);
+});
+
+add_task(function test_enableAppend_hash()
+{
+  // This test checks append mode, also verifying that the computed hash
+  // includes the contents of the existing data.
+  let destFile = getTempFile(TEST_FILE_NAME_1);
+
+  // Test the case where the file does not already exists first, then the case
+  // where the file already exists.
+  for (let i = 0; i < 2; i++) {
+    let saver = new BackgroundFileSaverOutputStream();
+    saver.enableAppend();
+    saver.enableSha256();
+    let completionPromise = promiseSaverComplete(saver);
+
+    saver.setTarget(destFile, false);
+    yield promiseCopyToSaver(TEST_DATA_LONG, saver, true);
+
+    saver.finish(Cr.NS_OK);
+    yield completionPromise;
+
+    // Verify results.
+    let expectedContents = (i == 0 ? TEST_DATA_LONG
+                                   : TEST_DATA_LONG + TEST_DATA_LONG);
+    yield promiseVerifyContents(destFile, expectedContents);
+    do_check_eq(EXPECTED_HASHES[expectedContents.length],
+                toHex(saver.sha256Hash));
+  }
+
+  // Clean up.
+  destFile.remove(false);
+});
+
 add_task(function test_finish_only()
 {
   // This test checks creating the object and doing nothing.
@@ -466,6 +587,57 @@ add_task(function test_finish_only()
   let completionPromise = promiseSaverComplete(saver, onTargetChange);
   saver.finish(Cr.NS_OK);
   yield completionPromise;
+});
+
+add_task(function test_empty()
+{
+  // This test checks we still create an empty file when no data is fed.
+  let destFile = getTempFile(TEST_FILE_NAME_1);
+
+  let saver = new BackgroundFileSaverOutputStream();
+  let completionPromise = promiseSaverComplete(saver);
+
+  saver.setTarget(destFile, false);
+  yield promiseCopyToSaver("", saver, true);
+
+  saver.finish(Cr.NS_OK);
+  yield completionPromise;
+
+  // Verify results.
+  do_check_true(destFile.exists());
+  do_check_eq(destFile.fileSize, 0);
+
+  // Clean up.
+  destFile.remove(false);
+});
+
+add_task(function test_empty_hash()
+{
+  // This test checks the hash of an empty file, both in normal and append mode.
+  let destFile = getTempFile(TEST_FILE_NAME_1);
+
+  // Test normal mode first, then append mode.
+  for (let i = 0; i < 2; i++) {
+    let saver = new BackgroundFileSaverOutputStream();
+    if (i == 1) {
+      saver.enableAppend();
+    }
+    saver.enableSha256();
+    let completionPromise = promiseSaverComplete(saver);
+
+    saver.setTarget(destFile, false);
+    yield promiseCopyToSaver("", saver, true);
+
+    saver.finish(Cr.NS_OK);
+    yield completionPromise;
+
+    // Verify results.
+    do_check_eq(destFile.fileSize, 0);
+    do_check_eq(EXPECTED_HASHES[0], toHex(saver.sha256Hash));
+  }
+
+  // Clean up.
+  destFile.remove(false);
 });
 
 add_task(function test_invalid_hash()
@@ -496,6 +668,55 @@ add_task(function test_invalid_hash()
     yield completionPromise;
     do_throw("completionPromise should throw");
   } catch (ex if ex.result == Cr.NS_ERROR_FAILURE) { }
+});
+
+add_task(function test_signature()
+{
+  // Check that we get a signature if the saver is finished.
+  let destFile = getTempFile(TEST_FILE_NAME_1);
+
+  let saver = new BackgroundFileSaverOutputStream();
+  let completionPromise = promiseSaverComplete(saver);
+
+  try {
+    let signatureInfo = saver.signatureInfo;
+    do_throw("Can't get signature if saver is not complete");
+  } catch (ex if ex.result == Cr.NS_ERROR_NOT_AVAILABLE) { }
+
+  saver.enableSignatureInfo();
+  saver.setTarget(destFile, false);
+  yield promiseCopyToSaver(TEST_DATA_SHORT, saver, true);
+
+  saver.finish(Cr.NS_OK);
+  yield completionPromise;
+  yield promiseVerifyContents(destFile, TEST_DATA_SHORT);
+
+  // signatureInfo is an empty nsIArray
+  do_check_eq(0, saver.signatureInfo.length);
+
+  // Clean up.
+  destFile.remove(false);
+});
+
+add_task(function test_signature_not_enabled()
+{
+  // Check that we get a signature if the saver is finished on Windows.
+  let destFile = getTempFile(TEST_FILE_NAME_1);
+
+  let saver = new BackgroundFileSaverOutputStream();
+  let completionPromise = promiseSaverComplete(saver);
+  saver.setTarget(destFile, false);
+  yield promiseCopyToSaver(TEST_DATA_SHORT, saver, true);
+
+  saver.finish(Cr.NS_OK);
+  yield completionPromise;
+  try {
+    let signatureInfo = saver.signatureInfo;
+    do_throw("Can't get signature if not enabled");
+  } catch (ex if ex.result == Cr.NS_ERROR_NOT_AVAILABLE) { }
+
+  // Clean up.
+  destFile.remove(false);
 });
 
 add_task(function test_teardown()

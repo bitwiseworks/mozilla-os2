@@ -341,11 +341,10 @@ private:
   {
     MOZ_ASSERT(!mFlags.mHasHashedFrames);
     uint32_t count = GetChildCount();
-    mFrames = new nsTHashtable< nsPtrHashKey<nsIFrame> >();
     mFlags.mHasHashedFrames = 1;
     uint32_t minSize =
       std::max(kMinChildCountForHashtable, uint32_t(PL_DHASH_MIN_SIZE));
-    mFrames->Init(std::max(count, minSize));
+    mFrames = new nsTHashtable< nsPtrHashKey<nsIFrame> >(std::max(count, minSize));
     for (nsIFrame* f = mFirstChild; count-- > 0; f = f->GetNextSibling()) {
       mFrames->PutEntry(f);
     }
@@ -400,7 +399,10 @@ public:
   }
   void SetBreakTypeBefore(uint8_t aBreakType) {
     NS_ASSERTION(IsBlock(), "Only blocks have break-before");
-    NS_ASSERTION(aBreakType <= NS_STYLE_CLEAR_LEFT_AND_RIGHT,
+    NS_ASSERTION(aBreakType == NS_STYLE_CLEAR_NONE ||
+                 aBreakType == NS_STYLE_CLEAR_LEFT ||
+                 aBreakType == NS_STYLE_CLEAR_RIGHT ||
+                 aBreakType == NS_STYLE_CLEAR_BOTH,
                  "Only float break types are allowed before a line");
     mFlags.mBreakType = aBreakType;
   }
@@ -419,7 +421,7 @@ public:
   bool HasFloatBreakAfter() const {
     return !IsBlock() && (NS_STYLE_CLEAR_LEFT == mFlags.mBreakType ||
                           NS_STYLE_CLEAR_RIGHT == mFlags.mBreakType ||
-                          NS_STYLE_CLEAR_LEFT_AND_RIGHT == mFlags.mBreakType);
+                          NS_STYLE_CLEAR_BOTH == mFlags.mBreakType);
   }
   uint8_t GetBreakTypeAfter() const {
     return !IsBlock() ? mFlags.mBreakType : NS_STYLE_CLEAR_NONE;
@@ -445,26 +447,44 @@ public:
   // layout (except for handling of 'overflow').
   void SetOverflowAreas(const nsOverflowAreas& aOverflowAreas);
   nsRect GetOverflowArea(nsOverflowType aType) {
-    return mData ? mData->mOverflowAreas.Overflow(aType) : mBounds;
+    return mData ? mData->mOverflowAreas.Overflow(aType) : GetPhysicalBounds();
   }
   nsOverflowAreas GetOverflowAreas() {
     if (mData) {
       return mData->mOverflowAreas;
     }
-    return nsOverflowAreas(mBounds, mBounds);
+    nsRect bounds = GetPhysicalBounds();
+    return nsOverflowAreas(bounds, bounds);
   }
   nsRect GetVisualOverflowArea()
     { return GetOverflowArea(eVisualOverflow); }
   nsRect GetScrollableOverflowArea()
     { return GetOverflowArea(eScrollableOverflow); }
 
-  void SlideBy(nscoord aDY) {
-    mBounds.y += aDY;
+  void SlideBy(nscoord aDBCoord, nscoord aContainerWidth) {
+    NS_ASSERTION(aContainerWidth == mContainerWidth || mContainerWidth == -1,
+                 "container width doesn't match");
+    mContainerWidth = aContainerWidth;
+    mBounds.BStart(mWritingMode) += aDBCoord;
     if (mData) {
       NS_FOR_FRAME_OVERFLOW_TYPES(otype) {
-        mData->mOverflowAreas.Overflow(otype).y += aDY;
+        mData->mOverflowAreas.Overflow(otype).y += aDBCoord;
       }
     }
+  }
+
+  void IndentBy(nscoord aDICoord, nscoord aContainerWidth) {
+    NS_ASSERTION(aContainerWidth == mContainerWidth || mContainerWidth == -1,
+                 "container width doesn't match");
+    mContainerWidth = aContainerWidth;
+    mBounds.IStart(mWritingMode) += aDICoord;
+  }
+
+  void ExpandBy(nscoord aDISize, nscoord aContainerWidth) {
+    NS_ASSERTION(aContainerWidth == mContainerWidth || mContainerWidth == -1,
+                 "container width doesn't match");
+    mContainerWidth = aContainerWidth;
+    mBounds.ISize(mWritingMode) += aDISize;
   }
 
   /**
@@ -478,8 +498,29 @@ public:
   nscoord GetAscent() const { return mAscent; }
   void SetAscent(nscoord aAscent) { mAscent = aAscent; }
 
-  nscoord GetHeight() const {
-    return mBounds.height;
+  nscoord BStart() const {
+    return mBounds.BStart(mWritingMode);
+  }
+  nscoord BSize() const {
+    return mBounds.BSize(mWritingMode);
+  }
+  nscoord BEnd() const {
+    return mBounds.BEnd(mWritingMode);
+  }
+  nscoord IStart() const {
+    return mBounds.IStart(mWritingMode);
+  }
+  nscoord ISize() const {
+    return mBounds.ISize(mWritingMode);
+  }
+  nscoord IEnd() const {
+    return mBounds.IEnd(mWritingMode);
+  }
+  void SetBoundsEmpty() {
+    mBounds.IStart(mWritingMode) = 0;
+    mBounds.ISize(mWritingMode) = 0;
+    mBounds.BStart(mWritingMode) = 0;
+    mBounds.BSize(mWritingMode) = 0;
   }
 
   static void DeleteLineList(nsPresContext* aPresContext, nsLineList& aLines,
@@ -497,10 +538,11 @@ public:
                                     nsIFrame* aLastFrameBeforeEnd,
                                     int32_t* aFrameIndexInLine);
 
-#ifdef DEBUG
+#ifdef DEBUG_FRAME_DUMP
   char* StateToString(char* aBuf, int32_t aBufSize) const;
 
   void List(FILE* out, int32_t aIndent, uint32_t aFlags = 0) const;
+  void List(FILE* out = stderr, const char* aPrefix = "", uint32_t aFlags = 0) const;
   nsIFrame* LastChild() const;
 #endif
 
@@ -536,7 +578,38 @@ public:
 
   nsIFrame* mFirstChild;
 
-  nsRect mBounds;
+  mozilla::WritingMode mWritingMode;
+  nscoord mContainerWidth;
+ private:
+  mozilla::LogicalRect mBounds;
+ public:
+  const mozilla::LogicalRect& GetBounds() { return mBounds; }
+  nsRect GetPhysicalBounds() const
+  {
+    if (mBounds.IsEmpty()) {
+      return nsRect(0, 0, 0, 0);
+    }
+
+    NS_ASSERTION(mContainerWidth != -1, "mContainerWidth not initialized");
+    return mBounds.GetPhysicalRect(mWritingMode, mContainerWidth);
+  }
+  void SetBounds(mozilla::WritingMode aWritingMode,
+                 nscoord aIStart, nscoord aBStart,
+                 nscoord aISize, nscoord aBSize,
+                 nscoord aContainerWidth)
+  {
+    mWritingMode = aWritingMode;
+    mContainerWidth = aContainerWidth;
+    mBounds = mozilla::LogicalRect(aWritingMode, aIStart, aBStart,
+                                   aISize, aBSize);
+  }
+  void SetBounds(mozilla::WritingMode aWritingMode,
+                 nsRect aRect, nscoord aContainerWidth)
+  {
+    mWritingMode = aWritingMode;
+    mContainerWidth = aContainerWidth;
+    mBounds = mozilla::LogicalRect(aWritingMode, aRect, aContainerWidth);
+  }
 
   // mFlags.mHasHashedFrames says which one to use
   union {
@@ -1626,12 +1699,10 @@ public:
                          bool* aXIsAfterLastFrame) MOZ_OVERRIDE;
 
   NS_IMETHOD GetNextSiblingOnLine(nsIFrame*& aFrame, int32_t aLineNumber) MOZ_OVERRIDE;
-#ifdef IBMBIDI
   NS_IMETHOD CheckLineOrder(int32_t                  aLine,
                             bool                     *aIsReordered,
                             nsIFrame                 **aFirstVisual,
                             nsIFrame                 **aLastVisual) MOZ_OVERRIDE;
-#endif
   nsresult Init(nsLineList& aLines, bool aRightToLeft);
 
 private:

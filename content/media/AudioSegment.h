@@ -7,13 +7,44 @@
 #define MOZILLA_AUDIOSEGMENT_H_
 
 #include "MediaSegment.h"
-#include "nsISupportsImpl.h"
 #include "AudioSampleFormat.h"
 #include "SharedBuffer.h"
+#include "WebAudioUtils.h"
+#ifdef MOZILLA_INTERNAL_API
+#include "mozilla/TimeStamp.h"
+#endif
 
 namespace mozilla {
 
+template<typename T>
+class SharedChannelArrayBuffer : public ThreadSharedObject {
+public:
+  SharedChannelArrayBuffer(nsTArray<nsTArray<T> >* aBuffers)
+  {
+    mBuffers.SwapElements(*aBuffers);
+  }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    size_t amount = 0;
+    amount += mBuffers.SizeOfExcludingThis(aMallocSizeOf);
+    for (size_t i = 0; i < mBuffers.Length(); i++) {
+      amount += mBuffers[i].SizeOfExcludingThis(aMallocSizeOf);
+    }
+
+    return amount;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
+  nsTArray<nsTArray<T> > mBuffers;
+};
+
 class AudioStream;
+class AudioMixer;
 
 /**
  * For auto-arrays etc, guess this as the common number of channels.
@@ -96,6 +127,29 @@ struct AudioChunk {
     mChannelData.Clear();
     mDuration = aDuration;
     mVolume = 1.0f;
+    mBufferFormat = AUDIO_FORMAT_SILENCE;
+  }
+  int ChannelCount() const { return mChannelData.Length(); }
+
+  size_t SizeOfExcludingThisIfUnshared(MallocSizeOf aMallocSizeOf) const
+  {
+    return SizeOfExcludingThis(aMallocSizeOf, true);
+  }
+
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf, bool aUnshared) const
+  {
+    size_t amount = 0;
+
+    // Possibly owned:
+    // - mBuffer - Can hold data that is also in the decoded audio queue. If it
+    //             is not shared, or unshared == false it gets counted.
+    if (mBuffer && (!aUnshared || !mBuffer->IsShared())) {
+      amount += mBuffer->SizeOfIncludingThis(aMallocSizeOf);
+    }
+
+    // Memory in the array is owned by mBuffer.
+    amount += mChannelData.SizeOfExcludingThis(aMallocSizeOf);
+    return amount;
   }
 
   TrackTicks mDuration; // in frames within the buffer
@@ -103,7 +157,11 @@ struct AudioChunk {
   nsTArray<const void*> mChannelData; // one pointer per channel; empty if and only if mBuffer is null
   float mVolume; // volume multiplier to apply (1.0f if mBuffer is nonnull)
   SampleFormat mBufferFormat; // format of frames in mBuffer (only meaningful if mBuffer is nonnull)
+#ifdef MOZILLA_INTERNAL_API
+  mozilla::TimeStamp mTimeStamp;           // time at which this has been fetched from the MediaEngine
+#endif
 };
+
 
 /**
  * A list of audio samples consisting of a sequence of slices of SharedBuffers.
@@ -114,6 +172,54 @@ public:
   typedef mozilla::AudioSampleFormat SampleFormat;
 
   AudioSegment() : MediaSegmentBase<AudioSegment, AudioChunk>(AUDIO) {}
+
+  // Resample the whole segment in place.
+  template<typename T>
+  void Resample(SpeexResamplerState* aResampler, uint32_t aInRate, uint32_t aOutRate)
+  {
+    mDuration = 0;
+
+    for (ChunkIterator ci(*this); !ci.IsEnded(); ci.Next()) {
+      nsAutoTArray<nsTArray<T>, GUESS_AUDIO_CHANNELS> output;
+      nsAutoTArray<const T*, GUESS_AUDIO_CHANNELS> bufferPtrs;
+      AudioChunk& c = *ci;
+      // If this chunk is null, don't bother resampling, just alter its duration
+      if (c.IsNull()) {
+        c.mDuration = (c.mDuration * aOutRate) / aInRate;
+        mDuration += c.mDuration;
+        continue;
+      }
+      uint32_t channels = c.mChannelData.Length();
+      output.SetLength(channels);
+      bufferPtrs.SetLength(channels);
+      uint32_t inFrames = c.mDuration;
+      // Round up to allocate; the last frame may not be used.
+      NS_ASSERTION((UINT32_MAX - aInRate + 1) / c.mDuration >= aOutRate,
+                   "Dropping samples");
+      uint32_t outSize = (c.mDuration * aOutRate + aInRate - 1) / aInRate;
+      for (uint32_t i = 0; i < channels; i++) {
+        const T* in = static_cast<const T*>(c.mChannelData[i]);
+        T* out = output[i].AppendElements(outSize);
+        uint32_t outFrames = outSize;
+
+        dom::WebAudioUtils::SpeexResamplerProcess(aResampler, i,
+                                                  in, &inFrames,
+                                                  out, &outFrames);
+        MOZ_ASSERT(inFrames == c.mDuration);
+        bufferPtrs[i] = out;
+        output[i].SetLength(outFrames);
+      }
+      MOZ_ASSERT(channels > 0);
+      c.mDuration = output[0].Length();
+      c.mBuffer = new mozilla::SharedChannelArrayBuffer<T>(&output);
+      for (uint32_t i = 0; i < channels; i++) {
+        c.mChannelData[i] = bufferPtrs[i];
+      }
+      mDuration += c.mDuration;
+    }
+  }
+
+  void ResampleChunks(SpeexResamplerState* aResampler);
 
   void AppendFrames(already_AddRefed<ThreadSharedObject> aBuffer,
                     const nsTArray<const float*>& aChannelData,
@@ -126,6 +232,9 @@ public:
     }
     chunk->mVolume = 1.0f;
     chunk->mBufferFormat = AUDIO_FORMAT_FLOAT32;
+#ifdef MOZILLA_INTERNAL_API
+    chunk->mTimeStamp = TimeStamp::Now();
+#endif
   }
   void AppendFrames(already_AddRefed<ThreadSharedObject> aBuffer,
                     const nsTArray<const int16_t*>& aChannelData,
@@ -138,6 +247,9 @@ public:
     }
     chunk->mVolume = 1.0f;
     chunk->mBufferFormat = AUDIO_FORMAT_S16;
+#ifdef MOZILLA_INTERNAL_API
+    chunk->mTimeStamp = TimeStamp::Now();
+#endif
   }
   // Consumes aChunk, and returns a pointer to the persistent copy of aChunk
   // in the segment.
@@ -148,12 +260,33 @@ public:
     chunk->mChannelData.SwapElements(aChunk->mChannelData);
     chunk->mVolume = aChunk->mVolume;
     chunk->mBufferFormat = aChunk->mBufferFormat;
+#ifdef MOZILLA_INTERNAL_API
+    chunk->mTimeStamp = TimeStamp::Now();
+#endif
     return chunk;
   }
   void ApplyVolume(float aVolume);
-  void WriteTo(AudioStream* aOutput);
+  void WriteTo(uint64_t aID, AudioStream* aOutput, AudioMixer* aMixer = nullptr);
+
+  int ChannelCount() {
+    NS_WARN_IF_FALSE(!mChunks.IsEmpty(),
+        "Cannot query channel count on a AudioSegment with no chunks.");
+    // Find the first chunk that has non-zero channels. A chunk that hs zero
+    // channels is just silence and we can simply discard it.
+    for (ChunkIterator ci(*this); !ci.IsEnded(); ci.Next()) {
+      if (ci->ChannelCount()) {
+        return ci->ChannelCount();
+      }
+    }
+    return 0;
+  }
 
   static Type StaticType() { return AUDIO; }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
 };
 
 }

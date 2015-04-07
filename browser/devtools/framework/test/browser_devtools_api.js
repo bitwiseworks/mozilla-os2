@@ -7,7 +7,7 @@ const Cu = Components.utils;
 const toolId = "test-tool";
 
 let tempScope = {};
-Cu.import("resource:///modules/devtools/shared/event-emitter.js", tempScope);
+Cu.import("resource://gre/modules/devtools/event-emitter.js", tempScope);
 let EventEmitter = tempScope.EventEmitter;
 
 function test() {
@@ -48,6 +48,12 @@ function runTests(aTab) {
 function continueTests(toolbox, panel) {
   ok(toolbox.getCurrentPanel(), "panel value is correct");
   is(toolbox.currentToolId, toolId, "toolbox _currentToolId is correct");
+
+  ok(!toolbox.doc.getElementById("toolbox-tab-" + toolId).hasAttribute("icon-invertable"),
+    "The tool tab does not have the invertable attribute");
+
+  ok(toolbox.doc.getElementById("toolbox-tab-inspector").hasAttribute("icon-invertable"),
+    "The builtin tool tabs do have the invertable attribute");
 
   let toolDefinitions = gDevTools.getToolDefinitionMap();
   is(toolDefinitions.has(toolId), true, "The tool is in gDevTools");
@@ -97,7 +103,7 @@ function DevToolPanel(iframeWindow, toolbox) {
 
 DevToolPanel.prototype = {
   open: function() {
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
 
     executeSoon(function() {
       this._isReady = true;
@@ -117,6 +123,6 @@ DevToolPanel.prototype = {
   _isReady: false,
 
   destroy: function DTI_destroy() {
-    return Promise.defer(null);
+    return promise.defer(null);
   },
 };

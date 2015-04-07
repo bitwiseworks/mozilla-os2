@@ -8,6 +8,7 @@
 #ifndef _nsDiskCacheBinding_h_
 #define _nsDiskCacheBinding_h_
 
+#include "mozilla/MemoryReporting.h"
 #include "nspr.h"
 #include "pldhash.h"
 
@@ -31,7 +32,7 @@ class nsDiskCacheDeviceDeactivateEntryEvent;
 
 class nsDiskCacheBinding : public nsISupports, public PRCList {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
 
     nsDiskCacheBinding(nsCacheEntry* entry, nsDiskCacheRecord * record);
     virtual ~nsDiskCacheBinding();
@@ -105,13 +106,13 @@ public:
     void                    RemoveBinding(nsDiskCacheBinding * binding);
     bool                    ActiveBindings();
 
-    size_t                 SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf);
+    size_t                 SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
 private:
     nsresult                AddBinding(nsDiskCacheBinding * binding);
 
     // member variables
-    static PLDHashTableOps ops;
+    static const PLDHashTableOps ops;
     PLDHashTable           table;
     bool                   initialized;
 };

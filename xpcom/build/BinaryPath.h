@@ -22,17 +22,17 @@ public:
 #ifdef XP_WIN
   static nsresult Get(const char *argv0, char aResult[MAXPATHLEN])
   {
-    PRUnichar wide_path[MAXPATHLEN];
+    wchar_t wide_path[MAXPATHLEN];
     nsresult rv = GetW(argv0, wide_path);
     if (NS_FAILED(rv))
       return rv;
     WideCharToMultiByte(CP_UTF8, 0, wide_path, -1,
-                        aResult, MAXPATHLEN, NULL, NULL);
+                        aResult, MAXPATHLEN, nullptr, nullptr);
     return NS_OK;
   }
 
 private:
-  static nsresult GetW(const char *argv0, PRUnichar aResult[MAXPATHLEN])
+  static nsresult GetW(const char *argv0, wchar_t aResult[MAXPATHLEN])
   {
     if (::GetModuleFileNameW(0, aResult, MAXPATHLEN))
       return NS_OK;
@@ -112,21 +112,12 @@ private:
         found = true;
         break;
       }
-      token = strtok(NULL, ":");
+      token = strtok(nullptr, ":");
     }
     free(pathdup);
     if (found)
       return NS_OK;
     return NS_ERROR_FAILURE;
-  }
-
-#elif defined(XP_OS2)
-  static nsresult Get(const char *argv0, char aResult[MAXPATHLEN])
-  {
-    PPIB ppib;
-    PTIB ptib;
-    DosGetInfoBlocks( &ptib, &ppib);
-    DosQueryModuleName(ppib->pib_hmte, MAXPATHLEN, aResult);
   }
 
 #else
@@ -138,7 +129,7 @@ public:
   {
     nsCOMPtr<nsIFile> lf;
 #ifdef XP_WIN
-    PRUnichar exePath[MAXPATHLEN];
+    wchar_t exePath[MAXPATHLEN];
     nsresult rv = GetW(argv0, exePath);
 #else
     char exePath[MAXPATHLEN];

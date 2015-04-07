@@ -8,16 +8,12 @@
 
 #include "nsIScriptContext.h"
 #include "mozilla/dom/EventTarget.h"
-#include "nsJSUtils.h"
 #include "nsDOMJSUtils.h"
-#include "mozilla/Util.h"
 #include "xpcprivate.h"
+#include "WorkerPrivate.h"
 
 using mozilla::dom::EventTarget;
 using mozilla::DebugOnly;
-
-NS_EXPORT
-nsCxPusher::~nsCxPusher() {}
 
 bool
 nsCxPusher::Push(EventTarget *aCurrentTarget)
@@ -79,7 +75,7 @@ nsCxPusher::RePush(EventTarget *aCurrentTarget)
   return Push(aCurrentTarget);
 }
 
-NS_EXPORT_(void)
+void
 nsCxPusher::Push(JSContext *cx)
 {
   mPusher.construct(cx);
@@ -93,7 +89,7 @@ nsCxPusher::PushNull()
   mPusher.construct(static_cast<JSContext*>(nullptr), /* aAllowNull = */ true);
 }
 
-NS_EXPORT_(void)
+void
 nsCxPusher::Pop()
 {
   if (!mPusher.empty())
@@ -102,7 +98,7 @@ nsCxPusher::Pop()
 
 namespace mozilla {
 
-AutoCxPusher::AutoCxPusher(JSContext* cx, bool allowNull) : mScriptIsRunning(false)
+AutoCxPusher::AutoCxPusher(JSContext* cx, bool allowNull)
 {
   MOZ_ASSERT_IF(!allowNull, cx);
 
@@ -112,18 +108,11 @@ AutoCxPusher::AutoCxPusher(JSContext* cx, bool allowNull) : mScriptIsRunning(fal
   if (cx)
     mScx = GetScriptContextFromJSContext(cx);
 
-  // NB: The GetDynamicScriptContext is historical and might not be sane.
   XPCJSContextStack *stack = XPCJSRuntime::Get()->GetJSContextStack();
-  if (cx && nsJSUtils::GetDynamicScriptContext(cx) && stack->HasJSContext(cx))
-  {
-    // If the context is on the stack, that means that a script
-    // is running at the moment in the context.
-    mScriptIsRunning = true;
-  }
-
   if (!stack->Push(cx)) {
     MOZ_CRASH();
   }
+  mStackDepthAfterPush = stack->Count();
 
 #ifdef DEBUG
   mPushedContext = cx;
@@ -132,20 +121,28 @@ AutoCxPusher::AutoCxPusher(JSContext* cx, bool allowNull) : mScriptIsRunning(fal
 
   // Enter a request and a compartment for the duration that the cx is on the
   // stack if non-null.
-  //
-  // NB: We call UnmarkGrayContext so that this can obsolete the need for the
-  // old XPCAutoRequest as well.
   if (cx) {
     mAutoRequest.construct(cx);
-    if (js::GetDefaultGlobalForContext(cx))
-      mAutoCompartment.construct(cx, js::GetDefaultGlobalForContext(cx));
-    xpc_UnmarkGrayContext(cx);
+
+    // DOM JSContexts don't store their default compartment object on the cx.
+    JSObject *compartmentObject = mScx ? mScx->GetWindowProxy()
+                                       : js::DefaultObjectForContextOrNull(cx);
+    if (compartmentObject)
+      mAutoCompartment.construct(cx, compartmentObject);
   }
 }
 
-NS_EXPORT
 AutoCxPusher::~AutoCxPusher()
 {
+  // GC when we pop a script entry point. This is a useful heuristic that helps
+  // us out on certain (flawed) benchmarks like sunspider, because it lets us
+  // avoid GCing during the timing loop.
+  //
+  // NB: We need to take care to only do this if we're in a compartment,
+  // otherwise JS_MaybeGC will segfault.
+  if (mScx && !mAutoCompartment.empty())
+    JS_MaybeGC(nsXPConnect::XPConnect()->GetCurrentJSContext());
+
   // Leave the compartment and request before popping.
   mAutoCompartment.destroyIfConstructed();
   mAutoRequest.destroyIfConstructed();
@@ -160,16 +157,15 @@ AutoCxPusher::~AutoCxPusher()
   DebugOnly<JSContext*> stackTop;
   MOZ_ASSERT(mPushedContext == nsXPConnect::XPConnect()->GetCurrentJSContext());
   XPCJSRuntime::Get()->GetJSContextStack()->Pop();
-
-  if (!mScriptIsRunning && mScx) {
-    // No JS is running in the context, but executing the event handler might have
-    // caused some JS to run. Tell the script context that it's done.
-
-    mScx->ScriptEvaluated(true);
-  }
-
   mScx = nullptr;
-  mScriptIsRunning = false;
+}
+
+bool
+AutoCxPusher::IsStackTop()
+{
+  uint32_t currentDepth = XPCJSRuntime::Get()->GetJSContextStack()->Count();
+  MOZ_ASSERT(currentDepth >= mStackDepthAfterPush);
+  return currentDepth == mStackDepthAfterPush;
 }
 
 AutoJSContext::AutoJSContext(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM_IN_IMPL)
@@ -187,6 +183,7 @@ AutoJSContext::AutoJSContext(bool aSafe MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
 void
 AutoJSContext::Init(bool aSafe MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
 {
+  JS::AutoAssertNoGC nogc;
   MOZ_ASSERT(!mCx, "mCx should not be initialized!");
 
   MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -207,9 +204,54 @@ AutoJSContext::operator JSContext*() const
   return mCx;
 }
 
+ThreadsafeAutoJSContext::ThreadsafeAutoJSContext(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM_IN_IMPL)
+{
+  MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+
+  if (NS_IsMainThread()) {
+    mCx = nullptr;
+    mAutoJSContext.construct();
+  } else {
+    mCx = mozilla::dom::workers::GetCurrentThreadJSContext();
+    mRequest.construct(mCx);
+  }
+}
+
+ThreadsafeAutoJSContext::operator JSContext*() const
+{
+  if (mCx) {
+    return mCx;
+  } else {
+    return mAutoJSContext.ref();
+  }
+}
+
 AutoSafeJSContext::AutoSafeJSContext(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM_IN_IMPL)
   : AutoJSContext(true MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT)
+  , mAc(mCx, XPCJSRuntime::Get()->GetJSContextStack()->GetSafeJSContextGlobal())
 {
+}
+
+ThreadsafeAutoSafeJSContext::ThreadsafeAutoSafeJSContext(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM_IN_IMPL)
+{
+  MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+
+  if (NS_IsMainThread()) {
+    mCx = nullptr;
+    mAutoSafeJSContext.construct();
+  } else {
+    mCx = mozilla::dom::workers::GetCurrentThreadJSContext();
+    mRequest.construct(mCx);
+  }
+}
+
+ThreadsafeAutoSafeJSContext::operator JSContext*() const
+{
+  if (mCx) {
+    return mCx;
+  } else {
+    return mAutoSafeJSContext.ref();
+  }
 }
 
 AutoPushJSContext::AutoPushJSContext(JSContext *aCx) : mCx(aCx)

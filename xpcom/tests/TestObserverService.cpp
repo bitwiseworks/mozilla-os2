@@ -15,7 +15,7 @@
 
 #include <stdio.h>
 
-static nsIObserverService *anObserverService = NULL;
+static nsIObserverService *anObserverService = nullptr;
 
 static void testResult( nsresult rv ) {
     if ( NS_SUCCEEDED( rv ) ) {
@@ -46,12 +46,12 @@ private:
     ~TestObserver() {}
 };
 
-NS_IMPL_ISUPPORTS2( TestObserver, nsIObserver, nsISupportsWeakReference )
+NS_IMPL_ISUPPORTS( TestObserver, nsIObserver, nsISupportsWeakReference )
 
 NS_IMETHODIMP
 TestObserver::Observe( nsISupports     *aSubject,
                        const char *aTopic,
-                       const PRUnichar *someData ) {
+                       const char16_t *someData ) {
     nsCString topic( aTopic );
     nsString data( someData );
     	/*
@@ -99,13 +99,13 @@ int main(int argc, char *argv[])
         printf("Testing Notify(observer-A, topic-A)...\n");
         rv = anObserverService->NotifyObservers( aObserver,
                                    topicA.get(),
-                                   NS_LITERAL_STRING("Testing Notify(observer-A, topic-A)").get() );
+                                   MOZ_UTF16("Testing Notify(observer-A, topic-A)") );
         testResult(rv);
 
         printf("Testing Notify(observer-B, topic-B)...\n");
         rv = anObserverService->NotifyObservers( bObserver,
                                    topicB.get(),
-                                   NS_LITERAL_STRING("Testing Notify(observer-B, topic-B)").get() );
+                                   MOZ_UTF16("Testing Notify(observer-B, topic-B)") );
         testResult(rv);
  
         printf("Testing EnumerateObserverList (for topic-A)...\n");
@@ -120,14 +120,16 @@ int main(int argc, char *argv[])
           bool loop = true;
           while( NS_SUCCEEDED(e->HasMoreElements(&loop)) && loop) 
           {
-              e->GetNext(getter_AddRefs(observer));
+              nsCOMPtr<nsISupports> supports;
+              e->GetNext(getter_AddRefs(supports));
+              observer = do_QueryInterface(supports);
               printf("Calling observe on enumerated observer ");
               printString(reinterpret_cast<TestObserver*>
                                           (reinterpret_cast<void*>(observer.get()))->mName);
               printf("...\n");
               rv = observer->Observe( observer, 
                                       topicA.get(), 
-                                      NS_LITERAL_STRING("during enumeration").get() );
+                                      MOZ_UTF16("during enumeration") );
               testResult(rv);
           }
         }

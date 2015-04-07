@@ -22,8 +22,8 @@ class StreamNotifyChild : public PStreamNotifyChild
 public:
   StreamNotifyChild(const nsCString& aURL)
     : mURL(aURL)
-    , mClosure(NULL)
-    , mBrowserStream(NULL)
+    , mClosure(nullptr)
+    , mBrowserStream(nullptr)
   { }
 
   virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
@@ -37,7 +37,7 @@ public:
 private:
   virtual bool Recv__delete__(const NPReason& reason) MOZ_OVERRIDE;
 
-  bool RecvRedirectNotify(const nsCString& url, const int32_t& status);
+  bool RecvRedirectNotify(const nsCString& url, const int32_t& status) MOZ_OVERRIDE;
 
   /**
    * If a stream is created for this this URLNotify, we associate the objects

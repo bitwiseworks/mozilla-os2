@@ -4,9 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsError.h"
 #include "nsDOMStringMap.h"
 
+#include "jsapi.h"
+#include "nsError.h"
 #include "nsGenericHTMLElement.h"
 #include "nsContentUtils.h"
 #include "mozilla/dom/DOMStringMapBinding.h"
@@ -15,10 +16,13 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMStringMap)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsDOMStringMap)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mElement)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDOMStringMap)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
   // Check that mElement exists in case the unlink code is run more than once.
@@ -68,9 +72,9 @@ nsDOMStringMap::~nsDOMStringMap()
 
 /* virtual */
 JSObject*
-nsDOMStringMap::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+nsDOMStringMap::WrapObject(JSContext *cx)
 {
-  return DOMStringMapBinding::Wrap(cx, scope, this);
+  return DOMStringMapBinding::Wrap(cx, this);
 }
 
 void
@@ -85,6 +89,12 @@ nsDOMStringMap::NamedGetter(const nsAString& aProp, bool& found,
   }
 
   found = mElement->GetAttr(attr, aResult);
+}
+
+bool
+nsDOMStringMap::NameIsEnumerable(const nsAString& aName)
+{
+  return true;
 }
 
 void
@@ -139,7 +149,7 @@ nsDOMStringMap::NamedDeleter(const nsAString& aProp, bool& found)
 }
 
 void
-nsDOMStringMap::GetSupportedNames(nsTArray<nsString>& aNames)
+nsDOMStringMap::GetSupportedNames(unsigned, nsTArray<nsString>& aNames)
 {
   uint32_t attrCount = mElement->GetAttrCount();
 
@@ -179,22 +189,22 @@ bool nsDOMStringMap::DataPropToAttr(const nsAString& aProp,
   // in the range "a" to "z".
   // Replace capital characters with "-" followed by lower case character.
   // Otherwise, simply append character to attribute name.
-  const PRUnichar* start = aProp.BeginReading();
-  const PRUnichar* end = aProp.EndReading();
-  const PRUnichar* cur = start;
+  const char16_t* start = aProp.BeginReading();
+  const char16_t* end = aProp.EndReading();
+  const char16_t* cur = start;
   for (; cur < end; ++cur) {
-    const PRUnichar* next = cur + 1;
-    if (PRUnichar('-') == *cur && next < end &&
-        PRUnichar('a') <= *next && *next <= PRUnichar('z')) {
+    const char16_t* next = cur + 1;
+    if (char16_t('-') == *cur && next < end &&
+        char16_t('a') <= *next && *next <= char16_t('z')) {
       // Syntax error if character following "-" is in range "a" to "z".
       return false;
     }
 
-    if (PRUnichar('A') <= *cur && *cur <= PRUnichar('Z')) {
+    if (char16_t('A') <= *cur && *cur <= char16_t('Z')) {
       // Append the characters in the range [start, cur)
       aResult.Append(start, cur - start);
       // Uncamel-case characters in the range of "A" to "Z".
-      aResult.Append(PRUnichar('-'));
+      aResult.Append(char16_t('-'));
       aResult.Append(*cur - 'A' + 'a');
       start = next; // We've already appended the thing at *cur
     }
@@ -219,8 +229,8 @@ bool nsDOMStringMap::AttrToDataProp(const nsAString& aAttr,
   }
 
   // Start reading attribute from first character after "data-".
-  const PRUnichar* cur = aAttr.BeginReading() + 5;
-  const PRUnichar* end = aAttr.EndReading();
+  const char16_t* cur = aAttr.BeginReading() + 5;
+  const char16_t* end = aAttr.EndReading();
 
   // Don't try to mess with aResult's capacity: the probably-no-op SetCapacity()
   // call is not that fast.
@@ -230,9 +240,9 @@ bool nsDOMStringMap::AttrToDataProp(const nsAString& aAttr,
   // "z" then replace with upper case letter.
   // Otherwise append character to property name.
   for (; cur < end; ++cur) {
-    const PRUnichar* next = cur + 1;
-    if (PRUnichar('-') == *cur && next < end && 
-        PRUnichar('a') <= *next && *next <= PRUnichar('z')) {
+    const char16_t* next = cur + 1;
+    if (char16_t('-') == *cur && next < end && 
+        char16_t('a') <= *next && *next <= char16_t('z')) {
       // Upper case the lower case letters that follow a "-".
       aResult.Append(*next - 'a' + 'A');
       // Consume character to account for "-" character.

@@ -6,6 +6,7 @@
 #ifndef nsBaseAppShell_h__
 #define nsBaseAppShell_h__
 
+#include "mozilla/Atomics.h"
 #include "nsIAppShell.h"
 #include "nsIThreadInternal.h"
 #include "nsIObserver.h"
@@ -22,7 +23,7 @@ class nsBaseAppShell : public nsIAppShell, public nsIThreadObserver,
                        public nsIObserver
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIAPPSHELL
   NS_DECL_NSITHREADOBSERVER
   NS_DECL_NSIOBSERVER
@@ -78,6 +79,9 @@ private:
 
   bool DispatchDummyEvent(nsIThread* target);
 
+  void IncrementEventloopNestingLevel();
+  void DecrementEventloopNestingLevel();
+
   /**
    * Runs all synchronous sections which are queued up in mSyncSections.
    */
@@ -119,7 +123,7 @@ private:
    */
   bool *mBlockedWait;
   int32_t mFavorPerf;
-  int32_t mNativeEventPending;
+  mozilla::Atomic<bool> mNativeEventPending;
   PRIntervalTime mStarvationDelay;
   PRIntervalTime mSwitchTime;
   PRIntervalTime mLastNativeEventTime;
@@ -146,7 +150,7 @@ private:
    * Tracks whether we have processed any gecko events in NativeEventCallback so
    * that we can avoid erroneously entering a blocking loop waiting for gecko
    * events to show up during OnProcessNextEvent.  This is required because on
-   * OS X ProcessGeckoEvents may be invoked inside the context of 
+   * OS X ProcessGeckoEvents may be invoked inside the context of
    * ProcessNextNativeEvent and may result in NativeEventCallback being invoked
    * and in turn invoking NS_ProcessPendingEvents.  Because
    * ProcessNextNativeEvent may be invoked prior to the NS_HasPendingEvents

@@ -6,16 +6,17 @@
 #ifndef nsICanvasRenderingContextInternal_h___
 #define nsICanvasRenderingContextInternal_h___
 
+#include "mozilla/gfx/2D.h"
 #include "nsISupports.h"
 #include "nsIInputStream.h"
 #include "nsIDocShell.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
-#include "gfxPattern.h"
+#include "GraphicsFilter.h"
 #include "mozilla/RefPtr.h"
 
 #define NS_ICANVASRENDERINGCONTEXTINTERNAL_IID \
-{ 0x8b8da863, 0xd151, 0x4014, \
-  { 0x8b, 0xdc, 0x62, 0xb5, 0x0d, 0xc0, 0x2b, 0x62 } }
+{ 0x3cc9e801, 0x1806, 0x4ff6, \
+  { 0x86, 0x14, 0xf9, 0xd0, 0xf4, 0xfb, 0x3b, 0x08 } }
 
 class gfxContext;
 class gfxASurface;
@@ -41,10 +42,6 @@ public:
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ICANVASRENDERINGCONTEXTINTERNAL_IID)
 
-  enum {
-    RenderFlagPremultAlpha = 0x1
-  };
-
   void SetCanvasElement(mozilla::dom::HTMLCanvasElement* aParentCanvas)
   {
     mCanvasElement = aParentCanvas;
@@ -54,16 +51,20 @@ public:
     return mCanvasElement;
   }
 
+#ifdef DEBUG
+    // Useful for testing
+    virtual int32_t GetWidth() const = 0;
+    virtual int32_t GetHeight() const = 0;
+#endif
+
   // Sets the dimensions of the canvas, in pixels.  Called
   // whenever the size of the element changes.
   NS_IMETHOD SetDimensions(int32_t width, int32_t height) = 0;
 
   NS_IMETHOD InitializeWithSurface(nsIDocShell *docShell, gfxASurface *surface, int32_t width, int32_t height) = 0;
 
-  // Render the canvas at the origin of the given gfxContext
-  NS_IMETHOD Render(gfxContext *ctx,
-                    gfxPattern::GraphicsFilter aFilter,
-                    uint32_t aFlags = RenderFlagPremultAlpha) = 0;
+  // Creates an image buffer. Returns null on failure.
+  virtual void GetImageBuffer(uint8_t** aImageBuffer, int32_t* aFormat) = 0;
 
   // Gives you a stream containing the image represented by this context.
   // The format is given in aMimeTime, for example "image/png".
@@ -72,22 +73,22 @@ public:
   // is false, alpha will be discarded and the result will be the image
   // composited on black.
   NS_IMETHOD GetInputStream(const char *aMimeType,
-                            const PRUnichar *aEncoderOptions,
+                            const char16_t *aEncoderOptions,
                             nsIInputStream **aStream) = 0;
-
-  // If this canvas context can be represented with a simple Thebes surface,
-  // return the surface.  Otherwise returns an error.
-  NS_IMETHOD GetThebesSurface(gfxASurface **surface) = 0;
   
   // This gets an Azure SourceSurface for the canvas, this will be a snapshot
   // of the canvas at the time it was called.
-  virtual mozilla::TemporaryRef<mozilla::gfx::SourceSurface> GetSurfaceSnapshot() = 0;
+  // If aPremultAlpha is provided, then it assumed the callee can handle
+  // un-premultiplied surfaces, and *aPremultAlpha will be set to false
+  // if one is returned.
+  virtual mozilla::TemporaryRef<mozilla::gfx::SourceSurface> GetSurfaceSnapshot(bool* aPremultAlpha = nullptr) = 0;
 
   // If this context is opaque, the backing store of the canvas should
   // be created as opaque; all compositing operators should assume the
   // dst alpha is always 1.0.  If this is never called, the context
   // defaults to false (not opaque).
   NS_IMETHOD SetIsOpaque(bool isOpaque) = 0;
+  virtual bool GetIsOpaque() = 0;
 
   // Invalidate this context and release any held resources, in preperation
   // for possibly reinitializing with SetDimensions/InitializeWithSurface.

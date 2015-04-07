@@ -14,8 +14,7 @@ namespace mozilla {
 class WebGLProgram;
 
 class WebGLUniformLocation MOZ_FINAL
-    : public nsISupports
-    , public WebGLContextBoundObject
+    : public WebGLContextBoundObject
 {
 public:
     WebGLUniformLocation(WebGLContext *context, WebGLProgram *program, GLint location, const WebGLUniformInfo& info);
@@ -34,10 +33,10 @@ public:
     uint32_t ProgramGeneration() const { return mProgramGeneration; }
     int ElementSize() const { return mElementSize; }
 
-    JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> scope);
+    JSObject* WrapObject(JSContext *cx);
 
-    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-    NS_DECL_CYCLE_COLLECTION_CLASS(WebGLUniformLocation)
+    NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLUniformLocation)
+    NS_DECL_CYCLE_COLLECTION_NATIVE_CLASS(WebGLUniformLocation)
 
 protected:
     // nsRefPtr, not WebGLRefPtr, so that we don't prevent the program from being explicitly deleted.

@@ -2,22 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH            = @DEPTH@
-topsrcdir        = @top_srcdir@
-srcdir           = @srcdir@
-VPATH            = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-LIBRARY_NAME     = autoconfig
-EXPORT_LIBRARY   = 1
-IS_COMPONENT     = 1
-MODULE_NAME      = nsAutoConfigModule
-LIBXUL_LIBRARY   = 1
-
-
-include $(topsrcdir)/config/config.mk
-
 AUTOCFG_JS_EXPORTS = \
 		$(srcdir)/prefcalls.js \
 		$(NULL)
@@ -28,9 +12,6 @@ else
 ifeq ($(MOZ_WIDGET_TOOLKIT), windows)
 AUTOCFG_JS_EXPORTS += $(srcdir)/win/platform.js
 else
-ifeq ($(MOZ_WIDGET_TOOLKIT), os2)
-AUTOCFG_JS_EXPORTS += $(srcdir)/os2/platform.js
-else
 ifeq ($(MOZ_WIDGET_TOOLKIT), beos)
 AUTOCFG_JS_EXPORTS += $(srcdir)/beos/platform.js
 else
@@ -38,7 +19,3 @@ AUTOCFG_JS_EXPORTS += $(srcdir)/unix/platform.js
 endif
 endif
 endif
-endif
-
-include $(topsrcdir)/config/rules.mk
-

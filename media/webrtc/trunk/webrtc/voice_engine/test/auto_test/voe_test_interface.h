@@ -15,7 +15,7 @@
 #ifndef WEBRTC_VOICE_ENGINE_VOE_TEST_INTERFACE_H
 #define WEBRTC_VOICE_ENGINE_VOE_TEST_INTERFACE_H
 
-#include "common_types.h"
+#include "webrtc/common_types.h"
 
 namespace voetest {
 // TODO(andrew): Using directives not permitted.
@@ -49,5 +49,5 @@ enum ExtendedSelection {
 // Main test function
 int runAutoTest(TestType testType, ExtendedSelection extendedSel);
 
-} //  namespace voetest
+}  // namespace voetest
 #endif // WEBRTC_VOICE_ENGINE_VOE_TEST_INTERFACE_H

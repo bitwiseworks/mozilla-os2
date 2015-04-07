@@ -4,54 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-relativesrcdir = @relativesrcdir@
-FAIL_ON_WARNINGS := 1
 
-include $(DEPTH)/config/autoconf.mk
-
-cppsrcs = \
-  TestIncrementalDownload.cpp \
-  TestStreamLoader.cpp \
-  PropertiesTest.cpp \
-  urltest.cpp \
-  TestCallbacks.cpp \
-  TestPageLoad.cpp \
-  TestURLParser.cpp \
-  TestStandardURL.cpp \
-  TestUpload.cpp \
-  TestBlockingSocket.cpp \
-  TestDNS.cpp \
-  TestOpen.cpp \
-  TestCookie.cpp \
-  TestServ.cpp \
-  ReadNTLM.cpp \
-  TestProtocols.cpp \
-  $(NULL)
-
-DISABLED_SIMPLE_PROGRAMS := $(cppsrcs:.cpp=$(BIN_SUFFIX))
-
-# XXX Make this work in libxul builds.
-#SIMPLE_PROGRAMS += \
-#		TestPerf$(BIN_SUFFIX) \
-#		TestIDN$(BIN_SUFFIX) \
-#		TestSocketTransport$(BIN_SUFFIX) \
-#		TestStreamTransport$(BIN_SUFFIX) \
-#		TestStreamChannel$(BIN_SUFFIX) \
-#		TestStreamPump$(BIN_SUFFIX) \
-#		TestIOThreads$(BIN_SUFFIX) \
-#		TestUDPSocketProvider$(BIN_SUFFIX) \
-#		$(NULL)
-
-CPP_UNIT_TESTS = \
-		 TestSTSParser.cpp \
-		 TestUDPServerSocket.cpp \
-		 $(NULL)
-
-include $(topsrcdir)/config/config.mk
 
 LIBS		= $(XPCOM_LIBS) \
 		  $(NSPR_LIBS) \
@@ -63,14 +16,6 @@ include $(topsrcdir)/config/rules.mk
 
 check::
 	$(RUN_TEST_PROGRAM) $(DIST)/bin/TestCookie$(BIN_SUFFIX)
-
-_RES_FILES 	= urlparse.dat \
-		  urlparse_unx.dat \
-		  $(NULL)
-libs:: $(_RES_FILES)
-	$(INSTALL) $^ $(DIST)/bin/res
-install:: $(_RES_FILES)
-	$(SYSINSTALL) $(IFLAGS1) $^ $(DESTDIR)$(mozappdir)/res
 
 # One of the xpcshell unit tests needs this file, so make sure it winds
 #  up in the test directory.

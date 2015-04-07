@@ -7,8 +7,6 @@
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     DIRS += ['interpose']
 
-MODULE = 'dom'
-
 EXPORTS.mozilla += [
     'PluginLibrary.h',
 ]
@@ -39,6 +37,7 @@ EXPORTS.mozilla.plugins += [
     'PluginStreamChild.h',
     'PluginStreamParent.h',
     'PluginUtilsOSX.h',
+    'ScopedMethodFactory.h',
     'StreamNotifyChild.h',
     'StreamNotifyParent.h',
 ]
@@ -47,11 +46,17 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     EXPORTS.mozilla.plugins += [
         'PluginSurfaceParent.h',
     ]
-    CPP_SOURCES += [
+    # These files cannot be built in unified mode because they force NSPR logging.
+    SOURCES += [
         'COMMessageFilter.cpp',
-        'PluginSurfaceParent.cpp',
         'MiniShmParent.cpp',
         'PluginHangUIParent.cpp',
+        'PluginSurfaceParent.cpp',
+    ]
+    DEFINES['MOZ_HANGUI_PROCESS_NAME'] = '"plugin-hang-ui%s"' % CONFIG['BIN_SUFFIX']
+    LOCAL_INCLUDES += [
+        '/widget/shared',
+        'hangui',
     ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
@@ -60,16 +65,21 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     ]
 
 if CONFIG['MOZ_ENABLE_QT']:
-    CPP_SOURCES += [
+    GENERATED_SOURCES += [
         'moc_NestedLoopTimer.cpp',
+    ]
+    # These files cannot be built in unified mode because they force NSPR logging.
+    SOURCES += [
         'NestedLoopTimer.cpp',
     ]
 
-CPP_SOURCES += [
+# These files cannot be built in unified mode because they force NSPR logging.
+SOURCES += [
     'BrowserStreamChild.cpp',
     'BrowserStreamParent.cpp',
     'ChildAsyncCall.cpp',
     'ChildTimer.cpp',
+    'PluginBackgroundDestroyer.cpp',
     'PluginIdentifierChild.cpp',
     'PluginIdentifierParent.cpp',
     'PluginInstanceChild.cpp',
@@ -84,4 +94,35 @@ CPP_SOURCES += [
     'PluginStreamChild.cpp',
     'PluginStreamParent.cpp',
 ]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    # These files cannot be built in unified mode because they force NSPR logging.
+    SOURCES += [
+        'PluginInterposeOSX.mm',
+        'PluginUtilsOSX.mm',
+    ]
+
+IPDL_SOURCES += [
+    'PBrowserStream.ipdl',
+    'PPluginBackgroundDestroyer.ipdl',
+    'PPluginIdentifier.ipdl',
+    'PPluginInstance.ipdl',
+    'PPluginModule.ipdl',
+    'PPluginScriptableObject.ipdl',
+    'PPluginStream.ipdl',
+    'PPluginSurface.ipdl',
+    'PStreamNotify.ipdl',
+]
+
+FAIL_ON_WARNINGS = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'
+LOCAL_INCLUDES += [
+    '../base',
+    '/xpcom/base/',
+]
+
+DEFINES['FORCE_PR_LOG'] = True
 

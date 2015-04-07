@@ -14,7 +14,7 @@ interface nsIDOMNode;
  * tabs contained in them.
  */
 
-[scriptable, uuid(15152edf-6c99-4277-9020-076be4653c69)]
+[scriptable, uuid(fe116b56-0226-4562-b52a-a623dad07ead)]
 interface nsISessionStore : nsISupports
 {
   /**
@@ -71,15 +71,9 @@ interface nsISessionStore : nsISupports
   void deleteTabValue(in jsval aTab, in AString aKey);
 
   /**
-   * @returns A boolean indicating we should restore previous browser session
-   */
-  boolean shouldRestore();
-
-  /**
    * Restores the previous browser session using a fast, lightweight strategy
-   * @param aRestoringOOM  Whether this is an OOM restore from Android
    * @param aSessionString The session string to restore from. If null, the
    *                       backup session file is read from.
    */
-  void restoreLastSession(in boolean aRestoringOOM, in AString aSessionString);
+  void restoreLastSession(in AString aSessionString);
 };

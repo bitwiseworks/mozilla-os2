@@ -4,56 +4,42 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "MediaEncoder.h"
 #include "MediaDecoder.h"
-#ifdef MOZ_OGG
+#include "nsIPrincipal.h"
+#include "nsMimeTypes.h"
+#include "prlog.h"
+#include "mozilla/Preferences.h"
+
 #include "OggWriter.h"
-#endif
 #ifdef MOZ_OPUS
 #include "OpusTrackEncoder.h"
+
 #endif
 
-#ifdef MOZ_WIDGET_GONK
-#include <android/log.h>
-#define LOG(args...) __android_log_print(ANDROID_LOG_INFO, "MediaEncoder", ## args);
+#ifdef MOZ_VORBIS
+#include "VorbisTrackEncoder.h"
+#endif
+#ifdef MOZ_WEBM_ENCODER
+#include "VorbisTrackEncoder.h"
+#include "VP8TrackEncoder.h"
+#include "WebMWriter.h"
+#endif
+#ifdef MOZ_OMX_ENCODER
+#include "OmxTrackEncoder.h"
+#include "ISOMediaWriter.h"
+#endif
+
+#ifdef LOG
+#undef LOG
+#endif
+
+#ifdef PR_LOGGING
+PRLogModuleInfo* gMediaEncoderLog;
+#define LOG(type, msg) PR_LOG(gMediaEncoderLog, type, msg)
 #else
-#define LOG(args,...)
+#define LOG(type, msg)
 #endif
 
 namespace mozilla {
-
-#define TRACK_BUFFER_LEN 8192
-
-namespace {
-
-template <class String>
-static bool
-TypeListContains(char const *const * aTypes, const String& aType)
-{
-  for (int32_t i = 0; aTypes[i]; ++i) {
-    if (aType.EqualsASCII(aTypes[i]))
-      return true;
-  }
-  return false;
-}
-
-#ifdef MOZ_OGG
-// The recommended mime-type for Ogg Opus files is audio/ogg.
-// See http://wiki.xiph.org/OggOpus for more details.
-static const char* const gOggTypes[2] = {
-  "audio/ogg",
-  nullptr
-};
-
-static bool
-IsOggType(const nsAString& aType)
-{
-  if (!MediaDecoder::IsOggEnabled()) {
-    return false;
-  }
-
-  return TypeListContains(gOggTypes, aType);
-}
-#endif
-} //anonymous namespace
 
 void
 MediaEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
@@ -65,13 +51,15 @@ MediaEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
 {
   // Process the incoming raw track data from MediaStreamGraph, called on the
   // thread of MediaStreamGraph.
-  if (aQueuedMedia.GetType() == MediaSegment::AUDIO) {
+  if (mAudioEncoder && aQueuedMedia.GetType() == MediaSegment::AUDIO) {
     mAudioEncoder->NotifyQueuedTrackChanges(aGraph, aID, aTrackRate,
                                             aTrackOffset, aTrackEvents,
                                             aQueuedMedia);
 
-  } else {
-    // Type video is not supported for now.
+  } else if (mVideoEncoder && aQueuedMedia.GetType() == MediaSegment::VIDEO) {
+      mVideoEncoder->NotifyQueuedTrackChanges(aGraph, aID, aTrackRate,
+                                              aTrackOffset, aTrackEvents,
+                                              aQueuedMedia);
   }
 }
 
@@ -79,65 +67,104 @@ void
 MediaEncoder::NotifyRemoved(MediaStreamGraph* aGraph)
 {
   // In case that MediaEncoder does not receive a TRACK_EVENT_ENDED event.
-  LOG("NotifyRemoved in [MediaEncoder].");
-  mAudioEncoder->NotifyRemoved(aGraph);
+  LOG(PR_LOG_DEBUG, ("NotifyRemoved in [MediaEncoder]."));
+  if (mAudioEncoder) {
+    mAudioEncoder->NotifyRemoved(aGraph);
+  }
+  if (mVideoEncoder) {
+    mVideoEncoder->NotifyRemoved(aGraph);
+  }
+
 }
 
 /* static */
 already_AddRefed<MediaEncoder>
-MediaEncoder::CreateEncoder(const nsAString& aMIMEType)
+MediaEncoder::CreateEncoder(const nsAString& aMIMEType, uint8_t aTrackTypes)
 {
+#ifdef PR_LOGGING
+  if (!gMediaEncoderLog) {
+    gMediaEncoderLog = PR_NewLogModule("MediaEncoder");
+  }
+#endif
   nsAutoPtr<ContainerWriter> writer;
   nsAutoPtr<AudioTrackEncoder> audioEncoder;
   nsAutoPtr<VideoTrackEncoder> videoEncoder;
   nsRefPtr<MediaEncoder> encoder;
-
-  if (aMIMEType.IsEmpty()) {
-    // TODO: Should pick out a default container+codec base on the track
-    //       coming from MediaStreamGraph. For now, just default to Ogg+Opus.
-    const_cast<nsAString&>(aMIMEType) = NS_LITERAL_STRING("audio/ogg");
+  nsString mimeType;
+  if (!aTrackTypes) {
+    LOG(PR_LOG_ERROR, ("NO TrackTypes!!!"));
+    return nullptr;
   }
-
-  bool isAudioOnly = FindInReadable(NS_LITERAL_STRING("audio/"), aMIMEType);
-#ifdef MOZ_OGG
-  if (IsOggType(aMIMEType)) {
-    writer = new OggWriter();
-    if (!isAudioOnly) {
-      // Initialize the videoEncoder.
+#ifdef MOZ_WEBM_ENCODER
+  else if (MediaEncoder::IsWebMEncoderEnabled() &&
+          (aMIMEType.EqualsLiteral(VIDEO_WEBM) ||
+          (aTrackTypes & ContainerWriter::CREATE_VIDEO_TRACK))) {
+    if (aTrackTypes & ContainerWriter::CREATE_AUDIO_TRACK) {
+      audioEncoder = new VorbisTrackEncoder();
+      NS_ENSURE_TRUE(audioEncoder, nullptr);
     }
-#ifdef MOZ_OPUS
-    audioEncoder = new OpusTrackEncoder();
-#endif
-  }
-#endif
-  // If the given mime-type is video but fail to create the video encoder.
-  if (!isAudioOnly) {
+    videoEncoder = new VP8TrackEncoder();
+    writer = new WebMWriter(aTrackTypes);
+    NS_ENSURE_TRUE(writer, nullptr);
     NS_ENSURE_TRUE(videoEncoder, nullptr);
+    mimeType = NS_LITERAL_STRING(VIDEO_WEBM);
   }
+#endif //MOZ_WEBM_ENCODER
+#ifdef MOZ_OMX_ENCODER
+  else if (MediaEncoder::IsOMXEncoderEnabled() &&
+          (aMIMEType.EqualsLiteral(VIDEO_MP4) ||
+          (aTrackTypes & ContainerWriter::CREATE_VIDEO_TRACK))) {
+    if (aTrackTypes & ContainerWriter::CREATE_AUDIO_TRACK) {
+      audioEncoder = new OmxAACAudioTrackEncoder();
+      NS_ENSURE_TRUE(audioEncoder, nullptr);
+    }
+    videoEncoder = new OmxVideoTrackEncoder();
+    writer = new ISOMediaWriter(aTrackTypes);
+    NS_ENSURE_TRUE(writer, nullptr);
+    NS_ENSURE_TRUE(videoEncoder, nullptr);
+    mimeType = NS_LITERAL_STRING(VIDEO_MP4);
+  } else if (MediaEncoder::IsOMXEncoderEnabled() &&
+            (aMIMEType.EqualsLiteral(AUDIO_3GPP))) {
+    audioEncoder = new OmxAMRAudioTrackEncoder();
+    NS_ENSURE_TRUE(audioEncoder, nullptr);
 
-  // Return null if we fail to create the audio encoder.
-  NS_ENSURE_TRUE(audioEncoder, nullptr);
-
+    writer = new ISOMediaWriter(aTrackTypes, ISOMediaWriter::TYPE_FRAG_3GP);
+    NS_ENSURE_TRUE(writer, nullptr);
+    mimeType = NS_LITERAL_STRING(AUDIO_3GPP);
+  }
+#endif // MOZ_OMX_ENCODER
+  else if (MediaDecoder::IsOggEnabled() && MediaDecoder::IsOpusEnabled() &&
+           (aMIMEType.EqualsLiteral(AUDIO_OGG) ||
+           (aTrackTypes & ContainerWriter::CREATE_AUDIO_TRACK))) {
+    writer = new OggWriter();
+    audioEncoder = new OpusTrackEncoder();
+    NS_ENSURE_TRUE(writer, nullptr);
+    NS_ENSURE_TRUE(audioEncoder, nullptr);
+    mimeType = NS_LITERAL_STRING(AUDIO_OGG);
+  }
+  else {
+    LOG(PR_LOG_ERROR, ("Can not find any encoder to record this media stream"));
+    return nullptr;
+  }
+  LOG(PR_LOG_DEBUG, ("Create encoder result:a[%d] v[%d] w[%d] mimeType = %s.",
+                      audioEncoder != nullptr, videoEncoder != nullptr,
+                      writer != nullptr, mimeType.get()));
   encoder = new MediaEncoder(writer.forget(), audioEncoder.forget(),
-                             videoEncoder.forget(), aMIMEType);
-
-
+                             videoEncoder.forget(), mimeType);
   return encoder.forget();
 }
 
 /**
  * GetEncodedData() runs as a state machine, starting with mState set to
- * ENCODE_HEADER, the procedure should be as follow:
+ * GET_METADDATA, the procedure should be as follow:
  *
  * While non-stop
- *   If mState is ENCODE_HEADER
- *     Create the header from audio/video encoder
- *     If a header is generated
- *       Insert header data into the container stream of writer
- *       Force copied the final container data from writer
- *       Return the copy of final container data
- *     Else
+ *   If mState is GET_METADDATA
+ *     Get the meta data from audio/video encoder
+ *     If a meta data is generated
+ *       Get meta data from audio/video encoder
  *       Set mState to ENCODE_TRACK
+ *       Return the final container data
  *
  *   If mState is ENCODE_TRACK
  *     Get encoded track data from audio/video encoder
@@ -148,7 +175,7 @@ MediaEncoder::CreateEncoder(const nsAString& aMIMEType)
  *       If this is the last packet of input stream
  *         Set mState to ENCODE_DONE
  *
- *   If mState is ENCODE_DONE
+ *   If mState is ENCODE_DONE or ENCODE_ERROR
  *     Stop the loop
  */
 void
@@ -162,81 +189,138 @@ MediaEncoder::GetEncodedData(nsTArray<nsTArray<uint8_t> >* aOutputBufs,
   bool reloop = true;
   while (reloop) {
     switch (mState) {
-    case ENCODE_HEADER: {
-      nsTArray<uint8_t> buffer;
-      nsresult rv = mAudioEncoder->GetHeader(&buffer);
+    case ENCODE_METADDATA: {
+      LOG(PR_LOG_DEBUG, ("ENCODE_METADDATA TimeStamp = %f", GetEncodeTimeStamp()));
+      nsresult rv = CopyMetadataToMuxer(mAudioEncoder.get());
       if (NS_FAILED(rv)) {
-        // Encoding might be canceled.
-        mState = ENCODE_DONE;
+        LOG(PR_LOG_ERROR, ("Error! Fail to Set Audio Metadata"));
         break;
       }
-
-      if (!buffer.IsEmpty()) {
-        rv = mWriter->WriteEncodedTrack(buffer, 0);
-        if (NS_FAILED(rv)) {
-          LOG("ERROR! Fail to write header to the media container.");
-          mState = ENCODE_DONE;
-          break;
-        }
-
-        rv = mWriter->GetContainerData(aOutputBufs,
-                                       ContainerWriter::FLUSH_NEEDED);
-        if (NS_SUCCEEDED(rv)) {
-          // Successfully get the copy of final container data from writer.
-          reloop = false;
-          break;
-        }
-      } else {
-        // No more headers, starts to encode tracks.
-        mState = ENCODE_TRACK;
-      }
-      break;
-    }
-
-    case ENCODE_TRACK: {
-      nsTArray<uint8_t> buffer;
-      int encodedDuration = 0;
-      nsresult rv = mAudioEncoder->GetEncodedTrack(&buffer, encodedDuration);
+      rv = CopyMetadataToMuxer(mVideoEncoder.get());
       if (NS_FAILED(rv)) {
-        // Encoding might be canceled.
-        LOG("ERROR! Fail to get encoded data from encoder.");
-        mState = ENCODE_DONE;
-        break;
-      }
-
-      rv = mWriter->WriteEncodedTrack(buffer, encodedDuration,
-                                      mAudioEncoder->IsEncodingComplete() ?
-                                      ContainerWriter::END_OF_STREAM : 0);
-      if (NS_FAILED(rv)) {
-        LOG("ERROR! Fail to write encoded track to the media container.");
-        mState = ENCODE_DONE;
+        LOG(PR_LOG_ERROR, ("Error! Fail to Set Video Metadata"));
         break;
       }
 
       rv = mWriter->GetContainerData(aOutputBufs,
-                                     mAudioEncoder->IsEncodingComplete() ?
+                                     ContainerWriter::GET_HEADER);
+      if (NS_FAILED(rv)) {
+       LOG(PR_LOG_ERROR,("Error! writer fail to generate header!"));
+       mState = ENCODE_ERROR;
+       break;
+      }
+      LOG(PR_LOG_DEBUG, ("Finish ENCODE_METADDATA TimeStamp = %f", GetEncodeTimeStamp()));
+      mState = ENCODE_TRACK;
+      break;
+    }
+
+    case ENCODE_TRACK: {
+      LOG(PR_LOG_DEBUG, ("ENCODE_TRACK TimeStamp = %f", GetEncodeTimeStamp()));
+      EncodedFrameContainer encodedData;
+      nsresult rv = NS_OK;
+      rv = WriteEncodedDataToMuxer(mAudioEncoder.get());
+      if (NS_FAILED(rv)) {
+        LOG(PR_LOG_ERROR, ("Error! Fail to write audio encoder data to muxer"));
+        break;
+      }
+      LOG(PR_LOG_DEBUG, ("Audio encoded TimeStamp = %f", GetEncodeTimeStamp()));
+      rv = WriteEncodedDataToMuxer(mVideoEncoder.get());
+      if (NS_FAILED(rv)) {
+        LOG(PR_LOG_ERROR, ("Fail to write video encoder data to muxer"));
+        break;
+      }
+      LOG(PR_LOG_DEBUG, ("Video encoded TimeStamp = %f", GetEncodeTimeStamp()));
+      // In audio only or video only case, let unavailable track's flag to be true.
+      bool isAudioCompleted = (mAudioEncoder && mAudioEncoder->IsEncodingComplete()) || !mAudioEncoder;
+      bool isVideoCompleted = (mVideoEncoder && mVideoEncoder->IsEncodingComplete()) || !mVideoEncoder;
+      rv = mWriter->GetContainerData(aOutputBufs,
+                                     isAudioCompleted && isVideoCompleted ?
                                      ContainerWriter::FLUSH_NEEDED : 0);
       if (NS_SUCCEEDED(rv)) {
         // Successfully get the copy of final container data from writer.
         reloop = false;
-        break;
       }
-
-      mState = (mAudioEncoder->IsEncodingComplete()) ? ENCODE_DONE : ENCODE_TRACK;
+      mState = (mWriter->IsWritingComplete()) ? ENCODE_DONE : ENCODE_TRACK;
+      LOG(PR_LOG_DEBUG, ("END ENCODE_TRACK TimeStamp = %f "
+          "mState = %d aComplete %d vComplete %d",
+          GetEncodeTimeStamp(), mState, isAudioCompleted, isVideoCompleted));
       break;
     }
 
     case ENCODE_DONE:
-      LOG("MediaEncoder has been shutdown.");
+    case ENCODE_ERROR:
+      LOG(PR_LOG_DEBUG, ("MediaEncoder has been shutdown."));
       mShutdown = true;
       reloop = false;
       break;
-
     default:
-      MOZ_NOT_REACHED("Invalid encode state");
-      break;
+      MOZ_CRASH("Invalid encode state");
     }
   }
 }
+
+nsresult
+MediaEncoder::WriteEncodedDataToMuxer(TrackEncoder *aTrackEncoder)
+{
+  if (aTrackEncoder == nullptr) {
+    return NS_OK;
+  }
+  if (aTrackEncoder->IsEncodingComplete()) {
+    return NS_OK;
+  }
+  EncodedFrameContainer encodedVideoData;
+  nsresult rv = aTrackEncoder->GetEncodedTrack(encodedVideoData);
+  if (NS_FAILED(rv)) {
+    // Encoding might be canceled.
+    LOG(PR_LOG_ERROR, ("Error! Fail to get encoded data from video encoder."));
+    mState = ENCODE_ERROR;
+    return rv;
+  }
+  rv = mWriter->WriteEncodedTrack(encodedVideoData,
+                                  aTrackEncoder->IsEncodingComplete() ?
+                                  ContainerWriter::END_OF_STREAM : 0);
+  if (NS_FAILED(rv)) {
+    LOG(PR_LOG_ERROR, ("Error! Fail to write encoded video track to the media container."));
+    mState = ENCODE_ERROR;
+  }
+  return rv;
+}
+
+nsresult
+MediaEncoder::CopyMetadataToMuxer(TrackEncoder *aTrackEncoder)
+{
+  if (aTrackEncoder == nullptr) {
+    return NS_OK;
+  }
+  nsRefPtr<TrackMetadataBase> meta = aTrackEncoder->GetMetadata();
+  if (meta == nullptr) {
+    LOG(PR_LOG_ERROR, ("Error! metadata = null"));
+    mState = ENCODE_ERROR;
+    return NS_ERROR_ABORT;
+  }
+
+  nsresult rv = mWriter->SetMetadata(meta);
+  if (NS_FAILED(rv)) {
+   LOG(PR_LOG_ERROR, ("Error! SetMetadata fail"));
+   mState = ENCODE_ERROR;
+  }
+  return rv;
+}
+
+#ifdef MOZ_WEBM_ENCODER
+bool
+MediaEncoder::IsWebMEncoderEnabled()
+{
+  return Preferences::GetBool("media.encoder.webm.enabled");
+}
+#endif
+
+#ifdef MOZ_OMX_ENCODER
+bool
+MediaEncoder::IsOMXEncoderEnabled()
+{
+  return Preferences::GetBool("media.encoder.omx.enabled");
+}
+#endif
 
 }

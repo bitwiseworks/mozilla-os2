@@ -8,14 +8,12 @@
 /*
  * Double hashing, a la Knuth 6.
  */
+#include "mozilla/fallible.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Types.h"
 #include "nscore.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#if defined(__GNUC__) && defined(__i386__) && !defined(XP_OS2)
+#if defined(__GNUC__) && defined(__i386__)
 #define PL_DHASH_FASTCALL __attribute__ ((regparm (3),stdcall))
 #elif defined(XP_WIN)
 #define PL_DHASH_FASTCALL __fastcall
@@ -23,13 +21,15 @@ extern "C" {
 #define PL_DHASH_FASTCALL
 #endif
 
-#ifdef DEBUG_XXXbrendan
-#define PL_DHASHMETER 1
-#endif
-
-/* Table size limit, do not equal or exceed (see min&maxAlphaFrac, below). */
-#undef PL_DHASH_SIZE_LIMIT
-#define PL_DHASH_SIZE_LIMIT     ((uint32_t)1 << 24)
+/*
+ * Table size limit; do not exceed.  The max capacity used to be 1<<23 but that
+ * occasionally that wasn't enough.  Making it much bigger than 1<<26 probably
+ * isn't worthwhile -- tables that big are kind of ridiculous.  Also, the
+ * growth operation will (deliberately) fail if |capacity * entrySize|
+ * overflows a uint32_t, and entrySize is always at least 8 bytes.
+ */
+#undef PL_DHASH_MAX_SIZE
+#define PL_DHASH_MAX_SIZE     ((uint32_t)1 << 26)
 
 /* Minimum table size, or gross entry count (net is at most .75 loaded). */
 #ifndef PL_DHASH_MIN_SIZE
@@ -71,7 +71,7 @@ typedef struct PLDHashTableOps  PLDHashTableOps;
  * maintained automatically by PL_DHashTableOperate -- users should never set
  * it, and its only uses should be via the entry macros below.
  *
- * The PL_DHASH_ENTRY_IS_LIVE macro tests whether entry is neither free nor
+ * The PL_DHASH_ENTRY_IS_LIVE function tests whether entry is neither free nor
  * removed.  An entry may be either busy or free; if busy, it may be live or
  * removed.  Consumers of this API should not access members of entries that
  * are not live.
@@ -85,9 +85,23 @@ struct PLDHashEntryHdr {
     PLDHashNumber       keyHash;        /* every entry must begin like this */
 };
 
-#define PL_DHASH_ENTRY_IS_FREE(entry)   ((entry)->keyHash == 0)
-#define PL_DHASH_ENTRY_IS_BUSY(entry)   (!PL_DHASH_ENTRY_IS_FREE(entry))
-#define PL_DHASH_ENTRY_IS_LIVE(entry)   ((entry)->keyHash >= 2)
+MOZ_ALWAYS_INLINE bool
+PL_DHASH_ENTRY_IS_FREE(PLDHashEntryHdr* entry)
+{
+    return entry->keyHash == 0;
+}
+
+MOZ_ALWAYS_INLINE bool
+PL_DHASH_ENTRY_IS_BUSY(PLDHashEntryHdr* entry)
+{
+    return !PL_DHASH_ENTRY_IS_FREE(entry);
+}
+
+MOZ_ALWAYS_INLINE bool
+PL_DHASH_ENTRY_IS_LIVE(PLDHashEntryHdr* entry)
+{
+    return entry->keyHash >= 2;
+}
 
 /*
  * A PLDHashTable is currently 8 words (without the PL_DHASHMETER overhead)
@@ -144,7 +158,7 @@ struct PLDHashEntryHdr {
  * assuming esize is not too large (in which case, chaining should probably be
  * used for any alpha).  For esize=2 and k=3, we want alpha >= .2; for esize=3
  * and k=2, we want alpha >= .4.  For k=4, esize could be 6, and alpha >= .5
- * would still obtain.  See the PL_DHASH_MIN_ALPHA macro further below.
+ * would still obtain.
  *
  * The current implementation uses a configurable lower bound on alpha, which
  * defaults to .25, when deciding to shrink the table (while still respecting
@@ -165,8 +179,13 @@ struct PLDHashTable {
     const PLDHashTableOps *ops;         /* virtual operations, see below */
     void                *data;          /* ops- and instance-specific data */
     int16_t             hashShift;      /* multiplicative hash shift */
-    uint8_t             maxAlphaFrac;   /* 8-bit fixed point max alpha */
-    uint8_t             minAlphaFrac;   /* 8-bit fixed point min alpha */
+    /*
+     * |recursionLevel| is only used in debug builds, but is present in opt
+     * builds to avoid binary compatibility problems when mixing DEBUG and
+     * non-DEBUG components.  (Actually, even if it were removed,
+     * sizeof(PLDHashTable) wouldn't change, due to struct padding.)
+     */
+    uint16_t            recursionLevel; /* used to detect unsafe re-entry */
     uint32_t            entrySize;      /* number of bytes in an entry */
     uint32_t            entryCount;     /* number of entries in table */
     uint32_t            removedCount;   /* removed entry sentinels in table */
@@ -381,57 +400,22 @@ PL_DHashTableDestroy(PLDHashTable *table);
  * Initialize table with ops, data, entrySize, and capacity.  Capacity is a
  * guess for the smallest table size at which the table will usually be less
  * than 75% loaded (the table will grow or shrink as needed; capacity serves
- * only to avoid inevitable early growth from PL_DHASH_MIN_SIZE).
+ * only to avoid inevitable early growth from PL_DHASH_MIN_SIZE).  This will
+ * crash if it can't allocate enough memory, or if entrySize or capacity are
+ * too large.
  */
-NS_COM_GLUE bool
+NS_COM_GLUE void
 PL_DHashTableInit(PLDHashTable *table, const PLDHashTableOps *ops, void *data,
                   uint32_t entrySize, uint32_t capacity);
 
 /*
- * Set maximum and minimum alpha for table.  The defaults are 0.75 and .25.
- * maxAlpha must be in [0.5, 0.9375] for the default PL_DHASH_MIN_SIZE; or if
- * MinSize=PL_DHASH_MIN_SIZE <= 256, in [0.5, (float)(MinSize-1)/MinSize]; or
- * else in [0.5, 255.0/256].  minAlpha must be in [0, maxAlpha / 2), so that
- * we don't shrink on the very next remove after growing a table upon adding
- * an entry that brings entryCount past maxAlpha * tableSize.
+ * Initialize table. This is the same as PL_DHashTableInit, except that it
+ * returns a boolean indicating success, rather than crashing on failure.
  */
-NS_COM_GLUE void
-PL_DHashTableSetAlphaBounds(PLDHashTable *table,
-                            float maxAlpha,
-                            float minAlpha);
-
-/*
- * Call this macro with k, the number of pointer-sized words wasted per entry
- * under chaining, to compute the minimum alpha at which double hashing still
- * beats chaining.
- */
-#define PL_DHASH_MIN_ALPHA(table, k)                                          \
-    ((float)((table)->entrySize / sizeof(void *) - 1)                         \
-     / ((table)->entrySize / sizeof(void *) + (k)))
-
-/*
- * Default max/min alpha, and macros to compute the value for the |capacity|
- * parameter to PL_NewDHashTable and PL_DHashTableInit, given default or any
- * max alpha, such that adding entryCount entries right after initializing the
- * table will not require a reallocation (so PL_DHASH_ADD can't fail for those
- * PL_DHashTableOperate calls).
- *
- * NB: PL_DHASH_CAP is a helper macro meant for use only in PL_DHASH_CAPACITY.
- * Don't use it directly!
- */
-#define PL_DHASH_DEFAULT_MAX_ALPHA 0.75
-#define PL_DHASH_DEFAULT_MIN_ALPHA 0.25
-
-#define PL_DHASH_CAP(entryCount, maxAlpha)                                    \
-    ((uint32_t)((double)(entryCount) / (maxAlpha)))
-
-#define PL_DHASH_CAPACITY(entryCount, maxAlpha)                               \
-    (PL_DHASH_CAP(entryCount, maxAlpha) +                                     \
-     (((PL_DHASH_CAP(entryCount, maxAlpha) * (uint8_t)(0x100 * (maxAlpha)))     \
-       >> 8) < (entryCount)))
-
-#define PL_DHASH_DEFAULT_CAPACITY(entryCount)                                 \
-    PL_DHASH_CAPACITY(entryCount, PL_DHASH_DEFAULT_MAX_ALPHA)
+NS_COM_GLUE bool
+PL_DHashTableInit(PLDHashTable *table, const PLDHashTableOps *ops, void *data,
+                  uint32_t entrySize, uint32_t capacity,
+                  const mozilla::fallible_t& ) MOZ_WARN_UNUSED_RESULT;
 
 /*
  * Finalize table's data, free its entry storage using table->ops->freeTable,
@@ -549,20 +533,20 @@ PL_DHashTableEnumerate(PLDHashTable *table, PLDHashEnumerator etor, void *arg);
 
 typedef size_t
 (* PLDHashSizeOfEntryExcludingThisFun)(PLDHashEntryHdr *hdr,
-                                       nsMallocSizeOfFun mallocSizeOf,
+                                       mozilla::MallocSizeOf mallocSizeOf,
                                        void *arg);
 
 /**
  * Measure the size of the table's entry storage, and if
- * |sizeOfEntryExcludingThis| is non-NULL, measure the size of things pointed
- * to by entries.  Doesn't measure |ops| because it's often shared between
- * tables, nor |data| because it's opaque.
+ * |sizeOfEntryExcludingThis| is non-nullptr, measure the size of things
+ * pointed to by entries.  Doesn't measure |ops| because it's often shared
+ * between tables, nor |data| because it's opaque.
  */
 NS_COM_GLUE size_t
 PL_DHashTableSizeOfExcludingThis(const PLDHashTable *table,
                                  PLDHashSizeOfEntryExcludingThisFun sizeOfEntryExcludingThis,
-                                 nsMallocSizeOfFun mallocSizeOf,
-                                 void *arg = NULL);
+                                 mozilla::MallocSizeOf mallocSizeOf,
+                                 void *arg = nullptr);
 
 /**
  * Like PL_DHashTableSizeOfExcludingThis, but includes sizeof(*this).
@@ -570,8 +554,8 @@ PL_DHashTableSizeOfExcludingThis(const PLDHashTable *table,
 NS_COM_GLUE size_t
 PL_DHashTableSizeOfIncludingThis(const PLDHashTable *table,
                                  PLDHashSizeOfEntryExcludingThisFun sizeOfEntryExcludingThis,
-                                 nsMallocSizeOfFun mallocSizeOf,
-                                 void *arg = NULL);
+                                 mozilla::MallocSizeOf mallocSizeOf,
+                                 void *arg = nullptr);
 
 #ifdef DEBUG
 /**
@@ -597,10 +581,6 @@ PL_DHashMarkTableImmutable(PLDHashTable *table);
 
 NS_COM_GLUE void
 PL_DHashTableDumpMeter(PLDHashTable *table, PLDHashEnumerator dump, FILE *fp);
-#endif
-
-#ifdef __cplusplus
-}
 #endif
 
 #endif /* pldhash_h___ */

@@ -59,6 +59,7 @@
         this.timeout = this._prefs.getIntPref("delay");
         this._formattingEnabled = this._prefs.getBoolPref("formatting.enabled");
         this._mayTrimURLs = this._prefs.getBoolPref("trimURLs");
+        this._ignoreNextSelect = false;
 
         this.inputField.controllers.insertControllerAt(0, this._copyCutController);
         this.inputField.addEventListener("mousedown", this, false);
@@ -66,6 +67,12 @@
         this.inputField.addEventListener("mouseout", this, false);
         this.inputField.addEventListener("overflow", this, false);
         this.inputField.addEventListener("underflow", this, false);
+
+        try {
+          if (this._prefs.getBoolPref("unifiedcomplete")) {
+            this.setAttribute("autocompletesearch", "unifiedcomplete");
+          }
+        } catch (ex) {}
 
         const kXULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
         var textBox = document.getAnonymousElementByAttribute(this,
@@ -136,7 +143,9 @@
           this._value = aValue;
           var returnValue = aValue;
           var action = this._parseActionUrl(aValue);
-          if (action) {
+          // Don't put back the action if we are invoked while override actions
+          // is active.
+          if (action && this._numNoActionsKeys <= 0) {
             returnValue = action.param;
             this.setAttribute("actiontype", action.type);
           } else {
@@ -258,6 +267,9 @@
           var postData = null;
 
           var action = this._parseActionUrl(url);
+          let lastLocationChange = gBrowser.selectedBrowser.lastLocationChange;
+
+          let matchLastLocationChange = true;
           if (action) {
             url = action.param;
             if (this.hasAttribute("actiontype")) {
@@ -270,86 +282,98 @@
               }
               return;
             }
+            continueOperation.call(this);
           }
           else {
-            [url, postData, mayInheritPrincipal] = this._canonizeURL(aTriggeringEvent);
-            if (!url)
-              return;
+            this._canonizeURL(aTriggeringEvent, response => {
+              [url, postData, mayInheritPrincipal] = response;
+              if (url) {
+                matchLastLocationChange = (lastLocationChange ==
+                                           gBrowser.selectedBrowser.lastLocationChange);
+                continueOperation.call(this);
+              }
+            });
           }
 
-          this.value = url;
-          gBrowser.userTypedValue = url;
-          try {
-            addToUrlbarHistory(url);
-          } catch (ex) {
-            // Things may go wrong when adding url to session history,
-            // but don't let that interfere with the loading of the url.
-            Cu.reportError(ex);
-          }
-
-          function loadCurrent() {
-            let flags = Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP;
-            // Pass LOAD_FLAGS_DISALLOW_INHERIT_OWNER to prevent any loads from
-            // inheriting the currently loaded document's principal, unless this
-            // URL is marked as safe to inherit (e.g. came from a bookmark
-            // keyword).
-            if (!mayInheritPrincipal)
-              flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_OWNER;
-            // If the value wasn't typed, we know that we decoded the value as
-            // UTF-8 (see losslessDecodeURI)
-            if (!this.valueIsTyped)
-              flags |= Ci.nsIWebNavigation.LOAD_FLAGS_URI_IS_UTF8;
-            gBrowser.loadURIWithFlags(url, flags, null, null, postData);
-          }
-
-          // Focus the content area before triggering loads, since if the load
-          // occurs in a new tab, we want focus to be restored to the content
-          // area when the current tab is re-selected.
-          gBrowser.selectedBrowser.focus();
-
-          let isMouseEvent = aTriggeringEvent instanceof MouseEvent;
-          let altEnter = !isMouseEvent && aTriggeringEvent && aTriggeringEvent.altKey;
-
-          if (altEnter) {
-            // XXX This was added a long time ago, and I'm not sure why it is
-            // necessary. Alt+Enter's default action might cause a system beep,
-            // or something like that?
-            aTriggeringEvent.preventDefault();
-            aTriggeringEvent.stopPropagation();
-          }
-
-          // If the current tab is empty, ignore Alt+Enter (just reuse this tab)
-          altEnter = altEnter && !isTabEmpty(gBrowser.selectedTab);
-
-          if (isMouseEvent || altEnter) {
-            // Use the standard UI link behaviors for clicks or Alt+Enter
-            let where = "tab";
-            if (isMouseEvent)
-              where = whereToOpenLink(aTriggeringEvent, false, false);
-
-            if (where == "current") {
-              loadCurrent();
-            } else {
-              this.handleRevert();
-              let params = { allowThirdPartyFixup: true,
-                             postData: postData,
-                             initiatingDoc: document };
-              if (!this.valueIsTyped)
-                params.isUTF8 = true;
-              openUILinkIn(url, where, params);
+          function continueOperation()
+          {
+            this.value = url;
+            gBrowser.userTypedValue = url;
+            try {
+              addToUrlbarHistory(url);
+            } catch (ex) {
+              // Things may go wrong when adding url to session history,
+              // but don't let that interfere with the loading of the url.
+              Cu.reportError(ex);
             }
-          } else {
-            loadCurrent();
+
+            function loadCurrent() {
+              let webnav = Ci.nsIWebNavigation;
+              let flags = webnav.LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP |
+                          webnav.LOAD_FLAGS_FIXUP_SCHEME_TYPOS;
+              // Pass LOAD_FLAGS_DISALLOW_INHERIT_OWNER to prevent any loads from
+              // inheriting the currently loaded document's principal, unless this
+              // URL is marked as safe to inherit (e.g. came from a bookmark
+              // keyword).
+              if (!mayInheritPrincipal)
+                flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_OWNER;
+              gBrowser.loadURIWithFlags(url, flags, null, null, postData);
+            }
+
+            // Focus the content area before triggering loads, since if the load
+            // occurs in a new tab, we want focus to be restored to the content
+            // area when the current tab is re-selected.
+            gBrowser.selectedBrowser.focus();
+
+            let isMouseEvent = aTriggeringEvent instanceof MouseEvent;
+            let altEnter = !isMouseEvent && aTriggeringEvent && aTriggeringEvent.altKey;
+
+            if (altEnter) {
+              // XXX This was added a long time ago, and I'm not sure why it is
+              // necessary. Alt+Enter's default action might cause a system beep,
+              // or something like that?
+              aTriggeringEvent.preventDefault();
+              aTriggeringEvent.stopPropagation();
+            }
+
+            // If the current tab is empty, ignore Alt+Enter (just reuse this tab)
+            altEnter = altEnter && !isTabEmpty(gBrowser.selectedTab);
+
+            if (isMouseEvent || altEnter) {
+              // Use the standard UI link behaviors for clicks or Alt+Enter
+              let where = "tab";
+              if (isMouseEvent)
+                where = whereToOpenLink(aTriggeringEvent, false, false);
+
+              if (where == "current") {
+                if (matchLastLocationChange) {
+                  loadCurrent();
+                }
+              } else {
+                this.handleRevert();
+                let params = { allowThirdPartyFixup: true,
+                               postData: postData,
+                               initiatingDoc: document };
+                openUILinkIn(url, where, params);
+              }
+            } else {
+              if (matchLastLocationChange) {
+                loadCurrent();
+              }
+            }
           }
         ]]></body>
       </method>
 
       <method name="_canonizeURL">
         <parameter name="aTriggeringEvent"/>
+        <parameter name="aCallback"/>
         <body><![CDATA[
           var url = this.value;
-          if (!url)
-            return ["", null, false];
+          if (!url) {
+            aCallback(["", null, false]);
+            return;
+          }
 
           // Only add the suffix when the URL bar value isn't already "URL-like",
           // and only if we get a keyboard event, to match user expectations.
@@ -402,11 +426,9 @@
             }
           }
 
-          var postData = {};
-          var mayInheritPrincipal = { value: false };
-          url = getShortcutOrURI(url, postData, mayInheritPrincipal);
-
-          return [url, postData.value, mayInheritPrincipal.value];
+          getShortcutOrURIAndPostData(url, data => {
+            aCallback([data.url, data.postData, data.mayInheritPrincipal]);
+          });
         ]]></body>
       </method>
 
@@ -484,7 +506,7 @@
 
           let uri;
           try {
-            uri = uriFixup.createFixupURI(inputVal, Ci.nsIURIFixup.FIXUP_FLAG_USE_UTF8);
+            uri = uriFixup.createFixupURI(inputVal, Ci.nsIURIFixup.FIXUP_FLAG_NONE);
           } catch (e) {}
           if (!uri)
             return selectedVal;
@@ -585,6 +607,14 @@
               case "trimURLs":
                 this._mayTrimURLs = this._prefs.getBoolPref(aData);
                 break;
+              case "unifiedcomplete":
+                let useUnifiedComplete = false;
+                try {
+                  useUnifiedComplete = this._prefs.getBoolPref(aData);
+                } catch (ex) {}
+                this.setAttribute("autocompletesearch",
+                                  useUnifiedComplete ? "unifiedcomplete"
+                                                     : "urlinline history");
             }
           }
         ]]></body>
@@ -672,6 +702,15 @@
             this.setAttribute("actiontype", action.type);
         ]]></body>
       </method>
+
+      <method name="selectTextRange">
+        <parameter name="aStartIndex"/>
+        <parameter name="aEndIndex"/>
+        <body><![CDATA[
+          this._ignoreNextSelect = true;
+          this.inputField.setSelectionRange(aStartIndex, aEndIndex);
+        ]]></body>
+      </method>
     </implementation>
 
     <handlers>
@@ -733,6 +772,15 @@
       <handler event="dragover" phase="capturing" action="this.onDragOver(event, this);"/>
       <handler event="drop" phase="capturing" action="this.onDrop(event, this);"/>
       <handler event="select"><![CDATA[
+        if (this._ignoreNextSelect) {
+          // If this select event is coming from autocomplete's selectTextRange,
+          // then we don't need to adjust what's on the selection keyboard here,
+          // but make sure to reset the flag since this should be a one-time
+          // suppression.
+          this._ignoreNextSelect = false;
+          return;
+        }
+
         if (!Cc["@mozilla.org/widget/clipboard;1"]
                .getService(Ci.nsIClipboard)
                .supportsSelectionClipboard())
@@ -927,7 +975,7 @@
             <xul:menupopup anonid="menupopup"
                            xbl:inherits="oncommand=menucommand">
               <children/>
-              <xul:menuitem class="menuitem-iconic popup-notification-closeitem"
+              <xul:menuitem class="menuitem-iconic popup-notification-closeitem close-icon"
                             label="&closeNotificationItem.label;"
                             xbl:inherits="oncommand=closeitemcommand"/>
             </xul:menupopup>
@@ -936,7 +984,7 @@
       </xul:vbox>
       <xul:vbox pack="start">
         <xul:toolbarbutton anonid="closebutton"
-                           class="messageCloseButton popup-notification-closebutton tabbable"
+                           class="messageCloseButton close-icon popup-notification-closebutton tabbable"
                            xbl:inherits="oncommand=closebuttoncommand"
                            tooltiptext="&closeNotification.tooltip;"/>
       </xul:vbox>
@@ -1159,7 +1207,7 @@
             <xul:menupopup anonid="menupopup"
                            xbl:inherits="oncommand=menucommand">
               <children/>
-              <xul:menuitem class="menuitem-iconic popup-notification-closeitem"
+              <xul:menuitem class="menuitem-iconic popup-notification-closeitem close-icon"
                             label="&closeNotificationItem.label;"
                             xbl:inherits="oncommand=closeitemcommand"/>
             </xul:menupopup>
@@ -1168,7 +1216,7 @@
       </xul:vbox>
       <xul:vbox pack="start">
         <xul:toolbarbutton anonid="closebutton"
-                           class="messageCloseButton popup-notification-closebutton tabbable"
+                           class="messageCloseButton close-icon popup-notification-closebutton tabbable"
                            xbl:inherits="oncommand=closebuttoncommand"
                            tooltiptext="&closeNotification.tooltip;"/>
       </xul:vbox>
@@ -1489,7 +1537,7 @@
   </binding>
 
   <binding id="click-to-play-plugins-notification" extends="chrome://global/content/bindings/notification.xml#popup-notification">
-    <content align="start" class="click-to-play-plugins-notification-content">
+    <content align="start" style="width: &pluginNotification.width;;">
       <xul:vbox flex="1" align="stretch" class="popup-notification-main-box"
                 xbl:inherits="popupid">
         <xul:hbox class="click-to-play-plugins-notification-description-box" flex="1" align="start">
@@ -1498,7 +1546,7 @@
             <xul:label class="text-link click-to-play-plugins-notification-link" anonid="click-to-play-plugins-notification-link" />
           </xul:description>
           <xul:toolbarbutton anonid="closebutton"
-                             class="messageCloseButton popup-notification-closebutton tabbable"
+                             class="messageCloseButton popup-notification-closebutton tabbable close-icon"
                              xbl:inherits="oncommand=closebuttoncommand"
                              tooltiptext="&closeNotification.tooltip;"/>
         </xul:hbox>
@@ -1522,7 +1570,7 @@
                   class="click-to-play-plugins-notification-button-container"
                   pack="center" align="center">
           <xul:button anonid="primarybutton"
-                      class="click-to-play-popup-button primary-button"
+                      class="click-to-play-popup-button"
                       oncommand="document.getBindingParent(this)._onButton(this)"
                       flex="1"/>
           <xul:button anonid="secondarybutton"
@@ -1557,14 +1605,20 @@
       <field name="_items">[]</field>
       <constructor><![CDATA[
         const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-        for (let action of this.notification.options.centerActions) {
+        let sortedActions = [];
+        for (let action of this.notification.options.pluginData.values()) {
+          sortedActions.push(action);
+        }
+        sortedActions.sort((a, b) => a.pluginName.localeCompare(b.pluginName));
+
+        for (let action of sortedActions) {
           let item = document.createElementNS(XUL_NS, "row");
           item.setAttribute("class", "plugin-popupnotification-centeritem");
           item.action = action;
           this.appendChild(item);
           this._items.push(item);
         }
-        switch (this.notification.options.centerActions.length) {
+        switch (this._items.length) {
           case 0:
             PopupNotifications._dismiss();
             break;
@@ -1629,7 +1683,7 @@
       </method>
       <method name="_setupSingleState">
         <body><![CDATA[
-          var action = this.notification.options.centerActions[0];
+          var action = this._items[0].action;
           var host = action.pluginPermissionHost;
 
           let label, linkLabel, linkUrl, button1, button2;
@@ -1793,7 +1847,7 @@
       <method name="_singleActivateNow">
         <body><![CDATA[
           gPluginHandler._updatePluginPermission(this.notification,
-            this.notification.options.centerActions[0],
+            this._items[0].action,
             "allownow");
           this._cancel();
         ]]></body>
@@ -1801,7 +1855,7 @@
       <method name="_singleBlock">
         <body><![CDATA[
           gPluginHandler._updatePluginPermission(this.notification,
-            this.notification.options.centerActions[0],
+            this._items[0].action,
             "block");
             this._cancel();
         ]]></body>
@@ -1809,7 +1863,7 @@
       <method name="_singleActivateAlways">
         <body><![CDATA[
           gPluginHandler._updatePluginPermission(this.notification,
-            this.notification.options.centerActions[0],
+            this._items[0].action,
             "allowalways");
           this._cancel();
         ]]></body>
@@ -1817,7 +1871,7 @@
       <method name="_singleContinue">
         <body><![CDATA[
           gPluginHandler._updatePluginPermission(this.notification,
-            this.notification.options.centerActions[0],
+            this._items[0].action,
             "continue");
           this._cancel();
         ]]></body>
@@ -1859,7 +1913,6 @@
     <handlers>
       <!-- The _accept method checks for .defaultPrevented so that if focus is in a button,
            enter activates the button and not this default action -->
-      <handler event="keypress" keycode="VK_ENTER" group="system" action="this._accept(event);"/>
       <handler event="keypress" keycode="VK_RETURN" group="system" action="this._accept(event);"/>
     </handlers>
   </binding>
@@ -2011,7 +2064,7 @@
                              onclick="document.getBindingParent(this).onLinkClick();"/>
           </xul:description>
         </xul:hbox>
-        <xul:toolbarbutton class="panel-promo-closebutton"
+        <xul:toolbarbutton class="panel-promo-closebutton close-icon"
                            oncommand="document.getBindingParent(this).onCloseButtonCommand();"
                            tooltiptext="&closeNotification.tooltip;"/>
       </xul:hbox>
@@ -2044,21 +2097,10 @@
       </field>
       <property name="_viewsLeftMap">
         <getter><![CDATA[
-          let viewsLeftMap = {};
           try {
-            viewsLeftMap = JSON.parse(Services.prefs.getCharPref("browser.syncPromoViewsLeftMap"));
-          } catch (ex) {
-            // If the old preference exists, migrate it to the new one.
-            try {
-              let oldPref = Services.prefs.getIntPref("browser.syncPromoViewsLeft");
-              Services.prefs.clearUserPref("browser.syncPromoViewsLeft");
-              viewsLeftMap.bookmarks = oldPref;
-              viewsLeftMap.passwords = oldPref;
-              Services.prefs.setCharPref("browser.syncPromoViewsLeftMap",
-                                         JSON.stringify(viewsLeftMap));
-            } catch (ex2) {}
-          }
-          return viewsLeftMap;
+            return JSON.parse(Services.prefs.getCharPref("browser.syncPromoViewsLeftMap"));
+          } catch (ex) {}
+          return {};
         ]]></getter>
       </property>
       <property name="_viewsLeft">
@@ -2122,8 +2164,7 @@
       <method name="onLinkClick">
         <body><![CDATA[
           // Open a new selected tab and close the current panel.
-          gBrowser.loadOneTab(this._promolink.getAttribute("href"),
-                              { inBackground: false });
+          openUILinkIn(this._promolink.getAttribute("href"), "tab");
           this._panel.hidePopup();
         ]]></body>
       </method>
@@ -2186,12 +2227,14 @@
            extends="chrome://global/content/bindings/toolbarbutton.xml#toolbarbutton">
     <content>
       <children includes="observes|template|menupopup|panel|tooltip"/>
-      <xul:hbox class="toolbarbutton-badge-container" align="start" pack="end" flex="1">
+      <xul:hbox class="toolbarbutton-badge-container" align="start" pack="end">
         <xul:hbox class="toolbarbutton-badge" xbl:inherits="badge"/>
         <xul:image class="toolbarbutton-icon" xbl:inherits="validate,src=image,label"/>
       </xul:hbox>
       <xul:label class="toolbarbutton-text" crop="right" flex="1"
-                 xbl:inherits="value=label,accesskey,crop"/>
+                 xbl:inherits="value=label,accesskey,crop,wrap"/>
+      <xul:label class="toolbarbutton-multiline-text" flex="1"
+                 xbl:inherits="xbl:text=label,accesskey,wrap"/>
     </content>
   </binding>
 

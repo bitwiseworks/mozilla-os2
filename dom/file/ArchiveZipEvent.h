@@ -13,8 +13,6 @@
 #include "FileCommon.h"
 #include "zipstruct.h"
 
-#include "DictionaryHelpers.h"
-
 BEGIN_FILE_NAMESPACE
 
 /**
@@ -25,7 +23,7 @@ class ArchiveZipItem : public ArchiveItem
 public:
   ArchiveZipItem(const char* aFilename,
                  const ZipCentral& aCentralStruct,
-                 const nsAString& aEncoding);
+                 const nsACString& aEncoding);
   virtual ~ArchiveZipItem();
 
   nsresult GetFilename(nsString& aFilename) MOZ_OVERRIDE;
@@ -46,7 +44,7 @@ private: // data
   nsString mFilenameU;
   ZipCentral mCentralStruct;
 
-  nsString mEncoding;
+  nsCString mEncoding;
 };
 
 /**
@@ -56,12 +54,12 @@ class ArchiveReaderZipEvent : public ArchiveReaderEvent
 {
 public:
   ArchiveReaderZipEvent(ArchiveReader* aArchiveReader,
-                        const nsAString& aEncoding);
+                        const nsACString& aEncoding);
 
   nsresult Exec() MOZ_OVERRIDE;
 
 private:
-  nsString mEncoding;
+  nsCString mEncoding;
 };
 
 END_FILE_NAMESPACE

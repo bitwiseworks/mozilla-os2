@@ -5,7 +5,7 @@
  /*
   * ContentAreaObserver manages tracking the viewable area within the browser.
   * It also handles certain tasks like positioning of input elements within
-  * content when the viewable area changes. 
+  * content when the viewable area changes.
   *
   * ContentAreaObserver creates styles that content can apply and also fires
   * events when things change. The 'width' and 'height' properties of the
@@ -61,20 +61,23 @@ var ContentAreaObserver = {
     return this._getContentHeightForWindow(this.height);
   },
 
-  get contentTop () {
-    return Elements.toolbar.getBoundingClientRect().bottom;
-  },
-
   get viewableHeight() {
     return this._getViewableHeightForContent(this.contentHeight);
   },
 
   get isKeyboardOpened() {
-    return MetroUtils.keyboardVisible;
+    return Services.metro.keyboardVisible;
   },
 
   get isKeyboardTransitioning() {
     return this._deckTransitioning;
+  },
+
+  get viewstate() {
+    if (this.width < Services.prefs.getIntPref("browser.ui.snapped.maxWidth")) {
+      return "snapped";
+    }
+    return (this.height > this.width) ? "portrait" : "landscape";
   },
 
   /*
@@ -92,7 +95,7 @@ var ContentAreaObserver = {
     Services.obs.addObserver(this, "metro_softkeyboard_hidden", false);
 
     // setup initial values for browser form repositioning
-    this._shiftBrowserDeck(0);
+    this.shiftBrowserDeck(0);
 
     // initialize our custom width and height styles
     this._initStyles();
@@ -114,16 +117,19 @@ var ContentAreaObserver = {
     let newWidth = width || this.width;
     let newHeight = height || this.height;
 
-    if (newHeight == oldHeight && newWidth == oldWidth)
+    if (newHeight == oldHeight && newWidth == oldWidth) {
       return;
+    }
 
     this.styles["window-width"].width = newWidth + "px";
     this.styles["window-width"].maxWidth = newWidth + "px";
     this.styles["window-height"].height = newHeight + "px";
     this.styles["window-height"].maxHeight = newHeight + "px";
 
+    this._updateViewState();
+
     this.updateContentArea(newWidth, this._getContentHeightForWindow(newHeight));
-    this._disatchBrowserEvent("SizeChanged");
+    this._dispatchBrowserEvent("SizeChanged");
   },
 
   updateContentArea: function cao_updateContentArea (width, height) {
@@ -133,8 +139,9 @@ var ContentAreaObserver = {
     let newWidth = width || this.width;
     let newHeight = height || this.contentHeight;
 
-    if (newHeight == oldHeight && newWidth == oldWidth)
+    if (newHeight == oldHeight && newWidth == oldWidth) {
       return;
+    }
 
     this.styles["content-height"].height = newHeight + "px";
     this.styles["content-height"].maxHeight = newHeight + "px";
@@ -142,7 +149,7 @@ var ContentAreaObserver = {
     this.styles["content-width"].maxWidth = newWidth + "px";
 
     this.updateViewableArea(newWidth, this._getViewableHeightForContent(newHeight));
-    this._disatchBrowserEvent("ContentSizeChanged");
+    this._dispatchBrowserEvent("ContentSizeChanged");
   },
 
   updateViewableArea: function cao_updateViewableArea (width, height) {
@@ -152,8 +159,9 @@ var ContentAreaObserver = {
     let newWidth = width || this.width;
     let newHeight = height || this.viewableHeight;
 
-    if (newHeight == oldHeight && newWidth == oldWidth)
+    if (newHeight == oldHeight && newWidth == oldWidth) {
       return;
+    }
 
     this.styles["viewable-height"].height = newHeight + "px";
     this.styles["viewable-height"].maxHeight = newHeight + "px";
@@ -166,18 +174,15 @@ var ContentAreaObserver = {
     // these are hidden.
     BrowserUI._updateButtons();
 
-    this._disatchBrowserEvent("ViewableSizeChanged");
+    this._dispatchBrowserEvent("ViewableSizeChanged");
   },
 
   updateAppBarPosition: function updateAppBarPosition(aForceDown) {
     // Adjust the app and find bar position above the soft keyboard
-    let navBar = document.getElementById("navbar");
-    let contextAppBar = document.getElementById("contextappbar");
-    let findBar = document.getElementById("content-navigator");
-    let keyboardHeight = aForceDown ? 0 : MetroUtils.keyboardHeight;
-    navBar.style.bottom = keyboardHeight + "px";
-    contextAppBar.style.bottom = keyboardHeight + "px";
-    findBar.style.bottom = keyboardHeight + "px";
+    let keyboardHeight = aForceDown ? 0 : Services.metro.keyboardHeight;
+    Elements.navbar.style.bottom = keyboardHeight + "px";
+    Elements.contextappbar.style.bottom = keyboardHeight + "px";
+    Elements.findbar.style.bottom = keyboardHeight + "px";
   },
 
   /*
@@ -190,8 +195,9 @@ var ContentAreaObserver = {
   },
 
   onBrowserCreated: function onBrowserCreated(aBrowser) {
-    aBrowser.classList.add("content-width");
-    aBrowser.classList.add("content-height");
+    let notificationBox = aBrowser.parentNode.parentNode;
+    notificationBox.classList.add("content-width");
+    notificationBox.classList.add("content-height");
   },
 
   /*
@@ -208,23 +214,25 @@ var ContentAreaObserver = {
     this.updateViewableArea();
 
     if (!aNewState) {
-      this._shiftBrowserDeck(0);
+      this.shiftBrowserDeck(0);
       return;
     }
 
     // Request info about the target form element to see if we
     // need to reposition the browser above the keyboard.
-    Browser.selectedBrowser.messageManager.sendAsyncMessage("Browser:RepositionInfoRequest", {
-      viewHeight: this.viewableHeight,
-    });
+    if (SelectionHelperUI.layerMode === 2 /*kContentLayer*/) {
+      Browser.selectedBrowser.messageManager.sendAsyncMessage("Browser:RepositionInfoRequest", {
+        viewHeight: this.viewableHeight,
+      });
+    }
   },
 
   _onRepositionResponse: function _onRepositionResponse(aJsonMsg) {
     if (!aJsonMsg.reposition || !this.isKeyboardOpened) {
-      this._shiftBrowserDeck(0);
+      this.shiftBrowserDeck(0);
       return;
     }
-    this._shiftBrowserDeck(aJsonMsg.raiseContent);
+    this.shiftBrowserDeck(aJsonMsg.raiseContent);
   },
 
   observe: function cao_observe(aSubject, aTopic, aData) {
@@ -271,7 +279,16 @@ var ContentAreaObserver = {
    * Internal helpers
    */
 
-  _shiftBrowserDeck: function _shiftBrowserDeck(aAmount) {
+  _updateViewState: function (aState) {
+    let oldViewstate = Elements.windowState.getAttribute("viewstate");
+    let viewstate = aState || this.viewstate;
+    if (viewstate != oldViewstate) {
+      Elements.windowState.setAttribute("viewstate", viewstate);
+      Services.obs.notifyObservers(null, "metro_viewstate_changed", viewstate);
+    }
+  },
+
+  shiftBrowserDeck: function (aAmount) {
     if (aAmount == 0) {
       this._deckTransitioning = false;
       this._dispatchWindowEvent("KeyboardChanged", this.isKeyboardOpened);
@@ -303,7 +320,7 @@ var ContentAreaObserver = {
     window.dispatchEvent(event);
   },
 
-  _disatchBrowserEvent: function (aName, aDetail) {
+  _dispatchBrowserEvent: function (aName, aDetail) {
     setTimeout(function() {
       let event = document.createEvent("Events");
       event.initEvent(aName, true, false);
@@ -326,7 +343,7 @@ var ContentAreaObserver = {
   },
 
   _getViewableHeightForContent: function (contentHeight) {
-    let keyboardHeight = MetroUtils.keyboardHeight;
+    let keyboardHeight = Services.metro.keyboardHeight;
     return contentHeight - keyboardHeight;
   },
 

@@ -15,41 +15,39 @@
 #include <string>
 
 #include "gflags/gflags.h"
-#include "resource_manager.h"
-#include "voe_audio_processing.h"
-#include "voe_base.h"
-#include "voe_dtmf.h"
-#include "voe_errors.h"
-#include "voe_file.h"
-#include "voe_rtp_rtcp.h"
-#include "voe_test_defines.h"
-#include "voe_test_interface.h"
+#include "webrtc/voice_engine/include/voe_audio_processing.h"
+#include "webrtc/voice_engine/include/voe_base.h"
+#include "webrtc/voice_engine/include/voe_dtmf.h"
+#include "webrtc/voice_engine/include/voe_errors.h"
+#include "webrtc/voice_engine/include/voe_file.h"
+#include "webrtc/voice_engine/include/voe_rtp_rtcp.h"
+#include "webrtc/voice_engine/test/auto_test/resource_manager.h"
+#include "webrtc/voice_engine/test/auto_test/voe_test_common.h"
+#include "webrtc/voice_engine/test/auto_test/voe_test_interface.h"
 #ifdef WEBRTC_VOICE_ENGINE_CALL_REPORT_API
-#include "voe_call_report.h"
+#include "webrtc/voice_engine/include/voe_call_report.h"
 #endif
 #ifdef WEBRTC_VOICE_ENGINE_CODEC_API
-#include "voe_codec.h"
+#include "webrtc/voice_engine/include/voe_codec.h"
 #endif
 #ifdef WEBRTC_VOICE_ENGINE_ENCRYPTION_API
-#include "voe_encryption.h"
+#include "webrtc/voice_engine/include/voe_encryption.h"
 #endif
 #ifdef WEBRTC_VOICE_ENGINE_EXTERNAL_MEDIA_API
-#include "voe_external_media.h"
+#include "webrtc/voice_engine/include/voe_external_media.h"
 #endif
 #ifdef WEBRTC_VOICE_ENGINE_HARDWARE_API
-#include "voe_hardware.h"
+#include "webrtc/voice_engine/include/voe_hardware.h"
 #endif
-#ifdef WEBRTC_VOICE_ENGINE_NETWORK_API
-#include "voe_network.h"
-#endif
+#include "webrtc/voice_engine/include/voe_network.h"
 #ifdef WEBRTC_VOICE_ENGINE_VIDEO_SYNC_API
-#include "voe_video_sync.h"
+#include "webrtc/voice_engine/include/voe_video_sync.h"
 #endif
 #ifdef WEBRTC_VOICE_ENGINE_VOLUME_CONTROL_API
-#include "voe_volume_control.h"
+#include "webrtc/voice_engine/include/voe_volume_control.h"
 #endif
 
-#ifdef _TEST_NETEQ_STATS_
+#ifdef WEBRTC_VOICE_ENGINE_NETEQ_STATS_API
 namespace webrtc {
 class CriticalSectionWrapper;
 class ThreadWrapper;
@@ -107,9 +105,7 @@ class SubAPIManager {
 #ifdef WEBRTC_VOICE_ENGINE_NETEQ_STATS_API
       _netEqStats = true;
 #endif
-#ifdef WEBRTC_VOICE_ENGINE_NETWORK_API
       _network = true;
-#endif
 #ifdef WEBRTC_VOICE_ENGINE_RTP_RTCP_API
       _rtp_rtcp = true;
 #endif
@@ -203,11 +199,10 @@ class VoETestManager {
     return voe_call_report_;
   }
 
-#ifdef _TEST_NETEQ_STATS_
+#ifdef WEBRTC_VOICE_ENGINE_NETEQ_STATS_API
   VoENetEqStats* NetEqStatsPtr() const {
     return voe_neteq_stats_;
   }
-
 #endif
 
  private:
@@ -223,7 +218,7 @@ class VoETestManager {
   VoEFile*               voe_file_;
   VoEHardware*           voe_hardware_;
   VoENetwork*            voe_network_;
-#ifdef _TEST_NETEQ_STATS_
+#ifdef WEBRTC_VOICE_ENGINE_NETEQ_STATS_API
   VoENetEqStats*         voe_neteq_stats_;
 #endif
   VoERTP_RTCP*           voe_rtp_rtcp_;
@@ -234,6 +229,6 @@ class VoETestManager {
   ResourceManager        resource_manager_;
 };
 
-} // namespace voetest
+}  // namespace voetest
 
 #endif // WEBRTC_VOICE_ENGINE_VOE_STANDARD_TEST_H

@@ -11,25 +11,18 @@
 #include <android/log.h>
 
 #include "nsGeoPosition.h"
-#include "nsPoint.h"
 #include "nsRect.h"
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsIObserver.h"
+#include "nsIAndroidBridge.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/dom/Touch.h"
+#include "mozilla/EventForwards.h"
 #include "InputData.h"
 #include "Units.h"
 
 //#define FORCE_ALOG 1
-
-#ifndef ALOG
-#if defined(DEBUG) || defined(FORCE_ALOG)
-#define ALOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gecko" , ## args)
-#else
-#define ALOG(args...) ((void)0)
-#endif
-#endif
 
 class nsIAndroidDisplayport;
 class nsIAndroidViewport;
@@ -37,7 +30,6 @@ class nsIWidget;
 
 namespace mozilla {
 
-class AndroidGeckoLayerClient;
 class AutoLocalJNIFrame;
 
 void InitAndroidJavaWrappers(JNIEnv *jEnv);
@@ -75,10 +67,10 @@ private:
 class WrappedJavaObject {
 public:
     WrappedJavaObject() :
-        wrapped_obj(0)
+        wrapped_obj(nullptr)
     { }
 
-    WrappedJavaObject(jobject jobj) {
+    WrappedJavaObject(jobject jobj) : wrapped_obj(nullptr) {
         Init(jobj);
     }
 
@@ -87,7 +79,39 @@ public:
     }
 
     bool isNull() const {
-        return wrapped_obj == 0;
+        return wrapped_obj == nullptr;
+    }
+
+    jobject wrappedObject() const {
+        return wrapped_obj;
+    }
+
+protected:
+    jobject wrapped_obj;
+};
+
+class AutoGlobalWrappedJavaObject : protected WrappedJavaObject{
+public:
+    AutoGlobalWrappedJavaObject() :
+        wrapped_obj(nullptr)
+    { }
+
+    AutoGlobalWrappedJavaObject(jobject jobj, JNIEnv* env) : wrapped_obj(nullptr) {
+        Init(jobj, env);
+    }
+
+    virtual ~AutoGlobalWrappedJavaObject();
+    void Dispose();
+
+    void Init(jobject jobj, JNIEnv* env) {
+        if (!isNull()) {
+            env->DeleteGlobalRef(wrapped_obj);
+        }
+        wrapped_obj = env->NewGlobalRef(jobj);
+    }
+
+    bool isNull() const {
+        return wrapped_obj == nullptr;
     }
 
     jobject wrappedObject() const {
@@ -186,61 +210,6 @@ protected:
     static jfieldID jTopField;
 };
 
-class AndroidViewTransform : public WrappedJavaObject {
-public:
-    static void InitViewTransformClass(JNIEnv *jEnv);
-
-    void Init(jobject jobj);
-
-    AndroidViewTransform() {}
-    AndroidViewTransform(jobject jobj) { Init(jobj); }
-
-    float GetX(JNIEnv *env);
-    float GetY(JNIEnv *env);
-    float GetScale(JNIEnv *env);
-    void GetFixedLayerMargins(JNIEnv *env, gfx::Margin &aFixedLayerMargins);
-    float GetOffsetX(JNIEnv *env);
-    float GetOffsetY(JNIEnv *env);
-
-private:
-    static jclass jViewTransformClass;
-    static jfieldID jXField;
-    static jfieldID jYField;
-    static jfieldID jScaleField;
-    static jfieldID jFixedLayerMarginLeft;
-    static jfieldID jFixedLayerMarginTop;
-    static jfieldID jFixedLayerMarginRight;
-    static jfieldID jFixedLayerMarginBottom;
-    static jfieldID jOffsetXField;
-    static jfieldID jOffsetYField;
-};
-
-class AndroidProgressiveUpdateData : public WrappedJavaObject {
-public:
-    static void InitProgressiveUpdateDataClass(JNIEnv *jEnv);
-
-    void Init(jobject jobj);
-
-    AndroidProgressiveUpdateData() {}
-    AndroidProgressiveUpdateData(jobject jobj) { Init(jobj); }
-
-    float GetX(JNIEnv *env);
-    float GetY(JNIEnv *env);
-    float GetWidth(JNIEnv *env);
-    float GetHeight(JNIEnv *env);
-    float GetScale(JNIEnv *env);
-    bool GetShouldAbort(JNIEnv *env);
-
-private:
-    static jclass jProgressiveUpdateDataClass;
-    static jfieldID jXField;
-    static jfieldID jYField;
-    static jfieldID jWidthField;
-    static jfieldID jHeightField;
-    static jfieldID jScaleField;
-    static jfieldID jShouldAbortField;
-};
-
 class AndroidLayerRendererFrame : public WrappedJavaObject {
 public:
     static void InitLayerRendererFrameClass(JNIEnv *jEnv);
@@ -259,53 +228,6 @@ private:
     static jmethodID jDrawBackgroundMethod;
     static jmethodID jDrawForegroundMethod;
     static jmethodID jEndDrawingMethod;
-};
-
-class AndroidGeckoLayerClient : public WrappedJavaObject {
-public:
-    static void InitGeckoLayerClientClass(JNIEnv *jEnv);
-
-    void Init(jobject jobj);
-
-    AndroidGeckoLayerClient() {}
-    AndroidGeckoLayerClient(jobject jobj) { Init(jobj); }
-
-    void SetFirstPaintViewport(const LayerIntPoint& aOffset, const CSSToLayerScale& aZoom, const CSSRect& aCssPageRect);
-    void SetPageRect(const CSSRect& aCssPageRect);
-    void SyncViewportInfo(const LayerIntRect& aDisplayPort, const CSSToLayerScale& aDisplayResolution,
-                          bool aLayersUpdated, ScreenPoint& aScrollOffset, CSSToScreenScale& aScale,
-                          gfx::Margin& aFixedLayerMargins, ScreenPoint& aOffset);
-    void SyncFrameMetrics(const ScreenPoint& aScrollOffset, float aZoom, const CSSRect& aCssPageRect,
-                          bool aLayersUpdated, const CSSRect& aDisplayPort, const CSSToLayerScale& aDisplayResolution,
-                          bool aIsFirstPaint, gfx::Margin& aFixedLayerMargins, ScreenPoint& aOffset);
-    bool ProgressiveUpdateCallback(bool aHasPendingNewThebesContent, const LayerRect& aDisplayPort, float aDisplayResolution, bool aDrawingCritical, gfx::Rect& aViewport, float& aScaleX, float& aScaleY);
-    bool CreateFrame(AutoLocalJNIFrame *jniFrame, AndroidLayerRendererFrame& aFrame);
-    bool ActivateProgram(AutoLocalJNIFrame *jniFrame);
-    bool DeactivateProgram(AutoLocalJNIFrame *jniFrame);
-    void GetDisplayPort(AutoLocalJNIFrame *jniFrame, bool aPageSizeUpdate, bool aIsBrowserContentDisplayed, int32_t tabId, nsIAndroidViewport* metrics, nsIAndroidDisplayport** displayPort);
-    void ContentDocumentChanged(AutoLocalJNIFrame *jniFrame);
-    bool IsContentDocumentDisplayed(AutoLocalJNIFrame *jniFrame);
-
-protected:
-    static jclass jGeckoLayerClientClass;
-    static jmethodID jSetFirstPaintViewport;
-    static jmethodID jSetPageRect;
-    static jmethodID jSyncViewportInfoMethod;
-    static jmethodID jSyncFrameMetricsMethod;
-    static jmethodID jCreateFrameMethod;
-    static jmethodID jActivateProgramMethod;
-    static jmethodID jDeactivateProgramMethod;
-    static jmethodID jGetDisplayPort;
-    static jmethodID jContentDocumentChanged;
-    static jmethodID jIsContentDocumentDisplayed;
-    static jmethodID jProgressiveUpdateCallbackMethod;
-
-public:
-    static jclass jViewportClass;
-    static jclass jDisplayportClass;
-    static jmethodID jViewportCtor;
-    static jfieldID jDisplayportPosition;
-    static jfieldID jDisplayportResolution;
 };
 
 enum {
@@ -420,17 +342,44 @@ enum {
     AKEYCODE_KANA               = 218,
     AKEYCODE_ASSIST             = 219,
 
+    AMETA_FUNCTION_ON           = 0x00000008,
     AMETA_CTRL_ON               = 0x00001000,
     AMETA_CTRL_LEFT_ON          = 0x00002000,
     AMETA_CTRL_RIGHT_ON         = 0x00004000,
     AMETA_META_ON               = 0x00010000,
     AMETA_META_LEFT_ON          = 0x00020000,
     AMETA_META_RIGHT_ON         = 0x00040000,
+    AMETA_CAPS_LOCK_ON          = 0x00100000,
+    AMETA_NUM_LOCK_ON           = 0x00200000,
+    AMETA_SCROLL_LOCK_ON        = 0x00400000,
 
     AMETA_ALT_MASK              = AMETA_ALT_LEFT_ON   | AMETA_ALT_RIGHT_ON   | AMETA_ALT_ON,
     AMETA_CTRL_MASK             = AMETA_CTRL_LEFT_ON  | AMETA_CTRL_RIGHT_ON  | AMETA_CTRL_ON,
     AMETA_META_MASK             = AMETA_META_LEFT_ON  | AMETA_META_RIGHT_ON  | AMETA_META_ON,
     AMETA_SHIFT_MASK            = AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_RIGHT_ON | AMETA_SHIFT_ON,
+};
+
+class nsAndroidDisplayport MOZ_FINAL : public nsIAndroidDisplayport
+{
+public:
+    NS_DECL_ISUPPORTS
+    virtual nsresult GetLeft(float *aLeft) { *aLeft = mLeft; return NS_OK; }
+    virtual nsresult GetTop(float *aTop) { *aTop = mTop; return NS_OK; }
+    virtual nsresult GetRight(float *aRight) { *aRight = mRight; return NS_OK; }
+    virtual nsresult GetBottom(float *aBottom) { *aBottom = mBottom; return NS_OK; }
+    virtual nsresult GetResolution(float *aResolution) { *aResolution = mResolution; return NS_OK; }
+    virtual nsresult SetLeft(float aLeft) { mLeft = aLeft; return NS_OK; }
+    virtual nsresult SetTop(float aTop) { mTop = aTop; return NS_OK; }
+    virtual nsresult SetRight(float aRight) { mRight = aRight; return NS_OK; }
+    virtual nsresult SetBottom(float aBottom) { mBottom = aBottom; return NS_OK; }
+    virtual nsresult SetResolution(float aResolution) { mResolution = aResolution; return NS_OK; }
+
+    nsAndroidDisplayport(AndroidRectF aRect, float aResolution):
+        mLeft(aRect.Left()), mTop(aRect.Top()), mRight(aRect.Right()), mBottom(aRect.Bottom()), mResolution(aResolution) {}
+
+private:
+    ~nsAndroidDisplayport() {}
+    float mLeft, mTop, mRight, mBottom, mResolution;
 };
 
 class AndroidMotionEvent
@@ -548,6 +497,7 @@ public:
     const nsTArray<float>& Pressures() { return mPressures; }
     const nsTArray<float>& Orientations() { return mOrientations; }
     const nsTArray<nsIntPoint>& PointRadii() { return mPointRadii; }
+    const nsTArray<nsString>& PrefNames() { return mPrefNames; }
     double X() { return mX; }
     double Y() { return mY; }
     double Z() { return mZ; }
@@ -558,6 +508,7 @@ public:
     int KeyCode() { return mKeyCode; }
     int MetaState() { return mMetaState; }
     uint32_t DomKeyLocation() { return mDomKeyLocation; }
+    Modifiers DOMModifiers() const;
     bool IsAltPressed() const { return (mMetaState & AMETA_ALT_MASK) != 0; }
     bool IsShiftPressed() const { return (mMetaState & AMETA_SHIFT_MASK) != 0; }
     bool IsCtrlPressed() const { return (mMetaState & AMETA_CTRL_MASK) != 0; }
@@ -565,6 +516,7 @@ public:
     int Flags() { return mFlags; }
     int UnicodeChar() { return mUnicodeChar; }
     int BaseUnicodeChar() { return mBaseUnicodeChar; }
+    int DOMPrintableKeyValue() { return mDOMPrintableKeyValue; }
     int RepeatCount() const { return mRepeatCount; }
     int Count() { return mCount; }
     int Start() { return mStart; }
@@ -578,14 +530,17 @@ public:
     int RangeBackColor() { return mRangeBackColor; }
     int RangeLineColor() { return mRangeLineColor; }
     nsGeoPosition* GeoPosition() { return mGeoPosition; }
-    double Bandwidth() { return mBandwidth; }
-    bool CanBeMetered() { return mCanBeMetered; }
+    int ConnectionType() { return mConnectionType; }
+    bool IsWifi() { return mIsWifi; }
+    int DHCPGateway() { return mDHCPGateway; }
     short ScreenOrientation() { return mScreenOrientation; }
     RefCountedJavaObject* ByteBuffer() { return mByteBuffer; }
     int Width() { return mWidth; }
     int Height() { return mHeight; }
-    nsTouchEvent MakeTouchEvent(nsIWidget* widget);
+    int RequestId() { return mCount; } // for convenience
+    WidgetTouchEvent MakeTouchEvent(nsIWidget* widget);
     MultiTouchInput MakeMultiTouchInput(nsIWidget* widget);
+    WidgetMouseEvent MakeMouseEvent(nsIWidget* widget);
     void UnionRect(nsIntRect const& aRect);
     nsIObserver *Observer() { return mObserver; }
 
@@ -602,7 +557,7 @@ protected:
     nsIntRect mRect;
     int mFlags, mMetaState;
     uint32_t mDomKeyLocation;
-    int mKeyCode, mUnicodeChar, mBaseUnicodeChar;
+    int mKeyCode, mUnicodeChar, mBaseUnicodeChar, mDOMPrintableKeyValue;
     int mRepeatCount;
     int mCount;
     int mStart, mEnd;
@@ -613,12 +568,14 @@ protected:
     int mPointerIndex;
     nsString mCharacters, mCharactersExtra, mData;
     nsRefPtr<nsGeoPosition> mGeoPosition;
-    double mBandwidth;
-    bool mCanBeMetered;
+    int mConnectionType;
+    bool mIsWifi;
+    int mDHCPGateway;
     short mScreenOrientation;
     nsRefPtr<RefCountedJavaObject> mByteBuffer;
     int mWidth, mHeight;
     nsCOMPtr<nsIObserver> mObserver;
+    nsTArray<nsString> mPrefNames;
 
     void ReadIntArray(nsTArray<int> &aVals,
                       JNIEnv *jenv,
@@ -632,10 +589,14 @@ protected:
                         JNIEnv *jenv,
                         jfieldID field,
                         int32_t count);
+    void ReadStringArray(nsTArray<nsString> &aStrings,
+                         JNIEnv *jenv,
+                         jfieldID field);
     void ReadRectField(JNIEnv *jenv);
     void ReadCharactersField(JNIEnv *jenv);
     void ReadCharactersExtraField(JNIEnv *jenv);
     void ReadDataField(JNIEnv *jenv);
+    void ReadStringFromJString(nsString &aString, JNIEnv *jenv, jstring s);
 
     uint32_t ReadDomKeyLocation(JNIEnv* jenv, jobject jGeckoEventObj);
 
@@ -659,6 +620,7 @@ protected:
     static jfieldID jCharactersField;
     static jfieldID jCharactersExtraField;
     static jfieldID jDataField;
+    static jfieldID jDOMPrintableKeyValueField;
     static jfieldID jKeyCodeField;
     static jfieldID jMetaStateField;
     static jfieldID jDomKeyLocationField;
@@ -678,9 +640,11 @@ protected:
     static jfieldID jRangeBackColorField;
     static jfieldID jRangeLineColorField;
     static jfieldID jLocationField;
+    static jfieldID jPrefNamesField;
 
-    static jfieldID jBandwidthField;
-    static jfieldID jCanBeMeteredField;
+    static jfieldID jConnectionTypeField;
+    static jfieldID jIsWifiField;
+    static jfieldID jDHCPGatewayField;
 
     static jfieldID jScreenOrientationField;
     static jfieldID jByteBufferField;
@@ -721,12 +685,19 @@ public:
         REMOVE_OBSERVER = 34,
         LOW_MEMORY = 35,
         NETWORK_LINK_CHANGE = 36,
-        ADD_OBSERVER = 37,
+        TELEMETRY_HISTOGRAM_ADD = 37,
+        ADD_OBSERVER = 38,
+        PREFERENCES_OBSERVE = 39,
+        PREFERENCES_GET = 40,
+        PREFERENCES_REMOVE_OBSERVERS = 41,
+        TELEMETRY_UI_SESSION_START = 42,
+        TELEMETRY_UI_SESSION_STOP = 43,
+        TELEMETRY_UI_EVENT = 44,
         dummy_java_enum_list_end
     };
 
     enum {
-        // Memory pressue levels, keep in sync with those in MemoryMonitor.java
+        // Memory pressure levels. Keep these in sync with those in MemoryMonitor.java.
         MEMORY_PRESSURE_NONE = 0,
         MEMORY_PRESSURE_CLEANUP = 1,
         MEMORY_PRESSURE_LOW = 2,

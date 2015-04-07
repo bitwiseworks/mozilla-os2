@@ -7,10 +7,11 @@
 #include <string.h>
 
 #include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Base64.h"
+#include "mozilla/BasicEvents.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/Selection.h"
-#include "mozilla/Util.h"
+#include "mozilla/dom/Selection.h"
 #include "nsAString.h"
 #include "nsAutoPtr.h"
 #include "nsCOMArray.h"
@@ -26,7 +27,6 @@
 #include "nsEditor.h"
 #include "nsEditorUtils.h"
 #include "nsError.h"
-#include "nsGUIEvent.h"
 #include "nsGkAtoms.h"
 #include "nsHTMLEditUtils.h"
 #include "nsHTMLEditor.h"
@@ -34,8 +34,8 @@
 #include "nsIContent.h"
 #include "nsIContentFilter.h"
 #include "nsIDOMComment.h"
-#include "nsIDOMDOMStringList.h"
-#include "nsIDOMDataTransfer.h"
+#include "mozilla/dom/DOMStringList.h"
+#include "mozilla/dom/DataTransfer.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMDocumentFragment.h"
 #include "nsIDOMElement.h"
@@ -57,7 +57,7 @@
 #include "nsIFile.h"
 #include "nsIInputStream.h"
 #include "nsIMIMEService.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsINode.h"
 #include "nsIParserUtils.h"
 #include "nsIPlaintextEditor.h"
@@ -94,8 +94,6 @@ class nsISupports;
 
 using namespace mozilla;
 using namespace mozilla::dom;
-
-const PRUnichar nbsp = 160;
 
 #define kInsertCookie  "_moz_Insert Here_moz_"
 
@@ -226,7 +224,7 @@ nsHTMLEditor::InsertHTMLWithContext(const nsAString & aInputString,
 {
   return DoInsertHTMLWithContext(aInputString, aContextStr, aInfoStr,
       aFlavor, aSourceDoc, aDestNode, aDestOffset, aDeleteSelection,
-      true);
+      /* trusted input */ true, /* clear style */ false);
 }
 
 nsresult
@@ -238,7 +236,8 @@ nsHTMLEditor::DoInsertHTMLWithContext(const nsAString & aInputString,
                                       nsIDOMNode *aDestNode,
                                       int32_t aDestOffset,
                                       bool aDeleteSelection,
-                                      bool aTrustedInput)
+                                      bool aTrustedInput,
+                                      bool aClearStyle)
 {
   NS_ENSURE_TRUE(mRules, NS_ERROR_NOT_INITIALIZED);
 
@@ -366,12 +365,14 @@ nsHTMLEditor::DoInsertHTMLWithContext(const nsAString & aInputString,
     rv = DeleteSelectionAndPrepareToCreateNode();
     NS_ENSURE_SUCCESS(rv, rv);
 
-    // pasting does not inherit local inline styles
-    nsCOMPtr<nsIDOMNode> tmpNode =
-      do_QueryInterface(selection->GetAnchorNode());
-    int32_t tmpOffset = selection->GetAnchorOffset();
-    rv = ClearStyle(address_of(tmpNode), &tmpOffset, nullptr, nullptr);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (aClearStyle) {
+      // pasting does not inherit local inline styles
+      nsCOMPtr<nsIDOMNode> tmpNode =
+        do_QueryInterface(selection->GetAnchorNode());
+      int32_t tmpOffset = static_cast<int32_t>(selection->AnchorOffset());
+      rv = ClearStyle(address_of(tmpNode), &tmpOffset, nullptr, nullptr);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
   }
   else
   {
@@ -931,7 +932,7 @@ RemoveFragComments(nsCString & aStr)
 }
 
 nsresult
-nsHTMLEditor::ParseCFHTML(nsCString & aCfhtml, PRUnichar **aStuffToPaste, PRUnichar **aCfcontext)
+nsHTMLEditor::ParseCFHTML(nsCString & aCfhtml, char16_t **aStuffToPaste, char16_t **aCfcontext)
 {
   // First obtain offsets from cfhtml str.
   int32_t startHTML, endHTML, startFragment, endFragment;
@@ -1230,24 +1231,25 @@ GetStringFromDataTransfer(nsIDOMDataTransfer *aDataTransfer, const nsAString& aT
     variant->GetAsAString(aOutputString);
 }
 
-nsresult nsHTMLEditor::InsertFromDataTransfer(nsIDOMDataTransfer *aDataTransfer,
+nsresult nsHTMLEditor::InsertFromDataTransfer(DataTransfer *aDataTransfer,
                                               int32_t aIndex,
                                               nsIDOMDocument *aSourceDoc,
                                               nsIDOMNode *aDestinationNode,
                                               int32_t aDestOffset,
                                               bool aDoDeleteSelection)
 {
-  nsCOMPtr<nsIDOMDOMStringList> types;
-  aDataTransfer->MozTypesAt(aIndex, getter_AddRefs(types));
+  ErrorResult rv;
+  nsRefPtr<DOMStringList> types = aDataTransfer->MozTypesAt(aIndex, rv);
+  if (rv.Failed()) {
+    return rv.ErrorCode();
+  }
 
-  bool hasPrivateHTMLFlavor;
-  types->Contains(NS_LITERAL_STRING(kHTMLContext), &hasPrivateHTMLFlavor);
+  bool hasPrivateHTMLFlavor = types->Contains(NS_LITERAL_STRING(kHTMLContext));
 
   bool isText = IsPlaintextEditor();
   bool isSafe = IsSafeToInsertData(aSourceDoc);
 
-  uint32_t length;
-  types->GetLength(&length);
+  uint32_t length = types->Length();
   for (uint32_t t = 0; t < length; t++) {
     nsAutoString type;
     types->Item(t, type);
@@ -1338,7 +1340,7 @@ bool nsHTMLEditor::HavePrivateHTMLFlavor(nsIClipboard *aClipboard)
 
 NS_IMETHODIMP nsHTMLEditor::Paste(int32_t aSelectionType)
 {
-  if (!FireClipboardEvent(NS_PASTE))
+  if (!FireClipboardEvent(NS_PASTE, aSelectionType))
     return NS_OK;
 
   // Get Clipboard Service
@@ -1419,7 +1421,9 @@ NS_IMETHODIMP nsHTMLEditor::Paste(int32_t aSelectionType)
 
 NS_IMETHODIMP nsHTMLEditor::PasteTransferable(nsITransferable *aTransferable)
 {
-  if (!FireClipboardEvent(NS_PASTE))
+  // Use an invalid value for the clipboard type as data comes from aTransferable
+  // and we don't currently implement a way to put that in the data transfer yet.
+  if (!FireClipboardEvent(NS_PASTE, nsIClipboard::kGlobalClipboard))
     return NS_OK;
 
   // handle transferable hooks
@@ -1437,7 +1441,7 @@ NS_IMETHODIMP nsHTMLEditor::PasteTransferable(nsITransferable *aTransferable)
 //
 NS_IMETHODIMP nsHTMLEditor::PasteNoFormatting(int32_t aSelectionType)
 {
-  if (!FireClipboardEvent(NS_PASTE))
+  if (!FireClipboardEvent(NS_PASTE, aSelectionType))
     return NS_OK;
 
   ForceCompositionEnd();
@@ -1672,7 +1676,7 @@ nsHTMLEditor::InsertTextWithQuotations(const nsAString &aStringToInsert)
   // Whenever the quotedness changes (or we reach the string's end)
   // we will insert the hunk all at once, quoted or non.
 
-  static const PRUnichar cite('>');
+  static const char16_t cite('>');
   bool curHunkIsQuoted = (aStringToInsert.First() == cite);
 
   nsAString::const_iterator hunkStart, strEnd;
@@ -2118,7 +2122,7 @@ nsresult nsHTMLEditor::CreateDOMFragmentFromPaste(const nsAString &aInputString,
   if (!aInfoStr.IsEmpty())
   {
     int32_t sep, num;
-    sep = aInfoStr.FindChar((PRUnichar)',');
+    sep = aInfoStr.FindChar((char16_t)',');
     numstr1 = Substring(aInfoStr, 0, sep);
     numstr2 = Substring(aInfoStr, sep+1, aInfoStr.Length() - (sep+1));
 

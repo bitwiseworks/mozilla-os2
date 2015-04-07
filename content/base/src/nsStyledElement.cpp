@@ -8,8 +8,8 @@
 #include "nsGkAtoms.h"
 #include "nsAttrValue.h"
 #include "nsAttrValueInlines.h"
-#include "mozilla/dom/Element.h"
-#include "nsMutationEvent.h"
+#include "mozilla/dom/ElementInlines.h"
+#include "mozilla/InternalMutationEvent.h"
 #include "nsDOMCSSDeclaration.h"
 #include "nsDOMCSSAttrDeclaration.h"
 #include "nsServiceManagerUtils.h"
@@ -22,7 +22,7 @@
 #include "nsContentUtils.h"
 #include "nsStyleUtil.h"
 
-namespace css = mozilla::css;
+using namespace mozilla;
 using namespace mozilla::dom;
 
 //----------------------------------------------------------------------
@@ -236,7 +236,7 @@ nsStyledElementNotElementCSSInlineStyle::ParseStyleAttribute(const nsAString& aV
 {
   nsIDocument* doc = OwnerDoc();
 
-  if (!nsStyleUtil::CSPAllowsInlineStyle(NodePrincipal(),
+  if (!nsStyleUtil::CSPAllowsInlineStyle(nullptr, NodePrincipal(),
                                          doc->GetDocumentURI(), 0, aValue,
                                          nullptr))
     return;

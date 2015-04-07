@@ -1,4 +1,3 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,6 +19,31 @@ const { isGlobalPBSupported } = require('../private-browsing/utils');
 
 // Bug 834961: ignore private windows when they are not supported
 function getWindows() windows(null, { includePrivate: isPrivateBrowsingSupported || isGlobalPBSupported });
+
+const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+
+// Define predicate functions that can be used to detech weather
+// we deal with fennec tabs or firefox tabs.
+
+// Predicate to detect whether tab is XUL "Tab" node.
+const isXULTab = tab =>
+  tab instanceof Ci.nsIDOMNode &&
+  tab.nodeName === "tab" &&
+  tab.namespaceURI === XUL_NS;
+exports.isXULTab = isXULTab;
+
+// Predicate to detecet whether given tab is a fettec tab.
+// Unfortunately we have to guess via duck typinng of:
+// http://mxr.mozilla.org/mozilla-central/source/mobile/android/chrome/content/browser.js#2583
+const isFennecTab = tab =>
+  tab &&
+  tab.QueryInterface &&
+  Ci.nsIBrowserTab &&
+  tab.QueryInterface(Ci.nsIBrowserTab) === tab;
+exports.isFennecTab = isFennecTab;
+
+const isTab = x => isXULTab(x) || isFennecTab(x);
+exports.isTab = isTab;
 
 function activateTab(tab, window) {
   let gBrowser = getTabBrowserForTab(tab);
@@ -183,6 +207,11 @@ function getTabId(tab) {
 }
 exports.getTabId = getTabId;
 
+function getTabForId(id) {
+  return getTabs().find(tab => getTabId(tab) === id) || null;
+}
+exports.getTabForId = getTabForId;
+
 function getTabTitle(tab) {
   return getBrowserForTab(tab).contentDocument.title || tab.label || "";
 }
@@ -265,7 +294,7 @@ function getTabForWindow(window) {
         return tab;
     }
   }
-  return null; 
+  return null;
 }
 
 function getTabURL(tab) {

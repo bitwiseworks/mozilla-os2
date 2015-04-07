@@ -10,17 +10,18 @@
 
 #include "webrtc/modules/video_render//video_render_frames.h"
 
-#include <cassert>
+#include <assert.h>
 
-#include "modules/interface/module_common_types.h"
-#include "system_wrappers/interface/tick_util.h"
-#include "system_wrappers/interface/trace.h"
+#include "webrtc/common_video/interface/texture_video_frame.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/system_wrappers/interface/tick_util.h"
+#include "webrtc/system_wrappers/interface/trace.h"
 
 namespace webrtc {
 
-const WebRtc_Word32 KEventMaxWaitTimeMs = 200;
-const WebRtc_UWord32 kMinRenderDelayMs = 10;
-const WebRtc_UWord32 kMaxRenderDelayMs= 500;
+const int32_t KEventMaxWaitTimeMs = 200;
+const uint32_t kMinRenderDelayMs = 10;
+const uint32_t kMaxRenderDelayMs= 500;
 
 VideoRenderFrames::VideoRenderFrames()
     : incoming_frames_(),
@@ -31,18 +32,30 @@ VideoRenderFrames::~VideoRenderFrames() {
   ReleaseAllFrames();
 }
 
-WebRtc_Word32 VideoRenderFrames::AddFrame(I420VideoFrame* new_frame) {
-  const WebRtc_Word64 time_now = TickTime::MillisecondTimestamp();
+int32_t VideoRenderFrames::AddFrame(I420VideoFrame* new_frame) {
+  const int64_t time_now = TickTime::MillisecondTimestamp();
 
   if (new_frame->render_time_ms() + KOldRenderTimestampMS < time_now) {
     WEBRTC_TRACE(kTraceWarning, kTraceVideoRenderer, -1,
-                 "%s: too old frame.", __FUNCTION__);
+                 "%s: too old frame, timestamp=%u.",
+                 __FUNCTION__, new_frame->timestamp());
     return -1;
   }
   if (new_frame->render_time_ms() > time_now + KFutureRenderTimestampMS) {
     WEBRTC_TRACE(kTraceWarning, kTraceVideoRenderer, -1,
-                 "%s: frame too long into the future.", __FUNCTION__);
+                 "%s: frame too long into the future, timestamp=%u.",
+                 __FUNCTION__, new_frame->timestamp());
     return -1;
+  }
+
+  if (new_frame->native_handle() != NULL) {
+    incoming_frames_.PushBack(new TextureVideoFrame(
+        static_cast<NativeHandle*>(new_frame->native_handle()),
+        new_frame->width(),
+        new_frame->height(),
+        new_frame->timestamp(),
+        new_frame->render_time_ms()));
+    return incoming_frames_.GetSize();
   }
 
   // Get an empty frame
@@ -59,8 +72,8 @@ WebRtc_Word32 VideoRenderFrames::AddFrame(I420VideoFrame* new_frame) {
         KMaxNumberOfFrames) {
       // Already allocated too many frames.
       WEBRTC_TRACE(kTraceWarning, kTraceVideoRenderer,
-                   -1, "%s: too many frames, limit: %d", __FUNCTION__,
-                   KMaxNumberOfFrames);
+                   -1, "%s: too many frames, timestamp=%u, limit=%d",
+                   __FUNCTION__, new_frame->timestamp(), KMaxNumberOfFrames);
       return -1;
     }
 
@@ -101,10 +114,7 @@ I420VideoFrame* VideoRenderFrames::FrameToRender() {
         // This is the oldest one so far and it's OK to render.
         if (render_frame) {
           // This one is older than the newly found frame, remove this one.
-          render_frame->ResetSize();
-          render_frame->set_timestamp(0);
-          render_frame->set_render_time_ms(0);
-          empty_frames_.PushFront(render_frame);
+          ReturnFrame(render_frame);
         }
         render_frame = oldest_frame_in_list;
         incoming_frames_.Erase(item);
@@ -119,15 +129,20 @@ I420VideoFrame* VideoRenderFrames::FrameToRender() {
   return render_frame;
 }
 
-WebRtc_Word32 VideoRenderFrames::ReturnFrame(I420VideoFrame* old_frame) {
-  old_frame->ResetSize();
-  old_frame->set_timestamp(0);
-  old_frame->set_render_time_ms(0);
-  empty_frames_.PushBack(old_frame);
+int32_t VideoRenderFrames::ReturnFrame(I420VideoFrame* old_frame) {
+  // No need to reuse texture frames because they do not allocate memory.
+  if (old_frame->native_handle() == NULL) {
+    old_frame->ResetSize();
+    old_frame->set_timestamp(0);
+    old_frame->set_render_time_ms(0);
+    empty_frames_.PushBack(old_frame);
+  } else {
+    delete old_frame;
+  }
   return 0;
 }
 
-WebRtc_Word32 VideoRenderFrames::ReleaseAllFrames() {
+int32_t VideoRenderFrames::ReleaseAllFrames() {
   while (!incoming_frames_.Empty()) {
     ListItem* item = incoming_frames_.First();
     if (item) {
@@ -149,8 +164,8 @@ WebRtc_Word32 VideoRenderFrames::ReleaseAllFrames() {
   return 0;
 }
 
-WebRtc_UWord32 VideoRenderFrames::TimeToNextFrameRelease() {
-  WebRtc_Word64 time_to_release = 0;
+uint32_t VideoRenderFrames::TimeToNextFrameRelease() {
+  int64_t time_to_release = 0;
   ListItem* item = incoming_frames_.First();
   if (item) {
     I420VideoFrame* oldest_frame =
@@ -163,11 +178,11 @@ WebRtc_UWord32 VideoRenderFrames::TimeToNextFrameRelease() {
   } else {
     time_to_release = KEventMaxWaitTimeMs;
   }
-  return static_cast<WebRtc_UWord32>(time_to_release);
+  return static_cast<uint32_t>(time_to_release);
 }
 
-WebRtc_Word32 VideoRenderFrames::SetRenderDelay(
-    const WebRtc_UWord32 render_delay) {
+int32_t VideoRenderFrames::SetRenderDelay(
+    const uint32_t render_delay) {
   if (render_delay < kMinRenderDelayMs ||
       render_delay > kMaxRenderDelayMs) {
     WEBRTC_TRACE(kTraceWarning, kTraceVideoRenderer,

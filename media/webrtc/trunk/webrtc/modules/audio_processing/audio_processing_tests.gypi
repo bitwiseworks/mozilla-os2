@@ -9,33 +9,6 @@
 {
   'targets': [
     {
-      'target_name': 'audioproc_unittest',
-      'type': 'executable',
-      'conditions': [
-        ['prefer_fixed_point==1', {
-          'defines': [ 'WEBRTC_AUDIOPROC_FIXED_PROFILE' ],
-        }, {
-          'defines': [ 'WEBRTC_AUDIOPROC_FLOAT_PROFILE' ],
-        }],
-        ['enable_protobuf==1', {
-          'defines': [ 'WEBRTC_AUDIOPROC_DEBUG_DUMP' ],
-        }],
-      ],
-      'dependencies': [
-        'audio_processing',
-        'audioproc_unittest_proto',
-        '<(webrtc_root)/common_audio/common_audio.gyp:signal_processing',
-        '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
-        '<(webrtc_root)/test/test.gyp:test_support',
-        '<(DEPTH)/testing/gtest.gyp:gtest',
-      ],
-      'sources': [
-        'aec/system_delay_unittest.cc',
-        'test/unit_test.cc',
-        'utility/delay_estimator_unittest.cc',
-      ],
-    },
-    {
       'target_name': 'audioproc_unittest_proto',
       'type': 'static_library',
       'sources': [ 'test/unittest.proto', ],
@@ -70,7 +43,7 @@
           'dependencies': [
             'audioproc_debug_proto',
             '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
-            '<(DEPTH)/third_party/google-gflags/google-gflags.gyp:google-gflags',
+            '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
           ],
           'sources': [ 'test/unpack.cc', ],
         },

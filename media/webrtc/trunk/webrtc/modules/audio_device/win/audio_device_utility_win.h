@@ -11,8 +11,8 @@
 #ifndef WEBRTC_AUDIO_DEVICE_AUDIO_DEVICE_UTILITY_WIN_H
 #define WEBRTC_AUDIO_DEVICE_AUDIO_DEVICE_UTILITY_WIN_H
 
-#include "audio_device_utility.h"
-#include "audio_device.h"
+#include "webrtc/modules/audio_device/audio_device_utility.h"
+#include "webrtc/modules/audio_device/include/audio_device.h"
 #include <windows.h>
 
 namespace webrtc
@@ -22,17 +22,17 @@ class CriticalSectionWrapper;
 class AudioDeviceUtilityWindows : public AudioDeviceUtility
 {
 public:
-    AudioDeviceUtilityWindows(const WebRtc_Word32 id);
+    AudioDeviceUtilityWindows(const int32_t id);
     ~AudioDeviceUtilityWindows();
 
-    virtual WebRtc_Word32 Init();
+    virtual int32_t Init();
 
 private:
     BOOL GetOSDisplayString(LPTSTR pszOS);
 
 private:
     CriticalSectionWrapper&         _critSect;
-    WebRtc_Word32                   _id;
+    int32_t                         _id;
     AudioDeviceModule::ErrorCode    _lastError;
 };
 

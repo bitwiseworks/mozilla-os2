@@ -4,8 +4,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DIRS += [
+PARALLEL_DIRS += [
     'idl-parser',
+]
+
+DIRS += [
     'typelib',
     'string',
     'glue',
@@ -38,5 +41,7 @@ TEST_TOOL_DIRS += [
 if CONFIG['DEHYDRA_PATH']:
     DIRS += ['analysis']
 
-MODULE = 'xpcom'
-
+CONFIGURE_DEFINE_FILES += [
+    'xpcom-config.h',
+    'xpcom-private.h',
+]

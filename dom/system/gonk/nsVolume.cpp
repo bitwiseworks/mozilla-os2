@@ -13,6 +13,8 @@
 #include "nsVolumeStat.h"
 #include "nsXULAppAPI.h"
 #include "Volume.h"
+#include "AutoMounter.h"
+#include "VolumeManager.h"
 
 #define VOLUME_MANAGER_LOG_TAG  "nsVolume"
 #include "VolumeManagerLog.h"
@@ -43,14 +45,18 @@ NS_VolumeStateStr(int32_t aState)
 // allocate an nsVolume which is then passed to MainThread. Since we
 // have a situation where we allocate on one thread and free on another
 // we use a thread safe AddRef implementation.
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsVolume, nsIVolume)
+NS_IMPL_ISUPPORTS(nsVolume, nsIVolume)
 
 nsVolume::nsVolume(const Volume* aVolume)
   : mName(NS_ConvertUTF8toUTF16(aVolume->Name())),
     mMountPoint(NS_ConvertUTF8toUTF16(aVolume->MountPoint())),
     mState(aVolume->State()),
     mMountGeneration(aVolume->MountGeneration()),
-    mMountLocked(aVolume->IsMountLocked())
+    mMountLocked(aVolume->IsMountLocked()),
+    mIsFake(false),
+    mIsMediaPresent(aVolume->MediaPresent()),
+    mIsSharing(aVolume->IsSharing()),
+    mIsFormatting(aVolume->IsFormatting())
 {
 }
 
@@ -85,12 +91,49 @@ bool nsVolume::Equals(nsIVolume* aVolume)
   if (mMountLocked != volIsMountLocked) {
     return false;
   }
+
+  bool isFake;
+  aVolume->GetIsFake(&isFake);
+  if (mIsFake != isFake) {
+    return false;
+  }
+
+  bool isSharing;
+  aVolume->GetIsSharing(&isSharing);
+  if (mIsSharing != isSharing) {
+    return false;
+  }
+
+  bool isFormatting;
+  aVolume->GetIsFormatting(&isFormatting);
+  if (mIsFormatting != isFormatting) {
+    return false;
+  }
+
   return true;
+}
+
+NS_IMETHODIMP nsVolume::GetIsMediaPresent(bool *aIsMediaPresent)
+{
+  *aIsMediaPresent = mIsMediaPresent;
+  return NS_OK;
 }
 
 NS_IMETHODIMP nsVolume::GetIsMountLocked(bool *aIsMountLocked)
 {
   *aIsMountLocked = mMountLocked;
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsVolume::GetIsSharing(bool *aIsSharing)
+{
+  *aIsSharing = mIsSharing;
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsVolume::GetIsFormatting(bool *aIsFormatting)
+{
+  *aIsFormatting = mIsFormatting;
   return NS_OK;
 }
 
@@ -136,13 +179,94 @@ NS_IMETHODIMP nsVolume::GetStats(nsIVolumeStat **aResult)
   return NS_OK;
 }
 
+NS_IMETHODIMP nsVolume::GetIsFake(bool *aIsFake)
+{
+  *aIsFake = mIsFake;
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsVolume::Format()
+{
+  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+
+  XRE_GetIOMessageLoop()->PostTask(
+      FROM_HERE,
+      NewRunnableFunction(FormatVolumeIOThread, NameStr()));
+
+  return NS_OK;
+}
+
+/* static */
+void nsVolume::FormatVolumeIOThread(const nsCString& aVolume)
+{
+  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+
+  MOZ_ASSERT(MessageLoop::current() == XRE_GetIOMessageLoop());
+  if (VolumeManager::State() != VolumeManager::VOLUMES_READY) {
+    return;
+  }
+
+  AutoMounterFormatVolume(aVolume);
+}
+
+NS_IMETHODIMP nsVolume::Mount()
+{
+  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+
+  XRE_GetIOMessageLoop()->PostTask(
+      FROM_HERE,
+      NewRunnableFunction(MountVolumeIOThread, NameStr()));
+
+  return NS_OK;
+}
+
+/* static */
+void nsVolume::MountVolumeIOThread(const nsCString& aVolume)
+{
+  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+
+  MOZ_ASSERT(MessageLoop::current() == XRE_GetIOMessageLoop());
+  if (VolumeManager::State() != VolumeManager::VOLUMES_READY) {
+    return;
+  }
+
+  AutoMounterMountVolume(aVolume);
+}
+
+NS_IMETHODIMP nsVolume::Unmount()
+{
+  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+
+  XRE_GetIOMessageLoop()->PostTask(
+      FROM_HERE,
+      NewRunnableFunction(UnmountVolumeIOThread, NameStr()));
+
+  return NS_OK;
+}
+
+/* static */
+void nsVolume::UnmountVolumeIOThread(const nsCString& aVolume)
+{
+  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+
+  MOZ_ASSERT(MessageLoop::current() == XRE_GetIOMessageLoop());
+  if (VolumeManager::State() != VolumeManager::VOLUMES_READY) {
+    return;
+  }
+
+  AutoMounterUnmountVolume(aVolume);
+}
+
 void
 nsVolume::LogState() const
 {
   if (mState == nsIVolume::STATE_MOUNTED) {
-    LOG("nsVolume: %s state %s @ '%s' gen %d locked %d",
+    LOG("nsVolume: %s state %s @ '%s' gen %d locked %d fake %d "
+        "media %d sharing %d formatting %d",
         NameStr().get(), StateStr(), MountPointStr().get(),
-        MountGeneration(), (int)IsMountLocked());
+        MountGeneration(), (int)IsMountLocked(), (int)IsFake(),
+        (int)IsMediaPresent(), (int)IsSharing(),
+        (int)IsFormatting());
     return;
   }
 
@@ -156,6 +280,10 @@ void nsVolume::Set(nsIVolume* aVolume)
   aVolume->GetName(mName);
   aVolume->GetMountPoint(mMountPoint);
   aVolume->GetState(&mState);
+  aVolume->GetIsFake(&mIsFake);
+  aVolume->GetIsMediaPresent(&mIsMediaPresent);
+  aVolume->GetIsSharing(&mIsSharing);
+  aVolume->GetIsFormatting(&mIsFormatting);
 
   int32_t volMountGeneration;
   aVolume->GetMountGeneration(&volMountGeneration);
@@ -220,6 +348,37 @@ nsVolume::UpdateMountLock(bool aMountLocked)
      NewRunnableFunction(Volume::UpdateMountLock,
                          NS_LossyConvertUTF16toASCII(Name()),
                          MountGeneration(), aMountLocked));
+}
+
+void
+nsVolume::SetIsFake(bool aIsFake)
+{
+  mIsFake = aIsFake;
+  if (mIsFake) {
+    // The media is always present for fake volumes.
+    mIsMediaPresent = true;
+    MOZ_ASSERT(!mIsSharing);
+  }
+}
+
+void
+nsVolume::SetState(int32_t aState)
+{
+  static int32_t sMountGeneration = 0;
+
+  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsFake());
+
+  if (aState == mState) {
+    return;
+  }
+
+  if (aState == nsIVolume::STATE_MOUNTED) {
+    mMountGeneration = ++sMountGeneration;
+  }
+
+  mState = aState;
 }
 
 } // system

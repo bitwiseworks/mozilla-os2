@@ -11,20 +11,19 @@
 // Implementation of codec data base test
 // testing is done via the VCM module, no specific CodecDataBase module functionality.
 
-#include "codec_database_test.h"
+#include "webrtc/modules/video_coding/main/test/codec_database_test.h"
 
 #include <assert.h>
 #include <stdio.h>
 
-#include "../../../../engine_configurations.h"
-#include "../source/event.h"
-#include "test_callbacks.h"
-#include "test_macros.h"
-#include "test_util.h"
-#include "testsupport/fileutils.h"
-#include "testsupport/metrics/video_metrics.h"
-#include "vp8.h" // for external codecs test
-
+#include "webrtc/engine_configurations.h"
+#include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
+#include "webrtc/modules/video_coding/main/interface/video_coding.h"
+#include "webrtc/modules/video_coding/main/test/test_callbacks.h"
+#include "webrtc/modules/video_coding/main/test/test_macros.h"
+#include "webrtc/modules/video_coding/main/test/test_util.h"
+#include "webrtc/test/testsupport/fileutils.h"
+#include "webrtc/test/testsupport/metrics/video_metrics.h"
 
 using namespace webrtc;
 
@@ -90,7 +89,7 @@ CodecDataBaseTest::Setup(CmdArgs& args)
 
 
 
-WebRtc_Word32
+int32_t
 CodecDataBaseTest::Perform(CmdArgs& args)
 {
 #ifndef VIDEOCODEC_VP8
@@ -114,7 +113,7 @@ CodecDataBaseTest::Perform(CmdArgs& args)
     // registering the callback - encode and decode with the same vcm (could be later changed)
     _encodeCompleteCallback->RegisterReceiverVCM(_vcm);
     // preparing a frame to be encoded
-    WebRtc_UWord8* tmpBuffer = new WebRtc_UWord8[_lengthSourceFrame];
+    uint8_t* tmpBuffer = new uint8_t[_lengthSourceFrame];
     TEST(fread(tmpBuffer, 1, _lengthSourceFrame, _sourceFile) > 0);
     I420VideoFrame sourceFrame;
     int half_width = (_width + 1) / 2;
@@ -126,7 +125,7 @@ CodecDataBaseTest::Perform(CmdArgs& args)
                             size_uv, tmpBuffer + size_y + size_uv,
                             _width, _height,
                             _width, half_width, half_width);
-    _timeStamp += (WebRtc_UWord32)(9e4 / _frameRate);
+    _timeStamp += (uint32_t)(9e4 / _frameRate);
     sourceFrame.set_timestamp(_timeStamp);
     // Encoder registration
     TEST (VideoCodingModule::NumberOfCodecs() > 0);
@@ -152,7 +151,7 @@ CodecDataBaseTest::Perform(CmdArgs& args)
     // Testing with VP8.
     VideoCodingModule::Codec(kVideoCodecVP8, &sendCodec);
     _vcm->RegisterSendCodec(&sendCodec, 1, 1440);
-    _encodeCompleteCallback->SetCodecType(kRTPVideoVP8);
+    _encodeCompleteCallback->SetCodecType(kRtpVideoVp8);
     _vcm->InitializeReceiver();
     TEST (_vcm->AddVideoFrame(sourceFrame) == VCM_OK );
     _vcm->InitializeSender();
@@ -197,13 +196,13 @@ CodecDataBaseTest::Perform(CmdArgs& args)
     VideoCodingModule::Codec(kVideoCodecVP8, &vp8EncSettings);
     _vcm->RegisterTransportCallback(_encodeCallback); // encode returns error if callback uninitialized
     _encodeCallback->RegisterReceiverVCM(_vcm);
-    _encodeCallback->SetCodecType(kRTPVideoVP8);
+    _encodeCallback->SetCodecType(kRtpVideoVp8);
     TEST(_vcm->RegisterExternalEncoder(encoder, vp8EncSettings.plType) == VCM_OK);
     TEST(_vcm->RegisterSendCodec(&vp8EncSettings, 4, 1440) == VCM_OK);
     TEST(_vcm->AddVideoFrame(sourceFrame) == VCM_OK);
     TEST(_vcm->Decode() == VCM_OK);
     waitEvent->Wait(33);
-    _timeStamp += (WebRtc_UWord32)(9e4 / _frameRate);
+    _timeStamp += (uint32_t)(9e4 / _frameRate);
     sourceFrame.set_timestamp(_timeStamp);
     TEST(_vcm->AddVideoFrame(sourceFrame) == VCM_OK);
     TEST(_vcm->Decode() == VCM_OK);
@@ -233,19 +232,19 @@ CodecDataBaseTest::Perform(CmdArgs& args)
     TEST(_vcm->RegisterReceiveCodec(&receiveCodec, 1, true) == VCM_OK); // Require key frame
     _vcm->RegisterTransportCallback(_encodeCallback); // encode returns error if callback uninitialized
     _encodeCallback->RegisterReceiverVCM(_vcm);
-    _encodeCallback->SetCodecType(kRTPVideoVP8);
+    _encodeCallback->SetCodecType(kRtpVideoVp8);
     TEST(_vcm->AddVideoFrame(sourceFrame) == VCM_OK);
     TEST(_vcm->Decode() == VCM_OK);
     TEST(_vcm->ResetDecoder() == VCM_OK);
     waitEvent->Wait(33);
-    _timeStamp += (WebRtc_UWord32)(9e4 / _frameRate);
+    _timeStamp += (uint32_t)(9e4 / _frameRate);
     sourceFrame.set_timestamp(_timeStamp);
     TEST(_vcm->AddVideoFrame(sourceFrame) == VCM_OK);
     // Try to decode a delta frame. Should get a warning since we have enabled the "require key frame" setting
     // and because no frame type request callback has been registered.
     TEST(_vcm->Decode() == VCM_MISSING_CALLBACK);
     TEST(_vcm->IntraFrameRequest(0) == VCM_OK);
-    _timeStamp += (WebRtc_UWord32)(9e4 / _frameRate);
+    _timeStamp += (uint32_t)(9e4 / _frameRate);
     sourceFrame.set_timestamp(_timeStamp);
     TEST(_vcm->AddVideoFrame(sourceFrame) == VCM_OK);
     TEST(_vcm->Decode() == VCM_OK);
@@ -258,13 +257,13 @@ CodecDataBaseTest::Perform(CmdArgs& args)
     TEST(_vcm->RegisterReceiveCodec(&sendCodec, 1) == VCM_OK);
     TEST(_vcm->IntraFrameRequest(0) == VCM_OK);
     waitEvent->Wait(33);
-    _timeStamp += (WebRtc_UWord32)(9e4 / _frameRate);
+    _timeStamp += (uint32_t)(9e4 / _frameRate);
     sourceFrame.set_timestamp(_timeStamp);
     TEST(_vcm->AddVideoFrame(sourceFrame) == VCM_OK);
     TEST(_vcm->Decode() == VCM_OK);
     TEST(_vcm->RegisterReceiveCodec(&sendCodec, 1) == VCM_OK);
     waitEvent->Wait(33);
-    _timeStamp += (WebRtc_UWord32)(9e4 / _frameRate);
+    _timeStamp += (uint32_t)(9e4 / _frameRate);
     sourceFrame.set_timestamp(_timeStamp);
     TEST(_vcm->IntraFrameRequest(0) == VCM_OK);
     TEST(_vcm->AddVideoFrame(sourceFrame) == VCM_OK);
@@ -340,14 +339,14 @@ CodecDataBaseTest::Perform(CmdArgs& args)
                                         size_uv, tmpBuffer + size_y + size_uv,
                                         _width, _height,
                                         _width, half_width, half_width);
-                _timeStamp += (WebRtc_UWord32)(9e4 / _frameRate);
+                _timeStamp += (uint32_t)(9e4 / _frameRate);
                 sourceFrame.set_timestamp(_timeStamp);
                 // send frame to the encoder
                 TEST (_vcm->AddVideoFrame(sourceFrame) == VCM_OK);
                 waitEvent->Wait(33); // was 100
 
                 int ret =_vcm->Decode();
-                TEST(ret == 0);
+                TEST(ret >= 0);
                 if (ret < 0)
                 {
                     printf("Error #%d in frame number %d \n",ret, frameCnt);
@@ -360,7 +359,7 @@ CodecDataBaseTest::Perform(CmdArgs& args)
                 {
                     printf("frame number:%d\n",frameCnt);
                 }
-            } // end for:encode-decode
+            }  // end for:encode-decode
            // byte count for codec specific
 
             printf("Total bytes encoded: %f \n\n",(8.0/1000)*(encodeCallCDT->EncodedBytes()/((int)10/VideoCodingModule::NumberOfCodecs())));
@@ -376,14 +375,14 @@ CodecDataBaseTest::Perform(CmdArgs& args)
                 printf("PSNR from encoder-decoder send-receive control test"
                        "is %f\n\n", psnr.average);
             }
-        } // end: iterate codecs
+        }  // end: iterate codecs
         rewind(_sourceFile);
         delete [] tmpBuffer;
         delete decodeCallCDT;
         delete encodeCallCDT;
         // closing and calculating PSNR for prior encoder-decoder test
         TearDown(); // closing open files
-    } // end of #codecs >1
+    }  // end of #codecs >1
 
     delete waitEvent;
     Print();

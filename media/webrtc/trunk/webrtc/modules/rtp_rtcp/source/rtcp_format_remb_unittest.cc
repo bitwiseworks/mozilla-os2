@@ -8,16 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <gtest/gtest.h>
+#include "testing/gtest/include/gtest/gtest.h"
 
-#include "typedefs.h"
-#include "common_types.h"
-#include "rtp_utility.h"
-#include "rtcp_sender.h"
-#include "rtcp_receiver.h"
-#include "rtp_rtcp_impl.h"
-#include "modules/remote_bitrate_estimator/include/bwe_defines.h"
-#include "modules/remote_bitrate_estimator/include/mock/mock_remote_bitrate_observer.h"
+#include "webrtc/common_types.h"
+#include "webrtc/modules/remote_bitrate_estimator/include/bwe_defines.h"
+#include "webrtc/modules/remote_bitrate_estimator/include/mock/mock_remote_bitrate_observer.h"
+#include "webrtc/modules/rtp_rtcp/source/rtcp_receiver.h"
+#include "webrtc/modules/rtp_rtcp/source/rtcp_sender.h"
+#include "webrtc/modules/rtp_rtcp/source/rtp_rtcp_impl.h"
+#include "webrtc/modules/rtp_rtcp/source/rtp_utility.h"
+#include "webrtc/typedefs.h"
 
 namespace {
 
@@ -36,8 +36,8 @@ class TestTransport : public Transport {
   virtual int SendRTCPPacket(int /*channel*/,
                              const void *packet,
                              int packetLength) {
-    RTCPUtility::RTCPParserV2 rtcpParser((WebRtc_UWord8*)packet,
-                                         (WebRtc_Word32)packetLength,
+    RTCPUtility::RTCPParserV2 rtcpParser((uint8_t*)packet,
+                                         (int32_t)packetLength,
                                          true); // Allow non-compound RTCP
 
     EXPECT_TRUE(rtcpParser.IsValid());
@@ -45,9 +45,9 @@ class TestTransport : public Transport {
     EXPECT_EQ(0, rtcp_receiver_->IncomingRTCPPacket(rtcpPacketInformation,
                                                     &rtcpParser));
 
-    EXPECT_EQ((WebRtc_UWord32)kRtcpRemb,
+    EXPECT_EQ((uint32_t)kRtcpRemb,
               rtcpPacketInformation.rtcpPacketTypeFlags & kRtcpRemb);
-    EXPECT_EQ((WebRtc_UWord32)1234,
+    EXPECT_EQ((uint32_t)1234,
               rtcpPacketInformation.receiverEstimatedMaxBitrate);
     return packetLength;
   }
@@ -60,17 +60,20 @@ class RtcpFormatRembTest : public ::testing::Test {
  protected:
   RtcpFormatRembTest()
       : over_use_detector_options_(),
+        system_clock_(Clock::GetRealTimeClock()),
+        receive_statistics_(ReceiveStatistics::Create(system_clock_)),
         remote_bitrate_observer_(),
-        remote_bitrate_estimator_(RemoteBitrateEstimator::Create(
-            &remote_bitrate_observer_,
-            over_use_detector_options_,
-            RemoteBitrateEstimator::kMultiStreamEstimation)) {}
+        remote_bitrate_estimator_(
+            RemoteBitrateEstimatorFactory().Create(
+                &remote_bitrate_observer_,
+                system_clock_)) {}
   virtual void SetUp();
   virtual void TearDown();
 
   OverUseDetectorOptions over_use_detector_options_;
-  RtpRtcpClock* system_clock_;
+  Clock* system_clock_;
   ModuleRtpRtcpImpl* dummy_rtp_rtcp_impl_;
+  scoped_ptr<ReceiveStatistics> receive_statistics_;
   RTCPSender* rtcp_sender_;
   RTCPReceiver* rtcp_receiver_;
   TestTransport* test_transport_;
@@ -79,14 +82,14 @@ class RtcpFormatRembTest : public ::testing::Test {
 };
 
 void RtcpFormatRembTest::SetUp() {
-  system_clock_ = ModuleRTPUtility::GetSystemClock();
   RtpRtcp::Configuration configuration;
   configuration.id = 0;
   configuration.audio = false;
   configuration.clock = system_clock_;
   configuration.remote_bitrate_estimator = remote_bitrate_estimator_.get();
   dummy_rtp_rtcp_impl_ = new ModuleRtpRtcpImpl(configuration);
-  rtcp_sender_ = new RTCPSender(0, false, system_clock_, dummy_rtp_rtcp_impl_);
+  rtcp_sender_ =
+      new RTCPSender(0, false, system_clock_, receive_statistics_.get());
   rtcp_receiver_ = new RTCPReceiver(0, system_clock_, dummy_rtp_rtcp_impl_);
   test_transport_ = new TestTransport(rtcp_receiver_);
 
@@ -99,7 +102,6 @@ void RtcpFormatRembTest::TearDown() {
   delete rtcp_receiver_;
   delete dummy_rtp_rtcp_impl_;
   delete test_transport_;
-  delete system_clock_;
 }
 
 TEST_F(RtcpFormatRembTest, TestBasicAPI) {
@@ -113,23 +115,18 @@ TEST_F(RtcpFormatRembTest, TestBasicAPI) {
 }
 
 TEST_F(RtcpFormatRembTest, TestNonCompund) {
-  WebRtc_UWord32 SSRC = 456789;
+  uint32_t SSRC = 456789;
   EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpNonCompound));
   EXPECT_EQ(0, rtcp_sender_->SetREMBData(1234, 1, &SSRC));
-  EXPECT_EQ(0, rtcp_sender_->SendRTCP(kRtcpRemb));
+  RTCPSender::FeedbackState feedback_state(dummy_rtp_rtcp_impl_);
+  EXPECT_EQ(0, rtcp_sender_->SendRTCP(feedback_state, kRtcpRemb));
 }
 
 TEST_F(RtcpFormatRembTest, TestCompund) {
-  WebRtc_UWord32 SSRCs[2] = {456789, 98765};
+  uint32_t SSRCs[2] = {456789, 98765};
   EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpCompound));
   EXPECT_EQ(0, rtcp_sender_->SetREMBData(1234, 2, SSRCs));
-  EXPECT_EQ(0, rtcp_sender_->SendRTCP(kRtcpRemb));
+  RTCPSender::FeedbackState feedback_state(dummy_rtp_rtcp_impl_);
+  EXPECT_EQ(0, rtcp_sender_->SendRTCP(feedback_state, kRtcpRemb));
 }
-
-int main(int argc, char** argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-
-  return RUN_ALL_TESTS();
-}
-
-} // namespace
+}  // namespace

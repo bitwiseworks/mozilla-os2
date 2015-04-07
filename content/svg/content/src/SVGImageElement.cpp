@@ -3,9 +3,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/EventStates.h"
 
 #include "mozilla/dom/SVGImageElement.h"
+#include "mozilla/gfx/2D.h"
 #include "nsCOMPtr.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
@@ -16,13 +18,15 @@
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Image)
 
+using namespace mozilla::gfx;
+
 namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGImageElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGImageElement::WrapNode(JSContext *aCx)
 {
-  return SVGImageElementBinding::Wrap(aCx, aScope, this);
+  return SVGImageElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::LengthInfo SVGImageElement::sLengthInfo[4] =
@@ -41,16 +45,16 @@ nsSVGElement::StringInfo SVGImageElement::sStringInfo[1] =
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_ISUPPORTS_INHERITED6(SVGImageElement, SVGImageElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement,
-                             imgINotificationObserver,
-                             nsIImageLoadingContent, imgIOnloadBlocker)
+NS_IMPL_ISUPPORTS_INHERITED(SVGImageElement, SVGImageElementBase,
+                            nsIDOMNode, nsIDOMElement,
+                            nsIDOMSVGElement,
+                            imgINotificationObserver,
+                            nsIImageLoadingContent, imgIOnloadBlocker)
 
 //----------------------------------------------------------------------
 // Implementation
 
-SVGImageElement::SVGImageElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+SVGImageElement::SVGImageElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : SVGImageElementBase(aNodeInfo)
 {
   // We start out broken
@@ -200,7 +204,7 @@ SVGImageElement::UnbindFromTree(bool aDeep, bool aNullParent)
   SVGImageElementBase::UnbindFromTree(aDeep, aNullParent);
 }
 
-nsEventStates
+EventStates
 SVGImageElement::IntrinsicState() const
 {
   return SVGImageElementBase::IntrinsicState() |
@@ -234,6 +238,31 @@ SVGImageElement::ConstructPath(gfxContext *aCtx)
     return;
 
   aCtx->Rectangle(gfxRect(x, y, width, height));
+}
+
+TemporaryRef<Path>
+SVGImageElement::BuildPath()
+{
+  // We get called in order to get bounds for this element, and for
+  // hit-testing against it. For that we just pretend to be a rectangle.
+
+  float x, y, width, height;
+  GetAnimatedLengthValues(&x, &y, &width, &height, nullptr);
+
+  if (width <= 0 || height <= 0) {
+    return nullptr;
+  }
+
+  RefPtr<PathBuilder> pathBuilder = CreatePathBuilder();
+
+  Rect r(x, y, width, height);
+  pathBuilder->MoveTo(r.TopLeft());
+  pathBuilder->LineTo(r.TopRight());
+  pathBuilder->LineTo(r.BottomRight());
+  pathBuilder->LineTo(r.BottomLeft());
+  pathBuilder->Close();
+
+  return pathBuilder->Finish();
 }
 
 //----------------------------------------------------------------------

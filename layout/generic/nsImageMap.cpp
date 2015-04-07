@@ -7,23 +7,16 @@
 
 #include "nsImageMap.h"
 
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/Event.h" // for nsIDOMEvent::InternalDOMEvent()
 #include "nsString.h"
-#include "nsDOMEvent.h"
 #include "nsReadableUtils.h"
 #include "nsRenderingContext.h"
 #include "nsPresContext.h"
-#include "nsIURL.h"
-#include "nsIServiceManager.h"
-#include "nsNetUtil.h"
-#include "nsTextFragment.h"
-#include "mozilla/dom/Element.h"
-#include "nsIDocument.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsGkAtoms.h"
-#include "nsIPresShell.h"
 #include "nsImageFrame.h"
 #include "nsCoord.h"
-#include "nsIConsoleService.h"
 #include "nsIScriptError.h"
 #include "nsIStringBundle.h"
 #include "nsContentUtils.h"
@@ -32,9 +25,7 @@
 #include "nsAccessibilityService.h"
 #endif
 
-namespace dom = mozilla::dom;
-
-static NS_DEFINE_CID(kCStringBundleServiceCID, NS_STRINGBUNDLESERVICE_CID);
+using namespace mozilla;
 
 class Area {
 public:
@@ -91,7 +82,7 @@ static void logMessage(nsIContent*      aContent,
   nsIDocument* doc = aContent->OwnerDoc();
 
   nsContentUtils::ReportToConsole(
-     aFlags, "ImageMap", doc,
+     aFlags, NS_LITERAL_CSTRING("ImageMap"), doc,
      nsContentUtils::eLAYOUT_PROPERTIES,
      aMessageName,
      nullptr,  /* params */
@@ -275,9 +266,9 @@ class DefaultArea : public Area {
 public:
   DefaultArea(nsIContent* aArea);
 
-  virtual bool IsInside(nscoord x, nscoord y) const;
-  virtual void Draw(nsIFrame* aFrame, nsRenderingContext& aRC);
-  virtual void GetRect(nsIFrame* aFrame, nsRect& aRect);
+  virtual bool IsInside(nscoord x, nscoord y) const MOZ_OVERRIDE;
+  virtual void Draw(nsIFrame* aFrame, nsRenderingContext& aRC) MOZ_OVERRIDE;
+  virtual void GetRect(nsIFrame* aFrame, nsRect& aRect) MOZ_OVERRIDE;
 };
 
 DefaultArea::DefaultArea(nsIContent* aArea)
@@ -320,10 +311,10 @@ class RectArea : public Area {
 public:
   RectArea(nsIContent* aArea);
 
-  virtual void ParseCoords(const nsAString& aSpec);
-  virtual bool IsInside(nscoord x, nscoord y) const;
-  virtual void Draw(nsIFrame* aFrame, nsRenderingContext& aRC);
-  virtual void GetRect(nsIFrame* aFrame, nsRect& aRect);
+  virtual void ParseCoords(const nsAString& aSpec) MOZ_OVERRIDE;
+  virtual bool IsInside(nscoord x, nscoord y) const MOZ_OVERRIDE;
+  virtual void Draw(nsIFrame* aFrame, nsRenderingContext& aRC) MOZ_OVERRIDE;
+  virtual void GetRect(nsIFrame* aFrame, nsRect& aRect) MOZ_OVERRIDE;
 };
 
 RectArea::RectArea(nsIContent* aArea)
@@ -422,10 +413,10 @@ class PolyArea : public Area {
 public:
   PolyArea(nsIContent* aArea);
 
-  virtual void ParseCoords(const nsAString& aSpec);
-  virtual bool IsInside(nscoord x, nscoord y) const;
-  virtual void Draw(nsIFrame* aFrame, nsRenderingContext& aRC);
-  virtual void GetRect(nsIFrame* aFrame, nsRect& aRect);
+  virtual void ParseCoords(const nsAString& aSpec) MOZ_OVERRIDE;
+  virtual bool IsInside(nscoord x, nscoord y) const MOZ_OVERRIDE;
+  virtual void Draw(nsIFrame* aFrame, nsRenderingContext& aRC) MOZ_OVERRIDE;
+  virtual void GetRect(nsIFrame* aFrame, nsRect& aRect) MOZ_OVERRIDE;
 };
 
 PolyArea::PolyArea(nsIContent* aArea)
@@ -562,10 +553,10 @@ class CircleArea : public Area {
 public:
   CircleArea(nsIContent* aArea);
 
-  virtual void ParseCoords(const nsAString& aSpec);
-  virtual bool IsInside(nscoord x, nscoord y) const;
-  virtual void Draw(nsIFrame* aFrame, nsRenderingContext& aRC);
-  virtual void GetRect(nsIFrame* aFrame, nsRect& aRect);
+  virtual void ParseCoords(const nsAString& aSpec) MOZ_OVERRIDE;
+  virtual bool IsInside(nscoord x, nscoord y) const MOZ_OVERRIDE;
+  virtual void Draw(nsIFrame* aFrame, nsRenderingContext& aRC) MOZ_OVERRIDE;
+  virtual void GetRect(nsIFrame* aFrame, nsRect& aRect) MOZ_OVERRIDE;
 };
 
 CircleArea::CircleArea(nsIContent* aArea)
@@ -669,9 +660,9 @@ nsImageMap::~nsImageMap()
   NS_ASSERTION(mAreas.Length() == 0, "Destroy was not called");
 }
 
-NS_IMPL_ISUPPORTS2(nsImageMap,
-                   nsIMutationObserver,
-                   nsIDOMEventListener)
+NS_IMPL_ISUPPORTS(nsImageMap,
+                  nsIMutationObserver,
+                  nsIDOMEventListener)
 
 nsresult
 nsImageMap::GetBoundsForAreaContent(nsIContent *aContent,
@@ -828,6 +819,7 @@ nsImageMap::AddArea(nsIContent* aArea)
     area = new PolyArea(aArea);
     break;
   default:
+    area = nullptr;
     NS_NOTREACHED("FindAttrValueIn returned an unexpected value.");
     break;
   }
@@ -841,9 +833,9 @@ nsImageMap::AddArea(nsIContent* aArea)
                                 false);
 
   // This is a nasty hack.  It needs to go away: see bug 135040.  Once this is
-  // removed, the code added to nsCSSFrameConstructor::RestyleElement,
+  // removed, the code added to RestyleManager::RestyleElement,
   // nsCSSFrameConstructor::ContentRemoved (both hacks there), and
-  // nsCSSFrameConstructor::ProcessRestyledFrames to work around this issue can
+  // RestyleManager::ProcessRestyledFrames to work around this issue can
   // be removed.
   aArea->SetPrimaryFrame(mImageFrame);
 

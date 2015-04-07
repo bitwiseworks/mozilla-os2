@@ -180,23 +180,18 @@ destroying the MediaDecoder object.
 
 #include "nsISupports.h"
 #include "nsCOMPtr.h"
-#include "nsIThread.h"
-#include "nsIChannel.h"
 #include "nsIObserver.h"
 #include "nsAutoPtr.h"
-#include "nsSize.h"
-#include "prlog.h"
-#include "gfxContext.h"
-#include "gfxRect.h"
 #include "MediaResource.h"
+#include "mozilla/dom/AudioChannelBinding.h"
+#include "mozilla/gfx/Rect.h"
 #include "mozilla/ReentrantMonitor.h"
+#include "mozilla/TimeStamp.h"
 #include "MediaStreamGraph.h"
-#include "MediaDecoderOwner.h"
-#include "AudioChannelCommon.h"
 #include "AbstractMediaDecoder.h"
+#include "necko-config.h"
 
 class nsIStreamListener;
-class nsIMemoryReporter;
 class nsIPrincipal;
 class nsITimer;
 
@@ -206,28 +201,14 @@ class TimeRanges;
 }
 }
 
-using namespace mozilla::dom;
-
 namespace mozilla {
 namespace layers {
 class Image;
 } //namespace layers
 
-class MediaByteRange;
 class VideoFrameContainer;
-class AudioStream;
 class MediaDecoderStateMachine;
 class MediaDecoderOwner;
-
-// The size to use for audio data frames in MozAudioAvailable events.
-// This value is per channel, and is chosen to give ~43 fps of events,
-// for example, 44100 with 2 channels, 2*1024 = 2048.
-static const uint32_t FRAMEBUFFER_LENGTH_PER_CHANNEL = 1024;
-
-// The total size of the framebuffer used for MozAudioAvailable events
-// has to be within the following range.
-static const uint32_t FRAMEBUFFER_LENGTH_MIN = 512;
-static const uint32_t FRAMEBUFFER_LENGTH_MAX = 16384;
 
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
 // GetTickCount() and conflicts with MediaDecoder::GetCurrentTime implementation.
@@ -235,13 +216,46 @@ static const uint32_t FRAMEBUFFER_LENGTH_MAX = 16384;
 #undef GetCurrentTime
 #endif
 
+// Stores the seek target; the time to seek to, and whether an Accurate,
+// or "Fast" (nearest keyframe) seek was requested.
+struct SeekTarget {
+  enum Type {
+    Invalid,
+    PrevSyncPoint,
+    Accurate
+  };
+  SeekTarget()
+    : mTime(-1.0)
+    , mType(SeekTarget::Invalid)
+  {
+  }
+  SeekTarget(int64_t aTimeUsecs, Type aType)
+    : mTime(aTimeUsecs)
+    , mType(aType)
+  {
+  }
+  bool IsValid() const {
+    return mType != SeekTarget::Invalid;
+  }
+  void Reset() {
+    mTime = -1;
+    mType = SeekTarget::Invalid;
+  }
+  // Seek target time in microseconds.
+  int64_t mTime;
+  // Whether we should seek "Fast", or "Accurate".
+  // "Fast" seeks to the seek point preceeding mTime, whereas
+  // "Accurate" seeks as close as possible to mTime.
+  Type mType;
+};
+
 class MediaDecoder : public nsIObserver,
                      public AbstractMediaDecoder
 {
 public:
-  typedef mozilla::layers::Image Image;
+  class DecodedStreamGraphListener;
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIOBSERVER
 
   // Enumeration for the valid play states (see mPlayState)
@@ -258,6 +272,9 @@ public:
   MediaDecoder();
   virtual ~MediaDecoder();
 
+  // Reset the decoder and notify the media element that
+  // server connection is closed.
+  virtual void ResetConnectionState();
   // Create a new decoder of the same type as this one.
   // Subclasses must implement this.
   virtual MediaDecoder* Clone() = 0;
@@ -277,16 +294,12 @@ public:
 
   // Start downloading the media. Decode the downloaded data up to the
   // point of the first frame of data.
-  // aResource is the media stream to use. Ownership of aResource passes to
-  // the decoder, even if Load returns an error.
   // This is called at most once per decoder, after Init().
-  virtual nsresult Load(MediaResource* aResource,
-                        nsIStreamListener** aListener,
+  virtual nsresult Load(nsIStreamListener** aListener,
                         MediaDecoder* aCloneDonor);
 
-  // Called in |Load| to open the media resource.
-  nsresult OpenResource(MediaResource* aResource,
-                        nsIStreamListener** aStreamListener);
+  // Called in |Load| to open mResource.
+  nsresult OpenResource(nsIStreamListener** aStreamListener);
 
   // Called when the video file has completed downloading.
   virtual void ResourceLoaded();
@@ -306,6 +319,11 @@ public:
   {
     return mResource;
   }
+  void SetResource(MediaResource* aResource)
+  {
+    NS_ASSERTION(NS_IsMainThread(), "Should only be called on main thread");
+    mResource = aResource;
+  }
 
   // Return the principal of the current URI being played or downloaded.
   virtual already_AddRefed<nsIPrincipal> GetCurrentPrincipal();
@@ -315,7 +333,9 @@ public:
   virtual double GetCurrentTime();
 
   // Seek to the time position in (seconds) from the start of the video.
-  virtual nsresult Seek(double aTime);
+  // If aDoFastSeek is true, we'll seek to the sync point/keyframe preceeding
+  // the seek target.
+  virtual nsresult Seek(double aTime, SeekTarget::Type aSeekType);
 
   // Enables decoders to supply an enclosing byte range for a seek offset.
   // E.g. used by ChannelMediaResource to download a whole cluster for
@@ -346,8 +366,15 @@ public:
   // of our audio.
   virtual void SetAudioCaptured(bool aCaptured);
 
-  void SetPlaybackRate(double aPlaybackRate);
+  virtual void NotifyWaitingForResourcesStatusChanged() MOZ_OVERRIDE;
+
+  virtual void SetPlaybackRate(double aPlaybackRate);
   void SetPreservesPitch(bool aPreservesPitch);
+
+  // Directs the decoder to not preroll extra samples until the media is
+  // played. This reduces the memory overhead of media elements that may
+  // not be played. Note that seeking also doesn't cause us start prerolling.
+  void SetMinimizePrerollUntilPlaybackStarts();
 
   // All MediaStream-related data is protected by mReentrantMonitor.
   // We have at most one DecodedStreamData per MediaDecoder. Its stream
@@ -356,10 +383,15 @@ public:
   // replaying after the input as ended. In the latter case, the new source is
   // not connected to streams created by captureStreamUntilEnded.
 
-  struct DecodedStreamData MOZ_FINAL : public MainThreadMediaStreamListener {
+  struct DecodedStreamData {
+    typedef gfx::IntSize IntSize;
+
     DecodedStreamData(MediaDecoder* aDecoder,
                       int64_t aInitialTime, SourceMediaStream* aStream);
     ~DecodedStreamData();
+
+    StreamTime GetLastOutputTime() { return mListener->GetLastOutputTime(); }
+    bool IsFinished() { return mListener->IsFinishedOnMainThread(); }
 
     // The following group of fields are protected by the decoder's monitor
     // and can be read or written on any thread.
@@ -377,8 +409,8 @@ public:
     MediaDecoder* mDecoder;
     // The last video image sent to the stream. Useful if we need to replicate
     // the image.
-    nsRefPtr<Image> mLastVideoImage;
-    gfxIntSize mLastVideoImageDisplaySize;
+    nsRefPtr<layers::Image> mLastVideoImage;
+    IntSize mLastVideoImageDisplaySize;
     // This is set to true when the stream is initialized (audio and
     // video tracks added).
     bool mStreamInitialized;
@@ -389,12 +421,62 @@ public:
     // The decoder is responsible for calling Destroy() on this stream.
     // Can be read from any thread.
     const nsRefPtr<SourceMediaStream> mStream;
+    // Can be read from any thread.
+    nsRefPtr<DecodedStreamGraphListener> mListener;
     // True when we've explicitly blocked this stream because we're
     // not in PLAY_STATE_PLAYING. Used on the main thread only.
     bool mHaveBlockedForPlayState;
-
-    virtual void NotifyMainThreadStateChanged() MOZ_OVERRIDE;
+    // We also have an explicit blocker on the stream when
+    // mDecoderStateMachine is non-null and MediaDecoderStateMachine is false.
+    bool mHaveBlockedForStateMachineNotPlaying;
   };
+
+  class DecodedStreamGraphListener : public MediaStreamListener {
+  public:
+    DecodedStreamGraphListener(MediaStream* aStream, DecodedStreamData* aData);
+    virtual void NotifyOutput(MediaStreamGraph* aGraph, GraphTime aCurrentTime) MOZ_OVERRIDE;
+    virtual void NotifyFinished(MediaStreamGraph* aGraph) MOZ_OVERRIDE;
+
+    void DoNotifyFinished();
+
+    StreamTime GetLastOutputTime()
+    {
+      MutexAutoLock lock(mMutex);
+      return mLastOutputTime;
+    }
+    void Forget()
+    {
+      NS_ASSERTION(NS_IsMainThread(), "Main thread only");
+      mData = nullptr;
+
+      MutexAutoLock lock(mMutex);
+      mStream = nullptr;
+    }
+    bool SetFinishedOnMainThread(bool aFinished)
+    {
+      MutexAutoLock lock(mMutex);
+      bool result = !mStreamFinishedOnMainThread;
+      mStreamFinishedOnMainThread = aFinished;
+      return result;
+    }
+    bool IsFinishedOnMainThread()
+    {
+      MutexAutoLock lock(mMutex);
+      return mStreamFinishedOnMainThread;
+    }
+  private:
+    // Main thread only
+    DecodedStreamData* mData;
+
+    Mutex mMutex;
+    // Protected by mMutex
+    nsRefPtr<MediaStream> mStream;
+    // Protected by mMutex
+    StreamTime mLastOutputTime;
+    // Protected by mMutex
+    bool mStreamFinishedOnMainThread;
+  };
+
   struct OutputStreamData {
     void Init(ProcessedMediaStream* aStream, bool aFinishWhenEnded)
     {
@@ -419,14 +501,14 @@ public:
    * Recreates mDecodedStream. Call this to create mDecodedStream at first,
    * and when seeking, to ensure a new stream is set up with fresh buffers.
    * aStartTimeUSecs is relative to the state machine's mStartTime.
+   * Decoder monitor must be held.
    */
   void RecreateDecodedStream(int64_t aStartTimeUSecs);
   /**
-   * Called when the state of mDecodedStream as visible on the main thread
-   * has changed. In particular we want to know when the stream has finished
-   * so we can call PlaybackEnded.
+   * Call this when mDecoderStateMachine or mDecoderStateMachine->IsPlaying() changes.
+   * Decoder monitor must be held.
    */
-  void NotifyDecodedStreamMainThreadStateChanged();
+  void UpdateStreamBlockingForStateMachinePlaying();
   nsTArray<OutputStreamData>& OutputStreams()
   {
     GetReentrantMonitor().AssertCurrentThreadIn();
@@ -485,9 +567,10 @@ public:
   // changed. Called on main thread only.
   virtual void NotifyPrincipalChanged();
 
-  // Called by the decode thread to keep track of the number of bytes read
-  // from the resource.
-  void NotifyBytesConsumed(int64_t aBytes) MOZ_FINAL MOZ_OVERRIDE;
+  // Called by the MediaResource to keep track of the number of bytes read
+  // from the resource. Called on the main by an event runner dispatched
+  // by the MediaResource read functions.
+  void NotifyBytesConsumed(int64_t aBytes, int64_t aOffset) MOZ_FINAL MOZ_OVERRIDE;
 
   int64_t GetEndMediaTime() const MOZ_FINAL MOZ_OVERRIDE;
 
@@ -504,7 +587,18 @@ public:
   // from a content header. Must be called from the main thread only.
   virtual void SetDuration(double aDuration);
 
+  // Sets the initial duration of the media. Called while the media metadata
+  // is being read and the decode is being setup.
   void SetMediaDuration(int64_t aDuration) MOZ_OVERRIDE;
+  // Updates the media duration. This is called while the media is being
+  // played, calls before the media has reached loaded metadata are ignored.
+  // The duration is assumed to be an estimate, and so a degree of
+  // instability is expected; if the incoming duration is not significantly
+  // different from the existing duration, the change request is ignored.
+  // If the incoming duration is significantly different, the duration is
+  // changed, this causes a durationchanged event to fire to the media
+  // element.
+  void UpdateEstimatedMediaDuration(int64_t aDuration) MOZ_OVERRIDE;
 
   // Set a flag indicating whether seeking is supported
   virtual void SetMediaSeekable(bool aMediaSeekable) MOZ_OVERRIDE;
@@ -517,7 +611,7 @@ public:
   virtual bool IsTransportSeekable();
 
   // Return the time ranges that can be seeked into.
-  virtual nsresult GetSeekable(TimeRanges* aSeekable);
+  virtual nsresult GetSeekable(dom::TimeRanges* aSeekable);
 
   // Set the end time of the media resource. When playback reaches
   // this point the media pauses. aTime is in seconds.
@@ -528,6 +622,7 @@ public:
 
   // Invalidate the frame.
   void Invalidate();
+  void InvalidateWithFlags(uint32_t aFlags);
 
   // Suspend any media downloads that are in progress. Called by the
   // media element when it is sent to the bfcache, or when we need
@@ -552,13 +647,7 @@ public:
   virtual void MoveLoadsToBackground();
 
   // Returns a weak reference to the media decoder owner.
-  mozilla::MediaDecoderOwner* GetMediaOwner() const;
-
-  // Returns the current size of the framebuffer used in
-  // MozAudioAvailable events.
-  uint32_t GetFrameBufferLength() { return mFrameBufferLength; }
-
-  void AudioAvailable(float* aFrameBuffer, uint32_t aFrameBufferLength, float aTime);
+  MediaDecoderOwner* GetMediaOwner() const;
 
   // Called by the state machine to notify the decoder that the duration
   // has changed.
@@ -577,22 +666,18 @@ public:
 
   // Constructs the time ranges representing what segments of the media
   // are buffered and playable.
-  virtual nsresult GetBuffered(TimeRanges* aBuffered);
+  virtual nsresult GetBuffered(dom::TimeRanges* aBuffered);
 
   // Returns the size, in bytes, of the heap memory used by the currently
   // queued decoded video and audio data.
-  virtual int64_t VideoQueueMemoryInUse();
-  virtual int64_t AudioQueueMemoryInUse();
+  size_t SizeOfVideoQueue();
+  size_t SizeOfAudioQueue();
 
   VideoFrameContainer* GetVideoFrameContainer() MOZ_FINAL MOZ_OVERRIDE
   {
     return mVideoFrameContainer;
   }
-  mozilla::layers::ImageContainer* GetImageContainer() MOZ_OVERRIDE;
-
-  // Sets the length of the framebuffer used in MozAudioAvailable events.
-  // The new size must be between 512 and 16384.
-  virtual nsresult RequestFrameBufferLength(uint32_t aLength);
+  layers::ImageContainer* GetImageContainer() MOZ_OVERRIDE;
 
   // Return the current state. Can be called on any thread. If called from
   // a non-main thread, the decoder monitor must be held.
@@ -640,6 +725,10 @@ public:
   // The actual playback rate computation. The monitor must be held.
   virtual double ComputePlaybackRate(bool* aReliable);
 
+  // Return true when the media is same-origin with the element. The monitor
+  // must be held.
+  bool IsSameOriginMedia();
+
   // Returns true if we can play the entire media through without stopping
   // to buffer, given the current download and playback rates.
   bool CanPlayThrough();
@@ -650,8 +739,8 @@ public:
   // held.
   void UpdatePlaybackPosition(int64_t aTime) MOZ_FINAL MOZ_OVERRIDE;
 
-  void SetAudioChannelType(AudioChannelType aType) { mAudioChannelType = aType; }
-  AudioChannelType GetAudioChannelType() { return mAudioChannelType; }
+  void SetAudioChannel(dom::AudioChannel aChannel) { mAudioChannel = aChannel; }
+  dom::AudioChannel GetAudioChannel() { return mAudioChannel; }
 
   // Send a new set of metadata to the state machine, to be dispatched to the
   // main thread to be presented when the |currentTime| of the media is greater
@@ -671,7 +760,11 @@ public:
   // Change to a new play state. This updates the mState variable and
   // notifies any thread blocking on this object's monitor of the
   // change. Call on the main thread only.
-  void ChangeState(PlayState aState);
+  virtual void ChangeState(PlayState aState);
+
+  // Called by |ChangeState|, to update the state machine.
+  // Call on the main thread only and the lock must be obtained.
+  virtual void ApplyStateToStateMachine(PlayState aState);
 
   // May be called by the reader to notify this decoder that the metadata from
   // the media file has been read. Call on the decode thread only.
@@ -679,13 +772,17 @@ public:
 
   // Called when the metadata from the media file has been loaded by the
   // state machine. Call on the main thread only.
-  void MetadataLoaded(int aChannels, int aRate, bool aHasAudio, bool aHasVideo, MetadataTags* aTags);
+  virtual void MetadataLoaded(int aChannels,
+                              int aRate,
+                              bool aHasAudio,
+                              bool aHasVideo,
+                              MetadataTags* aTags);
 
   // Called when the first frame has been loaded.
   // Call on the main thread only.
   void FirstFrameLoaded();
 
-  // Returns true if the resource has been loaded. Must be in monitor.
+  // Returns true if the resource has been loaded. Acquires the monitor.
   // Call from any thread.
   virtual bool IsDataCachedToEndOfResource();
 
@@ -712,7 +809,7 @@ public:
 
   // Calls mElement->UpdateReadyStateForData, telling it whether we have
   // data for the next frame and if we're buffering. Main thread only.
-  void UpdateReadyStateForData();
+  virtual void UpdateReadyStateForData();
 
   // Find the end of the cached data starting at the current decoder
   // position.
@@ -728,24 +825,27 @@ public:
   // Drop reference to state machine.  Only called during shutdown dance.
   virtual void ReleaseStateMachine();
 
-  // Called when a "MozAudioAvailable" event listener is added. This enables
-  // the decoder to only dispatch "MozAudioAvailable" events when a
-  // handler exists, reducing overhead. Called on the main thread.
-  virtual void NotifyAudioAvailableListener();
-
   // Notifies the element that decoding has failed.
   virtual void DecodeError();
 
+  // Indicate whether the media is same-origin with the element.
+  void UpdateSameOriginStatus(bool aSameOrigin);
+
   MediaDecoderOwner* GetOwner() MOZ_OVERRIDE;
+
+  // Returns true if we're logically playing, that is, if the Play() has
+  // been called and Pause() has not or we have not yet reached the end
+  // of media. This is irrespective of the seeking state; if the owner
+  // calls Play() and then Seek(), we still count as logically playing.
+  // The decoder monitor must be held.
+  bool IsLogicallyPlaying();
 
 #ifdef MOZ_RAW
   static bool IsRawEnabled();
 #endif
 
-#ifdef MOZ_OGG
   static bool IsOggEnabled();
   static bool IsOpusEnabled();
-#endif
 
 #ifdef MOZ_WAVE
   static bool IsWaveEnabled();
@@ -753,6 +853,9 @@ public:
 
 #ifdef MOZ_WEBM
   static bool IsWebMEnabled();
+#endif
+#ifdef NECKO_PROTOCOL_rtsp
+  static bool IsRtspEnabled();
 #endif
 
 #ifdef MOZ_GSTREAMER
@@ -767,12 +870,12 @@ public:
   static bool IsMediaPluginsEnabled();
 #endif
 
-#ifdef MOZ_DASH
-  static bool IsDASHEnabled();
-#endif
-
 #ifdef MOZ_WMF
   static bool IsWMFEnabled();
+#endif
+
+#ifdef MOZ_APPLEMEDIA
+  static bool IsAppleMP3Enabled();
 #endif
 
   // Schedules the state machine to run one cycle on the shared state
@@ -867,15 +970,15 @@ public:
     ReentrantMonitor mReentrantMonitor;
 
     // Number of frames parsed and demuxed from media.
-    // Access protected by mStatsReentrantMonitor.
+    // Access protected by mReentrantMonitor.
     uint32_t mParsedFrames;
 
     // Number of parsed frames which were actually decoded.
-    // Access protected by mStatsReentrantMonitor.
+    // Access protected by mReentrantMonitor.
     uint32_t mDecodedFrames;
 
     // Number of decoded frames which were actually sent down the rendering
-    // pipeline to be painted ("presented"). Access protected by mStatsReentrantMonitor.
+    // pipeline to be painted ("presented"). Access protected by mReentrantMonitor.
     uint32_t mPresentedFrames;
   };
 
@@ -889,6 +992,7 @@ public:
     GetFrameStatistics().NotifyDecodedFrames(aParsed, aDecoded);
   }
 
+protected:
   /******
    * The following members should be accessed with the decoder lock held.
    ******/
@@ -919,13 +1023,6 @@ public:
   double mInitialPlaybackRate;
   bool mInitialPreservesPitch;
 
-  // Position to seek to when the seek notification is received by the
-  // decode thread. Written by the main thread and read via the
-  // decode thread. Synchronised using mReentrantMonitor. If the
-  // value is negative then no seek has been requested. When a seek is
-  // started this is reset to negative.
-  double mRequestedSeekTime;
-
   // Duration of the media resource. Set to -1 if unknown.
   // Set when the metadata is loaded. Accessed on the main thread
   // only.
@@ -941,6 +1038,10 @@ public:
   // True if the media is seekable (i.e. supports random access).
   bool mMediaSeekable;
 
+  // True if the media is same-origin with the element. Data can only be
+  // passed to MediaStreams when this is true.
+  bool mSameOriginMedia;
+
   /******
    * The following member variables can be accessed from any thread.
    ******/
@@ -950,7 +1051,7 @@ public:
   // is synchronised on a monitor. The lifetime of this object is
   // after mPlayState is LOADING and before mPlayState is SHUTDOWN. It
   // is safe to access it during this period.
-  nsCOMPtr<MediaDecoderStateMachine> mDecoderStateMachine;
+  nsRefPtr<MediaDecoderStateMachine> mDecoderStateMachine;
 
   // Media data resource.
   nsRefPtr<MediaResource> mResource;
@@ -990,7 +1091,7 @@ private:
   // The |RestrictedAccessMonitor| member object.
   RestrictedAccessMonitor mReentrantMonitor;
 
-public:
+protected:
   // Data about MediaStreams that are being fed by this decoder.
   nsTArray<OutputStreamData> mOutputStreams;
   // The SourceMediaStream we are using to feed the mOutputStreams. This stream
@@ -1003,6 +1104,10 @@ public:
   // True if this decoder is in dormant state.
   // Should be true only when PlayState is PLAY_STATE_LOADING.
   bool mIsDormant;
+
+  // True if this decoder is exiting from dormant state.
+  // Should be true only when PlayState is PLAY_STATE_LOADING.
+  bool mIsExitingDormant;
 
   // Set to one of the valid play states.
   // This can only be changed on the main thread while holding the decoder
@@ -1020,6 +1125,15 @@ public:
   // This can only be PLAY_STATE_PAUSED or PLAY_STATE_PLAYING.
   PlayState mNextState;
 
+  // Position to seek to when the seek notification is received by the
+  // decode thread.
+  // This can only be changed on the main thread while holding the decoder
+  // monitor. Thus, it can be safely read while holding the decoder monitor
+  // OR on the main thread.
+  // If the SeekTarget's IsValid() accessor returns false, then no seek has
+  // been requested. When a seek is started this is reset to invalid.
+  SeekTarget mRequestedSeekTarget;
+
   // True when we have fully loaded the resource and reported that
   // to the element (i.e. reached NETWORK_LOADED state).
   // Accessed on the main thread only.
@@ -1034,12 +1148,6 @@ public:
 
   // True if the stream is infinite (e.g. a webradio).
   bool mInfiniteStream;
-
-  // True if NotifyDecodedStreamMainThreadStateChanged should retrigger
-  // PlaybackEnded when mDecodedStream->mStream finishes.
-  bool mTriggerPlaybackEndedWhenSourceStreamFinishes;
-
-protected:
 
   // Start timer to update download progress information.
   nsresult StartProgress();
@@ -1082,9 +1190,6 @@ protected:
   // time of the last decoded video frame).
   MediaChannelStatistics mPlaybackStatistics;
 
-  // The framebuffer size to use for audioavailable events.
-  uint32_t mFrameBufferLength;
-
   // True when our media stream has been pinned. We pin the stream
   // while seeking.
   bool mPinnedForSeek;
@@ -1100,7 +1205,13 @@ protected:
 
   // Be assigned from media element during the initialization and pass to
   // AudioStream Class.
-  AudioChannelType mAudioChannelType;
+  dom::AudioChannel mAudioChannel;
+
+  // True if the decoder has been directed to minimize its preroll before
+  // playback starts. After the first time playback starts, we don't attempt
+  // to minimize preroll, as we assume the user is likely to keep playing,
+  // or play the media again.
+  bool mMinimizePreroll;
 };
 
 } // namespace mozilla

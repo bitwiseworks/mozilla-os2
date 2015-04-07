@@ -66,6 +66,10 @@ public:
     // (The zeroes will be the inverse of the poles)
     void setAllpassPole(const Complex& pole);
 
+    // Return true iff the next output block will contain sound even with
+    // silent input.
+    bool hasTail() const { return m_y1 || m_y2 || m_x1 || m_x2; }
+
     // Resets filter state
     void reset();
 
@@ -89,6 +93,10 @@ private:
     double m_a2;
 
     // Filter memory
+    //
+    // Double precision for the output values is valuable because errors can
+    // accumulate.  Input values are also stored as double so they need not be
+    // converted again for computation.
     double m_x1; // input delayed by 1 sample
     double m_x2; // input delayed by 2 samples
     double m_y1; // output delayed by 1 sample

@@ -55,7 +55,6 @@
 #include "rdf.h"
 #include "nsCRT.h"
 #include "nsCRTGlue.h"
-#include "prbit.h"
 #include "mozilla/HashFunctions.h"
 
 using namespace mozilla;
@@ -140,7 +139,7 @@ struct ResourceHashEntry : public PLDHashEntryHdr {
     }
 };
 
-static PLDHashTableOps gResourceTableOps = {
+static const PLDHashTableOps gResourceTableOps = {
     PL_DHashAllocTable,
     PL_DHashFreeTable,
     ResourceHashEntry::HashKey,
@@ -158,12 +157,12 @@ static PLDHashTableOps gResourceTableOps = {
 
 struct LiteralHashEntry : public PLDHashEntryHdr {
     nsIRDFLiteral *mLiteral;
-    const PRUnichar *mKey;
+    const char16_t *mKey;
 
     static PLDHashNumber
     HashKey(PLDHashTable *table, const void *key)
     {
-        return HashString(static_cast<const PRUnichar *>(key));
+        return HashString(static_cast<const char16_t *>(key));
     }
 
     static bool
@@ -173,12 +172,12 @@ struct LiteralHashEntry : public PLDHashEntryHdr {
         const LiteralHashEntry *entry =
             static_cast<const LiteralHashEntry *>(hdr);
 
-        return 0 == nsCRT::strcmp(static_cast<const PRUnichar *>(key),
+        return 0 == nsCRT::strcmp(static_cast<const char16_t *>(key),
                                   entry->mKey);
     }
 };
 
-static PLDHashTableOps gLiteralTableOps = {
+static const PLDHashTableOps gLiteralTableOps = {
     PL_DHashAllocTable,
     PL_DHashFreeTable,
     LiteralHashEntry::HashKey,
@@ -215,7 +214,7 @@ struct IntHashEntry : public PLDHashEntryHdr {
     }
 };
 
-static PLDHashTableOps gIntTableOps = {
+static const PLDHashTableOps gIntTableOps = {
     PL_DHashAllocTable,
     PL_DHashFreeTable,
     IntHashEntry::HashKey,
@@ -256,7 +255,7 @@ struct DateHashEntry : public PLDHashEntryHdr {
     }
 };
 
-static PLDHashTableOps gDateTableOps = {
+static const PLDHashTableOps gDateTableOps = {
     PL_DHashAllocTable,
     PL_DHashFreeTable,
     DateHashEntry::HashKey,
@@ -302,7 +301,7 @@ public:
     Data mData;
 };
 
-NS_IMPL_ISUPPORTS2(BlobImpl, nsIRDFNode, nsIRDFBlob)
+NS_IMPL_ISUPPORTS(BlobImpl, nsIRDFNode, nsIRDFBlob)
 
 NS_IMETHODIMP
 BlobImpl::EqualsNode(nsIRDFNode *aNode, bool *aEquals)
@@ -374,7 +373,7 @@ struct BlobHashEntry : public PLDHashEntryHdr {
     }
 };
 
-static PLDHashTableOps gBlobTableOps = {
+static const PLDHashTableOps gBlobTableOps = {
     PL_DHashAllocTable,
     PL_DHashFreeTable,
     BlobHashEntry::HashKey,
@@ -395,10 +394,10 @@ static PLDHashTableOps gBlobTableOps = {
 class LiteralImpl : public nsIRDFLiteral {
 public:
     static nsresult
-    Create(const PRUnichar* aValue, nsIRDFLiteral** aResult);
+    Create(const char16_t* aValue, nsIRDFLiteral** aResult);
 
     // nsISupports
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
 
     // nsIRDFNode
     NS_DECL_NSIRDFNODE
@@ -407,37 +406,37 @@ public:
     NS_DECL_NSIRDFLITERAL
 
 protected:
-    LiteralImpl(const PRUnichar* s);
+    LiteralImpl(const char16_t* s);
     virtual ~LiteralImpl();
 
-    const PRUnichar* GetValue() const {
-        size_t objectSize = ((sizeof(LiteralImpl) + sizeof(PRUnichar) - 1) / sizeof(PRUnichar)) * sizeof(PRUnichar);
-        return reinterpret_cast<const PRUnichar*>(reinterpret_cast<const unsigned char*>(this) + objectSize);
+    const char16_t* GetValue() const {
+        size_t objectSize = ((sizeof(LiteralImpl) + sizeof(char16_t) - 1) / sizeof(char16_t)) * sizeof(char16_t);
+        return reinterpret_cast<const char16_t*>(reinterpret_cast<const unsigned char*>(this) + objectSize);
     }
 };
 
 
 nsresult
-LiteralImpl::Create(const PRUnichar* aValue, nsIRDFLiteral** aResult)
+LiteralImpl::Create(const char16_t* aValue, nsIRDFLiteral** aResult)
 {
     // Goofy math to get alignment right. Copied from nsSharedString.h.
-    size_t objectSize = ((sizeof(LiteralImpl) + sizeof(PRUnichar) - 1) / sizeof(PRUnichar)) * sizeof(PRUnichar);
-    size_t stringLen = nsCharTraits<PRUnichar>::length(aValue);
-    size_t stringSize = (stringLen + 1) * sizeof(PRUnichar);
+    size_t objectSize = ((sizeof(LiteralImpl) + sizeof(char16_t) - 1) / sizeof(char16_t)) * sizeof(char16_t);
+    size_t stringLen = nsCharTraits<char16_t>::length(aValue);
+    size_t stringSize = (stringLen + 1) * sizeof(char16_t);
 
     void* objectPtr = operator new(objectSize + stringSize);
     if (! objectPtr)
         return NS_ERROR_NULL_POINTER;
 
-    PRUnichar* buf = reinterpret_cast<PRUnichar*>(static_cast<unsigned char*>(objectPtr) + objectSize);
-    nsCharTraits<PRUnichar>::copy(buf, aValue, stringLen + 1);
+    char16_t* buf = reinterpret_cast<char16_t*>(static_cast<unsigned char*>(objectPtr) + objectSize);
+    nsCharTraits<char16_t>::copy(buf, aValue, stringLen + 1);
 
     NS_ADDREF(*aResult = new (objectPtr) LiteralImpl(buf));
     return NS_OK;
 }
 
 
-LiteralImpl::LiteralImpl(const PRUnichar* s)
+LiteralImpl::LiteralImpl(const char16_t* s)
 {
     RDFServiceImpl::gRDFService->RegisterLiteral(this);
     NS_ADDREF(RDFServiceImpl::gRDFService);
@@ -454,8 +453,8 @@ LiteralImpl::~LiteralImpl()
     NS_RELEASE2(RDFServiceImpl::gRDFService, refcnt);
 }
 
-NS_IMPL_THREADSAFE_ADDREF(LiteralImpl)
-NS_IMPL_THREADSAFE_RELEASE(LiteralImpl)
+NS_IMPL_ADDREF(LiteralImpl)
+NS_IMPL_RELEASE(LiteralImpl)
 
 nsresult
 LiteralImpl::QueryInterface(REFNSIID iid, void** result)
@@ -495,20 +494,20 @@ LiteralImpl::EqualsNode(nsIRDFNode* aNode, bool* aResult)
 }
 
 NS_IMETHODIMP
-LiteralImpl::GetValue(PRUnichar* *value)
+LiteralImpl::GetValue(char16_t* *value)
 {
     NS_ASSERTION(value, "null ptr");
     if (! value)
         return NS_ERROR_NULL_POINTER;
 
-    const PRUnichar *temp = GetValue();
+    const char16_t *temp = GetValue();
     *value = temp? NS_strdup(temp) : 0;
     return NS_OK;
 }
 
 
 NS_IMETHODIMP
-LiteralImpl::GetValueConst(const PRUnichar** aValue)
+LiteralImpl::GetValueConst(const char16_t** aValue)
 {
     *aValue = GetValue();
     return NS_OK;
@@ -616,7 +615,7 @@ DateImpl::EqualsDate(nsIRDFDate* date, bool* result)
     if (NS_FAILED(rv = date->GetValue(&p)))
         return rv;
 
-    *result = LL_EQ(p, mValue);
+    *result = p == mValue;
     return NS_OK;
 }
 
@@ -757,31 +756,21 @@ RDFServiceImpl::Init()
     if (! mNamedDataSources)
         return NS_ERROR_OUT_OF_MEMORY;
 
-    if (!PL_DHashTableInit(&mResources, &gResourceTableOps, nullptr,
-                           sizeof(ResourceHashEntry), PL_DHASH_MIN_SIZE)) {
-        mResources.ops = nullptr;
-        return NS_ERROR_OUT_OF_MEMORY;
-    }
-    if (!PL_DHashTableInit(&mLiterals, &gLiteralTableOps, nullptr,
-                           sizeof(LiteralHashEntry), PL_DHASH_MIN_SIZE)) {
-        mLiterals.ops = nullptr;
-        return NS_ERROR_OUT_OF_MEMORY;
-    }
-    if (!PL_DHashTableInit(&mInts, &gIntTableOps, nullptr,
-                           sizeof(IntHashEntry), PL_DHASH_MIN_SIZE)) {
-        mInts.ops = nullptr;
-        return NS_ERROR_OUT_OF_MEMORY;
-    }
-    if (!PL_DHashTableInit(&mDates, &gDateTableOps, nullptr,
-                           sizeof(DateHashEntry), PL_DHASH_MIN_SIZE)) {
-        mDates.ops = nullptr;
-        return NS_ERROR_OUT_OF_MEMORY;
-    }
-    if (!PL_DHashTableInit(&mBlobs, &gBlobTableOps, nullptr,
-                           sizeof(BlobHashEntry), PL_DHASH_MIN_SIZE)) {
-        mBlobs.ops = nullptr;
-        return NS_ERROR_OUT_OF_MEMORY;
-    }
+    PL_DHashTableInit(&mResources, &gResourceTableOps, nullptr,
+                      sizeof(ResourceHashEntry), PL_DHASH_MIN_SIZE);
+
+    PL_DHashTableInit(&mLiterals, &gLiteralTableOps, nullptr,
+                      sizeof(LiteralHashEntry), PL_DHASH_MIN_SIZE);
+
+    PL_DHashTableInit(&mInts, &gIntTableOps, nullptr,
+                      sizeof(IntHashEntry), PL_DHASH_MIN_SIZE);
+
+    PL_DHashTableInit(&mDates, &gDateTableOps, nullptr,
+                      sizeof(DateHashEntry), PL_DHASH_MIN_SIZE);
+
+    PL_DHashTableInit(&mBlobs, &gBlobTableOps, nullptr,
+                      sizeof(BlobHashEntry), PL_DHASH_MIN_SIZE);
+
     mDefaultResourceFactory = do_GetClassObject(kRDFDefaultResourceCID, &rv);
     NS_ASSERTION(NS_SUCCEEDED(rv), "unable to get default resource factory");
     if (NS_FAILED(rv)) return rv;
@@ -838,7 +827,7 @@ RDFServiceImpl::CreateSingleton(nsISupports* aOuter,
     return serv->QueryInterface(aIID, aResult);
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(RDFServiceImpl, nsIRDFService, nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(RDFServiceImpl, nsIRDFService, nsISupportsWeakReference)
 
 // Per RFC2396.
 static const uint8_t
@@ -1051,7 +1040,7 @@ static int32_t kShift = 6;
 
 
 NS_IMETHODIMP
-RDFServiceImpl::GetLiteral(const PRUnichar* aValue, nsIRDFLiteral** aLiteral)
+RDFServiceImpl::GetLiteral(const char16_t* aValue, nsIRDFLiteral** aLiteral)
 {
     NS_PRECONDITION(aValue != nullptr, "null ptr");
     if (! aValue)
@@ -1397,7 +1386,7 @@ RDFServiceImpl::GetDataSource(const char* aURI, bool aBlock, nsIRDFDataSource** 
                 Substring(spec, 4, spec.Length() - 4));
 
         // Strip params to get ``base'' contractID for data source.
-        int32_t p = contractID.FindChar(PRUnichar('&'));
+        int32_t p = contractID.FindChar(char16_t('&'));
         if (p >= 0)
             contractID.Truncate(p);
 
@@ -1436,7 +1425,7 @@ RDFServiceImpl::GetDataSource(const char* aURI, bool aBlock, nsIRDFDataSource** 
 nsresult
 RDFServiceImpl::RegisterLiteral(nsIRDFLiteral* aLiteral)
 {
-    const PRUnichar* value;
+    const char16_t* value;
     aLiteral->GetValueConst(&value);
 
     NS_ASSERTION(PL_DHASH_ENTRY_IS_FREE(PL_DHashTableOperate(&mLiterals,
@@ -1461,7 +1450,7 @@ RDFServiceImpl::RegisterLiteral(nsIRDFLiteral* aLiteral)
 
     PR_LOG(gLog, PR_LOG_DEBUG,
            ("rdfserv   register-literal [%p] %s",
-            aLiteral, (const PRUnichar*) value));
+            aLiteral, (const char16_t*) value));
 
     return NS_OK;
 }
@@ -1470,7 +1459,7 @@ RDFServiceImpl::RegisterLiteral(nsIRDFLiteral* aLiteral)
 nsresult
 RDFServiceImpl::UnregisterLiteral(nsIRDFLiteral* aLiteral)
 {
-    const PRUnichar* value;
+    const char16_t* value;
     aLiteral->GetValueConst(&value);
 
     NS_ASSERTION(PL_DHASH_ENTRY_IS_BUSY(PL_DHashTableOperate(&mLiterals,
@@ -1484,7 +1473,7 @@ RDFServiceImpl::UnregisterLiteral(nsIRDFLiteral* aLiteral)
     // reference to it in the hashtable.
     PR_LOG(gLog, PR_LOG_DEBUG,
            ("rdfserv unregister-literal [%p] %s",
-            aLiteral, (const PRUnichar*) value));
+            aLiteral, (const char16_t*) value));
 
     return NS_OK;
 }

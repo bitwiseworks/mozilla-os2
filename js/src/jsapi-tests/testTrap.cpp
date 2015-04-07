@@ -5,9 +5,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
-#include "tests.h"
-#include "jsdbgapi.h"
+#include "js/OldDebugAPI.h"
+#include "jsapi-tests/tests.h"
 
 static int emptyTrapCallCount = 0;
 
@@ -35,17 +34,20 @@ BEGIN_TEST(testTrap_gc)
         ;
 
     // compile
-    JS::RootedScript script(cx, JS_CompileScript(cx, global, source, strlen(source), __FILE__, 1));
+    JS::CompileOptions options(cx);
+    options.setFileAndLine(__FILE__, 1);
+    JS::RootedScript script(cx, JS_CompileScript(cx, global, source,
+                                                 strlen(source), options));
     CHECK(script);
 
     // execute
     JS::RootedValue v2(cx);
-    CHECK(JS_ExecuteScript(cx, global, script, v2.address()));
+    CHECK(JS_ExecuteScript(cx, global, script, &v2));
     CHECK(v2.isObject());
     CHECK_EQUAL(emptyTrapCallCount, 0);
 
     // Enable debug mode
-    CHECK(JS_SetDebugMode(cx, JS_TRUE));
+    CHECK(JS_SetDebugMode(cx, true));
 
     static const char trapClosureText[] = "some trap closure";
 
@@ -61,8 +63,9 @@ BEGIN_TEST(testTrap_gc)
 
         trapClosure = JS_NewStringCopyZ(cx, trapClosureText);
         CHECK(trapClosure);
-        JS_SetTrap(cx, script, line2, EmptyTrapHandler, STRING_TO_JSVAL(trapClosure));
-        JS_SetTrap(cx, script, line6, EmptyTrapHandler, STRING_TO_JSVAL(trapClosure));
+        JS::RootedValue closureValue(cx, JS::StringValue(trapClosure));
+        JS_SetTrap(cx, script, line2, EmptyTrapHandler, closureValue);
+        JS_SetTrap(cx, script, line6, EmptyTrapHandler, closureValue);
 
         JS_GC(rt);
 
@@ -70,7 +73,7 @@ BEGIN_TEST(testTrap_gc)
     }
 
     // execute
-    CHECK(JS_ExecuteScript(cx, global, script, v2.address()));
+    CHECK(JS_ExecuteScript(cx, global, script, &v2));
     CHECK_EQUAL(emptyTrapCallCount, 11);
 
     JS_GC(rt);

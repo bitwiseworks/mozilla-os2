@@ -11,14 +11,7 @@ XPIDL_SOURCES += [
     'nsIDOMGeoPositionCoords.idl',
     'nsIDOMGeoPositionError.idl',
     'nsIDOMGeoPositionErrorCallback.idl',
-    'nsIDOMNavigatorGeolocation.idl',
 ]
 
 XPIDL_MODULE = 'dom_geolocation'
-
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/dom/interfaces/base',
-]
-
-MODULE = 'dom'
 

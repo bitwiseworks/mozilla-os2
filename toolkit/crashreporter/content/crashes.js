@@ -2,14 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
+const { classes: Cc, utils: Cu, interfaces: Ci } = Components;
 
-var reportsDir, submittedDir, pendingDir;
 var reportURL;
 
-Components.utils.import("resource://gre/modules/CrashSubmit.jsm");
-Components.utils.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/CrashReports.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Task.jsm");
+Cu.import("resource://gre/modules/osfile.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "CrashSubmit",
+  "resource://gre/modules/CrashSubmit.jsm");
 
 const buildID = Services.appinfo.appBuildID;
 
@@ -55,26 +59,6 @@ function submitPendingReport(event) {
   return false;
 }
 
-function findInsertionPoint(reports, date) {
-  if (reports.length == 0)
-    return 0;
-
-  var min = 0;
-  var max = reports.length - 1;
-  while (min < max) {
-    var mid = parseInt((min + max) / 2);
-    if (reports[mid].date < date)
-      max = mid - 1;
-    else if (reports[mid].date > date)
-      min = mid + 1;
-    else
-      return mid;
-  }
-  if (reports[min].date <= date)
-    return min;
-  return min+1;
-}
-
 function populateReportList() {
   var prefService = Cc["@mozilla.org/preferences-service;1"].
                     getService(Ci.nsIPrefBranch);
@@ -92,57 +76,7 @@ function populateReportList() {
     document.getElementById("noConfig").style.display = "block";
     return;
   }
-  var directoryService = Cc["@mozilla.org/file/directory_service;1"].
-                         getService(Ci.nsIProperties);
-
-  reportsDir = directoryService.get("UAppData", Ci.nsIFile);
-  reportsDir.append("Crash Reports");
-
-  submittedDir = directoryService.get("UAppData", Ci.nsIFile);
-  submittedDir.append("Crash Reports");
-  submittedDir.append("submitted");
-
-  var reports = [];
-  if (submittedDir.exists() && submittedDir.isDirectory()) {
-    var entries = submittedDir.directoryEntries;
-    while (entries.hasMoreElements()) {
-      var file = entries.getNext().QueryInterface(Ci.nsIFile);
-      var leaf = file.leafName;
-      if (leaf.substr(0, 3) == "bp-" &&
-          leaf.substr(-4) == ".txt") {
-        var entry = {
-          id: leaf.slice(0, -4),
-          date: file.lastModifiedTime,
-          pending: false
-        };
-        var pos = findInsertionPoint(reports, entry.date);
-        reports.splice(pos, 0, entry);
-      }
-    }
-  }
-
-  pendingDir = directoryService.get("UAppData", Ci.nsIFile);
-  pendingDir.append("Crash Reports");
-  pendingDir.append("pending");
-
-  if (pendingDir.exists() && pendingDir.isDirectory()) {
-    var uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    var entries = pendingDir.directoryEntries;
-    while (entries.hasMoreElements()) {
-      var file = entries.getNext().QueryInterface(Ci.nsIFile);
-      var leaf = file.leafName;
-      var id = leaf.slice(0, -4);
-      if (leaf.substr(-4) == ".dmp" && uuidRegex.test(id)) {
-        var entry = {
-          id: id,
-          date: file.lastModifiedTime,
-          pending: true
-        };
-        var pos = findInsertionPoint(reports, entry.date);
-        reports.splice(pos, 0, entry);
-      }
-    }
-  }
+  let reports = CrashReports.getReports();
 
   if (reports.length == 0) {
     document.getElementById("clear-reports").style.display = "none";
@@ -197,46 +131,53 @@ function populateReportList() {
   }
 }
 
-function clearReports() {
-  var bundles = Cc["@mozilla.org/intl/stringbundle;1"].
-                getService(Ci.nsIStringBundleService);
-  var bundle = bundles.createBundle("chrome://global/locale/crashes.properties");
-  var prompts = Cc["@mozilla.org/embedcomp/prompt-service;1"].
-                getService(Ci.nsIPromptService);
-  if (!prompts.confirm(window,
-                       bundle.GetStringFromName("deleteconfirm.title"),
-                       bundle.GetStringFromName("deleteconfirm.description")))
-    return;
+let clearReports = Task.async(function*() {
+  let bundle = Services.strings.createBundle("chrome://global/locale/crashes.properties");
 
-  var entries = submittedDir.directoryEntries;
-  while (entries.hasMoreElements()) {
-    var file = entries.getNext().QueryInterface(Ci.nsIFile);
-    var leaf = file.leafName;
-    if (leaf.substr(0, 3) == "bp-" &&
-        leaf.substr(-4) == ".txt") {
-      file.remove(false);
+  if (!Services.
+         prompt.confirm(window,
+                        bundle.GetStringFromName("deleteconfirm.title"),
+                        bundle.GetStringFromName("deleteconfirm.description"))) {
+    return;
+  }
+
+  let cleanupFolder = Task.async(function*(path, filter) {
+    let iterator = new OS.File.DirectoryIterator(path);
+    try {
+      yield iterator.forEach(Task.async(function*(aEntry) {
+        if (!filter || (yield filter(aEntry))) {
+          yield OS.File.remove(aEntry.path);
+        }
+      }));
+    } catch (e if e instanceof OS.File.Error && e.becauseNoSuchFile) {
+    } finally {
+      iterator.close();
     }
-  }
-  entries = reportsDir.directoryEntries;
-  var oneYearAgo = Date.now() - 31586000000;
-  while (entries.hasMoreElements()) {
-    var file = entries.getNext().QueryInterface(Ci.nsIFile);
-    var leaf = file.leafName;
-    if (leaf.substr(0, 11) == "InstallTime" &&
-        file.lastModifiedTime < oneYearAgo &&
-        leaf != "InstallTime" + buildID) {
-      file.remove(false);
+  });
+
+  yield cleanupFolder(CrashReports.submittedDir.path, function*(aEntry) {
+    return aEntry.name.startsWith("bp-") && aEntry.name.endsWith(".txt");
+  });
+
+  let oneYearAgo = Date.now() - 31586000000;
+  yield cleanupFolder(CrashReports.reportsDir.path, function*(aEntry) {
+    if (!aEntry.name.startsWith("InstallTime") ||
+        aEntry.name == "InstallTime" + buildID) {
+      return false;
     }
-  }
-  entries = pendingDir.directoryEntries;
-  while (entries.hasMoreElements()) {
-    entries.getNext().QueryInterface(Ci.nsIFile).remove(false);
-  }
+
+    let date = aEntry.winLastWriteDate;
+    if (!date) {
+      let stat = yield OS.File.stat(aEntry.path);
+      date = stat.lastModificationDate;
+    }
+
+    return (date < oneYearAgo);
+  });
+
+  yield cleanupFolder(CrashReports.pendingDir.path);
+
   document.getElementById("clear-reports").style.display = "none";
   document.getElementById("reportList").style.display = "none";
   document.getElementById("noReports").style.display = "block";
-}
-
-function init() {
-  populateReportList();
-}
+});

@@ -34,13 +34,26 @@ public:
 
     virtual void SetEnabled(bool enabled);
 
+    virtual void OnEnabled(OnEnabledCallbackType callback);
+
     virtual void* GetHWCDevice();
+
+    virtual void* GetFBSurface();
 
     virtual bool SwapBuffers(EGLDisplay dpy, EGLSurface sur);
 
     virtual ANativeWindowBuffer* DequeueBuffer();
 
     virtual bool QueueBuffer(ANativeWindowBuffer* handle);
+
+    virtual void UpdateFBSurface(EGLDisplay dpy, EGLSurface sur);
+
+    virtual void SetFBReleaseFd(int fd);
+
+    virtual int GetPrevFBAcquireFd()
+    {
+        return -1;
+    }
 
 private:
     hw_module_t const*        mModule;

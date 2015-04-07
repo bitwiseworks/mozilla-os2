@@ -13,6 +13,12 @@ extern "C"
 #include "ccapi_types.h"
 }
 
+#if defined(__cplusplus) && __cplusplus >= 201103L
+typedef struct Timecard Timecard;
+#else
+#include "timecard.h"
+#endif
+
 namespace CSF
 {
     class ECC_API CC_Call
@@ -272,23 +278,26 @@ namespace CSF
           */
         virtual void originateP2PCall (cc_sdp_direction_t video_pref, const std::string & digits, const std::string & ip) = 0;
 
-        virtual void createOffer (cc_media_constraints_t* constraints) = 0;
+        virtual void createOffer (cc_media_constraints_t* constraints, Timecard *) = 0;
 
-        virtual void createAnswer(cc_media_constraints_t* constraints) = 0;
+        virtual void createAnswer(cc_media_constraints_t* constraints, Timecard *) = 0;
 
-        virtual void setLocalDescription(cc_jsep_action_t action, const std::string & sdp) = 0;
+        virtual void setLocalDescription(cc_jsep_action_t action, const std::string & sdp, Timecard *) = 0;
 
-        virtual void setRemoteDescription(cc_jsep_action_t action, const std::string & sdp) = 0;
+        virtual void setRemoteDescription(cc_jsep_action_t action, const std::string & sdp, Timecard *) = 0;
 
         virtual void setPeerConnection(const std::string& handle) = 0;
 
-        virtual void addStream(cc_media_stream_id_t stream_id, cc_media_track_id_t track_id, cc_media_type_t media_type) = 0;
+        virtual void addStream(cc_media_stream_id_t stream_id,
+                               cc_media_track_id_t track_id,
+                               cc_media_type_t media_type,
+                               cc_media_constraints_t *constraints) = 0;
 
         virtual void removeStream(cc_media_stream_id_t stream_id, cc_media_track_id_t track_id, cc_media_type_t media_type) = 0;
 
         virtual const std::string& getPeerConnection() const = 0;
 
-        virtual void addICECandidate(const std::string & candidate, const std::string & mid, unsigned short level) = 0;
+        virtual void addICECandidate(const std::string & candidate, const std::string & mid, unsigned short level, Timecard *) = 0;
 
     };
 }

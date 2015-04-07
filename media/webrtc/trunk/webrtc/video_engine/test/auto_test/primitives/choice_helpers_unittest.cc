@@ -8,11 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <cstdio>
+#include <stdio.h>
 
-#include "gtest/gtest.h"
-#include "video_engine/test/auto_test/primitives/choice_helpers.h"
-#include "video_engine/test/auto_test/primitives/fake_stdin.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/video_engine/test/auto_test/primitives/choice_helpers.h"
+#include "webrtc/video_engine/test/auto_test/primitives/fake_stdin.h"
 
 namespace webrtc {
 

@@ -5,18 +5,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
-#include "tests.h"
-
-#include <string.h>
 #include <stdarg.h>
-
-#include "jscntxt.h"
-#include "jsgc.h"
+#include <string.h>
 
 #include "gc/FindSCCs.h"
-
-#include "gc/FindSCCs-inl.h"
+#include "jsapi-tests/tests.h"
 
 static const unsigned MaxVertices = 10;
 
@@ -142,7 +135,7 @@ void setup(unsigned count)
     vertex_count = count;
     for (unsigned i = 0; i < MaxVertices; ++i) {
         TestNode &v = Vertex[i];
-        v.gcNextGraphNode = NULL;
+        v.gcNextGraphNode = nullptr;
         v.index = i;
         memset(&v.hasEdge, 0, sizeof(v.hasEdge));
     }
@@ -155,7 +148,7 @@ void edge(unsigned src_index, unsigned dest_index)
 
 void run()
 {
-    finder = new ComponentFinder<TestNode>(rt->mainThread.nativeStackLimit);
+    finder = new ComponentFinder<TestNode>(rt->mainThread.nativeStackLimit[js::StackForSystemCode]);
     for (unsigned i = 0; i < vertex_count; ++i)
         finder->addNode(&Vertex[i]);
     resultsList = finder->getResultsList();
@@ -168,14 +161,14 @@ bool group(int vertex, ...)
     va_list ap;
     va_start(ap, vertex);
     while (vertex != -1) {
-        CHECK(v != NULL);
+        CHECK(v != nullptr);
         CHECK(v->index == unsigned(vertex));
         v = v->nextNodeInGroup();
         vertex = va_arg(ap, int);
     }
     va_end(ap);
 
-    CHECK(v == NULL);
+    CHECK(v == nullptr);
     resultsList = resultsList->nextGroup();
     return true;
 }
@@ -187,24 +180,24 @@ bool remaining(int vertex, ...)
     va_list ap;
     va_start(ap, vertex);
     while (vertex != -1) {
-        CHECK(v != NULL);
+        CHECK(v != nullptr);
         CHECK(v->index == unsigned(vertex));
         v = (TestNode *)v->gcNextGraphNode;
         vertex = va_arg(ap, int);
     }
     va_end(ap);
 
-    CHECK(v == NULL);
-    resultsList = NULL;
+    CHECK(v == nullptr);
+    resultsList = nullptr;
     return true;
 }
 
 bool end()
 {
-    CHECK(resultsList == NULL);
+    CHECK(resultsList == nullptr);
 
     delete finder;
-    finder = NULL;
+    finder = nullptr;
     return true;
 }
 END_TEST(testFindSCCs)
@@ -214,7 +207,7 @@ struct TestNode2 : public GraphNodeBase<TestNode2>
     TestNode2 *edge;
 
     TestNode2() :
-        edge(NULL)
+        edge(nullptr)
     {
     }
 
@@ -246,7 +239,7 @@ BEGIN_TEST(testFindSCCsStackLimit)
     for (unsigned i = initial; i < (max - 10); ++i)
         vertices[i].edge = &vertices[i + 1];
 
-    ComponentFinder<TestNode2> finder(rt->mainThread.nativeStackLimit);
+    ComponentFinder<TestNode2> finder(rt->mainThread.nativeStackLimit[js::StackForSystemCode]);
     for (unsigned i = 0; i < max; ++i)
         finder.addNode(&vertices[i]);
 

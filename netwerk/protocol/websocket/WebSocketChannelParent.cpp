@@ -9,15 +9,16 @@
 #include "nsIAuthPromptProvider.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "SerializedLoadContext.h"
 
 using namespace mozilla::ipc;
 
 namespace mozilla {
 namespace net {
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(WebSocketChannelParent,
-                              nsIWebSocketListener,
-                              nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS(WebSocketChannelParent,
+                  nsIWebSocketListener,
+                  nsIInterfaceRequestor)
 
 WebSocketChannelParent::WebSocketChannelParent(nsIAuthPromptProvider* aAuthProvider,
                                                nsILoadContext* aLoadContext,
@@ -147,7 +148,8 @@ WebSocketChannelParent::RecvSendBinaryStream(const InputStreamParams& aStream,
 {
   LOG(("WebSocketChannelParent::RecvSendBinaryStream() %p\n", this));
   if (mChannel) {
-    nsCOMPtr<nsIInputStream> stream = DeserializeInputStream(aStream);
+    nsTArray<mozilla::ipc::FileDescriptor> fds;
+    nsCOMPtr<nsIInputStream> stream = DeserializeInputStream(aStream, fds);
     if (!stream) {
       return false;
     }

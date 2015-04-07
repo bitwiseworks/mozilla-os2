@@ -5,37 +5,65 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 EXPORTS.mozilla.dom.network += [
+    'Connection.h',
     'Constants.h',
+    'TCPServerSocketChild.h',
+    'TCPServerSocketParent.h',
     'TCPSocketChild.h',
     'TCPSocketParent.h',
     'Types.h',
-    'Utils.h',
+    'UDPSocketChild.h',
+    'UDPSocketParent.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'Connection.cpp',
+    'TCPServerSocketChild.cpp',
+    'TCPServerSocketParent.cpp',
     'TCPSocketChild.cpp',
     'TCPSocketParent.cpp',
-    'Utils.cpp',
+    'UDPSocketChild.cpp',
+    'UDPSocketParent.cpp',
 ]
 
-if CONFIG['MOZ_B2G_RIL']:
-    CPP_SOURCES += [
-        'MobileConnection.cpp',
-    ]
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     EXTRA_JS_MODULES = [
         'NetworkStatsDB.jsm',
         'NetworkStatsService.jsm',
     ]
 
 EXTRA_COMPONENTS += [
-    'TCPSocket.js',
+    'TCPServerSocket.js',
     'TCPSocket.manifest',
     'TCPSocketParentIntermediary.js',
 ]
 
-if CONFIG['MOZ_B2G_RIL']:
+EXTRA_PP_COMPONENTS += [
+    'TCPSocket.js',
+]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     EXTRA_COMPONENTS += [
         'NetworkStatsManager.js',
         'NetworkStatsManager.manifest',
+        'NetworkStatsServiceProxy.js',
+        'NetworkStatsServiceProxy.manifest',
     ]
+    EXPORTS.mozilla.dom.network += [
+        'NetUtils.h',
+    ]
+    UNIFIED_SOURCES += [
+        'NetUtils.cpp',
+    ]
+
+IPDL_SOURCES += [
+    'PTCPServerSocket.ipdl',
+    'PTCPSocket.ipdl',
+    'PUDPSocket.ipdl',
+]
+
+FAIL_ON_WARNINGS = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'

@@ -7,19 +7,10 @@
 XPIDL_SOURCES += [
     'nsIDOMStorage.idl',
     'nsIDOMStorageEvent.idl',
-    'nsIDOMStorageIndexedDB.idl',
     'nsIDOMStorageManager.idl',
-    'nsIDOMToString.idl',
 ]
 
 XPIDL_MODULE = 'dom_storage'
-
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/dom/interfaces/base',
-    '-I$(topsrcdir)/dom/interfaces/events',
-]
-
-MODULE = 'dom'
 
 EXPORTS += [
     'nsPIDOMStorage.h',

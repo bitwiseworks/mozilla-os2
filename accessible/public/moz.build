@@ -19,7 +19,6 @@ XPIDL_SOURCES += [
     'nsIAccessibleHyperText.idl',
     'nsIAccessibleImage.idl',
     'nsIAccessiblePivot.idl',
-    'nsIAccessibleProvider.idl',
     'nsIAccessibleRelation.idl',
     'nsIAccessibleRetrieval.idl',
     'nsIAccessibleRole.idl',
@@ -30,13 +29,14 @@ XPIDL_SOURCES += [
     'nsIAccessibleTableChangeEvent.idl',
     'nsIAccessibleText.idl',
     'nsIAccessibleTextChangeEvent.idl',
+    'nsIAccessibleTextRange.idl',
     'nsIAccessibleTypes.idl',
     'nsIAccessibleValue.idl',
     'nsIAccessibleVirtualCursorChangeEvent.idl',
     'nsIXBLAccessible.idl',
 ]
 
-MODULE = 'accessibility'
+XPIDL_MODULE = 'accessibility'
 
 EXPORTS += [
     'nsIAccessibilityService.h',

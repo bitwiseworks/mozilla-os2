@@ -5,18 +5,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "tests.h"
+#include "jsapi-tests/tests.h"
 
 BEGIN_TEST(testGCExactRooting)
 {
-    JS::RootedObject rootCx(cx, JS_NewObject(cx, NULL, NULL, NULL));
-    JS::RootedObject rootRt(cx->runtime(), JS_NewObject(cx, NULL, NULL, NULL));
+    JS::RootedObject rootCx(cx, JS_NewObject(cx, nullptr, JS::NullPtr(), JS::NullPtr()));
+    JS::RootedObject rootRt(cx->runtime(), JS_NewObject(cx, nullptr, JS::NullPtr(), JS::NullPtr()));
 
     JS_GC(cx->runtime());
 
     /* Use the objects we just created to ensure that they are still alive. */
-    JS_DefineProperty(cx, rootCx, "foo", JS::DoubleValue(0), NULL, NULL, 0);
-    JS_DefineProperty(cx, rootRt, "foo", JS::DoubleValue(0), NULL, NULL, 0);
+    JS_DefineProperty(cx, rootCx, "foo", JS::UndefinedHandleValue, 0);
+    JS_DefineProperty(cx, rootRt, "foo", JS::UndefinedHandleValue, 0);
 
     return true;
 }

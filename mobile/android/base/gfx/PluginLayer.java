@@ -8,6 +8,7 @@ import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.util.FloatUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
+import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.view.SurfaceView;
@@ -35,7 +36,7 @@ public class PluginLayer extends TileLayer {
                 1.0f, 0.0f, // bottom right
     };
 
-    public PluginLayer(View view, Rect rect, int maxDimension) {
+    public PluginLayer(View view, RectF rect, int maxDimension) {
         super(new BufferedCairoImage(null, 0, 0, 0), TileLayer.PaintMode.NORMAL);
 
         mView = view;
@@ -93,7 +94,7 @@ public class PluginLayer extends TileLayer {
         mContainer.removeView(mView);
     }
 
-    public void reset(Rect rect) {
+    public void reset(RectF rect) {
         mLayoutParams.reset(rect);
     }
 
@@ -107,7 +108,7 @@ public class PluginLayer extends TileLayer {
 
             mLastZoomFactor = context.zoomFactor;
             mLastViewport = context.viewport;
-            mLayoutParams.reposition(context.viewport, context.zoomFactor);
+            mLayoutParams.reposition(context.viewport, context.offset, context.zoomFactor);
 
             showView();
         }
@@ -125,7 +126,7 @@ public class PluginLayer extends TileLayer {
         private int mMaxDimension;
         private float mLastResolution;
 
-        public PluginLayoutParams(Rect rect, int maxDimension) {
+        public PluginLayoutParams(RectF rect, int maxDimension) {
             super(0, 0, 0, 0);
 
             mMaxDimension = maxDimension;
@@ -144,13 +145,14 @@ public class PluginLayer extends TileLayer {
             }
         }
 
-        public void reset(Rect rect) {
-            mRect = new RectF(rect);
+        public void reset(RectF rect) {
+            mRect = rect;
         }
 
-        public void reposition(RectF viewport, float zoomFactor) {
+        public void reposition(RectF viewport, PointF offset, float zoomFactor) {
 
             RectF scaled = RectUtils.scale(mRect, zoomFactor);
+            scaled.offset(offset.x, offset.y);
 
             this.x = Math.round(scaled.left - viewport.left);
             this.y = Math.round(scaled.top - viewport.top);

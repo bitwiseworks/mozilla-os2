@@ -25,7 +25,7 @@
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * 
+ *
  * ***** END LICENSE BLOCK ***** */
 
 #ifndef assembler_assembler_AssemblerBufferWithConstantPool_h
@@ -35,7 +35,7 @@
 
 #if ENABLE_ASSEMBLER
 
-#include "AssemblerBuffer.h"
+#include "assembler/assembler/AssemblerBuffer.h"
 #include "assembler/wtf/SegmentedVector.h"
 #include "assembler/wtf/Assertions.h"
 
@@ -106,14 +106,14 @@ public:
         , m_lastConstDelta(0)
         , m_flushCount(0)
     {
-        m_pool = static_cast<uint32_t*>(malloc(maxPoolSize));
-        m_mask = static_cast<char*>(malloc(maxPoolSize / sizeof(uint32_t)));
+        m_pool = static_cast<uint32_t*>(js_malloc(maxPoolSize));
+        m_mask = static_cast<char*>(js_malloc(maxPoolSize / sizeof(uint32_t)));
     }
 
     ~AssemblerBufferWithConstantPool()
     {
-        free(m_mask);
-        free(m_pool);
+        js_free(m_mask);
+        js_free(m_pool);
     }
 
     void ensureSpace(int space)
@@ -248,7 +248,7 @@ public:
         } dpun;
 
         dpun.d = constant;
-        
+
         m_pool[m_numConsts] = dpun.s.lo;
         m_pool[m_numConsts+1] = dpun.s.hi;
         m_mask[m_numConsts] = static_cast<char>(isReusable ? ReusableConst : UniqueConst);

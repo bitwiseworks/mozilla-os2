@@ -7,11 +7,13 @@ package org.mozilla.gecko.sync.receivers;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
 import org.mozilla.gecko.background.common.GlobalConstants;
 import org.mozilla.gecko.background.common.log.Logger;
+import org.mozilla.gecko.sync.Sync11Configuration;
 import org.mozilla.gecko.sync.SyncConstants;
 import org.mozilla.gecko.sync.SyncConfiguration;
 import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.config.AccountPickler;
 import org.mozilla.gecko.sync.config.ClientRecordTerminator;
+import org.mozilla.gecko.sync.net.BasicAuthHeaderProvider;
 import org.mozilla.gecko.sync.setup.Constants;
 import org.mozilla.gecko.sync.setup.SyncAccounts.SyncAccountParameters;
 
@@ -30,6 +32,12 @@ public class SyncAccountDeletedService extends IntentService {
 
   @Override
   protected void onHandleIntent(Intent intent) {
+    // Intent can, in theory, be null. Bug 1025937.
+    if (intent == null) {
+      Logger.debug(LOG_TAG, "Short-circuiting on null intent.");
+      return;
+    }
+
     final Context context = this;
 
     long intentVersion = intent.getLongExtra(Constants.JSON_KEY_VERSION, 0);
@@ -112,27 +120,29 @@ public class SyncAccountDeletedService extends IntentService {
       return;
     }
 
-    final String clientGuid = prefs.getString(SyncConfiguration.PREF_ACCOUNT_GUID, null);
-    final String clusterURL = prefs.getString(SyncConfiguration.PREF_CLUSTER_URL, null);
-
-    // Finally, a good place to do this.
-    prefs.edit().clear().commit();
-
-    if (clientGuid == null) {
-      Logger.warn(LOG_TAG, "Client GUID was null; not deleting client record from server.");
-      return;
-    }
-
-    if (clusterURL == null) {
-      Logger.warn(LOG_TAG, "Cluster URL was null; not deleting client record from server.");
-      return;
-    }
-
     try {
-      ClientRecordTerminator.deleteClientRecord(encodedUsername, password, clusterURL, clientGuid);
-    } catch (Exception e) {
-      // This should never happen, but we really don't want to die in a background thread.
-      Logger.warn(LOG_TAG, "Got exception deleting client record from server; ignoring.", e);
+      final String clientGUID = prefs.getString(SyncConfiguration.PREF_ACCOUNT_GUID, null);
+      if (clientGUID == null) {
+        Logger.warn(LOG_TAG, "Client GUID was null; not deleting client record from server.");
+        return;
+      }
+
+      BasicAuthHeaderProvider authHeaderProvider = new BasicAuthHeaderProvider(encodedUsername, password);
+      SyncConfiguration configuration = new Sync11Configuration(encodedUsername, authHeaderProvider, prefs);
+      if (configuration.getClusterURL() == null) {
+        Logger.warn(LOG_TAG, "Cluster URL was null; not deleting client record from server.");
+        return;
+      }
+
+      try {
+        ClientRecordTerminator.deleteClientRecord(configuration, clientGUID);
+      } catch (Exception e) {
+        // This should never happen, but we really don't want to die in a background thread.
+        Logger.warn(LOG_TAG, "Got exception deleting client record from server; ignoring.", e);
+      }
+    } finally {
+      // Finally, a good place to do this.
+      prefs.edit().clear().commit();
     }
   }
 }

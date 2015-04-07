@@ -6,33 +6,31 @@
 // Chromium headers must come before Mozilla headers.
 #include "base/process_util.h"
 
+#include "mozilla/Atomics.h"
+
 #include "nsDebugImpl.h"
 #include "nsDebug.h"
 #ifdef MOZ_CRASHREPORTER
 # include "nsExceptionHandler.h"
 #endif
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "prprf.h"
 #include "prlog.h"
-#include "prinit.h"
-#include "plstr.h"
 #include "nsError.h"
 #include "prerror.h"
 #include "prerr.h"
 #include "prenv.h"
-#include "pratom.h"
 
 #ifdef ANDROID
 #include <android/log.h>
 #endif
 
-#if defined(XP_UNIX) || defined(_WIN32) || defined(XP_OS2)
-/* for abort() and getenv() */
+#ifdef _WIN32
+/* for getenv() */
 #include <stdlib.h>
 #endif
 
-#include "nsTraceRefcntImpl.h"
-#include "nsISupportsUtils.h"
+#include "nsTraceRefcnt.h"
 
 #if defined(XP_UNIX)
 #include <signal.h>
@@ -48,7 +46,6 @@
 
 #if defined(XP_MACOSX)
 #include <stdbool.h>
-#include <sys/types.h>
 #include <unistd.h>
 #include <sys/sysctl.h>
 #endif
@@ -64,12 +61,6 @@ RealBreak();
 static void
 Break(const char *aMsg);
 
-#if defined(XP_OS2)
-#  define INCL_WINDIALOGS  // need for WinMessageBox
-#  include <os2.h>
-#  include <string.h>
-#endif /* XP_OS2 */
-
 #if defined(_WIN32)
 #include <windows.h>
 #include <signal.h>
@@ -80,20 +71,19 @@ Break(const char *aMsg);
 
 using namespace mozilla;
 
-static bool sIsMultiprocess = false;
-static const char *sMultiprocessDescription = NULL;
+static const char *sMultiprocessDescription = nullptr;
 
-static int32_t gAssertionCount = 0;
+static Atomic<int32_t> gAssertionCount;
 
-NS_IMPL_QUERY_INTERFACE2(nsDebugImpl, nsIDebug, nsIDebug2)
+NS_IMPL_QUERY_INTERFACE(nsDebugImpl, nsIDebug, nsIDebug2)
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsDebugImpl::AddRef()
 {
   return 2;
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsDebugImpl::Release()
 {
   return 1;
@@ -166,7 +156,7 @@ nsDebugImpl::GetIsDebuggerAttached(bool* aResult)
   size_t infoSize = sizeof(info);
   memset(&info, 0, infoSize);
 
-  if (sysctl(mib, mibSize, &info, &infoSize, NULL, 0)) {
+  if (sysctl(mib, mibSize, &info, &infoSize, nullptr, 0)) {
     // if the call fails, default to false
     *aResult = false;
     return NS_OK;
@@ -183,7 +173,6 @@ nsDebugImpl::GetIsDebuggerAttached(bool* aResult)
 /* static */ void
 nsDebugImpl::SetMultiprocessMode(const char *aDesc)
 {
-  sIsMultiprocess = true;
   sMultiprocessDescription = aDesc;
 }
 
@@ -222,7 +211,7 @@ static nsAssertBehavior GetAssertBehavior()
     gAssertBehavior = NS_ASSERT_WARN;
   else
     gAssertBehavior = NS_ASSERT_TRAP;
-#elif defined(XP_WIN) || defined(XP_OS2)
+#elif defined(XP_WIN)
   gAssertBehavior = NS_ASSERT_TRAP;
 #else
   gAssertBehavior = NS_ASSERT_WARN;
@@ -318,15 +307,12 @@ NS_DebugBreak(uint32_t aSeverity, const char *aStr, const char *aExpr,
 
 #  define PrintToBuffer(...) PR_sxprintf(StuffFixedBuffer, &buf, __VA_ARGS__)
 
-   // If we're multiprocess, print "[PID]" or "[Desc PID]" at the beginning of
-   // the message.
-   if (sIsMultiprocess) {
-     PrintToBuffer("[");
-     if (sMultiprocessDescription) {
-       PrintToBuffer("%s ", sMultiprocessDescription);
-     }
-     PrintToBuffer("%d] ", base::GetCurrentProcId());
+   // Print "[PID]" or "[Desc PID]" at the beginning of the message.
+   PrintToBuffer("[");
+   if (sMultiprocessDescription) {
+     PrintToBuffer("%s ", sMultiprocessDescription);
    }
+   PrintToBuffer("%d] ", base::GetCurrentProcId());
 
    PrintToBuffer("%s: ", sevString);
 
@@ -349,7 +335,7 @@ NS_DebugBreak(uint32_t aSeverity, const char *aStr, const char *aExpr,
    PR_LogFlush();
 
    // errors on platforms without a debugdlg ring a bell on stderr
-#if !defined(XP_WIN) && !defined(XP_OS2)
+#if !defined(XP_WIN)
    if (ll != PR_LOG_WARNING)
      fprintf(stderr, "\07");
 #endif
@@ -358,9 +344,12 @@ NS_DebugBreak(uint32_t aSeverity, const char *aStr, const char *aExpr,
    __android_log_print(ANDROID_LOG_INFO, "Gecko", "%s", buf.buffer);
 #endif
 
-   // Write the message to stderr
-   fprintf(stderr, "%s\n", buf.buffer);
-   fflush(stderr);
+   // Write the message to stderr unless it's a warning and MOZ_IGNORE_WARNINGS
+   // is set.
+   if (!(PR_GetEnv("MOZ_IGNORE_WARNINGS") && aSeverity == NS_DEBUG_WARNING)) {
+     fprintf(stderr, "%s\n", buf.buffer);
+     fflush(stderr);
+   }
 
    switch (aSeverity) {
    case NS_DEBUG_WARNING:
@@ -376,13 +365,15 @@ NS_DebugBreak(uint32_t aSeverity, const char *aStr, const char *aExpr,
      note += buf.buffer;
      note += ")";
      CrashReporter::AppendAppNotesToCrashReport(note);
+     CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AbortMessage"),
+                                        nsDependentCString(buf.buffer));
 #endif  // MOZ_CRASHREPORTER
 
 #if defined(DEBUG) && defined(_WIN32)
      RealBreak();
 #endif
 #ifdef DEBUG
-     nsTraceRefcntImpl::WalkTheStack(stderr);
+     nsTraceRefcnt::WalkTheStack(stderr);
 #endif
      Abort(buf.buffer);
      return;
@@ -390,7 +381,7 @@ NS_DebugBreak(uint32_t aSeverity, const char *aStr, const char *aExpr,
    }
 
    // Now we deal with assertions
-   PR_ATOMIC_INCREMENT(&gAssertionCount);
+   gAssertionCount++;
 
    switch (GetAssertBehavior()) {
    case NS_ASSERT_WARN:
@@ -406,11 +397,11 @@ NS_DebugBreak(uint32_t aSeverity, const char *aStr, const char *aExpr,
       return;
 
    case NS_ASSERT_STACK:
-     nsTraceRefcntImpl::WalkTheStack(stderr);
+     nsTraceRefcnt::WalkTheStack(stderr);
      return;
 
    case NS_ASSERT_STACK_AND_ABORT:
-     nsTraceRefcntImpl::WalkTheStack(stderr);
+     nsTraceRefcnt::WalkTheStack(stderr);
      // Fall through to abort
 
    case NS_ASSERT_ABORT:
@@ -435,8 +426,6 @@ RealBreak()
 {
 #if defined(_WIN32)
   ::DebugBreak();
-#elif defined(XP_OS2)
-   asm("int $3");
 #elif defined(XP_MACOSX)
    raise(SIGTRAP);
 #elif defined(__GNUC__) && (defined(__i386__) || defined(__i386) || defined(__x86_64__))
@@ -483,8 +472,8 @@ Break(const char *aMsg)
      */
     PROCESS_INFORMATION pi;
     STARTUPINFOW si;
-    PRUnichar executable[MAX_PATH];
-    PRUnichar* pName;
+    wchar_t executable[MAX_PATH];
+    wchar_t* pName;
 
     memset(&pi, 0, sizeof(pi));
 
@@ -493,17 +482,15 @@ Break(const char *aMsg)
     si.wShowWindow = SW_SHOW;
 
     // 2nd arg of CreateProcess is in/out
-    PRUnichar *msgCopy = (PRUnichar*) _alloca((strlen(aMsg) + 1)*sizeof(PRUnichar));
-    wcscpy(msgCopy  , (PRUnichar*)NS_ConvertUTF8toUTF16(aMsg).get());
+    wchar_t *msgCopy = (wchar_t*) _alloca((strlen(aMsg) + 1)*sizeof(wchar_t));
+    wcscpy(msgCopy, NS_ConvertUTF8toUTF16(aMsg).get());
 
-    if(GetModuleFileNameW(GetModuleHandleW(L"xpcom.dll"), (LPWCH)executable, MAX_PATH) &&
-       NULL != (pName = wcsrchr(executable, '\\')) &&
-       NULL != 
-       wcscpy((WCHAR*)
-       pName+1, L"windbgdlg.exe") &&
-       CreateProcessW((LPCWSTR)executable, (LPWSTR)msgCopy, NULL, NULL, false,
-                     DETACHED_PROCESS | NORMAL_PRIORITY_CLASS,
-                     NULL, NULL, &si, &pi)) {
+    if(GetModuleFileNameW(GetModuleHandleW(L"xpcom.dll"), executable, MAX_PATH) &&
+       nullptr != (pName = wcsrchr(executable, '\\')) &&
+       nullptr != wcscpy(pName + 1, L"windbgdlg.exe") &&
+       CreateProcessW(executable, msgCopy, nullptr, nullptr,
+                      false, DETACHED_PROCESS | NORMAL_PRIORITY_CLASS,
+                      nullptr, nullptr, &si, &pi)) {
       WaitForSingleObject(pi.hProcess, INFINITE);
       GetExitCodeProcess(pi.hProcess, &code);
       CloseHandle(pi.hProcess);
@@ -523,28 +510,6 @@ Break(const char *aMsg)
   }
 
   RealBreak();
-#elif defined(XP_OS2)
-   char msg[1200];
-   PR_snprintf(msg, sizeof(msg),
-               "%s\n\nClick Cancel to Debug Application.\n"
-               "Click Enter to continue running the Application.", aMsg);
-   ULONG code = MBID_ERROR;
-   code = WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, msg, 
-                        "NSGlue_Assertion", 0,
-                        MB_ERROR | MB_ENTERCANCEL);
-
-   /* It is possible that we are executing on a thread that doesn't have a
-    * message queue.  In that case, the message won't appear, and code will
-    * be 0xFFFF.  We'll give the user a chance to debug it by calling
-    * Break()
-    * Actually, that's a really bad idea since this happens a lot with threadsafe
-    * assertions and since it means that you can't actually run the debug build
-    * outside a debugger without it crashing constantly.
-    */
-   if (( code == MBID_ENTER ) || (code == MBID_ERROR))
-     return;
-
-   RealBreak();
 #elif defined(XP_MACOSX)
    /* Note that we put this Mac OS X test above the GNUC/x86 test because the
     * GNUC/x86 test is also true on Intel Mac OS X and we want the PPC/x86
@@ -567,7 +532,8 @@ static const nsDebugImpl kImpl;
 nsresult
 nsDebugImpl::Create(nsISupports* outer, const nsIID& aIID, void* *aInstancePtr)
 {
-  NS_ENSURE_NO_AGGREGATION(outer);
+  if (NS_WARN_IF(outer))
+    return NS_ERROR_NO_AGGREGATION;
 
   return const_cast<nsDebugImpl*>(&kImpl)->
     QueryInterface(aIID, aInstancePtr);
@@ -598,5 +564,12 @@ NS_ErrorAccordingToNSPR()
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
+void
+NS_ABORT_OOM(size_t size)
+{
+#ifdef MOZ_CRASHREPORTER
+  CrashReporter::AnnotateOOMAllocationSize(size);
+#endif
+  MOZ_CRASH();
+}
 

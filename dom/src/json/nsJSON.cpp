@@ -5,15 +5,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jsapi.h"
-#include "jsdbgapi.h"
-#include "nsIServiceManager.h"
+#include "js/CharacterEncoding.h"
+#include "js/OldDebugAPI.h"
 #include "nsJSON.h"
 #include "nsIXPConnect.h"
 #include "nsIXPCScriptable.h"
 #include "nsStreamUtils.h"
 #include "nsIInputStream.h"
 #include "nsStringStream.h"
-#include "nsICharsetConverterManager.h"
+#include "mozilla/dom/EncodingUtils.h"
+#include "nsIUnicodeEncoder.h"
+#include "nsIUnicodeDecoder.h"
 #include "nsXPCOMStrings.h"
 #include "nsNetUtil.h"
 #include "nsContentUtils.h"
@@ -21,9 +23,10 @@
 #include "nsCRTGlue.h"
 #include "nsAutoPtr.h"
 #include "nsIScriptSecurityManager.h"
+#include "mozilla/Maybe.h"
 #include <algorithm>
 
-static const char kXPConnectServiceCID[] = "@mozilla.org/js/xpc/XPConnect;1";
+using mozilla::dom::EncodingUtils;
 
 #define JSON_STREAM_BUFSIZE 4096
 
@@ -49,7 +52,7 @@ static nsresult
 WarnDeprecatedMethod(DeprecationWarning warning)
 {
   return nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                         "DOM Core", nullptr,
+                                         NS_LITERAL_CSTRING("DOM Core"), nullptr,
                                          nsContentUtils::eDOM_PROPERTIES,
                                          warning == EncodeWarning
                                          ? "nsIJSONEncodeDeprecatedWarning"
@@ -57,7 +60,7 @@ WarnDeprecatedMethod(DeprecationWarning warning)
 }
 
 NS_IMETHODIMP
-nsJSON::Encode(const JS::Value& aValue, JSContext* cx, uint8_t aArgc,
+nsJSON::Encode(JS::Handle<JS::Value> aValue, JSContext* cx, uint8_t aArgc,
                nsAString &aJSON)
 {
   // This function should only be called from JS.
@@ -110,7 +113,7 @@ NS_IMETHODIMP
 nsJSON::EncodeToStream(nsIOutputStream *aStream,
                        const char* aCharset,
                        const bool aWriteBOM,
-                       const JS::Value& val,
+                       JS::Handle<JS::Value> val,
                        JSContext* cx,
                        uint8_t aArgc)
 {
@@ -159,15 +162,15 @@ nsJSON::EncodeToStream(nsIOutputStream *aStream,
   return rv;
 }
 
-static JSBool
+static bool
 WriteCallback(const jschar *buf, uint32_t len, void *data)
 {
   nsJSONWriter *writer = static_cast<nsJSONWriter*>(data);
-  nsresult rv =  writer->Write((const PRUnichar*)buf, (uint32_t)len);
+  nsresult rv =  writer->Write((const char16_t*)buf, (uint32_t)len);
   if (NS_FAILED(rv))
-    return JS_FALSE;
+    return false;
 
-  return JS_TRUE;
+  return true;
 }
 
 NS_IMETHODIMP
@@ -182,9 +185,11 @@ nsJSON::EncodeFromJSVal(JS::Value *value, JSContext *cx, nsAString &result)
   }
 
   nsJSONWriter writer;
-  if (!JS_Stringify(cx, value, NULL, JSVAL_NULL, WriteCallback, &writer)) {
+  JS::Rooted<JS::Value> vp(cx, *value);
+  if (!JS_Stringify(cx, &vp, JS::NullPtr(), JS::NullHandleValue, WriteCallback, &writer)) {
     return NS_ERROR_XPC_BAD_CONVERT_JS;
   }
+  *value = vp;
 
   NS_ENSURE_TRUE(writer.DidWrite(), NS_ERROR_UNEXPECTED);
   writer.FlushBuffer();
@@ -211,11 +216,11 @@ nsJSON::EncodeInternal(JSContext* cx, const JS::Value& aValue,
    */
   JS::Rooted<JS::Value> val(cx, aValue);
   JS::Rooted<JS::Value> toJSON(cx);
-  if (JS_GetProperty(cx, obj, "toJSON", toJSON.address()) &&
+  if (JS_GetProperty(cx, obj, "toJSON", &toJSON) &&
       toJSON.isObject() &&
       JS_ObjectIsCallable(cx, &toJSON.toObject())) {
     // If toJSON is implemented, it must not throw
-    if (!JS_CallFunctionValue(cx, obj, toJSON, 0, NULL, val.address())) {
+    if (!JS_CallFunctionValue(cx, obj, toJSON, JS::HandleValueArray::empty(), &val)) {
       if (JS_IsExceptionPending(cx))
         // passing NS_OK will throw the pending exception
         return NS_OK;
@@ -241,7 +246,7 @@ nsJSON::EncodeInternal(JSContext* cx, const JS::Value& aValue,
     return NS_ERROR_INVALID_ARG;
 
   // We're good now; try to stringify
-  if (!JS_Stringify(cx, val.address(), NULL, JSVAL_NULL, WriteCallback, writer))
+  if (!JS_Stringify(cx, &val, JS::NullPtr(), JS::NullHandleValue, WriteCallback, writer))
     return NS_ERROR_FAILURE;
 
   return NS_OK;
@@ -274,11 +279,7 @@ nsJSONWriter::SetCharset(const char* aCharset)
 {
   nsresult rv = NS_OK;
   if (mStream) {
-    nsCOMPtr<nsICharsetConverterManager> ccm =
-      do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv = ccm->GetUnicodeEncoder(aCharset, getter_AddRefs(mEncoder));
-    NS_ENSURE_SUCCESS(rv, rv);
+    mEncoder = EncodingUtils::EncoderForEncoding(aCharset);
     rv = mEncoder->SetOutputErrorBehavior(nsIUnicodeEncoder::kOnError_Signal,
                                           nullptr, '\0');
     NS_ENSURE_SUCCESS(rv, rv);
@@ -288,14 +289,14 @@ nsJSONWriter::SetCharset(const char* aCharset)
 }
 
 nsresult
-nsJSONWriter::Write(const PRUnichar *aBuffer, uint32_t aLength)
+nsJSONWriter::Write(const char16_t *aBuffer, uint32_t aLength)
 {
   if (mStream) {
     return WriteToStream(mStream, mEncoder, aBuffer, aLength);
   }
 
   if (!mDidWrite) {
-    mBuffer = new PRUnichar[JSON_STREAM_BUFSIZE];
+    mBuffer = new char16_t[JSON_STREAM_BUFSIZE];
     if (!mBuffer)
       return NS_ERROR_OUT_OF_MEMORY;
     mDidWrite = true;
@@ -310,7 +311,7 @@ nsJSONWriter::Write(const PRUnichar *aBuffer, uint32_t aLength)
     // we know mBufferCount is 0 because we know we hit the if above
     mOutputString.Append(aBuffer, aLength);
   } else {
-    memcpy(&mBuffer[mBufferCount], aBuffer, aLength * sizeof(PRUnichar));
+    memcpy(&mBuffer[mBufferCount], aBuffer, aLength * sizeof(char16_t));
     mBufferCount += aLength;
   }
 
@@ -331,14 +332,14 @@ nsJSONWriter::FlushBuffer()
 nsresult
 nsJSONWriter::WriteToStream(nsIOutputStream *aStream,
                             nsIUnicodeEncoder *encoder,
-                            const PRUnichar *aBuffer,
+                            const char16_t *aBuffer,
                             uint32_t aLength)
 {
   nsresult rv;
   int32_t srcLength = aLength;
   uint32_t bytesWritten;
 
-  // The bytes written to the stream might differ from the PRUnichar size
+  // The bytes written to the stream might differ from the char16_t size
   int32_t aDestLength;
   rv = encoder->GetMaxLength(aBuffer, srcLength, &aDestLength);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -359,18 +360,19 @@ nsJSONWriter::WriteToStream(nsIOutputStream *aStream,
 }
 
 NS_IMETHODIMP
-nsJSON::Decode(const nsAString& json, JSContext* cx, JS::Value* aRetval)
+nsJSON::Decode(const nsAString& json, JSContext* cx,
+               JS::MutableHandle<JS::Value> aRetval)
 {
   nsresult rv = WarnDeprecatedMethod(DecodeWarning);
   if (NS_FAILED(rv))
     return rv;
 
-  const PRUnichar *data;
+  const char16_t *data;
   uint32_t len = NS_StringGetData(json, &data);
   nsCOMPtr<nsIInputStream> stream;
   rv = NS_NewByteInputStream(getter_AddRefs(stream),
                              reinterpret_cast<const char*>(data),
-                             len * sizeof(PRUnichar),
+                             len * sizeof(char16_t),
                              NS_ASSIGNMENT_DEPEND);
   NS_ENSURE_SUCCESS(rv, rv);
   return DecodeInternal(cx, stream, len, false, aRetval);
@@ -378,21 +380,19 @@ nsJSON::Decode(const nsAString& json, JSContext* cx, JS::Value* aRetval)
 
 NS_IMETHODIMP
 nsJSON::DecodeFromStream(nsIInputStream *aStream, int32_t aContentLength,
-                         JSContext* cx, JS::Value* aRetval)
+                         JSContext* cx, JS::MutableHandle<JS::Value> aRetval)
 {
   return DecodeInternal(cx, aStream, aContentLength, true, aRetval);
 }
 
 NS_IMETHODIMP
-nsJSON::DecodeToJSVal(const nsAString &str, JSContext *cx, JS::Value *result)
+nsJSON::DecodeToJSVal(const nsAString &str, JSContext *cx,
+                      JS::MutableHandle<JS::Value> result)
 {
-  JS::Rooted<JS::Value> value(cx);
   if (!JS_ParseJSON(cx, static_cast<const jschar*>(PromiseFlatString(str).get()),
-                    str.Length(), &value)) {
+                    str.Length(), result)) {
     return NS_ERROR_UNEXPECTED;
   }
-
-  *result = value;
   return NS_OK;
 }
 
@@ -401,7 +401,7 @@ nsJSON::DecodeInternal(JSContext* cx,
                        nsIInputStream *aStream,
                        int32_t aContentLength,
                        bool aNeedsConverter,
-                       JS::Value* aRetval)
+                       JS::MutableHandle<JS::Value> aRetval)
 {
   // Consume the stream
   nsCOMPtr<nsIChannel> jsonChannel;
@@ -418,7 +418,7 @@ nsJSON::DecodeInternal(JSContext* cx,
     return NS_ERROR_FAILURE;
 
   nsRefPtr<nsJSONListener> jsonListener =
-    new nsJSONListener(cx, aRetval, aNeedsConverter);
+    new nsJSONListener(cx, aRetval.address(), aNeedsConverter);
 
   //XXX this stream pattern should be consolidated in netwerk
   rv = jsonListener->OnStartRequest(jsonChannel, nullptr);
@@ -482,7 +482,7 @@ NS_NewJSON(nsISupports* aOuter, REFNSIID aIID, void** aResult)
 
 nsJSONListener::nsJSONListener(JSContext *cx, JS::Value *rootVal,
                                bool needsConverter)
-  : mNeedsConverter(needsConverter), 
+  : mNeedsConverter(needsConverter),
     mCx(cx),
     mRootVal(rootVal)
 {
@@ -523,13 +523,13 @@ nsJSONListener::OnStopRequest(nsIRequest *aRequest, nsISupports *aContext,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  JS::RootedValue reviver(mCx, JS::NullValue()), value(mCx);
+  JS::Rooted<JS::Value> reviver(mCx, JS::NullValue()), value(mCx);
 
-  JS::StableCharPtr chars(reinterpret_cast<const jschar*>(mBufferedChars.Elements()),
-                          mBufferedChars.Length());
-  JSBool ok = JS_ParseJSONWithReviver(mCx, chars.get(),
+  JS::ConstTwoByteChars chars(reinterpret_cast<const jschar*>(mBufferedChars.Elements()),
+                              mBufferedChars.Length());
+  bool ok = JS_ParseJSONWithReviver(mCx, chars.get(),
                                       uint32_t(mBufferedChars.Length()),
-                                      reviver, value.address());
+                                      reviver, &value);
 
   *mRootVal = value;
   mBufferedChars.TruncateLength(0);
@@ -551,7 +551,7 @@ nsJSONListener::OnDataAvailable(nsIRequest *aRequest, nsISupports *aContext,
     if (mSniffBuffer.Length() < 4)
       return NS_OK;
   }
-  
+
   char buffer[JSON_STREAM_BUFSIZE];
   unsigned long bytesRemaining = aLength - mSniffBuffer.Length();
   while (bytesRemaining) {
@@ -600,11 +600,7 @@ nsJSONListener::ProcessBytes(const char* aBuffer, uint32_t aByteLength)
     // We should have a unicode charset by now
     rv = CheckCharset(charset.get());
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCOMPtr<nsICharsetConverterManager> ccm =
-        do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv = ccm->GetUnicodeDecoderRaw(charset.get(), getter_AddRefs(mDecoder));
-    NS_ENSURE_SUCCESS(rv, rv);
+    mDecoder = EncodingUtils::DecoderForEncoding(charset);
 
     // consume the sniffed bytes
     rv = ConsumeConverted(mSniffBuffer.get(), mSniffBuffer.Length());
@@ -618,8 +614,8 @@ nsJSONListener::ProcessBytes(const char* aBuffer, uint32_t aByteLength)
   if (mNeedsConverter) {
     rv = ConsumeConverted(aBuffer, aByteLength);
   } else {
-    uint32_t unichars = aByteLength / sizeof(PRUnichar);
-    rv = Consume((PRUnichar *) aBuffer, unichars);
+    uint32_t unichars = aByteLength / sizeof(char16_t);
+    rv = Consume((char16_t *) aBuffer, unichars);
   }
 
   return rv;
@@ -635,7 +631,7 @@ nsJSONListener::ConsumeConverted(const char* aBuffer, uint32_t aByteLength)
   rv = mDecoder->GetMaxLength(aBuffer, srcLen, &unicharLength);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  PRUnichar* endelems = mBufferedChars.AppendElements(unicharLength);
+  char16_t* endelems = mBufferedChars.AppendElements(unicharLength);
   int32_t preLength = unicharLength;
   rv = mDecoder->Convert(aBuffer, &srcLen, endelems, &unicharLength);
   if (NS_FAILED(rv))
@@ -647,7 +643,7 @@ nsJSONListener::ConsumeConverted(const char* aBuffer, uint32_t aByteLength)
 }
 
 nsresult
-nsJSONListener::Consume(const PRUnichar* aBuffer, uint32_t aByteLength)
+nsJSONListener::Consume(const char16_t* aBuffer, uint32_t aByteLength)
 {
   if (!mBufferedChars.AppendElements(aBuffer, aByteLength))
     return NS_ERROR_FAILURE;

@@ -6,16 +6,19 @@
 if CONFIG['LIBXUL_SDK']:
     error('toolkit.mozbuild is not compatible with --enable-libxul-sdk=')
 
-if not CONFIG['MOZ_NATIVE_NSPR']:
-    add_tier_dir('nspr', 'config/nspr')
+if CONFIG['MOZ_CONTENT_SANDBOX']:
+    add_tier_dir('sandbox', 'security/sandbox')
 
-if not CONFIG['MOZ_NATIVE_SQLITE']:
-    add_tier_dir('nss', 'db/sqlite3/src')
+# Depends on NSS and NSPR, and must be built after sandbox or else B2G emulator
+# builds fail.
+add_tier_dir('platform', 'security/certverifier')
 
-if CONFIG['MOZ_PSM'] and not CONFIG['MOZ_NATIVE_NSS']:
-    add_tier_dir('nss', 'security/build')
+# Depends on certverifier
+add_tier_dir('platform', 'security/apps')
 
-include('/config/js/js.mozbuild')
+# the signing related bits of libmar depend on nss
+if CONFIG['MOZ_UPDATER']:
+    add_tier_dir('platform', 'modules/libmar')
 
 if CONFIG['NS_TRACE_MALLOC']:
     add_tier_dir('platform', 'tools/trace-malloc/lib')
@@ -37,15 +40,7 @@ add_tier_dir('platform', [
 if CONFIG['MOZ_AUTH_EXTENSION']:
     add_tier_dir('platform', 'extensions/auth')
 
-# External/3rd party libraries.
-
-if not CONFIG['MOZ_NATIVE_JPEG']:
-    add_tier_dir('platform', 'media/libjpeg')
-
 if CONFIG['MOZ_UPDATER']:
-    if not CONFIG['MOZ_NATIVE_BZ2']:
-        add_tier_dir('platform', 'modules/libbz2')
-
     add_tier_dir('platform', 'other-licenses/bsdiff')
 
 # Gecko/Core components.
@@ -53,6 +48,8 @@ if CONFIG['MOZ_UPDATER']:
 add_tier_dir('platform', ['ipc', 'js/ipc'])
 
 add_tier_dir('platform', ['hal', 'js/xpconnect', 'intl/chardet'])
+
+add_tier_dir('platform', 'media/libyuv')
 
 add_tier_dir('platform', ['modules/libjar', 'storage'])
 
@@ -64,26 +61,6 @@ add_tier_dir('platform', 'rdf')
 if CONFIG['MOZ_JSDEBUGGER']:
     add_tier_dir('platform', 'js/jsd')
 
-if CONFIG['MOZ_VORBIS']:
-    add_tier_dir('platform', 'media/libvorbis')
-
-if CONFIG['MOZ_TREMOR']:
-    add_tier_dir('platform', 'media/libtremor')
-
-if CONFIG['MOZ_OPUS']:
-    add_tier_dir('platform', 'media/libopus')
-
-if CONFIG['MOZ_WEBM']:
-    add_tier_dir('platform', 'media/libnestegg')
-
-add_tier_dir('platform', 'media/webvtt')
-
-if CONFIG['MOZ_VP8'] and not CONFIG['MOZ_NATIVE_LIBVPX']:
-    add_tier_dir('platform', 'media/libvpx')
-
-if CONFIG['MOZ_OGG']:
-    add_tier_dir('platform', ['media/libogg', 'media/libtheora'])
-
 if CONFIG['MOZ_WEBRTC']:
     add_tier_dir('platform', [
         'media/webrtc',
@@ -92,19 +69,11 @@ if CONFIG['MOZ_WEBRTC']:
         'media/mtransport/standalone',
     ])
 
-if CONFIG['MOZ_SPEEX_RESAMPLER']:
-    add_tier_dir('platform', 'media/libspeex_resampler')
-
-if CONFIG['MOZ_SOUNDTOUCH']:
-    add_tier_dir('platform', 'media/libsoundtouch')
-
-if CONFIG['MOZ_CUBEB']:
-    add_tier_dir('platform', 'media/libcubeb')
-
 if CONFIG['MOZ_OMX_PLUGIN']:
     add_tier_dir('platform', [
         'media/omx-plugin/lib/ics/libutils',
         'media/omx-plugin/lib/ics/libstagefright',
+        'media/omx-plugin/lib/ics/libvideoeditorplayer',
         'media/omx-plugin/lib/gb/libutils',
         'media/omx-plugin/lib/gb/libstagefright',
         'media/omx-plugin/lib/gb/libstagefright_color_conversion',
@@ -116,14 +85,8 @@ if CONFIG['MOZ_OMX_PLUGIN']:
         'media/omx-plugin/froyo',
         'media/omx-plugin/lib/hc/libstagefright',
         'media/omx-plugin/hc',
-        'media/omx-plugin/sony',
-        'media/omx-plugin/jb-htc',
+        'media/omx-plugin/kk',
     ])
-
-if not CONFIG['MOZ_NATIVE_PNG']:
-    add_tier_dir('platform', 'media/libpng')
-
-add_tier_dir('platform', 'media/kiss_fft')
 
 if CONFIG['ENABLE_TESTS']:
     add_tier_dir('platform', 'testing/specialpowers')
@@ -178,16 +141,7 @@ if CONFIG['MOZ_ENABLE_XREMOTE']:
 if CONFIG['MOZ_SPELLCHECK']:
     add_tier_dir('platform', 'extensions/spellcheck')
 
-if CONFIG['MOZ_PSM']:
-    add_tier_dir('platform', 'security/manager')
-else:
-    add_tier_dir('platform', [
-        'security/manager/boot/public',
-        'security/manager/ssl/public',
-    ])
-
-if CONFIG['MOZ_UPDATER']:
-    add_tier_dir('platform', 'modules/libmar')
+add_tier_dir('platform', 'security/manager')
 
 add_tier_dir('platform', 'toolkit')
 
@@ -218,24 +172,22 @@ if CONFIG['NS_TRACE_MALLOC']:
 if CONFIG['MOZ_ENABLE_GNOME_COMPONENT']:
     add_tier_dir('platform', 'toolkit/system/gnome')
 
-# if libconic is present, it will do its own network monitoring
-if not CONFIG['MOZ_ENABLE_LIBCONIC'] and CONFIG['MOZ_ENABLE_DBUS']:
+# if QtNetwork is present, it will do its own network monitoring
+if not CONFIG['MOZ_ENABLE_QTNETWORK'] and CONFIG['MOZ_ENABLE_DBUS']:
     add_tier_dir('platform', 'toolkit/system/dbus')
 
 add_tier_dir('platform', 'addon-sdk')
 
-if CONFIG['MOZ_MAPINFO']:
-    add_tier_dir('platform', 'tools/codesighs')
-
 if CONFIG['ENABLE_MARIONETTE'] or CONFIG['MOZ_WIDGET_TOOLKIT'] not in ('gonk', 'android'):
     add_tier_dir('platform', 'testing/marionette')
+
+add_tier_dir('platform', 'tools/quitter')
 
 if CONFIG['ENABLE_TESTS']:
     add_tier_dir('platform', [
         'testing/mochitest',
         'testing/xpcshell',
         'testing/tools/screenshot',
-        'testing/peptest',
         'testing/profiles',
         'testing/mozbase',
         'testing/modules',

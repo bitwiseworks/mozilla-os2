@@ -244,22 +244,23 @@ ProcessMetrics* ProcessMetrics::CreateProcessMetrics(ProcessHandle process) {
 
 ProcessMetrics::~ProcessMetrics() { }
 
-void EnableTerminationOnHeapCorruption() {
-  // On POSIX, there nothing to do AFAIK.
-}
-
-void RaiseProcessToHighPriority() {
-  // On POSIX, we don't actually do anything here.  We could try to nice() or
-  // setpriority() or sched_getscheduler, but these all require extra rights.
-}
-
 bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   int status;
   const int result = HANDLE_EINTR(waitpid(handle, &status, WNOHANG));
   if (result == -1) {
-    LOG(ERROR) << "waitpid failed pid:" << handle << " errno:" << errno;
+    // This shouldn't happen, but sometimes it does.  The error is
+    // probably ECHILD and the reason is probably that a pid was
+    // waited on again after a previous wait reclaimed its zombie.
+    // (It could also occur if the process isn't a direct child, but
+    // don't do that.)  This is bad, because it risks interfering with
+    // an unrelated child process if the pid is reused.
+    //
+    // So, lacking reliable information, we indicate that the process
+    // is dead, in the hope that the caller will give up and stop
+    // calling us.  See also bug 943174 and bug 933680.
+    CHROMIUM_LOG(ERROR) << "waitpid failed pid:" << handle << " errno:" << errno;
     if (child_exited)
-      *child_exited = false;
+      *child_exited = true;
     return false;
   } else if (result == 0) {
     // the child hasn't exited yet.
@@ -273,6 +274,7 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
 
   if (WIFSIGNALED(status)) {
     switch(WTERMSIG(status)) {
+      case SIGSYS:
       case SIGSEGV:
       case SIGILL:
       case SIGABRT:
@@ -287,108 +289,6 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
     return WEXITSTATUS(status) != 0;
 
   return false;
-}
-
-bool WaitForExitCode(ProcessHandle handle, int* exit_code) {
-  int status;
-  if (HANDLE_EINTR(waitpid(handle, &status, 0)) == -1) {
-    NOTREACHED();
-    return false;
-  }
-
-  if (WIFEXITED(status)) {
-    *exit_code = WEXITSTATUS(status);
-    return true;
-  }
-
-  // If it didn't exit cleanly, it must have been signaled.
-  DCHECK(WIFSIGNALED(status));
-  return false;
-}
-
-namespace {
-
-int WaitpidWithTimeout(ProcessHandle handle, int wait_milliseconds,
-                       bool* success) {
-  // This POSIX version of this function only guarantees that we wait no less
-  // than |wait_milliseconds| for the proces to exit.  The child process may
-  // exit sometime before the timeout has ended but we may still block for
-  // up to 0.25 seconds after the fact.
-  //
-  // waitpid() has no direct support on POSIX for specifying a timeout, you can
-  // either ask it to block indefinitely or return immediately (WNOHANG).
-  // When a child process terminates a SIGCHLD signal is sent to the parent.
-  // Catching this signal would involve installing a signal handler which may
-  // affect other parts of the application and would be difficult to debug.
-  //
-  // Our strategy is to call waitpid() once up front to check if the process
-  // has already exited, otherwise to loop for wait_milliseconds, sleeping for
-  // at most 0.25 secs each time using usleep() and then calling waitpid().
-  //
-  // usleep() is speced to exit if a signal is received for which a handler
-  // has been installed.  This means that when a SIGCHLD is sent, it will exit
-  // depending on behavior external to this function.
-  //
-  // This function is used primarily for unit tests, if we want to use it in
-  // the application itself it would probably be best to examine other routes.
-  int status = -1;
-  pid_t ret_pid = HANDLE_EINTR(waitpid(handle, &status, WNOHANG));
-  static const int64_t kQuarterSecondInMicroseconds = kMicrosecondsPerSecond/4;
-
-  // If the process hasn't exited yet, then sleep and try again.
-  Time wakeup_time = Time::Now() + TimeDelta::FromMilliseconds(
-      wait_milliseconds);
-  while (ret_pid == 0) {
-    Time now = Time::Now();
-    if (now > wakeup_time)
-      break;
-    // Guaranteed to be non-negative!
-    int64_t sleep_time_usecs = (wakeup_time - now).InMicroseconds();
-    // Don't sleep for more than 0.25 secs at a time.
-    if (sleep_time_usecs > kQuarterSecondInMicroseconds) {
-      sleep_time_usecs = kQuarterSecondInMicroseconds;
-    }
-
-    // usleep() will return 0 and set errno to EINTR on receipt of a signal
-    // such as SIGCHLD.
-    usleep(sleep_time_usecs);
-    ret_pid = HANDLE_EINTR(waitpid(handle, &status, WNOHANG));
-  }
-
-  if (success)
-    *success = (ret_pid != -1);
-
-  return status;
-}
-
-}  // namespace
-
-bool WaitForSingleProcess(ProcessHandle handle, int wait_milliseconds) {
-  bool waitpid_success;
-  int status;
-  if (wait_milliseconds == base::kNoTimeout)
-    waitpid_success = (HANDLE_EINTR(waitpid(handle, &status, 0)) != -1);
-  else
-    status = WaitpidWithTimeout(handle, wait_milliseconds, &waitpid_success);
-  if (status != -1) {
-    DCHECK(waitpid_success);
-    return WIFEXITED(status);
-  } else {
-    return false;
-  }
-}
-
-bool CrashAwareSleep(ProcessHandle handle, int wait_milliseconds) {
-  bool waitpid_success;
-  int status = WaitpidWithTimeout(handle, wait_milliseconds, &waitpid_success);
-  if (status != -1) {
-    DCHECK(waitpid_success);
-    return !(WIFEXITED(status) || WIFSIGNALED(status));
-  } else {
-    // If waitpid returned with an error, then the process doesn't exist
-    // (which most probably means it didn't exist before our call).
-    return waitpid_success;
-  }
 }
 
 namespace {
@@ -436,144 +336,6 @@ int ProcessMetrics::GetCPUUsage() {
   last_time_ = time;
 
   return cpu;
-}
-
-bool GetAppOutput(const CommandLine& cl, std::string* output) {
-  int pipe_fd[2];
-  pid_t pid;
-
-  // Illegal to allocate memory after fork and before execvp
-  InjectiveMultimap fd_shuffle1, fd_shuffle2;
-  fd_shuffle1.reserve(3);
-  fd_shuffle2.reserve(3);
-  const std::vector<std::string>& argv = cl.argv();
-  scoped_array<char*> argv_cstr(new char*[argv.size() + 1]);
-
-  if (pipe(pipe_fd) < 0)
-    return false;
-
-  switch (pid = fork()) {
-    case -1:  // error
-      close(pipe_fd[0]);
-      close(pipe_fd[1]);
-      return false;
-    case 0:  // child
-      {
-        // Obscure fork() rule: in the child, if you don't end up doing exec*(),
-        // you call _exit() instead of exit(). This is because _exit() does not
-        // call any previously-registered (in the parent) exit handlers, which
-        // might do things like block waiting for threads that don't even exist
-        // in the child.
-        int dev_null = open("/dev/null", O_WRONLY);
-        if (dev_null < 0)
-          _exit(127);
-
-        fd_shuffle1.push_back(InjectionArc(pipe_fd[1], STDOUT_FILENO, true));
-        fd_shuffle1.push_back(InjectionArc(dev_null, STDERR_FILENO, true));
-        fd_shuffle1.push_back(InjectionArc(dev_null, STDIN_FILENO, true));
-        // Adding another element here? Remeber to increase the argument to
-        // reserve(), above.
-
-        std::copy(fd_shuffle1.begin(), fd_shuffle1.end(),
-                  std::back_inserter(fd_shuffle2));
-
-        // fd_shuffle1 is mutated by this call because it cannot malloc.
-        if (!ShuffleFileDescriptors(&fd_shuffle1))
-          _exit(127);
-
-        CloseSuperfluousFds(fd_shuffle2);
-
-        for (size_t i = 0; i < argv.size(); i++)
-          argv_cstr[i] = const_cast<char*>(argv[i].c_str());
-        argv_cstr[argv.size()] = NULL;
-        execvp(argv_cstr[0], argv_cstr.get());
-        _exit(127);
-      }
-    default:  // parent
-      {
-        // Close our writing end of pipe now. Otherwise later read would not
-        // be able to detect end of child's output (in theory we could still
-        // write to the pipe).
-        close(pipe_fd[1]);
-
-        int exit_code = EXIT_FAILURE;
-        bool success = WaitForExitCode(pid, &exit_code);
-        if (!success || exit_code != EXIT_SUCCESS) {
-          close(pipe_fd[0]);
-          return false;
-        }
-
-        char buffer[256];
-        std::string buf_output;
-
-        while (true) {
-          ssize_t bytes_read =
-              HANDLE_EINTR(read(pipe_fd[0], buffer, sizeof(buffer)));
-          if (bytes_read <= 0)
-            break;
-          buf_output.append(buffer, bytes_read);
-        }
-        output->swap(buf_output);
-        close(pipe_fd[0]);
-        return true;
-      }
-  }
-}
-
-int GetProcessCount(const std::wstring& executable_name,
-                    const ProcessFilter* filter) {
-  int count = 0;
-
-  NamedProcessIterator iter(executable_name, filter);
-  while (iter.NextProcessEntry())
-    ++count;
-  return count;
-}
-
-bool KillProcesses(const std::wstring& executable_name, int exit_code,
-                   const ProcessFilter* filter) {
-  bool result = true;
-  const ProcessEntry* entry;
-
-  NamedProcessIterator iter(executable_name, filter);
-  while ((entry = iter.NextProcessEntry()) != NULL)
-    result = KillProcess((*entry).pid, exit_code, true) && result;
-
-  return result;
-}
-
-bool WaitForProcessesToExit(const std::wstring& executable_name,
-                            int wait_milliseconds,
-                            const ProcessFilter* filter) {
-  bool result = false;
-
-  // TODO(port): This is inefficient, but works if there are multiple procs.
-  // TODO(port): use waitpid to avoid leaving zombies around
-
-  base::Time end_time = base::Time::Now() +
-      base::TimeDelta::FromMilliseconds(wait_milliseconds);
-  do {
-    NamedProcessIterator iter(executable_name, filter);
-    if (!iter.NextProcessEntry()) {
-      result = true;
-      break;
-    }
-    PlatformThread::Sleep(100);
-  } while ((base::Time::Now() - end_time) > base::TimeDelta());
-
-  return result;
-}
-
-bool CleanupProcesses(const std::wstring& executable_name,
-                      int wait_milliseconds,
-                      int exit_code,
-                      const ProcessFilter* filter) {
-  bool exited_cleanly =
-      WaitForProcessesToExit(executable_name, wait_milliseconds,
-                           filter);
-  if (!exited_cleanly)
-    KillProcesses(executable_name, exit_code, filter);
-  return exited_cleanly;
 }
 
 }  // namespace base

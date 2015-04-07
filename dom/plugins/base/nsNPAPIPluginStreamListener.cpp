@@ -15,7 +15,7 @@
 #include "nsPluginLogging.h"
 #include "nsPluginStreamListenerPeer.h"
 
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 #include <algorithm>
 
 nsNPAPIStreamWrapper::nsNPAPIStreamWrapper(nsIOutputStream *outputStream,
@@ -35,7 +35,7 @@ nsNPAPIStreamWrapper::~nsNPAPIStreamWrapper()
   }
 }
 
-NS_IMPL_ISUPPORTS1(nsPluginStreamToFile, nsIOutputStream)
+NS_IMPL_ISUPPORTS(nsPluginStreamToFile, nsIOutputStream)
 
 nsPluginStreamToFile::nsPluginStreamToFile(const char* target,
                                            nsIPluginInstanceOwner* owner)
@@ -128,8 +128,8 @@ nsPluginStreamToFile::Close(void)
 
 // nsNPAPIPluginStreamListener Methods
 
-NS_IMPL_ISUPPORTS2(nsNPAPIPluginStreamListener,
-                   nsITimerCallback, nsIHTTPHeaderListener)
+NS_IMPL_ISUPPORTS(nsNPAPIPluginStreamListener,
+                  nsITimerCallback, nsIHTTPHeaderListener)
 
 nsNPAPIPluginStreamListener::nsNPAPIPluginStreamListener(nsNPAPIPluginInstance* inst, 
                                                          void* notifyData,
@@ -866,7 +866,7 @@ nsNPAPIPluginStreamListener::HandleRedirectNotification(nsIChannel *oldChannel, 
 
           NPP npp;
           mInst->GetNPP(&npp);
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
           NS_TRY_SAFE_CALL_VOID((*pluginFunctions->urlredirectnotify)(npp, spec.get(), static_cast<int32_t>(status), mNPStreamWrapper->mNPStream.notifyData), mInst,
                                 NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
 #else

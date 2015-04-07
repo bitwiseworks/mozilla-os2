@@ -6,10 +6,12 @@
 #ifndef nsSecureBrowserUIImpl_h_
 #define nsSecureBrowserUIImpl_h_
 
+#ifdef DEBUG
+#include "mozilla/Atomics.h"
+#endif
 #include "mozilla/ReentrantMonitor.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
-#include "nsIObserver.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMHTMLFormElement.h"
@@ -39,7 +41,6 @@ class nsIInterfaceRequestor;
 class nsSecureBrowserUIImpl : public nsISecureBrowserUI,
                               public nsIWebProgressListener,
                               public nsIFormSubmitObserver,
-                              public nsIObserver,
                               public nsSupportsWeakReference,
                               public nsISSLStatusProvider
 {
@@ -48,12 +49,10 @@ public:
   nsSecureBrowserUIImpl();
   virtual ~nsSecureBrowserUIImpl();
   
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIWEBPROGRESSLISTENER
   NS_DECL_NSISECUREBROWSERUI
   
-  // nsIObserver
-  NS_DECL_NSIOBSERVER
   NS_DECL_NSISSLSTATUSPROVIDER
 
   NS_IMETHOD Notify(nsIDOMHTMLFormElement* formNode, nsIDOMWindow* window,
@@ -93,7 +92,7 @@ protected:
   bool mOnLocationChangeSeen;
 #ifdef DEBUG
   /* related to mReentrantMonitor */
-  int32_t mOnStateLocationChangeReentranceDetection;
+  mozilla::Atomic<int32_t> mOnStateLocationChangeReentranceDetection;
 #endif
 
   static already_AddRefed<nsISupports> ExtractSecurityInfo(nsIRequest* aRequest);

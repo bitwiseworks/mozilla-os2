@@ -7,15 +7,13 @@
 interface nsIPrincipal;
 interface nsIDOMWindow;
 interface nsIDOMElement;
+interface nsIArray;
 
 /**
- * Interface allows access to a content to request
- * permission to perform a privileged operation such as
- * geolocation.
+ *  Interface provides the request type and its access.
  */
-[scriptable, uuid(1de67000-2de8-11e2-81c1-0800200c9a66)]
-interface nsIContentPermissionRequest : nsISupports {
-
+[scriptable, uuid(ef4db3b8-ca9c-4b1d-8f81-fd88ec32af13)]
+interface nsIContentPermissionType : nsISupports {
   /**
    *  The type of the permission request, such as
    *  "geolocation".
@@ -29,6 +27,25 @@ interface nsIContentPermissionRequest : nsISupports {
   readonly attribute ACString access;
 
   /**
+   * The array of available options.
+   */
+  readonly attribute nsIArray options; // ["choice1", "choice2"]
+};
+
+/**
+ * Interface allows access to a content to request
+ * permission to perform a privileged operation such as
+ * geolocation.
+ */
+[scriptable, uuid(69a39d88-d1c4-4ba9-9b19-bafc7a1bb783)]
+interface nsIContentPermissionRequest : nsISupports {
+  /**
+   *  The array will include the request types. Elements of this array are
+   *  nsIContentPermissionType object.
+   */
+  readonly attribute nsIArray types;
+
+  /*
    *  The principal of the permission request.
    */
   readonly attribute nsIPrincipal principal;
@@ -47,7 +64,7 @@ interface nsIContentPermissionRequest : nsISupports {
    */
 
   void cancel();
-  void allow();
+  void allow([optional] in jsval choices); // {"type1": "choice1", "type2": "choiceA"}
 };
 
 /**

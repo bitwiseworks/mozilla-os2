@@ -6,11 +6,11 @@
 
 #include "IndexedDBChild.h"
 
-#include "nsIAtom.h"
 #include "nsIInputStream.h"
 
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/quota/Client.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 
 #include "AsyncConnectionHelper.h"
@@ -24,6 +24,7 @@
 USING_INDEXEDDB_NAMESPACE
 
 using namespace mozilla::dom;
+using mozilla::dom::quota::Client;
 using mozilla::dom::quota::QuotaManager;
 
 namespace {
@@ -50,14 +51,14 @@ public:
   virtual nsresult
   OnSuccess() MOZ_OVERRIDE
   {
-    static_cast<IDBOpenDBRequest*>(mRequest.get())->SetTransaction(NULL);
+    static_cast<IDBOpenDBRequest*>(mRequest.get())->SetTransaction(nullptr);
     return AsyncConnectionHelper::OnSuccess();
   }
 
   virtual void
   OnError() MOZ_OVERRIDE
   {
-    static_cast<IDBOpenDBRequest*>(mRequest.get())->SetTransaction(NULL);
+    static_cast<IDBOpenDBRequest*>(mRequest.get())->SetTransaction(nullptr);
     AsyncConnectionHelper::OnError();
   }
 
@@ -103,7 +104,7 @@ class IPCDeleteDatabaseHelper : public AsyncConnectionHelper
 {
 public:
   IPCDeleteDatabaseHelper(IDBRequest* aRequest)
-  : AsyncConnectionHelper(static_cast<IDBDatabase*>(NULL), aRequest)
+  : AsyncConnectionHelper(static_cast<IDBDatabase*>(nullptr), aRequest)
   { }
 
   virtual nsresult UnpackResponseFromParentProcess(
@@ -140,7 +141,7 @@ public:
       return NS_OK;
     }
 
-    nsRefPtr<nsDOMEvent> event =
+    nsRefPtr<Event> event =
       IDBVersionChangeEvent::Create(mDatabase, mOldVersion, mNewVersion);
     MOZ_ASSERT(event);
 
@@ -202,36 +203,39 @@ void
 IndexedDBChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   if (mFactory) {
-    mFactory->SetActor(static_cast<IndexedDBChild*>(NULL));
+    mFactory->SetActor(static_cast<IndexedDBChild*>(nullptr));
 #ifdef DEBUG
-    mFactory = NULL;
+    mFactory = nullptr;
 #endif
   }
 }
 
 PIndexedDBDatabaseChild*
-IndexedDBChild::AllocPIndexedDBDatabase(const nsString& aName,
-                                        const uint64_t& aVersion)
+IndexedDBChild::AllocPIndexedDBDatabaseChild(
+                                        const nsString& aName,
+                                        const uint64_t& aVersion,
+                                        const PersistenceType& aPersistenceType)
 {
   return new IndexedDBDatabaseChild(aName, aVersion);
 }
 
 bool
-IndexedDBChild::DeallocPIndexedDBDatabase(PIndexedDBDatabaseChild* aActor)
+IndexedDBChild::DeallocPIndexedDBDatabaseChild(PIndexedDBDatabaseChild* aActor)
 {
   delete aActor;
   return true;
 }
 
 PIndexedDBDeleteDatabaseRequestChild*
-IndexedDBChild::AllocPIndexedDBDeleteDatabaseRequest(const nsString& aName)
+IndexedDBChild::AllocPIndexedDBDeleteDatabaseRequestChild(
+                                        const nsString& aName,
+                                        const PersistenceType& aPersistenceType)
 {
-  MOZ_NOT_REACHED("Caller is supposed to manually construct a request!");
-  return NULL;
+  MOZ_CRASH("Caller is supposed to manually construct a request!");
 }
 
 bool
-IndexedDBChild::DeallocPIndexedDBDeleteDatabaseRequest(
+IndexedDBChild::DeallocPIndexedDBDeleteDatabaseRequestChild(
                                    PIndexedDBDeleteDatabaseRequestChild* aActor)
 {
   delete aActor;
@@ -244,7 +248,7 @@ IndexedDBChild::DeallocPIndexedDBDeleteDatabaseRequest(
 
 IndexedDBDatabaseChild::IndexedDBDatabaseChild(const nsString& aName,
                                                uint64_t aVersion)
-: mDatabase(NULL), mName(aName), mVersion(aVersion)
+: mDatabase(nullptr), mName(aName), mVersion(aVersion)
 {
   MOZ_COUNT_CTOR(IndexedDBDatabaseChild);
 }
@@ -281,14 +285,15 @@ IndexedDBDatabaseChild::EnsureDatabase(
                            const DatabaseInfoGuts& aDBInfo,
                            const InfallibleTArray<ObjectStoreInfoGuts>& aOSInfo)
 {
-  nsCOMPtr<nsIAtom> databaseId;
+  nsCString databaseId;
   if (mDatabase) {
     databaseId = mDatabase->Id();
   }
   else {
-    databaseId = QuotaManager::GetStorageId(aDBInfo.origin, aDBInfo.name);
+    QuotaManager::GetStorageId(aDBInfo.persistenceType, aDBInfo.origin,
+                               Client::IDB, aDBInfo.name, databaseId);
   }
-  NS_ENSURE_TRUE(databaseId, false);
+  MOZ_ASSERT(!databaseId.IsEmpty());
 
   nsRefPtr<DatabaseInfo> dbInfo;
   if (DatabaseInfo::Get(databaseId, getter_AddRefs(dbInfo))) {
@@ -322,7 +327,7 @@ IndexedDBDatabaseChild::EnsureDatabase(
   if (!mDatabase) {
     nsRefPtr<IDBDatabase> database =
       IDBDatabase::Create(aRequest, aRequest->Factory(), dbInfo.forget(),
-                          aDBInfo.origin, NULL, NULL);
+                          aDBInfo.origin, nullptr, nullptr);
     if (!database) {
       NS_WARNING("Failed to create database!");
       return false;
@@ -340,11 +345,10 @@ IndexedDBDatabaseChild::EnsureDatabase(
 void
 IndexedDBDatabaseChild::ActorDestroy(ActorDestroyReason aWhy)
 {
-  MOZ_ASSERT(!mStrongDatabase);
   if (mDatabase) {
-    mDatabase->SetActor(static_cast<IndexedDBDatabaseChild*>(NULL));
+    mDatabase->SetActor(static_cast<IndexedDBDatabaseChild*>(nullptr));
 #ifdef DEBUG
-    mDatabase = NULL;
+    mDatabase = nullptr;
 #endif
   }
 }
@@ -413,7 +417,7 @@ IndexedDBDatabaseChild::RecvError(const nsresult& aRv)
     request->Reset();
   }
   else {
-    openHelper = new IPCOpenDatabaseHelper(NULL, request);
+    openHelper = new IPCOpenDatabaseHelper(nullptr, request);
   }
 
   openHelper->SetError(aRv);
@@ -509,7 +513,7 @@ IndexedDBDatabaseChild::RecvPIndexedDBTransactionConstructor(
   nsRefPtr<IPCOpenDatabaseHelper> helper =
     new IPCOpenDatabaseHelper(mDatabase, mRequest);
 
-  nsTArray<nsString> storesToOpen;
+  Sequence<nsString> storesToOpen;
   nsRefPtr<IDBTransaction> transaction =
     IDBTransaction::CreateInternal(mDatabase, storesToOpen,
                                    IDBTransaction::VERSION_CHANGE, false, true);
@@ -534,7 +538,7 @@ IndexedDBDatabaseChild::RecvPIndexedDBTransactionConstructor(
 }
 
 PIndexedDBTransactionChild*
-IndexedDBDatabaseChild::AllocPIndexedDBTransaction(
+IndexedDBDatabaseChild::AllocPIndexedDBTransactionChild(
                                                const TransactionParams& aParams)
 {
   MOZ_ASSERT(aParams.type() ==
@@ -543,7 +547,7 @@ IndexedDBDatabaseChild::AllocPIndexedDBTransaction(
 }
 
 bool
-IndexedDBDatabaseChild::DeallocPIndexedDBTransaction(
+IndexedDBDatabaseChild::DeallocPIndexedDBTransactionChild(
                                              PIndexedDBTransactionChild* aActor)
 {
   delete aActor;
@@ -555,7 +559,7 @@ IndexedDBDatabaseChild::DeallocPIndexedDBTransaction(
  ******************************************************************************/
 
 IndexedDBTransactionChild::IndexedDBTransactionChild()
-: mTransaction(NULL)
+: mTransaction(nullptr)
 {
   MOZ_COUNT_CTOR(IndexedDBTransactionChild);
 }
@@ -622,9 +626,9 @@ IndexedDBTransactionChild::ActorDestroy(ActorDestroyReason aWhy)
   }
 
   if (mTransaction) {
-    mTransaction->SetActor(static_cast<IndexedDBTransactionChild*>(NULL));
+    mTransaction->SetActor(static_cast<IndexedDBTransactionChild*>(nullptr));
 #ifdef DEBUG
-    mTransaction = NULL;
+    mTransaction = nullptr;
 #endif
   }
 }
@@ -649,8 +653,7 @@ IndexedDBTransactionChild::RecvComplete(const CompleteParams& aParams)
       break;
 
     default:
-      MOZ_NOT_REACHED("Unknown union type!");
-      return false;
+      MOZ_CRASH("Unknown union type!");
   }
 
   FireCompleteEvent(resultCode);
@@ -658,15 +661,14 @@ IndexedDBTransactionChild::RecvComplete(const CompleteParams& aParams)
 }
 
 PIndexedDBObjectStoreChild*
-IndexedDBTransactionChild::AllocPIndexedDBObjectStore(
+IndexedDBTransactionChild::AllocPIndexedDBObjectStoreChild(
                                     const ObjectStoreConstructorParams& aParams)
 {
-  MOZ_NOT_REACHED("Caller is supposed to manually construct an object store!");
-  return NULL;
+  MOZ_CRASH("Caller is supposed to manually construct an object store!");
 }
 
 bool
-IndexedDBTransactionChild::DeallocPIndexedDBObjectStore(
+IndexedDBTransactionChild::DeallocPIndexedDBObjectStoreChild(
                                              PIndexedDBObjectStoreChild* aActor)
 {
   delete aActor;
@@ -717,9 +719,9 @@ void
 IndexedDBObjectStoreChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   if (mObjectStore) {
-    mObjectStore->SetActor(static_cast<IndexedDBObjectStoreChild*>(NULL));
+    mObjectStore->SetActor(static_cast<IndexedDBObjectStoreChild*>(nullptr));
 #ifdef DEBUG
-    mObjectStore = NULL;
+    mObjectStore = nullptr;
 #endif
   }
 }
@@ -740,32 +742,54 @@ IndexedDBObjectStoreChild::RecvPIndexedDBCursorConstructor(
 
   size_t direction = static_cast<size_t>(aParams.direction());
 
-  nsTArray<StructuredCloneFile> blobs;
-  IDBObjectStore::ConvertActorsToBlobs(aParams.blobsChild(), blobs);
-
   nsRefPtr<IDBCursor> cursor;
-  nsresult rv =
-    mObjectStore->OpenCursorFromChildProcess(request, direction, aParams.key(),
-                                             aParams.cloneInfo(), blobs,
-                                             getter_AddRefs(cursor));
-  NS_ENSURE_SUCCESS(rv, false);
+  nsresult rv;
 
-  MOZ_ASSERT(blobs.IsEmpty(), "Should have swapped blob elements!");
+  typedef ipc::OptionalStructuredCloneReadInfo CursorUnionType;
+
+  switch (aParams.optionalCloneInfo().type()) {
+    case CursorUnionType::TSerializedStructuredCloneReadInfo: {
+      nsTArray<StructuredCloneFile> blobs;
+      IDBObjectStore::ConvertActorsToBlobs(aParams.blobsChild(), blobs);
+
+      const SerializedStructuredCloneReadInfo& cloneInfo =
+        aParams.optionalCloneInfo().get_SerializedStructuredCloneReadInfo();
+
+      rv = mObjectStore->OpenCursorFromChildProcess(request, direction,
+                                                    aParams.key(), cloneInfo,
+                                                    blobs,
+                                                    getter_AddRefs(cursor));
+      NS_ENSURE_SUCCESS(rv, false);
+
+      MOZ_ASSERT(blobs.IsEmpty(), "Should have swapped blob elements!");
+    } break;
+
+    case CursorUnionType::Tvoid_t:
+      MOZ_ASSERT(aParams.blobsChild().IsEmpty());
+
+      rv = mObjectStore->OpenCursorFromChildProcess(request, direction,
+                                                    aParams.key(),
+                                                    getter_AddRefs(cursor));
+      NS_ENSURE_SUCCESS(rv, false);
+      break;
+
+    default:
+      MOZ_CRASH("Unknown union type!");
+  }
 
   actor->SetCursor(cursor);
   return true;
 }
 
 PIndexedDBRequestChild*
-IndexedDBObjectStoreChild::AllocPIndexedDBRequest(
+IndexedDBObjectStoreChild::AllocPIndexedDBRequestChild(
                                         const ObjectStoreRequestParams& aParams)
 {
-  MOZ_NOT_REACHED("Caller is supposed to manually construct a request!");
-  return NULL;
+  MOZ_CRASH("Caller is supposed to manually construct a request!");
 }
 
 bool
-IndexedDBObjectStoreChild::DeallocPIndexedDBRequest(
+IndexedDBObjectStoreChild::DeallocPIndexedDBRequestChild(
                                                  PIndexedDBRequestChild* aActor)
 {
   delete aActor;
@@ -773,29 +797,28 @@ IndexedDBObjectStoreChild::DeallocPIndexedDBRequest(
 }
 
 PIndexedDBIndexChild*
-IndexedDBObjectStoreChild::AllocPIndexedDBIndex(
+IndexedDBObjectStoreChild::AllocPIndexedDBIndexChild(
                                           const IndexConstructorParams& aParams)
 {
-  MOZ_NOT_REACHED("Caller is supposed to manually construct an index!");
-  return NULL;
+  MOZ_CRASH("Caller is supposed to manually construct an index!");
 }
 
 bool
-IndexedDBObjectStoreChild::DeallocPIndexedDBIndex(PIndexedDBIndexChild* aActor)
+IndexedDBObjectStoreChild::DeallocPIndexedDBIndexChild(PIndexedDBIndexChild* aActor)
 {
   delete aActor;
   return true;
 }
 
 PIndexedDBCursorChild*
-IndexedDBObjectStoreChild::AllocPIndexedDBCursor(
+IndexedDBObjectStoreChild::AllocPIndexedDBCursorChild(
                               const ObjectStoreCursorConstructorParams& aParams)
 {
   return new IndexedDBCursorChild();
 }
 
 bool
-IndexedDBObjectStoreChild::DeallocPIndexedDBCursor(
+IndexedDBObjectStoreChild::DeallocPIndexedDBCursorChild(
                                                   PIndexedDBCursorChild* aActor)
 {
   delete aActor;
@@ -839,9 +862,9 @@ void
 IndexedDBIndexChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   if (mIndex) {
-    mIndex->SetActor(static_cast<IndexedDBIndexChild*>(NULL));
+    mIndex->SetActor(static_cast<IndexedDBIndexChild*>(nullptr));
 #ifdef DEBUG
-    mIndex = NULL;
+    mIndex = nullptr;
 #endif
   }
 }
@@ -892,8 +915,7 @@ IndexedDBIndexChild::RecvPIndexedDBCursorConstructor(
       break;
 
     default:
-      MOZ_NOT_REACHED("Unknown union type!");
-      return false;
+      MOZ_CRASH("Unknown union type!");
   }
 
   actor->SetCursor(cursor);
@@ -901,28 +923,27 @@ IndexedDBIndexChild::RecvPIndexedDBCursorConstructor(
 }
 
 PIndexedDBRequestChild*
-IndexedDBIndexChild::AllocPIndexedDBRequest(const IndexRequestParams& aParams)
+IndexedDBIndexChild::AllocPIndexedDBRequestChild(const IndexRequestParams& aParams)
 {
-  MOZ_NOT_REACHED("Caller is supposed to manually construct a request!");
-  return NULL;
+  MOZ_CRASH("Caller is supposed to manually construct a request!");
 }
 
 bool
-IndexedDBIndexChild::DeallocPIndexedDBRequest(PIndexedDBRequestChild* aActor)
+IndexedDBIndexChild::DeallocPIndexedDBRequestChild(PIndexedDBRequestChild* aActor)
 {
   delete aActor;
   return true;
 }
 
 PIndexedDBCursorChild*
-IndexedDBIndexChild::AllocPIndexedDBCursor(
+IndexedDBIndexChild::AllocPIndexedDBCursorChild(
                                     const IndexCursorConstructorParams& aParams)
 {
   return new IndexedDBCursorChild();
 }
 
 bool
-IndexedDBIndexChild::DeallocPIndexedDBCursor(PIndexedDBCursorChild* aActor)
+IndexedDBIndexChild::DeallocPIndexedDBCursorChild(PIndexedDBCursorChild* aActor)
 {
   delete aActor;
   return true;
@@ -933,7 +954,7 @@ IndexedDBIndexChild::DeallocPIndexedDBCursor(PIndexedDBCursorChild* aActor)
  ******************************************************************************/
 
 IndexedDBCursorChild::IndexedDBCursorChild()
-: mCursor(NULL)
+: mCursor(nullptr)
 {
   MOZ_COUNT_CTOR(IndexedDBCursorChild);
 }
@@ -971,22 +992,21 @@ void
 IndexedDBCursorChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   if (mCursor) {
-    mCursor->SetActor(static_cast<IndexedDBCursorChild*>(NULL));
+    mCursor->SetActor(static_cast<IndexedDBCursorChild*>(nullptr));
 #ifdef DEBUG
-    mCursor = NULL;
+    mCursor = nullptr;
 #endif
   }
 }
 
 PIndexedDBRequestChild*
-IndexedDBCursorChild::AllocPIndexedDBRequest(const CursorRequestParams& aParams)
+IndexedDBCursorChild::AllocPIndexedDBRequestChild(const CursorRequestParams& aParams)
 {
-  MOZ_NOT_REACHED("Caller is supposed to manually construct a request!");
-  return NULL;
+  MOZ_CRASH("Caller is supposed to manually construct a request!");
 }
 
 bool
-IndexedDBCursorChild::DeallocPIndexedDBRequest(PIndexedDBRequestChild* aActor)
+IndexedDBCursorChild::DeallocPIndexedDBRequestChild(PIndexedDBRequestChild* aActor)
 {
   delete aActor;
   return true;
@@ -1034,8 +1054,7 @@ IndexedDBRequestChildBase::Disconnect()
 bool
 IndexedDBRequestChildBase::Recv__delete__(const ResponseValue& aResponse)
 {
-  MOZ_NOT_REACHED("This should be overridden!");
-  return false;
+  MOZ_CRASH("This should be overridden!");
 }
 
 /*******************************************************************************
@@ -1073,6 +1092,9 @@ IndexedDBObjectStoreRequestChild::Recv__delete__(const ResponseValue& aResponse)
     case ResponseValue::TGetAllResponse:
       MOZ_ASSERT(mRequestType == ParamsUnionType::TGetAllParams);
       break;
+    case ResponseValue::TGetAllKeysResponse:
+      MOZ_ASSERT(mRequestType == ParamsUnionType::TGetAllKeysParams);
+      break;
     case ResponseValue::TAddResponse:
       MOZ_ASSERT(mRequestType == ParamsUnionType::TAddParams);
       break;
@@ -1089,12 +1111,12 @@ IndexedDBObjectStoreRequestChild::Recv__delete__(const ResponseValue& aResponse)
       MOZ_ASSERT(mRequestType == ParamsUnionType::TCountParams);
       break;
     case ResponseValue::TOpenCursorResponse:
-      MOZ_ASSERT(mRequestType == ParamsUnionType::TOpenCursorParams);
+      MOZ_ASSERT(mRequestType == ParamsUnionType::TOpenCursorParams ||
+                 mRequestType == ParamsUnionType::TOpenKeyCursorParams);
       break;
 
     default:
-      MOZ_NOT_REACHED("Received invalid response parameters!");
-      return false;
+      MOZ_CRASH("Received invalid response parameters!");
   }
 
   nsresult rv = mHelper->OnParentProcessRequestComplete(aResponse);
@@ -1152,8 +1174,7 @@ IndexedDBIndexRequestChild::Recv__delete__(const ResponseValue& aResponse)
       break;
 
     default:
-      MOZ_NOT_REACHED("Received invalid response parameters!");
-      return false;
+      MOZ_CRASH("Received invalid response parameters!");
   }
 
   nsresult rv = mHelper->OnParentProcessRequestComplete(aResponse);
@@ -1196,8 +1217,7 @@ IndexedDBCursorRequestChild::Recv__delete__(const ResponseValue& aResponse)
       break;
 
     default:
-      MOZ_NOT_REACHED("Received invalid response parameters!");
-      return false;
+      MOZ_CRASH("Received invalid response parameters!");
   }
 
   nsresult rv = mHelper->OnParentProcessRequestComplete(aResponse);
@@ -1213,13 +1233,13 @@ IndexedDBCursorRequestChild::Recv__delete__(const ResponseValue& aResponse)
 IndexedDBDeleteDatabaseRequestChild::IndexedDBDeleteDatabaseRequestChild(
                                                  IDBFactory* aFactory,
                                                  IDBOpenDBRequest* aOpenRequest,
-                                                 nsIAtom* aDatabaseId)
+                                                 const nsACString& aDatabaseId)
 : mFactory(aFactory), mOpenRequest(aOpenRequest), mDatabaseId(aDatabaseId)
 {
   MOZ_COUNT_CTOR(IndexedDBDeleteDatabaseRequestChild);
   MOZ_ASSERT(aFactory);
   MOZ_ASSERT(aOpenRequest);
-  MOZ_ASSERT(aDatabaseId);
+  MOZ_ASSERT(!aDatabaseId.IsEmpty());
 }
 
 IndexedDBDeleteDatabaseRequestChild::~IndexedDBDeleteDatabaseRequestChild()
@@ -1282,15 +1302,13 @@ IPCOpenDatabaseHelper::UnpackResponseFromParentProcess(
 AsyncConnectionHelper::ChildProcessSendResult
 IPCOpenDatabaseHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
-  MOZ_NOT_REACHED("Don't call me!");
-  return Error;
+  MOZ_CRASH("Don't call me!");
 }
 
 nsresult
 IPCOpenDatabaseHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
-  MOZ_NOT_REACHED("Don't call me!");
-  return NS_ERROR_FAILURE;
+  MOZ_CRASH("Don't call me!");
 }
 
 nsresult
@@ -1311,15 +1329,13 @@ IPCSetVersionHelper::UnpackResponseFromParentProcess(
 AsyncConnectionHelper::ChildProcessSendResult
 IPCSetVersionHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
-  MOZ_NOT_REACHED("Don't call me!");
-  return Error;
+  MOZ_CRASH("Don't call me!");
 }
 
 nsresult
 IPCSetVersionHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
-  MOZ_NOT_REACHED("Don't call me!");
-  return NS_ERROR_FAILURE;
+  MOZ_CRASH("Don't call me!");
 }
 
 already_AddRefed<nsIDOMEvent>
@@ -1343,15 +1359,13 @@ nsresult
 IPCDeleteDatabaseHelper::UnpackResponseFromParentProcess(
                                             const ResponseValue& aResponseValue)
 {
-  MOZ_NOT_REACHED("Don't call me!");
-  return NS_ERROR_FAILURE;
+  MOZ_CRASH("Don't call me!");
 }
 
 AsyncConnectionHelper::ChildProcessSendResult
 IPCDeleteDatabaseHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
-  MOZ_NOT_REACHED("Don't call me!");
-  return Error;
+  MOZ_CRASH("Don't call me!");
 }
 
 nsresult
@@ -1364,6 +1378,5 @@ IPCDeleteDatabaseHelper::GetSuccessResult(JSContext* aCx, JS::MutableHandle<JS::
 nsresult
 IPCDeleteDatabaseHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
-  MOZ_NOT_REACHED("Don't call me!");
-  return NS_ERROR_FAILURE;
+  MOZ_CRASH("Don't call me!");
 }

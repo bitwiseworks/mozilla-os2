@@ -28,14 +28,14 @@
 
 using namespace mozilla::dom;
 
-NS_IMPL_ISUPPORTS1(nsXMLQuery, nsXMLQuery)
+NS_IMPL_ISUPPORTS(nsXMLQuery, nsXMLQuery)
 
 //----------------------------------------------------------------------
 //
 // nsXULTemplateResultSetXML
 //
 
-NS_IMPL_ISUPPORTS1(nsXULTemplateResultSetXML, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS(nsXULTemplateResultSetXML, nsISimpleEnumerator)
 
 NS_IMETHODIMP
 nsXULTemplateResultSetXML::HasMoreElements(bool *aResult)
@@ -86,19 +86,17 @@ TraverseRuleToBindingsMap(nsISupports* aKey, nsXMLBindingSet* aMatch, void* aCon
     return PL_DHASH_NEXT;
 }
   
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULTemplateQueryProcessorXML)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULTemplateQueryProcessorXML)
-    if (tmp->mRuleToBindingsMap.IsInitialized()) {
-        tmp->mRuleToBindingsMap.Clear();
-    }
+    tmp->mRuleToBindingsMap.Clear();
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mRoot)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mEvaluator)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mTemplateBuilder)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mRequest)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULTemplateQueryProcessorXML)
-    if (tmp->mRuleToBindingsMap.IsInitialized()) {
-        tmp->mRuleToBindingsMap.EnumerateRead(TraverseRuleToBindingsMap, &cb);
-    }
+    tmp->mRuleToBindingsMap.EnumerateRead(TraverseRuleToBindingsMap, &cb);
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEvaluator)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTemplateBuilder)
@@ -221,9 +219,6 @@ nsXULTemplateQueryProcessorXML::InitializeForBuilding(nsISupports* aDatasource,
     mEvaluator = do_CreateInstance("@mozilla.org/dom/xpath-evaluator;1");
     NS_ENSURE_TRUE(mEvaluator, NS_ERROR_OUT_OF_MEMORY);
 
-    if (!mRuleToBindingsMap.IsInitialized())
-        mRuleToBindingsMap.Init();
-
     return NS_OK;
 }
 
@@ -232,8 +227,7 @@ nsXULTemplateQueryProcessorXML::Done()
 {
     mGenerationStarted = false;
 
-    if (mRuleToBindingsMap.IsInitialized())
-        mRuleToBindingsMap.Clear();
+    mRuleToBindingsMap.Clear();
 
     return NS_OK;
 }
@@ -322,10 +316,12 @@ nsXULTemplateQueryProcessorXML::GenerateResults(nsISupports* aDatasource,
     if (!xmlquery)
         return NS_ERROR_INVALID_ARG;
 
+    nsCOMPtr<nsISupports> supports;
     nsCOMPtr<nsIDOMNode> context;
     if (aRef)
       aRef->GetBindingObjectFor(xmlquery->GetMemberVariable(),
-                                getter_AddRefs(context));
+                                getter_AddRefs(supports));
+    context = do_QueryInterface(supports);
     if (!context)
         context = mRoot;
 

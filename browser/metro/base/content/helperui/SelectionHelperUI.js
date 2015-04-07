@@ -111,11 +111,12 @@ Marker.prototype = {
   _tag: "",
   _hPlane: 0,
   _vPlane: 0,
+  _restrictedToBounds: false,
 
   // Tweak me if the monocle graphics change in any way
   _monocleRadius: 8,
   _monocleXHitTextAdjust: -2, 
-  _monocleYHitTextAdjust: -10, 
+  _monocleYHitTextAdjust: -10,
 
   get xPos() {
     return this._xPos;
@@ -135,6 +136,13 @@ Marker.prototype = {
 
   get dragging() {
     return this._element.customDragger.dragging;
+  },
+
+  // Indicates that marker's position doesn't reflect real selection boundary
+  // but rather boundary of input control while actual selection boundaries are
+  // not visible (ex. due scrolled content).
+  get restrictedToBounds() {
+    return this._restrictedToBounds;
   },
 
   shutdown: function shutdown() {
@@ -163,17 +171,10 @@ Marker.prototype = {
     return this._element.hidden == false;
   },
 
-  position: function position(aX, aY) {
-    if (aX < 0) {
-      Util.dumpLn("Marker: aX is negative");
-      aX = 0;
-    }
-    if (aY < 0) {
-      Util.dumpLn("Marker: aY is negative");
-      aY = 0;
-    }
+  position: function position(aX, aY, aRestrictedToBounds) {
     this._xPos = aX;
     this._yPos = aY;
+    this._restrictedToBounds = !!aRestrictedToBounds;
     this._setPosition();
   },
 
@@ -253,7 +254,7 @@ var SelectionHelperUI = {
   _endMark: null,
   _caretMark: null,
   _target: null,
-  _movement: { active: false, x:0, y: 0 },
+  _showAfterUpdate: false,
   _activeSelectionRect: null,
   _selectionMarkIds: [],
   _targetIsEditable: false,
@@ -344,6 +345,39 @@ var SelectionHelperUI = {
     return false;
   },
 
+
+  /*
+   * Observers
+   */
+
+  observe: function (aSubject, aTopic, aData) {
+    switch (aTopic) {
+      case "attach_edit_session_to_content":
+        // We receive this from text input bindings when this module
+        // isn't accessible.
+        this.chromeTextboxClick(aSubject);
+        break;
+
+      case "apzc-transform-begin":
+        if (this.isActive && this.layerMode == kContentLayer) {
+          this._hideMonocles();
+        }
+        break;
+
+      case "apzc-transform-end":
+        // The selection range callback will check to see if the new
+        // position is off the screen, in which case it shuts down and
+        // clears the selection.
+        if (this.isActive && this.layerMode == kContentLayer) {
+          this._showAfterUpdate = true;
+          this._sendAsyncMessage("Browser:SelectionUpdate", {
+            isInitiatedByAPZC: true
+          });
+        }
+        break;
+      }
+  },
+
   /*
    * Public apis
    */
@@ -380,23 +414,26 @@ var SelectionHelperUI = {
 
   /*
    * openEditSession
-   * 
+   *
    * Attempts to select underlying text at a point and begins editing
    * the section.
    *
    * @param aMsgTarget - Browser or chrome message target
    * @param aX, aY - Browser relative client coordinates.
+   * @param aSetFocus - (optional) For form inputs, requests that the focus
+   * be set to the element.
    */
-  openEditSession: function openEditSession(aMsgTarget, aX, aY) {
+  openEditSession: function openEditSession(aMsgTarget, aX, aY, aSetFocus) {
     if (!aMsgTarget || this.isActive)
       return;
     this._init(aMsgTarget);
     this._setupDebugOptions();
-
+    let setFocus = aSetFocus || false;
     // Send this over to SelectionHandler in content, they'll message us
     // back with information on the current selection. SelectionStart
     // takes client coordinates.
     this._sendAsyncMessage("Browser:SelectionStart", {
+      setFocus: setFocus,
       xPos: aX,
       yPos: aY
     });
@@ -404,13 +441,15 @@ var SelectionHelperUI = {
 
   /*
    * attachEditSession
-   * 
+   *
    * Attaches to existing selection and begins editing.
    *
-   * @param aMsgTarget - Browser or chrome message target
-   * @param aX, aY - Browser relative client coordinates.
+   * @param aMsgTarget - Browser or chrome message target.
+   * @param aX Tap browser relative client X coordinate.
+   * @param aY Tap browser relative client Y coordinate.
+   * @param aTarget Actual tap target (optional).
    */
-  attachEditSession: function attachEditSession(aMsgTarget, aX, aY) {
+  attachEditSession: function attachEditSession(aMsgTarget, aX, aY, aTarget) {
     if (!aMsgTarget || this.isActive)
       return;
     this._init(aMsgTarget);
@@ -420,6 +459,7 @@ var SelectionHelperUI = {
     // back with information on the current selection. SelectionAttach
     // takes client coordinates.
     this._sendAsyncMessage("Browser:SelectionAttach", {
+      target: aTarget,
       xPos: aX,
       yPos: aY
     });
@@ -436,11 +476,12 @@ var SelectionHelperUI = {
    * Once the user starts a drag, the caret marker is hidden, and
    * the start and end markers take over.
    *
-   * @param aMsgTarget - Browser or chrome message target
-   * @param aX, aY - Browser relative client coordinates of the tap
-   * that initiated the session.
+   * @param aMsgTarget - Browser or chrome message target.
+   * @param aX Tap browser relative client X coordinate.
+   * @param aY Tap browser relative client Y coordinate.
+   * @param aTarget Actual tap target (optional).
    */
-  attachToCaret: function attachToCaret(aMsgTarget, aX, aY) {
+  attachToCaret: function attachToCaret(aMsgTarget, aX, aY, aTarget) {
     if (!this.isActive) {
       this._init(aMsgTarget);
       this._setupDebugOptions();
@@ -448,9 +489,14 @@ var SelectionHelperUI = {
       this._hideMonocles();
     }
 
-    this._lastPoint = { xPos: aX, yPos: aY };
+    this._lastCaretAttachment = {
+      target: aTarget,
+      xPos: aX,
+      yPos: aY
+    };
 
     this._sendAsyncMessage("Browser:CaretAttach", {
+      target: aTarget,
       xPos: aX,
       yPos: aY
     });
@@ -489,8 +535,44 @@ var SelectionHelperUI = {
   },
 
   /*
+   * Click handler for chrome pages loaded into the browser (about:config).
+   * Called from the text input bindings via the attach_edit_session_to_content
+   * observer.
+   */
+  chromeTextboxClick: function (aEvent) {
+    this.attachEditSession(Browser.selectedTab.browser, aEvent.clientX,
+        aEvent.clientY, aEvent.target);
+  },
+
+  /*
+   * Handy debug routines that work independent of selection. They
+   * make use of the selection overlay for drawing points.
+   */
+
+  debugDisplayDebugPoint: function (aLeft, aTop, aSize, aCssColorStr, aFill) {
+    this.overlay.enabled = true;
+    this.overlay.displayDebugLayer = true;
+    this.overlay.addDebugRect(aLeft, aTop, aLeft + aSize, aTop + aSize,
+                              aCssColorStr, aFill);
+  },
+
+  debugClearDebugPoints: function () {
+    this.overlay.displayDebugLayer = false;
+    if (!this._msgTarget) {
+      this.overlay.enabled = false;
+    }
+  },
+
+  /*
    * Init and shutdown
    */
+
+  init: function () {
+    let os = Services.obs;
+    os.addObserver(this, "attach_edit_session_to_content", false);
+    os.addObserver(this, "apzc-transform-begin", false);
+    os.addObserver(this, "apzc-transform-end", false);
+  },
 
   _init: function _init(aMsgTarget) {
     // store the target message manager
@@ -510,19 +592,23 @@ var SelectionHelperUI = {
     messageManager.addMessageListener("Content:SelectionDebugRect", this);
     messageManager.addMessageListener("Content:HandlerShutdown", this);
     messageManager.addMessageListener("Content:SelectionHandlerPong", this);
+    messageManager.addMessageListener("Content:SelectionSwap", this);
 
+    // capture phase
     window.addEventListener("keypress", this, true);
-    window.addEventListener("click", this, false);
-    window.addEventListener("touchstart", this, true);
-    window.addEventListener("touchend", this, true);
-    window.addEventListener("touchmove", this, true);
     window.addEventListener("MozPrecisePointer", this, true);
     window.addEventListener("MozDeckOffsetChanging", this, true);
     window.addEventListener("MozDeckOffsetChanged", this, true);
+    window.addEventListener("KeyboardChanged", this, true);
+
+    // bubble phase
+    window.addEventListener("click", this, false);
+    window.addEventListener("touchstart", this, false);
 
     Elements.browsers.addEventListener("URLChanged", this, true);
     Elements.browsers.addEventListener("SizeChanged", this, true);
-    Elements.browsers.addEventListener("ZoomChanged", this, true);
+
+    Elements.tabList.addEventListener("TabSelect", this, true);
 
     Elements.navbar.addEventListener("transitionend", this, true);
 
@@ -536,19 +622,21 @@ var SelectionHelperUI = {
     messageManager.removeMessageListener("Content:SelectionDebugRect", this);
     messageManager.removeMessageListener("Content:HandlerShutdown", this);
     messageManager.removeMessageListener("Content:SelectionHandlerPong", this);
+    messageManager.removeMessageListener("Content:SelectionSwap", this);
 
     window.removeEventListener("keypress", this, true);
-    window.removeEventListener("click", this, false);
-    window.removeEventListener("touchstart", this, true);
-    window.removeEventListener("touchend", this, true);
-    window.removeEventListener("touchmove", this, true);
     window.removeEventListener("MozPrecisePointer", this, true);
     window.removeEventListener("MozDeckOffsetChanging", this, true);
     window.removeEventListener("MozDeckOffsetChanged", this, true);
+    window.removeEventListener("KeyboardChanged", this, true);
+
+    window.removeEventListener("click", this, false);
+    window.removeEventListener("touchstart", this, false);
 
     Elements.browsers.removeEventListener("URLChanged", this, true);
     Elements.browsers.removeEventListener("SizeChanged", this, true);
-    Elements.browsers.removeEventListener("ZoomChanged", this, true);
+
+    Elements.tabList.removeEventListener("TabSelect", this, true);
 
     Elements.navbar.removeEventListener("transitionend", this, true);
 
@@ -610,6 +698,16 @@ var SelectionHelperUI = {
     this.startMark.position(targetMark.xPos, targetMark.yPos);
     this.endMark.position(targetMark.xPos, targetMark.yPos);
 
+    // We delay transitioning until we know which direction the user is dragging
+    // based on a hysteresis value in the drag marker code. Down in our caller, we
+    // cache the first drag position in _cachedCaretPos so we can select from the
+    // initial caret drag position. Use those values if we have them. (Note
+    // _cachedCaretPos has already been translated in _getMarkerBaseMessage.)
+    let xpos = this._cachedCaretPos ? this._cachedCaretPos.xPos :
+      this._msgTarget.ctobx(targetMark.xPos, true);
+    let ypos = this._cachedCaretPos ? this._cachedCaretPos.yPos :
+      this._msgTarget.ctoby(targetMark.yPos, true);
+
     // Start the selection monocle drag. SelectionHandler relies on this
     // for getting initialized. This will also trigger a message back for
     // monocle positioning. Note, markerDragMove is still on the stack in
@@ -617,41 +715,9 @@ var SelectionHelperUI = {
     this._sendAsyncMessage("Browser:SelectionSwitchMode", {
       newMode: "selection",
       change: targetMark.tag,
-      xPos: this._msgTarget.ctobx(targetMark.xPos, true),
-      yPos: this._msgTarget.ctoby(targetMark.yPos, true),
+      xPos: xpos,
+      yPos: ypos,
     });
-  },
-
-  /*
-   * _transitionFromSelectionToCaret
-   *
-   * Transitions from text selection mode to caret mode.
-   *
-   * @param aClientX, aClientY - client coordinates of the
-   * tap that initiates the change.
-   */
-  _transitionFromSelectionToCaret: function _transitionFromSelectionToCaret(aClientX, aClientY) {
-    // Reset some of our state
-    this._activeSelectionRect = null;
-
-    // Reset the monocles
-    this._shutdownAllMarkers();
-    this._setupMonocleIdArray();
-
-    // Translate to browser relative client coordinates
-    let coords =
-      this._msgTarget.ptClientToBrowser(aClientX, aClientY, true);
-
-    // Init SelectionHandler and turn on caret selection. Note the focus caret
-    // will have been removed from the target element due to the shutdown call.
-    // This won't set the caret position on its own.
-    this._sendAsyncMessage("Browser:CaretAttach", {
-      xPos: coords.x,
-      yPos: coords.y
-    });
-
-    // Set the caret position
-    this._setCaretPositionAtPoint(coords.x, coords.y);
   },
 
   /*
@@ -774,11 +840,29 @@ var SelectionHelperUI = {
 
   _showMonocles: function _showMonocles(aSelection) {
     if (!aSelection) {
-      this.caretMark.show();
+      if (this._checkMonocleVisibility(this.caretMark.xPos, this.caretMark.yPos)) {
+        this.caretMark.show();
+      }
     } else {
-      this.endMark.show();
-      this.startMark.show();
+      if (this._checkMonocleVisibility(this.endMark.xPos, this.endMark.yPos)) {
+        this.endMark.show();
+      }
+      if (this._checkMonocleVisibility(this.startMark.xPos, this.startMark.yPos)) {
+        this.startMark.show();
+      }
     }
+  },
+
+  _checkMonocleVisibility: function(aX, aY) {
+    let viewport = Browser.selectedBrowser.contentViewportBounds;
+    aX = this._msgTarget.ctobx(aX);
+    aY = this._msgTarget.ctoby(aY);
+    if (aX < viewport.x || aY < viewport.y ||
+        aX > (viewport.x + viewport.width) ||
+        aY > (viewport.y + viewport.height)) {
+      return false;
+    }
+    return true;
   },
 
   /*
@@ -786,71 +870,15 @@ var SelectionHelperUI = {
    */
 
   /*
-   * _onTap
-   *
    * Handles taps that move the current caret around in text edits,
-   * clear active selection and focus when neccessary, or change
-   * modes.
-   * Future: changing selection modes by tapping on a monocle.
+   * clear active selection and focus when necessary, or change
+   * modes. Only active after SelectionHandlerUI is initialized.
    */
-  _onTap: function _onTap(aEvent) {
-    let clientCoords =
-      this._msgTarget.ptBrowserToClient(aEvent.clientX, aEvent.clientY, true);
-
-    // Check for a tap on a monocle
-    if (this.startMark.hitTest(clientCoords.x, clientCoords.y) ||
-        this.endMark.hitTest(clientCoords.x, clientCoords.y)) {
-      aEvent.stopPropagation();
-      aEvent.preventDefault();
-      return;
+  _onClick: function(aEvent) {
+    if (this.layerMode == kChromeLayer && this._targetIsEditable) {
+      this.attachToCaret(this._msgTarget, aEvent.clientX, aEvent.clientY,
+          aEvent.target);
     }
-
-    // Is the tap point within the bound of the target element? This
-    // is useful if we are dealing with some sort of input control.
-    // Not so much if the target is a page or div.
-    let pointInTargetElement =
-      Util.pointWithinRect(clientCoords.x, clientCoords.y,
-                           this._targetElementRect);
-
-    // If the tap is within an editable element and the caret monocle is
-    // active, update the caret.
-    if (this.caretMark.visible && pointInTargetElement) {
-      // setCaretPositionAtPoint takes browser relative coords.
-      this._setCaretPositionAtPoint(aEvent.clientX, aEvent.clientY);
-      return;
-    }
-
-    // if the target is editable, we have selection or a caret, and the
-    // user clicks off the target clear selection and remove focus from
-    // the input.
-    if (this._targetIsEditable && !pointInTargetElement) {
-      // shutdown but leave focus alone. the event will fall through
-      // and the dom will update focus for us. If the user tapped on
-      // another input, we'll get a attachToCaret call soonish on the
-      // new input.
-      this.closeEditSession(false);
-      return;
-    }
-
-    if (this._hitTestSelection(aEvent) && this._targetIsEditable) {
-      // Attach to the newly placed caret position
-      this._sendAsyncMessage("Browser:CaretAttach", {
-        xPos: aEvent.clientX,
-        yPos: aEvent.clientY
-      });
-      return;
-    }
-
-    // A tap within an editable but outside active selection, clear the
-    // selection and flip back to caret mode.
-    if (this.startMark.visible && pointInTargetElement &&
-        this._targetIsEditable) {
-      this._transitionFromSelectionToCaret(clientCoords.x, clientCoords.y);
-      return;
-    }
-
-    // Close when we get a single tap in content.
-    this.closeEditSession(false);
   },
 
   _onKeypress: function _onKeypress() {
@@ -878,21 +906,33 @@ var SelectionHelperUI = {
    */
   _onDeckOffsetChanged: function _onDeckOffsetChanged(aEvent) {
     // Update the monocle position and display
-    this.attachToCaret(null, this._lastPoint.xPos, this._lastPoint.yPos);
+    this.attachToCaret(null, this._lastCaretAttachment.xPos,
+        this._lastCaretAttachment.yPos, this._lastCaretAttachment.target);
   },
 
   /*
-   * Detects when the nav bar hides or shows, so we can enable
-   * selection at the appropriate location once the transition is
-   * complete, or shutdown selection down when the nav bar is hidden.
+   * Detects when the nav bar transitions, so we can enable selection at the
+   * appropriate location once the transition is complete, or shutdown
+   * selection down when the nav bar is hidden.
    */
   _onNavBarTransitionEvent: function _onNavBarTransitionEvent(aEvent) {
+    // Ignore when selection is in content
     if (this.layerMode == kContentLayer) {
       return;
     }
-    if (aEvent.propertyName == "bottom" && Elements.navbar.isShowing) {
+
+    // After tansitioning up, show the monocles
+    if (Elements.navbar.isShowing) {
+      this._showAfterUpdate = true;
       this._sendAsyncMessage("Browser:SelectionUpdate", {});
     }
+  },
+
+  _onKeyboardChangedEvent: function _onKeyboardChangedEvent() {
+    if (!this.isActive || this.layerMode == kContentLayer) {
+      return;
+    }
+    this._sendAsyncMessage("Browser:SelectionUpdate", {});
   },
 
   /*
@@ -908,6 +948,12 @@ var SelectionHelperUI = {
     this._shutdown();
   },
 
+  _selectionSwap: function _selectionSwap() {
+    [this.startMark.tag, this.endMark.tag] = [this.endMark.tag,
+        this.startMark.tag];
+    [this._startMark, this._endMark] = [this.endMark, this.startMark];
+  },
+
   /*
    * Message handlers
    */
@@ -920,24 +966,33 @@ var SelectionHelperUI = {
     let haveSelectionRect = true;
 
     if (json.updateStart) {
-      this.startMark.position(this._msgTarget.btocx(json.start.xPos, true),
-                              this._msgTarget.btocy(json.start.yPos, true));
+      let x = this._msgTarget.btocx(json.start.xPos, true);
+      let y = this._msgTarget.btocy(json.start.yPos, true);
+      this.startMark.position(x, y, json.start.restrictedToBounds);
     }
+
     if (json.updateEnd) {
-      this.endMark.position(this._msgTarget.btocx(json.end.xPos, true),
-                            this._msgTarget.btocy(json.end.yPos, true));
+      let x = this._msgTarget.btocx(json.end.xPos, true);
+      let y = this._msgTarget.btocy(json.end.yPos, true);
+      this.endMark.position(x, y, json.end.restrictedToBounds);
     }
 
     if (json.updateCaret) {
+      let x = this._msgTarget.btocx(json.caret.xPos, true);
+      let y = this._msgTarget.btocy(json.caret.yPos, true);
       // If selectionRangeFound is set SelectionHelper found a range we can
       // attach to. If not, there's no text in the control, and hence no caret
       // position information we can use.
       haveSelectionRect = json.selectionRangeFound;
       if (json.selectionRangeFound) {
-        this.caretMark.position(this._msgTarget.btocx(json.caret.xPos, true),
-                                this._msgTarget.btocy(json.caret.yPos, true));
-        this.caretMark.show();
+        this.caretMark.position(x, y);
+        this._showMonocles(false);
       }
+    }
+
+    if (this._showAfterUpdate) {
+      this._showAfterUpdate = false;
+      this._showMonocles(!json.updateCaret);
     }
 
     this._targetIsEditable = json.targetIsEditable;
@@ -947,7 +1002,7 @@ var SelectionHelperUI = {
     this._targetElementRect =
       this._msgTarget.rectBrowserToClient(json.element, true);
 
-    // Ifd this is the end of a selection move show the appropriate
+    // If this is the end of a selection move show the appropriate
     // monocle images. src=(start, update, end, caret)
     if (json.src == "start" || json.src == "end") {
       this._showMonocles(true);
@@ -984,34 +1039,16 @@ var SelectionHelperUI = {
     }
     switch (aEvent.type) {
       case "click":
-        this._onTap(aEvent);
+        this._onClick(aEvent);
         break;
 
       case "touchstart": {
         if (aEvent.touches.length != 1)
           break;
-        let touch = aEvent.touches[0];
-        this._movement.x = touch.clientX;
-        this._movement.y = touch.clientY;
-        this._movement.active = true;
-        break;
-      }
-
-      case "touchend":
-        if (aEvent.touches.length == 0)
-          this._movement.active = false;
-        break;
-
-      case "touchmove": {
-        if (aEvent.touches.length != 1)
-          break;
-        let touch = aEvent.touches[0];
-        // Clear selection when the user pans the page
-        if (!this._checkForActiveDrag() && this._movement.active) {
-          if (Math.abs(touch.clientX - this._movement.x) > kDisableOnScrollDistance ||
-              Math.abs(touch.clientY - this._movement.y) > kDisableOnScrollDistance) {
-            this.closeEditSession(true);
-          }
+        // Only prevent default if we're dragging so that
+        // APZC doesn't scroll.
+        if (this._checkForActiveDrag()) {
+          aEvent.preventDefault();
         }
         break;
       }
@@ -1025,10 +1062,10 @@ var SelectionHelperUI = {
         break;
 
       case "URLChanged":
+      case "TabSelect":
         this._shutdown();
         break;
 
-      case "ZoomChanged":
       case "MozPrecisePointer":
         this.closeEditSession(true);
         break;
@@ -1043,6 +1080,10 @@ var SelectionHelperUI = {
 
       case "transitionend":
         this._onNavBarTransitionEvent(aEvent);
+        break;
+
+      case "KeyboardChanged":
+        this._onKeyboardChangedEvent();
         break;
     }
   },
@@ -1066,6 +1107,9 @@ var SelectionHelperUI = {
       case "Content:HandlerShutdown":
         this._selectionHandlerShutdown();
         break;
+      case "Content:SelectionSwap":
+        this._selectionSwap();
+        break;
       case "Content:SelectionHandlerPong":
         this._onPong(json.id);
         break;
@@ -1081,11 +1125,13 @@ var SelectionHelperUI = {
       change: aMarkerTag,
       start: {
         xPos: this._msgTarget.ctobx(this.startMark.xPos, true),
-        yPos: this._msgTarget.ctoby(this.startMark.yPos, true)
+        yPos: this._msgTarget.ctoby(this.startMark.yPos, true),
+        restrictedToBounds: this.startMark.restrictedToBounds
       },
       end: {
         xPos: this._msgTarget.ctobx(this.endMark.xPos, true),
-        yPos: this._msgTarget.ctoby(this.endMark.yPos, true)
+        yPos: this._msgTarget.ctoby(this.endMark.yPos, true),
+        restrictedToBounds: this.endMark.restrictedToBounds
       },
       caret: {
         xPos: this._msgTarget.ctobx(this.caretMark.xPos, true),
@@ -1097,7 +1143,10 @@ var SelectionHelperUI = {
   markerDragStart: function markerDragStart(aMarker) {
     let json = this._getMarkerBaseMessage(aMarker.tag);
     if (aMarker.tag == "caret") {
-      this._sendAsyncMessage("Browser:CaretMove", json);
+      // Cache for when we start the drag in _transitionFromCaretToSelection.
+      if (!this._cachedCaretPos) {
+        this._cachedCaretPos = this._getMarkerBaseMessage(aMarker.tag).caret;
+      }
       return;
     }
     this._sendAsyncMessage("Browser:SelectionMoveStart", json);
@@ -1106,7 +1155,7 @@ var SelectionHelperUI = {
   markerDragStop: function markerDragStop(aMarker) {
     let json = this._getMarkerBaseMessage(aMarker.tag);
     if (aMarker.tag == "caret") {
-      this._sendAsyncMessage("Browser:CaretUpdate", json);
+      this._cachedCaretPos = null;
       return;
     }
     this._sendAsyncMessage("Browser:SelectionMoveEnd", json);
@@ -1125,6 +1174,7 @@ var SelectionHelperUI = {
       }
       return true;
     }
+    this._cachedCaretPos = null;
 
     // We'll re-display these after the drag is complete.
     this._hideMonocles();

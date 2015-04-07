@@ -121,11 +121,14 @@ reserved = set((
         'bridges',
         'call',
         'child',
+        'class',
         'compress',
         '__delete__',
         'delete',                       # reserve 'delete' to prevent its use
+        'from',
         'goto',
         'include',
+        'intr',
         'manager',
         'manages',
         'namespace',
@@ -144,7 +147,6 @@ reserved = set((
         'struct',
         'sync',
         'union',
-        'urgent',
         'using'))
 tokens = [
     'COLONCOLON', 'ID', 'STRING'
@@ -265,13 +267,29 @@ def p_IncludeStmt(p):
     if path is None:
         raise ParseError(loc, "can't locate include file `%s'"% (
                 inc.file))
-    
+
     inc.tu = Parser(type, id).parse(open(path).read(), path, Parser.current.includedirs, Parser.current.errout)
     p[0] = inc
 
 def p_UsingStmt(p):
-    """UsingStmt : USING CxxType"""
-    p[0] = UsingStmt(locFromTok(p, 1), p[2])
+    """UsingStmt : USING CxxType FROM STRING
+                 | USING CLASS CxxType FROM STRING
+                 | USING STRUCT CxxType FROM STRING"""
+    if 6 == len(p):
+        header = p[5]
+    elif 5 == len(p):
+        header = p[4]
+    else:
+        header = None
+    if 6 == len(p):
+        kind = p[2]
+    else:
+        kind = None
+    if 6 == len(p):
+        cxxtype = p[3]
+    else:
+        cxxtype = p[2]
+    p[0] = UsingStmt(locFromTok(p, 1), cxxtype, header, kind)
 
 ##--------------------
 ## Namespaced stuff
@@ -605,14 +623,14 @@ def p_OptionalSendSemanticsQual(p):
 
 def p_SendSemanticsQual(p):
     """SendSemanticsQual : ASYNC
+                         | INTR
                          | RPC
-                         | URGENT
                          | SYNC"""
     s = p[1]
     if 'async' == s: p[0] =    ASYNC
-    elif 'rpc' == s: p[0] =    RPC
+    elif 'intr' == s: p[0] =   INTR
     elif 'sync' == s: p[0] =   SYNC
-    elif 'urgent' == s: p[0] = URGENT
+    elif 'rpc' == s: p[0] =    RPC
     else:
         assert 0
 

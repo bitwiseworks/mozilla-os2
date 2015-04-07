@@ -14,7 +14,6 @@
 
 #include "nsAppRunner.h"
 #include "nsIFile.h"
-#include "nsIXULAppInstall.h"
 #include "nsCOMPtr.h"
 #include "nsMemory.h"
 #include "nsCRTGlue.h"
@@ -50,7 +49,7 @@ static void Output(bool isError, const char *fmt, ... )
   va_start(ap, fmt);
 
 #if (defined(XP_WIN) && !MOZ_WINCONSOLE)
-  PRUnichar msg[2048];
+  char16_t msg[2048];
   _vsnwprintf(msg, sizeof(msg)/sizeof(msg[0]), NS_ConvertUTF8toUTF16(fmt).get(), ap);
 
   UINT flags = MB_OK;
@@ -59,7 +58,7 @@ static void Output(bool isError, const char *fmt, ... )
   else
     flags |= MB_ICONINFORMATION;
     
-  MessageBoxW(NULL, msg, L"XULRunner", flags);
+  MessageBoxW(nullptr, msg, L"XULRunner", flags);
 #else
   vfprintf(stderr, fmt, ap);
 #endif
@@ -79,7 +78,7 @@ static bool IsArg(const char* arg, const char* s)
     return !strcasecmp(arg, s);
   }
 
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
   if (*arg == '/')
     return !strcasecmp(++arg, s);
 #endif
@@ -122,6 +121,16 @@ GetGREVersion(const char *argv0,
   return NS_OK;
 }
 
+/**
+ * A helper class which calls NS_LogInit/NS_LogTerm in its scope.
+ */
+class ScopedLogging
+{
+public:
+  ScopedLogging() { NS_LogInit(); }
+  ~ScopedLogging() { NS_LogTerm(); }
+};
+
 static void Usage(const char *argv0)
 {
     nsAutoCString milestone;
@@ -138,8 +147,6 @@ static void Usage(const char *argv0)
            "  -h, --help                 show this message\n"
            "  -v, --version              show version\n"
            "  --gre-version              print the GRE version string on stdout\n"
-           "  --install-app <application> [<destination> [<directoryname>]]\n"
-           "                             Install a XUL application.\n"
            "\n"
            "APP-FILE\n"
            "  Application initialization file.\n"
@@ -161,73 +168,6 @@ static const nsDynamicFunctionLoad kXULFuncs[] = {
     { "XRE_main", (NSFuncPtr*) &XRE_main },
     { nullptr, nullptr }
 };
-
-static nsresult
-GetXULRunnerDir(const char *argv0, nsIFile* *aResult)
-{
-  nsresult rv;
-
-  nsCOMPtr<nsIFile> appFile;
-  rv = BinaryPath::GetFile(argv0, getter_AddRefs(appFile));
-  if (NS_FAILED(rv)) {
-    Output(true, "Could not find XULRunner application path.\n");
-    return rv;
-  }
-
-  rv = appFile->GetParent(aResult);
-  if (NS_FAILED(rv)) {
-    Output(true, "Could not find XULRunner installation dir.\n");
-  }
-  return rv;
-}
-
-static int
-InstallXULApp(nsIFile* aXULRunnerDir,
-              const char *aAppLocation,
-              const char *aInstallTo,
-              const char *aLeafName)
-{
-  nsCOMPtr<nsIFile> appLocation;
-  nsCOMPtr<nsIFile> installTo;
-  nsString leafName;
-
-  nsresult rv = XRE_GetFileFromPath(aAppLocation, getter_AddRefs(appLocation));
-  if (NS_FAILED(rv))
-    return 2;
-
-  if (aInstallTo) {
-    rv = XRE_GetFileFromPath(aInstallTo, getter_AddRefs(installTo));
-    if (NS_FAILED(rv))
-      return 2;
-  }
-
-  if (aLeafName)
-    NS_CStringToUTF16(nsDependentCString(aLeafName),
-                      NS_CSTRING_ENCODING_NATIVE_FILESYSTEM, leafName);
-
-  rv = NS_InitXPCOM2(nullptr, aXULRunnerDir, nullptr);
-  if (NS_FAILED(rv))
-    return 3;
-
-  {
-    // Scope our COMPtr to avoid holding XPCOM refs beyond xpcom shutdown
-    nsCOMPtr<nsIXULAppInstall> install
-      (do_GetService("@mozilla.org/xulrunner/app-install-service;1"));
-    if (!install) {
-      rv = NS_ERROR_FAILURE;
-    }
-    else {
-      rv = install->InstallApplication(appLocation, installTo, leafName);
-    }
-  }
-
-  NS_ShutdownXPCOM(nullptr);
-
-  if (NS_FAILED(rv))
-    return 3;
-
-  return 0;
-}
 
 class AutoAppData
 {
@@ -270,6 +210,8 @@ int main(int argc, char* argv[])
     return 255;
   }
 
+  ScopedLogging log;
+
   if (argc > 1 && (IsArg(argv[1], "h") ||
                    IsArg(argv[1], "help") ||
                    IsArg(argv[1], "?")))
@@ -311,33 +253,8 @@ int main(int argc, char* argv[])
     }
 
     if (IsArg(argv[1], "install-app")) {
-      if (argc < 3 || argc > 5) {
-        Usage(argv[0]);
-        return 1;
-      }
-
-      char *appLocation = argv[2];
-
-      char *installTo = nullptr;
-      if (argc > 3) {
-        installTo = argv[3];
-        if (!*installTo) // left blank?
-          installTo = nullptr;
-      }
-
-      char *leafName = nullptr;
-      if (argc > 4) {
-        leafName = argv[4];
-        if (!*leafName)
-          leafName = nullptr;
-      }
-
-      nsCOMPtr<nsIFile> regDir;
-      rv = GetXULRunnerDir(argv[0], getter_AddRefs(regDir));
-      if (NS_FAILED(rv))
-        return 2;
-
-      return InstallXULApp(regDir, appLocation, installTo, leafName);
+      Output(true, "--install-app support has been removed.  Use 'python install-app.py' instead.\n");
+      return 1;
     }
   }
 

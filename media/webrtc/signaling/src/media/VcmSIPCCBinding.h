@@ -10,7 +10,15 @@ extern "C"
 #include "ccapi_types.h"
 }
 
+#include "sigslot.h"
+
 class nsIThread;
+class nsIEventTarget;
+class nsIPrefBranch;
+
+namespace mozilla {
+    class NrIceMediaStream;
+};
 
 namespace CSF
 {
@@ -29,12 +37,11 @@ namespace CSF
     	virtual void dtmfBurst(int digit, int direction, int duration) = 0;
     	virtual void sendIFrame(cc_call_handle_t call) = 0;
     };
-    class VcmSIPCCBinding
+    class VcmSIPCCBinding : public sigslot::has_slots<>
     {
     public:
         VcmSIPCCBinding ();
         virtual ~VcmSIPCCBinding();
-
 
         // The getter is only for use by the vcm_* impl functions.
         void setStreamObserver(StreamObserver*);
@@ -57,14 +64,26 @@ namespace CSF
 
 	static void setMainThread(nsIThread *thread);
 	static nsIThread *getMainThread();
+	static nsIEventTarget *getSTSThread();
+
+	static void setSTSThread(nsIEventTarget *thread);
+
+	static void connectCandidateSignal(mozilla::NrIceMediaStream* stream);
+
+        static nsCOMPtr<nsIPrefBranch> getPrefBranch();
 
     private:
+	void CandidateReady(mozilla::NrIceMediaStream* stream,
+			    const std::string& candidate);
+
         static VcmSIPCCBinding * gSelf;
         StreamObserver* streamObserver;
         MediaProviderObserver *mediaProviderObserver;
         static int gAudioCodecMask;
         static int gVideoCodecMask;
 	static nsIThread *gMainThread;
+	static nsIEventTarget *gSTSThread;
+        static nsCOMPtr<nsIPrefBranch> gBranch;
     };
 }
 

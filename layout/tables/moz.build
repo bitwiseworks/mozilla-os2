@@ -6,16 +6,13 @@
 
 TEST_DIRS += ['test']
 
-MODULE = 'layout'
-
 EXPORTS += [
     'nsITableCellLayout.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'BasicTableLayoutStrategy.cpp',
     'FixedTableLayoutStrategy.cpp',
-    'SpanningCellSorter.cpp',
     'nsCellMap.cpp',
     'nsTableCellFrame.cpp',
     'nsTableColFrame.cpp',
@@ -25,7 +22,23 @@ CPP_SOURCES += [
     'nsTablePainter.cpp',
     'nsTableRowFrame.cpp',
     'nsTableRowGroupFrame.cpp',
+    'SpanningCellSorter.cpp',
 ]
 
-LIBRARY_NAME = 'gktable_s'
+FAIL_ON_WARNINGS = True
 
+MSVC_ENABLE_PGO = True
+
+FINAL_LIBRARY = 'gklayout'
+
+LOCAL_INCLUDES += [
+    '../../content/base/src',
+    '../../content/html/content/src',
+    '../../intl/unicharutil/util',
+    '../base',
+    '../generic',
+    '../style',
+    '../xul',
+]
+
+DEFINES['DEBUG_TABLE_STRATEGY_off'] = True

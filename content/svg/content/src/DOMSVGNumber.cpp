@@ -10,16 +10,18 @@
 #include "nsSVGElement.h"
 #include "nsIDOMSVGNumber.h"
 #include "nsError.h"
-#include "nsContentUtils.h"
+#include "nsContentUtils.h" // for NS_ENSURE_FINITE
 
 // See the architecture comment in DOMSVGAnimatedNumberList.h.
 
-using namespace mozilla;
+namespace mozilla {
 
-// We could use NS_IMPL_CYCLE_COLLECTION_1, except that in Unlink() we need to
+// We could use NS_IMPL_CYCLE_COLLECTION(, except that in Unlink() we need to
 // clear our list's weak ref to us to be safe. (The other option would be to
 // not unlink and rely on the breaking of the other edges in the cycle, as
 // NS_SVG_VAL_IMPL_CYCLE_COLLECTION does.)
+NS_IMPL_CYCLE_COLLECTION_CLASS(DOMSVGNumber)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGNumber)
   // We may not belong to a list, so we must null check tmp->mList.
   if (tmp->mList) {
@@ -33,15 +35,49 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMSVGNumber)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMSVGNumber)
+}
+DOMCI_DATA(SVGNumber, mozilla::DOMSVGNumber)
 
-DOMCI_DATA(SVGNumber, DOMSVGNumber)
-
+namespace mozilla {
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGNumber)
-  NS_INTERFACE_MAP_ENTRY(DOMSVGNumber) // pseudo-interface
+  NS_INTERFACE_MAP_ENTRY(mozilla::DOMSVGNumber) // pseudo-interface
   NS_INTERFACE_MAP_ENTRY(nsIDOMSVGNumber)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGNumber)
 NS_INTERFACE_MAP_END
+
+//----------------------------------------------------------------------
+// Helper class: AutoChangeNumberNotifier
+// Stack-based helper class to pair calls to WillChangeNumberList and
+// DidChangeNumberList.
+class MOZ_STACK_CLASS AutoChangeNumberNotifier
+{
+public:
+  AutoChangeNumberNotifier(DOMSVGNumber* aNumber MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    : mNumber(aNumber)
+  {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    MOZ_ASSERT(mNumber, "Expecting non-null number");
+    MOZ_ASSERT(mNumber->HasOwner(),
+               "Expecting list to have an owner for notification");
+    mEmptyOrOldValue =
+      mNumber->Element()->WillChangeNumberList(mNumber->mAttrEnum);
+  }
+
+  ~AutoChangeNumberNotifier()
+  {
+    mNumber->Element()->DidChangeNumberList(mNumber->mAttrEnum,
+                                            mEmptyOrOldValue);
+    if (mNumber->mList->IsAnimating()) {
+      mNumber->Element()->AnimationNeedsResample();
+    }
+  }
+
+private:
+  DOMSVGNumber* const mNumber;
+  nsAttrValue   mEmptyOrOldValue;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
 
 DOMSVGNumber::DOMSVGNumber(DOMSVGNumberList *aList,
                            uint8_t aAttrEnum,
@@ -93,12 +129,8 @@ DOMSVGNumber::SetValue(float aValue)
     if (InternalItem() == aValue) {
       return NS_OK;
     }
-    nsAttrValue emptyOrOldValue = Element()->WillChangeNumberList(mAttrEnum);
+    AutoChangeNumberNotifier notifier(this);
     InternalItem() = aValue;
-    Element()->DidChangeNumberList(mAttrEnum, emptyOrOldValue);
-    if (mList->mAList->IsAnimating()) {
-      Element()->AnimationNeedsResample();
-    }
     return NS_OK;
   }
   mValue = aValue;
@@ -156,3 +188,4 @@ DOMSVGNumber::IndexIsValid()
 }
 #endif
 
+} // namespace mozilla

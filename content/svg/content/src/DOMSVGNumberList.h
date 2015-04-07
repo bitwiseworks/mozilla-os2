@@ -42,6 +42,7 @@ class DOMSVGNumber;
 class DOMSVGNumberList MOZ_FINAL : public nsISupports,
                                    public nsWrapperCache
 {
+  friend class AutoChangeNumberListNotifier;
   friend class DOMSVGNumber;
 
 public:
@@ -71,8 +72,7 @@ public:
     }
   }
 
-  virtual JSObject* WrapObject(JSContext *cx,
-                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
 
   nsISupports* GetParentObject()
   {
@@ -93,6 +93,14 @@ public:
   /// Called to notify us to syncronize our length and detach excess items.
   void InternalListLengthWillChange(uint32_t aNewLength);
 
+  /**
+   * Returns true if our attribute is animating (in which case our animVal is
+   * not simply a mirror of our baseVal).
+   */
+  bool IsAnimating() const {
+    return mAList->IsAnimating();
+  }
+
   uint32_t NumberOfItems() const
   {
     if (IsAnimValList()) {
@@ -103,17 +111,10 @@ public:
   void Clear(ErrorResult& error);
   already_AddRefed<nsIDOMSVGNumber> Initialize(nsIDOMSVGNumber *newItem,
                                                ErrorResult& error);
-  nsIDOMSVGNumber* GetItem(uint32_t index, ErrorResult& error)
-  {
-    bool found;
-    nsIDOMSVGNumber* item = IndexedGetter(index, found, error);
-    if (!found) {
-      error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-    }
-    return item;
-  }
-  nsIDOMSVGNumber* IndexedGetter(uint32_t index, bool& found,
-                                 ErrorResult& error);
+  already_AddRefed<nsIDOMSVGNumber> GetItem(uint32_t index,
+                                            ErrorResult& error);
+  already_AddRefed<nsIDOMSVGNumber> IndexedGetter(uint32_t index, bool& found,
+                                                  ErrorResult& error);
   already_AddRefed<nsIDOMSVGNumber> InsertItemBefore(nsIDOMSVGNumber *newItem,
                                                      uint32_t index,
                                                      ErrorResult& error);
@@ -159,8 +160,8 @@ private:
    */
   SVGNumberList& InternalList() const;
 
-  /// Creates a DOMSVGNumber for aIndex, if it doesn't already exist.
-  void EnsureItemAt(uint32_t aIndex);
+  /// Returns the nsIDOMSVGNumber at aIndex, creating it if necessary.
+  already_AddRefed<nsIDOMSVGNumber> GetItemAt(uint32_t aIndex);
 
   void MaybeInsertNullInAnimValListAt(uint32_t aIndex);
   void MaybeRemoveItemFromAnimValListAt(uint32_t aIndex);

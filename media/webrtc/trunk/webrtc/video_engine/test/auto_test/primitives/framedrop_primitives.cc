@@ -8,25 +8,26 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <cassert>
-#include <cmath>
+#include <assert.h>
+#include <math.h>
+
 #include <sstream>
 #include <string>
 
 #include "webrtc/modules/video_capture/include/video_capture_factory.h"
-#include "system_wrappers/interface/tick_util.h"
-#include "testsupport/fileutils.h"
-#include "testsupport/frame_reader.h"
-#include "testsupport/frame_writer.h"
-#include "testsupport/perf_test.h"
-#include "video_engine/test/auto_test/interface/vie_autotest.h"
-#include "video_engine/test/auto_test/interface/vie_autotest_defines.h"
-#include "video_engine/test/auto_test/primitives/framedrop_primitives.h"
-#include "video_engine/test/auto_test/primitives/general_primitives.h"
-#include "video_engine/test/libvietest/include/tb_interfaces.h"
-#include "video_engine/test/libvietest/include/tb_external_transport.h"
-#include "video_engine/test/libvietest/include/vie_external_render_filter.h"
-#include "video_engine/test/libvietest/include/vie_to_file_renderer.h"
+#include "webrtc/system_wrappers/interface/tick_util.h"
+#include "webrtc/test/testsupport/fileutils.h"
+#include "webrtc/test/testsupport/frame_reader.h"
+#include "webrtc/test/testsupport/frame_writer.h"
+#include "webrtc/test/testsupport/perf_test.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_autotest.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_autotest_defines.h"
+#include "webrtc/video_engine/test/auto_test/primitives/framedrop_primitives.h"
+#include "webrtc/video_engine/test/auto_test/primitives/general_primitives.h"
+#include "webrtc/video_engine/test/libvietest/include/tb_external_transport.h"
+#include "webrtc/video_engine/test/libvietest/include/tb_interfaces.h"
+#include "webrtc/video_engine/test/libvietest/include/vie_external_render_filter.h"
+#include "webrtc/video_engine/test/libvietest/include/vie_to_file_renderer.h"
 
 enum { kWaitTimeForFinalDecodeMs = 100 };
 
@@ -252,11 +253,12 @@ void TestFullStack(const TbInterfaces& interfaces,
   EXPECT_EQ(0, base_interface->DeleteChannel(video_channel));
 
   // Collect transport statistics.
-  WebRtc_Word32 num_rtp_packets = 0;
-  WebRtc_Word32 num_dropped_packets = 0;
-  WebRtc_Word32 num_rtcp_packets = 0;
+  int32_t num_rtp_packets = 0;
+  int32_t num_dropped_packets = 0;
+  int32_t num_rtcp_packets = 0;
+  std::map<uint8_t, int> packet_counters;
   external_transport.GetStats(num_rtp_packets, num_dropped_packets,
-                              num_rtcp_packets);
+                              num_rtcp_packets, &packet_counters);
   ViETest::Log("RTP packets    : %5d", num_rtp_packets);
   ViETest::Log("Dropped packets: %5d", num_dropped_packets);
   ViETest::Log("RTCP packets   : %5d", num_rtcp_packets);
@@ -277,7 +279,7 @@ void FixOutputFileForComparison(const std::string& output_file,
       "useful to fill that gap with and it is impossible to detect it without "
       "any previous timestamps to compare with.";
 
-  WebRtc_UWord8* last_frame_data = new WebRtc_UWord8[frame_length_in_bytes];
+  uint8_t* last_frame_data = new uint8_t[frame_length_in_bytes];
 
   // Process the file and write frame duplicates for all dropped frames.
   for (std::vector<Frame*>::const_iterator it = frames.begin();
@@ -293,8 +295,8 @@ void FixOutputFileForComparison(const std::string& output_file,
   delete[] last_frame_data;
   frame_reader.Close();
   frame_writer.Close();
-  ASSERT_EQ(0, std::remove(output_file.c_str()));
-  ASSERT_EQ(0, std::rename(temp_file.c_str(), output_file.c_str()));
+  ASSERT_EQ(0, remove(output_file.c_str()));
+  ASSERT_EQ(0, rename(temp_file.c_str(), output_file.c_str()));
 }
 
 void FrameDropDetector::ReportFrameState(State state, unsigned int timestamp,
@@ -586,7 +588,7 @@ int FrameDropDetector::GetNumberOfFramesDroppedAt(State state) {
 
 int FrameDropMonitoringRemoteFileRenderer::DeliverFrame(
     unsigned char *buffer, int buffer_size, uint32_t time_stamp,
-    int64_t render_time) {
+    int64_t render_time, void* /*handle*/) {
   // |render_time| provides the ideal render time for this frame. If that time
   // has already passed we will render it immediately.
   int64_t report_render_time_us = render_time * 1000;
@@ -598,7 +600,7 @@ int FrameDropMonitoringRemoteFileRenderer::DeliverFrame(
   frame_drop_detector_->ReportFrameState(FrameDropDetector::kRendered,
                                          time_stamp, report_render_time_us);
   return ViEToFileRenderer::DeliverFrame(buffer, buffer_size,
-                                         time_stamp, render_time);
+                                         time_stamp, render_time, NULL);
 }
 
 int FrameDropMonitoringRemoteFileRenderer::FrameSizeChange(

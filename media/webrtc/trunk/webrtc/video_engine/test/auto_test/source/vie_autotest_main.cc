@@ -8,15 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "vie_autotest_main.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_autotest_main.h"
 
 #include "gflags/gflags.h"
-#include "gtest/gtest.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
-#include "video_engine/test/auto_test/interface/vie_autotest.h"
-#include "video_engine/test/auto_test/interface/vie_autotest_window_manager_interface.h"
-#include "video_engine/test/auto_test/interface/vie_window_creator.h"
-#include "test/testsupport/fileutils.h"
+#include "webrtc/test/testsupport/fileutils.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_autotest.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_autotest_window_manager_interface.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_window_creator.h"
 
 DEFINE_bool(automated, false, "Run Video engine tests in noninteractive mode.");
 DEFINE_bool(auto_custom_call, false, "Run custom call directly.");
@@ -30,11 +30,10 @@ ViEAutoTestMain::ViEAutoTestMain() {
   index_to_test_method_map_[2] = "RunsCaptureTestWithoutErrors";
   index_to_test_method_map_[3] = "RunsCodecTestWithoutErrors";
   index_to_test_method_map_[4] = "RunsEncryptionTestWithoutErrors";
-  index_to_test_method_map_[5] = "RunsFileTestWithoutErrors";
-  index_to_test_method_map_[6] = "RunsImageProcessTestWithoutErrors";
-  index_to_test_method_map_[7] = "RunsNetworkTestWithoutErrors";
-  index_to_test_method_map_[8] = "RunsRenderTestWithoutErrors";
-  index_to_test_method_map_[9] = "RunsRtpRtcpTestWithoutErrors";
+  index_to_test_method_map_[5] = "RunsImageProcessTestWithoutErrors";
+  index_to_test_method_map_[6] = "RunsNetworkTestWithoutErrors";
+  index_to_test_method_map_[7] = "RunsRenderTestWithoutErrors";
+  index_to_test_method_map_[8] = "RunsRtpRtcpTestWithoutErrors";
 }
 
 int ViEAutoTestMain::RunTests(int argc, char** argv) {
@@ -196,4 +195,3 @@ int ViEAutoTestMain::RunInteractiveMode() {
     return 0;
   }
 }
-

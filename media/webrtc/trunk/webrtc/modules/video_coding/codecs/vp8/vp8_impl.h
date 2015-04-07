@@ -13,7 +13,7 @@
 #ifndef WEBRTC_MODULES_VIDEO_CODING_CODECS_VP8_IMPL_H_
 #define WEBRTC_MODULES_VIDEO_CODING_CODECS_VP8_IMPL_H_
 
-#include "modules/video_coding/codecs/vp8/include/vp8.h"
+#include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
 
 // VPX forward declaration
 typedef struct vpx_codec_ctx vpx_codec_ctx_t;
@@ -113,8 +113,6 @@ class VP8EncoderImpl : public VP8Encoder {
   void PopulateCodecSpecific(CodecSpecificInfo* codec_specific,
                              const vpx_codec_cx_pkt& pkt,
                              uint32_t timestamp);
-
-  int GetEncodedFrame(const I420VideoFrame& input_image);
 
   int GetEncodedPartitions(const I420VideoFrame& input_image);
 
@@ -228,8 +226,8 @@ class VP8DecoderImpl : public VP8Decoder {
   int image_format_;
   vpx_ref_frame_t* ref_frame_;
   int propagation_cnt_;
-  bool latest_keyframe_complete_;
   bool mfqe_enabled_;
+  bool key_frame_required_;
 };  // end of VP8Decoder class
 }  // namespace webrtc
 

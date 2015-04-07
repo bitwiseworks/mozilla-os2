@@ -7,6 +7,8 @@
 #include "nsISupports.idl"
 #include "nsIObserver.idl"
 
+interface nsIPrincipal;
+
 [scriptable, uuid(160e87e1-d57d-456b-b6ea-17826f6ea7a8)]
 interface nsIAlertsService : nsISupports
 {
@@ -14,6 +16,9 @@ interface nsIAlertsService : nsISupports
     * Displays a sliding notification window.
     *
     * @param imageUrl       A URL identifying the image to put in the alert.
+    *                       The OS X implemenation limits the amount of time it
+    *                       will wait for an icon to load to six seconds. After
+    *                       that time the alert will show with no icon.
     * @param title          The title for the alert.
     * @param text           The contents of the alert.
     * @param textClickable  If true, causes the alert text to look like a link
@@ -23,12 +28,10 @@ interface nsIAlertsService : nsISupports
     *                       consumer during the alert listener callbacks.
     * @param alertListener  Used for callbacks. May be null if the caller 
     *                       doesn't care about callbacks.
-    * @param name           The name of the notification. This is currently
-    *                       only used on OS X with Growl and Android.
-    *                       On OS X with Growl, users can disable notifications
-    *                       with a given name. On Android the name is hashed
-    *                       and used as a notification ID. Notifications will
-    *                       replace previous notifications with the same name.
+    * @param name           The name of the notification. This is currently only
+    *                       used on Android and OS X. On Android the name is
+    *                       hashed and used as a notification ID. Notifications
+    *                       will replace previous notifications with the same name.
     * @param dir            Bidi override for the title. Valid values are
     *                       "auto", "ltr" or "rtl". Only available on supported
     *                       platforms.
@@ -57,7 +60,8 @@ interface nsIAlertsService : nsISupports
                               [optional] in nsIObserver alertListener,
                               [optional] in AString name,
                               [optional] in AString dir,
-                              [optional] in AString lang);
+                              [optional] in AString lang,
+                              [optional] in nsIPrincipal principal);
 
    /**
     * Close alerts created by the service.
@@ -66,7 +70,8 @@ interface nsIAlertsService : nsISupports
     *                       is provided then only a notification created with
     *                       no name (if any) will be closed.
     */
-   void closeAlert([optional] in AString name);
+   void closeAlert([optional] in AString name,
+                   [optional] in nsIPrincipal principal);
 };
 
 [scriptable, uuid(df1bd4b0-3a8c-40e6-806a-203f38b0bd9f)]

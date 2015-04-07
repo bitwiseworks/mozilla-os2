@@ -5,7 +5,7 @@
 #ifndef mozilla_system_automounter_h__
 #define mozilla_system_automounter_h__
 
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 
 class nsCString;
 
@@ -16,6 +16,11 @@ namespace system {
 #define AUTOMOUNTER_DISABLE                 0
 #define AUTOMOUNTER_ENABLE                  1
 #define AUTOMOUNTER_DISABLE_WHEN_UNPLUGGED  2
+
+// Automounter statuses
+#define AUTOMOUNTER_STATUS_DISABLED         0
+#define AUTOMOUNTER_STATUS_ENABLED          1
+#define AUTOMOUNTER_STATUS_FILES_OPEN       2
 
 /**
  * Initialize the automounter. This causes some of the phone's
@@ -39,6 +44,12 @@ void
 SetAutoMounterMode(int32_t aMode);
 
 /**
+ * Reports the status of the automounter.
+ */
+int32_t
+GetAutoMounterStatus();
+
+/**
  * Sets the sharing mode of an individual volume.
  *
  * If a volume is enabled for sharing, and the autmounter
@@ -47,6 +58,33 @@ SetAutoMounterMode(int32_t aMode);
  */
 void
 SetAutoMounterSharingMode(const nsCString& aVolumeName, bool aAllowSharing);
+
+/**
+ * Formats the volume with specified volume name.
+ *
+ * If the volume is ready to format, automounter
+ * will unmount it, format it and then mount it again.
+ */
+void
+AutoMounterFormatVolume(const nsCString& aVolumeName);
+
+/**
+ * Mounts the volume with specified volume name.
+ *
+ * If the volume is already unmounted, automounter
+ * will mount it. Otherwise automounter will skip this.
+ */
+void
+AutoMounterMountVolume(const nsCString& aVolumeName);
+
+/**
+ * Unmounts the volume with specified volume name.
+ *
+ * If the volume is already mounted, automounter
+ * will unmount it. Otherwise automounter will skip this.
+ */
+void
+AutoMounterUnmountVolume(const nsCString& aVolumeName);
 
 /**
  * Shuts down the automounter.

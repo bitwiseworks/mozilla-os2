@@ -12,32 +12,26 @@
 #include "mozilla/dom/CanvasRenderingContext2D.h"
 #include "mozilla/gfx/2D.h"
 #include "nsWrapperCache.h"
-
-#define NS_CANVASGRADIENTAZURE_PRIVATE_IID \
-    {0x28425a6a, 0x90e0, 0x4d42, {0x9c, 0x75, 0xff, 0x60, 0x09, 0xb3, 0x10, 0xa8}}
+#include "gfxGradientCache.h"
 
 namespace mozilla {
 namespace dom {
 
-class CanvasGradient : public nsISupports,
-                       public nsWrapperCache
+class CanvasGradient : public nsWrapperCache
 {
 public:
-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_CANVASGRADIENTAZURE_PRIVATE_IID)
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(CanvasGradient)
+  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(CanvasGradient)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(CanvasGradient)
 
-  enum Type
-  {
+  MOZ_BEGIN_NESTED_ENUM_CLASS(Type, uint8_t)
     LINEAR = 0,
     RADIAL
-  };
+  MOZ_END_NESTED_ENUM_CLASS(Type)
 
   Type GetType()
   {
     return mType;
   }
-
 
   mozilla::gfx::GradientStops *
   GetGradientStopsForTarget(mozilla::gfx::DrawTarget *aRT)
@@ -46,7 +40,10 @@ public:
       return mStops;
     }
 
-    mStops = aRT->CreateGradientStops(mRawStops.Elements(), mRawStops.Length());
+    mStops =
+      gfx::gfxGradientCache::GetOrCreateGradientStops(aRT,
+                                                      mRawStops,
+                                                      gfx::ExtendMode::CLAMP);
 
     return mStops;
   }
@@ -54,9 +51,9 @@ public:
   // WebIDL
   void AddColorStop(float offset, const nsAString& colorstr, ErrorResult& rv);
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
+  JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
   {
-    return CanvasGradientBinding::Wrap(aCx, aScope, this);
+    return CanvasGradientBinding::Wrap(aCx, this);
   }
 
   CanvasRenderingContext2D* GetParentObject()
@@ -78,6 +75,8 @@ protected:
   Type mType;
   virtual ~CanvasGradient() {}
 };
+
+MOZ_FINISH_NESTED_ENUM_CLASS(CanvasGradient::Type)
 
 } // namespace dom
 } // namespace mozilla

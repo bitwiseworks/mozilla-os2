@@ -8,19 +8,21 @@
 
 #include "gfxTypes.h"
 
-#include "gfxColor.h"
 #include "gfxMatrix.h"
+#include "mozilla/Alignment.h"
+#include "mozilla/gfx/2D.h"
+#include "GraphicsFilter.h"
 #include "nsISupportsImpl.h"
 #include "nsAutoPtr.h"
-#include "mozilla/gfx/2D.h"
-#include "mozilla/Util.h"
+#include "nsTArray.h"
 
 class gfxContext;
 class gfxASurface;
+struct gfxRGBA;
 typedef struct _cairo_pattern cairo_pattern_t;
 
 
-class gfxPattern {
+class gfxPattern MOZ_FINAL{
     NS_INLINE_DECL_REFCOUNTING(gfxPattern)
 
 public:
@@ -33,11 +35,15 @@ public:
                gfxFloat cx1, gfxFloat cy1, gfxFloat radius1); // radial
     gfxPattern(mozilla::gfx::SourceSurface *aSurface,
                const mozilla::gfx::Matrix &aTransform); // Azure
-    virtual ~gfxPattern();
 
     cairo_pattern_t *CairoPattern();
     void AddColorStop(gfxFloat offset, const gfxRGBA& c);
     void SetColorStops(mozilla::RefPtr<mozilla::gfx::GradientStops> aStops);
+
+    // This should only be called on a cairo pattern that we want to use with
+    // Azure. We will read back the color stops from cairo and try to look
+    // them up in the cache.
+    void CacheColorStops(mozilla::gfx::DrawTarget *aDT);
 
     void SetMatrix(const gfxMatrix& matrix);
     gfxMatrix GetMatrix() const;
@@ -45,7 +51,7 @@ public:
 
     /* Get an Azure Pattern for the current Cairo pattern. aPattern transform
      * specifies the transform that was set on the DrawTarget when the pattern
-     * was set. When this is NULL it is assumed the transform is identical
+     * was set. When this is nullptr it is assumed the transform is identical
      * to the current transform.
      */
     mozilla::gfx::Pattern *GetPattern(mozilla::gfx::DrawTarget *aTarget,
@@ -84,16 +90,6 @@ public:
 
     int CairoStatus();
 
-    enum GraphicsFilter {
-        FILTER_FAST,
-        FILTER_GOOD,
-        FILTER_BEST,
-        FILTER_NEAREST,
-        FILTER_BILINEAR,
-        FILTER_GAUSSIAN,
-        FILTER_SENTINEL
-    };
-
     void SetFilter(GraphicsFilter filter);
     GraphicsFilter Filter() const;
 
@@ -106,7 +102,10 @@ public:
 
     mozilla::TemporaryRef<mozilla::gfx::SourceSurface> GetAzureSurface() { return mSourceSurface; }
 
-protected:
+private:
+    // Private destructor, to discourage deletion outside of Release():
+    ~gfxPattern();
+
     cairo_pattern_t *mPattern;
 
     /**

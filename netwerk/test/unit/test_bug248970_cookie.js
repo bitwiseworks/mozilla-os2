@@ -2,10 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Cu = Components.utils;
-const Ci = Components.interfaces;
-const Cc = Components.classes;
-
 Cu.import("resource://testing-common/httpd.js");
 Cu.import("resource://gre/modules/Services.jsm");
 
@@ -18,7 +14,7 @@ function inChildProcess() {
 }
 function makeChan(path) {
   var ios = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
-  var chan = ios.newChannel("http://localhost:4444/" + path, null, null)
+  var chan = ios.newChannel("http://localhost:" + httpserver.identity.primaryPort + "/" + path, null, null)
                 .QueryInterface(Ci.nsIHttpChannel);
   return chan;
 }
@@ -73,7 +69,7 @@ function run_test() {
   httpserver = new HttpServer();
   httpserver.registerPathHandler("/set", setHandler);
   httpserver.registerPathHandler("/present", presentHandler);
-  httpserver.start(4444);
+  httpserver.start(-1);
   
   do_test_pending();
   

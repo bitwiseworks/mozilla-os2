@@ -15,10 +15,10 @@
 #include <utility>
 #include <vector>
 
-#include "modules/interface/module.h"
-#include "modules/remote_bitrate_estimator/include/remote_bitrate_estimator.h"
-#include "modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
-#include "system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/modules/interface/module.h"
+#include "webrtc/modules/remote_bitrate_estimator/include/remote_bitrate_estimator.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 
@@ -26,9 +26,9 @@ class CriticalSectionWrapper;
 class ProcessThread;
 class RtpRtcp;
 
-class VieRemb : public RemoteBitrateObserver, public Module {
+class VieRemb : public RemoteBitrateObserver {
  public:
-  explicit VieRemb(ProcessThread* process_thread);
+  VieRemb();
   ~VieRemb();
 
   // Called to add a receive channel to include in the REMB packet.
@@ -51,18 +51,12 @@ class VieRemb : public RemoteBitrateObserver, public Module {
   // estimate has decreased or if no RTCP REMB packet has been sent for
   // a certain time interval.
   // Implements RtpReceiveBitrateUpdate.
-  virtual void OnReceiveBitrateChanged(std::vector<unsigned int>* ssrcs,
+  virtual void OnReceiveBitrateChanged(const std::vector<unsigned int>& ssrcs,
                                        unsigned int bitrate);
-
-  // Implements Module.
-  virtual WebRtc_Word32 ChangeUniqueId(const WebRtc_Word32 id);
-  virtual WebRtc_Word32 TimeUntilNextProcess();
-  virtual WebRtc_Word32 Process();
 
  private:
   typedef std::list<RtpRtcp*> RtpModules;
 
-  ProcessThread* process_thread_;
   scoped_ptr<CriticalSectionWrapper> list_crit_;
 
   // The last time a REMB was sent.
@@ -77,8 +71,6 @@ class VieRemb : public RemoteBitrateObserver, public Module {
 
   // The last bitrate update.
   unsigned int bitrate_;
-  std::vector<unsigned int> ssrcs_;
-  int64_t bitrate_update_time_ms_;
 };
 
 }  // namespace webrtc

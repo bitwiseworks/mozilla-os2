@@ -4,11 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Assembler-x64.h"
-#include "gc/Marking.h"
-#include "jit/LIR.h"
+#include "jit/x64/Assembler-x64.h"
 
-#include "jsscriptinlines.h"
+#include "gc/Marking.h"
 
 using namespace js;
 using namespace js::jit;
@@ -41,11 +39,12 @@ ABIArgGenerator::next(MIRType type)
       case MIRType_Pointer:
         current_ = ABIArg(IntArgRegs[regIndex_++]);
         break;
+      case MIRType_Float32:
       case MIRType_Double:
         current_ = ABIArg(FloatArgRegs[regIndex_++]);
         break;
       default:
-        JS_NOT_REACHED("Unexpected argument type");
+        MOZ_ASSUME_UNREACHABLE("Unexpected argument type");
     }
     return current_;
 #else
@@ -60,6 +59,7 @@ ABIArgGenerator::next(MIRType type)
         current_ = ABIArg(IntArgRegs[intRegIndex_++]);
         break;
       case MIRType_Double:
+      case MIRType_Float32:
         if (floatRegIndex_ == NumFloatArgRegs) {
             current_ = ABIArg(stackOffset_);
             stackOffset_ += sizeof(uint64_t);
@@ -68,15 +68,16 @@ ABIArgGenerator::next(MIRType type)
         current_ = ABIArg(FloatArgRegs[floatRegIndex_++]);
         break;
       default:
-        JS_NOT_REACHED("Unexpected argument type");
+        MOZ_ASSUME_UNREACHABLE("Unexpected argument type");
     }
     return current_;
 #endif
 }
 
+// Avoid r11, which is the MacroAssembler's ScratchReg.
 const Register ABIArgGenerator::NonArgReturnVolatileReg0 = r10;
-const Register ABIArgGenerator::NonArgReturnVolatileReg1 = r11;
-const Register ABIArgGenerator::NonVolatileReg = r12;
+const Register ABIArgGenerator::NonArgReturnVolatileReg1 = r12;
+const Register ABIArgGenerator::NonVolatileReg = r13;
 
 void
 Assembler::writeRelocation(JmpSrc src, Relocation::Kind reloc)
@@ -88,22 +89,22 @@ Assembler::writeRelocation(JmpSrc src, Relocation::Kind reloc)
         // patch later.
         jumpRelocations_.writeFixedUint32_t(0);
     }
-    if (reloc == Relocation::IONCODE) {
+    if (reloc == Relocation::JITCODE) {
         jumpRelocations_.writeUnsigned(src.offset());
         jumpRelocations_.writeUnsigned(jumps_.length());
     }
 }
 
 void
-Assembler::addPendingJump(JmpSrc src, void *target, Relocation::Kind reloc)
+Assembler::addPendingJump(JmpSrc src, ImmPtr target, Relocation::Kind reloc)
 {
-    JS_ASSERT(target);
+    JS_ASSERT(target.value != nullptr);
 
     // Emit reloc before modifying the jump table, since it computes a 0-based
     // index. This jump is not patchable at runtime.
-    if (reloc == Relocation::IONCODE)
+    if (reloc == Relocation::JITCODE)
         writeRelocation(src, reloc);
-    enoughMemory_ &= jumps_.append(RelativePatch(src.offset(), target, reloc));
+    enoughMemory_ &= jumps_.append(RelativePatch(src.offset(), target.value, reloc));
 }
 
 size_t
@@ -114,13 +115,13 @@ Assembler::addPatchableJump(JmpSrc src, Relocation::Kind reloc)
     writeRelocation(src, reloc);
 
     size_t index = jumps_.length();
-    enoughMemory_ &= jumps_.append(RelativePatch(src.offset(), NULL, reloc));
+    enoughMemory_ &= jumps_.append(RelativePatch(src.offset(), nullptr, reloc));
     return index;
 }
 
 /* static */
 uint8_t *
-Assembler::PatchableJumpAddress(IonCode *code, size_t index)
+Assembler::PatchableJumpAddress(JitCode *code, size_t index)
 {
     // The assembler stashed the offset into the code of the fragments used
     // for far jumps at the start of the relocation table.
@@ -146,11 +147,11 @@ Assembler::finish()
         return;
 
     // Emit the jump table.
-    masm.align(16);
+    masm.align(SizeOfJumpTableEntry);
     extendedJumpTable_ = masm.size();
 
     // Now that we know the offset to the jump table, squirrel it into the
-    // jump relocation buffer if any IonCode references exist and must be
+    // jump relocation buffer if any JitCode references exist and must be
     // tracked for GC.
     JS_ASSERT_IF(jumpRelocations_.length(), jumpRelocations_.length() >= sizeof(uint32_t));
     if (jumpRelocations_.length())
@@ -161,9 +162,14 @@ Assembler::finish()
 #ifdef DEBUG
         size_t oldSize = masm.size();
 #endif
-        masm.jmp_rip(0);
+        masm.jmp_rip(2);
+        JS_ASSERT(masm.size() - oldSize == 6);
+        // Following an indirect branch with ud2 hints to the hardware that
+        // there's no fall-through. This also aligns the 64-bit immediate.
+        masm.ud2();
+        JS_ASSERT(masm.size() - oldSize == 8);
         masm.immediate64(0);
-        masm.align(SizeOfJumpTableEntry);
+        JS_ASSERT(masm.size() - oldSize == SizeOfExtendedJump);
         JS_ASSERT(masm.size() - oldSize == SizeOfJumpTableEntry);
     }
 }
@@ -177,9 +183,9 @@ Assembler::executableCopy(uint8_t *buffer)
         RelativePatch &rp = jumps_[i];
         uint8_t *src = buffer + rp.offset;
         if (!rp.target) {
-            // The patch target is NULL for jumps that have been linked to a
-            // label within the same code block, but may be repatched later to
-            // jump to a different code block.
+            // The patch target is nullptr for jumps that have been linked to
+            // a label within the same code block, but may be repatched later
+            // to jump to a different code block.
             continue;
         }
         if (JSC::X86Assembler::canRelinkJump(src, rp.target)) {
@@ -231,8 +237,8 @@ class RelocationIterator
     }
 };
 
-IonCode *
-Assembler::CodeFromJump(IonCode *code, uint8_t *jump)
+JitCode *
+Assembler::CodeFromJump(JitCode *code, uint8_t *jump)
 {
     uint8_t *target = (uint8_t *)JSC::X86Assembler::getRel32Target(jump);
     if (target >= code->raw() && target < code->raw() + code->instructionsSize()) {
@@ -243,16 +249,16 @@ Assembler::CodeFromJump(IonCode *code, uint8_t *jump)
         target = (uint8_t *)JSC::X86Assembler::getPointer(target + SizeOfExtendedJump);
     }
 
-    return IonCode::FromExecutable(target);
+    return JitCode::FromExecutable(target);
 }
 
 void
-Assembler::TraceJumpRelocations(JSTracer *trc, IonCode *code, CompactBufferReader &reader)
+Assembler::TraceJumpRelocations(JSTracer *trc, JitCode *code, CompactBufferReader &reader)
 {
     RelocationIterator iter(reader);
     while (iter.read()) {
-        IonCode *child = CodeFromJump(code, code->raw() + iter.offset());
-        MarkIonCodeUnbarriered(trc, &child, "rel32");
+        JitCode *child = CodeFromJump(code, code->raw() + iter.offset());
+        MarkJitCodeUnbarriered(trc, &child, "rel32");
         JS_ASSERT(child == CodeFromJump(code, code->raw() + iter.offset()));
     }
 }

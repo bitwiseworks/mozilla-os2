@@ -7,17 +7,15 @@
 #ifndef jit_arm_Assembler_arm_h
 #define jit_arm_Assembler_arm_h
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/MathAlgorithms.h"
-#include "mozilla/Util.h"
 
-#include "jsprf.h"
-
-#include "jit/shared/Assembler-shared.h"
 #include "assembler/assembler/AssemblerBufferWithConstantPool.h"
+#include "jit/arm/Architecture-arm.h"
 #include "jit/CompactBuffer.h"
 #include "jit/IonCode.h"
-#include "jit/arm/Architecture-arm.h"
+#include "jit/shared/Assembler-shared.h"
 #include "jit/shared/IonAssemblerBufferWithConstantPools.h"
 
 namespace js {
@@ -29,54 +27,49 @@ namespace jit {
 // clearer than bl r14).  HOWEVER, this register can
 // easily be a gpr when it is not busy holding the return
 // address.
-static const MOZ_CONSTEXPR Register r0  = { Registers::r0 };
-static const MOZ_CONSTEXPR Register r1  = { Registers::r1 };
-static const MOZ_CONSTEXPR Register r2  = { Registers::r2 };
-static const MOZ_CONSTEXPR Register r3  = { Registers::r3 };
-static const MOZ_CONSTEXPR Register r4  = { Registers::r4 };
-static const MOZ_CONSTEXPR Register r5  = { Registers::r5 };
-static const MOZ_CONSTEXPR Register r6  = { Registers::r6 };
-static const MOZ_CONSTEXPR Register r7  = { Registers::r7 };
-static const MOZ_CONSTEXPR Register r8  = { Registers::r8 };
-static const MOZ_CONSTEXPR Register r9  = { Registers::r9 };
-static const MOZ_CONSTEXPR Register r10 = { Registers::r10 };
-static const MOZ_CONSTEXPR Register r11 = { Registers::r11 };
-static const MOZ_CONSTEXPR Register r12 = { Registers::ip };
-static const MOZ_CONSTEXPR Register ip  = { Registers::ip };
-static const MOZ_CONSTEXPR Register sp  = { Registers::sp };
-static const MOZ_CONSTEXPR Register r14 = { Registers::lr };
-static const MOZ_CONSTEXPR Register lr  = { Registers::lr };
-static const MOZ_CONSTEXPR Register pc  = { Registers::pc };
+static MOZ_CONSTEXPR_VAR Register r0  = { Registers::r0 };
+static MOZ_CONSTEXPR_VAR Register r1  = { Registers::r1 };
+static MOZ_CONSTEXPR_VAR Register r2  = { Registers::r2 };
+static MOZ_CONSTEXPR_VAR Register r3  = { Registers::r3 };
+static MOZ_CONSTEXPR_VAR Register r4  = { Registers::r4 };
+static MOZ_CONSTEXPR_VAR Register r5  = { Registers::r5 };
+static MOZ_CONSTEXPR_VAR Register r6  = { Registers::r6 };
+static MOZ_CONSTEXPR_VAR Register r7  = { Registers::r7 };
+static MOZ_CONSTEXPR_VAR Register r8  = { Registers::r8 };
+static MOZ_CONSTEXPR_VAR Register r9  = { Registers::r9 };
+static MOZ_CONSTEXPR_VAR Register r10 = { Registers::r10 };
+static MOZ_CONSTEXPR_VAR Register r11 = { Registers::r11 };
+static MOZ_CONSTEXPR_VAR Register r12 = { Registers::ip };
+static MOZ_CONSTEXPR_VAR Register ip  = { Registers::ip };
+static MOZ_CONSTEXPR_VAR Register sp  = { Registers::sp };
+static MOZ_CONSTEXPR_VAR Register r14 = { Registers::lr };
+static MOZ_CONSTEXPR_VAR Register lr  = { Registers::lr };
+static MOZ_CONSTEXPR_VAR Register pc  = { Registers::pc };
 
-static const MOZ_CONSTEXPR Register ScratchRegister = {Registers::ip};
+static MOZ_CONSTEXPR_VAR Register ScratchRegister = {Registers::ip};
 
-static const MOZ_CONSTEXPR Register OsrFrameReg = r3;
-static const MOZ_CONSTEXPR Register ArgumentsRectifierReg = r8;
-static const MOZ_CONSTEXPR Register CallTempReg0 = r5;
-static const MOZ_CONSTEXPR Register CallTempReg1 = r6;
-static const MOZ_CONSTEXPR Register CallTempReg2 = r7;
-static const MOZ_CONSTEXPR Register CallTempReg3 = r8;
-static const MOZ_CONSTEXPR Register CallTempReg4 = r0;
-static const MOZ_CONSTEXPR Register CallTempReg5 = r1;
-static const MOZ_CONSTEXPR Register CallTempReg6 = r2;
+static MOZ_CONSTEXPR_VAR Register OsrFrameReg = r3;
+static MOZ_CONSTEXPR_VAR Register ArgumentsRectifierReg = r8;
+static MOZ_CONSTEXPR_VAR Register CallTempReg0 = r5;
+static MOZ_CONSTEXPR_VAR Register CallTempReg1 = r6;
+static MOZ_CONSTEXPR_VAR Register CallTempReg2 = r7;
+static MOZ_CONSTEXPR_VAR Register CallTempReg3 = r8;
+static MOZ_CONSTEXPR_VAR Register CallTempReg4 = r0;
+static MOZ_CONSTEXPR_VAR Register CallTempReg5 = r1;
 
-static const MOZ_CONSTEXPR Register IntArgReg0 = r0;
-static const MOZ_CONSTEXPR Register IntArgReg1 = r1;
-static const MOZ_CONSTEXPR Register IntArgReg2 = r2;
-static const MOZ_CONSTEXPR Register IntArgReg3 = r3;
-static const MOZ_CONSTEXPR Register GlobalReg = r10;
-static const MOZ_CONSTEXPR Register HeapReg = r11;
-static const MOZ_CONSTEXPR Register CallTempNonArgRegs[] = { r5, r6, r7, r8 };
+static MOZ_CONSTEXPR_VAR Register IntArgReg0 = r0;
+static MOZ_CONSTEXPR_VAR Register IntArgReg1 = r1;
+static MOZ_CONSTEXPR_VAR Register IntArgReg2 = r2;
+static MOZ_CONSTEXPR_VAR Register IntArgReg3 = r3;
+static MOZ_CONSTEXPR_VAR Register GlobalReg = r10;
+static MOZ_CONSTEXPR_VAR Register HeapReg = r11;
+static MOZ_CONSTEXPR_VAR Register CallTempNonArgRegs[] = { r5, r6, r7, r8 };
 static const uint32_t NumCallTempNonArgRegs =
     mozilla::ArrayLength(CallTempNonArgRegs);
 class ABIArgGenerator
 {
-#if defined(JS_CPU_ARM_HARDFP)
     unsigned intRegIndex_;
     unsigned floatRegIndex_;
-#else
-    unsigned argRegIndex_;
-#endif
     uint32_t stackOffset_;
     ABIArg current_;
 
@@ -87,40 +80,55 @@ class ABIArgGenerator
     uint32_t stackBytesConsumedSoFar() const { return stackOffset_; }
     static const Register NonArgReturnVolatileReg0;
     static const Register NonArgReturnVolatileReg1;
-
 };
 
-static const MOZ_CONSTEXPR Register PreBarrierReg = r1;
+static MOZ_CONSTEXPR_VAR Register PreBarrierReg = r1;
 
-static const MOZ_CONSTEXPR Register InvalidReg = { Registers::invalid_reg };
-static const MOZ_CONSTEXPR FloatRegister InvalidFloatReg = { FloatRegisters::invalid_freg };
+static MOZ_CONSTEXPR_VAR Register InvalidReg = { Registers::invalid_reg };
+static MOZ_CONSTEXPR_VAR FloatRegister InvalidFloatReg = { FloatRegisters::invalid_freg };
 
-static const MOZ_CONSTEXPR Register JSReturnReg_Type = r3;
-static const MOZ_CONSTEXPR Register JSReturnReg_Data = r2;
-static const MOZ_CONSTEXPR Register StackPointer = sp;
-static const MOZ_CONSTEXPR Register FramePointer = InvalidReg;
-static const MOZ_CONSTEXPR Register ReturnReg = r0;
-static const MOZ_CONSTEXPR FloatRegister ReturnFloatReg = { FloatRegisters::d0 };
-static const MOZ_CONSTEXPR FloatRegister ScratchFloatReg = { FloatRegisters::d1 };
+static MOZ_CONSTEXPR_VAR Register JSReturnReg_Type = r3;
+static MOZ_CONSTEXPR_VAR Register JSReturnReg_Data = r2;
+static MOZ_CONSTEXPR_VAR Register StackPointer = sp;
+static MOZ_CONSTEXPR_VAR Register FramePointer = InvalidReg;
+static MOZ_CONSTEXPR_VAR Register ReturnReg = r0;
+static MOZ_CONSTEXPR_VAR FloatRegister ReturnFloatReg = { FloatRegisters::d0 };
+static MOZ_CONSTEXPR_VAR FloatRegister ScratchFloatReg = { FloatRegisters::d15 };
 
-static const MOZ_CONSTEXPR FloatRegister NANReg = { FloatRegisters::d15 };
+static MOZ_CONSTEXPR_VAR FloatRegister NANReg = { FloatRegisters::d14 };
 
-static const MOZ_CONSTEXPR FloatRegister d0  = {FloatRegisters::d0};
-static const MOZ_CONSTEXPR FloatRegister d1  = {FloatRegisters::d1};
-static const MOZ_CONSTEXPR FloatRegister d2  = {FloatRegisters::d2};
-static const MOZ_CONSTEXPR FloatRegister d3  = {FloatRegisters::d3};
-static const MOZ_CONSTEXPR FloatRegister d4  = {FloatRegisters::d4};
-static const MOZ_CONSTEXPR FloatRegister d5  = {FloatRegisters::d5};
-static const MOZ_CONSTEXPR FloatRegister d6  = {FloatRegisters::d6};
-static const MOZ_CONSTEXPR FloatRegister d7  = {FloatRegisters::d7};
-static const MOZ_CONSTEXPR FloatRegister d8  = {FloatRegisters::d8};
-static const MOZ_CONSTEXPR FloatRegister d9  = {FloatRegisters::d9};
-static const MOZ_CONSTEXPR FloatRegister d10 = {FloatRegisters::d10};
-static const MOZ_CONSTEXPR FloatRegister d11 = {FloatRegisters::d11};
-static const MOZ_CONSTEXPR FloatRegister d12 = {FloatRegisters::d12};
-static const MOZ_CONSTEXPR FloatRegister d13 = {FloatRegisters::d13};
-static const MOZ_CONSTEXPR FloatRegister d14 = {FloatRegisters::d14};
-static const MOZ_CONSTEXPR FloatRegister d15 = {FloatRegisters::d15};
+// Registers used in the GenerateFFIIonExit Enable Activation block.
+static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegCallee = r4;
+static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegE0 = r0;
+static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegE1 = r1;
+static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegE2 = r2;
+static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegE3 = r3;
+
+// Registers used in the GenerateFFIIonExit Disable Activation block.
+// None of these may be the second scratch register (lr).
+static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegReturnData = r2;
+static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegReturnType = r3;
+static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegD0 = r0;
+static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegD1 = r1;
+static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegD2 = r4;
+
+
+static MOZ_CONSTEXPR_VAR FloatRegister d0  = {FloatRegisters::d0};
+static MOZ_CONSTEXPR_VAR FloatRegister d1  = {FloatRegisters::d1};
+static MOZ_CONSTEXPR_VAR FloatRegister d2  = {FloatRegisters::d2};
+static MOZ_CONSTEXPR_VAR FloatRegister d3  = {FloatRegisters::d3};
+static MOZ_CONSTEXPR_VAR FloatRegister d4  = {FloatRegisters::d4};
+static MOZ_CONSTEXPR_VAR FloatRegister d5  = {FloatRegisters::d5};
+static MOZ_CONSTEXPR_VAR FloatRegister d6  = {FloatRegisters::d6};
+static MOZ_CONSTEXPR_VAR FloatRegister d7  = {FloatRegisters::d7};
+static MOZ_CONSTEXPR_VAR FloatRegister d8  = {FloatRegisters::d8};
+static MOZ_CONSTEXPR_VAR FloatRegister d9  = {FloatRegisters::d9};
+static MOZ_CONSTEXPR_VAR FloatRegister d10 = {FloatRegisters::d10};
+static MOZ_CONSTEXPR_VAR FloatRegister d11 = {FloatRegisters::d11};
+static MOZ_CONSTEXPR_VAR FloatRegister d12 = {FloatRegisters::d12};
+static MOZ_CONSTEXPR_VAR FloatRegister d13 = {FloatRegisters::d13};
+static MOZ_CONSTEXPR_VAR FloatRegister d14 = {FloatRegisters::d14};
+static MOZ_CONSTEXPR_VAR FloatRegister d15 = {FloatRegisters::d15};
 
 // For maximal awesomeness, 8 should be sufficent.
 // ldrd/strd (dual-register load/store) operate in a single cycle
@@ -209,21 +217,21 @@ class VFPRegister
     {
         JS_ASSERT(_code == (unsigned)fr.code());
     }
-    bool isDouble() { return kind == Double; }
-    bool isSingle() { return kind == Single; }
-    bool isFloat() { return (kind == Double) || (kind == Single); }
-    bool isInt() { return (kind == UInt) || (kind == Int); }
-    bool isSInt()   { return kind == Int; }
-    bool isUInt()   { return kind == UInt; }
-    bool equiv(VFPRegister other) { return other.kind == kind; }
-    size_t size() { return (kind == Double) ? 8 : 4; }
+    bool isDouble() const { return kind == Double; }
+    bool isSingle() const { return kind == Single; }
+    bool isFloat() const { return (kind == Double) || (kind == Single); }
+    bool isInt() const { return (kind == UInt) || (kind == Int); }
+    bool isSInt() const { return kind == Int; }
+    bool isUInt() const { return kind == UInt; }
+    bool equiv(VFPRegister other) const { return other.kind == kind; }
+    size_t size() const { return (kind == Double) ? 8 : 4; }
     bool isInvalid();
     bool isMissing();
 
-    VFPRegister doubleOverlay();
-    VFPRegister singleOverlay();
-    VFPRegister sintOverlay();
-    VFPRegister uintOverlay();
+    VFPRegister doubleOverlay() const;
+    VFPRegister singleOverlay() const;
+    VFPRegister sintOverlay() const;
+    VFPRegister uintOverlay() const;
 
     struct VFPRegIndexSplit;
     VFPRegIndexSplit encode();
@@ -574,7 +582,7 @@ struct RIS
     {
         JS_ASSERT(ShiftAmount == imm);
     }
-    explicit RIS(Reg r) : ShiftAmount(ShiftAmount) { }
+    explicit RIS(Reg r) : ShiftAmount(r.ShiftAmount) {}
 };
 
 struct RRS
@@ -639,10 +647,10 @@ class Imm8 : public Operand2
 {
   public:
     static datastore::Imm8mData encodeImm(uint32_t imm) {
-        // In gcc, clz is undefined if you call it with 0.
+        // mozilla::CountLeadingZeroes32(imm) requires imm != 0.
         if (imm == 0)
             return datastore::Imm8mData(0, 0);
-        int left = js_bitscan_clz32(imm) & 30;
+        int left = mozilla::CountLeadingZeroes32(imm) & 30;
         // See if imm is a simple value that can be encoded with a rotate of 0.
         // This is effectively imm <= 0xff, but I assume this can be optimized
         // more
@@ -656,7 +664,7 @@ class Imm8 : public Operand2
             return  datastore::Imm8mData(imm >> (24 - left), ((8+left) >> 1));
         }
         // Look for the most signifigant bit set, once again.
-        int right = 32 - (js_bitscan_clz32(no_imm)  & 30);
+        int right = 32 - (mozilla::CountLeadingZeroes32(no_imm) & 30);
         // If it is in the bottom 8 bits, there is a chance that this is a
         // wraparound case.
         if (right >= 8)
@@ -734,7 +742,6 @@ class O2RegImmShift : public Op2Reg
         datastore::Reg r(*this);
         datastore::RIS ris(r);
         return ris.ShiftAmount;
-        
     }
 };
 
@@ -949,7 +956,9 @@ class VFPImm {
     uint32_t data;
 
   public:
-    VFPImm(uint32_t top);
+    static const VFPImm one;
+
+    VFPImm(uint32_t topWordOfDouble);
 
     uint32_t encode() {
         return data;
@@ -958,15 +967,6 @@ class VFPImm {
         return data != -1U;
     }
 };
-
-inline void
-AssemblerCrashAtUnhandlableOOM(const char *reason)
-{
-    char msgbuf[1024];
-    JS_snprintf(msgbuf, sizeof(msgbuf), "[unhandlable oom] %s", reason);
-    MOZ_ReportAssertionFailure(msgbuf, __FILE__, __LINE__);
-    MOZ_CRASH();
-}
 
 // A BOffImm is an immediate that is used for branches. Namely, it is the offset that will
 // be encoded in the branch instruction. This is the only sane way of constructing a branch.
@@ -987,7 +987,7 @@ class BOffImm
     {
         JS_ASSERT((offset & 0x3) == 0);
         if (!isInRange(offset))
-            AssemblerCrashAtUnhandlableOOM("BOffImm");
+            CrashAtUnhandlableOOM("BOffImm");
     }
     static bool isInRange(int offset)
     {
@@ -1034,15 +1034,6 @@ class Imm16
     bool isInvalid () {
         return invalid;
     }
-};
-
-// FP Instructions use a different set of registers,
-// with a different encoding, so this calls for a different class.
-// which will be implemented later
-// IIRC, this has been subsumed by vfpreg.
-class FloatOp
-{
-    uint32_t data;
 };
 
 /* I would preffer that these do not exist, since there are essentially
@@ -1136,11 +1127,11 @@ class InstructionIterator;
 class Assembler;
 typedef js::jit::AssemblerBufferWithConstantPool<1024, 4, Instruction, Assembler, 1> ARMBuffer;
 
-class Assembler
+class Assembler : public AssemblerShared
 {
   public:
     // ARM conditional constants
-    typedef enum {
+    enum ARMCondition {
         EQ = 0x00000000, // Zero
         NE = 0x10000000, // Non-zero
         CS = 0x20000000,
@@ -1156,7 +1147,7 @@ class Assembler
         GT = 0xc0000000,
         LE = 0xd0000000,
         AL = 0xe0000000
-    } ARMCondition;
+    };
 
     enum Condition {
         Equal = EQ,
@@ -1171,7 +1162,7 @@ class Assembler
         LessThanOrEqual = LE,
         Overflow = VS,
         Signed = MI,
-        Unsigned = PL,
+        NotSigned = PL,
         Zero = EQ,
         NonZero = NE,
         Always  = AL,
@@ -1241,7 +1232,7 @@ class Assembler
     void resetCounter();
     uint32_t actualOffset(uint32_t) const;
     uint32_t actualIndex(uint32_t) const;
-    static uint8_t *PatchableJumpAddress(IonCode *code, uint32_t index);
+    static uint8_t *PatchableJumpAddress(JitCode *code, uint32_t index);
     BufferOffset actualOffset(BufferOffset) const;
   protected:
 
@@ -1249,18 +1240,10 @@ class Assembler
     // gets moved (executable copy, gc, etc.)
     struct RelativePatch
     {
-        // the offset within the code buffer where the value is loaded that
-        // we want to fix-up
-        BufferOffset offset;
         void *target;
         Relocation::Kind kind;
-        void fixOffset(ARMBuffer &m_buffer) {
-            offset = BufferOffset(offset.getOffset() + m_buffer.poolSizeBefore(offset.getOffset()));
-        }
-        RelativePatch(BufferOffset offset, void *target, Relocation::Kind kind)
-          : offset(offset),
-            target(target),
-            kind(kind)
+        RelativePatch(void *target, Relocation::Kind kind)
+            : target(target), kind(kind)
         { }
     };
 
@@ -1292,7 +1275,7 @@ class Assembler
     // dest parameter, a this object is still needed.  dummy always happens
     // to be null, but we shouldn't be looking at it in any case.
     static Assembler *dummy;
-    Pool pools_[4];
+    mozilla::Array<Pool, 4> pools_;
     Pool *int32Pool;
     Pool *doublePool;
 
@@ -1322,7 +1305,7 @@ class Assembler
         // Set up the forwards 32 bit region
         new (int32Pool) Pool (4096, 4, 4, 8, 4, m_buffer.LifoAlloc_, false, true, &pools_[3]);
         for (int i = 0; i < 4; i++) {
-            if (pools_[i].poolData == NULL) {
+            if (pools_[i].poolData == nullptr) {
                 m_buffer.fail_oom();
                 return;
             }
@@ -1368,7 +1351,7 @@ class Assembler
 
     static uintptr_t getPointer(uint8_t *);
     template <class Iter>
-    static const uint32_t * getPtr32Target(Iter *iter, Register *dest = NULL, RelocStyle *rs = NULL);
+    static const uint32_t * getPtr32Target(Iter *iter, Register *dest = nullptr, RelocStyle *rs = nullptr);
 
     bool oom() const;
 
@@ -1385,6 +1368,12 @@ class Assembler
     void copyPreBarrierTable(uint8_t *dest);
 
     bool addCodeLabel(CodeLabel label);
+    size_t numCodeLabels() const {
+        return codeLabels_.length();
+    }
+    CodeLabel codeLabel(size_t i) {
+        return codeLabels_[i];
+    }
 
     // Size of the instruction stream, in bytes.
     size_t size() const;
@@ -1397,13 +1386,13 @@ class Assembler
     size_t bytesNeeded() const;
 
     // Write a blob of binary into the instruction stream *OR*
-    // into a destination address. If dest is NULL (the default), then the
+    // into a destination address. If dest is nullptr (the default), then the
     // instruction gets written into the instruction stream. If dest is not null
     // it is interpreted as a pointer to the location that we want the
     // instruction to be written.
-    BufferOffset writeInst(uint32_t x, uint32_t *dest = NULL);
+    BufferOffset writeInst(uint32_t x, uint32_t *dest = nullptr);
     // A static variant for the cases where we don't want to have an assembler
-    // object at all. Normally, you would use the dummy (NULL) object.
+    // object at all. Normally, you would use the dummy (nullptr) object.
     static void writeInstStatic(uint32_t x, uint32_t *dest);
 
   public:
@@ -1412,10 +1401,10 @@ class Assembler
     BufferOffset align(int alignment);
     BufferOffset as_nop();
     BufferOffset as_alu(Register dest, Register src1, Operand2 op2,
-                ALUOp op, SetCond_ sc = NoSetCond, Condition c = Always, Instruction *instdest = NULL);
+                ALUOp op, SetCond_ sc = NoSetCond, Condition c = Always, Instruction *instdest = nullptr);
 
     BufferOffset as_mov(Register dest,
-                Operand2 op2, SetCond_ sc = NoSetCond, Condition c = Always, Instruction *instdest = NULL);
+                Operand2 op2, SetCond_ sc = NoSetCond, Condition c = Always, Instruction *instdest = nullptr);
     BufferOffset as_mvn(Register dest, Operand2 op2,
                 SetCond_ sc = NoSetCond, Condition c = Always);
     // logical operations
@@ -1453,8 +1442,8 @@ class Assembler
     // Not quite ALU worthy, but useful none the less:
     // These also have the isue of these being formatted
     // completly differently from the standard ALU operations.
-    BufferOffset as_movw(Register dest, Imm16 imm, Condition c = Always, Instruction *pos = NULL);
-    BufferOffset as_movt(Register dest, Imm16 imm, Condition c = Always, Instruction *pos = NULL);
+    BufferOffset as_movw(Register dest, Imm16 imm, Condition c = Always, Instruction *pos = nullptr);
+    BufferOffset as_movt(Register dest, Imm16 imm, Condition c = Always, Instruction *pos = nullptr);
 
     BufferOffset as_genmul(Register d1, Register d2, Register rm, Register rn,
                    MULOp op, SetCond_ sc, Condition c = Always);
@@ -1474,28 +1463,35 @@ class Assembler
                 SetCond_ sc = NoSetCond, Condition c = Always);
     BufferOffset as_smlal(Register dest1, Register dest2, Register src1, Register src2,
                 SetCond_ sc = NoSetCond, Condition c = Always);
+
+    BufferOffset as_sdiv(Register dest, Register num, Register div, Condition c = Always);
+    BufferOffset as_udiv(Register dest, Register num, Register div, Condition c = Always);
+
     // Data transfer instructions: ldr, str, ldrb, strb.
     // Using an int to differentiate between 8 bits and 32 bits is
     // overkill, but meh
     BufferOffset as_dtr(LoadStore ls, int size, Index mode,
-                Register rt, DTRAddr addr, Condition c = Always, uint32_t *dest = NULL);
+                Register rt, DTRAddr addr, Condition c = Always, uint32_t *dest = nullptr);
     // Handles all of the other integral data transferring functions:
     // ldrsb, ldrsh, ldrd, etc.
     // size is given in bits.
     BufferOffset as_extdtr(LoadStore ls, int size, bool IsSigned, Index mode,
-                   Register rt, EDtrAddr addr, Condition c = Always, uint32_t *dest = NULL);
+                   Register rt, EDtrAddr addr, Condition c = Always, uint32_t *dest = nullptr);
 
     BufferOffset as_dtm(LoadStore ls, Register rn, uint32_t mask,
                 DTMMode mode, DTMWriteBack wb, Condition c = Always);
     //overwrite a pool entry with new data.
     void as_WritePoolEntry(Instruction *addr, Condition c, uint32_t data);
     // load a 32 bit immediate from a pool into a register
-    BufferOffset as_Imm32Pool(Register dest, uint32_t value, ARMBuffer::PoolEntry *pe = NULL, Condition c = Always);
+    BufferOffset as_Imm32Pool(Register dest, uint32_t value, Condition c = Always);
     // make a patchable jump that can target the entire 32 bit address space.
-    BufferOffset as_BranchPool(uint32_t value, RepatchLabel *label, ARMBuffer::PoolEntry *pe = NULL, Condition c = Always);
+    BufferOffset as_BranchPool(uint32_t value, RepatchLabel *label, ARMBuffer::PoolEntry *pe = nullptr, Condition c = Always);
 
     // load a 64 bit floating point immediate from a pool into a register
-    BufferOffset as_FImm64Pool(VFPRegister dest, double value, ARMBuffer::PoolEntry *pe = NULL, Condition c = Always);
+    BufferOffset as_FImm64Pool(VFPRegister dest, double value, Condition c = Always);
+    // load a 32 bit floating point immediate from a pool into a register
+    BufferOffset as_FImm32Pool(VFPRegister dest, float value, Condition c = Always);
+
     // Control flow stuff:
 
     // bx can *only* branch to a register
@@ -1536,7 +1532,7 @@ class Assembler
         isSingle = 0 << 8
     };
 
-    BufferOffset writeVFPInst(vfp_size sz, uint32_t blob, uint32_t *dest=NULL);
+    BufferOffset writeVFPInst(vfp_size sz, uint32_t blob, uint32_t *dest=nullptr);
     // Unityped variants: all registers hold the same (ieee754 single/double)
     // notably not included are vcvt; vmov vd, #imm; vmov rt, vn.
     BufferOffset as_vfp_float(VFPRegister vd, VFPRegister vn, VFPRegister vm,
@@ -1608,7 +1604,7 @@ class Assembler
     /* xfer between VFP and memory*/
     BufferOffset as_vdtr(LoadStore ls, VFPRegister vd, VFPAddr addr,
                  Condition c = Always /* vfp doesn't have a wb option*/,
-                 uint32_t *dest = NULL);
+                 uint32_t *dest = nullptr);
 
     // VFP's ldm/stm work differently from the standard arm ones.
     // You can only transfer a range
@@ -1630,8 +1626,13 @@ class Assembler
     void retarget(Label *label, Label *target);
     // I'm going to pretend this doesn't exist for now.
     void retarget(Label *label, void *target, Relocation::Kind reloc);
-    //    void Bind(IonCode *code, AbsoluteLabel *label, const void *address);
+
     void Bind(uint8_t *rawCode, AbsoluteLabel *label, const void *address);
+
+    // See Bind
+    size_t labelOffsetToPatchOffset(size_t offset) {
+        return actualOffset(offset);
+    }
 
     void call(Label *label);
     void call(void *target);
@@ -1639,13 +1640,13 @@ class Assembler
     void as_bkpt();
 
   public:
-    static void TraceJumpRelocations(JSTracer *trc, IonCode *code, CompactBufferReader &reader);
-    static void TraceDataRelocations(JSTracer *trc, IonCode *code, CompactBufferReader &reader);
+    static void TraceJumpRelocations(JSTracer *trc, JitCode *code, CompactBufferReader &reader);
+    static void TraceDataRelocations(JSTracer *trc, JitCode *code, CompactBufferReader &reader);
 
   protected:
-    void addPendingJump(BufferOffset src, void *target, Relocation::Kind kind) {
-        enoughMemory_ &= jumps_.append(RelativePatch(src, target, kind));
-        if (kind == Relocation::IONCODE)
+    void addPendingJump(BufferOffset src, ImmPtr target, Relocation::Kind kind) {
+        enoughMemory_ &= jumps_.append(RelativePatch(target.value, kind));
+        if (kind == Relocation::JITCODE)
             writeRelocation(src);
     }
 
@@ -1686,7 +1687,7 @@ class Assembler
         JS_ASSERT(rn.code() > dtmLastReg);
         dtmRegBitField |= 1 << rn.code();
         if (dtmLoadStore == IsLoad && rn.code() == 13 && dtmBase.code() == 13) {
-            JS_ASSERT("ARM Spec says this is invalid");
+            MOZ_ASSUME_UNREACHABLE("ARM Spec says this is invalid");
         }
     }
     void finishDataTransfer() {
@@ -1787,13 +1788,15 @@ class Assembler
     static uint32_t patchWrite_NearCallSize();
     static uint32_t nopSize() { return 4; }
     static void patchWrite_NearCall(CodeLocationLabel start, CodeLocationLabel toCall);
-    static void patchDataWithValueCheck(CodeLocationLabel label, ImmWord newValue,
-                                        ImmWord expectedValue);
+    static void patchDataWithValueCheck(CodeLocationLabel label, PatchedImmPtr newValue,
+                                        PatchedImmPtr expectedValue);
+    static void patchDataWithValueCheck(CodeLocationLabel label, ImmPtr newValue,
+                                        ImmPtr expectedValue);
     static void patchWrite_Imm32(CodeLocationLabel label, Imm32 imm);
     static uint32_t alignDoubleArg(uint32_t offset) {
         return (offset+1)&~1;
     }
-    static uint8_t *nextInstruction(uint8_t *instruction, uint32_t *count = NULL);
+    static uint8_t *nextInstruction(uint8_t *instruction, uint32_t *count = nullptr);
     // Toggle a jmp or cmp emitted by toggledJump().
 
     static void ToggleToJmp(CodeLocationLabel inst_);
@@ -1803,7 +1806,9 @@ class Assembler
 
     static void updateBoundsCheck(uint32_t logHeapSize, Instruction *inst);
     void processCodeLabels(uint8_t *rawCode);
-
+    bool bailed() {
+        return m_buffer.bail();
+    }
 }; // Assembler
 
 // An Instruction is a structure for both encoding and decoding any and all ARM instructions.
@@ -2087,11 +2092,10 @@ class InstructionIterator {
 static const uint32_t NumIntArgRegs = 4;
 static const uint32_t NumFloatArgRegs = 8;
 
-#ifdef JS_CPU_ARM_HARDFP
 static inline bool
 GetIntArgReg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register *out)
 {
-   if (usedIntArgs >= NumIntArgRegs)
+    if (usedIntArgs >= NumIntArgRegs)
         return false;
     *out = Register::FromCode(usedIntArgs);
     return true;
@@ -2117,9 +2121,26 @@ GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register *out)
     return true;
 }
 
+
+#if !defined(JS_CODEGEN_ARM_HARDFP) || defined(JS_ARM_SIMULATOR)
+
+static inline uint32_t
+GetArgStackDisp(uint32_t arg)
+{
+    JS_ASSERT(!useHardFpABI());
+    JS_ASSERT(arg >= NumIntArgRegs);
+    return (arg - NumIntArgRegs) * sizeof(intptr_t);
+}
+
+#endif
+
+
+#if defined(JS_CODEGEN_ARM_HARDFP) || defined(JS_ARM_SIMULATOR)
+
 static inline bool
 GetFloatArgReg(uint32_t usedIntArgs, uint32_t usedFloatArgs, FloatRegister *out)
 {
+    JS_ASSERT(useHardFpABI());
     if (usedFloatArgs >= NumFloatArgRegs)
         return false;
     *out = FloatRegister::FromCode(usedFloatArgs);
@@ -2129,17 +2150,30 @@ GetFloatArgReg(uint32_t usedIntArgs, uint32_t usedFloatArgs, FloatRegister *out)
 static inline uint32_t
 GetIntArgStackDisp(uint32_t usedIntArgs, uint32_t usedFloatArgs, uint32_t *padding)
 {
+    JS_ASSERT(useHardFpABI());
     JS_ASSERT(usedIntArgs >= NumIntArgRegs);
     uint32_t doubleSlots = Max(0, (int32_t)usedFloatArgs - (int32_t)NumFloatArgRegs);
     doubleSlots *= 2;
     int intSlots = usedIntArgs - NumIntArgRegs;
-    return (intSlots + doubleSlots + *padding) * STACK_SLOT_SIZE;
+    return (intSlots + doubleSlots + *padding) * sizeof(intptr_t);
 }
 
 static inline uint32_t
-GetFloatArgStackDisp(uint32_t usedIntArgs, uint32_t usedFloatArgs, uint32_t *padding)
+GetFloat32ArgStackDisp(uint32_t usedIntArgs, uint32_t usedFloatArgs, uint32_t *padding)
 {
+    JS_ASSERT(useHardFpABI());
+    JS_ASSERT(usedFloatArgs >= NumFloatArgRegs);
+    uint32_t intSlots = 0;
+    if (usedIntArgs > NumIntArgRegs)
+        intSlots = usedIntArgs - NumIntArgRegs;
+    uint32_t float32Slots = usedFloatArgs - NumFloatArgRegs;
+    return (intSlots + float32Slots + *padding) * sizeof(intptr_t);
+}
 
+static inline uint32_t
+GetDoubleArgStackDisp(uint32_t usedIntArgs, uint32_t usedFloatArgs, uint32_t *padding)
+{
+    JS_ASSERT(useHardFpABI());
     JS_ASSERT(usedFloatArgs >= NumFloatArgRegs);
     uint32_t intSlots = 0;
     if (usedIntArgs > NumIntArgRegs) {
@@ -2149,47 +2183,13 @@ GetFloatArgStackDisp(uint32_t usedIntArgs, uint32_t usedFloatArgs, uint32_t *pad
     }
     uint32_t doubleSlots = usedFloatArgs - NumFloatArgRegs;
     doubleSlots *= 2;
-    return (intSlots + doubleSlots + *padding) * STACK_SLOT_SIZE;
-}
-#else
-static inline bool
-GetIntArgReg(uint32_t arg, uint32_t floatArg, Register *out)
-{
-    if (arg < NumIntArgRegs) {
-        *out = Register::FromCode(arg);
-        return true;
-    }
-    return false;
-}
-
-// Get a register in which we plan to put a quantity that will be used as an
-// integer argument.  This differs from GetIntArgReg in that if we have no more
-// actual argument registers to use we will fall back on using whatever
-// CallTempReg* don't overlap the argument registers, and only fail once those
-// run out too.
-static inline bool
-GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register *out)
-{
-    if (GetIntArgReg(usedIntArgs, usedFloatArgs, out))
-        return true;
-    // Unfortunately, we have to assume things about the point at which
-    // GetIntArgReg returns false, because we need to know how many registers it
-    // can allocate.
-    usedIntArgs -= NumIntArgRegs;
-    if (usedIntArgs >= NumCallTempNonArgRegs)
-        return false;
-    *out = CallTempNonArgRegs[usedIntArgs];
-    return true;
-}
-
-static inline uint32_t
-GetArgStackDisp(uint32_t arg)
-{
-    JS_ASSERT(arg >= NumIntArgRegs);
-    return (arg - NumIntArgRegs) * STACK_SLOT_SIZE;
+    return (intSlots + doubleSlots + *padding) * sizeof(intptr_t);
 }
 
 #endif
+
+
+
 class DoubleEncoder {
     uint32_t rep(bool b, uint32_t count) {
         uint32_t ret = 0;
@@ -2197,6 +2197,7 @@ class DoubleEncoder {
             ret = (ret << 1) | b;
         return ret;
     }
+
     uint32_t encode(uint8_t value) {
         //ARM ARM "VFP modified immediate constants"
         // aBbbbbbb bbcdefgh 000...
@@ -2224,10 +2225,10 @@ class DoubleEncoder {
           : dblTop(dblTop_), data(data_)
         { }
     };
-    DoubleEntry table [256];
 
-    // grumble singleton, grumble
-    static DoubleEncoder _this;
+    mozilla::Array<DoubleEntry, 256> table;
+
+  public:
     DoubleEncoder()
     {
         for (int i = 0; i < 256; i++) {
@@ -2235,11 +2236,10 @@ class DoubleEncoder {
         }
     }
 
-  public:
-    static bool lookup(uint32_t top, datastore::Imm8VFPImmData *ret) {
+    bool lookup(uint32_t top, datastore::Imm8VFPImmData *ret) {
         for (int i = 0; i < 256; i++) {
-            if (_this.table[i].dblTop == top) {
-                *ret = _this.table[i].data;
+            if (table[i].dblTop == top) {
+                *ret = table[i].data;
                 return true;
             }
         }

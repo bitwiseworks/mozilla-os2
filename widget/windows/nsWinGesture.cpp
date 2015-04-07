@@ -11,10 +11,11 @@
 #include "nsWinGesture.h"
 #include "nsUXThemeData.h"
 #include "nsIDOMSimpleGestureEvent.h"
-#include "nsGUIEvent.h"
 #include "nsIDOMWheelEvent.h"
 #include "mozilla/Constants.h"
+#include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/TouchEvents.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -23,7 +24,7 @@ using namespace mozilla::widget;
 extern PRLogModuleInfo* gWindowsLog;
 #endif
 
-const PRUnichar nsWinGesture::kGestureLibraryName[] =  L"user32.dll";
+const wchar_t nsWinGesture::kGestureLibraryName[] =  L"user32.dll";
 HMODULE nsWinGesture::sLibraryHandle = nullptr;
 nsWinGesture::GetGestureInfoPtr nsWinGesture::getGestureInfo = nullptr;
 nsWinGesture::CloseGestureInfoHandlePtr nsWinGesture::closeGestureInfoHandle = nullptr;
@@ -118,7 +119,8 @@ bool nsWinGesture::InitLibrary()
 
 #define GCOUNT 5
 
-bool nsWinGesture::SetWinGestureSupport(HWND hWnd, nsGestureNotifyEvent::ePanDirection aDirection)
+bool nsWinGesture::SetWinGestureSupport(HWND hWnd,
+                     WidgetGestureNotifyEvent::ePanDirection aDirection)
 {
   if (!getGestureInfo)
     return false;
@@ -143,15 +145,15 @@ bool nsWinGesture::SetWinGestureSupport(HWND hWnd, nsGestureNotifyEvent::ePanDir
 
   if (gEnableSingleFingerPanEvents) {
 
-    if (aDirection == nsGestureNotifyEvent::ePanVertical ||
-        aDirection == nsGestureNotifyEvent::ePanBoth)
+    if (aDirection == WidgetGestureNotifyEvent::ePanVertical ||
+        aDirection == WidgetGestureNotifyEvent::ePanBoth)
     {
       config[2].dwWant  |= GC_PAN_WITH_SINGLE_FINGER_VERTICALLY;
       config[2].dwBlock -= GC_PAN_WITH_SINGLE_FINGER_VERTICALLY;
     }
 
-    if (aDirection == nsGestureNotifyEvent::ePanHorizontal ||
-        aDirection == nsGestureNotifyEvent::ePanBoth)
+    if (aDirection == WidgetGestureNotifyEvent::ePanHorizontal ||
+        aDirection == WidgetGestureNotifyEvent::ePanBoth)
     {
       config[2].dwWant  |= GC_PAN_WITH_SINGLE_FINGER_HORIZONTALLY;
       config[2].dwBlock -= GC_PAN_WITH_SINGLE_FINGER_HORIZONTALLY;
@@ -296,7 +298,8 @@ bool nsWinGesture::IsPanEvent(LPARAM lParam)
 /* Gesture event processing */
 
 bool
-nsWinGesture::ProcessGestureMessage(HWND hWnd, WPARAM wParam, LPARAM lParam, nsSimpleGestureEvent& evt)
+nsWinGesture::ProcessGestureMessage(HWND hWnd, WPARAM wParam, LPARAM lParam,
+                                    WidgetSimpleGestureEvent& evt)
 {
   GESTUREINFO gi;
 
@@ -564,7 +567,7 @@ nsWinGesture::PanFeedbackFinalize(HWND hWnd, bool endFeedback)
 }
 
 bool
-nsWinGesture::PanDeltaToPixelScroll(WheelEvent& aWheelEvent)
+nsWinGesture::PanDeltaToPixelScroll(WidgetWheelEvent& aWheelEvent)
 {
   aWheelEvent.deltaX = aWheelEvent.deltaY = aWheelEvent.deltaZ = 0.0;
   aWheelEvent.lineOrPageDeltaX = aWheelEvent.lineOrPageDeltaY = 0;
@@ -572,7 +575,7 @@ nsWinGesture::PanDeltaToPixelScroll(WheelEvent& aWheelEvent)
   aWheelEvent.refPoint.x = mPanRefPoint.x;
   aWheelEvent.refPoint.y = mPanRefPoint.y;
   aWheelEvent.deltaMode = nsIDOMWheelEvent::DOM_DELTA_PIXEL;
-  aWheelEvent.scrollType = WheelEvent::SCROLL_SYNCHRONOUSLY;
+  aWheelEvent.scrollType = WidgetWheelEvent::SCROLL_SYNCHRONOUSLY;
   aWheelEvent.isPixelOnlyDevice = true;
 
   aWheelEvent.overflowDeltaX = 0.0;

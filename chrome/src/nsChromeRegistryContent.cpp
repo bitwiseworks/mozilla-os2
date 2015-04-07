@@ -4,15 +4,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "RegistryMessageUtils.h"
-#include "nsChromeRegistry.h"
 #include "nsChromeRegistryContent.h"
 #include "nsString.h"
 #include "nsNetUtil.h"
-#include "nsResProtocolHandler.h"
+#include "nsIResProtocolHandler.h"
 
 nsChromeRegistryContent::nsChromeRegistryContent()
 {
-  mPackagesHash.Init();
 }
 
 void
@@ -224,7 +222,7 @@ nsChromeRegistryContent::GetSelectedLocale(const nsACString& aPackage,
   
 NS_IMETHODIMP
 nsChromeRegistryContent::Observe(nsISupports* aSubject, const char* aTopic,
-                                 const PRUnichar* aData)
+                                 const char16_t* aData)
 {
   CONTENT_NOT_IMPLEMENTED();
 }

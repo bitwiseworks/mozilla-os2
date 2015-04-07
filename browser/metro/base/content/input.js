@@ -12,7 +12,7 @@ Components.utils.import("resource://gre/modules/Geometry.jsm");
 // maximum drag distance in inches while axis locking can still be reverted
 const kAxisLockRevertThreshold = 0.8;
 
-// Same as NS_EVENT_STATE_ACTIVE from nsIEventStateManager.h
+// Same as NS_EVENT_STATE_ACTIVE from mozilla/EventStates.h
 const kStateActive = 0x00000001;
 
 // After a drag begins, kinetic panning is stopped if the drag doesn't become
@@ -27,13 +27,6 @@ const kMaxVelocity = 6;
  * prefs
  */
 
-// A debug pref that when set makes us treat all precise pointer input
-// as imprecise touch input. For debugging purposes only. Note there are
-// subtle event sequencing differences in this feature when running on
-// the desktop using the win32 widget backend and the winrt widget backend
-// in metro. Fixing something in this mode does not insure the bug is
-// in metro.
-const kDebugMouseInputPref = "metro.debug.treatmouseastouch";
 // Display rects around selection ranges. Useful in debugging
 // selection problems.
 const kDebugSelectionDisplayPref = "metro.debug.selection.displayRanges";
@@ -42,6 +35,7 @@ const kDebugSelectionDisplayPref = "metro.debug.selection.displayRanges";
 const kDebugSelectionDumpPref = "metro.debug.selection.dumpRanges";
 // Dump message manager event traffic for selection.
 const kDebugSelectionDumpEvents = "metro.debug.selection.dumpEvents";
+const kAsyncPanZoomEnabled = "layers.async-pan-zoom.enabled"
 
 /**
  * TouchModule
@@ -92,7 +86,8 @@ var TouchModule = {
 
     // capture phase events
     window.addEventListener("CancelTouchSequence", this, true);
-    window.addEventListener("dblclick", this, true);
+    window.addEventListener("keydown", this, true);
+    window.addEventListener("MozMouseHittest", this, true);
 
     // bubble phase
     window.addEventListener("contextmenu", this, false);
@@ -100,16 +95,9 @@ var TouchModule = {
     window.addEventListener("touchmove", this, false);
     window.addEventListener("touchend", this, false);
 
-    try {
-      this._treatMouseAsTouch = Services.prefs.getBoolPref(kDebugMouseInputPref);
-    } catch (e) {}
+    Services.obs.addObserver(this, "Gesture:SingleTap", false);
+    Services.obs.addObserver(this, "Gesture:DoubleTap", false);
   },
-
-  /*
-   * Mouse input source tracking
-   */
-
-  _treatMouseAsTouch: false,
 
   /*
    * Events
@@ -141,24 +129,66 @@ var TouchModule = {
           case "touchend":
             this._onTouchEnd(aEvent);
             break;
-          case "dblclick":
-            // XXX This will get picked up somewhere below us for "double tap to zoom"
-            // once we get omtc and the apzc. Currently though dblclick is delivered to
-            // content and triggers selection of text, so fire up the SelectionHelperUI
-            // once selection is present.
-            if (!InputSourceHelper.isPrecise &&
-                !SelectionHelperUI.isActive &&
-                !FindHelperUI.isActive) {
-              setTimeout(function () {
-                SelectionHelperUI.attachEditSession(Browser.selectedTab.browser,
-                                                    aEvent.clientX, aEvent.clientY);
-              }, 50);
+          case "keydown":
+            this._handleKeyDown(aEvent);
+            break;
+          case "MozMouseHittest":
+            // Used by widget to hit test chrome vs content. Make sure the XUl scrollbars
+            // are counted as "chrome". Since the XUL scrollbars have sub-elements we walk
+            // the parent chain to ensure we catch all of those as well.
+            let onScrollbar = false;
+            for (let node = aEvent.originalTarget; node instanceof XULElement; node = node.parentNode) {
+              if (node.tagName == 'scrollbar') {
+                onScrollbar = true;
+                break;
+              }
             }
+            if (onScrollbar || aEvent.target.ownerDocument == document) {
+              aEvent.preventDefault();
+            }
+            aEvent.stopPropagation();
             break;
         }
       }
     }
   },
+
+  _handleKeyDown: function _handleKeyDown(aEvent) {
+    const TABKEY = 9;
+    if (aEvent.keyCode == TABKEY && !InputSourceHelper.isPrecise) {
+      if (Util.isEditable(aEvent.target) &&
+          aEvent.target.selectionStart != aEvent.target.selectionEnd) {
+        SelectionHelperUI.closeEditSession(false);
+      }
+      setTimeout(function() {
+        let element = Browser.selectedBrowser.contentDocument.activeElement;
+        // We only want to attach monocles if we have an input, text area,
+        // there is selection, and the target element changed.
+        // Sometimes the target element won't change even though selection is
+        // cleared because of focus outside the browser.
+        if (Util.isEditable(element) &&
+            !SelectionHelperUI.isActive &&
+            element.selectionStart != element.selectionEnd &&
+            // not e10s friendly
+            aEvent.target != element) {
+              let rect = element.getBoundingClientRect();
+              SelectionHelperUI.attachEditSession(Browser.selectedBrowser,
+                                                  rect.left + rect.width / 2,
+                                                  rect.top + rect.height / 2);
+        }
+      }, 50);
+    }
+  },
+
+  observe: function BrowserUI_observe(aSubject, aTopic, aData) {
+    switch (aTopic) {
+      case "Gesture:SingleTap":
+      case "Gesture:DoubleTap":
+        Browser.selectedBrowser.messageManager.sendAsyncMessage(aTopic, JSON.parse(aData));
+        break;
+    }
+  },
+
 
   sample: function sample(aTimeStamp) {
     this._waitingForPaint = false;
@@ -181,15 +211,6 @@ var TouchModule = {
   },
 
   _onContextMenu: function _onContextMenu(aEvent) {
-    // Special case when running on the desktop, fire off
-    // a edge ui event when we get the contextmenu event.
-    if (this._treatMouseAsTouch) {
-      let event = document.createEvent("Events");
-      event.initEvent("MozEdgeUICompleted", true, false);
-      window.dispatchEvent(event);
-      return;
-    }
-
     // bug 598965 - chrome UI should stop to be pannable once the
     // context menu has appeared.
     if (ContextMenuUI.popupState) {
@@ -235,6 +256,13 @@ var TouchModule = {
       return;
     }
 
+    // Don't allow kinetic panning if APZC is enabled and the pan element is the deck
+    let deck = document.getElementById("browsers");
+    if (Services.prefs.getBoolPref(kAsyncPanZoomEnabled) &&
+        this._targetScrollbox == deck) {
+      return;
+    }
+
     // XXX shouldn't dragger always be valid here?
     if (dragger) {
       let draggable = dragger.isDraggable(targetScrollbox, targetScrollInterface);
@@ -272,8 +300,9 @@ var TouchModule = {
     if (this._isCancellable) {
       // only the first touchmove is cancellable.
       this._isCancellable = false;
-      if (aEvent.defaultPrevented)
+      if (aEvent.defaultPrevented) {
         this._isCancelled = true;
+      }
     }
 
     if (this._isCancelled)
@@ -313,8 +342,6 @@ var TouchModule = {
 
         // Let everyone know when mousemove begins a pan
         if (!oldIsPan && dragData.isPan()) {
-          //this._longClickTimeout.clear();
-
           let event = document.createEvent("Events");
           event.initEvent("PanBegin", true, false);
           this._targetScrollbox.dispatchEvent(event);
@@ -354,8 +381,14 @@ var TouchModule = {
     if (dragData.isPan()) {
       if (Date.now() - this._dragStartTime > kStopKineticPanOnDragTimeout)
         this._kinetic._velocity.set(0, 0);
-      // Start kinetic pan.
-      this._kinetic.start();
+
+      // Start kinetic pan if we aren't using async pan zoom or the scroll
+      // element is not browsers.
+      let deck = document.getElementById("browsers");
+      if (!Services.prefs.getBoolPref(kAsyncPanZoomEnabled) ||
+          this._targetScrollbox != deck) {
+        this._kinetic.start();
+      }
     } else {
       this._kinetic.end();
       if (this._dragger)
@@ -433,7 +466,8 @@ var ScrollUtils = {
   getScrollboxFromElement: function getScrollboxFromElement(elem) {
     let scrollbox = null;
     let qinterface = null;
-    // if element is content, get the browser scroll interface
+
+    // if element is content or the startui page, get the browser scroll interface
     if (elem.ownerDocument == Browser.selectedBrowser.contentDocument) {
       elem = Browser.selectedBrowser;
     }
@@ -912,58 +946,6 @@ KineticController.prototype = {
 };
 
 
-/**
- * Input module for basic scrollwheel input.  Currently just zooms the browser
- * view accordingly.
- */
-var ScrollwheelModule = {
-  _pendingEvent : 0,
-  _container: null,
-  
-  init: function init(container) {
-    this._container = container;
-    window.addEventListener("MozPrecisePointer", this, true);
-    window.addEventListener("MozImprecisePointer", this, true);
-  },
-
-  handleEvent: function handleEvent(aEvent) {
-    switch(aEvent.type) {
-      case "DOMMouseScroll":
-      case "MozMousePixelScroll":
-        this._onScroll(aEvent);
-        break;
-      case "MozPrecisePointer":
-        this._container.removeEventListener("DOMMouseScroll", this, true);
-        this._container.removeEventListener("MozMousePixelScroll", this, true);
-        break;
-      case "MozImprecisePointer":
-        this._container.addEventListener("DOMMouseScroll", this, true);
-        this._container.addEventListener("MozMousePixelScroll", this, true);
-        break;
-    };
-  },
-
-  _onScroll: function _onScroll(aEvent) {
-    // If events come too fast we don't want their handling to lag the
-    // zoom in/zoom out execution. With the timeout the zoom is executed
-    // as we scroll.
-    if (this._pendingEvent)
-      clearTimeout(this._pendingEvent);
-
-    this._pendingEvent = setTimeout(function handleEventImpl(self) {
-      self._pendingEvent = 0;
-      Browser.zoom(aEvent.detail);
-    }, 0, this);
-
-    aEvent.stopPropagation();
-    aEvent.preventDefault();
-  },
-
-  /* We don't have much state to reset if we lose event focus */
-  cancelPending: function cancelPending() {}
-};
-
-
 /*
  * Simple gestures support
  */
@@ -973,19 +955,6 @@ var GestureModule = {
 
   init: function init() {
     window.addEventListener("MozSwipeGesture", this, true);
-    /*
-    window.addEventListener("MozMagnifyGestureStart", this, true);
-    window.addEventListener("MozMagnifyGestureUpdate", this, true);
-    window.addEventListener("MozMagnifyGesture", this, true);
-    */
-    window.addEventListener("CancelTouchSequence", this, true);
-  },
-
-  _initMouseEventFromGestureEvent: function _initMouseEventFromGestureEvent(aDestEvent, aSrcEvent, aType, aCanBubble, aCancellable) {
-    aDestEvent.initMouseEvent(aType, aCanBubble, aCancellable, window, null,
-                              aSrcEvent.screenX, aSrcEvent.screenY, aSrcEvent.clientX, aSrcEvent.clientY,
-                              aSrcEvent.ctrlKey, aSrcEvent.altKey, aSrcEvent.shiftKey, aSrcEvent.metaKey,
-                              aSrcEvent.button, aSrcEvent.relatedTarget);
   },
 
   /*
@@ -1011,40 +980,12 @@ var GestureModule = {
             aEvent.target.dispatchEvent(event);
           }
           break;
-
-        // Magnify currently doesn't work for Win8 (bug 593168)
-        /*
-        case "MozMagnifyGestureStart":
-          this._pinchStart(aEvent);
-          break;
-
-        case "MozMagnifyGestureUpdate":
-          this._pinchUpdate(aEvent);
-          break;
-
-        case "MozMagnifyGesture":
-          this._pinchEnd(aEvent);
-          break;
-        */
-
-        case "CancelTouchSequence":
-          this.cancelPending();
-          break;
       }
     } catch (e) {
       Util.dumpLn("Error while handling gesture event", aEvent.type,
                   "\nPlease report error at:", e);
       Cu.reportError(e);
     }
-  },
-
-  /*
-   * Event handlers
-   */
-
-  cancelPending: function cancelPending() {
-    if (AnimatedZoom.isZooming())
-      AnimatedZoom.finish();
   },
 
   _onSwipe: function _onSwipe(aEvent) {
@@ -1063,92 +1004,6 @@ var GestureModule = {
      CommandUpdater.doCommand(aId);
      return true;
   },
-
-  _pinchStart: function _pinchStart(aEvent) {
-    if (AnimatedZoom.isZooming())
-      return;
-    // Cancel other touch sequence events, and be courteous by allowing them
-    // to say no.
-    let event = document.createEvent("Events");
-    event.initEvent("CancelTouchSequence", true, true);
-    let success = aEvent.target.dispatchEvent(event);
-
-    if (!success || !Browser.selectedTab.allowZoom)
-      return;
-
-    AnimatedZoom.start();
-    this._pinchDelta = 0;
-
-    //this._ignoreNextUpdate = true; // first update gives useless, huge delta
-
-    // cache gesture limit values
-    this._maxGrowth = Services.prefs.getIntPref("browser.ui.pinch.maxGrowth");
-    this._maxShrink = Services.prefs.getIntPref("browser.ui.pinch.maxShrink");
-    this._scalingFactor = Services.prefs.getIntPref("browser.ui.pinch.scalingFactor");
-
-    // Adjust the client coordinates to be relative to the browser element's top left corner.
-    this._browserBCR = getBrowser().getBoundingClientRect();
-    this._pinchStartX = aEvent.clientX - this._browserBCR.left;
-    this._pinchStartY = aEvent.clientY - this._browserBCR.top;
-  },
-
-  _pinchUpdate: function _pinchUpdate(aEvent) {
-    if (!AnimatedZoom.isZooming() || !aEvent.delta)
-      return;
-
-    let delta = 0;
-    let browser = AnimatedZoom.browser;
-    let oldScale = browser.scale;
-    let bcr = this._browserBCR;
-
-    // Accumulate pinch delta. Small changes are just jitter.
-    this._pinchDelta += aEvent.delta;
-    if (Math.abs(this._pinchDelta) >= oldScale) {
-      delta = this._pinchDelta;
-      this._pinchDelta = 0;
-    }
-
-    // decrease the pinchDelta min/max values to limit zooming out/in speed
-    delta = Util.clamp(delta, -this._maxShrink, this._maxGrowth);
-
-    let newScale = Browser.selectedTab.clampZoomLevel(oldScale * (1 + delta / this._scalingFactor));
-    let startScale = AnimatedZoom.startScale;
-    let scaleRatio = startScale / newScale;
-    let cX = aEvent.clientX - bcr.left;
-    let cY = aEvent.clientY - bcr.top;
-
-    // Calculate the new zoom rect.
-    let rect = AnimatedZoom.zoomFrom.clone();
-    rect.translate(this._pinchStartX - cX + (1-scaleRatio) * cX * rect.width / bcr.width,
-                   this._pinchStartY - cY + (1-scaleRatio) * cY * rect.height / bcr.height);
-
-    rect.width *= scaleRatio;
-    rect.height *= scaleRatio;
-
-    this.translateInside(rect, new Rect(0, 0, browser.contentDocumentWidth * startScale,
-                                              browser.contentDocumentHeight * startScale));
-
-    // redraw zoom canvas according to new zoom rect
-    AnimatedZoom.updateTo(rect);
-  },
-
-  _pinchEnd: function _pinchEnd(aEvent) {
-    if (AnimatedZoom.isZooming())
-      AnimatedZoom.finish();
-  },
-
-  /**
-   * Ensure r0 is inside r1, if possible. Preserves w, h.
-   * Same as Rect.prototype.translateInside except it aligns the top left
-   * instead of the bottom right if r0 is bigger than r1.
-   */
-  translateInside: function translateInside(r0, r1) {
-    let offsetX = (r0.left < r1.left ? r1.left - r0.left :
-        (r0.right > r1.right ? Math.max(r1.left - r0.left, r1.right - r0.right) : 0));
-    let offsetY = (r0.top < r1.top ? r1.top - r0.top :
-        (r0.bottom > r1.bottom ? Math.max(r1.top - r0.top, r1.bottom - r0.bottom) : 0));
-    return r0.translate(offsetX, offsetY);
-  }
 };
 
 /**
@@ -1157,49 +1012,42 @@ var GestureModule = {
  */
 var InputSourceHelper = {
   isPrecise: false,
-  treatMouseAsTouch: false,
 
   init: function ish_init() {
-    // debug feature, make all input imprecise
-    try {
-      this.treatMouseAsTouch = Services.prefs.getBoolPref(kDebugMouseInputPref);
-    } catch (e) {}
-    if (!this.treatMouseAsTouch) {
-      window.addEventListener("mousemove", this, true);
-      window.addEventListener("mousedown", this, true);
-    }
+    Services.obs.addObserver(this, "metro_precise_input", false);
+    Services.obs.addObserver(this, "metro_imprecise_input", false);
   },
-  
-  handleEvent: function ish_handleEvent(aEvent) {
-    switch (aEvent.mozInputSource) {
-      case Ci.nsIDOMMouseEvent.MOZ_SOURCE_MOUSE:
-      case Ci.nsIDOMMouseEvent.MOZ_SOURCE_PEN:
-      case Ci.nsIDOMMouseEvent.MOZ_SOURCE_ERASER:
-      case Ci.nsIDOMMouseEvent.MOZ_SOURCE_CURSOR:
-        if (!this.isPrecise && !this.treatMouseAsTouch) {
-          this.isPrecise = true;
-          this._fire("MozPrecisePointer");
-        }
-        break;
 
-      case Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH:
-        if (this.isPrecise) {
-          this.isPrecise = false;
-          this._fire("MozImprecisePointer");
-        }
+  _precise: function () {
+    if (!this.isPrecise) {
+      this.isPrecise = true;
+      this._fire("MozPrecisePointer");
+    }
+  },
+
+  _imprecise: function () {
+    if (this.isPrecise) {
+      this.isPrecise = false;
+      this._fire("MozImprecisePointer");
+    }
+  },
+
+  observe: function BrowserUI_observe(aSubject, aTopic, aData) {
+    switch (aTopic) {
+      case "metro_precise_input":
+        this._precise();
+        break;
+      case "metro_imprecise_input":
+        this._imprecise();
         break;
     }
   },
-  
+
   fireUpdate: function fireUpdate() {
-    if (this.treatMouseAsTouch) {
-      this._fire("MozImprecisePointer");
+    if (this.isPrecise) {
+      this._fire("MozPrecisePointer");
     } else {
-      if (this.isPrecise) {
-        this._fire("MozPrecisePointer");
-      } else {
-        this._fire("MozImprecisePointer");
-      }
+      this._fire("MozImprecisePointer");
     }
   },
 

@@ -5,8 +5,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
-#include "tests.h"
+#include "jsapi-tests/tests.h"
 
 BEGIN_TEST(testDefineProperty_bug564344)
 {
@@ -14,11 +13,11 @@ BEGIN_TEST(testDefineProperty_bug564344)
     EVAL("function f() {}\n"
          "var x = {p: f};\n"
          "x.p();  // brand x's scope\n"
-         "x;", x.address());
+         "x;", &x);
 
     JS::RootedObject obj(cx, JSVAL_TO_OBJECT(x));
     for (int i = 0; i < 2; i++)
-        CHECK(JS_DefineProperty(cx, obj, "q", JSVAL_VOID, NULL, NULL, JSPROP_SHARED));
+        CHECK(JS_DefineProperty(cx, obj, "q", JS::UndefinedHandleValue, JSPROP_SHARED));
     return true;
 }
 END_TEST(testDefineProperty_bug564344)

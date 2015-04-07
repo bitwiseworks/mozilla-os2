@@ -6,16 +6,20 @@
 #ifndef GFX_CanvasLayerComposite_H
 #define GFX_CanvasLayerComposite_H
 
-
-#include "mozilla/layers/LayerManagerComposite.h"
-#include "gfxASurface.h"
-#if defined(MOZ_WIDGET_GTK2) && !defined(MOZ_PLATFORM_MAEMO)
-#include "mozilla/X11Util.h"
-#endif
+#include "Layers.h"                     // for CanvasLayer, etc
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/layers/LayerManagerComposite.h"  // for LayerComposite, etc
+#include "mozilla/layers/LayersTypes.h"  // for LayerRenderState, etc
+#include "nsDebug.h"                    // for NS_RUNTIMEABORT
+#include "nsRect.h"                     // for nsIntRect
+#include "nscore.h"                     // for nsACString
+struct nsIntPoint;
 
 namespace mozilla {
 namespace layers {
 
+class CompositableHost;
 // Canvas layers use ImageHosts (but CanvasClients) because compositing a
 // canvas is identical to compositing an image.
 class ImageHost;
@@ -36,7 +40,7 @@ public:
 
   virtual LayerRenderState GetRenderState() MOZ_OVERRIDE;
 
-  virtual void SetCompositableHost(CompositableHost* aHost) MOZ_OVERRIDE;
+  virtual bool SetCompositableHost(CompositableHost* aHost) MOZ_OVERRIDE;
 
   virtual void Disconnect() MOZ_OVERRIDE
   {
@@ -44,8 +48,7 @@ public:
   }
 
   virtual Layer* GetLayer() MOZ_OVERRIDE;
-  virtual void RenderLayer(const nsIntPoint& aOffset,
-                           const nsIntRect& aClipRect) MOZ_OVERRIDE;
+  virtual void RenderLayer(const nsIntRect& aClipRect) MOZ_OVERRIDE;
 
   virtual void CleanupResources() MOZ_OVERRIDE;
 
@@ -55,15 +58,13 @@ public:
 
   void SetBounds(nsIntRect aBounds) { mBounds = aBounds; }
 
-#ifdef MOZ_LAYERS_HAVE_LOG
   virtual const char* Name() const MOZ_OVERRIDE { return "CanvasLayerComposite"; }
 
 protected:
   virtual nsACString& PrintInfo(nsACString& aTo, const char* aPrefix) MOZ_OVERRIDE;
-#endif
 
 private:
-  RefPtr<ImageHost> mImageHost;
+  RefPtr<CompositableHost> mImageHost;
 };
 
 } /* layers */

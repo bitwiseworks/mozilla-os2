@@ -14,7 +14,7 @@
 
 bool
 gfxDWriteShaper::ShapeText(gfxContext      *aContext,
-                           const PRUnichar *aText,
+                           const char16_t *aText,
                            uint32_t         aOffset,
                            uint32_t         aLength,
                            int32_t          aScript,
@@ -44,8 +44,9 @@ gfxDWriteShaper::ShapeText(gfxContext      *aContext,
      * in a single call, so we cannot exceed that limit.
      */
     UINT32 length = aLength;
+    char16ptr_t text = aText;
 
-    TextAnalysis analysis(aText, length, NULL, readingDirection);
+    TextAnalysis analysis(text, length, nullptr, readingDirection);
     TextAnalysis::Run *runHead;
     hr = analysis.GenerateResults(analyzer, &runHead);
 
@@ -66,10 +67,10 @@ trymoreglyphs:
     }
     maxGlyphs += 3 * length / 2 + 16;
 
-    nsAutoTArray<UINT16, 400> clusters;
-    nsAutoTArray<UINT16, 400> indices;
-    nsAutoTArray<DWRITE_SHAPING_TEXT_PROPERTIES, 400> textProperties;
-    nsAutoTArray<DWRITE_SHAPING_GLYPH_PROPERTIES, 400> glyphProperties;
+    AutoFallibleTArray<UINT16, 400> clusters;
+    AutoFallibleTArray<UINT16, 400> indices;
+    AutoFallibleTArray<DWRITE_SHAPING_TEXT_PROPERTIES, 400> textProperties;
+    AutoFallibleTArray<DWRITE_SHAPING_GLYPH_PROPERTIES, 400> glyphProperties;
     if (!clusters.SetLength(length) ||
         !indices.SetLength(maxGlyphs) || 
         !textProperties.SetLength(maxGlyphs) ||
@@ -80,10 +81,10 @@ trymoreglyphs:
 
     UINT32 actualGlyphs;
 
-    hr = analyzer->GetGlyphs(aText, length,
+    hr = analyzer->GetGlyphs(text, length,
             font->GetFontFace(), FALSE, 
             readingDirection == DWRITE_READING_DIRECTION_RIGHT_TO_LEFT,
-            &runHead->mScript, NULL, NULL, NULL, NULL, 0,
+            &runHead->mScript, nullptr, nullptr, nullptr, nullptr, 0,
             maxGlyphs, clusters.Elements(), textProperties.Elements(),
             indices.Elements(), glyphProperties.Elements(), &actualGlyphs);
 
@@ -97,8 +98,8 @@ trymoreglyphs:
     }
 
     WORD gID = indices[0];
-    nsAutoTArray<FLOAT, 400> advances;
-    nsAutoTArray<DWRITE_GLYPH_OFFSET, 400> glyphOffsets;
+    AutoFallibleTArray<FLOAT, 400> advances;
+    AutoFallibleTArray<DWRITE_GLYPH_OFFSET, 400> glyphOffsets;
     if (!advances.SetLength(actualGlyphs) || 
         !glyphOffsets.SetLength(actualGlyphs)) {
         NS_WARNING("Shaper failed to allocate memory.");
@@ -107,7 +108,7 @@ trymoreglyphs:
 
     if (!static_cast<gfxDWriteFont*>(mFont)->mUseSubpixelPositions) {
         hr = analyzer->GetGdiCompatibleGlyphPlacements(
-                                          aText,
+                                          text,
                                           clusters.Elements(),
                                           textProperties.Elements(),
                                           length,
@@ -122,14 +123,14 @@ trymoreglyphs:
                                           FALSE,
                                           FALSE,
                                           &runHead->mScript,
-                                          NULL,
-                                          NULL,
-                                          NULL,
+                                          nullptr,
+                                          nullptr,
+                                          nullptr,
                                           0,
                                           advances.Elements(),
                                           glyphOffsets.Elements());
     } else {
-        hr = analyzer->GetGlyphPlacements(aText,
+        hr = analyzer->GetGlyphPlacements(text,
                                           clusters.Elements(),
                                           textProperties.Elements(),
                                           length,
@@ -141,9 +142,9 @@ trymoreglyphs:
                                           FALSE,
                                           FALSE,
                                           &runHead->mScript,
-                                          NULL,
-                                          NULL,
-                                          NULL,
+                                          nullptr,
+                                          nullptr,
+                                          nullptr,
                                           0,
                                           advances.Elements(),
                                           glyphOffsets.Elements());

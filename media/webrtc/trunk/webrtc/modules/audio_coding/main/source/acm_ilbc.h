@@ -19,46 +19,52 @@ struct iLBC_decinst_t_;
 
 namespace webrtc {
 
+namespace acm1 {
+
 class ACMILBC : public ACMGenericCodec {
  public:
-  explicit ACMILBC(WebRtc_Word16 codec_id);
-  ~ACMILBC();
+  explicit ACMILBC(int16_t codec_id);
+  virtual ~ACMILBC();
 
   // for FEC
-  ACMGenericCodec* CreateInstance(void);
+  virtual ACMGenericCodec* CreateInstance(void) OVERRIDE;
 
-  WebRtc_Word16 InternalEncode(WebRtc_UWord8* bitstream,
-                               WebRtc_Word16* bitstream_len_byte);
+  virtual int16_t InternalEncode(uint8_t* bitstream,
+                                 int16_t* bitstream_len_byte) OVERRIDE;
 
-  WebRtc_Word16 InternalInitEncoder(WebRtcACMCodecParams *codec_params);
+  virtual int16_t InternalInitEncoder(
+      WebRtcACMCodecParams* codec_params) OVERRIDE;
 
-  WebRtc_Word16 InternalInitDecoder(WebRtcACMCodecParams *codec_params);
+  virtual int16_t InternalInitDecoder(
+      WebRtcACMCodecParams* codec_params) OVERRIDE;
 
  protected:
-  WebRtc_Word16 DecodeSafe(WebRtc_UWord8* bitstream,
-                           WebRtc_Word16 bitstream_len_byte,
-                           WebRtc_Word16* audio,
-                           WebRtc_Word16* audio_samples,
-                           WebRtc_Word8* speech_type);
+  virtual int16_t DecodeSafe(uint8_t* bitstream,
+                             int16_t bitstream_len_byte,
+                             int16_t* audio,
+                             int16_t* audio_samples,
+                             int8_t* speech_type) OVERRIDE;
 
-  WebRtc_Word32 CodecDef(WebRtcNetEQ_CodecDef& codec_def,
-                         const CodecInst& codec_inst);
+  virtual int32_t CodecDef(WebRtcNetEQ_CodecDef& codec_def,
+                           const CodecInst& codec_inst) OVERRIDE;
 
-  WebRtc_Word16 SetBitRateSafe(const WebRtc_Word32 rate);
+  virtual int16_t SetBitRateSafe(const int32_t rate) OVERRIDE;
 
-  void DestructEncoderSafe();
+  virtual void DestructEncoderSafe() OVERRIDE;
 
-  void DestructDecoderSafe();
+  virtual void DestructDecoderSafe() OVERRIDE;
 
-  WebRtc_Word16 InternalCreateEncoder();
+  virtual int16_t InternalCreateEncoder() OVERRIDE;
 
-  WebRtc_Word16 InternalCreateDecoder();
+  virtual int16_t InternalCreateDecoder() OVERRIDE;
 
-  void InternalDestructEncoderInst(void* ptr_inst);
+  virtual void InternalDestructEncoderInst(void* ptr_inst) OVERRIDE;
 
   iLBC_encinst_t_* encoder_inst_ptr_;
   iLBC_decinst_t_* decoder_inst_ptr_;
 };
+
+}  // namespace acm1
 
 }  // namespace webrtc
 

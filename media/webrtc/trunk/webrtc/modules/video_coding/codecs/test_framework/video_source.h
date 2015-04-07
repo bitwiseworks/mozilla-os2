@@ -12,7 +12,7 @@
 #define WEBRTC_MODULES_VIDEO_CODING_CODECS_TEST_FRAMEWORK_VIDEO_SOURCE_H_
 
 #include <string>
-#include "common_video/libyuv/include/webrtc_libyuv.h"
+#include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
 
 enum VideoSize
     {
@@ -70,7 +70,7 @@ public:
     std::string GetName() const;
 
     VideoSize GetSize() const;
-    static VideoSize GetSize(WebRtc_UWord16 width, WebRtc_UWord16 height);
+    static VideoSize GetSize(uint16_t width, uint16_t height);
     unsigned int GetFrameLength() const;
 
     // Returns a human-readable size string.
@@ -106,4 +106,3 @@ private:
 
 
 #endif // WEBRTC_MODULES_VIDEO_CODING_CODECS_TEST_FRAMEWORK_VIDEO_SOURCE_H_
-

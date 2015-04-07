@@ -15,30 +15,55 @@
 //       which the deadline will be 15ms + throttle threshold
 //#define COMPOSITOR_PERFORMANCE_WARNING
 
+#include <stdint.h>                     // for uint64_t
+#include "Layers.h"                     // for Layer
+#include "ShadowLayersManager.h"        // for ShadowLayersManager
+#include "base/basictypes.h"            // for DISALLOW_EVIL_CONSTRUCTORS
+#include "base/platform_thread.h"       // for PlatformThreadId
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/Monitor.h"            // for Monitor
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/TimeStamp.h"          // for TimeStamp
+#include "mozilla/ipc/ProtocolUtils.h"
+#include "mozilla/layers/GeckoContentController.h"
+#include "mozilla/layers/LayersMessages.h"  // for TargetConfig
 #include "mozilla/layers/PCompositorParent.h"
-#include "mozilla/layers/PLayerTransactionParent.h"
-#include "base/thread.h"
-#include "mozilla/Monitor.h"
-#include "mozilla/TimeStamp.h"
-#include "ShadowLayersManager.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsISupportsImpl.h"
+#include "nsSize.h"                     // for nsIntSize
 
+class CancelableTask;
+class MessageLoop;
+class gfxContext;
 class nsIWidget;
 
-namespace base {
-class Thread;
+namespace mozilla {
+namespace gfx {
+class DrawTarget;
 }
 
-namespace mozilla {
 namespace layers {
 
-class AsyncPanZoomController;
-class Layer;
-class LayerManagerComposite;
+class APZCTreeManager;
 class AsyncCompositionManager;
-struct TextureFactoryIdentifier;
+class Compositor;
+class LayerManagerComposite;
+class LayerTransactionParent;
 
-class CompositorParent : public PCompositorParent,
-                         public ShadowLayersManager
+struct ScopedLayerTreeRegistration
+{
+  ScopedLayerTreeRegistration(uint64_t aLayersId,
+                              Layer* aRoot,
+                              GeckoContentController* aController);
+  ~ScopedLayerTreeRegistration();
+
+private:
+  uint64_t mLayersId;
+};
+
+class CompositorParent MOZ_FINAL : public PCompositorParent,
+                                   public ShadowLayersManager
 {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CompositorParent)
 
@@ -47,21 +72,37 @@ public:
                    bool aUseExternalSurfaceSize = false,
                    int aSurfaceWidth = -1, int aSurfaceHeight = -1);
 
-  virtual ~CompositorParent();
+  // IToplevelProtocol::CloneToplevel()
+  virtual IToplevelProtocol*
+  CloneToplevel(const InfallibleTArray<mozilla::ipc::ProtocolFdMapping>& aFds,
+                base::ProcessHandle aPeerProcess,
+                mozilla::ipc::ProtocolCloneContext* aCtx) MOZ_OVERRIDE;
 
   virtual bool RecvWillStop() MOZ_OVERRIDE;
   virtual bool RecvStop() MOZ_OVERRIDE;
   virtual bool RecvPause() MOZ_OVERRIDE;
   virtual bool RecvResume() MOZ_OVERRIDE;
+  virtual bool RecvNotifyChildCreated(const uint64_t& child) MOZ_OVERRIDE;
   virtual bool RecvMakeSnapshot(const SurfaceDescriptor& aInSnapshot,
-                                SurfaceDescriptor* aOutSnapshot);
+                                SurfaceDescriptor* aOutSnapshot) MOZ_OVERRIDE;
   virtual bool RecvFlushRendering() MOZ_OVERRIDE;
+
+  virtual bool RecvNotifyRegionInvalidated(const nsIntRegion& aRegion) MOZ_OVERRIDE;
+  virtual bool RecvStartFrameTimeRecording(const int32_t& aBufferSize, uint32_t* aOutStartIndex) MOZ_OVERRIDE;
+  virtual bool RecvStopFrameTimeRecording(const uint32_t& aStartIndex, InfallibleTArray<float>* intervals) MOZ_OVERRIDE;
 
   virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
 
   virtual void ShadowLayersUpdated(LayerTransactionParent* aLayerTree,
                                    const TargetConfig& aTargetConfig,
-                                   bool isFirstPaint) MOZ_OVERRIDE;
+                                   bool aIsFirstPaint,
+                                   bool aScheduleComposite) MOZ_OVERRIDE;
+  virtual void ForceComposite(LayerTransactionParent* aLayerTree) MOZ_OVERRIDE;
+  virtual bool SetTestSampleTime(LayerTransactionParent* aLayerTree,
+                                 const TimeStamp& aTime) MOZ_OVERRIDE;
+  virtual void LeaveTestMode(LayerTransactionParent* aLayerTree) MOZ_OVERRIDE;
+  virtual AsyncCompositionManager* GetCompositionManager(LayerTransactionParent* aLayerTree) MOZ_OVERRIDE { return mCompositionManager; }
+
   /**
    * This forces the is-first-paint flag to true. This is intended to
    * be called by the widget code when it loses its viewport information
@@ -72,7 +113,7 @@ public:
   void ForceIsFirstPaint();
   void Destroy();
 
-  LayerManagerComposite* GetLayerManager() { return mLayerManager; }
+  void NotifyChildCreated(uint64_t aChild);
 
   void AsyncRender();
 
@@ -86,7 +127,13 @@ public:
   bool ScheduleResumeOnCompositorThread(int width, int height);
 
   virtual void ScheduleComposition();
-  void NotifyShadowTreeTransaction();
+  void NotifyShadowTreeTransaction(uint64_t aId, bool aIsFirstPaint, bool aScheduleComposite);
+
+  /**
+   * Returns the unique layer tree identifier that corresponds to the root
+   * tree of this compositor.
+   */
+  uint64_t RootLayerTreeId();
 
   /**
    * Returns a pointer to the compositor corresponding to the given ID.
@@ -125,13 +172,19 @@ public:
   static void DeallocateLayerTreeId(uint64_t aId);
 
   /**
-   * Set aController as the pan/zoom controller for the tree referred
+   * Set aController as the pan/zoom callback for the subtree referred
    * to by aLayersId.
    *
    * Must run on content main thread.
    */
-  static void SetPanZoomControllerForLayerTree(uint64_t aLayersId,
-                                               AsyncPanZoomController* aController);
+  static void SetControllerForLayerTree(uint64_t aLayersId,
+                                        GeckoContentController* aController);
+
+  /**
+   * This returns a reference to the APZCTreeManager to which
+   * pan/zoom-related events can be sent.
+   */
+  static APZCTreeManager* GetAPZCTreeManager(uint64_t aLayersId);
 
   /**
    * A new child process has been configured to push transactions
@@ -150,8 +203,15 @@ public:
                                         PlatformThreadId aThreadID);
 
   struct LayerTreeState {
+    LayerTreeState();
     nsRefPtr<Layer> mRoot;
-    nsRefPtr<AsyncPanZoomController> mController;
+    nsRefPtr<GeckoContentController> mController;
+    CompositorParent* mParent;
+    LayerManagerComposite* mLayerManager;
+    // Pointer to the CrossProcessCompositorParent. Used by APZCs to share
+    // their FrameMetrics with the corresponding child process that holds
+    // the PCompositorChild
+    PCompositorParent* mCrossProcessParent;
     TargetConfig mTargetConfig;
   };
 
@@ -162,34 +222,38 @@ public:
    */
   static const LayerTreeState* GetIndirectShadowTree(uint64_t aId);
 
-  /**
-   * Tell all CompositorParents to update their last refresh to aTime and sample
-   * animations at this time stamp.  If aIsTesting is true, the
-   * CompositorParents will become "paused" and continue sampling animations at
-   * this time stamp until this function is called again with aIsTesting set to
-   * false.
-   */
-  static void SetTimeAndSampleAnimations(TimeStamp aTime, bool aIsTesting);
+  float ComputeRenderIntegrity();
 
-protected:
+  /**
+   * Returns true if the calling thread is the compositor thread.
+   */
+  static bool IsInCompositorThread();
+
+private:
+  // Private destructor, to discourage deletion outside of Release():
+  virtual ~CompositorParent();
+
   virtual PLayerTransactionParent*
-    AllocPLayerTransaction(const LayersBackend& aBackendHint,
-                           const uint64_t& aId,
-                           TextureFactoryIdentifier* aTextureFactoryIdentifier);
-  virtual bool DeallocPLayerTransaction(PLayerTransactionParent* aLayers);
+    AllocPLayerTransactionParent(const nsTArray<LayersBackend>& aBackendHints,
+                                 const uint64_t& aId,
+                                 TextureFactoryIdentifier* aTextureFactoryIdentifier,
+                                 bool* aSuccess) MOZ_OVERRIDE;
+  virtual bool DeallocPLayerTransactionParent(PLayerTransactionParent* aLayers) MOZ_OVERRIDE;
   virtual void ScheduleTask(CancelableTask*, int);
-  virtual void Composite();
-  virtual void ComposeToTarget(gfxContext* aTarget);
+  void Composite();
+  void CompositeToTarget(gfx::DrawTarget* aTarget);
+  void ForceComposeToTarget(gfx::DrawTarget* aTarget);
 
   void SetEGLSurfaceSize(int width, int height);
 
-private:
+  void InitializeLayerManager(const nsTArray<LayersBackend>& aBackendHints);
   void PauseComposition();
   void ResumeComposition();
   void ResumeCompositionAndResize(int width, int height);
   void ForceComposition();
+  void CancelCurrentCompositeTask();
 
-  inline PlatformThreadId CompositorThreadID();
+  inline static PlatformThreadId CompositorThreadID();
 
   /**
    * Creates a global map referencing each compositor by ID.
@@ -236,7 +300,10 @@ private:
    */
   bool CanComposite();
 
+  void DidComposite();
+
   nsRefPtr<LayerManagerComposite> mLayerManager;
+  nsRefPtr<Compositor> mCompositor;
   RefPtr<AsyncCompositionManager> mCompositionManager;
   nsIWidget* mWidget;
   CancelableTask *mCurrentCompositeTask;
@@ -244,7 +311,7 @@ private:
   TimeStamp mTestTime;
   bool mIsTesting;
 #ifdef COMPOSITOR_PERFORMANCE_WARNING
-  TimeStamp mExpectedComposeTime;
+  TimeStamp mExpectedComposeStartTime;
 #endif
 
   bool mPaused;
@@ -256,9 +323,14 @@ private:
   mozilla::Monitor mResumeCompositionMonitor;
 
   uint64_t mCompositorID;
+  uint64_t mRootLayerTreeID;
 
   bool mOverrideComposeReadiness;
   CancelableTask* mForceCompositionTask;
+
+  nsRefPtr<APZCTreeManager> mApzcTreeManager;
+
+  bool mWantDidCompositeEvent;
 
   DISALLOW_EVIL_CONSTRUCTORS(CompositorParent);
 };

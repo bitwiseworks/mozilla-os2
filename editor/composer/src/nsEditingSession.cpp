@@ -86,8 +86,8 @@ nsEditingSession::~nsEditingSession()
     mLoadBlankDocTimer->Cancel();
 }
 
-NS_IMPL_ISUPPORTS3(nsEditingSession, nsIEditingSession, nsIWebProgressListener, 
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(nsEditingSession, nsIEditingSession, nsIWebProgressListener, 
+                  nsISupportsWeakReference)
 
 /*---------------------------------------------------------------------------
 
@@ -448,7 +448,7 @@ nsEditingSession::SetupEditorOnWindow(nsIDOMWindow *aWindow)
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = editor->Init(domDoc, nullptr /* root content */,
-                    nullptr, mEditorFlags);
+                    nullptr, mEditorFlags, EmptyString());
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsISelection> selection;
@@ -827,7 +827,7 @@ NS_IMETHODIMP
 nsEditingSession::OnStatusChange(nsIWebProgress *aWebProgress,
                                  nsIRequest *aRequest,
                                  nsresult aStatus,
-                                 const PRUnichar *aMessage)
+                                 const char16_t *aMessage)
 {
     NS_NOTREACHED("notification excluded in AddProgressListener(...)");
     return NS_OK;
@@ -1022,7 +1022,7 @@ nsEditingSession::TimerCallback(nsITimer* aTimer, void* aClosure)
   {
     nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(docShell));
     if (webNav)
-      webNav->LoadURI(NS_LITERAL_STRING("about:blank").get(),
+      webNav->LoadURI(MOZ_UTF16("about:blank"),
                       0, nullptr, nullptr, nullptr);
   }
 }

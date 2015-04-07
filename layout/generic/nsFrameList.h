@@ -6,11 +6,15 @@
 #ifndef nsFrameList_h___
 #define nsFrameList_h___
 
-#include "nscore.h"
-#include "nsTraceRefcnt.h"
 #include <stdio.h> /* for FILE* */
 #include "nsDebug.h"
-#include "nsTArray.h"
+#include "nsTArrayForwardDeclare.h"
+
+#if defined(DEBUG) || defined(MOZ_DUMP_PAINTING)
+// DEBUG_FRAME_DUMP enables nsIFrame::List and related methods.
+// You can also define this in a non-DEBUG build if you need frame dumps.
+#define DEBUG_FRAME_DUMP 1
+#endif
 
 class nsIFrame;
 class nsIPresShell;
@@ -265,7 +269,6 @@ public:
   inline void AppendIfNonempty(nsTArray<mozilla::layout::FrameChildList>* aLists,
                                mozilla::layout::FrameChildListID aListID) const;
 
-#ifdef IBMBIDI
   /**
    * Return the frame before this frame in visual order (after Bidi reordering).
    * If aFrame is null, return the last frame in visual order.
@@ -277,9 +280,8 @@ public:
    * If aFrame is null, return the first frame in visual order.
    */
   nsIFrame* GetNextVisualFor(nsIFrame* aFrame) const;
-#endif // IBMBIDI
 
-#ifdef DEBUG
+#ifdef DEBUG_FRAME_DUMP
   void List(FILE* out) const;
 #endif
 
@@ -433,10 +435,7 @@ public:
       mPrev = aOther.mPrev;
     }
 
-    void Next() {
-      mPrev = mFrame;
-      Enumerator::Next();
-    }
+    inline void Next();
 
     bool AtEnd() const { return Enumerator::AtEnd(); }
 

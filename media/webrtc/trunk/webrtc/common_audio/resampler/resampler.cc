@@ -17,8 +17,8 @@
 #include <string.h>
 #include <assert.h>
 
-#include "signal_processing_library.h"
-#include "resampler.h"
+#include "webrtc/common_audio/resampler/include/resampler.h"
+#include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
 
 // TODO(jesup) better adjust per platform ability
 // Note: if these are changed (higher), you may need to change the
@@ -70,6 +70,7 @@ int Resampler::Reset(int in_freq, int out_freq, ResamplerType type)
 {
   uint32_t channels = (type == kResamplerSynchronousStereo ||
                        type == kResamplerFixedSynchronousStereo) ? 2 : 1;
+
   if (state_)
   {
     speex_resampler_destroy(state_);
@@ -131,4 +132,4 @@ int Resampler::Push(const int16_t* samples_in, int length_in,
   return 0;
 }
 
-} // namespace webrtc
+}  // namespace webrtc

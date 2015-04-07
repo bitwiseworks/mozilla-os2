@@ -28,35 +28,46 @@ int mar_repackage_and_sign(const char *NSSConfigDir,
                            const char *src, 
                            const char * dest);
 
+static void print_version() {
+  printf("Version: %s\n", MOZ_APP_VERSION);
+  printf("Default Channel ID: %s\n", MAR_CHANNEL_ID);
+}
+
 static void print_usage() {
   printf("usage:\n");
   printf("Create a MAR file:\n");
   printf("  mar [-H MARChannelID] [-V ProductVersion] [-C workingDir] "
-         "{-c|-x|-t|-T} archive.mar [files...]\n");
+         "-c archive.mar [files...]\n");
+
+  printf("Extract a MAR file:\n");
+  printf("  mar [-C workingDir] -x archive.mar\n");
 #ifndef NO_SIGN_VERIFY
   printf("Sign a MAR file:\n");
   printf("  mar [-C workingDir] -d NSSConfigDir -n certname -s "
          "archive.mar out_signed_archive.mar\n");
+
   printf("Strip a MAR signature:\n");
   printf("  mar [-C workingDir] -r "
          "signed_input_archive.mar output_archive.mar\n");
+
   printf("Extract a MAR signature:\n");
   printf("  mar [-C workingDir] -n(i) -X "
          "signed_input_archive.mar base_64_encoded_signature_file\n");
+
   printf("Import a MAR signature:\n");
   printf("  mar [-C workingDir] -n(i) -I "
          "signed_input_archive.mar base_64_encoded_signature_file "
          "changed_signed_output.mar\n");
   printf("(i) is the index of the certificate to extract\n");
-#if defined(XP_WIN) && !defined(MAR_NSS)
+#if defined(XP_MACOSX) || (defined(XP_WIN) && !defined(MAR_NSS))
   printf("Verify a MAR file:\n");
   printf("  mar [-C workingDir] -D DERFilePath -v signed_archive.mar\n");
   printf("At most %d signature certificate DER files are specified by "
          "-D0 DERFilePath1 -D1 DERFilePath2, ...\n", MAX_SIGNATURES);
-#else 
+#else
   printf("Verify a MAR file:\n");
   printf("  mar [-C workingDir] -d NSSConfigDir -n certname "
-    "-v signed_archive.mar\n");
+         "-v signed_archive.mar\n");
   printf("At most %d signature certificate names are specified by "
          "-n0 certName -n1 certName2, ...\n", MAX_SIGNATURES);
 #endif
@@ -64,8 +75,17 @@ static void print_usage() {
          "-n0 certName -n1 certName2, ...\n", MAX_SIGNATURES);
 #endif
   printf("Print information on a MAR file:\n");
+  printf("  mar -t archive.mar\n");
+
+  printf("Print detailed information on a MAR file including signatures:\n");
+  printf("  mar -T archive.mar\n");
+
+  printf("Refresh the product information block of a MAR file:\n");
   printf("  mar [-H MARChannelID] [-V ProductVersion] [-C workingDir] "
          "-i unsigned_archive_to_refresh.mar\n");
+
+  printf("Print executable version:\n");
+  printf("  mar --version\n");
   printf("This program does not handle unicode file paths properly\n");
 }
 
@@ -99,23 +119,32 @@ int main(int argc, char **argv) {
   int rv = -1;
   uint32_t certCount = 0;
   int32_t sigIndex = -1;
+
 #if defined(XP_WIN) && !defined(MAR_NSS) && !defined(NO_SIGN_VERIFY)
   HANDLE certFile;
-  /* We use DWORD here instead of uint64_t because it simplifies code with
-     the Win32 API ReadFile which takes a DWORD.  DER files will not be too
-     large anyway. */
-  DWORD fileSizes[MAX_SIGNATURES];
-  DWORD read;
   uint8_t *certBuffers[MAX_SIGNATURES];
-  char *DERFilePaths[MAX_SIGNATURES];
+#endif
+#if !defined(NO_SIGN_VERIFY) && ((!defined(MAR_NSS) && defined(XP_WIN)) || \
+                                 defined(XP_MACOSX))
+  char* DERFilePaths[MAX_SIGNATURES];
+  uint32_t fileSizes[MAX_SIGNATURES];
+  uint32_t read;
 #endif
 
   memset(certNames, 0, sizeof(certNames));
 #if defined(XP_WIN) && !defined(MAR_NSS) && !defined(NO_SIGN_VERIFY)
-  memset(fileSizes, 0, sizeof(fileSizes));
   memset(certBuffers, 0, sizeof(certBuffers));
-  memset(DERFilePaths, 0, sizeof(DERFilePaths));
 #endif
+#if !defined(NO_SIGN_VERIFY) && ((!defined(MAR_NSS) && defined(XP_WIN)) || \
+                                 defined(XP_MACOSX))
+  memset(DERFilePaths, 0, sizeof(DERFilePaths));
+  memset(fileSizes, 0, sizeof(fileSizes));
+#endif
+
+  if (argc > 1 && 0 == strcmp(argv[1], "--version")) {
+    print_version();
+    return 0;
+  }
 
   if (argc < 3) {
     print_usage();
@@ -136,13 +165,14 @@ int main(int argc, char **argv) {
       argv += 2;
       argc -= 2;
     } 
-#if defined(XP_WIN) && !defined(MAR_NSS) && !defined(NO_SIGN_VERIFY)
+#if !defined(NO_SIGN_VERIFY) && ((!defined(MAR_NSS) && defined(XP_WIN)) || \
+                                 defined(XP_MACOSX))
     /* -D DERFilePath, also matches -D[index] DERFilePath
        We allow an index for verifying to be symmetric
        with the import and export command line arguments. */
     else if (argv[1][0] == '-' &&
              argv[1][1] == 'D' &&
-             (argv[1][2] == '0' + certCount || argv[1][2] == '\0')) {
+             (argv[1][2] == (char)('0' + certCount) || argv[1][2] == '\0')) {
       if (certCount >= MAX_SIGNATURES) {
         print_usage();
         return -1;
@@ -162,7 +192,7 @@ int main(int argc, char **argv) {
         with the import and export command line arguments. */
     } else if (argv[1][0] == '-' &&
                argv[1][1] == 'n' &&
-               (argv[1][2] == '0' + certCount ||
+               (argv[1][2] == (char)('0' + certCount) ||
                 argv[1][2] == '\0' ||
                 !strcmp(argv[2], "-X") ||
                 !strcmp(argv[2], "-I"))) {
@@ -341,6 +371,10 @@ int main(int argc, char **argv) {
     }
 
     return 0;
+
+#elif defined(XP_MACOSX)
+    return mar_verify_signatures(argv[2], (const uint8_t* const*)DERFilePaths,
+                                 0, NULL, certCount);
 #else
     if (!NSSConfigDir || certCount == 0) {
       print_usage();
@@ -352,8 +386,7 @@ int main(int argc, char **argv) {
       return -1;
     }
 
-    return mar_verify_signatures(argv[2], NULL, 0,
-                                 certNames, certCount);
+    return mar_verify_signatures(argv[2], NULL, 0, certNames, certCount);
 
 #endif /* defined(XP_WIN) && !defined(MAR_NSS) */
   case 's':

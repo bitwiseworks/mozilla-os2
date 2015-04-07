@@ -5,7 +5,7 @@
 
 #include "nsUserInfo.h"
 
-#include "mozilla/Util.h" // ArrayLength
+#include "mozilla/ArrayUtils.h" // ArrayLength
 #include "nsString.h"
 #include "windows.h"
 #include "nsCRT.h"
@@ -23,7 +23,7 @@ nsUserInfo::~nsUserInfo()
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsUserInfo, nsIUserInfo)
+NS_IMPL_ISUPPORTS(nsUserInfo, nsIUserInfo)
 
 NS_IMETHODIMP
 nsUserInfo::GetUsername(char **aUsername)
@@ -32,7 +32,7 @@ nsUserInfo::GetUsername(char **aUsername)
   *aUsername = nullptr;
 
   // ULEN is the max username length as defined in lmcons.h
-  PRUnichar username[UNLEN +1];
+  wchar_t username[UNLEN +1];
   DWORD size = mozilla::ArrayLength(username);
   if (!GetUserNameW(username, &size))
     return NS_ERROR_FAILURE;
@@ -42,12 +42,12 @@ nsUserInfo::GetUsername(char **aUsername)
 }
 
 NS_IMETHODIMP
-nsUserInfo::GetFullname(PRUnichar **aFullname)
+nsUserInfo::GetFullname(char16_t **aFullname)
 {
   NS_ENSURE_ARG_POINTER(aFullname);
   *aFullname = nullptr;
 
-  PRUnichar fullName[512];
+  wchar_t fullName[512];
   DWORD size = mozilla::ArrayLength(fullName);
 
   if (GetUserNameExW(NameDisplay, fullName, &size)) {
@@ -57,7 +57,7 @@ nsUserInfo::GetFullname(PRUnichar **aFullname)
 
     // Try to use the net APIs regardless of the error because it may be
     // able to obtain the information.
-    PRUnichar username[UNLEN + 1];
+    wchar_t username[UNLEN + 1];
     size = mozilla::ArrayLength(username);
     if (!GetUserNameW(username, &size)) {
       // ERROR_NONE_MAPPED means the user info is not filled out on this computer
@@ -101,7 +101,7 @@ nsUserInfo::GetDomain(char **aDomain)
 
   const DWORD level = 100;
   LPBYTE info;
-  NET_API_STATUS status = NetWkstaGetInfo(NULL, level, &info);
+  NET_API_STATUS status = NetWkstaGetInfo(nullptr, level, &info);
   if (status == NERR_Success) {
     *aDomain =
       ToNewUTF8String(nsDependentString(reinterpret_cast<WKSTA_INFO_100 *>(info)->
@@ -119,7 +119,7 @@ nsUserInfo::GetEmailAddress(char **aEmailAddress)
   *aEmailAddress = nullptr;
 
   // RFC3696 says max length of an email address is 254
-  PRUnichar emailAddress[255];
+  wchar_t emailAddress[255];
   DWORD size = mozilla::ArrayLength(emailAddress);
 
   if (!GetUserNameExW(NameUserPrincipal, emailAddress, &size)) {

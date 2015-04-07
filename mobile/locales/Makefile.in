@@ -12,13 +12,6 @@
 #     based on current locale.
 #####################################################################################
 
-DEPTH     = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir    = @srcdir@
-VPATH     = @srcdir@
-relativesrcdir = @relativesrcdir@
-
-include $(DEPTH)/config/autoconf.mk
 include $(topsrcdir)/config/config.mk
 
 USE_AUTOTARGETS_MK=1
@@ -26,12 +19,6 @@ include $(topsrcdir)/config/makefiles/makeutils.mk
 
 # Separate items of contention
 tgt-gendir = .deps/generated_$(AB_CD)
-
-jar-maker = \
-  $(firstword \
-    $(wildcard $(MOZILLA_DIR)/config/JarMaker.py) \
-    $(topsrcdir)/config/JarMaker.py \
-  )
 
 GENERATED_DIRS += .deps
 
@@ -120,10 +107,10 @@ search-jar-preqs = \
 .PHONY: search-jar
 search-jar: $(search-jar)
 $(search-jar): $(search-jar-preqs)
-	@echo "\nGenerating: search-jar"
-	printf "$(AB_CD).jar:" > $@
+	@echo '\nGenerating: search-jar'
+	printf '$(AB_CD).jar:' > $@
 	ln -fn $@ .
-	printf "$(foreach plugin,$(SEARCH_PLUGINS),$(subst __PLUGIN_SUBST__,$(plugin), \n locale/$(AB_CD)/browser/searchplugins/__PLUGIN_SUBST__.xml (__PLUGIN_SUBST__.xml)))" >>  $@
+	printf '$(foreach plugin,$(SEARCH_PLUGINS),$(subst __PLUGIN_SUBST__,$(plugin), \n locale/$(AB_CD)/browser/searchplugins/__PLUGIN_SUBST__.xml (__PLUGIN_SUBST__.xml)))' >>  $@
 	@echo   >> $@
 
 ###################
@@ -137,18 +124,17 @@ search-preqs =\
   $(call mkdir_deps,$(FINAL_TARGET)/chrome) \
   $(search-jar) \
   $(search-dir-deps) \
-  $(jar-maker) \
   $(if $(IS_LANGUAGE_REPACK),FORCE) \
   $(GLOBAL_DEPS) \
   $(NULL)
 
 .PHONY: searchplugins
 searchplugins: $(search-preqs)
-	$(PYTHON) $(jar-maker) \
+	$(call py_action,jar_maker,\
           $(QUIET) -j $(FINAL_TARGET)/chrome \
           -s $(topsrcdir)/$(relativesrcdir)/en-US/searchplugins \
           -s $(LOCALE_SRCDIR)/searchplugins \
-          $(MAKE_JARS_FLAGS) $(search-jar)
+          $(MAKE_JARS_FLAGS) $(search-jar))
 	$(TOUCH) $@
 
 include $(topsrcdir)/config/rules.mk
@@ -191,28 +177,25 @@ bookmarks-inc = $(firstword $(bookmarks-inc-array))
 
 bookmarks-preqs = \
   $(bookmarks-inc) \
-  $(call mkdir_deps,$(dir $(bookmarks-ts))) \
   $(src-bookmarks) \
   generic/profile/$(bookmarks).in \
-  $(topsrcdir)/config/Preprocessor.py \
   $(if $(IS_LANGUAGE_REPACK),FORCE) \
   $(GLOBAL_DEPS) \
   $(NULL)
 
 $(bookmarks-ts): $(bookmarks-preqs)
 	$(display_deps)
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
+	$(call py_action,preprocessor, \
       -I $< \
       -DAB_CD=$(NO_JA_JP_MAC_AB_CD) \
       $(src-bookmarks) \
-      > $@
+      -o $@)
 
 .PHONY: bookmarks $(bookmarks)
 bookmarks: $(bookmarks)
 $(bookmarks): $(bookmarks-ts)
-	@echo "\nGenerating: $@"
+	@echo '\nGenerating: $@'
 	ln -fn $< .
 
 
 export:: searchplugins bookmarks
-

@@ -249,9 +249,9 @@ float4 CalculateYCbCrColor(const float2 aTexCoords)
   float4 yuv;
   float4 color;
 
-  yuv.r = tCr.Sample(LayerTextureSamplerLinear, aTexCoords).r - 0.5;
-  yuv.g = tY.Sample(LayerTextureSamplerLinear, aTexCoords).r - 0.0625;
-  yuv.b = tCb.Sample(LayerTextureSamplerLinear, aTexCoords).r - 0.5;
+  yuv.r = tCr.Sample(LayerTextureSamplerLinear, aTexCoords).a - 0.5;
+  yuv.g = tY.Sample(LayerTextureSamplerLinear, aTexCoords).a - 0.0625;
+  yuv.b = tCb.Sample(LayerTextureSamplerLinear, aTexCoords).a - 0.5;
 
   color.r = yuv.g * 1.164 + yuv.r * 1.596;
   color.g = yuv.g * 1.164 - 0.813 * yuv.r - 0.391 * yuv.b;
@@ -442,6 +442,18 @@ technique10 RenderSolidColorLayer
   {
     SetRasterizerState( LayerRast );
     SetBlendState( Premul, float4( 0.0f, 0.0f, 0.0f, 0.0f ), 0xFFFFFFFF );
+    SetVertexShader( CompileShader( vs_4_0_level_9_3, LayerQuadVS() ) );
+    SetGeometryShader( NULL );
+    SetPixelShader( CompileShader( ps_4_0_level_9_3, SolidColorShader() ) );
+  }
+}
+
+technique10 RenderClearLayer
+{
+  pass P0
+  {
+    SetRasterizerState( LayerRast );
+    SetBlendState( NoBlendDual, float4( 0.0f, 0.0f, 0.0f, 0.0f ), 0xFFFFFFFF );
     SetVertexShader( CompileShader( vs_4_0_level_9_3, LayerQuadVS() ) );
     SetGeometryShader( NULL );
     SetPixelShader( CompileShader( ps_4_0_level_9_3, SolidColorShader() ) );

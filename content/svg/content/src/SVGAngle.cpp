@@ -6,26 +6,19 @@
 #include "SVGAngle.h"
 #include "nsSVGAngle.h"
 #include "mozilla/dom/SVGAngleBinding.h"
-#include "nsContentUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
 NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(SVGAngle, mSVGElement)
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(SVGAngle)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(SVGAngle)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SVGAngle)
-  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY(SVGAngle)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
+NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(SVGAngle, AddRef)
+NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(SVGAngle, Release)
 
 JSObject*
-SVGAngle::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+SVGAngle::WrapObject(JSContext* aCx)
 {
-  return SVGAngleBinding::Wrap(aCx, aScope, this);
+  return SVGAngleBinding::Wrap(aCx, this);
 }
 
 uint16_t

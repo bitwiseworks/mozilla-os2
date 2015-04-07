@@ -4,9 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
-include "mozilla/dom/mobilemessage/Types.h";
-
 include protocol PSms;
 include protocol PBlob;
 include SmsTypes;
@@ -66,6 +63,26 @@ struct ReplyMarkeMessageReadFail
   int32_t error;
 };
 
+struct ReplyGetSegmentInfoForText
+{
+  SmsSegmentInfoData infoData;
+};
+
+struct ReplyGetSegmentInfoForTextFail
+{
+  int32_t error;
+};
+
+struct ReplyGetSmscAddress
+{
+  nsString smscAddress;
+};
+
+struct ReplyGetSmscAddressFail
+{
+  int32_t error;
+};
+
 union MessageReply
 {
   ReplyMessageSend;
@@ -76,6 +93,10 @@ union MessageReply
   ReplyMessageDeleteFail;
   ReplyMarkeMessageRead;
   ReplyMarkeMessageReadFail;
+  ReplyGetSegmentInfoForText;
+  ReplyGetSegmentInfoForTextFail;
+  ReplyGetSmscAddress;
+  ReplyGetSmscAddressFail;
 };
 
 } // namespace mobilemessage

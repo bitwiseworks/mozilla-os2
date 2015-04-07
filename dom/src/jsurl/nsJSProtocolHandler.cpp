@@ -3,6 +3,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "jsapi.h"
@@ -20,7 +21,6 @@
 #include "nsIURI.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
-#include "nsIScriptGlobalObjectOwner.h"
 #include "nsIPrincipal.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIInterfaceRequestor.h"
@@ -46,8 +46,9 @@
 #include "nsIWritablePropertyBag2.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsSandboxFlags.h"
+#include "mozilla/dom/ScriptSettings.h"
 
-using mozilla::AutoPushJSContext;
+using mozilla::dom::AutoEntryScript;
 
 static NS_DEFINE_CID(kJSURICID, NS_JSURI_CID);
 
@@ -56,7 +57,7 @@ class nsJSThunk : public nsIInputStream
 public:
     nsJSThunk();
 
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_FORWARD_SAFE_NSIINPUTSTREAM(mInnerStream)
 
     nsresult Init(nsIURI* uri);
@@ -76,7 +77,7 @@ protected:
 //
 // nsISupports implementation...
 //
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsJSThunk, nsIInputStream)
+NS_IMPL_ISUPPORTS(nsJSThunk, nsIInputStream)
 
 
 nsJSThunk::nsJSThunk()
@@ -118,22 +119,19 @@ static
 nsIScriptGlobalObject* GetGlobalObject(nsIChannel* aChannel)
 {
     // Get the global object owner from the channel
-    nsCOMPtr<nsIScriptGlobalObjectOwner> globalOwner;
-    NS_QueryNotificationCallbacks(aChannel, globalOwner);
-    if (!globalOwner) {
-        NS_WARNING("Unable to get an nsIScriptGlobalObjectOwner from the "
-                   "channel!");
-    }
-    if (!globalOwner) {
+    nsCOMPtr<nsIDocShell> docShell;
+    NS_QueryNotificationCallbacks(aChannel, docShell);
+    if (!docShell) {
+        NS_WARNING("Unable to get a docShell from the channel!");
         return nullptr;
     }
 
-    // So far so good: get the script context from its owner.
-    nsIScriptGlobalObject* global = globalOwner->GetScriptGlobalObject();
+    // So far so good: get the script global from its docshell
+    nsIScriptGlobalObject* global = docShell->GetScriptGlobalObject();
 
     NS_ASSERTION(global,
                  "Unable to get an nsIScriptGlobalObject from the "
-                 "ScriptGlobalObjectOwner!");
+                 "docShell!");
     return global;
 }
 
@@ -182,7 +180,9 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
             csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
                                      NS_ConvertUTF8toUTF16(asciiSpec),
                                      NS_ConvertUTF8toUTF16(mURL),
-                                     0);
+                                     0,
+                                     EmptyString(),
+                                     EmptyString());
         }
 
         //return early if inline scripts are not allowed
@@ -197,8 +197,6 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
         return NS_ERROR_FAILURE;
     }
 
-    nsCOMPtr<nsPIDOMWindow> win(do_QueryInterface(global));
-
     // Sandboxed document check: javascript: URI's are disabled
     // in a sandboxed document unless 'allow-scripts' was specified.
     nsIDocument* doc = aOriginalInnerWindow->GetExtantDoc();
@@ -207,9 +205,10 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
     }
 
     // Push our popup control state
-    nsAutoPopupStatePusher popupStatePusher(win, aPopupState);
+    nsAutoPopupStatePusher popupStatePusher(aPopupState);
 
     // Make sure we still have the same inner window as we used to.
+    nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(global);
     nsPIDOMWindow *innerWin = win->GetCurrentInnerWindow();
 
     if (innerWin != aOriginalInnerWindow) {
@@ -241,8 +240,13 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
     bool useSandbox =
         (aExecutionPolicy == nsIScriptChannel::EXECUTE_IN_SANDBOX);
 
-    AutoPushJSContext cx(scriptContext->GetNativeContext());
+    // New script entry point required, due to the "Create a script" step of
+    // http://www.whatwg.org/specs/web-apps/current-work/#javascript-protocol
+    AutoEntryScript entryScript(innerGlobal, true,
+                                scriptContext->GetNativeContext());
+    JSContext* cx = entryScript.cx();
     JS::Rooted<JSObject*> globalJSObject(cx, innerGlobal->GetGlobalJSObject());
+    NS_ENSURE_TRUE(globalJSObject, NS_ERROR_UNEXPECTED);
 
     if (!useSandbox) {
         //-- Don't outside a sandbox unless the script principal subsumes the
@@ -267,13 +271,7 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
 
         // First check to make sure it's OK to evaluate this script to
         // start with.  For example, script could be disabled.
-        bool ok;
-        rv = securityManager->CanExecuteScripts(cx, principal, &ok);
-        if (NS_FAILED(rv)) {
-            return rv;
-        }
-
-        if (!ok) {
+        if (!securityManager->ScriptAllowed(globalJSObject)) {
             // Treat this as returning undefined from the script.  That's what
             // nsJSContext does.
             return NS_ERROR_DOM_RETVAL_UNDEFINED;
@@ -295,13 +293,13 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
         sandboxObj = js::UncheckedUnwrap(sandboxObj);
         JSAutoCompartment ac(cx, sandboxObj);
 
-        // Push our JSContext on the context stack so the JS_ValueToString call (and
+        // Push our JSContext on the context stack so the EvalInSandboxObject call (and
         // JS_ReportPendingException, if relevant) will use the principal of cx.
         nsCxPusher pusher;
         pusher.Push(cx);
         rv = xpc->EvalInSandboxObject(NS_ConvertUTF8toUTF16(script),
                                       /* filename = */ nullptr, cx,
-                                      sandboxObj, true, v.address());
+                                      sandboxObj, true, &v);
 
         // Propagate and report exceptions that happened in the
         // sandbox.
@@ -314,10 +312,10 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
         JS::CompileOptions options(cx);
         options.setFileAndLine(mURL.get(), 1)
                .setVersion(JSVERSION_DEFAULT);
-        rv = scriptContext->EvaluateString(NS_ConvertUTF8toUTF16(script),
-                                           globalJSObject, options,
-                                           /* aCoerceToString = */ true,
-                                           v.address());
+        nsJSUtils::EvaluateOptions evalOptions;
+        evalOptions.setCoerceToString(true);
+        rv = nsJSUtils::EvaluateString(cx, NS_ConvertUTF8toUTF16(script),
+                                       globalJSObject, options, evalOptions, &v);
 
         // If there's an error on cx as a result of that call, report
         // it now -- either we're just running under the event loop,
@@ -331,7 +329,7 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
 
     // If we took the sandbox path above, v might be in the sandbox
     // compartment.
-    if (!JS_WrapValue(cx, v.address())) {
+    if (!JS_WrapValue(cx, &v)) {
         return NS_ERROR_OUT_OF_MEMORY;
     }
 
@@ -503,9 +501,9 @@ nsresult nsJSChannel::Init(nsIURI *aURI)
 // nsISupports implementation...
 //
 
-NS_IMPL_ISUPPORTS7(nsJSChannel, nsIChannel, nsIRequest, nsIRequestObserver,
-                   nsIStreamListener, nsIScriptChannel, nsIPropertyBag,
-                   nsIPropertyBag2)
+NS_IMPL_ISUPPORTS(nsJSChannel, nsIChannel, nsIRequest, nsIRequestObserver,
+                  nsIStreamListener, nsIScriptChannel, nsIPropertyBag,
+                  nsIPropertyBag2)
 
 //
 // nsIRequest implementation...
@@ -1133,7 +1131,7 @@ nsJSProtocolHandler::~nsJSProtocolHandler()
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsJSProtocolHandler, nsIProtocolHandler)
+NS_IMPL_ISUPPORTS(nsJSProtocolHandler, nsIProtocolHandler)
 
 nsresult
 nsJSProtocolHandler::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
@@ -1301,8 +1299,10 @@ nsJSURI::Read(nsIObjectInputStream* aStream)
     if (NS_FAILED(rv)) return rv;
 
     if (haveBase) {
-        rv = aStream->ReadObject(true, getter_AddRefs(mBaseURI));
+        nsCOMPtr<nsISupports> supports;
+        rv = aStream->ReadObject(true, getter_AddRefs(supports));
         if (NS_FAILED(rv)) return rv;
+        mBaseURI = do_QueryInterface(supports);
     }
 
     return NS_OK;

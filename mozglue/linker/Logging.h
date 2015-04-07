@@ -5,9 +5,11 @@
 #ifndef Logging_h
 #define Logging_h
 
+#include "mozilla/Likely.h"
+
 #ifdef ANDROID
 #include <android/log.h>
-#define log(...) __android_log_print(ANDROID_LOG_ERROR, "GeckoLinker", __VA_ARGS__)
+#define LOG(...) __android_log_print(ANDROID_LOG_ERROR, "GeckoLinker", __VA_ARGS__)
 #else
 #include <cstdio>
 
@@ -24,27 +26,49 @@
 #define MOZ_CONCAT1(a, b) MOZ_CONCAT2(a, b)
 #define MOZ_CONCAT(a, b) MOZ_CONCAT1(a, b)
 
-/* Some magic to choose between log1 and logm depending on the number of
+/* Some magic to choose between LOG1 and LOGm depending on the number of
  * arguments */
 #define MOZ_CHOOSE_LOG(...) \
-  MOZ_MACRO_GLUE(MOZ_CONCAT(log, MOZ_ONE_OR_MORE_ARGS(__VA_ARGS__)), \
+  MOZ_MACRO_GLUE(MOZ_CONCAT(LOG, MOZ_ONE_OR_MORE_ARGS(__VA_ARGS__)), \
                  (__VA_ARGS__))
 
-#define log1(format) fprintf(stderr, format "\n")
-#define logm(format, ...) fprintf(stderr, format "\n", __VA_ARGS__)
-#define log(...) MOZ_CHOOSE_LOG(__VA_ARGS__)
+#define LOG1(format) fprintf(stderr, format "\n")
+#define LOGm(format, ...) fprintf(stderr, format "\n", __VA_ARGS__)
+#define LOG(...) MOZ_CHOOSE_LOG(__VA_ARGS__)
 
 #endif
 
-#ifdef MOZ_DEBUG_LINKER
-#define debug log
-#else
-#define debug(...)
-#endif
+class Logging
+{
+public:
+  static bool isVerbose()
+  {
+    return Singleton.verbose;
+  }
 
-/* HAVE_64BIT_OS is not defined when building host tools, so use
- * __SIZEOF_POINTER__ */
-#if defined(HAVE_64BIT_OS) || __SIZEOF_POINTER__ == 8
+private:
+  bool verbose;
+
+public:
+  static void Init()
+  {
+    const char *env = getenv("MOZ_DEBUG_LINKER");
+    if (env && *env == '1')
+      Singleton.verbose = true;
+  }
+
+private:
+  static Logging Singleton;
+};
+
+#define DEBUG_LOG(...)   \
+  do {                   \
+    if (MOZ_UNLIKELY(Logging::isVerbose())) {  \
+      LOG(__VA_ARGS__);  \
+    }                    \
+  } while(0)
+
+#if defined(__LP64__)
 #  define PRIxAddr "lx"
 #  define PRIxSize "lx"
 #  define PRIdSize "ld"

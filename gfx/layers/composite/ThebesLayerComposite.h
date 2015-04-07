@@ -6,12 +6,18 @@
 #ifndef GFX_ThebesLayerComposite_H
 #define GFX_ThebesLayerComposite_H
 
-#include "mozilla/layers/PLayerTransaction.h"
-#include "mozilla/layers/ShadowLayers.h"
+#include "Layers.h"                     // for Layer (ptr only), etc
+#include "gfxRect.h"                    // for gfxRect
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/layers/LayerManagerComposite.h"  // for LayerComposite, etc
+#include "mozilla/layers/LayersTypes.h"  // for LayerRenderState, etc
+#include "nsDebug.h"                    // for NS_RUNTIMEABORT
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nscore.h"                     // for nsACString
 
-#include "Layers.h"
-#include "mozilla/layers/LayerManagerComposite.h"
-#include "base/task.h"
+struct nsIntPoint;
+struct nsIntRect;
 
 
 namespace mozilla {
@@ -23,7 +29,9 @@ namespace layers {
  * non-tiled Thebes layers and single or double buffering.
  */
 
+class CompositableHost;
 class ContentHost;
+class TiledLayerComposer;
 
 class ThebesLayerComposite : public ThebesLayer,
                              public LayerComposite
@@ -44,12 +52,11 @@ public:
 
   virtual TiledLayerComposer* GetTiledLayerComposer() MOZ_OVERRIDE;
 
-  virtual void RenderLayer(const nsIntPoint& aOffset,
-                           const nsIntRect& aClipRect) MOZ_OVERRIDE;
+  virtual void RenderLayer(const nsIntRect& aClipRect) MOZ_OVERRIDE;
 
   virtual void CleanupResources() MOZ_OVERRIDE;
 
-  virtual void SetCompositableHost(CompositableHost* aHost) MOZ_OVERRIDE;
+  virtual bool SetCompositableHost(CompositableHost* aHost) MOZ_OVERRIDE;
 
   virtual LayerComposite* AsLayerComposite() MOZ_OVERRIDE { return this; }
 
@@ -67,18 +74,14 @@ public:
     Mutated();
   }
 
-  MOZ_LAYER_DECL_NAME("ThebesLayerComposite", TYPE_SHADOW)
+  MOZ_LAYER_DECL_NAME("ThebesLayerComposite", TYPE_THEBES)
 
 protected:
 
-#ifdef MOZ_LAYERS_HAVE_LOG
   virtual nsACString& PrintInfo(nsACString& aTo, const char* aPrefix) MOZ_OVERRIDE;
-#endif
 
 private:
-  gfxRect GetDisplayPort();
-  gfxSize GetEffectiveResolution();
-  gfxRect GetCompositionBounds();
+  CSSToScreenScale GetEffectiveResolution();
 
   RefPtr<ContentHost> mBuffer;
   bool mRequiresTiledProperties;

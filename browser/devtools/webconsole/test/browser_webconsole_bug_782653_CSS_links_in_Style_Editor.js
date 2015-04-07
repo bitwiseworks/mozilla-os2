@@ -26,35 +26,40 @@ function testViewSource(aHud)
     nodes = hud = StyleEditorUI = null;
   });
 
-  let selector = ".webconsole-msg-cssparser .webconsole-location";
-
-  waitForSuccess({
-    name: "find the location node",
-    validatorFn: function()
-    {
-      return hud.outputNode.querySelector(selector);
+  waitForMessages({
+    webconsole: hud,
+    messages: [{
+      text: "'font-weight'",
+      category: CATEGORY_CSS,
+      severity: SEVERITY_WARNING,
     },
-    successFn: function()
     {
-      nodes = hud.outputNode.querySelectorAll(selector);
-      is(nodes.length, 2, "correct number of css messages");
+      text: "'color'",
+      category: CATEGORY_CSS,
+      severity: SEVERITY_WARNING,
+    }],
+  }).then(([error1Rule, error2Rule]) => {
+    let error1Msg = [...error1Rule.matched][0];
+    let error2Msg = [...error2Rule.matched][0];
+    nodes = [error1Msg.querySelector(".message-location"),
+             error2Msg.querySelector(".message-location")];
+    ok(nodes[0], ".message-location node for the first error");
+    ok(nodes[1], ".message-location node for the second error");
 
-      let target = TargetFactory.forTab(gBrowser.selectedTab);
-      let toolbox = gDevTools.getToolbox(target);
-      toolbox.once("styleeditor-selected", (event, panel) => {
-        StyleEditorUI = panel.UI;
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    let toolbox = gDevTools.getToolbox(target);
+    toolbox.once("styleeditor-selected", (event, panel) => {
+      StyleEditorUI = panel.UI;
 
-        let count = 0;
-        StyleEditorUI.on("editor-added", function() {
-          if (++count == 2) {
-            onStyleEditorReady(panel);
-          }
-        });
+      let count = 0;
+      StyleEditorUI.on("editor-added", function() {
+        if (++count == 2) {
+          onStyleEditorReady(panel);
+        }
       });
+    });
 
-      EventUtils.sendMouseEvent({ type: "click" }, nodes[0]);
-    },
-    failureFn: finishTest,
+    EventUtils.sendMouseEvent({ type: "click" }, nodes[0]);
   });
 }
 
@@ -102,31 +107,22 @@ function onStyleEditorReady(aPanel)
 function checkStyleEditorForSheetAndLine(aHref, aLine, aCallback)
 {
   let foundEditor = null;
-  waitForSuccess({
-    name: "style editor for stylesheet",
-    validatorFn: function()
-    {
-      for (let editor of StyleEditorUI.editors) {
-        if (editor.styleSheet.href == aHref) {
-          foundEditor = editor;
-          return true;
-        }
-      }
-      return false;
-    },
-    successFn: function()
-    {
-      performLineCheck(foundEditor, aLine, aCallback);
-    },
-    failureFn: finishTest,
-  });
+  for (let editor of StyleEditorUI.editors) {
+    if (editor.styleSheet.href == aHref) {
+      foundEditor = editor;
+      break;
+    }
+  }
+
+  ok(foundEditor, "found style editor for " + aHref);
+  performLineCheck(foundEditor, aLine, aCallback);
 }
 
 function performLineCheck(aEditor, aLine, aCallback)
 {
   function checkForCorrectState()
   {
-    is(aEditor.sourceEditor.getCaretPosition().line, aLine,
+    is(aEditor.sourceEditor.getCursor().line, aLine,
        "correct line is selected");
     is(StyleEditorUI.selectedStyleSheetIndex, aEditor.styleSheet.styleSheetIndex,
        "correct stylesheet is selected in the editor");
@@ -134,17 +130,13 @@ function performLineCheck(aEditor, aLine, aCallback)
     aCallback && executeSoon(aCallback);
   }
 
-  waitForSuccess({
-    name: "source editor load",
-    validatorFn: function()
-    {
-      return aEditor.sourceEditor;
-    },
-    successFn: checkForCorrectState,
-    failureFn: function() {
-      info("selectedStyleSheetIndex " + StyleEditorUI.selectedStyleSheetIndex
-           + " expected " + aEditor.styleSheet.styleSheetIndex);
-      finishTest();
-    },
+  info("wait for source editor to load");
+
+  // Get out of the styleeditor-selected event loop.
+  executeSoon(() => {
+    aEditor.getSourceEditor().then(() => {
+      // Get out of the editor's source-editor-load event loop.
+      executeSoon(checkForCorrectState);
+    });
   });
 }

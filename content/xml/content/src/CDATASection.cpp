@@ -5,6 +5,7 @@
 
 #include "mozilla/dom/CDATASection.h"
 #include "mozilla/dom/CDATASectionBinding.h"
+#include "mozilla/IntegerPrintfMacros.h"
 
 namespace mozilla {
 namespace dom {
@@ -13,14 +14,14 @@ CDATASection::~CDATASection()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED4(CDATASection, nsGenericDOMDataNode, nsIDOMNode,
-                             nsIDOMCharacterData, nsIDOMText,
-                             nsIDOMCDATASection)
+NS_IMPL_ISUPPORTS_INHERITED(CDATASection, nsGenericDOMDataNode, nsIDOMNode,
+                            nsIDOMCharacterData, nsIDOMText,
+                            nsIDOMCDATASection)
 
 JSObject*
-CDATASection::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+CDATASection::WrapNode(JSContext *aCx)
 {
-  return CDATASectionBinding::Wrap(aCx, aScope, this);
+  return CDATASectionBinding::Wrap(aCx, this);
 }
 
 bool
@@ -48,7 +49,7 @@ CDATASection::List(FILE* out, int32_t aIndent) const
   int32_t index;
   for (index = aIndent; --index >= 0; ) fputs("  ", out);
 
-  fprintf(out, "CDATASection refcount=%d<", mRefCnt.get());
+  fprintf(out, "CDATASection refcount=%" PRIuPTR "<", mRefCnt.get());
 
   nsAutoString tmp;
   ToCString(tmp, 0, mText.GetLength());

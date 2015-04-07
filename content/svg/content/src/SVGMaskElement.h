@@ -13,7 +13,7 @@
 class nsSVGMaskFrame;
 
 nsresult NS_NewSVGMaskElement(nsIContent **aResult,
-                              already_AddRefed<nsINodeInfo> aNodeInfo);
+                              already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
@@ -28,10 +28,9 @@ class SVGMaskElement MOZ_FINAL : public SVGMaskElementBase
 
 protected:
   friend nsresult (::NS_NewSVGMaskElement(nsIContent **aResult,
-                                          already_AddRefed<nsINodeInfo> aNodeInfo));
-  SVGMaskElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx,
-                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+                                          already_AddRefed<nsINodeInfo>&& aNodeInfo));
+  SVGMaskElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
 
 public:
   // nsIContent interface
@@ -42,8 +41,8 @@ public:
   virtual bool HasValidDimensions() const MOZ_OVERRIDE;
 
   // WebIDL
-  already_AddRefed<nsIDOMSVGAnimatedEnumeration> MaskUnits();
-  already_AddRefed<nsIDOMSVGAnimatedEnumeration> MaskContentUnits();
+  already_AddRefed<SVGAnimatedEnumeration> MaskUnits();
+  already_AddRefed<SVGAnimatedEnumeration> MaskContentUnits();
   already_AddRefed<SVGAnimatedLength> X();
   already_AddRefed<SVGAnimatedLength> Y();
   already_AddRefed<SVGAnimatedLength> Width();

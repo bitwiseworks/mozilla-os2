@@ -23,9 +23,11 @@ FilePicker.prototype = {
   _filePath: null,
   _promptActive: false,
   _filterIndex: 0,
+  _addToRecentDocs: false,
 
   init: function(aParent, aTitle, aMode) {
     this._domWin = aParent;
+    this._mode = aMode;
     Services.obs.addObserver(this, "FilePicker:Result", false);
 
     let idService = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator); 
@@ -149,18 +151,22 @@ FilePicker.prototype = {
   },
 
   get addToRecentDocs() {
-    throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+    return this._addToRecentDocs;
   },
 
   set addToRecentDocs(val) {
-    throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+    this._addToRecentDocs = val;
+  },
+
+  get mode() {
+    return this._mode;
   },
 
   show: function() {
     if (this._domWin) {
-      PromptUtils.fireDialogEvent(this._domWin, "DOMWillOpenModalDialog");
+      this.fireDialogEvent(this._domWin, "DOMWillOpenModalDialog");
       let winUtils = this._domWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
-      callerWin = winUtils.enterModalStateWithWindow();
+      winUtils.enterModalState();
     }
 
     this._promptActive = true;
@@ -170,6 +176,12 @@ FilePicker.prototype = {
     while (this._promptActive)
       thread.processNextEvent(true);
     delete this._promptActive;
+
+    if (this._domWin) {
+      let winUtils = this._domWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      winUtils.leaveModalState();
+      this.fireDialogEvent(this._domWin, "DOMModalDialogClosed");
+    }
 
     if (this._filePath)
       return Ci.nsIFilePicker.returnOK;
@@ -185,8 +197,18 @@ FilePicker.prototype = {
   _sendMessage: function() {
     let msg = {
       type: "FilePicker:Show",
-      guid: this.guid
+      guid: this.guid,
     };
+
+    // Knowing the window lets us destroy any temp files when the tab is closed
+    // Other consumers of the file picker may have to either wait for Android
+    // to clean up the temp dir (not guaranteed) or clean up after themselves.
+    let win = Services.wm.getMostRecentWindow('navigator:browser');
+    let tab = win.BrowserApp.getTabForWindow(this._domWin.top)
+    if (tab) {
+      msg.tabId = tab.id;
+    }
+
     if (!this._extensionsFilter && !this._mimeTypeFilter) {
       // If neither filters is set show anything we can.
       msg.mode = "mimeType";
@@ -203,7 +225,7 @@ FilePicker.prototype = {
   },
 
   sendMessageToJava: function(aMsg) {
-    Cc["@mozilla.org/android/bridge;1"].getService(Ci.nsIAndroidBridge).handleGeckoMessage(JSON.stringify(aMsg));
+    Services.androidBridge.handleGeckoMessage(aMsg);
   },
 
   observe: function(aSubject, aTopic, aData) {
@@ -238,6 +260,20 @@ FilePicker.prototype = {
         return mapFunction(this.mFiles[this.mIndex++]);
       }
     };
+  },
+
+  fireDialogEvent: function(aDomWin, aEventName) {
+    // accessing the document object can throw if this window no longer exists. See bug 789888.
+    try {
+      if (!aDomWin.document)
+        return;
+      let event = aDomWin.document.createEvent("Events");
+      event.initEvent(aEventName, true, true);
+      let winUtils = aDomWin.QueryInterface(Ci.nsIInterfaceRequestor)
+                           .getInterface(Ci.nsIDOMWindowUtils);
+      winUtils.dispatchEventToChromeOnly(aDomWin, event);
+    } catch(ex) {
+    }
   },
 
   classID: Components.ID("{18a4e042-7c7c-424b-a583-354e68553a7f}"),

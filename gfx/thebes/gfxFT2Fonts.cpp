@@ -35,7 +35,9 @@
 #include "prlog.h"
 #include "prinit.h"
 
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/gfx/2D.h"
 
 // rounding and truncation functions for a Freetype floating point number
 // (FT26Dot6) stored in a 32bit integer with high 26 bits for the integer
@@ -101,7 +103,7 @@ gfxFT2FontGroup::gfxFT2FontGroup(const nsAString& families,
         // We want to get rid of this entirely at some point, but first we need real lists of fonts.
         QFont defaultFont;
         QFontInfo fi (defaultFont);
-        familyArray.AppendElement(nsDependentString(static_cast<const PRUnichar *>(fi.family().utf16())));
+        familyArray.AppendElement(nsDependentString(static_cast<const char16_t *>(fi.family().utf16())));
 #elif defined(MOZ_WIDGET_GTK)
         FcResult result;
         FcChar8 *family = nullptr;
@@ -284,7 +286,7 @@ void gfxFT2FontGroup::GetCJKPrefFonts(nsTArray<nsRefPtr<gfxFontEntry> >& aFontEn
             case 950: GetPrefFonts(nsGkAtoms::zh_tw, aFontEntryList); break;
         }
 #else
-        const char *ctype = setlocale(LC_CTYPE, NULL);
+        const char *ctype = setlocale(LC_CTYPE, nullptr);
         if (ctype) {
             if (!PL_strncasecmp(ctype, "ja", 2)) {
                 GetPrefFonts(nsGkAtoms::Japanese, aFontEntryList);
@@ -402,7 +404,7 @@ gfxFT2FontGroup::WhichSystemFontSupportsChar(uint32_t aCh, int32_t aRunScript)
 
 bool
 gfxFT2Font::ShapeText(gfxContext      *aContext,
-                      const PRUnichar *aText,
+                      const char16_t *aText,
                       uint32_t         aOffset,
                       uint32_t         aLength,
                       int32_t          aScript,
@@ -424,9 +426,6 @@ gfxFT2Font::ShapeText(gfxContext      *aContext,
 
     if (!ok && gfxPlatform::GetPlatform()->UseHarfBuzzForScript(aScript)) {
         if (!mHarfBuzzShaper) {
-            gfxFT2LockedFace face(this);
-            mFUnitsConvFactor = face.XScale();
-
             mHarfBuzzShaper = new gfxHarfBuzzShaper(this);
         }
         ok = mHarfBuzzShaper->ShapeText(aContext, aText,
@@ -444,7 +443,7 @@ gfxFT2Font::ShapeText(gfxContext      *aContext,
 }
 
 void
-gfxFT2Font::AddRange(const PRUnichar *aText, uint32_t aOffset,
+gfxFT2Font::AddRange(const char16_t *aText, uint32_t aOffset,
                      uint32_t aLength, gfxShapedText *aShapedText)
 {
     const uint32_t appUnitsPerDevUnit = aShapedText->GetAppUnitsPerDevUnit();
@@ -460,7 +459,7 @@ gfxFT2Font::AddRange(const PRUnichar *aText, uint32_t aOffset,
     FT_UInt spaceGlyph = GetSpaceGlyph();
 
     for (uint32_t i = 0; i < aLength; i++, aOffset++) {
-        PRUnichar ch = aText[i];
+        char16_t ch = aText[i];
 
         if (ch == 0) {
             // treat this null byte as a missing glyph, don't create a glyph for it
@@ -485,7 +484,7 @@ gfxFT2Font::AddRange(const PRUnichar *aText, uint32_t aOffset,
         } else {
             // find next character and its glyph -- in case they exist
             // and exist in the current font face -- to compute kerning
-            PRUnichar chNext = 0;
+            char16_t chNext = 0;
             FT_UInt gidNext = 0;
             FT_Pos lsbDeltaNext = 0;
 
@@ -546,20 +545,14 @@ gfxFT2Font::gfxFT2Font(cairo_scaled_font_t *aCairoFont,
                        const gfxFontStyle *aFontStyle,
                        bool aNeedsBold)
     : gfxFT2FontBase(aCairoFont, aFontEntry, aFontStyle)
+    , mCharGlyphCache(64)
 {
     NS_ASSERTION(mFontEntry, "Unable to find font entry for font.  Something is whack.");
     mApplySyntheticBold = aNeedsBold;
-    mCharGlyphCache.Init(64);
 }
 
 gfxFT2Font::~gfxFT2Font()
 {
-}
-
-cairo_font_face_t *
-gfxFT2Font::CairoFontFace()
-{
-    return GetFontEntry()->CairoFontFace();
 }
 
 /**
@@ -595,10 +588,14 @@ gfxFT2Font::GetOrMakeFont(FT2FontEntry *aFontEntry, const gfxFontStyle *aStyle,
     nsRefPtr<gfxFont> font = gfxFontCache::GetCache()->Lookup(aFontEntry, aStyle);
     if (!font) {
         cairo_scaled_font_t *scaledFont = aFontEntry->CreateScaledFont(aStyle);
+        if (!scaledFont) {
+            return nullptr;
+        }
         font = new gfxFT2Font(scaledFont, aFontEntry, aStyle, aNeedsBold);
         cairo_scaled_font_destroy(scaledFont);
-        if (!font)
+        if (!font) {
             return nullptr;
+        }
         gfxFontCache::GetCache()->AddNew(font);
     }
     return font.forget().downcast<gfxFT2Font>();
@@ -642,18 +639,36 @@ gfxFT2Font::FillGlyphDataForChar(uint32_t ch, CachedGlyphData *gd)
 }
 
 void
-gfxFT2Font::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                FontCacheSizes*   aSizes) const
+gfxFT2Font::AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                   FontCacheSizes* aSizes) const
 {
-    gfxFont::SizeOfExcludingThis(aMallocSizeOf, aSizes);
+    gfxFont::AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
     aSizes->mFontInstances +=
         mCharGlyphCache.SizeOfExcludingThis(nullptr, aMallocSizeOf);
 }
 
 void
-gfxFT2Font::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                FontCacheSizes*   aSizes) const
+gfxFT2Font::AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                   FontCacheSizes* aSizes) const
 {
     aSizes->mFontInstances += aMallocSizeOf(this);
-    SizeOfExcludingThis(aMallocSizeOf, aSizes);
+    AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
 }
+
+#ifdef USE_SKIA
+mozilla::TemporaryRef<mozilla::gfx::GlyphRenderingOptions>
+gfxFT2Font::GetGlyphRenderingOptions()
+{
+  mozilla::gfx::FontHinting hinting;
+
+  if (gfxPlatform::GetPlatform()->FontHintingEnabled()) {
+    hinting = mozilla::gfx::FontHinting::NORMAL;
+  } else {
+    hinting = mozilla::gfx::FontHinting::NONE;
+  }
+
+  // We don't want to force the use of the autohinter over the font's built in hints
+  return mozilla::gfx::Factory::CreateCairoGlyphRenderingOptions(hinting, false);
+}
+#endif
+

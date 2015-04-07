@@ -7,8 +7,6 @@
 #ifndef vm_StringBuffer_h
 #define vm_StringBuffer_h
 
-#include "mozilla/DebugOnly.h"
-
 #include "jscntxt.h"
 
 #include "js/Vector.h"
@@ -33,19 +31,21 @@ class StringBuffer
 
     CharBuffer cb;
 
-    JSContext *context() const { return cb.allocPolicy().context(); }
+    ExclusiveContext *context() const {
+        return cb.allocPolicy().context()->asExclusiveContext();
+    }
 
     StringBuffer(const StringBuffer &other) MOZ_DELETE;
     void operator=(const StringBuffer &other) MOZ_DELETE;
 
   public:
-    explicit StringBuffer(JSContext *cx) : cb(cx) { }
+    explicit StringBuffer(ExclusiveContext *cx) : cb(cx) { }
 
     inline bool reserve(size_t len) { return cb.reserve(len); }
     inline bool resize(size_t len) { return cb.resize(len); }
     inline bool append(const jschar c) { return cb.append(c); }
     inline bool append(const jschar *chars, size_t len) { return cb.append(chars, len); }
-    inline bool append(const JS::CharPtr chars, size_t len) { return cb.append(chars.get(), len); }
+    inline bool append(const JS::ConstCharPtr chars, size_t len) { return cb.append(chars.get(), len); }
     inline bool append(const jschar *begin, const jschar *end) { return cb.append(begin, end); }
     inline bool append(JSString *str);
     inline bool append(JSLinearString *str);
@@ -64,7 +64,7 @@ class StringBuffer
     void infallibleAppend(const jschar *chars, size_t len) {
         cb.infallibleAppend(chars, len);
     }
-    void infallibleAppend(const JS::CharPtr chars, size_t len) {
+    void infallibleAppend(const JS::ConstCharPtr chars, size_t len) {
         cb.infallibleAppend(chars.get(), len);
     }
     void infallibleAppend(const jschar *begin, const jschar *end) {
@@ -120,10 +120,7 @@ StringBuffer::appendInflated(const char *cstr, size_t cstrlen)
     size_t lengthBefore = length();
     if (!cb.growByUninitialized(cstrlen))
         return false;
-    mozilla::DebugOnly<size_t> oldcstrlen = cstrlen;
-    mozilla::DebugOnly<bool> ok = InflateStringToBuffer(context(), cstr, cstrlen,
-                                                        begin() + lengthBefore, &cstrlen);
-    JS_ASSERT(ok && oldcstrlen == cstrlen);
+    InflateStringToBuffer(cstr, cstrlen, begin() + lengthBefore);
     return true;
 }
 
@@ -142,7 +139,7 @@ ValueToStringBuffer(JSContext *cx, const Value &v, StringBuffer &sb)
 
 /* ES5 9.8 ToString for booleans, appending the result to the string buffer. */
 inline bool
-BooleanToStringBuffer(JSContext *cx, bool b, StringBuffer &sb)
+BooleanToStringBuffer(bool b, StringBuffer &sb)
 {
     return b ? sb.append("true") : sb.append("false");
 }

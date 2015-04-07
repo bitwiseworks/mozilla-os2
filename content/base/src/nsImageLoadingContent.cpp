@@ -26,12 +26,9 @@
 #include "imgRequestProxy.h"
 #include "nsThreadUtils.h"
 #include "nsNetUtil.h"
-#include "nsAsyncDOMEvent.h"
 #include "nsImageFrame.h"
 
 #include "nsIPresShell.h"
-#include "nsEventStates.h"
-#include "nsGUIEvent.h"
 
 #include "nsIChannel.h"
 #include "nsIStreamListener.h"
@@ -40,14 +37,20 @@
 #include "nsIDOMNode.h"
 
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
 #include "nsLayoutUtils.h"
 #include "nsIContentPolicy.h"
-#include "nsEventDispatcher.h"
 #include "nsSVGEffects.h"
 
 #include "mozAutoDocUpdate.h"
+#include "mozilla/AsyncEventDispatcher.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ScriptSettings.h"
+
+#ifdef LoadImage
+// Undefine LoadImage to prevent naming conflict with Windows.
+#undef LoadImage
+#endif
 
 using namespace mozilla;
 
@@ -89,6 +92,7 @@ nsImageLoadingContent::nsImageLoadingContent()
     mStateChangerDepth(0),
     mCurrentRequestRegistered(false),
     mPendingRequestRegistered(false),
+    mFrameCreateCalled(false),
     mVisibleCount(0)
 {
   if (!nsContentUtils::GetImgLoaderForChannel(nullptr)) {
@@ -236,8 +240,16 @@ nsImageLoadingContent::OnStopRequest(imgIRequest* aRequest,
   if (shell && shell->IsVisible() &&
       (!shell->DidInitialize() || shell->IsPaintingSuppressed())) {
 
-    if (NS_SUCCEEDED(mCurrentRequest->StartDecoding())) {
-      startedDecoding = true;
+    // If we've gotten a frame and that frame has called FrameCreate and that
+    // frame has been reflowed then we know that it checked it's own visibility
+    // so we can trust our visible count and we don't start decode if we are not
+    // visible.
+    nsIFrame* f = GetOurPrimaryFrame();
+    if (!mFrameCreateCalled || !f || (f->GetStateBits() & NS_FRAME_FIRST_REFLOW) ||
+        mVisibleCount > 0 || shell->AssumeAllImagesVisible()) {
+      if (NS_SUCCEEDED(mCurrentRequest->StartDecoding())) {
+        startedDecoding = true;
+      }
     }
   }
 
@@ -412,7 +424,7 @@ nsImageLoadingContent::GetRequest(int32_t aRequestType,
   NS_ENSURE_ARG_POINTER(aRequest);
 
   ErrorResult result;
-  *aRequest = GetRequest(aRequestType, result).get();
+  *aRequest = GetRequest(aRequestType, result).take();
 
   return result.ErrorCode();
 }
@@ -422,23 +434,19 @@ nsImageLoadingContent::FrameCreated(nsIFrame* aFrame)
 {
   NS_ASSERTION(aFrame, "aFrame is null");
 
+  mFrameCreateCalled = true;
+
   if (aFrame->HasAnyStateBits(NS_FRAME_IN_POPUP)) {
     // Assume all images in popups are visible.
     IncrementVisibleCount();
   }
 
-  nsPresContext* presContext = aFrame->PresContext();
-  if (mVisibleCount == 0) {
-    presContext->PresShell()->EnsureImageInVisibleList(this);
-  }
-
-  // We pass the SKIP_FRAME_CHECK flag to TrackImage here because our primary
-  // frame pointer hasn't been setup yet when this is caled.
-  TrackImage(mCurrentRequest, SKIP_FRAME_CHECK);
-  TrackImage(mPendingRequest, SKIP_FRAME_CHECK);
+  TrackImage(mCurrentRequest);
+  TrackImage(mPendingRequest);
 
   // We need to make sure that our image request is registered, if it should
   // be registered.
+  nsPresContext* presContext = aFrame->PresContext();
   if (mCurrentRequest) {
     nsLayoutUtils::RegisterImageRequestIfAnimated(presContext, mCurrentRequest,
                                                   &mCurrentRequestRegistered);
@@ -455,21 +463,29 @@ nsImageLoadingContent::FrameDestroyed(nsIFrame* aFrame)
 {
   NS_ASSERTION(aFrame, "aFrame is null");
 
+  mFrameCreateCalled = false;
+
   // We need to make sure that our image request is deregistered.
+  nsPresContext* presContext = GetFramePresContext();
   if (mCurrentRequest) {
-    nsLayoutUtils::DeregisterImageRequest(GetFramePresContext(),
+    nsLayoutUtils::DeregisterImageRequest(presContext,
                                           mCurrentRequest,
                                           &mCurrentRequestRegistered);
   }
 
   if (mPendingRequest) {
-    nsLayoutUtils::DeregisterImageRequest(GetFramePresContext(),
+    nsLayoutUtils::DeregisterImageRequest(presContext,
                                           mPendingRequest,
                                           &mPendingRequestRegistered);
   }
 
   UntrackImage(mCurrentRequest);
   UntrackImage(mPendingRequest);
+
+  nsIPresShell* presShell = presContext ? presContext->GetPresShell() : nullptr;
+  if (presShell) {
+    presShell->RemoveImageFromVisibleList(this);
+  }
 
   if (aFrame->HasAnyStateBits(NS_FRAME_IN_POPUP)) {
     // We assume all images in popups are visible, so this decrement balances
@@ -528,7 +544,7 @@ nsImageLoadingContent::GetCurrentURI(nsIURI** aURI)
   NS_ENSURE_ARG_POINTER(aURI);
 
   ErrorResult result;
-  *aURI = GetCurrentURI(result).get();
+  *aURI = GetCurrentURI(result).take();
   return result.ErrorCode();
 }
 
@@ -583,7 +599,7 @@ nsImageLoadingContent::LoadImageWithChannel(nsIChannel* aChannel,
   NS_ENSURE_ARG_POINTER(aListener);
 
   ErrorResult result;
-  *aListener = LoadImageWithChannel(aChannel, result).get();
+  *aListener = LoadImageWithChannel(aChannel, result).take();
   return result.ErrorCode();
 }
 
@@ -806,12 +822,16 @@ nsImageLoadingContent::LoadImage(nsIURI* aNewURI,
 
   // Not blocked. Do the load.
   nsRefPtr<imgRequestProxy>& req = PrepareNextRequest();
+  nsCOMPtr<nsIContent> content =
+      do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
   nsresult rv;
   rv = nsContentUtils::LoadImage(aNewURI, aDocument,
                                  aDocument->NodePrincipal(),
                                  aDocument->GetDocumentURI(),
                                  this, loadFlags,
+                                 content->LocalName(),
                                  getter_AddRefs(req));
+
   if (NS_SUCCEEDED(rv)) {
     TrackImage(req);
     ResetAnimationIfNeeded();
@@ -849,21 +869,22 @@ nsImageLoadingContent::LoadImage(nsIURI* aNewURI,
 }
 
 nsresult
-nsImageLoadingContent::ForceImageState(bool aForce, nsEventStates::InternalType aState)
+nsImageLoadingContent::ForceImageState(bool aForce,
+                                       EventStates::InternalType aState)
 {
   mIsImageStateForced = aForce;
-  mForcedImageState = nsEventStates(aState);
+  mForcedImageState = EventStates(aState);
   return NS_OK;
 }
 
-nsEventStates
+EventStates
 nsImageLoadingContent::ImageState() const
 {
   if (mIsImageStateForced) {
     return mForcedImageState;
   }
 
-  nsEventStates states;
+  EventStates states;
 
   if (mBroken) {
     states |= NS_EVENT_STATE_BROKEN;
@@ -1028,10 +1049,10 @@ nsImageLoadingContent::FireEvent(const nsAString& aEventType)
 
   nsCOMPtr<nsINode> thisNode = do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
 
-  nsRefPtr<nsAsyncDOMEvent> event =
-    new nsLoadBlockingAsyncDOMEvent(thisNode, aEventType, false, false);
-  event->PostDOMEvent();
-  
+  nsRefPtr<AsyncEventDispatcher> loadBlockingAsyncDispatcher =
+    new LoadBlockingAsyncEventDispatcher(thisNode, aEventType, false, false);
+  loadBlockingAsyncDispatcher->PostDOMEvent();
+
   return NS_OK;
 }
 
@@ -1183,12 +1204,6 @@ nsImageLoadingContent::ClearPendingRequest(nsresult aReason,
   if (!mPendingRequest)
     return;
 
-  // Push a null JSContext on the stack so that code that runs within
-  // the below code doesn't think it's being called by JS. See bug
-  // 604262.
-  nsCxPusher pusher;
-  pusher.PushNull();
-
   // Deregister this image from the refresh driver so it no longer receives
   // notifications.
   nsLayoutUtils::DeregisterImageRequest(GetFramePresContext(), mPendingRequest,
@@ -1248,11 +1263,6 @@ nsImageLoadingContent::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   if (!aDocument)
     return;
 
-  // Push a null JSContext on the stack so that callbacks triggered by the
-  // below code won't think they're being called from JS.
-  nsCxPusher pusher;
-  pusher.PushNull();
-
   TrackImage(mCurrentRequest);
   TrackImage(mPendingRequest);
 
@@ -1268,11 +1278,6 @@ nsImageLoadingContent::UnbindFromTree(bool aDeep, bool aNullParent)
   if (!doc)
     return;
 
-  // Push a null JSContext on the stack so that callbacks triggered by the
-  // below code won't think they're being called from JS.
-  nsCxPusher pusher;
-  pusher.PushNull();
-
   UntrackImage(mCurrentRequest);
   UntrackImage(mPendingRequest);
 
@@ -1281,7 +1286,7 @@ nsImageLoadingContent::UnbindFromTree(bool aDeep, bool aNullParent)
 }
 
 void
-nsImageLoadingContent::TrackImage(imgIRequest* aImage, uint32_t aFlags /* = 0 */)
+nsImageLoadingContent::TrackImage(imgIRequest* aImage)
 {
   if (!aImage)
     return;
@@ -1290,7 +1295,7 @@ nsImageLoadingContent::TrackImage(imgIRequest* aImage, uint32_t aFlags /* = 0 */
              "Why haven't we heard of this request?");
 
   nsIDocument* doc = GetOurCurrentDoc();
-  if (doc && ((aFlags & SKIP_FRAME_CHECK) || GetOurPrimaryFrame()) &&
+  if (doc && (mFrameCreateCalled || GetOurPrimaryFrame()) &&
       (mVisibleCount > 0)) {
     if (aImage == mCurrentRequest && !(mCurrentRequestFlags & REQUEST_IS_TRACKED)) {
       mCurrentRequestFlags |= REQUEST_IS_TRACKED;

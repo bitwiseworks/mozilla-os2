@@ -11,7 +11,7 @@
 typedef nsSVGFE SVGFEComponentTransferElementBase;
 
 nsresult NS_NewSVGFEComponentTransferElement(nsIContent **aResult,
-                                             already_AddRefed<nsINodeInfo> aNodeInfo);
+                                             already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
@@ -19,20 +19,20 @@ namespace dom {
 class SVGFEComponentTransferElement : public SVGFEComponentTransferElementBase
 {
   friend nsresult (::NS_NewSVGFEComponentTransferElement(nsIContent **aResult,
-                                                         already_AddRefed<nsINodeInfo> aNodeInfo));
+                                                         already_AddRefed<nsINodeInfo>&& aNodeInfo));
 protected:
-  SVGFEComponentTransferElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  SVGFEComponentTransferElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : SVGFEComponentTransferElementBase(aNodeInfo)
   {
   }
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
 public:
-  virtual nsresult Filter(nsSVGFilterInstance* aInstance,
-                          const nsTArray<const Image*>& aSources,
-                          const Image* aTarget,
-                          const nsIntRect& aDataRect) MOZ_OVERRIDE;
+  virtual FilterPrimitiveDescription
+    GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
+                            const IntRect& aFilterSubregion,
+                            const nsTArray<bool>& aInputsAreTainted,
+                            nsTArray<mozilla::RefPtr<SourceSurface>>& aInputImages) MOZ_OVERRIDE;
   virtual bool AttributeAffectsRendering(
           int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
   virtual nsSVGString& GetResultImageName() MOZ_OVERRIDE { return mStringAttributes[RESULT]; }
@@ -45,8 +45,6 @@ public:
   already_AddRefed<SVGAnimatedString> In1();
 
 protected:
-  virtual bool OperatesOnPremultipledAlpha(int32_t) MOZ_OVERRIDE { return false; }
-
   virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
 
   enum { RESULT, IN1 };

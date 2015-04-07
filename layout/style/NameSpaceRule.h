@@ -9,6 +9,7 @@
 #define mozilla_css_NameSpaceRule_h__
 
 #include "mozilla/Attributes.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/css/Rule.h"
 
 #include "nsIDOMCSSRule.h"
@@ -52,7 +53,7 @@ public:
 
   void GetURLSpec(nsString& aURLSpec) const { aURLSpec = mURLSpec; }
 
-  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+  virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
     MOZ_MUST_OVERRIDE;
 
   // nsIDOMCSSRule interface
@@ -63,9 +64,9 @@ private:
   nsString          mURLSpec;
 };
 
+NS_DEFINE_STATIC_IID_ACCESSOR(NameSpaceRule, NS_CSS_NAMESPACE_RULE_IMPL_CID)
+
 } // namespace css
 } // namespace mozilla
-
-NS_DEFINE_STATIC_IID_ACCESSOR(mozilla::css::NameSpaceRule, NS_CSS_NAMESPACE_RULE_IMPL_CID)
 
 #endif /* mozilla_css_NameSpaceRule_h__ */

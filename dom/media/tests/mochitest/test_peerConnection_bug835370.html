@@ -27,20 +27,16 @@
     try { pconnect.createOffer(step1, failed, 1); } catch (e) { exception = e; }
     ok(exception, "createOffer(step1, failed, 1) throws");
     exception = null;
-    try { pconnect.createOffer(step1, failed, []); } catch (e) { exception = e; }
-    ok(exception, "createOffer(step1, failed, []) throws");
-    exception = null;
     try { pconnects.createOffer(step1, failed, {}); } catch (e) { exception = e; }
     ok(!exception, "createOffer(step1, failed, {}) succeeds");
     exception = null;
-    try { pconnect.createOffer(step1, failed, { mandatory: [] }); } catch (e) { exception = e; }
-    ok(exception, "createOffer(step1, failed, { mandatory: [] }) throws");
-    exception = null;
-    try { pconnect.createOffer(step1, failed, { mandatory: { FooBar: true } }); } catch (e) { exception = e; }
+    try {
+        pconnect.createOffer(step1, failed, { mandatory: { FooBar: true } });
+    } catch (e) {
+        ok(e.message.indexOf("FooBar") > 0, "createOffer has readable exceptions");
+        exception = e;
+    }
     ok(exception, "createOffer(step1, failed, { mandatory: { FooBar: true } }) throws");
-    exception = null;
-    try { pconnect.createOffer(step1, failed, { optional: {} }); } catch (e) { exception = e; }
-    ok(exception, "createOffer(step1, failed, { optional: {} }) throws");
     exception = null;
     try { pconnects.createOffer(step1, failed, { optional: [] }); } catch (e) { exception = e; }
     ok(!exception, "createOffer(step1, failed, { optional: [] }) succeeds");
@@ -53,6 +49,8 @@
     exception = null;
     try { pconnects.createOffer(step1, failed, { mandatory: { OfferToReceiveVideo: false, OfferToReceiveAudio: true, MozDontOfferDataChannel: true}, optional: [{ VoiceActivityDetection: true }, { FooBar: "42"  }] }); } catch (e) { exception = e; }
     ok(!exception, "createOffer(step1, failed, { mandatory: { OfferToReceiveVideo: false, OfferToReceiveAudio: true, MozDontOfferDataChannel: true}, optional: [{ VoiceActivityDetection: true }, { FooBar: \"42\"  }] }) succeeds");
+    pconnect.close();
+    pconnects.close();
     pconnect = null;
     pconnects = null;
     SimpleTest.finish();

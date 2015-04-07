@@ -3,9 +3,6 @@
 
 Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
 Cu.import("resource://gre/modules/devtools/dbg-client.jsm");
-Cu.import("resource://gre/modules/devtools/DevToolsUtils.jsm");
-
-var { safeErrorString } = DevToolsUtils;
 
 let port = 2929;
 
@@ -82,7 +79,10 @@ function test_socket_shutdown()
 
     onClosed: function(aStatus) {
       do_print("test_socket_shutdown onClosed called at " + new Date().toTimeString());
-      do_check_eq(aStatus, Cr.NS_ERROR_CONNECTION_REFUSED);
+      // The connection should be refused here, but on slow or overloaded
+      // machines it may just time out.
+      let expected = [ Cr.NS_ERROR_CONNECTION_REFUSED, Cr.NS_ERROR_NET_TIMEOUT ];
+      do_check_neq(expected.indexOf(aStatus), -1);
       run_next_test();
     }
   };
@@ -144,7 +144,7 @@ function makeInfallible(aHandler, aName) {
       if (aName) {
         msg += aName + " ";
       }
-      msg += "threw an exception: " + safeErrorString(ex);
+      msg += "threw an exception: " + DevToolsUtils.safeErrorString(ex);
       if (ex.stack) {
         msg += "\nCall stack:\n" + ex.stack;
       }
@@ -159,6 +159,7 @@ function makeInfallible(aHandler, aName) {
          */
         Cu.reportError(msg);
       }
+      return undefined;
     }
   }
 }

@@ -11,13 +11,12 @@
  *****************************************************************************
  */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsMemory.h"
 #include "nsProcess.h"
-#include "prtypes.h"
 #include "prio.h"
 #include "prenv.h"
 #include "nsCRT.h"
@@ -59,8 +58,8 @@ cpu_type_t pref_cpu_types[2] = {
 //-------------------------------------------------------------------//
 // nsIProcess implementation
 //-------------------------------------------------------------------//
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsProcess, nsIProcess,
-                                         nsIObserver)
+NS_IMPL_ISUPPORTS(nsProcess, nsIProcess,
+                  nsIObserver)
 
 //Constructor
 nsProcess::nsProcess()
@@ -89,7 +88,8 @@ nsProcess::Init(nsIFile* executable)
     if (mExecutable)
         return NS_ERROR_ALREADY_INITIALIZED;
 
-    NS_ENSURE_ARG_POINTER(executable);
+    if (NS_WARN_IF(!executable))
+        return NS_ERROR_INVALID_ARG;
     bool isFile;
 
     //First make sure the file exists
@@ -113,7 +113,7 @@ nsProcess::Init(nsIFile* executable)
 
 #if defined(XP_WIN)
 // Out param `wideCmdLine` must be PR_Freed by the caller.
-static int assembleCmdLine(char *const *argv, PRUnichar **wideCmdLine,
+static int assembleCmdLine(char *const *argv, wchar_t **wideCmdLine,
                            UINT codePage)
 {
     char *const *arg;
@@ -140,7 +140,7 @@ static int assembleCmdLine(char *const *argv, PRUnichar **wideCmdLine,
                 + 1;                     /* space in between, or final null */
     }
     p = cmdLine = (char *) PR_MALLOC(cmdLineSize*sizeof(char));
-    if (p == NULL) {
+    if (p == nullptr) {
         return -1;
     }
 
@@ -213,8 +213,8 @@ static int assembleCmdLine(char *const *argv, PRUnichar **wideCmdLine,
     } 
 
     *p = '\0';
-    int32_t numChars = MultiByteToWideChar(codePage, 0, cmdLine, -1, NULL, 0); 
-    *wideCmdLine = (PRUnichar *) PR_MALLOC(numChars*sizeof(PRUnichar));
+    int32_t numChars = MultiByteToWideChar(codePage, 0, cmdLine, -1, nullptr, 0);
+    *wideCmdLine = (wchar_t *) PR_MALLOC(numChars*sizeof(wchar_t));
     MultiByteToWideChar(codePage, 0, cmdLine, -1, *wideCmdLine, numChars); 
     PR_Free(cmdLine);
     return 0;
@@ -242,7 +242,7 @@ void nsProcess::Monitor(void *arg)
     {
         MutexAutoLock lock(process->mLock);
         CloseHandle(process->mProcess);
-        process->mProcess = NULL;
+        process->mProcess = nullptr;
         process->mExitValue = exitCode;
         if (process->mShutdown)
             return;
@@ -339,8 +339,8 @@ nsProcess::CopyArgsAndRunProcess(bool blocking, const char** args,
                                  uint32_t count, nsIObserver* observer,
                                  bool holdWeak)
 {
-    // Add one to the count for the program name and one for NULL termination.
-    char **my_argv = NULL;
+    // Add one to the count for the program name and one for null termination.
+    char **my_argv = nullptr;
     my_argv = (char**)NS_Alloc(sizeof(char*) * (count + 2));
     if (!my_argv) {
         return NS_ERROR_OUT_OF_MEMORY;
@@ -352,7 +352,7 @@ nsProcess::CopyArgsAndRunProcess(bool blocking, const char** args,
         my_argv[i + 1] = const_cast<char*>(args[i]);
     }
 
-    my_argv[count + 1] = NULL;
+    my_argv[count + 1] = nullptr;
 
     nsresult rv = RunProcess(blocking, my_argv, observer, holdWeak, false);
 
@@ -363,26 +363,26 @@ nsProcess::CopyArgsAndRunProcess(bool blocking, const char** args,
 
 // XXXldb |args| has the wrong const-ness
 NS_IMETHODIMP  
-nsProcess::Runw(bool blocking, const PRUnichar **args, uint32_t count)
+nsProcess::Runw(bool blocking, const char16_t **args, uint32_t count)
 {
     return CopyArgsAndRunProcessw(blocking, args, count, nullptr, false);
 }
 
 // XXXldb |args| has the wrong const-ness
 NS_IMETHODIMP  
-nsProcess::RunwAsync(const PRUnichar **args, uint32_t count,
+nsProcess::RunwAsync(const char16_t **args, uint32_t count,
                     nsIObserver* observer, bool holdWeak)
 {
     return CopyArgsAndRunProcessw(false, args, count, observer, holdWeak);
 }
 
 nsresult
-nsProcess::CopyArgsAndRunProcessw(bool blocking, const PRUnichar** args,
+nsProcess::CopyArgsAndRunProcessw(bool blocking, const char16_t** args,
                                   uint32_t count, nsIObserver* observer,
                                   bool holdWeak)
 {
-    // Add one to the count for the program name and one for NULL termination.
-    char **my_argv = NULL;
+    // Add one to the count for the program name and one for null termination.
+    char **my_argv = nullptr;
     my_argv = (char**)NS_Alloc(sizeof(char*) * (count + 2));
     if (!my_argv) {
         return NS_ERROR_OUT_OF_MEMORY;
@@ -394,7 +394,7 @@ nsProcess::CopyArgsAndRunProcessw(bool blocking, const PRUnichar** args,
         my_argv[i + 1] = ToNewUTF8String(nsDependentString(args[i]));
     }
 
-    my_argv[count + 1] = NULL;
+    my_argv[count + 1] = nullptr;
 
     nsresult rv = RunProcess(blocking, my_argv, observer, holdWeak, true);
 
@@ -409,8 +409,10 @@ nsresult
 nsProcess::RunProcess(bool blocking, char **my_argv, nsIObserver* observer,
                       bool holdWeak, bool argsUTF8)
 {
-    NS_ENSURE_TRUE(mExecutable, NS_ERROR_NOT_INITIALIZED);
-    NS_ENSURE_FALSE(mThread, NS_ERROR_ALREADY_INITIALIZED);
+    if (NS_WARN_IF(!mExecutable))
+        return NS_ERROR_NOT_INITIALIZED;
+    if (NS_WARN_IF(mThread))
+        return NS_ERROR_ALREADY_INITIALIZED;
 
     if (observer) {
         if (holdWeak) {
@@ -428,11 +430,11 @@ nsProcess::RunProcess(bool blocking, char **my_argv, nsIObserver* observer,
 
 #if defined(PROCESSMODEL_WINAPI)
     BOOL retVal;
-    PRUnichar *cmdLine = NULL;
+    wchar_t *cmdLine = nullptr;
 
     // The 'argv' array is null-terminated and always starts with the program path.
     // If the second slot is non-null then arguments are being passed.
-    if (my_argv[1] != NULL &&
+    if (my_argv[1] != nullptr &&
         assembleCmdLine(my_argv + 1, &cmdLine, argsUTF8 ? CP_UTF8 : CP_ACP) == -1) {
         return NS_ERROR_FILE_EXECUTION_FAILED;    
     }
@@ -448,7 +450,7 @@ nsProcess::RunProcess(bool blocking, char **my_argv, nsIObserver* observer,
     SHELLEXECUTEINFOW sinfo;
     memset(&sinfo, 0, sizeof(SHELLEXECUTEINFOW));
     sinfo.cbSize = sizeof(SHELLEXECUTEINFOW);
-    sinfo.hwnd   = NULL;
+    sinfo.hwnd   = nullptr;
     sinfo.lpFile = wideFile.get();
     sinfo.nShow  = SW_SHOWNORMAL;
     sinfo.fMask  = SEE_MASK_FLAG_DDEWAIT |
@@ -487,7 +489,7 @@ nsProcess::RunProcess(bool blocking, char **my_argv, nsIObserver* observer,
 
     // Note that the 'argv' array is already null-terminated, which 'posix_spawnp' requires.
     pid_t newPid = 0;
-    int result = posix_spawnp(&newPid, my_argv[0], NULL, &spawnattr, my_argv, *_NSGetEnviron());
+    int result = posix_spawnp(&newPid, my_argv[0], nullptr, &spawnattr, my_argv, *_NSGetEnviron());
     mPid = static_cast<int32_t>(newPid);
 
     posix_spawnattr_destroy(&spawnattr);
@@ -496,7 +498,7 @@ nsProcess::RunProcess(bool blocking, char **my_argv, nsIObserver* observer,
         return NS_ERROR_FAILURE;
     }
 #else
-    mProcess = PR_CreateProcess(my_argv[0], my_argv, NULL, NULL);
+    mProcess = PR_CreateProcess(my_argv[0], my_argv, nullptr, nullptr);
     if (!mProcess)
         return NS_ERROR_FAILURE;
     struct MYProcess {
@@ -515,7 +517,7 @@ nsProcess::RunProcess(bool blocking, char **my_argv, nsIObserver* observer,
     }
     else {
         mThread = PR_CreateThread(PR_SYSTEM_THREAD, Monitor, this,
-                                  PR_PRIORITY_NORMAL, PR_LOCAL_THREAD,
+                                  PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
                                   PR_JOINABLE_THREAD, 0);
         if (!mThread) {
             NS_RELEASE_THIS();
@@ -595,7 +597,7 @@ nsProcess::GetExitValue(int32_t *aExitValue)
 }
 
 NS_IMETHODIMP
-nsProcess::Observe(nsISupports* subject, const char* topic, const PRUnichar* data)
+nsProcess::Observe(nsISupports* subject, const char* topic, const char16_t* data)
 {
     // Shutting down, drop all references
     if (mThread) {

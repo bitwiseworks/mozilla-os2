@@ -16,8 +16,8 @@ pref("extensions.installDistroAddons", false);
 // Disable the add-on compatibility dialog
 pref("extensions.showMismatchUI", false);
 
-// Whether or not we've ever run.  We use this to set permissions on firstrun.
-pref("webapprt.firstrun", false);
+// Set reportURL for crashes
+pref("breakpad.reportURL", "https://crash-stats.mozilla.com/report/index/");
 
 // Blocklist preferences
 pref("extensions.blocklist.enabled", true);
@@ -31,11 +31,53 @@ pref("extensions.blocklist.itemURL", "https://addons.mozilla.org/%LOCALE%/%APP%/
 
 pref("full-screen-api.enabled", true);
 
+// IndexedDB
+pref("dom.indexedDB.enabled", true);
+pref("dom.indexedDB.warningQuota", 50);
+
+// Offline cache prefs
+pref("browser.offline-apps.notify", false);
+pref("browser.cache.offline.enable", true);
+pref("offline-apps.allow_by_default", true);
+
+// TCPSocket
+pref("dom.mozTCPSocket.enabled", true);
 
 // Enable smooth scrolling
 pref("general.smoothScroll", true);
 
+// WebPayment
+pref("dom.mozPay.enabled", true);
+
+// System messages
+pref("dom.sysmsg.enabled", true);
+
+// Alarm API
+pref("dom.mozAlarms.enabled", true);
+
+// Disable slow script dialog for apps
+pref("dom.max_script_run_time", 0);
+pref("dom.max_chrome_script_run_time", 0);
+
+// The request URL of the GeoLocation backend
+pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%");
+
+#ifndef RELEASE_BUILD
+// Enable mozPay default provider
+pref("dom.payment.provider.0.name", "Firefox Marketplace");
+pref("dom.payment.provider.0.description", "marketplace.firefox.com");
+pref("dom.payment.provider.0.uri", "https://marketplace.firefox.com/mozpay/?req=");
+pref("dom.payment.provider.0.type", "mozilla/payments/pay/v1");
+pref("dom.payment.provider.0.requestMethod", "GET");
+#endif
+
+// Enable window resize and move
+pref("dom.always_allow_move_resize_window", true);
+
 pref("plugin.allowed_types", "application/x-shockwave-flash,application/futuresplash");
+
+pref("devtools.debugger.remote-enabled", true);
+pref("devtools.debugger.force-local", true);
 
 // The default for this pref reflects whether the build is capable of IPC.
 // (Turning it on in a no-IPC build will have no effect.)
@@ -49,3 +91,4 @@ pref("dom.ipc.plugins.enabled.x86_64", true);
 pref("dom.ipc.plugins.enabled", true);
 #endif
 
+pref("places.database.growthIncrementKiB", 0);

@@ -86,7 +86,7 @@ class TransportLayerPrsock : public TransportLayer {
       virtual uint64_t ByteCountReceived() { return 0; }
 
       // nsISupports methods
-      NS_DECL_ISUPPORTS
+      NS_DECL_THREADSAFE_ISUPPORTS
 
       private:
       TransportLayerPrsock *prsock_;
@@ -101,7 +101,7 @@ class TransportLayerPrsock : public TransportLayer {
   // Functions to be called by SocketHandler
   void OnSocketReady(PRFileDesc *fd, int16_t outflags);
   void OnSocketDetached(PRFileDesc *fd) {
-    SetState(TS_CLOSED);
+    TL_SET_STATE(TS_CLOSED);
   }
   void IsLocal(bool *aIsLocal) {
     // TODO(jesup): better check? Does it matter? (likely no)
@@ -109,7 +109,7 @@ class TransportLayerPrsock : public TransportLayer {
   }
 
   PRFileDesc *fd_;
-  nsCOMPtr<SocketHandler> handler_;
+  nsRefPtr<SocketHandler> handler_;
   nsCOMPtr<nsISocketTransportService> stservice_;
 
 };

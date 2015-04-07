@@ -3,11 +3,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Layers.h"
 #include "RenderTrace.h"
 
 // If rendertrace is off let's no compile this code
 #ifdef MOZ_RENDERTRACE
+#include "Layers.h"
 
 
 namespace mozilla {
@@ -18,7 +18,7 @@ static int colorId = 0;
 static gfx3DMatrix GetRootTransform(Layer *aLayer) {
   gfx3DMatrix layerTrans = aLayer->GetTransform();
   layerTrans.ProjectTo2D();
-  if (aLayer->GetParent() != NULL) {
+  if (aLayer->GetParent() != nullptr) {
     return GetRootTransform(aLayer->GetParent()) * layerTrans;
   }
   return layerTrans;

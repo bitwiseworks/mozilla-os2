@@ -10,7 +10,7 @@
   'targets': [
     {
       'target_name': 'paced_sender',
-      'type': '<(library)',
+      'type': 'static_library',
       'dependencies': [
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
       ],
@@ -23,31 +23,4 @@
       ],
     },
   ], # targets
-
-  'conditions': [
-    ['include_tests==1', {
-      'targets' : [
-        {
-          'target_name': 'paced_sender_unittests',
-          'type': 'executable',
-          'dependencies': [
-            'paced_sender',
-            '<(webrtc_root)/test/test.gyp:test_support_main',
-            '<(DEPTH)/testing/gmock.gyp:gmock',
-            '<(DEPTH)/testing/gtest.gyp:gtest',
-          ],
-          'sources': [
-            'paced_sender_unittest.cc',
-           ],
-         },
-       ], # targets
-    }], # include_tests
-  ], # conditions
-
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2

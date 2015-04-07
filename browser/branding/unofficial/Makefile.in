@@ -2,12 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir = @srcdir@
-VPATH = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
 include $(topsrcdir)/config/config.mk
 
 PREF_JS_EXPORTS = $(srcdir)/pref/firefox-branding.js
@@ -20,7 +14,6 @@ BRANDING_FILES := \
 	branding.nsi \
 	appname.bmp \
 	bgintro.bmp \
-	bgplain.bmp \
 	clock.bmp \
 	particles.bmp \
 	pencil.bmp \
@@ -53,13 +46,6 @@ BRANDING_FILES := \
 	$(NULL)
 endif
 
-ifeq ($(OS_ARCH),OS2)
-BRANDING_FILES := \
-	firefox-os2.ico \
-	document-os2.ico \
-	$(NULL)
-endif
-
 BRANDING_DEST := $(DIST)/branding
 BRANDING_TARGET := export
 INSTALL_TARGETS += BRANDING
@@ -70,5 +56,3 @@ VISUALMANIFEST_FLAGS := -Fsubstitution -DMOZ_APP_DISPLAYNAME=${MOZ_APP_DISPLAYNA
 VISUALMANIFEST_PATH := $(DIST)/bin
 PP_TARGETS += VISUALMANIFEST
 endif
-
-include $(topsrcdir)/config/rules.mk

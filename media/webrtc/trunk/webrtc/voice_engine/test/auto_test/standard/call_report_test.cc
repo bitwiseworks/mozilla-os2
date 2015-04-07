@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "after_streaming_fixture.h"
-#include "testsupport/fileutils.h"
+#include "webrtc/test/testsupport/fileutils.h"
+#include "webrtc/voice_engine/test/auto_test/fixtures/after_streaming_fixture.h"
 
 class CallReportTest : public AfterStreamingFixture {
 };
@@ -42,7 +42,8 @@ TEST_F(CallReportTest, GetRoundTripTimeSummaryReturnsAllMinusOnesIfRtcpIsOff) {
   EXPECT_EQ(-1, delays.max);
 }
 
-TEST_F(CallReportTest, GetRoundTripTimesReturnsValuesIfRtcpIsOn) {
+// Flaky: https://code.google.com/p/webrtc/issues/detail?id=1719
+TEST_F(CallReportTest, DISABLED_GetRoundTripTimesReturnsValuesIfRtcpIsOn) {
   voe_rtp_rtcp_->SetRTCPStatus(channel_, true);
   Sleep(1000);
 
@@ -51,29 +52,6 @@ TEST_F(CallReportTest, GetRoundTripTimesReturnsValuesIfRtcpIsOn) {
   EXPECT_NE(-1, delays.average);
   EXPECT_NE(-1, delays.min);
   EXPECT_NE(-1, delays.max);
-}
-
-TEST_F(CallReportTest, DeadOrAliveSummaryFailsIfDeadOrAliveTrackingNotActive) {
-  int count_the_dead;
-  int count_the_living;
-  EXPECT_EQ(-1, voe_call_report_->GetDeadOrAliveSummary(channel_,
-                                                        count_the_dead,
-                                                        count_the_living));
-}
-
-TEST_F(CallReportTest,
-       DeadOrAliveSummarySucceedsIfDeadOrAliveTrackingIsActive) {
-  EXPECT_EQ(0, voe_network_->SetPeriodicDeadOrAliveStatus(channel_, true, 1));
-  Sleep(1200);
-
-  int count_the_dead;
-  int count_the_living;
-  EXPECT_EQ(0, voe_call_report_->GetDeadOrAliveSummary(channel_,
-                                                       count_the_dead,
-                                                       count_the_living));
-
-  EXPECT_GE(count_the_dead, 0);
-  EXPECT_GE(count_the_living, 0);
 }
 
 TEST_F(CallReportTest, WriteReportToFileFailsOnBadInput) {

@@ -4,22 +4,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "BaselineCompiler-shared.h"
+#include "jit/shared/BaselineCompiler-shared.h"
+
 #include "jit/BaselineIC.h"
 #include "jit/VMFunctions.h"
 
 using namespace js;
 using namespace js::jit;
 
-BaselineCompilerShared::BaselineCompilerShared(JSContext *cx, HandleScript script)
+BaselineCompilerShared::BaselineCompilerShared(JSContext *cx, TempAllocator &alloc, JSScript *script)
   : cx(cx),
-    script(cx, script),
-    pc(script->code),
+    script(script),
+    pc(script->code()),
     ionCompileable_(jit::IsIonEnabled(cx) && CanIonCompileScript(cx, script, false)),
     ionOSRCompileable_(jit::IsIonEnabled(cx) && CanIonCompileScript(cx, script, true)),
     debugMode_(cx->compartment()->debugMode()),
-    analysis_(script),
-    frame(cx, script, masm),
+    alloc_(alloc),
+    analysis_(alloc, script),
+    frame(script, masm),
     stubSpace_(),
     icEntries_(),
     pcMappingEntries_(),
@@ -30,10 +32,9 @@ BaselineCompilerShared::BaselineCompilerShared(JSContext *cx, HandleScript scrip
 { }
 
 bool
-BaselineCompilerShared::callVM(const VMFunction &fun)
+BaselineCompilerShared::callVM(const VMFunction &fun, CallVMPhase phase)
 {
-    IonCompartment *ion = cx->compartment()->ionCompartment();
-    IonCode *code = ion->getVMWrapper(fun);
+    JitCode *code = cx->runtime()->jitRuntime()->getVMWrapper(fun);
     if (!code)
         return false;
 
@@ -50,13 +51,43 @@ BaselineCompilerShared::callVM(const VMFunction &fun)
     // Assert all arguments were pushed.
     JS_ASSERT(masm.framePushed() - pushedBeforeCall_ == argSize);
 
-    uint32_t frameSize = BaselineFrame::FramePointerOffset + BaselineFrame::Size() +
-        (frame.nlocals() + frame.stackDepth()) * sizeof(Value);
+    Address frameSizeAddress(BaselineFrameReg, BaselineFrame::reverseOffsetOfFrameSize());
+    uint32_t frameVals = frame.nlocals() + frame.stackDepth();
+    uint32_t frameBaseSize = BaselineFrame::FramePointerOffset + BaselineFrame::Size();
+    uint32_t frameFullSize = frameBaseSize + (frameVals * sizeof(Value));
+    if (phase == POST_INITIALIZE) {
+        masm.store32(Imm32(frameFullSize), frameSizeAddress);
+        uint32_t descriptor = MakeFrameDescriptor(frameFullSize + argSize, JitFrame_BaselineJS);
+        masm.push(Imm32(descriptor));
 
-    masm.store32(Imm32(frameSize), Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFrameSize()));
+    } else if (phase == PRE_INITIALIZE) {
+        masm.store32(Imm32(frameBaseSize), frameSizeAddress);
+        uint32_t descriptor = MakeFrameDescriptor(frameBaseSize + argSize, JitFrame_BaselineJS);
+        masm.push(Imm32(descriptor));
 
-    uint32_t descriptor = MakeFrameDescriptor(frameSize + argSize, IonFrame_BaselineJS);
-    masm.push(Imm32(descriptor));
+    } else {
+        JS_ASSERT(phase == CHECK_OVER_RECURSED);
+        Label afterWrite;
+        Label writePostInitialize;
+
+        // If OVER_RECURSED is set, then frame locals haven't been pushed yet.
+        masm.branchTest32(Assembler::Zero,
+                          frame.addressOfFlags(),
+                          Imm32(BaselineFrame::OVER_RECURSED),
+                          &writePostInitialize);
+
+        masm.move32(Imm32(frameBaseSize), BaselineTailCallReg);
+        masm.jump(&afterWrite);
+
+        masm.bind(&writePostInitialize);
+        masm.move32(Imm32(frameFullSize), BaselineTailCallReg);
+
+        masm.bind(&afterWrite);
+        masm.store32(BaselineTailCallReg, frameSizeAddress);
+        masm.add32(Imm32(argSize), BaselineTailCallReg);
+        masm.makeFrameDescriptor(BaselineTailCallReg, JitFrame_BaselineJS);
+        masm.push(BaselineTailCallReg);
+    }
 
     // Perform the call.
     masm.call(code);
@@ -65,7 +96,7 @@ BaselineCompilerShared::callVM(const VMFunction &fun)
 
     // Add a fake ICEntry (without stubs), so that the return offset to
     // pc mapping works.
-    ICEntry entry(pc - script->code, false);
+    ICEntry entry(script->pcToOffset(pc), ICEntry::Kind_CallVM);
     entry.setReturnOffset(callOffset);
 
     return icEntries_.append(entry);

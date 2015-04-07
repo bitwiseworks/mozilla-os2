@@ -9,7 +9,7 @@
 #define xptiprivate_h___
 
 #include "nscore.h"
-#include NEW_H
+#include <new>
 #include "nsISupports.h"
 
 // this after nsISupports, to pick up IID
@@ -72,7 +72,6 @@
 /***************************************************************************/
 
 class xptiInterfaceInfo;
-class xptiInterfaceInfoManager;
 class xptiInterfaceEntry;
 class xptiTypelibGuts;
 
@@ -291,7 +290,7 @@ private:
 class xptiInterfaceInfo MOZ_FINAL : public nsIInterfaceInfo
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
 
     // Use delegation to implement (most!) of nsIInterfaceInfo.
     NS_IMETHOD GetName(char * *aName) { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetName(aName); }

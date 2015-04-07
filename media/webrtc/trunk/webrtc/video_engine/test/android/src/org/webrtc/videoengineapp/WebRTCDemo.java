@@ -22,6 +22,8 @@ import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
+import android.hardware.Camera;
+import android.hardware.Camera.CameraInfo;
 import android.hardware.SensorManager;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
@@ -57,6 +59,7 @@ import android.widget.TabHost.TabSpec;
 import android.widget.TextView;
 
 import org.webrtc.videoengine.ViERenderer;
+import org.mozilla.gecko.mozglue.WebRTCJNITarget;
 
 import java.io.File;
 import java.io.IOException;
@@ -78,7 +81,7 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
     private SurfaceView svLocal = null;
 
     // channel number
-    private int channel;
+    private int channel = -1;
     private int cameraId;
     private int voiceChannel = -1;
 
@@ -87,7 +90,7 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
     private boolean voERunning = false;
 
     // debug
-    private boolean enableTrace = false;
+    private boolean enableTrace = true;
 
     // Constant
     private static final String TAG = "WEBRTC";
@@ -161,7 +164,6 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
     private TextView etATxPort;
     private int destinationPortVoice = 11113;
     private CheckBox cbEnableSpeaker;
-    private boolean enableSpeaker = false;
     private CheckBox cbEnableAGC;
     private boolean enableAGC = false;
     private CheckBox cbEnableAECM;
@@ -179,6 +181,9 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
     private int bitRateO;
     private int numCalls = 0;
 
+    private int widthI;
+    private int heightI;
+
     // Variable for storing variables
     private String webrtcName = "/webrtc";
     private String webrtcDebugDir = null;
@@ -186,6 +191,10 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
     private WakeLock wakeLock;
 
     private boolean usingFrontCamera = true;
+    // The orientations (in degrees) of each of the cameras CCW-relative to the
+    // device, indexed by CameraInfo.CAMERA_FACING_{BACK,FRONT}, and -1
+    // for unrepresented |facing| values (i.e. single-camera device).
+    private int[] cameraOrientations = new int[] { -1, -1 };
 
     private String[] mVideoCodecsStrings = null;
     private String[] mVideoCodecsSizeStrings = { "176x144", "320x240",
@@ -193,38 +202,60 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
     private String[] mVoiceCodecsStrings = null;
 
     private OrientationEventListener orientationListener;
-    int currentOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
-    int currentCameraOrientation = 0;
+    int currentDeviceOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
 
     private StatsView statsView = null;
 
     private BroadcastReceiver receiver;
 
-    public int getCameraOrientation(int cameraOrientation) {
-        Display display = this.getWindowManager().getDefaultDisplay();
-        int displatyRotation = display.getRotation();
-        int degrees = 0;
-        switch (displatyRotation) {
-            case Surface.ROTATION_0: degrees = 0; break;
-            case Surface.ROTATION_90: degrees = 90; break;
-            case Surface.ROTATION_180: degrees = 180; break;
-            case Surface.ROTATION_270: degrees = 270; break;
-        }
-        int result = 0;
-        if (cameraOrientation > 180) {
-            result = (cameraOrientation + degrees) % 360;
-        } else {
-            result = (cameraOrientation - degrees + 360) % 360;
-        }
-        return result;
+    // Rounds rotation to the nearest 90 degree rotation.
+    private static int roundRotation(int rotation) {
+        return (int)(Math.round((double)rotation / 90) * 90) % 360;
     }
 
-    public void onConfigurationChanged(Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-        int newRotation = getCameraOrientation(currentCameraOrientation);
-        if (viERunning) {
-            vieAndroidAPI.SetRotation(cameraId, newRotation);
+    // Populate |cameraOrientations| with the first cameras that have each of
+    // the facing values.
+    private void populateCameraOrientations() {
+        CameraInfo info = new CameraInfo();
+        for (int i = 0; i < Camera.getNumberOfCameras(); ++i) {
+            Camera.getCameraInfo(i, info);
+            if (cameraOrientations[info.facing] != -1) {
+                continue;
+            }
+            cameraOrientations[info.facing] = info.orientation;
         }
+    }
+
+    // Return the |CameraInfo.facing| value appropriate for |usingFrontCamera|.
+    private static int facingOf(boolean usingFrontCamera) {
+        return usingFrontCamera ? CameraInfo.CAMERA_FACING_FRONT
+                : CameraInfo.CAMERA_FACING_BACK;
+    }
+
+    // This function ensures that egress streams always send real world up
+    // streams.
+    // Note: There are two components of the camera rotation. The rotation of
+    // the capturer relative to the device. I.e. up for the camera might not be
+    // device up. When rotating the device the camera is also rotated.
+    // The former is called orientation and the second is called rotation here.
+    public void compensateCameraRotation() {
+        int cameraOrientation = cameraOrientations[facingOf(usingFrontCamera)];
+        // The device orientation is the device's rotation relative to its
+        // natural position.
+        int cameraRotation = roundRotation(currentDeviceOrientation);
+
+        int totalCameraRotation = 0;
+        if (usingFrontCamera) {
+            // The front camera rotates in the opposite direction of the
+            // device.
+            int inverseCameraRotation = (360 - cameraRotation) % 360;
+            totalCameraRotation =
+                (inverseCameraRotation + cameraOrientation) % 360;
+        } else {
+            totalCameraRotation =
+                (cameraRotation + cameraOrientation) % 360;
+        }
+        vieAndroidAPI.SetRotation(cameraId, totalCameraRotation);
     }
 
     // Called when the activity is first created.
@@ -236,8 +267,9 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        // Set screen orientation
-        setRequestedOrientation (ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+
+        populateCameraOrientations();
 
         PowerManager pm = (PowerManager) this.getSystemService(
             Context.POWER_SERVICE);
@@ -249,24 +281,19 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
         IntentFilter receiverFilter = new IntentFilter(Intent.ACTION_HEADSET_PLUG);
 
         receiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    if (intent.getAction().compareTo(Intent.ACTION_HEADSET_PLUG)
-                            == 0) {
-                        int state = intent.getIntExtra("state", 0);
-                        Log.v(TAG, "Intent.ACTION_HEADSET_PLUG state: " + state +
-                                " microphone: " + intent.getIntExtra("microphone", 0));
-                        if (voERunning) {
-                            if (state == 1) {
-                                enableSpeaker = true;
-                            } else {
-                                enableSpeaker = false;
-                            }
-                            routeAudio(enableSpeaker);
-                        }
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent.getAction().compareTo(Intent.ACTION_HEADSET_PLUG)
+                        == 0) {
+                    int state = intent.getIntExtra("state", 0);
+                    Log.v(TAG, "Intent.ACTION_HEADSET_PLUG state: " + state +
+                         " microphone: " + intent.getIntExtra("microphone", 0));
+                    if (voERunning) {
+                        routeAudio(state == 0 && cbEnableSpeaker.isChecked());
                     }
                 }
-            };
+            }
+        };
         registerReceiver(receiver, receiverFilter);
 
         mTabHost = getTabHost();
@@ -303,7 +330,8 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
                 new OrientationEventListener(this, SensorManager.SENSOR_DELAY_UI) {
                     public void onOrientationChanged (int orientation) {
                         if (orientation != ORIENTATION_UNKNOWN) {
-                            currentOrientation = orientation;
+                            currentDeviceOrientation = orientation;
+                            compensateCameraRotation();
                         }
                     }
                 };
@@ -342,20 +370,25 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
 
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
+            // Only draw Stats in Main tab.
+            if(mTabHost.getCurrentTabTag() == "tab_video") {
+                Paint loadPaint = new Paint();
+                loadPaint.setAntiAlias(true);
+                loadPaint.setTextSize(16);
+                loadPaint.setARGB(255, 255, 255, 255);
 
-            Paint loadPaint = new Paint();
-            loadPaint.setAntiAlias(true);
-            loadPaint.setTextSize(16);
-            loadPaint.setARGB(255, 255, 255, 255);
+                canvas.drawText("#calls " + numCalls, 4, 222, loadPaint);
 
-            canvas.drawText("#calls " + numCalls, 4, 152, loadPaint);
-
-            String loadText;
-            loadText = "> " + frameRateI + " fps/" + bitRateI + "k bps/ " + packetLoss;
-            canvas.drawText(loadText, 4, 172, loadPaint);
-            loadText = "< " + frameRateO + " fps/ " + bitRateO + "k bps";
-            canvas.drawText(loadText, 4, 192, loadPaint);
-
+                String loadText;
+                loadText = "> " + frameRateI + " fps/" +
+                           bitRateI/1024 + " kbps/ " + packetLoss;
+                canvas.drawText(loadText, 4, 242, loadPaint);
+                loadText = "< " + frameRateO + " fps/ " +
+                           bitRateO/1024 + " kbps";
+                canvas.drawText(loadText, 4, 262, loadPaint);
+                loadText = "Incoming resolution " + widthI + "x" + heightI;
+                canvas.drawText(loadText, 4, 282, loadPaint);
+            }
             updateDisplay();
         }
 
@@ -418,6 +451,8 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
                 vieAndroidAPI.StopReceive(channel);
                 vieAndroidAPI.StopSend(channel);
                 vieAndroidAPI.RemoveRemoteRenderer(channel);
+                vieAndroidAPI.ViE_DeleteChannel(channel);
+                channel = -1;
                 vieAndroidAPI.StopCamera(cameraId);
                 vieAndroidAPI.Terminate();
                 mLlRemoteSurface.removeView(remoteSurfaceView);
@@ -476,7 +511,11 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
         }
 
         btSwitchCamera = (Button) findViewById(R.id.btSwitchCamera);
-        btSwitchCamera.setOnClickListener(this);
+        if (cameraOrientations[0] != -1 && cameraOrientations[1] != -1) {
+            btSwitchCamera.setOnClickListener(this);
+        } else {
+            btSwitchCamera.setEnabled(false);
+        }
         btStartStopCall = (Button) findViewById(R.id.btStartStopCall);
         btStartStopCall.setOnClickListener(this);
         findViewById(R.id.btExit).setOnClickListener(this);
@@ -561,7 +600,6 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
         cbEnableNack.setChecked(enableNack);
 
         cbEnableSpeaker = (CheckBox) findViewById(R.id.cbSpeaker);
-        cbEnableSpeaker.setChecked(enableSpeaker);
         cbEnableAGC = (CheckBox) findViewById(R.id.cbAutoGainControl);
         cbEnableAGC.setChecked(enableAGC);
         cbEnableAECM = (CheckBox) findViewById(R.id.cbAECM);
@@ -660,16 +698,13 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
             }
 
             if (enableVideoSend) {
-                currentCameraOrientation =
-                        vieAndroidAPI.GetCameraOrientation(usingFrontCamera ? 1 : 0);
                 ret = vieAndroidAPI.SetSendCodec(channel, codecType, INIT_BITRATE,
                         codecSizeWidth, codecSizeHeight, SEND_CODEC_FRAMERATE);
                 int camId = vieAndroidAPI.StartCamera(channel, usingFrontCamera ? 1 : 0);
 
-                if (camId > 0) {
+                if (camId >= 0) {
                     cameraId = camId;
-                    int neededRotation = getCameraOrientation(currentCameraOrientation);
-                    vieAndroidAPI.SetRotation(cameraId, neededRotation);
+                    compensateCameraRotation();
                 } else {
                     ret = camId;
                 }
@@ -737,19 +772,19 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
             return -1;
         }
 
-        // Create channel
-        voiceChannel = vieAndroidAPI.VoE_CreateChannel();
-        if (0 != voiceChannel) {
-            Log.d(TAG, "VoE create channel failed");
-            return -1;
-        }
-
         // Suggest to use the voice call audio stream for hardware volume controls
         setVolumeControlStream(AudioManager.STREAM_VOICE_CALL);
         return 0;
     }
 
     private int startVoiceEngine() {
+        // Create channel
+        voiceChannel = vieAndroidAPI.VoE_CreateChannel();
+        if (0 > voiceChannel) {
+            Log.d(TAG, "VoE create channel failed");
+            return -1;
+        }
+
         // Set local receiver
         if (0 != vieAndroidAPI.VoE_SetLocalReceiver(voiceChannel,
                         receivePortVoice)) {
@@ -761,7 +796,7 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
         }
 
         // Route audio
-        routeAudio(enableSpeaker);
+        routeAudio(cbEnableSpeaker.isChecked());
 
         // set volume to default value
         if (0 != vieAndroidAPI.VoE_SetSpeakerVolume(volumeLevel)) {
@@ -838,15 +873,12 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
                 usingFrontCamera = !usingFrontCamera;
 
                 if (viERunning) {
-                    currentCameraOrientation =
-                            vieAndroidAPI.GetCameraOrientation(usingFrontCamera ? 1 : 0);
                     vieAndroidAPI.StopCamera(cameraId);
                     mLlLocalSurface.removeView(svLocal);
 
                     vieAndroidAPI.StartCamera(channel, usingFrontCamera ? 1 : 0);
                     mLlLocalSurface.addView(svLocal);
-                    int neededRotation = getCameraOrientation(currentCameraOrientation);
-                    vieAndroidAPI.SetRotation(cameraId, neededRotation);
+                    compensateCameraRotation();
                 }
                 break;
             case R.id.btStartStopCall:
@@ -893,9 +925,8 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
                 }
                 break;
             case R.id.cbSpeaker:
-                enableSpeaker = cbEnableSpeaker.isChecked();
                 if (voERunning) {
-                    routeAudio(enableSpeaker);
+                    routeAudio(cbEnableSpeaker.isChecked());
                 }
                 break;
             case R.id.cbDebugRecording:
@@ -977,7 +1008,6 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
                 Integer.parseInt(etARxPort.getText().toString());
 
         enableNack  = cbEnableNack.isChecked();
-        enableSpeaker  = cbEnableSpeaker.isChecked();
         enableAGC  = cbEnableAGC.isChecked();
         enableAECM  = cbEnableAECM.isChecked();
         enableNS  = cbEnableNS.isChecked();
@@ -1017,6 +1047,7 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
         Log.d(TAG, "No setting selected");
     }
 
+    @WebRTCJNITarget
     public int updateStats(int inFrameRateI, int inBitRateI,
             int inPacketLoss, int inFrameRateO, int inBitRateO) {
         frameRateI = inFrameRateI;
@@ -1024,6 +1055,12 @@ public class WebRTCDemo extends TabActivity implements IViEAndroidCallback,
         packetLoss = inPacketLoss;
         frameRateO = inFrameRateO;
         bitRateO = inBitRateO;
+        return 0;
+    }
+
+    public int newIncomingResolution(int width, int height) {
+        widthI = width;
+        heightI = height;
         return 0;
     }
 

@@ -1,4 +1,4 @@
-57446
+57467
 0/nm
 0th/pt
 1/n1
@@ -3828,11 +3828,13 @@ DOS/M
 DOT
 DP/SM
 DPT
+DRM
 DST
 DTP
 DUI
 DVD
 DVDs
+DVR/S
 DWI
 Dacca/M
 Dacey/M
@@ -17679,7 +17681,7 @@ androgenic
 androgynous
 androgyny/M
 android/SM
-anecdotal
+anecdotal/Y
 anecdote/MS
 anechoic
 anemia/M
@@ -18771,6 +18773,7 @@ autobiographic
 autobiographical/Y
 autobiography/SM
 autoclave/MS
+autocomplete/S
 autocracy/SM
 autocrat/SM
 autocratic
@@ -22719,6 +22722,7 @@ cinnabar/M
 cinnamon/M
 cipher's
 cipher/CGDS
+ciphertext/S
 cir
 circa
 circadian
@@ -24444,6 +24448,8 @@ corresponding/Y
 corridor/SM
 corrie/S
 corrigenda
+corrigibility/IM
+corrigible/I
 corroborate/GNVXDS
 corroborated/U
 corroboration/M
@@ -24458,6 +24464,7 @@ corrupt/DRYPSTG
 corrupted/U
 corruptibility/IM
 corruptible/I
+corruptibly/I
 corruption/SM
 corruptness/M
 corsage/MS
@@ -25070,7 +25077,9 @@ cryptographer/MS
 cryptographic
 cryptographically
 cryptography/M
+cryptologist/MS
 cryptology
+cryptosystem/S
 crystal/SM
 crystalline
 crystallization/M
@@ -26012,6 +26021,7 @@ deputation/SM
 depute/DSG
 deputize/DSG
 deputy/SM
+dequeue/DSG
 derailleur/MS
 derailment/MS
 derangement/M
@@ -26298,6 +26308,7 @@ diastole/M
 diastolic
 diathermy/M
 diatom/SM
+diatomaceous
 diatomic
 diatonic
 diatribe/SM
@@ -28282,6 +28293,7 @@ enormous/YP
 enormousness/M
 enough/M
 enplane/DSG
+enqueue/DSG
 enquirer/S
 enquiringly
 enrage/GDS
@@ -34687,10 +34699,8 @@ incorporated/U
 incorporation/AM
 incorporeal
 incorrect/Y
-incorrigibility/M
-incorrigible
+incorrigibleness
 incorrigibly
-incorruptibly
 increasing/Y
 increment/SMDG
 incremental/Y
@@ -35367,6 +35377,7 @@ interrogatory/SM
 interrupt/ZGMDRS
 interrupter/M
 interruptibility
+interruptible/U
 interruption/MS
 interscholastic
 intersect/GDS
@@ -37143,7 +37154,7 @@ linguine/M
 linguini/M
 linguist/SM
 linguistic/S
-linguistically
+linguistical/Y
 linguistics/M
 liniment/SM
 lining/M
@@ -38834,6 +38845,7 @@ migraine/MS
 migrant/MS
 migrate/AGDS
 migration/SM
+migrator/SM
 migratory
 mikado/MS
 mike/MGDS
@@ -38877,6 +38889,7 @@ milky/RTP
 mill/MDRSZGJ
 millage/M
 millenarian
+millennia
 millennial
 millennium/SM
 millepede/MS
@@ -43762,6 +43775,7 @@ plainsmen
 plainsong/M
 plainspoken
 plaint/SMV
+plaintext
 plaintiff/SM
 plaintive/Y
 plait/MDGS
@@ -44941,6 +44955,7 @@ professorship/MS
 proffer/GMDS
 proficiency/SM
 proficient/MYS
+profiler/SM
 profit/BGD
 profitability/M
 profitable/U
@@ -44971,6 +44986,7 @@ program/ZGMDRS
 programer/M
 programmable/SM
 programmatic
+programmatically
 programmed/CA
 programmer/MS
 programming/MS
@@ -45235,6 +45251,7 @@ pseudonym/SM
 pseudonymous
 pseudopod
 pseudopodia
+pseudorandom/Y
 pseudoscience/MS
 pseudy
 pshaw/MS
@@ -46014,6 +46031,8 @@ rasp/GMDRS
 raspberry/SM
 raspy/RT
 raster
+rasterization/M
+rasterize/SGDR
 rat/SM
 ratatouille/M
 ratbag/S
@@ -46282,6 +46301,7 @@ recur/S
 recurred
 recurrence/SM
 recurring
+recurse/DGSV
 recursion/S
 recuse/DGS
 recyclable/MS
@@ -46802,7 +46822,6 @@ resistivity
 resistless
 resistor/MS
 resitting
-resizing
 resold
 resole/DSG
 resolute/XPYTNR
@@ -49487,7 +49506,7 @@ sixths
 sixtieth/M
 sixtieths
 sixty/SMH
-size/MGBDRS
+size/AMGBDRS
 sizing/M
 sizzle/DRSMZG
 ska/M
@@ -49926,6 +49945,8 @@ snapshot/SM
 snare/DSMG
 snarf/SDG
 snark/S
+snarkily
+snarky/TR
 snarl's
 snarl/USDG
 snarling/Y
@@ -53635,7 +53656,7 @@ too
 took/A
 tool's
 tool/ADGS
-toolbar
+toolbar/MS
 toolbox/MS
 toolkit
 toolmaker/MS

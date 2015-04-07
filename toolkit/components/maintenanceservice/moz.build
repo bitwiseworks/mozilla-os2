@@ -6,7 +6,7 @@
 
 PROGRAM = 'maintenanceservice'
 
-CPP_SOURCES += [
+SOURCES += [
     'certificatecheck.cpp',
     'maintenanceservice.cpp',
     'registrycertificates.cpp',
@@ -14,3 +14,25 @@ CPP_SOURCES += [
     'serviceinstall.cpp',
     'workmonitor.cpp',
 ]
+
+# For debugging purposes only
+#DEFINES['DISABLE_UPDATER_AUTHENTICODE_CHECK'] = True
+
+DEFINES['UNICODE'] = True
+DEFINES['_UNICODE'] = True
+DEFINES['NS_NO_XPCOM'] = True
+
+# Pick up nsWindowsRestart.cpp
+LOCAL_INCLUDES += [
+    '/toolkit/mozapps/update/common',
+    '/toolkit/xre',
+]
+
+USE_STATIC_LIBS = True
+
+if CONFIG['_MSC_VER']:
+    WIN32_EXE_LDFLAGS += ['-ENTRY:wmainCRTStartup']
+
+RCINCLUDE = 'maintenanceservice.rc'
+
+DISABLE_STL_WRAPPING = True

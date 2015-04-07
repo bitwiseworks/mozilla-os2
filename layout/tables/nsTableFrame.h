@@ -111,6 +111,9 @@ class nsTableFrame : public nsContainerFrame
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
+  static void DestroyPositionedTablePartArray(void* aPropertyValue);
+  NS_DECLARE_FRAME_PROPERTY(PositionedTablePartArray, DestroyPositionedTablePartArray)
+
   /** nsTableOuterFrame has intimate knowledge of the inner table frame */
   friend class nsTableOuterFrame;
 
@@ -146,6 +149,15 @@ public:
 
   static bool PageBreakAfter(nsIFrame* aSourceFrame,
                                nsIFrame* aNextFrame);
+  
+  // Register a positioned table part with its nsTableFrame. These objects will
+  // be visited by FixupPositionedTableParts after reflow is complete. (See that
+  // function for more explanation.) Should be called during frame construction.
+  static void RegisterPositionedTablePart(nsIFrame* aFrame);
+
+  // Unregister a positioned table part with its nsTableFrame.
+  static void UnregisterPositionedTablePart(nsIFrame* aFrame,
+                                            nsIFrame* aDestructRoot);
 
   nsPoint GetFirstSectionOrigin(const nsHTMLReflowState& aReflowState) const;
   /*
@@ -161,13 +173,13 @@ public:
   /** @see nsIFrame::DidSetStyleContext */
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
 
-  NS_IMETHOD AppendFrames(ChildListID     aListID,
-                          nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  NS_IMETHOD InsertFrames(ChildListID     aListID,
-                          nsIFrame*       aPrevFrame,
-                          nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  NS_IMETHOD RemoveFrame(ChildListID     aListID,
-                         nsIFrame*       aOldFrame) MOZ_OVERRIDE;
+  virtual nsresult AppendFrames(ChildListID     aListID,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult InsertFrames(ChildListID     aListID,
+                                nsIFrame*       aPrevFrame,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult RemoveFrame(ChildListID     aListID,
+                               nsIFrame*       aOldFrame) MOZ_OVERRIDE;
 
   virtual nsMargin GetUsedBorder() const MOZ_OVERRIDE;
   virtual nsMargin GetUsedPadding() const MOZ_OVERRIDE;
@@ -179,6 +191,12 @@ public:
   /** helper method to find the table parent of any table frame object */
   static nsTableFrame* GetTableFrame(nsIFrame* aSourceFrame);
                                  
+  /* Like GetTableFrame, but will return nullptr if we don't pass through
+   * aMustPassThrough on the way to the table.
+   */
+  static nsTableFrame* GetTableFramePassingThrough(nsIFrame* aMustPassThrough,
+                                                   nsIFrame* aSourceFrame);
+
   typedef void (* DisplayGenericTablePartTraversal)
       (nsDisplayListBuilder* aBuilder, nsFrame* aFrame,
        const nsRect& aDirtyRect, const nsDisplayListSet& aLists);
@@ -218,8 +236,8 @@ public:
   /** Initialize the table frame with a set of children.
     * @see nsIFrame::SetInitialChildList 
     */
-  NS_IMETHOD SetInitialChildList(ChildListID     aListID,
-                                 nsFrameList&    aChildList) MOZ_OVERRIDE;
+  virtual nsresult SetInitialChildList(ChildListID     aListID,
+                                       nsFrameList&    aChildList) MOZ_OVERRIDE;
 
   virtual const nsFrameList& GetChildList(ChildListID aListID) const MOZ_OVERRIDE;
   virtual void GetChildLists(nsTArray<ChildList>* aLists) const MOZ_OVERRIDE;
@@ -236,6 +254,13 @@ public:
   void PaintTableBorderBackground(nsRenderingContext& aRenderingContext,
                                   const nsRect& aDirtyRect,
                                   nsPoint aPt, uint32_t aBGPaintFlags);
+
+  /**
+   * Determines if any table part has a background image that is currently not
+   * decoded. Does not look into cell contents (ie only table parts).
+   */
+  static bool AnyTablePartHasUndecodedBackgroundImage(nsIFrame* aStart,
+                                                      nsIFrame* aEnd);
 
   /** Get the outer half (i.e., the part outside the height and width of
    *  the table) of the largest segment (?) of border-collapsed border on
@@ -313,10 +338,10 @@ public:
     *
     * @see nsIFrame::Reflow
     */
-  NS_IMETHOD Reflow(nsPresContext*          aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*          aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
   nsresult ReflowTable(nsHTMLReflowMetrics&     aDesiredSize,
                        const nsHTMLReflowState& aReflowState,
@@ -343,9 +368,9 @@ public:
     return nsContainerFrame::IsFrameOfType(aFlags);
   }
 
-#ifdef DEBUG
+#ifdef DEBUG_FRAME_DUMP
   /** @see nsIFrame::GetFrameName */
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   /** return the width of the column at aColIndex    */
@@ -502,7 +527,7 @@ protected:
 
   void InitChildReflowState(nsHTMLReflowState& aReflowState);
 
-  virtual int GetSkipSides() const MOZ_OVERRIDE;
+  virtual int GetLogicalSkipSides(const nsHTMLReflowState* aReflowState = nullptr) const MOZ_OVERRIDE;
 
 public:
   bool IsRowInserted() const;
@@ -542,8 +567,20 @@ protected:
   void AdjustForCollapsingRowsCols(nsHTMLReflowMetrics& aDesiredSize,
                                    nsMargin             aBorderPadding);
 
+  /** FixupPositionedTableParts is called at the end of table reflow to reflow
+   *  the absolutely positioned descendants of positioned table parts. This is
+   *  necessary because the dimensions of table parts may change after they've
+   *  been reflowed (e.g. in AdjustForCollapsingRowsCols).
+   */
+  void FixupPositionedTableParts(nsPresContext*           aPresContext,
+                                 nsHTMLReflowMetrics&     aDesiredSize,
+                                 const nsHTMLReflowState& aReflowState);
+
+  // Clears the list of positioned table parts.
+  void ClearAllPositionedTableParts();
+
   nsITableLayoutStrategy* LayoutStrategy() const {
-    return static_cast<nsTableFrame*>(GetFirstInFlow())->
+    return static_cast<nsTableFrame*>(FirstInFlow())->
       mTableLayoutStrategy;
   }
 
@@ -809,12 +846,12 @@ inline void nsTableFrame::SetRowInserted(bool aValue)
 
 inline void nsTableFrame::SetNeedToCollapse(bool aValue)
 {
-  static_cast<nsTableFrame*>(GetFirstInFlow())->mBits.mNeedToCollapse = (unsigned)aValue;
+  static_cast<nsTableFrame*>(FirstInFlow())->mBits.mNeedToCollapse = (unsigned)aValue;
 }
 
 inline bool nsTableFrame::NeedToCollapse() const
 {
-  return (bool) static_cast<nsTableFrame*>(GetFirstInFlow())->mBits.mNeedToCollapse;
+  return (bool) static_cast<nsTableFrame*>(FirstInFlow())->mBits.mNeedToCollapse;
 }
 
 inline void nsTableFrame::SetHasZeroColSpans(bool aValue)
@@ -840,7 +877,7 @@ inline bool nsTableFrame::NeedColSpanExpansion() const
 
 inline nsFrameList& nsTableFrame::GetColGroups()
 {
-  return static_cast<nsTableFrame*>(GetFirstInFlow())->mColGroups;
+  return static_cast<nsTableFrame*>(FirstInFlow())->mColGroups;
 }
 
 inline nsTArray<nsTableColFrame*>& nsTableFrame::GetColCache()

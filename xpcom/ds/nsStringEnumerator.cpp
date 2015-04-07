@@ -5,12 +5,10 @@
 
 
 #include "nsStringEnumerator.h"
-#include "nsCRT.h"
-#include "nsString.h"
-#include "nsReadableUtils.h"
 #include "nsISimpleEnumerator.h"
 #include "nsSupportsPrimitives.h"
 #include "mozilla/Attributes.h"
+#include "nsTArray.h"
 
 //
 // nsStringEnumerator
@@ -78,15 +76,14 @@ private:
     bool mIsUnicode;
 };
 
-NS_IMPL_ISUPPORTS3(nsStringEnumerator,
-                   nsIStringEnumerator,
-                   nsIUTF8StringEnumerator,
-                   nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS(nsStringEnumerator,
+                  nsIStringEnumerator,
+                  nsIUTF8StringEnumerator,
+                  nsISimpleEnumerator)
 
 NS_IMETHODIMP
 nsStringEnumerator::HasMore(bool* aResult)
 {
-    NS_ENSURE_ARG_POINTER(aResult);
     *aResult = mIndex < Count();
     return NS_OK;
 }
@@ -121,7 +118,8 @@ nsStringEnumerator::GetNext(nsISupports** aResult)
 NS_IMETHODIMP
 nsStringEnumerator::GetNext(nsAString& aResult)
 {
-    NS_ENSURE_TRUE(mIndex < Count(), NS_ERROR_UNEXPECTED);
+    if (NS_WARN_IF(mIndex >= Count()))
+        return NS_ERROR_UNEXPECTED;
 
     if (mIsUnicode)
         aResult = mArray->ElementAt(mIndex++);
@@ -134,7 +132,8 @@ nsStringEnumerator::GetNext(nsAString& aResult)
 NS_IMETHODIMP
 nsStringEnumerator::GetNext(nsACString& aResult)
 {
-    NS_ENSURE_TRUE(mIndex < Count(), NS_ERROR_UNEXPECTED);
+    if (NS_WARN_IF(mIndex >= Count()))
+        return NS_ERROR_UNEXPECTED;
     
     if (mIsUnicode)
         CopyUTF16toUTF8(mArray->ElementAt(mIndex++), aResult);
@@ -162,8 +161,8 @@ nsresult
 NS_NewStringEnumerator(nsIStringEnumerator** aResult,
                        const nsTArray<nsString>* aArray, nsISupports* aOwner)
 {
-    NS_ENSURE_ARG_POINTER(aResult);
-    NS_ENSURE_ARG_POINTER(aArray);
+    if (NS_WARN_IF(!aResult) || NS_WARN_IF(!aArray))
+        return NS_ERROR_INVALID_ARG;
     
     *aResult = new nsStringEnumerator(aArray, aOwner);
     return StringEnumeratorTail(aResult);
@@ -174,8 +173,8 @@ nsresult
 NS_NewUTF8StringEnumerator(nsIUTF8StringEnumerator** aResult,
                            const nsTArray<nsCString>* aArray, nsISupports* aOwner)
 {
-    NS_ENSURE_ARG_POINTER(aResult);
-    NS_ENSURE_ARG_POINTER(aArray);
+    if (NS_WARN_IF(!aResult) || NS_WARN_IF(!aArray))
+        return NS_ERROR_INVALID_ARG;
     
     *aResult = new nsStringEnumerator(aArray, aOwner);
     return StringEnumeratorTail(aResult);
@@ -185,8 +184,8 @@ nsresult
 NS_NewAdoptingStringEnumerator(nsIStringEnumerator** aResult,
                                nsTArray<nsString>* aArray)
 {
-    NS_ENSURE_ARG_POINTER(aResult);
-    NS_ENSURE_ARG_POINTER(aArray);
+    if (NS_WARN_IF(!aResult) || NS_WARN_IF(!aArray))
+        return NS_ERROR_INVALID_ARG;
     
     *aResult = new nsStringEnumerator(aArray, true);
     return StringEnumeratorTail(aResult);
@@ -196,8 +195,8 @@ nsresult
 NS_NewAdoptingUTF8StringEnumerator(nsIUTF8StringEnumerator** aResult,
                                    nsTArray<nsCString>* aArray)
 {
-    NS_ENSURE_ARG_POINTER(aResult);
-    NS_ENSURE_ARG_POINTER(aArray);
+    if (NS_WARN_IF(!aResult) || NS_WARN_IF(!aArray))
+        return NS_ERROR_INVALID_ARG;
     
     *aResult = new nsStringEnumerator(aArray, true);
     return StringEnumeratorTail(aResult);
@@ -208,8 +207,8 @@ nsresult
 NS_NewStringEnumerator(nsIStringEnumerator** aResult,
                        const nsTArray<nsString>* aArray)
 {
-    NS_ENSURE_ARG_POINTER(aResult);
-    NS_ENSURE_ARG_POINTER(aArray);
+    if (NS_WARN_IF(!aResult) || NS_WARN_IF(!aArray))
+        return NS_ERROR_INVALID_ARG;
     
     *aResult = new nsStringEnumerator(aArray, false);
     return StringEnumeratorTail(aResult);
@@ -219,8 +218,8 @@ nsresult
 NS_NewUTF8StringEnumerator(nsIUTF8StringEnumerator** aResult,
                            const nsTArray<nsCString>* aArray)
 {
-    NS_ENSURE_ARG_POINTER(aResult);
-    NS_ENSURE_ARG_POINTER(aArray);
+    if (NS_WARN_IF(!aResult) || NS_WARN_IF(!aArray))
+        return NS_ERROR_INVALID_ARG;
     
     *aResult = new nsStringEnumerator(aArray, false);
     return StringEnumeratorTail(aResult);

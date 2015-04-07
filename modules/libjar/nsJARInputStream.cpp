@@ -22,7 +22,7 @@
  *  nsISupports implementation
  *--------------------------------------------*/
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsJARInputStream, nsIInputStream)
+NS_IMPL_ISUPPORTS(nsJARInputStream, nsIInputStream)
 
 /*----------------------------------------------------------
  * nsJARInputStream implementation
@@ -229,7 +229,6 @@ NS_IMETHODIMP
 nsJARInputStream::ReadSegments(nsWriteSegmentFun writer, void * closure, uint32_t count, uint32_t *_retval)
 {
     // don't have a buffer to read from, so this better not be called!
-    NS_NOTREACHED("Consumers should be using Read()!");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -282,12 +281,8 @@ nsJARInputStream::ContinueInflate(char* aBuffer, uint32_t aCount,
         inflateEnd(&mZs);
 
         // stop returning valid data as soon as we know we have a bad CRC
-        if (mOutCrc != mInCrc) {
-            // asserting because while this rarely happens, you definitely
-            // want to catch it in debug builds!
-            NS_NOTREACHED(0);
+        if (mOutCrc != mInCrc)
             return NS_ERROR_FILE_CORRUPTED;
-        }
     }
 
     return NS_OK;

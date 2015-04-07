@@ -6,13 +6,15 @@
 #ifndef mozilla_dom_SVGPathElement_h
 #define mozilla_dom_SVGPathElement_h
 
+#include "mozilla/gfx/2D.h"
+#include "mozilla/RefPtr.h"
 #include "nsSVGNumber2.h"
 #include "nsSVGPathGeometryElement.h"
 #include "SVGAnimatedPathSegList.h"
 #include "DOMSVGPathSeg.h"
 
 nsresult NS_NewSVGPathElement(nsIContent **aResult,
-                              already_AddRefed<nsINodeInfo> aNodeInfo);
+                              already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 class gfxContext;
 
@@ -28,12 +30,13 @@ class SVGPathElement MOZ_FINAL : public SVGPathElementBase
 {
 friend class nsSVGPathFrame;
 
+  typedef mozilla::gfx::Path Path;
+
 protected:
   friend nsresult (::NS_NewSVGPathElement(nsIContent **aResult,
-                                          already_AddRefed<nsINodeInfo> aNodeInfo));
-  virtual JSObject* WrapNode(JSContext *cx,
-                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
-  SVGPathElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+                                          already_AddRefed<nsINodeInfo>&& aNodeInfo));
+  virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
+  SVGPathElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
 
 public:
   // nsIContent interface
@@ -47,8 +50,15 @@ public:
   virtual bool IsMarkable() MOZ_OVERRIDE;
   virtual void GetMarkPoints(nsTArray<nsSVGMark> *aMarks) MOZ_OVERRIDE;
   virtual void ConstructPath(gfxContext *aCtx) MOZ_OVERRIDE;
+  virtual TemporaryRef<Path> BuildPath() MOZ_OVERRIDE;
 
-  virtual already_AddRefed<gfxFlattenedPath> GetFlattenedPath(const gfxMatrix &aMatrix) MOZ_OVERRIDE;
+  /**
+   * This returns a path without the extra little line segments that
+   * ApproximateZeroLengthSubpathSquareCaps can insert if we have square-caps.
+   * See the comment for that function for more info on that.
+   */
+  virtual TemporaryRef<Path>
+    GetPathForLengthOrPositionMeasuring() MOZ_OVERRIDE;
 
   // nsIContent interface
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
@@ -71,10 +81,10 @@ public:
    * length (as provided by the <path> element's 'pathLength' attribute). This
    * is used to scale stroke dashing, and to scale offsets along a textPath.
    */
-  gfxFloat GetPathLengthScale(PathLengthScaleForType aFor);
+  float GetPathLengthScale(PathLengthScaleForType aFor);
 
   // WebIDL
-  already_AddRefed<nsIDOMSVGAnimatedNumber> PathLength();
+  already_AddRefed<SVGAnimatedNumber> PathLength();
   float GetTotalLength(ErrorResult& rv);
   already_AddRefed<nsISVGPoint> GetPointAtLength(float distance, ErrorResult& rv);
   uint32_t GetPathSegAtLength(float distance);

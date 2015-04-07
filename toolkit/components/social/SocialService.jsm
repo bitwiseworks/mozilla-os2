@@ -19,6 +19,7 @@ const STRING_TYPE_NAME       = "type.%ID%.name";
 XPCOMUtils.defineLazyModuleGetter(this, "getFrameWorkerHandle", "resource://gre/modules/FrameWorker.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "WorkerAPI", "resource://gre/modules/WorkerAPI.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "MozSocialAPI", "resource://gre/modules/MozSocialAPI.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "closeAllChatWindows", "resource://gre/modules/MozSocialAPI.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "DeferredTask", "resource://gre/modules/DeferredTask.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "etld",
@@ -33,7 +34,8 @@ XPCOMUtils.defineLazyServiceGetter(this, "etld",
 
 // Internal helper methods and state
 let SocialServiceInternal = {
-  enabled: Services.prefs.getBoolPref("social.enabled"),
+  get enabled() this.providerArray.length > 0,
+
   get providerArray() {
     return [p for ([, p] of Iterator(this.providers))];
   },
@@ -54,14 +56,6 @@ let SocialServiceInternal = {
                        ", exception: " + err);
       }
     }
-  },
-  getManifestByOrigin: function(origin) {
-    for (let manifest of SocialServiceInternal.manifests) {
-      if (origin == manifest.origin) {
-        return manifest;
-      }
-    }
-    return null;
   },
   getManifestPrefname: function(origin) {
     // Retrieve the prefname for a given origin/manifest.
@@ -96,7 +90,7 @@ let SocialServiceInternal = {
     let hosts = [];
     let providers = {};
 
-    for (p of SocialServiceInternal.providerArray) {
+    for (let p of SocialServiceInternal.providerArray) {
       p.frecency = 0;
       providers[p.domain] = p;
       hosts.push(p.domain);
@@ -143,6 +137,8 @@ XPCOMUtils.defineLazyGetter(SocialServiceInternal, "providers", function () {
   for (let manifest of this.manifests) {
     try {
       if (ActiveProviders.has(manifest.origin)) {
+        // enable the api when a provider is enabled
+        MozSocialAPI.enabled = true;
         let provider = new SocialProvider(manifest);
         providers[provider.origin] = provider;
       }
@@ -188,16 +184,17 @@ let ActiveProviders = {
 
   add: function (origin) {
     this._providers[origin] = 1;
-    this._deferredTask.start();
+    this._deferredTask.arm();
   },
 
   delete: function (origin) {
     delete this._providers[origin];
-    this._deferredTask.start();
+    this._deferredTask.arm();
   },
 
   flush: function () {
-    this._deferredTask.flush();
+    this._deferredTask.disarm();
+    this._persist();
   },
 
   get _deferredTask() {
@@ -215,11 +212,14 @@ let ActiveProviders = {
 };
 
 function migrateSettings() {
-  let activeProviders;
+  let activeProviders, enabled;
   try {
     activeProviders = Services.prefs.getCharPref("social.activeProviders");
   } catch(e) {
     // not set, we'll check if we need to migrate older prefs
+  }
+  if (Services.prefs.prefHasUserValue("social.enabled")) {
+    enabled = Services.prefs.getBoolPref("social.enabled");
   }
   if (activeProviders) {
     // migration from fx21 to fx22 or later
@@ -246,12 +246,18 @@ function migrateSettings() {
         defaultManifest = Services.prefs.getDefaultBranch(null)
                         .getComplexValue(prefname, Ci.nsISupportsString).data;
         defaultManifest = JSON.parse(defaultManifest);
+      } catch(e) {
+        // not a built-in, continue
+      }
+      if (defaultManifest) {
         if (defaultManifest.shareURL && !manifest.shareURL) {
           manifest.shareURL = defaultManifest.shareURL;
           needsUpdate = true;
         }
-      } catch(e) {
-        // not a built-in, continue
+        if (defaultManifest.version && (!manifest.version || defaultManifest.version > manifest.version)) {
+          manifest = defaultManifest;
+          needsUpdate = true;
+        }
       }
       if (needsUpdate) {
         // the provider was installed with an older build, so we will update the
@@ -267,7 +273,14 @@ function migrateSettings() {
         string.data = JSON.stringify(manifest);
         Services.prefs.setComplexValue(prefname, Ci.nsISupportsString, string);
       }
+      // as of fx 29, we no longer rely on social.enabled. migration from prior
+      // versions should disable all service addons if social.enabled=false
+      if (enabled === false) {
+        ActiveProviders.delete(origin);
+      }
     }
+    ActiveProviders.flush();
+    Services.prefs.clearUserPref("social.enabled");
     return;
   }
 
@@ -332,9 +345,6 @@ function initService() {
     // enabled providers are not migrated.
     Cu.reportError("Error migrating social settings: " + e);
   }
-  // Initialize the MozSocialAPI
-  if (SocialServiceInternal.enabled)
-    MozSocialAPI.enabled = true;
 }
 
 function schedule(callback) {
@@ -343,26 +353,21 @@ function schedule(callback) {
 
 // Public API
 this.SocialService = {
+  get hasEnabledProviders() {
+    // used as an optimization during startup, can be used to check if further
+    // initialization should be done (e.g. creating the instances of
+    // SocialProvider and turning on UI). ActiveProviders may have changed and
+    // not yet flushed so we check the active providers array
+    for (let p in ActiveProviders._providers) {
+      return true;
+    };
+    return false;
+  },
   get enabled() {
     return SocialServiceInternal.enabled;
   },
   set enabled(val) {
-    let enable = !!val;
-
-    // Allow setting to the same value when in safe mode so the
-    // feature can be force enabled.
-    if (enable == SocialServiceInternal.enabled &&
-        !Services.appinfo.inSafeMode)
-      return;
-
-    // if disabling, ensure all providers are actually disabled
-    if (!enable)
-      SocialServiceInternal.providerArray.forEach(function (p) p.enabled = false);
-
-    SocialServiceInternal.enabled = enable;
-    MozSocialAPI.enabled = enable;
-    Services.obs.notifyObservers(null, "social:pref-changed", enable ? "enabled" : "disabled");
-    Services.telemetry.getHistogramById("SOCIAL_TOGGLED").add(enable);
+    throw new Error("not allowed to set SocialService.enabled");
   },
 
   // Adds and activates a builtin provider. The provider may or may not have
@@ -375,7 +380,7 @@ this.SocialService = {
       });
       return;
     }
-    let manifest = SocialServiceInternal.getManifestByOrigin(origin);
+    let manifest = SocialService.getManifestByOrigin(origin);
     if (manifest) {
       let addon = new AddonWrapper(manifest);
       AddonManagerPrivate.callAddonListeners("onEnabling", addon, false);
@@ -395,12 +400,14 @@ this.SocialService = {
     if (SocialServiceInternal.providers[manifest.origin])
       throw new Error("SocialService.addProvider: provider with this origin already exists");
 
+    // enable the api when a provider is enabled
+    MozSocialAPI.enabled = true;
     let provider = new SocialProvider(manifest);
     SocialServiceInternal.providers[provider.origin] = provider;
     ActiveProviders.add(provider.origin);
 
     this.getOrderedProviderList(function (providers) {
-      this._notifyProviderListeners("provider-added", providers);
+      this._notifyProviderListeners("provider-enabled", provider.origin, providers);
       if (onDone)
         onDone(provider);
     }.bind(this));
@@ -413,7 +420,7 @@ this.SocialService = {
       throw new Error("SocialService.removeProvider: no provider with origin " + origin + " exists!");
 
     let provider = SocialServiceInternal.providers[origin];
-    let manifest = SocialServiceInternal.getManifestByOrigin(origin);
+    let manifest = SocialService.getManifestByOrigin(origin);
     let addon = manifest && new AddonWrapper(manifest);
     if (addon) {
       AddonManagerPrivate.callAddonListeners("onDisabling", addon, false);
@@ -424,6 +431,8 @@ this.SocialService = {
     ActiveProviders.delete(provider.origin);
 
     delete SocialServiceInternal.providers[origin];
+    // disable the api if we have no enabled providers
+    MozSocialAPI.enabled = SocialServiceInternal.enabled;
 
     if (addon) {
       // we have to do this now so the addon manager ui will update an uninstall
@@ -434,7 +443,7 @@ this.SocialService = {
     }
 
     this.getOrderedProviderList(function (providers) {
-      this._notifyProviderListeners("provider-removed", providers);
+      this._notifyProviderListeners("provider-disabled", origin, providers);
       if (onDone)
         onDone();
     }.bind(this));
@@ -455,6 +464,15 @@ this.SocialService = {
     });
   },
 
+  getManifestByOrigin: function(origin) {
+    for (let manifest of SocialServiceInternal.manifests) {
+      if (origin == manifest.origin) {
+        return manifest;
+      }
+    }
+    return null;
+  },
+
   // Returns an array of installed providers, sorted by frecency
   getOrderedProviderList: function(onDone) {
     SocialServiceInternal.orderedProviders(onDone);
@@ -472,10 +490,10 @@ this.SocialService = {
     this._providerListeners.delete(listener);
   },
 
-  _notifyProviderListeners: function (topic, data) {
+  _notifyProviderListeners: function (topic, origin, providers) {
     for (let [listener, ] of this._providerListeners) {
       try {
-        listener(topic, data);
+        listener(topic, origin, providers);
       } catch (ex) {
         Components.utils.reportError("SocialService: provider listener threw an exception: " + ex);
       }
@@ -483,7 +501,8 @@ this.SocialService = {
   },
 
   _manifestFromData: function(type, data, principal) {
-    let sameOriginRequired = ['workerURL', 'sidebarURL', 'shareURL'];
+    let featureURLs = ['workerURL', 'sidebarURL', 'shareURL', 'statusURL', 'markURL'];
+    let resolveURLs = featureURLs.concat(['postActivationURL']);
 
     if (type == 'directory') {
       // directory provided manifests must have origin in manifest, use that
@@ -497,24 +516,29 @@ this.SocialService = {
     // force/fixup origin
     data.origin = principal.origin;
 
-    // workerURL, sidebarURL is required and must be same-origin
     // iconURL and name are required
     // iconURL may be a different origin (CDN or data url support) if this is
     // a whitelisted or directory listed provider
-    if (!data['workerURL'] && !data['sidebarURL'] && !data['shareURL']) {
-      Cu.reportError("SocialService.manifestFromData manifest missing required workerURL or sidebarURL.");
+    let providerHasFeatures = [url for (url of featureURLs) if (data[url])].length > 0;
+    if (!providerHasFeatures) {
+      Cu.reportError("SocialService.manifestFromData manifest missing required urls.");
       return null;
     }
     if (!data['name'] || !data['iconURL']) {
       Cu.reportError("SocialService.manifestFromData manifest missing name or iconURL.");
       return null;
     }
-    for (let url of sameOriginRequired) {
+    for (let url of resolveURLs) {
       if (data[url]) {
         try {
-          data[url] = Services.io.newURI(principal.URI.resolve(data[url]), null, null).spec;
+          let resolved = Services.io.newURI(principal.URI.resolve(data[url]), null, null);
+          if (!(resolved.schemeIs("http") || resolved.schemeIs("https"))) {
+            Cu.reportError("SocialService.manifestFromData unsupported scheme '" + resolved.scheme + "' for " + principal.origin);
+            return null;
+          }
+          data[url] = resolved.spec;
         } catch(e) {
-          Cu.reportError("SocialService.manifestFromData same-origin missmatch in manifest for " + principal.origin);
+          Cu.reportError("SocialService.manifestFromData unable to resolve '" + url + "' for " + principal.origin);
           return null;
         }
       }
@@ -555,48 +579,52 @@ this.SocialService = {
       },
     };
 
-    let link = chromeWin.document.getElementById("servicesInstall-learnmore-link");
-    link.value = browserBundle.GetStringFromName("service.install.learnmore");
-    link.href = Services.urlFormatter.formatURLPref("app.support.baseURL") + "social-api";
-
+    let options = {
+                    learnMoreURL: Services.urlFormatter.formatURLPref("app.support.baseURL") + "social-api",
+                  };
     let anchor = "servicesInstall-notification-icon";
     let notificationid = "servicesInstall";
     chromeWin.PopupNotifications.show(browser, notificationid, message, anchor,
-                                      action, [], {});
+                                      action, [], options);
   },
 
   installProvider: function(aDOMDocument, data, installCallback) {
+    let manifest;
     let installOrigin = aDOMDocument.nodePrincipal.origin;
 
-    let id = getAddonIDFromOrigin(installOrigin);
-    let version = data && data.version ? data.version : "0";
-    if (Services.blocklist.getAddonBlocklistState(id, version) == Ci.nsIBlocklistService.STATE_BLOCKED)
-      throw new Error("installProvider: provider with origin [" +
-                      installOrigin + "] is blocklisted");
+    if (data) {
+      let installType = getOriginActivationType(installOrigin);
+      // if we get data, we MUST have a valid manifest generated from the data
+      manifest = this._manifestFromData(installType, data, aDOMDocument.nodePrincipal);
+      if (!manifest)
+        throw new Error("SocialService.installProvider: service configuration is invalid from " + aDOMDocument.location.href);
 
+      let addon = new AddonWrapper(manifest);
+      if (addon && addon.blocklistState == Ci.nsIBlocklistService.STATE_BLOCKED)
+        throw new Error("installProvider: provider with origin [" +
+                        installOrigin + "] is blocklisted");
+    }
+
+    let id = getAddonIDFromOrigin(installOrigin);
     AddonManager.getAddonByID(id, function(aAddon) {
       if (aAddon && aAddon.userDisabled) {
         aAddon.cancelUninstall();
         aAddon.userDisabled = false;
       }
       schedule(function () {
-        this._installProvider(aDOMDocument, data, installCallback);
+        this._installProvider(aDOMDocument, manifest, aManifest => {
+          this._notifyProviderListeners("provider-installed", aManifest.origin);
+          installCallback(aManifest);
+        });
       }.bind(this));
     }.bind(this));
   },
 
-  _installProvider: function(aDOMDocument, data, installCallback) {
+  _installProvider: function(aDOMDocument, manifest, installCallback) {
     let sourceURI = aDOMDocument.location.href;
     let installOrigin = aDOMDocument.nodePrincipal.origin;
 
     let installType = getOriginActivationType(installOrigin);
-    let manifest;
-    if (data) {
-      // if we get data, we MUST have a valid manifest generated from the data
-      manifest = this._manifestFromData(installType, data, aDOMDocument.nodePrincipal);
-      if (!manifest)
-        throw new Error("SocialService.installProvider: service configuration is invalid from " + sourceURI);
-    }
     let installer;
     switch(installType) {
       case "foreign":
@@ -632,7 +660,7 @@ this.SocialService = {
         if (!manifest)
           throw new Error("Cannot install provider without manifest data");
         installer = new AddonInstaller(sourceURI, manifest, installCallback);
-        installer.install();
+        this._showInstallNotification(aDOMDocument, installer);
         break;
       default:
         throw new Error("SocialService.installProvider: Invalid install type "+installType+"\n");
@@ -640,18 +668,23 @@ this.SocialService = {
     }
   },
 
+  createWrapper: function(manifest) {
+    return new AddonWrapper(manifest);
+  },
+
   /**
    * updateProvider is used from the worker to self-update.  Since we do not
    * have knowledge of the currently selected provider here, we will notify
    * the front end to deal with any reload.
    */
-  updateProvider: function(aDOMDocument, aManifest, aCallback) {
-    let installOrigin = aDOMDocument.nodePrincipal.origin;
-    let installType = this.getOriginActivationType(installOrigin);
+  updateProvider: function(aUpdateOrigin, aManifest) {
+    let originUri = Services.io.newURI(aUpdateOrigin, null, null);
+    let principal = Services.scriptSecurityManager.getNoAppCodebasePrincipal(originUri);
+    let installType = this.getOriginActivationType(aUpdateOrigin);
     // if we get data, we MUST have a valid manifest generated from the data
-    let manifest = this._manifestFromData(installType, aManifest, aDOMDocument.nodePrincipal);
+    let manifest = this._manifestFromData(installType, aManifest, principal);
     if (!manifest)
-      throw new Error("SocialService.installProvider: service configuration is invalid from " + installOrigin);
+      throw new Error("SocialService.installProvider: service configuration is invalid from " + aUpdateOrigin);
 
     // overwrite the preference
     let string = Cc["@mozilla.org/supports-string;1"].
@@ -665,13 +698,15 @@ this.SocialService = {
       let provider = new SocialProvider(manifest);
       SocialServiceInternal.providers[provider.origin] = provider;
       // update the cache and ui, reload provider if necessary
-      this._notifyProviderListeners("provider-update", provider);
+      this.getOrderedProviderList(providers => {
+        this._notifyProviderListeners("provider-update", provider.origin, providers);
+      });
     }
 
   },
 
   uninstallProvider: function(origin, aCallback) {
-    let manifest = SocialServiceInternal.getManifestByOrigin(origin);
+    let manifest = SocialService.getManifestByOrigin(origin);
     let addon = new AddonWrapper(manifest);
     addon.uninstall(aCallback);
   }
@@ -691,8 +726,8 @@ function SocialProvider(input) {
   if (!input.origin)
     throw new Error("SocialProvider must be passed an origin");
 
-  let id = getAddonIDFromOrigin(input.origin);
-  if (Services.blocklist.getAddonBlocklistState(id, input.version || "0") == Ci.nsIBlocklistService.STATE_BLOCKED)
+  let addon = new AddonWrapper(input);
+  if (addon.blocklistState == Ci.nsIBlocklistService.STATE_BLOCKED)
     throw new Error("SocialProvider: provider with origin [" +
                     input.origin + "] is blocklisted");
 
@@ -703,6 +738,11 @@ function SocialProvider(input) {
   this.workerURL = input.workerURL;
   this.sidebarURL = input.sidebarURL;
   this.shareURL = input.shareURL;
+  this.statusURL = input.statusURL;
+  this.markURL = input.markURL;
+  this.markedIcon = input.markedIcon;
+  this.unmarkedIcon = input.unmarkedIcon;
+  this.postActivationURL = input.postActivationURL;
   this.origin = input.origin;
   let originUri = Services.io.newURI(input.origin, null, null);
   this.principal = Services.scriptSecurityManager.getNoAppCodebasePrincipal(originUri);
@@ -722,6 +762,12 @@ function SocialProvider(input) {
 }
 
 SocialProvider.prototype = {
+  reload: function() {
+    this._terminate();
+    this._activate();
+    Services.obs.notifyObservers(null, "social:provider-reload", this.origin);
+  },
+
   // Provider enabled/disabled state. Disabled providers do not have active
   // connections to their FrameWorkers.
   _enabled: false,
@@ -743,7 +789,7 @@ SocialProvider.prototype = {
   },
 
   get manifest() {
-    return SocialServiceInternal.getManifestByOrigin(this.origin);
+    return SocialService.getManifestByOrigin(this.origin);
   },
 
   // Reference to a workerAPI object for this provider. Null if the provider has
@@ -766,60 +812,6 @@ SocialProvider.prototype = {
   // values aren't to be used as the user is logged out'.
   profile: undefined,
 
-  // Contains the information necessary to support our page mark feature.
-  // null means no info yet provided (which includes the case of the provider
-  // not supporting the feature) or the provided data is invalid.  Updated via
-  // the 'pageMarkInfo' setter and returned via the getter.
-  _pageMarkInfo: null,
-  get pageMarkInfo() {
-    return this._pageMarkInfo;
-  },
-  set pageMarkInfo(data) {
-    // Accept *and validate* the page-mark-config message from the provider.
-    let promptImages = {};
-    let promptMessages = {};
-    let self = this;
-    function reportError(reason) {
-      Cu.reportError("Invalid page-mark data from provider: " + reason + ": marking is disabled for this provider");
-      // and we explicitly reset the page-mark data to null to avoid stale
-      // data being used and notify our observers.
-      self._pageMarkInfo = null;
-      Services.obs.notifyObservers(null, "social:page-mark-config", self.origin);
-    }
-    if (!data ||
-        !data.images || typeof data.images != "object" ||
-        !data.messages || typeof data.messages != "object") {
-      reportError("data is missing valid 'images' or 'messages' elements");
-      return;
-    }
-    for (let sub of ["marked", "unmarked"]) {
-      let url = data.images[sub];
-      if (!url || typeof url != "string" || url.length == 0) {
-        reportError('images["' + sub + '"] is not a valid string');
-        return;
-      }
-      // resolve potentially relative URLs but there is no same-origin check
-      // for images to help providers utilize content delivery networks...
-      // Also note no scheme checks are necessary - even a javascript: URL
-      // is safe as gecko evaluates them in a sandbox.
-      let imgUri = this.resolveUri(url);
-      if (!imgUri) {
-        reportError('images["' + sub + '"] is an invalid URL');
-        return;
-      }
-      promptImages[sub] = imgUri.spec;
-    }
-    for (let sub of ["markedTooltip", "unmarkedTooltip", "markedLabel", "unmarkedLabel"]) {
-      if (typeof data.messages[sub] != "string" || data.messages[sub].length == 0) {
-        reportError('messages["' + sub + '"] is not a valid string');
-        return;
-      }
-      promptMessages[sub] = data.messages[sub];
-    }
-    this._pageMarkInfo = {images: promptImages, messages: promptMessages};
-    Services.obs.notifyObservers(null, "social:page-mark-config", this.origin);
-  },
-
   // Map of objects describing the provider's notification icons, whose
   // properties include:
   //   name, iconURL, counter, contentPanel
@@ -830,6 +822,7 @@ SocialProvider.prototype = {
   updateUserProfile: function(profile) {
     if (!profile)
       profile = {};
+    let accountChanged = !this.profile || this.profile.userName != profile.userName;
     this.profile = profile;
 
     // Sanitize the portrait from any potential script-injection.
@@ -862,6 +855,12 @@ SocialProvider.prototype = {
     }
 
     Services.obs.notifyObservers(null, "social:profile-changed", this.origin);
+    if (accountChanged)
+      closeAllChatWindows(this);
+  },
+
+  haveLoggedInUser: function () {
+    return !!(this.profile && this.profile.userName);
   },
 
   // Called by the workerAPI to add/update a notification icon.
@@ -887,6 +886,7 @@ SocialProvider.prototype = {
   },
 
   _terminate: function _terminate() {
+    closeAllChatWindows(this);
     if (this.workerURL) {
       try {
         getFrameWorkerHandle(this.workerURL).terminate();
@@ -981,7 +981,7 @@ function getPrefnameFromOrigin(origin) {
 function AddonInstaller(sourceURI, aManifest, installCallback) {
   aManifest.updateDate = Date.now();
   // get the existing manifest for installDate
-  let manifest = SocialServiceInternal.getManifestByOrigin(aManifest.origin);
+  let manifest = SocialService.getManifestByOrigin(aManifest.origin);
   let isNewInstall = !manifest;
   if (manifest && manifest.installDate)
     aManifest.installDate = manifest.installDate;
@@ -1022,8 +1022,8 @@ var SocialAddonProvider = {
     for (let manifest of SocialServiceInternal.manifests) {
       try {
         if (ActiveProviders.has(manifest.origin)) {
-          let id = getAddonIDFromOrigin(manifest.origin);
-          if (Services.blocklist.getAddonBlocklistState(id, manifest.version || "0") != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
+          let addon = new AddonWrapper(manifest);
+          if (addon.blocklistState != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
             SocialService.removeProvider(manifest.origin);
           }
         }
@@ -1057,6 +1057,7 @@ var SocialAddonProvider = {
     Services.prefs.clearUserPref(getPrefnameFromOrigin(aAddon.manifest.origin));
     aAddon.pendingOperations -= AddonManager.PENDING_UNINSTALL;
     AddonManagerPrivate.callAddonListeners("onUninstalled", aAddon);
+    SocialService._notifyProviderListeners("provider-uninstalled", aAddon.manifest.origin);
     if (aCallback)
       schedule(aCallback);
   }
@@ -1110,11 +1111,11 @@ AddonWrapper.prototype = {
   },
 
   get blocklistState() {
-    return Services.blocklist.getAddonBlocklistState(this.id, this.version || "0");
+    return Services.blocklist.getAddonBlocklistState(this);
   },
 
   get blocklistURL() {
-    return Services.blocklist.getAddonBlocklistURL(this.id, this.version || "0");
+    return Services.blocklist.getAddonBlocklistURL(this);
   },
 
   get screenshots() {

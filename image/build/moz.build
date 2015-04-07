@@ -4,11 +4,24 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'imglib2'
+EXPORTS += [
+    'nsImageModule.h',
+]
 
-CPP_SOURCES += [
+SOURCES += [
     'nsImageModule.cpp',
 ]
 
 LIBRARY_NAME = 'imglib2'
+
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'xul'
+LOCAL_INCLUDES += [
+    '../encoders/bmp',
+    '../encoders/ico',
+    '../encoders/jpeg',
+    '../encoders/png',
+    '../src',
+]
 

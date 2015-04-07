@@ -4,11 +4,17 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'simple'
-
-CPP_SOURCES += [
+SOURCES += [
     'SimpleTest.cpp',
 ]
 
 LIBRARY_NAME = 'simpletest'
 
+EXTRA_COMPONENTS += [
+    'SimpleTest.js',
+    'SimpleTest.manifest',
+]
+
+IS_COMPONENT = True
+
+XPI_NAME = 'simple'

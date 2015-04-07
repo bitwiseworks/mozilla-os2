@@ -7,8 +7,14 @@
 #ifndef jit_MoveEmitter_x86_shared_h
 #define jit_MoveEmitter_x86_shared_h
 
+#if defined(JS_CODEGEN_X86)
+# include "jit/x86/MacroAssembler-x86.h"
+#elif defined(JS_CODEGEN_X64)
+# include "jit/x64/MacroAssembler-x64.h"
+#else
+# error "Wrong architecture. Only x86 and x64 should build this file!"
+#endif
 #include "jit/MoveResolver.h"
-#include "jit/IonMacroAssembler.h"
 
 namespace js {
 namespace jit {
@@ -17,37 +23,32 @@ class CodeGenerator;
 
 class MoveEmitterX86
 {
-    typedef MoveResolver::Move Move;
-    typedef MoveResolver::MoveOperand MoveOperand;
-
     bool inCycle_;
     MacroAssemblerSpecific &masm;
 
     // Original stack push value.
     uint32_t pushedAtStart_;
 
-    // These store stack offsets to spill locations, snapshotting
-    // codegen->framePushed_ at the time they were allocated. They are -1 if no
-    // stack space has been allocated for that particular spill.
+    // This is a store stack offset for the cycle-break spill slot, snapshotting
+    // codegen->framePushed_ at the time it is allocated. -1 if not allocated.
     int32_t pushedAtCycle_;
-    int32_t pushedAtSpill_;
-
-    // Register that is available for temporary use. It may be assigned
-    // InvalidReg. If no corresponding spill space has been assigned,
-    // then this register do not need to be spilled.
-    Register spilledReg_;
 
     void assertDone();
-    Register tempReg();
-    Operand cycleSlot() const;
-    Operand spillSlot() const;
+    Address cycleSlot();
+    Address toAddress(const MoveOperand &operand) const;
     Operand toOperand(const MoveOperand &operand) const;
+    Operand toPopOperand(const MoveOperand &operand) const;
 
-    void emitMove(const MoveOperand &from, const MoveOperand &to);
+    size_t characterizeCycle(const MoveResolver &moves, size_t i,
+                             bool *allGeneralRegs, bool *allFloatRegs);
+    bool maybeEmitOptimizedCycle(const MoveResolver &moves, size_t i,
+                                 bool allGeneralRegs, bool allFloatRegs, size_t swapCount);
+    void emitInt32Move(const MoveOperand &from, const MoveOperand &to);
+    void emitGeneralMove(const MoveOperand &from, const MoveOperand &to);
+    void emitFloat32Move(const MoveOperand &from, const MoveOperand &to);
     void emitDoubleMove(const MoveOperand &from, const MoveOperand &to);
-    void breakCycle(const MoveOperand &from, const MoveOperand &to, Move::Kind kind);
-    void completeCycle(const MoveOperand &from, const MoveOperand &to, Move::Kind kind);
-    void emit(const Move &move);
+    void breakCycle(const MoveOperand &to, MoveOp::Type type);
+    void completeCycle(const MoveOperand &to, MoveOp::Type type);
 
   public:
     MoveEmitterX86(MacroAssemblerSpecific &masm);

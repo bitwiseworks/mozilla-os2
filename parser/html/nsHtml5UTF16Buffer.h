@@ -25,13 +25,13 @@
  * Please edit UTF16Buffer.java instead and regenerate.
  */
 
-#ifndef nsHtml5UTF16Buffer_h__
-#define nsHtml5UTF16Buffer_h__
+#ifndef nsHtml5UTF16Buffer_h
+#define nsHtml5UTF16Buffer_h
 
 #include "nsIAtom.h"
 #include "nsHtml5AtomTable.h"
 #include "nsString.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsIContent.h"
 #include "nsTraceRefcnt.h"
 #include "jArray.h"
@@ -41,6 +41,7 @@
 #include "nsHtml5ByteReadable.h"
 #include "nsIUnicodeDecoder.h"
 #include "nsHtml5Macros.h"
+#include "nsIContentHandle.h"
 
 class nsHtml5StreamParser;
 
@@ -57,13 +58,13 @@ class nsHtml5Portability;
 class nsHtml5UTF16Buffer
 {
   private:
-    PRUnichar* buffer;
+    char16_t* buffer;
     int32_t start;
     int32_t end;
   public:
     int32_t getStart();
     void setStart(int32_t start);
-    PRUnichar* getBuffer();
+    char16_t* getBuffer();
     int32_t getEnd();
     bool hasMore();
     void adjust(bool lastWasCR);

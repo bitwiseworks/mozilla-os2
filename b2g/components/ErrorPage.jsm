@@ -9,7 +9,7 @@ this.EXPORTED_SYMBOLS = ['ErrorPage'];
 const Cu = Components.utils;
 const Cc = Components.classes;
 const Ci = Components.interfaces;
-const kErrorPageFrameScript = 'chrome://browser/content/ErrorPage.js';
+const kErrorPageFrameScript = 'chrome://b2g/content/ErrorPage.js';
 
 Cu.import('resource://gre/modules/Services.jsm');
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -149,20 +149,38 @@ let ErrorPage = {
     }
   },
 
+  _listenError: function(frameLoader) {
+    let self = this;
+    let frameElement = frameLoader.ownerElement;
+    let injectErrorPageScript = function() {
+      let mm = frameLoader.messageManager;
+      try {
+        mm.loadFrameScript(kErrorPageFrameScript, true, true);
+      } catch (e) {
+        dump('Error loading ' + kErrorPageFrameScript + ' as frame script: ' + e + '\n');
+      }
+      mm.addMessageListener('ErrorPage:AddCertException', self._addCertException.bind(self));
+      frameElement.removeEventListener('mozbrowsererror', injectErrorPageScript, true);
+    };
+
+    frameElement.addEventListener('mozbrowsererror',
+                                  injectErrorPageScript,
+                                  true // use capture
+                                 );
+  },
+
   init: function errorPageInit() {
-    Services.obs.addObserver(this, 'in-process-browser-or-app-frame-shown', false);
-    Services.obs.addObserver(this, 'remote-browser-frame-shown', false);
+    Services.obs.addObserver(this, 'inprocess-browser-shown', false);
+    Services.obs.addObserver(this, 'remote-browser-shown', false);
   },
 
   observe: function errorPageObserve(aSubject, aTopic, aData) {
     let frameLoader = aSubject.QueryInterface(Ci.nsIFrameLoader);
-    let mm = frameLoader.messageManager;
-    try {
-      mm.loadFrameScript(kErrorPageFrameScript, true);
-    } catch (e) {
-      dump('Error loading ' + kErrorPageFrameScript + ' as frame script: ' + e + '\n');
+    // Ignore notifications that aren't from a BrowserOrApp
+    if (!frameLoader.ownerIsBrowserOrAppFrame) {
+      return;
     }
-    mm.addMessageListener('ErrorPage:AddCertException', this._addCertException.bind(this));
+    this._listenError(frameLoader);
   }
 };
 

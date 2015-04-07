@@ -1,14 +1,12 @@
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
-
 Cu.import("resource://testing-common/httpd.js");
 
 var httpServer = null;
 // Need to randomize, because apparently no one clears our cache
 var randomPath = "/redirect/" + Math.random();
-var randomURI = "http://localhost:4444" + randomPath;
+
+XPCOMUtils.defineLazyGetter(this, "randomURI", function() {
+  return "http://localhost:" + httpServer.identity.primaryPort + randomPath;
+});
 
 var cacheUpdateObserver = null;
 
@@ -70,11 +68,11 @@ function run_test()
   httpServer.registerPathHandler("/manifest", manifestHandler);
   httpServer.registerPathHandler("/content", contentHandler);
   httpServer.registerPathHandler(randomPath, redirectHandler);
-  httpServer.start(4444);
+  httpServer.start(-1);
 
   var pm = Cc["@mozilla.org/permissionmanager;1"]
     .getService(Ci.nsIPermissionManager);
-  var uri = make_uri("http://localhost:4444");
+  var uri = make_uri("http://localhost:" + httpServer.identity.primaryPort);
   var principal = Cc["@mozilla.org/scriptsecuritymanager;1"]
                     .getService(Ci.nsIScriptSecurityManager)
                     .getNoAppCodebasePrincipal(uri);
@@ -105,8 +103,10 @@ function run_test()
 
   var us = Cc["@mozilla.org/offlinecacheupdate-service;1"].
            getService(Ci.nsIOfflineCacheUpdateService);
-  us.scheduleUpdate(make_uri("http://localhost:4444/manifest"),
-                    make_uri("http://localhost:4444/masterEntry"),
+  us.scheduleUpdate(make_uri("http://localhost:" +
+                             httpServer.identity.primaryPort + "/manifest"),
+                    make_uri("http://localhost:" +
+                             httpServer.identity.primaryPort + "/masterEntry"),
                     null);
 
   do_test_pending();

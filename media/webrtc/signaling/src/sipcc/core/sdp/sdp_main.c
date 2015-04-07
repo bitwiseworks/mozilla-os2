@@ -50,6 +50,8 @@ const sdp_attrarray_t sdp_attr[SDP_MAX_ATTR_TYPES] =
      sdp_parse_attr_simple_u32, sdp_build_attr_simple_u32 },
     {"fmtp", sizeof("fmtp"),
      sdp_parse_attr_fmtp, sdp_build_attr_fmtp },
+    {"sctpmap", sizeof("sctpmap"),
+     sdp_parse_attr_sctpmap, sdp_build_attr_sctpmap },
     {"framing", sizeof("framing"),
      sdp_parse_attr_simple_string, sdp_build_attr_simple_string },
     {"inactive", sizeof("inactive"),
@@ -169,9 +171,16 @@ const sdp_attrarray_t sdp_attr[SDP_MAX_ATTR_TYPES] =
     {"maxptime", sizeof("maxptime"),
       sdp_parse_attr_simple_u32, sdp_build_attr_simple_u32},
     {"rtcp-fb", sizeof("rtcp-fb"),
-      sdp_parse_attr_rtcp_fb, sdp_build_attr_rtcp_fb}
+      sdp_parse_attr_rtcp_fb, sdp_build_attr_rtcp_fb},
+    {"setup", sizeof("setup"),
+      sdp_parse_attr_setup, sdp_build_attr_setup},
+    {"connection", sizeof("connection"),
+      sdp_parse_attr_connection, sdp_build_attr_connection},
+    {"extmap", sizeof("extmap"),
+      sdp_parse_attr_extmap, sdp_build_attr_extmap},
+    {"identity", sizeof("identity"),
+      sdp_parse_attr_simple_string, sdp_build_attr_simple_string},
 };
-
 /* Note: These *must* be in the same order as the enum types. */
 const sdp_namearray_t sdp_media[SDP_MAX_MEDIA_TYPES] =
 {
@@ -395,9 +404,7 @@ const sdp_namearray_t sdp_fmtp_codec_param[SDP_MAX_FMTP_PARAM] =
     {"useinbandfec",                    sizeof("useinbandfec")}, /* 46 */
     {"maxcodedaudiobandwidth",          sizeof("maxcodedaudiobandwidth")}, /* 47 */
     {"cbr",                             sizeof("cbr")}, /* 48 */
-    {"streams",                         sizeof("streams")}, /* 49 */
-    {"protocol",                        sizeof("protocol")} /* 50 */
-
+    {"max-fr",                          sizeof("max-fr")} /* 49 */
 } ;
 
 /* Note: These *must* be in the same order as the enum type. */
@@ -483,6 +490,21 @@ const sdp_namearray_t sdp_rtcp_fb_ccm_type_val[SDP_MAX_RTCP_FB_CCM] =
     SDP_NAME("vbcm")
 };
 
+/* Maintain the same order as defined in typedef sdp_setup_type_e */
+const sdp_namearray_t sdp_setup_type_val[SDP_MAX_SETUP] =
+{
+    SDP_NAME("active"),
+    SDP_NAME("passive"),
+    SDP_NAME("actpass"),
+    SDP_NAME("holdconn")
+};
+
+/* Maintain the same order as defined in typedef sdp_connection_type_e */
+const sdp_namearray_t sdp_connection_type_val[SDP_MAX_CONNECTION] =
+{
+    SDP_NAME("new"),
+    SDP_NAME("existing")
+};
 
 /*  Maintain same order as defined in typedef sdp_srtp_crypto_suite_t */
 const sdp_srtp_crypto_suite_list sdp_srtp_crypto_suite_array[SDP_SRTP_MAX_NUM_CRYPTO_SUITES] =
@@ -783,7 +805,7 @@ sdp_t *sdp_init_description (const char *peerconnection, void *config_p)
 
     sdp_p = (sdp_t *)SDP_MALLOC(sizeof(sdp_t));
     if (sdp_p == NULL) {
-	return (NULL);
+        return (NULL);
     }
 
     sstrncpy(sdp_p->peerconnection, peerconnection, sizeof(sdp_p->peerconnection));
@@ -975,12 +997,17 @@ sdp_result_e sdp_parse (sdp_t *sdp_p, char **bufp, u16 len)
      * we find a parsing error.
      */
     while (!end_found) {
-	/* If the last char of this line goes beyond the end of the buffer,
-	 * we don't parse it.
-	 */
+        /* If the last char of this line goes beyond the end of the buffer,
+         * we don't parse it.
+         */
         ptr = next_ptr;
         line_end = sdp_findchar(ptr, "\n");
-        if (line_end >= (*bufp + len)) {
+        if ((line_end >= (*bufp + len)) ||
+           (*line_end == '\0')) {
+            /* As this does not update the result value the SDP up to this point
+             * is still accept as valid. So encountering this is not treated as
+             * an error.
+             */
             sdp_parse_error(sdp_p->peerconnection,
                 "%s End of line beyond end of buffer.",
                 sdp_p->debug_str);
@@ -990,8 +1017,8 @@ sdp_result_e sdp_parse (sdp_t *sdp_p, char **bufp, u16 len)
 
         /* Print the line if we're tracing. */
         if ((parse_done == FALSE) &&
-	  (sdp_p->debug_flag[SDP_DEBUG_TRACE])) {
-	    SDP_PRINT("%s ", sdp_p->debug_str);
+          (sdp_p->debug_flag[SDP_DEBUG_TRACE])) {
+            SDP_PRINT("%s ", sdp_p->debug_str);
 
             SDP_PRINT("%*s", (int)(line_end - ptr), ptr);
 
@@ -1192,226 +1219,6 @@ sdp_result_e sdp_build (sdp_t *sdp_p, flex_string *fs)
     return (result);
 }
 
-/* Function:    sdp_copy
- * Description: Create a new SDP structure that is an exact copy of the
- *              one passed in.
- * Parameters:  orig_sdp_p  The SDP handle of the SDP to be copied.
- * Returns:     A handle for a new SDP structure as a void ptr.
-*/
-sdp_t *sdp_copy (sdp_t *orig_sdp_p)
-{
-    int i, j;
-    u16                 cur_level;
-    sdp_result_e        rc;
-    sdp_t              *new_sdp_p;
-    sdp_timespec_t     *cur_time_p = NULL;
-    sdp_timespec_t     *orig_time_p = NULL;
-    sdp_mca_t          *orig_mca_p = NULL;
-    sdp_mca_t          *new_mca_p = NULL;
-    sdp_mca_t          *dst_mca_p = NULL;
-    sdp_media_profiles_t *src_media_profile_p;
-    sdp_media_profiles_t *dst_media_profile_p;
-
-    if (orig_sdp_p->debug_flag[SDP_DEBUG_TRACE]) {
-        SDP_PRINT("%s Copy SDP:", orig_sdp_p->debug_str);
-    }
-
-    if (sdp_verify_sdp_ptr(orig_sdp_p) == FALSE) {
-        return (NULL);
-    }
-
-    new_sdp_p = (sdp_t *)SDP_MALLOC(sizeof(sdp_t));
-    if (new_sdp_p == NULL) {
-        return (NULL);
-    }
-
-    sstrncpy(new_sdp_p->peerconnection, orig_sdp_p->peerconnection,
-        sizeof(new_sdp_p->peerconnection));
-
-    /* Initialize magic number. */
-    new_sdp_p->magic_num = orig_sdp_p->magic_num;
-
-    new_sdp_p->conf_p             = orig_sdp_p->conf_p;
-    new_sdp_p->version            = orig_sdp_p->version;
-    sstrncpy(new_sdp_p->owner_name, orig_sdp_p->owner_name,
-             SDP_MAX_LINE_LEN+1);
-    sstrncpy(new_sdp_p->owner_sessid, orig_sdp_p->owner_sessid,
-             SDP_MAX_LINE_LEN+1);
-    sstrncpy(new_sdp_p->owner_version, orig_sdp_p->owner_version,
-             SDP_MAX_LINE_LEN+1);
-    new_sdp_p->owner_network_type = orig_sdp_p->owner_network_type;
-    new_sdp_p->owner_addr_type    = orig_sdp_p->owner_addr_type;
-    sstrncpy(new_sdp_p->owner_addr, orig_sdp_p->owner_addr,
-             SDP_MAX_LINE_LEN+1);
-    sstrncpy(new_sdp_p->sessname, orig_sdp_p->sessname,
-             SDP_MAX_LINE_LEN+1);
-    new_sdp_p->sessinfo_found     = orig_sdp_p->sessinfo_found;
-    new_sdp_p->uri_found          = orig_sdp_p->uri_found;
-
-    new_sdp_p->default_conn.nettype      = orig_sdp_p->default_conn.nettype;
-    new_sdp_p->default_conn.addrtype     = orig_sdp_p->default_conn.addrtype;
-    sstrncpy(new_sdp_p->default_conn.conn_addr,
-             orig_sdp_p->default_conn.conn_addr,
-             SDP_MAX_LINE_LEN+1);
-
-    new_sdp_p->default_conn.is_multicast =
-        orig_sdp_p->default_conn.is_multicast;
-    new_sdp_p->default_conn.ttl      = orig_sdp_p->default_conn.ttl;
-    new_sdp_p->default_conn.num_of_addresses
-        = orig_sdp_p->default_conn.num_of_addresses;
-    new_sdp_p->encrypt.encrypt_type = orig_sdp_p->encrypt.encrypt_type;
-    sstrncpy(new_sdp_p->encrypt.encrypt_key,
-             orig_sdp_p->encrypt.encrypt_key, SDP_MAX_LINE_LEN+1);
-
-    /* Copy all session level bw lines. */
-    rc = sdp_copy_all_bw_lines(orig_sdp_p, new_sdp_p,
-                               SDP_SESSION_LEVEL, SDP_SESSION_LEVEL);
-    if (rc != SDP_SUCCESS) {
-        sdp_free_description(new_sdp_p);
-        return (NULL);
-    }
-
-    /* Copy timespec structures. */
-    orig_time_p = orig_sdp_p->timespec_p;
-    while (orig_time_p != NULL) {
-        if (cur_time_p == NULL) {
-            new_sdp_p->timespec_p = \
-                (sdp_timespec_t *)SDP_MALLOC(sizeof(sdp_timespec_t));
-            cur_time_p = new_sdp_p->timespec_p;
-        } else {
-            cur_time_p->next_p = \
-                (sdp_timespec_t *)SDP_MALLOC(sizeof(sdp_timespec_t));
-            cur_time_p = cur_time_p->next_p;
-        }
-        if (cur_time_p == NULL) {
-            sdp_free_description(new_sdp_p);
-            return (NULL);
-        }
-        sstrncpy(cur_time_p->start_time, orig_time_p->start_time,
-                 SDP_MAX_LINE_LEN+1);
-        sstrncpy(cur_time_p->stop_time, orig_time_p->stop_time,
-                 SDP_MAX_LINE_LEN+1);
-        cur_time_p->next_p = NULL;
-
-        /* Move to next time structure. */
-        orig_time_p = orig_time_p->next_p;
-    }
-
-    /* Copy all session attributes. */
-    rc = sdp_copy_all_attrs(orig_sdp_p, new_sdp_p,
-                            SDP_SESSION_LEVEL, SDP_SESSION_LEVEL);
-    if (rc != SDP_SUCCESS) {
-        sdp_free_description(new_sdp_p);
-        return (NULL);
-    }
-
-
-    /* Now copy each media level with its parameters and all
-     * corresponding attrs. */
-    orig_mca_p = orig_sdp_p->mca_p;
-    new_mca_p = NULL;
-    cur_level = 0;
-    while (orig_mca_p != NULL) {
-        cur_level++;
-
-        /* Allocate and link in a new media level. */
-        new_mca_p = sdp_alloc_mca();
-        if (new_mca_p == NULL) {
-            sdp_free_description(new_sdp_p);
-            return (NULL);
-        }
-        if (dst_mca_p == NULL) {
-            new_sdp_p->mca_p = new_mca_p;
-        } else {
-            dst_mca_p->next_p = new_mca_p;
-        }
-        dst_mca_p = new_mca_p;
-        new_sdp_p->mca_count++;
-
-        /* Copy all the media level parameters. */
-        dst_mca_p->media         = orig_mca_p->media;
-        dst_mca_p->conn.nettype  = orig_mca_p->conn.nettype;
-        dst_mca_p->conn.addrtype = orig_mca_p->conn.addrtype;
-        sstrncpy(dst_mca_p->conn.conn_addr, orig_mca_p->conn.conn_addr,
-                 SDP_MAX_LINE_LEN+1);
-
-        dst_mca_p->conn.is_multicast = orig_mca_p->conn.is_multicast;
-        dst_mca_p->conn.ttl      = orig_mca_p->conn.ttl;
-        dst_mca_p->conn.num_of_addresses = orig_mca_p->conn.num_of_addresses;
-
-        dst_mca_p->transport     = orig_mca_p->transport;
-        dst_mca_p->port_format   = orig_mca_p->port_format;
-        dst_mca_p->port          = orig_mca_p->port;
-        dst_mca_p->num_ports     = orig_mca_p->num_ports;
-        dst_mca_p->vpi           = orig_mca_p->vpi;
-        dst_mca_p->vci           = orig_mca_p->vci;
-        dst_mca_p->vcci          = orig_mca_p->vcci;
-        dst_mca_p->cid           = orig_mca_p->cid;
-        dst_mca_p->num_payloads  = orig_mca_p->num_payloads;
-
-        for (i=0; i < SDP_MAX_PAYLOAD_TYPES; i++) {
-            dst_mca_p->payload_indicator[i] = orig_mca_p->payload_indicator[i];
-            dst_mca_p->payload_type[i] = orig_mca_p->payload_type[i];
-        }
-
-        dst_mca_p->sessinfo_found = orig_mca_p->sessinfo_found;
-        dst_mca_p->encrypt.encrypt_type = orig_mca_p->encrypt.encrypt_type;
-        sstrncpy(dst_mca_p->encrypt.encrypt_key,
-                 orig_mca_p->encrypt.encrypt_key, SDP_MAX_LINE_LEN+1);
-        dst_mca_p->media_direction = orig_mca_p->media_direction;
-
-        /* Now copy all the media level bw lines over. */
-        rc = sdp_copy_all_bw_lines(orig_sdp_p, new_sdp_p, cur_level, cur_level);
-        if (rc != SDP_SUCCESS) {
-            sdp_free_description(new_sdp_p);
-            return (NULL);
-        }
-
-        dst_mca_p->mid = orig_mca_p->mid;
-
-        if (orig_mca_p->media_profiles_p != NULL) {
-            src_media_profile_p = orig_mca_p->media_profiles_p;
-            dst_mca_p->media_profiles_p = (sdp_media_profiles_t *)
-                SDP_MALLOC(sizeof(sdp_media_profiles_t));
-            dst_media_profile_p = dst_mca_p->media_profiles_p;
-            if (dst_media_profile_p == NULL) {
-                sdp_free_description(new_sdp_p);
-                return (NULL);
-            }
-
-            dst_media_profile_p->num_profiles =
-                src_media_profile_p->num_profiles;
-            for (i=0; i < SDP_MAX_PROFILES; i++) {
-                dst_media_profile_p->profile[i] =
-                    src_media_profile_p->profile[i];
-                dst_media_profile_p->num_payloads[i] =
-                    src_media_profile_p->num_payloads[i];
-                for (j=0; j < SDP_MAX_PAYLOAD_TYPES; j++) {
-                    dst_media_profile_p->payload_indicator[i][j] =
-                        src_media_profile_p->payload_indicator[i][j];
-                    dst_media_profile_p->payload_type[i][j] =
-                        src_media_profile_p->payload_type[i][j];
-
-                }
-            }
-        }
-
-        /* Now copy all the media level attrs over. */
-        (void)sdp_copy_all_attrs(orig_sdp_p, new_sdp_p, cur_level, cur_level);
-
-        /* Now move to the next media level. */
-        orig_mca_p = orig_mca_p->next_p;
-    }
-
-
-    /* Set default debug flags from application config. */
-    for (i=0; i < SDP_MAX_DEBUG_TYPES; i++) {
-        new_sdp_p->debug_flag[i] = orig_sdp_p->debug_flag[i];
-    }
-
-    return (new_sdp_p);
-}
-
 /* Function:    sdp_free_description
  * Description:	Free an SDP description and all memory associated with it.
  * Parameters:  sdp_p  The SDP handle returned by sdp_init_description
@@ -1431,14 +1238,19 @@ sdp_result_e sdp_free_description (sdp_t *sdp_p)
         return (SDP_INVALID_SDP_PTR);
     }
 
+    /* Free the config structure */
+    if (sdp_p->conf_p) {
+        SDP_FREE(sdp_p->conf_p);
+    }
+
     /* Free any timespec structures - should be only one since
      * this is all we currently support.
      */
     time_p = sdp_p->timespec_p;
     while (time_p != NULL) {
-	next_time_p = time_p->next_p;
-	SDP_FREE(time_p);
-	time_p = next_time_p;
+        next_time_p = time_p->next_p;
+        SDP_FREE(time_p);
+        time_p = next_time_p;
     }
 
     bw_p = &(sdp_p->bw);
@@ -1452,23 +1264,23 @@ sdp_result_e sdp_free_description (sdp_t *sdp_p)
     /* Free any session attr structures */
     attr_p = sdp_p->sess_attrs_p;
     while (attr_p != NULL) {
-	next_attr_p = attr_p->next_p;
-	sdp_free_attr(attr_p);
-	attr_p = next_attr_p;
+        next_attr_p = attr_p->next_p;
+        sdp_free_attr(attr_p);
+        attr_p = next_attr_p;
     }
 
     /* Free any mca structures */
     mca_p = sdp_p->mca_p;
     while (mca_p != NULL) {
-	next_mca_p = mca_p->next_p;
+        next_mca_p = mca_p->next_p;
 
-	/* Free any media attr structures */
-	attr_p = mca_p->media_attrs_p;
-	while (attr_p != NULL) {
-	    next_attr_p = attr_p->next_p;
-	    sdp_free_attr(attr_p);
-	    attr_p = next_attr_p;
-	}
+        /* Free any media attr structures */
+        attr_p = mca_p->media_attrs_p;
+        while (attr_p != NULL) {
+            next_attr_p = attr_p->next_p;
+            sdp_free_attr(attr_p);
+            attr_p = next_attr_p;
+        }
 
         /* Free the media profiles struct if allocated. */
         if (mca_p->media_profiles_p != NULL) {
@@ -1483,8 +1295,8 @@ sdp_result_e sdp_free_description (sdp_t *sdp_p)
             bw_data_p = bw_p->bw_data_list;
         }
 
-	SDP_FREE(mca_p);
-	mca_p = next_mca_p;
+        SDP_FREE(mca_p);
+        mca_p = next_mca_p;
     }
 
     SDP_FREE(sdp_p);

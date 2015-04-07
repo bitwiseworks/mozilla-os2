@@ -15,6 +15,8 @@
 #include "nsComponentManagerUtils.h"
 #include "nsIMutableArray.h"
 
+#define DOT11_BSS_TYPE_UNUSED static_cast<DOT11_BSS_TYPE>(0)
+
 using namespace mozilla;
 
 nsresult
@@ -24,11 +26,11 @@ nsWifiMonitor::DoScan()
     if (!wlan_library)
       return NS_ERROR_NOT_AVAILABLE;
 
-    WlanOpenHandleFunction WlanOpenHandle = (WlanOpenHandleFunction) GetProcAddress(wlan_library, "WlanOpenHandle");
-    WlanEnumInterfacesFunction WlanEnumInterfaces = (WlanEnumInterfacesFunction) GetProcAddress(wlan_library, "WlanEnumInterfaces");
-    WlanGetNetworkBssListFunction WlanGetNetworkBssList = (WlanGetNetworkBssListFunction) GetProcAddress(wlan_library, "WlanGetNetworkBssList");
-    WlanFreeMemoryFunction WlanFreeMemory = (WlanFreeMemoryFunction) GetProcAddress(wlan_library, "WlanFreeMemory");
-    WlanCloseHandleFunction WlanCloseHandle = (WlanCloseHandleFunction) GetProcAddress(wlan_library, "WlanCloseHandle");
+    decltype(::WlanOpenHandle)* WlanOpenHandle = (decltype(::WlanOpenHandle)*) GetProcAddress(wlan_library, "WlanOpenHandle");
+    decltype(::WlanEnumInterfaces)* WlanEnumInterfaces = (decltype(::WlanEnumInterfaces)*) GetProcAddress(wlan_library, "WlanEnumInterfaces");
+    decltype(::WlanGetNetworkBssList)* WlanGetNetworkBssList = (decltype(::WlanGetNetworkBssList)*) GetProcAddress(wlan_library, "WlanGetNetworkBssList");
+    decltype(::WlanFreeMemory)* WlanFreeMemory = (decltype(::WlanFreeMemory)*) GetProcAddress(wlan_library, "WlanFreeMemory");
+    decltype(::WlanCloseHandle)* WlanCloseHandle = (decltype(::WlanCloseHandle)*) GetProcAddress(wlan_library, "WlanCloseHandle");
 
     if (!WlanOpenHandle ||
         !WlanEnumInterfaces ||
@@ -47,13 +49,13 @@ nsWifiMonitor::DoScan()
 
       // Get the handle to the WLAN API.
       DWORD negotiated_version;
-      HANDLE wlan_handle = NULL;
+      HANDLE wlan_handle = nullptr;
       // We could be executing on either Windows XP or Windows Vista, so use the
       // lower version of the client WLAN API. It seems that the negotiated version
       // is the Vista version irrespective of what we pass!
       static const int kXpWlanClientVersion = 1;
       if ((*WlanOpenHandle)(kXpWlanClientVersion,
-                            NULL,
+                            nullptr,
                             &negotiated_version,
                             &wlan_handle) != ERROR_SUCCESS) {
         return NS_ERROR_NOT_AVAILABLE;
@@ -64,10 +66,10 @@ nsWifiMonitor::DoScan()
         return NS_ERROR_FAILURE;
 
       // Get the list of interfaces. WlanEnumInterfaces allocates interface_list.
-      WLAN_INTERFACE_INFO_LIST *interface_list = NULL;
-      if ((*WlanEnumInterfaces)(wlan_handle, NULL, &interface_list) != ERROR_SUCCESS) {
+      WLAN_INTERFACE_INFO_LIST *interface_list = nullptr;
+      if ((*WlanEnumInterfaces)(wlan_handle, nullptr, &interface_list) != ERROR_SUCCESS) {
         // try again later
-        (*WlanCloseHandle)(wlan_handle, NULL);
+        (*WlanCloseHandle)(wlan_handle, nullptr);
         return NS_ERROR_FAILURE;
       }
 
@@ -77,10 +79,10 @@ nsWifiMonitor::DoScan()
         WLAN_BSS_LIST *bss_list;
         HRESULT rv = (*WlanGetNetworkBssList)(wlan_handle,
                                               &interface_list->InterfaceInfo[i].InterfaceGuid,
-                                              NULL,   // Use all SSIDs.
+                                              nullptr,  // Use all SSIDs.
                                               DOT11_BSS_TYPE_UNUSED,
-                                              false,  // bSecurityEnabled - unused
-                                              NULL,   // reserved
+                                              false,    // bSecurityEnabled - unused
+                                              nullptr,  // reserved
                                               &bss_list);
         if (rv != ERROR_SUCCESS) {
           continue;
@@ -108,7 +110,7 @@ nsWifiMonitor::DoScan()
       (*WlanFreeMemory)(interface_list);
 
       // Close the handle.
-      (*WlanCloseHandle)(wlan_handle, NULL);
+      (*WlanCloseHandle)(wlan_handle, nullptr);
 
 
       bool accessPointsChanged = !AccessPointsEqual(accessPoints, lastAccessPoints);

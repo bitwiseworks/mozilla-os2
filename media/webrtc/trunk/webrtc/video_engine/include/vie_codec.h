@@ -17,7 +17,7 @@
 #ifndef WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_CODEC_H_
 #define WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_CODEC_H_
 
-#include "common_types.h"
+#include "webrtc/common_types.h"
 
 namespace webrtc {
 
@@ -170,6 +170,12 @@ class WEBRTC_DLLEXPORT ViECodec {
   // decode the incoming video stream.
   virtual int WaitForFirstKeyFrame(const int video_channel,
                                    const bool wait) = 0;
+
+  // Enables recording of debugging information.
+  virtual int StartDebugRecording(int video_channel,
+                                  const char* file_name_utf8) = 0;
+  // Disables recording of debugging information.
+  virtual int StopDebugRecording(int video_channel) = 0;
 
  protected:
   ViECodec() {}

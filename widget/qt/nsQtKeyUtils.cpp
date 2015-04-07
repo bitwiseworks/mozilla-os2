@@ -4,12 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include <qnamespace.h>
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/TextEvents.h"
 
 #include "nsWindow.h"
 #include "nsQtKeyUtils.h"
-
-#include "nsGUIEvent.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -472,13 +472,9 @@ QtKeyCodeToDOMKeyNameIndex(int aKeysym)
         case Qt::Key_PowerDown:
         case Qt::Key_Suspend:
         case Qt::Key_ContrastAdjust:
-
-#if (QT_VERSION >= QT_VERSION_CHECK(5, 0, 0))
         case Qt::Key_TouchpadToggle:
         case Qt::Key_TouchpadOn:
         case Qt::Key_TouchpadOff:
-#endif
-
         case Qt::Key_unknown:
         case Qt::Key_Call:
         case Qt::Key_CameraFocus:

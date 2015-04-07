@@ -61,7 +61,7 @@ static PRLogModuleInfo *gJarProtocolLog = nullptr;
 class nsJARInputThunk : public nsIInputStream
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIINPUTSTREAM
 
     nsJARInputThunk(nsIZipReader *zipReader,
@@ -104,7 +104,7 @@ private:
     int64_t                     mContentLength;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsJARInputThunk, nsIInputStream)
+NS_IMPL_ISUPPORTS(nsJARInputThunk, nsIInputStream)
 
 nsresult
 nsJARInputThunk::Init()
@@ -213,27 +213,23 @@ nsJARChannel::~nsJARChannel()
 {
     // release owning reference to the jar handler
     nsJARProtocolHandler *handler = gJarHandler;
-    NS_RELEASE(handler); // NULL parameter
+    NS_RELEASE(handler); // nullptr parameter
 }
 
-NS_IMPL_ISUPPORTS_INHERITED7(nsJARChannel,
-                             nsHashPropertyBag,
-                             nsIRequest,
-                             nsIChannel,
-                             nsIStreamListener,
-                             nsIRequestObserver,
-                             nsIDownloadObserver,
-                             nsIRemoteOpenFileListener,
-                             nsIJARChannel)
+NS_IMPL_ISUPPORTS_INHERITED(nsJARChannel,
+                            nsHashPropertyBag,
+                            nsIRequest,
+                            nsIChannel,
+                            nsIStreamListener,
+                            nsIRequestObserver,
+                            nsIDownloadObserver,
+                            nsIRemoteOpenFileListener,
+                            nsIJARChannel)
 
 nsresult 
 nsJARChannel::Init(nsIURI *uri)
 {
     nsresult rv;
-    rv = nsHashPropertyBag::Init();
-    if (NS_FAILED(rv))
-        return rv;
-
     mJarURI = do_QueryInterface(uri, &rv);
     if (NS_FAILED(rv))
         return rv;
@@ -353,7 +349,7 @@ nsJARChannel::LookupFile()
         rv = mJarBaseURI->GetScheme(scheme);
         if (NS_SUCCEEDED(rv) && scheme.EqualsLiteral("remoteopenfile")) {
             nsRefPtr<RemoteOpenFileChild> remoteFile = new RemoteOpenFileChild();
-            rv = remoteFile->Init(mJarBaseURI);
+            rv = remoteFile->Init(mJarBaseURI, mAppURI);
             NS_ENSURE_SUCCESS(rv, rv);
             mJarFile = remoteFile;
 

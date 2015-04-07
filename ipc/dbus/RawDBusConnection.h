@@ -7,19 +7,16 @@
 #ifndef mozilla_ipc_dbus_gonk_rawdbusconnection_h__
 #define mozilla_ipc_dbus_gonk_rawdbusconnection_h__
 
-#include <string.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string>
-#include <stdlib.h>
-#include "nscore.h"
 #include "mozilla/Scoped.h"
-#include <mozilla/Mutex.h>
 
 struct DBusConnection;
+struct DBusError;
+struct DBusMessage;
 
 namespace mozilla {
 namespace ipc {
+
+typedef void (*DBusReplyCallback)(DBusMessage*, void*);
 
 class RawDBusConnection
 {
@@ -30,13 +27,34 @@ class RawDBusConnection
 
 public:
   RawDBusConnection();
-  ~RawDBusConnection();
+  virtual ~RawDBusConnection();
+
   nsresult EstablishDBusConnection();
-  DBusConnection* GetConnection() {
+
+  bool Watch();
+
+  DBusConnection* GetConnection()
+  {
     return mConnection;
   }
 
+  bool Send(DBusMessage* aMessage);
+
+  bool SendWithReply(DBusReplyCallback aCallback, void* aData,
+                     int aTimeout, DBusMessage* aMessage);
+
+  bool SendWithReply(DBusReplyCallback aCallback, void* aData,
+                     int aTimeout,
+                     const char* aDestination,
+                     const char* aPath, const char* aIntf,
+                     const char *aFunc, int aFirstArgType, ...);
+
 protected:
+  DBusMessage* BuildDBusMessage(const char* aDestination,
+                                const char* aPath, const char* aIntf,
+                                const char* aFunc, int aFirstArgType,
+                                va_list args);
+
   Scoped<ScopedDBusConnectionPtrTraits> mConnection;
 
 private:

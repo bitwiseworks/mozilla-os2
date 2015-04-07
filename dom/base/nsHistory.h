@@ -6,44 +6,57 @@
 #ifndef nsHistory_h___
 #define nsHistory_h___
 
+#include "mozilla/Attributes.h"
+#include "mozilla/ErrorResult.h"
+#include "nsCOMPtr.h"
+#include "nsCycleCollectionParticipant.h"
 #include "nsIDOMHistory.h"
-#include "nsISupports.h"
-#include "nscore.h"
-#include "nsIScriptContext.h"
-#include "nsISHistory.h"
-#include "nsIWeakReference.h"
-#include "nsPIDOMWindow.h"
+#include "nsPIDOMWindow.h" // for GetParentObject
+#include "nsStringFwd.h"
+#include "nsWrapperCache.h"
 
 class nsIDocShell;
+class nsISHistory;
+class nsIWeakReference;
+class nsPIDOMWindow;
 
 // Script "History" object
-class nsHistory : public nsIDOMHistory
+class nsHistory MOZ_FINAL : public nsIDOMHistory, // Empty, needed for extension
+                                                  // backwards compat
+                            public nsWrapperCache
 {
+public:
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsHistory)
+
 public:
   nsHistory(nsPIDOMWindow* aInnerWindow);
   virtual ~nsHistory();
 
-  // nsISupports
-  NS_DECL_ISUPPORTS
+  nsPIDOMWindow* GetParentObject() const;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
-  // nsIDOMHistory
-  NS_DECL_NSIDOMHISTORY
-
-  nsIDocShell *GetDocShell() {
-    nsCOMPtr<nsPIDOMWindow> win(do_QueryReferent(mInnerWindow));
-    if (!win)
-      return nullptr;
-    return win->GetDocShell();
-  }
-
-  void GetWindow(nsPIDOMWindow **aWindow) {
-    nsCOMPtr<nsPIDOMWindow> win(do_QueryReferent(mInnerWindow));
-    *aWindow = win.forget().get();
-  }
+  uint32_t GetLength(mozilla::ErrorResult& aRv) const;
+  void GetState(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
+                mozilla::ErrorResult& aRv) const;
+  void Go(int32_t aDelta, mozilla::ErrorResult& aRv);
+  void Back(mozilla::ErrorResult& aRv);
+  void Forward(mozilla::ErrorResult& aRv);
+  void PushState(JSContext* aCx, JS::Handle<JS::Value> aData,
+                 const nsAString& aTitle, const nsAString& aUrl,
+                 mozilla::ErrorResult& aRv);
+  void ReplaceState(JSContext* aCx, JS::Handle<JS::Value> aData,
+                    const nsAString& aTitle, const nsAString& aUrl,
+                    mozilla::ErrorResult& aRv);
 
 protected:
-  nsresult GetSessionHistoryFromDocShell(nsIDocShell * aDocShell,
-                                         nsISHistory ** aReturn);
+  nsIDocShell* GetDocShell() const;
+
+  void PushOrReplaceState(JSContext* aCx, JS::Handle<JS::Value> aData,
+                          const nsAString& aTitle, const nsAString& aUrl,
+                          mozilla::ErrorResult& aRv, bool aReplace);
+
+  already_AddRefed<nsISHistory> GetSessionHistory() const;
 
   nsCOMPtr<nsIWeakReference> mInnerWindow;
 };

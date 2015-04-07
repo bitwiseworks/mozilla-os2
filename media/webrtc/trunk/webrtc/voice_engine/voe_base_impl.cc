@@ -8,21 +8,21 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "voe_base_impl.h"
+#include "webrtc/voice_engine/voe_base_impl.h"
 
-#include "audio_coding_module.h"
-#include "audio_processing.h"
-#include "channel.h"
-#include "critical_section_wrapper.h"
-#include "file_wrapper.h"
-#include "modules/audio_device/audio_device_impl.h"
-#include "output_mixer.h"
-#include "signal_processing_library.h"
-#include "trace.h"
-#include "transmit_mixer.h"
-#include "utility.h"
-#include "voe_errors.h"
-#include "voice_engine_impl.h"
+#include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
+#include "webrtc/modules/audio_coding/main/interface/audio_coding_module.h"
+#include "webrtc/modules/audio_device/audio_device_impl.h"
+#include "webrtc/modules/audio_processing/include/audio_processing.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/file_wrapper.h"
+#include "webrtc/system_wrappers/interface/trace.h"
+#include "webrtc/voice_engine/channel.h"
+#include "webrtc/voice_engine/include/voe_errors.h"
+#include "webrtc/voice_engine/output_mixer.h"
+#include "webrtc/voice_engine/transmit_mixer.h"
+#include "webrtc/voice_engine/utility.h"
+#include "webrtc/voice_engine/voice_engine_impl.h"
 
 #if (defined(_WIN32) && defined(_DLL) && (_MSC_VER == 1400))
 // Fix for VS 2005 MD/MDd link problem
@@ -40,7 +40,7 @@ VoEBase* VoEBase::GetInterface(VoiceEngine* voiceEngine)
     {
         return NULL;
     }
-    VoiceEngineImpl* s = reinterpret_cast<VoiceEngineImpl*>(voiceEngine);
+    VoiceEngineImpl* s = static_cast<VoiceEngineImpl*>(voiceEngine);
     s->AddRef();
     return s;
 }
@@ -65,7 +65,7 @@ VoEBaseImpl::~VoEBaseImpl()
     delete &_callbackCritSect;
 }
 
-void VoEBaseImpl::OnErrorIsReported(const ErrorCode error)
+void VoEBaseImpl::OnErrorIsReported(ErrorCode error)
 {
     CriticalSectionScoped cs(&_callbackCritSect);
     if (_voiceEngineObserver)
@@ -94,7 +94,7 @@ void VoEBaseImpl::OnErrorIsReported(const ErrorCode error)
     }
 }
 
-void VoEBaseImpl::OnWarningIsReported(const WarningCode warning)
+void VoEBaseImpl::OnWarningIsReported(WarningCode warning)
 {
     CriticalSectionScoped cs(&_callbackCritSect);
     if (_voiceEngineObserver)
@@ -124,16 +124,17 @@ void VoEBaseImpl::OnWarningIsReported(const WarningCode warning)
     }
 }
 
-WebRtc_Word32 VoEBaseImpl::RecordedDataIsAvailable(
+int32_t VoEBaseImpl::RecordedDataIsAvailable(
         const void* audioSamples,
-        const WebRtc_UWord32 nSamples,
-        const WebRtc_UWord8 nBytesPerSample,
-        const WebRtc_UWord8 nChannels,
-        const WebRtc_UWord32 samplesPerSec,
-        const WebRtc_UWord32 totalDelayMS,
-        const WebRtc_Word32 clockDrift,
-        const WebRtc_UWord32 currentMicLevel,
-        WebRtc_UWord32& newMicLevel)
+        uint32_t nSamples,
+        uint8_t nBytesPerSample,
+        uint8_t nChannels,
+        uint32_t samplesPerSec,
+        uint32_t totalDelayMS,
+        int32_t clockDrift,
+        uint32_t currentMicLevel,
+        bool keyPressed,
+        uint32_t& newMicLevel)
 {
     WEBRTC_TRACE(kTraceStream, kTraceVoice, VoEId(_shared->instance_id(), -1),
                  "VoEBaseImpl::RecordedDataIsAvailable(nSamples=%u, "
@@ -141,102 +142,20 @@ WebRtc_Word32 VoEBaseImpl::RecordedDataIsAvailable(
                      "totalDelayMS=%u, clockDrift=%d, currentMicLevel=%u)",
                  nSamples, nBytesPerSample, nChannels, samplesPerSec,
                  totalDelayMS, clockDrift, currentMicLevel);
-
-    assert(_shared->transmit_mixer() != NULL);
-    assert(_shared->audio_device() != NULL);
-
-    bool isAnalogAGC(false);
-    WebRtc_UWord32 maxVolume(0);
-    WebRtc_UWord16 currentVoEMicLevel(0);
-    WebRtc_UWord32 newVoEMicLevel(0);
-
-    if (_shared->audio_processing() &&
-        (_shared->audio_processing()->gain_control()->mode()
-                    == GainControl::kAdaptiveAnalog))
-    {
-        isAnalogAGC = true;
-    }
-
-    // Will only deal with the volume in adaptive analog mode
-    if (isAnalogAGC)
-    {
-        // Scale from ADM to VoE level range
-        if (_shared->audio_device()->MaxMicrophoneVolume(&maxVolume) == 0)
-        {
-            if (0 != maxVolume)
-            {
-                currentVoEMicLevel = (WebRtc_UWord16) ((currentMicLevel
-                        * kMaxVolumeLevel + (int) (maxVolume / 2))
-                        / (maxVolume));
-            }
-        }
-        // We learned that on certain systems (e.g Linux) the currentVoEMicLevel
-        // can be greater than the maxVolumeLevel therefore
-        // we are going to cap the currentVoEMicLevel to the maxVolumeLevel
-        // and change the maxVolume to currentMicLevel if it turns out that
-        // the currentVoEMicLevel is indeed greater than the maxVolumeLevel.
-        if (currentVoEMicLevel > kMaxVolumeLevel)
-        {
-            currentVoEMicLevel = kMaxVolumeLevel;
-            maxVolume = currentMicLevel;
-        }
-    }
-
-    // Keep track if the MicLevel has been changed by the AGC, if not,
-    // use the old value AGC returns to let AGC continue its trend,
-    // so eventually the AGC is able to change the mic level. This handles
-    // issues with truncation introduced by the scaling.
-    if (_oldMicLevel == currentMicLevel)
-    {
-        currentVoEMicLevel = (WebRtc_UWord16) _oldVoEMicLevel;
-    }
-
-    // Perform channel-independent operations
-    // (APM, mix with file, record to file, mute, etc.)
-    _shared->transmit_mixer()->PrepareDemux(audioSamples, nSamples, nChannels,
-        samplesPerSec, static_cast<WebRtc_UWord16>(totalDelayMS), clockDrift,
-        currentVoEMicLevel);
-
-    // Copy the audio frame to each sending channel and perform
-    // channel-dependent operations (file mixing, mute, etc.) to prepare
-    // for encoding.
-    _shared->transmit_mixer()->DemuxAndMix();
-    // Do the encoding and packetize+transmit the RTP packet when encoding
-    // is done.
-    _shared->transmit_mixer()->EncodeAndSend();
-
-    // Will only deal with the volume in adaptive analog mode
-    if (isAnalogAGC)
-    {
-        // Scale from VoE to ADM level range
-        newVoEMicLevel = _shared->transmit_mixer()->CaptureLevel();
-        if (newVoEMicLevel != currentVoEMicLevel)
-        {
-            // Add (kMaxVolumeLevel/2) to round the value
-            newMicLevel = (WebRtc_UWord32) ((newVoEMicLevel * maxVolume
-                    + (int) (kMaxVolumeLevel / 2)) / (kMaxVolumeLevel));
-        }
-        else
-        {
-            // Pass zero if the level is unchanged
-            newMicLevel = 0;
-        }
-
-        // Keep track of the value AGC returns
-        _oldVoEMicLevel = newVoEMicLevel;
-        _oldMicLevel = currentMicLevel;
-    }
+    newMicLevel = static_cast<uint32_t>(ProcessRecordedDataWithAPM(
+        NULL, 0, audioSamples, samplesPerSec, nChannels, nSamples,
+        totalDelayMS, clockDrift, currentMicLevel, keyPressed));
 
     return 0;
 }
 
-WebRtc_Word32 VoEBaseImpl::NeedMorePlayData(
-        const WebRtc_UWord32 nSamples,
-        const WebRtc_UWord8 nBytesPerSample,
-        const WebRtc_UWord8 nChannels,
-        const WebRtc_UWord32 samplesPerSec,
+int32_t VoEBaseImpl::NeedMorePlayData(
+        uint32_t nSamples,
+        uint8_t nBytesPerSample,
+        uint8_t nChannels,
+        uint32_t samplesPerSec,
         void* audioSamples,
-        WebRtc_UWord32& nSamplesOut)
+        uint32_t& nSamplesOut)
 {
     WEBRTC_TRACE(kTraceStream, kTraceVoice, VoEId(_shared->instance_id(), -1),
                  "VoEBaseImpl::NeedMorePlayData(nSamples=%u, "
@@ -259,18 +178,69 @@ WebRtc_Word32 VoEBaseImpl::NeedMorePlayData(
 
     assert(static_cast<int>(nSamples) == _audioFrame.samples_per_channel_);
     assert(samplesPerSec ==
-        static_cast<WebRtc_UWord32>(_audioFrame.sample_rate_hz_));
+        static_cast<uint32_t>(_audioFrame.sample_rate_hz_));
 
     // Deliver audio (PCM) samples to the ADM
     memcpy(
-           (WebRtc_Word16*) audioSamples,
-           (const WebRtc_Word16*) _audioFrame.data_,
-           sizeof(WebRtc_Word16) * (_audioFrame.samples_per_channel_
+           (int16_t*) audioSamples,
+           (const int16_t*) _audioFrame.data_,
+           sizeof(int16_t) * (_audioFrame.samples_per_channel_
                    * _audioFrame.num_channels_));
 
     nSamplesOut = _audioFrame.samples_per_channel_;
 
     return 0;
+}
+
+int VoEBaseImpl::OnDataAvailable(const int voe_channels[],
+                                 int number_of_voe_channels,
+                                 const int16_t* audio_data,
+                                 int sample_rate,
+                                 int number_of_channels,
+                                 int number_of_frames,
+                                 int audio_delay_milliseconds,
+                                 int current_volume,
+                                 bool key_pressed,
+                                 bool need_audio_processing) {
+  WEBRTC_TRACE(kTraceStream, kTraceVoice, VoEId(_shared->instance_id(), -1),
+               "VoEBaseImpl::OnDataAvailable(number_of_voe_channels=%d, "
+               "sample_rate=%d, number_of_channels=%d, number_of_frames=%d, "
+               "audio_delay_milliseconds=%d, current_volume=%d, "
+               "key_pressed=%d, need_audio_processing=%d)",
+               number_of_voe_channels, sample_rate, number_of_channels,
+               number_of_frames, audio_delay_milliseconds, current_volume,
+               key_pressed, need_audio_processing);
+  if (number_of_voe_channels == 0)
+    return 0;
+
+  if (need_audio_processing) {
+    return ProcessRecordedDataWithAPM(
+        voe_channels, number_of_voe_channels, audio_data, sample_rate,
+        number_of_channels, number_of_frames, audio_delay_milliseconds,
+        0, current_volume, key_pressed);
+  }
+
+  // No need to go through the APM, demultiplex the data to each VoE channel,
+  // encode and send to the network.
+  for (int i = 0; i < number_of_voe_channels; ++i) {
+    voe::ChannelOwner ch =
+        _shared->channel_manager().GetChannel(voe_channels[i]);
+    voe::Channel* channel_ptr = ch.channel();
+    if (!channel_ptr)
+      continue;
+
+    if (channel_ptr->InputIsOnHold()) {
+      channel_ptr->UpdateLocalTimeStamp();
+    } else if (channel_ptr->Sending()) {
+      channel_ptr->Demultiplex(audio_data, sample_rate, number_of_frames,
+                               number_of_channels);
+      channel_ptr->PrepareEncodeAndSend(sample_rate);
+      channel_ptr->EncodeAndSend();
+    }
+  }
+
+  // Return 0 to indicate no need to change the volume.
+  return 0;
 }
 
 int VoEBaseImpl::RegisterVoiceEngineObserver(VoiceEngineObserver& observer)
@@ -286,14 +256,12 @@ int VoEBaseImpl::RegisterVoiceEngineObserver(VoiceEngineObserver& observer)
     }
 
     // Register the observer in all active channels
-    voe::ScopedChannel sc(_shared->channel_manager());
-    void* iterator(NULL);
-    voe::Channel* channelPtr = sc.GetFirstChannel(iterator);
-    while (channelPtr != NULL)
-    {
-        channelPtr->RegisterVoiceEngineObserver(observer);
-        channelPtr = sc.GetNextChannel(iterator);
+    for (voe::ChannelManager::Iterator it(&_shared->channel_manager());
+         it.IsValid();
+         it.Increment()) {
+      it.GetChannel()->RegisterVoiceEngineObserver(observer);
     }
+
     _shared->transmit_mixer()->RegisterVoiceEngineObserver(observer);
 
     _voiceEngineObserverPtr = &observer;
@@ -318,19 +286,17 @@ int VoEBaseImpl::DeRegisterVoiceEngineObserver()
     _voiceEngineObserverPtr = NULL;
 
     // Deregister the observer in all active channels
-    voe::ScopedChannel sc(_shared->channel_manager());
-    void* iterator(NULL);
-    voe::Channel* channelPtr = sc.GetFirstChannel(iterator);
-    while (channelPtr != NULL)
-    {
-        channelPtr->DeRegisterVoiceEngineObserver();
-        channelPtr = sc.GetNextChannel(iterator);
+    for (voe::ChannelManager::Iterator it(&_shared->channel_manager());
+         it.IsValid();
+         it.Increment()) {
+      it.GetChannel()->DeRegisterVoiceEngineObserver();
     }
 
     return 0;
 }
 
-int VoEBaseImpl::Init(AudioDeviceModule* external_adm)
+int VoEBaseImpl::Init(AudioDeviceModule* external_adm,
+                      AudioProcessing* audioproc)
 {
     WEBRTC_TRACE(kTraceApiCall, kTraceVoice, VoEId(_shared->instance_id(), -1),
         "Init(external_adm=0x%p)", external_adm);
@@ -486,146 +452,74 @@ int VoEBaseImpl::Init(AudioDeviceModule* external_adm)
             "Init() failed to set mono/stereo recording mode");
     }
 
-    // APM initialization done after sound card since we need
-    // to know if we support stereo recording or not.
+    if (!audioproc) {
+      audioproc = AudioProcessing::Create(VoEId(_shared->instance_id(), -1));
+      if (!audioproc) {
+        LOG(LS_ERROR) << "Failed to create AudioProcessing.";
+        _shared->SetLastError(VE_NO_MEMORY);
+        return -1;
+      }
+    }
+    _shared->set_audio_processing(audioproc);
 
-    // Create the AudioProcessing Module if it does not exist.
-
-    if (_shared->audio_processing() == NULL)
-    {
-        _shared->set_audio_processing(AudioProcessing::Create(
-                VoEId(_shared->instance_id(), -1)));
-        if (_shared->audio_processing() == NULL)
-        {
-            _shared->SetLastError(VE_NO_MEMORY, kTraceCritical,
-                "Init() failed to create the AP module");
-            return -1;
-        }
-        // Ensure that mixers in both directions has access to the created APM
-        _shared->transmit_mixer()->SetAudioProcessingModule(
-            _shared->audio_processing());
-        _shared->output_mixer()->SetAudioProcessingModule(
-            _shared->audio_processing());
-
-        if (_shared->audio_processing()->echo_cancellation()->
-                set_device_sample_rate_hz(
-                        kVoiceEngineAudioProcessingDeviceSampleRateHz))
-        {
-            _shared->SetLastError(VE_APM_ERROR, kTraceError,
-                "Init() failed to set the device sample rate to 48K for AP "
-                " module");
-            return -1;
-        }
-        // Using 8 kHz as inital Fs. Might be changed already at first call.
-        if (_shared->audio_processing()->set_sample_rate_hz(8000))
-        {
-            _shared->SetLastError(VE_APM_ERROR, kTraceError,
-                "Init() failed to set the sample rate to 8K for AP module");
-            return -1;
-        }
-
-        // Assume mono until the audio frames are received from the capture
-        // device, at which point this can be updated.
-        if (_shared->audio_processing()->set_num_channels(1, 1) != 0)
-        {
-            _shared->SetLastError(VE_SOUNDCARD_ERROR, kTraceError,
-                "Init() failed to set channels for the primary audio stream");
-            return -1;
-        }
-
-        if (_shared->audio_processing()->set_num_reverse_channels(1) != 0)
-        {
-            _shared->SetLastError(VE_SOUNDCARD_ERROR, kTraceError,
-                "Init() failed to set channels for the primary audio stream");
-            return -1;
-        }
-        // high-pass filter
-        if (_shared->audio_processing()->high_pass_filter()->Enable(
-                WEBRTC_VOICE_ENGINE_HP_DEFAULT_STATE) != 0)
-        {
-            _shared->SetLastError(VE_APM_ERROR, kTraceError,
-                "Init() failed to set the high-pass filter for AP module");
-            return -1;
-        }
-        // Echo Cancellation
-        if (_shared->audio_processing()->echo_cancellation()->
-                enable_drift_compensation(false) != 0)
-        {
-            _shared->SetLastError(VE_APM_ERROR, kTraceError,
-                "Init() failed to set drift compensation for AP module");
-            return -1;
-        }
-        if (_shared->audio_processing()->echo_cancellation()->Enable(
-                WEBRTC_VOICE_ENGINE_EC_DEFAULT_STATE))
-        {
-            _shared->SetLastError(VE_APM_ERROR, kTraceError,
-                "Init() failed to set echo cancellation state for AP module");
-            return -1;
-        }
-        // Noise Reduction
-        if (_shared->audio_processing()->noise_suppression()->set_level(
-                (NoiseSuppression::Level) WEBRTC_VOICE_ENGINE_NS_DEFAULT_MODE)
-                != 0)
-        {
-            _shared->SetLastError(VE_APM_ERROR, kTraceError,
-                "Init() failed to set noise reduction level for AP module");
-            return -1;
-        }
-        if (_shared->audio_processing()->noise_suppression()->Enable(
-                WEBRTC_VOICE_ENGINE_NS_DEFAULT_STATE) != 0)
-        {
-            _shared->SetLastError(VE_APM_ERROR, kTraceError,
-                "Init() failed to set noise reduction state for AP module");
-            return -1;
-        }
-        // Automatic Gain control
-        if (_shared->audio_processing()->gain_control()->
-                set_analog_level_limits(kMinVolumeLevel,kMaxVolumeLevel) != 0)
-        {
-            _shared->SetLastError(VE_APM_ERROR, kTraceError,
-                "Init() failed to set AGC analog level for AP module");
-            return -1;
-        }
-        if (_shared->audio_processing()->gain_control()->set_mode(
-                (GainControl::Mode) WEBRTC_VOICE_ENGINE_AGC_DEFAULT_MODE)
-                != 0)
-        {
-            _shared->SetLastError(VE_APM_ERROR, kTraceError,
-                "Init() failed to set AGC mode for AP module");
-            return -1;
-        }
-        if (_shared->audio_processing()->gain_control()->Enable(
-                WEBRTC_VOICE_ENGINE_AGC_DEFAULT_STATE)
-                != 0)
-        {
-            _shared->SetLastError(VE_APM_ERROR, kTraceError,
-                "Init() failed to set AGC state for AP module");
-            return -1;
-        }
-        // VAD
-        if (_shared->audio_processing()->voice_detection()->Enable(
-                WEBRTC_VOICE_ENGINE_VAD_DEFAULT_STATE)
-                != 0)
-        {
-            _shared->SetLastError(VE_APM_ERROR, kTraceError,
-                "Init() failed to set VAD state for AP module");
-            return -1;
-        }
+    // Set the error state for any failures in this block.
+    _shared->SetLastError(VE_APM_ERROR);
+    if (audioproc->echo_cancellation()->set_device_sample_rate_hz(48000)) {
+      LOG_FERR1(LS_ERROR, set_device_sample_rate_hz, 48000);
+      return -1;
+    }
+    // Assume 16 kHz mono until the audio frames are received from the capture
+    // device, at which point this can be updated.
+    if (audioproc->set_sample_rate_hz(16000)) {
+      LOG_FERR1(LS_ERROR, set_sample_rate_hz, 16000);
+      return -1;
+    }
+    if (audioproc->set_num_channels(1, 1) != 0) {
+      LOG_FERR2(LS_ERROR, set_num_channels, 1, 1);
+      return -1;
+    }
+    if (audioproc->set_num_reverse_channels(1) != 0) {
+      LOG_FERR1(LS_ERROR, set_num_reverse_channels, 1);
+      return -1;
     }
 
-  // Set default AGC mode for the ADM
+    // Configure AudioProcessing components. All are disabled by default.
+    if (audioproc->high_pass_filter()->Enable(true) != 0) {
+      LOG_FERR1(LS_ERROR, high_pass_filter()->Enable, true);
+      return -1;
+    }
+    if (audioproc->echo_cancellation()->enable_drift_compensation(false) != 0) {
+      LOG_FERR1(LS_ERROR, enable_drift_compensation, false);
+      return -1;
+    }
+    if (audioproc->noise_suppression()->set_level(kDefaultNsMode) != 0) {
+      LOG_FERR1(LS_ERROR, noise_suppression()->set_level, kDefaultNsMode);
+      return -1;
+    }
+    GainControl* agc = audioproc->gain_control();
+    if (agc->set_analog_level_limits(kMinVolumeLevel, kMaxVolumeLevel) != 0) {
+      LOG_FERR2(LS_ERROR, agc->set_analog_level_limits, kMinVolumeLevel,
+                kMaxVolumeLevel);
+      return -1;
+    }
+    if (agc->set_mode(kDefaultAgcMode) != 0) {
+      LOG_FERR1(LS_ERROR, agc->set_mode, kDefaultAgcMode);
+      return -1;
+    }
+    if (agc->Enable(kDefaultAgcState) != 0) {
+      LOG_FERR1(LS_ERROR, agc->Enable, kDefaultAgcState);
+      return -1;
+    }
+    _shared->SetLastError(0);  // Clear error state.
+
 #ifdef WEBRTC_VOICE_ENGINE_AGC
-    bool enable(false);
-    if (_shared->audio_processing()->gain_control()->mode()
-            != GainControl::kFixedDigital)
-    {
-        enable = _shared->audio_processing()->gain_control()->is_enabled();
-        // Only set the AGC mode for the ADM when Adaptive AGC mode is selected
-        if (_shared->audio_device()->SetAGC(enable) != 0)
-        {
-            _shared->SetLastError(VE_AUDIO_DEVICE_MODULE_ERROR,
-                kTraceError, "Init() failed to set default AGC mode in ADM 0");
-        }
+    bool agc_enabled = agc->mode() == GainControl::kAdaptiveAnalog &&
+                       agc->is_enabled();
+    if (_shared->audio_device()->SetAGC(agc_enabled) != 0) {
+      LOG_FERR1(LS_ERROR, audio_device()->SetAGC, agc_enabled);
+      _shared->SetLastError(VE_AUDIO_DEVICE_MODULE_ERROR);
+      // TODO(ajm): No error return here due to
+      // https://code.google.com/p/webrtc/issues/detail?id=1464
     }
 #endif
 
@@ -640,18 +534,6 @@ int VoEBaseImpl::Terminate()
     return TerminateInternal();
 }
 
-int VoEBaseImpl::MaxNumOfChannels()
-{
-    WEBRTC_TRACE(kTraceApiCall, kTraceVoice, VoEId(_shared->instance_id(), -1),
-                 "MaxNumOfChannels()");
-    WebRtc_Word32 maxNumOfChannels =
-        _shared->channel_manager().MaxNumOfChannels();
-    WEBRTC_TRACE(kTraceStateInfo, kTraceVoice,
-        VoEId(_shared->instance_id(), -1),
-        "MaxNumOfChannels() => %d", maxNumOfChannels);
-    return (maxNumOfChannels);
-}
-
 int VoEBaseImpl::CreateChannel()
 {
     WEBRTC_TRACE(kTraceApiCall, kTraceVoice, VoEId(_shared->instance_id(), -1),
@@ -664,55 +546,40 @@ int VoEBaseImpl::CreateChannel()
         return -1;
     }
 
-    WebRtc_Word32 channelId = -1;
+    voe::ChannelOwner channel_owner =
+        _shared->channel_manager().CreateChannel();
 
-    if (!_shared->channel_manager().CreateChannel(channelId))
-    {
-        _shared->SetLastError(VE_CHANNEL_NOT_CREATED, kTraceError,
-            "CreateChannel() failed to allocate memory for channel");
-        return -1;
+    if (channel_owner.channel()->SetEngineInformation(
+            _shared->statistics(),
+            *_shared->output_mixer(),
+            *_shared->transmit_mixer(),
+            *_shared->process_thread(),
+            *_shared->audio_device(),
+            _voiceEngineObserverPtr,
+            &_callbackCritSect) != 0) {
+      _shared->SetLastError(
+          VE_CHANNEL_NOT_CREATED,
+          kTraceError,
+          "CreateChannel() failed to associate engine and channel."
+          " Destroying channel.");
+      _shared->channel_manager()
+          .DestroyChannel(channel_owner.channel()->ChannelId());
+      return -1;
+    } else if (channel_owner.channel()->Init() != 0) {
+      _shared->SetLastError(
+          VE_CHANNEL_NOT_CREATED,
+          kTraceError,
+          "CreateChannel() failed to initialize channel. Destroying"
+          " channel.");
+      _shared->channel_manager()
+          .DestroyChannel(channel_owner.channel()->ChannelId());
+      return -1;
     }
 
-    bool destroyChannel(false);
-    {
-        voe::ScopedChannel sc(_shared->channel_manager(), channelId);
-        voe::Channel* channelPtr = sc.ChannelPtr();
-        if (channelPtr == NULL)
-        {
-            _shared->SetLastError(VE_CHANNEL_NOT_CREATED, kTraceError,
-                "CreateChannel() failed to allocate memory for channel");
-            return -1;
-        }
-        else if (channelPtr->SetEngineInformation(_shared->statistics(),
-                                                  *_shared->output_mixer(),
-                                                  *_shared->transmit_mixer(),
-                                                  *_shared->process_thread(),
-                                                  *_shared->audio_device(),
-                                                  _voiceEngineObserverPtr,
-                                                  &_callbackCritSect) != 0)
-        {
-            destroyChannel = true;
-            _shared->SetLastError(VE_CHANNEL_NOT_CREATED, kTraceError,
-                "CreateChannel() failed to associate engine and channel."
-                " Destroying channel.");
-        }
-        else if (channelPtr->Init() != 0)
-        {
-            destroyChannel = true;
-            _shared->SetLastError(VE_CHANNEL_NOT_CREATED, kTraceError,
-                "CreateChannel() failed to initialize channel. Destroying"
-                " channel.");
-        }
-    }
-    if (destroyChannel)
-    {
-        _shared->channel_manager().DestroyChannel(channelId);
-        return -1;
-    }
     WEBRTC_TRACE(kTraceStateInfo, kTraceVoice,
         VoEId(_shared->instance_id(), -1),
-        "CreateChannel() => %d", channelId);
-    return channelId;
+        "CreateChannel() => %d", channel_owner.channel()->ChannelId());
+    return channel_owner.channel()->ChannelId();
 }
 
 int VoEBaseImpl::DeleteChannel(int channel)
@@ -728,8 +595,8 @@ int VoEBaseImpl::DeleteChannel(int channel)
     }
 
     {
-        voe::ScopedChannel sc(_shared->channel_manager(), channel);
-        voe::Channel* channelPtr = sc.ChannelPtr();
+        voe::ChannelOwner ch = _shared->channel_manager().GetChannel(channel);
+        voe::Channel* channelPtr = ch.channel();
         if (channelPtr == NULL)
         {
             _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
@@ -738,12 +605,7 @@ int VoEBaseImpl::DeleteChannel(int channel)
         }
     }
 
-    if (_shared->channel_manager().DestroyChannel(channel) != 0)
-    {
-        _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
-            "DeleteChannel() failed to destroy channel");
-        return -1;
-    }
+    _shared->channel_manager().DestroyChannel(channel);
 
     if (StopSend() != 0)
     {
@@ -758,261 +620,6 @@ int VoEBaseImpl::DeleteChannel(int channel)
     return 0;
 }
 
-int VoEBaseImpl::SetLocalReceiver(int channel, int port, int RTCPport,
-                                  const char ipAddr[64],
-                                  const char multiCastAddr[64])
-{
-    //  Inititialize local receive sockets (RTP and RTCP).
-    //
-    //  The sockets are always first closed and then created again by this
-    //  function call. The created sockets are by default also used for
-    // transmission (unless source port is set in SetSendDestination).
-    //
-    //  Note that, sockets can also be created automatically if a user calls
-    //  SetSendDestination and StartSend without having called SetLocalReceiver
-    // first. The sockets are then created at the first packet transmission.
-
-    CriticalSectionScoped cs(_shared->crit_sec());
-    if (ipAddr == NULL && multiCastAddr == NULL)
-    {
-        WEBRTC_TRACE(kTraceApiCall, kTraceVoice,
-            VoEId(_shared->instance_id(), -1),
-            "SetLocalReceiver(channel=%d, port=%d, RTCPport=%d)",
-            channel, port, RTCPport);
-    }
-    else if (ipAddr != NULL && multiCastAddr == NULL)
-    {
-        WEBRTC_TRACE(kTraceApiCall, kTraceVoice,
-          VoEId(_shared->instance_id(), -1),
-          "SetLocalReceiver(channel=%d, port=%d, RTCPport=%d, ipAddr=%s)",
-          channel, port, RTCPport, ipAddr);
-    }
-    else if (ipAddr == NULL && multiCastAddr != NULL)
-    {
-        WEBRTC_TRACE(kTraceApiCall, kTraceVoice,
-            VoEId(_shared->instance_id(), -1),
-            "SetLocalReceiver(channel=%d, port=%d, RTCPport=%d, "
-            "multiCastAddr=%s)", channel, port, RTCPport, multiCastAddr);
-    }
-    else
-    {
-        WEBRTC_TRACE(kTraceApiCall, kTraceVoice,
-            VoEId(_shared->instance_id(), -1),
-            "SetLocalReceiver(channel=%d, port=%d, RTCPport=%d, "
-            "ipAddr=%s, multiCastAddr=%s)", channel, port, RTCPport, ipAddr,
-            multiCastAddr);
-    }
-#ifndef WEBRTC_EXTERNAL_TRANSPORT
-    if (!_shared->statistics().Initialized())
-    {
-        _shared->SetLastError(VE_NOT_INITED, kTraceError);
-        return -1;
-    }
-    if ((port < 0) || (port > 65535))
-    {
-        _shared->SetLastError(VE_INVALID_PORT_NMBR, kTraceError,
-            "SetLocalReceiver() invalid RTP port");
-        return -1;
-    }
-    if (((RTCPport != kVoEDefault) && (RTCPport < 0)) || ((RTCPport
-            != kVoEDefault) && (RTCPport > 65535)))
-    {
-        _shared->SetLastError(VE_INVALID_PORT_NMBR, kTraceError,
-            "SetLocalReceiver() invalid RTCP port");
-        return -1;
-    }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
-    if (channelPtr == NULL)
-    {
-        _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
-            "SetLocalReceiver() failed to locate channel");
-        return -1;
-    }
-
-    // Cast RTCP port. In the RTP module 0 corresponds to RTP port + 1 in
-    // the module, which is the default.
-    WebRtc_UWord16 rtcpPortUW16(0);
-    if (RTCPport != kVoEDefault)
-    {
-        rtcpPortUW16 = static_cast<WebRtc_UWord16> (RTCPport);
-    }
-
-    return channelPtr->SetLocalReceiver(port, rtcpPortUW16, ipAddr,
-                                        multiCastAddr);
-#else
-    _shared->SetLastError(VE_EXTERNAL_TRANSPORT_ENABLED,
-        kTraceWarning, "SetLocalReceiver() VoE is built for external "
-        "transport");
-    return -1;
-#endif
-}
-
-int VoEBaseImpl::GetLocalReceiver(int channel, int& port, int& RTCPport,
-                                  char ipAddr[64])
-{
-    WEBRTC_TRACE(kTraceApiCall, kTraceVoice, VoEId(_shared->instance_id(), -1),
-                 "GetLocalReceiver(channel=%d, ipAddr[]=?)", channel);
-#ifndef WEBRTC_EXTERNAL_TRANSPORT
-    if (!_shared->statistics().Initialized())
-    {
-        _shared->SetLastError(VE_NOT_INITED, kTraceError);
-        return -1;
-    }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
-    if (channelPtr == NULL)
-    {
-        _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
-            "SetLocalReceiver() failed to locate channel");
-        return -1;
-    }
-    WebRtc_Word32 ret = channelPtr->GetLocalReceiver(port, RTCPport, ipAddr);
-    if (ipAddr != NULL)
-    {
-        WEBRTC_TRACE(kTraceStateInfo, kTraceVoice,
-            VoEId(_shared->instance_id(), -1),
-            "GetLocalReceiver() => port=%d, RTCPport=%d, ipAddr=%s",
-            port, RTCPport, ipAddr);
-    }
-    else
-    {
-        WEBRTC_TRACE(kTraceStateInfo, kTraceVoice,
-          VoEId(_shared->instance_id(), -1),
-          "GetLocalReceiver() => port=%d, RTCPport=%d", port, RTCPport);
-    }
-    return ret;
-#else
-    _shared->SetLastError(VE_EXTERNAL_TRANSPORT_ENABLED, kTraceWarning,
-        "SetLocalReceiver() VoE is built for external transport");
-    return -1;
-#endif
-}
-
-int VoEBaseImpl::SetSendDestination(int channel, int port, const char* ipaddr,
-                                    int sourcePort, int RTCPport)
-{
-    WEBRTC_TRACE(
-                 kTraceApiCall,
-                 kTraceVoice,
-                 VoEId(_shared->instance_id(), -1),
-                 "SetSendDestination(channel=%d, port=%d, ipaddr=%s,"
-                 "sourcePort=%d, RTCPport=%d)",
-                 channel, port, ipaddr, sourcePort, RTCPport);
-    CriticalSectionScoped cs(_shared->crit_sec());
-#ifndef WEBRTC_EXTERNAL_TRANSPORT
-    if (!_shared->statistics().Initialized())
-    {
-        _shared->SetLastError(VE_NOT_INITED, kTraceError);
-        return -1;
-    }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
-    if (channelPtr == NULL)
-    {
-        _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
-            "SetSendDestination() failed to locate channel");
-        return -1;
-    }
-    if ((port < 0) || (port > 65535))
-    {
-        _shared->SetLastError(VE_INVALID_PORT_NMBR, kTraceError,
-            "SetSendDestination() invalid RTP port");
-        return -1;
-    }
-    if (((RTCPport != kVoEDefault) && (RTCPport < 0)) || ((RTCPport
-            != kVoEDefault) && (RTCPport > 65535)))
-    {
-        _shared->SetLastError(VE_INVALID_PORT_NMBR, kTraceError,
-            "SetSendDestination() invalid RTCP port");
-        return -1;
-    }
-    if (((sourcePort != kVoEDefault) && (sourcePort < 0)) || ((sourcePort
-            != kVoEDefault) && (sourcePort > 65535)))
-    {
-        _shared->SetLastError(VE_INVALID_PORT_NMBR, kTraceError,
-            "SetSendDestination() invalid source port");
-        return -1;
-    }
-
-    // Cast RTCP port. In the RTP module 0 corresponds to RTP port + 1 in the
-    // module, which is the default.
-    WebRtc_UWord16 rtcpPortUW16(0);
-    if (RTCPport != kVoEDefault)
-    {
-        rtcpPortUW16 = static_cast<WebRtc_UWord16> (RTCPport);
-        WEBRTC_TRACE(
-                     kTraceInfo,
-                     kTraceVoice,
-                     VoEId(_shared->instance_id(), channel),
-                     "SetSendDestination() non default RTCP port %u will be "
-                     "utilized",
-                     rtcpPortUW16);
-    }
-
-    return channelPtr->SetSendDestination(port, ipaddr, sourcePort,
-                                          rtcpPortUW16);
-#else
-    _shared->SetLastError(VE_EXTERNAL_TRANSPORT_ENABLED, kTraceWarning,
-        "SetSendDestination() VoE is built for external transport");
-    return -1;
-#endif
-}
-
-int VoEBaseImpl::GetSendDestination(int channel, int& port, char ipAddr[64],
-                                    int& sourcePort, int& RTCPport)
-{
-    WEBRTC_TRACE(
-                 kTraceApiCall,
-                 kTraceVoice,
-                 VoEId(_shared->instance_id(), -1),
-                 "GetSendDestination(channel=%d, ipAddr[]=?, sourcePort=?,"
-                 "RTCPport=?)",
-                 channel);
-#ifndef WEBRTC_EXTERNAL_TRANSPORT
-    if (!_shared->statistics().Initialized())
-    {
-        _shared->SetLastError(VE_NOT_INITED, kTraceError);
-        return -1;
-    }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
-    if (channelPtr == NULL)
-    {
-        _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
-            "GetSendDestination() failed to locate channel");
-        return -1;
-    }
-    WebRtc_Word32 ret = channelPtr->GetSendDestination(port, ipAddr,
-                                                       sourcePort, RTCPport);
-    if (ipAddr != NULL)
-    {
-        WEBRTC_TRACE(
-                     kTraceStateInfo,
-                     kTraceVoice,
-                     VoEId(_shared->instance_id(), -1),
-                     "GetSendDestination() => port=%d, RTCPport=%d, ipAddr=%s, "
-                     "sourcePort=%d, RTCPport=%d",
-                     port, RTCPport, ipAddr, sourcePort, RTCPport);
-    }
-    else
-    {
-        WEBRTC_TRACE(
-                     kTraceStateInfo,
-                     kTraceVoice,
-                     VoEId(_shared->instance_id(), -1),
-                     "GetSendDestination() => port=%d, RTCPport=%d, "
-                     "sourcePort=%d, RTCPport=%d",
-                     port, RTCPport, sourcePort, RTCPport);
-    }
-    return ret;
-#else
-    _shared->SetLastError(VE_EXTERNAL_TRANSPORT_ENABLED, kTraceWarning,
-        "GetSendDestination() VoE is built for external transport");
-    return -1;
-#endif
-}
-
 int VoEBaseImpl::StartReceive(int channel)
 {
     WEBRTC_TRACE(kTraceApiCall, kTraceVoice, VoEId(_shared->instance_id(), -1),
@@ -1023,8 +630,8 @@ int VoEBaseImpl::StartReceive(int channel)
         _shared->SetLastError(VE_NOT_INITED, kTraceError);
         return -1;
     }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
+    voe::ChannelOwner ch = _shared->channel_manager().GetChannel(channel);
+    voe::Channel* channelPtr = ch.channel();
     if (channelPtr == NULL)
     {
         _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
@@ -1044,8 +651,8 @@ int VoEBaseImpl::StopReceive(int channel)
         _shared->SetLastError(VE_NOT_INITED, kTraceError);
         return -1;
     }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
+    voe::ChannelOwner ch = _shared->channel_manager().GetChannel(channel);
+    voe::Channel* channelPtr = ch.channel();
     if (channelPtr == NULL)
     {
         _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
@@ -1065,8 +672,8 @@ int VoEBaseImpl::StartPlayout(int channel)
         _shared->SetLastError(VE_NOT_INITED, kTraceError);
         return -1;
     }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
+    voe::ChannelOwner ch = _shared->channel_manager().GetChannel(channel);
+    voe::Channel* channelPtr = ch.channel();
     if (channelPtr == NULL)
     {
         _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
@@ -1096,8 +703,8 @@ int VoEBaseImpl::StopPlayout(int channel)
         _shared->SetLastError(VE_NOT_INITED, kTraceError);
         return -1;
     }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
+    voe::ChannelOwner ch = _shared->channel_manager().GetChannel(channel);
+    voe::Channel* channelPtr = ch.channel();
     if (channelPtr == NULL)
     {
         _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
@@ -1123,8 +730,8 @@ int VoEBaseImpl::StartSend(int channel)
         _shared->SetLastError(VE_NOT_INITED, kTraceError);
         return -1;
     }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
+    voe::ChannelOwner ch = _shared->channel_manager().GetChannel(channel);
+    voe::Channel* channelPtr = ch.channel();
     if (channelPtr == NULL)
     {
         _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
@@ -1135,15 +742,6 @@ int VoEBaseImpl::StartSend(int channel)
     {
         return 0;
     }
-#ifndef WEBRTC_EXTERNAL_TRANSPORT
-    if (!channelPtr->ExternalTransport()
-            && !channelPtr->SendSocketsInitialized())
-    {
-        _shared->SetLastError(VE_DESTINATION_NOT_INITED, kTraceError,
-            "StartSend() must set send destination first");
-        return -1;
-    }
-#endif
     if (StartSend() != 0)
     {
         _shared->SetLastError(VE_AUDIO_DEVICE_MODULE_ERROR, kTraceError,
@@ -1163,8 +761,8 @@ int VoEBaseImpl::StopSend(int channel)
         _shared->SetLastError(VE_NOT_INITED, kTraceError);
         return -1;
     }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
+    voe::ChannelOwner ch = _shared->channel_manager().GetChannel(channel);
+    voe::Channel* channelPtr = ch.channel();
     if (channelPtr == NULL)
     {
         _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
@@ -1195,8 +793,8 @@ int VoEBaseImpl::GetVersion(char version[1024])
     char versionBuf[kVoiceEngineVersionMaxMessageSize];
     char* versionPtr = versionBuf;
 
-    WebRtc_Word32 len = 0;
-    WebRtc_Word32 accLen = 0;
+    int32_t len = 0;
+    int32_t accLen = 0;
 
     len = AddVoEVersion(versionPtr);
     if (len == -1)
@@ -1268,25 +866,25 @@ int VoEBaseImpl::GetVersion(char version[1024])
     return 0;
 }
 
-WebRtc_Word32 VoEBaseImpl::AddBuildInfo(char* str) const
+int32_t VoEBaseImpl::AddBuildInfo(char* str) const
 {
     return sprintf(str, "Build: svn:%s %s\n", WEBRTC_SVNREVISION, BUILDINFO);
 }
 
-WebRtc_Word32 VoEBaseImpl::AddVoEVersion(char* str) const
+int32_t VoEBaseImpl::AddVoEVersion(char* str) const
 {
     return sprintf(str, "VoiceEngine 4.1.0\n");
 }
 
 #ifdef WEBRTC_EXTERNAL_TRANSPORT
-WebRtc_Word32 VoEBaseImpl::AddExternalTransportBuild(char* str) const
+int32_t VoEBaseImpl::AddExternalTransportBuild(char* str) const
 {
     return sprintf(str, "External transport build\n");
 }
 #endif
 
 #ifdef WEBRTC_VOE_EXTERNAL_REC_AND_PLAYOUT
-WebRtc_Word32 VoEBaseImpl::AddExternalRecAndPlayoutBuild(char* str) const
+int32_t VoEBaseImpl::AddExternalRecAndPlayoutBuild(char* str) const
 {
     return sprintf(str, "External recording and playout build\n");
 }
@@ -1309,8 +907,8 @@ int VoEBaseImpl::SetNetEQPlayoutMode(int channel, NetEqModes mode)
         _shared->SetLastError(VE_NOT_INITED, kTraceError);
         return -1;
     }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
+    voe::ChannelOwner ch = _shared->channel_manager().GetChannel(channel);
+    voe::Channel* channelPtr = ch.channel();
     if (channelPtr == NULL)
     {
         _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
@@ -1329,8 +927,8 @@ int VoEBaseImpl::GetNetEQPlayoutMode(int channel, NetEqModes& mode)
         _shared->SetLastError(VE_NOT_INITED, kTraceError);
         return -1;
     }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
+    voe::ChannelOwner ch = _shared->channel_manager().GetChannel(channel);
+    voe::Channel* channelPtr = ch.channel();
     if (channelPtr == NULL)
     {
         _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
@@ -1338,46 +936,6 @@ int VoEBaseImpl::GetNetEQPlayoutMode(int channel, NetEqModes& mode)
         return -1;
     }
     return channelPtr->GetNetEQPlayoutMode(mode);
-}
-
-int VoEBaseImpl::SetNetEQBGNMode(int channel, NetEqBgnModes mode)
-{
-    WEBRTC_TRACE(kTraceApiCall, kTraceVoice, VoEId(_shared->instance_id(), -1),
-                 "SetNetEQBGNMode(channel=%i, mode=%i)", channel, mode);
-    if (!_shared->statistics().Initialized())
-    {
-        _shared->SetLastError(VE_NOT_INITED, kTraceError);
-        return -1;
-    }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
-    if (channelPtr == NULL)
-    {
-        _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
-            "SetNetEQBGNMode() failed to locate channel");
-        return -1;
-    }
-    return channelPtr->SetNetEQBGNMode(mode);
-}
-
-int VoEBaseImpl::GetNetEQBGNMode(int channel, NetEqBgnModes& mode)
-{
-    WEBRTC_TRACE(kTraceApiCall, kTraceVoice, VoEId(_shared->instance_id(), -1),
-                 "GetNetEQBGNMode(channel=%i, mode=?)", channel);
-    if (!_shared->statistics().Initialized())
-    {
-        _shared->SetLastError(VE_NOT_INITED, kTraceError);
-        return -1;
-    }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
-    if (channelPtr == NULL)
-    {
-        _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
-            "GetNetEQBGNMode() failed to locate channel");
-        return -1;
-    }
-    return channelPtr->GetNetEQBGNMode(mode);
 }
 
 int VoEBaseImpl::SetOnHoldStatus(int channel, bool enable, OnHoldModes mode)
@@ -1390,8 +948,8 @@ int VoEBaseImpl::SetOnHoldStatus(int channel, bool enable, OnHoldModes mode)
         _shared->SetLastError(VE_NOT_INITED, kTraceError);
         return -1;
     }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
+    voe::ChannelOwner ch = _shared->channel_manager().GetChannel(channel);
+    voe::Channel* channelPtr = ch.channel();
     if (channelPtr == NULL)
     {
         _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
@@ -1410,8 +968,8 @@ int VoEBaseImpl::GetOnHoldStatus(int channel, bool& enabled, OnHoldModes& mode)
         _shared->SetLastError(VE_NOT_INITED, kTraceError);
         return -1;
     }
-    voe::ScopedChannel sc(_shared->channel_manager(), channel);
-    voe::Channel* channelPtr = sc.ChannelPtr();
+    voe::ChannelOwner ch = _shared->channel_manager().GetChannel(channel);
+    voe::Channel* channelPtr = ch.channel();
     if (channelPtr == NULL)
     {
         _shared->SetLastError(VE_CHANNEL_NOT_VALID, kTraceError,
@@ -1421,7 +979,7 @@ int VoEBaseImpl::GetOnHoldStatus(int channel, bool& enabled, OnHoldModes& mode)
     return channelPtr->GetOnHoldStatus(enabled, mode);
 }
 
-WebRtc_Word32 VoEBaseImpl::StartPlayout()
+int32_t VoEBaseImpl::StartPlayout()
 {
     WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_shared->instance_id(), -1),
                  "VoEBaseImpl::StartPlayout()");
@@ -1449,50 +1007,24 @@ WebRtc_Word32 VoEBaseImpl::StartPlayout()
     return 0;
 }
 
-WebRtc_Word32 VoEBaseImpl::StopPlayout()
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_shared->instance_id(), -1),
-                 "VoEBaseImpl::StopPlayout()");
-
-    WebRtc_Word32 numOfChannels = _shared->channel_manager().NumOfChannels();
-    if (numOfChannels <= 0)
-    {
-        return 0;
+int32_t VoEBaseImpl::StopPlayout() {
+  WEBRTC_TRACE(kTraceInfo,
+               kTraceVoice,
+               VoEId(_shared->instance_id(), -1),
+               "VoEBaseImpl::StopPlayout()");
+  // Stop audio-device playing if no channel is playing out
+  if (_shared->NumOfSendingChannels() == 0) {
+    if (_shared->audio_device()->StopPlayout() != 0) {
+      _shared->SetLastError(VE_CANNOT_STOP_PLAYOUT,
+                            kTraceError,
+                            "StopPlayout() failed to stop playout");
+      return -1;
     }
-
-    WebRtc_UWord16 nChannelsPlaying(0);
-    WebRtc_Word32* channelsArray = new WebRtc_Word32[numOfChannels];
-
-    // Get number of playing channels
-    _shared->channel_manager().GetChannelIds(channelsArray, numOfChannels);
-    for (int i = 0; i < numOfChannels; i++)
-    {
-        voe::ScopedChannel sc(_shared->channel_manager(), channelsArray[i]);
-        voe::Channel* chPtr = sc.ChannelPtr();
-        if (chPtr)
-        {
-            if (chPtr->Playing())
-            {
-                nChannelsPlaying++;
-            }
-        }
-    }
-    delete[] channelsArray;
-
-    // Stop audio-device playing if no channel is playing out
-    if (nChannelsPlaying == 0)
-    {
-        if (_shared->audio_device()->StopPlayout() != 0)
-        {
-            _shared->SetLastError(VE_CANNOT_STOP_PLAYOUT, kTraceError,
-                "StopPlayout() failed to stop playout");
-            return -1;
-        }
-    }
-    return 0;
+  }
+  return 0;
 }
 
-WebRtc_Word32 VoEBaseImpl::StartSend()
+int32_t VoEBaseImpl::StartSend()
 {
     WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_shared->instance_id(), -1),
                  "VoEBaseImpl::StartSend()");
@@ -1521,7 +1053,7 @@ WebRtc_Word32 VoEBaseImpl::StartSend()
     return 0;
 }
 
-WebRtc_Word32 VoEBaseImpl::StopSend()
+int32_t VoEBaseImpl::StopSend()
 {
     WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_shared->instance_id(), -1),
                  "VoEBaseImpl::StopSend()");
@@ -1542,23 +1074,13 @@ WebRtc_Word32 VoEBaseImpl::StopSend()
     return 0;
 }
 
-WebRtc_Word32 VoEBaseImpl::TerminateInternal()
+int32_t VoEBaseImpl::TerminateInternal()
 {
     WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_shared->instance_id(), -1),
                  "VoEBaseImpl::TerminateInternal()");
 
     // Delete any remaining channel objects
-    WebRtc_Word32 numOfChannels = _shared->channel_manager().NumOfChannels();
-    if (numOfChannels > 0)
-    {
-        WebRtc_Word32* channelsArray = new WebRtc_Word32[numOfChannels];
-        _shared->channel_manager().GetChannelIds(channelsArray, numOfChannels);
-        for (int i = 0; i < numOfChannels; i++)
-        {
-            DeleteChannel(channelsArray[i]);
-        }
-        delete[] channelsArray;
-    }
+    _shared->channel_manager().DestroyAllChannels();
 
     if (_shared->process_thread())
     {
@@ -1578,9 +1100,7 @@ WebRtc_Word32 VoEBaseImpl::TerminateInternal()
         }
     }
 
-    // Audio Device Module
-
-    if (_shared->audio_device() != NULL)
+    if (_shared->audio_device())
     {
         if (_shared->audio_device()->StopPlayout() != 0)
         {
@@ -1607,19 +1127,108 @@ WebRtc_Word32 VoEBaseImpl::TerminateInternal()
             _shared->SetLastError(VE_AUDIO_DEVICE_MODULE_ERROR, kTraceError,
                 "TerminateInternal() failed to terminate the ADM");
         }
-       
         _shared->set_audio_device(NULL);
     }
 
-    // AP module
-
-    if (_shared->audio_processing() != NULL)
-    {
-        _shared->transmit_mixer()->SetAudioProcessingModule(NULL);
+    if (_shared->audio_processing()) {
         _shared->set_audio_processing(NULL);
     }
 
     return _shared->statistics().SetUnInitialized();
 }
 
-} // namespace webrtc
+int VoEBaseImpl::ProcessRecordedDataWithAPM(
+    const int voe_channels[],
+    int number_of_voe_channels,
+    const void* audio_data,
+    uint32_t sample_rate,
+    uint8_t number_of_channels,
+    uint32_t number_of_frames,
+    uint32_t audio_delay_milliseconds,
+    int32_t clock_drift,
+    uint32_t current_volume,
+    bool key_pressed) {
+  assert(_shared->transmit_mixer() != NULL);
+  assert(_shared->audio_device() != NULL);
+
+  bool is_analog_agc(false);
+  if (_shared->audio_processing() &&
+      _shared->audio_processing()->gain_control()->mode() ==
+          GainControl::kAdaptiveAnalog) {
+    is_analog_agc = true;
+  }
+
+  // Only deal with the volume in adaptive analog mode.
+  uint32_t max_volume = 0;
+  uint16_t current_voe_mic_level = 0;
+  if (is_analog_agc) {
+    // Scale from ADM to VoE level range
+    if (_shared->audio_device()->MaxMicrophoneVolume(&max_volume) == 0) {
+      if (max_volume) {
+        current_voe_mic_level = static_cast<uint16_t>(
+            (current_volume * kMaxVolumeLevel +
+                static_cast<int>(max_volume / 2)) / max_volume);
+      }
+    }
+    // We learned that on certain systems (e.g Linux) the current_voe_mic_level
+    // can be greater than the maxVolumeLevel therefore
+    // we are going to cap the current_voe_mic_level to the maxVolumeLevel
+    // and change the maxVolume to current_volume if it turns out that
+    // the current_voe_mic_level is indeed greater than the maxVolumeLevel.
+    if (current_voe_mic_level > kMaxVolumeLevel) {
+      current_voe_mic_level = kMaxVolumeLevel;
+      max_volume = current_volume;
+    }
+  }
+
+  // Keep track if the MicLevel has been changed by the AGC, if not,
+  // use the old value AGC returns to let AGC continue its trend,
+  // so eventually the AGC is able to change the mic level. This handles
+  // issues with truncation introduced by the scaling.
+  if (_oldMicLevel == current_volume)
+    current_voe_mic_level = static_cast<uint16_t>(_oldVoEMicLevel);
+
+  // Perform channel-independent operations
+  // (APM, mix with file, record to file, mute, etc.)
+  _shared->transmit_mixer()->PrepareDemux(
+      audio_data, number_of_frames, number_of_channels, sample_rate,
+      static_cast<uint16_t>(audio_delay_milliseconds), clock_drift,
+      current_voe_mic_level, key_pressed);
+
+  // Copy the audio frame to each sending channel and perform
+  // channel-dependent operations (file mixing, mute, etc.), encode and
+  // packetize+transmit the RTP packet. When |number_of_voe_channels| == 0,
+  // do the operations on all the existing VoE channels; otherwise the
+  // operations will be done on specific channels.
+  if (number_of_voe_channels == 0) {
+    _shared->transmit_mixer()->DemuxAndMix();
+    _shared->transmit_mixer()->EncodeAndSend();
+  } else {
+    _shared->transmit_mixer()->DemuxAndMix(voe_channels,
+                                           number_of_voe_channels);
+    _shared->transmit_mixer()->EncodeAndSend(voe_channels,
+                                             number_of_voe_channels);
+  }
+
+  if (!is_analog_agc)
+    return 0;
+
+  // Scale from VoE to ADM level range.
+  uint32_t new_voe_mic_level = _shared->transmit_mixer()->CaptureLevel();
+
+  // Keep track of the value AGC returns.
+  _oldVoEMicLevel = new_voe_mic_level;
+  _oldMicLevel = current_volume;
+
+  if (new_voe_mic_level != current_voe_mic_level) {
+    // Return the new volume if AGC has changed the volume.
+    return static_cast<int>(
+        (new_voe_mic_level * max_volume +
+            static_cast<int>(kMaxVolumeLevel / 2)) / kMaxVolumeLevel);
+  }
+
+  // Return 0 to indicate no change on the volume.
+  return 0;
+}
+
+}  // namespace webrtc

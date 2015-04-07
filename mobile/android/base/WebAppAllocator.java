@@ -10,35 +10,25 @@ import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
 import android.graphics.Bitmap;
 import android.util.Log;
 
-public class WebAppAllocator {
-    private final String LOGTAG = "GeckoWebAppAllocator";
-    // The number of WebApp# and WEBAPP# activites/apps/intents
+import java.util.ArrayList;
+
+public class WebappAllocator {
+    private final String LOGTAG = "GeckoWebappAllocator";
+    // The number of Webapp# and WEBAPP# activites/apps/intents
     private final static int MAX_WEB_APPS = 100;
 
-    protected static GeckoApp sContext = null;
-    protected static WebAppAllocator sInstance = null;
-    public static WebAppAllocator getInstance() {
+    protected static WebappAllocator sInstance = null;
+    public static WebappAllocator getInstance() {
         return getInstance(GeckoAppShell.getContext());
     }
 
-    public static synchronized WebAppAllocator getInstance(Context cx) {
+    public static synchronized WebappAllocator getInstance(Context cx) {
         if (sInstance == null) {
-            if (!(cx instanceof GeckoApp))
-                throw new RuntimeException("Context needs to be a GeckoApp");
-
-            sContext = (GeckoApp) cx;
-            sInstance = new WebAppAllocator(cx);
-        }
-
-        // The marketplaceApp will run in this same process, but has a different context
-        // Rather than just failing, we want to create a new Allocator instead
-        if (cx != sContext) {
-            sInstance = null;
-            sContext = (GeckoApp) cx;
-            sInstance = new WebAppAllocator(cx);
+            sInstance = new WebappAllocator(cx);
         }
 
         return sInstance;
@@ -46,7 +36,7 @@ public class WebAppAllocator {
 
     SharedPreferences mPrefs;
 
-    protected WebAppAllocator(Context context) {
+    protected WebappAllocator(Context context) {
         mPrefs = context.getSharedPreferences("webapps", Context.MODE_PRIVATE | Context.MODE_MULTI_PROCESS);
     }
 

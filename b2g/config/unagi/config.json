@@ -7,6 +7,7 @@
     "build_targets": [],
     "upload_files": [
         "{objdir}/dist/b2g-update/*.mar",
+        "{objdir}/dist/b2g-*.tar.gz",
         "{objdir}/dist/b2g-*.crashreporter-symbols.zip",
         "{workdir}/sources.xml"
     ],
@@ -22,14 +23,13 @@
     ],
     "env": {
         "VARIANT": "user",
-        "MOZILLA_OFFICIAL": "1",
-        "B2GUPDATER": "1"
+        "MOZILLA_OFFICIAL": "1"
     },
-    "gecko_l10n_root": "http://hg.mozilla.org/l10n-central",
+    "gecko_l10n_root": "https://hg.mozilla.org/l10n-central",
     "gaia": {
         "l10n": {
             "vcs": "hgtool",
-            "root": "http://hg.mozilla.org/gaia-l10n"
+            "root": "https://hg.mozilla.org/gaia-l10n"
         }
     }
 }

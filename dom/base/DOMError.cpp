@@ -6,8 +6,7 @@
 
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/DOMErrorBinding.h"
-#include "nsContentUtils.h"
-#include "nsDOMException.h"
+#include "mozilla/dom/DOMException.h"
 #include "nsPIDOMWindow.h"
 
 namespace mozilla {
@@ -21,14 +20,20 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMError)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
+DOMError::DOMError(nsPIDOMWindow* aWindow)
+  : mWindow(aWindow)
+{
+  SetIsDOMBinding();
+}
+
 DOMError::DOMError(nsPIDOMWindow* aWindow, nsresult aValue)
   : mWindow(aWindow)
 {
-  const char *name, *message;
-  NS_GetNameAndMessageForDOMNSResult(aValue, &name, &message);
+  nsCString name, message;
+  NS_GetNameAndMessageForDOMNSResult(aValue, name, message);
 
-  mName = NS_ConvertASCIItoUTF16(name);
-  mMessage = NS_ConvertASCIItoUTF16(message);
+  CopyUTF8toUTF16(name, mName);
+  CopyUTF8toUTF16(message, mMessage);
 
   SetIsDOMBinding();
 }
@@ -54,16 +59,17 @@ DOMError::~DOMError()
 }
 
 JSObject*
-DOMError::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+DOMError::WrapObject(JSContext* aCx)
 {
-  return DOMErrorBinding::Wrap(aCx, aScope, this);
+  return DOMErrorBinding::Wrap(aCx, this);
 }
 
 /* static */ already_AddRefed<DOMError>
-DOMError::Constructor(const GlobalObject& aGlobal, const nsAString& aName,
-                      const nsAString& aMessage, ErrorResult& aRv)
+DOMError::Constructor(const GlobalObject& aGlobal,
+                      const nsAString& aName, const nsAString& aMessage,
+                      ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.Get());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
 
   // Window is null for chrome code.
 

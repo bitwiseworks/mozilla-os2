@@ -7,26 +7,22 @@
 #ifndef nsWyciwygChannel_h___
 #define nsWyciwygChannel_h___
 
-#include "nsWyciwygProtocolHandler.h"
-#include "nsXPIDLString.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
 
 #include "nsIWyciwygChannel.h"
-#include "nsILoadGroup.h"
-#include "nsIOutputStream.h"
-#include "nsIInputStream.h"
-#include "nsIInputStreamPump.h"
-#include "nsIInterfaceRequestor.h"
-#include "nsIProgressEventSink.h"
 #include "nsIStreamListener.h"
-#include "nsICacheListener.h"
-#include "nsICacheEntryDescriptor.h"
-#include "nsIURI.h"
-#include "nsIEventTarget.h"
-#include "nsILoadContext.h"
-#include "nsNetUtil.h"
+#include "nsICacheEntryOpenCallback.h"
 #include "PrivateBrowsingChannel.h"
+
+class nsICacheEntry;
+class nsIEventTarget;
+class nsIInputStream;
+class nsIInputStreamPump;
+class nsILoadGroup;
+class nsIOutputStream;
+class nsIProgressEventSink;
+class nsIURI;
 
 extern PRLogModuleInfo * gWyciwygLog;
 
@@ -34,17 +30,17 @@ extern PRLogModuleInfo * gWyciwygLog;
 
 class nsWyciwygChannel: public nsIWyciwygChannel,
                         public nsIStreamListener,
-                        public nsICacheListener,
+                        public nsICacheEntryOpenCallback,
                         public mozilla::net::PrivateBrowsingChannel<nsWyciwygChannel>
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIREQUEST
     NS_DECL_NSICHANNEL
     NS_DECL_NSIWYCIWYGCHANNEL
     NS_DECL_NSIREQUESTOBSERVER
     NS_DECL_NSISTREAMLISTENER
-    NS_DECL_NSICACHELISTENER
+    NS_DECL_NSICACHEENTRYOPENCALLBACK
 
     friend class nsWyciwygSetCharsetandSourceEvent;
     friend class nsWyciwygWriteEvent;
@@ -57,12 +53,13 @@ public:
     nsresult Init(nsIURI *uri);
 
 protected:
-    nsresult WriteToCacheEntryInternal(const nsAString& aData, const nsACString& spec);
+    nsresult WriteToCacheEntryInternal(const nsAString& aData);
     void SetCharsetAndSourceInternal();
     nsresult CloseCacheEntryInternal(nsresult reason);
 
     nsresult ReadFromCache();
-    nsresult OpenCacheEntry(const nsACString & aCacheKey, nsCacheAccessMode aWriteAccess);
+    nsresult EnsureWriteCacheEntry();
+    nsresult OpenCacheEntry(nsIURI *aURI, uint32_t aOpenFlags);
 
     void WriteCharsetAndSourceToCache(int32_t aSource,
                                       const nsCString& aCharset);
@@ -72,6 +69,13 @@ protected:
 
     friend class mozilla::net::PrivateBrowsingChannel<nsWyciwygChannel>;
 
+    enum EMode {
+      NONE,
+      WRITING,
+      READING
+    };
+
+    EMode                               mMode;
     nsresult                            mStatus;
     bool                                mIsPending;
     bool                                mCharsetAndSourceSet;
@@ -95,7 +99,7 @@ protected:
     nsCOMPtr<nsIInputStreamPump>        mPump;
     
     // Cache related stuff    
-    nsCOMPtr<nsICacheEntryDescriptor>   mCacheEntry;
+    nsCOMPtr<nsICacheEntry>             mCacheEntry;
     nsCOMPtr<nsIOutputStream>           mCacheOutputStream;
     nsCOMPtr<nsIInputStream>            mCacheInputStream;
     nsCOMPtr<nsIEventTarget>            mCacheIOTarget;

@@ -54,17 +54,16 @@ public:
   virtual void UnselectRow(uint32_t aRowIdx);
   virtual Accessible* AsAccessible() { return this; }
 
-  // nsAccessNode
-  virtual void Shutdown();
-
   // Accessible
+  virtual void Shutdown();
   virtual TableAccessible* AsTable() { return this; }
   virtual a11y::role NativeRole();
 
 protected:
 
   // XULTreeAccessible
-  virtual already_AddRefed<Accessible> CreateTreeItemAccessible(int32_t aRow);
+  virtual already_AddRefed<Accessible>
+    CreateTreeItemAccessible(int32_t aRow) const MOZ_OVERRIDE;
 };
 
 
@@ -86,20 +85,18 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(XULTreeGridRowAccessible,
                                            XULTreeItemAccessibleBase)
 
-  // nsAccessNode
-  virtual void Shutdown();
-
   // Accessible
+  virtual void Shutdown();
   virtual a11y::role NativeRole();
   virtual ENameValueFlag Name(nsString& aName);
   virtual Accessible* ChildAtPoint(int32_t aX, int32_t aY,
                                    EWhichChildAtPoint aWhichChild);
 
-  virtual Accessible* GetChildAt(uint32_t aIndex);
-  virtual uint32_t ChildCount() const;
+  virtual Accessible* GetChildAt(uint32_t aIndex) const MOZ_OVERRIDE;
+  virtual uint32_t ChildCount() const MOZ_OVERRIDE;
 
   // XULTreeItemAccessibleBase
-  virtual Accessible* GetCellAccessible(nsITreeColumn* aColumn);
+  virtual Accessible* GetCellAccessible(nsITreeColumn* aColumn) const MOZ_OVERRIDE;
   virtual void RowInvalidated(int32_t aStartColIdx, int32_t aEndColIdx);
 
 protected:
@@ -108,7 +105,7 @@ protected:
   virtual void CacheChildren();
 
   // XULTreeItemAccessibleBase
-  AccessibleHashtable mAccessibleCache;
+  mutable AccessibleHashtable mAccessibleCache;
 };
 
 
@@ -160,7 +157,7 @@ public:
   virtual Accessible* FocusedChild();
   virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() MOZ_OVERRIDE;
   virtual int32_t IndexInParent() const;
-  virtual Relation RelationByType(uint32_t aType);
+  virtual Relation RelationByType(RelationType aType) MOZ_OVERRIDE;
   virtual a11y::role NativeRole();
   virtual uint64_t NativeState();
   virtual uint64_t NativeInteractiveState() const;
@@ -182,8 +179,9 @@ public:
   /**
    * Fire name or state change event if the accessible text or value has been
    * changed.
+   * @return true if name has changed
    */
-  void CellInvalidated();
+  bool CellInvalidated();
 
 protected:
   // Accessible

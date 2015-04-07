@@ -3,6 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/AsyncEventDispatcher.h"
 #include "nsCOMPtr.h"
 #include "nsTreeSelection.h"
 #include "nsIBoxObject.h"
@@ -12,12 +13,12 @@
 #include "nsIDOMElement.h"
 #include "nsDOMClassInfoID.h"
 #include "nsIContent.h"
-#include "nsGUIEvent.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsGkAtoms.h"
-#include "nsAsyncDOMEvent.h"
-#include "nsEventDispatcher.h"
 #include "nsAutoPtr.h"
+#include "nsComponentManagerUtils.h"
+
+using namespace mozilla;
 
 // A helper class for managing our ranges of selection.
 struct nsTreeRange
@@ -257,7 +258,7 @@ nsTreeSelection::~nsTreeSelection()
     mSelectTimer->Cancel();
 }
 
-NS_IMPL_CYCLE_COLLECTION_2(nsTreeSelection, mTree, mCurrentColumn)
+NS_IMPL_CYCLE_COLLECTION(nsTreeSelection, mTree, mCurrentColumn)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsTreeSelection)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsTreeSelection)
@@ -650,11 +651,12 @@ NS_IMETHODIMP nsTreeSelection::SetCurrentIndex(int32_t aIndex)
   NS_NAMED_LITERAL_STRING(DOMMenuItemActive, "DOMMenuItemActive");
   NS_NAMED_LITERAL_STRING(DOMMenuItemInactive, "DOMMenuItemInactive");
 
-  nsRefPtr<nsAsyncDOMEvent> event =
-    new nsAsyncDOMEvent(treeDOMNode,
-                     (aIndex != -1 ? DOMMenuItemActive : DOMMenuItemInactive),
-                      true, false);
-  return event->PostDOMEvent();
+  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
+    new AsyncEventDispatcher(treeDOMNode,
+                             (aIndex != -1 ? DOMMenuItemActive :
+                                             DOMMenuItemInactive),
+                             true, false);
+  return asyncDispatcher->PostDOMEvent();
 }
 
 NS_IMETHODIMP nsTreeSelection::GetCurrentColumn(nsITreeColumn** aCurrentColumn)
@@ -838,9 +840,9 @@ nsTreeSelection::FireOnSelectHandler()
   nsCOMPtr<nsINode> node(do_QueryInterface(elt));
   NS_ENSURE_STATE(node);
 
-  nsRefPtr<nsAsyncDOMEvent> event =
-    new nsAsyncDOMEvent(node, NS_LITERAL_STRING("select"), true, false);
-  event->RunDOMEventWhenSafe();
+  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
+    new AsyncEventDispatcher(node, NS_LITERAL_STRING("select"), true, false);
+  asyncDispatcher->RunDOMEventWhenSafe();
   return NS_OK;
 }
 

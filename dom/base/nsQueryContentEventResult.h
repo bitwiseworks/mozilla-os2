@@ -3,12 +3,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef mozilla_dom_nsQueryContentEventResult_h
+#define mozilla_dom_nsQueryContentEventResult_h
+
 #include "nsIQueryContentEventResult.h"
 #include "nsString.h"
 #include "nsRect.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/EventForwards.h"
 
-class nsQueryContentEvent;
 class nsIWidget;
 
 class nsQueryContentEventResult MOZ_FINAL : public nsIQueryContentEventResult
@@ -19,7 +22,8 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIQUERYCONTENTEVENTRESULT
 
-  void SetEventResult(nsIWidget* aWidget, const nsQueryContentEvent &aEvent);
+  void SetEventResult(nsIWidget* aWidget,
+                      const mozilla::WidgetQueryContentEvent &aEvent);
 
 protected:
   uint32_t mEventID;
@@ -31,3 +35,5 @@ protected:
   bool mSucceeded;
   bool mReversed;
 };
+
+#endif // mozilla_dom_nsQueryContentEventResult_h

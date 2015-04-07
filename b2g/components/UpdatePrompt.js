@@ -12,6 +12,7 @@ const Cr = Components.results;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/WebappsUpdater.jsm");
 
 const VERBOSE = 1;
 let log =
@@ -44,6 +45,24 @@ XPCOMUtils.defineLazyServiceGetter(Services, "idle",
 XPCOMUtils.defineLazyServiceGetter(Services, "settings",
                                    "@mozilla.org/settingsService;1",
                                    "nsISettingsService");
+
+XPCOMUtils.defineLazyServiceGetter(Services, 'env',
+                                   '@mozilla.org/process/environment;1',
+                                   'nsIEnvironment');
+
+function useSettings() {
+  // When we're running in the real phone, then we can use settings.
+  // But when we're running as part of xpcshell, there is no settings database
+  // and trying to use settings in this scenario causes lots of weird
+  // assertions at shutdown time.
+  if (typeof useSettings.result === "undefined") {
+    useSettings.result = !Services.env.get("XPCSHELL_TEST_PROFILE_DIR");
+  }
+  return useSettings.result;
+}
+
+XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
+                                  "resource://gre/modules/SystemAppProxy.jsm");
 
 function UpdateCheckListener(updatePrompt) {
   this._updatePrompt = updatePrompt;
@@ -117,7 +136,6 @@ UpdatePrompt.prototype = {
   _applyPromptTimer: null,
   _waitingForIdle: false,
   _updateCheckListner: null,
-  _pendingEvents: [],
 
   get applyPromptTimeout() {
     return Services.prefs.getIntPref(PREF_APPLY_PROMPT_TIMEOUT);
@@ -127,14 +145,8 @@ UpdatePrompt.prototype = {
     return Services.prefs.getIntPref(PREF_APPLY_IDLE_TIMEOUT);
   },
 
-  handleContentStart: function UP_handleContentStart(shell) {
-    let content = shell.contentBrowser.contentWindow;
-    content.addEventListener("mozContentEvent", this);
-
-    for (let i = 0; i < this._pendingEvents.length; i++) {
-      shell.sendChromeEvent(this._pendingEvents[i]);
-    }
-    this._pendingEvents.length = 0;
+  handleContentStart: function UP_handleContentStart() {
+    SystemAppProxy.addEventListener("mozContentEvent", this);
   },
 
   // nsIUpdatePrompt
@@ -182,8 +194,10 @@ UpdatePrompt.prototype = {
 
   showUpdateHistory: function UP_showUpdateHistory(aParent) { },
   showUpdateInstalled: function UP_showUpdateInstalled() {
-    let lock = Services.settings.createLock();
-    lock.set("deviceinfo.last_updated", Date.now(), null, null);
+    if (useSettings()) {
+      let lock = Services.settings.createLock();
+      lock.set("deviceinfo.last_updated", Date.now(), null, null);
+    }
   },
 
   // Custom functions
@@ -199,10 +213,12 @@ UpdatePrompt.prototype = {
   },
 
   setUpdateStatus: function UP_setUpdateStatus(aStatus) {
-    log("Setting gecko.updateStatus: " + aStatus);
+     if (useSettings()) {
+       log("Setting gecko.updateStatus: " + aStatus);
 
-    let lock = Services.settings.createLock();
-    lock.set("gecko.updateStatus", aStatus, null);
+       let lock = Services.settings.createLock();
+       lock.set("gecko.updateStatus", aStatus, null);
+     }
   },
 
   showApplyPrompt: function UP_showApplyPrompt(aUpdate) {
@@ -212,9 +228,30 @@ UpdatePrompt.prototype = {
       return;
     }
 
+#ifdef MOZ_B2G_RIL
+    let window = Services.wm.getMostRecentWindow("navigator:browser");
+    let pinReq = window.navigator.mozIccManager.getCardLock("pin");
+    pinReq.onsuccess = function(e) {
+      if (e.target.result.enabled) {
+        // The SIM is pin locked. Don't use a fallback timer. This means that
+        // the user has to press Install to apply the update. If we use the
+        // timer, and the timer reboots the phone, then the phone will be
+        // unusable until the SIM is unlocked.
+        log("SIM is pin locked. Not starting fallback timer.");
+      } else {
+        // This means that no pin lock is enabled, so we go ahead and start
+        // the fallback timer.
+        this._applyPromptTimer = this.createTimer(this.applyPromptTimeout);
+      }
+    }.bind(this);
+    pinReq.onerror = function(e) {
+      this._applyPromptTimer = this.createTimer(this.applyPromptTimeout);
+    }.bind(this);
+#else
     // Schedule a fallback timeout in case the UI is unable to respond or show
     // a prompt for some reason.
     this._applyPromptTimer = this.createTimer(this.applyPromptTimeout);
+#endif
   },
 
   _copyProperties: ["appVersion", "buildID", "detailsURL", "displayVersion",
@@ -249,15 +286,12 @@ UpdatePrompt.prototype = {
     let detail = aDetail || {};
     detail.type = aType;
 
-    let browser = Services.wm.getMostRecentWindow("navigator:browser");
-    if (!browser) {
-      this._pendingEvents.push(detail);
+    let sent = SystemAppProxy.dispatchEvent(detail);
+    if (!sent) {
       log("Warning: Couldn't send update event " + aType +
           ": no content browser. Will send again when content becomes available.");
       return false;
     }
-
-    browser.shell.sendChromeEvent(detail);
     return true;
   },
 
@@ -331,59 +365,47 @@ UpdatePrompt.prototype = {
       this.restartProcess();
       return;
     }
-
-    let osApplyToDir;
+ 
     try {
-      this._update.QueryInterface(Ci.nsIWritablePropertyBag);
-      osApplyToDir = this._update.getProperty("osApplyToDir");
-    } catch (e) {}
-
-    if (!osApplyToDir) {
-      log("Error: Update has no osApplyToDir");
-      return;
+      Services.aus.applyOsUpdate(this._update);
     }
-
-    let updateFile = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-    updateFile.initWithPath(osApplyToDir + "/update.zip");
-    if (!updateFile.exists()) {
-      log("Error: FOTA update not found at " + updateFile.path);
-      return;
+    catch (e) {
+      this._update.errorCode = Cr.NS_ERROR_FAILURE;
+      this.showUpdateError(this._update);
     }
-
-    this.finishOSUpdate(updateFile.path);
   },
 
   restartProcess: function UP_restartProcess() {
     log("Update downloaded, restarting to apply it");
 
+    let callbackAfterSet = function() {
 #ifndef MOZ_WIDGET_GONK
-    let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"]
-                     .getService(Ci.nsIAppStartup);
-    appStartup.quit(appStartup.eForceQuit | appStartup.eRestart);
+      let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"]
+                       .getService(Ci.nsIAppStartup);
+      appStartup.quit(appStartup.eForceQuit | appStartup.eRestart);
 #else
-    // NB: on Gonk, we rely on the system process manager to restart us.
-    let pmService = Cc["@mozilla.org/power/powermanagerservice;1"]
-                    .getService(Ci.nsIPowerManagerService);
-    pmService.restart();
+      // NB: on Gonk, we rely on the system process manager to restart us.
+      let pmService = Cc["@mozilla.org/power/powermanagerservice;1"]
+                      .getService(Ci.nsIPowerManagerService);
+      pmService.restart();
 #endif
-  },
+    }
 
-  finishOSUpdate: function UP_finishOSUpdate(aOsUpdatePath) {
-    log("Rebooting into recovery to apply FOTA update: " + aOsUpdatePath);
-
-    try {
-      let recoveryService = Cc["@mozilla.org/recovery-service;1"]
-                            .getService(Ci.nsIRecoveryService);
-      recoveryService.installFotaUpdate(aOsUpdatePath);
-    } catch(e) {
-      log("Error: Couldn't reboot into recovery to apply FOTA update " +
-          aOsUpdatePath);
-      aUpdate = Services.um.activeUpdate;
-      if (aUpdate) {
-        aUpdate.errorCode = Cr.NS_ERROR_FAILURE;
-        aUpdate.statusText = "fota-reboot-failed";
-        this.showUpdateError(aUpdate);
-      }
+    if (useSettings()) {
+      // Save current os version in deviceinfo.previous_os
+      let lock = Services.settings.createLock({
+        handle: callbackAfterSet,
+        handleAbort: function(error) {
+          log("Abort callback when trying to set previous_os: " + error);
+          callbackAfterSet();
+        }
+      });
+      lock.get("deviceinfo.os", {
+        handle: function(name, value) {
+          log("Set previous_os to: " + value);
+          lock.set("deviceinfo.previous_os", value, null, null);
+        }
+      });
     }
   },
 
@@ -428,61 +450,6 @@ UpdatePrompt.prototype = {
     }
   },
 
-  appsUpdated: function UP_appsUpdated(aApps) {
-    log("appsUpdated: " + aApps.length + " apps to update");
-    let lock = Services.settings.createLock();
-    lock.set("apps.updateStatus", "check-complete", null);
-    this.sendChromeEvent("apps-update-check", { apps: aApps });
-    this._checkingApps = false;
-  },
-
-  // Trigger apps update check and wait for all to be done before
-  // notifying gaia.
-  onUpdateCheckStart: function UP_onUpdateCheckStart() {
-    log("onUpdateCheckStart (" + this._checkingApps + ")");
-    // Don't start twice.
-    if (this._checkingApps) {
-      return;
-    }
-
-    this._checkingApps = true;
-
-    let self = this;
-
-    let window = Services.wm.getMostRecentWindow("navigator:browser");
-    let all = window.navigator.mozApps.mgmt.getAll();
-
-    all.onsuccess = function() {
-      let appsCount = this.result.length;
-      let appsChecked = 0;
-      let appsToUpdate = [];
-      this.result.forEach(function updateApp(aApp) {
-        let update = aApp.checkForUpdate();
-        update.onsuccess = function() {
-          if (aApp.downloadAvailable) {
-            appsToUpdate.push(aApp.manifestURL);
-          }
-
-          appsChecked += 1;
-          if (appsChecked == appsCount) {
-            self.appsUpdated(appsToUpdate);
-          }
-        }
-        update.onerror = function() {
-          appsChecked += 1;
-          if (appsChecked == appsCount) {
-            self.appsUpdated(appsToUpdate);
-          }
-        }
-      });
-    }
-
-    all.onerror = function() {
-      // Could not get the app list, just notify to update nothing.
-      self.appsUpdated([]);
-    }
-  },
-
   // nsIObserver
 
   observe: function UP_observe(aSubject, aTopic, aData) {
@@ -496,7 +463,7 @@ UpdatePrompt.prototype = {
         Services.obs.removeObserver(this, "quit-application");
         break;
       case "update-check-start":
-        this.onUpdateCheckStart();
+        WebappsUpdater.updateApps();
         break;
     }
   },
@@ -509,6 +476,14 @@ UpdatePrompt.prototype = {
       this._applyPromptTimer = null;
       this.finishUpdate();
       this._update = null;
+      return;
+    }
+    if (aTimer == this._watchdogTimer) {
+      log("Download watchdog fired");
+      this._watchdogTimer = null;
+      this._autoRestartDownload = true;
+      Services.aus.pauseDownload();
+      return;
     }
   },
 
@@ -523,26 +498,29 @@ UpdatePrompt.prototype = {
   _startedSent: false,
 
   _watchdogTimer: null,
-  _watchdogTimeout: 0,
 
   _autoRestartDownload: false,
   _autoRestartCount: 0,
 
-  watchdogTimerFired: function UP_watchdogTimerFired() {
-    log("Download watchdog fired");
-    this._autoRestartDownload = true;
-    Services.aus.pauseDownload();
-  },
-
   startWatchdogTimer: function UP_startWatchdogTimer() {
+    let watchdogTimeout = 120000;  // 120 seconds
+    try {
+      watchdogTimeout = Services.prefs.getIntPref(PREF_DOWNLOAD_WATCHDOG_TIMEOUT);
+    } catch (e) {
+      // This means that the preference doesn't exist. watchdogTimeout will
+      // retain its default assigned above.
+    }
+    if (watchdogTimeout <= 0) {
+      // 0 implies don't bother using the watchdog timer at all.
+      this._watchdogTimer = null;
+      return;
+    }
     if (this._watchdogTimer) {
       this._watchdogTimer.cancel();
     } else {
       this._watchdogTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-      this._watchdogTimeout = Services.prefs.getIntPref(PREF_DOWNLOAD_WATCHDOG_TIMEOUT);
     }
-    this._watchdogTimer.initWithCallback(this.watchdogTimerFired.bind(this),
-                                         this._watchdogTimeout,
+    this._watchdogTimer.initWithCallback(this, watchdogTimeout,
                                          Ci.nsITimer.TYPE_ONE_SHOT);
   },
 

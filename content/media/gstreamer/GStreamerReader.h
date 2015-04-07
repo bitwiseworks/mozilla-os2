@@ -5,6 +5,8 @@
 #if !defined(GStreamerReader_h_)
 #define GStreamerReader_h_
 
+#include <map>
+
 #include <gst/gst.h>
 #include <gst/app/gstappsrc.h>
 #include <gst/app/gstappsink.h>
@@ -17,8 +19,13 @@
 #pragma GCC diagnostic ignored "-Wreserved-user-defined-literal"
 #include <gst/video/video.h>
 #pragma GCC diagnostic pop
-#include <map>
+
 #include "MediaDecoderReader.h"
+#include "MP3FrameParser.h"
+#include "ImageContainer.h"
+#include "nsRect.h"
+
+struct GstURIDecodeBin;
 
 namespace mozilla {
 
@@ -30,6 +37,8 @@ class AbstractMediaDecoder;
 
 class GStreamerReader : public MediaDecoderReader
 {
+  typedef gfx::IntRect IntRect;
+
 public:
   GStreamerReader(AbstractMediaDecoder* aDecoder);
   virtual ~GStreamerReader();
@@ -39,7 +48,7 @@ public:
   virtual bool DecodeAudioData();
   virtual bool DecodeVideoFrame(bool &aKeyframeSkip,
                                 int64_t aTimeThreshold);
-  virtual nsresult ReadMetadata(VideoInfo* aInfo,
+  virtual nsresult ReadMetadata(MediaInfo* aInfo,
                                 MetadataTags** aTags);
   virtual nsresult Seek(int64_t aTime,
                         int64_t aStartTime,
@@ -47,19 +56,31 @@ public:
                         int64_t aCurrentTime);
   virtual nsresult GetBuffered(dom::TimeRanges* aBuffered, int64_t aStartTime);
 
+  virtual void NotifyDataArrived(const char *aBuffer,
+                                 uint32_t aLength,
+                                 int64_t aOffset) MOZ_OVERRIDE;
+
   virtual bool HasAudio() {
-    return mInfo.mHasAudio;
+    return mInfo.HasAudio();
   }
 
   virtual bool HasVideo() {
-    return mInfo.mHasVideo;
+    return mInfo.HasVideo();
   }
+
+  layers::ImageContainer* GetImageContainer() { return mDecoder->GetImageContainer(); }
 
 private:
 
   void ReadAndPushData(guint aLength);
-  void NotifyBytesConsumed();
-  int64_t QueryDuration();
+  nsRefPtr<layers::PlanarYCbCrImage> GetImageFromBuffer(GstBuffer* aBuffer);
+  void CopyIntoImageBuffer(GstBuffer *aBuffer, GstBuffer** aOutBuffer, nsRefPtr<layers::PlanarYCbCrImage> &image);
+  GstCaps* BuildAudioSinkCaps();
+  void InstallPadCallbacks();
+
+#if GST_VERSION_MAJOR >= 1
+  void ImageDataFromVideoFrame(GstVideoFrame *aFrame, layers::PlanarYCbCrImage::Data *aData);
+#endif
 
   /* Called once the pipeline is setup to check that the stream only contains
    * supported formats
@@ -70,6 +91,30 @@ private:
 
   static GstBusSyncReply ErrorCb(GstBus *aBus, GstMessage *aMessage, gpointer aUserData);
   GstBusSyncReply Error(GstBus *aBus, GstMessage *aMessage);
+
+  /*
+   * We attach this callback to playbin so that when uridecodebin is
+   * constructed, we can then list for its autoplug-sort signal to blacklist
+   * the elements it can construct.
+   */
+  static void ElementAddedCb(GstBin *aPlayBin,
+                             GstElement *aElement,
+                             gpointer aUserData);
+
+  /*
+   * Called on the autoplug-sort signal emitted by uridecodebin for filtering
+   * the elements it uses.
+   */
+  static GValueArray *ElementFilterCb(GstURIDecodeBin *aBin,
+                                      GstPad *aPad,
+                                      GstCaps *aCaps,
+                                      GValueArray *aFactories,
+                                      gpointer aUserData);
+
+  GValueArray *ElementFilter(GstURIDecodeBin *aBin,
+                             GstPad *aPad,
+                             GstCaps *aCaps,
+                             GValueArray *aFactories);
 
   /* Called on the source-setup signal emitted by playbin. Used to
    * configure appsrc .
@@ -94,20 +139,31 @@ private:
   gboolean SeekData(GstAppSrc* aSrc, guint64 aOffset);
 
   /* Called when events reach the sinks. See inline comments */
+#if GST_VERSION_MAJOR == 1
+  static GstPadProbeReturn EventProbeCb(GstPad *aPad, GstPadProbeInfo *aInfo, gpointer aUserData);
+  GstPadProbeReturn EventProbe(GstPad *aPad, GstEvent *aEvent);
+#else
   static gboolean EventProbeCb(GstPad* aPad, GstEvent* aEvent, gpointer aUserData);
   gboolean EventProbe(GstPad* aPad, GstEvent* aEvent);
+#endif
 
-  /* Called when elements in the video branch of the pipeline call
-   * gst_pad_alloc_buffer(). Used to provide PlanarYCbCrImage backed GstBuffers
-   * to the pipeline so that a memory copy can be avoided when handling YUV
-   * buffers from the pipeline to the gfx side.
+  /* Called when the video part of the pipeline allocates buffers. Used to
+   * provide PlanarYCbCrImage backed GstBuffers to the pipeline so that a memory
+   * copy can be avoided when handling YUV buffers from the pipeline to the gfx
+   * side.
    */
+#if GST_VERSION_MAJOR == 1
+  static GstPadProbeReturn QueryProbeCb(GstPad *aPad, GstPadProbeInfo *aInfo, gpointer aUserData);
+  GstPadProbeReturn QueryProbe(GstPad *aPad, GstPadProbeInfo *aInfo, gpointer aUserData);
+#else
   static GstFlowReturn AllocateVideoBufferCb(GstPad* aPad, guint64 aOffset, guint aSize,
                                              GstCaps* aCaps, GstBuffer** aBuf);
   GstFlowReturn AllocateVideoBufferFull(GstPad* aPad, guint64 aOffset, guint aSize,
                                      GstCaps* aCaps, GstBuffer** aBuf, nsRefPtr<layers::PlanarYCbCrImage>& aImage);
   GstFlowReturn AllocateVideoBuffer(GstPad* aPad, guint64 aOffset, guint aSize,
                                      GstCaps* aCaps, GstBuffer** aBuf);
+#endif
+
 
   /* Called when the pipeline is prerolled, that is when at start or after a
    * seek, the first audio and video buffers are queued in the sinks.
@@ -123,8 +179,55 @@ private:
 
   /* Called at end of stream, when decoding has finished */
   static void EosCb(GstAppSink* aSink, gpointer aUserData);
-  void Eos();
+  /* Notifies that a sink will no longer receive any more data. If nullptr
+   * is passed to this, we'll assume all streams have reached EOS (for example
+   * an error has occurred). */
+  void Eos(GstAppSink* aSink = nullptr);
 
+  /* Called when an element is added inside playbin. We use it to find the
+   * decodebin instance.
+   */
+  static void PlayElementAddedCb(GstBin *aBin, GstElement *aElement,
+                                 gpointer *aUserData);
+
+  /* Called during decoding, to decide whether a (sub)stream should be decoded or
+   * ignored */
+  static bool ShouldAutoplugFactory(GstElementFactory* aFactory, GstCaps* aCaps);
+
+  /* Called by decodebin during autoplugging. We use it to apply our
+   * container/codec blacklist.
+   */
+  static GValueArray* AutoplugSortCb(GstElement* aElement,
+                                     GstPad* aPad, GstCaps* aCaps,
+                                     GValueArray* aFactories);
+
+  // Try to find MP3 headers in this stream using our MP3 frame parser.
+  nsresult ParseMP3Headers();
+
+  // Get the length of the stream, excluding any metadata we have ignored at the
+  // start of the stream: ID3 headers, for example.
+  int64_t GetDataLength();
+
+  // Use our own MP3 parser here, largely for consistency with other platforms.
+  MP3FrameParser mMP3FrameParser;
+
+  // The byte position in the stream where the actual media (ignoring, for
+  // example, ID3 tags) starts.
+  uint64_t mDataOffset;
+
+  // We want to be able to decide in |ReadMetadata| whether or not we use the
+  // duration from the MP3 frame parser, as this backend supports more than just
+  // MP3. But |NotifyDataArrived| can update the duration and is often called
+  // _before_ |ReadMetadata|. This flag stops the former from using the parser
+  // duration until we are sure we want to.
+  bool mUseParserDuration;
+  int64_t mLastParserDuration;
+
+#if GST_VERSION_MAJOR >= 1
+  GstAllocator *mAllocator;
+  GstBufferPool *mBufferPool;
+  GstVideoInfo mVideoInfo;
+#endif
   GstElement* mPlayBin;
   GstBus* mBus;
   GstAppSrc* mSource;
@@ -137,7 +240,7 @@ private:
   /* the actual audio app sink */
   GstAppSink* mAudioAppSink;
   GstVideoFormat mFormat;
-  nsIntRect mPicture;
+  IntRect mPicture;
   int mVideoSinkBufferCount;
   int mAudioSinkBufferCount;
   GstAppSrcCallbacks mSrcCallbacks;
@@ -154,11 +257,11 @@ private:
   /* bool used to signal when gst has detected the end of stream and
    * DecodeAudioData and DecodeVideoFrame should not expect any more data
    */
-  bool mReachedEos;
-  /* offset we've reached reading from the source */
-  gint64 mByteOffset;
-  /* the last offset we reported with NotifyBytesConsumed */
-  gint64 mLastReportedByteOffset;
+  bool mReachedAudioEos;
+  bool mReachedVideoEos;
+#if GST_VERSION_MAJOR >= 1
+  bool mConfigureAlignment;
+#endif
   int fpsNum;
   int fpsDen;
 };

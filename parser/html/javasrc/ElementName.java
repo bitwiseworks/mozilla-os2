@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2011 Mozilla Foundation
+ * Copyright (c) 2008-2014 Mozilla Foundation
  *
  * Permission is hereby granted, free of charge, to any person obtaining a 
  * copy of this software and associated documentation files (the "Software"), 
@@ -342,8 +342,10 @@ public final class ElementName
 //                return "IFRAME";
 //            case TreeBuilder.NOEMBED:
 //                return "NOEMBED";
-//            case TreeBuilder.EMBED_OR_IMG:
-//                return "EMBED_OR_IMG";
+//            case TreeBuilder.EMBED:
+//                return "EMBED";
+//            case TreeBuilder.IMG:
+//                return "IMG";
 //            case TreeBuilder.AREA_OR_WBR:
 //                return "AREA_OR_WBR";
 //            case TreeBuilder.DIV_OR_BLOCKQUOTE_OR_CENTER_OR_MENU:
@@ -356,8 +358,6 @@ public final class ElementName
 //                return "RUBY_OR_SPAN_OR_SUB_OR_SUP_OR_VAR";
 //            case TreeBuilder.RT_OR_RP:
 //                return "RT_OR_RP";
-//            case TreeBuilder.COMMAND:
-//                return "COMMAND";
 //            case TreeBuilder.PARAM_OR_SOURCE_OR_TRACK:
 //                return "PARAM_OR_SOURCE_OR_TRACK";
 //            case TreeBuilder.MGLYPH_OR_MALIGNMARK:
@@ -659,7 +659,6 @@ public final class ElementName
     public static final ElementName ACRONYM = new ElementName("acronym", "acronym", TreeBuilder.OTHER);
     public static final ElementName ADDRESS = new ElementName("address", "address", TreeBuilder.ADDRESS_OR_ARTICLE_OR_ASIDE_OR_DETAILS_OR_DIR_OR_FIGCAPTION_OR_FIGURE_OR_FOOTER_OR_HEADER_OR_HGROUP_OR_MAIN_OR_NAV_OR_SECTION_OR_SUMMARY | SPECIAL);
     public static final ElementName BGSOUND = new ElementName("bgsound", "bgsound", TreeBuilder.LINK_OR_BASEFONT_OR_BGSOUND | SPECIAL);
-    public static final ElementName COMMAND = new ElementName("command", "command", TreeBuilder.COMMAND | SPECIAL);
     public static final ElementName COMPOSE = new ElementName("compose", "compose", TreeBuilder.OTHER);
     public static final ElementName CEILING = new ElementName("ceiling", "ceiling", TreeBuilder.OTHER);
     public static final ElementName CSYMBOL = new ElementName("csymbol", "csymbol", TreeBuilder.OTHER);
@@ -726,7 +725,7 @@ public final class ElementName
     public static final ElementName QUOTIENT = new ElementName("quotient", "quotient", TreeBuilder.OTHER);
     public static final ElementName SELECTOR = new ElementName("selector", "selector", TreeBuilder.OTHER);
     public static final ElementName TEXTAREA = new ElementName("textarea", "textarea", TreeBuilder.TEXTAREA | SPECIAL);
-    public static final ElementName TEMPLATE = new ElementName("template", "template", TreeBuilder.TEMPLATE | SPECIAL);
+    public static final ElementName TEMPLATE = new ElementName("template", "template", TreeBuilder.TEMPLATE | SPECIAL | SCOPING);
     public static final ElementName TEXTPATH = new ElementName("textpath", "textPath", TreeBuilder.OTHER);
     public static final ElementName VARIANCE = new ElementName("variance", "variance", TreeBuilder.OTHER);
     public static final ElementName ANIMATION = new ElementName("animation", "animation", TreeBuilder.OTHER);
@@ -774,6 +773,7 @@ public final class ElementName
     public static final ElementName EXPONENTIALE = new ElementName("exponentiale", "exponentiale", TreeBuilder.OTHER);
     public static final ElementName FETURBULENCE = new ElementName("feturbulence", "feTurbulence", TreeBuilder.OTHER);
     public static final ElementName FEPOINTLIGHT = new ElementName("fepointlight", "fePointLight", TreeBuilder.OTHER);
+    public static final ElementName FEDROPSHADOW = new ElementName("fedropshadow", "feDropShadow", TreeBuilder.OTHER);
     public static final ElementName FEMORPHOLOGY = new ElementName("femorphology", "feMorphology", TreeBuilder.OTHER);
     public static final ElementName OUTERPRODUCT = new ElementName("outerproduct", "outerproduct", TreeBuilder.OTHER);
     public static final ElementName ANIMATEMOTION = new ElementName("animatemotion", "animateMotion", TreeBuilder.OTHER);
@@ -1054,7 +1054,6 @@ public final class ElementName
     ACRONYM,
     ADDRESS,
     BGSOUND,
-    COMMAND,
     COMPOSE,
     CEILING,
     CSYMBOL,
@@ -1169,6 +1168,7 @@ public final class ElementName
     EXPONENTIALE,
     FETURBULENCE,
     FEPOINTLIGHT,
+    FEDROPSHADOW,
     FEMORPHOLOGY,
     OUTERPRODUCT,
     ANIMATEMOTION,
@@ -1450,7 +1450,6 @@ public final class ElementName
     236381647,
     236571826,
     237124271,
-    238172205,
     238210544,
     238270764,
     238435405,
@@ -1565,6 +1564,7 @@ public final class ElementName
     408072233,
     409112005,
     409608425,
+    409713793,
     409771500,
     419040932,
     437730612,

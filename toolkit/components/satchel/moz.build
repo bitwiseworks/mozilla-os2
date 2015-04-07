@@ -4,7 +4,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['test']
+MOCHITEST_MANIFESTS += ['test/mochitest.ini']
+XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
+BROWSER_CHROME_MANIFESTS += ['test/browser/browser.ini']
 
 XPIDL_SOURCES += [
     'nsIFormAutoComplete.idl',
@@ -13,10 +15,14 @@ XPIDL_SOURCES += [
     'nsIInputListAutoComplete.idl',
 ]
 
-MODULE = 'satchel'
+XPIDL_MODULE = 'satchel'
 
-CPP_SOURCES += [
+SOURCES += [
     'nsFormFillController.cpp',
+]
+
+LOCAL_INCLUDES += [
+    '../build',
 ]
 
 EXTRA_COMPONENTS += [
@@ -30,5 +36,15 @@ EXTRA_PP_COMPONENTS += [
     'nsFormHistory.js',
 ]
 
-LIBRARY_NAME = 'satchel'
+EXTRA_JS_MODULES += [
+    'AutoCompleteE10S.jsm',
+    'nsFormAutoCompleteResult.jsm',
+]
 
+EXTRA_PP_JS_MODULES += [
+    'FormHistory.jsm',
+]
+
+FINAL_LIBRARY = 'xul'
+
+JAR_MANIFESTS += ['jar.mn']

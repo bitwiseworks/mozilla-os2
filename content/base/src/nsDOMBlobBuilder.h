@@ -29,7 +29,8 @@ public:
                      const nsAString& aName,
                      const nsAString& aContentType)
     : nsDOMFile(aName, aContentType, UINT64_MAX),
-      mBlobs(aBlobs)
+      mBlobs(aBlobs),
+      mIsFromNsiFile(false)
   {
   }
 
@@ -37,19 +38,22 @@ public:
   nsDOMMultipartFile(nsTArray<nsCOMPtr<nsIDOMBlob> >& aBlobs,
                      const nsAString& aContentType)
     : nsDOMFile(aContentType, UINT64_MAX),
-      mBlobs(aBlobs)
+      mBlobs(aBlobs),
+      mIsFromNsiFile(false)
   {
   }
 
   // Create as a file to be later initialized
   nsDOMMultipartFile(const nsAString& aName)
-    : nsDOMFile(aName, EmptyString(), UINT64_MAX)
+    : nsDOMFile(aName, EmptyString(), UINT64_MAX),
+      mIsFromNsiFile(false)
   {
   }
 
   // Create as a blob to be later initialized
   nsDOMMultipartFile()
-    : nsDOMFile(EmptyString(), UINT64_MAX)
+    : nsDOMFile(EmptyString(), UINT64_MAX),
+      mIsFromNsiFile(false)
   {
   }
 
@@ -69,6 +73,9 @@ public:
   nsresult InitFile(JSContext* aCx,
                     uint32_t aArgc,
                     JS::Value* aArgv);
+  nsresult InitChromeFile(JSContext* aCx,
+                          uint32_t aArgc,
+                          JS::Value* aArgv);
 
   already_AddRefed<nsIDOMBlob>
   CreateSlice(uint64_t aStart, uint64_t aLength, const nsAString& aContentType) MOZ_OVERRIDE;
@@ -96,8 +103,14 @@ public:
   virtual const nsTArray<nsCOMPtr<nsIDOMBlob> >*
   GetSubBlobs() const MOZ_OVERRIDE { return &mBlobs; }
 
+  NS_IMETHOD GetMozFullPathInternal(nsAString& aFullPath) MOZ_OVERRIDE;
+
 protected:
+  nsresult ParseBlobArrayArgument(JSContext* aCx, JS::Value& aValue,
+                                  bool aNativeEOL, UnwrapFuncPtr aUnwrapFunc);
+
   nsTArray<nsCOMPtr<nsIDOMBlob> > mBlobs;
+  bool mIsFromNsiFile;
 };
 
 class BlobSet {

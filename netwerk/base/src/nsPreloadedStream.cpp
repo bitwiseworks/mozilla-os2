@@ -7,15 +7,14 @@
 #include "nsIRunnable.h"
 
 #include "nsThreadUtils.h"
-#include "nsAlgorithm.h"
 #include <algorithm>
    
 namespace mozilla {
 namespace net {
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsPreloadedStream,
-                              nsIInputStream,
-                              nsIAsyncInputStream)
+NS_IMPL_ISUPPORTS(nsPreloadedStream,
+                  nsIInputStream,
+                  nsIAsyncInputStream)
 
 nsPreloadedStream::nsPreloadedStream(nsIAsyncInputStream *aStream,
                                      const char *data, uint32_t datalen)

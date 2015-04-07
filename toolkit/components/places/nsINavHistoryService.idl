@@ -23,7 +23,7 @@ interface nsINavHistoryQueryOptions;
 interface nsINavHistoryResult;
 interface nsINavHistoryBatchCallback;
 
-[scriptable, uuid(081452e5-be5c-4038-a5ea-f1f34cb6fd81)]
+[scriptable, uuid(91d104bb-17ef-404b-9f9a-d9ed8de6824c)]
 interface nsINavHistoryResultNode : nsISupports
 {
   /**
@@ -154,6 +154,19 @@ interface nsINavHistoryResultNode : nsISupports
    * for the uri represented by this node. Otherwise this is an empty string.
    */
   readonly attribute AString tags;
+
+  /**
+   * The unique ID associated with the page. It my return an empty string
+   * if the result node is a non-URI node.
+   */
+  readonly attribute ACString pageGuid;
+
+  /**
+   * The unique ID associated with the bookmark. It returns an empty string
+   * if the result node is not associated with a bookmark, a folder or a
+   * separator.
+   */
+  readonly attribute ACString bookmarkGuid;
 };
 
 
@@ -162,7 +175,7 @@ interface nsINavHistoryResultNode : nsISupports
  * Bookmark folders and places queries will be QueryResultNodes which extends
  * these items.
  */
-[scriptable, uuid(62534d3c-1b3f-401e-b3ba-b911f57f8a29)]
+[scriptable, uuid(5bac9734-c0ff-44eb-8d19-da88462ff6da)]
 interface nsINavHistoryContainerResultNode : nsINavHistoryResultNode
 {
 
@@ -262,7 +275,7 @@ interface nsINavHistoryContainerResultNode : nsINavHistoryResultNode
  * generated this node, this item will report it has no children and never try
  * to populate itself.
  */
-[scriptable, uuid(ea17745a-1852-4155-a98f-d1dd1763b3df)]
+[scriptable, uuid(a4144c3e-8125-46d5-a719-831bec8095f4)]
 interface nsINavHistoryQueryResultNode : nsINavHistoryContainerResultNode
 {
   /**
@@ -597,7 +610,7 @@ interface nsINavHistoryResult : nsISupports
  * DANGER! If you are in the middle of a batch transaction, there may be a
  * database transaction active. You can still access the DB, but be careful.
  */
-[scriptable, uuid(45e2970b-9b00-4473-9938-39d6beaf4248)]
+[scriptable, uuid(0f0f45b0-13a1-44ae-a0ab-c6046ec6d4da)]
 interface nsINavHistoryObserver : nsISupports
 {
   /**
@@ -661,6 +674,37 @@ interface nsINavHistoryObserver : nsISupports
   void onTitleChanged(in nsIURI aURI,
                       in AString aPageTitle,
                       in ACString aGUID);
+
+  /**
+   * Called when an individual page's frecency has changed.
+   *
+   * This is not called for pages whose frecencies change as the result of some
+   * large operation where some large or unknown number of frecencies change at
+   * once.  Use onManyFrecenciesChanged to detect such changes.
+   *
+   * @param aURI
+   *        The page's URI.
+   * @param aNewFrecency
+   *        The page's new frecency.
+   * @param aGUID
+   *        The page's GUID.
+   * @param aHidden
+   *        True if the page is marked as hidden.
+   * @param aVisitDate
+   *        The page's last visit date.
+   */
+  void onFrecencyChanged(in nsIURI aURI,
+                         in long aNewFrecency,
+                         in ACString aGUID,
+                         in boolean aHidden,
+                         in PRTime aVisitDate);
+
+  /**
+   * Called when the frecencies of many pages have changed at once.
+   *
+   * onFrecencyChanged is not called for each of those pages.
+   */
+  void onManyFrecenciesChanged();
 
   /**
    * Removed by the user.

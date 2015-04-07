@@ -7,6 +7,7 @@
 #include "Hal.h"
 #include "mozilla/AppProcessChecker.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/hal_sandbox/PHalChild.h"
 #include "mozilla/hal_sandbox/PHalParent.h"
 #include "mozilla/dom/TabParent.h"
@@ -52,7 +53,7 @@ Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier &id)
 
   WindowIdentifier newID(id);
   newID.AppendProcessID();
-  Hal()->SendVibrate(p, newID.AsArray(), GetTabChildFrom(newID.GetWindow()));
+  Hal()->SendVibrate(p, newID.AsArray(), TabChild::GetFrom(newID.GetWindow()));
 }
 
 void
@@ -62,7 +63,7 @@ CancelVibrate(const WindowIdentifier &id)
 
   WindowIdentifier newID(id);
   newID.AppendProcessID();
-  Hal()->SendCancelVibrate(newID.AsArray(), GetTabChildFrom(newID.GetWindow()));
+  Hal()->SendCancelVibrate(newID.AsArray(), TabChild::GetFrom(newID.GetWindow()));
 }
 
 void
@@ -211,6 +212,14 @@ GetTimezone()
   return timezone;
 }
 
+int32_t
+GetTimezoneOffset()
+{
+  int32_t timezoneOffset;
+  Hal()->SendGetTimezoneOffset(&timezoneOffset);
+  return timezoneOffset;
+}
+
 void
 EnableSystemClockChangeNotifications()
 {
@@ -318,6 +327,12 @@ GetCurrentSwitchState(SwitchDevice aDevice)
   return state;
 }
 
+void
+NotifySwitchStateFromInputDevice(SwitchDevice aDevice, SwitchState aState)
+{
+  Hal()->SendNotifySwitchStateFromInputDevice(aDevice, aState);
+}
+
 bool
 EnableAlarm()
 {
@@ -341,7 +356,8 @@ SetAlarm(int32_t aSeconds, int32_t aNanoseconds)
 void
 SetProcessPriority(int aPid,
                    ProcessPriority aPriority,
-                   ProcessCPUPriority aCPUPriority)
+                   ProcessCPUPriority aCPUPriority,
+                   uint32_t aBackgroundLRU)
 {
   NS_RUNTIMEABORT("Only the main process may set processes' priorities.");
 }
@@ -683,6 +699,16 @@ public:
   }
 
   virtual bool
+  RecvGetTimezoneOffset(int32_t *aTimezoneOffset) MOZ_OVERRIDE
+  {
+    if (!AssertAppProcessPermission(this, "time")) {
+      return false;
+    }
+    *aTimezoneOffset = hal::GetTimezoneOffset();
+    return true;
+  }
+
+  virtual bool
   RecvEnableSystemClockChangeNotifications() MOZ_OVERRIDE
   {
     hal::RegisterSystemClockChangeObserver(this);
@@ -796,6 +822,14 @@ public:
     return true;
   }
 
+  virtual bool
+  RecvNotifySwitchStateFromInputDevice(const SwitchDevice& aDevice,
+                                       const SwitchState& aState) MOZ_OVERRIDE
+  {
+    hal::NotifySwitchStateFromInputDevice(aDevice, aState);
+    return true;
+  }
+
   void Notify(const int64_t& aClockDeltaMS)
   {
     unused << SendNotifySystemClockChange(aClockDeltaMS);
@@ -814,6 +848,18 @@ public:
     }
     hal::FactoryReset();
     return true;
+  }
+
+  virtual mozilla::ipc::IProtocol*
+  CloneProtocol(Channel* aChannel,
+                mozilla::ipc::ProtocolCloneContext* aCtx) MOZ_OVERRIDE
+  {
+    ContentParent* contentParent = aCtx->GetContentParent();
+    nsAutoPtr<PHalParent> actor(contentParent->AllocPHalParent());
+    if (!actor || !contentParent->RecvPHalConstructor(actor)) {
+      return nullptr;
+    }
+    return actor.forget();
   }
 };
 

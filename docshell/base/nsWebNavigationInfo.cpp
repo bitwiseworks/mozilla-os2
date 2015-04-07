@@ -5,14 +5,14 @@
 
 #include "nsWebNavigationInfo.h"
 #include "nsIWebNavigation.h"
-#include "nsString.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIDocumentLoaderFactory.h"
 #include "nsIPluginHost.h"
+#include "nsIDocShell.h"
 #include "nsContentUtils.h"
 #include "imgLoader.h"
 
-NS_IMPL_ISUPPORTS1(nsWebNavigationInfo, nsIWebNavigationInfo)
+NS_IMPL_ISUPPORTS(nsWebNavigationInfo, nsIWebNavigationInfo)
 
 #define CONTENT_DLF_CONTRACT "@mozilla.org/content/document-loader-factory;1"
 #define PLUGIN_DLF_CONTRACT \
@@ -50,7 +50,15 @@ nsWebNavigationInfo::IsTypeSupported(const nsACString& aType,
   if (*aIsTypeSupported) {
     return rv;
   }
-  
+
+  // If this request is for a docShell that isn't going to allow plugins,
+  // there's no need to try and find a plugin to handle it.
+  nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(aWebNav));
+  bool allowed;
+  if (docShell && NS_SUCCEEDED(docShell->GetAllowPlugins(&allowed)) && !allowed) {
+    return NS_OK;
+  }
+
   // Try reloading plugins in case they've changed.
   nsCOMPtr<nsIPluginHost> pluginHost =
     do_GetService(MOZ_PLUGIN_HOST_CONTRACTID);

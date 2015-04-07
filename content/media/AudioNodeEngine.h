@@ -8,13 +8,15 @@
 
 #include "AudioSegment.h"
 #include "mozilla/dom/AudioNode.h"
-#include "mozilla/dom/AudioParam.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Mutex.h"
 
 namespace mozilla {
 
 namespace dom {
 struct ThreeDPoint;
+class AudioParamTimeline;
+class DelayNodeEngine;
 }
 
 class AudioNodeStream;
@@ -42,6 +44,12 @@ public:
       mSampleData = nullptr;
     }
     ~Storage() { free(mDataToFree); }
+    size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+    {
+      // NB: mSampleData might not be owned, if it is it just points to
+      //     mDataToFree.
+      return aMallocSizeOf(mDataToFree);
+    }
     void* mDataToFree;
     const float* mSampleData;
   };
@@ -72,6 +80,17 @@ public:
    */
   void Clear() { mContents.Clear(); }
 
+  virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    size_t amount = ThreadSharedObject::SizeOfExcludingThis(aMallocSizeOf);
+    amount += mContents.SizeOfExcludingThis(aMallocSizeOf);
+    for (size_t i = 0; i < mContents.Length(); i++) {
+      amount += mContents[i].SizeOfExcludingThis(aMallocSizeOf);
+    }
+
+    return amount;
+  }
+
 private:
   AutoFallibleTArray<Storage,2> mContents;
 };
@@ -86,6 +105,14 @@ void AllocateAudioBlock(uint32_t aChannelCount, AudioChunk* aChunk);
  * aChunk must have been allocated by AllocateAudioBlock.
  */
 void WriteZeroesToAudioBlock(AudioChunk* aChunk, uint32_t aStart, uint32_t aLength);
+
+/**
+ * Copy with scale. aScale == 1.0f should be optimized.
+ */
+void AudioBufferCopyWithScale(const float* aInput,
+                              float aScale,
+                              float* aOutput,
+                              uint32_t aSize);
 
 /**
  * Pointwise multiply-add operation. aScale == 1.0f should be optimized.
@@ -127,17 +154,20 @@ void BufferComplexMultiply(const float* aInput,
                            uint32_t aSize);
 
 /**
+ * Vector maximum element magnitude ( max(abs(aInput)) ).
+ */
+float AudioBufferPeakValue(const float* aInput, uint32_t aSize);
+
+/**
  * In place gain. aScale == 1.0f should be optimized.
  */
-void AudioBufferInPlaceScale(float aBlock[WEBAUDIO_BLOCK_SIZE],
-                             uint32_t aChannelCount,
-                             float aScale);
+void AudioBlockInPlaceScale(float aBlock[WEBAUDIO_BLOCK_SIZE],
+                            float aScale);
 
 /**
  * In place gain. aScale == 1.0f should be optimized.
  */
 void AudioBufferInPlaceScale(float* aBlock,
-                             uint32_t aChannelCount,
                              float aScale,
                              uint32_t aSize);
 
@@ -193,6 +223,8 @@ public:
     MOZ_COUNT_DTOR(AudioNodeEngine);
   }
 
+  virtual dom::DelayNodeEngine* AsDelayNodeEngine() { return nullptr; }
+
   virtual void SetStreamTimeParameter(uint32_t aIndex, TrackTicks aParam)
   {
     NS_ERROR("Invalid SetStreamTimeParameter index");
@@ -235,20 +267,29 @@ public:
    * *aFinished is set to false by the caller. If the callee sets it to true,
    * we'll finish the stream and not call this again.
    */
-  virtual void ProduceAudioBlock(AudioNodeStream* aStream,
-                                 const AudioChunk& aInput,
-                                 AudioChunk* aOutput,
-                                 bool* aFinished)
+  virtual void ProcessBlock(AudioNodeStream* aStream,
+                            const AudioChunk& aInput,
+                            AudioChunk* aOutput,
+                            bool* aFinished)
   {
     MOZ_ASSERT(mInputCount <= 1 && mOutputCount <= 1);
     *aOutput = aInput;
+  }
+  /**
+   * Produce the next block of audio samples, before input is provided.
+   * ProcessBlock() will be called later, and it then should not change
+   * aOutput.  This is used only for DelayNodeEngine in a feedback loop.
+   */
+  virtual void ProduceBlockBeforeInput(AudioChunk* aOutput)
+  {
+    NS_NOTREACHED("ProduceBlockBeforeInput called on wrong engine\n");
   }
 
   /**
    * Produce the next block of audio samples, given input samples in the aInput
    * array.  There is one input sample per active port in aInput, in order.
-   * This is the multi-input/output version of ProduceAudioBlock.  Only one kind
-   * of ProduceAudioBlock is called on each node, depending on whether the
+   * This is the multi-input/output version of ProcessBlock.  Only one kind
+   * of ProcessBlock is called on each node, depending on whether the
    * number of inputs and outputs are both 1 or not.
    *
    * aInput is always guaranteed to not contain more input AudioChunks than the
@@ -259,10 +300,10 @@ public:
    * corresponding AudioNode, in which case it will be interpreted as a channel
    * of silence.
    */
-  virtual void ProduceAudioBlocksOnPorts(AudioNodeStream* aStream,
-                                         const OutputChunks& aInput,
-                                         OutputChunks& aOutput,
-                                         bool* aFinished)
+  virtual void ProcessBlocksOnPorts(AudioNodeStream* aStream,
+                                    const OutputChunks& aInput,
+                                    OutputChunks& aOutput,
+                                    bool* aFinished)
   {
     MOZ_ASSERT(mInputCount > 1 || mOutputCount > 1);
     // Only produce one output port, and drop all other input ports.
@@ -298,6 +339,25 @@ public:
 
   uint16_t InputCount() const { return mInputCount; }
   uint16_t OutputCount() const { return mOutputCount; }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    // NB: |mNode| is tracked separately so it is excluded here.
+    return 0;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
+  void SizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
+                           AudioNodeSizes& aUsage) const
+  {
+    aUsage.mEngine = SizeOfIncludingThis(aMallocSizeOf);
+    aUsage.mDomNode = mNode->SizeOfIncludingThis(aMallocSizeOf);
+    aUsage.mNodeType = mNode->NodeType();
+  }
 
 private:
   dom::AudioNode* mNode;

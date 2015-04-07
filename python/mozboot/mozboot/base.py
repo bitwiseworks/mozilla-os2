@@ -61,7 +61,14 @@ this shell. Try creating a new shell and run this bootstrapper again.
 
 If this continues to fail and you are sure you have a modern Python on your
 system, ensure it is on the $PATH and try again. If that fails, you'll need to
-install Python manually. See http://www.python.org/.
+install Python manually and ensure the path with the python binary is listed in
+the $PATH environment variable.
+
+We recommend the following tools for installing Python:
+
+    pyenv   -- https://github.com/yyuu/pyenv)
+    pythonz -- https://github.com/saghul/pythonz
+    official installers -- http://www.python.org/
 '''
 
 
@@ -96,7 +103,10 @@ class BaseBootstrapper(object):
 
     def run_as_root(self, command):
         if os.geteuid() != 0:
-            command.insert(0, 'sudo')
+            if self.which('sudo'):
+                command.insert(0, 'sudo')
+            else:
+                command = ['su', 'root', '-c', ' '.join(command)]
 
         print('Executing as root:', subprocess.list2cmdline(command))
 
@@ -123,6 +133,17 @@ class BaseBootstrapper(object):
     def apt_install(self, *packages):
         command = ['apt-get', 'install']
         command.extend(packages)
+
+        self.run_as_root(command)
+
+    def apt_update(self):
+        command = ['apt-get', 'update']
+
+        self.run_as_root(command)
+
+    def apt_add_architecture(self, arch):
+        command = ['dpkg', '--add-architecture']
+        command.extend(arch)
 
         self.run_as_root(command)
 
@@ -179,15 +200,26 @@ class BaseBootstrapper(object):
         This should be defined in child classes.
         """
 
+    def _hgplain_env(self):
+        """ Returns a copy of the current environment updated with the HGPLAIN
+        environment variable.
+
+        HGPLAIN prevents Mercurial from applying locale variations to the output
+        making it suitable for use in scripts.
+        """
+        env = os.environ.copy()
+        env['HGPLAIN'] = '1'
+        return env
+
     def is_mercurial_modern(self):
         hg = self.which('hg')
         if not hg:
             print(NO_MERCURIAL)
             return False, False, None
 
-        info = self.check_output([hg, '--version']).splitlines()[0]
+        info = self.check_output([hg, '--version'], env=self._hgplain_env()).splitlines()[0]
 
-        match = re.search('version ([^\)]+)', info)
+        match = re.search('version ([^\+\)]+)', info)
         if not match:
             print('ERROR: Unable to identify Mercurial version.')
             return True, False, None
@@ -247,6 +279,9 @@ class BaseBootstrapper(object):
             print('Your version of Python (%s) is new enough.' % version)
             return
 
+        print('Your version of Python (%s) is too old. Will try to upgrade.' %
+            version)
+
         self._ensure_package_manager_updated()
         self.upgrade_python(version)
 
@@ -254,6 +289,7 @@ class BaseBootstrapper(object):
 
         if not modern:
             print(PYTHON_UPGRADE_FAILED % (MODERN_PYTHON_VERSION, after))
+            sys.exit(1)
 
     def upgrade_python(self, current):
         """Upgrade Python.

@@ -14,6 +14,8 @@
   display: block;
   unicode-bidi: inherit;
   text-overflow: inherit;
+  overflow: inherit;
+  padding: inherit;
   height: 100%;   /* Need this so percentage heights of kids work right */
 }
 
@@ -51,13 +53,13 @@ input {
   /* The sum of border-top, border-bottom, padding-top, padding-bottom
      must be the same here, for buttons, and for <select> (including its
      internal padding magic) */
-  padding: 1px 0 1px 0;
+  padding: 1px;
   border: 2px inset ThreeDFace;
   background-color: -moz-Field;
   color: -moz-FieldText;
   font: -moz-field;
   text-rendering: optimizeLegibility;
-  line-height: normal !important;
+  line-height: normal;
   text-align: start;
   text-transform: none;
   word-spacing: normal;
@@ -67,6 +69,7 @@ input {
   text-indent: 0;
   -moz-user-select: text;
   text-shadow: none;
+  overflow-clip-box: content-box;
 }
 
 input > .anonymous-div,
@@ -84,9 +87,8 @@ input::-moz-placeholder {
 
   /* Make sure that the location bar's alignment in RTL mode changes according
      to the input box direction if the user switches the text direction using
-     cmd_switchTextDirection (which applies a dir attribute to the input box's
-     anonymous div). */
-  input.uri-element-right-align:-moz-locale-dir(rtl) > .anonymous-div[dir=ltr] {
+     cmd_switchTextDirection (which applies a dir attribute to the <input>). */
+  input.uri-element-right-align[dir=ltr]:-moz-locale-dir(rtl) {
     text-align: left !important;
   }
 }
@@ -94,6 +96,8 @@ input::-moz-placeholder {
 textarea {
   margin: 1px 0 1px 0;
   border: 2px inset ThreeDFace;
+  /* The 1px horizontal padding is for parity with Win/IE */
+  padding: 0px 1px;
   background-color: -moz-Field;
   color: -moz-FieldText;
   font: medium -moz-fixed;
@@ -111,6 +115,7 @@ textarea {
   -moz-user-select: text;
   text-shadow: none;
   word-wrap: break-word;
+  overflow-clip-box: content-box;
 }
 
 textarea > scrollbar {
@@ -124,12 +129,7 @@ textarea::-moz-placeholder {
   white-space: pre;
   overflow: auto;
   border: 0px !important;
-  /*
-   * The 1px horizontal padding is for parity with Win/IE.
-   * We need to mark it !important to make sure it can't be changed on the
-   * placeholder.
-   */
-  padding: 0px 1px !important;
+  padding: inherit !important;
   margin: 0px;
   text-decoration: inherit;
   -moz-text-decoration-color: inherit;
@@ -137,6 +137,8 @@ textarea::-moz-placeholder {
   display: inline-block;
   ime-mode: inherit;
   resize: inherit;
+  -moz-control-character-visibility: visible;
+  overflow-clip-box: inherit;
 }
 
 textarea > .anonymous-div.wrap,
@@ -197,7 +199,7 @@ select {
   word-wrap: normal !important;
   text-align: start; 
   cursor: default;
-  -moz-box-sizing: border-box;
+  box-sizing: border-box;
   -moz-user-select: none;
   -moz-appearance: menulist;
   border-width: 2px;
@@ -207,6 +209,8 @@ select {
   text-shadow: none;
   /* No text-decoration reaching inside, by default */
   display: inline-block;
+  page-break-inside: avoid;
+  overflow-clip-box: padding-box !important; /* bug 992447 */
 }
 
 /* Need the "select[size][multiple]" selector to override the settings on
@@ -245,7 +249,7 @@ select > button {
 
   /* Make sure to size correctly if the combobox has a non-auto height. */
   height: 100% ! important;
-  -moz-box-sizing: border-box ! important;
+  box-sizing: border-box ! important;
 
   /*
     Make sure to align properly with the display frame.  Note that we
@@ -277,7 +281,8 @@ select:empty {
   -moz-user-select: none;
   /* Make sure to size correctly if the combobox has a non-auto height. */
   height: 100% ! important;
-  -moz-box-sizing: border-box ! important;
+  box-sizing: border-box ! important;
+  line-height: -moz-block-height;
 }
 
 option {
@@ -367,8 +372,8 @@ select:disabled:disabled /* Need the pseudo-class twice to have the specificity
   cursor: inherit;
 }
 
-input:disabled > .anonymous-div,
-textarea:disabled > .anonymous-div {
+input:disabled,
+textarea:disabled {
   cursor: default;
 }
 
@@ -414,6 +419,7 @@ input[type="file"] {
   display: inline-block;
   white-space: nowrap;
   overflow: hidden;
+  overflow-clip-box: padding-box;
   color: inherit;
 
   /* Revert rules which apply on all inputs. */
@@ -449,6 +455,19 @@ input[type="file"] > button[type="button"] {
   cursor: inherit;
 }
 
+/* colored part of the color selector button */
+input[type="color"]:-moz-system-metric(color-picker-available)::-moz-color-swatch {
+  width: 100%;
+  height: 100%;
+  min-width: 3px;
+  min-height: 3px;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+  border: 1px solid grey;
+  display: block;
+}
+
 /* Try to make RTL <input type='file'> look nicer. */
 /* TODO: use text-align: match-parent when bug 645642 is fixed. */
 input[type="file"]:-moz-dir(rtl) > xul|label {
@@ -480,7 +499,7 @@ input[type="checkbox"] {
    (Should we maybe set !important on width and height, then?)  */
 input[type="radio"],
 input[type="checkbox"] {
-  -moz-box-sizing: border-box;
+  box-sizing: border-box;
   width: 13px;
   height: 13px;
   cursor: default;
@@ -524,10 +543,13 @@ input[type="radio"]:hover:active {
 /* Note: Values in nsNativeTheme IsWidgetStyled function 
    need to match button background/border values here */
 
-button, 
+/* Non text-related properties for buttons: these ones are shared with
+   input[type="color"] */
+button,
+input[type="color"]:-moz-system-metric(color-picker-available),
 input[type="reset"],
 input[type="button"],
-input[type="submit"] { 
+input[type="submit"] {
   -moz-appearance: button;
   /* The sum of border-top, border-bottom, padding-top, padding-bottom
      must be the same here, for text inputs, and for <select>.  For
@@ -535,16 +557,30 @@ input[type="submit"] {
   padding: 0px 6px 0px 6px;
   border: 2px outset ButtonFace;
   background-color: ButtonFace;
+  cursor: default;
+  box-sizing: border-box;
+  -moz-user-select: none;
+  -moz-binding: none;
+}
+
+/* Text-related properties for buttons: these ones are not shared with
+   input[type="color"] */
+button,
+input[type="reset"],
+input[type="button"],
+input[type="submit"] {
   color: ButtonText; 
   font: -moz-button;
   line-height: normal;
   white-space: pre;
-  cursor: default;
-  -moz-box-sizing: border-box;
-  -moz-user-select: none;
-  -moz-binding: none;
   text-align: center;
   text-shadow: none;
+  overflow-clip-box: padding-box;
+}
+
+input[type="color"]:-moz-system-metric(color-picker-available) {
+  width: 64px;
+  height: 23px;
 }
 
 button {
@@ -560,24 +596,39 @@ button {
 }
 
 button:hover,
+input[type="color"]:-moz-system-metric(color-picker-available):hover,
 input[type="reset"]:hover,
 input[type="button"]:hover,
 input[type="submit"]:hover {
   background-color: -moz-buttonhoverface;
+}
+
+button:hover,
+input[type="reset"]:hover,
+input[type="button"]:hover,
+input[type="submit"]:hover {
   color: -moz-buttonhovertext;
 }
 
 button:active:hover,
+input[type="color"]:-moz-system-metric(color-picker-available):active:hover,
 input[type="reset"]:active:hover,
 input[type="button"]:active:hover,
 input[type="submit"]:active:hover {
   padding: 0px 5px 0px 7px;
   border-style: inset;
   background-color: ButtonFace;
+}
+
+button:active:hover,
+input[type="reset"]:active:hover,
+input[type="button"]:active:hover,
+input[type="submit"]:active:hover {
   color: ButtonText;
 }
 
 button::-moz-focus-inner,
+input[type="color"]:-moz-system-metric(color-picker-available)::-moz-focus-inner,
 input[type="reset"]::-moz-focus-inner,
 input[type="button"]::-moz-focus-inner,
 input[type="submit"]::-moz-focus-inner,
@@ -587,6 +638,7 @@ input[type="file"] > button[type="button"]::-moz-focus-inner {
 }
 
 button:-moz-focusring::-moz-focus-inner,
+input[type="color"]:-moz-system-metric(color-picker-available):-moz-focusring::-moz-focus-inner,
 input[type="reset"]:-moz-focusring::-moz-focus-inner,
 input[type="button"]:-moz-focusring::-moz-focus-inner,
 input[type="submit"]:-moz-focusring::-moz-focus-inner,
@@ -595,6 +647,8 @@ input[type="file"] > button[type="button"]:-moz-focusring::-moz-focus-inner {
 }
 
 button:disabled:active, button:disabled,
+input[type="color"]:-moz-system-metric(color-picker-available):disabled:active,
+input[type="color"]:-moz-system-metric(color-picker-available):disabled,
 input[type="reset"]:disabled:active,
 input[type="reset"]:disabled,
 input[type="button"]:disabled:active,
@@ -607,8 +661,19 @@ input[type="submit"]:disabled {
      must be the same here and for text inputs */
   padding: 0px 6px 0px 6px;
   border: 2px outset ButtonFace;
-  color: GrayText;
   cursor: inherit; 
+}
+
+button:disabled:active, button:disabled,
+input[type="reset"]:disabled:active,
+input[type="reset"]:disabled,
+input[type="button"]:disabled:active,
+input[type="button"]:disabled,
+select:disabled > button,
+select:disabled > button,
+input[type="submit"]:disabled:active,
+input[type="submit"]:disabled {
+  color: GrayText;
 }
 
  /*
@@ -684,7 +749,7 @@ progress {
   float: none ! important;
   position: static ! important;
   overflow: visible ! important;
-  -moz-box-sizing: border-box ! important;
+  box-sizing: border-box ! important;
 
   -moz-appearance: progresschunk;
   height: 100%;
@@ -745,6 +810,16 @@ input[type=range] {
 input[type=range][orient=vertical] {
   width: 1.3em;
   height: 12em;
+}
+
+/**
+ * Ideally we'd also require :-moz-focusring here, but that doesn't currently
+ * work. Instead we only use the -moz-focus-outer border style if
+ * NS_EVENT_STATE_FOCUSRING is set (the check is in
+ * nsRangeFrame::BuildDisplayList).
+ */
+input[type=range]::-moz-focus-outer {
+  border: 1px dotted black;
 }
 
 /**
@@ -826,23 +901,80 @@ input[type=range]::-moz-range-thumb {
   -moz-user-select: none ! important;
 }
 
-%ifdef XP_OS2
-input {
-  font: medium serif; font-family: inherit
+/* As a temporary workaround until bug 677302 the rule for input[type=number]
+ * has moved to number-control.css
+ */
+
+input[type=number]::-moz-number-wrapper {
+  /* Prevent styling that would change the type of frame we construct. */
+  display: flex;
+  float: none !important;
+  position: static !important;
+  height: 100%;
 }
 
-select {
-  font: medium serif; font-family: inherit
+input[type=number]::-moz-number-text {
+  -moz-appearance: none;
+  /* work around autofocus bug 939248 on initial load */
+  -moz-user-modify: read-write;
+  /* This pseudo-element is also an 'input' element (nested inside and
+   * distinct from the <input type=number> element) so we need to prevent the
+   * explicit setting of 'text-align' by the general CSS rule for 'input'
+   * above. We want to inherit its value from its <input type=number>
+   * ancestor, not have that general CSS rule reset it.
+   */
+  text-align: inherit;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  margin: 0;
 }
 
-optgroup {
-  font: medium serif; font-family: inherit
-}
-
-input[type="reset"],
-input[type="button"],
-input[type="submit"] { 
-  font: medium serif; font-family: inherit
-}
-
+input[type=number]::-moz-number-spin-box {
+  display: flex;
+  flex-direction: column;
+%ifdef XP_WIN
+  /* The Window's Theme's spin buttons have a very narrow minimum width, so
+   * make it something reasonable:
+   */
+  width: 16px;
 %endif
+  height: 0;
+  align-self: center;
+  justify-content: center;
+}
+
+input[type=number]::-moz-number-spin-up {
+  -moz-appearance: spinner-upbutton;
+  display: block; /* bug 926670 */
+  flex: none;
+  cursor: default;
+  /* Style for when native theming is off: */
+  background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="6" height="5"><path d="M1,4 L3,0 5,4" fill="dimgrey"/></svg>');
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  border: 1px solid darkgray;
+  border-bottom: none;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+}
+
+input[type=number]::-moz-number-spin-down {
+  -moz-appearance: spinner-downbutton;
+  display: block; /* bug 926670 */
+  flex: none;
+  cursor: default;
+  /* Style for when native theming is off: */
+  background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="6" height="5"><path d="M1,1 L3,5 5,1" fill="dimgrey"/></svg>');
+  background-repeat: no-repeat;
+  background-position: center top;
+  border: 1px solid darkgray;
+  border-top: none;
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+input[type="number"] > div > div > div:hover {
+  /* give some indication of hover state for the up/down buttons */
+  background-color: lightblue;
+}

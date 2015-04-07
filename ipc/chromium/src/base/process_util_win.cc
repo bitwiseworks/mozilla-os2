@@ -19,6 +19,8 @@
 #include "base/scoped_ptr.h"
 #include "base/win_util.h"
 
+#include <algorithm>
+
 namespace {
 
 // System pagesize. This value remains constant on x86/64 architectures.
@@ -97,7 +99,11 @@ bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle) {
 }
 
 void CloseProcessHandle(ProcessHandle process) {
-  CloseHandle(process);
+  // closing a handle twice on Windows can be catastrophic - after the first
+  // close the handle value may be reused, so the second close will kill that
+  // other new handle.
+  BOOL ok = CloseHandle(process);
+  DCHECK(ok);
 }
 
 // Helper for GetProcId()
@@ -353,97 +359,6 @@ bool LaunchApp(const CommandLine& cl,
                    start_hidden, process_handle);
 }
 
-// Attempts to kill the process identified by the given process
-// entry structure, giving it the specified exit code.
-// Returns true if this is successful, false otherwise.
-bool KillProcessById(ProcessId process_id, int exit_code, bool wait) {
-  HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE,
-                               FALSE,  // Don't inherit handle
-                               process_id);
-  if (!process)
-    return false;
-
-  bool ret = KillProcess(process, exit_code, wait);
-  CloseHandle(process);
-  return ret;
-}
-
-bool GetAppOutput(const std::wstring& cmd_line, std::string* output) {
-  if (!output) {
-    NOTREACHED();
-    return false;
-  }
-
-  HANDLE out_read = NULL;
-  HANDLE out_write = NULL;
-
-  SECURITY_ATTRIBUTES sa_attr;
-  // Set the bInheritHandle flag so pipe handles are inherited.
-  sa_attr.nLength = sizeof(SECURITY_ATTRIBUTES);
-  sa_attr.bInheritHandle = TRUE;
-  sa_attr.lpSecurityDescriptor = NULL;
-
-  // Create the pipe for the child process's STDOUT.
-  if (!CreatePipe(&out_read, &out_write, &sa_attr, 0)) {
-    NOTREACHED() << "Failed to create pipe";
-    return false;
-  }
-
-  // Ensure we don't leak the handles.
-  ScopedHandle scoped_out_read(out_read);
-  ScopedHandle scoped_out_write(out_write);
-
-  // Ensure the read handle to the pipe for STDOUT is not inherited.
-  if (!SetHandleInformation(out_read, HANDLE_FLAG_INHERIT, 0)) {
-    NOTREACHED() << "Failed to disabled pipe inheritance";
-    return false;
-  }
-
-  // Now create the child process
-  PROCESS_INFORMATION proc_info = { 0 };
-  STARTUPINFO start_info = { 0 };
-
-  start_info.cb = sizeof(STARTUPINFO);
-  start_info.hStdOutput = out_write;
-  // Keep the normal stdin and stderr.
-  start_info.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-  start_info.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-  start_info.dwFlags |= STARTF_USESTDHANDLES;
-
-  // Create the child process.
-  if (!CreateProcess(NULL, const_cast<wchar_t*>(cmd_line.c_str()), NULL, NULL,
-                     TRUE,  // Handles are inherited.
-                     0, NULL, NULL, &start_info, &proc_info)) {
-    NOTREACHED() << "Failed to start process";
-    return false;
-  }
-
-  // We don't need the thread handle, close it now.
-  CloseHandle(proc_info.hThread);
-
-  // Close our writing end of pipe now. Otherwise later read would not be able
-  // to detect end of child's output.
-  scoped_out_write.Close();
-
-  // Read output from the child process's pipe for STDOUT
-  const int kBufferSize = 1024;
-  char buffer[kBufferSize];
-
-  for (;;) {
-    DWORD bytes_read = 0;
-    BOOL success = ReadFile(out_read, buffer, kBufferSize, &bytes_read, NULL);
-    if (!success || bytes_read == 0)
-      break;
-    output->append(buffer, bytes_read);
-  }
-
-  // Let's wait for the process to finish.
-  WaitForSingleObject(proc_info.hProcess, INFINITE);
-  CloseHandle(proc_info.hProcess);
-
-  return true;
-}
-
 bool KillProcess(ProcessHandle process, int exit_code, bool wait) {
   bool result = (TerminateProcess(process, exit_code) != FALSE);
   if (result && wait) {
@@ -484,19 +399,6 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
     return false;
   }
 
-  return true;
-}
-
-bool WaitForExitCode(ProcessHandle handle, int* exit_code) {
-  ScopedHandle closer(handle);  // Ensure that we always close the handle.
-  if (::WaitForSingleObject(handle, INFINITE) != WAIT_OBJECT_0) {
-    NOTREACHED();
-    return false;
-  }
-  DWORD temp_code;  // Don't clobber out-parameters in case of failure.
-  if (!::GetExitCodeProcess(handle, &temp_code))
-    return false;
-  *exit_code = temp_code;
   return true;
 }
 
@@ -552,75 +454,6 @@ void NamedProcessIterator::InitProcessEntry(ProcessEntry* entry) {
   entry->dwSize = sizeof(*entry);
 }
 
-int GetProcessCount(const std::wstring& executable_name,
-                    const ProcessFilter* filter) {
-  int count = 0;
-
-  NamedProcessIterator iter(executable_name, filter);
-  while (iter.NextProcessEntry())
-    ++count;
-  return count;
-}
-
-bool KillProcesses(const std::wstring& executable_name, int exit_code,
-                   const ProcessFilter* filter) {
-  bool result = true;
-  const ProcessEntry* entry;
-
-  NamedProcessIterator iter(executable_name, filter);
-  while (entry = iter.NextProcessEntry()) {
-    if (!KillProcessById((*entry).th32ProcessID, exit_code, true))
-      result = false;
-  }
-
-  return result;
-}
-
-bool WaitForProcessesToExit(const std::wstring& executable_name,
-                            int wait_milliseconds,
-                            const ProcessFilter* filter) {
-  const ProcessEntry* entry;
-  bool result = true;
-  DWORD start_time = GetTickCount();
-
-  NamedProcessIterator iter(executable_name, filter);
-  while (entry = iter.NextProcessEntry()) {
-    DWORD remaining_wait =
-      std::max(0, wait_milliseconds -
-          static_cast<int>(GetTickCount() - start_time));
-    HANDLE process = OpenProcess(SYNCHRONIZE,
-                                 FALSE,
-                                 entry->th32ProcessID);
-    DWORD wait_result = WaitForSingleObject(process, remaining_wait);
-    CloseHandle(process);
-    result = result && (wait_result == WAIT_OBJECT_0);
-  }
-
-  return result;
-}
-
-bool WaitForSingleProcess(ProcessHandle handle, int wait_milliseconds) {
-  bool retval = WaitForSingleObject(handle, wait_milliseconds) == WAIT_OBJECT_0;
-  return retval;
-}
-
-bool CrashAwareSleep(ProcessHandle handle, int wait_milliseconds) {
-  bool retval = WaitForSingleObject(handle, wait_milliseconds) == WAIT_TIMEOUT;
-  return retval;
-}
-
-bool CleanupProcesses(const std::wstring& executable_name,
-                      int wait_milliseconds,
-                      int exit_code,
-                      const ProcessFilter* filter) {
-  bool exited_cleanly = WaitForProcessesToExit(executable_name,
-                                               wait_milliseconds,
-                                               filter);
-  if (!exited_cleanly)
-    KillProcesses(executable_name, exit_code, filter);
-  return exited_cleanly;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // ProcesMetrics
 
@@ -638,151 +471,6 @@ ProcessMetrics* ProcessMetrics::CreateProcessMetrics(ProcessHandle process) {
 }
 
 ProcessMetrics::~ProcessMetrics() { }
-
-size_t ProcessMetrics::GetPagefileUsage() const {
-  PROCESS_MEMORY_COUNTERS pmc;
-  if (GetProcessMemoryInfo(process_, &pmc, sizeof(pmc))) {
-    return pmc.PagefileUsage;
-  }
-  return 0;
-}
-
-// Returns the peak space allocated for the pagefile, in bytes.
-size_t ProcessMetrics::GetPeakPagefileUsage() const {
-  PROCESS_MEMORY_COUNTERS pmc;
-  if (GetProcessMemoryInfo(process_, &pmc, sizeof(pmc))) {
-    return pmc.PeakPagefileUsage;
-  }
-  return 0;
-}
-
-// Returns the current working set size, in bytes.
-size_t ProcessMetrics::GetWorkingSetSize() const {
-  PROCESS_MEMORY_COUNTERS pmc;
-  if (GetProcessMemoryInfo(process_, &pmc, sizeof(pmc))) {
-    return pmc.WorkingSetSize;
-  }
-  return 0;
-}
-
-size_t ProcessMetrics::GetPrivateBytes() const {
-  // PROCESS_MEMORY_COUNTERS_EX is not supported until XP SP2.
-  // GetProcessMemoryInfo() will simply fail on prior OS. So the requested
-  // information is simply not available. Hence, we will return 0 on unsupported
-  // OSes. Unlike most Win32 API, we don't need to initialize the "cb" member.
-  PROCESS_MEMORY_COUNTERS_EX pmcx;
-  if (GetProcessMemoryInfo(process_,
-                          reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmcx),
-                          sizeof(pmcx))) {
-      return pmcx.PrivateUsage;
-  }
-  return 0;
-}
-
-void ProcessMetrics::GetCommittedKBytes(CommittedKBytes* usage) const {
-  MEMORY_BASIC_INFORMATION mbi = {0};
-  size_t committed_private = 0;
-  size_t committed_mapped = 0;
-  size_t committed_image = 0;
-  void* base_address = NULL;
-  while (VirtualQueryEx(process_, base_address, &mbi, sizeof(mbi)) ==
-      sizeof(mbi)) {
-    if (mbi.State == MEM_COMMIT) {
-      if (mbi.Type == MEM_PRIVATE) {
-        committed_private += mbi.RegionSize;
-      } else if (mbi.Type == MEM_MAPPED) {
-        committed_mapped += mbi.RegionSize;
-      } else if (mbi.Type == MEM_IMAGE) {
-        committed_image += mbi.RegionSize;
-      } else {
-        NOTREACHED();
-      }
-    }
-    void* new_base = (static_cast<BYTE*>(mbi.BaseAddress)) + mbi.RegionSize;
-    // Avoid infinite loop by weird MEMORY_BASIC_INFORMATION.
-    // If we query 64bit processes in a 32bit process, VirtualQueryEx()
-    // returns such data.
-    if (new_base <= base_address) {
-      usage->image = 0;
-      usage->mapped = 0;
-      usage->priv = 0;
-      return;
-    }
-    base_address = new_base;
-  }
-  usage->image = committed_image / 1024;
-  usage->mapped = committed_mapped / 1024;
-  usage->priv = committed_private / 1024;
-}
-
-bool ProcessMetrics::GetWorkingSetKBytes(WorkingSetKBytes* ws_usage) const {
-  size_t ws_private = 0;
-  size_t ws_shareable = 0;
-  size_t ws_shared = 0;
-
-  DCHECK(ws_usage);
-  memset(ws_usage, 0, sizeof(*ws_usage));
-
-  DWORD number_of_entries = 4096;  // Just a guess.
-  PSAPI_WORKING_SET_INFORMATION* buffer = NULL;
-  int retries = 5;
-  for (;;) {
-    DWORD buffer_size = sizeof(PSAPI_WORKING_SET_INFORMATION) +
-                        (number_of_entries * sizeof(PSAPI_WORKING_SET_BLOCK));
-
-    // if we can't expand the buffer, don't leak the previous
-    // contents or pass a NULL pointer to QueryWorkingSet
-    PSAPI_WORKING_SET_INFORMATION* new_buffer =
-        reinterpret_cast<PSAPI_WORKING_SET_INFORMATION*>(
-            realloc(buffer, buffer_size));
-    if (!new_buffer) {
-      free(buffer);
-      return false;
-    }
-    buffer = new_buffer;
-
-    // Call the function once to get number of items
-    if (QueryWorkingSet(process_, buffer, buffer_size))
-      break;  // Success
-
-    if (GetLastError() != ERROR_BAD_LENGTH) {
-      free(buffer);
-      return false;
-    }
-
-    number_of_entries = static_cast<DWORD>(buffer->NumberOfEntries);
-
-    // Maybe some entries are being added right now. Increase the buffer to
-    // take that into account.
-    number_of_entries = static_cast<DWORD>(number_of_entries * 1.25);
-
-    if (--retries == 0) {
-      free(buffer);  // If we're looping, eventually fail.
-      return false;
-    }
-  }
-
-  // On windows 2000 the function returns 1 even when the buffer is too small.
-  // The number of entries that we are going to parse is the minimum between the
-  // size we allocated and the real number of entries.
-  number_of_entries =
-      std::min(number_of_entries, static_cast<DWORD>(buffer->NumberOfEntries));
-  for (unsigned int i = 0; i < number_of_entries; i++) {
-    if (buffer->WorkingSetInfo[i].Shared) {
-      ws_shareable++;
-      if (buffer->WorkingSetInfo[i].ShareCount > 1)
-        ws_shared++;
-    } else {
-      ws_private++;
-    }
-  }
-
-  ws_usage->priv = ws_private * PAGESIZE_KB;
-  ws_usage->shareable = ws_shareable * PAGESIZE_KB;
-  ws_usage->shared = ws_shared * PAGESIZE_KB;
-  free(buffer);
-  return true;
-}
 
 static uint64_t FileTimeToUTC(const FILETIME& ftime) {
   LARGE_INTEGER li;
@@ -832,80 +520,6 @@ int ProcessMetrics::GetCPUUsage() {
   last_time_ = time;
 
   return cpu;
-}
-
-bool ProcessMetrics::GetIOCounters(IO_COUNTERS* io_counters) const {
-  return GetProcessIoCounters(process_, io_counters) != FALSE;
-}
-
-bool ProcessMetrics::CalculateFreeMemory(FreeMBytes* free) const {
-  const SIZE_T kTopAdress = 0x7F000000;
-  const SIZE_T kMegabyte = 1024 * 1024;
-  SIZE_T accumulated = 0;
-
-  MEMORY_BASIC_INFORMATION largest = {0};
-  UINT_PTR scan = 0;
-  while (scan < kTopAdress) {
-    MEMORY_BASIC_INFORMATION info;
-    if (!::VirtualQueryEx(process_, reinterpret_cast<void*>(scan),
-                          &info, sizeof(info)))
-      return false;
-    if (info.State == MEM_FREE) {
-      accumulated += info.RegionSize;
-      UINT_PTR end = scan + info.RegionSize;
-      if (info.RegionSize > (largest.RegionSize))
-        largest = info;
-    }
-    scan += info.RegionSize;
-  }
-  free->largest = largest.RegionSize / kMegabyte;
-  free->largest_ptr = largest.BaseAddress;
-  free->total = accumulated / kMegabyte;
-  return true;
-}
-
-bool EnableLowFragmentationHeap() {
-  HMODULE kernel32 = GetModuleHandle(L"kernel32.dll");
-  HeapSetFn heap_set = reinterpret_cast<HeapSetFn>(GetProcAddress(
-      kernel32,
-      "HeapSetInformation"));
-
-  // On Windows 2000, the function is not exported. This is not a reason to
-  // fail.
-  if (!heap_set)
-    return true;
-
-  unsigned number_heaps = GetProcessHeaps(0, NULL);
-  if (!number_heaps)
-    return false;
-
-  // Gives us some extra space in the array in case a thread is creating heaps
-  // at the same time we're querying them.
-  static const int MARGIN = 8;
-  scoped_array<HANDLE> heaps(new HANDLE[number_heaps + MARGIN]);
-  number_heaps = GetProcessHeaps(number_heaps + MARGIN, heaps.get());
-  if (!number_heaps)
-    return false;
-
-  for (unsigned i = 0; i < number_heaps; ++i) {
-    ULONG lfh_flag = 2;
-    // Don't bother with the result code. It may fails on heaps that have the
-    // HEAP_NO_SERIALIZE flag. This is expected and not a problem at all.
-    heap_set(heaps[i],
-             HeapCompatibilityInformation,
-             &lfh_flag,
-             sizeof(lfh_flag));
-  }
-  return true;
-}
-
-void EnableTerminationOnHeapCorruption() {
-  // Ignore the result code. Supported on XP SP3 and Vista.
-  HeapSetInformation(NULL, HeapEnableTerminationOnCorruption, NULL, 0);
-}
-
-void RaiseProcessToHighPriority() {
-  SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 }
 
 }  // namespace base

@@ -3,15 +3,16 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir = @srcdir@
-VPATH = @srcdir@
+export:: mozilla_api_key google_api_key
 
-include $(DEPTH)/config/autoconf.mk
-
-DISABLED_EXTRA_COMPONENTS = \
-  nsURLFormatter.manifest \
-  $(NULL)
+EXTRA_PP_COMPONENTS_FLAGS = -I mozilla_api_key -I google_api_key
 
 include $(topsrcdir)/config/rules.mk
+
+mozilla_api_key:
+	@echo '#define MOZ_MOZILLA_API_KEY $(MOZ_MOZILLA_API_KEY)' > $@
+
+google_api_key:
+	@echo '#define MOZ_GOOGLE_API_KEY $(MOZ_GOOGLE_API_KEY)' > $@
+
+GARBAGE += google_api_key moz_google_api_key

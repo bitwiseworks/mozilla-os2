@@ -3,15 +3,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "SVGNumberList.h"
 #include "nsCharSeparatedTokenizer.h"
-#include "nsError.h"
-#include "nsMathUtils.h"
 #include "nsString.h"
 #include "nsTextFormatter.h"
-#include "prdtoa.h"
 #include "SVGContentUtils.h"
 
 namespace mozilla {
@@ -31,13 +28,13 @@ void
 SVGNumberList::GetValueAsString(nsAString& aValue) const
 {
   aValue.Truncate();
-  PRUnichar buf[24];
+  char16_t buf[24];
   uint32_t last = mNumbers.Length() - 1;
   for (uint32_t i = 0; i < mNumbers.Length(); ++i) {
     // Would like to use aValue.AppendPrintf("%f", mNumbers[i]), but it's not
     // possible to always avoid trailing zeros.
     nsTextFormatter::snprintf(buf, ArrayLength(buf),
-                              NS_LITERAL_STRING("%g").get(),
+                              MOZ_UTF16("%g"),
                               double(mNumbers[i]));
     // We ignore OOM, since it's not useful for us to return an error.
     aValue.Append(buf);
@@ -55,24 +52,16 @@ SVGNumberList::SetValueFromString(const nsAString& aValue)
   nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
     tokenizer(aValue, ',', nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
 
-  nsAutoCString str;  // outside loop to minimize memory churn
-
   while (tokenizer.hasMoreTokens()) {
-    CopyUTF16toUTF8(tokenizer.nextToken(), str); // NS_ConvertUTF16toUTF8
-    const char *token = str.get();
-    if (*token == '\0') {
-      return NS_ERROR_DOM_SYNTAX_ERR; // nothing between commas
-    }
-    char *end;
-    float num = float(PR_strtod(token, &end));
-    if (*end != '\0' || !NS_finite(num)) {
+    float num;
+    if (!SVGContentUtils::ParseNumber(tokenizer.nextToken(), num)) {
       return NS_ERROR_DOM_SYNTAX_ERR;
     }
     if (!temp.AppendItem(num)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
   }
-  if (tokenizer.lastTokenEndedWithSeparator()) {
+  if (tokenizer.separatorAfterCurrentToken()) {
     return NS_ERROR_DOM_SYNTAX_ERR; // trailing comma
   }
   return CopyFrom(temp);

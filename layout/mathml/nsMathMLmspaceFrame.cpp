@@ -3,14 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
-#include "nsCOMPtr.h"
-#include "nsFrame.h"
-#include "nsPresContext.h"
-#include "nsStyleContext.h"
-#include "nsStyleConsts.h"
-
 #include "nsMathMLmspaceFrame.h"
+#include "nsMathMLElement.h"
+#include "mozilla/gfx/2D.h"
 #include <algorithm>
 
 
@@ -54,8 +49,7 @@ nsMathMLmspaceFrame::ProcessAttributes(nsPresContext* aPresContext)
   // as an example. Hence we allow negative values.
   //
   mWidth = 0;
-  GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::width,
-               value);
+  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::width, value);
   if (!value.IsEmpty()) {
     ParseNumericValue(value, &mWidth,
                       nsMathMLElement::PARSE_ALLOW_NEGATIVE,
@@ -73,8 +67,7 @@ nsMathMLmspaceFrame::ProcessAttributes(nsPresContext* aPresContext)
   // We do not allow negative values. See bug 716349.
   //
   mHeight = 0;
-  GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::height,
-               value);
+  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::height, value);
   if (!value.IsEmpty()) {
     ParseNumericValue(value, &mHeight, 0,
                       aPresContext, mStyleContext);
@@ -91,15 +84,14 @@ nsMathMLmspaceFrame::ProcessAttributes(nsPresContext* aPresContext)
   // We do not allow negative values. See bug 716349.
   //
   mDepth = 0;
-  GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::depth_,
-               value);
+  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::depth_, value);
   if (!value.IsEmpty()) {
     ParseNumericValue(value, &mDepth, 0,
                       aPresContext, mStyleContext);
   }
 }
 
-NS_IMETHODIMP
+nsresult
 nsMathMLmspaceFrame::Reflow(nsPresContext*          aPresContext,
                             nsHTMLReflowMetrics&     aDesiredSize,
                             const nsHTMLReflowState& aReflowState,
@@ -114,9 +106,9 @@ nsMathMLmspaceFrame::Reflow(nsPresContext*          aPresContext,
   mBoundingMetrics.leftBearing = 0;
   mBoundingMetrics.rightBearing = mBoundingMetrics.width;
 
-  aDesiredSize.ascent = mHeight;
-  aDesiredSize.width = std::max(0, mBoundingMetrics.width);
-  aDesiredSize.height = aDesiredSize.ascent + mDepth;
+  aDesiredSize.SetTopAscent(mHeight);
+  aDesiredSize.Width() = std::max(0, mBoundingMetrics.width);
+  aDesiredSize.Height() = aDesiredSize.TopAscent() + mDepth;
   // Also return our bounding metrics
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;
 
@@ -132,7 +124,7 @@ nsMathMLmspaceFrame::MeasureForWidth(nsRenderingContext& aRenderingContext,
   ProcessAttributes(PresContext());
   mBoundingMetrics = nsBoundingMetrics();
   mBoundingMetrics.width = mWidth;
-  aDesiredSize.width = std::max(0, mBoundingMetrics.width);
+  aDesiredSize.Width() = std::max(0, mBoundingMetrics.width);
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;
   return NS_OK;
 }

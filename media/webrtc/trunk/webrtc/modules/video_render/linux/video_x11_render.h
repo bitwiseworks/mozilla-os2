@@ -11,7 +11,7 @@
 #ifndef WEBRTC_MODULES_VIDEO_RENDER_MAIN_SOURCE_LINUX_VIDEO_X11_RENDER_H_
 #define WEBRTC_MODULES_VIDEO_RENDER_MAIN_SOURCE_LINUX_VIDEO_X11_RENDER_H_
 
-#include "video_render_defines.h"
+#include "webrtc/modules/video_render/include/video_render_defines.h"
 
 #include <X11/Xlib.h>
 #include <map>
@@ -28,22 +28,22 @@ public:
     VideoX11Render(Window window);
     ~VideoX11Render();
 
-    WebRtc_Word32 Init();
-    WebRtc_Word32 ChangeWindow(Window window);
+    int32_t Init();
+    int32_t ChangeWindow(Window window);
 
-    VideoX11Channel* CreateX11RenderChannel(WebRtc_Word32 streamId,
-                                                WebRtc_Word32 zOrder,
-                                                const float left,
-                                                const float top,
-                                                const float right,
-                                                const float bottom);
+    VideoX11Channel* CreateX11RenderChannel(int32_t streamId,
+                                            int32_t zOrder,
+                                            const float left,
+                                            const float top,
+                                            const float right,
+                                            const float bottom);
 
-    WebRtc_Word32 DeleteX11RenderChannel(WebRtc_Word32 streamId);
+    int32_t DeleteX11RenderChannel(int32_t streamId);
 
-    WebRtc_Word32 GetIncomingStreamProperties(WebRtc_Word32 streamId,
-                                              WebRtc_UWord32& zOrder,
-                                              float& left, float& top,
-                                              float& right, float& bottom);
+    int32_t GetIncomingStreamProperties(int32_t streamId,
+                                        uint32_t& zOrder,
+                                        float& left, float& top,
+                                        float& right, float& bottom);
 
 private:
     Window _window;
@@ -53,6 +53,6 @@ private:
 };
 
 
-} //namespace webrtc
+}  // namespace webrtc
 
 #endif // WEBRTC_MODULES_VIDEO_RENDER_MAIN_SOURCE_LINUX_VIDEO_X11_RENDER_H_

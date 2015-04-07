@@ -31,8 +31,8 @@ The easiest and fastest way to clobber is to run:
 
  $ mach clobber
 
-If you know this clobber doesn't apply to you or you're feeling lucky \
-- well do ya? - you can ignore this clobber requirement by running:
+If you know this clobber doesn't apply to you or you're feeling lucky -- \
+Well, are ya? -- you can ignore this clobber requirement by running:
 
  $ touch {clobber_file}
 '''.splitlines()])
@@ -180,6 +180,8 @@ def main(args, env, cwd, fh=sys.stderr):
     required, performed, message = clobber.maybe_do_clobber(cwd, auto, fh)
 
     if not required or performed:
+        if performed and env.get('TINDERBOX_OUTPUT'):
+            print('TinderboxPrint: auto clobber', file=fh)
         return 0
 
     print(message, file=fh)

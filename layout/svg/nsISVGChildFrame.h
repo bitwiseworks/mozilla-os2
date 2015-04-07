@@ -8,14 +8,14 @@
 
 #include "gfxRect.h"
 #include "nsQueryFrame.h"
-#include "nsRect.h"
 
 class nsIFrame;
 class nsRenderingContext;
 
-struct gfxMatrix;
 struct nsPoint;
 class SVGBBox;
+struct nsRect;
+struct nsIntRect;
 
 namespace mozilla {
 class SVGAnimatedLengthList;
@@ -23,6 +23,10 @@ class SVGAnimatedNumberList;
 class SVGLengthList;
 class SVGNumberList;
 class SVGUserUnitList;
+
+namespace gfx {
+class Matrix;
+}
 }
 
 /**
@@ -43,21 +47,31 @@ public:
 
   NS_DECL_QUERYFRAME_TARGET(nsISVGChildFrame)
 
-  // Paint this frame - aDirtyRect is the area being redrawn, in frame
-  // offset pixel coordinates
-  NS_IMETHOD PaintSVG(nsRenderingContext* aContext,
-                      const nsIntRect *aDirtyRect)=0;
+  // Paint this frame.
+  // aDirtyRect is the area being redrawn, in frame offset pixel coordinates.
+  // aTransformRoot (if non-null) is the frame at which we stop looking up
+  // transforms, when painting content that is part of an SVG glyph. (See
+  // bug 875329.)
+  // For normal SVG graphics using display-list rendering, any transforms on
+  // the element or its parents will have already been set up in the context
+  // before PaintSVG is called. When painting SVG glyphs, this is not the case,
+  // so the element's full transform needs to be applied; but we don't want to
+  // apply transforms from outside the actual glyph element, so we need to know
+  // how far up the ancestor chain to go.
+  virtual nsresult PaintSVG(nsRenderingContext* aContext,
+                            const nsIntRect *aDirtyRect,
+                            nsIFrame* aTransformRoot = nullptr) = 0;
 
   // Check if this frame or children contain the given point,
   // specified in app units relative to the origin of the outer
   // svg frame (origin ill-defined in the case of borders - bug
   // 290770).  See bug 290852 for foreignObject complications.
-  NS_IMETHOD_(nsIFrame*) GetFrameForPoint(const nsPoint &aPoint)=0;
+  virtual nsIFrame* GetFrameForPoint(const nsPoint &aPoint)=0;
 
-  // Get bounds in our gfxContext's coordinates space (in app units)
-  NS_IMETHOD_(nsRect) GetCoveredRegion()=0;
+  // Get bounds in our nsSVGOuterSVGFrame's coordinates space (in app units)
+  virtual nsRect GetCoveredRegion()=0;
 
-  // Called on SVG child frames (except NS_STATE_SVG_NONDISPLAY_CHILD frames)
+  // Called on SVG child frames (except NS_FRAME_IS_NONDISPLAY frames)
   // to update and then invalidate their cached bounds. This method is not
   // called until after the nsSVGOuterSVGFrame has had its initial reflow
   // (i.e. once the SVG viewport dimensions are known). It should also only
@@ -81,7 +95,7 @@ public:
   // DO_NOT_NOTIFY_RENDERING_OBSERVERS - this should only be used when
   //                           updating the descendant frames of a clipPath,
   //                           mask, pattern or marker frame (or other similar
-  //                           NS_STATE_SVG_NONDISPLAY_CHILD frame) immediately
+  //                           NS_FRAME_IS_NONDISPLAY frame) immediately
   //                           prior to painting that frame's descendants.
   // TRANSFORM_CHANGED     - the current transform matrix for this frame has changed
   // COORD_CONTEXT_CHANGED - the dimensions of this frame's coordinate context has
@@ -123,11 +137,11 @@ public:
    * @param aFlags Flags indicating whether, stroke, for example, should be
    *   included in the bbox calculation.
    */
-  virtual SVGBBox GetBBoxContribution(const gfxMatrix &aToBBoxUserspace,
+  virtual SVGBBox GetBBoxContribution(const mozilla::gfx::Matrix &aToBBoxUserspace,
                                       uint32_t aFlags) = 0;
 
   // Are we a container frame?
-  NS_IMETHOD_(bool) IsDisplayContainer()=0;
+  virtual bool IsDisplayContainer()=0;
 };
 
 #endif // __NS_ISVGCHILDFRAME_H__

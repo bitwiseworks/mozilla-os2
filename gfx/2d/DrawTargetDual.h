@@ -12,6 +12,7 @@
 #include "SourceSurfaceDual.h"
      
 #include "2D.h"
+#include "Filters.h"
      
 namespace mozilla {
 namespace gfx {
@@ -34,6 +35,7 @@ namespace gfx {
 class DrawTargetDual : public DrawTarget
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DrawTargetDual)
   DrawTargetDual(DrawTarget *aA, DrawTarget *aB)
     : mA(aA)
     , mB(aB)
@@ -59,6 +61,15 @@ public:
 
   virtual void DrawSurface(SourceSurface *aSurface, const Rect &aDest, const Rect & aSource,
                            const DrawSurfaceOptions &aSurfOptions, const DrawOptions &aOptions);
+
+  virtual void DrawFilter(FilterNode *aNode,
+                          const Rect &aSourceRect,
+                          const Point &aDestPoint,
+                          const DrawOptions &aOptions = DrawOptions())
+  {
+    mA->DrawFilter(aNode, aSourceRect, aDestPoint, aOptions);
+    mB->DrawFilter(aNode, aSourceRect, aDestPoint, aOptions);
+  }
 
   virtual void MaskSurface(const Pattern &aSource,
                            SourceSurface *aMask,
@@ -114,7 +125,7 @@ public:
   virtual TemporaryRef<DrawTarget>
     CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const;
      
-  virtual TemporaryRef<PathBuilder> CreatePathBuilder(FillRule aFillRule = FILL_WINDING) const
+  virtual TemporaryRef<PathBuilder> CreatePathBuilder(FillRule aFillRule = FillRule::FILL_WINDING) const
   {
     return mA->CreatePathBuilder(aFillRule);
   }
@@ -122,14 +133,24 @@ public:
   virtual TemporaryRef<GradientStops>
     CreateGradientStops(GradientStop *aStops,
                         uint32_t aNumStops,
-                        ExtendMode aExtendMode = EXTEND_CLAMP) const
+                        ExtendMode aExtendMode = ExtendMode::CLAMP) const
   {
     return mA->CreateGradientStops(aStops, aNumStops, aExtendMode);
   }
-     
+
+  virtual TemporaryRef<FilterNode> CreateFilter(FilterType aType)
+  {
+    return mA->CreateFilter(aType);
+  }
+
   virtual void *GetNativeSurface(NativeSurfaceType aType)
   {
     return nullptr;
+  }
+
+  virtual bool IsDualDrawTarget()
+  {
+    return true;
   }
      
 private:

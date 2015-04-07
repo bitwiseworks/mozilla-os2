@@ -9,35 +9,35 @@
 #include "nsSVGFilters.h"
 #include "nsSVGNumber2.h"
 
-typedef SVGFEUnstyledElement SVGFEDistantLightElementBase;
-
 nsresult NS_NewSVGFEDistantLightElement(nsIContent **aResult,
-                                        already_AddRefed<nsINodeInfo> aNodeInfo);
+                                        already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
 
+typedef SVGFELightElement SVGFEDistantLightElementBase;
+
 class SVGFEDistantLightElement : public SVGFEDistantLightElementBase
 {
   friend nsresult (::NS_NewSVGFEDistantLightElement(nsIContent **aResult,
-                                                    already_AddRefed<nsINodeInfo> aNodeInfo));
+                                                    already_AddRefed<nsINodeInfo>&& aNodeInfo));
 protected:
-  SVGFEDistantLightElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  SVGFEDistantLightElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : SVGFEDistantLightElementBase(aNodeInfo)
   {
   }
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
 public:
+  virtual AttributeMap ComputeLightAttributes(nsSVGFilterInstance* aInstance) MOZ_OVERRIDE;
   virtual bool AttributeAffectsRendering(
           int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   // WebIDL
-  already_AddRefed<nsIDOMSVGAnimatedNumber> Azimuth();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> Elevation();
+  already_AddRefed<SVGAnimatedNumber> Azimuth();
+  already_AddRefed<SVGAnimatedNumber> Elevation();
 
 protected:
   virtual NumberAttributesInfo GetNumberInfo() MOZ_OVERRIDE;

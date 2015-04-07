@@ -2,32 +2,49 @@
 # Any copyright is dedicated to the Public Domain.
 # http://creativecommons.org/publicdomain/zero/1.0/
 
-XPIDL_SOURCES = ['bar.idl', 'biz.idl', 'foo.idl']
-XPIDL_MODULE = 'module_name'
-XPIDL_FLAGS = ['-Idir1', '-Idir2', '-Idir3']
-
-ASFILES = ['bar.s', 'foo.asm']
-
-DEFINES = ['-Dbar', '-Dfoo']
+SOURCES += ['bar.s', 'foo.asm']
 
 EXTRA_COMPONENTS = ['bar.js', 'foo.js']
 EXTRA_PP_COMPONENTS = ['bar.pp.js', 'foo.pp.js']
 
-HOST_CSRCS = ['bar.c', 'foo.c']
+EXTRA_JS_MODULES = ['bar.jsm', 'foo.jsm']
+EXTRA_PP_JS_MODULES = ['bar.pp.jsm', 'foo.pp.jsm']
+
+CPP_UNIT_TESTS = ['foo.cpp']
+
+HOST_SOURCES += ['bar.cpp', 'foo.cpp']
+HOST_SOURCES += ['bar.c', 'foo.c']
 
 HOST_LIBRARY_NAME = 'host_bar'
 
-LIBRARY_NAME = 'lib_name'
 LIBS = ['bar.lib', 'foo.lib']
+
+OS_LIBS = ['foo.so', '-l123', 'bar.a']
 
 SDK_LIBRARY = ['bar.sdk', 'foo.sdk']
 
-SHARED_LIBRARY_LIBS += ['bar.sll', 'foo.sll']
+SOURCES += ['bar.c', 'foo.c']
 
-SIMPLE_PROGRAMS = ['bar.x', 'foo.x']
+SOURCES += ['bar.mm', 'foo.mm']
 
-CSRCS += ['bar.c', 'foo.c']
+SOURCES += ['baz.S', 'foo.S']
 
-CMMSRCS = ['bar.mm', 'foo.mm']
+FAIL_ON_WARNINGS = True
+MSVC_ENABLE_PGO = True
+NO_VISIBILITY_FLAGS = True
 
-SSRCS = ['bar.S', 'foo.S']
+DELAYLOAD_DLLS = ['foo.dll', 'bar.dll']
+
+RCFILE = 'foo.rc'
+RESFILE = 'bar.res'
+RCINCLUDE = 'bar.rc'
+DEFFILE = 'baz.def'
+
+USE_STATIC_LIBS = True
+
+CFLAGS += ['-fno-exceptions', '-w']
+CXXFLAGS += ['-fcxx-exceptions', '-include foo.h']
+LDFLAGS += ['-framework Foo', '-x']
+WIN32_EXE_LDFLAGS += ['-subsystem:console']
+
+DISABLE_STL_WRAPPING = True

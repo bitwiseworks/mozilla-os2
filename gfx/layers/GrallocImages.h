@@ -8,13 +8,19 @@
 
 #ifdef MOZ_WIDGET_GONK
 
-#include "mozilla/layers/LayersSurfaces.h"
 #include "ImageLayers.h"
+#include "ImageContainer.h"
+#include "mozilla/gfx/Point.h"
+#include "mozilla/layers/AtomicRefCountedWithFinalize.h"
+#include "mozilla/layers/FenceUtils.h"
+#include "mozilla/layers/LayersSurfaces.h"
 
 #include <ui/GraphicBuffer.h>
 
 namespace mozilla {
 namespace layers {
+
+class GrallocTextureClientOGL;
 
 /**
  * The YUV format supported by Android HAL
@@ -37,13 +43,20 @@ namespace layers {
  * mPicX, mPicY and mPicSize. The size of the rendered image is
  * mPicSize, not mYSize or mCbCrSize.
  */
-class GrallocPlanarYCbCrImage : public PlanarYCbCrImage {
-  typedef PlanarYCbCrImage::Data Data;
-
+class GrallocImage : public PlanarYCbCrImage
+                   , public ISharedImage
+{
+  typedef PlanarYCbCrData Data;
+  static uint32_t sColorIdMap[];
 public:
-  GrallocPlanarYCbCrImage();
+  struct GrallocData {
+    nsRefPtr<TextureClient> mGraphicBuffer;
+    gfx::IntSize mPicSize;
+  };
 
-  virtual ~GrallocPlanarYCbCrImage();
+  GrallocImage();
+
+  virtual ~GrallocImage();
 
   /**
    * This makes a copy of the data buffers, in order to support functioning
@@ -51,16 +64,42 @@ public:
    */
   virtual void SetData(const Data& aData);
 
-  virtual uint32_t GetDataSize() { return 0; }
+  /**
+   *  Share the SurfaceDescriptor without making the copy, in order
+   *  to support functioning in all different layer managers.
+   */
+  virtual void SetData(const GrallocData& aData);
 
-  virtual bool IsValid() { return mSurfaceDescriptor.type() != SurfaceDescriptor::T__None; }
+  // From [android 4.0.4]/hardware/msm7k/libgralloc-qsd8k/gralloc_priv.h
+  enum {
+    /* OEM specific HAL formats */
+    HAL_PIXEL_FORMAT_YCbCr_422_P            = 0x102,
+    HAL_PIXEL_FORMAT_YCbCr_420_P            = 0x103,
+    HAL_PIXEL_FORMAT_YCbCr_420_SP           = 0x109,
+    HAL_PIXEL_FORMAT_YCrCb_420_SP_ADRENO    = 0x10A,
+    HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED     = 0x7FA30C03,
+    HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS     = 0x7FA30C04,
+  };
 
-  SurfaceDescriptor GetSurfaceDescriptor() {
-    return mSurfaceDescriptor;
+  virtual TemporaryRef<gfx::SourceSurface> GetAsSourceSurface() MOZ_OVERRIDE;
+
+  android::sp<android::GraphicBuffer> GetGraphicBuffer() const;
+
+  void* GetNativeBuffer();
+
+  virtual bool IsValid() { return !!mTextureClient; }
+
+  virtual ISharedImage* AsSharedImage() MOZ_OVERRIDE { return this; }
+
+  virtual TextureClient* GetTextureClient(CompositableClient* aClient) MOZ_OVERRIDE;
+
+  virtual uint8_t* GetBuffer()
+  {
+    return static_cast<uint8_t*>(GetNativeBuffer());
   }
 
 private:
-  SurfaceDescriptor mSurfaceDescriptor;
+  RefPtr<GrallocTextureClientOGL> mTextureClient;
 };
 
 } // namespace layers

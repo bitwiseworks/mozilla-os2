@@ -8,11 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "video_source.h"
+#include "webrtc/modules/video_coding/main/test/video_source.h"
 
-#include <cassert>
+#include <assert.h>
 
-#include "testsupport/fileutils.h"
+#include "webrtc/test/testsupport/fileutils.h"
 
 VideoSource::VideoSource()
 :
@@ -40,7 +40,7 @@ _frameRate(frameRate)
     GetWidthHeight(size);
 }
 
-VideoSource::VideoSource(std::string fileName, WebRtc_UWord16 width, WebRtc_UWord16 height,
+VideoSource::VideoSource(std::string fileName, uint16_t width, uint16_t height,
     float frameRate /*= 30*/, webrtc::VideoType type /*= webrtc::kI420*/)
 :
 _fileName(fileName),
@@ -55,7 +55,7 @@ _frameRate(frameRate)
     assert(frameRate > 0);
 }
 
-WebRtc_Word32
+int32_t
 VideoSource::GetFrameLength() const
 {
     return webrtc::CalcBufferSize(_type, _width, _height);

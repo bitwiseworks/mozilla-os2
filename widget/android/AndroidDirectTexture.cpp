@@ -6,8 +6,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include "AndroidDirectTexture.h"
-
-typedef gfxASurface::gfxImageFormat gfxImageFormat;
+#include "nsRect.h"
 
 namespace mozilla {
 
@@ -18,7 +17,7 @@ AndroidDirectTexture::AndroidDirectTexture(uint32_t width, uint32_t height, uint
   , mWidth(width)
   , mHeight(height)
   , mFormat(format)
-  , mPendingReallocBuffer(NULL)
+  , mPendingReallocBuffer(nullptr)
 {
   mFrontBuffer = new AndroidGraphicBuffer(width, height, usage, format);
   mBackBuffer = new AndroidGraphicBuffer(width, height, usage, format);
@@ -28,12 +27,12 @@ AndroidDirectTexture::~AndroidDirectTexture()
 {
   if (mFrontBuffer) {
     delete mFrontBuffer;
-    mFrontBuffer = NULL;
+    mFrontBuffer = nullptr;
   }
 
   if (mBackBuffer) {
     delete mBackBuffer;
-    mBackBuffer = NULL;
+    mBackBuffer = nullptr;
   }
 }
 
@@ -47,7 +46,7 @@ AndroidDirectTexture::ReallocPendingBuffer()
   // It is assumed that mLock is already acquired
   if (mPendingReallocBuffer == mBackBuffer) {
     mBackBuffer->Reallocate(mWidth, mHeight, mFormat);
-    mPendingReallocBuffer = NULL;
+    mPendingReallocBuffer = nullptr;
   }
 }
 
@@ -91,7 +90,7 @@ AndroidDirectTexture::Reallocate(uint32_t aWidth, uint32_t aHeight) {
 }
 
 bool
-AndroidDirectTexture::Reallocate(uint32_t aWidth, uint32_t aHeight, gfxASurface::gfxImageFormat aFormat)
+AndroidDirectTexture::Reallocate(uint32_t aWidth, uint32_t aHeight, gfxImageFormat aFormat)
 {
   MutexAutoLock lock(mLock);
 

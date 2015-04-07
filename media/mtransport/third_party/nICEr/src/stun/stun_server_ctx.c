@@ -84,17 +84,18 @@ int nr_stun_server_ctx_destroy(nr_stun_server_ctx **ctxp)
         nr_stun_server_destroy_client(clnt1);
     }
 
+    nr_stun_server_destroy_client(ctx->default_client);
+
     RFREE(ctx->label);
     RFREE(ctx);
 
     return(0);
   }
 
-int nr_stun_server_add_client(nr_stun_server_ctx *ctx, char *client_label, char *user, Data *pass, int (*stun_server_cb)(void *cb_arg, nr_stun_server_ctx *ctx,nr_socket *sock, nr_stun_server_request *req, int *error), void *cb_arg)
+static int nr_stun_server_client_create(nr_stun_server_ctx *ctx, char *client_label, char *user, Data *pass, nr_stun_server_cb cb, void *cb_arg, nr_stun_server_client **clntp)
   {
-    int r,_status;
-
     nr_stun_server_client *clnt=0;
+    int r,_status;
 
     if(!(clnt=RCALLOC(sizeof(nr_stun_server_client))))
       ABORT(R_NO_MEMORY);
@@ -108,16 +109,49 @@ int nr_stun_server_add_client(nr_stun_server_ctx *ctx, char *client_label, char 
     if(r=r_data_copy(&clnt->password,pass))
       ABORT(r);
 
-    clnt->stun_server_cb=stun_server_cb;
+    clnt->stun_server_cb=cb;
     clnt->cb_arg=cb_arg;
+
+    *clntp = clnt;
+    _status=0;
+ abort:
+    if(_status){
+      nr_stun_server_destroy_client(clnt);
+    }
+    return(_status);
+  }
+
+int nr_stun_server_add_client(nr_stun_server_ctx *ctx, char *client_label, char *user, Data *pass, nr_stun_server_cb cb, void *cb_arg)
+  {
+   int r,_status;
+   nr_stun_server_client *clnt;
+
+    if (r=nr_stun_server_client_create(ctx, client_label, user, pass, cb, cb_arg, &clnt))
+      ABORT(r);
 
     STAILQ_INSERT_TAIL(&ctx->clients,clnt,entry);
 
     _status=0;
   abort:
-    if(_status){
-      nr_stun_server_destroy_client(clnt);
-    }
+    return(_status);
+  }
+
+int nr_stun_server_add_default_client(nr_stun_server_ctx *ctx, char *ufrag, Data *pass, nr_stun_server_cb cb, void *cb_arg)
+  {
+    int r,_status;
+    nr_stun_server_client *clnt;
+
+    assert(!ctx->default_client);
+    if (ctx->default_client)
+      ABORT(R_INTERNAL);
+
+    if (r=nr_stun_server_client_create(ctx, "default_client", ufrag, pass, cb, cb_arg, &clnt))
+      ABORT(r);
+
+    ctx->default_client = clnt;
+
+    _status=0;
+  abort:
     return(_status);
   }
 
@@ -149,7 +183,7 @@ static int nr_stun_server_get_password(void *arg, nr_stun_message *msg, Data **p
 
     if ((nr_stun_get_message_client(ctx, msg, &clnt))) {
         if (! nr_stun_message_has_attribute(msg, NR_STUN_ATTR_USERNAME, &username_attribute)) {
-           r_log(NR_LOG_STUN,LOG_NOTICE,"STUN-SERVER(%s): Missing Username",ctx->label);
+           r_log(NR_LOG_STUN,LOG_WARNING,"STUN-SERVER(%s): Missing Username",ctx->label);
            ABORT(R_NOT_FOUND);
         }
 
@@ -200,6 +234,7 @@ int nr_stun_server_process_request(nr_stun_server_ctx *ctx, nr_socket *sock, cha
     nr_stun_server_client *clnt = 0;
     nr_stun_server_request info;
     int error;
+    int dont_free = 0;
 
     r_log(NR_LOG_STUN,LOG_DEBUG,"STUN-SERVER(%s): Received(my_addr=%s,peer_addr=%s)",ctx->label,ctx->my_addr.as_string,peer_addr->as_string);
 
@@ -215,24 +250,24 @@ int nr_stun_server_process_request(nr_stun_server_ctx *ctx, nr_socket *sock, cha
         ABORT(r);
 
     if ((r=nr_stun_decode_message(req, nr_stun_server_get_password, ctx))) {
-        /* draft-ietf-behave-rfc3489bis-07.txt S 7.3 says "If any errors are
-         * detected, the message is silently discarded."  */
+        /* RFC5389 S 7.3 says "If any errors are detected, the message is
+         * silently discarded."  */
 #ifndef USE_STUN_PEDANTIC
         /* ... but that seems like a bad idea, at least return a 400 so
          * that the server isn't a black hole to the client */
-        nr_stun_form_error_response(req, res, 400, "Bad Request");
+        nr_stun_form_error_response(req, res, 400, "Bad Request - Failed to decode request");
         ABORT(R_ALREADY);
 #endif /* USE_STUN_PEDANTIC */
         ABORT(R_REJECTED);
     }
 
     if ((r=nr_stun_receive_message(0, req))) {
-        /* draft-ietf-behave-rfc3489bis-07.txt S 7.3 says "If any errors are
-         * detected, the message is silently discarded."  */
+        /* RFC5389 S 7.3 says "If any errors are detected, the message is
+         * silently discarded."  */
 #ifndef USE_STUN_PEDANTIC
         /* ... but that seems like a bad idea, at least return a 400 so
          * that the server isn't a black hole to the client */
-        nr_stun_form_error_response(req, res, 400, "Bad Request");
+        nr_stun_form_error_response(req, res, 400, "Bad Request - Section 7.3 check failed");
         ABORT(R_ALREADY);
 #endif /* USE_STUN_PEDANTIC */
         ABORT(R_REJECTED);
@@ -240,13 +275,13 @@ int nr_stun_server_process_request(nr_stun_server_ctx *ctx, nr_socket *sock, cha
 
     if (NR_STUN_GET_TYPE_CLASS(req->header.type) != NR_CLASS_REQUEST
      && NR_STUN_GET_TYPE_CLASS(req->header.type) != NR_CLASS_INDICATION) {
-         r_log(NR_LOG_STUN,LOG_NOTICE,"STUN-SERVER(%s): Illegal message type: %04x",ctx->label,req->header.type);
-        /* draft-ietf-behave-rfc3489bis-07.txt S 7.3 says "If any errors are
-         * detected, the message is silently discarded."  */
+         r_log(NR_LOG_STUN,LOG_WARNING,"STUN-SERVER(%s): Illegal message type: %04x",ctx->label,req->header.type);
+        /* RFC5389 S 7.3 says "If any errors are detected, the message is
+         * silently discarded."  */
 #ifndef USE_STUN_PEDANTIC
         /* ... but that seems like a bad idea, at least return a 400 so
          * that the server isn't a black hole to the client */
-        nr_stun_form_error_response(req, res, 400, "Bad Request");
+        nr_stun_form_error_response(req, res, 400, "Bad Request - Unsupported message type");
         ABORT(R_ALREADY);
 #endif /* USE_STUN_PEDANTIC */
         ABORT(R_REJECTED);
@@ -291,7 +326,8 @@ int nr_stun_server_process_request(nr_stun_server_ctx *ctx, nr_socket *sock, cha
         info.response = res;
 
         error = 0;
-        if (clnt->stun_server_cb(clnt->cb_arg,ctx,sock,&info,&error)) {
+        dont_free = 0;
+        if (clnt->stun_server_cb(clnt->cb_arg,ctx,sock,&info,&dont_free,&error)) {
             if (error == 0)
                 error = 500;
 
@@ -311,7 +347,7 @@ int nr_stun_server_process_request(nr_stun_server_ctx *ctx, nr_socket *sock, cha
          nr_stun_form_error_response(req, res, 500, "Failed to specify error");
 
     if ((r=nr_stun_server_send_response(ctx, sock, peer_addr, res, clnt))) {
-        r_log(NR_LOG_STUN,LOG_WARNING,"STUN-SERVER(label=%s): Failed sending response (my_addr=%s,peer_addr=%s)",ctx->label,ctx->my_addr.as_string,peer_addr->as_string);
+        r_log(NR_LOG_STUN,LOG_ERR,"STUN-SERVER(label=%s): Failed sending response (my_addr=%s,peer_addr=%s)",ctx->label,ctx->my_addr.as_string,peer_addr->as_string);
         _status = R_FAILED;
     }
 
@@ -335,8 +371,10 @@ int nr_stun_server_process_request(nr_stun_server_ctx *ctx, nr_socket *sock, cha
         _status = 0;
     }
 
-    nr_stun_message_destroy(&res);
-    nr_stun_message_destroy(&req);
+    if (!dont_free) {
+      nr_stun_message_destroy(&res);
+      nr_stun_message_destroy(&req);
+    }
 
     return(_status);
   }
@@ -375,6 +413,9 @@ static int nr_stun_server_send_response(nr_stun_server_ctx *ctx, nr_socket *sock
 
 static int nr_stun_server_destroy_client(nr_stun_server_client *clnt)
   {
+    if (!clnt)
+      return 0;
+
     RFREE(clnt->label);
     RFREE(clnt->username);
     r_data_zfree(&clnt->password);
@@ -390,7 +431,7 @@ int nr_stun_get_message_client(nr_stun_server_ctx *ctx, nr_stun_message *req, nr
     nr_stun_server_client *clnt=0;
 
     if (! nr_stun_message_has_attribute(req, NR_STUN_ATTR_USERNAME, &attr)) {
-       r_log(NR_LOG_STUN,LOG_NOTICE,"STUN-SERVER(%s): Missing Username",ctx->label);
+       r_log(NR_LOG_STUN,LOG_WARNING,"STUN-SERVER(%s): Missing Username",ctx->label);
        ABORT(R_NOT_FOUND);
     }
 
@@ -399,8 +440,22 @@ int nr_stun_get_message_client(nr_stun_server_ctx *ctx, nr_stun_message *req, nr
                      sizeof(attr->u.username)))
             break;
     }
+
+    if (!clnt && ctx->default_client) {
+      /* If we can't find a specific client see if this matches the default,
+         which means that the username starts with our ufrag.
+       */
+      char *colon = strchr(attr->u.username, ':');
+      if (colon && !strncmp(ctx->default_client->username,
+                            attr->u.username,
+                            colon - attr->u.username)) {
+        clnt = ctx->default_client;
+        r_log(NR_LOG_STUN,LOG_NOTICE,"STUN-SERVER(%s): Falling back to default client, username=: %s",ctx->label,attr->u.username);
+      }
+    }
+
     if (!clnt) {
-        r_log(NR_LOG_STUN,LOG_NOTICE,"STUN-SERVER(%s): Request from unknown user: %s",ctx->label,attr->u.username);
+        r_log(NR_LOG_STUN,LOG_WARNING,"STUN-SERVER(%s): Request from unknown user: %s",ctx->label,attr->u.username);
         ABORT(R_NOT_FOUND);
     }
 

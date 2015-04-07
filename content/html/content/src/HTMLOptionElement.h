@@ -18,15 +18,16 @@ namespace dom {
 
 class HTMLSelectElement;
 
-class HTMLOptionElement : public nsGenericHTMLElement,
-                          public nsIDOMHTMLOptionElement
+class HTMLOptionElement MOZ_FINAL : public nsGenericHTMLElement,
+                                    public nsIDOMHTMLOptionElement
 {
 public:
-  HTMLOptionElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  HTMLOptionElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
   virtual ~HTMLOptionElement();
 
   static already_AddRefed<HTMLOptionElement>
-    Option(const GlobalObject& aGlobal, const Optional<nsAString>& aText,
+    Option(const GlobalObject& aGlobal,
+           const Optional<nsAString>& aText,
            const Optional<nsAString>& aValue,
            const Optional<bool>& aDefaultSelected,
            const Optional<bool>& aSelected, ErrorResult& aError);
@@ -35,15 +36,6 @@ public:
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLOptionElement
   using mozilla::dom::Element::SetText;
@@ -69,13 +61,11 @@ public:
                               bool aNullParent = true) MOZ_OVERRIDE;
 
   // nsIContent
-  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  virtual EventStates IntrinsicState() const MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo* aNodeInfo, nsINode** aResult) const MOZ_OVERRIDE;
 
   nsresult CopyInnerTo(mozilla::dom::Element* aDest);
-
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
   virtual bool IsDisabled() const MOZ_OVERRIDE {
     return HasAttr(kNameSpaceID_None, nsGkAtoms::disabled);
@@ -123,16 +113,10 @@ public:
     aRv = SetText(aValue);
   }
 
-  int32_t GetIndex(ErrorResult& aRv)
-  {
-    int32_t id = 0;
-    aRv = GetIndex(&id);
-    return id;
-  }
+  int32_t Index();
 
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
   /**
    * Get the select content element that contains this option, this

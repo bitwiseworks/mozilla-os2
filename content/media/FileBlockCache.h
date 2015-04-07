@@ -9,10 +9,12 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/Monitor.h"
-#include "prio.h"
 #include "nsTArray.h"
 #include "MediaCache.h"
 #include "nsDeque.h"
+#include "nsThreadUtils.h"
+
+struct PRFileDesc;
 
 namespace mozilla {
 
@@ -83,7 +85,7 @@ public:
   // Represents a change yet to be made to a block in the file. The change
   // is either a write (and the data to be written is stored in this struct)
   // or a move (and the index of the source block is stored instead).
-  struct BlockChange {
+  struct BlockChange MOZ_FINAL {
 
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BlockChange)
 
@@ -110,6 +112,12 @@ public:
     bool IsWrite() const {
       return mSourceBlockIndex == -1 &&
              mData.get() != nullptr;
+    }
+
+  private:
+    // Private destructor, to discourage deletion outside of Release():
+    ~BlockChange()
+    {
     }
   };
 
@@ -141,9 +149,7 @@ public:
   private:
     int32_t ObjectAt(int32_t aIndex) {
       void* v = nsDeque::ObjectAt(aIndex);
-      // Ugly hack to work around "casting 64bit void* to 32bit int loses precision"
-      // error on 64bit Linux.
-      return *(reinterpret_cast<int32_t*>(&v));
+      return reinterpret_cast<uintptr_t>(v);
     }
   };
 

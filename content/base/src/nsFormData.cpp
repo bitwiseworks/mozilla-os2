@@ -8,7 +8,6 @@
 #include "nsIDOMFile.h"
 #include "mozilla/dom/HTMLFormElement.h"
 #include "mozilla/dom/FormDataBinding.h"
-#include "nsContentUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -89,7 +88,7 @@ nsFormData::Append(const nsAString& aName, nsIVariant* aValue)
     }
   }
 
-  PRUnichar* stringData = nullptr;
+  char16_t* stringData = nullptr;
   uint32_t stringLen = 0;
   rv = aValue->GetAsWStringWithSize(&stringLen, &stringData);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -102,9 +101,9 @@ nsFormData::Append(const nsAString& aName, nsIVariant* aValue)
 }
 
 /* virtual */ JSObject*
-nsFormData::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+nsFormData::WrapObject(JSContext* aCx)
 {
-  return FormDataBinding::Wrap(aCx, aScope, this);
+  return FormDataBinding::Wrap(aCx, this);
 }
 
 /* static */ already_AddRefed<nsFormData>
@@ -112,7 +111,7 @@ nsFormData::Constructor(const GlobalObject& aGlobal,
                         const Optional<NonNull<HTMLFormElement> >& aFormElement,
                         ErrorResult& aRv)
 {
-  nsRefPtr<nsFormData> formData = new nsFormData(aGlobal.Get());
+  nsRefPtr<nsFormData> formData = new nsFormData(aGlobal.GetAsSupports());
   if (aFormElement.WasPassed()) {
     aRv = aFormElement.Value().WalkFormElements(formData);
   }

@@ -8,6 +8,7 @@
 #include <d3d10_1.h>
 #include <dxgi.h>
 
+#include "mozilla/gfx/Point.h"
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/PLayerTransaction.h"
 #include "ShadowLayers.h"
@@ -17,73 +18,10 @@ using namespace mozilla::gl;
 namespace mozilla {
 namespace layers {
 
-// Platform-specific shadow-layers interfaces.  See ShadowLayers.h.
-// D3D10 doesn't need all these yet.
-bool
-ISurfaceAllocator::PlatformAllocSurfaceDescriptor(const gfxIntSize&,
-                                                  gfxASurface::gfxContentType,
-                                                  uint32_t,
-                                                  SurfaceDescriptor*)
-{
-  return false;
-}
-
-/*static*/ already_AddRefed<gfxASurface>
-ShadowLayerForwarder::PlatformOpenDescriptor(OpenMode,
-                                             const SurfaceDescriptor&)
-{
-  return nullptr;
-}
-
-/*static*/ bool
-ShadowLayerForwarder::PlatformCloseDescriptor(const SurfaceDescriptor&)
-{
-  return false;
-}
-
-/*static*/ bool
-ShadowLayerForwarder::PlatformGetDescriptorSurfaceContentType(
-  const SurfaceDescriptor&,
-  OpenMode,
-  gfxContentType*,
-  gfxASurface**)
-{
-  return false;
-}
-
-/*static*/ bool
-ShadowLayerForwarder::PlatformGetDescriptorSurfaceSize(
-  const SurfaceDescriptor&,
-  OpenMode,
-  gfxIntSize*,
-  gfxASurface**)
-{
-  return false;
-}
-
-bool
-ShadowLayerForwarder::PlatformDestroySharedSurface(SurfaceDescriptor*)
-{
-  return false;
-}
 
 /*static*/ void
 ShadowLayerForwarder::PlatformSyncBeforeUpdate()
 {
-}
-
-bool
-ISurfaceAllocator::PlatformDestroySharedSurface(SurfaceDescriptor*)
-{
-  return false;
-}
-
-/*static*/ already_AddRefed<TextureImage>
-LayerManagerComposite::OpenDescriptorForDirectTexturing(GLContext*,
-                                                        const SurfaceDescriptor&,
-                                                        GLenum)
-{
-  return nullptr;
 }
 
 /*static*/ bool

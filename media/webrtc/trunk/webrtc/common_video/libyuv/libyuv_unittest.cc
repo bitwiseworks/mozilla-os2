@@ -11,12 +11,12 @@
 #include <math.h>
 #include <string.h>
 
-#include "common_video/interface/i420_video_frame.h"
-#include "common_video/libyuv/include/webrtc_libyuv.h"
-#include "gtest/gtest.h"
-#include "system_wrappers/interface/tick_util.h"
-#include "system_wrappers/interface/scoped_ptr.h"
-#include "testsupport/fileutils.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/common_video/interface/i420_video_frame.h"
+#include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/tick_util.h"
+#include "webrtc/test/testsupport/fileutils.h"
 
 namespace webrtc {
 
@@ -211,7 +211,9 @@ TEST_F(TestLibYuv, ConvertTest) {
     return;
   }
 
-  psnr = I420PSNR(orig_buffer_.get(), res_i420_buffer.get(), width_, height_);
+  ConvertToI420(kI420, res_i420_buffer.get(), 0, 0,
+      width_, height_, 0, kRotateNone, &res_i420_frame);
+  psnr = I420PSNR(&orig_frame_, &res_i420_frame);
   EXPECT_EQ(48.0, psnr);
   j++;
 

@@ -2,34 +2,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "ProfilerIOInterposeObserver.h"
-
 #include "GeckoProfiler.h"
+#include "ProfilerIOInterposeObserver.h"
+#include "ProfilerMarkers.h"
 
 using namespace mozilla;
 
-ProfilerIOInterposeObserver::ProfilerIOInterposeObserver()
+void ProfilerIOInterposeObserver::Observe(Observation& aObservation)
 {
-  IOInterposer* interposer = IOInterposer::GetInstance();
-  if (interposer) {
-    interposer->Register(IOInterposeObserver::OpAll, this);
+  if (!IsMainThread()) {
+    return;
   }
-}
 
-ProfilerIOInterposeObserver::~ProfilerIOInterposeObserver()
-{
-  IOInterposer* interposer = IOInterposer::GetInstance();
-  if (interposer) {
-    interposer->Deregister(IOInterposeObserver::OpAll, this);
+  ProfilerBacktrace* stack = profiler_get_backtrace();
+
+  nsCString filename;
+  if (aObservation.Filename()) {
+    filename = NS_ConvertUTF16toUTF8(aObservation.Filename());
   }
-}
 
-void ProfilerIOInterposeObserver::Observe(IOInterposeObserver::Operation aOp,
-                                          double& aDuration,
-                                          const char* aModuleInfo)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  const char* ops[] = {"none", "read", "write", "invalid", "fsync"};
-  PROFILER_MARKER(ops[aOp]);
+  IOMarkerPayload* markerPayload = new IOMarkerPayload(aObservation.Reference(),
+                                                       filename.get(),
+                                                       aObservation.Start(),
+                                                       aObservation.End(),
+                                                       stack);
+  PROFILER_MARKER_PAYLOAD(aObservation.ObservedOperationString(), markerPayload);
 }
-

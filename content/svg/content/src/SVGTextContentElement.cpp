@@ -5,27 +5,34 @@
 
 #include "mozilla/dom/SVGTextContentElement.h"
 #include "nsISVGPoint.h"
-#include "nsSVGTextContainerFrame.h"
-#include "nsSVGTextFrame2.h"
-#include "nsIDOMSVGAnimatedLength.h"
+#include "SVGTextFrame.h"
 #include "mozilla/dom/SVGIRect.h"
-#include "nsIDOMSVGAnimatedEnum.h"
 
 namespace mozilla {
 namespace dom {
 
-nsSVGTextContainerFrame*
-SVGTextContentElement::GetTextContainerFrame()
-{
-  return do_QueryFrame(GetPrimaryFrame(Flush_Layout));
-}
+nsSVGEnumMapping SVGTextContentElement::sLengthAdjustMap[] = {
+  { &nsGkAtoms::spacing, SVG_LENGTHADJUST_SPACING },
+  { &nsGkAtoms::spacingAndGlyphs, SVG_LENGTHADJUST_SPACINGANDGLYPHS },
+  { nullptr, 0 }
+};
 
-nsSVGTextFrame2*
+nsSVGElement::EnumInfo SVGTextContentElement::sEnumInfo[1] =
+{
+  { &nsGkAtoms::lengthAdjust, sLengthAdjustMap, SVG_LENGTHADJUST_SPACING }
+};
+
+nsSVGElement::LengthInfo SVGTextContentElement::sLengthInfo[1] =
+{
+  { &nsGkAtoms::textLength, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::XY }
+};
+
+SVGTextFrame*
 SVGTextContentElement::GetSVGTextFrame()
 {
   nsIFrame* frame = GetPrimaryFrame(Flush_Layout);
   while (frame) {
-    nsSVGTextFrame2* textFrame = do_QueryFrame(frame);
+    SVGTextFrame* textFrame = do_QueryFrame(frame);
     if (textFrame) {
       return textFrame;
     }
@@ -34,11 +41,16 @@ SVGTextContentElement::GetSVGTextFrame()
   return nullptr;
 }
 
-bool
-SVGTextContentElement::FrameIsSVGText()
+already_AddRefed<SVGAnimatedLength>
+SVGTextContentElement::TextLength()
 {
-  nsIFrame* frame = GetPrimaryFrame(Flush_Layout);
-  return frame && frame->IsSVGText();
+  return LengthAttributes()[TEXTLENGTH].ToDOMAnimatedLength(this);
+}
+
+already_AddRefed<SVGAnimatedEnumeration>
+SVGTextContentElement::LengthAdjust()
+{
+  return EnumAttributes()[LENGTHADJUST].ToDOMAnimatedEnum(this);
 }
 
 //----------------------------------------------------------------------
@@ -46,182 +58,102 @@ SVGTextContentElement::FrameIsSVGText()
 int32_t
 SVGTextContentElement::GetNumberOfChars()
 {
-  if (FrameIsSVGText()) {
-    nsSVGTextFrame2* textFrame = GetSVGTextFrame();
-    return textFrame ? textFrame->GetNumberOfChars(this) : 0;
-  } else {
-    nsSVGTextContainerFrame* metrics = GetTextContainerFrame();
-    return metrics ? metrics->GetNumberOfChars() : 0;
-  }
+  SVGTextFrame* textFrame = GetSVGTextFrame();
+  return textFrame ? textFrame->GetNumberOfChars(this) : 0;
 }
 
 float
 SVGTextContentElement::GetComputedTextLength()
 {
-  if (FrameIsSVGText()) {
-    nsSVGTextFrame2* textFrame = GetSVGTextFrame();
-    return textFrame ? textFrame->GetComputedTextLength(this) : 0.0f;
-  } else {
-    nsSVGTextContainerFrame* metrics = GetTextContainerFrame();
-    return metrics ? metrics->GetComputedTextLength() : 0.0f;
-  }
+  SVGTextFrame* textFrame = GetSVGTextFrame();
+  return textFrame ? textFrame->GetComputedTextLength(this) : 0.0f;
 }
 
 void
 SVGTextContentElement::SelectSubString(uint32_t charnum, uint32_t nchars, ErrorResult& rv)
 {
-  if (FrameIsSVGText()) {
-    nsSVGTextFrame2* textFrame = GetSVGTextFrame();
-    if (!textFrame)
-      return;
+  SVGTextFrame* textFrame = GetSVGTextFrame();
+  if (!textFrame)
+    return;
 
-    rv = textFrame->SelectSubString(this, charnum, nchars);
-  } else {
-    rv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-  }
+  rv = textFrame->SelectSubString(this, charnum, nchars);
 }
 
 float
 SVGTextContentElement::GetSubStringLength(uint32_t charnum, uint32_t nchars, ErrorResult& rv)
 {
-  if (FrameIsSVGText()) {
-    nsSVGTextFrame2* textFrame = GetSVGTextFrame();
-    if (!textFrame)
-      return 0.0f;
+  SVGTextFrame* textFrame = GetSVGTextFrame();
+  if (!textFrame)
+    return 0.0f;
 
-    float length = 0.0f;
-    rv = textFrame->GetSubStringLength(this, charnum, nchars, &length);
-    return length;
-  } else {
-    nsSVGTextContainerFrame* metrics = GetTextContainerFrame();
-    if (!metrics)
-      return 0.0f;
-
-    uint32_t charcount = metrics->GetNumberOfChars();
-    if (charcount <= charnum || nchars > charcount - charnum) {
-      rv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-      return 0.0f;
-    }
-
-    if (nchars == 0)
-      return 0.0f;
-
-    return metrics->GetSubStringLength(charnum, nchars);
-  }
+  float length = 0.0f;
+  rv = textFrame->GetSubStringLength(this, charnum, nchars, &length);
+  return length;
 }
 
 already_AddRefed<nsISVGPoint>
 SVGTextContentElement::GetStartPositionOfChar(uint32_t charnum, ErrorResult& rv)
 {
-  nsCOMPtr<nsISVGPoint> point;
-  if (FrameIsSVGText()) {
-    nsSVGTextFrame2* textFrame = GetSVGTextFrame();
-    if (!textFrame) {
-      rv.Throw(NS_ERROR_FAILURE);
-      return nullptr;
-    }
-
-    rv = textFrame->GetStartPositionOfChar(this, charnum, getter_AddRefs(point));
-  } else {
-    nsSVGTextContainerFrame* metrics = GetTextContainerFrame();
-
-    if (!metrics) {
-      rv.Throw(NS_ERROR_FAILURE);
-      return nullptr;
-    }
-
-    rv = metrics->GetStartPositionOfChar(charnum, getter_AddRefs(point));
+  SVGTextFrame* textFrame = GetSVGTextFrame();
+  if (!textFrame) {
+    rv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
   }
+
+  nsCOMPtr<nsISVGPoint> point;
+  rv = textFrame->GetStartPositionOfChar(this, charnum, getter_AddRefs(point));
   return point.forget();
 }
 
 already_AddRefed<nsISVGPoint>
 SVGTextContentElement::GetEndPositionOfChar(uint32_t charnum, ErrorResult& rv)
 {
-  nsCOMPtr<nsISVGPoint> point;
-  if (FrameIsSVGText()) {
-    nsSVGTextFrame2* textFrame = GetSVGTextFrame();
-    if (!textFrame) {
-      rv.Throw(NS_ERROR_FAILURE);
-      return nullptr;
-    }
-
-    rv = textFrame->GetEndPositionOfChar(this, charnum, getter_AddRefs(point));
-  } else {
-    nsSVGTextContainerFrame* metrics = GetTextContainerFrame();
-
-    if (!metrics) {
-      rv.Throw(NS_ERROR_FAILURE);
-      return nullptr;
-    }
-
-    rv = metrics->GetEndPositionOfChar(charnum, getter_AddRefs(point));
+  SVGTextFrame* textFrame = GetSVGTextFrame();
+  if (!textFrame) {
+    rv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
   }
+
+  nsCOMPtr<nsISVGPoint> point;
+  rv = textFrame->GetEndPositionOfChar(this, charnum, getter_AddRefs(point));
   return point.forget();
 }
 
 already_AddRefed<SVGIRect>
 SVGTextContentElement::GetExtentOfChar(uint32_t charnum, ErrorResult& rv)
 {
-  nsRefPtr<SVGIRect> rect;
-  if (FrameIsSVGText()) {
-    nsSVGTextFrame2* textFrame = GetSVGTextFrame();
+  SVGTextFrame* textFrame = GetSVGTextFrame();
 
-    if (!textFrame) {
-      rv.Throw(NS_ERROR_FAILURE);
-      return nullptr;
-    }
-
-    rv = textFrame->GetExtentOfChar(this, charnum, getter_AddRefs(rect));
-  } else {
-    nsSVGTextContainerFrame* metrics = GetTextContainerFrame();
-
-    if (!metrics) {
-      rv.Throw(NS_ERROR_FAILURE);
-      return nullptr;
-    }
-
-    rv = metrics->GetExtentOfChar(charnum, getter_AddRefs(rect));
+  if (!textFrame) {
+    rv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
   }
+
+  nsRefPtr<SVGIRect> rect;
+  rv = textFrame->GetExtentOfChar(this, charnum, getter_AddRefs(rect));
   return rect.forget();
 }
 
 float
 SVGTextContentElement::GetRotationOfChar(uint32_t charnum, ErrorResult& rv)
 {
-  float rotation;
-  if (FrameIsSVGText()) {
-    nsSVGTextFrame2* textFrame = GetSVGTextFrame();
+  SVGTextFrame* textFrame = GetSVGTextFrame();
 
-    if (!textFrame) {
-      rv.Throw(NS_ERROR_FAILURE);
-      return 0.0f;
-    }
-
-    rv = textFrame->GetRotationOfChar(this, charnum, &rotation);
-  } else {
-    nsSVGTextContainerFrame* metrics = GetTextContainerFrame();
-
-    if (!metrics) {
-      rv.Throw(NS_ERROR_FAILURE);
-      return 0.0f;
-    }
-
-    rv = metrics->GetRotationOfChar(charnum, &rotation);
+  if (!textFrame) {
+    rv.Throw(NS_ERROR_FAILURE);
+    return 0.0f;
   }
+
+  float rotation;
+  rv = textFrame->GetRotationOfChar(this, charnum, &rotation);
   return rotation;
 }
 
 int32_t
 SVGTextContentElement::GetCharNumAtPosition(nsISVGPoint& aPoint)
 {
-  if (FrameIsSVGText()) {
-    nsSVGTextFrame2* textFrame = GetSVGTextFrame();
-    return textFrame ? textFrame->GetCharNumAtPosition(this, &aPoint) : -1;
-  } else {
-    nsSVGTextContainerFrame* metrics = GetTextContainerFrame();
-    return metrics ? metrics->GetCharNumAtPosition(&aPoint) : -1;
-  }
+  SVGTextFrame* textFrame = GetSVGTextFrame();
+  return textFrame ? textFrame->GetCharNumAtPosition(this, &aPoint) : -1;
 }
 
 } // namespace dom

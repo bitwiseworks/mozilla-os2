@@ -16,6 +16,8 @@
 #include "nsPresContext.h"
 #include "nsLayoutUtils.h"
 #include "gfxFont.h"
+#include "nsIAccessibleTypes.h"
+#include "mozilla/gfx/2D.h"
 
 using namespace mozilla::a11y;
 
@@ -34,7 +36,7 @@ sdnTextAccessible::get_domText(BSTR __RPC_FAR* aText)
 
   if (!aText)
     return E_INVALIDARG;
-  *aText = NULL;
+  *aText = nullptr;
 
   if (mAccessible->IsDefunct())
     return CO_E_OBJNOTCONNECTED;
@@ -170,7 +172,7 @@ sdnTextAccessible::get_fontFamily(BSTR __RPC_FAR* aFontFamily)
 
   if (!aFontFamily)
     return E_INVALIDARG;
-  *aFontFamily = NULL;
+  *aFontFamily = nullptr;
 
   if (mAccessible->IsDefunct())
     return CO_E_OBJNOTCONNECTED;

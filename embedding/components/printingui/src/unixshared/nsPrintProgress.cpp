@@ -11,8 +11,8 @@
 #include "nsISupportsPrimitives.h"
 #include "nsIComponentManager.h"
 
-NS_IMPL_THREADSAFE_ADDREF(nsPrintProgress)
-NS_IMPL_THREADSAFE_RELEASE(nsPrintProgress)
+NS_IMPL_ADDREF(nsPrintProgress)
+NS_IMPL_RELEASE(nsPrintProgress)
 
 NS_INTERFACE_MAP_BEGIN(nsPrintProgress)
    NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIPrintStatusFeedback)
@@ -194,7 +194,7 @@ NS_IMETHODIMP nsPrintProgress::OnLocationChange(nsIWebProgress *aWebProgress, ns
 }
 
 /* void onStatusChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in nsresult aStatus, in wstring aMessage); */
-NS_IMETHODIMP nsPrintProgress::OnStatusChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, nsresult aStatus, const PRUnichar *aMessage)
+NS_IMETHODIMP nsPrintProgress::OnStatusChange(nsIWebProgress *aWebProgress, nsIRequest *aRequest, nsresult aStatus, const char16_t *aMessage)
 {
   if (aMessage && *aMessage)
   m_pendingStatus = aMessage;
@@ -223,7 +223,7 @@ nsresult nsPrintProgress::ReleaseListeners()
   return NS_OK;
 }
 
-NS_IMETHODIMP nsPrintProgress::ShowStatusString(const PRUnichar *status)
+NS_IMETHODIMP nsPrintProgress::ShowStatusString(const char16_t *status)
 {
   return OnStatusChange(nullptr, nullptr, NS_OK, status);
 }

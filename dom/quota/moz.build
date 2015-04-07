@@ -12,8 +12,6 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'dom_quota'
 
-MODULE = 'dom'
-
 EXPORTS += [
     'nsIOfflineStorage.h',
 ]
@@ -24,18 +22,30 @@ EXPORTS.mozilla.dom.quota += [
     'Client.h',
     'FileStreams.h',
     'OriginOrPatternString.h',
+    'PersistenceType.h',
     'QuotaCommon.h',
     'QuotaManager.h',
     'QuotaObject.h',
     'StoragePrivilege.h',
-    'UsageRunnable.h',
+    'UsageInfo.h',
     'Utilities.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'CheckQuotaHelper.cpp',
     'FileStreams.cpp',
     'QuotaManager.cpp',
     'QuotaObject.cpp',
+]
+
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'
+LOCAL_INCLUDES += [
+    '/caps/include',
 ]
 

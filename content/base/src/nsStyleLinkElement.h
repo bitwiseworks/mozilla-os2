@@ -15,32 +15,27 @@
 
 #include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
-#include "nsIDOMLinkStyle.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsCSSStyleSheet.h"
 #include "nsTArray.h"
 #include "mozilla/CORSMode.h"
 
-#define PREFETCH      0x00000001
-#define DNS_PREFETCH  0x00000002
-#define STYLESHEET    0x00000004
-#define NEXT          0x00000008
-#define ALTERNATE     0x00000010
-
 class nsIDocument;
 class nsIURI;
 
-class nsStyleLinkElement : public nsIDOMLinkStyle,
-                           public nsIStyleSheetLinkingElement
+namespace mozilla {
+namespace dom {
+class ShadowRoot;
+} // namespace dom
+} // namespace mozilla
+
+class nsStyleLinkElement : public nsIStyleSheetLinkingElement
 {
 public:
   nsStyleLinkElement();
   virtual ~nsStyleLinkElement();
 
   NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) MOZ_OVERRIDE = 0;
-
-  // nsIDOMLinkStyle
-  NS_DECL_NSIDOMLINKSTYLE
 
   nsCSSStyleSheet* GetSheet() const { return mStyleSheet; }
 
@@ -57,9 +52,21 @@ public:
   virtual void OverrideBaseURI(nsIURI* aNewBaseURI) MOZ_OVERRIDE;
   virtual void SetLineNumber(uint32_t aLineNumber) MOZ_OVERRIDE;
 
+  enum RelValue {
+    ePREFETCH =     0x00000001,
+    eDNS_PREFETCH = 0x00000002,
+    eSTYLESHEET =   0x00000004,
+    eNEXT =         0x00000008,
+    eALTERNATE =    0x00000010,
+  };
+
+  // The return value is a bitwise or of 0 or more RelValues
   static uint32_t ParseLinkTypes(const nsAString& aTypes);
-  
-  void UpdateStyleSheetInternal() { UpdateStyleSheetInternal(nullptr); }
+
+  void UpdateStyleSheetInternal()
+  {
+    UpdateStyleSheetInternal(nullptr, nullptr);
+  }
 protected:
   /**
    * @param aOldDocument should be non-null only if we're updating because we
@@ -70,6 +77,7 @@ protected:
    *                     changed but the URI may not have changed.
    */
   nsresult UpdateStyleSheetInternal(nsIDocument *aOldDocument,
+                                    mozilla::dom::ShadowRoot *aOldShadowRoot,
                                     bool aForceUpdate = false);
 
   void UpdateStyleSheetScopedness(bool aIsNowScoped);
@@ -95,12 +103,17 @@ private:
   /**
    * @param aOldDocument should be non-null only if we're updating because we
    *                     removed the node from the document.
+   * @param aOldShadowRoot The ShadowRoot that used to contain the style.
+   *                     Passed as a parameter because on an update, the node
+   *                     is removed from the tree before the sheet is removed
+   *                     from the ShadowRoot.
    * @param aForceUpdate true will force the update even if the URI has not
    *                     changed.  This should be used in cases when something
    *                     about the content that affects the resulting sheet
    *                     changed but the URI may not have changed.
    */
-  nsresult DoUpdateStyleSheet(nsIDocument *aOldDocument,
+  nsresult DoUpdateStyleSheet(nsIDocument* aOldDocument,
+                              mozilla::dom::ShadowRoot* aOldShadowRoot,
                               nsICSSLoaderObserver* aObserver,
                               bool* aWillNotify,
                               bool* aIsAlternate,

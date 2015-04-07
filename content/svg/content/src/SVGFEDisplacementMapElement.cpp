@@ -10,20 +10,15 @@
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FEDisplacementMap)
 
+using namespace mozilla::gfx;
+
 namespace mozilla {
 namespace dom {
 
-// Channel Selectors
-static const unsigned short SVG_CHANNEL_UNKNOWN = 0;
-static const unsigned short SVG_CHANNEL_R = 1;
-static const unsigned short SVG_CHANNEL_G = 2;
-static const unsigned short SVG_CHANNEL_B = 3;
-static const unsigned short SVG_CHANNEL_A = 4;
-
 JSObject*
-SVGFEDisplacementMapElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+SVGFEDisplacementMapElement::WrapNode(JSContext* aCx)
 {
-  return SVGFEDisplacementMapElementBinding::Wrap(aCx, aScope, this);
+  return SVGFEDisplacementMapElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::NumberInfo SVGFEDisplacementMapElement::sNumberInfo[1] =
@@ -77,86 +72,47 @@ SVGFEDisplacementMapElement::In2()
   return mStringAttributes[IN2].ToDOMAnimatedString(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedNumber>
+already_AddRefed<SVGAnimatedNumber>
 SVGFEDisplacementMapElement::Scale()
 {
   return mNumberAttributes[SCALE].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+already_AddRefed<SVGAnimatedEnumeration>
 SVGFEDisplacementMapElement::XChannelSelector()
 {
   return mEnumAttributes[CHANNEL_X].ToDOMAnimatedEnum(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+already_AddRefed<SVGAnimatedEnumeration>
 SVGFEDisplacementMapElement::YChannelSelector()
 {
   return mEnumAttributes[CHANNEL_Y].ToDOMAnimatedEnum(this);
 }
 
-nsresult
-SVGFEDisplacementMapElement::Filter(nsSVGFilterInstance* instance,
-                                    const nsTArray<const Image*>& aSources,
-                                    const Image* aTarget,
-                                    const nsIntRect& rect)
+FilterPrimitiveDescription
+SVGFEDisplacementMapElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
+                                                     const IntRect& aFilterSubregion,
+                                                     const nsTArray<bool>& aInputsAreTainted,
+                                                     nsTArray<RefPtr<SourceSurface>>& aInputImages)
 {
-  float scale = instance->GetPrimitiveNumber(SVGContentUtils::XY,
-                                             &mNumberAttributes[SCALE]);
-  if (scale == 0.0f) {
-    CopyRect(aTarget, aSources[0], rect);
-    return NS_OK;
+  if (aInputsAreTainted[1]) {
+    // If the map is tainted, refuse to apply the effect and act as a
+    // pass-through filter instead, as required by the spec.
+    FilterPrimitiveDescription descr(PrimitiveType::Offset);
+    descr.Attributes().Set(eOffsetOffset, IntPoint(0, 0));
+    return descr;
   }
 
-  int32_t width = instance->GetSurfaceWidth();
-  int32_t height = instance->GetSurfaceHeight();
-
-  uint8_t* sourceData = aSources[0]->mImage->Data();
-  uint8_t* displacementData = aSources[1]->mImage->Data();
-  uint8_t* targetData = aTarget->mImage->Data();
-  uint32_t stride = aTarget->mImage->Stride();
-
-  static const uint8_t dummyData[4] = { 0, 0, 0, 0 };
-
-  static const uint16_t channelMap[5] = {
-                             0,
-                             GFX_ARGB32_OFFSET_R,
-                             GFX_ARGB32_OFFSET_G,
-                             GFX_ARGB32_OFFSET_B,
-                             GFX_ARGB32_OFFSET_A };
-  uint16_t xChannel = channelMap[mEnumAttributes[CHANNEL_X].GetAnimValue()];
-  uint16_t yChannel = channelMap[mEnumAttributes[CHANNEL_Y].GetAnimValue()];
-
-  double scaleOver255 = scale / 255.0;
-  double scaleAdjustment = 0.5 - 0.5 * scale;
-
-  for (int32_t y = rect.y; y < rect.YMost(); y++) {
-    for (int32_t x = rect.x; x < rect.XMost(); x++) {
-      uint32_t targIndex = y * stride + 4 * x;
-      // At some point we might want to replace this with a bilinear sample.
-      int32_t sourceX = x +
-        NSToIntFloor(scaleOver255 * displacementData[targIndex + xChannel] +
-                scaleAdjustment);
-      int32_t sourceY = y +
-        NSToIntFloor(scaleOver255 * displacementData[targIndex + yChannel] +
-                scaleAdjustment);
-
-      bool outOfBounds = sourceX < 0 || sourceX >= width ||
-                         sourceY < 0 || sourceY >= height;
-      const uint8_t* data;
-      int32_t multiplier;
-      if (outOfBounds) {
-        data = dummyData;
-        multiplier = 0;
-      } else {
-        data = sourceData;
-        multiplier = 1;
-      }
-      *(uint32_t*)(targetData + targIndex) =
-        *(uint32_t*)(data + multiplier * (sourceY * stride + 4 * sourceX));
-    }
-  }
-  return NS_OK;
+  float scale = aInstance->GetPrimitiveNumber(SVGContentUtils::XY,
+                                              &mNumberAttributes[SCALE]);
+  uint32_t xChannel = mEnumAttributes[CHANNEL_X].GetAnimValue();
+  uint32_t yChannel = mEnumAttributes[CHANNEL_Y].GetAnimValue();
+  FilterPrimitiveDescription descr(PrimitiveType::DisplacementMap);
+  descr.Attributes().Set(eDisplacementMapScale, scale);
+  descr.Attributes().Set(eDisplacementMapXChannel, xChannel);
+  descr.Attributes().Set(eDisplacementMapYChannel, yChannel);
+  return descr;
 }
 
 bool
@@ -177,38 +133,6 @@ SVGFEDisplacementMapElement::GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSou
 {
   aSources.AppendElement(nsSVGStringInfo(&mStringAttributes[IN1], this));
   aSources.AppendElement(nsSVGStringInfo(&mStringAttributes[IN2], this));
-}
-
-nsIntRect
-SVGFEDisplacementMapElement::ComputeTargetBBox(const nsTArray<nsIntRect>& aSourceBBoxes,
-          const nsSVGFilterInstance& aInstance)
-{
-  // XXX we could do something clever here involving analysis of 'scale'
-  // to figure out the maximum displacement, and then return mIn1's bounds
-  // adjusted for the maximum displacement
-  return GetMaxRect();
-}
-
-void
-SVGFEDisplacementMapElement::ComputeNeededSourceBBoxes(const nsIntRect& aTargetBBox,
-          nsTArray<nsIntRect>& aSourceBBoxes, const nsSVGFilterInstance& aInstance)
-{
-  // in2 contains the displacements, which we read for each target pixel
-  aSourceBBoxes[1] = aTargetBBox;
-  // XXX to figure out which parts of 'in' we might read, we could
-  // do some analysis of 'scale' to figure out the maximum displacement.
-  // For now, just leave aSourceBBoxes[0] alone, i.e. assume we use its
-  // entire output bounding box.
-  // If we change this, we need to change coordinate assumptions above
-}
-
-nsIntRect
-SVGFEDisplacementMapElement::ComputeChangeBBox(const nsTArray<nsIntRect>& aSourceChangeBoxes,
-                                               const nsSVGFilterInstance& aInstance)
-{
-  // XXX we could do something clever here involving analysis of 'scale'
-  // to figure out the maximum displacement
-  return GetMaxRect();
 }
 
 //----------------------------------------------------------------------

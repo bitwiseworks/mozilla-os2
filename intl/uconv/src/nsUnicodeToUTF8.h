@@ -7,6 +7,7 @@
 #define nsUnicodeToUTF8_h___
 
 #include "mozilla/Attributes.h"
+#include "nsIUnicodeEncoder.h"
 
 // Class ID for our UnicodeToUTF8 charset converter
 // {7C657D18-EC5E-11d2-8AAC-00600811A836}
@@ -38,23 +39,23 @@ public:
    */
   nsUnicodeToUTF8() {mHighSurrogate = 0;}
 
-  NS_IMETHOD Convert(const PRUnichar * aSrc, 
+  NS_IMETHOD Convert(const char16_t * aSrc, 
                      int32_t * aSrcLength, 
                      char * aDest, 
                      int32_t * aDestLength);
 
   NS_IMETHOD Finish(char * aDest, int32_t * aDestLength);
 
-  NS_IMETHOD GetMaxLength(const PRUnichar * aSrc, int32_t aSrcLength, 
+  NS_IMETHOD GetMaxLength(const char16_t * aSrc, int32_t aSrcLength, 
       int32_t * aDestLength);
 
   NS_IMETHOD Reset() {mHighSurrogate = 0; return NS_OK;}
 
   NS_IMETHOD SetOutputErrorBehavior(int32_t aBehavior, 
-    nsIUnicharEncoder * aEncoder, PRUnichar aChar) {return NS_OK;}
+    nsIUnicharEncoder * aEncoder, char16_t aChar) {return NS_OK;}
 
 protected:
-  PRUnichar mHighSurrogate;
+  char16_t mHighSurrogate;
 
 };
 

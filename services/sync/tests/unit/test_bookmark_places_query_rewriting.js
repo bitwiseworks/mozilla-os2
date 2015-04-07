@@ -2,6 +2,7 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 _("Rewrite place: URIs.");
+Cu.import("resource://gre/modules/PlacesUtils.jsm");
 Cu.import("resource://services-sync/engines/bookmarks.js");
 Cu.import("resource://services-sync/service.js");
 Cu.import("resource://services-sync/util.js");
@@ -11,8 +12,8 @@ let store = engine._store;
 
 function run_test() {
   initTestLogging("Trace");
-  Log4Moz.repository.getLogger("Sync.Engine.Bookmarks").level = Log4Moz.Level.Trace;
-  Log4Moz.repository.getLogger("Sync.Store.Bookmarks").level = Log4Moz.Level.Trace;
+  Log.repository.getLogger("Sync.Engine.Bookmarks").level = Log.Level.Trace;
+  Log.repository.getLogger("Sync.Store.Bookmarks").level = Log.Level.Trace;
 
   let tagRecord = new BookmarkQuery("bookmarks", "abcdefabcdef");
   let uri = "place:folder=499&type=7&queryType=1";

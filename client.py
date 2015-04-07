@@ -5,10 +5,7 @@
 
 
 LIBFFI_DIRS = (('js/ctypes/libffi', 'libffi'),)
-WEBIDLPARSER_DIR = 'dom/bindings/parser'
-WEBIDLPARSER_REPO = 'https://hg.mozilla.org/users/khuey_mozilla.com/webidl-parser'
 HG_EXCLUSIONS = ['.hg', '.hgignore', '.hgtags']
-WEBIDLPARSER_EXCLUSIONS = HG_EXCLUSIONS + ['.gitignore', 'ply']
 
 CVSROOT_LIBFFI = ':pserver:anoncvs@sources.redhat.com:/cvs/libffi'
 
@@ -95,7 +92,32 @@ def toggle_trailing_blank_line(depname):
       # adding blank line
       open(depname, "ab").write("\n")
 
-o = OptionParser(usage="client.py [options] update_nspr tagname | update_nss tagname | update_libffi tagname | update_webidlparser tagname")
+def get_trailing_blank_line_state(depname):
+  lines = open(depname, "r").readlines()
+  if not lines:
+      print >>sys.stderr, "unexpected short file"
+      return "no blank line"
+
+  if not lines[-1].strip():
+      return "has blank line"
+  else:
+      return "no blank line"
+
+def update_nspr_or_nss(tag, depfile, destination, hgpath):
+  print "reverting to HG version of %s to get its blank line state" % depfile
+  check_call_noisy([options.hg, 'revert', depfile])
+  old_state = get_trailing_blank_line_state(depfile)
+  print "old state of %s is: %s" % (depfile, old_state)
+  do_hg_replace(destination, hgpath, tag, HG_EXCLUSIONS, options.hg)
+  new_state = get_trailing_blank_line_state(depfile)
+  print "new state of %s is: %s" % (depfile, new_state)
+  if old_state == new_state:
+    print "toggling blank line in: ", depfile
+    toggle_trailing_blank_line(depfile)
+  tag_file = destination + "/TAG-INFO"
+  print >>file(tag_file, "w"), tag
+
+o = OptionParser(usage="client.py [options] update_nspr tagname | update_nss tagname | update_libffi tagname")
 o.add_option("--skip-mozilla", dest="skip_mozilla",
              action="store_true", default=False,
              help="Obsolete")
@@ -106,6 +128,8 @@ o.add_option("--cvsroot", dest="cvsroot",
              help="The CVSROOT for libffi (default : %s)" % CVSROOT_LIBFFI)
 o.add_option("--hg", dest="hg", default=os.environ.get('HG', 'hg'),
              help="The location of the hg binary")
+o.add_option("--repo", dest="repo",
+             help="the repo to update from (default: upstream repo)")
 
 try:
     options, args = o.parse_args()
@@ -119,24 +143,21 @@ if action in ('checkout', 'co'):
     pass
 elif action in ('update_nspr'):
     tag, = args[1:]
-    do_hg_replace('nsprpub', 'https://hg.mozilla.org/projects/nspr',
-	              tag, HG_EXCLUSIONS, options.hg)
-    print >>file("nsprpub/TAG-INFO", "w"), tag
-    toggle_trailing_blank_line("nsprpub/config/prdepend.h")
+    depfile = "nsprpub/config/prdepend.h"
+    if not options.repo:
+        options.repo = 'https://hg.mozilla.org/projects/nspr'
+    update_nspr_or_nss(tag, depfile, 'nsprpub', options.repo)
 elif action in ('update_nss'):
     tag, = args[1:]
-    do_hg_replace('security/nss', 'https://hg.mozilla.org/projects/nss',
-	              tag, HG_EXCLUSIONS, options.hg)
-    print >>file("security/nss/TAG-INFO", "w"), tag
-    toggle_trailing_blank_line("security/nss/coreconf/coreconf.dep")
+    depfile = "security/nss/coreconf/coreconf.dep"
+    if not options.repo:
+	    options.repo = 'https://hg.mozilla.org/projects/nss'
+    update_nspr_or_nss(tag, depfile, 'security/nss', options.repo)
 elif action in ('update_libffi'):
     tag, = args[1:]
     if not options.cvsroot:
         options.cvsroot = CVSROOT_LIBFFI
     do_cvs_export(LIBFFI_DIRS, tag, options.cvsroot, options.cvs)
-elif action in ('update_webidlparser'):
-    tag, = args[1:]
-    do_hg_replace(WEBIDLPARSER_DIR, WEBIDLPARSER_REPO, tag, WEBIDLPARSER_EXCLUSIONS, options.hg)
 else:
     o.print_help()
     sys.exit(2)

@@ -8,14 +8,17 @@
 #ifndef MOZILLA_SVGMOTIONSMILTYPE_H_
 #define MOZILLA_SVGMOTIONSMILTYPE_H_
 
+#include "mozilla/gfx/2D.h"
 #include "mozilla/Attributes.h"
-#include "gfxMatrix.h"
 #include "nsISMILType.h"
 
-class gfxFlattenedPath;
 class nsSMILValue;
 
 namespace mozilla {
+
+namespace gfx {
+struct Matrix;
+}
 
 /**
  * MotionRotateType: Enum to indicate the type of our "rotate" attribute.
@@ -35,6 +38,8 @@ enum RotateType {
  */
 class SVGMotionSMILType : public nsISMILType
 {
+  typedef mozilla::gfx::Path Path;
+
 public:
   // Singleton for nsSMILValue objects to hold onto.
   static SVGMotionSMILType sSingleton;
@@ -61,20 +66,18 @@ protected:
                                nsSMILValue& aResult) const MOZ_OVERRIDE;
 public:
   // Used to generate a transform matrix from an <animateMotion> nsSMILValue.
-  static gfxMatrix CreateMatrix(const nsSMILValue& aSMILVal);
+  static gfx::Matrix CreateMatrix(const nsSMILValue& aSMILVal);
 
   // Used to generate a nsSMILValue for the point at the given distance along
   // the given path.
-  static nsSMILValue ConstructSMILValue(gfxFlattenedPath* aPath,
+  static nsSMILValue ConstructSMILValue(Path* aPath,
                                         float aDist,
                                         RotateType aRotateType,
                                         float aRotateAngle);
 
 private:
-  // Private constructor & destructor: prevent instances beyond my singleton,
-  // and prevent others from deleting my singleton.
-  SVGMotionSMILType()  {}
-  ~SVGMotionSMILType() {}
+  // Private constructor: prevent instances beyond my singleton.
+  MOZ_CONSTEXPR SVGMotionSMILType() {}
 };
 
 } // namespace mozilla

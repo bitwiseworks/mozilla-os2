@@ -5,9 +5,7 @@
 "use strict";
 
 let { classes: Cc, interfaces: Ci, results: Cr, utils: Cu }  = Components;
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Geometry.jsm");
 
 function debug(msg) {
   //dump("BrowserElementChild - " + msg + "\n");
@@ -17,20 +15,44 @@ function debug(msg) {
 // mozbrowser API clients.
 docShell.isActive = true;
 
+function parentDocShell(docshell) {
+  if (!docshell) {
+    return null;
+  }
+  let treeitem = docshell.QueryInterface(Ci.nsIDocShellTreeItem);
+  return treeitem.parent ? treeitem.parent.QueryInterface(Ci.nsIDocShell) : null;
+}
+
+function isTopBrowserElement(docShell) {
+  while (docShell) {
+    docShell = parentDocShell(docShell);
+    if (docShell && docShell.isBrowserOrApp) {
+      return false;
+    }
+  }
+  return true;
+}
+
+if (!('BrowserElementIsPreloaded' in this)) {
+  if (isTopBrowserElement(docShell) &&
+      Services.prefs.getBoolPref("dom.mozInputMethod.enabled")) {
+    try {
+      Services.scriptloader.loadSubScript("chrome://global/content/forms.js");
+    } catch (e) {
+    }
+  }
+
+  Services.scriptloader.loadSubScript("chrome://global/content/BrowserElementPanning.js");
+  ContentPanning.init();
+
+  Services.scriptloader.loadSubScript("chrome://global/content/BrowserElementChildPreload.js");
+} else {
+  ContentPanning.init();
+}
+
+var BrowserElementIsReady = true;
+
 let infos = sendSyncMessage('browser-element-api:call',
                             { 'msg_name': 'hello' })[0];
 docShell.QueryInterface(Ci.nsIDocShellTreeItem).name = infos.name;
 docShell.setFullscreenAllowed(infos.fullscreenAllowed);
-
-
-if (!('BrowserElementIsPreloaded' in this)) {
-  // This is a produc-specific file that's sometimes unavailable.
-  try {
-    Services.scriptloader.loadSubScript("chrome://browser/content/forms.js");
-  } catch (e) {
-  }
-  Services.scriptloader.loadSubScript("chrome://global/content/BrowserElementPanning.js");
-  Services.scriptloader.loadSubScript("chrome://global/content/BrowserElementChildPreload.js");
-}
-
-var BrowserElementIsReady = true;

@@ -25,8 +25,8 @@
 #include "nsStringStream.h"
 #include "plbase64.h"
 #include "nsIClassInfoImpl.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/Util.h"
 
 // For large favicons optimization.
 #include "imgITools.h"
@@ -66,8 +66,8 @@ public:
 
 PLACES_FACTORY_SINGLETON_IMPLEMENTATION(nsFaviconService, gFaviconService)
 
-NS_IMPL_CLASSINFO(nsFaviconService, NULL, 0, NS_FAVICONSERVICE_CID)
-NS_IMPL_ISUPPORTS3_CI(
+NS_IMPL_CLASSINFO(nsFaviconService, nullptr, 0, NS_FAVICONSERVICE_CID)
+NS_IMPL_ISUPPORTS_CI(
   nsFaviconService
 , nsIFaviconService
 , mozIAsyncFavicons
@@ -77,6 +77,8 @@ NS_IMPL_ISUPPORTS3_CI(
 nsFaviconService::nsFaviconService()
   : mOptimizedIconDimension(OPTIMIZED_FAVICON_DIMENSION)
   , mFailedFaviconSerial(0)
+  , mFailedFavicons(MAX_FAVICON_CACHE_SIZE)
+  , mUnassociatedIcons(MAX_UNASSOCIATED_FAVICONS)
 {
   NS_ASSERTION(!gFaviconService,
                "Attempting to create two instances of the service!");
@@ -98,9 +100,6 @@ nsFaviconService::Init()
 {
   mDB = Database::GetDatabase();
   NS_ENSURE_STATE(mDB);
-
-  mFailedFavicons.Init(MAX_FAVICON_CACHE_SIZE);
-  mUnassociatedIcons.Init(MAX_UNASSOCIATED_FAVICONS);
 
   mOptimizedIconDimension = Preferences::GetInt(
     "places.favicons.optimizeToDimension", OPTIMIZED_FAVICON_DIMENSION

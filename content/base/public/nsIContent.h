@@ -7,7 +7,7 @@
 
 #include "mozilla/Attributes.h"
 #include "nsCaseTreatment.h" // for enum, cannot be forward-declared
-#include "nsIDocument.h"
+#include "nsINode.h"
 
 // Forward declarations
 class nsAString;
@@ -18,8 +18,14 @@ class nsAttrValue;
 class nsAttrName;
 class nsTextFragment;
 class nsIFrame;
+class nsXBLBinding;
 
 namespace mozilla {
+class EventChainPreVisitor;
+namespace dom {
+class ShadowRoot;
+struct CustomElementData;
+} // namespace dom
 namespace widget {
 struct IMEState;
 } // namespace widget
@@ -33,8 +39,8 @@ enum nsLinkState {
 
 // IID for the nsIContent interface
 #define NS_ICONTENT_IID \
-{ 0x8a8b4b1d, 0x72d8, 0x428e, \
- { 0x95, 0x75, 0xf9, 0x18, 0xba, 0xf6, 0x9e, 0xa1 } }
+{ 0x1329e5b7, 0x4bcd, 0x450c, \
+  { 0xa2, 0x3a, 0x98, 0xc5, 0x85, 0xcd, 0x73, 0xf9 } }
 
 /**
  * A node of content in a document's content model. This interface
@@ -48,11 +54,10 @@ public:
   // If you're using the external API, the only thing you can know about
   // nsIContent is that it exists with an IID
 
-  nsIContent(already_AddRefed<nsINodeInfo> aNodeInfo)
+  nsIContent(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : nsINode(aNodeInfo)
   {
-    NS_ASSERTION(mNodeInfo,
-                 "No nsINodeInfo passed to nsIContent, PREPARE TO CRASH!!!");
+    MOZ_ASSERT(mNodeInfo);
     SetNodeIsContent();
   }
 #endif // MOZILLA_INTERNAL_API
@@ -169,8 +174,8 @@ public:
   bool IsRootOfNativeAnonymousSubtree() const
   {
     NS_ASSERTION(!HasFlag(NODE_IS_NATIVE_ANONYMOUS_ROOT) ||
-                 (HasFlag(NODE_IS_ANONYMOUS) &&
-                  HasFlag(NODE_IS_IN_ANONYMOUS_SUBTREE)),
+                 (HasFlag(NODE_IS_ANONYMOUS_ROOT) &&
+                  HasFlag(NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE)),
                  "Some flags seem to be missing!");
     return HasFlag(NODE_IS_NATIVE_ANONYMOUS_ROOT);
   }
@@ -185,9 +190,9 @@ public:
    * Makes this content anonymous
    * @see nsIAnonymousContentCreator
    */
-  void SetNativeAnonymous()
+  void SetIsNativeAnonymousRoot()
   {
-    SetFlags(NODE_IS_ANONYMOUS | NODE_IS_IN_ANONYMOUS_SUBTREE |
+    SetFlags(NODE_IS_ANONYMOUS_ROOT | NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE |
              NODE_IS_NATIVE_ANONYMOUS_ROOT);
   }
 
@@ -209,7 +214,7 @@ public:
                  "to binding parent");
     NS_ASSERTION(!GetParent() ||
                  ((GetBindingParent() == GetParent()) ==
-                  HasFlag(NODE_IS_ANONYMOUS)) ||
+                  HasFlag(NODE_IS_ANONYMOUS_ROOT)) ||
                  // Unfortunately default content for XBL insertion points is
                  // anonymous content that is bound with the parent of the
                  // insertion point as the parent but the bound element for the
@@ -217,10 +222,10 @@ public:
                  // the assert a bit here.
                  (GetBindingParent() &&
                   (GetBindingParent() == GetParent()->GetBindingParent()) ==
-                  HasFlag(NODE_IS_ANONYMOUS)),
+                  HasFlag(NODE_IS_ANONYMOUS_ROOT)),
                  "For nodes with parent, flag and GetBindingParent() check "
                  "should match");
-    return HasFlag(NODE_IS_ANONYMOUS);
+    return HasFlag(NODE_IS_ANONYMOUS_ROOT);
   }
 
   /**
@@ -235,17 +240,14 @@ public:
                   static_cast<nsIContent*>(SubtreeRoot())->IsInNativeAnonymousSubtree()),
                  "Must have binding parent when in native anonymous subtree which is in document.\n"
                  "Native anonymous subtree which is not in document must have native anonymous root.");
-    return IsInNativeAnonymousSubtree() || GetBindingParent() != nullptr;
+    return IsInNativeAnonymousSubtree() || (!HasFlag(NODE_IS_IN_SHADOW_TREE) && GetBindingParent() != nullptr);
   }
 
   /**
    * Return true iff this node is in an HTML document (in the HTML5 sense of
    * the term, i.e. not in an XHTML/XML document).
    */
-  inline bool IsInHTMLDocument() const
-  {
-    return OwnerDoc()->IsHTML();
-  }
+  inline bool IsInHTMLDocument() const;
 
   /**
    * Get the namespace that this element's tag is defined in
@@ -295,6 +297,11 @@ public:
     return IsInNamespace(kNameSpaceID_XUL);
   }
 
+  inline bool IsXUL(nsIAtom* aTag) const
+  {
+    return mNodeInfo->Equals(aTag, kNameSpaceID_XUL);
+  }
+
   inline bool IsMathML() const
   {
     return IsInNamespace(kNameSpaceID_MathML);
@@ -305,24 +312,18 @@ public:
     return mNodeInfo->Equals(aTag, kNameSpaceID_MathML);
   }
 
+  inline bool IsActiveChildrenElement() const
+  {
+    return mNodeInfo->Equals(nsGkAtoms::children, kNameSpaceID_XBL) &&
+           GetBindingParent();
+  }
+
   /**
    * Returns an atom holding the name of the attribute of type ID on
    * this content node (if applicable).  Returns null for non-element
    * content nodes.
    */
   virtual nsIAtom *GetIDAttributeName() const = 0;
-
-  /**
-   * Normalizes an attribute name and returns it as a nodeinfo if an attribute
-   * with that name exists. This method is intended for character case
-   * conversion if the content object is case insensitive (e.g. HTML). Returns
-   * the nodeinfo of the attribute with the specified name if one exists or
-   * null otherwise.
-   *
-   * @param aStr the unparsed attribute string
-   * @return the node info. May be nullptr.
-   */
-  virtual already_AddRefed<nsINodeInfo> GetExistingAttrNameFromQName(const nsAString& aStr) const = 0;
 
   /**
    * Set attribute values. All attribute values are assumed to have a
@@ -505,7 +506,7 @@ public:
    * the document is notified of the content change.
    * NOTE: For elements this always ASSERTS and returns NS_ERROR_FAILURE
    */
-  virtual nsresult SetText(const PRUnichar* aBuffer, uint32_t aLength,
+  virtual nsresult SetText(const char16_t* aBuffer, uint32_t aLength,
                            bool aNotify) = 0;
 
   /**
@@ -513,7 +514,7 @@ public:
    * the document is notified of the content change.
    * NOTE: For elements this always ASSERTS and returns NS_ERROR_FAILURE
    */
-  virtual nsresult AppendText(const PRUnichar* aBuffer, uint32_t aLength,
+  virtual nsresult AppendText(const char16_t* aBuffer, uint32_t aLength,
                               bool aNotify) = 0;
 
   /**
@@ -533,10 +534,25 @@ public:
   virtual bool TextIsOnlyWhitespace() = 0;
 
   /**
+   * Method to see if the text node contains data that is useful
+   * for a translation: i.e., it consists of more than just whitespace,
+   * digits and punctuation.
+   * NOTE: Always returns false for elements.
+   */
+  virtual bool HasTextForTranslation() = 0;
+
+  /**
    * Append the text content to aResult.
    * NOTE: This asserts and returns for elements
    */
   virtual void AppendTextTo(nsAString& aResult) = 0;
+
+  /**
+   * Append the text content to aResult.
+   * NOTE: This asserts and returns for elements
+   */
+  virtual bool AppendTextTo(nsAString& aResult,
+                            const mozilla::fallible_t&) NS_WARN_UNUSED_RESULT = 0;
 
   /**
    * Check if this content is focusable and in the current tab order.
@@ -560,12 +576,8 @@ public:
    *         > 0 can be tabbed to in the order specified by this value
    * @return whether the content is focusable via mouse, kbd or script.
    */
-  virtual bool IsFocusable(int32_t *aTabIndex = nullptr, bool aWithMouse = false)
-  {
-    if (aTabIndex) 
-      *aTabIndex = -1; // Default, not tabbable
-    return false;
-  }
+  bool IsFocusable(int32_t* aTabIndex = nullptr, bool aWithMouse = false);
+  virtual bool IsFocusableInternal(int32_t* aTabIndex, bool aWithMouse);
 
   /**
    * The method focuses (or activates) element that accesskey is bound to. It is
@@ -610,12 +622,91 @@ public:
   virtual nsIContent *GetBindingParent() const = 0;
 
   /**
+   * Gets the current XBL binding that is bound to this element.
+   *
+   * @return the current binding.
+   */
+  virtual nsXBLBinding *GetXBLBinding() const = 0;
+
+  /**
+   * Sets or unsets an XBL binding for this element. Setting a
+   * binding on an element that already has a binding will remove the
+   * old binding.
+   *
+   * @param aBinding The binding to bind to this content. If nullptr is
+   *        provided as the argument, then existing binding will be
+   *        removed.
+   *
+   * @param aOldBindingManager The old binding manager that contains
+   *                           this content if this content was adopted
+   *                           to another document.
+   */
+  virtual void SetXBLBinding(nsXBLBinding* aBinding,
+                             nsBindingManager* aOldBindingManager = nullptr) = 0;
+
+  /**
+   * Sets the ShadowRoot binding for this element. The contents of the
+   * binding is rendered in place of this node's children.
+   *
+   * @param aShadowRoot The ShadowRoot to be bound to this element.
+   */
+  virtual void SetShadowRoot(mozilla::dom::ShadowRoot* aShadowRoot) = 0;
+
+  /**
+   * Gets the ShadowRoot binding for this element.
+   *
+   * @return The ShadowRoot currently bound to this element.
+   */
+  virtual mozilla::dom::ShadowRoot *GetShadowRoot() const = 0;
+
+  /**
+   * Gets the root of the node tree for this content if it is in a shadow tree.
+   * This method is called |GetContainingShadow| instead of |GetRootShadowRoot|
+   * to avoid confusion with |GetShadowRoot|.
+   *
+   * @return The ShadowRoot that is the root of the node tree.
+   */
+  virtual mozilla::dom::ShadowRoot *GetContainingShadow() const = 0;
+
+  /**
+   * Gets the insertion parent element of the XBL binding.
+   * The insertion parent is our one true parent in the transformed DOM.
+   *
+   * @return the insertion parent element.
+   */
+  virtual nsIContent *GetXBLInsertionParent() const = 0;
+
+  /**
+   * Sets the insertion parent element of the XBL binding.
+   *
+   * @param aContent The insertion parent element.
+   */
+  virtual void SetXBLInsertionParent(nsIContent* aContent) = 0;
+
+  /**
    * Returns the content node that is the parent of this node in the flattened
-   * tree.
+   * tree. For nodes that are not filtered into an insertion point, this
+   * simply returns their DOM parent in the original DOM tree.
    *
    * @return the flattened tree parent
    */
   nsIContent *GetFlattenedTreeParent() const;
+
+  /**
+   * Gets the custom element data used by web components custom element.
+   * Custom element data is created at the first attempt to enqueue a callback.
+   *
+   * @return The custom element data or null if none.
+   */
+  virtual mozilla::dom::CustomElementData *GetCustomElementData() const = 0;
+
+  /**
+   * Sets the custom element data, ownership of the
+   * callback data is taken by this content.
+   *
+   * @param aCallbackData The custom element data.
+   */
+  virtual void SetCustomElementData(mozilla::dom::CustomElementData* aData) = 0;
 
   /**
    * API to check if this is a link that's traversed in response to user input
@@ -836,9 +927,10 @@ public:
   }
 
   // Overloaded from nsINode
-  virtual already_AddRefed<nsIURI> GetBaseURI() const MOZ_OVERRIDE;
+  virtual already_AddRefed<nsIURI> GetBaseURI(bool aTryUseXHRDocBaseURI = false) const MOZ_OVERRIDE;
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(
+                     mozilla::EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   virtual bool IsPurple() = 0;
   virtual void RemovePurple() = 0;
@@ -873,6 +965,15 @@ public:
   virtual void DumpContent(FILE* out = stdout, int32_t aIndent = 0,
                            bool aDumpAll = true) const = 0;
 #endif
+
+  /**
+   * Append to aOutDescription a short (preferably one line) string
+   * describing the content.
+   * Currently implemented for elements only.
+   */
+  virtual void Describe(nsAString& aOutDescription) const {
+    aOutDescription = NS_LITERAL_STRING("(not an element)");
+  }
 
   enum ETabFocusType {
   //eTabFocus_textControlsMask = (1<<0),  // unused - textboxes always tabbable

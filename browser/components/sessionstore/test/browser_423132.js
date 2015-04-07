@@ -27,10 +27,9 @@ function test() {
 
     newWin.gBrowser.loadURI(testURL, null, null);
 
-    newWin.gBrowser.addEventListener("load", function (aEvent) {
-      newWin.gBrowser.removeEventListener("load", arguments.callee, true);
-
+    whenBrowserLoaded(newWin.gBrowser.selectedBrowser, function() {
       // get the sessionstore state for the window
+      SyncHandlers.get(newWin.gBrowser.selectedBrowser).flush();
       let state = ss.getWindowState(newWin);
 
       // verify our cookie got set during pageload
@@ -67,7 +66,7 @@ function test() {
       cs.removeAll();
       newWin.close();
       finish();
-    }, true);
+    });
   }, false);
 }
 

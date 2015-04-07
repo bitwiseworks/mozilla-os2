@@ -4,29 +4,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsPrincipal.h"
+
 #include "mozIThirdPartyUtil.h"
 #include "nscore.h"
 #include "nsScriptSecurityManager.h"
 #include "nsString.h"
 #include "nsReadableUtils.h"
-#include "plstr.h"
-#include "nsCRT.h"
+#include "pratom.h"
 #include "nsIURI.h"
-#include "nsIFileURL.h"
-#include "nsIProtocolHandler.h"
-#include "nsNetUtil.h"
 #include "nsJSPrincipals.h"
-#include "nsVoidArray.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsIClassInfoImpl.h"
 #include "nsError.h"
 #include "nsIContentSecurityPolicy.h"
-#include "nsContentUtils.h"
 #include "nsCxPusher.h"
 #include "jswrapper.h"
-
-#include "nsPrincipal.h"
 
 #include "mozilla/Preferences.h"
 #include "mozilla/HashFunctions.h"
@@ -52,21 +46,21 @@ static bool URIIsImmutable(nsIURI* aURI)
 // Static member variables
 const char nsBasePrincipal::sInvalid[] = "Invalid";
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsBasePrincipal::AddRef()
 {
   NS_PRECONDITION(int32_t(refcount) >= 0, "illegal refcnt");
   // XXXcaa does this need to be threadsafe?  See bug 143559.
-  nsrefcnt count = PR_ATOMIC_INCREMENT(&refcount);
+  nsrefcnt count = ++refcount;
   NS_LOG_ADDREF(this, count, "nsBasePrincipal", sizeof(*this));
   return count;
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsBasePrincipal::Release()
 {
   NS_PRECONDITION(0 != refcount, "dup release");
-  nsrefcnt count = PR_ATOMIC_DECREMENT(&refcount);
+  nsrefcnt count = --refcount;
   NS_LOG_RELEASE(this, count, "nsBasePrincipal");
   if (count == 0) {
     delete this;
@@ -75,7 +69,7 @@ nsBasePrincipal::Release()
   return count;
 }
 
-nsBasePrincipal::nsBasePrincipal() : mSecurityPolicy(nullptr)
+nsBasePrincipal::nsBasePrincipal()
 {
   if (!gIsObservingCodeBasePrincipalSupport) {
     nsresult rv =
@@ -90,31 +84,6 @@ nsBasePrincipal::nsBasePrincipal() : mSecurityPolicy(nullptr)
 
 nsBasePrincipal::~nsBasePrincipal(void)
 {
-  SetSecurityPolicy(nullptr); 
-}
-
-NS_IMETHODIMP
-nsBasePrincipal::GetSecurityPolicy(void** aSecurityPolicy)
-{
-  if (mSecurityPolicy && mSecurityPolicy->IsInvalid()) 
-    SetSecurityPolicy(nullptr);
-  
-  *aSecurityPolicy = (void *) mSecurityPolicy;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsBasePrincipal::SetSecurityPolicy(void* aSecurityPolicy)
-{
-  DomainPolicy *newPolicy = reinterpret_cast<DomainPolicy *>(aSecurityPolicy);
-  if (newPolicy)
-    newPolicy->Hold();
- 
-  if (mSecurityPolicy)
-    mSecurityPolicy->Drop();
-  
-  mSecurityPolicy = newPolicy;
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -147,12 +116,12 @@ void nsPrincipal::dumpImpl()
 
 NS_IMPL_CLASSINFO(nsPrincipal, nullptr, nsIClassInfo::MAIN_THREAD_ONLY,
                   NS_PRINCIPAL_CID)
-NS_IMPL_QUERY_INTERFACE2_CI(nsPrincipal,
+NS_IMPL_QUERY_INTERFACE_CI(nsPrincipal,
+                           nsIPrincipal,
+                           nsISerializable)
+NS_IMPL_CI_INTERFACE_GETTER(nsPrincipal,
                             nsIPrincipal,
                             nsISerializable)
-NS_IMPL_CI_INTERFACE_GETTER2(nsPrincipal,
-                             nsIPrincipal,
-                             nsISerializable)
 NS_IMPL_ADDREF_INHERITED(nsPrincipal, nsBasePrincipal)
 NS_IMPL_RELEASE_INHERITED(nsPrincipal, nsBasePrincipal)
 
@@ -262,7 +231,7 @@ nsPrincipal::GetOrigin(char **aOrigin)
 }
 
 NS_IMETHODIMP
-nsPrincipal::Equals(nsIPrincipal *aOther, bool *aResult)
+nsPrincipal::EqualsConsideringDomain(nsIPrincipal *aOther, bool *aResult)
 {
   *aResult = false;
 
@@ -276,14 +245,36 @@ nsPrincipal::Equals(nsIPrincipal *aOther, bool *aResult)
     return NS_OK;
   }
 
-  // Codebases are equal if they have the same origin.
-  *aResult = NS_SUCCEEDED(
-               nsScriptSecurityManager::CheckSameOriginPrincipal(this, aOther));
+  if (!nsScriptSecurityManager::AppAttributesEqual(this, aOther)) {
+      return NS_OK;
+  }
+
+  // If either the subject or the object has changed its principal by
+  // explicitly setting document.domain then the other must also have
+  // done so in order to be considered the same origin. This prevents
+  // DNS spoofing based on document.domain (154930)
+
+  nsCOMPtr<nsIURI> thisURI;
+  this->GetDomain(getter_AddRefs(thisURI));
+  bool thisSetDomain = !!thisURI;
+  if (!thisURI) {
+      this->GetURI(getter_AddRefs(thisURI));
+  }
+
+  nsCOMPtr<nsIURI> otherURI;
+  aOther->GetDomain(getter_AddRefs(otherURI));
+  bool otherSetDomain = !!otherURI;
+  if (!otherURI) {
+      aOther->GetURI(getter_AddRefs(otherURI));
+  }
+
+  *aResult = thisSetDomain == otherSetDomain &&
+             nsScriptSecurityManager::SecurityCompareURIs(thisURI, otherURI);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsPrincipal::EqualsIgnoringDomain(nsIPrincipal *aOther, bool *aResult)
+nsPrincipal::Equals(nsIPrincipal *aOther, bool *aResult)
 {
   *aResult = false;
 
@@ -323,9 +314,9 @@ nsPrincipal::Subsumes(nsIPrincipal *aOther, bool *aResult)
 }
 
 NS_IMETHODIMP
-nsPrincipal::SubsumesIgnoringDomain(nsIPrincipal *aOther, bool *aResult)
+nsPrincipal::SubsumesConsideringDomain(nsIPrincipal *aOther, bool *aResult)
 {
-  return EqualsIgnoringDomain(aOther, aResult);
+  return EqualsConsideringDomain(aOther, aResult);
 }
 
 NS_IMETHODIMP
@@ -412,9 +403,6 @@ nsPrincipal::SetDomain(nsIURI* aDomain)
   mDomain = NS_TryToMakeImmutable(aDomain);
   mDomainImmutable = URIIsImmutable(mDomain);
 
-  // Domain has changed, forget cached security policy
-  SetSecurityPolicy(nullptr);
-
   // Recompute all wrappers between compartments using this principal and other
   // non-chrome compartments.
   AutoSafeJSContext cx;
@@ -430,19 +418,17 @@ nsPrincipal::SetDomain(nsIURI* aDomain)
 }
 
 NS_IMETHODIMP
-nsPrincipal::GetExtendedOrigin(nsACString& aExtendedOrigin)
+nsPrincipal::GetJarPrefix(nsACString& aJarPrefix)
 {
   MOZ_ASSERT(mAppId != nsIScriptSecurityManager::UNKNOWN_APP_ID);
 
-  mozilla::GetExtendedOrigin(mCodebase, mAppId, mInMozBrowser, aExtendedOrigin);
+  mozilla::GetJarPrefix(mAppId, mInMozBrowser, aJarPrefix);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsPrincipal::GetAppStatus(uint16_t* aAppStatus)
 {
-  MOZ_ASSERT(mAppId != nsIScriptSecurityManager::UNKNOWN_APP_ID);
-
   *aAppStatus = GetAppStatus();
   return NS_OK;
 }
@@ -507,17 +493,22 @@ nsPrincipal::GetBaseDomain(nsACString& aBaseDomain)
 NS_IMETHODIMP
 nsPrincipal::Read(nsIObjectInputStream* aStream)
 {
+  nsCOMPtr<nsISupports> supports;
   nsCOMPtr<nsIURI> codebase;
-  nsresult rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(codebase));
+  nsresult rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(supports));
   if (NS_FAILED(rv)) {
     return rv;
   }
 
+  codebase = do_QueryInterface(supports);
+
   nsCOMPtr<nsIURI> domain;
-  rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(domain));
+  rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(supports));
   if (NS_FAILED(rv)) {
     return rv;
   }
+
+  domain = do_QueryInterface(supports);
 
   uint32_t appId;
   rv = aStream->Read32(&appId);
@@ -527,8 +518,23 @@ nsPrincipal::Read(nsIObjectInputStream* aStream)
   rv = aStream->ReadBoolean(&inMozBrowser);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(supports));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // This may be null.
+  nsCOMPtr<nsIContentSecurityPolicy> csp = do_QueryInterface(supports, &rv);
+
   rv = Init(codebase, appId, inMozBrowser);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = SetCsp(csp);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // need to link in the CSP context here (link in a reference to this
+  // nsIPrincipal and to the URI of the protected resource).
+  if (csp) {
+    csp->SetRequestContext(codebase, nullptr, this, nullptr);
+  }
 
   SetDomain(domain);
 
@@ -539,10 +545,6 @@ NS_IMETHODIMP
 nsPrincipal::Write(nsIObjectOutputStream* aStream)
 {
   NS_ENSURE_STATE(mCodebase);
-
-  // mSecurityPolicy is an optimization; it'll get looked up again as needed.
-  // Don't bother saving and restoring it, esp. since it might change if
-  // preferences change.
 
   nsresult rv = NS_WriteOptionalCompoundObject(aStream, mCodebase, NS_GET_IID(nsIURI),
                                                true);
@@ -559,6 +561,13 @@ nsPrincipal::Write(nsIObjectOutputStream* aStream)
   aStream->Write32(mAppId);
   aStream->WriteBoolean(mInMozBrowser);
 
+  rv = NS_WriteOptionalCompoundObject(aStream, mCSP,
+                                      NS_GET_IID(nsIContentSecurityPolicy),
+                                      true);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
   // mCodebaseImmutable and mDomainImmutable will be recomputed based
   // on the deserialized URIs in Read().
 
@@ -568,8 +577,8 @@ nsPrincipal::Write(nsIObjectOutputStream* aStream)
 uint16_t
 nsPrincipal::GetAppStatus()
 {
-  MOZ_ASSERT(mAppId != nsIScriptSecurityManager::UNKNOWN_APP_ID);
-
+  NS_WARN_IF_FALSE(mAppId != nsIScriptSecurityManager::UNKNOWN_APP_ID,
+                   "Asking for app status on a principal with an unknown app id");
   // Installed apps have a valid app id (not NO_APP_ID or UNKNOWN_APP_ID)
   // and they are not inside a mozbrowser.
   if (mAppId == nsIScriptSecurityManager::NO_APP_ID ||
@@ -580,9 +589,8 @@ nsPrincipal::GetAppStatus()
   nsCOMPtr<nsIAppsService> appsService = do_GetService(APPS_SERVICE_CONTRACTID);
   NS_ENSURE_TRUE(appsService, nsIPrincipal::APP_STATUS_NOT_INSTALLED);
 
-  nsCOMPtr<mozIDOMApplication> domApp;
-  appsService->GetAppByLocalId(mAppId, getter_AddRefs(domApp));
-  nsCOMPtr<mozIApplication> app = do_QueryInterface(domApp);
+  nsCOMPtr<mozIApplication> app;
+  appsService->GetAppByLocalId(mAppId, getter_AddRefs(app));
   NS_ENSURE_TRUE(app, nsIPrincipal::APP_STATUS_NOT_INSTALLED);
 
   uint16_t status = nsIPrincipal::APP_STATUS_INSTALLED;
@@ -619,10 +627,10 @@ static const char EXPANDED_PRINCIPAL_SPEC[] = "[Expanded Principal]";
 
 NS_IMPL_CLASSINFO(nsExpandedPrincipal, nullptr, nsIClassInfo::MAIN_THREAD_ONLY,
                   NS_EXPANDEDPRINCIPAL_CID)
-NS_IMPL_QUERY_INTERFACE2_CI(nsExpandedPrincipal,
-                            nsIPrincipal,
-                            nsIExpandedPrincipal)
-NS_IMPL_CI_INTERFACE_GETTER2(nsExpandedPrincipal,
+NS_IMPL_QUERY_INTERFACE_CI(nsExpandedPrincipal,
+                           nsIPrincipal,
+                           nsIExpandedPrincipal)
+NS_IMPL_CI_INTERFACE_GETTER(nsExpandedPrincipal,
                              nsIPrincipal,
                              nsIExpandedPrincipal)
 NS_IMPL_ADDREF_INHERITED(nsExpandedPrincipal, nsBasePrincipal)
@@ -660,15 +668,15 @@ typedef nsresult (NS_STDCALL nsIPrincipal::*nsIPrincipalMemFn)(nsIPrincipal* aOt
                                                                bool* aResult);
 #define CALL_MEMBER_FUNCTION(THIS,MEM_FN)  ((THIS)->*(MEM_FN))
 
-// nsExpandedPrincipal::Equals and nsExpandedPrincipal::EqualsIgnoringDomain
+// nsExpandedPrincipal::Equals and nsExpandedPrincipal::EqualsConsideringDomain
 // shares the same logic. The difference only that Equals requires 'this'
-// and 'aOther' to Subsume each other while EqualsIgnoringDomain requires
-// bidirectional SubsumesIgnoringDomain.
+// and 'aOther' to Subsume each other while EqualsConsideringDomain requires
+// bidirectional SubsumesConsideringDomain.
 static nsresult
 Equals(nsExpandedPrincipal* aThis, nsIPrincipalMemFn aFn, nsIPrincipal* aOther,
        bool* aResult)
 {
-  // If (and only if) 'aThis' and 'aOther' both Subsume/SubsumesIgnoringDomain
+  // If (and only if) 'aThis' and 'aOther' both Subsume/SubsumesConsideringDomain
   // each other, then they are Equal.
   *aResult = false;
   // Calling the corresponding subsume function on this (aFn).
@@ -690,14 +698,14 @@ nsExpandedPrincipal::Equals(nsIPrincipal* aOther, bool* aResult)
 }
 
 NS_IMETHODIMP
-nsExpandedPrincipal::EqualsIgnoringDomain(nsIPrincipal* aOther, bool* aResult)
+nsExpandedPrincipal::EqualsConsideringDomain(nsIPrincipal* aOther, bool* aResult)
 {
-  return ::Equals(this, &nsIPrincipal::SubsumesIgnoringDomain, aOther, aResult);
+  return ::Equals(this, &nsIPrincipal::SubsumesConsideringDomain, aOther, aResult);
 }
 
-// nsExpandedPrincipal::Subsumes and nsExpandedPrincipal::SubsumesIgnoringDomain
+// nsExpandedPrincipal::Subsumes and nsExpandedPrincipal::SubsumesConsideringDomain
 // shares the same logic. The difference only that Subsumes calls are replaced
-//with SubsumesIgnoringDomain calls in the second case.
+//with SubsumesConsideringDomain calls in the second case.
 static nsresult
 Subsumes(nsExpandedPrincipal* aThis, nsIPrincipalMemFn aFn, nsIPrincipal* aOther,
          bool* aResult)
@@ -742,9 +750,9 @@ nsExpandedPrincipal::Subsumes(nsIPrincipal* aOther, bool* aResult)
 }
 
 NS_IMETHODIMP
-nsExpandedPrincipal::SubsumesIgnoringDomain(nsIPrincipal* aOther, bool* aResult)
+nsExpandedPrincipal::SubsumesConsideringDomain(nsIPrincipal* aOther, bool* aResult)
 {
-  return ::Subsumes(this, &nsIPrincipal::SubsumesIgnoringDomain, aOther, aResult);
+  return ::Subsumes(this, &nsIPrincipal::SubsumesConsideringDomain, aOther, aResult);
 }
 
 NS_IMETHODIMP
@@ -763,8 +771,7 @@ nsExpandedPrincipal::CheckMayLoad(nsIURI* uri, bool aReport, bool aAllowIfInheri
 NS_IMETHODIMP
 nsExpandedPrincipal::GetHashValue(uint32_t* result)
 {
-  MOZ_NOT_REACHED("extended principal should never be used as key in a hash map");
-  return NS_ERROR_FAILURE;
+  MOZ_CRASH("extended principal should never be used as key in a hash map");
 }
 
 NS_IMETHODIMP
@@ -782,9 +789,10 @@ nsExpandedPrincipal::GetWhiteList(nsTArray<nsCOMPtr<nsIPrincipal> >** aWhiteList
 }
 
 NS_IMETHODIMP
-nsExpandedPrincipal::GetExtendedOrigin(nsACString& aExtendedOrigin)
+nsExpandedPrincipal::GetJarPrefix(nsACString& aJarPrefix)
 {
-  return GetOrigin(getter_Copies(aExtendedOrigin));
+  aJarPrefix.Truncate();
+  return NS_OK;
 }
 
 NS_IMETHODIMP

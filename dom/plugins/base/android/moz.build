@@ -4,14 +4,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'plugin'
-
 EXPORTS += [
-    'ANPKeyCodes.h',
     'android_npapi.h',
+    'ANPKeyCodes.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'ANPAudio.cpp',
     'ANPBitmap.cpp',
     'ANPEvent.cpp',
@@ -25,3 +23,17 @@ CPP_SOURCES += [
     'ANPWindow.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'
+LOCAL_INCLUDES += [
+    '/dom/plugins/base',
+    '/dom/plugins/base/android/include',
+    '/gfx/gl',
+    '/widget/android',
+    '/widget/xpwidgets',
+]
+
+DEFINES['MOZ_APP_NAME'] = '"%s"' % CONFIG['MOZ_APP_NAME']

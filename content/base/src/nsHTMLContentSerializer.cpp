@@ -15,7 +15,7 @@
 #include "nsIDOMElement.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsString.h"
 #include "nsUnicharUtils.h"
 #include "nsXPIDLString.h"
@@ -39,8 +39,6 @@
 #include "nsParserConstants.h"
 
 using namespace mozilla::dom;
-
-static const int32_t kLongLineLen = 128;
 
 nsresult NS_NewHTMLContentSerializer(nsIContentSerializer** aSerializer)
 {
@@ -205,12 +203,12 @@ nsHTMLContentSerializer::AppendElementStart(Element* aElement,
       AppendIndentation(aStr);
     }
     else if (mAddSpace) {
-      AppendToString(PRUnichar(' '), aStr);
+      AppendToString(char16_t(' '), aStr);
       mAddSpace = false;
     }
   }
   else if (mAddSpace) {
-    AppendToString(PRUnichar(' '), aStr);
+    AppendToString(char16_t(' '), aStr);
     mAddSpace = false;
   }
   else {
@@ -364,12 +362,12 @@ nsHTMLContentSerializer::AppendElementEnd(Element* aElement,
       AppendIndentation(aStr);
     }
     else if (mAddSpace) {
-      AppendToString(PRUnichar(' '), aStr);
+      AppendToString(char16_t(' '), aStr);
       mAddSpace = false;
     }
   }
   else if (mAddSpace) {
-    AppendToString(PRUnichar(' '), aStr);
+    AppendToString(char16_t(' '), aStr);
     mAddSpace = false;
   }
 
@@ -444,7 +442,7 @@ uint32_t FindNextBasicEntity(const nsAString& aStr,
   for (; aIndex < aLen; ++aIndex) {
     // for each character in this chunk, check if it
     // needs to be replaced
-    PRUnichar val = aStr[aIndex];
+    char16_t val = aStr[aIndex];
     if (val <= kValNBSP && aEntityTable[val]) {
       *aEntity = aEntityTable[val];
       return aIndex;
@@ -497,12 +495,12 @@ nsHTMLContentSerializer::AppendAndTranslateEntities(const nsAString& aStr,
       return;
     }
 
-    nsReadingIterator<PRUnichar> done_reading;
+    nsReadingIterator<char16_t> done_reading;
     aStr.EndReading(done_reading);
 
     // for each chunk of |aString|...
     uint32_t advanceLength = 0;
-    nsReadingIterator<PRUnichar> iter;
+    nsReadingIterator<char16_t> iter;
 
     const char **entityTable = mInAttribute ? kAttrEntities : kEntities;
     nsAutoCString entityReplacement;
@@ -513,9 +511,9 @@ nsHTMLContentSerializer::AppendAndTranslateEntities(const nsAString& aStr,
       uint32_t fragmentLength = iter.size_forward();
       uint32_t lengthReplaced = 0; // the number of UTF-16 codepoints
                                     //  replaced by a particular entity
-      const PRUnichar* c = iter.get();
-      const PRUnichar* fragmentStart = c;
-      const PRUnichar* fragmentEnd = c + fragmentLength;
+      const char16_t* c = iter.get();
+      const char16_t* fragmentStart = c;
+      const char16_t* fragmentEnd = c + fragmentLength;
       const char* entityText = nullptr;
       const char* fullConstEntityText = nullptr;
       char* fullEntityText = nullptr;
@@ -524,7 +522,7 @@ nsHTMLContentSerializer::AppendAndTranslateEntities(const nsAString& aStr,
       // for each character in this chunk, check if it
       // needs to be replaced
       for (; c < fragmentEnd; c++, advanceLength++) {
-        PRUnichar val = *c;
+        char16_t val = *c;
         if (val <= kValNBSP && entityTable[val]) {
           fullConstEntityText = entityTable[val];
           break;
@@ -567,9 +565,9 @@ nsHTMLContentSerializer::AppendAndTranslateEntities(const nsAString& aStr,
 
       aOutputStr.Append(fragmentStart, advanceLength);
       if (entityText) {
-        aOutputStr.Append(PRUnichar('&'));
+        aOutputStr.Append(char16_t('&'));
         AppendASCIItoUTF16(entityText, aOutputStr);
-        aOutputStr.Append(PRUnichar(';'));
+        aOutputStr.Append(char16_t(';'));
         advanceLength++;
       }
       else if (fullConstEntityText) {

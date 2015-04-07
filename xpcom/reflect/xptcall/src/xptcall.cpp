@@ -24,13 +24,13 @@ nsXPTCStubBase::QueryInterface(REFNSIID aIID,
     return mOuter->QueryInterface(aIID, aInstancePtr);
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsXPTCStubBase::AddRef()
 {
     return mOuter->AddRef();
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsXPTCStubBase::Release()
 {
     return mOuter->Release();
@@ -40,11 +40,13 @@ EXPORT_XPCOM_API(nsresult)
 NS_GetXPTCallStub(REFNSIID aIID, nsIXPTCProxy* aOuter,
                   nsISomeInterface* *aResult)
 {
-    NS_ENSURE_ARG(aOuter && aResult);
+    if (NS_WARN_IF(!aOuter) || NS_WARN_IF(!aResult))
+        return NS_ERROR_INVALID_ARG;
 
     XPTInterfaceInfoManager *iim =
         XPTInterfaceInfoManager::GetSingleton();
-    NS_ENSURE_TRUE(iim, NS_ERROR_NOT_INITIALIZED);
+    if (NS_WARN_IF(!iim))
+        return NS_ERROR_NOT_INITIALIZED;
 
     xptiInterfaceEntry *iie = iim->GetInterfaceEntryForIID(&aIID);
     if (!iie || !iie->EnsureResolved() || iie->GetBuiltinClassFlag())

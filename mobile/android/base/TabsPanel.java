@@ -5,6 +5,8 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.animation.PropertyAnimator;
 import org.mozilla.gecko.animation.ViewHelper;
 import org.mozilla.gecko.widget.IconTabWidget;
@@ -47,7 +49,8 @@ public class TabsPanel extends LinearLayout
     }
 
     private Context mContext;
-    private GeckoApp mActivity;
+    private final GeckoApp mActivity;
+    private final LightweightTheme mTheme;
     private RelativeLayout mHeader;
     private TabsListContainer mTabsContainer;
     private PanelView mPanel;
@@ -68,6 +71,7 @@ public class TabsPanel extends LinearLayout
         super(context, attrs);
         mContext = context;
         mActivity = (GeckoApp) context;
+        mTheme = ((GeckoApplication) context.getApplicationContext()).getLightweightTheme();
 
         setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.FILL_PARENT,
                                                       LinearLayout.LayoutParams.FILL_PARENT));
@@ -86,13 +90,13 @@ public class TabsPanel extends LinearLayout
         mHeader = (RelativeLayout) findViewById(R.id.tabs_panel_header);
         mTabsContainer = (TabsListContainer) findViewById(R.id.tabs_container);
 
-        mPanelNormal = (TabsTray) findViewById(R.id.normal_tabs);
+        mPanelNormal = (PanelView) findViewById(R.id.normal_tabs);
         mPanelNormal.setTabsPanel(this);
 
-        mPanelPrivate = (TabsTray) findViewById(R.id.private_tabs);
+        mPanelPrivate = (PanelView) findViewById(R.id.private_tabs);
         mPanelPrivate.setTabsPanel(this);
 
-        mPanelRemote = (RemoteTabs) findViewById(R.id.synced_tabs);
+        mPanelRemote = (PanelView) findViewById(R.id.synced_tabs);
         mPanelRemote.setTabsPanel(this);
 
         mFooter = (RelativeLayout) findViewById(R.id.tabs_panel_footer);
@@ -105,28 +109,26 @@ public class TabsPanel extends LinearLayout
             }
         });
 
-        ImageButton button;
-        Resources resources = getContext().getResources();
-
         mTabWidget = (IconTabWidget) findViewById(R.id.tab_widget);
 
-        button = mTabWidget.addTab(R.drawable.tabs_normal);
-        button.setContentDescription(resources.getString(R.string.tabs_normal));
+        mTabWidget.addTab(R.drawable.tabs_normal, R.string.tabs_normal);
+        mTabWidget.addTab(R.drawable.tabs_private, R.string.tabs_private);
 
-        button = mTabWidget.addTab(R.drawable.tabs_private);
-        button.setContentDescription(resources.getString(R.string.tabs_private));
-
-        button = mTabWidget.addTab(R.drawable.tabs_synced);
-        button.setContentDescription(resources.getString(R.string.tabs_synced));
+        if (!GeckoProfile.get(mContext).inGuestMode()) {
+            mTabWidget.addTab(R.drawable.tabs_synced, R.string.tabs_synced);
+        }
 
         mTabWidget.setTabSelectionListener(this);
     }
 
-    public void addTab() {
-        if (mCurrentPanel == Panel.NORMAL_TABS)
-           mActivity.addTab();
-        else
-           mActivity.addPrivateTab();
+    private void addTab() {
+        if (mCurrentPanel == Panel.NORMAL_TABS) {
+            Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.ACTIONBAR, "new_tab");
+            mActivity.addTab();
+        } else {
+            Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.ACTIONBAR, "new_private_tab");
+            mActivity.addPrivateTab();
+        }
 
         mActivity.autoHideTabs();
     }
@@ -166,19 +168,19 @@ public class TabsPanel extends LinearLayout
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
-        mActivity.getLightweightTheme().addListener(this);
+        mTheme.addListener(this);
     }
 
     @Override
     public void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        mActivity.getLightweightTheme().removeListener(this);
+        mTheme.removeListener(this);
     }
     
     @Override
     public void onLightweightThemeChanged() {
-        int background = mActivity.getResources().getColor(R.color.background_tabs);
-        LightweightThemeDrawable drawable = mActivity.getLightweightTheme().getColorDrawable(this, background, true);
+        final int background = getResources().getColor(R.color.background_tabs);
+        final LightweightThemeDrawable drawable = mTheme.getColorDrawable(this, background, true);
         if (drawable == null)
             return;
 
@@ -199,11 +201,8 @@ public class TabsPanel extends LinearLayout
 
     // Tabs List Container holds the ListView
     public static class TabsListContainer extends FrameLayout {
-        private Context mContext;
-
         public TabsListContainer(Context context, AttributeSet attrs) {
             super(context, attrs);
-            mContext = context;
         }
 
         public PanelView getCurrentPanelView() {
@@ -234,11 +233,11 @@ public class TabsPanel extends LinearLayout
     // Tabs Panel Toolbar contains the Buttons
     public static class TabsPanelToolbar extends LinearLayout 
                                          implements LightweightTheme.OnChangeListener {
-        private BrowserApp mActivity;
+        private final LightweightTheme mTheme;
 
         public TabsPanelToolbar(Context context, AttributeSet attrs) {
             super(context, attrs);
-            mActivity = (BrowserApp) context;
+            mTheme = ((GeckoApplication) context.getApplicationContext()).getLightweightTheme();
 
             setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.FILL_PARENT,
                                                           (int) context.getResources().getDimension(R.dimen.browser_toolbar_height)));
@@ -249,19 +248,19 @@ public class TabsPanel extends LinearLayout
         @Override
         public void onAttachedToWindow() {
             super.onAttachedToWindow();
-            mActivity.getLightweightTheme().addListener(this);
+            mTheme.addListener(this);
         }
 
         @Override
         public void onDetachedFromWindow() {
             super.onDetachedFromWindow();
-            mActivity.getLightweightTheme().removeListener(this);
+            mTheme.removeListener(this);
         }
     
         @Override
         public void onLightweightThemeChanged() {
-            int background = mActivity.getResources().getColor(R.color.background_tabs);
-            LightweightThemeDrawable drawable = mActivity.getLightweightTheme().getColorDrawable(this, background);
+            final int background = getResources().getColor(R.color.background_tabs);
+            final LightweightThemeDrawable drawable = mTheme.getColorDrawable(this, background);
             if (drawable == null)
                 return;
 
@@ -442,6 +441,13 @@ public class TabsPanel extends LinearLayout
 
         mHeader.setLayerType(View.LAYER_TYPE_NONE, null);
         mTabsContainer.setLayerType(View.LAYER_TYPE_NONE, null);
+
+        // If the tray is now hidden, call hide() on current panel and unset it as the current panel
+        // to avoid hide() being called again when the tray is opened next.
+        if (!mVisible && mPanel != null) {
+            mPanel.hide();
+            mPanel = null;
+        }
     }
 
     public void setTabsLayoutChangeListener(TabsLayoutChangeListener listener) {

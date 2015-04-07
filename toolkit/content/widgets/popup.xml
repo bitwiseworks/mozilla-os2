@@ -205,7 +205,7 @@
 
   </binding>
 
-  <binding id="popup"
+  <binding id="popup" role="xul:menupopup"
            extends="chrome://global/content/bindings/popup.xml#popup-base">
     
     <content>
@@ -214,16 +214,6 @@
         <children/>
       </xul:arrowscrollbox>
     </content>
-
-    <implementation implements="nsIAccessibleProvider">
-      <property name="accessibleType" readonly="true">
-        <getter>
-          <![CDATA[
-              return Components.interfaces.nsIAccessibleProvider.XULMenupopup;
-            ]]>
-        </getter>
-      </property>
-    </implementation>
 
     <handlers>
       <handler event="popupshowing" phase="target">
@@ -247,20 +237,9 @@
     </handlers>
   </binding>
 
-  <binding id="panel"
+  <binding id="panel" role="xul:panel"
            extends="chrome://global/content/bindings/popup.xml#popup-base">
-    <!-- This separate binding for dialog-like panels - not menu, list or autocomplete popups
-         exposes the popup as an alert or a pane, depending on whether it is always intended
-         to get keyboard navigation when it opens -->
-    <implementation implements="nsIDOMXULPopupElement, nsIAccessibleProvider">
-      <property name="accessibleType" readonly="true">
-        <getter>
-          <![CDATA[
-          return (this.getAttribute("noautofocus") == "true") ?
-                       Components.interfaces.nsIAccessibleProvider.XULAlert :
-                       Components.interfaces.nsIAccessibleProvider.XULPane;
-        ]]></getter>
-      </property>
+    <implementation implements="nsIDOMXULPopupElement">
       <field name="_prevFocus">0</field>
       <field name="_dragBindingAlive">true</field>
       <constructor>
@@ -334,8 +313,8 @@
   </binding>
 
   <binding id="arrowpanel" extends="chrome://global/content/bindings/popup.xml#panel">
-    <content flip="both" side="top" position="bottomcenter topleft">
-      <xul:box anonid="container" class="panel-arrowcontainer" flex="1"
+    <content flip="both" side="top" position="bottomcenter topleft" consumeoutsideclicks="false">
+      <xul:vbox anonid="container" class="panel-arrowcontainer" flex="1"
                xbl:inherits="side,panelopen">
         <xul:box anonid="arrowbox" class="panel-arrowbox">
           <xul:image anonid="arrow" class="panel-arrow" xbl:inherits="side"/>
@@ -344,7 +323,7 @@
           <children/>
           <xul:box class="panel-inner-arrowcontentfooter" xbl:inherits="footertype" hidden="true"/>
         </xul:box>
-      </xul:box>
+      </xul:vbox>
     </content>
     <implementation>
       <field name="_fadeTimer">null</field>
@@ -398,20 +377,20 @@
         var container = document.getAnonymousElementByAttribute(this, "anonid", "container");
         var arrowbox = document.getAnonymousElementByAttribute(this, "anonid", "arrowbox");
 
-        // if this panel has a "sliding" arrow, we may have previously set margins...
-        arrowbox.style.removeProperty("margin");
-
         var position = this.alignmentPosition;
+        var offset = this.alignmentOffset;
+
+        // if this panel has a "sliding" arrow, we may have previously set margins...
+        arrowbox.style.removeProperty("transform");
         if (position.indexOf("start_") == 0 || position.indexOf("end_") == 0) {
-          container.orient = "";
+          container.orient = "horizontal";
           arrowbox.orient = "vertical";
           if (position.indexOf("_after") > 0) {
             arrowbox.pack = "end";
-            arrowbox.style.marginBottom = this.alignmentOffset + "px";
           } else {
             arrowbox.pack = "start";
-            arrowbox.style.marginTop = this.alignmentOffset + "px";
           }
+          arrowbox.style.transform = "translate(0, " + -offset + "px)";
 
           // The assigned side stays the same regardless of direction.
           var isRTL = (window.getComputedStyle(this).direction == "rtl");
@@ -426,15 +405,14 @@
           }
         }
         else if (position.indexOf("before_") == 0 || position.indexOf("after_") == 0) {
-          container.orient = "vertical";
+          container.orient = "";
           arrowbox.orient = "";
           if (position.indexOf("_end") > 0) {
             arrowbox.pack = "end";
-            arrowbox.style.marginRight = this.alignmentOffset + "px";
           } else {
             arrowbox.pack = "start";
-            arrowbox.style.marginLeft = this.alignmentOffset + "px";
           }
+          arrowbox.style.transform = "translate(" + -offset + "px, 0)";
 
           if (position.indexOf("before_") == 0) {
             container.dir = "reverse";
@@ -455,6 +433,7 @@
       <handler event="popupshowing" phase="target">
       <![CDATA[
         this.adjustArrowPosition();
+
         // set fading
         var fade = this.getAttribute("fade");
         var fadeDelay = (fade == "fast") ? 1 : fade == "slow" ? 4000 : 0;
@@ -476,7 +455,7 @@
           this.hidePopup();
           this.style.removeProperty("opacity");
         }
-      ]]>
+        ]]>
       </handler>
       <handler event="popupshown" phase="target">
         this.setAttribute("panelopen", "true");
@@ -487,20 +466,15 @@
     </handlers>
   </binding>
 
-  <binding id="tooltip" extends="chrome://global/content/bindings/popup.xml#popup-base">
+  <binding id="tooltip" role="xul:tooltip"
+           extends="chrome://global/content/bindings/popup.xml#popup-base">
     <content>
       <children>
         <xul:label class="tooltip-label" xbl:inherits="xbl:text=label" flex="1"/>
       </children>
     </content>
     
-    <implementation implements="nsIAccessibleProvider">
-      <property name="accessibleType" readonly="true">
-        <getter>
-          return Components.interfaces.nsIAccessibleProvider.XULTooltip;
-        </getter>
-      </property>
-
+    <implementation>
       <field name="_mouseOutCount">0</field>
       <field name="_isMouseOver">false</field>
       
@@ -543,6 +517,7 @@
           var titleText = null;
           var XLinkTitleText = null;
           var SVGTitleText = null;
+          var XULtooltiptextText = null;
           var lookingForSVGTitle = true;
           var direction = tipElement.ownerDocument.dir;
 
@@ -567,30 +542,51 @@
               !tipElement.hasAttribute('title')) {
             let files = tipElement.files;
 
-            if (files.length == 0) {
-              try {
-                var bundle = Components.classes['@mozilla.org/intl/stringbundle;1']
-                                       .getService(Components.interfaces.nsIStringBundleService)
-                                       .createBundle("chrome://global/locale/layout/HtmlForm.properties");
+            try {
+              var bundle = Components.classes['@mozilla.org/intl/stringbundle;1']
+                                     .getService(Components.interfaces.nsIStringBundleService)
+                                     .createBundle("chrome://global/locale/layout/HtmlForm.properties");
+              if (files.length == 0) {
                 if (tipElement.multiple) {
                   titleText = bundle.GetStringFromName("NoFilesSelected");
                 } else {
                   titleText = bundle.GetStringFromName("NoFileSelected");
                 }
-              } catch(e) {}
-            } else {
-              titleText = files[0].name;
-              for (let i=1; i<files.length; ++i) {
-                titleText += "\n" + files[i].name;
+              } else {
+                titleText = files[0].name;
+                // For UX and performance (jank) reasons we cap the number of
+                // files that we list in the tooltip to 20 plus a "and xxx more"
+                // line, or to 21 if exactly 21 files were picked.
+                const TRUNCATED_FILE_COUNT = 20;
+                let count = Math.min(files.length, TRUNCATED_FILE_COUNT);
+                for (let i = 1; i < count; ++i) {
+                  titleText += "\n" + files[i].name;
+                }
+                if (files.length == TRUNCATED_FILE_COUNT + 1) {
+                  titleText += "\n" + files[TRUNCATED_FILE_COUNT].name;
+                } else if (files.length > TRUNCATED_FILE_COUNT + 1) {
+                  let xmoreStr = bundle.GetStringFromName("AndNMoreFiles");
+                  let xmoreNum = files.length - TRUNCATED_FILE_COUNT;
+                  let tmp = {};
+                  Components.utils.import("resource://gre/modules/PluralForm.jsm", tmp);
+                  let andXMoreStr = tmp.PluralForm.get(xmoreNum, xmoreStr).replace("#1", xmoreNum);
+                  titleText += "\n" + andXMoreStr;
+                }
               }
-            }
+            } catch(e) {}
           }
 
-          while ((titleText == null) && (XLinkTitleText == null) &&
-                 (SVGTitleText == null) && tipElement) {
-            if (tipElement.nodeType == Node.ELEMENT_NODE &&
-                tipElement.namespaceURI != XULNS) {
-              titleText = tipElement.getAttribute("title");
+          // Check texts against null so that title="" can be used to undefine a
+          // title on a child element.
+          while (tipElement &&
+                 (titleText == null) && (XLinkTitleText == null) &&
+                 (SVGTitleText == null) && (XULtooltiptextText == null)) {
+
+            if (tipElement.nodeType == Node.ELEMENT_NODE) {
+              if (tipElement.namespaceURI == XULNS)
+                XULtooltiptextText = tipElement.getAttribute("tooltiptext");
+              else
+                titleText = tipElement.getAttribute("title");
 
               if ((tipElement instanceof HTMLAnchorElement ||
                    tipElement instanceof HTMLAreaElement ||
@@ -621,7 +617,7 @@
 
           this.style.direction = direction;
 
-          return [titleText, XLinkTitleText, SVGTitleText].some(function (t) {
+          return [titleText, XLinkTitleText, SVGTitleText, XULtooltiptextText].some(function (t) {
             if (t && /\S/.test(t)) {
               // Make CRLF and CR render one line break each.
               this.label = t.replace(/\r\n?/g, '\n');

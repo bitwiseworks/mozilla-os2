@@ -5,47 +5,62 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "TelephonyCall.h"
-
-#include "nsIDOMCallEvent.h"
+#include "mozilla/dom/TelephonyCallBinding.h"
 
 #include "mozilla/dom/DOMError.h"
-#include "GeneratedEvents.h"
-#include "nsDOMClassInfo.h"
-#include "Telephony.h"
-#include "nsITelephonyProvider.h"
 
-USING_TELEPHONY_NAMESPACE
+#include "CallEvent.h"
+#include "Telephony.h"
+#include "TelephonyCallGroup.h"
+
+using namespace mozilla::dom;
+using mozilla::ErrorResult;
+using mozilla::dom::telephony::kOutgoingPlaceholderCallIndex;
 
 // static
 already_AddRefed<TelephonyCall>
-TelephonyCall::Create(Telephony* aTelephony, const nsAString& aNumber,
-                      uint16_t aCallState, uint32_t aCallIndex, bool aEmergency)
+TelephonyCall::Create(Telephony* aTelephony, uint32_t aServiceId,
+                      const nsAString& aNumber, uint16_t aCallState,
+                      uint32_t aCallIndex, bool aEmergency, bool aIsConference,
+                      bool aSwitchable, bool aMergeable)
 {
   NS_ASSERTION(aTelephony, "Null pointer!");
   NS_ASSERTION(!aNumber.IsEmpty(), "Empty number!");
   NS_ASSERTION(aCallIndex >= 1, "Invalid call index!");
 
-  nsRefPtr<TelephonyCall> call = new TelephonyCall();
-
-  call->BindToOwner(aTelephony->GetOwner());
+  nsRefPtr<TelephonyCall> call = new TelephonyCall(aTelephony->GetOwner());
 
   call->mTelephony = aTelephony;
+  call->mServiceId = aServiceId;
   call->mNumber = aNumber;
   call->mCallIndex = aCallIndex;
   call->mError = nullptr;
   call->mEmergency = aEmergency;
+  call->mGroup = aIsConference ? aTelephony->ConferenceGroup() : nullptr;
+  call->mSwitchable = aSwitchable;
+  call->mMergeable = aMergeable;
 
   call->ChangeStateInternal(aCallState, false);
 
   return call.forget();
 }
 
-TelephonyCall::TelephonyCall()
-  : mCallIndex(kOutgoingPlaceholderCallIndex),
+TelephonyCall::TelephonyCall(nsPIDOMWindow* aOwner)
+  : DOMEventTargetHelper(aOwner),
+    mCallIndex(kOutgoingPlaceholderCallIndex),
     mCallState(nsITelephonyProvider::CALL_STATE_UNKNOWN),
-    mLive(false),
-    mOutgoing(false)
+    mLive(false)
 {
+}
+
+TelephonyCall::~TelephonyCall()
+{
+}
+
+JSObject*
+TelephonyCall::WrapObject(JSContext* aCx)
+{
+  return TelephonyCallBinding::Wrap(aCx, this);
 }
 
 void
@@ -60,9 +75,6 @@ TelephonyCall::ChangeStateInternal(uint16_t aCallState, bool aFireEvents)
       break;
     case nsITelephonyProvider::CALL_STATE_ALERTING:
       stateString.AssignLiteral("alerting");
-      break;
-    case nsITelephonyProvider::CALL_STATE_BUSY:
-      stateString.AssignLiteral("busy");
       break;
     case nsITelephonyProvider::CALL_STATE_CONNECTING:
       stateString.AssignLiteral("connecting");
@@ -95,17 +107,21 @@ TelephonyCall::ChangeStateInternal(uint16_t aCallState, bool aFireEvents)
   mState = stateString;
   mCallState = aCallState;
 
-  if (aCallState == nsITelephonyProvider::CALL_STATE_DIALING) {
-    mOutgoing = true;
-  }
-
   if (aCallState == nsITelephonyProvider::CALL_STATE_DISCONNECTED) {
     NS_ASSERTION(mLive, "Should be live!");
-    mTelephony->RemoveCall(this);
     mLive = false;
+    if (mGroup) {
+      mGroup->RemoveCall(this);
+    } else {
+      mTelephony->RemoveCall(this);
+    }
   } else if (!mLive) {
-    mTelephony->AddCall(this);
     mLive = true;
+    if (mGroup) {
+      mGroup->AddCall(this);
+    } else {
+      mTelephony->AddCall(this);
+    }
   }
 
   if (aFireEvents) {
@@ -127,20 +143,13 @@ TelephonyCall::ChangeStateInternal(uint16_t aCallState, bool aFireEvents)
 
 nsresult
 TelephonyCall::DispatchCallEvent(const nsAString& aType,
-                                 nsIDOMTelephonyCall* aCall)
+                                 TelephonyCall* aCall)
 {
   MOZ_ASSERT(aCall);
 
-  nsCOMPtr<nsIDOMEvent> event;
-  NS_NewDOMCallEvent(getter_AddRefs(event), this, nullptr, nullptr);
-  NS_ASSERTION(event, "This should never fail!");
+  nsRefPtr<CallEvent> event = CallEvent::Create(this, aType, aCall, false, false);
 
-  nsCOMPtr<nsIDOMCallEvent> callEvent = do_QueryInterface(event);
-  MOZ_ASSERT(callEvent);
-  nsresult rv = callEvent->InitCallEvent(aType, false, false, aCall);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return DispatchTrustedEvent(callEvent);
+  return DispatchTrustedEvent(event);
 }
 
 void
@@ -149,7 +158,7 @@ TelephonyCall::NotifyError(const nsAString& aError)
   // Set the error string
   NS_ASSERTION(!mError, "Already have an error?");
 
-  mError = new mozilla::dom::DOMError(GetOwner(), aError);
+  mError = new DOMError(GetOwner(), aError);
 
   // Do the state transitions
   ChangeStateInternal(nsITelephonyProvider::CALL_STATE_DISCONNECTED, true);
@@ -160,121 +169,139 @@ TelephonyCall::NotifyError(const nsAString& aError)
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_2(TelephonyCall,
-                                     nsDOMEventTargetHelper,
-                                     mTelephony,
-                                     mError);
+void
+TelephonyCall::ChangeGroup(TelephonyCallGroup* aGroup)
+{
+  mGroup = aGroup;
+
+  nsresult rv = DispatchCallEvent(NS_LITERAL_STRING("groupchange"), this);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to dispatch error event!");
+  }
+}
+
+NS_IMPL_CYCLE_COLLECTION_INHERITED(TelephonyCall,
+                                   DOMEventTargetHelper,
+                                   mTelephony,
+                                   mError,
+                                   mGroup);
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TelephonyCall)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMTelephonyCall)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(TelephonyCall)
-NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-NS_IMPL_ADDREF_INHERITED(TelephonyCall, nsDOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(TelephonyCall, nsDOMEventTargetHelper)
+NS_IMPL_ADDREF_INHERITED(TelephonyCall, DOMEventTargetHelper)
+NS_IMPL_RELEASE_INHERITED(TelephonyCall, DOMEventTargetHelper)
 
-DOMCI_DATA(TelephonyCall, TelephonyCall)
+// TelephonyCall WebIDL
 
-NS_IMETHODIMP
-TelephonyCall::GetNumber(nsAString& aNumber)
+already_AddRefed<DOMError>
+TelephonyCall::GetError() const
 {
-  aNumber.Assign(mNumber);
-  return NS_OK;
+  nsRefPtr<DOMError> error = mError;
+  return error.forget();
 }
 
-NS_IMETHODIMP
-TelephonyCall::GetState(nsAString& aState)
+already_AddRefed<TelephonyCallGroup>
+TelephonyCall::GetGroup() const
 {
-  aState.Assign(mState);
-  return NS_OK;
+  nsRefPtr<TelephonyCallGroup> group = mGroup;
+  return group.forget();
 }
 
-NS_IMETHODIMP
-TelephonyCall::GetEmergency(bool* aEmergency)
-{
-  *aEmergency = mEmergency;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-TelephonyCall::GetError(nsISupports** aError)
-{
-  NS_IF_ADDREF(*aError = mError);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-TelephonyCall::Answer()
+void
+TelephonyCall::Answer(ErrorResult& aRv)
 {
   if (mCallState != nsITelephonyProvider::CALL_STATE_INCOMING) {
     NS_WARNING("Answer on non-incoming call ignored!");
-    return NS_OK;
+    return;
   }
 
-  nsresult rv = mTelephony->Provider()->AnswerCall(mCallIndex);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsresult rv = mTelephony->Provider()->AnswerCall(mServiceId, mCallIndex);
+  if (NS_FAILED(rv)) {
+    aRv.Throw(rv);
+    return;
+  }
 
   ChangeStateInternal(nsITelephonyProvider::CALL_STATE_CONNECTING, true);
-  return NS_OK;
 }
 
-NS_IMETHODIMP
-TelephonyCall::HangUp()
+void
+TelephonyCall::HangUp(ErrorResult& aRv)
 {
   if (mCallState == nsITelephonyProvider::CALL_STATE_DISCONNECTING ||
       mCallState == nsITelephonyProvider::CALL_STATE_DISCONNECTED) {
     NS_WARNING("HangUp on previously disconnected call ignored!");
-    return NS_OK;
+    return;
   }
 
   nsresult rv = mCallState == nsITelephonyProvider::CALL_STATE_INCOMING ?
-                mTelephony->Provider()->RejectCall(mCallIndex) :
-                mTelephony->Provider()->HangUp(mCallIndex);
-  NS_ENSURE_SUCCESS(rv, rv);
+                mTelephony->Provider()->RejectCall(mServiceId, mCallIndex) :
+                mTelephony->Provider()->HangUp(mServiceId, mCallIndex);
+  if (NS_FAILED(rv)) {
+    aRv.Throw(rv);
+    return;
+  }
 
   ChangeStateInternal(nsITelephonyProvider::CALL_STATE_DISCONNECTING, true);
-  return NS_OK;
 }
 
-NS_IMETHODIMP
-TelephonyCall::Hold()
+void
+TelephonyCall::Hold(ErrorResult& aRv)
 {
   if (mCallState != nsITelephonyProvider::CALL_STATE_CONNECTED) {
     NS_WARNING("Hold non-connected call ignored!");
-    return NS_OK;
+    return;
   }
 
-  nsresult rv = mTelephony->Provider()->HoldCall(mCallIndex);
-  NS_ENSURE_SUCCESS(rv,rv);
+  if (mGroup) {
+    NS_WARNING("Hold a call in conference ignored!");
+    return;
+  }
+
+  if (!mSwitchable) {
+    NS_WARNING("Hold a non-switchable call ignored!");
+    return;
+  }
+
+  nsresult rv = mTelephony->Provider()->HoldCall(mServiceId, mCallIndex);
+  if (NS_FAILED(rv)) {
+    aRv.Throw(rv);
+    return;
+  }
+
+  if (!mSecondNumber.IsEmpty()) {
+    // No state transition when we switch two numbers within one TelephonyCall
+    // object. Otherwise, the state here will be inconsistent with the backend
+    // RIL and will never be right.
+    return;
+  }
 
   ChangeStateInternal(nsITelephonyProvider::CALL_STATE_HOLDING, true);
-  return NS_OK;
 }
 
-NS_IMETHODIMP
-TelephonyCall::Resume()
+void
+TelephonyCall::Resume(ErrorResult& aRv)
 {
   if (mCallState != nsITelephonyProvider::CALL_STATE_HELD) {
     NS_WARNING("Resume non-held call ignored!");
-    return NS_OK;
+    return;
   }
 
-  nsresult rv = mTelephony->Provider()->ResumeCall(mCallIndex);
-  NS_ENSURE_SUCCESS(rv,rv);
+  if (mGroup) {
+    NS_WARNING("Resume a call in conference ignored!");
+    return;
+  }
+
+  if (!mSwitchable) {
+    NS_WARNING("Resume a non-switchable call ignored!");
+    return;
+  }
+
+  nsresult rv = mTelephony->Provider()->ResumeCall(mServiceId, mCallIndex);
+  if (NS_FAILED(rv)) {
+    aRv.Throw(rv);
+    return;
+  }
 
   ChangeStateInternal(nsITelephonyProvider::CALL_STATE_RESUMING, true);
-  return NS_OK;
 }
-
-NS_IMPL_EVENT_HANDLER(TelephonyCall, statechange)
-NS_IMPL_EVENT_HANDLER(TelephonyCall, dialing)
-NS_IMPL_EVENT_HANDLER(TelephonyCall, alerting)
-NS_IMPL_EVENT_HANDLER(TelephonyCall, busy)
-NS_IMPL_EVENT_HANDLER(TelephonyCall, connecting)
-NS_IMPL_EVENT_HANDLER(TelephonyCall, connected)
-NS_IMPL_EVENT_HANDLER(TelephonyCall, disconnecting)
-NS_IMPL_EVENT_HANDLER(TelephonyCall, disconnected)
-NS_IMPL_EVENT_HANDLER(TelephonyCall, holding)
-NS_IMPL_EVENT_HANDLER(TelephonyCall, held)
-NS_IMPL_EVENT_HANDLER(TelephonyCall, resuming)
-NS_IMPL_EVENT_HANDLER(TelephonyCall, error)

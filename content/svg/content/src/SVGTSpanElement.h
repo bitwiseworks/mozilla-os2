@@ -9,7 +9,7 @@
 #include "mozilla/dom/SVGTextPositioningElement.h"
 
 nsresult NS_NewSVGTSpanElement(nsIContent **aResult,
-                               already_AddRefed<nsINodeInfo> aNodeInfo);
+                               already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
@@ -20,16 +20,27 @@ class SVGTSpanElement MOZ_FINAL : public SVGTSpanElementBase
 {
 protected:
   friend nsresult (::NS_NewSVGTSpanElement(nsIContent **aResult,
-                                           already_AddRefed<nsINodeInfo> aNodeInfo));
-  SVGTSpanElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx,
-                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+                                           already_AddRefed<nsINodeInfo>&& aNodeInfo));
+  SVGTSpanElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
 
 public:
   // nsIContent interface
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
+
+protected:
+  virtual EnumAttributesInfo GetEnumInfo() MOZ_OVERRIDE;
+  virtual LengthAttributesInfo GetLengthInfo() MOZ_OVERRIDE;
+
+  nsSVGEnum mEnumAttributes[1];
+  virtual nsSVGEnum* EnumAttributes() MOZ_OVERRIDE
+    { return mEnumAttributes; }
+
+  nsSVGLength2 mLengthAttributes[1];
+  virtual nsSVGLength2* LengthAttributes() MOZ_OVERRIDE
+    { return mLengthAttributes; }
 };
 
 } // namespace dom

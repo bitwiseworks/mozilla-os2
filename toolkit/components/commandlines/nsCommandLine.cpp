@@ -34,8 +34,6 @@
 #include <shlobj.h>
 #elif defined(XP_UNIX)
 #include <unistd.h>
-#elif defined(XP_OS2)
-#include <os2.h>
 #endif
 
 #ifdef DEBUG_bsmedberg
@@ -84,10 +82,10 @@ nsCommandLine::nsCommandLine() :
 }
 
 
-NS_IMPL_CLASSINFO(nsCommandLine, NULL, 0, NS_COMMANDLINE_CID)
-NS_IMPL_ISUPPORTS2_CI(nsCommandLine,
-                      nsICommandLine,
-                      nsICommandLineRunner)
+NS_IMPL_CLASSINFO(nsCommandLine, nullptr, 0, NS_COMMANDLINE_CID)
+NS_IMPL_ISUPPORTS_CI(nsCommandLine,
+                     nsICommandLine,
+                     nsICommandLineRunner)
 
 NS_IMETHODIMP
 nsCommandLine::GetLength(int32_t *aResult)
@@ -120,7 +118,7 @@ nsCommandLine::FindFlag(const nsAString& aFlag, bool aCaseSensitive, int32_t *aR
   for (uint32_t f = 0; f < mArgs.Length(); f++) {
     const nsString &arg = mArgs[f];
 
-    if (arg.Length() >= 2 && arg.First() == PRUnichar('-')) {
+    if (arg.Length() >= 2 && arg.First() == char16_t('-')) {
       if (aFlag.Equals(Substring(arg, 1), c)) {
         *aResult = f;
         return NS_OK;
@@ -267,7 +265,7 @@ nsCommandLine::ResolveFile(const nsAString& aArgument, nsIFile* *aResult)
   NS_CopyUnicodeToNative(aArgument, path);
 
   CFURLRef newurl =
-    CFURLCreateFromFileSystemRepresentationRelativeToBase(NULL, (const UInt8*) path.get(),
+    CFURLCreateFromFileSystemRepresentationRelativeToBase(nullptr, (const UInt8*) path.get(),
                                                           path.Length(),
                                                           true, baseurl);
 
@@ -333,32 +331,6 @@ nsCommandLine::ResolveFile(const nsAString& aArgument, nsIFile* *aResult)
       return NS_ERROR_FAILURE;
 
     rv = lf->InitWithPath(nsDependentString(pathBuf));
-    if (NS_FAILED(rv)) return rv;
-  }
-  NS_ADDREF(*aResult = lf);
-  return NS_OK;
-
-#elif defined(XP_OS2)
-  nsCOMPtr<nsIFile> lf (do_CreateInstance(NS_LOCAL_FILE_CONTRACTID));
-  NS_ENSURE_TRUE(lf, NS_ERROR_OUT_OF_MEMORY);
-
-  rv = lf->InitWithPath(aArgument);
-  if (NS_FAILED(rv)) {
-
-    nsAutoCString fullPath;
-    mWorkingDir->GetNativePath(fullPath);
-
-    nsAutoCString carg;
-    NS_CopyUnicodeToNative(aArgument, carg);
-
-    fullPath.Append('\\');
-    fullPath.Append(carg);
-
-    char pathBuf[CCHMAXPATH];
-    if (DosQueryPathInfo(fullPath.get(), FIL_QUERYFULLNAME, pathBuf, sizeof(pathBuf)))
-      return NS_ERROR_FAILURE;
-
-    rv = lf->InitWithNativePath(nsDependentCString(pathBuf));
     if (NS_FAILED(rv)) return rv;
   }
   NS_ADDREF(*aResult = lf);
@@ -458,7 +430,7 @@ nsCommandLine::Init(int32_t argc, const char* const* argv, nsIFile* aWorkingDir,
 #ifdef DEBUG_COMMANDLINE
     printf("Testing native arg %i: '%s'\n", i, curarg);
 #endif
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
     if (*curarg == '/') {
       char* dup = PL_strdup(curarg);
       if (!dup) return NS_ERROR_OUT_OF_MEMORY;
@@ -506,11 +478,11 @@ nsCommandLine::Init(int32_t argc, const char* const* argv, nsIFile* aWorkingDir,
 }
 
 static void
-LogConsoleMessage(const PRUnichar* fmt, ...)
+LogConsoleMessage(const char16_t* fmt, ...)
 {
   va_list args;
   va_start(args, fmt);
-  PRUnichar* msg = nsTextFormatter::vsmprintf(fmt, args);
+  char16_t* msg = nsTextFormatter::vsmprintf(fmt, args);
   va_end(args);
 
   nsCOMPtr<nsIConsoleService> cs = do_GetService("@mozilla.org/consoleservice;1");
@@ -551,7 +523,7 @@ nsCommandLine::EnumerateHandlers(EnumerateHandlersCallback aCallback, void *aClo
 
     nsCOMPtr<nsICommandLineHandler> clh(do_GetService(contractID.get()));
     if (!clh) {
-      LogConsoleMessage(NS_LITERAL_STRING("Contract ID '%s' was registered as a command line handler for entry '%s', but could not be created.").get(),
+      LogConsoleMessage(MOZ_UTF16("Contract ID '%s' was registered as a command line handler for entry '%s', but could not be created."),
                         contractID.get(), entry.get());
       continue;
     }
@@ -668,13 +640,13 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsCommandLine)
 NS_DEFINE_NAMED_CID(NS_COMMANDLINE_CID);
 
 static const mozilla::Module::CIDEntry kCommandLineCIDs[] = {
-  { &kNS_COMMANDLINE_CID, false, NULL, nsCommandLineConstructor },
-  { NULL }
+  { &kNS_COMMANDLINE_CID, false, nullptr, nsCommandLineConstructor },
+  { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kCommandLineContracts[] = {
   { "@mozilla.org/toolkit/command-line;1", &kNS_COMMANDLINE_CID },
-  { NULL }
+  { nullptr }
 };
 
 static const mozilla::Module kCommandLineModule = {

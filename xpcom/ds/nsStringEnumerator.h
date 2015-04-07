@@ -4,14 +4,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsIStringEnumerator.h"
-#include "nsString.h"
-#include "nsTArray.h"
+#include "nsStringFwd.h"
+#include "nsTArrayForwardDeclare.h"
 
 // nsIStringEnumerator/nsIUTF8StringEnumerator implementations
 //
 // Currently all implementations support both interfaces. The
 // constructors below provide the most common interface for the given
-// type (i.e. nsIStringEnumerator for PRUnichar* strings, and so
+// type (i.e. nsIStringEnumerator for char16_t* strings, and so
 // forth) but any resulting enumerators can be queried to the other
 // type. Internally, the enumerators will hold onto the type that was
 // passed in and do conversion if GetNext() for the other type of

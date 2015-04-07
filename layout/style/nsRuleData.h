@@ -11,7 +11,9 @@
 #ifndef nsRuleData_h_
 #define nsRuleData_h_
 
+#include "mozilla/CSSVariableDeclarations.h"
 #include "nsCSSProps.h"
+#include "nsCSSValue.h"
 #include "nsStyleStructFwd.h"
 
 class nsPresContext;
@@ -42,6 +44,8 @@ struct nsRuleData
   // mValueOffsets for the one struct in mSIDs is zero.
   nsCSSValue* const mValueStorage; // our user owns this array
   size_t mValueOffsets[nsStyleStructID_Length];
+
+  nsAutoPtr<mozilla::CSSVariableDeclarations> mVariables;
 
   nsRuleData(uint32_t aSIDs, nsCSSValue* aValueStorage,
              nsPresContext* aContext, nsStyleContext* aStyleContext);

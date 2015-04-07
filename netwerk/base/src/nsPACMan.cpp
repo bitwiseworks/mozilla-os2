@@ -12,26 +12,19 @@
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsNetUtil.h"
-#include "nsCRT.h"
-#include "prmon.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
-#include "nsProxyRelease.h"
+#include "nsISystemProxySettings.h"
+#ifdef MOZ_NUWA_PROCESS
+#include "ipc/Nuwa.h"
+#endif
 
 //-----------------------------------------------------------------------------
 using namespace mozilla;
 using namespace mozilla::net;
 
-#include "prlog.h"
 #if defined(PR_LOGGING)
-static PRLogModuleInfo *
-GetProxyLog()
-{
-    static PRLogModuleInfo *sLog;
-    if (!sLog)
-        sLog = PR_NewLogModule("proxy");
-    return sLog;
-}
 #endif
+#undef LOG
 #define LOG(args) PR_LOG(GetProxyLog(), PR_LOG_DEBUG, args)
 
 // The PAC thread does evaluations of both PAC files and
@@ -118,6 +111,30 @@ public:
 
 private:
   nsCOMPtr<nsIThread> mThread;
+};
+
+// Dispatch this to wait until the PAC thread shuts down.
+
+class WaitForThreadShutdown MOZ_FINAL : public nsRunnable
+{
+public:
+  explicit WaitForThreadShutdown(nsPACMan *aPACMan)
+    : mPACMan(aPACMan)
+  {
+  }
+
+  NS_IMETHODIMP Run()
+  {
+    NS_ABORT_IF_FALSE(NS_IsMainThread(), "wrong thread");
+    if (mPACMan->mPACThread) {
+      mPACMan->mPACThread->Shutdown();
+      mPACMan->mPACThread = nullptr;
+    }
+    return NS_OK;
+  }
+
+private:
+  nsRefPtr<nsPACMan> mPACMan;
 };
 
 //-----------------------------------------------------------------------------
@@ -291,9 +308,15 @@ void
 nsPACMan::Shutdown()
 {
   NS_ABORT_IF_FALSE(NS_IsMainThread(), "pacman must be shutdown on main thread");
-  CancelExistingLoad();
+  if (mShutdown) {
+    return;
+  }
   mShutdown = true;
+  CancelExistingLoad();
   PostCancelPendingQ(NS_ERROR_ABORT);
+
+  nsRefPtr<WaitForThreadShutdown> runnable = new WaitForThreadShutdown(this);
+  NS_DispatchToMainThread(runnable);
 }
 
 nsresult
@@ -333,7 +356,7 @@ nsPACMan::PostQuery(PendingPACQuery *query)
 
   // add a reference to the query while it is in the pending list
   nsRefPtr<PendingPACQuery> addref(query);
-  mPendingQ.insertBack(addref.forget().get());
+  mPendingQ.insertBack(addref.forget().take());
   ProcessPendingQ();
   return NS_OK;
 }
@@ -501,11 +524,12 @@ nsPACMan::ProcessPendingQ()
   NS_ABORT_IF_FALSE(!NS_IsMainThread(), "wrong thread");
   while (ProcessPending());
 
-  // do GC while the thread has nothing pending
-  mPAC.GC();
-
-  if (mShutdown)
+  if (mShutdown) {
     mPAC.Shutdown();
+  } else {
+    // do GC while the thread has nothing pending
+    mPAC.GC();
+  }
 }
 
 // returns true if progress was made by shortening the queue
@@ -562,8 +586,8 @@ nsPACMan::ProcessPending()
   return true;
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS3(nsPACMan, nsIStreamLoaderObserver,
-                              nsIInterfaceRequestor, nsIChannelEventSink)
+NS_IMPL_ISUPPORTS(nsPACMan, nsIStreamLoaderObserver,
+                  nsIInterfaceRequestor, nsIChannelEventSink)
 
 NS_IMETHODIMP
 nsPACMan::OnStreamComplete(nsIStreamLoader *loader,
@@ -684,6 +708,13 @@ nsPACMan::NamePACThread()
 {
   NS_ABORT_IF_FALSE(!NS_IsMainThread(), "wrong thread");
   PR_SetCurrentThreadName("Proxy Resolution");
+#ifdef MOZ_NUWA_PROCESS
+  if (IsNuwaProcess()) {
+    NS_ASSERTION(NuwaMarkCurrentThread != nullptr,
+                 "NuwaMarkCurrentThread is undefined!");
+    NuwaMarkCurrentThread(nullptr, nullptr);
+  }
+#endif
 }
 
 nsresult
@@ -700,4 +731,19 @@ nsPACMan::Init(nsISystemProxySettings *systemProxySettings)
   mPACThread->Dispatch(event, nsIEventTarget::DISPATCH_NORMAL);
 
   return NS_OK;
+}
+
+namespace mozilla {
+namespace net {
+
+PRLogModuleInfo*
+GetProxyLog()
+{
+    static PRLogModuleInfo *sLog;
+    if (!sLog)
+        sLog = PR_NewLogModule("proxy");
+    return sLog;
+}
+
+}
 }

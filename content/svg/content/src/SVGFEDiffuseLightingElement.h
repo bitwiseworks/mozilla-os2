@@ -9,7 +9,7 @@
 #include "nsSVGFilters.h"
 
 nsresult NS_NewSVGFEDiffuseLightingElement(nsIContent **aResult,
-                                           already_AddRefed<nsINodeInfo> aNodeInfo);
+                                           already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
@@ -19,16 +19,20 @@ typedef nsSVGFELightingElement SVGFEDiffuseLightingElementBase;
 class SVGFEDiffuseLightingElement : public SVGFEDiffuseLightingElementBase
 {
   friend nsresult (::NS_NewSVGFEDiffuseLightingElement(nsIContent **aResult,
-                                                       already_AddRefed<nsINodeInfo> aNodeInfo));
+                                                       already_AddRefed<nsINodeInfo>&& aNodeInfo));
 protected:
-  SVGFEDiffuseLightingElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  SVGFEDiffuseLightingElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : SVGFEDiffuseLightingElementBase(aNodeInfo)
   {
   }
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
 public:
+  virtual FilterPrimitiveDescription
+    GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
+                            const IntRect& aFilterSubregion,
+                            const nsTArray<bool>& aInputsAreTainted,
+                            nsTArray<mozilla::RefPtr<SourceSurface>>& aInputImages) MOZ_OVERRIDE;
   virtual bool AttributeAffectsRendering(
           int32_t aNameSpaceID, nsIAtom* aAttribute) const;
 
@@ -36,15 +40,10 @@ public:
 
   // WebIDL
   already_AddRefed<SVGAnimatedString> In1();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> SurfaceScale();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> DiffuseConstant();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> KernelUnitLengthX();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> KernelUnitLengthY();
-
-protected:
-  virtual void LightPixel(const float *N, const float *L,
-                          nscolor color, uint8_t *targetData);
-
+  already_AddRefed<SVGAnimatedNumber> SurfaceScale();
+  already_AddRefed<SVGAnimatedNumber> DiffuseConstant();
+  already_AddRefed<SVGAnimatedNumber> KernelUnitLengthX();
+  already_AddRefed<SVGAnimatedNumber> KernelUnitLengthY();
 };
 
 } // namespace dom

@@ -5,19 +5,19 @@
 #include "nsIClassInfoImpl.h"
 #include "nsIProgrammingLanguage.h"
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 GenericClassInfo::AddRef()
 {
   return 2;
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 GenericClassInfo::Release()
 {
   return 1;
 }
 
-NS_IMPL_QUERY_INTERFACE1(GenericClassInfo, nsIClassInfo)
+NS_IMPL_QUERY_INTERFACE(GenericClassInfo, nsIClassInfo)
 
 NS_IMETHODIMP
 GenericClassInfo::GetInterfaces(uint32_t* countp, nsIID*** array)
@@ -37,14 +37,14 @@ NS_IMETHODIMP
 GenericClassInfo::GetContractID(char** contractid)
 {
   NS_ERROR("GetContractID not implemented");
-  *contractid = NULL;
+  *contractid = nullptr;
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
 GenericClassInfo::GetClassDescription(char** description)
 {
-  *description = NULL;
+  *description = nullptr;
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -52,7 +52,7 @@ NS_IMETHODIMP
 GenericClassInfo::GetClassID(nsCID** classid)
 {
   NS_ERROR("GetClassID not implemented");
-  *classid = NULL;
+  *classid = nullptr;
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

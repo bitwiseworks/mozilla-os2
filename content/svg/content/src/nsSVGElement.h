@@ -18,7 +18,8 @@
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsError.h"
-#include "mozilla/dom/Element.h"
+#include "mozilla/dom/DOMRect.h"
+#include "mozilla/dom/ElementInlines.h"
 #include "nsISupportsImpl.h"
 #include "nsStyledElement.h"
 #include "nsSVGClass.h"
@@ -56,6 +57,11 @@ class SVGAnimatedPreserveAspectRatio;
 class nsSVGAnimatedTransformList;
 class SVGStringList;
 class DOMSVGStringList;
+
+namespace gfx {
+class Matrix;
+}
+
 }
 
 struct gfxMatrix;
@@ -67,9 +73,9 @@ class nsSVGElement : public nsSVGElementBase    // nsIContent
                    , public nsIDOMSVGElement
 {
 protected:
-  nsSVGElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  friend nsresult NS_NewSVGElement(nsIContent **aResult,
-                                   already_AddRefed<nsINodeInfo> aNodeInfo);
+  nsSVGElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  friend nsresult NS_NewSVGElement(mozilla::dom::Element **aResult,
+                                   already_AddRefed<nsINodeInfo>&& aNodeInfo);
   nsresult Init();
   virtual ~nsSVGElement(){}
 
@@ -167,8 +173,8 @@ public:
   // Setter for to set the current <animateMotion> transformation
   // Only visible for nsSVGGraphicElement, so it's a no-op here, and that
   // subclass has the useful implementation.
-  virtual void SetAnimateMotionTransform(const gfxMatrix* aMatrix) {/*no-op*/}
-  virtual const gfxMatrix* GetAnimateMotionTransform() const { return nullptr; }
+  virtual void SetAnimateMotionTransform(const mozilla::gfx::Matrix* aMatrix) {/*no-op*/}
+  virtual const mozilla::gfx::Matrix* GetAnimateMotionTransform() const { return nullptr; }
 
   bool IsStringAnimatable(uint8_t aAttrEnum) {
     return GetStringInfo().mStringInfo[aAttrEnum].mIsAnimatable;
@@ -233,7 +239,7 @@ public:
   void DidAnimateLengthList(uint8_t aAttrEnum);
   void DidAnimatePointList();
   void DidAnimatePathSegList();
-  void DidAnimateTransformList();
+  void DidAnimateTransformList(int32_t aModType);
   void DidAnimateString(uint8_t aAttrEnum);
 
   enum {
@@ -304,13 +310,11 @@ public:
   virtual bool IsTransformable() { return false; }
 
   // WebIDL
-  mozilla::dom::SVGSVGElement* GetOwnerSVGElement(mozilla::ErrorResult& rv);
+  mozilla::dom::SVGSVGElement* GetOwnerSVGElement();
   nsSVGElement* GetViewportElement();
   already_AddRefed<mozilla::dom::SVGAnimatedString> ClassName();
-  already_AddRefed<mozilla::dom::CSSValue> GetPresentationAttribute(const nsAString& aName, mozilla::ErrorResult& rv);
 protected:
-  virtual JSObject* WrapNode(JSContext *cx,
-                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
 
 #ifdef DEBUG
   // We define BeforeSetAttr here and mark it MOZ_FINAL to ensure it is NOT used
@@ -629,7 +633,7 @@ private:
 #define NS_IMPL_NS_NEW_SVG_ELEMENT(_elementName)                             \
 nsresult                                                                     \
 NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
-                                 already_AddRefed<nsINodeInfo> aNodeInfo)    \
+                                 already_AddRefed<nsINodeInfo>&& aNodeInfo)  \
 {                                                                            \
   nsRefPtr<nsSVG##_elementName##Element> it =                                \
     new nsSVG##_elementName##Element(aNodeInfo);                             \
@@ -648,7 +652,7 @@ NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
 #define NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(_elementName)                  \
 nsresult                                                                     \
 NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
-                                 already_AddRefed<nsINodeInfo> aNodeInfo)    \
+                                 already_AddRefed<nsINodeInfo>&& aNodeInfo)  \
 {                                                                            \
   nsRefPtr<mozilla::dom::SVG##_elementName##Element> it =                    \
     new mozilla::dom::SVG##_elementName##Element(aNodeInfo);                 \
@@ -667,7 +671,7 @@ NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
 #define NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT_CHECK_PARSER(_elementName)     \
 nsresult                                                                     \
 NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
-                                 already_AddRefed<nsINodeInfo> aNodeInfo,    \
+                                 already_AddRefed<nsINodeInfo>&& aNodeInfo,  \
                                  mozilla::dom::FromParser aFromParser)       \
 {                                                                            \
   nsRefPtr<mozilla::dom::SVG##_elementName##Element> it =                    \
@@ -687,12 +691,14 @@ NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
 // No unlinking, we'd need to null out the value pointer (the object it
 // points to is held by the element) and null-check it everywhere.
 #define NS_SVG_VAL_IMPL_CYCLE_COLLECTION(_val, _element)                     \
+NS_IMPL_CYCLE_COLLECTION_CLASS(_val)                                         \
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_val)                                \
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_element) \
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                                        \
 NS_IMPL_CYCLE_COLLECTION_UNLINK_0(_val)
 
 #define NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(_val, _element)       \
+NS_IMPL_CYCLE_COLLECTION_CLASS(_val)                                         \
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_val)                                  \
 NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER                            \
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END                                          \

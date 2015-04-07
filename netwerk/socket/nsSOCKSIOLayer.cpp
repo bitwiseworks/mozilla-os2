@@ -66,7 +66,7 @@ public:
     nsSOCKSSocketInfo();
     virtual ~nsSOCKSSocketInfo() { HandshakeFinished(); }
 
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSISOCKSSOCKETINFO
     NS_DECL_NSIDNSLISTENER
 
@@ -177,7 +177,7 @@ nsSOCKSSocketInfo::Init(int32_t version, int32_t family, const char *proxyHost, 
     mFlags           = flags;
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsSOCKSSocketInfo, nsISOCKSSocketInfo, nsIDNSListener)
+NS_IMPL_ISUPPORTS(nsSOCKSSocketInfo, nsISOCKSSocketInfo, nsIDNSListener)
 
 NS_IMETHODIMP 
 nsSOCKSSocketInfo::GetExternalProxyAddr(NetAddr * *aExternalProxyAddr)
@@ -881,7 +881,7 @@ nsSOCKSSocketInfo::WriteUint32(uint32_t v)
 void
 nsSOCKSSocketInfo::WriteNetAddr(const NetAddr *addr)
 {
-    const char *ip = NULL;
+    const char *ip = nullptr;
     uint32_t len = 0;
 
     if (addr->raw.family == AF_INET) {
@@ -892,7 +892,7 @@ nsSOCKSSocketInfo::WriteNetAddr(const NetAddr *addr)
         len = sizeof(addr->inet6.ip.u8);
     }
 
-    NS_ABORT_IF_FALSE(ip != NULL, "Unknown address");
+    NS_ABORT_IF_FALSE(ip != nullptr, "Unknown address");
     NS_ABORT_IF_FALSE(mDataLength + len <= BUFFER_SIZE,
                       "Can't write that much data!");
  
@@ -979,7 +979,7 @@ nsSOCKSSocketInfo::ReadNetPort(NetAddr *addr)
 void
 nsSOCKSSocketInfo::WantRead(uint32_t sz)
 {
-    NS_ABORT_IF_FALSE(mDataIoPtr == NULL,
+    NS_ABORT_IF_FALSE(mDataIoPtr == nullptr,
                       "WantRead() called while I/O already in progress!");
     NS_ABORT_IF_FALSE(mDataLength + sz <= BUFFER_SIZE,
                       "Can't read that much data!");
@@ -1077,7 +1077,7 @@ nsSOCKSIOLayerConnect(PRFileDesc *fd, const PRNetAddr *addr, PRIntervalTime to)
     NetAddr dst;
 
     nsSOCKSSocketInfo * info = (nsSOCKSSocketInfo*) fd->secret;
-    if (info == NULL) return PR_FAILURE;
+    if (info == nullptr) return PR_FAILURE;
 
     if (addr->raw.family == PR_AF_INET6 &&
         PR_IsNetAddrType(addr, PR_IpAddrV4Mapped)) {
@@ -1113,7 +1113,7 @@ nsSOCKSIOLayerConnectContinue(PRFileDesc *fd, int16_t oflags)
     PRStatus status;
 
     nsSOCKSSocketInfo * info = (nsSOCKSSocketInfo*) fd->secret;
-    if (info == NULL) return PR_FAILURE;
+    if (info == nullptr) return PR_FAILURE;
 
     do { 
         status = info->DoHandshake(fd, oflags);
@@ -1126,7 +1126,7 @@ static int16_t
 nsSOCKSIOLayerPoll(PRFileDesc *fd, int16_t in_flags, int16_t *out_flags)
 {
     nsSOCKSSocketInfo * info = (nsSOCKSSocketInfo*) fd->secret;
-    if (info == NULL) return PR_FAILURE;
+    if (info == nullptr) return PR_FAILURE;
 
     if (!info->IsConnected()) {
         *out_flags = 0;
@@ -1178,7 +1178,7 @@ nsSOCKSIOLayerGetName(PRFileDesc *fd, PRNetAddr *addr)
 {
     nsSOCKSSocketInfo * info = (nsSOCKSSocketInfo*) fd->secret;
     
-    if (info != NULL && addr != NULL) {
+    if (info != nullptr && addr != nullptr) {
         NetAddr temp;
         NetAddr *tempPtr = &temp;
         if (info->GetExternalProxyAddr(&tempPtr) == NS_OK) {
@@ -1195,7 +1195,7 @@ nsSOCKSIOLayerGetPeerName(PRFileDesc *fd, PRNetAddr *addr)
 {
     nsSOCKSSocketInfo * info = (nsSOCKSSocketInfo*) fd->secret;
 
-    if (info != NULL && addr != NULL) {
+    if (info != nullptr && addr != nullptr) {
         NetAddr temp;
         NetAddr *tempPtr = &temp;
         if (info->GetDestinationAddr(&tempPtr) == NS_OK) {

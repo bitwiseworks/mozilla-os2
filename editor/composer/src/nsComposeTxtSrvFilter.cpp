@@ -7,7 +7,7 @@
 #include "nsError.h"                    // for NS_OK
 #include "nsIContent.h"                 // for nsIContent
 #include "nsIDOMNode.h"                 // for nsIDOMNode
-#include "nsINameSpaceManager.h"        // for kNameSpaceID_None
+#include "nsNameSpaceManager.h"        // for kNameSpaceID_None
 #include "nsLiteralString.h"            // for NS_LITERAL_STRING
 #include "nscore.h"                     // for NS_IMETHODIMP
 
@@ -16,7 +16,7 @@ nsComposeTxtSrvFilter::nsComposeTxtSrvFilter() :
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsComposeTxtSrvFilter, nsITextServicesFilter)
+NS_IMPL_ISUPPORTS(nsComposeTxtSrvFilter, nsITextServicesFilter)
 
 NS_IMETHODIMP
 nsComposeTxtSrvFilter::Skip(nsIDOMNode* aNode, bool *_retval)

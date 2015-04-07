@@ -7,7 +7,6 @@
 #ifndef GFX_FONT_FEATURES_H
 #define GFX_FONT_FEATURES_H
 
-#include "gfxTypes.h"
 #include "nsTHashtable.h"
 #include "nsTArray.h"
 #include "nsString.h"
@@ -49,12 +48,11 @@ operator==(const gfxAlternateValue& a, const gfxAlternateValue& b)
     return (a.alternate == b.alternate) && (a.value == b.value);
 }
 
-class gfxFontFeatureValueSet {
+class gfxFontFeatureValueSet MOZ_FINAL {
 public:
     NS_INLINE_DECL_REFCOUNTING(gfxFontFeatureValueSet)
 
     gfxFontFeatureValueSet();
-    virtual ~gfxFontFeatureValueSet() {}
 
     struct ValueList {
         ValueList(const nsAString& aName, const nsTArray<uint32_t>& aSelectors)
@@ -79,7 +77,10 @@ public:
     AddFontFeatureValues(const nsAString& aFamily,
                 const nsTArray<gfxFontFeatureValueSet::FeatureValues>& aValues);
 
-protected:
+private:
+    // Private destructor, to discourage deletion outside of Release():
+    ~gfxFontFeatureValueSet() {}
+
     struct FeatureValueHashKey {
         nsString mFamily;
         uint32_t mPropVal;

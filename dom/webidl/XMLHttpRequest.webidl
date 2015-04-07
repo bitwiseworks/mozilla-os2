@@ -57,7 +57,6 @@ dictionary MozXMLHttpRequestParameters
  Constructor(DOMString ignored)]
 interface XMLHttpRequest : XMLHttpRequestEventTarget {
   // event handler
-  [SetterThrows, GetterThrows=Workers]
   attribute EventHandler onreadystatechange;
 
   // states
@@ -71,7 +70,9 @@ interface XMLHttpRequest : XMLHttpRequestEventTarget {
 
   // request
   [Throws]
-  void open(ByteString method, DOMString url, optional boolean async = true,
+  void open(ByteString method, DOMString url);
+  [Throws]
+  void open(ByteString method, DOMString url, boolean async,
             optional DOMString? user, optional DOMString? password);
   [Throws]
   void setRequestHeader(ByteString header, ByteString value);

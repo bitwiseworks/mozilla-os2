@@ -13,17 +13,20 @@ const PDU_TIMESTAMP = "00101000000000"; // 2000/01/01
 const PDU_UDL = "01";
 const PDU_UD = "41";
 
+const SENT_TIMESTAMP = Date.UTC(2000, 0, 1); // Must be equal to PDU_TIMESTAMP.
+
 SpecialPowers.addPermission("sms", true, document);
 
-let sms = window.navigator.mozSms;
-ok(sms instanceof MozSmsManager);
+let manager = window.navigator.mozMobileMessage;
+ok(manager instanceof MozMobileMessageManager,
+   "manager is instance of " + manager.constructor);
 
 let pendingEmulatorCmdCount = 0;
 function sendSmsPduToEmulator(pdu) {
   ++pendingEmulatorCmdCount;
 
   let cmd = "sms pdu " + pdu;
-  runEmulatorCmd(cmd, function (result) {
+  runEmulatorCmd(cmd, function(result) {
     --pendingEmulatorCmdCount;
 
     is(result[0], "OK", "Emulator response");
@@ -48,8 +51,7 @@ function checkMessage(message, id, threadId, messageClass) {
   is(message.sender, "+1", "message.sender");
   is(message.body, "A", "message.body");
   is(message.messageClass, messageClass, "message.messageClass");
-  ok(message.timestamp instanceof Date,
-     "message.timestamp is instanceof " + message.timestamp.constructor);
+  is(message.deliveryTimestamp, 0, "deliveryTimestamp is 0");
   is(message.read, false, "message.read");
 }
 
@@ -61,18 +63,20 @@ function test_message_class_0() {
   ];
 
   function do_test(dcsIndex) {
-    sms.addEventListener("received", function onReceived(event) {
-      sms.removeEventListener("received", onReceived);
+    manager.addEventListener("received", function onReceived(event) {
+      manager.removeEventListener("received", onReceived);
 
       let message = event.message;
       checkMessage(message, -1, 0, "class-0");
-      ok(event.message.timestamp.getTime() >= timeBeforeSend,
+      ok(event.message.timestamp >= timeBeforeSend,
          "Message's timestamp should be greater then the timetamp of sending");
-      ok(event.message.timestamp.getTime() <= Date.now(),
+      ok(event.message.timestamp <= Date.now(),
          "Message's timestamp should be lesser than the timestamp of now");
+      is(event.message.sentTimestamp, SENT_TIMESTAMP,
+         "Message's sentTimestamp should be equal to SENT_TIMESTAMP");
 
       // Make sure the message is not stored.
-      let cursor = sms.getMessages(null, false);
+      let cursor = manager.getMessages(null, false);
       cursor.onsuccess = function onsuccess() {
         if (cursor.result) {
           // Here we check whether there is any message of the same sender.
@@ -109,15 +113,17 @@ function test_message_class_0() {
 
 function doTestMessageClassGeneric(allDCSs, messageClass, next) {
   function do_test(dcsIndex) {
-    sms.addEventListener("received", function onReceived(event) {
-      sms.removeEventListener("received", onReceived);
+    manager.addEventListener("received", function onReceived(event) {
+      manager.removeEventListener("received", onReceived);
 
       // Make sure we can correctly receive the message
       checkMessage(event.message, null, null, messageClass);
-      ok(event.message.timestamp.getTime() >= timeBeforeSend,
+      ok(event.message.timestamp >= timeBeforeSend,
          "Message's timestamp should be greater then the timetamp of sending");
-      ok(event.message.timestamp.getTime() <= Date.now(),
+      ok(event.message.timestamp <= Date.now(),
          "Message's timestamp should be lesser than the timestamp of now");
+      is(event.message.sentTimestamp, SENT_TIMESTAMP,
+         "Message's sentTimestamp should be equal to SENT_TIMESTAMP");
 
       ++dcsIndex;
       if (dcsIndex >= allDCSs.length) {
@@ -169,10 +175,12 @@ function test_message_class_2() {
         if (pidIndex == 0) {
           // Make sure we can correctly receive the message
           checkMessage(event.message, null, null, "class-2");
-          ok(event.message.timestamp.getTime() >= timeBeforeSend,
+          ok(event.message.timestamp >= timeBeforeSend,
              "Message's timestamp should be greater then the timetamp of sending");
-          ok(event.message.timestamp.getTime() <= Date.now(),
+          ok(event.message.timestamp <= Date.now(),
              "Message's timestamp should be lesser than the timestamp of now");
+          is(event.message.sentTimestamp, SENT_TIMESTAMP,
+             "Message's sentTimestamp should be equal to SENT_TIMESTAMP");
 
           next();
           return;
@@ -187,7 +195,7 @@ function test_message_class_2() {
       }
 
       function next() {
-        sms.removeEventListener("received", onReceived);
+        manager.removeEventListener("received", onReceived);
 
         ++pidIndex;
         if (pidIndex >= allPIDs.length) {
@@ -202,7 +210,7 @@ function test_message_class_2() {
         }
       }
 
-      sms.addEventListener("received", onReceived);
+      manager.addEventListener("received", onReceived);
 
       if (pidIndex != 0) {
         // Wait for three seconds to ensure we don't receive the message.

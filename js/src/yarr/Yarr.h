@@ -31,8 +31,8 @@
 #define yarr_Yarr_h
 
 #include <limits.h>
-#include "YarrInterpreter.h"
-#include "YarrPattern.h"
+#include "yarr/YarrInterpreter.h"
+#include "yarr/YarrPattern.h"
 
 namespace JSC { namespace Yarr {
 
@@ -47,10 +47,11 @@ namespace JSC { namespace Yarr {
 
 static const unsigned quantifyInfinite = UINT_MAX;
 static const unsigned offsetNoMatch = (unsigned)-1;
+static const unsigned offsetError = (unsigned)-2;
 
 // The below limit restricts the number of "recursive" match calls in order to
 // avoid spending exponential time on complex regular expressions.
-static const unsigned matchLimit = 1000000;
+static const unsigned matchLimit = 2500000;
 
 enum JSRegExpResult {
     JSRegExpMatch = 1,

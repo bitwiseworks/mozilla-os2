@@ -25,9 +25,10 @@
 #include "nsIDOMXULTextboxElement.h"
 #include "nsIEditor.h"
 #include "nsIFrame.h"
-#include "nsINameSpaceManager.h"
 #include "nsITextControlFrame.h"
 #include "nsMenuPopupFrame.h"
+#include "nsNameSpaceManager.h"
+#include "mozilla/dom/Element.h"
 
 using namespace mozilla::a11y;
 
@@ -39,8 +40,11 @@ XULButtonAccessible::
   XULButtonAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   AccessibleWrap(aContent, aDoc)
 {
-  if (ContainsMenu())
+  if (ContainsMenu()) {
     mGenericTypes |= eMenuButton;
+  } else {
+    mGenericTypes |= eButton;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -159,11 +163,8 @@ XULButtonAccessible::ContainerWidget() const
   return nullptr;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// XULButtonAccessible: Accessible protected
-
-void
-XULButtonAccessible::CacheChildren()
+bool
+XULButtonAccessible::IsAcceptableChild(Accessible* aPossibleChild) const
 {
   // In general XUL button has not accessible children. Nevertheless menu
   // buttons can have button (@type="menu-button") and popup accessibles
@@ -171,41 +172,20 @@ XULButtonAccessible::CacheChildren()
 
   // XXX: no children until the button is menu button. Probably it's not
   // totally correct but in general AT wants to have leaf buttons.
+  roles::Role role = aPossibleChild->Role();
 
-  bool isMenuButton = mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
-                                            nsGkAtoms::menuButton, eCaseMatters);
+  // Get an accessible for menupopup or panel elements.
+  if (role == roles::MENUPOPUP)
+    return true;
 
-  Accessible* menupopup = nullptr;
-  Accessible* button = nullptr;
+  // Button type="menu-button" contains a real button. Get an accessible
+  // for it. Ignore dropmarker button which is placed as a last child.
+  if (role != roles::PUSHBUTTON ||
+      aPossibleChild->GetContent()->Tag() == nsGkAtoms::dropMarker)
+    return false;
 
-  TreeWalker walker(this, mContent);
-
-  Accessible* child = nullptr;
-  while ((child = walker.NextChild())) {
-    roles::Role role = child->Role();
-
-    if (role == roles::MENUPOPUP) {
-      // Get an accessible for menupopup or panel elements.
-      menupopup = child;
-
-    } else if (isMenuButton && role == roles::PUSHBUTTON) {
-      // Button type="menu-button" contains a real button. Get an accessible
-      // for it. Ignore dropmarker button which is placed as a last child.
-      button = child;
-      break;
-
-    } else {
-      // Unbind rejected accessible from document.
-      Document()->UnbindFromDocument(child);
-    }
-  }
-
-  if (!menupopup)
-    return;
-
-  AppendChild(menupopup);
-  if (button)
-    AppendChild(button);
+  return mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                               nsGkAtoms::menuButton, eCaseMatters);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -244,7 +224,7 @@ XULDropmarkerAccessible::DropmarkerOpen(bool aToggleOpen)
   bool isOpen = false;
 
   nsCOMPtr<nsIDOMXULButtonElement> parentButtonElement =
-    do_QueryInterface(mContent->GetParent());
+    do_QueryInterface(mContent->GetFlattenedTreeParent());
 
   if (parentButtonElement) {
     parentButtonElement->GetOpen(&isOpen);
@@ -408,7 +388,7 @@ XULGroupboxAccessible::NativeName(nsString& aName)
 {
   // XXX: we use the first related accessible only.
   Accessible* label =
-    RelationByType(nsIAccessibleRelation::RELATION_LABELLED_BY).Next();
+    RelationByType(RelationType::LABELLED_BY).Next();
   if (label)
     return label->Name(aName);
 
@@ -416,10 +396,10 @@ XULGroupboxAccessible::NativeName(nsString& aName)
 }
 
 Relation
-XULGroupboxAccessible::RelationByType(uint32_t aType)
+XULGroupboxAccessible::RelationByType(RelationType aType)
 {
   Relation rel = AccessibleWrap::RelationByType(aType);
-  if (aType != nsIAccessibleRelation::RELATION_LABELLED_BY)
+  if (aType != RelationType::LABELLED_BY)
     return rel;
 
   // The label for xul:groupbox is generated from xul:label that is
@@ -430,8 +410,7 @@ XULGroupboxAccessible::RelationByType(uint32_t aType)
     Accessible* childAcc = GetChildAt(childIdx);
     if (childAcc->Role() == roles::LABEL) {
       // Ensure that it's our label
-      Relation reverseRel =
-        childAcc->RelationByType(nsIAccessibleRelation::RELATION_LABEL_FOR);
+      Relation reverseRel = childAcc->RelationByType(RelationType::LABEL_FOR);
       Accessible* testGroupbox = nullptr;
       while ((testGroupbox = reverseRel.Next()))
         if (testGroupbox == this) {
@@ -659,201 +638,4 @@ uint64_t
 XULToolbarSeparatorAccessible::NativeState()
 {
   return 0;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// XULTextFieldAccessible
-////////////////////////////////////////////////////////////////////////////////
-
-XULTextFieldAccessible::
- XULTextFieldAccessible(nsIContent* aContent, DocAccessible* aDoc) :
- HyperTextAccessibleWrap(aContent, aDoc)
-{
-}
-
-NS_IMPL_ISUPPORTS_INHERITED2(XULTextFieldAccessible,
-                             Accessible,
-                             nsIAccessibleText,
-                             nsIAccessibleEditableText)
-
-////////////////////////////////////////////////////////////////////////////////
-// XULTextFieldAccessible: nsIAccessible
-
-void
-XULTextFieldAccessible::Value(nsString& aValue)
-{
-  aValue.Truncate();
-  if (NativeRole() == roles::PASSWORD_TEXT) // Don't return password text!
-    return;
-
-  nsCOMPtr<nsIDOMXULTextBoxElement> textBox(do_QueryInterface(mContent));
-  if (textBox) {
-    textBox->GetValue(aValue);
-    return;
-  }
-
-  nsCOMPtr<nsIDOMXULMenuListElement> menuList(do_QueryInterface(mContent));
-  if (menuList)
-    menuList->GetLabel(aValue);
-}
-
-void
-XULTextFieldAccessible::ApplyARIAState(uint64_t* aState) const
-{
-  HyperTextAccessibleWrap::ApplyARIAState(aState);
-
-  aria::MapToState(aria::eARIAAutoComplete, mContent->AsElement(), aState);
-}
-
-uint64_t
-XULTextFieldAccessible::NativeState()
-{
-  uint64_t state = HyperTextAccessibleWrap::NativeState();
-
-  nsCOMPtr<nsIContent> inputField(GetInputField());
-  NS_ENSURE_TRUE(inputField, state);
-
-  // Create a temporary accessible from the HTML text field to get
-  // the accessible state from. Doesn't add to cache into document cache.
-  nsRefPtr<HTMLTextFieldAccessible> tempAccessible =
-    new HTMLTextFieldAccessible(inputField, mDoc);
-  if (!tempAccessible)
-    return state;
-
-  state |= tempAccessible->NativeState();
-
-  nsCOMPtr<nsIDOMXULMenuListElement> menuList(do_QueryInterface(mContent));
-  if (menuList) {
-    // <xul:menulist droppable="false">
-    if (!mContent->AttrValueIs(kNameSpaceID_None,
-                               nsGkAtoms::editable,
-                               nsGkAtoms::_true, eIgnoreCase)) {
-      state |= states::READONLY;
-    }
-  }
-
-  return state;
-}
-
-role
-XULTextFieldAccessible::NativeRole()
-{
-  if (mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
-                            nsGkAtoms::password, eIgnoreCase))
-    return roles::PASSWORD_TEXT;
-  
-  return roles::ENTRY;
-}
-
-/**
-  * Only one actions available
-  */
-uint8_t
-XULTextFieldAccessible::ActionCount()
-{
-  return 1;
-}
-
-/**
-  * Return the name of our only action
-  */
-NS_IMETHODIMP
-XULTextFieldAccessible::GetActionName(uint8_t aIndex, nsAString& aName)
-{
-  if (aIndex == eAction_Click) {
-    aName.AssignLiteral("activate"); 
-    return NS_OK;
-  }
-  return NS_ERROR_INVALID_ARG;
-}
-
-/**
-  * Tell the button to do its action
-  */
-NS_IMETHODIMP
-XULTextFieldAccessible::DoAction(uint8_t index)
-{
-  if (index == 0) {
-    nsCOMPtr<nsIDOMXULElement> element(do_QueryInterface(mContent));
-    if (element)
-    {
-      element->Focus();
-      return NS_OK;
-    }
-    return NS_ERROR_FAILURE;
-  }
-  return NS_ERROR_INVALID_ARG;
-}
-
-bool
-XULTextFieldAccessible::CanHaveAnonChildren()
-{
-  return false;
-}
-
-already_AddRefed<nsIEditor>
-XULTextFieldAccessible::GetEditor() const
-{
-  nsCOMPtr<nsIContent> inputField = GetInputField();
-  nsCOMPtr<nsIDOMNSEditableElement> editableElt(do_QueryInterface(inputField));
-  if (!editableElt)
-    return nullptr;
-
-  nsCOMPtr<nsIEditor> editor;
-  editableElt->GetEditor(getter_AddRefs(editor));
-  return editor.forget();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// XULTextFieldAccessible: Accessible protected
-
-void
-XULTextFieldAccessible::CacheChildren()
-{
-  NS_ENSURE_TRUE_VOID(mDoc);
-  // Create child accessibles for native anonymous content of underlying HTML
-  // input element.
-  nsCOMPtr<nsIContent> inputContent(GetInputField());
-  if (!inputContent)
-    return;
-
-  TreeWalker walker(this, inputContent);
-
-  Accessible* child = nullptr;
-  while ((child = walker.NextChild()) && AppendChild(child));
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// XULTextFieldAccessible: HyperTextAccessible protected
-
-already_AddRefed<nsFrameSelection>
-XULTextFieldAccessible::FrameSelection()
-{
-  nsCOMPtr<nsIContent> inputContent(GetInputField());
-  nsIFrame* frame = inputContent->GetPrimaryFrame();
-  return frame ? frame->GetFrameSelection() : nullptr;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// XULTextFieldAccessible protected
-
-already_AddRefed<nsIContent>
-XULTextFieldAccessible::GetInputField() const
-{
-  nsCOMPtr<nsIDOMNode> inputFieldDOMNode;
-  nsCOMPtr<nsIDOMXULTextBoxElement> textBox = do_QueryInterface(mContent);
-  if (textBox) {
-    textBox->GetInputField(getter_AddRefs(inputFieldDOMNode));
-
-  } else {
-    // <xul:menulist droppable="false">
-    nsCOMPtr<nsIDOMXULMenuListElement> menuList = do_QueryInterface(mContent);
-    if (menuList)
-      menuList->GetInputField(getter_AddRefs(inputFieldDOMNode));
-  }
-
-  NS_ASSERTION(inputFieldDOMNode, "No input field for XULTextFieldAccessible");
-
-  nsCOMPtr<nsIContent> inputField = do_QueryInterface(inputFieldDOMNode);
-  return inputField.forget();
 }

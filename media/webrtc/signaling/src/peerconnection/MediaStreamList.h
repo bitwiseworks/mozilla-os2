@@ -8,7 +8,6 @@
 #include "mozilla/ErrorResult.h"
 #include "nsISupportsImpl.h"
 #include "nsAutoPtr.h"
-#include "jspubtd.h"
 #include "nsWrapperCache.h"
 
 #ifdef USE_FAKE_MEDIA_STREAMS
@@ -39,7 +38,7 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MediaStreamList)
 
-  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+  virtual JSObject* WrapObject(JSContext *cx)
     MOZ_OVERRIDE;
   nsISupports* GetParentObject();
 

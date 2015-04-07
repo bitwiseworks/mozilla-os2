@@ -6,19 +6,22 @@
 #include "mozilla/dom/UndoManager.h"
 #include "mozilla/dom/DOMTransactionBinding.h"
 
+#include "mozilla/dom/Event.h"
 #include "nsDOMClassInfoID.h"
 #include "nsIClassInfo.h"
+#include "nsIDOMDocument.h"
 #include "nsIXPCScriptable.h"
 #include "nsIVariant.h"
 #include "nsVariant.h"
 #include "nsINode.h"
 #include "nsIDOMDOMTransactionEvent.h"
-#include "nsEventDispatcher.h"
 #include "nsContentUtils.h"
 #include "jsapi.h"
+#include "nsIDocument.h"
 
-#include "mozilla/Preferences.h"
 #include "mozilla/ErrorResult.h"
+#include "mozilla/EventDispatcher.h"
+#include "mozilla/Preferences.h"
 
 // Includes for mutation observer.
 #include "nsIDOMHTMLElement.h"
@@ -116,7 +119,7 @@ protected:
   nsString mUndoValue;
 };
 
-NS_IMPL_CYCLE_COLLECTION_2(UndoAttrChanged, mElement, mAttrAtom)
+NS_IMPL_CYCLE_COLLECTION(UndoAttrChanged, mElement, mAttrAtom)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(UndoAttrChanged)
   NS_INTERFACE_MAP_ENTRY(nsITransaction)
@@ -222,7 +225,7 @@ protected:
   nsString mUndoValue;
 };
 
-NS_IMPL_CYCLE_COLLECTION_1(UndoTextChanged, mContent)
+NS_IMPL_CYCLE_COLLECTION(UndoTextChanged, mContent)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(UndoTextChanged)
   NS_INTERFACE_MAP_ENTRY(nsITransaction)
@@ -331,7 +334,7 @@ protected:
   nsCOMArray<nsIContent> mChildren;
 };
 
-NS_IMPL_CYCLE_COLLECTION_2(UndoContentAppend, mContent, mChildren)
+NS_IMPL_CYCLE_COLLECTION(UndoContentAppend, mContent, mChildren)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(UndoContentAppend)
   NS_INTERFACE_MAP_ENTRY(nsITransaction)
@@ -402,7 +405,7 @@ protected:
   nsCOMPtr<nsIContent> mNextNode;
 };
 
-NS_IMPL_CYCLE_COLLECTION_3(UndoContentInsert, mContent, mChild, mNextNode)
+NS_IMPL_CYCLE_COLLECTION(UndoContentInsert, mContent, mChild, mNextNode)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(UndoContentInsert)
   NS_INTERFACE_MAP_ENTRY(nsITransaction)
@@ -490,7 +493,7 @@ protected:
   nsCOMPtr<nsIContent> mNextNode;
 };
 
-NS_IMPL_CYCLE_COLLECTION_3(UndoContentRemove, mContent, mChild, mNextNode)
+NS_IMPL_CYCLE_COLLECTION(UndoContentRemove, mContent, mChild, mNextNode)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(UndoContentRemove)
   NS_INTERFACE_MAP_ENTRY(nsITransaction)
@@ -593,7 +596,7 @@ protected:
                                       // reference.
 };
 
-NS_IMPL_ISUPPORTS1(UndoMutationObserver, nsIMutationObserver)
+NS_IMPL_ISUPPORTS(UndoMutationObserver, nsIMutationObserver)
 
 bool
 UndoMutationObserver::IsManagerForMutation(nsIContent* aContent)
@@ -738,7 +741,7 @@ protected:
   uint32_t mFlags;
 };
 
-NS_IMPL_CYCLE_COLLECTION_1(FunctionCallTxn, mTransaction)
+NS_IMPL_CYCLE_COLLECTION(FunctionCallTxn, mTransaction)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(FunctionCallTxn)
   NS_INTERFACE_MAP_ENTRY(nsITransaction)
@@ -1139,23 +1142,9 @@ UndoManager::DispatchTransactionEvent(JSContext* aCx, const nsAString& aType,
     return;
   }
 
-  nsIDocument* ownerDoc = mHostNode->OwnerDoc();
-  if (!ownerDoc) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return;
-  }
-
-  nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(ownerDoc);
-  if (!domDoc) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return;
-  }
-
-  nsCOMPtr<nsIDOMEvent> event;
-  nsresult rv = domDoc->CreateEvent(NS_LITERAL_STRING("domtransaction"),
-                                    getter_AddRefs(event));
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
+  nsRefPtr<Event> event = mHostNode->OwnerDoc()->CreateEvent(
+    NS_LITERAL_STRING("domtransaction"), aRv);
+  if (aRv.Failed()) {
     return;
   }
 
@@ -1167,13 +1156,14 @@ UndoManager::DispatchTransactionEvent(JSContext* aCx, const nsAString& aType,
   nsTArray<nsIVariant*> transactionItems;
   for (uint32_t i = 0; i < items.Length(); i++) {
     JS::Rooted<JS::Value> txVal(aCx, JS::ObjectValue(*items[i]->Callback()));
-    if (!JS_WrapValue(aCx, txVal.address())) {
+    if (!JS_WrapValue(aCx, &txVal)) {
       aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
       return;
     }
     nsCOMPtr<nsIVariant> txVariant;
-    rv = nsContentUtils::XPConnect()->JSToVariant(aCx, txVal,
-                                                  getter_AddRefs(txVariant));
+    nsresult rv =
+      nsContentUtils::XPConnect()->JSToVariant(aCx, txVal,
+                                               getter_AddRefs(txVariant));
     if (NS_SUCCEEDED(rv)) {
       keepAlive.AppendObject(txVariant);
       transactionItems.AppendElement(txVariant.get());
@@ -1191,8 +1181,8 @@ UndoManager::DispatchTransactionEvent(JSContext* aCx, const nsAString& aType,
                                                     transactions))) {
     event->SetTrusted(true);
     event->SetTarget(mHostNode);
-    nsEventDispatcher::DispatchDOMEvent(mHostNode, nullptr, event,
-                                        nullptr, nullptr);
+    EventDispatcher::DispatchDOMEvent(mHostNode, nullptr, event,
+                                      nullptr, nullptr);
   }
 }
 
@@ -1237,11 +1227,3 @@ UndoManager::Disconnect()
 {
   mIsDisconnected = true;
 }
-
-bool
-UndoManager::PrefEnabled()
-{
-  static bool sPrefValue = Preferences::GetBool("dom.undo_manager.enabled", false);
-  return sPrefValue;
-}
-

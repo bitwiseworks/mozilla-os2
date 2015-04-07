@@ -49,7 +49,7 @@ ReverbConvolverStage::ReverbConvolverStage(const float* impulseResponse, size_t,
 
     if (!m_directMode) {
         m_fftKernel = new FFTBlock(fftSize);
-        m_fftKernel->PerformPaddedFFT(impulseResponse + stageOffset, stageLength);
+        m_fftKernel->PadAndMakeScaledDFT(impulseResponse + stageOffset, stageLength);
         m_fftConvolver = new FFTConvolver(fftSize);
     } else {
         m_directKernel.SetLength(fftSize / 2);
@@ -85,6 +85,29 @@ ReverbConvolverStage::ReverbConvolverStage(const float* impulseResponse, size_t,
     delayBufferSize = delayBufferSize < renderSliceSize ? renderSliceSize : delayBufferSize;
     m_preDelayBuffer.SetLength(delayBufferSize);
     PodZero(m_preDelayBuffer.Elements(), m_preDelayBuffer.Length());
+}
+
+size_t ReverbConvolverStage::sizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+{
+    size_t amount = aMallocSizeOf(this);
+
+    if (m_fftKernel) {
+        amount += m_fftKernel->SizeOfIncludingThis(aMallocSizeOf);
+    }
+
+    if (m_fftConvolver) {
+        amount += m_fftConvolver->sizeOfIncludingThis(aMallocSizeOf);
+    }
+
+    amount += m_preDelayBuffer.SizeOfExcludingThis(aMallocSizeOf);
+    amount += m_temporaryBuffer.SizeOfExcludingThis(aMallocSizeOf);
+    amount += m_directKernel.SizeOfExcludingThis(aMallocSizeOf);
+
+    if (m_directConvolver) {
+        amount += m_directConvolver->sizeOfIncludingThis(aMallocSizeOf);
+    }
+
+    return amount;
 }
 
 void ReverbConvolverStage::processInBackground(ReverbConvolver* convolver, size_t framesToProcess)

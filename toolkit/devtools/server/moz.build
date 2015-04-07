@@ -4,17 +4,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['tests']
+BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']
+MOCHITEST_CHROME_MANIFESTS += ['tests/mochitest/chrome.ini']
+XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']
 
 XPIDL_SOURCES += [
     'nsIJSInspector.idl',
 ]
 
-MODULE = 'jsinspector'
+XPIDL_MODULE = 'jsinspector'
 
-CPP_SOURCES += [
+SOURCES += [
     'nsJSInspector.cpp',
 ]
 
-LIBRARY_NAME = 'jsinspector'
-
+FINAL_LIBRARY = 'xul'

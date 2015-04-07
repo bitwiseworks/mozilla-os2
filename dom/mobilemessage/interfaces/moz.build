@@ -11,10 +11,7 @@ XPIDL_SOURCES += [
     'nsIDOMMozMobileMessageThread.idl',
     'nsIDOMMozSmsEvent.idl',
     'nsIDOMMozSmsMessage.idl',
-    'nsIDOMNavigatorMobileMessage.idl',
-    'nsIDOMNavigatorSms.idl',
     'nsIDOMSmsFilter.idl',
-    'nsIDOMSmsManager.idl',
     'nsIDOMSmsSegmentInfo.idl',
     'nsIMmsService.idl',
     'nsIMobileMessageCallback.idl',
@@ -25,16 +22,10 @@ XPIDL_SOURCES += [
     'nsIWapPushApplication.idl',
 ]
 
-if CONFIG['MOZ_B2G_RIL']:
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk' and CONFIG['MOZ_B2G_RIL']:
     XPIDL_SOURCES += [
         'nsIRilMobileMessageDatabaseService.idl',
     ]
 
 XPIDL_MODULE = 'dom_mobilemessage'
-
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/dom/base',
-    '-I$(topsrcdir)/dom/interfaces/base',
-    '-I$(topsrcdir)/dom/interfaces/events',
-]
 

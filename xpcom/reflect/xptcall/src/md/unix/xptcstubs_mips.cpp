@@ -8,14 +8,14 @@
 #include "xptcprivate.h"
 #include "xptiprivate.h"
 
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 
 /*
  * This is for MIPS O32 ABI
  * Args contains a0-3 and then the stack.
  * Because a0 is 'this', we want to skip it
  */
-extern "C" nsresult
+extern "C" nsresult ATTRIBUTE_USED
 PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint32_t* args)
 {
     args++; // always skip over a0
@@ -23,7 +23,7 @@ PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint32_t* args)
 #define PARAM_BUFFER_COUNT		16
 
     nsXPTCMiniVariant paramBuffer[PARAM_BUFFER_COUNT];
-    nsXPTCMiniVariant* dispatchParams = NULL;
+    nsXPTCMiniVariant* dispatchParams = nullptr;
     const nsXPTMethodInfo* info;
     uint8_t paramCount;
     uint8_t i;

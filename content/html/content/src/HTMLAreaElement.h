@@ -8,53 +8,45 @@
 #define mozilla_dom_HTMLAreaElement_h
 
 #include "mozilla/Attributes.h"
-#include "nsIDOMHTMLAreaElement.h"
+#include "mozilla/dom/Link.h"
 #include "nsGenericHTMLElement.h"
-#include "nsILink.h"
 #include "nsGkAtoms.h"
+#include "nsDOMTokenList.h"
+#include "nsIDOMHTMLAreaElement.h"
 #include "nsIURL.h"
-#include "Link.h"
 
 class nsIDocument;
 
 namespace mozilla {
+class EventChainPostVisitor;
+class EventChainPreVisitor;
 namespace dom {
 
-class HTMLAreaElement : public nsGenericHTMLElement,
-                        public nsIDOMHTMLAreaElement,
-                        public nsILink,
-                        public Link
+class HTMLAreaElement MOZ_FINAL : public nsGenericHTMLElement,
+                                  public nsIDOMHTMLAreaElement,
+                                  public Link
 {
 public:
-  HTMLAreaElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  HTMLAreaElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
   virtual ~HTMLAreaElement();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
+  // CC
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLAreaElement,
+                                           nsGenericHTMLElement)
+
   // DOM memory reporter participant
   NS_DECL_SIZEOF_EXCLUDING_THIS
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   virtual int32_t TabIndexDefault() MOZ_OVERRIDE;
 
   // nsIDOMHTMLAreaElement
   NS_DECL_NSIDOMHTMLAREAELEMENT
 
-  // nsILink
-  NS_IMETHOD LinkAdded() MOZ_OVERRIDE { return NS_OK; }
-  NS_IMETHOD LinkRemoved() MOZ_OVERRIDE { return NS_OK; }
-
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
-  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PostHandleEvent(EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
   virtual bool IsLink(nsIURI** aURI) const MOZ_OVERRIDE;
   virtual void GetLinkTarget(nsAString& aTarget) MOZ_OVERRIDE;
   virtual already_AddRefed<nsIURI> GetHrefURI() const MOZ_OVERRIDE;
@@ -77,9 +69,7 @@ public:
 
   virtual nsresult Clone(nsINodeInfo* aNodeInfo, nsINode** aResult) const MOZ_OVERRIDE;
 
-  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
-
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
+  virtual EventStates IntrinsicState() const MOZ_OVERRIDE;
 
   // WebIDL
 
@@ -124,9 +114,27 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::ping, aPing, aError);
   }
+  
+  void GetRel(nsString& aValue)
+  {
+    GetHTMLAttr(nsGkAtoms::rel, aValue);
+  }
+
+  void SetRel(const nsAString& aRel, ErrorResult& aError)
+  {
+    SetHTMLAttr(nsGkAtoms::rel, aRel, aError);
+  } 
+  nsDOMTokenList* RelList();
+  // The Link::GetOrigin is OK for us
 
   // The XPCOM GetProtocol is OK for us
   // The XPCOM SetProtocol is OK for us
+
+  // The Link::GetUsername is OK for us
+  // The Link::SetUsername is OK for us
+
+  // The Link::GetPassword is OK for us
+  // The Link::SetPassword is OK for us
 
   // The XPCOM GetHost is OK for us
   // The XPCOM SetHost is OK for us
@@ -146,6 +154,9 @@ public:
   // The XPCOM GetHash is OK for us
   // The XPCOM SetHash is OK for us
 
+  // The Link::GetSearchParams is OK for us
+  // The Link::SetSearchParams is OK for us
+
   bool NoHref() const
   {
     return GetBoolAttr(nsGkAtoms::nohref);
@@ -162,11 +173,11 @@ public:
   }
 
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
   virtual void GetItemValueText(nsAString& text) MOZ_OVERRIDE;
   virtual void SetItemValueText(const nsAString& text) MOZ_OVERRIDE;
+  nsRefPtr<nsDOMTokenList > mRelList;
 };
 
 } // namespace dom

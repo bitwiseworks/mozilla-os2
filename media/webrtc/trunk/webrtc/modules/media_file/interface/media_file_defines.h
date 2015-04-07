@@ -11,9 +11,9 @@
 #ifndef WEBRTC_MODULES_MEDIA_FILE_INTERFACE_MEDIA_FILE_DEFINES_H_
 #define WEBRTC_MODULES_MEDIA_FILE_INTERFACE_MEDIA_FILE_DEFINES_H_
 
-#include "engine_configurations.h"
-#include "module_common_types.h"
-#include "typedefs.h"
+#include "webrtc/engine_configurations.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/typedefs.h"
 
 namespace webrtc {
 // Callback class for the MediaFile class.
@@ -25,27 +25,27 @@ public:
     // This function is called by MediaFile when a file has been playing for
     // durationMs ms. id is the identifier for the MediaFile instance calling
     // the callback.
-    virtual void PlayNotification(const WebRtc_Word32 id,
-                                  const WebRtc_UWord32 durationMs) = 0;
+    virtual void PlayNotification(const int32_t id,
+                                  const uint32_t durationMs) = 0;
 
     // This function is called by MediaFile when a file has been recording for
     // durationMs ms. id is the identifier for the MediaFile instance calling
     // the callback.
-    virtual void RecordNotification(const WebRtc_Word32 id,
-                                    const WebRtc_UWord32 durationMs) = 0;
+    virtual void RecordNotification(const int32_t id,
+                                    const uint32_t durationMs) = 0;
 
     // This function is called by MediaFile when a file has been stopped
     // playing. id is the identifier for the MediaFile instance calling the
     // callback.
-    virtual void PlayFileEnded(const WebRtc_Word32 id) = 0;
+    virtual void PlayFileEnded(const int32_t id) = 0;
 
     // This function is called by MediaFile when a file has been stopped
     // recording. id is the identifier for the MediaFile instance calling the
     // callback.
-    virtual void RecordFileEnded(const WebRtc_Word32 id) = 0;
+    virtual void RecordFileEnded(const int32_t id) = 0;
 
 protected:
     FileCallback() {}
 };
-} // namespace webrtc
+}  // namespace webrtc
 #endif // WEBRTC_MODULES_MEDIA_FILE_INTERFACE_MEDIA_FILE_DEFINES_H_

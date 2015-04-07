@@ -5,7 +5,9 @@
 #ifndef nsAttrValueInlines_h__
 #define nsAttrValueInlines_h__
 
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
+
+#include "nsAttrValue.h"
 
 struct MiscContainer
 {

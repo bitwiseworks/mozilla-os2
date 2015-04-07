@@ -4,7 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#pragma once
+#ifndef mozilla_dom_SpeechStreamListener_h
+#define mozilla_dom_SpeechStreamListener_h
 
 #include "MediaStreamGraph.h"
 #include "AudioSegment.h"
@@ -32,9 +33,12 @@ public:
   void NotifyFinished(MediaStreamGraph* aGraph) MOZ_OVERRIDE;
 
 private:
-  template<typename SampleFormatType> void ConvertAndDispatchAudioChunk(AudioChunk& aChunk);
+  template<typename SampleFormatType>
+  void ConvertAndDispatchAudioChunk(int aDuration, float aVolume, SampleFormatType* aData);
   nsRefPtr<SpeechRecognition> mRecognition;
 };
 
 } // namespace dom
 } // namespace mozilla
+
+#endif

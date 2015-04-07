@@ -3,7 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#pragma once
+#ifndef mozilla_dom_SVGAnimatedBoolean_h
+#define mozilla_dom_SVGAnimatedBoolean_h
 
 #include "nsWrapperCache.h"
 #include "nsSVGElement.h"
@@ -13,11 +14,10 @@
 namespace mozilla {
 namespace dom {
 
-class SVGAnimatedBoolean MOZ_FINAL : public nsISupports,
-                                     public nsWrapperCache
+class SVGAnimatedBoolean MOZ_FINAL : public nsWrapperCache
 {
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(SVGAnimatedBoolean)
+  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(SVGAnimatedBoolean)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(SVGAnimatedBoolean)
 
   SVGAnimatedBoolean(nsSVGBoolean* aVal, nsSVGElement *aSVGElement)
     : mVal(aVal), mSVGElement(aSVGElement)
@@ -26,10 +26,9 @@ class SVGAnimatedBoolean MOZ_FINAL : public nsISupports,
   }
   ~SVGAnimatedBoolean();
 
- // WebIDL
+  // WebIDL
   nsSVGElement* GetParentObject() const { return mSVGElement; }
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
   bool BaseVal() const { return mVal->GetBaseValue(); }
   void SetBaseVal(bool aValue) { mVal->SetBaseValue(aValue, mSVGElement); }
   bool AnimVal() const { mSVGElement->FlushAnimations(); return mVal->GetAnimValue(); }
@@ -41,3 +40,5 @@ protected:
 
 } //namespace dom
 } //namespace mozilla
+
+#endif // mozilla_dom_SVGAnimatedBoolean_h

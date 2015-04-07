@@ -4,13 +4,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'build'
+if CONFIG['MOZ_LIBSTDCXX_TARGET_VERSION']:
+    LIBRARY_NAME = 'stdc++compat'
+    SOURCES += ['stdc++compat.cpp']
 
-CPP_SOURCES += [
-    'stdc++compat.cpp',
-]
+if CONFIG['MOZ_LIBSTDCXX_HOST_VERSION']:
+    HOST_LIBRARY_NAME = 'host_stdc++compat'
+    HOST_SOURCES += [
+        'stdc++compat.cpp',
+    ]
 
-HOST_LIBRARY_NAME = 'host_stdc++compat'
+FORCE_STATIC_LIB = True
 
-LIBRARY_NAME = 'stdc++compat'
+NO_PGO = True
 
+DISABLE_STL_WRAPPING = True

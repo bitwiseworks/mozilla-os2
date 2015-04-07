@@ -8,7 +8,6 @@
 let gWindow = null;
 var gFrame = null;
 
-const kMarkerOffsetY = 12;
 const kCommonWaitMs = 5000;
 const kCommonPollMs = 100;
 
@@ -25,6 +24,8 @@ function setUpAndTearDown() {
   yield waitForCondition(function () {
       return !SelectionHelperUI.isSelectionUIVisible;
     }, kCommonWaitMs, kCommonPollMs);
+  InputSourceHelper.isPrecise = false;
+  InputSourceHelper.fireUpdate();
 }
 
 gTests.push({
@@ -36,52 +37,17 @@ gTests.push({
     yield addTab(chromeRoot + "browser_selection_textarea.html");
 
     yield waitForCondition(function () {
-      return !StartUI.isStartPageVisible;
+      return !BrowserUI.isStartTabVisible;
       }, 10000, 100);
 
     yield hideContextUI();
 
     gWindow = Browser.selectedTab.browser.contentWindow;
-    InputSourceHelper.isPrecise = false;
   },
 });
 
 gTests.push({
-  desc: "textarea basic selection",
-  setUp: setUpAndTearDown,
-  tearDown: setUpAndTearDown,
-  run: function test() {
-    let textarea = gWindow.document.getElementById("inputtext");
-    textarea.focus();
-
-    let promise = waitForEvent(document, "popupshown");
-    sendContextMenuClick(355, 50);
-    yield promise;
-
-    checkContextUIMenuItemVisibility(["context-select",
-                                      "context-select-all"]);
-
-    let menuItem = document.getElementById("context-select");
-    ok(menuItem, "menu item exists");
-    ok(!menuItem.hidden, "menu item visible");
-    let popupPromise = waitForEvent(document, "popuphidden");
-    EventUtils.synthesizeMouse(menuItem, 10, 10, {}, gWindow);
-    yield popupPromise;
-    ok(popupPromise && !(popupPromise instanceof Error), "promise error");
-
-    yield waitForCondition(function () {
-        return SelectionHelperUI.isSelectionUIVisible;
-      }, kCommonWaitMs, kCommonPollMs);
-
-    // check text selection
-    is(getTrimmedSelection(textarea).toString(), "pictures", "selection test");
-
-    clearSelection(textarea);
-  },
-});
-
-gTests.push({
-  desc: "textarea complex drag selection",
+  desc: "textarea selection and drag",
   setUp: setUpAndTearDown,
   tearDown: setUpAndTearDown,
   run: function test() {
@@ -89,9 +55,10 @@ gTests.push({
     yield waitForMs(100);
 
     let textarea = gWindow.document.getElementById("inputtext");
+    textarea.focus();
 
     let promise = waitForEvent(document, "popupshown");
-    sendContextMenuClick(355, 50);
+    sendContextMenuClickToElement(gWindow, textarea, 20, 10);
     yield promise;
 
     checkContextUIMenuItemVisibility(["context-select",
@@ -101,7 +68,7 @@ gTests.push({
     ok(menuItem, "menu item exists");
     ok(!menuItem.hidden, "menu item visible");
     let popupPromise = waitForEvent(document, "popuphidden");
-    EventUtils.synthesizeMouse(menuItem, 10, 10, {}, gWindow);
+    sendElementTap(gWindow, menuItem);
     yield popupPromise;
     ok(popupPromise && !(popupPromise instanceof Error), "promise error");
 
@@ -110,7 +77,7 @@ gTests.push({
       }, kCommonWaitMs, kCommonPollMs);
 
     is(SelectionHelperUI.isActive, true, "selection active");
-    is(getTrimmedSelection(textarea).toString(), "pictures", "selection test");
+    is(getTrimmedSelection(textarea).toString(), "Alice", "selection test");
 
     let xpos = SelectionHelperUI.endMark.xPos;
     let ypos = SelectionHelperUI.endMark.yPos + 10;
@@ -119,15 +86,15 @@ gTests.push({
 
     // end marker and off the text area to the right
     yield touchdrag.start(gWindow, xpos, ypos, 1200, 400);
-    let textLength = getTrimmedSelection(textarea).toString().length;
+    let token = "(end)";
     yield waitForCondition(function () {
-      let newTextLength = getTrimmedSelection(textarea).toString().length;
-      if (textLength != newTextLength) {
-        textLength = newTextLength;
+      let selection = getTrimmedSelection(textarea).toString();
+      if (selection.length < token.length ||
+          selection.substring(selection.length - token.length) != token) {
         return false;
       }
       return true;
-    }, 45000, 1000);
+    }, 5000, 100);
 
     touchdrag.end();
     touchdrag = null;
@@ -136,10 +103,6 @@ gTests.push({
         return !SelectionHelperUI.hasActiveDrag;
       }, kCommonWaitMs, kCommonPollMs);
     yield SelectionHelperUI.pingSelectionHandler();
-
-    let text = getTrimmedSelection(textarea).toString();
-    let end = text.substring(text.length - "(end)".length);
-    is(end, "(end)", "selection test");
   },
 });
 
@@ -148,7 +111,5 @@ function test() {
     todo(false, "browser_selection_tests need landscape mode to run.");
     return;
   }
-
-  requestLongerTimeout(3);
   runTests();
 }

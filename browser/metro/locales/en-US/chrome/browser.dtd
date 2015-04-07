@@ -2,34 +2,41 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
+<!-- NAVBAR AND AUTOCOMPLETE -->
+
 <!ENTITY urlbar.emptytext      "Enter Search or Address">
-<!ENTITY urlbar.accesskey      "d">
 
 <!ENTITY back.label            "Back">
 <!ENTITY forward.label         "Forward">
 <!ENTITY newtab.label          "New Tab">
+<!ENTITY newPrivateTab.label   "New Private Tab">
 <!ENTITY closetab.label        "Close Tab">
 
-<!ENTITY appbarFindInPage2.label    "Find in page">
-<!ENTITY appbarViewOnDesktop2.label "View on desktop">
-
-<!ENTITY startTopSitesHeader.label        "Top Sites">
-<!ENTITY startBookmarksHeader.label       "Bookmarks">
-<!ENTITY startHistoryHeader.label         "Recent History">
-<!ENTITY startRemoteTabsHeader.label      "Tabs from Other Devices">
-
-<!-- LOCALIZATION NOTE (snappedRemoteTabsHeader.label): shortened version of startRemoteTabsHeader.label.
-     Needs to be two words or shorter to fit in narrow vertical space.-->
-<!-- LOCALIZATION NOTE (snappedRemoteTabsHeader.label,
-                        snappedBookmarksHeader.label,
-                        snappedHistoryHeader.lavel )
-      The '>' character is not part of the name, but is an indicator of more content. Please do not localize the '>' -->
-<!ENTITY snappedRemoteTabsHeader.label    "Remote Tabs >">
-<!ENTITY snappedBookmarksHeader.label       "Bookmarks >">
-<!ENTITY snappedHistoryHeader.label         "Recent History >">
-
 <!ENTITY autocompleteResultsHeader.label  "Your Results">
-<!ENTITY autocompleteSearchesHeader.label "Internet Searches"> 
+
+<!ENTITY appbarErrorConsole.label      "Open error console">
+<!ENTITY appbarJSShell.label           "Open JavaScript shell">
+<!ENTITY appbarFindInPage2.label       "Find in page">
+<!ENTITY appbarRelaunchInDesktop.label "Relaunch in Desktop">
+<!ENTITY appbarMSMetaData2.label       "Get app for this site">
+<!ENTITY appbarViewPageSource.label    "View page source">
+
+<!ENTITY topSitesHeader.label        "Top Sites">
+<!ENTITY bookmarksHeader.label       "Bookmarks">
+<!ENTITY recentHistoryHeader.label   "Recent History">
+<!ENTITY remoteTabsHeader.label      "Tabs from Other Devices">
+
+<!-- LOCALIZATION NOTE (narrowTopSitesHeader.label,
+                        narrowBookmarksHeader.label,
+                        narrowHistoryHeader.label,
+                        narrowRemoteTabsHeader.label )
+     are shortened versions of topSitesHeader.label, bookmarksHeader.label, recentHistoryHeader.label
+     and remoteTabsHeader.label. Need to be two words or shorter to fit in narrow vertical space.
+      -->
+<!ENTITY narrowTopSitesHeader.label      "Top Sites">
+<!ENTITY narrowBookmarksHeader.label     "Bookmarks">
+<!ENTITY narrowRecentHistoryHeader.label "Recent History">
+<!ENTITY narrowRemoteTabsHeader.label    "Remote Tabs">
 
 <!ENTITY downloadsHeader.label     "Downloads">
 <!ENTITY downloadShowPage.label    "Go to Page">
@@ -43,7 +50,6 @@
 <!ENTITY downloadDelete.label      "Delete">
 <!ENTITY downloadFailed.label      "Failed">
 
-<!ENTITY bookmarksHeader.label     "Bookmarks">
 <!ENTITY allBookmarks.label        "See all bookmarks">
 
 <!ENTITY consoleHeader.label       "Error Console">
@@ -53,10 +59,12 @@
 <!ENTITY consoleMessages.label     "Messages">
 <!ENTITY consoleCodeEval.label     "Code:">
 <!ENTITY consoleClear.label        "Clear">
+<!ENTITY consoleCopyAll.label      "Copy">
 <!ENTITY consoleEvaluate.label     "…">
 <!ENTITY consoleErrFile.label      "Source File:">
 <!ENTITY consoleErrLine.label      "Line:">
 <!ENTITY consoleErrColumn.label    "Column:">
+<!ENTITY consoleFollowCheckbox.label "Follow">
 
 <!--  TEXT CONTEXT MENU -->
 <!ENTITY contextTextCut.label              "Cut">
@@ -84,3 +92,58 @@
 <!ENTITY contextSaveVideoLib.label         "Save to video library">
 <!ENTITY contextCopyVideoLocation.label    "Copy video location">
 <!ENTITY contextOpenVideoTab.label         "Open video in new tab">
+
+<!-- KEYBOARD SHORTCUTS -->
+<!ENTITY reload.key "r">
+<!ENTITY focusURL.key "l">
+<!ENTITY urlbar.accesskey "d">
+<!ENTITY openFile.key "o">
+<!ENTITY savePage.key "s">
+<!ENTITY find.key "f">
+<!ENTITY findNext.key "g">
+<!ENTITY quit.key "q">
+<!ENTITY addBookmark.key "d">
+<!ENTITY newTab.key "t">
+<!ENTITY newTab2.key "n">
+<!ENTITY closeTab.key "w">
+<!-- Private browsing (control+shift+key) -->
+<!ENTITY newPrivateTab.key "p">
+
+<!-- DEVELOPER SHORTCUTS (control+shift+key) -->
+<!ENTITY jsConsole.key "j">
+<!ENTITY optionsFlyout.key "o">
+<!ENTITY syncFlyout.key "s">
+<!ENTITY aboutFlyout.key "a">
+
+<!-- FIRT RUN EXPERIENCE -->
+<!-- LOCALIZATION NOTE (firstRunTabs.label,
+                        firstRunTopSites.label,
+                        firstRunBookmarks.label,
+                        firstRunMenu.label,
+                        firstRunHistory.label )
+     These strings appear on the Firefox Start page the first time
+     Firefox for Windows 8 Touch (Metro) is launched.  Each one
+     has an arrow pointing toward the feature it references.
+     -->
+<!ENTITY firstRunTabs.label "Looking for your tabs? Just pull down or right-click">
+<!ENTITY firstRunTopSites.label "Go to the sites you visit most">
+<!ENTITY firstRunBookmarks.label "Find pages you've saved for later">
+<!ENTITY firstRunMenu.label "Access more features and options">
+<!ENTITY firstRunHistory.label "See where you've been on the Web">
+<!ENTITY firstRunWelcome.label "Welcome to &brandShortName;">
+<!ENTITY firstRunDifferent.label "Different by design">
+
+  <!-- LOCALIZATION NOTE (firstRunBack.label,
+                          firstRunNewTab.label,
+                          firstRunStar.label,
+                          firstRunPin.label,
+                          firstRunGotIt.label )
+       These strings appear as a content overlay the first time a page
+       is visited. Each one has an arrow pointing toward the feature it
+       references.
+       -->
+<!ENTITY firstRunBack.label "Tap to go back to the previous page">
+<!ENTITY firstRunNewTab.label "Add a new tab to explore a new site">
+<!ENTITY firstRunStar.label "Use bookmarks to save pages for later">
+<!ENTITY firstRunPin.label "Pin any site to your Windows Start screen for quick access">
+<!ENTITY firstRunGotIt.label "Got it!">

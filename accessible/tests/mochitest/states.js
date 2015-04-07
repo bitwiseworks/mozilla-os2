@@ -78,8 +78,10 @@ function testStates(aAccOrElmOrID, aState, aExtraState, aAbsentState,
   var id = prettyName(aAccOrElmOrID) + (aTestName ? " [" + aTestName + "]": "");
 
   // Primary test.
-  isState(state & aState, aState, false,
-          "wrong state bits for " + id + "!");
+  if (aState) {
+    isState(state & aState, aState, false,
+            "wrong state bits for " + id + "!");
+  }
 
   if (aExtraState)
     isState(extraState & aExtraState, aExtraState, true,
@@ -138,7 +140,8 @@ function testStates(aAccOrElmOrID, aState, aExtraState, aAbsentState,
   }
 
   // checked/mixed/checkable
-  if (state & STATE_CHECKED || state & STATE_MIXED && role != ROLE_PROGRESSBAR)
+  if (state & STATE_CHECKED || state & STATE_MIXED &&
+      role != ROLE_TOGGLE_BUTTON && role != ROLE_PROGRESSBAR)
     isState(state & STATE_CHECKABLE, STATE_CHECKABLE, false,
             "Checked or mixed element must be checkable!");
 

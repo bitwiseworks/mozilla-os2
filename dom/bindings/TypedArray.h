@@ -7,11 +7,46 @@
 #ifndef mozilla_dom_TypedArray_h
 #define mozilla_dom_TypedArray_h
 
+#include "jsapi.h"
 #include "jsfriendapi.h"
 #include "js/RootingAPI.h"
+#include "js/TracingAPI.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/Move.h"
+#include "mozilla/dom/BindingDeclarations.h"
+#include "nsWrapperCache.h"
 
 namespace mozilla {
 namespace dom {
+
+/*
+ * Class that just handles the JSObject storage and tracing for typed arrays
+ */
+struct TypedArrayObjectStorage : AllTypedArraysBase {
+protected:
+  JSObject* mObj;
+
+  TypedArrayObjectStorage(JSObject *obj) : mObj(obj)
+  {
+  }
+
+  explicit TypedArrayObjectStorage(TypedArrayObjectStorage&& aOther)
+    : mObj(aOther.mObj)
+  {
+    aOther.mObj = nullptr;
+  }
+
+public:
+  inline void TraceSelf(JSTracer* trc)
+  {
+    if (mObj) {
+      JS_CallObjectTracer(trc, &mObj, "TypedArray.mObj");
+    }
+  }
+
+private:
+  TypedArrayObjectStorage(const TypedArrayObjectStorage&) MOZ_DELETE;
+};
 
 /*
  * Various typed array classes for argument conversion.  We have a base class
@@ -22,18 +57,36 @@ namespace dom {
 template<typename T,
          JSObject* UnwrapArray(JSObject*),
          void GetLengthAndData(JSObject*, uint32_t*, T**)>
-struct TypedArray_base {
+struct TypedArray_base : public TypedArrayObjectStorage {
+  typedef T element_type;
+
   TypedArray_base(JSObject* obj)
-    : mObj(NULL),
-      mData(NULL),
+    : TypedArrayObjectStorage(obj),
+      mData(nullptr),
       mLength(0),
       mComputed(false)
   {
-    Init(obj);
+    MOZ_ASSERT(obj != nullptr);
+  }
+
+  TypedArray_base()
+    : TypedArrayObjectStorage(nullptr),
+      mData(nullptr),
+      mLength(0),
+      mComputed(false)
+  {
+  }
+
+  explicit TypedArray_base(TypedArray_base&& aOther)
+    : TypedArrayObjectStorage(Move(aOther)),
+      mData(aOther.mData),
+      mLength(aOther.mLength)
+  {
+    aOther.mData = nullptr;
+    aOther.mLength = 0;
   }
 
 private:
-  JSObject* mObj;
   mutable T* mData;
   mutable uint32_t mLength;
   mutable bool mComputed;
@@ -65,6 +118,12 @@ public:
     return mObj;
   }
 
+  inline bool WrapIntoNewCompartment(JSContext* cx)
+  {
+    return JS_WrapObject(cx,
+      JS::MutableHandle<JSObject*>::fromMarkedLocation(&mObj));
+  }
+
   inline void ComputeLengthAndData() const
   {
     MOZ_ASSERT(inited());
@@ -78,6 +137,17 @@ protected:
   {
     mObj = UnwrapArray(obj);
   }
+
+  inline void ComputeData() const {
+    MOZ_ASSERT(inited());
+    if (!mComputed) {
+      GetLengthAndData(mObj, &mLength, &mData);
+      mComputed = true;
+    }
+  }
+
+private:
+  TypedArray_base(const TypedArray_base&) MOZ_DELETE;
 };
 
 
@@ -91,17 +161,38 @@ struct TypedArray : public TypedArray_base<T, UnwrapArray, GetLengthAndData> {
     TypedArray_base<T, UnwrapArray, GetLengthAndData>(obj)
   {}
 
+  TypedArray() :
+    TypedArray_base<T, UnwrapArray, GetLengthAndData>()
+  {}
+
+  explicit TypedArray(TypedArray&& aOther)
+    : TypedArray_base<T, UnwrapArray, GetLengthAndData>(Move(aOther))
+  {
+  }
+
   static inline JSObject*
   Create(JSContext* cx, nsWrapperCache* creator, uint32_t length,
-         const T* data = NULL) {
+         const T* data = nullptr) {
     JS::Rooted<JSObject*> creatorWrapper(cx);
     Maybe<JSAutoCompartment> ac;
     if (creator && (creatorWrapper = creator->GetWrapperPreserveColor())) {
       ac.construct(cx, creatorWrapper);
     }
+
+    return CreateCommon(cx, length, data);
+  }
+
+  static inline JSObject*
+  Create(JSContext* cx, uint32_t length, const T* data = nullptr) {
+    return CreateCommon(cx, length, data);
+  }
+
+private:
+  static inline JSObject*
+  CreateCommon(JSContext* cx, uint32_t length, const T* data) {
     JSObject* obj = CreateNew(cx, length);
     if (!obj) {
-      return NULL;
+      return nullptr;
     }
     if (data) {
       T* buf = static_cast<T*>(GetData(obj));
@@ -109,6 +200,8 @@ struct TypedArray : public TypedArray_base<T, UnwrapArray, GetLengthAndData> {
     }
     return obj;
   }
+
+  TypedArray(const TypedArray&) MOZ_DELETE;
 };
 
 typedef TypedArray<int8_t, js::UnwrapInt8Array, JS_GetInt8ArrayData,
@@ -143,6 +236,98 @@ typedef TypedArray_base<uint8_t, js::UnwrapArrayBufferView, js::GetArrayBufferVi
 typedef TypedArray<uint8_t, js::UnwrapArrayBuffer, JS_GetArrayBufferData,
                    js::GetArrayBufferLengthAndData, JS_NewArrayBuffer>
         ArrayBuffer;
+
+// A class for converting an nsTArray to a TypedArray
+// Note: A TypedArrayCreator must not outlive the nsTArray it was created from.
+//       So this is best used to pass from things that understand nsTArray to
+//       things that understand TypedArray, as with Promise::ArgumentToJSValue.
+template<typename TypedArrayType>
+class TypedArrayCreator
+{
+  typedef nsTArray<typename TypedArrayType::element_type> ArrayType;
+
+  public:
+    TypedArrayCreator(const ArrayType& aArray)
+      : mArray(aArray)
+    {}
+
+    JSObject* Create(JSContext* aCx) const
+    {
+      return TypedArrayType::Create(aCx, mArray.Length(), mArray.Elements());
+    }
+
+  private:
+    const ArrayType& mArray;
+};
+
+// A class for rooting an existing TypedArray struct
+template<typename ArrayType>
+class MOZ_STACK_CLASS TypedArrayRooter : private JS::CustomAutoRooter
+{
+public:
+  TypedArrayRooter(JSContext* cx,
+                   ArrayType* aArray MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
+    JS::CustomAutoRooter(cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT),
+    mArray(aArray)
+  {
+  }
+
+  virtual void trace(JSTracer* trc) MOZ_OVERRIDE
+  {
+    mArray->TraceSelf(trc);
+  }
+
+private:
+  TypedArrayObjectStorage* const mArray;
+};
+
+// And a specialization for dealing with nullable typed arrays
+template<typename Inner> struct Nullable;
+template<typename ArrayType>
+class MOZ_STACK_CLASS TypedArrayRooter<Nullable<ArrayType> > :
+    private JS::CustomAutoRooter
+{
+public:
+  TypedArrayRooter(JSContext* cx,
+                   Nullable<ArrayType>* aArray MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
+    JS::CustomAutoRooter(cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT),
+    mArray(aArray)
+  {
+  }
+
+  virtual void trace(JSTracer* trc) MOZ_OVERRIDE
+  {
+    if (!mArray->IsNull()) {
+      mArray->Value().TraceSelf(trc);
+    }
+  }
+
+private:
+  Nullable<ArrayType>* const mArray;
+};
+
+// Class for easily setting up a rooted typed array object on the stack
+template<typename ArrayType>
+class MOZ_STACK_CLASS RootedTypedArray : public ArrayType,
+                                         private TypedArrayRooter<ArrayType>
+{
+public:
+  RootedTypedArray(JSContext* cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
+    ArrayType(),
+    TypedArrayRooter<ArrayType>(cx,
+                                MOZ_THIS_IN_INITIALIZER_LIST()
+                                MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT)
+  {
+  }
+
+  RootedTypedArray(JSContext* cx, JSObject* obj MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
+    ArrayType(obj),
+    TypedArrayRooter<ArrayType>(cx,
+                                MOZ_THIS_IN_INITIALIZER_LIST()
+                                MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT)
+  {
+  }
+};
 
 } // namespace dom
 } // namespace mozilla

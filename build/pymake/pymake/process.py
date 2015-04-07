@@ -6,6 +6,7 @@ parsing command lines into argv and making sure that no shell magic is being use
 #TODO: ship pyprocessing?
 import multiprocessing
 import subprocess, shlex, re, logging, sys, traceback, os, imp, glob
+import site
 from collections import deque
 # XXXkhuey Work around http://bugs.python.org/issue1731717
 subprocess._cleanup = lambda: None
@@ -33,7 +34,7 @@ def tokens2re(tokens):
     return re.compile('(?:%s|%s)' % (nonescaped, r'(?P<escape>\\\\)'))
 
 _unquoted_tokens = tokens2re({
-  'whitespace': r'[\t\r\n ]',
+  'whitespace': r'[\t\r\n ]+',
   'quote': r'[\'"]',
   'comment': '#',
   'special': r'[<>&|`~(){}$;]',
@@ -59,7 +60,7 @@ class ClineSplitter(list):
     """
     def __init__(self, cline, cwd):
         self.cwd = cwd
-        self.arg = ''
+        self.arg = None
         self.cline = cline
         self.glob = False
         self._parse_unquoted()
@@ -68,6 +69,8 @@ class ClineSplitter(list):
         """
         Push the given string as part of the current argument
         """
+        if self.arg is None:
+            self.arg = ''
         self.arg += str
 
     def _next(self):
@@ -75,7 +78,7 @@ class ClineSplitter(list):
         Finalize current argument, effectively adding it to the list.
         Perform globbing if needed.
         """
-        if not self.arg:
+        if self.arg is None:
             return
         if self.glob:
             if os.path.isabs(self.arg):
@@ -92,7 +95,7 @@ class ClineSplitter(list):
             self.glob = False
         else:
             self.append(self.arg)
-        self.arg = ''
+        self.arg = None
 
     def _parse_unquoted(self):
         """
@@ -108,7 +111,8 @@ class ClineSplitter(list):
                 break
             # The beginning of the string, up to the found token, is part of
             # the current argument
-            self._push(self.cline[:m.start()])
+            if m.start():
+                self._push(self.cline[:m.start()])
             self.cline = self.cline[m.end():]
 
             match = dict([(name, value) for name, value in m.groupdict().items() if value])
@@ -142,7 +146,8 @@ class ClineSplitter(list):
                 self._push(m.group(0))
             else:
                 raise Exception, "Shouldn't reach here"
-        self._next()
+        if self.arg:
+            self._next()
 
     def _parse_quoted(self):
         # Single quoted strings are preserved, except for the final quote
@@ -341,30 +346,6 @@ class PythonException(Exception):
     def __str__(self):
         return self.message
 
-def load_module_recursive(module, path):
-    """
-    Emulate the behavior of __import__, but allow
-    passing a custom path to search for modules.
-    """
-    bits = module.split('.')
-    oldsyspath = sys.path
-    for i, bit in enumerate(bits):
-        dotname = '.'.join(bits[:i+1])
-        try:
-          f, path, desc = imp.find_module(bit, path)
-          # Add the directory the module was found in to sys.path
-          if path != '':
-              abspath = os.path.abspath(path)
-              if not os.path.isdir(abspath):
-                  abspath = os.path.dirname(path)
-              sys.path = [abspath] + sys.path
-          m = imp.load_module(dotname, f, path, desc)
-          if f is None:
-              path = m.__path__
-        except ImportError:
-            return
-        finally:
-            sys.path = oldsyspath
 
 class PythonJob(Job):
     """
@@ -384,16 +365,28 @@ class PythonJob(Job):
         # os.environ is a magic dictionary. Setting it to something else
         # doesn't affect the environment of subprocesses, so use clear/update
         oldenv = dict(os.environ)
+
+        # sys.path is adjusted for the entire lifetime of the command
+        # execution. This ensures any delayed imports will still work.
+        oldsyspath = list(sys.path)
         try:
             os.chdir(self.cwd)
             os.environ.clear()
             os.environ.update(self.env)
+
+            sys.path = []
+            for p in sys.path + self.pycommandpath:
+                site.addsitedir(p)
+            sys.path.extend(oldsyspath)
+
             if self.module not in sys.modules:
-                load_module_recursive(self.module,
-                                      sys.path + self.pycommandpath)
-            if self.module not in sys.modules:
-                print >>sys.stderr, "No module named '%s'" % self.module
-                return -127                
+                try:
+                    __import__(self.module)
+                except Exception as e:
+                    print >>sys.stderr, 'Error importing %s: %s' % (
+                        self.module, e)
+                    return -127
+
             m = sys.modules[self.module]
             if self.method not in m.__dict__:
                 print >>sys.stderr, "No method named '%s' in module %s" % (self.method, self.module)
@@ -419,6 +412,12 @@ class PythonJob(Job):
         finally:
             os.environ.clear()
             os.environ.update(oldenv)
+            sys.path = oldsyspath
+            # multiprocessing exits via os._exit, make sure that all output
+            # from command gets written out before that happens.
+            sys.stdout.flush()
+            sys.stderr.flush()
+
         return 0
 
 def job_runner(job):

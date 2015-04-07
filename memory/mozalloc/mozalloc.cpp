@@ -20,12 +20,10 @@
 #  include <unistd.h>           // for valloc on *BSD
 #endif //if defined(XP_UNIX)
 
-#if defined(XP_WIN) || (defined(XP_OS2) && defined(__declspec))
+#if defined(XP_WIN)
 #  define MOZALLOC_EXPORT __declspec(dllexport)
 #endif
 
-// Make sure that "malloc" et al. resolve to their libc variants.
-#define MOZALLOC_DONT_DEFINE_MACRO_WRAPPERS
 #include "mozilla/mozalloc.h"
 #include "mozilla/mozalloc_oom.h"  // for mozalloc_handle_oom
 

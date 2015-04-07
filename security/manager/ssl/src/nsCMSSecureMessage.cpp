@@ -38,7 +38,7 @@ extern PRLogModuleInfo* gPIPNSSLog;
  *****/
 
 // Standard ISupports implementation
-NS_IMPL_ISUPPORTS1(nsCMSSecureMessage, nsICMSSecureMessage)
+NS_IMPL_ISUPPORTS(nsCMSSecureMessage, nsICMSSecureMessage)
 
 // nsCMSSecureMessage constructor
 nsCMSSecureMessage::nsCMSSecureMessage()
@@ -122,7 +122,7 @@ DecodeCert(const char *value, nsIX509Cert ** _retval)
     rv = NS_ERROR_FAILURE;
   }
 
-  nsCRT::free((char*)data);
+  free((char*)data);
   return rv;
 }
 
@@ -166,10 +166,6 @@ SendMessage(const char *msg, const char *base64Cert, char ** _retval)
     rv = NS_ERROR_FAILURE;
     goto done;
   }
-
-#if 0
-  cert->dbhandle = CERT_GetDefaultCertDB();  /* work-around */
-#endif
 
   /* Step 2.  Get a signature cert */
 
@@ -244,7 +240,7 @@ SendMessage(const char *msg, const char *base64Cert, char ** _retval)
   rv = encode(output.data, output.len, _retval);
 
 done:
-  if (certDER) nsCRT::free((char *)certDER);
+  if (certDER) free((char *)certDER);
   if (cert) CERT_DestroyCertificate(cert);
   if (cmsMsg) NSS_CMSMessage_Destroy(cmsMsg);
   if (arena) PORT_FreeArena(arena, false);  /* false? */

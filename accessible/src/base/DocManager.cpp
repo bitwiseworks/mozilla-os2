@@ -5,30 +5,28 @@
 
 #include "DocManager.h"
 
-#include "Accessible-inl.h"
 #include "ApplicationAccessible.h"
 #include "ARIAMap.h"
 #include "DocAccessible-inl.h"
 #include "nsAccessibilityService.h"
-#include "nsAccUtils.h"
 #include "RootAccessibleWrap.h"
-#include "States.h"
 
 #ifdef A11Y_LOG
 #include "Logging.h"
 #endif
 
+#include "mozilla/EventListenerManager.h"
+#include "mozilla/dom/Event.h" // for nsIDOMEvent::InternalDOMEvent()
 #include "nsCURILoader.h"
 #include "nsDocShellLoadTypes.h"
-#include "nsDOMEvent.h"
 #include "nsIChannel.h"
-#include "nsIContentViewer.h"
 #include "nsIDOMDocument.h"
-#include "nsEventListenerManager.h"
 #include "nsIDOMWindow.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIWebNavigation.h"
 #include "nsServiceManagerUtils.h"
+#include "nsIWebProgress.h"
+#include "nsCoreUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -37,6 +35,11 @@ using namespace mozilla::dom;
 ////////////////////////////////////////////////////////////////////////////////
 // DocManager
 ////////////////////////////////////////////////////////////////////////////////
+
+DocManager::DocManager()
+  : mDocAccessibleCache(4)
+{
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // DocManager public
@@ -88,8 +91,6 @@ DocManager::IsProcessingRefreshDriverNotification() const
 bool
 DocManager::Init()
 {
-  mDocAccessibleCache.Init(4);
-
   nsCOMPtr<nsIWebProgress> progress =
     do_GetService(NS_DOCUMENTLOADER_SERVICE_CONTRACTID);
 
@@ -117,10 +118,10 @@ DocManager::Shutdown()
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports
 
-NS_IMPL_THREADSAFE_ISUPPORTS3(DocManager,
-                              nsIWebProgressListener,
-                              nsIDOMEventListener,
-                              nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(DocManager,
+                  nsIWebProgressListener,
+                  nsIDOMEventListener,
+                  nsISupportsWeakReference)
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIWebProgressListener
@@ -229,7 +230,7 @@ DocManager::OnLocationChange(nsIWebProgress* aWebProgress,
 NS_IMETHODIMP
 DocManager::OnStatusChange(nsIWebProgress* aWebProgress,
                            nsIRequest* aRequest, nsresult aStatus,
-                           const PRUnichar* aMessage)
+                           const char16_t* aMessage)
 {
   NS_NOTREACHED("notification excluded in AddProgressListener(...)");
   return NS_OK;
@@ -269,11 +270,6 @@ DocManager::HandleEvent(nsIDOMEvent* aEvent)
     if (logging::IsEnabled(logging::eDocDestroy))
       logging::DocDestroy("received 'pagehide' event", document);
 #endif
-
-    // Ignore 'pagehide' on temporary documents since we ignore them entirely in
-    // accessibility.
-    if (document->IsInitialDocument())
-      return NS_OK;
 
     // Shutdown this one and sub document accessibles.
 
@@ -328,9 +324,9 @@ DocManager::AddListeners(nsIDocument* aDocument,
 {
   nsPIDOMWindow* window = aDocument->GetWindow();
   EventTarget* target = window->GetChromeEventHandler();
-  nsEventListenerManager* elm = target->GetListenerManager(true);
+  EventListenerManager* elm = target->GetOrCreateListenerManager();
   elm->AddEventListenerByType(this, NS_LITERAL_STRING("pagehide"),
-                              dom::TrustedEventsAtCapture());
+                              TrustedEventsAtCapture());
 
 #ifdef A11Y_LOG
   if (logging::IsEnabled(logging::eDocCreate))
@@ -339,7 +335,7 @@ DocManager::AddListeners(nsIDocument* aDocument,
 
   if (aAddDOMContentLoadedListener) {
     elm->AddEventListenerByType(this, NS_LITERAL_STRING("DOMContentLoaded"),
-                                dom::TrustedEventsAtCapture());
+                                TrustedEventsAtCapture());
 #ifdef A11Y_LOG
     if (logging::IsEnabled(logging::eDocCreate))
       logging::Text("added 'DOMContentLoaded' listener");
@@ -355,21 +351,22 @@ DocManager::RemoveListeners(nsIDocument* aDocument)
     return;
 
   EventTarget* target = window->GetChromeEventHandler();
-  nsEventListenerManager* elm = target->GetListenerManager(true);
+  if (!target)
+    return;
+
+  EventListenerManager* elm = target->GetOrCreateListenerManager();
   elm->RemoveEventListenerByType(this, NS_LITERAL_STRING("pagehide"),
-                                 dom::TrustedEventsAtCapture());
+                                 TrustedEventsAtCapture());
 
   elm->RemoveEventListenerByType(this, NS_LITERAL_STRING("DOMContentLoaded"),
-                                 dom::TrustedEventsAtCapture());
+                                 TrustedEventsAtCapture());
 }
 
 DocAccessible*
 DocManager::CreateDocOrRootAccessible(nsIDocument* aDocument)
 {
-  // Ignore temporary, hiding, resource documents and documents without
-  // docshell.
-  if (aDocument->IsInitialDocument() ||
-      !aDocument->IsVisibleConsideringAncestors() ||
+  // Ignore hiding, resource documents and documents without docshell.
+  if (!aDocument->IsVisibleConsideringAncestors() ||
       aDocument->IsResourceDoc() || !aDocument->IsActive())
     return nullptr;
 

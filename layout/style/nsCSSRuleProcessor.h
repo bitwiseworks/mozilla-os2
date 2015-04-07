@@ -13,13 +13,13 @@
 #define nsCSSRuleProcessor_h_
 
 #include "mozilla/Attributes.h"
+#include "mozilla/EventStates.h"
+#include "mozilla/MemoryReporting.h"
 #include "nsIStyleRuleProcessor.h"
 #include "nsCSSStyleSheet.h"
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
-#include "nsCSSRules.h"
 #include "nsRuleWalker.h"
-#include "nsEventStates.h"
 
 struct CascadeEnumData;
 struct nsCSSSelector;
@@ -27,6 +27,8 @@ struct nsCSSSelectorList;
 struct RuleCascadeData;
 struct TreeMatchContext;
 class nsCSSKeyframesRule;
+class nsCSSPageRule;
+class nsCSSFontFeatureValuesRule;
 
 /**
  * The CSS style rule processor provides a mechanism for sibling style
@@ -75,13 +77,14 @@ public:
    * Helper to get the content state for a content node.  This may be
    * slightly adjusted from IntrinsicState().
    */
-  static nsEventStates GetContentState(mozilla::dom::Element* aElement,
-                                       const TreeMatchContext& aTreeMatchContext);
+  static mozilla::EventStates GetContentState(
+                                mozilla::dom::Element* aElement,
+                                const TreeMatchContext& aTreeMatchContext);
 
   /*
    * Helper to get the content state for :visited handling for an element
    */
-  static nsEventStates GetContentStateForVisitedHandling(
+  static mozilla::EventStates GetContentStateForVisitedHandling(
              mozilla::dom::Element* aElement,
              const TreeMatchContext& aTreeMatchContext,
              nsRuleWalker::VisitedHandlingType aVisitedHandling,
@@ -104,6 +107,7 @@ public:
 #endif
 
   virtual nsRestyleHint HasStateDependentStyle(StateRuleProcessorData* aData) MOZ_OVERRIDE;
+  virtual nsRestyleHint HasStateDependentStyle(PseudoElementStateRuleProcessorData* aData) MOZ_OVERRIDE;
 
   virtual bool HasDocumentStateDependentStyle(StateRuleProcessorData* aData) MOZ_OVERRIDE;
 
@@ -112,9 +116,9 @@ public:
 
   virtual bool MediumFeaturesChanged(nsPresContext* aPresContext) MOZ_OVERRIDE;
 
-  virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun mallocSizeOf)
+  virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
     const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
-  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf)
+  virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf)
     const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
 
   // Append all the currently-active font face rules to aArray.  Return
@@ -154,12 +158,12 @@ public:
 #endif
 
   struct StateSelector {
-    StateSelector(nsEventStates aStates, nsCSSSelector* aSelector)
+    StateSelector(mozilla::EventStates aStates, nsCSSSelector* aSelector)
       : mStates(aStates),
         mSelector(aSelector)
     {}
 
-    nsEventStates mStates;
+    mozilla::EventStates mStates;
     nsCSSSelector* mSelector;
   };
 
@@ -168,6 +172,11 @@ private:
 
   RuleCascadeData* GetRuleCascade(nsPresContext* aPresContext);
   void RefreshRuleCascade(nsPresContext* aPresContext);
+
+  nsRestyleHint HasStateDependentStyle(ElementDependentRuleProcessorData* aData,
+                                       mozilla::dom::Element* aStatefulElement,
+                                       nsCSSPseudoElements::Type aPseudoType,
+                                       mozilla::EventStates aStateMask);
 
   // The sheet order here is the same as in nsStyleSet::mSheets
   sheet_array_type mSheets;

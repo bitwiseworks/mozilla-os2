@@ -8,9 +8,15 @@
 #include "gfxXlibSurface.h"
 #include "gfxImageSurface.h"
 #include "gfxContext.h"
+#include "gfxPlatform.h"
 #include "gfxAlphaRecovery.h"
 #include "cairo-xlib.h"
 #include "cairo-xlib-xrender.h"
+#include "mozilla/gfx/BorrowedContext.h"
+#include "gfx2DGlue.h"
+
+using namespace mozilla;
+using namespace mozilla::gfx;
 
 #if 0
 #include <stdio.h>
@@ -134,15 +140,35 @@ gfxXlibNativeRenderer::DrawDirect(gfxContext *ctx, nsIntSize size,
                                   uint32_t flags,
                                   Screen *screen, Visual *visual)
 {
-    cairo_t *cr = ctx->GetCairo();
+    if (ctx->IsCairo()) {
+        return DrawCairo(ctx->GetCairo(), size, flags, screen, visual);
+    }
 
+    // We need to actually borrow the context because we want to read out the
+    // clip rectangles.
+    BorrowedCairoContext borrowed(ctx->GetDrawTarget());
+    if (!borrowed.mCairo) {
+      return false;
+    }
+
+    bool direct = DrawCairo(borrowed.mCairo, size, flags, screen, visual);
+    borrowed.Finish();
+
+    return direct;
+}
+
+bool
+gfxXlibNativeRenderer::DrawCairo(cairo_t* cr, nsIntSize size,
+                                 uint32_t flags,
+                                 Screen *screen, Visual *visual)
+{
     /* Check that the target surface is an xlib surface. */
     cairo_surface_t *target = cairo_get_group_target (cr);
     if (cairo_surface_get_type (target) != CAIRO_SURFACE_TYPE_XLIB) {
         NATIVE_DRAWING_NOTE("FALLBACK: non-X surface");
         return false;
     }
-    
+
     cairo_matrix_t matrix;
     cairo_get_matrix (cr, &matrix);
     double device_offset_x, device_offset_y;
@@ -156,7 +182,7 @@ gfxXlibNativeRenderer::DrawDirect(gfxContext *ctx, nsIntSize size,
                  "Expected integer device offsets");
     nsIntPoint offset(NS_lroundf(matrix.x0 + device_offset_x),
                       NS_lroundf(matrix.y0 + device_offset_y));
-    
+
     int max_rectangles = 0;
     if (flags & DRAW_SUPPORTS_CLIP_RECT) {
       max_rectangles = 1;
@@ -193,10 +219,10 @@ gfxXlibNativeRenderer::DrawDirect(gfxContext *ctx, nsIntSize size,
     /* Stop now if everything is clipped out */
     if (needs_clip && rect_count == 0)
         return true;
-      
+
     /* Check that the screen is supported.
        Visuals belong to screens, so, if alternate visuals are not supported,
-       then alternate screens cannot be supported. */  
+       then alternate screens cannot be supported. */
     bool supports_alternate_visual =
         (flags & DRAW_SUPPORTS_ALTERNATE_VISUAL) != 0;
     bool supports_alternate_screen = supports_alternate_visual &&
@@ -206,13 +232,13 @@ gfxXlibNativeRenderer::DrawDirect(gfxContext *ctx, nsIntSize size,
         NATIVE_DRAWING_NOTE("FALLBACK: non-default screen");
         return false;
     }
-        
+
     /* Check that there is a visual */
     Visual *target_visual = cairo_xlib_surface_get_visual (target);
     if (!target_visual) {
         NATIVE_DRAWING_NOTE("FALLBACK: no Visual for surface");
         return false;
-    }        
+    }
     /* Check that the visual is supported */
     if (!supports_alternate_visual && target_visual != visual) {
         // Only the format of the visual is important (not the GLX properties)
@@ -226,12 +252,11 @@ gfxXlibNativeRenderer::DrawDirect(gfxContext *ctx, nsIntSize size,
             return false;
         }
     }
-  
+
     /* we're good to go! */
     NATIVE_DRAWING_NOTE("TAKING FAST PATH\n");
     cairo_surface_flush (target);
-    nsRefPtr<gfxASurface> surface = gfxASurface::Wrap(target);
-    nsresult rv = DrawWithXlib(static_cast<gfxXlibSurface*>(surface.get()),
+    nsresult rv = DrawWithXlib(target,
                                offset, rectangles,
                                needs_clip ? rect_count : 0);
     if (NS_SUCCEEDED(rv)) {
@@ -284,31 +309,34 @@ enum DrawingMethod {
     eAlphaExtraction
 };
 
-static already_AddRefed<gfxXlibSurface>
-CreateTempXlibSurface (gfxASurface *destination, nsIntSize size,
+static cairo_surface_t*
+CreateTempXlibSurface (cairo_surface_t* cairoTarget,
+                       DrawTarget* drawTarget,
+                       nsIntSize size,
                        bool canDrawOverBackground,
                        uint32_t flags, Screen *screen, Visual *visual,
                        DrawingMethod *method)
 {
+    NS_ASSERTION(cairoTarget || drawTarget, "Must have some type");
+
     bool drawIsOpaque = (flags & gfxXlibNativeRenderer::DRAW_IS_OPAQUE) != 0;
     bool supportsAlternateVisual =
         (flags & gfxXlibNativeRenderer::DRAW_SUPPORTS_ALTERNATE_VISUAL) != 0;
     bool supportsAlternateScreen = supportsAlternateVisual &&
         (flags & gfxXlibNativeRenderer::DRAW_SUPPORTS_ALTERNATE_SCREEN);
 
-    cairo_surface_t *target = destination->CairoSurface();
-    cairo_surface_type_t target_type = cairo_surface_get_type (target);
-    cairo_content_t target_content = cairo_surface_get_content (target);
+    cairo_surface_type_t cairoTargetType =
+        cairoTarget ? cairo_surface_get_type (cairoTarget) : (cairo_surface_type_t)0xFF;
 
-    Screen *target_screen = target_type == CAIRO_SURFACE_TYPE_XLIB ?
-        cairo_xlib_surface_get_screen (target) : screen;
+    Screen *target_screen = cairoTargetType == CAIRO_SURFACE_TYPE_XLIB ?
+        cairo_xlib_surface_get_screen (cairoTarget) : screen;
 
     // When the background has an alpha channel, we need to draw with an alpha
     // channel anyway, so there is no need to copy the background.  If
     // doCopyBackground is set here, we'll also need to check below that the
     // background can copied without any loss in format conversions.
     bool doCopyBackground = !drawIsOpaque && canDrawOverBackground &&
-        target_content == CAIRO_CONTENT_COLOR;
+        cairoTarget && cairo_surface_get_content (cairoTarget) == CAIRO_CONTENT_COLOR;
 
     if (supportsAlternateScreen && screen != target_screen && drawIsOpaque) {
         // Prefer a visual on the target screen.
@@ -320,16 +348,15 @@ CreateTempXlibSurface (gfxASurface *destination, nsIntSize size,
         // Analyse the pixel formats either to check whether we can
         // doCopyBackground or to see if we can find a better visual for
         // opaque drawing.
-        Visual *target_visual = NULL;
-        XRenderPictFormat *target_format = NULL;
-        switch (target_type) {
-        case CAIRO_SURFACE_TYPE_XLIB:
-            target_visual = cairo_xlib_surface_get_visual (target);
-            target_format = cairo_xlib_surface_get_xrender_format (target);
-            break;
-        case CAIRO_SURFACE_TYPE_IMAGE: {
-            gfxASurface::gfxImageFormat imageFormat =
-                static_cast<gfxImageSurface*>(destination)->Format();
+        Visual *target_visual = nullptr;
+        XRenderPictFormat *target_format = nullptr;
+        if (cairoTargetType == CAIRO_SURFACE_TYPE_XLIB) {
+            target_visual = cairo_xlib_surface_get_visual (cairoTarget);
+            target_format = cairo_xlib_surface_get_xrender_format (cairoTarget);
+        } else if (cairoTargetType == CAIRO_SURFACE_TYPE_IMAGE || drawTarget) {
+            gfxImageFormat imageFormat =
+                drawTarget ? SurfaceFormatToImageFormat(drawTarget->GetFormat()) :
+                    (gfxImageFormat)cairo_image_surface_get_format(cairoTarget);
             target_visual = gfxXlibSurface::FindVisual(screen, imageFormat);
             Display *dpy = DisplayOfScreen(screen);
             if (target_visual) {
@@ -338,10 +365,6 @@ CreateTempXlibSurface (gfxASurface *destination, nsIntSize size,
                 target_format =
                     gfxXlibSurface::FindRenderFormat(dpy, imageFormat);
             }                
-            break;
-        }
-        default:
-            break;
         }
 
         if (supportsAlternateVisual &&
@@ -370,7 +393,7 @@ CreateTempXlibSurface (gfxASurface *destination, nsIntSize size,
             supportsAlternateScreen ? target_screen : screen;
         Visual *argbVisual =
             gfxXlibSurface::FindVisual(visualScreen,
-                                       gfxASurface::ImageFormatARGB32);
+                                       gfxImageFormat::ARGB32);
         if (argbVisual) {
             visual = argbVisual;
             screen = visualScreen;
@@ -380,7 +403,7 @@ CreateTempXlibSurface (gfxASurface *destination, nsIntSize size,
             // No advantage in using the target screen.
             Visual *rgb24Visual =
                 gfxXlibSurface::FindVisual(screen,
-                                           gfxASurface::ImageFormatRGB24);
+                                           gfxImageFormat::RGB24);
             if (rgb24Visual) {
                 visual = rgb24Visual;
             }
@@ -388,16 +411,19 @@ CreateTempXlibSurface (gfxASurface *destination, nsIntSize size,
     }
 
     Drawable drawable =
-        (screen == target_screen && target_type == CAIRO_SURFACE_TYPE_XLIB) ?
-        cairo_xlib_surface_get_drawable (target) : RootWindowOfScreen(screen);
+        (screen == target_screen && cairoTargetType == CAIRO_SURFACE_TYPE_XLIB) ?
+        cairo_xlib_surface_get_drawable (cairoTarget) : RootWindowOfScreen(screen);
 
-    nsRefPtr<gfxXlibSurface> surface =
-        gfxXlibSurface::Create(screen, visual,
-                               gfxIntSize(size.width, size.height),
-                               drawable);
+    cairo_surface_t *surface =
+        gfxXlibSurface::CreateCairoSurface(screen, visual,
+                                           gfxIntSize(size.width, size.height),
+                                           drawable);
+    if (!surface) {
+        return nullptr;
+    }
 
     if (drawIsOpaque ||
-        surface->GetContentType() == gfxASurface::CONTENT_COLOR_ALPHA) {
+        cairo_surface_get_content(surface) == CAIRO_CONTENT_COLOR_ALPHA) {
         NATIVE_DRAWING_NOTE(drawIsOpaque ?
                             ", SIMPLE OPAQUE\n" : ", SIMPLE WITH ALPHA");
         *method = eSimple;
@@ -409,48 +435,41 @@ CreateTempXlibSurface (gfxASurface *destination, nsIntSize size,
         *method = eAlphaExtraction;
     }
 
-    return surface.forget();
+    return surface;
 }
 
 bool
-gfxXlibNativeRenderer::DrawOntoTempSurface(gfxXlibSurface *tempXlibSurface,
+gfxXlibNativeRenderer::DrawOntoTempSurface(cairo_surface_t *tempXlibSurface,
                                            nsIntPoint offset)
 {
-    tempXlibSurface->Flush();
+    cairo_surface_flush(tempXlibSurface);
     /* no clipping is needed because the callback can't draw outside the native
        surface anyway */
-    nsresult rv = DrawWithXlib(tempXlibSurface, offset, NULL, 0);
-    tempXlibSurface->MarkDirty();
+    nsresult rv = DrawWithXlib(tempXlibSurface, offset, nullptr, 0);
+    cairo_surface_mark_dirty(tempXlibSurface);
     return NS_SUCCEEDED(rv);
 }
 
 static already_AddRefed<gfxImageSurface>
-CopyXlibSurfaceToImage(gfxXlibSurface *tempXlibSurface,
-                       gfxASurface::gfxImageFormat format)
+CopyXlibSurfaceToImage(cairo_surface_t *tempXlibSurface,
+                       gfxIntSize size,
+                       gfxImageFormat format)
 {
-    nsRefPtr<gfxImageSurface> result =
-        new gfxImageSurface(tempXlibSurface->GetSize(), format);
+    nsRefPtr<gfxImageSurface> result = new gfxImageSurface(size, format);
 
-    gfxContext copyCtx(result);
-    copyCtx.SetSource(tempXlibSurface);
-    copyCtx.SetOperator(gfxContext::OPERATOR_SOURCE);
-    copyCtx.Paint();
+    cairo_t* copyCtx = cairo_create(result->CairoSurface());
+    cairo_set_source_surface(copyCtx, tempXlibSurface, 0, 0);
+    cairo_set_operator(copyCtx, CAIRO_OPERATOR_SOURCE);
+    cairo_paint(copyCtx);
+    cairo_destroy(copyCtx);
 
     return result.forget();
 }
 
 void
 gfxXlibNativeRenderer::Draw(gfxContext* ctx, nsIntSize size,
-                            uint32_t flags, Screen *screen, Visual *visual,
-                            DrawOutput* result)
+                            uint32_t flags, Screen *screen, Visual *visual)
 {
-    if (result) {
-        result->mSurface = NULL;
-        result->mUniformAlpha = false;
-        result->mUniformColor = false;
-    }
-
-    bool drawIsOpaque = (flags & DRAW_IS_OPAQUE) != 0;
     gfxMatrix matrix = ctx->CurrentMatrix();
 
     // We can only draw direct or onto a copied background if pixels align and
@@ -488,7 +507,7 @@ gfxXlibNativeRenderer::Draw(gfxContext* ctx, nsIntSize size,
 
         if (canDrawOverBackground &&
             DrawDirect(ctx, size, flags, screen, visual))
-            return;
+          return;
     }
 
     nsIntRect drawingRect(nsIntPoint(0, 0), size);
@@ -506,108 +525,120 @@ gfxXlibNativeRenderer::Draw(gfxContext* ctx, nsIntSize size,
                          int32_t(clipExtents.Width()),
                          int32_t(clipExtents.Height()));
     drawingRect.IntersectRect(drawingRect, intExtents);
+
     gfxPoint offset(drawingRect.x, drawingRect.y);
 
     DrawingMethod method;
-    nsRefPtr<gfxASurface> target = ctx->CurrentSurface();
-    nsRefPtr<gfxXlibSurface> tempXlibSurface = 
-        CreateTempXlibSurface(target, drawingRect.Size(),
+    cairo_surface_t* cairoTarget = nullptr;
+    DrawTarget* drawTarget = nullptr;
+    gfxPoint deviceTranslation;
+    if (ctx->IsCairo()) {
+        cairoTarget = cairo_get_group_target(ctx->GetCairo());
+        deviceTranslation = ctx->CurrentMatrix().GetTranslation();
+    } else {
+        drawTarget = ctx->GetDrawTarget();
+        Matrix dtTransform = drawTarget->GetTransform();
+        deviceTranslation = gfxPoint(dtTransform._31, dtTransform._32);
+        cairoTarget = static_cast<cairo_surface_t*>
+            (drawTarget->GetNativeSurface(NativeSurfaceType::CAIRO_SURFACE));
+    }
+
+    cairo_surface_t* tempXlibSurface =
+        CreateTempXlibSurface(cairoTarget, drawTarget, size,
                               canDrawOverBackground, flags, screen, visual,
                               &method);
     if (!tempXlibSurface)
         return;
-  
-    if (drawingRect.Size() != size || method == eCopyBackground) {
-        // Only drawing a portion, or copying background,
-        // so won't return a result.
-        result = NULL;
-    }
 
-    nsRefPtr<gfxContext> tmpCtx;
+    bool drawIsOpaque = (flags & DRAW_IS_OPAQUE) != 0;
     if (!drawIsOpaque) {
-        tmpCtx = new gfxContext(tempXlibSurface);
+        cairo_t* tmpCtx = cairo_create(tempXlibSurface);
         if (method == eCopyBackground) {
-            tmpCtx->SetOperator(gfxContext::OPERATOR_SOURCE);
-            tmpCtx->SetSource(target, -(offset + matrix.GetTranslation()));
+            NS_ASSERTION(cairoTarget, "eCopyBackground only used when there's a cairoTarget");
+            cairo_set_operator(tmpCtx, CAIRO_OPERATOR_SOURCE);
+            gfxPoint pt = -(offset + deviceTranslation);
+            cairo_set_source_surface(tmpCtx, cairoTarget, pt.x, pt.y);
             // The copy from the tempXlibSurface to the target context should
             // use operator SOURCE, but that would need a mask to bound the
             // operation.  Here we only copy opaque backgrounds so operator
             // OVER will behave like SOURCE masked by the surface.
-            NS_ASSERTION(tempXlibSurface->GetContentType()
-                         == gfxASurface::CONTENT_COLOR,
+            NS_ASSERTION(cairo_surface_get_content(tempXlibSurface) == CAIRO_CONTENT_COLOR,
                          "Don't copy background with a transparent surface");
         } else {
-            tmpCtx->SetOperator(gfxContext::OPERATOR_CLEAR);
+            cairo_set_operator(tmpCtx, CAIRO_OPERATOR_CLEAR);
         }
-        tmpCtx->Paint();
+        cairo_paint(tmpCtx);
+        cairo_destroy(tmpCtx);
     }
 
     if (!DrawOntoTempSurface(tempXlibSurface, -drawingRect.TopLeft())) {
+        cairo_surface_destroy(tempXlibSurface);
         return;
     }
-  
+
+    SurfaceFormat moz2DFormat =
+        cairo_surface_get_content(tempXlibSurface) == CAIRO_CONTENT_COLOR ?
+            SurfaceFormat::B8G8R8A8 : SurfaceFormat::B8G8R8X8;
     if (method != eAlphaExtraction) {
-        ctx->SetSource(tempXlibSurface, offset);
-        ctx->Paint();
-        if (result) {
-            result->mSurface = tempXlibSurface;
-            /* fill in the result with what we know, which is really just what our
-               assumption was */
-            result->mUniformAlpha = true;
-            result->mColor.a = 1.0;
+        if (drawTarget) {
+            NativeSurface native;
+            native.mFormat = moz2DFormat;
+            native.mType = NativeSurfaceType::CAIRO_SURFACE;
+            native.mSurface = tempXlibSurface;
+            native.mSize = ToIntSize(size);
+            RefPtr<SourceSurface> sourceSurface =
+                drawTarget->CreateSourceSurfaceFromNativeSurface(native);
+            if (sourceSurface) {
+                drawTarget->DrawSurface(sourceSurface,
+                    Rect(offset.x, offset.y, size.width, size.height),
+                    Rect(0, 0, size.width, size.height));
+            }
+        } else {
+            nsRefPtr<gfxASurface> tmpSurf = gfxASurface::Wrap(tempXlibSurface);
+            ctx->SetSource(tmpSurf, offset);
+            ctx->Paint();
         }
+        cairo_surface_destroy(tempXlibSurface);
         return;
     }
     
     nsRefPtr<gfxImageSurface> blackImage =
-        CopyXlibSurfaceToImage(tempXlibSurface, gfxASurface::ImageFormatARGB32);
+        CopyXlibSurfaceToImage(tempXlibSurface, size, gfxImageFormat::ARGB32);
     
-    tmpCtx->SetDeviceColor(gfxRGBA(1.0, 1.0, 1.0));
-    tmpCtx->SetOperator(gfxContext::OPERATOR_SOURCE);
-    tmpCtx->Paint();
+    cairo_t* tmpCtx = cairo_create(tempXlibSurface);
+    cairo_set_source_rgba(tmpCtx, 1.0, 1.0, 1.0, 1.0);
+    cairo_set_operator(tmpCtx, CAIRO_OPERATOR_SOURCE);
+    cairo_paint(tmpCtx);
+    cairo_destroy(tmpCtx);
     DrawOntoTempSurface(tempXlibSurface, -drawingRect.TopLeft());
     nsRefPtr<gfxImageSurface> whiteImage =
-        CopyXlibSurfaceToImage(tempXlibSurface, gfxASurface::ImageFormatRGB24);
+        CopyXlibSurfaceToImage(tempXlibSurface, size, gfxImageFormat::RGB24);
   
     if (blackImage->CairoStatus() == CAIRO_STATUS_SUCCESS &&
         whiteImage->CairoStatus() == CAIRO_STATUS_SUCCESS) {
-        gfxAlphaRecovery::Analysis analysis;
-        if (!gfxAlphaRecovery::RecoverAlpha(blackImage, whiteImage,
-                                            result ? &analysis : nullptr))
+        if (!gfxAlphaRecovery::RecoverAlpha(blackImage, whiteImage)) {
+            cairo_surface_destroy(tempXlibSurface);
             return;
-
-        ctx->SetSource(blackImage, offset);
-
-        /* if the caller wants to retrieve the rendered image, put it into
-           a 'similar' surface, and use that as the source for the drawing right
-           now. This means we always return a surface similar to the surface
-           used for 'cr', which is ideal if it's going to be cached and reused.
-           We do not return an image if the result has uniform color (including
-           alpha). */
-        if (result) {
-            if (analysis.uniformAlpha) {
-                result->mUniformAlpha = true;
-                result->mColor.a = analysis.alpha;
-            }
-            if (analysis.uniformColor) {
-                result->mUniformColor = true;
-                result->mColor.r = analysis.r;
-                result->mColor.g = analysis.g;
-                result->mColor.b = analysis.b;
-            } else {
-                result->mSurface = target->
-                    CreateSimilarSurface(gfxASurface::CONTENT_COLOR_ALPHA,
-                                         gfxIntSize(size.width, size.height));
-
-                gfxContext copyCtx(result->mSurface);
-                copyCtx.SetSource(blackImage);
-                copyCtx.SetOperator(gfxContext::OPERATOR_SOURCE);
-                copyCtx.Paint();
-
-                ctx->SetSource(result->mSurface);
-            }
         }
-        
-        ctx->Paint();
+
+        gfxASurface* paintSurface = blackImage;
+        if (drawTarget) {
+            NativeSurface native;
+            native.mFormat = moz2DFormat;
+            native.mType = NativeSurfaceType::CAIRO_SURFACE;
+            native.mSurface = paintSurface->CairoSurface();
+            native.mSize = ToIntSize(size);
+            RefPtr<SourceSurface> sourceSurface =
+                drawTarget->CreateSourceSurfaceFromNativeSurface(native);
+            if (sourceSurface) {
+                drawTarget->DrawSurface(sourceSurface,
+                    Rect(offset.x, offset.y, size.width, size.height),
+                    Rect(0, 0, size.width, size.height));
+            }
+        } else {
+            ctx->SetSource(paintSurface, offset);
+            ctx->Paint();
+        }
     }
+    cairo_surface_destroy(tempXlibSurface);
 }

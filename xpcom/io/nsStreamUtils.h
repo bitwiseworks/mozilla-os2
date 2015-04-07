@@ -8,6 +8,7 @@
 #include "nsCOMPtr.h"
 #include "nsStringFwd.h"
 #include "nsIInputStream.h"
+#include "nsTArray.h"
 
 class nsIOutputStream;
 class nsIInputStreamCallback;
@@ -130,14 +131,19 @@ NS_ConsumeStream(nsIInputStream *aSource, uint32_t aMaxCount,
                  nsACString &aBuffer);
 
 /**
- * This function tests whether or not the input stream is buffered.  A buffered
+ * This function tests whether or not the input stream is buffered. A buffered
  * input stream is one that implements readSegments.  The test for this is to
- * simply call readSegments, without actually consuming any data from the
+ * 1/ check whether the input stream implements nsIBufferedInputStream;
+ * 2/ if not, call readSegments, without actually consuming any data from the
  * stream, to verify that it functions.
  *
  * NOTE: If the stream is non-blocking and has no data available yet, then this
- * test will fail.  In that case, we return false even though the test is not 
+ * test will fail.  In that case, we return false even though the test is not
  * really conclusive.
+ *
+ * PERFORMANCE NOTE: If the stream does not implement nsIBufferedInputStream,
+ * calling readSegments may cause I/O. Therefore, you should avoid calling
+ * this function from the main thread.
  *
  * @param aInputStream
  *        The input stream to test.
@@ -148,12 +154,18 @@ NS_InputStreamIsBuffered(nsIInputStream *aInputStream);
 /**
  * This function tests whether or not the output stream is buffered.  A
  * buffered output stream is one that implements writeSegments.  The test for
- * this is to simply call writeSegments, without actually writing any data into
+ * this is to:
+ * 1/ check whether the output stream implements nsIBufferedOutputStream;
+ * 2/ if not, call writeSegments, without actually writing any data into
  * the stream, to verify that it functions.
  *
  * NOTE: If the stream is non-blocking and has no available space yet, then
  * this test will fail.  In that case, we return false even though the test is
  * not really conclusive.
+ *
+ * PERFORMANCE NOTE: If the stream does not implement nsIBufferedOutputStream,
+ * calling writeSegments may cause I/O. Therefore, you should avoid calling
+ * this function from the main thread.
  *
  * @param aOutputStream
  *        The output stream to test.
@@ -231,5 +243,22 @@ struct nsWriteSegmentThunk {
   nsWriteSegmentFun  mFun;
   void              *mClosure;
 };
+
+/**
+ * Read data from aInput and store in aDest.  A non-zero aKeep will keep that
+ * many bytes from aDest (from the end).  New data is appended after the kept
+ * bytes (if any).  aDest's new length on returning from this function is
+ * aKeep + aNewBytes and is guaranteed to be less than or equal to aDest's
+ * current capacity.
+ * @param aDest the array to fill
+ * @param aInput the stream to read from
+ * @param aKeep number of bytes to keep (0 <= aKeep <= aDest.Length())
+ * @param aNewBytes (out) number of bytes read from aInput or zero if Read()
+ *        failed
+ * @return the result from aInput->Read(...)
+ */
+extern NS_METHOD
+NS_FillArray(FallibleTArray<char> &aDest, nsIInputStream *aInput,
+             uint32_t aKeep, uint32_t *aNewBytes);
 
 #endif // !nsStreamUtils_h__

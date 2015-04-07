@@ -3,19 +3,22 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "TexturePoolOGL.h"
-#include "GLContext.h"
-#include "nsDeque.h"
-#include "mozilla/Monitor.h"
+#include <stdlib.h>                     // for malloc
+#include "GLContext.h"                  // for GLContext
+#include "mozilla/Monitor.h"            // for Monitor, MonitorAutoLock
+#include "mozilla/mozalloc.h"           // for operator delete, etc
+#include "nsDebug.h"                    // for NS_ASSERTION, NS_ERROR, etc
+#include "nsDeque.h"                    // for nsDeque
 
 #define TEXTURE_POOL_SIZE 10
 
 namespace mozilla {
 namespace gl {
 
-static GLContext* sActiveContext = NULL;
+static GLContext* sActiveContext = nullptr;
 
-static Monitor* sMonitor = NULL;
-static nsDeque* sTextures = NULL;
+static Monitor* sMonitor = nullptr;
+static nsDeque* sTextures = nullptr;
 
 GLuint TexturePoolOGL::AcquireTexture()
 {
@@ -89,7 +92,7 @@ void TexturePoolOGL::Fill(GLContext* aContext)
 
   sActiveContext->MakeCurrent();
 
-  GLuint* texture = NULL;
+  GLuint* texture = nullptr;
   while (sTextures->GetSize() < TEXTURE_POOL_SIZE) {
     texture = (GLuint*)malloc(sizeof(GLuint));
     sActiveContext->fGenTextures(1, texture);

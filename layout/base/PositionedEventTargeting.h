@@ -5,10 +5,11 @@
 #ifndef mozilla_PositionedEventTargeting_h
 #define mozilla_PositionedEventTargeting_h
 
-#include "nsPoint.h"
-#include "nsGUIEvent.h"
+#include <stdint.h>
+#include "mozilla/EventForwards.h"
 
 class nsIFrame;
+struct nsPoint;
 
 namespace mozilla {
 
@@ -21,7 +22,7 @@ enum {
  * that are suitable targets, to account for inaccurate pointing devices.
  */
 nsIFrame*
-FindFrameTargetedByInputEvent(const nsGUIEvent *aEvent,
+FindFrameTargetedByInputEvent(const WidgetGUIEvent* aEvent,
                               nsIFrame* aRootFrame,
                               const nsPoint& aPointRelativeToRootFrame,
                               uint32_t aFlags = 0);

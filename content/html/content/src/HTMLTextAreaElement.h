@@ -13,10 +13,10 @@
 #include "nsIDOMNSEditableElement.h"
 #include "nsCOMPtr.h"
 #include "nsGenericHTMLElement.h"
-#include "nsEventStates.h"
 #include "nsStubMutationObserver.h"
 #include "nsIConstraintValidation.h"
 #include "mozilla/dom/HTMLFormElement.h"
+#include "mozilla/dom/HTMLInputElementBinding.h"
 #include "nsGkAtoms.h"
 
 #include "nsTextEditorState.h"
@@ -28,9 +28,14 @@ class nsPresContext;
 class nsPresState;
 
 namespace mozilla {
+
+class EventChainPostVisitor;
+class EventChainPreVisitor;
+class EventStates;
+
 namespace dom {
 
-class HTMLTextAreaElement MOZ_FINAL : public nsGenericHTMLFormElement,
+class HTMLTextAreaElement MOZ_FINAL : public nsGenericHTMLFormElementWithState,
                                       public nsIDOMHTMLTextAreaElement,
                                       public nsITextControlElement,
                                       public nsIDOMNSEditableElement,
@@ -40,20 +45,11 @@ class HTMLTextAreaElement MOZ_FINAL : public nsGenericHTMLFormElement,
 public:
   using nsIConstraintValidation::GetValidationMessage;
 
-  HTMLTextAreaElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+  HTMLTextAreaElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
                       FromParser aFromParser = NOT_FROM_PARSER);
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   virtual int32_t TabIndexDefault() MOZ_OVERRIDE;
 
@@ -77,7 +73,7 @@ public:
 
   virtual void FieldSetDisabledChanged(bool aNotify) MOZ_OVERRIDE;
 
-  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  virtual EventStates IntrinsicState() const MOZ_OVERRIDE;
 
   // nsITextControlElemet
   NS_IMETHOD SetValueChanged(bool aValueChanged) MOZ_OVERRIDE;
@@ -98,8 +94,8 @@ public:
   NS_IMETHOD_(void) UnbindFromFrame(nsTextControlFrame* aFrame) MOZ_OVERRIDE;
   NS_IMETHOD CreateEditor() MOZ_OVERRIDE;
   NS_IMETHOD_(nsIContent*) GetRootEditorNode() MOZ_OVERRIDE;
-  NS_IMETHOD_(nsIContent*) CreatePlaceholderNode() MOZ_OVERRIDE;
-  NS_IMETHOD_(nsIContent*) GetPlaceholderNode() MOZ_OVERRIDE;
+  NS_IMETHOD_(Element*) CreatePlaceholderNode() MOZ_OVERRIDE;
+  NS_IMETHOD_(Element*) GetPlaceholderNode() MOZ_OVERRIDE;
   NS_IMETHOD_(void) UpdatePlaceholderVisibility(bool aNotify) MOZ_OVERRIDE;
   NS_IMETHOD_(bool) GetPlaceholderVisibility() MOZ_OVERRIDE;
   NS_IMETHOD_(void) InitializeKeyboardEventListeners() MOZ_OVERRIDE;
@@ -121,8 +117,9 @@ public:
                                               int32_t aModType) const MOZ_OVERRIDE;
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
-  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PostHandleEvent(
+                     EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
 
   virtual bool IsHTMLFocusable(bool aWithMouse, bool *aIsFocusable, int32_t *aTabIndex) MOZ_OVERRIDE;
 
@@ -147,9 +144,7 @@ public:
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLTextAreaElement,
-                                           nsGenericHTMLFormElement)
-
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
+                                           nsGenericHTMLFormElementWithState)
 
   // nsIConstraintValidation
   bool     IsTooLong();
@@ -189,8 +184,8 @@ public:
   {
     SetHTMLBoolAttr(nsGkAtoms::disabled, aDisabled, aError);
   }
-  // nsGenericHTMLFormElement::GetForm is fine
-  using nsGenericHTMLFormElement::GetForm;
+  // nsGenericHTMLFormElementWithState::GetForm is fine
+  using nsGenericHTMLFormElementWithState::GetForm;
   int32_t MaxLength()
   {
     return GetIntAttr(nsGkAtoms::maxlength, -1);
@@ -225,6 +220,14 @@ public:
   {
     return GetBoolAttr(nsGkAtoms::required);
   }
+
+  void SetRangeText(const nsAString& aReplacement, ErrorResult& aRv);
+
+  void SetRangeText(const nsAString& aReplacement, uint32_t aStart,
+                    uint32_t aEnd, const SelectionMode& aSelectMode,
+                    ErrorResult& aRv, int32_t aSelectionStart = -1,
+                    int32_t aSelectionEnd = -1);
+
   void SetRequired(bool aRequired, ErrorResult& aError)
   {
     SetHTMLBoolAttr(nsGkAtoms::required, aRequired, aError);
@@ -272,10 +275,10 @@ public:
   }
 
 protected:
-  using nsGenericHTMLFormElement::IsSingleLineTextControl; // get rid of the compiler warning
+  // get rid of the compiler warning
+  using nsGenericHTMLFormElementWithState::IsSingleLineTextControl;
 
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
   nsCOMPtr<nsIControllers> mControllers;
   /** Whether or not the value has changed since its default value was given. */
@@ -357,6 +360,10 @@ protected:
    * @return whether the current value is the empty string.
    */
   bool IsValueEmpty() const;
+
+private:
+  static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                    nsRuleData* aData);
 };
 
 } // namespace dom

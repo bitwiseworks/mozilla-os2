@@ -17,10 +17,10 @@ interface nsIURI;
  * This service allows accessing some DOMApplicationRegistry methods from
  * non-javascript code.
  */
-[scriptable, uuid(27b995cf-bec8-47de-aa48-6117c950fce3)]
+[scriptable, uuid(93cde78d-56f6-4322-b707-9b23eb80d90d)]
 interface nsIAppsService : nsISupports
 {
-  mozIDOMApplication getAppByManifestURL(in DOMString manifestURL);
+  mozIApplication getAppByManifestURL(in DOMString manifestURL);
 
   /**
    * Returns the |localId| of the app associated with the |manifestURL| passed
@@ -33,19 +33,12 @@ interface nsIAppsService : nsISupports
   /**
    * Returns the application associated to this localId.
    */
-  mozIDOMApplication getAppByLocalId(in unsigned long localId);
+  mozIApplication getAppByLocalId(in unsigned long localId);
 
   /**
    * Returns the manifest URL associated to this localId.
    */
   DOMString getManifestURLByLocalId(in unsigned long localId);
-
-  /**
-   * Returns the app that is related to the message.
-   * This is a helper to not have to worry about what is the actual structure
-   * of the message when listening to one.
-   */
-  mozIApplication getAppFromObserverMessage(in DOMString message);
 
   /**
    * Returns the CSP associated to this localId.

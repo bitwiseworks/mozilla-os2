@@ -7,7 +7,7 @@
 #include "AsyncFaviconHelpers.h"
 
 #include "nsICacheService.h"
-#include "nsICacheVisitor.h"
+#include "nsICacheEntry.h"
 #include "nsICachingChannel.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 
@@ -18,6 +18,7 @@
 #include "nsPrintfCString.h"
 #include "nsStreamUtils.h"
 #include "nsIPrivateBrowsingChannel.h"
+#include "nsISupportsPriority.h"
 #include <algorithm>
 
 using namespace mozilla::places;
@@ -89,7 +90,7 @@ FetchPageInfo(nsRefPtr<Database>& aDB,
   bool isNull;
   rv = stmt->GetIsNull(1, &isNull);
   NS_ENSURE_SUCCESS(rv, rv);
-  // favicon_id can be NULL.
+  // favicon_id can be nullptr.
   if (!isNull) {
     rv = stmt->GetInt64(1, &_page.iconId);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -209,42 +210,42 @@ FetchIconInfo(nsRefPtr<Database>& aDB,
   NS_ENSURE_STATE(stmt);
   mozStorageStatementScoper scoper(stmt);
 
-  nsresult rv = URIBinder::Bind(stmt, NS_LITERAL_CSTRING("icon_url"),
-                                _icon.spec);
-  NS_ENSURE_SUCCESS(rv, rv);
+  DebugOnly<nsresult> rv = URIBinder::Bind(stmt, NS_LITERAL_CSTRING("icon_url"),
+                                           _icon.spec);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   bool hasResult;
   rv = stmt->ExecuteStep(&hasResult);
-  NS_ENSURE_SUCCESS(rv, rv);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
   if (!hasResult) {
     // The icon does not exist yet, bail out.
     return NS_OK;
   }
 
   rv = stmt->GetInt64(0, &_icon.id);
-  NS_ENSURE_SUCCESS(rv, rv);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
 
-  // Expiration can be NULL.
+  // Expiration can be nullptr.
   bool isNull;
   rv = stmt->GetIsNull(1, &isNull);
-  NS_ENSURE_SUCCESS(rv, rv);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
   if (!isNull) {
     rv = stmt->GetInt64(1, reinterpret_cast<int64_t*>(&_icon.expiration));
-    NS_ENSURE_SUCCESS(rv, rv);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
 
-  // Data can be NULL.
+  // Data can be nullptr.
   rv = stmt->GetIsNull(2, &isNull);
-  NS_ENSURE_SUCCESS(rv, rv);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
   if (!isNull) {
     uint8_t* data;
     uint32_t dataLen = 0;
     rv = stmt->GetBlob(2, &dataLen, &data);
-    NS_ENSURE_SUCCESS(rv, rv);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
     _icon.data.Adopt(TO_CHARBUFFER(data), dataLen);
     // Read mime only if we have data.
     rv = stmt->GetUTF8String(3, _icon.mimeType);
-    NS_ENSURE_SUCCESS(rv, rv);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
 
   return NS_OK;
@@ -304,7 +305,7 @@ GetExpirationTimeFromChannel(nsIChannel* aChannel)
     nsCOMPtr<nsISupports> cacheToken;
     nsresult rv = cachingChannel->GetCacheToken(getter_AddRefs(cacheToken));
     if (NS_SUCCEEDED(rv)) {
-      nsCOMPtr<nsICacheEntryInfo> cacheEntry = do_QueryInterface(cacheToken);
+      nsCOMPtr<nsICacheEntry> cacheEntry = do_QueryInterface(cacheToken);
       uint32_t seconds;
       rv = cacheEntry->GetExpirationTime(&seconds);
       if (NS_SUCCEEDED(rv)) {
@@ -499,7 +500,7 @@ AsyncFetchAndSetIconForPage::Run()
 ////////////////////////////////////////////////////////////////////////////////
 //// AsyncFetchAndSetIconFromNetwork
 
-NS_IMPL_ISUPPORTS_INHERITED3(
+NS_IMPL_ISUPPORTS_INHERITED(
   AsyncFetchAndSetIconFromNetwork
 , nsRunnable
 , nsIStreamListener
@@ -552,6 +553,12 @@ AsyncFetchAndSetIconFromNetwork::Run()
     rv = pbChannel->SetPrivate(mFaviconLoadPrivate);
     NS_ENSURE_SUCCESS(rv, rv);
   }
+
+  nsCOMPtr<nsISupportsPriority> priorityChannel = do_QueryInterface(channel);
+  if (priorityChannel) {
+    priorityChannel->AdjustPriority(nsISupportsPriority::PRIORITY_LOWEST);
+  }
+
   return channel->AsyncOpen(this, nullptr);
 }
 
@@ -806,7 +813,7 @@ AsyncGetFaviconURLForPage::Run()
 
   nsAutoCString iconSpec;
   nsresult rv = FetchIconURL(mDB, mPageSpec, iconSpec);
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  NS_ENSURE_SUCCESS(rv, rv);
 
   // Now notify our callback of the icon spec we retrieved, even if empty.
   IconData iconData;
@@ -871,7 +878,7 @@ AsyncGetFaviconDataForPage::Run()
 
   nsAutoCString iconSpec;
   nsresult rv = FetchIconURL(mDB, mPageSpec, iconSpec);
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  NS_ENSURE_SUCCESS(rv, rv);
 
   IconData iconData;
   iconData.spec.Assign(iconSpec);
@@ -883,7 +890,6 @@ AsyncGetFaviconDataForPage::Run()
     rv = FetchIconInfo(mDB, iconData);
     if (NS_FAILED(rv)) {
       iconData.spec.Truncate();
-      MOZ_ASSERT(false, "Fetching favicon information failed unexpectedly.");
     }
   }
 

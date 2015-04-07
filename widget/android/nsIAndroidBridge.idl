@@ -11,10 +11,32 @@ interface nsIBrowserTab : nsISupports {
   readonly attribute float scale;
 };
 
-[scriptable, uuid(d10377b4-1c90-493a-a532-63cb3f16ee2b)]
+[scriptable, uuid(08426a73-e70b-4680-9282-630932e2b2bb)]
+interface nsIUITelemetryObserver : nsISupports {
+  void startSession(in wstring name,
+                    in unsigned long timestamp);
+  void stopSession(in wstring name,
+                   in wstring reason,
+                   in unsigned long timestamp);
+  void addEvent(in wstring action,
+                in wstring method,
+                in unsigned long timestamp,
+                in wstring extras);
+};
+
+[scriptable, uuid(c31331d2-afad-460f-9c66-728b8c838cec)]
 interface nsIAndroidBrowserApp : nsISupports {
   nsIBrowserTab getBrowserTab(in int32_t tabId);
+  void getPreferences(in int32_t requestId,
+                      [array, size_is(count)] in wstring prefNames,
+                      in unsigned long count);
+  void observePreferences(in int32_t requestId,
+                          [array, size_is(count)] in wstring prefNames,
+                          in unsigned long count);
+  void removePreferenceObservers(in int32_t requestId);
+  nsIUITelemetryObserver getUITelemetryObserver();
 };
+
 [scriptable, uuid(59cfcb35-69b7-47b2-8155-32b193272666)]
 interface nsIAndroidViewport : nsISupports {
   readonly attribute float x;
@@ -41,10 +63,10 @@ interface nsIAndroidDisplayport : nsISupports {
   attribute float resolution;
 };
 
-[scriptable, uuid(5aa0cfa5-377c-4f5e-8dcf-59ebd9482d65)]
+[scriptable, uuid(1beb70d3-70f3-4742-98cc-a3d301b26c0c)]
 interface nsIAndroidBridge : nsISupports
 {
-  AString handleGeckoMessage(in AString message);
+  [implicit_jscontext] void handleGeckoMessage(in jsval message);
   attribute nsIAndroidBrowserApp browserApp;
   nsIAndroidDisplayport getDisplayPort(in boolean aPageSizeUpdate, in boolean isBrowserContentDisplayed, in int32_t tabId, in nsIAndroidViewport metrics);
   void contentDocumentChanged();

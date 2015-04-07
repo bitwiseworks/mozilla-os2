@@ -18,7 +18,9 @@ const nsIDM = Ci.nsIDownloadManager;
 const nsIWBP = Ci.nsIWebBrowserPersist;
 const nsIWPL = Ci.nsIWebProgressListener;
 const dm = Cc["@mozilla.org/download-manager;1"].getService(nsIDM);
-dm.cleanUp();
+if (!oldDownloadManagerDisabled()) {
+  dm.cleanUp();
+}
 
 function setOnlineState(aOnline)
 {
@@ -36,6 +38,10 @@ function setOnlineState(aOnline)
 
 function run_test()
 {
+  if (oldDownloadManagerDisabled()) {
+    return;
+  }
+
   /**
    * 1. Create data for http server to send
    */
@@ -74,7 +80,7 @@ function run_test()
     }
     resp.bodyOutputStream.write(body, body.length);
   });
-  httpserv.start(4444);
+  httpserv.start(-1);
 
   /**
    * 3. Perform various actions for certain download states
@@ -141,7 +147,8 @@ function run_test()
                          nsIWBP.PERSIST_FLAGS_BYPASS_CACHE |
                          nsIWBP.PERSIST_FLAGS_AUTODETECT_APPLY_CONVERSION;
   let dl = dm.addDownload(nsIDM.DOWNLOAD_TYPE_DOWNLOAD,
-                          createURI("http://localhost:4444/resume"),
+                          createURI("http://localhost:" +
+                                    httpserv.identity.primaryPort + "/resume"),
                           createURI(destFile), null, null,
                           Math.round(Date.now() * 1000), null, persist, false);
   persist.progressListener = dl.QueryInterface(nsIWPL);

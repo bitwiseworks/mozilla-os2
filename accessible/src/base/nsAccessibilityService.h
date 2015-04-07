@@ -178,8 +178,7 @@ private:
   void Shutdown();
 
   /**
-   * Create accessible for the element implementing nsIAccessibleProvider
-   * interface.
+   * Create accessible for the element having XBL bindings.
    */
   already_AddRefed<Accessible>
     CreateAccessibleByType(nsIContent* aContent, DocAccessible* aDoc);
@@ -330,30 +329,6 @@ static const char kEventTypeNames[][40] = {
   "hypertext links count changed",           // EVENT_HYPERTEXT_NLINKS_CHANGED
   "object attribute changed",                // EVENT_OBJECT_ATTRIBUTE_CHANGED
   "virtual cursor changed"                   // EVENT_VIRTUALCURSOR_CHANGED
-};
-
-/**
- * Map nsIAccessibleRelation constants to strings. Used by
- * nsIAccessibleRetrieval::getStringRelationType() method.
- */
-static const char kRelationTypeNames[][20] = {
-  "labelled by",         // RELATION_LABELLED_BY
-  "label for",           // RELATION_LABEL_FOR
-  "described by",        // RELATION_DESCRIBED_BY
-  "description for",     // RELATION_DESCRIPTION_FOR
-  "node child of",       // RELATION_NODE_CHILD_OF
-  "node parent of",      // RELATION_NODE_PARENT_OF
-  "controlled by",       // RELATION_CONTROLLED_BY
-  "controller for",      // RELATION_CONTROLLER_FOR
-  "flows to",            // RELATION_FLOWS_TO
-  "flows from",          // RELATION_FLOWS_FROM
-  "member of",           // RELATION_MEMBER_OF
-  "subwindow of",        // RELATION_SUBWINDOW_OF
-  "embeds",              // RELATION_EMBEDS
-  "embedded by",         // RELATION_EMBEDDED_BY
-  "popup for",           // RELATION_POPUP_FOR
-  "parent window of",    // RELATION_PARENT_WINDOW_OF
-  "default button"       // RELATION_DEFAULT_BUTTON
 };
 
 #endif /* __nsIAccessibilityService_h__ */

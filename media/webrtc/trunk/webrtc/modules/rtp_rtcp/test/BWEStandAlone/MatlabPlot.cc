@@ -8,19 +8,22 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "MatlabPlot.h"
+#include "webrtc/modules/rtp_rtcp/test/BWEStandAlone/MatlabPlot.h"
+
+#include <math.h>
+#include <stdio.h>
+
+#include <algorithm>
+#include <sstream>
+
 #ifdef MATLAB
 #include "engine.h"
 #endif
-#include "event_wrapper.h"
-#include "thread_wrapper.h"
-#include "critical_section_wrapper.h"
-#include "tick_util.h"
 
-#include <sstream>
-#include <algorithm>
-#include <math.h>
-#include <stdio.h>
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/event_wrapper.h"
+#include "webrtc/system_wrappers/interface/thread_wrapper.h"
+#include "webrtc/system_wrappers/interface/tick_util.h"
 
 using namespace webrtc;
 
@@ -66,7 +69,7 @@ MatlabLine::~MatlabLine()
 
 void MatlabLine::Append(double x, double y)
 {
-    if (_maxLen > 0 && _xData.size() > static_cast<WebRtc_UWord32>(_maxLen))
+    if (_maxLen > 0 && _xData.size() > static_cast<uint32_t>(_maxLen))
     {
         _xData.resize(_maxLen);
         _yData.resize(_maxLen);
@@ -312,7 +315,7 @@ double MatlabLine::yMax()
 
 MatlabTimeLine::MatlabTimeLine(int horizonSeconds /*= -1*/, const char *plotAttrib /*= NULL*/,
                                const char *name /*= NULL*/,
-                               WebRtc_Word64 refTimeMs /* = -1*/)
+                               int64_t refTimeMs /* = -1*/)
                                :
 _timeHorizon(horizonSeconds),
 MatlabLine(-1, plotAttrib, name) // infinite number of elements
@@ -340,7 +343,7 @@ void MatlabTimeLine::PurgeOldData()
             - _timeHorizon; // remove data points older than this
 
         std::list<double>::reverse_iterator ritx = _xData.rbegin();
-        WebRtc_UWord32 removeCount = 0;
+        uint32_t removeCount = 0;
         while (ritx != _xData.rend())
         {
             if (*ritx >= historyLimit)
@@ -366,7 +369,7 @@ void MatlabTimeLine::PurgeOldData()
 }
 
 
-WebRtc_Word64 MatlabTimeLine::GetRefTime()
+int64_t MatlabTimeLine::GetRefTime()
 {
     return(_refTimeMs);
 }
@@ -433,7 +436,7 @@ int MatlabPlot::AddLine(int maxLen /*= -1*/, const char *plotAttrib /*= NULL*/, 
 
 
 int MatlabPlot::AddTimeLine(int maxLen /*= -1*/, const char *plotAttrib /*= NULL*/, const char *name /*= NULL*/,
-                            WebRtc_Word64 refTimeMs /*= -1*/)
+                            int64_t refTimeMs /*= -1*/)
 {
     CriticalSectionScoped cs(_critSect);
 
@@ -1031,7 +1034,7 @@ bool MatlabEngine::PlotThread(void *obj)
                     // things to plot, we have already accessed what we need in the plot
                     plot->DonePlotting();
 
-                    WebRtc_Word64 start = TickTime::MillisecondTimestamp();
+                    int64_t start = TickTime::MillisecondTimestamp();
                     // plot it
                     int ret = engEvalString(ep, cmd.str().c_str());
                     printf("time=%I64i\n", TickTime::MillisecondTimestamp() - start);

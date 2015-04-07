@@ -4,15 +4,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-PARALLEL_DIRS += ['encoder']
+PARALLEL_DIRS += [
+  'encoder',
+  'mediasource',
+  'ogg',
+  'webaudio',
+  'webvtt'
+]
 
-PARALLEL_DIRS += ['webaudio']
+TEST_TOOL_DIRS += ['compiledtest']
 
 if CONFIG['MOZ_RAW']:
     PARALLEL_DIRS += ['raw']
-
-if CONFIG['MOZ_OGG']:
-    PARALLEL_DIRS += ['ogg']
 
 if CONFIG['MOZ_WAVE']:
     PARALLEL_DIRS += ['wave']
@@ -23,8 +26,8 @@ if CONFIG['MOZ_WEBM']:
 if CONFIG['MOZ_GSTREAMER']:
     PARALLEL_DIRS += ['gstreamer']
 
-if CONFIG['MOZ_DASH']:
-    PARALLEL_DIRS += ['dash']
+if CONFIG['MOZ_DIRECTSHOW']:
+    PARALLEL_DIRS += ['directshow']
 
 if CONFIG['MOZ_MEDIA_PLUGINS']:
     PARALLEL_DIRS += ['plugins']
@@ -32,43 +35,62 @@ if CONFIG['MOZ_MEDIA_PLUGINS']:
 if CONFIG['MOZ_WMF']:
     PARALLEL_DIRS += ['wmf']
 
+if CONFIG['MOZ_FMP4']:
+    PARALLEL_DIRS += ['fmp4']
+
+if CONFIG['MOZ_APPLEMEDIA']:
+    PARALLEL_DIRS += ['apple']
+
 PARALLEL_DIRS += ['webrtc']
 
 if CONFIG['MOZ_OMX_DECODER']:
     PARALLEL_DIRS += ['omx']
     PARALLEL_DIRS += ['omx/mediaresourcemanager']
 
-if CONFIG['MOZ_WEBSPEECH']:
-    PARALLEL_DIRS += ['webspeech']
+PARALLEL_DIRS += ['webspeech']
 
-TEST_DIRS += ['test']
-
-MODULE = 'content'
+TEST_DIRS += [
+    'test',
+    'gtest',
+]
 
 EXPORTS += [
     'AbstractMediaDecoder.h',
-    'AudioAvailableEventManager.h',
     'AudioChannelFormat.h',
+    'AudioCompactor.h',
     'AudioEventTimeline.h',
+    'AudioMixer.h',
     'AudioNodeEngine.h',
+    'AudioNodeExternalInputStream.h',
     'AudioNodeStream.h',
     'AudioSampleFormat.h',
     'AudioSegment.h',
     'AudioStream.h',
+    'BufferDecoder.h',
     'BufferMediaResource.h',
-    'DOMMediaStream.h',
     'DecoderTraits.h',
+    'DOMMediaStream.h',
+    'EncodedBufferCache.h',
     'FileBlockCache.h',
+    'Latency.h',
     'MediaCache.h',
+    'MediaData.h',
     'MediaDecoder.h',
     'MediaDecoderOwner.h',
     'MediaDecoderReader.h',
     'MediaDecoderStateMachine.h',
+    'MediaInfo.h',
     'MediaMetadataManager.h',
+    'MediaQueue.h',
+    'MediaRecorder.h',
     'MediaResource.h',
     'MediaSegment.h',
     'MediaStreamGraph.h',
+    'MediaTaskQueue.h',
+    'MP3FrameParser.h',
+    'RtspMediaResource.h',
     'SharedBuffer.h',
+    'SharedThreadPool.h',
     'StreamBuffer.h',
     'TimeVarying.h',
     'TrackUnionStream.h',
@@ -85,35 +107,84 @@ EXPORTS.mozilla.dom += [
     'TextTrackCue.h',
     'TextTrackCueList.h',
     'TextTrackList.h',
+    'TextTrackRegion.h',
+    'VideoPlaybackQuality.h',
     'VideoStreamTrack.h',
 ]
 
-CPP_SOURCES += [
-    'AudioAvailableEventManager.cpp',
+UNIFIED_SOURCES += [
     'AudioChannelFormat.cpp',
+    'AudioCompactor.cpp',
     'AudioNodeEngine.cpp',
+    'AudioNodeExternalInputStream.cpp',
     'AudioNodeStream.cpp',
     'AudioSegment.cpp',
     'AudioStream.cpp',
     'AudioStreamTrack.cpp',
+    'BufferDecoder.cpp',
     'DOMMediaStream.cpp',
-    'DecoderTraits.cpp',
+    'EncodedBufferCache.cpp',
     'FileBlockCache.cpp',
     'MediaCache.cpp',
+    'MediaData.cpp',
     'MediaDecoder.cpp',
     'MediaDecoderReader.cpp',
     'MediaDecoderStateMachine.cpp',
+    'MediaRecorder.cpp',
     'MediaResource.cpp',
+    'MediaShutdownManager.cpp',
     'MediaStreamGraph.cpp',
     'MediaStreamTrack.cpp',
+    'MediaTaskQueue.cpp',
+    'MP3FrameParser.cpp',
+    'RtspMediaResource.cpp',
+    'SharedThreadPool.cpp',
     'StreamBuffer.cpp',
     'TextTrack.cpp',
     'TextTrackCue.cpp',
     'TextTrackCueList.cpp',
     'TextTrackList.cpp',
+    'TextTrackRegion.cpp',
     'VideoFrameContainer.cpp',
+    'VideoPlaybackQuality.cpp',
     'VideoSegment.cpp',
     'VideoStreamTrack.cpp',
     'VideoUtils.cpp',
-    'WebVTTLoadListener.cpp',
+    'WebVTTListener.cpp',
 ]
+
+# DecoderTraits.cpp needs to be built separately because of Mac OS X headers.
+# Latency.cpp needs to be built separately because it forces NSPR logging.
+SOURCES += [
+    'DecoderTraits.cpp',
+    'Latency.cpp',
+]
+
+FAIL_ON_WARNINGS = True
+
+if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
+    SOURCES += ['AudioNodeEngineNEON.cpp']
+    SOURCES['AudioNodeEngineNEON.cpp'].flags += ['-mfpu=neon']
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'
+LOCAL_INCLUDES += [
+    '/content/base/src',
+    '/layout/generic',
+    '/layout/xul',
+    '/netwerk/base/src',
+]
+
+if CONFIG['MOZ_DIRECTSHOW']:
+    LOCAL_INCLUDES += [
+        '/media/webrtc/trunk/webrtc/modules/video_capture/windows',
+    ]
+
+DEFINES['MOZILLA_INTERNAL_API'] = True
+
+if CONFIG['MOZ_OMX_DECODER']:
+    DEFINES['MOZ_OMX_DECODER'] = True
+

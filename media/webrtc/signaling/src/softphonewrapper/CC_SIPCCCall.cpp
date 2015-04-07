@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CSFLog.h"
+#include "timecard.h"
 
 #include "CC_Common.h"
 
@@ -29,7 +30,7 @@ CSF_IMPLEMENT_WRAP(CC_SIPCCCall, cc_call_handle_t);
 
 CC_SIPCCCall::CC_SIPCCCall (cc_call_handle_t aCallHandle) :
             callHandle(aCallHandle),
-            pMediaData(new CC_SIPCCCallMediaData(NULL,false,false,-1)),
+            pMediaData(new CC_SIPCCCallMediaData(nullptr, false, false, -1)),
             m_lock("CC_SIPCCCall")
 {
     CSFLogInfo( logTag, "Creating  CC_SIPCCCall %u", callHandle );
@@ -422,7 +423,7 @@ void CC_SIPCCCall::addStream(int streamId, bool isVideo)
         VideoTermination * pVideo = VcmSIPCCBinding::getVideoTermination();
 
         // if there is a window for this call apply it to the stream
-        if ( pMediaData->remoteWindow != NULL)
+        if ( pMediaData->remoteWindow != nullptr)
         {
             pVideo->setRemoteWindow(streamId,  pMediaData->remoteWindow);
         }
@@ -431,7 +432,7 @@ void CC_SIPCCCall::addStream(int streamId, bool isVideo)
             CSFLogInfo( logTag, "addStream: remoteWindow is NULL");
         }
 
-		if(pMediaData->extRenderer != NULL)
+		if(pMediaData->extRenderer != nullptr)
 		{
 			pVideo->setExternalRenderer(streamId, pMediaData->videoFormat, pMediaData->extRenderer);
 		}
@@ -531,23 +532,29 @@ void CC_SIPCCCall::originateP2PCall (cc_sdp_direction_t video_pref, const std::s
 /*
  * This method works asynchronously, is an onCallEvent with the resulting SDP
  */
-void CC_SIPCCCall::createOffer (cc_media_constraints_t *constraints) {
-    CCAPI_CreateOffer(callHandle, constraints);
+void CC_SIPCCCall::createOffer (cc_media_constraints_t *constraints,
+                                Timecard *tc) {
+    CCAPI_CreateOffer(callHandle, constraints, tc);
 }
 /*
  * This method works asynchronously, there is onCallEvent with the resulting SDP
  */
-void CC_SIPCCCall::createAnswer (cc_media_constraints_t *constraints) {
-    CCAPI_CreateAnswer(callHandle, constraints);
+void CC_SIPCCCall::createAnswer (cc_media_constraints_t *constraints,
+                                 Timecard *tc) {
+    CCAPI_CreateAnswer(callHandle, constraints, tc);
 
 }
 
-void CC_SIPCCCall::setLocalDescription(cc_jsep_action_t action, const std::string & sdp) {
-    CCAPI_SetLocalDescription(callHandle, action, sdp.c_str());
+void CC_SIPCCCall::setLocalDescription(cc_jsep_action_t action,
+                                       const std::string & sdp,
+                                       Timecard *tc) {
+    CCAPI_SetLocalDescription(callHandle, action, sdp.c_str(), tc);
 }
 
-void CC_SIPCCCall::setRemoteDescription(cc_jsep_action_t action, const std::string & sdp) {
-    CCAPI_SetRemoteDescription(callHandle, action, sdp.c_str());
+void CC_SIPCCCall::setRemoteDescription(cc_jsep_action_t action,
+                                       const std::string & sdp,
+                                       Timecard *tc) {
+    CCAPI_SetRemoteDescription(callHandle, action, sdp.c_str(), tc);
 }
 
 void CC_SIPCCCall::setPeerConnection(const std::string& handle)
@@ -562,14 +569,21 @@ const std::string& CC_SIPCCCall::getPeerConnection() const {
   return peerconnection;
 }
 
-void CC_SIPCCCall::addStream(cc_media_stream_id_t stream_id, cc_media_track_id_t track_id, cc_media_type_t media_type) {
-  CCAPI_AddStream(callHandle, stream_id, track_id, media_type);
+void CC_SIPCCCall::addStream(cc_media_stream_id_t stream_id,
+                             cc_media_track_id_t track_id,
+                             cc_media_type_t media_type,
+                             cc_media_constraints_t *constraints) {
+  CCAPI_AddStream(callHandle, stream_id, track_id, media_type, constraints);
 }
 
 void CC_SIPCCCall::removeStream(cc_media_stream_id_t stream_id, cc_media_track_id_t track_id, cc_media_type_t media_type) {
   CCAPI_RemoveStream(callHandle, stream_id, track_id, media_type);
 }
 
-void CC_SIPCCCall::addICECandidate(const std::string & candidate, const std::string & mid, unsigned short level) {
-  CCAPI_AddICECandidate(callHandle, candidate.c_str(), mid.c_str(), (cc_level_t) level);
+void CC_SIPCCCall::addICECandidate(const std::string & candidate,
+                                   const std::string & mid,
+                                   unsigned short level,
+                                   Timecard *tc) {
+  CCAPI_AddICECandidate(callHandle, candidate.c_str(), mid.c_str(),
+                        (cc_level_t) level, tc);
 }

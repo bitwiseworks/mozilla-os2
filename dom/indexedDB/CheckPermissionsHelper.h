@@ -24,23 +24,24 @@ class CheckPermissionsHelper MOZ_FINAL : public nsIRunnable,
                                          public nsIObserver
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSIOBSERVER
 
   CheckPermissionsHelper(OpenDatabaseHelper* aHelper,
-                         nsIDOMWindow* aWindow,
-                         bool aForDeletion)
+                         nsIDOMWindow* aWindow)
   : mHelper(aHelper),
     mWindow(aWindow),
     // If we're trying to delete the database, we should never prompt the user.
     // Anything that would prompt is translated to denied.
-    mPromptAllowed(!aForDeletion),
+    mPromptAllowed(!aHelper->mForDeletion),
     mHasPrompted(false),
     mPromptResult(0)
   {
     NS_ASSERTION(aHelper, "Null pointer!");
+    NS_ASSERTION(aHelper->mPersistenceType == quota::PERSISTENCE_TYPE_PERSISTENT,
+                 "Checking permission for non persistent databases?!");
   }
 
 private:

@@ -24,20 +24,14 @@ using namespace mozilla::net;
 
 #include "nsFtpProtocolHandler.h"
 #include "nsFTPChannel.h"
-#include "nsIURL.h"
 #include "nsIStandardURL.h"
-#include "nsCRT.h"
-#include "nsIComponentManager.h"
-#include "nsIInterfaceRequestor.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "nsIProgressEventSink.h"
 #include "prlog.h"
-#include "nsNetUtil.h"
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsIObserverService.h"
 #include "nsEscape.h"
 #include "nsAlgorithm.h"
+#include "nsICacheSession.h"
 
 //-----------------------------------------------------------------------------
 
@@ -94,11 +88,11 @@ nsFtpProtocolHandler::~nsFtpProtocolHandler()
     gFtpHandler = nullptr;
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS4(nsFtpProtocolHandler,
-                              nsIProtocolHandler,
-                              nsIProxiedProtocolHandler,
-                              nsIObserver,
-                              nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(nsFtpProtocolHandler,
+                  nsIProtocolHandler,
+                  nsIProxiedProtocolHandler,
+                  nsIObserver,
+                  nsISupportsWeakReference)
 
 nsresult
 nsFtpProtocolHandler::Init()
@@ -370,7 +364,7 @@ nsFtpProtocolHandler::InsertConnection(nsIURI *aKey, nsFtpControlConnection *aCo
 NS_IMETHODIMP
 nsFtpProtocolHandler::Observe(nsISupports *aSubject,
                               const char *aTopic,
-                              const PRUnichar *aData)
+                              const char16_t *aData)
 {
     LOG(("FTP:observing [%s]\n", aTopic));
 

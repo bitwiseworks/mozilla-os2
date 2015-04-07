@@ -7,8 +7,7 @@
 #define GFX_CANVASLAYERD3D9_H
 
 #include "LayerManagerD3D9.h"
-#include "GLContext.h"
-#include "gfxASurface.h"
+#include "GLContextTypes.h"
 
 namespace mozilla {
 namespace layers {
@@ -19,17 +18,7 @@ class CanvasLayerD3D9 :
   public LayerD3D9
 {
 public:
-  CanvasLayerD3D9(LayerManagerD3D9 *aManager)
-    : CanvasLayer(aManager, NULL)
-    , LayerD3D9(aManager)
-    , mDataIsPremultiplied(false)
-    , mNeedsYFlip(false)
-    , mHasAlpha(true)
-  {
-      mImplData = static_cast<LayerD3D9*>(this);
-      aManager->deviceManager()->mLayersWithResources.AppendElement(this);
-  }
-
+  CanvasLayerD3D9(LayerManagerD3D9 *aManager);
   ~CanvasLayerD3D9();
 
   // CanvasLayer implementation
@@ -48,7 +37,6 @@ protected:
 
   void UpdateSurface();
 
-  nsRefPtr<gfxASurface> mSurface;
   nsRefPtr<GLContext> mGLContext;
   nsRefPtr<IDirect3DTexture9> mTexture;
   RefPtr<gfx::DrawTarget> mDrawTarget;

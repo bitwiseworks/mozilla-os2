@@ -18,7 +18,7 @@ this.FormAutoCompleteResult =
                                  labels,
                                  comments,
                                  prevResult) {
-  this._searchString = searchString;
+  this.searchString = searchString;
   this._searchResult = searchResult;
   this._defaultIndex = defaultIndex;
   this._errorDescription = errorDescription;
@@ -37,7 +37,7 @@ this.FormAutoCompleteResult =
 FormAutoCompleteResult.prototype = {
 
   // The user's query string
-  _searchString: "",
+  searchString: "",
 
   // The result code of this result object, see |get searchResult| for possible values.
   _searchResult: 0,
@@ -58,13 +58,6 @@ FormAutoCompleteResult.prototype = {
 
   get wrappedJSObject() {
     return this;
-  },
-
-  /**
-   * @return the user's query string
-   */
-  get searchString() {
-    return this._searchString;
   },
 
   /**
@@ -156,6 +149,15 @@ FormAutoCompleteResult.prototype = {
   getImageAt: function(index) {
     this._checkIndexBounds(index);
     return "";
+  },
+
+  /**
+   * Retrieves a result
+   * @param  index    the index of the result requested
+   * @return          the result at the specified index
+   */
+  getFinalCompleteValueAt: function(index) {
+    return this.getValueAt(index);
   },
 
   /**

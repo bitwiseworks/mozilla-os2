@@ -4,36 +4,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsAboutCache.h"
-#include "nsIIOService.h"
-#include "nsIServiceManager.h"
 #include "nsIInputStream.h"
 #include "nsIStorageStream.h"
-#include "nsISimpleEnumerator.h"
-#include "nsXPIDLString.h"
 #include "nsIURI.h"
 #include "nsCOMPtr.h"
 #include "nsNetUtil.h"
 #include "nsEscape.h"
+#include "nsAboutProtocolUtils.h"
 
 #include "nsICacheService.h"
 
-static PRTime SecondsToPRTime(uint32_t t_sec)
-{
-    PRTime t_usec, usec_per_sec;
-    t_usec = t_sec;
-    usec_per_sec = PR_USEC_PER_SEC;
-    return t_usec *= usec_per_sec;
-}
-static void PrintTimeString(char *buf, uint32_t bufsize, uint32_t t_sec)
-{
-    PRExplodedTime et;
-    PRTime t_usec = SecondsToPRTime(t_sec);
-    PR_ExplodeTime(t_usec, PR_LocalTimeParameters, &et);
-    PR_FormatTime(buf, bufsize, "%Y-%m-%d %H:%M:%S", &et);
-}
-
-
-NS_IMPL_ISUPPORTS2(nsAboutCache, nsIAboutModule, nsICacheVisitor)
+NS_IMPL_ISUPPORTS(nsAboutCache, nsIAboutModule, nsICacheVisitor)
 
 NS_IMETHODIMP
 nsAboutCache::NewChannel(nsIURI *aURI, nsIChannel **result)

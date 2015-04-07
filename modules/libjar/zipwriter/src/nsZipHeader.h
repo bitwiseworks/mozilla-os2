@@ -47,15 +47,15 @@ public:
         mIAttr(0),
         mInited(false),
         mWriteOnClose(false),
-        mExtraField(NULL),
-        mLocalExtraField(NULL)
+        mExtraField(nullptr),
+        mLocalExtraField(nullptr)
     {
     }
 
     ~nsZipHeader()
     {
-        mExtraField = NULL;
-        mLocalExtraField = NULL;
+        mExtraField = nullptr;
+        mLocalExtraField = nullptr;
     }
 
     uint32_t mCRC;
@@ -88,6 +88,7 @@ public:
     nsresult WriteCDSHeader(nsIOutputStream *aStream);
     nsresult ReadCDSHeader(nsIInputStream *aStream);
     const uint8_t * GetExtraField(uint16_t aTag, bool aLocal, uint16_t *aBlockSize);
+    nsresult PadExtraField(uint32_t aOffset, uint16_t aAlignSize);
 };
 
 #endif

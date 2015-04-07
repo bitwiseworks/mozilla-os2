@@ -10,7 +10,7 @@
 #include "nsSVGLength2.h"
 
 nsresult NS_NewSVGLineElement(nsIContent **aResult,
-                              already_AddRefed<nsINodeInfo> aNodeInfo);
+                              already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
@@ -20,11 +20,10 @@ typedef nsSVGPathGeometryElement SVGLineElementBase;
 class SVGLineElement MOZ_FINAL : public SVGLineElementBase
 {
 protected:
-  SVGLineElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx,
-                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  SVGLineElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
   friend nsresult (::NS_NewSVGLineElement(nsIContent **aResult,
-                                          already_AddRefed<nsINodeInfo> aNodeInfo));
+                                          already_AddRefed<nsINodeInfo>&& aNodeInfo));
 
 public:
   // nsIContent interface
@@ -34,6 +33,7 @@ public:
   virtual bool IsMarkable() MOZ_OVERRIDE { return true; }
   virtual void GetMarkPoints(nsTArray<nsSVGMark> *aMarks) MOZ_OVERRIDE;
   virtual void ConstructPath(gfxContext *aCtx) MOZ_OVERRIDE;
+  virtual TemporaryRef<Path> BuildPath() MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
 

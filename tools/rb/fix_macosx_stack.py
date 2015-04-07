@@ -7,8 +7,8 @@
 # This script uses atos to process the output of nsTraceRefcnt's Mac OS
 # X stack walking code.  This is useful for two things:
 #  (1) Getting line number information out of
-#      |nsTraceRefcntImpl::WalkTheStack|'s output in debug builds.
-#  (2) Getting function names out of |nsTraceRefcntImpl::WalkTheStack|'s
+#      |nsTraceRefcnt::WalkTheStack|'s output in debug builds.
+#  (2) Getting function names out of |nsTraceRefcnt::WalkTheStack|'s
 #      output on all builds (where it mostly prints UNKNOWN because only
 #      a handful of symbols are exported from component libraries).
 #
@@ -81,7 +81,7 @@ def addressToSymbol(file, address):
     converter = None
     if not file in atoses:
         debug_file = separate_debug_file_for(file) or file
-        converter = unbufferedLineConverter('/usr/bin/atos', ['-arch', 'x86_64', '-o', debug_file])
+        converter = unbufferedLineConverter('/usr/bin/xcrun', ['atos', '-arch', 'x86_64', '-o', debug_file])
         atoses[file] = converter
     else:
         converter = atoses[file]
@@ -99,7 +99,7 @@ def cxxfilt(sym):
     cxxfilt_proc.stdin.write(sym + "\n")
     return cxxfilt_proc.stdout.readline().rstrip("\n")
 
-line_re = re.compile("^(.*) ?\[([^ ]*) \+(0x[0-9A-F]{1,8})\](.*)$")
+line_re = re.compile("^(.*) ?\[([^ ]*) \+(0x[0-9a-fA-F]{1,8})\](.*)$")
 balance_tree_re = re.compile("^([ \|0-9-]*)")
 atos_name_re = re.compile("^(.+) \(in ([^)]+)\) \((.+)\)$")
 

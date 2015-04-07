@@ -5,29 +5,21 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 XPIDL_SOURCES += [
-    'nsIDOMConnection.idl',
-    'nsIDOMDataErrorEvent.idl',
-    'nsIDOMNavigatorNetwork.idl',
+    'nsIDOMTCPServerSocket.idl',
     'nsIDOMTCPSocket.idl',
-    'nsIDOMUSSDReceivedEvent.idl',
+    'nsIMozNavigatorNetwork.idl',
+    'nsITCPServerSocketChild.idl',
+    'nsITCPServerSocketParent.idl',
     'nsITCPSocketChild.idl',
     'nsITCPSocketParent.idl',
+    'nsIUDPSocketChild.idl',
 ]
 
-if CONFIG['MOZ_B2G_RIL']:
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     XPIDL_SOURCES += [
-        'nsIDOMCFStateChangeEvent.idl',
-        'nsIDOMMobileConnection.idl',
         'nsIDOMNetworkStats.idl',
         'nsIDOMNetworkStatsManager.idl',
-        'nsIMobileConnectionProvider.idl',
-        'nsINavigatorMobileConnection.idl',
+        'nsINetworkStatsServiceProxy.idl',
     ]
 
 XPIDL_MODULE = 'dom_network'
-
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/dom/interfaces/base',
-    '-I$(topsrcdir)/dom/interfaces/events',
-]
-

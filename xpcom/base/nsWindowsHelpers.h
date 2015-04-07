@@ -9,6 +9,26 @@
 #include "nsAutoRef.h"
 #include "nscore.h"
 
+// ----------------------------------------------------------------------------
+// Critical Section helper class
+// ----------------------------------------------------------------------------
+
+class AutoCriticalSection
+{
+public:
+  AutoCriticalSection(LPCRITICAL_SECTION section)
+    : mSection(section)
+  {
+    ::EnterCriticalSection(mSection);
+  }
+  ~AutoCriticalSection()
+  {
+    ::LeaveCriticalSection(mSection);
+  }
+private:
+  LPCRITICAL_SECTION mSection;
+};
+
 template<>
 class nsAutoRefTraits<HKEY>
 {
@@ -16,7 +36,7 @@ public:
   typedef HKEY RawRef;
   static HKEY Void()
   {
-    return NULL;
+    return nullptr;
   }
 
   static void Release(RawRef aFD)
@@ -34,7 +54,7 @@ public:
   typedef SC_HANDLE RawRef;
   static SC_HANDLE Void()
   {
-    return NULL;
+    return nullptr;
   }
 
   static void Release(RawRef aFD)
@@ -51,7 +71,7 @@ class nsSimpleRef<HANDLE>
 protected:
   typedef HANDLE RawRef;
 
-  nsSimpleRef() : mRawRef(NULL)
+  nsSimpleRef() : mRawRef(nullptr)
   {
   }
 
@@ -61,7 +81,7 @@ protected:
 
   bool HaveResource() const
   {
-    return mRawRef != NULL && mRawRef != INVALID_HANDLE_VALUE;
+    return mRawRef != nullptr && mRawRef != INVALID_HANDLE_VALUE;
   }
 
 public:
@@ -72,7 +92,7 @@ public:
 
   static void Release(RawRef aRawRef)
   {
-    if (aRawRef != NULL && aRawRef != INVALID_HANDLE_VALUE) {
+    if (aRawRef != nullptr && aRawRef != INVALID_HANDLE_VALUE) {
       CloseHandle(aRawRef);
     }
   }
@@ -87,7 +107,7 @@ public:
   typedef HMODULE RawRef;
   static RawRef Void()
   {
-    return NULL;
+    return nullptr;
   }
 
   static void Release(RawRef aFD)
@@ -105,16 +125,6 @@ typedef nsAutoRef<HMODULE> nsModuleHandle;
 
 namespace
 {
-  bool
-  IsVistaOrLater()
-  {
-    OSVERSIONINFO info;
-    ZeroMemory(&info, sizeof(OSVERSIONINFO));
-    info.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-    GetVersionEx(&info);
-    return info.dwMajorVersion >= 6;
-  }
-
   bool
   IsRunningInWindowsMetro()
   {
@@ -159,7 +169,7 @@ namespace
     if (systemDirLen && systemPath[systemDirLen - 1] != L'\\') {
       systemPath[systemDirLen] = L'\\';
       ++systemDirLen;
-      // No need to re-NULL terminate
+      // No need to re-nullptr terminate
     }
 
     size_t fileLen = wcslen(module);

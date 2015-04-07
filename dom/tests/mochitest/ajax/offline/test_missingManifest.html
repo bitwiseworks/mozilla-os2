@@ -3,41 +3,25 @@
 <title>Test missing manifest</title>
 
 <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+<link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 
 <script type="text/javascript">
 
 var gTestWin;
 
-netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+SimpleTest.waitForExplicitFinish();
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
+SpecialPowers.pushPermissions([{'type': 'offline-app', 'allow': true, 'context': document}], startTest);
 
-// Enable the offline-app permission before loading the new window
-var pm = Cc["@mozilla.org/permissionmanager;1"]
-        .getService(Ci.nsIPermissionManager);
-var uri = Cc["@mozilla.org/network/io-service;1"]
-         .getService(Ci.nsIIOService)
-         .newURI(window.location.href, null, null);
-var principal = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
-                  .getService(Ci.nsIScriptSecurityManager)
-                  .getNoAppCodebasePrincipal(uri);
+function startTest() {
+  // now this will properly load the manifest.
+  gTestWin = window.open("missing.html");
+}
 
-pm.addFromPrincipal(principal, "offline-app", Ci.nsIPermissionManager.ALLOW_ACTION);
-
-// now this will properly load the manifest.
-gTestWin = window.open("missing.html");
-
-function finish()
-{
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-  pm.removeFromPrincipal(principal, "offline-app");
-
+function finish() {
   gTestWin.close();
   SimpleTest.finish();
 }
-
-SimpleTest.waitForExplicitFinish();
 
 </script>
 

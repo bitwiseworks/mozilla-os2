@@ -6,7 +6,7 @@
 
 PROGRAM = 'jsapi-tests'
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'selfTest.cpp',
     'testAddPropertyPropcache.cpp',
     'testArgumentsObject.cpp',
@@ -29,41 +29,63 @@ CPP_SOURCES += [
     'testException.cpp',
     'testExternalStrings.cpp',
     'testFindSCCs.cpp',
+    'testFreshGlobalEvalRedefinition.cpp',
     'testFuncCallback.cpp',
     'testFunctionProperties.cpp',
     'testGCExactRooting.cpp',
     'testGCFinalizeCallback.cpp',
+    'testGCHeapPostBarriers.cpp',
     'testGCOutOfMemory.cpp',
-    'testGetPropertyDefault.cpp',
+    'testGCStoreBufferRemoval.cpp',
     'testHashTable.cpp',
     'testHashTableInit.cpp',
     'testIndexToString.cpp',
+    'testIntern.cpp',
     'testIntString.cpp',
     'testIntTypesABI.cpp',
-    'testIntern.cpp',
+    'testIsInsideNursery.cpp',
     'testJSEvaluateScript.cpp',
     'testLookup.cpp',
     'testLooselyEqual.cpp',
+    'testMappedArrayBuffer.cpp',
     'testNewObject.cpp',
-    'testOOM.cpp',
+    'testNullRoot.cpp',
     'testObjectEmulatingUndefined.cpp',
+    'testOOM.cpp',
     'testOps.cpp',
     'testOriginPrincipals.cpp',
     'testParseJSON.cpp',
+    'testPersistentRooted.cpp',
     'testProfileStrings.cpp',
     'testPropCache.cpp',
     'testRegExp.cpp',
     'testResolveRecursion.cpp',
+    'tests.cpp',
     'testSameValue.cpp',
     'testScriptInfo.cpp',
     'testScriptObject.cpp',
     'testSetProperty.cpp',
+    'testSetPropertyIgnoringNamedGetter.cpp',
     'testSourcePolicy.cpp',
     'testStringBuffer.cpp',
+    'testStructuredClone.cpp',
     'testToIntWidth.cpp',
     'testTrap.cpp',
     'testTypedArrays.cpp',
+    'testUncaughtError.cpp',
     'testUTF8.cpp',
     'testXDR.cpp',
-    'tests.cpp',
 ]
+
+if CONFIG['ENABLE_ION']:
+    UNIFIED_SOURCES += [
+        'testJitRValueAlloc.cpp',
+    ]
+
+DEFINES['EXPORT_JS_API'] = True
+# Building against js_static requires that we declare mfbt sybols "exported"
+# on its behalf.
+DEFINES['IMPL_MFBT'] = True
+
+LOCAL_INCLUDES += ['..']
+GENERATED_INCLUDES += ['..']

@@ -10,7 +10,6 @@
 
 #include "jsd.h"
 #include "nsCxPusher.h"
-#include "nsContentUtils.h"
 
 using mozilla::AutoSafeJSContext;
 
@@ -21,23 +20,23 @@ JSCList _jsd_context_list = JS_INIT_STATIC_CLIST(&_jsd_context_list);
 
 /* these are used to connect JSD_SetUserCallbacks() with JSD_DebuggerOn() */
 static JSD_UserCallbacks _callbacks;
-static void*             _user = NULL; 
-static JSRuntime*        _jsrt = NULL;
+static void*             _user = nullptr; 
+static JSRuntime*        _jsrt = nullptr;
 
 #ifdef JSD_HAS_DANGEROUS_THREAD
-static void* _dangerousThread = NULL;
+static void* _dangerousThread = nullptr;
 #endif
 
 #ifdef JSD_THREADSAFE
-JSDStaticLock* _jsd_global_lock = NULL;
+JSDStaticLock* _jsd_global_lock = nullptr;
 #endif
 
 #ifdef DEBUG
 void JSD_ASSERT_VALID_CONTEXT(JSDContext* jsdc)
 {
-    JS_ASSERT(jsdc->inited);
-    JS_ASSERT(jsdc->jsrt);
-    JS_ASSERT(jsdc->glob);
+    MOZ_ASSERT(jsdc->inited);
+    MOZ_ASSERT(jsdc->jsrt);
+    MOZ_ASSERT(jsdc->glob);
 }
 #endif
 
@@ -48,19 +47,21 @@ extern void
 global_finalize(JSFreeOp* fop, JSObject* obj);
 
 extern JSObject*
-CreateJSDGlobal(JSContext *cx, JSClass *clasp);
+CreateJSDGlobal(JSContext *cx, const JSClass *clasp);
 
 /***************************************************************************/
 
 
-static JSClass global_class = {
+static const JSClass global_class = {
     "JSDGlobal", JSCLASS_GLOBAL_FLAGS |
     JSCLASS_HAS_PRIVATE | JSCLASS_PRIVATE_IS_NSISUPPORTS,
     JS_PropertyStub,  JS_DeletePropertyStub,  JS_PropertyStub,  JS_StrictPropertyStub,
-    JS_EnumerateStub, JS_ResolveStub,   JS_ConvertStub,   global_finalize
+    JS_EnumerateStub, JS_ResolveStub,   JS_ConvertStub,   global_finalize,
+    nullptr, nullptr, nullptr,
+    JS_GlobalObjectTraceHook
 };
 
-static JSBool
+static bool
 _validateUserCallbacks(JSD_UserCallbacks* callbacks)
 {
     return !callbacks ||
@@ -73,15 +74,15 @@ _newJSDContext(JSRuntime*         jsrt,
                void*              user,
                JSObject*          scopeobj)
 {
-    JSDContext* jsdc = NULL;
+    JSDContext* jsdc = nullptr;
     bool ok = true;
     AutoSafeJSContext cx;
 
     if( ! jsrt )
-        return NULL;
+        return nullptr;
 
     if( ! _validateUserCallbacks(callbacks) )
-        return NULL;
+        return nullptr;
 
     jsdc = (JSDContext*) calloc(1, sizeof(JSDContext));
     if( ! jsdc )
@@ -118,22 +119,22 @@ _newJSDContext(JSRuntime*         jsrt,
     if( ! jsd_InitScriptManager(jsdc) )
         goto label_newJSDContext_failure;
 
-
-    jsdc->glob = CreateJSDGlobal(cx, &global_class);
-
-    if( ! jsdc->glob )
-        goto label_newJSDContext_failure;
-
     {
+        JS::RootedObject global(cx, CreateJSDGlobal(cx, &global_class));
+        if( ! global )
+            goto label_newJSDContext_failure;
+
+        jsdc->glob = global;
+
         JSAutoCompartment ac(cx, jsdc->glob);
-        ok = JS_AddNamedObjectRoot(cx, &jsdc->glob, "JSD context global") &&
-             JS_InitStandardClasses(cx, jsdc->glob);
+        ok = JS::AddNamedObjectRoot(cx, &jsdc->glob, "JSD context global") &&
+             JS_InitStandardClasses(cx, global);
     }
     if( ! ok )
         goto label_newJSDContext_failure;
 
-    jsdc->data = NULL;
-    jsdc->inited = JS_TRUE;
+    jsdc->data = nullptr;
+    jsdc->inited = true;
 
     JSD_LOCK();
     JS_INSERT_LINK(&jsdc->links, &_jsd_context_list);
@@ -144,12 +145,12 @@ _newJSDContext(JSRuntime*         jsrt,
 label_newJSDContext_failure:
     if( jsdc ) {
         if ( jsdc->glob )
-            JS_RemoveObjectRootRT(JS_GetRuntime(cx), &jsdc->glob);
+            JS::RemoveObjectRootRT(JS_GetRuntime(cx), &jsdc->glob);
         jsd_DestroyObjectManager(jsdc);
         jsd_DestroyAtomTable(jsdc);
         free(jsdc);
     }
-    return NULL;
+    return nullptr;
 }
 
 static void
@@ -162,12 +163,12 @@ _destroyJSDContext(JSDContext* jsdc)
     JSD_UNLOCK();
 
     if ( jsdc->glob ) {
-        JS_RemoveObjectRootRT(jsdc->jsrt, &jsdc->glob);
+        JS::RemoveObjectRootRT(jsdc->jsrt, &jsdc->glob);
     }
     jsd_DestroyObjectManager(jsdc);
     jsd_DestroyAtomTable(jsdc);
 
-    jsdc->inited = JS_FALSE;
+    jsdc->inited = false;
 
     /*
     * We should free jsdc here, but we let it leak in case there are any 
@@ -189,7 +190,7 @@ jsd_DebuggerOnForUser(JSRuntime*         jsrt,
 
     jsdc = _newJSDContext(jsrt, callbacks, user, scopeobj);
     if( ! jsdc )
-        return NULL;
+        return nullptr;
 
     /*
      * Set hooks here.  The new/destroy script hooks are on even when
@@ -201,9 +202,7 @@ jsd_DebuggerOnForUser(JSRuntime*         jsrt,
     JS_SetNewScriptHookProc(jsdc->jsrt, jsd_NewScriptHookProc, jsdc);
     JS_SetDestroyScriptHookProc(jsdc->jsrt, jsd_DestroyScriptHookProc, jsdc);
     jsd_DebuggerUnpause(jsdc);
-#ifdef LIVEWIRE
-    LWDBG_SetNewScriptHookProc(jsd_NewScriptHookProc, jsdc);
-#endif
+
     if( jsdc->userCallbacks.setContext )
         jsdc->userCallbacks.setContext(jsdc, jsdc->user);
     return jsdc;
@@ -212,21 +211,18 @@ jsd_DebuggerOnForUser(JSRuntime*         jsrt,
 JSDContext*
 jsd_DebuggerOn(void)
 {
-    JS_ASSERT(_jsrt);
-    JS_ASSERT(_validateUserCallbacks(&_callbacks));
-    return jsd_DebuggerOnForUser(_jsrt, &_callbacks, _user, NULL);
+    MOZ_ASSERT(_jsrt);
+    MOZ_ASSERT(_validateUserCallbacks(&_callbacks));
+    return jsd_DebuggerOnForUser(_jsrt, &_callbacks, _user, nullptr);
 }
 
 void
 jsd_DebuggerOff(JSDContext* jsdc)
 {
-    jsd_DebuggerPause(jsdc, JS_TRUE);
+    jsd_DebuggerPause(jsdc, true);
     /* clear hooks here */
-    JS_SetNewScriptHookProc(jsdc->jsrt, NULL, NULL);
-    JS_SetDestroyScriptHookProc(jsdc->jsrt, NULL, NULL);
-#ifdef LIVEWIRE
-    LWDBG_SetNewScriptHookProc(NULL,NULL);
-#endif
+    JS_SetNewScriptHookProc(jsdc->jsrt, nullptr, nullptr);
+    JS_SetDestroyScriptHookProc(jsdc->jsrt, nullptr, nullptr);
 
     /* clean up */
     JSD_LockScriptSubsystem(jsdc);
@@ -237,22 +233,22 @@ jsd_DebuggerOff(JSDContext* jsdc)
     _destroyJSDContext(jsdc);
 
     if( jsdc->userCallbacks.setContext )
-        jsdc->userCallbacks.setContext(NULL, jsdc->user);
+        jsdc->userCallbacks.setContext(nullptr, jsdc->user);
 }
 
 void
-jsd_DebuggerPause(JSDContext* jsdc, JSBool forceAllHooksOff)
+jsd_DebuggerPause(JSDContext* jsdc, bool forceAllHooksOff)
 {
-    JS_SetDebuggerHandler(jsdc->jsrt, NULL, NULL);
+    JS_SetDebuggerHandler(jsdc->jsrt, nullptr, nullptr);
     if (forceAllHooksOff || !(jsdc->flags & JSD_COLLECT_PROFILE_DATA)) {
-        JS_SetExecuteHook(jsdc->jsrt, NULL, NULL);
-        JS_SetCallHook(jsdc->jsrt, NULL, NULL);
+        JS_SetExecuteHook(jsdc->jsrt, nullptr, nullptr);
+        JS_SetCallHook(jsdc->jsrt, nullptr, nullptr);
     }
-    JS_SetThrowHook(jsdc->jsrt, NULL, NULL);
-    JS_SetDebugErrorHook(jsdc->jsrt, NULL, NULL);
+    JS_SetThrowHook(jsdc->jsrt, nullptr, nullptr);
+    JS_SetDebugErrorHook(jsdc->jsrt, nullptr, nullptr);
 }
 
-static JSBool
+static bool
 jsd_DebugErrorHook(JSContext *cx, const char *message,
                    JSErrorReport *report, void *closure);
 
@@ -315,7 +311,7 @@ JSDContext*
 jsd_JSDContextForJSContext(JSContext* context)
 {
     JSDContext* iter;
-    JSDContext* jsdc = NULL;
+    JSDContext* jsdc = nullptr;
     JSRuntime*  runtime = JS_GetRuntime(context);
 
     JSD_LOCK();
@@ -333,7 +329,7 @@ jsd_JSDContextForJSContext(JSContext* context)
     return jsdc;
 }    
 
-static JSBool
+static bool
 jsd_DebugErrorHook(JSContext *cx, const char *message,
                    JSErrorReport *report, void *closure)
 {
@@ -343,11 +339,11 @@ jsd_DebugErrorHook(JSContext *cx, const char *message,
     
     if( ! jsdc )
     {
-        JS_ASSERT(0);
-        return JS_TRUE;
+        MOZ_ASSERT(0);
+        return true;
     }
     if( JSD_IS_DANGEROUS_THREAD(jsdc) )
-        return JS_TRUE;
+        return true;
 
     /* local in case hook gets cleared on another thread */
     JSD_LOCK();
@@ -356,17 +352,17 @@ jsd_DebugErrorHook(JSContext *cx, const char *message,
     JSD_UNLOCK();
 
     if(!errorReporter)
-        return JS_TRUE;
+        return true;
 
     switch(errorReporter(jsdc, cx, message, report, errorReporterData))
     {
         case JSD_ERROR_REPORTER_PASS_ALONG:
-            return JS_TRUE;
+            return true;
         case JSD_ERROR_REPORTER_RETURN:
-            return JS_FALSE;
+            return false;
         case JSD_ERROR_REPORTER_DEBUG:
         {
-            jsval rval;
+            JS::RootedValue rval(cx);
             JSD_ExecutionHookProc   hook;
             void*                   hookData;
 
@@ -377,22 +373,22 @@ jsd_DebugErrorHook(JSContext *cx, const char *message,
             JSD_UNLOCK();
 
             jsd_CallExecutionHook(jsdc, cx, JSD_HOOK_DEBUG_REQUESTED,
-                                  hook, hookData, &rval);
+                                  hook, hookData, rval.address());
             /* XXX Should make this dependent on ExecutionHook retval */
-            return JS_TRUE;
+            return true;
         }
         case JSD_ERROR_REPORTER_CLEAR_RETURN:
             if(report && JSREPORT_IS_EXCEPTION(report->flags))
                 JS_ClearPendingException(cx);
-            return JS_FALSE;
+            return false;
         default:
-            JS_ASSERT(0);
+            MOZ_ASSERT(0);
             break;
     }
-    return JS_TRUE;
+    return true;
 }
 
-JSBool
+bool
 jsd_SetErrorReporter(JSDContext*       jsdc, 
                      JSD_ErrorReporter reporter, 
                      void*             callerdata)
@@ -401,10 +397,10 @@ jsd_SetErrorReporter(JSDContext*       jsdc,
     jsdc->errorReporter = reporter;
     jsdc->errorReporterData = callerdata;
     JSD_UNLOCK();
-    return JS_TRUE;
+    return true;
 }
 
-JSBool
+bool
 jsd_GetErrorReporter(JSDContext*        jsdc, 
                      JSD_ErrorReporter* reporter, 
                      void**             callerdata)
@@ -415,5 +411,5 @@ jsd_GetErrorReporter(JSDContext*        jsdc,
     if( callerdata )
         *callerdata = jsdc->errorReporterData;
     JSD_UNLOCK();
-    return JS_TRUE;
+    return true;
 }

@@ -6,29 +6,33 @@
 #ifndef GFX_BASICLAYERS_H
 #define GFX_BASICLAYERS_H
 
-#include "Layers.h"
+#include <stdint.h>                     // for INT32_MAX, int32_t
+#include "Layers.h"                     // for Layer (ptr only), etc
+#include "gfxTypes.h"
+#include "gfxCachedTempSurface.h"       // for gfxCachedTempSurface
+#include "gfxContext.h"                 // for gfxContext
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/WidgetUtils.h"        // for ScreenRotation
+#include "mozilla/layers/LayersTypes.h"  // for BufferMode, LayersBackend, etc
+#include "nsAString.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsISupportsImpl.h"            // for gfxContext::AddRef, etc
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nscore.h"                     // for nsAString, etc
 
-#include "gfxContext.h"
-#include "gfxCachedTempSurface.h"
-#include "mozilla/layers/ShadowLayers.h"
-#include "mozilla/WidgetUtils.h"
-#include "nsAutoRef.h"
-#include "nsThreadUtils.h"
-
+class gfxPattern;
 class nsIWidget;
 
 namespace mozilla {
 namespace layers {
 
 class BasicShadowableLayer;
-class ThebesLayerComposite;
-class ContainerLayerComposite;
-class ImageLayerComposite;
-class CanvasLayerComposite;
-class ColorLayerComposite;
-class ReadbackProcessor;
 class ImageFactory;
+class ImageLayer;
 class PaintLayerContext;
+class ReadbackLayer;
+class ReadbackProcessor;
 
 /**
  * This is a cairo/Thebes-only, main-thread-only implementation of layers.
@@ -93,7 +97,7 @@ public:
   virtual void EndTransaction(DrawThebesLayerCallback aCallback,
                               void* aCallbackData,
                               EndTransactionFlags aFlags = END_DEFAULT);
-  virtual bool AreComponentAlphaLayersEnabled() { return HasShadowManager() || !IsWidgetLayerManager(); }
+  virtual bool AreComponentAlphaLayersEnabled() { return !IsWidgetLayerManager(); }
 
   void AbortTransaction();
 
@@ -107,11 +111,11 @@ public:
   virtual already_AddRefed<ReadbackLayer> CreateReadbackLayer();
   virtual ImageFactory *GetImageFactory();
 
-  virtual LayersBackend GetBackendType() { return LAYERS_BASIC; }
+  virtual LayersBackend GetBackendType() { return LayersBackend::LAYERS_BASIC; }
   virtual void GetBackendName(nsAString& name) { name.AssignLiteral("Basic"); }
 
-#ifdef DEBUG
   bool InConstruction() { return mPhase == PHASE_CONSTRUCTION; }
+#ifdef DEBUG
   bool InDrawing() { return mPhase == PHASE_DRAWING; }
   bool InForward() { return mPhase == PHASE_FORWARD; }
 #endif
@@ -121,9 +125,7 @@ public:
   void SetTarget(gfxContext* aTarget) { mUsingDefaultTarget = false; mTarget = aTarget; }
   bool IsRetained() { return mWidget != nullptr; }
 
-#ifdef MOZ_LAYERS_HAVE_LOG
   virtual const char* Name() const { return "Basic"; }
-#endif // MOZ_LAYERS_HAVE_LOG
 
   // Clear the cached contents of this layer tree.
   virtual void ClearCachedResources(Layer* aSubtree = nullptr) MOZ_OVERRIDE;
@@ -135,13 +137,12 @@ public:
                                                  const nsIntRegion& aRegion,
                                                  bool* aNeedsClipToVisibleRegion);
   already_AddRefed<gfxContext> PushGroupWithCachedSurface(gfxContext *aTarget,
-                                                          gfxASurface::gfxContentType aContent);
+                                                          gfxContentType aContent);
   void PopGroupToSourceWithCachedSurface(gfxContext *aTarget, gfxContext *aPushed);
 
   virtual bool IsCompositingCheap() { return false; }
   virtual int32_t GetMaxTextureSize() const { return INT32_MAX; }
   bool CompositorMightResample() { return mCompositorMightResample; }
-  bool HasShadowTarget() { return !!mShadowTarget; }
 
 protected:
   enum TransactionPhase {
@@ -174,6 +175,8 @@ protected:
 
   void FlashWidgetUpdateArea(gfxContext* aContext);
 
+  void RenderDebugOverlay();
+
   // Widget whose surface should be used as the basis for ThebesLayer
   // buffers.
   nsIWidget* mWidget;
@@ -181,16 +184,6 @@ protected:
   nsRefPtr<gfxContext> mDefaultTarget;
   // The context to draw into.
   nsRefPtr<gfxContext> mTarget;
-  // When we're doing a transaction in order to draw to a non-default
-  // target, the layers transaction is only performed in order to send
-  // a PLayerTransaction:Update.  We save the original non-default target to
-  // mShadowTarget, and then perform the transaction using
-  // mDummyTarget as the render target.  After the transaction ends,
-  // we send a message to our remote side to capture the actual pixels
-  // being drawn to the default target, and then copy those pixels
-  // back to mShadowTarget.
-  nsRefPtr<gfxContext> mShadowTarget;
-  nsRefPtr<gfxContext> mDummyTarget;
   // Image factory we use.
   nsRefPtr<ImageFactory> mFactory;
 
@@ -203,13 +196,6 @@ protected:
   bool mTransactionIncomplete;
   bool mCompositorMightResample;
 };
-
-void
-PaintContext(gfxPattern* aPattern,
-             const nsIntRegion& aVisible,
-             float aOpacity,
-             gfxContext* aContext,
-             Layer* aMaskLayer);
 
 }
 }

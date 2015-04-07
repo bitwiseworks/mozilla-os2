@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "mozilla/Atomics.h"
 #include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -29,6 +30,9 @@
 #endif
 #ifdef ANDROID
 #include "base/message_pump_android.h"
+#endif
+#ifdef MOZ_TASK_TRACER
+#include "GeckoTaskTracer.h"
 #endif
 
 #include "MessagePump.h"
@@ -86,11 +90,11 @@ MessageLoop* MessageLoop::current() {
   return lazy_tls_ptr.Pointer()->Get();
 }
 
-int32_t message_loop_id_seq = 0;
+static mozilla::Atomic<int32_t> message_loop_id_seq(0);
 
 MessageLoop::MessageLoop(Type type)
     : type_(type),
-      id_(PR_ATOMIC_INCREMENT(&message_loop_id_seq)),
+      id_(++message_loop_id_seq),
       nestable_tasks_allowed_(true),
       exception_restoration_(false),
       state_(NULL),
@@ -98,6 +102,8 @@ MessageLoop::MessageLoop(Type type)
 #ifdef OS_WIN
       os_modal_loop_(false),
 #endif  // OS_WIN
+      transient_hang_timeout_(0),
+      permanent_hang_timeout_(0),
       next_sequence_num_(0) {
   DCHECK(!current()) << "should only have one message loop per thread";
   lazy_tls_ptr.Pointer()->Set(this);
@@ -113,6 +119,10 @@ MessageLoop::MessageLoop(Type type)
     // to set run_depth_base_ to 2 or we'll never be able to process
     // Idle tasks.
     run_depth_base_ = 2;
+    return;
+  }
+  if (type_ == TYPE_MOZILLA_NONMAINTHREAD) {
+    pump_ = new mozilla::ipc::MessagePumpForNonMainThreads();
     return;
   }
 
@@ -270,6 +280,11 @@ void MessageLoop::PostNonNestableDelayedTask(
 void MessageLoop::PostIdleTask(
     const tracked_objects::Location& from_here, Task* task) {
   DCHECK(current() == this);
+
+#ifdef MOZ_TASK_TRACER
+  task = mozilla::tasktracer::CreateTracedTask(task);
+#endif
+
   task->SetBirthPlace(from_here);
   PendingTask pending_task(task, false);
   deferred_non_nestable_work_queue_.push(pending_task);
@@ -279,6 +294,11 @@ void MessageLoop::PostIdleTask(
 void MessageLoop::PostTask_Helper(
     const tracked_objects::Location& from_here, Task* task, int delay_ms,
     bool nestable) {
+
+#ifdef MOZ_TASK_TRACER
+  task = mozilla::tasktracer::CreateTracedTask(task);
+#endif
+
   task->SetBirthPlace(from_here);
 
   PendingTask pending_task(task, nestable);
@@ -383,34 +403,12 @@ void MessageLoop::ReloadWorkQueue() {
 }
 
 bool MessageLoop::DeletePendingTasks() {
-  bool did_work = !work_queue_.empty();
-  while (!work_queue_.empty()) {
-    PendingTask pending_task = work_queue_.front();
-    work_queue_.pop();
-    if (!pending_task.delayed_run_time.is_null()) {
-      // We want to delete delayed tasks in the same order in which they would
-      // normally be deleted in case of any funny dependencies between delayed
-      // tasks.
-      AddToDelayedWorkQueue(pending_task);
-    } else {
-      // TODO(darin): Delete all tasks once it is safe to do so.
-      // Until it is totally safe, just do it when running purify.
-#ifdef PURIFY
-      delete pending_task.task;
-#endif  // PURIFY
-    }
-  }
-  did_work |= !deferred_non_nestable_work_queue_.empty();
+  MOZ_ASSERT(work_queue_.empty());
+  bool did_work = !deferred_non_nestable_work_queue_.empty();
   while (!deferred_non_nestable_work_queue_.empty()) {
-    // TODO(darin): Delete all tasks once it is safe to do so.
-    // Until it is totaly safe, just delete them to keep purify happy.
-#ifdef PURIFY
     Task* task = deferred_non_nestable_work_queue_.front().task;
-#endif
     deferred_non_nestable_work_queue_.pop();
-#ifdef PURIFY
     delete task;
-#endif
   }
   did_work |= !delayed_work_queue_.empty();
   while (!delayed_work_queue_.empty()) {

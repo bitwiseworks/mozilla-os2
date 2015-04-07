@@ -8,6 +8,9 @@ const Cr = Components.results;
 
 Cu.import("resource://testing-common/httpd.js");
 
+// XXX until bug 937114 is fixed
+Cu.importGlobalProperties(["atob"]);
+
 // The following boilerplate makes sure that XPCom calls
 // that use the profile directory work.
 
@@ -34,45 +37,18 @@ XPCOMUtils.defineLazyServiceGetter(this,
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
 
+const TEST_MESSAGE_MANAGER = "Mr McFeeley";
 const TEST_URL = "https://myfavoritebacon.com";
 const TEST_URL2 = "https://myfavoritebaconinacan.com";
 const TEST_USER = "user@mozilla.com";
 const TEST_PRIVKEY = "fake-privkey";
 const TEST_CERT = "fake-cert";
+const TEST_ASSERTION = "fake-assertion";
 const TEST_IDPPARAMS = {
   domain: "myfavoriteflan.com",
   authentication: "/foo/authenticate.html",
   provisioning: "/foo/provision.html"
 };
-
-let XULAppInfo = {
-  vendor: "Mozilla",
-  name: "XPCShell",
-  ID: "xpcshell@tests.mozilla.org",
-  version: "1",
-  appBuildID: "20100621",
-  platformVersion: "",
-  platformBuildID: "20100621",
-  inSafeMode: false,
-  logConsoleErrors: true,
-  OS: "XPCShell",
-  XPCOMABI: "noarch-spidermonkey",
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIXULAppInfo, Ci.nsIXULRuntime]),
-  invalidateCachesOnRestart: function invalidateCachesOnRestart() { }
-};
-
-let XULAppInfoFactory = {
-  createInstance: function (outer, iid) {
-    if (outer != null)
-      throw Cr.NS_ERROR_NO_AGGREGATION;
-    return XULAppInfo.QueryInterface(iid);
-  }
-};
-
-let registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
-registrar.registerFactory(Components.ID("{fbfae60b-64a4-44ef-a911-08ceb70b9f31}"),
-                          "XULAppInfo", "@mozilla.org/xre/app-info;1",
-                          XULAppInfoFactory);
 
 // The following are utility functions for Identity testing
 
@@ -95,6 +71,29 @@ function uuid() {
   return uuidGenerator.generateUUID().toString();
 }
 
+function base64UrlDecode(s) {
+  s = s.replace(/-/g, "+");
+  s = s.replace(/_/g, "/");
+
+  // Replace padding if it was stripped by the sender.
+  // See http://tools.ietf.org/html/rfc4648#section-4
+  switch (s.length % 4) {
+    case 0:
+      break; // No pad chars in this case
+    case 2:
+      s += "==";
+      break; // Two pad chars
+    case 3:
+      s += "=";
+      break; // One pad char
+    default:
+      throw new InputException("Illegal base64url string!");
+  }
+
+  // With correct padding restored, apply the standard base64 decoder
+  return atob(s);
+}
+
 // create a mock "doc" object, which the Identity Service
 // uses as a pointer back into the doc object
 function mock_doc(aIdentity, aOrigin, aDoFunc) {
@@ -102,13 +101,37 @@ function mock_doc(aIdentity, aOrigin, aDoFunc) {
   mockedDoc.id = uuid();
   mockedDoc.loggedInUser = aIdentity;
   mockedDoc.origin = aOrigin;
-  mockedDoc['do'] = aDoFunc;
-  mockedDoc.doReady = partial(aDoFunc, 'ready');
-  mockedDoc.doLogin = partial(aDoFunc, 'login');
-  mockedDoc.doLogout = partial(aDoFunc, 'logout');
-  mockedDoc.doError = partial(aDoFunc, 'error');
-  mockedDoc.doCancel = partial(aDoFunc, 'cancel');
-  mockedDoc.doCoffee = partial(aDoFunc, 'coffee');
+  mockedDoc["do"] = aDoFunc;
+  mockedDoc._mm = TEST_MESSAGE_MANAGER;
+  mockedDoc.doReady = partial(aDoFunc, "ready");
+  mockedDoc.doLogin = partial(aDoFunc, "login");
+  mockedDoc.doLogout = partial(aDoFunc, "logout");
+  mockedDoc.doError = partial(aDoFunc, "error");
+  mockedDoc.doCancel = partial(aDoFunc, "cancel");
+  mockedDoc.doCoffee = partial(aDoFunc, "coffee");
+  mockedDoc.childProcessShutdown = partial(aDoFunc, "child-process-shutdown");
+
+  mockedDoc.RP = mockedDoc;
+
+  return mockedDoc;
+}
+
+function mock_fxa_rp(aIdentity, aOrigin, aDoFunc) {
+  let mockedDoc = {};
+  mockedDoc.id = uuid();
+  mockedDoc.emailHint = aIdentity;
+  mockedDoc.origin = aOrigin;
+  mockedDoc.wantIssuer = "firefox-accounts";
+  mockedDoc._mm = TEST_MESSAGE_MANAGER;
+
+  mockedDoc.doReady = partial(aDoFunc, "ready");
+  mockedDoc.doLogin = partial(aDoFunc, "login");
+  mockedDoc.doLogout = partial(aDoFunc, "logout");
+  mockedDoc.doError = partial(aDoFunc, "error");
+  mockedDoc.doCancel = partial(aDoFunc, "cancel");
+  mockedDoc.childProcessShutdown = partial(aDoFunc, "child-process-shutdown");
+
+  mockedDoc.RP = mockedDoc;
 
   return mockedDoc;
 }
@@ -190,8 +213,8 @@ function setup_provisioning(identity, afterSetupCallback, doneProvisioningCallba
         doneProvisioningCallback(err);
     },
     sandbox: {
-	// Emulate the free() method on the iframe sandbox
-	free: function() {}
+      // Emulate the free() method on the iframe sandbox
+      free: function() {}
     }
   };
 
@@ -210,4 +233,24 @@ function setup_provisioning(identity, afterSetupCallback, doneProvisioningCallba
 }
 
 // Switch debug messages on by default
+let initialPrefDebugValue = false;
+try {
+  initialPrefDebugValue = Services.prefs.getBoolPref("toolkit.identity.debug");
+} catch(noPref) {}
 Services.prefs.setBoolPref("toolkit.identity.debug", true);
+
+// Switch on firefox accounts
+let initialPrefFXAValue = false;
+try {
+  initialPrefFXAValue = Services.prefs.getBoolPref("identity.fxaccounts.enabled");
+} catch(noPref) {}
+Services.prefs.setBoolPref("identity.fxaccounts.enabled", true);
+
+// after execution, restore prefs
+do_register_cleanup(function() {
+  log("restoring prefs to their initial values");
+  Services.prefs.setBoolPref("toolkit.identity.debug", initialPrefDebugValue);
+  Services.prefs.setBoolPref("identity.fxaccounts.enabled", initialPrefFXAValue);
+});
+
+

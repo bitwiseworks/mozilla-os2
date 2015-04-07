@@ -4,10 +4,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "D3D9SurfaceImage.h"
-#include "gfxImageSurface.h"
+#include "gfx2DGlue.h"
+#include "mozilla/layers/TextureD3D9.h"
+#include "mozilla/gfx/Types.h"
 
 namespace mozilla {
 namespace layers {
+
+
+D3D9SurfaceImage::D3D9SurfaceImage()
+  : Image(nullptr, ImageFormat::D3D9_RGB32_TEXTURE)
+  , mSize(0, 0)
+{}
+
+D3D9SurfaceImage::~D3D9SurfaceImage() {}
 
 HRESULT
 D3D9SurfaceImage::SetData(const Data& aData)
@@ -39,7 +49,7 @@ D3D9SurfaceImage::SetData(const Data& aData)
   // device.
   const nsIntRect& region = aData.mRegion;
   RefPtr<IDirect3DTexture9> texture;
-  HANDLE shareHandle = NULL;
+  HANDLE shareHandle = nullptr;
   hr = device->CreateTexture(region.width,
                              region.height,
                              1,
@@ -59,7 +69,7 @@ D3D9SurfaceImage::SetData(const Data& aData)
   textureSurface->GetDesc(&mDesc);
 
   RECT src = { region.x, region.y, region.x+region.width, region.y+region.height };
-  hr = device->StretchRect(surface, &src, textureSurface, NULL, D3DTEXF_NONE);
+  hr = device->StretchRect(surface, &src, textureSurface, nullptr, D3DTEXF_NONE);
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
   // Flush the draw command now, so that by the time we come to draw this
@@ -73,7 +83,7 @@ D3D9SurfaceImage::SetData(const Data& aData)
 
   mTexture = texture;
   mShareHandle = shareHandle;
-  mSize = gfxIntSize(region.width, region.height);
+  mSize = gfx::IntSize(region.width, region.height);
   mQuery = query;
 
   return S_OK;
@@ -87,7 +97,7 @@ D3D9SurfaceImage::EnsureSynchronized()
     return;
   }
   int iterations = 0;
-  while (iterations < 10 && S_FALSE == mQuery->GetData(NULL, 0, D3DGETDATA_FLUSH)) {
+  while (iterations < 10 && S_FALSE == mQuery->GetData(nullptr, 0, D3DGETDATA_FLUSH)) {
     Sleep(1);
     iterations++;
   }
@@ -109,23 +119,35 @@ D3D9SurfaceImage::GetDesc() const
   return mDesc;
 }
 
-gfxIntSize
+gfx::IntSize
 D3D9SurfaceImage::GetSize()
 {
   return mSize;
 }
 
-already_AddRefed<gfxASurface>
-D3D9SurfaceImage::GetAsSurface()
+TextureClient*
+D3D9SurfaceImage::GetTextureClient(CompositableClient* aClient)
+{
+  EnsureSynchronized();
+  if (!mTextureClient) {
+    RefPtr<SharedTextureClientD3D9> textureClient =
+      new SharedTextureClientD3D9(gfx::SurfaceFormat::B8G8R8X8, TEXTURE_FLAGS_DEFAULT);
+    textureClient->InitWith(mTexture, mShareHandle, mDesc);
+    mTextureClient = textureClient;
+  }
+  return mTextureClient;
+}
+
+TemporaryRef<gfx::SourceSurface>
+D3D9SurfaceImage::GetAsSourceSurface()
 {
   NS_ENSURE_TRUE(mTexture, nullptr);
 
   HRESULT hr;
-  nsRefPtr<gfxImageSurface> surface =
-    new gfxImageSurface(mSize, gfxASurface::ImageFormatRGB24);
+  RefPtr<gfx::DataSourceSurface> surface = gfx::Factory::CreateDataSourceSurface(mSize, gfx::SurfaceFormat::B8G8R8X8);
 
-  if (!surface->CairoSurface() || surface->CairoStatus()) {
-    NS_WARNING("Failed to created Cairo image surface for D3D9SurfaceImage.");
+  if (!surface) {
+    NS_WARNING("Failed to created SourceSurface for D3D9SurfaceImage.");
     return nullptr;
   }
 
@@ -155,20 +177,27 @@ D3D9SurfaceImage::GetAsSurface()
   NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
 
   D3DLOCKED_RECT rect;
-  hr = systemMemorySurface->LockRect(&rect, NULL, 0);
+  hr = systemMemorySurface->LockRect(&rect, nullptr, 0);
   NS_ENSURE_TRUE(SUCCEEDED(hr), nullptr);
+
+  gfx::DataSourceSurface::MappedSurface mappedSurface;
+  if (!surface->Map(gfx::DataSourceSurface::WRITE, &mappedSurface)) {
+    systemMemorySurface->UnlockRect();
+    return nullptr;
+  }
 
   const unsigned char* src = (const unsigned char*)(rect.pBits);
   const unsigned srcPitch = rect.Pitch;
   for (int y = 0; y < mSize.height; y++) {
-    memcpy(surface->Data() + surface->Stride() * y,
+    memcpy(mappedSurface.mData + mappedSurface.mStride * y,
            (unsigned char*)(src) + srcPitch * y,
            mSize.width * 4);
   }
 
   systemMemorySurface->UnlockRect();
+  surface->Unmap();
 
-  return surface.forget();
+  return surface;
 }
 
 } /* layers */

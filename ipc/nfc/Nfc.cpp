@@ -4,24 +4,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <fcntl.h>
-#include <limits.h>
-#include <errno.h>
+/* Copyright © 2013, Deutsche Telekom, Inc. */
 
+#include "mozilla/ipc/Nfc.h"
+
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
-#undef LOG
-#if defined(MOZ_WIDGET_GONK)
+#undef CHROMIUM_LOG
+#if (defined(MOZ_WIDGET_GONK) && defined(DEBUG))
 #include <android/log.h>
-#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk", args)
+#define CHROMIUM_LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk", args)
 #else
-#define LOG(args...)  printf(args);
+#define CHROMIUM_LOG(args...)
 #endif
 
 #include "jsfriendapi.h"
+#include "mozilla/ArrayUtils.h"
 #include "nsThreadUtils.h" // For NS_IsMainThread.
-#include "Nfc.h"
 
 USING_WORKERS_NAMESPACE
 using namespace mozilla::ipc;
@@ -32,42 +33,150 @@ const char* NFC_SOCKET_NAME = "/dev/socket/nfcd";
 
 // Network port to connect to for adb forwarded sockets when doing
 // desktop development.
-const uint32_t NFCD_TEST_PORT = 6400;
+const uint32_t NFC_TEST_PORT = 6400;
 
-class DispatchNfcEvent : public WorkerTask
+nsRefPtr<mozilla::ipc::NfcConsumer> sNfcConsumer;
+
+class ConnectWorkerToNFC : public WorkerTask
 {
 public:
-    DispatchNfcEvent(UnixSocketRawData* aMessage)
-      : mMessage(aMessage)
+    ConnectWorkerToNFC()
     { }
 
-    virtual bool RunTask(JSContext *aCx);
+    virtual bool RunTask(JSContext* aCx);
+};
+
+class SendNfcSocketDataTask : public nsRunnable
+{
+public:
+    SendNfcSocketDataTask(UnixSocketRawData* aRawData)
+        : mRawData(aRawData)
+    { }
+
+    NS_IMETHOD Run()
+    {
+        MOZ_ASSERT(NS_IsMainThread());
+
+        if (!sNfcConsumer ||
+            sNfcConsumer->GetConnectionStatus() != SOCKET_CONNECTED) {
+            // Probably shuting down.
+            delete mRawData;
+            return NS_OK;
+        }
+
+        sNfcConsumer->SendSocketData(mRawData);
+        return NS_OK;
+    }
+
+private:
+    UnixSocketRawData* mRawData;
+};
+
+bool
+PostToNFC(JSContext* aCx,
+          unsigned aArgc,
+          JS::Value* aVp)
+{
+    JS::CallArgs args = JS::CallArgsFromVp(aArgc, aVp);
+    NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
+
+    if (args.length() != 1) {
+        JS_ReportError(aCx, "Expecting one argument with the NFC message");
+        return false;
+    }
+
+    JS::Value v = args[0];
+
+    JSAutoByteString abs;
+    void* data;
+    size_t size;
+    if (JSVAL_IS_STRING(v)) {
+        JS::Rooted<JSString*> str(aCx, v.toString());
+        if (!abs.encodeUtf8(aCx, str)) {
+            return false;
+        }
+
+        data = abs.ptr();
+        size = abs.length();
+    } else if (!JSVAL_IS_PRIMITIVE(v)) {
+        JSObject* obj = JSVAL_TO_OBJECT(v);
+        if (!JS_IsTypedArrayObject(obj)) {
+            JS_ReportError(aCx, "Object passed in wasn't a typed array");
+            return false;
+        }
+
+        uint32_t type = JS_GetArrayBufferViewType(obj);
+        if (type != js::ArrayBufferView::TYPE_INT8 &&
+            type != js::ArrayBufferView::TYPE_UINT8 &&
+            type != js::ArrayBufferView::TYPE_UINT8_CLAMPED) {
+            JS_ReportError(aCx, "Typed array data is not octets");
+            return false;
+        }
+
+        size = JS_GetTypedArrayByteLength(obj);
+        data = JS_GetArrayBufferViewData(obj);
+    } else {
+        JS_ReportError(aCx,
+                       "Incorrect argument. Expecting a string or a typed array");
+        return false;
+    }
+
+    UnixSocketRawData* raw = new UnixSocketRawData(data, size);
+
+    nsRefPtr<SendNfcSocketDataTask> task =
+        new SendNfcSocketDataTask(raw);
+    NS_DispatchToMainThread(task);
+    return true;
+}
+
+bool
+ConnectWorkerToNFC::RunTask(JSContext* aCx)
+{
+    // Set up the postNFCMessage on the function for worker -> NFC thread
+    // communication.
+    NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
+    NS_ASSERTION(!JS_IsRunning(aCx), "Are we being called somehow?");
+    JS::Rooted<JSObject*> workerGlobal(aCx, JS::CurrentGlobalOrNull(aCx));
+
+    return !!JS_DefineFunction(aCx, workerGlobal,
+                               "postNfcMessage", PostToNFC, 1, 0);
+}
+
+class DispatchNFCEvent : public WorkerTask
+{
+public:
+    DispatchNFCEvent(UnixSocketRawData* aMessage)
+        : mMessage(aMessage)
+    { }
+
+    virtual bool RunTask(JSContext* aCx);
 
 private:
     nsAutoPtr<UnixSocketRawData> mMessage;
 };
 
 bool
-DispatchNfcEvent::RunTask(JSContext *aCx)
+DispatchNFCEvent::RunTask(JSContext* aCx)
 {
-    MOZ_ASSERT(NS_IsMainThread(), "DispatchNfcEvent on main thread");
-    MOZ_ASSERT(aCx);
+    JS::Rooted<JSObject*> obj(aCx, JS::CurrentGlobalOrNull(aCx));
 
-    JSObject *obj = JS_GetGlobalForScopeChain(aCx);
-    JSObject *array = JS_NewUint8Array(aCx, mMessage->mSize);
+    JSObject* array = JS_NewUint8Array(aCx, mMessage->mSize);
     if (!array) {
         return false;
     }
+    JS::Rooted<JS::Value> arrayVal(aCx, JS::ObjectValue(*array));
+
     memcpy(JS_GetArrayBufferViewData(array), mMessage->mData, mMessage->mSize);
-    jsval argv[] = { OBJECT_TO_JSVAL(array) };
-    return JS_CallFunctionName(aCx, obj, "onNfcMessage", NS_ARRAY_LENGTH(argv),
-                               argv, argv);
+    JS::Rooted<JS::Value> rval(aCx);
+    return JS_CallFunctionName(aCx, obj, "onNfcMessage", arrayVal, &rval);
 }
 
 class NfcConnector : public mozilla::ipc::UnixSocketConnector
 {
 public:
-    NfcConnector() {}
+    NfcConnector()
+    {}
+
     virtual ~NfcConnector()
     {}
 
@@ -77,6 +186,7 @@ public:
                             sockaddr_any& aAddr,
                             const char* aAddress);
     virtual bool SetUp(int aFd);
+    virtual bool SetUpListenSocket(int aFd);
     virtual void GetSocketAddr(const sockaddr_any& aAddr,
                                nsAString& aAddrStr);
 };
@@ -96,7 +206,7 @@ NfcConnector::Create()
 #endif
 
     if (fd < 0) {
-        NS_WARNING("Could not open Nfc socket!");
+        NS_WARNING("Could not open nfc socket!");
         return -1;
     }
 
@@ -132,8 +242,8 @@ NfcConnector::CreateAddr(bool aIsServer,
         break;
     case AF_INET:
         aAddr.in.sin_family = af;
-        aAddr.in.sin_port = htons(NFCD_TEST_PORT);
-        aAddr.in.sin_addr.s_addr = htons(INADDR_LOOPBACK);
+        aAddr.in.sin_port = htons(NFC_TEST_PORT);
+        aAddr.in.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         aAddrSize = sizeof(sockaddr_in);
         break;
     default:
@@ -141,7 +251,6 @@ NfcConnector::CreateAddr(bool aIsServer,
         return false;
     }
     return true;
-
 }
 
 bool
@@ -151,15 +260,21 @@ NfcConnector::SetUp(int aFd)
     return true;
 }
 
+bool
+NfcConnector::SetUpListenSocket(int aFd)
+{
+    // Nothing to do here.
+    return true;
+}
+
 void
 NfcConnector::GetSocketAddr(const sockaddr_any& aAddr,
                             nsAString& aAddrStr)
 {
-    MOZ_NOT_REACHED("This should never be called!");
+    MOZ_CRASH("This should never be called!");
 }
 
 } // anonymous namespace
-
 
 namespace mozilla {
 namespace ipc {
@@ -168,24 +283,48 @@ NfcConsumer::NfcConsumer(WorkerCrossThreadDispatcher* aDispatcher)
     : mDispatcher(aDispatcher)
     , mShutdown(false)
 {
-    ConnectSocket(new NfcConnector(), NFC_SOCKET_NAME);
+    mAddress = NFC_SOCKET_NAME;
+
+    ConnectSocket(new NfcConnector(), mAddress.get());
+}
+
+nsresult
+NfcConsumer::Register(WorkerCrossThreadDispatcher* aDispatcher)
+{
+    MOZ_ASSERT(NS_IsMainThread());
+
+    if (sNfcConsumer) {
+        return NS_ERROR_FAILURE;
+    }
+
+    nsRefPtr<ConnectWorkerToNFC> connection = new ConnectWorkerToNFC();
+    if (!aDispatcher->PostTask(connection)) {
+        return NS_ERROR_UNEXPECTED;
+    }
+
+    // Now that we're set up, connect ourselves to the NFC thread.
+    sNfcConsumer = new NfcConsumer(aDispatcher);
+    return NS_OK;
 }
 
 void
 NfcConsumer::Shutdown()
 {
-    mShutdown = true;
-    CloseSocket();
+    MOZ_ASSERT(NS_IsMainThread());
+
+    if (sNfcConsumer) {
+        sNfcConsumer->mShutdown = true;
+        sNfcConsumer->CloseSocket();
+        sNfcConsumer = nullptr;
+    }
 }
 
 void
 NfcConsumer::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage)
 {
     MOZ_ASSERT(NS_IsMainThread());
-#ifdef DEBUG
-    LOG("ReceiveSocketData\n");
-#endif
-    nsRefPtr<DispatchNfcEvent> dre(new DispatchNfcEvent(aMessage.forget()));
+
+    nsRefPtr<DispatchNFCEvent> dre(new DispatchNFCEvent(aMessage.forget()));
     mDispatcher->PostTask(dre);
 }
 
@@ -193,26 +332,23 @@ void
 NfcConsumer::OnConnectSuccess()
 {
     // Nothing to do here.
-    LOG("Socket open for Nfc\n");
+    CHROMIUM_LOG("NFC: %s\n", __FUNCTION__);
 }
 
 void
 NfcConsumer::OnConnectError()
 {
-#ifdef DEBUG
-    LOG("%s\n", __FUNCTION__);
-#endif
+    CHROMIUM_LOG("NFC: %s\n", __FUNCTION__);
     CloseSocket();
 }
 
 void
 NfcConsumer::OnDisconnect()
 {
-#ifdef DEBUG
-    LOG("%s\n", __FUNCTION__);
-#endif
+    CHROMIUM_LOG("NFC: %s\n", __FUNCTION__);
     if (!mShutdown) {
-        ConnectSocket(new NfcConnector(), NFC_SOCKET_NAME, 1000);
+        ConnectSocket(new NfcConnector(), mAddress.get(),
+                      GetSuggestedConnectDelayMs());
     }
 }
 

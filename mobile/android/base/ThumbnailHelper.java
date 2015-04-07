@@ -9,9 +9,11 @@ import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.gfx.IntSize;
 import org.mozilla.gecko.mozglue.DirectBufferAllocator;
+import org.mozilla.gecko.mozglue.generatorannotations.WrapElementForJNI;
 
 import android.graphics.Bitmap;
 import android.util.Log;
+import android.content.res.Resources;
 
 import java.nio.ByteBuffer;
 import java.util.LinkedList;
@@ -29,7 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class ThumbnailHelper {
     private static final String LOGTAG = "GeckoThumbnailHelper";
 
-    public static final float THUMBNAIL_ASPECT_RATIO = 0.714f;  // this is a 5:7 ratio (as per UX decision)
+    public static final float THUMBNAIL_ASPECT_RATIO = 0.571f;  // this is a 4:7 ratio (as per UX decision)
 
     // static singleton stuff
 
@@ -52,13 +54,15 @@ public final class ThumbnailHelper {
 
     private ThumbnailHelper() {
         mPendingThumbnails = new LinkedList<Tab>();
-        mPendingWidth = new AtomicInteger((int)GeckoAppShell.getContext().getResources().getDimension(R.dimen.tab_thumbnail_width));
+        try {
+            mPendingWidth = new AtomicInteger((int)GeckoAppShell.getContext().getResources().getDimension(R.dimen.tab_thumbnail_width));
+        } catch (Resources.NotFoundException nfe) { mPendingWidth = new AtomicInteger(0); }
         mWidth = -1;
         mHeight = -1;
     }
 
     public void getAndProcessThumbnailFor(Tab tab) {
-        if ("about:home".equals(tab.getURL())) {
+        if (AboutPages.isAboutHome(tab.getURL())) {
             tab.updateThumbnail(null);
             return;
         }
@@ -95,17 +99,24 @@ public final class ThumbnailHelper {
     }
 
     public void setThumbnailWidth(int width) {
-        mPendingWidth.set(IntSize.nextPowerOfTwo(width));
+        // Check inverted for safety: Bug 803299 Comment 34.
+        if (GeckoAppShell.getScreenDepth() == 24) {
+            mPendingWidth.set(width);
+        } else {
+            // Bug 776906: on 16-bit screens we need to ensure an even width.
+            mPendingWidth.set((width & 1) == 0 ? width : width + 1);
+        }
     }
 
     private void updateThumbnailSize() {
-        // Apply any pending width updates
+        // Apply any pending width updates.
         mWidth = mPendingWidth.get();
 
-        mWidth &= ~0x1; // Ensure the width is always an even number (bug 776906)
         mHeight = Math.round(mWidth * THUMBNAIL_ASPECT_RATIO);
 
-        int capacity = mWidth * mHeight * 2; // Multiply by 2 for 16bpp
+        int pixelSize = (GeckoAppShell.getScreenDepth() == 24) ? 4 : 2;
+        int capacity = mWidth * mHeight * pixelSize;
+        Log.d(LOGTAG, "Using new thumbnail size: " + capacity + " (width " + mWidth + ")");
         if (mBuffer == null || mBuffer.capacity() != capacity) {
             if (mBuffer != null) {
                 mBuffer = DirectBufferAllocator.free(mBuffer);
@@ -137,11 +148,13 @@ public final class ThumbnailHelper {
             return;
         }
 
+        Log.d(LOGTAG, "Sending thumbnail event: " + mWidth + ", " + mHeight);
         GeckoEvent e = GeckoEvent.createThumbnailEvent(tab.getId(), mWidth, mHeight, mBuffer);
         GeckoAppShell.sendEventToGecko(e);
     }
 
     /* This method is invoked by JNI once the thumbnail data is ready. */
+    @WrapElementForJNI(stubName = "SendThumbnail")
     public static void notifyThumbnail(ByteBuffer data, int tabId, boolean success) {
         Tab tab = Tabs.getInstance().getTab(tabId);
         ThumbnailHelper helper = ThumbnailHelper.getInstance();
@@ -169,6 +182,7 @@ public final class ThumbnailHelper {
     }
 
     private void handleThumbnailData(Tab tab, ByteBuffer data) {
+        Log.d(LOGTAG, "handleThumbnailData: " + data.capacity());
         if (data != mBuffer) {
             // This should never happen, but log it and recover gracefully
             Log.e(LOGTAG, "handleThumbnailData called with an unexpected ByteBuffer!");

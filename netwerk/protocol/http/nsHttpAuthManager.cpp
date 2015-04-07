@@ -7,13 +7,14 @@
 #include "HttpLog.h"
 
 #include "nsHttpHandler.h"
-#include "nsHttpChannel.h"
 #include "nsHttpAuthManager.h"
-#include "nsReadableUtils.h"
 #include "nsNetUtil.h"
 #include "nsIPrincipal.h"
 
-NS_IMPL_ISUPPORTS1(nsHttpAuthManager, nsIHttpAuthManager)
+namespace mozilla {
+namespace net {
+
+NS_IMPL_ISUPPORTS(nsHttpAuthManager, nsIHttpAuthManager)
 
 nsHttpAuthManager::nsHttpAuthManager()
 {
@@ -147,3 +148,6 @@ nsHttpAuthManager::ClearAll()
     return rv2;
   return NS_OK;
 }
+
+} // namespace mozilla::net
+} // namespace mozilla

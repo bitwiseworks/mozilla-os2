@@ -32,6 +32,28 @@ extern PRLogModuleInfo *gUrlClassifierDbServiceLog;
 namespace mozilla {
 namespace safebrowsing {
 
+void
+Classifier::SplitTables(const nsACString& str, nsTArray<nsCString>& tables)
+{
+  tables.Clear();
+
+  nsACString::const_iterator begin, iter, end;
+  str.BeginReading(begin);
+  str.EndReading(end);
+  while (begin != end) {
+    iter = begin;
+    FindCharInReadable(',', iter, end);
+    nsDependentCSubstring table = Substring(begin,iter);
+    if (!table.IsEmpty()) {
+      tables.AppendElement(Substring(begin, iter));
+    }
+    begin = iter;
+    if (begin != end) {
+      begin++;
+    }
+  }
+}
+
 Classifier::Classifier()
   : mFreshTime(45 * 60)
 {
@@ -126,8 +148,6 @@ Classifier::Open(nsIFile& aCacheDirectory)
   mCryptoHash = do_CreateInstance(NS_CRYPTO_HASH_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  mTableFreshness.Init();
-
   // Build the list of know urlclassifier lists
   // XXX: Disk IO potentially on the main thread during startup
   RegenActiveTables();
@@ -197,20 +217,25 @@ Classifier::TableRequest(nsACString& aResult)
 }
 
 nsresult
-Classifier::Check(const nsACString& aSpec, LookupResultArray& aResults)
+Classifier::Check(const nsACString& aSpec,
+                  const nsACString& aTables,
+                  LookupResultArray& aResults)
 {
   Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_CL_CHECK_TIME> timer;
 
-  // Get the set of fragments to look up.
+  // Get the set of fragments based on the url. This is necessary because we
+  // only look up at most 5 URLs per aSpec, even if aSpec has more than 5
+  // components.
   nsTArray<nsCString> fragments;
   nsresult rv = LookupCache::GetLookupFragments(aSpec, &fragments);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsTArray<nsCString> activeTables;
-  ActiveTables(activeTables);
+  SplitTables(aTables, activeTables);
 
   nsTArray<LookupCache*> cacheArray;
   for (uint32_t i = 0; i < activeTables.Length(); i++) {
+    LOG(("Checking table %s", activeTables[i].get()));
     LookupCache *cache = GetLookupCache(activeTables[i]);
     if (cache) {
       cacheArray.AppendElement(cache);
@@ -228,15 +253,16 @@ Classifier::Check(const nsACString& aSpec, LookupResultArray& aResults)
     Completion hostKey;
     rv = LookupCache::GetKey(fragments[i], &hostKey, mCryptoHash);
     if (NS_FAILED(rv)) {
-      // Local host on the network
+      // Local host on the network.
       continue;
     }
 
 #if DEBUG && defined(PR_LOGGING)
     if (LOG_ENABLED()) {
       nsAutoCString checking;
-      lookupHash.ToString(checking);
-      LOG(("Checking %s (%X)", checking.get(), lookupHash.ToUint32()));
+      lookupHash.ToHexString(checking);
+      LOG(("Checking fragment %s, hash %s (%X)", fragments[i].get(),
+           checking.get(), lookupHash.ToUint32()));
     }
 #endif
     for (uint32_t i = 0; i < cacheArray.Length(); i++) {
@@ -301,7 +327,9 @@ Classifier::ApplyUpdates(nsTArray<TableUpdate*>* aUpdates)
       nsCString updateTable(aUpdates->ElementAt(i)->TableName());
       rv = ApplyTableUpdates(aUpdates, updateTable);
       if (NS_FAILED(rv)) {
-        Reset();
+        if (rv != NS_ERROR_OUT_OF_MEMORY) {
+          Reset();
+        }
         return rv;
       }
     }
@@ -411,9 +439,11 @@ Classifier::ScanStoreDir(nsTArray<nsCString>& aTables)
 
   bool hasMore;
   while (NS_SUCCEEDED(rv = entries->HasMoreElements(&hasMore)) && hasMore) {
-    nsCOMPtr<nsIFile> file;
-    rv = entries->GetNext(getter_AddRefs(file));
+    nsCOMPtr<nsISupports> supports;
+    rv = entries->GetNext(getter_AddRefs(supports));
     NS_ENSURE_SUCCESS(rv, rv);
+
+    nsCOMPtr<nsIFile> file = do_QueryInterface(supports);
 
     nsCString leafName;
     rv = file->GetNativeLeafName(leafName);
@@ -542,8 +572,7 @@ nsresult
 Classifier::ApplyTableUpdates(nsTArray<TableUpdate*>* aUpdates,
                               const nsACString& aTable)
 {
-  LOG(("Classifier::ApplyTableUpdates(%s)",
-       PromiseFlatCString(aTable).get()));
+  LOG(("Classifier::ApplyTableUpdates(%s)", PromiseFlatCString(aTable).get()));
 
   nsAutoPtr<HashStore> store(new HashStore(aTable, mStoreDirectory));
 
@@ -567,6 +596,7 @@ Classifier::ApplyTableUpdates(nsTArray<TableUpdate*>* aUpdates,
   }
 
   if (!validupdates) {
+    // This can happen if the update was only valid for one table.
     return NS_OK;
   }
 

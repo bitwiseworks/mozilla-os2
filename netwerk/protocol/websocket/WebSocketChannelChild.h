@@ -8,13 +8,14 @@
 #define mozilla_net_WebSocketChannelChild_h
 
 #include "mozilla/net/PWebSocketChild.h"
-#include "mozilla/net/ChannelEventQueue.h"
 #include "mozilla/net/BaseWebSocketChannel.h"
-#include "nsCOMPtr.h"
 #include "nsString.h"
 
 namespace mozilla {
 namespace net {
+
+class ChannelEvent;
+class ChannelEventQueue;
 
 class WebSocketChannelChild : public BaseWebSocketChannel,
                               public PWebSocketChild
@@ -24,6 +25,7 @@ class WebSocketChannelChild : public BaseWebSocketChannel,
   ~WebSocketChannelChild();
 
   NS_DECL_ISUPPORTS
+  NS_DECL_NSITHREADRETARGETABLEREQUEST
 
   // nsIWebSocketChannel methods BaseWebSocketChannel didn't implement for us
   //
@@ -33,19 +35,19 @@ class WebSocketChannelChild : public BaseWebSocketChannel,
   NS_IMETHOD SendMsg(const nsACString &aMsg);
   NS_IMETHOD SendBinaryMsg(const nsACString &aMsg);
   NS_IMETHOD SendBinaryStream(nsIInputStream *aStream, uint32_t aLength);
+  nsresult SendBinaryStream(OptionalInputStreamParams *aStream, uint32_t aLength);
   NS_IMETHOD GetSecurityInfo(nsISupports **aSecurityInfo);
 
   void AddIPDLReference();
   void ReleaseIPDLReference();
 
  private:
-  bool RecvOnStart(const nsCString& aProtocol, const nsCString& aExtensions);
-  bool RecvOnStop(const nsresult& aStatusCode);
-  bool RecvOnMessageAvailable(const nsCString& aMsg);
-  bool RecvOnBinaryMessageAvailable(const nsCString& aMsg);
-  bool RecvOnAcknowledge(const uint32_t& aSize);
-  bool RecvOnServerClose(const uint16_t& aCode, const nsCString &aReason);
-  bool RecvAsyncOpenFailed();
+  bool RecvOnStart(const nsCString& aProtocol, const nsCString& aExtensions) MOZ_OVERRIDE;
+  bool RecvOnStop(const nsresult& aStatusCode) MOZ_OVERRIDE;
+  bool RecvOnMessageAvailable(const nsCString& aMsg) MOZ_OVERRIDE;
+  bool RecvOnBinaryMessageAvailable(const nsCString& aMsg) MOZ_OVERRIDE;
+  bool RecvOnAcknowledge(const uint32_t& aSize) MOZ_OVERRIDE;
+  bool RecvOnServerClose(const uint16_t& aCode, const nsCString &aReason) MOZ_OVERRIDE;
 
   void OnStart(const nsCString& aProtocol, const nsCString& aExtensions);
   void OnStop(const nsresult& aStatusCode);
@@ -54,6 +56,8 @@ class WebSocketChannelChild : public BaseWebSocketChannel,
   void OnAcknowledge(const uint32_t& aSize);
   void OnServerClose(const uint16_t& aCode, const nsCString& aReason);
   void AsyncOpenFailed();  
+
+  void DispatchToTargetThread(ChannelEvent *aChannelEvent);
 
   nsRefPtr<ChannelEventQueue> mEventQ;
   bool mIPCOpen;

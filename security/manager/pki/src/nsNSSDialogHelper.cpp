@@ -11,6 +11,7 @@
 #include "nsIServiceManager.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
+#include "mozilla/dom/ScriptSettings.h"
 
 static const char kOpenDialogParam[] = "centerscreen,chrome,modal,titlebar";
 static const char kOpenWindowParam[] = "centerscreen,chrome,titlebar";
@@ -32,6 +33,13 @@ nsNSSDialogHelper::openDialog(
   if (!parent) {
     windowWatcher->GetActiveWindow(getter_AddRefs(parent));
   }
+
+  // We're loading XUL into this window, and it's happening on behalf of the
+  // system, not on behalf of content. Make sure the initial about:blank window
+  // gets a system principal, otherwise we'll bork when trying to wrap the
+  // nsIKeyGenThread |arguments| property into the unprivileged scoope.
+  MOZ_ASSERT(!strncmp("chrome://", url, strlen("chrome://")));
+  mozilla::dom::AutoNoJSAPI nojsapi;
 
   nsCOMPtr<nsIDOMWindow> newWindow;
   rv = windowWatcher->OpenWindow(parent,

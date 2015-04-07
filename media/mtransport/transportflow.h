@@ -18,6 +18,7 @@
 #include "mozilla/Scoped.h"
 #include "transportlayer.h"
 #include "m_cpp_utils.h"
+#include "nsAutoPtr.h"
 
 // A stack of transport layers acts as a flow.
 // Generally, one reads and writes to the top layer.
@@ -48,7 +49,8 @@
 
 namespace mozilla {
 
-class TransportFlow : public sigslot::has_slots<> {
+class TransportFlow : public nsISupports,
+                      public sigslot::has_slots<> {
  public:
   TransportFlow()
     : id_("(anonymous)"),
@@ -95,7 +97,9 @@ class TransportFlow : public sigslot::has_slots<> {
   sigslot::signal3<TransportFlow*, const unsigned char *, size_t>
     SignalPacketReceived;
 
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TransportFlow)
+  bool Contains(TransportLayer *layer) const;
+
+  NS_DECL_THREADSAFE_ISUPPORTS
 
  private:
   DISALLOW_COPY_ASSIGN(TransportFlow);

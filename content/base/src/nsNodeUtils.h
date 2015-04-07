@@ -8,10 +8,10 @@
 
 #include "nsIContent.h"          // for use in inline function (ParentChainChanged)
 #include "nsIMutationObserver.h" // for use in inline function (ParentChainChanged)
+#include "js/TypeDecls.h"
+#include "nsCOMArray.h"
 
 struct CharacterDataChangeInfo;
-struct JSContext;
-class JSObject;
 class nsIVariant;
 class nsIDOMNode;
 class nsIDOMUserDataHandler;

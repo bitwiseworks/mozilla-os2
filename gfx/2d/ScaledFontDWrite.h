@@ -17,16 +17,17 @@ namespace gfx {
 class ScaledFontDWrite MOZ_FINAL : public ScaledFontBase
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(ScaledFontDwrite)
   ScaledFontDWrite(IDWriteFontFace *aFont, Float aSize)
     : mFontFace(aFont)
     , ScaledFontBase(aSize)
   {}
   ScaledFontDWrite(uint8_t *aData, uint32_t aSize, uint32_t aIndex, Float aGlyphSize);
 
-  virtual FontType GetType() const { return FONT_DWRITE; }
+  virtual FontType GetType() const { return FontType::DWRITE; }
 
   virtual TemporaryRef<Path> GetPathForGlyphs(const GlyphBuffer &aBuffer, const DrawTarget *aTarget);
-  virtual void CopyGlyphsToBuilder(const GlyphBuffer &aBuffer, PathBuilder *aBuilder);
+  virtual void CopyGlyphsToBuilder(const GlyphBuffer &aBuffer, PathBuilder *aBuilder, BackendType aBackendType, const Matrix *aTransformHint);
 
   void CopyGlyphsToSink(const GlyphBuffer &aBuffer, ID2D1GeometrySink *aSink);
 
@@ -48,15 +49,17 @@ public:
 class GlyphRenderingOptionsDWrite : public GlyphRenderingOptions
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(GlyphRenderingOptionsDWrite)
   GlyphRenderingOptionsDWrite(IDWriteRenderingParams *aParams)
     : mParams(aParams)
   {
   }
 
-  virtual FontType GetType() const { return FONT_DWRITE; }
+  virtual FontType GetType() const { return FontType::DWRITE; }
 
 private:
   friend class DrawTargetD2D;
+  friend class DrawTargetD2D1;
 
   RefPtr<IDWriteRenderingParams> mParams;
 };

@@ -2,9 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "tests.h"
 #include <limits>
 #include <math.h>
+
+#include "jsapi-tests/tests.h"
 
 using namespace std;
 
@@ -13,14 +14,14 @@ struct LooseEqualityFixture : public JSAPITest
     virtual ~LooseEqualityFixture() {}
 
     bool leq(JS::HandleValue x, JS::HandleValue y) {
-        JSBool equal;
+        bool equal;
         CHECK(JS_LooselyEqual(cx, x, y, &equal) && equal);
         CHECK(JS_LooselyEqual(cx, y, x, &equal) && equal);
         return true;
     }
 
     bool nleq(JS::HandleValue x, JS::HandleValue y) {
-        JSBool equal;
+        bool equal;
         CHECK(JS_LooselyEqual(cx, x, y, &equal) && !equal);
         CHECK(JS_LooselyEqual(cx, y, x, &equal) && !equal);
         return true;
@@ -56,7 +57,7 @@ struct LooseEqualityData
         i42 = INT_TO_JSVAL(42);
         undef = JSVAL_VOID;
         null = JSVAL_NULL;
-        obj = OBJECT_TO_JSVAL(JS_GetGlobalForScopeChain(cx));
+        obj = OBJECT_TO_JSVAL(JS::CurrentGlobalOrNull(cx));
         poszero = DOUBLE_TO_JSVAL(0.0);
         negzero = DOUBLE_TO_JSVAL(-0.0);
 #ifdef XP_WIN

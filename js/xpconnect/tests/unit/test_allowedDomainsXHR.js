@@ -10,7 +10,7 @@ var httpbody = "<?xml version='1.0' ?><root>0123456789</root>";
 
 var sb = cu.Sandbox(["http://www.example.com",
                      "http://localhost:4444/simple"],
-                     {wantXHRConstructor: true});
+                     { wantGlobalProperties: ["XMLHttpRequest"] });
 
 function createXHR(loc, async)
 {
@@ -52,7 +52,7 @@ function run_test()
   // Test sync XHR sending
   cu.evalInSandbox('var createXHR = ' + createXHR.toString(), sb);
   var res = cu.evalInSandbox('var sync = createXHR("4444/simple"); sync.send(null); sync', sb);
-  checkResults(res);
+  do_check_true(checkResults(res));
 
   // negative test sync XHR sending (to ensure that the xhr do not have chrome caps, see bug 779821)
   try {
@@ -70,9 +70,13 @@ function run_test()
     httpserver.stop(finishIfDone);
   }
 
-  sb.checkResults = checkResults;
-  
+  // We want to execute checkResults from the scope of the sandbox as well to
+  // make sure that there are no permission errors related to nsEP. For that
+  // we need to clone the function into the sandbox and make a few things
+  // available for it.
+  cu.evalInSandbox('var checkResults = ' + checkResults.toSource(), sb);
   sb.do_check_eq = do_check_eq;
+  sb.httpbody = httpbody;
 
   function changeListener(event) {
     if (checkResults(async))

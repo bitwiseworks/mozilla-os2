@@ -15,7 +15,7 @@
  * A SQL statement that can be used for both synchronous and asynchronous
  * purposes.
  */
-[scriptable, uuid(57ec7be1-36cf-4510-b938-7d1c9ee8cec5)]
+[scriptable, uuid(b3c4476e-c490-4e3b-9db1-e2d3a6f0287c)]
 interface mozIStorageStatement : mozIStorageBaseStatement {
   /**
    * Create a clone of this statement, by initializing a new statement
@@ -264,8 +264,8 @@ interface mozIStorageStatement : mozIStorageBaseStatement {
     return str;
   }
 
-  inline const PRUnichar* AsSharedWString(uint32_t idx, uint32_t *len) {
-    const PRUnichar *str = nullptr;
+  inline const char16_t* AsSharedWString(uint32_t idx, uint32_t *len) {
+    const char16_t *str = nullptr;
     *len = 0;
     mozilla::DebugOnly<nsresult> rv = GetSharedString(idx, len, &str);
     NS_ABORT_IF_FALSE(NS_SUCCEEDED(rv) || IsNull(idx),

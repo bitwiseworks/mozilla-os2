@@ -12,6 +12,18 @@ const URI_GENERIC_ICON_DOWNLOAD = "chrome://browser/skin/images/alert-downloads-
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/DownloadUtils.jsm");
+
+XPCOMUtils.defineLazyGetter(this, "ContentUtil", function() {
+  Cu.import("resource:///modules/ContentUtil.jsm");
+  return ContentUtil;
+});
+XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
+                                  "resource://gre/modules/Downloads.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
+                                  "resource://gre/modules/FileUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
 
 // -----------------------------------------------------------------------
 // HelperApp Launcher Dialog
@@ -32,118 +44,204 @@ HelperAppLauncherDialog.prototype = {
       aLauncher.launchWithApplication(null, false);
     } else {
       let wasClicked = false;
-      let listener = {
-        observe: function(aSubject, aTopic, aData) {
-          if (aTopic == "alertclickcallback") {
-            wasClicked = true;
-            let win = Cc["@mozilla.org/appshell/window-mediator;1"].getService(Ci.nsIWindowMediator).getMostRecentWindow("navigator:browser");
-            if (win)
-              win.PanelUI.show("downloads-container");
-  
-            aLauncher.saveToDisk(null, false);
-          } else {
-            if (!wasClicked)
-              aLauncher.cancel(Cr.NS_BINDING_ABORTED);
-          }
-        }
-      };
-      this._notify(aLauncher, listener);
+      this._showDownloadInfobar(aLauncher);
     }
   },
 
+  _getDownloadSize: function dv__getDownloadSize (aSize) {
+    let displaySize = DownloadUtils.convertByteUnits(aSize);
+    // displaySize[0] is formatted size, displaySize[1] is units
+    if (aSize > 0)
+      return displaySize.join("");
+    else {
+      let browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
+      return browserBundle.GetStringFromName("downloadsUnknownSize");
+    }
+  },
+
+  _getChromeWindow: function (aWindow) {
+      let chromeWin = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                            .getInterface(Ci.nsIWebNavigation)
+                            .QueryInterface(Ci.nsIDocShellTreeItem)
+                            .rootTreeItem
+                            .QueryInterface(Ci.nsIInterfaceRequestor)
+                            .getInterface(Ci.nsIDOMWindow)
+                            .QueryInterface(Ci.nsIDOMChromeWindow);
+     return chromeWin;
+  },
+
+  _showDownloadInfobar: function do_showDownloadInfobar(aLauncher) {
+    let browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
+
+    let runButtonText =
+              browserBundle.GetStringFromName("downloadOpen");
+    let saveButtonText =
+              browserBundle.GetStringFromName("downloadSave");
+    let cancelButtonText =
+              browserBundle.GetStringFromName("downloadCancel");
+
+    let buttons = [
+      {
+        isDefault: true,
+        label: runButtonText,
+        accessKey: "",
+        callback: function() {
+          aLauncher.saveToDisk(null, false);
+          Services.obs.notifyObservers(aLauncher.targetFile, "dl-run", "true");
+        }
+      },
+      {
+        label: saveButtonText,
+        accessKey: "",
+        callback: function() {
+          aLauncher.saveToDisk(null, false);
+          Services.obs.notifyObservers(aLauncher.targetFile, "dl-run", "false");
+        }
+      },
+      {
+        label: cancelButtonText,
+        accessKey: "",
+        callback: function() { aLauncher.cancel(Cr.NS_BINDING_ABORTED); }
+      }
+    ];
+
+    let window = Services.wm.getMostRecentWindow("navigator:browser");
+    let chromeWin = this._getChromeWindow(window).wrappedJSObject;
+    let notificationBox = chromeWin.Browser.getNotificationBox();
+    let document = notificationBox.ownerDocument;
+    let downloadSize = this._getDownloadSize(aLauncher.contentLength);
+
+    let msg = browserBundle.GetStringFromName("alertDownloadSave2");
+
+    let fragment =  ContentUtil.populateFragmentFromString(
+                      document.createDocumentFragment(),
+                      msg,
+                      {
+                        text: aLauncher.suggestedFileName,
+                        className: "download-filename-text"
+                      },
+                      {
+                        text: downloadSize,
+                        className: "download-size-text"
+                      },
+                      {
+                        text: aLauncher.source.host,
+                        className: "download-host-text"
+                      }
+                    );
+    let newBar = notificationBox.appendNotification("",
+                                                    "save-download",
+                                                    URI_GENERIC_ICON_DOWNLOAD,
+                                                    notificationBox.PRIORITY_WARNING_HIGH,
+                                                    buttons);
+    let messageContainer = document.getAnonymousElementByAttribute(newBar, "anonid", "messageText");
+    messageContainer.appendChild(fragment);
+  },
+
   promptForSaveToFile: function hald_promptForSaveToFile(aLauncher, aContext, aDefaultFile, aSuggestedFileExt, aForcePrompt) {
+    throw new Components.Exception("Async version must be used", Cr.NS_ERROR_NOT_AVAILABLE);
+  },
+
+  promptForSaveToFileAsync: function hald_promptForSaveToFileAsync(aLauncher, aContext, aDefaultFile, aSuggestedFileExt, aForcePrompt) {
     let file = null;
     let prefs = Services.prefs;
 
-    if (!aForcePrompt) {
-      // Check to see if the user wishes to auto save to the default download
-      // folder without prompting. Note that preference might not be set.
-      let autodownload = true;
-      try {
-        autodownload = prefs.getBoolPref(PREF_BD_USEDOWNLOADDIR);
-      } catch (e) { }
-
-      if (autodownload) {
-        // Retrieve the user's default download directory
-        let dnldMgr = Cc["@mozilla.org/download-manager;1"].getService(Ci.nsIDownloadManager);
-        let defaultFolder = dnldMgr.userDownloadsDirectory;
-
+    Task.spawn(function() {
+      if (!aForcePrompt) {
+        // Check to see if the user wishes to auto save to the default download
+        // folder without prompting. Note that preference might not be set.
+        let autodownload = true;
         try {
-          file = this.validateLeafName(defaultFolder, aDefaultFile, aSuggestedFileExt);
-        }
-        catch (e) {
-        }
+          autodownload = prefs.getBoolPref(PREF_BD_USEDOWNLOADDIR);
+        } catch (e) { }
 
-        // Check to make sure we have a valid directory, otherwise, prompt
-        if (file)
-          return file;
+        if (autodownload) {
+          // Retrieve the user's preferred download directory
+          let preferredDir = yield Downloads.getPreferredDownloadsDirectory();
+          let defaultFolder = new FileUtils.File(preferredDir);
+
+          try {
+            file = this.validateLeafName(defaultFolder, aDefaultFile, aSuggestedFileExt);
+          }
+          catch (e) {
+          }
+
+          // Check to make sure we have a valid directory, otherwise, prompt
+          if (file) {
+            aLauncher.saveDestinationAvailable(file);
+            return;
+          }
+        }
       }
-    }
 
-    // Use file picker to show dialog.
-    let picker = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
-    let windowTitle = "";
-    let parent = aContext.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
-    picker.init(parent, windowTitle, Ci.nsIFilePicker.modeSave);
-    picker.defaultString = aDefaultFile;
+      // Use file picker to show dialog.
+      let picker = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+      let windowTitle = "";
+      let parent = aContext.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
+      picker.init(parent, windowTitle, Ci.nsIFilePicker.modeSave);
+      picker.defaultString = aDefaultFile;
 
-    if (aSuggestedFileExt) {
-      // aSuggestedFileExtension includes the period, so strip it
-      picker.defaultExtension = aSuggestedFileExt.substring(1);
-    }
-    else {
+      if (aSuggestedFileExt) {
+        // aSuggestedFileExtension includes the period, so strip it
+        picker.defaultExtension = aSuggestedFileExt.substring(1);
+      }
+      else {
+        try {
+          picker.defaultExtension = aLauncher.MIMEInfo.primaryExtension;
+        }
+        catch (e) { }
+      }
+
+      let wildCardExtension = "*";
+      if (aSuggestedFileExt) {
+        wildCardExtension += aSuggestedFileExt;
+        picker.appendFilter(aLauncher.MIMEInfo.description, wildCardExtension);
+      }
+
+      picker.appendFilters(Ci.nsIFilePicker.filterAll);
+
+      // Default to lastDir if it is valid, otherwise use the user's preferred
+      // downloads directory.  getPreferredDownloadsDirectory should always
+      // return a valid directory string, so we can safely default to it.
+      let preferredDir = yield Downloads.getPreferredDownloadsDirectory();
+      picker.displayDirectory = new FileUtils.File(preferredDir);
+
+      // The last directory preference may not exist, which will throw.
       try {
-        picker.defaultExtension = aLauncher.MIMEInfo.primaryExtension;
+        let lastDir = prefs.getComplexValue("browser.download.lastDir", Ci.nsILocalFile);
+        if (isUsableDirectory(lastDir))
+          picker.displayDirectory = lastDir;
       }
       catch (e) { }
-    }
 
-    var wildCardExtension = "*";
-    if (aSuggestedFileExt) {
-      wildCardExtension += aSuggestedFileExt;
-      picker.appendFilter(aLauncher.MIMEInfo.description, wildCardExtension);
-    }
+      picker.open(function(aResult) {
+        if (aResult == Ci.nsIFilePicker.returnCancel) {
+          // null result means user cancelled.
+          aLauncher.saveDestinationAvailable(null);
+          return;
+        }
 
-    picker.appendFilters(Ci.nsIFilePicker.filterAll);
+        // Be sure to save the directory the user chose through the Save As...
+        // dialog  as the new browser.download.dir since the old one
+        // didn't exist.
+        file = picker.file;
 
-    // Default to lastDir if it is valid, otherwise use the user's default
-    // downloads directory.  userDownloadsDirectory should always return a
-    // valid directory, so we can safely default to it.
-    var dnldMgr = Cc["@mozilla.org/download-manager;1"].getService(Ci.nsIDownloadManager);
-    picker.displayDirectory = dnldMgr.userDownloadsDirectory;
-
-    // The last directory preference may not exist, which will throw.
-    try {
-      let lastDir = prefs.getComplexValue("browser.download.lastDir", Ci.nsILocalFile);
-      if (isUsableDirectory(lastDir))
-        picker.displayDirectory = lastDir;
-    }
-    catch (e) { }
-
-    if (picker.show() == Ci.nsIFilePicker.returnCancel) {
-      // null result means user cancelled.
-      return null;
-    }
-
-    // Be sure to save the directory the user chose through the Save As...
-    // dialog  as the new browser.download.dir since the old one
-    // didn't exist.
-    file = picker.file;
-
-    if (file) {
-      try {
-        // Remove the file so that it's not there when we ensure non-existence later;
-        // this is safe because for the file to exist, the user would have had to
-        // confirm that he wanted the file overwritten.
-        if (file.exists())
-          file.remove(false);
-      }
-      catch (e) { }
-      var newDir = file.parent.QueryInterface(Ci.nsILocalFile);
-      prefs.setComplexValue("browser.download.lastDir", Ci.nsILocalFile, newDir);
-      file = this.validateLeafName(newDir, file.leafName, null);
-    }
-    return file;
+        if (file) {
+          try {
+            // Remove the file so that it's not there when we ensure non-existence later;
+            // this is safe because for the file to exist, the user would have had to
+            // confirm that he wanted the file overwritten.
+            if (file.exists())
+              file.remove(false);
+          }
+          catch (e) { }
+          let newDir = file.parent.QueryInterface(Ci.nsILocalFile);
+          prefs.setComplexValue("browser.download.lastDir", Ci.nsILocalFile, newDir);
+          file = this.validateLeafName(newDir, file.leafName, null);
+        }
+        aLauncher.saveDestinationAvailable(file);
+      }.bind(this));
+    }.bind(this));
   },
 
   validateLeafName: function hald_validateLeafName(aLocalFile, aLeafName, aFileExt) {
@@ -203,16 +301,6 @@ HelperAppLauncherDialog.prototype = {
   isUsableDirectory: function hald_isUsableDirectory(aDirectory) {
     return aDirectory.exists() && aDirectory.isDirectory() && aDirectory.isWritable();
   },
-
-  _notify: function hald_notify(aLauncher, aCallback) {
-    let bundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
-
-    let notifier = Cc[aCallback ? "@mozilla.org/alerts-service;1" : "@mozilla.org/toaster-alerts-service;1"].getService(Ci.nsIAlertsService);
-    notifier.showAlertNotification(URI_GENERIC_ICON_DOWNLOAD,
-                                   bundle.GetStringFromName("alertDownloads"),
-                                   bundle.GetStringFromName("alertTapToSave"),
-                                   true, "", aCallback, "downloadopen-fail");
-  }
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([HelperAppLauncherDialog]);

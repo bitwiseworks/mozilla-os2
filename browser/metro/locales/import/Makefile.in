@@ -2,15 +2,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH     = ../../../..
-topsrcdir = @top_srcdir@
-srcdir    = @srcdir@
-VPATH     = @srcdir@
-
 # desktop specific resources - this defines LOCALE_SRCDIR
 relativesrcdir = browser/locales
 
-include $(DEPTH)/config/autoconf.mk
 include $(topsrcdir)/config/config.mk
 
 #########################################
@@ -30,15 +24,17 @@ include $(topsrcdir)/config/rules.mk
 # Metro reuses desktop search plugins
 libs::
 	$(MAKE) -C $(DEPTH)/browser/locales searchplugins \
-	  DIST_SUBDIR=$(DIST_SUBDIR) XPI_ROOT_APPID="$(XPI_ROOT_APPID)"
+	  DIST_SUBDIR=$(DIST_SUBDIR) XPI_ROOT_APPID='$(XPI_ROOT_APPID)'
 
 #########################################
 # Bookmarks
 
 # Pick up desktop's bookmarks.inc file
+ifdef LOCALE_MERGEDIR
+vpath book%.inc $(LOCALE_MERGEDIR)/browser/profile
+endif
 vpath book%.inc $(LOCALE_SRCDIR)/profile
 ifdef LOCALE_MERGEDIR
-vpath book%.inc $(LOCALE_SRCDIR)/profile
 vpath book%.inc @top_srcdir@/$(relativesrcdir)/en-US/profile
 endif
 
@@ -47,10 +43,10 @@ bookmarks-src = $(srcdir)/../generic/profile/bookmarks.json.in
 # The resulting bookmarks.json will get picked up and packaged by the
 # processing of the jar file in the parent directory.
 bookmarks: bookmarks.inc
-	@echo "Generating: $@"
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
+	@echo 'Generating: $@'
+	$(call py_action,preprocessor, \
 	  -I $^ \
 	  -DAB_CD=$(AB_CD) \
-	  $(bookmarks-src) > ../bookmarks.json
+	  $(bookmarks-src) -o ../bookmarks.json)
 
-libs:: bookmarks
+export:: bookmarks

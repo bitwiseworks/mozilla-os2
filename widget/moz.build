@@ -8,7 +8,7 @@ DIRS += ['shared', 'xpwidgets']
 
 toolkit = CONFIG['MOZ_WIDGET_TOOLKIT']
 
-if toolkit in ('os2', 'cocoa', 'qt', 'android', 'gonk'):
+if toolkit in ('cocoa', 'qt', 'android', 'gonk'):
     DIRS += [toolkit]
 if toolkit in ('qt', 'android', 'gonk', 'gtk2', 'gtk3'):
     EXPORTS += ['nsIPrintDialogService.h']
@@ -40,11 +40,6 @@ elif toolkit == 'cocoa':
         'nsINativeMenuService.h',
         'nsIPrintDialogService.h',
     ]
-elif toolkit == 'os2':
-    XPIDL_SOURCES += [
-        'nsIRwsService.idl',
-    ]
-    EXPORTS += ['nsIDragSessionOS2.h']
 
 TEST_TOOL_DIRS += ['tests']
 
@@ -55,7 +50,7 @@ TEST_TOOL_DIRS += ['tests']
 # source tree.
 #
 if CONFIG['MOZ_ENABLE_GTK']:
-    DIRS += ['gtk2']
+    DIRS += ['gtk']
 
     if CONFIG['MOZ_X11']:
         DIRS += ['gtkxtbin']
@@ -69,15 +64,16 @@ XPIDL_SOURCES += [
     'nsIClipboardDragDropHooks.idl',
     'nsIClipboardHelper.idl',
     'nsIClipboardOwner.idl',
+    'nsIColorPicker.idl',
     'nsIDragService.idl',
     'nsIDragSession.idl',
     'nsIFilePicker.idl',
     'nsIFormatConverter.idl',
     'nsIGfxInfo.idl',
     'nsIGfxInfoDebug.idl',
-    'nsIIMEPicker.idl',
     'nsIIdleService.idl',
     'nsIIdleServiceInternal.idl',
+    'nsIIMEPicker.idl',
     'nsIPrintOptions.idl',
     'nsIPrintSession.idl',
     'nsIPrintSettings.idl',
@@ -94,25 +90,31 @@ if CONFIG['MOZ_METRO']:
         'nsIWinMetroUtils.idl',
     ]
 
-MODULE = 'widget'
+XPIDL_MODULE = 'widget'
 
 EXPORTS += [
     'InputData.h',
-    'nsEvent.h',
-    'nsGUIEvent.h',
     'nsIDeviceContextSpec.h',
-    'nsINativeKeyBindings.h',
     'nsIPluginWidget.h',
     'nsIRollupListener.h',
     'nsIWidget.h',
     'nsIWidgetListener.h',
-    'nsNativeWidget.h',
     'nsWidgetInitData.h',
     'nsWidgetsCID.h',
 ]
 
 EXPORTS.mozilla += [
+    'BasicEvents.h',
+    'CommandList.h',
+    'ContentEvents.h',
+    'EventClassList.h',
+    'EventForwards.h',
     'LookAndFeel.h',
+    'MiscEvents.h',
+    'MouseEvents.h',
+    'TextEvents.h',
+    'TextRange.h',
+    'TouchEvents.h',
     'WidgetUtils.h',
 ]
 
@@ -121,5 +123,5 @@ if CONFIG['MOZ_INSTRUMENT_EVENT_LOOP']:
         'WidgetTraceEvent.h',
     ]
 
-EXPORTS.IPC = ['nsGUIEventIPC.h']
+EXPORTS.ipc = ['nsGUIEventIPC.h']
 

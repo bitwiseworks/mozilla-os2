@@ -25,7 +25,7 @@ protected:
     : nsSVGClipPathFrameBase(aContext)
     , mInUse(false)
   {
-    AddStateBits(NS_STATE_SVG_NONDISPLAY_CHILD);
+    AddStateBits(NS_FRAME_IS_NONDISPLAY);
   }
 
 public:
@@ -53,9 +53,9 @@ public:
   bool IsValid();
 
   // nsIFrame interface:
-  NS_IMETHOD AttributeChanged(int32_t         aNameSpaceID,
-                              nsIAtom*        aAttribute,
-                              int32_t         aModType) MOZ_OVERRIDE;
+  virtual nsresult AttributeChanged(int32_t         aNameSpaceID,
+                                    nsIAtom*        aAttribute,
+                                    int32_t         aModType) MOZ_OVERRIDE;
 
   virtual void Init(nsIContent*      aContent,
                     nsIFrame*        aParent,
@@ -68,8 +68,8 @@ public:
    */
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
-#ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
+#ifdef DEBUG_FRAME_DUMP
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
   {
     return MakeFrameName(NS_LITERAL_STRING("SVGClipPath"), aResult);
   }
@@ -80,11 +80,13 @@ public:
   // automatically sets and clears the mInUse flag on the clip path frame
   // (to prevent nasty reference loops). It's easy to mess this up
   // and break things, so this helper makes the code far more robust.
-  class AutoClipPathReferencer
+  class MOZ_STACK_CLASS AutoClipPathReferencer
   {
   public:
-    AutoClipPathReferencer(nsSVGClipPathFrame *aFrame)
+    AutoClipPathReferencer(nsSVGClipPathFrame *aFrame
+                           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
        : mFrame(aFrame) {
+      MOZ_GUARD_OBJECT_NOTIFIER_INIT;
       NS_ASSERTION(!mFrame->mInUse, "reference loop!");
       mFrame->mInUse = true;
     }
@@ -93,6 +95,7 @@ public:
     }
   private:
     nsSVGClipPathFrame *mFrame;
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
   };
 
   nsIFrame *mClipParent;
@@ -101,7 +104,8 @@ public:
   bool mInUse;
 
   // nsSVGContainerFrame methods:
-  virtual gfxMatrix GetCanvasTM(uint32_t aFor) MOZ_OVERRIDE;
+  virtual gfxMatrix GetCanvasTM(uint32_t aFor,
+                                nsIFrame* aTransformRoot = nullptr) MOZ_OVERRIDE;
 };
 
 #endif

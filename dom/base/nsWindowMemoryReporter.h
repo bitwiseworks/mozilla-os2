@@ -9,40 +9,62 @@
 
 #include "nsIMemoryReporter.h"
 #include "nsIObserver.h"
+#include "nsITimer.h"
 #include "nsDataHashtable.h"
 #include "nsWeakReference.h"
 #include "nsAutoPtr.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/PodOperations.h"
 #include "mozilla/TimeStamp.h"
 #include "nsArenaMemoryStats.h"
-#include "mozilla/Attributes.h"
-
-// This should be used for any nsINode sub-class that has fields of its own
-// that it needs to measure;  any sub-class that doesn't use it will inherit
-// SizeOfExcludingThis from its super-class.  SizeOfIncludingThis() need not be
-// defined, it is inherited from nsINode.
-#define NS_DECL_SIZEOF_EXCLUDING_THIS \
-  virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
 
 class nsWindowSizes {
+#define FOR_EACH_SIZE(macro) \
+  macro(DOM,   mDOMElementNodesSize) \
+  macro(DOM,   mDOMTextNodesSize) \
+  macro(DOM,   mDOMCDATANodesSize) \
+  macro(DOM,   mDOMCommentNodesSize) \
+  macro(DOM,   mDOMEventTargetsSize) \
+  macro(DOM,   mDOMOtherSize) \
+  macro(Style, mStyleSheetsSize) \
+  macro(Other, mLayoutPresShellSize) \
+  macro(Style, mLayoutStyleSetsSize) \
+  macro(Other, mLayoutTextRunsSize) \
+  macro(Other, mLayoutPresContextSize) \
+  macro(Other, mPropertyTablesSize) \
+
 public:
-  nsWindowSizes(nsMallocSizeOfFun aMallocSizeOf) {
-    memset(this, 0, sizeof(nsWindowSizes));
-    mMallocSizeOf = aMallocSizeOf;
+  nsWindowSizes(mozilla::MallocSizeOf aMallocSizeOf)
+    :
+      #define ZERO_SIZE(kind, mSize)  mSize(0),
+      FOR_EACH_SIZE(ZERO_SIZE)
+      #undef ZERO_SIZE
+      mDOMEventTargetsCount(0),
+      mDOMEventListenersCount(0),
+      mArenaStats(),
+      mMallocSizeOf(aMallocSizeOf)
+  {}
+
+  void addToTabSizes(nsTabSizes *sizes) const {
+    #define ADD_TO_TAB_SIZES(kind, mSize) sizes->add(nsTabSizes::kind, mSize);
+    FOR_EACH_SIZE(ADD_TO_TAB_SIZES)
+    #undef ADD_TO_TAB_SIZES
+    mArenaStats.addToTabSizes(sizes);
   }
-  nsMallocSizeOfFun mMallocSizeOf;
+
+  #define DECL_SIZE(kind, mSize) size_t mSize;
+  FOR_EACH_SIZE(DECL_SIZE);
+  #undef DECL_SIZE
+
+  uint32_t mDOMEventTargetsCount;
+  uint32_t mDOMEventListenersCount;
+
   nsArenaMemoryStats mArenaStats;
-  size_t mDOMElementNodes;
-  size_t mDOMTextNodes;
-  size_t mDOMCDATANodes;
-  size_t mDOMCommentNodes;
-  size_t mDOMEventTargets;
-  size_t mDOMOther;
-  size_t mStyleSheets;
-  size_t mLayoutPresShell;
-  size_t mLayoutStyleSets;
-  size_t mLayoutTextRuns;
-  size_t mLayoutPresContext;
-  size_t mPropertyTables;
+  mozilla::MallocSizeOf mMallocSizeOf;
+
+#undef FOR_EACH_SIZE
 };
 
 /**
@@ -107,50 +129,53 @@ public:
  *   the tab.
  *
  */
-class nsWindowMemoryReporter MOZ_FINAL : public nsIMemoryMultiReporter,
+class nsWindowMemoryReporter MOZ_FINAL : public nsIMemoryReporter,
                                          public nsIObserver,
                                          public nsSupportsWeakReference
 {
 public:
   NS_DECL_ISUPPORTS
-  NS_DECL_NSIMEMORYMULTIREPORTER
+  NS_DECL_NSIMEMORYREPORTER
   NS_DECL_NSIOBSERVER
 
   static void Init();
 
+  ~nsWindowMemoryReporter();
+
+#ifdef DEBUG
+  /**
+   * Unlink all known ghost windows, to enable investigating what caused them
+   * to become ghost windows in the first place.
+   */
+  static void UnlinkGhostWindows();
+#endif
+
 private:
   /**
-   * GhostURLsReporter generates the "ghost-windows" multi-report, which
-   * includes a list of all ghost windows' URLs.  If you're only interested in
-   * this list, running this report is faster than running
-   * nsWindowMemoryReporter.
+   * nsGhostWindowReporter generates the "ghost-windows" report, which counts
+   * the number of ghost windows present.
    */
-  class GhostURLsReporter MOZ_FINAL : public nsIMemoryMultiReporter
+  class GhostWindowsReporter MOZ_FINAL : public nsIMemoryReporter
   {
   public:
-    GhostURLsReporter(nsWindowMemoryReporter* aWindowReporter);
-
     NS_DECL_ISUPPORTS
-    NS_DECL_NSIMEMORYMULTIREPORTER
 
-  private:
-    nsRefPtr<nsWindowMemoryReporter> mWindowReporter;
-  };
+    static int64_t DistinguishedAmount();
 
-  /**
-   * nsGhostWindowReporter generates the "ghost-windows" single-report, which
-   * counts the number of ghost windows present.
-   */
-  class NumGhostsReporter MOZ_FINAL : public nsIMemoryReporter
-  {
-  public:
-    NumGhostsReporter(nsWindowMemoryReporter* aWindowReporter);
-
-    NS_DECL_ISUPPORTS
-    NS_DECL_NSIMEMORYREPORTER
-
-  private:
-    nsRefPtr<nsWindowMemoryReporter> mWindowReporter;
+    NS_IMETHOD
+    CollectReports(nsIHandleReportCallback* aHandleReport, nsISupports* aData)
+    {
+      return MOZ_COLLECT_REPORT(
+        "ghost-windows", KIND_OTHER, UNITS_COUNT, DistinguishedAmount(),
+"The number of ghost windows present (the number of nodes underneath "
+"explicit/window-objects/top(none)/ghost, modulo race conditions).  A ghost "
+"window is not shown in any tab, does not share a domain with any non-detached "
+"windows, and has met these criteria for at least "
+"memory.ghost_window_timeout_seconds, or has survived a round of "
+"about:memory's minimize memory usage button.\n\n"
+"Ghost windows can happen legitimately, but they are often indicative of "
+"leaks in the browser or add-ons.");
+    }
   };
 
   // Protect ctor, use Init() instead.
@@ -166,13 +191,6 @@ private:
   void ObserveAfterMinimizeMemoryUsage();
 
   /**
-   * When we observe a DOM window being detached, we enqueue an asynchronous
-   * event which calls this method.  This method then calls
-   * CheckForGhostWindows.
-   */
-  void CheckForGhostWindowsCallback();
-
-  /**
    * Iterate over all weak window pointers in mDetachedWindows and update our
    * accounting of which windows meet ghost criterion (2).
    *
@@ -185,7 +203,20 @@ private:
    * This is called asynchronously after we observe a DOM window being detached
    * from its docshell, and also right before we generate a memory report.
    */
-  void CheckForGhostWindows(nsTHashtable<nsUint64HashKey> *aOutGhostIDs = NULL);
+  void CheckForGhostWindows(nsTHashtable<nsUint64HashKey> *aOutGhostIDs = nullptr);
+
+  /**
+   * Eventually do a check for ghost windows, if we haven't done one recently
+   * and we aren't already planning to do one soon.
+   */
+  void AsyncCheckForGhostWindows();
+
+  /**
+   * Kill the check timer, if it exists.
+   */
+  void KillCheckTimer();
+
+  static void CheckTimerFired(nsITimer* aTimer, void* aClosure);
 
   /**
    * Maps a weak reference to a detached window (nsIWeakReference) to the time
@@ -200,9 +231,16 @@ private:
   nsDataHashtable<nsISupportsHashKey, mozilla::TimeStamp> mDetachedWindows;
 
   /**
-   * True if we have an asynchronous call to CheckForGhostWindows pending.
+   * Track the last time we ran CheckForGhostWindows(), to avoid running it
+   * too often after a DOM window is detached.
    */
-  bool mCheckForGhostWindowsCallbackPending;
+  mozilla::TimeStamp mLastCheckForGhostWindows;
+
+  nsCOMPtr<nsITimer> mCheckTimer;
+
+  bool mCycleCollectorIsRunning;
+
+  bool mCheckTimerWaitingForCCEnd;
 };
 
 #endif // nsWindowMemoryReporter_h__

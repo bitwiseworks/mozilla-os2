@@ -13,10 +13,7 @@ function test()
 {
   waitForExplicitFinish();
 
-  addTabAndOpenStyleEditor(function(panel) {
-    gUI = panel.UI;
-    gUI.on("editor-added", testEditorAdded);
-  });
+  addTabAndCheckOnStyleEditorAdded(panel => gUI = panel.UI, testEditorAdded);
 
   content.location = TESTCASE_URI;
 }
@@ -27,10 +24,10 @@ let gOriginalHref;
 
 let checksCompleted = 0;
 
-function testEditorAdded(aEvent, aEditor)
+function testEditorAdded(aEditor)
 {
-  gAddedCount++;
-  if (gAddedCount == 2) {
+  info("added " + gAddedCount + " editors");
+  if (++gAddedCount == 2) {
     waitForFocus(function () {// create a new style sheet
       let newButton = gPanelWindow.document.querySelector(".style-editor-newButton");
       ok(newButton, "'new' button exists");
@@ -58,7 +55,7 @@ function testEditorAdded(aEvent, aEditor)
     }
   });
 
-  aEditor.styleSheet.on("property-change", function(event, property) {
+  aEditor.styleSheet.on("property-change", function(property) {
     if (property == "ruleCount") {
       let ruleCount = aEditor.summary.querySelector(".stylesheet-rule-count").textContent;
       is(parseInt(ruleCount), 1,
@@ -96,20 +93,9 @@ function testEditor(aEditor) {
   is(computedStyle.backgroundColor, "rgb(255, 255, 255)",
      "content's background color is initially white");
 
-  EventUtils.synthesizeKey("[", {accelKey: true}, gPanelWindow);
-  is(aEditor.sourceEditor.getText(), "",
-     "Nothing happened as it is a known shortcut in source editor");
-
-  EventUtils.synthesizeKey("]", {accelKey: true}, gPanelWindow);
-  is(aEditor.sourceEditor.getText(), "",
-     "Nothing happened as it is a known shortcut in source editor");
-
   for each (let c in TESTCASE_CSS_SOURCE) {
     EventUtils.synthesizeKey(c, {}, gPanelWindow);
   }
-
-  is(aEditor.sourceEditor.getText(), TESTCASE_CSS_SOURCE + "}",
-     "rule bracket has been auto-closed");
 
   ok(aEditor.unsaved,
      "new editor has unsaved flag");
@@ -121,6 +107,9 @@ function testEditor(aEditor) {
 
 function onTransitionEnd() {
   content.removeEventListener("transitionend", onTransitionEnd, false);
+
+  is(gNewEditor.sourceEditor.getText(), TESTCASE_CSS_SOURCE + "}",
+     "rule bracket has been auto-closed");
 
   let computedStyle = content.getComputedStyle(content.document.body, null);
   is(computedStyle.backgroundColor, "rgb(255, 0, 0)",

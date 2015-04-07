@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsIOutputStream.idl"
-#include "nsrootidl.idl"
 
 /**
  * This interface allows writing of primitive data types (integers,
@@ -79,7 +78,7 @@ NS_WriteOptionalStringZ(nsIBinaryOutputStream* aStream, const char* aString)
 }
 
 inline nsresult
-NS_WriteOptionalWStringZ(nsIBinaryOutputStream* aStream, const PRUnichar* aString)
+NS_WriteOptionalWStringZ(nsIBinaryOutputStream* aStream, const char16_t* aString)
 {
     bool nonnull = (aString != nullptr);
     nsresult rv = aStream->WriteBoolean(nonnull);

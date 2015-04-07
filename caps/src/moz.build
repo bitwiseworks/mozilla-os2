@@ -4,9 +4,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'caps'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
+    'DomainPolicy.cpp',
     'nsJSPrincipals.cpp',
     'nsNullPrincipal.cpp',
     'nsNullPrincipalURI.cpp',
@@ -16,5 +15,12 @@ CPP_SOURCES += [
     'nsSystemPrincipal.cpp',
 ]
 
-LIBRARY_NAME = 'caps_s'
+MSVC_ENABLE_PGO = True
 
+LOCAL_INCLUDES += [
+    '../include',
+    '/dom/base',
+    '/js/xpconnect/src',
+]
+
+FINAL_LIBRARY = 'gklayout'

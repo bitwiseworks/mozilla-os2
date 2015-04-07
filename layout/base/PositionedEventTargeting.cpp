@@ -4,13 +4,17 @@
 
 #include "PositionedEventTargeting.h"
 
+#include "mozilla/EventListenerManager.h"
+#include "mozilla/EventStates.h"
+#include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
-#include "nsGUIEvent.h"
 #include "nsLayoutUtils.h"
 #include "nsGkAtoms.h"
-#include "nsEventListenerManager.h"
 #include "nsPrintfCString.h"
 #include "mozilla/dom/Element.h"
+#include "nsRegion.h"
+#include "nsDeviceContext.h"
+#include "nsIFrame.h"
 #include <algorithm>
 
 namespace mozilla {
@@ -115,32 +119,70 @@ GetPrefsFor(nsEventStructType aEventStructType)
 static bool
 HasMouseListener(nsIContent* aContent)
 {
-  nsEventListenerManager* elm = aContent->GetListenerManager(false);
+  if (EventListenerManager* elm = aContent->GetExistingListenerManager()) {
+    return elm->HasListenersFor(nsGkAtoms::onclick) ||
+           elm->HasListenersFor(nsGkAtoms::onmousedown) ||
+           elm->HasListenersFor(nsGkAtoms::onmouseup);
+  }
+
+  return false;
+}
+
+static bool gTouchEventsRegistered = false;
+static int32_t gTouchEventsEnabled = 0;
+
+static bool
+HasTouchListener(nsIContent* aContent)
+{
+  EventListenerManager* elm = aContent->GetExistingListenerManager();
   if (!elm) {
     return false;
   }
-  return elm->HasListenersFor(nsGkAtoms::onclick) ||
-         elm->HasListenersFor(nsGkAtoms::onmousedown) ||
-         elm->HasListenersFor(nsGkAtoms::onmouseup);
+
+  if (!gTouchEventsRegistered) {
+    Preferences::AddIntVarCache(&gTouchEventsEnabled,
+      "dom.w3c_touch_events.enabled", gTouchEventsEnabled);
+    gTouchEventsRegistered = true;
+  }
+
+  if (!gTouchEventsEnabled) {
+    return false;
+  }
+
+  return elm->HasListenersFor(nsGkAtoms::ontouchstart) ||
+         elm->HasListenersFor(nsGkAtoms::ontouchend);
 }
 
 static bool
-IsElementClickable(nsIFrame* aFrame)
+IsElementClickable(nsIFrame* aFrame, nsIAtom* stopAt = nullptr)
 {
   // Input events propagate up the content tree so we'll follow the content
   // ancestors to look for elements accepting the click.
   for (nsIContent* content = aFrame->GetContent(); content;
        content = content->GetFlattenedTreeParent()) {
-    if (HasMouseListener(content)) {
+    nsIAtom* tag = content->Tag();
+    if (content->IsHTML() && stopAt && tag == stopAt) {
+      break;
+    }
+    if (HasTouchListener(content) || HasMouseListener(content)) {
       return true;
     }
     if (content->IsHTML()) {
-      nsIAtom* tag = content->Tag();
       if (tag == nsGkAtoms::button ||
           tag == nsGkAtoms::input ||
           tag == nsGkAtoms::select ||
           tag == nsGkAtoms::textarea ||
           tag == nsGkAtoms::label) {
+        return true;
+      }
+      // Bug 921928: we don't have access to the content of remote iframe.
+      // So fluffing won't go there. We do an optimistic assumption here:
+      // that the content of the remote iframe needs to be a target.
+      if (tag == nsGkAtoms::iframe &&
+          content->AttrValueIs(kNameSpaceID_None, nsGkAtoms::mozbrowser,
+                               nsGkAtoms::_true, eIgnoreCase) &&
+          content->AttrValueIs(kNameSpaceID_None, nsGkAtoms::Remote,
+                               nsGkAtoms::_true, eIgnoreCase)) {
         return true;
       }
     } else if (content->IsXUL()) {
@@ -160,8 +202,13 @@ IsElementClickable(nsIFrame* aFrame)
         return true;
       }
     }
-    if (content->AttrValueIs(kNameSpaceID_None, nsGkAtoms::role,
-                             nsGkAtoms::button, eIgnoreCase)) {
+    static nsIContent::AttrValuesArray clickableRoles[] =
+      { &nsGkAtoms::button, &nsGkAtoms::key, nullptr };
+    if (content->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::role,
+                                 clickableRoles, eIgnoreCase) >= 0) {
+      return true;
+    }
+    if (content->IsEditable()) {
       return true;
     }
     nsCOMPtr<nsIURI> linkURI;
@@ -176,16 +223,27 @@ static nscoord
 AppUnitsFromMM(nsIFrame* aFrame, uint32_t aMM, bool aVertical)
 {
   nsPresContext* pc = aFrame->PresContext();
-  nsIPresShell* presShell = pc->PresShell();
   float result = float(aMM) *
-    (pc->DeviceContext()->AppUnitsPerPhysicalInch() / MM_PER_INCH_FLOAT) *
-    (aVertical ? presShell->GetYResolution() : presShell->GetXResolution());
+    (pc->DeviceContext()->AppUnitsPerPhysicalInch() / MM_PER_INCH_FLOAT);
   return NSToCoordRound(result);
+}
+
+/**
+ * Clip aRect with the bounds of aFrame in the coordinate system of
+ * aRootFrame. aRootFrame is an ancestor of aFrame.
+ */
+static nsRect
+ClipToFrame(nsIFrame* aRootFrame, nsIFrame* aFrame, nsRect& aRect)
+{
+  nsRect bound = nsLayoutUtils::TransformFrameRectToAncestor(
+    aFrame, nsRect(nsPoint(0, 0), aFrame->GetSize()), aRootFrame);
+  nsRect result = bound.Intersect(aRect);
+  return result;
 }
 
 static nsRect
 GetTargetRect(nsIFrame* aRootFrame, const nsPoint& aPointRelativeToRootFrame,
-              const EventRadiusPrefs* aPrefs)
+              nsIFrame* aRestrictToDescendants, const EventRadiusPrefs* aPrefs)
 {
   nsMargin m(AppUnitsFromMM(aRootFrame, aPrefs->mSideRadii[0], true),
              AppUnitsFromMM(aRootFrame, aPrefs->mSideRadii[1], false),
@@ -193,7 +251,7 @@ GetTargetRect(nsIFrame* aRootFrame, const nsPoint& aPointRelativeToRootFrame,
              AppUnitsFromMM(aRootFrame, aPrefs->mSideRadii[3], false));
   nsRect r(aPointRelativeToRootFrame, nsSize(0,0));
   r.Inflate(m);
-  return r;
+  return ClipToFrame(aRootFrame, aRestrictToDescendants, r);
 }
 
 static float
@@ -204,16 +262,68 @@ ComputeDistanceFromRect(const nsPoint& aPoint, const nsRect& aRect)
   return float(NS_hypot(dx, dy));
 }
 
+static float
+ComputeDistanceFromRegion(const nsPoint& aPoint, const nsRegion& aRegion)
+{
+  MOZ_ASSERT(!aRegion.IsEmpty(), "can't compute distance between point and empty region");
+  nsRegionRectIterator iter(aRegion);
+  const nsRect* r;
+  float minDist = -1;
+  while ((r = iter.Next()) != nullptr) {
+    float dist = ComputeDistanceFromRect(aPoint, *r);
+    if (dist < minDist || minDist < 0) {
+      minDist = dist;
+    }
+  }
+  return minDist;
+}
+
+// Subtract aRegion from aExposedRegion as long as that doesn't make the
+// exposed region get too complex or removes a big chunk of the exposed region.
+static void
+SubtractFromExposedRegion(nsRegion* aExposedRegion, const nsRegion& aRegion)
+{
+  if (aRegion.IsEmpty())
+    return;
+
+  nsRegion tmp;
+  tmp.Sub(*aExposedRegion, aRegion);
+  // Don't let *aExposedRegion get too complex, but don't let it fluff out to
+  // its bounds either. Do let aExposedRegion get more complex if by doing so
+  // we reduce its area by at least half.
+  if (tmp.GetNumRects() <= 15 || tmp.Area() <= aExposedRegion->Area()/2) {
+    *aExposedRegion = tmp;
+  }
+}
+
 static nsIFrame*
 GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
-           const EventRadiusPrefs* aPrefs, nsIFrame* aRestrictToDescendants,
-           nsTArray<nsIFrame*>& aCandidates)
+           const nsRect& aTargetRect, const EventRadiusPrefs* aPrefs,
+           nsIFrame* aRestrictToDescendants, nsTArray<nsIFrame*>& aCandidates)
 {
   nsIFrame* bestTarget = nullptr;
   // Lower is better; distance is in appunits
   float bestDistance = 1e6f;
+  nsRegion exposedRegion(aTargetRect);
   for (uint32_t i = 0; i < aCandidates.Length(); ++i) {
     nsIFrame* f = aCandidates[i];
+
+    bool preservesAxisAlignedRectangles = false;
+    nsRect borderBox = nsLayoutUtils::TransformFrameRectToAncestor(f,
+        nsRect(nsPoint(0, 0), f->GetSize()), aRoot, &preservesAxisAlignedRectangles);
+    nsRegion region;
+    region.And(exposedRegion, borderBox);
+
+    if (region.IsEmpty()) {
+      continue;
+    }
+
+    if (preservesAxisAlignedRectangles) {
+      // Subtract from the exposed region if we have a transform that won't make
+      // the bounds include a bunch of area that we don't actually cover.
+      SubtractFromExposedRegion(&exposedRegion, region);
+    }
+
     if (!IsElementClickable(f)) {
       continue;
     }
@@ -226,13 +336,12 @@ GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
       continue;
     }
 
-    nsRect borderBox = nsLayoutUtils::TransformFrameRectToAncestor(f,
-        nsRect(nsPoint(0, 0), f->GetSize()), aRoot);
     // distance is in appunits
-    float distance = ComputeDistanceFromRect(aPointRelativeToRootFrame, borderBox);
+    float distance = ComputeDistanceFromRegion(aPointRelativeToRootFrame, region);
     nsIContent* content = f->GetContent();
     if (content && content->IsElement() &&
-        content->AsElement()->State().HasState(nsEventStates(NS_EVENT_STATE_VISITED))) {
+        content->AsElement()->State().HasState(
+                                        EventStates(NS_EVENT_STATE_VISITED))) {
       distance *= aPrefs->mVisitedWeight / 100.0f;
     }
     if (distance < bestDistance) {
@@ -244,18 +353,18 @@ GetClosest(nsIFrame* aRoot, const nsPoint& aPointRelativeToRootFrame,
 }
 
 nsIFrame*
-FindFrameTargetedByInputEvent(const nsGUIEvent *aEvent,
+FindFrameTargetedByInputEvent(const WidgetGUIEvent* aEvent,
                               nsIFrame* aRootFrame,
                               const nsPoint& aPointRelativeToRootFrame,
                               uint32_t aFlags)
 {
-  bool ignoreRootScrollFrame = (aFlags & INPUT_IGNORE_ROOT_SCROLL_FRAME) != 0;
+  uint32_t flags = (aFlags & INPUT_IGNORE_ROOT_SCROLL_FRAME) ?
+     nsLayoutUtils::IGNORE_ROOT_SCROLL_FRAME : 0;
   nsIFrame* target =
-    nsLayoutUtils::GetFrameForPoint(aRootFrame, aPointRelativeToRootFrame,
-                                    false, ignoreRootScrollFrame);
+    nsLayoutUtils::GetFrameForPoint(aRootFrame, aPointRelativeToRootFrame, flags);
 
   const EventRadiusPrefs* prefs = GetPrefsFor(aEvent->eventStructType);
-  if (!prefs || !prefs->mEnabled || (target && IsElementClickable(target))) {
+  if (!prefs || !prefs->mEnabled || (target && IsElementClickable(target, nsGkAtoms::body))) {
     return target;
   }
 
@@ -263,16 +372,8 @@ FindFrameTargetedByInputEvent(const nsGUIEvent *aEvent,
   // events generated by touch-screen hardware.
   if (aEvent->eventStructType == NS_MOUSE_EVENT &&
       prefs->mTouchOnly &&
-      static_cast<const nsMouseEvent*>(aEvent)->inputSource !=
-          nsIDOMMouseEvent::MOZ_SOURCE_TOUCH) {
-      return target;
-  }
-
-  nsRect targetRect = GetTargetRect(aRootFrame, aPointRelativeToRootFrame, prefs);
-  nsAutoTArray<nsIFrame*,8> candidates;
-  nsresult rv = nsLayoutUtils::GetFramesForArea(aRootFrame, targetRect, candidates,
-                                                false, ignoreRootScrollFrame);
-  if (NS_FAILED(rv)) {
+      aEvent->AsMouseEvent()->inputSource !=
+        nsIDOMMouseEvent::MOZ_SOURCE_TOUCH) {
     return target;
   }
 
@@ -283,8 +384,17 @@ FindFrameTargetedByInputEvent(const nsGUIEvent *aEvent,
   // would be targeted instead.
   nsIFrame* restrictToDescendants = target ?
     target->PresContext()->PresShell()->GetRootFrame() : aRootFrame;
+
+  nsRect targetRect = GetTargetRect(aRootFrame, aPointRelativeToRootFrame,
+                                    restrictToDescendants, prefs);
+  nsAutoTArray<nsIFrame*,8> candidates;
+  nsresult rv = nsLayoutUtils::GetFramesForArea(aRootFrame, targetRect, candidates, flags);
+  if (NS_FAILED(rv)) {
+    return target;
+  }
+
   nsIFrame* closestClickable =
-    GetClosest(aRootFrame, aPointRelativeToRootFrame, prefs,
+    GetClosest(aRootFrame, aPointRelativeToRootFrame, targetRect, prefs,
                restrictToDescendants, candidates);
   return closestClickable ? closestClickable : target;
 }

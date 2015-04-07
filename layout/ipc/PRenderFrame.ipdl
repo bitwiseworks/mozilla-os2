@@ -8,6 +8,9 @@
 include protocol PBrowser;
 include protocol PLayerTransaction;
 
+
+using class nsRegion from "nsRegion.h";
+
 namespace mozilla {
 namespace layout {
 
@@ -41,18 +44,19 @@ parent:
 
     async NotifyCompositorTransaction();
 
-    async CancelDefaultPanZoom();
-    async DetectScrollableSubframe();
+    async UpdateHitRegion(nsRegion aRegion);
 
     async __delete__();
 
 state EMPTY_OR_DIRECT_COMPOSITOR:
     recv PLayerTransaction goto HAVE_CONTENT;
     recv NotifyCompositorTransaction goto EMPTY_OR_DIRECT_COMPOSITOR;
+    recv UpdateHitRegion goto EMPTY_OR_DIRECT_COMPOSITOR;
     recv __delete__;
 
 state HAVE_CONTENT:
     recv NotifyCompositorTransaction goto HAVE_CONTENT;
+    recv UpdateHitRegion goto HAVE_CONTENT;
     recv __delete__;
 };
 

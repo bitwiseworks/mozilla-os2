@@ -5,6 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsRecentBadCerts.h"
+
+#include "pkix/pkixtypes.h"
 #include "nsIX509Cert.h"
 #include "nsIObserverService.h"
 #include "mozilla/RefPtr.h"
@@ -22,8 +24,7 @@
 
 using namespace mozilla;
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsRecentBadCerts,
-                              nsIRecentBadCerts)
+NS_IMPL_ISUPPORTS(nsRecentBadCerts, nsIRecentBadCerts)
 
 nsRecentBadCerts::nsRecentBadCerts()
 :monitor("nsRecentBadCerts.monitor")
@@ -71,7 +72,8 @@ nsRecentBadCerts::GetRecentBadCert(const nsAString & aHostNameWithPort,
 
   if (foundDER.len) {
     CERTCertDBHandle *certdb = CERT_GetDefaultCertDB();
-    ScopedCERTCertificate nssCert(CERT_FindCertByDERCert(certdb, &foundDER));
+    mozilla::pkix::ScopedCERTCertificate nssCert(
+      CERT_FindCertByDERCert(certdb, &foundDER));
     if (!nssCert) 
       nssCert = CERT_NewTempCertificate(certdb, &foundDER,
                                         nullptr, // no nickname
@@ -83,7 +85,7 @@ nsRecentBadCerts::GetRecentBadCert(const nsAString & aHostNameWithPort,
     if (!nssCert)
       return NS_ERROR_FAILURE;
 
-    status->mServerCert = nsNSSCertificate::Create(nssCert);
+    status->mServerCert = nsNSSCertificate::Create(nssCert.get());
     status->mHaveCertErrorBits = true;
     status->mIsDomainMismatch = isDomainMismatch;
     status->mIsNotValidAtThisTime = isNotValidAtThisTime;

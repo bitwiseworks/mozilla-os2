@@ -8,63 +8,17 @@ include protocol PIndexedDBIndex;
 include protocol PIndexedDBRequest;
 include protocol PIndexedDBTransaction;
 
-include "mozilla/dom/indexedDB/SerializationHelpers.h";
+include IndexedDBParams;
 
-using mozilla::dom::indexedDB::Key;
-using mozilla::dom::indexedDB::IDBCursor::Direction;
-using mozilla::dom::indexedDB::IndexInfo;
-using mozilla::dom::indexedDB::IndexUpdateInfo;
-using mozilla::dom::indexedDB::SerializedStructuredCloneReadInfo;
-using mozilla::dom::indexedDB::SerializedStructuredCloneWriteInfo;
-
-using mozilla::void_t;
+using struct mozilla::dom::indexedDB::IndexInfo from "mozilla/dom/indexedDB/DatabaseInfo.h";
+using struct mozilla::dom::indexedDB::IndexUpdateInfo from "mozilla/dom/indexedDB/DatabaseInfo.h";
+using struct mozilla::dom::indexedDB::SerializedStructuredCloneWriteInfo from "mozilla/dom/indexedDB/IndexedDatabase.h";
 
 namespace mozilla {
 namespace dom {
 namespace indexedDB {
 
 namespace ipc {
-
-namespace FIXME_Bug_521898_objectstore {
-
-struct KeyRange
-{
-  Key lower;
-  Key upper;
-  bool lowerOpen;
-  bool upperOpen;
-  bool isOnly;
-};
-
-union OptionalKeyRange
-{
-  KeyRange;
-  void_t;
-};
-
-struct GetParams
-{
-  KeyRange keyRange;
-};
-
-struct GetAllParams
-{
-  OptionalKeyRange optionalKeyRange;
-  uint32_t limit;
-};
-
-struct CountParams
-{
-  OptionalKeyRange optionalKeyRange;
-};
-
-struct OpenCursorParams
-{
-  OptionalKeyRange optionalKeyRange;
-  Direction direction;
-};
-
-} // namespace FIXME_Bug_521898_objectstore
 
 struct AddPutParams
 {
@@ -91,19 +45,20 @@ struct DeleteParams
 
 struct ClearParams
 {
-  void_t FIXME_Bug_753159;
 };
 
 union ObjectStoreRequestParams
 {
   GetParams;
   GetAllParams;
+  GetAllKeysParams;
   AddParams;
   PutParams;
   DeleteParams;
   ClearParams;
   CountParams;
   OpenCursorParams;
+  OpenKeyCursorParams;
 };
 
 struct CreateIndexParams
@@ -127,7 +82,7 @@ struct ObjectStoreCursorConstructorParams
   PIndexedDBRequest request;
   Direction direction;
   Key key;
-  SerializedStructuredCloneReadInfo cloneInfo;
+  OptionalStructuredCloneReadInfo optionalCloneInfo;
   PBlob[] blobs;
 };
 

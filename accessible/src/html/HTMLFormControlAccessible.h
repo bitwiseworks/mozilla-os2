@@ -26,7 +26,13 @@ class HTMLCheckboxAccessible : public LeafAccessible
 public:
   enum { eAction_Click = 0 };
 
-  HTMLCheckboxAccessible(nsIContent* aContent, DocAccessible* aDoc);
+  HTMLCheckboxAccessible(nsIContent* aContent, DocAccessible* aDoc) :
+    LeafAccessible(aContent, aDoc)
+  {
+    // Ignore "CheckboxStateChange" DOM event in lieu of document observer
+    // state change notification.
+    mStateFlags |= eIgnoreDOMUIEvent;
+  }
 
   // nsIAccessible
   NS_IMETHOD GetActionName(uint8_t aIndex, nsAString& aName);
@@ -51,7 +57,13 @@ class HTMLRadioButtonAccessible : public RadioButtonAccessible
 {
 
 public:
-  HTMLRadioButtonAccessible(nsIContent* aContent, DocAccessible* aDoc);
+  HTMLRadioButtonAccessible(nsIContent* aContent, DocAccessible* aDoc) :
+    RadioButtonAccessible(aContent, aDoc)
+  {
+    // Ignore "RadioStateChange" DOM event in lieu of document observer
+    // state change notification.
+    mStateFlags |= eIgnoreDOMUIEvent;
+  }
 
   // Accessible
   virtual uint64_t NativeState();
@@ -119,6 +131,7 @@ public:
   virtual void ApplyARIAState(uint64_t* aState) const;
   virtual mozilla::a11y::role NativeRole();
   virtual uint64_t NativeState();
+  virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() MOZ_OVERRIDE;
 
   // ActionAccessible
   virtual uint8_t ActionCount();
@@ -131,7 +144,10 @@ protected:
   // Accessible
   virtual ENameValueFlag NativeName(nsString& aName) MOZ_OVERRIDE;
 
-  virtual void CacheChildren() MOZ_OVERRIDE;
+  /**
+   * Return a XUL widget element this input is part of.
+   */
+  nsIContent* XULWidgetElm() const { return mContent->GetBindingParent(); }
 };
 
 
@@ -150,6 +166,30 @@ public:
 
 
 /**
+ * Used for HTML input@type="number".
+ */
+class HTMLSpinnerAccessible : public AccessibleWrap
+{
+public:
+  HTMLSpinnerAccessible(nsIContent* aContent, DocAccessible* aDoc) :
+    AccessibleWrap(aContent, aDoc)
+  {
+    mStateFlags |= eHasNumericValue;
+}
+
+  // Accessible
+  virtual mozilla::a11y::role NativeRole() MOZ_OVERRIDE;
+  virtual void Value(nsString& aValue) MOZ_OVERRIDE;
+
+  virtual double MaxValue() const MOZ_OVERRIDE;
+  virtual double MinValue() const MOZ_OVERRIDE;
+  virtual double CurValue() const MOZ_OVERRIDE;
+  virtual double Step() const MOZ_OVERRIDE;
+  virtual bool SetCurValue(double aValue) MOZ_OVERRIDE;
+};
+
+
+/**
   * Used for input@type="range" element.
   */
 class HTMLRangeAccessible : public LeafAccessible
@@ -161,12 +201,16 @@ public:
     mStateFlags |= eHasNumericValue;
   }
 
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIACCESSIBLEVALUE
-
   // Accessible
   virtual void Value(nsString& aValue);
   virtual mozilla::a11y::role NativeRole();
+
+  // Value
+  virtual double MaxValue() const MOZ_OVERRIDE;
+  virtual double MinValue() const MOZ_OVERRIDE;
+  virtual double CurValue() const MOZ_OVERRIDE;
+  virtual double Step() const MOZ_OVERRIDE;
+  virtual bool SetCurValue(double aValue) MOZ_OVERRIDE;
 
   // Widgets
   virtual bool IsWidget() const;
@@ -183,7 +227,7 @@ public:
 
   // Accessible
   virtual mozilla::a11y::role NativeRole();
-  virtual Relation RelationByType(uint32_t aType);
+  virtual Relation RelationByType(RelationType aType) MOZ_OVERRIDE;
 
 protected:
   // Accessible
@@ -204,7 +248,7 @@ public:
 
   // Accessible
   virtual mozilla::a11y::role NativeRole();
-  virtual Relation RelationByType(uint32_t aType);
+  virtual Relation RelationByType(RelationType aType) MOZ_OVERRIDE;
 };
 
 /**
@@ -218,7 +262,7 @@ public:
   // Accessible
   virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() MOZ_OVERRIDE;
   virtual mozilla::a11y::role NativeRole();
-  virtual Relation RelationByType(uint32_t aType);
+  virtual Relation RelationByType(RelationType aType) MOZ_OVERRIDE;
 
 protected:
   // Accessible
@@ -239,7 +283,7 @@ public:
 
   // Accessible
   virtual mozilla::a11y::role NativeRole();
-  virtual Relation RelationByType(uint32_t aType);
+  virtual Relation RelationByType(RelationType aType) MOZ_OVERRIDE;
 };
 
 } // namespace a11y

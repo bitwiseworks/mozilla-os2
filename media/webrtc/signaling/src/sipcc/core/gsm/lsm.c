@@ -984,7 +984,20 @@ lsm_rx_start (lsm_lcb_t *lcb, const char *fname, fsmdef_media_t *media)
                     media->src_port = open_rcv.port;
                 }
 
+                attrs.rtcp_mux = media->rtcp_mux;
+
+                attrs.is_video = FALSE;
+                attrs.bundle_level = 0;
+                attrs.bundle_stream_correlator = 0;
+                attrs.num_ssrcs = 0;
+                attrs.num_unique_payload_types = 0;
+                /* TODO(bcampen@mozilla.com): Bug 784491: Fill in
+                 * attrs.bundle_stream_correlator, attrs.ssrcs, and
+                 * attrs.unique_payload_types
+                 */
+
                 if ( media->cap_index == CC_VIDEO_1 ) {
+                    attrs.is_video = TRUE;
                     attrs.video.opaque = media->video;
                 } else {
                     attrs.audio.packetization_period = media->packetization_period;
@@ -1005,6 +1018,7 @@ lsm_rx_start (lsm_lcb_t *lcb, const char *fname, fsmdef_media_t *media)
                     dcb->peerconnection,
                     media->num_payloads,
                     media->payloads,
+                    media->setup,
                     FSM_NEGOTIATED_CRYPTO_DIGEST_ALGORITHM(media),
                     FSM_NEGOTIATED_CRYPTO_DIGEST(media),
                     &attrs);
@@ -1216,11 +1230,23 @@ lsm_tx_start (lsm_lcb_t *lcb, const char *fname, fsmdef_media_t *media)
         			continue;
             	}
         	}
-
             media->xmit_chan = TRUE;
-
             attrs.mute = FALSE;
+            attrs.rtcp_mux = media->rtcp_mux;
+            attrs.audio_level = media->audio_level;
+            attrs.audio_level_id = (uint8_t)media->audio_level_id;
+            attrs.is_video = FALSE;
+            attrs.bundle_level = 0;
+            attrs.bundle_stream_correlator = 0;
+            attrs.num_ssrcs = 0;
+            attrs.num_unique_payload_types = 0;
+            /* TODO(bcampen@mozilla.com): Bug 784491: Fill in
+             * attrs.bundle_stream_correlator, attrs.ssrcs, and
+             * attrs.unique_payload_types
+             */
+
             if ( CC_IS_VIDEO(media->cap_index)) {
+                attrs.is_video = TRUE;
                 attrs.video.opaque = media->video;
                 if (lcb->vid_mute) {
                     attrs.mute = TRUE;
@@ -1273,6 +1299,7 @@ lsm_tx_start (lsm_lcb_t *lcb, const char *fname, fsmdef_media_t *media)
                   dcb->peerconnection,
                   media->payloads,
                   (short)dscp,
+                  media->setup,
                   FSM_NEGOTIATED_CRYPTO_DIGEST_ALGORITHM(media),
                   FSM_NEGOTIATED_CRYPTO_DIGEST(media),
                   &attrs) == -1)

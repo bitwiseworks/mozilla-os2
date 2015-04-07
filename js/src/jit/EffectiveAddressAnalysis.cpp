@@ -4,13 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "EffectiveAddressAnalysis.h"
+#include "jit/EffectiveAddressAnalysis.h"
+#include "jit/MIR.h"
+#include "jit/MIRGraph.h"
 
 using namespace js;
 using namespace jit;
 
 static void
-AnalyzeLsh(MBasicBlock *block, MLsh *lsh)
+AnalyzeLsh(TempAllocator &alloc, MLsh *lsh)
 {
     if (lsh->specialization() != MIRType_Int32)
         return;
@@ -30,9 +32,9 @@ AnalyzeLsh(MBasicBlock *block, MLsh *lsh)
 
     int32_t displacement = 0;
     MInstruction *last = lsh;
-    MDefinition *base = NULL;
+    MDefinition *base = nullptr;
     while (true) {
-        if (last->useCount() != 1)
+        if (!last->hasOneUse())
             break;
 
         MUseIterator use = last->usesBegin();
@@ -61,7 +63,7 @@ AnalyzeLsh(MBasicBlock *block, MLsh *lsh)
         if (displacement % elemSize != 0)
             return;
 
-        if (last->useCount() != 1)
+        if (!last->hasOneUse())
             return;
 
         MUseIterator use = last->usesBegin();
@@ -82,9 +84,9 @@ AnalyzeLsh(MBasicBlock *block, MLsh *lsh)
         return;
     }
 
-    MEffectiveAddress *eaddr = MEffectiveAddress::New(base, index, scale, displacement);
+    MEffectiveAddress *eaddr = MEffectiveAddress::New(alloc, base, index, scale, displacement);
     last->replaceAllUsesWith(eaddr);
-    block->insertAfter(last, eaddr);
+    last->block()->insertAfter(last, eaddr);
 }
 
 // This analysis converts patterns of the form:
@@ -107,7 +109,7 @@ EffectiveAddressAnalysis::analyze()
     for (ReversePostorderIterator block(graph_.rpoBegin()); block != graph_.rpoEnd(); block++) {
         for (MInstructionIterator i = block->begin(); i != block->end(); i++) {
             if (i->isLsh())
-                AnalyzeLsh(*block, i->toLsh());
+                AnalyzeLsh(graph_.alloc(), i->toLsh());
         }
     }
     return true;

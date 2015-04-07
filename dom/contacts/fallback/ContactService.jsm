@@ -11,7 +11,7 @@ const Cu = Components.utils;
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 
-this.EXPORTED_SYMBOLS = [];
+this.EXPORTED_SYMBOLS = ["ContactService"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -22,9 +22,9 @@ XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
                                    "@mozilla.org/parentprocessmessagemanager;1",
                                    "nsIMessageListenerManager");
 
-let myGlobal = this;
 
-let ContactService = {
+/* all exported symbols need to be bound to this on B2G - Bug 961777 */
+let ContactService = this.ContactService = {
   init: function() {
     if (DEBUG) debug("Init");
     this._messages = ["Contacts:Find", "Contacts:GetAll", "Contacts:GetAll:SendNow",
@@ -33,32 +33,22 @@ let ContactService = {
                       "child-process-shutdown", "Contacts:GetRevision",
                       "Contacts:GetCount"];
     this._children = [];
-    this._cursors = {};
+    this._cursors = new Map();
     this._messages.forEach(function(msgName) {
       ppmm.addMessageListener(msgName, this);
     }.bind(this));
 
-    var idbManager = Components.classes["@mozilla.org/dom/indexeddb/manager;1"].getService(Ci.nsIIndexedDatabaseManager);
-    idbManager.initWindowless(myGlobal);
-    this._db = new ContactDB(myGlobal);
-    this._db.init(myGlobal);
+    this._db = new ContactDB();
+    this._db.init();
 
-    let countryName = PhoneNumberUtils.getCountryName();
-    if (Services.prefs.getPrefType("dom.phonenumber.substringmatching." + countryName) == Ci.nsIPrefBranch.PREF_INT) {
-      if (DEBUG) debug("Enable Substring Matching for Phone Numbers: " + countryName);
-      let val = Services.prefs.getIntPref("dom.phonenumber.substringmatching." + countryName);
-      if (val && val > 0) {
-        this._db.enableSubstringMatching(val);
-      }
-    }
+    this.configureSubstringMatching();
 
     Services.obs.addObserver(this, "profile-before-change", false);
-    Services.prefs.addObserver("dom.phonenumber.substringmatching", this, false);
+    Services.prefs.addObserver("ril.lastKnownSimMcc", this, false);
   },
 
   observe: function(aSubject, aTopic, aData) {
     if (aTopic === 'profile-before-change') {
-      myGlobal = null;
       this._messages.forEach(function(msgName) {
         ppmm.removeMessageListener(msgName, this);
       }.bind(this));
@@ -71,16 +61,23 @@ let ContactService = {
       this._db = null;
       this._children = null;
       this._cursors = null;
-    } else if (aTopic === 'nsPref:changed' && aData.contains("dom.phonenumber.substringmatching")) {
-      // We don't fully support changing substringMatching during runtime. This is mostly for testing.
-      let countryName = PhoneNumberUtils.getCountryName();
-      if (Services.prefs.getPrefType("dom.phonenumber.substringmatching." + countryName) == Ci.nsIPrefBranch.PREF_INT) {
-        let val = Services.prefs.getIntPref("dom.phonenumber.substringmatching." + countryName);
-        if (val && val > 0) {
-          this._db.enableSubstringMatching(val);
-        }
+    } else if (aTopic === 'nsPref:changed' && aData === "ril.lastKnownSimMcc") {
+      this.configureSubstringMatching();
+    }
+  },
+
+  configureSubstringMatching: function() {
+    let countryName = PhoneNumberUtils.getCountryName();
+    if (Services.prefs.getPrefType("dom.phonenumber.substringmatching." + countryName) == Ci.nsIPrefBranch.PREF_INT) {
+      let val = Services.prefs.getIntPref("dom.phonenumber.substringmatching." + countryName);
+      if (val) {
+        this._db.enableSubstringMatching(val);
+        return;
       }
     }
+    // if we got here, we dont have a substring setting
+    // for this country, so disable substring matching
+    this._db.disableSubstringMatching();
   },
 
   assertPermission: function(aMessage, aPerm) {
@@ -125,25 +122,28 @@ let ContactService = {
         if (!this.assertPermission(aMessage, "contacts-read")) {
           return null;
         }
-        if (!this._cursors[mm]) {
-          this._cursors[mm] = [];
+        let cursorList = this._cursors.get(mm);
+        if (!cursorList) {
+          cursorList = [];
+          this._cursors.set(mm, cursorList);
         }
-        this._cursors[mm].push(msg.cursorId);
+        cursorList.push(msg.cursorId);
 
         this._db.getAll(
           function(aContacts) {
             try {
               mm.sendAsyncMessage("Contacts:GetAll:Next", {cursorId: msg.cursorId, contacts: aContacts});
               if (aContacts === null) {
-                let index = this._cursors[mm].indexOf(msg.cursorId);
-                this._cursors[mm].splice(index, 1);
+                let cursorList = this._cursors.get(mm);
+                let index = cursorList.indexOf(msg.cursorId);
+                cursorList.splice(index, 1);
               }
             } catch (e) {
               if (DEBUG) debug("Child is dead, DB should stop sending contacts");
               throw e;
             }
           }.bind(this),
-          function(aErrorMsg) { mm.sendAsyncMessage("Contacts:Find:Return:KO", { requestID: msg.cursorId, errorMsg: aErrorMsg }); },
+          function(aErrorMsg) { mm.sendAsyncMessage("Contacts:GetAll:Return:KO", { requestID: msg.cursorId, errorMsg: aErrorMsg }); },
           msg.findOptions, msg.cursorId);
         break;
       case "Contacts:GetAll:SendNow":
@@ -192,7 +192,9 @@ let ContactService = {
             mm.sendAsyncMessage("Contacts:Clear:Return:OK", { requestID: msg.requestID });
             this.broadcastMessage("Contact:Changed", { reason: "remove" });
           }.bind(this),
-          function(aErrorMsg) { mm.sendAsyncMessage("Contacts:Clear:Return:KO", { requestID: msg.requestID, errorMsg: aErrorMsg }); }.bind(this)
+          function(aErrorMsg) {
+            mm.sendAsyncMessage("Contacts:Clear:Return:KO", { requestID: msg.requestID, errorMsg: aErrorMsg });
+          }.bind(this)
         );
         break;
       case "Contacts:GetRevision":
@@ -205,7 +207,10 @@ let ContactService = {
               requestID: msg.requestID,
               revision: revision
             });
-          }
+          },
+          function(aErrorMsg) {
+            mm.sendAsyncMessage("Contacts:GetRevision:Return:KO", { requestID: msg.requestID, errorMsg: aErrorMsg });
+          }.bind(this)
         );
         break;
       case "Contacts:GetCount":
@@ -218,7 +223,10 @@ let ContactService = {
               requestID: msg.requestID,
               count: count
             });
-          }
+          },
+          function(aErrorMsg) {
+            mm.sendAsyncMessage("Contacts:Count:Return:KO", { requestID: msg.requestID, errorMsg: aErrorMsg });
+          }.bind(this)
         );
         break;
       case "Contacts:RegisterForMessages":
@@ -237,11 +245,12 @@ let ContactService = {
           if (DEBUG) debug("Unregister index: " + index);
           this._children.splice(index, 1);
         }
-        if (this._cursors[mm]) {
-          for (let id of this._cursors[mm]) {
+        cursorList = this._cursors.get(mm);
+        if (cursorList) {
+          for (let id of cursorList) {
             this._db.clearDispatcher(id);
           }
-          delete this._cursors[mm];
+          this._cursors.delete(mm);
         }
         break;
       default:

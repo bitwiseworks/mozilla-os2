@@ -7,10 +7,8 @@
 #define nsIScriptTimeoutHandler_h___
 
 #include "nsTArray.h"
+#include "js/TypeDecls.h"
 
-namespace JS {
-class Value;
-} // namespace JS
 namespace mozilla {
 namespace dom {
 class Function;
@@ -36,7 +34,7 @@ public:
   virtual mozilla::dom::Function *GetCallback() = 0;
 
   // Get the handler text of not a compiled object.
-  virtual const PRUnichar *GetHandlerText() = 0;
+  virtual const char16_t *GetHandlerText() = 0;
 
   // Get the location of the script.
   // Note: The memory pointed to by aFileName is owned by the

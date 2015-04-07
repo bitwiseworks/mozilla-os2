@@ -63,7 +63,7 @@ nsTString_CharT::RFind( const char* aString, bool aIgnoreCase, int32_t aOffset, 
    */
 
 int32_t
-nsTString_CharT::RFindChar( PRUnichar aChar, int32_t aOffset, int32_t aCount) const
+nsTString_CharT::RFindChar( char16_t aChar, int32_t aOffset, int32_t aCount) const
   {
     return nsBufferRoutines<CharT>::rfind_char(mData, mLength, aOffset, aChar, aCount);
   }
@@ -380,13 +380,13 @@ nsTString_CharT::Mid( self_type& aResult, index_type aStartPos, size_type aLengt
    */
 
 bool
-nsTString_CharT::SetCharAt( PRUnichar aChar, uint32_t aIndex )
+nsTString_CharT::SetCharAt( char16_t aChar, uint32_t aIndex )
   {
     if (aIndex >= mLength)
       return false;
 
     if (!EnsureMutable())
-      NS_RUNTIMEABORT("OOM");
+      NS_ABORT_OOM(mLength);
 
     mData[aIndex] = CharT(aChar);
     return true;
@@ -401,7 +401,7 @@ void
 nsTString_CharT::StripChars( const char* aSet )
   {
     if (!EnsureMutable())
-      NS_RUNTIMEABORT("OOM");
+      NS_ABORT_OOM(mLength);
 
     mLength = nsBufferRoutines<CharT>::strip_chars(mData, mLength, aSet);
   }
@@ -421,7 +421,7 @@ void
 nsTString_CharT::ReplaceChar( char_type aOldChar, char_type aNewChar )
   {
     if (!EnsureMutable()) // XXX do this lazily?
-      NS_RUNTIMEABORT("OOM");
+      NS_ABORT_OOM(mLength);
 
     for (uint32_t i=0; i<mLength; ++i)
       {
@@ -434,7 +434,7 @@ void
 nsTString_CharT::ReplaceChar( const char* aSet, char_type aNewChar )
   {
     if (!EnsureMutable()) // XXX do this lazily?
-      NS_RUNTIMEABORT("OOM");
+      NS_ABORT_OOM(mLength);
 
     char_type* data = mData;
     uint32_t lenRemaining = mLength;
@@ -467,7 +467,7 @@ nsTString_CharT::ReplaceSubstring( const self_type& aTarget, const self_type& aN
     uint32_t i = 0;
     while (i < mLength)
       {
-        int32_t r = FindSubstring(mData + i, mLength - i, aTarget.Data(), aTarget.Length(), false);
+        int32_t r = FindSubstring(mData + i, mLength - i, static_cast<const char_type*>(aTarget.Data()), aTarget.Length(), false);
         if (r == kNotFound)
           break;
 
@@ -569,7 +569,7 @@ void
 nsTString_CharT::AssignWithConversion( const incompatible_char_type* aData, int32_t aLength )
   {
       // for compatibility with the old string implementation, we need to allow
-      // for a NULL input buffer :-(
+      // for a nullptr input buffer :-(
     if (!aData)
       {
         Truncate();

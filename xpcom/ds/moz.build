@@ -37,29 +37,22 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     ]
     EXPORTS += ['nsWindowsRegKey.h']
     EXPORTS.mozilla += ['TimeStamp_windows.h']
-    CPP_SOURCES += [
+    SOURCES += [
         'nsWindowsRegKey.cpp'
     ]
 
 XPIDL_MODULE = 'xpcom_ds'
 
-MODULE = 'xpcom'
-
 EXPORTS += [
     'nsArray.h',
     'nsAtomService.h',
-    'nsCRT.h',
     'nsCharSeparatedTokenizer.h',
     'nsCheapSets.h',
-    'nsCppSharedAllocator.h',
+    'nsCRT.h',
     'nsExpirationTracker.h',
     'nsHashPropertyBag.h',
     'nsHashtable.h',
-    'nsIByteBuffer.h',
-    'nsIUnicharBuffer.h',
     'nsMathUtils.h',
-    'nsObserverList.h',
-    'nsObserverService.h',
     'nsStaticAtom.h',
     'nsStaticNameTable.h',
     'nsStringEnumerator.h',
@@ -75,43 +68,58 @@ EXPORTS.mozilla += [
     'TimeStamp.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsArray.cpp',
     'nsAtomService.cpp',
     'nsAtomTable.cpp',
-    'nsByteBuffer.cpp',
     'nsCRT.cpp',
     'nsHashPropertyBag.cpp',
     'nsHashtable.cpp',
     'nsINIParserImpl.cpp',
     'nsObserverList.cpp',
     'nsObserverService.cpp',
-    'nsPersistentProperties.cpp',
     'nsProperties.cpp',
-    'nsStaticNameTable.cpp',
     'nsStringEnumerator.cpp',
     'nsSupportsArray.cpp',
     'nsSupportsArrayEnumerator.cpp',
     'nsSupportsPrimitives.cpp',
-    'nsUnicharBuffer.cpp',
     'nsVariant.cpp',
     'TimeStamp.cpp',
 ]
 
-if CONFIG['HAVE_CLOCK_MONOTONIC']:
-    CPP_SOURCES += [
+# These two files cannot be built in unified mode because they use the
+# PL_ARENA_CONST_ALIGN_MASK macro with plarena.h.
+SOURCES += [
+    'nsPersistentProperties.cpp',
+    'nsStaticNameTable.cpp',
+]
+
+if CONFIG['OS_ARCH'] == 'WINNT':
+    SOURCES += [
+        'TimeStamp_windows.cpp',
+    ]
+elif CONFIG['HAVE_CLOCK_MONOTONIC']:
+    SOURCES += [
         'TimeStamp_posix.cpp',
     ]
 elif CONFIG['OS_ARCH'] == 'Darwin':
-    CPP_SOURCES += [
+    SOURCES += [
         'TimeStamp_darwin.cpp',
     ]
-elif CONFIG['OS_ARCH'] == 'WINNT':
-    CPP_SOURCES += [
-        'TimeStamp_windows.cpp',
-    ]
-else:
+elif CONFIG['COMPILE_ENVIRONMENT']:
     error('No TimeStamp implementation on this platform.  Build will not succeed')
 
-LIBRARY_NAME = 'xpcomds_s'
+EXTRA_COMPONENTS += [
+    'nsINIProcessor.js',
+    'nsINIProcessor.manifest',
+]
 
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+LOCAL_INCLUDES += [
+    '../io',
+]
+
+FINAL_LIBRARY = 'xpcom_core'

@@ -1,13 +1,10 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Assertions.h"
-
-#include "plstr.h"
 
 #include "jsapi.h"
 
@@ -17,8 +14,9 @@
 #include "nsIPlatformCharset.h"
 #include "nsILocaleService.h"
 #include "nsICollation.h"
-#include "nsIServiceManager.h"
 #include "nsUnicharUtils.h"
+#include "nsComponentManagerUtils.h"
+#include "nsServiceManagerUtils.h"
 
 #include "xpcpublic.h"
 
@@ -73,32 +71,32 @@ struct XPCLocaleCallbacks : public JSLocaleCallbacks
     return ths;
   }
 
-  static JSBool
+  static bool
   LocaleToUpperCase(JSContext *cx, HandleString src, MutableHandleValue rval)
   {
     return ChangeCase(cx, src, rval, ToUpperCase);
   }
 
-  static JSBool
+  static bool
   LocaleToLowerCase(JSContext *cx, HandleString src, MutableHandleValue rval)
   {
     return ChangeCase(cx, src, rval, ToLowerCase);
   }
 
-  static JSBool
+  static bool
   LocaleToUnicode(JSContext* cx, const char* src, MutableHandleValue rval)
   {
     return This(JS_GetRuntime(cx))->ToUnicode(cx, src, rval);
   }
 
-  static JSBool
+  static bool
   LocaleCompare(JSContext *cx, HandleString src1, HandleString src2, MutableHandleValue rval)
   {
     return This(JS_GetRuntime(cx))->Compare(cx, src1, src2, rval);
   }
 
 private:
-  static JSBool
+  static bool
   ChangeCase(JSContext* cx, HandleString src, MutableHandleValue rval,
              void(*changeCaseFnc)(const nsAString&, nsAString&))
   {
@@ -111,7 +109,7 @@ private:
     changeCaseFnc(depStr, result);
 
     JSString *ucstr =
-      JS_NewUCStringCopyN(cx, (jschar*)result.get(), result.Length());
+      JS_NewUCStringCopyN(cx, result.get(), result.Length());
     if (!ucstr) {
       return false;
     }
@@ -120,7 +118,7 @@ private:
     return true;
   }
 
-  JSBool
+  bool
   Compare(JSContext *cx, HandleString src1, HandleString src2, MutableHandleValue rval)
   {
     nsresult rv;
@@ -167,7 +165,7 @@ private:
     return true;
   }
 
-  JSBool
+  bool
   ToUnicode(JSContext* cx, const char* src, MutableHandleValue rval)
   {
     nsresult rv;
@@ -183,7 +181,7 @@ private:
           nsAutoString localeStr;
           rv = appLocale->
                GetCategory(NS_LITERAL_STRING(NSILOCALE_TIME), localeStr);
-          NS_ASSERTION(NS_SUCCEEDED(rv), "failed to get app locale info");
+          MOZ_ASSERT(NS_SUCCEEDED(rv), "failed to get app locale info");
 
           nsCOMPtr<nsIPlatformCharset> platformCharset =
             do_GetService(NS_PLATFORMCHARSET_CONTRACTID, &rv);
@@ -207,8 +205,8 @@ private:
 
     if (mDecoder) {
       int32_t unicharLength = srcLength;
-      PRUnichar *unichars =
-        (PRUnichar *)JS_malloc(cx, (srcLength + 1) * sizeof(PRUnichar));
+      char16_t *unichars =
+        (char16_t *)JS_malloc(cx, (srcLength + 1) * sizeof(char16_t));
       if (unichars) {
         rv = mDecoder->Convert(src, &srcLength, unichars, &unicharLength);
         if (NS_SUCCEEDED(rv)) {
@@ -217,9 +215,9 @@ private:
 
           // nsIUnicodeDecoder::Convert may use fewer than srcLength PRUnichars
           if (unicharLength + 1 < srcLength + 1) {
-            PRUnichar *shrunkUnichars =
-              (PRUnichar *)JS_realloc(cx, unichars,
-                                      (unicharLength + 1) * sizeof(PRUnichar));
+            char16_t *shrunkUnichars =
+              (char16_t *)JS_realloc(cx, unichars,
+                                      (unicharLength + 1) * sizeof(char16_t));
             if (shrunkUnichars)
               unichars = shrunkUnichars;
           }
@@ -250,7 +248,7 @@ private:
 #endif
 };
 
-NS_EXPORT_(bool)
+bool
 xpc_LocalizeRuntime(JSRuntime *rt)
 {
   JS_SetLocaleCallbacks(rt, new XPCLocaleCallbacks());
@@ -268,13 +266,13 @@ xpc_LocalizeRuntime(JSRuntime *rt)
 
   nsAutoString localeStr;
   rv = appLocale->GetCategory(NS_LITERAL_STRING(NSILOCALE_TIME), localeStr);
-  NS_ASSERTION(NS_SUCCEEDED(rv), "failed to get app locale info");
+  MOZ_ASSERT(NS_SUCCEEDED(rv), "failed to get app locale info");
   NS_LossyConvertUTF16toASCII locale(localeStr);
 
   return !!JS_SetDefaultLocale(rt, locale.get());
 }
 
-NS_EXPORT_(void)
+void
 xpc_DelocalizeRuntime(JSRuntime *rt)
 {
   XPCLocaleCallbacks* lc = XPCLocaleCallbacks::This(rt);

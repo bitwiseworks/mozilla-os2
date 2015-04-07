@@ -13,9 +13,9 @@
 
 #include <vector>
 
-#include "common_types.h"  // NOLINT
-#include "system_wrappers/interface/scoped_ptr.h"
-#include "typedefs.h"  // NOLINT
+#include "webrtc/common_types.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/typedefs.h"
 
 namespace webrtc {
 
@@ -30,7 +30,7 @@ class ViEFrameCallback {
   virtual void DeliverFrame(int id,
                             I420VideoFrame* video_frame,
                             int num_csrcs = 0,
-                            const WebRtc_UWord32 CSRC[kRtpCsrcSize] = NULL) = 0;
+                            const uint32_t CSRC[kRtpCsrcSize] = NULL) = 0;
 
   // The capture delay has changed from the provider. |frame_delay| is given in
   // ms.
@@ -77,7 +77,7 @@ class ViEFrameProviderBase {
  protected:
   void DeliverFrame(I420VideoFrame* video_frame,
                     int num_csrcs = 0,
-                    const WebRtc_UWord32 CSRC[kRtpCsrcSize] = NULL);
+                    const uint32_t CSRC[kRtpCsrcSize] = NULL);
   void SetFrameDelay(int frame_delay);
   int FrameDelay();
   int GetBestFormat(int* best_width,

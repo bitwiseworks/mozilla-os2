@@ -10,15 +10,15 @@
 
 #include "webrtc/system_wrappers/interface/data_log.h"
 
-#include <cstdio>
+#include <stdio.h>
 
-#include "gtest/gtest.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 using ::webrtc::DataLog;
 
 const char* kDataLogFileName = "table_1.txt";
 
-void PerformLogging(std::string table_name) {
+void PerformLogging(const std::string& table_name) {
   // Simulate normal DataTable logging behavior using this table name.
   ASSERT_EQ(0, DataLog::AddTable(table_name));
   ASSERT_EQ(0, DataLog::AddColumn(table_name, "test", 1));
@@ -44,7 +44,7 @@ TEST(TestDataLogDisabled, VerifyLoggingWorks) {
 
 TEST(TestDataLogDisabled, EnsureNoFileIsWritten) {
   // Remove any previous data files on disk:
-  std::remove(kDataLogFileName);
+  remove(kDataLogFileName);
   ASSERT_EQ(0, DataLog::CreateLog());
   // Don't use the table name we would get from Combine on a disabled DataLog.
   // Use "table_1" instead (which is what an enabled DataLog would give us).

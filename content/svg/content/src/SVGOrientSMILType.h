@@ -15,14 +15,20 @@ class nsSMILValue;
  * This nsISMILType class is a special case for the 'orient' attribute on SVG's
  * 'marker' element.
  *
- *   orient = "auto | <angle>"
+ *   orient = "auto | auto-start-reverse | <angle>"
  *
  * Unusually, this attribute doesn't have just a single corresponding DOM
  * property, but rather is split into two properties: 'orientType' (of type
  * SVGAnimatedEnumeration) and 'orientAngle' (of type SVGAnimatedAngle). If
- * 'orientType.animVal' is not SVG_MARKER_ORIENT_AUTO, then
+ * 'orientType.animVal' is SVG_MARKER_ORIENT_ANGLE, then
  * 'orientAngle.animVal' contains the angle that is being used. The lacuna
  * value is 0.
+ *
+ * The SVG 2 specification does not define a
+ * SVG_MARKER_ORIENT_AUTO_START_REVERSE constant value for orientType to use;
+ * instead, if the attribute is set to "auto-start-reverse",
+ * SVG_MARKER_ORIENT_UNKNOWN is used.  Internally, however, we do use a
+ * constant with this name.
  */
 
 namespace mozilla {
@@ -52,10 +58,8 @@ protected:
                                nsSMILValue& aResult) const MOZ_OVERRIDE;
 
 private:
-  // Private constructor & destructor: prevent instances beyond my singleton,
-  // and prevent others from deleting my singleton.
-  SVGOrientSMILType()  {}
-  ~SVGOrientSMILType() {}
+  // Private constructor: prevent instances beyond my singleton.
+  MOZ_CONSTEXPR SVGOrientSMILType() {}
 };
 
 } // namespace mozilla

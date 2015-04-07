@@ -24,7 +24,7 @@ namespace crashreporter {
 class LSPAnnotationGatherer : public nsRunnable
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
 
   void Annotate();
@@ -32,7 +32,7 @@ public:
   nsCOMPtr<nsIThread> mThread;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(LSPAnnotationGatherer, nsIRunnable)
+NS_IMPL_ISUPPORTS(LSPAnnotationGatherer, nsIRunnable)
 
 void
 LSPAnnotationGatherer::Annotate()
@@ -56,7 +56,7 @@ LSPAnnotationGatherer::Run()
   DWORD size = 0;
   int err;
   // Get the size of the buffer we need
-  if (SOCKET_ERROR != WSCEnumProtocols(NULL, NULL, &size, &err) ||
+  if (SOCKET_ERROR != WSCEnumProtocols(nullptr, nullptr, &size, &err) ||
       err != WSAENOBUFS) {
     // Er, what?
     NS_NOTREACHED("WSCEnumProtocols suceeded when it should have failed ...");
@@ -67,7 +67,7 @@ LSPAnnotationGatherer::Run()
   WSAPROTOCOL_INFOW* providers =
     reinterpret_cast<WSAPROTOCOL_INFOW*>(byteArray.get());
 
-  int n = WSCEnumProtocols(NULL, providers, &size, &err);
+  int n = WSCEnumProtocols(nullptr, providers, &size, &err);
   if (n == SOCKET_ERROR) {
     // Lame. We provided the right size buffer; we'll just give up now.
     NS_WARNING("Could not get LSP list");

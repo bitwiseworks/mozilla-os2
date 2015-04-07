@@ -11,7 +11,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 //// nsRandomGenerator
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsRandomGenerator, nsIRandomGenerator)
+NS_IMPL_ISUPPORTS(nsRandomGenerator, nsIRandomGenerator)
 
 ////////////////////////////////////////////////////////////////////////////////
 //// nsIRandomGenerator
@@ -25,14 +25,16 @@ nsRandomGenerator::GenerateRandomBytes(uint32_t aLength,
   NS_ENSURE_ARG_POINTER(aBuffer);
   *aBuffer = nullptr;
 
-  uint8_t *buf = reinterpret_cast<uint8_t *>(NS_Alloc(aLength));
-  if (!buf)
-    return NS_ERROR_OUT_OF_MEMORY;
-
   mozilla::ScopedPK11SlotInfo slot(PK11_GetInternalSlot());
-  if (slot == NULL) {
+  if (!slot) {
     return NS_ERROR_FAILURE;
   }
+
+  uint8_t *buf = reinterpret_cast<uint8_t *>(NS_Alloc(aLength));
+  if (!buf) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   SECStatus srv = PK11_GenerateRandomOnSlot(slot, buf, aLength);
 
   if (SECSuccess != srv) {

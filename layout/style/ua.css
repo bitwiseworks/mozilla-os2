@@ -16,12 +16,12 @@
 
 *|*::-moz-table {
   display: table !important;
-  -moz-box-sizing: border-box; /* XXX do we really want this? */
+  box-sizing: border-box; /* XXX do we really want this? */
 }
 
 *|*::-moz-inline-table {
   display: inline-table !important;
-  -moz-box-sizing: border-box; /* XXX do we really want this? */
+  box-sizing: border-box; /* XXX do we really want this? */
 }
 
 *|*::-moz-table-outer {
@@ -80,7 +80,9 @@
 *|*::-moz-list-bullet, *|*::-moz-list-number {
   display: inline;
   vertical-align: baseline;
-  -moz-margin-end: 8px;
+  /* Note that this padding is suppressed for some CJK numbering styles;
+   * see bug 934072 */
+  -moz-padding-end: 0.5em;
 }
 
 /* Links */
@@ -101,6 +103,7 @@
   position: static !important;
   unicode-bidi: inherit;
   text-overflow: inherit;
+  overflow-clip-box: inherit;
 }
 
 *|*::-moz-anonymous-block, *|*::-moz-anonymous-positioned-block {
@@ -113,6 +116,7 @@
   opacity: inherit;
   text-decoration: inherit;
   -moz-box-ordinal-group: inherit !important;
+  overflow-clip-box: inherit;
 }
 
 *|*::-moz-xul-anonymous-block {
@@ -121,6 +125,7 @@
   float: none ! important;
   -moz-box-ordinal-group: inherit !important;
   text-overflow: inherit;
+  overflow-clip-box: inherit;
 }
 
 *|*::-moz-scrolled-content, *|*::-moz-scrolled-canvas,
@@ -140,15 +145,16 @@
   -moz-column-gap: inherit;
   -moz-column-rule: inherit;
   /* CSS3 flexbox properties that apply to the flex container: */
-  /* align-content: inherit; FIXME: not yet supported (bug 702508) */
+  align-content: inherit;
   align-items: inherit;
   flex-direction: inherit;
-  /* flex-wrap: inherit; FIXME: not yet supported (bug 702508) */
+  flex-wrap: inherit;
   justify-content: inherit;
   /* Do not change these. nsCSSFrameConstructor depends on them to create a good
      frame tree. */
   position: static !important;
   float: none !important;
+  overflow-clip-box: inherit;
 }
 
 *|*::-moz-viewport, *|*::-moz-viewport-scroll, *|*::-moz-canvas, *|*::-moz-scrolled-canvas {
@@ -209,8 +215,8 @@
 
 *|*::-moz-anonymous-positioned-block {
   display: block !important;
-  position: relative;
-  top: inherit; 
+  position: inherit; /* relative or sticky */
+  top: inherit;
   left: inherit;
   bottom: inherit;
   right: inherit;
@@ -246,7 +252,7 @@
   max-width: none !important;
   min-height: 0 !important;
   max-height: none !important;
-  -moz-box-sizing: border-box !important; 
+  box-sizing: border-box !important;
 }
 
 /* If there is a full-screen element that is not the root then

@@ -1,5 +1,3 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,7 +8,7 @@ module.metadata = {
 };
 
 const { Ci } = require("chrome");
-const method = require("method/core");
+const method = require("../../method/core");
 const { add, remove, iterator } = require("../lang/weak-set");
 
 let getTargetWindow = method("getTargetWindow");
@@ -33,6 +31,9 @@ let detachFrom = method("detatchFrom");
 exports.detachFrom = detachFrom;
 
 function attach(modification, target) {
+  if (!modification)
+    return;
+
   let window = getTargetWindow(target);
 
   attachTo(modification, window);
@@ -44,6 +45,9 @@ function attach(modification, target) {
 exports.attach = attach;
 
 function detach(modification, target) {
+  if (!modification)
+    return;
+
   if (target) {
     let window = getTargetWindow(target);
     detachFrom(modification, window);

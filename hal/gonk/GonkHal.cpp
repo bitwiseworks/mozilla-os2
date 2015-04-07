@@ -15,11 +15,14 @@
  * limitations under the License.
  */
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/android_alarm.h>
 #include <math.h>
+#include <regex.h>
 #include <stdio.h>
+#include <sys/klog.h>
 #include <sys/syscall.h>
 #include <sys/resource.h>
 #include <time.h>
@@ -40,9 +43,11 @@
 
 #include "Hal.h"
 #include "HalImpl.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/dom/battery/Constants.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/Monitor.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Preferences.h"
@@ -125,7 +130,7 @@ public:
     os->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
   }
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
   NS_DECL_NSIOBSERVER
 
@@ -150,7 +155,7 @@ private:
   static bool sShuttingDown;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(VibratorRunnable, nsIRunnable, nsIObserver);
+NS_IMPL_ISUPPORTS(VibratorRunnable, nsIRunnable, nsIObserver);
 
 bool VibratorRunnable::sShuttingDown = false;
 
@@ -183,13 +188,13 @@ VibratorRunnable::Run()
       mMonitor.Wait();
     }
   }
-  sVibratorRunnable = NULL;
+  sVibratorRunnable = nullptr;
   return NS_OK;
 }
 
 NS_IMETHODIMP
 VibratorRunnable::Observe(nsISupports *subject, const char *topic,
-                          const PRUnichar *data)
+                          const char16_t *data)
 {
   MOZ_ASSERT(strcmp(topic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0);
   MonitorAutoLock lock(mMonitor);
@@ -289,10 +294,11 @@ public:
 
 } // anonymous namespace
 
-class BatteryObserver : public IUeventObserver,
-                        public RefCounted<BatteryObserver>
+class BatteryObserver : public IUeventObserver
 {
 public:
+  NS_INLINE_DECL_REFCOUNTING(BatteryObserver)
+
   BatteryObserver()
     :mUpdater(new BatteryUpdater())
   {
@@ -345,7 +351,7 @@ UnregisterBatteryObserverIOThread()
   MOZ_ASSERT(sBatteryObserver);
 
   UnregisterUeventListener(sBatteryObserver);
-  sBatteryObserver = NULL;
+  sBatteryObserver = nullptr;
 }
 
 void
@@ -435,7 +441,7 @@ GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo)
     aBatteryInfo->charging() = true;
   }
 
-  if (aBatteryInfo->charging() && (aBatteryInfo->level() < 1.0)) {
+  if (!aBatteryInfo->charging() || (aBatteryInfo->level() < 1.0)) {
     aBatteryInfo->remainingTime() = dom::battery::kUnknownRemainingTime;
   } else {
     aBatteryInfo->remainingTime() = dom::battery::kDefaultRemainingTime;
@@ -593,7 +599,7 @@ SetCpuSleepAllowed(bool aAllowed)
   UpdateCpuSleepState();
 }
 
-static light_device_t* sLights[hal::eHalLightID_Count];	// will be initialized to NULL
+static light_device_t* sLights[hal::eHalLightID_Count];	// will be initialized to nullptr
 
 light_device_t* GetDevice(hw_module_t* module, char const* name)
 {
@@ -603,14 +609,14 @@ light_device_t* GetDevice(hw_module_t* module, char const* name)
   if (err == 0) {
     return (light_device_t*)device;
   } else {
-    return NULL;
+    return nullptr;
   }
 }
 
 void
 InitLights()
 {
-  // assume that if backlight is NULL, nothing has been set yet
+  // assume that if backlight is nullptr, nothing has been set yet
   // if this is not true, the initialization will occur everytime a light is read or set!
   if (!sLights[hal::eHalLightID_Backlight]) {
     int err;
@@ -651,7 +657,8 @@ SetLight(hal::LightType light, const hal::LightConfiguration& aConfig)
 
   InitLights();
 
-  if (light < 0 || light >= hal::eHalLightID_Count || sLights[light] == NULL) {
+  if (light < 0 || light >= hal::eHalLightID_Count ||
+      sLights[light] == nullptr) {
     return false;
   }
 
@@ -676,7 +683,8 @@ GetLight(hal::LightType light, hal::LightConfiguration* aConfig)
   InitLights();
 #endif
 
-  if (light < 0 || light >= hal::eHalLightID_Count || sLights[light] == NULL) {
+  if (light < 0 || light >= hal::eHalLightID_Count ||
+      sLights[light] == nullptr) {
     return false;
   }
 
@@ -734,13 +742,12 @@ AdjustSystemClock(int64_t aDeltaMilliseconds)
 
   if (ioctl(fd, ANDROID_ALARM_SET_RTC, &now) < 0) {
     HAL_LOG(("ANDROID_ALARM_SET_RTC failed: %s", strerror(errno)));
-    return;
   }
 
   hal::NotifySystemClockChange(aDeltaMilliseconds);
 }
 
-static int32_t
+int32_t
 GetTimezoneOffset()
 {
   PRExplodedTime prTime;
@@ -754,10 +761,38 @@ GetTimezoneOffset()
   return -(offset / 60);
 }
 
+static int32_t sKernelTimezoneOffset = 0;
+
+static void
+UpdateKernelTimezone(int32_t timezoneOffset)
+{
+  if (sKernelTimezoneOffset == timezoneOffset) {
+    return;
+  }
+
+  // Tell the kernel about the new time zone as well, so that FAT filesystems
+  // will get local timestamps rather than UTC timestamps.
+  //
+  // We assume that /init.rc has a sysclktz entry so that settimeofday has
+  // already been called once before we call it (there is a side-effect in
+  // the kernel the very first time settimeofday is called where it does some
+  // special processing if you only set the timezone).
+  struct timezone tz;
+  memset(&tz, 0, sizeof(tz));
+  tz.tz_minuteswest = timezoneOffset;
+  settimeofday(nullptr, &tz);
+  sKernelTimezoneOffset = timezoneOffset;
+}
+
 void
 SetTimezone(const nsCString& aTimezoneSpec)
 {
   if (aTimezoneSpec.Equals(GetTimezone())) {
+    // Even though the timezone hasn't changed, we still need to tell the
+    // kernel what the current timezone is. The timezone is persisted in
+    // a property and doesn't change across reboots, but the kernel still
+    // needs to be updated on every boot.
+    UpdateKernelTimezone(GetTimezoneOffset());
     return;
   }
 
@@ -767,6 +802,7 @@ SetTimezone(const nsCString& aTimezoneSpec)
   // functions that depend on the timezone. To be safe, we call it manually.
   tzset();
   int32_t newTimezoneOffsetMinutes = GetTimezoneOffset();
+  UpdateKernelTimezone(newTimezoneOffsetMinutes);
   hal::NotifySystemTimezoneChange(
     hal::SystemTimezoneChangeInformation(
       oldTimezoneOffsetMinutes, newTimezoneOffsetMinutes));
@@ -849,7 +885,7 @@ public:
 
 int AlarmData::sNextGeneration = 0;
 
-AlarmData* sAlarmData = NULL;
+AlarmData* sAlarmData = nullptr;
 
 class AlarmFiredEvent : public nsRunnable {
 public:
@@ -883,7 +919,7 @@ DestroyAlarmData(void* aData)
 // Runs on alarm-watcher thread.
 void ShutDownAlarm(int aSigno)
 {
-  if (aSigno == SIGUSR1) {
+  if (aSigno == SIGUSR1 && sAlarmData) {
     sAlarmData->mShuttingDown = true;
   }
   return;
@@ -921,7 +957,7 @@ WaitForAlarm(void* aData)
   }
 
   pthread_cleanup_pop(1);
-  return NULL;
+  return nullptr;
 }
 
 bool
@@ -942,7 +978,7 @@ EnableAlarm()
   sigemptyset(&actions.sa_mask);
   actions.sa_flags = 0;
   actions.sa_handler = ShutDownAlarm;
-  if (sigaction(SIGUSR1, &actions, NULL)) {
+  if (sigaction(SIGUSR1, &actions, nullptr)) {
     HAL_LOG(("Failed to set SIGUSR1 signal for alarm-watcher thread."));
     return false;
   }
@@ -957,7 +993,7 @@ EnableAlarm()
   int status = pthread_create(&sAlarmFireWatcherThread, &attr, WaitForAlarm,
                               alarmData.get());
   if (status) {
-    alarmData = NULL;
+    alarmData = nullptr;
     delete sInternalLockCpuMonitor;
     HAL_LOG(("Failed to create alarm-watcher thread. Status: %d.", status));
     return false;
@@ -976,7 +1012,7 @@ DisableAlarm()
   MOZ_ASSERT(sAlarmData);
 
   // NB: this must happen-before the thread cancellation.
-  sAlarmData = NULL;
+  sAlarmData = nullptr;
 
   // The cancel will interrupt the thread and destroy it, freeing the
   // data pointed at by sAlarmData.
@@ -1028,6 +1064,146 @@ OomAdjOfOomScoreAdj(int aOomScoreAdj)
 }
 
 static void
+RoundOomScoreAdjUpWithBackroundLRU(int& aOomScoreAdj, uint32_t aBackgroundLRU)
+{
+  // We want to add minimum value to round OomScoreAdj up according to
+  // the steps by aBackgroundLRU.
+  aOomScoreAdj +=
+    ceil(((float)OOM_SCORE_ADJ_MAX / OOM_ADJUST_MAX) * aBackgroundLRU);
+}
+
+#define OOM_LOG(level, args...) __android_log_print(level, "OomLogger", ##args)
+class OomVictimLogger MOZ_FINAL
+  : public nsIObserver
+{
+public:
+  OomVictimLogger()
+    : mLastLineChecked(-1.0),
+      mRegexes(nullptr)
+  {
+    // Enable timestamps in kernel's printk
+    WriteToFile("/sys/module/printk/parameters/time", "Y");
+  }
+
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIOBSERVER
+private:
+  double mLastLineChecked;
+  ScopedFreePtr<regex_t> mRegexes;
+};
+NS_IMPL_ISUPPORTS(OomVictimLogger, nsIObserver);
+
+NS_IMETHODIMP
+OomVictimLogger::Observe(
+  nsISupports* aSubject,
+  const char* aTopic,
+  const char16_t* aData)
+{
+  nsDependentCString event_type(aTopic);
+  if (!event_type.EqualsLiteral("ipc:content-shutdown")) {
+    return NS_OK;
+  }
+
+  // OOM message finding regexes
+  const char* const regexes_raw[] = {
+    ".*select.*to kill.*",
+    ".*send sigkill to.*",
+    ".*lowmem_shrink.*, return",
+    ".*lowmem_shrink.*, ofree.*"};
+  const size_t regex_count = ArrayLength(regexes_raw);
+
+  // Compile our regex just in time
+  if (!mRegexes) {
+    mRegexes = static_cast<regex_t*>(malloc(sizeof(regex_t) * regex_count));
+    for (size_t i = 0; i < regex_count; i++) {
+      int compilation_err = regcomp(&(mRegexes[i]), regexes_raw[i], REG_NOSUB);
+      if (compilation_err) {
+        OOM_LOG(ANDROID_LOG_ERROR, "Cannot compile regex \"%s\"\n", regexes_raw[i]);
+        return NS_OK;
+      }
+    }
+  }
+
+#ifndef KLOG_SIZE_BUFFER
+  // Upstream bionic in commit
+  // e249b059637b49a285ed9f58a2a18bfd054e5d95
+  // deprecated the old klog defs.
+  // Our current bionic does not hit this
+  // change yet so handle the future change.
+  #define KLOG_SIZE_BUFFER KLOG_WRITE
+#else
+  // Once the change hits our bionic this ifndef
+  // can be removed.
+  #warning "Please remove KLOG_UNREAD_SIZE compatability def"
+#endif
+  // Retreive kernel log
+  int msg_buf_size = klogctl(KLOG_SIZE_BUFFER, NULL, 0);
+  ScopedFreePtr<char> msg_buf(static_cast<char *>(malloc(msg_buf_size + 1)));
+  int read_size = klogctl(KLOG_READ_ALL, msg_buf.rwget(), msg_buf_size);
+
+  // Turn buffer into cstring
+  read_size = read_size > msg_buf_size ? msg_buf_size : read_size;
+  msg_buf.rwget()[read_size] = '\0';
+
+  // Foreach line
+  char* line_end;
+  char* line_begin = msg_buf.rwget();
+  for (; (line_end = strchr(line_begin, '\n')); line_begin = line_end + 1) {
+    // make line into cstring
+    *line_end = '\0';
+
+    // Note: Kernel messages look like:
+    // <5>[63648.286409] sd 35:0:0:0: Attached scsi generic sg1 type 0
+    // 5 is the loging level
+    // [*] is the time timestamp, seconds since boot
+    // last comes the logged message
+
+    // Since the logging level can be a string we must
+    // skip it since scanf lacks wildcard matching
+    char*  timestamp_begin = strchr(line_begin, '[');
+    char   after_float;
+    double lineTimestamp = -1;
+    bool   lineTimestampFound = false;
+    if (timestamp_begin &&
+         // Note: scanf treats a ' ' as [ ]*
+         // Note: scanf treats [ %lf] as [ %lf thus we must check
+         // for the closing bracket outselves.
+         2 == sscanf(timestamp_begin, "[ %lf%c", &lineTimestamp, &after_float) &&
+         after_float == ']') {
+      if (lineTimestamp <= mLastLineChecked) {
+        continue;
+      }
+
+      lineTimestampFound = true;
+      mLastLineChecked = lineTimestamp;
+    }
+      
+
+    // Log interesting lines
+    for (size_t i = 0; i < regex_count; i++) {
+      int matching = !regexec(&(mRegexes[i]), line_begin, 0, NULL, 0);
+      if (matching) {
+        // Log content of kernel message. We try to skip the ], but if for
+        // some reason (most likely due to buffer overflow/wraparound), we
+        // can't find the ] then we just log the entire line.
+        char* endOfTimestamp = strchr(line_begin, ']');
+        if (endOfTimestamp && endOfTimestamp[1] == ' ') {
+          // skip the ] and the space that follows it
+          line_begin = endOfTimestamp + 2;
+        }
+        if (!lineTimestampFound) {
+          OOM_LOG(ANDROID_LOG_WARN, "following kill message may be a duplicate");
+        }
+        OOM_LOG(ANDROID_LOG_ERROR, "[Kill]: %s\n", line_begin);
+        break;
+      }
+    }
+  }
+
+  return NS_OK;
+}
+
+static void
 EnsureKernelLowMemKillerParamsSet()
 {
   static bool kernelLowMemKillerParamsSet;
@@ -1057,7 +1233,11 @@ EnsureKernelLowMemKillerParamsSet()
   nsAutoCString adjParams;
   nsAutoCString minfreeParams;
 
-  for (int i = 0; i < NUM_PROCESS_PRIORITY; i++) {
+  int32_t lowerBoundOfNextOomScoreAdj = OOM_SCORE_ADJ_MIN - 1;
+  int32_t lowerBoundOfNextKillUnderKB = 0;
+  int32_t countOfLowmemorykillerParametersSets = 0;
+
+  for (int i = NUM_PROCESS_PRIORITY - 1; i >= 0; i--) {
     // The system doesn't function correctly if we're missing these prefs, so
     // crash loudly.
 
@@ -1071,19 +1251,34 @@ EnsureKernelLowMemKillerParamsSet()
       MOZ_CRASH();
     }
 
-    int32_t killUnderMB;
+    int32_t killUnderKB;
     if (!NS_SUCCEEDED(Preferences::GetInt(
-          nsPrintfCString("hal.processPriorityManager.gonk.%s.KillUnderMB",
+          nsPrintfCString("hal.processPriorityManager.gonk.%s.KillUnderKB",
                           ProcessPriorityToString(priority)).get(),
-          &killUnderMB))) {
-      MOZ_CRASH();
+          &killUnderKB))) {
+      // ProcessPriority values like PROCESS_PRIORITY_FOREGROUND_KEYBOARD,
+      // which has only OomScoreAdjust but lacks KillUnderMB value, will not
+      // create new LMK parameters.
+      continue;
     }
+
+    // The LMK in kernel silently malfunctions if we assign the parameters
+    // in non-increasing order, so we add this assertion here. See bug 887192.
+    MOZ_ASSERT(oomScoreAdj > lowerBoundOfNextOomScoreAdj);
+    MOZ_ASSERT(killUnderKB > lowerBoundOfNextKillUnderKB);
+
+    // The LMK in kernel only accept 6 sets of LMK parameters. See bug 914728.
+    MOZ_ASSERT(countOfLowmemorykillerParametersSets < 6);
 
     // adj is in oom_adj units.
     adjParams.AppendPrintf("%d,", OomAdjOfOomScoreAdj(oomScoreAdj));
 
     // minfree is in pages.
-    minfreeParams.AppendPrintf("%d,", killUnderMB * 1024 * 1024 / PAGE_SIZE);
+    minfreeParams.AppendPrintf("%d,", killUnderKB * 1024 / PAGE_SIZE);
+
+    lowerBoundOfNextOomScoreAdj = oomScoreAdj;
+    lowerBoundOfNextKillUnderKB = killUnderKB;
+    countOfLowmemorykillerParametersSets++;
   }
 
   // Strip off trailing commas.
@@ -1095,14 +1290,21 @@ EnsureKernelLowMemKillerParamsSet()
   }
 
   // Set the low-memory-notification threshold.
-  int32_t lowMemNotifyThresholdMB;
+  int32_t lowMemNotifyThresholdKB;
   if (NS_SUCCEEDED(Preferences::GetInt(
-        "hal.processPriorityManager.gonk.notifyLowMemUnderMB",
-        &lowMemNotifyThresholdMB))) {
+        "hal.processPriorityManager.gonk.notifyLowMemUnderKB",
+        &lowMemNotifyThresholdKB))) {
 
     // notify_trigger is in pages.
     WriteToFile("/sys/module/lowmemorykiller/parameters/notify_trigger",
-      nsPrintfCString("%d", lowMemNotifyThresholdMB * 1024 * 1024 / PAGE_SIZE).get());
+      nsPrintfCString("%d", lowMemNotifyThresholdKB * 1024 / PAGE_SIZE).get());
+  }
+
+  // Ensure OOM events appear in logcat
+  nsRefPtr<OomVictimLogger> oomLogger = new OomVictimLogger();
+  nsCOMPtr<nsIObserverService> os = services::GetObserverService();
+  if (os) {
+    os->AddObserver(oomLogger, "ipc:content-shutdown", false);
   }
 }
 
@@ -1186,10 +1388,11 @@ SetNiceForPid(int aPid, int aNice)
 void
 SetProcessPriority(int aPid,
                    ProcessPriority aPriority,
-                   ProcessCPUPriority aCPUPriority)
+                   ProcessCPUPriority aCPUPriority,
+                   uint32_t aBackgroundLRU)
 {
-  HAL_LOG(("SetProcessPriority(pid=%d, priority=%d, cpuPriority=%d)",
-           aPid, aPriority, aCPUPriority));
+  HAL_LOG(("SetProcessPriority(pid=%d, priority=%d, cpuPriority=%d, LRU=%u)",
+           aPid, aPriority, aCPUPriority, aBackgroundLRU));
 
   // If this is the first time SetProcessPriority was called, set the kernel's
   // OOM parameters according to our prefs.
@@ -1204,6 +1407,8 @@ SetProcessPriority(int aPid,
   nsresult rv = Preferences::GetInt(nsPrintfCString(
     "hal.processPriorityManager.gonk.%s.OomScoreAdjust",
     ProcessPriorityToString(aPriority)).get(), &oomScoreAdj);
+
+  RoundOomScoreAdjUpWithBackroundLRU(oomScoreAdj, aBackgroundLRU);
 
   if (NS_SUCCEEDED(rv)) {
     int clampedOomScoreAdj = clamped<int>(oomScoreAdj, OOM_SCORE_ADJ_MIN,

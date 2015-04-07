@@ -4,30 +4,58 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['tests']
+XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']
 
 XPIDL_SOURCES += [
     'nsITelemetry.idl',
-    'nsITelemetryPing.idl',
 ]
 
-MODULE = 'telemetry'
+XPIDL_MODULE = 'telemetry'
 
 EXPORTS.mozilla += [
     'ProcessedStack.h',
     'Telemetry.h',
-    'TelemetryHistogramEnums.h',
+    'ThreadHangStats.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'Telemetry.cpp',
 ]
 
 EXTRA_COMPONENTS += [
-    'TelemetryPing.manifest',
+    'TelemetryStartup.js',
+    'TelemetryStartup.manifest'
 ]
 
-EXTRA_PP_COMPONENTS += [
-    'TelemetryPing.js',
+EXTRA_JS_MODULES += [
+    'TelemetryFile.jsm',
+    'TelemetryLog.jsm',
+    'TelemetryStopwatch.jsm',
+    'ThirdPartyCookieProbe.jsm',
+]
+
+EXTRA_PP_JS_MODULES += [
+    'TelemetryPing.jsm',
+    'UITelemetry.jsm',
+]
+
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'
+
+GENERATED_FILES = [
+    'TelemetryHistogramData.inc',
+]
+
+if CONFIG['MOZILLA_OFFICIAL']:
+    DEFINES['MOZILLA_OFFICIAL'] = True
+
+LOCAL_INCLUDES += [
+    '/xpcom/build',
+    '/xpcom/threads',
 ]
 

@@ -6,7 +6,6 @@
 
 #include "sqlite3.h"
 
-#include "jsapi.h"
 #include "jsfriendapi.h"
 
 #include "nsPrintfCString.h"
@@ -161,7 +160,7 @@ public:
 
   NS_IMETHOD Run()
   {
-    (void)mCallback->Complete();
+    (void)mCallback->Complete(NS_OK, nullptr);
     return NS_OK;
   }
 private:

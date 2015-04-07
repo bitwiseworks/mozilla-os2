@@ -6,6 +6,7 @@ this.EXPORTED_SYMBOLS = ["Services"];
 
 const Ci = Components.interfaces;
 const Cc = Components.classes;
+const Cr = Components.results;
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -18,9 +19,15 @@ XPCOMUtils.defineLazyGetter(Services, "prefs", function () {
 });
 
 XPCOMUtils.defineLazyGetter(Services, "appinfo", function () {
-  return Cc["@mozilla.org/xre/app-info;1"]
-           .getService(Ci.nsIXULAppInfo)
-           .QueryInterface(Ci.nsIXULRuntime);
+  let appinfo = Cc["@mozilla.org/xre/app-info;1"]
+                  .getService(Ci.nsIXULRuntime);
+  try {
+    appinfo.QueryInterface(Ci.nsIXULAppInfo);
+  } catch (ex if ex instanceof Components.Exception &&
+                 ex.result == Cr.NS_NOINTERFACE) {
+    // Not all applications implement nsIXULAppInfo (e.g. xpcshell doesn't).
+  }
+  return appinfo;
 });
 
 XPCOMUtils.defineLazyGetter(Services, "dirsvc", function () {
@@ -29,9 +36,22 @@ XPCOMUtils.defineLazyGetter(Services, "dirsvc", function () {
            .QueryInterface(Ci.nsIProperties);
 });
 
+#ifdef MOZ_CRASHREPORTER
+XPCOMUtils.defineLazyGetter(Services, "crashmanager", () => {
+  let ns = {};
+  Components.utils.import("resource://gre/modules/CrashManager.jsm", ns);
+
+  return ns.CrashManager.Singleton;
+});
+#endif
+
 let initTable = [
+#ifdef MOZ_WIDGET_ANDROID
+  ["androidBridge", "@mozilla.org/android/bridge;1", "nsIAndroidBridge"],
+#endif
   ["appShell", "@mozilla.org/appshell/appShellService;1", "nsIAppShellService"],
   ["cache", "@mozilla.org/network/cache-service;1", "nsICacheService"],
+  ["cache2", "@mozilla.org/netwerk/cache-storage-service;1", "nsICacheStorageService"],
   ["console", "@mozilla.org/consoleservice;1", "nsIConsoleService"],
   ["contentPrefs", "@mozilla.org/content-pref/service;1", "nsIContentPrefService"],
   ["cookies", "@mozilla.org/cookiemanager;1", "nsICookieManager2"],
@@ -64,7 +84,12 @@ let initTable = [
   ["DOMRequest", "@mozilla.org/dom/dom-request-service;1", "nsIDOMRequestService"],
   ["focus", "@mozilla.org/focus-manager;1", "nsIFocusManager"],
   ["uriFixup", "@mozilla.org/docshell/urifixup;1", "nsIURIFixup"],
-  ["blocklist", "@mozilla.org/extensions/blocklist;1", "nsIBlocklistService"]
+  ["blocklist", "@mozilla.org/extensions/blocklist;1", "nsIBlocklistService"],
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+  ["metro", "@mozilla.org/windows-metroutils;1", "nsIWinMetroUtils"],
+#endif
+#endif
 ];
 
 initTable.forEach(function ([name, contract, intf])

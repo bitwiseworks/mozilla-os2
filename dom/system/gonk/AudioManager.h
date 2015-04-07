@@ -28,8 +28,6 @@
       {0x89, 0x10, 0xf9, 0x3c, 0x55, 0xe6, 0x62, 0xec}}
 #define NS_AUDIOMANAGER_CONTRACTID "@mozilla.org/telephony/audiomanager;1"
 
-using namespace mozilla::dom;
-
 namespace mozilla {
 namespace hal {
 class SwitchEvent;
@@ -38,7 +36,8 @@ typedef Observer<SwitchEvent> SwitchObserver;
 
 namespace dom {
 namespace gonk {
-
+class RecoverTask;
+class AudioChannelVolInitCallback;
 class AudioManager : public nsIAudioManager
                    , public nsIObserver
 {
@@ -50,13 +49,30 @@ public:
   AudioManager();
   ~AudioManager();
 
+  // When audio backend is dead, recovery task needs to read all volume
+  // settings then set back into audio backend.
+  friend class RecoverTask;
+  friend class AudioChannelVolInitCallback;
+
 protected:
   int32_t mPhoneState;
   int mCurrentStreamVolumeTbl[AUDIO_STREAM_CNT];
 
+  nsresult SetStreamVolumeIndex(int32_t aStream, int32_t aIndex);
+  nsresult GetStreamVolumeIndex(int32_t aStream, int32_t *aIndex);
+
 private:
   nsAutoPtr<mozilla::hal::SwitchObserver> mObserver;
-  nsCOMPtr<AudioChannelAgent>             mPhoneAudioAgent;
+  nsCOMPtr<nsIAudioChannelAgent>          mPhoneAudioAgent;
+#ifdef MOZ_B2G_RIL
+  bool                                    mMuteCallToRIL;
+  // mIsMicMuted is only used for toggling mute call to RIL.
+  bool                                    mIsMicMuted;
+#endif
+
+  void HandleBluetoothStatusChanged(nsISupports* aSubject,
+                                    const char* aTopic,
+                                    const nsCString aAddress);
 };
 
 } /* namespace gonk */

@@ -11,33 +11,31 @@
 #ifndef WEBRTC_MODULES_VIDEO_CODING_PACKET_H_
 #define WEBRTC_MODULES_VIDEO_CODING_PACKET_H_
 
-#include "typedefs.h"
-#include "module_common_types.h"
-#include "jitter_buffer_common.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/modules/video_coding/main/source/jitter_buffer_common.h"
+#include "webrtc/typedefs.h"
 
-namespace webrtc
-{
+namespace webrtc {
 
-class VCMPacket
-{
+class VCMPacket {
 public:
     VCMPacket();
-    VCMPacket(const WebRtc_UWord8* ptr,
-              const WebRtc_UWord32 size,
+    VCMPacket(const uint8_t* ptr,
+              const uint32_t size,
               const WebRtcRTPHeader& rtpHeader);
-    VCMPacket(const WebRtc_UWord8* ptr,
-              WebRtc_UWord32 size,
-              WebRtc_UWord16 seqNum,
-              WebRtc_UWord32 timestamp,
+    VCMPacket(const uint8_t* ptr,
+              uint32_t size,
+              uint16_t seqNum,
+              uint32_t timestamp,
               bool markerBit);
 
     void Reset();
 
-    WebRtc_UWord8           payloadType;
-    WebRtc_UWord32          timestamp;
-    WebRtc_UWord16          seqNum;
-    const WebRtc_UWord8*    dataPtr;
-    WebRtc_UWord32          sizeBytes;
+    uint8_t           payloadType;
+    uint32_t          timestamp;
+    uint16_t          seqNum;
+    const uint8_t*    dataPtr;
+    uint32_t          sizeBytes;
     bool                    markerBit;
 
     FrameType               frameType;
@@ -47,11 +45,13 @@ public:
     VCMNaluCompleteness completeNALU;   // Default is kNaluIncomplete.
     bool insertStartCode;               // True if a start code should be inserted before this
                                         // packet.
+    int width;
+    int height;
     RTPVideoHeader codecSpecificHeader;
 
 protected:
     void CopyCodecSpecifics(const RTPVideoHeader& videoHeader);
 };
 
-} // namespace webrtc
+}  // namespace webrtc
 #endif // WEBRTC_MODULES_VIDEO_CODING_PACKET_H_

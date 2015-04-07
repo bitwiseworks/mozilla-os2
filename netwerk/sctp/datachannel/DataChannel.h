@@ -24,6 +24,7 @@
 #include "nsITimer.h"
 #include "mozilla/Mutex.h"
 #include "DataChannelProtocol.h"
+#include "DataChannelListener.h"
 #ifdef SCTP_DTLS_SUPPORTED
 #include "mtransport/sigslot.h"
 #include "mtransport/transportflow.h"
@@ -91,29 +92,6 @@ public:
   char     *mData;
 };
 
-// Implemented by consumers of a Channel to receive messages.
-// Can't nest it in DataChannelConnection because C++ doesn't allow forward
-// refs to embedded classes
-class DataChannelListener {
-public:
-  virtual ~DataChannelListener() {}
-
-  // Called when a DOMString message is received.
-  virtual nsresult OnMessageAvailable(nsISupports *aContext,
-                                      const nsACString& message) = 0;
-
-  // Called when a binary message is received.
-  virtual nsresult OnBinaryMessageAvailable(nsISupports *aContext,
-                                            const nsACString& message) = 0;
-
-  // Called when the channel is connected
-  virtual nsresult OnChannelConnected(nsISupports *aContext) = 0;
-
-  // Called when the channel is closed
-  virtual nsresult OnChannelClosed(nsISupports *aContext) = 0;
-};
-
-
 // One per PeerConnection
 class DataChannelConnection: public nsITimerCallback
 #ifdef SCTP_DTLS_SUPPORTED
@@ -121,12 +99,13 @@ class DataChannelConnection: public nsITimerCallback
 #endif
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
 
   class DataConnectionListener : public SupportsWeakPtr<DataConnectionListener>
   {
   public:
+    MOZ_DECLARE_REFCOUNTED_TYPENAME(DataChannelConnection::DataConnectionListener)
     virtual ~DataConnectionListener() {}
 
     // Called when a the connection is open
@@ -211,6 +190,10 @@ public:
   friend class DataChannel;
   Mutex  mLock;
 
+  void ReadBlob(already_AddRefed<DataChannelConnection> aThis, uint16_t aStream, nsIInputStream* aBlob);
+
+  void GetStreamIds(std::vector<uint16_t>* aStreamList);
+
 protected:
   friend class DataChannelOnMessageAvailable;
   // Avoid cycles with PeerConnectionImpl
@@ -229,10 +212,11 @@ private:
   DataChannel* FindChannelByStream(uint16_t stream);
   uint16_t FindFreeStream();
   bool RequestMoreStreams(int32_t aNeeded = 16);
-  int32_t SendControlMessage(void *msg, uint32_t len, uint16_t streamOut);
+  int32_t SendControlMessage(void *msg, uint32_t len, uint16_t stream);
   int32_t SendOpenRequestMessage(const nsACString& label, const nsACString& protocol,
-                                 uint16_t streamOut,
+                                 uint16_t stream,
                                  bool unordered, uint16_t prPolicy, uint32_t prValue);
+  int32_t SendOpenAckMessage(uint16_t stream);
   int32_t SendMsgInternal(DataChannel *channel, const char *data,
                           uint32_t length, uint32_t ppid);
   int32_t SendBinary(DataChannel *channel, const char *data,
@@ -241,20 +225,22 @@ private:
 
   void DeliverQueuedData(uint16_t stream);
 
-  already_AddRefed<DataChannel> OpenFinish(already_AddRefed<DataChannel> channel) NS_WARN_UNUSED_RESULT;
+  already_AddRefed<DataChannel> OpenFinish(already_AddRefed<DataChannel>&& aChannel);
 
   void StartDefer();
   bool SendDeferredMessages();
   void ProcessQueuedOpens();
   void ClearResets();
   void SendOutgoingStreamReset();
-  void ResetOutgoingStream(uint16_t streamOut);
+  void ResetOutgoingStream(uint16_t stream);
   void HandleOpenRequestMessage(const struct rtcweb_datachannel_open_request *req,
                                 size_t length,
-                                uint16_t streamIn);
-  void HandleUnknownMessage(uint32_t ppid, size_t length, uint16_t streamIn);
-  void HandleDataMessage(uint32_t ppid, const void *buffer, size_t length, uint16_t streamIn);
-  void HandleMessage(const void *buffer, size_t length, uint32_t ppid, uint16_t streamIn);
+                                uint16_t stream);
+  void HandleOpenAckMessage(const struct rtcweb_datachannel_ack *ack,
+                            size_t length, uint16_t stream);
+  void HandleUnknownMessage(uint32_t ppid, size_t length, uint16_t stream);
+  void HandleDataMessage(uint32_t ppid, const void *buffer, size_t length, uint16_t stream);
+  void HandleMessage(const void *buffer, size_t length, uint32_t ppid, uint16_t stream);
   void HandleAssociationChangeEvent(const struct sctp_assoc_change *sac);
   void HandlePeerAddressChangeEvent(const struct sctp_paddr_change *spc);
   void HandleRemoteErrorEvent(const struct sctp_remote_error *sre);
@@ -306,6 +292,7 @@ private:
   nsCOMPtr<nsITimer> mDeferredTimer;
   uint32_t mDeferTimeout; // in ms
   bool mTimerRunning;
+  nsCOMPtr<nsIThread> mInternalIOThread;
 };
 
 #define ENSURE_DATACONNECTION \
@@ -344,7 +331,7 @@ public:
     , mStream(stream)
     , mPrPolicy(policy)
     , mPrValue(value)
-    , mFlags(0)
+    , mFlags(flags)
     , mIsRecvBinary(false)
     {
       NS_ASSERTION(mConnection,"NULL connection");

@@ -6,6 +6,7 @@ Cu.import("resource://services-sync/identity.js");
 Cu.import("resource://services-sync/resource.js");
 Cu.import("resource://services-sync/service.js");
 Cu.import("resource://services-sync/util.js");
+Cu.import("resource://testing-common/services/sync/utils.js");
 
 
 function test_toJSON() {
@@ -51,7 +52,7 @@ function test_fetch() {
   try {
     _("Fetching a WBO record");
     let rec = new WBORecord("coll", "record");
-    rec.fetch(Service.resource("http://localhost:8080/record"));
+    rec.fetch(Service.resource(server.baseURI + "/record"));
     do_check_eq(rec.id, "asdf-1234-asdf-1234"); // NOT "record"!
 
     do_check_eq(rec.modified, 2454725.98283);
@@ -59,7 +60,7 @@ function test_fetch() {
     do_check_eq(rec.payload.cheese, "roquefort");
 
     _("Fetching a WBO record using the record manager");
-    let rec2 = Service.recordManager.get("http://localhost:8080/record2");
+    let rec2 = Service.recordManager.get(server.baseURI + "/record2");
     do_check_eq(rec2.id, "record2");
     do_check_eq(rec2.modified, 2454725.98284);
     do_check_eq(typeof(rec2.payload), "object");
@@ -78,6 +79,7 @@ function test_fetch() {
 
 function run_test() {
   initTestLogging("Trace");
+  ensureLegacyIdentityManager();
 
   test_toJSON();
   test_fetch();

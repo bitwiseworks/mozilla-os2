@@ -1,7 +1,8 @@
 import os
 from setuptools import setup, find_packages
+import sys
 
-version = '0.5.31'
+version = '0.7.6'
 
 # get documentation from the README
 try:
@@ -11,10 +12,25 @@ except (OSError, IOError):
     description = ''
 
 # dependencies
-deps = ['manifestdestiny', 'mozhttpd >= 0.5',
-        'mozprocess >= 0.9', 'mozrunner >= 5.15',
-        'mozdevice >= 0.22', 'moznetwork >= 0.21',
-        'mozcrash >= 0.5', 'mozprofile >= 0.7']
+with open('requirements.txt') as f:
+    deps = f.read().splitlines()
+
+# Requirements.txt contains a pointer to the local copy of marionette_transport;
+# if we're installing using setup.py, handle this locally or replace with a valid
+# pypi package reference.
+deps = [x for x in deps if 'transport' not in x]
+transport_dir = os.path.join(os.path.dirname(__file__), os.path.pardir, 'transport')
+method = [x for x in sys.argv if x in ('develop', 'install')]
+if os.path.exists(transport_dir) and method:
+    cmd = [sys.executable, 'setup.py', method[0]]
+    import subprocess
+    try:
+        subprocess.check_call(cmd, cwd=transport_dir)
+    except subprocess.CalledProcessError:
+        print "Error running setup.py in %s" % directory
+        raise
+else:
+    deps += ['marionette-transport == 0.1']
 
 setup(name='marionette_client',
       version=version,

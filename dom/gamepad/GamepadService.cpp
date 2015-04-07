@@ -12,9 +12,6 @@
 #include "nsAutoPtr.h"
 #include "nsIDOMEvent.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMGamepadButtonEvent.h"
-#include "nsIDOMGamepadAxisMoveEvent.h"
-#include "nsIDOMGamepadEvent.h"
 #include "GeneratedEvents.h"
 #include "nsIDOMWindow.h"
 #include "nsIObserver.h"
@@ -23,6 +20,10 @@
 #include "nsITimer.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Services.h"
+
+#include "mozilla/dom/GamepadAxisMoveEvent.h"
+#include "mozilla/dom/GamepadButtonEvent.h"
+#include "mozilla/dom/GamepadEvent.h"
 
 #include <cstddef>
 
@@ -45,7 +46,7 @@ StaticRefPtr<GamepadService> gGamepadServiceSingleton;
 
 bool GamepadService::sShutdown = false;
 
-NS_IMPL_ISUPPORTS1(GamepadService, nsIObserver)
+NS_IMPL_ISUPPORTS(GamepadService, nsIObserver)
 
 GamepadService::GamepadService()
   : mStarted(false),
@@ -64,7 +65,7 @@ GamepadService::GamepadService()
 NS_IMETHODIMP
 GamepadService::Observe(nsISupports* aSubject,
                         const char* aTopic,
-                        const PRUnichar* aData)
+                        const char16_t* aData)
 {
   nsCOMPtr<nsIObserverService> observerService =
     mozilla::services::GetObserverService();
@@ -208,7 +209,7 @@ GamepadService::NewButtonEvent(uint32_t aIndex, uint32_t aButton, bool aPressed,
     --i;
 
     // Only send events to non-background windows
-    if (!listeners[i]->GetOuterWindow() ||
+    if (!listeners[i]->IsCurrentInnerWindow() ||
         listeners[i]->GetOuterWindow()->IsBackground()) {
       continue;
     }
@@ -241,18 +242,19 @@ GamepadService::FireButtonEvent(EventTarget* aTarget,
                                 uint32_t aButton,
                                 double aValue)
 {
-  nsCOMPtr<nsIDOMEvent> event;
-  bool defaultActionEnabled = true;
-  NS_NewDOMGamepadButtonEvent(getter_AddRefs(event), aTarget, nullptr, nullptr);
-  nsCOMPtr<nsIDOMGamepadButtonEvent> je = do_QueryInterface(event);
-  MOZ_ASSERT(je, "QI should not fail");
-
-
   nsString name = aValue == 1.0L ? NS_LITERAL_STRING("gamepadbuttondown") :
                                    NS_LITERAL_STRING("gamepadbuttonup");
-  je->InitGamepadButtonEvent(name, false, false, aGamepad, aButton);
-  je->SetTrusted(true);
+  GamepadButtonEventInit init;
+  init.mBubbles = false;
+  init.mCancelable = false;
+  init.mGamepad = aGamepad;
+  init.mButton = aButton;
+  nsRefPtr<GamepadButtonEvent> event =
+    GamepadButtonEvent::Constructor(aTarget, name, init);
 
+  event->SetTrusted(true);
+
+  bool defaultActionEnabled = true;
   aTarget->DispatchEvent(event, &defaultActionEnabled);
 }
 
@@ -272,7 +274,7 @@ GamepadService::NewAxisMoveEvent(uint32_t aIndex, uint32_t aAxis, double aValue)
     --i;
 
     // Only send events to non-background windows
-    if (!listeners[i]->GetOuterWindow() ||
+    if (!listeners[i]->IsCurrentInnerWindow() ||
         listeners[i]->GetOuterWindow()->IsBackground()) {
       continue;
     }
@@ -305,17 +307,20 @@ GamepadService::FireAxisMoveEvent(EventTarget* aTarget,
                                   uint32_t aAxis,
                                   double aValue)
 {
-  nsCOMPtr<nsIDOMEvent> event;
+  GamepadAxisMoveEventInit init;
+  init.mBubbles = false;
+  init.mCancelable = false;
+  init.mGamepad = aGamepad;
+  init.mAxis = aAxis;
+  init.mValue = aValue;
+  nsRefPtr<GamepadAxisMoveEvent> event =
+    GamepadAxisMoveEvent::Constructor(aTarget,
+                                      NS_LITERAL_STRING("gamepadaxismove"),
+                                      init);
+
+  event->SetTrusted(true);
+
   bool defaultActionEnabled = true;
-  NS_NewDOMGamepadAxisMoveEvent(getter_AddRefs(event), aTarget, nullptr,
-                                nullptr);
-  nsCOMPtr<nsIDOMGamepadAxisMoveEvent> je = do_QueryInterface(event);
-  MOZ_ASSERT(je, "QI should not fail");
-
-  je->InitGamepadAxisMoveEvent(NS_LITERAL_STRING("gamepadaxismove"),
-                               false, false, aGamepad, aAxis, aValue);
-  je->SetTrusted(true);
-
   aTarget->DispatchEvent(event, &defaultActionEnabled);
 }
 
@@ -335,7 +340,7 @@ GamepadService::NewConnectionEvent(uint32_t aIndex, bool aConnected)
       --i;
 
       // Only send events to non-background windows
-      if (!listeners[i]->GetOuterWindow() ||
+      if (!listeners[i]->IsCurrentInnerWindow() ||
           listeners[i]->GetOuterWindow()->IsBackground()) {
         continue;
       }
@@ -381,17 +386,18 @@ GamepadService::FireConnectionEvent(EventTarget* aTarget,
                                     Gamepad* aGamepad,
                                     bool aConnected)
 {
-  nsCOMPtr<nsIDOMEvent> event;
-  bool defaultActionEnabled = true;
-  NS_NewDOMGamepadEvent(getter_AddRefs(event), aTarget, nullptr, nullptr);
-  nsCOMPtr<nsIDOMGamepadEvent> je = do_QueryInterface(event);
-  MOZ_ASSERT(je, "QI should not fail");
-
   nsString name = aConnected ? NS_LITERAL_STRING("gamepadconnected") :
                                NS_LITERAL_STRING("gamepaddisconnected");
-  je->InitGamepadEvent(name, false, false, aGamepad);
-  je->SetTrusted(true);
+  GamepadEventInit init;
+  init.mBubbles = false;
+  init.mCancelable = false;
+  init.mGamepad = aGamepad;
+  nsRefPtr<GamepadEvent> event =
+    GamepadEvent::Constructor(aTarget, name, init);
 
+  event->SetTrusted(true);
+
+  bool defaultActionEnabled = true;
   aTarget->DispatchEvent(event, &defaultActionEnabled);
 }
 
@@ -446,7 +452,7 @@ GamepadService::SetWindowHasSeenGamepad(nsGlobalWindow* aWindow,
 
   if (aHasSeen) {
     aWindow->SetHasSeenGamepadInput(true);
-    nsCOMPtr<nsISupports> window = nsGlobalWindow::ToSupports(aWindow);
+    nsCOMPtr<nsISupports> window = ToSupports(aWindow);
     nsRefPtr<Gamepad> gamepad = mGamepads[aIndex]->Clone(window);
     aWindow->AddGamepad(aIndex, gamepad);
   } else {
@@ -501,7 +507,7 @@ GamepadService::StartCleanupTimer()
  * of the GamepadService to JavaScript via XPCOM so that we can write Mochitests
  * that add and remove fake gamepads, avoiding the platform-specific backends.
  */
-NS_IMPL_ISUPPORTS1(GamepadServiceTest, nsIGamepadServiceTest)
+NS_IMPL_ISUPPORTS(GamepadServiceTest, nsIGamepadServiceTest)
 
 GamepadServiceTest* GamepadServiceTest::sSingleton = nullptr;
 
@@ -519,6 +525,7 @@ GamepadServiceTest::CreateService()
 GamepadServiceTest::GamepadServiceTest()
 {
   /* member initializers and constructor code */
+  nsRefPtr<GamepadService> service = GamepadService::GetService();
 }
 
 /* uint32_t addGamepad (in string id, in unsigned long mapping, in unsigned long numButtons, in unsigned long numAxes); */

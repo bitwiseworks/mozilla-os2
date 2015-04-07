@@ -6,3 +6,42 @@
 
 TEST_DIRS += ['test']
 
+EXTRA_JS_MODULES += [
+    'BrowserNewTabPreloader.jsm',
+    'BrowserUITelemetry.jsm',
+    'ContentClick.jsm',
+    'ContentLinkHandler.jsm',
+    'ContentSearch.jsm',
+    'CustomizationTabPreloader.jsm',
+    'Feeds.jsm',
+    'NetworkPrioritizer.jsm',
+    'offlineAppCache.jsm',
+    'RemotePrompt.jsm',
+    'SharedFrame.jsm',
+    'SitePermissions.jsm',
+    'Social.jsm',
+    'TabCrashReporter.jsm',
+    'WebappManager.jsm',
+    'webrtcUI.jsm',
+]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    EXTRA_JS_MODULES += [
+        'Windows8WindowFrameColor.jsm',
+        'WindowsJumpLists.jsm',
+        'WindowsPreviewPerTab.jsm',
+    ]
+
+if CONFIG['NIGHTLY_BUILD']:
+    EXTRA_JS_MODULES += [
+        'SignInToWebsite.jsm',
+    ]
+
+EXTRA_PP_JS_MODULES += [
+    'AboutHome.jsm',
+    'RecentWindow.jsm',
+    'UITour.jsm',
+]
+
+if CONFIG['MOZILLA_OFFICIAL']:
+    DEFINES['MOZILLA_OFFICIAL'] = 1

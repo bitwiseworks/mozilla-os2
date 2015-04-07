@@ -24,13 +24,13 @@ function run_test() {
     }, [
       "onInstallStarted",
       "onInstallEnded",
-    ], check_test);
+    ], callback_soon(check_test));
     install.install();
   });
 }
 
 function check_test() {
-  AddonManager.getAddonByID("bug675371@tests.mozilla.org", function(addon) {
+  AddonManager.getAddonByID("bug675371@tests.mozilla.org", do_exception_wrap(function(addon) {
     do_check_neq(addon, null);
     do_check_true(addon.isActive);
 
@@ -86,6 +86,6 @@ function check_test() {
       do_check_false(target.active);
     }
 
-    do_test_finished();
-  });
+    do_execute_soon(do_test_finished);
+  }));
 }

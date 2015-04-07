@@ -58,12 +58,8 @@ function test() {
   };
 
   function testOnWindow(options, callback) {
-    let win = OpenBrowserWindow(options);
-    win.addEventListener("load", function onLoad() {
-      win.removeEventListener("load", onLoad, false);
-      windowsToClose.push(win);
-      executeSoon(function() callback(win));
-    }, false);
+    let win = whenNewWindowLoaded(options, callback);
+    windowsToClose.push(win);
   };
 
   registerCleanupFunction(function() {
@@ -73,14 +69,14 @@ function test() {
   });
 
   testOnWindow({}, function(win) {
-    testPopupBlockerMenuItem(false, win,
+    testPopupBlockerMenuItem(false, win, function() {
       testOnWindow({private: true}, function(win) {
-        testPopupBlockerMenuItem(true, win,
+        testPopupBlockerMenuItem(true, win, function() {
           testOnWindow({}, function(win) {
             testPopupBlockerMenuItem(false, win, finishTest);
           })
-        );
+        });
       })
-    );
+    });
   });
 }

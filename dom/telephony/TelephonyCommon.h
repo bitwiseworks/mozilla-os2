@@ -7,12 +7,14 @@
 #ifndef mozilla_dom_telephony_telephonycommon_h__
 #define mozilla_dom_telephony_telephonycommon_h__
 
+#include "mozilla/Attributes.h"
+#include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/ErrorResult.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDebug.h"
-#include "nsDOMEventTargetHelper.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "nsTArray.h"
 
 #define BEGIN_TELEPHONY_NAMESPACE \
@@ -22,18 +24,23 @@
 #define USING_TELEPHONY_NAMESPACE \
   using namespace mozilla::dom::telephony;
 
-class nsIDOMTelephony;
-class nsIDOMTelephonyCall;
+namespace mozilla {
+namespace dom {
 
-BEGIN_TELEPHONY_NAMESPACE
+namespace telephony {
 
 enum {
   kOutgoingPlaceholderCallIndex = UINT32_MAX
 };
 
+} // namespace telephony
+
+class CallsList;
 class Telephony;
 class TelephonyCall;
+class TelephonyCallGroup;
 
-END_TELEPHONY_NAMESPACE
+} // namespace dom
+} // namespace mozilla
 
 #endif // mozilla_dom_telephony_telephonycommon_h__

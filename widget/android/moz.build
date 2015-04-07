@@ -10,27 +10,28 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'widget_android'
 
-MODULE = 'widget'
-
 EXPORTS += [
     'AndroidBridge.h',
-    'AndroidJNIWrapper.h',
     'AndroidJavaWrappers.h',
+    'AndroidJNIWrapper.h',
+    'GeneratedJNIWrappers.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'AndroidBridge.cpp',
     'AndroidDirectTexture.cpp',
     'AndroidGraphicBuffer.cpp',
+    'AndroidJavaWrappers.cpp',
     'AndroidJNI.cpp',
     'AndroidJNIWrapper.cpp',
-    'AndroidJavaWrappers.cpp',
+    'GeneratedJNIWrappers.cpp',
     'GfxInfo.cpp',
+    'NativeJSContainer.cpp',
     'nsAppShell.cpp',
     'nsClipboard.cpp',
     'nsDeviceContextAndroid.cpp',
-    'nsIMEPicker.cpp',
     'nsIdleServiceAndroid.cpp',
+    'nsIMEPicker.cpp',
     'nsLookAndFeel.cpp',
     'nsPrintOptionsAndroid.cpp',
     'nsScreenManagerAndroid.cpp',
@@ -38,3 +39,21 @@ CPP_SOURCES += [
     'nsWindow.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
+LIBRARY_NAME = 'widget_android'
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'
+
+LOCAL_INCLUDES += [
+    '/docshell/base',
+    '/dom/system/android',
+    '/netwerk/cache',
+    '/widget/android/android',
+    '/widget/shared',
+    '/widget/xpwidgets',
+]
+
+#DEFINES['DEBUG_WIDGETS'] = True

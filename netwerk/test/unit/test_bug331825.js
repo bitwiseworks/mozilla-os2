@@ -1,8 +1,3 @@
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
-
 Cu.import("resource://testing-common/httpd.js");
 
 var server;
@@ -25,13 +20,14 @@ function run_test() {
 
   server.registerPathHandler("/bug" + BUGID, bug331825);
 
-  server.start(4444);
+  server.start(-1);
 
   // make request
   var channel =
       Components.classes["@mozilla.org/network/io-service;1"].
       getService(Components.interfaces.nsIIOService).
-      newChannel("http://localhost:4444/bug" + BUGID, null, null);
+      newChannel("http://localhost:" + server.identity.primaryPort + "/bug" +
+                 BUGID, null, null);
 
   channel.QueryInterface(Components.interfaces.nsIHttpChannel);
   channel.setRequestHeader("If-None-Match", "foobar", false);

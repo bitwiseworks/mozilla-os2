@@ -196,6 +196,19 @@ public:
     return static_cast<nsSVGElement*>(e.get());
   }
 
+  /**
+   * Returns true if this object is an "identity" value, from the perspective
+   * of SMIL. In other words, returns true until the initial value set up in
+   * SVGLengthListSMILType::Init() has been changed with a SetInfo() call.
+   */
+  bool IsIdentity() const {
+    if (!mElement) {
+      NS_ABORT_IF_FALSE(IsEmpty(), "target element propagation failure");
+      return true;
+    }
+    return false;
+  }
+
   uint8_t Axis() const {
     NS_ABORT_IF_FALSE(mElement, "Axis() isn't valid");
     return mAxis;
@@ -204,7 +217,7 @@ public:
   /**
    * The value returned by this function depends on which attribute this object
    * is for. If appending a list of zeros to the attribute's list would have no
-   * affect on rendering (e.g. the attributes 'dx' and 'dy' on <text>), then
+   * effect on rendering (e.g. the attributes 'dx' and 'dy' on <text>), then
    * this method will return true. If appending a list of zeros to the
    * attribute's list could *change* rendering (e.g. the attributes 'x' and 'y'
    * on <text>), then this method will return false.

@@ -15,8 +15,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=495300
 <pre id="test">
 <script class="testbody" type="text/javascript">
 
-SimpleTest.expectAssertions(0, 2);
-
 var manager = new MediaTestManager;
 
 function filename(uri) {
@@ -36,6 +34,7 @@ function mediaEnded(event) {
 function startTest(test, token) {
   var elemType = /^audio/.test(test.type) ? "audio" : "video";
   var v1 = document.createElement(elemType);
+  v1.preload = "auto";
 
   v1.src = test.name;
   if (test.duration) {

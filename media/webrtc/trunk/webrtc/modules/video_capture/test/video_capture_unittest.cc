@@ -10,17 +10,17 @@
 
 #include <stdio.h>
 
-#include "gtest/gtest.h"
-#include "modules/utility/interface/process_thread.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/common_video/interface/i420_video_frame.h"
+#include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
+#include "webrtc/modules/utility/interface/process_thread.h"
 #include "webrtc/modules/video_capture/include/video_capture.h"
 #include "webrtc/modules/video_capture/include/video_capture_factory.h"
-#include "common_video/interface/i420_video_frame.h"
-#include "common_video/libyuv/include/webrtc_libyuv.h"
-#include "system_wrappers/interface/critical_section_wrapper.h"
-#include "system_wrappers/interface/scoped_ptr.h"
-#include "system_wrappers/interface/scoped_refptr.h"
-#include "system_wrappers/interface/sleep.h"
-#include "system_wrappers/interface/tick_util.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/scoped_refptr.h"
+#include "webrtc/system_wrappers/interface/sleep.h"
+#include "webrtc/system_wrappers/interface/tick_util.h"
 
 using webrtc::CriticalSectionWrapper;
 using webrtc::CriticalSectionScoped;
@@ -38,7 +38,7 @@ using webrtc::VideoCaptureModule;
 #define WAIT_(ex, timeout, res) \
   do { \
     res = (ex); \
-    WebRtc_Word64 start = TickTime::MillisecondTimestamp(); \
+    int64_t start = TickTime::MillisecondTimestamp(); \
     while (!res && TickTime::MillisecondTimestamp() < start + timeout) { \
       SleepMs(5); \
       res = (ex); \
@@ -142,7 +142,7 @@ class TestVideoCaptureCallback : public VideoCaptureDataCallback {
  public:
   TestVideoCaptureCallback()
     : capture_cs_(CriticalSectionWrapper::CreateCriticalSection()),
-      capture_delay_(0),
+      capture_delay_(-1),
       last_render_time_ms_(0),
       incoming_frames_(0),
       timing_warnings_(0),
@@ -154,7 +154,7 @@ class TestVideoCaptureCallback : public VideoCaptureDataCallback {
       printf("No of timing warnings %d\n", timing_warnings_);
   }
 
-  virtual void OnIncomingCapturedFrame(const WebRtc_Word32 id,
+  virtual void OnIncomingCapturedFrame(const int32_t id,
                                        webrtc::I420VideoFrame& videoFrame) {
     CriticalSectionScoped cs(capture_cs_.get());
 
@@ -186,15 +186,15 @@ class TestVideoCaptureCallback : public VideoCaptureDataCallback {
     last_render_time_ms_ = videoFrame.render_time_ms();
     last_frame_.CopyFrame(videoFrame);
   }
-  virtual void OnIncomingCapturedEncodedFrame(const WebRtc_Word32 id,
+  virtual void OnIncomingCapturedEncodedFrame(const int32_t id,
                                               webrtc::VideoFrame& videoFrame,
                                               webrtc::VideoCodecType codecType)
  {
-     assert(!"NOTIMPLEMENTED");
+     assert(false);
  }
 
-  virtual void OnCaptureDelayChanged(const WebRtc_Word32 id,
-                                     const WebRtc_Word32 delay) {
+  virtual void OnCaptureDelayChanged(const int32_t id,
+                                     const int32_t delay) {
     CriticalSectionScoped cs(capture_cs_.get());
     capture_delay_ = delay;
   }
@@ -204,7 +204,7 @@ class TestVideoCaptureCallback : public VideoCaptureDataCallback {
     capability_= capability;
     incoming_frames_ = 0;
     last_render_time_ms_ = 0;
-    capture_delay_ = 0;
+    capture_delay_ = -1;
   }
   int incoming_frames() {
     CriticalSectionScoped cs(capture_cs_.get());
@@ -243,7 +243,7 @@ class TestVideoCaptureCallback : public VideoCaptureDataCallback {
   scoped_ptr<CriticalSectionWrapper> capture_cs_;
   VideoCaptureCapability capability_;
   int capture_delay_;
-  WebRtc_Word64 last_render_time_ms_;
+  int64_t last_render_time_ms_;
   int incoming_frames_;
   int timing_warnings_;
   webrtc::I420VideoFrame last_frame_;
@@ -258,13 +258,13 @@ class TestVideoCaptureFeedBack : public VideoCaptureFeedBack {
     alarm_(webrtc::Cleared) {
   }
 
-  virtual void OnCaptureFrameRate(const WebRtc_Word32 id,
-                                  const WebRtc_UWord32 frameRate) {
+  virtual void OnCaptureFrameRate(const int32_t id,
+                                  const uint32_t frameRate) {
     CriticalSectionScoped cs(capture_cs_.get());
     frame_rate_ = frameRate;
   }
 
-  virtual void OnNoPictureAlarm(const WebRtc_Word32 id,
+  virtual void OnNoPictureAlarm(const int32_t id,
                                 const VideoCaptureAlarm reported_alarm) {
     CriticalSectionScoped cs(capture_cs_.get());
     alarm_ = reported_alarm;
@@ -332,7 +332,7 @@ class VideoCaptureTest : public testing::Test {
 
 TEST_F(VideoCaptureTest, CreateDelete) {
   for (int i = 0; i < 5; ++i) {
-    WebRtc_Word64 start_time = TickTime::MillisecondTimestamp();
+    int64_t start_time = TickTime::MillisecondTimestamp();
     TestVideoCaptureCallback capture_observer;
     webrtc::scoped_refptr<VideoCaptureModule> module(OpenVideoCaptureDevice(
         0, &capture_observer));
@@ -356,9 +356,9 @@ TEST_F(VideoCaptureTest, CreateDelete) {
     // Make sure 5 frames are captured.
     EXPECT_TRUE_WAIT(capture_observer.incoming_frames() >= 5, kTimeOut);
 
-    EXPECT_GT(capture_observer.capture_delay(), 0);
+    EXPECT_GE(capture_observer.capture_delay(), 0);
 
-    WebRtc_Word64 stop_time = TickTime::MillisecondTimestamp();
+    int64_t stop_time = TickTime::MillisecondTimestamp();
     EXPECT_EQ(0, module->StopCapture());
     EXPECT_FALSE(module->CaptureStarted());
 
@@ -581,7 +581,7 @@ TEST_F(VideoCaptureExternalTest, DISABLED_TestExternalCaptureI420) {
 
 // Test frame rate and no picture alarm.
 TEST_F(VideoCaptureExternalTest , FrameRate) {
-  WebRtc_Word64 testTime = 3;
+  int64_t testTime = 3;
   TickTime startTime = TickTime::Now();
 
   while ((TickTime::Now() - startTime).Milliseconds() < testTime * 1000) {
@@ -639,4 +639,3 @@ TEST_F(VideoCaptureExternalTest, Rotation) {
   EXPECT_EQ(0, capture_input_interface_->IncomingFrame(test_buffer.get(),
     length, capture_callback_.capability(), 0));
 }
-

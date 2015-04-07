@@ -16,7 +16,7 @@
 #include "SVGAnimatedNumberList.h"
 
 nsresult NS_NewSVGFEConvolveMatrixElement(nsIContent **aResult,
-                                          already_AddRefed<nsINodeInfo> aNodeInfo);
+                                          already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 class DOMSVGAnimatedNumberList;
@@ -29,53 +29,42 @@ typedef nsSVGFE SVGFEConvolveMatrixElementBase;
 class SVGFEConvolveMatrixElement : public SVGFEConvolveMatrixElementBase
 {
   friend nsresult (::NS_NewSVGFEConvolveMatrixElement(nsIContent **aResult,
-                                                      already_AddRefed<nsINodeInfo> aNodeInfo));
+                                                      already_AddRefed<nsINodeInfo>&& aNodeInfo));
 protected:
-  SVGFEConvolveMatrixElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  SVGFEConvolveMatrixElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : SVGFEConvolveMatrixElementBase(aNodeInfo)
   {
   }
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
 public:
-  virtual nsresult Filter(nsSVGFilterInstance* aInstance,
-                          const nsTArray<const Image*>& aSources,
-                          const Image* aTarget,
-                          const nsIntRect& aDataRect) MOZ_OVERRIDE;
+  virtual FilterPrimitiveDescription
+    GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
+                            const IntRect& aFilterSubregion,
+                            const nsTArray<bool>& aInputsAreTainted,
+                            nsTArray<mozilla::RefPtr<SourceSurface>>& aInputImages) MOZ_OVERRIDE;
   virtual bool AttributeAffectsRendering(
           int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
   virtual nsSVGString& GetResultImageName() MOZ_OVERRIDE { return mStringAttributes[RESULT]; }
   virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources) MOZ_OVERRIDE;
-  virtual nsIntRect ComputeTargetBBox(const nsTArray<nsIntRect>& aSourceBBoxes,
-          const nsSVGFilterInstance& aInstance) MOZ_OVERRIDE;
-  virtual void ComputeNeededSourceBBoxes(const nsIntRect& aTargetBBox,
-          nsTArray<nsIntRect>& aSourceBBoxes, const nsSVGFilterInstance& aInstance) MOZ_OVERRIDE;
-  virtual nsIntRect ComputeChangeBBox(const nsTArray<nsIntRect>& aSourceChangeBoxes,
-          const nsSVGFilterInstance& aInstance) MOZ_OVERRIDE;
-
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   // WebIDL
   already_AddRefed<SVGAnimatedString> In1();
-  already_AddRefed<nsIDOMSVGAnimatedInteger> OrderX();
-  already_AddRefed<nsIDOMSVGAnimatedInteger> OrderY();
+  already_AddRefed<SVGAnimatedInteger> OrderX();
+  already_AddRefed<SVGAnimatedInteger> OrderY();
   already_AddRefed<DOMSVGAnimatedNumberList> KernelMatrix();
-  already_AddRefed<nsIDOMSVGAnimatedInteger> TargetX();
-  already_AddRefed<nsIDOMSVGAnimatedInteger> TargetY();
-  already_AddRefed<nsIDOMSVGAnimatedEnumeration> EdgeMode();
+  already_AddRefed<SVGAnimatedInteger> TargetX();
+  already_AddRefed<SVGAnimatedInteger> TargetY();
+  already_AddRefed<SVGAnimatedEnumeration> EdgeMode();
   already_AddRefed<SVGAnimatedBoolean> PreserveAlpha();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> Divisor();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> Bias();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> KernelUnitLengthX();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> KernelUnitLengthY();
+  already_AddRefed<SVGAnimatedNumber> Divisor();
+  already_AddRefed<SVGAnimatedNumber> Bias();
+  already_AddRefed<SVGAnimatedNumber> KernelUnitLengthX();
+  already_AddRefed<SVGAnimatedNumber> KernelUnitLengthY();
 
 protected:
-  virtual bool OperatesOnPremultipledAlpha(int32_t) MOZ_OVERRIDE {
-    return !mBooleanAttributes[PRESERVEALPHA].GetAnimValue();
-  }
-
   virtual NumberAttributesInfo GetNumberInfo() MOZ_OVERRIDE;
   virtual NumberPairAttributesInfo GetNumberPairInfo() MOZ_OVERRIDE;
   virtual IntegerAttributesInfo GetIntegerInfo() MOZ_OVERRIDE;

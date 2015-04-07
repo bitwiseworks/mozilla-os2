@@ -12,23 +12,23 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGTitleElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGTitleElement::WrapNode(JSContext *aCx)
 {
-  return SVGTitleElementBinding::Wrap(aCx, aScope, this);
+  return SVGTitleElementBinding::Wrap(aCx, this);
 }
 
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_ISUPPORTS_INHERITED4(SVGTitleElement, SVGTitleElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement,
-                             nsIMutationObserver)
+NS_IMPL_ISUPPORTS_INHERITED(SVGTitleElement, SVGTitleElementBase,
+                            nsIDOMNode, nsIDOMElement,
+                            nsIDOMSVGElement,
+                            nsIMutationObserver)
 
 //----------------------------------------------------------------------
 // Implementation
 
-SVGTitleElement::SVGTitleElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+SVGTitleElement::SVGTitleElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : SVGTitleElementBase(aNodeInfo)
 {
   AddMutationObserver(this);

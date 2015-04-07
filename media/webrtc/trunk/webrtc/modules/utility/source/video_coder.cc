@@ -10,10 +10,10 @@
 
 #ifdef WEBRTC_MODULE_UTILITY_VIDEO
 
-#include "video_coder.h"
+#include "webrtc/modules/utility/source/video_coder.h"
 
 namespace webrtc {
-VideoCoder::VideoCoder(WebRtc_UWord32 instanceID)
+VideoCoder::VideoCoder(uint32_t instanceID)
     : _vcm(VideoCodingModule::Create(instanceID)),
       _decodedVideo(0)
 {
@@ -29,21 +29,9 @@ VideoCoder::~VideoCoder()
     VideoCodingModule::Destroy(_vcm);
 }
 
-WebRtc_Word32 VideoCoder::ResetDecoder()
-{
-    _vcm->ResetDecoder();
-
-    _vcm->InitializeSender();
-    _vcm->InitializeReceiver();
-
-    _vcm->RegisterTransportCallback(this);
-    _vcm->RegisterReceiveCallback(this);
-    return 0;
-}
-
-WebRtc_Word32 VideoCoder::SetEncodeCodec(VideoCodec& videoCodecInst,
-                                         WebRtc_UWord32 numberOfCores,
-                                         WebRtc_UWord32 maxPayloadSize)
+int32_t VideoCoder::SetEncodeCodec(VideoCodec& videoCodecInst,
+                                   uint32_t numberOfCores,
+                                   uint32_t maxPayloadSize)
 {
     if(_vcm->RegisterSendCodec(&videoCodecInst, numberOfCores,
                                maxPayloadSize) != VCM_OK)
@@ -54,12 +42,12 @@ WebRtc_Word32 VideoCoder::SetEncodeCodec(VideoCodec& videoCodecInst,
 }
 
 
-WebRtc_Word32 VideoCoder::SetDecodeCodec(VideoCodec& videoCodecInst,
-                                         WebRtc_Word32 numberOfCores)
+int32_t VideoCoder::SetDecodeCodec(VideoCodec& videoCodecInst,
+                                   int32_t numberOfCores)
 {
     if (videoCodecInst.plType == 0)
     {
-        WebRtc_Word8 plType = DefaultPayloadType(videoCodecInst.plName);
+        int8_t plType = DefaultPayloadType(videoCodecInst.plName);
         if (plType == -1)
         {
             return -1;
@@ -74,8 +62,8 @@ WebRtc_Word32 VideoCoder::SetDecodeCodec(VideoCodec& videoCodecInst,
     return 0;
 }
 
-WebRtc_Word32 VideoCoder::Decode(I420VideoFrame& decodedVideo,
-                                 const EncodedVideoData& encodedData)
+int32_t VideoCoder::Decode(I420VideoFrame& decodedVideo,
+                           const EncodedVideoData& encodedData)
 {
     decodedVideo.ResetSize();
     if(encodedData.payloadSize <= 0)
@@ -84,16 +72,12 @@ WebRtc_Word32 VideoCoder::Decode(I420VideoFrame& decodedVideo,
     }
 
     _decodedVideo = &decodedVideo;
-    if(_vcm->DecodeFromStorage(encodedData) != VCM_OK)
-    {
-        return -1;
-    }
     return 0;
 }
 
 
-WebRtc_Word32 VideoCoder::Encode(const I420VideoFrame& videoFrame,
-                                 EncodedVideoData& videoEncodedData)
+int32_t VideoCoder::Encode(const I420VideoFrame& videoFrame,
+                           EncodedVideoData& videoEncodedData)
 {
     // The AddVideoFrame(..) call will (indirectly) call SendData(). Store a
     // pointer to videoFrame so that it can be updated.
@@ -106,11 +90,11 @@ WebRtc_Word32 VideoCoder::Encode(const I420VideoFrame& videoFrame,
     return 0;
 }
 
-WebRtc_Word8 VideoCoder::DefaultPayloadType(const char* plName)
+int8_t VideoCoder::DefaultPayloadType(const char* plName)
 {
     VideoCodec tmpCodec;
-    WebRtc_Word32 numberOfCodecs = _vcm->NumberOfCodecs();
-    for (WebRtc_UWord8 i = 0; i < numberOfCodecs; i++)
+    int32_t numberOfCodecs = _vcm->NumberOfCodecs();
+    for (uint8_t i = 0; i < numberOfCodecs; i++)
     {
         _vcm->Codec(i, &tmpCodec);
         if(strncmp(tmpCodec.plName, plName, kPayloadNameSize) == 0)
@@ -121,18 +105,18 @@ WebRtc_Word8 VideoCoder::DefaultPayloadType(const char* plName)
     return -1;
 }
 
-WebRtc_Word32 VideoCoder::FrameToRender(I420VideoFrame& videoFrame)
+int32_t VideoCoder::FrameToRender(I420VideoFrame& videoFrame)
 {
     return _decodedVideo->CopyFrame(videoFrame);
 }
 
-WebRtc_Word32 VideoCoder::SendData(
+int32_t VideoCoder::SendData(
     const FrameType frameType,
-    const WebRtc_UWord8  payloadType,
-    const WebRtc_UWord32 timeStamp,
+    const uint8_t  payloadType,
+    const uint32_t timeStamp,
     int64_t capture_time_ms,
-    const WebRtc_UWord8* payloadData,
-    WebRtc_UWord32 payloadSize,
+    const uint8_t* payloadData,
+    uint32_t payloadSize,
     const RTPFragmentationHeader& fragmentationHeader,
     const RTPVideoHeader* /*rtpVideoHdr*/)
 {
@@ -144,9 +128,9 @@ WebRtc_Word32 VideoCoder::SendData(
     _videoEncodedData->timeStamp = timeStamp;
     _videoEncodedData->fragmentationHeader.CopyFrom(fragmentationHeader);
     memcpy(_videoEncodedData->payloadData, payloadData,
-           sizeof(WebRtc_UWord8) * payloadSize);
+           sizeof(uint8_t) * payloadSize);
     _videoEncodedData->payloadSize = payloadSize;
     return 0;
 }
-} // namespace webrtc
+}  // namespace webrtc
 #endif // WEBRTC_MODULE_UTILITY_VIDEO

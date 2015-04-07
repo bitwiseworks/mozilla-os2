@@ -36,15 +36,11 @@
   let db = storage.openDatabase(file);
   db.close();
 
-  // Invoke all the multi-reporters.  The SQLite multi-reporter is among
+  // Invoke all the reporters.  The SQLite multi-reporter is among
   // them.  It shouldn't crash.
   let mgr = Cc["@mozilla.org/memory-reporter-manager;1"].
             getService(Ci.nsIMemoryReporterManager);
-  e = mgr.enumerateMultiReporters();
-  while (e.hasMoreElements()) {
-    let r = e.getNext().QueryInterface(Ci.nsIMemoryMultiReporter);
-    r.collectReports(function(){}, null);
-  }
+  mgr.getReportsForThisProcess(function(){}, null);
 
   // If we haven't crashed, we've passed, but the test harness requires that
   // we explicitly check something.

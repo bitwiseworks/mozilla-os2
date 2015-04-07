@@ -24,9 +24,7 @@ extern "C"
 }
 
 
-static const char* logTag = "CallControlManager";
-
-static std::string logDestination = "CallControl.log";
+static const char logTag[] = "CallControlManager";
 
 using namespace std;
 using namespace CSFUnified;
@@ -66,7 +64,7 @@ bool CallControlManagerImpl::destroy()
 void CallControlManagerImpl::addCCObserver ( CC_Observer * observer )
 {
 	mozilla::MutexAutoLock lock(m_lock);
-    if (observer == NULL)
+    if (observer == nullptr)
     {
         CSFLogError(logTag, "NULL value for \"observer\" passed to addCCObserver().");
         return;
@@ -84,7 +82,7 @@ void CallControlManagerImpl::removeCCObserver ( CC_Observer * observer )
 void CallControlManagerImpl::addECCObserver ( ECC_Observer * observer )
 {
 	mozilla::MutexAutoLock lock(m_lock);
-    if (observer == NULL)
+    if (observer == nullptr)
     {
         CSFLogError(logTag, "NULL value for \"observer\" passed to addECCObserver().");
         return;
@@ -149,7 +147,7 @@ bool CallControlManagerImpl::registerUser( const std::string& deviceName, const 
 	setConnectionState(ConnectionStatusEnum::eRegistering);
 
     CSFLogInfo(logTag, "registerUser(%s, %s )", user.c_str(), domain.c_str());
-    if(phone != NULL)
+    if(phone != nullptr)
     {
     	setConnectionState(ConnectionStatusEnum::eReady);
 
@@ -180,7 +178,7 @@ bool CallControlManagerImpl::startP2PMode(const std::string& user)
 	setConnectionState(ConnectionStatusEnum::eRegistering);
 
     CSFLogInfo(logTag, "startP2PMode(%s)", user.c_str());
-    if(phone != NULL)
+    if(phone != nullptr)
     {
     	setConnectionState(ConnectionStatusEnum::eReady);
 
@@ -209,7 +207,7 @@ bool CallControlManagerImpl::startP2PMode(const std::string& user)
 bool CallControlManagerImpl::startSDPMode()
 {
     CSFLogInfo(logTag, "startSDPMode");
-    if(phone != NULL)
+    if(phone != nullptr)
     {
         CSFLogError(logTag, "%s failed - already started in SDP mode!",__FUNCTION__);
         return false;
@@ -227,7 +225,7 @@ bool CallControlManagerImpl::startSDPMode()
 bool CallControlManagerImpl::disconnect()
 {
     CSFLogInfo(logTag, "disconnect()");
-    if(phone == NULL)
+    if(phone == nullptr)
         return true;
 
     connectionState = ConnectionStatusEnum::eIdle;
@@ -263,7 +261,7 @@ std::string CallControlManagerImpl::getCurrentServer()
 // Currently controlled device
 CC_DevicePtr CallControlManagerImpl::getActiveDevice()
 {
-    if(phone != NULL)
+    if(phone != nullptr)
         return phone->getActiveDevice();
 
     return CC_DevicePtr();
@@ -293,7 +291,7 @@ PhoneDetailsPtr CallControlManagerImpl::getAvailablePhoneDetails(const std::stri
 // Media setup
 VideoControlPtr CallControlManagerImpl::getVideoControl()
 {
-    if(phone != NULL)
+    if(phone != nullptr)
         return phone->getVideoControl();
 
     return VideoControlPtr();
@@ -301,7 +299,7 @@ VideoControlPtr CallControlManagerImpl::getVideoControl()
 
 AudioControlPtr CallControlManagerImpl::getAudioControl()
 {
-    if(phone != NULL)
+    if(phone != nullptr)
         return phone->getAudioControl();
 
     return AudioControlPtr();

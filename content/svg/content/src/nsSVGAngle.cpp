@@ -3,20 +3,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsSVGAngle.h"
-#include "prdtoa.h"
-#include "nsTextFormatter.h"
-#include "nsSVGAttrTearoffTable.h"
 #include "mozilla/dom/SVGMarkerElement.h"
-#include "nsMathUtils.h"
 #include "nsContentUtils.h" // NS_ENSURE_FINITE
 #include "nsSMILValue.h"
-#include "SVGOrientSMILType.h"
-#include "nsAttrValueInlines.h"
+#include "nsSVGAttrTearoffTable.h"
+#include "nsTextFormatter.h"
 #include "SVGAngle.h"
 #include "SVGAnimatedAngle.h"
+#include "SVGOrientSMILType.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -85,9 +82,9 @@ GetUnitTypeForString(const nsAString& unitStr)
 static void
 GetValueString(nsAString &aValueAsString, float aValue, uint16_t aUnitType)
 {
-  PRUnichar buf[24];
-  nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-                            NS_LITERAL_STRING("%g").get(),
+  char16_t buf[24];
+  nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+                            MOZ_UTF16("%g"),
                             (double)aValue);
   aValueAsString.Assign(buf);
 
@@ -96,28 +93,23 @@ GetValueString(nsAString &aValueAsString, float aValue, uint16_t aUnitType)
   aValueAsString.Append(unitString);
 }
 
-static nsresult
-GetValueFromString(const nsAString &aValueAsString,
-                   float *aValue,
-                   uint16_t *aUnitType)
+static bool
+GetValueFromString(const nsAString& aString,
+                   float& aValue,
+                   uint16_t* aUnitType)
 {
-  NS_ConvertUTF16toUTF8 value(aValueAsString);
-  const char *str = value.get();
+  RangedPtr<const char16_t> iter =
+    SVGContentUtils::GetStartRangedPtr(aString);
+  const RangedPtr<const char16_t> end =
+    SVGContentUtils::GetEndRangedPtr(aString);
 
-  if (NS_IsAsciiWhitespace(*str))
-    return NS_ERROR_DOM_SYNTAX_ERR;
-  
-  char *rest;
-  *aValue = float(PR_strtod(str, &rest));
-  if (rest != str && NS_finite(*aValue)) {
-    *aUnitType = GetUnitTypeForString(
-      Substring(aValueAsString, rest - str));
-    if (IsValidUnitType(*aUnitType)) {
-      return NS_OK;
-    }
+  if (!SVGContentUtils::ParseNumber(iter, end, aValue)) {
+    return false;
   }
-  
-  return NS_ERROR_DOM_SYNTAX_ERR;
+
+  const nsAString& units = Substring(iter.get(), end.get());
+  *aUnitType = GetUnitTypeForString(units);
+  return IsValidUnitType(*aUnitType);
 }
 
 /* static */ float
@@ -260,12 +252,11 @@ nsSVGAngle::SetBaseValueString(const nsAString &aValueAsString,
                                nsSVGElement *aSVGElement,
                                bool aDoSetAttr)
 {
-  float value = 0;
-  uint16_t unitType = 0;
+  float value;
+  uint16_t unitType;
   
-  nsresult rv = GetValueFromString(aValueAsString, &value, &unitType);
-  if (NS_FAILED(rv)) {
-    return rv;
+  if (!GetValueFromString(aValueAsString, value, &unitType)) {
+     return NS_ERROR_DOM_SYNTAX_ERR;
   }
   if (mBaseVal == value && mBaseValUnit == uint8_t(unitType)) {
     return NS_OK;
@@ -379,12 +370,13 @@ nsSVGAngle::SMILOrient::ValueFromString(const nsAString& aStr,
   nsSMILValue val(&SVGOrientSMILType::sSingleton);
   if (aStr.EqualsLiteral("auto")) {
     val.mU.mOrient.mOrientType = SVG_MARKER_ORIENT_AUTO;
+  } else if (aStr.EqualsLiteral("auto-start-reverse")) {
+    val.mU.mOrient.mOrientType = SVG_MARKER_ORIENT_AUTO_START_REVERSE;
   } else {
     float value;
     uint16_t unitType;
-    nsresult rv = GetValueFromString(aStr, &value, &unitType);
-    if (NS_FAILED(rv)) {
-      return rv;
+    if (!GetValueFromString(aStr, value, &unitType)) {
+      return NS_ERROR_DOM_SYNTAX_ERR;
     }
     val.mU.mOrient.mAngle = value;
     val.mU.mOrient.mUnit = unitType;
@@ -426,7 +418,8 @@ nsSVGAngle::SMILOrient::SetAnimValue(const nsSMILValue& aValue)
 
   if (aValue.mType == &SVGOrientSMILType::sSingleton) {
     mOrientType->SetAnimValue(aValue.mU.mOrient.mOrientType);
-    if (aValue.mU.mOrient.mOrientType == SVG_MARKER_ORIENT_AUTO) {
+    if (aValue.mU.mOrient.mOrientType == SVG_MARKER_ORIENT_AUTO ||
+        aValue.mU.mOrient.mOrientType == SVG_MARKER_ORIENT_AUTO_START_REVERSE) {
       mAngle->SetAnimValue(0.0f, SVG_ANGLETYPE_UNSPECIFIED, mSVGElement);
     } else {
       mAngle->SetAnimValue(aValue.mU.mOrient.mAngle, aValue.mU.mOrient.mUnit, mSVGElement);

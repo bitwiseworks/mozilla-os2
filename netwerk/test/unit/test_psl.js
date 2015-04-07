@@ -1,11 +1,10 @@
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-
 var etld = Cc["@mozilla.org/network/effective-tld-service;1"]
              .getService(Ci.nsIEffectiveTLDService);
 
 var idna = Cc["@mozilla.org/network/idn-service;1"]
            .getService(Ci.nsIIDNService);
+
+var Cr = Components.results;
 
 function run_test()
 {
@@ -24,8 +23,8 @@ function checkPublicSuffix(host, expectedSuffix)
   var actualSuffix = null;
   try {
     actualSuffix = etld.getBaseDomainFromHost(host);
-  } catch (e if e.name == "NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS" ||
-                e.name == "NS_ERROR_ILLEGAL_VALUE") {
+  } catch (e if e.result == Cr.NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS ||
+                e.result == Cr.NS_ERROR_ILLEGAL_VALUE) {
   }
   // The EffectiveTLDService always gives back punycoded labels.
   // The test suite wants to get back what it put in.

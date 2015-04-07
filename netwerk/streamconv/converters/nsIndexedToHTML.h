@@ -7,20 +7,17 @@
 #define ____nsindexedtohtml___h___
 
 #include "nsCOMPtr.h"
-#include "nsIFactory.h"
 #include "nsString.h"
 #include "nsIStreamConverter.h"
-#include "nsXPIDLString.h"
 #include "nsIDirIndexListener.h"
-#include "nsIDateTimeFormat.h"
-#include "nsIStringBundle.h"
-#include "nsIStringStream.h"
-#include "nsITextToSubURI.h"
-#include "nsICharsetConverterManager.h"
 
 #define NS_NSINDEXEDTOHTMLCONVERTER_CID \
 { 0xcf0f71fd, 0xfafd, 0x4e2b, {0x9f, 0xdc, 0x13, 0x4d, 0x97, 0x2e, 0x16, 0xe2} }
 
+class nsIDateTimeFormat;
+class nsIStringBundle;
+class nsITextToSubURI;
+class nsIUnicodeEncoder;
 
 class nsIndexedToHTML : public nsIStreamConverter,
                         public nsIDirIndexListener
@@ -42,11 +39,11 @@ public:
 
 protected:
     
-    void FormatSizeString(int64_t inSize, nsString& outSizeString);
-    nsresult FormatInputStream(nsIRequest* aRequest, nsISupports *aContext, const nsAString &aBuffer);
+    void FormatSizeString(int64_t inSize, nsCString& outSizeString);
+    nsresult SendToListener(nsIRequest* aRequest, nsISupports *aContext, const nsACString &aBuffer);
     // Helper to properly implement OnStartRequest
     nsresult DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
-                              nsString& aBuffer);
+                              nsCString& aBuffer);
 
 protected:
     nsCOMPtr<nsIDirIndexParser>     mParser;
@@ -61,7 +58,6 @@ protected:
 private:
     // Expecting absolute locations, given by 201 lines.
     bool mExpectAbsLoc;
-    nsString mEscapedEllipsis;
 };
 
 #endif

@@ -6,11 +6,11 @@
 #ifndef nsStreamLoader_h__
 #define nsStreamLoader_h__
 
-#include "nsIRequest.h"
 #include "nsIStreamLoader.h"
 #include "nsCOMPtr.h"
-#include "nsString.h"
 #include "mozilla/Attributes.h"
+
+class nsIRequest;
 
 class nsStreamLoader MOZ_FINAL : public nsIStreamLoader
 {
@@ -29,6 +29,10 @@ public:
 protected:
   static NS_METHOD WriteSegmentFun(nsIInputStream *, void *, const char *,
                                    uint32_t, uint32_t, uint32_t *);
+
+  // Utility method to free mData, if present, and update other state to
+  // reflect that no data has been allocated.
+  void ReleaseData();
 
   nsCOMPtr<nsIStreamLoaderObserver> mObserver;
   nsCOMPtr<nsISupports>             mContext;  // the observer's context

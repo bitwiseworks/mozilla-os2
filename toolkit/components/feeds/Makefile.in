@@ -3,25 +3,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir = @srcdir@
-VPATH = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-MOZILLA_INTERNAL_API = 1
-FORCE_STATIC_LIB = 1
-LIBXUL_LIBRARY = 1
-
-DISABLED_EXTRA_COMPONENTS = FeedProcessor.js FeedProcessor.manifest
-
 include $(topsrcdir)/config/rules.mk
 
-ABS_SRCDIR := $(call core_abspath,$(srcdir))
+ABS_SRCDIR := $(abspath $(srcdir))
 ifeq ($(OS_ARCH),WINNT)
-
-ABS_DEPTH := $(call core_abspath,$(DEPTH))
 
 check::
 	cd $(srcdir)/test; $(LIBXUL_DIST)/bin/xpcshell$(BIN_SUFFIX) shell.js 

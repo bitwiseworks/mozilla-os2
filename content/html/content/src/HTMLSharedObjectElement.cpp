@@ -4,10 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/EventStates.h"
 #include "mozilla/dom/HTMLSharedObjectElement.h"
 #include "mozilla/dom/HTMLEmbedElementBinding.h"
 #include "mozilla/dom/HTMLAppletElementBinding.h"
-#include "mozilla/Util.h"
+#include "mozilla/dom/ElementInlines.h"
 
 #include "nsIDocument.h"
 #include "nsIPluginDocument.h"
@@ -22,7 +23,7 @@ NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(SharedObject)
 namespace mozilla {
 namespace dom {
 
-HTMLSharedObjectElement::HTMLSharedObjectElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+HTMLSharedObjectElement::HTMLSharedObjectElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
                                                  FromParser aFromParser)
   : nsGenericHTMLElement(aNodeInfo),
     mIsDoneAddingChildren(mNodeInfo->Equals(nsGkAtoms::embed) || !aFromParser)
@@ -32,8 +33,6 @@ HTMLSharedObjectElement::HTMLSharedObjectElement(already_AddRefed<nsINodeInfo> a
 
   // By default we're in the loading state
   AddStatesSilently(NS_EVENT_STATE_LOADING);
-
-  SetIsDOMBinding();
 }
 
 void
@@ -82,6 +81,8 @@ HTMLSharedObjectElement::DoneAddingChildren(bool aHaveNotified)
   }
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLSharedObjectElement)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLSharedObjectElement,
                                                   nsGenericHTMLElement)
   nsObjectLoadingContent::Traverse(tmp, cb);
@@ -91,21 +92,19 @@ NS_IMPL_ADDREF_INHERITED(HTMLSharedObjectElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLSharedObjectElement, Element)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLSharedObjectElement)
-  NS_HTML_CONTENT_INTERFACES_AMBIGUOUS(nsGenericHTMLElement,
-                                       nsIDOMHTMLAppletElement)
-  NS_INTERFACE_TABLE_INHERITED8(HTMLSharedObjectElement,
-                                nsIRequestObserver,
-                                nsIStreamListener,
-                                nsIFrameLoaderOwner,
-                                nsIObjectLoadingContent,
-                                imgINotificationObserver,
-                                nsIImageLoadingContent,
-                                imgIOnloadBlocker,
-                                nsIChannelEventSink)
+  NS_INTERFACE_TABLE_INHERITED(HTMLSharedObjectElement,
+                               nsIRequestObserver,
+                               nsIStreamListener,
+                               nsIFrameLoaderOwner,
+                               nsIObjectLoadingContent,
+                               imgINotificationObserver,
+                               nsIImageLoadingContent,
+                               imgIOnloadBlocker,
+                               nsIChannelEventSink)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLAppletElement, applet)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLEmbedElement, embed)
-NS_ELEMENT_INTERFACE_MAP_END
+NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLSharedObjectElement)
 
@@ -261,9 +260,9 @@ MapAttributesIntoRuleExceptHidden(const nsMappedAttributes *aAttributes,
   nsGenericHTMLElement::MapCommonAttributesIntoExceptHidden(aAttributes, aData);
 }
 
-static void
-MapAttributesIntoRule(const nsMappedAttributes *aAttributes,
-                      nsRuleData *aData)
+void
+HTMLSharedObjectElement::MapAttributesIntoRule(const nsMappedAttributes *aAttributes,
+                                               nsRuleData *aData)
 {
   MapAttributesIntoRuleBase(aAttributes, aData);
   nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
@@ -306,7 +305,7 @@ HTMLSharedObjectElement::StartObjectLoad(bool aNotify)
   SetIsNetworkCreated(false);
 }
 
-nsEventStates
+EventStates
 HTMLSharedObjectElement::IntrinsicState() const
 {
   return nsGenericHTMLElement::IntrinsicState() | ObjectState();
@@ -344,14 +343,14 @@ HTMLSharedObjectElement::CopyInnerTo(Element* aDest)
 }
 
 JSObject*
-HTMLSharedObjectElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLSharedObjectElement::WrapNode(JSContext* aCx)
 {
   JSObject* obj;
   if (mNodeInfo->Equals(nsGkAtoms::applet)) {
-    obj = HTMLAppletElementBinding::Wrap(aCx, aScope, this);
+    obj = HTMLAppletElementBinding::Wrap(aCx, this);
   } else {
     MOZ_ASSERT(mNodeInfo->Equals(nsGkAtoms::embed));
-    obj = HTMLEmbedElementBinding::Wrap(aCx, aScope, this);
+    obj = HTMLEmbedElementBinding::Wrap(aCx, this);
   }
   if (!obj) {
     return nullptr;

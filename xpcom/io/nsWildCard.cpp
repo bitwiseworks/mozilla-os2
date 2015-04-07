@@ -60,7 +60,7 @@ template<class T>
 static int
 _valid_subexp(const T *expr, T stop1, T stop2)
 {
-    register int x;
+    int x;
     int nsc = 0;     /* Number of special characters */
     int np;          /* Number of pipe characters in union */
     int tld = 0;     /* Number of tilde characters */
@@ -145,7 +145,7 @@ NS_WildCardValid(const char *expr)
 }
 
 int
-NS_WildCardValid(const PRUnichar *expr)
+NS_WildCardValid(const char16_t *expr)
 {
     return NS_WildCardValid_(expr);
 }
@@ -168,14 +168,14 @@ _shexp_match(const T *str, const T *expr, bool case_insensitive, unsigned int le
  * or stop2 inside it. Return ABORTED if bracketed expression is unterminated.
  * Handle all escaping.
  * Return index in input string of first stop found, or ABORTED if not found.
- * If "dest" is non-NULL, copy counted characters to it and NUL terminate.
+ * If "dest" is non-nullptr, copy counted characters to it and null terminate.
  */
 template<class T>
 static int
 _scan_and_copy(const T *expr, T stop1, T stop2, T *dest)
 {
-    register int sx;     /* source index */
-    register T cc;
+    int sx;     /* source index */
+    T cc;
 
     for (sx = 0; (cc = expr[sx]) && cc != stop1 && cc != stop2; sx++) {
         if (cc == '\\') {
@@ -212,14 +212,14 @@ static int
 _handle_union(const T *str, const T *expr, bool case_insensitive,
               unsigned int level)
 {
-    register int sx;     /* source index */
+    int sx;              /* source index */
     int cp;              /* source index of closing parenthesis */
     int count;
     int ret   = NOMATCH;
     T *e2;
 
     /* Find the closing parenthesis that ends this union in the expression */
-    cp = ::_scan_and_copy(expr, T(')'), T('\0'), static_cast<T*>(NULL));
+    cp = ::_scan_and_copy(expr, T(')'), T('\0'), static_cast<T*>(nullptr));
     if (cp == ABORTED || cp < 4) /* must be at least "(a|b" before ')' */
         return ABORTED;
     ++cp;                /* now index of char after closing parenthesis */
@@ -263,8 +263,8 @@ static int
 _shexp_match(const T *str, const T *expr, bool case_insensitive,
              unsigned int level)
 {
-    register int x;   /* input string index */
-    register int y;   /* expression index */
+    int x;   /* input string index */
+    int y;   /* expression index */
     int ret,neg;
 
     if (level > 20)      /* Don't let the stack get too deep. */
@@ -383,7 +383,7 @@ template<class T>
 static int
 ns_WildCardMatch(const T *str, const T *xp, bool case_insensitive)
 {
-    T *expr = NULL;
+    T *expr = nullptr;
     int x, ret = MATCH;
 
     if (!nsCharTraits<T>::find(xp, nsCharTraits<T>::length(xp), T('~')))
@@ -394,7 +394,7 @@ ns_WildCardMatch(const T *str, const T *xp, bool case_insensitive)
         return NOMATCH;
     memcpy(expr, xp, (nsCharTraits<T>::length(xp) + 1) * sizeof(T));
 
-    x = ::_scan_and_copy(expr, T('~'), T('\0'), static_cast<T*>(NULL));
+    x = ::_scan_and_copy(expr, T('~'), T('\0'), static_cast<T*>(nullptr));
     if (x != ABORTED && expr[x] == '~') {
         expr[x++] = '\0';
         ret = ::_shexp_match(str, &expr[x], case_insensitive, 0);
@@ -432,7 +432,7 @@ NS_WildCardMatch(const char *str, const char *xp,
 }
 
 int
-NS_WildCardMatch(const PRUnichar *str, const PRUnichar *xp,
+NS_WildCardMatch(const char16_t *str, const char16_t *xp,
                  bool case_insensitive)
 {
     return NS_WildCardMatch_(str, xp, case_insensitive);

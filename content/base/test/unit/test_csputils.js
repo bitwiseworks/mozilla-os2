@@ -11,13 +11,11 @@ const Cr = Components.results;
 Cu.import('resource://gre/modules/CSPUtils.jsm');
 Cu.import('resource://gre/modules/NetUtil.jsm');
 
-// load the HTTP server
-Cu.import("resource://testing-common/httpd.js");
-
 var httpServer = new HttpServer();
+httpServer.start(-1);
 
 const POLICY_FROM_URI = "default-src 'self'; img-src *";
-const POLICY_PORT = 9000;
+const POLICY_PORT = httpServer.identity.primaryPort;
 const POLICY_URI = "http://localhost:" + POLICY_PORT + "/policy";
 const POLICY_URI_RELATIVE = "/policy";
 
@@ -116,8 +114,12 @@ test(
     h = CSPHost.fromString("foo-bar.com");
     do_check_neq(null, h); // "dashes in hosts should work"
 
+
     h = CSPHost.fromString("foo!bar.com");
     do_check_eq(null, h); // "special chars in hosts should fail"
+
+    h = CSPHost.fromString("{app-url-is-uid}");
+    do_check_neq(null, h); // "Packaged apps URLs failed"
   });
 
 test(
@@ -143,15 +145,6 @@ test(
     do_check_true( h2.permits("a.b.c")); //"CSPHost a.b.c should allow string a.b.c"
   });
 
-test(
-    function test_CSPHost_intersectWith() {
-      var h = CSPHost.fromString("*.b.c");
-      //"*.a.b.c ^ *.b.c should be *.a.b.c"
-      do_check_eq("*.a.b.c", h.intersectWith(CSPHost.fromString("*.a.b.c")).toString());
-
-      //"*.b.c ^ *.d.e should not work (null)"
-      do_check_eq(null, h.intersectWith(CSPHost.fromString("*.d.e")));
-    });
 
 ///////////////////// Test the Source object //////////////////////
 
@@ -188,6 +181,9 @@ test(
       //Port parsing should work for all schemes
       do_check_neq(null, CSPSource.create("data:"));
       do_check_neq(null, CSPSource.create("javascript:"));
+
+      //"app:// URLs should work, including the {} characters.");
+      do_check_neq(null, CSPSource.fromString("{app-host-is-uid}", undefined, "app://{app-host-is-uid}"));
     });
 
 test(
@@ -228,6 +224,12 @@ test(
       do_check_false(src.permits("https://a.com"));
       //"nothing else should be allowed"
       do_check_false(src.permits("https://foobar.com"));
+
+      src = CSPSource.create("{app-host-is-uid}", undefined, "app://{app-host-is-uid}");
+      //"src should inherit and require 'app' scheme"
+      do_check_false(src.permits("https://{app-host-is-uid}"));
+      //"src should inherit scheme 'app'"
+      do_check_true(src.permits("app://{app-host-is-uid}"));
 
     });
 
@@ -317,42 +319,6 @@ test(
       do_check_true(wildcardHostSourceList.permits("http://somerandom.foo.com"));
       //"*.foo.com permits all"
       do_check_false(wildcardHostSourceList.permits("http://barbaz.com"));
-    });
-
-test(
-    function test_CSPSourceList_intersect() {
-      // for this test, 'self' values are irrelevant
-      // policy a /\ policy b intersects policies, not context (where 'self'
-      // values come into play)
-      var nullSourceList = CSPSourceList.fromString("'none'");
-      var simpleSourceList = CSPSourceList.fromString("http://a.com");
-      var doubleSourceList = CSPSourceList.fromString("https://foo.com http://bar.com:88");
-      var singleFooSourceList = CSPSourceList.fromString("https://foo.com");
-      var allSourceList = CSPSourceList.fromString("*");
-
-      //"Intersection of one source with 'none' source list should be none.");
-      do_check_true(nullSourceList.intersectWith(simpleSourceList).isNone());
-      //"Intersection of two sources with 'none' source list should be none.");
-      do_check_true(nullSourceList.intersectWith(doubleSourceList).isNone());
-      //"Intersection of '*' with 'none' source list should be none.");
-      do_check_true(nullSourceList.intersectWith(allSourceList).isNone());
-
-      //"Intersection of one source with '*' source list should be one source.");
-      do_check_equivalent(allSourceList.intersectWith(simpleSourceList),
-                          simpleSourceList);
-      //"Intersection of two sources with '*' source list should be two sources.");
-      do_check_equivalent(allSourceList.intersectWith(doubleSourceList),
-                          doubleSourceList);
-
-      //"Non-overlapping source lists should intersect to 'none'");
-      do_check_true(simpleSourceList.intersectWith(doubleSourceList).isNone());
-
-      //"subset and superset should intersect to subset.");
-      do_check_equivalent(singleFooSourceList,
-                          doubleSourceList.intersectWith(singleFooSourceList));
-
-      //TODO: write more tests?
-
     });
 
 ///////////////////// Test the Whole CSP rep object //////////////////////
@@ -682,15 +648,14 @@ test(function test_FrameAncestor_ignores_userpass_bug779918() {
       function testPermits(aChildUri, aParentUri, aContentType) {
         let cspObj = Cc["@mozilla.org/contentsecuritypolicy;1"]
                        .createInstance(Ci.nsIContentSecurityPolicy);
-        cspObj.refinePolicy(testPolicy, aChildUri, false);
+        cspObj.appendPolicy(testPolicy, aChildUri, false, false);
         let docshellparent = Cc["@mozilla.org/docshell;1"]
                                .createInstance(Ci.nsIDocShell);
         let docshellchild  = Cc["@mozilla.org/docshell;1"]
                                .createInstance(Ci.nsIDocShell);
         docshellparent.setCurrentURI(aParentUri);
         docshellchild.setCurrentURI(aChildUri);
-        docshellparent.QueryInterface(Ci.nsIDocShellTreeNode)
-                      .addChild(docshellchild);
+        docshellparent.addChild(docshellchild);
         return cspObj.permitsAncestry(docshellchild);
       };
 
@@ -713,46 +678,62 @@ test(function test_FrameAncestor_ignores_userpass_bug779918() {
 
 test(function test_CSP_ReportURI_parsing() {
       var cspr;
-      var SD = CSPRep.SRC_DIRECTIVES_OLD;
+      var SD = CSPRep.SRC_DIRECTIVES_NEW;
       var self = "http://self.com:34";
       var parsedURIs = [];
 
       var uri_valid_absolute = self + "/report.py";
-      var uri_invalid_host_absolute = "http://foo.org:34/report.py";
+      var uri_other_host_absolute = "http://foo.org:34/report.py";
       var uri_valid_relative = "/report.py";
       var uri_valid_relative_expanded = self + uri_valid_relative;
       var uri_valid_relative2 = "foo/bar/report.py";
       var uri_valid_relative2_expanded = self + "/" + uri_valid_relative2;
       var uri_invalid_relative = "javascript:alert(1)";
+      var uri_other_scheme_absolute = "https://self.com/report.py";
+      var uri_other_scheme_and_host_absolute = "https://foo.com/report.py";
 
-      cspr = CSPRep.fromString("allow *; report-uri " + uri_valid_absolute, URI(self));
+      cspr = CSPRep.fromStringSpecCompliant("default-src *; report-uri " + uri_valid_absolute, URI(self));
       parsedURIs = cspr.getReportURIs().split(/\s+/);
       do_check_in_array(parsedURIs, uri_valid_absolute);
       do_check_eq(parsedURIs.length, 1);
 
-      cspr = CSPRep.fromString("allow *; report-uri " + uri_invalid_host_absolute, URI(self));
+      cspr = CSPRep.fromStringSpecCompliant("default-src *; report-uri " + uri_other_host_absolute, URI(self));
       parsedURIs = cspr.getReportURIs().split(/\s+/);
-      do_check_in_array(parsedURIs, "");
+      do_check_in_array(parsedURIs, uri_other_host_absolute);
       do_check_eq(parsedURIs.length, 1); // the empty string is in there.
 
-      cspr = CSPRep.fromString("allow *; report-uri " + uri_invalid_relative, URI(self));
+      cspr = CSPRep.fromStringSpecCompliant("default-src *; report-uri " + uri_invalid_relative, URI(self));
       parsedURIs = cspr.getReportURIs().split(/\s+/);
       do_check_in_array(parsedURIs, "");
       do_check_eq(parsedURIs.length, 1);
 
-      cspr = CSPRep.fromString("allow *; report-uri " + uri_valid_relative, URI(self));
+      cspr = CSPRep.fromStringSpecCompliant("default-src *; report-uri " + uri_valid_relative, URI(self));
       parsedURIs = cspr.getReportURIs().split(/\s+/);
       do_check_in_array(parsedURIs, uri_valid_relative_expanded);
       do_check_eq(parsedURIs.length, 1);
 
-      cspr = CSPRep.fromString("allow *; report-uri " + uri_valid_relative2, URI(self));
+      cspr = CSPRep.fromStringSpecCompliant("default-src *; report-uri " + uri_valid_relative2, URI(self));
       parsedURIs = cspr.getReportURIs().split(/\s+/);
       dump(parsedURIs.length);
       do_check_in_array(parsedURIs, uri_valid_relative2_expanded);
       do_check_eq(parsedURIs.length, 1);
 
+      // make sure cross-scheme reporting works
+      cspr = CSPRep.fromStringSpecCompliant("default-src *; report-uri " + uri_other_scheme_absolute, URI(self));
+      parsedURIs = cspr.getReportURIs().split(/\s+/);
+      dump(parsedURIs.length);
+      do_check_in_array(parsedURIs, uri_other_scheme_absolute);
+      do_check_eq(parsedURIs.length, 1);
+
+      // make sure cross-scheme, cross-host reporting works
+      cspr = CSPRep.fromStringSpecCompliant("default-src *; report-uri " + uri_other_scheme_and_host_absolute, URI(self));
+      parsedURIs = cspr.getReportURIs().split(/\s+/);
+      dump(parsedURIs.length);
+      do_check_in_array(parsedURIs, uri_other_scheme_and_host_absolute);
+      do_check_eq(parsedURIs.length, 1);
+
       // combination!
-      cspr = CSPRep.fromString("allow *; report-uri " +
+      cspr = CSPRep.fromStringSpecCompliant("default-src *; report-uri " +
                                uri_valid_relative2 + " " +
                                uri_valid_absolute, URI(self));
       parsedURIs = cspr.getReportURIs().split(/\s+/);
@@ -760,14 +741,15 @@ test(function test_CSP_ReportURI_parsing() {
       do_check_in_array(parsedURIs, uri_valid_absolute);
       do_check_eq(parsedURIs.length, 2);
 
-      cspr = CSPRep.fromString("allow *; report-uri " +
+      cspr = CSPRep.fromStringSpecCompliant("default-src *; report-uri " +
                                uri_valid_relative2 + " " +
-                               uri_invalid_host_absolute + " " +
+                               uri_other_host_absolute + " " +
                                uri_valid_absolute, URI(self));
       parsedURIs = cspr.getReportURIs().split(/\s+/);
       do_check_in_array(parsedURIs, uri_valid_relative2_expanded);
+      do_check_in_array(parsedURIs, uri_other_host_absolute);
       do_check_in_array(parsedURIs, uri_valid_absolute);
-      do_check_eq(parsedURIs.length, 2);
+      do_check_eq(parsedURIs.length, 3);
     });
 
 test(
@@ -911,56 +893,6 @@ test(
       do_check_false(p_none.permits("http://bar.com"));
     });
 
-test(
-    function test_bug783497_refinePolicyIssues() {
-
-      const firstPolicy = "allow 'self'; img-src 'self'; script-src 'self'; options 'bogus-option'";
-      const secondPolicy = "default-src 'none'; script-src 'self'";
-      var cspObj = Cc["@mozilla.org/contentsecuritypolicy;1"]
-                     .createInstance(Ci.nsIContentSecurityPolicy);
-      var selfURI = URI("http://self.com/");
-
-      function testPermits(aUri, aContentType) {
-        return cspObj.shouldLoad(aContentType, aUri, null, null, null, null)
-               == Ci.nsIContentPolicy.ACCEPT;
-      };
-
-      // everything is allowed by the default policy
-      do_check_true(testPermits(URI("http://self.com/foo.js"),
-                    Ci.nsIContentPolicy.TYPE_SCRIPT));
-      do_check_true(testPermits(URI("http://other.com/foo.js"),
-                    Ci.nsIContentPolicy.TYPE_SCRIPT));
-      do_check_true(testPermits(URI("http://self.com/foo.png"),
-                    Ci.nsIContentPolicy.TYPE_IMAGE));
-      do_check_true(testPermits(URI("http://other.com/foo.png"),
-                    Ci.nsIContentPolicy.TYPE_IMAGE));
-
-      // fold in the first policy
-      cspObj.refinePolicy(firstPolicy, selfURI, false);
-
-      // script-src and img-src are limited to self after the first policy
-      do_check_true(testPermits(URI("http://self.com/foo.js"),
-                    Ci.nsIContentPolicy.TYPE_SCRIPT));
-      do_check_false(testPermits(URI("http://other.com/foo.js"),
-                     Ci.nsIContentPolicy.TYPE_SCRIPT));
-      do_check_true(testPermits(URI("http://self.com/foo.png"),
-                    Ci.nsIContentPolicy.TYPE_IMAGE));
-      do_check_false(testPermits(URI("http://other.com/foo.png"),
-                     Ci.nsIContentPolicy.TYPE_IMAGE));
-
-      // fold in the second policy
-      cspObj.refinePolicy(secondPolicy, selfURI, false);
-
-      // script-src is self and img-src is none after the merge
-      do_check_true(testPermits(URI("http://self.com/foo.js"),
-                    Ci.nsIContentPolicy.TYPE_SCRIPT));
-      do_check_false(testPermits(URI("http://other.com/foo.js"),
-                     Ci.nsIContentPolicy.TYPE_SCRIPT));
-      do_check_false(testPermits(URI("http://self.com/foo.png"),
-                     Ci.nsIContentPolicy.TYPE_IMAGE));
-      do_check_false(testPermits(URI("http://other.com/foo.png"),
-                     Ci.nsIContentPolicy.TYPE_IMAGE));
-    });
 
 test(
     function test_bug764937_defaultSrcMissing() {
@@ -976,7 +908,7 @@ test(
       };
 
       const policy = "script-src 'self'";
-      cspObjSpecCompliant.refinePolicy(policy, selfURI, true);
+      cspObjSpecCompliant.appendPolicy(policy, selfURI, false, true);
 
       // Spec-Compliant policy default-src defaults to *.
       // This means all images are allowed, and only 'self'
@@ -994,7 +926,7 @@ test(
                                  URI("http://bar.com/foo.js"),
                                  Ci.nsIContentPolicy.TYPE_SCRIPT));
 
-      cspObjOld.refinePolicy(policy, selfURI, false);
+      cspObjOld.appendPolicy(policy, selfURI, false, false);
 
       // non-Spec-Compliant policy default-src defaults to 'none'
       // This means all images are blocked, and so are all scripts (because the
@@ -1014,6 +946,66 @@ test(
 
     });
 
+test(function test_equals_does_case_insensitive_comparison() {
+      // NOTE: For scheme, host and keyword-host:
+      // (1) compare the same lower-case in two distinct objects
+      // (2) compare upper-case with lower-case inputs
+      // to test case insensitivity.
+
+      // CSPSource equals ignores case
+      var upperCaseHost = "http://FOO.COM";
+      var lowerCaseHost = "http://foo.com";
+      src1 = CSPSource.fromString(lowerCaseHost);
+      src2 = CSPSource.fromString(lowerCaseHost);
+      do_check_true(src1.equals(src2))
+      src3 = CSPSource.fromString(upperCaseHost);
+      do_check_true(src1.equals(src3))
+
+      // CSPHost equals ignores case
+      var upperCaseScheme = "HTTP";
+      var lowerCaseScheme = "http";
+      src1 = CSPHost.fromString(lowerCaseScheme);
+      src2 = CSPHost.fromString(lowerCaseScheme);
+      do_check_true(src1.equals(src2));
+      src3 = CSPHost.fromString(upperCaseScheme);
+      do_check_true(src1.equals(src3));
+
+      // CSPSourceList equals (mainly for testing keywords)
+      var upperCaseKeywords = "'SELF'";
+      var lowerCaseKeywords = "'self'";
+      src1 = CSPSourceList.fromString(lowerCaseKeywords);
+      src2 = CSPSourceList.fromString(lowerCaseKeywords);
+      do_check_true(src1.equals(src2))
+      src3 = CSPSourceList.fromString(upperCaseKeywords);
+      do_check_true(src1.equals(src3))
+
+  });
+
+test(function test_csp_permits_case_insensitive() {
+      var cspr;
+      var SD = CSPRep.SRC_DIRECTIVES_NEW;
+
+      // checks directives can be case-insensitive
+      var selfHost = "http://self.com";
+      var testPolicy1 = "DEFAULT-src 'self';";
+      cspr = CSPRep.fromString(testPolicy1, URI(selfHost));
+      do_check_true(cspr.permits(URI("http://self.com"), SD.DEFAULT_SRC));
+
+      // checks hosts can be case-insensitive
+      var testPolicy2 = "default-src 'self' http://FOO.COM";
+      cspr = CSPRep.fromString(testPolicy2, URI(selfHost));
+      do_check_true(cspr.permits(URI("http://foo.com"), SD.DEFAULT_SRC));
+
+      // checks schemes can be case-insensitive
+      var testPolicy3 = "default-src 'self' HTTP://foo.com";
+      cspr = CSPRep.fromString(testPolicy3, URI(selfHost));
+      do_check_true(cspr.permits(URI("http://foo.com"), SD.DEFAULT_SRC));
+
+      // checks keywords can be case-insensitive
+      var testPolicy4 = "default-src 'NONE'";
+      cspr = CSPRep.fromString(testPolicy4, URI(selfHost));
+      do_check_false(cspr.permits(URI("http://foo.com"), SD.DEFAULT_SRC));
+  });
 /*
 
 test(function test_CSPRep_fromPolicyURI_failswhenmixed() {
@@ -1048,7 +1040,6 @@ function run_test() {
   }
   //server.registerDirectory("/", nsILocalFileForBasePath);
   httpServer.registerPathHandler("/policy", policyresponder);
-  httpServer.start(POLICY_PORT);
 
   for(let i in tests) {
     tests[i]();

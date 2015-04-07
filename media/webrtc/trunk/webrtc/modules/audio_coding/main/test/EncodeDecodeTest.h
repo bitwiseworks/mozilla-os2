@@ -24,24 +24,21 @@ namespace webrtc {
 #define MAX_INCOMING_PAYLOAD 8096
 
 // TestPacketization callback which writes the encoded payloads to file
-class TestPacketization: public AudioPacketizationCallback {
+class TestPacketization : public AudioPacketizationCallback {
  public:
-  TestPacketization(RTPStream *rtpStream, WebRtc_UWord16 frequency);
+  TestPacketization(RTPStream *rtpStream, uint16_t frequency);
   ~TestPacketization();
-  virtual WebRtc_Word32 SendData(const FrameType frameType,
-                                 const WebRtc_UWord8 payloadType,
-                                 const WebRtc_UWord32 timeStamp,
-                                 const WebRtc_UWord8* payloadData,
-                                 const WebRtc_UWord16 payloadSize,
-                                 const RTPFragmentationHeader* fragmentation);
+  virtual int32_t SendData(const FrameType frameType, const uint8_t payloadType,
+                           const uint32_t timeStamp, const uint8_t* payloadData,
+                           const uint16_t payloadSize,
+                           const RTPFragmentationHeader* fragmentation);
 
  private:
-  static void MakeRTPheader(WebRtc_UWord8* rtpHeader, WebRtc_UWord8 payloadType,
-                            WebRtc_Word16 seqNo, WebRtc_UWord32 timeStamp,
-                            WebRtc_UWord32 ssrc);
+  static void MakeRTPheader(uint8_t* rtpHeader, uint8_t payloadType,
+                            int16_t seqNo, uint32_t timeStamp, uint32_t ssrc);
   RTPStream* _rtpStream;
-  WebRtc_Word32 _frequency;
-  WebRtc_Word16 _seqNo;
+  int32_t _frequency;
+  int16_t _seqNo;
 };
 
 class Sender {
@@ -51,11 +48,10 @@ class Sender {
   void Teardown();
   void Run();
   bool Add10MsData();
-  bool Process();
 
   //for auto_test and logging
-  WebRtc_UWord8 testMode;
-  WebRtc_UWord8 codeId;
+  uint8_t testMode;
+  uint8_t codeId;
 
  private:
   AudioCodingModule* _acm;
@@ -74,32 +70,32 @@ class Receiver {
   bool PlayoutData();
 
   //for auto_test and logging
-  WebRtc_UWord8 codeId;
-  WebRtc_UWord8 testMode;
+  uint8_t codeId;
+  uint8_t testMode;
 
  private:
   AudioCodingModule* _acm;
   RTPStream* _rtpStream;
   PCMFile _pcmFile;
-  WebRtc_Word16* _playoutBuffer;
-  WebRtc_UWord16 _playoutLengthSmpls;
-  WebRtc_UWord8 _incomingPayload[MAX_INCOMING_PAYLOAD];
-  WebRtc_UWord16 _payloadSizeBytes;
-  WebRtc_UWord16 _realPayloadSizeBytes;
-  WebRtc_Word32 _frequency;
+  int16_t* _playoutBuffer;
+  uint16_t _playoutLengthSmpls;
+  uint8_t _incomingPayload[MAX_INCOMING_PAYLOAD];
+  uint16_t _payloadSizeBytes;
+  uint16_t _realPayloadSizeBytes;
+  int32_t _frequency;
   bool _firstTime;
   WebRtcRTPHeader _rtpInfo;
-  WebRtc_UWord32 _nextTime;
+  uint32_t _nextTime;
 };
 
-class EncodeDecodeTest: public ACMTest {
+class EncodeDecodeTest : public ACMTest {
  public:
   EncodeDecodeTest();
   EncodeDecodeTest(int testMode);
   virtual void Perform();
 
-  WebRtc_UWord16 _playoutFreq;
-  WebRtc_UWord8 _testMode;
+  uint16_t _playoutFreq;
+  uint8_t _testMode;
 
  private:
   void EncodeToFile(int fileType, int codeId, int* codePars, int testMode);
@@ -109,6 +105,6 @@ class EncodeDecodeTest: public ACMTest {
   Receiver _receiver;
 };
 
-} // namespace webrtc
+}  // namespace webrtc
 
 #endif

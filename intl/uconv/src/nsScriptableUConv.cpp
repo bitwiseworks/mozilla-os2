@@ -3,32 +3,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsAtomicRefcnt.h"
 #include "nsString.h"
-#include "nsReadableUtils.h"
-#include "nsIServiceManager.h"
 #include "nsICharsetConverterManager.h"
 #include "nsIScriptableUConv.h"
 #include "nsScriptableUConv.h"
 #include "nsIStringStream.h"
-#include "nsCRT.h"
 #include "nsComponentManagerUtils.h"
 #include "nsCharsetAlias.h"
-
-static int32_t          gInstanceCount = 0;
+#include "nsServiceManagerUtils.h"
 
 /* Implementation file */
-NS_IMPL_ISUPPORTS1(nsScriptableUnicodeConverter, nsIScriptableUnicodeConverter)
+NS_IMPL_ISUPPORTS(nsScriptableUnicodeConverter, nsIScriptableUnicodeConverter)
 
 nsScriptableUnicodeConverter::nsScriptableUnicodeConverter()
 : mIsInternal(false)
 {
-  PR_ATOMIC_INCREMENT(&gInstanceCount);
 }
 
 nsScriptableUnicodeConverter::~nsScriptableUnicodeConverter()
 {
-  PR_ATOMIC_DECREMENT(&gInstanceCount);
 }
 
 nsresult
@@ -70,7 +63,9 @@ nsScriptableUnicodeConverter::ConvertFromUnicode(const nsAString& aSrc,
   nsresult rv = ConvertFromUnicodeWithLength(aSrc, &len, &str);
   if (NS_SUCCEEDED(rv)) {
     // No Adopt on nsACString :(
-    _retval.Assign(str, len);
+    if (!_retval.Assign(str, len, mozilla::fallible_t())) {
+      rv = NS_ERROR_OUT_OF_MEMORY;
+    }
     moz_free(str);
   }
   return rv;
@@ -107,7 +102,9 @@ nsScriptableUnicodeConverter::Finish(nsACString& _retval)
   nsresult rv = FinishWithLength(&str, &len);
   if (NS_SUCCEEDED(rv)) {
     // No Adopt on nsACString :(
-    _retval.Assign(str, len);
+    if (!_retval.Assign(str, len, mozilla::fallible_t())) {
+      rv = NS_ERROR_OUT_OF_MEMORY;
+    }
     moz_free(str);
   }
   return rv;
@@ -142,7 +139,7 @@ nsScriptableUnicodeConverter::ConvertFromByteArray(const uint8_t* aData,
                               inLength, &outLength);
   if (NS_SUCCEEDED(rv))
   {
-    PRUnichar* buf = (PRUnichar*)moz_malloc((outLength+1)*sizeof(PRUnichar));
+    char16_t* buf = (char16_t*)moz_malloc((outLength+1)*sizeof(char16_t));
     if (!buf)
       return NS_ERROR_OUT_OF_MEMORY;
 
@@ -151,7 +148,9 @@ nsScriptableUnicodeConverter::ConvertFromByteArray(const uint8_t* aData,
     if (NS_SUCCEEDED(rv))
     {
       buf[outLength] = 0;
-      _retval.Assign(buf, outLength);
+      if (!_retval.Assign(buf, outLength, mozilla::fallible_t())) {
+        rv = NS_ERROR_OUT_OF_MEMORY;
+      }
     }
     moz_free(buf);
     return rv;
@@ -268,7 +267,7 @@ nsScriptableUnicodeConverter::InitConverter()
     return rv;
   }
 
-  rv = mEncoder->SetOutputErrorBehavior(nsIUnicodeEncoder::kOnError_Replace, nullptr, (PRUnichar)'?');
+  rv = mEncoder->SetOutputErrorBehavior(nsIUnicodeEncoder::kOnError_Replace, nullptr, (char16_t)'?');
   if (NS_FAILED(rv)) {
     return rv;
   }

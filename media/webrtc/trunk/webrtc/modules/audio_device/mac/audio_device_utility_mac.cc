@@ -8,15 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "audio_device_utility_mac.h"
-#include "audio_device_config.h"    // DEBUG_PRINT()
-#include "critical_section_wrapper.h"
-#include "trace.h"
+#include "webrtc/modules/audio_device/mac/audio_device_utility_mac.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/trace.h"
 
 namespace webrtc
 {
 
-AudioDeviceUtilityMac::AudioDeviceUtilityMac(const WebRtc_Word32 id) :
+AudioDeviceUtilityMac::AudioDeviceUtilityMac(const int32_t id) :
     _critSect(*CriticalSectionWrapper::CreateCriticalSection()),
     _id(id)
 {
@@ -41,7 +40,7 @@ AudioDeviceUtilityMac::~AudioDeviceUtilityMac()
     delete &_critSect;
 }
 
-WebRtc_Word32 AudioDeviceUtilityMac::Init()
+int32_t AudioDeviceUtilityMac::Init()
 {
 
     WEBRTC_TRACE(kTraceStateInfo, kTraceAudioDevice, _id,
@@ -50,4 +49,4 @@ WebRtc_Word32 AudioDeviceUtilityMac::Init()
     return 0;
 }
 
-} //  namespace webrtc
+}  // namespace webrtc

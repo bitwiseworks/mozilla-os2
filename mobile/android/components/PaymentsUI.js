@@ -8,32 +8,42 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/JNI.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsIMessageSender");
 
 function paymentSuccess(aRequestId) {
-  return paymentCallback(aRequestId, "Payment:Success");
+  return function(aResult) {
+    closePaymentTab(aRequestId, function() {
+      cpmm.sendAsyncMessage("Payment:Success", { result: aResult,
+                                    requestId: aRequestId });
+    });
+  }
 }
 
 function paymentFailed(aRequestId) {
-  return paymentCallback(aRequestId, "Payment:Failed");
-}
-
-function paymentCallback(aRequestId, aMsg) {
-  return function(aResult) {
+  return function(aErrorMsg) {
     closePaymentTab(aRequestId, function() {
-      cpmm.sendAsyncMessage(aMsg, { result: aResult,
+      cpmm.sendAsyncMessage("Payment:Failed", { errorMsg: aErrorMsg,
                                     requestId: aRequestId });
     });
   }
 }
 
 let paymentTabs = {};
-
+let cancelTabCallbacks = {};
+function paymentCanceled(aRequestId) {
+  return function() {
+    paymentFailed(aRequestId)();
+  }
+}
 function closePaymentTab(aId, aCallback) {
   if (paymentTabs[aId]) {
+    paymentTabs[aId].browser.removeEventListener("TabClose", cancelTabCallbacks[aId]);
+    delete cancelTabCallbacks[aId];
+
     // We ask the UI to close the selected payment flow.
     let content = Services.wm.getMostRecentWindow("navigator:browser");
     if (content) {
@@ -55,11 +65,6 @@ PaymentUI.prototype = {
     return this.bundle = Services.strings.createBundle("chrome://browser/locale/payments.properties");
   },
 
-  sendMessageToJava: function(aMsg) {
-    let data = Cc["@mozilla.org/android/bridge;1"].getService(Ci.nsIAndroidBridge).handleGeckoMessage(JSON.stringify(aMsg));
-    return JSON.parse(data);
-  },
-
   confirmPaymentRequest: function confirmPaymentRequest(aRequestId,
                                                         aRequests,
                                                         aSuccessCb,
@@ -70,13 +75,13 @@ PaymentUI.prototype = {
 
     // If there's only one payment provider that will work, just move on without prompting the user.
     if (aRequests.length == 1) {
-      aSuccessCb.onresult(aRequestId, aRequests[0].wrappedJSObject.type);
+      aSuccessCb.onresult(aRequestId, aRequests[0].type);
       return;
     }
 
     // Otherwise, let the user select a payment provider from a list.
     for (let i = 0; i < aRequests.length; i++) {
-      let request = aRequests[i].wrappedJSObject;
+      let request = aRequests[i];
       let requestText = request.providerName;
       if (request.productPrice) {
         requestText += " (" + request.productPrice[0].amount + " " +
@@ -90,7 +95,7 @@ PaymentUI.prototype = {
       title: this.bundle.GetStringFromName("payments.providerdialog.title"),
     }).setSingleChoiceItems(listItems).show(function(data) {
       if (data.button > -1 && aSuccessCb) {
-        aSuccessCb.onresult(aRequestId, aRequests[data.button].wrappedJSObject.type);
+        aSuccessCb.onresult(aRequestId, aRequests[data.button].type);
       } else {
         _error(aRequestId, "USER_CANCELED");
       }
@@ -123,25 +128,55 @@ PaymentUI.prototype = {
     let tab = content.BrowserApp.addTab(aPaymentFlowInfo.uri + aPaymentFlowInfo.jwt);
 
     // Inject paymentSuccess and paymentFailed methods into the document after its loaded.
-    tab.browser.addEventListener("DOMContentLoaded", function loadPaymentShim() {
+    tab.browser.addEventListener("DOMWindowCreated", function loadPaymentShim() {
       let frame = tab.browser.contentDocument.defaultView;
       try {
-        frame.wrappedJSObject.paymentSuccess = paymentSuccess(aRequestId);
-        frame.wrappedJSObject.paymentFailed = paymentFailed(aRequestId);
+        frame.wrappedJSObject.mozPaymentProvider = {
+          __exposedProps__: {
+            paymentSuccess: 'r',
+            paymentFailed: 'r',
+            mnc: 'r',
+            mcc: 'r',
+          },
+
+          _getNetworkInfo: function(type) {
+            let jni = new JNI();
+            let cls = jni.findClass("org/mozilla/gecko/GeckoNetworkManager");
+            let method = jni.getStaticMethodID(cls, "get" + type.toUpperCase(), "()I");
+            let val = jni.callStaticIntMethod(cls, method);
+            jni.close();
+
+            if (val < 0)
+              return null;
+            return val;
+          },
+
+          get mnc() {
+            delete this.mnc;
+            return this.mnc = this._getNetworkInfo("mnc");
+          },
+
+          get mcc() {
+            delete this.mcc;
+            return this.mcc = this._getNetworkInfo("mcc");
+          },
+
+          paymentSuccess: paymentSuccess(aRequestId),
+          paymentFailed: paymentFailed(aRequestId)
+        };
       } catch (e) {
         _error(aRequestId, "ERROR_ADDING_METHODS");
       } finally {
-        tab.browser.removeEventListener("DOMContentLoaded", loadPaymentShim);
+        tab.browser.removeEventListener("DOMWindowCreated", loadPaymentShim);
       }
-    }, false);
-
-    // fail the payment if the tab is closed on its own
-    tab.browser.addEventListener("TabClose", function paymentCanceled() {
-      paymentFailed(aRequestId)();
-    });
+    }, true);
 
     // Store a reference to the tab so that we can close it when the payment succeeds or fails.
     paymentTabs[aRequestId] = tab;
+    cancelTabCallbacks[aRequestId] = paymentCanceled(aRequestId);
+
+    // Fail the payment if the tab is closed on its own
+    tab.browser.addEventListener("TabClose", cancelTabCallbacks[aRequestId]);
   },
 
   cleanup: function cleanup() {

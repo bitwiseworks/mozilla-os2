@@ -32,6 +32,8 @@ class SVGMatrix;
  */
 class SVGTransform MOZ_FINAL : public nsWrapperCache
 {
+  friend class AutoChangeTransformNotifier;
+
 public:
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(SVGTransform)
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(SVGTransform)
@@ -118,10 +120,9 @@ public:
 
   // WebIDL
   DOMSVGTransformList* GetParentObject() const { return mList; }
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
   uint16_t Type() const;
-  dom::SVGMatrix* Matrix();
+  dom::SVGMatrix* GetMatrix();
   float Angle() const;
   void SetMatrix(dom::SVGMatrix& matrix, ErrorResult& rv);
   void SetTranslate(float tx, float ty, ErrorResult& rv);
@@ -137,7 +138,7 @@ protected:
     return mIsAnimValItem;
   }
   const gfxMatrix& Matrixgfx() const {
-    return Transform().Matrix();
+    return Transform().GetMatrix();
   }
   void SetMatrix(const gfxMatrix& aMatrix);
 
@@ -163,8 +164,6 @@ private:
   nsSVGTransform& Transform() {
     return HasOwner() ? InternalItem() : *mTransform;
   }
-  inline nsAttrValue NotifyElementWillChange();
-  void NotifyElementDidChange(const nsAttrValue& aEmptyOrOldValue);
 
   nsRefPtr<DOMSVGTransformList> mList;
 
@@ -182,16 +181,6 @@ private:
   // that case we allocate an nsSVGTransform object on the heap to store the data.
   nsAutoPtr<nsSVGTransform> mTransform;
 };
-
-nsAttrValue
-SVGTransform::NotifyElementWillChange()
-{
-  nsAttrValue result;
-  if (HasOwner()) {
-    result = Element()->WillChangeTransformList();
-  }
-  return result;
-}
 
 } // namespace dom
 } // namespace mozilla

@@ -11,7 +11,7 @@ function test() {
     origin: "https://example.com",
     sidebarURL: "https://example.com/browser/browser/base/content/test/social/social_sidebar.html",
     workerURL: "https://example.com/browser/browser/base/content/test/social/social_worker.js",
-    iconURL: "https://example.com/browser/browser/base/content/test/moz.png"
+    iconURL: "https://example.com/browser/browser/base/content/test/general/moz.png"
   };
 
   let postSubTest = function(cb) {
@@ -20,6 +20,8 @@ function test() {
     cb();
   };
   runSocialTestWithProvider(manifest, function (finishcb) {
+    SocialSidebar.show();
+    ok(SocialSidebar.provider, "sidebar provider exists");
     runSocialTests(tests, undefined, postSubTest, function() {
       finishcb();
     });
@@ -30,7 +32,7 @@ var tests = {
   testTearoffChat: function(next) {
     let chats = document.getElementById("pinnedchats");
     let chatTitle;
-    let port = Social.provider.getWorkerPort();
+    let port = SocialSidebar.provider.getWorkerPort();
     ok(port, "provider has a port");
     port.onmessage = function (e) {
       let topic = e.data.topic;
@@ -56,6 +58,7 @@ var tests = {
           doc.body.appendChild(div);
           let swap = document.getAnonymousElementByAttribute(chats.selectedChat, "anonid", "swap");
           swap.click();
+          port.close();
           break;
         case "got-chatbox-message":
           ok(true, "got chatbox message");
@@ -73,11 +76,37 @@ var tests = {
                               .getInterface(Components.interfaces.nsIDOMWindow);
         Services.wm.removeListener(this);
         // wait for load to ensure the window is ready for us to test
-        domwindow.addEventListener("load", function _load() {
-          domwindow.removeEventListener("load", _load, false);
+        domwindow.addEventListener("load", function _load(event) {
           let doc = domwindow.document;
+          if (event.target != doc)
+              return;
+
+          domwindow.removeEventListener("load", _load, false);
+
+          domwindow.addEventListener("unload", function _close(event) {
+            if (event.target != doc)
+              return;
+            domwindow.removeEventListener("unload", _close, false);
+            info("window has been closed");
+            waitForCondition(function() {
+              return chats.selectedChat && chats.selectedChat.contentDocument &&
+                     chats.selectedChat.contentDocument.readyState == "complete";
+            },function () {
+              ok(chats.selectedChat, "should have a chatbox in our window again");
+              ok(chats.selectedChat.getAttribute("label") == chatTitle,
+                 "the new chatbox should show the title of the chat window again");
+              let testdiv = chats.selectedChat.contentDocument.getElementById("testdiv");
+              is(testdiv.getAttribute("test"), "2", "docshell should have been swapped");
+              chats.selectedChat.close();
+              waitForCondition(function() {
+                return chats.children.length == 0;
+              },function () {
+                next();
+              });
+            });
+          }, false);
+
           is(doc.documentElement.getAttribute("windowtype"), "Social:Chat", "Social:Chat window opened");
-          is(doc.location.href, "chrome://browser/content/chatWindow.xul", "Should have seen the right window open");
           // window is loaded, but the docswap does not happen until after load,
           // and we have no event to wait on, so we'll wait for document state
           // to be ready
@@ -97,25 +126,183 @@ var tests = {
             swap.click();
           }, domwindow);
         }, false);
-        domwindow.addEventListener("unload", function _close() {
-          domwindow.removeEventListener("unload", _close, false);
-          info("window has been closed");
-          waitForCondition(function() {
-            return chats.selectedChat && chats.selectedChat.contentDocument &&
-                   chats.selectedChat.contentDocument.readyState == "complete";
-          },function () {
-            ok(chats.selectedChat, "should have a chatbox in our window again");
-            ok(chats.selectedChat.getAttribute("label") == chatTitle,
-               "the new chatbox should show the title of the chat window again");
-            let testdiv = chats.selectedChat.contentDocument.getElementById("testdiv");
-            is(testdiv.getAttribute("test"), "2", "docshell should have been swapped");
-            chats.selectedChat.close();
-            next();
-          });
-        }, false);
       }
     });
 
     port.postMessage({topic: "test-init", data: { id: 1 }});
+  },
+
+  testCloseOnLogout: function(next) {
+    let chats = document.getElementById("pinnedchats");
+    const chatUrl = "https://example.com/browser/browser/base/content/test/social/social_chat.html";
+    let port = SocialSidebar.provider.getWorkerPort();
+    ok(port, "provider has a port");
+    port.postMessage({topic: "test-init"});
+    port.onmessage = function (e) {
+      let topic = e.data.topic;
+      switch (topic) {
+        case "got-chatbox-visibility":
+          // chatbox is open, lets detach. The new chat window will be caught in
+          // the window watcher below
+          let doc = chats.selectedChat.contentDocument;
+          // This message is (sometimes!) received a second time
+          // before we start our tests from the onCloseWindow
+          // callback.
+          if (doc.location == "about:blank")
+            return;
+          info("chatbox is open, detach from window");
+          let swap = document.getAnonymousElementByAttribute(chats.selectedChat, "anonid", "swap");
+          swap.click();
+          break;
+      }
+    }
+
+    Services.wm.addListener({
+      onWindowTitleChange: function() {},
+      onCloseWindow: function(xulwindow) {},
+      onOpenWindow: function(xulwindow) {
+        let domwindow = xulwindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                              .getInterface(Components.interfaces.nsIDOMWindow);
+        Services.wm.removeListener(this);
+        // wait for load to ensure the window is ready for us to test, make sure
+        // we're not getting called for about:blank
+        domwindow.addEventListener("load", function _load(event) {
+          let doc = domwindow.document;
+          if (event.target != doc)
+              return;
+          domwindow.removeEventListener("load", _load, false);
+
+          domwindow.addEventListener("unload", function _close(event) {
+            if (event.target != doc)
+              return;
+            domwindow.removeEventListener("unload", _close, false);
+            ok(true, "window has been closed");
+            next();
+          }, false);
+
+          is(doc.documentElement.getAttribute("windowtype"), "Social:Chat", "Social:Chat window opened");
+          // window is loaded, but the docswap does not happen until after load,
+          // and we have no event to wait on, so we'll wait for document state
+          // to be ready
+          let chatbox = doc.getElementById("chatter");
+          waitForCondition(function() {
+            return chats.children.length == 0 &&
+                   chatbox.contentDocument &&
+                   chatbox.contentDocument.readyState == "complete";
+          },function() {
+            // logout, we should get unload next
+            port.postMessage({topic: "test-logout"});
+            port.close();
+          }, domwindow);
+
+        }, false);
+      }
+    });
+
+    port.postMessage({topic: "test-worker-chat", data: chatUrl});
+  },
+
+  testReattachTwice: function(next) {
+    let chats = document.getElementById("pinnedchats");
+    const chatUrl = "https://example.com/browser/browser/base/content/test/social/social_chat.html";
+    let chatBoxCount = 0, reattachCount = 0;
+    let port = SocialSidebar.provider.getWorkerPort();
+    ok(port, "provider has a port");
+    port.postMessage({topic: "test-init"});
+    port.onmessage = function (e) {
+      let topic = e.data.topic;
+      switch (topic) {
+        case "got-chatbox-visibility":
+          // chatbox is open, lets detach. The new chat window will be caught in
+          // the window watcher below
+          let doc = chats.selectedChat.contentDocument;
+          // This message is (sometimes!) received a second time
+          // before we start our tests from the onCloseWindow
+          // callback.
+          if (doc.location == "about:blank")
+            return;
+          if (++chatBoxCount != 2) {
+            // open the second chat window
+            port.postMessage({topic: "test-worker-chat", data: chatUrl + "?id=2"});
+            return;
+          }
+          info("chatbox is open, detach from window");
+          let chat1 = chats.firstChild;
+          let chat2 = chat1.nextSibling;
+          document.getAnonymousElementByAttribute(chat1, "anonid", "swap").click();
+          document.getAnonymousElementByAttribute(chat2, "anonid", "swap").click();
+          break;
+      }
+    };
+
+    let firstChatWindowDoc;
+    Services.wm.addListener({
+      onWindowTitleChange: function() {},
+      onCloseWindow: function(xulwindow) {},
+      onOpenWindow: function(xulwindow) {
+        let listener = this;
+        let domwindow = xulwindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                                 .getInterface(Components.interfaces.nsIDOMWindow);
+        // wait for load to ensure the window is ready for us to test, make sure
+        // we're not getting called for about:blank
+        domwindow.addEventListener("load", function _load(event) {
+          let doc = domwindow.document;
+          if (event.target != doc)
+            return;
+          domwindow.removeEventListener("load", _load, false);
+
+          domwindow.addEventListener("unload", function _close(event) {
+            if (event.target != doc)
+              return;
+            domwindow.removeEventListener("unload", _close, false);
+            ok(true, "window has been closed");
+            waitForCondition(function() {
+              return chats.selectedChat && chats.selectedChat.contentDocument &&
+                     chats.selectedChat.contentDocument.readyState == "complete";
+            }, function () {
+              ++reattachCount;
+              if (reattachCount == 1) {
+                info("reattaching second chat window");
+                let chatbox = firstChatWindowDoc.getElementById("chatter");
+                firstChatWindowDoc.getAnonymousElementByAttribute(chatbox, "anonid", "swap").click();
+                firstChatWindowDoc = null;
+              }
+              else if (reattachCount == 2) {
+                is(chats.children.length, 2, "both chat windows should be reattached");
+                chats.removeAll();
+                waitForCondition(() => chats.children.length == 0, function () {
+                  info("no chat window left");
+                  is(chats.chatboxForURL.size, 0, "chatboxForURL map should be empty");
+                  next();
+                });
+              }
+            }, "waited too long for the window to reattach");
+          }, false);
+
+          is(doc.documentElement.getAttribute("windowtype"), "Social:Chat", "Social:Chat window opened");
+          if (!firstChatWindowDoc) {
+            firstChatWindowDoc = doc;
+            return;
+          }
+          Services.wm.removeListener(listener);
+
+          // window is loaded, but the docswap does not happen until after load,
+          // and we have no event to wait on, so we'll wait for document state
+          // to be ready
+          let chatbox = doc.getElementById("chatter");
+          waitForCondition(function() {
+            return chats.children.length == 0 &&
+                   chatbox.contentDocument &&
+                   chatbox.contentDocument.readyState == "complete";
+          },function() {
+            info("reattaching chat window");
+            doc.getAnonymousElementByAttribute(chatbox, "anonid", "swap").click();
+          }, "waited too long for the chat window to be detached");
+
+        }, false);
+      }
+    });
+
+    port.postMessage({topic: "test-worker-chat", data: chatUrl + "?id=1"});
   }
-}
+};

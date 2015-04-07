@@ -11,23 +11,33 @@
 #include "nsIFile.h"
 #include "nsIPrincipal.h"
 #include "nsIObserver.h"
-#include "nsDOMEventTargetHelper.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/StaticPtr.h"
-#include "DOMRequest.h"
+#include "mozilla/dom/DOMRequest.h"
 
 #define DEVICESTORAGE_PICTURES   "pictures"
 #define DEVICESTORAGE_VIDEOS     "videos"
 #define DEVICESTORAGE_MUSIC      "music"
 #define DEVICESTORAGE_APPS       "apps"
 #define DEVICESTORAGE_SDCARD     "sdcard"
+#define DEVICESTORAGE_CRASHES    "crashes"
+
+class DeviceStorageFile;
+class nsIInputStream;
 
 namespace mozilla {
+class EventListenerManager;
 namespace dom {
 class DeviceStorageEnumerationParameters;
 class DOMCursor;
 class DOMRequest;
+class Promise;
+class DeviceStorageFileSystem;
 } // namespace dom
+namespace ipc {
+class FileDescriptor;
+}
 } // namespace mozilla
 
 class DeviceStorageFile MOZ_FINAL
@@ -50,9 +60,10 @@ public:
   DeviceStorageFile(const nsAString& aStorageType,
                     const nsAString& aStorageName,
                     const nsAString& aPath);
-  // Used for enumerations. When you call Enumerate, you can pass in a directory to enumerate
-  // and the results that are returned are relative to that directory, files related to an
-  // enumeration need to know the "root of the enumeration" directory.
+  // Used for enumerations. When you call Enumerate, you can pass in a
+  // directory to enumerate and the results that are returned are relative to
+  // that directory, files related to an enumeration need to know the "root of
+  // the enumeration" directory.
   DeviceStorageFile(const nsAString& aStorageType,
                     const nsAString& aStorageName,
                     const nsAString& aRootDir,
@@ -61,15 +72,15 @@ public:
   void SetPath(const nsAString& aPath);
   void SetEditable(bool aEditable);
 
-  static already_AddRefed<DeviceStorageFile> CreateUnique(nsAString& aFileName,
-                                                          uint32_t aFileType,
-                                                          uint32_t aFileAttributes);
+  static already_AddRefed<DeviceStorageFile>
+  CreateUnique(nsAString& aFileName,
+               uint32_t aFileType,
+               uint32_t aFileAttributes);
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   bool IsAvailable();
-  bool IsComposite();
-  void GetCompositePath(nsAString& aCompositePath);
+  void GetFullPath(nsAString& aFullPath);
 
   // we want to make sure that the names of file can't reach
   // outside of the type of storage the user asked for.
@@ -91,18 +102,22 @@ public:
 
   void GetDiskFreeSpace(int64_t* aSoFar);
   void GetStatus(nsAString& aStatus);
+  void GetStorageStatus(nsAString& aStatus);
+  void DoFormat(nsAString& aStatus);
+  void DoMount(nsAString& aStatus);
+  void DoUnmount(nsAString& aStatus);
   static void GetRootDirectoryForType(const nsAString& aStorageType,
                                       const nsAString& aStorageName,
                                       nsIFile** aFile);
 
   nsresult CalculateSizeAndModifiedDate();
   nsresult CalculateMimeType();
+  nsresult CreateFileDescriptor(mozilla::ipc::FileDescriptor& aFileDescriptor);
 
 private:
   void Init();
   void NormalizeFilePath();
   void AppendRelativePath(const nsAString& aPath);
-  void GetStatusInternal(nsAString& aStorageName, nsAString& aStatus);
   void AccumDirectoryUsage(nsIFile* aFile,
                            uint64_t* aPicturesSoFar,
                            uint64_t* aVideosSoFar,
@@ -136,7 +151,7 @@ class FileUpdateDispatcher MOZ_FINAL
 };
 
 class nsDOMDeviceStorage MOZ_FINAL
-  : public nsDOMEventTargetHelper
+  : public mozilla::DOMEventTargetHelper
   , public nsIDOMDeviceStorage
   , public nsIObserver
 {
@@ -145,6 +160,8 @@ class nsDOMDeviceStorage MOZ_FINAL
     EnumerationParameters;
   typedef mozilla::dom::DOMCursor DOMCursor;
   typedef mozilla::dom::DOMRequest DOMRequest;
+  typedef mozilla::dom::Promise Promise;
+  typedef mozilla::dom::DeviceStorageFileSystem DeviceStorageFileSystem;
 public:
   typedef nsTArray<nsString> VolumeNameArray;
 
@@ -153,26 +170,37 @@ public:
 
   NS_DECL_NSIOBSERVER
   NS_DECL_NSIDOMEVENTTARGET
-  virtual void AddEventListener(const nsAString& aType,
-                                nsIDOMEventListener* aListener,
-                                bool aUseCapture,
-                                const mozilla::dom::Nullable<bool>& aWantsUntrusted,
-                                ErrorResult& aRv) MOZ_OVERRIDE;
+
+  virtual mozilla::EventListenerManager*
+    GetExistingListenerManager() const MOZ_OVERRIDE;
+  virtual mozilla::EventListenerManager*
+    GetOrCreateListenerManager() MOZ_OVERRIDE;
+
+  virtual void
+  AddEventListener(const nsAString& aType,
+                   mozilla::dom::EventListener* aListener,
+                   bool aUseCapture,
+                   const mozilla::dom::Nullable<bool>& aWantsUntrusted,
+                   ErrorResult& aRv) MOZ_OVERRIDE;
+
   virtual void RemoveEventListener(const nsAString& aType,
-                                   nsIDOMEventListener* aListener,
+                                   mozilla::dom::EventListener* aListener,
                                    bool aUseCapture,
                                    ErrorResult& aRv) MOZ_OVERRIDE;
 
-  nsDOMDeviceStorage();
+  nsDOMDeviceStorage(nsPIDOMWindow* aWindow);
 
-  nsresult Init(nsPIDOMWindow* aWindow, const nsAString& aType,
-                nsTArray<nsRefPtr<nsDOMDeviceStorage> >& aStores);
   nsresult Init(nsPIDOMWindow* aWindow, const nsAString& aType,
                 const nsAString& aVolName);
 
   bool IsAvailable();
+  bool IsFullPath(const nsAString& aPath)
+  {
+    return aPath.Length() > 0 && aPath.CharAt(0) == '/';
+  }
 
-  void SetRootDirectoryForType(const nsAString& aType, const nsAString& aVolName);
+  void SetRootDirectoryForType(const nsAString& aType,
+                               const nsAString& aVolName);
 
   // WebIDL
   nsPIDOMWindow*
@@ -181,7 +209,7 @@ public:
     return GetOwner();
   }
   virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   IMPL_EVENT_HANDLER(change)
 
@@ -223,29 +251,38 @@ public:
   already_AddRefed<DOMRequest> FreeSpace(ErrorResult& aRv);
   already_AddRefed<DOMRequest> UsedSpace(ErrorResult& aRv);
   already_AddRefed<DOMRequest> Available(ErrorResult& aRv);
+  already_AddRefed<DOMRequest> Format(ErrorResult& aRv);
+  already_AddRefed<DOMRequest> StorageStatus(ErrorResult& aRv);
+  already_AddRefed<DOMRequest> Mount(ErrorResult& aRv);
+  already_AddRefed<DOMRequest> Unmount(ErrorResult& aRv);
 
   bool Default();
 
   // Uses XPCOM GetStorageName
 
-  static void CreateDeviceStorageFor(nsPIDOMWindow* aWin,
-                                     const nsAString& aType,
-                                     nsDOMDeviceStorage** aStore);
+  already_AddRefed<Promise>
+  GetRoot();
 
-  static void CreateDeviceStoragesFor(nsPIDOMWindow* aWin,
-                                      const nsAString& aType,
-                                      nsTArray<nsRefPtr<nsDOMDeviceStorage> >& aStores,
-                                      bool aCompositeComponent);
+  static void
+  CreateDeviceStorageFor(nsPIDOMWindow* aWin,
+                         const nsAString& aType,
+                         nsDOMDeviceStorage** aStore);
+
+  static void
+  CreateDeviceStoragesFor(nsPIDOMWindow* aWin,
+                          const nsAString& aType,
+                          nsTArray<nsRefPtr<nsDOMDeviceStorage> >& aStores);
+
   void Shutdown();
 
   static void GetOrderedVolumeNames(nsTArray<nsString>& aVolumeNames);
 
-  static void GetWritableStorageName(const nsAString& aStorageType,
-                                     nsAString &aStorageName);
+  static void GetDefaultStorageName(const nsAString& aStorageType,
+                                    nsAString &aStorageName);
 
-  static bool ParseCompositePath(const nsAString& aCompositePath,
-                                 nsAString& aOutStorageName,
-                                 nsAString& aOutStoragePath);
+  static bool ParseFullPath(const nsAString& aFullPath,
+                            nsAString& aOutStorageName,
+                            nsAString& aOutStoragePath);
 private:
   ~nsDOMDeviceStorage();
 
@@ -268,25 +305,11 @@ private:
   nsString mStorageType;
   nsCOMPtr<nsIFile> mRootDirectory;
   nsString mStorageName;
-  bool mCompositeComponent;
 
-  // A composite device storage object is one which front-ends for multiple
-  // real storage objects. The real storage objects will each be stored in
-  // mStores and will each have a unique mStorageName. The composite storage
-  // object will have mStorageName == "", and mRootDirectory will be null.
-  // 
-  // Note that on desktop (or other non-gonk), composite storage areas
-  // don't exist, and mStorageName will also be "".
-  //
-  // A device storage object which is stored in mStores is considered to be
-  // a composite component.
-
-  bool IsComposite() { return mStores.Length() > 0; }
-  bool IsCompositeComponent() { return mCompositeComponent; }
-  nsTArray<nsRefPtr<nsDOMDeviceStorage> > mStores;
-  already_AddRefed<nsDOMDeviceStorage> GetStorage(const nsAString& aCompositePath,
+  already_AddRefed<nsDOMDeviceStorage> GetStorage(const nsAString& aFullPath,
                                                   nsAString& aOutStoragePath);
-  already_AddRefed<nsDOMDeviceStorage> GetStorageByName(const nsAString &aStorageName);
+  already_AddRefed<nsDOMDeviceStorage>
+    GetStorageByName(const nsAString &aStorageName);
 
   nsCOMPtr<nsIPrincipal> mPrincipal;
 
@@ -298,16 +321,11 @@ private:
   friend class WatchFileEvent;
   friend class DeviceStorageRequest;
 
-  class VolumeNameCache : public mozilla::RefCounted<VolumeNameCache>
-  {
-  public:
-    nsTArray<nsString>  mVolumeNames;
-  };
-  static mozilla::StaticRefPtr<VolumeNameCache> sVolumeNameCache;
+  static mozilla::StaticAutoPtr<nsTArray<nsString>> sVolumeNameCache;
 
 #ifdef MOZ_WIDGET_GONK
-  void DispatchMountChangeEvent(nsAString& aVolumeName,
-                                nsAString& aVolumeStatus);
+  nsString mLastStatus;
+  void DispatchMountChangeEvent(nsAString& aVolumeStatus);
 #endif
 
   // nsIDOMDeviceStorage.type
@@ -316,6 +334,8 @@ private:
       DEVICE_STORAGE_TYPE_SHARED,
       DEVICE_STORAGE_TYPE_EXTERNAL
   };
+
+  nsRefPtr<DeviceStorageFileSystem> mFileSystem;
 };
 
 #endif

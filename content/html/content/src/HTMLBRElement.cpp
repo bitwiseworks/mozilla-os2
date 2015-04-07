@@ -5,7 +5,6 @@
 
 #include "mozilla/dom/HTMLBRElement.h"
 #include "mozilla/dom/HTMLBRElementBinding.h"
-#include "mozilla/Util.h"
 
 #include "nsAttrValueInlines.h"
 #include "nsStyleConsts.h"
@@ -18,27 +17,17 @@ NS_IMPL_NS_NEW_HTML_ELEMENT(BR)
 namespace mozilla {
 namespace dom {
 
-HTMLBRElement::HTMLBRElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+HTMLBRElement::HTMLBRElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 HTMLBRElement::~HTMLBRElement()
 {
 }
 
-NS_IMPL_ADDREF_INHERITED(HTMLBRElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLBRElement, Element)
-
-
-// QueryInterface implementation for HTMLBRElement
-NS_INTERFACE_TABLE_HEAD(HTMLBRElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLBRElement, nsIDOMHTMLBRElement)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
-
+NS_IMPL_ISUPPORTS_INHERITED(HTMLBRElement, nsGenericHTMLElement,
+                            nsIDOMHTMLBRElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLBRElement)
 
@@ -48,8 +37,8 @@ NS_IMPL_STRING_ATTR(HTMLBRElement, Clear, clear)
 static const nsAttrValue::EnumTable kClearTable[] = {
   { "left", NS_STYLE_CLEAR_LEFT },
   { "right", NS_STYLE_CLEAR_RIGHT },
-  { "all", NS_STYLE_CLEAR_LEFT_AND_RIGHT },
-  { "both", NS_STYLE_CLEAR_LEFT_AND_RIGHT },
+  { "all", NS_STYLE_CLEAR_BOTH },
+  { "both", NS_STYLE_CLEAR_BOTH },
   { 0 }
 };
 
@@ -67,9 +56,9 @@ HTMLBRElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-static void
-MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                      nsRuleData* aData)
+void
+HTMLBRElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                     nsRuleData* aData)
 {
   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Display)) {
     nsCSSValue* clear = aData->ValueForClear();
@@ -106,9 +95,9 @@ HTMLBRElement::GetAttributeMappingFunction() const
 }
 
 JSObject*
-HTMLBRElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLBRElement::WrapNode(JSContext *aCx)
 {
-  return HTMLBRElementBinding::Wrap(aCx, aScope, this);
+  return HTMLBRElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

@@ -29,8 +29,8 @@ public:
   DOMStorageDBChild(DOMLocalStorageManager* aManager);
   virtual ~DOMStorageDBChild();
 
-  NS_IMETHOD_(nsrefcnt) AddRef(void);
-  NS_IMETHOD_(nsrefcnt) Release(void);
+  NS_IMETHOD_(MozExternalRefCountType) AddRef(void);
+  NS_IMETHOD_(MozExternalRefCountType) Release(void);
 
   void AddIPDLReference();
   void ReleaseIPDLReference();
@@ -49,7 +49,11 @@ public:
   virtual nsresult AsyncClear(DOMStorageCacheBridge* aCache);
 
   virtual void AsyncClearAll()
-    { mScopesHavingData.Clear(); /* NO-OP on the child process otherwise */ }
+  {
+    if (mScopesHavingData) {
+      mScopesHavingData->Clear(); /* NO-OP on the child process otherwise */
+    }
+  }
 
   virtual void AsyncClearMatchingScope(const nsACString& aScope)
     { /* NO-OP on the child process */ }
@@ -76,13 +80,14 @@ private:
 
   nsTHashtable<nsCStringHashKey>& ScopesHavingData();
 
-  nsAutoRefCnt mRefCnt;
+  ThreadSafeAutoRefCnt mRefCnt;
+  NS_DECL_OWNINGTHREAD
 
   // Held to get caches to forward answers to.
   nsRefPtr<DOMLocalStorageManager> mManager;
 
   // Scopes having data hash, for optimization purposes only
-  nsTHashtable<nsCStringHashKey> mScopesHavingData;
+  nsAutoPtr<nsTHashtable<nsCStringHashKey> > mScopesHavingData;
 
   // List of caches waiting for preload.  This ensures the contract that
   // AsyncPreload call references the cache for time of the preload.
@@ -107,8 +112,12 @@ public:
   DOMStorageDBParent();
   virtual ~DOMStorageDBParent();
 
-  NS_IMETHOD_(nsrefcnt) AddRef(void);
-  NS_IMETHOD_(nsrefcnt) Release(void);
+  virtual mozilla::ipc::IProtocol*
+  CloneProtocol(Channel* aChannel,
+                mozilla::ipc::ProtocolCloneContext* aCtx) MOZ_OVERRIDE;
+
+  NS_IMETHOD_(MozExternalRefCountType) AddRef(void);
+  NS_IMETHOD_(MozExternalRefCountType) Release(void);
 
   void AddIPDLReference();
   void ReleaseIPDLReference();
@@ -179,7 +188,8 @@ private:
 private:
   CacheParentBridge* NewCache(const nsACString& aScope);
 
-  nsAutoRefCnt mRefCnt;
+  ThreadSafeAutoRefCnt mRefCnt;
+  NS_DECL_OWNINGTHREAD
 	
 	// True when IPC channel is open and Send*() methods are OK to use.
   bool mIPCOpen;

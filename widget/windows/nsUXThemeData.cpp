@@ -5,29 +5,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/WindowsVersion.h"
 
 #include "nsUXThemeData.h"
 #include "nsDebug.h"
 #include "nsToolkit.h"
-#include "WinUtils.h"
 #include "nsUXThemeConstants.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
 
-const PRUnichar
+const wchar_t
 nsUXThemeData::kThemeLibraryName[] = L"uxtheme.dll";
-const PRUnichar
-nsUXThemeData::kDwmLibraryName[] = L"dwmapi.dll";
 
 HANDLE
 nsUXThemeData::sThemes[eUXNumClasses];
 
 HMODULE
-nsUXThemeData::sThemeDLL = NULL;
-HMODULE
-nsUXThemeData::sDwmDLL = NULL;
+nsUXThemeData::sThemeDLL = nullptr;
 
 bool
 nsUXThemeData::sFlatMenus = false;
@@ -36,22 +32,11 @@ bool nsUXThemeData::sTitlebarInfoPopulatedAero = false;
 bool nsUXThemeData::sTitlebarInfoPopulatedThemed = false;
 SIZE nsUXThemeData::sCommandButtons[4];
 
-nsUXThemeData::DwmExtendFrameIntoClientAreaProc nsUXThemeData::dwmExtendFrameIntoClientAreaPtr = NULL;
-nsUXThemeData::DwmIsCompositionEnabledProc nsUXThemeData::dwmIsCompositionEnabledPtr = NULL;
-nsUXThemeData::DwmSetIconicThumbnailProc nsUXThemeData::dwmSetIconicThumbnailPtr = NULL;
-nsUXThemeData::DwmSetIconicLivePreviewBitmapProc nsUXThemeData::dwmSetIconicLivePreviewBitmapPtr = NULL;
-nsUXThemeData::DwmGetWindowAttributeProc nsUXThemeData::dwmGetWindowAttributePtr = NULL;
-nsUXThemeData::DwmSetWindowAttributeProc nsUXThemeData::dwmSetWindowAttributePtr = NULL;
-nsUXThemeData::DwmInvalidateIconicBitmapsProc nsUXThemeData::dwmInvalidateIconicBitmapsPtr = NULL;
-nsUXThemeData::DwmDefWindowProcProc nsUXThemeData::dwmDwmDefWindowProcPtr = NULL;
-
 void
 nsUXThemeData::Teardown() {
   Invalidate();
   if(sThemeDLL)
     FreeLibrary(sThemeDLL);
-  if(sDwmDLL)
-    FreeLibrary(sDwmDLL);
 }
 
 void
@@ -60,18 +45,7 @@ nsUXThemeData::Initialize()
   ::ZeroMemory(sThemes, sizeof(sThemes));
   NS_ASSERTION(!sThemeDLL, "nsUXThemeData being initialized twice!");
 
-  if (GetDwmDLL()) {
-    dwmExtendFrameIntoClientAreaPtr = (DwmExtendFrameIntoClientAreaProc)::GetProcAddress(sDwmDLL, "DwmExtendFrameIntoClientArea");
-    dwmIsCompositionEnabledPtr = (DwmIsCompositionEnabledProc)::GetProcAddress(sDwmDLL, "DwmIsCompositionEnabled");
-    dwmSetIconicThumbnailPtr = (DwmSetIconicThumbnailProc)::GetProcAddress(sDwmDLL, "DwmSetIconicThumbnail");
-    dwmSetIconicLivePreviewBitmapPtr = (DwmSetIconicLivePreviewBitmapProc)::GetProcAddress(sDwmDLL, "DwmSetIconicLivePreviewBitmap");
-    dwmGetWindowAttributePtr = (DwmGetWindowAttributeProc)::GetProcAddress(sDwmDLL, "DwmGetWindowAttribute");
-    dwmSetWindowAttributePtr = (DwmSetWindowAttributeProc)::GetProcAddress(sDwmDLL, "DwmSetWindowAttribute");
-    dwmInvalidateIconicBitmapsPtr = (DwmInvalidateIconicBitmapsProc)::GetProcAddress(sDwmDLL, "DwmInvalidateIconicBitmaps");
-    dwmDwmDefWindowProcPtr = (DwmDefWindowProcProc)::GetProcAddress(sDwmDLL, "DwmDefWindowProc");
-    CheckForCompositor(true);
-  }
-
+  CheckForCompositor(true);
   Invalidate();
 }
 
@@ -80,7 +54,7 @@ nsUXThemeData::Invalidate() {
   for(int i = 0; i < eUXNumClasses; i++) {
     if(sThemes[i]) {
       CloseThemeData(sThemes[i]);
-      sThemes[i] = NULL;
+      sThemes[i] = nullptr;
     }
   }
   BOOL useFlat = FALSE;
@@ -93,7 +67,7 @@ nsUXThemeData::GetTheme(nsUXThemeClass cls) {
   NS_ASSERTION(cls < eUXNumClasses, "Invalid theme class!");
   if(!sThemes[cls])
   {
-    sThemes[cls] = OpenThemeData(NULL, GetClassName(cls));
+    sThemes[cls] = OpenThemeData(nullptr, GetClassName(cls));
   }
   return sThemes[cls];
 }
@@ -103,13 +77,6 @@ nsUXThemeData::GetThemeDLL() {
   if (!sThemeDLL)
     sThemeDLL = ::LoadLibraryW(kThemeLibraryName);
   return sThemeDLL;
-}
-
-HMODULE
-nsUXThemeData::GetDwmDLL() {
-  if (!sDwmDLL && WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION)
-    sDwmDLL = ::LoadLibraryW(kDwmLibraryName);
-  return sDwmDLL;
 }
 
 const wchar_t *nsUXThemeData::GetClassName(nsUXThemeClass cls) {
@@ -178,7 +145,7 @@ nsUXThemeData::InitTitlebarInfo()
   // Use system metrics for pre-vista, otherwise trigger a
   // refresh on the next layout.
   sTitlebarInfoPopulatedAero = sTitlebarInfoPopulatedThemed =
-    (WinUtils::GetWindowsVersion() < WinUtils::VISTA_VERSION);
+    !IsVistaOrLater();
 }
 
 // static
@@ -190,10 +157,10 @@ nsUXThemeData::UpdateTitlebarInfo(HWND aWnd)
 
   if (!sTitlebarInfoPopulatedAero && nsUXThemeData::CheckForCompositor()) {
     RECT captionButtons;
-    if (SUCCEEDED(nsUXThemeData::dwmGetWindowAttributePtr(aWnd,
-                                                          DWMWA_CAPTION_BUTTON_BOUNDS,
-                                                          &captionButtons,
-                                                          sizeof(captionButtons)))) {
+    if (SUCCEEDED(WinUtils::dwmGetWindowAttributePtr(aWnd,
+                                                     DWMWA_CAPTION_BUTTON_BOUNDS,
+                                                     &captionButtons,
+                                                     sizeof(captionButtons)))) {
       sCommandButtons[CMDBUTTONIDX_BUTTONBOX].cx = captionButtons.right - captionButtons.left - 3;
       sCommandButtons[CMDBUTTONIDX_BUTTONBOX].cy = (captionButtons.bottom - captionButtons.top) - 1;
       sTitlebarInfoPopulatedAero = true;
@@ -213,10 +180,10 @@ nsUXThemeData::UpdateTitlebarInfo(HWND aWnd)
   wc.cbClsExtra    = 0;
   wc.cbWndExtra    = 0;
   wc.hInstance     = nsToolkit::mDllInstance;
-  wc.hIcon         = NULL;
-  wc.hCursor       = NULL;
-  wc.hbrBackground = NULL;
-  wc.lpszMenuName  = NULL;
+  wc.hIcon         = nullptr;
+  wc.hCursor       = nullptr;
+  wc.hbrBackground = nullptr;
+  wc.lpszMenuName  = nullptr;
   wc.lpszClassName = className.get();
   ::RegisterClassW(&wc);
 
@@ -227,8 +194,8 @@ nsUXThemeData::UpdateTitlebarInfo(HWND aWnd)
   HWND hWnd = CreateWindowExW(WS_EX_LAYERED,
                               className.get(), L"",
                               WS_OVERLAPPEDWINDOW,
-                              0, 0, 0, 0, aWnd, NULL,
-                              nsToolkit::mDllInstance, NULL);
+                              0, 0, 0, 0, aWnd, nullptr,
+                              nsToolkit::mDllInstance, nullptr);
   NS_ASSERTION(hWnd, "UpdateTitlebarInfo window creation failed.");
 
   ShowWindow(hWnd, SW_SHOW);
@@ -286,6 +253,8 @@ nsUXThemeData::sThemeId = LookAndFeel::eWindowsTheme_Generic;
 
 bool
 nsUXThemeData::sIsDefaultWindowsTheme = false;
+bool
+nsUXThemeData::sIsHighContrastOn = false;
 
 // static
 LookAndFeel::WindowsTheme
@@ -300,16 +269,38 @@ bool nsUXThemeData::IsDefaultWindowTheme()
   return sIsDefaultWindowsTheme;
 }
 
+bool nsUXThemeData::IsHighContrastOn()
+{
+  return sIsHighContrastOn;
+}
+
+// static
+bool nsUXThemeData::CheckForCompositor(bool aUpdateCache)
+{
+  static BOOL sCachedValue = FALSE;
+  if (aUpdateCache && WinUtils::dwmIsCompositionEnabledPtr) {
+    WinUtils::dwmIsCompositionEnabledPtr(&sCachedValue);
+  }
+  return sCachedValue;
+}
+
 // static
 void
 nsUXThemeData::UpdateNativeThemeInfo()
 {
   // Trigger a refresh of themed button metrics if needed
-  sTitlebarInfoPopulatedThemed =
-    (WinUtils::GetWindowsVersion() < WinUtils::VISTA_VERSION);
+  sTitlebarInfoPopulatedThemed = !IsVistaOrLater();
 
   sIsDefaultWindowsTheme = false;
   sThemeId = LookAndFeel::eWindowsTheme_Generic;
+
+  HIGHCONTRAST highContrastInfo;
+  highContrastInfo.cbSize = sizeof(HIGHCONTRAST);
+  if (SystemParametersInfo(SPI_GETHIGHCONTRAST, 0, &highContrastInfo, 0)) {
+    sIsHighContrastOn = ((highContrastInfo.dwFlags & HCF_HIGHCONTRASTON) != 0);
+  } else {
+    sIsHighContrastOn = false;
+  }
 
   if (!IsAppThemed()) {
     sThemeId = LookAndFeel::eWindowsTheme_Classic;
@@ -322,7 +313,7 @@ nsUXThemeData::UpdateNativeThemeInfo()
                                  MAX_PATH,
                                  themeColor,
                                  MAX_PATH,
-                                 NULL, 0))) {
+                                 nullptr, 0))) {
     sThemeId = LookAndFeel::eWindowsTheme_Classic;
     return;
   }
@@ -331,7 +322,7 @@ nsUXThemeData::UpdateNativeThemeInfo()
   themeName = themeName ? themeName + 1 : themeFileName;
 
   WindowsTheme theme = WINTHEME_UNRECOGNIZED;
-  for (int i = 0; i < ArrayLength(knownThemes); ++i) {
+  for (size_t i = 0; i < ArrayLength(knownThemes); ++i) {
     if (!lstrcmpiW(themeName, knownThemes[i].name)) {
       theme = (WindowsTheme)knownThemes[i].type;
       break;
@@ -341,9 +332,16 @@ nsUXThemeData::UpdateNativeThemeInfo()
   if (theme == WINTHEME_UNRECOGNIZED)
     return;
 
-  if (theme == WINTHEME_AERO || theme == WINTHEME_AERO_LITE || theme == WINTHEME_LUNA)
+  // We're using the default theme if we're using any of Aero, Aero Lite, or
+  // luna. However, on Win8, GetCurrentThemeName (see above) returns
+  // AeroLite.msstyles for the 4 builtin highcontrast themes as well. Those
+  // themes "don't count" as default themes, so we specifically check for high
+  // contrast mode in that situation.
+  if (!(IsWin8OrLater() && sIsHighContrastOn) &&
+      (theme == WINTHEME_AERO || theme == WINTHEME_AERO_LITE || theme == WINTHEME_LUNA)) {
     sIsDefaultWindowsTheme = true;
-  
+  }
+
   if (theme != WINTHEME_LUNA) {
     switch(theme) {
       case WINTHEME_AERO:
@@ -366,7 +364,7 @@ nsUXThemeData::UpdateNativeThemeInfo()
 
   // calculate the luna color scheme
   WindowsThemeColor color = WINTHEMECOLOR_UNRECOGNIZED;
-  for (int i = 0; i < ArrayLength(knownColors); ++i) {
+  for (size_t i = 0; i < ArrayLength(knownColors); ++i) {
     if (!lstrcmpiW(themeColor, knownColors[i].name)) {
       color = (WindowsThemeColor)knownColors[i].type;
       break;

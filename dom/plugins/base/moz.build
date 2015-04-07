@@ -14,11 +14,10 @@ XPIDL_SOURCES += [
     'nsIPluginInputStream.idl',
     'nsIPluginInstanceOwner.idl',
     'nsIPluginTag.idl',
-    'nsIPluginTagInfo.idl',
     'nspluginroot.idl',
 ]
 
-MODULE = 'plugin'
+XPIDL_MODULE = 'plugin'
 
 EXPORTS += [
     'npapi.h',
@@ -33,58 +32,94 @@ EXPORTS += [
     'nsPluginLogging.h',
     'nsPluginNativeWindow.h',
     'nsPluginPlayPreviewInfo.h',
-    'nsPluginTags.h',
     'nsPluginsCID.h',
     'nsPluginsDir.h',
+    'nsPluginTags.h',
 ]
 
 EXPORTS.mozilla += [
     'PluginPRLibrary.h',
 ]
 
-CPP_SOURCES += [
-    'PluginPRLibrary.cpp',
+UNIFIED_SOURCES += [
     'nsJSNPRuntime.cpp',
+    'nsPluginInstanceOwner.cpp',
+    'nsPluginModule.cpp',
+    'nsPluginPlayPreviewInfo.cpp',
+    'PluginPRLibrary.cpp',
+]
+
+# These files cannot be built in unified mode because they force NSPR logging.
+SOURCES += [
     'nsNPAPIPlugin.cpp',
     'nsNPAPIPluginInstance.cpp',
     'nsNPAPIPluginStreamListener.cpp',
     'nsPluginHost.cpp',
-    'nsPluginInstanceOwner.cpp',
-    'nsPluginModule.cpp',
-    'nsPluginPlayPreviewInfo.cpp',
     'nsPluginStreamListenerPeer.cpp',
     'nsPluginTags.cpp',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
-    CPP_SOURCES += [
-        'nsPluginsDirWin.cpp',
-        'nsPluginNativeWindowWin.cpp',
+    UNIFIED_SOURCES += [
         'nsPluginDirServiceProvider.cpp',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
-    CPP_SOURCES += [
-        'nsPluginsDirOS2.cpp',
-        'nsPluginNativeWindowOS2.cpp',
+        'nsPluginNativeWindowWin.cpp',
+        'nsPluginsDirWin.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    CPP_SOURCES += [
-        'nsPluginsDirDarwin.cpp',
+    UNIFIED_SOURCES += [
         'nsPluginNativeWindow.cpp',
+        'nsPluginsDirDarwin.cpp',
     ]
 else:
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'nsPluginsDirUnix.cpp',
     ]
-    if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gtk2':
-        CPP_SOURCES += [
-            'nsPluginNativeWindowGtk2.cpp',
+    if CONFIG['MOZ_ENABLE_GTK']:
+        # This file cannot be built in unified mode because of name clashes in X11 headers.
+        SOURCES += [
+            'nsPluginNativeWindowGtk.cpp',
         ]
     elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
-        CPP_SOURCES += [
+        UNIFIED_SOURCES += [
             'nsPluginNativeWindowQt.cpp',
         ]
     else:
-        CPP_SOURCES += [
+        UNIFIED_SOURCES += [
             'nsPluginNativeWindow.cpp',
         ]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'android':
+    # android_npapi.h extends the NPNVariable and NPPVariable enums
+    # using #defines, which results in Wswitch warnings in gcc-4.6.
+    # Therefore, enable FAIL_ON_WARNINGS only on non-Android platforms.
+    FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+LOCAL_INCLUDES += [
+    '/content/base/src',
+    '/dom/base',
+    '/gfx/skia/include/config',
+    '/gfx/skia/include/core',
+    '/layout/generic',
+    '/layout/xul',
+    '/widget/android',
+    '/widget/xpwidgets',
+    '/xpcom/base',
+]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+    LOCAL_INCLUDES += [
+        '/dom/plugins/base/android',
+    ]
+
+if CONFIG['OS_ARCH'] == 'WINNT':
+    LOCAL_INCLUDES += [
+        '/xpcom/base',
+    ]
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+DEFINES['SK_BUILD_FOR_ANDROID_NDK'] = True
+
+FINAL_LIBRARY = 'xul'

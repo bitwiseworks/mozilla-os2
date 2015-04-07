@@ -79,15 +79,26 @@ hardware (via AudioStream).
 #include "mozilla/Attributes.h"
 #include "nsThreadUtils.h"
 #include "MediaDecoder.h"
-#include "AudioAvailableEventManager.h"
 #include "mozilla/ReentrantMonitor.h"
-#include "nsITimer.h"
-#include "AudioSegment.h"
-#include "VideoSegment.h"
+#include "MediaDecoderReader.h"
+#include "MediaDecoderOwner.h"
+#include "MediaMetadataManager.h"
+
+class nsITimer;
 
 namespace mozilla {
 
-class MediaDecoderReader;
+class AudioSegment;
+class VideoSegment;
+class MediaTaskQueue;
+class SharedThreadPool;
+
+// GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
+// GetTickCount() and conflicts with MediaDecoderStateMachine::GetCurrentTime
+// implementation.
+#ifdef GetCurrentTime
+#undef GetCurrentTime
+#endif
 
 /*
   The state machine class. This manages the decoding and seeking in the
@@ -101,16 +112,15 @@ class MediaDecoderReader;
 
   See MediaDecoder.h for more details.
 */
-class MediaDecoderStateMachine : public nsRunnable
+class MediaDecoderStateMachine
 {
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaDecoderStateMachine)
 public:
   typedef MediaDecoder::DecodedStreamData DecodedStreamData;
   MediaDecoderStateMachine(MediaDecoder* aDecoder,
                                MediaDecoderReader* aReader,
                                bool aRealTime = false);
-  ~MediaDecoderStateMachine();
 
-  // nsDecoderStateMachine interface
   nsresult Init(MediaDecoderStateMachine* aCloneDonor);
 
   // Enumeration for the valid decoding states
@@ -126,7 +136,7 @@ public:
   };
 
   State GetState() {
-    mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
+    AssertCurrentThreadInMonitor();
     return mState;
   }
 
@@ -157,11 +167,16 @@ public:
   // aEndTime is in microseconds.
   void SetMediaEndTime(int64_t aEndTime);
 
+  // Called from main thread to update the duration with an estimated value.
+  // The duration is only changed if its significantly different than the
+  // the current duration, as the incoming duration is an estimate and so
+  // often is unstable as more data is read and the estimate is updated.
+  // Can result in a durationchangeevent. aDuration is in microseconds.
+  void UpdateEstimatedDuration(int64_t aDuration);
+
   // Functions used by assertions to ensure we're calling things
   // on the appropriate threads.
-  bool OnDecodeThread() const {
-    return IsCurrentThread(mDecodeThread);
-  }
+  bool OnDecodeThread() const;
   bool OnStateMachineThread() const;
   bool OnAudioThread() const {
     return IsCurrentThread(mAudioThread);
@@ -174,8 +189,8 @@ public:
   // that the state has changed.
   void Play();
 
-  // Seeks to aTime in seconds.
-  void Seek(double aTime);
+  // Seeks to the decoder to aTarget asynchronously.
+  void Seek(const SeekTarget& aTarget);
 
   // Returns the current playback position in seconds.
   // Called from the main thread to get the current frame time. The decoder
@@ -211,55 +226,52 @@ public:
   // the main thread.
   void StartBuffering();
 
-  // State machine thread run function. Defers to RunStateMachine().
-  NS_IMETHOD Run() MOZ_OVERRIDE;
-
   // This is called on the state machine thread and audio thread.
   // The decoder monitor must be obtained before calling this.
   bool HasAudio() const {
-    mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
-    return mInfo.mHasAudio;
+    AssertCurrentThreadInMonitor();
+    return mInfo.HasAudio();
   }
 
   // This is called on the state machine thread and audio thread.
   // The decoder monitor must be obtained before calling this.
   bool HasVideo() const {
-    mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
-    return mInfo.mHasVideo;
+    AssertCurrentThreadInMonitor();
+    return mInfo.HasVideo();
   }
 
   // Should be called by main thread.
-  bool HaveNextFrameData() const;
+  bool HaveNextFrameData();
 
   // Must be called with the decode monitor held.
   bool IsBuffering() const {
-    mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
+    AssertCurrentThreadInMonitor();
 
     return mState == DECODER_STATE_BUFFERING;
   }
 
   // Must be called with the decode monitor held.
   bool IsSeeking() const {
-    mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
+    AssertCurrentThreadInMonitor();
 
     return mState == DECODER_STATE_SEEKING;
   }
 
-  nsresult GetBuffered(TimeRanges* aBuffered);
+  nsresult GetBuffered(dom::TimeRanges* aBuffered);
 
   void SetPlaybackRate(double aPlaybackRate);
   void SetPreservesPitch(bool aPreservesPitch);
 
-  int64_t VideoQueueMemoryInUse() {
+  size_t SizeOfVideoQueue() {
     if (mReader) {
-      return mReader->VideoQueueMemoryInUse();
+      return mReader->SizeOfVideoQueueInBytes();
     }
     return 0;
   }
 
-  int64_t AudioQueueMemoryInUse() {
+  size_t SizeOfAudioQueue() {
     if (mReader) {
-      return mReader->AudioQueueMemoryInUse();
+      return mReader->SizeOfAudioQueueInBytes();
     }
     return 0;
   }
@@ -267,26 +279,22 @@ public:
   void NotifyDataArrived(const char* aBuffer, uint32_t aLength, int64_t aOffset);
 
   int64_t GetEndMediaTime() const {
-    mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
+    AssertCurrentThreadInMonitor();
     return mEndTime;
   }
 
   bool IsTransportSeekable() {
-    mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
+    AssertCurrentThreadInMonitor();
     return mTransportSeekable;
   }
 
   bool IsMediaSeekable() {
-    mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
+    AssertCurrentThreadInMonitor();
     return mMediaSeekable;
   }
 
-  // Sets the current frame buffer length for the MozAudioAvailable event.
-  // Accessed on the main and state machine threads.
-  void SetFrameBufferLength(uint32_t aLength);
-
   // Returns the shared state machine thread.
-  static nsIThread* GetStateMachineThread();
+  nsIEventTarget* GetStateMachineThread();
 
   // Calls ScheduleStateMachine() after taking the decoder lock. Also
   // notifies the decoder thread in case it's waiting on the decoder lock.
@@ -297,24 +305,28 @@ public:
   // earlier, in which case the request is discarded.
   nsresult ScheduleStateMachine(int64_t aUsecs = 0);
 
-  // Creates and starts a new decode thread. Don't call this directly,
-  // request a new decode thread by calling
-  // StateMachineTracker::RequestCreateDecodeThread().
-  // The decoder monitor must not be held. Called on the state machine thread.
-  nsresult StartDecodeThread();
-
   // Timer function to implement ScheduleStateMachine(aUsecs).
-  void TimeoutExpired();
+  nsresult TimeoutExpired(int aGeneration);
 
   // Set the media fragment end time. aEndTime is in microseconds.
   void SetFragmentEndTime(int64_t aEndTime);
 
   // Drop reference to decoder.  Only called during shutdown dance.
-  void ReleaseDecoder() { mDecoder = nullptr; }
+  void ReleaseDecoder() {
+    MOZ_ASSERT(mReader);
+    if (mReader) {
+      mReader->ReleaseDecoder();
+    }
+    mDecoder = nullptr;
+  }
 
-   // Called when a "MozAudioAvailable" event listener is added to the media
-   // element. Called on the main thread.
-   void NotifyAudioAvailableListener();
+  // If we're playing into a MediaStream, record the current point in the
+  // MediaStream and the current point in our media resource so later we can
+  // convert MediaStream playback positions to media resource positions. Best to
+  // call this while we're not playing (while the MediaStream is blocked). Can
+  // be called on any thread with the decoder monitor held.
+  void SetSyncPointForMediaStream();
+  int64_t GetCurrentTimeViaMediaStreamSync();
 
   // Copy queued audio/video data in the reader to any output MediaStreams that
   // need it.
@@ -329,10 +341,27 @@ public:
 
   void QueueMetadata(int64_t aPublishTime, int aChannels, int aRate, bool aHasAudio, bool aHasVideo, MetadataTags* aTags);
 
-protected:
-  virtual uint32_t GetAmpleVideoFrames() { return mAmpleVideoFrames; }
+  // Returns true if we're currently playing. The decoder monitor must
+  // be held.
+  bool IsPlaying();
 
-private:
+  // Called when the reader may have acquired the hardware resources required
+  // to begin decoding. The state machine may move into DECODING_METADATA if
+  // appropriate. The decoder monitor must be held while calling this.
+  void NotifyWaitingForResourcesStatusChanged();
+
+  // Notifies the state machine that should minimize the number of samples
+  // decoded we preroll, until playback starts. The first time playback starts
+  // the state machine is free to return to prerolling normally. Note
+  // "prerolling" in this context refers to when we decode and buffer decoded
+  // samples in advance of when they're needed for playback.
+  void SetMinimizePrerollUntilPlaybackStarts();
+
+protected:
+  virtual ~MediaDecoderStateMachine();
+
+  void AssertCurrentThreadInMonitor() const { mDecoder->GetReentrantMonitor().AssertCurrentThreadIn(); }
+
   class WakeDecoderRunnable : public nsRunnable {
   public:
     WakeDecoderRunnable(MediaDecoderStateMachine* aSM)
@@ -368,27 +397,43 @@ private:
   };
   WakeDecoderRunnable* GetWakeDecoderRunnable();
 
+  MediaQueue<AudioData>& AudioQueue() { return mReader->AudioQueue(); }
+  MediaQueue<VideoData>& VideoQueue() { return mReader->VideoQueue(); }
+
+  // True if our buffers of decoded audio are not full, and we should
+  // decode more.
+  bool NeedToDecodeAudio();
+
+  // Decodes some audio. This should be run on the decode task queue.
+  void DecodeAudio();
+
+  // True if our buffers of decoded video are not full, and we should
+  // decode more.
+  bool NeedToDecodeVideo();
+
+  // Decodes some video. This should be run on the decode task queue.
+  void DecodeVideo();
+
   // Returns true if we've got less than aAudioUsecs microseconds of decoded
   // and playable data. The decoder monitor must be held.
-  bool HasLowDecodedData(int64_t aAudioUsecs) const;
+  bool HasLowDecodedData(int64_t aAudioUsecs);
 
   // Returns true if we're running low on data which is not yet decoded.
   // The decoder monitor must be held.
-  bool HasLowUndecodedData() const;
+  bool HasLowUndecodedData();
 
-  // Returns the number of microseconds of undecoded data available for
-  // decoding. The decoder monitor must be held.
-  int64_t GetUndecodedData() const;
+  // Returns true if we have less than aUsecs of undecoded data available.
+  bool HasLowUndecodedData(double aUsecs);
 
   // Returns the number of unplayed usecs of audio we've got decoded and/or
   // pushed to the hardware waiting to play. This is how much audio we can
   // play without having to run the audio decoder. The decoder monitor
   // must be held.
-  int64_t AudioDecodedUsecs() const;
+  int64_t AudioDecodedUsecs();
 
   // Returns true when there's decoded audio waiting to play.
   // The decoder monitor must be held.
-  bool HasFutureAudio() const;
+  bool HasFutureAudio();
 
   // Returns true if we recently exited "quick buffering" mode.
   bool JustExitedQuickBuffering();
@@ -458,24 +503,12 @@ private:
                        uint64_t aFrameOffset);
 
   // Pops an audio chunk from the front of the audio queue, and pushes its
-  // audio data to the audio hardware. MozAudioAvailable data is also queued
-  // here. Called on the audio thread.
+  // audio data to the audio hardware.
   uint32_t PlayFromAudioQueue(uint64_t aFrameOffset, uint32_t aChannels);
-
-  // Stops the decode thread, and if we have a pending request for a new
-  // decode thread it is canceled. The decoder monitor must be held with exactly
-  // one lock count. Called on the state machine thread.
-  void StopDecodeThread();
 
   // Stops the audio thread. The decoder monitor must be held with exactly
   // one lock count. Called on the state machine thread.
   void StopAudioThread();
-
-  // Ensures the decode thread is running if it already exists, or requests
-  // a new decode thread be started if there currently is no decode thread.
-  // The decoder monitor must be held with exactly one lock count. Called on
-  // the state machine thread.
-  nsresult ScheduleDecodeThread();
 
   // Starts the audio thread. The decoder monitor must be held with exactly
   // one lock count. Called on the state machine thread.
@@ -487,26 +520,73 @@ private:
   void AudioLoop();
 
   // Sets internal state which causes playback of media to pause.
-  // The decoder monitor must be held. Called on the state machine,
-  // and decode threads.
+  // The decoder monitor must be held.
   void StopPlayback();
 
   // Sets internal state which causes playback of media to begin or resume.
-  // Must be called with the decode monitor held. Called on the state machine
-  // and decode threads.
+  // Must be called with the decode monitor held.
   void StartPlayback();
 
   // Moves the decoder into decoding state. Called on the state machine
   // thread. The decoder monitor must be held.
   void StartDecoding();
 
+  // Moves the decoder into the shutdown state, and dispatches an error
+  // event to the media element. This begins shutting down the decoder.
+  // The decoder monitor must be held. This is only called on the
+  // decode thread.
+  void DecodeError();
+
   void StartWaitForResources();
 
-  void StartDecodeMetadata();
+  // Dispatches a task to the decode task queue to begin decoding metadata.
+  // This is threadsafe and can be called on any thread.
+  // The decoder monitor must be held.
+  nsresult EnqueueDecodeMetadataTask();
 
-  // Returns true if we're currently playing. The decoder monitor must
-  // be held.
-  bool IsPlaying();
+  nsresult DispatchAudioDecodeTaskIfNeeded();
+
+  // Ensures a to decode audio has been dispatched to the decode task queue.
+  // If a task to decode has already been dispatched, this does nothing,
+  // otherwise this dispatches a task to do the decode.
+  // This is called on the state machine or decode threads.
+  // The decoder monitor must be held.
+  nsresult EnsureAudioDecodeTaskQueued();
+
+  nsresult DispatchVideoDecodeTaskIfNeeded();
+
+  // Ensures a to decode video has been dispatched to the decode task queue.
+  // If a task to decode has already been dispatched, this does nothing,
+  // otherwise this dispatches a task to do the decode.
+  // The decoder monitor must be held.
+  nsresult EnsureVideoDecodeTaskQueued();
+
+  // Dispatches a task to the decode task queue to seek the decoder.
+  // The decoder monitor must be held.
+  nsresult EnqueueDecodeSeekTask();
+
+  // Calls the reader's SetIdle(), with aIsIdle as parameter. This is only
+  // called in a task dispatched to the decode task queue, don't call it
+  // directly.
+  void SetReaderIdle();
+  void SetReaderActive();
+
+  // Re-evaluates the state and determines whether we need to dispatch
+  // events to run the decode, or if not whether we should set the reader
+  // to idle mode. This is threadsafe, and can be called from any thread.
+  // The decoder monitor must be held.
+  void DispatchDecodeTasksIfNeeded();
+
+  // Called before we do anything on the decode task queue to set the reader
+  // as not idle if it was idle. This is called before we decode, seek, or
+  // decode metadata (in case we were dormant or awaiting resources).
+  void EnsureActive();
+
+  // Queries our state to see whether the decode has finished for all streams.
+  // If so, we move into DECODER_STATE_COMPLETED and schedule the state machine
+  // to run.
+  // The decoder monitor must be held.
+  void CheckIfDecodeComplete();
 
   // Returns the "media time". This is the absolute time which the media
   // playback has reached. i.e. this returns values in the range
@@ -514,7 +594,7 @@ private:
   // not start at 0. Note this is different to the value returned
   // by GetCurrentTime(), which is in the range [0,duration].
   int64_t GetMediaTime() const {
-    mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
+    AssertCurrentThreadInMonitor();
     return mStartTime + mCurrentFrameTime;
   }
 
@@ -539,9 +619,7 @@ private:
   // Called on the decode thread.
   void DecodeLoop();
 
-  // Decode thread run function. Determines which of the Decode*() functions
-  // to call.
-  void DecodeThreadRun();
+  void CallDecodeMetadata();
 
   // Copy audio from an AudioData packet to aOutput. This may require
   // inserting silence depending on the timing of the audio packet.
@@ -557,8 +635,8 @@ private:
   nsresult RunStateMachine();
 
   bool IsStateMachineScheduled() const {
-    mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
-    return !mTimeout.IsNull() || mRunAgain;
+    AssertCurrentThreadInMonitor();
+    return !mTimeout.IsNull();
   }
 
   // Returns true if we're not playing and the decode thread has filled its
@@ -587,22 +665,34 @@ private:
   // The "audio push thread".
   nsCOMPtr<nsIThread> mAudioThread;
 
-  // Thread for decoding video in background. The "decode thread".
-  nsCOMPtr<nsIThread> mDecodeThread;
+  // The task queue in which we run decode tasks. This is referred to as
+  // the "decode thread", though in practise tasks can run on a different
+  // thread every time they're called.
+  RefPtr<MediaTaskQueue> mDecodeTaskQueue;
 
-  // Timer to call the state machine Run() method. Used by
+  RefPtr<SharedThreadPool> mStateMachineThreadPool;
+
+  // Timer to run the state machine cycles. Used by
   // ScheduleStateMachine(). Access protected by decoder monitor.
   nsCOMPtr<nsITimer> mTimer;
 
-  // Timestamp at which the next state machine Run() method will be called.
-  // If this is non-null, a call to Run() is scheduled, either by a timer,
-  // or via an event. Access protected by decoder monitor.
+  // Timestamp at which the next state machine cycle will run.
+  // Access protected by decoder monitor.
   TimeStamp mTimeout;
+
+  // Used to check if there are state machine cycles are running in sequence.
+  DebugOnly<bool> mInRunningStateMachine;
 
   // The time that playback started from the system clock. This is used for
   // timing the presentation of video frames when there's no audio.
   // Accessed only via the state machine thread.
   TimeStamp mPlayStartTime;
+
+  // When we start writing decoded data to a new DecodedDataStream, or we
+  // restart writing due to PlaybackStarted(), we record where we are in the
+  // MediaStream and what that corresponds to in the media.
+  StreamTime mSyncPointInMediaStream;
+  int64_t mSyncPointInDecodedStream; // microseconds
 
   // When the playbackRate changes, and there is no audio clock, it is necessary
   // to reset the mPlayStartTime. This is done next time the clock is queried,
@@ -634,7 +724,7 @@ private:
   // Position to seek to in microseconds when the seek state transition occurs.
   // The decoder monitor lock must be obtained before reading or writing
   // this value. Accessed on main and decode thread.
-  int64_t mSeekTime;
+  SeekTarget mSeekTarget;
 
   // Media Fragment end time in microseconds. Access controlled by decoder monitor.
   int64_t mFragmentEndTime;
@@ -643,7 +733,7 @@ private:
   // This is created and destroyed on the audio thread, while holding the
   // decoder monitor, so if this is used off the audio thread, you must
   // first acquire the decoder monitor and check that it is non-null.
-  nsAutoPtr<AudioStream> mAudioStream;
+  RefPtr<AudioStream> mAudioStream;
 
   // The reader, don't call its methods with the decoder monitor held.
   // This is created in the play state machine's constructor, and destroyed
@@ -707,6 +797,72 @@ private:
   // the video queue, we will not decode any more video frames until some have
   // been consumed by the play state machine thread.
   uint32_t mAmpleVideoFrames;
+
+  // Low audio threshold. If we've decoded less than this much audio we
+  // consider our audio decode "behind", and we may skip video decoding
+  // in order to allow our audio decoding to catch up. We favour audio
+  // decoding over video. We increase this threshold if we're slow to
+  // decode video frames, in order to reduce the chance of audio underruns.
+  // Note that we don't ever reset this threshold, it only ever grows as
+  // we detect that the decode can't keep up with rendering.
+  int64_t mLowAudioThresholdUsecs;
+
+  // Our "ample" audio threshold. Once we've this much audio decoded, we
+  // pause decoding. If we increase mLowAudioThresholdUsecs, we'll also
+  // increase this too appropriately (we don't want mLowAudioThresholdUsecs
+  // to be greater than ampleAudioThreshold, else we'd stop decoding!).
+  // Note that we don't ever reset this threshold, it only ever grows as
+  // we detect that the decode can't keep up with rendering.
+  int64_t mAmpleAudioThresholdUsecs;
+
+  // At the start of decoding we want to "preroll" the decode until we've
+  // got a few frames decoded before we consider whether decode is falling
+  // behind. Otherwise our "we're falling behind" logic will trigger
+  // unneccessarily if we start playing as soon as the first sample is
+  // decoded. These two fields store how many video frames and audio
+  // samples we must consume before are considered to be finished prerolling.
+  uint32_t mAudioPrerollUsecs;
+  uint32_t mVideoPrerollFrames;
+
+  // When we start decoding (either for the first time, or after a pause)
+  // we may be low on decoded data. We don't want our "low data" logic to
+  // kick in and decide that we're low on decoded data because the download
+  // can't keep up with the decode, and cause us to pause playback. So we
+  // have a "preroll" stage, where we ignore the results of our "low data"
+  // logic during the first few frames of our decode. This occurs during
+  // playback. The flags below are true when the corresponding stream is
+  // being "prerolled".
+  bool mIsAudioPrerolling;
+  bool mIsVideoPrerolling;
+
+  // True when we have an audio stream that we're decoding, and we have not
+  // yet decoded to end of stream.
+  bool mIsAudioDecoding;
+
+  // True when we have a video stream that we're decoding, and we have not
+  // yet decoded to end of stream.
+  bool mIsVideoDecoding;
+
+  // True when we have dispatched a task to the decode task queue to run
+  // the audio decode.
+  bool mDispatchedAudioDecodeTask;
+
+  // True when we have dispatched a task to the decode task queue to run
+  // the video decode.
+  bool mDispatchedVideoDecodeTask;
+
+  // True when the reader is initialized, but has been ordered "idle" by the
+  // state machine. This happens when the MediaQueue's of decoded data are
+  // "full" and playback is paused. The reader may choose to use the idle
+  // notification to enter a low power state.
+  bool mIsReaderIdle;
+
+  // If the video decode is falling behind the audio, we'll start dropping the
+  // inter-frames up until the next keyframe which is at or before the current
+  // playback position. skipToNextKeyframe is true if we're currently
+  // skipping up to the next keyframe.
+  bool mSkipToNextKeyFrame;
+
   // True if we shouldn't play our audio (but still write it to any capturing
   // streams). When this is true, mStopAudioThread is always true and
   // the audio thread will never start again after it has stopped.
@@ -728,26 +884,22 @@ private:
   bool mPositionChangeQueued;
 
   // True if the audio playback thread has finished. It is finished
-  // when either all the audio frames in the Vorbis bitstream have completed
-  // playing, or we've moved into shutdown state, and the threads are to be
+  // when either all the audio frames have completed playing, or we've moved
+  // into shutdown state, and the threads are to be
   // destroyed. Written by the audio playback thread and read and written by
   // the state machine thread. Synchronised via decoder monitor.
+  // When data is being sent to a MediaStream, this is true when all data has
+  // been written to the MediaStream.
   bool mAudioCompleted;
 
   // True if mDuration has a value obtained from an HTTP header, or from
   // the media index/metadata. Accessed on the state machine thread.
   bool mGotDurationFromMetaData;
 
-  // False while decode thread should be running. Accessed state machine
-  // and decode threads. Syncrhonised by decoder monitor.
-  bool mStopDecodeThread;
-
-  // True when the decode thread run function has finished, but the thread
-  // has not necessarily been shut down yet. This can happen if we switch
-  // from COMPLETED state to SEEKING before the state machine has a chance
-  // to run in the COMPLETED state and shutdown the decode thread.
-  // Synchronised by the decoder monitor.
-  bool mDecodeThreadIdle;
+  // True if we've dispatched an event to the decode task queue to call
+  // DecodeThreadRun(). We use this flag to prevent us from dispatching
+  // unneccessary runnables, since the decode thread runs in a loop.
+  bool mDispatchedEventToDecode;
 
   // False while audio thread should be running. Accessed state machine
   // and audio threads. Syncrhonised by decoder monitor.
@@ -760,20 +912,17 @@ private:
   // Synchronised via decoder monitor.
   bool mQuickBuffering;
 
-  // True if the shared state machine thread is currently running this
-  // state machine.
-  bool mIsRunning;
-
-  // True if we should run the state machine again once the current
-  // state machine run has finished.
-  bool mRunAgain;
-
-  // True if we've dispatched an event to run the state machine. It's
-  // imperative that we don't dispatch multiple events to run the state
-  // machine at the same time, as our code assume all events are synchronous.
-  // If we dispatch multiple events, the second event can run while the
-  // first is shutting down a thread, causing inconsistent state.
-  bool mDispatchedRunEvent;
+  // True if we should not decode/preroll unnecessary samples, unless we're
+  // played. "Prerolling" in this context refers to when we decode and
+  // buffer decoded samples in advance of when they're needed for playback.
+  // This flag is set for preload=metadata media, and means we won't
+  // decode more than the first video frame and first block of audio samples
+  // for that media when we startup, or after a seek. When Play() is called,
+  // we reset this flag, as we assume the user is playing the media, so
+  // prerolling is appropriate then. This flag is used to reduce the overhead
+  // of prerolling samples for media elements that may not play, both
+  // memory and CPU overhead.
+  bool mMinimizePreroll;
 
   // True if the decode thread has gone filled its buffers and is now
   // waiting to be awakened before it continues decoding. Synchronized
@@ -783,28 +932,16 @@ private:
   // True is we are decoding a realtime stream, like a camera stream
   bool mRealTime;
 
-  // Record whether audio and video decoding were throttled during the
-  // previous iteration of DecodeLooop. When we transition from
-  // throttled to not-throttled we need to pump decoding.
-  bool mDidThrottleAudioDecoding;
-  bool mDidThrottleVideoDecoding;
-
-  // True if we've requested a new decode thread, but it has not yet been
-  // created. Synchronized by the decoder monitor.
-  bool mRequestedNewDecodeThread;
-
-  // Manager for queuing and dispatching MozAudioAvailable events.  The
-  // event manager is accessed from the state machine and audio threads,
-  // and takes care of synchronizing access to its internal queue.
-  AudioAvailableEventManager mEventManager;
-
   // Stores presentation info required for playback. The decoder monitor
   // must be held when accessing this.
-  VideoInfo mInfo;
+  MediaInfo mInfo;
 
   mozilla::MediaMetadataManager mMetadataManager;
 
   MediaDecoderOwner::NextFrameStatus mLastFrameStatus;
+
+  // The id of timer tasks, used to ignore tasks that are scheduled previously.
+  int mTimerId;
 };
 
 } // namespace mozilla;

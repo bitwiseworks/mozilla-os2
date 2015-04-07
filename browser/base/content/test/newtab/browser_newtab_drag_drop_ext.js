@@ -17,7 +17,7 @@ function runTests() {
   yield addNewTabPageTab();
   checkGrid("0,1,2,3,4,5,6,7p,8p");
 
-  yield simulateDrop(0);
+  yield simulateExternalDrop(0);
   checkGrid("99p,0,1,2,3,4,5,7p,8p");
 
   // drag a new site onto the grid and make sure that pinned cells don't get
@@ -28,7 +28,7 @@ function runTests() {
   yield addNewTabPageTab();
   checkGrid("0,1,2,3,4,5,6,7p,8p");
 
-  yield simulateDrop(7);
+  yield simulateExternalDrop(7);
   checkGrid("0,1,2,3,4,5,7p,99p,8p");
 
   // drag a new site beneath a pinned cell and make sure the pinned cell is
@@ -39,7 +39,7 @@ function runTests() {
   yield addNewTabPageTab();
   checkGrid("0,1,2,3,4,5,6,7,8p");
 
-  yield simulateDrop(7);
+  yield simulateExternalDrop(7);
   checkGrid("0,1,2,3,4,5,6,99p,8p");
 
   // drag a new site onto a block of pinned sites and make sure they're shifted
@@ -50,6 +50,6 @@ function runTests() {
   yield addNewTabPageTab();
   checkGrid("0p,1p,2p");
 
-  yield simulateDrop(1);
+  yield simulateExternalDrop(1);
   checkGrid("0p,99p,1p,2p,3,4,5,6,7");
 }

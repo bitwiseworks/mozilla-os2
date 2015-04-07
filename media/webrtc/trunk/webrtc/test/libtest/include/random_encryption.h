@@ -11,7 +11,7 @@
 #ifndef SRC_VIDEO_ENGINE_TEST_AUTO_TEST_HELPERS_RANDOM_ENCRYPTION_H_
 #define SRC_VIDEO_ENGINE_TEST_AUTO_TEST_HELPERS_RANDOM_ENCRYPTION_H_
 
-#include "common_types.h"
+#include "webrtc/common_types.h"
 
 // These algorithms attempt to create an uncrackable encryption
 // scheme by completely disregarding the input data.
@@ -19,31 +19,42 @@ class RandomEncryption : public webrtc::Encryption {
  public:
   explicit RandomEncryption(unsigned int rand_seed);
 
-  virtual void encrypt(int channel_no, unsigned char* in_data,
-                       unsigned char* out_data, int bytes_in, int* bytes_out) {
+  virtual void encrypt(int channel_no,
+                       unsigned char* in_data,
+                       unsigned char* out_data,
+                       int bytes_in,
+                       int* bytes_out) OVERRIDE {
     GenerateRandomData(out_data, bytes_in, bytes_out);
   }
 
-  virtual void decrypt(int channel_no, unsigned char* in_data,
-                       unsigned char* out_data, int bytes_in, int* bytes_out) {
+  virtual void decrypt(int channel_no,
+                       unsigned char* in_data,
+                       unsigned char* out_data,
+                       int bytes_in,
+                       int* bytes_out) OVERRIDE {
     GenerateRandomData(out_data, bytes_in, bytes_out);
   }
 
-  virtual void encrypt_rtcp(int channel_no, unsigned char* in_data,
-                            unsigned char* out_data, int bytes_in,
-                            int* bytes_out) {
+  virtual void encrypt_rtcp(int channel_no,
+                            unsigned char* in_data,
+                            unsigned char* out_data,
+                            int bytes_in,
+                            int* bytes_out) OVERRIDE {
     GenerateRandomData(out_data, bytes_in, bytes_out);
   }
 
-  virtual void decrypt_rtcp(int channel_no, unsigned char* in_data,
-                            unsigned char* out_data, int bytes_in,
-                            int* bytes_out) {
+  virtual void decrypt_rtcp(int channel_no,
+                            unsigned char* in_data,
+                            unsigned char* out_data,
+                            int bytes_in,
+                            int* bytes_out) OVERRIDE {
     GenerateRandomData(out_data, bytes_in, bytes_out);
   }
 
  private:
   // Generates some completely random data with roughly the right length.
-  void GenerateRandomData(unsigned char* out_data, int bytes_in,
+  void GenerateRandomData(unsigned char* out_data,
+                          int bytes_in,
                           int* bytes_out);
 
   // Makes up a length within +- 50 of the original length, without

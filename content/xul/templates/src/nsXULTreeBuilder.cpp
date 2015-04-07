@@ -27,7 +27,7 @@
 #include "nsIXULSortService.h"
 #include "nsTArray.h"
 #include "nsUnicharUtils.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsDOMClassInfoID.h"
 #include "nsWhitespaceTokenizer.h"
 #include "nsTreeContentView.h"
@@ -273,11 +273,11 @@ NS_NewXULTreeBuilder(nsISupports* aOuter, REFNSIID aIID, void** aResult)
 NS_IMPL_ADDREF_INHERITED(nsXULTreeBuilder, nsXULTemplateBuilder)
 NS_IMPL_RELEASE_INHERITED(nsXULTreeBuilder, nsXULTemplateBuilder)
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_4(nsXULTreeBuilder, nsXULTemplateBuilder,
-                                     mBoxObject,
-                                     mSelection,
-                                     mPersistStateStore,
-                                     mObservers)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(nsXULTreeBuilder, nsXULTemplateBuilder,
+                                   mBoxObject,
+                                   mSelection,
+                                   mPersistStateStore,
+                                   mObservers)
 
 DOMCI_DATA(XULTreeBuilder, nsXULTreeBuilder)
 
@@ -979,7 +979,7 @@ nsXULTreeBuilder::SetCellText(int32_t aRow, nsITreeColumn* aCol, const nsAString
 }
 
 NS_IMETHODIMP
-nsXULTreeBuilder::PerformAction(const PRUnichar* aAction)
+nsXULTreeBuilder::PerformAction(const char16_t* aAction)
 {
     uint32_t count = mObservers.Count();
     for (uint32_t i = 0; i < count; ++i) {
@@ -992,7 +992,7 @@ nsXULTreeBuilder::PerformAction(const PRUnichar* aAction)
 }
 
 NS_IMETHODIMP
-nsXULTreeBuilder::PerformActionOnRow(const PRUnichar* aAction, int32_t aRow)
+nsXULTreeBuilder::PerformActionOnRow(const char16_t* aAction, int32_t aRow)
 {
     uint32_t count = mObservers.Count();
     for (uint32_t i = 0; i < count; ++i) {
@@ -1005,7 +1005,7 @@ nsXULTreeBuilder::PerformActionOnRow(const PRUnichar* aAction, int32_t aRow)
 }
 
 NS_IMETHODIMP
-nsXULTreeBuilder::PerformActionOnCell(const PRUnichar* aAction, int32_t aRow, nsITreeColumn* aCol)
+nsXULTreeBuilder::PerformActionOnCell(const char16_t* aAction, int32_t aRow, nsITreeColumn* aCol)
 {
     NS_ENSURE_ARG_POINTER(aCol);
     nsAutoString id;

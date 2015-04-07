@@ -10,11 +10,13 @@
 
 #include "nsRect.h"
 #include "imgIContainer.h"
-#include "nsEvent.h"
 #include "npapi.h"
+#include "nsTArray.h"
 
 // This must be the last include:
 #include "nsObjCExceptions.h"
+
+#include "mozilla/EventForwards.h"
 
 // Declare the backingScaleFactor method that we want to call
 // on NSView/Window/Screen objects, if they recognize it.
@@ -23,6 +25,12 @@
 @end
 
 class nsIWidget;
+
+namespace mozilla {
+namespace gfx {
+class SourceSurface;
+}
+}
 
 // Used to retain a Cocoa object for the remainder of a method's execution.
 class nsAutoRetainCocoaObject {
@@ -78,9 +86,31 @@ private:
 
 @end
 
+struct KeyBindingsCommand
+{
+  SEL selector;
+  id data;
+};
+
+@interface NativeKeyBindingsRecorder : NSResponder
+{
+@private
+  nsTArray<KeyBindingsCommand>* mCommands;
+}
+
+- (void)startRecording:(nsTArray<KeyBindingsCommand>&)aCommands;
+
+- (void)doCommandBySelector:(SEL)aSelector;
+
+- (void)insertText:(id)aString;
+
+@end // NativeKeyBindingsRecorder
+
 class nsCocoaUtils
 {
-  public:
+  typedef mozilla::gfx::SourceSurface SourceSurface;
+
+public:
 
   // Get the backing scale factor from an object that supports this selector
   // (NSView/Window/Screen, on 10.7 or later), returning 1.0 if not supported
@@ -204,7 +234,8 @@ class nsCocoaUtils
       @param aResult the resulting CGImageRef
       @return NS_OK if the conversion worked, NS_ERROR_FAILURE otherwise
    */
-  static nsresult CreateCGImageFromSurface(gfxImageSurface *aFrame, CGImageRef *aResult);
+  static nsresult CreateCGImageFromSurface(SourceSurface* aSurface,
+                                           CGImageRef* aResult);
   
   /** Creates a Cocoa <code>NSImage</code> from a <code>CGImageRef</code>.
       Copies the pixel data from the <code>CGImageRef</code> into a new <code>NSImage</code>.
@@ -220,9 +251,10 @@ class nsCocoaUtils
       @param aImage the image to extract a frame from
       @param aWhichFrame the frame to extract (see imgIContainer FRAME_*)
       @param aResult the resulting NSImage
+      @param scaleFactor the desired scale factor of the NSImage (2 for a retina display)
       @return NS_OK if the conversion worked, NS_ERROR_FAILURE otherwise
    */  
-  static nsresult CreateNSImageFromImageContainer(imgIContainer *aImage, uint32_t aWhichFrame, NSImage **aResult);
+  static nsresult CreateNSImageFromImageContainer(imgIContainer *aImage, uint32_t aWhichFrame, NSImage **aResult, CGFloat scaleFactor);
 
   /**
    * Returns nsAString for aSrc.
@@ -264,14 +296,14 @@ class nsCocoaUtils
   /**
    * Initializes aPluginEvent for aCocoaEvent.
    */
-  static void InitPluginEvent(nsPluginEvent &aPluginEvent,
+  static void InitPluginEvent(mozilla::WidgetPluginEvent &aPluginEvent,
                               NPCocoaEvent &aCocoaEvent);
   /**
-   * Initializes nsInputEvent for aNativeEvent or aModifiers.
+   * Initializes WidgetInputEvent for aNativeEvent or aModifiers.
    */
-  static void InitInputEvent(nsInputEvent &aInputEvent,
+  static void InitInputEvent(mozilla::WidgetInputEvent &aInputEvent,
                              NSEvent* aNativeEvent);
-  static void InitInputEvent(nsInputEvent &aInputEvent,
+  static void InitInputEvent(mozilla::WidgetInputEvent &aInputEvent,
                              NSUInteger aModifiers);
 
   /**
@@ -286,6 +318,26 @@ class nsCocoaUtils
    * once we're comfortable with the HiDPI behavior.
    */
   static bool HiDPIEnabled();
+
+  /**
+   * Keys can optionally be bound by system or user key bindings to one or more
+   * commands based on selectors. This collects any such commands in the
+   * provided array.
+   */
+  static void GetCommandsFromKeyEvent(NSEvent* aEvent,
+                                      nsTArray<KeyBindingsCommand>& aCommands);
+
+  /**
+   * Converts the string name of a Gecko key (like "VK_HOME") to the
+   * corresponding Cocoa Unicode character.
+   */
+  static uint32_t ConvertGeckoNameToMacCharCode(const nsAString& aKeyCodeName);
+
+  /**
+   * Converts a Gecko key code (like NS_VK_HOME) to the corresponding Cocoa
+   * Unicode character.
+   */
+  static uint32_t ConvertGeckoKeyCodeToMacCharCode(uint32_t aKeyCode);
 };
 
 #endif // nsCocoaUtils_h_

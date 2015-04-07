@@ -23,16 +23,19 @@ let subscriptLoader = Cc["@mozilla.org/moz/jssubscript-loader;1"]
  */
 function newWorker(custom_ns) {
   let worker_ns = {
-    importScripts: function fakeImportScripts() {
-      Array.slice(arguments).forEach(function (script) {
-        subscriptLoader.loadSubScript("resource://gre/modules/" + script, this);
+    importScripts: function() {
+      Array.slice(arguments).forEach(function(script) {
+        if (!script.startsWith("resource:")) {
+          script = "resource://gre/modules/" + script;
+        }
+        subscriptLoader.loadSubScript(script, this);
       }, this);
     },
 
-    postRILMessage: function fakePostRILMessage(message) {
+    postRILMessage: function(message) {
     },
 
-    postMessage: function fakepostMessage(message) {
+    postMessage: function(message) {
     },
 
     // Define these variables inside the worker scope so ES5 strict mode
@@ -40,22 +43,37 @@ function newWorker(custom_ns) {
     onmessage: undefined,
     onerror: undefined,
 
-    CLIENT_ID: 0,
     DEBUG: true
   };
   // The 'self' variable in a worker points to the worker's own namespace.
   worker_ns.self = worker_ns;
-
-  // systemlibs.js utilizes ctypes for loading native libraries.
-  Cu.import("resource://gre/modules/ctypes.jsm", worker_ns);
 
   // Copy the custom definitions over.
   for (let key in custom_ns) {
     worker_ns[key] = custom_ns[key];
   }
 
+  // fake require() for toolkit/components/workerloader/require.js
+  let require = (function() {
+    return function require(script) {
+      worker_ns.module = {};
+      worker_ns.importScripts(script);
+      return worker_ns;
+    }
+  })();
+
+  Object.freeze(require);
+  Object.defineProperty(worker_ns, "require", {
+    value: require,
+    enumerable: true,
+    configurable: false
+  });
+
   // Load the RIL worker itself.
   worker_ns.importScripts("ril_worker.js");
+
+  // Register at least one client.
+  worker_ns.ContextPool.registerClient({ clientId: 0 });
 
   return worker_ns;
 }
@@ -90,7 +108,7 @@ function newIncomingParcel(fakeParcelSize, response, request, data) {
     ++writeIndex;
   }
 
-  function writeUint32(value) {
+  function writeInt32(value) {
     writeUint8(value & 0xff);
     writeUint8((value >> 8) & 0xff);
     writeUint8((value >> 16) & 0xff);
@@ -109,8 +127,8 @@ function newIncomingParcel(fakeParcelSize, response, request, data) {
   }
   writeParcelSize(fakeParcelSize);
 
-  writeUint32(response);
-  writeUint32(request);
+  writeInt32(response);
+  writeInt32(request);
 
   // write parcel data
   for (let ii = 0; ii < data.length; ++ii) {
@@ -123,15 +141,16 @@ function newIncomingParcel(fakeParcelSize, response, request, data) {
 /**
  *
  */
-function newRadioInterfaceLayer() {
-  let ril_ns = {
-    ChromeWorker: function ChromeWorker() {
-      // Stub function
-    },
-  };
+let ril_ns;
+function newRadioInterface() {
+  if (!ril_ns) {
+    ril_ns = {};
+    subscriptLoader.loadSubScript("resource://gre/components/RadioInterfaceLayer.js", ril_ns);
+  }
 
-  subscriptLoader.loadSubScript("resource://gre/components/RadioInterfaceLayer.js", ril_ns);
-  return new ril_ns.RadioInterfaceLayer();
+  return {
+    __proto__: ril_ns.RadioInterface.prototype,
+  };
 }
 
 /**

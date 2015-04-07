@@ -8,21 +8,15 @@
 
 #include "mozilla/Attributes.h"
 #include "nsContainerFrame.h"
-#include "nsBlockFrame.h"
-#include "nsIFormControlFrame.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsITextControlFrame.h"
-#include "nsDisplayList.h"
-#include "nsIScrollableFrame.h"
-#include "nsStubMutationObserver.h"
 #include "nsITextControlElement.h"
 #include "nsIStatefulFrame.h"
-#include "nsIEditor.h"
 
 class nsISelectionController;
-class nsIDOMCharacterData;
 class EditorInitializerEntryTracker;
 class nsTextEditorState;
+class nsIEditor;
 namespace mozilla {
 namespace dom {
 class Element;
@@ -45,8 +39,6 @@ public:
   virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 
   virtual nsIScrollableFrame* GetScrollTargetFrame() MOZ_OVERRIDE {
-    if (!IsScrollable())
-      return nullptr;
     return do_QueryFrame(GetFirstPrincipalChild());
   }
 
@@ -58,10 +50,10 @@ public:
                                  nsSize aMargin, nsSize aBorder,
                                  nsSize aPadding, bool aShrinkWrap) MOZ_OVERRIDE;
 
-  NS_IMETHOD Reflow(nsPresContext*          aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*           aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
   virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
   virtual bool IsCollapsed() MOZ_OVERRIDE;
@@ -72,8 +64,8 @@ public:
   virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
 #endif
 
-#ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
+#ifdef DEBUG_FRAME_DUMP
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
   {
     aResult.AssignLiteral("nsTextControlFrame");
     return NS_OK;
@@ -95,12 +87,14 @@ public:
 
   // Utility methods to set current widget state
 
-  NS_IMETHOD SetInitialChildList(ChildListID     aListID,
-                                 nsFrameList&    aChildList) MOZ_OVERRIDE;
+  virtual nsresult SetInitialChildList(ChildListID     aListID,
+                                       nsFrameList&    aChildList) MOZ_OVERRIDE;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
+
+  virtual mozilla::dom::Element* GetPseudoElement(nsCSSPseudoElements::Type aType) MOZ_OVERRIDE;
 
 //==== BEGIN NSIFORMCONTROLFRAME
   virtual void SetFocus(bool aOn , bool aRepaint) MOZ_OVERRIDE; 
@@ -144,13 +138,13 @@ public:
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
   /** handler for attribute changes to mContent */
-  NS_IMETHOD AttributeChanged(int32_t         aNameSpaceID,
-                              nsIAtom*        aAttribute,
-                              int32_t         aModType) MOZ_OVERRIDE;
+  virtual nsresult AttributeChanged(int32_t         aNameSpaceID,
+                                    nsIAtom*        aAttribute,
+                                    int32_t         aModType) MOZ_OVERRIDE;
 
   nsresult GetText(nsString& aText);
 
-  NS_IMETHOD PeekOffset(nsPeekOffsetStruct *aPos) MOZ_OVERRIDE;
+  virtual nsresult PeekOffset(nsPeekOffsetStruct *aPos) MOZ_OVERRIDE;
 
   NS_DECL_QUERYFRAME
 
@@ -174,40 +168,6 @@ public: //for methods who access nsTextControlFrame directly
   // called by the focus listener
   nsresult MaybeBeginSecureKeyboardInput();
   void MaybeEndSecureKeyboardInput();
-
-  class MOZ_STACK_CLASS ValueSetter {
-  public:
-    ValueSetter(nsIEditor* aEditor)
-      : mEditor(aEditor)
-      , mCanceled(false)
-    {
-      MOZ_ASSERT(aEditor);
-
-      // To protect against a reentrant call to SetValue, we check whether
-      // another SetValue is already happening for this frame.  If it is,
-      // we must wait until we unwind to re-enable oninput events.
-      mEditor->GetSuppressDispatchingInputEvent(&mOuterTransaction);
-    }
-    void Cancel() {
-      mCanceled = true;
-    }
-    void Init() {
-      mEditor->SetSuppressDispatchingInputEvent(true);
-    }
-    ~ValueSetter() {
-      mEditor->SetSuppressDispatchingInputEvent(mOuterTransaction);
-
-      if (mCanceled) {
-        return;
-      }
-    }
-
-  private:
-    nsCOMPtr<nsIEditor> mEditor;
-    bool mOuterTransaction;
-    bool mCanceled;
-  };
-  friend class ValueSetter;
 
 #define DEFINE_TEXTCTRL_FORWARDER(type, name)                                  \
   type name() {                                                                \
@@ -275,13 +235,6 @@ protected:
   nsresult OffsetToDOMPoint(int32_t aOffset, nsIDOMNode** aResult, int32_t* aPosition);
 
   /**
-   * Find out whether this control is scrollable (i.e. if it is not a single
-   * line text control)
-   * @return whether this control is scrollable
-   */
-  bool IsScrollable() const;
-
-  /**
    * Update the textnode under our anonymous div to show the new
    * value. This should only be called when we have no editor yet.
    * @throws NS_ERROR_UNEXPECTED if the div has no text content
@@ -341,7 +294,7 @@ private:
 
 private:
   // these packed bools could instead use the high order bits on mState, saving 4 bytes 
-  bool mUseEditor;
+  bool mEditorHasBeenInitialized;
   bool mIsProcessing;
   // Keep track if we have asked a placeholder node creation.
   bool mUsePlaceholder;

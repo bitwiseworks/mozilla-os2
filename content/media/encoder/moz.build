@@ -4,22 +4,51 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'content'
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+    PARALLEL_DIRS += ['fmp4_muxer']
 
 EXPORTS += [
     'ContainerWriter.h',
+    'EncodedFrameContainer.h',
     'MediaEncoder.h',
     'TrackEncoder.h',
+    'TrackMetadataBase.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'MediaEncoder.cpp',
     'TrackEncoder.cpp',
 ]
 
+if CONFIG['MOZ_OMX_ENCODER']:
+    EXPORTS += ['OmxTrackEncoder.h']
+    UNIFIED_SOURCES += ['OmxTrackEncoder.cpp']
+
 if CONFIG['MOZ_OPUS']:
     EXPORTS += ['OpusTrackEncoder.h']
-    CPP_SOURCES += ['OpusTrackEncoder.cpp']
+    UNIFIED_SOURCES += ['OpusTrackEncoder.cpp']
 
-LIBRARY_NAME = 'gkconencoder_s'
+if CONFIG['MOZ_WEBM_ENCODER']:
+    EXPORTS += ['VorbisTrackEncoder.h',
+                'VP8TrackEncoder.h',
+    ]
+    UNIFIED_SOURCES += ['VorbisTrackEncoder.cpp',
+                        'VP8TrackEncoder.cpp',
+    ]
+    LOCAL_INCLUDES += ['/media/libyuv/include']
 
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'gklayout'
+
+# These includes are from Android JB, for use of MediaCodec.
+LOCAL_INCLUDES += ['/ipc/chromium/src']
+CXXFLAGS += [
+    '-I%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
+        'frameworks/native/opengl/include',
+        'frameworks/native/include',
+        'frameworks/av/include/media',
+    ]
+]
+
+include('/ipc/chromium/chromium-config.mozbuild')

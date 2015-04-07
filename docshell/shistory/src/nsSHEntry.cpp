@@ -5,18 +5,16 @@
 
 // Local Includes
 #include "nsSHEntry.h"
-#include "nsXPIDLString.h"
-#include "nsReadableUtils.h"
 #include "nsIDocShellLoadInfo.h"
 #include "nsIDocShellTreeItem.h"
-#include "nsISHistory.h"
-#include "nsISHistoryInternal.h"
 #include "nsDocShellEditorData.h"
 #include "nsSHEntryShared.h"
 #include "nsILayoutHistoryState.h"
 #include "nsIContentViewer.h"
 #include "nsISupportsArray.h"
 #include "nsIStructuredCloneContainer.h"
+#include "nsIInputStream.h"
+#include "nsIURI.h"
 #include <algorithm>
 
 namespace dom = mozilla::dom;
@@ -35,6 +33,7 @@ nsSHEntry::nsSHEntry()
   , mScrollPositionY(0)
   , mParent(nullptr)
   , mURIWasModified(false)
+  , mIsSrcdocEntry(false)
 {
   mShared = new nsSHEntryShared();
 }
@@ -52,6 +51,9 @@ nsSHEntry::nsSHEntry(const nsSHEntry &other)
   , mParent(other.mParent)
   , mURIWasModified(other.mURIWasModified)
   , mStateData(other.mStateData)
+  , mIsSrcdocEntry(other.mIsSrcdocEntry)
+  , mSrcdocData(other.mSrcdocData)
+  , mBaseURI(other.mBaseURI)
 {
 }
 
@@ -74,8 +76,7 @@ nsSHEntry::~nsSHEntry()
 //    nsSHEntry: nsISupports
 //*****************************************************************************
 
-NS_IMPL_ISUPPORTS4(nsSHEntry, nsISHContainer, nsISHEntry, nsIHistoryEntry,
-                   nsISHEntryInternal)
+NS_IMPL_ISUPPORTS(nsSHEntry, nsISHContainer, nsISHEntry, nsISHEntryInternal)
 
 //*****************************************************************************
 //    nsSHEntry: nsISHEntry
@@ -193,7 +194,7 @@ nsSHEntry::GetSticky(bool *aSticky)
   return NS_OK;
 }
 
-NS_IMETHODIMP nsSHEntry::GetTitle(PRUnichar** aTitle)
+NS_IMETHODIMP nsSHEntry::GetTitle(char16_t** aTitle)
 {
   // Check for empty title...
   if (mTitle.IsEmpty() && mURI) {
@@ -371,6 +372,9 @@ nsSHEntry::Create(nsIURI * aURI, const nsAString &aTitle,
   //By default the page is not expired
   mShared->mExpired = false;
 
+  mIsSrcdocEntry = false;
+  mSrcdocData = NullString();
+
   return NS_OK;
 }
 
@@ -488,6 +492,43 @@ NS_IMETHODIMP
 nsSHEntry::AbandonBFCacheEntry()
 {
   mShared = nsSHEntryShared::Duplicate(mShared);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSHEntry::GetIsSrcdocEntry(bool* aIsSrcdocEntry)
+{
+  *aIsSrcdocEntry = mIsSrcdocEntry;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSHEntry::GetSrcdocData(nsAString &aSrcdocData)
+{
+  aSrcdocData = mSrcdocData;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSHEntry::SetSrcdocData(const nsAString &aSrcdocData)
+{
+  mSrcdocData = aSrcdocData;
+  mIsSrcdocEntry = true;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSHEntry::GetBaseURI(nsIURI **aBaseURI)
+{
+  *aBaseURI = mBaseURI;
+  NS_IF_ADDREF(*aBaseURI);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSHEntry::SetBaseURI(nsIURI *aBaseURI)
+{
+  mBaseURI = aBaseURI;
   return NS_OK;
 }
 

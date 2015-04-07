@@ -349,17 +349,16 @@ function testDecoderGetEncoding()
     {encoding: "iso-2022-jp", labels: ["csiso2022jp", "iso-2022-jp"]},
     {encoding: "shift_jis", labels: ["csshiftjis", "ms_kanji", "shift-jis", "shift_jis", "sjis", "windows-31j", "x-sjis"]},
     {encoding: "euc-kr", labels: ["cseuckr", "csksc56011987", "euc-kr", "iso-ir-149", "korean", "ks_c_5601-1987", "ks_c_5601-1989", "ksc5601", "ksc_5601", "windows-949"]},
-    {encoding: "iso-2022-kr", labels: ["csiso2022kr", "iso-2022-kr"]},
     {encoding: "utf-16le", labels: ["utf-16", "utf-16le"]},
     {encoding: "utf-16be", labels: ["utf-16be"]},
     {encoding: "x-user-defined", labels: ["x-user-defined"]},
-    {error: "TypeError", labels: ["x-windows-949", "\u0130SO-8859-1"]},
+    {error: "TypeError", labels: ["x-windows-949", "\u0130SO-8859-1", "csiso2022kr", "iso-2022-kr", "iso-2022-cn", "iso-2022-cn-ext", "replacement"]},
   ];
 
   for (var le of labelEncodings) {
     for (var label of le.labels) {
       try {
-        var decoder = TextDecoder(label);
+        var decoder = new TextDecoder(label);
       } catch (e) {
         assert_true(!!le.error, label + " shoud not throw " + e.name);
         assert_equals(e.name, le.error, label + " label encoding unsupported test.");
@@ -375,7 +374,7 @@ function testCharset(test)
 {
   try {
     var fatal = test.fatal ? {fatal: test.fatal} : null;
-    var decoder = TextDecoder(test.encoding, fatal);
+    var decoder = new TextDecoder(test.encoding, fatal);
   } catch (e) {
     assert_equals(e.name, test.error, test.msg + " error thrown from the constructor.");
     return;
@@ -439,7 +438,7 @@ function testInvalid2022JP()
   inputs.forEach(function(input) {
     try {
       // decode() should never throw unless {fatal: true} is specified
-      new TextDecoder("iso-2022-jp").decode(new Uint8Array(input));
+      (new TextDecoder("iso-2022-jp")).decode(new Uint8Array(input));
     } catch (e) {
       if (e.name !== "EncodingError") {
         throw e;

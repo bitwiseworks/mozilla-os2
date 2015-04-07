@@ -15,29 +15,36 @@ elif toolkit == 'qt':
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     DIRS += ['icon/win', 'icon']
-elif CONFIG['OS_ARCH'] == 'OS2':
-    DIRS += ['icon/os2', 'icon']
 
 if toolkit == 'cocoa':
     DIRS += ['icon/mac', 'icon']
 elif toolkit == 'android':
     DIRS += ['icon/android', 'icon']
 
-MODULE = 'imgdecoders'
-
-CPP_SOURCES += [
-    'nsBMPDecoder.cpp',
+UNIFIED_SOURCES += [
+    'EXIF.cpp',
     'nsGIFDecoder2.cpp',
     'nsICODecoder.cpp',
     'nsIconDecoder.cpp',
+]
+
+# These files cannot be built in unified mode because they want to force NSPR
+# logging.
+SOURCES += [
+    'nsBMPDecoder.cpp',
     'nsJPEGDecoder.cpp',
     'nsPNGDecoder.cpp',
 ]
 
-if CONFIG['MOZ_WBMP']:
-    CPP_SOURCES += [
-        'nsWBMPDecoder.cpp',
-    ]
+FAIL_ON_WARNINGS = True
 
-LIBRARY_NAME = 'imgdecoders_s'
+SOURCES += [
+    'iccjpeg.c',
+]
 
+# Decoders need RasterImage.h
+LOCAL_INCLUDES += [
+    '/image/src',
+]
+
+FINAL_LIBRARY = 'imglib2'

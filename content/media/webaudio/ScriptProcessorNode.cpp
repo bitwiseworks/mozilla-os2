@@ -20,20 +20,11 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ScriptProcessorNode)
-  if (tmp->Context()) {
-    tmp->Context()->UnregisterScriptProcessorNode(tmp);
-  }
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END_INHERITED(AudioNode)
+// The maximum latency, in seconds, that we can live with before dropping
+// buffers.
+static const float MAX_LATENCY_S = 0.5;
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ScriptProcessorNode, AudioNode)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ScriptProcessorNode)
-NS_INTERFACE_MAP_END_INHERITING(AudioNode)
-
-NS_IMPL_ADDREF_INHERITED(ScriptProcessorNode, AudioNode)
-NS_IMPL_RELEASE_INHERITED(ScriptProcessorNode, AudioNode)
+NS_IMPL_ISUPPORTS_INHERITED0(ScriptProcessorNode, AudioNode)
 
 // This class manages a queue of output buffers shared between
 // the main thread and the Media Stream Graph thread.
@@ -47,7 +38,19 @@ private:
       : mMutex(aName)
     {}
 
-    Mutex& Lock() { return mMutex; }
+    size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+    {
+      mMutex.AssertCurrentThreadOwns();
+
+      size_t amount = 0;
+      for (size_t i = 0; i < mBufferList.size(); i++) {
+        amount += mBufferList[i].SizeOfExcludingThis(aMallocSizeOf, false);
+      }
+
+      return amount;
+    }
+
+    Mutex& Lock() const { return const_cast<OutputQueue*>(this)->mMutex; }
 
     size_t ReadyToConsume() const
     {
@@ -76,6 +79,13 @@ private:
       return front;
     }
 
+    // Empties the buffer queue.
+    void Clear()
+    {
+      mMutex.AssertCurrentThreadOwns();
+      mBufferList.clear();
+    }
+
   private:
     typedef std::deque<AudioChunk> BufferList;
 
@@ -88,10 +98,25 @@ private:
   };
 
 public:
-  SharedBuffers()
+  SharedBuffers(float aSampleRate)
     : mOutputQueue("SharedBuffers::outputQueue")
     , mDelaySoFar(TRACK_TICKS_MAX)
+    , mSampleRate(aSampleRate)
+    , mLatency(0.0)
+    , mDroppingBuffers(false)
   {
+  }
+
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    size_t amount = aMallocSizeOf(this);
+
+    {
+      MutexAutoLock lock(mOutputQueue.Lock());
+      amount += mOutputQueue.SizeOfExcludingThis(aMallocSizeOf);
+    }
+
+    return amount;
   }
 
   // main thread
@@ -99,6 +124,38 @@ public:
                                    uint32_t aBufferSize)
   {
     MOZ_ASSERT(NS_IsMainThread());
+
+    TimeStamp now = TimeStamp::Now();
+
+    if (mLastEventTime.IsNull()) {
+      mLastEventTime = now;
+    } else {
+      // When the main thread is blocked, and all the event are processed in a
+      // burst after the main thread unblocks, the |(now - mLastEventTime)|
+      // interval will be very short. |latency - bufferDuration| will be
+      // negative, effectively moving back mLatency to a smaller and smaller
+      // value, until it crosses zero, at which point we stop dropping buffers
+      // and resume normal operation. This does not work if at the same time,
+      // the MSG thread was also slowed down, so if the latency on the MSG
+      // thread is normal, and we are still dropping buffers, and mLatency is
+      // still more than twice the duration of a buffer, we reset it and stop
+      // dropping buffers.
+      float latency = (now - mLastEventTime).ToSeconds();
+      float bufferDuration = aBufferSize / mSampleRate;
+      mLatency += latency - bufferDuration;
+      mLastEventTime = now;
+      if (mLatency > MAX_LATENCY_S ||
+          (mDroppingBuffers && mLatency > 0.0 &&
+           fabs(latency - bufferDuration) < bufferDuration)) {
+        mDroppingBuffers = true;
+        return;
+      } else {
+        if (mDroppingBuffers) {
+          mLatency = 0;
+        }
+        mDroppingBuffers = false;
+      }
+    }
 
     MutexAutoLock lock(mOutputQueue.Lock());
     for (uint32_t offset = 0; offset < aBufferSize; offset += WEBAUDIO_BLOCK_SIZE) {
@@ -150,12 +207,34 @@ public:
     return mDelaySoFar == TRACK_TICKS_MAX ? 0 : mDelaySoFar;
   }
 
+  void Reset()
+  {
+    MOZ_ASSERT(!NS_IsMainThread());
+    mDelaySoFar = TRACK_TICKS_MAX;
+    mLatency = 0.0f;
+    {
+      MutexAutoLock lock(mOutputQueue.Lock());
+      mOutputQueue.Clear();
+    }
+    mLastEventTime = TimeStamp();
+  }
+
 private:
   OutputQueue mOutputQueue;
   // How much delay we've seen so far.  This measures the amount of delay
   // caused by the main thread lagging behind in producing output buffers.
   // TRACK_TICKS_MAX means that we have not received our first buffer yet.
   TrackTicks mDelaySoFar;
+  // The samplerate of the context.
+  float mSampleRate;
+  // This is the latency caused by the buffering. If this grows too high, we
+  // will drop buffers until it is acceptable.
+  float mLatency;
+  // This is the time at which we last produced a buffer, to detect if the main
+  // thread has been blocked.
+  TimeStamp mLastEventTime;
+  // True if we should be dropping buffers.
+  bool mDroppingBuffers;
 };
 
 class ScriptProcessorNodeEngine : public AudioNodeEngine
@@ -172,10 +251,11 @@ public:
     , mSource(nullptr)
     , mDestination(static_cast<AudioNodeStream*> (aDestination->Stream()))
     , mBufferSize(aBufferSize)
-    , mDefaultNumberOfInputChannels(aNumberOfInputChannels)
     , mInputWriteIndex(0)
     , mSeenNonSilenceInput(false)
   {
+    mInputChannels.SetLength(aNumberOfInputChannels);
+    AllocateInputBlock();
   }
 
   void SetSourceStream(AudioNodeStream* aSource)
@@ -183,10 +263,10 @@ public:
     mSource = aSource;
   }
 
-  virtual void ProduceAudioBlock(AudioNodeStream* aStream,
-                                 const AudioChunk& aInput,
-                                 AudioChunk* aOutput,
-                                 bool* aFinished) MOZ_OVERRIDE
+  virtual void ProcessBlock(AudioNodeStream* aStream,
+                            const AudioChunk& aInput,
+                            AudioChunk* aOutput,
+                            bool* aFinished) MOZ_OVERRIDE
   {
     MutexAutoLock lock(NodeMutex());
 
@@ -196,7 +276,17 @@ public:
       return;
     }
 
-    EnsureInputChannels(aInput.mChannelData.Length());
+    // This node is not connected to anything. Per spec, we don't fire the
+    // onaudioprocess event. We also want to clear out the input and output
+    // buffer queue, and output a null buffer.
+    if (!(aStream->ConsumerCount() ||
+          aStream->AsProcessedStream()->InputPortCount())) {
+      aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
+      mSharedBuffers->Reset();
+      mSeenNonSilenceInput = false;
+      mInputWriteIndex = 0;
+      return;
+    }
 
     // First, record our input buffer
     for (uint32_t i = 0; i < mInputChannels.Length(); ++i) {
@@ -206,6 +296,7 @@ public:
       } else {
         mSeenNonSilenceInput = true;
         MOZ_ASSERT(aInput.GetDuration() == WEBAUDIO_BLOCK_SIZE, "sanity check");
+        MOZ_ASSERT(aInput.mChannelData.Length() == mInputChannels.Length());
         AudioBlockCopyChannelWithScale(static_cast<const float*>(aInput.mChannelData[i]),
                                        aInput.mVolume,
                                        mInputChannels[i] + mInputWriteIndex);
@@ -226,30 +317,31 @@ public:
     }
   }
 
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    // Not owned:
+    // - mSharedBuffers
+    // - mSource (probably)
+    // - mDestination (probably)
+    size_t amount = AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
+    amount += mInputChannels.SizeOfExcludingThis(aMallocSizeOf);
+    for (size_t i = 0; i < mInputChannels.Length(); i++) {
+      amount += mInputChannels[i].SizeOfExcludingThis(aMallocSizeOf);
+    }
+
+    return amount;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
 private:
   void AllocateInputBlock()
   {
     for (unsigned i = 0; i < mInputChannels.Length(); ++i) {
       if (!mInputChannels[i]) {
-        mInputChannels[i] = new float[mBufferSize];
-      }
-    }
-  }
-
-  void EnsureInputChannels(uint32_t aNumberOfChannels)
-  {
-    if (aNumberOfChannels == 0) {
-      aNumberOfChannels = mDefaultNumberOfInputChannels;
-    }
-    if (mInputChannels.Length() == 0) {
-      mInputChannels.SetLength(aNumberOfChannels);
-      AllocateInputBlock();
-    } else if (aNumberOfChannels < mInputChannels.Length()) {
-      mInputChannels.SetLength(aNumberOfChannels);
-    } else if (aNumberOfChannels > mInputChannels.Length()) {
-      uint32_t oldLength = mInputChannels.Length();
-      mInputChannels.SetLength(aNumberOfChannels);
-      for (uint32_t i = oldLength; i < aNumberOfChannels; ++i) {
         mInputChannels[i] = new float[mBufferSize];
       }
     }
@@ -266,10 +358,9 @@ private:
     // Add the delay caused by the main thread
     playbackTick += mSharedBuffers->DelaySoFar();
     // Compute the playback time in the coordinate system of the destination
+    // FIXME: bug 970773
     double playbackTime =
-      WebAudioUtils::StreamPositionToDestinationTime(playbackTick,
-                                                     mSource,
-                                                     mDestination);
+      mSource->DestinationTimeFromTicks(mDestination, playbackTick);
 
     class Command : public nsRunnable
     {
@@ -314,13 +405,16 @@ private:
         AutoPushJSContext cx(node->Context()->GetJSContext());
         if (cx) {
 
+
           // Create the input buffer
           nsRefPtr<AudioBuffer> inputBuffer;
           if (!mNullInput) {
-            inputBuffer = new AudioBuffer(node->Context(),
-                                          node->BufferSize(),
-                                          node->Context()->SampleRate());
-            if (!inputBuffer->InitializeBuffers(mInputChannels.Length(), cx)) {
+            ErrorResult rv;
+            inputBuffer =
+              AudioBuffer::Create(node->Context(), mInputChannels.Length(),
+                                  node->BufferSize(),
+                                  node->Context()->SampleRate(), cx, rv);
+            if (rv.Failed()) {
               return NS_OK;
             }
             // Put the channel data inside it
@@ -340,10 +434,18 @@ private:
                            mPlaybackTime);
           node->DispatchTrustedEvent(event);
 
-          // Steal the output buffers
+          // Steal the output buffers if they have been set.  Don't create a
+          // buffer if it hasn't been used to return output;
+          // FinishProducingOutputBuffer() will optimize output = null.
+          // GetThreadSharedChannelsForRate() may also return null after OOM.
           nsRefPtr<ThreadSharedFloatArrayBufferList> output;
           if (event->HasOutputBuffer()) {
-            output = event->OutputBuffer()->GetThreadSharedChannelsForRate(cx);
+            ErrorResult rv;
+            AudioBuffer* buffer = event->GetOutputBuffer(rv);
+            // HasOutputBuffer() returning true means that GetOutputBuffer()
+            // will not fail.
+            MOZ_ASSERT(!rv.Failed());
+            output = buffer->GetThreadSharedChannelsForRate(cx);
           }
 
           // Append it to our output buffer queue
@@ -370,7 +472,6 @@ private:
   AudioNodeStream* mDestination;
   InputChannels mInputChannels;
   const uint32_t mBufferSize;
-  const uint32_t mDefaultNumberOfInputChannels;
   // The write index into the current input buffer
   uint32_t mInputWriteIndex;
   bool mSeenNonSilenceInput;
@@ -384,7 +485,7 @@ ScriptProcessorNode::ScriptProcessorNode(AudioContext* aContext,
               aNumberOfInputChannels,
               mozilla::dom::ChannelCountMode::Explicit,
               mozilla::dom::ChannelInterpretation::Speakers)
-  , mSharedBuffers(new SharedBuffers())
+  , mSharedBuffers(new SharedBuffers(aContext->SampleRate()))
   , mBufferSize(aBufferSize ?
                   aBufferSize : // respect what the web developer requested
                   4096)         // choose our own buffer size -- 4KB for now
@@ -402,15 +503,26 @@ ScriptProcessorNode::ScriptProcessorNode(AudioContext* aContext,
 
 ScriptProcessorNode::~ScriptProcessorNode()
 {
-  if (Context()) {
-    Context()->UnregisterScriptProcessorNode(this);
-  }
+}
+
+size_t
+ScriptProcessorNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  size_t amount = AudioNode::SizeOfExcludingThis(aMallocSizeOf);
+  amount += mSharedBuffers->SizeOfIncludingThis(aMallocSizeOf);
+  return amount;
+}
+
+size_t
+ScriptProcessorNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
 
 JSObject*
-ScriptProcessorNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ScriptProcessorNode::WrapObject(JSContext* aCx)
 {
-  return ScriptProcessorNodeBinding::Wrap(aCx, aScope, this);
+  return ScriptProcessorNodeBinding::Wrap(aCx, this);
 }
 
 }

@@ -38,7 +38,7 @@
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptSecurityManager.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "nsISelectionPrivate.h"
 #include "nsITransferable.h" // for kUnicodeMime
 #include "nsContentUtils.h"
@@ -49,6 +49,7 @@
 #include "nsIFrame.h"
 #include "nsStringBuffer.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ShadowRoot.h"
 #include "nsIEditor.h"
 #include "nsIHTMLEditor.h"
 #include "nsIDocShell.h"
@@ -80,7 +81,8 @@ protected:
                               nsINode* aOriginalNode = nullptr);
   nsresult SerializeToStringRecursive(nsINode* aNode,
                                       nsAString& aStr,
-                                      bool aDontSerializeRoot);
+                                      bool aDontSerializeRoot,
+                                      uint32_t aMaxLength = 0);
   nsresult SerializeNodeEnd(nsINode* aNode, nsAString& aStr);
   // This serializes the content of aNode.
   nsresult SerializeToStringIterative(nsINode* aNode,
@@ -108,7 +110,16 @@ protected:
     NS_PRECONDITION(aNode, "");
 
     if (mFlags & SkipInvisibleContent) {
-      nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
+      // Treat the visibility of the ShadowRoot as if it were
+      // the host content.
+      nsCOMPtr<nsIContent> content;
+      ShadowRoot* shadowRoot = ShadowRoot::FromNode(aNode);
+      if (shadowRoot) {
+        content = shadowRoot->GetHost();
+      } else {
+        content = do_QueryInterface(aNode);
+      }
+
       if (content) {
         nsIFrame* frame = content->GetPrimaryFrame();
         if (!frame) {
@@ -171,8 +182,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDocumentEncoder)
    NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_5(nsDocumentEncoder,
-                           mDocument, mSelection, mRange, mNode, mCommonParent)
+NS_IMPL_CYCLE_COLLECTION(nsDocumentEncoder,
+                         mDocument, mSelection, mRange, mNode, mCommonParent)
 
 nsDocumentEncoder::nsDocumentEncoder() : mCachedBuffer(nullptr)
 {
@@ -440,8 +451,13 @@ nsDocumentEncoder::SerializeNodeEnd(nsINode* aNode,
 nsresult
 nsDocumentEncoder::SerializeToStringRecursive(nsINode* aNode,
                                               nsAString& aStr,
-                                              bool aDontSerializeRoot)
+                                              bool aDontSerializeRoot,
+                                              uint32_t aMaxLength)
 {
+  if (aMaxLength > 0 && aStr.Length() >= aMaxLength) {
+    return NS_OK;
+  }
+
   if (!IsVisibleNode(aNode))
     return NS_OK;
 
@@ -462,7 +478,8 @@ nsDocumentEncoder::SerializeToStringRecursive(nsINode* aNode,
   if (!maybeFixedNode)
     maybeFixedNode = aNode;
 
-  if (mFlags & SkipInvisibleContent) {
+  if ((mFlags & SkipInvisibleContent) &&
+      !(mFlags & OutputNonTextContentAsPlaceholder)) {
     if (aNode->IsNodeOfType(nsINode::eCONTENT)) {
       nsIFrame* frame = static_cast<nsIContent*>(aNode)->GetPrimaryFrame();
       if (frame) {
@@ -476,7 +493,12 @@ nsDocumentEncoder::SerializeToStringRecursive(nsINode* aNode,
   }
 
   if (!aDontSerializeRoot) {
-    rv = SerializeNodeStart(maybeFixedNode, 0, -1, aStr, aNode);
+    int32_t endOffset = -1;
+    if (aMaxLength > 0) {
+      MOZ_ASSERT(aMaxLength >= aStr.Length());
+      endOffset = aMaxLength - aStr.Length();
+    }
+    rv = SerializeNodeStart(maybeFixedNode, 0, endOffset, aStr, aNode);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -485,7 +507,7 @@ nsDocumentEncoder::SerializeToStringRecursive(nsINode* aNode,
   for (nsINode* child = nsNodeUtils::GetFirstChildOfTemplateOrNode(node);
        child;
        child = child->GetNextSibling()) {
-    rv = SerializeToStringRecursive(child, aStr, false);
+    rv = SerializeToStringRecursive(child, aStr, false, aMaxLength);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -540,13 +562,19 @@ ConvertAndWrite(const nsAString& aString,
   nsresult rv;
   int32_t charLength, startCharLength;
   const nsPromiseFlatString& flat = PromiseFlatString(aString);
-  const PRUnichar* unicodeBuf = flat.get();
+  const char16_t* unicodeBuf = flat.get();
   int32_t unicodeLength = aString.Length();
   int32_t startLength = unicodeLength;
 
   rv = aEncoder->GetMaxLength(unicodeBuf, unicodeLength, &charLength);
   startCharLength = charLength;
   NS_ENSURE_SUCCESS(rv, rv);
+
+  if (!charLength) {
+    // Nothing to write.  Besides, a length 0 string has an immutable buffer, so
+    // attempts to null-terminate it will crash.
+    return NS_OK;
+  }
 
   nsAutoCString charXferString;
   if (!charXferString.SetLength(charLength, fallible_t()))
@@ -1000,6 +1028,13 @@ nsDocumentEncoder::SerializeRangeToString(nsRange *aRange,
 NS_IMETHODIMP
 nsDocumentEncoder::EncodeToString(nsAString& aOutputString)
 {
+  return EncodeToStringWithMaxLength(0, aOutputString);
+}
+
+NS_IMETHODIMP
+nsDocumentEncoder::EncodeToStringWithMaxLength(uint32_t aMaxLength,
+                                               nsAString& aOutputString)
+{
   if (!mDocument)
     return NS_ERROR_NOT_INITIALIZED;
 
@@ -1008,11 +1043,11 @@ nsDocumentEncoder::EncodeToString(nsAString& aOutputString)
   nsString output;
   static const size_t bufferSize = 2048;
   if (!mCachedBuffer) {
-    mCachedBuffer = nsStringBuffer::Alloc(bufferSize).get();
+    mCachedBuffer = nsStringBuffer::Alloc(bufferSize).take();
   }
   NS_ASSERTION(!mCachedBuffer->IsReadonly(),
                "DocumentEncoder shouldn't keep reference to non-readonly buffer!");
-  static_cast<PRUnichar*>(mCachedBuffer->Data())[0] = PRUnichar(0);
+  static_cast<char16_t*>(mCachedBuffer->Data())[0] = char16_t(0);
   mCachedBuffer->ToString(0, output, true);
   // output owns the buffer now!
   mCachedBuffer = nullptr;
@@ -1129,7 +1164,7 @@ nsDocumentEncoder::EncodeToString(nsAString& aOutputString)
     rv = mSerializer->AppendDocumentStart(mDocument, output);
 
     if (NS_SUCCEEDED(rv)) {
-      rv = SerializeToStringRecursive(mDocument, output, false);
+      rv = SerializeToStringRecursive(mDocument, output, false, aMaxLength);
     }
   }
 
@@ -1474,7 +1509,7 @@ nsHTMLCopyEncoder::EncodeToStringWithContext(nsAString& aContextString,
   // whitespace info to this.
   nsAutoString infoString;
   infoString.AppendInt(mStartDepth);
-  infoString.Append(PRUnichar(','));
+  infoString.Append(char16_t(','));
   infoString.AppendInt(mEndDepth);
   aInfoString = infoString;
   

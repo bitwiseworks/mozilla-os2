@@ -7,8 +7,9 @@
 #define nsError_h__
 
 #include "mozilla/Likely.h"
-#include "mozilla/StandardInteger.h"
 #include "mozilla/TypedEnum.h"
+
+#include <stdint.h>
 
 /*
  * To add error code to your module, you need to do the following:
@@ -68,6 +69,7 @@
 #define NS_ERROR_MODULE_DOM_INDEXEDDB 33
 #define NS_ERROR_MODULE_DOM_FILEHANDLE 34
 #define NS_ERROR_MODULE_SIGNED_JAR 35
+#define NS_ERROR_MODULE_DOM_FILESYSTEM 36
 
 /* NS_ERROR_MODULE_GENERAL should be used by modules that do not
  * care if return code values overlap. Callers of methods that
@@ -180,6 +182,12 @@ inline uint32_t NS_FAILED_impl(nsresult _nsresult) {
 }
 #define NS_FAILED(_nsresult)    ((bool)MOZ_UNLIKELY(NS_FAILED_impl(_nsresult)))
 #define NS_SUCCEEDED(_nsresult) ((bool)MOZ_LIKELY(!NS_FAILED_impl(_nsresult)))
+
+/* Check that our enum type is actually uint32_t as expected */
+static_assert(((nsresult)0) < ((nsresult)-1),
+              "nsresult must be an unsigned type");
+static_assert(sizeof(nsresult) == sizeof(uint32_t),
+              "nsresult must be 32 bits");
 #else
 #define NS_FAILED_impl(_nsresult) ((_nsresult) & 0x80000000)
 #define NS_FAILED(_nsresult)    (MOZ_UNLIKELY(NS_FAILED_impl(_nsresult)))

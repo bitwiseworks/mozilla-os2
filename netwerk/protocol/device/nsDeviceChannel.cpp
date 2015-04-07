@@ -4,12 +4,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "plstr.h"
-#include "nsComponentManagerUtils.h"
 #include "nsDeviceChannel.h"
 #include "nsDeviceCaptureProvider.h"
-#include "mozilla/Preferences.h"
 
 #ifdef MOZ_WIDGET_ANDROID
+#include "mozilla/Preferences.h"
 #include "AndroidCaptureProvider.h"
 #endif
 
@@ -45,9 +44,9 @@ void extractAttributeValue(const char* searchString, const char* attributeName, 
   }
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsDeviceChannel,
-                             nsBaseChannel,
-                             nsIChannel)
+NS_IMPL_ISUPPORTS_INHERITED(nsDeviceChannel,
+                            nsBaseChannel,
+                            nsIChannel)
 
 // nsDeviceChannel methods
 nsDeviceChannel::nsDeviceChannel()

@@ -2,314 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-DIST_FILES = package-name.txt
-
-include $(topsrcdir)/mobile/android/base/android-services-files.mk
-
-MOZGLUE_JAVA_FILES := \
-  mozglue/ByteBufferInputStream.java \
-  mozglue/DirectBufferAllocator.java \
-  mozglue/NativeReference.java \
-  mozglue/NativeZip.java \
-  $(NULL)
-
-MOZGLUE_PP_JAVA_FILES := \
-  mozglue/GeckoLoader.java \
-  $(NULL)
-
-UTIL_JAVA_FILES := \
-  util/ActivityResultHandler.java \
-  util/ActivityResultHandlerMap.java \
-  util/Clipboard.java \
-  util/EventDispatcher.java \
-  util/FloatUtils.java \
-  util/GamepadUtils.java \
-  util/GeckoBackgroundThread.java \
-  util/GeckoEventListener.java \
-  util/GeckoEventResponder.java \
-  util/GeckoJarReader.java \
-  util/HardwareUtils.java \
-  util/INIParser.java \
-  util/INISection.java \
-  util/JSONUtils.java \
-  util/StringUtils.java \
-  util/ThreadUtils.java \
-  util/UiAsyncTask.java \
-  $(NULL)
-
-FENNEC_JAVA_FILES = \
-  ANRReporter.java \
-  ActivityHandlerHelper.java \
-  AlertNotification.java \
-  AlignRightLinkPreference.java \
-  AllCapsTextView.java \
-  AndroidImport.java \
-  AndroidImportPreference.java \
-  AnimatedHeightLayout.java \
-  AppNotificationClient.java \
-  AwesomeBar.java \
-  AwesomebarResultHandler.java \
-  AwesomeBarTabs.java \
-  animation/AnimatorProxy.java \
-  animation/HeightChangeAnimation.java \
-  animation/PropertyAnimator.java \
-  animation/Rotate3DAnimation.java \
-  animation/ViewHelper.java \
-  awesomebar/AwesomeBarTab.java \
-  awesomebar/AllPagesTab.java \
-  awesomebar/BookmarksTab.java \
-  awesomebar/HistoryTab.java \
-  BackButton.java \
-  BrowserApp.java \
-  BrowserToolbar.java \
-  BrowserToolbarBackground.java \
-  BrowserToolbarLayout.java \
-  CameraImageResultHandler.java \
-  CameraVideoResultHandler.java \
-  CanvasDelegate.java \
-  CheckableLinearLayout.java \
-  ClickableWhenDisabledEditText.java \
-  ContextGetter.java \
-  CustomEditText.java \
-  db/BrowserDB.java \
-  db/LocalBrowserDB.java \
-  db/DBUtils.java \
-  DataReportingNotification.java \
-  Distribution.java \
-  DoorHanger.java \
-  DoorHangerPopup.java \
-  EditBookmarkDialog.java \
-  Favicons.java \
-  FilePickerResultHandler.java \
-  FilePickerResultHandlerSync.java \
-  FindInPageBar.java \
-  FlowLayout.java \
-  FontSizePreference.java \
-  FormAssistPopup.java \
-  ForwardButton.java \
-  GeckoAccessibility.java \
-  GeckoApplication.java \
-  GeckoApp.java \
-  GeckoAppShell.java \
-  GeckoActivity.java \
-  GeckoBatteryManager.java \
-  GeckoConnectivityReceiver.java \
-  GeckoEditable.java \
-  GeckoEvent.java \
-  GeckoHalDefines.java \
-  GeckoInputConnection.java \
-  GeckoMessageReceiver.java \
-  GeckoPreferences.java \
-  GeckoPreferenceFragment.java \
-  GeckoProfile.java \
-  GeckoSmsManager.java \
-  GeckoThread.java \
-  GeckoJavaSampler.java \
-  GlobalHistory.java \
-  GeckoViewsFactory.java \
-  GeckoView.java \
-  health/BrowserHealthRecorder.java \
-  health/BrowserHealthReporter.java \
-  InputMethods.java \
-  JavaAddonManager.java \
-  LightweightTheme.java \
-  LightweightThemeDrawable.java \
-  LinkPreference.java \
-  MemoryMonitor.java \
-  MotionEventInterceptor.java \
-  MultiChoicePreference.java \
-  NotificationClient.java \
-  NotificationHandler.java \
-  NotificationHelper.java \
-  NotificationService.java \
-  NSSBridge.java \
-  OrderedBroadcastHelper.java \
-  PrefsHelper.java \
-  PrivateDataPreference.java \
-  PrivateTab.java \
-  ProfileMigrator.java \
-  Prompt.java \
-  PromptInput.java \
-  PromptService.java \
-  Restarter.java \
-  SearchEngine.java \
-  sqlite/ByteBufferInputStream.java \
-  sqlite/MatrixBlobCursor.java \
-  sqlite/SQLiteBridge.java \
-  sqlite/SQLiteBridgeException.java \
-  ReaderModeUtils.java \
-  RemoteTabs.java \
-  RobocopAPI.java \
-  ServiceNotificationClient.java \
-  SessionParser.java \
-  SetupScreen.java \
-  ShapedButton.java \
-  SharedPreferencesHelper.java \
-  SiteIdentityPopup.java \
-  SmsManager.java \
-  SuggestClient.java \
-  SurfaceBits.java \
-  SyncPreference.java \
-  Tab.java \
-  TabCounter.java \
-  Tabs.java \
-  TabsPanel.java \
-  TabsTray.java \
-  TabsAccessor.java \
-  TailTouchDelegate.java \
-  Telemetry.java \
-  TextSelection.java \
-  TextSelectionHandle.java \
-  ThumbnailHelper.java \
-  TouchEventInterceptor.java \
-  UpdateServiceHelper.java \
-  VideoPlayer.java \
-  WebAppAllocator.java \
-  WebAppImpl.java \
-  ZoomConstraints.java \
-  braille/com/googlecode/eyesfree/braille/selfbraille/ISelfBrailleService.java \
-  braille/com/googlecode/eyesfree/braille/selfbraille/SelfBrailleClient.java \
-  braille/com/googlecode/eyesfree/braille/selfbraille/WriteData.java \
-  db/BrowserContract.java \
-  db/BrowserProvider.java \
-  db/FormHistoryProvider.java \
-  db/PerProfileContentProvider.java \
-  db/PasswordsProvider.java \
-  db/TabsProvider.java \
-  gfx/Axis.java \
-  gfx/BitmapUtils.java \
-  gfx/BufferedCairoImage.java \
-  gfx/CairoGLInfo.java \
-  gfx/CairoImage.java \
-  gfx/CairoUtils.java \
-  gfx/DisplayPortCalculator.java \
-  gfx/DisplayPortMetrics.java \
-  gfx/DrawTimingQueue.java \
-  gfx/FloatSize.java \
-  gfx/GeckoLayerClient.java \
-  gfx/GfxInfoThread.java \
-  gfx/GLController.java \
-  gfx/ImmutableViewportMetrics.java \
-  gfx/InputConnectionHandler.java \
-  gfx/IntSize.java \
-  gfx/JavaPanZoomController.java \
-  gfx/Layer.java \
-  gfx/LayerMarginsAnimator.java \
-  gfx/LayerRenderer.java \
-  gfx/LayerView.java \
-  gfx/NativePanZoomController.java \
-  gfx/NinePatchTileLayer.java \
-  gfx/PanningPerfAPI.java \
-  gfx/PanZoomController.java \
-  gfx/PanZoomTarget.java \
-  gfx/PluginLayer.java \
-  gfx/PointUtils.java \
-  gfx/ProgressiveUpdateData.java \
-  gfx/RectUtils.java \
-  gfx/ScrollbarLayer.java \
-  gfx/SimpleScaleGestureDetector.java \
-  gfx/SingleTileLayer.java \
-  gfx/SubdocumentScrollHelper.java \
-  gfx/TextLayer.java \
-  gfx/TextureGenerator.java \
-  gfx/TextureReaper.java \
-  gfx/TileLayer.java \
-  gfx/TouchEventHandler.java \
-  gfx/ViewTransform.java \
-  gfx/VirtualLayer.java \
-  menu/GeckoMenu.java \
-  menu/GeckoMenuInflater.java \
-  menu/GeckoMenuItem.java \
-  menu/GeckoSubMenu.java \
-  menu/MenuItemActionBar.java \
-  menu/MenuItemActionView.java \
-  menu/MenuItemDefault.java \
-  menu/MenuPanel.java \
-  menu/MenuPopup.java \
-  widget/AboutHome.java \
-  widget/AboutHomeView.java \
-  widget/AboutHomeSection.java \
-  widget/ActivityChooserModel.java \
-  widget/AddonsSection.java \
-  widget/ButtonToast.java \
-  widget/ArrowPopup.java \
-  widget/DateTimePicker.java \
-  widget/Divider.java \
-  widget/FaviconView.java \
-  widget/GeckoPopupMenu.java \
-  widget/GeckoActionProvider.java \
-  widget/IconTabWidget.java \
-  widget/LastTabsSection.java \
-  widget/LinkTextView.java \
-  widget/PromoBox.java \
-  widget/RemoteTabsSection.java \
-  widget/TopSitesView.java \
-  widget/TabRow.java \
-  widget/ThumbnailView.java \
-  widget/TwoWayView.java \
-  GeckoNetworkManager.java \
-  GeckoScreenOrientationListener.java \
-  UpdateService.java \
-  GeckoUpdateReceiver.java \
-  ReferrerReceiver.java \
-  $(NULL)
-
-WEBSOCKETS_JAVA_FILES := \
-  websockets/HybiParser.java \
-  websockets/WebSocketClient.java \
-  $(NULL)
-
-ifdef MOZ_WEBRTC
-WEBRTC_VIDEO_CAPTURE_JAVA_FILES = \
-  CaptureCapabilityAndroid.java \
-  VideoCaptureAndroid.java \
-  VideoCaptureDeviceInfoAndroid.java \
-  $(NULL)
-
-WEBRTC_AUDIO_CAPTURE_JAVA_FILES = \
-  WebRTCAudioDevice.java \
-  $(NULL)
-
-WEBRTC_JAVA_FILES = \
-  $(addprefix $(DEPTH)/media/webrtc/trunk/webrtc/modules/video_capture/android/java/org/webrtc/videoengine/, $(WEBRTC_VIDEO_CAPTURE_JAVA_FILES)) \
-  $(addprefix $(DEPTH)/media/webrtc/trunk/webrtc/modules/audio_device/android/org/webrtc/voiceengine/, $(WEBRTC_AUDIO_CAPTURE_JAVA_FILES)) \
-  $(NULL)
-endif
-
-ifdef MOZ_ANDROID_ANR_REPORTER
-DEFINES += -DMOZ_ANDROID_ANR_REPORTER=1
-endif
-
-FENNEC_PP_JAVA_VIEW_FILES = \
-  GeckoButton.java \
-  GeckoImageButton.java \
-  GeckoImageView.java \
-  GeckoEditText.java \
-  GeckoFrameLayout.java \
-  GeckoLinearLayout.java \
-  GeckoRelativeLayout.java \
-  GeckoTextSwitcher.java \
-  GeckoTextView.java \
-  $(NULL)
-
-FENNEC_PP_JAVA_FILES = \
-  App.java \
-  AppConstants.java \
-  SysInfo.java \
-  WebApp.java \
-  WebApps.java \
-  $(NULL)
-
-FENNEC_PP_XML_FILES = \
-  res/xml/preferences.xml \
-  res/xml/searchable.xml \
+DIST_FILES := \
+  package-name.txt.in \
   $(NULL)
 
 ifneq (,$(findstring -march=armv7,$(OS_CFLAGS)))
@@ -325,8 +19,8 @@ ifeq ($(CPU_ARCH),arm)
 ifeq ($(MIN_CPU_VERSION),7)
 ANDROID_VERSION_CODE=$(shell cat $(DEPTH)/config/buildid | cut -c1-10)
 else
-# decrement the version code by 1 for armv6 builds so armv7 builds will win any compatability ties
-ANDROID_VERSION_CODE=$(shell echo $$((`cat $(DEPTH)/config/buildid | cut -c1-10` - 1)))
+# See https://bugzilla.mozilla.org/show_bug.cgi?id=1042128#c11 for an explanation of this:
+ANDROID_VERSION_CODE=$(shell cat $(topsrcdir)/mobile/android/config/armv6_play_store_version_code.txt)
 endif
 else #not arm, so x86
 # increment the version code by 1 for x86 builds so they are offered to x86 phones that have arm emulators
@@ -338,897 +32,92 @@ UA_BUILDID=$(shell echo $(ANDROID_VERSION_CODE) | cut -c1-8)
 
 MOZ_BUILD_TIMESTAMP=$(shell echo `$(PYTHON) $(topsrcdir)/toolkit/xre/make-platformini.py --print-timestamp`)
 
-ifdef MOZ_UPDATER
-DEFINES +=  -DMOZ_UPDATER=$(MOZ_UPDATER)
-endif
-
-# Mangle our package name to avoid Bug 750548.
 DEFINES += \
-  -DMANGLED_ANDROID_PACKAGE_NAME=$(subst fennec,f3nn3c,$(ANDROID_PACKAGE_NAME)) \
-  -DANDROID_PACKAGE_NAME=$(ANDROID_PACKAGE_NAME) \
-  -DANDROID_CPU_ARCH=$(ANDROID_CPU_ARCH) \
   -DANDROID_VERSION_CODE=$(ANDROID_VERSION_CODE) \
-  -DCPU_ARCH=$(CPU_ARCH) \
-  -DGRE_MILESTONE=$(GRE_MILESTONE) \
-  -DMOZILLA_OFFICIAL=$(MOZILLA_OFFICIAL) \
-  -DMOZ_APP_ABI=$(TARGET_XPCOM_ABI) \
-  -DMOZ_APP_BASENAME=$(MOZ_APP_BASENAME) \
+  -DMOZ_ANDROID_SHARED_ID="$(MOZ_ANDROID_SHARED_ID)" \
+  -DMOZ_ANDROID_SHARED_ACCOUNT_TYPE="$(MOZ_ANDROID_SHARED_ACCOUNT_TYPE)" \
+  -DMOZ_ANDROID_SHARED_FXACCOUNT_TYPE="$(MOZ_ANDROID_SHARED_FXACCOUNT_TYPE)" \
   -DMOZ_APP_BUILDID=$(MOZ_APP_BUILDID) \
-  -DMOZ_APP_DISPLAYNAME="$(MOZ_APP_DISPLAYNAME)" \
-  -DMOZ_APP_ID=$(MOZ_APP_ID) \
-  -DMOZ_APP_NAME=$(MOZ_APP_NAME) \
-  -DMOZ_APP_VENDOR=$(MOZ_APP_VENDOR) \
-  -DMOZ_APP_VERSION=$(MOZ_APP_VERSION) \
   -DMOZ_BUILD_TIMESTAMP=$(MOZ_BUILD_TIMESTAMP) \
-  -DMOZ_CHILD_PROCESS_NAME=$(MOZ_CHILD_PROCESS_NAME) \
-  -DMOZ_CRASHREPORTER=$(MOZ_CRASHREPORTER) \
-  -DMOZ_MIN_CPU_VERSION=$(MIN_CPU_VERSION) \
-  -DMOZ_UPDATE_CHANNEL=$(MOZ_UPDATE_CHANNEL) \
-  -DOMNIJAR_NAME=$(OMNIJAR_NAME) \
-  -DOS_TARGET=$(OS_TARGET) \
-  -DTARGET_XPCOM_ABI=$(TARGET_XPCOM_ABI) \
   -DUA_BUILDID=$(UA_BUILDID) \
+  -DMOZ_DEBUG=$(MOZ_DEBUG) \
   $(NULL)
-
-ifdef MOZ_PKG_SPECIAL
-DEFINES += -DMOZ_PKG_SPECIAL=$(MOZ_PKG_SPECIAL)
-endif
-
-ifdef MOZ_LINKER_EXTRACT
-DEFINES += -DMOZ_LINKER_EXTRACT=1
-endif
 
 GARBAGE += \
   AndroidManifest.xml  \
+  WebappManifestFragment.xml.frag \
   classes.dex  \
-  $(MOZGLUE_PP_JAVA_FILES) \
-  $(FENNEC_PP_JAVA_FILES) \
-  $(FENNEC_PP_JAVA_VIEW_FILES) \
-  $(SYNC_PP_JAVA_FILES) \
   gecko.ap_  \
   res/values/strings.xml \
-  R.java \
-  $(FENNEC_PP_XML_FILES) \
-  $(SYNC_PP_RES_XML) \
-  package-name.txt \
+  .aapt.deps \
   fennec_ids.txt \
-  Manifest.java \
   javah.out \
   jni-stubs.inc \
+  GeneratedJNIWrappers.cpp \
+  GeneratedJNIWrappers.h \
   $(NULL)
 
-GARBAGE_DIRS += classes db jars res sync services
-
-MOZ_ANDROID_SHARED_ID = "$(ANDROID_PACKAGE_NAME).sharedID"
-MOZ_ANDROID_SHARED_ACCOUNT_TYPE = "$(ANDROID_PACKAGE_NAME)_sync"
-
-# Bug 567884 - Need a way to find appropriate icons during packaging
-ifeq ($(MOZ_APP_NAME),fennec)
-ICON_PATH = $(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/content/fennec_48x48.png
-ICON_PATH_HDPI = $(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/content/fennec_72x72.png
-ICON_PATH_XHDPI = $(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/content/fennec_96x96.png
-ICON_PATH_XXHDPI = $(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/content/fennec_144x144.png
-
-# we released these builds to the public with shared IDs and need to keep them
-ifeq (org.mozilla.firefox,$(ANDROID_PACKAGE_NAME))
-MOZ_ANDROID_SHARED_ID = "org.mozilla.firefox.sharedID"
-MOZ_ANDROID_SHARED_ACCOUNT_TYPE = "org.mozilla.firefox_sync"
-else ifeq (org.mozilla.firefox_beta,$(ANDROID_PACKAGE_NAME))
-MOZ_ANDROID_SHARED_ID = "org.mozilla.firefox.sharedID"
-MOZ_ANDROID_SHARED_ACCOUNT_TYPE = "org.mozilla.firefox_sync"
-else ifeq (org.mozilla.fennec_aurora,$(ANDROID_PACKAGE_NAME))
-MOZ_ANDROID_SHARED_ID = "org.mozilla.fennec.sharedID"
-MOZ_ANDROID_SHARED_ACCOUNT_TYPE = "org.mozilla.fennec_sync"
-else ifeq (org.mozilla.fennec,$(ANDROID_PACKAGE_NAME))
-MOZ_ANDROID_SHARED_ID = "org.mozilla.fennec.sharedID"
-MOZ_ANDROID_SHARED_ACCOUNT_TYPE = "org.mozilla.fennec_sync"
-endif
-
-else
-ICON_PATH = $(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/content/icon48.png
-ICON_PATH_HDPI = $(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/content/icon64.png
-endif
-
-ifdef MOZ_ANDROID_SHARED_ID
-DEFINES += -DMOZ_ANDROID_SHARED_ID="$(MOZ_ANDROID_SHARED_ID)"
-endif
-ifdef MOZ_ANDROID_SHARED_ACCOUNT_TYPE
-DEFINES += -DMOZ_ANDROID_SHARED_ACCOUNT_TYPE="$(MOZ_ANDROID_SHARED_ACCOUNT_TYPE)"
-endif
-
-RES_LAYOUT = \
-  $(SYNC_RES_LAYOUT) \
-  res/layout/abouthome_content.xml \
-  res/layout/arrow_popup.xml \
-  res/layout/autocomplete_list.xml \
-  res/layout/autocomplete_list_item.xml \
-  res/layout/awesomebar.xml \
-  res/layout/awesomebar_folder_row.xml \
-  res/layout/awesomebar_header_row.xml \
-  res/layout/awesomebar_allpages_list.xml \
-  res/layout/awesomebar_row.xml \
-  res/layout/awesomebar_search.xml \
-  res/layout/awesomebar_suggestion_row.xml \
-  res/layout/awesomebar_suggestion_item.xml \
-  res/layout/awesomebar_suggestion_prompt.xml \
-  res/layout/awesomebar_tab_indicator.xml \
-  res/layout/awesomebar_tabs.xml \
-  res/layout/bookmark_edit.xml \
-  res/layout/browser_toolbar.xml \
-  res/layout/datetime_picker.xml \
-  res/layout/doorhanger.xml \
-  res/layout/doorhanger_button.xml \
-  res/layout/find_in_page_content.xml \
-  res/layout/font_size_preference.xml \
-  res/layout/gecko_app.xml \
-  res/layout/web_app.xml \
-  res/layout/launch_app_list.xml \
-  res/layout/launch_app_listitem.xml \
-  res/layout/menu_action_bar.xml \
-  res/layout/menu_item_action_view.xml \
-  res/layout/menu_popup.xml \
-  res/layout/notification_icon_text.xml \
-  res/layout/notification_progress.xml \
-  res/layout/notification_progress_text.xml \
-  res/layout/preference_rightalign_icon.xml \
-  res/layout/site_setting_item.xml \
-  res/layout/site_setting_title.xml \
-  res/layout/setup_screen.xml \
-  res/layout/shared_ui_components.xml \
-  res/layout/site_identity.xml \
-  res/layout/remote_tabs_child.xml \
-  res/layout/remote_tabs_group.xml \
-  res/layout/tabs_panel.xml \
-  res/layout/tabs_counter.xml \
-  res/layout/tabs_panel_header.xml \
-  res/layout/tabs_panel_indicator.xml \
-  res/layout/tabs_item_cell.xml \
-  res/layout/tabs_item_row.xml \
-  res/layout/text_selection_handles.xml \
-  res/layout/list_item_header.xml \
-  res/layout/select_dialog_list.xml \
-  res/layout/select_dialog_multichoice.xml \
-  res/layout/select_dialog_singlechoice.xml \
-  res/layout/simple_dropdown_item_1line.xml \
-  res/layout/abouthome_addon_row.xml \
-  res/layout/abouthome_last_tabs_row.xml \
-  res/layout/abouthome_section.xml \
-  res/layout/abouthome_remote_tab_row.xml \
-  res/layout/abouthome_topsite_item.xml \
-  res/layout/validation_message.xml \
-  res/layout/videoplayer.xml \
-  $(NULL)
-
-RES_LAYOUT_LARGE_V11 = \
-  res/layout-large-v11/awesomebar_search.xml \
-  res/layout-large-v11/browser_toolbar.xml \
-  $(NULL)
-
-RES_LAYOUT_LARGE_LAND_V11 = \
-  res/layout-large-land-v11/tabs_panel.xml \
-  res/layout-large-land-v11/tabs_panel_header.xml \
-  res/layout-large-land-v11/tabs_panel_footer.xml \
-  $(NULL)
-
-RES_LAYOUT_XLARGE_V11 = \
-  res/layout-xlarge-v11/awesomebar_search.xml \
-  res/layout-xlarge-v11/font_size_preference.xml \
-  res/layout-xlarge-v11/remote_tabs_child.xml \
-  res/layout-xlarge-v11/remote_tabs_group.xml \
-  $(NULL)
-
-RES_LAYOUT_XLARGE_LAND_V11 = \
-  res/layout-xlarge-land-v11/abouthome_content.xml \
-  $(NULL)
-
-RES_VALUES = \
-  $(SYNC_RES_VALUES) \
-  res/values/attrs.xml \
-  res/values/arrays.xml \
-  res/values/colors.xml \
-  res/values/dimens.xml \
-  res/values/integers.xml \
-  res/values/layout.xml \
-  res/values/styles.xml \
-  res/values/themes.xml \
-  $(NULL)
-
-RES_VALUES_LAND = \
-  res/values-land/integers.xml \
-  res/values-land/layout.xml \
-  res/values-land/styles.xml \
-  $(NULL)
-
-RES_VALUES_V11 = \
-  $(SYNC_RES_VALUES_V11) \
-  res/values-v11/colors.xml \
-  res/values-v11/dimens.xml \
-  res/values-v11/styles.xml \
-  res/values-v11/themes.xml \
-  $(NULL)
-
-RES_VALUES_LARGE_V11 = \
-  $(SYNC_RES_VALUES_LARGE_V11) \
-  res/values-large-v11/dimens.xml \
-  res/values-large-v11/layout.xml \
-  res/values-large-v11/styles.xml \
-  res/values-large-v11/themes.xml \
-  $(NULL)
-
-RES_VALUES_LARGE_LAND_V11 = \
-  res/values-large-land-v11/styles.xml \
-  $(NULL)
-
-RES_VALUES_XLARGE_V11 = \
-  res/values-xlarge-v11/dimens.xml \
-  res/values-xlarge-v11/integers.xml \
-  res/values-xlarge-v11/styles.xml \
-  $(NULL)
-
-RES_VALUES_V14 = \
-  res/values-v14/styles.xml \
-  $(NULL)
-
-RES_XML = \
-  res/xml/preferences_datareporting.xml \
-  $(SYNC_RES_XML) \
-  $(NULL)
-
-RES_XML_V11 = \
-  res/xml-v11/preference_headers.xml \
-  res/xml-v11/preferences_general.xml \
-  res/xml-v11/preferences_content.xml \
-  res/xml-v11/preferences_privacy.xml \
-  res/xml-v11/preferences.xml \
-  $(NULL)
-
-RES_ANIM = \
-  res/anim/awesomebar_fade_in.xml \
-  res/anim/popup_show.xml \
-  res/anim/popup_hide.xml \
-  res/anim/awesomebar_fade_out.xml \
-  res/anim/awesomebar_hold_still.xml \
-  res/anim/grow_fade_in.xml \
-  res/anim/grow_fade_in_center.xml \
-  res/anim/shrink_fade_out.xml \
-  $(NULL)
-
-RES_DRAWABLE_MDPI = \
-  res/drawable-mdpi/blank.png \
-  res/drawable-mdpi/favicon.png \
-  res/drawable-mdpi/folder.png \
-  res/drawable-mdpi/abouthome_icon.png \
-  res/drawable-mdpi/abouthome_logo_dark.png \
-  res/drawable-mdpi/abouthome_logo_light.png \
-  res/drawable-mdpi/abouthome_promo_box_bg.9.png \
-  res/drawable-mdpi/abouthome_promo_box_pressed_bg.9.png \
-  res/drawable-mdpi/abouthome_promo_logo_apps.png \
-  res/drawable-mdpi/abouthome_promo_logo_sync.png \
-  res/drawable-mdpi/abouthome_thumbnail.png \
-  res/drawable-mdpi/abouthome_thumbnail_bg.png \
-  res/drawable-mdpi/abouthome_thumbnail_add.png \
-  res/drawable-mdpi/address_bar_bg_shadow.png \
-  res/drawable-mdpi/alert_addon.png \
-  res/drawable-mdpi/alert_app.png \
-  res/drawable-mdpi/alert_download.png \
-  res/drawable-mdpi/alert_camera.png \
-  res/drawable-mdpi/alert_mic.png \
-  res/drawable-mdpi/alert_mic_camera.png \
-  res/drawable-mdpi/arrow_popup_bg.9.png \
-  res/drawable-mdpi/autocomplete_list_bg.9.png \
-  res/drawable-mdpi/awesomebar_tab_center.9.png \
-  res/drawable-mdpi/awesomebar_tab_left.9.png \
-  res/drawable-mdpi/awesomebar_tab_right.9.png \
-  res/drawable-mdpi/awesomebar_sep_left.9.png \
-  res/drawable-mdpi/awesomebar_sep_right.9.png \
-  res/drawable-mdpi/desktop_notification.png \
-  res/drawable-mdpi/ic_addons_empty.png \
-  res/drawable-mdpi/ic_awesomebar_go.png \
-  res/drawable-mdpi/ic_awesomebar_reader.png \
-  res/drawable-mdpi/ic_awesomebar_search.png \
-  res/drawable-mdpi/ic_awesomebar_star.png \
-  res/drawable-mdpi/ic_awesomebar_tab.png \
-  res/drawable-mdpi/ic_menu_addons_filler.png \
-  res/drawable-mdpi/ic_menu_bookmark_add.png \
-  res/drawable-mdpi/ic_menu_bookmark_remove.png \
-  res/drawable-mdpi/ic_menu_character_encoding.png \
-  res/drawable-mdpi/ic_menu_close_all_tabs.png \
-  res/drawable-mdpi/ic_menu_forward.png \
-  res/drawable-mdpi/ic_menu_new_private_tab.png \
-  res/drawable-mdpi/ic_menu_new_tab.png \
-  res/drawable-mdpi/ic_menu_reload.png \
-  res/drawable-mdpi/ic_status_logo.png \
-  res/drawable-mdpi/progress_spinner_1.png \
-  res/drawable-mdpi/progress_spinner_2.png \
-  res/drawable-mdpi/progress_spinner_3.png \
-  res/drawable-mdpi/progress_spinner_4.png \
-  res/drawable-mdpi/progress_spinner_5.png \
-  res/drawable-mdpi/progress_spinner_6.png \
-  res/drawable-mdpi/progress_spinner_7.png \
-  res/drawable-mdpi/progress_spinner_8.png \
-  res/drawable-mdpi/progress_spinner_9.png \
-  res/drawable-mdpi/progress_spinner_10.png \
-  res/drawable-mdpi/progress_spinner_11.png \
-  res/drawable-mdpi/progress_spinner_12.png \
-  res/drawable-mdpi/tab_indicator_divider.9.png \
-  res/drawable-mdpi/tab_indicator_selected.9.png \
-  res/drawable-mdpi/tab_indicator_selected_focused.9.png \
-  res/drawable-mdpi/spinner_default.9.png \
-  res/drawable-mdpi/spinner_focused.9.png \
-  res/drawable-mdpi/spinner_pressed.9.png \
-  res/drawable-mdpi/tab_new.png \
-  res/drawable-mdpi/tab_new_pb.png \
-  res/drawable-mdpi/tab_close.png \
-  res/drawable-mdpi/tab_thumbnail_default.png \
-  res/drawable-mdpi/tab_thumbnail_shadow.png \
-  res/drawable-mdpi/tabs_count.png \
-  res/drawable-mdpi/tabs_count_foreground.png \
-  res/drawable-mdpi/toast.9.png \
-  res/drawable-mdpi/toast_button_focused.9.png \
-  res/drawable-mdpi/toast_button_pressed.9.png \
-  res/drawable-mdpi/toast_divider.9.png \
-  res/drawable-mdpi/address_bar_url_default.9.png \
-  res/drawable-mdpi/address_bar_url_default_pb.9.png \
-  res/drawable-mdpi/address_bar_url_pressed.9.png \
-  res/drawable-mdpi/address_bar_url_pressed_pb.9.png \
-  res/drawable-mdpi/find_close.png \
-  res/drawable-mdpi/find_next.png \
-  res/drawable-mdpi/find_prev.png \
-  res/drawable-mdpi/larry_blue.png \
-  res/drawable-mdpi/larry_green.png \
-  res/drawable-mdpi/menu.png \
-  res/drawable-mdpi/menu_pb.png \
-  res/drawable-mdpi/menu_panel_bg.9.png \
-  res/drawable-mdpi/menu_popup_bg.9.png \
-  res/drawable-mdpi/menu_popup_arrow_bottom.png \
-  res/drawable-mdpi/menu_popup_arrow_top.png \
-  res/drawable-mdpi/menu_item_check.png \
-  res/drawable-mdpi/menu_item_more.png \
-  res/drawable-mdpi/menu_item_uncheck.png \
-  res/drawable-mdpi/site_security_blocked_mixed_content.png \
-  res/drawable-mdpi/site_security_loaded_mixed_content.png \
-  res/drawable-mdpi/site_security_identified.png \
-  res/drawable-mdpi/site_security_verified.png \
-  res/drawable-mdpi/tabs_normal.png \
-  res/drawable-mdpi/tabs_private.png \
-  res/drawable-mdpi/tabs_synced.png \
-  res/drawable-mdpi/urlbar_stop.png \
-  res/drawable-mdpi/reader.png \
-  res/drawable-mdpi/reader_active.png \
-  res/drawable-mdpi/reading_list.png \
-  res/drawable-mdpi/validation_arrow.png \
-  res/drawable-mdpi/validation_arrow_inverted.png \
-  res/drawable-mdpi/validation_bg.9.png \
-  res/drawable-mdpi/bookmarkdefaults_favicon_support.png \
-  res/drawable-mdpi/bookmarkdefaults_favicon_addons.png \
-  res/drawable-mdpi/handle_end.png \
-  res/drawable-mdpi/handle_middle.png \
-  res/drawable-mdpi/handle_start.png \
-  res/drawable-mdpi/scrollbar.png \
-  res/drawable-mdpi/shadow.png \
-  res/drawable-mdpi/start.png \
-  res/drawable-mdpi/marketplace.png \
-  $(addprefix res/drawable-mdpi/,$(notdir $(SYNC_RES_DRAWABLE_MDPI))) \
-  $(NULL)
-
-RES_DRAWABLE_LDPI = \
-  $(addprefix res/drawable-ldpi/,$(notdir $(SYNC_RES_DRAWABLE_LDPI))) \
-  $(NULL)
-
-RES_DRAWABLE_HDPI = \
-  res/drawable-hdpi/blank.png \
-  res/drawable-hdpi/favicon.png \
-  res/drawable-hdpi/folder.png \
-  res/drawable-hdpi/home_bg.png \
-  res/drawable-hdpi/home_star.png \
-  res/drawable-hdpi/abouthome_icon.png \
-  res/drawable-hdpi/abouthome_logo_dark.png \
-  res/drawable-hdpi/abouthome_logo_light.png \
-  res/drawable-hdpi/abouthome_promo_box_bg.9.png \
-  res/drawable-hdpi/abouthome_promo_box_pressed_bg.9.png \
-  res/drawable-hdpi/abouthome_promo_logo_apps.png \
-  res/drawable-hdpi/abouthome_promo_logo_sync.png \
-  res/drawable-hdpi/abouthome_thumbnail.png \
-  res/drawable-hdpi/abouthome_thumbnail_bg.png \
-  res/drawable-hdpi/abouthome_thumbnail_add.png \
-  res/drawable-hdpi/address_bar_bg_shadow.png \
-  res/drawable-hdpi/alert_addon.png \
-  res/drawable-hdpi/alert_app.png \
-  res/drawable-hdpi/alert_download.png \
-  res/drawable-hdpi/alert_camera.png \
-  res/drawable-hdpi/alert_mic.png \
-  res/drawable-hdpi/alert_mic_camera.png \
-  res/drawable-hdpi/arrow_popup_bg.9.png \
-  res/drawable-hdpi/awesomebar_tab_center.9.png \
-  res/drawable-hdpi/awesomebar_tab_left.9.png \
-  res/drawable-hdpi/awesomebar_tab_right.9.png \
-  res/drawable-hdpi/awesomebar_sep_left.9.png \
-  res/drawable-hdpi/awesomebar_sep_right.9.png \
-  res/drawable-hdpi/ic_addons_empty.png \
-  res/drawable-hdpi/ic_awesomebar_go.png \
-  res/drawable-hdpi/ic_awesomebar_reader.png \
-  res/drawable-hdpi/ic_awesomebar_search.png \
-  res/drawable-hdpi/ic_awesomebar_star.png \
-  res/drawable-hdpi/ic_awesomebar_tab.png \
-  res/drawable-hdpi/ic_menu_addons_filler.png \
-  res/drawable-hdpi/ic_menu_bookmark_add.png \
-  res/drawable-hdpi/ic_menu_bookmark_remove.png \
-  res/drawable-hdpi/ic_menu_character_encoding.png \
-  res/drawable-hdpi/ic_menu_close_all_tabs.png \
-  res/drawable-hdpi/ic_menu_forward.png \
-  res/drawable-hdpi/ic_menu_new_private_tab.png \
-  res/drawable-hdpi/ic_menu_new_tab.png \
-  res/drawable-hdpi/ic_menu_reload.png \
-  res/drawable-hdpi/ic_status_logo.png \
-  res/drawable-hdpi/tab_indicator_divider.9.png \
-  res/drawable-hdpi/tab_indicator_selected.9.png \
-  res/drawable-hdpi/tab_indicator_selected_focused.9.png \
-  res/drawable-hdpi/spinner_default.9.png \
-  res/drawable-hdpi/spinner_focused.9.png \
-  res/drawable-hdpi/spinner_pressed.9.png \
-  res/drawable-hdpi/tab_new.png \
-  res/drawable-hdpi/tab_new_pb.png \
-  res/drawable-hdpi/tab_close.png \
-  res/drawable-hdpi/tab_thumbnail_default.png \
-  res/drawable-hdpi/tab_thumbnail_shadow.png \
-  res/drawable-hdpi/tabs_count.png \
-  res/drawable-hdpi/tabs_count_foreground.png \
-  res/drawable-hdpi/address_bar_url_default.9.png \
-  res/drawable-hdpi/address_bar_url_default_pb.9.png \
-  res/drawable-hdpi/address_bar_url_pressed.9.png \
-  res/drawable-hdpi/address_bar_url_pressed_pb.9.png \
-  res/drawable-hdpi/find_close.png \
-  res/drawable-hdpi/find_next.png \
-  res/drawable-hdpi/find_prev.png \
-  res/drawable-hdpi/larry_blue.png \
-  res/drawable-hdpi/larry_green.png \
-  res/drawable-hdpi/menu.png \
-  res/drawable-hdpi/menu_pb.png \
-  res/drawable-hdpi/menu_panel_bg.9.png \
-  res/drawable-hdpi/menu_popup_bg.9.png \
-  res/drawable-hdpi/menu_popup_arrow_bottom.png \
-  res/drawable-hdpi/menu_popup_arrow_top.png \
-  res/drawable-hdpi/menu_item_check.png \
-  res/drawable-hdpi/menu_item_more.png \
-  res/drawable-hdpi/menu_item_uncheck.png \
-  res/drawable-hdpi/site_security_blocked_mixed_content.png \
-  res/drawable-hdpi/site_security_loaded_mixed_content.png \
-  res/drawable-hdpi/site_security_identified.png \
-  res/drawable-hdpi/site_security_verified.png \
-  res/drawable-hdpi/tabs_normal.png \
-  res/drawable-hdpi/tabs_private.png \
-  res/drawable-hdpi/tabs_synced.png \
-  res/drawable-hdpi/urlbar_stop.png \
-  res/drawable-hdpi/reader.png \
-  res/drawable-hdpi/reader_active.png \
-  res/drawable-hdpi/reading_list.png \
-  res/drawable-hdpi/validation_arrow.png \
-  res/drawable-hdpi/validation_arrow_inverted.png \
-  res/drawable-hdpi/validation_bg.9.png \
-  res/drawable-hdpi/handle_end.png \
-  res/drawable-hdpi/handle_middle.png \
-  res/drawable-hdpi/handle_start.png \
-  $(addprefix res/drawable-hdpi/,$(notdir $(SYNC_RES_DRAWABLE_HDPI))) \
-  $(NULL)
-
-RES_DRAWABLE_XHDPI = \
-  res/drawable-xhdpi/blank.png \
-  res/drawable-xhdpi/favicon.png \
-  res/drawable-xhdpi/folder.png \
-  res/drawable-xhdpi/abouthome_icon.png \
-  res/drawable-xhdpi/abouthome_logo_dark.png \
-  res/drawable-xhdpi/abouthome_logo_light.png \
-  res/drawable-xhdpi/abouthome_promo_box_bg.9.png \
-  res/drawable-xhdpi/abouthome_promo_box_pressed_bg.9.png \
-  res/drawable-xhdpi/abouthome_promo_logo_apps.png \
-  res/drawable-xhdpi/abouthome_promo_logo_sync.png \
-  res/drawable-xhdpi/abouthome_thumbnail.png \
-  res/drawable-xhdpi/abouthome_thumbnail_bg.png \
-  res/drawable-xhdpi/abouthome_thumbnail_add.png \
-  res/drawable-xhdpi/address_bar_bg_shadow.png \
-  res/drawable-xhdpi/address_bar_url_default.9.png \
-  res/drawable-xhdpi/address_bar_url_default_pb.9.png \
-  res/drawable-xhdpi/address_bar_url_pressed.9.png \
-  res/drawable-xhdpi/address_bar_url_pressed_pb.9.png \
-  res/drawable-xhdpi/alert_addon.png \
-  res/drawable-xhdpi/alert_app.png \
-  res/drawable-xhdpi/alert_download.png \
-  res/drawable-xhdpi/alert_camera.png \
-  res/drawable-xhdpi/alert_mic.png \
-  res/drawable-xhdpi/alert_mic_camera.png \
-  res/drawable-xhdpi/arrow_popup_bg.9.png \
-  res/drawable-xhdpi/awesomebar_tab_center.9.png \
-  res/drawable-xhdpi/awesomebar_tab_left.9.png \
-  res/drawable-xhdpi/awesomebar_tab_right.9.png \
-  res/drawable-xhdpi/awesomebar_sep_left.9.png \
-  res/drawable-xhdpi/awesomebar_sep_right.9.png \
-  res/drawable-xhdpi/ic_addons_empty.png \
-  res/drawable-xhdpi/ic_awesomebar_go.png \
-  res/drawable-xhdpi/ic_awesomebar_reader.png \
-  res/drawable-xhdpi/ic_awesomebar_search.png \
-  res/drawable-xhdpi/ic_awesomebar_star.png \
-  res/drawable-xhdpi/ic_awesomebar_tab.png \
-  res/drawable-xhdpi/ic_menu_addons_filler.png \
-  res/drawable-xhdpi/ic_menu_bookmark_add.png \
-  res/drawable-xhdpi/ic_menu_bookmark_remove.png \
-  res/drawable-xhdpi/ic_menu_close_all_tabs.png \
-  res/drawable-xhdpi/ic_menu_character_encoding.png \
-  res/drawable-xhdpi/ic_menu_forward.png \
-  res/drawable-xhdpi/ic_menu_new_private_tab.png \
-  res/drawable-xhdpi/ic_menu_new_tab.png \
-  res/drawable-xhdpi/ic_menu_reload.png \
-  res/drawable-xhdpi/ic_status_logo.png \
-  res/drawable-xhdpi/spinner_default.9.png \
-  res/drawable-xhdpi/spinner_focused.9.png \
-  res/drawable-xhdpi/spinner_pressed.9.png \
-  res/drawable-xhdpi/tab_new.png \
-  res/drawable-xhdpi/tab_new_pb.png \
-  res/drawable-xhdpi/tab_close.png \
-  res/drawable-xhdpi/tab_thumbnail_default.png \
-  res/drawable-xhdpi/tab_thumbnail_shadow.png \
-  res/drawable-xhdpi/tabs_count.png \
-  res/drawable-xhdpi/tabs_count_foreground.png \
-  res/drawable-xhdpi/find_close.png \
-  res/drawable-xhdpi/find_next.png \
-  res/drawable-xhdpi/find_prev.png \
-  res/drawable-xhdpi/urlbar_stop.png \
-  res/drawable-xhdpi/reader.png \
-  res/drawable-xhdpi/reader_active.png \
-  res/drawable-xhdpi/reading_list.png \
-  res/drawable-xhdpi/larry_blue.png \
-  res/drawable-xhdpi/larry_green.png \
-  res/drawable-xhdpi/menu.png \
-  res/drawable-xhdpi/menu_pb.png \
-  res/drawable-xhdpi/menu_panel_bg.9.png \
-  res/drawable-xhdpi/menu_popup_bg.9.png \
-  res/drawable-xhdpi/menu_popup_arrow_bottom.png \
-  res/drawable-xhdpi/menu_popup_arrow_top.png \
-  res/drawable-xhdpi/menu_item_check.png \
-  res/drawable-xhdpi/menu_item_more.png \
-  res/drawable-xhdpi/menu_item_uncheck.png \
-  res/drawable-xhdpi/tab_indicator_divider.9.png \
-  res/drawable-xhdpi/tab_indicator_selected.9.png \
-  res/drawable-xhdpi/tab_indicator_selected_focused.9.png \
-  res/drawable-xhdpi/site_security_blocked_mixed_content.png \
-  res/drawable-xhdpi/site_security_loaded_mixed_content.png \
-  res/drawable-xhdpi/site_security_identified.png \
-  res/drawable-xhdpi/site_security_verified.png \
-  res/drawable-xhdpi/tabs_normal.png \
-  res/drawable-xhdpi/tabs_private.png \
-  res/drawable-xhdpi/tabs_synced.png \
-  res/drawable-xhdpi/validation_arrow.png \
-  res/drawable-xhdpi/validation_arrow_inverted.png \
-  res/drawable-xhdpi/validation_bg.9.png \
-  res/drawable-xhdpi/handle_end.png \
-  res/drawable-xhdpi/handle_middle.png \
-  res/drawable-xhdpi/handle_start.png \
-  $(NULL)
-
-RES_DRAWABLE_MDPI_V11 = \
-  res/drawable-mdpi-v11/alert_addon.png \
-  res/drawable-mdpi-v11/alert_app.png \
-  res/drawable-mdpi-v11/alert_download.png \
-  res/drawable-mdpi-v11/alert_camera.png \
-  res/drawable-mdpi-v11/alert_mic.png \
-  res/drawable-mdpi-v11/alert_mic_camera.png \
-  res/drawable-mdpi-v11/firefox_settings_alert.png \
-  res/drawable-mdpi-v11/ic_menu_addons.png \
-  res/drawable-mdpi-v11/ic_menu_apps.png \
-  res/drawable-mdpi-v11/ic_menu_back.png \
-  res/drawable-mdpi-v11/ic_menu_bookmark_add.png \
-  res/drawable-mdpi-v11/ic_menu_bookmark_remove.png \
-  res/drawable-mdpi-v11/ic_menu_desktop_mode_off.png \
-  res/drawable-mdpi-v11/ic_menu_desktop_mode_on.png \
-  res/drawable-mdpi-v11/ic_menu_downloads.png \
-  res/drawable-mdpi-v11/ic_menu_find_in_page.png \
-  res/drawable-mdpi-v11/ic_menu_forward.png \
-  res/drawable-mdpi-v11/ic_menu_new_private_tab.png \
-  res/drawable-mdpi-v11/ic_menu_new_tab.png \
-  res/drawable-mdpi-v11/ic_menu_reload.png \
-  res/drawable-mdpi-v11/ic_menu_save_as_pdf.png \
-  res/drawable-mdpi-v11/ic_menu_settings.png \
-  res/drawable-mdpi-v11/ic_menu_share.png \
-  res/drawable-mdpi-v11/ic_menu_tools.png \
-  res/drawable-mdpi-v11/ic_menu_quit.png \
-  res/drawable-mdpi-v11/ic_status_logo.png \
-  $(NULL)
-
-RES_DRAWABLE_HDPI_V11 = \
-  res/drawable-hdpi-v11/alert_addon.png \
-  res/drawable-hdpi-v11/alert_app.png \
-  res/drawable-hdpi-v11/alert_download.png \
-  res/drawable-hdpi-v11/alert_camera.png \
-  res/drawable-hdpi-v11/alert_mic.png \
-  res/drawable-hdpi-v11/alert_mic_camera.png \
-  res/drawable-hdpi-v11/firefox_settings_alert.png \
-  res/drawable-hdpi-v11/ic_menu_addons.png \
-  res/drawable-hdpi-v11/ic_menu_apps.png \
-  res/drawable-hdpi-v11/ic_menu_back.png \
-  res/drawable-hdpi-v11/ic_menu_bookmark_add.png \
-  res/drawable-hdpi-v11/ic_menu_bookmark_remove.png \
-  res/drawable-hdpi-v11/ic_menu_desktop_mode_off.png \
-  res/drawable-hdpi-v11/ic_menu_desktop_mode_on.png \
-  res/drawable-hdpi-v11/ic_menu_downloads.png \
-  res/drawable-hdpi-v11/ic_menu_find_in_page.png \
-  res/drawable-hdpi-v11/ic_menu_forward.png \
-  res/drawable-hdpi-v11/ic_menu_new_private_tab.png \
-  res/drawable-hdpi-v11/ic_menu_new_tab.png \
-  res/drawable-hdpi-v11/ic_menu_reload.png \
-  res/drawable-hdpi-v11/ic_menu_save_as_pdf.png \
-  res/drawable-hdpi-v11/ic_menu_settings.png \
-  res/drawable-hdpi-v11/ic_menu_share.png \
-  res/drawable-hdpi-v11/ic_menu_tools.png \
-  res/drawable-hdpi-v11/ic_menu_quit.png \
-  res/drawable-hdpi-v11/ic_status_logo.png \
-  $(NULL)
-
-RES_DRAWABLE_XHDPI_V11 = \
-  res/drawable-xhdpi-v11/alert_addon.png \
-  res/drawable-xhdpi-v11/alert_app.png \
-  res/drawable-xhdpi-v11/alert_download.png \
-  res/drawable-xhdpi-v11/alert_camera.png \
-  res/drawable-xhdpi-v11/alert_mic.png \
-  res/drawable-xhdpi-v11/alert_mic_camera.png \
-  res/drawable-xhdpi-v11/firefox_settings_alert.png \
-  res/drawable-xhdpi-v11/ic_menu_addons.png \
-  res/drawable-xhdpi-v11/ic_menu_apps.png \
-  res/drawable-xhdpi-v11/ic_menu_back.png \
-  res/drawable-xhdpi-v11/ic_menu_bookmark_add.png \
-  res/drawable-xhdpi-v11/ic_menu_bookmark_remove.png \
-  res/drawable-xhdpi-v11/ic_menu_desktop_mode_off.png \
-  res/drawable-xhdpi-v11/ic_menu_desktop_mode_on.png \
-  res/drawable-xhdpi-v11/ic_menu_downloads.png \
-  res/drawable-xhdpi-v11/ic_menu_find_in_page.png \
-  res/drawable-xhdpi-v11/ic_menu_forward.png \
-  res/drawable-xhdpi-v11/ic_menu_new_private_tab.png \
-  res/drawable-xhdpi-v11/ic_menu_new_tab.png \
-  res/drawable-xhdpi-v11/ic_menu_reload.png \
-  res/drawable-xhdpi-v11/ic_menu_save_as_pdf.png \
-  res/drawable-xhdpi-v11/ic_menu_settings.png \
-  res/drawable-xhdpi-v11/ic_menu_share.png \
-  res/drawable-xhdpi-v11/ic_menu_tools.png \
-  res/drawable-xhdpi-v11/ic_menu_quit.png \
-  res/drawable-xhdpi-v11/ic_status_logo.png \
-  $(NULL)
-
-RES_DRAWABLE_LARGE_MDPI_V11 = \
-  res/drawable-large-mdpi-v11/arrow_popup_bg.9.png \
-  res/drawable-large-mdpi-v11/ic_menu_reload.png \
-  res/drawable-large-mdpi-v11/ic_menu_forward.png \
-  res/drawable-large-mdpi-v11/menu.png \
-  $(NULL)
-
-RES_DRAWABLE_LARGE_HDPI_V11 = \
-  res/drawable-large-hdpi-v11/arrow_popup_bg.9.png \
-  res/drawable-large-hdpi-v11/ic_menu_reload.png \
-  res/drawable-large-hdpi-v11/ic_menu_forward.png \
-  res/drawable-large-hdpi-v11/menu.png \
-  $(NULL)
-
-RES_DRAWABLE_LARGE_XHDPI_V11 = \
-  res/drawable-large-xhdpi-v11/arrow_popup_bg.9.png \
-  res/drawable-large-xhdpi-v11/ic_menu_reload.png \
-  res/drawable-large-xhdpi-v11/ic_menu_forward.png \
-  res/drawable-large-xhdpi-v11/menu.png \
-  $(NULL)
-
-RES_DRAWABLE_XLARGE_MDPI_V11 = \
-  res/drawable-xlarge-mdpi-v11/awesomebar_tab_center.9.png \
-  res/drawable-xlarge-mdpi-v11/awesomebar_tab_left.9.png \
-  res/drawable-xlarge-mdpi-v11/awesomebar_tab_right.9.png \
-  res/drawable-xlarge-mdpi-v11/awesomebar_sep_left.9.png \
-  res/drawable-xlarge-mdpi-v11/awesomebar_sep_right.9.png \
-  res/drawable-xlarge-mdpi-v11/ic_menu_bookmark_add.png \
-  res/drawable-xlarge-mdpi-v11/ic_menu_bookmark_remove.png \
-  $(NULL)
-
-RES_DRAWABLE_XLARGE_HDPI_V11 = \
-  res/drawable-xlarge-hdpi-v11/awesomebar_tab_center.9.png \
-  res/drawable-xlarge-hdpi-v11/awesomebar_tab_left.9.png \
-  res/drawable-xlarge-hdpi-v11/awesomebar_tab_right.9.png \
-  res/drawable-xlarge-hdpi-v11/awesomebar_sep_left.9.png \
-  res/drawable-xlarge-hdpi-v11/awesomebar_sep_right.9.png \
-  res/drawable-xlarge-hdpi-v11/ic_menu_bookmark_add.png \
-  res/drawable-xlarge-hdpi-v11/ic_menu_bookmark_remove.png \
-  $(NULL)
-
-RES_DRAWABLE_XLARGE_XHDPI_V11 = \
-  res/drawable-xlarge-xhdpi-v11/awesomebar_tab_center.9.png \
-  res/drawable-xlarge-xhdpi-v11/awesomebar_tab_left.9.png \
-  res/drawable-xlarge-xhdpi-v11/awesomebar_tab_right.9.png \
-  res/drawable-xlarge-xhdpi-v11/awesomebar_sep_left.9.png \
-  res/drawable-xlarge-xhdpi-v11/awesomebar_sep_right.9.png \
-  res/drawable-xlarge-xhdpi-v11/ic_menu_bookmark_add.png \
-  res/drawable-xlarge-xhdpi-v11/ic_menu_bookmark_remove.png \
-  $(NULL)
-
-RES_COLOR = \
-  res/color/abouthome_section_more_text.xml \
-  res/color/abouthome_section_subtitle.xml \
-  res/color/abouthome_section_title.xml \
-  res/color/awesome_bar_title.xml \
-  res/color/awesome_bar_title_hint.xml \
-  res/color/primary_text.xml \
-  res/color/primary_text_inverse.xml \
-  res/color/secondary_text.xml \
-  res/color/secondary_text_inverse.xml \
-  res/color/select_item_multichoice.xml \
-  res/color/tertiary_text.xml \
-  res/color/tertiary_text_inverse.xml \
-  $(NULL)
-
-RES_MENU = \
-  res/menu/abouthome_topsites_contextmenu.xml \
-  res/menu/awesomebar_contextmenu.xml \
-  res/menu/browser_app_menu.xml \
-  res/menu/gecko_app_menu.xml \
-  res/menu/titlebar_contextmenu.xml \
-  res/menu-large-v11/browser_app_menu.xml \
-  res/menu-v11/browser_app_menu.xml \
-  res/menu-xlarge-v11/browser_app_menu.xml \
-  $(NULL)
+GARBAGE_DIRS += classes db jars res sync services generated
 
 JAVA_CLASSPATH = $(ANDROID_SDK)/android.jar
 
-ifdef MOZ_CRASHREPORTER
-FENNEC_JAVA_FILES += CrashReporter.java
-RES_DRAWABLE_MDPI += res/drawable-mdpi/crash_reporter.png
-RES_LAYOUT += res/layout/crash_reporter.xml
-endif
-
-MOZ_ANDROID_DRAWABLES += \
-  $(SYNC_RES_DRAWABLE)                                                          \
-  mobile/android/base/resources/drawable/abouthome_logo.xml                     \
-  mobile/android/base/resources/drawable/abouthome_promo_box.xml                \
-  mobile/android/base/resources/drawable/action_bar_button.xml                  \
-  mobile/android/base/resources/drawable/action_bar_button_inverse.xml          \
-  mobile/android/base/resources/drawable/address_bar_bg.xml                     \
-  mobile/android/base/resources/drawable/address_bar_bg_shadow_repeat.xml       \
-  mobile/android/base/resources/drawable/address_bar_nav_button.xml             \
-  mobile/android/base/resources/drawable/address_bar_right_edge.xml             \
-  mobile/android/base/resources/drawable/address_bar_url.xml                    \
-  mobile/android/base/resources/drawable/awesomebar_listview_divider.xml        \
-  mobile/android/base/resources/drawable/awesomebar_header_row.xml              \
-  mobile/android/base/resources/drawable/awesomebar_tab_indicator.xml           \
-  mobile/android/base/resources/drawable/awesomebar_tab_selected.xml            \
-  mobile/android/base/resources/drawable/awesomebar_tab_unselected.xml          \
-  mobile/android/base/resources/drawable/divider_vertical.xml                   \
-  mobile/android/base/resources/drawable/favicon_bg.xml                         \
-  mobile/android/base/resources/drawable/handle_end_level.xml                   \
-  mobile/android/base/resources/drawable/handle_start_level.xml                 \
-  mobile/android/base/resources/drawable/ic_menu_back.xml                       \
-  mobile/android/base/resources/drawable/ic_menu_desktop_mode_off.xml           \
-  mobile/android/base/resources/drawable/ic_menu_desktop_mode_on.xml            \
-  mobile/android/base/resources/drawable/ic_menu_quit.xml                       \
-  mobile/android/base/resources/drawable/menu_item_state.xml                    \
-  mobile/android/base/resources/drawable/menu_level.xml                         \
-  mobile/android/base/resources/drawable/progress_spinner.xml                   \
-  mobile/android/base/resources/drawable/remote_tabs_child_divider.xml          \
-  mobile/android/base/resources/drawable/shaped_button.xml                      \
-  mobile/android/base/resources/drawable/site_security_level.xml                \
-  mobile/android/base/resources/drawable/spinner.xml                            \
-  mobile/android/base/resources/drawable/suggestion_selector.xml                \
-  mobile/android/base/resources/drawable/tab_new_level.xml                      \
-  mobile/android/base/resources/drawable/tab_row.xml                            \
-  mobile/android/base/resources/drawable/tab_thumbnail.xml                      \
-  mobile/android/base/resources/drawable/tabs_panel_indicator.xml               \
-  mobile/android/base/resources/drawable/textbox_bg.xml                         \
-  mobile/android/base/resources/drawable/toast_button.xml                       \
-  mobile/android/base/resources/drawable/webapp_titlebar_bg.xml                 \
-  $(NULL)
-
-MOZ_BRANDING_DRAWABLE_MDPI = $(shell if test -e $(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/android-resources.mn; then cat $(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/android-resources.mn | tr '\n' ' ';  fi)
-
-RESOURCES=$(RES_LAYOUT) $(RES_LAYOUT_LARGE_LAND_V11) $(RES_LAYOUT_LARGE_V11) $(RES_LAYOUT_XLARGE_V11) $(RES_LAYOUT_XLARGE_LAND_V11) $(RES_VALUES) $(RES_VALUES_LAND) $(RES_VALUES_V11) $(RES_VALUES_LARGE_V11) $(RES_VALUES_LARGE_LAND_V11) $(RES_VALUES_XLARGE_V11) $(RES_VALUES_LAND_V14) $(RES_VALUES_V14) $(RES_XML) $(RES_XML_V11) $(RES_ANIM) $(RES_DRAWABLE_MDPI) $(RES_DRAWABLE_LDPI) $(RES_DRAWABLE_HDPI) $(RES_DRAWABLE_XHDPI) $(RES_DRAWABLE_MDPI_V11) $(RES_DRAWABLE_HDPI_V11) $(RES_DRAWABLE_XHDPI_V11) $(RES_DRAWABLE_LARGE_MDPI_V11) $(RES_DRAWABLE_LARGE_HDPI_V11) $(RES_DRAWABLE_LARGE_XHDPI_V11) $(RES_DRAWABLE_XLARGE_MDPI_V11) $(RES_DRAWABLE_XLARGE_HDPI_V11) $(RES_DRAWABLE_XLARGE_XHDPI_V11) $(RES_COLOR) $(RES_MENU)
-
-RES_DIRS= \
-  res/layout                    \
-  res/layout-large-v11          \
-  res/layout-large-land-v11     \
-  res/layout-xlarge-v11         \
-  res/layout-xlarge-land-v11    \
-  res/values                    \
-  res/values-v11                \
-  res/values-large-v11          \
-  res/values-xlarge-v11         \
-  res/values-land-v14           \
-  res/xml                       \
-  res/xml-v11                   \
-  res/anim                      \
-  res/drawable-ldpi             \
-  res/drawable-mdpi             \
-  res/drawable-hdpi             \
-  res/drawable-xhdpi            \
-  res/drawable                  \
-  res/drawable-mdpi-v11         \
-  res/drawable-hdpi-v11         \
-  res/drawable-xhdpi-v11        \
-  res/drawable-large-mdpi-v11   \
-  res/drawable-large-hdpi-v11   \
-  res/drawable-large-xhdpi-v11  \
-  res/drawable-xlarge-mdpi-v11  \
-  res/drawable-xlarge-hdpi-v11  \
-  res/drawable-xlarge-xhdpi-v11 \
-  res/color                     \
-  res/menu                      \
-  res/menu-v11                  \
-  res/menu-large-v11            \
-  res/menu-xlarge-v11           \
-  $(NULL)
-
 ALL_JARS = \
-  jars/gecko-browser.jar \
-  jars/gecko-mozglue.jar \
-  jars/gecko-util.jar \
-  jars/sync-thirdparty.jar \
-  jars/websockets.jar \
+  gecko-R.jar \
+  gecko-browser.jar \
+  gecko-mozglue.jar \
+  gecko-util.jar \
+  squareup-picasso.jar \
+  sync-thirdparty.jar \
+  websockets.jar \
   $(NULL)
 
 ifdef MOZ_WEBRTC
-ALL_JARS += jars/webrtc.jar
+ALL_JARS += webrtc.jar
 endif
 
-include $(topsrcdir)/config/rules.mk
-
-# Override the Java settings with some specific android settings
-include $(topsrcdir)/config/android-common.mk
+include $(topsrcdir)/config/config.mk
 
 # Note that we're going to set up a dependency directly between embed_android.dex and the java files
 # Instead of on the .class files, since more than one .class file might be produced per .java file
 # Sync dependencies are provided in a single jar. Sync classes themselves are delivered as source,
 # because Android resource classes must be compiled together in order to avoid overlapping resource
 # indices.
-classes.dex: $(ALL_JARS)
-	@echo "DX classes.dex"
-	$(DX) --dex --output=classes.dex jars $(ANDROID_COMPAT_LIB)
 
-jars/gecko-browser.jar: jars/gecko-mozglue.jar jars/gecko-util.jar jars/sync-thirdparty.jar jars/websockets.jar $(addprefix $(srcdir)/,$(FENNEC_JAVA_FILES)) $(FENNEC_PP_JAVA_FILES) $(FENNEC_PP_JAVA_VIEW_FILES) $(addprefix $(srcdir)/,$(SYNC_JAVA_FILES)) $(SYNC_PP_JAVA_FILES) R.java
-	@echo "JAR gecko-browser.jar"
-	$(NSINSTALL) -D classes/gecko-browser
-	$(JAVAC) $(JAVAC_FLAGS) -Xlint:all,-deprecation,-fallthrough -d classes/gecko-browser -classpath "jars/gecko-mozglue.jar:jars/gecko-util.jar:jars/sync-thirdparty.jar:jars/websockets.jar" $(addprefix $(srcdir)/,$(FENNEC_JAVA_FILES)) $(FENNEC_PP_JAVA_FILES) $(FENNEC_PP_JAVA_VIEW_FILES) $(addprefix $(srcdir)/,$(SYNC_JAVA_FILES)) $(SYNC_PP_JAVA_FILES) R.java
-	$(JAR) cMf jars/gecko-browser.jar -C classes/gecko-browser .
+classes.dex: .proguard.deps
+	$(REPORT_BUILD)
+	$(DX) --dex --output=classes.dex jars-proguarded $(ANDROID_COMPAT_LIB)
 
-jars/gecko-mozglue.jar: $(addprefix $(srcdir)/,$(MOZGLUE_JAVA_FILES)) $(MOZGLUE_PP_JAVA_FILES) jars
-	@echo "JAR gecko-mozglue.jar"
-	$(NSINSTALL) -D classes/gecko-mozglue
-	$(JAVAC) $(JAVAC_FLAGS) -Xlint:all -d classes/gecko-mozglue $(addprefix $(srcdir)/,$(MOZGLUE_JAVA_FILES)) $(MOZGLUE_PP_JAVA_FILES)
-	$(JAR) cMf jars/gecko-mozglue.jar -C classes/gecko-mozglue .
-
-jars/gecko-util.jar: jars/gecko-mozglue.jar $(addprefix $(srcdir)/,$(UTIL_JAVA_FILES)) jars
-	@echo "JAR gecko-util.jar"
-	$(NSINSTALL) -D classes/gecko-util
-	$(JAVAC) $(JAVAC_FLAGS) -Xlint:all,-deprecation -d classes/gecko-util -classpath "jars/gecko-mozglue.jar" $(addprefix $(srcdir)/,$(UTIL_JAVA_FILES))
-	$(JAR) cMf jars/gecko-util.jar -C classes/gecko-util .
-
-jars/sync-thirdparty.jar: $(addprefix $(srcdir)/,$(SYNC_THIRDPARTY_JAVA_FILES)) jars
-	@echo "JAR sync-thirdparty.jar"
-	$(NSINSTALL) -D classes/sync-thirdparty
-	$(JAVAC) $(JAVAC_FLAGS) -d classes/sync-thirdparty $(addprefix $(srcdir)/,$(SYNC_THIRDPARTY_JAVA_FILES))
-	$(JAR) cMf jars/sync-thirdparty.jar -C classes/sync-thirdparty .
-
-jars/websockets.jar: $(addprefix $(srcdir)/, $(WEBSOCKETS_JAVA_FILES)) jars
-	@echo "JAR websockets.jar"
-	$(NSINSTALL) -D classes/websockets
-	$(JAVAC) $(JAVAC_FLAGS) -Xlint:all,-serial -d classes/websockets $(addprefix $(srcdir)/,$(WEBSOCKETS_JAVA_FILES))
-	$(JAR) cMf jars/websockets.jar -C classes/websockets .
-
-ifdef MOZ_WEBRTC
-jars/webrtc.jar: $(addprefix $(srcdir)/, $(WEBRTC_JAVA_FILES)) jars jars/gecko-browser.jar jars/gecko-util.jar
-	@echo "JAR webrtc.jar"
-	$(NSINSTALL) -D classes/webrtc
-	$(JAVAC) $(JAVAC_FLAGS) -d classes/webrtc -classpath classes/gecko-browser:classes/gecko-util $(addprefix $(srcdir)/,$(WEBRTC_JAVA_FILES))
-	$(JAR) cMf jars/webrtc.jar -C classes/webrtc .
+ifdef MOZ_DISABLE_PROGUARD
+  PROGUARD_PASSES=0
+else
+  ifdef MOZ_DEBUG
+  PROGUARD_PASSES=1
+  else
+  PROGUARD_PASSES=6
+  endif
 endif
 
-jars:
-	@echo "MKDIR jars"
-	$(NSINSTALL) -D jars
+# We touch the target file before invoking Proguard so that Proguard's
+# outputs are fresher than the target, preventing a subsequent
+# invocation from thinking Proguard's outputs are stale.  This is safe
+# because Make removes the target file if any recipe command fails.
+.proguard.deps: $(ALL_JARS)
+	$(REPORT_BUILD)
+	@$(TOUCH) $@
+	java -jar $(ANDROID_SDK_ROOT)/tools/proguard/lib/proguard.jar \
+		@$(topsrcdir)/mobile/android/config/proguard.cfg \
+		-optimizationpasses $(PROGUARD_PASSES) \
+		-injars $(subst ::,:,$(subst $(NULL) ,:,$(strip $(ALL_JARS)))) \
+		-outjars jars-proguarded \
+		-libraryjars $(ANDROID_SDK)/android.jar:$(ANDROID_COMPAT_LIB)
 
 CLASSES_WITH_JNI= \
+    org.mozilla.gecko.ANRReporter \
     org.mozilla.gecko.GeckoAppShell \
     org.mozilla.gecko.GeckoJavaSampler \
     org.mozilla.gecko.gfx.NativePanZoomController \
-    org.mozilla.gecko.ANRReporter \
+    org.mozilla.gecko.util.NativeJSContainer \
+    org.mozilla.gecko.util.NativeJSObject \
     $(NULL)
 
 ifdef MOZ_WEBSMS_BACKEND
@@ -1240,112 +129,191 @@ ifdef MOZ_WEBSMS_BACKEND
 CLASSES_WITH_JNI += org.mozilla.gecko.GeckoSmsManager
 endif
 
-jni-stubs.inc: jars/gecko-browser.jar jars/gecko-mozglue.jar jars/gecko-util.jar jars/sync-thirdparty.jar
+jni-stubs.inc: gecko-browser.jar gecko-mozglue.jar gecko-util.jar sync-thirdparty.jar
 	$(JAVAH) -o javah.out -bootclasspath $(JAVA_BOOTCLASSPATH) -classpath $(subst $(NULL) $(NULL),:,$^) $(CLASSES_WITH_JNI)
 	$(PYTHON) $(topsrcdir)/mobile/android/base/jni-generator.py javah.out $@
 
-PP_RES_XML= \
-  $(SYNC_PP_RES_XML) \
-  $(FENNEC_PP_XML_FILES) \
+ANNOTATION_PROCESSOR_JAR_FILES := $(DEPTH)/build/annotationProcessors/annotationProcessors.jar
+
+GeneratedJNIWrappers.cpp: $(ANNOTATION_PROCESSOR_JAR_FILES)
+GeneratedJNIWrappers.cpp: $(ALL_JARS)
+	$(JAVA) -classpath gecko-mozglue.jar:$(JAVA_BOOTCLASSPATH):$(ANNOTATION_PROCESSOR_JAR_FILES) org.mozilla.gecko.annotationProcessors.AnnotationProcessor $(ALL_JARS)
+
+gecko_package_dir = generated/org/mozilla/gecko
+# Like generated/org/mozilla/fennec_$USERID.
+android_package_dir = $(addprefix generated/,$(subst .,/,$(ANDROID_PACKAGE_NAME)))
+
+# These _PP_JAVAFILES are specified in moz.build and defined in
+# backend.mk, which is included by config.mk.  Therefore this needs to
+# be defined after config.mk is included.
+PP_JAVAFILES := $(filter-out $(gecko_package_dir)/R.java,$(gecko-mozglue_PP_JAVAFILES) $(gecko-browser_PP_JAVAFILES))
+
+manifest := \
+  AndroidManifest.xml.in \
+  WebappManifestFragment.xml.frag.in \
   $(NULL)
 
-# This is kinda awful; if any of the source files change, we remake them all.
-$(PP_RES_XML): $(patsubst res/%,$(srcdir)/resources/%.in,$(PP_RES_XML))
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
-             $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $(subst res/,$(srcdir)/resources/,$@).in > $@
+PP_TARGETS += manifest
 
-# AndroidManifest.xml includes these files, so they need to be marked as dependencies.
-SERVICES_MANIFEST_FRAGMENTS = $(wildcard $(topsrcdir)/mobile/android/services/manifests/*.in)
+# Certain source files need to be preprocessed.  This special rule
+# generates these files into generated/org/mozilla/gecko for
+# consumption by the build system and IDEs.
 
-android-tgts = \
-  AndroidManifest.xml \
-  $(MOZGLUE_PP_JAVA_FILES) \
-  $(FENNEC_PP_JAVA_FILES) \
-  $(SYNC_PP_JAVA_FILES) \
-  package-name.txt \
+preprocessed := $(addsuffix .in,$(subst $(gecko_package_dir)/,,$(filter $(gecko_package_dir)/%,$(PP_JAVAFILES))))
+
+preprocessed_PATH := $(gecko_package_dir)
+preprocessed_KEEP_PATH := 1
+
+PP_TARGETS += preprocessed
+
+# Certain source files have Java package name @ANDROID_PACKAGE_NAME@.
+# We hate these files but they are necessary for backwards
+# compatibility.  These special rules generate these files into
+# generated/org/mozilla/{firefox,firefox_beta,fennec,fennec_$USER} for
+# consumption by the build system and IDEs.
+
+preprocessed_package := $(addsuffix .in,$(subst $(android_package_dir)/,,$(filter $(android_package_dir)/%,$(PP_JAVAFILES))))
+
+preprocessed_package_PATH := $(android_package_dir)
+preprocessed_package_KEEP_PATH := 1
+
+PP_TARGETS += preprocessed_package
+
+include $(topsrcdir)/config/rules.mk
+
+not_android_res_files := \
+  *.mkdir.done* \
+  *.DS_Store* \
+  *\#* \
+  *.rej \
+  *.orig \
   $(NULL)
 
-android-preqs = \
-  Makefile.in \
-  $(call mkdir_deps,$(sort $(dir $(MOZGLUE_PP_JAVA_FILES)))) \
-  $(call mkdir_deps,$(sort $(dir $(FENNEC_PP_JAVA_FILES)))) \
-  $(call mkdir_deps,$(sort $(dir $(SYNC_PP_JAVA_FILES)))) \
-  $(SERVICES_MANIFEST_FRAGMENTS) \
-  WebAppManifestFragment.xml.in \
-  WebAppsFragments.java \
+# This uses the fact that Android resource directories list all
+# resource files one subdirectory below the parent resource directory.
+android_res_files := $(filter-out $(not_android_res_files),$(wildcard $(addsuffix /*,$(wildcard $(addsuffix /*,$(ANDROID_RES_DIRS))))))
+
+$(ANDROID_GENERATED_RESFILES): $(call mkdir_deps,$(sort $(dir $(ANDROID_GENERATED_RESFILES))))
+
+# [Comment 1/3] We don't have correct dependencies for strings.xml at
+# this point, so we always recursively invoke the submake to check the
+# dependencies.  Sigh.  And, with multilocale builds, there will be
+# multiple strings.xml files, and we need to rebuild gecko.ap_ if any
+# of them change.  But!  mobile/android/base/locales does not have
+# enough information to actually build res/values/strings.xml during a
+# language repack.  So rather than adding rules into the main
+# makefile, and trying to work around the lack of information, we
+# force a rebuild of gecko.ap_ during packaging.  See below.
+
+res/values/strings.xml: FORCE
+	$(MAKE) -C locales
+
+all_resources = \
+  $(CURDIR)/AndroidManifest.xml \
+  $(CURDIR)/WebappManifestFragment.xml.frag \
+  $(android_res_files) \
+  $(ANDROID_GENERATED_RESFILES) \
   $(NULL)
 
-$(android-tgts): % : %.in $(android-preqs)
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
-             $(AUTOMATION_PPARGS) -DOBJDIR="`pwd`" $(DEFINES) $(ACDEFINES) $< > $@
+# For GeckoView, we want a zip of an Android res/ directory that
+# merges the contents of all the ANDROID_RES_DIRS.  The inner res/
+# directory must have the Android resource two-layer hierarchy.
 
-# Add a predefined number of WebApp<num> classes to the WebApps class.
-# These are used so that each webapp can launch in its own process
-# Keep this number in sync with the max web apps in WebAppAllocator.java
-NUM_WEB_APPS=100
-WebAppManifestFragment.xml.in: WebAppManifestFragment.xml.frag
-	@rm -f $@
-	@for n in `$(PYTHON) -c "for x in range($(NUM_WEB_APPS)): print x"`; do \
-		cat $< | sed s,@APPNUM@,$$n,g >> $@ ; \
-	done
+# The following helper zips files in a directory into a zip file while
+# maintaining the directory structure rooted below the directory.
+# (adding or creating said file as appropriate).  For example, if the
+# dir contains dir/subdir/file, calling with directory dir would
+# create a zip containing subdir/file.  Note: the trailing newline is
+# necessary.
 
-WebAppsFragments.java: WebAppsFragment.java.frag
-	@rm -f $@
-	@for n in `$(PYTHON) -c "for x in range($(NUM_WEB_APPS)): print x"`; do \
-		cat $< | sed s,@APPNUM@,$$n,g >> $@ ; \
-	done
+# $(1): zip file to add to (or create).
+# $(2): directory to zip contents of.
+define zip_directory_with_relative_paths
+cd $(2) && zip -q $(1) -r * -x $(not_android_res_files)
 
-# Replace @VIEWTYPE@ with different View names.
-$(FENNEC_PP_JAVA_VIEW_FILES): GeckoView.java.frag
-	@rm -f $@
-	cat $< | sed s,@VIEWTYPE@,$(patsubst Gecko%.java,%,$@),g >> $@ ; \
+endef
 
-res/drawable-mdpi/icon.png: $(MOZ_APP_ICON)
-	$(NSINSTALL) -D res/drawable-mdpi
-	cp $(ICON_PATH) $@
+geckoview_resources.zip: $(all_resources) $(GLOBAL_DEPS)
+	$(foreach dir,$(ANDROID_RES_DIRS),$(call zip_directory_with_relative_paths,$(CURDIR)/$@,$(dir)))
 
-res/drawable-hdpi/icon.png: $(MOZ_APP_ICON)
-	$(NSINSTALL) -D res/drawable-hdpi
-	cp $(ICON_PATH_HDPI) $@
+# All of generated/org/mozilla/gecko/R.java, gecko.ap_, and R.txt are
+# produced by aapt; this saves aapt invocations.  The trailing
+# semi-colon defines an empty recipe; defining no recipe at all causes
+# Make to treat the target differently, in a way that defeats our
+# dependencies.
 
-res/drawable-xhdpi/icon.png: $(MOZ_APP_ICON)
-	$(NSINSTALL) -D res/drawable-xhdpi
-	cp $(ICON_PATH_XHDPI) $@
+$(gecko_package_dir)/R.java: .aapt.deps ;
+gecko.ap_: .aapt.deps ;
+R.txt: .aapt.deps ;
 
-res/drawable-xxhdpi/icon.png: $(MOZ_APP_ICON)
-	$(NSINSTALL) -D res/drawable-xxhdpi
-	cp $(ICON_PATH_XXHDPI) $@
+# [Comment 2/3] This tom-foolery provides a target that forces a
+# rebuild of gecko.ap_.  This is used during packaging to ensure that
+# resources are fresh.  The alternative would be complicated; see
+# [Comment 1/3].
 
-RES_DRAWABLE = $(addprefix res/drawable/,$(notdir $(MOZ_ANDROID_DRAWABLES)))
-$(RES_DRAWABLE): $(addprefix $(topsrcdir)/,$(MOZ_ANDROID_DRAWABLES))
-	$(NSINSTALL) -D res/drawable
-	$(NSINSTALL) $^ res/drawable/
+gecko-nodeps/R.java: .aapt.nodeps ;
+gecko-nodeps.ap_: .aapt.nodeps ;
+gecko-nodeps/R.txt: .aapt.nodeps ;
 
-RES_BRANDING_DRAWABLE_MDPI = $(addprefix res/drawable-mdpi/,$(notdir $(MOZ_BRANDING_DRAWABLE_MDPI)))
-$(RES_BRANDING_DRAWABLE_MDPI): $(addprefix $(topsrcdir)/,$(MOZ_BRANDING_DRAWABLE_MDPI))
-	$(NSINSTALL) -D res/drawable-mdpi
-	$(NSINSTALL) $^ res/drawable-mdpi/
+# This ignores the default set of resources ignored by aapt, plus
+# files starting with '#'.  (Emacs produces temp files named #temp#.)
+# This doesn't actually set the environment variable; it's used as a
+# parameter in the aapt invocation below.  Consider updating
+# not_android_res_files as well.
 
-$(RES_DIRS):
-	$(RM) -r $@
-	$(NSINSTALL) -D $@
+ANDROID_AAPT_IGNORE := !.svn:!.git:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*.scc:*~:\#*:*.rej:*.orig
 
-$(RESOURCES): $(RES_DIRS) $(subst res/,$(srcdir)/resources/,$(RESOURCES))
-	@echo "creating $@"
-	$(NSINSTALL) $(subst res/,$(srcdir)/resources/,$@) $(dir $@)
+# 1: target file.
+# 2: dependencies.
+# 3: name of ap_ file to write.
+# 4: directory to write R.java into.
+# 5: directory to write R.txt into.
+# We touch the target file before invoking aapt so that aapt's outputs
+# are fresher than the target, preventing a subsequent invocation from
+# thinking aapt's outputs are stale.  This is safe because Make
+# removes the target file if any recipe command fails.
+define aapt_command
+$(1): $$(call mkdir_deps,$(filter-out ./,$(dir $(3) $(4) $(5)))) $(2)
+	@$$(TOUCH) $$@
+	$$(AAPT) package -f -M AndroidManifest.xml -I $$(ANDROID_SDK)/android.jar \
+		--auto-add-overlay \
+		$$(addprefix -S ,$$(ANDROID_RES_DIRS)) \
+		--custom-package org.mozilla.gecko --non-constant-id \
+		-F $(3) \
+		-J $(4) \
+		--output-text-symbols $(5) \
+		--ignore-assets "$$(ANDROID_AAPT_IGNORE)"
+endef
 
+# [Comment 3/3] The first of these rules is used during regular
+# builds.  The second writes an ap_ file that is only used during
+# packaging.  It doesn't write the normal ap_, or R.java, since we
+# don't want the packaging step to write anything that would make a
+# further no-op build do work.  See also
+# toolkit/mozapps/installer/packager.mk.
 
-R.java: $(MOZ_APP_ICON) $(RESOURCES) $(RES_DRAWABLE) $(RES_BRANDING_DRAWABLE_MDPI) $(PP_RES_XML) res/drawable-mdpi/icon.png res/drawable-hdpi/icon.png res/drawable-xhdpi/icon.png res/drawable-xxhdpi/icon.png res/values/strings.xml AndroidManifest.xml FORCE
-	$(AAPT) package -f -M AndroidManifest.xml -I $(ANDROID_SDK)/android.jar -S res -J . --custom-package org.mozilla.gecko
+# .aapt.deps: $(all_resources)
+$(eval $(call aapt_command,.aapt.deps,$(all_resources),gecko.ap_,$(gecko_package_dir)/,./))
 
-gecko.ap_: AndroidManifest.xml res/drawable-mdpi/icon.png res/drawable-hdpi/icon.png res/drawable-xhdpi/icon.png res/drawable-xxhdpi/icon.png $(RESOURCES) $(RES_DRAWABLE) $(RES_BRANDING_DRAWABLE_MDPI) $(PP_RES_XML) res/values/strings.xml FORCE
-	$(AAPT) package -f -M AndroidManifest.xml -I $(ANDROID_SDK)/android.jar  -S res -F $@
+# .aapt.nodeps: $(CURDIR)/AndroidManifest.xml FORCE
+$(eval $(call aapt_command,.aapt.nodeps,$(CURDIR)/AndroidManifest.xml FORCE,gecko-nodeps.ap_,gecko-nodeps/,gecko-nodeps/))
 
-fennec_ids.txt: fennec-ids-generator.py R.java
-	$(PYTHON) $(topsrcdir)/mobile/android/base/fennec-ids-generator.py -i R.java -o $@
+fennec_ids.txt: $(gecko_package_dir)/R.java fennec-ids-generator.py
+	$(PYTHON) $(topsrcdir)/mobile/android/base/fennec-ids-generator.py -i $< -o $@
 
-libs:: classes.dex package-name.txt jni-stubs.inc fennec_ids.txt
+# Override the Java settings with some specific android settings
+include $(topsrcdir)/config/android-common.mk
+
+libs:: geckoview_resources.zip classes.dex jni-stubs.inc GeneratedJNIWrappers.cpp fennec_ids.txt
+	$(INSTALL) geckoview_resources.zip $(FINAL_TARGET)
 	$(INSTALL) classes.dex $(FINAL_TARGET)
-	$(INSTALL) package-name.txt $(FINAL_TARGET)
-	@(diff jni-stubs.inc $(topsrcdir)/mozglue/android/jni-stubs.inc >/dev/null) || \
-	 (echo "*** Error: The jni-stubs have changed. Copy $(CURDIR)/jni-stubs.inc to $(topsrcdir)/mozglue/android" && exit 1)
+	@(diff jni-stubs.inc $(topsrcdir)/mozglue/android/jni-stubs.inc >/dev/null && diff GeneratedJNIWrappers.cpp $(topsrcdir)/widget/android/GeneratedJNIWrappers.cpp >/dev/null) || \
+	 (echo '*****************************************************' && \
+	  echo '***   Error: The generated JNI code has changed   ***' && \
+	  echo '* To update generated code in the tree, please run  *' && \
+	  echo && \
+	  echo '  cp $(CURDIR)/jni-stubs.inc $(topsrcdir)/mozglue/android && cp $(CURDIR)/GeneratedJNIWrappers.* $(topsrcdir)/widget/android' && \
+	  echo && \
+	  echo '* Repeat the build, and check in any changes.       *' && \
+	  echo '*****************************************************' && \
+	  exit 1)

@@ -37,14 +37,14 @@ public:
   nsCertVerificationResult();
   virtual ~nsCertVerificationResult();
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSICERTVERIFICATIONRESULT
 
 private:
   nsresult mRV;
   uint32_t mVerified;
   uint32_t mCount;
-  PRUnichar **mUsages;
+  char16_t **mUsages;
 
 friend class nsCertVerificationJob;
 };

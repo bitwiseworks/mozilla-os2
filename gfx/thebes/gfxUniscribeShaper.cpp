@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "prtypes.h"
 #include "gfxTypes.h"
 
 #include "gfxContext.h"
@@ -34,7 +33,7 @@ class UniscribeItem
 public:
     UniscribeItem(gfxContext *aContext, HDC aDC,
                   gfxUniscribeShaper *aShaper,
-                  const PRUnichar *aString, uint32_t aLength,
+                  const char16_t *aString, uint32_t aLength,
                   SCRIPT_ITEM *aItem, uint32_t aIVS) :
         mContext(aContext), mDC(aDC),
         mShaper(aShaper),
@@ -68,7 +67,7 @@ public:
         HRESULT rv;
         HDC shapeDC = nullptr;
 
-        const PRUnichar *str = mAlternativeString ? mAlternativeString : mItemString;
+        char16ptr_t str = mAlternativeString ? mAlternativeString : mItemString;
 
         mScriptItem->a.fLogicalOrder = true; 
         SCRIPT_ANALYSIS sa = mScriptItem->a;
@@ -184,7 +183,7 @@ public:
             rv = ScriptPlace(placeDC, mShaper->ScriptCache(),
                              mGlyphs.Elements(), mNumGlyphs,
                              mAttr.Elements(), &sa,
-                             mAdvances.Elements(), mOffsets.Elements(), NULL);
+                             mAdvances.Elements(), mOffsets.Elements(), nullptr);
 
             if (rv == E_PENDING) {
                 SelectFont();
@@ -208,7 +207,7 @@ public:
 
         memset(sfp, 0, sizeof(SCRIPT_FONTPROPERTIES));
         sfp->cBytes = sizeof(SCRIPT_FONTPROPERTIES);
-        rv = ScriptGetFontProperties(NULL, mShaper->ScriptCache(),
+        rv = ScriptGetFontProperties(nullptr, mShaper->ScriptCache(),
                                      sfp);
         if (rv == E_PENDING) {
             SelectFont();
@@ -321,14 +320,14 @@ private:
     void GenerateAlternativeString() {
         if (mAlternativeString)
             free(mAlternativeString);
-        mAlternativeString = (PRUnichar *)malloc(mItemLength * sizeof(PRUnichar));
+        mAlternativeString = (char16_t *)malloc(mItemLength * sizeof(char16_t));
         if (!mAlternativeString)
             return;
         memcpy((void *)mAlternativeString, (const void *)mItemString,
-               mItemLength * sizeof(PRUnichar));
+               mItemLength * sizeof(char16_t));
         for (uint32_t i = 0; i < mItemLength; i++) {
             if (NS_IS_HIGH_SURROGATE(mItemString[i]) || NS_IS_LOW_SURROGATE(mItemString[i]))
-                mAlternativeString[i] = PRUnichar(0xFFFD);
+                mAlternativeString[i] = char16_t(0xFFFD);
         }
     }
 
@@ -342,20 +341,20 @@ private:
 
 public:
     // these point to the full string/length of the item
-    const PRUnichar *mItemString;
+    const char16_t *mItemString;
     const uint32_t mItemLength;
 
 private:
-    PRUnichar *mAlternativeString;
+    char16_t *mAlternativeString;
 
 #define AVERAGE_ITEM_LENGTH 40
 
-    nsAutoTArray<WORD, uint32_t(ESTIMATE_MAX_GLYPHS(AVERAGE_ITEM_LENGTH))> mGlyphs;
-    nsAutoTArray<WORD, AVERAGE_ITEM_LENGTH + 1> mClusters;
-    nsAutoTArray<SCRIPT_VISATTR, uint32_t(ESTIMATE_MAX_GLYPHS(AVERAGE_ITEM_LENGTH))> mAttr;
+    AutoFallibleTArray<WORD, uint32_t(ESTIMATE_MAX_GLYPHS(AVERAGE_ITEM_LENGTH))> mGlyphs;
+    AutoFallibleTArray<WORD, AVERAGE_ITEM_LENGTH + 1> mClusters;
+    AutoFallibleTArray<SCRIPT_VISATTR, uint32_t(ESTIMATE_MAX_GLYPHS(AVERAGE_ITEM_LENGTH))> mAttr;
  
-    nsAutoTArray<GOFFSET, 2 * AVERAGE_ITEM_LENGTH> mOffsets;
-    nsAutoTArray<int, 2 * AVERAGE_ITEM_LENGTH> mAdvances;
+    AutoFallibleTArray<GOFFSET, 2 * AVERAGE_ITEM_LENGTH> mOffsets;
+    AutoFallibleTArray<int, 2 * AVERAGE_ITEM_LENGTH> mAdvances;
 
 #undef AVERAGE_ITEM_LENGTH
 
@@ -369,7 +368,7 @@ private:
 class Uniscribe
 {
 public:
-    Uniscribe(const PRUnichar *aString,
+    Uniscribe(const char16_t *aString,
               gfxShapedText *aShapedText,
               uint32_t aOffset, uint32_t aLength):
         mString(aString), mShapedText(aShapedText),
@@ -418,21 +417,21 @@ public:
     }
 
 private:
-    const PRUnichar *mString;
+    char16ptr_t      mString;
     gfxShapedText   *mShapedText;
     uint32_t         mOffset;
     uint32_t         mLength;
 
     SCRIPT_CONTROL mControl;
     SCRIPT_STATE   mState;
-    nsTArray<SCRIPT_ITEM> mItems;
+    FallibleTArray<SCRIPT_ITEM> mItems;
     int mNumItems;
 };
 
 
 bool
 gfxUniscribeShaper::ShapeText(gfxContext      *aContext,
-                              const PRUnichar *aText,
+                              const char16_t *aText,
                               uint32_t         aOffset,
                               uint32_t         aLength,
                               int32_t          aScript,

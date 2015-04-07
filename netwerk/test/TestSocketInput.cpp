@@ -7,9 +7,6 @@
 #ifdef WIN32
 #include <windows.h>
 #endif
-#ifdef XP_OS2
-#include <os2.h>
-#endif
 
 #include "nscore.h"
 #include "nsCOMPtr.h"
@@ -52,7 +49,7 @@ InputTestConsumer::~InputTestConsumer()
 }
 
 
-NS_IMPL_ISUPPORTS2(InputTestConsumer, nsIRequestObserver, nsIStreamListener)
+NS_IMPL_ISUPPORTS(InputTestConsumer, nsIRequestObserver, nsIStreamListener)
 
 
 NS_IMETHODIMP

@@ -12,36 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-DEPTH   = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir    = @srcdir@
-VPATH   = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-MODULE_NAME = omxpluginhc
-FORCE_SHARED_LIB = 1
-
-# Don't use STL wrappers; this isn't Gecko code
-STL_FLAGS =
-
-# must link statically with the CRT; this isn't Gecko code
-USE_STATIC_LIBS = 1
-
-# Need to custom install OMX media plugin
-NO_DIST_INSTALL = 1
-NO_INSTALL = 1
-
 include $(topsrcdir)/config/rules.mk
-
-ifdef GNU_CXX
-# Turn off C++ 11 features due to conflicts with Android OS headers and char16_t definition
-CXXFLAGS += -std=gnu++98
-endif
-
-INCLUDES        += \
-                -I$(srcdir)/../../../content/media/plugins \
-                $(NULL)
 
 EXTRA_DSO_LDOPTS += \
 		-L$(DEPTH)/media/omx-plugin/lib/gb/libutils \
@@ -50,12 +21,3 @@ EXTRA_DSO_LDOPTS += \
 		-lstagefright \
 		$(NULL)
 
-INCLUDES        += \
-                -I$(srcdir)/../include/gb \
-                -I$(srcdir)/../include/gb/media/stagefright/openmax \
-                $(NULL)
-
-libs::	$(DLL_PREFIX)$(LIBRARY_NAME)$(DLL_SUFFIX)
-	$(INSTALL) $< $(DEPTH)/dist/bin
-
-libs:: $(PROGRAMS)

@@ -4,15 +4,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'jprof'
-
 EXPORTS += [
     'jprof.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'libmalloc.cpp',
 ]
 
 LIBRARY_NAME = 'jprof'
 
+EXPORT_LIBRARY = True
+
+FORCE_SHARED_LIB = True
+
+DEFINES['_IMPL_JPROF_API'] = True

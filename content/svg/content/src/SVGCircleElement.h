@@ -10,7 +10,7 @@
 #include "nsSVGLength2.h"
 
 nsresult NS_NewSVGCircleElement(nsIContent **aResult,
-                                already_AddRefed<nsINodeInfo> aNodeInfo);
+                                already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 typedef nsSVGPathGeometryElement SVGCircleElementBase;
 
@@ -20,11 +20,10 @@ namespace dom {
 class SVGCircleElement MOZ_FINAL : public SVGCircleElementBase
 {
 protected:
-  SVGCircleElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx,
-                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  SVGCircleElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
   friend nsresult (::NS_NewSVGCircleElement(nsIContent **aResult,
-                                            already_AddRefed<nsINodeInfo> aNodeInfo));
+                                            already_AddRefed<nsINodeInfo>&& aNodeInfo));
 
 public:
   // nsSVGSVGElement methods:
@@ -32,6 +31,7 @@ public:
 
   // nsSVGPathGeometryElement methods:
   virtual void ConstructPath(gfxContext *aCtx) MOZ_OVERRIDE;
+  virtual TemporaryRef<Path> BuildPath() MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 

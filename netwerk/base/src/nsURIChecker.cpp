@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsURIChecker.h"
-#include "nsIServiceManager.h"
 #include "nsIAuthPrompt.h"
 #include "nsIHttpChannel.h"
 #include "nsNetUtil.h"
@@ -27,13 +26,13 @@ ServerIsNES3x(nsIHttpChannel *httpChannel)
 
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS6(nsURIChecker,
-                   nsIURIChecker,
-                   nsIRequest,
-                   nsIRequestObserver,
-                   nsIStreamListener,
-                   nsIChannelEventSink,
-                   nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS(nsURIChecker,
+                  nsIURIChecker,
+                  nsIRequest,
+                  nsIRequestObserver,
+                  nsIStreamListener,
+                  nsIChannelEventSink,
+                  nsIInterfaceRequestor)
 
 nsURIChecker::nsURIChecker()
     : mStatus(NS_OK)

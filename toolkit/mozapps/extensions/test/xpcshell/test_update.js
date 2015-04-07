@@ -6,7 +6,6 @@
 
 const PREF_MATCH_OS_LOCALE = "intl.locale.matchOS";
 const PREF_SELECTED_LOCALE = "general.useragent.locale";
-const PREF_GETADDONS_BYIDS_PERFORMANCE = "extensions.getAddons.getWithPerformance.url";
 const PREF_GETADDONS_CACHE_ENABLED = "extensions.getAddons.cache.enabled";
 
 // The test extension uses an insecure update url.
@@ -25,7 +24,13 @@ const PARAMS = "?%REQ_VERSION%/%ITEM_ID%/%ITEM_VERSION%/%ITEM_MAXAPPVERSION%/" +
 var gInstallDate;
 
 Components.utils.import("resource://testing-common/httpd.js");
-var testserver;
+var testserver = new HttpServer();
+testserver.start(-1);
+gPort = testserver.identity.primaryPort;
+mapFile("/data/test_update.rdf", testserver);
+mapFile("/data/test_update.xml", testserver);
+testserver.registerDirectory("/addons/", do_get_file("addons"));
+
 const profileDir = gProfD.clone();
 profileDir.append("extensions");
 
@@ -36,16 +41,10 @@ function run_test() {
   Services.prefs.setBoolPref(PREF_MATCH_OS_LOCALE, false);
   Services.prefs.setCharPref(PREF_SELECTED_LOCALE, "fr-FR");
 
-  // Create and configure the HTTP server.
-  testserver = new HttpServer();
-  testserver.registerDirectory("/data/", do_get_file("data"));
-  testserver.registerDirectory("/addons/", do_get_file("addons"));
-  testserver.start(4444);
-
   writeInstallRDFForExtension({
     id: "addon1@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -57,7 +56,7 @@ function run_test() {
   writeInstallRDFForExtension({
     id: "addon2@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "0",
@@ -69,7 +68,7 @@ function run_test() {
   writeInstallRDFForExtension({
     id: "addon3@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "5",
@@ -210,7 +209,7 @@ function run_test_2(install) {
 function check_test_2() {
   ensure_test_completed();
 
-  AddonManager.getAddonByID("addon1@tests.mozilla.org", function(olda1) {
+  AddonManager.getAddonByID("addon1@tests.mozilla.org", callback_soon(function(olda1) {
     do_check_neq(olda1, null);
     do_check_eq(olda1.version, "1.0");
     do_check_true(isExtensionInAddonsList(profileDir, olda1.id));
@@ -232,16 +231,16 @@ function check_test_2() {
       do_check_eq(originalSyncGUID, a1.syncGUID);
 
       a1.uninstall();
-      restartManager();
-
-      run_test_3();
+      do_execute_soon(run_test_3);
     });
-  });
+  }));
 }
 
 
 // Check that an update check finds compatibility updates and applies them
 function run_test_3() {
+  restartManager();
+
   AddonManager.getAddonByID("addon2@tests.mozilla.org", function(a2) {
     do_check_neq(a2, null);
     do_check_true(a2.isActive);
@@ -262,14 +261,14 @@ function run_test_3() {
 
       onNoUpdateAvailable: function(addon) {
         do_check_eq(addon, a2);
-        restartManager();
-        check_test_3();
+        do_execute_soon(check_test_3);
       }
     }, AddonManager.UPDATE_WHEN_USER_REQUESTED);
   });
 }
 
 function check_test_3() {
+  restartManager();
   AddonManager.getAddonByID("addon2@tests.mozilla.org", function(a2) {
     do_check_neq(a2, null);
     do_check_true(a2.isActive);
@@ -343,14 +342,14 @@ function run_test_5() {
 
       onNoUpdateAvailable: function(addon) {
         do_check_true(this.sawUpdate);
-        restartManager();
-        check_test_5();
+        do_execute_soon(check_test_5);
       }
     }, AddonManager.UPDATE_WHEN_USER_REQUESTED, "3.0");
   });
 }
 
 function check_test_5() {
+  restartManager();
   AddonManager.getAddonByID("addon3@tests.mozilla.org", function(a3) {
     do_check_neq(a3, null);
     do_check_false(a3.isActive);
@@ -358,18 +357,18 @@ function check_test_5() {
     do_check_true(a3.appDisabled);
 
     a3.uninstall();
-    restartManager();
-
-    run_test_6();
+    do_execute_soon(run_test_6);
   });
 }
 
 // Test that background update checks work
 function run_test_6() {
+  restartManager();
+
   writeInstallRDFForExtension({
     id: "addon1@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -401,7 +400,7 @@ function continue_test_6(install) {
   }, [
     "onInstallStarted",
     "onInstallEnded",
-  ], check_test_6);
+  ], callback_soon(check_test_6));
 }
 
 function check_test_6(install) {
@@ -413,33 +412,33 @@ function check_test_6(install) {
     do_check_eq(a1.version, "2.0");
     do_check_eq(a1.releaseNotesURI.spec, "http://example.com/updateInfo.xhtml");
     a1.uninstall();
-    restartManager();
-
-    run_test_7();
+    do_execute_soon(run_test_7);
   });
 }
 
 // Test that background update checks work for lightweight themes
 function run_test_7() {
+  restartManager();
+
   LightweightThemeManager.currentTheme = {
     id: "1",
     version: "1",
     name: "Test LW Theme",
     description: "A test theme",
     author: "Mozilla",
-    homepageURL: "http://localhost:4444/data/index.html",
-    headerURL: "http://localhost:4444/data/header.png",
-    footerURL: "http://localhost:4444/data/footer.png",
-    previewURL: "http://localhost:4444/data/preview.png",
-    iconURL: "http://localhost:4444/data/icon.png",
-    updateURL: "http://localhost:4444/data/lwtheme.js"
+    homepageURL: "http://localhost:" + gPort + "/data/index.html",
+    headerURL: "http://localhost:" + gPort + "/data/header.png",
+    footerURL: "http://localhost:" + gPort + "/data/footer.png",
+    previewURL: "http://localhost:" + gPort + "/data/preview.png",
+    iconURL: "http://localhost:" + gPort + "/data/icon.png",
+    updateURL: "http://localhost:" + gPort + "/data/lwtheme.js"
   };
 
   // XXX The lightweight theme manager strips non-https updateURLs so hack it
   // back in.
   let themes = JSON.parse(Services.prefs.getCharPref("lightweightThemes.usedThemes"));
   do_check_eq(themes.length, 1);
-  themes[0].updateURL = "http://localhost:4444/data/lwtheme.js";
+  themes[0].updateURL = "http://localhost:" + gPort + "/data/lwtheme.js";
   Services.prefs.setCharPref("lightweightThemes.usedThemes", JSON.stringify(themes));
 
   testserver.registerPathHandler("/data/lwtheme.js", function(request, response) {
@@ -453,12 +452,12 @@ function run_test_7() {
       name: "Updated Theme",
       description: "A test theme",
       author: "Mozilla",
-      homepageURL: "http://localhost:4444/data/index2.html",
-      headerURL: "http://localhost:4444/data/header.png",
-      footerURL: "http://localhost:4444/data/footer.png",
-      previewURL: "http://localhost:4444/data/preview.png",
-      iconURL: "http://localhost:4444/data/icon2.png",
-      updateURL: "http://localhost:4444/data/lwtheme.js"
+      homepageURL: "http://localhost:" + gPort + "/data/index2.html",
+      headerURL: "http://localhost:" + gPort + "/data/header.png",
+      footerURL: "http://localhost:" + gPort + "/data/footer.png",
+      previewURL: "http://localhost:" + gPort + "/data/preview.png",
+      iconURL: "http://localhost:" + gPort + "/data/icon2.png",
+      updateURL: "http://localhost:" + gPort + "/data/lwtheme.js"
     }));
   });
 
@@ -517,7 +516,7 @@ function run_test_7_cache() {
   // back in.
   let themes = JSON.parse(Services.prefs.getCharPref("lightweightThemes.usedThemes"));
   do_check_eq(themes.length, 1);
-  themes[0].updateURL = "http://localhost:4444/data/lwtheme.js";
+  themes[0].updateURL = "http://localhost:" + gPort + "/data/lwtheme.js";
   Services.prefs.setCharPref("lightweightThemes.usedThemes", JSON.stringify(themes));
 
   testserver.registerPathHandler("/data/lwtheme.js", function(request, response) {
@@ -527,12 +526,12 @@ function run_test_7_cache() {
       name: "Updated Theme v.3",
       description: "A test theme v.3",
       author: "John Smith",
-      homepageURL: "http://localhost:4444/data/index3.html?v=3",
-      headerURL: "http://localhost:4444/data/header.png?v=3",
-      footerURL: "http://localhost:4444/data/footer.png?v=3",
-      previewURL: "http://localhost:4444/data/preview.png?v=3",
-      iconURL: "http://localhost:4444/data/icon2.png?v=3",
-      updateURL: "https://localhost:4444/data/lwtheme.js?v=3"
+      homepageURL: "http://localhost:" + gPort + "/data/index3.html?v=3",
+      headerURL: "http://localhost:" + gPort + "/data/header.png?v=3",
+      footerURL: "http://localhost:" + gPort + "/data/footer.png?v=3",
+      previewURL: "http://localhost:" + gPort + "/data/preview.png?v=3",
+      iconURL: "http://localhost:" + gPort + "/data/icon2.png?v=3",
+      updateURL: "https://localhost:" + gPort + "/data/lwtheme.js?v=3"
     }));
   });
 
@@ -568,17 +567,17 @@ function check_test_7_cache() {
     do_check_eq(p1.description, "A test theme v.3");
     do_print(JSON.stringify(p1));
     do_check_eq(p1.creator.name, "John Smith");
-    do_check_eq(p1.homepageURL, "http://localhost:4444/data/index3.html?v=3");
-    do_check_eq(p1.screenshots[0].url, "http://localhost:4444/data/preview.png?v=3");
-    do_check_eq(p1.iconURL, "http://localhost:4444/data/icon2.png?v=3");
-    do_check_eq(currentTheme.headerURL, "http://localhost:4444/data/header.png?v=3");
-    do_check_eq(currentTheme.footerURL, "http://localhost:4444/data/footer.png?v=3");
-    do_check_eq(currentTheme.updateURL, "https://localhost:4444/data/lwtheme.js?v=3");
+    do_check_eq(p1.homepageURL, "http://localhost:" + gPort + "/data/index3.html?v=3");
+    do_check_eq(p1.screenshots[0].url, "http://localhost:" + gPort + "/data/preview.png?v=3");
+    do_check_eq(p1.iconURL, "http://localhost:" + gPort + "/data/icon2.png?v=3");
+    do_check_eq(currentTheme.headerURL, "http://localhost:" + gPort + "/data/header.png?v=3");
+    do_check_eq(currentTheme.footerURL, "http://localhost:" + gPort + "/data/footer.png?v=3");
+    do_check_eq(currentTheme.updateURL, "https://localhost:" + gPort + "/data/lwtheme.js?v=3");
 
     do_check_eq(p1.installDate.getTime(), gInstallDate);
     do_check_true(p1.installDate.getTime() < p1.updateDate.getTime());
 
-    run_test_8();
+    do_execute_soon(run_test_8);
   });
 }
 
@@ -587,7 +586,7 @@ function run_test_8() {
   writeInstallRDFForExtension({
     id: "addon1@tests.mozilla.org",
     version: "5.0",
-    updateURL: "http://localhost:4444/data/param_test.rdf" + PARAMS,
+    updateURL: "http://localhost:" + gPort + "/data/param_test.rdf" + PARAMS,
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -599,7 +598,7 @@ function run_test_8() {
   writeInstallRDFForExtension({
     id: "addon2@tests.mozilla.org",
     version: "67.0.5b1",
-    updateURL: "http://localhost:4444/data/param_test.rdf" + PARAMS,
+    updateURL: "http://localhost:" + gPort + "/data/param_test.rdf" + PARAMS,
     targetApplications: [{
       id: "toolkit@mozilla.org",
       minVersion: "0",
@@ -611,7 +610,7 @@ function run_test_8() {
   writeInstallRDFForExtension({
     id: "addon3@tests.mozilla.org",
     version: "1.3+",
-    updateURL: "http://localhost:4444/data/param_test.rdf" + PARAMS,
+    updateURL: "http://localhost:" + gPort + "/data/param_test.rdf" + PARAMS,
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "0",
@@ -627,7 +626,7 @@ function run_test_8() {
   writeInstallRDFForExtension({
     id: "addon4@tests.mozilla.org",
     version: "0.5ab6",
-    updateURL: "http://localhost:4444/data/param_test.rdf" + PARAMS,
+    updateURL: "http://localhost:" + gPort + "/data/param_test.rdf" + PARAMS,
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -639,7 +638,7 @@ function run_test_8() {
   writeInstallRDFForExtension({
     id: "addon5@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/param_test.rdf" + PARAMS,
+    updateURL: "http://localhost:" + gPort + "/data/param_test.rdf" + PARAMS,
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -651,7 +650,7 @@ function run_test_8() {
   writeInstallRDFForExtension({
     id: "addon6@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/param_test.rdf" + PARAMS,
+    updateURL: "http://localhost:" + gPort + "/data/param_test.rdf" + PARAMS,
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -662,7 +661,7 @@ function run_test_8() {
 
   restartManager();
 
-  AddonManager.getAddonByID("addon2@tests.mozilla.org", function(a2) {
+  AddonManager.getAddonByID("addon2@tests.mozilla.org", callback_soon(function(a2) {
     a2.userDisabled = true;
     restartManager();
 
@@ -756,7 +755,7 @@ function run_test_8() {
       let compatListener = {
         onUpdateFinished: function(addon, error) {
           if (--count == 0)
-            run_next_test();
+            do_execute_soon(run_next_test);
         }
       };
 
@@ -767,7 +766,7 @@ function run_test_8() {
 
         onUpdateFinished: function(addon, error) {
           if (--count == 0)
-            run_next_test();
+            do_execute_soon(run_next_test);
         }
       };
 
@@ -778,7 +777,7 @@ function run_test_8() {
       a5.findUpdates(compatListener, AddonManager.UPDATE_WHEN_NEW_APP_INSTALLED);
       a6.findUpdates(updateListener, AddonManager.UPDATE_WHEN_NEW_APP_INSTALLED);
     });
-  });
+  }));
 }
 
 // Tests that if an install.rdf claims compatibility then the add-on will be
@@ -787,7 +786,7 @@ function run_test_9() {
   writeInstallRDFForExtension({
     id: "addon4@tests.mozilla.org",
     version: "5.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "0",
@@ -828,7 +827,7 @@ function run_test_11() {
       onUpdateFinished: function(addon) {
         do_check_true(addon.isCompatible);
 
-        run_test_12();
+        do_execute_soon(run_test_12);
       }
     }, AddonManager.UPDATE_WHEN_NEW_APP_INSTALLED);
   });
@@ -843,9 +842,7 @@ function run_test_12() {
     do_check_true(a4.isCompatible);
 
     a4.uninstall();
-    restartManager();
-
-    run_test_13();
+    do_execute_soon(run_test_13);
   });
 }
 
@@ -854,11 +851,13 @@ function run_test_12() {
 // version of the app that the caller requested an update check for, when
 // strict compatibility checking is disabled.
 function run_test_13() {
+  restartManager();
+
   // Not initially compatible but the update check will make it compatible
   writeInstallRDFForExtension({
     id: "addon7@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "0",
@@ -887,14 +886,14 @@ function run_test_13() {
 
       onUpdateFinished: function(addon) {
         do_check_true(addon.isCompatible);
-        restartManager();
-        check_test_13();
+        do_execute_soon(check_test_13);
       }
     }, AddonManager.UPDATE_WHEN_NEW_APP_DETECTED, "3.0");
   });
 }
 
 function check_test_13() {
+  restartManager();
   AddonManager.getAddonByID("addon7@tests.mozilla.org", function(a7) {
     do_check_neq(a7, null);
     do_check_true(a7.isActive);
@@ -902,20 +901,20 @@ function check_test_13() {
     do_check_false(a7.appDisabled);
 
     a7.uninstall();
-    restartManager();
-
-    run_test_14();
+    do_execute_soon(run_test_14);
   });
 }
 
 // Test that background update checks doesn't update an add-on that isn't
 // allowed to update automatically.
 function run_test_14() {
+  restartManager();
+
   // Have an add-on there that will be updated so we see some events from it
   writeInstallRDFForExtension({
     id: "addon1@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -927,7 +926,7 @@ function run_test_14() {
   writeInstallRDFForExtension({
     id: "addon8@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -971,7 +970,9 @@ function run_test_14() {
 
       onInstallEnded: function(aInstall) {
         do_check_eq(aInstall.existingAddon.id, "addon1@tests.mozilla.org");
-        check_test_14(aInstall);
+        do_check_eq(aInstall.existingAddon.pendingUpgrade.install, aInstall);
+
+        do_execute_soon(check_test_14);
       },
 
       onInstallFailed: function(aInstall) {
@@ -988,9 +989,7 @@ function run_test_14() {
   });
 }
 
-function check_test_14(install) {
-  do_check_eq(install.existingAddon.pendingUpgrade.install, install);
-
+function check_test_14() {
   restartManager();
   AddonManager.getAddonsByIDs(["addon1@tests.mozilla.org",
                                "addon8@tests.mozilla.org"], function([a1, a8]) {
@@ -1002,20 +1001,20 @@ function check_test_14(install) {
     do_check_eq(a8.version, "1.0");
     a8.uninstall();
 
-    restartManager();
-
-    run_test_15();
+    do_execute_soon(run_test_15);
   });
 }
 
 // Test that background update checks doesn't update an add-on that is
 // pending uninstall
 function run_test_15() {
+  restartManager();
+
   // Have an add-on there that will be updated so we see some events from it
   writeInstallRDFForExtension({
     id: "addon1@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -1027,7 +1026,7 @@ function run_test_15() {
   writeInstallRDFForExtension({
     id: "addon8@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -1072,7 +1071,7 @@ function run_test_15() {
 
       onInstallEnded: function(aInstall) {
         do_check_eq(aInstall.existingAddon.id, "addon1@tests.mozilla.org");
-        check_test_15(aInstall);
+        do_execute_soon(check_test_15);
       },
 
       onInstallFailed: function(aInstall) {
@@ -1089,7 +1088,7 @@ function run_test_15() {
   });
 }
 
-function check_test_15(aInstall) {
+function check_test_15() {
   restartManager();
   AddonManager.getAddonsByIDs(["addon1@tests.mozilla.org",
                                "addon8@tests.mozilla.org"], function([a1, a8]) {
@@ -1099,29 +1098,31 @@ function check_test_15(aInstall) {
 
     do_check_eq(a8, null);
 
-    restartManager();
-
-    run_test_16();
+    do_execute_soon(run_test_16);
   });
 }
 
 function run_test_16() {
   restartManager();
 
-  let url = "http://localhost:4444/addons/test_install2_1.xpi";
+  restartManager();
+
+  let url = "http://localhost:" + gPort + "/addons/test_install2_1.xpi";
   AddonManager.getInstallForURL(url, function(aInstall) {
     aInstall.addListener({
       onInstallEnded: function() {
+       do_execute_soon(function install_2_1_ended() {
         restartManager();
 
         AddonManager.getAddonByID("addon2@tests.mozilla.org", function(a1) {
           do_check_neq(a1.syncGUID, null);
           let oldGUID = a1.syncGUID;
 
-          let url = "http://localhost:4444/addons/test_install2_2.xpi";
+          let url = "http://localhost:" + gPort + "/addons/test_install2_2.xpi";
           AddonManager.getInstallForURL(url, function(aInstall) {
             aInstall.addListener({
               onInstallEnded: function() {
+               do_execute_soon(function install_2_2_ended() {
                 restartManager();
 
                 AddonManager.getAddonByID("addon2@tests.mozilla.org", function(a2) {
@@ -1129,15 +1130,15 @@ function run_test_16() {
                   do_check_eq(oldGUID, a2.syncGUID);
 
                   a2.uninstall();
-                  restartManager();
-
-                  run_test_17();
+                  do_execute_soon(run_test_17);
                 });
+               });
               }
             });
             aInstall.install();
           }, "application/x-xpinstall");
         });
+       });
       }
     });
     aInstall.install();
@@ -1147,10 +1148,12 @@ function run_test_16() {
 // Test that the update check correctly observes the
 // extensions.strictCompatibility pref and compatibility overrides.
 function run_test_17() {
+  restartManager();
+
   writeInstallRDFForExtension({
     id: "addon9@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "0.1",
@@ -1169,14 +1172,15 @@ function run_test_17() {
     onDownloadFailed: function(aInstall) {
       AddonManager.getAddonByID("addon9@tests.mozilla.org", function(a9) {
         a9.uninstall();
-        restartManager();
         do_execute_soon(run_test_18);
       });
     }
   });
 
+  Services.prefs.setCharPref(PREF_GETADDONS_BYIDS,
+                             "http://localhost:" + gPort + "/data/test_update.xml");
   Services.prefs.setCharPref(PREF_GETADDONS_BYIDS_PERFORMANCE,
-                             "http://localhost:4444/data/test_update.xml");
+                             "http://localhost:" + gPort + "/data/test_update.xml");
   Services.prefs.setBoolPref(PREF_GETADDONS_CACHE_ENABLED, true);
   // Fake a timer event
   gInternalManager.notify(null);
@@ -1185,10 +1189,11 @@ function run_test_17() {
 // Tests that compatibility updates are applied to addons when the updated
 // compatibility data wouldn't match with strict compatibility enabled.
 function run_test_18() {
+  restartManager();
   writeInstallRDFForExtension({
     id: "addon10@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "0.1",
@@ -1212,8 +1217,7 @@ function run_test_18() {
 
       onUpdateFinished: function() {
         a10.uninstall();
-        restartManager();
-        run_test_19();
+        do_execute_soon(run_test_19);
       }
     }, AddonManager.UPDATE_WHEN_USER_REQUESTED);
   });
@@ -1222,10 +1226,11 @@ function run_test_18() {
 // Test that the update check correctly observes when an addon opts-in to
 // strict compatibility checking.
 function run_test_19() {
+  restartManager();
   writeInstallRDFForExtension({
     id: "addon11@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "0.1",
@@ -1249,8 +1254,7 @@ function run_test_19() {
 
       onUpdateFinished: function() {
         a11.uninstall();
-        restartManager();
-        run_test_20();
+        do_execute_soon(run_test_20);
       }
    }, AddonManager.UPDATE_WHEN_USER_REQUESTED);
   });
@@ -1259,10 +1263,11 @@ function run_test_19() {
 // Test that the update succeeds when the update.rdf URN contains a type prefix
 // different from the add-on type
 function run_test_20() {
+  restartManager();
   writeInstallRDFForExtension({
     id: "addon12@tests.mozilla.org",
     version: "1.0",
-    updateURL: "http://localhost:4444/data/test_update.rdf",
+    updateURL: "http://localhost:" + gPort + "/data/test_update.rdf",
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -1292,7 +1297,7 @@ function continue_test_20(install) {
   }, [
     "onInstallStarted",
     "onInstallEnded",
-  ], check_test_20);
+  ], callback_soon(check_test_20));
 }
 
 function check_test_20(install) {
@@ -1304,8 +1309,10 @@ function check_test_20(install) {
     do_check_eq(a12.version, "2.0");
     do_check_eq(a12.type, "extension");
     a12.uninstall();
-    restartManager();
 
-    end_test();
+    do_execute_soon(() => {
+      restartManager();
+      end_test();
+    });
   });
 }

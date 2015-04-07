@@ -24,18 +24,18 @@
 #include "nsCSSProperty.h"
 #include "CSSValue.h"
 #include "nsWrapperCache.h"
-#include "mozilla/dom/BindingUtils.h"
 #include "nsString.h"
 #include "nsIDOMCSSRule.h"
 #include "nsIDOMCSSValue.h"
 #include "mozilla/ErrorResult.h"
+#include "nsAutoPtr.h"
+#include "nsCOMPtr.h"
+#include "nsINode.h"
 
 // dbeabbfa-6cb3-4f5c-aec2-dd558d9d681f
 #define NS_ICSSDECLARATION_IID \
 { 0xdbeabbfa, 0x6cb3, 0x4f5c, \
  { 0xae, 0xc2, 0xdd, 0x55, 0x8d, 0x9d, 0x68, 0x1f } }
-
-class nsINode;
 
 class nsICSSDeclaration : public nsIDOMCSSStyleDeclaration,
                           public nsWrapperCache
@@ -49,6 +49,9 @@ public:
    */
   NS_IMETHOD GetPropertyValue(const nsCSSProperty aPropID,
                               nsAString& aValue) = 0;
+
+  NS_IMETHOD GetAuthoredPropertyValue(const nsAString& aPropName,
+                                      nsAString& aValue) = 0;
 
   /**
    * Method analogous to nsIDOMCSSStyleDeclaration::SetProperty.  This
@@ -75,7 +78,7 @@ public:
     nsRefPtr<mozilla::dom::CSSValue> val = GetPropertyCSSValue(aProp, error);
     if (error.Failed()) {
       return error.ErrorCode();
-  }
+    }
 
     nsCOMPtr<nsIDOMCSSValue> xpVal = do_QueryInterface(val);
     xpVal.forget(aVal);
@@ -125,6 +128,10 @@ public:
                         mozilla::ErrorResult& rv) {
     rv = GetPropertyValue(aPropName, aValue);
   }
+  void GetAuthoredPropertyValue(const nsAString& aPropName, nsString& aValue,
+                                mozilla::ErrorResult& rv) {
+    rv = GetAuthoredPropertyValue(aPropName, aValue);
+  }
   void GetPropertyPriority(const nsAString& aPropName, nsString& aPriority) {
     GetPropertyPriority(aPropName, static_cast<nsAString&>(aPriority));
   }
@@ -145,10 +152,12 @@ public:
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsICSSDeclaration, NS_ICSSDECLARATION_IID)
 
-#define NS_DECL_NSICSSDECLARATION                               \
-  NS_IMETHOD GetPropertyValue(const nsCSSProperty aPropID,    \
-                              nsAString& aValue);               \
-  NS_IMETHOD SetPropertyValue(const nsCSSProperty aPropID,    \
+#define NS_DECL_NSICSSDECLARATION                                   \
+  NS_IMETHOD GetPropertyValue(const nsCSSProperty aPropID,          \
+                              nsAString& aValue);                   \
+  NS_IMETHOD GetAuthoredPropertyValue(const nsAString& aPropName,   \
+                                      nsAString& aValue);           \
+  NS_IMETHOD SetPropertyValue(const nsCSSProperty aPropID,          \
                               const nsAString& aValue);
 
 #define NS_DECL_NSIDOMCSSSTYLEDECLARATION_HELPER \

@@ -55,7 +55,10 @@ MOZ_EXPORT void
 Dump(Writer aWriter);
 
 // A useful |WriterFun|.  If |fp| is a FILE* you want |Dump|'s output to be
-// written to, call |Dump(FpWrite, fp)|.
+// written to, call:
+//
+//   dmd::Writer writer(FpWrite, fp);
+//   dmd::Dump(writer);
 MOZ_EXPORT void
 FpWrite(void* aFp, const char* aFmt, va_list aAp);
 
@@ -74,6 +77,10 @@ struct Sizes
 // reporter for DMD.
 MOZ_EXPORT void
 SizeOf(Sizes* aSizes);
+
+// Indicates whether or not DMD is enabled.
+MOZ_EXPORT bool
+IsEnabled();
 
 } // namespace mozilla
 } // namespace dmd

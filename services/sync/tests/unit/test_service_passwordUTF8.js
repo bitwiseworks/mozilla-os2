@@ -58,6 +58,8 @@ function run_test() {
   let upd = collectionsHelper.with_updated_collection;
   let collections = collectionsHelper.collections;
 
+  ensureLegacyIdentityManager();
+
   do_test_pending();
   let server = httpd_setup({
     "/1.1/johndoe/info/collections":    login_handling(collectionsHelper.handler),
@@ -67,7 +69,7 @@ function run_test() {
   });
 
   setBasicCredentials("johndoe", JAPANESE, "irrelevant");
-  Service.serverURL = TEST_SERVER_URL;
+  Service.serverURL = server.baseURI;
 
   try {
     _("Try to log in with the password.");

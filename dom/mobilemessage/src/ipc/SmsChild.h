@@ -55,17 +55,26 @@ protected:
   virtual bool
   RecvNotifyDeliveryErrorMessage(const MobileMessageData& aMessage) MOZ_OVERRIDE;
 
-  virtual PSmsRequestChild*
-  AllocPSmsRequest(const IPCSmsRequest& aRequest) MOZ_OVERRIDE;
+  virtual bool
+  RecvNotifyReceivedSilentMessage(const MobileMessageData& aMessage) MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPSmsRequest(PSmsRequestChild* aActor) MOZ_OVERRIDE;
+  RecvNotifyReadSuccessMessage(const MobileMessageData& aMessage) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvNotifyReadErrorMessage(const MobileMessageData& aMessage) MOZ_OVERRIDE;
+
+  virtual PSmsRequestChild*
+  AllocPSmsRequestChild(const IPCSmsRequest& aRequest) MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPSmsRequestChild(PSmsRequestChild* aActor) MOZ_OVERRIDE;
 
   virtual PMobileMessageCursorChild*
-  AllocPMobileMessageCursor(const IPCMobileMessageCursor& aCursor) MOZ_OVERRIDE;
+  AllocPMobileMessageCursorChild(const IPCMobileMessageCursor& aCursor) MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPMobileMessageCursor(PMobileMessageCursorChild* aActor) MOZ_OVERRIDE;
+  DeallocPMobileMessageCursorChild(PMobileMessageCursorChild* aActor) MOZ_OVERRIDE;
 };
 
 class SmsRequestChild : public PSmsRequestChild

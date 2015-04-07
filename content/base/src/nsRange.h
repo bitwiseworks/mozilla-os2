@@ -20,14 +20,12 @@
 #include "nsWrapperCache.h"
 #include "mozilla/Attributes.h"
 
-class nsClientRect;
-class nsClientRectList;
-class nsIDOMDocumentFragment;
-
 namespace mozilla {
 class ErrorResult;
 namespace dom {
 class DocumentFragment;
+class DOMRect;
+class DOMRectList;
 }
 }
 
@@ -36,6 +34,8 @@ class nsRange MOZ_FINAL : public nsIDOMRange,
                           public nsWrapperCache
 {
   typedef mozilla::ErrorResult ErrorResult;
+  typedef mozilla::dom::DOMRect DOMRect;
+  typedef mozilla::dom::DOMRectList DOMRectList;
 
 public:
   nsRange(nsINode* aNode)
@@ -89,7 +89,7 @@ public:
 
   // nsIDOMRange interface
   NS_DECL_NSIDOMRANGE
-  
+
   nsINode* GetRoot() const
   {
     return mRoot;
@@ -215,12 +215,11 @@ public:
   void SetStartAfter(nsINode& aNode, ErrorResult& aErr);
   void SetStartBefore(nsINode& aNode, ErrorResult& aErr);
   void SurroundContents(nsINode& aNode, ErrorResult& aErr);
-  already_AddRefed<nsClientRect> GetBoundingClientRect();
-  already_AddRefed<nsClientRectList> GetClientRects();
+  already_AddRefed<DOMRect> GetBoundingClientRect();
+  already_AddRefed<DOMRectList> GetClientRects();
 
   nsINode* GetParentObject() const { return mOwner; }
-  virtual JSObject* WrapObject(JSContext* cx,
-                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE MOZ_FINAL;
+  virtual JSObject* WrapObject(JSContext* cx) MOZ_OVERRIDE MOZ_FINAL;
 
 private:
   // no copy's or assigns
@@ -235,16 +234,16 @@ private:
    */
   nsresult CutContents(mozilla::dom::DocumentFragment** frag);
 
-  static nsresult CloneParentsBetween(nsIDOMNode *aAncestor,
-                                      nsIDOMNode *aNode,
-                                      nsIDOMNode **aClosestAncestor,
-                                      nsIDOMNode **aFarthestAncestor);
+  static nsresult CloneParentsBetween(nsINode* aAncestor,
+                                      nsINode* aNode,
+                                      nsINode** aClosestAncestor,
+                                      nsINode** aFarthestAncestor);
 
 public:
 /******************************************************************************
- *  Utility routine to detect if a content node starts before a range and/or 
+ *  Utility routine to detect if a content node starts before a range and/or
  *  ends after a range.  If neither it is contained inside the range.
- *  
+ *
  *  XXX - callers responsibility to ensure node in same doc as range!
  *
  *****************************************************************************/

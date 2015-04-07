@@ -8,20 +8,12 @@
 #define mozilla_net_ASpdySession_h
 
 #include "nsAHttpTransaction.h"
-#include "nsAHttpConnection.h"
 #include "prinrval.h"
 #include "nsString.h"
 
 class nsISocketTransport;
 
 namespace mozilla { namespace net {
-
-// This is designed to handle up to 2 concrete protocol levels
-// simultaneously
-//
-// Currently supported are v3 (preferred), and v2
-// network.protocol.http.spdy.enabled.v2 (and v3) prefs can enable/disable
-// them.
 
 class ASpdySession : public nsAHttpTransaction
 {
@@ -30,7 +22,7 @@ public:
   virtual bool CanReuse() = 0;
   virtual bool RoomForMoreStreams() = 0;
   virtual PRIntervalTime IdleTime() = 0;
-  virtual void ReadTimeoutTick(PRIntervalTime now) = 0;
+  virtual uint32_t ReadTimeoutTick(PRIntervalTime now) = 0;
   virtual void DontReuse() = 0;
 
   static ASpdySession *NewSpdySession(uint32_t version,
@@ -40,7 +32,11 @@ public:
 
   virtual void PrintDiagnostics (nsCString &log) = 0;
 
-  const static uint32_t kSendingChunkSize = 4096;
+  bool ResponseTimeoutEnabled() const MOZ_OVERRIDE MOZ_FINAL {
+    return true;
+  }
+
+  const static uint32_t kSendingChunkSize = 4095;
   const static uint32_t kTCPSendBufferSize = 131072;
 
   // until we have an API that can push back on receiving data (right now
@@ -48,6 +44,13 @@ public:
   // reason to throttle with the rwin other than in server push
   // scenarios.
   const static uint32_t kInitialRwin = 256 * 1024 * 1024;
+
+  bool SoftStreamError(nsresult code)
+  {
+    return (code == NS_BASE_STREAM_CLOSED || code == NS_BINDING_FAILED ||
+            code == NS_BINDING_ABORTED || code == NS_BINDING_REDIRECTED ||
+            code == NS_BINDING_RETARGETED);
+  }
 };
 
 // this is essentially a single instantiation as a member of nsHttpHandler.
@@ -59,21 +62,17 @@ public:
   SpdyInformation();
   ~SpdyInformation() {}
 
-  // determine if a version of the protocol is enabled. The primary
-  // version is index 0, the secondary version is index 1.
+  static const uint32_t kCount = 3;
+
+  // determine if a version of the protocol is enabled for index <= kCount
   bool ProtocolEnabled(uint32_t index);
 
   // lookup a version enum based on an npn string. returns NS_OK if
   // string was known.
   nsresult GetNPNVersionIndex(const nsACString &npnString, uint8_t *result);
 
-  enum {
-    SPDY_VERSION_2 = 2,
-    SPDY_VERSION_3 = 3
-  };
-
-  uint8_t   Version[2];
-  nsCString VersionString[2];
+  uint8_t   Version[kCount];
+  nsCString VersionString[kCount];
 };
 
 }} // namespace mozilla::net

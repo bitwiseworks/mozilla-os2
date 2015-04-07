@@ -17,7 +17,7 @@
     </resources>
   </binding>
 
-  <binding id="menulist" display="xul:menu"
+  <binding id="menulist" display="xul:menu" role="xul:menulist"
            extends="chrome://global/content/bindings/menulist.xml#menulist-base">
     <content sizetopopup="pref">
       <xul:hbox class="menulist-label-box" flex="1">
@@ -66,9 +66,12 @@
       </handler>
     </handlers>
 
-    <implementation implements="nsIDOMXULMenuListElement, nsIAccessibleProvider, nsIDOMEventListener">
+    <implementation implements="nsIDOMXULMenuListElement, nsIDOMEventListener">
       <constructor>
-        this.setInitialSelection()
+        this.mInputField = null;
+        this.mSelectedInternal = null;
+        this.menuBoxObject = this.boxObject.QueryInterface(Components.interfaces.nsIMenuBoxObject);
+        this.setInitialSelection();
       </constructor>
 
       <method name="setInitialSelection">
@@ -145,14 +148,6 @@
           ]]>
         </getter>
       </property>
-
-      <field name="menuBoxObject" readonly="true">
-        this.boxObject.QueryInterface(Components.interfaces.nsIMenuBoxObject)
-      </field>
-
-      <field name="mSelectedInternal">
-        null
-      </field>
 
       <method name="contains">
         <parameter name="item"/>
@@ -387,17 +382,6 @@
         </body>
       </method>
 
-      <property name="accessibleType" readonly="true">
-        <getter>
-          <![CDATA[
-            // Droppable is currently used for the Firefox bookmarks dialog only
-            return (this.getAttribute("droppable") == "false") ?
-                   Components.interfaces.nsIAccessibleProvider.XULTextBox :
-                   Components.interfaces.nsIAccessibleProvider.XULCombobox;
-          ]]>
-        </getter>
-      </property>
-
       <destructor>
         <![CDATA[
           if (this.mSelectedInternal) {
@@ -468,8 +452,6 @@
           ]]>
         </body>
       </method>
-
-      <field name="mInputField">null</field>
 
       <property name="inputField" readonly="true">
         <getter><![CDATA[

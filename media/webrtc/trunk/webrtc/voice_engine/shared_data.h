@@ -11,18 +11,18 @@
 #ifndef WEBRTC_VOICE_ENGINE_SHARED_DATA_H
 #define WEBRTC_VOICE_ENGINE_SHARED_DATA_H
 
-#include "voice_engine_defines.h"
-
-#include "channel_manager.h"
-#include "statistics.h"
-#include "process_thread.h"
-
-#include "audio_device.h"
-#include "audio_processing.h"
+#include "webrtc/modules/audio_device/include/audio_device.h"
+#include "webrtc/modules/audio_processing/include/audio_processing.h"
+#include "webrtc/modules/utility/interface/process_thread.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/voice_engine/channel_manager.h"
+#include "webrtc/voice_engine/statistics.h"
+#include "webrtc/voice_engine/voice_engine_defines.h"
 
 class ProcessThread;
 
 namespace webrtc {
+class Config;
 class CriticalSectionWrapper;
 
 namespace voe {
@@ -34,12 +34,12 @@ class SharedData
 {
 public:
     // Public accessors.
-    WebRtc_UWord32 instance_id() const { return _instanceId; }
+    uint32_t instance_id() const { return _instanceId; }
     Statistics& statistics() { return _engineStatistics; }
     ChannelManager& channel_manager() { return _channelManager; }
     AudioDeviceModule* audio_device() { return _audioDevicePtr; }
     void set_audio_device(AudioDeviceModule* audio_device);
-    AudioProcessing* audio_processing() { return _audioProcessingModulePtr; }
+    AudioProcessing* audio_processing() { return audioproc_.get(); }
     void set_audio_processing(AudioProcessing* audio_processing);
     TransmitMixer* transmit_mixer() { return _transmitMixerPtr; }
     OutputMixer* output_mixer() { return _outputMixerPtr; }
@@ -56,23 +56,23 @@ public:
       _audioDeviceLayer = layer;
     }
 
-    WebRtc_UWord16 NumOfSendingChannels();
+    uint16_t NumOfSendingChannels();
 
     // Convenience methods for calling statistics().SetLastError().
-    void SetLastError(const WebRtc_Word32 error) const;
-    void SetLastError(const WebRtc_Word32 error, const TraceLevel level) const;
-    void SetLastError(const WebRtc_Word32 error, const TraceLevel level,
+    void SetLastError(int32_t error) const;
+    void SetLastError(int32_t error, TraceLevel level) const;
+    void SetLastError(int32_t error, TraceLevel level,
                       const char* msg) const;
 
 protected:
-    const WebRtc_UWord32 _instanceId;
+    const uint32_t _instanceId;
     CriticalSectionWrapper* _apiCritPtr;
     ChannelManager _channelManager;
     Statistics _engineStatistics;
     AudioDeviceModule* _audioDevicePtr;
     OutputMixer* _outputMixerPtr;
     TransmitMixer* _transmitMixerPtr;
-    AudioProcessing* _audioProcessingModulePtr;
+    scoped_ptr<AudioProcessing> audioproc_;
     ProcessThread* _moduleProcessThreadPtr;
 
     bool _externalRecording;
@@ -80,11 +80,11 @@ protected:
 
     AudioDeviceModule::AudioLayer _audioDeviceLayer;
 
-    SharedData();
+    SharedData(const Config& config);
     virtual ~SharedData();
 };
 
-} //  namespace voe
+}  // namespace voe
 
-} //  namespace webrtc
+}  // namespace webrtc
 #endif // WEBRTC_VOICE_ENGINE_SHARED_DATA_H

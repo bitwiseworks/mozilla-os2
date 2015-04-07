@@ -4,18 +4,46 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'accessibility'
-
 EXPORTS += [
-    'xpcAccEvents.h',
+    'xpcAccessibleHyperText.h',
+    'xpcAccessibleSelectable.h',
+    'xpcAccessibleValue.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsAccessibleRelation.cpp',
-    'xpcAccEvents.cpp',
+    'xpcAccessibleHyperText.cpp',
+    'xpcAccessibleSelectable.cpp',
     'xpcAccessibleTable.cpp',
     'xpcAccessibleTableCell.cpp',
+    'xpcAccessibleTextRange.cpp',
+    'xpcAccessibleValue.cpp',
 ]
 
-LIBRARY_NAME = 'accessibility_xpcom_s'
+GENERATED_SOURCES += [
+    'xpcAccEvents.cpp',
+]
 
+LOCAL_INCLUDES += [
+    '../base',
+    '../generic',
+]
+
+if CONFIG['MOZ_ENABLE_GTK']:
+    LOCAL_INCLUDES += [
+        '../atk',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    LOCAL_INCLUDES += [
+        '../windows/msaa',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    LOCAL_INCLUDES += [
+        '../mac',
+    ]
+else:
+    LOCAL_INCLUDES += [
+        '../other',
+    ]
+
+FINAL_LIBRARY = 'xul'

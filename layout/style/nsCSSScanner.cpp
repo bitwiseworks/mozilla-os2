@@ -8,12 +8,11 @@
 
 #include "nsCSSScanner.h"
 #include "nsStyleUtil.h"
+#include "nsISupportsImpl.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/css/ErrorReporter.h"
 #include "mozilla/Likely.h"
-#include "mozilla/Util.h"
 #include <algorithm>
-
-using mozilla::ArrayLength;
 
 /* Character class tables and related helper functions. */
 
@@ -76,8 +75,8 @@ static const uint8_t gLexTable[] = {
  SUIJ, SUIJ, SUIJ,   SU,   SU,   SU,   SU,    S,
 };
 
-MOZ_STATIC_ASSERT(MOZ_ARRAY_LENGTH(gLexTable) == 128,
-                  "gLexTable expected to cover all 128 ASCII characters");
+static_assert(MOZ_ARRAY_LENGTH(gLexTable) == 128,
+              "gLexTable expected to cover all 128 ASCII characters");
 
 #undef I
 #undef J
@@ -138,21 +137,24 @@ IsVertSpace(int32_t ch) {
 }
 
 /**
- * True if 'ch' is a character that can appear in the middle of an
- * identifier.
+ * True if 'ch' is a character that can appear in the middle of an identifier.
+ * This includes U+0000 since it is handled as U+FFFD, but for purposes of
+ * GatherText it should not be included in IsOpenCharClass.
  */
 static inline bool
 IsIdentChar(int32_t ch) {
-  return IsOpenCharClass(ch, IS_IDCHAR);
+  return IsOpenCharClass(ch, IS_IDCHAR) || ch == 0;
 }
 
 /**
  * True if 'ch' is a character that by itself begins an identifier.
+ * This includes U+0000 since it is handled as U+FFFD, but for purposes of
+ * GatherText it should not be included in IsOpenCharClass.
  * (This is a subset of IsIdentChar.)
  */
 static inline bool
 IsIdentStart(int32_t ch) {
-  return IsOpenCharClass(ch, IS_IDSTART);
+  return IsOpenCharClass(ch, IS_IDSTART) || ch == 0;
 }
 
 /**
@@ -257,13 +259,13 @@ nsCSSToken::AppendToString(nsString& aBuffer) const
     case eCSSToken_URL:
     case eCSSToken_Bad_URL:
       aBuffer.AppendLiteral("url(");
-      if (mSymbol != PRUnichar(0)) {
+      if (mSymbol != char16_t(0)) {
         nsStyleUtil::AppendEscapedCSSString(mIdent, aBuffer, mSymbol);
       } else {
         aBuffer.Append(mIdent);
       }
       if (mType == eCSSToken_URL) {
-        aBuffer.Append(PRUnichar(')'));
+        aBuffer.Append(char16_t(')'));
       }
       break;
 
@@ -277,7 +279,7 @@ nsCSSToken::AppendToString(nsString& aBuffer) const
 
     case eCSSToken_Percentage:
       aBuffer.AppendFloat(mNumber * 100.0f);
-      aBuffer.Append(PRUnichar('%'));
+      aBuffer.Append(char16_t('%'));
       break;
 
     case eCSSToken_Dimension:
@@ -346,9 +348,12 @@ nsCSSScanner::nsCSSScanner(const nsAString& aBuffer, uint32_t aLineNumber)
   , mTokenLineOffset(0)
   , mTokenOffset(0)
   , mRecordStartOffset(0)
+  , mEOFCharacters(eEOFCharacters_None)
   , mReporter(nullptr)
   , mSVGMode(false)
   , mRecording(false)
+  , mSeenBadToken(false)
+  , mSeenVariableReference(false)
 {
   MOZ_COUNT_CTOR(nsCSSScanner);
 }
@@ -381,6 +386,21 @@ nsCSSScanner::StopRecording(nsString& aBuffer)
   aBuffer.Append(mBuffer + mRecordStartOffset,
                  mOffset - mRecordStartOffset);
 }
+
+uint32_t
+nsCSSScanner::RecordingLength() const
+{
+  MOZ_ASSERT(mRecording, "haven't started recording");
+  return mOffset - mRecordStartOffset;
+}
+
+#ifdef DEBUG
+bool
+nsCSSScanner::IsRecording() const
+{
+  return mRecording;
+}
+#endif
 
 nsDependentSubstring
 nsCSSScanner::GetCurrentLine() const
@@ -475,6 +495,32 @@ nsCSSScanner::Backup(uint32_t n)
 #endif
 }
 
+void
+nsCSSScanner::SavePosition(nsCSSScannerPosition& aState)
+{
+  aState.mOffset = mOffset;
+  aState.mLineNumber = mLineNumber;
+  aState.mLineOffset = mLineOffset;
+  aState.mTokenLineNumber = mTokenLineNumber;
+  aState.mTokenLineOffset = mTokenLineOffset;
+  aState.mTokenOffset = mTokenOffset;
+  aState.mInitialized = true;
+}
+
+void
+nsCSSScanner::RestoreSavedPosition(const nsCSSScannerPosition& aState)
+{
+  MOZ_ASSERT(aState.mInitialized, "have not saved state");
+  if (aState.mInitialized) {
+    mOffset = aState.mOffset;
+    mLineNumber = aState.mLineNumber;
+    mLineOffset = aState.mLineOffset;
+    mTokenLineNumber = aState.mTokenLineNumber;
+    mTokenLineOffset = aState.mTokenLineOffset;
+    mTokenOffset = aState.mTokenOffset;
+  }
+}
+
 /**
  * Skip over a sequence of whitespace characters (vertical or
  * horizontal) starting at the current read position.
@@ -507,13 +553,22 @@ nsCSSScanner::SkipComment()
     int32_t ch = Peek();
     if (ch < 0) {
       mReporter->ReportUnexpectedEOF("PECommentEOF");
+      SetEOFCharacters(eEOFCharacters_Asterisk | eEOFCharacters_Slash);
       return;
     }
-    if (ch == '*' && Peek(1) == '/') {
-      Advance(2);
-      return;
-    }
-    if (IsVertSpace(ch)) {
+    if (ch == '*') {
+      Advance();
+      ch = Peek();
+      if (ch < 0) {
+        mReporter->ReportUnexpectedEOF("PECommentEOF");
+        SetEOFCharacters(eEOFCharacters_Slash);
+        return;
+      }
+      if (ch == '/') {
+        Advance();
+        return;
+      }
+    } else if (IsVertSpace(ch)) {
       AdvanceLine();
     } else {
       Advance();
@@ -538,8 +593,11 @@ nsCSSScanner::GatherEscape(nsString& aOutput, bool aInString)
     // the backslash on the floor.  Otherwise, we want to treat it as a U+FFFD
     // character.
     Advance();
-    if (!aInString) {
-      aOutput.Append(0xFFFD);
+    if (aInString) {
+      SetEOFCharacters(eEOFCharacters_DropBackslash);
+    } else {
+      aOutput.Append(UCS2_REPLACEMENT_CHAR);
+      SetEOFCharacters(eEOFCharacters_ReplacementChar);
     }
     return true;
   }
@@ -561,7 +619,11 @@ nsCSSScanner::GatherEscape(nsString& aOutput, bool aInString)
     // return, or form feed) can be escaped with a backslash to remove
     // its special meaning." -- CSS2.1 section 4.1.3
     Advance(2);
-    aOutput.Append(ch);
+    if (ch == 0) {
+      aOutput.Append(UCS2_REPLACEMENT_CHAR);
+    } else {
+      aOutput.Append(ch);
+    }
     return true;
   }
 
@@ -584,22 +646,21 @@ nsCSSScanner::GatherEscape(nsString& aOutput, bool aInString)
     ch = Peek();
   } while (i < 6 && IsHexDigit(ch));
 
-  // Silently deleting \0 opens a content-filtration loophole (see
-  // bug 228856), so what we do instead is pretend the "cancels the
-  // meaning of special characters" rule applied.
+  // "Interpret the hex digits as a hexadecimal number. If this number is zero,
+  // or is greater than the maximum allowed codepoint, return U+FFFD
+  // REPLACEMENT CHARACTER" -- CSS Syntax Level 3
   if (MOZ_UNLIKELY(val == 0)) {
-    do {
-      aOutput.Append('0');
-    } while (--i);
+    aOutput.Append(UCS2_REPLACEMENT_CHAR);
   } else {
     AppendUCS4ToUTF16(ENSURE_VALID_CHAR(val), aOutput);
-    // Consume exactly one whitespace character after a nonzero
-    // hexadecimal escape sequence.
-    if (IsVertSpace(ch)) {
-      AdvanceLine();
-    } else if (IsHorzSpace(ch)) {
-      Advance();
-    }
+  }
+
+  // Consume exactly one whitespace character after a
+  // hexadecimal escape sequence.
+  if (IsVertSpace(ch)) {
+    AdvanceLine();
+  } else if (IsHorzSpace(ch)) {
+    Advance();
   }
   return true;
 }
@@ -644,6 +705,11 @@ nsCSSScanner::GatherText(uint8_t aClass, nsString& aText)
     int32_t ch = Peek();
     MOZ_ASSERT(!IsOpenCharClass(ch, aClass),
                "should not have exited the inner loop");
+    if (ch == 0) {
+      Advance();
+      aText.Append(UCS2_REPLACEMENT_CHAR);
+      continue;
+    }
 
     if (ch != '\\') {
       break;
@@ -666,6 +732,8 @@ bool
 nsCSSScanner::ScanIdent(nsCSSToken& aToken)
 {
   if (MOZ_UNLIKELY(!GatherText(IS_IDCHAR, aToken.mIdent))) {
+    MOZ_ASSERT(Peek() == '\\',
+               "unexpected IsIdentStart character that did not begin an ident");
     aToken.mSymbol = Peek();
     Advance();
     return true;
@@ -680,6 +748,8 @@ nsCSSScanner::ScanIdent(nsCSSToken& aToken)
   aToken.mType = eCSSToken_Function;
   if (aToken.mIdent.LowerCaseEqualsLiteral("url")) {
     NextURL(aToken);
+  } else if (aToken.mIdent.LowerCaseEqualsLiteral("var")) {
+    mSeenVariableReference = true;
   }
   return true;
 }
@@ -811,7 +881,7 @@ nsCSSScanner::ScanNumber(nsCSSToken& aToken)
   }
 
   bool gotE = false;
-  if (IsSVGMode() && (c == 'e' || c == 'E')) {
+  if (c == 'e' || c == 'E') {
     int32_t expSignChar = Peek(1);
     int32_t nextChar = Peek(2);
     if (IsDigit(expSignChar) ||
@@ -890,7 +960,7 @@ nsCSSScanner::ScanString(nsCSSToken& aToken)
   int32_t aStop = Peek();
   MOZ_ASSERT(aStop == '"' || aStop == '\'', "should not have been called");
   aToken.mType = eCSSToken_String;
-  aToken.mSymbol = PRUnichar(aStop); // Remember how it's quoted.
+  aToken.mSymbol = char16_t(aStop); // Remember how it's quoted.
   Advance();
 
   for (;;) {
@@ -898,6 +968,8 @@ nsCSSScanner::ScanString(nsCSSToken& aToken)
 
     int32_t ch = Peek();
     if (ch == -1) {
+      AddEOFCharacters(aStop == '"' ? eEOFCharacters_DoubleQuote :
+                                      eEOFCharacters_SingleQuote);
       break; // EOF ends a string token with no error.
     }
     if (ch == aStop) {
@@ -911,6 +983,7 @@ nsCSSScanner::ScanString(nsCSSToken& aToken)
       continue;
     }
 
+    mSeenBadToken = true;
     aToken.mType = eCSSToken_Bad_String;
     mReporter->ReportUnexpected("SEUnterminatedString", aToken);
     break;
@@ -1002,6 +1075,72 @@ nsCSSScanner::ScanURange(nsCSSToken& aResult)
   return true;
 }
 
+#ifdef DEBUG
+/* static */ void
+nsCSSScanner::AssertEOFCharactersValid(uint32_t c)
+{
+  MOZ_ASSERT(c == eEOFCharacters_None ||
+             c == eEOFCharacters_ReplacementChar ||
+             c == eEOFCharacters_Slash ||
+             c == (eEOFCharacters_Asterisk |
+                   eEOFCharacters_Slash) ||
+             c == eEOFCharacters_DoubleQuote ||
+             c == eEOFCharacters_SingleQuote ||
+             c == (eEOFCharacters_DropBackslash |
+                   eEOFCharacters_DoubleQuote) ||
+             c == (eEOFCharacters_DropBackslash |
+                   eEOFCharacters_SingleQuote) ||
+             c == eEOFCharacters_CloseParen ||
+             c == (eEOFCharacters_ReplacementChar |
+                   eEOFCharacters_CloseParen) ||
+             c == (eEOFCharacters_DoubleQuote |
+                   eEOFCharacters_CloseParen) ||
+             c == (eEOFCharacters_SingleQuote |
+                   eEOFCharacters_CloseParen) ||
+             c == (eEOFCharacters_DropBackslash |
+                   eEOFCharacters_DoubleQuote |
+                   eEOFCharacters_CloseParen) ||
+             c == (eEOFCharacters_DropBackslash |
+                   eEOFCharacters_SingleQuote |
+                   eEOFCharacters_CloseParen),
+             "invalid EOFCharacters value");
+}
+#endif
+
+void
+nsCSSScanner::SetEOFCharacters(uint32_t aEOFCharacters)
+{
+  mEOFCharacters = EOFCharacters(aEOFCharacters);
+}
+
+void
+nsCSSScanner::AddEOFCharacters(uint32_t aEOFCharacters)
+{
+  mEOFCharacters = EOFCharacters(mEOFCharacters | aEOFCharacters);
+}
+
+static const char16_t kImpliedEOFCharacters[] = {
+  UCS2_REPLACEMENT_CHAR, '*', '/', '"', '\'', ')', 0
+};
+
+/* static */ void
+nsCSSScanner::AppendImpliedEOFCharacters(EOFCharacters aEOFCharacters,
+                                         nsAString& aResult)
+{
+  // First, ignore eEOFCharacters_DropBackslash.
+  uint32_t c = aEOFCharacters >> 1;
+
+  // All of the remaining EOFCharacters bits represent appended characters,
+  // and the bits are in the order that they need appending.
+  for (const char16_t* p = kImpliedEOFCharacters; *p && c; p++, c >>= 1) {
+    if (c & 1) {
+      aResult.Append(*p);
+    }
+  }
+
+  MOZ_ASSERT(c == 0, "too many bits in mEOFCharacters");
+}
+
 /**
  * Consume the part of an URL token after the initial 'url('.  Caller
  * is assumed to have consumed 'url(' already.  Will always produce
@@ -1034,7 +1173,7 @@ nsCSSScanner::NextURL(nsCSSToken& aToken)
 
   } else {
     // Otherwise, this is the start of a non-quoted url (which may be empty).
-    aToken.mSymbol = PRUnichar(0);
+    aToken.mSymbol = char16_t(0);
     GatherText(IS_URL_CHAR, aToken.mIdent);
   }
 
@@ -1044,7 +1183,11 @@ nsCSSScanner::NextURL(nsCSSToken& aToken)
   if (MOZ_LIKELY(ch < 0 || ch == ')')) {
     Advance();
     aToken.mType = eCSSToken_URL;
+    if (ch < 0) {
+      AddEOFCharacters(eEOFCharacters_CloseParen);
+    }
   } else {
+    mSeenBadToken = true;
     aToken.mType = eCSSToken_Bad_URL;
   }
   return true;
@@ -1134,7 +1277,7 @@ nsCSSScanner::Next(nsCSSToken& aToken, bool aSkipWS)
   if (ch == '-') {
     int32_t c2 = Peek(1);
     int32_t c3 = Peek(2);
-    if (IsIdentStart(c2)) {
+    if (IsIdentStart(c2) || (c2 == '-' && c3 != '>')) {
       return ScanIdent(aToken);
     }
     if (IsDigit(c2) || (c2 == '.' && IsDigit(c3))) {
@@ -1182,5 +1325,46 @@ nsCSSScanner::Next(nsCSSToken& aToken, bool aSkipWS)
   // Otherwise, a symbol (DELIM).
   aToken.mSymbol = ch;
   Advance();
+  return true;
+}
+
+/* nsCSSGridTemplateAreaScanner methods. */
+
+nsCSSGridTemplateAreaScanner::nsCSSGridTemplateAreaScanner(const nsAString& aBuffer)
+  : mBuffer(aBuffer.BeginReading())
+  , mOffset(0)
+  , mCount(aBuffer.Length())
+{
+}
+
+bool
+nsCSSGridTemplateAreaScanner::Next(nsCSSGridTemplateAreaToken& aTokenResult)
+{
+  int32_t ch;
+  // Skip whitespace
+  do {
+    if (mOffset >= mCount) {
+      return false;
+    }
+    ch = mBuffer[mOffset];
+    mOffset++;
+  } while (IsWhitespace(ch));
+
+  if (IsOpenCharClass(ch, IS_IDCHAR)) {
+    // Named cell token
+    uint32_t start = mOffset - 1;  // offset of |ch|
+    while (mOffset < mCount && IsOpenCharClass(mBuffer[mOffset], IS_IDCHAR)) {
+      mOffset++;
+    }
+    aTokenResult.mName.Assign(&mBuffer[start], mOffset - start);
+    aTokenResult.isTrash = false;
+  } else if (ch == '.') {
+    // Null cell token
+    aTokenResult.mName.Truncate();
+    aTokenResult.isTrash = false;
+  } else {
+    // Trash token
+    aTokenResult.isTrash = true;
+  }
   return true;
 }

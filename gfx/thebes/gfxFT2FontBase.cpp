@@ -7,6 +7,8 @@
 #include "gfxFT2Utils.h"
 #include "harfbuzz/hb.h"
 #include "mozilla/Likely.h"
+#include "gfxFontConstants.h"
+#include "gfxFontUtils.h"
 
 using namespace mozilla::gfx;
 
@@ -91,7 +93,7 @@ gfxFT2FontBase::GetGlyph(uint32_t aCharCode)
 void
 gfxFT2FontBase::GetGlyphExtents(uint32_t aGlyph, cairo_text_extents_t* aExtents)
 {
-    NS_PRECONDITION(aExtents != NULL, "aExtents must not be NULL");
+    NS_PRECONDITION(aExtents != nullptr, "aExtents must not be NULL");
 
     cairo_glyph_t glyphs[1];
     glyphs[0].index = aGlyph;
@@ -115,7 +117,9 @@ gfxFT2FontBase::GetMetrics()
         new(&mMetrics) gfxFont::Metrics(); // zero initialize
         mSpaceGlyph = 0;
     } else {
-        gfxFT2LockedFace(this).GetMetrics(&mMetrics, &mSpaceGlyph);
+        gfxFT2LockedFace face(this);
+        mFUnitsConvFactor = face.XScale();
+        face.GetMetrics(&mMetrics, &mSpaceGlyph);
     }
 
     SanitizeMetrics(&mMetrics, false);
@@ -154,6 +158,10 @@ gfxFT2FontBase::GetGlyph(uint32_t unicode, uint32_t variation_selector)
             gfxFT2LockedFace(this).GetUVSGlyph(unicode, variation_selector);
         if (id)
             return id;
+        id = gfxFontUtils::GetUVSFallback(unicode, variation_selector);
+        if (id) {
+            unicode = id;
+        }
     }
 
     return GetGlyph(unicode);
@@ -218,15 +226,15 @@ gfxFT2FontBase::ConstructFontOptions()
   const gfxFontStyle* style = this->GetStyle();
   if (style->style == NS_FONT_STYLE_ITALIC) {
     if (style->weight == NS_FONT_WEIGHT_BOLD) {
-      mFontOptions.mStyle = FONT_STYLE_BOLD_ITALIC;
+      mFontOptions.mStyle = FontStyle::BOLD_ITALIC;
     } else {
-      mFontOptions.mStyle = FONT_STYLE_ITALIC;
+      mFontOptions.mStyle = FontStyle::ITALIC;
     }
   } else {
     if (style->weight == NS_FONT_WEIGHT_BOLD) {
-      mFontOptions.mStyle = FONT_STYLE_BOLD;
+      mFontOptions.mStyle = FontStyle::BOLD;
     } else {
-      mFontOptions.mStyle = FONT_STYLE_NORMAL;
+      mFontOptions.mStyle = FontStyle::NORMAL;
     }
   }
 }

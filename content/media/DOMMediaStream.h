@@ -8,13 +8,12 @@
 
 #include "nsIDOMMediaStream.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsIPrincipal.h"
 #include "nsWrapperCache.h"
-#include "nsIDOMWindow.h"
 #include "StreamBuffer.h"
-#include "nsIRunnable.h"
+#include "nsIDOMWindow.h"
 
 class nsXPCClassInfo;
+class nsIPrincipal;
 
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
 // GetTickCount() and conflicts with NS_DECL_NSIDOMMEDIASTREAM, containing
@@ -38,6 +37,8 @@ class MediaStreamTrack;
 class AudioStreamTrack;
 class VideoStreamTrack;
 }
+
+class MediaStreamDirectListener;
 
 /**
  * DOM wrapper for MediaStreams.
@@ -63,15 +64,30 @@ public:
   {
     return mWindow;
   }
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   // WebIDL
   double CurrentTime();
+
   void GetAudioTracks(nsTArray<nsRefPtr<AudioStreamTrack> >& aTracks);
   void GetVideoTracks(nsTArray<nsRefPtr<VideoStreamTrack> >& aTracks);
 
-  MediaStream* GetStream() { return mStream; }
+  MediaStream* GetStream() const { return mStream; }
+
+  /**
+   * Overridden in DOMLocalMediaStreams to allow getUserMedia to pass
+   * data directly to RTCPeerConnection without going through graph queuing.
+   * Returns a bool to let us know if direct data will be delivered.
+   */
+  virtual bool AddDirectListener(MediaStreamDirectListener *aListener) { return false; }
+  virtual void RemoveDirectListener(MediaStreamDirectListener *aListener) {}
+
+  /**
+   * Overridden in DOMLocalMediaStreams to allow getUserMedia to disable
+   * media at the SourceMediaStream.
+   */
+  virtual void SetTrackEnabled(TrackID aTrackID, bool aEnabled);
+
   bool IsFinished();
   /**
    * Returns a principal indicating who may access this stream. The stream contents
@@ -93,6 +109,10 @@ public:
    * will only be called during a forced shutdown due to application exit.
    */
   void NotifyMediaStreamGraphShutdown();
+  /**
+   * Called when the main-thread state of the MediaStream changed.
+   */
+  void NotifyStreamStateChanged();
 
   // Indicate what track types we eventually expect to add to this stream
   enum {
@@ -143,13 +163,26 @@ public:
   // We only care about track additions, we'll fire the notification even if
   // some of the tracks have been removed.
   // Takes ownership of aCallback.
+  // If GetExpectedTracks() returns 0, the callback will be fired as soon as there are any tracks.
   void OnTracksAvailable(OnTracksAvailableCallback* aCallback);
+
+  /**
+   * Add an nsISupports object that this stream will keep alive as long as
+   * the stream is not finished.
+   */
+  void AddConsumerToKeepAlive(nsISupports* aConsumer)
+  {
+    if (!IsFinished() && !mNotifiedOfMediaStreamGraphShutdown) {
+      mConsumersToKeepAlive.AppendElement(aConsumer);
+    }
+  }
 
 protected:
   void Destroy();
   void InitSourceStream(nsIDOMWindow* aWindow, TrackTypeHints aHintContents);
   void InitTrackUnionStream(nsIDOMWindow* aWindow, TrackTypeHints aHintContents);
   void InitStreamCommon(MediaStream* aStream);
+
   void CheckTracksAvailable();
 
   class StreamListener;
@@ -173,6 +206,9 @@ protected:
 
   nsTArray<nsAutoPtr<OnTracksAvailableCallback> > mRunOnTracksAvailable;
 
+  // Keep these alive until the stream finishes
+  nsTArray<nsCOMPtr<nsISupports> > mConsumersToKeepAlive;
+
   // Indicate what track types we eventually expect to add to this stream
   uint8_t mHintContents;
   // Indicate what track types have been added to this stream
@@ -189,8 +225,7 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   virtual void Stop();
 

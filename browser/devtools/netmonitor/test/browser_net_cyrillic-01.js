@@ -9,7 +9,7 @@ function test() {
   initNetMonitor(CYRILLIC_URL).then(([aTab, aDebuggee, aMonitor]) => {
     info("Starting test... ");
 
-    let { document, SourceEditor, NetMonitorView } = aMonitor.panelWin;
+    let { document, Editor, NetMonitorView } = aMonitor.panelWin;
     let { RequestsMenu } = NetMonitorView;
 
     RequestsMenu.lazyUpdate = false;
@@ -26,10 +26,13 @@ function test() {
       EventUtils.sendMouseEvent({ type: "mousedown" },
         document.querySelectorAll("#details-pane tab")[3]);
 
-      NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
+      let RESPONSE_BODY_DISPLAYED = aMonitor.panelWin.EVENTS.RESPONSE_BODY_DISPLAYED;
+      waitFor(aMonitor.panelWin, RESPONSE_BODY_DISPLAYED).then(() =>
+        NetMonitorView.editor("#response-content-textarea")
+      ).then((aEditor) => {
         is(aEditor.getText().indexOf("\u044F"), 26, // я
           "The text shown in the source editor is incorrect.");
-        is(aEditor.getMode(), SourceEditor.MODES.TEXT,
+        is(aEditor.getMode(), Editor.modes.text,
           "The mode active in the source editor is incorrect.");
 
         teardown(aMonitor).then(finish);

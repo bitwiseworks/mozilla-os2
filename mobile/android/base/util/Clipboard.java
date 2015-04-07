@@ -9,24 +9,27 @@ import android.content.Context;
 import android.os.Build;
 import android.util.Log;
 
+import org.mozilla.gecko.mozglue.generatorannotations.WrapElementForJNI;
+
 import java.util.concurrent.SynchronousQueue;
 
 public final class Clipboard {
     private static Context mContext;
-    private final static String LOG_TAG = "Clipboard";
+    private final static String LOGTAG = "GeckoClipboard";
     private final static SynchronousQueue<String> sClipboardQueue = new SynchronousQueue<String>();
 
     private Clipboard() {
     }
 
-    public static void init(Context c) {
+    public static void init(final Context c) {
         if (mContext != null) {
-            Log.w(LOG_TAG, "Clipboard.init() called twice!");
+            Log.w(LOGTAG, "Clipboard.init() called twice!");
             return;
         }
-        mContext = c;
+        mContext = c.getApplicationContext();
     }
 
+    @WrapElementForJNI(stubName = "GetClipboardTextWrapper")
     public static String getText() {
         // If we're on the UI thread or the background thread, we have a looper on the thread
         // and can just call this directly. For any other threads, post the call to the
@@ -52,13 +55,14 @@ public final class Clipboard {
         }
     }
 
+    @WrapElementForJNI(stubName = "SetClipboardText")
     public static void setText(final CharSequence text) {
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             @SuppressWarnings("deprecation")
             public void run() {
                 if (Build.VERSION.SDK_INT >= 11) {
-                    android.content.ClipboardManager cm = getClipboardManager11(mContext);
+                    android.content.ClipboardManager cm = getClipboardManager(mContext);
                     ClipData clip = ClipData.newPlainText("Text", text);
                     try {
                         cm.setPrimaryClip(clip);
@@ -68,20 +72,44 @@ public final class Clipboard {
                         // Fortunately, the text is still successfully copied to the clipboard.
                     }
                 } else {
-                    android.text.ClipboardManager cm = getClipboardManager(mContext);
+                    android.text.ClipboardManager cm = getDeprecatedClipboardManager(mContext);
                     cm.setText(text);
                 }
             }
         });
     }
 
-    private static android.content.ClipboardManager getClipboardManager11(Context context) {
+    /**
+     * Returns true if the clipboard is nonempty, false otherwise.
+     *
+     * @return true if the clipboard is nonempty, false otherwise.
+     */
+    @WrapElementForJNI
+    public static boolean hasText() {
+        if (Build.VERSION.SDK_INT >= 11) {
+            android.content.ClipboardManager cm = getClipboardManager(mContext);
+            return cm.hasPrimaryClip();
+        }
+
+        android.text.ClipboardManager cm = getDeprecatedClipboardManager(mContext);
+        return cm.hasText();
+    }
+
+    /**
+     * Deletes all text from the clipboard.
+     */
+    @WrapElementForJNI
+    public static void clearText() {
+        setText(null);
+    }
+
+    private static android.content.ClipboardManager getClipboardManager(Context context) {
         // In API Level 11 and above, CLIPBOARD_SERVICE returns android.content.ClipboardManager,
         // which is a subclass of android.text.ClipboardManager.
         return (android.content.ClipboardManager) mContext.getSystemService(Context.CLIPBOARD_SERVICE);
     }
 
-    private static android.text.ClipboardManager getClipboardManager(Context context) {
+    private static android.text.ClipboardManager getDeprecatedClipboardManager(Context context) {
         return (android.text.ClipboardManager) mContext.getSystemService(Context.CLIPBOARD_SERVICE);
     }
 
@@ -91,7 +119,7 @@ public final class Clipboard {
     @SuppressWarnings("deprecation")
     private static String getClipboardTextImpl() {
         if (Build.VERSION.SDK_INT >= 11) {
-            android.content.ClipboardManager cm = getClipboardManager11(mContext);
+            android.content.ClipboardManager cm = getClipboardManager(mContext);
             if (cm.hasPrimaryClip()) {
                 ClipData clip = cm.getPrimaryClip();
                 if (clip != null) {
@@ -100,7 +128,7 @@ public final class Clipboard {
                 }
             }
         } else {
-            android.text.ClipboardManager cm = getClipboardManager(mContext);
+            android.text.ClipboardManager cm = getDeprecatedClipboardManager(mContext);
             if (cm.hasText()) {
                 return cm.getText().toString();
             }

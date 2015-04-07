@@ -20,23 +20,17 @@ interface HTMLAreaElement : HTMLElement {
            attribute DOMString coords;
            [SetterThrows]
            attribute DOMString shape;
-  // No support for stringifier attributes yet
-  //[SetterThrows]
-  //stringifier attribute DOMString href;
-  stringifier;
-           [SetterThrows]
-           attribute DOMString href;
            [SetterThrows]
            attribute DOMString target;
            [SetterThrows]
            attribute DOMString download;
            [SetterThrows]
            attribute DOMString ping;
+           [SetterThrows]
+           attribute DOMString rel;
+  readonly attribute DOMTokenList relList;
 
   // not implemented.
-  //        [SetterThrows]
-  //       attribute DOMString rel;
-  //readonly attribute DOMTokenList relList;
   //
   //       [SetterThrows]
   //       attribute DOMString hreflang;

@@ -182,14 +182,19 @@ class CxxCodeGen(CodePrinter, Visitor):
 
         if md.inline:
             self.write('inline ')
+        if md.inline:
+            self.write('MOZ_NEVER_INLINE ')
         if md.static:
             self.write('static ')
         if md.virtual:
             self.write('virtual ')
         if md.ret:
-            md.ret.accept(self)
-            self.println()
-            self.printdent()
+            if md.only_for_definition:
+                self.write('auto ')
+            else:
+                md.ret.accept(self)
+                self.println()
+                self.printdent()
         if md.typeop is not None:
             self.write('operator ')
             md.typeop.accept(self)
@@ -202,6 +207,9 @@ class CxxCodeGen(CodePrinter, Visitor):
 
         if md.const:
             self.write(' const')
+        if md.ret and md.only_for_definition:
+            self.write(' -> ')
+            md.ret.accept(self)
         if md.warn_unused:
             self.write(' NS_WARN_UNUSED_RESULT')
         if md.pure:

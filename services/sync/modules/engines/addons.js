@@ -48,7 +48,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
                                   "resource://gre/modules/AddonManager.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository",
-                                  "resource://gre/modules/AddonRepository.jsm");
+                                  "resource://gre/modules/addons/AddonRepository.jsm");
 
 this.EXPORTED_SYMBOLS = ["AddonsEngine"];
 
@@ -655,9 +655,6 @@ AddonsStore.prototype = {
  */
 function AddonsTracker(name, engine) {
   Tracker.call(this, name, engine);
-
-  Svc.Obs.add("weave:engine:start-tracking", this);
-  Svc.Obs.add("weave:engine:stop-tracking", this);
 }
 AddonsTracker.prototype = {
   __proto__: Tracker.prototype,
@@ -691,20 +688,16 @@ AddonsTracker.prototype = {
     this.score += SCORE_INCREMENT_XLARGE;
   },
 
-  observe: function(subject, topic, data) {
-    switch (topic) {
-      case "weave:engine:start-tracking":
-        if (this.engine.enabled) {
-          this.reconciler.startListening();
-        }
-
-        this.reconciler.addChangeListener(this);
-        break;
-
-      case "weave:engine:stop-tracking":
-        this.reconciler.removeChangeListener(this);
-        this.reconciler.stopListening();
-        break;
+  startTracking: function() {
+    if (this.engine.enabled) {
+      this.reconciler.startListening();
     }
-  }
+
+    this.reconciler.addChangeListener(this);
+  },
+
+  stopTracking: function() {
+    this.reconciler.removeChangeListener(this);
+    this.reconciler.stopListening();
+  },
 };

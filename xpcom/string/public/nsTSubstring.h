@@ -3,8 +3,10 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+// IWYU pragma: private, include "nsString.h"
 
-// IWYU pragma: private, include "nsAString.h"
+#include "mozilla/Casting.h"
+#include "mozilla/MemoryReporting.h"
 
 #ifndef MOZILLA_INTERNAL_API
 #error Cannot use internal string classes without MOZILLA_INTERNAL_API defined. Use the frozen header nsStringAPI.h instead.
@@ -129,7 +131,7 @@ class nsTSubstring_CharT
       char_iterator BeginWriting()
         {
           if (!EnsureMutable())
-            NS_RUNTIMEABORT("OOM");
+            NS_ABORT_OOM(mLength);
 
           return mData;
         }
@@ -142,7 +144,7 @@ class nsTSubstring_CharT
       char_iterator EndWriting()
         {
           if (!EnsureMutable())
-            NS_RUNTIMEABORT("OOM");
+            NS_ABORT_OOM(mLength);
 
           return mData + mLength;
         }
@@ -199,7 +201,11 @@ class nsTSubstring_CharT
          */
 
         // returns pointer to string data (not necessarily null-terminated)
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      char16ptr_t Data() const
+#else
       const char_type *Data() const
+#endif
         {
           return mData;
         }
@@ -209,9 +215,19 @@ class nsTSubstring_CharT
           return mLength;
         }
 
+      uint32_t Flags() const
+        {
+          return mFlags;
+        }
+
       bool IsEmpty() const
         {
           return mLength == 0;
+        }
+
+      bool IsLiteral() const
+        {
+          return (mFlags & F_LITERAL) != 0;
         }
 
       bool IsVoid() const
@@ -262,6 +278,17 @@ class nsTSubstring_CharT
       bool NS_FASTCALL Equals( const char_type* data ) const;
       bool NS_FASTCALL Equals( const char_type* data, const comparator_type& comp ) const;
 
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      bool NS_FASTCALL Equals( char16ptr_t data ) const
+        {
+          return Equals(static_cast<const char16_t*>(data));
+        }
+      bool NS_FASTCALL Equals( char16ptr_t data, const comparator_type& comp ) const
+        {
+          return Equals(static_cast<const char16_t*>(data), comp);
+        }
+#endif
+
         /**
          * An efficient comparison with ASCII that can be used even
          * for wide strings. Call this version when you know the
@@ -281,24 +308,11 @@ class nsTSubstring_CharT
     // non-constant char array variable. Use EqualsASCII for them.
     // The template trick to acquire the array length at compile time without
     // using a macro is due to Corey Kosak, with much thanks.
-#ifdef NS_DISABLE_LITERAL_TEMPLATE
-      inline bool EqualsLiteral( const char* str ) const
-        {
-          return EqualsASCII(str);
-        }
-#else
       template<int N>
       inline bool EqualsLiteral( const char (&str)[N] ) const
         {
           return EqualsASCII(str, N-1);
         }
-      template<int N>
-      inline bool EqualsLiteral( char (&str)[N] ) const
-        {
-          const char* s = str;
-          return EqualsASCII(s, N-1);
-        }
-#endif
 
     // The LowerCaseEquals methods compare the ASCII-lowercase version of
     // this string (lowercasing only ASCII uppercase characters) to some
@@ -314,24 +328,11 @@ class nsTSubstring_CharT
     // explicit size.  Do not attempt to use it with a regular char*
     // pointer, or with a non-constant char array variable. Use
     // LowerCaseEqualsASCII for them.
-#ifdef NS_DISABLE_LITERAL_TEMPLATE
-      inline bool LowerCaseEqualsLiteral( const char* str ) const
-        {
-          return LowerCaseEqualsASCII(str);
-        }
-#else
       template<int N>
       inline bool LowerCaseEqualsLiteral( const char (&str)[N] ) const
         {
           return LowerCaseEqualsASCII(str, N-1);
         }
-      template<int N>
-      inline bool LowerCaseEqualsLiteral( char (&str)[N] ) const
-        {
-          const char* s = str;
-          return LowerCaseEqualsASCII(s, N-1);
-        }
-#endif
 
         /**
          * assignment
@@ -340,8 +341,8 @@ class nsTSubstring_CharT
       void NS_FASTCALL Assign( char_type c );
       bool NS_FASTCALL Assign( char_type c, const fallible_t& ) NS_WARN_UNUSED_RESULT;
 
-      void NS_FASTCALL
-        Assign( const char_type* data, size_type length = size_type(-1) );
+      void NS_FASTCALL Assign( const char_type* data );
+      void NS_FASTCALL Assign( const char_type* data, size_type length );
       bool NS_FASTCALL Assign( const char_type* data, size_type length, const fallible_t& ) NS_WARN_UNUSED_RESULT;
 
       void NS_FASTCALL Assign( const self_type& );
@@ -350,16 +351,38 @@ class nsTSubstring_CharT
       void NS_FASTCALL Assign( const substring_tuple_type& );
       bool NS_FASTCALL Assign( const substring_tuple_type&, const fallible_t& ) NS_WARN_UNUSED_RESULT;
 
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      void Assign (char16ptr_t data)
+        {
+          Assign(static_cast<const char16_t*>(data));
+        }
+
+      bool Assign(char16ptr_t data, const fallible_t&) NS_WARN_UNUSED_RESULT
+        {
+          return Assign(static_cast<const char16_t*>(data), fallible_t());
+        }
+
+      void Assign (char16ptr_t data, size_type length)
+        {
+          Assign(static_cast<const char16_t*>(data), length);
+        }
+
+      bool Assign(char16ptr_t data, size_type length, const fallible_t&) NS_WARN_UNUSED_RESULT
+        {
+          return Assign(static_cast<const char16_t*>(data), length, fallible_t());
+        }
+#endif
+
       void NS_FASTCALL AssignASCII( const char* data, size_type length );
       bool NS_FASTCALL AssignASCII( const char* data, size_type length, const fallible_t& ) NS_WARN_UNUSED_RESULT;
 
       void NS_FASTCALL AssignASCII( const char* data )
         {
-          AssignASCII(data, strlen(data));
+          AssignASCII(data, mozilla::SafeCast<size_type, size_t>(strlen(data)));
         }
       bool NS_FASTCALL AssignASCII( const char* data, const fallible_t& ) NS_WARN_UNUSED_RESULT
         {
-          return AssignASCII(data, strlen(data), fallible_t());
+          return AssignASCII(data, mozilla::SafeCast<size_type, size_t>(strlen(data)), fallible_t());
         }
 
     // AssignLiteral must ONLY be applied to an actual literal string, or
@@ -368,20 +391,20 @@ class nsTSubstring_CharT
     // non-constant char array variable. Use AssignASCII for those.
     // There are not fallible version of these methods because they only really
     // apply to small allocations that we wouldn't want to check anyway.
-#ifdef NS_DISABLE_LITERAL_TEMPLATE
-      void AssignLiteral( const char* str )
-                  { AssignASCII(str); }
-#else
+      template<int N>
+      void AssignLiteral( const char_type (&str)[N] )
+                  { AssignLiteral(str, N - 1); }
+#ifdef CharT_is_PRUnichar
       template<int N>
       void AssignLiteral( const char (&str)[N] )
-                  { AssignASCII(str, N-1); }
-      template<int N>
-      void AssignLiteral( char (&str)[N] )
                   { AssignASCII(str, N-1); }
 #endif
 
       self_type& operator=( char_type c )                                                       { Assign(c);        return *this; }
       self_type& operator=( const char_type* data )                                             { Assign(data);     return *this; }
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      self_type& operator=( char16ptr_t data )                                                  { Assign(data);     return *this; }
+#endif
       self_type& operator=( const self_type& str )                                              { Assign(str);      return *this; }
       self_type& operator=( const substring_tuple_type& tuple )                                 { Assign(tuple);    return *this; }
 
@@ -393,14 +416,32 @@ class nsTSubstring_CharT
          */
 
       void NS_FASTCALL Replace( index_type cutStart, size_type cutLength, char_type c );
+      bool NS_FASTCALL Replace( index_type cutStart, size_type cutLength, char_type c, const mozilla::fallible_t&) NS_WARN_UNUSED_RESULT;
       void NS_FASTCALL Replace( index_type cutStart, size_type cutLength, const char_type* data, size_type length = size_type(-1) );
+      bool NS_FASTCALL Replace( index_type cutStart, size_type cutLength, const char_type* data, size_type length, const mozilla::fallible_t&) NS_WARN_UNUSED_RESULT;
       void Replace( index_type cutStart, size_type cutLength, const self_type& str )      { Replace(cutStart, cutLength, str.Data(), str.Length()); }
+      bool Replace( index_type cutStart, size_type cutLength, const self_type& str, const mozilla::fallible_t&) NS_WARN_UNUSED_RESULT
+                 { return Replace(cutStart, cutLength, str.Data(), str.Length(), mozilla::fallible_t()); }
       void NS_FASTCALL Replace( index_type cutStart, size_type cutLength, const substring_tuple_type& tuple );
 
       void NS_FASTCALL ReplaceASCII( index_type cutStart, size_type cutLength, const char* data, size_type length = size_type(-1) );
 
+    // ReplaceLiteral must ONLY be applied to an actual literal string.
+    // Do not attempt to use it with a regular char* pointer, or with a char
+    // array variable. Use Replace or ReplaceASCII for those.
+      template<int N>
+      void ReplaceLiteral( index_type cutStart, size_type cutLength, const char_type (&str)[N] ) { ReplaceLiteral(cutStart, cutLength, str, N - 1); }
+
       void Append( char_type c )                                                                 { Replace(mLength, 0, c); }
+      bool Append( char_type c, const mozilla::fallible_t&) NS_WARN_UNUSED_RESULT                { return Replace(mLength, 0, c, mozilla::fallible_t()); }
       void Append( const char_type* data, size_type length = size_type(-1) )                     { Replace(mLength, 0, data, length); }
+      bool Append( const char_type* data, size_type length, const mozilla::fallible_t&) NS_WARN_UNUSED_RESULT
+                 { return Replace(mLength, 0, data, length, mozilla::fallible_t()); }
+
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+    void Append( char16ptr_t data, size_type length = size_type(-1) )                            { Append(static_cast<const char16_t*>(data), length); }
+#endif
+
       void Append( const self_type& str )                                                        { Replace(mLength, 0, str); }
       void Append( const substring_tuple_type& tuple )                                           { Replace(mLength, 0, tuple); }
 
@@ -444,38 +485,43 @@ class nsTSubstring_CharT
       /**
        * Append the given float to this string 
        */
-      void AppendFloat( float aFloat )
-                      { DoAppendFloat(aFloat, 6); }
-      void AppendFloat( double aFloat )
-                      { DoAppendFloat(aFloat, 15); }
-  private:
-      void NS_FASTCALL DoAppendFloat( double aFloat, int digits );
+      void NS_FASTCALL AppendFloat( float aFloat );
+      void NS_FASTCALL AppendFloat( double aFloat );
   public:
 
     // AppendLiteral must ONLY be applied to an actual literal string.
     // Do not attempt to use it with a regular char* pointer, or with a char
-    // array variable. Use AppendASCII for those.
-#ifdef NS_DISABLE_LITERAL_TEMPLATE
-      void AppendLiteral( const char* str )
-                  { AppendASCII(str); }
-#else
+    // array variable. Use Append or AppendASCII for those.
+      template<int N>
+      void AppendLiteral( const char_type (&str)[N] )                                             { ReplaceLiteral(mLength, 0, str, N - 1); }
+#ifdef CharT_is_PRUnichar
       template<int N>
       void AppendLiteral( const char (&str)[N] )
-                  { AppendASCII(str, N-1); }
-      template<int N>
-      void AppendLiteral( char (&str)[N] )
                   { AppendASCII(str, N-1); }
 #endif
 
       self_type& operator+=( char_type c )                                                       { Append(c);        return *this; }
       self_type& operator+=( const char_type* data )                                             { Append(data);     return *this; }
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      self_type& operator+=( char16ptr_t data )                                                  { Append(data);     return *this; }
+#endif
       self_type& operator+=( const self_type& str )                                              { Append(str);      return *this; }
       self_type& operator+=( const substring_tuple_type& tuple )                                 { Append(tuple);    return *this; }
 
       void Insert( char_type c, index_type pos )                                                 { Replace(pos, 0, c); }
       void Insert( const char_type* data, index_type pos, size_type length = size_type(-1) )     { Replace(pos, 0, data, length); }
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      void Insert( char16ptr_t data, index_type pos, size_type length = size_type(-1) )
+        { Insert(static_cast<const char16_t*>(data), pos, length); }
+#endif
       void Insert( const self_type& str, index_type pos )                                        { Replace(pos, 0, str); }
       void Insert( const substring_tuple_type& tuple, index_type pos )                           { Replace(pos, 0, tuple); }
+
+    // InsertLiteral must ONLY be applied to an actual literal string.
+    // Do not attempt to use it with a regular char* pointer, or with a char
+    // array variable. Use Insert for those.
+      template<int N>
+      void InsertLiteral( const char_type (&str)[N], index_type pos )                            { ReplaceLiteral(pos, 0, str, N - 1); }
 
       void Cut( index_type cutStart, size_type cutLength )                                       { Replace(cutStart, cutLength, char_traits::sEmptyBuffer, 0); }
 
@@ -520,7 +566,7 @@ class nsTSubstring_CharT
           *data = mData;
           return mLength;
         }
-        
+
         /**
          * Get a pointer to the string's internal buffer, optionally resizing
          * the buffer first.  If size_type(-1) is passed for newLen, then the
@@ -534,7 +580,7 @@ class nsTSubstring_CharT
       size_type GetMutableData( char_type** data, size_type newLen = size_type(-1) )
         {
           if (!EnsureMutable(newLen))
-            NS_RUNTIMEABORT("OOM");
+            NS_ABORT_OOM(newLen == size_type(-1) ? mLength : newLen);
 
           *data = mData;
           return mLength;
@@ -551,6 +597,18 @@ class nsTSubstring_CharT
           *data = mData;
           return mLength;
         }
+
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      size_type GetMutableData( wchar_t** data, size_type newLen = size_type(-1) )
+        {
+          return GetMutableData(reinterpret_cast<char16_t**>(data), newLen);
+        }
+
+      size_type GetMutableData( wchar_t** data, size_type newLen, const fallible_t& )
+        {
+    return GetMutableData(reinterpret_cast<char16_t**>(data), newLen, fallible_t());
+        }
+#endif
 
 
         /**
@@ -626,14 +684,14 @@ class nsTSubstring_CharT
           mFlags(flags) {}
 #endif /* DEBUG || FORCE_BUILD_REFCNT_LOGGING */
 
-      size_t SizeOfExcludingThisMustBeUnshared(nsMallocSizeOfFun mallocSizeOf)
+      size_t SizeOfExcludingThisMustBeUnshared(mozilla::MallocSizeOf mallocSizeOf)
         const;
-      size_t SizeOfIncludingThisMustBeUnshared(nsMallocSizeOfFun mallocSizeOf)
+      size_t SizeOfIncludingThisMustBeUnshared(mozilla::MallocSizeOf mallocSizeOf)
         const;
 
-      size_t SizeOfExcludingThisIfUnshared(nsMallocSizeOfFun mallocSizeOf)
+      size_t SizeOfExcludingThisIfUnshared(mozilla::MallocSizeOf mallocSizeOf)
         const;
-      size_t SizeOfIncludingThisIfUnshared(nsMallocSizeOfFun mallocSizeOf)
+      size_t SizeOfIncludingThisIfUnshared(mozilla::MallocSizeOf mallocSizeOf)
         const;
 
         /**
@@ -642,9 +700,9 @@ class nsTSubstring_CharT
          * you do use them, please explain clearly in a comment why it's safe
          * and won't lead to double-counting.
          */
-      size_t SizeOfExcludingThisEvenIfShared(nsMallocSizeOfFun mallocSizeOf)
+      size_t SizeOfExcludingThisEvenIfShared(mozilla::MallocSizeOf mallocSizeOf)
         const;
-      size_t SizeOfIncludingThisEvenIfShared(nsMallocSizeOfFun mallocSizeOf)
+      size_t SizeOfIncludingThisEvenIfShared(mozilla::MallocSizeOf mallocSizeOf)
         const;
 
     protected:
@@ -784,9 +842,15 @@ class nsTSubstring_CharT
           mFlags = dataFlags | (mFlags & 0xFFFF0000);
         }
 
+      void NS_FASTCALL ReplaceLiteral( index_type cutStart, size_type cutLength, const char_type* data, size_type length );
+
       static int AppendFunc( void* arg, const char* s, uint32_t len);
 
     public:
+
+      // NOTE: this method is declared public _only_ for convenience for
+      // callers who don't have access to the original nsLiteralString_CharT.
+      void NS_FASTCALL AssignLiteral( const char_type* data, size_type length );
 
       // mFlags is a bitwise combination of the following flags.  the meaning
       // and interpretation of these flags is an implementation detail.
@@ -804,6 +868,7 @@ class nsTSubstring_CharT
           F_SHARED       = 1 << 2,  // mData points to a heap-allocated, shared buffer
           F_OWNED        = 1 << 3,  // mData points to a heap-allocated, raw buffer
           F_FIXED        = 1 << 4,  // mData points to a fixed-size writable, dependent buffer
+          F_LITERAL      = 1 << 5,  // mData points to a string literal; F_TERMINATED will also be set
 
           // class flags are in the upper 16-bits
           F_CLASS_FIXED  = 1 << 16   // indicates that |this| is of type nsTFixedString

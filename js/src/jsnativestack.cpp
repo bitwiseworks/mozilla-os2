@@ -9,10 +9,6 @@
 #ifdef XP_WIN
 # include "jswin.h"
 
-#elif defined(XP_OS2)
-# define INCL_DOSPROCESS
-# include <os2.h>
-
 #elif defined(XP_MACOSX) || defined(DARWIN) || defined(XP_UNIX)
 # include <pthread.h>
 
@@ -21,8 +17,8 @@
 # endif
 
 # if defined(ANDROID)
-#  include <unistd.h>
 #  include <sys/types.h>
+#  include <unistd.h>
 # endif
 
 #else
@@ -88,18 +84,6 @@ js::GetNativeStackBaseImpl()
         context.uc_stack.ss_size;
 }
 
-#elif defined(XP_OS2)
-
-void *
-js::GetNativeStackBaseImpl()
-{
-    PTIB  ptib;
-    PPIB  ppib;
-
-    DosGetInfoBlocks(&ptib, &ppib);
-    return ptib->tib_pstacklimit;
-}
-
 #else /* XP_UNIX */
 
 void *
@@ -142,7 +126,7 @@ js::GetNativeStackBaseImpl()
         if (fs) {
             char line[100];
             unsigned long stackAddr = (unsigned long)&sattr;
-            while (fgets(line, sizeof(line), fs) != NULL) {
+            while (fgets(line, sizeof(line), fs) != nullptr) {
                 unsigned long stackStart;
                 unsigned long stackEnd;
                 if (sscanf(line, "%lx-%lx ", &stackStart, &stackEnd) == 2 &&

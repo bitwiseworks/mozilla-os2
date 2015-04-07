@@ -9,13 +9,10 @@
 #include "nsError.h"
 #include "SVGAnimatedNumberList.h"
 #include "nsCOMPtr.h"
-#include "nsContentUtils.h"
 #include "mozilla/dom/SVGNumberListBinding.h"
 #include <algorithm>
 
 // See the comment in this file's header.
-
-namespace mozilla {
 
 // local helper functions
 namespace {
@@ -36,10 +33,14 @@ void UpdateListIndicesFromIndex(FallibleTArray<DOMSVGNumber*>& aItemsArray,
 
 } // namespace
 
-// We could use NS_IMPL_CYCLE_COLLECTION_1, except that in Unlink() we need to
+namespace mozilla {
+
+// We could use NS_IMPL_CYCLE_COLLECTION(, except that in Unlink() we need to
 // clear our DOMSVGAnimatedNumberList's weak ref to us to be safe. (The other
 // option would be to not unlink and rely on the breaking of the other edges in
 // the cycle, as NS_SVG_VAL_IMPL_CYCLE_COLLECTION does.)
+NS_IMPL_CYCLE_COLLECTION_CLASS(DOMSVGNumberList)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGNumberList)
   if (tmp->mAList) {
     if (tmp->IsAnimValList()) {
@@ -69,10 +70,41 @@ NS_INTERFACE_MAP_END
 
 
 JSObject*
-DOMSVGNumberList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+DOMSVGNumberList::WrapObject(JSContext *cx)
 {
-  return mozilla::dom::SVGNumberListBinding::Wrap(cx, scope, this);
+  return mozilla::dom::SVGNumberListBinding::Wrap(cx, this);
 }
+
+//----------------------------------------------------------------------
+// Helper class: AutoChangeNumberListNotifier
+// Stack-based helper class to pair calls to WillChangeNumberList and
+// DidChangeNumberList.
+class MOZ_STACK_CLASS AutoChangeNumberListNotifier
+{
+public:
+  AutoChangeNumberListNotifier(DOMSVGNumberList* aNumberList MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    : mNumberList(aNumberList)
+  {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    MOZ_ASSERT(mNumberList, "Expecting non-null numberList");
+    mEmptyOrOldValue =
+      mNumberList->Element()->WillChangeNumberList(mNumberList->AttrEnum());
+  }
+
+  ~AutoChangeNumberListNotifier()
+  {
+    mNumberList->Element()->DidChangeNumberList(mNumberList->AttrEnum(),
+                                                mEmptyOrOldValue);
+    if (mNumberList->IsAnimating()) {
+      mNumberList->Element()->AnimationNeedsResample();
+    }
+  }
+
+private:
+  DOMSVGNumberList* const mNumberList;
+  nsAttrValue       mEmptyOrOldValue;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
 
 void
 DOMSVGNumberList::InternalListLengthWillChange(uint32_t aNewLength)
@@ -128,7 +160,7 @@ DOMSVGNumberList::Clear(ErrorResult& error)
   }
 
   if (LengthNoFlush() > 0) {
-    nsAttrValue emptyOrOldValue = Element()->WillChangeNumberList(AttrEnum());
+    AutoChangeNumberListNotifier notifier(this);
     // Notify any existing DOM items of removal *before* truncating the lists
     // so that they can find their SVGNumber internal counterparts and copy
     // their values. This also notifies the animVal list:
@@ -136,10 +168,6 @@ DOMSVGNumberList::Clear(ErrorResult& error)
 
     mItems.Clear();
     InternalList().Clear();
-    Element()->DidChangeNumberList(AttrEnum(), emptyOrOldValue);
-    if (mAList->IsAnimating()) {
-      Element()->AnimationNeedsResample();
-    }
   }
 }
 
@@ -174,7 +202,18 @@ DOMSVGNumberList::Initialize(nsIDOMSVGNumber *newItem,
   return InsertItemBefore(newItem, 0, error);
 }
 
-nsIDOMSVGNumber*
+already_AddRefed<nsIDOMSVGNumber>
+DOMSVGNumberList::GetItem(uint32_t index, ErrorResult& error)
+{
+  bool found;
+  nsRefPtr<nsIDOMSVGNumber> item = IndexedGetter(index, found, error);
+  if (!found) {
+    error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+  }
+  return item.forget();
+}
+
+already_AddRefed<nsIDOMSVGNumber>
 DOMSVGNumberList::IndexedGetter(uint32_t index, bool& found, ErrorResult& error)
 {
   if (IsAnimValList()) {
@@ -182,8 +221,7 @@ DOMSVGNumberList::IndexedGetter(uint32_t index, bool& found, ErrorResult& error)
   }
   found = index < LengthNoFlush();
   if (found) {
-    EnsureItemAt(index);
-    return mItems[index];
+    return GetItemAt(index);
   }
   return nullptr;
 }
@@ -220,7 +258,7 @@ DOMSVGNumberList::InsertItemBefore(nsIDOMSVGNumber *newItem,
     return nullptr;
   }
 
-  nsAttrValue emptyOrOldValue = Element()->WillChangeNumberList(AttrEnum());
+  AutoChangeNumberListNotifier notifier(this);
   // Now that we know we're inserting, keep animVal list in sync as necessary.
   MaybeInsertNullInAnimValListAt(index);
 
@@ -234,10 +272,6 @@ DOMSVGNumberList::InsertItemBefore(nsIDOMSVGNumber *newItem,
 
   UpdateListIndicesFromIndex(mItems, index + 1);
 
-  Element()->DidChangeNumberList(AttrEnum(), emptyOrOldValue);
-  if (mAList->IsAnimating()) {
-    Element()->AnimationNeedsResample();
-  }
   return domItem.forget();
 }
 
@@ -264,7 +298,7 @@ DOMSVGNumberList::ReplaceItem(nsIDOMSVGNumber *newItem,
     domItem = domItem->Clone(); // must do this before changing anything!
   }
 
-  nsAttrValue emptyOrOldValue = Element()->WillChangeNumberList(AttrEnum());
+  AutoChangeNumberListNotifier notifier(this);
   if (mItems[index]) {
     // Notify any existing DOM item of removal *before* modifying the lists so
     // that the DOM item can copy the *old* value at its index:
@@ -278,10 +312,6 @@ DOMSVGNumberList::ReplaceItem(nsIDOMSVGNumber *newItem,
   // would end up reading bad data from InternalList()!
   domItem->InsertingIntoList(this, AttrEnum(), index, IsAnimValList());
 
-  Element()->DidChangeNumberList(AttrEnum(), emptyOrOldValue);
-  if (mAList->IsAnimating()) {
-    Element()->AnimationNeedsResample();
-  }
   return domItem.forget();
 }
 
@@ -304,33 +334,32 @@ DOMSVGNumberList::RemoveItem(uint32_t index,
   // internal value.
   MaybeRemoveItemFromAnimValListAt(index);
 
-  // We have to return the removed item, so make sure it exists:
-  EnsureItemAt(index);
+  // We have to return the removed item, so get it, creating it if necessary:
+  nsRefPtr<nsIDOMSVGNumber> result = GetItemAt(index);
 
-  nsAttrValue emptyOrOldValue = Element()->WillChangeNumberList(AttrEnum());
+  AutoChangeNumberListNotifier notifier(this);
   // Notify the DOM item of removal *before* modifying the lists so that the
   // DOM item can copy its *old* value:
   mItems[index]->RemovingFromList();
-  nsCOMPtr<nsIDOMSVGNumber> result = mItems[index];
 
   InternalList().RemoveItem(index);
   mItems.RemoveElementAt(index);
 
   UpdateListIndicesFromIndex(mItems, index);
 
-  Element()->DidChangeNumberList(AttrEnum(), emptyOrOldValue);
-  if (mAList->IsAnimating()) {
-    Element()->AnimationNeedsResample();
-  }
   return result.forget();
 }
 
-void
-DOMSVGNumberList::EnsureItemAt(uint32_t aIndex)
+already_AddRefed<nsIDOMSVGNumber>
+DOMSVGNumberList::GetItemAt(uint32_t aIndex)
 {
+  MOZ_ASSERT(aIndex < mItems.Length());
+
   if (!mItems[aIndex]) {
     mItems[aIndex] = new DOMSVGNumber(this, AttrEnum(), aIndex, IsAnimValList());
   }
+  nsRefPtr<nsIDOMSVGNumber> result = mItems[aIndex];
+  return result.forget();
 }
 
 void

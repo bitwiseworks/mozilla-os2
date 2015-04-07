@@ -65,9 +65,9 @@ nsSVGGFrame::NotifySVGChanged(uint32_t aFlags)
 }
 
 gfxMatrix
-nsSVGGFrame::GetCanvasTM(uint32_t aFor)
+nsSVGGFrame::GetCanvasTM(uint32_t aFor, nsIFrame* aTransformRoot)
 {
-  if (!(GetStateBits() & NS_STATE_SVG_NONDISPLAY_CHILD)) {
+  if (!(GetStateBits() & NS_FRAME_IS_NONDISPLAY) && !aTransformRoot) {
     if ((aFor == FOR_PAINTING && NS_SVGDisplayListPaintingEnabled()) ||
         (aFor == FOR_HIT_TESTING && NS_SVGDisplayListHitTestingEnabled())) {
       return nsSVGIntegrationUtils::GetCSSPxToDevPxMatrix(this);
@@ -78,15 +78,16 @@ nsSVGGFrame::GetCanvasTM(uint32_t aFor)
 
     nsSVGContainerFrame *parent = static_cast<nsSVGContainerFrame*>(mParent);
     SVGGraphicsElement *content = static_cast<SVGGraphicsElement*>(mContent);
-
-    gfxMatrix tm = content->PrependLocalTransformsTo(parent->GetCanvasTM(aFor));
+    gfxMatrix tm = content->PrependLocalTransformsTo(
+        this == aTransformRoot ? gfxMatrix() :
+                                 parent->GetCanvasTM(aFor, aTransformRoot));
 
     mCanvasTM = new gfxMatrix(tm);
   }
   return *mCanvasTM;
 }
 
-NS_IMETHODIMP
+nsresult
 nsSVGGFrame::AttributeChanged(int32_t         aNameSpaceID,
                               nsIAtom*        aAttribute,
                               int32_t         aModType)

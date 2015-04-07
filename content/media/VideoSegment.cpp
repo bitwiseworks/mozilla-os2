@@ -4,13 +4,16 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "VideoSegment.h"
+
+#include "gfx2DGlue.h"
 #include "ImageContainer.h"
 
 namespace mozilla {
 
 using namespace layers;
 
-VideoFrame::VideoFrame(already_AddRefed<Image> aImage, const gfxIntSize& aIntrinsicSize)
+VideoFrame::VideoFrame(already_AddRefed<Image>& aImage,
+                       const gfxIntSize& aIntrinsicSize)
   : mImage(aImage), mIntrinsicSize(aIntrinsicSize), mForceBlack(false)
 {}
 
@@ -32,6 +35,7 @@ VideoFrame::TakeFrom(VideoFrame* aFrame)
 {
   mImage = aFrame->mImage.forget();
   mIntrinsicSize = aFrame->mIntrinsicSize;
+  mForceBlack = aFrame->GetForceBlack();
 }
 
 VideoChunk::VideoChunk()
@@ -41,11 +45,12 @@ VideoChunk::~VideoChunk()
 {}
 
 void
-VideoSegment::AppendFrame(already_AddRefed<Image> aImage, TrackTicks aDuration,
-                          const gfxIntSize& aIntrinsicSize)
+VideoSegment::AppendFrame(already_AddRefed<Image>&& aImage,
+                          TrackTicks aDuration,
+                          const IntSize& aIntrinsicSize)
 {
   VideoChunk* chunk = AppendChunk(aDuration);
-  VideoFrame frame(aImage, aIntrinsicSize);
+  VideoFrame frame(aImage, ThebesIntSize(aIntrinsicSize));
   chunk->mFrame.TakeFrom(&frame);
 }
 

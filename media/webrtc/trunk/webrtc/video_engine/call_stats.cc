@@ -10,7 +10,7 @@
 
 #include "webrtc/video_engine/call_stats.h"
 
-#include <cassert>
+#include <assert.h>
 
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
@@ -76,7 +76,7 @@ int32_t CallStats::Process() {
 
   // If there is a valid rtt, update all observers.
   if (max_rtt > 0) {
-    for (std::list<StatsObserver*>::iterator it = observers_.begin();
+    for (std::list<CallStatsObserver*>::iterator it = observers_.begin();
          it != observers_.end(); ++it) {
       (*it)->OnRttUpdate(max_rtt);
     }
@@ -89,9 +89,9 @@ RtcpRttObserver* CallStats::rtcp_rtt_observer() const {
   return rtcp_rtt_observer_.get();
 }
 
-void CallStats::RegisterStatsObserver(StatsObserver* observer) {
+void CallStats::RegisterStatsObserver(CallStatsObserver* observer) {
   CriticalSectionScoped cs(crit_.get());
-  for (std::list<StatsObserver*>::iterator it = observers_.begin();
+  for (std::list<CallStatsObserver*>::iterator it = observers_.begin();
        it != observers_.end(); ++it) {
     if (*it == observer)
       return;
@@ -99,9 +99,9 @@ void CallStats::RegisterStatsObserver(StatsObserver* observer) {
   observers_.push_back(observer);
 }
 
-void CallStats::DeregisterStatsObserver(StatsObserver* observer) {
+void CallStats::DeregisterStatsObserver(CallStatsObserver* observer) {
   CriticalSectionScoped cs(crit_.get());
-  for (std::list<StatsObserver*>::iterator it = observers_.begin();
+  for (std::list<CallStatsObserver*>::iterator it = observers_.begin();
        it != observers_.end(); ++it) {
     if (*it == observer) {
       observers_.erase(it);

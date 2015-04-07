@@ -6,7 +6,8 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
+#include "mozilla/TextComposition.h"
 #include "mozilla/dom/Element.h"
 #include "nsAString.h"
 #include "nsAutoPtr.h"
@@ -29,7 +30,7 @@
 #include "nsIDOMNodeIterator.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMText.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsINode.h"
 #include "nsIPlaintextEditor.h"
 #include "nsISelection.h"
@@ -42,6 +43,7 @@
 #include "nsUnicharUtils.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 #define CANCEL_OPERATION_IF_READONLY_OR_DISABLED \
   if (IsReadonly() || IsDisabled()) \
@@ -92,7 +94,7 @@ nsTextEditRules::~nsTextEditRules()
  *  XPCOM Cruft
  ********************************************************/
 
-NS_IMPL_CYCLE_COLLECTION_2(nsTextEditRules, mBogusNode, mCachedSelectionNode)
+NS_IMPL_CYCLE_COLLECTION(nsTextEditRules, mBogusNode, mCachedSelectionNode)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsTextEditRules)
   NS_INTERFACE_MAP_ENTRY(nsIEditRules)
@@ -145,6 +147,15 @@ nsTextEditRules::Init(nsPlaintextEditor *aEditor)
     Preferences::GetBool("bidi.edit.delete_immediately", false);
 
   return res;
+}
+
+NS_IMETHODIMP
+nsTextEditRules::SetInitialValue(const nsAString& aValue)
+{
+  if (IsPasswordEditor()) {
+    mPasswordText = aValue;
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -482,9 +493,9 @@ GetTextNode(nsISelection *selection, nsEditor *editor) {
 }
 #ifdef DEBUG
 #define ASSERT_PASSWORD_LENGTHS_EQUAL()                                \
-  if (IsPasswordEditor()) {                                            \
+  if (IsPasswordEditor() && mEditor->GetRoot()) {                      \
     int32_t txtLen;                                                    \
-    mEditor->GetTextLength(&txtLen);                                    \
+    mEditor->GetTextLength(&txtLen);                                   \
     NS_ASSERTION(mPasswordText.Length() == uint32_t(txtLen),           \
                  "password length not equal to number of asterisks");  \
   }
@@ -1221,7 +1232,8 @@ nsTextEditRules::TruncateInsertionIfNeeded(Selection* aSelection,
     nsContentUtils::GetSelectionInTextControl(aSelection, mEditor->GetRoot(),
                                               start, end);
 
-    int32_t oldCompStrLength = mEditor->GetIMEBufferLength();
+    TextComposition* composition = mEditor->GetComposition();
+    int32_t oldCompStrLength = composition ? composition->String().Length() : 0;
 
     const int32_t selectionLength = end - start;
     const int32_t resultingDocLength = docLength - selectionLength - oldCompStrLength;
@@ -1319,7 +1331,7 @@ nsTextEditRules::FillBufWithPWChars(nsAString *aOutString, int32_t aLength)
   MOZ_ASSERT(aOutString);
 
   // change the output to the platform password character
-  PRUnichar passwordChar = LookAndFeel::GetPasswordCharacter();
+  char16_t passwordChar = LookAndFeel::GetPasswordCharacter();
 
   int32_t i;
   aOutString->Truncate();

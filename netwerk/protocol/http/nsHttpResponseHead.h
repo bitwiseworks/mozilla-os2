@@ -10,6 +10,8 @@
 #include "nsHttp.h"
 #include "nsString.h"
 
+namespace mozilla { namespace net {
+
 //-----------------------------------------------------------------------------
 // nsHttpResponseHead represents the status line and headers from an HTTP
 // response.
@@ -112,6 +114,7 @@ public:
     }
 
 private:
+    void     AssignDefaultStatusText();
     void     ParseVersion(const char *);
     void     ParseCacheControl(const char *);
     void     ParsePragma(const char *);
@@ -121,15 +124,16 @@ private:
     nsHttpHeaderArray mHeaders;
     nsHttpVersion     mVersion;
     uint16_t          mStatus;
-    mozilla::net::InfallableCopyCString mStatusText;
+    nsCString         mStatusText;
     int64_t           mContentLength;
-    mozilla::net::InfallableCopyCString mContentType;
-    mozilla::net::InfallableCopyCString mContentCharset;
+    nsCString         mContentType;
+    nsCString         mContentCharset;
     bool              mCacheControlNoStore;
     bool              mCacheControlNoCache;
     bool              mPragmaNoCache;
 
     friend struct IPC::ParamTraits<nsHttpResponseHead>;
 };
+}} // namespace mozilla::net
 
 #endif // nsHttpResponseHead_h__

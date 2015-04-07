@@ -10,21 +10,25 @@
  * To enable this code at build time, add --enable-visual-profiling to your 
  * configure options.
  *
- * To enable this code at run time, export MOZ_PROFILING_FILE env var with 
- * a path to the file to write the log to.  This is all you need to produce 
- * the log of all events instrumentation in the mozilla code.
- * Check MOZ_EVENT_TRACER_* macros bellow to add your own.
+ * To enable this code at run time, export MOZ_TRACE_FILE env var with a
+ * path to the file to write the log to. This is all you need to * produce
+ * the log of all events instrumentation in the mozilla code. Check
+ * MOZ_EVENT_TRACER_* macros below to add your own.
  *
  * To let the event tracer log only some events to save disk space, export 
  * MOZ_PROFILING_EVENTS with comma separated list of event names you want 
  * to record in the log.
  */
 
-#include "nscore.h"
+#ifndef VisualEventTracer_h___
+#define VisualEventTracer_h___
+
+#include <stdint.h>
+#include "mozilla/Attributes.h"
 #include "mozilla/GuardObjects.h"
-#include "nsIVisualEventTracer.h"
 
 #ifdef MOZ_VISUAL_EVENT_TRACER
+#include "nsIVisualEventTracer.h"
 
 // Bind an object instance, usually |this|, to a name, usually URL or 
 // host name, the instance deals with for its lifetime.  The name string 
@@ -222,5 +226,7 @@ class VisualEventTracer : public nsIVisualEventTracer
 
 #endif
 
-} // eventtracer 
+} // eventtracer
 } // mozilla
+
+#endif /* VisualEventTracer_h___ */

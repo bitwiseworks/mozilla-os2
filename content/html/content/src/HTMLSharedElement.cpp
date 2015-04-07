@@ -16,6 +16,7 @@
 #include "nsRuleData.h"
 #include "nsMappedAttributes.h"
 #include "nsContentUtils.h"
+#include "nsIURI.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Shared)
 
@@ -33,28 +34,16 @@ NS_IMPL_RELEASE_INHERITED(HTMLSharedElement, Element)
 
 // QueryInterface implementation for HTMLSharedElement
 NS_INTERFACE_MAP_BEGIN(HTMLSharedElement)
-  NS_HTML_CONTENT_INTERFACES_AMBIGUOUS(nsGenericHTMLElement,
-                                       nsIDOMHTMLParamElement)
-  NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLParamElement, param)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLBaseElement, base)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLDirectoryElement, dir)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLQuoteElement, q)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLQuoteElement, blockquote)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLHeadElement, head)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLHtmlElement, html)
-NS_ELEMENT_INTERFACE_MAP_END
+NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
 
 
 NS_IMPL_ELEMENT_CLONE(HTMLSharedElement)
-
-// nsIDOMHTMLParamElement
-NS_IMPL_STRING_ATTR(HTMLSharedElement, Name, name)
-NS_IMPL_STRING_ATTR(HTMLSharedElement, Type, type)
-NS_IMPL_STRING_ATTR(HTMLSharedElement, Value, value)
-NS_IMPL_STRING_ATTR(HTMLSharedElement, ValueType, valuetype)
-
-// nsIDOMHTMLDirectoryElement
-NS_IMPL_BOOL_ATTR(HTMLSharedElement, Compact, compact)
 
 // nsIDOMHTMLQuoteElement
 NS_IMPL_URI_ATTR(HTMLSharedElement, Cite, cite)
@@ -185,8 +174,10 @@ SetBaseURIUsingFirstBaseWithHref(nsIDocument* aDocument, nsIContent* aMustMatch)
 
       // Try to set our base URI.  If that fails, try to set base URI to null
       nsresult rv = aDocument->SetBaseURI(newBaseURI);
+      aDocument->SetChromeXHRDocBaseURI(newBaseURI);
       if (NS_FAILED(rv)) {
         aDocument->SetBaseURI(nullptr);
+        aDocument->SetChromeXHRDocBaseURI(nullptr);
       }
       return;
     }
@@ -323,26 +314,26 @@ HTMLSharedElement::GetAttributeMappingFunction() const
 }
 
 JSObject*
-HTMLSharedElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLSharedElement::WrapNode(JSContext *aCx)
 {
   if (mNodeInfo->Equals(nsGkAtoms::param)) {
-    return HTMLParamElementBinding::Wrap(aCx, aScope, this);
+    return HTMLParamElementBinding::Wrap(aCx, this);
   }
   if (mNodeInfo->Equals(nsGkAtoms::base)) {
-    return HTMLBaseElementBinding::Wrap(aCx, aScope, this);
+    return HTMLBaseElementBinding::Wrap(aCx, this);
   }
   if (mNodeInfo->Equals(nsGkAtoms::dir)) {
-    return HTMLDirectoryElementBinding::Wrap(aCx, aScope, this);
+    return HTMLDirectoryElementBinding::Wrap(aCx, this);
   }
   if (mNodeInfo->Equals(nsGkAtoms::q) ||
       mNodeInfo->Equals(nsGkAtoms::blockquote)) {
-    return HTMLQuoteElementBinding::Wrap(aCx, aScope, this);
+    return HTMLQuoteElementBinding::Wrap(aCx, this);
   }
   if (mNodeInfo->Equals(nsGkAtoms::head)) {
-    return HTMLHeadElementBinding::Wrap(aCx, aScope, this);
+    return HTMLHeadElementBinding::Wrap(aCx, this);
   }
   MOZ_ASSERT(mNodeInfo->Equals(nsGkAtoms::html));
-  return HTMLHtmlElementBinding::Wrap(aCx, aScope, this);
+  return HTMLHtmlElementBinding::Wrap(aCx, this);
 }
 
 } // namespace mozilla

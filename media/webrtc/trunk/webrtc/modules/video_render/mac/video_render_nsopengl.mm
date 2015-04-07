@@ -64,7 +64,7 @@ VideoChannelNSOpenGL::~VideoChannelNSOpenGL()
 
 int VideoChannelNSOpenGL::ChangeContext(NSOpenGLContext *nsglContext)
 {
-    _owner->UnlockAGLCntx();
+    _owner->LockAGLCntx();
 
     _nsglContext = nsglContext;
     [_nsglContext makeCurrentContext];
@@ -74,10 +74,8 @@ int VideoChannelNSOpenGL::ChangeContext(NSOpenGLContext *nsglContext)
 
 }
 
-WebRtc_Word32 VideoChannelNSOpenGL::GetChannelProperties(float& left,
-        float& top,
-        float& right,
-        float& bottom)
+int32_t VideoChannelNSOpenGL::GetChannelProperties(float& left, float& top,
+                                                   float& right, float& bottom)
 {
 
     _owner->LockAGLCntx();
@@ -91,8 +89,8 @@ WebRtc_Word32 VideoChannelNSOpenGL::GetChannelProperties(float& left,
     return 0;
 }
 
-WebRtc_Word32 VideoChannelNSOpenGL::RenderFrame(
-  const WebRtc_UWord32 /*streamId*/, I420VideoFrame& videoFrame) {
+int32_t VideoChannelNSOpenGL::RenderFrame(
+  const uint32_t /*streamId*/, I420VideoFrame& videoFrame) {
 
   _owner->LockAGLCntx();
 
@@ -422,7 +420,7 @@ int VideoRenderNSOpenGL::ChangeWindow(CocoaRenderView* newWindowRef)
  * If so then they will simply be restarted
  * If not then create them and continue
  */
-WebRtc_Word32 VideoRenderNSOpenGL::StartRender()
+int32_t VideoRenderNSOpenGL::StartRender()
 {
 
     LockAGLCntx();
@@ -457,7 +455,7 @@ WebRtc_Word32 VideoRenderNSOpenGL::StartRender()
     UnlockAGLCntx();
     return 0;
 }
-WebRtc_Word32 VideoRenderNSOpenGL::StopRender()
+int32_t VideoRenderNSOpenGL::StopRender()
 {
 
     LockAGLCntx();
@@ -558,7 +556,8 @@ int VideoRenderNSOpenGL::setRenderTargetWindow()
         0
     };
 
-    NSOpenGLPixelFormat* fmt = [[NSOpenGLPixelFormat alloc] initWithAttributes: (NSOpenGLPixelFormatAttribute*) attribs];
+    NSOpenGLPixelFormat* fmt = [[[NSOpenGLPixelFormat alloc] initWithAttributes:
+                          (NSOpenGLPixelFormatAttribute*) attribs] autorelease];
 
     if(_windowRef)
     {
@@ -569,8 +568,6 @@ int VideoRenderNSOpenGL::setRenderTargetWindow()
         UnlockAGLCntx();
         return -1;
     }
-
-    [fmt release];
 
     _nsglContext = [_windowRef nsOpenGLContext];
     [_nsglContext makeCurrentContext];
@@ -599,7 +596,8 @@ int VideoRenderNSOpenGL::setRenderTargetFullScreen()
         0
     };
 
-    NSOpenGLPixelFormat* fmt = [[NSOpenGLPixelFormat alloc] initWithAttributes: (NSOpenGLPixelFormatAttribute*) attribs];
+    NSOpenGLPixelFormat* fmt = [[[NSOpenGLPixelFormat alloc] initWithAttributes:
+                          (NSOpenGLPixelFormatAttribute*) attribs] autorelease];
 
     // Store original superview and frame for use when exiting full screens
     _windowRefSuperViewFrame = [_windowRef frame];
@@ -625,8 +623,6 @@ int VideoRenderNSOpenGL::setRenderTargetFullScreen()
         UnlockAGLCntx();
         return -1;
     }
-
-    [fmt release];
 
     _nsglContext = [_windowRef nsOpenGLContext];
     [_nsglContext makeCurrentContext];
@@ -792,7 +788,7 @@ int VideoRenderNSOpenGL::DeleteAllNSGLChannels()
     return 0;
 }
 
-WebRtc_Word32 VideoRenderNSOpenGL::DeleteNSGLChannel(const WebRtc_UWord32 channel)
+int32_t VideoRenderNSOpenGL::DeleteNSGLChannel(const uint32_t channel)
 {
 
     CriticalSectionScoped cs(&_nsglContextCritSec);
@@ -823,12 +819,12 @@ WebRtc_Word32 VideoRenderNSOpenGL::DeleteNSGLChannel(const WebRtc_UWord32 channe
     return 0;
 }
 
-WebRtc_Word32 VideoRenderNSOpenGL::GetChannelProperties(const WebRtc_UWord16 streamId,
-        WebRtc_UWord32& zOrder,
-        float& left,
-        float& top,
-        float& right,
-        float& bottom)
+int32_t VideoRenderNSOpenGL::GetChannelProperties(const uint16_t streamId,
+                                                  uint32_t& zOrder,
+                                                  float& left,
+                                                  float& top,
+                                                  float& right,
+                                                  float& bottom)
 {
 
     CriticalSectionScoped cs(&_nsglContextCritSec);
@@ -1180,7 +1176,7 @@ int VideoRenderNSOpenGL::GetWindowRect(Rect& rect)
     }
 }
 
-WebRtc_Word32 VideoRenderNSOpenGL::ChangeUniqueID(WebRtc_Word32 id)
+int32_t VideoRenderNSOpenGL::ChangeUniqueID(int32_t id)
 {
 
     CriticalSectionScoped cs(&_nsglContextCritSec);
@@ -1188,15 +1184,15 @@ WebRtc_Word32 VideoRenderNSOpenGL::ChangeUniqueID(WebRtc_Word32 id)
     return 0;
 }
 
-WebRtc_Word32 VideoRenderNSOpenGL::SetText(const WebRtc_UWord8 /*textId*/,
-        const WebRtc_UWord8* /*text*/,
-        const WebRtc_Word32 /*textLength*/,
-        const WebRtc_UWord32 /*textColorRef*/,
-        const WebRtc_UWord32 /*backgroundColorRef*/,
-        const float /*left*/,
-        const float /*top*/,
-        const float /*right*/,
-        const float /*bottom*/)
+int32_t VideoRenderNSOpenGL::SetText(const uint8_t /*textId*/,
+                                     const uint8_t* /*text*/,
+                                     const int32_t /*textLength*/,
+                                     const uint32_t /*textColorRef*/,
+                                     const uint32_t /*backgroundColorRef*/,
+                                     const float /*left*/,
+                                     const float /*top*/,
+                                     const float /*right*/,
+                                     const float /*bottom*/)
 {
 
     return 0;
@@ -1262,6 +1258,6 @@ void VideoRenderNSOpenGL::UnlockAGLCntx()
  */
 
 
-} //namespace webrtc
+}  // namespace webrtc
 
 #endif // COCOA_RENDERING

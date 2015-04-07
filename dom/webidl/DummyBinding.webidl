@@ -8,21 +8,8 @@
 // aren't actually referenced anywhere in IDL yet but are used in C++.
 
 interface DummyInterface {
-  readonly attribute OnErrorEventHandlerNonNull onErrorEventHandler;
-  FilePropertyBag fileBag();
-  InspectorRGBTriple rgbTriple();
-  Function getFunction();
-  void funcSocketsDict(optional SocketsDict arg);
-  void funcHttpConnDict(optional HttpConnDict arg);
-  void funcWebSocketDict(optional WebSocketDict arg);
-  void funcDNSCacheDict(optional DNSCacheDict arg);
-  void frameRequestCallback(FrameRequestCallback arg);
-  void idbObjectStoreParams(optional IDBObjectStoreParameters arg);
-  void CameraPictureOptions(optional CameraPictureOptions arg);
-  void MmsParameters(optional MmsParameters arg);
-  void MmsAttachment(optional MmsAttachment arg);
+  void lifecycleCallbacks(optional LifecycleCallbacks arg);
 };
 
 interface DummyInterfaceWorkers {
-  BlobPropertyBag blobBag();
 };

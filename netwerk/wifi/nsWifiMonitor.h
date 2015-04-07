@@ -12,7 +12,7 @@
 #include "nsIThread.h"
 #include "nsIRunnable.h"
 #include "nsCOMArray.h"
-#include "nsIWifiMonitor.h"
+#include "nsIWifiListener.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "prlog.h"
 #include "nsIObserver.h"
@@ -47,7 +47,7 @@ class nsWifiListener
 class nsWifiMonitor MOZ_FINAL : nsIRunnable, nsIWifiMonitor, nsIObserver
 {
  public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIWIFIMONITOR
   NS_DECL_NSIRUNNABLE
   NS_DECL_NSIOBSERVER

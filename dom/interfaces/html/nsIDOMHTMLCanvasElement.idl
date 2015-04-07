@@ -5,11 +5,6 @@
 
 #include "nsIDOMHTMLElement.idl"
 
-%{C++
-// for jsval
-#include "jsapi.h"
-%}
-
 /**
  * The nsIDOMHTMLCanvasElement interface is the interface to a HTML
  * <canvas> element.
@@ -25,29 +20,8 @@ interface nsIDOMFile;
 interface nsIVariant;
 interface nsIInputStreamCallback;
 
-[scriptable, builtinclass, uuid(8d5fb8a0-7782-11e1-b0c4-0800200c9a67)]
-interface nsIDOMMozCanvasPrintState : nsISupports
-{
-  // A canvas rendering context.
-  readonly attribute nsISupports context;
-
-  // To be called when rendering to the context is done.
-  void done();
-};
-
-[scriptable, function, uuid(8d5fb8a0-7782-11e1-b0c4-0800200c9a66)]
-interface nsIPrintCallback : nsISupports
-{
-  void render(in nsIDOMMozCanvasPrintState ctx);
-};
-
-[scriptable, function, uuid(6e9ffb59-2067-4aef-a51c-65e65a3e0d81)]
-interface nsIFileCallback : nsISupports {
-  void receive(in nsIDOMBlob file);
-};
-
-[scriptable, uuid(350fddae-4476-4dcd-bccf-9c9c356354a6)]
-interface nsIDOMHTMLCanvasElement : nsIDOMHTMLElement
+[scriptable, uuid(8978d1c5-2981-4678-a1c3-b0b7bae04fbc)]
+interface nsIDOMHTMLCanvasElement : nsISupports
 {
   attribute unsigned long width;
   attribute unsigned long height;
@@ -66,9 +40,6 @@ interface nsIDOMHTMLCanvasElement : nsIDOMHTMLElement
   // mozGetAsFile(name, type);        -- uses given type
   nsIDOMFile mozGetAsFile(in DOMString name, [optional] in DOMString type);
 
-  void toBlob(in nsIFileCallback callback,
-              [optional] in DOMString type);
-
   // A Mozilla-only extension to get a canvas context backed by double-buffered
   // shared memory. Only privileged callers can call this.
   nsISupports MozGetIPCContext(in DOMString contextId);
@@ -77,8 +48,5 @@ interface nsIDOMHTMLCanvasElement : nsIDOMHTMLElement
   // stream in the desired image format.
   void mozFetchAsStream(in nsIInputStreamCallback callback,
                                         [optional] in DOMString type);
-
-  // A Mozilla-only callback that is called during the printing process.
-  attribute nsIPrintCallback mozPrintCallback;
 };
 

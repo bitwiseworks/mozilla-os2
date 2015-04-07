@@ -25,7 +25,7 @@ HTTP(..) load ligature-with-space-1.html
 fails-if(cocoaWidget||winWidget) HTTP(..) == lineheight-metrics-1.html lineheight-metrics-1-ref.html # bug 657864
 == lineheight-percentage-1.html lineheight-percentage-1-ref.html
 skip-if(B2G) == long-1.html long-ref.html
-== pre-line-1.html pre-line-1-ref.html
+fuzzy-if(Android,255,42) == pre-line-1.html pre-line-1-ref.html
 == pre-line-2.html pre-line-2-ref.html
 == pre-line-3.html pre-line-3-ref.html
 == pre-line-4.html pre-line-4-ref.html
@@ -33,6 +33,9 @@ skip-if(B2G) == long-1.html long-ref.html
 == soft-hyphens-1a.html soft-hyphens-1-ref.html
 == soft-hyphens-1b.html soft-hyphens-1-ref.html
 == soft-hyphens-1c.html soft-hyphens-1-ref.html
+== soft-hyphens-break-word-1a.html soft-hyphens-break-word-1-ref.html
+== soft-hyphens-break-word-1b.html soft-hyphens-break-word-1-ref.html
+== soft-hyphens-break-word-1c.html soft-hyphens-break-word-1-ref.html
 # Tests for soft hyphens in table cells, bug 418975
 != soft-hyphen-in-table-1.html soft-hyphen-in-table-1-notref.html
 == soft-hyphen-in-table-1.html soft-hyphen-in-table-1-ref.html
@@ -50,7 +53,7 @@ skip-if(!(d2d||cocoaWidget)) random-if(d2d) != subpixel-glyphs-x-2a.html subpixe
 skip-if(B2G) HTTP(..) == subpixel-glyphs-x-3a.html subpixel-glyphs-x-3b.html
 # No platforms do subpixel positioning vertically
 == subpixel-glyphs-y-1a.html subpixel-glyphs-y-1b.html
-fuzzy-if((Android||B2G),231,603) == subpixel-lineheight-1a.html subpixel-lineheight-1b.html
+fuzzy-if((Android||B2G),231,653) == subpixel-lineheight-1a.html subpixel-lineheight-1b.html
 == swash-1.html swash-1-ref.html
 HTTP(..) != synthetic-bold-metrics-01.html synthetic-bold-metrics-01-notref.html
 HTTP(..) == synthetic-bold-papyrus-01.html synthetic-bold-papyrus-01-ref.html
@@ -106,7 +109,7 @@ HTTP(..) == variation-selector-unsupported-1.html variation-selector-unsupported
 == wordbreak-1.html wordbreak-1-ref.html
 == wordbreak-2.html wordbreak-2-ref.html
 == wordbreak-3.html wordbreak-3-ref.html
-== wordbreak-4a.html wordbreak-4a-ref.html
+skip-if((Android&&(AndroidVersion==10||AndroidVersion==17))||(B2G&&browserIsRemote)) == wordbreak-4a.html wordbreak-4a-ref.html
 == wordbreak-4b.html wordbreak-4b-ref.html
 == wordbreak-5.html wordbreak-5-ref.html
 == wordbreak-6.html wordbreak-6-ref.html
@@ -132,6 +135,7 @@ skip-if(B2G) == wordwrap-09.html wordwrap-09-ref.html
 random-if(cocoaWidget) HTTP(..) == zwnj-01.xhtml zwnj-01-ref.xhtml
 HTTP(..) == zwnj-02.xhtml zwnj-02-ref.xhtml # HTTP(..) for ../filters.svg
 != zwnj-01.html zwnj-01-notref.html
+== initial-zwj-1.html initial-zwj-1-ref.html
 == cgj-01.html cgj-01-ref.html
 == 444656.html 444656-ref.html
 == 449555-1.html 449555-1-ref.html
@@ -142,8 +146,7 @@ fails-if(!winWidget&&!gtk2Widget) skip-if(B2G) HTTP(..) == 475092-pos.html 47509
 # Test for bug 484954
 == rgba-text.html rgba-text-ref.html
 # Test for bug 575695, 'kern' table support
-# Random on Windows because behavior depends on Uniscribe version(?)
-random-if(winWidget) HTTP(..) != kerning-01.html kerning-01-notref.html
+HTTP(..) != kerning-01.html kerning-01-notref.html
 # Test for bug 577380, support for AAT layout (on OS X only)
 random-if(!cocoaWidget) == 577380.html 577380-ref.html
 # Test for OpenType Arabic shaping support
@@ -151,12 +154,12 @@ HTTP(..) == arabic-shaping-1.html arabic-shaping-1-ref.html
 # check ligature in Arial Bold on Windows, for bug 644184; may fail on other platforms depending on fonts
 random-if(!winWidget) == arial-bold-lam-alef-1.html arial-bold-lam-alef-1-ref.html
 # Fallback (presentation-forms) shaping with a font that lacks GSUB/GPOS
-# These tests are not valid on OS X because our masking of complex-script ranges
+# These tests are not valid with Mac or FT2 font backends because our masking of complex-script ranges
 # in the 'cmap' will prevent the test font (without GSUB) being used.
-skip-if(B2G) fails-if(cocoaWidget) HTTP(..) == arabic-fallback-1.html arabic-fallback-1-ref.html
-fails-if(cocoaWidget) HTTP(..) == arabic-fallback-2.html arabic-fallback-2-ref.html
-fails-if(cocoaWidget) HTTP(..) == arabic-fallback-3.html arabic-fallback-3-ref.html
-fails-if(!cocoaWidget) HTTP(..) != arabic-fallback-4.html arabic-fallback-4-notref.html
+skip-if(B2G) fails-if(cocoaWidget||Android) HTTP(..) == arabic-fallback-1.html arabic-fallback-1-ref.html
+fails-if(cocoaWidget||Android||B2G) HTTP(..) == arabic-fallback-2.html arabic-fallback-2-ref.html
+fails-if(cocoaWidget||Android||B2G) HTTP(..) == arabic-fallback-3.html arabic-fallback-3-ref.html
+fails-if(!cocoaWidget&&!Android&&!B2G) HTTP(..) != arabic-fallback-4.html arabic-fallback-4-notref.html
 == arabic-marks-1.html arabic-marks-1-ref.html
 
 == 726392-1.html 726392-1-ref.html
@@ -180,8 +183,8 @@ pref(gfx.font_rendering.graphite.enabled,true) HTTP(..) != graphite-03a.html gra
 pref(gfx.font_rendering.graphite.enabled,true) HTTP(..) != graphite-03b.html graphite-03-notref.html
 pref(gfx.font_rendering.graphite.enabled,false) HTTP(..) != graphite-01.html graphite-01-ref.html
 pref(gfx.font_rendering.graphite.enabled,false) HTTP(..) != graphite-02.html graphite-02-ref.html
-# test 03a (lang setting in Padauk font) now works in opentype/harfbuzz as well, but not on Windows 7/8 (using Uniscribe/DirectWrite)
-fails-if(/^Windows\x20NT\x206\.[12]/.test(http.oscpu)) pref(gfx.font_rendering.graphite.enabled,false) HTTP(..) != graphite-03a.html graphite-03-notref.html
+# test 03a (lang setting in Padauk font) now works in opentype/harfbuzz as well
+pref(gfx.font_rendering.graphite.enabled,false) HTTP(..) != graphite-03a.html graphite-03-notref.html
 pref(gfx.font_rendering.graphite.enabled,false) HTTP(..) == graphite-03b.html graphite-03-notref.html
 
 # tests for graphite rendering with valid and invalid lang tags
@@ -267,6 +270,7 @@ pref(gfx.font_rendering.graphite.enabled,true) HTTP(..) == glyph-decomposition-g
 == auto-hyphenation-nb-1.html auto-hyphenation-nb-1-ref.html
 == auto-hyphenation-nl-1.html auto-hyphenation-nl-1-ref.html
 == auto-hyphenation-nn-1.html auto-hyphenation-nn-1-ref.html
+== auto-hyphenation-pl-1.html auto-hyphenation-pl-1-ref.html
 == auto-hyphenation-pt-1.html auto-hyphenation-pt-1-ref.html
 == auto-hyphenation-ru-1.html auto-hyphenation-ru-1-ref.html
 == auto-hyphenation-sh-1.html auto-hyphenation-sh-1-ref.html
@@ -276,3 +280,22 @@ pref(gfx.font_rendering.graphite.enabled,true) HTTP(..) == glyph-decomposition-g
 != auto-hyphenation-sv-1.html auto-hyphenation-sv-1-notref.html # verify swedish != english
 == auto-hyphenation-tr-1.html auto-hyphenation-tr-1-ref.html
 == auto-hyphenation-uk-1.html auto-hyphenation-uk-1-ref.html
+
+# osx-font-smoothing - with and without subpixel AA, only under OSX
+fails-if(!cocoaWidget||OSX==10.6||OSX==10.7) != osx-font-smoothing.html osx-font-smoothing-ref.html
+fails-if(!cocoaWidget||OSX==10.6||OSX==10.7) != osx-font-smoothing-2.html osx-font-smoothing-2-notref.html
+== osx-font-smoothing-2.html osx-font-smoothing-2-ref.html
+
+pref(layout.css.text-align-true-value.enabled,true) == text-align-true.html text-align-true-ref.html
+
+# stray control chars should not be invisible, bug 909344
+!= control-chars-01a.html control-chars-01-notref.html
+!= control-chars-01b.html control-chars-01-notref.html
+!= control-chars-01c.html control-chars-01-notref.html
+!= control-chars-01d.html control-chars-01-notref.html
+!= control-chars-02.html control-chars-02-notref.html
+== control-chars-03a.html control-chars-03-ref.html
+== control-chars-03b.html control-chars-03-ref.html
+
+# font fallback for <space> when not supported in the primary font family - bug 970891
+HTTP(..) == space-font-1.html space-font-1-ref.html

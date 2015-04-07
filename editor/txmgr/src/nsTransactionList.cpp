@@ -15,7 +15,7 @@
 #include "nsTransactionStack.h"
 #include "nscore.h"
 
-NS_IMPL_ISUPPORTS1(nsTransactionList, nsITransactionList)
+NS_IMPL_ISUPPORTS(nsTransactionList, nsITransactionList)
 
 nsTransactionList::nsTransactionList(nsITransactionManager *aTxnMgr, nsTransactionStack *aTxnStack)
   : mTxnStack(aTxnStack)
@@ -147,7 +147,7 @@ NS_IMETHODIMP nsTransactionList::GetItem(int32_t aIndex, nsITransaction **aItem)
 
   NS_ENSURE_TRUE(item, NS_ERROR_FAILURE);
 
-  *aItem = item->GetTransaction().get();
+  *aItem = item->GetTransaction().take();
 
   return NS_OK;
 }

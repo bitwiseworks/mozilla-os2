@@ -7,13 +7,10 @@
 // Implement TimeStamp::Now() with QueryPerformanceCounter() controlled with
 // values of GetTickCount().
 
-// XXX Forcing log to be able to catch issues in the field.  Should be removed
-// before this reaches the Release or even Beta channel.
-#define FORCE_PR_LOG
-
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/TimeStamp.h"
+#include "nsWindowsHelpers.h"
 #include <windows.h>
 
 #include "nsCRT.h"
@@ -184,26 +181,6 @@ namespace mozilla {
 
 typedef ULONGLONG (WINAPI* GetTickCount64_t)();
 static GetTickCount64_t sGetTickCount64 = nullptr;
-
-// ----------------------------------------------------------------------------
-// Critical Section helper class
-// ----------------------------------------------------------------------------
-
-class AutoCriticalSection
-{
-public:
-  AutoCriticalSection(LPCRITICAL_SECTION section)
-    : mSection(section)
-  {
-    ::EnterCriticalSection(mSection);
-  }
-  ~AutoCriticalSection()
-  {
-    ::LeaveCriticalSection(mSection);
-  }
-private:
-  LPCRITICAL_SECTION mSection;
-};
 
 // Function protecting GetTickCount result from rolling over,
 // result is in [ms]
@@ -457,18 +434,6 @@ TimeDuration::Resolution()
   return TimeDuration::FromTicks(int64_t(sResolution));
 }
 
-struct TimeStampInitialization
-{
-  TimeStampInitialization() {
-    TimeStamp::Startup();
-  }
-  ~TimeStampInitialization() {
-    TimeStamp::Shutdown();
-  }
-};
-
-static TimeStampInitialization initOnce;
-
 static bool
 HasStableTSC()
 {
@@ -534,8 +499,6 @@ TimeStamp::Startup()
 
   InitThresholds();
   InitResolution();
-  sFirstTimeStamp = TimeStamp::Now();
-  sProcessCreation = TimeStamp();
 
   return NS_OK;
 }

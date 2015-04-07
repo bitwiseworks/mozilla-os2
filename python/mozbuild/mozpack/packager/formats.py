@@ -176,7 +176,8 @@ class JarFormatter(FlatFormatter):
         return chromepath, entry
 
     def add_manifest(self, entry):
-        if isinstance(entry, ManifestChrome):
+        if isinstance(entry, ManifestChrome) and \
+                not urlparse(entry.relpath).scheme:
             chromepath, entry = self._jarize(entry, entry.relpath)
             assert not self._frozen_chrome
             self._chrome.add(chromepath)
@@ -260,10 +261,11 @@ class OmniJarFormatter(FlatFormatter):
         omnijar archive.
         '''
         base = self._get_base(path)
-        path = mozpack.path.split(mozpack.path.relpath(path, base))
+        path = mozpack.path.relpath(path, base)
         if any(mozpack.path.match(path, p.replace('*', '**'))
                for p in self._non_resources):
             return False
+        path = mozpack.path.split(path)
         if path[0] == 'chrome':
             return len(path) == 1 or path[1] != 'icons'
         if path[0] == 'components':

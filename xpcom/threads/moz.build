@@ -20,32 +20,44 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'xpcom_threads'
 
-MODULE = 'xpcom'
-
 EXPORTS += [
     'nsEventQueue.h',
+    'nsMemoryPressure.h',
     'nsProcess.h',
     'nsThread.h',
 ]
 
 EXPORTS.mozilla += [
+    'BackgroundHangMonitor.h',
     'HangMonitor.h',
     'LazyIdleThread.h',
     'SyncRunnable.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
+    'BackgroundHangMonitor.cpp',
     'HangMonitor.cpp',
     'LazyIdleThread.cpp',
-    'TimerThread.cpp',
     'nsEnvironment.cpp',
     'nsEventQueue.cpp',
+    'nsMemoryPressure.cpp',
     'nsProcessCommon.cpp',
     'nsThread.cpp',
     'nsThreadManager.cpp',
     'nsThreadPool.cpp',
     'nsTimerImpl.cpp',
+    'ThreadStackHelper.cpp',
+    'TimerThread.cpp',
 ]
 
-LIBRARY_NAME = 'xpcomthreads_s'
+MSVC_ENABLE_PGO = True
 
+LOCAL_INCLUDES += [
+    '../build',
+]
+
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'xpcom_core'
+
+include('/ipc/chromium/chromium-config.mozbuild')

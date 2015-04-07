@@ -2,158 +2,28 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-relativesrcdir = @relativesrcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-FAIL_ON_WARNINGS = 1
-
-VPATH += $(topsrcdir)/build
-
-# This can be deleted when SIMPLE_PROGRAMS is in moz.build
-cppsrcs = \
-  nsIFileEnumerator.cpp \
-  TestCallTemplates.cpp \
-  TestINIParser.cpp \
-  TestPRIntN.cpp \
-  TestRacingServiceManager.cpp \
-  TestRegistrationOrder.cpp \
-  TestThreadPoolListener.cpp \
-  TestTimers.cpp \
-  TestBlockingProcess.cpp \
-  TestQuickReturn.cpp \
-  TestArguments.cpp \
-  TestUnicodeArguments.cpp \
-  $(NULL)
-
-# This can be deleted when SIMPLE_PROGRAMS is in moz.build
-ifeq ($(OS_TARGET),WINNT)
-cppsrcs += TestBase64.cpp
-endif
-
-# This can be deleted when SIMPLE_PROGRAMS is in moz.build
-ifdef WRAP_STL_INCLUDES
-cppsrcs += TestSTLWrappers.cpp
-endif
-
-# TODO: Use CPPSRCS from moz.build
-SIMPLE_PROGRAMS	:= $(cppsrcs:.cpp=$(BIN_SUFFIX))
-
-CPP_UNIT_TESTS = \
-                 ShowAlignments.cpp \
-                 ShowSSEConfig.cpp \
-                 TestAutoPtr.cpp \
-                 TestAutoRef.cpp \
-                 TestCOMArray.cpp \
-                 TestCOMPtr.cpp \
-                 TestCOMPtrEq.cpp \
-                 TestDeque.cpp \
-                 TestFile.cpp \
-                 TestHashtables.cpp \
-                 TestID.cpp \
-                 TestObserverArray.cpp \
-                 TestObserverService.cpp \
-                 TestPipe.cpp \
-                 TestRefPtr.cpp \
-                 TestTextFormatter.cpp \
-                 TestTArray.cpp \
-                 $(NULL)
-
-ifdef MOZ_MEMORY
-CPP_UNIT_TESTS += TestJemalloc.cpp
-endif
-
-# XXX Make this tests work in libxul builds.
-#CPP_UNIT_TESTS += \
-#                  TestArray.cpp \
-#                  TestCRT.cpp \
-#                  TestEncoding.cpp \
-#                  TestExpirationTracker.cpp \
-#                  TestPipes.cpp \
-#                  TestPriorityQueue.cpp \
-#                  TestStorageStream.cpp \
-#                  TestStrings.cpp \
-#                  TestSynchronization.cpp \
-#                  TestTArray.cpp \
-#                  TestThreadPool.cpp \
-#                  TestThreads.cpp \
-#                  TestTimeStamp.cpp \
-#                  TestXPIDLString.cpp \
-#                  TestUTF.cpp \
-#                  TestAtoms.cpp \
-#                  $(NULL)
-## FIXME: bug 577500 TestStaticAtoms fails when run in dist/bin
-## TestStaticAtoms.cpp
-
-ifdef MOZ_DEBUG
-# FIXME bug 523392: TestDeadlockDetector doesn't like Windows
-# FIXME bug 523378: also fails on OS X
-ifneq (,$(filter-out WINNT Darwin,$(OS_ARCH)))
-CPP_UNIT_TESTS += \
-                  TestDeadlockDetector.cpp \
-                  TestDeadlockDetectorScalability.cpp \
-                  $(NULL)
-endif
-endif
-
-ifndef MOZILLA_INTERNAL_API
-CPP_UNIT_TESTS += \
-                  TestStringAPI.cpp \
-                  $(NULL)
-endif
-
-include $(topsrcdir)/config/config.mk
-
 LIBS += $(XPCOM_LIBS)
-
-# Needed to resolve __yylex (?)
-ifeq ($(OS_ARCH)$(OS_RELEASE),FreeBSD2)
-LIBS		+= -lpcap
-endif
 
 # Make sure we have symbols in case we need to debug these.
 MOZ_DEBUG_SYMBOLS = 1
 
 include $(topsrcdir)/config/rules.mk
 
-LOCAL_INCLUDES	= \
-                -I$(srcdir)/../ds \
-		$(NULL)
-
-libs::
-	$(INSTALL) $(srcdir)/test.properties $(DIST)/bin/res
 ifneq (,$(SIMPLE_PROGRAMS))
+libs::
 	$(INSTALL) $(SIMPLE_PROGRAMS) $(DEPTH)/_tests/xpcshell/$(relativesrcdir)/unit
 endif
 
-# Copy TestHarness.h into its own module, for ease of setting up includes
-# correctly.
-export::
-	$(NSINSTALL) -D $(DIST)/include/testing
-	$(INSTALL) $(srcdir)/TestHarness.h $(DIST)/include/testing
-
-install::
-	$(SYSINSTALL) $(IFLAGS1) $(srcdir)/test.properties $(DESTDIR)$(mozappdir)/res
-
-ifeq (,$(filter-out WINNT os2-emx, $(HOST_OS_ARCH)))
+ifeq (,$(filter-out WINNT, $(HOST_OS_ARCH)))
 getnativepath = $(call normalizepath,$(1))
 else
 getnativepath = $(1)
 endif
 
-abs_srcdir = $(call core_abspath,$(srcdir))
+abs_srcdir = $(abspath $(srcdir))
 
-DIST_PATH = $(DIST)/bin/
-RM_DIST = rm -f
-regOrderDir="$(call getnativepath,$(abs_srcdir)/regorder)";
-DOCOPY=
+regOrderDir = $(call getnativepath,$(abs_srcdir)/regorder)
 
 check::
 	XPCOM_DEBUG_BREAK=stack-and-abort $(RUN_TEST_PROGRAM) \
-	  $(DIST)/bin/TestRegistrationOrder$(BIN_SUFFIX) $(regOrderDir)
-
-GARBAGE += TestScriptable.h
+	  $(DIST)/bin/TestRegistrationOrder$(BIN_SUFFIX) '$(regOrderDir)'

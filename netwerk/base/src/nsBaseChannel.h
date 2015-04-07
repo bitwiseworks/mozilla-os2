@@ -13,7 +13,6 @@
 #include "nsInputStreamPump.h"
 
 #include "nsIChannel.h"
-#include "nsIInputStream.h"
 #include "nsIURI.h"
 #include "nsILoadGroup.h"
 #include "nsIStreamListener.h"
@@ -24,6 +23,8 @@
 #include "PrivateBrowsingChannel.h"
 #include "nsThreadUtils.h"
 #include "nsNetUtil.h"
+
+class nsIInputStream;
 
 //-----------------------------------------------------------------------------
 // nsBaseChannel is designed to be subclassed.  The subclass is responsible for
@@ -43,7 +44,7 @@ class nsBaseChannel : public nsHashPropertyBag
                     , public nsITransportEventSink
                     , public nsIAsyncVerifyRedirectCallback
                     , public mozilla::net::PrivateBrowsingChannel<nsBaseChannel>
-                    , private nsIStreamListener
+                    , protected nsIStreamListener
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -57,7 +58,7 @@ public:
 
   // This method must be called to initialize the basechannel instance.
   nsresult Init() {
-    return nsHashPropertyBag::Init();
+    return NS_OK;
   }
 
 protected:
@@ -99,6 +100,10 @@ private:
 
   // Called when the callbacks available to this channel may have changed.
   virtual void OnCallbacksChanged() {
+  }
+
+  // Called when our channel is done, to allow subclasses to drop resources.
+  virtual void OnChannelDone() {
   }
 
 public:
@@ -152,9 +157,9 @@ public:
   }
 
   // This is a short-cut to calling nsIRequest::IsPending()
-  bool IsPending() const {
+  virtual bool Pending() const {
     return mPump || mWaitingOnAsyncRedirect;
-  }
+ }
 
   // Helper function for querying the channel's notification callbacks.
   template <class T> void GetCallback(nsCOMPtr<T> &result) {
@@ -210,6 +215,13 @@ private:
     mProgressSink = nullptr;
     mQueriedProgressSink = false;
     OnCallbacksChanged();
+  }
+
+  // Called when our channel is done.  This should drop no-longer-needed pointers.
+  void ChannelDone() {
+      mListener = nullptr;
+      mListenerContext = nullptr;
+      OnChannelDone();
   }
 
   // Handle an async redirect callback.  This will only be called if we

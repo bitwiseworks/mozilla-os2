@@ -7,13 +7,8 @@
 
 #include "nsAboutProtocolHandler.h"
 #include "nsIURI.h"
-#include "nsIIOService.h"
-#include "nsCRT.h"
-#include "nsIComponentManager.h"
-#include "nsIServiceManager.h"
 #include "nsIAboutModule.h"
 #include "nsString.h"
-#include "nsReadableUtils.h"
 #include "nsNetCID.h"
 #include "nsAboutProtocolUtils.h"
 #include "nsError.h"
@@ -35,7 +30,7 @@ static bool IsSafeForUntrustedContent(nsIAboutModule *aModule, nsIURI *aURI) {
 }
 ////////////////////////////////////////////////////////////////////////////////
 
-NS_IMPL_ISUPPORTS1(nsAboutProtocolHandler, nsIProtocolHandler)
+NS_IMPL_ISUPPORTS(nsAboutProtocolHandler, nsIProtocolHandler)
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIProtocolHandler methods:
@@ -130,6 +125,17 @@ nsAboutProtocolHandler::NewChannel(nsIURI* uri, nsIChannel* *result)
     // about:what you ask?
     nsCOMPtr<nsIAboutModule> aboutMod;
     nsresult rv = NS_GetAboutModule(uri, getter_AddRefs(aboutMod));
+
+    nsAutoCString path;
+    nsresult rv2 = NS_GetAboutModuleName(uri, path);
+    if (NS_SUCCEEDED(rv2) && path.EqualsLiteral("srcdoc")) {
+        // about:srcdoc is meant to be unresolvable, yet is included in the 
+        // about lookup tables so that it can pass security checks when used in
+        // a srcdoc iframe.  To ensure that it stays unresolvable, we pretend
+        // that it doesn't exist.
+      rv = NS_ERROR_FACTORY_NOT_REGISTERED;
+    }
+
     if (NS_SUCCEEDED(rv)) {
         // The standard return case:
         rv = aboutMod->NewChannel(uri, result);
@@ -181,7 +187,7 @@ nsAboutProtocolHandler::AllowPort(int32_t port, const char *scheme, bool *_retva
 ////////////////////////////////////////////////////////////////////////////////
 // Safe about protocol handler impl
 
-NS_IMPL_ISUPPORTS1(nsSafeAboutProtocolHandler, nsIProtocolHandler)
+NS_IMPL_ISUPPORTS(nsSafeAboutProtocolHandler, nsIProtocolHandler)
 
 // nsIProtocolHandler methods:
 

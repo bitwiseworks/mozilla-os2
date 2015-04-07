@@ -38,7 +38,7 @@ public:
   TransportSecurityInfo();
   virtual ~TransportSecurityInfo();
   
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITRANSPORTSECURITYINFO
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSISSLSTATUSPROVIDER
@@ -47,11 +47,11 @@ public:
   NS_DECL_NSICLASSINFO
 
   nsresult SetSecurityState(uint32_t aState);
-  nsresult SetShortSecurityDescription(const PRUnichar *aText);
+  nsresult SetShortSecurityDescription(const char16_t *aText);
 
-  const char * GetHostName() const {
-    return mHostName.get();
-  }
+  const nsACString & GetHostName() const { return mHostName; }
+  const char * GetHostNameRaw() const { return mHostName.get(); }
+
   nsresult GetHostName(char **aHostName);
   nsresult SetHostName(const char *aHostName);
 
@@ -72,13 +72,6 @@ public:
   nsresult SetSSLStatus(nsSSLStatus *aSSLStatus);
   nsSSLStatus* SSLStatus() { return mSSLStatus; }
   void SetStatusErrorBits(nsIX509Cert & cert, uint32_t collected_errors);
-
-  bool IsCertIssuerBlacklisted() const {
-    return mIsCertIssuerBlacklisted;
-  }
-  void SetCertIssuerBlacklisted() {
-    mIsCertIssuerBlacklisted = true;
-  }
 
 private:
   mutable ::mozilla::Mutex mMutex;
@@ -102,7 +95,6 @@ private:
 
   int32_t mPort;
   nsXPIDLCString mHostName;
-  PRErrorCode mIsCertIssuerBlacklisted;
 
   /* SSL Status */
   mozilla::RefPtr<nsSSLStatus> mSSLStatus;
@@ -134,9 +126,6 @@ public:
   static nsresult Init()
   {
     sInstance = new RememberCertErrorsTable();
-    if (!sInstance->mErrorHosts.IsInitialized())
-      return NS_ERROR_OUT_OF_MEMORY;
-
     return NS_OK;
   }
 

@@ -10,8 +10,8 @@ XPIDL_SOURCES += [
     'nsIRDFContainerUtils.idl',
     'nsIRDFDataSource.idl',
     'nsIRDFDelegateFactory.idl',
-    'nsIRDFInMemoryDataSource.idl',
     'nsIRDFInferDataSource.idl',
+    'nsIRDFInMemoryDataSource.idl',
     'nsIRDFLiteral.idl',
     'nsIRDFNode.idl',
     'nsIRDFObserver.idl',
@@ -29,5 +29,5 @@ XPIDL_SOURCES += [
     'rdfITripleVisitor.idl',
 ]
 
-MODULE = 'rdf'
+XPIDL_MODULE = 'rdf'
 

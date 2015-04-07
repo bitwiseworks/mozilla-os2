@@ -13,25 +13,25 @@
 
 using namespace mozilla::widget;
 
-NS_IMPL_ISUPPORTS1(nsBidiKeyboard, nsIBidiKeyboard)
+NS_IMPL_ISUPPORTS(nsBidiKeyboard, nsIBidiKeyboard)
 
 nsBidiKeyboard::nsBidiKeyboard() : nsIBidiKeyboard()
 {
+  Reset();
 }
 
 nsBidiKeyboard::~nsBidiKeyboard()
 {
 }
 
-NS_IMETHODIMP nsBidiKeyboard::IsLangRTL(bool *aIsRTL)
+NS_IMETHODIMP nsBidiKeyboard::Reset()
 {
-  *aIsRTL = TISInputSourceWrapper::CurrentInputSource().IsForRTLLanguage();
   return NS_OK;
 }
 
-NS_IMETHODIMP nsBidiKeyboard::SetLangFromBidiLevel(uint8_t aLevel)
+NS_IMETHODIMP nsBidiKeyboard::IsLangRTL(bool *aIsRTL)
 {
-  // XXX Insert platform specific code to set keyboard language
+  *aIsRTL = TISInputSourceWrapper::CurrentInputSource().IsForRTLLanguage();
   return NS_OK;
 }
 

@@ -7,7 +7,6 @@
 #define nsMathMLmspaceFrame_h___
 
 #include "mozilla/Attributes.h"
-#include "nsCOMPtr.h"
 #include "nsMathMLContainerFrame.h"
 
 //
@@ -30,7 +29,7 @@ public:
 
   virtual bool IsLeaf() const MOZ_OVERRIDE;
 
-  NS_IMETHOD
+  virtual nsresult
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,

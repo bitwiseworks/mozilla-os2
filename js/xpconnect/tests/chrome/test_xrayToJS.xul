@@ -1,0 +1,170 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/css" href="chrome://global/skin"?>
+<?xml-stylesheet type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css"?>
+<!--
+https://bugzilla.mozilla.org/show_bug.cgi?id=933681
+-->
+<window title="Mozilla Bug 933681"
+        xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
+  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
+
+  <!-- test results are displayed in the html:body -->
+  <body xmlns="http://www.w3.org/1999/xhtml">
+  <a href="https://bugzilla.mozilla.org/show_bug.cgi?id=933681"
+     target="_blank">Mozilla Bug 933681</a>
+  </body>
+
+  <!-- test code goes here -->
+  <script type="application/javascript">
+  <![CDATA[
+
+  /** Test for ES constructors on Xrayed globals. **/
+  SimpleTest.waitForExplicitFinish();
+  const Cu = Components.utils;
+  let global = Cu.getGlobalForObject.bind(Cu);
+
+  simpleConstructors = ['Object', 'Function', 'Array', 'Boolean', 'Date', 'Number',
+                        'String', 'RegExp', 'Error', 'InternalError', 'EvalError',
+                        'RangeError', 'ReferenceError', 'SyntaxError', 'TypeError',
+                        'URIError', 'ArrayBuffer', 'Int8Array', 'Uint8Array',
+                        'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array',
+                        'Float32Array', 'Float64Array', 'Uint8ClampedArray',
+                        'WeakMap', 'Map', 'Set'];
+
+  function go() {
+    window.iwin = document.getElementById('ifr').contentWindow;
+
+    // Test constructors that can be instantiated with zero arguments.
+    for (var c of simpleConstructors) {
+      ok(iwin[c], "Constructors appear: " + c);
+      is(iwin[c], Cu.unwaiveXrays(iwin.wrappedJSObject[c]),
+         "we end up with the appropriate constructor: " + c);
+      is(Cu.unwaiveXrays(Cu.waiveXrays(new iwin[c]).constructor), iwin[c],
+         "constructor property is set up right: " + c);
+      is(Object.getPrototypeOf(new iwin[c]),
+         Cu.unwaiveXrays(Cu.waiveXrays(iwin[c]).prototype),
+         "prototype is correct: " + c);
+      is(global(new iwin[c]), iwin, "Got the right global: " + c);
+    }
+
+    // Test Object in more detail.
+    var num = new iwin.Object(4);
+    is(num.valueOf(), 4, "primitive object construction works");
+    is(global(num), iwin, "correct global for num");
+    var obj = new iwin.Object();
+    obj.foo = 2;
+    var withProto = iwin.Object.create(obj);
+    is(global(withProto), iwin, "correct global for withProto");
+    is(withProto.foo, 2, "Inherits properly");
+
+    // Test Function.
+    var primitiveFun = new iwin.Function('return 2');
+    is(global(primitiveFun), iwin, "function construction works");
+    is(primitiveFun(), 2, "basic function works");
+    var doSetFoo = new iwin.Function('arg', 'arg.foo = 2;');
+    is(global(doSetFoo), iwin, "function with args works");
+    try {
+      doSetFoo(new Object());
+      ok(false, "should have thrown while setting property on object");
+    } catch (e) {
+      ok(!!/denied/.test(e), "Threw correctly: " + e);
+    }
+    var factoryFun = new iwin.Function('return {foo: 32}');
+    is(global(factoryFun), iwin, "proper global for factoryFun");
+    is(factoryFun().foo, 32, "factoryFun invokable");
+    is(global(factoryFun()), iwin, "minted objects live in the content scope");
+
+    // Test interface objects that don't actually construct things.
+    is(iwin.Math.tan(4.5), Math.tan(4.5), "Math.tan works");
+    is(iwin.Math.E, Math.E, "Math.E works");
+    var json = JSON.stringify({a: 2, b: 'hi', c: {d: 'there'}});
+    is(global(iwin.JSON.parse(json)), iwin, "JSON rehydrated into the right context");
+    is(iwin.JSON.stringify(iwin.JSON.parse(json)), json, "JSON composition identity holds");
+
+    // Test proxies.
+    var targetObject = new iwin.Object();
+    targetObject.foo = 9;
+    var forwardingProxy = new iwin.Proxy(targetObject, new iwin.Object());
+    is(global(forwardingProxy), iwin, "proxy global correct");
+    is(forwardingProxy.foo, 9, "forwards correctly");
+    // NB: COW-implemented proxy handlers are super dangerous, and we should not
+    // encourage them.
+    var handler = {get: function(target, name) { return name * 2; }, __exposedProps__: {get: 'r'}};
+    var doublingProxy = new iwin.Proxy(targetObject, handler);
+    is(global(doublingProxy), iwin, "doubling proxy global correct");
+    is(doublingProxy[3], 6, "Doubles correctly");
+    is(doublingProxy[20], 40, "Doubles correctly");
+
+    // Test eval.
+    var toEval = "({a: 2, b: {foo: 'bar'}, f: function() { return window; }})";
+    is(global(iwin.eval(toEval)), iwin, "eval creates objects in the correct global");
+    is(iwin.eval(toEval).b.foo, 'bar', "eval-ed object looks right");
+    is(iwin.eval(toEval).f(), iwin, "evaled function works right");
+
+    testDate();
+
+    // We could also test DataView and Iterator here for completeness, but it's
+    // more trouble than it's worth.
+
+
+    SimpleTest.finish();
+  }
+
+  function filterOut(array, props) {
+    return array.filter(p => props.indexOf(p) == -1);
+  }
+
+  function testXray(classname, xray, xray2, propsToSkip) {
+    propsToSkip = propsToSkip || [];
+    let xrayProto = Object.getPrototypeOf(xray);
+    let localProto = window[classname].prototype;
+    let protoProps = filterOut(Object.getOwnPropertyNames(localProto), propsToSkip).sort();
+    let protoMethods = protoProps.filter(name => typeof localProto[name] == 'function' &&
+                                         name != 'constructor');
+    ok(protoMethods.length > 0, "Need something to test");
+    is(xrayProto, iwin[classname].prototype, "Xray proto is correct");
+    is(xrayProto, xray.__proto__, "Proto accessors agree");
+    is(Object.getPrototypeOf(xrayProto), iwin.Object.prototype, "proto proto is correct");
+    for (let name of protoMethods) {
+      info("Running tests for property: " + name);
+      ok(xrayProto.hasOwnProperty(name), "proto should have the property as own");
+      ok(!xray.hasOwnProperty(name), "instance should not have the property as own");
+      let method = xrayProto[name];
+      is(typeof method, 'function', "Methods from Xrays are functions");
+      is(global(method), window, "Methods from Xrays are local");
+      ok(method instanceof Function, "instanceof works on methods from Xrays");
+      is(xrayProto[name], method, "Holder caching works properly");
+      is(xray[name], method, "Proto props resolve on the instance");
+      let local = localProto[name];
+      is(method.length, local.length, "Function.length identical");
+      if (method.length == 0) {
+        is(xray[name]() + "", local.call(xray) + "",
+           "Xray and local method results stringify identically");
+         is(xray[name]() + "", xray.wrappedJSObject[name]() + "",
+            "Xray and waived method results stringify identically");
+      }
+    }
+    is(Object.getOwnPropertyNames(xrayProto).sort().toSource(),
+       protoProps.toSource(), "getOwnPropertyNames works");
+
+    is(xrayProto.constructor, iwin[classname], "constructor property works");
+
+    xrayProto.expando = 42;
+    is(xray.expando, 42, "Xrayed instances see proto expandos");
+    is(xray2.expando, 42, "Xrayed instances see proto expandos");
+  }
+
+  function testDate() {
+    // toGMTString is handled oddly in the engine. We don't bother to support
+    // it over Xrays.
+    //
+    // We don't yet support self-hosted functions on Xrays. See bug 972987.
+    let propsToSkip = ['toGMTString', 'toLocaleString',
+                       'toLocaleDateString', 'toLocaleTimeString'];
+    testXray('Date', new iwin.Date(), new iwin.Date(), propsToSkip);
+  }
+
+  ]]>
+  </script>
+  <iframe id="ifr" onload="go();" src="http://example.org/tests/js/xpconnect/tests/mochitest/file_empty.html" />
+</window>

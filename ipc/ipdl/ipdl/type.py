@@ -5,7 +5,9 @@
 
 import os, sys
 
-from ipdl.ast import CxxInclude, Decl, Loc, QualifiedId, State, StructDecl, TransitionStmt, TypeSpec, UnionDecl, UsingStmt, Visitor, ASYNC, SYNC, RPC, IN, OUT, INOUT, ANSWER, CALL, RECV, SEND, URGENT
+from ipdl.ast import CxxInclude, Decl, Loc, QualifiedId, State, StructDecl, TransitionStmt
+from ipdl.ast import TypeSpec, UnionDecl, UsingStmt, Visitor, ASYNC, SYNC, INTR
+from ipdl.ast import IN, OUT, INOUT, ANSWER, CALL, RECV, SEND, RPC
 import ipdl.builtin as builtin
 
 _DELETE_MSG = '__delete__'
@@ -204,18 +206,22 @@ class IPDLType(Type):
 
     def isAsync(self): return self.sendSemantics is ASYNC
     def isSync(self): return self.sendSemantics is SYNC
-    def isRpc(self): return self.sendSemantics is RPC or self.sendSemantics is URGENT
-    def isUrgent(self): return self.sendSemantics is URGENT
+    def isInterrupt(self): return self.sendSemantics is INTR
+    def isRpc(self): return self.sendSemantics is RPC
 
     def talksAsync(self): return True
-    def talksSync(self): return self.isSync() or self.isRpc()
-    def talksRpc(self): return self.isRpc()
+    def talksSync(self): return self.isSync() or self.isRpc() or self.isInterrupt()
+    def talksRpc(self): return self.isRpc() or self.isInterrupt()
+    def talksInterrupt(self): return self.isInterrupt()
 
-    def hasReply(self):  return self.isSync() or self.isRpc()
+    def hasReply(self):  return (self.isSync()
+                                 or self.isInterrupt()
+                                 or self.isRpc())
 
     def needsMoreJuiceThan(self, o):
         return (o.isAsync() and not self.isAsync()
-                or o.isSync() and self.isRpc())
+                or o.isSync() and self.isRpc()
+                or o.isRpc() and self.isInterrupt())
 
 class StateType(IPDLType):
     def __init__(self, protocol, name, start=False):
@@ -500,7 +506,7 @@ def makeBuiltinUsing(tname):
                               QualifiedId(_builtinloc, base, quals)))
 
 builtinUsing = [ makeBuiltinUsing(t) for t in builtin.Types ]
-builtinIncludes = [ CxxInclude(_builtinloc, f) for f in builtin.Includes ]
+builtinHeaderIncludes = [ CxxInclude(_builtinloc, f) for f in builtin.HeaderIncludes ]
 
 def errormsg(loc, fmt, *args):
     while not isinstance(loc, Loc):
@@ -588,8 +594,6 @@ With this information, it finally type checks the AST.'''
                 self.reportErrors(errout)
                 return False
             return True
-
-        tu.cxxIncludes = builtinIncludes + tu.cxxIncludes
 
         # tag each relevant node with "decl" information, giving type, name,
         # and location of declaration
@@ -871,7 +875,7 @@ class GatherDecls(TcheckVisitor):
                 "destructor declaration `%s(...)' required for managed protocol `%s'",
                 _DELETE_MSG, p.name)
 
-        p.decl.type.hasReentrantDelete = p.decl.type.hasDelete and self.symtab.lookup(_DELETE_MSG).type.isRpc()
+        p.decl.type.hasReentrantDelete = p.decl.type.hasDelete and self.symtab.lookup(_DELETE_MSG).type.isInterrupt()
 
         for managed in p.managesStmts:
             mgdname = managed.name
@@ -1491,13 +1495,13 @@ class CheckTypes(TcheckVisitor):
         loc = t.loc
         impliedDirection, impliedSems = {
             SEND: [ OUT, _YNC ], RECV: [ IN, _YNC ],
-            CALL: [ OUT, RPC ],  ANSWER: [ IN, RPC ],
+            CALL: [ OUT, INTR ],  ANSWER: [ IN, INTR ],
          } [t.trigger]
         
         if (OUT is impliedDirection and t.msg.type.isIn()
             or IN is impliedDirection and t.msg.type.isOut()
-            or _YNC is impliedSems and t.msg.type.isRpc()
-            or RPC is impliedSems and (not t.msg.type.isRpc())):
+            or _YNC is impliedSems and t.msg.type.isInterrupt()
+            or INTR is impliedSems and (not t.msg.type.isInterrupt())):
             mtype = t.msg.type
 
             self.error(
@@ -1623,7 +1627,7 @@ class ProcessGraph:
         for b in cls.iterbridges():
             if b.parent == actor:
                 endpoints.append(Actor(b.bridgeProto, 'parent'))
-            elif b.child == actor:
+            if b.child == actor:
                 endpoints.append(Actor(b.bridgeProto, 'child'))
         return endpoints
 
@@ -1776,11 +1780,12 @@ class BuildProcessGraph(TcheckVisitor):
 
             if pproc == cproc:
                 if parentSideActor is not None:
-                    self.error(bridges.loc,
-                               "ambiguous bridge `%s' between `%s' and `%s'",
-                               bridgeProto.name(),
-                               parentSideProto.name(),
-                               childSideProto.name())
+                    if parentSideProto != childSideProto:
+                        self.error(bridges.loc,
+                                   "ambiguous bridge `%s' between `%s' and `%s'",
+                                   bridgeProto.name(),
+                                   parentSideProto.name(),
+                                   childSideProto.name())
                 else:
                     parentSideActor, childSideActor = pactor.other(), cactor.other()
 

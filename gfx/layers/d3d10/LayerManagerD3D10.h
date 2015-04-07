@@ -12,6 +12,7 @@
 #include <d3d10_1.h>
 
 #include "gfxContext.h"
+#include "mozilla/gfx/UserData.h"
 #include "nsIWidget.h"
 
 #include "ReadbackManagerD3D10.h"
@@ -40,8 +41,6 @@ struct ShaderConstantRectD3D10
   operator float* () { return &mX; }
 };
 
-extern cairo_user_data_key_t gKeyD3D10Texture;
-
 /*
  * This is the LayerManager used for Direct3D 10. For now this will
  * render on the main thread.
@@ -50,6 +49,10 @@ extern cairo_user_data_key_t gKeyD3D10Texture;
  * transactions.
  */
 class LayerManagerD3D10 : public LayerManager {
+  typedef mozilla::gfx::DrawTarget DrawTarget;
+  typedef mozilla::gfx::IntSize IntSize;
+  typedef mozilla::gfx::SurfaceFormat SurfaceFormat;
+
 public:
   LayerManagerD3D10(nsIWidget *aWidget);
   virtual ~LayerManagerD3D10();
@@ -92,9 +95,9 @@ public:
   enum {
     MAX_TEXTURE_SIZE = 8192
   };
-  virtual bool CanUseCanvasLayerForSize(const gfxIntSize &aSize)
+  virtual bool CanUseCanvasLayerForSize(const gfx::IntSize &aSize)
   {
-    return aSize <= gfxIntSize(MAX_TEXTURE_SIZE, MAX_TEXTURE_SIZE);
+    return aSize <= gfx::IntSize(MAX_TEXTURE_SIZE, MAX_TEXTURE_SIZE);
   }
 
   virtual int32_t GetMaxTextureSize() const
@@ -109,23 +112,21 @@ public:
   virtual already_AddRefed<CanvasLayer> CreateCanvasLayer();
   virtual already_AddRefed<ReadbackLayer> CreateReadbackLayer();
 
-  virtual already_AddRefed<gfxASurface>
-    CreateOptimalSurface(const gfxIntSize &aSize,
-                         gfxASurface::gfxImageFormat imageFormat);
+  virtual TemporaryRef<DrawTarget>
+    CreateOptimalDrawTarget(const IntSize &aSize,
+                            SurfaceFormat aSurfaceFormat);
 
-  virtual already_AddRefed<gfxASurface>
-    CreateOptimalMaskSurface(const gfxIntSize &aSize);
+  virtual TemporaryRef<DrawTarget>
+    CreateOptimalMaskDrawTarget(const IntSize &aSize);
 
   virtual TemporaryRef<mozilla::gfx::DrawTarget>
-    CreateDrawTarget(const mozilla::gfx::IntSize &aSize,
+    CreateDrawTarget(const gfx::IntSize &aSize,
                      mozilla::gfx::SurfaceFormat aFormat);
 
-  virtual LayersBackend GetBackendType() { return LAYERS_D3D10; }
+  virtual LayersBackend GetBackendType() { return LayersBackend::LAYERS_D3D10; }
   virtual void GetBackendName(nsAString& name) { name.AssignLiteral("Direct3D 10"); }
 
-#ifdef MOZ_LAYERS_HAVE_LOG
   virtual const char* Name() const { return "D3D10"; }
-#endif // MOZ_LAYERS_HAVE_LOG
 
   // Public helpers
 
@@ -170,6 +171,8 @@ private:
 
   nsIWidget *mWidget;
 
+  bool mDisableSequenceForNextFrame;
+
   CallbackInfo mCurrentCallbackInfo;
 
   nsIntSize mViewport;
@@ -178,7 +181,7 @@ private:
   nsAutoPtr<Nv3DVUtils> mNv3DVUtils; 
 
   /*
-   * Context target, NULL when drawing directly to our swap chain.
+   * Context target, nullptr when drawing directly to our swap chain.
    */
   nsRefPtr<gfxContext> mTarget;
 
@@ -230,7 +233,7 @@ public:
    * Any layer that can be used as a mask layer should override this method.
    * If aSize is non-null, it will contain the size of the texture.
    */
-  virtual already_AddRefed<ID3D10ShaderResourceView> GetAsTexture(gfxIntSize* aSize)
+  virtual already_AddRefed<ID3D10ShaderResourceView> GetAsTexture(gfx::IntSize* aSize)
   {
     return nullptr;
   }
@@ -238,8 +241,8 @@ public:
   void SetEffectTransformAndOpacity()
   {
     Layer* layer = GetLayer();
-    const gfx3DMatrix& transform = layer->GetEffectiveTransform();
-    void* raw = &const_cast<gfx3DMatrix&>(transform)._11;
+    const gfx::Matrix4x4& transform = layer->GetEffectiveTransform();
+    void* raw = &const_cast<gfx::Matrix4x4&>(transform)._11;
     effect()->GetVariableByName("mLayerTransform")->SetRawValue(raw, 0, 64);
     effect()->GetVariableByName("fLayerOpacity")->AsScalar()->SetFloat(layer->GetEffectiveOpacity());
   }

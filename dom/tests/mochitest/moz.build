@@ -6,30 +6,48 @@
 
 DIRS += [
     'dom-level0',
-    'dom-level1-core',
-    'dom-level2-core',
-    'dom-level2-html',
     'ajax',
+    'beacon',
     'bugs',
-    'chrome',
-    'crypto',
     'general',
-    'whatwg',
     'geolocation',
     'localstorage',
     'orientation',
     'sessionstorage',
     'storageevent',
-    'pointerlock',
     'notification',
-    'webapps',
     'webcomponents',
 ]
 
 if CONFIG['MOZ_GAMEPAD']:
    DIRS += ['gamepad']
 
-#needs IPC support, also tests do not run successfully in Firefox for now
-#if CONFIG['MOZ_BUILD_APP'] != 'mobile':
-#    DIRS += ['notification']
+MOCHITEST_MANIFESTS += [
+    'crypto/mochitest.ini',
+    'dom-level1-core/mochitest.ini',
+    'dom-level2-core/mochitest.ini',
+    'dom-level2-html/mochitest.ini',
+    'webapps/mochitest.ini',
+    'whatwg/mochitest.ini',
+]
 
+MOCHITEST_CHROME_MANIFESTS += [
+    'chrome/chrome.ini',
+    'webapps/chrome.ini',
+    'whatwg/chrome.ini',
+]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gtk2':
+    # Bug 788164.
+    MOCHITEST_MANIFESTS += [
+        'pointerlock/mochitest.ini',
+    ]
+
+if CONFIG['MOZ_DISABLE_CRYPTOLEGACY']:
+   MOCHITEST_MANIFESTS += [
+      'crypto/mochitest-no-legacy.ini',
+   ]
+else:
+   MOCHITEST_MANIFESTS += [
+      'crypto/mochitest-legacy.ini',
+   ]

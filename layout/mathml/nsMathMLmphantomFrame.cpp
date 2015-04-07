@@ -4,12 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-#include "nsCOMPtr.h"
-#include "nsFrame.h"
-#include "nsPresContext.h"
-#include "nsStyleConsts.h"
-
 #include "nsMathMLmphantomFrame.h"
+#include "mozilla/gfx/2D.h"
 
 //
 // <mphantom> -- make content invisible but preserve its size

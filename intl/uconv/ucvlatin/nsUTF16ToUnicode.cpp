@@ -3,10 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsUCConstructors.h"
 #include "nsUTF16ToUnicode.h"
 #include "nsCharTraits.h"
-#include <string.h>
+#include "mozilla/Endian.h"
 
 enum {
   STATE_NORMAL = 0,
@@ -19,15 +18,15 @@ enum {
 nsresult
 nsUTF16ToUnicodeBase::UTF16ConvertToUnicode(const char * aSrc,
                                             int32_t * aSrcLength,
-                                            PRUnichar * aDest,
+                                            char16_t * aDest,
                                             int32_t * aDestLength,
                                             bool aSwapBytes)
 {
   const char* src = aSrc;
   const char* srcEnd = aSrc + *aSrcLength;
-  PRUnichar* dest = aDest;
-  PRUnichar* destEnd = aDest + *aDestLength;
-  PRUnichar oddHighSurrogate;
+  char16_t* dest = aDest;
+  char16_t* destEnd = aDest + *aDestLength;
+  char16_t oddHighSurrogate;
 
   switch(mState) {
     case STATE_FIRST_CALL:
@@ -69,7 +68,7 @@ nsUTF16ToUnicodeBase::UTF16ConvertToUnicode(const char * aSrc,
 
   const char* srcEvenEnd;
 
-  PRUnichar u;
+  char16_t u;
   if (mState == STATE_HALF_CODE_POINT) {
     if (dest == destEnd)
       goto error;
@@ -77,8 +76,8 @@ nsUTF16ToUnicodeBase::UTF16ConvertToUnicode(const char * aSrc,
     // the 1st byte of a 16-bit code unit was stored in |mOddByte| in the
     // previous run while the 2nd byte has to come from |*src|.
     mState = STATE_NORMAL;
-#ifdef IS_BIG_ENDIAN
-    u = (mOddByte << 8) | *src++; // safe, we know we have at least one byte.
+#if MOZ_BIG_ENDIAN
+    u = (mOddByte << 8) | uint8_t(*src++); // safe, we know we have at least one byte.
 #else
     u = (*src++ << 8) | mOddByte; // safe, we know we have at least one byte.
 #endif
@@ -93,7 +92,7 @@ nsUTF16ToUnicodeBase::UTF16ConvertToUnicode(const char * aSrc,
       goto error;
 
 #if !defined(__sparc__) && !defined(__arm__)
-    u = *(const PRUnichar*)src;
+    u = *(const char16_t*)src;
 #else
     memcpy(&u, src, 2);
 #endif
@@ -194,7 +193,7 @@ nsUTF16ToUnicodeBase::GetMaxLength(const char * aSrc, int32_t aSrcLength,
 
 NS_IMETHODIMP
 nsUTF16BEToUnicode::Convert(const char * aSrc, int32_t * aSrcLength,
-                            PRUnichar * aDest, int32_t * aDestLength)
+                            char16_t * aDest, int32_t * aDestLength)
 {
   switch (mState) {
     case STATE_FIRST_CALL:
@@ -211,13 +210,13 @@ nsUTF16BEToUnicode::Convert(const char * aSrc, int32_t * aSrcLength,
         mState = STATE_SECOND_BYTE;
         return NS_OK_UDEC_MOREINPUT;
       }
-#ifdef IS_LITTLE_ENDIAN
+#if MOZ_LITTLE_ENDIAN
       // on LE machines, BE BOM is 0xFFFE
-      if (0xFFFE != *((PRUnichar*)aSrc)) {
+      if (0xFFFE != *((char16_t*)aSrc)) {
         mState = STATE_NORMAL;
       }
 #else
-      if (0xFEFF != *((PRUnichar*)aSrc)) {
+      if (0xFEFF != *((char16_t*)aSrc)) {
         mState = STATE_NORMAL;
       }
 #endif
@@ -235,19 +234,13 @@ nsUTF16BEToUnicode::Convert(const char * aSrc, int32_t * aSrcLength,
       break;
   }
 
-  nsresult rv = UTF16ConvertToUnicode(aSrc, aSrcLength, aDest, aDestLength,
-#ifdef IS_LITTLE_ENDIAN
-                                      true
-#else
-                                      false
-#endif
-                                      );
-  return rv;
+  return UTF16ConvertToUnicode(aSrc, aSrcLength, aDest, aDestLength,
+                               bool(MOZ_LITTLE_ENDIAN));
 }
 
 NS_IMETHODIMP
 nsUTF16LEToUnicode::Convert(const char * aSrc, int32_t * aSrcLength,
-                            PRUnichar * aDest, int32_t * aDestLength)
+                            char16_t * aDest, int32_t * aDestLength)
 {
   switch (mState) {
     case STATE_FIRST_CALL:
@@ -264,13 +257,13 @@ nsUTF16LEToUnicode::Convert(const char * aSrc, int32_t * aSrcLength,
         mState = STATE_SECOND_BYTE;
         return NS_OK_UDEC_MOREINPUT;
       }
-#ifdef IS_BIG_ENDIAN
+#if MOZ_BIG_ENDIAN
       // on BE machines, LE BOM is 0xFFFE
-      if (0xFFFE != *((PRUnichar*)aSrc)) {
+      if (0xFFFE != *((char16_t*)aSrc)) {
         mState = STATE_NORMAL;
       }
 #else
-      if (0xFEFF != *((PRUnichar*)aSrc)) {
+      if (0xFEFF != *((char16_t*)aSrc)) {
         mState = STATE_NORMAL;
       }
 #endif
@@ -288,14 +281,8 @@ nsUTF16LEToUnicode::Convert(const char * aSrc, int32_t * aSrcLength,
       break;
   }
 
-  nsresult rv = UTF16ConvertToUnicode(aSrc, aSrcLength, aDest, aDestLength,
-#ifdef IS_BIG_ENDIAN
-                                      true
-#else
-                                      false
-#endif
-                                      );
-  return rv;
+  return UTF16ConvertToUnicode(aSrc, aSrcLength, aDest, aDestLength,
+                               bool(MOZ_BIG_ENDIAN));
 }
 
 NS_IMETHODIMP
@@ -308,7 +295,7 @@ nsUTF16ToUnicode::Reset()
 
 NS_IMETHODIMP
 nsUTF16ToUnicode::Convert(const char * aSrc, int32_t * aSrcLength,
-                          PRUnichar * aDest, int32_t * aDestLength)
+                          char16_t * aDest, int32_t * aDestLength)
 {
     if(STATE_FIRST_CALL == mState && *aSrcLength < 2)
     {
@@ -350,12 +337,10 @@ nsUTF16ToUnicode::Convert(const char * aSrc, int32_t * aSrcLength,
     }
     
     nsresult rv = UTF16ConvertToUnicode(aSrc, aSrcLength, aDest, aDestLength,
-#ifdef IS_BIG_ENDIAN
+#if MOZ_BIG_ENDIAN
                                         (mEndian == kLittleEndian)
-#elif defined(IS_LITTLE_ENDIAN)
-                                        (mEndian == kBigEndian)
 #else
-    #error "Unknown endianness"
+                                        (mEndian == kBigEndian)
 #endif
                                         );
 

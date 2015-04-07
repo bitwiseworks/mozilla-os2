@@ -1,17 +1,20 @@
 "use strict";
 // https://bugzilla.mozilla.org/show_bug.cgi?id=761228
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
-
 Cu.import("resource://testing-common/httpd.js");
+
+XPCOMUtils.defineLazyGetter(this, "URL", function() {
+  return "http://localhost:" + httpServer.identity.primaryPort;
+});
 
 var httpServer = null;
 const testFileName = "test_customConditionalRequest_304";
 const basePath = "/" + testFileName + "/";
-const baseURI = "http://localhost:4444" + basePath;
+
+XPCOMUtils.defineLazyGetter(this, "baseURI", function() {
+  return URL + basePath;
+});
+
 const unexpected304 = "unexpected304";
 const existingCached304 = "existingCached304";
 
@@ -28,9 +31,9 @@ function make_channel(url) {
 }
 
 function clearCache() {
-    var service = Components.classes["@mozilla.org/network/cache-service;1"]
-        .getService(Ci.nsICacheService);
-    service.evictEntries(Ci.nsICache.STORE_ANYWHERE);
+    var service = Components.classes["@mozilla.org/netwerk/cache-storage-service;1"]
+        .getService(Ci.nsICacheStorageService);
+    service.clear();
 }
 
 function alwaysReturn304Handler(metadata, response) {
@@ -46,7 +49,7 @@ function run_test() {
                                  alwaysReturn304Handler);
   httpServer.registerPathHandler(basePath + existingCached304,
                                  alwaysReturn304Handler);
-  httpServer.start(4444);
+  httpServer.start(-1);
   run_next_test();
 }
 
@@ -72,13 +75,13 @@ add_test(function test_unexpected_304() {
 // the cache.
 add_test(function test_304_stored_in_cache() {
   asyncOpenCacheEntry(
-    baseURI + existingCached304, "HTTP",
-    Ci.nsICache.STORE_ANYWHERE, Ci.nsICache.ACCESS_READ_WRITE,
+    baseURI + existingCached304, "disk", Ci.nsICacheStorage.OPEN_NORMALLY, null,
     function (entryStatus, cacheEntry) {
       cacheEntry.setMetaDataElement("request-method", "GET");
       cacheEntry.setMetaDataElement("response-head",
                                     "HTTP/1.1 304 Not Modified\r\n" +
                                     "\r\n");
+      cacheEntry.metaDataReady();
       cacheEntry.close();
 
       var chan = make_channel(baseURI + existingCached304);

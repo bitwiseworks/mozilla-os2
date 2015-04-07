@@ -6,6 +6,8 @@
 #ifndef MOZILLA_GFX_COMPOSITORD3D11_H
 #define MOZILLA_GFX_COMPOSITORD3D11_H
 
+#include "mozilla/gfx/2D.h"
+#include "gfx2DGlue.h"
 #include "mozilla/layers/Compositor.h"
 #include "TextureD3D11.h"
 #include <d3d11.h>
@@ -38,59 +40,72 @@ struct DeviceAttachmentsD3D11;
 class CompositorD3D11 : public Compositor
 {
 public:
-  CompositorD3D11(nsIWidget *aWidget);
+  CompositorD3D11(nsIWidget* aWidget);
   ~CompositorD3D11();
 
-  virtual bool Initialize();
-  virtual void Destroy() { }
+  virtual bool Initialize() MOZ_OVERRIDE;
+  virtual void Destroy() MOZ_OVERRIDE {}
 
   virtual TextureFactoryIdentifier
     GetTextureFactoryIdentifier() MOZ_OVERRIDE;
 
-  virtual bool CanUseCanvasLayerForSize(const gfxIntSize &aSize) MOZ_OVERRIDE;
+  virtual TemporaryRef<DataTextureSource>
+    CreateDataTextureSource(TextureFlags aFlags = 0) MOZ_OVERRIDE;
+
+  virtual bool CanUseCanvasLayerForSize(const gfx::IntSize& aSize) MOZ_OVERRIDE;
   virtual int32_t GetMaxTextureSize() const MOZ_FINAL;
 
-  virtual void SetTargetContext(gfxContext *aTarget) { mTarget = aTarget; }
+  virtual void SetTargetContext(gfx::DrawTarget* aTarget)  MOZ_OVERRIDE
+  {
+    mTarget = aTarget;
+  }
 
-  virtual void MakeCurrent(MakeCurrentFlags aFlags = 0) { }
+  virtual void MakeCurrent(MakeCurrentFlags aFlags = 0)  MOZ_OVERRIDE {}
 
   virtual TemporaryRef<CompositingRenderTarget>
     CreateRenderTarget(const gfx::IntRect &aRect,
                        SurfaceInitMode aInit) MOZ_OVERRIDE;
 
   virtual TemporaryRef<CompositingRenderTarget>
-    CreateRenderTargetFromSource(const gfx::IntRect &aRect,
-                                 const CompositingRenderTarget *aSource) MOZ_OVERRIDE;
+    CreateRenderTargetFromSource(const gfx::IntRect& aRect,
+                                 const CompositingRenderTarget* aSource,
+                                 const gfx::IntPoint& aSourcePoint) MOZ_OVERRIDE;
 
-  virtual void SetRenderTarget(CompositingRenderTarget *aSurface) MOZ_OVERRIDE;
-  virtual CompositingRenderTarget* GetCurrentRenderTarget() MOZ_OVERRIDE
+  virtual void SetRenderTarget(CompositingRenderTarget* aSurface) MOZ_OVERRIDE;
+  virtual CompositingRenderTarget* GetCurrentRenderTarget() const MOZ_OVERRIDE
   {
     return mCurrentRT;
   }
 
-  virtual void SetDestinationSurfaceSize(const gfx::IntSize& aSize) MOZ_OVERRIDE { }
+  virtual void SetDestinationSurfaceSize(const gfx::IntSize& aSize) MOZ_OVERRIDE {}
 
   /**
    * Declare an offset to use when rendering layers. This will be ignored when
    * rendering to a target instead of the screen.
    */
-  virtual void SetScreenRenderOffset(const ScreenPoint& aOffset) MOZ_OVERRIDE {
+  virtual void SetScreenRenderOffset(const ScreenPoint& aOffset) MOZ_OVERRIDE
+  {
     if (aOffset.x || aOffset.y) {
       NS_RUNTIMEABORT("SetScreenRenderOffset not supported by CompositorD3D11.");
     }
     // If the offset is 0, 0 that's okay.
   }
 
-  virtual void DrawQuad(const gfx::Rect &aRect, const gfx::Rect &aClipRect,
+  virtual void ClearRect(const gfx::Rect& aRect) MOZ_OVERRIDE;
+
+  virtual void DrawQuad(const gfx::Rect &aRect,
+                        const gfx::Rect &aClipRect,
                         const EffectChain &aEffectChain,
-                        gfx::Float aOpacity, const gfx::Matrix4x4 &aTransform,
-                        const gfx::Point &aOffset) MOZ_OVERRIDE;
+                        gfx::Float aOpacity,
+                        const gfx::Matrix4x4 &aTransform) MOZ_OVERRIDE;
 
   /**
-   * Start a new frame. If aClipRectIn is null, sets *aClipRectOut to the screen dimensions. 
+   * Start a new frame. If aClipRectIn is null, sets *aClipRectOut to the
+   * screen dimensions. 
    */
-  virtual void BeginFrame(const gfx::Rect *aClipRectIn,
-                          const gfxMatrix& aTransform,
+  virtual void BeginFrame(const nsIntRegion& aInvalidRegion,
+                          const gfx::Rect *aClipRectIn,
+                          const gfx::Matrix& aTransform,
                           const gfx::Rect& aRenderBounds,
                           gfx::Rect *aClipRectOut = nullptr,
                           gfx::Rect *aRenderBoundsOut = nullptr) MOZ_OVERRIDE;
@@ -104,19 +119,19 @@ public:
    * Post rendering stuff if the rendering is outside of this Compositor
    * e.g., by Composer2D
    */
-  virtual void EndFrameForExternalComposition(const gfxMatrix& aTransform) MOZ_OVERRIDE { }
+  virtual void EndFrameForExternalComposition(const gfx::Matrix& aTransform) MOZ_OVERRIDE {}
 
   /**
    * Tidy up if BeginFrame has been called, but EndFrame won't be
    */
-  virtual void AbortFrame() MOZ_OVERRIDE { }
+  virtual void AbortFrame() MOZ_OVERRIDE {}
 
   /**
    * Setup the viewport and projection matrix for rendering
    * to a window of the given dimensions.
    */
   virtual void PrepareViewport(const gfx::IntSize& aSize,
-                               const gfxMatrix& aWorldTransform) MOZ_OVERRIDE;
+                               const gfx::Matrix& aWorldTransform) MOZ_OVERRIDE;
 
   virtual bool SupportsPartialTextureUpdate() MOZ_OVERRIDE { return true; }
 
@@ -124,27 +139,26 @@ public:
   virtual const char* Name() const MOZ_OVERRIDE { return "Direct3D 11"; }
 #endif
 
-  virtual void NotifyLayersTransaction() MOZ_OVERRIDE { }
+  virtual LayersBackend GetBackendType() const MOZ_OVERRIDE {
+    return LayersBackend::LAYERS_D3D11;
+  }
 
   virtual nsIWidget* GetWidget() const MOZ_OVERRIDE { return mWidget; }
-  virtual const nsIntSize& GetWidgetSize() MOZ_OVERRIDE;
 
-  ID3D11Device *GetDevice() { return mDevice; }
+  ID3D11Device* GetDevice() { return mDevice; }
 
 private:
-  enum MaskMode {
-    UNMASKED = 0,
-    MASKED = 1,
-    MASKED3D
-  };
-
+  // ensure mSize is up to date with respect to mWidget
+  void EnsureSize();
   void VerifyBufferSize();
   void UpdateRenderTarget();
   bool CreateShaders();
   void UpdateConstantBuffers();
   void SetSamplerForFilter(gfx::Filter aFilter);
-  void SetPSForEffect(Effect *aEffect, MaskMode aMaskMode);
+  void SetPSForEffect(Effect *aEffect, MaskType aMaskType, gfx::SurfaceFormat aFormat);
   void PaintToTarget();
+
+  virtual gfx::IntSize GetWidgetSize() const MOZ_OVERRIDE { return gfx::ToIntSize(mSize); }
 
   RefPtr<ID3D11DeviceContext> mContext;
   RefPtr<ID3D11Device> mDevice;
@@ -152,12 +166,12 @@ private:
   RefPtr<CompositingRenderTargetD3D11> mDefaultRT;
   RefPtr<CompositingRenderTargetD3D11> mCurrentRT;
 
-  DeviceAttachmentsD3D11 *mAttachments;
+  DeviceAttachmentsD3D11* mAttachments;
 
-  nsRefPtr<gfxContext> mTarget;
+  RefPtr<gfx::DrawTarget> mTarget;
 
-  nsIWidget *mWidget;
-  // XXX - Bas - wth?
+  nsIWidget* mWidget;
+
   nsIntSize mSize;
 
   HWND mHwnd;
@@ -166,6 +180,7 @@ private:
 
   VertexShaderConstants mVSConstants;
   PixelShaderConstants mPSConstants;
+  bool mDisableSequenceForNextFrame;
 };
 
 }

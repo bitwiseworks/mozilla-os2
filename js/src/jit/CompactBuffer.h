@@ -7,9 +7,10 @@
 #ifndef jit_Compactbuffer_h
 #define jit_Compactbuffer_h
 
-#include "js/Vector.h"
 #include "jsalloc.h"
-#include "IonTypes.h"
+
+#include "jit/IonTypes.h"
+#include "js/Vector.h"
 
 namespace js {
 namespace jit {
@@ -42,8 +43,7 @@ class CompactBufferReader
             if (!(byte & 1))
                 return val;
         }
-        JS_NOT_REACHED("unreachable");
-        return 0;
+        MOZ_ASSUME_UNREACHABLE("unreachable");
     }
 
   public:
@@ -86,6 +86,12 @@ class CompactBufferReader
     bool more() const {
         JS_ASSERT(buffer_ <= end_);
         return buffer_ < end_;
+    }
+
+    void seek(const uint8_t *start, uint32_t offset) {
+        buffer_ = start + offset;
+        MOZ_ASSERT(start < end_);
+        MOZ_ASSERT(buffer_ < end_);
     }
 };
 

@@ -79,6 +79,9 @@ static inline Type MIN (const Type &a, const Type &b) { return a < b ? a : b; }
 template <typename Type>
 static inline Type MAX (const Type &a, const Type &b) { return a > b ? a : b; }
 
+static inline unsigned int DIV_CEIL (const unsigned int a, unsigned int b)
+{ return (a + (b - 1)) / b; }
+
 
 #undef  ARRAY_LENGTH
 template <typename Type, unsigned int n>
@@ -321,14 +324,22 @@ struct hb_prealloced_array_t
   inline void pop (void)
   {
     len--;
-    /* TODO: shrink array if needed */
+  }
+
+  inline void remove (unsigned int i)
+  {
+     if (unlikely (i >= len))
+       return;
+     memmove (static_cast<void *> (&array[i]),
+	      static_cast<void *> (&array[i + 1]),
+	      (len - i - 1) * sizeof (Type));
+     len--;
   }
 
   inline void shrink (unsigned int l)
   {
      if (l < len)
        len = l;
-    /* TODO: shrink array if needed */
   }
 
   template <typename T>
@@ -376,7 +387,7 @@ struct hb_prealloced_array_t
   }
 };
 
-#define HB_AUTO_ARRAY_PREALLOCED 64
+#define HB_AUTO_ARRAY_PREALLOCED 16
 template <typename Type>
 struct hb_auto_array_t : hb_prealloced_array_t <Type, HB_AUTO_ARRAY_PREALLOCED>
 {
@@ -563,8 +574,8 @@ _hb_debug (unsigned int level,
   return level < max_level;
 }
 
-#define DEBUG_LEVEL(WHAT, LEVEL) (_hb_debug ((LEVEL), HB_DEBUG_##WHAT))
-#define DEBUG(WHAT) (DEBUG_LEVEL (WHAT, 0))
+#define DEBUG_LEVEL_ENABLED(WHAT, LEVEL) (_hb_debug ((LEVEL), HB_DEBUG_##WHAT))
+#define DEBUG_ENABLED(WHAT) (DEBUG_LEVEL_ENABLED (WHAT, 0))
 
 template <int max_level> static inline void
 _hb_debug_msg_va (const char *what,
@@ -595,7 +606,7 @@ _hb_debug_msg_va (const char *what,
 #define ULBAR	"\342\225\257"	/* U+256F BOX DRAWINGS LIGHT ARC UP AND LEFT */
 #define LBAR	"\342\225\264"	/* U+2574 BOX DRAWINGS LIGHT LEFT */
     static const char bars[] = VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR VBAR;
-    fprintf (stderr, "%2d %s" VRBAR "%s",
+    fprintf (stderr, "%2u %s" VRBAR "%s",
 	     level,
 	     bars + sizeof (bars) - 1 - MIN ((unsigned int) sizeof (bars), (unsigned int) (sizeof (VBAR) - 1) * level),
 	     level_dir ? (level_dir > 0 ? DLBAR : ULBAR) : LBAR);
@@ -794,6 +805,12 @@ hb_in_range (T u, T lo, T hi)
     return (u & ~(lo^hi)) == lo;
   else
     return lo <= u && u <= hi;
+}
+
+template <typename T> static inline bool
+hb_in_ranges (T u, T lo1, T hi1, T lo2, T hi2)
+{
+  return hb_in_range (u, lo1, hi1) || hb_in_range (u, lo2, hi2);
 }
 
 template <typename T> static inline bool

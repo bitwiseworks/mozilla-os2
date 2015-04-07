@@ -3,6 +3,7 @@ dnl Local autoconf macros used with mozilla
 dnl The contents of this file are under the Public Domain.
 dnl
 
+builtin(include, build/autoconf/hotfixes.m4)dnl
 builtin(include, build/autoconf/acwinpaths.m4)dnl
 builtin(include, build/autoconf/hooks.m4)dnl
 builtin(include, build/autoconf/config.status.m4)dnl
@@ -30,6 +31,8 @@ builtin(include, build/autoconf/zlib.m4)dnl
 builtin(include, build/autoconf/linux.m4)dnl
 builtin(include, build/autoconf/python-virtualenv.m4)dnl
 builtin(include, build/autoconf/winsdk.m4)dnl
+builtin(include, build/autoconf/icu.m4)dnl
+builtin(include, build/autoconf/ffi.m4)dnl
 
 MOZ_PROG_CHECKMSYS()
 

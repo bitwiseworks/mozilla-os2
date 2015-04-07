@@ -10,12 +10,15 @@
 #include "nsThreadManager.h"
 #include "nsThreadUtils.h"
 #include "plarena.h"
+#include "pratom.h"
 #include "GeckoProfiler.h"
+#include "mozilla/Atomics.h"
 
+using mozilla::Atomic;
 using mozilla::TimeDuration;
 using mozilla::TimeStamp;
 
-static int32_t          gGenerator = 0;
+static Atomic<int32_t>  gGenerator;
 static TimerThread*     gThread = nullptr;
 
 #ifdef DEBUG_TIMERS
@@ -108,13 +111,13 @@ public:
   nsTimerEvent()
     : mTimer()
     , mGeneration(0)
-  {
+   {
     MOZ_COUNT_CTOR(nsTimerEvent);
 
     MOZ_ASSERT(gThread->IsOnTimerThread(),
                "nsTimer must always be allocated on the timer thread");
 
-    PR_ATOMIC_INCREMENT(&sAllocatorUsers);
+    sAllocatorUsers++;
   }
 
 #ifdef DEBUG_TIMERS
@@ -150,19 +153,19 @@ private:
 
     MOZ_ASSERT(!sCanDeleteAllocator || sAllocatorUsers > 0,
                "This will result in us attempting to deallocate the nsTimerEvent allocator twice");
-    PR_ATOMIC_DECREMENT(&sAllocatorUsers);
+    sAllocatorUsers--;
   }
 
   nsRefPtr<nsTimerImpl> mTimer;
   int32_t      mGeneration;
 
   static TimerEventAllocator* sAllocator;
-  static int32_t sAllocatorUsers;
+  static Atomic<int32_t> sAllocatorUsers;
   static bool sCanDeleteAllocator;
 };
 
 TimerEventAllocator* nsTimerEvent::sAllocator = nullptr;
-int32_t nsTimerEvent::sAllocatorUsers = 0;
+Atomic<int32_t> nsTimerEvent::sAllocatorUsers;
 bool nsTimerEvent::sCanDeleteAllocator = false;
 
 namespace {
@@ -199,15 +202,15 @@ void TimerEventAllocator::Free(void* aPtr)
 
 } // anonymous namespace
 
-NS_IMPL_THREADSAFE_QUERY_INTERFACE1(nsTimerImpl, nsITimer)
-NS_IMPL_THREADSAFE_ADDREF(nsTimerImpl)
+NS_IMPL_QUERY_INTERFACE(nsTimerImpl, nsITimer)
+NS_IMPL_ADDREF(nsTimerImpl)
 
-NS_IMETHODIMP_(nsrefcnt) nsTimerImpl::Release(void)
+NS_IMETHODIMP_(MozExternalRefCountType) nsTimerImpl::Release(void)
 {
   nsrefcnt count;
 
   MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");
-  count = NS_AtomicDecrementRefcnt(mRefCnt);
+  count = --mRefCnt;
   NS_LOG_RELEASE(this, count, "nsTimerImpl");
   if (count == 0) {
     mRefCnt = 1; /* stabilize */
@@ -325,14 +328,16 @@ nsresult nsTimerImpl::InitCommon(uint32_t aType, uint32_t aDelay)
 {
   nsresult rv;
 
-  NS_ENSURE_TRUE(gThread, NS_ERROR_NOT_INITIALIZED);
+  if (NS_WARN_IF(!gThread))
+    return NS_ERROR_NOT_INITIALIZED;
   if (!mEventTarget) {
     NS_ERROR("mEventTarget is NULL");
     return NS_ERROR_NOT_INITIALIZED;
   }
 
   rv = gThread->Init();
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv)))
+    return rv;
 
   /**
    * In case of re-Init, both with and without a preceding Cancel, clear the
@@ -352,7 +357,7 @@ nsresult nsTimerImpl::InitCommon(uint32_t aType, uint32_t aDelay)
     gThread->RemoveTimer(this);
   mCanceled = false;
   mTimeout = TimeStamp();
-  mGeneration = PR_ATOMIC_INCREMENT(&gGenerator);
+  mGeneration = gGenerator++;
 
   mType = (uint8_t)aType;
   SetDelayInternal(aDelay);
@@ -365,7 +370,8 @@ NS_IMETHODIMP nsTimerImpl::InitWithFuncCallback(nsTimerCallbackFunc aFunc,
                                                 uint32_t aDelay,
                                                 uint32_t aType)
 {
-  NS_ENSURE_ARG_POINTER(aFunc);
+  if (NS_WARN_IF(!aFunc))
+    return NS_ERROR_INVALID_ARG;
   
   ReleaseCallback();
   mCallbackType = CALLBACK_TYPE_FUNC;
@@ -379,7 +385,8 @@ NS_IMETHODIMP nsTimerImpl::InitWithCallback(nsITimerCallback *aCallback,
                                             uint32_t aDelay,
                                             uint32_t aType)
 {
-  NS_ENSURE_ARG_POINTER(aCallback);
+  if (NS_WARN_IF(!aCallback))
+    return NS_ERROR_INVALID_ARG;
 
   ReleaseCallback();
   mCallbackType = CALLBACK_TYPE_INTERFACE;
@@ -393,7 +400,8 @@ NS_IMETHODIMP nsTimerImpl::Init(nsIObserver *aObserver,
                                 uint32_t aDelay,
                                 uint32_t aType)
 {
-  NS_ENSURE_ARG_POINTER(aObserver);
+  if (NS_WARN_IF(!aObserver))
+    return NS_ERROR_INVALID_ARG;
 
   ReleaseCallback();
   mCallbackType = CALLBACK_TYPE_OBSERVER;
@@ -489,8 +497,8 @@ NS_IMETHODIMP nsTimerImpl::GetTarget(nsIEventTarget** aTarget)
 
 NS_IMETHODIMP nsTimerImpl::SetTarget(nsIEventTarget* aTarget)
 {
-  NS_ENSURE_TRUE(mCallbackType == CALLBACK_TYPE_UNKNOWN,
-                 NS_ERROR_ALREADY_INITIALIZED);
+  if (NS_WARN_IF(mCallbackType != CALLBACK_TYPE_UNKNOWN))
+    return NS_ERROR_ALREADY_INITIALIZED;
 
   if (aTarget)
     mEventTarget = aTarget;
@@ -507,8 +515,12 @@ void nsTimerImpl::Fire()
 
   PROFILER_LABEL("Timer", "Fire");
 
-  TimeStamp now = TimeStamp::Now();
+#ifdef MOZ_TASK_TRACER
+  mozilla::tasktracer::AutoRunFakeTracedTask runTracedTask(mTracedTask);
+#endif
+
 #ifdef DEBUG_TIMERS
+  TimeStamp now = TimeStamp::Now();
   if (PR_LOG_TEST(GetTimerLog(), PR_LOG_DEBUG)) {
     TimeDuration   a = now - mStart; // actual delay in intervals
     TimeDuration   b = TimeDuration::FromMilliseconds(mDelay); // expected delay in intervals
@@ -538,7 +550,7 @@ void nsTimerImpl::Fire()
   if (mCallbackType == CALLBACK_TYPE_INTERFACE)
     mTimerCallbackWhileFiring = mCallback.i;
   mFiring = true;
-  
+
   // Handle callbacks that re-init the timer, but avoid leaking.
   // See bug 330128.
   CallbackUnion callback = mCallback;
@@ -636,11 +648,17 @@ NS_IMETHODIMP nsTimerEvent::Run()
 #endif
 
   mTimer->Fire();
+  // Since nsTimerImpl is not thread-safe, we should release |mTimer|
+  // here in the target thread to avoid race condition. Otherwise,
+  // ~nsTimerEvent() which calls nsTimerImpl::Release() could run in the
+  // timer thread and result in race condition.
+  mTimer = nullptr;
 
   return NS_OK;
 }
 
-already_AddRefed<nsTimerImpl> nsTimerImpl::PostTimerEvent(already_AddRefed<nsTimerImpl> aTimerRef)
+already_AddRefed<nsTimerImpl>
+nsTimerImpl::PostTimerEvent(already_AddRefed<nsTimerImpl> aTimerRef)
 {
   nsRefPtr<nsTimerImpl> timer(aTimerRef);
   if (!timer->mEventTarget) {
@@ -676,8 +694,9 @@ already_AddRefed<nsTimerImpl> nsTimerImpl::PostTimerEvent(already_AddRefed<nsTim
     // But only re-arm REPEATING_PRECISE timers.
     if (gThread && timer->mType == TYPE_REPEATING_PRECISE) {
       nsresult rv = gThread->AddTimer(timer);
-      if (NS_FAILED(rv))
+      if (NS_FAILED(rv)) {
         return timer.forget();
+      }
     }
   }
 
@@ -687,10 +706,11 @@ already_AddRefed<nsTimerImpl> nsTimerImpl::PostTimerEvent(already_AddRefed<nsTim
   nsresult rv = target->Dispatch(event, NS_DISPATCH_NORMAL);
   if (NS_FAILED(rv)) {
     timer = event->ForgetTimer();
-    if (gThread)
+    if (gThread) {
       gThread->RemoveTimer(timer);
     }
     return timer.forget();
+  }
 
   return nullptr;
 }

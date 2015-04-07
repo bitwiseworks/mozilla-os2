@@ -9,49 +9,55 @@
 
 #include "IndexedDatabase.h"
 
-#include "nsIIDBFileHandle.h"
-
 #include "mozilla/dom/file/FileHandle.h"
 #include "mozilla/dom/indexedDB/FileInfo.h"
 
 BEGIN_INDEXEDDB_NAMESPACE
 
-class IDBFileHandle : public mozilla::dom::file::FileHandle,
-                      public nsIIDBFileHandle
+class IDBDatabase;
+
+class IDBFileHandle : public file::FileHandle
 {
+  typedef mozilla::dom::file::LockedFile LockedFile;
+
 public:
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIIDBFILEHANDLE
-
-  NS_IMETHOD_(int64_t)
-  GetFileId()
-  {
-    return mFileInfo->Id();
-  }
-
-  NS_IMETHOD_(FileInfo*)
-  GetFileInfo()
-  {
-    return mFileInfo;
-  }
-
   static already_AddRefed<IDBFileHandle>
   Create(IDBDatabase* aDatabase, const nsAString& aName,
          const nsAString& aType, already_AddRefed<FileInfo> aFileInfo);
 
+
+  virtual int64_t
+  GetFileId() MOZ_OVERRIDE
+  {
+    return mFileInfo->Id();
+  }
+
+  virtual FileInfo*
+  GetFileInfo() MOZ_OVERRIDE
+  {
+    return mFileInfo;
+  }
+
   virtual already_AddRefed<nsISupports>
-  CreateStream(nsIFile* aFile, bool aReadOnly);
+  CreateStream(nsIFile* aFile, bool aReadOnly) MOZ_OVERRIDE;
 
   virtual already_AddRefed<nsIDOMFile>
-  CreateFileObject(mozilla::dom::file::LockedFile* aLockedFile,
-                   uint32_t aFileSize);
+  CreateFileObject(LockedFile* aLockedFile, uint32_t aFileSize) MOZ_OVERRIDE;
+
+  // nsWrapperCache
+  virtual JSObject*
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+
+  // WebIDL
+  IDBDatabase*
+  Database();
 
 private:
-  IDBFileHandle()
-  { }
+  IDBFileHandle(IDBDatabase* aOwner);
 
   ~IDBFileHandle()
-  { }
+  {
+  }
 
   nsRefPtr<FileInfo> mFileInfo;
 };

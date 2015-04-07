@@ -4,9 +4,17 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['test']
+BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
 
 EXTRA_COMPONENTS += [
     'BrowserPageThumbs.manifest',
     'PageThumbsProtocol.js',
 ]
+
+EXTRA_JS_MODULES += [
+    'BackgroundPageThumbs.jsm',
+    'PageThumbs.jsm',
+    'PageThumbsWorker.js',
+]
+
+JAR_MANIFESTS += ['jar.mn']

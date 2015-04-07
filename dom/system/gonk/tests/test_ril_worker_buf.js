@@ -16,10 +16,10 @@ function run_test() {
 function add_test_incoming_parcel(parcel, handler) {
   add_test(function test_incoming_parcel() {
     let worker = newWorker({
-      postRILMessage: function fakePostRILMessage(data) {
+      postRILMessage: function(data) {
         // do nothing
       },
-      postMessage: function fakePostMessage(message) {
+      postMessage: function(message) {
         // do nothing
       }
     });
@@ -27,18 +27,19 @@ function add_test_incoming_parcel(parcel, handler) {
     if (!parcel) {
       parcel = newIncomingParcel(-1,
                                  worker.RESPONSE_TYPE_UNSOLICITED,
-                                 worker.REQUEST_REGISTRATION_STATE,
+                                 worker.REQUEST_VOICE_REGISTRATION_STATE,
                                  [0, 0, 0, 0]);
     }
 
+    let context = worker.ContextPool._contexts[0];
     // supports only requests less or equal than UINT8_MAX(255).
-    let request = parcel[worker.PARCEL_SIZE_SIZE + worker.UINT32_SIZE];
-    worker.RIL[request] = function ril_request_handler() {
-      handler(worker);
-      worker.postMessage();
+    let buf = context.Buf;
+    let request = parcel[buf.PARCEL_SIZE_SIZE + buf.UINT32_SIZE];
+    context.RIL[request] = function ril_request_handler() {
+      handler.apply(this, arguments);
     };
 
-    worker.onRILMessage(parcel);
+    worker.onRILMessage(0, parcel);
 
     // end of incoming parcel's trip, let's do next test.
     run_next_test();
@@ -47,28 +48,30 @@ function add_test_incoming_parcel(parcel, handler) {
 
 // Test normal parcel handling.
 add_test_incoming_parcel(null,
-  function test_normal_parcel_handling(worker) {
+  function test_normal_parcel_handling() {
+    let self = this;
     do_check_throws(function normal_handler() {
       // reads exactly the same size, should not throw anything.
-      worker.Buf.readUint32();
+      self.context.Buf.readInt32();
     });
   }
 );
 
 // Test parcel under read.
 add_test_incoming_parcel(null,
-  function test_parcel_under_read(worker) {
+  function test_parcel_under_read() {
+    let self = this;
     do_check_throws(function under_read_handler() {
       // reads less than parcel size, should not throw.
-      worker.Buf.readUint16();
+      self.context.Buf.readUint16();
     });
   }
 );
 
 // Test parcel over read.
 add_test_incoming_parcel(null,
-  function test_parcel_over_read(worker) {
-    let buf = worker.Buf;
+  function test_parcel_over_read() {
+    let buf = this.context.Buf;
 
     // read all data available
     while (buf.readAvailable > 0) {
@@ -85,16 +88,17 @@ add_test_incoming_parcel(null,
 // Test Bug 814761: buffer overwritten
 add_test(function test_incoming_parcel_buffer_overwritten() {
   let worker = newWorker({
-    postRILMessage: function fakePostRILMessage(data) {
+    postRILMessage: function(data) {
       // do nothing
     },
-    postMessage: function fakePostMessage(message) {
+    postMessage: function(message) {
       // do nothing
     }
   });
 
+  let context = worker.ContextPool._contexts[0];
   // A convenient alias.
-  let buf = worker.Buf;
+  let buf = context.Buf;
 
   // Allocate an array of specified size and set each of its elements to value.
   function calloc(length, value) {
@@ -106,35 +110,35 @@ add_test(function test_incoming_parcel_buffer_overwritten() {
   }
 
   // Do nothing in handleParcel().
-  let request = worker.REQUEST_REGISTRATION_STATE;
-  worker.RIL[request] = null;
+  let request = worker.REQUEST_VOICE_REGISTRATION_STATE;
+  context.RIL[request] = null;
 
   // Prepare two parcels, whose sizes are both smaller than the incoming buffer
   // size but larger when combined, to trigger the bug.
-  let pA_dataLength = buf.INCOMING_BUFFER_LENGTH / 2;
+  let pA_dataLength = buf.incomingBufferLength / 2;
   let pA = newIncomingParcel(-1,
                              worker.RESPONSE_TYPE_UNSOLICITED,
                              request,
                              calloc(pA_dataLength, 1));
-  let pA_parcelSize = pA.length - worker.PARCEL_SIZE_SIZE;
+  let pA_parcelSize = pA.length - buf.PARCEL_SIZE_SIZE;
 
-  let pB_dataLength = buf.INCOMING_BUFFER_LENGTH * 3 / 4;
+  let pB_dataLength = buf.incomingBufferLength * 3 / 4;
   let pB = newIncomingParcel(-1,
                              worker.RESPONSE_TYPE_UNSOLICITED,
                              request,
                              calloc(pB_dataLength, 1));
-  let pB_parcelSize = pB.length - worker.PARCEL_SIZE_SIZE;
+  let pB_parcelSize = pB.length - buf.PARCEL_SIZE_SIZE;
 
   // First, send an incomplete pA and verifies related data pointer:
   let p1 = pA.subarray(0, pA.length - 1);
-  worker.onRILMessage(p1);
+  worker.onRILMessage(0, p1);
   // The parcel should not have been processed.
   do_check_eq(buf.readAvailable, 0);
   // buf.currentParcelSize should have been set because incoming data has more
   // than 4 octets.
   do_check_eq(buf.currentParcelSize, pA_parcelSize);
   // buf.readIncoming should contains remaining unconsumed octets count.
-  do_check_eq(buf.readIncoming, p1.length - worker.PARCEL_SIZE_SIZE);
+  do_check_eq(buf.readIncoming, p1.length - buf.PARCEL_SIZE_SIZE);
   // buf.incomingWriteIndex should be ready to accept the last octet.
   do_check_eq(buf.incomingWriteIndex, p1.length);
 
@@ -143,7 +147,7 @@ add_test(function test_incoming_parcel_buffer_overwritten() {
   let p2 = new Uint8Array(1 + pB.length);
   p2.set(pA.subarray(pA.length - 1), 0);
   p2.set(pB, 1);
-  worker.onRILMessage(p2);
+  worker.onRILMessage(0, p2);
   // The parcels should have been both consumed.
   do_check_eq(buf.readAvailable, 0);
   // No parcel data remains.
@@ -159,8 +163,8 @@ add_test(function test_incoming_parcel_buffer_overwritten() {
 
 // Test Buf.readUint8Array.
 add_test_incoming_parcel(null,
-  function test_buf_readUint8Array(worker) {
-    let buf = worker.Buf;
+  function test_buf_readUint8Array() {
+    let buf = this.context.Buf;
 
     let u8array = buf.readUint8Array(1);
     do_check_eq(u8array instanceof Uint8Array, true);

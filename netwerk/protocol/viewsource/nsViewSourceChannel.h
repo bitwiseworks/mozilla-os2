@@ -8,12 +8,9 @@
 
 #include "nsString.h"
 #include "nsCOMPtr.h"
-#include "nsXPIDLString.h"
 #include "nsIViewSourceChannel.h"
 #include "nsIURI.h"
 #include "nsIStreamListener.h"
-#include "nsViewSourceHandler.h"
-#include "nsNetCID.h"
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsICachingChannel.h"
@@ -52,6 +49,9 @@ public:
 
     NS_HIDDEN_(nsresult) Init(nsIURI* uri);
 
+    NS_HIDDEN_(nsresult) InitSrcdoc(nsIURI* aURI, const nsAString &aSrcdoc,
+                                    nsIURI* aBaseURI);
+
 protected:
     nsCOMPtr<nsIChannel>        mChannel;
     nsCOMPtr<nsIHttpChannel>    mHttpChannel;
@@ -61,9 +61,11 @@ protected:
     nsCOMPtr<nsIUploadChannel>  mUploadChannel;
     nsCOMPtr<nsIStreamListener> mListener;
     nsCOMPtr<nsIURI>            mOriginalURI;
+    nsCOMPtr<nsIURI>            mBaseURI;
     nsCString                   mContentType;
     bool                        mIsDocument; // keeps track of the LOAD_DOCUMENT_URI flag
     bool                        mOpened;
+    bool                        mIsSrcdocChannel;
 };
 
 #endif /* nsViewSourceChannel_h___ */

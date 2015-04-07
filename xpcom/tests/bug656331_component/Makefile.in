@@ -5,21 +5,11 @@
 
 # Blatantly copied from xpcom/tests/component.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
+unittestlocation = xpcom/tests/unit
 
-include $(DEPTH)/config/autoconf.mk
-
-LIBRARY_NAME	= test656331
-IS_COMPONENT	= 1
-NO_DIST_INSTALL = 1
-FORCE_SHARED_LIB = 1
-
-include $(topsrcdir)/config/config.mk
-
-MANIFEST_FILE = bug656331.manifest
+MANIFEST = bug656331.manifest
+MANIFEST_PATH = $(testxpcobjdir)/$(unittestlocation)
+PP_TARGETS += MANIFEST
 
 EXTRA_DSO_LDOPTS = \
   $(DIST)/lib/$(LIB_PREFIX)xpcomglue_s.$(LIB_SUFFIX) \
@@ -34,14 +24,6 @@ EXTRA_DSO_LDOPTS += \
   $(NULL)
 endif
 
-include $(topsrcdir)/config/rules.mk
-
-DEFINES += -DLIBRARY_FILENAME="$(SHARED_LIBRARY)"
-
-unittestlocation = xpcom/tests/unit
-
-libs:: $(SHARED_LIBRARY)
-	$(INSTALL) $^ $(testxpcobjdir)/$(unittestlocation)
-
-libs:: $(MANIFEST_FILE)
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(DEFINES) $(ACDEFINES) $(XULPPFLAGS) $< > $(testxpcobjdir)/$(unittestlocation)/$(<F)
+LIB_FILES = $(SHARED_LIBRARY)
+LIB_DEST = $(testxpcobjdir)/$(unittestlocation)
+INSTALL_TARGETS += LIB

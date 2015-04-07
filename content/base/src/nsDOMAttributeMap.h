@@ -10,23 +10,18 @@
 #ifndef nsDOMAttributeMap_h
 #define nsDOMAttributeMap_h
 
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Attr.h"
 #include "mozilla/ErrorResult.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIDOMMozNamedAttrMap.h"
 #include "nsRefPtrHashtable.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "nsWrapperCache.h"
 
 class nsIAtom;
 class nsINodeInfo;
 class nsIDocument;
-
-namespace mozilla {
-namespace dom {
-class Element;
-} // namespace dom
-} // namespace mozilla
 
 /**
  * Structure used as a key for caching Attrs in nsDOMAttributeMap's mAttributeCache.
@@ -146,12 +141,12 @@ public:
   {
     return mContent;
   }
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   // WebIDL
   Attr* GetNamedItem(const nsAString& aAttrName);
   Attr* NamedGetter(const nsAString& aAttrName, bool& aFound);
+  bool NameIsEnumerable(const nsAString& aName);
   already_AddRefed<Attr>
   SetNamedItem(Attr& aAttr, ErrorResult& aError)
   {
@@ -176,12 +171,12 @@ public:
   RemoveNamedItemNS(const nsAString& aNamespaceURI, const nsAString& aLocalName,
                     ErrorResult& aError);
 
-  void GetSupportedNames(nsTArray<nsString>& aNames)
+  void GetSupportedNames(unsigned, nsTArray<nsString>& aNames)
   {
     // No supported names we want to show up in iteration.
   }
 
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
 private:
   nsCOMPtr<Element> mContent;
@@ -210,5 +205,9 @@ private:
   already_AddRefed<Attr> RemoveAttribute(nsINodeInfo* aNodeInfo);
 };
 
+// XXX khuey yes this is crazy.  The bindings code needs to see this include,
+// but if we pull it in at the top of the file we get a circular include
+// problem.
+#include "mozilla/dom/Element.h"
 
 #endif /* nsDOMAttributeMap_h */

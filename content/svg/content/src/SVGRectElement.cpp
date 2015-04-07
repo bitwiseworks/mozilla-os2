@@ -7,9 +7,13 @@
 #include "nsGkAtoms.h"
 #include "gfxContext.h"
 #include "mozilla/dom/SVGRectElementBinding.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/PathHelpers.h"
 #include <algorithm>
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Rect)
+
+using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace dom {
@@ -17,9 +21,9 @@ namespace dom {
 class SVGAnimatedLength;
 
 JSObject*
-SVGRectElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGRectElement::WrapNode(JSContext *aCx)
 {
-  return SVGRectElementBinding::Wrap(aCx, aScope, this);
+  return SVGRectElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::LengthInfo SVGRectElement::sLengthInfo[6] =
@@ -35,7 +39,7 @@ nsSVGElement::LengthInfo SVGRectElement::sLengthInfo[6] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGRectElement::SVGRectElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+SVGRectElement::SVGRectElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : SVGRectElementBase(aNodeInfo)
 {
 }
@@ -146,6 +150,54 @@ SVGRectElement::ConstructPath(gfxContext *aCtx)
   gfxSize corner(rx, ry);
   aCtx->RoundedRectangle(gfxRect(x, y, width, height),
                          gfxCornerSizes(corner, corner, corner, corner));
+}
+
+TemporaryRef<Path>
+SVGRectElement::BuildPath()
+{
+  float x, y, width, height, rx, ry;
+  GetAnimatedLengthValues(&x, &y, &width, &height, &rx, &ry, nullptr);
+
+  if (width <= 0 || height <= 0) {
+    return nullptr;
+  }
+
+  RefPtr<PathBuilder> pathBuilder = CreatePathBuilder();
+
+  rx = std::max(rx, 0.0f);
+  ry = std::max(ry, 0.0f);
+
+  if (rx == 0 && ry == 0) {
+    // Optimization for the no rounded corners case.
+    Rect r(x, y, width, height);
+    pathBuilder->MoveTo(r.TopLeft());
+    pathBuilder->LineTo(r.TopRight());
+    pathBuilder->LineTo(r.BottomRight());
+    pathBuilder->LineTo(r.BottomLeft());
+    pathBuilder->Close();
+  } else {
+    // If either the 'rx' or the 'ry' attribute isn't set, then we have to
+    // set it to the value of the other:
+    bool hasRx = mLengthAttributes[ATTR_RX].IsExplicitlySet();
+    bool hasRy = mLengthAttributes[ATTR_RY].IsExplicitlySet();
+    MOZ_ASSERT(hasRx || hasRy);
+
+    if (hasRx && !hasRy) {
+      ry = rx;
+    } else if (hasRy && !hasRx) {
+      rx = ry;
+    }
+
+    // Clamp rx and ry to half the rect's width and height respectively:
+    rx = std::min(rx, width / 2);
+    ry = std::min(ry, height / 2);
+
+    Size cornerRadii(rx, ry);
+    Size radii[] = { cornerRadii, cornerRadii, cornerRadii, cornerRadii };
+    AppendRoundedRectToPath(pathBuilder, Rect(x, y, width, height), radii);
+  }
+
+  return pathBuilder->Finish();
 }
 
 } // namespace dom

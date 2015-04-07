@@ -9,13 +9,15 @@
  */
 
 #include "nsCSSDataBlock.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/css/Declaration.h"
 #include "mozilla/css/ImageLoader.h"
 #include "nsRuleData.h"
 #include "nsStyleSet.h"
 #include "nsStyleContext.h"
+#include "nsIDocument.h"
 
-namespace css = mozilla::css;
+using namespace mozilla;
 
 /**
  * Does a fast move of aSource to aDest.  The previous value in
@@ -46,19 +48,27 @@ ShouldIgnoreColors(nsRuleData *aRuleData)
  * Image sources are specified by |url()| or |-moz-image-rect()| function.
  */
 static void
-TryToStartImageLoadOnValue(const nsCSSValue& aValue, nsIDocument* aDocument)
+TryToStartImageLoadOnValue(const nsCSSValue& aValue, nsIDocument* aDocument,
+                           nsCSSValueTokenStream* aTokenStream)
 {
   MOZ_ASSERT(aDocument);
 
   if (aValue.GetUnit() == eCSSUnit_URL) {
     aValue.StartImageLoad(aDocument);
+    if (aTokenStream) {
+      aTokenStream->mImageValues.PutEntry(aValue.GetImageStructValue());
+    }
   }
   else if (aValue.GetUnit() == eCSSUnit_Image) {
     // If we already have a request, see if this document needs to clone it.
     imgIRequest* request = aValue.GetImageValue(nullptr);
 
     if (request) {
-      aDocument->StyleImageLoader()->MaybeRegisterCSSImage(aValue.GetImageStructValue());
+      mozilla::css::ImageValue* imageValue = aValue.GetImageStructValue();
+      aDocument->StyleImageLoader()->MaybeRegisterCSSImage(imageValue);
+      if (aTokenStream) {
+        aTokenStream->mImageValues.PutEntry(imageValue);
+      }
     }
   }
   else if (aValue.EqualsFunction(eCSSKeyword__moz_image_rect)) {
@@ -66,25 +76,27 @@ TryToStartImageLoadOnValue(const nsCSSValue& aValue, nsIDocument* aDocument)
     NS_ABORT_IF_FALSE(arguments->Count() == 6, "unexpected num of arguments");
 
     const nsCSSValue& image = arguments->Item(1);
-    TryToStartImageLoadOnValue(image, aDocument);
+    TryToStartImageLoadOnValue(image, aDocument, aTokenStream);
   }
 }
 
 static void
 TryToStartImageLoad(const nsCSSValue& aValue, nsIDocument* aDocument,
-                    nsCSSProperty aProperty)
+                    nsCSSProperty aProperty,
+                    nsCSSValueTokenStream* aTokenStream)
 {
   if (aValue.GetUnit() == eCSSUnit_List) {
     for (const nsCSSValueList* l = aValue.GetListValue(); l; l = l->mNext) {
-      TryToStartImageLoad(l->mValue, aDocument, aProperty);
+      TryToStartImageLoad(l->mValue, aDocument, aProperty, aTokenStream);
     }
   } else if (nsCSSProps::PropHasFlags(aProperty,
                                       CSS_PROPERTY_IMAGE_IS_IN_ARRAY_0)) {
     if (aValue.GetUnit() == eCSSUnit_Array) {
-      TryToStartImageLoadOnValue(aValue.GetArrayValue()->Item(0), aDocument);
+      TryToStartImageLoadOnValue(aValue.GetArrayValue()->Item(0), aDocument,
+                                 aTokenStream);
     }
   } else {
-    TryToStartImageLoadOnValue(aValue, aDocument);
+    TryToStartImageLoadOnValue(aValue, aDocument, aTokenStream);
   }
 }
 
@@ -102,6 +114,55 @@ ShouldStartImageLoads(nsRuleData *aRuleData, nsCSSProperty aProperty)
          nsCSSProps::PropHasFlags(aProperty, CSS_PROPERTY_START_IMAGE_LOADS);
 }
 
+static void
+MapSinglePropertyInto(nsCSSProperty aProp,
+                      const nsCSSValue* aValue,
+                      nsCSSValue* aTarget,
+                      nsRuleData* aRuleData)
+{
+    NS_ABORT_IF_FALSE(aValue->GetUnit() != eCSSUnit_Null, "oops");
+
+    // Although aTarget is the nsCSSValue we are going to write into,
+    // we also look at its value before writing into it.  This is done
+    // when aTarget is a token stream value, which is the case when we
+    // have just re-parsed a property that had a variable reference (in
+    // nsCSSParser::ParsePropertyWithVariableReferences).  TryToStartImageLoad
+    // then records any resulting ImageValue objects on the
+    // nsCSSValueTokenStream object we found on aTarget.  See the comment
+    // above nsCSSValueTokenStream::mImageValues for why.
+    NS_ABORT_IF_FALSE(aTarget->GetUnit() == eCSSUnit_TokenStream ||
+                      aTarget->GetUnit() == eCSSUnit_Null,
+                      "aTarget must only be a token stream (when re-parsing "
+                      "properties with variable references) or null");
+
+    nsCSSValueTokenStream* tokenStream =
+        aTarget->GetUnit() == eCSSUnit_TokenStream ?
+            aTarget->GetTokenStreamValue() :
+            nullptr;
+
+    if (ShouldStartImageLoads(aRuleData, aProp)) {
+        nsIDocument* doc = aRuleData->mPresContext->Document();
+        TryToStartImageLoad(*aValue, doc, aProp, tokenStream);
+    }
+    *aTarget = *aValue;
+    if (nsCSSProps::PropHasFlags(aProp,
+            CSS_PROPERTY_IGNORED_WHEN_COLORS_DISABLED) &&
+        ShouldIgnoreColors(aRuleData))
+    {
+        if (aProp == eCSSProperty_background_color) {
+            // Force non-'transparent' background
+            // colors to the user's default.
+            if (aTarget->IsNonTransparentColor()) {
+                aTarget->SetColorValue(aRuleData->mPresContext->
+                                       DefaultBackgroundColor());
+            }
+        } else {
+            // Ignore 'color', 'border-*-color', etc.
+            *aTarget = nsCSSValue();
+        }
+    }
+}
+
 void
 nsCSSCompressedDataBlock::MapRuleInfoInto(nsRuleData *aRuleData) const
 {
@@ -112,8 +173,6 @@ nsCSSCompressedDataBlock::MapRuleInfoInto(nsRuleData *aRuleData) const
     if (!(aRuleData->mSIDs & mStyleBits))
         return;
 
-    nsIDocument* doc = aRuleData->mPresContext->Document();
-
     for (uint32_t i = 0; i < mNumProps; i++) {
         nsCSSProperty iProp = PropertyAtIndex(i);
         if (nsCachedStyleData::GetBitForSID(nsCSSProps::kSIDTable[iProp]) &
@@ -121,27 +180,7 @@ nsCSSCompressedDataBlock::MapRuleInfoInto(nsRuleData *aRuleData) const
             nsCSSValue* target = aRuleData->ValueFor(iProp);
             if (target->GetUnit() == eCSSUnit_Null) {
                 const nsCSSValue *val = ValueAtIndex(i);
-                NS_ABORT_IF_FALSE(val->GetUnit() != eCSSUnit_Null, "oops");
-                if (ShouldStartImageLoads(aRuleData, iProp)) {
-                    TryToStartImageLoad(*val, doc, iProp);
-                }
-                *target = *val;
-                if (nsCSSProps::PropHasFlags(iProp,
-                        CSS_PROPERTY_IGNORED_WHEN_COLORS_DISABLED) &&
-                    ShouldIgnoreColors(aRuleData))
-                {
-                    if (iProp == eCSSProperty_background_color) {
-                        // Force non-'transparent' background
-                        // colors to the user's default.
-                        if (target->IsNonTransparentColor()) {
-                            target->SetColorValue(aRuleData->mPresContext->
-                                                  DefaultBackgroundColor());
-                        }
-                    } else {
-                        // Ignore 'color', 'border-*-color', etc.
-                        *target = nsCSSValue();
-                    }
-                }
+                MapSinglePropertyInto(iProp, val, target, aRuleData);
             }
         }
     }
@@ -226,7 +265,7 @@ nsCSSCompressedDataBlock::CreateEmptyBlock()
 }
 
 size_t
-nsCSSCompressedDataBlock::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsCSSCompressedDataBlock::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
     size_t n = aMallocSizeOf(this);
     for (uint32_t i = 0; i < mNumProps; i++) {
@@ -533,6 +572,22 @@ nsCSSExpandedDataBlock::DoTransferFromBlock(nsCSSExpandedDataBlock& aFromBlock,
    */
   changed |= MoveValue(aFromBlock.PropertyAt(aPropID), PropertyAt(aPropID));
   return changed;
+}
+
+void
+nsCSSExpandedDataBlock::MapRuleInfoInto(nsCSSProperty aPropID,
+                                        nsRuleData* aRuleData) const
+{
+  MOZ_ASSERT(!nsCSSProps::IsShorthand(aPropID));
+
+  const nsCSSValue* src = PropertyAt(aPropID);
+  MOZ_ASSERT(src->GetUnit() != eCSSUnit_Null);
+
+  nsCSSValue* dest = aRuleData->ValueFor(aPropID);
+  MOZ_ASSERT(dest->GetUnit() == eCSSUnit_TokenStream &&
+             dest->GetTokenStreamValue()->mPropertyID == aPropID);
+
+  MapSinglePropertyInto(aPropID, src, dest, aRuleData);
 }
 
 #ifdef DEBUG

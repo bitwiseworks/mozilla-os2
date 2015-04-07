@@ -5,7 +5,9 @@
  * accompanying file LICENSE for details.
  */
 
+#if !defined(NDEBUG)
 #define NDEBUG
+#endif
 #include <assert.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -66,8 +68,8 @@ struct AudioTrack {
                status_t (*get_position)(void* instance, uint32_t* position);
               /* only used on froyo. */
   /* static */ int (*get_output_frame_count)(int* frame_count, int stream);
-  /* static */ int (*get_output_latency)(uint32_t* frame_count, int stream);
-  /* static */ int (*get_output_samplingrate)(int* frame_count, int stream);
+  /* static */ int (*get_output_latency)(uint32_t* latency, int stream);
+  /* static */ int (*get_output_samplingrate)(int* samplerate, int stream);
                status_t (*set_marker_position)(void* instance, unsigned int);
 
 };
@@ -231,12 +233,13 @@ audiotrack_init(cubeb ** context, char const * context_name)
   DLSYM_DLERROR("_ZNK7android10AudioTrack7latencyEv", ctx->klass.latency, ctx->library);
   DLSYM_DLERROR("_ZNK7android10AudioTrack9initCheckEv", ctx->klass.check, ctx->library);
 
+  DLSYM_DLERROR("_ZN7android11AudioSystem21getOutputSamplingRateEPii", ctx->klass.get_output_samplingrate, ctx->library);
+
   /* |getMinFrameCount| is not available on Froyo, and is available on
    * gingerbread and ICS with a different signature. */
   if (audiotrack_version_is_froyo(ctx)) {
     DLSYM_DLERROR("_ZN7android11AudioSystem19getOutputFrameCountEPii", ctx->klass.get_output_frame_count, ctx->library);
     DLSYM_DLERROR("_ZN7android11AudioSystem16getOutputLatencyEPji", ctx->klass.get_output_latency, ctx->library);
-    DLSYM_DLERROR("_ZN7android11AudioSystem21getOutputSamplingRateEPii", ctx->klass.get_output_samplingrate, ctx->library);
   } else {
     DLSYM_DLERROR("_ZN7android10AudioTrack16getMinFrameCountEPi19audio_stream_type_tj", ctx->klass.get_min_frame_count, ctx->library);
     if (!ctx->klass.get_min_frame_count) {
@@ -288,6 +291,34 @@ audiotrack_get_max_channel_count(cubeb * ctx, uint32_t * max_channels)
   return CUBEB_OK;
 }
 
+static int
+audiotrack_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * latency_ms)
+{
+  /* We always use the lowest latency possible when using this backend (see
+   * audiotrack_stream_init), so this value is not going to be used. */
+  int rv;
+
+  rv = audiotrack_get_min_frame_count(ctx, &params, (int *)latency_ms);
+  if (rv != CUBEB_OK) {
+    return CUBEB_ERROR;
+  }
+
+  /* Convert to milliseconds. */
+  *latency_ms = *latency_ms * 1000 / params.rate;
+
+  return CUBEB_OK;
+}
+
+static int
+audiotrack_get_preferred_sample_rate(cubeb * ctx, uint32_t * rate)
+{
+  status_t rv;
+
+  rv = ctx->klass.get_output_samplingrate((int32_t *)rate, 3 /* MUSIC */);
+
+  return rv == 0 ? CUBEB_OK : CUBEB_ERROR;
+}
+
 void
 audiotrack_destroy(cubeb * context)
 {
@@ -307,7 +338,7 @@ audiotrack_stream_init(cubeb * ctx, cubeb_stream ** stream, char const * stream_
 {
   cubeb_stream * stm;
   int32_t channels;
-  int32_t min_frame_count;
+  uint32_t min_frame_count;
 
   assert(ctx && stream);
 
@@ -316,7 +347,7 @@ audiotrack_stream_init(cubeb * ctx, cubeb_stream ** stream, char const * stream_
     return CUBEB_ERROR_INVALID_FORMAT;
   }
 
-  if (audiotrack_get_min_frame_count(ctx, &stream_params, &min_frame_count)) {
+  if (audiotrack_get_min_frame_count(ctx, &stream_params, (int *)&min_frame_count)) {
     return CUBEB_ERROR;
   }
 
@@ -424,14 +455,30 @@ audiotrack_stream_get_position(cubeb_stream * stream, uint64_t * position)
   return CUBEB_OK;
 }
 
+int
+audiotrack_stream_get_latency(cubeb_stream * stream, uint32_t * latency)
+{
+  assert(stream->instance && latency);
+
+  /* Android returns the latency in ms, we want it in frames. */
+  *latency = stream->context->klass.latency(stream->instance);
+  /* with rate <= 96000, we won't overflow until 44.739 seconds of latency */
+  *latency = (*latency * stream->params.rate) / 1000;
+
+  return 0;
+}
+
 static struct cubeb_ops const audiotrack_ops = {
   .init = audiotrack_init,
   .get_backend_id = audiotrack_get_backend_id,
   .get_max_channel_count = audiotrack_get_max_channel_count,
+  .get_min_latency = audiotrack_get_min_latency,
+  .get_preferred_sample_rate = audiotrack_get_preferred_sample_rate,
   .destroy = audiotrack_destroy,
   .stream_init = audiotrack_stream_init,
   .stream_destroy = audiotrack_stream_destroy,
   .stream_start = audiotrack_stream_start,
   .stream_stop = audiotrack_stream_stop,
-  .stream_get_position = audiotrack_stream_get_position
+  .stream_get_position = audiotrack_stream_get_position,
+  .stream_get_latency = audiotrack_stream_get_latency
 };

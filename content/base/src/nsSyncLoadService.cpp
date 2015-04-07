@@ -18,7 +18,7 @@
 #include "nsIDocument.h"
 #include "nsIDOMDocument.h"
 #include "nsIPrincipal.h"
-#include "nsContentUtils.h"
+#include "nsContentUtils.h" // for kLoadAsData
 #include "nsThreadUtils.h"
 #include "nsNetUtil.h"
 #include "nsAutoPtr.h"
@@ -85,9 +85,9 @@ nsForceXMLListener::~nsForceXMLListener()
 {
 }
 
-NS_IMPL_ISUPPORTS2(nsForceXMLListener,
-                   nsIStreamListener,
-                   nsIRequestObserver)
+NS_IMPL_ISUPPORTS(nsForceXMLListener,
+                  nsIStreamListener,
+                  nsIRequestObserver)
 
 NS_IMETHODIMP
 nsForceXMLListener::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
@@ -116,12 +116,12 @@ nsSyncLoader::~nsSyncLoader()
     }
 }
 
-NS_IMPL_ISUPPORTS5(nsSyncLoader,
-                   nsIStreamListener,
-                   nsIRequestObserver,
-                   nsIChannelEventSink,
-                   nsIInterfaceRequestor,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(nsSyncLoader,
+                  nsIStreamListener,
+                  nsIRequestObserver,
+                  nsIChannelEventSink,
+                  nsIInterfaceRequestor,
+                  nsISupportsWeakReference)
 
 nsresult
 nsSyncLoader::LoadDocument(nsIChannel* aChannel,
@@ -340,7 +340,7 @@ nsSyncLoadService::PushSyncStreamToListener(nsIInputStream* aIn,
     if (!NS_InputStreamIsBuffered(aIn)) {
         int64_t chunkSize;
         rv = aChannel->GetContentLength(&chunkSize);
-        if (NS_FAILED(rv)) {
+        if (NS_FAILED(rv) || chunkSize < 1) {
             chunkSize = 4096;
         }
         chunkSize = std::min(int64_t(UINT16_MAX), chunkSize);

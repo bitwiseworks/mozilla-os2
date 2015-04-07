@@ -13,9 +13,16 @@
 #include "base/string_util.h"
 #include "chrome/common/chrome_switches.h"
 
+#if defined(XP_MACOSX)
+#include "nsCocoaFeatures.h"
+// An undocumented CoreGraphics framework method, present in the same form
+// since at least OS X 10.5.
+extern "C" CGError CGSSetDebugOptions(int options);
+#endif
+
 #ifdef XP_WIN
 #include <objbase.h>
-bool ShouldProtectPluginCurrentDirectory(LPCWSTR pluginFilePath);
+bool ShouldProtectPluginCurrentDirectory(char16ptr_t pluginFilePath);
 #endif
 
 using mozilla::ipc::IOThreadChild;
@@ -81,7 +88,7 @@ PluginProcessChild::Init()
 #ifdef XP_WIN
     // Drag-and-drop needs OleInitialize to be called, and Silverlight depends
     // on the host calling CoInitialize (which is called by OleInitialize).
-    ::OleInitialize(NULL);
+    ::OleInitialize(nullptr);
 #endif
 
     // Certain plugins, such as flash, steal the unhandled exception filter
@@ -119,11 +126,21 @@ PluginProcessChild::Init()
       return false;
     }
 
-    mPlugin.Init(pluginFilename, ParentHandle(),
-                 IOThreadChild::message_loop(),
-                 IOThreadChild::channel());
-
-    return true;
+    bool retval = mPlugin.Init(pluginFilename, ParentHandle(),
+                               IOThreadChild::message_loop(),
+                               IOThreadChild::channel());
+#if defined(XP_MACOSX)
+    if (nsCocoaFeatures::OnYosemiteOrLater()) {
+      // Explicitly turn off CGEvent logging.  This works around bug 1092855.
+      // If there are already CGEvents in the log, turning off logging also
+      // causes those events to be written to disk.  But at this point no
+      // CGEvents have yet been processed.  CGEvents are events (usually
+      // input events) pulled from the WindowServer.  An option of 0x80000008
+      // turns on CGEvent logging.
+      CGSSetDebugOptions(0x80000007);
+    }
+#endif
+    return retval;
 }
 
 void

@@ -4,18 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef IBMBIDI
-
 #ifndef nsBidiPresUtils_h___
 #define nsBidiPresUtils_h___
 
-#include "nsTArray.h"
 #include "nsBidi.h"
 #include "nsBidiUtils.h"
-#include "nsCOMPtr.h"
-#include "nsDataHashtable.h"
-#include "nsBlockFrame.h"
-#include "nsTHashtable.h"
+#include "nsHashKeys.h"
+#include "nsCoord.h"
 
 #ifdef DrawText
 #undef DrawText
@@ -24,6 +19,13 @@
 struct BidiParagraphData;
 struct BidiLineData;
 class nsIFrame;
+class nsBlockFrame;
+class nsPresContext;
+class nsRenderingContext;
+class nsBlockInFlowLineIterator;
+class nsStyleContext;
+template<class T> class nsTHashtable;
+namespace mozilla { class WritingMode; }
 
 /**
  * A structure representing some continuation state for each frame on the line,
@@ -110,7 +112,7 @@ public:
      * @param aDirection The direction of the text. The string will never have
      *  mixed direction.
      */
-    virtual void SetText(const PRUnichar*   aText,
+    virtual void SetText(const char16_t*   aText,
                          int32_t            aLength,
                          nsBidiDirection    aDirection) = 0;
 
@@ -156,7 +158,9 @@ public:
    * @lina 05/02/2000
    */
   static void ReorderFrames(nsIFrame*            aFirstFrameOnLine,
-                            int32_t              aNumFramesOnLine);
+                            int32_t              aNumFramesOnLine,
+                            mozilla::WritingMode aLineWM,
+                            nscoord&             aLineWidth);
 
   /**
    * Format Unicode text, taking into account bidi capabilities
@@ -166,7 +170,7 @@ public:
    * @lina 06/18/2000 
    */
   static nsresult FormatUnicodeText(nsPresContext* aPresContext,
-                                    PRUnichar*      aText,
+                                    char16_t*      aText,
                                     int32_t&        aTextLength,
                                     nsCharType      aCharType,
                                     bool            aIsOddLevel);
@@ -177,9 +181,16 @@ public:
    *
    * @param[in] aText  the string to be rendered (in logical order)
    * @param aLength the number of characters in the string
-   * @param aBaseDirection the base direction of the string
+   * @param aBaseLevel the base embedding level of the string
+   *  odd values are right-to-left; even values are left-to-right, plus special
+   *  constants as follows (defined in nsBidi.h)
    *  NSBIDI_LTR - left-to-right string
    *  NSBIDI_RTL - right-to-left string
+   *  NSBIDI_DEFAULT_LTR - auto direction determined by first strong character,
+   *                       default is left-to-right
+   *  NSBIDI_DEFAULT_RTL - auto direction determined by first strong character,
+   *                       default is right-to-left
+   *
    * @param aPresContext the presentation context
    * @param aRenderingContext the rendering context to render to
    * @param aTextRunConstructionContext the rendering context to be used to construct the textrun (affects font hinting)
@@ -188,9 +199,9 @@ public:
    * @param[in,out] aPosResolve array of logical positions to resolve into visual positions; can be nullptr if this functionality is not required
    * @param aPosResolveCount number of items in the aPosResolve array
    */
-  static nsresult RenderText(const PRUnichar*       aText,
+  static nsresult RenderText(const char16_t*       aText,
                              int32_t                aLength,
-                             nsBidiDirection        aBaseDirection,
+                             nsBidiLevel            aBaseLevel,
                              nsPresContext*         aPresContext,
                              nsRenderingContext&    aRenderingContext,
                              nsRenderingContext&    aTextRunConstructionContext,
@@ -199,18 +210,18 @@ public:
                              nsBidiPositionResolve* aPosResolve = nullptr,
                              int32_t                aPosResolveCount = 0)
   {
-    return ProcessTextForRenderingContext(aText, aLength, aBaseDirection, aPresContext, aRenderingContext,
+    return ProcessTextForRenderingContext(aText, aLength, aBaseLevel, aPresContext, aRenderingContext,
                                           aTextRunConstructionContext, MODE_DRAW, aX, aY, aPosResolve, aPosResolveCount, nullptr);
   }
   
-  static nscoord MeasureTextWidth(const PRUnichar*     aText,
+  static nscoord MeasureTextWidth(const char16_t*     aText,
                                   int32_t              aLength,
-                                  nsBidiDirection      aBaseDirection,
+                                  nsBidiLevel          aBaseLevel,
                                   nsPresContext*       aPresContext,
                                   nsRenderingContext&  aRenderingContext)
   {
     nscoord length;
-    nsresult rv = ProcessTextForRenderingContext(aText, aLength, aBaseDirection, aPresContext,
+    nsresult rv = ProcessTextForRenderingContext(aText, aLength, aBaseLevel, aPresContext,
                                                  aRenderingContext, aRenderingContext,
                                                  MODE_MEASURE, 0, 0, nullptr, 0, &length);
     return NS_SUCCEEDED(rv) ? length : 0;
@@ -276,9 +287,16 @@ public:
    *
    * @param[in] aText  the string to be processed (in logical order)
    * @param aLength the number of characters in the string
-   * @param aBaseDirection the base direction of the string
+   * @param aBaseLevel the base embedding level of the string
+   *  odd values are right-to-left; even values are left-to-right, plus special
+   *  constants as follows (defined in nsBidi.h)
    *  NSBIDI_LTR - left-to-right string
    *  NSBIDI_RTL - right-to-left string
+   *  NSBIDI_DEFAULT_LTR - auto direction determined by first strong character,
+   *                       default is left-to-right
+   *  NSBIDI_DEFAULT_RTL - auto direction determined by first strong character,
+   *                       default is right-to-left
+   *
    * @param aPresContext the presentation context
    * @param aprocessor the bidi processor
    * @param aMode the operation to process
@@ -290,9 +308,9 @@ public:
    * @param aPosResolveCount number of items in the aPosResolve array
    * @param[out] aWidth Pointer to where the width will be stored (may be null)
    */
-  static nsresult ProcessText(const PRUnichar*       aText,
+  static nsresult ProcessText(const char16_t*       aText,
                               int32_t                aLength,
-                              nsBidiDirection        aBaseDirection,
+                              nsBidiLevel            aBaseLevel,
                               nsPresContext*         aPresContext,
                               BidiProcessor&         aprocessor,
                               Mode                   aMode,
@@ -319,11 +337,25 @@ public:
                                   nsBidiLevel aBaseDirection,
                                   bool aOverride);
 
+  /**
+   * Use style attributes to determine the base paragraph level to pass to the
+   * bidi algorithm.
+   *
+   * If |unicode-bidi| is set to "[-moz-]plaintext", returns NSBIDI_DEFAULT_LTR,
+   * in other words the direction is determined from the first strong character
+   * in the text according to rules P2 and P3 of the bidi algorithm, or LTR if
+   * there is no strong character.
+   *
+   * Otherwise returns NSBIDI_LTR or NSBIDI_RTL depending on the value of
+   * |direction|
+   */
+  static nsBidiLevel BidiLevelFromStyle(nsStyleContext* aStyleContext);
+
 private:
   static nsresult
-  ProcessTextForRenderingContext(const PRUnichar*       aText,
+  ProcessTextForRenderingContext(const char16_t*       aText,
                                  int32_t                aLength,
-                                 nsBidiDirection        aBaseDirection,
+                                 nsBidiLevel            aBaseLevel,
                                  nsPresContext*         aPresContext,
                                  nsRenderingContext&    aRenderingContext,
                                  nsRenderingContext&    aTextRunConstructionContext,
@@ -346,24 +378,27 @@ private:
                              nsBlockInFlowLineIterator* aLineIter,
                              nsIFrame*                  aCurrentFrame,
                              BidiParagraphData*         aBpd);
-  
+
   /*
-   * Position aFrame and it's descendants to their visual places. Also if aFrame
-   * is not leaf, resize it to embrace it's children.
+   * Position aFrame and its descendants to their visual places. Also if aFrame
+   * is not leaf, resize it to embrace its children.
    *
-   * @param aFrame               The frame which itself and its children are going
-   *                             to be repositioned
-   * @param aIsOddLevel          TRUE means the embedding level of this frame is odd
-   * @param[in,out] aLeft        IN value is the starting position of aFrame(without
-   *                             considering its left margin)
-   *                             OUT value will be the ending position of aFrame(after
-   *                             adding its right margin)
+   * @param aFrame               The frame which itself and its children are
+   *                             going to be repositioned
+   * @param aIsEvenLevel         TRUE means the embedding level of this frame
+   *                             is even (LTR)
+   * @param[in,out] aStart       IN value is the starting position of aFrame
+   *                             (without considering its inline-start margin)
+   *                             OUT value will be the ending position of aFrame
+   *                             (after adding its inline-end margin)
    * @param aContinuationStates  A map from nsIFrame* to nsFrameContinuationState
    */
   static void RepositionFrame(nsIFrame*              aFrame,
-                              bool                   aIsOddLevel,
-                              nscoord&               aLeft,
-                              nsContinuationStates*  aContinuationStates);
+                              bool                   aIsEvenLevel,
+                              nscoord&               aStart,
+                              nsContinuationStates*  aContinuationStates,
+                              mozilla::WritingMode   aLineWM,
+                              nscoord&               aLineWidth);
 
   /*
    * Initialize the continuation state(nsFrameContinuationState) to
@@ -391,10 +426,10 @@ private:
    * @param[out] aIsLeftMost     TRUE means aFrame is leftmost frame or continuation
    * @param[out] aIsRightMost    TRUE means aFrame is rightmost frame or continuation
    */
-   static void IsLeftOrRightMost(nsIFrame*              aFrame,
-                                 nsContinuationStates*  aContinuationStates,
-                                 bool&                aIsLeftMost /* out */,
-                                 bool&                aIsRightMost /* out */);
+   static void IsFirstOrLast(nsIFrame*              aFrame,
+                             nsContinuationStates*  aContinuationStates,
+                             bool&                  aIsFirst /* out */,
+                             bool&                  aIsLast /* out */);
 
   /**
    *  Adjust frame positions following their visual order
@@ -404,7 +439,9 @@ private:
    *  @lina 04/11/2000
    */
   static void RepositionInlineFrames(BidiLineData* aBld,
-                                     nsIFrame* aFirstChild);
+                                     nsIFrame* aFirstChild,
+                                     mozilla::WritingMode aLineWM,
+                                     nscoord& aLineWidth);
   
   /**
    * Helper method for Resolve()
@@ -450,7 +487,7 @@ private:
                                      int32_t            aLastIndex,
                                      int32_t&           aOffset);
   static void CalculateCharType(nsBidi*          aBidiEngine,
-                                const PRUnichar* aText,
+                                const char16_t* aText,
                                 int32_t&         aOffset,
                                 int32_t          aCharTypeLimit,
                                 int32_t&         aRunLimit,
@@ -459,20 +496,18 @@ private:
                                 uint8_t&         aCharType,
                                 uint8_t&         aPrevCharType);
   
-  static void StripBidiControlCharacters(PRUnichar* aText,
+  static void StripBidiControlCharacters(char16_t* aText,
                                          int32_t&   aTextLength);
 
-  static bool WriteLogicalToVisual(const PRUnichar* aSrc,
+  static bool WriteLogicalToVisual(const char16_t* aSrc,
                                      uint32_t aSrcLength,
-                                     PRUnichar* aDest,
+                                     char16_t* aDest,
                                      nsBidiLevel aBaseDirection,
                                      nsBidi* aBidiEngine);
 
-  static void WriteReverse(const PRUnichar* aSrc,
+  static void WriteReverse(const char16_t* aSrc,
                            uint32_t aSrcLength,
-                           PRUnichar* aDest);
+                           char16_t* aDest);
 };
 
 #endif /* nsBidiPresUtils_h___ */
-
-#endif // IBMBIDI

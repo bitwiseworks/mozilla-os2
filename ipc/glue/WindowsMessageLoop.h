@@ -12,11 +12,13 @@
 #include <windows.h>
 
 #include "base/basictypes.h"
-#include "nsTraceRefcnt.h"
+#include "nsISupportsImpl.h"
 
 namespace mozilla {
 namespace ipc {
 namespace windows {
+
+void InitUIThread();
 
 class DeferredMessage
 {

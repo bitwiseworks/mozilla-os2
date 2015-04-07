@@ -6,22 +6,37 @@
 #ifndef _NS_DEVICECONTEXT_H_
 #define _NS_DEVICECONTEXT_H_
 
-#include "nsCOMPtr.h"
-#include "nsIDeviceContextSpec.h"
-#include "nsIScreenManager.h"
-#include "nsIWidget.h"
-#include "nsCoord.h"
-#include "gfxContext.h"
+#include <stdint.h>                     // for uint32_t
+#include <sys/types.h>                  // for int32_t
+#include "gfxTypes.h"                   // for gfxFloat
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsCOMPtr.h"                   // for nsCOMPtr
+#include "nsCoord.h"                    // for nscoord
+#include "nsError.h"                    // for nsresult
+#include "nsISupports.h"                // for NS_INLINE_DECL_REFCOUNTING
+#include "nsMathUtils.h"                // for NS_round
+#include "nscore.h"                     // for char16_t, nsAString
+#include "mozilla/AppUnits.h"           // for AppUnits
 
-class nsIAtom;
-class nsFontCache;
+class gfxASurface;
+class gfxTextPerfMetrics;
 class gfxUserFontSet;
+class nsFont;
+class nsFontCache;
+class nsFontMetrics;
+class nsIAtom;
+class nsIDeviceContextSpec;
+class nsIScreen;
+class nsIScreenManager;
+class nsIWidget;
+class nsRect;
+class nsRenderingContext;
 
-class nsDeviceContext
+class nsDeviceContext MOZ_FINAL
 {
 public:
     nsDeviceContext();
-    ~nsDeviceContext();
 
     NS_INLINE_DECL_REFCOUNTING(nsDeviceContext)
 
@@ -42,16 +57,16 @@ public:
     /**
      * Create a rendering context and initialize it.  Only call this
      * method on device contexts that were initialized for printing.
-     * @param aContext out parameter for new rendering context
-     * @return error status
+     *
+     * @return the new rendering context (guaranteed to be non-null)
      */
-    nsresult CreateRenderingContext(nsRenderingContext *&aContext);
+    already_AddRefed<nsRenderingContext> CreateRenderingContext();
 
     /**
      * Gets the number of app units in one CSS pixel; this number is global,
      * not unique to each device context.
      */
-    static int32_t AppUnitsPerCSSPixel() { return 60; }
+    static int32_t AppUnitsPerCSSPixel() { return mozilla::AppUnitsPerCSSPixel(); }
 
     /**
      * Gets the number of app units in one device pixel; this number
@@ -84,7 +99,7 @@ public:
      * Gets the number of app units in one CSS inch; this is
      * 96 times AppUnitsPerCSSPixel.
      */
-    static int32_t AppUnitsPerCSSInch() { return 96 * AppUnitsPerCSSPixel(); }
+    static int32_t AppUnitsPerCSSInch() { return mozilla::AppUnitsPerCSSInch(); }
 
     /**
      * Get the unscaled ratio of app units to dev pixels; useful if something
@@ -104,6 +119,7 @@ public:
      */
     nsresult GetMetricsFor(const nsFont& aFont, nsIAtom* aLanguage,
                            gfxUserFontSet* aUserFontSet,
+                           gfxTextPerfMetrics* aTextPerf,
                            nsFontMetrics*& aMetrics);
 
     /**
@@ -163,7 +179,7 @@ public:
      * EndDocument() or AbortDocument().
      *
      * @param aTitle - title of Document
-     * @param aPrintToFileName - name of file to print to, if NULL
+     * @param aPrintToFileName - name of file to print to, if nullptr
      * then don't print to file
      * @param aStartPage - starting page number (must be greater than zero)
      * @param aEndPage - ending page number (must be less than or
@@ -171,10 +187,10 @@ public:
      *
      * @return error status
      */
-    nsresult BeginDocument(PRUnichar  *aTitle,
-                           PRUnichar  *aPrintToFileName,
-                           int32_t     aStartPage,
-                           int32_t     aEndPage);
+    nsresult BeginDocument(const nsAString& aTitle,
+                           char16_t*       aPrintToFileName,
+                           int32_t          aStartPage,
+                           int32_t          aEndPage);
 
     /**
      * Inform the output device that output of a document is ending.
@@ -232,7 +248,10 @@ public:
      */
     bool IsPrinterSurface();
 
-protected:
+private:
+    // Private destructor, to discourage deletion outside of Release():
+    ~nsDeviceContext();
+
     void SetDPI();
     void ComputeClientRectUsingScreen(nsRect *outRect);
     void ComputeFullAreaUsingScreen(nsRect *outRect);

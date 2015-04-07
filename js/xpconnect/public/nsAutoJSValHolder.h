@@ -1,4 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6,12 +7,11 @@
 #ifndef __NSAUTOJSVALHOLDER_H__
 #define __NSAUTOJSVALHOLDER_H__
 
+#include "nsDebug.h"
 #include "jsapi.h"
 
-#include "nsDebug.h"
-
 /**
- * Simple class that looks and acts like a jsval except that it unroots
+ * Simple class that looks and acts like a JS::Value except that it unroots
  * itself automatically if Root() is ever called. Designed to be rooted on the
  * context or runtime (but not both!).
  */
@@ -46,7 +46,7 @@ public:
       else {
         this->Release();
       }
-      *this = static_cast<jsval>(aOther);
+      *this = static_cast<JS::Value>(aOther);
     }
     return *this;
   }
@@ -63,13 +63,9 @@ public:
    * Note that mVal may be JSVAL_NULL, which is not a problem.
    */
   bool Hold(JSRuntime* aRt) {
-    // Do we really care about different runtimes?
-    if (mRt && aRt != mRt) {
-      js_RemoveRoot(mRt, &mVal);
-      mRt = nullptr;
-    }
+    MOZ_ASSERT_IF(mRt, mRt == aRt);
 
-    if (!mRt && JS_AddNamedValueRootRT(aRt, &mVal, "nsAutoJSValHolder")) {
+    if (!mRt && JS::AddNamedValueRootRT(aRt, &mVal, "nsAutoJSValHolder")) {
       mRt = aRt;
     }
 
@@ -78,13 +74,13 @@ public:
 
   /**
    * Manually release, nullifying mVal, and mRt, but returning
-   * the original jsval.
+   * the original JS::Value.
    */
-  jsval Release() {
-    jsval oldval = mVal;
+  JS::Value Release() {
+    JS::Value oldval = mVal;
 
     if (mRt) {
-      JS_RemoveValueRootRT(mRt, &mVal); // infallible
+      JS::RemoveValueRootRT(mRt, &mVal); // infallible
       mRt = nullptr;
     }
 
@@ -109,23 +105,20 @@ public:
          : nullptr;
   }
 
-  jsval* ToJSValPtr() {
-    return &mVal;
-  }
-
   /**
-   * Pretend to be a jsval.
+   * Pretend to be a JS::Value.
    */
-  operator jsval() const { return mVal; }
+  operator JS::Value() const { return mVal; }
+  JS::Value get() const { return mVal; }
 
   nsAutoJSValHolder &operator=(JSObject* aOther) {
     return *this = OBJECT_TO_JSVAL(aOther);
   }
 
-  nsAutoJSValHolder &operator=(jsval aOther) {
+  nsAutoJSValHolder &operator=(JS::Value aOther) {
 #ifdef DEBUG
     if (JSVAL_IS_GCTHING(aOther) && !JSVAL_IS_NULL(aOther)) {
-      NS_ASSERTION(IsHeld(), "Not rooted!");
+      MOZ_ASSERT(IsHeld(), "Not rooted!");
     }
 #endif
     mVal = aOther;
@@ -133,7 +126,7 @@ public:
   }
 
 private:
-  jsval mVal;
+  JS::Heap<JS::Value> mVal;
   JSRuntime* mRt;
 };
 

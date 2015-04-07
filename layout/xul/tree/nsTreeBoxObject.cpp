@@ -9,12 +9,12 @@
 #include "nsIXULTemplateBuilder.h"
 #include "nsTreeContentView.h"
 #include "nsITreeSelection.h"
-#include "nsChildIterator.h"
+#include "ChildIterator.h"
 #include "nsContentUtils.h"
 #include "nsError.h"
 #include "nsTreeBodyFrame.h"
 
-NS_IMPL_CYCLE_COLLECTION_1(nsTreeBoxObject, mView)
+NS_IMPL_CYCLE_COLLECTION(nsTreeBoxObject, mView)
 
 NS_IMPL_ADDREF_INHERITED(nsTreeBoxObject, nsBoxObject)
 NS_IMPL_RELEASE_INHERITED(nsTreeBoxObject, nsBoxObject)
@@ -52,30 +52,26 @@ nsTreeBoxObject::~nsTreeBoxObject()
   /* destructor code */
 }
 
-
-static void FindBodyElement(nsIContent* aParent, nsIContent** aResult)
+static nsIContent* FindBodyElement(nsIContent* aParent)
 {
-  *aResult = nullptr;
-  ChildIterator iter, last;
-  for (ChildIterator::Init(aParent, &iter, &last); iter != last; ++iter) {
-    nsCOMPtr<nsIContent> content = *iter;
-
+  mozilla::dom::FlattenedChildIterator iter(aParent);
+  for (nsIContent* content = iter.GetNextChild(); content; content = iter.GetNextChild()) {
     nsINodeInfo *ni = content->NodeInfo();
     if (ni->Equals(nsGkAtoms::treechildren, kNameSpaceID_XUL)) {
-      *aResult = content;
-      NS_ADDREF(*aResult);
-      break;
+      return content;
     } else if (ni->Equals(nsGkAtoms::tree, kNameSpaceID_XUL)) {
       // There are nesting tree elements. Only the innermost should
       // find the treechilren.
-      break;
+      return nullptr;
     } else if (content->IsElement() &&
                !ni->Equals(nsGkAtoms::_template, kNameSpaceID_XUL)) {
-      FindBodyElement(content, aResult);
-      if (*aResult)
-        break;
+      nsIContent* result = FindBodyElement(content);
+      if (result)
+        return result;
     }
   }
+
+  return nullptr;
 }
 
 nsTreeBodyFrame*
@@ -106,8 +102,7 @@ nsTreeBoxObject::GetTreeBody(bool aFlushLayout)
   }
 
   // Iterate over our content model children looking for the body.
-  nsCOMPtr<nsIContent> content;
-  FindBodyElement(frame->GetContent(), getter_AddRefs(content));
+  nsCOMPtr<nsIContent> content = FindBodyElement(frame->GetContent());
   if (!content)
     return nullptr;
 
@@ -216,7 +211,7 @@ NS_IMETHODIMP nsTreeBoxObject::GetColumns(nsITreeColumns** aColumns)
   *aColumns = nullptr;
   nsTreeBodyFrame* body = GetTreeBody();
   if (body) 
-    *aColumns = body->Columns().get();
+    *aColumns = body->Columns().take();
   return NS_OK;
 }
 

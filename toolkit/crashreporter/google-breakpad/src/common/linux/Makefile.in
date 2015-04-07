@@ -2,47 +2,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-ifdef MOZ_CRASHREPORTER
-endif
-
-LOCAL_INCLUDES = \
-  -I$(topsrcdir)/toolkit/crashreporter/google-breakpad/src \
-  $(NULL)
-
 ifneq (Android,$(OS_TARGET))
 else
 TARGET_LOCAL_INCLUDES += -I$(topsrcdir)/toolkit/crashreporter/google-breakpad/src/common/android/include/
 endif
 
-ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
-DEFINES += -DELFSIZE=32
-endif
-
-DEFINES += -DNO_STABS_SUPPORT
-
-ifdef MOZ_CRASHREPORTER
-HOST_CPPSRCS = \
-  dump_symbols.cc \
-  elf_symbols_to_module.cc \
-  elfutils.cc \
-  file_id.cc \
-  guid_creator.cc \
-  linux_libc_support.cc \
-  memory_mapped_file.cc \
-  $(NULL)
-endif
-
-# need static lib
-FORCE_STATIC_LIB = 1
-
 include $(topsrcdir)/config/rules.mk
 
 # See https://bugzilla.mozilla.org/show_bug.cgi?id=741348#c11
-file_id.$(OBJ_SUFFIX): STL_FLAGS=
+file_id.$(OBJ_SUFFIX): DISABLE_STL_WRAPPING := 1

@@ -6,12 +6,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PNecko;
-include protocol PBrowser;
 include URIParams;
 
-include "SerializedLoadContext.h";
 
-using IPC::SerializedLoadContext;
+using class IPC::SerializedLoadContext from "SerializedLoadContext.h";
 
 namespace mozilla {
 namespace net {
@@ -65,8 +63,7 @@ parent:
   sync GetCookieString(URIParams host,
                        bool isForeign,
                        bool fromHttp,
-                       SerializedLoadContext loadContext,
-                       nullable PBrowser browser)
+                       SerializedLoadContext loadContext)
        returns (nsCString result);
 
   /*
@@ -103,8 +100,7 @@ parent:
                   nsCString cookieString,
                   nsCString serverTime,
                   bool fromHttp,
-                  SerializedLoadContext loadContext,
-                  nullable PBrowser browser);
+                  SerializedLoadContext loadContext);
 
   __delete__();
 };

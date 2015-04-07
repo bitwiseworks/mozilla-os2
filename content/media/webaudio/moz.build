@@ -8,9 +8,8 @@ PARALLEL_DIRS += ['blink', 'test']
 
 TEST_TOOL_DIRS += ['compiledtest']
 
-MODULE = 'content'
-
 EXPORTS += [
+    'AudioContext.h',
     'AudioParamTimeline.h',
     'MediaBufferDecoder.h',
     'ThreeDPoint.h',
@@ -37,17 +36,19 @@ EXPORTS.mozilla.dom += [
     'ConvolverNode.h',
     'DelayNode.h',
     'DynamicsCompressorNode.h',
-    'EnableWebAudioCheck.h',
     'GainNode.h',
+    'MediaElementAudioSourceNode.h',
     'MediaStreamAudioDestinationNode.h',
+    'MediaStreamAudioSourceNode.h',
     'OfflineAudioCompletionEvent.h',
+    'OscillatorNode.h',
     'PannerNode.h',
     'PeriodicWave.h',
     'ScriptProcessorNode.h',
     'WaveShaperNode.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'AnalyserNode.cpp',
     'AudioBuffer.cpp',
     'AudioBufferSourceNode.cpp',
@@ -61,13 +62,17 @@ CPP_SOURCES += [
     'ChannelMergerNode.cpp',
     'ChannelSplitterNode.cpp',
     'ConvolverNode.cpp',
+    'DelayBuffer.cpp',
     'DelayNode.cpp',
     'DynamicsCompressorNode.cpp',
-    'EnableWebAudioCheck.cpp',
+    'FFTBlock.cpp',
     'GainNode.cpp',
     'MediaBufferDecoder.cpp',
+    'MediaElementAudioSourceNode.cpp',
     'MediaStreamAudioDestinationNode.cpp',
+    'MediaStreamAudioSourceNode.cpp',
     'OfflineAudioCompletionEvent.cpp',
+    'OscillatorNode.cpp',
     'PannerNode.cpp',
     'PeriodicWave.cpp',
     'ScriptProcessorNode.cpp',
@@ -76,3 +81,8 @@ CPP_SOURCES += [
     'WebAudioUtils.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'

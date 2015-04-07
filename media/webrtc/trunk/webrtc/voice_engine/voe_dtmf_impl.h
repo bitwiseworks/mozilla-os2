@@ -11,9 +11,8 @@
 #ifndef WEBRTC_VOICE_ENGINE_VOE_DTMF_IMPL_H
 #define WEBRTC_VOICE_ENGINE_VOE_DTMF_IMPL_H
 
-#include "voe_dtmf.h"
-
-#include "shared_data.h"
+#include "webrtc/voice_engine/include/voe_dtmf.h"
+#include "webrtc/voice_engine/shared_data.h"
 
 namespace webrtc
 {
@@ -48,18 +47,6 @@ public:
 
     virtual int StopPlayingDtmfTone();
 
-    virtual int RegisterTelephoneEventDetection(
-        int channel,
-        TelephoneEventDetectionMethods detectionMethod,
-        VoETelephoneEventObserver& observer);
-
-    virtual int DeRegisterTelephoneEventDetection(int channel);
-
-    virtual int GetTelephoneEventDetectionStatus(
-        int channel,
-        bool& enabled,
-        TelephoneEventDetectionMethods& detectionMethod);
-
     virtual int SetDtmfPlayoutStatus(int channel, bool enable);
 
     virtual int GetDtmfPlayoutStatus(int channel, bool& enabled);
@@ -74,6 +61,6 @@ private:
     voe::SharedData* _shared;
 };
 
-} // namespace webrtc
+}  // namespace webrtc
 
 #endif  // WEBRTC_VOICE_ENGINE_VOE_DTMF_IMPL_H

@@ -46,19 +46,24 @@ class Configuration:
             if not isinstance(entry, list):
                 assert isinstance(entry, dict)
                 entry = [entry]
-            elif len(entry) == 1 and entry[0].get("workers", False):
-                # List with only a workers descriptor means we should
-                # infer a mainthread descriptor.  If you want only
-                # workers bindings, don't use a list here.
-                entry.append({})
+            elif len(entry) == 1:
+                if entry[0].get("workers", False):
+                    # List with only a workers descriptor means we should
+                    # infer a mainthread descriptor.  If you want only
+                    # workers bindings, don't use a list here.
+                    entry.append({})
+                else:
+                    raise TypeError("Don't use a single-element list for "
+                                    "non-worker-only interface " + iface.identifier.name +
+                                    " in Bindings.conf")
+            elif len(entry) == 2:
+                if entry[0].get("workers", False) == entry[1].get("workers", False):
+                    raise TypeError("The two entries for interface " + iface.identifier.name +
+                                    " in Bindings.conf should not have the same value for 'workers'")
+            else:
+                raise TypeError("Interface " + iface.identifier.name +
+                                " should have no more than two entries in Bindings.conf")
             self.descriptors.extend([Descriptor(self, iface, x) for x in entry])
-
-        # Mark the descriptors for which the nativeType corresponds to exactly
-        # one interface.
-        for descriptor in self.descriptors:
-            descriptor.unsharedImplementation = all(
-                d.nativeType != descriptor.nativeType or d == descriptor
-                for d in self.descriptors)
 
         # Keep the descriptor list sorted for determinism.
         self.descriptors.sort(lambda x,y: cmp(x.name, y.name))
@@ -99,8 +104,6 @@ class Configuration:
                     item.setUserData("mainThread", True)
                 if item in worker:
                     item.setUserData("workers", True)
-        flagWorkerOrMainThread(self.dictionaries, mainDictionaries,
-                               workerDictionaries);
         flagWorkerOrMainThread(self.callbacks, mainCallbacks, workerCallbacks)
 
     def getInterface(self, ifname):
@@ -174,6 +177,10 @@ class Configuration:
             if d.workers == workers:
                 return d
 
+        if workers:
+            for d in self.descriptorsByName[interfaceName]:
+                return d
+
         raise NoSuchDescriptorError("For " + interfaceName + " found no matches");
     def getDescriptorProvider(self, workers):
         """
@@ -218,10 +225,7 @@ class Descriptor(DescriptorProvider):
             else:
                 nativeTypeDefault = "nsIDOM" + ifaceName
         elif self.interface.isCallback():
-            if self.workers:
-                nativeTypeDefault = "JSObject"
-            else:
-                nativeTypeDefault = "mozilla::dom::" + ifaceName
+            nativeTypeDefault = "mozilla::dom::" + ifaceName
         else:
             if self.workers:
                 nativeTypeDefault = "mozilla::dom::workers::" + ifaceName
@@ -229,11 +233,20 @@ class Descriptor(DescriptorProvider):
                 nativeTypeDefault = "mozilla::dom::" + ifaceName
 
         self.nativeType = desc.get('nativeType', nativeTypeDefault)
+        # Now create a version of nativeType that doesn't have extra
+        # mozilla::dom:: at the beginning.
+        prettyNativeType = self.nativeType.split("::")
+        if prettyNativeType[0] == "mozilla":
+            prettyNativeType.pop(0)
+            if prettyNativeType[0] == "dom":
+                prettyNativeType.pop(0)
+        self.prettyNativeType = "::".join(prettyNativeType)
+
         self.jsImplParent = desc.get('jsImplParent', self.nativeType)
 
         # Do something sane for JSObject
         if self.nativeType == "JSObject":
-            headerDefault = "jsapi.h"
+            headerDefault = "js/TypeDecls.h"
         elif self.interface.isCallback() or self.interface.isJSImplemented():
             # A copy of CGHeaders.getDeclarationFilename; we can't
             # import it here, sadly.
@@ -250,6 +263,7 @@ class Descriptor(DescriptorProvider):
                 headerDefault = self.nativeType
                 headerDefault = headerDefault.replace("::", "/") + ".h"
         self.headerFile = desc.get('headerFile', headerDefault)
+        self.headerIsDefault = self.headerFile == headerDefault
         if self.jsImplParent == self.nativeType:
             self.jsImplParentHeader = self.headerFile
         else:
@@ -277,7 +291,8 @@ class Descriptor(DescriptorProvider):
             'NamedCreator': None,
             'NamedDeleter': None,
             'Stringifier': None,
-            'LegacyCaller': None
+            'LegacyCaller': None,
+            'Jsonifier': None
             }
         if self.concrete:
             self.proxy = False
@@ -290,6 +305,8 @@ class Descriptor(DescriptorProvider):
             for m in iface.members:
                 if m.isMethod() and m.isStringifier():
                     addOperation('Stringifier', m)
+                if m.isMethod() and m.isJsonifier():
+                    addOperation('Jsonifier', m)
                 # Don't worry about inheriting legacycallers either: in
                 # practice these are on most-derived prototypes.
                 if m.isMethod() and m.isLegacycaller():
@@ -345,34 +362,22 @@ class Descriptor(DescriptorProvider):
                     raise SyntaxError("%s supports named properties but does "
                                       "not have a named getter.\n%s" %
                                       (self.interface, self.interface.location))
-                if operations['LegacyCaller']:
-                    raise SyntaxError("%s has a legacy caller but is a proxy; "
-                                      "we don't support that yet.\n%s" %
-                                      (self.interface, self.interface.location))
                 iface = self.interface
                 while iface:
                     iface.setUserData('hasProxyDescendant', True)
                     iface = iface.parent
         self.operations = operations
 
-        if self.workers:
-            if desc.get('nativeOwnership', 'worker') != 'worker':
-                raise TypeError("Worker descriptor for %s should have 'worker' "
-                                "as value for nativeOwnership" %
-                                self.interface.identifier.name)
-            self.nativeOwnership = "worker"
-        else:
-            self.nativeOwnership = desc.get('nativeOwnership', 'nsisupports')
-            if not self.nativeOwnership in ['owned', 'refcounted', 'nsisupports']:
-                raise TypeError("Descriptor for %s has unrecognized value (%s) "
-                                "for nativeOwnership" %
-                                (self.interface.identifier.name, self.nativeOwnership))
-        self.customTrace = desc.get('customTrace', self.workers)
-        self.customFinalize = desc.get('customFinalize', self.workers)
+        self.nativeOwnership = desc.get('nativeOwnership', 'refcounted')
+        if not self.nativeOwnership in ('owned', 'refcounted'):
+            raise TypeError("Descriptor for %s has unrecognized value (%s) "
+                            "for nativeOwnership" %
+                            (self.interface.identifier.name, self.nativeOwnership))
+        if desc.get('wantsQI', None) != None:
+            self._wantsQI = desc.get('wantsQI', None)
         self.wrapperCache = (not self.interface.isCallback() and
-                             (self.workers or
-                              (self.nativeOwnership != 'owned' and
-                               desc.get('wrapperCache', True))))
+                             (self.nativeOwnership != 'owned' and
+                              desc.get('wrapperCache', True)))
 
         def make_name(name):
             return name + "_workers" if self.workers else name
@@ -419,7 +424,7 @@ class Descriptor(DescriptorProvider):
         self.prototypeChain = []
         parent = interface
         while parent:
-            self.prototypeChain.insert(0, make_name(parent.identifier.name))
+            self.prototypeChain.insert(0, parent.identifier.name)
             parent = parent.parent
         config.maxProtoChainLength = max(config.maxProtoChainLength,
                                          len(self.prototypeChain))
@@ -479,11 +484,43 @@ class Descriptor(DescriptorProvider):
     def needsHeaderInclude(self):
         """
         An interface doesn't need a header file if it is not concrete,
-        not pref-controlled, and has only consts.
+        not pref-controlled, has no prototype object, and has no
+        static methods or attributes.
         """
         return (self.interface.isExternal() or self.concrete or
-            self.interface.getExtendedAttribute("PrefControlled") or
-            self.interface.hasInterfacePrototypeObject())
+            self.interface.hasInterfacePrototypeObject() or
+            any((m.isAttr() or m.isMethod()) and m.isStatic() for m
+                in self.interface.members))
+
+    def isExposedConditionally(self):
+        return (self.interface.getExtendedAttribute("Pref") or
+                self.interface.getExtendedAttribute("ChromeOnly") or
+                self.interface.getExtendedAttribute("Func") or
+                self.interface.getExtendedAttribute("AvailableIn"))
+
+    def needsXrayResolveHooks(self):
+        """
+        Generally, any interface with NeedNewResolve needs Xray
+        resolveOwnProperty and enumerateOwnProperties hooks.  But for
+        the special case of plugin-loading elements, we do NOT want
+        those, because we don't want to instantiate plug-ins simply
+        due to chrome touching them and that's all those hooks do on
+        those elements.  So we special-case those here.
+        """
+        return (self.interface.getExtendedAttribute("NeedNewResolve") and
+                self.interface.identifier.name not in ["HTMLObjectElement",
+                                                       "HTMLEmbedElement",
+                                                       "HTMLAppletElement"])
+
+    def needsSpecialGenericOps(self):
+        """
+        Returns true if this descriptor requires generic ops other than
+        GenericBindingMethod/GenericBindingGetter/GenericBindingSetter.
+
+        In practice we need to do this if our this value might be an XPConnect
+        object or if we need to coerce null/undefined to the global.
+        """
+        return self.hasXPConnectImpls or self.interface.isOnGlobalProtoChain()
 
 # Some utility methods
 def getTypesFromDescriptor(descriptor):

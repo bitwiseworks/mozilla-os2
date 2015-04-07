@@ -8,14 +8,14 @@
 #define jswatchpoint_h
 
 #include "jsalloc.h"
-#include "jsprvtd.h"
-#include "jsapi.h"
-#include "jsfriendapi.h"
 
 #include "gc/Barrier.h"
 #include "js/HashTable.h"
+#include "js/OldDebugAPI.h"
 
 namespace js {
+
+struct WeakMapTracer;
 
 struct WatchKey {
     WatchKey() {}
@@ -31,17 +31,25 @@ struct WatchKey {
 
 struct Watchpoint {
     JSWatchPointHandler handler;
-    RelocatablePtrObject closure;
+    EncapsulatedPtrObject closure;  /* This is always marked in minor GCs and so doesn't require a postbarrier. */
     bool held;  /* true if currently running handler */
+    Watchpoint(JSWatchPointHandler handler, JSObject* closure, bool held)
+      : handler(handler), closure(closure), held(held) {}
 };
 
 template <>
-struct DefaultHasher<WatchKey> {
+struct DefaultHasher<WatchKey>
+{
     typedef WatchKey Lookup;
     static inline js::HashNumber hash(const Lookup &key);
 
     static bool match(const WatchKey &k, const Lookup &l) {
         return k.object == l.object && k.id.get() == l.id.get();
+    }
+
+    static void rekey(WatchKey &k, const WatchKey& newKey) {
+        k.object.unsafeSet(newKey.object);
+        k.id.unsafeSet(newKey.id);
     }
 };
 

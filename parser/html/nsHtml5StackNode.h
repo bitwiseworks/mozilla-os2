@@ -26,13 +26,13 @@
  * Please edit StackNode.java instead and regenerate.
  */
 
-#ifndef nsHtml5StackNode_h__
-#define nsHtml5StackNode_h__
+#ifndef nsHtml5StackNode_h
+#define nsHtml5StackNode_h
 
 #include "nsIAtom.h"
 #include "nsHtml5AtomTable.h"
 #include "nsString.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsIContent.h"
 #include "nsTraceRefcnt.h"
 #include "jArray.h"
@@ -42,6 +42,7 @@
 #include "nsHtml5ByteReadable.h"
 #include "nsIUnicodeDecoder.h"
 #include "nsHtml5Macros.h"
+#include "nsIContentHandle.h"
 
 class nsHtml5StreamParser;
 
@@ -63,7 +64,7 @@ class nsHtml5StackNode
     nsIAtom* name;
     nsIAtom* popName;
     int32_t ns;
-    nsIContent** node;
+    nsIContentHandle* node;
     nsHtml5HtmlAttributes* attributes;
   private:
     int32_t refcount;
@@ -78,12 +79,12 @@ class nsHtml5StackNode
     bool isSpecial();
     bool isFosterParenting();
     bool isHtmlIntegrationPoint();
-    nsHtml5StackNode(int32_t flags, int32_t ns, nsIAtom* name, nsIContent** node, nsIAtom* popName, nsHtml5HtmlAttributes* attributes);
-    nsHtml5StackNode(nsHtml5ElementName* elementName, nsIContent** node);
-    nsHtml5StackNode(nsHtml5ElementName* elementName, nsIContent** node, nsHtml5HtmlAttributes* attributes);
-    nsHtml5StackNode(nsHtml5ElementName* elementName, nsIContent** node, nsIAtom* popName);
-    nsHtml5StackNode(nsHtml5ElementName* elementName, nsIAtom* popName, nsIContent** node);
-    nsHtml5StackNode(nsHtml5ElementName* elementName, nsIContent** node, nsIAtom* popName, bool markAsIntegrationPoint);
+    nsHtml5StackNode(int32_t flags, int32_t ns, nsIAtom* name, nsIContentHandle* node, nsIAtom* popName, nsHtml5HtmlAttributes* attributes);
+    nsHtml5StackNode(nsHtml5ElementName* elementName, nsIContentHandle* node);
+    nsHtml5StackNode(nsHtml5ElementName* elementName, nsIContentHandle* node, nsHtml5HtmlAttributes* attributes);
+    nsHtml5StackNode(nsHtml5ElementName* elementName, nsIContentHandle* node, nsIAtom* popName);
+    nsHtml5StackNode(nsHtml5ElementName* elementName, nsIAtom* popName, nsIContentHandle* node);
+    nsHtml5StackNode(nsHtml5ElementName* elementName, nsIContentHandle* node, nsIAtom* popName, bool markAsIntegrationPoint);
   private:
     static int32_t prepareSvgFlags(int32_t flags);
     static int32_t prepareMathFlags(int32_t flags, bool markAsIntegrationPoint);

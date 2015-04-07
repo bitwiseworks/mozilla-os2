@@ -6,12 +6,11 @@
 
 #include "nsNetAddr.h"
 #include "nsString.h"
-#include "prnetdb.h"
 #include "mozilla/net/DNS.h"
 
 using namespace mozilla::net;
 
-NS_IMPL_ISUPPORTS1(nsNetAddr, nsINetAddr)
+NS_IMPL_ISUPPORTS(nsNetAddr, nsINetAddr)
 
 /* Makes a copy of |addr| */
 nsNetAddr::nsNetAddr(NetAddr* addr)
@@ -30,7 +29,7 @@ NS_IMETHODIMP nsNetAddr::GetFamily(uint16_t *aFamily)
   case AF_INET6:
     *aFamily = nsINetAddr::FAMILY_INET6;
     break;
-#if defined(XP_UNIX) || defined(XP_OS2)
+#if defined(XP_UNIX)
   case AF_LOCAL:
     *aFamily = nsINetAddr::FAMILY_LOCAL;
     break;
@@ -57,12 +56,12 @@ NS_IMETHODIMP nsNetAddr::GetAddress(nsACString & aAddress)
     NetAddrToString(&mAddr, aAddress.BeginWriting(), kIPv6CStrBufSize);
     aAddress.SetLength(strlen(aAddress.BeginReading()));
     break;
-#if defined(XP_UNIX) || defined(XP_OS2)
+#if defined(XP_UNIX)
   case AF_LOCAL:
     aAddress.Assign(mAddr.local.path);
     break;
 #endif
-  // PR_AF_LOCAL falls through to default when not XP_UNIX || XP_OS2
+  // PR_AF_LOCAL falls through to default when not XP_UNIX
   default:
     return NS_ERROR_UNEXPECTED;
   }
@@ -80,7 +79,7 @@ NS_IMETHODIMP nsNetAddr::GetPort(uint16_t *aPort)
   case AF_INET6:
     *aPort = ntohs(mAddr.inet6.port);
     break;
-#if defined(XP_UNIX) || defined(XP_OS2)
+#if defined(XP_UNIX)
   case AF_LOCAL:
     // There is no port number for local / connections.
     return NS_ERROR_NOT_AVAILABLE;
@@ -100,7 +99,7 @@ NS_IMETHODIMP nsNetAddr::GetFlow(uint32_t *aFlow)
     *aFlow = ntohl(mAddr.inet6.flowinfo);
     break;
   case AF_INET:
-#if defined(XP_UNIX) || defined(XP_OS2)
+#if defined(XP_UNIX)
   case AF_LOCAL:
 #endif
     // only for IPv6
@@ -120,7 +119,7 @@ NS_IMETHODIMP nsNetAddr::GetScope(uint32_t *aScope)
     *aScope = ntohl(mAddr.inet6.scope_id);
     break;
   case AF_INET:
-#if defined(XP_UNIX) || defined(XP_OS2)
+#if defined(XP_UNIX)
   case AF_LOCAL:
 #endif
     // only for IPv6
@@ -140,7 +139,7 @@ NS_IMETHODIMP nsNetAddr::GetIsV4Mapped(bool *aIsV4Mapped)
     *aIsV4Mapped = IPv6ADDR_IS_V4MAPPED(&mAddr.inet6.ip);
     break;
   case AF_INET:
-#if defined(XP_UNIX) || defined(XP_OS2)
+#if defined(XP_UNIX)
   case AF_LOCAL:
 #endif
     // only for IPv6
@@ -149,6 +148,11 @@ NS_IMETHODIMP nsNetAddr::GetIsV4Mapped(bool *aIsV4Mapped)
     return NS_ERROR_UNEXPECTED;
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsNetAddr::GetNetAddr(NetAddr *aResult) {
+  memcpy(aResult, &mAddr, sizeof(mAddr));
   return NS_OK;
 }
 

@@ -8,18 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "voice_engine/test/auto_test/fixtures/before_initialization_fixture.h"
+#include "webrtc/voice_engine/test/auto_test/fixtures/before_initialization_fixture.h"
 
-#include <cstdlib>
+#include <stdlib.h>
 
 class VoeBaseMiscTest : public BeforeInitializationFixture {
 };
 
 using namespace testing;
-
-TEST_F(VoeBaseMiscTest, MaxNumChannelsIs32) {
-  EXPECT_EQ(32, voe_base_->MaxNumOfChannels());
-}
 
 TEST_F(VoeBaseMiscTest, GetVersionPrintsSomeUsefulInformation) {
   char char_buffer[1024];

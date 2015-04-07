@@ -3,14 +3,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nscore.h"
 #include "nsString.h"
 #include "nsXPCOMStrings.h"
 #include "nsReadableUtils.h"
 #include "nsWin32Locale.h"
-#include "nsLocaleCID.h"
 #include "prprf.h"
 #include <windows.h>
 #include "nsCRT.h"
@@ -618,7 +617,7 @@ nsWin32Locale::GetPlatformLocale(const nsAString& locale, LCID* winLCID)
   size_t  i, j;
 
   // parse the locale
-  const PRUnichar* data;
+  const char16_t* data;
   j = NS_StringGetData(locale, &data);
   for (i = 0; i < 7 && i < j; i++) {
     locale_string[i] = data[i] == '-' ? '\0' : data[i];
@@ -701,7 +700,7 @@ nsWin32Locale::GetXPLocale(LCID winLCID, nsAString& locale)
       }
       for(j=0;iso_list[i].sublang_list[j].win_code;j++) {
         if (sublang_id == iso_list[i].sublang_list[j].win_code) {
-          locale.Append(PRUnichar('-'));
+          locale.Append(char16_t('-'));
           locale.AppendASCII(iso_list[i].sublang_list[j].iso_code);
           break;
         }

@@ -3,18 +3,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
-#include "nsCOMPtr.h"
-#include "nsFrame.h"
+#include "nsMathMLmencloseFrame.h"
 #include "nsPresContext.h"
-#include "nsStyleContext.h"
-#include "nsStyleConsts.h"
 #include "nsRenderingContext.h"
 #include "nsWhitespaceTokenizer.h"
 
-#include "nsMathMLmencloseFrame.h"
 #include "nsDisplayList.h"
 #include "gfxContext.h"
+#include "nsMathMLChar.h"
 #include <algorithm>
 
 //
@@ -24,10 +20,10 @@
 // longdiv:
 // Unicode 5.1 assigns U+27CC to LONG DIVISION, but a right parenthesis
 // renders better with current font support.
-static const PRUnichar kLongDivChar = ')';
+static const char16_t kLongDivChar = ')';
 
 // radical: 'SQUARE ROOT'
-static const PRUnichar kRadicalChar = 0x221A;
+static const char16_t kRadicalChar = 0x221A;
 
 // updiagonalstrike
 static const uint8_t kArrowHeadSize = 10;
@@ -76,9 +72,7 @@ nsresult nsMathMLmencloseFrame::AllocateMathMLChar(nsMencloseNotation mask)
 
   nsPresContext *presContext = PresContext();
   mMathMLChar[i].SetData(presContext, Char);
-  ResolveMathMLCharStyle(presContext, mContent, mStyleContext,
-                         &mMathMLChar[i],
-                         true);
+  ResolveMathMLCharStyle(presContext, mContent, mStyleContext, &mMathMLChar[i]);
 
   return NS_OK;
 }
@@ -144,8 +138,7 @@ void nsMathMLmencloseFrame::InitNotations()
 
   nsAutoString value;
 
-  if (GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::notation_,
-                   value)) {
+  if (mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::notation_, value)) {
     // parse the notation attribute
     nsWhitespaceTokenizer tokenizer(value);
 
@@ -311,7 +304,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
   ///////////////
   // Measure the size of our content using the base class to format like an
   // inferred mrow.
-  nsHTMLReflowMetrics baseSize;
+  nsHTMLReflowMetrics baseSize(aDesiredSize.GetWritingMode());
   nsresult rv =
     nsMathMLContainerFrame::Place(aRenderingContext, false, baseSize);
 
@@ -338,7 +331,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
   GetRuleThickness(aRenderingContext, fm, mRuleThickness);
   GetEmHeight(fm, mEmHeight);
 
-  PRUnichar one = '1';
+  char16_t one = '1';
   nsBoundingMetrics bmOne = aRenderingContext.GetBoundingMetrics(&one, 1);
 
   ///////////////
@@ -355,7 +348,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       nscoord phi;
       // Rule 11, App. G, TeXbook
       // psi = clearance between rule and content
-      if (NS_MATHML_IS_DISPLAYSTYLE(mPresentationData.flags))
+      if (StyleFont()->mMathDisplay == NS_MATHML_DISPLAYSTYLE_BLOCK)
         phi = fm->XHeight();
       else
         phi = mRuleThickness;
@@ -553,19 +546,19 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
   mBoundingMetrics.rightBearing =
     std::max(mBoundingMetrics.width, dx_left + bmBase.rightBearing);
   
-  aDesiredSize.width = mBoundingMetrics.width;
+  aDesiredSize.Width() = mBoundingMetrics.width;
 
-  aDesiredSize.ascent = std::max(mBoundingMetrics.ascent, baseSize.ascent);
-  aDesiredSize.height = aDesiredSize.ascent +
-    std::max(mBoundingMetrics.descent, baseSize.height - baseSize.ascent);
+  aDesiredSize.SetTopAscent(std::max(mBoundingMetrics.ascent, baseSize.TopAscent()));
+  aDesiredSize.Height() = aDesiredSize.TopAscent() +
+    std::max(mBoundingMetrics.descent, baseSize.Height() - baseSize.TopAscent());
 
   if (IsToDraw(NOTATION_LONGDIV) || IsToDraw(NOTATION_RADICAL)) {
     // get the leading to be left at the top of the resulting frame
     // this seems more reliable than using fm->GetLeading() on suspicious
     // fonts
     nscoord leading = nscoord(0.2f * mEmHeight);
-    nscoord desiredSizeAscent = aDesiredSize.ascent;
-    nscoord desiredSizeDescent = aDesiredSize.height - aDesiredSize.ascent;
+    nscoord desiredSizeAscent = aDesiredSize.TopAscent();
+    nscoord desiredSizeDescent = aDesiredSize.Height() - aDesiredSize.TopAscent();
     
     if (IsToDraw(NOTATION_LONGDIV)) {
       desiredSizeAscent = std::max(desiredSizeAscent,
@@ -581,20 +574,20 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
                                   radicalDescent + mRuleThickness);
     }
 
-    aDesiredSize.ascent = desiredSizeAscent;
-    aDesiredSize.height = desiredSizeAscent + desiredSizeDescent;
+    aDesiredSize.SetTopAscent(desiredSizeAscent);
+    aDesiredSize.Height() = desiredSizeAscent + desiredSizeDescent;
   }
     
   if (IsToDraw(NOTATION_CIRCLE) ||
       IsToDraw(NOTATION_ROUNDEDBOX) ||
       (IsToDraw(NOTATION_TOP) && IsToDraw(NOTATION_BOTTOM))) {
     // center the menclose around the content (vertically)
-    nscoord dy = std::max(aDesiredSize.ascent - bmBase.ascent,
-                        aDesiredSize.height - aDesiredSize.ascent -
+    nscoord dy = std::max(aDesiredSize.TopAscent() - bmBase.ascent,
+                        aDesiredSize.Height() - aDesiredSize.TopAscent() -
                         bmBase.descent);
 
-    aDesiredSize.ascent = bmBase.ascent + dy;
-    aDesiredSize.height = aDesiredSize.ascent + bmBase.descent + dy;
+    aDesiredSize.SetTopAscent(bmBase.ascent + dy);
+    aDesiredSize.Height() = aDesiredSize.TopAscent() + bmBase.descent + dy;
   }
 
   // Update mBoundingMetrics ascent/descent
@@ -607,7 +600,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       IsToDraw(NOTATION_VERTICALSTRIKE) ||
       IsToDraw(NOTATION_CIRCLE) ||
       IsToDraw(NOTATION_ROUNDEDBOX))
-    mBoundingMetrics.ascent = aDesiredSize.ascent;
+    mBoundingMetrics.ascent = aDesiredSize.TopAscent();
   
   if (IsToDraw(NOTATION_BOTTOM) ||
       IsToDraw(NOTATION_RIGHT) ||
@@ -618,12 +611,12 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       IsToDraw(NOTATION_VERTICALSTRIKE) ||
       IsToDraw(NOTATION_CIRCLE) ||
       IsToDraw(NOTATION_ROUNDEDBOX))
-    mBoundingMetrics.descent = aDesiredSize.height - aDesiredSize.ascent;
+    mBoundingMetrics.descent = aDesiredSize.Height() - aDesiredSize.TopAscent();
 
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;
   
   mReference.x = 0;
-  mReference.y = aDesiredSize.ascent;
+  mReference.y = aDesiredSize.TopAscent();
 
   if (aPlaceOrigin) {
     //////////////////
@@ -631,7 +624,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
     if (IsToDraw(NOTATION_LONGDIV))
       mMathMLChar[mLongDivCharIndex].SetRect(nsRect(dx_left -
                                                     bmLongdivChar.width,
-                                                    aDesiredSize.ascent -
+                                                    aDesiredSize.TopAscent() -
                                                     longdivAscent,
                                                     bmLongdivChar.width,
                                                     bmLongdivChar.ascent +
@@ -642,7 +635,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
                     dx_left + bmBase.width : dx_left - bmRadicalChar.width);
 
       mMathMLChar[mRadicalCharIndex].SetRect(nsRect(dx,
-                                                    aDesiredSize.ascent -
+                                                    aDesiredSize.TopAscent() -
                                                     radicalAscent,
                                                     bmRadicalChar.width,
                                                     bmRadicalChar.ascent +
@@ -653,7 +646,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
 
     //////////////////
     // Finish reflowing child frames
-    PositionRowChildFrames(dx_left, aDesiredSize.ascent);
+    PositionRowChildFrames(dx_left, aDesiredSize.TopAscent());
   }
 
   return NS_OK;
@@ -677,7 +670,7 @@ nsMathMLmencloseFrame::FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize)
   return gap;
 }
 
-NS_IMETHODIMP
+nsresult
 nsMathMLmencloseFrame::AttributeChanged(int32_t         aNameSpaceID,
                                         nsIAtom*        aAttribute,
                                         int32_t         aModType)
@@ -729,7 +722,7 @@ public:
 #endif
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx);
+                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
   NS_DISPLAY_DECL_NAME("MathMLMencloseNotation", TYPE_MATHML_MENCLOSE_NOTATION)
 
 private:

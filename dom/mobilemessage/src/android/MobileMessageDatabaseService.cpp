@@ -11,7 +11,7 @@ namespace mozilla {
 namespace dom {
 namespace mobilemessage {
 
-NS_IMPL_ISUPPORTS1(MobileMessageDatabaseService, nsIMobileMessageDatabaseService)
+NS_IMPL_ISUPPORTS(MobileMessageDatabaseService, nsIMobileMessageDatabaseService)
 
 NS_IMETHODIMP
 MobileMessageDatabaseService::GetMessageMoz(int32_t aMessageId,
@@ -58,6 +58,7 @@ MobileMessageDatabaseService::CreateMessageCursor(nsIDOMMozSmsFilter* aFilter,
 NS_IMETHODIMP
 MobileMessageDatabaseService::MarkMessageRead(int32_t aMessageId,
                                               bool aValue,
+                                              bool aSendReadReport,
                                               nsIMobileMessageCallback* aRequest)
 {
   // TODO: This would need to be implemented as part of Bug 748391

@@ -9,7 +9,7 @@
 #include "nsMacDockSupport.h"
 #include "nsObjCExceptions.h"
 
-NS_IMPL_ISUPPORTS2(nsMacDockSupport, nsIMacDockSupport, nsITaskbarProgress)
+NS_IMPL_ISUPPORTS(nsMacDockSupport, nsIMacDockSupport, nsITaskbarProgress)
 
 nsMacDockSupport::nsMacDockSupport()
 : mAppIcon(nil)
@@ -76,7 +76,8 @@ nsMacDockSupport::SetBadgeText(const nsAString& aBadgeText)
   if (aBadgeText.IsEmpty())
     [tile setBadgeLabel: nil];
   else
-    [tile setBadgeLabel:[NSString stringWithCharacters:mBadgeText.get() length:mBadgeText.Length()]];
+    [tile setBadgeLabel:[NSString stringWithCharacters:reinterpret_cast<const unichar*>(mBadgeText.get())
+                                                length:mBadgeText.Length()]];
   return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;

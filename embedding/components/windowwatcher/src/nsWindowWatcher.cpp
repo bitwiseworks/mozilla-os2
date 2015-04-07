@@ -41,7 +41,9 @@
 #include "nsIWindowCreator.h"
 #include "nsIWindowCreator2.h"
 #include "nsIXPConnect.h"
+#include "nsIXULRuntime.h"
 #include "nsPIDOMWindow.h"
+#include "nsGlobalWindow.h"
 #include "nsIMarkupDocumentViewer.h"
 #include "nsIContentViewer.h"
 #include "nsIWindowProvider.h"
@@ -160,7 +162,7 @@ private:
 
 NS_IMPL_ADDREF(nsWatcherWindowEnumerator)
 NS_IMPL_RELEASE(nsWatcherWindowEnumerator)
-NS_IMPL_QUERY_INTERFACE1(nsWatcherWindowEnumerator, nsISimpleEnumerator)
+NS_IMPL_QUERY_INTERFACE(nsWatcherWindowEnumerator, nsISimpleEnumerator)
 
 nsWatcherWindowEnumerator::nsWatcherWindowEnumerator(nsWindowWatcher *inWatcher)
   : mWindowWatcher(inWatcher),
@@ -239,10 +241,10 @@ void nsWatcherWindowEnumerator::WindowRemoved(nsWatcherWindowEntry *inInfo) {
 
 NS_IMPL_ADDREF(nsWindowWatcher)
 NS_IMPL_RELEASE(nsWindowWatcher)
-NS_IMPL_QUERY_INTERFACE3(nsWindowWatcher,
-                         nsIWindowWatcher,
-                         nsIPromptFactory,
-                         nsPIWindowWatcher)
+NS_IMPL_QUERY_INTERFACE(nsWindowWatcher,
+                        nsIWindowWatcher,
+                        nsIPromptFactory,
+                        nsPIWindowWatcher)
 
 nsWindowWatcher::nsWindowWatcher() :
         mEnumeratorList(),
@@ -474,9 +476,23 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
   }
 
   // try to find an extant window with the given name
-  nsCOMPtr<nsIDOMWindow> foundWindow;
-  SafeGetWindowByName(name, aParent, getter_AddRefs(foundWindow));
+  nsCOMPtr<nsIDOMWindow> foundWindow = SafeGetWindowByName(name, aParent);
   GetWindowTreeItem(foundWindow, getter_AddRefs(newDocShellItem));
+
+  // Do sandbox checks here, instead of waiting until nsIDocShell::LoadURI.
+  // The state of the window can change before this call and if we are blocked
+  // because of sandboxing, we wouldn't want that to happen.
+  nsCOMPtr<nsPIDOMWindow> parentWindow = do_QueryInterface(aParent);
+  nsCOMPtr<nsIDocShell> parentDocShell;
+  if (parentWindow) {
+    parentDocShell = parentWindow->GetDocShell();
+    if (parentDocShell) {
+      nsCOMPtr<nsIDocShell> foundDocShell = do_QueryInterface(newDocShellItem);
+      if (parentDocShell->IsSandboxedFrom(foundDocShell)) {
+        return NS_ERROR_DOM_INVALID_ACCESS_ERR;
+      }
+    }
+  }
 
   // no extant window? make a new one.
 
@@ -543,21 +559,26 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
     callerContextGuard.Push(cx);
   }
 
+  uint32_t activeDocsSandboxFlags = 0;
   if (!newDocShellItem) {
     // We're going to either open up a new window ourselves or ask a
     // nsIWindowProvider for one.  In either case, we'll want to set the right
     // name on it.
     windowNeedsName = true;
 
-    // If the parent trying to open a new window is sandboxed,
-    // this is not allowed and we fail here.
+    // If the parent trying to open a new window is sandboxed
+    // without 'allow-popups', this is not allowed and we fail here.
     if (aParent) {
       nsCOMPtr<nsIDOMDocument> domdoc;
       aParent->GetDocument(getter_AddRefs(domdoc));
       nsCOMPtr<nsIDocument> doc = do_QueryInterface(domdoc);
 
-      if (doc && (doc->GetSandboxFlags() & SANDBOXED_NAVIGATION)) {
-        return NS_ERROR_FAILURE;
+      if (doc) {
+        // Save sandbox flags for copying to new browsing context (docShell).
+        activeDocsSandboxFlags = doc->GetSandboxFlags();
+        if (activeDocsSandboxFlags & SANDBOXED_AUXILIARY_NAVIGATION) {
+          return NS_ERROR_DOM_INVALID_ACCESS_ERR;
+        }
       }
     }
 
@@ -663,9 +684,9 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
         bool popupConditions = false;
 
         // is the parent under popup conditions?
-        nsCOMPtr<nsPIDOMWindow> piWindow(do_QueryInterface(aParent));
-        if (piWindow)
-          popupConditions = piWindow->IsLoadingOrRunningTimeout();
+        if (parentWindow) {
+          popupConditions = parentWindow->IsLoadingOrRunningTimeout();
+        }
 
         // chrome is always allowed, so clear the flag if the opener is chrome
         if (popupConditions) {
@@ -709,6 +730,16 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
 
   nsCOMPtr<nsIDocShell> newDocShell(do_QueryInterface(newDocShellItem));
   NS_ENSURE_TRUE(newDocShell, NS_ERROR_UNEXPECTED);
+
+  // Set up sandboxing attributes if the window is new.
+  // The flags can only be non-zero for new windows.
+  if (activeDocsSandboxFlags != 0) {
+    newDocShell->SetSandboxFlags(activeDocsSandboxFlags);
+    if (parentWindow) {
+      newDocShell->
+        SetOnePermittedSandboxedNavigator(parentWindow->GetDocShell());
+    }
+  }
   
   rv = ReadyOpenedDocShellItem(newDocShellItem, aParent, windowIsNew, _retval);
   if (NS_FAILED(rv))
@@ -750,52 +781,6 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
       newDocShellItem->SetName(name);
     } else {
       newDocShellItem->SetName(EmptyString());
-    }
-  }
-
-  // Inherit the right character set into the new window to use as a fallback
-  // in the event the document being loaded does not specify a charset.  When
-  // aCalledFromJS is true, we want to use the character set of the document in
-  // the caller; otherwise we want to use the character set of aParent's
-  // docshell. Failing to set this charset is not fatal, so we want to continue
-  // in the face of errors.
-  nsCOMPtr<nsIContentViewer> newCV;
-  newDocShell->GetContentViewer(getter_AddRefs(newCV));
-  nsCOMPtr<nsIMarkupDocumentViewer> newMuCV = do_QueryInterface(newCV);
-  if (newMuCV) {
-    nsCOMPtr<nsIDocShellTreeItem> parentItem;
-    GetWindowTreeItem(aParent, getter_AddRefs(parentItem));
-
-    if (aCalledFromJS) {
-      nsCOMPtr<nsIDocShellTreeItem> callerItem = GetCallerTreeItem(parentItem);
-      nsCOMPtr<nsPIDOMWindow> callerWin = do_GetInterface(callerItem);
-      if (callerWin) {
-        nsCOMPtr<nsIDocument> doc = callerWin->GetExtantDoc();
-        if (doc) {
-          newMuCV->SetDefaultCharacterSet(doc->GetDocumentCharacterSet());
-        }
-      }
-    }
-    else {
-      nsCOMPtr<nsIDocShell> parentDocshell = do_QueryInterface(parentItem);
-      // parentDocshell may be null if the parent got closed in the meantime
-      if (parentDocshell) {
-        nsCOMPtr<nsIContentViewer> parentCV;
-        parentDocshell->GetContentViewer(getter_AddRefs(parentCV));
-        nsCOMPtr<nsIMarkupDocumentViewer> parentMuCV =
-          do_QueryInterface(parentCV);
-        if (parentMuCV) {
-          nsAutoCString charset;
-          nsresult res = parentMuCV->GetDefaultCharacterSet(charset);
-          if (NS_SUCCEEDED(res)) {
-            newMuCV->SetDefaultCharacterSet(charset);
-          }
-          res = parentMuCV->GetPrevDocCharacterSet(charset);
-          if (NS_SUCCEEDED(res)) {
-            newMuCV->SetPrevDocCharacterSet(charset);
-          }
-        }
-      }
     }
   }
 
@@ -851,17 +836,24 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
     }
   }
 
+  // We rely on CalculateChromeFlags to decide whether remote (out-of-process)
+  // tabs should be used.
+  bool isRemoteWindow =
+    !!(chromeFlags & nsIWebBrowserChrome::CHROME_REMOTE_WINDOW);
+
   if (isNewToplevelWindow) {
     nsCOMPtr<nsIDocShellTreeItem> childRoot;
     newDocShellItem->GetRootTreeItem(getter_AddRefs(childRoot));
     nsCOMPtr<nsILoadContext> childContext = do_QueryInterface(childRoot);
     if (childContext) {
       childContext->SetPrivateBrowsing(isPrivateBrowsingWindow);
+      childContext->SetRemoteTabs(isRemoteWindow);
     }
   } else if (windowIsNew) {
     nsCOMPtr<nsILoadContext> childContext = do_QueryInterface(newDocShellItem);
     if (childContext) {
       childContext->SetPrivateBrowsing(isPrivateBrowsingWindow);
+      childContext->SetRemoteTabs(isRemoteWindow);
     }
   }
 
@@ -936,11 +928,6 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
   }
 
   // Copy the current session storage for the current domain.
-  nsCOMPtr<nsPIDOMWindow> piWindow = do_QueryInterface(aParent);
-  nsIDocShell* parentDocShell = nullptr;
-  if (piWindow)
-    parentDocShell = piWindow->GetDocShell();
-
   if (subjectPrincipal && parentDocShell) {
     nsCOMPtr<nsIDOMStorageManager> parentStorageManager = do_QueryInterface(parentDocShell);
     nsCOMPtr<nsIDOMStorageManager> newStorageManager = do_QueryInterface(newDocShell);
@@ -966,18 +953,15 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
     // we need that to show a modal window.
     NS_ENSURE_TRUE(newChrome, NS_ERROR_NOT_AVAILABLE);
 
-    nsCOMPtr<nsPIDOMWindow> modalContentWindow;
-
     // Dispatch dialog events etc, but we only want to do that if
     // we're opening a modal content window (the helper classes are
     // no-ops if given no window), for chrome dialogs we don't want to
     // do any of that (it's done elsewhere for us).
-
-    if (windowIsModalContentDialog) {
-      modalContentWindow = do_QueryInterface(*_retval);
-    }
-
-    nsAutoWindowStateHelper windowStateHelper(aParent);
+    // Make sure we maintain the state on an outer window, because
+    // that's where it lives; inner windows assert if you try to
+    // maintain the state on them.
+    nsAutoWindowStateHelper windowStateHelper(
+      parentWindow ? parentWindow->GetOuterWindow() : nullptr);
 
     if (!windowStateHelper.DefaultEnabled()) {
       // Default to cancel not opening the modal window.
@@ -1000,7 +984,7 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
       // Reset popup state while opening a modal dialog, and firing
       // events about the dialog, to prevent the current state from
       // being active the whole time a modal dialog is open.
-      nsAutoPopupStatePusher popupStatePusher(modalContentWindow, openAbused);
+      nsAutoPopupStatePusher popupStatePusher(openAbused);
   
       newChrome->ShowAsModal();
     }
@@ -1109,6 +1093,13 @@ NS_IMETHODIMP
 nsWindowWatcher::SetWindowCreator(nsIWindowCreator *creator)
 {
   mWindowCreator = creator; // it's an nsCOMPtr, so this is an ownership ref
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWindowWatcher::HasWindowCreator(bool *result)
+{
+  *result = mWindowCreator;
   return NS_OK;
 }
 
@@ -1299,7 +1290,7 @@ nsWindowWatcher::GetChromeForWindow(nsIDOMWindow *aWindow, nsIWebBrowserChrome *
 }
 
 NS_IMETHODIMP
-nsWindowWatcher::GetWindowByName(const PRUnichar *aTargetName, 
+nsWindowWatcher::GetWindowByName(const char16_t *aTargetName, 
                                  nsIDOMWindow *aCurrentWindow,
                                  nsIDOMWindow **aResult)
 {
@@ -1355,9 +1346,14 @@ nsWindowWatcher::URIfromURL(const char *aURL,
      in nsGlobalWindow.cpp.) */
   JSContext *cx = nsContentUtils::GetCurrentJSContext();
   if (cx) {
-    nsIScriptContext *scriptcx = nsJSUtils::GetDynamicScriptContext(cx);
-    if (scriptcx) {
-      baseWindow = do_QueryInterface(scriptcx->GetGlobalObject());
+    baseWindow = do_QueryInterface(nsJSUtils::GetDynamicScriptGlobal(cx));
+    if (baseWindow) {
+      nsIPrincipal* entryPrin =
+        static_cast<nsGlobalWindow*>(baseWindow.get())->GetPrincipal();
+      nsIPrincipal* subjectPrin = nsContentUtils::GetSubjectPrincipal();
+      if (!subjectPrin->SubsumesConsideringDomain(entryPrin)) {
+        baseWindow = nullptr;
+      }
     }
   }
 
@@ -1448,6 +1444,19 @@ uint32_t nsWindowWatcher::CalculateChromeFlags(nsIDOMWindow *aParent,
       nsIWebBrowserChrome::CHROME_PRIVATE_WINDOW : 0;
     chromeFlags |= WinHasOption(aFeatures, "non-private", 0, &presenceFlag) ?
       nsIWebBrowserChrome::CHROME_NON_PRIVATE_WINDOW : 0;
+  }
+
+  // Determine whether the window should have remote tabs.
+  if (isCallerChrome) {
+    bool remote;
+    if (Preferences::GetBool("browser.tabs.remote.autostart")) {
+      remote = !WinHasOption(aFeatures, "non-remote", 0, &presenceFlag);
+    } else {
+      remote = WinHasOption(aFeatures, "remote", 0, &presenceFlag);
+    }
+    if (remote) {
+      chromeFlags |= nsIWebBrowserChrome::CHROME_REMOTE_WINDOW;
+    }
   }
 
   nsresult rv;
@@ -1649,7 +1658,7 @@ nsWindowWatcher::WinHasOption(const char *aOptions, const char *aName,
    necessarily return a failure method value. check aFoundItem.
 */
 NS_IMETHODIMP
-nsWindowWatcher::FindItemWithName(const PRUnichar* aName,
+nsWindowWatcher::FindItemWithName(const char16_t* aName,
                                   nsIDocShellTreeItem* aRequestor,
                                   nsIDocShellTreeItem* aOriginalRequestor,
                                   nsIDocShellTreeItem** aFoundItem)
@@ -1732,13 +1741,10 @@ nsWindowWatcher::GetCallerTreeItem(nsIDocShellTreeItem* aParentItem)
   return callerItem.forget();
 }
 
-nsresult
+already_AddRefed<nsIDOMWindow>
 nsWindowWatcher::SafeGetWindowByName(const nsAString& aName,
-                                     nsIDOMWindow* aCurrentWindow,
-                                     nsIDOMWindow** aResult)
+                                     nsIDOMWindow* aCurrentWindow)
 {
-  *aResult = nullptr;
-  
   nsCOMPtr<nsIDocShellTreeItem> startItem;
   GetWindowTreeItem(aCurrentWindow, getter_AddRefs(startItem));
 
@@ -1757,8 +1763,7 @@ nsWindowWatcher::SafeGetWindowByName(const nsAString& aName,
   }
 
   nsCOMPtr<nsIDOMWindow> foundWin = do_GetInterface(foundItem);
-  foundWin.swap(*aResult);
-  return NS_OK;
+  return foundWin.forget();
 }
 
 /* Fetch the nsIDOMWindow corresponding to the given nsIDocShellTreeItem.
@@ -2016,26 +2021,37 @@ nsWindowWatcher::SizeOpenedDocShellItem(nsIDocShellTreeItem *aDocShellItem,
         /* Unlike position, force size out-of-bounds check only if
            size actually was specified. Otherwise, intrinsically sized
            windows are broken. */
-        if (height < 100)
+        if (height < 100) {
           height = 100;
-        if (winHeight > screenHeight)
+          winHeight = height + (sizeChromeHeight ? 0 : chromeHeight);
+        }
+        if (winHeight > screenHeight) {
           height = screenHeight - (sizeChromeHeight ? 0 : chromeHeight);
-        if (width < 100)
+        }
+        if (width < 100) {
           width = 100;
-        if (winWidth > screenWidth)
+          winWidth = width + (sizeChromeWidth ? 0 : chromeWidth);
+        }
+        if (winWidth > screenWidth) {
           width = screenWidth - (sizeChromeWidth ? 0 : chromeWidth);
+        }
       }
 
-      if (left + winWidth > screenLeft + screenWidth)
+      if (left + winWidth > screenLeft + screenWidth || left + winWidth < left) {
         left = screenLeft + screenWidth - winWidth;
-      if (left < screenLeft)
+      }
+      if (left < screenLeft) {
         left = screenLeft;
-      if (top + winHeight > screenTop + screenHeight)
+      }
+      if (top + winHeight > screenTop + screenHeight || top + winHeight < top) {
         top = screenTop + screenHeight - winHeight;
-      if (top < screenTop)
+      }
+      if (top < screenTop) {
         top = screenTop;
-      if (top != oldTop || left != oldLeft)
+      }
+      if (top != oldTop || left != oldLeft) {
         positionSpecified = true;
+      }
     }
   }
 

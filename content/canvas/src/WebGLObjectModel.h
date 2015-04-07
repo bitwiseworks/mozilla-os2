@@ -102,8 +102,8 @@ public:
     { }
 
     ~WebGLRefCountedObject() {
-        NS_ABORT_IF_FALSE(mWebGLRefCnt == 0, "destroying WebGL object still referenced by other WebGL objects");
-        NS_ABORT_IF_FALSE(mDeletionStatus == Deleted, "Derived class destructor must call DeleteOnce()");
+        MOZ_ASSERT(mWebGLRefCnt == 0, "destroying WebGL object still referenced by other WebGL objects");
+        MOZ_ASSERT(mDeletionStatus == Deleted, "Derived class destructor must call DeleteOnce()");
     }
 
     // called by WebGLRefPtr
@@ -113,7 +113,7 @@ public:
 
     // called by WebGLRefPtr
     void WebGLRelease() {
-        NS_ABORT_IF_FALSE(mWebGLRefCnt > 0, "releasing WebGL object with WebGL refcnt already zero");
+        MOZ_ASSERT(mWebGLRefCnt > 0, "releasing WebGL object with WebGL refcnt already zero");
         --mWebGLRefCnt;
         MaybeDelete();
     }
@@ -215,12 +215,12 @@ public:
     }
 
     T* operator->() const {
-        NS_ABORT_IF_FALSE(mRawPtr != 0, "You can't dereference a nullptr WebGLRefPtr with operator->()!");
+        MOZ_ASSERT(mRawPtr != 0, "You can't dereference a nullptr WebGLRefPtr with operator->()!");
         return get();
     }
 
     T& operator*() const {
-        NS_ABORT_IF_FALSE(mRawPtr != 0, "You can't dereference a nullptr WebGLRefPtr with operator*()!");
+        MOZ_ASSERT(mRawPtr != 0, "You can't dereference a nullptr WebGLRefPtr with operator*()!");
         return *get();
     }
 
@@ -280,16 +280,16 @@ public:
     WebGLRectangleObject()
         : mWidth(0), mHeight(0) { }
 
-    WebGLRectangleObject(WebGLsizei width, WebGLsizei height)
+    WebGLRectangleObject(GLsizei width, GLsizei height)
         : mWidth(width), mHeight(height) { }
 
-    WebGLsizei Width() const { return mWidth; }
-    void width(WebGLsizei value) { mWidth = value; }
+    GLsizei Width() const { return mWidth; }
+    void width(GLsizei value) { mWidth = value; }
 
-    WebGLsizei Height() const { return mHeight; }
-    void height(WebGLsizei value) { mHeight = value; }
+    GLsizei Height() const { return mHeight; }
+    void height(GLsizei value) { mHeight = value; }
 
-    void setDimensions(WebGLsizei width, WebGLsizei height) {
+    void setDimensions(GLsizei width, GLsizei height) {
         mWidth = width;
         mHeight = height;
     }
@@ -305,12 +305,12 @@ public:
     }
 
     bool HasSameDimensionsAs(const WebGLRectangleObject& other) const {
-        return Width() == other.Width() && Height() == other.Height(); 
+        return Width() == other.Width() && Height() == other.Height();
     }
 
 protected:
-    WebGLsizei mWidth;
-    WebGLsizei mHeight;
+    GLsizei mWidth;
+    GLsizei mHeight;
 };
 
 }// namespace mozilla
@@ -329,8 +329,7 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
                             const char* aName,
                             uint32_t aFlags = 0)
 {
-  CycleCollectionNoteEdgeName(aCallback, aName, aFlags);
-  aCallback.NoteXPCOMChild(aField);
+  CycleCollectionNoteChild(aCallback, aField.get(), aName, aFlags);
 }
 
 #endif

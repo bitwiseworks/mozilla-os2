@@ -13,11 +13,11 @@
 
 #include <vector>
 
-#include "common_types.h"
-#include "common_video/interface/video_image.h"
-#include "modules/interface/module_common_types.h"
-#include "modules/video_coding/codecs/interface/video_codec_interface.h"
-#include "modules/video_coding/main/interface/video_coding_defines.h"
+#include "webrtc/common_types.h"
+#include "webrtc/common_video/interface/video_image.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/modules/video_coding/codecs/interface/video_codec_interface.h"
+#include "webrtc/modules/video_coding/main/interface/video_coding_defines.h"
 
 namespace webrtc
 {
@@ -37,12 +37,12 @@ public:
     /**
     *   Set render time in milliseconds
     */
-    void SetRenderTime(const WebRtc_Word64 renderTimeMs) {_renderTimeMs = renderTimeMs;}
+    void SetRenderTime(const int64_t renderTimeMs) {_renderTimeMs = renderTimeMs;}
 
     /**
     *   Set the encoded frame size
     */
-    void SetEncodedSize(WebRtc_UWord32 width, WebRtc_UWord32 height)
+    void SetEncodedSize(uint32_t width, uint32_t height)
                        { _encodedWidth  = width; _encodedHeight = height; }
     /**
     *   Get the encoded image
@@ -52,19 +52,19 @@ public:
     /**
     *   Get pointer to frame buffer
     */
-    const WebRtc_UWord8* Buffer() const {return _buffer;}
+    const uint8_t* Buffer() const {return _buffer;}
     /**
     *   Get frame length
     */
-    WebRtc_UWord32 Length() const {return _length;}
+    uint32_t Length() const {return _length;}
     /**
     *   Get frame timestamp (90kHz)
     */
-    WebRtc_UWord32 TimeStamp() const {return _timeStamp;}
+    uint32_t TimeStamp() const {return _timeStamp;}
     /**
     *   Get render time in milliseconds
     */
-    WebRtc_Word64 RenderTimeMs() const {return _renderTimeMs;}
+    int64_t RenderTimeMs() const {return _renderTimeMs;}
     /**
     *   Get frame type
     */
@@ -80,7 +80,7 @@ public:
     /**
     *   Payload type of the encoded payload
     */
-    WebRtc_UWord8 PayloadType() const { return _payloadType; }
+    uint8_t PayloadType() const { return _payloadType; }
     /**
     *   Get codec specific info.
     *   The returned pointer is only valid as long as the VCMEncodedFrame
@@ -90,8 +90,6 @@ public:
     const CodecSpecificInfo* CodecSpecific() const {return &_codecSpecificInfo;}
 
     const RTPFragmentationHeader* FragmentationHeader() const;
-
-    WebRtc_Word32 Store(VCMFrameStorageCallback& storeCallback) const;
 
     static webrtc::FrameType ConvertFrameType(VideoFrameType frameType);
     static VideoFrameType ConvertFrameType(webrtc::FrameType frameType);
@@ -106,20 +104,20 @@ protected:
     * is copied to the new buffer.
     * Buffer size is updated to minimumSize.
     */
-    WebRtc_Word32 VerifyAndAllocate(const WebRtc_UWord32 minimumSize);
+    int32_t VerifyAndAllocate(const uint32_t minimumSize);
 
     void Reset();
 
     void CopyCodecSpecific(const RTPVideoHeader* header);
 
-    WebRtc_Word64                 _renderTimeMs;
-    WebRtc_UWord8                 _payloadType;
+    int64_t                 _renderTimeMs;
+    uint8_t                 _payloadType;
     bool                          _missingFrame;
     CodecSpecificInfo             _codecSpecificInfo;
     webrtc::VideoCodecType        _codec;
     RTPFragmentationHeader        _fragmentation;
 };
 
-} // namespace webrtc
+}  // namespace webrtc
 
 #endif // WEBRTC_MODULES_VIDEO_CODING_ENCODED_FRAME_H_

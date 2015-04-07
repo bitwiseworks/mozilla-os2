@@ -12,15 +12,23 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'layout_printing'
 
-MODULE = 'layout'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsPagePrintTimer.cpp',
-    'nsPrintData.cpp',
-    'nsPrintEngine.cpp',
     'nsPrintObject.cpp',
     'nsPrintPreviewListener.cpp',
 ]
 
-LIBRARY_NAME = 'gkprinting_s'
+# These files cannot be built in unified mode because they force NSPR logging.
+SOURCES += [
+    'nsPrintData.cpp',
+    'nsPrintEngine.cpp',
+]
+
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'gklayout'
+LOCAL_INCLUDES += [
+    '../../content/base/src',
+    '../base',
+]
 

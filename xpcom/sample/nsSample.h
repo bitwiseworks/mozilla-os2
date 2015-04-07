@@ -3,6 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef nsSample_h
+#define nsSample_h
+
 /**
  * A sample of XPConnect. This file is the header of an implementation
  * nsSample of the nsISample interface.
@@ -87,7 +90,7 @@ public:
      * of wstring (wide string), the Unicode type.  If the world were a
      * perfect place, all normal strings in XPCOM interfaces would be unicode.
      * If this type had been specified as wstring, it would appear as
-     * PRUnichar * in C++, which is the NSPR type for unicode characters.
+     * char16_t * in C++, which is the NSPR type for unicode characters.
      */
     /* NS_IMETHOD Poke(const char* aValue); */
 
@@ -96,3 +99,5 @@ private:
 
     char* mValue;
 };
+
+#endif

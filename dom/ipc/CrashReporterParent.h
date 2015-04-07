@@ -3,12 +3,16 @@
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#ifndef mozilla_dom_CrashReporterParent_h
+#define mozilla_dom_CrashReporterParent_h
+
 #include "mozilla/dom/PCrashReporterParent.h"
 #include "mozilla/dom/TabMessageUtils.h"
-#include "nsXULAppAPI.h"
 #include "nsIFile.h"
 #ifdef MOZ_CRASHREPORTER
 #include "nsExceptionHandler.h"
+#include "nsDataHashtable.h"
 #endif
 
 namespace mozilla {
@@ -74,12 +78,15 @@ public:
 
  protected:
   virtual bool
-    RecvAnnotateCrashReport(const nsCString& key, const nsCString& data) {
+    RecvAnnotateCrashReport(const nsCString& key, const nsCString& data) MOZ_OVERRIDE {
     AnnotateCrashReport(key, data);
     return true;
   }
   virtual bool
-    RecvAppendAppNotes(const nsCString& data);
+    RecvAppendAppNotes(const nsCString& data) MOZ_OVERRIDE;
+  virtual mozilla::ipc::IProtocol*
+  CloneProtocol(Channel* aChannel,
+                mozilla::ipc::ProtocolCloneContext *aCtx) MOZ_OVERRIDE;
 
 #ifdef MOZ_CRASHREPORTER
   AnnotationTable mNotes;
@@ -119,7 +126,7 @@ CrashReporterParent::GenerateCrashReport(Toplevel* t,
                                          const AnnotationTable* processNotes)
 {
   nsCOMPtr<nsIFile> crashDump;
-  if (t->TakeMinidump(getter_AddRefs(crashDump), NULL) &&
+  if (t->TakeMinidump(getter_AddRefs(crashDump), nullptr) &&
       CrashReporter::GetIDFromMinidump(crashDump, mChildDumpID)) {
     return GenerateChildData(processNotes);
   }
@@ -149,3 +156,5 @@ CrashReporterParent::CreateCrashReporter(Toplevel* actor)
 
 } // namespace dom
 } // namespace mozilla
+
+#endif // mozilla_dom_CrashReporterParent_h

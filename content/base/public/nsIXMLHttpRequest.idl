@@ -16,21 +16,9 @@ interface nsIGlobalObject;
 interface nsIInputStream;
 interface nsIDOMBlob;
 
-%{C++
-// for jsval
-#include "jsapi.h"
-%}
-
-[scriptable, builtinclass, uuid(ac97e161-9f1d-4163-adc9-e9a59e18682c)]
+[scriptable, builtinclass, uuid(5ced7e7a-e2c3-4563-a57d-31b97ce64dc5)]
 interface nsIXMLHttpRequestEventTarget : nsIDOMEventTarget {
   // event handler attributes
-  [implicit_jscontext] attribute jsval onabort;
-  [implicit_jscontext] attribute jsval onerror;
-  [implicit_jscontext] attribute jsval onload;
-  [implicit_jscontext] attribute jsval onloadstart;
-  [implicit_jscontext] attribute jsval onprogress;
-  [implicit_jscontext] attribute jsval ontimeout;
-  [implicit_jscontext] attribute jsval onloadend;
 };
 
 [scriptable, builtinclass, uuid(df3796fa-d98a-4185-9dda-d2f2b56a5d38)]
@@ -343,7 +331,7 @@ interface nsIXMLHttpRequest : nsISupports
   readonly attribute boolean mozSystem;
 };
 
-[scriptable, uuid(840d0d00-e83e-4a29-b3c7-67e96e90a499)]
+[uuid(840d0d00-e83e-4a29-b3c7-67e96e90a499)]
 interface nsIXHRSendable : nsISupports {
   void getSendInfo(out nsIInputStream body,
                    out uint64_t contentLength,

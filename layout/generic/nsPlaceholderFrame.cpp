@@ -15,6 +15,7 @@
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
 #include "nsRenderingContext.h"
+#include "nsIFrameInlines.h"
 
 nsIFrame*
 NS_NewPlaceholderFrame(nsIPresShell* aPresShell, nsStyleContext* aContext,
@@ -24,6 +25,12 @@ NS_NewPlaceholderFrame(nsIPresShell* aPresShell, nsStyleContext* aContext,
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsPlaceholderFrame)
+
+#ifdef DEBUG
+NS_QUERYFRAME_HEAD(nsPlaceholderFrame)
+  NS_QUERYFRAME_ENTRY(nsPlaceholderFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
+#endif
 
 /* virtual */ nsSize
 nsPlaceholderFrame::GetMinSize(nsBoxLayoutState& aBoxLayoutState)
@@ -91,7 +98,7 @@ nsPlaceholderFrame::AddInlinePrefWidth(nsRenderingContext* aRenderingContext,
   }
 }
 
-NS_IMETHODIMP
+nsresult
 nsPlaceholderFrame::Reflow(nsPresContext*           aPresContext,
                            nsHTMLReflowMetrics&     aDesiredSize,
                            const nsHTMLReflowState& aReflowState,
@@ -102,7 +109,7 @@ nsPlaceholderFrame::Reflow(nsPresContext*           aPresContext,
   // If this is our first reflow, and our out-of-flow has already received its
   // first reflow (before us), complain.
   // XXXdholbert This "look for a previous continuation or IB-split sibling"
-  // code could use nsLayoutUtils::GetPrevContinuationOrSpecialSibling(), if
+  // code could use nsLayoutUtils::GetPrevContinuationOrIBSplitSibling(), if
   // we ever add a function like that. (We currently have a "Next" version.)
   if ((GetStateBits() & NS_FRAME_FIRST_REFLOW) &&
       !(mOutOfFlowFrame->GetStateBits() & NS_FRAME_FIRST_REFLOW)) {
@@ -115,7 +122,7 @@ nsPlaceholderFrame::Reflow(nsPresContext*           aPresContext,
     nsIFrame* ancestor = this;
     while ((ancestor = ancestor->GetParent())) {
       if (ancestor->GetPrevContinuation() ||
-          ancestor->Properties().Get(IBSplitSpecialPrevSibling())) {
+          ancestor->Properties().Get(IBSplitPrevSibling())) {
         isInContinuationOrIBSplit = true;
         break;
       }
@@ -131,8 +138,8 @@ nsPlaceholderFrame::Reflow(nsPresContext*           aPresContext,
 
   DO_GLOBAL_REFLOW_COUNT("nsPlaceholderFrame");
   DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
-  aDesiredSize.width = 0;
-  aDesiredSize.height = 0;
+  aDesiredSize.Width() = 0;
+  aDesiredSize.Height() = 0;
 
   aStatus = NS_FRAME_COMPLETE;
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
@@ -228,22 +235,23 @@ nsPlaceholderFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 }
 #endif // DEBUG || (MOZ_REFLOW_PERF_DSP && MOZ_REFLOW_PERF)
 
-#ifdef DEBUG
-NS_IMETHODIMP
+#ifdef DEBUG_FRAME_DUMP
+nsresult
 nsPlaceholderFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("Placeholder"), aResult);
 }
 
 void
-nsPlaceholderFrame::List(FILE* out, int32_t aIndent, uint32_t aFlags) const
+nsPlaceholderFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const
 {
-  ListGeneric(out, aIndent, aFlags);
+  nsCString str;
+  ListGeneric(str, aPrefix, aFlags);
 
   if (mOutOfFlowFrame) {
-    fprintf(out, " outOfFlowFrame=");
-    nsFrame::ListTag(out, mOutOfFlowFrame);
+    str += " outOfFlowFrame=";
+    nsFrame::ListTag(str, mOutOfFlowFrame);
   }
-  fputs("\n", out);
+  fprintf_stderr(out, "%s\n", str.get());
 }
-#endif // DEBUG
+#endif

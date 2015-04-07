@@ -67,6 +67,8 @@ extern "C" {
 
 #define NESTEGG_CODEC_VP8    0 /**< Track uses Google On2 VP8 codec. */
 #define NESTEGG_CODEC_VORBIS 1 /**< Track uses Xiph Vorbis codec. */
+#define NESTEGG_CODEC_VP9    2 /**< Track uses Google On2 VP9 codec. */
+#define NESTEGG_CODEC_OPUS   3 /**< Track uses Xiph Opus codec. */
 
 #define NESTEGG_VIDEO_MONO              0 /**< Track is mono video. */
 #define NESTEGG_VIDEO_STEREO_LEFT_RIGHT 1 /**< Track is side-by-side stereo video.  Left first. */
@@ -138,6 +140,8 @@ typedef struct {
   double rate;           /**< Sampling rate in Hz. */
   unsigned int channels; /**< Number of audio channels. */
   unsigned int depth;    /**< Bits per sample. */
+  uint64_t  codec_delay; /**< Nanoseconds that must be discarded from the start. */
+  uint64_t  seek_preroll;/**< Nanoseconds that must be discarded after a seek. */
 } nestegg_audio_params;
 
 /** Logging callback function pointer. */
@@ -272,6 +276,16 @@ int nestegg_track_video_params(nestegg * context, unsigned int track,
 int nestegg_track_audio_params(nestegg * context, unsigned int track,
                                nestegg_audio_params * params);
 
+/** Query the default frame duration for @a track.  For a video track, this
+    is typically the inverse of the video frame rate.
+    @param context  Stream context initialized by #nestegg_init.
+    @param track    Zero based track number.
+    @param duration Storage for the default duration in nanoseconds.
+    @retval  0 Success.
+    @retval -1 Error. */
+int nestegg_track_default_duration(nestegg * context, unsigned int track,
+                                   uint64_t * duration);
+
 /** Read a packet of media data.  A packet consists of one or more chunks of
     data associated with a single track.  nestegg_read_packet should be
     called in a loop while the return value is 1 to drive the stream parser
@@ -301,6 +315,13 @@ int nestegg_packet_track(nestegg_packet * packet, unsigned int * track);
     @retval -1 Error. */
 int nestegg_packet_tstamp(nestegg_packet * packet, uint64_t * tstamp);
 
+/** Query the duration in nanoseconds of @a packet.
+    @param packet Packet initialized by #nestegg_read_packet.
+    @param duration Storage for the queried duration in nanoseconds.
+    @retval  0 Success.
+    @retval -1 Error. */
+int nestegg_packet_duration(nestegg_packet * packet, uint64_t * duration);
+
 /** Query the number of data chunks contained in @a packet.
     @param packet Packet initialized by #nestegg_read_packet.
     @param count  Storage for the queried timestamp in nanoseconds.
@@ -319,6 +340,14 @@ int nestegg_packet_count(nestegg_packet * packet, unsigned int * count);
 int nestegg_packet_data(nestegg_packet * packet, unsigned int item,
                         unsigned char ** data, size_t * length);
 
+/** Returns discard_padding for given packet
+    @param packet  Packet initialized by #nestegg_read_packet.
+    @param discard_padding pointer to store discard padding in.
+    @retval  0 Success.
+    @retval -1 Error. */
+int nestegg_packet_discard_padding(nestegg_packet * packet,
+                                   int64_t * discard_padding);
+
 /** Query the presence of cues.
     @param context  Stream context initialized by #nestegg_init.
     @retval 0 The media has no cues.
@@ -333,6 +362,13 @@ int nestegg_has_cues(nestegg * context);
  * @retval 0 The file is not a WebM file.
  * @retval 1 The file is a WebM file. */
 int nestegg_sniff(unsigned char const * buffer, size_t length);
+
+/**
+ * Set the underlying allocation function for library allocations.
+ *
+ * @param realloc_func The desired function.
+ */
+void nestegg_set_halloc_func(void * (* realloc_func)(void *, size_t));
 
 #if defined(__cplusplus)
 }

@@ -14,11 +14,10 @@
 #include "nsString.h"
 #include "nsTArray.h"
 #include "mozilla/dom/TypedArray.h"
-#include <utility>
+#include "mozilla/MemoryReporting.h"
 
 namespace mozilla {
 
-class MediaDecoderReader;
 namespace dom {
 class AudioBuffer;
 class AudioContext;
@@ -32,7 +31,6 @@ struct WebAudioDecodeJob MOZ_FINAL
   // The callbacks are only necessary for asynchronous operation.
   WebAudioDecodeJob(const nsACString& aContentType,
                     dom::AudioContext* aContext,
-                    const dom::ArrayBuffer& aBuffer,
                     dom::DecodeSuccessCallback* aSuccessCallback = nullptr,
                     dom::DecodeErrorCallback* aFailureCallback = nullptr);
   ~WebAudioDecodeJob();
@@ -56,8 +54,8 @@ struct WebAudioDecodeJob MOZ_FINAL
 
   bool AllocateBuffer();
 
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
-  JS::Heap<JSObject*> mArrayBuffer;
   nsCString mContentType;
   uint32_t mWriteIndex;
   nsRefPtr<dom::AudioContext> mContext;
@@ -79,10 +77,13 @@ public:
   void AsyncDecodeMedia(const char* aContentType, uint8_t* aBuffer,
                         uint32_t aLength, WebAudioDecodeJob& aDecodeJob);
 
-  bool SyncDecodeMedia(const char* aContentType, uint8_t* aBuffer,
-                       uint32_t aLength, WebAudioDecodeJob& aDecodeJob);
-
+  ~MediaBufferDecoder() { Shutdown(); }
   void Shutdown();
+
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+  {
+    return 0;
+  }
 
 private:
   bool EnsureThreadPoolInitialized();

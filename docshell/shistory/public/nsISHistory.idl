@@ -5,7 +5,7 @@
 
 #include "nsISupports.idl"
 
-interface nsIHistoryEntry;
+interface nsISHEntry;
 interface nsISHistoryListener;
 interface nsISimpleEnumerator;
 /**
@@ -22,12 +22,12 @@ interface nsISimpleEnumerator;
 
 %{C++
 #define NS_SHISTORY_CID \
-{0x7294fe9c, 0x14d8, 0x11d5, {0x98, 0x82, 0x00, 0xC0, 0x4f, 0xa0, 0x2f, 0x40}}
+{0x7b807041, 0xe60a, 0x4384, {0x93, 0x5f, 0xaf, 0x30, 0x61, 0xd8, 0xb8, 0x15}}
 
 #define NS_SHISTORY_CONTRACTID "@mozilla.org/browser/shistory;1"
 %}
 
-[scriptable, uuid(ef2c9bcb-96b8-4095-933a-cb1c506f2c58)]
+[scriptable, uuid(7b807041-e60a-4384-935f-af3061d8b815)]
 interface nsISHistory: nsISupports
 {
   /**
@@ -63,6 +63,7 @@ interface nsISHistory: nsISupports
    * given index.
    *
    * @param index             The index value whose entry is requested.
+   *                          The oldest entry is located at index == 0.
    * @param modifyIndex       A boolean flag that indicates if the current
    *                          index of session history should be modified 
    *                          to the parameter index.
@@ -72,7 +73,7 @@ interface nsISHistory: nsISupports
    *                          <code>NS_ERROR_FAILURE</code> Error in obtaining
    *                          history entry for the given index.
    */
-   nsIHistoryEntry getEntryAtIndex(in long index, in boolean modifyIndex);
+   nsISHEntry getEntryAtIndex(in long index, in boolean modifyIndex);
 
 
   /**
@@ -135,15 +136,27 @@ interface nsISHistory: nsISupports
    *           by step #1 to obtain handle to the next object in the list. 
    *           The object returned by this step is of type nsISupports.
    *        3) Perform a QueryInterface on the object returned by step #2 
-   *           to nsIHistoryEntry.
-   *        4) Use nsIHistoryEntry to access properties of each history entry. 
+   *           to nsISHEntry.
+   *        4) Use nsISHEntry to access properties of each history entry. 
    *
    * @see nsISimpleEnumerator
-   * @see nsIHistoryEntry
+   * @see nsISHEntry
    * @see QueryInterface()
    * @see do_QueryInterface()
    */
    readonly attribute nsISimpleEnumerator SHistoryEnumerator;
 
    void reloadCurrentEntry();
+
+   /**
+   * Called to obtain the index to a given history entry.
+   *
+   * @param aEntry            The entry to obtain the index of.
+   *
+   * @return                  <code>NS_OK</code> index for the history entry
+   *                          is obtained successfully.
+   *                          <code>NS_ERROR_FAILURE</code> Error in obtaining
+   *                          index for the given history entry.
+   */
+   long getIndexOfEntry(in nsISHEntry aEntry);
 };

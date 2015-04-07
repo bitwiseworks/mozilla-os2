@@ -53,9 +53,12 @@ function fileImported(aStatus, aFileContent)
   is(gScratchpad.getText(), gFileContent,
      "the editor content is correct");
 
+  is(gScratchpad.dirty, false,
+     "the editor marks imported file as saved");
+
   // Save the file after changes.
   gFileContent += "// omg, saved!";
-  gScratchpad.setText(gFileContent);
+  gScratchpad.editor.setText(gFileContent);
 
   gScratchpad.exportToFile(gFile.QueryInterface(Ci.nsILocalFile), true, true,
                           fileExported);
@@ -70,7 +73,7 @@ function fileExported(aStatus)
 
   // Attempt another file save, with confirmation which returns false.
   gFileContent += "// omg, saved twice!";
-  gScratchpad.setText(gFileContent);
+  gScratchpad.editor.setText(gFileContent);
 
   let oldConfirm = gScratchpadWindow.confirm;
   let askedConfirmation = false;

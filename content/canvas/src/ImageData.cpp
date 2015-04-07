@@ -6,8 +6,8 @@
 
 #include "mozilla/dom/ImageData.h"
 
-#include "nsDOMClassInfoID.h"
-#include "nsContentUtils.h"
+#include "mozilla/CheckedInt.h"
+#include "mozilla/HoldDropJSObjects.h"
 #include "mozilla/dom/ImageDataBinding.h"
 
 #include "jsapi.h"
@@ -17,6 +17,8 @@ namespace dom {
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(ImageData)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(ImageData)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(ImageData)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ImageData)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
@@ -34,10 +36,65 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ImageData)
   tmp->DropData();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
+//static
+ImageData*
+ImageData::Constructor(const GlobalObject& aGlobal,
+                       const uint32_t aWidth,
+                       const uint32_t aHeight,
+                       ErrorResult& aRv)
+{
+  if (aWidth == 0 || aHeight == 0) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return nullptr;
+  }
+  CheckedInt<uint32_t> length = CheckedInt<uint32_t>(aWidth) * aHeight * 4;
+  if (!length.isValid()) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return nullptr;
+  }
+  js::AssertSameCompartment(aGlobal.GetContext(), aGlobal.Get());
+  JSObject* data = Uint8ClampedArray::Create(aGlobal.GetContext(),
+                                             length.value());
+  if (!data) {
+    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return nullptr;
+  }
+  return new ImageData(aWidth, aHeight, *data);
+}
+
+//static
+ImageData*
+ImageData::Constructor(const GlobalObject& aGlobal,
+                       const Uint8ClampedArray& aData,
+                       const uint32_t aWidth,
+                       const Optional<uint32_t>& aHeight,
+                       ErrorResult& aRv)
+{
+  aData.ComputeLengthAndData();
+
+  uint32_t length = aData.Length();
+  if (length == 0 || length % 4) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return nullptr;
+  }
+  length /= 4;
+  if (aWidth == 0) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return nullptr;
+  }
+  uint32_t height = length / aWidth;
+  if (length != aWidth * height ||
+      (aHeight.WasPassed() && aHeight.Value() != height)) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return nullptr;
+  }
+  return new ImageData(aWidth, height, *aData.Obj());
+}
+
 void
 ImageData::HoldData()
 {
-  NS_HOLD_JS_OBJECTS(this, ImageData);
+  mozilla::HoldJSObjects(this);
 }
 
 void
@@ -45,14 +102,14 @@ ImageData::DropData()
 {
   if (mData) {
     mData = nullptr;
-    NS_DROP_JS_OBJECTS(this, ImageData);
+    mozilla::DropJSObjects(this);
   }
 }
 
 JSObject*
-ImageData::WrapObject(JSContext* cx, JS::Handle<JSObject*> scope)
+ImageData::WrapObject(JSContext* cx)
 {
-  return ImageDataBinding::Wrap(cx, scope, this);
+  return ImageDataBinding::Wrap(cx, this);
 }
 
 } // namespace dom

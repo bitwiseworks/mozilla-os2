@@ -4,16 +4,25 @@
 #include "nsComponentManagerUtils.h"
 
 #include <stdio.h>
-#include <algorithm>
 
 //////////////////////////////////////////////////
 // TestConverter
 //////////////////////////////////////////////////
 
-NS_IMPL_ISUPPORTS3(TestConverter,
-                   nsIStreamConverter,
-                   nsIStreamListener,
-                   nsIRequestObserver)
+#define NS_TESTCONVERTER_CID                         \
+{ /* B8A067B0-4450-11d3-A16E-0050041CAF44 */         \
+    0xb8a067b0,                                      \
+    0x4450,                                          \
+    0x11d3,                                          \
+    {0xa1, 0x6e, 0x00, 0x50, 0x04, 0x1c, 0xaf, 0x44} \
+}
+
+NS_DEFINE_CID(kTestConverterCID, NS_TESTCONVERTER_CID);
+
+NS_IMPL_ISUPPORTS(TestConverter,
+                  nsIStreamConverter,
+                  nsIStreamListener,
+                  nsIRequestObserver)
 
 TestConverter::TestConverter() {
 }
@@ -77,12 +86,6 @@ TestConverter::AsyncConvertData(const char *aFromType,
     toType = aToType;
 
     return NS_OK; 
-}
-
-static inline uint32_t
-saturated(uint64_t aValue)
-{
-    return (uint32_t) std::min(aValue, (uint64_t) UINT32_MAX);
 }
 
 // nsIStreamListener method

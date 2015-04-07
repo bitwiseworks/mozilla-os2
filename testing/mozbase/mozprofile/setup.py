@@ -5,25 +5,17 @@
 import sys
 from setuptools import setup
 
-PACKAGE_VERSION = '0.9'
+PACKAGE_NAME = 'mozprofile'
+PACKAGE_VERSION = '0.21'
 
 # we only support python 2 right now
 assert sys.version_info[0] == 2
 
-deps = ["ManifestDestiny >= 0.5.4",
-        "mozfile >= 0.6"]
-# version-dependent dependencies
-try:
-    import json
-except ImportError:
-    deps.append('simplejson')
-try:
-    import sqlite3
-except ImportError:
-    deps.append('pysqlite')
+deps = ['ManifestDestiny >= 0.5.4',
+        'mozfile >= 1.0',
+        'mozlog']
 
-
-setup(name='mozprofile',
+setup(name=PACKAGE_NAME,
       version=PACKAGE_VERSION,
       description="Library to create and modify Mozilla application profiles",
       long_description="see http://mozbase.readthedocs.org/",
@@ -44,10 +36,12 @@ setup(name='mozprofile',
       include_package_data=True,
       zip_safe=False,
       install_requires=deps,
-      tests_require=['mozhttpd', 'mozfile'],
+      tests_require=['mozhttpd'],
       entry_points="""
       # -*- Entry points: -*-
       [console_scripts]
       mozprofile = mozprofile:cli
+      view-profile = mozprofile:view_profile
+      diff-profiles = mozprofile:diff_profiles
       """,
     )

@@ -10,9 +10,6 @@
 #include "nsString.h"
 #include "nsNavHistory.h"
 #include "mozilla/Services.h"
-#if defined(XP_OS2)
-#include "nsIRandomGenerator.h"
-#endif
 
 // The length of guids that are used by history and bookmarks.
 #define GUID_LENGTH 12
@@ -23,7 +20,7 @@ namespace places {
 ////////////////////////////////////////////////////////////////////////////////
 //// AsyncStatementCallback
 
-NS_IMPL_ISUPPORTS1(
+NS_IMPL_ISUPPORTS(
   AsyncStatementCallback
 , mozIStorageStatementCallback
 )
@@ -192,7 +189,7 @@ void
 GetReversedHostname(const nsString& aForward, nsString& aRevHost)
 {
   ReverseString(aForward, aRevHost);
-  aRevHost.Append(PRUnichar('.'));
+  aRevHost.Append(char16_t('.'));
 }
 
 void
@@ -210,8 +207,8 @@ Base64urlEncode(const uint8_t* aBytes,
                 uint32_t aNumBytes,
                 nsCString& _result)
 {
-  // SetLength does not set aside space for NULL termination.  PL_Base64Encode
-  // will not NULL terminate, however, nsCStrings must be NULL terminated.  As a
+  // SetLength does not set aside space for null termination.  PL_Base64Encode
+  // will not null terminate, however, nsCStrings must be null terminated.  As a
   // result, we set the capacity to be one greater than what we need, and the
   // length to our desired length.
   uint32_t length = (aNumBytes + 2) / 3 * 4; // +2 due to integer math.
@@ -229,10 +226,16 @@ Base64urlEncode(const uint8_t* aBytes,
 }
 
 #ifdef XP_WIN
+} // namespace places
+} // namespace mozilla
+
 // Included here because windows.h conflicts with the use of mozIStorageError
-// above.
+// above, but make sure that these are not included inside mozilla::places.
 #include <windows.h>
 #include <wincrypt.h>
+
+namespace mozilla {
+namespace places {
 #endif
 
 static
@@ -264,17 +267,6 @@ GenerateRandomBytes(uint32_t aSize,
     (void)PR_Close(urandom);
   }
   return rv;
-#elif defined(XP_OS2)
-  nsCOMPtr<nsIRandomGenerator> rg =
-    do_GetService("@mozilla.org/security/random-generator;1");
-  NS_ENSURE_STATE(rg);
-
-  uint8_t* temp;
-  nsresult rv = rg->GenerateRandomBytes(aSize, &temp);
-  NS_ENSURE_SUCCESS(rv, rv);
-  memcpy(_buffer, temp, aSize);
-  NS_Free(temp);
-  return NS_OK;
 #endif
 }
 
@@ -378,7 +370,7 @@ PlacesEvent::Notify()
   }
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(
+NS_IMPL_ISUPPORTS(
   PlacesEvent
 , nsIRunnable
 )

@@ -2,22 +2,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH     := @DEPTH@
-topsrcdir := @top_srcdir@
-srcdir    := @srcdir@
-VPATH     := @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 # Definitions used by constants.js.
-weave_version := 1.26.0
+weave_version := 1.33.0
 weave_id      := {340c2bbc-ce74-4362-90b5-7c26312808ef}
 
 # Preprocess files.
 SYNC_PP := modules/constants.js
 SYNC_PP_FLAGS := \
  -Dweave_version=$(weave_version) \
- -Dweave_id=$(weave_id)
+ -Dweave_id='$(weave_id)'
 SYNC_PP_PATH = $(FINAL_TARGET)/modules/services-sync
 PP_TARGETS += SYNC_PP
 
@@ -25,7 +18,9 @@ PP_TARGETS += SYNC_PP
 sync_modules := \
   addonsreconciler.js \
   addonutils.js \
+  browserid_identity.js \
   engines.js \
+  healthreport.jsm \
   identity.js \
   jpakeclient.js \
   keys.js \
@@ -45,7 +40,6 @@ sync_modules := \
 # copied as-is.
 sync_engine_modules := \
   addons.js \
-  apps.js \
   bookmarks.js \
   clients.js \
   forms.js \
@@ -57,6 +51,7 @@ sync_engine_modules := \
 
 sync_stage_modules := \
   cluster.js \
+  declined.js \
   enginesync.js \
   $(NULL)
 
@@ -64,11 +59,7 @@ sync_testing_modules := \
   fakeservices.js \
   rotaryengine.js \
   utils.js \
-  $(NULL)
-
-EXTRA_COMPONENTS := \
-  SyncComponents.manifest \
-  Weave.js \
+  fxa_utils.js \
   $(NULL)
 
 PREF_JS_EXPORTS := $(srcdir)/services-sync.js
@@ -88,5 +79,3 @@ INSTALL_TARGETS += SYNC_STAGES
 
 TESTING_JS_MODULES := $(addprefix modules-testing/,$(sync_testing_modules))
 TESTING_JS_MODULE_DIR := services/sync
-
-include $(topsrcdir)/config/rules.mk

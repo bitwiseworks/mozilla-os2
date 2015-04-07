@@ -66,6 +66,9 @@
 
 #define CC_KFACTOR_STAT_LEN   (256)
 
+/* Should be enough for any reasonable use-case */
+#define MAX_SSRCS_PER_MEDIA_LINE 16
+#define MAX_PTS_PER_MEDIA_LINE 16
 
 /**
  *  vcm_tones_t
@@ -185,6 +188,9 @@ typedef struct
     {
       int width;
       int height;
+      uint32_t rtcp_fb_types;
+      uint32_t max_fs; /* Max frame size */
+      uint32_t max_fr; /* Max frame rate */
     } video;
   };
 
@@ -331,8 +337,22 @@ typedef struct vcm_audioAttrs_t_ {
 typedef struct vcm_attrs_t_ {
   cc_boolean         mute;
   cc_boolean         is_video;
+  cc_boolean         rtcp_mux;
+  cc_boolean         audio_level;
+  uint8_t            audio_level_id;
   vcm_audioAttrs_t audio; /**< audio line attribs */
   vcm_videoAttrs_t video; /**< Video Atrribs */
+  uint32_t bundle_level; /**< Where bundle transport info lives, if any */
+  /* Some stuff for assisting in stream correlation for bundle */
+  /** RTP correlator specified here:
+   * http://tools.ietf.org/html/draft-roach-mmusic-unified-plan */
+  cc_uint32_t        bundle_stream_correlator;
+  cc_uint32_t        ssrcs[MAX_SSRCS_PER_MEDIA_LINE];
+  cc_uint8_t         num_ssrcs;
+  /** Payload type ids that appear on this m-line, but no other. Used as a
+   * last-ditch correlator for bundle */
+  cc_uint8_t         unique_payload_types[MAX_PTS_PER_MEDIA_LINE];
+  cc_uint8_t         num_unique_payload_types;
 } vcm_mediaAttrs_t;
 
 //Using C++ for gips. This is required for gips.
@@ -583,6 +603,7 @@ int vcmRxStart(cc_mcapid_t mcap_id,
  *  @param[in]   peerconnection - the peerconnection in use
  *  @param[in]   num_payloads  - number of codecs negotiated
  *  @param[in]   payloads      - list of negotiated codec details
+ *  @param[in]   setup_t       - whether playing client or server role
  *  @param[in]   fingerprint_alg - the DTLS fingerprint algorithm
  *  @param[in]   fingerprint  - the DTLS fingerprint
  *  @param[in]   attrs        - media attributes
@@ -601,6 +622,7 @@ int vcmRxStartICE(cc_mcapid_t mcap_id,
         const char *peerconnection,
         int num_payloads,
         const vcm_payload_info_t* payloads,
+        sdp_setup_type_e setup_type,
         const char *fingerprint_alg,
         const char *fingerprint,
         vcm_mediaAttrs_t *attrs);
@@ -661,6 +683,7 @@ int vcmTxStart(cc_mcapid_t mcap_id,
  *  @param[in]   peerconnection - the peerconnection in use
  *  @param[in]   payload      - payload information
  *  @param[in]   tos          - bit marking
+ *  @param[in]   setup_type   - whether playing client or server role
  *  @param[in]   fingerprint_alg - the DTLS fingerprint algorithm
  *  @param[in]   fingerprint  - the DTLS fingerprint
  *  @param[in]   attrs        - media attributes
@@ -679,6 +702,7 @@ int vcmTxStart(cc_mcapid_t mcap_id,
         const char *peerconnection,
         const vcm_payload_info_t *payload,
         short tos,
+        sdp_setup_type_e setup_type,
         const char *fingerprint_alg,
         const char *fingerprint,
         vcm_mediaAttrs_t *attrs);
@@ -1032,6 +1056,18 @@ int vcmGetILBCMode();
  *
  */
 int vcmOnSdpParseError(const char *peercconnection, const char *message);
+
+/**
+ * vcmDisableRtcpComponent
+ *
+ * If we are doing rtcp-mux we need to disable component number 2 in the ICE
+ * layer.  Otherwise we will wait for it to connect when it is unused
+ */
+int vcmDisableRtcpComponent(const char *peerconnection, int level);
+
+short vcmGetVideoMaxFs(uint16_t codec, int32_t *max_fs);
+
+short vcmGetVideoMaxFr(uint16_t codec, int32_t *max_fs);
 
 //Using C++ for gips. This is the end of extern "C" above.
 #ifdef __cplusplus

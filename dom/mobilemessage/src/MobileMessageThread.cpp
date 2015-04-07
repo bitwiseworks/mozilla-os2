@@ -8,10 +8,8 @@
 #include "jsapi.h"           // For OBJECT_TO_JSVAL and JS_NewDateObjectMsec
 #include "jsfriendapi.h"     // For js_DateGetMsecSinceEpoch
 #include "nsJSUtils.h"       // For nsDependentJSString
-#include "nsContentUtils.h"  // For nsTArrayHelpers.h
 #include "nsTArrayHelpers.h" // For nsTArrayToJSArray
-#include "Constants.h"       // For MessageType
-
+#include "mozilla/dom/mobilemessage/Constants.h" // For MessageType
 
 using namespace mozilla::dom::mobilemessage;
 
@@ -30,11 +28,12 @@ NS_IMPL_ADDREF(MobileMessageThread)
 NS_IMPL_RELEASE(MobileMessageThread)
 
 /* static */ nsresult
-MobileMessageThread::Create(const uint64_t aId,
+MobileMessageThread::Create(uint64_t aId,
                             const JS::Value& aParticipants,
-                            const JS::Value& aTimestamp,
+                            uint64_t aTimestamp,
+                            const nsAString& aLastMessageSubject,
                             const nsAString& aBody,
-                            const uint64_t aUnreadCount,
+                            uint64_t aUnreadCount,
                             const nsAString& aLastMessageType,
                             JSContext* aCx,
                             nsIDOMMozMobileMessageThread** aThread)
@@ -45,6 +44,7 @@ MobileMessageThread::Create(const uint64_t aId,
   // to them.
   ThreadData data;
   data.id() = aId;
+  data.lastMessageSubject().Assign(aLastMessageSubject);
   data.body().Assign(aBody);
   data.unreadCount() = aUnreadCount;
 
@@ -60,13 +60,13 @@ MobileMessageThread::Create(const uint64_t aId,
     }
 
     uint32_t length;
-    JS_ALWAYS_TRUE(JS_GetArrayLength(aCx, obj, &length));
+    MOZ_ALWAYS_TRUE(JS_GetArrayLength(aCx, obj, &length));
     NS_ENSURE_TRUE(length, NS_ERROR_INVALID_ARG);
 
     for (uint32_t i = 0; i < length; ++i) {
       JS::Rooted<JS::Value> val(aCx);
 
-      if (!JS_GetElement(aCx, obj, i, val.address()) || !val.isString()) {
+      if (!JS_GetElement(aCx, obj, i, &val) || !val.isString()) {
         return NS_ERROR_INVALID_ARG;
       }
 
@@ -76,25 +76,10 @@ MobileMessageThread::Create(const uint64_t aId,
     }
   }
 
-  // We support both a Date object and a millisecond timestamp as a number.
-  if (aTimestamp.isObject()) {
-    JS::Rooted<JSObject*> obj(aCx, &aTimestamp.toObject());
-    if (!JS_ObjectIsDate(aCx, obj)) {
-      return NS_ERROR_INVALID_ARG;
-    }
-    data.timestamp() = js_DateGetMsecSinceEpoch(obj);
-  } else {
-    if (!aTimestamp.isNumber()) {
-      return NS_ERROR_INVALID_ARG;
-    }
-    double number = aTimestamp.toNumber();
-    if (static_cast<uint64_t>(number) != number) {
-      return NS_ERROR_INVALID_ARG;
-    }
-    data.timestamp() = static_cast<uint64_t>(number);
-  }
+  // Set |timestamp|;
+  data.timestamp() = aTimestamp;
 
-  // Set |aLastMessageType|.
+  // Set |lastMessageType|.
   {
     MessageType lastMessageType;
     if (aLastMessageType.Equals(MESSAGE_TYPE_SMS)) {
@@ -112,13 +97,15 @@ MobileMessageThread::Create(const uint64_t aId,
   return NS_OK;
 }
 
-MobileMessageThread::MobileMessageThread(const uint64_t aId,
+MobileMessageThread::MobileMessageThread(uint64_t aId,
                                          const nsTArray<nsString>& aParticipants,
-                                         const uint64_t aTimestamp,
+                                         uint64_t aTimestamp,
+                                         const nsString& aLastMessageSubject,
                                          const nsString& aBody,
-                                         const uint64_t aUnreadCount,
+                                         uint64_t aUnreadCount,
                                          MessageType aLastMessageType)
-  : mData(aId, aParticipants, aTimestamp, aBody, aUnreadCount, aLastMessageType)
+  : mData(aId, aParticipants, aTimestamp, aLastMessageSubject, aBody,
+          aUnreadCount, aLastMessageType)
 {
   MOZ_ASSERT(aParticipants.Length());
 }
@@ -133,6 +120,13 @@ NS_IMETHODIMP
 MobileMessageThread::GetId(uint64_t* aId)
 {
   *aId = mData.id();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+MobileMessageThread::GetLastMessageSubject(nsAString& aLastMessageSubject)
+{
+  aLastMessageSubject = mData.lastMessageSubject();
   return NS_OK;
 }
 
@@ -152,25 +146,21 @@ MobileMessageThread::GetUnreadCount(uint64_t* aUnreadCount)
 
 NS_IMETHODIMP
 MobileMessageThread::GetParticipants(JSContext* aCx,
-                                     JS::Value* aParticipants)
+                                     JS::MutableHandle<JS::Value> aParticipants)
 {
   JS::Rooted<JSObject*> obj(aCx);
 
   nsresult rv = nsTArrayToJSArray(aCx, mData.participants(), obj.address());
   NS_ENSURE_SUCCESS(rv, rv);
 
-  aParticipants->setObject(*obj);
+  aParticipants.setObject(*obj);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-MobileMessageThread::GetTimestamp(JSContext* aCx,
-                                  JS::Value* aDate)
+MobileMessageThread::GetTimestamp(DOMTimeStamp* aDate)
 {
-  JSObject *obj = JS_NewDateObjectMsec(aCx, mData.timestamp());
-  NS_ENSURE_TRUE(obj, NS_ERROR_FAILURE);
-
-  *aDate = OBJECT_TO_JSVAL(obj);
+  *aDate = mData.timestamp();
   return NS_OK;
 }
 
@@ -186,8 +176,7 @@ MobileMessageThread::GetLastMessageType(nsAString& aLastMessageType)
       break;
     case eMessageType_EndGuard:
     default:
-      MOZ_NOT_REACHED("We shouldn't get any other message type!");
-      return NS_ERROR_UNEXPECTED;
+      MOZ_CRASH("We shouldn't get any other message type!");
   }
 
   return NS_OK;

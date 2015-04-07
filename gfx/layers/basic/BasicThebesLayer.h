@@ -6,20 +6,33 @@
 #ifndef GFX_BASICTHEBESLAYER_H
 #define GFX_BASICTHEBESLAYER_H
 
-#include "mozilla/layers/PLayerTransactionParent.h"
-#include "BasicLayersImpl.h"
-#include "mozilla/layers/ContentClient.h"
+#include "Layers.h"                     // for ThebesLayer, LayerManager, etc
+#include "RotatedBuffer.h"              // for RotatedContentBuffer, etc
+#include "BasicImplData.h"              // for BasicImplData
+#include "BasicLayers.h"                // for BasicLayerManager
+#include "gfxPoint.h"                   // for gfxPoint
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/gfx/BasePoint.h"      // for BasePoint
+#include "mozilla/layers/ContentClient.h"  // for ContentClientBasic
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
+#include "nsRegion.h"                   // for nsIntRegion
+class gfxContext;
 
 namespace mozilla {
 namespace layers {
 
+class ReadbackProcessor;
+
 class BasicThebesLayer : public ThebesLayer, public BasicImplData {
 public:
-  typedef ThebesLayerBuffer::PaintState PaintState;
-  typedef ThebesLayerBuffer::ContentType ContentType;
+  typedef RotatedContentBuffer::PaintState PaintState;
+  typedef RotatedContentBuffer::ContentType ContentType;
 
   BasicThebesLayer(BasicLayerManager* aLayerManager) :
-    ThebesLayer(aLayerManager, static_cast<BasicImplData*>(this)),
+    ThebesLayer(aLayerManager,
+                static_cast<BasicImplData*>(MOZ_THIS_IN_INITIALIZER_LIST())),
     mContentClient(nullptr)
   {
     MOZ_COUNT_CTOR(BasicThebesLayer);
@@ -40,7 +53,7 @@ public:
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
     mInvalidRegion.Or(mInvalidRegion, aRegion);
-    mInvalidRegion.SimplifyOutward(10);
+    mInvalidRegion.SimplifyOutward(20);
     mValidRegion.Sub(mValidRegion, mInvalidRegion);
   }
 
@@ -50,6 +63,9 @@ public:
                            void* aCallbackData,
                            ReadbackProcessor* aReadback);
 
+  virtual void Validate(LayerManager::DrawThebesLayerCallback aCallback,
+                        void* aCallbackData) MOZ_OVERRIDE;
+
   virtual void ClearCachedResources()
   {
     if (mContentClient) {
@@ -57,13 +73,13 @@ public:
     }
     mValidRegion.SetEmpty();
   }
-  
-  virtual void ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface)
+
+  virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface)
   {
     if (!BasicManager()->IsRetained()) {
       // Don't do any snapping of our transform, since we're just going to
       // draw straight through without intermediate buffers.
-      mEffectiveTransform = GetLocalTransform()*aTransformToSurface;
+      mEffectiveTransform = GetLocalTransform() * aTransformToSurface;
       if (gfxPoint(0,0) != mResidualTranslation) {
         mResidualTranslation = gfxPoint(0,0);
         mValidRegion.SetEmpty();
@@ -86,6 +102,7 @@ protected:
               const nsIntRegion& aExtendedRegionToDraw,
               const nsIntRegion& aRegionToInvalidate,
               bool aDidSelfCopy,
+              DrawRegionClip aClip,
               LayerManager::DrawThebesLayerCallback aCallback,
               void* aCallbackData)
   {
@@ -93,8 +110,8 @@ protected:
       BasicManager()->SetTransactionIncomplete();
       return;
     }
-    aCallback(this, aContext, aExtendedRegionToDraw, aRegionToInvalidate,
-              aCallbackData);
+    aCallback(this, aContext, aExtendedRegionToDraw, aClip,
+              aRegionToInvalidate, aCallbackData);
     // Everything that's visible has been validated. Do this instead of just
     // OR-ing with aRegionToDraw, since that can lead to a very complex region
     // here (OR doesn't automatically simplify to the simplest possible

@@ -3,6 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "OggWriter.h"
+#include "prtime.h"
 
 #undef LOG
 #ifdef MOZ_WIDGET_GONK
@@ -19,6 +20,14 @@ OggWriter::OggWriter() : ContainerWriter()
   if (NS_FAILED(Init())) {
     LOG("ERROR! Fail to initialize the OggWriter.");
   }
+}
+
+OggWriter::~OggWriter()
+{
+  if (mInitialized) {
+    ogg_stream_clear(&mOggStreamState);
+  }
+  // mPacket's data was always owned by us, no need to ogg_packet_clear.
 }
 
 nsresult
@@ -45,9 +54,35 @@ OggWriter::Init()
 }
 
 nsresult
-OggWriter::WriteEncodedTrack(const nsTArray<uint8_t>& aBuffer, int aDuration,
+OggWriter::WriteEncodedTrack(const EncodedFrameContainer& aData,
                              uint32_t aFlags)
 {
+  for (uint32_t i = 0; i < aData.GetEncodedFrames().Length(); i++) {
+    if (aData.GetEncodedFrames()[i]->GetFrameType() != EncodedFrame::OPUS_AUDIO_FRAME) {
+      LOG("[OggWriter] wrong encoded data type!");
+      return NS_ERROR_FAILURE;
+    }
+
+    nsresult rv = WriteEncodedData(aData.GetEncodedFrames()[i]->GetFrameData(),
+                                   aData.GetEncodedFrames()[i]->GetDuration(),
+                                   aFlags);
+    if (NS_FAILED(rv)) {
+      LOG("%p Failed to WriteEncodedTrack!", this);
+      return rv;
+    }
+  }
+  return NS_OK;
+}
+
+nsresult
+OggWriter::WriteEncodedData(const nsTArray<uint8_t>& aBuffer, int aDuration,
+                            uint32_t aFlags)
+{
+  if (!mInitialized) {
+    LOG("[OggWriter] OggWriter has not initialized!");
+    return NS_ERROR_FAILURE;
+  }
+
   MOZ_ASSERT(!ogg_stream_eos(&mOggStreamState),
              "No data can be written after eos has marked.");
 
@@ -81,14 +116,49 @@ OggWriter::WriteEncodedTrack(const nsTArray<uint8_t>& aBuffer, int aDuration,
   return NS_OK;
 }
 
+void
+OggWriter::ProduceOggPage(nsTArray<nsTArray<uint8_t> >* aOutputBufs)
+{
+  aOutputBufs->AppendElement();
+  aOutputBufs->LastElement().SetLength(mOggPage.header_len +
+                                       mOggPage.body_len);
+  memcpy(aOutputBufs->LastElement().Elements(), mOggPage.header,
+         mOggPage.header_len);
+  memcpy(aOutputBufs->LastElement().Elements() + mOggPage.header_len,
+         mOggPage.body, mOggPage.body_len);
+}
+
 nsresult
 OggWriter::GetContainerData(nsTArray<nsTArray<uint8_t> >* aOutputBufs,
                             uint32_t aFlags)
 {
   int rc = -1;
+  // Generate the oggOpus Header
+  if (aFlags & ContainerWriter::GET_HEADER) {
+    OpusMetadata* meta = static_cast<OpusMetadata*>(mMetadata.get());
+    NS_ASSERTION(meta, "should have meta data");
+    NS_ASSERTION(meta->GetKind() == TrackMetadataBase::METADATA_OPUS,
+                 "should have Opus meta data");
+
+    nsresult rv = WriteEncodedData(meta->mIdHeader, 0);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rc = ogg_stream_flush(&mOggStreamState, &mOggPage);
+    NS_ENSURE_TRUE(rc > 0, NS_ERROR_FAILURE);
+    ProduceOggPage(aOutputBufs);
+
+    rv = WriteEncodedData(meta->mCommentHeader, 0);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rc = ogg_stream_flush(&mOggStreamState, &mOggPage);
+    NS_ENSURE_TRUE(rc > 0, NS_ERROR_FAILURE);
+
+    ProduceOggPage(aOutputBufs);
+    return NS_OK;
+
   // Force generate a page even if the amount of packet data is not enough.
   // Usually do so after a header packet.
-  if (aFlags & ContainerWriter::FLUSH_NEEDED) {
+  } else if (aFlags & ContainerWriter::FLUSH_NEEDED) {
     // rc = 0 means no packet to put into a page, or an internal error.
     rc = ogg_stream_flush(&mOggStreamState, &mOggPage);
   } else {
@@ -98,16 +168,34 @@ OggWriter::GetContainerData(nsTArray<nsTArray<uint8_t> >* aOutputBufs,
   }
 
   if (rc) {
-    aOutputBufs->AppendElement();
-    aOutputBufs->LastElement().SetLength(mOggPage.header_len +
-                                         mOggPage.body_len);
-    memcpy(aOutputBufs->LastElement().Elements(), mOggPage.header,
-           mOggPage.header_len);
-    memcpy(aOutputBufs->LastElement().Elements() + mOggPage.header_len,
-           mOggPage.body, mOggPage.body_len);
+    ProduceOggPage(aOutputBufs);
+  }
+  if (aFlags & ContainerWriter::FLUSH_NEEDED) {
+    mIsWritingComplete = true;
+  }
+  return (rc > 0) ? NS_OK : NS_ERROR_FAILURE;
+}
+
+nsresult
+OggWriter::SetMetadata(TrackMetadataBase* aMetadata)
+{
+  MOZ_ASSERT(aMetadata);
+  if (aMetadata->GetKind() != TrackMetadataBase::METADATA_OPUS) {
+    LOG("wrong meta data type!");
+    return NS_ERROR_FAILURE;
+  }
+  // Validate each field of METADATA
+  mMetadata = static_cast<OpusMetadata*>(aMetadata);
+  if (mMetadata->mIdHeader.Length() == 0) {
+    LOG("miss mIdHeader!");
+    return NS_ERROR_FAILURE;
+  }
+  if (mMetadata->mCommentHeader.Length() == 0) {
+    LOG("miss mCommentHeader!");
+    return NS_ERROR_FAILURE;
   }
 
-  return (rc > 0) ? NS_OK : NS_ERROR_FAILURE;
+  return NS_OK;
 }
 
 }

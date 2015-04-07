@@ -11,7 +11,7 @@ namespace mozilla {
 namespace layers {
 
 ColorLayerD3D10::ColorLayerD3D10(LayerManagerD3D10 *aManager)
-  : ColorLayer(aManager, NULL)
+  : ColorLayer(aManager, nullptr)
   , LayerD3D10(aManager)
 {
   mImplData = static_cast<LayerD3D10*>(this);
@@ -35,28 +35,25 @@ ColorLayerD3D10::RenderLayer()
   color[2] = (float)(mColor.b * opacity);
   color[3] = opacity;
 
-  const gfx3DMatrix& transform = GetEffectiveTransform();
-  void* raw = &const_cast<gfx3DMatrix&>(transform)._11;
+  const gfx::Matrix4x4& transform = GetEffectiveTransform();
+  void* raw = &const_cast<gfx::Matrix4x4&>(transform)._11;
   effect()->GetVariableByName("mLayerTransform")->SetRawValue(raw, 0, 64);
   effect()->GetVariableByName("fLayerColor")->AsVector()->SetFloatVector(color);
 
   ID3D10EffectTechnique *technique = SelectShader(SHADER_SOLID | LoadMaskTexture());
 
-  nsIntRegionRectIterator iter(mVisibleRegion);
+  nsIntRect bounds = GetBounds();
 
-  const nsIntRect *iterRect;
-  while ((iterRect = iter.Next())) {
-    effect()->GetVariableByName("vLayerQuad")->AsVector()->SetFloatVector(
-      ShaderConstantRectD3D10(
-        (float)iterRect->x,
-        (float)iterRect->y,
-        (float)iterRect->width,
-        (float)iterRect->height)
-      );
+  effect()->GetVariableByName("vLayerQuad")->AsVector()->SetFloatVector(
+    ShaderConstantRectD3D10(
+      (float)bounds.x,
+      (float)bounds.y,
+      (float)bounds.width,
+      (float)bounds.height)
+    );
 
-    technique->GetPassByIndex(0)->Apply(0);
-    device()->Draw(4, 0);
-  }
+  technique->GetPassByIndex(0)->Apply(0);
+  device()->Draw(4, 0);
 }
 
 } /* layers */

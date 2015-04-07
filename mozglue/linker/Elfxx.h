@@ -16,10 +16,14 @@
 #endif
 #include <endian.h>
 
+#if defined(__ARM_EABI__) && !defined(PT_ARM_EXIDX)
+#define PT_ARM_EXIDX 0x70000001
+#endif
+
 /**
  * Generic ELF macros for the target system
  */
-#ifdef HAVE_64BIT_OS
+#ifdef __LP64__
 #define Elf_(type) Elf64_ ## type
 #define ELFCLASS ELFCLASS64
 #define ELF_R_TYPE ELF64_R_TYPE

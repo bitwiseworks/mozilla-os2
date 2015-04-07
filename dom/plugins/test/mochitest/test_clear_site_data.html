@@ -3,8 +3,13 @@
   <title>NPAPI ClearSiteData/GetSitesWithData Functionality</title>
   <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js"></script>
+  <script type="application/javascript" src="utils.js"></script>
 </head>
 <body>
+  <script type="application/javascript">
+    setTestPluginEnabledState(SpecialPowers.Ci.nsIPluginTag.STATE_ENABLED);
+  </script>
+
   <embed id="plugin1" type="application/x-test" width="200" height="200"></embed>
 
   <script class="testbody" type="application/javascript">
@@ -16,12 +21,17 @@
     const FLAG_CLEAR_ALL = pluginHostIface.FLAG_CLEAR_ALL;
     const FLAG_CLEAR_CACHE = pluginHostIface.FLAG_CLEAR_CACHE;
 
-    // Make sure clearing by timerange is supported.
     var p = document.getElementById("plugin1");
-    p.setSitesWithDataCapabilities(true);
 
-    ok(PluginUtils.withTestPlugin(runTest), "Test plugin found");
-    SimpleTest.finish();
+    // Since we're running with chrome permissions, accessing the plugin wont
+    // synchronously spawn it -- wait for the async spawning to finish.
+    SimpleTest.executeSoon(function() {
+      // Make sure clearing by timerange is supported.
+      p.setSitesWithDataCapabilities(true);
+
+      ok(PluginUtils.withTestPlugin(runTest), "Test plugin found");
+      SimpleTest.finish();
+    });
 
     function stored(needles) {
       var something = pluginHost.siteHasData(this.pluginTag, null);

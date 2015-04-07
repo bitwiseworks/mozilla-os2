@@ -5,20 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 void
-nsTDependentString_CharT::Rebind( const char_type* data, size_type length )
-  {
-    // If we currently own a buffer, release it.
-    Finalize();
-
-    mData = const_cast<char_type*>(data);
-    mLength = length;
-    SetDataFlags(F_TERMINATED);
-    AssertValid();
-  }
-
-void
 nsTDependentString_CharT::Rebind( const string_type& str, uint32_t startPos )
   {
+    NS_ABORT_IF_FALSE(str.Flags() & F_TERMINATED, "Unterminated flat string");
+
     // If we currently own a buffer, release it.
     Finalize();
 
@@ -27,8 +17,8 @@ nsTDependentString_CharT::Rebind( const string_type& str, uint32_t startPos )
     if (startPos > strLength)
       startPos = strLength;
 
-    mData = const_cast<char_type*>(str.Data()) + startPos;
+    mData = const_cast<char_type*>(static_cast<const char_type*>(str.Data())) + startPos;
     mLength = strLength - startPos;
 
-    SetDataFlags(F_TERMINATED);
+    SetDataFlags(str.Flags() & (F_TERMINATED | F_LITERAL));
   }

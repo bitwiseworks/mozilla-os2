@@ -6,14 +6,14 @@
 #define nsFrameSelection_h___
 
 #include "mozilla/Attributes.h"
-
-#include "mozilla/Selection.h"
+#include "mozilla/EventForwards.h"
+#include "mozilla/dom/Selection.h"
+#include "mozilla/TextRange.h"
 #include "nsIFrame.h"
 #include "nsIContent.h"
 #include "nsISelectionController.h"
 #include "nsITableCellLayout.h"
 #include "nsIDOMElement.h"
-#include "nsGUIEvent.h"
 #include "nsRange.h"
 
 class nsTableOuterFrame;
@@ -24,9 +24,7 @@ class nsTableOuterFrame;
 { 0x3c6ae2d0, 0x4cf1, 0x44a1, \
   { 0x9e, 0x9d, 0x24, 0x11, 0x86, 0x7f, 0x19, 0xc6 } }
 
-#ifdef IBMBIDI // Constant for Set/Get CaretBidiLevel
 #define BIDI_LEVEL_UNDEFINED 0x80
-#endif
 
 //----------------------------------------------------------------------
 
@@ -45,7 +43,7 @@ struct SelectionDetails
   int32_t mStart;
   int32_t mEnd;
   SelectionType mType;
-  nsTextRangeStyle mTextRangeStyle;
+  mozilla::TextRangeStyle mTextRangeStyle;
   SelectionDetails *mNext;
 };
 
@@ -176,7 +174,9 @@ struct nsPrevNextBidiLevels
 };
 
 namespace mozilla {
+namespace dom {
 class Selection;
+}
 }
 class nsIScrollableFrame;
 
@@ -243,10 +243,10 @@ public:
    *  @param aMouseEvent         passed in so we can get where event occurred and what keys are pressed
    */
   /*unsafe*/
-  nsresult HandleTableSelection(nsINode *aParentContent,
+  nsresult HandleTableSelection(nsINode* aParentContent,
                                 int32_t aContentOffset,
                                 int32_t aTarget,
-                                nsMouseEvent *aMouseEvent);
+                                mozilla::WidgetMouseEvent* aMouseEvent);
 
   /**
    * Add cell to the selection.
@@ -355,7 +355,7 @@ public:
    * no query interface for selection. must use this method now.
    * @param aSelectionType enum value defined in nsISelection for the seleciton you want.
    */
-  mozilla::Selection* GetSelection(SelectionType aType) const;
+  mozilla::dom::Selection* GetSelection(SelectionType aType) const;
 
   /**
    * ScrollSelectionIntoView scrolls a region of the selection,
@@ -411,8 +411,7 @@ public:
 
   void SetHint(HINT aHintRight) { mHint = aHintRight; }
   HINT GetHint() const { return mHint; }
-  
-#ifdef IBMBIDI
+
   /** SetCaretBidiLevel sets the caret bidi level
    *  @param aLevel the caret bidi level
    *  This method is virtual since it gets called from outside of layout.
@@ -426,7 +425,6 @@ public:
    *  This method is virtual since it gets called from outside of layout.
    */
   virtual void UndefineCaretBidiLevel();
-#endif
 
   /** CharacterMove will generally be called from the nsiselectioncontroller implementations.
    *  the effect being the selection will move one character left or right.
@@ -493,15 +491,15 @@ public:
   /** This method can be used to store the data received during a MouseDown
    *  event so that we can place the caret during the MouseUp event.
    * @aMouseEvent the event received by the selection MouseDown
-   *  handling method. A NULL value can be use to tell this method
+   *  handling method. A nullptr value can be use to tell this method
    *  that any data is storing is no longer valid.
    */
-  void SetDelayedCaretData(nsMouseEvent *aMouseEvent);
+  void SetDelayedCaretData(mozilla::WidgetMouseEvent* aMouseEvent);
 
   /** Get the delayed MouseDown event data necessary to place the
    *  caret during MouseUp processing.
    * @return a pointer to the event received
-   *  by the selection during MouseDown processing. It can be NULL
+   *  by the selection during MouseDown processing. It can be nullptr
    *  if the data is no longer valid.
    */
   bool HasDelayedCaretData() { return mDelayedMouseEventValid; }
@@ -592,6 +590,7 @@ public:
   nsIPresShell *GetShell()const  { return mShell; }
 
   void DisconnectFromPresShell();
+  nsresult ClearNormalSelection();
 private:
   nsresult TakeFocus(nsIContent *aNewFocus,
                      uint32_t aContentOffset,
@@ -622,7 +621,7 @@ private:
     return retval;
   }
 
-  friend class mozilla::Selection;
+  friend class mozilla::dom::Selection;
 #ifdef DEBUG
   void printSelection();       // for debugging
 #endif /* DEBUG */
@@ -649,7 +648,7 @@ private:
   // so remember to use nsCOMPtr when needed.
   nsresult     NotifySelectionListeners(SelectionType aType);     // add parameters to say collapsed etc?
 
-  nsRefPtr<mozilla::Selection> mDomSelections[nsISelectionController::NUM_SELECTIONTYPES];
+  nsRefPtr<mozilla::dom::Selection> mDomSelections[nsISelectionController::NUM_SELECTIONTYPES];
 
   // Table selection support.
   nsITableCellLayout* GetCellLayout(nsIContent *aCellContent) const;
@@ -677,7 +676,6 @@ private:
   // Might return null
   nsIContent* GetParentTable(nsIContent *aCellNode) const;
   nsresult CreateAndAddRange(nsINode *aParentNode, int32_t aOffset);
-  nsresult ClearNormalSelection();
 
   nsCOMPtr<nsINode> mCellParent; //used to snap to table selection
   nsCOMPtr<nsIContent> mStartSelectedCell;
@@ -705,9 +703,7 @@ private:
   int16_t mDisplaySelection; //for visual display purposes.
 
   HINT  mHint;   //hint to tell if the selection is at the end of this line or beginning of next
-#ifdef IBMBIDI
   uint8_t mCaretBidiLevel;
-#endif
 
   int32_t mDesiredX;
   uint32_t mDelayedMouseEventClickCount;

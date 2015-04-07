@@ -34,7 +34,7 @@ nsMetroFilePicker::~nsMetroFilePicker()
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsMetroFilePicker, nsIFilePicker)
+NS_IMPL_ISUPPORTS(nsMetroFilePicker, nsIFilePicker)
 
 NS_IMETHODIMP
 nsMetroFilePicker::Init(nsIDOMWindow *parent, const nsAString& title, int16_t mode)
@@ -77,7 +77,7 @@ HRESULT nsMetroFilePicker::OnPickSingleFile(IAsyncOperation<StorageFile*>* aFile
   HRESULT hr;
   ComPtr<IStorageFile> file;
   hr = aFile->GetResults(file.GetAddressOf());
-  // When the user cancels hr == S_OK and file is NULL
+  // When the user cancels hr == S_OK and file is nullptr
   if (FAILED(hr) || !file) {
     if (mCallback)
       mCallback->Done(nsIFilePicker::returnCancel);
@@ -396,11 +396,11 @@ nsMetroFilePicker::ParseFiltersIntoVector(ComPtr<IVector<HSTRING>>& aVector,
                                           const nsAString& aFilter,
                                           bool aAllowAll)
 {
-  const PRUnichar *beg = aFilter.BeginReading();
-  const PRUnichar *end = aFilter.EndReading();
-  for (const PRUnichar *cur = beg, *fileTypeStart = beg; cur <= end; ++cur) {
+  const char16_t *beg = aFilter.BeginReading();
+  const char16_t *end = aFilter.EndReading();
+  for (const char16_t *cur = beg, *fileTypeStart = beg; cur <= end; ++cur) {
     // Start of a a filetype, example: *.png
-    if (cur == end || PRUnichar(' ') == *cur) {
+    if (cur == end || char16_t(' ') == *cur) {
       int32_t startPos = fileTypeStart - beg;
       int32_t endPos = cur - fileTypeStart - (cur == end ? 0 : 1);
       const nsAString& fileType = Substring(aFilter,

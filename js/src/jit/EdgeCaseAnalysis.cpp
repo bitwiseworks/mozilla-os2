@@ -4,14 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <stdio.h>
+#include "jit/EdgeCaseAnalysis.h"
 
-#include "Ion.h"
-#include "IonBuilder.h"
-#include "IonSpewer.h"
-#include "EdgeCaseAnalysis.h"
-#include "MIR.h"
-#include "MIRGraph.h"
+#include "jit/MIR.h"
+#include "jit/MIRGraph.h"
 
 using namespace js;
 using namespace js::jit;
@@ -34,6 +30,7 @@ EdgeCaseAnalysis::analyzeLate()
             iter->setId(nextId++);
             iter->analyzeEdgeCasesForward();
         }
+        block->lastIns()->setId(nextId++);
     }
 
     for (PostorderIterator block(graph.poBegin()); block != graph.poEnd(); block++) {

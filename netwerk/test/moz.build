@@ -4,36 +4,59 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['httpserver', 'browser']
+TEST_TOOL_DIRS += ['httpserver']
 
-MODULE = 'test_necko'
+FAIL_ON_WARNINGS = True
 
+BROWSER_CHROME_MANIFESTS += ['browser/browser.ini']
+MOCHITEST_MANIFESTS += ['mochitests/mochitest.ini']
 XPCSHELL_TESTS_MANIFESTS += ['unit/xpcshell.ini']
 
 # FIXME/bug 575918: out-of-process xpcshell is broken on OS X
 if CONFIG['OS_ARCH'] != 'Darwin':
     XPCSHELL_TESTS_MANIFESTS += ['unit_ipc/xpcshell.ini']
 
-CPP_SOURCES += [
-    'PropertiesTest.cpp',
-    'ReadNTLM.cpp',
-    'TestBlockingSocket.cpp',
-    'TestCallbacks.cpp',
-    'TestCookie.cpp',
-    'TestDNS.cpp',
-    'TestIncrementalDownload.cpp',
-    'TestOpen.cpp',
-    'TestPageLoad.cpp',
-    'TestProtocols.cpp',
-    'TestServ.cpp',
-    'TestStandardURL.cpp',
-    'TestStreamLoader.cpp',
-    'TestURLParser.cpp',
-    'TestUpload.cpp',
-    'urltest.cpp',
+SIMPLE_PROGRAMS = [
+    'PropertiesTest',
+    'ReadNTLM',
+    'TestBlockingSocket',
+    'TestCallbacks',
+    'TestCookie',
+    'TestDNS',
+    'TestIncrementalDownload',
+    'TestOpen',
+    'TestPageLoad',
+    'TestProtocols',
+    'TestServ',
+    'TestStandardURL',
+    'TestStreamLoader',
+    'TestUpload',
+    'TestURLParser',
+    'urltest',
 ]
 
-bin_suffix = CONFIG['BIN_SUFFIX']
-SIMPLE_PROGRAMS += [
-    "%s%s" % (x[0:-4], bin_suffix) for x in CPP_SOURCES
+# XXX Make this work in libxul builds.
+#SIMPLE_PROGRAMS += [
+#    TestIDN',
+#    TestIOThreads',
+#    TestPerf',
+#    TestSocketTransport',
+#    TestStreamChannel',
+#    TestStreamPump',
+#    TestStreamTransport',
+#    TestUDPSocketProvider',
+#]
+
+SOURCES += [
+    '%s.cpp' % s for s in SIMPLE_PROGRAMS
+]
+
+CPP_UNIT_TESTS += [
+    'TestSTSParser.cpp',
+    'TestUDPSocket.cpp',
+]
+
+RESOURCE_FILES += [
+    'urlparse.dat',
+    'urlparse_unx.dat',
 ]

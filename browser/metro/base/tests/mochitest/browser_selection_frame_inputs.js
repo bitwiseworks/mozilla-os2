@@ -9,7 +9,6 @@ let gWindow = null;
 var gFrame = null;
 var gInput = null;
 
-const kMarkerOffsetY = 12;
 const kCommonWaitMs = 5000;
 const kCommonPollMs = 100;
 
@@ -28,6 +27,8 @@ function setUpAndTearDown() {
   yield waitForCondition(function () {
       return !SelectionHelperUI.isSelectionUIVisible;
     }, kCommonWaitMs, kCommonPollMs);
+  InputSourceHelper.isPrecise = false;
+  InputSourceHelper.fireUpdate();
 }
 
 gTests.push({
@@ -39,7 +40,7 @@ gTests.push({
     yield addTab(chromeRoot + "browser_selection_frame_inputs.html");
 
     yield waitForCondition(function () {
-      return !StartUI.isStartPageVisible;
+      return !BrowserUI.isStartTabVisible;
       }, 10000, 100);
 
     yield hideContextUI();
@@ -51,8 +52,6 @@ gTests.push({
     ok(gWindow != null, "gWindow");
     ok(gFrame != null, "gFrame");
     ok(gInput != null, "gInput");
-
-    InputSourceHelper.isPrecise = false;
   },
 });
 
@@ -75,7 +74,7 @@ gTests.push({
     ok(menuItem, "menu item exists");
     ok(!menuItem.hidden, "menu item visible");
     let popupPromise = waitForEvent(document, "popuphidden");
-    EventUtils.synthesizeMouse(menuItem, 10, 10, {}, gWindow);
+    sendElementTap(gWindow, menuItem);
     yield popupPromise;
 
     yield waitForCondition(function () {
@@ -109,7 +108,7 @@ gTests.push({
     ok(menuItem, "menu item exists");
     ok(!menuItem.hidden, "menu item visible");
     let popupPromise = waitForEvent(document, "popuphidden");
-    EventUtils.synthesizeMouse(menuItem, 10, 10, {}, gWindow);
+    sendElementTap(gWindow, menuItem);
     yield popupPromise;
 
     yield waitForCondition(function () {
@@ -157,7 +156,5 @@ function test() {
     todo(false, "browser_selection_tests need landscape mode to run.");
     return;
   }
-
-  requestLongerTimeout(3);
   runTests();
 }

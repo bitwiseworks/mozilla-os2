@@ -20,8 +20,8 @@ function login_handling(handler) {
 }
 
 function run_test() {
-  let logger = Log4Moz.repository.rootLogger;
-  Log4Moz.repository.rootLogger.addAppender(new Log4Moz.DumpAppender());
+  let logger = Log.repository.rootLogger;
+  Log.repository.rootLogger.addAppender(new Log.DumpAppender());
 
   let collectionsHelper = track_collections_helper();
   let upd = collectionsHelper.with_updated_collection;
@@ -38,7 +38,7 @@ function run_test() {
 
   try {
     _("Set up test fixtures.");
-    new SyncTestingInfrastructure("johndoe", "ilovejane", "foo");
+    new SyncTestingInfrastructure(server, "johndoe", "ilovejane", "foo");
     Service.scheduler.globalScore = GLOBAL_SCORE;
     // Avoid daily ping
     Svc.Prefs.set("lastPing", Math.floor(Date.now() / 1000));

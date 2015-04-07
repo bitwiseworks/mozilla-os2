@@ -20,8 +20,8 @@
  * http://www.whatwg.org/specs/web-apps/current-work/
  */
 
-[scriptable, uuid(8b29a62f-b448-49f3-9242-241d5cf94ea9)]
-interface nsIDOMHTMLBodyElement : nsIDOMHTMLElement
+[scriptable, uuid(068630db-2c00-43dd-b167-495757a88236)]
+interface nsIDOMHTMLBodyElement : nsISupports
 {
            attribute DOMString        aLink;
            attribute DOMString        background;
@@ -29,23 +29,4 @@ interface nsIDOMHTMLBodyElement : nsIDOMHTMLElement
            attribute DOMString        link;
            attribute DOMString        text;
            attribute DOMString        vLink;
-
-           [implicit_jscontext] attribute jsval            onafterprint;
-           [implicit_jscontext] attribute jsval            onbeforeprint;
-           [implicit_jscontext] attribute jsval            onbeforeunload;
-           [implicit_jscontext] attribute jsval            onhashchange;
-           [implicit_jscontext] attribute jsval            onmessage;
-           [implicit_jscontext] attribute jsval            onoffline;
-           [implicit_jscontext] attribute jsval            ononline;
-           [implicit_jscontext] attribute jsval            onpagehide;
-           [implicit_jscontext] attribute jsval            onpageshow;
-           [implicit_jscontext] attribute jsval            onpopstate;
-           // Not supported yet
-           // [implicit_jscontext] attribute jsval            onredo;
-           [implicit_jscontext] attribute jsval            onresize;
-           // Not supported yet
-           // [implicit_jscontext] attribute jsval            onstorage;
-           // Not supported yet
-           // [implicit_jscontext] attribute jsval            onundo;
-           [implicit_jscontext] attribute jsval            onunload;
 };

@@ -11,8 +11,10 @@
 #include "xpcom-private.h"
 #include "nsIComponentManager.h"
 #include "nsIComponentRegistrar.h"
+#include "nsIMemoryReporter.h"
 #include "nsIServiceManager.h"
 #include "nsIFile.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Module.h"
 #include "mozilla/ModuleLoader.h"
 #include "mozilla/Mutex.h"
@@ -38,7 +40,6 @@
 
 struct nsFactoryEntry;
 class nsIServiceManager;
-class nsIMemoryReporter;
 struct PRThread;
 
 #define NS_COMPONENTMANAGER_CID                      \
@@ -123,12 +124,14 @@ class nsComponentManagerImpl MOZ_FINAL
     , public nsSupportsWeakReference
     , public nsIComponentRegistrar
     , public nsIInterfaceRequestor
+    , public nsIMemoryReporter
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIINTERFACEREQUESTOR
     NS_DECL_NSICOMPONENTMANAGER
     NS_DECL_NSICOMPONENTREGISTRAR
+    NS_DECL_NSIMEMORYREPORTER
 
     static nsresult Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
 
@@ -210,9 +213,9 @@ public:
         { }
 
         KnownModule(mozilla::FileLocation &aFile)
-            : mModule(NULL)
+            : mModule(nullptr)
             , mFile(aFile)
-            , mLoader(NULL)
+            , mLoader(nullptr)
             , mLoaded(false)
             , mFailed(false)
         { }
@@ -311,12 +314,10 @@ public:
 
     nsTArray<PendingServiceInfo> mPendingServices;
 
-    size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf);
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
 private:
     ~nsComponentManagerImpl();
-
-    nsIMemoryReporter* mReporter;
 };
 
 
@@ -336,7 +337,7 @@ struct nsFactoryEntry
 
     already_AddRefed<nsIFactory> GetFactory();
 
-    size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf);
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
     const mozilla::Module::CIDEntry* mCIDEntry;
     nsComponentManagerImpl::KnownModule* mModule;

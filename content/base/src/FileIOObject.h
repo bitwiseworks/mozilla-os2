@@ -6,7 +6,7 @@
 #ifndef FileIOObject_h__
 #define FileIOObject_h__
 
-#include "nsDOMEventTargetHelper.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "nsIChannel.h"
 #include "nsIFile.h"
 #include "nsIDOMFile.h"
@@ -28,7 +28,7 @@ extern const uint64_t kUnknownSize;
 
 // A common base class for FileReader and FileSaver
 
-class FileIOObject : public nsDOMEventTargetHelper,
+class FileIOObject : public DOMEventTargetHelper,
                      public nsIStreamListener,
                      public nsITimerCallback
 {
@@ -48,12 +48,12 @@ public:
     return mError;
   }
 
-  NS_METHOD GetOnabort(JSContext* aCx, JS::Value* aValue);
-  NS_METHOD SetOnabort(JSContext* aCx, const JS::Value& aValue);
-  NS_METHOD GetOnerror(JSContext* aCx, JS::Value* aValue);
-  NS_METHOD SetOnerror(JSContext* aCx, const JS::Value& aValue);
-  NS_METHOD GetOnprogress(JSContext* aCx, JS::Value* aValue);
-  NS_METHOD SetOnprogress(JSContext* aCx, const JS::Value& aValue);
+  NS_METHOD GetOnabort(JSContext* aCx, JS::MutableHandle<JS::Value> aValue);
+  NS_METHOD SetOnabort(JSContext* aCx, JS::Handle<JS::Value> aValue);
+  NS_METHOD GetOnerror(JSContext* aCx, JS::MutableHandle<JS::Value> aValue);
+  NS_METHOD SetOnerror(JSContext* aCx, JS::Handle<JS::Value> aValue);
+  NS_METHOD GetOnprogress(JSContext* aCx, JS::MutableHandle<JS::Value> aValue);
+  NS_METHOD SetOnprogress(JSContext* aCx, JS::Handle<JS::Value> aValue);
 
   IMPL_EVENT_HANDLER(abort)
   IMPL_EVENT_HANDLER(error)
@@ -65,8 +65,7 @@ public:
 
   NS_DECL_NSIREQUESTOBSERVER
 
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(FileIOObject,
-                                           nsDOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(FileIOObject, DOMEventTargetHelper)
 
 protected:
   // Implemented by the derived class to do whatever it needs to do for abort

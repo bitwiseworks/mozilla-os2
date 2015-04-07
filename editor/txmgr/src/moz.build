@@ -4,9 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'txmgr'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsTransactionItem.cpp',
     'nsTransactionList.cpp',
     'nsTransactionManager.cpp',
@@ -14,5 +12,6 @@ CPP_SOURCES += [
     'nsTransactionStack.cpp',
 ]
 
-LIBRARY_NAME = 'txmgr'
+FAIL_ON_WARNINGS = True
 
+FINAL_LIBRARY = 'xul'

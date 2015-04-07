@@ -20,9 +20,6 @@ namespace storage {
 nsresult
 Row::initialize(sqlite3_stmt *aStatement)
 {
-  // Initialize the hash table
-  mNameHashtable.Init();
-
   // Get the number of results
   mNumCols = ::sqlite3_column_count(aStatement);
 
@@ -41,7 +38,7 @@ Row::initialize(sqlite3_stmt *aStatement)
       case SQLITE_TEXT:
       {
         nsDependentString str(
-          static_cast<const PRUnichar *>(::sqlite3_column_text16(aStatement, i))
+          static_cast<const char16_t *>(::sqlite3_column_text16(aStatement, i))
         );
         variant = new TextVariant(str);
         break;
@@ -78,7 +75,7 @@ Row::initialize(sqlite3_stmt *aStatement)
  * Note:  This object is only ever accessed on one thread at a time.  It it not
  *        threadsafe, but it does need threadsafe AddRef and Release.
  */
-NS_IMPL_THREADSAFE_ISUPPORTS2(
+NS_IMPL_ISUPPORTS(
   Row,
   mozIStorageRow,
   mozIStorageValueArray
@@ -221,7 +218,7 @@ Row::GetSharedUTF8String(uint32_t,
 NS_IMETHODIMP
 Row::GetSharedString(uint32_t,
                      uint32_t *,
-                     const PRUnichar **)
+                     const char16_t **)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }

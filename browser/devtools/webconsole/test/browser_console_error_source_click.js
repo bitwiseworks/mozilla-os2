@@ -16,7 +16,7 @@ function test()
   addTab(TEST_URI);
   browser.addEventListener("load", function onLoad() {
     browser.removeEventListener("load", onLoad, true);
-    HUDConsoleUI.toggleBrowserConsole().then(browserConsoleOpened);
+    HUDService.toggleBrowserConsole().then(browserConsoleOpened);
   }, true);
 
   function browserConsoleOpened(aHud)
@@ -61,7 +61,7 @@ function test()
 
       let msg = [...results[0].matched][0];
       ok(msg, "message element found for: " + result.text);
-      let locationNode = msg.querySelector(".webconsole-location");
+      let locationNode = msg.querySelector(".message-location");
       ok(locationNode, "message location element found");
 
       EventUtils.synthesizeMouse(locationNode, 2, 2, {}, hud.iframeWindow);

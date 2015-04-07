@@ -11,12 +11,10 @@
 #include "nsThreadUtils.h"
 #include "nsTransportUtils.h"
 #include "nsStreamUtils.h"
-#include "nsURLHelper.h"
 #include "nsMimeTypes.h"
 #include "nsNetUtil.h"
 #include "nsProxyRelease.h"
 #include "nsAutoPtr.h"
-#include "nsStandardURL.h"
 
 #include "nsIFileURL.h"
 #include "nsIMIMEService.h"
@@ -407,10 +405,10 @@ nsFileChannel::OpenContentStream(bool async, nsIInputStream **result,
 //-----------------------------------------------------------------------------
 // nsFileChannel::nsISupports
 
-NS_IMPL_ISUPPORTS_INHERITED2(nsFileChannel,
-                             nsBaseChannel,
-                             nsIUploadChannel,
-                             nsIFileChannel)
+NS_IMPL_ISUPPORTS_INHERITED(nsFileChannel,
+                            nsBaseChannel,
+                            nsIUploadChannel,
+                            nsIFileChannel)
 
 //-----------------------------------------------------------------------------
 // nsFileChannel::nsIFileChannel
@@ -433,7 +431,7 @@ nsFileChannel::SetUploadStream(nsIInputStream *stream,
                                const nsACString &contentType,
                                int64_t contentLength)
 {
-  NS_ENSURE_TRUE(!IsPending(), NS_ERROR_IN_PROGRESS);
+  NS_ENSURE_TRUE(!Pending(), NS_ERROR_IN_PROGRESS);
 
   if ((mUploadStream = stream)) {
     mUploadLength = contentLength;

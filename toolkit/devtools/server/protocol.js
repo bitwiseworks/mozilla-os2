@@ -5,15 +5,12 @@
 "use strict";
 
 let {Cu} = require("chrome");
-
-let promise = require("sdk/core/promise");
+let Services = require("Services");
+let promise = require("devtools/toolkit/deprecated-sync-thenables");
 let {Class} = require("sdk/core/heritage");
 let {EventTarget} = require("sdk/event/target");
 let events = require("sdk/event/core");
 let object = require("sdk/util/object");
-
-// For telemetry
-Cu.import("resource://gre/modules/Services.jsm");
 
 // Waiting for promise.done() to be added, see bug 851321
 function promiseDone(err) {
@@ -81,6 +78,8 @@ types.getType = function(type) {
 
     if (collection === "array") {
       return types.addArrayType(subtype);
+    } else if (collection === "nullable") {
+      return types.addNullableType(subtype);
     }
 
     if (registeredLifetimes.has(collection)) {
@@ -103,6 +102,17 @@ types.getType = function(type) {
   }
 
   throw Error("Unknown type: " + type);
+}
+
+/**
+ * Don't allow undefined when writing primitive types to packets.  If
+ * you want to allow undefined, use a nullable type.
+ */
+function identityWrite(v) {
+  if (v === undefined) {
+    throw Error("undefined passed where a value is required");
+  }
+  return v;
 }
 
 /**
@@ -136,8 +146,8 @@ types.addType = function(name, typeObject={}, options={}) {
   let type = object.merge({
     name: name,
     primitive: !(typeObject.read || typeObject.write),
-    read: v => v,
-    write: v => v
+    read: identityWrite,
+    write: identityWrite
   }, typeObject);
 
   registeredTypes.set(name, type);
@@ -168,6 +178,7 @@ types.addArrayType = function(subtype) {
     return types.addType(name);
   }
   return types.addType(name, {
+    category: "array",
     read: (v, ctx) => [subtype.read(i, ctx) for (i of v)],
     write: (v, ctx) => [subtype.write(i, ctx) for (i of v)]
   });
@@ -185,6 +196,8 @@ types.addArrayType = function(subtype) {
  */
 types.addDictType = function(name, specializations) {
   return types.addType(name, {
+    category: "dict",
+    specializations: specializations,
     read: (v, ctx) => {
       let ret = {};
       for (let prop in v) {
@@ -231,6 +244,7 @@ types.addDictType = function(name, specializations) {
 types.addActorType = function(name) {
   let type = types.addType(name, {
     _actor: true,
+    category: "actor",
     read: (v, ctx, detail) => {
       // If we're reading a request on the server side, just
       // find the actor registered with this actorID.
@@ -241,12 +255,13 @@ types.addActorType = function(name) {
       // Reading a response on the client side, check for an
       // existing front on the connection, and create the front
       // if it isn't found.
-      let front = ctx.conn.getActor(v.actor);
+      let actorID = typeof(v) === "string" ? v : v.actor;
+      let front = ctx.conn.getActor(actorID);
       if (front) {
         front.form(v, detail, ctx);
       } else {
         front = new type.frontClass(ctx.conn, v, detail, ctx)
-        front.actorID = v.actor;
+        front.actorID = actorID;
         ctx.marshallPool().manage(front);
       }
       return front;
@@ -272,6 +287,25 @@ types.addActorType = function(name) {
   return type;
 }
 
+types.addNullableType = function(subtype) {
+  subtype = types.getType(subtype);
+  return types.addType("nullable:" + subtype.name, {
+    category: "nullable",
+    read: (value, ctx) => {
+      if (value == null) {
+        return value;
+      }
+      return subtype.read(value, ctx);
+    },
+    write: (value, ctx) => {
+      if (value == null) {
+        return value;
+      }
+      return subtype.write(value, ctx);
+    }
+  });
+}
+
 /**
  * Register an actor detail type.  This is just like an actor type, but
  * will pass a detail hint to the actor's form method during serialization/
@@ -293,6 +327,7 @@ types.addActorDetail = function(name, actorType, detail) {
   }
   return types.addType(name, {
     _actor: true,
+    category: "detail",
     read: (v, ctx) => actorType.read(v, ctx, detail),
     write: (v, ctx) => actorType.write(v, ctx, detail)
   });
@@ -333,6 +368,7 @@ types.addLifetimeType = function(lifetime, subtype) {
   }
   let prop = registeredLifetimes.get(lifetime);
   return types.addType(lifetime + ":" + subtype.name, {
+    category: "lifetime",
     read: (value, ctx) => subtype.read(value, ctx[prop]),
     write: (value, ctx) => subtype.write(value, ctx[prop])
   })
@@ -364,33 +400,27 @@ types.JSON = types.addType("json");
  *    The argument index to place at this position.
  * @param type type
  *    The argument should be marshalled as this type.
- * @param object options
- *    Argument options:
- *      optional: true if the argument can be undefined or null.
  * @constructor
  */
 let Arg = Class({
-  initialize: function(index, type, options={}) {
+  initialize: function(index, type) {
     this.index = index;
     this.type = types.getType(type);
-    this.optional = !!options.optional;
   },
 
   write: function(arg, ctx) {
-    if (arg === undefined || arg === null) {
-      if (!this.optional) throw Error("Required argument " + this.name + " not specified.");
-      return undefined;
-    }
     return this.type.write(arg, ctx);
   },
 
   read: function(v, ctx, outArgs) {
-    if (v === undefined || v === null) {
-      if (!this.optional) throw Error("Required argument " + this.name + " not specified.");
-      outArgs[this.index] = v;
-      return;
-    }
     outArgs[this.index] = this.type.read(v, ctx);
+  },
+
+  describe: function() {
+    return {
+      _arg: this.index,
+      type: this.type.name,
+    }
   }
 });
 exports.Arg = Arg;
@@ -436,6 +466,13 @@ let Option = Class({
       return;
     }
     outArgs[this.index][name] = this.type.read(v, ctx);
+  },
+
+  describe: function() {
+    return {
+      _option: this.index,
+      type: this.type.name,
+    }
   }
 });
 
@@ -446,34 +483,24 @@ exports.Option = Option;
  *
  * @param type type
  *    The return value should be marshalled as this type.
- * @param object options
- *    Argument options:
- *      optional: true if the argument can be undefined or null.
  */
 let RetVal = Class({
-  initialize: function(type, options={}) {
+  initialize: function(type) {
     this.type = types.getType(type);
-    this.optional = !!options.optional;
   },
 
   write: function(v, ctx) {
-    if (v !== undefined && v != null) {
-      return this.type.write(v, ctx);
-    }
-    if (!this.optional) {
-      throw Error("Return value not specified.");
-    }
-    return v;
+    return this.type.write(v, ctx);
   },
 
   read: function(v, ctx) {
-    if (v !== undefined && v != null) {
-      return this.type.read(v, ctx);
+    return this.type.read(v, ctx);
+  },
+
+  describe: function() {
+    return {
+      _retval: this.type.name
     }
-    if (!this.optional) {
-      throw Error("Return value not specified.");
-    }
-    return v;
   }
 });
 
@@ -517,6 +544,15 @@ function findPlaceholders(template, constructor, path=[], placeholders=[]) {
   return placeholders;
 }
 
+
+function describeTemplate(template) {
+  return JSON.parse(JSON.stringify(template, (key, value) => {
+    if (value.describe) {
+      return value.describe();
+    }
+    return value;
+  }));
+}
 
 /**
  * Manages a request template.
@@ -570,6 +606,8 @@ let Request = Class({
     }
     return fnArgs;
   },
+
+  describe: function() { return describeTemplate(this.template); }
 });
 
 /**
@@ -624,7 +662,9 @@ let Response = Class({
     }
     let v = getPath(packet, this.path);
     return this.retVal.read(v, ctx);
-  }
+  },
+
+  describe: function() { return describeTemplate(this.template); }
 });
 
 /**
@@ -736,7 +776,7 @@ let Pool = Class({
         actor.destroy = destroy;
       }
     };
-    this.conn.removeActorPool(this);
+    this.conn.removeActorPool(this, true);
     this.__poolMap.clear();
     this.__poolMap = null;
   },
@@ -821,6 +861,12 @@ let Actor = Class({
       message: err.toString()
     });
   },
+
+  _queueResponse: function(create) {
+    let pending = this._pendingResponse || promise.resolve(null);
+    let response = create(pending);
+    this._pendingResponse = response;
+  }
 });
 exports.Actor = Actor;
 
@@ -867,8 +913,8 @@ let actorProto = function(actorProto) {
       let frozenSpec = desc.value._methodSpec;
       let spec = {};
       spec.name = frozenSpec.name || name;
-      spec.request = Request(object.merge({type: spec.name}, frozenSpec.request));
-      spec.response = Response(frozenSpec.response);
+      spec.request = Request(object.merge({type: spec.name}, frozenSpec.request || undefined));
+      spec.response = Response(frozenSpec.response || undefined);
       spec.telemetry = frozenSpec.telemetry;
       spec.release = frozenSpec.release;
       spec.oneway = frozenSpec.oneway;
@@ -906,20 +952,27 @@ let actorProto = function(actorProto) {
           response.from = this.actorID;
           // If spec.release has been specified, destroy the object.
           if (spec.release) {
-            this.destroy();
+            try {
+              this.destroy();
+            } catch(e) {
+              this.writeError(e);
+              return;
+            }
           }
 
           conn.send(response);
         };
 
-        if (ret && ret.then) {
-          ret.then(sendReturn).then(null, this.writeError.bind(this));
-        } else {
-          sendReturn(ret);
-        }
-
+        this._queueResponse(p => {
+          return p
+            .then(() => ret)
+            .then(sendReturn)
+            .then(null, this.writeError.bind(this));
+        })
       } catch(e) {
-        this.writeError(e);
+        this._queueResponse(p => {
+          return p.then(() => this.writeError(e));
+        });
       }
     };
 
@@ -945,7 +998,10 @@ exports.ActorClass = function(proto) {
   if (!registeredTypes.has(proto.typeName)) {
     types.addActorType(proto.typeName);
   }
-  return Class(actorProto(proto));
+  let cls = Class(actorProto(proto));
+
+  registeredTypes.get(proto.typeName).actorSpec = proto._actorSpec;
+  return cls;
 };
 
 /**
@@ -977,6 +1033,12 @@ let Front = Class({
   },
 
   destroy: function() {
+    // Reject all outstanding requests, they won't make sense after
+    // the front is destroyed.
+    while (this._requests && this._requests.length > 0) {
+      let deferred = this._requests.shift();
+      deferred.reject(new Error("Connection closed"));
+    }
     Pool.prototype.destroy.call(this);
     this.actorID = null;
   },
@@ -1036,7 +1098,10 @@ let Front = Class({
 
     // Remaining packets must be responses.
     if (this._requests.length === 0) {
-      throw Error("Unexpected packet from " + this.actorID + ", " + packet.type);
+      let msg = "Unexpected packet " + this.actorID + ", " + JSON.stringify(packet);
+      let err = Error(msg);
+      console.error(err);
+      throw err;
     }
 
     let deferred = this._requests.shift();
@@ -1216,4 +1281,58 @@ exports.FrontClass = function(actorType, proto) {
   let cls = Class(frontProto(proto));
   registeredTypes.get(cls.prototype.typeName).frontClass = cls;
   return cls;
+}
+
+
+exports.dumpActorSpec = function(type) {
+  let actorSpec = type.actorSpec;
+  let ret = {
+    category: "actor",
+    typeName: type.name,
+    methods: [],
+    events: {}
+  };
+
+  for (let method of actorSpec.methods) {
+    ret.methods.push({
+      name: method.name,
+      release: method.release || undefined,
+      oneway: method.oneway || undefined,
+      request: method.request.describe(),
+      response: method.response.describe()
+    });
+  }
+
+  if (actorSpec.events) {
+    for (let [name, request] of actorSpec.events) {
+      ret.events[name] = request.describe();
+    }
+  }
+
+
+  JSON.stringify(ret);
+
+  return ret;
+}
+
+exports.dumpProtocolSpec = function() {
+  let ret = {
+    types: {},
+  };
+
+  for (let [name, type] of registeredTypes) {
+    // Force lazy instantiation if needed.
+    type = types.getType(name);
+    if (type.category === "dict") {
+      ret.types[name] = {
+        category: "dict",
+        typeName: name,
+        specializations: type.specializations
+      }
+    } else if (type.category === "actor") {
+      ret.types[name] = exports.dumpActorSpec(type);
+    }
+  }
+
+  return ret;
 }

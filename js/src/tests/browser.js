@@ -108,7 +108,7 @@ function writeFormattedResult( expect, actual, string, passed ) {
   var s = "<tt>"+ string ;
   s += "<b>" ;
   s += ( passed ) ? "<font color=#009900> &nbsp;" + PASSED
-    : "<font color=#aa0000>&nbsp;" +  FAILED + expect + "</tt>";
+    : "<font color=#aa0000>&nbsp;" +  FAILED + expect;
 
   DocumentWrite( s + "</font></b></tt><br>" );
   return passed;
@@ -156,8 +156,7 @@ function gc()
 {
   try
   {
-    netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
-    Components.utils.forceGC();
+    SpecialPowers.forceGC();
   }
   catch(ex)
   {
@@ -169,10 +168,8 @@ function jsdgc()
 {
   try
   {
-    // Thanks to dveditz
-    netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
-    var jsdIDebuggerService = Components.interfaces.jsdIDebuggerService;
-    var service = Components.classes['@mozilla.org/js/jsd/debugger-service;1'].
+    var jsdIDebuggerService = SpecialPowers.Ci.jsdIDebuggerService;
+    var service = SpecialPowers.Cc['@mozilla.org/js/jsd/debugger-service;1'].
       getService(jsdIDebuggerService);
     service.GC();
   }
@@ -202,9 +199,7 @@ function options(aOptionName)
   }
 
   if (aOptionName) {
-    netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
-    if (!(aOptionName in Components.utils)) {
-//    if (!(aOptionName in SpecialPowers.wrap(Components).utils)) {
+    if (!(aOptionName in SpecialPowers.Cu)) {
       // This test is trying to flip an unsupported option, so it's
       // likely no longer testing what it was supposed to.  Fail it
       // hard.
@@ -218,8 +213,7 @@ function options(aOptionName)
       // option is not set, toggle it to set
       options.currvalues[aOptionName] = true;
 
-//    SpecialPowers.wrap(Components).utils[aOptionName] = options.currvalues.hasOwnProperty(aOptionName);
-    Components.utils[aOptionName] =
+    SpecialPowers.Cu[aOptionName] =
       options.currvalues.hasOwnProperty(aOptionName);
   }
 
@@ -248,18 +242,15 @@ function optionsInit() {
   // and popping options
   options.stackvalues = [];
 
-  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
   for (var optionName in options.currvalues)
   {
     var propName = optionName;
 
-//    if (!(propName in SpecialPowers.wrap(Components).utils))
-    if (!(propName in Components.utils))
+    if (!(propName in SpecialPowers.Cu))
     {
       throw "options.currvalues is out of sync with Components.utils";
     }
-//    if (!SpecialPowers.wrap(Components).utils[propName])
-    if (!Components.utils[propName])
+    if (!SpecialPowers.Cu[propName])
     {
       delete options.currvalues[optionName];
     }
@@ -272,8 +263,7 @@ function optionsInit() {
 
 function gczeal(z)
 {
-  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
-  Components.utils.setGCZeal(z);
+  SpecialPowers.setGCZeal(z);
 }
 
 function jit(on)
@@ -386,31 +376,27 @@ function jsTestDriverBrowserInit()
     // must have at least suitepath/subsuite/testcase.js
     return;
   }
-  var suitepath = testpathparts.slice(0,testpathparts.length-2).join('/');
-  var subsuite = testpathparts[testpathparts.length - 2];
-  var test     = testpathparts[testpathparts.length - 1];
 
-  document.write('<title>' + suitepath + '/' + subsuite + '/' + test + '<\/title>');
+  document.write('<title>' + properties.test + '<\/title>');
 
   // XXX bc - the first document.written script is ignored if the protocol
   // is file:. insert an empty script tag, to work around it.
   document.write('<script></script>');
 
-  // Enable a test suite that has more than two levels of directories to
-  // provide browser.js and shell.js in its base directory.
-  // This assumes that suitepath is a relative path, as is the case in the
-  // try server environment. Absolute paths are not allowed.
-  if (suitepath.indexOf('/') !== -1) {
-    var base = suitepath.slice(0, suitepath.indexOf('/'));
-    outputscripttag(base + '/shell.js', properties);
-    outputscripttag(base + '/browser.js', properties);
+  // Output script tags for shell.js, then browser.js, at each level of the
+  // test path hierarchy.
+  var prepath = "";
+  var i = 0;
+  for (end = testpathparts.length - 1; i < end; i++) {
+    prepath += testpathparts[i] + "/";
+    outputscripttag(prepath + "shell.js", properties);
+    outputscripttag(prepath + "browser.js", properties);
   }
 
-  outputscripttag(suitepath + '/shell.js', properties);
-  outputscripttag(suitepath + '/browser.js', properties);
-  outputscripttag(suitepath + '/' + subsuite + '/shell.js', properties);
-  outputscripttag(suitepath + '/' + subsuite + '/browser.js', properties);
-  outputscripttag(suitepath + '/' + subsuite + '/' + test, properties);
+  // Output the test script itself.
+  outputscripttag(prepath + testpathparts[i], properties);
+
+  // Finally output the driver-end script to advance to the next test.
   outputscripttag('js-test-driver-end.js', properties);
   return;
 }
@@ -517,11 +503,9 @@ var gDialogCloserObserver;
 
 function registerDialogCloser()
 {
-  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
-//  gDialogCloser = SpecialPowers.wrap(Components).
-  gDialogCloser = Components.
-    classes['@mozilla.org/embedcomp/window-watcher;1'].
-    getService(Components.interfaces.nsIWindowWatcher);
+  gDialogCloser = SpecialPowers.
+    Cc['@mozilla.org/embedcomp/window-watcher;1'].
+    getService(SpecialPowers.Ci.nsIWindowWatcher);
 
   gDialogCloserObserver = {observe: dialogCloser_observe};
 

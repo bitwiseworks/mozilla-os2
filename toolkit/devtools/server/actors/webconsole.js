@@ -1,4 +1,4 @@
-/* -*- Mode: js2; js2-basic-offset: 2; indent-tabs-mode: nil; -*- */
+/* -*- js2-basic-offset: 2; indent-tabs-mode: nil; -*- */
 /* vim: set ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6,38 +6,49 @@
 
 "use strict";
 
-let Cc = Components.classes;
-let Ci = Components.interfaces;
-let Cu = Components.utils;
+let {Cc, Ci, Cu} = require("chrome");
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
+let { DebuggerServer, ActorPool } = require("devtools/server/main");
+// Symbols from script.js
+let { ThreadActor, EnvironmentActor, ObjectActor, LongStringActor } = DebuggerServer;
+
+Cu.import("resource://gre/modules/jsdebugger.jsm");
+addDebuggerToGlobal(this);
+
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
+XPCOMUtils.defineLazyGetter(this, "NetworkMonitor", () => {
+  return require("devtools/toolkit/webconsole/network-monitor")
+         .NetworkMonitor;
+});
+XPCOMUtils.defineLazyGetter(this, "NetworkMonitorChild", () => {
+  return require("devtools/toolkit/webconsole/network-monitor")
+         .NetworkMonitorChild;
+});
+XPCOMUtils.defineLazyGetter(this, "ConsoleProgressListener", () => {
+  return require("devtools/toolkit/webconsole/network-monitor")
+         .ConsoleProgressListener;
+});
+XPCOMUtils.defineLazyGetter(this, "events", () => {
+  return require("sdk/event/core");
+});
 
-XPCOMUtils.defineLazyModuleGetter(this, "WebConsoleUtils",
-                                  "resource://gre/modules/devtools/WebConsoleUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "ConsoleServiceListener",
-                                  "resource://gre/modules/devtools/WebConsoleUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "ConsoleAPIListener",
-                                  "resource://gre/modules/devtools/WebConsoleUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "ConsoleProgressListener",
-                                  "resource://gre/modules/devtools/WebConsoleUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "JSTermHelpers",
-                                  "resource://gre/modules/devtools/WebConsoleUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "JSPropertyProvider",
-                                  "resource://gre/modules/devtools/WebConsoleUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "NetworkMonitor",
-                                  "resource://gre/modules/devtools/WebConsoleUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "ConsoleAPIStorage",
-                                  "resource://gre/modules/ConsoleAPIStorage.jsm");
+for (let name of ["WebConsoleUtils", "ConsoleServiceListener",
+                  "ConsoleAPIListener", "JSTermHelpers", "JSPropertyProvider",
+                  "ConsoleReflowListener"]) {
+  Object.defineProperty(this, name, {
+    get: function(prop) {
+      if (prop == "WebConsoleUtils") {
+        prop = "Utils";
+      }
+      return require("devtools/toolkit/webconsole/utils")[prop];
+    }.bind(null, name),
+    configurable: true,
+    enumerable: true
+  });
+}
 
 
 /**
@@ -53,32 +64,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "ConsoleAPIStorage",
 function WebConsoleActor(aConnection, aParentActor)
 {
   this.conn = aConnection;
-
-  if (aParentActor instanceof BrowserTabActor &&
-      aParentActor.browser instanceof Ci.nsIDOMWindow) {
-    // B2G tab actor |this.browser| points to a DOM chrome window, not
-    // a xul:browser element.
-    //
-    // TODO: bug 802246 - b2g has only one tab actor, the shell.xul, which is
-    // not properly supported by the console actor - see bug for details.
-    //
-    // Below we work around the problem: selecting the shell.xul tab actor
-    // behaves as if the user picked the global console actor.
-    //this._window = aParentActor.browser;
-    this._window = Services.wm.getMostRecentWindow("navigator:browser");
-    this._isGlobalActor = true;
-  }
-  else if (aParentActor instanceof BrowserTabActor &&
-           aParentActor.browser instanceof Ci.nsIDOMElement) {
-    // Firefox for desktop tab actor |this.browser| points to the xul:browser
-    // element.
-    this._window = aParentActor.browser.contentWindow;
-  }
-  else {
-    // In all other cases we should behave as the global console actor.
-    this._window = Services.wm.getMostRecentWindow("navigator:browser");
-    this._isGlobalActor = true;
-  }
+  this.parentActor = aParentActor;
 
   this._actorPool = new ActorPool(this.conn);
   this.conn.addActorPool(this._actorPool);
@@ -87,18 +73,22 @@ function WebConsoleActor(aConnection, aParentActor)
 
   this.dbg = new Debugger();
 
-  this._protoChains = new Map();
-  this._dbgGlobals = new Map();
-  this._getDebuggerGlobal(this.window);
+  this._netEvents = new Map();
+  this._gripDepth = 0;
 
+  this._onWillNavigate = this._onWillNavigate.bind(this);
   this._onObserverNotification = this._onObserverNotification.bind(this);
-  Services.obs.addObserver(this._onObserverNotification,
-                           "inner-window-destroyed", false);
-  if (this._isGlobalActor) {
+  if (this.parentActor.isRootActor) {
     Services.obs.addObserver(this._onObserverNotification,
                              "last-pb-context-exited", false);
   }
+
+  this.traits = {
+    customNetworkRequest: !this._parentIsContentActor,
+  };
 }
+
+WebConsoleActor.l10n = new WebConsoleUtils.l10n("chrome://global/locale/console.properties");
 
 WebConsoleActor.prototype =
 {
@@ -110,11 +100,11 @@ WebConsoleActor.prototype =
   dbg: null,
 
   /**
-   * Tells if this Web Console actor is a global actor or not.
+   * This is used by the ObjectActor to keep track of the depth of grip() calls.
    * @private
-   * @type boolean
+   * @type number
    */
-  _isGlobalActor: false,
+  _gripDepth: null,
 
   /**
    * Actor pool for all of the actors we send to the client.
@@ -132,22 +122,13 @@ WebConsoleActor.prototype =
   _prefs: null,
 
   /**
-   * Holds a map between inner window IDs and Debugger.Objects for the window
-   * objects.
-   * @private
-   * @type Map
-   */
-  _dbgGlobals: null,
-
-  /**
-   * A cache of prototype chains for objects that have received a
-   * prototypeAndProperties request.
+   * Holds a map between nsIChannel objects and NetworkEventActors for requests
+   * created with sendHTTPRequest.
    *
    * @private
    * @type Map
-   * @see dbg-script-actors.js, ThreadActor._protoChains
    */
-  _protoChains: null,
+  _netEvents: null,
 
   /**
    * The debugger server connection instance.
@@ -156,12 +137,127 @@ WebConsoleActor.prototype =
   conn: null,
 
   /**
-   * The content window we work with.
+   * List of supported features by the console actor.
+   * @type object
+   */
+  traits: null,
+
+  /**
+   * Boolean getter that tells if the parent actor is a ContentActor.
+   *
+   * @private
+   * @type boolean
+   */
+  get _parentIsContentActor() {
+    return "ContentActor" in DebuggerServer &&
+            this.parentActor instanceof DebuggerServer.ContentActor;
+  },
+
+  /**
+   * The window we work with.
    * @type nsIDOMWindow
    */
-  get window() this._window,
+  get window() {
+    if (this.parentActor.isRootActor) {
+      return this._getWindowForBrowserConsole();
+    }
+    return this.parentActor.window;
+  },
 
-  _window: null,
+  /**
+   * Get a window to use for the browser console.
+   *
+   * @private
+   * @return nsIDOMWindow
+   *         The window to use, or null if no window could be found.
+   */
+  _getWindowForBrowserConsole: function WCA__getWindowForBrowserConsole()
+  {
+    // Check if our last used chrome window is still live.
+    let window = this._lastChromeWindow && this._lastChromeWindow.get();
+    // If not, look for a new one.
+    if (!window || window.closed) {
+      window = this.parentActor.window;
+      if (!window) {
+        // Try to find the Browser Console window to use instead.
+        window = Services.wm.getMostRecentWindow("devtools:webconsole");
+        // We prefer the normal chrome window over the console window,
+        // so we'll look for those windows in order to replace our reference.
+        let onChromeWindowOpened = () => {
+          // We'll look for this window when someone next requests window()
+          Services.obs.removeObserver(onChromeWindowOpened, "domwindowopened");
+          this._lastChromeWindow = null;
+        };
+        Services.obs.addObserver(onChromeWindowOpened, "domwindowopened", false);
+      }
+
+      this._handleNewWindow(window);
+    }
+
+    return window;
+  },
+
+  /**
+   * Store a newly found window on the actor to be used in the future.
+   *
+   * @private
+   * @param nsIDOMWindow window
+   *        The window to store on the actor (can be null).
+   */
+  _handleNewWindow: function WCA__handleNewWindow(window)
+  {
+    if (window) {
+      if (this._hadChromeWindow) {
+        let contextChangedMsg = WebConsoleActor.l10n.getStr("evaluationContextChanged");
+        Services.console.logStringMessage(contextChangedMsg);
+      }
+      this._lastChromeWindow = Cu.getWeakReference(window);
+      this._hadChromeWindow = true;
+    } else {
+      this._lastChromeWindow = null;
+    }
+  },
+
+  /**
+   * Whether we've been using a window before.
+   *
+   * @private
+   * @type boolean
+   */
+  _hadChromeWindow: false,
+
+  /**
+   * A weak reference to the last chrome window we used to work with.
+   *
+   * @private
+   * @type nsIWeakReference
+   */
+  _lastChromeWindow: null,
+
+  // The evalWindow is used at the scope for JS evaluation.
+  _evalWindow: null,
+  get evalWindow() {
+    return this._evalWindow || this.window;
+  },
+
+  set evalWindow(aWindow) {
+    this._evalWindow = aWindow;
+
+    if (!this._progressListenerActive) {
+      events.on(this.parentActor, "will-navigate", this._onWillNavigate);
+      this._progressListenerActive = true;
+    }
+  },
+
+  /**
+   * Flag used to track if we are listening for events from the progress
+   * listener of the tab actor. We use the progress listener to clear
+   * this.evalWindow on page navigation.
+   *
+   * @private
+   * @type boolean
+   */
+  _progressListenerActive: false,
 
   /**
    * The ConsoleServiceListener instance.
@@ -185,11 +281,16 @@ WebConsoleActor.prototype =
   consoleProgressListener: null,
 
   /**
-   * Getter for the NetworkMonitor.saveRequestAndResponseBodies preference.
-   * @type boolean
+   * The ConsoleReflowListener instance.
    */
-  get saveRequestAndResponseBodies()
-    this._prefs["NetworkMonitor.saveRequestAndResponseBodies"],
+  consoleReflowListener: null,
+
+  /**
+   * The JSTerm Helpers names cache.
+   * @private
+   * @type array
+   */
+  _jstermHelpersCache: null,
 
   actorPrefix: "console",
 
@@ -198,7 +299,17 @@ WebConsoleActor.prototype =
     return { actor: this.actorID };
   },
 
-  hasNativeConsoleAPI: BrowserTabActor.prototype.hasNativeConsoleAPI,
+  hasNativeConsoleAPI: function WCA_hasNativeConsoleAPI(aWindow) {
+    let isNative = false;
+    try {
+      // We are very explicitly examining the "console" property of
+      // the non-Xrayed object here.
+      let console = aWindow.wrappedJSObject.console;
+      isNative = console instanceof aWindow.Console;
+    }
+    catch (ex) { }
+    return isNative;
+  },
 
   _createValueGrip: ThreadActor.prototype.createValueGrip,
   _stringIsLong: ThreadActor.prototype._stringIsLong,
@@ -226,19 +337,50 @@ WebConsoleActor.prototype =
       this.consoleProgressListener.destroy();
       this.consoleProgressListener = null;
     }
+    if (this.consoleReflowListener) {
+      this.consoleReflowListener.destroy();
+      this.consoleReflowListener = null;
+    }
     this.conn.removeActorPool(this._actorPool);
-    Services.obs.removeObserver(this._onObserverNotification,
-                                "inner-window-destroyed");
-    if (this._isGlobalActor) {
+    if (this.parentActor.isRootActor) {
       Services.obs.removeObserver(this._onObserverNotification,
                                   "last-pb-context-exited");
     }
     this._actorPool = null;
-    this._protoChains.clear();
-    this._dbgGlobals.clear();
+
+    this._jstermHelpersCache = null;
+    this._evalWindow = null;
+    this._netEvents.clear();
     this.dbg.enabled = false;
     this.dbg = null;
-    this.conn = this._window = null;
+    this.conn = null;
+  },
+
+  /**
+   * Create and return an environment actor that corresponds to the provided
+   * Debugger.Environment. This is a straightforward clone of the ThreadActor's
+   * method except that it stores the environment actor in the web console
+   * actor's pool.
+   *
+   * @param Debugger.Environment aEnvironment
+   *        The lexical environment we want to extract.
+   * @return The EnvironmentActor for aEnvironment or undefined for host
+   *         functions or functions scoped to a non-debuggee global.
+   */
+  createEnvironmentActor: function WCA_createEnvironmentActor(aEnvironment) {
+    if (!aEnvironment) {
+      return undefined;
+    }
+
+    if (aEnvironment.actor) {
+      return aEnvironment.actor;
+    }
+
+    let actor = new EnvironmentActor(aEnvironment, this);
+    this._actorPool.addActor(actor);
+    aEnvironment.actor = actor;
+
+    return actor;
   },
 
   /**
@@ -274,16 +416,7 @@ WebConsoleActor.prototype =
         // The above can throw an exception if aValue is not an actual object.
       }
     }
-    let dbgGlobal = null;
-    try {
-      dbgGlobal = this._getDebuggerGlobal(global);
-    }
-    catch (ex) {
-      // The above call can throw in addDebuggee() if the given global object
-      // is already in the stackframe of code that is executing now. Console.jsm
-      // and the Browser Console can cause this case.
-      dbgGlobal = this._getDebuggerGlobal(this.window);
-    }
+    let dbgGlobal = this.dbg.makeGlobalObjectReference(global);
     return dbgGlobal.makeDebuggeeValue(aValue);
   },
 
@@ -376,7 +509,14 @@ WebConsoleActor.prototype =
   onStartListeners: function WCA_onStartListeners(aRequest)
   {
     let startedListeners = [];
-    let window = !this._isGlobalActor ? this.window : null;
+    let window = !this.parentActor.isRootActor ? this.window : null;
+    let appId = null;
+    let messageManager = null;
+
+    if (this._parentIsContentActor) {
+      appId = this.parentActor.docShell.appId;
+      messageManager = this.parentActor.messageManager;
+    }
 
     while (aRequest.listeners.length > 0) {
       let listener = aRequest.listeners.shift();
@@ -399,8 +539,14 @@ WebConsoleActor.prototype =
           break;
         case "NetworkActivity":
           if (!this.networkMonitor) {
-            this.networkMonitor =
-              new NetworkMonitor(window, this);
+            if (appId || messageManager) {
+              this.networkMonitor =
+                new NetworkMonitorChild(appId, messageManager,
+                                        this.parentActor.actorID, this);
+            }
+            else {
+              this.networkMonitor = new NetworkMonitor({ window: window }, this);
+            }
             this.networkMonitor.init();
           }
           startedListeners.push(listener);
@@ -414,11 +560,19 @@ WebConsoleActor.prototype =
                                                     MONITOR_FILE_ACTIVITY);
           startedListeners.push(listener);
           break;
+        case "ReflowActivity":
+          if (!this.consoleReflowListener) {
+            this.consoleReflowListener =
+              new ConsoleReflowListener(this.window, this);
+          }
+          startedListeners.push(listener);
+          break;
       }
     }
     return {
       startedListeners: startedListeners,
       nativeConsoleAPI: this.hasNativeConsoleAPI(this.window),
+      traits: this.traits,
     };
   },
 
@@ -469,6 +623,14 @@ WebConsoleActor.prototype =
           if (this.consoleProgressListener) {
             this.consoleProgressListener.stopMonitor(this.consoleProgressListener.
                                                      MONITOR_FILE_ACTIVITY);
+            this.consoleProgressListener = null;
+          }
+          stoppedListeners.push(listener);
+          break;
+        case "ReflowActivity":
+          if (this.consoleReflowListener) {
+            this.consoleReflowListener.destroy();
+            this.consoleReflowListener = null;
           }
           stoppedListeners.push(listener);
           break;
@@ -508,7 +670,7 @@ WebConsoleActor.prototype =
             break;
           }
           let cache = this.consoleAPIListener
-                      .getCachedMessages(!this._isGlobalActor);
+                      .getCachedMessages(!this.parentActor.isRootActor);
           cache.forEach((aMessage) => {
             let message = this.prepareConsoleMessageForRemote(aMessage);
             message._type = type;
@@ -521,7 +683,7 @@ WebConsoleActor.prototype =
             break;
           }
           let cache = this.consoleServiceListener
-                      .getCachedMessages(!this._isGlobalActor);
+                      .getCachedMessages(!this.parentActor.isRootActor);
           cache.forEach((aMessage) => {
             let message = null;
             if (aMessage instanceof Ci.nsIScriptError) {
@@ -567,12 +729,13 @@ WebConsoleActor.prototype =
     let evalOptions = {
       bindObjectActor: aRequest.bindObjectActor,
       frameActor: aRequest.frameActor,
+      url: aRequest.url,
     };
     let evalInfo = this.evalWithDebugger(input, evalOptions);
     let evalResult = evalInfo.result;
     let helperResult = evalInfo.helperResult;
 
-    let result, error, errorMessage;
+    let result, errorMessage, errorGrip = null;
     if (evalResult) {
       if ("return" in evalResult) {
         result = evalResult.return;
@@ -581,7 +744,8 @@ WebConsoleActor.prototype =
         result = evalResult.yield;
       }
       else if ("throw" in evalResult) {
-        error = evalResult.throw;
+        let error = evalResult.throw;
+        errorGrip = this.createValueGrip(error);
         let errorToString = evalInfo.window
                             .evalInGlobalWithBindings("ex + ''", {ex: error});
         if (errorToString && typeof errorToString.return == "string") {
@@ -595,7 +759,7 @@ WebConsoleActor.prototype =
       input: input,
       result: this.createValueGrip(result),
       timestamp: timestamp,
-      exception: error ? this.createValueGrip(error) : null,
+      exception: errorGrip,
       exceptionMessage: errorMessage,
       helperResult: helperResult,
     };
@@ -611,12 +775,49 @@ WebConsoleActor.prototype =
    */
   onAutocomplete: function WCA_onAutocomplete(aRequest)
   {
-    // TODO: Bug 842682 - use the debugger API for autocomplete in the Web
-    // Console, and provide suggestions from the selected debugger stack frame.
-    let result = JSPropertyProvider(this.window, aRequest.text) || {};
+    let frameActorId = aRequest.frameActor;
+    let dbgObject = null;
+    let environment = null;
+
+    // This is the case of the paused debugger
+    if (frameActorId) {
+      let frameActor = this.conn.getActor(frameActorId);
+      if (frameActor) {
+        let frame = frameActor.frame;
+        environment = frame.environment;
+      }
+      else {
+        Cu.reportError("Web Console Actor: the frame actor was not found: " +
+                       frameActorId);
+      }
+    }
+    // This is the general case (non-paused debugger)
+    else {
+      dbgObject = this.dbg.makeGlobalObjectReference(this.evalWindow);
+    }
+
+    let result = JSPropertyProvider(dbgObject, environment, aRequest.text,
+                                    aRequest.cursor, frameActorId) || {};
+    let matches = result.matches || [];
+    let reqText = aRequest.text.substr(0, aRequest.cursor);
+
+    // We consider '$' as alphanumerc because it is used in the names of some
+    // helper functions.
+    let lastNonAlphaIsDot = /[.][a-zA-Z0-9$]*$/.test(reqText);
+    if (!lastNonAlphaIsDot) {
+      if (!this._jstermHelpersCache) {
+        let helpers = {
+          sandbox: Object.create(null)
+        };
+        JSTermHelpers(helpers);
+        this._jstermHelpersCache = Object.getOwnPropertyNames(helpers.sandbox);
+      }
+      matches = matches.concat(this._jstermHelpersCache.filter(n => n.startsWith(result.matchProp)));
+    }
+
     return {
       from: this.actorID,
-      matches: result.matches || [],
+      matches: matches.sort(),
       matchProp: result.matchProp,
     };
   },
@@ -627,10 +828,13 @@ WebConsoleActor.prototype =
   onClearMessagesCache: function WCA_onClearMessagesCache()
   {
     // TODO: Bug 717611 - Web Console clear button does not clear cached errors
-    let windowId = !this._isGlobalActor ?
+    let windowId = !this.parentActor.isRootActor ?
                    WebConsoleUtils.getInnerWindowId(this.window) : null;
+    let ConsoleAPIStorage = Cc["@mozilla.org/consoleAPI-storage;1"]
+                              .getService(Ci.nsIConsoleAPIStorage);
     ConsoleAPIStorage.clearEvents(windowId);
-    if (this._isGlobalActor) {
+
+    if (this.parentActor.isRootActor) {
       Services.console.logStringMessage(null); // for the Error Console
       Services.console.reset();
     }
@@ -664,6 +868,11 @@ WebConsoleActor.prototype =
   {
     for (let key in aRequest.preferences) {
       this._prefs[key] = aRequest.preferences[key];
+
+      if (key == "NetworkMonitor.saveRequestAndResponseBodies" &&
+          this.networkMonitor) {
+        this.networkMonitor.saveRequestAndResponseBodies = this._prefs[key];
+      }
     }
     return { updated: Object.keys(aRequest.preferences) };
   },
@@ -671,27 +880,6 @@ WebConsoleActor.prototype =
   //////////////////
   // End of request handlers.
   //////////////////
-
-  /**
-   * Get the Debugger.Object for the given global object (usually a window
-   * object).
-   *
-   * @private
-   * @param object aGlobal
-   *        The global object for which you want a Debugger.Object.
-   * @return Debugger.Object
-   *         The Debugger.Object for the given global object.
-   */
-  _getDebuggerGlobal: function WCA__getDebuggerGlobal(aGlobal)
-  {
-    let windowId = WebConsoleUtils.getInnerWindowId(aGlobal);
-    if (!this._dbgGlobals.has(windowId)) {
-      let dbgGlobal = this.dbg.addDebuggee(aGlobal);
-      this.dbg.removeDebuggee(aGlobal);
-      this._dbgGlobals.set(windowId, dbgGlobal);
-    }
-    return this._dbgGlobals.get(windowId);
-  },
 
   /**
    * Create an object with the API we expose to the Web Console during
@@ -710,12 +898,13 @@ WebConsoleActor.prototype =
   _getJSTermHelpers: function WCA__getJSTermHelpers(aDebuggerGlobal)
   {
     let helpers = {
-      window: this.window,
+      window: this.evalWindow,
       chromeWindow: this.chromeWindow.bind(this),
       makeDebuggeeValue: aDebuggerGlobal.makeDebuggeeValue.bind(aDebuggerGlobal),
       createValueGrip: this.createValueGrip.bind(this),
       sandbox: Object.create(null),
       helperResult: null,
+      consoleActor: this,
     };
     JSTermHelpers(helpers);
 
@@ -782,22 +971,14 @@ WebConsoleActor.prototype =
    *         evaluated.
    *         - result: the result of the evaluation.
    *         - helperResult: any result coming from a JSTerm helper function.
+   *         - url: the url to evaluate the script as. Defaults to
+   *         "debugger eval code".
    */
   evalWithDebugger: function WCA_evalWithDebugger(aString, aOptions = {})
   {
     // The help function needs to be easy to guess, so we make the () optional.
     if (aString.trim() == "help" || aString.trim() == "?") {
       aString = "help()";
-    }
-
-    // Find the Debugger.Object of the given ObjectActor. This is used as
-    // a binding during eval: |_self|.
-    let bindSelf = null;
-    if (aOptions.bindObjectActor) {
-      let objActor = this.getActorByID(aOptions.bindObjectActor);
-      if (objActor) {
-        bindSelf = objActor.obj;
-      }
     }
 
     // Find the Debugger.Frame of the given FrameActor.
@@ -813,36 +994,31 @@ WebConsoleActor.prototype =
       }
     }
 
-    // Determine which debugger to use, depending on the presence of the
-    // stackframe.
-    // This helps with avoid having bindings from a different Debugger. The
-    // Debugger.Frame comes from the jsdebugger's Debugger instance.
-    let dbg = this.dbg;
-    let dbgWindow = this._getDebuggerGlobal(this.window);
-    if (frame) {
-      dbg = frameActor.threadActor.dbg;
-      dbgWindow = dbg.addDebuggee(this.window);
-    }
+    // If we've been given a frame actor in whose scope we should evaluate the
+    // expression, be sure to use that frame's Debugger (that is, the JavaScript
+    // debugger's Debugger) for the whole operation, not the console's Debugger.
+    // (One Debugger will treat a different Debugger's Debugger.Object instances
+    // as ordinary objects, not as references to be followed, so mixing
+    // debuggers causes strange behaviors.)
+    let dbg = frame ? frameActor.threadActor.dbg : this.dbg;
+    let dbgWindow = dbg.makeGlobalObjectReference(this.evalWindow);
 
-    // If we have an object to bind to |_self| we need to determine the
-    // global of the given JavaScript object.
-    if (bindSelf) {
-      let jsObj = bindSelf.unsafeDereference();
-      let global = Cu.getGlobalForObject(jsObj);
-
-      // Get the Debugger.Object for the new global.
-      if (global != this.window) {
-        dbgWindow = dbg.addDebuggee(global);
-
-        // Remove the debuggee only if the Debugger instance belongs to the
-        // console actor, to avoid breaking the ThreadActor that owns the
-        // Debugger object.
-        if (dbg == this.dbg) {
-          dbg.removeDebuggee(global);
-        }
+    // If we have an object to bind to |_self|, create a Debugger.Object
+    // referring to that object, belonging to dbg.
+    let bindSelf = null;
+    let dbgWindow = dbg.makeGlobalObjectReference(this.evalWindow);
+    if (aOptions.bindObjectActor) {
+      let objActor = this.getActorByID(aOptions.bindObjectActor);
+      if (objActor) {
+        let jsObj = objActor.obj.unsafeDereference();
+        // If we use the makeDebuggeeValue method of jsObj's own global, then
+        // we'll get a D.O that sees jsObj as viewed from its own compartment -
+        // that is, without wrappers. The evalWithBindings call will then wrap
+        // jsObj appropriately for the evaluation compartment.
+        let global = Cu.getGlobalForObject(jsObj);
+        dbgWindow = dbg.makeGlobalObjectReference(global);
+        bindSelf = dbgWindow.makeDebuggeeValue(jsObj);
       }
-
-      bindSelf = dbgWindow.makeDebuggeeValue(jsObj);
     }
 
     // Get the JSTerm helpers for the given debugger window.
@@ -880,12 +1056,17 @@ WebConsoleActor.prototype =
     // Ready to evaluate the string.
     helpers.evalInput = aString;
 
+    let evalOptions;
+    if (typeof aOptions.url == "string") {
+      evalOptions = { url: aOptions.url };
+    }
+
     let result;
     if (frame) {
-      result = frame.evalWithBindings(aString, bindings);
+      result = frame.evalWithBindings(aString, bindings, evalOptions);
     }
     else {
-      result = dbgWindow.evalInGlobalWithBindings(aString, bindings);
+      result = dbgWindow.evalInGlobalWithBindings(aString, bindings, evalOptions);
     }
 
     let helperResult = helpers.helperResult;
@@ -998,18 +1179,20 @@ WebConsoleActor.prototype =
    * is about to be recorded.
    *
    * @see NetworkEventActor
-   * @see NetworkMonitor from WebConsoleUtils.jsm
+   * @see NetworkMonitor from webconsole/utils.js
    *
    * @param object aEvent
    *        The initial network request event information.
+   * @param nsIHttpChannel aChannel
+   *        The network request nsIHttpChannel object.
    * @return object
    *         A new NetworkEventActor is returned. This is used for tracking the
    *         network request and response.
    */
-  onNetworkEvent: function WCA_onNetworkEvent(aEvent)
+  onNetworkEvent: function WCA_onNetworkEvent(aEvent, aChannel)
   {
-    let actor = new NetworkEventActor(aEvent, this);
-    this._actorPool.addActor(actor);
+    let actor = this.getNetworkEventActor(aChannel);
+    actor.init(aEvent);
 
     let packet = {
       from: this.actorID,
@@ -1020,6 +1203,59 @@ WebConsoleActor.prototype =
     this.conn.send(packet);
 
     return actor;
+  },
+
+  /**
+   * Get the NetworkEventActor for a nsIChannel, if it exists,
+   * otherwise create a new one.
+   *
+   * @param nsIHttpChannel aChannel
+   *        The channel for the network event.
+   * @return object
+   *         The NetworkEventActor for the given channel.
+   */
+  getNetworkEventActor: function WCA_getNetworkEventActor(aChannel) {
+    let actor = this._netEvents.get(aChannel);
+    if (actor) {
+      // delete from map as we should only need to do this check once
+      this._netEvents.delete(aChannel);
+      actor.channel = null;
+      return actor;
+    }
+
+    actor = new NetworkEventActor(aChannel, this);
+    this._actorPool.addActor(actor);
+    return actor;
+  },
+
+  /**
+   * Send a new HTTP request from the target's window.
+   *
+   * @param object aMessage
+   *        Object with 'request' - the HTTP request details.
+   */
+  onSendHTTPRequest: function WCA_onSendHTTPRequest(aMessage)
+  {
+    let details = aMessage.request;
+
+    // send request from target's window
+    let request = new this.window.XMLHttpRequest();
+    request.open(details.method, details.url, true);
+
+    for (let {name, value} of details.headers) {
+      request.setRequestHeader(name, value);
+    }
+    request.send(details.body);
+
+    let actor = this.getNetworkEventActor(request.channel);
+
+    // map channel to actor so we can associate future events with it
+    this._netEvents.set(request.channel, actor);
+
+    return {
+      from: this.actorID,
+      eventActor: actor.grip()
+    };
   },
 
   /**
@@ -1037,6 +1273,29 @@ WebConsoleActor.prototype =
       type: "fileActivity",
       uri: aFileURI,
     };
+    this.conn.send(packet);
+  },
+
+  /**
+   * Handler for reflow activity. This method forwards reflow events to the
+   * remote Web Console client.
+   *
+   * @see ConsoleReflowListener
+   * @param Object aReflowInfo
+   */
+  onReflowActivity: function WCA_onReflowActivity(aReflowInfo)
+  {
+    let packet = {
+      from: this.actorID,
+      type: "reflowActivity",
+      interruptible: aReflowInfo.interruptible,
+      start: aReflowInfo.start,
+      end: aReflowInfo.end,
+      sourceURL: aReflowInfo.sourceURL,
+      sourceLine: aReflowInfo.sourceLine,
+      functionName: aReflowInfo.functionName
+    };
+
     this.conn.send(packet);
   },
 
@@ -1066,6 +1325,10 @@ WebConsoleActor.prototype =
       return this.createValueGrip(dbgObj);
     });
 
+    result.styles = Array.map(aMessage.styles || [], (aString) => {
+      return this.createValueGrip(aString);
+    });
+
     return result;
   },
 
@@ -1092,8 +1355,7 @@ WebConsoleActor.prototype =
   },
 
   /**
-   * Notification observer for the "inner-window-destroyed" topic. This function
-   * cleans up |this._dbgGlobals| when needed.
+   * Notification observer for the "last-pb-context-exited" topic.
    *
    * @private
    * @param object aSubject
@@ -1105,19 +1367,25 @@ WebConsoleActor.prototype =
   _onObserverNotification: function WCA__onObserverNotification(aSubject, aTopic)
   {
     switch (aTopic) {
-      case "inner-window-destroyed": {
-        let windowId = aSubject.QueryInterface(Ci.nsISupportsPRUint64).data;
-        if (this._dbgGlobals.has(windowId)) {
-          this._dbgGlobals.delete(windowId);
-        }
-        break;
-      }
       case "last-pb-context-exited":
         this.conn.send({
           from: this.actorID,
           type: "lastPrivateContextExited",
         });
         break;
+    }
+  },
+
+  /**
+   * The "will-navigate" progress listener. This is used to clear the current
+   * eval scope.
+   */
+  _onWillNavigate: function WCA__onWillNavigate({ window, isTopLevel })
+  {
+    if (isTopLevel) {
+      this._evalWindow = null;
+      events.off(this.parentActor, "will-navigate", this._onWillNavigate);
+      this._progressListenerActive = false;
     }
   },
 };
@@ -1131,33 +1399,32 @@ WebConsoleActor.prototype.requestTypes =
   autocomplete: WebConsoleActor.prototype.onAutocomplete,
   clearMessagesCache: WebConsoleActor.prototype.onClearMessagesCache,
   getPreferences: WebConsoleActor.prototype.onGetPreferences,
-  setPreferences: WebConsoleActor.prototype.onSetPreferences
+  setPreferences: WebConsoleActor.prototype.onSetPreferences,
+  sendHTTPRequest: WebConsoleActor.prototype.onSendHTTPRequest
 };
 
 /**
  * Creates an actor for a network event.
  *
  * @constructor
- * @param object aNetworkEvent
- *        The network event you want to use the actor for.
+ * @param object aChannel
+ *        The nsIChannel associated with this event.
  * @param object aWebConsoleActor
  *        The parent WebConsoleActor instance for this object.
  */
-function NetworkEventActor(aNetworkEvent, aWebConsoleActor)
+function NetworkEventActor(aChannel, aWebConsoleActor)
 {
   this.parent = aWebConsoleActor;
   this.conn = this.parent.conn;
-
-  this._startedDateTime = aNetworkEvent.startedDateTime;
-  this._isXHR = aNetworkEvent.isXHR;
+  this.channel = aChannel;
 
   this._request = {
-    method: aNetworkEvent.method,
-    url: aNetworkEvent.url,
-    httpVersion: aNetworkEvent.httpVersion,
+    method: null,
+    url: null,
+    httpVersion: null,
     headers: [],
     cookies: [],
-    headersSize: aNetworkEvent.headersSize,
+    headersSize: null,
     postData: {},
   };
 
@@ -1171,10 +1438,6 @@ function NetworkEventActor(aNetworkEvent, aWebConsoleActor)
 
   // Keep track of LongStringActors owned by this NetworkEventActor.
   this._longStringActors = new Set();
-
-  this._discardRequestBody = aNetworkEvent.discardRequestBody;
-  this._discardResponseBody = aNetworkEvent.discardResponseBody;
-  this._private = aNetworkEvent.private;
 }
 
 NetworkEventActor.prototype =
@@ -1213,6 +1476,10 @@ NetworkEventActor.prototype =
       }
     }
     this._longStringActors = new Set();
+
+    if (this.channel) {
+      this.parent._netEvents.delete(this.channel);
+    }
     this.parent.releaseActor(this);
   },
 
@@ -1223,6 +1490,27 @@ NetworkEventActor.prototype =
   {
     this.release();
     return {};
+  },
+
+  /**
+   * Set the properties of this actor based on it's corresponding
+   * network event.
+   *
+   * @param object aNetworkEvent
+   *        The network event associated with this actor.
+   */
+  init: function NEA_init(aNetworkEvent)
+  {
+    this._startedDateTime = aNetworkEvent.startedDateTime;
+    this._isXHR = aNetworkEvent.isXHR;
+
+    for (let prop of ['method', 'url', 'httpVersion', 'headersSize']) {
+      this._request[prop] = aNetworkEvent[prop];
+    }
+
+    this._discardRequestBody = aNetworkEvent.discardRequestBody;
+    this._discardResponseBody = aNetworkEvent.discardResponseBody;
+    this._private = aNetworkEvent.private;
   },
 
   /**
@@ -1549,7 +1837,12 @@ NetworkEventActor.prototype.requestTypes =
   "getEventTimings": NetworkEventActor.prototype.onGetEventTimings,
 };
 
-DebuggerServer.addTabActor(WebConsoleActor, "consoleActor");
-DebuggerServer.addGlobalActor(WebConsoleActor, "consoleActor");
+exports.register = function(handle) {
+  handle.addGlobalActor(WebConsoleActor, "consoleActor");
+  handle.addTabActor(WebConsoleActor, "consoleActor");
+};
 
-
+exports.unregister = function(handle) {
+  handle.removeGlobalActor(WebConsoleActor, "consoleActor");
+  handle.removeTabActor(WebConsoleActor, "consoleActor");
+};

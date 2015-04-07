@@ -79,7 +79,7 @@ is(BODY_UCS2.length,      CB_MAX_CONTENT_UCS2,     "BODY_UCS2.length");
 is(BODY_UCS2_IND.length,  CB_MAX_CONTENT_UCS2 - 1, "BODY_UCS2_IND.length")
 
 let cbs = window.navigator.mozCellBroadcast;
-ok(cbs instanceof MozCellBroadcast,
+ok(cbs instanceof window.MozCellBroadcast,
    "mozCellBroadcast is instanceof " + cbs.constructor);
 
 let pendingEmulatorCmdCount = 0;
@@ -87,7 +87,7 @@ function sendCellBroadcastMessage(pdu, callback) {
   pendingEmulatorCmdCount++;
 
   let cmd = "cbs pdu " + pdu;
-  runEmulatorCmd(cmd, function (result) {
+  runEmulatorCmd(cmd, function(result) {
     pendingEmulatorCmdCount--;
 
     is(result[0], "OK", "Emulator response");
@@ -157,7 +157,7 @@ function testGsmMessageAttributes() {
     ok(message, "event.message is valid");
 
     // Attributes other than `language` and `body` should always be assigned.
-    ok(message.geographicalScope != null, "message.geographicalScope");
+    ok(message.gsmGeographicalScope != null, "message.gsmGeographicalScope");
     ok(message.messageCode != null, "message.messageCode");
     ok(message.messageId != null, "message.messageId");
     ok(message.language != null, "message.language");
@@ -170,6 +170,7 @@ function testGsmMessageAttributes() {
       ok(message.etws.emergencyUserAlert != null, "message.etws.emergencyUserAlert");
       ok(message.etws.popup != null, "message.etws.popup");
     }
+    ok(message.cdmaServiceCategory != null, "message.cdmaServiceCategory");
 
     window.setTimeout(testReceiving_GSM_GeographicalScope, 0);
   });
@@ -186,9 +187,9 @@ function testReceiving_GSM_GeographicalScope() {
     let pdu = buildHexStr(((gs & 0x03) << 14), 4)
             + buildHexStr(0, (CB_MESSAGE_SIZE_GSM - 2) * 2);
 
-    doTestHelper(pdu, nextTest, function (message) {
-      is(message.geographicalScope, CB_GSM_GEOGRAPHICAL_SCOPE_NAMES[gs],
-         "message.geographicalScope");
+    doTestHelper(pdu, nextTest, function(message) {
+      is(message.gsmGeographicalScope, CB_GSM_GEOGRAPHICAL_SCOPE_NAMES[gs],
+         "message.gsmGeographicalScope");
     });
   }
 
@@ -210,7 +211,7 @@ function testReceiving_GSM_MessageCode() {
     let pdu = buildHexStr(((messageCode & 0x3FF) << 4), 4)
             + buildHexStr(0, (CB_MESSAGE_SIZE_GSM - 2) * 2);
 
-    doTestHelper(pdu, nextTest, function (message) {
+    doTestHelper(pdu, nextTest, function(message) {
       is(message.messageCode, messageCode, "message.messageCode");
     });
   }
@@ -232,7 +233,7 @@ function testReceiving_GSM_MessageId() {
             + buildHexStr((messageId & 0xFFFF), 4)
             + buildHexStr(0, (CB_MESSAGE_SIZE_GSM - 4) * 2);
 
-    doTestHelper(pdu, nextTest, function (message) {
+    doTestHelper(pdu, nextTest, function(message) {
       is(message.messageId, messageId, "message.messageId");
       ok(message.etws == null, "message.etws");
     });
@@ -325,7 +326,7 @@ function testReceiving_GSM_Language_and_Body() {
 
     let nextTest = (dcs < 0xFF) ? do_test.bind(null, dcs + 1)
                                  : testReceiving_GSM_Timestamp;
-    doTestHelper(pdu, nextTest, function (message) {
+    doTestHelper(pdu, nextTest, function(message) {
       if (language) {
         is(message.language, language, "message.language");
       } else if (indicator) {
@@ -357,7 +358,7 @@ function testReceiving_GSM_Timestamp() {
   log("Test receiving GSM Cell Broadcast - Timestamp");
 
   let pdu = buildHexStr(0, CB_MESSAGE_SIZE_GSM * 2);
-  doTestHelper(pdu, testReceiving_GSM_WarningType, function (message) {
+  doTestHelper(pdu, testReceiving_GSM_WarningType, function(message) {
     // Cell Broadcast messages do not contain a timestamp field (however, ETWS
     // does). We only check the timestamp doesn't go too far (60 seconds) here.
     let msMessage = message.timestamp.getTime();
@@ -379,7 +380,7 @@ function testReceiving_GSM_WarningType() {
             + buildHexStr((messageId & 0xFFFF), 4)
             + buildHexStr(0, (CB_MESSAGE_SIZE_GSM - 4) * 2);
 
-    doTestHelper(pdu, nextTest, function (message) {
+    doTestHelper(pdu, nextTest, function(message) {
       is(message.messageId, messageId, "message.messageId");
       ok(message.etws != null, "message.etws");
 
@@ -401,7 +402,7 @@ function doTestEmergencyUserAlert_or_Popup(name, mask, nextTest) {
           + buildHexStr(CB_GSM_MESSAGEID_ETWS_BEGIN, 4)
           + buildHexStr(0, (CB_MESSAGE_SIZE_GSM - 4) * 2);
 
-  doTestHelper(pdu, nextTest, function (message) {
+  doTestHelper(pdu, nextTest, function(message) {
     is(message.messageId, CB_GSM_MESSAGEID_ETWS_BEGIN, "message.messageId");
     ok(message.etws != null, "message.etws");
     is(message.etws[name], mask != 0, "message.etws." + name);
@@ -434,13 +435,32 @@ function testReceiving_GSM_Multipart() {
       pdus.push(pdu);
     }
 
-    doTestHelper(pdus, nextTest, function (message) {
+    doTestHelper(pdus, nextTest, function(message) {
       is(message.body.length, (numParts * CB_MAX_CONTENT_7BIT),
          "message.body");
     });
   }
 
-  repeat(do_test, seq(16, 1), cleanUp);
+  repeat(do_test, seq(16, 1), testReceiving_GSM_ServiceCategory);
+}
+
+function testReceiving_GSM_ServiceCategory() {
+  log("Test receiving GSM Cell Broadcast - Service Category");
+
+  cbs.addEventListener("received", function onreceived(event) {
+    cbs.removeEventListener("received", onreceived);
+
+    let message = event.message;
+
+    // Bug 910091
+    // "Service Category" is not defined in GSM.  We should always get '0' here.
+    is(message.cdmaServiceCategory, 0, "message.cdmaServiceCategory");
+
+    window.setTimeout(cleanUp, 0);
+  });
+
+  let pdu = buildHexStr(0, CB_MESSAGE_SIZE_GSM * 2);
+  sendCellBroadcastMessage(pdu);
 }
 
 function cleanUp() {
@@ -455,7 +475,7 @@ function cleanUp() {
   finish();
 }
 
-waitFor(testGsmMessageAttributes, function () {
-  return navigator.mozMobileConnection.voice.connected;
+waitFor(testGsmMessageAttributes, function() {
+  return navigator.mozMobileConnections[0].voice.connected;
 });
 

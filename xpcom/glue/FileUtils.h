@@ -8,7 +8,7 @@
 
 #include "nscore.h" // nullptr
 
-#if defined(XP_UNIX) || defined(XP_OS2)
+#if defined(XP_UNIX)
 # include <unistd.h>
 #elif defined(XP_WIN)
 # include <io.h>
@@ -59,14 +59,27 @@ typedef Scoped<ScopedCloseFDTraits> ScopedClose;
 struct ScopedClosePRFDTraits
 {
   typedef PRFileDesc* type;
-  static type empty() { return NULL; }
+  static type empty() { return nullptr; }
   static void release(type fd) {
-    if (fd != NULL) {
+    if (fd != nullptr) {
       PR_Close(fd);
     }
   }
 };
 typedef Scoped<ScopedClosePRFDTraits> AutoFDClose;
+
+/* RAII wrapper for FILE descriptors */
+struct ScopedCloseFileTraits
+{
+  typedef FILE *type;
+  static type empty() { return nullptr; }
+  static void release(type f) {
+    if (f) {
+      fclose(f);
+    }
+  }
+};
+typedef Scoped<ScopedCloseFileTraits> ScopedCloseFile;
 
 /**
  * Fallocate efficiently and continuously allocates files via fallocate-type APIs.

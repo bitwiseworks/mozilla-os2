@@ -8,6 +8,7 @@
 
 #include "gfxASurface.h"
 #include "nsExpirationTracker.h"
+#include "nsSize.h"
 
 class gfxContext;
 
@@ -33,12 +34,11 @@ public:
    * When |aContentType| differs in different invocations this is handled
    * appropriately, creating a new surface if necessary.
    * 
-   * |aSimilarTo| should be of the same gfxSurfaceType in each invocation.
    * Because the cached surface may have been created during a previous
    * invocation, this will not be efficient if the new |aSimilarTo| has a
-   * different format.
+   * different format, size, or gfxSurfaceType.
    */
-  already_AddRefed<gfxContext> Get(gfxASurface::gfxContentType aContentType,
+  already_AddRefed<gfxContext> Get(gfxContentType aContentType,
                                    const gfxRect& aRect,
                                    gfxASurface* aSimilarTo);
 
@@ -52,9 +52,7 @@ private:
   nsRefPtr<gfxASurface> mSurface;
   gfxIntSize mSize;
   nsExpirationState mExpirationState;
-#ifdef DEBUG
-  gfxASurface::gfxSurfaceType mType;
-#endif 
+  gfxSurfaceType mType;
 };
 
 #endif /* GFX_CACHED_TEMP_SURFACE_H */

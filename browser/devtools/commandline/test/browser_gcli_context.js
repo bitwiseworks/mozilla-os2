@@ -14,8 +14,7 @@
  * limitations under the License.
  */
 
-// define(function(require, exports, module) {
-
+'use strict';
 // <INJECTED SOURCE:START>
 
 // THIS FILE IS GENERATED FROM SOURCE IN THE GCLI PROJECT
@@ -23,40 +22,28 @@
 
 var exports = {};
 
-const TEST_URI = "data:text/html;charset=utf-8,<p id='gcli-input'>gcli-testContext.js</p>";
+var TEST_URI = "data:text/html;charset=utf-8,<p id='gcli-input'>gcli-testContext.js</p>";
 
 function test() {
-  helpers.addTabWithToolbar(TEST_URI, function(options) {
-    return helpers.runTests(options, exports);
-  }).then(finish);
+  return Task.spawn(function() {
+    let options = yield helpers.openTab(TEST_URI);
+    yield helpers.openToolbar(options);
+    gcli.addItems(mockCommands.items);
+
+    yield helpers.runTests(options, exports);
+
+    gcli.removeItems(mockCommands.items);
+    yield helpers.closeToolbar(options);
+    yield helpers.closeTab(options);
+  }).then(finish, helpers.handleError);
 }
 
 // <INJECTED SOURCE:END>
 
-'use strict';
-
-// var helpers = require('gclitest/helpers');
-// var mockCommands = require('gclitest/mockCommands');
-var cli = require('gcli/cli');
-
-var origLogErrors = undefined;
-
-exports.setup = function(options) {
-  mockCommands.setup();
-
-  origLogErrors = cli.logErrors;
-  cli.logErrors = false;
-};
-
-exports.shutdown = function(options) {
-  mockCommands.shutdown();
-
-  cli.logErrors = origLogErrors;
-  origLogErrors = undefined;
-};
+// var helpers = require('./helpers');
 
 exports.testBaseline = function(options) {
-  helpers.audit(options, [
+  return helpers.audit(options, [
     // These 3 establish a baseline for comparison when we have used the
     // context command
     {
@@ -85,12 +72,12 @@ exports.testBaseline = function(options) {
       setup:    'tsn',
       check: {
         input:  'tsn',
-        hints:     '',
+        hints:     ' deep down nested cmd',
         markup: 'III',
         cursor: 3,
         current: '__command',
         status: 'ERROR',
-        predictionsContains: [ 'tsn', 'tsn deep', 'tsn ext', 'tsn exte' ],
+        predictionsContains: [ 'tsn deep down nested cmd', 'tsn ext', 'tsn exte' ],
         args: {
           command: { name: 'tsn' },
         }
@@ -100,28 +87,27 @@ exports.testBaseline = function(options) {
 };
 
 exports.testContext = function(options) {
-  helpers.audit(options, [
+  return helpers.audit(options, [
     // Use the 'tsn' context
     {
       setup:    'context tsn',
       check: {
         input:  'context tsn',
-        hints:             '',
+        hints:             ' deep down nested cmd',
         markup: 'VVVVVVVVVVV',
         message: '',
-        predictionsContains: [ 'tsn', 'tsn deep', 'tsn ext', 'tsn exte' ],
+        predictionsContains: [ 'tsn deep down nested cmd', 'tsn ext', 'tsn exte' ],
         args: {
           command: { name: 'context' },
           prefix: {
-            value: mockCommands.commands.tsn,
+            value: options.requisition.canon.getCommand('tsn'),
             status: 'VALID',
             message: ''
-          },
+          }
         }
       },
       exec: {
-        output: 'Using tsn as a command prefix',
-        completed: true,
+        output: 'Using tsn as a command prefix'
       }
     },
     // For comparison with earlier
@@ -137,9 +123,8 @@ exports.testContext = function(options) {
           text: {
             value: undefined,
             arg: '',
-            status: 'INCOMPLETE',
-            message: ''
-          },
+            status: 'INCOMPLETE'
+          }
         }
       }
     },
@@ -156,22 +141,21 @@ exports.testContext = function(options) {
             arg: ' test',
             status: 'VALID',
             message: ''
-          },
+          }
         }
       },
       exec: {
-        output: 'Exec: tsnExt text=test',
-        completed: true,
+        output: 'Exec: tsnExt text=test'
       }
     },
     {
       setup:    'tsn',
       check: {
         input:  'tsn',
-        hints:     '',
+        hints:     ' deep down nested cmd',
         markup: 'III',
         message: '',
-        predictionsContains: [ 'tsn', 'tsn deep', 'tsn ext', 'tsn exte' ],
+        predictionsContains: [ 'tsn deep down nested cmd', 'tsn ext', 'tsn exte' ],
         args: {
           command: { name: 'tsn' },
         }
@@ -190,7 +174,7 @@ exports.testContext = function(options) {
         unassigned: [ ],
         args: {
           command: { name: 'tsb' },
-          toggle: { value: true, arg: ' true', status: 'VALID', message: '' },
+          toggle: { value: true, arg: ' true', status: 'VALID', message: '' }
         }
       }
     },
@@ -206,20 +190,19 @@ exports.testContext = function(options) {
         hints:                   '',
         markup: 'VVVVVVVVVVVVVVVVV',
         message: '',
-        predictions: [ ],
+        predictions: [ 'tsn ext', 'tsn exte', 'tsn exten', 'tsn extend' ],
         unassigned: [ ],
         args: {
           command: { name: 'context' },
           prefix: {
-            value: mockCommands.commands.tsnExt,
+            value: options.requisition.canon.getCommand('tsn ext'),
             status: 'VALID',
             message: ''
           }
         }
       },
       exec: {
-        output: 'Error: Can\'t use \'tsn ext\' as a prefix because it is not a parent command.',
-        completed: true,
+        output: 'Can\'t use \'tsn ext\' as a prefix because it is not a parent command.',
         error: true
       }
     },
@@ -237,15 +220,14 @@ exports.testContext = function(options) {
         args: {
           command: { name: 'context' },
           prefix: {
-            value: mockCommands.commands.tsnDeep,
+            value: options.requisition.canon.getCommand('tsn deep'),
             status: 'VALID',
             message: ''
           }
         }
       },
       exec: {
-        output: '',
-        completed: true,
+        output: ''
       }
     },
     */
@@ -264,13 +246,9 @@ exports.testContext = function(options) {
       },
       exec: {
         output: 'Command prefix is unset',
-        completed: true,
         type: 'string',
         error: false
       }
     }
   ]);
 };
-
-
-// });

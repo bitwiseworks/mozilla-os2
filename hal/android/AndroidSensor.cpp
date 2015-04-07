@@ -13,12 +13,12 @@ namespace hal_impl {
 
 void
 EnableSensorNotifications(SensorType aSensor) {
-  AndroidBridge::Bridge()->EnableSensor(aSensor);
+  mozilla::widget::android::GeckoAppShell::EnableSensor(aSensor);
 }
 
 void
 DisableSensorNotifications(SensorType aSensor) {
-  AndroidBridge::Bridge()->DisableSensor(aSensor);
+  mozilla::widget::android::GeckoAppShell::DisableSensor(aSensor);
 }
 
 } // hal_impl

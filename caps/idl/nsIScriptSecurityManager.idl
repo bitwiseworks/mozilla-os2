@@ -9,20 +9,11 @@
 interface nsIURI;
 interface nsIChannel;
 interface nsIDocShell;
+interface nsIDomainPolicy;
 
-[scriptable, uuid(ae486501-ec57-4ec8-a565-6880ca4ae6c4)]
+[scriptable, uuid(4c087cc3-e0cc-4ec3-88df-8d68f3023b45)]
 interface nsIScriptSecurityManager : nsIXPCSecurityManager
 {
-    ///////////////// Security Checks //////////////////
-    /**
-     * Checks whether the running script is allowed to access aProperty.
-     */
-    [noscript] void checkPropertyAccess(in JSContextPtr aJSContext,
-                                        in JSObjectPtr aJSObject,
-                                        in string aClassName,
-                                        in jsid aProperty,
-                                        in uint32_t aAction);
-
     /**
      * Check that the script currently running in context "cx" can load "uri".
      *
@@ -103,24 +94,9 @@ interface nsIScriptSecurityManager : nsIXPCSecurityManager
                                       in unsigned long flags);
 
     /**
-     * Check that the function 'funObj' is allowed to run on 'targetObj'
-     *
-     * Will return error code NS_ERROR_DOM_SECURITY_ERR if the function
-     * should not run
-     *
-     * @param cx The current active JavaScript context.
-     * @param funObj The function trying to run..
-     * @param targetObj The object the function will run on.
+     * Return true if scripts may be executed in the scope of the given global.
      */
-    [noscript] void checkFunctionAccess(in JSContextPtr cx, in voidPtr funObj,
-                                        in voidPtr targetObj);
-
-    /**
-     * Return true if content from the given principal is allowed to
-     * execute scripts.
-     */
-    [noscript] boolean canExecuteScripts(in JSContextPtr cx,
-                                         in nsIPrincipal principal);
+    [noscript,notxpcom] boolean scriptAllowed(in JSObjectPtr aGlobal);
 
     ///////////////// Principals ///////////////////////
     /**
@@ -174,13 +150,6 @@ interface nsIScriptSecurityManager : nsIXPCSecurityManager
      */
     [deprecated] nsIPrincipal getCodebasePrincipal(in nsIURI uri);
 
-    ///////////////////////
-    /**
-     * Return the principal of the specified object in the specified context.
-     */
-    [noscript] nsIPrincipal getObjectPrincipal(in JSContextPtr cx,
-                                               in JSObjectPtr obj);
-
     /**
      * Returns true if the principal of the currently running script is the
      * system principal, false otherwise.
@@ -216,6 +185,13 @@ interface nsIScriptSecurityManager : nsIXPCSecurityManager
      * script to check whether a given principal is system.
      */
     boolean isSystemPrincipal(in nsIPrincipal aPrincipal);
+%{C++
+    bool IsSystemPrincipal(nsIPrincipal* aPrincipal) {
+      bool isSystem = false;
+      IsSystemPrincipal(aPrincipal, &isSystem);
+      return isSystem;
+    }
+%}
 
     /**
      * Same as getSubjectPrincipal(), only faster. cx must *never* be
@@ -227,15 +203,38 @@ interface nsIScriptSecurityManager : nsIXPCSecurityManager
 
     const unsigned long NO_APP_ID = 0;
     const unsigned long UNKNOWN_APP_ID = 4294967295; // UINT32_MAX
+    const unsigned long SAFEBROWSING_APP_ID = 4294967294; // UINT32_MAX - 1
 
     /**
-     * Returns the extended origin for the uri.
+     * Returns the jar prefix for the app.
      * appId can be NO_APP_ID or a valid app id. appId should not be
      * UNKNOWN_APP_ID.
-     * inMozBrowser has to be true if the uri is inside a mozbrowser iframe.
+     * inMozBrowser has to be true if the app is inside a mozbrowser iframe.
      */
-    AUTF8String getExtendedOrigin(in nsIURI uri, in unsigned long appId,
-                                  in boolean inMozBrowser);
+    AUTF8String getJarPrefix(in unsigned long appId, in boolean inMozBrowser);
+
+    /**
+     * Per-domain controls to enable and disable script. This system is designed
+     * to be used by at most one consumer, and enforces this with its semantics.
+     *
+     * Initially, domainPolicyActive is false. When activateDomainPolicy() is
+     * invoked, domainPolicyActive becomes true, and subsequent calls to
+     * activateDomainPolicy() will fail until deactivate() is invoked on the
+     * nsIDomainPolicy returned from activateDomainPolicy(). At this point,
+     * domainPolicyActive becomes false again, and a new consumer may acquire
+     * control of the system by invoking activateDomainPolicy().
+     */
+    nsIDomainPolicy activateDomainPolicy();
+    readonly attribute boolean domainPolicyActive;
+
+    /**
+     * Query mechanism for the above policy.
+     *
+     * If domainPolicyEnabled is false, this simply returns the current value
+     * of javascript.enabled. Otherwise, it returns the same value, but taking
+     * the various blacklist/whitelist exceptions into account.
+     */
+    bool policyAllowsScript(in nsIURI aDomain);
 };
 
 %{C++

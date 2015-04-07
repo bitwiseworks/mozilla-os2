@@ -161,14 +161,15 @@ namespace {
 class StorageNotifierRunnable : public nsRunnable
 {
 public:
-  StorageNotifierRunnable(nsISupports* aSubject)
-    : mSubject(aSubject)
+  StorageNotifierRunnable(nsISupports* aSubject, const char16_t* aType)
+    : mSubject(aSubject), mType(aType)
   { }
 
   NS_DECL_NSIRUNNABLE
 
 private:
   nsCOMPtr<nsISupports> mSubject;
+  const char16_t* mType;
 };
 
 NS_IMETHODIMP
@@ -177,7 +178,7 @@ StorageNotifierRunnable::Run()
   nsCOMPtr<nsIObserverService> observerService =
     mozilla::services::GetObserverService();
   if (observerService) {
-    observerService->NotifyObservers(mSubject, "dom-storage2-changed", nullptr);
+    observerService->NotifyObservers(mSubject, "dom-storage2-changed", mType);
   }
   return NS_OK;
 }
@@ -207,7 +208,11 @@ DOMStorage::BroadcastChangeNotification(const nsSubstring& aKey,
     return;
   }
 
-  nsRefPtr<StorageNotifierRunnable> r = new StorageNotifierRunnable(event);
+  nsRefPtr<StorageNotifierRunnable> r =
+    new StorageNotifierRunnable(event,
+                                GetType() == LocalStorage
+                                  ? MOZ_UTF16("localStorage")
+                                  : MOZ_UTF16("sessionStorage"));
   NS_DispatchToMainThread(r);
 }
 
@@ -314,29 +319,7 @@ DOMStorage::PrincipalEquals(nsIPrincipal* aPrincipal)
 bool
 DOMStorage::CanAccess(nsIPrincipal* aPrincipal)
 {
-  // Allow C++ callers to access the storage
-  if (!aPrincipal) {
-    return true;
-  }
-
-  // For content, either the code base or domain must be the same.  When code
-  // base is the same, this is enough to say it is safe for a page to access
-  // this storage.
-
-  bool subsumes;
-  nsresult rv = aPrincipal->SubsumesIgnoringDomain(mPrincipal, &subsumes);
-  if (NS_FAILED(rv)) {
-    return false;
-  }
-
-  if (!subsumes) {
-    nsresult rv = aPrincipal->Subsumes(mPrincipal, &subsumes);
-    if (NS_FAILED(rv)) {
-      return false;
-    }
-  }
-
-  return subsumes;
+  return !aPrincipal || aPrincipal->Subsumes(mPrincipal);
 }
 
 nsTArray<nsString>*

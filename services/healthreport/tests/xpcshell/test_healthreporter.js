@@ -20,11 +20,10 @@ Cu.import("resource://testing-common/httpd.js");
 Cu.import("resource://testing-common/services-common/bagheeraserver.js");
 Cu.import("resource://testing-common/services/metrics/mocks.jsm");
 Cu.import("resource://testing-common/services/healthreport/utils.jsm");
+Cu.import("resource://testing-common/AppData.jsm");
 
 
-const SERVER_HOSTNAME = "localhost";
-const SERVER_PORT = 8080;
-const SERVER_URI = "http://" + SERVER_HOSTNAME + ":" + SERVER_PORT;
+const DUMMY_URI = "http://localhost:62013/";
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const HealthReporterState = bsp.HealthReporterState;
@@ -54,13 +53,12 @@ function getReporter(name, uri, inspected) {
 
 function getReporterAndServer(name, namespace="test") {
   return Task.spawn(function get() {
-    let reporter = yield getReporter(name, SERVER_URI);
-    reporter.serverNamespace = namespace;
-
-    let server = new BagheeraServer(SERVER_URI);
+    let server = new BagheeraServer();
     server.createNamespace(namespace);
+    server.start();
 
-    server.start(SERVER_PORT);
+    let reporter = yield getReporter(name, server.serverURI);
+    reporter.serverNamespace = namespace;
 
     throw new Task.Result([reporter, server]);
   });
@@ -77,7 +75,7 @@ function getHealthReportProviderValues(reporter, day=null) {
   return Task.spawn(function getValues() {
     let p = reporter.getProvider("org.mozilla.healthreport");
     do_check_neq(p, null);
-    let m = p.getMeasurement("submissions", 1);
+    let m = p.getMeasurement("submissions", 2);
     do_check_neq(m, null);
 
     let data = yield reporter._storage.getMeasurementValues(m.id);
@@ -88,6 +86,7 @@ function getHealthReportProviderValues(reporter, day=null) {
     do_check_true(data.days.hasDay(day));
     let serializer = m.serializer(m.SERIALIZE_JSON)
     let json = serializer.daily(data.days.getDay(day));
+    do_check_eq(json._v, 2);
 
     throw new Task.Result(json);
   });
@@ -111,6 +110,8 @@ add_task(function test_constructor() {
     do_check_eq(typeof(reporter._state), "object");
     do_check_eq(reporter._state.lastPingDate.getTime(), 0);
     do_check_eq(reporter._state.remoteIDs.length, 0);
+    do_check_eq(reporter._state.clientIDVersion, 1);
+    do_check_neq(reporter._state.clientID, null);
 
     let failed = false;
     try {
@@ -137,7 +138,7 @@ add_task(function test_shutdown_normal() {
 });
 
 add_task(function test_shutdown_storage_in_progress() {
-  let reporter = yield getHealthReporter("shutdown_storage_in_progress", SERVER_URI, true);
+  let reporter = yield getHealthReporter("shutdown_storage_in_progress", DUMMY_URI, true);
 
   reporter.onStorageCreated = function () {
     print("Faking shutdown during storage initialization.");
@@ -155,7 +156,7 @@ add_task(function test_shutdown_storage_in_progress() {
 // results in shutdown and storage closure.
 add_task(function test_shutdown_provider_manager_in_progress() {
   let reporter = yield getHealthReporter("shutdown_provider_manager_in_progress",
-                                         SERVER_URI, true);
+                                         DUMMY_URI, true);
 
   reporter.onProviderManagerInitialized = function () {
     print("Faking shutdown during provider manager initialization.");
@@ -173,7 +174,7 @@ add_task(function test_shutdown_provider_manager_in_progress() {
 // Simulates an error during provider manager initialization and verifies we shut down.
 add_task(function test_shutdown_when_provider_manager_errors() {
   let reporter = yield getHealthReporter("shutdown_when_provider_manager_errors",
-                                       SERVER_URI, true);
+                                       DUMMY_URI, true);
 
   reporter.onInitializeProviderManagerFinished = function () {
     print("Throwing fake error.");
@@ -294,6 +295,9 @@ add_task(function test_remove_old_lastpayload() {
 add_task(function test_json_payload_simple() {
   let reporter = yield getReporter("json_payload_simple");
 
+  let clientID = reporter._state.clientID;
+  do_check_neq(clientID, null);
+
   try {
     let now = new Date();
     let payload = yield reporter.getJSONPayload();
@@ -302,6 +306,9 @@ add_task(function test_json_payload_simple() {
 
     do_check_eq(original.version, 2);
     do_check_eq(original.thisPingDate, reporter._formatDate(now));
+    do_check_eq(original.clientID, clientID);
+    do_check_eq(original.clientIDVersion, reporter._state.clientIDVersion);
+    do_check_eq(original.clientIDVersion, 1);
     do_check_eq(Object.keys(original.data.last).length, 0);
     do_check_eq(Object.keys(original.data.days).length, 0);
     do_check_false("notInitialized" in original);
@@ -311,6 +318,7 @@ add_task(function test_json_payload_simple() {
 
     original = JSON.parse(yield reporter.getJSONPayload());
     do_check_eq(original.lastPingDate, reporter._formatDate(reporter.lastPingDate));
+    do_check_eq(original.clientID, clientID);
 
     // This could fail if we cross UTC day boundaries at the exact instance the
     // test is executed. Let's tempt fate.
@@ -556,7 +564,7 @@ add_task(function test_idle_daily() {
 add_task(function test_data_submission_transport_failure() {
   let reporter = yield getReporter("data_submission_transport_failure");
   try {
-    reporter.serverURI = "http://localhost:8080/";
+    reporter.serverURI = DUMMY_URI;
     reporter.serverNamespace = "test00";
 
     let deferred = Promise.defer();
@@ -567,7 +575,6 @@ add_task(function test_data_submission_transport_failure() {
     do_check_eq(request.state, request.SUBMISSION_FAILURE_SOFT);
 
     let data = yield getHealthReportProviderValues(reporter, new Date());
-    do_check_eq(data._v, 1);
     do_check_eq(data.firstDocumentUploadAttempt, 1);
     do_check_eq(data.uploadTransportFailure, 1);
     do_check_eq(Object.keys(data).length, 3);
@@ -594,7 +601,6 @@ add_task(function test_data_submission_server_failure() {
     do_check_eq(request.state, request.SUBMISSION_FAILURE_HARD);
 
     let data = yield getHealthReportProviderValues(reporter, now);
-    do_check_eq(data._v, 1);
     do_check_eq(data.firstDocumentUploadAttempt, 1);
     do_check_eq(data.uploadServerFailure, 1);
     do_check_eq(Object.keys(data).length, 3);
@@ -633,13 +639,13 @@ add_task(function test_data_submission_success() {
     do_check_true("DummyConstantProvider.DummyMeasurement" in o.data.last);
 
     let data = yield getHealthReportProviderValues(reporter, now);
-    do_check_eq(data._v, 1);
     do_check_eq(data.continuationUploadAttempt, 1);
     do_check_eq(data.uploadSuccess, 1);
     do_check_eq(Object.keys(data).length, 3);
 
     let d = reporter.lastPingDate;
     let id = reporter.lastSubmitID;
+    let clientID = reporter._state.clientID;
 
     reporter._shutdown();
 
@@ -647,6 +653,7 @@ add_task(function test_data_submission_success() {
     reporter = yield getReporter("data_submission_success");
     do_check_eq(reporter.lastSubmitID, id);
     do_check_eq(reporter.lastPingDate.getTime(), d.getTime());
+    do_check_eq(reporter._state.clientID, clientID);
 
     reporter._shutdown();
   } finally {
@@ -684,7 +691,6 @@ add_task(function test_recurring_daily_pings() {
     // now() on the health reporter instance wasn't munged. So, we should see
     // both requests attributed to the same day.
     let data = yield getHealthReportProviderValues(reporter, new Date());
-    do_check_eq(data._v, 1);
     do_check_eq(data.firstDocumentUploadAttempt, 1);
     do_check_eq(data.continuationUploadAttempt, 1);
     do_check_eq(data.uploadSuccess, 2);
@@ -708,6 +714,9 @@ add_task(function test_request_remote_data_deletion() {
     do_check_neq(id, null);
     do_check_true(server.hasDocument(reporter.serverNamespace, id));
 
+    let clientID = reporter._state.clientID;
+    do_check_neq(clientID, null);
+
     defineNow(policy, policy._futureDate(10 * 1000));
 
     let promise = reporter.requestDeleteRemoteData();
@@ -716,6 +725,64 @@ add_task(function test_request_remote_data_deletion() {
     do_check_null(reporter.lastSubmitID);
     do_check_false(reporter.haveRemoteData());
     do_check_false(server.hasDocument(reporter.serverNamespace, id));
+
+    // Client ID should be updated.
+    do_check_neq(reporter._state.clientID, null);
+    do_check_neq(reporter._state.clientID, clientID);
+    do_check_eq(reporter._state.clientIDVersion, 1);
+
+    // And it should be persisted to disk.
+    let o = yield CommonUtils.readJSON(reporter._state._filename);
+    do_check_eq(o.clientID, reporter._state.clientID);
+    do_check_eq(o.clientIDVersion, 1);
+  } finally {
+    reporter._shutdown();
+    yield shutdownServer(server);
+  }
+});
+
+add_task(function test_multiple_simultaneous_uploads() {
+  let [reporter, server] = yield getReporterAndServer("multiple_simultaneous_uploads");
+
+  try {
+    let d1 = Promise.defer();
+    let d2 = Promise.defer();
+    let t1 = new Date(Date.now() - 1000);
+    let t2 = new Date(t1.getTime() + 500);
+    let r1 = new DataSubmissionRequest(d1, t1);
+    let r2 = new DataSubmissionRequest(d2, t2);
+
+    let getPayloadDeferred = Promise.defer();
+
+    Object.defineProperty(reporter, "getJSONPayload", {
+      configurable: true,
+      value: () => {
+        getPayloadDeferred.resolve();
+        delete reporter["getJSONPayload"];
+        return reporter.getJSONPayload();
+      },
+    });
+
+    let p1 = reporter.requestDataUpload(r1);
+    yield getPayloadDeferred.promise;
+    do_check_true(reporter._uploadInProgress);
+    let p2 = reporter.requestDataUpload(r2);
+
+    yield p1;
+    yield p2;
+
+    do_check_eq(r1.state, r1.SUBMISSION_SUCCESS);
+    do_check_eq(r2.state, r2.UPLOAD_IN_PROGRESS);
+
+    // They should both be resolved already.
+    yield d1;
+    yield d2;
+
+    let data = yield getHealthReportProviderValues(reporter, t1);
+    do_check_eq(data.firstDocumentUploadAttempt, 1);
+    do_check_false("continuationUploadAttempt" in data);
+    do_check_eq(data.uploadSuccess, 1);
+    do_check_eq(data.uploadAlreadyInProgress, 1);
   } finally {
     reporter._shutdown();
     yield shutdownServer(server);
@@ -843,10 +910,10 @@ add_task(function test_failure_if_not_initialized() {
 });
 
 add_task(function test_upload_on_init_failure() {
-  let reporter = yield getHealthReporter("upload_on_init_failure", SERVER_URI, true);
-  let server = new BagheeraServer(SERVER_URI);
+  let server = new BagheeraServer();
+  server.start();
+  let reporter = yield getHealthReporter("upload_on_init_failure", server.serverURI, true);
   server.createNamespace(reporter.serverNamespace);
-  server.start(SERVER_PORT);
 
   reporter.onInitializeProviderManagerFinished = function () {
     throw new Error("Fake error during provider manager initialization.");
@@ -1049,6 +1116,81 @@ add_task(function test_state_downgrade_upgrade() {
     let o = yield CommonUtils.readJSON(reporter._state._filename);
     do_check_eq(o.remoteIDs.length, 3);
     do_check_eq(o.lastPingTime, now.getTime() + 1000);
+  } finally {
+    reporter._shutdown();
+  }
+});
+
+// Missing client ID in state should be created on state load.
+add_task(function* test_state_create_client_id() {
+  let reporter = getHealthReporter("state_create_client_id");
+
+  yield CommonUtils.writeJSON({
+    v: 1,
+    remoteIDs: ["id1", "id2"],
+    lastPingTime: Date.now(),
+    removeOutdatedLastPayload: true,
+  }, reporter._state._filename);
+
+  try {
+    yield reporter.init();
+
+    do_check_eq(reporter.lastSubmitID, "id1");
+    do_check_neq(reporter._state.clientID, null);
+    do_check_eq(reporter._state.clientID.length, 36);
+    do_check_eq(reporter._state.clientIDVersion, 1);
+
+    let clientID = reporter._state.clientID;
+
+    // The client ID should be persisted as soon as it is created.
+    reporter._shutdown();
+
+    reporter = getHealthReporter("state_create_client_id");
+    yield reporter.init();
+    do_check_eq(reporter._state.clientID, clientID);
+  } finally {
+    reporter._shutdown();
+  }
+});
+
+// Invalid stored client ID is reset automatically.
+add_task(function* test_empty_client_id() {
+  let reporter = getHealthReporter("state_empty_client_id");
+
+  yield CommonUtils.writeJSON({
+    v: 1,
+    clientID: "",
+    remoteIDs: ["id1", "id2"],
+    lastPingTime: Date.now(),
+    removeOutdatedLastPayload: true,
+  }, reporter._state._filename);
+
+  try {
+    yield reporter.init();
+
+    do_check_neq(reporter._state.clientID, null);
+    do_check_eq(reporter._state.clientID.length, 36);
+  } finally {
+    reporter._shutdown();
+  }
+});
+
+add_task(function* test_nonstring_client_id() {
+  let reporter = getHealthReporter("state_nonstring_client_id");
+
+  yield CommonUtils.writeJSON({
+    v: 1,
+    clientID: 42,
+    remoteIDs: ["id1", "id2"],
+    lastPingTime: Date.now(),
+    remoteOutdatedLastPayload: true,
+  }, reporter._state._filename);
+
+  try {
+    yield reporter.init();
+
+    do_check_neq(reporter._state.clientID, null);
+    do_check_eq(reporter._state.clientID.length, 36);
   } finally {
     reporter._shutdown();
   }

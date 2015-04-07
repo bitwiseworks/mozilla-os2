@@ -8,17 +8,21 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "webrtc/voice_engine/test/auto_test/voe_cpu_test.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <cassert>
 #if defined(_WIN32)
 #include <conio.h>
 #endif
 
-#include "voe_cpu_test.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/test/channel_transport/include/channel_transport.h"
+#include "webrtc/voice_engine/test/auto_test/voe_test_defines.h"
 
 using namespace webrtc;
+using namespace test;
 
 namespace voetest {
 
@@ -45,6 +49,7 @@ int VoECpuTest::DoTest() {
   VoEFile* file = _mgr.FilePtr();
   VoECodec* codec = _mgr.CodecPtr();
   VoEAudioProcessing* apm = _mgr.APMPtr();
+  VoENetwork* voe_network = _mgr.NetworkPtr();
 
   int channel(-1);
   CodecInst isac;
@@ -59,8 +64,12 @@ int VoECpuTest::DoTest() {
   CHECK(base->Init());
   channel = base->CreateChannel();
 
-  CHECK(base->SetLocalReceiver(channel, 5566));
-  CHECK(base->SetSendDestination(channel, 5566, "127.0.0.1"));
+  scoped_ptr<VoiceChannelTransport> voice_socket_transport(
+      new VoiceChannelTransport(voe_network, channel));
+
+  CHECK(voice_socket_transport->SetSendDestination("127.0.0.1", 5566));
+  CHECK(voice_socket_transport->SetLocalReceiver(5566));
+
   CHECK(codec->SetRecPayloadType(channel, isac));
   CHECK(codec->SetSendCodec(channel, isac));
 
@@ -86,8 +95,7 @@ int VoECpuTest::DoTest() {
 
   base->DeleteChannel(channel);
   CHECK(base->Terminate());
-
   return 0;
 }
 
-} //  namespace voetest
+}  // namespace voetest

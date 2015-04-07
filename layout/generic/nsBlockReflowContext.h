@@ -12,14 +12,11 @@
 #include "nsIFrame.h"
 #include "nsHTMLReflowMetrics.h"
 
-class nsBlockFrame;
 class nsBlockReflowState;
 struct nsHTMLReflowState;
 class nsLineBox;
-class nsIFrame;
 class nsPresContext;
 class nsLineLayout;
-struct nsStylePosition;
 struct nsBlockHorizontalAlign;
 
 /**
@@ -42,12 +39,12 @@ public:
                        nsBlockReflowState& aState);
 
   bool PlaceBlock(const nsHTMLReflowState& aReflowState,
-                    bool                     aForceFit,
-                    nsLineBox*               aLine,
-                    nsCollapsingMargin&      aBottomMarginResult /* out */,
-                    nsRect&                  aInFlowBounds,
-                    nsOverflowAreas&         aOverflowAreas,
-                    nsReflowStatus           aReflowStatus);
+                  bool                     aForceFit,
+                  nsLineBox*               aLine,
+                  nsCollapsingMargin&      aBottomMarginResult /* out */,
+                  nsOverflowAreas&         aOverflowAreas,
+                  nsReflowStatus           aReflowStatus,
+                  nscoord                  aContainerWidth);
 
   nsCollapsingMargin& GetCarriedOutBottomMargin() {
     return mMetrics.mCarriedOutBottomMargin;

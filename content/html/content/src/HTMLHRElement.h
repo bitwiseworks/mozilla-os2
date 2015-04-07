@@ -16,24 +16,15 @@
 namespace mozilla {
 namespace dom {
 
-class HTMLHRElement : public nsGenericHTMLElement,
-                      public nsIDOMHTMLHRElement
+class HTMLHRElement MOZ_FINAL : public nsGenericHTMLElement,
+                                public nsIDOMHTMLHRElement
 {
 public:
-  HTMLHRElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  HTMLHRElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
   virtual ~HTMLHRElement();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLHRElement
   NS_DECL_NSIDOMHTMLHRELEMENT
@@ -45,7 +36,6 @@ public:
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
   virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const MOZ_OVERRIDE;
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
   // WebIDL API
   void SetAlign(const nsAString& aAlign, ErrorResult& aError)
@@ -81,8 +71,11 @@ public:
   }
 
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
+
+private:
+  static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                    nsRuleData* aData);
 };
 
 } // namespace dom

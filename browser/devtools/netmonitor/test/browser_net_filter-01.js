@@ -24,51 +24,95 @@ function test() {
       is(NetMonitorView.detailsPaneHidden, false,
         "The details pane should not be hidden after toggle button was pressed.");
 
-      testButtons("all");
+      // First test with single filters...
+      testFilterButtons(aMonitor, "all");
       testContents([1, 1, 1, 1, 1, 1, 1, 1])
         .then(() => {
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-html-button"));
-          testButtons("html");
+          testFilterButtons(aMonitor, "html");
           return testContents([1, 0, 0, 0, 0, 0, 0, 0]);
         })
         .then(() => {
+          // Reset filters
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-all-button"));
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-css-button"));
-          testButtons("css");
+          testFilterButtons(aMonitor, "css");
           return testContents([0, 1, 0, 0, 0, 0, 0, 0]);
         })
         .then(() => {
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-all-button"));
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-js-button"));
-          testButtons("js");
+          testFilterButtons(aMonitor, "js");
           return testContents([0, 0, 1, 0, 0, 0, 0, 0]);
         })
         .then(() => {
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-all-button"));
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-xhr-button"));
-          testButtons("xhr");
+          testFilterButtons(aMonitor, "xhr");
           return testContents([1, 1, 1, 1, 1, 1, 1, 1]);
         })
         .then(() => {
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-all-button"));
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-fonts-button"));
-          testButtons("fonts");
+          testFilterButtons(aMonitor, "fonts");
           return testContents([0, 0, 0, 1, 0, 0, 0, 0]);
         })
         .then(() => {
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-all-button"));
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-images-button"));
-          testButtons("images");
+          testFilterButtons(aMonitor, "images");
           return testContents([0, 0, 0, 0, 1, 0, 0, 0]);
         })
         .then(() => {
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-all-button"));
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-media-button"));
-          testButtons("media");
+          testFilterButtons(aMonitor, "media");
           return testContents([0, 0, 0, 0, 0, 1, 1, 0]);
         })
         .then(() => {
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-all-button"));
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-flash-button"));
-          testButtons("flash");
+          testFilterButtons(aMonitor, "flash");
           return testContents([0, 0, 0, 0, 0, 0, 0, 1]);
         })
         .then(() => {
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-all-button"));
-          testButtons("all");
+          testFilterButtons(aMonitor, "all");
+          return testContents([1, 1, 1, 1, 1, 1, 1, 1]);
+        })
+        // ...then combine multiple filters together.
+        .then(() => {
+          // Enable filtering for html and css; should show request of both type.
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-html-button"));
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-css-button"));
+          testFilterButtonsCustom(aMonitor, [0, 1, 1, 0, 0, 0, 0, 0, 0, 0]);
+          return testContents([1, 1, 0, 0, 0, 0, 0, 0]);
+        })
+        .then(() => {
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-flash-button"));
+          testFilterButtonsCustom(aMonitor, [0, 1, 1, 0, 0, 0, 0, 0, 1, 0]);
+          return testContents([1, 1, 0, 0, 0, 0, 0, 1]);
+        })
+        .then(() => {
+          // Disable some filters. Only one left active.
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-css-button"));
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-flash-button"));
+          testFilterButtons(aMonitor, "html");
+          return testContents([1, 0, 0, 0, 0, 0, 0, 0]);
+        })
+        .then(() => {
+          // Disable last active filter. Should toggle to all.
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-html-button"));
+          testFilterButtons(aMonitor, "all");
+          return testContents([1, 1, 1, 1, 1, 1, 1, 1]);
+        })
+        .then(() => {
+          // Enable few filters and click on all. Only "all" should be checked.
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-html-button"));
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-css-button"));
+          testFilterButtonsCustom(aMonitor, [0, 1, 1, 0, 0, 0, 0, 0, 0]);
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-all-button"));
+          testFilterButtons(aMonitor, "all");
           return testContents([1, 1, 1, 1, 1, 1, 1, 1]);
         })
         .then(() => {
@@ -76,22 +120,6 @@ function test() {
         })
         .then(finish);
     });
-
-    function testButtons(aFilterType) {
-      let doc = aMonitor.panelWin.document;
-      let target = doc.querySelector("#requests-menu-filter-" + aFilterType + "-button");
-      let buttons = doc.querySelectorAll(".requests-menu-footer-button");
-
-      for (let button of buttons) {
-        if (button != target) {
-          is(button.hasAttribute("checked"), false,
-            "The " + button.id + " button should not have a 'checked' attribute.");
-        } else {
-          is(button.hasAttribute("checked"), true,
-            "The " + button.id + " button should have a 'checked' attribute.");
-        }
-      }
-    }
 
     function testContents(aVisibility) {
       isnot(RequestsMenu.selectedItem, null,
@@ -101,7 +129,7 @@ function test() {
       is(NetMonitorView.detailsPaneHidden, false,
         "The details pane should still be visible after filtering.");
 
-      is(RequestsMenu.orderedItems.length, aVisibility.length,
+      is(RequestsMenu.items.length, aVisibility.length,
         "There should be a specific amount of items in the requests menu.");
       is(RequestsMenu.visibleItems.length, aVisibility.filter(e => e).length,
         "There should be a specific amount of visbile items in the requests menu.");
@@ -176,7 +204,7 @@ function test() {
           fullMimeType: "application/x-shockwave-flash"
       });
 
-      return Promise.resolve(null);
+      return promise.resolve(null);
     }
 
     aDebuggee.performRequests('{ "getMedia": true, "getFlash": true }');

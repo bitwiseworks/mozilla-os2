@@ -7,6 +7,8 @@ package org.mozilla.gecko;
 
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.widget.ArrowPopup;
+import org.mozilla.gecko.widget.DoorHanger;
+import org.mozilla.gecko.prompts.PromptInput;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -30,8 +32,11 @@ public class DoorHangerPopup extends ArrowPopup
     // uniquely identified by its tabId and value.
     private HashSet<DoorHanger> mDoorHangers;
 
-    DoorHangerPopup(GeckoApp activity, View anchor) {
-        super(activity, anchor);
+    // Whether or not the doorhanger popup is disabled.
+    private boolean mDisabled;
+
+    DoorHangerPopup(GeckoApp activity) {
+        super(activity);
 
         mDoorHangers = new HashSet<DoorHanger>();
 
@@ -44,6 +49,24 @@ public class DoorHangerPopup extends ArrowPopup
         unregisterEventListener("Doorhanger:Add");
         unregisterEventListener("Doorhanger:Remove");
         Tabs.unregisterOnTabsChangedListener(this);
+    }
+
+    /**
+     * Temporarily disables the doorhanger popup. If the popup is disabled,
+     * it will not be shown to the user, but it will continue to process
+     * calls to add/remove doorhanger notifications.
+     */
+    void disable() {
+        mDisabled = true;
+        updatePopup();
+    }
+
+    /**
+     * Re-enables the doorhanger popup.
+     */
+    void enable() {
+        mDisabled = false;
+        updatePopup();
     }
 
     @Override
@@ -248,10 +271,11 @@ public class DoorHangerPopup extends ArrowPopup
      */
     void updatePopup() {
         // Bail if the selected tab is null, if there are no active doorhangers,
-        // or if we haven't inflated the layout yet (this can happen if updatePopup()
-        // is called before the runnable from addDoorHanger() runs). 
+        // if we haven't inflated the layout yet (this can happen if updatePopup()
+        // is called before the runnable from addDoorHanger() runs), or if the
+        // doorhanger popup is temporarily disabled.
         Tab tab = Tabs.getInstance().getSelectedTab();
-        if (tab == null || mDoorHangers.size() == 0 || !mInflated) {
+        if (tab == null || mDoorHangers.size() == 0 || !mInflated || mDisabled) {
             dismiss();
             return;
         }
@@ -276,7 +300,7 @@ public class DoorHangerPopup extends ArrowPopup
 
         showDividers();
         if (isShowing()) {
-            update();
+            show();
             return;
         }
 
@@ -295,15 +319,21 @@ public class DoorHangerPopup extends ArrowPopup
         }
     }
 
+    //Show all inter-DoorHanger dividers (ie. Dividers on all visible DoorHangers except the last one)
     private void showDividers() {
         int count = mContent.getChildCount();
+        DoorHanger lastVisibleDoorHanger = null;
 
         for (int i = 0; i < count; i++) {
             DoorHanger dh = (DoorHanger) mContent.getChildAt(i);
             dh.showDivider();
+            if (dh.getVisibility() == View.VISIBLE) {
+                lastVisibleDoorHanger = dh;
+            }
         }
-
-        ((DoorHanger) mContent.getChildAt(count-1)).hideDivider();
+        if (lastVisibleDoorHanger != null) {
+            lastVisibleDoorHanger.hideDivider();
+        }
     }
 
     private void registerEventListener(String event) {

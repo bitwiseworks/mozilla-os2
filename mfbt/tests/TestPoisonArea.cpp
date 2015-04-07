@@ -79,21 +79,14 @@
  *    at all.  Thus, it is not used here.
  */
 
-// MAP_ANON(YMOUS) is not in any standard, and the C99 PRI* macros are
-// not in C++98.  Add defines as necessary.
-#define __STDC_FORMAT_MACROS
+#include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/NullPtr.h"
+
+// MAP_ANON(YMOUS) is not in any standard.  Add defines as necessary.
 #define _GNU_SOURCE 1
 #define _DARWIN_C_SOURCE 1
 
 #include <stddef.h>
-
-#ifndef _WIN32
-#include <inttypes.h>
-#else
-#define PRIxPTR "Ix"
-typedef unsigned int uint32_t;
-// MSVC defines uintptr_t in <crtdefs.h> which is brought in implicitly
-#endif
 
 #include <errno.h>
 #include <stdio.h>
@@ -102,12 +95,6 @@ typedef unsigned int uint32_t;
 
 #ifdef _WIN32
 #include <windows.h>
-#elif defined(__OS2__)
-#include <sys/types.h>
-#include <unistd.h>
-#include <setjmp.h>
-#define INCL_DOS
-#include <os2.h>
 #else
 #include <sys/types.h>
 #include <fcntl.h>
@@ -168,6 +155,9 @@ typedef unsigned int uint32_t;
 #elif defined __s390__
 #define RETURN_INSTR 0x07fe0000 /* br %r14 */
 
+#elif defined __aarch64__
+#define RETURN_INSTR 0xd65f03c0 /* ret */
+
 #elif defined __ia64
 struct ia64_instr { uint32_t i[4]; };
 static const ia64_instr _return_instr =
@@ -195,8 +185,8 @@ StrW32Error(DWORD errcode)
   FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |
                  FORMAT_MESSAGE_FROM_SYSTEM |
                  FORMAT_MESSAGE_IGNORE_INSERTS,
-                 NULL, errcode, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                 (LPSTR) &errmsg, 0, NULL);
+                 nullptr, errcode, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                 (LPSTR)&errmsg, 0, nullptr);
 
   // FormatMessage puts an unwanted newline at the end of the string
   size_t n = strlen(errmsg)-1;
@@ -242,75 +232,6 @@ static bool
 MakeRegionExecutable(void *)
 {
   return false;
-}
-
-#undef MAP_FAILED
-#define MAP_FAILED 0
-
-#elif defined(__OS2__)
-
-// page size is always 4k
-#undef PAGESIZE
-#define PAGESIZE 0x1000
-static unsigned long rc = 0;
-
-char * LastErrMsg()
-{
-  char * errmsg = (char *)malloc(16);
-  sprintf(errmsg, "rc= %ld", rc);
-  rc = 0;
-  return errmsg;
-}
-
-static void *
-ReserveRegion(uintptr_t request, bool accessible)
-{
-  // OS/2 doesn't support allocation at an arbitrary address,
-  // so return an address that is known to be invalid.
-  if (request) {
-    return (void*)0xFFFD0000;
-  }
-  void * mem = 0;
-  rc = DosAllocMem(&mem, PAGESIZE,
-                   (accessible ? PAG_COMMIT : 0) | PAG_READ | PAG_WRITE);
-  return rc ? 0 : mem;
-}
-
-static void
-ReleaseRegion(void *page)
-{
-  return;
-}
-
-static bool
-ProbeRegion(uintptr_t page)
-{
-  // There's no reliable way to probe an address in the system
-  // arena other than by touching it and seeing if a trap occurs.
-  return false;
-}
-
-static bool
-MakeRegionExecutable(void *page)
-{
-  rc = DosSetMem(page, PAGESIZE, PAG_READ | PAG_WRITE | PAG_EXECUTE);
-  return rc ? true : false;
-}
-
-typedef struct _XCPT {
-  EXCEPTIONREGISTRATIONRECORD regrec;
-  jmp_buf                     jmpbuf;
-} XCPT;
-
-static unsigned long _System
-ExceptionHandler(PEXCEPTIONREPORTRECORD pReport,
-                 PEXCEPTIONREGISTRATIONRECORD pRegRec,
-                 PCONTEXTRECORD pContext, PVOID pVoid)
-{
-  if (pReport->fHandlerFlags == 0) {
-    longjmp(((XCPT*)pRegRec)->jmpbuf, pReport->ExceptionNum);
-  }
-  return XCPT_CONTINUE_SEARCH;
 }
 
 #undef MAP_FAILED
@@ -538,41 +459,6 @@ TestPage(const char *pagelabel, uintptr_t pageaddr, int should_succeed)
         failed = true;
       }
     }
-#elif defined(__OS2__)
-    XCPT xcpt;
-    volatile int code = setjmp(xcpt.jmpbuf);
-
-    if (!code) {
-      xcpt.regrec.prev_structure = 0;
-      xcpt.regrec.ExceptionHandler = ExceptionHandler;
-      DosSetExceptionHandler(&xcpt.regrec);
-      unsigned char scratch;
-      switch (test) {
-        case 0: scratch = *(volatile unsigned char *)opaddr; break;
-        case 1: ((void (*)())opaddr)(); break;
-        case 2: *(volatile unsigned char *)opaddr = 0; break;
-        default: abort();
-      }
-    }
-
-    if (code) {
-      if (should_succeed) {
-        printf("TEST-UNEXPECTED-FAIL | %s %s | exception code %x\n",
-               oplabel, pagelabel, code);
-        failed = true;
-      } else {
-        printf("TEST-PASS | %s %s | exception code %x\n",
-               oplabel, pagelabel, code);
-      }
-    } else {
-      if (should_succeed) {
-        printf("TEST-PASS | %s %s\n", oplabel, pagelabel);
-      } else {
-        printf("TEST-UNEXPECTED-FAIL | %s %s\n", oplabel, pagelabel);
-        failed = true;
-      }
-      DosUnsetExceptionHandler(&xcpt.regrec);
-    }
 #else
     pid_t pid = fork();
     if (pid == -1) {
@@ -634,7 +520,7 @@ main()
 {
 #ifdef _WIN32
   GetSystemInfo(&_sinfo);
-#elif !defined(__OS2__)
+#else
   _pagesize = sysconf(_SC_PAGESIZE);
 #endif
 

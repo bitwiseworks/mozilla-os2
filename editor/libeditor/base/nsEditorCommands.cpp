@@ -36,7 +36,7 @@ nsBaseEditorCommand::nsBaseEditorCommand()
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsBaseEditorCommand, nsIControllerCommand)
+NS_IMPL_ISUPPORTS(nsBaseEditorCommand, nsIControllerCommand)
 
 
 NS_IMETHODIMP
@@ -590,7 +590,7 @@ nsDeleteCommand::DoCommand(const char* aCommandName,
   } else if (!nsCRT::strcmp("cmd_deleteToEndOfLine", aCommandName)) {
     deleteDir = nsIEditor::eToEndOfLine;
   } else {
-    MOZ_NOT_REACHED("Unrecognized nsDeleteCommand");
+    MOZ_CRASH("Unrecognized nsDeleteCommand");
   }
 
   return editor->DeleteSelection(deleteDir, nsIEditor::eStrip);

@@ -12,6 +12,13 @@
 #include "Nv3DVUtils.h"
 #include "plstr.h"
 #include <algorithm>
+#include "gfx2DGlue.h"
+#include "gfxPlatform.h"
+#include "gfxWindowsPlatform.h"
+#include "TextureD3D9.h"
+#include "mozilla/gfx/Point.h"
+
+using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace layers {
@@ -19,15 +26,6 @@ namespace layers {
 const LPCWSTR kClassName       = L"D3D9WindowClass";
 
 #define USE_D3D9EX
-
-typedef IDirect3D9* (WINAPI*Direct3DCreate9Func)(
-  UINT SDKVersion
-);
-
-typedef HRESULT (WINAPI*Direct3DCreate9ExFunc)(
-  UINT SDKVersion,
-  IDirect3D9Ex **ppD3D
-);
 
 struct vertex {
   float x, y;
@@ -78,16 +76,27 @@ SwapChainD3D9::Init(HWND hWnd)
   return true;
 }
 
-bool
+already_AddRefed<IDirect3DSurface9>
+SwapChainD3D9::GetBackBuffer()
+{
+  nsRefPtr<IDirect3DSurface9> backBuffer;
+    mSwapChain->GetBackBuffer(0,
+                              D3DBACKBUFFER_TYPE_MONO,
+                              getter_AddRefs(backBuffer));
+  return backBuffer.forget();
+}
+
+DeviceManagerState
 SwapChainD3D9::PrepareForRendering()
 {
   RECT r;
   if (!::GetClientRect(mWnd, &r)) {
-    return false;
+    return DeviceFail;
   }
 
-  if (!mDeviceManager->VerifyReadyForRendering()) {
-    return false;
+  DeviceManagerState deviceState = mDeviceManager->VerifyReadyForRendering();
+  if (deviceState != DeviceOK) {
+    return deviceState;
   }
 
   if (!mSwapChain) {
@@ -95,17 +104,14 @@ SwapChainD3D9::PrepareForRendering()
   }
 
   if (mSwapChain) {
-    nsRefPtr<IDirect3DSurface9> backBuffer;
-    mSwapChain->GetBackBuffer(0,
-                              D3DBACKBUFFER_TYPE_MONO,
-                              getter_AddRefs(backBuffer));
+    nsRefPtr<IDirect3DSurface9> backBuffer = GetBackBuffer();
 
     D3DSURFACE_DESC desc;
     backBuffer->GetDesc(&desc);
 
     if (desc.Width == r.right - r.left && desc.Height == r.bottom - r.top) {
       mDeviceManager->device()->SetRenderTarget(0, backBuffer);
-      return true;
+      return DeviceOK;
     }
 
     mSwapChain = nullptr;
@@ -113,18 +119,16 @@ SwapChainD3D9::PrepareForRendering()
     Init(mWnd);
     
     if (!mSwapChain) {
-      return false;
+      return DeviceFail;
     }
     
-    mSwapChain->GetBackBuffer(0,
-                              D3DBACKBUFFER_TYPE_MONO,
-                              getter_AddRefs(backBuffer));
-
+    backBuffer = GetBackBuffer();
     mDeviceManager->device()->SetRenderTarget(0, backBuffer);
     
-    return true;
+    return DeviceOK;
   }
-  return false;
+
+  return DeviceFail;
 }
 
 void
@@ -140,6 +144,12 @@ SwapChainD3D9::Present(const nsIntRect &aRect)
 }
 
 void
+SwapChainD3D9::Present()
+{
+  mSwapChain->Present(nullptr, nullptr, 0, 0, 0);
+}
+
+void
 SwapChainD3D9::Reset()
 {
   mSwapChain = nullptr;
@@ -148,9 +158,13 @@ SwapChainD3D9::Reset()
 #define HAS_CAP(a, b) (((a) & (b)) == (b))
 #define LACKS_CAP(a, b) !(((a) & (b)) == (b))
 
+uint32_t DeviceManagerD3D9::sMaskQuadRegister = 11;
+
 DeviceManagerD3D9::DeviceManagerD3D9()
-  : mDeviceResetCount(0)
+  : mTextureHostList(nullptr)
+  , mDeviceResetCount(0)
   , mMaxTextureSize(0)
+  , mTextureAddressingMode(D3DTADDRESS_CLAMP)
   , mHasDynamicTextures(false)
   , mDeviceWasRemoved(false)
 {
@@ -158,11 +172,8 @@ DeviceManagerD3D9::DeviceManagerD3D9()
 
 DeviceManagerD3D9::~DeviceManagerD3D9()
 {
-  LayerManagerD3D9::OnDeviceManagerDestroy(this);
+  DestroyDevice();
 }
-
-NS_IMPL_ADDREF(DeviceManagerD3D9)
-NS_IMPL_RELEASE(DeviceManagerD3D9)
 
 bool
 DeviceManagerD3D9::Init()
@@ -170,9 +181,9 @@ DeviceManagerD3D9::Init()
   WNDCLASSW wc;
   HRESULT hr;
 
-  if (!GetClassInfoW(GetModuleHandle(NULL), kClassName, &wc)) {
+  if (!GetClassInfoW(GetModuleHandle(nullptr), kClassName, &wc)) {
       ZeroMemory(&wc, sizeof(WNDCLASSW));
-      wc.hInstance = GetModuleHandle(NULL);
+      wc.hInstance = GetModuleHandle(nullptr);
       wc.lpfnWndProc = ::DefWindowProc;
       wc.lpszClassName = kClassName;
       if (!RegisterClassW(&wc)) {
@@ -182,8 +193,8 @@ DeviceManagerD3D9::Init()
   }
 
   mFocusWnd = ::CreateWindowW(kClassName, L"D3D9Window", WS_OVERLAPPEDWINDOW,
-                              CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, NULL,
-                              NULL, GetModuleHandle(NULL), NULL);
+                              CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr,
+                              nullptr, GetModuleHandle(nullptr), nullptr);
 
   if (!mFocusWnd) {
     NS_WARNING("Failed to create DeviceManagerD3D9 Window.");
@@ -204,11 +215,11 @@ DeviceManagerD3D9::Init()
   } 
 
   HMODULE d3d9 = LoadLibraryW(L"d3d9.dll");
-  Direct3DCreate9Func d3d9Create = (Direct3DCreate9Func)
+  decltype(Direct3DCreate9)* d3d9Create = (decltype(Direct3DCreate9)*)
     GetProcAddress(d3d9, "Direct3DCreate9");
-  Direct3DCreate9ExFunc d3d9CreateEx = (Direct3DCreate9ExFunc)
+  decltype(Direct3DCreate9Ex)* d3d9CreateEx = (decltype(Direct3DCreate9Ex)*)
     GetProcAddress(d3d9, "Direct3DCreate9Ex");
-  
+
 #ifdef USE_D3D9EX
   if (d3d9CreateEx) {
     hr = d3d9CreateEx(D3D_SDK_VERSION, getter_AddRefs(mD3D9Ex));
@@ -237,12 +248,6 @@ DeviceManagerD3D9::Init()
     return false;
   }
 
-  if (!PL_strncasecmp(ident.Driver, "nvumdshim.dll", strlen(ident.Driver))) {
-    // XXX - This is a device using NVidia Optimus. We have no idea how to do
-    // interop here so let's fail and use BasicLayers. See bug 597320.
-    return false;
-  }
-
   D3DPRESENT_PARAMETERS pp;
   memset(&pp, 0, sizeof(D3DPRESENT_PARAMETERS));
 
@@ -262,7 +267,7 @@ DeviceManagerD3D9::Init()
                                  D3DCREATE_MULTITHREADED |
                                  D3DCREATE_MIXED_VERTEXPROCESSING,
                                  &pp,
-                                 NULL,
+                                 nullptr,
                                  getter_AddRefs(mDeviceEx));
     if (SUCCEEDED(hr)) {
       mDevice = mDeviceEx;
@@ -313,7 +318,7 @@ DeviceManagerD3D9::Init()
    * Do some post device creation setup 
    */ 
   if (mNv3DVUtils) { 
-    IUnknown* devUnknown = NULL; 
+    IUnknown* devUnknown = nullptr; 
     if (mDevice) { 
       mDevice->QueryInterface(IID_IUnknown, (void **)&devUnknown); 
     } 
@@ -496,12 +501,12 @@ DeviceManagerD3D9::SetupRenderState()
   mDevice->SetSamplerState(1, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
   mDevice->SetSamplerState(2, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
   mDevice->SetSamplerState(2, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
-  mDevice->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-  mDevice->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
-  mDevice->SetSamplerState(1, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-  mDevice->SetSamplerState(1, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
-  mDevice->SetSamplerState(2, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-  mDevice->SetSamplerState(2, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+  mDevice->SetSamplerState(0, D3DSAMP_ADDRESSU, mTextureAddressingMode);
+  mDevice->SetSamplerState(0, D3DSAMP_ADDRESSV, mTextureAddressingMode);
+  mDevice->SetSamplerState(1, D3DSAMP_ADDRESSU, mTextureAddressingMode);
+  mDevice->SetSamplerState(1, D3DSAMP_ADDRESSV, mTextureAddressingMode);
+  mDevice->SetSamplerState(2, D3DSAMP_ADDRESSU, mTextureAddressingMode);
+  mDevice->SetSamplerState(2, D3DSAMP_ADDRESSV, mTextureAddressingMode);
 }
 
 already_AddRefed<SwapChainD3D9>
@@ -514,7 +519,7 @@ DeviceManagerD3D9::CreateSwapChain(HWND hWnd)
   // will be permanently unaccelerated. This should be a rare situation
   // though and the need for a low-risk fix for this bug outweighs the
   // downside.
-  if (!VerifyReadyForRendering()) {
+  if (VerifyReadyForRendering() != DeviceOK) {
     return nullptr;
   }
 
@@ -533,23 +538,24 @@ DeviceManagerD3D9::CreateSwapChain(HWND hWnd)
   */
 bool
 LoadMaskTexture(Layer* aMask, IDirect3DDevice9* aDevice,
-                uint32_t aMaskQuadTexture, uint32_t aMaskTexRegister)
+                uint32_t aMaskTexRegister)
 {
-  gfxIntSize size;
+  IntSize size;
   nsRefPtr<IDirect3DTexture9> texture =
     static_cast<LayerD3D9*>(aMask->ImplData())->GetAsTexture(&size);
-  
+
   if (!texture) {
     return false;
   }
-  
-  gfxMatrix maskTransform;
-  bool maskIs2D = aMask->GetEffectiveTransform().CanDraw2D(&maskTransform);
+
+  Matrix maskTransform;
+  Matrix4x4 effectiveTransform = aMask->GetEffectiveTransform();
+  bool maskIs2D = effectiveTransform.CanDraw2D(&maskTransform);
   NS_ASSERTION(maskIs2D, "How did we end up with a 3D transform here?!");
-  gfxRect bounds = gfxRect(gfxPoint(), size);
+  Rect bounds = Rect(Point(), Size(size));
   bounds = maskTransform.TransformBounds(bounds);
 
-  aDevice->SetVertexShaderConstantF(aMaskQuadTexture, 
+  aDevice->SetVertexShaderConstantF(DeviceManagerD3D9::sMaskQuadRegister,
                                     ShaderConstantRect((float)bounds.x,
                                                        (float)bounds.y,
                                                        (float)bounds.width,
@@ -560,57 +566,10 @@ LoadMaskTexture(Layer* aMask, IDirect3DDevice9* aDevice,
   return true;
 }
 
-void
-DeviceManagerD3D9::SetShaderMode(ShaderMode aMode, Layer* aMask, bool aIs2D)
+uint32_t
+DeviceManagerD3D9::SetShaderMode(ShaderMode aMode, MaskType aMaskType)
 {
-  if (aMask) {
-    // register allocations are taken from LayerManagerD3D9Shaders.h after
-    // the shaders are compiled (genshaders.sh)
-    const uint32_t maskQuadRegister = 11;
-    uint32_t maskTexRegister;
-    switch (aMode) {
-      case RGBLAYER:
-        mDevice->SetVertexShader(mLayerVSMask);
-        mDevice->SetPixelShader(mRGBPSMask);
-        maskTexRegister = 1;
-        break;
-      case RGBALAYER:
-        if (aIs2D) {
-          mDevice->SetVertexShader(mLayerVSMask);
-          mDevice->SetPixelShader(mRGBAPSMask);
-        } else {
-          mDevice->SetVertexShader(mLayerVSMask3D);
-          mDevice->SetPixelShader(mRGBAPSMask3D);
-        }
-        maskTexRegister = 1;
-        break;
-      case COMPONENTLAYERPASS1:
-        mDevice->SetVertexShader(mLayerVSMask);
-        mDevice->SetPixelShader(mComponentPass1PSMask);
-        maskTexRegister = 2;
-        break;
-      case COMPONENTLAYERPASS2:
-        mDevice->SetVertexShader(mLayerVSMask);
-        mDevice->SetPixelShader(mComponentPass2PSMask);
-        maskTexRegister = 2;
-        break;
-      case YCBCRLAYER:
-        mDevice->SetVertexShader(mLayerVSMask);
-        mDevice->SetPixelShader(mYCbCrPSMask);
-        maskTexRegister = 3;
-        break;
-      case SOLIDCOLORLAYER:
-        mDevice->SetVertexShader(mLayerVSMask);
-        mDevice->SetPixelShader(mSolidColorPSMask);
-        maskTexRegister = 0;
-        break;
-    }
-    if (!LoadMaskTexture(aMask, mDevice, maskQuadRegister, maskTexRegister)) {
-      // if we can't load the mask, fall back to unmasked rendering
-      NS_WARNING("Could not load texture for mask layer.");
-      SetShaderMode(aMode, nullptr, true);
-    }
-  } else {
+  if (aMaskType == MaskNone) {
     switch (aMode) {
       case RGBLAYER:
         mDevice->SetVertexShader(mLayerVS);
@@ -637,12 +596,87 @@ DeviceManagerD3D9::SetShaderMode(ShaderMode aMode, Layer* aMask, bool aIs2D)
         mDevice->SetPixelShader(mSolidColorPS);
         break;
     }
+    return 0;
+  }
+
+  uint32_t maskTexRegister;
+  switch (aMode) {
+    case RGBLAYER:
+      mDevice->SetVertexShader(mLayerVSMask);
+      mDevice->SetPixelShader(mRGBPSMask);
+      maskTexRegister = 1;
+      break;
+    case RGBALAYER:
+      if (aMaskType == Mask2d) {
+        mDevice->SetVertexShader(mLayerVSMask);
+        mDevice->SetPixelShader(mRGBAPSMask);
+      } else {
+        mDevice->SetVertexShader(mLayerVSMask3D);
+        mDevice->SetPixelShader(mRGBAPSMask3D);
+      }
+      maskTexRegister = 1;
+      break;
+    case COMPONENTLAYERPASS1:
+      mDevice->SetVertexShader(mLayerVSMask);
+      mDevice->SetPixelShader(mComponentPass1PSMask);
+      maskTexRegister = 2;
+      break;
+    case COMPONENTLAYERPASS2:
+      mDevice->SetVertexShader(mLayerVSMask);
+      mDevice->SetPixelShader(mComponentPass2PSMask);
+      maskTexRegister = 2;
+      break;
+    case YCBCRLAYER:
+      mDevice->SetVertexShader(mLayerVSMask);
+      mDevice->SetPixelShader(mYCbCrPSMask);
+      maskTexRegister = 3;
+      break;
+    case SOLIDCOLORLAYER:
+      mDevice->SetVertexShader(mLayerVSMask);
+      mDevice->SetPixelShader(mSolidColorPSMask);
+      maskTexRegister = 0;
+      break;
+  }
+  return maskTexRegister;
+}
+
+void
+DeviceManagerD3D9::SetShaderMode(ShaderMode aMode, Layer* aMask, bool aIs2D)
+{
+  MaskType maskType = MaskNone;
+  if (aMask) {
+    maskType = aIs2D ? Mask2d : Mask3d;
+  }
+  uint32_t maskTexRegister = SetShaderMode(aMode, maskType);
+  if (aMask) {
+    // register allocations are taken from LayerManagerD3D9Shaders.h after
+    // the shaders are compiled (genshaders.sh)
+    if (!LoadMaskTexture(aMask, mDevice, maskTexRegister)) {
+      // if we can't load the mask, fall back to unmasked rendering
+      NS_WARNING("Could not load texture for mask layer.");
+      SetShaderMode(aMode, MaskNone);
+    }
   }
 }
 
-bool
+void
+DeviceManagerD3D9::DestroyDevice()
+{
+  ++mDeviceResetCount;
+  mDeviceWasRemoved = true;
+  if (!IsD3D9Ex()) {
+    ReleaseTextureResources();
+  }
+  gfxWindowsPlatform::GetPlatform()->OnDeviceManagerDestroy(this);
+}
+
+DeviceManagerState
 DeviceManagerD3D9::VerifyReadyForRendering()
 {
+  if (mDeviceWasRemoved) {
+    return DeviceMustRecreate;
+  }
+
   HRESULT hr = mDevice->TestCooperativeLevel();
 
   if (SUCCEEDED(hr)) {
@@ -650,24 +684,24 @@ DeviceManagerD3D9::VerifyReadyForRendering()
       hr = mDeviceEx->CheckDeviceState(mFocusWnd);
 
       if (FAILED(hr)) {
-        mDeviceWasRemoved = true;
-        LayerManagerD3D9::OnDeviceManagerDestroy(this);
-        ++mDeviceResetCount;
-        return false;
+        DestroyDevice();
+        return DeviceMustRecreate;
       }
     }
-    return true;
+    return DeviceOK;
   }
 
-  for(unsigned int i = 0; i < mLayersWithResources.Length(); i++) {
+  // We need to release all texture resources and swap chains before resetting.
+  for (unsigned int i = 0; i < mLayersWithResources.Length(); i++) {
     mLayersWithResources[i]->CleanResources();
   }
-  for(unsigned int i = 0; i < mSwapChains.Length(); i++) {
+  ReleaseTextureResources();
+  for (unsigned int i = 0; i < mSwapChains.Length(); i++) {
     mSwapChains[i]->Reset();
   }
 
   mVB = nullptr;
-  
+
   D3DPRESENT_PARAMETERS pp;
   memset(&pp, 0, sizeof(D3DPRESENT_PARAMETERS));
 
@@ -679,39 +713,44 @@ DeviceManagerD3D9::VerifyReadyForRendering()
   pp.PresentationInterval = D3DPRESENT_INTERVAL_DEFAULT;
   pp.hDeviceWindow = mFocusWnd;
 
-  hr = mDevice->Reset(&pp);
+  // Whatever happens from now on, either we reset the device, or we should
+  // pretend we reset the device so that the layer manager or compositor
+  // doesn't ignore it.
   ++mDeviceResetCount;
 
+  // if we got this far, we know !SUCCEEDEED(hr), that means hr is one of
+  // D3DERR_DEVICELOST, D3DERR_DEVICENOTRESET, D3DERR_DRIVERINTERNALERROR.
+  // It is only worth resetting if we get D3DERR_DEVICENOTRESET. If we get
+  // D3DERR_DEVICELOST we can wait and see if we get D3DERR_DEVICENOTRESET
+  // later, then reset.
   if (hr == D3DERR_DEVICELOST) {
-    /* It is not unusual for Reset to return DEVICELOST
-     * we're supposed to continue trying until we get
-     * DEVICENOTRESET and then Reset is supposed to succeed.
-     * Unfortunately, it seems like when we dock or undock
-     * DEVICELOST happens and we never get DEVICENOTRESET. */
-
     HMONITOR hMonitorWindow;
     hMonitorWindow = MonitorFromWindow(mFocusWnd, MONITOR_DEFAULTTOPRIMARY);
-    if (hMonitorWindow == mDeviceMonitor) {
-      /* The monitor has not changed. So, let's assume that the
-       * DEVICENOTRESET will be comming. */
-
+    if (hMonitorWindow != mDeviceMonitor) {
       /* jrmuizel: I'm not sure how to trigger this case. Usually, we get
        * DEVICENOTRESET right away and Reset() succeeds without going through a
        * set of DEVICELOSTs. This is presumeably because we don't call
        * VerifyReadyForRendering when we don't have any reason to paint.
-       * Hopefully comparing HMONITORs is not overly aggressive. */
-      return false;
+       * Hopefully comparing HMONITORs is not overly aggressive.
+       * See bug 626678.
+       */
+      /* The monitor has changed. We have to assume that the
+       * DEVICENOTRESET will not be coming. */
+      DestroyDevice();
+      return DeviceMustRecreate;
     }
-    /* otherwise fall through and recreate the device */
+    return DeviceFail;
+  }
+  if (hr == D3DERR_DEVICENOTRESET) {
+    hr = mDevice->Reset(&pp);
   }
 
   if (FAILED(hr) || !CreateVertexBuffer()) {
-    mDeviceWasRemoved = true;
-    LayerManagerD3D9::OnDeviceManagerDestroy(this);
-    return false;
+    DestroyDevice();
+    return DeviceMustRecreate;
   }
 
-  return true;
+  return DeviceOK;
 }
 
 bool
@@ -773,6 +812,13 @@ DeviceManagerD3D9::VerifyCaps()
     mHasDynamicTextures = true;
   }
 
+  if (HAS_CAP(caps.TextureAddressCaps, D3DPTADDRESSCAPS_WRAP) &&
+      LACKS_CAP(caps.TextureCaps, D3DPTEXTURECAPS_NONPOW2CONDITIONAL)) {
+    mTextureAddressingMode = D3DTADDRESS_WRAP;
+  } else {
+    gfxPlatform::DisableBufferRotation();
+  }
+
   return true;
 }
 
@@ -786,7 +832,7 @@ DeviceManagerD3D9::CreateVertexBuffer()
                                    0,
                                    D3DPOOL_DEFAULT,
                                    getter_AddRefs(mVB),
-                                   NULL);
+                                   nullptr);
 
   if (FAILED(hr)) {
     return false;
@@ -806,6 +852,101 @@ DeviceManagerD3D9::CreateVertexBuffer()
   mVB->Unlock();
 
   return true;
+}
+
+TemporaryRef<IDirect3DTexture9>
+DeviceManagerD3D9::CreateTexture(const IntSize &aSize,
+                                 _D3DFORMAT aFormat,
+                                 D3DPOOL aPool,
+                                 TextureSourceD3D9* aTextureHost)
+{
+  if (mDeviceWasRemoved) {
+    return nullptr;
+  }
+  RefPtr<IDirect3DTexture9> result;
+  if (FAILED(device()->CreateTexture(aSize.width, aSize.height,
+                                     1, 0, aFormat, aPool,
+                                     byRef(result), nullptr))) {
+    return nullptr;
+  }
+
+  NS_ASSERTION(aPool != D3DPOOL_MANAGED,
+               "Should not be using MANAGED texture pool. We will get an error when we have to recreate the device");
+  if (aPool == D3DPOOL_DEFAULT) {
+    MOZ_ASSERT(aTextureHost, "We need a texture host to track so we can release the texture.");
+    RegisterTextureHost(aTextureHost);
+  }
+
+  return result;
+}
+
+#ifdef DEBUG
+bool
+DeviceManagerD3D9::IsInTextureHostList(TextureSourceD3D9* aFind)
+{
+  TextureSourceD3D9* cur = mTextureHostList;
+  while(cur) {
+    if (cur == aFind) {
+      return true;
+    }
+    cur = cur->mNextHost;
+  }
+
+  return false;
+}
+#endif
+
+void
+DeviceManagerD3D9::RegisterTextureHost(TextureSourceD3D9* aHost)
+{
+  if (!aHost) {
+    return;
+  }
+
+  // Don't add aHost to the list twice.
+  if (aHost->mPreviousHost ||
+      mTextureHostList == aHost) {
+    MOZ_ASSERT(IsInTextureHostList(aHost));
+    return;
+  }
+
+  MOZ_ASSERT(!aHost->mNextHost);
+  MOZ_ASSERT(!IsInTextureHostList(aHost));
+
+  if (mTextureHostList) {
+    MOZ_ASSERT(!mTextureHostList->mPreviousHost);
+    mTextureHostList->mPreviousHost = aHost;
+    aHost->mNextHost = mTextureHostList;
+  }
+  mTextureHostList = aHost;
+  MOZ_ASSERT(!aHost->mCreatingDeviceManager, "Already created texture?");
+  MOZ_ASSERT(IsInTextureHostList(aHost));
+  aHost->mCreatingDeviceManager = this;
+}
+
+void
+DeviceManagerD3D9::ReleaseTextureResources()
+{
+  TextureSourceD3D9* host = mTextureHostList;
+  while (host) {
+    host->ReleaseTextureResources();
+    TextureSourceD3D9* oldHost = host;
+    host = oldHost->mNextHost;
+    oldHost->mPreviousHost = nullptr;
+    oldHost->mNextHost = nullptr;
+    oldHost->mCreatingDeviceManager = nullptr;
+  }
+  mTextureHostList = nullptr;
+}
+
+void
+DeviceManagerD3D9::RemoveTextureListHead(TextureSourceD3D9* aHost)
+{
+  MOZ_ASSERT(!aHost->mCreatingDeviceManager || aHost->mCreatingDeviceManager == this,
+             "Wrong device manager");
+  MOZ_ASSERT(aHost && mTextureHostList == aHost,
+             "aHost is not the head of the texture host list");
+  mTextureHostList = aHost->mNextHost;
 }
 
 } /* namespace layers */

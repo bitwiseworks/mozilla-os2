@@ -5,7 +5,7 @@
 var testnum = 0;
 let dbConnection; // used for deleted table tests
 
-Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
+Cu.import("resource://gre/modules/Promise.jsm");
 
 function countDeletedEntries(expected)
 {
@@ -395,7 +395,7 @@ add_task(function ()
                        { op : "bump", fieldname: "field5", value: "value5" },
                        { op : "bump", fieldname: "field6", value: "value6" }]);
   results = yield promiseSearchEntries(["fieldname", "timesUsed", "firstUsed", "lastUsed"], { });
-  
+
   do_check_eq(6, results[2].timesUsed);
   do_check_eq(13, results[3].timesUsed);
   do_check_eq(230, results[2].firstUsed);

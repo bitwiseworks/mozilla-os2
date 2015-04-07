@@ -11,7 +11,7 @@
 #ifndef WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_EXTERNAL_CODEC_H_
 #define WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_EXTERNAL_CODEC_H_
 
-#include "common_types.h"
+#include "webrtc/common_types.h"
 
 namespace webrtc {
 
@@ -27,7 +27,8 @@ class WEBRTC_DLLEXPORT ViEExternalCodec {
 
   virtual int RegisterExternalSendCodec(const int video_channel,
                                         const unsigned char pl_type,
-                                        VideoEncoder* encoder) = 0;
+                                        VideoEncoder* encoder,
+                                        bool internal_source) = 0;
 
   virtual int DeRegisterExternalSendCodec(const int video_channel,
                                           const unsigned char pl_type) = 0;

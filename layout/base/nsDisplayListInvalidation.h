@@ -8,10 +8,12 @@
 
 #include "mozilla/Attributes.h"
 #include "nsRect.h"
+#include "nsColor.h"
 
 class nsDisplayItem;
 class nsDisplayListBuilder;
 class nsDisplayBackgroundImage;
+class nsDisplayThemedBackground;
 
 /**
  * This stores the geometry of an nsDisplayItem, and the area
@@ -94,6 +96,17 @@ public:
   nsRect mPositioningArea;
 };
 
+class nsDisplayThemedBackgroundGeometry : public nsDisplayItemGeometry
+{
+public:
+  nsDisplayThemedBackgroundGeometry(nsDisplayThemedBackground* aItem, nsDisplayListBuilder* aBuilder);
+
+  virtual void MoveBy(const nsPoint& aOffset) MOZ_OVERRIDE;
+
+  nsRect mPositioningArea;
+  bool mWindowIsActive;
+};
+
 class nsDisplayBoxShadowInnerGeometry : public nsDisplayItemGeometry
 {
 public:
@@ -102,6 +115,19 @@ public:
   virtual void MoveBy(const nsPoint& aOffset) MOZ_OVERRIDE;
 
   nsRect mPaddingRect;
+};
+
+class nsDisplaySolidColorGeometry : public nsDisplayItemBoundsGeometry
+{
+public:
+  nsDisplaySolidColorGeometry(nsDisplayItem* aItem,
+                              nsDisplayListBuilder* aBuilder,
+                              nscolor aColor)
+    : nsDisplayItemBoundsGeometry(aItem, aBuilder)
+    , mColor(aColor)
+  { }
+
+  nscolor mColor;
 };
 
 #endif /*NSDISPLAYLISTINVALIDATION_H_*/

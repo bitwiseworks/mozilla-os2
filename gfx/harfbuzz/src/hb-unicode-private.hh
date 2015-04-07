@@ -32,8 +32,6 @@
 #define HB_UNICODE_PRIVATE_HH
 
 #include "hb-private.hh"
-
-#include "hb-unicode.h"
 #include "hb-object-private.hh"
 
 
@@ -108,7 +106,11 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
   modified_combining_class (hb_codepoint_t unicode)
   {
     /* XXX This hack belongs to the Myanmar shaper. */
-    if (unicode == 0x1037) unicode = 0x103A;
+    if (unlikely (unicode == 0x1037)) unicode = 0x103A;
+
+    /* XXX This hack belongs to the SEA shaper (for Tai Tham):
+     * Reorder SAKOT to ensure it comes after any tone marks. */
+    if (unlikely (unicode == 0x1A60)) return 254;
 
     return _hb_modified_combining_class[combining_class (unicode)];
   }
@@ -128,11 +130,14 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
    * is NOT Default_Ignorable, but it really behaves in a way that it should
    * be.  That has been reported to the Unicode Technical Committee for
    * consideration.  As such, we include it here, since Uniscribe removes it.
+   * It *is* in Unicode 6.3 however.  U+061C ARABIC LETTER MARK from Unicode
+   * 6.3 is also added manually.  The new Unicode 6.3 bidi formatting
+   * characters are encoded in a block that was Default_Ignorable already.
    *
-   * Note: While U+115F and U+1160 are Default_Ignorable, we do NOT want to
-   * hide them, as the way Uniscribe has implemented them is with regular
-   * spacing glyphs, and that's the way fonts are made to work.  As such,
-   * we make exceptions for those two.
+   * Note: While U+115F, U+1160, U+3164 and U+FFA0 are Default_Ignorable,
+   * we do NOT want to hide them, as the way Uniscribe has implemented them
+   * is with regular spacing glyphs, and that's the way fonts are made to work.
+   * As such, we make exceptions for those four.
    *
    * Gathered from:
    * http://unicode.org/cldr/utility/list-unicodeset.jsp?a=[:DI:]&abb=on&ucd=on&esc=on
@@ -154,10 +159,10 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
    * 200B..200F ;RIGHT-TO-LEFT MARK
    * 202A..202E ;RIGHT-TO-LEFT OVERRIDE
    * 2060..206F ;NOMINAL DIGIT SHAPES
-   * 3164 ;HANGUL FILLER
+   * #3164 ;HANGUL FILLER
    * FE00..FE0F ;VARIATION SELECTOR-16
    * FEFF ;ZERO WIDTH NO-BREAK SPACE
-   * FFA0 ;HALFWIDTH HANGUL FILLER
+   * #FFA0 ;HALFWIDTH HANGUL FILLER
    * FFF0..FFF8 ;<unassigned-FFF8>
    * 1D173..1D17A ;MUSICAL SYMBOL END PHRASE
    * E0000..E0FFF ;<unassigned-E0FFF>
@@ -173,14 +178,14 @@ HB_UNICODE_FUNCS_IMPLEMENT_CALLBACKS_SIMPLE
       switch (page) {
 	case 0x00: return unlikely (ch == 0x00AD);
 	case 0x03: return unlikely (ch == 0x034F);
+	case 0x06: return unlikely (ch == 0x061C);
 	case 0x17: return hb_in_range<hb_codepoint_t> (ch, 0x17B4, 0x17B5);
 	case 0x18: return hb_in_range<hb_codepoint_t> (ch, 0x180B, 0x180E);
 	case 0x20: return hb_in_ranges<hb_codepoint_t> (ch, 0x200B, 0x200F,
 							    0x202A, 0x202E,
 							    0x2060, 0x206F);
-	case 0x31: return unlikely (ch == 0x3164);
 	case 0xFE: return hb_in_range<hb_codepoint_t> (ch, 0xFE00, 0xFE0F) || ch == 0xFEFF;
-	case 0xFF: return hb_in_range<hb_codepoint_t> (ch, 0xFFF0, 0xFFF8) || ch == 0xFFA0;
+	case 0xFF: return hb_in_range<hb_codepoint_t> (ch, 0xFFF0, 0xFFF8);
 	default: return false;
       }
     }

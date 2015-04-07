@@ -11,7 +11,7 @@
 #include "webrtc/modules/audio_coding/main/source/acm_opus.h"
 
 #include "webrtc/modules/audio_coding/main/source/acm_codec_database.h"
-#include "webrtc/modules/audio_coding/main/source/acm_common_defs.h"
+#include "webrtc/modules/audio_coding/main/acm2/acm_common_defs.h"
 #include "webrtc/modules/audio_coding/main/source/acm_neteq.h"
 #include "webrtc/modules/audio_coding/neteq/interface/webrtc_neteq.h"
 #include "webrtc/modules/audio_coding/neteq/interface/webrtc_neteq_help_macros.h"
@@ -22,6 +22,8 @@
 #endif
 
 namespace webrtc {
+
+namespace acm1 {
 
 #ifndef WEBRTC_CODEC_OPUS
 
@@ -108,7 +110,8 @@ ACMOpus::ACMOpus(int16_t codec_id)
       bitrate_(20000),  // Default bit-rate.
       channels_(1) {  // Default mono
   codec_id_ = codec_id;
-  // Opus has internal DTX, but we dont use it for now.
+
+  // Opus has internal DTX, but we don't use it for now.
   has_internal_dtx_ = false;
 
   if (codec_id_ != ACMCodecDB::kOpus) {
@@ -269,7 +272,7 @@ void ACMOpus::DestructDecoderSafe() {
 
 void ACMOpus::InternalDestructEncoderInst(void* ptr_inst) {
   if (ptr_inst != NULL) {
-    WebRtcOpus_EncoderFree((OpusEncInst*) ptr_inst);
+    WebRtcOpus_EncoderFree(reinterpret_cast<OpusEncInst*>(ptr_inst));
   }
   return;
 }
@@ -310,5 +313,7 @@ void ACMOpus::SplitStereoPacket(uint8_t* payload, int32_t* payload_length) {
 }
 
 #endif  // WEBRTC_CODEC_OPUS
+
+}  // namespace acm1
 
 }  // namespace webrtc

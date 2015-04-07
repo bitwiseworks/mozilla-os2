@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <math.h>
 
 #include "nsThreadUtils.h"
 
@@ -55,41 +56,15 @@ Sampler *SamplerRegistry::sampler = NULL;
 // a pointer.
 static const pthread_t kNoThread = (pthread_t) 0;
 
-class MacOSMutex : public Mutex {
- public:
-  MacOSMutex() {
-    pthread_mutexattr_t attr;
-    pthread_mutexattr_init(&attr);
-    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_init(&mutex_, &attr);
-  }
-
-  virtual ~MacOSMutex() { pthread_mutex_destroy(&mutex_); }
-
-  virtual int Lock() { return pthread_mutex_lock(&mutex_); }
-  virtual int Unlock() { return pthread_mutex_unlock(&mutex_); }
-
-  virtual bool TryLock() {
-    int result = pthread_mutex_trylock(&mutex_);
-    // Return false if the lock is busy and locking failed.
-    if (result == EBUSY) {
-      return false;
-    }
-    ASSERT(result == 0);  // Verify no other errors.
-    return true;
-  }
-
- private:
-  pthread_mutex_t mutex_;
-};
-
-
-Mutex* OS::CreateMutex() {
-  return new MacOSMutex();
+void OS::Startup() {
 }
 
 void OS::Sleep(int milliseconds) {
   usleep(1000 * milliseconds);
+}
+
+void OS::SleepMicro(int microseconds) {
+  usleep(microseconds);
 }
 
 Thread::Thread(const char* name)
@@ -192,9 +167,14 @@ Sampler::FreePlatformData(PlatformData* aData)
 
 class SamplerThread : public Thread {
  public:
-  explicit SamplerThread(int interval)
+  explicit SamplerThread(double interval)
       : Thread("SamplerThread")
-      , interval_(interval) {}
+      , intervalMicro_(floor(interval * 1000 + 0.5))
+  {
+    if (intervalMicro_ <= 0) {
+      intervalMicro_ = 1;
+    }
+  }
 
   static void AddActiveSampler(Sampler* sampler) {
     mozilla::MutexAutoLock lock(*Sampler::sRegisteredThreadsMutex);
@@ -202,8 +182,6 @@ class SamplerThread : public Thread {
     if (instance_ == NULL) {
       instance_ = new SamplerThread(sampler->interval());
       instance_->Start();
-    } else {
-      ASSERT(instance_->interval_ == sampler->interval());
     }
   }
 
@@ -220,7 +198,7 @@ class SamplerThread : public Thread {
   // Implement Thread::Run().
   virtual void Run() {
     while (SamplerRegistry::sampler->IsActive()) {
-      {
+      if (!SamplerRegistry::sampler->IsPaused()) {
         mozilla::MutexAutoLock lock(*Sampler::sRegisteredThreadsMutex);
         std::vector<ThreadInfo*> threads =
           SamplerRegistry::sampler->GetRegisteredThreads();
@@ -231,13 +209,20 @@ class SamplerThread : public Thread {
           if (!info->Profile())
             continue;
 
+          PseudoStack::SleepState sleeping = info->Stack()->observeSleeping();
+          if (sleeping == PseudoStack::SLEEPING_AGAIN) {
+            info->Profile()->DuplicateLastSample();
+            //XXX: This causes flushes regardless of jank-only mode
+            info->Profile()->flush();
+            continue;
+          }
+
           ThreadProfile* thread_profile = info->Profile();
 
-          if (!SamplerRegistry::sampler->IsPaused())
-            SampleContext(SamplerRegistry::sampler, thread_profile);
+          SampleContext(SamplerRegistry::sampler, thread_profile);
         }
       }
-      OS::Sleep(interval_);
+      OS::SleepMicro(intervalMicro_);
     }
   }
 
@@ -286,11 +271,9 @@ class SamplerThread : public Thread {
     thread_resume(profiled_thread);
   }
 
-  const int interval_;
+  int intervalMicro_;
   //RuntimeProfilerRateLimiter rate_limiter_;
 
-  // Protects the process wide state below.
-  static Mutex* mutex_;
   static SamplerThread* instance_;
 
   DISALLOW_COPY_AND_ASSIGN(SamplerThread);
@@ -300,7 +283,7 @@ class SamplerThread : public Thread {
 
 SamplerThread* SamplerThread::instance_ = NULL;
 
-Sampler::Sampler(int interval, bool profiling, int entrySize)
+Sampler::Sampler(double interval, bool profiling, int entrySize)
     : // isolate_(isolate),
       interval_(interval),
       profiling_(profiling),
@@ -341,6 +324,12 @@ pid_t gettid()
   return (pid_t) syscall(SYS_thread_selfid);
 }
 
+/* static */ Thread::tid_t
+Thread::GetCurrentId()
+{
+  return gettid();
+}
+
 bool Sampler::RegisterCurrentThread(const char* aName,
                                     PseudoStack* aPseudoStack,
                                     bool aIsMainThread, void* stackTop)
@@ -348,10 +337,24 @@ bool Sampler::RegisterCurrentThread(const char* aName,
   if (!Sampler::sRegisteredThreadsMutex)
     return false;
 
+
   mozilla::MutexAutoLock lock(*Sampler::sRegisteredThreadsMutex);
 
-  ThreadInfo* info = new ThreadInfo(aName, gettid(),
-    aIsMainThread, aPseudoStack);
+  int id = gettid();
+  for (uint32_t i = 0; i < sRegisteredThreads->size(); i++) {
+    ThreadInfo* info = sRegisteredThreads->at(i);
+    if (info->ThreadId() == id) {
+      // Thread already registered. This means the first unregister will be
+      // too early.
+      ASSERT(false);
+      return false;
+    }
+  }
+
+  set_tls_stack_top(stackTop);
+
+  ThreadInfo* info = new ThreadInfo(aName, id,
+    aIsMainThread, aPseudoStack, stackTop);
 
   if (sActiveSampler) {
     sActiveSampler->RegisterThread(info);
@@ -368,6 +371,8 @@ void Sampler::UnregisterCurrentThread()
   if (!Sampler::sRegisteredThreadsMutex)
     return;
 
+  tlsStackTop.set(nullptr);
+
   mozilla::MutexAutoLock lock(*Sampler::sRegisteredThreadsMutex);
 
   int id = gettid();
@@ -381,3 +386,37 @@ void Sampler::UnregisterCurrentThread()
     }
   }
 }
+
+void TickSample::PopulateContext(void* aContext)
+{
+  // Note that this asm changes if PopulateContext's parameter list is altered
+#if defined(SPS_PLAT_amd64_darwin)
+  asm (
+      // Compute caller's %rsp by adding to %rbp:
+      // 8 bytes for previous %rbp, 8 bytes for return address
+      "leaq 0x10(%%rbp), %0\n\t"
+      // Dereference %rbp to get previous %rbp
+      "movq (%%rbp), %1\n\t"
+      :
+      "=r"(sp),
+      "=r"(fp)
+  );
+#elif defined(SPS_PLAT_x86_darwin)
+  asm (
+      // Compute caller's %esp by adding to %ebp:
+      // 4 bytes for aContext + 4 bytes for return address +
+      // 4 bytes for previous %ebp
+      "leal 0xc(%%ebp), %0\n\t"
+      // Dereference %ebp to get previous %ebp
+      "movl (%%ebp), %1\n\t"
+      :
+      "=r"(sp),
+      "=r"(fp)
+  );
+#else
+# error "Unsupported architecture"
+#endif
+  pc = reinterpret_cast<Address>(__builtin_extract_return_addr(
+                                    __builtin_return_address(0)));
+}
+

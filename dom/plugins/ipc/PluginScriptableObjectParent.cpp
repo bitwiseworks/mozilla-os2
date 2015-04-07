@@ -4,21 +4,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/DebugOnly.h"
-
 #include "PluginScriptableObjectParent.h"
-#include "PluginScriptableObjectUtils.h"
 
-#include "nsNPAPIPlugin.h"
+#include "mozilla/DebugOnly.h"
+#include "mozilla/plugins/PluginIdentifierParent.h"
 #include "mozilla/unused.h"
 #include "nsCxPusher.h"
+#include "nsNPAPIPlugin.h"
+#include "PluginScriptableObjectUtils.h"
 
 using namespace mozilla::plugins;
 using namespace mozilla::plugins::parent;
 
 namespace {
-
-typedef PluginIdentifierParent::StackIdentifier StackIdentifier;
 
 inline void
 ReleaseVariant(NPVariant& aVariant,
@@ -108,7 +106,7 @@ PluginScriptableObjectParent::ScriptableHasMethod(NPObject* aObject,
     return false;
   }
 
-  StackIdentifier identifier(aObject, aName);
+  PluginIdentifierParent::StackIdentifier identifier(aObject, aName);
   if (!identifier) {
     return false;
   }
@@ -148,7 +146,7 @@ PluginScriptableObjectParent::ScriptableInvoke(NPObject* aObject,
     return false;
   }
 
-  StackIdentifier identifier(aObject, aName);
+  PluginIdentifierParent::StackIdentifier identifier(aObject, aName);
   if (!identifier) {
     return false;
   }
@@ -250,7 +248,7 @@ PluginScriptableObjectParent::ScriptableHasProperty(NPObject* aObject,
     return false;
   }
 
-  StackIdentifier identifier(aObject, aName);
+  PluginIdentifierParent::StackIdentifier identifier(aObject, aName);
   if (!identifier) {
     return false;
   }
@@ -299,7 +297,7 @@ PluginScriptableObjectParent::ScriptableSetProperty(NPObject* aObject,
     return false;
   }
 
-  StackIdentifier identifier(aObject, aName);
+  PluginIdentifierParent::StackIdentifier identifier(aObject, aName);
   if (!identifier) {
     return false;
   }
@@ -342,7 +340,7 @@ PluginScriptableObjectParent::ScriptableRemoveProperty(NPObject* aObject,
     return false;
   }
 
-  StackIdentifier identifier(aObject, aName);
+  PluginIdentifierParent::StackIdentifier identifier(aObject, aName);
   if (!identifier) {
     return false;
   }
@@ -709,7 +707,7 @@ PluginScriptableObjectParent::AnswerInvoke(PPluginIdentifierParent* aId,
     return true;
   }
 
-  nsAutoTArray<NPVariant, 10> convertedArgs;
+  AutoFallibleTArray<NPVariant, 10> convertedArgs;
   uint32_t argCount = aArgs.Length();
 
   if (!convertedArgs.SetLength(argCount)) {
@@ -792,7 +790,7 @@ PluginScriptableObjectParent::AnswerInvokeDefault(const InfallibleTArray<Variant
     return true;
   }
 
-  nsAutoTArray<NPVariant, 10> convertedArgs;
+  AutoFallibleTArray<NPVariant, 10> convertedArgs;
   uint32_t argCount = aArgs.Length();
 
   if (!convertedArgs.SetLength(argCount)) {
@@ -1046,7 +1044,7 @@ PluginScriptableObjectParent::AnswerEnumerate(InfallibleTArray<PPluginIdentifier
     // Because of GC hazards, all identifiers returned from enumerate
     // must be made permanent.
     if (_identifierisstring(ids[index])) {
-      JSString* str = NPIdentifierToString(ids[index]);
+      JS::Rooted<JSString*> str(cx, NPIdentifierToString(ids[index]));
       if (!JS_StringHasBeenInterned(cx, str)) {
         DebugOnly<JSString*> str2 = JS_InternJSString(cx, str);
         NS_ASSERTION(str2 == str, "Interning a JS string which is currently an ID should return itself.");
@@ -1094,7 +1092,7 @@ PluginScriptableObjectParent::AnswerConstruct(const InfallibleTArray<Variant>& a
     return true;
   }
 
-  nsAutoTArray<NPVariant, 10> convertedArgs;
+  AutoFallibleTArray<NPVariant, 10> convertedArgs;
   uint32_t argCount = aArgs.Length();
 
   if (!convertedArgs.SetLength(argCount)) {
@@ -1212,7 +1210,7 @@ PluginScriptableObjectParent::AnswerNPN_Evaluate(const nsCString& aScript,
   return true;
 }
 
-JSBool
+bool
 PluginScriptableObjectParent::GetPropertyHelper(NPIdentifier aName,
                                                 bool* aHasProperty,
                                                 bool* aHasMethod,
@@ -1223,31 +1221,31 @@ PluginScriptableObjectParent::GetPropertyHelper(NPIdentifier aName,
   ParentNPObject* object = static_cast<ParentNPObject*>(mObject);
   if (object->invalidated) {
     NS_WARNING("Calling method on an invalidated object!");
-    return JS_FALSE;
+    return false;
   }
 
-  StackIdentifier identifier(GetInstance(), aName);
+  PluginIdentifierParent::StackIdentifier identifier(GetInstance(), aName);
   if (!identifier) {
-    return JS_FALSE;
+    return false;
   }
 
   bool hasProperty, hasMethod, success;
   Variant result;
   if (!CallGetChildProperty(identifier, &hasProperty, &hasMethod, &result,
                             &success)) {
-    return JS_FALSE;
+    return false;
   }
 
   if (!success) {
-    return JS_FALSE;
+    return false;
   }
 
   if (!ConvertToVariant(result, *aResult, GetInstance())) {
     NS_WARNING("Failed to convert result!");
-    return JS_FALSE;
+    return false;
   }
 
   *aHasProperty = hasProperty;
   *aHasMethod = hasMethod;
-  return JS_TRUE;
+  return true;
 }

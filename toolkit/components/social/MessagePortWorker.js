@@ -19,7 +19,9 @@ WorkerPort.prototype = {
   },
 
   _onerror: function fw_WorkerPort_onerror(err) {
-    throw new Error("Port " + this + " handler failed: " + err);
+    // We throw an object that "derives" from the exception, but with
+    // a more detailed message.
+    throw {message: "Port " + this + " handler failed: " + err.message, __proto__: err};
   }
 }
 
@@ -32,7 +34,7 @@ function importScripts() {
     xhr.onreadystatechange = function(aEvt) {
       if (xhr.readyState == 4) {
         if (xhr.status == 200 || xhr.status == 0) {
-          _evalInSandbox(xhr.responseText);
+          _evalInSandbox(xhr.responseText, scriptURL);
         }
         else {
           throw new Error("Unable to importScripts ["+scriptURL+"], status " + xhr.status)

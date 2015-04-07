@@ -63,12 +63,3 @@ function checkWindows() {
   is(state.windows[0].tabs.length, 2, "first window has two tabs");
   is(state.windows[1].tabs.length, 2, "second window has two tabs");
 }
-
-function whenDelayedStartupFinished(aWindow, aCallback) {
-  Services.obs.addObserver(function observer(aSubject, aTopic) {
-    if (aWindow == aSubject) {
-      Services.obs.removeObserver(observer, aTopic);
-      executeSoon(aCallback);
-    }
-  }, "browser-delayed-startup-finished", false);
-}

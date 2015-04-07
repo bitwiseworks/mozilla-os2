@@ -8,16 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "video_engine/vie_external_codec_impl.h"
+#include "webrtc/video_engine/vie_external_codec_impl.h"
 
-#include "engine_configurations.h"  // NOLINT
-#include "system_wrappers/interface/trace.h"
-#include "video_engine/include/vie_errors.h"
-#include "video_engine/vie_channel.h"
-#include "video_engine/vie_channel_manager.h"
-#include "video_engine/vie_encoder.h"
-#include "video_engine/vie_impl.h"
-#include "video_engine/vie_shared_data.h"
+#include "webrtc/engine_configurations.h"
+#include "webrtc/system_wrappers/interface/trace.h"
+#include "webrtc/video_engine/include/vie_errors.h"
+#include "webrtc/video_engine/vie_channel.h"
+#include "webrtc/video_engine/vie_channel_manager.h"
+#include "webrtc/video_engine/vie_encoder.h"
+#include "webrtc/video_engine/vie_impl.h"
+#include "webrtc/video_engine/vie_shared_data.h"
 
 namespace webrtc {
 
@@ -26,7 +26,7 @@ ViEExternalCodec* ViEExternalCodec::GetInterface(VideoEngine* video_engine) {
   if (video_engine == NULL) {
     return NULL;
   }
-  VideoEngineImpl* vie_impl = reinterpret_cast<VideoEngineImpl*>(video_engine);
+  VideoEngineImpl* vie_impl = static_cast<VideoEngineImpl*>(video_engine);
   ViEExternalCodecImpl* vie_external_codec_impl = vie_impl;
   // Increase ref count.
   (*vie_external_codec_impl)++;
@@ -42,7 +42,7 @@ int ViEExternalCodecImpl::Release() {
   // Decrease ref count.
   (*this)--;
 
-  WebRtc_Word32 ref_count = GetCount();
+  int32_t ref_count = GetCount();
   if (ref_count < 0) {
     WEBRTC_TRACE(kTraceWarning, kTraceVideo, shared_data_->instance_id(),
                  "ViEExternalCodec release too many times");
@@ -67,7 +67,8 @@ ViEExternalCodecImpl::~ViEExternalCodecImpl() {
 
 int ViEExternalCodecImpl::RegisterExternalSendCodec(const int video_channel,
                                                     const unsigned char pl_type,
-                                                    VideoEncoder* encoder) {
+                                                    VideoEncoder* encoder,
+                                                    bool internal_source) {
   WEBRTC_TRACE(kTraceApiCall, kTraceVideo, ViEId(shared_data_->instance_id()),
                "%s channel %d pl_type %d encoder 0x%x", __FUNCTION__,
                video_channel, pl_type, encoder);
@@ -90,7 +91,8 @@ int ViEExternalCodecImpl::RegisterExternalSendCodec(const int video_channel,
     return -1;
   }
 
-  if (vie_encoder->RegisterExternalEncoder(encoder, pl_type) != 0) {
+  if (vie_encoder->RegisterExternalEncoder(encoder, pl_type, internal_source)
+          != 0) {
     shared_data_->SetLastError(kViECodecUnknownError);
     return -1;
   }

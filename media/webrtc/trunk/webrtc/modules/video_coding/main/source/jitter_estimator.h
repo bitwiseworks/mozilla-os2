@@ -11,8 +11,8 @@
 #ifndef WEBRTC_MODULES_VIDEO_CODING_JITTER_ESTIMATOR_H_
 #define WEBRTC_MODULES_VIDEO_CODING_JITTER_ESTIMATOR_H_
 
-#include "typedefs.h"
-#include "rtt_filter.h"
+#include "webrtc/modules/video_coding/main/source/rtt_filter.h"
+#include "webrtc/typedefs.h"
 
 namespace webrtc
 {
@@ -20,7 +20,7 @@ namespace webrtc
 class VCMJitterEstimator
 {
 public:
-    VCMJitterEstimator(WebRtc_Word32 vcmId = 0, WebRtc_Word32 receiverId = 0);
+    VCMJitterEstimator(int32_t vcmId = 0, int32_t receiverId = 0);
 
     VCMJitterEstimator& operator=(const VCMJitterEstimator& rhs);
 
@@ -35,8 +35,8 @@ public:
     //          - frameSize       : Frame size of the current frame.
     //          - incompleteFrame : Flags if the frame is used to update the estimate before it
     //                              was complete. Default is false.
-    void UpdateEstimate(WebRtc_Word64 frameDelayMS,
-                        WebRtc_UWord32 frameSizeBytes,
+    void UpdateEstimate(int64_t frameDelayMS,
+                        uint32_t frameSizeBytes,
                         bool incompleteFrame = false);
 
     // Returns the current jitter estimate in milliseconds and adds
@@ -45,7 +45,7 @@ public:
     //          - rttMultiplier  : RTT param multiplier (when applicable).
     //
     // Return value                   : Jitter estimate in milliseconds
-    double GetJitterEstimate(double rttMultiplier);
+    int GetJitterEstimate(double rttMultiplier);
 
     // Updates the nack counter.
     void FrameNacked();
@@ -54,14 +54,14 @@ public:
     //
     // Input:
     //          - rttMs               : RTT in ms
-    void UpdateRtt(WebRtc_UWord32 rttMs);
+    void UpdateRtt(uint32_t rttMs);
 
-    void UpdateMaxFrameSize(WebRtc_UWord32 frameSizeBytes);
+    void UpdateMaxFrameSize(uint32_t frameSizeBytes);
 
     // A constant describing the delay from the jitter buffer
     // to the delay on the receiving side which is not accounted
     // for by the jitter buffer nor the decoding delay estimate.
-    static const WebRtc_UWord32 OPERATING_SYSTEM_JITTER = 10;
+    static const uint32_t OPERATING_SYSTEM_JITTER = 10;
 
 protected:
     // These are protected for better testing possibilities
@@ -76,7 +76,7 @@ private:
     //          - frameDelayMS    : Delay-delta calculated by UTILDelayEstimate in milliseconds
     //          - deltaFSBytes    : Frame size delta, i.e.
     //                            : frame size at time T minus frame size at time T-1
-    void KalmanEstimateChannel(WebRtc_Word64 frameDelayMS, WebRtc_Word32 deltaFSBytes);
+    void KalmanEstimateChannel(int64_t frameDelayMS, int32_t deltaFSBytes);
 
     // Updates the random jitter estimate, i.e. the variance
     // of the time deviations from the line given by the Kalman filter.
@@ -106,19 +106,19 @@ private:
     //                              T minus frame size at time T-1
     //
     // Return value                 : The difference in milliseconds
-    double DeviationFromExpectedDelay(WebRtc_Word64 frameDelayMS,
-                                      WebRtc_Word32 deltaFSBytes) const;
+    double DeviationFromExpectedDelay(int64_t frameDelayMS,
+                                      int32_t deltaFSBytes) const;
 
     // Constants, filter parameters
-    WebRtc_Word32         _vcmId;
-    WebRtc_Word32         _receiverId;
+    int32_t         _vcmId;
+    int32_t         _receiverId;
     const double          _phi;
     const double          _psi;
-    const WebRtc_UWord32  _alphaCountMax;
+    const uint32_t  _alphaCountMax;
     const double          _thetaLow;
-    const WebRtc_UWord32  _nackLimit;
-    const WebRtc_Word32   _numStdDevDelayOutlier;
-    const WebRtc_Word32   _numStdDevFrameSizeOutlier;
+    const uint32_t  _nackLimit;
+    const int32_t   _numStdDevDelayOutlier;
+    const int32_t   _numStdDevFrameSizeOutlier;
     const double          _noiseStdDevs;
     const double          _noiseStdDevOffset;
 
@@ -128,20 +128,20 @@ private:
     double                _varFrameSize;   // Frame size variance
     double                _maxFrameSize;   // Largest frame size received (descending
                                            // with a factor _psi)
-    WebRtc_UWord32        _fsSum;
-    WebRtc_UWord32        _fsCount;
+    uint32_t        _fsSum;
+    uint32_t        _fsCount;
 
-    WebRtc_Word64         _lastUpdateT;
+    int64_t         _lastUpdateT;
     double                _prevEstimate;         // The previously returned jitter estimate
-    WebRtc_UWord32        _prevFrameSize;        // Frame size of the previous frame
+    uint32_t        _prevFrameSize;        // Frame size of the previous frame
     double                _avgNoise;             // Average of the random jitter
-    WebRtc_UWord32        _alphaCount;
+    uint32_t        _alphaCount;
     double                _filterJitterEstimate; // The filtered sum of jitter estimates
 
-    WebRtc_UWord32        _startupCount;
+    uint32_t        _startupCount;
 
-    WebRtc_Word64         _latestNackTimestamp;  // Timestamp in ms when the latest nack was seen
-    WebRtc_UWord32        _nackCount;            // Keeps track of the number of nacks received,
+    int64_t         _latestNackTimestamp;  // Timestamp in ms when the latest nack was seen
+    uint32_t        _nackCount;            // Keeps track of the number of nacks received,
                                                  // but never goes above _nackLimit
     VCMRttFilter          _rttFilter;
 
@@ -149,6 +149,6 @@ private:
     enum { kFsAccuStartupSamples = 5 };
 };
 
-} // namespace webrtc
+}  // namespace webrtc
 
 #endif // WEBRTC_MODULES_VIDEO_CODING_JITTER_ESTIMATOR_H_

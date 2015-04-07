@@ -15,9 +15,9 @@
 using namespace js;
 using namespace js::crash;
 
-const static int stack_snapshot_max_size = 32768;
-
 #if defined(XP_WIN)
+
+static const int stack_snapshot_max_size = 32768;
 
 #include <windows.h>
 
@@ -46,14 +46,14 @@ GetStack(uint64_t *stack, uint64_t *stack_len, CrashRegisters *regs, char *buffe
     *stack_len = len;
 
     /* Get the register state. */
-#if defined(_MSC_VER) && JS_BITS_PER_WORD == 32
+#if defined(_MSC_VER) && defined(_M_IX86)
     /* ASM version for win2k that doesn't support RtlCaptureContext */
     uint32_t vip, vsp, vbp;
     __asm {
-    Label:
+    MyLabel:
         mov [vbp], ebp;
         mov [vsp], esp;
-        mov eax, [Label];
+        mov eax, [MyLabel];
         mov [vip], eax;
     }
     regs->ip = vip;
@@ -62,14 +62,16 @@ GetStack(uint64_t *stack, uint64_t *stack_len, CrashRegisters *regs, char *buffe
 #else
     CONTEXT context;
     RtlCaptureContext(&context);
-#if JS_BITS_PER_WORD == 32
+#if defined(_M_IX86)
     regs->ip = context.Eip;
     regs->sp = context.Esp;
     regs->bp = context.Ebp;
-#else
+#elif defined(_M_X64)
     regs->ip = context.Rip;
     regs->sp = context.Rsp;
     regs->bp = context.Rbp;
+#else
+#error unknown cpu architecture
 #endif
 #endif
 
@@ -80,9 +82,9 @@ GetStack(uint64_t *stack, uint64_t *stack_len, CrashRegisters *regs, char *buffe
 
 #elif 0
 
-#include <unistd.h>
-#include <ucontext.h>
 #include <sys/mman.h>
+#include <ucontext.h>
+#include <unistd.h>
 
 static bool
 GetStack(uint64_t *stack, uint64_t *stack_len, CrashRegisters *regs, char *buffer, size_t size)
@@ -114,14 +116,16 @@ GetStack(uint64_t *stack, uint64_t *stack_len, CrashRegisters *regs, char *buffe
     if (getcontext(&context) != 0)
 	return false;
 
-#if JS_BITS_PER_WORD == 64
+#if defined(__x86_64__)
     regs->sp = (uint64_t)context.uc_mcontext.gregs[REG_RSP];
     regs->bp = (uint64_t)context.uc_mcontext.gregs[REG_RBP];
     regs->ip = (uint64_t)context.uc_mcontext.gregs[REG_RIP];
-#elif JS_BITS_PER_WORD == 32
+#elif defined(__i386__)
     regs->sp = (uint64_t)context.uc_mcontext.gregs[REG_ESP];
     regs->bp = (uint64_t)context.uc_mcontext.gregs[REG_EBP];
     regs->ip = (uint64_t)context.uc_mcontext.gregs[REG_EIP];
+#else
+#error unknown cpu architecture
 #endif
 
     js_memcpy(buffer, (void *)p, len);
@@ -158,7 +162,7 @@ Stack::Stack(uint64_t id)
 bool
 Stack::snapshot()
 {
-    snaptime = time(NULL);
+    snaptime = time(nullptr);
     return GetStack(&stack_base, &stack_len, &regs, stack, sizeof(stack));
 }
 
@@ -182,7 +186,7 @@ Ring::Ring(uint64_t id)
 void
 Ring::push(uint64_t tag, void *data, size_t size)
 {
-    uint64_t t = time(NULL);
+    uint64_t t = time(nullptr);
 
     copyBytes(&tag, sizeof(uint64_t));
     copyBytes(&t, sizeof(uint64_t));
@@ -212,31 +216,39 @@ Ring::copyBytes(void *data, size_t size)
 } /* namespace crash */
 } /* namespace js */
 
+#ifdef JS_CRASH_DIAGNOSTICS
 static bool gInitialized;
 
 static Stack gGCStack(JS_CRASH_STACK_GC);
 static Stack gErrorStack(JS_CRASH_STACK_ERROR);
 static Ring gRingBuffer(JS_CRASH_RING);
+#endif
 
 void
 js::crash::SnapshotGCStack()
 {
+#ifdef JS_CRASH_DIAGNOSTICS
     if (gInitialized)
         gGCStack.snapshot();
+#endif
 }
 
 void
 js::crash::SnapshotErrorStack()
 {
+#ifdef JS_CRASH_DIAGNOSTICS
     if (gInitialized)
         gErrorStack.snapshot();
+#endif
 }
 
 void
 js::crash::SaveCrashData(uint64_t tag, void *ptr, size_t size)
 {
+#ifdef JS_CRASH_DIAGNOSTICS
     if (gInitialized)
         gRingBuffer.push(tag, ptr, size);
+#endif
 }
 
 JS_PUBLIC_API(void)

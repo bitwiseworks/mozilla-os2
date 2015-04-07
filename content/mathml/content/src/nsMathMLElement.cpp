@@ -6,7 +6,7 @@
 
 #include "nsMathMLElement.h"
 #include "base/compiler_specific.h"
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 #include "nsGkAtoms.h"
 #include "nsCRT.h"
 #include "nsRuleData.h"
@@ -14,13 +14,15 @@
 #include "nsMappedAttributes.h"
 #include "nsStyleConsts.h"
 #include "nsIDocument.h"
-#include "nsEventStates.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "mozAutoDocUpdate.h"
 #include "nsIScriptError.h"
 #include "nsContentUtils.h"
+#include "nsIURI.h"
 
+#include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/dom/ElementBinding.h"
 
 using namespace mozilla;
@@ -29,26 +31,18 @@ using namespace mozilla::dom;
 //----------------------------------------------------------------------
 // nsISupports methods:
 
-NS_INTERFACE_TABLE_HEAD(nsMathMLElement)
-  NS_INTERFACE_TABLE_INHERITED4(nsMathMLElement,
-                                nsIDOMNode,
-                                nsIDOMElement,
-                                nsILink,
-                                Link)
-  NS_ELEMENT_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
+NS_IMPL_ISUPPORTS_INHERITED(nsMathMLElement, nsMathMLElementBase,
+                            nsIDOMElement, nsIDOMNode, Link)
 
-NS_IMPL_ADDREF_INHERITED(nsMathMLElement, nsMathMLElementBase)
-NS_IMPL_RELEASE_INHERITED(nsMathMLElement, nsMathMLElementBase)
-
-static nsresult 
-WarnDeprecated(const PRUnichar* aDeprecatedAttribute, 
-               const PRUnichar* aFavoredAttribute, nsIDocument* aDocument)
+static nsresult
+WarnDeprecated(const char16_t* aDeprecatedAttribute, 
+               const char16_t* aFavoredAttribute, nsIDocument* aDocument)
 {
-  const PRUnichar *argv[] = 
+  const char16_t *argv[] = 
     { aDeprecatedAttribute, aFavoredAttribute };
   return nsContentUtils::
-          ReportToConsole(nsIScriptError::warningFlag, "MathML", aDocument,
+          ReportToConsole(nsIScriptError::warningFlag,
+                          NS_LITERAL_CSTRING("MathML"), aDocument,
                           nsContentUtils::eMATHML_PROPERTIES,
                           "DeprecatedSupersededBy", argv, 2);
 }
@@ -56,9 +50,10 @@ WarnDeprecated(const PRUnichar* aDeprecatedAttribute,
 static nsresult 
 ReportLengthParseError(const nsString& aValue, nsIDocument* aDocument)
 {
-  const PRUnichar *arg = aValue.get();
+  const char16_t *arg = aValue.get();
   return nsContentUtils::
-         ReportToConsole(nsIScriptError::errorFlag, "MathML", aDocument,
+         ReportToConsole(nsIScriptError::errorFlag,
+                         NS_LITERAL_CSTRING("MathML"), aDocument,
                          nsContentUtils::eMATHML_PROPERTIES,
                          "LengthParsingError", &arg, 1);
 }
@@ -68,20 +63,27 @@ ReportParseErrorNoTag(const nsString& aValue,
                       nsIAtom*        aAtom,
                       nsIDocument*    aDocument)
 {
-  const PRUnichar *argv[] = 
+  const char16_t *argv[] = 
     { aValue.get(), aAtom->GetUTF16String() };
   return nsContentUtils::
-         ReportToConsole(nsIScriptError::errorFlag, "MathML", aDocument,
+         ReportToConsole(nsIScriptError::errorFlag,
+                         NS_LITERAL_CSTRING("MathML"), aDocument,
                          nsContentUtils::eMATHML_PROPERTIES,
                          "AttributeParsingErrorNoTag", argv, 2);
 }
 
-nsMathMLElement::nsMathMLElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+nsMathMLElement::nsMathMLElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
 : nsMathMLElementBase(aNodeInfo),
   ALLOW_THIS_IN_INITIALIZER_LIST(Link(this)),
   mIncrementScriptLevel(false)
 {
-  SetIsDOMBinding();
+}
+
+nsMathMLElement::nsMathMLElement(already_AddRefed<nsINodeInfo>&& aNodeInfo)
+: nsMathMLElementBase(aNodeInfo),
+  ALLOW_THIS_IN_INITIALIZER_LIST(Link(this)),
+  mIncrementScriptLevel(false)
+{
 }
 
 nsresult
@@ -173,6 +175,9 @@ static Element::MappedAttributeEntry sTokenStyles[] = {
   { &nsGkAtoms::fontsize_ },
   { &nsGkAtoms::color },
   { &nsGkAtoms::fontfamily_ },
+  { &nsGkAtoms::fontstyle_ },
+  { &nsGkAtoms::fontweight_ },
+  { &nsGkAtoms::mathvariant_},
   { nullptr }
 };
 
@@ -380,7 +385,7 @@ nsMathMLElement::ParseNumericValue(const nsString& aString,
 
   // see if the negative sign is there
   int32_t i = 0;
-  PRUnichar c = str[0];
+  char16_t c = str[0];
   if (c == '-') {
     number.Append(c);
     i++;
@@ -429,7 +434,7 @@ nsMathMLElement::ParseNumericValue(const nsString& aString,
       // no explicit unit, this is a number that will act as a multiplier
       if (!(aFlags & PARSE_SUPPRESS_WARNINGS)) {
         nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                        "MathML", aDocument,
+                                        NS_LITERAL_CSTRING("MathML"), aDocument,
                                         nsContentUtils::eMATHML_PROPERTIES,
                                         "UnitlessValuesAreDeprecated");
       }
@@ -561,7 +566,7 @@ nsMathMLElement::MapMathMLAttributesInto(const nsMappedAttributes* aAttributes,
           // then it's a relative value and we store the nsCSSValue as an
           // Integer to indicate that. Otherwise we store it as a Number
           // to indicate that the scriptlevel is absolute.
-          PRUnichar ch = str.CharAt(0);
+          char16_t ch = str.CharAt(0);
           if (ch == '+' || ch == '-') {
             scriptLevel->SetIntValue(intValue, eCSSUnit_Integer);
           } else {
@@ -616,7 +621,7 @@ nsMathMLElement::MapMathMLAttributesInto(const nsMappedAttributes* aAttributes,
                              nullptr)
           && parseSizeKeywords) {
         static const char sizes[3][7] = { "small", "normal", "big" };
-        static const int32_t values[NS_ARRAY_LENGTH(sizes)] = {
+        static const int32_t values[MOZ_ARRAY_LENGTH(sizes)] = {
           NS_STYLE_FONT_SIZE_SMALL, NS_STYLE_FONT_SIZE_MEDIUM,
           NS_STYLE_FONT_SIZE_LARGE
         };
@@ -648,6 +653,110 @@ nsMathMLElement::MapMathMLAttributesInto(const nsMappedAttributes* aAttributes,
     if (value && value->Type() == nsAttrValue::eString &&
         fontFamily->GetUnit() == eCSSUnit_Null) {
       fontFamily->SetStringValue(value->GetStringValue(), eCSSUnit_Families);
+    }
+
+    // fontstyle
+    //
+    // "Specified the font style to use for the token. Deprecated in favor of
+    //  mathvariant."
+    //
+    // values: "normal" | "italic"
+    // default:	normal (except on <mi>)
+    //
+    // Note that the font-style property is reset in layout/style/ when
+    // -moz-math-variant is specified.
+    nsCSSValue* fontStyle = aData->ValueForFontStyle();
+    value = aAttributes->GetAttr(nsGkAtoms::fontstyle_);
+    if (value) {
+      WarnDeprecated(nsGkAtoms::fontstyle_->GetUTF16String(),
+                       nsGkAtoms::mathvariant_->GetUTF16String(),
+                       aData->mPresContext->Document());
+      if (value->Type() == nsAttrValue::eString &&
+          fontStyle->GetUnit() == eCSSUnit_Null) {
+        nsAutoString str(value->GetStringValue());
+        str.CompressWhitespace();
+        if (str.EqualsASCII("normal")) {
+          fontStyle->SetIntValue(NS_STYLE_FONT_STYLE_NORMAL,
+                                eCSSUnit_Enumerated);
+        } else if (str.EqualsASCII("italic")) {
+          fontStyle->SetIntValue(NS_STYLE_FONT_STYLE_ITALIC,
+                                eCSSUnit_Enumerated);
+        }
+      }
+    }
+
+    // fontweight
+    //
+    // "Specified the font weight for the token. Deprecated in favor of
+    // mathvariant."
+    //
+    // values: "normal" | "bold"
+    // default: normal
+    //
+    // Note that the font-weight property is reset in layout/style/ when
+    // -moz-math-variant is specified.
+    nsCSSValue* fontWeight = aData->ValueForFontWeight();
+    value = aAttributes->GetAttr(nsGkAtoms::fontweight_);
+    if (value) {
+      WarnDeprecated(nsGkAtoms::fontweight_->GetUTF16String(),
+                       nsGkAtoms::mathvariant_->GetUTF16String(),
+                       aData->mPresContext->Document());
+      if (value->Type() == nsAttrValue::eString &&
+          fontWeight->GetUnit() == eCSSUnit_Null) {
+        nsAutoString str(value->GetStringValue());
+        str.CompressWhitespace();
+        if (str.EqualsASCII("normal")) {
+          fontWeight->SetIntValue(NS_STYLE_FONT_WEIGHT_NORMAL,
+                                 eCSSUnit_Enumerated);
+        } else if (str.EqualsASCII("bold")) {
+          fontWeight->SetIntValue(NS_STYLE_FONT_WEIGHT_BOLD,
+                                  eCSSUnit_Enumerated);
+        }
+      }
+    }
+
+    // mathvariant
+    //
+    // "Specifies the logical class of the token. Note that this class is more
+    // than styling, it typically conveys semantic intent;"
+    //
+    // values: "normal" | "bold" | "italic" | "bold-italic" | "double-struck" |
+    // "bold-fraktur" | "script" | "bold-script" | "fraktur" | "sans-serif" |
+    // "bold-sans-serif" | "sans-serif-italic" | "sans-serif-bold-italic" |
+    // "monospace" | "initial" | "tailed" | "looped" | "stretched"
+    // default: normal (except on <mi>)
+    //
+    nsCSSValue* mathVariant = aData->ValueForMathVariant();
+    value = aAttributes->GetAttr(nsGkAtoms::mathvariant_);
+    if (value && value->Type() == nsAttrValue::eString &&
+        mathVariant->GetUnit() == eCSSUnit_Null) {
+      nsAutoString str(value->GetStringValue());
+      str.CompressWhitespace();
+      static const char sizes[19][23] = {
+        "normal", "bold", "italic", "bold-italic", "script", "bold-script",
+        "fraktur", "double-struck", "bold-fraktur", "sans-serif",
+        "bold-sans-serif", "sans-serif-italic", "sans-serif-bold-italic",
+        "monospace", "initial", "tailed", "looped", "stretched"
+      };
+      static const int32_t values[MOZ_ARRAY_LENGTH(sizes)] = {
+        NS_MATHML_MATHVARIANT_NORMAL, NS_MATHML_MATHVARIANT_BOLD,
+        NS_MATHML_MATHVARIANT_ITALIC, NS_MATHML_MATHVARIANT_BOLD_ITALIC,
+        NS_MATHML_MATHVARIANT_SCRIPT, NS_MATHML_MATHVARIANT_BOLD_SCRIPT,
+        NS_MATHML_MATHVARIANT_FRAKTUR, NS_MATHML_MATHVARIANT_DOUBLE_STRUCK,
+        NS_MATHML_MATHVARIANT_BOLD_FRAKTUR, NS_MATHML_MATHVARIANT_SANS_SERIF,
+        NS_MATHML_MATHVARIANT_BOLD_SANS_SERIF,
+        NS_MATHML_MATHVARIANT_SANS_SERIF_ITALIC,
+        NS_MATHML_MATHVARIANT_SANS_SERIF_BOLD_ITALIC,
+        NS_MATHML_MATHVARIANT_MONOSPACE, NS_MATHML_MATHVARIANT_INITIAL,
+        NS_MATHML_MATHVARIANT_TAILED, NS_MATHML_MATHVARIANT_LOOPED,
+        NS_MATHML_MATHVARIANT_STRETCHED
+      };
+      for (uint32_t i = 0; i < ArrayLength(sizes); ++i) {
+        if (str.EqualsASCII(sizes[i])) {
+          mathVariant->SetIntValue(values[i], eCSSUnit_Enumerated);
+          break;
+        }
+      }
     }
   }
 
@@ -725,7 +834,18 @@ nsMathMLElement::MapMathMLAttributesInto(const nsMappedAttributes* aAttributes,
   }
 
   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Position)) {
-    // width: value
+    // width
+    //
+    // "Specifies the desired width of the entire table and is intended for
+    // visual user agents. When the value is a percentage value, the value is
+    // relative to the horizontal space a MathML renderer has available for the
+    // math element. When the value is "auto", the MathML renderer should
+    // calculate the table width from its contents using whatever layout
+    // algorithm it chooses. "
+    //
+    // values: "auto" | length
+    // default: auto
+    //
     nsCSSValue* width = aData->ValueForWidth();
     if (width->GetUnit() == eCSSUnit_Null) {
       const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::width);
@@ -764,7 +884,7 @@ nsMathMLElement::MapMathMLAttributesInto(const nsMappedAttributes* aAttributes,
         direction->GetUnit() == eCSSUnit_Null) {
       nsAutoString str(value->GetStringValue());
       static const char dirs[][4] = { "ltr", "rtl" };
-      static const int32_t dirValues[NS_ARRAY_LENGTH(dirs)] = {
+      static const int32_t dirValues[MOZ_ARRAY_LENGTH(dirs)] = {
         NS_STYLE_DIRECTION_LTR, NS_STYLE_DIRECTION_RTL
       };
       for (uint32_t i = 0; i < ArrayLength(dirs); ++i) {
@@ -778,7 +898,7 @@ nsMathMLElement::MapMathMLAttributesInto(const nsMappedAttributes* aAttributes,
 }
 
 nsresult
-nsMathMLElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+nsMathMLElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
   nsresult rv = Element::PreHandleEvent(aVisitor);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -787,18 +907,19 @@ nsMathMLElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
 }
 
 nsresult
-nsMathMLElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
+nsMathMLElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
 {
   return PostHandleEventForLinks(aVisitor);
 }
 
 NS_IMPL_ELEMENT_CLONE(nsMathMLElement)
 
-nsEventStates
+EventStates
 nsMathMLElement::IntrinsicState() const
 {
   return Link::LinkState() | nsMathMLElementBase::IntrinsicState() |
-    (mIncrementScriptLevel ? NS_EVENT_STATE_INCREMENT_SCRIPT_LEVEL : nsEventStates());
+    (mIncrementScriptLevel ?
+       NS_EVENT_STATE_INCREMENT_SCRIPT_LEVEL : EventStates());
 }
 
 bool
@@ -821,7 +942,7 @@ nsMathMLElement::SetIncrementScriptLevel(bool aIncrementScriptLevel,
 }
 
 bool
-nsMathMLElement::IsFocusable(int32_t *aTabIndex, bool aWithMouse)
+nsMathMLElement::IsFocusableInternal(int32_t* aTabIndex, bool aWithMouse)
 {
   nsCOMPtr<nsIURI> uri;
   if (IsLink(getter_AddRefs(uri))) {
@@ -962,8 +1083,8 @@ nsMathMLElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       (aNameSpaceID == kNameSpaceID_None ||
        aNameSpaceID == kNameSpaceID_XLink)) {
     if (aNameSpaceID == kNameSpaceID_XLink) {
-      WarnDeprecated(NS_LITERAL_STRING("xlink:href").get(),
-                     NS_LITERAL_STRING("href").get(), OwnerDoc());
+      WarnDeprecated(MOZ_UTF16("xlink:href"),
+                     MOZ_UTF16("href"), OwnerDoc());
     }
     Link::ResetLinkState(!!aNotify, true);
   }
@@ -994,7 +1115,7 @@ nsMathMLElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttr,
 }
 
 JSObject*
-nsMathMLElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+nsMathMLElement::WrapNode(JSContext *aCx)
 {
-  return ElementBinding::Wrap(aCx, aScope, this);
+  return ElementBinding::Wrap(aCx, this);
 }

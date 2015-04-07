@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "packet.h"
-#include "module_common_types.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/modules/video_coding/main/source/packet.h"
 
 #include <assert.h>
 
@@ -28,12 +28,14 @@ VCMPacket::VCMPacket()
     isFirstPacket(false),
     completeNALU(kNaluUnset),
     insertStartCode(false),
+    width(0),
+    height(0),
     codecSpecificHeader() {
 }
 
-VCMPacket::VCMPacket(const WebRtc_UWord8* ptr,
-                               const WebRtc_UWord32 size,
-                               const WebRtcRTPHeader& rtpHeader) :
+VCMPacket::VCMPacket(const uint8_t* ptr,
+                     const uint32_t size,
+                     const WebRtcRTPHeader& rtpHeader) :
     payloadType(rtpHeader.header.payloadType),
     timestamp(rtpHeader.header.timestamp),
     seqNum(rtpHeader.header.sequenceNumber),
@@ -46,12 +48,14 @@ VCMPacket::VCMPacket(const WebRtc_UWord8* ptr,
     isFirstPacket(rtpHeader.type.Video.isFirstPacket),
     completeNALU(kNaluComplete),
     insertStartCode(false),
+    width(rtpHeader.type.Video.width),
+    height(rtpHeader.type.Video.height),
     codecSpecificHeader(rtpHeader.type.Video)
 {
     CopyCodecSpecifics(rtpHeader.type.Video);
 }
 
-VCMPacket::VCMPacket(const WebRtc_UWord8* ptr, WebRtc_UWord32 size, WebRtc_UWord16 seq, WebRtc_UWord32 ts, bool mBit) :
+VCMPacket::VCMPacket(const uint8_t* ptr, uint32_t size, uint16_t seq, uint32_t ts, bool mBit) :
     payloadType(0),
     timestamp(ts),
     seqNum(seq),
@@ -64,6 +68,8 @@ VCMPacket::VCMPacket(const WebRtc_UWord8* ptr, WebRtc_UWord32 size, WebRtc_UWord
     isFirstPacket(false),
     completeNALU(kNaluComplete),
     insertStartCode(false),
+    width(0),
+    height(0),
     codecSpecificHeader()
 {}
 
@@ -79,6 +85,8 @@ void VCMPacket::Reset() {
   isFirstPacket = false;
   completeNALU = kNaluUnset;
   insertStartCode = false;
+  width = 0;
+  height = 0;
   memset(&codecSpecificHeader, 0, sizeof(RTPVideoHeader));
 }
 
@@ -86,7 +94,7 @@ void VCMPacket::CopyCodecSpecifics(const RTPVideoHeader& videoHeader)
 {
     switch(videoHeader.codec)
     {
-        case kRTPVideoVP8:
+        case kRtpVideoVp8:
             {
                 // Handle all packets within a frame as depending on the previous packet
                 // TODO(holmer): This should be changed to make fragments independent
@@ -101,11 +109,6 @@ void VCMPacket::CopyCodecSpecifics(const RTPVideoHeader& videoHeader)
                     completeNALU = kNaluIncomplete;
 
                 codec = kVideoCodecVP8;
-                break;
-            }
-        case kRTPVideoI420:
-            {
-                codec = kVideoCodecI420;
                 break;
             }
         default:

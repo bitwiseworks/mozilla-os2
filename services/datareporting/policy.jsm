@@ -26,9 +26,11 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 #endif
 
+Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-common/utils.js");
+Cu.import("resource://gre/modules/UpdateChannel.jsm");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -134,7 +136,7 @@ Object.freeze(NotifyPolicyRequest.prototype);
  * Receivers of instances of this type should not attempt to do anything with
  * the instance except call one of the on* methods.
  */
-function DataSubmissionRequest(promise, expiresDate, isDelete) {
+this.DataSubmissionRequest = function (promise, expiresDate, isDelete) {
   this.promise = promise;
   this.expiresDate = expiresDate;
   this.isDelete = isDelete;
@@ -143,11 +145,12 @@ function DataSubmissionRequest(promise, expiresDate, isDelete) {
   this.reason = null;
 }
 
-DataSubmissionRequest.prototype = {
+this.DataSubmissionRequest.prototype = Object.freeze({
   NO_DATA_AVAILABLE: "no-data-available",
   SUBMISSION_SUCCESS: "success",
   SUBMISSION_FAILURE_SOFT: "failure-soft",
   SUBMISSION_FAILURE_HARD: "failure-hard",
+  UPLOAD_IN_PROGRESS: "upload-in-progress",
 
   /**
    * No submission was attempted because no data was available.
@@ -210,9 +213,17 @@ DataSubmissionRequest.prototype = {
     this.promise.resolve(this);
     return this.promise.promise;
   },
-};
 
-Object.freeze(DataSubmissionRequest.prototype);
+  /**
+   * The request was aborted because an upload was already in progress.
+   */
+  onUploadInProgress: function (reason=null) {
+    this.state = this.UPLOAD_IN_PROGRESS;
+    this.reason = reason;
+    this.promise.resolve(this);
+    return this.promise.promise;
+  },
+});
 
 /**
  * Manages scheduling of Firefox Health Report data submission.
@@ -265,8 +276,8 @@ Object.freeze(DataSubmissionRequest.prototype);
  *        events.
  */
 this.DataReportingPolicy = function (prefs, healthReportPrefs, listener) {
-  this._log = Log4Moz.repository.getLogger("Services.DataReporting.Policy");
-  this._log.level = Log4Moz.Level["Debug"];
+  this._log = Log.repository.getLogger("Services.DataReporting.Policy");
+  this._log.level = Log.Level["Debug"];
 
   for (let handler of this.REQUIRED_LISTENERS) {
     if (!listener[handler]) {
@@ -279,8 +290,19 @@ this.DataReportingPolicy = function (prefs, healthReportPrefs, listener) {
   this._healthReportPrefs = healthReportPrefs;
   this._listener = listener;
 
-  // If we've never run before, record the current time.
-  if (!this.firstRunDate.getTime()) {
+  // If the policy version has changed, reset all preferences, so that
+  // the notification reappears.
+  let acceptedVersion = this._prefs.get("dataSubmissionPolicyAcceptedVersion");
+  if (typeof(acceptedVersion) == "number" &&
+      acceptedVersion < this.minimumPolicyVersion) {
+    this._log.info("policy version has changed - resetting all prefs");
+    // We don't want to delay the notification in this case.
+    let firstRunToRestore = this.firstRunDate;
+    this._prefs.resetBranch();
+    this.firstRunDate = firstRunToRestore.getTime() ?
+                        firstRunToRestore : this.now();
+  } else if (!this.firstRunDate.getTime()) {
+    // If we've never run before, record the current time.
     this.firstRunDate = this.now();
   }
 
@@ -317,7 +339,7 @@ this.DataReportingPolicy = function (prefs, healthReportPrefs, listener) {
   this._inProgressSubmissionRequest = null;
 };
 
-DataReportingPolicy.prototype = Object.freeze({
+this.DataReportingPolicy.prototype = Object.freeze({
   /**
    * How long after first run we should notify about data submission.
    */
@@ -486,6 +508,18 @@ DataReportingPolicy.prototype = Object.freeze({
   },
 
   /**
+   * The minimum policy version which for dataSubmissionPolicyAccepted to
+   * to be valid.
+   */
+  get minimumPolicyVersion() {
+    // First check if the current channel has an ove
+    let channel = UpdateChannel.get(false);
+    let channelPref = this._prefs.get("minimumPolicyVersion.channel-" + channel);
+    return channelPref !== undefined ?
+           channelPref : this._prefs.get("minimumPolicyVersion", 1);
+  },
+
+  /**
    * Whether the user has accepted that data submission can occur.
    *
    * This overrides dataSubmissionEnabled.
@@ -497,10 +531,12 @@ DataReportingPolicy.prototype = Object.freeze({
 
   set dataSubmissionPolicyAccepted(value) {
     this._prefs.set("dataSubmissionPolicyAccepted", !!value);
-  },
-
-  set dataSubmissionPolicyAcceptedVersion(value) {
-    this._prefs.set("dataSubmissionPolicyAcceptedVersion", value);
+    if (!!value) {
+      let currentPolicyVersion = this._prefs.get("currentPolicyVersion", 1);
+      this._prefs.set("dataSubmissionPolicyAcceptedVersion", currentPolicyVersion);
+    } else {
+      this._prefs.reset("dataSubmissionPolicyAcceptedVersion");
+    }
   },
 
   /**
@@ -651,6 +687,13 @@ DataReportingPolicy.prototype = Object.freeze({
   },
 
   /**
+   * Whether the FHR upload enabled setting is locked and can't be changed.
+   */
+  get healthReportUploadLocked() {
+    return this._healthReportPrefs.locked("uploadEnabled");
+  },
+
+  /**
    * Record user acceptance of data submission policy.
    *
    * Data submission will not be allowed to occur until this is called.
@@ -668,7 +711,6 @@ DataReportingPolicy.prototype = Object.freeze({
     this.dataSubmissionPolicyResponseDate = this.now();
     this.dataSubmissionPolicyResponseType = "accepted-" + reason;
     this.dataSubmissionPolicyAccepted = true;
-    this.dataSubmissionPolicyAcceptedVersion = 1;
   },
 
   /**
@@ -897,7 +939,7 @@ DataReportingPolicy.prototype = Object.freeze({
 
       let deferred = Promise.defer();
 
-      deferred.promise.then(onComplete, function onError(error) {
+      deferred.promise.then(onComplete, (error) => {
         this._log.warn("Data policy notification presentation failed: " +
                        CommonUtils.exceptionStr(error));
       });
@@ -980,7 +1022,7 @@ DataReportingPolicy.prototype = Object.freeze({
 
     let onError = function onError(error) {
       this._log.error("Error when handling data submission result: " +
-                      CommonUtils.exceptionStr(result));
+                      CommonUtils.exceptionStr(error));
       this._inProgressSubmissionRequest = null;
       this._handleSubmissionFailure();
     }.bind(this);

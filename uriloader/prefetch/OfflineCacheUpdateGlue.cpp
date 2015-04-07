@@ -26,7 +26,11 @@
 //
 extern PRLogModuleInfo *gOfflineCacheUpdateLog;
 #endif
+
+#undef LOG
 #define LOG(args) PR_LOG(gOfflineCacheUpdateLog, 4, args)
+
+#undef LOG_ENABLED
 #define LOG_ENABLED() PR_LOG_TEST(gOfflineCacheUpdateLog, 4)
 
 namespace mozilla {
@@ -36,10 +40,10 @@ namespace docshell {
 // OfflineCacheUpdateGlue::nsISupports
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS3(OfflineCacheUpdateGlue,
-                   nsIOfflineCacheUpdate,
-                   nsIOfflineCacheUpdateObserver,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(OfflineCacheUpdateGlue,
+                  nsIOfflineCacheUpdate,
+                  nsIOfflineCacheUpdateObserver,
+                  nsISupportsWeakReference)
 
 //-----------------------------------------------------------------------------
 // OfflineCacheUpdateGlue <public>

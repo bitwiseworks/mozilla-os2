@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/keys.js");
 Cu.import("resource://services-sync/engines/tabs.js");
@@ -43,6 +43,8 @@ add_test(function v4_upgrade() {
     "/1.1/johndoe/storage/prefs": new ServerCollection().handler()
   });
 
+  ensureLegacyIdentityManager();
+
   try {
 
     _("Set up some tabs.");
@@ -54,10 +56,8 @@ add_test(function v4_upgrade() {
                           }],
                           attributes: {
                             image: "image"
-                          },
-                          extData: {
-                            weaveLastUsed: 1
-                          }}]}]};
+                          }
+                          }]}]};
     delete Svc.Session;
     Svc.Session = {
       getBrowserState: function () JSON.stringify(myTabs)
@@ -66,8 +66,7 @@ add_test(function v4_upgrade() {
     Service.status.resetSync();
 
     _("Logging in.");
-    Service.serverURL = TEST_SERVER_URL;
-    Service.clusterURL = TEST_CLUSTER_URL;
+    Service.serverURL = server.baseURI;
 
     Service.login("johndoe", "ilovejane", passphrase);
     do_check_true(Service.isLoggedIn);
@@ -102,8 +101,7 @@ add_test(function v4_upgrade() {
     _("Syncing afresh...");
     Service.logout();
     Service.collectionKeys.clear();
-    Service.serverURL = TEST_SERVER_URL;
-    Service.clusterURL = TEST_CLUSTER_URL;
+    Service.serverURL = server.baseURI;
     meta_global.payload = JSON.stringify({"syncID": "foooooooooooooobbbbbbbbbbbb",
                                           "storageVersion": STORAGE_VERSION});
     collections.meta = Date.now() / 1000;
@@ -227,10 +225,8 @@ add_test(function v5_upgrade() {
                           }],
                           attributes: {
                             image: "image"
-                          },
-                          extData: {
-                            weaveLastUsed: 1
-                          }}]}]};
+                          }
+                          }]}]};
     delete Svc.Session;
     Svc.Session = {
       getBrowserState: function () JSON.stringify(myTabs)
@@ -239,8 +235,8 @@ add_test(function v5_upgrade() {
     Service.status.resetSync();
 
     setBasicCredentials("johndoe", "ilovejane", passphrase);
-    Service.serverURL = TEST_SERVER_URL;
-    Service.clusterURL = TEST_CLUSTER_URL;
+    Service.serverURL = server.baseURI + "/";
+    Service.clusterURL = server.baseURI + "/";
 
     // Test an upgrade where the contents of the server would cause us to error
     // -- keys decrypted with a different sync key, for example.
@@ -294,8 +290,8 @@ add_test(function v5_upgrade() {
 });
 
 function run_test() {
-  let logger = Log4Moz.repository.rootLogger;
-  Log4Moz.repository.rootLogger.addAppender(new Log4Moz.DumpAppender());
+  let logger = Log.repository.rootLogger;
+  Log.repository.rootLogger.addAppender(new Log.DumpAppender());
 
   run_next_test();
 }

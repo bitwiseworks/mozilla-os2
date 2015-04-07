@@ -10,17 +10,17 @@
 
 #include <iostream>  // NOLINT
 
-#include "common_types.h"  // NOLINT
-#include "video_engine/include/vie_base.h"
-#include "video_engine/include/vie_capture.h"
-#include "video_engine/include/vie_codec.h"
-#include "video_engine/include/vie_network.h"
-#include "video_engine/include/vie_render.h"
-#include "video_engine/include/vie_rtp_rtcp.h"
-#include "video_engine/test/auto_test/interface/vie_autotest.h"
-#include "video_engine/test/auto_test/interface/vie_autotest_defines.h"
-#include "video_engine/test/libvietest/include/tb_external_transport.h"
-#include "voice_engine/include/voe_base.h"
+#include "webrtc/common_types.h"
+#include "webrtc/video_engine/include/vie_base.h"
+#include "webrtc/video_engine/include/vie_capture.h"
+#include "webrtc/video_engine/include/vie_codec.h"
+#include "webrtc/video_engine/include/vie_network.h"
+#include "webrtc/video_engine/include/vie_render.h"
+#include "webrtc/video_engine/include/vie_rtp_rtcp.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_autotest.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_autotest_defines.h"
+#include "webrtc/video_engine/test/libvietest/include/tb_external_transport.h"
+#include "webrtc/voice_engine/include/voe_base.h"
 
 enum RelayMode {
   kRelayOneStream = 1,
@@ -48,18 +48,24 @@ void SetSimulcastSettings(webrtc::VideoCodec* video_codec) {
   video_codec->simulcastStream[0].height = 180;
   video_codec->simulcastStream[0].numberOfTemporalLayers = 0;
   video_codec->simulcastStream[0].maxBitrate = 100;
+  video_codec->simulcastStream[0].targetBitrate = 100;
+  video_codec->simulcastStream[0].minBitrate = 0;
   video_codec->simulcastStream[0].qpMax = video_codec->qpMax;
 
   video_codec->simulcastStream[1].width = 640;
   video_codec->simulcastStream[1].height = 360;
   video_codec->simulcastStream[1].numberOfTemporalLayers = 0;
   video_codec->simulcastStream[1].maxBitrate = 500;
+  video_codec->simulcastStream[1].targetBitrate = 500;
+  video_codec->simulcastStream[1].minBitrate = 200;
   video_codec->simulcastStream[1].qpMax = video_codec->qpMax;
 
   video_codec->simulcastStream[2].width = 1280;
   video_codec->simulcastStream[2].height = 720;
   video_codec->simulcastStream[2].numberOfTemporalLayers = 0;
   video_codec->simulcastStream[2].maxBitrate = 1200;
+  video_codec->simulcastStream[2].targetBitrate = 1200;
+  video_codec->simulcastStream[2].minBitrate = 900;
   video_codec->simulcastStream[2].qpMax = video_codec->qpMax;
 }
 
@@ -69,8 +75,14 @@ void RuntimeSingleStreamSettings(webrtc::VideoCodec* video_codec) {
   video_codec->height = 800;
   video_codec->numberOfSimulcastStreams = kNumStreams;
   video_codec->simulcastStream[0].maxBitrate = 0;
+  video_codec->simulcastStream[0].targetBitrate = 0;
+  video_codec->simulcastStream[0].minBitrate = 0;
   video_codec->simulcastStream[1].maxBitrate = 0;
+  video_codec->simulcastStream[1].targetBitrate = 0;
+  video_codec->simulcastStream[1].minBitrate = 0;
   video_codec->simulcastStream[2].maxBitrate = 0;
+  video_codec->simulcastStream[2].targetBitrate = 0;
+  video_codec->simulcastStream[2].minBitrate = 0;
 }
 
 int VideoEngineSimulcastTest(void* window1, void* window2) {
@@ -130,32 +142,6 @@ int VideoEngineSimulcastTest(void* window1, void* window2) {
       webrtc::ViERTP_RTCP::GetInterface(video_engine);
   if (vie_rtp_rtcp == NULL) {
     printf("ERROR in ViERTP_RTCP::GetInterface\n");
-    return -1;
-  }
-
-  printf("Bandwidth estimation modes:\n");
-  printf("1. Multi-stream bandwidth estimation\n");
-  printf("2. Single-stream bandwidth estimation\n");
-  printf("Choose bandwidth estimation mode (default is 1): ");
-  std::string str;
-  std::getline(std::cin, str);
-  int bwe_mode_choice = atoi(str.c_str());
-  webrtc::BandwidthEstimationMode bwe_mode;
-  switch (bwe_mode_choice) {
-    case 1:
-      bwe_mode = webrtc::kViEMultiStreamEstimation;
-      break;
-    case 2:
-      bwe_mode = webrtc::kViESingleStreamEstimation;
-      break;
-    default:
-      bwe_mode = webrtc::kViEMultiStreamEstimation;
-      break;
-  }
-
-  error = vie_rtp_rtcp->SetBandwidthEstimationMode(bwe_mode);
-  if (error == -1) {
-    printf("ERROR in ViERTP_RTCP::SetBandwidthEstimationMode\n");
     return -1;
   }
 
@@ -380,6 +366,7 @@ int VideoEngineSimulcastTest(void* window1, void* window2) {
   }
 
   // Set start bit rate.
+  std::string str;
   std::cout << std::endl;
   std::cout << "Choose start rate (in kbps). Press enter for default:  ";
   std::getline(std::cin, str);

@@ -52,9 +52,8 @@ notification[type="critical"] {
 }
 
 .messageCloseButton {
-  list-style-image: url("moz-icon://stock/gtk-close?size=menu");
-  margin-top: 0;
-  margin-bottom: 0;
+  padding-left: 11px;
+  padding-right: 11px;
 }
 
 /* Popup notification */
@@ -63,10 +62,14 @@ notification[type="critical"] {
   max-width: 24em;
 }
 
-.popup-notification-button-container {
-  margin-top: 17px;
+.popup-notification-learnmore-link {
+  margin-top: 1em !important;
 }
 
-.popup-notification-closeitem {
-  list-style-image: url("moz-icon://stock/gtk-close?size=menu");
+.popup-notification-learnmore-link:not([href]) {
+  display: none;
+}
+
+.popup-notification-button-container {
+  margin-top: 17px;
 }

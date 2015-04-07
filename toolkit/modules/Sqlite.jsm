@@ -10,12 +10,14 @@ this.EXPORTED_SYMBOLS = [
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
-Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
+Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
+                                  "resource://gre/modules/AsyncShutdown.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "CommonUtils",
                                   "resource://services-common/utils.js");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
@@ -26,7 +28,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
 
 // Counts the number of created connections per database basename(). This is
 // used for logging to distinguish connection instances.
-let connectionCounters = {};
+let connectionCounters = new Map();
 
 
 /**
@@ -64,7 +66,7 @@ let connectionCounters = {};
  * @return Promise<OpenedConnection>
  */
 function openConnection(options) {
-  let log = Log4Moz.repository.getLogger("Sqlite.ConnectionOpener");
+  let log = Log.repository.getLogger("Sqlite.ConnectionOpener");
 
   if (!options.path) {
     throw new Error("path not specified in connection options.");
@@ -89,36 +91,117 @@ function openConnection(options) {
   }
 
   let file = FileUtils.File(path);
-  let openDatabaseFn = sharedMemoryCache ?
-                         Services.storage.openDatabase :
-                         Services.storage.openUnsharedDatabase;
 
   let basename = OS.Path.basename(path);
+  let number = connectionCounters.get(basename) || 0;
+  connectionCounters.set(basename, number + 1);
 
-  if (!connectionCounters[basename]) {
-    connectionCounters[basename] = 1;
-  }
-
-  let number = connectionCounters[basename]++;
   let identifier = basename + "#" + number;
 
   log.info("Opening database: " + path + " (" + identifier + ")");
-  try {
-    let connection = openDatabaseFn(file);
-
-    if (!connection.connectionReady) {
-      log.warn("Connection is not ready.");
-      return Promise.reject(new Error("Connection is not ready."));
-    }
-
-    return Promise.resolve(new OpenedConnection(connection, basename, number,
-                                                openedOptions));
-  } catch (ex) {
-    log.warn("Could not open database: " + CommonUtils.exceptionStr(ex));
-    return Promise.reject(ex);
+  let deferred = Promise.defer();
+  let options = null;
+  if (!sharedMemoryCache) {
+    options = Cc["@mozilla.org/hash-property-bag;1"].
+      createInstance(Ci.nsIWritablePropertyBag);
+    options.setProperty("shared", false);
   }
+  Services.storage.openAsyncDatabase(file, options, function(status, connection) {
+    if (!connection) {
+      log.warn("Could not open connection: " + status);
+      deferred.reject(new Error("Could not open connection: " + status));
+      return;
+    }
+    log.info("Connection opened");
+    try {
+      deferred.resolve(
+        new OpenedConnection(connection.QueryInterface(Ci.mozIStorageAsyncConnection), basename, number,
+        openedOptions));
+    } catch (ex) {
+      log.warn("Could not open database: " + CommonUtils.exceptionStr(ex));
+      deferred.reject(ex);
+    }
+  });
+  return deferred.promise;
 }
 
+/**
+ * Creates a clone of an existing and open Storage connection.  The clone has
+ * the same underlying characteristics of the original connection and is
+ * returned in form of on OpenedConnection handle.
+ *
+ * The following parameters can control the cloned connection:
+ *
+ *   connection -- (mozIStorageAsyncConnection) The original Storage connection
+ *       to clone.  It's not possible to clone connections to memory databases.
+ *
+ *   readOnly -- (boolean) - If true the clone will be read-only.  If the
+ *       original connection is already read-only, the clone will be, regardless
+ *       of this option.  If the original connection is using the shared cache,
+ *       this parameter will be ignored and the clone will be as privileged as
+ *       the original connection.
+ *   shrinkMemoryOnConnectionIdleMS -- (integer) If defined, the connection
+ *       will attempt to minimize its memory usage after this many
+ *       milliseconds of connection idle. The connection is idle when no
+ *       statements are executing. There is no default value which means no
+ *       automatic memory minimization will occur. Please note that this is
+ *       *not* a timer on the idle service and this could fire while the
+ *       application is active.
+ *
+ *
+ * @param options
+ *        (Object) Parameters to control connection and clone options.
+ *
+ * @return Promise<OpenedConnection>
+ */
+function cloneStorageConnection(options) {
+  let log = Log.repository.getLogger("Sqlite.ConnectionCloner");
+
+  let source = options && options.connection;
+  if (!source) {
+    throw new TypeError("connection not specified in clone options.");
+  }
+  if (!source instanceof Ci.mozIStorageAsyncConnection) {
+    throw new TypeError("Connection must be a valid Storage connection.")
+  }
+
+  let openedOptions = {};
+
+  if ("shrinkMemoryOnConnectionIdleMS" in options) {
+    if (!Number.isInteger(options.shrinkMemoryOnConnectionIdleMS)) {
+      throw new TypeError("shrinkMemoryOnConnectionIdleMS must be an integer. " +
+                          "Got: " + options.shrinkMemoryOnConnectionIdleMS);
+    }
+    openedOptions.shrinkMemoryOnConnectionIdleMS =
+      options.shrinkMemoryOnConnectionIdleMS;
+  }
+
+  let path = source.databaseFile.path;
+  let basename = OS.Path.basename(path);
+  let number = connectionCounters.get(basename) || 0;
+  connectionCounters.set(basename, number + 1);
+  let identifier = basename + "#" + number;
+
+  log.info("Cloning database: " + path + " (" + identifier + ")");
+  let deferred = Promise.defer();
+
+  source.asyncClone(!!options.readOnly, (status, connection) => {
+    if (!connection) {
+      log.warn("Could not clone connection: " + status);
+      deferred.reject(new Error("Could not clone connection: " + status));
+    }
+    log.info("Connection cloned");
+    try {
+      let conn = connection.QueryInterface(Ci.mozIStorageAsyncConnection);
+      deferred.resolve(new OpenedConnection(conn, basename, number,
+                                            openedOptions));
+    } catch (ex) {
+      log.warn("Could not clone database: " + CommonUtils.exceptionStr(ex));
+      deferred.reject(ex);
+    }
+  });
+  return deferred.promise;
+}
 
 /**
  * Handle on an opened SQLite database.
@@ -168,32 +251,13 @@ function openConnection(options) {
  *        `openConnection`.
  */
 function OpenedConnection(connection, basename, number, options) {
-  let log = Log4Moz.repository.getLogger("Sqlite.Connection." + basename);
-
-  // getLogger() returns a shared object. We can't modify the functions on this
-  // object since they would have effect on all instances and last write would
-  // win. So, we create a "proxy" object with our custom functions. Everything
-  // else is proxied back to the shared logger instance via prototype
-  // inheritance.
-  let logProxy = {__proto__: log};
-
-  // Automatically prefix all log messages with the identifier.
-  for (let level in Log4Moz.Level) {
-    if (level == "Desc") {
-      continue;
-    }
-
-    let lc = level.toLowerCase();
-    logProxy[lc] = function (msg) {
-      return log[lc].call(log, "Conn #" + number + ": " + msg);
-    };
-  }
-
-  this._log = logProxy;
+  this._log = Log.repository.getLoggerWithMessagePrefix("Sqlite.Connection." + basename,
+                                                        "Conn #" + number + ": ");
 
   this._log.info("Opened");
 
   this._connection = connection;
+  this._connectionIdentifier = basename + " Conn #" + number;
   this._open = true;
 
   this._cachedStatements = new Map();
@@ -225,51 +289,32 @@ OpenedConnection.prototype = Object.freeze({
 
   TRANSACTION_TYPES: ["DEFERRED", "IMMEDIATE", "EXCLUSIVE"],
 
-  get connectionReady() {
-    return this._open && this._connection.connectionReady;
-  },
-
-  /**
-   * The row ID from the last INSERT operation.
-   *
-   * Because all statements are executed asynchronously, this could
-   * return unexpected results if multiple statements are performed in
-   * parallel. It is the caller's responsibility to schedule
-   * appropriately.
-   *
-   * It is recommended to only use this within transactions (which are
-   * handled as sequential statements via Tasks).
-   */
-  get lastInsertRowID() {
-    this._ensureOpen();
-    return this._connection.lastInsertRowID;
-  },
-
-  /**
-   * The number of rows that were changed, inserted, or deleted by the
-   * last operation.
-   *
-   * The same caveats regarding asynchronous execution for
-   * `lastInsertRowID` also apply here.
-   */
-  get affectedRows() {
-    this._ensureOpen();
-    return this._connection.affectedRows;
-  },
-
   /**
    * The integer schema version of the database.
    *
    * This is 0 if not schema version has been set.
+   *
+   * @return Promise<int>
    */
-  get schemaVersion() {
-    this._ensureOpen();
-    return this._connection.schemaVersion;
+  getSchemaVersion: function() {
+    let self = this;
+    return this.execute("PRAGMA user_version").then(
+      function onSuccess(result) {
+        if (result == null) {
+          return 0;
+        }
+        return JSON.stringify(result[0].getInt32(0));
+      }
+    );
   },
 
-  set schemaVersion(value) {
+  setSchemaVersion: function(value) {
+    if (!Number.isInteger(value)) {
+      // Guarding against accidental SQLi
+      throw new TypeError("Schema version must be an integer. Got " + value);
+    }
     this._ensureOpen();
-    this._connection.schemaVersion = value;
+    return this.execute("PRAGMA user_version = " + value);
   },
 
   /**
@@ -298,6 +343,11 @@ OpenedConnection.prototype = Object.freeze({
     this._clearIdleShrinkTimer();
     let deferred = Promise.defer();
 
+    AsyncShutdown.profileBeforeChange.addBlocker(
+      "Sqlite.jsm: " + this._connectionIdentifier,
+      deferred.promise
+    );
+
     // We need to take extra care with transactions during shutdown.
     //
     // If we don't have a transaction in progress, we can proceed with shutdown
@@ -319,6 +369,35 @@ OpenedConnection.prototype = Object.freeze({
     this._inProgressTransaction = null;
 
     return deferred.promise;
+  },
+
+  /**
+   * Clones this connection to a new Sqlite one.
+   *
+   * The following parameters can control the cloned connection:
+   *
+   * @param readOnly
+   *        (boolean) - If true the clone will be read-only.  If the original
+   *        connection is already read-only, the clone will be, regardless of
+   *        this option.  If the original connection is using the shared cache,
+   *        this parameter will be ignored and the clone will be as privileged as
+   *        the original connection.
+   *
+   * @return Promise<OpenedConnection>
+   */
+  clone: function (readOnly=false) {
+    this._ensureOpen();
+
+    this._log.debug("Request to clone connection.");
+
+    let options = {
+      connection: this._connection,
+      readOnly: readOnly,
+    };
+    if (this._idleShrinkMS)
+      options.shrinkMemoryOnConnectionIdleMS = this._idleShrinkMS;
+
+    return cloneStorageConnection(options);
   },
 
   _finalize: function (deferred) {
@@ -616,9 +695,7 @@ OpenedConnection.prototype = Object.freeze({
   },
 
   /**
-   * Whether a table exists in the database.
-   *
-   * IMPROVEMENT: Look for temporary tables.
+   * Whether a table exists in the database (both persistent and temporary tables).
    *
    * @param name
    *        (string) Name of the table.
@@ -627,7 +704,9 @@ OpenedConnection.prototype = Object.freeze({
    */
   tableExists: function (name) {
     return this.execute(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+      "SELECT name FROM (SELECT * FROM sqlite_master UNION ALL " +
+                        "SELECT * FROM sqlite_temp_master) " +
+      "WHERE type = 'table' AND name=?",
       [name])
       .then(function onResult(rows) {
         return Promise.resolve(rows.length > 0);
@@ -636,9 +715,7 @@ OpenedConnection.prototype = Object.freeze({
   },
 
   /**
-   * Whether a named index exists.
-   *
-   * IMPROVEMENT: Look for indexes in temporary tables.
+   * Whether a named index exists (both persistent and temporary tables).
    *
    * @param name
    *        (string) Name of the index.
@@ -647,7 +724,9 @@ OpenedConnection.prototype = Object.freeze({
    */
   indexExists: function (name) {
     return this.execute(
-      "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
+      "SELECT name FROM (SELECT * FROM sqlite_master UNION ALL " +
+                        "SELECT * FROM sqlite_temp_master) " +
+      "WHERE type = 'index' AND name=?",
       [name])
       .then(function onResult(rows) {
         return Promise.resolve(rows.length > 0);
@@ -753,7 +832,7 @@ OpenedConnection.prototype = Object.freeze({
 
     // Don't incur overhead for serializing params unless the messages go
     // somewhere.
-    if (this._log.level <= Log4Moz.Level.Trace) {
+    if (this._log.level <= Log.Level.Trace) {
       let msg = "Stmt #" + index + " " + sql;
 
       if (params) {
@@ -862,4 +941,5 @@ OpenedConnection.prototype = Object.freeze({
 
 this.Sqlite = {
   openConnection: openConnection,
+  cloneStorageConnection: cloneStorageConnection
 };

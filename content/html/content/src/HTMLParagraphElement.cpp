@@ -20,16 +20,8 @@ HTMLParagraphElement::~HTMLParagraphElement()
 {
 }
 
-NS_IMPL_ADDREF_INHERITED(HTMLParagraphElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLParagraphElement, Element)
-
-// QueryInterface implementation for nsHTMLParagraphElement
-NS_INTERFACE_TABLE_HEAD(HTMLParagraphElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLParagraphElement,
-                                nsIDOMHTMLParagraphElement)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
+NS_IMPL_ISUPPORTS_INHERITED(HTMLParagraphElement, nsGenericHTMLElement,
+                            nsIDOMHTMLParagraphElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLParagraphElement)
 
@@ -49,8 +41,9 @@ HTMLParagraphElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-static void
-MapAttributesIntoRule(const nsMappedAttributes* aAttributes, nsRuleData* aData)
+void
+HTMLParagraphElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                            nsRuleData* aData)
 {
   nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aData);
   nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
@@ -75,9 +68,9 @@ HTMLParagraphElement::GetAttributeMappingFunction() const
 }
 
 JSObject*
-HTMLParagraphElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLParagraphElement::WrapNode(JSContext *aCx)
 {
-  return HTMLParagraphElementBinding::Wrap(aCx, aScope, this);
+  return HTMLParagraphElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

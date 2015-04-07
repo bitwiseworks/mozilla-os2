@@ -12,7 +12,7 @@ interface nsIFetchTelemetryDataCallback : nsISupports
   void complete();
 };
 
-[scriptable, uuid(e70ba4cc-7ccd-41fe-a75c-e4042233a8cb)]
+[scriptable, uuid(4e4bfc35-dac6-4b28-ade4-7e45760051d5)]
 interface nsITelemetry : nsISupports
 {
   /**
@@ -100,6 +100,23 @@ interface nsITelemetry : nsISupports
   readonly attribute jsval chromeHangs;
 
   /*
+   * An array of thread hang stats,
+   *   [<thread>, <thread>, ...]
+   * <thread> represents a single thread,
+   *   {"name": "<name>",
+   *    "activity": <time>,
+   *    "hangs": [<hang>, <hang>, ...]}
+   * <time> represents a histogram of time intervals in milliseconds,
+   *   with the same format as histogramSnapshots
+   * <hang> represents a particular hang,
+   *   {"stack": <stack>, "histogram": <time>}
+   * <stack> represents the hang's stack,
+   *   ["<frame_0>", "<frame_1>", ...]
+   */
+  [implicit_jscontext]
+  readonly attribute jsval threadHangStats;
+
+  /*
    * An object with two fields: memoryMap and stacks.
    * * memoryMap is a list of loaded libraries.
    * * stacks is a list of stacks. Each stack is a list of pairs of the form
@@ -112,17 +129,17 @@ interface nsITelemetry : nsISupports
   readonly attribute jsval lateWrites;
 
   /**
-   * An object whose properties are the names of histograms defined in
-   * TelemetryHistograms.h and whose corresponding values are the textual
-   * comments associated with said histograms.
+   * Returns an array whose values are the names of histograms defined
+   * in Histograms.json.
    */
-  [implicit_jscontext]
-  readonly attribute jsval registeredHistograms;
+  void registeredHistograms(out uint32_t count,
+                            [retval, array, size_is(count)] out string histograms);
 
   /** 
    * Create and return a histogram.  Parameters:
    *
    * @param name Unique histogram name
+   * @param expiration Expiration version
    * @param min - Minimal bucket size
    * @param max - Maximum bucket size
    * @param bucket_count - number of buckets in the histogram.
@@ -133,7 +150,7 @@ interface nsITelemetry : nsISupports
    *   clear() - Zeros out the histogram's buckets and sum
    */
   [implicit_jscontext]
-  jsval newHistogram(in ACString name, in uint32_t min, in uint32_t max, in uint32_t bucket_count, in unsigned long histogram_type);
+  jsval newHistogram(in ACString name, in ACString expiration, in uint32_t min, in uint32_t max, in uint32_t bucket_count, in unsigned long histogram_type);
 
   /**
    * Create a histogram using the current state of an existing histogram.  The
@@ -222,4 +239,23 @@ interface nsITelemetry : nsISupports
    * writes in lateWrites.
    */
   void asyncFetchTelemetryData(in nsIFetchTelemetryDataCallback aCallback);
+
+  /**
+   * Get statistics of file IO reports, null, if not recorded.
+   *
+   * The statistics are returned as an object whose propoerties are the names
+   * of the files that have been accessed and whose corresponding values are
+   * arrays of size three, representing startup, normal, and shutdown stages.
+   * Each stage's entry is either null or an array with the layout
+   * [total_time, #creates, #reads, #writes, #fsyncs, #stats]
+   */
+  [implicit_jscontext]
+  readonly attribute jsval fileIOReports;
+
+  /**
+   * Return the number of seconds since process start using monotonic
+   * timestamps (unaffected by system clock changes).
+   * @throws NS_ERROR_NOT_AVAILABLE if TimeStamp doesn't have the data.
+   */
+  double msSinceProcessStart();
 };

@@ -8,91 +8,92 @@
 
 const TEST_URI = "http://example.com/browser/browser/devtools/webconsole/test/test-eval-in-stackframe.html";
 
-let gWebConsole, gJSTerm, gVariablesView;
-
 function test()
 {
-  registerCleanupFunction(() => {
-    gWebConsole = gJSTerm = gVariablesView = null;
-  });
+  let hud;
 
-  addTab(TEST_URI);
-  browser.addEventListener("load", function onLoad() {
-    browser.removeEventListener("load", onLoad, true);
-    openConsole(null, consoleOpened);
-  }, true);
+  Task.spawn(runner).then(finishTest);
+
+  function* runner() {
+    let {tab} = yield loadTab(TEST_URI);
+    hud = yield openConsole(tab);
+    let jsterm = hud.jsterm;
+
+    let msg = yield execute("fooObj");
+    ok(msg, "output message found");
+
+    let anchor = msg.querySelector("a");
+    let body = msg.querySelector(".message-body");
+    ok(anchor, "object anchor");
+    ok(body, "message body");
+    ok(body.textContent.contains('testProp: "testValue"'), "message text check");
+
+    msg.scrollIntoView();
+    executeSoon(() => {
+      EventUtils.synthesizeMouse(anchor, 2, 2, {}, hud.iframeWindow);
+    });
+
+    let vviewVar = yield jsterm.once("variablesview-fetched");
+    let vview = vviewVar._variablesView;
+    ok(vview, "variables view object");
+
+    let [result] = yield findVariableViewProperties(vviewVar, [
+      { name: "testProp", value: "testValue" },
+    ], { webconsole: hud });
+
+    let prop = result.matchedProp;
+    ok(prop, "matched the |testProp| property in the variables view");
+
+    is(content.wrappedJSObject.fooObj.testProp, result.value,
+       "|fooObj.testProp| value is correct");
+
+    vview.window.focus();
+
+    executeSoon(() => {
+      EventUtils.synthesizeKey("VK_ESCAPE", {});
+    });
+    yield jsterm.once("sidebar-closed");
+
+    jsterm.clearOutput();
+
+    msg = yield execute("window.location");
+    ok(msg, "output message found");
+
+    body = msg.querySelector(".message-body");
+    ok(body, "message body");
+    anchor = msg.querySelector("a");
+    ok(anchor, "object anchor");
+    ok(body.textContent.contains("Location \u2192 http://example.com/browser/"),
+       "message text check");
+
+    msg.scrollIntoView();
+    executeSoon(() => {
+      EventUtils.synthesizeMouse(anchor, 2, 2, {}, hud.iframeWindow)
+    });
+    vviewVar = yield jsterm.once("variablesview-fetched");
+
+    vview = vviewVar._variablesView;
+    ok(vview, "variables view object");
+
+    yield findVariableViewProperties(vviewVar, [
+      { name: "host", value: "example.com" },
+    ], { webconsole: hud });
+
+    vview.window.focus();
+
+    msg.scrollIntoView();
+    executeSoon(() => {
+      EventUtils.synthesizeKey("VK_ESCAPE", {});
+    });
+
+    yield jsterm.once("sidebar-closed");
+  }
+
+  function execute(str) {
+    let deferred = promise.defer();
+    hud.jsterm.execute(str, (msg) => {
+      deferred.resolve(msg);
+    });
+    return deferred.promise;
+  }
 }
-
-function consoleOpened(hud)
-{
-  gWebConsole = hud;
-  gJSTerm = hud.jsterm;
-  gJSTerm.execute("fooObj", onExecuteFooObj);
-}
-
-function onExecuteFooObj()
-{
-  let msg = gWebConsole.outputNode.querySelector(".webconsole-msg-output");
-  ok(msg, "output message found");
-  isnot(msg.textContent.indexOf("[object Object]"), -1, "message text check");
-
-  gJSTerm.once("variablesview-fetched", onFooObjFetch);
-  EventUtils.synthesizeMouse(msg, 2, 2, {}, gWebConsole.iframeWindow)
-}
-
-function onFooObjFetch(aEvent, aVar)
-{
-  gVariablesView = aVar._variablesView;
-  ok(gVariablesView, "variables view object");
-
-  findVariableViewProperties(aVar, [
-    { name: "testProp", value: "testValue" },
-  ], { webconsole: gWebConsole }).then(onTestPropFound);
-}
-
-function onTestPropFound(aResults)
-{
-  let prop = aResults[0].matchedProp;
-  ok(prop, "matched the |testProp| property in the variables view");
-
-  is(content.wrappedJSObject.fooObj.testProp, aResults[0].value,
-     "|fooObj.testProp| value is correct");
-
-  gVariablesView.window.focus();
-  gJSTerm.once("sidebar-closed", onSidebarClosed);
-  EventUtils.synthesizeKey("VK_ESCAPE", {}, gVariablesView.window);
-}
-
-function onSidebarClosed()
-{
-  gJSTerm.clearOutput();
-  gJSTerm.execute("window", onExecuteWindow);
-}
-
-function onExecuteWindow()
-{
-  let msg = gWebConsole.outputNode.querySelector(".webconsole-msg-output");
-  ok(msg, "output message found");
-  isnot(msg.textContent.indexOf("[object Window]"), -1, "message text check");
-
-  gJSTerm.once("variablesview-fetched", onWindowFetch);
-  EventUtils.synthesizeMouse(msg, 2, 2, {}, gWebConsole.iframeWindow)
-}
-
-function onWindowFetch(aEvent, aVar)
-{
-  gVariablesView = aVar._variablesView;
-  ok(gVariablesView, "variables view object");
-
-  findVariableViewProperties(aVar, [
-    { name: "foo", value: "globalFooBug783499" },
-  ], { webconsole: gWebConsole }).then(onFooFound);
-}
-
-function onFooFound(aResults)
-{
-  gVariablesView.window.focus();
-  gJSTerm.once("sidebar-closed", finishTest);
-  EventUtils.synthesizeKey("VK_ESCAPE", {}, gVariablesView.window);
-}
-

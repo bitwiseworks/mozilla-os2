@@ -8,6 +8,24 @@
 
 namespace mozilla {
 
+FileLocation::FileLocation()
+{
+}
+
+FileLocation::~FileLocation()
+{
+}
+
+FileLocation::FileLocation(nsIFile* file)
+{
+  Init(file);
+}
+
+FileLocation::FileLocation(nsIFile* file, const char *path)
+{
+  Init(file, path);
+}
+
 FileLocation::FileLocation(const FileLocation &file, const char *path)
 {
   if (file.IsZip()) {
@@ -30,7 +48,7 @@ FileLocation::FileLocation(const FileLocation &file, const char *path)
       nsCOMPtr<nsIFile> cfile;
       file.mBaseFile->GetParent(getter_AddRefs(cfile));
 
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
       nsAutoCString pathStr(path);
       char *p;
       uint32_t len = pathStr.GetMutableData(&p);
@@ -48,6 +66,30 @@ FileLocation::FileLocation(const FileLocation &file, const char *path)
       Init(file.mBaseFile);
     }
   }
+}
+
+void
+FileLocation::Init(nsIFile* file)
+{
+  mBaseZip = nullptr;
+  mBaseFile = file;
+  mPath.Truncate();
+}
+
+void
+FileLocation::Init(nsIFile* file, const char* path)
+{
+  mBaseZip = nullptr;
+  mBaseFile = file;
+  mPath = path;
+}
+
+void
+FileLocation::Init(nsZipArchive* zip, const char* path)
+{
+  mBaseZip = zip;
+  mBaseFile = nullptr;
+  mPath = path;
 }
 
 void

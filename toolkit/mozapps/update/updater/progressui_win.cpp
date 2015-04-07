@@ -47,7 +47,7 @@ static StringTable sUIStrings;
 static BOOL
 GetStringsFile(WCHAR filename[MAX_PATH])
 {
-  if (!GetModuleFileNameW(NULL, filename, MAX_PATH))
+  if (!GetModuleFileNameW(nullptr, filename, MAX_PATH))
     return FALSE;
  
   WCHAR *dot = wcsrchr(filename, '.');
@@ -115,7 +115,8 @@ InitDialog(HWND hDlg)
   SetWindowTextW(GetDlgItem(hDlg, IDC_INFO), szwInfo);
 
   // Set dialog icon
-  HICON hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_DIALOG));
+  HICON hIcon = LoadIcon(GetModuleHandle(nullptr),
+                         MAKEINTRESOURCE(IDI_DIALOG));
   if (hIcon)
     SendMessage(hDlg, WM_SETICON, ICON_BIG, (LPARAM) hIcon);
 
@@ -171,7 +172,7 @@ InitDialog(HWND hDlg)
 
   CenterDialog(hDlg);  // make dialog appear in the center of the screen
 
-  SetTimer(hDlg, TIMER_ID, TIMER_INTERVAL, NULL);
+  SetTimer(hDlg, TIMER_ID, TIMER_INTERVAL, nullptr);
 }
 
 // Message handler for update dialog.
@@ -199,7 +200,7 @@ DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 }
 
 int
-InitProgressUI(int *argc, NS_tchar ***argv)
+InitProgressUI(int *argc, WCHAR ***argv)
 {
   return 0;
 }
@@ -244,8 +245,47 @@ ShowProgressUI(bool indeterminate, bool initUIStrings)
       return 0;
   }
 
+  // Don't load the UI if there's an <exe_name>.Local directory for redirection.
+  WCHAR appPath[MAX_PATH + 1] = { L'\0' };
+  if (!GetModuleFileNameW(nullptr, appPath, MAX_PATH)) {
+    return -1;
+  }
+
+  if (wcslen(appPath) + wcslen(L".Local") >= MAX_PATH) {
+    return -1;
+  }
+
+  wcscat(appPath, L".Local");
+
+  if (!_waccess(appPath, 04)) {
+    return -1;
+  }
+
+  // Don't load the UI if the strings for the UI are not provided.
   if (initUIStrings && InitProgressUIStrings() == -1) {
     return -1;
+  }
+
+  if (!GetModuleFileNameW(nullptr, appPath, MAX_PATH)) {
+    return -1;
+  }
+
+  // Use an activation context that supports visual styles for the controls.
+  ACTCTXW actx = {0};
+  actx.cbSize = sizeof(ACTCTXW);
+  actx.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID;
+  actx.hModule = GetModuleHandle(NULL); // Use the embedded manifest
+  // This is needed only for Win XP but doesn't cause a problem with other
+  // versions of Windows.
+  actx.lpSource = appPath;
+  actx.lpResourceName = MAKEINTRESOURCE(IDR_COMCTL32_MANIFEST);
+
+  HANDLE hactx = INVALID_HANDLE_VALUE;
+  hactx = CreateActCtxW(&actx);
+  ULONG_PTR actxCookie = NULL;
+  if (hactx != INVALID_HANDLE_VALUE) {
+    // Push the specified activation context to the top of the activation stack.
+    ActivateActCtx(hactx, &actxCookie);
   }
 
   INITCOMMONCONTROLSEX icc = {
@@ -254,9 +294,14 @@ ShowProgressUI(bool indeterminate, bool initUIStrings)
   };
   InitCommonControlsEx(&icc);
 
-  DialogBox(GetModuleHandle(NULL),
-            MAKEINTRESOURCE(IDD_DIALOG), NULL,
+  DialogBox(GetModuleHandle(nullptr),
+            MAKEINTRESOURCE(IDD_DIALOG), nullptr,
             (DLGPROC) DialogProc);
+
+  if (hactx != INVALID_HANDLE_VALUE) {
+    // Deactivate the context now that the comctl32.dll is loaded.
+    DeactivateActCtx(0, actxCookie);
+  }
 
   return 0;
 }

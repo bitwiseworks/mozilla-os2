@@ -6,12 +6,11 @@
 
 #include "domstubs.idl"
 #include "nsIDocShellTreeItem.idl"
-#include "nsIAtom.idl"
 
 %{ C++
+#include "js/TypeDecls.h"
 class nsPresContext;
 class nsIPresShell;
-struct JSContext;
 %}
 
 /**
@@ -35,14 +34,18 @@ interface nsIRequest;
 interface nsISHEntry;
 interface nsILayoutHistoryState;
 interface nsISecureBrowserUI;
+interface nsIScriptGlobalObject;
 interface nsIDOMStorage;
 interface nsIPrincipal;
 interface nsIWebBrowserPrint;
 interface nsIVariant;
 interface nsIPrivacyTransitionObserver;
 interface nsIReflowObserver;
+interface nsIScrollObserver;
 
-[scriptable, builtinclass, uuid(f453d2ee-bac7-46f9-a553-df918f0cc0d0)]
+typedef unsigned long nsLoadFlags;
+
+[scriptable, builtinclass, uuid(e46d924d-c20f-4add-8cf5-1e1c817b2181)]
 interface nsIDocShell : nsIDocShellTreeItem
 {
   /**
@@ -106,6 +109,11 @@ interface nsIDocShell : nsIDocShellTreeItem
   const long INTERNAL_LOAD_FLAGS_BYPASS_CLASSIFIER       = 0x10;
   const long INTERNAL_LOAD_FLAGS_FORCE_ALLOW_COOKIES     = 0x20;
 
+  // Whether the load should be treated as srcdoc load, rather than a URI one.
+  const long INTERNAL_LOAD_FLAGS_IS_SRCDOC               = 0x40;
+
+  const long INTERNAL_LOAD_FLAGS_FIXUP_SCHEME_TYPOS      = 0x80;
+
   /**
    * Loads the given URI.  This method is identical to loadURI(...) except
    * that its parameter list is broken out instead of being packaged inside
@@ -128,6 +136,13 @@ interface nsIDocShell : nsIDocShellTreeItem
    * @param aLoadFlags      - Flags to modify load behaviour. Flags are defined
    *                          in nsIWebNavigation.
    * @param aSHEntry        - Active Session History entry (if loading from SH)
+   * @param aSrcdoc           When INTERNAL_LOAD_FLAGS_IS_SRCDOC is set, the
+   *                          contents of this parameter will be loaded instead
+   *                          of aURI.
+   * @param aSourceDocShell - The source browsing context for the navigation.
+   * @param aBaseURI        - The base URI to be used for the load.  Set in
+   *                          srcdoc loads as it cannot otherwise be inferred
+   *                          in certain situations such as view-source.
    */
   [noscript]void internalLoad(in nsIURI aURI,
                               in nsIURI aReferrer,
@@ -141,6 +156,9 @@ interface nsIDocShell : nsIDocShellTreeItem
                               in unsigned long aLoadFlags,
                               in nsISHEntry aSHEntry,
                               in boolean firstParty,
+                              in AString aSrcdoc,
+                              in nsIDocShell aSourceDocShell,
+                              in nsIURI aBaseURI,
                               out nsIDocShell aDocShell,
                               out nsIRequest aRequest);
 
@@ -149,7 +167,7 @@ interface nsIDocShell : nsIDocShellTreeItem
    * depending on the value of aReplace.
    */
   [implicit_jscontext]
-  void addState(in nsIVariant aData, in DOMString aTitle,
+  void addState(in jsval aData, in DOMString aTitle,
                 in DOMString aURL, in boolean aReplace);
 
   /**
@@ -252,6 +270,13 @@ interface nsIDocShell : nsIDocShellTreeItem
   attribute boolean allowWindowControl;
 
   /**
+   * True if the docshell allows its content to be handled by a content listener
+   * other than the docshell itself, including the external helper app service,
+   * and false otherwise.  Defaults to true.
+   */
+  [infallible] attribute boolean allowContentRetargeting;
+
+  /**
    * Get an enumerator over this docShell and its children.
    *
    * @param aItemType  - Only include docShells of this type, or if typeAll,
@@ -339,6 +364,16 @@ interface nsIDocShell : nsIDocShellTreeItem
   attribute unsigned long  loadType;
 
   /*
+   * Default load flags (as defined in nsIRequest) that will be set on all
+   * requests made by this docShell and propagated to all child docShells and
+   * to nsILoadGroup::defaultLoadFlags for the docShell's loadGroup.
+   * Default is no flags.  Once set, only future requests initiated by the
+   * docShell are affected, so in general, these flags should be set before
+   * the docShell loads any content.
+   */
+  attribute nsLoadFlags defaultLoadFlags;
+
+  /*
    * returns true if the docshell is being destroyed, false otherwise
    */
   boolean isBeingDestroyed();
@@ -396,6 +431,22 @@ interface nsIDocShell : nsIDocShellTreeItem
 
   /* attribute to access whether error pages are enabled */
   attribute boolean useErrorPages;
+
+  /**
+   * Display a load error in a frame while keeping that frame's currentURI
+   * pointing correctly to the page where the error ocurred, rather than to
+   * the error document page. You must provide either the aURI or aURL parameter.
+   *
+   * @param  aError         The error code to be displayed
+   * @param  aURI           nsIURI of the page where the error happened
+   * @param  aURL           wstring of the page where the error happened
+   * @param  aFailedChannel The channel related to this error
+   */
+  void displayLoadError(in nsresult aError,
+                        in nsIURI aURI,
+                        in wstring aURL,
+                        [optional] in nsIChannel aFailedChannel);
+
 
   /**
    * Keeps track of the previous SHTransaction index and the current
@@ -528,7 +579,7 @@ interface nsIDocShell : nsIDocShellTreeItem
    * The rule of thumb here is that we disable js if this docshell or any
    * of its parents disallow scripting.
    */
-  readonly attribute boolean canExecuteScripts;
+  [infallible] readonly attribute boolean canExecuteScripts;
 
   /**
    * Sets whether a docshell is active. An active docshell is one that is
@@ -556,40 +607,12 @@ interface nsIDocShell : nsIDocShellTreeItem
   void createAboutBlankContentViewer(in nsIPrincipal aPrincipal);
 
   /**
-   * The charset attribute allows the user to view, hint, and set which
-   * converter is used to read the document's data.
+   * Upon getting, returns the canonical encoding label of the document
+   * currently loaded into this docshell.
    *
-   * <P>Inside Mozilla all text is encoded as Unicode. By standardizing  
-   * on Unicode every piece of code that handles characters no longer 
-   * needs to: 
-   *
-   *     Have access to a character encoding parameter.
-   *     Ask is the data stateful?
-   *     Ask is the data single byte?
-   *     Ask is the data multi-byte?
-   *     If multi-byte: have access to a routine that can
-   *         determine how many bytes in the current character.
-   *
-   * When the document is read in a converter is used to convert 
-   * the document's data to Unicode.
-   *
-   * The charset attribute provides the ability to:
-   *
-   *   See what converter was used when inputting the documents
-   *   data.
-   *
-   *   Override the character set for documents where the specified 
-   *   fallback, or auto-detected character set is incorrect
-   *
-   * Get/sets the encoding (converter) used to read the 
-   * document. Get returns the encoding used. Set forces 
-   * (overrides) the encoding. After forcing the charset the 
-   * embedding application will need to cause the data to be 
-   * reparsed in order to update the DOM / display.
-   *
-   * A force also sets the fallback encoding for this frame.
+   * Upon setting, sets forcedCharset for compatibility with legacy callers.
    */
-  attribute string charset;
+  attribute ACString charset;
 
   /**
    * Called when the user chose an encoding override from the character
@@ -599,23 +622,21 @@ interface nsIDocShell : nsIDocShellTreeItem
   void gatherCharsetMenuTelemetry();
 
   /**
-   * The charset forced by the user. When the charset attribute is set this
-   * attribute is set to the same value.
-   *
-   * XXX Could this be replaced by a boolean?
+   * The charset forced by the user.
    */
   attribute ACString forcedCharset;
 
   /**
    * In a child docshell, this is the charset of the parent docshell
    */
-  attribute ACString parentCharset;
-
-  /*
-   * In a child docshell, this is the source of parentCharset
-   * @see nsCharsetSource.h
-   */
-  attribute int32_t parentCharsetSource;
+  [noscript, notxpcom, nostdcall] void setParentCharset(
+    in ACString parentCharset,
+    in int32_t parentCharsetSource,
+    in nsIPrincipal parentCharsetPrincipal);
+  [noscript, notxpcom, nostdcall] void getParentCharset(
+    out ACString parentCharset,
+    out int32_t parentCharsetSource,
+    out nsIPrincipal parentCharsetPrincipal);
 
   /**
    * Add an observer to the list of parties to be notified when this docshell's
@@ -646,6 +667,24 @@ interface nsIDocShell : nsIDocShellTreeItem
   [noscript] void notifyReflowObservers(in bool interruptible,
                                         in DOMHighResTimeStamp start,
                                         in DOMHighResTimeStamp end);
+
+  /**
+   * Add an observer to the list of parties to be notified when scroll position
+   * of some elements is changed.
+   */
+  [noscript] void addWeakScrollObserver(in nsIScrollObserver obs);
+
+  /**
+   * Add an observer to the list of parties to be notified when scroll position
+   * of some elements is changed.
+   */
+  [noscript] void removeWeakScrollObserver(in nsIScrollObserver obs);
+
+  /**
+   * Notify all attached observers that the scroll position of some element
+   * has changed.
+   */
+  [noscript] void notifyScrollObservers();
 
   /**
    * Returns true if this docshell corresponds to an <iframe mozbrowser>.
@@ -732,6 +771,13 @@ interface nsIDocShell : nsIDocShellTreeItem
   [infallible] readonly attribute unsigned long appId;
 
   /**
+   * Return the manifest URL of the app associated with this docshell.
+   *
+   * If there is no associated app in our hierarchy, we return empty string.
+   */
+  readonly attribute DOMString appManifestURL;
+
+  /**
    * Like nsIDocShellTreeItem::GetSameTypeParent, except this ignores <iframe
    * mozbrowser> and <iframe mozapp> boundaries.
    */
@@ -756,6 +802,19 @@ interface nsIDocShell : nsIDocShellTreeItem
    * See nsSandboxFlags.h for the possible flags.
    */
   attribute unsigned long sandboxFlags;
+
+  /**
+   * When a new browsing context is opened by a sandboxed document, it needs to
+   * keep track of the browsing context that opened it, so that it can be
+   * navigated by it.  This is the "one permitted sandboxed navigator".
+   */
+  attribute nsIDocShell onePermittedSandboxedNavigator;
+
+  /**
+   * Returns true if we are sandboxed from aTargetDocShell.
+   * aTargetDocShell - the browsing context we are attempting to navigate.
+   */
+  [noscript,notxpcom,nostdcall] bool isSandboxedFrom(in nsIDocShell aTargetDocShell);
 
   /**
    * This member variable determines whether a document has Mixed Active Content that
@@ -866,4 +925,37 @@ interface nsIDocShell : nsIDocShellTreeItem
    * Returns false for mLSHE, true for mOSHE
    */
   boolean getCurrentSHEntry(out nsISHEntry aEntry);
+
+  /**
+    * Cherry picked parts of nsIController.
+    * They are here, because we want to call these functions
+    * from JS.
+    */
+  boolean isCommandEnabled(in string command);
+  void doCommand(in string command);
+
+  /**
+   * Invisible DocShell are dummy construct to simulate DOM windows
+   * without any actual visual representation. They have to be marked
+   * at construction time, to avoid any painting activity.
+   */
+  [noscript, notxpcom] bool IsInvisible();
+  [noscript, notxpcom] void SetInvisible(in bool aIsInvisibleDochsell);
+
+/**
+ * Get the script global for the document in this docshell.
+*/
+  [noscript,notxpcom,nostdcall] nsIScriptGlobalObject GetScriptGlobalObject();
+
+  /**
+   * If deviceSizeIsPageSize is set to true, device-width/height media queries
+   * will be calculated from the page size, not the device size.
+   *
+   * Used by the Responsive Design View and B2G Simulator.
+   *
+   * Default is False.
+   * Default value can be overriden with
+   * docshell.device_size_is_page_size pref.
+   */
+  [infallible] attribute boolean deviceSizeIsPageSize;
 };

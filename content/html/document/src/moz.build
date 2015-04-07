@@ -4,24 +4,40 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'content'
-
 EXPORTS += [
     'nsIHTMLDocument.h',
 ]
 
 EXPORTS.mozilla.dom += [
+    'HTMLAllCollection.h',
     'ImageDocument.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
+    'HTMLAllCollection.cpp',
     'ImageDocument.cpp',
     'MediaDocument.cpp',
-    'PluginDocument.cpp',
-    'VideoDocument.cpp',
     'nsHTMLContentSink.cpp',
     'nsHTMLDocument.cpp',
+    'VideoDocument.cpp',
 ]
 
-LIBRARY_NAME = 'gkconhtmldoc_s'
+SOURCES += [
+    # Includes npapi.h.
+    'PluginDocument.cpp',
+]
 
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+LOCAL_INCLUDES += [
+    '../../content/src',
+    '/caps/include',
+    '/content/base/src',
+    '/docshell/base',
+    '/dom/base',
+    '/layout/style',
+]
+
+FINAL_LIBRARY = 'gklayout'

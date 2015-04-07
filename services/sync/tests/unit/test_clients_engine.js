@@ -4,6 +4,7 @@
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/engines.js");
 Cu.import("resource://services-sync/engines/clients.js");
+Cu.import("resource://services-sync/record.js");
 Cu.import("resource://services-sync/service.js");
 Cu.import("resource://services-sync/util.js");
 Cu.import("resource://testing-common/services/sync/utils.js");
@@ -12,6 +13,29 @@ const MORE_THAN_CLIENTS_TTL_REFRESH = 691200; // 8 days
 const LESS_THAN_CLIENTS_TTL_REFRESH = 86400;  // 1 day
 
 let engine = Service.clientsEngine;
+
+/**
+ * Unpack the record with this ID, and verify that it has the same version that
+ * we should be putting into records.
+ */
+function check_record_version(user, id) {
+    let payload = JSON.parse(user.collection("clients").wbo(id).payload);
+
+    let rec = new CryptoWrapper();
+    rec.id = id;
+    rec.collection = "clients";
+    rec.ciphertext = payload.ciphertext;
+    rec.hmac = payload.hmac;
+    rec.IV = payload.IV;
+
+    let cleartext = rec.decrypt(Service.collectionKeys.keyForCollection("clients"));
+
+    _("Payload is " + JSON.stringify(cleartext));
+    do_check_eq(Services.appinfo.version, cleartext.version);
+    do_check_eq(2, cleartext.protocols.length);
+    do_check_eq("1.1", cleartext.protocols[0]);
+    do_check_eq("1.5", cleartext.protocols[1]);
+}
 
 add_test(function test_bad_hmac() {
   _("Ensure that Clients engine deletes corrupt records.");
@@ -57,9 +81,9 @@ add_test(function test_bad_hmac() {
   }
 
   try {
+    ensureLegacyIdentityManager();
     let passphrase     = "abcdeabcdeabcdeabcdeabcdea";
-    Service.serverURL  = TEST_SERVER_URL;
-    Service.clusterURL = TEST_CLUSTER_URL;
+    Service.serverURL  = server.baseURI;
     Service.login("foo", "ilovejane", passphrase);
 
     generateNewKeys(Service.collectionKeys);
@@ -70,6 +94,9 @@ add_test(function test_bad_hmac() {
     engine._sync();
     check_clients_count(1);
     do_check_true(engine.lastRecordUpload > 0);
+
+    // Our uploaded record has a version.
+    check_record_version(user, engine.localID);
 
     // Initial setup can wipe the server, so clean up.
     deletedCollections = [];
@@ -169,9 +196,6 @@ add_test(function test_properties() {
 add_test(function test_sync() {
   _("Ensure that Clients engine uploads a new client record once a week.");
 
-  new SyncTestingInfrastructure();
-  generateNewKeys(Service.collectionKeys);
-
   let contents = {
     meta: {global: {engines: {clients: {version: engine.version,
                                         syncID: engine.syncID}}}},
@@ -180,6 +204,9 @@ add_test(function test_sync() {
   };
   let server = serverForUsers({"foo": "password"}, contents);
   let user   = server.user("foo");
+
+  new SyncTestingInfrastructure(server.server);
+  generateNewKeys(Service.collectionKeys);
 
   function clientWBO() {
     return user.collection("clients").wbo(engine.localID);
@@ -407,8 +434,6 @@ add_test(function test_process_incoming_commands() {
 add_test(function test_command_sync() {
   _("Ensure that commands are synced across clients.");
 
-  new SyncTestingInfrastructure();
-
   engine._store.wipe();
   generateNewKeys(Service.collectionKeys);
 
@@ -419,6 +444,8 @@ add_test(function test_command_sync() {
     crypto: {}
   };
   let server   = serverForUsers({"foo": "password"}, contents);
+  new SyncTestingInfrastructure(server.server);
+
   let user     = server.user("foo");
   let remoteId = Utils.makeGUID();
 
@@ -552,6 +579,6 @@ add_test(function test_receive_display_uri() {
 
 function run_test() {
   initTestLogging("Trace");
-  Log4Moz.repository.getLogger("Sync.Engine.Clients").level = Log4Moz.Level.Trace;
+  Log.repository.getLogger("Sync.Engine.Clients").level = Log.Level.Trace;
   run_next_test();
 }

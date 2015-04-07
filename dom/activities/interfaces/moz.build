@@ -7,17 +7,7 @@
 XPIDL_SOURCES += [
     'nsIActivityProxy.idl',
     'nsIActivityUIGlue.idl',
-    'nsIDOMActivityHandlerDescription.idl',
-    'nsIDOMActivityOptions.idl',
-    'nsIDOMActivityRequestHandler.idl',
-    'nsIDOMNavigatorActivities.idl',
 ]
 
 XPIDL_MODULE = 'dom_activities'
-
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/dom/base',
-    '-I$(topsrcdir)/dom/interfaces/base',
-    '-I$(topsrcdir)/dom/interfaces/events',
-]
 

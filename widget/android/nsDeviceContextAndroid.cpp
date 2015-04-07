@@ -10,7 +10,7 @@
 #include "nsIPrintSettings.h"
 #include "nsDirectoryServiceDefs.h"
 
-NS_IMPL_ISUPPORTS1(nsDeviceContextSpecAndroid, nsIDeviceContextSpec)
+NS_IMPL_ISUPPORTS(nsDeviceContextSpecAndroid, nsIDeviceContextSpec)
 
 NS_IMETHODIMP
 nsDeviceContextSpecAndroid::GetSurfaceForPrinter(gfxASurface** aSurface)
@@ -51,10 +51,10 @@ nsDeviceContextSpecAndroid::Init(nsIWidget* aWidget,
 }
 
 NS_IMETHODIMP
-nsDeviceContextSpecAndroid::BeginDocument(PRUnichar* aTitle,
-                                      PRUnichar* aPrintToFileName,
-                                      int32_t aStartPage,
-                                      int32_t aEndPage)
+nsDeviceContextSpecAndroid::BeginDocument(const nsAString& aTitle,
+                                          char16_t* aPrintToFileName,
+                                          int32_t aStartPage,
+                                          int32_t aEndPage)
 {
   return NS_OK;
 }

@@ -19,13 +19,13 @@ public:
 
   virtual ~nsFrameIterator() {}
 
-  virtual void First();
-  virtual void Next();
-  virtual nsIFrame* CurrentItem();
-  virtual bool IsDone();
+  virtual void First() MOZ_OVERRIDE;
+  virtual void Next() MOZ_OVERRIDE;
+  virtual nsIFrame* CurrentItem() MOZ_OVERRIDE;
+  virtual bool IsDone() MOZ_OVERRIDE;
 
-  virtual void Last();
-  virtual void Prev();
+  virtual void Last() MOZ_OVERRIDE;
+  virtual void Prev() MOZ_OVERRIDE;
 
   nsFrameIterator(nsPresContext* aPresContext, nsIFrame *aStart,
                   nsIteratorType aType, bool aLockScroll, bool aFollowOOFs);
@@ -106,11 +106,11 @@ public:
   nsFrameIterator(aPresContext, aStart, aType, aLockScroll, aFollowOOFs) {}
 
 protected:
-  nsIFrame* GetFirstChildInner(nsIFrame* aFrame);
-  nsIFrame* GetLastChildInner(nsIFrame* aFrame);  
+  nsIFrame* GetFirstChildInner(nsIFrame* aFrame) MOZ_OVERRIDE;
+  nsIFrame* GetLastChildInner(nsIFrame* aFrame) MOZ_OVERRIDE;  
   
-  nsIFrame* GetNextSiblingInner(nsIFrame* aFrame);
-  nsIFrame* GetPrevSiblingInner(nsIFrame* aFrame);  
+  nsIFrame* GetNextSiblingInner(nsIFrame* aFrame) MOZ_OVERRIDE;
+  nsIFrame* GetPrevSiblingInner(nsIFrame* aFrame) MOZ_OVERRIDE;  
 };
 
 /************IMPLEMENTATIONS**************/
@@ -165,7 +165,7 @@ nsFrameTraversal::~nsFrameTraversal()
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsFrameTraversal,nsIFrameTraversal)
+NS_IMPL_ISUPPORTS(nsFrameTraversal,nsIFrameTraversal)
 
 NS_IMETHODIMP 
  nsFrameTraversal::NewFrameTraversal(nsIFrameEnumerator **aEnumerator,
@@ -183,7 +183,7 @@ NS_IMETHODIMP
 
 // nsFrameIterator implementation
 
-NS_IMPL_ISUPPORTS1(nsFrameIterator, nsIFrameEnumerator)
+NS_IMPL_ISUPPORTS(nsFrameIterator, nsIFrameEnumerator)
 
 nsFrameIterator::nsFrameIterator(nsPresContext* aPresContext, nsIFrame *aStart,
                                  nsIteratorType aType, bool aLockInScrollView,

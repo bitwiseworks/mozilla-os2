@@ -23,9 +23,8 @@ const inString = "Many years ago, I contracted an intimacy with a Mr. William Le
 
 const testContent = "<pre id='testPara'>" + inString;
 
-netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-const Ci = Components.interfaces;
-const Cc = Components.classes;
+const Ci = SpecialPowers.Ci;
+const Cc = SpecialPowers.Cc;
 var ccManager = Cc["@mozilla.org/charset-converter-manager;1"].getService(Ci.nsICharsetConverterManager);
 
 var decoderList = ccManager.getDecoderList();
@@ -35,7 +34,10 @@ while (decoderList.hasMore()) {
 
     // Skip UTF-16 variants. (Other non-ASCII compatible encodings will be
     // ignored anyway because of bug 601429
-    if (decoder.substring(0, 6)  == "UTF-16")
+    if (decoder.substring(0, 6)  == "UTF-16" || 
+        decoder == "replacement" ||
+        decoder == "ISO-2022-KR" ||
+        decoder == "ISO-2022-CN")
 	continue;
 
     data = encodeURI(testContent);

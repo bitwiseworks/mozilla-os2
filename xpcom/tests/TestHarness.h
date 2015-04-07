@@ -14,13 +14,13 @@
 
 #if defined(_MSC_VER) && defined(MOZ_STATIC_JS)
 /*
- * Including jsdbgapi.h may cause build break with --disable-shared-js
+ * Including js/OldDebugAPI.h may cause build break with --disable-shared-js
  * This is a workaround for bug 673616.
  */
 #define STATIC_JS_API
 #endif
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "prenv.h"
 #include "nsComponentManagerUtils.h"
@@ -36,7 +36,6 @@
 #include "nsIProperties.h"
 #include "nsIObserverService.h"
 #include "nsXULAppAPI.h"
-#include "jsdbgapi.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -102,17 +101,17 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
     NS_DECL_ISUPPORTS
 
     ScopedXPCOM(const char* testName,
-                nsIDirectoryServiceProvider *dirSvcProvider = NULL)
+                nsIDirectoryServiceProvider *dirSvcProvider = nullptr)
     : mDirSvcProvider(dirSvcProvider)
     {
       mTestName = testName;
       printf("Running %s tests...\n", mTestName);
 
-      nsresult rv = NS_InitXPCOM2(&mServMgr, NULL, this);
+      nsresult rv = NS_InitXPCOM2(&mServMgr, nullptr, this);
       if (NS_FAILED(rv))
       {
         fail("NS_InitXPCOM2 returned failure code 0x%x", rv);
-        mServMgr = NULL;
+        mServMgr = nullptr;
         return;
       }
     }
@@ -141,7 +140,7 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
       if (mServMgr)
       {
         NS_RELEASE(mServMgr);
-        nsresult rv = NS_ShutdownXPCOM(NULL);
+        nsresult rv = NS_ShutdownXPCOM(nullptr);
         if (NS_FAILED(rv))
         {
           fail("XPCOM shutdown failed with code 0x%x", rv);
@@ -154,7 +153,7 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
 
     bool failed()
     {
-      return mServMgr == NULL;
+      return mServMgr == nullptr;
     }
 
     already_AddRefed<nsIFile> GetProfileDirectory()
@@ -264,19 +263,19 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
     nsCOMPtr<nsIFile> mGRED;
 };
 
-NS_IMPL_QUERY_INTERFACE2(
+NS_IMPL_QUERY_INTERFACE(
   ScopedXPCOM,
   nsIDirectoryServiceProvider,
   nsIDirectoryServiceProvider2
 )
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 ScopedXPCOM::AddRef()
 {
   return 2;
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 ScopedXPCOM::Release()
 {
   return 1;

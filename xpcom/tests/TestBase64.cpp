@@ -168,7 +168,7 @@ private:
   bool mClosed;
 };
 
-NS_IMPL_ISUPPORTS1(FakeInputStream, nsIInputStream)
+NS_IMPL_ISUPPORTS(FakeInputStream, nsIInputStream)
 
 NS_IMETHODIMP
 FakeInputStream::Close()
@@ -258,7 +258,9 @@ FakeInputStream::CheckTest(nsACString& aResult)
 }
 
 #ifdef XP_WIN
-#define NS_tstrcmp wcscmp
+static inline int NS_tstrcmp(char16ptr_t x, char16ptr_t y) {
+    return wcscmp(x, y);
+}
 #else
 #define NS_tstrcmp strcmp
 #endif

@@ -11,8 +11,9 @@
 #ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_PCMFILE_H_
 #define WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_PCMFILE_H_
 
-#include <cstdio>
-#include <cstdlib>
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <string>
 
 #include "module_common_types.h"
@@ -23,45 +24,41 @@ namespace webrtc {
 class PCMFile {
  public:
   PCMFile();
-  PCMFile(WebRtc_UWord32 timestamp);
+  PCMFile(uint32_t timestamp);
   ~PCMFile() {
     if (pcm_file_ != NULL) {
       fclose(pcm_file_);
     }
   }
 
-  void Open(const std::string& filename, WebRtc_UWord16 frequency,
-                  const char* mode, bool auto_rewind = false);
+  void Open(const std::string& filename, uint16_t frequency, const char* mode,
+            bool auto_rewind = false);
 
-  WebRtc_Word32 Read10MsData(AudioFrame& audio_frame);
+  int32_t Read10MsData(AudioFrame& audio_frame);
 
-  void Write10MsData(WebRtc_Word16 *playout_buffer,
-                     WebRtc_UWord16 length_smpls);
+  void Write10MsData(int16_t *playout_buffer, uint16_t length_smpls);
   void Write10MsData(AudioFrame& audio_frame);
 
-  WebRtc_UWord16 PayloadLength10Ms() const;
-  WebRtc_Word32 SamplingFrequency() const;
+  uint16_t PayloadLength10Ms() const;
+  int32_t SamplingFrequency() const;
   void Close();
   bool EndOfFile() const {
     return end_of_file_;
   }
   void Rewind();
-  static WebRtc_Word16 ChooseFile(std::string* file_name,
-                                  WebRtc_Word16 max_len,
-                                  WebRtc_UWord16* frequency_hz);
-  static WebRtc_Word16 ChooseFile(std::string* file_name,
-                                  WebRtc_Word16 max_len);
+  static int16_t ChooseFile(std::string* file_name, int16_t max_len,
+                            uint16_t* frequency_hz);
   bool Rewinded();
   void SaveStereo(bool is_stereo = true);
   void ReadStereo(bool is_stereo = true);
  private:
   FILE* pcm_file_;
-  WebRtc_UWord16 samples_10ms_;
-  WebRtc_Word32 frequency_;
+  uint16_t samples_10ms_;
+  int32_t frequency_;
   bool end_of_file_;
   bool auto_rewind_;
   bool rewinded_;
-  WebRtc_UWord32 timestamp_;
+  uint32_t timestamp_;
   bool read_stereo_;
   bool save_stereo_;
 };

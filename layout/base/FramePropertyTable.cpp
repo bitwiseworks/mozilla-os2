@@ -4,7 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "FramePropertyTable.h"
-#include "prlog.h"
+
+#include "mozilla/MemoryReporting.h"
 
 namespace mozilla {
 
@@ -38,8 +39,8 @@ FramePropertyTable::Set(nsIFrame* aFrame, const FramePropertyDescriptor* aProper
     // We need to expand the single current entry to an array
     PropertyValue current = entry->mProp;
     entry->mProp.mProperty = nullptr;
-    MOZ_STATIC_ASSERT(sizeof(nsTArray<PropertyValue>) <= sizeof(void *),
-                      "Property array must fit entirely within entry->mProp.mValue");
+    static_assert(sizeof(nsTArray<PropertyValue>) <= sizeof(void *),
+                  "Property array must fit entirely within entry->mProp.mValue");
     new (&entry->mProp.mValue) nsTArray<PropertyValue>(4);
     entry->mProp.ToArray()->AppendElement(current);
   }
@@ -228,7 +229,7 @@ FramePropertyTable::DeleteAll()
 }
 
 size_t
-FramePropertyTable::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+FramePropertyTable::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   return mEntries.SizeOfExcludingThis(SizeOfPropertyTableEntryExcludingThis,
                                       aMallocSizeOf);
@@ -236,7 +237,7 @@ FramePropertyTable::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 
 /* static */ size_t
 FramePropertyTable::SizeOfPropertyTableEntryExcludingThis(Entry* aEntry,
-                      nsMallocSizeOfFun aMallocSizeOf, void *)
+                      mozilla::MallocSizeOf aMallocSizeOf, void *)
 {
   return aEntry->mProp.SizeOfExcludingThis(aMallocSizeOf);
 }

@@ -9,40 +9,11 @@
 
 #include "nsHttp.h"
 #include "nsTArray.h"
-#include "nsIHttpChannel.h"
-#include "nsIHttpHeaderVisitor.h"
-#include "nsCOMPtr.h"
 #include "nsString.h"
 
+class nsIHttpHeaderVisitor;
+
 namespace mozilla { namespace net {
-
-// A nsCString that aborts if it fails to successfully copy its input during
-// copy construction and/or assignment. This is useful for building classes
-// that are safely copy-constructable and safely assignable using the compiler-
-// generated copy constructor and assignment operator.
-class InfallableCopyCString : public nsCString
-{
-public:
-    InfallableCopyCString() { }
-    InfallableCopyCString(const nsACString & other)
-        : nsCString(other)
-    {
-        if (Length() != other.Length())
-            NS_RUNTIMEABORT("malloc");
-    }
-
-    InfallableCopyCString & operator=(const nsACString & other)
-    {
-        nsCString::operator=(other);
-
-        if (Length() != other.Length())
-            NS_RUNTIMEABORT("malloc");
-
-        return *this;
-    }
-};
-
-} } // namespace mozilla::net
 
 class nsHttpHeaderArray
 {
@@ -93,7 +64,7 @@ public:
     struct nsEntry
     {
         nsHttpAtom header;
-        mozilla::net::InfallableCopyCString value;
+        nsCString value;
 
         struct MatchHeader {
           bool Equals(const nsEntry &entry, const nsHttpAtom &header) const {
@@ -208,5 +179,7 @@ nsHttpHeaderArray::IsSuspectDuplicateHeader(nsHttpAtom header)
 
     return retval;
 }
+
+}} // namespace mozilla::net
 
 #endif

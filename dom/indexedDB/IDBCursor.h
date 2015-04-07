@@ -8,16 +8,25 @@
 #define mozilla_dom_indexeddb_idbcursor_h__
 
 #include "mozilla/dom/indexedDB/IndexedDatabase.h"
+
+#include "mozilla/Attributes.h"
+#include "mozilla/dom/IDBCursorBinding.h"
+#include "mozilla/ErrorResult.h"
+#include "nsCycleCollectionParticipant.h"
+#include "nsWrapperCache.h"
+
 #include "mozilla/dom/indexedDB/IDBObjectStore.h"
 #include "mozilla/dom/indexedDB/Key.h"
-
-#include "nsIIDBCursorWithValue.h"
-
-#include "nsCycleCollectionParticipant.h"
 
 class nsIRunnable;
 class nsIScriptContext;
 class nsPIDOMWindow;
+
+namespace mozilla {
+namespace dom {
+class OwningIDBObjectStoreOrIDBIndex;
+}
+}
 
 BEGIN_INDEXEDDB_NAMESPACE
 
@@ -31,7 +40,8 @@ class IDBTransaction;
 class IndexedDBCursorChild;
 class IndexedDBCursorParent;
 
-class IDBCursor MOZ_FINAL : public nsIIDBCursorWithValue
+class IDBCursor MOZ_FINAL : public nsISupports,
+                            public nsWrapperCache
 {
   friend class ContinueHelper;
   friend class ContinueObjectStoreHelper;
@@ -40,14 +50,12 @@ class IDBCursor MOZ_FINAL : public nsIIDBCursorWithValue
 
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_NSIIDBCURSOR
-  NS_DECL_NSIIDBCURSORWITHVALUE
-
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(IDBCursor)
 
   enum Type
   {
     OBJECTSTORE = 0,
+    OBJECTSTOREKEY,
     INDEXKEY,
     INDEXOBJECT
   };
@@ -74,7 +82,19 @@ public:
          const nsACString& aContinueQuery,
          const nsACString& aContinueToQuery,
          const Key& aKey,
-         StructuredCloneReadInfo& aCloneReadInfo);
+         StructuredCloneReadInfo&& aCloneReadInfo);
+
+  // For OBJECTSTOREKEY cursors.
+  static
+  already_AddRefed<IDBCursor>
+  Create(IDBRequest* aRequest,
+         IDBTransaction* aTransaction,
+         IDBObjectStore* aObjectStore,
+         Direction aDirection,
+         const Key& aRangeKey,
+         const nsACString& aContinueQuery,
+         const nsACString& aContinueToQuery,
+         const Key& aKey);
 
   // For INDEXKEY cursors.
   static
@@ -101,7 +121,7 @@ public:
          const nsACString& aContinueToQuery,
          const Key& aKey,
          const Key& aObjectKey,
-         StructuredCloneReadInfo& aCloneReadInfo);
+         StructuredCloneReadInfo&& aCloneReadInfo);
 
   IDBTransaction* Transaction() const
   {
@@ -113,8 +133,8 @@ public:
     return mRequest;
   }
 
-  static nsresult ParseDirection(const nsAString& aDirection,
-                                 Direction* aResult);
+  static Direction
+  ConvertDirection(IDBCursorDirection aDirection);
 
   void
   SetActor(IndexedDBCursorChild* aActorChild)
@@ -143,9 +163,50 @@ public:
     return mActorParent;
   }
 
-  nsresult
-  ContinueInternal(const Key& aKey,
-                   int32_t aCount);
+  void
+  ContinueInternal(const Key& aKey, int32_t aCount,
+                   ErrorResult& aRv);
+
+  // nsWrapperCache
+  virtual JSObject*
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+
+  // WebIDL
+  IDBTransaction*
+  GetParentObject() const
+  {
+    return mTransaction;
+  }
+
+  void
+  GetSource(OwningIDBObjectStoreOrIDBIndex& aSource) const;
+
+  IDBCursorDirection
+  GetDirection() const;
+
+  void
+  GetKey(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
+         ErrorResult& aRv);
+
+  void
+  GetPrimaryKey(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
+                ErrorResult& aRv);
+
+  already_AddRefed<IDBRequest>
+  Update(JSContext* aCx, JS::Handle<JS::Value> aValue, ErrorResult& aRv);
+
+  void
+  Advance(uint32_t aCount, ErrorResult& aRv);
+
+  void
+  Continue(JSContext* aCx, JS::Handle<JS::Value> aKey, ErrorResult& aRv);
+
+  already_AddRefed<IDBRequest>
+  Delete(JSContext* aCx, ErrorResult& aRv);
+
+  void
+  GetValue(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
+           ErrorResult& aRv);
 
 protected:
   IDBCursor();

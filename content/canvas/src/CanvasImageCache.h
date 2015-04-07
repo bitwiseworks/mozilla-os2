@@ -6,20 +6,23 @@
 #ifndef CANVASIMAGECACHE_H_
 #define CANVASIMAGECACHE_H_
 
+#include "nsSize.h"
+
 namespace mozilla {
 namespace dom {
 class Element;
 class HTMLCanvasElement;
 } // namespace dom
+namespace gfx {
+class SourceSurface;
+} // namespace gfx
 } // namespace mozilla
 class imgIRequest;
-class gfxASurface;
-
-#include "gfxPoint.h"
 
 namespace mozilla {
 
 class CanvasImageCache {
+  typedef mozilla::gfx::SourceSurface SourceSurface;
 public:
   /**
    * Notify that image element aImage was (or is about to be) drawn to aCanvas
@@ -29,7 +32,7 @@ public:
   static void NotifyDrawImage(dom::Element* aImage,
                               dom::HTMLCanvasElement* aCanvas,
                               imgIRequest* aRequest,
-                              gfxASurface* aSurface,
+                              SourceSurface* aSource,
                               const gfxIntSize& aSize);
 
   /**
@@ -38,9 +41,9 @@ public:
    * (with the same image request) and the returned surface contains the image
    * data, and the image size will be returned in aSize.
    */
-  static gfxASurface* Lookup(dom::Element* aImage,
-                             dom::HTMLCanvasElement* aCanvas,
-                             gfxIntSize* aSize);
+  static SourceSurface* Lookup(dom::Element* aImage,
+                               dom::HTMLCanvasElement* aCanvas,
+                               gfxIntSize* aSize);
 };
 
 }

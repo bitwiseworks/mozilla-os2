@@ -54,9 +54,12 @@ function shouldLoadURI(aURI) {
 
 function resolveURIInternal(aCmdLine, aArgument) {
   var uri = aCmdLine.resolveURI(aArgument);
+  var urifixup = Components.classes["@mozilla.org/docshell/urifixup;1"]
+                           .getService(nsIURIFixup);
 
   if (!(uri instanceof nsIFileURL)) {
-    return uri;
+    return urifixup.createFixupURI(aArgument,
+                                   urifixup.FIXUP_FLAG_FIX_SCHEME_TYPOS);
   }
 
   try {
@@ -71,9 +74,6 @@ function resolveURIInternal(aCmdLine, aArgument) {
   // doesn't exist. Try URI fixup heuristics: see bug 290782.
  
   try {
-    var urifixup = Components.classes["@mozilla.org/docshell/urifixup;1"]
-                             .getService(nsIURIFixup);
-
     uri = urifixup.createFixupURI(aArgument, 0);
   }
   catch (e) {
@@ -452,8 +452,10 @@ nsBrowserContentHandler.prototype = {
     var chromeParam = cmdLine.handleFlagWithParam("chrome", false);
     if (chromeParam) {
 
-      // Handle the old preference dialog URL separately (bug 285416)
-      if (chromeParam == "chrome://browser/content/pref/pref.xul") {
+      // Handle old preference dialog URLs.
+      if (chromeParam == "chrome://browser/content/pref/pref.xul" ||
+          (Services.prefs.getBoolPref("browser.preferences.inContent") &&
+           chromeParam == "chrome://browser/content/preferences/preferences.xul")) {
         openPreferences();
         cmdLine.preventDefault = true;
       } else try {
@@ -477,11 +479,22 @@ nsBrowserContentHandler.prototype = {
     }
     if (cmdLine.handleFlag("silent", false))
       cmdLine.preventDefault = true;
-    if (cmdLine.handleFlag("private-window", false)) {
-      openWindow(null, this.chromeURL, "_blank",
-        "chrome,dialog=no,private,all" + this.getFeatures(cmdLine),
-        "about:privatebrowsing");
-      cmdLine.preventDefault = true;
+
+    try {
+      var privateWindowParam = cmdLine.handleFlagWithParam("private-window", false);
+      if (privateWindowParam) {
+        var uri = resolveURIInternal(cmdLine, privateWindowParam);
+        handURIToExistingBrowser(uri, nsIBrowserDOMWindow.OPEN_NEWTAB, cmdLine, true);
+        cmdLine.preventDefault = true;
+      }
+    } catch (e if e.result == Components.results.NS_ERROR_INVALID_ARG) {
+      // NS_ERROR_INVALID_ARG is thrown when flag exists, but has no param.
+      if (cmdLine.handleFlag("private-window", false)) {
+        openWindow(null, this.chromeURL, "_blank",
+          "chrome,dialog=no,private,all" + this.getFeatures(cmdLine),
+          "about:privatebrowsing");
+        cmdLine.preventDefault = true;
+      }
     }
 
     var searchParam = cmdLine.handleFlagWithParam("search", false);
@@ -547,7 +560,7 @@ nsBrowserContentHandler.prototype = {
     }
 
     var overridePage = "";
-    var haveUpdateSession = false;
+    var willRestoreSession = false;
     try {
       // Read the old value of homepage_override.mstone before
       // needHomepageOverride updates it, so that we can later add it to the
@@ -566,11 +579,15 @@ nsBrowserContentHandler.prototype = {
             overridePage = Services.urlFormatter.formatURLPref("startup.homepage_welcome_url");
             break;
           case OVERRIDE_NEW_MSTONE:
-            // Check whether we have a session to restore. If we do, we assume
-            // that this is an "update" session.
+            // Check whether we will restore a session. If we will, we assume
+            // that this is an "update" session. This does not take crashes
+            // into account because that requires waiting for the session file
+            // to be read. If a crash occurs after updating, before restarting,
+            // we may open the startPage in addition to restoring the session.
             var ss = Components.classes["@mozilla.org/browser/sessionstartup;1"]
                                .getService(Components.interfaces.nsISessionStartup);
-            haveUpdateSession = ss.doRestore();
+            willRestoreSession = ss.isAutomaticRestoreEnabled();
+
             overridePage = Services.urlFormatter.formatURLPref("startup.homepage_override_url");
             if (prefb.prefHasUserValue("app.update.postupdate"))
               overridePage = getPostUpdateOverridePage(overridePage);
@@ -598,7 +615,7 @@ nsBrowserContentHandler.prototype = {
       startPage = "";
 
     // Only show the startPage if we're not restoring an update session.
-    if (overridePage && startPage && !haveUpdateSession)
+    if (overridePage && startPage && !willRestoreSession)
       return overridePage + "|" + startPage;
 
     return overridePage || startPage || "about:blank";
@@ -679,19 +696,22 @@ nsBrowserContentHandler.prototype = {
 };
 var gBrowserContentHandler = new nsBrowserContentHandler();
 
-function handURIToExistingBrowser(uri, location, cmdLine)
+function handURIToExistingBrowser(uri, location, cmdLine, forcePrivate)
 {
   if (!shouldLoadURI(uri))
     return;
 
-  // Do not open external links in private windows, unless we're in perma-private mode
-  var allowPrivate = PrivateBrowsingUtils.permanentPrivateBrowsing;
+  // Unless using a private window is forced, open external links in private
+  // windows only if we're in perma-private mode.
+  var allowPrivate = forcePrivate || PrivateBrowsingUtils.permanentPrivateBrowsing;
   var navWin = RecentWindow.getMostRecentBrowserWindow({private: allowPrivate});
   if (!navWin) {
     // if we couldn't load it in an existing window, open a new one
-    openWindow(null, gBrowserContentHandler.chromeURL, "_blank",
-               "chrome,dialog=no,all" + gBrowserContentHandler.getFeatures(cmdLine),
-               uri.spec);
+    var features = "chrome,dialog=no,all" + gBrowserContentHandler.getFeatures(cmdLine);
+    if (forcePrivate) {
+      features += ",private";
+    }
+    openWindow(null, gBrowserContentHandler.chromeURL, "_blank", features, uri.spec);
     return;
   }
 

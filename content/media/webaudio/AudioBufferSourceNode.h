@@ -9,11 +9,11 @@
 
 #include "AudioNode.h"
 #include "AudioBuffer.h"
-#include "AudioParam.h"
-#include "mozilla/dom/BindingUtils.h"
 
 namespace mozilla {
 namespace dom {
+
+class AudioParam;
 
 class AudioBufferSourceNode : public AudioNode,
                               public MainThreadMediaStreamListener
@@ -40,27 +40,11 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioBufferSourceNode, AudioNode)
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   void Start(double aWhen, double aOffset,
              const Optional<double>& aDuration, ErrorResult& aRv);
-  void NoteOn(double aWhen, ErrorResult& aRv)
-  {
-    Start(aWhen, 0.0, Optional<double>(), aRv);
-  }
-  void NoteGrainOn(double aWhen, double aOffset,
-                   double aDuration, ErrorResult& aRv)
-  {
-    Optional<double> duration;
-    duration.Construct(aDuration);
-    Start(aWhen, aOffset, duration, aRv);
-  }
-  void Stop(double aWhen, ErrorResult& aRv, bool aShuttingDown = false);
-  void NoteOff(double aWhen, ErrorResult& aRv)
-  {
-    Stop(aWhen, aRv);
-  }
+  void Stop(double aWhen, ErrorResult& aRv);
 
   AudioBuffer* GetBuffer(JSContext* aCx) const
   {
@@ -109,17 +93,30 @@ public:
 
   virtual void NotifyMainThreadStateChanged() MOZ_OVERRIDE;
 
+  virtual const char* NodeType() const
+  {
+    return "AudioBufferSourceNode";
+  }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+
 private:
   friend class AudioBufferSourceNodeEngine;
-  // START, OFFSET and DURATION are always set by start() (along with setting
-  // mBuffer to something non-null).
-  // STOP is set by stop().
+  // START is sent during Start().
+  // STOP is sent during Stop().
+  // BUFFERSTART and BUFFEREND are sent when SetBuffer() and Start() have
+  // been called (along with sending the buffer).
   enum EngineParameters {
     SAMPLE_RATE,
     START,
     STOP,
-    OFFSET,
-    DURATION,
+    // BUFFERSTART is the "offset" passed to start(), multiplied by
+    // buffer.sampleRate.
+    BUFFERSTART,
+    // BUFFEREND is the sum of "offset" and "duration" passed to start(),
+    // multiplied by buffer.sampleRate, or the size of the buffer, if smaller.
+    BUFFEREND,
     LOOP,
     LOOPSTART,
     LOOPEND,
@@ -129,9 +126,7 @@ private:
 
   void SendLoopParametersToStream();
   void SendBufferParameterToStream(JSContext* aCx);
-  void SendOffsetAndDurationParametersToStream(AudioNodeStream* aStream,
-                                               double aOffset,
-                                               double aDuration);
+  void SendOffsetAndDurationParametersToStream(AudioNodeStream* aStream);
   static void SendPlaybackRateToStream(AudioNode* aNode);
 
 private:
@@ -141,7 +136,6 @@ private:
   double mDuration;
   nsRefPtr<AudioBuffer> mBuffer;
   nsRefPtr<AudioParam> mPlaybackRate;
-  SelfReference<AudioBufferSourceNode> mPlayingRef; // a reference to self while playing
   bool mLoop;
   bool mStartCalled;
   bool mStopped;

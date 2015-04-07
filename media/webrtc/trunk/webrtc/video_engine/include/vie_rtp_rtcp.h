@@ -22,7 +22,7 @@
 #ifndef WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_RTP_RTCP_H_
 #define WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_RTP_RTCP_H_
 
-#include "common_types.h"
+#include "webrtc/common_types.h"
 
 namespace webrtc {
 
@@ -91,6 +91,8 @@ class WEBRTC_DLLEXPORT ViERTCPObserver {
   virtual ~ViERTCPObserver() {}
 };
 
+struct SenderInfo;
+
 class WEBRTC_DLLEXPORT ViERTP_RTCP {
  public:
   enum { KDefaultDeltaTransmitTimeSeconds = 15 };
@@ -133,6 +135,14 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
   virtual int GetRemoteCSRCs(const int video_channel,
                              unsigned int CSRCs[kRtpCsrcSize]) const = 0;
 
+  // This sets a specific payload type for the RTX stream. Note that this
+  // doesn't enable RTX, SetLocalSSRC must still be called to enable RTX.
+  virtual int SetRtxSendPayloadType(const int video_channel,
+                                    const uint8_t payload_type) = 0;
+
+  virtual int SetRtxReceivePayloadType(const int video_channel,
+                                       const uint8_t payload_type) = 0;
+
   // This function enables manual initialization of the sequence number. The
   // start sequence number is normally a random number.
   virtual int SetStartSequenceNumber(const int video_channel,
@@ -162,6 +172,16 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
   virtual int GetRemoteRTCPCName(
       const int video_channel,
       char rtcp_cname[KMaxRTCPCNameLength]) const = 0;
+
+  virtual int GetRemoteRTCPReceiverInfo(const int video_channel,
+                                        uint32_t& NTPHigh,
+                                        uint32_t& NTPLow,
+                                        uint32_t& receivedPacketCount,
+                                        uint64_t& receivedOctetCount,
+                                        uint32_t* jitter,
+                                        uint16_t* fractionLost,
+                                        uint32_t* cumulativeLost,
+                                        int32_t* rttMs) const = 0;
 
   // This function sends an RTCP APP packet on a specific channel.
   virtual int SendApplicationDefinedRTCPPacket(
@@ -199,6 +219,16 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
                                      const unsigned char payload_typeRED,
                                      const unsigned char payload_typeFEC) = 0;
 
+  // Sets send side support for delayed video buffering (actual delay will
+  // be exhibited on the receiver side).
+  // Target delay should be set to zero for real-time mode.
+  virtual int SetSenderBufferingMode(int video_channel,
+                                     int target_delay_ms) = 0;
+  // Sets receive side support for delayed video buffering. Target delay should
+  // be set to zero for real-time mode.
+  virtual int SetReceiverBufferingMode(int video_channel,
+                                       int target_delay_ms) = 0;
+
   // This function enables RTCP key frame requests.
   virtual int SetKeyFrameRequestMethod(
     const int video_channel, const ViEKeyFrameRequestMethod method) = 0;
@@ -214,10 +244,6 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
                             bool sender,
                             bool receiver) = 0;
 
-  // Sets the bandwidth estimation mode. This can only be changed before
-  // adding a channel.
-  virtual int SetBandwidthEstimationMode(BandwidthEstimationMode mode) = 0;
-
   // Enables RTP timestamp extension offset described in RFC 5450. This call
   // must be done before ViECodec::SetSendCodec is called.
   virtual int SetSendTimestampOffsetStatus(int video_channel,
@@ -228,11 +254,21 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
                                               bool enable,
                                               int id) = 0;
 
+  // Enables RTP absolute send time header extension. This call must be done
+  // before ViECodec::SetSendCodec is called.
+  virtual int SetSendAbsoluteSendTimeStatus(int video_channel,
+                                            bool enable,
+                                            int id) = 0;
+
+  // When enabled for a channel, *all* channels on the same transport will be
+  // expected to include the absolute send time header extension.
+  virtual int SetReceiveAbsoluteSendTimeStatus(int video_channel,
+                                               bool enable,
+                                               int id) = 0;
+
   // Enables transmission smoothening, i.e. packets belonging to the same frame
   // will be sent over a longer period of time instead of sending them
   // back-to-back.
-  // NOTE: This is still experimental functionality.
-  // TODO(mflodman) Remove this note when BUG=818 is closed.
   virtual int SetTransmissionSmoothingStatus(int video_channel,
                                              bool enable) = 0;
 
@@ -262,6 +298,10 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
                                unsigned int& bytes_received,
                                unsigned int& packets_received) const = 0;
 
+  // Gets the sender info part of the last received RTCP Sender Report (SR)
+  virtual int GetRemoteRTCPSenderInfo(const int video_channel,
+                                      SenderInfo* sender_info) const = 0;
+
   // The function gets bandwidth usage statistics from the sent RTP streams in
   // bits/s.
   virtual int GetBandwidthUsage(const int video_channel,
@@ -277,21 +317,11 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
       unsigned int* estimated_bandwidth) const = 0;
 
   // This function gets the receive-side estimated bandwidth available for
-  // video, including overhead, in bits/s.
-  // Returns -1 when no valid estimate is available.
+  // video, including overhead, in bits/s. |estimated_bandwidth| is 0 if there
+  // is no valid estimate.
   virtual int GetEstimatedReceiveBandwidth(
       const int video_channel,
       unsigned int* estimated_bandwidth) const = 0;
-
-  // This function sets various options for the bandwidth estimator
-  // code.  The options are applied to new channels only.  For a given
-  // channel, the options that are active at the time when the channel
-  // is created are immutable for that channel.  See
-  // http://tools.ietf.org/html/draft-alvestrand-rtcweb-congestion-02
-  // (or later, updated documentation) and common_types.h to get a
-  // feel for what the options do.
-  virtual int SetOverUseDetectorOptions(
-      const OverUseDetectorOptions& options) const = 0;
 
   // This function enables capturing of RTP packets to a binary file on a
   // specific channel and for a given direction. The file can later be

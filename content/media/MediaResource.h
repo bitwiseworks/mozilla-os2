@@ -7,17 +7,16 @@
 #define MediaResource_h_
 
 #include "mozilla/Mutex.h"
-#include "mozilla/XPCOM.h"
-#include "mozilla/ReentrantMonitor.h"
 #include "nsIChannel.h"
-#include "nsIHttpChannel.h"
-#include "nsIPrincipal.h"
 #include "nsIURI.h"
+#include "nsIStreamingProtocolController.h"
 #include "nsIStreamListener.h"
 #include "nsIChannelEventSink.h"
 #include "nsIInterfaceRequestor.h"
 #include "MediaCache.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/TimeStamp.h"
+#include "nsThreadUtils.h"
 
 // For HTTP seeking, if number of bytes needing to be
 // seeked forward is less than this value then a read is
@@ -30,6 +29,9 @@ static const uint32_t HTTP_REQUESTED_RANGE_NOT_SATISFIABLE_CODE = 416;
 // rate can be reliably calculated. 57 Segments at IW=3 allows slow start to
 // reach a CWND of 30 (See bug 831998)
 static const int64_t RELIABLE_DATA_THRESHOLD = 57 * 1460;
+
+class nsIHttpChannel;
+class nsIPrincipal;
 
 namespace mozilla {
 
@@ -44,7 +46,7 @@ class MediaDecoder;
  * an estimate of the "current rate" of the channel, which is some
  * kind of average of the data passing through over the time the
  * channel is active.
- * 
+ *
  * All methods take "now" as a parameter so the user of this class can
  * control the timeline used.
  */
@@ -55,7 +57,10 @@ public:
   MediaChannelStatistics(MediaChannelStatistics * aCopyFrom)
   {
     MOZ_ASSERT(aCopyFrom);
-    *this = *aCopyFrom;
+    mAccumulatedBytes = aCopyFrom->mAccumulatedBytes;
+    mAccumulatedTime = aCopyFrom->mAccumulatedTime;
+    mLastStartTime = aCopyFrom->mLastStartTime;
+    mIsStarted = aCopyFrom->mIsStarted;
   }
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaChannelStatistics)
@@ -175,6 +180,7 @@ inline MediaByteRange::MediaByteRange(TimestampedMediaByteRange& aByteRange)
   NS_ASSERTION(mStart < mEnd, "Range should end after start!");
 }
 
+class RtspMediaResource;
 
 /**
  * Provides a thread-safe, seek/read interface to resources
@@ -189,7 +195,8 @@ inline MediaByteRange::MediaByteRange(TimestampedMediaByteRange& aByteRange)
  * Decoder they are called on the Decode thread for example. You must
  * ensure that no threads are calling these methods once Close is called.
  *
- * Instances of this class are explicitly managed. 'delete' it when done.
+ * Instances of this class are reference counted. Use nsRefPtr for
+ * managing the lifetime of instances of this class.
  *
  * The generic implementation of this class is ChannelMediaResource, which can
  * handle any URI for which Necko supports AsyncOpen.
@@ -197,11 +204,15 @@ inline MediaByteRange::MediaByteRange(TimestampedMediaByteRange& aByteRange)
  * access, so the FileMediaResource implementation class bypasses the cache.
  * MediaResource::Create automatically chooses the best implementation class.
  */
-class MediaResource
+class MediaResource : public nsISupports
 {
 public:
-
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaResource)
+  // Our refcounting is threadsafe, and when our refcount drops to zero
+  // we dispatch an event to the main thread to delete the MediaResource.
+  // Note that this means it's safe for references to this object to be
+  // released on a non main thread, but the destructor will always run on
+  // the main thread.
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   // The following can be called on the main thread only:
   // Get the URI
@@ -247,6 +258,12 @@ public:
   // available bytes is less than aCount. Always check *aBytes after
   // read, and call again if necessary.
   virtual nsresult Read(char* aBuffer, uint32_t aCount, uint32_t* aBytes) = 0;
+  // Read up to aCount bytes from the stream. The read starts at
+  // aOffset in the stream, seeking to that location initially if
+  // it is not the current stream offset. The remaining arguments,
+  // results and requirements are the same as per the Read method.
+  virtual nsresult ReadAt(int64_t aOffset, char* aBuffer,
+                          uint32_t aCount, uint32_t* aBytes) = 0;
   // Seek to the given bytes offset in the stream. aWhence can be
   // one of:
   //   NS_SEEK_SET
@@ -257,7 +274,7 @@ public:
   // channel's listener to close the pipe, forcing an i/o error on any
   // blocked read. This will allow the decode thread to complete the
   // event.
-  // 
+  //
   // In the case of a seek in progress, the byte range request creates
   // a new listener. This is done on the main thread via seek
   // synchronously dispatching an event. This avoids the issue of us
@@ -346,19 +363,6 @@ public:
    */
   virtual nsresult Open(nsIStreamListener** aStreamListener) = 0;
 
-#ifdef MOZ_DASH
-  /**
-   * Open the stream using a specific byte range only. Creates a stream
-   * listener and returns it in aStreamListener; this listener needs to be
-   * notified of incoming data. Byte range is specified in aByteRange.
-   */
-  virtual nsresult OpenByteRange(nsIStreamListener** aStreamListener,
-                                 MediaByteRange const &aByteRange)
-  {
-    return Open(aStreamListener);
-  }
-#endif
-
   /**
    * Fills aRanges with MediaByteRanges representing the data which is cached
    * in the media cache. Stream should be pinned during call and while
@@ -377,14 +381,57 @@ public:
   // nsIChannel when the MediaResource is created. Safe to call from
   // any thread.
   virtual const nsCString& GetContentType() const = 0;
+
+  // Get the RtspMediaResource pointer if this MediaResource really is a
+  // RtspMediaResource. For calling Rtsp specific functions.
+  virtual RtspMediaResource* GetRtspPointer() {
+    return nullptr;
+  }
+
+  // Return true if the stream is a live stream
+  virtual bool IsRealTime() {
+    return false;
+  }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const {
+    return 0;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
 protected:
   virtual ~MediaResource() {};
+
+private:
+  void Destroy();
 };
 
 class BaseMediaResource : public MediaResource {
 public:
   virtual nsIURI* URI() const { return mURI; }
   virtual void MoveLoadsToBackground();
+
+  virtual size_t SizeOfExcludingThis(
+                  MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    // Might be useful to track in the future:
+    // - mChannel
+    // - mURI (possibly owned, looks like just a ref from mChannel)
+    // Not owned:
+    // - mDecoder
+    size_t size = MediaResource::SizeOfExcludingThis(aMallocSizeOf);
+    size += mContentType.SizeOfIncludingThisIfUnshared(aMallocSizeOf);
+
+    return size;
+  }
+
+  virtual size_t SizeOfIncludingThis(
+                  MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
 
 protected:
   BaseMediaResource(MediaDecoder* aDecoder,
@@ -414,6 +461,10 @@ protected:
   // load group, the request is removed from the group, the flags are set, and
   // then the request is added back to the load group.
   void ModifyLoadFlags(nsLoadFlags aFlags);
+
+  // Dispatches an event to call MediaDecoder::NotifyBytesConsumed(aNumBytes, aOffset)
+  // on the main thread. This is called automatically after every read.
+  void DispatchBytesConsumed(int64_t aNumBytes, int64_t aOffset);
 
   // This is not an nsCOMPointer to prevent a circular reference
   // between the decoder to the media stream object. The stream never
@@ -490,10 +541,6 @@ public:
 
   // Main thread
   virtual nsresult Open(nsIStreamListener** aStreamListener);
-#ifdef MOZ_DASH
-  virtual nsresult OpenByteRange(nsIStreamListener** aStreamListener,
-                                 MediaByteRange const & aByteRange);
-#endif
   virtual nsresult Close();
   virtual void     Suspend(bool aCloseImmediately);
   virtual void     Resume();
@@ -518,6 +565,8 @@ public:
   virtual void     SetReadMode(MediaCacheStream::ReadMode aMode);
   virtual void     SetPlaybackRate(uint32_t aBytesPerSecond);
   virtual nsresult Read(char* aBuffer, uint32_t aCount, uint32_t* aBytes);
+  virtual nsresult ReadAt(int64_t offset, char* aBuffer,
+                          uint32_t aCount, uint32_t* aBytes);
   virtual nsresult Seek(int32_t aWhence, int64_t aOffset);
   virtual void     StartSeekingForMetadata();
   virtual void     EndSeekingForMetadata();
@@ -534,6 +583,24 @@ public:
   virtual bool    IsSuspendedByCache();
   virtual bool    IsSuspended();
   virtual bool    IsTransportSeekable() MOZ_OVERRIDE;
+
+  virtual size_t SizeOfExcludingThis(
+                      MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE {
+    // Might be useful to track in the future:
+    //   - mListener (seems minor)
+    //   - mChannelStatistics (seems minor)
+    //     owned if RecordStatisticsTo is not called
+    //   - mDataReceivedEvent (seems minor)
+    size_t size = BaseMediaResource::SizeOfExcludingThis(aMallocSizeOf);
+    size += mCacheStream.SizeOfExcludingThis(aMallocSizeOf);
+
+    return size;
+  }
+
+  virtual size_t SizeOfIncludingThis(
+                      MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
 
   class Listener MOZ_FINAL : public nsIStreamListener,
                              public nsIInterfaceRequestor,
@@ -632,20 +699,6 @@ protected:
 
   // Start and end offset of the bytes to be requested.
   MediaByteRange mByteRange;
-
-#ifdef MOZ_DASH
-  // True if resource was opened with a byte rage request.
-  bool mByteRangeDownloads;
-
-  // Set to false once first byte range request has been made.
-  bool mByteRangeFirstOpen;
-
-  // For byte range requests, set to the offset requested in |Seek|.
-  // Used in |CacheClientSeek| to find the originally requested byte range.
-  // Read/Write on multiple threads; use |mSeekMonitor|.
-  ReentrantMonitor mSeekOffsetMonitor;
-  int64_t mSeekOffset;
-#endif
 
   // True if the stream can seek into unbuffered ranged, i.e. if the
   // connection supports byte range requests.

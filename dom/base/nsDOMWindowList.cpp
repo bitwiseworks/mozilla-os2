@@ -14,7 +14,6 @@
 #include "nsIDOMDocument.h"
 #include "nsIDOMWindow.h"
 #include "nsIDocShell.h"
-#include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIWebNavigation.h"
@@ -39,8 +38,7 @@ NS_INTERFACE_MAP_END
 NS_IMETHODIMP
 nsDOMWindowList::SetDocShell(nsIDocShell* aDocShell)
 {
-  nsCOMPtr<nsIDocShellTreeNode> docShellAsNode(do_QueryInterface(aDocShell));
-  mDocShellNode = docShellAsNode; // Weak Reference
+  mDocShellNode = aDocShell; // Weak Reference
 
   return NS_OK;
 }
@@ -86,14 +84,9 @@ nsDOMWindowList::GetLength(uint32_t* aLength)
 already_AddRefed<nsIDOMWindow>
 nsDOMWindowList::IndexedGetter(uint32_t aIndex, bool& aFound)
 {
-  EnsureFresh();
-
   aFound = false;
-  NS_ENSURE_TRUE(mDocShellNode, nullptr);
 
-  nsCOMPtr<nsIDocShellTreeItem> item;
-  mDocShellNode->GetChildAt(aIndex, getter_AddRefs(item));
-
+  nsCOMPtr<nsIDocShellTreeItem> item = GetDocShellTreeItemAt(aIndex);
   if (!item) {
     return nullptr;
   }

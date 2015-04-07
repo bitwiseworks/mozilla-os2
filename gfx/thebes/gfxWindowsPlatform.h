@@ -43,21 +43,27 @@
 #define D3D_FL9_3_REQ_TEXTURE2D_U_OR_V_DIMENSION 4096
 #endif
 
+namespace mozilla {
+namespace layers {
+class DeviceManagerD3D9;
+}
+}
+class IDirect3DDevice9;
 class ID3D11Device;
 class IDXGIAdapter1;
 
-class nsIMemoryMultiReporter;
+class nsIMemoryReporter;
 
 // Utility to get a Windows HDC from a thebes context,
 // used by both GDI and Uniscribe font shapers
 struct DCFromContext {
     DCFromContext(gfxContext *aContext) {
-        dc = NULL;
+        dc = nullptr;
         nsRefPtr<gfxASurface> aSurface = aContext->CurrentSurface();
-        NS_ASSERTION(aSurface, "DCFromContext: null surface");
+        NS_ASSERTION(aSurface || !aContext->IsCairo(), "DCFromContext: null surface");
         if (aSurface &&
-            (aSurface->GetType() == gfxASurface::SurfaceTypeWin32 ||
-             aSurface->GetType() == gfxASurface::SurfaceTypeWin32Printing))
+            (aSurface->GetType() == gfxSurfaceType::Win32 ||
+             aSurface->GetType() == gfxSurfaceType::Win32Printing))
         {
             dc = static_cast<gfxWindowsSurface*>(aSurface.get())->GetDC();
             needsRelease = false;
@@ -67,7 +73,7 @@ struct DCFromContext {
             cairo_win32_scaled_font_select_font(scaled, dc);
         }
         if (!dc) {
-            dc = GetDC(NULL);
+            dc = GetDC(nullptr);
             SetGraphicsMode(dc, GM_ADVANCED);
             needsRelease = true;
         }
@@ -75,7 +81,7 @@ struct DCFromContext {
 
     ~DCFromContext() {
         if (needsRelease) {
-            ReleaseDC(NULL, dc);
+            ReleaseDC(nullptr, dc);
         } else {
             RestoreDC(dc, -1);
         }
@@ -119,11 +125,12 @@ public:
 
     virtual gfxPlatformFontList* CreatePlatformFontList();
 
-    already_AddRefed<gfxASurface> CreateOffscreenSurface(const gfxIntSize& size,
-                                                         gfxASurface::gfxContentType contentType);
+    virtual already_AddRefed<gfxASurface>
+      CreateOffscreenSurface(const IntSize& size,
+                             gfxContentType contentType) MOZ_OVERRIDE;
     virtual already_AddRefed<gfxASurface>
       CreateOffscreenImageSurface(const gfxIntSize& aSize,
-                                  gfxASurface::gfxContentType aContentType);
+                                  gfxContentType aContentType);
 
     virtual mozilla::TemporaryRef<mozilla::gfx::ScaledFont>
       GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont);
@@ -147,6 +154,8 @@ public:
         RENDER_MODE_MAX
     };
 
+    int GetScreenDepth() const;
+
     RenderMode GetRenderMode() { return mRenderMode; }
     void SetRenderMode(RenderMode rmode) { mRenderMode = rmode; }
 
@@ -169,16 +178,12 @@ public:
     HRESULT CreateDevice(nsRefPtr<IDXGIAdapter1> &adapter1, int featureLevelIndex);
 #endif
 
-    HDC GetScreenDC() { return mScreenDC; }
-
     /**
      * Return the resolution scaling factor to convert between "logical" or
      * "screen" pixels as used by Windows (dependent on the DPI scaling option
      * in the Display control panel) and actual device pixels.
      */
-    double GetDPIScale() {
-        return GetDeviceCaps(mScreenDC, LOGPIXELSY) / 96.0;
-    }
+    double GetDPIScale();
 
     nsresult GetFontList(nsIAtom *aLangGroup,
                          const nsACString& aGenericFamily,
@@ -232,20 +237,7 @@ public:
     bool UseClearTypeForDownloadableFonts();
     bool UseClearTypeAlways();
 
-    // OS version in 16.16 major/minor form
-    // based on http://msdn.microsoft.com/en-us/library/ms724834(VS.85).aspx
-    enum {
-        kWindowsUnknown = 0,
-        kWindowsXP = 0x50001,
-        kWindowsServer2003 = 0x50002,
-        kWindowsVista = 0x60000,
-        kWindows7 = 0x60001,
-        kWindows8 = 0x60002
-    };
-
-    static int32_t WindowsOSVersion(int32_t *aBuildNum = nullptr);
-
-    static void GetDLLVersion(const PRUnichar *aDLLPath, nsAString& aVersion);
+    static void GetDLLVersion(char16ptr_t aDLLPath, nsAString& aVersion);
 
     // returns ClearType tuning information for each display
     static void GetCleartypeParams(nsTArray<ClearTypeParameterInfo>& aParams);
@@ -265,6 +257,9 @@ public:
 #else
     inline bool DWriteEnabled() { return false; }
 #endif
+    void OnDeviceManagerDestroy(mozilla::layers::DeviceManagerD3D9* aDeviceManager);
+    mozilla::layers::DeviceManagerD3D9* GetD3D9DeviceManager();
+    IDirect3DDevice9* GetD3D9Device();
 #ifdef CAIRO_HAS_D2D_SURFACE
     cairo_device_t *GetD2DDevice() { return mD2DDevice; }
     ID3D10Device1 *GetD3D10Device() { return mD2DDevice ? cairo_d2d_device_get_device(mD2DDevice) : nullptr; }
@@ -278,7 +273,6 @@ protected:
 
     int8_t mUseClearTypeForDownloadableFonts;
     int8_t mUseClearTypeAlways;
-    HDC mScreenDC;
 
 private:
     void Init();
@@ -297,15 +291,14 @@ private:
     cairo_device_t *mD2DDevice;
 #endif
     mozilla::RefPtr<IDXGIAdapter1> mAdapter;
+    nsRefPtr<mozilla::layers::DeviceManagerD3D9> mDeviceManager;
     mozilla::RefPtr<ID3D11Device> mD3D11Device;
     bool mD3D11DeviceInitialized;
 
-    virtual qcms_profile* GetPlatformCMSOutputProfile();
+    virtual void GetPlatformCMSOutputProfile(void* &mem, size_t &size);
 
     // TODO: unify this with mPrefFonts (NB: holds families, not fonts) in gfxPlatformFontList
     nsDataHashtable<nsCStringHashKey, nsTArray<nsRefPtr<gfxFontEntry> > > mPrefFonts;
-
-    nsIMemoryMultiReporter* mGPUAdapterMultiReporter;
 };
 
 #endif /* GFX_WINDOWS_PLATFORM_H */

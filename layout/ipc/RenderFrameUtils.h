@@ -8,6 +8,8 @@
 #ifndef mozilla_layer_RenderFrameUtils_h
 #define mozilla_layer_RenderFrameUtils_h
 
+#include "ipc/IPCMessageUtils.h"
+
 namespace mozilla {
 namespace layout {
 
@@ -33,9 +35,10 @@ namespace IPC {
 
 template <>
 struct ParamTraits<mozilla::layout::ScrollingBehavior>
-  : public EnumSerializer<mozilla::layout::ScrollingBehavior,
-                          mozilla::layout::DEFAULT_SCROLLING,
-                          mozilla::layout::SCROLLING_BEHAVIOR_SENTINEL>
+  : public ContiguousEnumSerializer<
+             mozilla::layout::ScrollingBehavior,
+             mozilla::layout::DEFAULT_SCROLLING,
+             mozilla::layout::SCROLLING_BEHAVIOR_SENTINEL>
 {};
 
 } // namespace IPC

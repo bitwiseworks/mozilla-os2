@@ -39,6 +39,8 @@ static char *RCSSTRING __UNUSED__="$Id: ice_peer_ctx.c,v 1.2 2008/04/28 17:59:01
 #include <nr_api.h>
 #include "ice_ctx.h"
 #include "ice_peer_ctx.h"
+#include "ice_media_stream.h"
+#include "ice_util.h"
 #include "nr_crypto.h"
 #include "async_timer.h"
 
@@ -53,6 +55,8 @@ int nr_ice_peer_ctx_create(nr_ice_ctx *ctx, nr_ice_handler *handler,char *label,
 
     if(!(pctx=RCALLOC(sizeof(nr_ice_peer_ctx))))
       ABORT(R_NO_MEMORY);
+
+    pctx->state = NR_ICE_PEER_STATE_UNPAIRED;
 
     if(!(pctx->label=r_strdup(label)))
       ABORT(R_NO_MEMORY);
@@ -98,6 +102,8 @@ int nr_ice_peer_ctx_parse_stream_attributes(nr_ice_peer_ctx *pctx, nr_ice_media_
   {
     nr_ice_media_stream *pstream=0;
     nr_ice_component *comp,*comp2;
+    char *lufrag,*rufrag;
+    char *lpwd,*rpwd;
     int r,_status;
 
     /*
@@ -122,6 +128,25 @@ int nr_ice_peer_ctx_parse_stream_attributes(nr_ice_peer_ctx *pctx, nr_ice_media_
     if (r=nr_ice_peer_ctx_parse_stream_attributes_int(pctx,stream,pstream,attrs,attr_ct))
       ABORT(r);
 
+    /* Now that we have the ufrag and password, compute all the username/password
+       pairs */
+    lufrag=stream->ufrag?stream->ufrag:pctx->ctx->ufrag;
+    lpwd=stream->pwd?stream->pwd:pctx->ctx->pwd;
+    assert(lufrag);
+    assert(lpwd);
+    rufrag=pstream->ufrag?pstream->ufrag:pctx->peer_ufrag;
+    rpwd=pstream->pwd?pstream->pwd:pctx->peer_pwd;
+    if (!rufrag || !rpwd)
+      ABORT(R_BAD_DATA);
+
+    if(r=nr_concat_strings(&pstream->r2l_user,lufrag,":",rufrag,NULL))
+      ABORT(r);
+    if(r=nr_concat_strings(&pstream->l2r_user,rufrag,":",lufrag,NULL))
+      ABORT(r);
+    if(r=r_data_make(&pstream->r2l_pass, (UCHAR *)lpwd, strlen(lpwd)))
+      ABORT(r);
+    if(r=r_data_make(&pstream->l2r_pass, (UCHAR *)rpwd, strlen(rpwd)))
+      ABORT(r);
 
     STAILQ_INSERT_TAIL(&pctx->peer_streams,pstream,entry);
 
@@ -138,18 +163,18 @@ static int nr_ice_peer_ctx_parse_stream_attributes_int(nr_ice_peer_ctx *pctx, nr
     for(i=0;i<attr_ct;i++){
       if(!strncmp(attrs[i],"ice-",4)){
         if(r=nr_ice_peer_ctx_parse_media_stream_attribute(pctx,pstream,attrs[i])) {
-          r_log(LOG_ICE,LOG_ERR,"ICE(%s): peer (%s) specified bogus ICE attribute",pctx->ctx->label,pctx->label);
+          r_log(LOG_ICE,LOG_WARNING,"ICE(%s): peer (%s) specified bogus ICE attribute",pctx->ctx->label,pctx->label);
           continue;
         }
       }
       else if (!strncmp(attrs[i],"candidate",9)){
         if(r=nr_ice_ctx_parse_candidate(pctx,pstream,attrs[i])) {
-          r_log(LOG_ICE,LOG_ERR,"ICE(%s): peer (%s) specified bogus candidate",pctx->ctx->label,pctx->label);
+          r_log(LOG_ICE,LOG_WARNING,"ICE(%s): peer (%s) specified bogus candidate",pctx->ctx->label,pctx->label);
           continue;
         }
       }
       else {
-        r_log(LOG_ICE,LOG_ERR,"ICE(%s): peer (%s) specified bogus attribute",pctx->ctx->label,pctx->label);
+        r_log(LOG_ICE,LOG_WARNING,"ICE(%s): peer (%s) specified bogus attribute",pctx->ctx->label,pctx->label);
       }
     }
 
@@ -181,7 +206,16 @@ static int nr_ice_ctx_parse_candidate(nr_ice_peer_ctx *pctx, nr_ice_media_stream
     }
 
     if(!comp){
-      r_log(LOG_ICE,LOG_ERR,"Peer answered with more components than we offered");
+      r_log(LOG_ICE,LOG_WARNING,"Peer answered with more components than we offered");
+      ABORT(R_BAD_DATA);
+    }
+
+    if (comp->state == NR_ICE_COMPONENT_DISABLED) {
+      r_log(LOG_ICE,LOG_WARNING,"Peer offered candidates for disabled remote component");
+      ABORT(R_BAD_DATA);
+    }
+    if (comp->local_component->state == NR_ICE_COMPONENT_DISABLED) {
+      r_log(LOG_ICE,LOG_WARNING,"Peer offered candidates for disabled local component");
       ABORT(R_BAD_DATA);
     }
 
@@ -197,27 +231,42 @@ static int nr_ice_ctx_parse_candidate(nr_ice_peer_ctx *pctx, nr_ice_media_stream
     return(_status);
   }
 
+int nr_ice_peer_ctx_find_pstream(nr_ice_peer_ctx *pctx, nr_ice_media_stream *stream, nr_ice_media_stream **pstreamp)
+  {
+    int _status;
+    nr_ice_media_stream *pstream;
 
+    /* Because we don't have forward pointers, iterate through all the
+       peer streams to find one that matches us */
+     pstream=STAILQ_FIRST(&pctx->peer_streams);
+     while(pstream) {
+       if (pstream->local_stream == stream)
+         break;
+
+       pstream = STAILQ_NEXT(pstream, entry);
+     }
+     if (!pstream) {
+       r_log(LOG_ICE,LOG_WARNING,"ICE(%s): peer (%s) has no stream matching stream %s",pctx->ctx->label,pctx->label,stream->label);
+       ABORT(R_NOT_FOUND);
+     }
+
+    *pstreamp = pstream;
+
+    _status=0;
+ abort:
+    return(_status);
+  }
 
 int nr_ice_peer_ctx_parse_trickle_candidate(nr_ice_peer_ctx *pctx, nr_ice_media_stream *stream, char *candidate)
   {
-    /* First need to find the stream. Because we don't have forward pointers,
-       iterate through all the peer streams to find one that matches us */
     nr_ice_media_stream *pstream;
     int r,_status;
     int needs_pairing = 0;
 
-    pstream=STAILQ_FIRST(&pctx->peer_streams);
-    while(pstream) {
-      if (pstream->local_stream == stream)
-        break;
-
-      pstream = STAILQ_NEXT(pstream, entry);
-    }
-    if (!pstream) {
-      r_log(LOG_ICE,LOG_ERR,"ICE(%s): peer (%s) has no stream matching stream %s",pctx->ctx->label,pctx->label,stream->label);
-      ABORT(R_NOT_FOUND);
-    }
+    r_log(LOG_ICE,LOG_DEBUG,"ICE(%s): peer (%s) parsing trickle ICE candidate %s",pctx->ctx->label,pctx->label,candidate);
+    r = nr_ice_peer_ctx_find_pstream(pctx, stream, &pstream);
+    if (r)
+      ABORT(r);
 
     switch(pstream->ice_state) {
       case NR_ICE_MEDIA_STREAM_UNPAIRED:
@@ -279,10 +328,17 @@ int nr_ice_peer_ctx_pair_candidates(nr_ice_peer_ctx *pctx)
     nr_ice_media_stream *stream;
     int r,_status;
 
+
+    r_log(LOG_ICE,LOG_DEBUG,"ICE(%s): peer (%s) pairing candidates",pctx->ctx->label,pctx->label);
+
     if(STAILQ_EMPTY(&pctx->peer_streams)) {
-        r_log(LOG_ICE,LOG_ERR,"ICE(%s): peer (%s) received no media stream attribributes",pctx->ctx->label,pctx->label);
+        r_log(LOG_ICE,LOG_ERR,"ICE(%s): peer (%s) received no media stream attributes",pctx->ctx->label,pctx->label);
         ABORT(R_FAILED);
     }
+
+    /* Set this first; if we fail partway through, we do not want to end
+     * up in UNPAIRED after creating some pairs. */
+    pctx->state = NR_ICE_PEER_STATE_PAIRED;
 
     stream=STAILQ_FIRST(&pctx->peer_streams);
     while(stream){
@@ -293,8 +349,51 @@ int nr_ice_peer_ctx_pair_candidates(nr_ice_peer_ctx *pctx)
       stream=STAILQ_NEXT(stream,entry);
     }
 
+
     _status=0;
   abort:
+    return(_status);
+  }
+
+
+int nr_ice_peer_ctx_pair_new_trickle_candidate(nr_ice_ctx *ctx, nr_ice_peer_ctx *pctx, nr_ice_candidate *cand)
+  {
+    int r, _status;
+    nr_ice_media_stream *pstream;
+
+    r_log(LOG_ICE,LOG_ERR,"ICE(%s): peer (%s) pairing local trickle ICE candidate %s",pctx->ctx->label,pctx->label,cand->label);
+    if ((r = nr_ice_peer_ctx_find_pstream(pctx, cand->stream, &pstream)))
+      ABORT(r);
+
+    if ((r = nr_ice_media_stream_pair_new_trickle_candidate(pctx, pstream, cand)))
+      ABORT(r);
+
+    _status=0;
+ abort:
+    return _status;
+  }
+
+int nr_ice_peer_ctx_disable_component(nr_ice_peer_ctx *pctx, nr_ice_media_stream *lstream, int component_id)
+  {
+    int r, _status;
+    nr_ice_media_stream *pstream;
+    nr_ice_component *component;
+
+    if ((r=nr_ice_peer_ctx_find_pstream(pctx, lstream, &pstream)))
+      ABORT(r);
+
+    /* We shouldn't be calling this after we have started pairing */
+    if (pstream->ice_state != NR_ICE_MEDIA_STREAM_UNPAIRED)
+      ABORT(R_FAILED);
+
+    if ((r=nr_ice_media_stream_find_component(pstream, component_id,
+                                              &component)))
+      ABORT(r);
+
+    component->state = NR_ICE_COMPONENT_DISABLED;
+
+    _status=0;
+ abort:
     return(_status);
   }
 
@@ -356,6 +455,7 @@ int nr_ice_peer_ctx_start_checks2(nr_ice_peer_ctx *pctx, int allow_non_first)
   {
     int r,_status;
     nr_ice_media_stream *stream;
+    int started = 0;
 
     stream=STAILQ_FIRST(&pctx->peer_streams);
     if(!stream)
@@ -366,6 +466,16 @@ int nr_ice_peer_ctx_start_checks2(nr_ice_peer_ctx *pctx, int allow_non_first)
         break;
 
       if(!allow_non_first){
+        /* This test applies if:
+
+           1. allow_non_first is 0 (i.e., non-trickle ICE)
+           2. the first stream has an empty check list.
+
+           But in the non-trickle ICE case, the other side should have provided
+           some candidates or ICE is pretty much not going to work and we're
+           just going to fail. Hence R_FAILED as opposed to R_NOT_FOUND and
+           immediate termination here.
+        */
         r_log(LOG_ICE,LOG_ERR,"ICE(%s): peer (%s) first stream has empty check list",pctx->ctx->label,pctx->label);
         ABORT(R_FAILED);
       }
@@ -374,15 +484,40 @@ int nr_ice_peer_ctx_start_checks2(nr_ice_peer_ctx *pctx, int allow_non_first)
     }
 
     if (!stream) {
-      r_log(LOG_ICE,LOG_ERR,"ICE(%s): peer (%s) no streams with non-empty check lists",pctx->ctx->label,pctx->label);
-      ABORT(R_NOT_FOUND);
+      /*
+         We fail above if we aren't doing trickle, and this is not all that
+         unusual in the trickle case.
+       */
+      r_log(LOG_ICE,LOG_NOTICE,"ICE(%s): peer (%s) no streams with non-empty check lists",pctx->ctx->label,pctx->label);
     }
-
-    if (stream->ice_state == NR_ICE_MEDIA_STREAM_CHECKS_FROZEN) {
+    else if (stream->ice_state == NR_ICE_MEDIA_STREAM_CHECKS_FROZEN) {
       if(r=nr_ice_media_stream_unfreeze_pairs(pctx,stream))
         ABORT(r);
       if(r=nr_ice_media_stream_start_checks(pctx,stream))
         ABORT(r);
+      ++started;
+    }
+
+    stream=STAILQ_FIRST(&pctx->peer_streams);
+    while (stream) {
+      int serviced = 0;
+      if (r=nr_ice_media_stream_service_pre_answer_requests(pctx, stream->local_stream, stream, &serviced))
+        ABORT(r);
+
+      if (serviced) {
+        ++started;
+      }
+      else {
+        r_log(LOG_ICE,LOG_NOTICE,"ICE(%s): peer (%s) no streams with pre-answer requests",pctx->ctx->label,pctx->label);
+      }
+
+
+      stream=STAILQ_NEXT(stream, entry);
+    }
+
+    if (!started) {
+      r_log(LOG_ICE,LOG_NOTICE,"ICE(%s): peer (%s) no checks to start",pctx->ctx->label,pctx->label);
+      ABORT(R_NOT_FOUND);
     }
 
     _status=0;
@@ -424,7 +559,6 @@ static void nr_ice_peer_ctx_fire_done(NR_SOCKET s, int how, void *cb_arg)
       pctx->handler->vtbl->ice_completed(pctx->handler->obj, pctx);
     }
   }
-
 
 /* OK, a stream just went ready. Examine all the streams to see if we're
    maybe miraculously done */

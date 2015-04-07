@@ -3,6 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef nsReadConfig_h
+#define nsReadConfig_h
+
 #include "nsCOMPtr.h"
 #include "nsIReadConfig.h"
 #include "nsIAutoConfig.h"
@@ -15,7 +18,7 @@ class nsReadConfig : public nsIReadConfig,
 
     public:
 
-        NS_DECL_ISUPPORTS
+        NS_DECL_THREADSAFE_ISUPPORTS
         NS_DECL_NSIREADCONFIG
         NS_DECL_NSIOBSERVER
 
@@ -33,3 +36,5 @@ class nsReadConfig : public nsIReadConfig,
 private:
         nsCOMPtr<nsIAutoConfig> mAutoConfig;
 };
+
+#endif

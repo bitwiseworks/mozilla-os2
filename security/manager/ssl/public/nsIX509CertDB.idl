@@ -13,15 +13,18 @@ interface nsIFile;
 interface nsIInterfaceRequestor;
 interface nsIZipReader;
 interface nsIRecentBadCerts;
+interface nsIX509CertList;
 
 %{C++
 #define NS_X509CERTDB_CONTRACTID "@mozilla.org/security/x509certdb;1"
 %}
 
-[scriptable, function, uuid(48411e2d-85a9-4b16-bec8-e30cde801f9e)]
-interface nsIOpenSignedJARFileCallback : nsISupports
+typedef uint32_t AppTrustedRoot;
+
+[scriptable, function, uuid(0927baea-622d-4e41-a76d-255af426e7fb)]
+interface nsIOpenSignedAppFileCallback : nsISupports
 {
-  void openSignedJARFileFinished(in nsresult rv,
+  void openSignedAppFileFinished(in nsresult rv,
                                  in nsIZipReader aZipReader,
                                  in nsIX509Cert3 aSignerCert);
 };
@@ -30,7 +33,7 @@ interface nsIOpenSignedJARFileCallback : nsISupports
  * This represents a service to access and manipulate 
  * X.509 certificates stored in a database.
  */
-[scriptable, uuid(ab0a1c52-f7fd-4fe7-9e65-7d3705a8580e)]
+[scriptable, uuid(7446a5b1-84ca-491f-a2fe-0bc60a71ffa5)]
 interface nsIX509CertDB : nsISupports {
 
   /**
@@ -195,6 +198,14 @@ interface nsIX509CertDB : nsISupports {
                     in unsigned long trust);
 
   /**
+   * @param cert        The certificate for which to modify trust.
+   * @param trustString decoded by CERT_DecodeTrustString. 3 comma separated
+   *                    characters, indicating SSL, Email, and Obj signing
+   *                    trust.
+   */
+  void setCertTrustFromString(in nsIX509Cert3 cert, in string trustString);
+
+  /**
    *  Query whether a certificate is trusted for a particular use.
    *
    *  @param cert Obtain the stored trust of this certificate.
@@ -261,6 +272,16 @@ interface nsIX509CertDB : nsISupports {
   nsIX509Cert constructX509FromBase64(in string base64);
 
   /*
+   *  Decode a raw data presentation and instantiate an object in memory.
+   *
+   *  @param certDER The raw representation of a certificate,
+   *                 encoded as raw DER.
+   *  @param length  The length of the DER string.
+   *  @return The new certificate object.
+   */
+  nsIX509Cert constructX509(in string certDER, in unsigned long length);
+
+  /*
    *  Obtain a reference to the appropriate service for recent
    *  bad certificates. May only be called on the main thread.
    *
@@ -286,8 +307,14 @@ interface nsIX509CertDB : nsISupports {
    *  as input, to encourage users of the API to verify the signature as the
    *  first step in opening the JAR.
    */
-  void openSignedJARFileAsync(in nsIFile aJarFile,
-                              in nsIOpenSignedJARFileCallback callback);
+  const AppTrustedRoot AppMarketplaceProdPublicRoot = 1;
+  const AppTrustedRoot AppMarketplaceProdReviewersRoot = 2;
+  const AppTrustedRoot AppMarketplaceDevPublicRoot = 3;
+  const AppTrustedRoot AppMarketplaceDevReviewersRoot = 4;
+  const AppTrustedRoot AppXPCShellRoot = 5;
+  void openSignedAppFileAsync(in AppTrustedRoot trustedRoot,
+                              in nsIFile aJarFile,
+                              in nsIOpenSignedAppFileCallback callback);
 
   /* 
    * Add a cert to a cert DB from a binary string.
@@ -298,4 +325,40 @@ interface nsIX509CertDB : nsISupports {
    * @param aName name of the cert for display purposes.
    */
   void addCert(in ACString certDER, in string aTrust, in string aName);
+
+  // Flags for verifyCertNow (these must match the values in CertVerifier.cpp):
+  // Prevent network traffic. Doesn't work with classic verification.
+  const uint32_t FLAG_LOCAL_ONLY = 1 << 0;
+  // Do not fall back to DV verification after attempting EV validation.
+  // Actually does prevent network traffic, but can cause a valid EV
+  // certificate to not be considered valid.
+  const uint32_t FLAG_MUST_BE_EV = 1 << 1;
+
+  /** Warning: This interface is inteded to use only for testing only as:
+   *    1. It can create IO on the main thread.
+   *    2. It is in constant change, so in/out can change at any release.
+   *
+   *  Obtain the verification result for a cert given a particular usage.
+   *  On success, the call returns 0, the chain built during verification,
+   *  and whether the cert is good for EV usage.
+   *  On failure, the call returns the PRErrorCode for the verification failure
+   *
+   *  @param aCert Obtain the stored trust of this certificate
+   *  @param aUsage a integer representing the usage from NSS
+   *  @param aFlags flags as described above
+   *  @param verifedChain chain of verification up to the root if success
+   *  @param aHasEVPolicy bool that signified that the cert was an EV cert
+   *  @return 0 if success or the value or the error code for the verification
+   *          failure
+   */
+  int32_t /*PRErrorCode*/
+    verifyCertNow(in nsIX509Cert aCert,
+                  in int64_t /*SECCertificateUsage*/ aUsage,
+                  in uint32_t aFlags,
+                  out nsIX509CertList verifiedChain,
+                  out bool aHasEVPolicy);
+
+  // Clears the OCSP cache for the current certificate verification
+  // implementation.
+  void clearOCSPCache();
 };

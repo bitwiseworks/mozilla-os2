@@ -9,12 +9,12 @@
 interface nsIInterfaceRequestor;
 
 %{C++
-#include "nsTArray.h"
+template<class T> class nsTArray;
 class nsCString;
 %}
 [ref] native nsCStringTArrayRef(nsTArray<nsCString>);
 
-[scriptable, uuid(bb2bb490-3ba4-4254-b8f5-8b43c7b714ea)]
+[scriptable, builtinclass, uuid(4080f700-9c16-4884-8f8d-e28094377084)]
 interface nsISSLSocketControl : nsISupports {
     attribute nsIInterfaceRequestor     notificationCallbacks;
 
@@ -52,9 +52,31 @@ interface nsISSLSocketControl : nsISupports {
       in ACString hostname,
       in long port);
 
+    /* The Key Exchange Algorithm is used when determining whether or
+       not to do false start.
+       After a handshake is complete it can be read from KEAUsed,
+       before a handshake is started it may be set through KEAExpected.
+       The values correspond to the SSLKEAType enum in NSS or the
+       KEY_EXCHANGE_UNKNOWN constant defined below.
+    */
+
+    [infallible] readonly attribute short KEAUsed;
+    [infallible] attribute short KEAExpected;
+
+    const short KEY_EXCHANGE_UNKNOWN = -1;
+
     /*
      * The original flags from the socket provider.
      */
     readonly attribute uint32_t providerFlags;
+
+    /* These values are defined by TLS. */
+    const short SSL_VERSION_3   = 0x0300;
+    const short TLS_VERSION_1   = 0x0301;
+    const short TLS_VERSION_1_1 = 0x0302;
+    const short TLS_VERSION_1_2 = 0x0303;
+    const short SSL_VERSION_UNKNOWN = -1;
+
+    [infallible] readonly attribute short SSLVersionUsed;
 };
 

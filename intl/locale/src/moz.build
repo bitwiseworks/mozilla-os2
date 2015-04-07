@@ -6,20 +6,18 @@
 
 toolkit = CONFIG['MOZ_WIDGET_TOOLKIT']
 
-if toolkit in ('os2', 'windows'):
-    DIRS += [toolkit]
+if toolkit == 'windows':
+    DIRS += ['windows']
 elif toolkit == 'cocoa':
     DIRS += ['mac']
 else:
     DIRS += ['unix']
 
-MODULE = 'locale'
-
 EXPORTS += [
     'nsCollation.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsCharsetAlias.cpp',
     'nsCollation.cpp',
     'nsLanguageAtomService.cpp',
@@ -29,5 +27,23 @@ CPP_SOURCES += [
     'nsUConvPropertySearch.cpp',
 ]
 
-LIBRARY_NAME = 'nslocale_s'
+EXTRA_JS_MODULES += [
+    'PluralForm.jsm',
+]
 
+MSVC_ENABLE_PGO = True
+
+FINAL_LIBRARY = 'i18n'
+
+GENERATED_FILES = [
+    'charsetalias.properties.h',
+]
+
+LOCAL_INCLUDES += [
+    '/intl/uconv/src',
+]
+
+RESOURCE_FILES += [
+    'langGroups.properties',
+    'language.properties',
+]

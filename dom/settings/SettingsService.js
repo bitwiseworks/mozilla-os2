@@ -38,6 +38,30 @@ function SettingsServiceLock(aSettingsService)
 
 SettingsServiceLock.prototype = {
 
+  callHandle: function callHandle(aCallback, aName, aValue) {
+    try {
+      aCallback ? aCallback.handle(aName, aValue) : null;
+    } catch (e) {
+      dump("settings 'handle' callback threw an exception, dropping: " + e + "\n");
+    }
+  },
+
+  callAbort: function callAbort(aCallback, aMessage) {
+    try {
+      aCallback ? aCallback.handleAbort(aMessage) : null;
+    } catch (e) {
+      dump("settings 'abort' callback threw an exception, dropping: " + e + "\n");
+    }
+  },
+
+  callError: function callError(aCallback, aMessage) {
+    try {
+      aCallback ? aCallback.handleError(aMessage) : null;
+    } catch (e) {
+      dump("settings 'error' callback threw an exception, dropping: " + e + "\n");
+    }
+  },
+
   process: function process() {
     debug("process!");
     let lock = this;
@@ -75,8 +99,7 @@ SettingsServiceLock.prototype = {
             setReq.onsuccess = function() {
               lock._isBusy = false;
               lock._open = true;
-              if (callback)
-                callback.handle(name, value);
+              lock.callHandle(callback, name, value);
               Services.obs.notifyObservers(lock, "mozsettings-changed", JSON.stringify({
                 key: name,
                 value: value,
@@ -88,14 +111,14 @@ SettingsServiceLock.prototype = {
 
             setReq.onerror = function(event) {
               lock._isBusy = false;
-              callback ? callback.handleError(event.target.errorMessage) : null;
+              lock.callError(callback, event.target.errorMessage);
               lock.process();
             };
           }
 
           checkKeyRequest.onerror = function(event) {
             lock._isBusy = false;
-            callback ? callback.handleError(event.target.errorMessage) : null;
+            lock.callError(callback, event.target.errorMessage);
             lock.process();
           };
           break;
@@ -116,28 +139,40 @@ SettingsServiceLock.prototype = {
                 let value = result.userValue !== undefined
                             ? result.userValue
                             : result.defaultValue;
-                callback.handle(name, value);
+                lock.callHandle(callback, name, value);
               } else {
-                callback.handle(name, null);
+                lock.callHandle(callback, name, null);
               }
             } else {
               if (DEBUG) debug("no callback defined!");
             }
             this._open = false;
           }.bind(lock);
-          getReq.onerror = function error(event) { callback ? callback.handleError(event.target.errorMessage) : null; };
+          getReq.onerror = function error(event) {
+            lock.callError(callback, event.target.errorMessage);
+          };
           break;
       }
     }
     lock._open = true;
   },
 
-  createTransactionAndProcess: function() {
+  createTransactionAndProcess: function(aCallback) {
     if (this._settingsService._settingsDB._db) {
       let lock;
       while (lock = this._settingsService._locks.dequeue()) {
         if (!lock._transaction) {
           lock._transaction = lock._settingsService._settingsDB._db.transaction(SETTINGSSTORE_NAME, "readwrite");
+          if (aCallback) {
+            lock._transaction.oncomplete = aCallback.handle;
+            lock._transaction.onabort = function(event) {
+              let message = '';
+              if (event.target.error) {
+                message = event.target.error.name + ': ' + event.target.error.message;
+              }
+              this.callAbort(aCallback, message);
+            };
+          }
         }
         if (!lock._isBusy) {
           lock.process();
@@ -165,35 +200,23 @@ SettingsServiceLock.prototype = {
     this._requests.enqueue({ callback: aCallback,
                              intent: "set", 
                              name: aName, 
-                             value: aValue, 
+                             value: this._settingsService._settingsDB.prepareValue(aValue),
                              message: aMessage });
     this.createTransactionAndProcess();
   },
 
   classID : SETTINGSSERVICELOCK_CID,
-  QueryInterface : XPCOMUtils.generateQI([nsISettingsServiceLock]),
-
-  classInfo : XPCOMUtils.generateCI({ classID: SETTINGSSERVICELOCK_CID,
-                                      contractID: SETTINGSSERVICELOCK_CONTRACTID,
-                                      classDescription: "SettingsServiceLock",
-                                      interfaces: [nsISettingsServiceLock],
-                                      flags: nsIClassInfo.DOM_OBJECT })
+  QueryInterface : XPCOMUtils.generateQI([nsISettingsServiceLock])
 };
 
 const SETTINGSSERVICE_CID        = Components.ID("{f656f0c0-f776-11e1-a21f-0800200c9a66}");
-
-let myGlobal = this;
 
 function SettingsService()
 {
   debug("settingsService Constructor");
   this._locks = new Queue();
-  if (!("indexedDB" in myGlobal)) {
-    let idbManager = Components.classes["@mozilla.org/dom/indexeddb/manager;1"].getService(Ci.nsIIndexedDatabaseManager);
-    idbManager.initWindowless(myGlobal);
-  }
   this._settingsDB = new SettingsDB();
-  this._settingsDB.init(myGlobal);
+  this._settingsDB.init();
 }
 
 SettingsService.prototype = {
@@ -205,25 +228,19 @@ SettingsService.prototype = {
     Services.tm.currentThread.dispatch(aCallback, Ci.nsIThread.DISPATCH_NORMAL);
   },
 
-  createLock: function createLock() {
+  createLock: function createLock(aCallback) {
     var lock = new SettingsServiceLock(this);
     this._locks.enqueue(lock);
     this._settingsDB.ensureDB(
-      function() { lock.createTransactionAndProcess(); },
-      function() { dump("SettingsService failed to open DB!\n"); },
-      myGlobal );
+      function() { lock.createTransactionAndProcess(aCallback); },
+      function() { dump("SettingsService failed to open DB!\n"); }
+    );
     this.nextTick(function() { this._open = false; }, lock);
     return lock;
   },
 
   classID : SETTINGSSERVICE_CID,
-  QueryInterface : XPCOMUtils.generateQI([Ci.nsISettingsService]),
-  classInfo: XPCOMUtils.generateCI({
-    classID: SETTINGSSERVICE_CID,
-    contractID: "@mozilla.org/settingsService;1",
-    interfaces: [Ci.nsISettingsService],
-    flags: nsIClassInfo.DOM_OBJECT
-  })
+  QueryInterface : XPCOMUtils.generateQI([Ci.nsISettingsService])
 }
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SettingsService, SettingsServiceLock])

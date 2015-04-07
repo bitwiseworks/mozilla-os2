@@ -4,10 +4,23 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'accessibility'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'sdnAccessible.cpp',
+    'sdnDocAccessible.cpp',
     'sdnTextAccessible.cpp',
 ]
 
+LOCAL_INCLUDES += [
+    '../../base',
+    '../../generic',
+    '../../html',
+    '../../xpcom',
+    '../../xul',
+    '../msaa',
+]
+
+# The midl generated code include Windows headers which defines min and max
+# macros which conflicts with std::min/max.  Suppress the macros:
+DEFINES['NOMINMAX'] = True
+
+FINAL_LIBRARY = 'xul'

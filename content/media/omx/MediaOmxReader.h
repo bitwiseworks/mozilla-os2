@@ -8,10 +8,14 @@
 
 #include "MediaResource.h"
 #include "MediaDecoderReader.h"
+#include "nsRect.h"
+#include "mozilla/dom/AudioChannelBinding.h"
 #include <ui/GraphicBuffer.h>
+#include <stagefright/MediaSource.h>
 
 namespace android {
 class OmxDecoder;
+class MediaExtractor;
 }
 
 namespace mozilla {
@@ -25,7 +29,6 @@ class AbstractMediaDecoder;
 class MediaOmxReader : public MediaDecoderReader
 {
   nsCString mType;
-  android::sp<android::OmxDecoder> mOmxDecoder;
   bool mHasVideo;
   bool mHasAudio;
   nsIntRect mPicture;
@@ -33,12 +36,26 @@ class MediaOmxReader : public MediaDecoderReader
   int64_t mVideoSeekTimeUs;
   int64_t mAudioSeekTimeUs;
   int32_t mSkipCount;
+  dom::AudioChannel mAudioChannel;
+  android::sp<android::MediaSource> mAudioOffloadTrack;
+
+protected:
+  android::sp<android::OmxDecoder> mOmxDecoder;
+  android::sp<android::MediaExtractor> mExtractor;
+
+  // Called by ReadMetadata() during MediaDecoderStateMachine::DecodeMetadata()
+  // on decode thread. It create and initialize the OMX decoder including
+  // setting up custom extractor. The extractor provide the essential
+  // information used for creating OMX decoder such as video/audio codec.
+  virtual nsresult InitOmxDecoder();
+
 public:
   MediaOmxReader(AbstractMediaDecoder* aDecoder);
   ~MediaOmxReader();
 
   virtual nsresult Init(MediaDecoderReader* aCloneDonor);
-  virtual nsresult ResetDecode();
+
+  virtual void NotifyDataArrived(const char* aBuffer, uint32_t aLength, int64_t aOffset);
 
   virtual bool DecodeAudioData();
   virtual bool DecodeVideoFrame(bool &aKeyframeSkip,
@@ -59,14 +76,35 @@ public:
   virtual bool IsDormantNeeded();
   virtual void ReleaseMediaResources();
 
-  virtual nsresult ReadMetadata(VideoInfo* aInfo,
+  virtual void ReleaseDecoder() MOZ_OVERRIDE;
+
+  virtual nsresult ReadMetadata(MediaInfo* aInfo,
                                 MetadataTags** aTags);
   virtual nsresult Seek(int64_t aTime, int64_t aStartTime, int64_t aEndTime, int64_t aCurrentTime);
-  virtual nsresult GetBuffered(mozilla::dom::TimeRanges* aBuffered, int64_t aStartTime);
 
-  virtual void OnDecodeThreadStart() MOZ_OVERRIDE;
+  virtual void SetIdle() MOZ_OVERRIDE;
+  virtual void SetActive() MOZ_OVERRIDE;
 
-  virtual void OnDecodeThreadFinish() MOZ_OVERRIDE;
+  void SetAudioChannel(dom::AudioChannel aAudioChannel) {
+    mAudioChannel = aAudioChannel;
+  }
+
+  android::sp<android::MediaSource> GetAudioOffloadTrack() {
+    return mAudioOffloadTrack;
+  }
+
+#ifdef MOZ_AUDIO_OFFLOAD
+  // Check whether it is possible to offload current audio track. This access
+  // canOffloadStream() from libStageFright Utils.cpp, which is not there in
+  // ANDROID_VERSION < 19
+  void CheckAudioOffload();
+#endif
+
+private:
+  // This flag is true when SetActive() has been called without a matching
+  // SetIdle(). This is used to sanity check the SetIdle/SetActive calls, to
+  // ensure SetActive has been called before a decode call.
+  DebugOnly<bool> mIsActive;
 };
 
 } // namespace mozilla

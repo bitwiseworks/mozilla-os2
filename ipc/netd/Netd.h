@@ -5,7 +5,7 @@
 #ifndef mozilla_system_netd_h__
 #define mozilla_system_netd_h__
 
-#include "mozilla/RefPtr.h"
+#include "nsISupportsImpl.h"
 #include "nsAutoPtr.h"
 #include "base/message_loop.h"
 #include "mozilla/FileUtils.h"
@@ -26,10 +26,14 @@ struct NetdCommand
   size_t mSize;
 };
 
-class NetdConsumer : public mozilla::RefCounted<NetdConsumer>
+class NetdConsumer
 {
-public:
+protected:
   virtual ~NetdConsumer() { }
+
+public:
+  NS_INLINE_DECL_REFCOUNTING(NetdConsumer)
+
   virtual void MessageReceived(NetdCommand* aMessage) = 0;
 };
 
@@ -38,14 +42,15 @@ class NetdWriteTask : public Task
   virtual void Run();
 };
 
-class NetdClient : public MessageLoopForIO::LineWatcher,
-                   public RefCounted<NetdClient>
+class NetdClient : public MessageLoopForIO::LineWatcher
 {
+  virtual ~NetdClient();
+
 public:
+  NS_INLINE_DECL_REFCOUNTING(NetdClient)
   typedef std::queue<NetdCommand*> NetdCommandQueue;
 
   NetdClient();
-  virtual ~NetdClient();
   static void Start();
   static void SendNetdCommandIOThread(NetdCommand* aMessage);
 

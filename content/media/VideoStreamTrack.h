@@ -7,6 +7,7 @@
 #define VIDEOSTREAMTRACK_H_
 
 #include "MediaStreamTrack.h"
+#include "DOMMediaStream.h"
 
 namespace mozilla {
 namespace dom {
@@ -16,8 +17,7 @@ public:
   VideoStreamTrack(DOMMediaStream* aStream, TrackID aTrackID)
     : MediaStreamTrack(aStream, aTrackID) {}
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   virtual VideoStreamTrack* AsVideoStreamTrack() { return this; }
 

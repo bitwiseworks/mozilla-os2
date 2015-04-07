@@ -10,36 +10,29 @@
 #include "nsSVGEnum.h"
 
 nsresult NS_NewSVGFEBlendElement(nsIContent **aResult,
-                                 already_AddRefed<nsINodeInfo> aNodeInfo);
+                                 already_AddRefed<nsINodeInfo>&& aNodeInfo);
 namespace mozilla {
 namespace dom {
-
-static const unsigned short SVG_FEBLEND_MODE_UNKNOWN = 0;
-static const unsigned short SVG_FEBLEND_MODE_NORMAL = 1;
-static const unsigned short SVG_FEBLEND_MODE_MULTIPLY = 2;
-static const unsigned short SVG_FEBLEND_MODE_SCREEN = 3;
-static const unsigned short SVG_FEBLEND_MODE_DARKEN = 4;
-static const unsigned short SVG_FEBLEND_MODE_LIGHTEN = 5;
 
 typedef nsSVGFE SVGFEBlendElementBase;
 
 class SVGFEBlendElement : public SVGFEBlendElementBase
 {
   friend nsresult (::NS_NewSVGFEBlendElement(nsIContent **aResult,
-                                             already_AddRefed<nsINodeInfo> aNodeInfo));
+                                             already_AddRefed<nsINodeInfo>&& aNodeInfo));
 protected:
-  SVGFEBlendElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  SVGFEBlendElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : SVGFEBlendElementBase(aNodeInfo)
   {
   }
-  virtual JSObject* WrapNode(JSContext *cx,
-                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
 
 public:
-  virtual nsresult Filter(nsSVGFilterInstance* aInstance,
-                          const nsTArray<const Image*>& aSources,
-                          const Image* aTarget,
-                          const nsIntRect& aDataRect) MOZ_OVERRIDE;
+  virtual FilterPrimitiveDescription
+    GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
+                            const IntRect& aFilterSubregion,
+                            const nsTArray<bool>& aInputsAreTainted,
+                            nsTArray<mozilla::RefPtr<SourceSurface>>& aInputImages) MOZ_OVERRIDE;
   virtual bool AttributeAffectsRendering(
           int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
   virtual nsSVGString& GetResultImageName() MOZ_OVERRIDE { return mStringAttributes[RESULT]; }
@@ -50,7 +43,7 @@ public:
   // WebIDL
   already_AddRefed<SVGAnimatedString> In1();
   already_AddRefed<SVGAnimatedString> In2();
-  already_AddRefed<nsIDOMSVGAnimatedEnumeration> Mode();
+  already_AddRefed<SVGAnimatedEnumeration> Mode();
 
 protected:
 

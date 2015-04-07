@@ -8,8 +8,9 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 
-import org.mozilla.gecko.sync.CredentialsSource;
+import org.mozilla.gecko.sync.InfoCollections;
 import org.mozilla.gecko.sync.Utils;
+import org.mozilla.gecko.sync.net.AuthHeaderProvider;
 import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionCreationDelegate;
 
 import android.content.Context;
@@ -21,33 +22,34 @@ import android.content.Context;
  * @author rnewman
  */
 public class Server11Repository extends Repository {
-
-  private String serverURI;
-  private String username;
   protected String collection;
-  private String collectionPath;
-  private URI collectionPathURI;
-  public CredentialsSource credentialsSource;
-  public static final String VERSION_PATH_FRAGMENT = "1.1/";
+  protected URI collectionURI;
+  protected final AuthHeaderProvider authHeaderProvider;
+  protected final InfoCollections infoCollections;
 
   /**
+   * Construct a new repository that fetches and stores against the Sync 1.1. API.
    *
-   * @param serverURI
-   *        URI of the Sync 1.1 server (string)
-   * @param username
-   *        Username on the server (string)
-   * @param collection
-   *        Name of the collection (string)
+   * @param collection name.
+   * @param storageURL full URL to storage endpoint.
+   * @param authHeaderProvider to use in requests; may be null.
+   * @param infoCollections instance; must not be null.
    * @throws URISyntaxException
    */
-  public Server11Repository(String serverURI, String username, String collection, CredentialsSource credentialsSource) throws URISyntaxException {
-    this.serverURI  = serverURI;
-    this.username   = username;
+  public Server11Repository(String collection, String storageURL, AuthHeaderProvider authHeaderProvider, InfoCollections infoCollections) throws URISyntaxException {
+    if (collection == null) {
+      throw new IllegalArgumentException("collection must not be null");
+    }
+    if (storageURL == null) {
+      throw new IllegalArgumentException("storageURL must not be null");
+    }
+    if (infoCollections == null) {
+      throw new IllegalArgumentException("infoCollections must not be null");
+    }
     this.collection = collection;
-
-    this.collectionPath = this.serverURI + VERSION_PATH_FRAGMENT + this.username + "/storage/" + this.collection;
-    this.collectionPathURI = new URI(this.collectionPath);
-    this.credentialsSource = credentialsSource;
+    this.collectionURI = new URI(storageURL + (storageURL.endsWith("/") ? collection : "/" + collection));
+    this.authHeaderProvider = authHeaderProvider;
+    this.infoCollections = infoCollections;
   }
 
   @Override
@@ -57,7 +59,7 @@ public class Server11Repository extends Repository {
   }
 
   public URI collectionURI() {
-    return this.collectionPathURI;
+    return this.collectionURI;
   }
 
   public URI collectionURI(boolean full, long newer, long limit, String sort, String ids) throws URISyntaxException {
@@ -81,7 +83,7 @@ public class Server11Repository extends Repository {
     }
 
     if (params.size() == 0) {
-      return this.collectionPathURI;
+      return this.collectionURI;
     }
 
     StringBuilder out = new StringBuilder();
@@ -91,12 +93,12 @@ public class Server11Repository extends Repository {
       indicator = '&';
       out.append(param);
     }
-    String uri = this.collectionPath + out.toString();
+    String uri = this.collectionURI + out.toString();
     return new URI(uri);
   }
 
   public URI wboURI(String id) throws URISyntaxException {
-    return new URI(this.collectionPath + "/" + id);
+    return new URI(this.collectionURI + "/" + id);
   }
 
   // Override these.
@@ -108,5 +110,13 @@ public class Server11Repository extends Repository {
   @SuppressWarnings("static-method")
   protected String getDefaultSort() {
     return null;
+  }
+
+  public AuthHeaderProvider getAuthHeaderProvider() {
+    return authHeaderProvider;
+  }
+
+  public boolean updateNeeded(long lastSyncTimestamp) {
+    return infoCollections.updateNeeded(collection, lastSyncTimestamp);
   }
 }

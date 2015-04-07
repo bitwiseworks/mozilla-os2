@@ -4,9 +4,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'xpcom'
-
 EXPORTS += [
+    'nsXPCOM.h',
+    'nsXPCOMCID.h',
     'nsXPCOMCIDInternal.h',
     'nsXREAppData.h',
     'nsXULAppAPI.h',
@@ -15,38 +15,90 @@ EXPORTS += [
 
 EXPORTS.mozilla += [
     'FileLocation.h',
+    'IOInterposer.h',
+    'LateWriteChecks.h',
     'Omnijar.h',
+    'PoisonIOInterposer.h',
     'ServiceList.h',
     'Services.h',
     'XPCOM.h',
-    'mozPoisonWrite.h',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
+    EXPORTS += ['nsWindowsDllInterceptor.h']
     EXPORTS.mozilla += ['perfprobe.h']
-    CPP_SOURCES += [
-        'mozPoisonWriteBase.cpp',
-        'mozPoisonWriteWin.cpp',
+    SOURCES += [
         'perfprobe.cpp',
+        'PoisonIOInterposerBase.cpp',
+        'PoisonIOInterposerWin.cpp',
     ]
 elif CONFIG['OS_ARCH'] == 'Darwin':
-    CPP_SOURCES += [
-        'mozPoisonWriteBase.cpp',
-        'mozPoisonWriteMac.cpp',
+    SOURCES += [
+        'mach_override.c',
+        'PoisonIOInterposerBase.cpp',
+        'PoisonIOInterposerMac.cpp',
     ]
 else:
-    CPP_SOURCES += [
-        'mozPoisonWriteStub.cpp',
-    ]
+    SOURCES += ['PoisonIOInterposerStub.cpp']
 
-CPP_SOURCES += [
-    '$(XPCOM_GLUENS_SRC_LCPPSRCS)',
-    '$(XPCOM_GLUE_SRC_LCPPSRCS)',
-    'FileLocation.cpp',
+include('../glue/objs.mozbuild')
+
+UNIFIED_SOURCES += xpcom_gluens_src_cppsrcs
+UNIFIED_SOURCES += xpcom_glue_src_cppsrcs
+
+UNIFIED_SOURCES += [
     'FrozenFunctions.cpp',
-    'Omnijar.cpp',
-    'Services.cpp',
-    'nsXPCOMStrings.cpp',
+    'IOInterposer.cpp',
+    'LateWriteChecks.cpp',
+    'MainThreadIOLogger.cpp',
     'nsXPComInit.cpp',
+    'nsXPCOMStrings.cpp',
+    'Services.cpp',
 ]
 
+if CONFIG['OS_ARCH'] != 'WINNT':
+    SOURCES += [
+        'NSPRInterposer.cpp',
+    ]
+
+# FileLocation.cpp and Omnijar.cpp cannot be built in unified mode because they
+# use plarena.h.
+SOURCES += [
+    'FileLocation.cpp',
+    'Omnijar.cpp',
+]
+
+MSVC_ENABLE_PGO = True
+
+LIBRARY_NAME = 'xpcom_core'
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'
+
+DEFINES['_IMPL_NS_STRINGAPI'] = True
+DEFINES['OMNIJAR_NAME'] = CONFIG['OMNIJAR_NAME']
+
+if CONFIG['TARGET_XPCOM_ABI']:
+    DEFINES['TARGET_XPCOM_ABI'] = '"%s"' % CONFIG['TARGET_XPCOM_ABI']
+
+if CONFIG['MOZ_OPTIMIZE']:
+    DEFINES['MOZ_OPTIMIZE'] = True
+
+GENERATED_INCLUDES += ['..']
+LOCAL_INCLUDES += [
+    '../base',
+    '../components',
+    '../ds',
+    '../glue',
+    '../io',
+    '../reflect/xptinfo/src',
+    '../threads',
+    '/chrome/src',
+    '/docshell/base',
+]
+
+if CONFIG['MOZ_VPX']:
+    LOCAL_INCLUDES += [
+        '/media/libvpx',
+    ]

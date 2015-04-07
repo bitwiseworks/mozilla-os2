@@ -4,7 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsDeque.h"
-#include "nsCRT.h"
+#include "nsISupportsImpl.h"
+#include <string.h>
 #ifdef DEBUG_rickg
 #include <stdio.h>
 #endif
@@ -88,6 +89,23 @@ nsDeque::~nsDeque() {
   }
   mData=0;
   SetDeallocator(0);
+}
+
+size_t nsDeque::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
+  size_t size = 0;
+  if (mData != mBuffer) {
+    size += aMallocSizeOf(mData);
+  }
+
+  if (mDeallocator) {
+    size += aMallocSizeOf(mDeallocator);
+  }
+
+  return size;
+}
+
+size_t nsDeque::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
+  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
 
 /**

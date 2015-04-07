@@ -21,18 +21,25 @@
 
 #include <iostream>
 
-#include "common_types.h"
-#include "tb_external_transport.h"
-#include "voe_base.h"
-#include "vie_autotest_defines.h"
-#include "vie_autotest.h"
-#include "vie_base.h"
-#include "vie_capture.h"
-#include "vie_codec.h"
-#include "vie_network.h"
-#include "vie_render.h"
-#include "vie_rtp_rtcp.h"
+#include "webrtc/common_types.h"
+#include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/test/channel_transport/include/channel_transport.h"
+#include "webrtc/video_engine/include/vie_base.h"
+#include "webrtc/video_engine/include/vie_capture.h"
+#include "webrtc/video_engine/include/vie_codec.h"
+#include "webrtc/video_engine/include/vie_external_codec.h"
+#include "webrtc/video_engine/include/vie_network.h"
+#include "webrtc/video_engine/include/vie_render.h"
+#include "webrtc/video_engine/include/vie_rtp_rtcp.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_autotest.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_autotest_defines.h"
+#include "webrtc/video_engine/test/libvietest/include/tb_external_transport.h"
+#include "webrtc/voice_engine/include/voe_base.h"
 
+const uint32_t kSsrc = 0x01234567;
+const uint32_t kRtxSsrc = 0x01234568;
+const int kRtxPayloadType = 98;
 #define VCM_RED_PAYLOAD_TYPE        96
 #define VCM_ULPFEC_PAYLOAD_TYPE     97
 
@@ -58,7 +65,7 @@ int VideoEngineSampleCode(void* window1, void* window2)
     error = ptrViE->SetTraceFilter(webrtc::kTraceAll);
     if (error == -1)
     {
-        printf("ERROR in VideoEngine::SetTraceLevel\n");
+        printf("ERROR in VideoEngine::SetTraceFilter\n");
         return -1;
     }
 
@@ -93,33 +100,6 @@ int VideoEngineSampleCode(void* window1, void* window2)
     if (ptrViERtpRtcp == NULL)
     {
         printf("ERROR in ViERTP_RTCP::GetInterface\n");
-        return -1;
-    }
-
-    printf("Bandwidth estimation modes:\n");
-    printf("1. Multi-stream bandwidth estimation\n");
-    printf("2. Single-stream bandwidth estimation\n");
-    printf("Choose bandwidth estimation mode (default is 1): ");
-    std::string str;
-    std::getline(std::cin, str);
-    int bwe_mode_choice = atoi(str.c_str());
-    webrtc::BandwidthEstimationMode bwe_mode;
-    switch (bwe_mode_choice) {
-      case 1:
-        bwe_mode = webrtc::kViEMultiStreamEstimation;
-        break;
-      case 2:
-        bwe_mode = webrtc::kViESingleStreamEstimation;
-        break;
-      default:
-        bwe_mode = webrtc::kViEMultiStreamEstimation;
-        break;
-    }
-
-    error = ptrViERtpRtcp->SetBandwidthEstimationMode(bwe_mode);
-    if (error == -1)
-    {
-        printf("ERROR in ViERTP_RTCP::SetBandwidthEstimationMode\n");
         return -1;
     }
 
@@ -240,14 +220,49 @@ int VideoEngineSampleCode(void* window1, void* window2)
         return -1;
     }
 
+    // Setting SSRC manually (arbitrary value), as otherwise we will get a clash
+    // (loopback), and a new SSRC will be set, which will reset the receiver.
+    error = ptrViERtpRtcp->SetLocalSSRC(videoChannel, kSsrc);
+    if (error == -1) {
+      printf("ERROR in ViERTP_RTCP::SetLocalSSRC\n");
+      return -1;
+    }
+
+    error = ptrViERtpRtcp->SetLocalSSRC(videoChannel, kRtxSsrc,
+                                        webrtc::kViEStreamTypeRtx, 0);
+    if (error == -1) {
+      printf("ERROR in ViERTP_RTCP::SetLocalSSRC\n");
+      return -1;
+    }
+
+    error = ptrViERtpRtcp->SetRemoteSSRCType(videoChannel,
+                                             webrtc::kViEStreamTypeRtx,
+                                             kRtxSsrc);
+
+    if (error == -1) {
+      printf("ERROR in ViERTP_RTCP::SetRtxReceivePayloadType\n");
+      return -1;
+    }
+
+    error = ptrViERtpRtcp->SetRtxSendPayloadType(videoChannel, kRtxPayloadType);
+    if (error == -1) {
+      printf("ERROR in ViERTP_RTCP::SetRtxSendPayloadType\n");
+      return -1;
+    }
+
+    error = ptrViERtpRtcp->SetRtxReceivePayloadType(videoChannel,
+                                                    kRtxPayloadType);
+    if (error == -1) {
+      printf("ERROR in ViERTP_RTCP::SetRtxReceivePayloadType\n");
+      return -1;
+    }
     //
     // Set up rendering
     //
     webrtc::ViERender* ptrViERender = webrtc::ViERender::GetInterface(ptrViE);
-    if (ptrViERender == NULL)
-    {
-        printf("ERROR in ViERender::GetInterface\n");
-        return -1;
+    if (ptrViERender == NULL) {
+      printf("ERROR in ViERender::GetInterface\n");
+      return -1;
     }
 
     error
@@ -323,6 +338,8 @@ int VideoEngineSampleCode(void* window1, void* window2)
             printf("\t %d. %s\n", codecIdx + 1, videoCodec.plName);
         }
     }
+    printf("%d. VP8 over Generic.\n", ptrViECodec->NumberOfCodecs() + 1);
+
     printf("Choose codec: ");
 #ifdef WEBRTC_ANDROID
     codecIdx = 0;
@@ -336,15 +353,40 @@ int VideoEngineSampleCode(void* window1, void* window2)
     getchar();
     codecIdx = codecIdx - 1; // Compensate for idx start at 1.
 #endif
+    // VP8 over generic transport gets this special one.
+    if (codecIdx == ptrViECodec->NumberOfCodecs()) {
+      for (codecIdx = 0; codecIdx < ptrViECodec->NumberOfCodecs(); ++codecIdx) {
+        error = ptrViECodec->GetCodec(codecIdx, videoCodec);
+        assert(error != -1);
+        if (videoCodec.codecType == webrtc::kVideoCodecVP8)
+          break;
+      }
+      assert(videoCodec.codecType == webrtc::kVideoCodecVP8);
+      videoCodec.codecType = webrtc::kVideoCodecGeneric;
 
-    error = ptrViECodec->GetCodec(codecIdx, videoCodec);
-    if (error == -1)
-    {
+      // Any plName should work with generic
+      strcpy(videoCodec.plName, "VP8-GENERIC");
+      uint8_t pl_type = 127;
+      videoCodec.plType = pl_type;
+      webrtc::ViEExternalCodec* external_codec = webrtc::ViEExternalCodec
+          ::GetInterface(ptrViE);
+      assert(external_codec != NULL);
+      error = external_codec->RegisterExternalSendCodec(videoChannel, pl_type,
+          webrtc::VP8Encoder::Create(), false);
+      assert(error != -1);
+      error = external_codec->RegisterExternalReceiveCodec(videoChannel,
+          pl_type, webrtc::VP8Decoder::Create(), false);
+      assert(error != -1);
+    } else {
+      error = ptrViECodec->GetCodec(codecIdx, videoCodec);
+      if (error == -1) {
         printf("ERROR in ViECodec::GetCodec\n");
         return -1;
+      }
     }
 
     // Set spatial resolution option
+    std::string str;
     std::cout << std::endl;
     std::cout << "Enter frame size option (default is CIF):" << std::endl;
     std::cout << "1. QCIF (176X144) " << std::endl;
@@ -352,13 +394,9 @@ int VideoEngineSampleCode(void* window1, void* window2)
     std::cout << "3. VGA  (640X480) " << std::endl;
     std::cout << "4. 4CIF (704X576) " << std::endl;
     std::cout << "5. WHD  (1280X720) " << std::endl;
+    std::cout << "6. FHD  (1920X1080) " << std::endl;
     std::getline(std::cin, str);
     int resolnOption = atoi(str.c_str());
-    // Try to keep the test frame size small when I420
-    if (videoCodec.codecType == webrtc::kVideoCodecI420)
-    {
-       resolnOption = 1;
-    }
     switch (resolnOption)
     {
         case 1:
@@ -380,6 +418,10 @@ int VideoEngineSampleCode(void* window1, void* window2)
         case 5:
             videoCodec.width = 1280;
             videoCodec.height = 720;
+            break;
+        case 6:
+            videoCodec.width = 1920;
+            videoCodec.height = 1080;
             break;
     }
 
@@ -405,11 +447,9 @@ int VideoEngineSampleCode(void* window1, void* window2)
     }
 
     error = ptrViECodec->SetSendCodec(videoChannel, videoCodec);
-    if (error == -1)
-    {
-        printf("ERROR in ViECodec::SetSendCodec\n");
-        return -1;
-    }
+    assert(error != -1);
+    error = ptrViECodec->SetReceiveCodec(videoChannel, videoCodec);
+    assert(error != -1);
 
     //
     // Choose Protection Mode
@@ -457,6 +497,22 @@ int VideoEngineSampleCode(void* window1, void* window2)
         printf("ERROR in ViERTP_RTCP::SetProtectionStatus\n");
     }
 
+    // Set up buffering delay.
+    std::cout << std::endl;
+    std::cout << "Set buffering delay (mS). Press enter for default(0mS):  ";
+    std::getline(std::cin, str);
+    int buffering_delay = atoi(str.c_str());
+    if (buffering_delay != 0) {
+      error = ptrViERtpRtcp->SetSenderBufferingMode(videoChannel,
+                                                    buffering_delay);
+      if (error < 0)
+        printf("ERROR in ViERTP_RTCP::SetSenderBufferingMode\n");
+
+      error = ptrViERtpRtcp->SetReceiverBufferingMode(videoChannel,
+                                                      buffering_delay);
+      if (error < 0)
+        printf("ERROR in ViERTP_RTCP::SetReceiverBufferingMode\n");
+    }
 
     //
     // Address settings
@@ -469,8 +525,9 @@ int VideoEngineSampleCode(void* window1, void* window2)
         return -1;
     }
 
-    // Setting External transport
-    TbExternalTransport extTransport(*(ptrViENetwork), videoChannel, NULL);
+    // Setup transport.
+    TbExternalTransport* extTransport = NULL;
+    webrtc::test::VideoChannelTransport* video_channel_transport = NULL;
 
     int testMode = 0;
     std::cout << std::endl;
@@ -484,8 +541,11 @@ int VideoEngineSampleCode(void* window1, void* window2)
         // Avoid changing SSRC due to collision.
         error = ptrViERtpRtcp->SetLocalSSRC(videoChannel, 1);
 
+        extTransport = new TbExternalTransport(*ptrViENetwork, videoChannel,
+                                               NULL);
+
         error = ptrViENetwork->RegisterSendTransport(videoChannel,
-                                                     extTransport);
+                                                     *extTransport);
         if (error == -1)
         {
             printf("ERROR in ViECodec::RegisterSendTransport \n");
@@ -509,32 +569,35 @@ int VideoEngineSampleCode(void* window1, void* window2)
         std::string delay_str;
         std::getline(std::cin, delay_str);
         network.mean_one_way_delay = atoi(delay_str.c_str());
-        extTransport.SetNetworkParameters(network);
+        extTransport->SetNetworkParameters(network);
         if (numTemporalLayers > 1 && temporalToggling) {
-          extTransport.SetTemporalToggle(numTemporalLayers);
+          extTransport->SetTemporalToggle(numTemporalLayers);
         } else {
           // Disabled
-          extTransport.SetTemporalToggle(0);
+          extTransport->SetTemporalToggle(0);
         }
     }
     else
     {
+        video_channel_transport = new webrtc::test::VideoChannelTransport(
+            ptrViENetwork, videoChannel);
+
         const char* ipAddress = "127.0.0.1";
         const unsigned short rtpPort = 6000;
         std::cout << std::endl;
         std::cout << "Using rtp port: " << rtpPort << std::endl;
         std::cout << std::endl;
-        error = ptrViENetwork->SetLocalReceiver(videoChannel, rtpPort);
+
+        error = video_channel_transport->SetLocalReceiver(rtpPort);
         if (error == -1)
         {
-            printf("ERROR in ViENetwork::SetLocalReceiver\n");
+            printf("ERROR in SetLocalReceiver\n");
             return -1;
         }
-        error = ptrViENetwork->SetSendDestination(videoChannel,
-                                                  ipAddress, rtpPort);
+        error = video_channel_transport->SetSendDestination(ipAddress, rtpPort);
         if (error == -1)
         {
-            printf("ERROR in ViENetwork::SetSendDestination\n");
+            printf("ERROR in SetSendDestination\n");
             return -1;
         }
     }
@@ -637,6 +700,9 @@ int VideoEngineSampleCode(void* window1, void* window2)
         printf("ERROR in ViEBase::DeleteChannel\n");
         return -1;
     }
+
+    delete video_channel_transport;
+    delete extTransport;
 
     int remainingInterfaces = 0;
     remainingInterfaces = ptrViECodec->Release();

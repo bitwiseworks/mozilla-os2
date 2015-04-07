@@ -4,23 +4,20 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'pipnss'
-
 EXPORTS += [
     'CryptoTask.h',
-    'ScopedNSSTypes.h',
+    'nsCrypto.h',
     'nsNSSShutDown.h',
     'nsRandomGenerator.h',
+    'ScopedNSSTypes.h',
 ]
 
 EXPORTS.mozilla += [
     'PublicSSL.h',
 ]
 
-CPP_SOURCES += [
-    'CertVerifier.cpp',
+UNIFIED_SOURCES += [
     'CryptoTask.cpp',
-    'JARSignatureVerification.cpp',
     'nsCertificatePrincipal.cpp',
     'nsCertOverrideService.cpp',
     'nsCertPicker.cpp',
@@ -29,9 +26,7 @@ CPP_SOURCES += [
     'nsCMS.cpp',
     'nsCMSSecureMessage.cpp',
     'nsCrypto.cpp',
-    'nsCryptoHash.cpp',
     'nsDataSignatureVerifier.cpp',
-    'nsIdentityChecking.cpp',
     'nsKeygenHandler.cpp',
     'nsKeygenThread.cpp',
     'nsKeyModule.cpp',
@@ -40,17 +35,14 @@ CPP_SOURCES += [
     'nsNSSCertCache.cpp',
     'nsNSSCertHelper.cpp',
     'nsNSSCertificate.cpp',
-    'nsNSSCertificateDB.cpp',
     'nsNSSCertificateFakeTransport.cpp',
     'nsNSSCertTrust.cpp',
     'nsNSSCertValidity.cpp',
     'nsNSSCleaner.cpp',
-    'nsNSSComponent.cpp',
     'nsNSSErrors.cpp',
     'nsNSSIOLayer.cpp',
     'nsNSSModule.cpp',
     'nsNSSShutDown.cpp',
-    'nsNSSVersion.cpp',
     'nsNTLMAuthModule.cpp',
     'nsPK11TokenDB.cpp',
     'nsPKCS11Slot.cpp',
@@ -66,22 +58,50 @@ CPP_SOURCES += [
     'nsStreamCipher.cpp',
     'nsTLSSocketProvider.cpp',
     'nsUsageArrayHelper.cpp',
-	'PSMContentListener.cpp',
     'PSMRunnable.cpp',
     'SharedSSLState.cpp',
     'SSLServerCertVerification.cpp',
     'TransportSecurityInfo.cpp',
 ]
 
+# nsNSSCertificateDB.cpp needs to include nscert.h before everything else.
+# The rest cannot be built in unified mode because they want to force NSPR
+# logging.
+SOURCES += [
+    'nsCryptoHash.cpp',
+    'nsNSSCertificateDB.cpp',
+    'nsNSSComponent.cpp',
+    'nsNSSVersion.cpp',
+    'PSMContentListener.cpp',
+]
+
 if not CONFIG['MOZ_DISABLE_CRYPTOLEGACY']:
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'nsSmartCardMonitor.cpp',
     ]
 
 if CONFIG['MOZ_XUL']:
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'nsCertTree.cpp',
     ]
 
-LIBRARY_NAME = 'pipnss'
+UNIFIED_SOURCES += [
+    'md4.c',
+]
 
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'xul'
+
+LOCAL_INCLUDES += [
+    '../../../certverifier',
+    '../../../pkix/include',
+]
+
+if CONFIG['NSS_DISABLE_DBM']:
+    DEFINES['NSS_DISABLE_DBM'] = '1'
+
+DEFINES['SSL_DISABLE_DEPRECATED_CIPHER_SUITE_NAMES'] = 'True'
+DEFINES['NSS_ENABLE_ECC'] = 'True'
+for var in ('DLL_PREFIX', 'DLL_SUFFIX'):
+    DEFINES[var] = '"%s"' % CONFIG[var]

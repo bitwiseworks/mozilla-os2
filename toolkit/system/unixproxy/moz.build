@@ -4,16 +4,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'unixproxy'
-
 if CONFIG['MOZ_ENABLE_LIBPROXY']:
-    CPP_SOURCES += [
+    SOURCES += [
         'nsLibProxySettings.cpp',
     ]
 else:
-    CPP_SOURCES += [
+    SOURCES += [
         'nsUnixSystemProxySettings.cpp',
     ]
 
-LIBRARY_NAME = 'unixproxy'
-
+FINAL_LIBRARY = 'xul'

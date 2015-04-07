@@ -13,6 +13,7 @@
 #include "mozilla/dom/SpeechSynthesisBinding.h"
 #include "SpeechSynthesis.h"
 #include "nsSynthVoiceRegistry.h"
+#include "nsIDocument.h"
 
 #undef LOG
 #ifdef PR_LOGGING
@@ -43,9 +44,12 @@ TraverseCachedVoices(const nsAString& aKey, SpeechSynthesisVoice* aEntry, void* 
   return PL_DHASH_NEXT;
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(SpeechSynthesis)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(SpeechSynthesis)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mParent)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCurrentTask)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSpeechQueue)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
   tmp->mVoiceCache.Clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -53,6 +57,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(SpeechSynthesis)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParent)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCurrentTask)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSpeechQueue)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
   tmp->mVoiceCache.EnumerateRead(TraverseCachedVoices, &cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -73,18 +78,16 @@ SpeechSynthesis::SpeechSynthesis(nsPIDOMWindow* aParent)
   : mParent(aParent)
 {
   SetIsDOMBinding();
-  mVoiceCache.Init();
 }
 
 SpeechSynthesis::~SpeechSynthesis()
 {
-  mVoiceCache.Clear();
 }
 
 JSObject*
-SpeechSynthesis::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+SpeechSynthesis::WrapObject(JSContext* aCx)
 {
-  return SpeechSynthesisBinding::Wrap(aCx, aScope, this);
+  return SpeechSynthesisBinding::Wrap(aCx, this);
 }
 
 nsIDOMWindow*

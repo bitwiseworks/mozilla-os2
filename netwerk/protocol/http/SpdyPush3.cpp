@@ -7,10 +7,18 @@
 // HttpLog.h should generally be included first
 #include "HttpLog.h"
 
+// Log on level :5, instead of default :4.
+#undef LOG
+#define LOG(args) LOG5(args)
+#undef LOG_ENABLED
+#define LOG_ENABLED() LOG5_ENABLED()
+
 #include <algorithm>
 
-#include "nsDependentString.h"
 #include "SpdyPush3.h"
+#include "PSpdyPush.h"
+#include "SpdySession3.h"
+#include "nsHttpRequestHead.h"
 
 namespace mozilla {
 namespace net {
@@ -135,7 +143,7 @@ SpdyPushedStream3::IsOrphaned(TimeStamp now)
 
   bool rv = ((now - mLastRead).ToSeconds() > 30.0);
   if (rv) {
-    LOG3(("SpdyPushCache3::IsOrphaned 0x%X IsOrphaned %3.2f\n",
+    LOG3(("SpdyPushCache::IsOrphaned 0x%X IsOrphaned %3.2f\n",
           mStreamID, (now - mLastRead).ToSeconds()));
   }
   return rv;
@@ -160,55 +168,12 @@ SpdyPushedStream3::GetBufferedData(char *buf,
 }
 
 //////////////////////////////////////////
-// SpdyPushCache3
-//////////////////////////////////////////
-
-SpdyPushCache3::SpdyPushCache3()
-{
-  mHash.Init();
-}
-
-SpdyPushCache3::~SpdyPushCache3()
-{
-  mHash.Clear();
-}
-
-SpdyPushedStream3 *
-SpdyPushCache3::GetPushedStream(nsCString key)
-{
-  return mHash.Get(key);
-}
-
-bool
-SpdyPushCache3::RegisterPushedStream(nsCString key,
-                                     SpdyPushedStream3 *stream)
-{
-  LOG3(("SpdyPushCache3::RegisterPushedStream %s 0x%X\n",
-        key.get(), stream->StreamID()));
-  if(mHash.Get(key))
-    return false;
-  mHash.Put(key, stream);
-  return true;
-}
-
-SpdyPushedStream3 *
-SpdyPushCache3::RemovePushedStream(nsCString key)
-{
-  SpdyPushedStream3 *rv = mHash.Get(key);
-  LOG3(("SpdyPushCache3::RemovePushedStream %s 0x%X\n",
-        key.get(), rv ? rv->StreamID() : 0));
-  if (rv)
-    mHash.Remove(key);
-  return rv;
-}
-
-//////////////////////////////////////////
 // SpdyPush3TransactionBuffer
 // This is the nsAHttpTransction owned by the stream when the pushed
 // stream has not yet been matched with a pull request
 //////////////////////////////////////////
 
-NS_IMPL_THREADSAFE_ISUPPORTS0(SpdyPush3TransactionBuffer)
+NS_IMPL_ISUPPORTS0(SpdyPush3TransactionBuffer)
 
 SpdyPush3TransactionBuffer::SpdyPush3TransactionBuffer()
   : mStatus(NS_OK)
@@ -266,6 +231,11 @@ uint32_t
 SpdyPush3TransactionBuffer::Caps()
 {
   return 0;
+}
+
+void
+SpdyPush3TransactionBuffer::SetDNSWasRefreshed()
+{
 }
 
 uint64_t

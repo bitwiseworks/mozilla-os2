@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jsapi.h"
 #include "CameraRecorderProfiles.h"
+#include "jsapi.h"
 #include "CameraCommon.h"
 
 using namespace mozilla;
@@ -28,7 +28,7 @@ RecorderVideoProfile::GetJsObject(JSContext* aCx, JSObject** aObject)
 {
   NS_ENSURE_TRUE(aObject, NS_ERROR_INVALID_ARG);
 
-  JS::Rooted<JSObject*> o(aCx, JS_NewObject(aCx, nullptr, nullptr, nullptr));
+  JS::Rooted<JSObject*> o(aCx, JS_NewObject(aCx, nullptr, JS::NullPtr(), JS::NullPtr()));
   NS_ENSURE_TRUE(o, NS_ERROR_OUT_OF_MEMORY);
 
   const char* codec = GetCodecName();
@@ -36,31 +36,31 @@ RecorderVideoProfile::GetJsObject(JSContext* aCx, JSObject** aObject)
 
   JS::Rooted<JSString*> s(aCx, JS_NewStringCopyZ(aCx, codec));
   JS::Rooted<JS::Value> v(aCx, STRING_TO_JSVAL(s));
-  if (!JS_SetProperty(aCx, o, "codec", v.address())) {
+  if (!JS_SetProperty(aCx, o, "codec", v)) {
     return NS_ERROR_FAILURE;
   }
 
   if (mBitrate != -1) {
     v = INT_TO_JSVAL(mBitrate);
-    if (!JS_SetProperty(aCx, o, "bitrate", v.address())) {
+    if (!JS_SetProperty(aCx, o, "bitrate", v)) {
       return NS_ERROR_FAILURE;
     }
   }
   if (mFramerate != -1) {
     v = INT_TO_JSVAL(mFramerate);
-    if (!JS_SetProperty(aCx, o, "framerate", v.address())) {
+    if (!JS_SetProperty(aCx, o, "framerate", v)) {
       return NS_ERROR_FAILURE;
     }
   }
   if (mWidth != -1) {
     v = INT_TO_JSVAL(mWidth);
-    if (!JS_SetProperty(aCx, o, "width", v.address())) {
+    if (!JS_SetProperty(aCx, o, "width", v)) {
       return NS_ERROR_FAILURE;
     }
   }
   if (mHeight != -1) {
     v = INT_TO_JSVAL(mHeight);
-    if (!JS_SetProperty(aCx, o, "height", v.address())) {
+    if (!JS_SetProperty(aCx, o, "height", v)) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -89,7 +89,7 @@ RecorderAudioProfile::GetJsObject(JSContext* aCx, JSObject** aObject)
 {
   NS_ENSURE_TRUE(aObject, NS_ERROR_INVALID_ARG);
 
-  JS::Rooted<JSObject*> o(aCx, JS_NewObject(aCx, nullptr, nullptr, nullptr));
+  JS::Rooted<JSObject*> o(aCx, JS_NewObject(aCx, nullptr, JS::NullPtr(), JS::NullPtr()));
   NS_ENSURE_TRUE(o, NS_ERROR_OUT_OF_MEMORY);
 
   const char* codec = GetCodecName();
@@ -97,25 +97,25 @@ RecorderAudioProfile::GetJsObject(JSContext* aCx, JSObject** aObject)
 
   JS::Rooted<JSString*> s(aCx, JS_NewStringCopyZ(aCx, codec));
   JS::Rooted<JS::Value> v(aCx, STRING_TO_JSVAL(s));
-  if (!JS_SetProperty(aCx, o, "codec", v.address())) {
+  if (!JS_SetProperty(aCx, o, "codec", v)) {
     return NS_ERROR_FAILURE;
   }
 
   if (mBitrate != -1) {
     v = INT_TO_JSVAL(mBitrate);
-    if (!JS_SetProperty(aCx, o, "bitrate", v.address())) {
+    if (!JS_SetProperty(aCx, o, "bitrate", v)) {
       return NS_ERROR_FAILURE;
     }
   }
   if (mSamplerate != -1) {
     v = INT_TO_JSVAL(mSamplerate);
-    if (!JS_SetProperty(aCx, o, "samplerate", v.address())) {
+    if (!JS_SetProperty(aCx, o, "samplerate", v)) {
       return NS_ERROR_FAILURE;
     }
   }
   if (mChannels != -1) {
     v = INT_TO_JSVAL(mChannels);
-    if (!JS_SetProperty(aCx, o, "channels", v.address())) {
+    if (!JS_SetProperty(aCx, o, "channels", v)) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -159,7 +159,7 @@ RecorderProfileManager::GetJsObject(JSContext* aCx, JSObject** aObject) const
 {
   NS_ENSURE_TRUE(aObject, NS_ERROR_INVALID_ARG);
 
-  JS::Rooted<JSObject*> o(aCx, JS_NewObject(aCx, nullptr, nullptr, nullptr));
+  JS::Rooted<JSObject*> o(aCx, JS_NewObject(aCx, nullptr, JS::NullPtr(), JS::NullPtr()));
   if (!o) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -185,7 +185,7 @@ RecorderProfileManager::GetJsObject(JSContext* aCx, JSObject** aObject) const
     NS_ENSURE_SUCCESS(rv, rv);
     JS::Rooted<JS::Value> v(aCx, OBJECT_TO_JSVAL(p));
 
-    if (!JS_SetProperty(aCx, o, profileName, v.address())) {
+    if (!JS_SetProperty(aCx, o, profileName, v)) {
       return NS_ERROR_FAILURE;
     }
   }

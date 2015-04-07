@@ -4,19 +4,19 @@
 
 package org.mozilla.gecko.db;
 
-import java.lang.IllegalArgumentException;
 import java.util.HashMap;
+
 import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.NSSBridge;
-import org.mozilla.gecko.db.DBUtils;
-import org.mozilla.gecko.db.BrowserContract.Passwords;
 import org.mozilla.gecko.db.BrowserContract.DeletedPasswords;
-import org.mozilla.gecko.db.BrowserContract;
+import org.mozilla.gecko.db.BrowserContract.Passwords;
+import org.mozilla.gecko.mozglue.GeckoLoader;
 import org.mozilla.gecko.sqlite.MatrixBlobCursor;
 import org.mozilla.gecko.sqlite.SQLiteBridge;
 import org.mozilla.gecko.sync.Utils;
+
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.UriMatcher;
@@ -25,9 +25,11 @@ import android.net.Uri;
 import android.text.TextUtils;
 import android.util.Log;
 
-public class PasswordsProvider extends PerProfileContentProvider {
+public class PasswordsProvider extends SQLiteBridgeContentProvider {
     static final String TABLE_PASSWORDS = "moz_logins";
     static final String TABLE_DELETED_PASSWORDS = "moz_deleted_logins";
+
+    private static final String TELEMETRY_TAG = "SQLITEBRIDGE_PROVIDER_PASSWORDS";
 
     private static final int PASSWORDS = 100;
     private static final int DELETED_PASSWORDS = 101;
@@ -76,7 +78,10 @@ public class PasswordsProvider extends PerProfileContentProvider {
         DELETED_PASSWORDS_PROJECTION_MAP.put(DeletedPasswords.ID, DeletedPasswords.ID);
         DELETED_PASSWORDS_PROJECTION_MAP.put(DeletedPasswords.GUID, DeletedPasswords.GUID);
         DELETED_PASSWORDS_PROJECTION_MAP.put(DeletedPasswords.TIME_DELETED, DeletedPasswords.TIME_DELETED);
-        System.loadLibrary("mozglue");
+
+        // We don't use .loadMozGlue because we're in a different process,
+        // and we just want to reuse code rather than use the loader lock etc.
+        GeckoLoader.doLoadLibrary("mozglue");
     }
 
     public PasswordsProvider() {
@@ -86,6 +91,11 @@ public class PasswordsProvider extends PerProfileContentProvider {
     @Override
     protected String getDBName(){
         return DB_FILENAME;
+    }
+
+    @Override
+    protected String getTelemetryPrefix() {
+        return TELEMETRY_TAG;
     }
 
     @Override

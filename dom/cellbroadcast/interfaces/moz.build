@@ -6,17 +6,9 @@
 
 XPIDL_SOURCES += [
     'nsICellBroadcastProvider.idl',
-    'nsIDOMMozCellBroadcast.idl',
     'nsIDOMMozCellBroadcastEvent.idl',
     'nsIDOMMozCellBroadcastMessage.idl',
-    'nsINavigatorCellBroadcast.idl',
 ]
 
 XPIDL_MODULE = 'dom_cellbroadcast'
-
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/dom/base',
-    '-I$(topsrcdir)/dom/interfaces/base',
-    '-I$(topsrcdir)/dom/interfaces/events',
-]
 

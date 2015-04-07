@@ -10,14 +10,14 @@
  * liability, trademark and document use rules apply.
  */
 
-[PrefControlled]
 interface AnalyserNode : AudioNode {
 
-    // Real-time frequency-domain data 
+    // Real-time frequency-domain data
     void getFloatFrequencyData(Float32Array array);
     void getByteFrequencyData(Uint8Array array);
 
-    // Real-time waveform data 
+    // Real-time waveform data
+    void getFloatTimeDomainData(Float32Array array);
     void getByteTimeDomainData(Uint8Array array);
 
     [SetterThrows, Pure]

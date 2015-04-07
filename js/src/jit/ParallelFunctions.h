@@ -7,71 +7,78 @@
 #ifndef jit_ParallelFunctions_h
 #define jit_ParallelFunctions_h
 
-#include "vm/ThreadPool.h"
-#include "vm/ForkJoin.h"
 #include "gc/Heap.h"
+#include "vm/ForkJoin.h"
 
 namespace js {
+
+class TypedObject; // subclass of JSObject* defined in builtin/TypedObject.h
+
 namespace jit {
 
-ForkJoinSlice *ParForkJoinSlice();
-JSObject *ParNewGCThing(gc::AllocKind allocKind);
-bool ParWriteGuard(ForkJoinSlice *context, JSObject *object);
-void ParBailout(uint32_t id);
-bool ParCheckOverRecursed(ForkJoinSlice *slice);
-bool ParCheckInterrupt(ForkJoinSlice *context);
+ForkJoinContext *ForkJoinContextPar();
+JSObject *NewGCThingPar(ForkJoinContext *cx, gc::AllocKind allocKind);
+bool ParallelWriteGuard(ForkJoinContext *cx, JSObject *object);
+bool IsInTargetRegion(ForkJoinContext *cx, TypedObject *object);
+bool CheckOverRecursedPar(ForkJoinContext *cx);
+bool InterruptCheckPar(ForkJoinContext *cx);
 
-void ParDumpValue(Value *v);
-
-// We pass the arguments to ParPush in a structure because, in code
-// gen, it is convenient to store them on the stack to avoid
-// constraining the reg alloc for the slow path.
-struct ParPushArgs {
-    JSObject *object;
-    Value value;
-};
-
-// Extends the given object with the given value (like `Array.push`).
-// Returns NULL on failure or else `args->object`, which is convenient
-// during code generation.
-JSObject* ParPush(ParPushArgs *args);
-
-// Extends the given array with `length` new holes.  Returns NULL on
+// Extends the given array with `length` new holes.  Returns nullptr on
 // failure or else `array`, which is convenient during code
 // generation.
-JSObject *ParExtendArray(ForkJoinSlice *slice, JSObject *array, uint32_t length);
+JSObject *ExtendArrayPar(ForkJoinContext *cx, JSObject *array, uint32_t length);
 
-// These parallel operations fail if they would be required to convert
-// to a string etc etc.
-ParallelResult ParStrictlyEqual(ForkJoinSlice *slice, MutableHandleValue v1, MutableHandleValue v2, JSBool *);
-ParallelResult ParStrictlyUnequal(ForkJoinSlice *slice, MutableHandleValue v1, MutableHandleValue v2, JSBool *);
-ParallelResult ParLooselyEqual(ForkJoinSlice *slice, MutableHandleValue v1, MutableHandleValue v2, JSBool *);
-ParallelResult ParLooselyUnequal(ForkJoinSlice *slice, MutableHandleValue v1, MutableHandleValue v2, JSBool *);
-ParallelResult ParLessThan(ForkJoinSlice *slice, MutableHandleValue v1, MutableHandleValue v2, JSBool *);
-ParallelResult ParLessThanOrEqual(ForkJoinSlice *slice, MutableHandleValue v1, MutableHandleValue v2, JSBool *);
-ParallelResult ParGreaterThan(ForkJoinSlice *slice, MutableHandleValue v1, MutableHandleValue v2, JSBool *);
-ParallelResult ParGreaterThanOrEqual(ForkJoinSlice *slice, MutableHandleValue v1, MutableHandleValue v2, JSBool *);
+// Set properties and elements on thread local objects.
+bool SetPropertyPar(ForkJoinContext *cx, HandleObject obj, HandlePropertyName name,
+                    HandleValue value, bool strict, jsbytecode *pc);
+bool SetElementPar(ForkJoinContext *cx, HandleObject obj, HandleValue index,
+                   HandleValue value, bool strict);
+bool SetDenseElementPar(ForkJoinContext *cx, HandleObject obj, int32_t index,
+                        HandleValue value, bool strict);
 
-ParallelResult ParStringsEqual(ForkJoinSlice *slice, HandleString v1, HandleString v2, JSBool *);
-ParallelResult ParStringsUnequal(ForkJoinSlice *slice, HandleString v1, HandleString v2, JSBool *);
+// String related parallel functions. These tend to call existing VM functions
+// that take a ThreadSafeContext.
+JSString *ConcatStringsPar(ForkJoinContext *cx, HandleString left, HandleString right);
+JSFlatString *IntToStringPar(ForkJoinContext *cx, int i);
+JSString *DoubleToStringPar(ForkJoinContext *cx, double d);
+JSString *PrimitiveToStringPar(ForkJoinContext *cx, HandleValue input);
+bool StringToNumberPar(ForkJoinContext *cx, JSString *str, double *out);
 
-ParallelResult InitRestParameter(ForkJoinSlice *slice, uint32_t length, Value *rest,
-                                 HandleObject templateObj, HandleObject res,
-                                 MutableHandleObject out);
+// Binary and unary operator functions on values. These tend to return
+// RETRY_SEQUENTIALLY if the values are objects.
+bool StrictlyEqualPar(ForkJoinContext *cx, MutableHandleValue v1, MutableHandleValue v2, bool *);
+bool StrictlyUnequalPar(ForkJoinContext *cx, MutableHandleValue v1, MutableHandleValue v2, bool *);
+bool LooselyEqualPar(ForkJoinContext *cx, MutableHandleValue v1, MutableHandleValue v2, bool *);
+bool LooselyUnequalPar(ForkJoinContext *cx, MutableHandleValue v1, MutableHandleValue v2, bool *);
+bool LessThanPar(ForkJoinContext *cx, MutableHandleValue v1, MutableHandleValue v2, bool *);
+bool LessThanOrEqualPar(ForkJoinContext *cx, MutableHandleValue v1, MutableHandleValue v2, bool *);
+bool GreaterThanPar(ForkJoinContext *cx, MutableHandleValue v1, MutableHandleValue v2, bool *);
+bool GreaterThanOrEqualPar(ForkJoinContext *cx, MutableHandleValue v1, MutableHandleValue v2, bool *);
 
-void ParallelAbort(ParallelBailoutCause cause,
-                   JSScript *outermostScript,
-                   JSScript *currentScript,
-                   jsbytecode *bytecode);
+bool StringsEqualPar(ForkJoinContext *cx, HandleString v1, HandleString v2, bool *);
+bool StringsUnequalPar(ForkJoinContext *cx, HandleString v1, HandleString v2, bool *);
 
-void PropagateParallelAbort(JSScript *outermostScript,
-                            JSScript *currentScript);
+bool BitNotPar(ForkJoinContext *cx, HandleValue in, int32_t *out);
+bool BitXorPar(ForkJoinContext *cx, HandleValue lhs, HandleValue rhs, int32_t *out);
+bool BitOrPar(ForkJoinContext *cx, HandleValue lhs, HandleValue rhs, int32_t *out);
+bool BitAndPar(ForkJoinContext *cx, HandleValue lhs, HandleValue rhs, int32_t *out);
+bool BitLshPar(ForkJoinContext *cx, HandleValue lhs, HandleValue rhs, int32_t *out);
+bool BitRshPar(ForkJoinContext *cx, HandleValue lhs, HandleValue rhs, int32_t *out);
 
-void TraceLIR(uint32_t bblock, uint32_t lir, uint32_t execModeInt,
-              const char *lirOpName, const char *mirOpName,
-              JSScript *script, jsbytecode *pc);
+bool UrshValuesPar(ForkJoinContext *cx, HandleValue lhs, HandleValue rhs, MutableHandleValue out);
 
-void ParCallToUncompiledScript(JSFunction *func);
+// Make a new rest parameter in parallel.
+JSObject *InitRestParameterPar(ForkJoinContext *cx, uint32_t length, Value *rest,
+                               HandleObject templateObj, HandleObject res);
+
+// Abort and debug tracing functions.
+void AbortPar(ParallelBailoutCause cause, JSScript *outermostScript, JSScript *currentScript,
+              jsbytecode *bytecode);
+void PropagateAbortPar(JSScript *outermostScript, JSScript *currentScript);
+
+void TraceLIR(IonLIRTraceData *current);
+
+void CallToUncompiledScriptPar(JSObject *obj);
 
 } // namespace jit
 } // namespace js

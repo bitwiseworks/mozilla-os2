@@ -16,6 +16,7 @@ from runreftest import ReftestOptions
 from automation import Automation
 import devicemanager
 import droid
+import moznetwork
 from remoteautomation import RemoteAutomation, fennecLogcatFilters
 
 class RemoteOptions(ReftestOptions):
@@ -28,6 +29,7 @@ class RemoteOptions(ReftestOptions):
         defaults["app"] = ""
         defaults["xrePath"] = ""
         defaults["utilityPath"] = ""
+        defaults["runTestsInParallel"] = False
 
         self.add_option("--remote-app-path", action="store",
                     type = "string", dest = "remoteAppPath",
@@ -52,7 +54,7 @@ class RemoteOptions(ReftestOptions):
         self.add_option("--remote-webserver", action="store",
                     type = "string", dest = "remoteWebServer",
                     help = "IP Address of the webserver hosting the reftest content")
-        defaults["remoteWebServer"] = automation.getLanIp()
+        defaults["remoteWebServer"] = moznetwork.get_ip()
 
         self.add_option("--http-port", action = "store",
                     type = "string", dest = "httpPort",
@@ -102,9 +104,12 @@ class RemoteOptions(ReftestOptions):
         self.set_defaults(**defaults)
 
     def verifyRemoteOptions(self, options):
+        if options.runTestsInParallel:
+            self.error("Cannot run parallel tests here")
+
         # Ensure our defaults are set properly for everything we can infer
         if not options.remoteTestRoot:
-            options.remoteTestRoot = self._automation._devicemanager.getDeviceRoot() + '/reftest'
+            options.remoteTestRoot = self.automation._devicemanager.getDeviceRoot() + '/reftest'
         options.remoteProfile = options.remoteTestRoot + "/profile"
 
         # Verify that our remotewebserver is set properly
@@ -162,8 +167,8 @@ class RemoteOptions(ReftestOptions):
             options.httpdPath = os.path.join(options.utilityPath, "components")
 
         # TODO: Copied from main, but I think these are no longer used in a post xulrunner world
-        #options.xrePath = options.remoteTestRoot + self._automation._product + '/xulrunner'
-        #options.utilityPath = options.testRoot + self._automation._product + '/bin'
+        #options.xrePath = options.remoteTestRoot + self.automation._product + '/xulrunner'
+        #options.utilityPath = options.testRoot + self.automation._product + '/bin'
         return options
 
 class ReftestServer:
@@ -174,7 +179,7 @@ class ReftestServer:
         it's own class and use it in both remote and non-remote testing. """
 
     def __init__(self, automation, options, scriptDir):
-        self._automation = automation
+        self.automation = automation
         self._utilityPath = options.utilityPath
         self._xrePath = options.xrePath
         self._profileDir = options.serverProfilePath
@@ -188,9 +193,9 @@ class ReftestServer:
     def start(self):
         "Run the Refest server, returning the process ID of the server."
 
-        env = self._automation.environment(xrePath = self._xrePath)
+        env = self.automation.environment(xrePath = self._xrePath)
         env["XPCOM_DEBUG_BREAK"] = "warn"
-        if self._automation.IS_WIN32:
+        if self.automation.IS_WIN32:
             env["PATH"] = env["PATH"] + ";" + self._xrePath
 
         args = ["-g", self._xrePath,
@@ -201,21 +206,21 @@ class ReftestServer:
                 "-f", os.path.join(self.scriptDir, "server.js")]
 
         xpcshell = os.path.join(self._utilityPath,
-                                "xpcshell" + self._automation.BIN_SUFFIX)
+                                "xpcshell" + self.automation.BIN_SUFFIX)
 
         if not os.access(xpcshell, os.F_OK):
             raise Exception('xpcshell not found at %s' % xpcshell)
-        if self._automation.elf_arm(xpcshell):
+        if self.automation.elf_arm(xpcshell):
             raise Exception('xpcshell at %s is an ARM binary; please use '
                             'the --utility-path argument to specify the path '
                             'to a desktop version.' % xpcshell)
 
-        self._process = self._automation.Process([xpcshell] + args, env = env)
+        self._process = self.automation.Process([xpcshell] + args, env = env)
         pid = self._process.pid
         if pid < 0:
             print "TEST-UNEXPECTED-FAIL | remotereftests.py | Error starting server."
             return 2
-        self._automation.log.info("INFO | remotereftests.py | Server pid: %d", pid)
+        self.automation.log.info("INFO | remotereftests.py | Server pid: %d", pid)
 
         if (self.pidFile != ""):
             f = open(self.pidFile + ".xpcshell.pid", 'w')
@@ -332,55 +337,48 @@ class RemoteReftest(RefTest):
     def stopWebServer(self, options):
         self.server.stop()
 
-    def createReftestProfile(self, options, profileDir, reftestlist):
-        RefTest.createReftestProfile(self, options, profileDir, reftestlist, server=options.remoteWebServer)
+    def createReftestProfile(self, options, reftestlist):
+        profile = RefTest.createReftestProfile(self, options, reftestlist, server=options.remoteWebServer)
+        profileDir = profile.profile
 
-        # Turn off the locale picker screen
-        fhandle = open(os.path.join(profileDir, "user.js"), 'a')
-        fhandle.write("""
-user_pref("browser.firstrun.show.localepicker", false);
-user_pref("font.size.inflation.emPerLine", 0);
-user_pref("font.size.inflation.minTwips", 0);
-user_pref("reftest.remote", true);
-// Set a future policy version to avoid the telemetry prompt.
-user_pref("toolkit.telemetry.prompted", 999);
-user_pref("toolkit.telemetry.notifiedOptOut", 999);
-user_pref("reftest.uri", "%s");
-user_pref("datareporting.policy.dataSubmissionPolicyBypassAcceptance", true);
+        prefs = {}
+        prefs["browser.firstrun.show.localepicker"] = False
+        prefs["font.size.inflation.emPerLine"] = 0
+        prefs["font.size.inflation.minTwips"] = 0
+        prefs["reftest.remote"] = True
+        # Set a future policy version to avoid the telemetry prompt.
+        prefs["toolkit.telemetry.prompted"] = 999
+        prefs["toolkit.telemetry.notifiedOptOut"] = 999
+        prefs["reftest.uri"] = "%s" % reftestlist
+        prefs["datareporting.policy.dataSubmissionPolicyBypassAcceptance"] = True
 
-// Point the url-classifier to the local testing server for fast failures
-user_pref("browser.safebrowsing.gethashURL", "http://127.0.0.1:8888/safebrowsing-dummy/gethash");
-user_pref("browser.safebrowsing.keyURL", "http://127.0.0.1:8888/safebrowsing-dummy/newkey");
-user_pref("browser.safebrowsing.updateURL", "http://127.0.0.1:8888/safebrowsing-dummy/update");
-// Point update checks to the local testing server for fast failures
-user_pref("extensions.update.url", "http://127.0.0.1:8888/extensions-dummy/updateURL");
-user_pref("extensions.update.background.url", "http://127.0.0.1:8888/extensions-dummy/updateBackgroundURL");
-user_pref("extensions.blocklist.url", "http://127.0.0.1:8888/extensions-dummy/blocklistURL");
-user_pref("extensions.hotfix.url", "http://127.0.0.1:8888/extensions-dummy/hotfixURL");
-// Turn off extension updates so they don't bother tests
-user_pref("extensions.update.enabled", false);
-// Make sure opening about:addons won't hit the network
-user_pref("extensions.webservice.discoverURL", "http://127.0.0.1:8888/extensions-dummy/discoveryURL");
-// Make sure AddonRepository won't hit the network
-user_pref("extensions.getAddons.maxResults", 0);
-user_pref("extensions.getAddons.get.url", "http://127.0.0.1:8888/extensions-dummy/repositoryGetURL");
-user_pref("extensions.getAddons.getWithPerformance.url", "http://127.0.0.1:8888/extensions-dummy/repositoryGetWithPerformanceURL");
-user_pref("extensions.getAddons.search.browseURL", "http://127.0.0.1:8888/extensions-dummy/repositoryBrowseURL");
-user_pref("extensions.getAddons.search.url", "http://127.0.0.1:8888/extensions-dummy/repositorySearchURL");
-// Make sure that opening the plugins check page won't hit the network
-user_pref("plugins.update.url", "http://127.0.0.1:8888/plugins-dummy/updateCheckURL");
+        # Point the url-classifier to the local testing server for fast failures
+        prefs["browser.safebrowsing.gethashURL"] = "http://127.0.0.1:8888/safebrowsing-dummy/gethash"
+        prefs["browser.safebrowsing.updateURL"] = "http://127.0.0.1:8888/safebrowsing-dummy/update"
+        # Point update checks to the local testing server for fast failures
+        prefs["extensions.update.url"] = "http://127.0.0.1:8888/extensions-dummy/updateURL"
+        prefs["extensions.update.background.url"] = "http://127.0.0.1:8888/extensions-dummy/updateBackgroundURL"
+        prefs["extensions.blocklist.url"] = "http://127.0.0.1:8888/extensions-dummy/blocklistURL"
+        prefs["extensions.hotfix.url"] = "http://127.0.0.1:8888/extensions-dummy/hotfixURL"
+        # Turn off extension updates so they don't bother tests
+        prefs["extensions.update.enabled"] = False
+        # Make sure opening about:addons won't hit the network
+        prefs["extensions.webservice.discoverURL"] = "http://127.0.0.1:8888/extensions-dummy/discoveryURL"
+        # Make sure AddonRepository won't hit the network
+        prefs["extensions.getAddons.maxResults"] = 0
+        prefs["extensions.getAddons.get.url"] = "http://127.0.0.1:8888/extensions-dummy/repositoryGetURL"
+        prefs["extensions.getAddons.getWithPerformance.url"] = "http://127.0.0.1:8888/extensions-dummy/repositoryGetWithPerformanceURL"
+        prefs["extensions.getAddons.search.browseURL"] = "http://127.0.0.1:8888/extensions-dummy/repositoryBrowseURL"
+        prefs["extensions.getAddons.search.url"] = "http://127.0.0.1:8888/extensions-dummy/repositorySearchURL"
+        # Make sure that opening the plugins check page won't hit the network
+        prefs["plugins.update.url"] = "http://127.0.0.1:8888/plugins-dummy/updateCheckURL"
+        prefs["layout.css.devPixelsPerPx"] = "1.0"
 
-""" % reftestlist)
+        # Disable skia-gl: see bug 907351
+        prefs["gfx.canvas.azure.accelerated"] = False
 
-        #workaround for jsreftests.
-        if options.enablePrivilege:
-            fhandle.write("""
-user_pref("capability.principal.codebase.p2.granted", "UniversalXPConnect");
-user_pref("capability.principal.codebase.p2.id", "http://%s:%s");
-""" % (options.remoteWebServer, options.httpPort))
-
-        # Close the file
-        fhandle.close()
+        # Set the extra prefs.
+        profile.set_preferences(prefs)
 
         try:
             self._devicemanager.pushDir(profileDir, options.remoteProfile)
@@ -388,8 +386,11 @@ user_pref("capability.principal.codebase.p2.id", "http://%s:%s");
             print "Automation Error: Failed to copy profiledir to device"
             raise
 
-    def copyExtraFilesToProfile(self, options, profileDir):
-        RefTest.copyExtraFilesToProfile(self, options, profileDir)
+        return profile
+
+    def copyExtraFilesToProfile(self, options, profile):
+        profileDir = profile.profile
+        RefTest.copyExtraFilesToProfile(self, options, profile)
         try:
             self._devicemanager.pushDir(profileDir, options.remoteProfile)
         except devicemanager.DMError:
@@ -398,6 +399,16 @@ user_pref("capability.principal.codebase.p2.id", "http://%s:%s");
 
     def getManifestPath(self, path):
         return path
+
+    def printDeviceInfo(self, printLogcat=False):
+        try:
+            if printLogcat:
+                logcat = self._devicemanager.getLogcat(filterOutRegexps=fennecLogcatFilters)
+                print ''.join(logcat)
+            print "Device info: %s" % self._devicemanager.getInfo()
+            print "Test root: %s" % self._devicemanager.getDeviceRoot()
+        except devicemanager.DMError:
+            print "WARNING: Error getting device information"
 
     def cleanup(self, profileDir):
         # Pull results back from device
@@ -486,7 +497,7 @@ def main(args):
     if (dm.processExist(procName)):
         dm.killProcess(procName)
 
-    print dm.getInfo()
+    reftest.printDeviceInfo()
 
 #an example manifest name to use on the cli
 #    manifest = "http://" + options.remoteWebServer + "/reftests/layout/reftests/reftest-sanity/reftest.list"
@@ -503,12 +514,8 @@ def main(args):
         retVal = 1
 
     reftest.stopWebServer(options)
-    try:
-        logcat = dm.getLogcat(filterOutRegexps=fennecLogcatFilters)
-        print ''.join(logcat)
-        print dm.getInfo()
-    except devicemanager.DMError:
-        print "WARNING: Error getting device information at end of test"
+
+    reftest.printDeviceInfo(printLogcat=True)
 
     return retVal
 

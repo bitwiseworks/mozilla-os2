@@ -20,11 +20,13 @@
 #include "IDBTransaction.h"
 #include "IndexedDatabaseManager.h"
 #include "ProfilerHelpers.h"
+#include "ReportInternalError.h"
 #include "TransactionThreadPool.h"
 
 #include "ipc/IndexedDBChild.h"
 #include "ipc/IndexedDBParent.h"
 
+using namespace mozilla;
 USING_INDEXEDDB_NAMESPACE
 using mozilla::dom::quota::QuotaManager;
 
@@ -56,15 +58,15 @@ ConvertCloneReadInfosToArrayInternal(
                                 nsTArray<StructuredCloneReadInfo>& aReadInfos,
                                 JS::MutableHandle<JS::Value> aResult)
 {
-  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0, nullptr));
+  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
   if (!array) {
-    NS_WARNING("Failed to make array!");
+    IDB_WARNING("Failed to make array!");
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
   if (!aReadInfos.IsEmpty()) {
     if (!JS_SetArrayLength(aCx, array, uint32_t(aReadInfos.Length()))) {
-      NS_WARNING("Failed to set array length!");
+      IDB_WARNING("Failed to set array length!");
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
 
@@ -78,8 +80,8 @@ ConvertCloneReadInfosToArrayInternal(
         return NS_ERROR_DOM_DATA_CLONE_ERR;
       }
 
-      if (!JS_SetElement(aCx, array, index, val.address())) {
-        NS_WARNING("Failed to set array element!");
+      if (!JS_SetElement(aCx, array, index, val)) {
+        IDB_WARNING("Failed to set array element!");
         return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
       }
     }
@@ -119,12 +121,8 @@ HelperBase::WrapNative(JSContext* aCx,
   NS_ASSERTION(aResult.address(), "Null pointer!");
   NS_ASSERTION(mRequest, "Null request!");
 
-  JS::Rooted<JSObject*> global(aCx, mRequest->GetParentObject());
-  NS_ASSERTION(global, "This should never be null!");
-
-  nsresult rv =
-    nsContentUtils::WrapNative(aCx, global, aNative, aResult.address());
-  NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  nsresult rv = nsContentUtils::WrapNative(aCx, aNative, aResult);
+  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   return NS_OK;
 }
@@ -173,11 +171,10 @@ AsyncConnectionHelper::~AsyncConnectionHelper()
 
     if (mainThread) {
       if (database) {
-        NS_ProxyRelease(mainThread, static_cast<nsIIDBDatabase*>(database));
+        NS_ProxyRelease(mainThread, static_cast<IDBWrapperCache*>(database));
       }
       if (transaction) {
-        NS_ProxyRelease(mainThread,
-                        static_cast<nsIIDBTransaction*>(transaction));
+        NS_ProxyRelease(mainThread, static_cast<IDBWrapperCache*>(transaction));
       }
     }
   }
@@ -185,8 +182,8 @@ AsyncConnectionHelper::~AsyncConnectionHelper()
   NS_ASSERTION(!mOldProgressHandler, "Should not have anything here!");
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(AsyncConnectionHelper, nsIRunnable,
-                                                     mozIStorageProgressHandler)
+NS_IMPL_ISUPPORTS(AsyncConnectionHelper, nsIRunnable,
+                  mozIStorageProgressHandler)
 
 NS_IMETHODIMP
 AsyncConnectionHelper::Run()
@@ -245,7 +242,7 @@ AsyncConnectionHelper::Run()
       }
 
       case Error: {
-        NS_WARNING("MaybeSendResultsToChildProcess failed!");
+        IDB_WARNING("MaybeSendResultsToChildProcess failed!");
         mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
         if (mRequest) {
           mRequest->NotifyHelperSentResultsToChildProcess(mResultCode);
@@ -254,7 +251,7 @@ AsyncConnectionHelper::Run()
       }
 
       default:
-        MOZ_NOT_REACHED("Unknown value for ChildProcessSendResult!");
+        MOZ_CRASH("Unknown value for ChildProcessSendResult!");
     }
 
     NS_ASSERTION(gCurrentTransaction == mTransaction, "Should be unchanged!");
@@ -340,6 +337,7 @@ AsyncConnectionHelper::Run()
       mResultCode = NS_ERROR_DOM_INDEXEDDB_RECOVERABLE_ERR;
     }
     else {
+      IDB_REPORT_INTERNAL_ERR();
       mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
   }
@@ -458,15 +456,15 @@ AsyncConnectionHelper::OnSuccess()
 
   nsRefPtr<nsIDOMEvent> event = CreateSuccessEvent(mRequest);
   if (!event) {
-    NS_ERROR("Failed to create event!");
+    IDB_WARNING("Failed to create event!");
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
   bool dummy;
   nsresult rv = mRequest->DispatchEvent(event, &dummy);
-  NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  IDB_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-  nsEvent* internalEvent = event->GetInternalNSEvent();
+  WidgetEvent* internalEvent = event->GetInternalNSEvent();
   NS_ASSERTION(internalEvent, "This should never be null!");
 
   NS_ASSERTION(!mTransaction ||
@@ -509,7 +507,7 @@ AsyncConnectionHelper::OnError()
                  mTransaction->IsAborted(),
                  "How else can this be closed?!");
 
-    nsEvent* internalEvent = event->GetInternalNSEvent();
+    WidgetEvent* internalEvent = event->GetInternalNSEvent();
     NS_ASSERTION(internalEvent, "This should never be null!");
 
     if (internalEvent->mFlags.mExceptionHasBeenRisen &&
@@ -627,14 +625,14 @@ AsyncConnectionHelper::ConvertToArrayAndCleanup(
   return rv;
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 StackBasedEventTarget::AddRef()
 {
   NS_NOTREACHED("Don't call me!");
   return 2;
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 StackBasedEventTarget::Release()
 {
   NS_NOTREACHED("Don't call me!");

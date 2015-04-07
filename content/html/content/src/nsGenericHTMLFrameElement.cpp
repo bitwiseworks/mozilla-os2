@@ -6,31 +6,43 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsGenericHTMLFrameElement.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "nsContentUtils.h"
+
 #include "mozilla/Preferences.h"
 #include "mozilla/ErrorResult.h"
-#include "nsIAppsService.h"
-#include "nsServiceManagerUtils.h"
-#include "nsIDOMApplicationRegistry.h"
-#include "nsIPermissionManager.h"
 #include "GeckoProfiler.h"
+#include "mozIApplication.h"
+#include "nsAttrValueInlines.h"
+#include "nsContentUtils.h"
+#include "nsIAppsService.h"
+#include "nsIDocShell.h"
+#include "nsIDOMDocument.h"
+#include "nsIFrame.h"
+#include "nsIInterfaceRequestorUtils.h"
+#include "nsIPermissionManager.h"
+#include "nsIPresShell.h"
+#include "nsIScrollable.h"
+#include "nsPresContext.h"
+#include "nsServiceManagerUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsGenericHTMLFrameElement)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsGenericHTMLFrameElement,
                                                   nsGenericHTMLElement)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFrameLoader)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_INTERFACE_TABLE_HEAD(nsGenericHTMLFrameElement)
-  NS_INTERFACE_TABLE_INHERITED3(nsGenericHTMLFrameElement,
-                                nsIFrameLoaderOwner,
-                                nsIDOMMozBrowserFrame,
-                                nsIMozBrowserFrame)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsGenericHTMLFrameElement)
-NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
+NS_IMPL_ADDREF_INHERITED(nsGenericHTMLFrameElement, nsGenericHTMLElement)
+NS_IMPL_RELEASE_INHERITED(nsGenericHTMLFrameElement, nsGenericHTMLElement)
+
+NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsGenericHTMLFrameElement)
+  NS_INTERFACE_TABLE_INHERITED(nsGenericHTMLFrameElement,
+                               nsIFrameLoaderOwner,
+                               nsIDOMMozBrowserFrame,
+                               nsIMozBrowserFrame)
+NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 NS_IMPL_BOOL_ATTR(nsGenericHTMLFrameElement, Mozbrowser, mozbrowser)
 
@@ -67,7 +79,7 @@ nsGenericHTMLFrameElement::GetContentDocument()
   nsIDocument *doc = win->GetDoc();
 
   // Return null for cross-origin contentDocument.
-  if (!nsContentUtils::GetSubjectPrincipal()->Subsumes(doc->NodePrincipal())) {
+  if (!nsContentUtils::GetSubjectPrincipal()->SubsumesConsideringDomain(doc->NodePrincipal())) {
     return nullptr;
   }
   return doc;
@@ -229,7 +241,9 @@ nsGenericHTMLFrameElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                                               aValue, aNotify);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::src) {
+  if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::src &&
+      (Tag() != nsGkAtoms::iframe || 
+       !HasAttr(kNameSpaceID_None,nsGkAtoms::srcdoc))) {
     // Don't propagate error here. The attribute was successfully set, that's
     // what we should reflect.
     LoadSrc();
@@ -265,6 +279,55 @@ nsGenericHTMLFrameElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
   }
 
   return NS_OK;
+}
+
+/* static */ int32_t
+nsGenericHTMLFrameElement::MapScrollingAttribute(const nsAttrValue* aValue)
+{
+  int32_t mappedValue = nsIScrollable::Scrollbar_Auto;
+  if (aValue && aValue->Type() == nsAttrValue::eEnum) {
+    switch (aValue->GetEnumValue()) {
+      case NS_STYLE_FRAME_OFF:
+      case NS_STYLE_FRAME_NOSCROLL:
+      case NS_STYLE_FRAME_NO:
+        mappedValue = nsIScrollable::Scrollbar_Never;
+        break;
+    }
+  }
+  return mappedValue;
+}
+
+/* virtual */ nsresult
+nsGenericHTMLFrameElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                                        const nsAttrValue* aValue,
+                                        bool aNotify)
+{
+  if (aName == nsGkAtoms::scrolling && aNameSpaceID == kNameSpaceID_None) {
+    if (mFrameLoader) {
+      nsIDocShell* docshell = mFrameLoader->GetExistingDocShell();
+      nsCOMPtr<nsIScrollable> scrollable = do_QueryInterface(docshell);
+      if (scrollable) {
+        int32_t cur;
+        scrollable->GetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_X, &cur);
+        int32_t val = MapScrollingAttribute(aValue);
+        if (cur != val) {
+          scrollable->SetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_X, val);
+          scrollable->SetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_Y, val);
+          nsRefPtr<nsPresContext> presContext;
+          docshell->GetPresContext(getter_AddRefs(presContext));
+          nsIPresShell* shell = presContext ? presContext->GetPresShell() : nullptr;
+          nsIFrame* rootScroll = shell ? shell->GetRootScrollFrame() : nullptr;
+          if (rootScroll) {
+            shell->FrameNeedsReflow(rootScroll, nsIPresShell::eStyleChange,
+                                    NS_FRAME_IS_DIRTY);
+          }
+        }
+      }
+    }
+  }
+
+  return nsGenericHTMLElement::AfterSetAttr(aNameSpaceID, aName, aValue,
+                                            aNotify);
 }
 
 void
@@ -315,6 +378,21 @@ nsGenericHTMLFrameElement::IsHTMLFocusable(bool aWithMouse,
   return false;
 }
 
+bool
+nsGenericHTMLFrameElement::BrowserFramesEnabled()
+{
+  static bool sMozBrowserFramesEnabled = false;
+  static bool sBoolVarCacheInitialized = false;
+
+  if (!sBoolVarCacheInitialized) {
+    sBoolVarCacheInitialized = true;
+    Preferences::AddBoolVarCache(&sMozBrowserFramesEnabled,
+                                 "dom.mozBrowserFramesEnabled");
+  }
+
+  return sMozBrowserFramesEnabled;
+}
+
 /**
  * Return true if this frame element really is a mozbrowser or mozapp.  (It
  * needs to have the right attributes, and its creator must have the right
@@ -326,7 +404,7 @@ nsGenericHTMLFrameElement::GetReallyIsBrowserOrApp(bool *aOut)
   *aOut = false;
 
   // Fail if browser frames are globally disabled.
-  if (!Preferences::GetBool("dom.mozBrowserFramesEnabled")) {
+  if (!nsGenericHTMLFrameElement::BrowserFramesEnabled()) {
     return NS_OK;
   }
 
@@ -407,7 +485,7 @@ nsGenericHTMLFrameElement::GetAppManifestURL(nsAString& aOut)
   nsCOMPtr<nsIAppsService> appsService = do_GetService(APPS_SERVICE_CONTRACTID);
   NS_ENSURE_TRUE(appsService, NS_OK);
 
-  nsCOMPtr<mozIDOMApplication> app;
+  nsCOMPtr<mozIApplication> app;
   appsService->GetAppByManifestURL(manifestURL, getter_AddRefs(app));
   if (app) {
     aOut.Assign(manifestURL);

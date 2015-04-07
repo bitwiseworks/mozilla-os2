@@ -4,9 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "LifoAlloc.h"
+#include "ds/LifoAlloc.h"
+
+#include "mozilla/MathAlgorithms.h"
 
 using namespace js;
+
+using mozilla::RoundUpPow2;
+using mozilla::tl::BitSize;
 
 namespace js {
 namespace detail {
@@ -17,7 +22,7 @@ BumpChunk::new_(size_t chunkSize)
     JS_ASSERT(RoundUpPow2(chunkSize) == chunkSize);
     void *mem = js_malloc(chunkSize);
     if (!mem)
-        return NULL;
+        return nullptr;
     BumpChunk *result = new (mem) BumpChunk(chunkSize - sizeof(BumpChunk));
 
     // We assume that the alignment of sAlign is less than that of
@@ -60,7 +65,7 @@ LifoAlloc::freeAll()
         decrementCurSize(victim->computedSizeOfIncludingThis());
         BumpChunk::delete_(victim);
     }
-    first = latest = last = NULL;
+    first = latest = last = nullptr;
 
     // Nb: maintaining curSize_ correctly isn't easy.  Fortunately, this is an
     // excellent sanity check.
@@ -87,8 +92,8 @@ LifoAlloc::getOrCreateChunk(size_t n)
 
         // Guard for overflow.
         if (allocSizeWithHeader < n ||
-            (allocSizeWithHeader & (size_t(1) << (tl::BitSize<size_t>::result - 1)))) {
-            return NULL;
+            (allocSizeWithHeader & (size_t(1) << (BitSize<size_t>::value - 1)))) {
+            return nullptr;
         }
 
         chunkSize = RoundUpPow2(allocSizeWithHeader);
@@ -99,7 +104,7 @@ LifoAlloc::getOrCreateChunk(size_t n)
     // If we get here, we couldn't find an existing BumpChunk to fill the request.
     BumpChunk *newChunk = BumpChunk::new_(chunkSize);
     if (!newChunk)
-        return NULL;
+        return nullptr;
     if (!first) {
         latest = first = last = newChunk;
     } else {
@@ -119,15 +124,17 @@ void
 LifoAlloc::transferFrom(LifoAlloc *other)
 {
     JS_ASSERT(!markCount);
-    JS_ASSERT(latest == first);
     JS_ASSERT(!other->markCount);
 
     if (!other->first)
         return;
 
     incrementCurSize(other->curSize_);
-    append(other->first, other->last);
-    other->first = other->last = other->latest = NULL;
+    if (other->isEmpty())
+        appendUnused(other->first, other->last);
+    else
+        appendUsed(other->first, other->latest, other->last);
+    other->first = other->last = other->latest = nullptr;
     other->curSize_ = 0;
 }
 
@@ -156,8 +163,8 @@ LifoAlloc::transferUnusedFrom(LifoAlloc *other)
             }
         }
 
-        append(other->latest->next(), other->last);
-        other->latest->setNext(NULL);
+        appendUnused(other->latest->next(), other->last);
+        other->latest->setNext(nullptr);
         other->last = other->latest;
     }
 }

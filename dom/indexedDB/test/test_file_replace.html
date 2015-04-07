@@ -26,7 +26,7 @@
     request.onerror = errorHandler;
     request.onupgradeneeded = grabEventAndContinueHandler;
     request.onsuccess = grabEventAndContinueHandler;
-    let event = yield;
+    let event = yield undefined;
 
     is(event.type, "upgradeneeded", "Got correct event type");
 
@@ -39,21 +39,21 @@
       objectStore.put(blobData.blobs[i], blobData.key);
     }
 
-    event = yield;
+    event = yield undefined;
 
     is(event.type, "success", "Got correct event type");
 
     for (let id = 1; id <= 100; id++) {
       let refs = {};
       let dbRefs = {};
-      let hasFileInfo = utils.getFileReferences(name, id, refs, dbRefs);
+      let hasFileInfo = utils.getFileReferences(name, id, null, refs, dbRefs);
       ok(hasFileInfo, "Has file info");
       is(refs.value, 1, "Correct ref count");
       is(dbRefs.value, id / 100 >> 0, "Correct db ref count");
     }
 
     finishTest();
-    yield;
+    yield undefined;
   }
   </script>
   <script type="text/javascript;version=1.7" src="file.js"></script>

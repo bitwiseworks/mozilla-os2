@@ -5,11 +5,8 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 XPIDL_SOURCES += [
-    'nsISidebar.idl',
     'nsIWebContentHandlerRegistrar.idl',
 ]
 
 XPIDL_MODULE = 'dom_sidebar'
-
-MODULE = 'dom'
 

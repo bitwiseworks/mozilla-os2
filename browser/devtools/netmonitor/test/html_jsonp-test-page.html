@@ -1,3 +1,5 @@
+<!-- Any copyright is dedicated to the Public Domain.
+     http://creativecommons.org/publicdomain/zero/1.0/ -->
 <!doctype html>
 
 <html>
@@ -24,7 +26,9 @@
 
       function performRequests() {
         get("sjs_content-type-test-server.sjs?fmt=jsonp&jsonp=$_0123Fun", function() {
-          // Done.
+          get("sjs_content-type-test-server.sjs?fmt=jsonp2&jsonp=$_4567Sad", function() {
+            // Done.
+          });
         });
       }
     </script>

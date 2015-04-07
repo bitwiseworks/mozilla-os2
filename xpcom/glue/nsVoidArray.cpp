@@ -3,11 +3,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/MathAlgorithms.h"
+#include "mozilla/MemoryReporting.h"
 #include <stdlib.h>
 
 #include "nsVoidArray.h"
 #include "nsQuickSort.h"
-#include "prbit.h"
 #include "nsISupportsImpl.h" // for nsTraceRefcnt
 #include "nsAlgorithm.h"
 
@@ -16,7 +17,6 @@
  */
 static const int32_t kMinGrowArrayBy = 8;
 static const int32_t kMaxGrowArrayBy = 1024;
-static const int32_t kAutoClearCompactSizeFactor = 4;
 
 /**
  * This is the threshold (in bytes) of the mImpl struct, past which
@@ -29,7 +29,6 @@ static const int32_t kLinearThreshold = 24 * sizeof(void *);
  * hold |n| elements.
  */
 #define SIZEOF_IMPL(n_) (sizeof(Impl) + sizeof(void *) * ((n_) - 1))
-
 
 /**
  * Compute the number of elements that an mImpl struct of |n| bytes
@@ -238,7 +237,7 @@ bool nsVoidArray::GrowArrayBy(int32_t aGrowBy)
     }
     else
     {
-      PR_CEILING_LOG2(newSize, newSize);
+      newSize = mozilla::CeilingLog2(newSize);
       newCapacity = CAPACITYOF_IMPL(1u << newSize);
     }
   }
@@ -697,7 +696,7 @@ struct SizeOfElementIncludingThisData
 {
   size_t mSize;
   nsVoidArraySizeOfElementIncludingThisFunc mSizeOfElementIncludingThis;
-  nsMallocSizeOfFun mMallocSizeOf;
+  mozilla::MallocSizeOf mMallocSizeOf;
   void *mData;      // the arg passed by the user
 };
 
@@ -712,7 +711,7 @@ SizeOfElementIncludingThisEnumerator(const void *aElement, void *aData)
 size_t
 nsVoidArray::SizeOfExcludingThis(
   nsVoidArraySizeOfElementIncludingThisFunc aSizeOfElementIncludingThis,
-  nsMallocSizeOfFun aMallocSizeOf, void* aData) const
+  mozilla::MallocSizeOf aMallocSizeOf, void* aData) const
 {
   size_t n = 0;
   // Measure the element storage.

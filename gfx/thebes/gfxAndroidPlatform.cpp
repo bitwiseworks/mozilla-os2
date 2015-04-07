@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -9,6 +10,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/Preferences.h"
 
+#include "gfx2DGlue.h"
 #include "gfxFT2FontList.h"
 #include "gfxImageSurface.h"
 #include "mozilla/dom/ContentChild.h"
@@ -16,8 +18,17 @@
 #include "nsIScreen.h"
 #include "nsIScreenManager.h"
 #include "nsILocaleService.h"
-
+#include "nsServiceManagerUtils.h"
+#include "gfxPrefs.h"
 #include "cairo.h"
+
+#ifdef MOZ_WIDGET_ANDROID
+#include "AndroidBridge.h"
+#endif
+
+#ifdef MOZ_WIDGET_GONK
+#include <cutils/properties.h>
+#endif
 
 #include "ft2build.h"
 #include FT_FREETYPE_H
@@ -27,71 +38,59 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
 
-static FT_Library gPlatformFTLibrary = NULL;
+static FT_Library gPlatformFTLibrary = nullptr;
 
-static int64_t sFreetypeMemoryUsed;
-static FT_MemoryRec_ sFreetypeMemoryRecord;
-
-static int64_t
-GetFreetypeSize()
+class FreetypeReporter MOZ_FINAL : public nsIMemoryReporter,
+                                   public CountingAllocatorBase<FreetypeReporter>
 {
-    return sFreetypeMemoryUsed;
-}
+public:
+    NS_DECL_ISUPPORTS
 
-NS_MEMORY_REPORTER_IMPLEMENT(Freetype,
-    "explicit/freetype",
-    KIND_HEAP,
-    UNITS_BYTES,
-    GetFreetypeSize,
-    "Memory used by Freetype."
-)
-
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_ON_ALLOC_FUN(FreetypeMallocSizeOfOnAlloc)
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_ON_FREE_FUN(FreetypeMallocSizeOfOnFree)
-
-static void*
-CountingAlloc(FT_Memory memory, long size)
-{
-    void *p = malloc(size);
-    sFreetypeMemoryUsed += FreetypeMallocSizeOfOnAlloc(p);
-    return p;
-}
-
-static void
-CountingFree(FT_Memory memory, void* p)
-{
-    sFreetypeMemoryUsed -= FreetypeMallocSizeOfOnFree(p);
-    free(p);
-}
-
-static void*
-CountingRealloc(FT_Memory memory, long cur_size, long new_size, void* p)
-{
-    sFreetypeMemoryUsed -= FreetypeMallocSizeOfOnFree(p);
-    void *pnew = realloc(p, new_size);
-    if (pnew) {
-        sFreetypeMemoryUsed += FreetypeMallocSizeOfOnAlloc(pnew);
-    } else if (new_size != 0) {
-        // realloc failed;  undo the decrement from above
-        sFreetypeMemoryUsed += FreetypeMallocSizeOfOnAlloc(p);
+    static void* Malloc(FT_Memory, long size)
+    {
+        return CountingMalloc(size);
     }
-    return pnew;
-}
+
+    static void Free(FT_Memory, void* p)
+    {
+        return CountingFree(p);
+    }
+
+    static void*
+    Realloc(FT_Memory, long cur_size, long new_size, void* p)
+    {
+        return CountingRealloc(p, new_size);
+    }
+
+    NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
+                              nsISupports* aData)
+    {
+        return MOZ_COLLECT_REPORT(
+            "explicit/freetype", KIND_HEAP, UNITS_BYTES, MemoryAllocated(),
+            "Memory used by Freetype.");
+    }
+};
+
+NS_IMPL_ISUPPORTS(FreetypeReporter, nsIMemoryReporter)
+
+template<> Atomic<size_t> CountingAllocatorBase<FreetypeReporter>::sAmount(0);
+
+static FT_MemoryRec_ sFreetypeMemoryRecord;
 
 gfxAndroidPlatform::gfxAndroidPlatform()
 {
     // A custom allocator.  It counts allocations, enabling memory reporting.
     sFreetypeMemoryRecord.user    = nullptr;
-    sFreetypeMemoryRecord.alloc   = CountingAlloc;
-    sFreetypeMemoryRecord.free    = CountingFree;
-    sFreetypeMemoryRecord.realloc = CountingRealloc;
+    sFreetypeMemoryRecord.alloc   = FreetypeReporter::Malloc;
+    sFreetypeMemoryRecord.free    = FreetypeReporter::Free;
+    sFreetypeMemoryRecord.realloc = FreetypeReporter::Realloc;
 
     // These two calls are equivalent to FT_Init_FreeType(), but allow us to
     // provide a custom memory allocator.
     FT_New_Library(&sFreetypeMemoryRecord, &gPlatformFTLibrary);
     FT_Add_Default_Modules(gPlatformFTLibrary);
 
-    NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(Freetype));
+    RegisterStrongMemoryReporter(new FreetypeReporter());
 
     nsCOMPtr<nsIScreenManager> screenMgr = do_GetService("@mozilla.org/gfx/screenmanager;1");
     nsCOMPtr<nsIScreen> screen;
@@ -100,29 +99,33 @@ gfxAndroidPlatform::gfxAndroidPlatform()
     screen->GetColorDepth(&mScreenDepth);
 
     mOffscreenFormat = mScreenDepth == 16
-                       ? gfxASurface::ImageFormatRGB16_565
-                       : gfxASurface::ImageFormatRGB24;
+                       ? gfxImageFormat::RGB16_565
+                       : gfxImageFormat::RGB24;
 
-    if (Preferences::GetBool("gfx.android.rgb16.force", false)) {
-        mOffscreenFormat = gfxASurface::ImageFormatRGB16_565;
+    if (gfxPrefs::AndroidRGB16Force()) {
+        mOffscreenFormat = gfxImageFormat::RGB16_565;
     }
 
+#ifdef MOZ_WIDGET_GONK
+    char propQemu[PROPERTY_VALUE_MAX];
+    property_get("ro.kernel.qemu", propQemu, "");
+    mIsInGonkEmulator = !strncmp(propQemu, "1", 1);
+#endif
 }
 
 gfxAndroidPlatform::~gfxAndroidPlatform()
 {
-    cairo_debug_reset_static_data();
-
     FT_Done_Library(gPlatformFTLibrary);
-    gPlatformFTLibrary = NULL;
+    gPlatformFTLibrary = nullptr;
 }
 
 already_AddRefed<gfxASurface>
-gfxAndroidPlatform::CreateOffscreenSurface(const gfxIntSize& size,
-                                      gfxASurface::gfxContentType contentType)
+gfxAndroidPlatform::CreateOffscreenSurface(const IntSize& size,
+                                           gfxContentType contentType)
 {
     nsRefPtr<gfxASurface> newSurface;
-    newSurface = new gfxImageSurface(size, OptimalFormatForContent(contentType));
+    newSurface = new gfxImageSurface(ThebesIntSize(size),
+                                     OptimalFormatForContent(contentType));
 
     return newSurface.forget();
 }
@@ -170,6 +173,7 @@ gfxAndroidPlatform::GetCommonFallbackFonts(const uint32_t aCh,
                                            nsTArray<const char*>& aFontList)
 {
     static const char kDroidSansJapanese[] = "Droid Sans Japanese";
+    static const char kMotoyaLMaru[] = "MotoyaLMaru";
 
     if (IS_IN_BMP(aCh)) {
         // try language-specific "Droid Sans *" fonts for certain blocks,
@@ -200,11 +204,13 @@ gfxAndroidPlatform::GetCommonFallbackFonts(const uint32_t aCh,
             break;
         case 0xf9: case 0xfa:
             if (IsJapaneseLocale()) {
+                aFontList.AppendElement(kMotoyaLMaru);
                 aFontList.AppendElement(kDroidSansJapanese);
             }
             break;
         default:
             if (block >= 0x2e && block <= 0x9f && IsJapaneseLocale()) {
+                aFontList.AppendElement(kMotoyaLMaru);
                 aFontList.AppendElement(kDroidSansJapanese);
             }
             break;
@@ -318,20 +324,18 @@ gfxAndroidPlatform::MakePlatformFont(const gfxProxyFontEntry *aProxyEntry,
                                                                      aLength);
 }
 
+gfxFontEntry*
+gfxAndroidPlatform::LookupLocalFont(const gfxProxyFontEntry *aProxyEntry,
+                                    const nsAString& aFontName)
+{
+    return gfxPlatformFontList::PlatformFontList()->LookupLocalFont(aProxyEntry,
+                                                                    aFontName);
+}
+
 TemporaryRef<ScaledFont>
 gfxAndroidPlatform::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
 {
-    NativeFont nativeFont;
-    if (aTarget->GetType() == BACKEND_CAIRO) {
-        nativeFont.mType = NATIVE_FONT_CAIRO_FONT_FACE;
-        nativeFont.mFont = NULL;
-        return Factory::CreateScaledFontWithCairo(nativeFont, aFont->GetAdjustedSize(), aFont->GetCairoScaledFont());
-    }
- 
-    NS_ASSERTION(aFont->GetType() == gfxFont::FONT_TYPE_FT2, "Expecting Freetype font");
-    nativeFont.mType = NATIVE_FONT_SKIA_FONT_FACE;
-    nativeFont.mFont = static_cast<gfxFT2FontBase*>(aFont)->GetFontOptions();
-    return Factory::CreateScaledFontForNativeFont(nativeFont, aFont->GetAdjustedSize());
+    return GetScaledFontForFontWithCairoSkia(aTarget, aFont);
 }
 
 bool
@@ -392,4 +396,17 @@ int
 gfxAndroidPlatform::GetScreenDepth() const
 {
     return mScreenDepth;
+}
+
+bool
+gfxAndroidPlatform::UseAcceleratedSkiaCanvas()
+{
+#ifdef MOZ_WIDGET_ANDROID
+    if (AndroidBridge::Bridge()->GetAPIVersion() < 11) {
+        // It's slower than software due to not having a compositing fast path
+        return false;
+    }
+#endif
+
+    return gfxPlatform::UseAcceleratedSkiaCanvas();
 }

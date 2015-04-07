@@ -31,33 +31,70 @@
                 onchange="gMainPane.updateBrowserStartupLastSession();"/>
 
     <!-- Downloads -->
-    <preference id="browser.download.manager.showWhenStarting"
-                name="browser.download.manager.showWhenStarting"
-                type="bool"
-                onchange="gMainPane.showDownloadsWhenStartingPrefChanged();"/>
-    <preference id="browser.download.manager.closeWhenDone"
-                name="browser.download.manager.closeWhenDone"
-                type="bool"/>
     <preference id="browser.download.useDownloadDir"
                 name="browser.download.useDownloadDir"
                 type="bool"/>
+
+    <preference id="browser.download.folderList"
+                name="browser.download.folderList"
+                type="int"/>
     <preference id="browser.download.dir"
                 name="browser.download.dir"
                 type="file"
                 onchange="gMainPane.displayDownloadDirPref();"/>
-    <preference id="browser.download.folderList"
-                name="browser.download.folderList"
-                type="int"/>
+    <!-- Tab preferences 
+    Preferences:
 
+    browser.link.open_newwindow
+        1 opens such links in the most recent window or tab,
+        2 opens such links in a new window,
+        3 opens such links in a new tab
+    browser.tabs.loadInBackground
+    - true if display should switch to a new tab which has been opened from a
+      link, false if display shouldn't switch
+    browser.tabs.warnOnClose
+    - true if when closing a window with multiple tabs the user is warned and
+      allowed to cancel the action, false to just close the window
+    browser.tabs.warnOnOpen
+    - true if the user should be warned if he attempts to open a lot of tabs at
+      once (e.g. a large folder of bookmarks), false otherwise
+    browser.taskbar.previews.enable
+    - true if tabs are to be shown in the Windows 7 taskbar    
+    -->
+
+    <preference id="browser.link.open_newwindow"
+                name="browser.link.open_newwindow"
+                type="int"/>
+    <preference id="browser.tabs.loadInBackground"
+                name="browser.tabs.loadInBackground"
+                type="bool"
+                inverted="true"/>
+    <preference id="browser.tabs.warnOnClose"
+                name="browser.tabs.warnOnClose"
+                type="bool"/>
+    <preference id="browser.tabs.warnOnOpen"
+                name="browser.tabs.warnOnOpen"
+                type="bool"/>
+    <preference id="browser.sessionstore.restore_on_demand"
+                name="browser.sessionstore.restore_on_demand"
+                type="bool"/>
+#ifdef XP_WIN
+    <preference id="browser.taskbar.previews.enable"
+                name="browser.taskbar.previews.enable"
+                type="bool"/>
+#endif
 </preferences>
 
-<hbox class="heading" data-category="paneGeneral" hidden="true">
-  <image class="preference-icon" type="general"/>
-  <html:h1>&paneGeneral.title;</html:h1>
+<hbox id="header-general"
+      class="header"
+      data-category="paneGeneral">
+  <image class="header-icon"/>
+  <label class="header-name"
+         value="&paneGeneral.title;"/>
 </hbox>
 
 <!-- Startup -->
-<groupbox id="startupGroup" data-category="paneGeneral" hidden="true">
+<groupbox id="startupGroup" data-category="paneGeneral">
   <caption label="&startup.label;"/>
 
   <hbox align="center">
@@ -116,21 +153,8 @@
 </groupbox>
 
 <!-- Downloads -->
-<groupbox id="downloadsGroup" data-category="paneGeneral" hidden="true">
+<groupbox id="downloadsGroup" data-category="paneGeneral">
   <caption label="&downloads.label;"/>
-
-  <checkbox id="showWhenDownloading"
-            label="&showWhenDownloading.label;"
-            accesskey="&showWhenDownloading.accesskey;"
-            preference="browser.download.manager.showWhenStarting"
-            onsyncfrompreference="return gMainPane.readShowDownloadsWhenStarting();"/>
-  <checkbox id="closeWhenDone"
-            label="&closeWhenDone.label;"
-            accesskey="&closeWhenDone.accesskey;"
-            class="indent"
-            preference="browser.download.manager.closeWhenDone"/>
-
-  <separator class="thin"/>
 
   <radiogroup id="saveWhere"
               preference="browser.download.useDownloadDir"
@@ -165,4 +189,36 @@
            label="&alwaysAsk.label;"
            accesskey="&alwaysAsk.accesskey;"/>
   </radiogroup>
+</groupbox>
+
+<!-- Tab preferences -->
+<groupbox data-category="paneGeneral">
+    <caption label="&tabsGroup.label;"/>
+    <checkbox id="linkTargeting" label="&newWindowsAsTabs.label;"
+              accesskey="&newWindowsAsTabs.accesskey;"
+              preference="browser.link.open_newwindow"
+              onsyncfrompreference="return gMainPane.readLinkTarget();"
+              onsynctopreference="return gMainPane.writeLinkTarget();"/>
+
+    <checkbox id="warnCloseMultiple" label="&warnCloseMultipleTabs.label;"
+              accesskey="&warnCloseMultipleTabs.accesskey;"
+              preference="browser.tabs.warnOnClose"/>
+
+    <checkbox id="warnOpenMany" label="&warnOpenManyTabs.label;"
+              accesskey="&warnOpenManyTabs.accesskey;"
+              preference="browser.tabs.warnOnOpen"/>
+
+    <checkbox id="restoreOnDemand" label="&restoreTabsOnDemand.label;"
+              accesskey="&restoreTabsOnDemand.accesskey;"
+              preference="browser.sessionstore.restore_on_demand"/>
+
+    <checkbox id="switchToNewTabs" label="&switchToNewTabs.label;"
+              accesskey="&switchToNewTabs.accesskey;"
+              preference="browser.tabs.loadInBackground"/>
+
+#ifdef XP_WIN
+    <checkbox id="showTabsInTaskbar" label="&showTabsInTaskbar.label;"
+              accesskey="&showTabsInTaskbar.accesskey;"
+              preference="browser.taskbar.previews.enable"/>
+#endif
 </groupbox>

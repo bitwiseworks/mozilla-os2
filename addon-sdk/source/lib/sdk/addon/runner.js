@@ -1,8 +1,6 @@
-/* vim:set ts=2 sw=2 sts=2 expandtab */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/.
- */
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 module.metadata = {
   "stability": "experimental"
@@ -114,6 +112,7 @@ function startup(reason, options) {
     }).then(function() {
       run(options);
     }).then(null, console.exception);
+    return void 0; // otherwise we raise a warning, see bug 910304
 }
 
 function run(options) {
@@ -141,7 +140,10 @@ function run(options) {
 
     // TODO: When bug 564675 is implemented this will no longer be needed
     // Always set the default prefs, because they disappear on restart
-    setDefaultPrefs(options.prefsURI);
+    if (options.prefsURI) {
+      // Only set if `prefsURI` specified
+      setDefaultPrefs(options.prefsURI);
+    }
 
     // this is where the addon's main.js finally run.
     let program = main(options.loader, options.main);

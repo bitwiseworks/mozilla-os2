@@ -12,6 +12,7 @@
 #define NTDDI_VERSION NTDDI_WIN7
 // Needed for various com interfaces
 #include <shobjidl.h>
+#undef LogSeverity // SetupAPI.h #defines this as DWORD
 
 #include "nsString.h"
 #include "nsIMutableArray.h"
@@ -20,7 +21,6 @@
 #include "nsIJumpListItem.h"
 #include "JumpListItem.h"
 #include "nsIObserver.h"
-#include "nsThreadUtils.h"
 #include "mozilla/Attributes.h"
 
 namespace mozilla {

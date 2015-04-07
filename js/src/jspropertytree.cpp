@@ -6,10 +6,9 @@
 
 #include "jspropertytree.h"
 
-#include "jstypes.h"
-#include "jsapi.h"
 #include "jscntxt.h"
 #include "jsgc.h"
+#include "jstypes.h"
 
 #include "vm/Shape.h"
 
@@ -32,11 +31,11 @@ ShapeHasher::match(const Key k, const Lookup &l)
 }
 
 Shape *
-PropertyTree::newShape(JSContext *cx)
+PropertyTree::newShape(ExclusiveContext *cx)
 {
     Shape *shape = js_NewGCShape(cx);
     if (!shape)
-        JS_ReportOutOfMemory(cx);
+        js_ReportOutOfMemory(cx);
     return shape;
 }
 
@@ -46,7 +45,7 @@ HashChildren(Shape *kid1, Shape *kid2)
     KidsHash *hash = js_new<KidsHash>();
     if (!hash || !hash->init(2)) {
         js_delete(hash);
-        return NULL;
+        return nullptr;
     }
 
     JS_ALWAYS_TRUE(hash->putNew(kid1, kid1));
@@ -55,13 +54,13 @@ HashChildren(Shape *kid1, Shape *kid2)
 }
 
 bool
-PropertyTree::insertChild(JSContext *cx, Shape *parent, Shape *child)
+PropertyTree::insertChild(ExclusiveContext *cx, Shape *parent, Shape *child)
 {
     JS_ASSERT(!parent->inDictionary());
     JS_ASSERT(!child->parent);
     JS_ASSERT(!child->inDictionary());
-    JS_ASSERT(cx->compartment() == compartment);
     JS_ASSERT(child->compartment() == parent->compartment());
+    JS_ASSERT(cx->isInsideCurrentCompartment(this));
 
     KidsPointer *kidp = &parent->kids;
 
@@ -78,7 +77,7 @@ PropertyTree::insertChild(JSContext *cx, Shape *parent, Shape *child)
 
         KidsHash *hash = HashChildren(shape, child);
         if (!hash) {
-            JS_ReportOutOfMemory(cx);
+            js_ReportOutOfMemory(cx);
             return false;
         }
         kidp->setHash(hash);
@@ -87,7 +86,7 @@ PropertyTree::insertChild(JSContext *cx, Shape *parent, Shape *child)
     }
 
     if (!kidp->toHash()->putNew(child, child)) {
-        JS_ReportOutOfMemory(cx);
+        js_ReportOutOfMemory(cx);
         return false;
     }
 
@@ -106,7 +105,7 @@ Shape::removeChild(Shape *child)
     if (kidp->isShape()) {
         JS_ASSERT(kidp->toShape() == child);
         kidp->setNull();
-        child->parent = NULL;
+        child->parent = nullptr;
         return;
     }
 
@@ -114,7 +113,7 @@ Shape::removeChild(Shape *child)
     JS_ASSERT(hash->count() >= 2);      /* otherwise kidp->isShape() should be true */
 
     hash->remove(child);
-    child->parent = NULL;
+    child->parent = nullptr;
 
     if (hash->count() == 1) {
         /* Convert from HASH form back to SHAPE form. */
@@ -127,73 +126,103 @@ Shape::removeChild(Shape *child)
 }
 
 Shape *
-PropertyTree::getChild(JSContext *cx, Shape *parent_, uint32_t nfixed, const StackShape &child)
+PropertyTree::getChild(ExclusiveContext *cx, Shape *parentArg, StackShape &unrootedChild)
 {
-    {
-        Shape *shape = NULL;
+    RootedShape parent(cx, parentArg);
+    JS_ASSERT(parent);
 
-        JS_ASSERT(parent_);
+    Shape *existingShape = nullptr;
 
-        /*
-         * The property tree has extremely low fan-out below its root in
-         * popular embeddings with real-world workloads. Patterns such as
-         * defining closures that capture a constructor's environment as
-         * getters or setters on the new object that is passed in as
-         * |this| can significantly increase fan-out below the property
-         * tree root -- see bug 335700 for details.
-         */
-        KidsPointer *kidp = &parent_->kids;
-        if (kidp->isShape()) {
-            Shape *kid = kidp->toShape();
-            if (kid->matches(child))
-                shape = kid;
-        } else if (kidp->isHash()) {
-            if (KidsHash::Ptr p = kidp->toHash()->lookup(child))
-                shape = *p;
-        } else {
-            /* If kidp->isNull(), we always insert. */
-        }
-
-#ifdef JSGC_INCREMENTAL
-        if (shape) {
-            JS::Zone *zone = shape->zone();
-            if (zone->needsBarrier()) {
-                /*
-                 * We need a read barrier for the shape tree, since these are weak
-                 * pointers.
-                 */
-                Shape *tmp = shape;
-                MarkShapeUnbarriered(zone->barrierTracer(), &tmp, "read barrier");
-                JS_ASSERT(tmp == shape);
-            } else if (zone->isGCSweeping() && !shape->isMarked() &&
-                       !shape->arenaHeader()->allocatedDuringIncremental)
-            {
-                /*
-                 * The shape we've found is unreachable and due to be finalized, so
-                 * remove our weak reference to it and don't use it.
-                 */
-                JS_ASSERT(parent_->isMarked());
-                parent_->removeChild(shape);
-                shape = NULL;
-            }
-        }
-#endif
-
-        if (shape)
-            return shape;
+    /*
+     * The property tree has extremely low fan-out below its root in
+     * popular embeddings with real-world workloads. Patterns such as
+     * defining closures that capture a constructor's environment as
+     * getters or setters on the new object that is passed in as
+     * |this| can significantly increase fan-out below the property
+     * tree root -- see bug 335700 for details.
+     */
+    KidsPointer *kidp = &parent->kids;
+    if (kidp->isShape()) {
+        Shape *kid = kidp->toShape();
+        if (kid->matches(unrootedChild))
+        existingShape = kid;
+    } else if (kidp->isHash()) {
+        if (KidsHash::Ptr p = kidp->toHash()->lookup(unrootedChild))
+        existingShape = *p;
+    } else {
+        /* If kidp->isNull(), we always insert. */
     }
 
-    StackShape::AutoRooter childRoot(cx, &child);
-    RootedShape parent(cx, parent_);
+#ifdef JSGC_INCREMENTAL
+    if (existingShape) {
+        JS::Zone *zone = existingShape->zone();
+        if (zone->needsBarrier()) {
+            /*
+             * We need a read barrier for the shape tree, since these are weak
+             * pointers.
+             */
+            Shape *tmp = existingShape;
+            MarkShapeUnbarriered(zone->barrierTracer(), &tmp, "read barrier");
+            JS_ASSERT(tmp == existingShape);
+        } else if (zone->isGCSweeping() && !existingShape->isMarked() &&
+                   !existingShape->arenaHeader()->allocatedDuringIncremental)
+        {
+            /*
+             * The shape we've found is unreachable and due to be finalized, so
+             * remove our weak reference to it and don't use it.
+             */
+            JS_ASSERT(parent->isMarked());
+            parent->removeChild(existingShape);
+            existingShape = nullptr;
+        }
+    }
+#endif
+
+    if (existingShape)
+        return existingShape;
+
+    RootedGeneric<StackShape*> child(cx, &unrootedChild);
 
     Shape *shape = newShape(cx);
     if (!shape)
-        return NULL;
+        return nullptr;
 
-    new (shape) Shape(child, nfixed);
+    new (shape) Shape(*child, parent->numFixedSlots());
 
     if (!insertChild(cx, parent, shape))
-        return NULL;
+        return nullptr;
+
+    return shape;
+}
+
+Shape *
+PropertyTree::lookupChild(ThreadSafeContext *cx, Shape *parent, const StackShape &child)
+{
+    /* Keep this in sync with the logic of getChild above. */
+    Shape *shape = nullptr;
+
+    JS_ASSERT(parent);
+
+    KidsPointer *kidp = &parent->kids;
+    if (kidp->isShape()) {
+        Shape *kid = kidp->toShape();
+        if (kid->matches(child))
+            shape = kid;
+    } else if (kidp->isHash()) {
+        if (KidsHash::Ptr p = kidp->toHash()->readonlyThreadsafeLookup(child))
+            shape = *p;
+    } else {
+        return nullptr;
+    }
+
+#if defined(JSGC_INCREMENTAL) && defined(DEBUG)
+    if (shape) {
+        JS::Zone *zone = shape->arenaHeader()->zone;
+        JS_ASSERT(!zone->needsBarrier());
+        JS_ASSERT(!(zone->isGCSweeping() && !shape->isMarked() &&
+                    !shape->arenaHeader()->allocatedDuringIncremental));
+    }
+#endif
 
     return shape;
 }
@@ -255,6 +284,9 @@ KidsPointer::checkConsistency(Shape *aKid) const
 void
 Shape::dump(JSContext *cx, FILE *fp) const
 {
+    /* This is only used from gdb, so allowing GC here would just be confusing. */
+    gc::AutoSuppressGC suppress(cx);
+
     jsid propid = this->propid();
 
     JS_ASSERT(!JSID_IS_VOID(propid));
@@ -267,10 +299,10 @@ Shape::dump(JSContext *cx, FILE *fp) const
             str = JSID_TO_ATOM(propid);
         } else {
             JS_ASSERT(JSID_IS_OBJECT(propid));
-            RootedValue v(cx, IdToValue(propid));
-            JSString *s = ToStringSlow<CanGC>(cx, v);
+            Value v = IdToValue(propid);
+            JSString *s = ToStringSlow<NoGC>(cx, v);
             fputs("object ", fp);
-            str = s ? s->ensureLinear(cx) : NULL;
+            str = s ? s->ensureLinear(cx) : nullptr;
         }
         if (!str)
             fputs("<error>", fp);
@@ -302,13 +334,10 @@ Shape::dump(JSContext *cx, FILE *fp) const
         int first = 1;
         fputs("(", fp);
 #define DUMP_FLAG(name, display) if (flags & name) fputs(&(" " #display)[first], fp), first = 0
-        DUMP_FLAG(HAS_SHORTID, has_shortid);
         DUMP_FLAG(IN_DICTIONARY, in_dictionary);
 #undef  DUMP_FLAG
         fputs(") ", fp);
     }
-
-    fprintf(fp, "shortid %d\n", maybeShortid());
 }
 
 void
@@ -341,36 +370,4 @@ Shape::dumpSubtree(JSContext *cx, int level, FILE *fp) const
     }
 }
 
-void
-js::PropertyTree::dumpShapes(JSRuntime *rt)
-{
-    static bool init = false;
-    static FILE *dumpfp = NULL;
-    if (!init) {
-        init = true;
-        const char *name = getenv("JS_DUMP_SHAPES_FILE");
-        if (!name)
-            return;
-        dumpfp = fopen(name, "a");
-    }
-
-    if (!dumpfp)
-        return;
-
-    fprintf(dumpfp, "rt->gcNumber = %lu", (unsigned long)rt->gcNumber);
-
-    for (gc::GCCompartmentsIter c(rt); !c.done(); c.next()) {
-        fprintf(dumpfp, "*** Compartment %p ***\n", (void *)c.get());
-
-        /*
-        typedef JSCompartment::EmptyShapeSet HS;
-        HS &h = c->emptyShapes;
-        for (HS::Range r = h.all(); !r.empty(); r.popFront()) {
-            Shape *empty = r.front();
-            empty->dumpSubtree(rt, 0, dumpfp);
-            putc('\n', dumpfp);
-        }
-        */
-    }
-}
 #endif

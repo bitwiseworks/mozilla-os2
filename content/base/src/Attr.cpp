@@ -10,29 +10,31 @@
 #include "mozilla/dom/Attr.h"
 #include "mozilla/dom/AttrBinding.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/EventDispatcher.h"
+#include "mozilla/InternalMutationEvent.h"
 #include "nsContentCreatorFunctions.h"
-#include "nsINameSpaceManager.h"
 #include "nsError.h"
 #include "nsUnicharUtils.h"
 #include "nsDOMString.h"
+#include "nsIContentInlines.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsIDOMUserDataHandler.h"
-#include "nsEventDispatcher.h"
 #include "nsGkAtoms.h"
 #include "nsCOMArray.h"
+#include "nsNameSpaceManager.h"
 #include "nsNodeUtils.h"
-#include "nsEventListenerManager.h"
 #include "nsTextNode.h"
 #include "mozAutoDocUpdate.h"
-#include "nsMutationEvent.h"
-#include "nsAsyncDOMEvent.h"
 #include "nsWrapperCacheInlines.h"
 
 nsIAttribute::nsIAttribute(nsDOMAttributeMap* aAttrMap,
-                           already_AddRefed<nsINodeInfo> aNodeInfo,
+                           already_AddRefed<nsINodeInfo>& aNodeInfo,
                            bool aNsAware)
 : nsINode(aNodeInfo), mAttrMap(aAttrMap), mNsAware(aNsAware)
+{
+}
+
+nsIAttribute::~nsIAttribute()
 {
 }
 
@@ -43,7 +45,7 @@ namespace dom {
 bool Attr::sInitialized;
 
 Attr::Attr(nsDOMAttributeMap *aAttrMap,
-           already_AddRefed<nsINodeInfo> aNodeInfo,
+           already_AddRefed<nsINodeInfo>&& aNodeInfo,
            const nsAString  &aValue, bool aNsAware)
   : nsIAttribute(aAttrMap, aNodeInfo, aNsAware), mValue(aValue)
 {
@@ -56,6 +58,8 @@ Attr::Attr(nsDOMAttributeMap *aAttrMap,
 
   SetIsDOMBinding();
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(Attr)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Attr)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
@@ -74,7 +78,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Attr)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(Attr)
-  Element* ownerElement = tmp->GetContentInternal();
+  Element* ownerElement = tmp->GetElement();
   if (tmp->IsBlack()) {
     if (ownerElement) {
       // The attribute owns the element via attribute map so we can
@@ -100,8 +104,8 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 // QueryInterface implementation for Attr
 NS_INTERFACE_TABLE_HEAD(Attr)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_TABLE6(Attr, nsINode, nsIDOMAttr, nsIAttribute, nsIDOMNode,
-                      nsIDOMEventTarget, EventTarget)
+  NS_INTERFACE_TABLE(Attr, nsINode, nsIDOMAttr, nsIAttribute, nsIDOMNode,
+                     nsIDOMEventTarget, EventTarget)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(Attr)
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsISupportsWeakReference,
                                  new nsNodeSupportsWeakRefTearoff(this))
@@ -110,8 +114,8 @@ NS_INTERFACE_TABLE_HEAD(Attr)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Attr)
-NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_DESTROY(Attr,
-                                              nsNodeUtils::LastRelease(this))
+NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE(Attr,
+                                                   nsNodeUtils::LastRelease(this))
 
 void
 Attr::SetMap(nsDOMAttributeMap *aMap)
@@ -125,10 +129,14 @@ Attr::SetMap(nsDOMAttributeMap *aMap)
   mAttrMap = aMap;
 }
 
-nsIContent*
-Attr::GetContent() const
+Element*
+Attr::GetElement() const
 {
-  return GetContentInternal();
+  if (!mAttrMap) {
+    return nullptr;
+  }
+  nsIContent* content = mAttrMap->GetContent();
+  return content ? content->AsElement() : nullptr;
 }
 
 nsresult
@@ -178,10 +186,10 @@ Attr::GetNameAtom(nsIContent* aContent)
 NS_IMETHODIMP
 Attr::GetValue(nsAString& aValue)
 {
-  nsIContent* content = GetContentInternal();
-  if (content) {
-    nsCOMPtr<nsIAtom> nameAtom = GetNameAtom(content);
-    content->GetAttr(mNodeInfo->NamespaceID(), nameAtom, aValue);
+  Element* element = GetElement();
+  if (element) {
+    nsCOMPtr<nsIAtom> nameAtom = GetNameAtom(element);
+    element->GetAttr(mNodeInfo->NamespaceID(), nameAtom, aValue);
   }
   else {
     aValue = mValue;
@@ -193,14 +201,14 @@ Attr::GetValue(nsAString& aValue)
 void
 Attr::SetValue(const nsAString& aValue, ErrorResult& aRv)
 {
-  nsIContent* content = GetContentInternal();
-  if (!content) {
+  Element* element = GetElement();
+  if (!element) {
     mValue = aValue;
     return;
   }
 
-  nsCOMPtr<nsIAtom> nameAtom = GetNameAtom(content);
-  aRv = content->SetAttr(mNodeInfo->NamespaceID(),
+  nsCOMPtr<nsIAtom> nameAtom = GetNameAtom(element);
+  aRv = element->SetAttr(mNodeInfo->NamespaceID(),
                          nameAtom,
                          mNodeInfo->GetPrefixAtom(),
                          aValue,
@@ -218,7 +226,6 @@ Attr::SetValue(const nsAString& aValue)
 bool
 Attr::Specified() const
 {
-  OwnerDoc()->WarnOnceAbout(nsIDocument::eSpecified);
   return true;
 }
 
@@ -234,7 +241,7 @@ Element*
 Attr::GetOwnerElement(ErrorResult& aRv)
 {
   OwnerDoc()->WarnOnceAbout(nsIDocument::eOwnerElement);
-  return GetContentInternal();
+  return GetElement();
 }
 
 NS_IMETHODIMP
@@ -243,9 +250,9 @@ Attr::GetOwnerElement(nsIDOMElement** aOwnerElement)
   NS_ENSURE_ARG_POINTER(aOwnerElement);
   OwnerDoc()->WarnOnceAbout(nsIDocument::eOwnerElement);
 
-  nsIContent* content = GetContentInternal();
-  if (content) {
-    return CallQueryInterface(content, aOwnerElement);
+  Element* element = GetElement();
+  if (element) {
+    return CallQueryInterface(element, aOwnerElement);
   }
 
   *aOwnerElement = nullptr;
@@ -287,11 +294,11 @@ Attr::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
 }
 
 already_AddRefed<nsIURI>
-Attr::GetBaseURI() const
+Attr::GetBaseURI(bool aTryUseXHRDocBaseURI) const
 {
-  nsINode *parent = GetContentInternal();
+  Element* parent = GetElement();
 
-  return parent ? parent->GetBaseURI() : nullptr;
+  return parent ? parent->GetBaseURI(aTryUseXHRDocBaseURI) : nullptr;
 }
 
 void
@@ -314,16 +321,14 @@ Attr::SetTextContentInternal(const nsAString& aTextContent,
 NS_IMETHODIMP
 Attr::GetIsId(bool* aReturn)
 {
-  nsIContent* content = GetContentInternal();
-  if (!content)
-  {
+  Element* element = GetElement();
+  if (!element) {
     *aReturn = false;
     return NS_OK;
   }
 
-  nsIAtom* idAtom = content->GetIDAttributeName();
-  if (!idAtom)
-  {
+  nsIAtom* idAtom = element->GetIDAttributeName();
+  if (!idAtom) {
     *aReturn = false;
     return NS_OK;
   }
@@ -376,7 +381,7 @@ Attr::RemoveChildAt(uint32_t aIndex, bool aNotify)
 }
 
 nsresult
-Attr::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+Attr::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mCanHandle = true;
   return NS_OK;
@@ -395,15 +400,9 @@ Attr::Shutdown()
 }
 
 JSObject*
-Attr::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+Attr::WrapObject(JSContext* aCx)
 {
-  return AttrBinding::Wrap(aCx, aScope, this);
-}
-
-Element*
-Attr::GetContentInternal() const
-{
-  return mAttrMap ? mAttrMap->GetContent() : nullptr;
+  return AttrBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

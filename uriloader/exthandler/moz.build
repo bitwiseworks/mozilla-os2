@@ -17,12 +17,11 @@ XPIDL_SOURCES += [
     'nsIHelperAppLauncherDialog.idl',
 ]
 
-MODULE = 'exthandler'
+XPIDL_MODULE = 'exthandler'
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
-    osdir = 'os2'
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     osdir = 'win'
+    LOCAL_INCLUDES += ['win']
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     osdir = 'win'
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
@@ -41,73 +40,109 @@ EXPORTS += [
 ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    EXPORTS += [
+    EXPORTS += [ '%s/%s' % (osdir, f) for f in [
         'nsExternalSharingAppService.h',
         'nsExternalURLHandlerService.h',
-    ]
+    ]]
 
 if CONFIG['MOZ_ENABLE_MEEGOTOUCHSHARE']:
-    EXPORTS += ['nsExternalSharingAppService.h']
+    EXPORTS += [
+        osdir + '/nsExternalSharingAppService.h',
+    ]
 
 EXPORTS.mozilla.dom += [
     'ExternalHelperAppChild.h',
     'ExternalHelperAppParent.h',
 ]
 
-CPP_SOURCES += [
-    'ExternalHelperAppChild.cpp',
+UNIFIED_SOURCES += [
     'ExternalHelperAppParent.cpp',
-    'nsExternalHelperAppService.cpp',
-    'nsExternalProtocolHandler.cpp',
     'nsLocalHandlerApp.cpp',
     'nsMIMEInfoImpl.cpp',
 ]
 
+# These files can't be built in unified mode because they force NSPR logging.
+SOURCES += [
+    'ExternalHelperAppChild.cpp',
+    'nsExternalHelperAppService.cpp',
+    'nsExternalProtocolHandler.cpp',
+]
+
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    # TODO: CMMSRCS go here
-    pass
+    UNIFIED_SOURCES += [
+        'mac/nsLocalHandlerAppMac.mm',
+        'mac/nsMIMEInfoMac.mm',
+    ]
+    # These files can't be built in unified mode because they force NSPR logging.
+    SOURCES += [
+        'mac/nsOSHelperAppService.mm',
+    ]
 else:
-    CPP_SOURCES += [
-        'nsOSHelperAppService.cpp',
+    # These files can't be built in unified mode because they force NSPR logging.
+    SOURCES += [
+        osdir + '/nsOSHelperAppService.cpp',
     ]
 
 if CONFIG['MOZ_ENABLE_GTK']:
-    CPP_SOURCES += [
-        'nsGNOMERegistry.cpp',
-        'nsMIMEInfoUnix.cpp',
+    UNIFIED_SOURCES += [
+        'unix/nsGNOMERegistry.cpp',
+        'unix/nsMIMEInfoUnix.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    CPP_SOURCES += [
-        'nsMIMEInfoAndroid.cpp',
-        'nsAndroidHandlerApp.cpp',
-        'nsExternalSharingAppService.cpp',
-        'nsExternalURLHandlerService.cpp',
+    UNIFIED_SOURCES += [
+        'android/nsAndroidHandlerApp.cpp',
+        'android/nsExternalSharingAppService.cpp',
+        'android/nsExternalURLHandlerService.cpp',
+        'android/nsMIMEInfoAndroid.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
-    CPP_SOURCES += [
-        'nsGNOMERegistry.cpp',
-        'nsMIMEInfoUnix.cpp',
+    UNIFIED_SOURCES += [
+        'unix/nsGNOMERegistry.cpp',
+        'unix/nsMIMEInfoUnix.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
-    CPP_SOURCES += [
-        'nsMIMEInfoWin.cpp',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
-    CPP_SOURCES += [
-        'nsMIMEInfoOS2.cpp',
+    # These files can't be built in unified mode because they force NSPR logging.
+    SOURCES += [
+        'win/nsMIMEInfoWin.cpp',
     ]
 
 if CONFIG['MOZ_ENABLE_DBUS']:
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'nsDBusHandlerApp.cpp',
     ]
 
 if CONFIG['MOZ_ENABLE_MEEGOTOUCHSHARE']:
-    CPP_SOURCES += [
-        'nsMeegoExternalSharingAppService.cpp',
+    UNIFIED_SOURCES += [
+        'unix/nsMeegoExternalSharingAppService.cpp',
     ]
 
 if CONFIG['MOZ_ENABLE_CONTENTACTION']:
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'nsContentHandlerApp.cpp',
     ]
+
+EXTRA_COMPONENTS += [
+    'nsHandlerService.js',
+    'nsHandlerService.manifest',
+    'nsWebHandlerApp.js',
+    'nsWebHandlerApp.manifest',
+]
+
+IPDL_SOURCES += [
+    'PExternalHelperApp.ipdl',
+]
+
+FAIL_ON_WARNINGS = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'
+
+LOCAL_INCLUDES += [
+    '/content/base/src',
+    '/dom/base',
+    '/dom/ipc',
+    '/netwerk/base/src',
+    '/netwerk/protocol/http',
+]
+

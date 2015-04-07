@@ -5,47 +5,32 @@
 
 #ifndef mozilla_dom_HTMLSharedListElement_h
 #define mozilla_dom_HTMLSharedListElement_h
+
 #include "mozilla/Attributes.h"
-#include "mozilla/Util.h"
 
 #include "nsIDOMHTMLOListElement.h"
-#include "nsIDOMHTMLDListElement.h"
 #include "nsIDOMHTMLUListElement.h"
 #include "nsGenericHTMLElement.h"
 
 namespace mozilla {
 namespace dom {
 
-class HTMLSharedListElement : public nsGenericHTMLElement,
-                              public nsIDOMHTMLOListElement,
-                              public nsIDOMHTMLDListElement,
-                              public nsIDOMHTMLUListElement
+class HTMLSharedListElement MOZ_FINAL : public nsGenericHTMLElement,
+                                        public nsIDOMHTMLOListElement,
+                                        public nsIDOMHTMLUListElement
 {
 public:
-  HTMLSharedListElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  HTMLSharedListElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : nsGenericHTMLElement(aNodeInfo)
   {
-    SetIsDOMBinding();
   }
   virtual ~HTMLSharedListElement();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
-
   // nsIDOMHTMLOListElement
   NS_DECL_NSIDOMHTMLOLISTELEMENT
-
-  // nsIDOMHTMLDListElement
-  // fully declared by NS_DECL_NSIDOMHTMLOLISTELEMENT
 
   // nsIDOMHTMLUListElement
   // fully declared by NS_DECL_NSIDOMHTMLOLISTELEMENT
@@ -57,11 +42,6 @@ public:
   virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const MOZ_OVERRIDE;
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
-
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE
-  {
-    return static_cast<nsIDOMHTMLOListElement*>(this);
-  }
 
   bool Reversed() const
   {
@@ -97,8 +77,11 @@ public:
   }
 
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
+
+private:
+  static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                    nsRuleData* aData);
 };
 
 } // namespace dom

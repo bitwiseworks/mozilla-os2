@@ -2,25 +2,30 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-// gSyncUI handles updating the tools menu
+// gSyncUI handles updating the tools menu and displaying notifications.
 let gSyncUI = {
+  DEFAULT_EOL_URL: "https://www.mozilla.org/firefox/?utm_source=synceol",
+
   _obs: ["weave:service:sync:start",
-         "weave:service:sync:delayed",
          "weave:service:quota:remaining",
          "weave:service:setup-complete",
          "weave:service:login:start",
          "weave:service:login:finish",
          "weave:service:logout:finish",
          "weave:service:start-over",
+         "weave:service:start-over:finish",
          "weave:ui:login:error",
          "weave:ui:sync:error",
          "weave:ui:sync:finish",
          "weave:ui:clear-error",
+         "weave:eol",
   ],
 
   _unloaded: false,
 
-  init: function SUI_init() {
+  init: function () {
+    Cu.import("resource://services-common/stringbundle.js");
+
     // Proceed to set up the UI if Sync has already started up.
     // Otherwise we'll do it when Sync is firing up.
     let xps = Components.classes["@mozilla.org/weave/service;1"]
@@ -80,33 +85,66 @@ let gSyncUI = {
     Services.obs.removeObserver(this, "weave:notification:added");
   },
 
-  _wasDelayed: false,
-
   _needsSetup: function SUI__needsSetup() {
+    // We want to treat "account needs verification" as "needs setup". So
+    // "reach in" to Weave.Status._authManager to check whether we the signed-in
+    // user is verified.
+    // Referencing Weave.Status spins a nested event loop to initialize the
+    // authManager, so this should always return a value directly.
+    // This only applies to fxAccounts-based Sync.
+    if (Weave.Status._authManager._signedInUser) {
+      // If we have a signed in user already, and that user is not verified,
+      // revert to the "needs setup" state.
+      if (!Weave.Status._authManager._signedInUser.verified) {
+        return true;
+      }
+    }
+
     let firstSync = "";
     try {
       firstSync = Services.prefs.getCharPref("services.sync.firstSync");
     } catch (e) { }
+
     return Weave.Status.checkSetup() == Weave.CLIENT_NOT_CONFIGURED ||
            firstSync == "notReady";
   },
 
+  _loginFailed: function () {
+    return Weave.Status.login == Weave.LOGIN_FAILED_LOGIN_REJECTED;
+  },
+
   updateUI: function SUI_updateUI() {
     let needsSetup = this._needsSetup();
-    document.getElementById("sync-setup-state").hidden = !needsSetup;
-    document.getElementById("sync-syncnow-state").hidden = needsSetup;
+    let loginFailed = this._loginFailed();
+
+    // Start off with a clean slate
+    document.getElementById("sync-reauth-state").hidden = true;
+    document.getElementById("sync-setup-state").hidden = true;
+    document.getElementById("sync-syncnow-state").hidden = true;
+
+    if (loginFailed) {
+      document.getElementById("sync-reauth-state").hidden = false;
+    } else if (needsSetup) {
+      document.getElementById("sync-setup-state").hidden = false;
+    } else {
+      document.getElementById("sync-syncnow-state").hidden = false;
+    }
 
     if (!gBrowser)
       return;
 
-    let button = document.getElementById("sync-button");
-    if (!button)
-      return;
+    let syncButton = document.getElementById("sync-button");
+    let panelHorizontalButton = document.getElementById("PanelUI-fxa-status");
+    [syncButton, panelHorizontalButton].forEach(function(button) {
+      if (!button)
+        return;
+      button.removeAttribute("status");
+    });
 
-    button.removeAttribute("status");
+    if (needsSetup && syncButton)
+      syncButton.removeAttribute("tooltiptext");
+
     this._updateLastSyncTime();
-    if (needsSetup)
-      button.removeAttribute("tooltiptext");
   },
 
 
@@ -115,26 +153,12 @@ let gSyncUI = {
     if (!gBrowser)
       return;
 
-    let button = document.getElementById("sync-button");
-    if (!button)
-      return;
-
-    button.setAttribute("status", "active");
-  },
-
-  onSyncDelay: function SUI_onSyncDelay() {
-    // basically, we want to just inform users that stuff is going to take a while
-    let title = this._stringBundle.GetStringFromName("error.sync.no_node_found.title");
-    let description = this._stringBundle.GetStringFromName("error.sync.no_node_found");
-    let buttons = [new Weave.NotificationButton(
-      this._stringBundle.GetStringFromName("error.sync.serverStatusButton.label"),
-      this._stringBundle.GetStringFromName("error.sync.serverStatusButton.accesskey"),
-      function() { gSyncUI.openServerStatus(); return true; }
-    )];
-    let notification = new Weave.Notification(
-      title, description, null, Weave.Notifications.PRIORITY_INFO, buttons);
-    Weave.Notifications.replaceTitle(notification);
-    this._wasDelayed = true;
+    ["sync-button", "PanelUI-fxa-status"].forEach(function(id) {
+      let button = document.getElementById(id);
+      if (!button)
+        return;
+      button.setAttribute("status", "active");
+    });
   },
 
   onLoginFinish: function SUI_onLoginFinish() {
@@ -153,6 +177,11 @@ let gSyncUI = {
 
     // if we haven't set up the client, don't show errors
     if (this._needsSetup()) {
+      this.updateUI();
+      return;
+    }
+    // if we are still waiting for the identity manager to initialize, don't show errors
+    if (Weave.Status.login == Weave.LOGIN_FAILED_NOT_READY) {
       this.updateUI();
       return;
     }
@@ -208,6 +237,37 @@ let gSyncUI = {
     Weave.Notifications.replaceTitle(notification);
   },
 
+  _getAppName: function () {
+    let brand = new StringBundle("chrome://branding/locale/brand.properties");
+    return brand.get("brandShortName");
+  },
+
+  onEOLNotice: function (data) {
+    let code = data.code;
+    let kind = (code == "hard-eol") ? "error" : "warning";
+    let url = data.url || gSyncUI.DEFAULT_EOL_URL;
+
+    let title = this._stringBundle.GetStringFromName(kind + ".sync.eol.label");
+    let description = this._stringBundle.formatStringFromName(kind + ".sync.eol.description",
+                                                              [this._getAppName()],
+                                                              1);
+
+    let buttons = [];
+    buttons.push(new Weave.NotificationButton(
+      this._stringBundle.GetStringFromName("sync.eol.learnMore.label"),
+      this._stringBundle.GetStringFromName("sync.eol.learnMore.accesskey"),
+      function() {
+        window.openUILinkIn(url, "tab");
+        return true;
+      }
+    ));
+
+    let priority = (kind == "error") ? Weave.Notifications.PRIORITY_WARNING :
+                                       Weave.Notifications.PRIORITY_INFO;
+    let notification = new Weave.Notification(title, description, null, priority, buttons);
+    Weave.Notifications.replaceTitle(notification);
+  },
+
   openServerStatus: function () {
     let statusURL = Services.prefs.getCharPref("services.sync.statusURL");
     window.openUILinkIn(statusURL, "tab");
@@ -239,13 +299,26 @@ let gSyncUI = {
    */
 
   openSetup: function SUI_openSetup(wizardType) {
-    let win = Services.wm.getMostRecentWindow("Weave:AccountSetup");
-    if (win)
-      win.focus();
-    else {
-      window.openDialog("chrome://browser/content/sync/setup.xul",
-                        "weaveSetup", "centerscreen,chrome,resizable=no",
-                        wizardType);
+    let xps = Components.classes["@mozilla.org/weave/service;1"]
+                                .getService(Components.interfaces.nsISupports)
+                                .wrappedJSObject;
+    if (xps.fxAccountsEnabled) {
+      fxAccounts.getSignedInUser().then(userData => {
+        if (userData) {
+          this.openPrefs();
+        } else {
+          switchToTabHavingURI("about:accounts", true);
+        }
+      });
+    } else {
+      let win = Services.wm.getMostRecentWindow("Weave:AccountSetup");
+      if (win)
+        win.focus();
+      else {
+        window.openDialog("chrome://browser/content/sync/setup.xul",
+                          "weaveSetup", "centerscreen,chrome,resizable=no",
+                          wizardType);
+      }
     }
   },
 
@@ -275,6 +348,9 @@ let gSyncUI = {
     openPreferences("paneSync");
   },
 
+  openSignInAgainPage: function () {
+    switchToTabHavingURI("about:accounts?action=reauth", true);
+  },
 
   // Helpers
   _updateLastSyncTime: function SUI__updateLastSyncTime() {
@@ -313,12 +389,6 @@ let gSyncUI = {
 
     // Clear out sync failures on a successful sync
     this.clearError(title);
-
-    if (this._wasDelayed && Weave.Status.sync != Weave.NO_SYNC_NODE_FOUND) {
-      title = this._stringBundle.GetStringFromName("error.sync.no_node_found.title");
-      this.clearError(title);
-      this._wasDelayed = false;
-    }
   },
 
   onSyncError: function SUI_onSyncError() {
@@ -390,12 +460,6 @@ let gSyncUI = {
       new Weave.Notification(title, description, null, priority, buttons);
     Weave.Notifications.replaceTitle(notification);
 
-    if (this._wasDelayed && Weave.Status.sync != Weave.NO_SYNC_NODE_FOUND) {
-      title = this._stringBundle.GetStringFromName("error.sync.no_node_found.title");
-      Weave.Notifications.removeAll(title);
-      this._wasDelayed = false;
-    }
-
     this.updateUI();
   },
 
@@ -403,6 +467,13 @@ let gSyncUI = {
     if (this._unloaded) {
       Cu.reportError("SyncUI observer called after unload: " + topic);
       return;
+    }
+
+    // Unwrap, just like Svc.Obs, but without pulling in that dependency.
+    if (subject && typeof subject == "object" &&
+        ("wrappedJSObject" in subject) &&
+        ("observersModuleSubjectWrapper" in subject.wrappedJSObject)) {
+      subject = subject.wrappedJSObject.object;
     }
 
     switch (topic) {
@@ -414,9 +485,6 @@ let gSyncUI = {
         break;
       case "weave:ui:sync:error":
         this.onSyncError();
-        break;
-      case "weave:service:sync:delayed":
-        this.onSyncDelay();
         break;
       case "weave:service:quota:remaining":
         this.onQuotaNotice();
@@ -439,6 +507,9 @@ let gSyncUI = {
       case "weave:service:start-over":
         this.onStartOver();
         break;
+      case "weave:service:start-over:finish":
+        this.updateUI();
+        break;
       case "weave:service:ready":
         this.initUI();
         break;
@@ -447,6 +518,9 @@ let gSyncUI = {
         break;
       case "weave:ui:clear-error":
         this.clearError();
+        break;
+      case "weave:eol":
+        this.onEOLNotice(subject);
         break;
     }
   },

@@ -7,14 +7,16 @@
 #include "nsGkAtoms.h"
 #include "nsMathMLElement.h"
 
+using namespace mozilla::dom;
+
 // MathML Element Factory (declared in nsContentCreatorFunctions.h)
 nsresult
-NS_NewMathMLElement(nsIContent** aResult, already_AddRefed<nsINodeInfo> aNodeInfo)
+NS_NewMathMLElement(Element** aResult, already_AddRefed<nsINodeInfo>&& aNodeInfo)
 {
-  aNodeInfo.get()->SetIDAttributeAtom(nsGkAtoms::id);
+  nsCOMPtr<nsINodeInfo> ni = aNodeInfo;
+  ni->SetIDAttributeAtom(nsGkAtoms::id);
 
-  nsMathMLElement* it = new nsMathMLElement(aNodeInfo);
-  NS_ENSURE_TRUE(it, NS_ERROR_OUT_OF_MEMORY);
+  nsMathMLElement* it = new nsMathMLElement(ni.forget());
 
   NS_ADDREF(*aResult = it);
   return NS_OK;

@@ -8,24 +8,21 @@ add permissions to the profile
 """
 
 __all__ = ['MissingPrimaryLocationError', 'MultiplePrimaryLocationsError',
-           'DuplicateLocationError', 'BadPortLocationError',
+           'DEFAULT_PORTS', 'DuplicateLocationError', 'BadPortLocationError',
            'LocationsSyntaxError', 'Location', 'ServerLocations',
            'Permissions']
 
 import codecs
 import itertools
 import os
-try:
-    import sqlite3
-except ImportError:
-    from pysqlite2 import dbapi2 as sqlite3
+import sqlite3
 import urlparse
 
 # http://hg.mozilla.org/mozilla-central/file/b871dfb2186f/build/automation.py.in#l28
-_DEFAULT_PORTS = { 'http': '8888',
-                   'https': '4443',
-                   'ws': '4443',
-                   'wss': '4443' }
+DEFAULT_PORTS = { 'http': '8888',
+                  'https': '4443',
+                  'ws': '4443',
+                  'wss': '4443' }
 
 class LocationError(Exception):
     """Signifies an improperly formed location."""
@@ -187,7 +184,7 @@ class ServerLocations(object):
                 host, port = netloc.rsplit(':', 1)
             except ValueError:
                 host = netloc
-                port = _DEFAULT_PORTS.get(scheme, '80')
+                port = DEFAULT_PORTS.get(scheme, '80')
 
             try:
                 location = Location(scheme, host, port, options)
@@ -242,6 +239,17 @@ class Permissions(object):
            expireType INTEGER,
            expireTime INTEGER)""")
 
+        rows = cursor.execute("PRAGMA table_info(moz_hosts)")
+        count = len(rows.fetchall())
+
+        # if the db contains 8 columns, we're using user_version 3
+        if count == 8:
+            statement = "INSERT INTO moz_hosts values(NULL, ?, ?, ?, 0, 0, 0, 0)"
+            cursor.execute("PRAGMA user_version=3;")
+        else:
+            statement = "INSERT INTO moz_hosts values(NULL, ?, ?, ?, 0, 0)"
+            cursor.execute("PRAGMA user_version=2;")
+
         for location in locations:
             # set the permissions
             permissions = { 'allowXULXBL': 'noxul' not in location.options }
@@ -250,17 +258,6 @@ class Permissions(object):
                     permission_type = 1
                 else:
                     permission_type = 2
-
-                rows = cursor.execute("PRAGMA table_info(moz_hosts)")
-                count = len(rows.fetchall())
-
-                # if the db contains 8 columns, we're using user_version 3
-                if count == 8:
-                    statement = "INSERT INTO moz_hosts values(NULL, ?, ?, ?, 0, 0, 0, 0)"
-                    cursor.execute("PRAGMA user_version=3;")
-                else:
-                    statement = "INSERT INTO moz_hosts values(NULL, ?, ?, ?, 0, 0)"
-                    cursor.execute("PRAGMA user_version=2;")
 
                 cursor.execute(statement,
                                (location.host, perm, permission_type))
@@ -275,15 +272,7 @@ class Permissions(object):
         returns a tuple of prefs, user_prefs
         """
 
-        # Grant God-power to all the privileged servers on which tests run.
         prefs = []
-        privileged = [i for i in self._locations if "privileged" in i.options]
-        for (i, l) in itertools.izip(itertools.count(1), privileged):
-            prefs.append(("capability.principal.codebase.p%s.granted" % i, "UniversalXPConnect"))
-
-            prefs.append(("capability.principal.codebase.p%s.id" % i, "%s://%s:%s" %
-                        (l.scheme, l.host, l.port)))
-            prefs.append(("capability.principal.codebase.p%s.subjectName" % i, ""))
 
         if proxy:
             user_prefs = self.pac_prefs(proxy)
@@ -297,7 +286,7 @@ class Permissions(object):
         return preferences for Proxy Auto Config. originally taken from
         http://mxr.mozilla.org/mozilla-central/source/build/automation.py.in
         """
-        proxy = _DEFAULT_PORTS
+        proxy = DEFAULT_PORTS.copy()
 
         # We need to proxy every server but the primary one.
         origins = ["'%s'" % l.url()
@@ -315,43 +304,56 @@ class Permissions(object):
             proxy.update(user_proxy)
 
         # TODO: this should live in a template!
-        # TODO: So changing the 5th line of the regex below from (\\\\\\\\d+)
-        # to (\\\\d+) makes this code work. Not sure why there would be this
-        # difference between automation.py.in and this file.
+        # If you must escape things in this string with backslashes, be aware
+        # of the multiple layers of escaping at work:
+        #
+        # - Python will unescape backslashes;
+        # - Writing out the prefs will escape things via JSON serialization;
+        # - The prefs file reader will unescape backslashes;
+        # - The JS engine parser will unescape backslashes.
         pacURL = """data:text/plain,
+var knownOrigins = (function () {
+  return [%(origins)s].reduce(function(t, h) { t[h] = true; return t; }, {})
+})();
+var uriRegex = new RegExp('^([a-z][-a-z0-9+.]*)' +
+                          '://' +
+                          '(?:[^/@]*@)?' +
+                          '(.*?)' +
+                          '(?::(\\\\d+))?/');
+var defaultPortsForScheme = {
+  'http': 80,
+  'ws': 80,
+  'https': 443,
+  'wss': 443
+};
+var originSchemesRemap = {
+  'ws': 'http',
+  'wss': 'https'
+};
+var proxyForScheme = {
+  'http': 'PROXY %(remote)s:%(http)s',
+  'https': 'PROXY %(remote)s:%(https)s',
+  'ws': 'PROXY %(remote)s:%(ws)s',
+  'wss': 'PROXY %(remote)s:%(wss)s'
+};
+
 function FindProxyForURL(url, host)
 {
-  var origins = [%(origins)s];
-  var regex = new RegExp('^([a-z][-a-z0-9+.]*)' +
-                         '://' +
-                         '(?:[^/@]*@)?' +
-                         '(.*?)' +
-                         '(?::(\\\\d+))?/');
-  var matches = regex.exec(url);
+  var matches = uriRegex.exec(url);
   if (!matches)
     return 'DIRECT';
-  var isHttp = matches[1] == 'http';
-  var isHttps = matches[1] == 'https';
-  var isWebSocket = matches[1] == 'ws';
-  var isWebSocketSSL = matches[1] == 'wss';
-  if (!matches[3])
-  {
-    if (isHttp | isWebSocket) matches[3] = '80';
-    if (isHttps | isWebSocketSSL) matches[3] = '443';
+  var originalScheme = matches[1];
+  var host = matches[2];
+  var port = matches[3];
+  if (!port && originalScheme in defaultPortsForScheme) {
+    port = defaultPortsForScheme[originalScheme];
   }
-  if (isWebSocket)
-    matches[1] = 'http';
-  if (isWebSocketSSL)
-    matches[1] = 'https';
+  var schemeForOriginChecking = originSchemesRemap[originalScheme] || originalScheme;
 
-  var origin = matches[1] + '://' + matches[2] + ':' + matches[3];
-  if (origins.indexOf(origin) < 0)
+  var origin = schemeForOriginChecking + '://' + host + ':' + port;
+  if (!(origin in knownOrigins))
     return 'DIRECT';
-  if (isHttp) return 'PROXY %(remote)s:%(http)s';
-  if (isHttps) return 'PROXY %(remote)s:%(https)s';
-  if (isWebSocket) return 'PROXY %(remote)s:%(ws)s';
-  if (isWebSocketSSL) return 'PROXY %(remote)s:%(wss)s';
-  return 'DIRECT';
+  return proxyForScheme[originalScheme] || 'DIRECT';
 }""" % proxy
         pacURL = "".join(pacURL.splitlines())
 

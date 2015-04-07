@@ -4,17 +4,23 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/SVGFEFloodElement.h"
+
+#include "FilterSupport.h"
 #include "mozilla/dom/SVGFEFloodElementBinding.h"
+#include "nsColor.h"
+#include "nsIFrame.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FEFlood)
+
+using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEFloodElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGFEFloodElement::WrapNode(JSContext *aCx)
 {
-  return SVGFEFloodElementBinding::Wrap(aCx, aScope, this);
+  return SVGFEFloodElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::StringInfo SVGFEFloodElement::sStringInfo[1] =
@@ -27,34 +33,27 @@ nsSVGElement::StringInfo SVGFEFloodElement::sStringInfo[1] =
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEFloodElement)
 
-nsresult
-SVGFEFloodElement::Filter(nsSVGFilterInstance *instance,
-                          const nsTArray<const Image*>& aSources,
-                          const Image* aTarget,
-                          const nsIntRect& aDataRect)
+FilterPrimitiveDescription
+SVGFEFloodElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
+                                           const IntRect& aFilterSubregion,
+                                           const nsTArray<bool>& aInputsAreTainted,
+                                           nsTArray<RefPtr<SourceSurface>>& aInputImages)
 {
+  FilterPrimitiveDescription descr(PrimitiveType::Flood);
   nsIFrame* frame = GetPrimaryFrame();
-  if (!frame) return NS_ERROR_FAILURE;
-  nsStyleContext* style = frame->StyleContext();
-
-  nscolor floodColor = style->StyleSVGReset()->mFloodColor;
-  float floodOpacity = style->StyleSVGReset()->mFloodOpacity;
-
-  gfxContext ctx(aTarget->mImage);
-  ctx.SetColor(gfxRGBA(NS_GET_R(floodColor) / 255.0,
-                       NS_GET_G(floodColor) / 255.0,
-                       NS_GET_B(floodColor) / 255.0,
-                       NS_GET_A(floodColor) / 255.0 * floodOpacity));
-  ctx.Rectangle(aTarget->mFilterPrimitiveSubregion);
-  ctx.Fill();
-  return NS_OK;
-}
-
-nsIntRect
-SVGFEFloodElement::ComputeTargetBBox(const nsTArray<nsIntRect>& aSourceBBoxes,
-                                     const nsSVGFilterInstance& aInstance)
-{
-  return GetMaxRect();
+  if (frame) {
+    nsStyleContext* style = frame->StyleContext();
+    nscolor floodColor = style->StyleSVGReset()->mFloodColor;
+    float floodOpacity = style->StyleSVGReset()->mFloodOpacity;
+    Color color(NS_GET_R(floodColor) / 255.0,
+                NS_GET_G(floodColor) / 255.0,
+                NS_GET_B(floodColor) / 255.0,
+                NS_GET_A(floodColor) / 255.0 * floodOpacity);
+    descr.Attributes().Set(eFloodColor, color);
+  } else {
+    descr.Attributes().Set(eFloodColor, Color());
+  }
+  return descr;
 }
 
 //----------------------------------------------------------------------

@@ -5,28 +5,42 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <vector>
-
-#include "AutoOpenSurface.h"
-#include "CompositorParent.h"
-#include "gfxSharedImageSurface.h"
-#include "ImageLayers.h"
-#include "mozilla/layout/RenderFrameParent.h"
-#include "mozilla/unused.h"
-#include "RenderTrace.h"
-#include "ShadowLayerParent.h"
 #include "LayerTransactionParent.h"
-#include "ShadowLayers.h"
-#include "ShadowLayerUtils.h"
-#include "TiledLayerBuffer.h"
-#include "gfxPlatform.h"
-#include "CompositableHost.h"
-#include "mozilla/layers/ThebesLayerComposite.h"
-#include "mozilla/layers/ImageLayerComposite.h"
-#include "mozilla/layers/ColorLayerComposite.h"
-#include "mozilla/layers/ContainerLayerComposite.h"
+#include <vector>                       // for vector
+#include "CompositableHost.h"           // for CompositableParent, Get, etc
+#include "ImageLayers.h"                // for ImageLayer
+#include "Layers.h"                     // for Layer, ContainerLayer, etc
+#include "ShadowLayerParent.h"          // for ShadowLayerParent
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxPoint3D.h"                 // for gfxPoint3D
+#include "CompositableTransactionParent.h"  // for EditReplyVector
+#include "ShadowLayersManager.h"        // for ShadowLayersManager
+#include "mozilla/gfx/BasePoint3D.h"    // for BasePoint3D
 #include "mozilla/layers/CanvasLayerComposite.h"
-#include "mozilla/layers/PLayerTransaction.h"
+#include "mozilla/layers/ColorLayerComposite.h"
+#include "mozilla/layers/Compositor.h"  // for Compositor
+#include "mozilla/layers/ContainerLayerComposite.h"
+#include "mozilla/layers/ImageLayerComposite.h"
+#include "mozilla/layers/LayerManagerComposite.h"
+#include "mozilla/layers/LayersMessages.h"  // for EditReply, etc
+#include "mozilla/layers/LayersSurfaces.h"  // for PGrallocBufferParent
+#include "mozilla/layers/LayersTypes.h"  // for MOZ_LAYERS_LOG
+#include "mozilla/layers/PCompositableParent.h"
+#include "mozilla/layers/PLayerParent.h"  // for PLayerParent
+#include "mozilla/layers/ThebesLayerComposite.h"
+#include "mozilla/mozalloc.h"           // for operator delete, etc
+#include "nsCoord.h"                    // for NSAppUnitsToFloatPixels
+#include "nsDebug.h"                    // for NS_RUNTIMEABORT
+#include "nsDeviceContext.h"            // for AppUnitsPerCSSPixel
+#include "nsISupportsImpl.h"            // for Layer::Release, etc
+#include "nsLayoutUtils.h"              // for nsLayoutUtils
+#include "nsMathUtils.h"                // for NS_round
+#include "nsPoint.h"                    // for nsPoint
+#include "nsTArray.h"                   // for nsTArray, nsTArray_Impl, etc
+#include "GeckoProfiler.h"
+#include "mozilla/layers/TextureHost.h"
+#include "mozilla/layers/AsyncCompositionManager.h"
+#include "mozilla/layers/AsyncPanZoomController.h"
 
 typedef std::vector<mozilla::layers::EditReply> EditReplyVector;
 
@@ -35,6 +49,8 @@ using mozilla::layout::RenderFrameParent;
 namespace mozilla {
 namespace layers {
 
+class PGrallocBufferParent;
+
 //--------------------------------------------------
 // Convenience accessors
 static ShadowLayerParent*
@@ -42,13 +58,6 @@ cast(const PLayerParent* in)
 {
   return const_cast<ShadowLayerParent*>(
     static_cast<const ShadowLayerParent*>(in));
-}
-
-static CompositableParent*
-cast(const PCompositableParent* in)
-{
-  return const_cast<CompositableParent*>(
-    static_cast<const CompositableParent*>(in));
 }
 
 template<class OpCreateT>
@@ -81,12 +90,12 @@ ShadowAfter(const OpInsertAfter& op)
 }
 
 static ShadowLayerParent*
-ShadowContainer(const OpAppendChild& op)
+ShadowContainer(const OpPrependChild& op)
 {
   return cast(op.containerParent());
 }
 static ShadowLayerParent*
-ShadowChild(const OpAppendChild& op)
+ShadowChild(const OpPrependChild& op)
 {
   return cast(op.childLayerParent());
 }
@@ -138,6 +147,7 @@ LayerTransactionParent::LayerTransactionParent(LayerManagerComposite* aManager,
   , mShadowLayersManager(aLayersManager)
   , mId(aId)
   , mDestroyed(false)
+  , mIPCOpen(false)
 {
   MOZ_COUNT_CTOR(LayerTransactionParent);
 }
@@ -158,21 +168,31 @@ LayerTransactionParent::Destroy()
   }
 }
 
+LayersBackend
+LayerTransactionParent::GetCompositorBackendType() const
+{
+  return mLayerManager->GetBackendType();
+}
+
 /* virtual */
 bool
 LayerTransactionParent::RecvUpdateNoSwap(const InfallibleTArray<Edit>& cset,
                                          const TargetConfig& targetConfig,
-                                         const bool& isFirstPaint)
+                                         const bool& isFirstPaint,
+                                         const bool& scheduleComposite)
 {
-  return RecvUpdate(cset, targetConfig, isFirstPaint, nullptr);
+  return RecvUpdate(cset, targetConfig, isFirstPaint, scheduleComposite, nullptr);
 }
 
 bool
 LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
                                    const TargetConfig& targetConfig,
                                    const bool& isFirstPaint,
+                                   const bool& scheduleComposite,
                                    InfallibleTArray<EditReply>* reply)
 {
+  profiler_tracing("Paint", "Composite", TRACING_INTERVAL_START);
+  PROFILER_LABEL("LayerTransactionParent", "RecvUpdate");
 #ifdef COMPOSITOR_PERFORMANCE_WARNING
   TimeStamp updateStart = TimeStamp::Now();
 #endif
@@ -183,9 +203,20 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
     return true;
   }
 
+  if (mLayerManager && mLayerManager->GetCompositor() &&
+      !targetConfig.naturalBounds().IsEmpty()) {
+    mLayerManager->GetCompositor()->SetScreenRotation(targetConfig.rotation());
+  }
+
+  // Clear fence handles used in previsou transaction.
+  ClearPrevFenceHandles();
+
   EditReplyVector replyv;
 
-  layer_manager()->BeginTransactionWithTarget(NULL);
+  {
+    AutoResolveRefLayers resolve(mShadowLayersManager->GetCompositionManager(this));
+    layer_manager()->BeginTransaction();
+  }
 
   for (EditArray::index_type i = 0; i < cset.Length(); ++i) {
     const Edit& edit = cset[i];
@@ -244,25 +275,38 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
       MOZ_LAYERS_LOG(("[ParentSide] SetLayerAttributes"));
 
       const OpSetLayerAttributes& osla = edit.get_OpSetLayerAttributes();
-      Layer* layer = AsLayerComposite(osla)->AsLayer();
+      ShadowLayerParent* layerParent = AsLayerComposite(osla);
+      Layer* layer = layerParent->AsLayer();
+      if (!layer) {
+        return false;
+      }
       const LayerAttributes& attrs = osla.attrs();
 
       const CommonLayerAttributes& common = attrs.common();
       layer->SetVisibleRegion(common.visibleRegion());
+      layer->SetEventRegions(common.eventRegions());
       layer->SetContentFlags(common.contentFlags());
       layer->SetOpacity(common.opacity());
-      layer->SetClipRect(common.useClipRect() ? &common.clipRect() : NULL);
+      layer->SetClipRect(common.useClipRect() ? &common.clipRect() : nullptr);
       layer->SetBaseTransform(common.transform().value());
       layer->SetPostScale(common.postXScale(), common.postYScale());
       layer->SetIsFixedPosition(common.isFixedPosition());
       layer->SetFixedPositionAnchor(common.fixedPositionAnchor());
       layer->SetFixedPositionMargins(common.fixedPositionMargin());
+      if (common.isStickyPosition()) {
+        layer->SetStickyPositionData(common.stickyScrollContainerId(),
+                                     common.stickyScrollRangeOuter(),
+                                     common.stickyScrollRangeInner());
+      }
+      layer->SetScrollbarData(common.scrollbarTargetContainerId(),
+        static_cast<Layer::ScrollDirection>(common.scrollbarDirection()));
       if (PLayerParent* maskLayer = common.maskLayerParent()) {
         layer->SetMaskLayer(cast(maskLayer)->AsLayer());
       } else {
-        layer->SetMaskLayer(NULL);
+        layer->SetMaskLayer(nullptr);
       }
       layer->SetAnimations(common.animations());
+      layer->SetInvalidRegion(common.invalidRegion());
 
       typedef SpecificLayerAttributes Specific;
       const SpecificLayerAttributes& specific = attrs.specific();
@@ -273,8 +317,10 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
       case Specific::TThebesLayerAttributes: {
         MOZ_LAYERS_LOG(("[ParentSide]   thebes layer"));
 
-        ThebesLayerComposite* thebesLayer =
-          static_cast<ThebesLayerComposite*>(layer);
+        ThebesLayerComposite* thebesLayer = layerParent->AsThebesLayerComposite();
+        if (!thebesLayer) {
+          return false;
+        }
         const ThebesLayerAttributes& attrs =
           specific.get_ThebesLayerAttributes();
 
@@ -285,42 +331,57 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
       case Specific::TContainerLayerAttributes: {
         MOZ_LAYERS_LOG(("[ParentSide]   container layer"));
 
-        ContainerLayer* containerLayer =
-          static_cast<ContainerLayer*>(layer);
+        ContainerLayerComposite* containerLayer = layerParent->AsContainerLayerComposite();
+        if (!containerLayer) {
+          return false;
+        }
         const ContainerLayerAttributes& attrs =
           specific.get_ContainerLayerAttributes();
         containerLayer->SetFrameMetrics(attrs.metrics());
+        containerLayer->SetScrollHandoffParentId(attrs.scrollParentId());
         containerLayer->SetPreScale(attrs.preXScale(), attrs.preYScale());
         containerLayer->SetInheritedScale(attrs.inheritedXScale(), attrs.inheritedYScale());
         break;
       }
-      case Specific::TColorLayerAttributes:
+      case Specific::TColorLayerAttributes: {
         MOZ_LAYERS_LOG(("[ParentSide]   color layer"));
 
-        static_cast<ColorLayer*>(layer)->SetColor(
-          specific.get_ColorLayerAttributes().color().value());
+        ColorLayerComposite* colorLayer = layerParent->AsColorLayerComposite();
+        if (!colorLayer) {
+          return false;
+        }
+        colorLayer->SetColor(specific.get_ColorLayerAttributes().color().value());
+        colorLayer->SetBounds(specific.get_ColorLayerAttributes().bounds());
         break;
-
-      case Specific::TCanvasLayerAttributes:
+      }
+      case Specific::TCanvasLayerAttributes: {
         MOZ_LAYERS_LOG(("[ParentSide]   canvas layer"));
 
-        static_cast<CanvasLayer*>(layer)->SetFilter(
-          specific.get_CanvasLayerAttributes().filter());
-        static_cast<CanvasLayerComposite*>(layer)->SetBounds(
-          specific.get_CanvasLayerAttributes().bounds());
+        CanvasLayerComposite* canvasLayer = layerParent->AsCanvasLayerComposite();
+        if (!canvasLayer) {
+          return false;
+        }
+        canvasLayer->SetFilter(specific.get_CanvasLayerAttributes().filter());
+        canvasLayer->SetBounds(specific.get_CanvasLayerAttributes().bounds());
         break;
-
-      case Specific::TRefLayerAttributes:
+      }
+      case Specific::TRefLayerAttributes: {
         MOZ_LAYERS_LOG(("[ParentSide]   ref layer"));
 
-        static_cast<RefLayer*>(layer)->SetReferentId(
-          specific.get_RefLayerAttributes().id());
+        RefLayerComposite* refLayer = layerParent->AsRefLayerComposite();
+        if (!refLayer) {
+          return false;
+        }
+        refLayer->SetReferentId(specific.get_RefLayerAttributes().id());
         break;
-
+      }
       case Specific::TImageLayerAttributes: {
         MOZ_LAYERS_LOG(("[ParentSide]   image layer"));
 
-        ImageLayer* imageLayer = static_cast<ImageLayer*>(layer);
+        ImageLayerComposite* imageLayer = layerParent->AsImageLayerComposite();
+        if (!imageLayer) {
+          return false;
+        }
         const ImageLayerAttributes& attrs = specific.get_ImageLayerAttributes();
         imageLayer->SetFilter(attrs.filter());
         imageLayer->SetScaleToSize(attrs.scaleToSize(), attrs.scaleMode());
@@ -331,35 +392,56 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
       }
       break;
     }
-    case Edit::TOpSetColoredBorders: {
-      if (edit.get_OpSetColoredBorders().enabled()) {
-        mLayerManager->GetCompositor()->EnableColoredBorders();
-      } else {
-        mLayerManager->GetCompositor()->DisableColoredBorders();
-      }
+    case Edit::TOpSetDiagnosticTypes: {
+      mLayerManager->GetCompositor()->SetDiagnosticTypes(
+        edit.get_OpSetDiagnosticTypes().diagnostics());
       break;
     }
     // Tree ops
     case Edit::TOpSetRoot: {
       MOZ_LAYERS_LOG(("[ParentSide] SetRoot"));
 
-      mRoot = AsLayerComposite(edit.get_OpSetRoot())->AsContainer();
+      Layer* newRoot = AsLayerComposite(edit.get_OpSetRoot())->AsLayer();
+      if (!newRoot) {
+        return false;
+      }
+      if (newRoot->GetParent()) {
+        // newRoot is not a root!
+        return false;
+      }
+      mRoot = newRoot;
       break;
     }
     case Edit::TOpInsertAfter: {
       MOZ_LAYERS_LOG(("[ParentSide] InsertAfter"));
 
       const OpInsertAfter& oia = edit.get_OpInsertAfter();
-      ShadowContainer(oia)->AsContainer()->InsertAfter(
-        ShadowChild(oia)->AsLayer(), ShadowAfter(oia)->AsLayer());
+      Layer* child = ShadowChild(oia)->AsLayer();
+      if (!child) {
+        return false;
+      }
+      ContainerLayerComposite* container = ShadowContainer(oia)->AsContainerLayerComposite();
+      if (!container ||
+          !container->InsertAfter(child, ShadowAfter(oia)->AsLayer()))
+      {
+        return false;
+      }
       break;
     }
-    case Edit::TOpAppendChild: {
-      MOZ_LAYERS_LOG(("[ParentSide] AppendChild"));
+    case Edit::TOpPrependChild: {
+      MOZ_LAYERS_LOG(("[ParentSide] PrependChild"));
 
-      const OpAppendChild& oac = edit.get_OpAppendChild();
-      ShadowContainer(oac)->AsContainer()->InsertAfter(
-        ShadowChild(oac)->AsLayer(), NULL);
+      const OpPrependChild& oac = edit.get_OpPrependChild();
+      Layer* child = ShadowChild(oac)->AsLayer();
+      if (!child) {
+        return false;
+      }
+      ContainerLayerComposite* container = ShadowContainer(oac)->AsContainerLayerComposite();
+      if (!container ||
+          !container->InsertAfter(child, nullptr))
+      {
+        return false;
+      }
       break;
     }
     case Edit::TOpRemoveChild: {
@@ -367,41 +449,78 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
 
       const OpRemoveChild& orc = edit.get_OpRemoveChild();
       Layer* childLayer = ShadowChild(orc)->AsLayer();
-      ShadowContainer(orc)->AsContainer()->RemoveChild(childLayer);
+      if (!childLayer) {
+        return false;
+      }
+      ContainerLayerComposite* container = ShadowContainer(orc)->AsContainerLayerComposite();
+      if (!container ||
+          !container->RemoveChild(childLayer))
+      {
+        return false;
+      }
       break;
     }
     case Edit::TOpRepositionChild: {
       MOZ_LAYERS_LOG(("[ParentSide] RepositionChild"));
 
       const OpRepositionChild& orc = edit.get_OpRepositionChild();
-      ShadowContainer(orc)->AsContainer()->RepositionChild(
-        ShadowChild(orc)->AsLayer(), ShadowAfter(orc)->AsLayer());
+      Layer* child = ShadowChild(orc)->AsLayer();
+      if (!child) {
+        return false;
+      }
+      ContainerLayerComposite* container = ShadowContainer(orc)->AsContainerLayerComposite();
+      if (!container ||
+          !container->RepositionChild(child, ShadowAfter(orc)->AsLayer()))
+      {
+        return false;
+      }
       break;
     }
     case Edit::TOpRaiseToTopChild: {
       MOZ_LAYERS_LOG(("[ParentSide] RaiseToTopChild"));
 
       const OpRaiseToTopChild& rtc = edit.get_OpRaiseToTopChild();
-      ShadowContainer(rtc)->AsContainer()->RepositionChild(
-        ShadowChild(rtc)->AsLayer(), NULL);
+      Layer* child = ShadowChild(rtc)->AsLayer();
+      if (!child) {
+        return false;
+      }
+      ContainerLayerComposite* container = ShadowContainer(rtc)->AsContainerLayerComposite();
+      if (!container ||
+          !container->RepositionChild(child, nullptr))
+      {
+        return false;
+      }
       break;
     }
     case Edit::TCompositableOperation: {
-      ReceiveCompositableUpdate(edit.get_CompositableOperation(),
-                                replyv);
+      if (!ReceiveCompositableUpdate(edit.get_CompositableOperation(),
+                                replyv)) {
+        return false;
+      }
       break;
     }
     case Edit::TOpAttachCompositable: {
       const OpAttachCompositable& op = edit.get_OpAttachCompositable();
-      Attach(cast(op.layerParent()), cast(op.compositableParent()));
+      CompositableHost* host = CompositableHost::FromIPDLActor(op.compositableParent());
+      if (!Attach(cast(op.layerParent()), host, false)) {
+        return false;
+      }
+      host->SetCompositorID(mLayerManager->GetCompositor()->GetCompositorID());
       break;
     }
     case Edit::TOpAttachAsyncCompositable: {
       const OpAttachAsyncCompositable& op = edit.get_OpAttachAsyncCompositable();
-      CompositableParent* compositableParent = CompositableMap::Get(op.containerID());
-      MOZ_ASSERT(compositableParent, "CompositableParent not found in the map");
-      Attach(cast(op.layerParent()), compositableParent);
-      compositableParent->SetCompositorID(mLayerManager->GetCompositor()->GetCompositorID());
+      PCompositableParent* compositableParent = CompositableMap::Get(op.containerID());
+      if (!compositableParent) {
+        NS_ERROR("CompositableParent not found in the map");
+        return false;
+      }
+      CompositableHost* host = CompositableHost::FromIPDLActor(compositableParent);
+      if (!Attach(cast(op.layerParent()), host, true)) {
+        return false;
+      }
+
+      host->SetCompositorID(mLayerManager->GetCompositor()->GetCompositorID());
       break;
     }
     default:
@@ -409,7 +528,10 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
     }
   }
 
-  layer_manager()->EndTransaction(NULL, NULL, LayerManager::END_NO_IMMEDIATE_REDRAW);
+  {
+    AutoResolveRefLayers resolve(mShadowLayersManager->GetCompositionManager(this));
+    layer_manager()->EndTransaction(nullptr, nullptr, LayerManager::END_NO_IMMEDIATE_REDRAW);
+  }
 
   if (reply) {
     reply->SetCapacity(replyv.size());
@@ -423,7 +545,7 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
   // other's buffer contents.
   LayerManagerComposite::PlatformSyncBeforeReplyUpdate();
 
-  mShadowLayersManager->ShadowLayersUpdated(this, targetConfig, isFirstPaint);
+  mShadowLayersManager->ShadowLayersUpdated(this, targetConfig, isFirstPaint, scheduleComposite);
 
 #ifdef COMPOSITOR_PERFORMANCE_WARNING
   int compositeTime = (int)(mozilla::TimeStamp::Now() - updateStart).ToMilliseconds();
@@ -436,6 +558,19 @@ LayerTransactionParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
 }
 
 bool
+LayerTransactionParent::RecvSetTestSampleTime(const TimeStamp& aTime)
+{
+  return mShadowLayersManager->SetTestSampleTime(this, aTime);
+}
+
+bool
+LayerTransactionParent::RecvLeaveTestMode()
+{
+  mShadowLayersManager->LeaveTestMode(this);
+  return true;
+}
+
+bool
 LayerTransactionParent::RecvGetOpacity(PLayerParent* aParent,
                                        float* aOpacity)
 {
@@ -443,31 +578,54 @@ LayerTransactionParent::RecvGetOpacity(PLayerParent* aParent,
     return false;
   }
 
-  *aOpacity = cast(aParent)->AsLayer()->GetLocalOpacity();
+  Layer* layer = cast(aParent)->AsLayer();
+  if (!layer) {
+    return false;
+  }
+
+  *aOpacity = layer->GetLocalOpacity();
   return true;
 }
 
 bool
-LayerTransactionParent::RecvGetTransform(PLayerParent* aParent,
-                                         gfx3DMatrix* aTransform)
+LayerTransactionParent::RecvGetAnimationTransform(PLayerParent* aParent,
+                                                  MaybeTransform* aTransform)
 {
   if (mDestroyed || !layer_manager() || layer_manager()->IsDestroyed()) {
     return false;
   }
 
+  Layer* layer = cast(aParent)->AsLayer();
+  if (!layer) {
+    return false;
+  }
+
+  // This method is specific to transforms applied by animation.
+  // This is because this method uses the information stored with an animation
+  // such as the origin of the reference frame corresponding to the layer, to
+  // recover the untranslated transform from the shadow transform. For
+  // transforms that are not set by animation we don't have this information
+  // available.
+  if (!layer->AsLayerComposite()->GetShadowTransformSetByAnimation()) {
+    *aTransform = mozilla::void_t();
+    return true;
+  }
+
   // The following code recovers the untranslated transform
   // from the shadow transform by undoing the translations in
   // AsyncCompositionManager::SampleValue.
-  Layer* layer = cast(aParent)->AsLayer();
-  *aTransform = layer->AsLayerComposite()->GetShadowTransform();
+
+  gfx3DMatrix transform;
+  gfx::To3DMatrix(layer->AsLayerComposite()->GetShadowTransform(), transform);
   if (ContainerLayer* c = layer->AsContainerLayer()) {
-    aTransform->ScalePost(1.0f/c->GetInheritedXScale(),
-                          1.0f/c->GetInheritedYScale(),
-                          1.0f);
+    // Undo the scale transform applied by AsyncCompositionManager::SampleValue
+    transform.ScalePost(1.0f/c->GetInheritedXScale(),
+                        1.0f/c->GetInheritedYScale(),
+                        1.0f);
   }
   float scale = 1;
   gfxPoint3D scaledOrigin;
-  gfxPoint3D mozOrigin;
+  gfxPoint3D transformOrigin;
   for (uint32_t i=0; i < layer->GetAnimations().Length(); i++) {
     if (layer->GetAnimations()[i].data().type() == AnimationData::TTransformData) {
       const TransformData& data = layer->GetAnimations()[i].data().get_TransformData();
@@ -476,29 +634,91 @@ LayerTransactionParent::RecvGetTransform(PLayerParent* aParent,
         gfxPoint3D(NS_round(NSAppUnitsToFloatPixels(data.origin().x, scale)),
                    NS_round(NSAppUnitsToFloatPixels(data.origin().y, scale)),
                    0.0f);
-      mozOrigin = data.mozOrigin();
+      double cssPerDev =
+        double(nsDeviceContext::AppUnitsPerCSSPixel()) / double(scale);
+      transformOrigin = data.transformOrigin() * cssPerDev;
       break;
     }
   }
 
-  aTransform->Translate(-scaledOrigin);
-  *aTransform = nsLayoutUtils::ChangeMatrixBasis(-scaledOrigin - mozOrigin, *aTransform);
+  // Undo the translation to the origin of the reference frame applied by
+  // AsyncCompositionManager::SampleValue
+  transform.Translate(-scaledOrigin);
+
+  // Undo the rebasing applied by
+  // nsDisplayTransform::GetResultingTransformMatrixInternal
+  transform = nsLayoutUtils::ChangeMatrixBasis(-scaledOrigin - transformOrigin,
+                                               transform);
+
+  // Convert to CSS pixels (this undoes the operations performed by
+  // nsStyleTransformMatrix::ProcessTranslatePart which is called from
+  // nsDisplayTransform::GetResultingTransformMatrix)
+  double devPerCss =
+    double(scale) / double(nsDeviceContext::AppUnitsPerCSSPixel());
+  transform._41 *= devPerCss;
+  transform._42 *= devPerCss;
+  transform._43 *= devPerCss;
+
+  *aTransform = transform;
   return true;
 }
 
-void
-LayerTransactionParent::Attach(ShadowLayerParent* aLayerParent, CompositableParent* aCompositable)
+bool
+LayerTransactionParent::RecvSetAsyncScrollOffset(PLayerParent* aLayer,
+                                                 const int32_t& aX, const int32_t& aY)
 {
-  LayerComposite* layer = aLayerParent->AsLayer()->AsLayerComposite();
-  MOZ_ASSERT(layer);
+  if (mDestroyed || !layer_manager() || layer_manager()->IsDestroyed()) {
+    return false;
+  }
+
+  Layer* layer = cast(aLayer)->AsLayer();
+  if (!layer) {
+    return false;
+  }
+  ContainerLayer* containerLayer = layer->AsContainerLayer();
+  if (!containerLayer) {
+    return false;
+  }
+  AsyncPanZoomController* controller = containerLayer->GetAsyncPanZoomController();
+  if (!controller) {
+    return false;
+  }
+  controller->SetTestAsyncScrollOffset(CSSPoint(aX, aY));
+  return true;
+}
+
+bool
+LayerTransactionParent::Attach(ShadowLayerParent* aLayerParent,
+                               CompositableHost* aCompositable,
+                               bool aIsAsync)
+{
+  if (!aCompositable) {
+    return false;
+  }
+
+  Layer* baselayer = aLayerParent->AsLayer();
+  if (!baselayer) {
+    return false;
+  }
+  LayerComposite* layer = baselayer->AsLayerComposite();
+  if (!layer) {
+    return false;
+  }
 
   Compositor* compositor
     = static_cast<LayerManagerComposite*>(aLayerParent->AsLayer()->Manager())->GetCompositor();
 
-  CompositableHost* compositable = aCompositable->GetCompositableHost();
-  MOZ_ASSERT(compositable);
-  layer->SetCompositableHost(compositable);
-  compositable->Attach(aLayerParent->AsLayer(), compositor);
+  if (!layer->SetCompositableHost(aCompositable)) {
+    // not all layer types accept a compositable, see bug 967824
+    return false;
+  }
+  aCompositable->Attach(aLayerParent->AsLayer(),
+                        compositor,
+                        aIsAsync
+                          ? CompositableHost::ALLOW_REATTACH
+                            | CompositableHost::KEEP_ATTACHED
+                          : CompositableHost::NO_FLAGS);
+  return true;
 }
 
 bool
@@ -513,11 +733,19 @@ LayerTransactionParent::RecvClearCachedResources()
   return true;
 }
 
+bool
+LayerTransactionParent::RecvForceComposite()
+{
+  mShadowLayersManager->ForceComposite(this);
+  return true;
+}
+
+
 PGrallocBufferParent*
-LayerTransactionParent::AllocPGrallocBuffer(const gfxIntSize& aSize,
-                                            const uint32_t& aFormat,
-                                            const uint32_t& aUsage,
-                                            MaybeMagicGrallocBufferHandle* aOutHandle)
+LayerTransactionParent::AllocPGrallocBufferParent(const IntSize& aSize,
+                                                  const uint32_t& aFormat,
+                                                  const uint32_t& aUsage,
+                                                  MaybeMagicGrallocBufferHandle* aOutHandle)
 {
 #ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
   return GrallocBufferActor::Create(aSize, aFormat, aUsage, aOutHandle);
@@ -528,7 +756,7 @@ LayerTransactionParent::AllocPGrallocBuffer(const gfxIntSize& aSize,
 }
 
 bool
-LayerTransactionParent::DeallocPGrallocBuffer(PGrallocBufferParent* actor)
+LayerTransactionParent::DeallocPGrallocBufferParent(PGrallocBufferParent* actor)
 {
 #ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
   delete actor;
@@ -540,29 +768,46 @@ LayerTransactionParent::DeallocPGrallocBuffer(PGrallocBufferParent* actor)
 }
 
 PLayerParent*
-LayerTransactionParent::AllocPLayer()
+LayerTransactionParent::AllocPLayerParent()
 {
   return new ShadowLayerParent();
 }
 
 bool
-LayerTransactionParent::DeallocPLayer(PLayerParent* actor)
+LayerTransactionParent::DeallocPLayerParent(PLayerParent* actor)
 {
   delete actor;
   return true;
 }
 
 PCompositableParent*
-LayerTransactionParent::AllocPCompositable(const TextureInfo& aInfo)
+LayerTransactionParent::AllocPCompositableParent(const TextureInfo& aInfo)
 {
-  return new CompositableParent(this, aInfo);
+  return CompositableHost::CreateIPDLActor(this, aInfo, 0);
 }
 
 bool
-LayerTransactionParent::DeallocPCompositable(PCompositableParent* actor)
+LayerTransactionParent::DeallocPCompositableParent(PCompositableParent* aActor)
 {
-  delete actor;
-  return true;
+  return CompositableHost::DestroyIPDLActor(aActor);
+}
+
+PTextureParent*
+LayerTransactionParent::AllocPTextureParent(const SurfaceDescriptor& aSharedData,
+                                            const TextureFlags& aFlags)
+{
+  return TextureHost::CreateIPDLActor(this, aSharedData, aFlags);
+}
+
+bool
+LayerTransactionParent::DeallocPTextureParent(PTextureParent* actor)
+{
+  return TextureHost::DestroyIPDLActor(actor);
+}
+
+bool LayerTransactionParent::IsSameProcess() const
+{
+  return OtherProcess() == ipc::kInvalidProcessHandle;
 }
 
 } // namespace layers

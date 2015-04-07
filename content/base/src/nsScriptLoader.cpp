@@ -8,24 +8,27 @@
  * A class that handles loading and evaluation of <script> elements.
  */
 
+#include "nsScriptLoader.h"
+
 #include "jsapi.h"
 #include "jsfriendapi.h"
-#include "nsScriptLoader.h"
-#include "nsICharsetConverterManager.h"
 #include "nsIUnicodeDecoder.h"
 #include "nsIContent.h"
+#include "nsJSUtils.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/Element.h"
 #include "nsGkAtoms.h"
 #include "nsNetUtil.h"
+#include "nsIJSRuntimeService.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptContext.h"
-#include "nsIScriptRuntime.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIPrincipal.h"
 #include "nsJSPrincipals.h"
 #include "nsContentPolicyUtils.h"
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
+#include "nsITimedChannel.h"
 #include "nsIScriptElement.h"
 #include "nsIDOMHTMLScriptElement.h"
 #include "nsIDocShell.h"
@@ -43,12 +46,15 @@
 #include "nsChannelPolicy.h"
 #include "nsCRT.h"
 #include "nsContentCreatorFunctions.h"
-#include "mozilla/dom/Element.h"
 #include "nsCrossSiteListenerProxy.h"
 #include "nsSandboxFlags.h"
+#include "nsContentTypeParser.h"
+#include "nsINetworkSeer.h"
+#include "mozilla/dom/EncodingUtils.h"
 
 #include "mozilla/CORSMode.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/unused.h"
 
 #ifdef PR_LOGGING
 static PRLogModuleInfo* gCspPRLog;
@@ -69,13 +75,23 @@ public:
     : mElement(aElement),
       mLoading(true),
       mIsInline(true),
+      mHasSourceMapURL(false),
+      mScriptTextBuf(nullptr),
+      mScriptTextLength(0),
       mJSVersion(aVersion),
       mLineNo(1),
       mCORSMode(aCORSMode)
   {
   }
 
-  NS_DECL_ISUPPORTS
+  ~nsScriptLoadRequest()
+  {
+    if (mScriptTextBuf) {
+      js_free(mScriptTextBuf);
+    }
+  }
+
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   void FireScriptAvailable(nsresult aResult)
   {
@@ -92,12 +108,16 @@ public:
   }
 
   nsCOMPtr<nsIScriptElement> mElement;
-  bool mLoading;             // Are we still waiting for a load to complete?
-  bool mIsInline;            // Is the script inline or loaded?
-  nsString mScriptText;              // Holds script for loaded scripts
+  bool mLoading;          // Are we still waiting for a load to complete?
+  bool mIsInline;         // Is the script inline or loaded?
+  bool mHasSourceMapURL;  // Does the HTTP header have a source map url?
+  nsString mSourceMapURL; // Holds source map url for loaded scripts
+  jschar* mScriptTextBuf;   // Holds script text for non-inline scripts. Don't
+  size_t mScriptTextLength; // use nsString so we can give ownership to jsapi.
   uint32_t mJSVersion;
   nsCOMPtr<nsIURI> mURI;
   nsCOMPtr<nsIPrincipal> mOriginPrincipal;
+  nsAutoCString mURL;   // Keep the URI's filename alive during off thread parsing.
   int32_t mLineNo;
   const CORSMode mCORSMode;
 };
@@ -105,7 +125,7 @@ public:
 // The nsScriptLoadRequest is passed as the context to necko, and thus
 // it needs to be threadsafe. Necko won't do anything with this
 // context, but it will AddRef and Release it on other threads.
-NS_IMPL_THREADSAFE_ISUPPORTS0(nsScriptLoadRequest)
+NS_IMPL_ISUPPORTS0(nsScriptLoadRequest)
 
 //////////////////////////////////////////////////////////////
 //
@@ -116,7 +136,8 @@ nsScriptLoader::nsScriptLoader(nsIDocument *aDocument)
     mBlockerCount(0),
     mEnabled(true),
     mDeferEnabled(false),
-    mDocumentParsingDone(false)
+    mDocumentParsingDone(false),
+    mBlockingDOMContentLoaded(false)
 {
   // enable logging for CSP
 #ifdef PR_LOGGING
@@ -156,7 +177,7 @@ nsScriptLoader::~nsScriptLoader()
   }  
 }
 
-NS_IMPL_ISUPPORTS1(nsScriptLoader, nsIStreamLoaderObserver)
+NS_IMPL_ISUPPORTS(nsScriptLoader, nsIStreamLoaderObserver)
 
 // Helper method for checking if the script element is an event-handler
 // This means that it has both a for-attribute and a event-attribute.
@@ -324,6 +345,16 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest, const nsAString &aType,
     httpChannel->SetReferrer(mDocument->GetDocumentURI());
   }
 
+  nsCOMPtr<nsILoadContext> loadContext(do_QueryInterface(docshell));
+  mozilla::net::SeerLearn(aRequest->mURI, mDocument->GetDocumentURI(),
+      nsINetworkSeer::LEARN_LOAD_SUBRESOURCE, loadContext);
+
+  // Set the initiator type
+  nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(httpChannel));
+  if (timedChannel) {
+    timedChannel->SetInitiatorType(NS_LITERAL_STRING("script"));
+  }
+
   nsCOMPtr<nsIStreamLoader> loader;
   rv = NS_NewStreamLoader(getter_AddRefs(loader), this);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -403,6 +434,113 @@ ParseTypeAttribute(const nsAString& aType, JSVersion* aVersion)
 }
 
 bool
+CSPAllowsInlineScript(nsIScriptElement *aElement, nsIDocument *aDocument)
+{
+  nsCOMPtr<nsIContentSecurityPolicy> csp;
+  nsresult rv = aDocument->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+  NS_ENSURE_SUCCESS(rv, false);
+
+  if (!csp) {
+    // no CSP --> allow
+    return true;
+  }
+
+  // An inline script can be allowed because all inline scripts are allowed,
+  // or else because it is whitelisted by a nonce-source or hash-source. This
+  // is a logical OR between whitelisting methods, so the allowInlineScript
+  // outparam can be reused for each check as long as we stop checking as soon
+  // as it is set to true. This also optimizes performance by avoiding the
+  // overhead of unnecessary checks.
+  bool allowInlineScript = true;
+  nsAutoTArray<unsigned short, 3> violations;
+
+  bool reportInlineViolation = false;
+  rv = csp->GetAllowsInlineScript(&reportInlineViolation, &allowInlineScript);
+  NS_ENSURE_SUCCESS(rv, false);
+  if (reportInlineViolation) {
+    violations.AppendElement(static_cast<unsigned short>(
+          nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT));
+  }
+
+  nsAutoString nonce;
+  if (!allowInlineScript) {
+    nsCOMPtr<nsIContent> scriptContent = do_QueryInterface(aElement);
+    bool foundNonce = scriptContent->GetAttr(kNameSpaceID_None,
+                                             nsGkAtoms::nonce, nonce);
+    if (foundNonce) {
+      bool reportNonceViolation;
+      rv = csp->GetAllowsNonce(nonce, nsIContentPolicy::TYPE_SCRIPT,
+                               &reportNonceViolation, &allowInlineScript);
+      NS_ENSURE_SUCCESS(rv, false);
+      if (reportNonceViolation) {
+        violations.AppendElement(static_cast<unsigned short>(
+              nsIContentSecurityPolicy::VIOLATION_TYPE_NONCE_SCRIPT));
+      }
+    }
+  }
+
+  if (!allowInlineScript) {
+    bool reportHashViolation;
+    nsAutoString scriptText;
+    aElement->GetScriptText(scriptText);
+    rv = csp->GetAllowsHash(scriptText, nsIContentPolicy::TYPE_SCRIPT,
+                            &reportHashViolation, &allowInlineScript);
+    NS_ENSURE_SUCCESS(rv, false);
+    if (reportHashViolation) {
+      violations.AppendElement(static_cast<unsigned short>(
+            nsIContentSecurityPolicy::VIOLATION_TYPE_HASH_SCRIPT));
+    }
+  }
+
+  // What violation(s) should be reported?
+  //
+  // 1. If the script tag has a nonce attribute, and the nonce does not match
+  // the policy, report VIOLATION_TYPE_NONCE_SCRIPT.
+  // 2. If the policy has at least one hash-source, and the hashed contents of
+  // the script tag did not match any of them, report VIOLATION_TYPE_HASH_SCRIPT
+  // 3. Otherwise, report VIOLATION_TYPE_INLINE_SCRIPT if appropriate.
+  //
+  // 1 and 2 may occur together, 3 should only occur by itself. Naturally,
+  // every VIOLATION_TYPE_NONCE_SCRIPT and VIOLATION_TYPE_HASH_SCRIPT are also
+  // VIOLATION_TYPE_INLINE_SCRIPT, but reporting the
+  // VIOLATION_TYPE_INLINE_SCRIPT is redundant and does not help the developer.
+  if (!violations.IsEmpty()) {
+    MOZ_ASSERT(violations[0] == nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
+               "How did we get any violations without an initial inline script violation?");
+    // gather information to log with violation report
+    nsIURI* uri = aDocument->GetDocumentURI();
+    nsAutoCString asciiSpec;
+    uri->GetAsciiSpec(asciiSpec);
+    nsAutoString scriptText;
+    aElement->GetScriptText(scriptText);
+    nsAutoString scriptSample(scriptText);
+
+    // cap the length of the script sample at 40 chars
+    if (scriptSample.Length() > 40) {
+      scriptSample.Truncate(40);
+      scriptSample.AppendLiteral("...");
+    }
+
+    for (uint32_t i = 0; i < violations.Length(); i++) {
+      // Skip reporting the redundant inline script violation if there are
+      // other (nonce and/or hash violations) as well.
+      if (i > 0 || violations.Length() == 1) {
+        csp->LogViolationDetails(violations[i], NS_ConvertUTF8toUTF16(asciiSpec),
+                                 scriptSample, aElement->GetScriptLineNumber(),
+                                 nonce, scriptText);
+      }
+    }
+  }
+
+  if (!allowInlineScript) {
+    NS_ASSERTION(!violations.IsEmpty(),
+        "CSP blocked inline script but is not reporting a violation");
+   return false;
+  }
+  return true;
+}
+
+bool
 nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
 {
   // We need a document to evaluate scripts.
@@ -419,28 +557,6 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
 
   // Step 12. Check that the script is not an eventhandler
   if (IsScriptEventHandler(scriptContent)) {
-    return false;
-  }
-
-  // Script evaluation can also be disabled in the current script
-  // context even though it's enabled in the document.
-  // XXX - still hard-coded for JS here, even though another language
-  // may be specified.  Should this check be made *after* we examine
-  // the attributes to locate the script-type?
-  // For now though, if JS is disabled we assume every language is
-  // disabled.
-  // XXX is this different from the mDocument->IsScriptEnabled() call?
-  nsCOMPtr<nsIScriptGlobalObject> globalObject =
-    do_QueryInterface(mDocument->GetWindow());
-  if (!globalObject) {
-    return false;
-  }
-  
-  nsIScriptContext *context = globalObject->GetScriptContext();
-
-  // If scripts aren't enabled in the current context, there's no
-  // point in going on.
-  if (!context || !context->GetScriptsEnabled()) {
     return false;
   }
 
@@ -559,7 +675,7 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
       NS_ASSERTION(mDocument->GetCurrentContentSink() ||
                    aElement->GetParserCreated() == FROM_PARSER_XSLT,
           "Non-XSLT Defer script on a document without an active parser; bug 592366.");
-      mDeferRequests.AppendElement(request);
+      AddDeferRequest(request);
       return false;
     }
 
@@ -609,41 +725,9 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
     return false;
   }
 
-  nsCOMPtr<nsIContentSecurityPolicy> csp;
-  rv = mDocument->NodePrincipal()->GetCsp(getter_AddRefs(csp));
-  NS_ENSURE_SUCCESS(rv, false);
-
-  if (csp) {
-    PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("New ScriptLoader i ****with CSP****"));
-    bool inlineOK = true;
-    bool reportViolations = false;
-    rv = csp->GetAllowsInlineScript(&reportViolations, &inlineOK);
-    NS_ENSURE_SUCCESS(rv, false);
-
-    if (reportViolations) {
-      // gather information to log with violation report
-      nsIURI* uri = mDocument->GetDocumentURI();
-      nsAutoCString asciiSpec;
-      uri->GetAsciiSpec(asciiSpec);
-      nsAutoString scriptText;
-      aElement->GetScriptText(scriptText);
-
-      // cap the length of the script sample at 40 chars
-      if (scriptText.Length() > 40) {
-        scriptText.Truncate(40);
-        scriptText.Append(NS_LITERAL_STRING("..."));
-      }
-
-      csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
-                               NS_ConvertUTF8toUTF16(asciiSpec),
-                               scriptText,
-                               aElement->GetScriptLineNumber());
-    }
-
-    if (!inlineOK) {
-      PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("CSP blocked inline scripts (2)"));
-      return false;
-    }
+  // Does CSP allow this inline script to run?
+  if (!CSPAllowsInlineScript(aElement, mDocument)) {
+    return false;
   }
 
   // Inline scripts ignore ther CORS mode and are always CORS_NONE
@@ -691,15 +775,135 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
   return ProcessRequest(request) == NS_ERROR_HTMLPARSER_BLOCK;
 }
 
+namespace {
+
+class NotifyOffThreadScriptLoadCompletedRunnable : public nsRunnable
+{
+  nsRefPtr<nsScriptLoadRequest> mRequest;
+  nsRefPtr<nsScriptLoader> mLoader;
+  void *mToken;
+
+public:
+  NotifyOffThreadScriptLoadCompletedRunnable(nsScriptLoadRequest* aRequest,
+                                             nsScriptLoader* aLoader)
+    : mRequest(aRequest), mLoader(aLoader), mToken(nullptr)
+  {}
+
+  void SetToken(void* aToken) {
+    MOZ_ASSERT(aToken && !mToken);
+    mToken = aToken;
+  }
+
+  NS_DECL_NSIRUNNABLE
+};
+
+} /* anonymous namespace */
+
 nsresult
-nsScriptLoader::ProcessRequest(nsScriptLoadRequest* aRequest)
+nsScriptLoader::ProcessOffThreadRequest(nsScriptLoadRequest* aRequest, void **aOffThreadToken)
+{
+  nsresult rv = ProcessRequest(aRequest, aOffThreadToken);
+  mDocument->UnblockOnload(false);
+  return rv;
+}
+
+NS_IMETHODIMP
+NotifyOffThreadScriptLoadCompletedRunnable::Run()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // We want these to be dropped on the main thread, once we return from this
+  // function.
+  nsRefPtr<nsScriptLoadRequest> request = mRequest.forget();
+  nsRefPtr<nsScriptLoader> loader = mLoader.forget();
+
+  nsresult rv = loader->ProcessOffThreadRequest(request, &mToken);
+
+  if (mToken) {
+    // The result of the off thread parse was not actually needed to process
+    // the request (disappearing window, some other error, ...). Finish the
+    // request to avoid leaks in the JS engine.
+    nsCOMPtr<nsIJSRuntimeService> svc = do_GetService("@mozilla.org/js/xpc/RuntimeService;1");
+    NS_ENSURE_TRUE(svc, NS_ERROR_FAILURE);
+    JSRuntime *rt;
+    svc->GetRuntime(&rt);
+    NS_ENSURE_TRUE(rt, NS_ERROR_FAILURE);
+    JS::FinishOffThreadScript(nullptr, rt, mToken);
+  }
+
+  return rv;
+}
+
+static void
+OffThreadScriptLoaderCallback(void *aToken, void *aCallbackData)
+{
+  nsRefPtr<NotifyOffThreadScriptLoadCompletedRunnable> aRunnable =
+    dont_AddRef(static_cast<NotifyOffThreadScriptLoadCompletedRunnable*>(aCallbackData));
+  aRunnable->SetToken(aToken);
+  NS_DispatchToMainThread(aRunnable);
+}
+
+nsresult
+nsScriptLoader::AttemptAsyncScriptParse(nsScriptLoadRequest* aRequest)
+{
+  if (!aRequest->mElement->GetScriptAsync() || aRequest->mIsInline) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIScriptGlobalObject> globalObject = GetScriptGlobalObject();
+  if (!globalObject) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIScriptContext> context = globalObject->GetScriptContext();
+  if (!context) {
+    return NS_ERROR_FAILURE;
+  }
+
+  AutoPushJSContext cx(context->GetNativeContext());
+  JS::Rooted<JSObject*> global(cx, globalObject->GetGlobalJSObject());
+
+  JS::CompileOptions options(cx);
+  FillCompileOptionsForRequest(aRequest, global, &options);
+
+  if (!JS::CanCompileOffThread(cx, options, aRequest->mScriptTextLength)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsRefPtr<NotifyOffThreadScriptLoadCompletedRunnable> runnable =
+    new NotifyOffThreadScriptLoadCompletedRunnable(aRequest, this);
+
+  if (!JS::CompileOffThread(cx, options,
+                            aRequest->mScriptTextBuf, aRequest->mScriptTextLength,
+                            OffThreadScriptLoaderCallback,
+                            static_cast<void*>(runnable))) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  mDocument->BlockOnload();
+
+  unused << runnable.forget();
+  return NS_OK;
+}
+
+nsresult
+nsScriptLoader::ProcessRequest(nsScriptLoadRequest* aRequest, void **aOffThreadToken)
 {
   NS_ASSERTION(nsContentUtils::IsSafeToRunScript(),
                "Processing requests when running scripts is unsafe.");
 
+  if (!aOffThreadToken) {
+    nsresult rv = AttemptAsyncScriptParse(aRequest);
+    if (rv != NS_ERROR_FAILURE)
+      return rv;
+  }
+
   NS_ENSURE_ARG(aRequest);
-  nsAFlatString* script;
   nsAutoString textData;
+  const jschar* scriptBuf = nullptr;
+  size_t scriptLength = 0;
+  JS::SourceBufferHolder::Ownership giveScriptOwnership =
+    JS::SourceBufferHolder::NoOwnership;
 
   nsCOMPtr<nsIDocument> doc;
 
@@ -711,13 +915,22 @@ nsScriptLoader::ProcessRequest(nsScriptLoadRequest* aRequest)
     // copies.
     aRequest->mElement->GetScriptText(textData);
 
-    script = &textData;
+    scriptBuf = textData.get();
+    scriptLength = textData.Length();
+    giveScriptOwnership = JS::SourceBufferHolder::NoOwnership;
   }
   else {
-    script = &aRequest->mScriptText;
+    scriptBuf = aRequest->mScriptTextBuf;
+    scriptLength = aRequest->mScriptTextLength;
+
+    giveScriptOwnership = JS::SourceBufferHolder::GiveOwnership;
+    aRequest->mScriptTextBuf = nullptr;
+    aRequest->mScriptTextLength = 0;
 
     doc = scriptElem->OwnerDoc();
   }
+
+  JS::SourceBufferHolder srcBuf(scriptBuf, scriptLength, giveScriptOwnership);
 
   nsCOMPtr<nsIScriptElement> oldParserInsertedScript;
   uint32_t parserCreated = aRequest->mElement->GetParserCreated();
@@ -728,11 +941,22 @@ nsScriptLoader::ProcessRequest(nsScriptLoadRequest* aRequest)
 
   FireScriptAvailable(NS_OK, aRequest);
 
-  bool runScript = true;
-  nsContentUtils::DispatchTrustedEvent(scriptElem->OwnerDoc(),
-                                       scriptElem,
-                                       NS_LITERAL_STRING("beforescriptexecute"),
-                                       true, true, &runScript);
+  // The window may have gone away by this point, in which case there's no point
+  // in trying to run the script.
+  nsPIDOMWindow *pwin = mDocument->GetInnerWindow();
+  bool runScript = !!pwin;
+  if (runScript) {
+    nsContentUtils::DispatchTrustedEvent(scriptElem->OwnerDoc(),
+                                         scriptElem,
+                                         NS_LITERAL_STRING("beforescriptexecute"),
+                                         true, true, &runScript);
+  }
+
+  // Inner window could have gone away after firing beforescriptexecute
+  pwin = mDocument->GetInnerWindow();
+  if (!pwin) {
+    runScript = false;
+  }
 
   nsresult rv = NS_OK;
   if (runScript) {
@@ -740,7 +964,7 @@ nsScriptLoader::ProcessRequest(nsScriptLoadRequest* aRequest)
       doc->BeginEvaluatingExternalScript();
     }
     aRequest->mElement->BeginEvaluating();
-    rv = EvaluateScript(aRequest, *script);
+    rv = EvaluateScript(aRequest, srcBuf, aOffThreadToken);
     aRequest->mElement->EndEvaluating();
     if (doc) {
       doc->EndEvaluatingExternalScript();
@@ -788,12 +1012,68 @@ nsScriptLoader::FireScriptEvaluated(nsresult aResult,
   aRequest->FireScriptEvaluated(aResult);
 }
 
+already_AddRefed<nsIScriptGlobalObject>
+nsScriptLoader::GetScriptGlobalObject()
+{
+  nsPIDOMWindow *pwin = mDocument->GetInnerWindow();
+  if (!pwin) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIScriptGlobalObject> globalObject = do_QueryInterface(pwin);
+  NS_ASSERTION(globalObject, "windows must be global objects");
+
+  // and make sure we are setup for this type of script.
+  nsresult rv = globalObject->EnsureScriptEnvironment();
+  if (NS_FAILED(rv)) {
+    return nullptr;
+  }
+
+  return globalObject.forget();
+}
+
+void
+nsScriptLoader::FillCompileOptionsForRequest(nsScriptLoadRequest *aRequest,
+                                             JS::Handle<JSObject *> aScopeChain,
+                                             JS::CompileOptions *aOptions)
+{
+  // It's very important to use aRequest->mURI, not the final URI of the channel
+  // aRequest ended up getting script data from, as the script filename.
+  nsContentUtils::GetWrapperSafeScriptFilename(mDocument, aRequest->mURI, aRequest->mURL);
+
+  aOptions->setIntroductionType("scriptElement");
+  aOptions->setFileAndLine(aRequest->mURL.get(), aRequest->mLineNo);
+  aOptions->setVersion(JSVersion(aRequest->mJSVersion));
+  aOptions->setCompileAndGo(JS_IsGlobalObject(aScopeChain));
+  if (aRequest->mHasSourceMapURL) {
+    aOptions->setSourceMapURL(aRequest->mSourceMapURL.get());
+  }
+  if (aRequest->mOriginPrincipal) {
+    aOptions->setOriginPrincipals(nsJSPrincipals::get(aRequest->mOriginPrincipal));
+  }
+
+  AutoJSContext cx;
+  JS::Rooted<JS::Value> elementVal(cx);
+  MOZ_ASSERT(aRequest->mElement);
+  // XXXbz this is super-fragile, because the code that _uses_ the
+  // JS::CompileOptions is nowhere near us, but we have to coordinate
+  // compartments with it... and in particular, it will compile in the
+  // compartment of aScopeChain, so we want to wrap into that compartment as
+  // well.
+  JSAutoCompartment ac(cx, aScopeChain);
+  if (NS_SUCCEEDED(nsContentUtils::WrapNative(cx, aRequest->mElement,
+                                              &elementVal,
+                                              /* aAllowWrapping = */ true))) {
+    MOZ_ASSERT(elementVal.isObject());
+    aOptions->setElement(&elementVal.toObject());
+  }
+}
+
 nsresult
 nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest,
-                               const nsAFlatString& aScript)
+                               JS::SourceBufferHolder& aSrcBuf,
+                               void** aOffThreadToken)
 {
-  nsresult rv = NS_OK;
-
   // We need a document to evaluate scripts.
   if (!mDocument) {
     return NS_ERROR_FAILURE;
@@ -806,20 +1086,13 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest,
     return NS_ERROR_FAILURE;
   }
 
-  nsPIDOMWindow *pwin = mDocument->GetInnerWindow();
-  if (!pwin) {
-    return NS_ERROR_FAILURE;
-  }
-  nsCOMPtr<nsIScriptGlobalObject> globalObject = do_QueryInterface(pwin);
-  NS_ASSERTION(globalObject, "windows must be global objects");
-
   // Get the script-type to be used by this element.
   NS_ASSERTION(scriptContent, "no content - what is default script-type?");
 
-  // and make sure we are setup for this type of script.
-  rv = globalObject->EnsureScriptEnvironment();
-  if (NS_FAILED(rv))
-    return rv;
+  nsCOMPtr<nsIScriptGlobalObject> globalObject = GetScriptGlobalObject();
+  if (!globalObject) {
+    return NS_ERROR_FAILURE;
+  }
 
   // Make sure context is a strong reference since we access it after
   // we've executed a script, which may cause all other references to
@@ -828,7 +1101,17 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest,
   if (!context) {
     return NS_ERROR_FAILURE;
   }
-  AutoPushJSContext cx(context->GetNativeContext());
+
+  JSVersion version = JSVersion(aRequest->mJSVersion);
+  if (version == JSVERSION_UNKNOWN) {
+    return NS_OK;
+  }
+
+  // New script entry point required, due to the "Create a script" sub-step of
+  // http://www.whatwg.org/specs/web-apps/current-work/#execute-the-script-block
+  AutoEntryScript entryScript(globalObject, true, context->GetNativeContext());
+  JS::Rooted<JSObject*> global(entryScript.cx(),
+                               globalObject->GetGlobalJSObject());
 
   bool oldProcessingScriptTag = context->GetProcessingScriptTag();
   context->SetProcessingScriptTag(true);
@@ -837,23 +1120,10 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest,
   nsCOMPtr<nsIScriptElement> oldCurrent = mCurrentScript;
   mCurrentScript = aRequest->mElement;
 
-  // It's very important to use aRequest->mURI, not the final URI of the channel
-  // aRequest ended up getting script data from, as the script filename.
-  nsAutoCString url;
-  nsContentUtils::GetWrapperSafeScriptFilename(mDocument, aRequest->mURI, url);
-
-  JSVersion version = JSVersion(aRequest->mJSVersion);
-  if (version != JSVERSION_UNKNOWN) {
-    JS::CompileOptions options(cx);
-    options.setFileAndLine(url.get(), aRequest->mLineNo)
-           .setVersion(JSVersion(aRequest->mJSVersion));
-    if (aRequest->mOriginPrincipal) {
-      options.setOriginPrincipals(nsJSPrincipals::get(aRequest->mOriginPrincipal));
-    }
-    JS::Rooted<JSObject*> global(cx, globalObject->GetGlobalJSObject());
-    rv = context->EvaluateString(aScript, global,
-                                 options, /* aCoerceToString = */ false, nullptr);
-  }
+  JS::CompileOptions options(entryScript.cx());
+  FillCompileOptionsForRequest(aRequest, global, &options);
+  nsresult rv = nsJSUtils::EvaluateString(entryScript.cx(), aSrcBuf, global, options,
+                                          aOffThreadToken);
 
   // Put the old script back in case it wants to do anything else.
   mCurrentScript = oldCurrent;
@@ -934,6 +1204,9 @@ nsScriptLoader::ProcessPendingRequests()
       !mParserBlockingRequest && mAsyncRequests.IsEmpty() &&
       mNonAsyncExternalScriptInsertedRequests.IsEmpty() &&
       mXSLTRequests.IsEmpty() && mDeferRequests.IsEmpty()) {
+    if (MaybeRemovedDeferRequests()) {
+      return ProcessPendingRequests();
+    }
     // No more pending scripts; time to unblock onload.
     // OK to unblock onload synchronously here, since callers must be
     // prepared for the world changing anyway.
@@ -1000,10 +1273,12 @@ DetectByteOrderMark(const unsigned char* aBytes, int32_t aLen, nsCString& oChars
 /* static */ nsresult
 nsScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
                                uint32_t aLength, const nsAString& aHintCharset,
-                               nsIDocument* aDocument, nsString& aString)
+                               nsIDocument* aDocument,
+                               jschar*& aBufOut, size_t& aLengthOut)
 {
   if (!aLength) {
-    aString.Truncate();
+    aBufOut = nullptr;
+    aLengthOut = 0;
     return NS_OK;
   }
 
@@ -1015,37 +1290,30 @@ nsScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
 
   nsAutoCString charset;
 
-  nsCOMPtr<nsICharsetConverterManager> charsetConv =
-    do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID);
-
   nsCOMPtr<nsIUnicodeDecoder> unicodeDecoder;
 
   if (DetectByteOrderMark(aData, aLength, charset)) {
     // charset is now "UTF-8" or "UTF-16". The UTF-16 decoder will re-sniff
     // the BOM for endianness. Both the UTF-16 and the UTF-8 decoder will
     // take care of swallowing the BOM.
-    charsetConv->GetUnicodeDecoderRaw(charset.get(),
-                                      getter_AddRefs(unicodeDecoder));
+    unicodeDecoder = EncodingUtils::DecoderForEncoding(charset);
   }
 
   if (!unicodeDecoder &&
       aChannel &&
       NS_SUCCEEDED(aChannel->GetContentCharset(charset)) &&
-      !charset.IsEmpty()) {
-    charsetConv->GetUnicodeDecoder(charset.get(),
-                                   getter_AddRefs(unicodeDecoder));
+      EncodingUtils::FindEncodingForLabel(charset, charset)) {
+    unicodeDecoder = EncodingUtils::DecoderForEncoding(charset);
   }
 
-  if (!unicodeDecoder && !aHintCharset.IsEmpty()) {
-    CopyUTF16toUTF8(aHintCharset, charset);
-    charsetConv->GetUnicodeDecoder(charset.get(),
-                                   getter_AddRefs(unicodeDecoder));
+  if (!unicodeDecoder &&
+      EncodingUtils::FindEncodingForLabel(aHintCharset, charset)) {
+    unicodeDecoder = EncodingUtils::DecoderForEncoding(charset);
   }
 
   if (!unicodeDecoder && aDocument) {
     charset = aDocument->GetDocumentCharacterSet();
-    charsetConv->GetUnicodeDecoderRaw(charset.get(),
-                                      getter_AddRefs(unicodeDecoder));
+    unicodeDecoder = EncodingUtils::DecoderForEncoding(charset);
   }
 
   if (!unicodeDecoder) {
@@ -1053,8 +1321,7 @@ nsScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
     // fallback in the old code was ISO-8859-1, which behaved like
     // windows-1252. Saying windows-1252 for clarity and for compliance
     // with the Encoding Standard.
-    charsetConv->GetUnicodeDecoderRaw("windows-1252",
-                                      getter_AddRefs(unicodeDecoder));
+    unicodeDecoder = EncodingUtils::DecoderForEncoding("windows-1252");
   }
 
   int32_t unicodeLength = 0;
@@ -1064,17 +1331,23 @@ nsScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
                                  aLength, &unicodeLength);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (!aString.SetLength(unicodeLength, fallible_t())) {
+  aBufOut = static_cast<jschar*>(js_malloc(unicodeLength * sizeof(jschar)));
+  if (!aBufOut) {
+    aLengthOut = 0;
     return NS_ERROR_OUT_OF_MEMORY;
   }
-
-  PRUnichar *ustr = aString.BeginWriting();
+  aLengthOut = unicodeLength;
 
   rv = unicodeDecoder->Convert(reinterpret_cast<const char*>(aData),
-                               (int32_t *) &aLength, ustr,
+                               (int32_t *) &aLength, aBufOut,
                                &unicodeLength);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
-  aString.SetLength(unicodeLength);
+  aLengthOut = unicodeLength;
+  if (NS_FAILED(rv)) {
+    js_free(aBufOut);
+    aBufOut = nullptr;
+    aLengthOut = 0;
+  }
   return rv;
 }
 
@@ -1105,12 +1378,16 @@ nsScriptLoader::OnStreamComplete(nsIStreamLoader* aLoader,
     } else {
       mPreloads.RemoveElement(request, PreloadRequestComparator());
     }
+    rv = NS_OK;
+  } else {
+    NS_Free(const_cast<uint8_t *>(aString));
+    rv = NS_SUCCESS_ADOPTED_DATA;
   }
 
   // Process our request and/or any pending ones
   ProcessPendingRequests();
 
-  return NS_OK;
+  return rv;
 }
 
 void
@@ -1155,6 +1432,11 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
     if (NS_SUCCEEDED(rv) && !requestSucceeded) {
       return NS_ERROR_NOT_AVAILABLE;
     }
+
+    nsAutoCString sourceMapURL;
+    httpChannel->GetResponseHeader(NS_LITERAL_CSTRING("X-SourceMap"), sourceMapURL);
+    aRequest->mHasSourceMapURL = true;
+    aRequest->mSourceMapURL = NS_ConvertUTF8toUTF16(sourceMapURL);
   }
 
   nsCOMPtr<nsIChannel> channel = do_QueryInterface(req);
@@ -1179,7 +1461,7 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
       hintCharset = mPreloads[i].mCharset;
     }
     rv = ConvertToUTF16(channel, aString, aStringLen, hintCharset, mDocument,
-                        aRequest->mScriptText);
+                        aRequest->mScriptTextBuf, aRequest->mScriptTextLength);
 
     NS_ENSURE_SUCCESS(rv, rv);
   }
@@ -1249,4 +1531,28 @@ nsScriptLoader::PreloadURI(nsIURI *aURI, const nsAString &aCharset,
   PreloadInfo *pi = mPreloads.AppendElement();
   pi->mRequest = request;
   pi->mCharset = aCharset;
+}
+
+void
+nsScriptLoader::AddDeferRequest(nsScriptLoadRequest* aRequest)
+{
+  mDeferRequests.AppendElement(aRequest);
+  if (mDeferEnabled && mDeferRequests.Length() == 1 && mDocument &&
+      !mBlockingDOMContentLoaded) {
+    MOZ_ASSERT(mDocument->GetReadyStateEnum() == nsIDocument::READYSTATE_LOADING);
+    mBlockingDOMContentLoaded = true;
+    mDocument->BlockDOMContentLoaded();
+  }
+}
+
+bool
+nsScriptLoader::MaybeRemovedDeferRequests()
+{
+  if (mDeferRequests.Length() == 0 && mDocument &&
+      mBlockingDOMContentLoaded) {
+    mBlockingDOMContentLoaded = false;
+    mDocument->UnblockDOMContentLoaded();
+    return true;
+  }
+  return false;
 }

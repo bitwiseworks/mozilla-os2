@@ -4,17 +4,17 @@
 
 "use strict";
 
-let Cu = Components.utils;
-let Ci = Components.interfaces;
-let Cc = Components.classes;
-let Cr = Components.results;
+const {utils: Cu, interfaces: Ci} = Components;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/BrowserElementParent.jsm");
 
 const NS_PREFBRANCH_PREFCHANGE_TOPIC_ID = "nsPref:changed";
 const BROWSER_FRAMES_ENABLED_PREF = "dom.mozBrowserFramesEnabled";
+
+XPCOMUtils.defineLazyModuleGetter(this, "BrowserElementParentBuilder",
+                                  "resource://gre/modules/BrowserElementParent.jsm",
+                                  "BrowserElementParentBuilder");
 
 function debug(msg) {
   //dump("BrowserElementParent.js - " + msg + "\n");
@@ -65,8 +65,8 @@ BrowserElementParentFactory.prototype = {
     // alive for as long as its frame element lives.
     this._bepMap = new WeakMap();
 
-    Services.obs.addObserver(this, 'remote-browser-frame-shown', /* ownsWeak = */ true);
-    Services.obs.addObserver(this, 'in-process-browser-or-app-frame-shown', /* ownsWeak = */ true);
+    Services.obs.addObserver(this, 'remote-browser-pending', /* ownsWeak = */ true);
+    Services.obs.addObserver(this, 'inprocess-browser-shown', /* ownsWeak = */ true);
   },
 
   _browserFramesPrefEnabled: function() {
@@ -79,18 +79,31 @@ BrowserElementParentFactory.prototype = {
   },
 
   _observeInProcessBrowserFrameShown: function(frameLoader) {
+    // Ignore notifications that aren't from a BrowserOrApp
+    if (!frameLoader.QueryInterface(Ci.nsIFrameLoader).ownerIsBrowserOrAppFrame) {
+      return;
+    }
     debug("In-process browser frame shown " + frameLoader);
-    this._createBrowserElementParent(frameLoader, /* hasRemoteFrame = */ false);
+    this._createBrowserElementParent(frameLoader,
+                                     /* hasRemoteFrame = */ false,
+                                     /* pending frame */ false);
   },
 
-  _observeRemoteBrowserFrameShown: function(frameLoader) {
+  _observeRemoteBrowserFramePending: function(frameLoader) {
+    // Ignore notifications that aren't from a BrowserOrApp
+    if (!frameLoader.QueryInterface(Ci.nsIFrameLoader).ownerIsBrowserOrAppFrame) {
+      return;
+    }
     debug("Remote browser frame shown " + frameLoader);
-    this._createBrowserElementParent(frameLoader, /* hasRemoteFrame = */ true);
+    this._createBrowserElementParent(frameLoader,
+                                     /* hasRemoteFrame = */ true,
+                                     /* pending frame */ true);
   },
 
-  _createBrowserElementParent: function(frameLoader, hasRemoteFrame) {
+  _createBrowserElementParent: function(frameLoader, hasRemoteFrame, isPendingFrame) {
     let frameElement = frameLoader.QueryInterface(Ci.nsIFrameLoader).ownerElement;
-    this._bepMap.set(frameElement, BrowserElementParentBuilder.create(frameLoader, hasRemoteFrame));
+    this._bepMap.set(frameElement, BrowserElementParentBuilder.create(
+      frameLoader, hasRemoteFrame, isPendingFrame));
   },
 
   observe: function(subject, topic, data) {
@@ -103,14 +116,11 @@ BrowserElementParentFactory.prototype = {
         this._init();
       }
       break;
-    case 'remote-browser-frame-shown':
-      this._observeRemoteBrowserFrameShown(subject);
+    case 'remote-browser-pending':
+      this._observeRemoteBrowserFramePending(subject);
       break;
-    case 'in-process-browser-or-app-frame-shown':
+    case 'inprocess-browser-shown':
       this._observeInProcessBrowserFrameShown(subject);
-      break;
-    case 'content-document-global-created':
-      this._observeContentGlobalCreated(subject);
       break;
     }
   },

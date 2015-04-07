@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+// IWYU pragma: private, include "nsISupports.h"
 
 #ifndef nsISupportsBase_h__
 #define nsISupportsBase_h__
@@ -60,7 +61,7 @@ public:
    *
    * @return The resulting reference count.
    */
-  NS_IMETHOD_(nsrefcnt) AddRef(void) = 0;
+  NS_IMETHOD_(MozExternalRefCountType) AddRef(void) = 0;
 
   /**
    * Decreases the reference count for this interface.
@@ -69,7 +70,7 @@ public:
    *
    * @return The resulting reference count.
    */
-  NS_IMETHOD_(nsrefcnt) Release(void) = 0;
+  NS_IMETHOD_(MozExternalRefCountType) Release(void) = 0;
 
   //@}
 };

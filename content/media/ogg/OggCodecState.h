@@ -27,7 +27,7 @@
 #include <nsClassHashtable.h>
 #include "VideoUtils.h"
 
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 
 // Uncomment the following to validate that we're predicting the number
 // of Vorbis samples in each packet correctly.
@@ -35,6 +35,8 @@
 #ifdef  VALIDATE_VORBIS_SAMPLE_CALCULATION
 #include <map>
 #endif
+
+#include "OpusParser.h"
 
 namespace mozilla {
 
@@ -341,7 +343,6 @@ public:
 
   // Various fields from the Ogg Opus header.
   int mRate;        // Sample rate the decoder uses (always 48 kHz).
-  uint32_t mNominalRate; // Original sample rate of the data (informational).
   int mChannels;    // Number of channels the stream encodes.
   uint16_t mPreSkip; // Number of samples to strip after decoder reset.
 #ifdef MOZ_SAMPLE_TYPE_FLOAT32
@@ -349,11 +350,8 @@ public:
 #else
   int32_t mGain_Q16; // Gain to apply to the decoder output.
 #endif
-  int mChannelMapping; // Channel mapping family.
-  int mStreams;     // Number of packed streams in each packet.
-  int mCoupledStreams; // Number of packed coupled streams in each packet.
-  unsigned char mMappingTable[255]; // Channel mapping table.
 
+  nsAutoPtr<OpusParser> mParser;
   OpusMSDecoder *mDecoder;
 
   int mSkip;        // Number of samples left to trim before playback.
@@ -365,9 +363,6 @@ public:
   MetadataTags* GetTags();
 
 private:
-
-  nsCString mVendorString;   // Encoder vendor string from the header.
-  nsTArray<nsCString> mTags; // Unparsed comment strings from the header.
 
   // Reconstructs the granulepos of Opus packets stored in the
   // mUnstamped array. mUnstamped must be filled with consecutive packets from
@@ -447,7 +442,7 @@ public:
                              nsSeekTarget& aResult);
 
   bool HasIndex() const {
-    return mIndex.IsInitialized() && mIndex.Count() > 0;
+    return mIndex.Count() > 0;
   }
 
   // Returns the duration of the active tracks in the media, if we have

@@ -12,8 +12,8 @@ class nsDOMAttributeMap;
 class nsIContent;
 
 #define NS_IATTRIBUTE_IID  \
-{ 0x8d9d7dbf, 0xc42d, 0x4715, \
-  { 0x95, 0xcf, 0x7a, 0x5e, 0xd5, 0xa4, 0x47, 0x70 } }
+{ 0x233a9c4d, 0xb27f, 0x4662, \
+    { 0xbd, 0x90, 0xba, 0xd6, 0x2e, 0x76, 0xc8, 0xe1 } }
 
 class nsIAttribute : public nsINode
 {
@@ -32,8 +32,6 @@ public:
     return mNodeInfo;
   }
 
-  virtual nsIContent* GetContent() const = 0;
-
   /**
    * Called when our ownerElement is moved into a new document.
    * Updates the nodeinfo of this node.
@@ -42,9 +40,11 @@ public:
 
 protected:
 #ifdef MOZILLA_INTERNAL_API
-  nsIAttribute(nsDOMAttributeMap *aAttrMap, already_AddRefed<nsINodeInfo> aNodeInfo,
+  nsIAttribute(nsDOMAttributeMap *aAttrMap,
+               already_AddRefed<nsINodeInfo>& aNodeInfo,
                bool aNsAware);
 #endif //MOZILLA_INTERNAL_API
+  virtual ~nsIAttribute();
 
   nsRefPtr<nsDOMAttributeMap> mAttrMap;
   bool mNsAware;

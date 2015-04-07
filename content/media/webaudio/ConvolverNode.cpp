@@ -9,14 +9,12 @@
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "blink/Reverb.h"
-
-#include <cmath>
-#include "nsMathUtils.h"
+#include "PlayingRefChangeHandler.h"
 
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(ConvolverNode, AudioNode, mBuffer)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(ConvolverNode, AudioNode, mBuffer)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ConvolverNode)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
@@ -26,7 +24,7 @@ NS_IMPL_RELEASE_INHERITED(ConvolverNode, AudioNode)
 
 class ConvolverNodeEngine : public AudioNodeEngine
 {
-  typedef PlayingRefChangeHandler<ConvolverNode> PlayingRefChanged;
+  typedef PlayingRefChangeHandler PlayingRefChanged;
 public:
   ConvolverNodeEngine(AudioNode* aNode, bool aNormalize)
     : AudioNodeEngine(aNode)
@@ -35,7 +33,6 @@ public:
     , mSampleRate(0.0f)
     , mUseBackgroundThreads(!aNode->Context()->IsOffline())
     , mNormalize(aNormalize)
-    , mSeenInput(false)
   {
   }
 
@@ -94,7 +91,6 @@ public:
 
     if (!mBuffer || !mBufferLength || !mSampleRate) {
       mReverb = nullptr;
-      mSeenInput = false;
       mLeftOverData = INT32_MIN;
       return;
     }
@@ -105,36 +101,32 @@ public:
                                   mNormalize, mSampleRate);
   }
 
-  virtual void ProduceAudioBlock(AudioNodeStream* aStream,
-                                 const AudioChunk& aInput,
-                                 AudioChunk* aOutput,
-                                 bool* aFinished)
+  virtual void ProcessBlock(AudioNodeStream* aStream,
+                            const AudioChunk& aInput,
+                            AudioChunk* aOutput,
+                            bool* aFinished)
   {
-    if (!mSeenInput && aInput.IsNull()) {
-      aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
-      return;
-    }
     if (!mReverb) {
       *aOutput = aInput;
       return;
     }
 
-    mSeenInput = true;
     AudioChunk input = aInput;
     if (aInput.IsNull()) {
-      AllocateAudioBlock(1, &input);
-      WriteZeroesToAudioBlock(&input, 0, WEBAUDIO_BLOCK_SIZE);
-
-      mLeftOverData -= WEBAUDIO_BLOCK_SIZE;
-      if (mLeftOverData <= 0) {
-        // Note: this keeps spamming the main thread with messages as long
-        // as there is nothing to play. This isn't great, but it avoids
-        // problems with some messages being ignored when they're rejected by
-        // ConvolverNode::AcceptPlayingRefRelease.
-        mLeftOverData = 0;
-        nsRefPtr<PlayingRefChanged> refchanged =
-          new PlayingRefChanged(aStream, PlayingRefChanged::RELEASE);
-        NS_DispatchToMainThread(refchanged);
+      if (mLeftOverData > 0) {
+        mLeftOverData -= WEBAUDIO_BLOCK_SIZE;
+        AllocateAudioBlock(1, &input);
+        WriteZeroesToAudioBlock(&input, 0, WEBAUDIO_BLOCK_SIZE);
+      } else {
+        if (mLeftOverData != INT32_MIN) {
+          mLeftOverData = INT32_MIN;
+          nsRefPtr<PlayingRefChanged> refchanged =
+            new PlayingRefChanged(aStream, PlayingRefChanged::RELEASE);
+          aStream->Graph()->
+            DispatchToMainThreadAfterStreamStateUpdate(refchanged.forget());
+        }
+        aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
+        return;
       }
     } else {
       if (aInput.mVolume != 1.0f) {
@@ -151,14 +143,34 @@ public:
       if (mLeftOverData <= 0) {
         nsRefPtr<PlayingRefChanged> refchanged =
           new PlayingRefChanged(aStream, PlayingRefChanged::ADDREF);
-        NS_DispatchToMainThread(refchanged);
+        aStream->Graph()->
+          DispatchToMainThreadAfterStreamStateUpdate(refchanged.forget());
       }
-      mLeftOverData = mBufferLength + WEBAUDIO_BLOCK_SIZE;
+      mLeftOverData = mBufferLength;
       MOZ_ASSERT(mLeftOverData > 0);
     }
     AllocateAudioBlock(2, aOutput);
 
     mReverb->process(&input, aOutput, WEBAUDIO_BLOCK_SIZE);
+  }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    size_t amount = AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
+    if (mBuffer && !mBuffer->IsShared()) {
+      amount += mBuffer->SizeOfIncludingThis(aMallocSizeOf);
+    }
+
+    if (mReverb) {
+      amount += mReverb->sizeOfIncludingThis(aMallocSizeOf);
+    }
+
+    return amount;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
 private:
@@ -169,7 +181,6 @@ private:
   float mSampleRate;
   bool mUseBackgroundThreads;
   bool mNormalize;
-  bool mSeenInput;
 };
 
 ConvolverNode::ConvolverNode(AudioContext* aContext)
@@ -177,17 +188,34 @@ ConvolverNode::ConvolverNode(AudioContext* aContext)
               2,
               ChannelCountMode::Clamped_max,
               ChannelInterpretation::Speakers)
-  , mMediaStreamGraphUpdateIndexAtLastInputConnection(0)
   , mNormalize(true)
 {
   ConvolverNodeEngine* engine = new ConvolverNodeEngine(this, mNormalize);
   mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM);
 }
 
-JSObject*
-ConvolverNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+size_t
+ConvolverNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
-  return ConvolverNodeBinding::Wrap(aCx, aScope, this);
+  size_t amount = AudioNode::SizeOfExcludingThis(aMallocSizeOf);
+  if (mBuffer) {
+    // NB: mBuffer might be shared with the associated engine, by convention
+    //     the AudioNode will report.
+    amount += mBuffer->SizeOfIncludingThis(aMallocSizeOf);
+  }
+  return amount;
+}
+
+size_t
+ConvolverNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+}
+
+JSObject*
+ConvolverNode::WrapObject(JSContext* aCx)
+{
+  return ConvolverNodeBinding::Wrap(aCx, this);
 }
 
 void

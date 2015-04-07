@@ -2,49 +2,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH     = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir    = @srcdir@
-VPATH     = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-MSVC_ENABLE_PGO := 1
-LIBXUL_LIBRARY = 1
-ifeq (WINNT,$(OS_TARGET))
-VISIBILITY_FLAGS =
-endif
-
-# The below is a rough translation of build_angle.gypi:
-DEFINES += -DANGLE_DISABLE_TRACE
-DEFINES += -DANGLE_COMPILE_OPTIMIZATION_LEVEL=D3DCOMPILE_OPTIMIZATION_LEVEL1
-
-# Target: 'preprocessor'
-# src/compiler/preprocessor:
-VPATH += $(srcdir)/src/compiler/preprocessor
-
-# Target: 'translator_common'
-#   Requires: 'preprocessor'
-LOCAL_INCLUDES += \
-  -I$(srcdir)/include \
-  -I$(srcdir)/include/KHR \
-  -I$(srcdir)/src
-
-DEFINES += -DCOMPILER_IMPLEMENTATION
-
-VPATH += $(srcdir)/src/compiler
-VPATH += $(srcdir)/src/compiler/depgraph
-VPATH += $(srcdir)/src/compiler/timing
-VPATH += $(srcdir)/src/third_party/compiler
-
-# Target: 'translator_glsl'
-#   Requires: 'translator_common'
-# src/compiler:
 ifdef MOZ_ANGLE_RENDERER
 
 libs::
+ifdef MOZ_D3DCOMPILER_DLL_PATH
+	cp -fp "$(MOZ_D3DCOMPILER_DLL_PATH)" "$(DIST)/bin"
+else
 ifdef MOZ_D3DCOMPILER_CAB
-	expand "$(MOZ_D3DCOMPILER_CAB)" -F:$(MOZ_D3DCOMPILER_DLL) "$(DIST)/bin"
+	expand '$(MOZ_D3DCOMPILER_CAB)' -F:$(MOZ_D3DCOMPILER_DLL) '$(DIST)/bin'
+endif
 endif
 
 endif

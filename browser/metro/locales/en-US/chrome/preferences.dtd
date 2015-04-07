@@ -7,10 +7,6 @@
 
 <!-- ## Options Flyout Panel ## -->
 <!ENTITY optionsHeader.title                                     "Options">
-<!ENTITY optionsHeader.startup.title                             "Startup">
-<!ENTITY optionsHeader.homepage.title                            "When &brandShortName; starts, show">
-<!ENTITY optionsHeader.homepage.startPage.button                 "start page">
-<!ENTITY optionsHeader.homepage.sessionRestore.button            "tabs from last time">
 <!ENTITY optionsHeader.char.title                                "Character Encoding">
 <!ENTITY optionsHeader.char.autodetect.label                     "Auto-detect">
 <!ENTITY optionsHeader.char.options.label                        "Show encoding options on the App Bar">
@@ -31,10 +27,15 @@
 <!ENTITY clearPrivateData.logins                                 "Active logins">
 
 <!ENTITY optionsHeader.privacy.passwords.label                   "Remember Passwords">
+<!ENTITY optionsHeader.displayOverlayButtons.label               "Show Navigation Buttons">
 <!ENTITY doNotTrack.title                                        "Do Not Track">
-<!ENTITY doNotTrack.desc                                         "Tell sites:">
-<!ENTITY doNotTrack.options.trackingNotOkay                      "I do not want to be tracked">
-<!ENTITY doNotTrack.options.noPreference                         "Nothing about my tracking preferences">
-<!ENTITY doNotTrack.options.trackingOkay                         "I want to be tracked">
+<!ENTITY doNotTrack.options.doNotTrack                           "Tell websites that I do not want to be tracked">
+<!ENTITY doNotTrack.options.doTrack                              "Tell websites that I want to be tracked">
+<!ENTITY doNotTrack.options.default                              "Do not tell websites anything about my tracking preferences">
+<!ENTITY doNotTrack.learnMoreLink                                "Learn more&#x2026;">
+
 <!ENTITY optionsHeader.reporting.title                           "Crash Reporter">
 <!ENTITY optionsHeader.reporting.crashes.label                   "&brandShortName; submits crash reports to help Mozilla make your browser more stable and secure">
+<!ENTITY optionsHeader.reporting.crashes.submitURLs             "Include the address of the page I was on">
+<!ENTITY optionsHeader.telemetry.title                            "Telemetry">
+<!ENTITY optionsHeader.telemetry.label                            "Shares usage statistics about &brandShortName; with Mozilla to help us make your browser better">

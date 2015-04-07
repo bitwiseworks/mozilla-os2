@@ -10,8 +10,8 @@
 
 #include "mozilla/Assertions.h"
 #include "nsDebug.h"
+#include "nsISupportsImpl.h"
 #include "nsThreadUtils.h"
-#include "nsTraceRefcnt.h"
 
 #include "BluetoothReplyRunnable.h"
 #include "BluetoothService.h"
@@ -21,7 +21,7 @@ USING_BLUETOOTH_NAMESPACE
 
 namespace {
 
-BluetoothServiceChildProcess* gBluetoothService;
+BluetoothServiceChildProcess* sBluetoothService;
 
 } // anonymous namespace
 
@@ -33,19 +33,19 @@ BluetoothChild::BluetoothChild(BluetoothServiceChildProcess* aBluetoothService)
 : mShutdownState(Running)
 {
   MOZ_COUNT_CTOR(BluetoothChild);
-  MOZ_ASSERT(!gBluetoothService);
+  MOZ_ASSERT(!sBluetoothService);
   MOZ_ASSERT(aBluetoothService);
 
-  gBluetoothService = aBluetoothService;
+  sBluetoothService = aBluetoothService;
 }
 
 BluetoothChild::~BluetoothChild()
 {
   MOZ_COUNT_DTOR(BluetoothChild);
-  MOZ_ASSERT(gBluetoothService);
+  MOZ_ASSERT(sBluetoothService);
   MOZ_ASSERT(mShutdownState == Dead);
 
-  gBluetoothService = nullptr;
+  sBluetoothService = nullptr;
 }
 
 void
@@ -61,9 +61,9 @@ BluetoothChild::BeginShutdown()
 void
 BluetoothChild::ActorDestroy(ActorDestroyReason aWhy)
 {
-  MOZ_ASSERT(gBluetoothService);
+  MOZ_ASSERT(sBluetoothService);
 
-  gBluetoothService->NoteDeadActor();
+  sBluetoothService->NoteDeadActor();
 
 #ifdef DEBUG
   mShutdownState = Dead;
@@ -73,18 +73,18 @@ BluetoothChild::ActorDestroy(ActorDestroyReason aWhy)
 bool
 BluetoothChild::RecvNotify(const BluetoothSignal& aSignal)
 {
-  MOZ_ASSERT(gBluetoothService);
+  MOZ_ASSERT(sBluetoothService);
 
-  gBluetoothService->DistributeSignal(aSignal);
+  sBluetoothService->DistributeSignal(aSignal);
   return true;
 }
 
 bool
 BluetoothChild::RecvEnabled(const bool& aEnabled)
 {
-  MOZ_ASSERT(gBluetoothService);
+  MOZ_ASSERT(sBluetoothService);
 
-  gBluetoothService->SetEnabled(aEnabled);
+  sBluetoothService->SetEnabled(aEnabled);
   return true;
 }
 
@@ -115,14 +115,13 @@ BluetoothChild::RecvNotificationsStopped()
 }
 
 PBluetoothRequestChild*
-BluetoothChild::AllocPBluetoothRequest(const Request& aRequest)
+BluetoothChild::AllocPBluetoothRequestChild(const Request& aRequest)
 {
-  MOZ_NOT_REACHED("Caller is supposed to manually construct a request!");
-  return nullptr;
+  MOZ_CRASH("Caller is supposed to manually construct a request!");
 }
 
 bool
-BluetoothChild::DeallocPBluetoothRequest(PBluetoothRequestChild* aActor)
+BluetoothChild::DeallocPBluetoothRequestChild(PBluetoothRequestChild* aActor)
 {
   delete aActor;
   return true;

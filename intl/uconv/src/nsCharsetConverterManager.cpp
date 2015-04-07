@@ -5,23 +5,19 @@
 
 #include "nsCOMPtr.h"
 #include "nsString.h"
-#include "nsReadableUtils.h"
 #include "nsUnicharUtils.h"
 #include "nsCharsetAlias.h"
-#include "nsIServiceManager.h"
 #include "nsICategoryManager.h"
 #include "nsICharsetConverterManager.h"
 #include "nsEncoderDecoderUtils.h"
 #include "nsIStringBundle.h"
-#include "nsCRT.h"
 #include "nsTArray.h"
 #include "nsStringEnumerator.h"
-#include "nsThreadUtils.h"
 #include "mozilla/Services.h"
 
-#include "nsXPCOM.h"
 #include "nsComponentManagerUtils.h"
 #include "nsISupportsPrimitives.h"
+#include "nsServiceManagerUtils.h"
 
 // just for CONTRACTIDs
 #include "nsCharsetConverterManager.h"
@@ -31,8 +27,7 @@ static nsIStringBundle * sTitleBundle;
 
 // Class nsCharsetConverterManager [implementation]
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsCharsetConverterManager,
-                              nsICharsetConverterManager)
+NS_IMPL_ISUPPORTS(nsCharsetConverterManager, nsICharsetConverterManager)
 
 nsCharsetConverterManager::nsCharsetConverterManager() 
 {
@@ -65,7 +60,7 @@ static
 nsresult GetBundleValue(nsIStringBundle * aBundle, 
                         const char * aName, 
                         const nsAFlatString& aProp, 
-                        PRUnichar ** aResult)
+                        char16_t ** aResult)
 {
   nsAutoString key; 
 
@@ -95,7 +90,7 @@ nsresult GetBundleValue(nsIStringBundle * aBundle,
 }
 
 static
-nsresult GetCharsetDataImpl(const char * aCharset, const PRUnichar * aProp,
+nsresult GetCharsetDataImpl(const char * aCharset, const char16_t * aProp,
                             nsAString& aResult)
 {
   NS_ENSURE_ARG_POINTER(aCharset);
@@ -116,7 +111,7 @@ bool nsCharsetConverterManager::IsInternal(const nsACString& aCharset)
   nsAutoString str;
   // fully qualify to possibly avoid vtable call
   nsresult rv = GetCharsetDataImpl(PromiseFlatCString(aCharset).get(),
-                                   NS_LITERAL_STRING(".isInternal").get(),
+                                   MOZ_UTF16(".isInternal"),
                                    str);
 
   return NS_SUCCEEDED(rv);
@@ -320,7 +315,7 @@ nsCharsetConverterManager::GetCharsetTitle(const char * aCharset,
 
 NS_IMETHODIMP
 nsCharsetConverterManager::GetCharsetData(const char * aCharset, 
-                                          const PRUnichar * aProp,
+                                          const char16_t * aProp,
                                           nsAString& aResult)
 {
   return GetCharsetDataImpl(aCharset, aProp, aResult);
@@ -350,11 +345,11 @@ nsCharsetConverterManager::GetCharsetLangGroupRaw(const char * aCharset,
   nsAutoString langGroup;
   // fully qualify to possibly avoid vtable call
   nsresult rv = nsCharsetConverterManager::GetCharsetData(
-      aCharset, NS_LITERAL_STRING(".LangGroup").get(), langGroup);
+      aCharset, MOZ_UTF16(".LangGroup"), langGroup);
 
   if (NS_SUCCEEDED(rv)) {
     ToLowerCase(langGroup); // use lowercase for all language atoms
-    *aResult = NS_NewAtom(langGroup).get();
+    *aResult = NS_NewAtom(langGroup).take();
   }
 
   return rv;

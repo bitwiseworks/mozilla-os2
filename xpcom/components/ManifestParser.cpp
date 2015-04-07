@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "ManifestParser.h"
 
@@ -15,6 +15,7 @@
 #include <windows.h>
 #elif defined(MOZ_WIDGET_COCOA)
 #include <CoreServices/CoreServices.h>
+#include "nsCocoaFeatures.h"
 #elif defined(MOZ_WIDGET_GTK)
 #include <gtk/gtk.h>
 #endif
@@ -68,31 +69,31 @@ struct ManifestDirective
 };
 static const ManifestDirective kParsingTable[] = {
   { "manifest",         1, false, true, true, false,
-    &nsComponentManagerImpl::ManifestManifest, NULL },
+    &nsComponentManagerImpl::ManifestManifest, nullptr },
   { "binary-component", 1, true, false, false, false,
-    &nsComponentManagerImpl::ManifestBinaryComponent, NULL },
+    &nsComponentManagerImpl::ManifestBinaryComponent, nullptr },
   { "interfaces",       1, true, false, false, false,
-    &nsComponentManagerImpl::ManifestXPT, NULL },
+    &nsComponentManagerImpl::ManifestXPT, nullptr },
   { "component",        2, true, false, false, false,
-    &nsComponentManagerImpl::ManifestComponent, NULL },
+    &nsComponentManagerImpl::ManifestComponent, nullptr },
   { "contract",         2, true, false, false, false,
-    &nsComponentManagerImpl::ManifestContract, NULL, true},
+    &nsComponentManagerImpl::ManifestContract, nullptr, true},
   { "category",         3, true, false, false, false,
-    &nsComponentManagerImpl::ManifestCategory, NULL },
+    &nsComponentManagerImpl::ManifestCategory, nullptr },
   { "content",          2, true, true, true,  true,
-    NULL, &nsChromeRegistry::ManifestContent },
+    nullptr, &nsChromeRegistry::ManifestContent },
   { "locale",           3, true, true, true,  false,
-    NULL, &nsChromeRegistry::ManifestLocale },
+    nullptr, &nsChromeRegistry::ManifestLocale },
   { "skin",             3, false, true, true,  false,
-    NULL, &nsChromeRegistry::ManifestSkin },
+    nullptr, &nsChromeRegistry::ManifestSkin },
   { "overlay",          2, true, true, false,  false,
-    NULL, &nsChromeRegistry::ManifestOverlay },
+    nullptr, &nsChromeRegistry::ManifestOverlay },
   { "style",            2, false, true, false,  false,
-    NULL, &nsChromeRegistry::ManifestStyle },
+    nullptr, &nsChromeRegistry::ManifestStyle },
   { "override",         2, true, true, true,  false,
-    NULL, &nsChromeRegistry::ManifestOverride },
+    nullptr, &nsChromeRegistry::ManifestOverride },
   { "resource",         2, true, true, false,  false,
-    NULL, &nsChromeRegistry::ManifestResource }
+    nullptr, &nsChromeRegistry::ManifestResource }
 };
 
 static const char kWhitespace[] = "\t ";
@@ -442,7 +443,7 @@ ParseManifest(NSLocationType type, FileLocation &file, char* buf, bool aChromeOn
       if (NS_SUCCEEDED(rv) && osTarget.Length()) {
         ToLowerCase(s);
         CopyUTF8toUTF16(s, abi);
-        abi.Insert(PRUnichar('_'), 0);
+        abi.Insert(char16_t('_'), 0);
         abi.Insert(osTarget, 0);
       }
     }
@@ -450,29 +451,30 @@ ParseManifest(NSLocationType type, FileLocation &file, char* buf, bool aChromeOn
 
   nsAutoString osVersion;
 #if defined(XP_WIN)
+#pragma warning(push)
+#pragma warning(disable:4996) // VC12+ deprecates GetVersionEx
   OSVERSIONINFO info = { sizeof(OSVERSIONINFO) };
   if (GetVersionEx(&info)) {
-    nsTextFormatter::ssprintf(osVersion, NS_LITERAL_STRING("%ld.%ld").get(),
+    nsTextFormatter::ssprintf(osVersion, MOZ_UTF16("%ld.%ld"),
                                          info.dwMajorVersion,
                                          info.dwMinorVersion);
   }
+#pragma warning(pop)
 #elif defined(MOZ_WIDGET_COCOA)
-  SInt32 majorVersion, minorVersion;
-  if ((Gestalt(gestaltSystemVersionMajor, &majorVersion) == noErr) &&
-      (Gestalt(gestaltSystemVersionMinor, &minorVersion) == noErr)) {
-    nsTextFormatter::ssprintf(osVersion, NS_LITERAL_STRING("%ld.%ld").get(),
-                                         majorVersion,
-                                         minorVersion);
-  }
-#elif defined(MOZ_WIDGET_GTK)
+  SInt32 majorVersion = nsCocoaFeatures::OSXVersionMajor();
+  SInt32 minorVersion = nsCocoaFeatures::OSXVersionMinor();
   nsTextFormatter::ssprintf(osVersion, NS_LITERAL_STRING("%ld.%ld").get(),
+                                       majorVersion,
+                                       minorVersion);
+#elif defined(MOZ_WIDGET_GTK)
+  nsTextFormatter::ssprintf(osVersion, MOZ_UTF16("%ld.%ld"),
                                        gtk_major_version,
                                        gtk_minor_version);
 #elif defined(MOZ_WIDGET_ANDROID)
   bool isTablet = false;
   if (mozilla::AndroidBridge::Bridge()) {
     mozilla::AndroidBridge::Bridge()->GetStaticStringField("android/os/Build$VERSION", "RELEASE", osVersion);
-    isTablet = mozilla::AndroidBridge::Bridge()->IsTablet();
+    isTablet = mozilla::widget::android::GeckoAppShell::IsTablet();
   }
 #endif
 
@@ -510,7 +512,7 @@ ParseManifest(NSLocationType type, FileLocation &file, char* buf, bool aChromeOn
     token = nsCRT::strtok(whitespace, kWhitespace, &whitespace);
     if (!token) continue;
 
-    const ManifestDirective* directive = NULL;
+    const ManifestDirective* directive = nullptr;
     for (const ManifestDirective* d = kParsingTable;
 	 d < ArrayEnd(kParsingTable);
 	 ++d) {
@@ -566,7 +568,7 @@ ParseManifest(NSLocationType type, FileLocation &file, char* buf, bool aChromeOn
     bool platform = false;
     bool contentAccessible = false;
 
-    while (NULL != (token = nsCRT::strtok(whitespace, kWhitespace, &whitespace)) && ok) {
+    while (nullptr != (token = nsCRT::strtok(whitespace, kWhitespace, &whitespace)) && ok) {
       ToLowerCase(token);
       NS_ConvertASCIItoUTF16 wtoken(token);
 

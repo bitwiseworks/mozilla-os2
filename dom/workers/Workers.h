@@ -9,11 +9,11 @@
 #include "jsapi.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Mutex.h"
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 
 #define BEGIN_WORKERS_NAMESPACE \
   namespace mozilla { namespace dom { namespace workers {
@@ -55,7 +55,6 @@ struct JSSettings
     JSSettings_JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MAX,
     JSSettings_JSGC_HIGH_FREQUENCY_LOW_LIMIT,
     JSSettings_JSGC_HIGH_FREQUENCY_HIGH_LIMIT,
-    JSSettings_JSGC_ANALYSIS_PURGE_TRIGGER,
     JSSettings_JSGC_ALLOCATION_THRESHOLD,
     JSSettings_JSGC_SLICE_TIME_BUDGET,
     JSSettings_JSGC_DYNAMIC_HEAP_GROWTH,
@@ -96,27 +95,28 @@ struct JSSettings
   // Settings that change based on chrome/content context.
   struct JSContentChromeSettings
   {
-    uint32_t options;
+    JS::ContextOptions contextOptions;
+    JS::CompartmentOptions compartmentOptions;
     int32_t maxScriptRuntime;
 
     JSContentChromeSettings()
-    : options(0), maxScriptRuntime(0)
+    : contextOptions(), compartmentOptions(), maxScriptRuntime(0)
     { }
   };
 
   JSContentChromeSettings chrome;
   JSContentChromeSettings content;
   JSGCSettingsArray gcSettings;
-  bool jitHardening;
+  JS::RuntimeOptions runtimeOptions;
+
 #ifdef JS_GC_ZEAL
   uint8_t gcZeal;
   uint32_t gcZealFrequency;
 #endif
 
   JSSettings()
-  : jitHardening(false)
 #ifdef JS_GC_ZEAL
-  , gcZeal(0), gcZealFrequency(0)
+  : gcZeal(0), gcZealFrequency(0)
 #endif
   {
     for (uint32_t index = 0; index < ArrayLength(gcSettings); index++) {
@@ -163,53 +163,70 @@ struct JSSettings
   }
 };
 
-// All of these are implemented in RuntimeService.cpp
-JSBool
-ResolveWorkerClasses(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aId,
-                     unsigned aFlags, JS::MutableHandle<JSObject*> aObjp);
-
-void
-CancelWorkersForWindow(JSContext* aCx, nsPIDOMWindow* aWindow);
-
-void
-SuspendWorkersForWindow(JSContext* aCx, nsPIDOMWindow* aWindow);
-
-void
-ResumeWorkersForWindow(nsIScriptContext* aCx, nsPIDOMWindow* aWindow);
-
-class WorkerTask {
-public:
-    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WorkerTask)
-
-    virtual ~WorkerTask() { }
-
-    virtual bool RunTask(JSContext* aCx) = 0;
+enum WorkerPreference
+{
+  WORKERPREF_DUMP = 0, // browser.dom.window.dump.enabled
+  WORKERPREF_COUNT
 };
 
-class WorkerCrossThreadDispatcher {
+// All of these are implemented in RuntimeService.cpp
+bool
+ResolveWorkerClasses(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aId,
+                     JS::MutableHandle<JSObject*> aObjp);
+
+void
+CancelWorkersForWindow(nsPIDOMWindow* aWindow);
+
+void
+SuspendWorkersForWindow(nsPIDOMWindow* aWindow);
+
+void
+ResumeWorkersForWindow(nsPIDOMWindow* aWindow);
+
+class WorkerTask
+{
+protected:
+  WorkerTask()
+  { }
+
+  virtual ~WorkerTask()
+  { }
+
+public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WorkerTask)
+
+  virtual bool
+  RunTask(JSContext* aCx) = 0;
+};
+
+class WorkerCrossThreadDispatcher
+{
+   friend class WorkerPrivate;
+
+  // Must be acquired *before* the WorkerPrivate's mutex, when they're both
+  // held.
+  Mutex mMutex;
+  WorkerPrivate* mWorkerPrivate;
+
+private:
+  // Only created by WorkerPrivate.
+  WorkerCrossThreadDispatcher(WorkerPrivate* aWorkerPrivate);
+
+  // Only called by WorkerPrivate.
+  void
+  Forget()
+  {
+    MutexAutoLock lock(mMutex);
+    mWorkerPrivate = nullptr;
+  }
+
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WorkerCrossThreadDispatcher)
 
-  WorkerCrossThreadDispatcher(WorkerPrivate* aPrivate) :
-    mMutex("WorkerCrossThreadDispatcher"), mPrivate(aPrivate) {}
-  void Forget()
-  {
-    mozilla::MutexAutoLock lock(mMutex);
-    mPrivate = nullptr;
-  }
-
-  /**
-   * Generically useful function for running a bit of C++ code on the worker
-   * thread.
-   */
-  bool PostTask(WorkerTask* aTask);
-
-protected:
-  friend class WorkerPrivate;
-
-  // Must be acquired *before* the WorkerPrivate's mutex, when they're both held.
-  mozilla::Mutex mMutex;
-  WorkerPrivate* mPrivate;
+  // Generically useful function for running a bit of C++ code on the worker
+  // thread.
+  bool
+  PostTask(WorkerTask* aTask);
 };
 
 WorkerCrossThreadDispatcher*
@@ -231,7 +248,7 @@ ThrowDOMExceptionForNSResult(JSContext* aCx, nsresult aNSResult);
 // (implying no setter at all), which will not throw when set in non-strict
 // code but will in strict code.  Old code should use this only for temporary
 // compatibility reasons.
-extern JSBool
+extern bool
 GetterOnlyJSNative(JSContext* aCx, unsigned aArgc, JS::Value* aVp);
 
 END_WORKERS_NAMESPACE

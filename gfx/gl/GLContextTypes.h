@@ -6,31 +6,34 @@
 #ifndef GLCONTEXT_TYPES_H_
 #define GLCONTEXT_TYPES_H_
 
-typedef unsigned int GLenum;
-typedef unsigned int GLbitfield;
-typedef unsigned int GLuint;
-typedef int GLint;
-typedef int GLsizei;
+#include "GLTypes.h"
+#include "mozilla/TypedEnum.h"
 
 namespace mozilla {
 namespace gl {
 
-enum ShaderProgramType {
-    RGBALayerProgramType,
-    RGBALayerExternalProgramType,
-    BGRALayerProgramType,
-    RGBXLayerProgramType,
-    BGRXLayerProgramType,
-    RGBARectLayerProgramType,
-    RGBAExternalLayerProgramType,
-    ColorLayerProgramType,
-    YCbCrLayerProgramType,
-    ComponentAlphaPass1ProgramType,
-    ComponentAlphaPass2ProgramType,
-    Copy2DProgramType,
-    Copy2DRectProgramType,
-    NumProgramTypes
-};
+class GLContext;
+
+typedef uintptr_t SharedTextureHandle;
+
+MOZ_BEGIN_ENUM_CLASS(SharedTextureShareType)
+    SameProcess = 0,
+    CrossProcess
+MOZ_END_ENUM_CLASS(SharedTextureShareType)
+
+MOZ_BEGIN_ENUM_CLASS(SharedTextureBufferType)
+    TextureID,
+    SurfaceTexture,
+    IOSurface
+MOZ_END_ENUM_CLASS(SharedTextureBufferType)
+
+MOZ_BEGIN_ENUM_CLASS(GLContextType)
+    Unknown,
+    WGL,
+    CGL,
+    GLX,
+    EGL
+MOZ_END_ENUM_CLASS(GLContextType)
 
 struct GLFormats
 {

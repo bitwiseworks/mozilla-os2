@@ -16,8 +16,8 @@
 #include "imgINotificationObserver.h"
 #include "imgIOnloadBlocker.h"
 #include "mozilla/CORSMode.h"
+#include "mozilla/EventStates.h"
 #include "nsCOMPtr.h"
-#include "nsEventStates.h"
 #include "nsIImageLoadingContent.h"
 #include "nsIRequest.h"
 #include "mozilla/ErrorResult.h"
@@ -30,6 +30,11 @@ class nsIIOService;
 class nsPresContext;
 class nsIContent;
 class imgRequestProxy;
+
+#ifdef LoadImage
+// Undefine LoadImage to prevent naming conflict with Windows.
+#undef LoadImage
+#endif
 
 class nsImageLoadingContent : public nsIImageLoadingContent,
                               public imgIOnloadBlocker
@@ -91,7 +96,7 @@ protected:
    * be an image (eg an HTML <input> of type other than "image") should just
    * not call this method when computing their intrinsic state.
    */
-  nsEventStates ImageState() const;
+  mozilla::EventStates ImageState() const;
 
   /**
    * LoadImage is called by subclasses when the appropriate
@@ -229,21 +234,6 @@ private:
   void UpdateImageState(bool aNotify);
 
   /**
-   * CancelImageRequests can be called when we want to cancel the
-   * image requests, generally due to our src changing and us wanting
-   * to start a new load.  The "current" request will be canceled only
-   * if it has not progressed far enough to know the image size yet
-   * unless aEvenIfSizeAvailable is true.
-   *
-   * @param aReason the reason the requests are being canceled
-   * @param aEvenIfSizeAvailable cancels the current load even if its size is
-   *                             available
-   * @param aNewImageStatus the nsIContentPolicy status of the new image load
-   */
-  void CancelImageRequests(nsresult aReason, bool aEvenIfSizeAvailable,
-                           int16_t aNewImageStatus);
-
-  /**
    * Method to fire an event once we know what's going on with the image load.
    *
    * @param aEventType "load" or "error" depending on how things went
@@ -328,16 +318,10 @@ protected:
    *
    * No-op if aImage is null.
    *
-   * SKIP_FRAME_CHECK passed to TrackImage means we skip the check if we have a
-   * frame, there is only one valid use of this: when calling from FrameCreated.
-   *
    * REQUEST_DISCARD passed to UntrackImage means we request the discard of the
    * decoded data of the image.
    */
-  enum {
-    SKIP_FRAME_CHECK = 0x1
-  };
-  void TrackImage(imgIRequest* aImage, uint32_t aFlags = 0);
+  void TrackImage(imgIRequest* aImage);
   enum {
     REQUEST_DISCARD = 0x1
   };
@@ -379,7 +363,7 @@ private:
    * When mIsImageStateForced is true, this holds the ImageState that we'll
    * return in ImageState().
    */
-  nsEventStates mForcedImageState;
+  mozilla::EventStates mForcedImageState;
 
   int16_t mImageBlockingStatus;
   bool mLoadingEnabled : 1;
@@ -418,6 +402,9 @@ private:
   // registered with the refresh driver.
   bool mCurrentRequestRegistered;
   bool mPendingRequestRegistered;
+
+  // True when FrameCreate has been called but FrameDestroy has not.
+  bool mFrameCreateCalled;
 
   uint32_t mVisibleCount;
 };

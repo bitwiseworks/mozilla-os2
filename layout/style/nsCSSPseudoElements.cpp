@@ -5,7 +5,7 @@
 
 /* atom list for CSS pseudo-elements */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsCSSPseudoElements.h"
 #include "nsAtomListUtils.h"
@@ -21,13 +21,13 @@ using namespace mozilla;
 #undef CSS_PSEUDO_ELEMENT
 
 #define CSS_PSEUDO_ELEMENT(name_, value_, flags_) \
-  NS_STATIC_ATOM_BUFFER(name_##_buffer, value_)
+  NS_STATIC_ATOM_BUFFER(name_##_pseudo_element_buffer, value_)
 #include "nsCSSPseudoElementList.h"
 #undef CSS_PSEUDO_ELEMENT
 
 static const nsStaticAtom CSSPseudoElements_info[] = {
 #define CSS_PSEUDO_ELEMENT(name_, value_, flags_) \
-  NS_STATIC_ATOM(name_##_buffer, (nsIAtom**)&nsCSSPseudoElements::name_),
+  NS_STATIC_ATOM(name_##_pseudo_element_buffer, (nsIAtom**)&nsCSSPseudoElements::name_),
 #include "nsCSSPseudoElementList.h"
 #undef CSS_PSEUDO_ELEMENT
 };
@@ -69,7 +69,7 @@ nsCSSPseudoElements::IsCSS2PseudoElement(nsIAtom *aAtom)
                   aAtom == nsCSSPseudoElements::firstLine;
   NS_ASSERTION(nsCSSAnonBoxes::IsAnonBox(aAtom) ||
                result ==
-                 PseudoElementHasFlags(aAtom, CSS_PSEUDO_ELEMENT_IS_CSS2),
+                 PseudoElementHasFlags(GetPseudoType(aAtom), CSS_PSEUDO_ELEMENT_IS_CSS2),
                "result doesn't match flags");
   return result;
 }
@@ -105,15 +105,17 @@ nsCSSPseudoElements::GetPseudoAtom(Type aType)
 }
 
 /* static */ uint32_t
-nsCSSPseudoElements::FlagsForPseudoElement(nsIAtom *aAtom)
+nsCSSPseudoElements::FlagsForPseudoElement(const Type aType)
 {
-  uint32_t i;
-  for (i = 0; i < ArrayLength(CSSPseudoElements_info); ++i) {
-    if (*CSSPseudoElements_info[i].mAtom == aAtom) {
-      break;
-    }
-  }
-  NS_ASSERTION(i < ArrayLength(CSSPseudoElements_info),
+  size_t index = static_cast<size_t>(aType);
+  NS_ASSERTION(index < ArrayLength(CSSPseudoElements_flags),
                "argument must be a pseudo-element");
-  return CSSPseudoElements_flags[i];
+  return CSSPseudoElements_flags[index];
+}
+
+/* static */ bool
+nsCSSPseudoElements::PseudoElementSupportsUserActionState(const Type aType)
+{
+  return PseudoElementHasFlags(aType,
+                               CSS_PSEUDO_ELEMENT_SUPPORTS_USER_ACTION_STATE);
 }

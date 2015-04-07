@@ -10,15 +10,16 @@
 #include "mozilla/hal_sandbox/PHal.h"
 #include "mozilla/HalTypes.h"
 #include "base/basictypes.h"
+#include "mozilla/Observer.h"
 #include "mozilla/Types.h"
 #include "nsTArray.h"
 #include "prlog.h"
 #include "mozilla/dom/battery/Types.h"
 #include "mozilla/dom/network/Types.h"
 #include "mozilla/dom/power/Types.h"
-#include "mozilla/dom/ContentParent.h"
 #include "mozilla/hal_sandbox/PHal.h"
 #include "mozilla/dom/ScreenOrientation.h"
+#include "mozilla/HalScreenConfiguration.h"
 
 /*
  * Hal.h contains the public Hal API.
@@ -39,13 +40,9 @@ class nsIDOMWindow;
 
 namespace mozilla {
 
-template <class T>
-class Observer;
-
 namespace hal {
 
 typedef Observer<void_t> AlarmObserver;
-typedef Observer<ScreenConfiguration> ScreenConfigurationObserver;
 
 class WindowIdentifier;
 
@@ -261,6 +258,12 @@ void SetTimezone(const nsCString& aTimezoneSpec);
 nsCString GetTimezone();
 
 /**
+ * Get timezone offset
+ * returns the timezone offset relative to UTC in minutes (DST effect included)
+ */
+int32_t GetTimezoneOffset();
+
+/**
  * Register observer for system clock changed notification.
  * @param aObserver The observer that should be added.
  */
@@ -435,6 +438,12 @@ void NotifySwitchChange(const hal::SwitchEvent& aEvent);
 hal::SwitchState GetCurrentSwitchState(hal::SwitchDevice aDevice);
 
 /**
+ * Notify switch status change from input device.
+ */
+void NotifySwitchStateFromInputDevice(hal::SwitchDevice aDevice,
+                                      hal::SwitchState aState);
+
+/**
  * Register an observer that is notified when a programmed alarm
  * expires.
  *
@@ -484,7 +493,8 @@ bool SetAlarm(int32_t aSeconds, int32_t aNanoseconds);
  */
 void SetProcessPriority(int aPid,
                         hal::ProcessPriority aPriority,
-                        hal::ProcessCPUPriority aCPUPriority);
+                        hal::ProcessCPUPriority aCPUPriority,
+                        uint32_t aLRU = 0);
 
 /**
  * Register an observer for the FM radio.
@@ -590,6 +600,13 @@ void StartDiskSpaceWatcher();
  * This API is currently only allowed to be used from the main process.
  */
 void StopDiskSpaceWatcher();
+
+/**
+ * Get total system memory of device being run on in bytes.
+ *
+ * Returns 0 if we are unable to determine this information from /proc/meminfo.
+ */
+uint32_t GetTotalSystemMemory();
 
 } // namespace MOZ_HAL_NAMESPACE
 } // namespace mozilla

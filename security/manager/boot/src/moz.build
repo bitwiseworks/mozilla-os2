@@ -4,15 +4,21 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'pipboot'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsBOOTModule.cpp',
     'nsEntropyCollector.cpp',
-    'nsSecureBrowserUIImpl.cpp',
+    'nsSecurityHeaderParser.cpp',
     'nsSecurityWarningDialogs.cpp',
-    'nsStrictTransportSecurityService.cpp',
+    'nsSiteSecurityService.cpp',
 ]
 
-LIBRARY_NAME = 'pipboot'
+# nsSecureBrowserUIImpl.cpp cannot be built in unified mode because it forces NSPR logging.
+SOURCES += [
+    'nsSecureBrowserUIImpl.cpp',
+]
 
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+FINAL_LIBRARY = 'xul'

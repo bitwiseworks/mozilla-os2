@@ -3,32 +3,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-LIBRARY_NAME    = chrome_s
-MSVC_ENABLE_PGO := 1
-LIBXUL_LIBRARY  = 1
-FORCE_STATIC_LIB = 1
-
-include $(topsrcdir)/config/config.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
-
-LOCAL_INCLUDES += \
-		-I$(topsrcdir)/netwerk/protocol/res \
-		-I$(topsrcdir)/netwerk/base/src \
-		$(NULL)
 
 ifdef MOZ_ENABLE_GTK
 CXXFLAGS          += $(TK_CFLAGS)
 endif
-
-LOCAL_INCLUDES += \
-  -I$(topsrcdir)/xpcom/components \
-  -I$(DEPTH)/xpcom \
-  $(NULL)

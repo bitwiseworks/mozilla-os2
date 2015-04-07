@@ -83,6 +83,7 @@ http://sub1.test2.example.com:80     privileged
 http://sub2.test1.example.com:80     privileged
 http://sub2.test2.example.com:80     privileged
 http://noxul.example.com:80          privileged,noxul
+http://example.net:80                privileged
 
 https://example.com:443                privileged
 https://test1.example.com:443          privileged
@@ -101,8 +102,6 @@ https://mismatch.expired.example.com:443	privileged,cert=expired
 https://mismatch.untrusted.example.com:443	privileged,cert=untrusted
 https://untrusted-expired.example.com:443	privileged,cert=untrustedandexpired
 https://mismatch.untrusted-expired.example.com:443	privileged,cert=untrustedandexpired
-https://ev-valid.example.com:443	privileged,cert=evvalid
-https://ev-invalid.example.com:443      priviliged,cert=evinvalid
 
 # This is here so that we don't load the default live bookmark over
 # the network in every test suite.
@@ -110,7 +109,7 @@ http://fxfeeds.mozilla.com:80
 
 # Prevent safebrowsing tests from hitting the network for its-a-trap.html and
 # its-an-attack.html.
-http://www.mozilla.org:80
+http://www.itisatrap.org:80
 
 #
 # These are subdomains of <ält.example.org>.
@@ -207,3 +206,12 @@ https://www2.w3c-test.org:443
 https://xn--n8j6ds53lwwkrqhv28a.w3c-test.org:443
 https://xn--lve-6lad.w3c-test.org:443
 http://test.w3.org:80
+
+# Hosts for testing TLD-based fallback encoding
+http://example.tw:80                privileged
+http://example.cn:80                privileged
+http://example.co.jp:80             privileged
+http://example.fi:80                privileged
+
+# Hosts for testing marketplace apps installations
+https://marketplace.firefox.com:443       privileged

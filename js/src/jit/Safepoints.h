@@ -7,15 +7,13 @@
 #ifndef jit_Safepoints_h
 #define jit_Safepoints_h
 
-#include "Registers.h"
-#include "CompactBuffer.h"
-#include "BitSet.h"
-
-#include "shared/Assembler-shared.h"
+#include "jit/CompactBuffer.h"
+#include "jit/shared/Assembler-shared.h"
 
 namespace js {
 namespace jit {
 
+class BitSet;
 struct SafepointNunboxEntry;
 class LAllocation;
 class LSafepoint;
@@ -28,7 +26,7 @@ class SafepointWriter
     BitSet *frameSlots_;
 
   public:
-    bool init(uint32_t slotCount);
+    bool init(TempAllocator &alloc, uint32_t slotCount);
 
   private:
     // A safepoint entry is written in the order these functions appear.
@@ -38,6 +36,8 @@ class SafepointWriter
     void writeGcRegs(LSafepoint *safepoint);
     void writeGcSlots(LSafepoint *safepoint);
     void writeValueSlots(LSafepoint *safepoint);
+
+    void writeSlotsOrElementsSlots(LSafepoint *safepoint);
 
 #ifdef JS_NUNBOX32
     void writeNunboxParts(LSafepoint *safepoint);
@@ -61,17 +61,21 @@ class SafepointReader
     CompactBufferReader stream_;
     uint32_t frameSlots_;
     uint32_t currentSlotChunk_;
-    uint32_t currentSlotChunkNumber_;
+    uint32_t nextSlotChunkNumber_;
     uint32_t osiCallPointOffset_;
     GeneralRegisterSet gcSpills_;
     GeneralRegisterSet valueSpills_;
-    GeneralRegisterSet allSpills_;
+    GeneralRegisterSet slotsOrElementsSpills_;
+    GeneralRegisterSet allGprSpills_;
+    FloatRegisterSet allFloatSpills_;
     uint32_t nunboxSlotsRemaining_;
+    uint32_t slotsOrElementsSlotsRemaining_;
 
   private:
     void advanceFromGcRegs();
     void advanceFromGcSlots();
     void advanceFromValueSlots();
+    void advanceFromNunboxSlots();
     bool getSlotFromBitmap(uint32_t *slot);
 
   public:
@@ -85,11 +89,17 @@ class SafepointReader
     GeneralRegisterSet gcSpills() const {
         return gcSpills_;
     }
+    GeneralRegisterSet slotsOrElementsSpills() const {
+        return slotsOrElementsSpills_;
+    }
     GeneralRegisterSet valueSpills() const {
         return valueSpills_;
     }
-    GeneralRegisterSet allSpills() const {
-        return allSpills_;
+    GeneralRegisterSet allGprSpills() const {
+        return allGprSpills_;
+    }
+    FloatRegisterSet allFloatSpills() const {
+        return allFloatSpills_;
     }
     uint32_t osiReturnPointOffset() const;
 
@@ -102,6 +112,9 @@ class SafepointReader
     // Returns true if a nunbox slot was read, false if there are no more
     // nunbox slots.
     bool getNunboxSlot(LAllocation *type, LAllocation *payload);
+
+    // Returns true if a slot was read, false if there are no more slots.
+    bool getSlotsOrElementsSlot(uint32_t *slot);
 };
 
 } // namespace jit

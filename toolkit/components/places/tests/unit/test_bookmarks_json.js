@@ -75,15 +75,15 @@ let test_bookmarks = {
 let bookmarksExportedFile;
 
 add_task(function test_import_bookmarks() {
-  bookmarksFile = do_get_file("bookmarks.json");
+  let bookmarksFile = OS.Path.join(do_get_cwd().path, "bookmarks.json");
 
   yield BookmarkJSONUtils.importFromFile(bookmarksFile, true);
   yield testImportedBookmarks();
 });
 
 add_task(function test_export_bookmarks() {
-  bookmarksExportedFile = gProfD;
-  bookmarksExportedFile.append("bookmarks.exported.json");
+  bookmarksExportedFile = OS.Path.join(OS.Constants.Path.profileDir,
+                                       "bookmarks.exported.json");
   yield BookmarkJSONUtils.exportToFile(bookmarksExportedFile);
 });
 
@@ -161,30 +161,21 @@ function checkItem(aExpected, aNode) {
                       aExpected.lastModified);
           break;
         case "url":
-          yield function() {
-            let deferred = Promise.defer();
-            PlacesUtils.livemarks.getLivemark(
-              { id: id },
-              function (aStatus, aLivemark) {
-                if (!Components.isSuccessCode(aStatus)) {
-                  do_check_eq(aNode.uri, aExpected.url);
-                }
-                deferred.resolve();
-              });
-            return deferred.promise; }();
+          if (!("feedUrl" in aExpected))
+            do_check_eq(aNode.uri, aExpected.url);
           break;
         case "icon":
-          yield function() {
-            let deferred = Promise.defer();
+          let (deferred = Promise.defer(), data) {
             PlacesUtils.favicons.getFaviconDataForPage(
               NetUtil.newURI(aExpected.url),
               function (aURI, aDataLen, aData, aMimeType) {
-                let base64Icon = "data:image/png;base64," +
-                      base64EncodeString(String.fromCharCode.apply(String, aData));
-                do_check_true(base64Icon == aExpected.icon);
-                deferred.resolve();
+                deferred.resolve(aData);
               });
-            return deferred.promise; }();
+            data = yield deferred.promise;
+            let base64Icon = "data:image/png;base64," +
+                             base64EncodeString(String.fromCharCode.apply(String, data));
+            do_check_true(base64Icon == aExpected.icon);
+          }
           break;
         case "keyword":
           break;
@@ -201,17 +192,9 @@ function checkItem(aExpected, aNode) {
           do_check_eq((yield PlacesUtils.getCharsetForURI(testURI)), aExpected.charset);
           break;
         case "feedUrl":
-          yield function() {
-            let deferred = Promise.defer();
-            PlacesUtils.livemarks.getLivemark(
-              { id: id },
-              function (aStatus, aLivemark) {
-                do_check_true(Components.isSuccessCode(aStatus));
-                do_check_eq(aLivemark.siteURI.spec, aExpected.url);
-                do_check_eq(aLivemark.feedURI.spec, aExpected.feedUrl);
-                deferred.resolve();
-              });
-            return deferred.promise; }();
+          let livemark = yield PlacesUtils.livemarks.getLivemark({ id: id });
+          do_check_eq(livemark.siteURI.spec, aExpected.url);
+          do_check_eq(livemark.feedURI.spec, aExpected.feedUrl);
           break;
         case "children":
           let folder = aNode.QueryInterface(Ci.nsINavHistoryContainerResultNode);

@@ -54,11 +54,7 @@
 
 #ifdef MOZ_TELEMETRY_REPORTING
   <preference id="toolkit.telemetry.enabled"
-#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
-              name="toolkit.telemetry.enabledPreRelease"
-#else
               name="toolkit.telemetry.enabled"
-#endif
               type="bool"/>
 #endif
 
@@ -128,9 +124,13 @@
 #endif
   <stringbundle id="bundlePreferences" src="chrome://browser/locale/preferences/preferences.properties"/>
 
-<hbox class="heading" data-category="paneAdvanced" hidden="true">
-  <image class="preference-icon" type="advanced"/>
-  <html:h1>&paneAdvanced.title;</html:h1>
+<hbox id="header-advanced"
+      class="header"
+      hidden="true"
+      data-category="paneAdvanced">
+  <image class="header-icon"/>
+  <label class="header-name"
+         value="&paneAdvanced.title;"/>
 </hbox>
 
 <tabbox id="advancedPrefs" flex="1"

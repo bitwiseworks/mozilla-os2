@@ -221,7 +221,6 @@ cairo-atsui.h
 cairo-beos.h
 cairo-ft.h
 cairo-glitz.h
-cairo-os2.h
 cairo-pdf.h
 cairo-ps.h
 cairo-tee.h
@@ -231,6 +230,7 @@ cairo-xlib.h
 cairo-xlib-xrender.h
 cairo-directfb.h
 cairo-qpainter.h
+cairo-qt.h
 #endif
 dfiff.h
 exception
@@ -482,6 +482,7 @@ IOKit/IOMessage.h
 IOKit/pwr_mgt/IOPMLib.h
 iomanip
 ios
+iosfwd
 iostream
 iostream.h
 iterator
@@ -689,7 +690,6 @@ oleidl.h
 OpenGL/OpenGL.h
 OpenTptInternet.h
 OpenTransport.h
-os2.h
 OS.h
 osreldate.h
 ostream
@@ -1047,8 +1047,6 @@ X11/Xlibint.h
 X11/Xlocale.h
 X11/Xos.h
 X11/Xutil.h
-xpt_struct.h
-xpt_xdr.h
 zmouse.h
 speex/speex_resampler.h
 soundtouch/SoundTouch.h
@@ -1072,20 +1070,8 @@ hunspell.hxx
 #if MOZ_NATIVE_BZ2==1
 bzlib.h
 #endif
-#if MOZ_PLATFORM_MAEMO==5
-hildon-uri.h
-hildon-mime.h
-hildon-file-chooser-dialog.h
-libosso.h
-osso-mem.h
-#endif
 #ifdef MOZ_ENABLE_GIO
 gio/gio.h
-#endif
-#ifdef MOZ_ENABLE_LIBCONIC
-conic/conicconnection.h
-conic/conicconnectionevent.h
-conic/conicstatisticsevent.h
 #endif
 #if MOZ_NATIVE_LIBEVENT==1
 event.h
@@ -1094,9 +1080,6 @@ sys/event.h
 #endif
 #ifdef MOZ_ENABLE_LIBPROXY
 proxy.h
-#endif
-#if MOZ_PLATFORM_MAEMO==6
-contentaction/contentaction.h
 #endif
 #ifdef MOZ_ENABLE_CONTENTMANAGER
 SelectSingleContentItemPage.h
@@ -1118,13 +1101,15 @@ vpx/vpx_decoder.h
 vpx/vpx_encoder.h
 vpx/vp8cx.h
 vpx/vp8dx.h
+vpx_mem/vpx_mem.h
 #endif
-#ifdef XP_WIN
+#ifdef GKMEDIAS_SHARED_LIBRARY
 vpx/vpx_codec.h
 vpx/vpx_decoder.h
 vpx/vpx_encoder.h
 vpx/vp8cx.h
 vpx/vp8dx.h
+vpx_mem/vpx_mem.h
 vorbis/codec.h
 theora/theoradec.h
 tremor/ivorbiscodec.h
@@ -1145,3 +1130,18 @@ kvm.h
 spawn.h
 err.h
 xlocale.h
+#ifdef MOZ_SHARED_ICU
+unicode/locid.h
+unicode/numsys.h
+unicode/ucal.h
+unicode/uclean.h
+unicode/ucol.h
+unicode/udat.h
+unicode/udatpg.h
+unicode/uenum.h
+unicode/unum.h
+unicode/ustring.h
+unicode/utypes.h
+#endif
+libutil.h
+unwind.h

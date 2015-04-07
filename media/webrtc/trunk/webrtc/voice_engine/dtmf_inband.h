@@ -8,15 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_VOICE_ENGINE_DTMF_INBAND_H
-#define WEBRTC_VOICE_ENGINE_DTMF_INBAND_H
+#ifndef WEBRTC_VOICE_ENGINE_DTMF_INBAND_H_
+#define WEBRTC_VOICE_ENGINE_DTMF_INBAND_H_
 
-#if _MSC_VER > 1000
-#pragma once
-#endif
-
-#include "typedefs.h"
-#include "voice_engine_defines.h"
+#include "webrtc/typedefs.h"
+#include "webrtc/voice_engine/voice_engine_defines.h"
 
 namespace webrtc {
 class CriticalSectionWrapper;
@@ -24,70 +20,68 @@ class CriticalSectionWrapper;
 class DtmfInband
 {
 public:
-    DtmfInband(const WebRtc_Word32 id);
+    DtmfInband(int32_t id);
 
     virtual ~DtmfInband();
 
     void Init();
 
-    int SetSampleRate(const WebRtc_UWord16 frequency);
+    int SetSampleRate(uint16_t frequency);
 
-    int GetSampleRate(WebRtc_UWord16& frequency);
+    int GetSampleRate(uint16_t& frequency);
 
-    int AddTone(const WebRtc_UWord8 eventCode,
-                WebRtc_Word32 lengthMs,
-                WebRtc_Word32 attenuationDb);
+    int AddTone(uint8_t eventCode,
+                int32_t lengthMs,
+                int32_t attenuationDb);
 
     int ResetTone();
-    int StartTone(const WebRtc_UWord8 eventCode,
-                  WebRtc_Word32 attenuationDb);
+    int StartTone(uint8_t eventCode, int32_t attenuationDb);
 
     int StopTone();
 
     bool IsAddingTone();
 
-    int Get10msTone(WebRtc_Word16 output[320],
-                    WebRtc_UWord16& outputSizeInSamples);
+    int Get10msTone(int16_t output[320], uint16_t& outputSizeInSamples);
 
-    WebRtc_UWord32 DelaySinceLastTone() const;
+    uint32_t DelaySinceLastTone() const;
 
     void UpdateDelaySinceLastTone();
 
 private:
     void ReInit();
-    WebRtc_Word16 DtmfFix_generate(WebRtc_Word16* decoded,
-                                   const WebRtc_Word16 value,
-                                   const WebRtc_Word16 volume,
-                                   const WebRtc_Word16 frameLen,
-                                   const WebRtc_Word16 fs);
+    int16_t DtmfFix_generate(int16_t* decoded,
+                             int16_t value,
+                             int16_t volume,
+                             int16_t frameLen,
+                             int16_t fs);
 
 private:
     enum {kDtmfFrameSizeMs = 10};
     enum {kDtmfAmpHigh = 32768};
     enum {kDtmfAmpLow  = 23171};	// 3 dB lower than the high frequency
 
-    WebRtc_Word16 DtmfFix_generateSignal(const WebRtc_Word16 a1_times2,
-                                         const WebRtc_Word16 a2_times2,
-                                         const WebRtc_Word16 volume,
-                                         WebRtc_Word16* signal,
-                                         const WebRtc_Word16 length);
+    int16_t DtmfFix_generateSignal(int16_t a1_times2,
+                                   int16_t a2_times2,
+                                   int16_t volume,
+                                   int16_t* signal,
+                                   int16_t length);
 
 private:
     CriticalSectionWrapper& _critSect;
-    WebRtc_Word32 _id;
-    WebRtc_UWord16 _outputFrequencyHz;  // {8000, 16000, 32000}
-    WebRtc_Word16 _oldOutputLow[2];     // Data needed for oscillator model
-    WebRtc_Word16 _oldOutputHigh[2];    // Data needed for oscillator model
-    WebRtc_Word16 _frameLengthSamples;  // {80, 160, 320}
-    WebRtc_Word32 _remainingSamples;
-    WebRtc_Word16 _eventCode;           // [0, 15]
-    WebRtc_Word16 _attenuationDb;       // [0, 36]
-    WebRtc_Word32 _lengthMs;
+    int32_t _id;
+    uint16_t _outputFrequencyHz;  // {8000, 16000, 32000}
+    int16_t _oldOutputLow[2];     // Data needed for oscillator model
+    int16_t _oldOutputHigh[2];    // Data needed for oscillator model
+    int16_t _frameLengthSamples;  // {80, 160, 320}
+    int32_t _remainingSamples;
+    int16_t _eventCode;           // [0, 15]
+    int16_t _attenuationDb;       // [0, 36]
+    int32_t _lengthMs;
     bool _reinit;  // 'true' if the oscillator should be reinit for next event
     bool _playing;
-    WebRtc_UWord32 _delaySinceLastToneMS; // time since last generated tone [ms]
+    uint32_t _delaySinceLastToneMS; // time since last generated tone [ms]
 };
 
-}   // namespace webrtc
+}  // namespace webrtc
 
-#endif // #ifndef WEBRTC_VOICE_ENGINE_DTMF_INBAND_H
+#endif // #ifndef WEBRTC_VOICE_ENGINE_DTMF_INBAND_H_

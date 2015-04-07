@@ -4,17 +4,26 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SVGPathData.h"
+
+#include "gfx2DGlue.h"
 #include "gfxPlatform.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/Types.h"
+#include "mozilla/gfx/Point.h"
+#include "mozilla/RefPtr.h"
 #include "nsError.h"
 #include "nsString.h"
 #include "nsSVGPathDataParser.h"
 #include "nsSVGPathGeometryElement.h" // for nsSVGMark
 #include <stdarg.h>
+#include "nsStyleConsts.h"
 #include "SVGContentUtils.h"
 #include "SVGPathSegUtils.h"
+#include "gfxContext.h"
 #include <algorithm>
 
 using namespace mozilla;
+using namespace mozilla::gfx;
 
 static bool IsMoveto(uint16_t aSegType)
 {
@@ -29,6 +38,7 @@ SVGPathData::CopyFrom(const SVGPathData& rhs)
     // Yes, we do want fallible alloc here
     return NS_ERROR_OUT_OF_MEMORY;
   }
+  mCachedPath = nullptr;
   mData = rhs.mData;
   return NS_OK;
 }
@@ -63,8 +73,9 @@ SVGPathData::SetValueFromString(const nsAString& aValue)
   // the first error. We still return any error though so that callers know if
   // there's a problem.
 
-  nsSVGPathDataParserToInternal pathParser(this);
-  return pathParser.Parse(aValue);
+  mCachedPath = nullptr;
+  nsSVGPathDataParser pathParser(aValue, this);
+  return pathParser.Parse() ? NS_OK : NS_ERROR_DOM_SYNTAX_ERR;
 }
 
 nsresult
@@ -75,6 +86,8 @@ SVGPathData::AppendSeg(uint32_t aType, ...)
   if (!mData.SetLength(newLength)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
+  mCachedPath = nullptr;
+
   mData[oldLength] = SVGPathSegUtils::EncodeType(aType);
   va_list args;
   va_start(args, aType);
@@ -142,7 +155,7 @@ SVGPathData::GetSegmentLengths(nsTArray<double> *aLengths) const
 }
 
 bool
-SVGPathData::GetDistancesFromOriginToEndsOfVisibleSegments(nsTArray<double> *aOutput) const
+SVGPathData::GetDistancesFromOriginToEndsOfVisibleSegments(FallibleTArray<double> *aOutput) const
 {
   SVGPathTraversalState state;
 
@@ -209,18 +222,51 @@ SVGPathData::GetPathSegAtLength(float aDistance) const
  *
  * Cairo only does this for |stroke-linecap: round| and not for
  * |stroke-linecap: square| (since that's what Adobe Acrobat has always done).
+ * Most likely the other backends that DrawTarget uses have the same behavior.
  *
  * To help us conform to the SVG spec we have this helper function to draw an
  * approximation of square caps for zero length subpaths. It does this by
- * inserting a subpath containing a single axis aligned straight line that is
- * as small as it can be without cairo throwing it away for being too small to
- * affect rendering. Cairo will then draw stroke caps for this axis aligned
- * line, creating an axis aligned rectangle (approximating the square that
- * would ideally be drawn).
+ * inserting a subpath containing a single user space axis aligned straight
+ * line that is as small as it can be while minimizing the risk of it being
+ * thrown away by the DrawTarget's backend for being too small to affect
+ * rendering. The idea is that we'll then get stroke caps drawn for this axis
+ * aligned line, creating an axis aligned rectangle that approximates the
+ * square that would ideally be drawn.
+ *
+ * Since we don't have any information about transforms from user space to
+ * device space, we choose the length of the small line that we insert by
+ * making it a small percentage of the stroke width of the path. This should
+ * hopefully allow us to make the line as long as possible (to avoid rounding
+ * issues in the backend resulting in the backend seeing it as having zero
+ * length) while still avoiding the small rectangle being noticably different
+ * from a square.
  *
  * Note that this function inserts a subpath into the current gfx path that
  * will be present during both fill and stroke operations.
  */
+static void
+ApproximateZeroLengthSubpathSquareCaps(PathBuilder* aPB,
+                                       const Point& aPoint,
+                                       Float aStrokeWidth)
+{
+  // Note that caps are proportional to stroke width, so if stroke width is
+  // zero it's actually fine for |tinyLength| below to end up being zero.
+  // However, it would be a waste to inserting a LineTo in that case, so better
+  // not to.
+  MOZ_ASSERT(aStrokeWidth > 0.0f,
+             "Make the caller check for this, or check it here");
+
+  // The fraction of the stroke width that we choose for the length of the
+  // line is rather arbitrary, other than being chosen to meet the requirements
+  // described in the comment above.
+
+  Float tinyLength = aStrokeWidth / 32;
+
+  aPB->MoveTo(aPoint);
+  aPB->LineTo(aPoint + Point(tinyLength, 0));
+  aPB->MoveTo(aPoint);
+}
+
 static void
 ApproximateZeroLengthSubpathSquareCaps(const gfxPoint &aPoint, gfxContext *aCtx)
 {
@@ -236,6 +282,15 @@ ApproximateZeroLengthSubpathSquareCaps(const gfxPoint &aPoint, gfxContext *aCtx)
   aCtx->MoveTo(aPoint);
 }
 
+#define MAYBE_APPROXIMATE_ZERO_LENGTH_SUBPATH_SQUARE_CAPS_TO_DT               \
+  do {                                                                        \
+    if (capsAreSquare && !subpathHasLength && aStrokeWidth > 0 &&             \
+        subpathContainsNonArc && SVGPathSegUtils::IsValidType(prevSegType) && \
+        (!IsMoveto(prevSegType) || segType == PATHSEG_CLOSEPATH)) {           \
+      ApproximateZeroLengthSubpathSquareCaps(builder, segStart, aStrokeWidth);\
+    }                                                                         \
+  } while(0)
+
 #define MAYBE_APPROXIMATE_ZERO_LENGTH_SUBPATH_SQUARE_CAPS                     \
   do {                                                                        \
     if (capsAreSquare && !subpathHasLength && subpathContainsNonArc &&        \
@@ -245,6 +300,263 @@ ApproximateZeroLengthSubpathSquareCaps(const gfxPoint &aPoint, gfxContext *aCtx)
       ApproximateZeroLengthSubpathSquareCaps(segStart, aCtx);                 \
     }                                                                         \
   } while(0)
+
+TemporaryRef<Path>
+SVGPathData::BuildPath(FillRule aFillRule,
+                       uint8_t aStrokeLineCap,
+                       Float aStrokeWidth) const
+{
+  if (mData.IsEmpty() || !IsMoveto(SVGPathSegUtils::DecodeType(mData[0]))) {
+    return nullptr; // paths without an initial moveto are invalid
+  }
+
+  RefPtr<DrawTarget> drawTarget =
+    gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget();
+  NS_ASSERTION(gfxPlatform::GetPlatform()->
+                 SupportsAzureContentForDrawTarget(drawTarget),
+               "Should support Moz2D content drawing");
+
+  RefPtr<PathBuilder> builder = drawTarget->CreatePathBuilder(aFillRule);
+
+  bool capsAreSquare = aStrokeLineCap == NS_STYLE_STROKE_LINECAP_SQUARE;
+  bool subpathHasLength = false;  // visual length
+  bool subpathContainsNonArc = false;
+
+  uint32_t segType     = PATHSEG_UNKNOWN;
+  uint32_t prevSegType = PATHSEG_UNKNOWN;
+  Point pathStart(0.0, 0.0); // start point of [sub]path
+  Point segStart(0.0, 0.0);
+  Point segEnd;
+  Point cp1, cp2;            // previous bezier's control points
+  Point tcp1, tcp2;          // temporaries
+
+  // Regarding cp1 and cp2: If the previous segment was a cubic bezier curve,
+  // then cp2 is its second control point. If the previous segment was a
+  // quadratic curve, then cp1 is its (only) control point.
+
+  uint32_t i = 0;
+  while (i < mData.Length()) {
+    segType = SVGPathSegUtils::DecodeType(mData[i++]);
+    uint32_t argCount = SVGPathSegUtils::ArgCountForType(segType);
+
+    switch (segType)
+    {
+    case PATHSEG_CLOSEPATH:
+      // set this early to allow drawing of square caps for "M{x},{y} Z":
+      subpathContainsNonArc = true;
+      MAYBE_APPROXIMATE_ZERO_LENGTH_SUBPATH_SQUARE_CAPS_TO_DT;
+      segEnd = pathStart;
+      builder->Close();
+      break;
+
+    case PATHSEG_MOVETO_ABS:
+      MAYBE_APPROXIMATE_ZERO_LENGTH_SUBPATH_SQUARE_CAPS_TO_DT;
+      pathStart = segEnd = Point(mData[i], mData[i+1]);
+      builder->MoveTo(segEnd);
+      subpathHasLength = false;
+      subpathContainsNonArc = false;
+      break;
+
+    case PATHSEG_MOVETO_REL:
+      MAYBE_APPROXIMATE_ZERO_LENGTH_SUBPATH_SQUARE_CAPS_TO_DT;
+      pathStart = segEnd = segStart + Point(mData[i], mData[i+1]);
+      builder->MoveTo(segEnd);
+      subpathHasLength = false;
+      subpathContainsNonArc = false;
+      break;
+
+    case PATHSEG_LINETO_ABS:
+      segEnd = Point(mData[i], mData[i+1]);
+      builder->LineTo(segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_LINETO_REL:
+      segEnd = segStart + Point(mData[i], mData[i+1]);
+      builder->LineTo(segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_CURVETO_CUBIC_ABS:
+      cp1 = Point(mData[i], mData[i+1]);
+      cp2 = Point(mData[i+2], mData[i+3]);
+      segEnd = Point(mData[i+4], mData[i+5]);
+      builder->BezierTo(cp1, cp2, segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart || segEnd != cp1 || segEnd != cp2);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_CURVETO_CUBIC_REL:
+      cp1 = segStart + Point(mData[i], mData[i+1]);
+      cp2 = segStart + Point(mData[i+2], mData[i+3]);
+      segEnd = segStart + Point(mData[i+4], mData[i+5]);
+      builder->BezierTo(cp1, cp2, segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart || segEnd != cp1 || segEnd != cp2);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_CURVETO_QUADRATIC_ABS:
+      cp1 = Point(mData[i], mData[i+1]);
+      // Convert quadratic curve to cubic curve:
+      tcp1 = segStart + (cp1 - segStart) * 2 / 3;
+      segEnd = Point(mData[i+2], mData[i+3]); // set before setting tcp2!
+      tcp2 = cp1 + (segEnd - cp1) / 3;
+      builder->BezierTo(tcp1, tcp2, segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart || segEnd != cp1);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_CURVETO_QUADRATIC_REL:
+      cp1 = segStart + Point(mData[i], mData[i+1]);
+      // Convert quadratic curve to cubic curve:
+      tcp1 = segStart + (cp1 - segStart) * 2 / 3;
+      segEnd = segStart + Point(mData[i+2], mData[i+3]); // set before setting tcp2!
+      tcp2 = cp1 + (segEnd - cp1) / 3;
+      builder->BezierTo(tcp1, tcp2, segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart || segEnd != cp1);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_ARC_ABS:
+    case PATHSEG_ARC_REL:
+    {
+      Point radii(mData[i], mData[i+1]);
+      segEnd = Point(mData[i+5], mData[i+6]);
+      if (segType == PATHSEG_ARC_REL) {
+        segEnd += segStart;
+      }
+      if (segEnd != segStart) {
+        if (radii.x == 0.0f || radii.y == 0.0f) {
+          builder->LineTo(segEnd);
+        } else {
+          nsSVGArcConverter converter(segStart, segEnd, radii, mData[i+2],
+                                      mData[i+3] != 0, mData[i+4] != 0);
+          while (converter.GetNextSegment(&cp1, &cp2, &segEnd)) {
+            builder->BezierTo(cp1, cp2, segEnd);
+          }
+        }
+      }
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart);
+      }
+      break;
+    }
+
+    case PATHSEG_LINETO_HORIZONTAL_ABS:
+      segEnd = Point(mData[i], segStart.y);
+      builder->LineTo(segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_LINETO_HORIZONTAL_REL:
+      segEnd = segStart + Point(mData[i], 0.0f);
+      builder->LineTo(segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_LINETO_VERTICAL_ABS:
+      segEnd = Point(segStart.x, mData[i]);
+      builder->LineTo(segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_LINETO_VERTICAL_REL:
+      segEnd = segStart + Point(0.0f, mData[i]);
+      builder->LineTo(segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_CURVETO_CUBIC_SMOOTH_ABS:
+      cp1 = SVGPathSegUtils::IsCubicType(prevSegType) ? segStart * 2 - cp2 : segStart;
+      cp2 = Point(mData[i],   mData[i+1]);
+      segEnd = Point(mData[i+2], mData[i+3]);
+      builder->BezierTo(cp1, cp2, segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart || segEnd != cp1 || segEnd != cp2);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_CURVETO_CUBIC_SMOOTH_REL:
+      cp1 = SVGPathSegUtils::IsCubicType(prevSegType) ? segStart * 2 - cp2 : segStart;
+      cp2 = segStart + Point(mData[i], mData[i+1]);
+      segEnd = segStart + Point(mData[i+2], mData[i+3]);
+      builder->BezierTo(cp1, cp2, segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart || segEnd != cp1 || segEnd != cp2);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_CURVETO_QUADRATIC_SMOOTH_ABS:
+      cp1 = SVGPathSegUtils::IsQuadraticType(prevSegType) ? segStart * 2 - cp1 : segStart;
+      // Convert quadratic curve to cubic curve:
+      tcp1 = segStart + (cp1 - segStart) * 2 / 3;
+      segEnd = Point(mData[i], mData[i+1]); // set before setting tcp2!
+      tcp2 = cp1 + (segEnd - cp1) / 3;
+      builder->BezierTo(tcp1, tcp2, segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart || segEnd != cp1);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    case PATHSEG_CURVETO_QUADRATIC_SMOOTH_REL:
+      cp1 = SVGPathSegUtils::IsQuadraticType(prevSegType) ? segStart * 2 - cp1 : segStart;
+      // Convert quadratic curve to cubic curve:
+      tcp1 = segStart + (cp1 - segStart) * 2 / 3;
+      segEnd = segStart + Point(mData[i], mData[i+1]); // changed before setting tcp2!
+      tcp2 = cp1 + (segEnd - cp1) / 3;
+      builder->BezierTo(tcp1, tcp2, segEnd);
+      if (!subpathHasLength) {
+        subpathHasLength = (segEnd != segStart || segEnd != cp1);
+      }
+      subpathContainsNonArc = true;
+      break;
+
+    default:
+      NS_NOTREACHED("Bad path segment type");
+      return nullptr; // according to spec we'd use everything up to the bad seg anyway
+    }
+    i += argCount;
+    prevSegType = segType;
+    segStart = segEnd;
+  }
+
+  NS_ABORT_IF_FALSE(i == mData.Length(), "Very, very bad - mData corrupt");
+  NS_ABORT_IF_FALSE(prevSegType == segType,
+                    "prevSegType should be left at the final segType");
+
+  MAYBE_APPROXIMATE_ZERO_LENGTH_SUBPATH_SQUARE_CAPS_TO_DT;
+
+  return builder->Finish();
+}
 
 void
 SVGPathData::ConstructPath(gfxContext *aCtx) const
@@ -378,14 +690,21 @@ SVGPathData::ConstructPath(gfxContext *aCtx) const
         if (radii.x == 0.0f || radii.y == 0.0f) {
           aCtx->LineTo(segEnd);
         } else {
-          nsSVGArcConverter converter(segStart, segEnd, radii, mData[i+2],
+          nsSVGArcConverter converter(ToPoint(segStart), ToPoint(segEnd),
+                                      ToPoint(radii), mData[i+2],
                                       mData[i+3] != 0, mData[i+4] != 0);
-          while (converter.GetNextSegment(&cp1, &cp2, &segEnd)) {
-            aCtx->CurveTo(cp1, cp2, segEnd);
+          Point cp1, cp2, segEnd_;
+          while (converter.GetNextSegment(&cp1, &cp2, &segEnd_)) {
+            aCtx->CurveTo(ThebesPoint(cp1), ThebesPoint(cp2), ThebesPoint(segEnd_));
           }
+          segEnd = ThebesPoint(segEnd_);
         }
       }
       if (!subpathHasLength) {
+        // Round to make sure the current comparison doesn't fail due to
+        // precision issues:
+        // XXX kill after all code is converted to float precision
+        segStart = ThebesPoint(ToPoint(segStart));
         subpathHasLength = (segEnd != segStart);
       }
       break;
@@ -491,21 +810,26 @@ SVGPathData::ConstructPath(gfxContext *aCtx) const
   MAYBE_APPROXIMATE_ZERO_LENGTH_SUBPATH_SQUARE_CAPS;
 }
 
-already_AddRefed<gfxFlattenedPath>
-SVGPathData::ToFlattenedPath(const gfxMatrix& aMatrix) const
+TemporaryRef<Path>
+SVGPathData::ToPathForLengthOrPositionMeasuring() const
 {
-  nsRefPtr<gfxContext> tmpCtx =
-    new gfxContext(gfxPlatform::GetPlatform()->ScreenReferenceSurface());
+  // Since the path that we return will not be used for painting it doesn't
+  // matter what we pass to BuildPath as aFillRule. Hawever, we do want to
+  // pass something other than NS_STYLE_STROKE_LINECAP_SQUARE as aStrokeLineCap
+  // to avoid the insertion of extra little lines (by
+  // ApproximateZeroLengthSubpathSquareCaps), in which case the value that we
+  // pass as aStrokeWidth doesn't matter (since it's only used to determine the
+  // length of those extra little lines).
 
-  tmpCtx->SetMatrix(aMatrix);
-  ConstructPath(tmpCtx);
-  tmpCtx->IdentityMatrix();
+  if (!mCachedPath) {
+    mCachedPath = BuildPath(FillRule::FILL_WINDING, NS_STYLE_STROKE_LINECAP_BUTT, 0);
+  }
 
-  return tmpCtx->GetFlattenedPath();
+  return mCachedPath;
 }
 
 static double
-AngleOfVector(const gfxPoint& aVector)
+AngleOfVector(const Point& aVector)
 {
   // C99 says about atan2 "A domain error may occur if both arguments are
   // zero" and "On a domain error, the function returns an implementation-
@@ -513,11 +837,11 @@ AngleOfVector(const gfxPoint& aVector)
   // seems to commonly be zero, but it could just as easily be a NaN value.
   // We specifically want zero in this case, hence the check:
 
-  return (aVector != gfxPoint(0.0, 0.0)) ? atan2(aVector.y, aVector.x) : 0.0;
+  return (aVector != Point(0.0, 0.0)) ? atan2(aVector.y, aVector.x) : 0.0;
 }
 
 static float
-AngleOfVectorF(const gfxPoint& aVector)
+AngleOfVectorF(const Point& aVector)
 {
   return static_cast<float>(AngleOfVector(aVector));
 }
@@ -530,14 +854,14 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
   // places, and repeat multiple times consecutively.
 
   // info on current [sub]path (reset every M command):
-  gfxPoint pathStart(0.0, 0.0);
+  Point pathStart(0.0, 0.0);
   float pathStartAngle = 0.0f;
 
   // info on previous segment:
   uint16_t prevSegType = PATHSEG_UNKNOWN;
-  gfxPoint prevSegEnd(0.0, 0.0);
+  Point prevSegEnd(0.0, 0.0);
   float prevSegEndAngle = 0.0f;
-  gfxPoint prevCP; // if prev seg was a bezier, this was its last control point
+  Point prevCP; // if prev seg was a bezier, this was its last control point
 
   uint32_t i = 0;
   while (i < mData.Length()) {
@@ -545,8 +869,8 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
     // info on current segment:
     uint16_t segType =
       SVGPathSegUtils::DecodeType(mData[i++]); // advances i to args
-    gfxPoint &segStart = prevSegEnd;
-    gfxPoint segEnd;
+    Point& segStart = prevSegEnd;
+    Point segEnd;
     float segStartAngle, segEndAngle;
 
     switch (segType) // to find segStartAngle, segEnd and segEndAngle
@@ -559,9 +883,9 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
     case PATHSEG_MOVETO_ABS:
     case PATHSEG_MOVETO_REL:
       if (segType == PATHSEG_MOVETO_ABS) {
-        segEnd = gfxPoint(mData[i], mData[i+1]);
+        segEnd = Point(mData[i], mData[i+1]);
       } else {
-        segEnd = segStart + gfxPoint(mData[i], mData[i+1]);
+        segEnd = segStart + Point(mData[i], mData[i+1]);
       }
       pathStart = segEnd;
       // If authors are going to specify multiple consecutive moveto commands
@@ -573,9 +897,9 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
     case PATHSEG_LINETO_ABS:
     case PATHSEG_LINETO_REL:
       if (segType == PATHSEG_LINETO_ABS) {
-        segEnd = gfxPoint(mData[i], mData[i+1]);
+        segEnd = Point(mData[i], mData[i+1]);
       } else {
-        segEnd = segStart + gfxPoint(mData[i], mData[i+1]);
+        segEnd = segStart + Point(mData[i], mData[i+1]);
       }
       segStartAngle = segEndAngle = AngleOfVectorF(segEnd - segStart);
       i += 2;
@@ -584,15 +908,15 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
     case PATHSEG_CURVETO_CUBIC_ABS:
     case PATHSEG_CURVETO_CUBIC_REL:
     {
-      gfxPoint cp1, cp2; // control points
+      Point cp1, cp2; // control points
       if (segType == PATHSEG_CURVETO_CUBIC_ABS) {
-        cp1 = gfxPoint(mData[i],   mData[i+1]);
-        cp2 = gfxPoint(mData[i+2], mData[i+3]);
-        segEnd = gfxPoint(mData[i+4], mData[i+5]);
+        cp1 = Point(mData[i], mData[i+1]);
+        cp2 = Point(mData[i+2], mData[i+3]);
+        segEnd = Point(mData[i+4], mData[i+5]);
       } else {
-        cp1 = segStart + gfxPoint(mData[i],   mData[i+1]);
-        cp2 = segStart + gfxPoint(mData[i+2], mData[i+3]);
-        segEnd = segStart + gfxPoint(mData[i+4], mData[i+5]);
+        cp1 = segStart + Point(mData[i], mData[i+1]);
+        cp2 = segStart + Point(mData[i+2], mData[i+3]);
+        segEnd = segStart + Point(mData[i+4], mData[i+5]);
       }
       prevCP = cp2;
       if (cp1 == segStart) {
@@ -610,13 +934,13 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
     case PATHSEG_CURVETO_QUADRATIC_ABS:
     case PATHSEG_CURVETO_QUADRATIC_REL:
     {
-      gfxPoint cp1, cp2; // control points
+      Point cp1, cp2; // control points
       if (segType == PATHSEG_CURVETO_QUADRATIC_ABS) {
-        cp1 = gfxPoint(mData[i],   mData[i+1]);
-        segEnd = gfxPoint(mData[i+2], mData[i+3]);
+        cp1 = Point(mData[i], mData[i+1]);
+        segEnd = Point(mData[i+2], mData[i+3]);
       } else {
-        cp1 = segStart + gfxPoint(mData[i],   mData[i+1]);
-        segEnd = segStart + gfxPoint(mData[i+2], mData[i+3]);
+        cp1 = segStart + Point(mData[i], mData[i+1]);
+        segEnd = segStart + Point(mData[i+2], mData[i+3]);
       }
       prevCP = cp1;
       segStartAngle = AngleOfVectorF(cp1 - segStart);
@@ -634,9 +958,9 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
       bool largeArcFlag = mData[i+3] != 0.0f;
       bool sweepFlag = mData[i+4] != 0.0f;
       if (segType == PATHSEG_ARC_ABS) {
-        segEnd = gfxPoint(mData[i+5], mData[i+6]);
+        segEnd = Point(mData[i+5], mData[i+6]);
       } else {
-        segEnd = segStart + gfxPoint(mData[i+5], mData[i+6]);
+        segEnd = segStart + Point(mData[i+5], mData[i+6]);
       }
 
       // See section F.6 of SVG 1.1 for details on what we're doing here:
@@ -701,8 +1025,8 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
       double cyp = -root * ry * x1p / rx;
 
       double theta, delta;
-      theta = AngleOfVector(gfxPoint((x1p-cxp)/rx, (y1p-cyp)/ry));    // F.6.5.5
-      delta = AngleOfVector(gfxPoint((-x1p-cxp)/rx, (-y1p-cyp)/ry)) - // F.6.5.6
+      theta = AngleOfVector(Point((x1p-cxp)/rx, (y1p-cyp)/ry));    // F.6.5.5
+      delta = AngleOfVector(Point((-x1p-cxp)/rx, (-y1p-cyp)/ry)) - // F.6.5.6
               theta;
       if (!sweepFlag && delta > 0)
         delta -= 2.0 * M_PI;
@@ -731,9 +1055,9 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
     case PATHSEG_LINETO_HORIZONTAL_ABS:
     case PATHSEG_LINETO_HORIZONTAL_REL:
       if (segType == PATHSEG_LINETO_HORIZONTAL_ABS) {
-        segEnd = gfxPoint(mData[i++], segStart.y);
+        segEnd = Point(mData[i++], segStart.y);
       } else {
-        segEnd = segStart + gfxPoint(mData[i++], 0.0f);
+        segEnd = segStart + Point(mData[i++], 0.0f);
       }
       segStartAngle = segEndAngle = AngleOfVectorF(segEnd - segStart);
       break;
@@ -741,9 +1065,9 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
     case PATHSEG_LINETO_VERTICAL_ABS:
     case PATHSEG_LINETO_VERTICAL_REL:
       if (segType == PATHSEG_LINETO_VERTICAL_ABS) {
-        segEnd = gfxPoint(segStart.x, mData[i++]);
+        segEnd = Point(segStart.x, mData[i++]);
       } else {
-        segEnd = segStart + gfxPoint(0.0f, mData[i++]);
+        segEnd = segStart + Point(0.0f, mData[i++]);
       }
       segStartAngle = segEndAngle = AngleOfVectorF(segEnd - segStart);
       break;
@@ -751,15 +1075,15 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
     case PATHSEG_CURVETO_CUBIC_SMOOTH_ABS:
     case PATHSEG_CURVETO_CUBIC_SMOOTH_REL:
     {
-      gfxPoint cp1 = SVGPathSegUtils::IsCubicType(prevSegType) ?
+      Point cp1 = SVGPathSegUtils::IsCubicType(prevSegType) ?
                        segStart * 2 - prevCP : segStart;
-      gfxPoint cp2;
+      Point cp2;
       if (segType == PATHSEG_CURVETO_CUBIC_SMOOTH_ABS) {
-        cp2 = gfxPoint(mData[i], mData[i+1]);
-        segEnd = gfxPoint(mData[i+2], mData[i+3]);
+        cp2 = Point(mData[i], mData[i+1]);
+        segEnd = Point(mData[i+2], mData[i+3]);
       } else {
-        cp2 = segStart + gfxPoint(mData[i], mData[i+1]);
-        segEnd = segStart + gfxPoint(mData[i+2], mData[i+3]);
+        cp2 = segStart + Point(mData[i], mData[i+1]);
+        segEnd = segStart + Point(mData[i+2], mData[i+3]);
       }
       prevCP = cp2;
       if (cp1 == segStart) {
@@ -777,13 +1101,13 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
     case PATHSEG_CURVETO_QUADRATIC_SMOOTH_ABS:
     case PATHSEG_CURVETO_QUADRATIC_SMOOTH_REL:
     {
-      gfxPoint cp1 = SVGPathSegUtils::IsQuadraticType(prevSegType) ?
+      Point cp1 = SVGPathSegUtils::IsQuadraticType(prevSegType) ?
                        segStart * 2 - prevCP : segStart;
-      gfxPoint cp2;
+      Point cp2;
       if (segType == PATHSEG_CURVETO_QUADRATIC_SMOOTH_ABS) {
-        segEnd = gfxPoint(mData[i], mData[i+1]);
+        segEnd = Point(mData[i], mData[i+1]);
       } else {
-        segEnd = segStart + gfxPoint(mData[i], mData[i+1]);
+        segEnd = segStart + Point(mData[i], mData[i+1]);
       }
       prevCP = cp1;
       segStartAngle = AngleOfVectorF(cp1 - segStart);
@@ -801,7 +1125,7 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
 
     // Set the angle of the mark at the start of this segment:
     if (aMarks->Length()) {
-      nsSVGMark &mark = aMarks->ElementAt(aMarks->Length() - 1);
+      nsSVGMark &mark = aMarks->LastElement();
       if (!IsMoveto(segType) && IsMoveto(prevSegType)) {
         // start of new subpath
         pathStartAngle = mark.angle = segStartAngle;
@@ -818,14 +1142,16 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
 
     // Add the mark at the end of this segment, and set its position:
     if (!aMarks->AppendElement(nsSVGMark(static_cast<float>(segEnd.x),
-                                         static_cast<float>(segEnd.y), 0))) {
+                                         static_cast<float>(segEnd.y),
+                                         0.0f,
+                                         nsSVGMark::eMid))) {
       aMarks->Clear(); // OOM, so try to free some
       return;
     }
 
     if (segType == PATHSEG_CLOSEPATH &&
         prevSegType != PATHSEG_CLOSEPATH) {
-      aMarks->ElementAt(aMarks->Length() - 1).angle =
+      aMarks->LastElement().angle =
         //aMarks->ElementAt(pathStartIndex).angle =
         SVGContentUtils::AngleBisect(segEndAngle, pathStartAngle);
     }
@@ -837,8 +1163,12 @@ SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark> *aMarks) const
 
   NS_ABORT_IF_FALSE(i == mData.Length(), "Very, very bad - mData corrupt");
 
-  if (aMarks->Length() &&
-      prevSegType != PATHSEG_CLOSEPATH)
-    aMarks->ElementAt(aMarks->Length() - 1).angle = prevSegEndAngle;
+  if (aMarks->Length()) {
+    if (prevSegType != PATHSEG_CLOSEPATH) {
+      aMarks->LastElement().angle = prevSegEndAngle;
+    }
+    aMarks->LastElement().type = nsSVGMark::eEnd;
+    aMarks->ElementAt(0).type = nsSVGMark::eStart;
+  }
 }
 

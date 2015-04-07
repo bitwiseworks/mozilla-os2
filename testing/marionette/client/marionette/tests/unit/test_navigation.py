@@ -3,8 +3,8 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 from marionette_test import MarionetteTestCase
-from errors import MarionetteException
-from errors import TimeoutException
+from marionette import MarionetteException
+from marionette import TimeoutException
 
 class TestNavigate(MarionetteTestCase):
     def test_navigate(self):
@@ -73,10 +73,10 @@ class TestNavigate(MarionetteTestCase):
         try:
             self.marionette.navigate("thisprotocoldoesnotexist://")
             self.fail("Should have thrown a MarionetteException")
-        except TimeoutException: 
+        except TimeoutException:
             self.fail("The socket shouldn't have timed out when navigating to a non-existent URL")
         except MarionetteException as e:
-            self.assertEqual(str(e), 'Error loading page')
+            self.assertIn("Error loading page", str(e))
         except Exception as inst:
             import traceback
             print traceback.format_exc()
@@ -97,7 +97,7 @@ class TestNavigate(MarionetteTestCase):
             self.assertTrue(self.marionette.find_element("id", "mozLink"))
             self.fail("Should have thrown a MarionetteException")
         except MarionetteException as e:
-            self.assertEqual(str(e), "Error loading page, timed out")
+            self.assertTrue("Error loading page, timed out" in str(e))
         except Exception as inst:
             import traceback
             print traceback.format_exc()
@@ -108,4 +108,3 @@ class TestNavigate(MarionetteTestCase):
         self.marionette.navigate(test_iframe)
         self.assertTrue('test_iframe.html' in self.marionette.get_url())
         self.assertTrue(self.marionette.find_element("id", "test_iframe"))
-

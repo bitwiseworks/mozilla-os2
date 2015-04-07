@@ -116,7 +116,7 @@ nsDocLoader::nsDocLoader()
   }
 #endif /* PR_LOGGING */
 
-  static PLDHashTableOps hash_table_ops =
+  static const PLDHashTableOps hash_table_ops =
   {
     PL_DHashAllocTable,
     PL_DHashFreeTable,
@@ -128,10 +128,8 @@ nsDocLoader::nsDocLoader()
     RequestInfoHashInitEntry
   };
 
-  if (!PL_DHashTableInit(&mRequestInfoHash, &hash_table_ops, nullptr,
-                         sizeof(nsRequestInfo), 16)) {
-    mRequestInfoHash.ops = nullptr;
-  }
+  PL_DHashTableInit(&mRequestInfoHash, &hash_table_ops, nullptr,
+                    sizeof(nsRequestInfo), 16);
 
   ClearInternalProgress();
 
@@ -975,6 +973,14 @@ nsDocLoader::GetIsLoadingDocument(bool *aIsLoadingDocument)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsDocLoader::GetLoadType(uint32_t *aLoadType)
+{
+  *aLoadType = 0;
+
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 int64_t nsDocLoader::GetMaxTotalProgress()
 {
   int64_t newMaxTotal = 0;
@@ -1106,7 +1112,7 @@ NS_IMETHODIMP nsDocLoader::OnProgress(nsIRequest *aRequest, nsISupports* ctxt,
 }
 
 NS_IMETHODIMP nsDocLoader::OnStatus(nsIRequest* aRequest, nsISupports* ctxt, 
-                                        nsresult aStatus, const PRUnichar* aStatusArg)
+                                        nsresult aStatus, const char16_t* aStatusArg)
 {
   //
   // Fire progress notifications out to any registered nsIWebProgressListeners
@@ -1376,7 +1382,7 @@ void
 nsDocLoader::FireOnStatusChange(nsIWebProgress* aWebProgress,
                                 nsIRequest* aRequest,
                                 nsresult aStatus,
-                                const PRUnichar* aMessage)
+                                const char16_t* aMessage)
 {
   /*                                                                           
    * First notify any listeners of the new state info...

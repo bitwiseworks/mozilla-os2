@@ -39,6 +39,10 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=682592
 */
 
 SimpleTest.waitForExplicitFinish();
+if (navigator.platform.startsWith("Linux arm")) { /* bugs 982875, 999429 */
+  SimpleTest.expectAssertions(0, 4);
+}
+
 var refFrame = document.getElementById("iframe-ref")
 var testFrame = document.getElementById("iframe-test");
 
@@ -82,7 +86,7 @@ function runTests () {
     refContainer.innerHTML = ltr + '<bdo dir="rtl">' + rtl + '</bdo>';
     testContainer = testFrame.contentDocument.getElementById('content');
     testContainer.innerHTML = ltr + rtl;
-    yield;
+    yield undefined;
   }
 
   // non-8bit char + 8bit chars + bidi
@@ -91,7 +95,7 @@ function runTests () {
     refContainer.innerHTML = ltr + '<bdo dir="rtl">' + rtl + '</bdo>';
     testContainer = testFrame.contentDocument.getElementById('content');
     testContainer.innerHTML = ltr + rtl;
-    yield;
+    yield undefined;
   }
 
   // appendData
@@ -102,7 +106,7 @@ function runTests () {
     textNode = document.createTextNode("");
     testContainer.appendChild(textNode);
     textNode.appendData(ltr + rtl);
-    yield;
+    yield undefined;
   }
 
   for (i = 0; i <= 16; i++) {
@@ -112,7 +116,7 @@ function runTests () {
     textNode = document.createTextNode("");
     testContainer.appendChild(textNode);
     textNode.appendData(ltr + rtl);
-    yield;
+    yield undefined;
   }
 
   // appendData with 8bit prefix
@@ -124,7 +128,7 @@ function runTests () {
     textNode = document.createTextNode(prefix);
     testContainer.appendChild(textNode);
     textNode.appendData(ltr + rtl);
-    yield;
+    yield undefined;
   }
 
   for (i = 0; i <= 16; i++) {
@@ -135,7 +139,7 @@ function runTests () {
     textNode = document.createTextNode(prefix);
     testContainer.appendChild(textNode);
     textNode.appendData(ltr + rtl);
-    yield;
+    yield undefined;
   }
 
   // appendData with non-8bit prefix
@@ -147,7 +151,7 @@ function runTests () {
     textNode = document.createTextNode(prefix);
     testContainer.appendChild(textNode);
     textNode.appendData(ltr + rtl);
-    yield;
+    yield undefined;
   }
 
   for (i = 0; i <= 16; i++) {
@@ -158,7 +162,7 @@ function runTests () {
     textNode = document.createTextNode(prefix);
     testContainer.appendChild(textNode);
     textNode.appendData(ltr + rtl);
-    yield;
+    yield undefined;
   }
 };
 

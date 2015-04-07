@@ -23,6 +23,8 @@
 #include "nsContentUtils.h"
 #include "nsPluginInstanceOwner.h"
 
+#include "nsThreadUtils.h"
+#include "nsIDOMElement.h"
 #include "nsIDocument.h"
 #include "nsIDocShell.h"
 #include "nsIScriptGlobalObject.h"
@@ -36,6 +38,7 @@
 #include "nsVersionComparator.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/unused.h"
+#include "nsILoadContext.h"
 
 using namespace mozilla;
 
@@ -49,7 +52,9 @@ using namespace mozilla;
 #include "mozilla/dom/ScreenOrientation.h"
 #include "mozilla/Hal.h"
 #include "GLContextProvider.h"
+#include "GLContext.h"
 #include "TexturePoolOGL.h"
+#include "GLSharedHandleHelpers.h"
 
 using namespace mozilla::gl;
 
@@ -90,15 +95,11 @@ static bool EnsureGLContext()
   return sPluginContext != nullptr;
 }
 
-class SharedPluginTexture {
+class SharedPluginTexture MOZ_FINAL {
 public:
   NS_INLINE_DECL_REFCOUNTING(SharedPluginTexture)
 
   SharedPluginTexture() : mLock("SharedPluginTexture.mLock")
-  {
-  }
-
-  ~SharedPluginTexture()
   {
   }
 
@@ -118,10 +119,10 @@ public:
   }
 
   void Release(nsNPAPIPluginInstance::TextureInfo& aTextureInfo)
-  { 
+  {
     mTextureInfo = aTextureInfo;
     mLock.Unlock();
-  } 
+  }
 
   SharedTextureHandle CreateSharedHandle()
   {
@@ -134,21 +135,27 @@ public:
       return 0;
 
     SharedTextureHandle handle =
-      sPluginContext->CreateSharedHandle(GLContext::SameProcess,
-                                         (void*)mTextureInfo.mTexture,
-                                         GLContext::TextureID);
+      gl::CreateSharedHandle(sPluginContext,
+                             gl::SharedTextureShareType::SameProcess,
+                             (void*)mTextureInfo.mTexture,
+                             gl::SharedTextureBufferType::TextureID);
 
     // We want forget about this now, so delete the texture. Assigning it to zero
     // ensures that we create a new one in Lock()
     sPluginContext->fDeleteTextures(1, &mTextureInfo.mTexture);
     mTextureInfo.mTexture = 0;
-    
+
     return handle;
   }
 
 private:
+  // Private destructor, to discourage deletion outside of Release():
+  ~SharedPluginTexture()
+  {
+  }
+
   nsNPAPIPluginInstance::TextureInfo mTextureInfo;
- 
+
   Mutex mLock;
 };
 
@@ -162,7 +169,7 @@ using namespace mozilla::layers;
 
 static NS_DEFINE_IID(kIOutputStreamIID, NS_IOUTPUTSTREAM_IID);
 
-NS_IMPL_THREADSAFE_ISUPPORTS0(nsNPAPIPluginInstance)
+NS_IMPL_ISUPPORTS0(nsNPAPIPluginInstance)
 
 nsNPAPIPluginInstance::nsNPAPIPluginInstance()
   :
@@ -189,7 +196,7 @@ nsNPAPIPluginInstance::nsNPAPIPluginInstance()
 #endif
   , mHaveJavaC2PJSObjectQuirk(false)
 {
-  mNPP.pdata = NULL;
+  mNPP.pdata = nullptr;
   mNPP.ndata = this;
 
   PLUGIN_LOG(PLUGIN_LOG_BASIC, ("nsNPAPIPluginInstance ctor: this=%p\n",this));
@@ -224,7 +231,7 @@ nsNPAPIPluginInstance::Destroy()
 #if MOZ_WIDGET_ANDROID
   if (mContentSurface)
     mContentSurface->SetFrameAvailableCallback(nullptr);
-  
+
   mContentTexture = nullptr;
   mContentSurface = nullptr;
 
@@ -260,7 +267,7 @@ nsresult nsNPAPIPluginInstance::Initialize(nsNPAPIPlugin *aPlugin, nsPluginInsta
       PL_strcpy(mMIMEType, aMIMEType);
     }
   }
-  
+
   return Start();
 }
 
@@ -430,7 +437,7 @@ nsNPAPIPluginInstance::Start()
     // Note: If we failed to get the tag type, we may be a full page plugin, so no arguments
     rv = GetAttributes(count, names, values);
     NS_ENSURE_SUCCESS(rv, rv);
-    
+
     // nsPluginTagType_Object or Applet may also have PARAM tags
     // Note: The arrays handed back by GetParameters() are
     // crafted specially to be directly behind the arrays from GetAttributes()
@@ -439,7 +446,7 @@ nsNPAPIPluginInstance::Start()
     if (tagtype != nsPluginTagType_Embed) {
       uint16_t pcount = 0;
       const char* const* pnames = nullptr;
-      const char* const* pvalues = nullptr;    
+      const char* const* pvalues = nullptr;
       if (NS_SUCCEEDED(GetParameters(pcount, pnames, pvalues))) {
         // Android expects an empty string as the separator instead of null
 #ifdef MOZ_WIDGET_ANDROID
@@ -532,7 +539,9 @@ nsNPAPIPluginInstance::Start()
   // before returning. If the plugin returns failure, we'll clear it out below.
   mRunning = RUNNING;
 
-  nsresult newResult = library->NPP_New((char*)mimetype, &mNPP, (uint16_t)mode, count, (char**)names, (char**)values, NULL, &error);
+  nsresult newResult = library->NPP_New((char*)mimetype, &mNPP, (uint16_t)mode,
+                                        count, (char**)names, (char**)values,
+                                        nullptr, &error);
   mInPluginInitCall = oldVal;
 
   NPP_PLUGIN_LOG(PLUGIN_LOG_NORMAL,
@@ -544,17 +553,17 @@ nsNPAPIPluginInstance::Start()
     nsJSNPRuntime::OnPluginDestroy(&mNPP);
     return NS_ERROR_FAILURE;
   }
-  
+
   return NS_OK;
 }
 
 nsresult nsNPAPIPluginInstance::SetWindow(NPWindow* window)
 {
-  // NPAPI plugins don't want a SetWindow(NULL).
+  // NPAPI plugins don't want a SetWindow(nullptr).
   if (!window || RUNNING != mRunning)
     return NS_OK;
 
-#if defined(MOZ_WIDGET_GTK2)
+#if MOZ_WIDGET_GTK
   // bug 108347, flash plugin on linux doesn't like window->width <=
   // 0, but Java needs wants this call.
   if (!nsPluginHost::IsJavaMIMEType(mMIMEType) && window->type == NPWindowTypeWindow &&
@@ -690,7 +699,7 @@ nsresult nsNPAPIPluginInstance::HandleEvent(void* event, int16_t* result,
 
   if (pluginFunctions->event) {
     mCurrentPluginEvent = event;
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
     NS_TRY_SAFE_CALL_RETURN(tmpResult, (*pluginFunctions->event)(&mNPP, event), this,
                             aSafeToReenterGecko);
 #else
@@ -698,7 +707,7 @@ nsresult nsNPAPIPluginInstance::HandleEvent(void* event, int16_t* result,
     tmpResult = (*pluginFunctions->event)(&mNPP, event);
 #endif
     NPP_PLUGIN_LOG(PLUGIN_LOG_NOISY,
-      ("NPP HandleEvent called: this=%p, npp=%p, event=%p, return=%d\n", 
+      ("NPP HandleEvent called: this=%p, npp=%p, event=%p, return=%d\n",
       this, &mNPP, event, tmpResult));
 
     if (result)
@@ -725,7 +734,7 @@ nsresult nsNPAPIPluginInstance::GetValueFromPlugin(NPPVariable variable, void* v
     NS_TRY_SAFE_CALL_RETURN(pluginError, (*pluginFunctions->getvalue)(&mNPP, variable, value), this,
                             NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
     NPP_PLUGIN_LOG(PLUGIN_LOG_NORMAL,
-    ("NPP GetValue called: this=%p, npp=%p, var=%d, value=%d, return=%d\n", 
+    ("NPP GetValue called: this=%p, npp=%p, var=%d, value=%d, return=%d\n",
     this, &mNPP, variable, value, pluginError));
 
     if (pluginError == NPERR_NO_ERROR) {
@@ -741,7 +750,7 @@ nsNPAPIPlugin* nsNPAPIPluginInstance::GetPlugin()
   return mPlugin;
 }
 
-nsresult nsNPAPIPluginInstance::GetNPP(NPP* aNPP) 
+nsresult nsNPAPIPluginInstance::GetNPP(NPP* aNPP)
 {
   if (aNPP)
     *aNPP = &mNPP;
@@ -862,7 +871,7 @@ void nsNPAPIPluginInstance::NotifyFullScreen(bool aFullScreen)
   SendLifecycleEvent(this, mFullScreen ? kEnterFullScreen_ANPLifecycleAction : kExitFullScreen_ANPLifecycleAction);
 
   if (mFullScreen && mFullScreenOrientation != dom::eScreenOrientation_None) {
-    AndroidBridge::Bridge()->LockScreenOrientation(mFullScreenOrientation);
+    mozilla::widget::android::GeckoAppShell::LockScreenOrientation(mFullScreenOrientation);
   }
 }
 
@@ -891,7 +900,7 @@ void nsNPAPIPluginInstance::SetANPDrawingModel(uint32_t aModel)
 
 void* nsNPAPIPluginInstance::GetJavaSurface()
 {
-  void* surface = nullptr; 
+  void* surface = nullptr;
   nsresult rv = GetValueFromPlugin(kJavaSurface_ANPGetValue, &surface);
   if (NS_FAILED(rv))
     return nullptr;
@@ -919,11 +928,11 @@ void nsNPAPIPluginInstance::SetFullScreenOrientation(uint32_t orientation)
     // We're already fullscreen so immediately apply the orientation change
 
     if (mFullScreenOrientation != dom::eScreenOrientation_None) {
-      AndroidBridge::Bridge()->LockScreenOrientation(mFullScreenOrientation);
+      mozilla::widget::android::GeckoAppShell::LockScreenOrientation(mFullScreenOrientation);
     } else if (oldOrientation != dom::eScreenOrientation_None) {
       // We applied an orientation when we entered fullscreen, but
       // we don't want it anymore
-      AndroidBridge::Bridge()->UnlockScreenOrientation();
+      mozilla::widget::android::GeckoAppShell::UnlockScreenOrientation();
     }
   }
 }
@@ -1012,9 +1021,10 @@ SharedTextureHandle nsNPAPIPluginInstance::CreateSharedHandle()
     return mContentTexture->CreateSharedHandle();
   } else if (mContentSurface) {
     EnsureGLContext();
-    return sPluginContext->CreateSharedHandle(GLContext::SameProcess,
-                                              mContentSurface,
-                                              GLContext::SurfaceTexture);
+    return gl::CreateSharedHandle(sPluginContext,
+                                  gl::SharedTextureShareType::SameProcess,
+                                  mContentSurface,
+                                  gl::SharedTextureBufferType::SurfaceTexture);
   } else return 0;
 }
 
@@ -1100,7 +1110,7 @@ nsresult nsNPAPIPluginInstance::IsRemoteDrawingCoreAnimation(bool* aDrawing)
   PluginLibrary* library = mPlugin->GetLibrary();
   if (!library)
       return NS_ERROR_FAILURE;
-  
+
   return library->IsRemoteDrawingCoreAnimation(&mNPP, aDrawing);
 #else
   return NS_ERROR_FAILURE;
@@ -1120,7 +1130,7 @@ nsresult nsNPAPIPluginInstance::ContentsScaleFactorChanged(double aContentsScale
   // We only need to call this if the plugin is running OOP.
   if (!library->IsOOP())
       return NS_OK;
-  
+
   return library->ContentsScaleFactorChanged(&mNPP, aContentsScaleFactor);
 #else
   return NS_ERROR_FAILURE;
@@ -1201,23 +1211,6 @@ nsNPAPIPluginInstance::AsyncSetWindow(NPWindow* window)
 
   return library->AsyncSetWindow(&mNPP, window);
 }
-
-#if defined(MOZ_WIDGET_QT) && (MOZ_PLATFORM_MAEMO == 6)
-nsresult
-nsNPAPIPluginInstance::HandleGUIEvent(const nsGUIEvent& anEvent, bool* handled)
-{
-  if (RUNNING != mRunning) {
-    *handled = false;
-    return NS_OK;
-  }
-
-  AutoPluginLibraryCall library(this);
-  if (!library)
-    return NS_ERROR_FAILURE;
-
-  return library->HandleGUIEvent(&mNPP, anEvent, handled);
-}
-#endif
 
 nsresult
 nsNPAPIPluginInstance::GetImageContainer(ImageContainer**aContainer)
@@ -1367,7 +1360,7 @@ nsNPAPIPluginInstance::PopPopupsEnabledState()
   window->PopPopupControlState(oldState);
 
   mPopupStates.RemoveElementAt(last);
-  
+
   return NS_OK;
 }
 
@@ -1452,7 +1445,7 @@ PluginTimerCallback(nsITimer *aTimer, void *aClosure)
   // Make sure we still have an instance and the timer is still alive
   // after the callback.
   nsNPAPIPluginInstance *inst = (nsNPAPIPluginInstance*)npp->ndata;
-  if (!inst || !inst->TimerWithID(id, NULL))
+  if (!inst || !inst->TimerWithID(id, nullptr))
     return;
 
   // use UnscheduleTimer to clean up if this is a one-shot timer
@@ -1489,7 +1482,7 @@ nsNPAPIPluginInstance::ScheduleTimer(uint32_t interval, NPBool repeat, void (*ti
 
   // generate ID that is unique to this instance
   uint32_t uniqueID = mTimers.Length();
-  while ((uniqueID == 0) || TimerWithID(uniqueID, NULL))
+  while ((uniqueID == 0) || TimerWithID(uniqueID, nullptr))
     uniqueID++;
   newTimer->id = uniqueID;
 
@@ -1612,7 +1605,7 @@ nsNPAPIPluginInstance::GetJSContext(JSContext* *outContext)
 
   nsRefPtr<nsPluginInstanceOwner> deathGrip(mOwner);
 
-  *outContext = NULL;
+  *outContext = nullptr;
   nsCOMPtr<nsIDocument> document;
 
   nsresult rv = mOwner->GetDocument(getter_AddRefs(document));

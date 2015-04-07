@@ -12,14 +12,13 @@
  */
 
 #include "jsiter.h"
-#include "jsprvtd.h"
 #include "jspubtd.h"
 
 #include "vm/Stack.h"
 
 namespace js {
 
-/* Implemented in jsdbgapi: */
+class ScopeIter;
 
 /*
  * Announce to the debugger that the thread has entered a new JavaScript frame,
@@ -39,7 +38,7 @@ namespace js {
  *   has set |frame|'s return value appropriately.
  */
 extern JSTrapStatus
-ScriptDebugPrologue(JSContext *cx, AbstractFramePtr frame);
+ScriptDebugPrologue(JSContext *cx, AbstractFramePtr frame, jsbytecode *pc);
 
 /*
  * Announce to the debugger that the thread has exited a JavaScript frame, |frame|.
@@ -57,7 +56,7 @@ ScriptDebugPrologue(JSContext *cx, AbstractFramePtr frame);
  * alternative path, containing its own call to ScriptDebugEpilogue.)
  */
 extern bool
-ScriptDebugEpilogue(JSContext *cx, AbstractFramePtr frame, bool ok);
+ScriptDebugEpilogue(JSContext *cx, AbstractFramePtr frame, jsbytecode *pc, bool ok);
 
 /*
  * Announce to the debugger that an exception has been thrown and propagated
@@ -87,8 +86,8 @@ DebugExceptionUnwind(JSContext *cx, AbstractFramePtr frame, jsbytecode *pc);
 extern bool
 BoxNonStrictThis(JSContext *cx, const CallReceiver &call);
 
-extern bool
-BoxNonStrictThis(JSContext *cx, MutableHandleValue thisv, bool *modified);
+extern JSObject *
+BoxNonStrictThis(JSContext *cx, HandleValue thisv);
 
 /*
  * Ensure that fp->thisValue() is the correct value of |this| for the scripted
@@ -109,12 +108,12 @@ enum MaybeConstruct {
  * before it reaches |v|. If it's -1, the decompiler will search the stack.
  */
 extern bool
-ReportIsNotFunction(JSContext *cx, const Value &v, int numToSkip = -1,
+ReportIsNotFunction(JSContext *cx, HandleValue v, int numToSkip = -1,
                     MaybeConstruct construct = NO_CONSTRUCT);
 
 /* See ReportIsNotFunction comment for the meaning of numToSkip. */
 extern JSObject *
-ValueToCallable(JSContext *cx, const Value &vp, int numToSkip = -1,
+ValueToCallable(JSContext *cx, HandleValue v, int numToSkip = -1,
                 MaybeConstruct construct = NO_CONSTRUCT);
 
 /*
@@ -130,16 +129,16 @@ Invoke(JSContext *cx, CallArgs args, MaybeConstruct construct = NO_CONSTRUCT);
  * arguments onto the stack.
  */
 extern bool
-Invoke(JSContext *cx, const Value &thisv, const Value &fval, unsigned argc, Value *argv,
-       Value *rval);
+Invoke(JSContext *cx, const Value &thisv, const Value &fval, unsigned argc, const Value *argv,
+       MutableHandleValue rval);
 
 /*
  * This helper takes care of the infinite-recursion check necessary for
  * getter/setter calls.
  */
 extern bool
-InvokeGetterOrSetter(JSContext *cx, JSObject *obj, const Value &fval, unsigned argc, Value *argv,
-                     Value *rval);
+InvokeGetterOrSetter(JSContext *cx, JSObject *obj, Value fval, unsigned argc, Value *argv,
+                     MutableHandleValue rval);
 
 /*
  * InvokeConstructor implement a function call from a constructor context
@@ -150,7 +149,7 @@ InvokeConstructor(JSContext *cx, CallArgs args);
 
 /* See the fval overload of Invoke. */
 extern bool
-InvokeConstructor(JSContext *cx, const Value &fval, unsigned argc, Value *argv, Value *rval);
+InvokeConstructor(JSContext *cx, Value fval, unsigned argc, Value *argv, Value *rval);
 
 /*
  * Executes a script with the given scopeChain/this. The 'type' indicates
@@ -206,7 +205,7 @@ class RunState
 
     JSScript *script() const { return script_; }
 
-    virtual StackFrame *pushInterpreterFrame(JSContext *cx, FrameGuard *fg) = 0;
+    virtual InterpreterFrame *pushInterpreterFrame(JSContext *cx) = 0;
     virtual void setReturnValue(Value v) = 0;
 
   private:
@@ -243,7 +242,7 @@ class ExecuteState : public RunState
     JSObject *scopeChain() const { return scopeChain_; }
     ExecuteType type() const { return type_; }
 
-    virtual StackFrame *pushInterpreterFrame(JSContext *cx, FrameGuard *fg);
+    virtual InterpreterFrame *pushInterpreterFrame(JSContext *cx);
 
     virtual void setReturnValue(Value v) {
         if (result_)
@@ -272,7 +271,7 @@ class InvokeState : public RunState
     bool constructing() const { return InitialFrameFlagsAreConstructing(initial_); }
     CallArgs &args() const { return args_; }
 
-    virtual StackFrame *pushInterpreterFrame(JSContext *cx, FrameGuard *fg);
+    virtual InterpreterFrame *pushInterpreterFrame(JSContext *cx);
 
     virtual void setReturnValue(Value v) {
         args_.rval().set(v);
@@ -291,7 +290,7 @@ class GeneratorState : public RunState
     GeneratorState(JSContext *cx, JSGenerator *gen, JSGeneratorState futureState);
     ~GeneratorState();
 
-    virtual StackFrame *pushInterpreterFrame(JSContext *cx, FrameGuard *fg);
+    virtual InterpreterFrame *pushInterpreterFrame(JSContext *cx);
     virtual void setReturnValue(Value) { }
 
     JSGenerator *gen() const { return gen_; }
@@ -311,73 +310,32 @@ extern bool
 SameValue(JSContext *cx, const Value &v1, const Value &v2, bool *same);
 
 extern JSType
-TypeOfValue(JSContext *cx, const Value &v);
+TypeOfObject(JSObject *obj);
+
+extern JSType
+TypeOfValue(const Value &v);
 
 extern bool
-HasInstance(JSContext *cx, HandleObject obj, HandleValue v, JSBool *bp);
+HasInstance(JSContext *cx, HandleObject obj, HandleValue v, bool *bp);
 
-/*
- * A linked list of the |FrameRegs regs;| variables belonging to all
- * js::Interpret C++ frames on this thread's stack.
- *
- * Note that this is *not* a list of all JS frames running under the
- * interpreter; that would include inlined frames, whose FrameRegs are
- * saved in various pieces in various places. Rather, this lists each
- * js::Interpret call's live 'regs'; when control returns to that call, it
- * will resume execution with this 'regs' instance.
- *
- * When Debugger puts a script in single-step mode, all js::Interpret
- * invocations that might be presently running that script must have
- * interrupts enabled. It's not practical to simply check
- * script->stepModeEnabled() at each point some callee could have changed
- * it, because there are so many places js::Interpret could possibly cause
- * JavaScript to run: each place an object might be coerced to a primitive
- * or a number, for example. So instead, we simply expose a list of the
- * 'regs' those frames are using, and let Debugger tweak the affected
- * js::Interpret frames when an onStep handler is established.
- *
- * Elements of this list are allocated within the js::Interpret stack
- * frames themselves; the list is headed by this thread's js::ThreadData.
- */
-class InterpreterFrames {
-  public:
-    class InterruptEnablerBase {
-      public:
-        virtual void enable() const = 0;
-    };
-
-    InterpreterFrames(JSContext *cx, FrameRegs *regs, const InterruptEnablerBase &enabler);
-    ~InterpreterFrames();
-
-    /* If this js::Interpret frame is running |script|, enable interrupts. */
-    inline void enableInterruptsIfRunning(JSScript *script);
-    inline void enableInterruptsUnconditionally() { enabler.enable(); }
-
-    InterpreterFrames *older;
-
-  private:
-    JSContext *context;
-    FrameRegs *regs;
-    const InterruptEnablerBase &enabler;
-};
-
-/* Unwind block and scope chains to match the given depth. */
+// Unwind scope chain and iterator to match the static scope corresponding to
+// the given bytecode position.
 extern void
-UnwindScope(JSContext *cx, AbstractFramePtr frame, uint32_t stackDepth);
+UnwindScope(JSContext *cx, ScopeIter &si, jsbytecode *pc);
 
 /*
  * Unwind for an uncatchable exception. This means not running finalizers, etc;
  * just preserving the basic engine stack invariants.
  */
 extern void
-UnwindForUncatchableException(JSContext *cx, const FrameRegs &regs);
+UnwindForUncatchableException(JSContext *cx, const InterpreterRegs &regs);
 
 extern bool
 OnUnknownMethod(JSContext *cx, HandleObject obj, Value idval, MutableHandleValue vp);
 
 class TryNoteIter
 {
-    const FrameRegs &regs;
+    const InterpreterRegs &regs;
     RootedScript script; /* TryNotIter is always stack allocated. */
     uint32_t pcOffset;
     JSTryNote *tn, *tnEnd;
@@ -385,7 +343,7 @@ class TryNoteIter
     void settle();
 
   public:
-    explicit TryNoteIter(JSContext *cx, const FrameRegs &regs);
+    explicit TryNoteIter(JSContext *cx, const InterpreterRegs &regs);
     bool done() const;
     void operator++();
     JSTryNote *operator*() const { return tn; }
@@ -393,42 +351,14 @@ class TryNoteIter
 
 /************************************************************************/
 
-/*
- * To really poison a set of values, using 'magic' or 'undefined' isn't good
- * enough since often these will just be ignored by buggy code (see bug 629974)
- * in debug builds and crash in release builds. Instead, we use a safe-for-crash
- * pointer.
- */
-static JS_ALWAYS_INLINE void
-Debug_SetValueRangeToCrashOnTouch(Value *beg, Value *end)
-{
-#ifdef DEBUG
-    for (Value *v = beg; v != end; ++v)
-        v->setObject(*reinterpret_cast<JSObject *>(0x42));
-#endif
-}
-
-static JS_ALWAYS_INLINE void
-Debug_SetValueRangeToCrashOnTouch(Value *vec, size_t len)
-{
-#ifdef DEBUG
-    Debug_SetValueRangeToCrashOnTouch(vec, vec + len);
-#endif
-}
-
-static JS_ALWAYS_INLINE void
-Debug_SetValueRangeToCrashOnTouch(HeapValue *vec, size_t len)
-{
-#ifdef DEBUG
-    Debug_SetValueRangeToCrashOnTouch((Value *) vec, len);
-#endif
-}
-
 bool
 Throw(JSContext *cx, HandleValue v);
 
 bool
 GetProperty(JSContext *cx, HandleValue value, HandlePropertyName name, MutableHandleValue vp);
+
+bool
+CallProperty(JSContext *cx, HandleValue value, HandlePropertyName name, MutableHandleValue vp);
 
 bool
 GetScopeName(JSContext *cx, HandleObject obj, HandlePropertyName name, MutableHandleValue vp);
@@ -440,55 +370,43 @@ GetScopeNameForTypeOf(JSContext *cx, HandleObject obj, HandlePropertyName name,
 JSObject *
 Lambda(JSContext *cx, HandleFunction fun, HandleObject parent);
 
-bool
-GetElement(JSContext *cx, MutableHandleValue lref, HandleValue rref, MutableHandleValue res);
+JSObject *
+LambdaArrow(JSContext *cx, HandleFunction fun, HandleObject parent, HandleValue thisv);
 
 bool
-GetElementMonitored(JSContext *cx, MutableHandleValue lref, HandleValue rref, MutableHandleValue res);
+GetElement(JSContext *cx, MutableHandleValue lref, HandleValue rref, MutableHandleValue res);
 
 bool
 CallElement(JSContext *cx, MutableHandleValue lref, HandleValue rref, MutableHandleValue res);
 
 bool
 SetObjectElement(JSContext *cx, HandleObject obj, HandleValue index, HandleValue value,
-                 JSBool strict);
+                 bool strict);
 bool
 SetObjectElement(JSContext *cx, HandleObject obj, HandleValue index, HandleValue value,
-                 JSBool strict, HandleScript script, jsbytecode *pc);
+                 bool strict, HandleScript script, jsbytecode *pc);
 
 bool
 InitElementArray(JSContext *cx, jsbytecode *pc,
                  HandleObject obj, uint32_t index, HandleValue value);
 
 bool
-AddValues(JSContext *cx, HandleScript script, jsbytecode *pc,
-          MutableHandleValue lhs, MutableHandleValue rhs,
-          Value *res);
+AddValues(JSContext *cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res);
 
 bool
-SubValues(JSContext *cx, HandleScript script, jsbytecode *pc,
-          MutableHandleValue lhs, MutableHandleValue rhs,
-          Value *res);
+SubValues(JSContext *cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res);
 
 bool
-MulValues(JSContext *cx, HandleScript script, jsbytecode *pc,
-          MutableHandleValue lhs, MutableHandleValue rhs,
-          Value *res);
+MulValues(JSContext *cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res);
 
 bool
-DivValues(JSContext *cx, HandleScript script, jsbytecode *pc,
-          MutableHandleValue lhs, MutableHandleValue rhs,
-          Value *res);
+DivValues(JSContext *cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res);
 
 bool
-ModValues(JSContext *cx, HandleScript script, jsbytecode *pc,
-          MutableHandleValue lhs, MutableHandleValue rhs,
-          Value *res);
+ModValues(JSContext *cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res);
 
 bool
-UrshValues(JSContext *cx, HandleScript script, jsbytecode *pc,
-           MutableHandleValue lhs, MutableHandleValue rhs,
-           Value *res);
+UrshValues(JSContext *cx, MutableHandleValue lhs, MutableHandleValue rhs, MutableHandleValue res);
 
 template <bool strict>
 bool
@@ -496,11 +414,11 @@ SetProperty(JSContext *cx, HandleObject obj, HandleId id, const Value &value);
 
 template <bool strict>
 bool
-DeleteProperty(JSContext *ctx, HandleValue val, HandlePropertyName name, JSBool *bv);
+DeleteProperty(JSContext *ctx, HandleValue val, HandlePropertyName name, bool *bv);
 
 template <bool strict>
 bool
-DeleteElement(JSContext *cx, HandleValue val, HandleValue index, JSBool *bv);
+DeleteElement(JSContext *cx, HandleValue val, HandleValue index, bool *bv);
 
 bool
 DefFunOperation(JSContext *cx, HandleScript script, HandleObject scopeChain, HandleFunction funArg);
@@ -530,15 +448,27 @@ RunOnceScriptPrologue(JSContext *cx, HandleScript script);
 
 bool
 InitGetterSetterOperation(JSContext *cx, jsbytecode *pc, HandleObject obj, HandleId id,
-                          HandleValue val);
+                          HandleObject val);
 
 bool
 InitGetterSetterOperation(JSContext *cx, jsbytecode *pc, HandleObject obj, HandlePropertyName name,
-                          HandleValue val);
+                          HandleObject val);
+
+bool
+EnterWithOperation(JSContext *cx, AbstractFramePtr frame, HandleValue val, HandleObject staticWith);
+
 
 bool
 InitGetterSetterOperation(JSContext *cx, jsbytecode *pc, HandleObject obj, HandleValue idval,
-                          HandleValue val);
+                          HandleObject val);
+
+inline bool
+SetConstOperation(JSContext *cx, HandleObject varobj, HandlePropertyName name, HandleValue rval)
+{
+    return JSObject::defineProperty(cx, varobj, name, rval,
+                                    JS_PropertyStub, JS_StrictPropertyStub,
+                                    JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY);
+}
 
 }  /* namespace js */
 

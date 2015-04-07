@@ -4,7 +4,20 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-CPP_SOURCES += [
+NO_DIST_INSTALL = True
+
+SOURCES += [
     'TestComponent.cpp',
 ]
 
+LIBRARY_NAME = 'testcompnoaslr'
+
+IS_COMPONENT = True
+
+FORCE_SHARED_LIB = True
+
+DEFINES['LIBRARY_FILENAME'] = '%s%s%s' % (
+    CONFIG['DLL_PREFIX'],
+    LIBRARY_NAME,
+    CONFIG['DLL_SUFFIX']
+)

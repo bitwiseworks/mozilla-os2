@@ -7,10 +7,12 @@
 #ifndef shell_jsheaptools_h
 #define shell_jsheaptools_h
 
-#include "jsapi.h"
-
 #ifdef DEBUG
-JSBool FindReferences(JSContext *cx, unsigned argc, jsval *vp);
+
+#include "js/TypeDecls.h"
+
+bool FindReferences(JSContext *cx, unsigned argc, JS::Value *vp);
+
 #endif /* DEBUG */
 
 #endif /* shell_jsheaptools_h */

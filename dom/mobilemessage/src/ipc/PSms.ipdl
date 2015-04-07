@@ -16,6 +16,7 @@ namespace mobilemessage {
 
 struct SendMmsMessageRequest
 {
+  uint32_t serviceId;
   nsString[] receivers;
   nsString subject;
   nsString smil;
@@ -24,8 +25,10 @@ struct SendMmsMessageRequest
 
 struct SendSmsMessageRequest
 {
+  uint32_t serviceId;
   nsString number;
   nsString message;
+  bool     silent;
 };
 
 union SendMessageRequest
@@ -59,10 +62,21 @@ struct MarkMessageReadRequest
 {
   int32_t messageId;
   bool value;
+  bool sendReadReport;
+};
+
+struct GetSegmentInfoForTextRequest
+{
+  nsString text;
 };
 
 struct CreateThreadCursorRequest
 {
+};
+
+struct GetSmscAddressRequest
+{
+  uint32_t serviceId;
 };
 
 union IPCSmsRequest
@@ -72,6 +86,8 @@ union IPCSmsRequest
   GetMessageRequest;
   DeleteMessageRequest;
   MarkMessageReadRequest;
+  GetSegmentInfoForTextRequest;
+  GetSmscAddressRequest;
 };
 
 union IPCMobileMessageCursor
@@ -100,6 +116,12 @@ child:
 
   NotifyDeliveryErrorMessage(MobileMessageData aMessageData);
 
+  NotifyReceivedSilentMessage(MobileMessageData aMessageData);
+
+  NotifyReadSuccessMessage(MobileMessageData aMessageData);
+
+  NotifyReadErrorMessage(MobileMessageData aMessageData);
+
 parent:
   /**
    * Sent when the child no longer needs to use sms.
@@ -116,11 +138,8 @@ parent:
    */
   PMobileMessageCursor(IPCMobileMessageCursor request);
 
-  sync HasSupport()
-      returns (bool aHasSupport);
-
-  sync GetSegmentInfoForText(nsString aText)
-      returns (SmsSegmentInfoData aResult);
+  AddSilentNumber(nsString aNumber);
+  RemoveSilentNumber(nsString aNumber);
 };
 
 } // namespace mobilemessage

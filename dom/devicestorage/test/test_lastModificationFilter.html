@@ -22,10 +22,19 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=717103
 <pre id="test">
 <script class="testbody" type="text/javascript">
 
+devicestorage_setup();
 
+var oldFiles = ["a.png", "b.png", "c.png"];
+var timeFile = "t.png";
+var newFiles = ["d.png", "e.png", "f.png"];
+
+var storage = navigator.getDeviceStorage('pictures');
+var prefix = "devicestorage/" + randomFilename(12);
+var i;
+var timestamp;
+var lastFileAddedTimestamp;
 
 function verifyAndDelete(prefix, files, e) {
-
   if (e.target.result == null) {
     ok(files.length == 0, "when the enumeration is done, we shouldn't have any files in this array")
     dump("We still have length = " + files.length + "\n");
@@ -36,7 +45,7 @@ function verifyAndDelete(prefix, files, e) {
 
   var filename = e.target.result.name;
   if (filename[0] == "/") {
-    // We got /storgaeName/prefix/filename
+    // We got /storageName/prefix/filename
     // Remove the storageName (this shows up on FirefoxOS)
     filename = filename.substring(1); // Remove leading slash
     var slashIndex = filename.indexOf("/");
@@ -53,71 +62,105 @@ function verifyAndDelete(prefix, files, e) {
   if (index == -1)
     return;
 
-  files.remove(index);
+  files.splice(index, 1);
 
   // clean up
-  var storage = navigator.getDeviceStorage("pictures");
-  var cleanup = storage.delete(prefix + "/" + filename);
+  var cleanup = storage.delete(e.target.result.name);
   cleanup.onsuccess = function(e) {}
 }
 
-function addFiles(prefix, files, date, callback) {
-
-  const Cc = SpecialPowers.Cc;
-  const Ci = SpecialPowers.Ci;
-
-  var directoryService = Cc["@mozilla.org/file/directory_service;1"].getService(Ci.nsIProperties);
-
-  for (var i=0; i<files.length; i++) {
-
-    var f = directoryService.get("TmpD", Ci.nsIFile);
-    f.appendRelativePath("device-storage-testing");
-
-    var path = prefix + '/' + files[i];
-    path.split("/").forEach(function(p) {
-      f.appendRelativePath(p);
-    });
-    f.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0644);
-    f.lastModifiedTime = date;
+function addFile(filename, callback) {
+  var addReq = storage.addNamed(createRandomBlob('image/png'), prefix + '/' + filename);
+  addReq.onsuccess = function(e) {
+    // After adding the file, we go ahead and grab the timestamp of the file
+    // that we just added
+    var getReq = storage.get(prefix + '/' + filename);
+    getReq.onsuccess = function(e) {
+      lastFileAddedTimestamp = e.target.result.lastModifiedDate;
+      callback();
+    }
+    getReq.onerror = function(e) {
+      ok(false, "getError was called : " + e.target.error.name);
+      devicestorage_cleanup();
+    };
   }
-  callback();
+  addReq.onerror = function(e) {
+    ok(false, "addError was called : " + e.target.error.name);
+    devicestorage_cleanup();
+  }
 }
 
+function addFileArray(fileArray, callback) {
+  var i = 0;
+  function addNextFile() {
+    i = i + 1;
+    if (i == fileArray.length) {
+      callback();
+      return;
+    }
+    addFile(fileArray[i], addNextFile);
+  }
+  addFile(fileArray[0], addNextFile);
+}
 
-devicestorage_setup();
+function delFile(filename, callback) {
+  var req = storage.delete(prefix + '/' + filename);
+  req.onsuccess = function(e) {
+    callback();
+  };
+  req.onerror = function(e) {
+    ok(false, "delError was called : " + e.target.error.name);
+    devicestorage_cleanup();
+  };
+}
 
-var prefix = "devicestorage/" + randomFilename(12)
-
-var oldFiles = ["a.png", "b.png", "c.png"];
-var newFiles = ["d.png", "e.png", "f.png"];
-
-// 157795200 is a long long time ago.
-addFiles(prefix, oldFiles, 157795200, addNewFiles);
-
-function enumerateNew() {
-
-  var storage = navigator.getDeviceStorage("pictures");
-  ok(navigator.getDeviceStorage, "Should have getDeviceStorage");
-
-// 836031600 is a long time ago
-  var cursor = storage.enumerate(prefix, {"since": new Date(836031600)});
+function afterNewFiles() {
+  var cursor = storage.enumerate(prefix, {"since": timestamp});
   cursor.onsuccess = function(e) {
     verifyAndDelete(prefix, newFiles, e);
     if (e.target.result) {
       e.target.continue();
     }
-  }
-
+  };
   cursor.onerror = function (e) {
     ok(false, "handleError was called : " + e.target.error.name);
     devicestorage_cleanup();
+  };
+}
+
+function waitForTimestampChange() {
+  // We've added a new file. See if the timestamp differs from
+  // oldFileAddedTimestamp, and if it's the same wait for a bit
+  // and try again.
+  if (lastFileAddedTimestamp.valueOf() === timestamp.valueOf()) {
+    delFile(timeFile, function() {
+      setTimeout(function() {
+        addFile(timeFile, waitForTimestampChange);
+      }, 1000);
+    });
+  } else {
+    timestamp = lastFileAddedTimestamp;
+    // The timestamp has changed. Go ahead and add the rest of the new files
+    delFile(timeFile, function() {
+      addFileArray(newFiles, afterNewFiles);
+    });
   }
 }
 
-function addNewFiles() {
-  addFiles(prefix, newFiles, Date.now(), enumerateNew);
+function afterOldFiles() {
+  timestamp = lastFileAddedTimestamp;
+  setTimeout(function() {
+    // We've added our old files and waited for a second.
+    // Add a new file until the timestamp changes
+    addFile(timeFile, waitForTimestampChange);
+  }, 1000);
 }
 
+function addOldFiles() {
+  addFileArray(oldFiles, afterOldFiles);
+}
+
+addOldFiles();
 
 </script>
 </pre>

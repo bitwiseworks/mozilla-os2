@@ -24,7 +24,7 @@
 #ifndef WEBRTC_VOICE_ENGINE_VOE_ENCRYPTION_H
 #define WEBRTC_VOICE_ENGINE_VOE_ENCRYPTION_H
 
-#include "common_types.h"
+#include "webrtc/common_types.h"
 
 namespace webrtc {
 
@@ -52,24 +52,6 @@ public:
     // Removes an Encryption instance and disables external encryption
     // for the selected |channel|.
     virtual int DeRegisterExternalEncryption(int channel) = 0;
-
-    // Not supported
-    virtual int EnableSRTPSend(int channel, CipherTypes cipherType,
-        int cipherKeyLength, AuthenticationTypes authType, int authKeyLength,
-        int authTagLength, SecurityLevels level, const unsigned char key[30],
-        bool useForRTCP = false) = 0;
-
-    // Not supported
-    virtual int DisableSRTPSend(int channel) = 0;
-
-    // Not supported
-    virtual int EnableSRTPReceive(int channel, CipherTypes cipherType,
-        int cipherKeyLength, AuthenticationTypes authType, int authKeyLength,
-        int authTagLength, SecurityLevels level, const unsigned char key[30],
-        bool useForRTCP = false) = 0;
-
-    // Not supported
-    virtual int DisableSRTPReceive(int channel) = 0;
 
 protected:
     VoEEncryption() {}

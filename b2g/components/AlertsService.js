@@ -17,6 +17,11 @@ XPCOMUtils.defineLazyServiceGetter(this, "uuidGenerator",
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
 
+XPCOMUtils.defineLazyServiceGetter(this, "notificationStorage",
+                                   "@mozilla.org/notificationStorage;1",
+                                   "nsINotificationStorage");
+
+
 XPCOMUtils.defineLazyGetter(this, "cpmm", function() {
   return Cc["@mozilla.org/childprocessmessagemanager;1"]
            .getService(Ci.nsIMessageSender);
@@ -65,26 +70,30 @@ AlertsService.prototype = {
   showAppNotification: function showAppNotification(aImageURL,
                                                     aTitle,
                                                     aText,
-                                                    aTextClickable,
-                                                    aManifestURL,
-                                                    aAlertListener) {
-    let uid = "app-notif-" + uuidGenerator.generateUUID();
+                                                    aAlertListener,
+                                                    aDetails) {
+    let uid = (aDetails.id == "") ?
+          "app-notif-" + uuidGenerator.generateUUID() : aDetails.id;
 
     this._listeners[uid] = {
       observer: aAlertListener,
       title: aTitle,
       text: aText,
-      manifestURL: aManifestURL,
-      imageURL: aImageURL
+      manifestURL: aDetails.manifestURL,
+      imageURL: aImageURL,
+      lang: aDetails.lang || undefined,
+      id: aDetails.id || undefined,
+      dbId: aDetails.dbId || undefined,
+      dir: aDetails.dir || undefined,
+      tag: aDetails.tag || undefined
     };
 
     cpmm.sendAsyncMessage("app-notification-send", {
       imageURL: aImageURL,
       title: aTitle,
       text: aText,
-      textClickable: aTextClickable,
-      manifestURL: aManifestURL,
-      uid: uid
+      uid: uid,
+      details: aDetails
     });
   },
 
@@ -110,7 +119,12 @@ AlertsService.prototype = {
         gSystemMessenger.sendMessage("notification", {
             title: listener.title,
             body: listener.text,
-            imageURL: listener.imageURL
+            imageURL: listener.imageURL,
+            lang: listener.lang,
+            dir: listener.dir,
+            id: listener.id,
+            tag: listener.tag,
+            dbId: listener.dbId
           },
           Services.io.newURI(data.target, null, null),
           Services.io.newURI(listener.manifestURL, null, null));
@@ -119,6 +133,9 @@ AlertsService.prototype = {
 
     // we're done with this notification
     if (topic === "alertfinished") {
+      if (listener.dbId) {
+        notificationStorage.delete(listener.manifestURL, listener.dbId);
+      }
       delete this._listeners[data.uid];
     }
   }

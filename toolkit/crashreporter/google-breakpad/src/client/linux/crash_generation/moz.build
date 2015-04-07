@@ -4,12 +4,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'crash_generation'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'crash_generation_client.cc',
     'crash_generation_server.cc',
 ]
 
-LIBRARY_NAME = 'crash_generation_s'
+FINAL_LIBRARY = 'xulapp_s'
 
+LOCAL_INCLUDES += [
+    '/toolkit/crashreporter/google-breakpad/src',
+]
+
+if CONFIG['OS_TARGET'] == 'Android':
+    LOCAL_INCLUDES += [
+        '/toolkit/crashreporter/google-breakpad/src/common/android/include',
+    ]

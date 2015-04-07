@@ -8,7 +8,9 @@
 #define DecoderTraits_h_
 
 #include "nsCOMPtr.h"
-#include "nsAString.h"
+
+class nsAString;
+class nsACString;
 
 namespace mozilla {
 
@@ -55,6 +57,10 @@ public:
   // or false otherwise. Not all platforms support all MIME types, and
   // vice versa.
   static bool IsSupportedInVideoDocument(const nsACString& aType);
+
+  // Returns true if we should not start decoder until we receive
+  // OnConnected signal. (currently RTSP only)
+  static bool DecoderWaitsForOnConnected(const nsACString& aType);
 };
 
 }

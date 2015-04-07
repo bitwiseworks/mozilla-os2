@@ -4,8 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'zlib'
-
 EXPORTS += [
     'mozzconf.h',
     'zconf.h',
@@ -14,3 +12,23 @@ EXPORTS += [
 
 LIBRARY_NAME = 'mozz'
 
+SOURCES += [
+    'adler32.c',
+    'compress.c',
+    'crc32.c',
+    'deflate.c',
+    'gzclose.c',
+    'gzlib.c',
+    'gzread.c',
+    'gzwrite.c',
+    'infback.c',
+    'inffast.c',
+    'inflate.c',
+    'inftrees.c',
+    'trees.c',
+    'uncompr.c',
+    'zutil.c',
+]
+
+if CONFIG['ZLIB_IN_MOZGLUE']:
+    DEFINES['IMPL_MFBT'] = True

@@ -1,4 +1,5 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,12 +8,15 @@
 #define MOZ_PROFILE_ENTRY_H
 
 #include <ostream>
-#include "GeckoProfilerImpl.h"
-#include "JSAObjectBuilder.h"
+#include "GeckoProfiler.h"
 #include "platform.h"
+#include "JSStreamWriter.h"
+#include "ProfilerBacktrace.h"
 #include "mozilla/Mutex.h"
 
 class ThreadProfile;
+
+#pragma pack(push, 1)
 
 class ProfileEntry
 {
@@ -22,7 +26,8 @@ public:
   // aTagData must not need release (i.e. be a string from the text segment)
   ProfileEntry(char aTagName, const char *aTagData);
   ProfileEntry(char aTagName, void *aTagPtr);
-  ProfileEntry(char aTagName, double aTagFloat);
+  ProfileEntry(char aTagName, ProfilerMarker *aTagMarker);
+  ProfileEntry(char aTagName, float aTagFloat);
   ProfileEntry(char aTagName, uintptr_t aTagOffset);
   ProfileEntry(char aTagName, Address aTagAddress);
   ProfileEntry(char aTagName, int aTagLine);
@@ -33,6 +38,10 @@ public:
   bool is_ent(char tagName);
   void* get_tagPtr();
   void log();
+  const ProfilerMarker* getMarker() {
+    MOZ_ASSERT(mTagName == 'm');
+    return mTagMarker;
+  }
 
   char getTagName() const { return mTagName; }
 
@@ -42,7 +51,8 @@ private:
     const char* mTagData;
     char        mTagChars[sizeof(void*)];
     void*       mTagPtr;
-    double      mTagFloat;
+    ProfilerMarker* mTagMarker;
+    float       mTagFloat;
     Address     mTagAddress;
     uintptr_t   mTagOffset;
     int         mTagLine;
@@ -51,15 +61,17 @@ private:
   char mTagName;
 };
 
+#pragma pack(pop)
+
 typedef void (*IterateTagsCallback)(const ProfileEntry& entry, const char* tagStringData);
 
 class ThreadProfile
 {
 public:
   ThreadProfile(const char* aName, int aEntrySize, PseudoStack *aStack,
-                int aThreadId, PlatformData* aPlatformData,
-                bool aIsMainThread);
-  ~ThreadProfile();
+                Thread::tid_t aThreadId, PlatformData* aPlatformData,
+                bool aIsMainThread, void *aStackTop);
+  virtual ~ThreadProfile();
   void addTag(ProfileEntry aTag);
   void flush();
   void erase();
@@ -68,20 +80,29 @@ public:
   friend std::ostream& operator<<(std::ostream& stream,
                                   const ThreadProfile& profile);
   void ToStreamAsJSON(std::ostream& stream);
-  JSCustomObject *ToJSObject(JSContext *aCx);
+  JSObject *ToJSObject(JSContext *aCx);
   PseudoStack* GetPseudoStack();
   mozilla::Mutex* GetMutex();
-  void BuildJSObject(JSAObjectBuilder& b, JSCustomObject* profile);
+  void StreamJSObject(JSStreamWriter& b);
+  void BeginUnwind();
+  virtual void EndUnwind();
+  virtual SyncProfile* AsSyncProfile() { return nullptr; }
 
   bool IsMainThread() const { return mIsMainThread; }
   const char* Name() const { return mName; }
-  int ThreadId() const { return mThreadId; }
+  Thread::tid_t ThreadId() const { return mThreadId; }
 
   PlatformData* GetPlatformData() { return mPlatformData; }
+  int GetGenerationID() const { return mGeneration; }
+  bool HasGenerationExpired(int aGenID) {
+    return aGenID + 2 <= mGeneration;
+  }
+  void* GetStackTop() const { return mStackTop; }
+  void DuplicateLastSample();
 private:
   // Circular buffer 'Keep One Slot Open' implementation
   // for simplicity
-  ProfileEntry* mEntries;
+  ProfileEntry*  mEntries;
   int            mWritePos; // points to the next entry we will write to
   int            mLastFlushPos; // points to the next entry since the last flush()
   int            mReadPos;  // points to the next entry we will read to
@@ -89,9 +110,12 @@ private:
   PseudoStack*   mPseudoStack;
   mozilla::Mutex mMutex;
   char*          mName;
-  int            mThreadId;
+  Thread::tid_t  mThreadId;
   bool           mIsMainThread;
   PlatformData*  mPlatformData;  // Platform specific data.
+  int            mGeneration;
+  int            mPendingGenerationFlush;
+  void* const    mStackTop;
 };
 
 std::ostream& operator<<(std::ostream& stream, const ThreadProfile& profile);

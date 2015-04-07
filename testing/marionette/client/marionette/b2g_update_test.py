@@ -7,28 +7,25 @@ import imp
 import os
 import re
 import subprocess
-import sys
-import tempfile
 import time
 import types
-import unittest
 import weakref
 
 from b2ginstance import B2GInstance
-from client import MarionetteClient
-from errors import MarionetteException, InvalidResponseException
+from errors import InvalidResponseException
 from marionette import Marionette
 from marionette_test import MarionetteTestCase
-from runtests import MarionetteTestRunner, cli, parse_options, startTestRunner
+from marionette_transport import MarionetteTransport
+from runtests import MarionetteTestRunner, cli
 
-class B2GUpdateMarionetteClient(MarionetteClient):
+class B2GUpdateMarionetteClient(MarionetteTransport):
     RETRY_TIMEOUT   = 5
     CONNECT_TIMEOUT = 30
     SEND_TIMEOUT    = 60 * 5
     MAX_RETRIES     = 24
 
     def __init__(self, addr, port, runner):
-        MarionetteClient.__init__(self, addr, port)
+        super(B2GUpdateMarionetteClient, self).__init__(addr, port)
         self.runner = runner
 
     def connect(self):
@@ -39,7 +36,7 @@ class B2GUpdateMarionetteClient(MarionetteClient):
         """
         for i in range(self.MAX_RETRIES):
             try:
-                MarionetteClient.connect(self, timeout=self.CONNECT_TIMEOUT)
+                MarionetteTransport.connect(self, timeout=self.CONNECT_TIMEOUT)
                 break
             except:
                 if i == self.MAX_RETRIES - 1:
@@ -361,7 +358,6 @@ class B2GUpdateTestCase(MarionetteTestCase):
         self.fail('Timed out waiting for B2G process to start during FOTA update')
 
     def flash(self, flash_script):
-        update_tools = self.runner.update_tools
         flash_build = os.path.basename(os.path.dirname(flash_script))
         self.print_status('FLASH-BUILD', flash_build)
 

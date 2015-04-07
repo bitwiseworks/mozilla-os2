@@ -6,6 +6,8 @@
 
 /* PR time code. */
 
+#include "prmjtime.h"
+
 #include "mozilla/MathAlgorithms.h"
 
 #ifdef SOLARIS
@@ -17,15 +19,8 @@
 #include "jstypes.h"
 #include "jsutil.h"
 
-#include "jsprf.h"
-#include "jslock.h"
-#include "prmjtime.h"
-
 #define PRMJ_DO_MILLISECONDS 1
 
-#ifdef XP_OS2
-#include <sys/timeb.h>
-#endif
 #ifdef XP_WIN
 #include <windef.h>
 #include <winbase.h>
@@ -35,12 +30,12 @@
 #define NS_HAVE_INVALID_PARAMETER_HANDLER 1
 #endif
 #ifdef NS_HAVE_INVALID_PARAMETER_HANDLER
-#include <stdlib.h>   /* for _set_invalid_parameter_handler */
 #include <crtdbg.h>   /* for _CrtSetReportMode */
+#include <stdlib.h>   /* for _set_invalid_parameter_handler */
 #endif
 
 #ifdef JS_THREADSAFE
-#include <prinit.h>
+#include "prinit.h"
 #endif
 
 #endif
@@ -183,16 +178,7 @@ static PRCallOnceType calibrationOnce = { 0 };
 #endif /* XP_WIN */
 
 
-#if defined(XP_OS2)
-int64_t
-PRMJ_Now(void)
-{
-    struct timeb b;
-    ftime(&b);
-    return (int64_t(b.time) * PRMJ_USEC_PER_SEC) + (int64_t(b.millitm) * PRMJ_USEC_PER_MSEC);
-}
-
-#elif defined(XP_UNIX)
+#if defined(XP_UNIX)
 int64_t
 PRMJ_Now(void)
 {
@@ -417,7 +403,7 @@ size_t
 PRMJ_FormatTime(char *buf, int buflen, const char *fmt, PRMJTime *prtm)
 {
     size_t result = 0;
-#if defined(XP_UNIX) || defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_UNIX) || defined(XP_WIN)
     struct tm a;
     int fake_tm_year = 0;
 #ifdef NS_HAVE_INVALID_PARAMETER_HANDLER

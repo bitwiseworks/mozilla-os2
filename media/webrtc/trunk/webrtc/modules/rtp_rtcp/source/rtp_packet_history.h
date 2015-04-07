@@ -15,18 +15,18 @@
 
 #include <vector>
 
-#include "module_common_types.h"
-#include "rtp_rtcp_defines.h"
-#include "typedefs.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
+#include "webrtc/typedefs.h"
 
 namespace webrtc {
 
-class RtpRtcpClock;
+class Clock;
 class CriticalSectionWrapper;
 
 class RTPPacketHistory {
  public:
-  RTPPacketHistory(RtpRtcpClock* clock);
+  RTPPacketHistory(Clock* clock);
   ~RTPPacketHistory();
 
   void SetStorePacketsStatus(bool enable, uint16_t number_to_store);
@@ -77,7 +77,7 @@ class RTPPacketHistory {
   bool FindSeqNum(uint16_t sequence_number, int32_t* index) const;
 
  private:
-  RtpRtcpClock& clock_;
+  Clock* clock_;
   CriticalSectionWrapper* critsect_;
   bool store_;
   uint32_t prev_index_;

@@ -46,6 +46,7 @@
 #include "nsXPCOMPrivate.h" // for MAXPATHLEN and XPCOM_DLL
 
 #include "mozilla/Telemetry.h"
+#include "mozilla/WindowsDllBlocklist.h"
 
 using namespace mozilla;
 
@@ -78,9 +79,19 @@ static void Output(const char *fmt, ... )
 #if MOZ_WINCONSOLE
   fwprintf_s(stderr, wide_msg);
 #else
-  MessageBoxW(NULL, wide_msg, L"Firefox", MB_OK
-                                        | MB_ICONERROR
-                                        | MB_SETFOREGROUND);
+  // Linking user32 at load-time interferes with the DLL blocklist (bug 932100).
+  // This is a rare codepath, so we can load user32 at run-time instead.
+  HMODULE user32 = LoadLibraryW(L"user32.dll");
+  if (user32) {
+    decltype(MessageBoxW)* messageBoxW =
+      (decltype(MessageBoxW)*) GetProcAddress(user32, "MessageBoxW");
+    if (messageBoxW) {
+      messageBoxW(nullptr, wide_msg, L"Firefox", MB_OK
+                                               | MB_ICONERROR
+                                               | MB_SETFOREGROUND);
+    }
+    FreeLibrary(user32);
+  }
 #endif
 #endif
 
@@ -99,7 +110,7 @@ static bool IsArg(const char* arg, const char* s)
     return !strcasecmp(arg, s);
   }
 
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
   if (*arg == '/')
     return !strcasecmp(++arg, s);
 #endif
@@ -144,25 +155,19 @@ static void AttachToTestHarness()
 XRE_GetFileFromPathType XRE_GetFileFromPath;
 XRE_CreateAppDataType XRE_CreateAppData;
 XRE_FreeAppDataType XRE_FreeAppData;
-#ifdef XRE_HAS_DLL_BLOCKLIST
-XRE_SetupDllBlocklistType XRE_SetupDllBlocklist;
-#endif
 XRE_TelemetryAccumulateType XRE_TelemetryAccumulate;
 XRE_StartupTimelineRecordType XRE_StartupTimelineRecord;
 XRE_mainType XRE_main;
-XRE_DisableWritePoisoningType XRE_DisableWritePoisoning;
+XRE_StopLateWriteChecksType XRE_StopLateWriteChecks;
 
 static const nsDynamicFunctionLoad kXULFuncs[] = {
     { "XRE_GetFileFromPath", (NSFuncPtr*) &XRE_GetFileFromPath },
     { "XRE_CreateAppData", (NSFuncPtr*) &XRE_CreateAppData },
     { "XRE_FreeAppData", (NSFuncPtr*) &XRE_FreeAppData },
-#ifdef XRE_HAS_DLL_BLOCKLIST
-    { "XRE_SetupDllBlocklist", (NSFuncPtr*) &XRE_SetupDllBlocklist },
-#endif
     { "XRE_TelemetryAccumulate", (NSFuncPtr*) &XRE_TelemetryAccumulate },
     { "XRE_StartupTimelineRecord", (NSFuncPtr*) &XRE_StartupTimelineRecord },
     { "XRE_main", (NSFuncPtr*) &XRE_main },
-    { "XRE_DisableWritePoisoning", (NSFuncPtr*) &XRE_DisableWritePoisoning },
+    { "XRE_StopLateWriteChecks", (NSFuncPtr*) &XRE_StopLateWriteChecks },
     { nullptr, nullptr }
 };
 
@@ -236,14 +241,19 @@ static int do_main(int argc, char* argv[], nsIFile *xreDirectory)
       // relaunches Metro Firefox with this command line arg.
       mainFlags = XRE_MAIN_FLAG_USE_METRO;
     } else {
+#ifndef RELEASE_BUILD
       // This command-line flag is used to test the metro browser in a desktop
       // environment.
       for (int idx = 1; idx < argc; idx++) {
         if (IsArg(argv[idx], "metrodesktop")) {
           metroOnDesktop = true;
+          // Disable crash reporting when running in metrodesktop mode.
+          char crashSwitch[] = "MOZ_CRASHREPORTER_DISABLE=1";
+          putenv(crashSwitch);
           break;
         } 
       }
+#endif
     }
   }
 #endif
@@ -290,13 +300,6 @@ static int do_main(int argc, char* argv[], nsIFile *xreDirectory)
     return 255;
   }
 
-  char appEnv[MAXPATHLEN];
-  snprintf(appEnv, MAXPATHLEN, "XUL_APP_FILE=%s", path.get());
-  if (putenv(appEnv)) {
-    Output("Couldn't set %s.\n", appEnv);
-    return 255;
-  }
-
   nsXREAppData *appData;
   rv = XRE_CreateAppData(iniFile, &appData);
   if (NS_FAILED(rv) || !appData) {
@@ -324,16 +327,16 @@ static int do_main(int argc, char* argv[], nsIFile *xreDirectory)
     // Check for a metro test harness command line args file
     HANDLE hTestFile = CreateFileA(path.get(),
                                    GENERIC_READ,
-                                   0, NULL, OPEN_EXISTING,
+                                   0, nullptr, OPEN_EXISTING,
                                    FILE_ATTRIBUTE_NORMAL,
-                                   NULL);
+                                   nullptr);
     if (hTestFile != INVALID_HANDLE_VALUE) {
       // Typical test harness command line args string is around 100 bytes.
       char buffer[1024];
       memset(buffer, 0, sizeof(buffer));
       DWORD bytesRead = 0;
       if (!ReadFile(hTestFile, (VOID*)buffer, sizeof(buffer)-1,
-                    &bytesRead, NULL) || !bytesRead) {
+                    &bytesRead, nullptr) || !bytesRead) {
         CloseHandle(hTestFile);
         printf("failed to read test file '%s'", testFile);
         return -1;
@@ -348,7 +351,7 @@ static int do_main(int argc, char* argv[], nsIFile *xreDirectory)
 
       char* ptr = buffer;
       newArgv[0] = ptr;
-      while (*ptr != NULL &&
+      while (*ptr != '\0' &&
              (ptr - buffer) < sizeof(buffer) &&
              newArgc < ARRAYSIZE(newArgv)) {
         if (isspace(*ptr)) {
@@ -510,13 +513,13 @@ InitXPCOMGlue(const char *argv0, nsIFile **xreDirectory)
     }
     if (absfwurl) {
       CFURLRef xulurl =
-        CFURLCreateCopyAppendingPathComponent(NULL, absfwurl,
+        CFURLCreateCopyAppendingPathComponent(nullptr, absfwurl,
                                               CFSTR("XUL.framework"),
                                               true);
 
       if (xulurl) {
         CFURLRef xpcomurl =
-          CFURLCreateCopyAppendingPathComponent(NULL, xulurl,
+          CFURLCreateCopyAppendingPathComponent(nullptr, xulurl,
                                                 CFSTR("libxpcom.dylib"),
                                                 false);
 
@@ -594,16 +597,24 @@ int main(int argc, char* argv[])
 
   nsIFile *xreDirectory;
 
+#ifdef HAS_DLL_BLOCKLIST
+  DllBlocklist_Initialize();
+
+#ifdef DEBUG
+  // In order to be effective against AppInit DLLs, the blocklist must be
+  // initialized before user32.dll is loaded into the process (bug 932100).
+  if (GetModuleHandleA("user32.dll")) {
+    fprintf(stderr, "DLL blocklist was unable to intercept AppInit DLLs.\n");
+  }
+#endif
+#endif
+
   nsresult rv = InitXPCOMGlue(argv[0], &xreDirectory);
   if (NS_FAILED(rv)) {
     return 255;
   }
 
   XRE_StartupTimelineRecord(mozilla::StartupTimeline::START, start);
-
-#ifdef XRE_HAS_DLL_BLOCKLIST
-  XRE_SetupDllBlocklist();
-#endif
 
   if (gotCounters) {
 #if defined(XP_WIN)
@@ -639,7 +650,7 @@ int main(int argc, char* argv[])
   // at least one such write that we don't control (see bug 826029). For
   // now we enable writes again and early exits will have to use exit instead
   // of _exit.
-  XRE_DisableWritePoisoning();
+  XRE_StopLateWriteChecks();
 #endif
 
   return result;

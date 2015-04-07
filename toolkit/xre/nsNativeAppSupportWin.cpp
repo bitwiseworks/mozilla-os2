@@ -53,7 +53,7 @@ static HWND hwndForDOMWindow( nsISupports * );
 
 static
 nsresult
-GetMostRecentWindow(const PRUnichar* aType, nsIDOMWindow** aWindow) {
+GetMostRecentWindow(const char16_t* aType, nsIDOMWindow** aWindow) {
     nsresult rv;
     nsCOMPtr<nsIWindowMediator> med( do_GetService( NS_WINDOWMEDIATOR_CONTRACTID, &rv ) );
     if ( NS_FAILED( rv ) )
@@ -91,7 +91,7 @@ activateWindow( nsIDOMWindow *win ) {
 
 // Simple Win32 mutex wrapper.
 struct Mutex {
-    Mutex( const PRUnichar *name )
+    Mutex( const char16_t *name )
         : mName( name ),
           mHandle( 0 ),
           mState( -1 ) {
@@ -319,7 +319,7 @@ private:
     static HSZ   mApplication, mTopics[ topicCount ];
     static DWORD mInstance;
     static bool mCanHandleRequests;
-    static PRUnichar mMutexName[];
+    static char16_t mMutexName[];
     friend struct MessageWindow;
 }; // nsNativeAppSupportWin
 
@@ -459,7 +459,7 @@ HSZ   nsNativeAppSupportWin::mTopics[nsNativeAppSupportWin::topicCount] = { 0 };
 DWORD nsNativeAppSupportWin::mInstance      = 0;
 bool nsNativeAppSupportWin::mCanHandleRequests   = false;
 
-PRUnichar nsNativeAppSupportWin::mMutexName[ 128 ] = { 0 };
+char16_t nsNativeAppSupportWin::mMutexName[ 128 ] = { 0 };
 
 
 // Message window encapsulation.
@@ -476,9 +476,9 @@ struct MessageWindow {
     }
 
     // Class name: appName + "MessageWindow"
-    static const PRUnichar *className() {
-        static PRUnichar classNameBuffer[128];
-        static PRUnichar *mClassName = 0;
+    static const wchar_t *className() {
+        static wchar_t classNameBuffer[128];
+        static wchar_t *mClassName = 0;
         if ( !mClassName ) {
             ::_snwprintf(classNameBuffer,
                          128,   // size of classNameBuffer in PRUnichars
@@ -533,7 +533,7 @@ struct MessageWindow {
             //  the same thread.
             BOOL desRes = DestroyWindow( mHandle );
             if ( FALSE != desRes ) {
-                mHandle = NULL;
+                mHandle = nullptr;
             }
             else {
                 retval = NS_ERROR_FAILURE;
@@ -643,7 +643,8 @@ nsNativeAppSupportWin::Start( bool *aResult ) {
     // Grab mutex first.
 
     // Build mutex name from app name.
-    ::_snwprintf(mMutexName, sizeof mMutexName / sizeof(PRUnichar), L"%s%s%s", 
+    ::_snwprintf(reinterpret_cast<wchar_t*>(mMutexName),
+                 sizeof mMutexName / sizeof(char16_t), L"%s%s%s",
                  MOZ_MUTEX_NAMESPACE,
                  NS_ConvertUTF8toUTF16(gAppData->name).get(),
                  MOZ_STARTUP_MUTEX_NAME );
@@ -759,7 +760,7 @@ nsNativeAppSupportWin::Stop( bool *aResult ) {
 
 NS_IMETHODIMP
 nsNativeAppSupportWin::Observe(nsISupports* aSubject, const char* aTopic,
-                               const PRUnichar* aData)
+                               const char16_t* aData)
 {
     if (strcmp(aTopic, "quit-application") == 0) {
         Quit();
@@ -858,7 +859,7 @@ static nsCString uTypeDesc( UINT uType ) {
 static nsCString hszValue( DWORD instance, HSZ hsz ) {
     // Extract string from HSZ.
     nsCString result("[");
-    DWORD len = DdeQueryString( instance, hsz, NULL, NULL, CP_WINANSI );
+    DWORD len = DdeQueryString( instance, hsz, nullptr, nullptr, CP_WINANSI );
     if ( len ) {
         char buffer[ 256 ];
         DdeQueryString( instance, hsz, buffer, sizeof buffer, CP_WINANSI );
@@ -890,7 +891,7 @@ static void escapeQuotes( nsAString &aString ) {
            break;
        } else {
            // Insert back-slash ahead of the '"'.
-           aString.Insert( PRUnichar('\\'), offset );
+           aString.Insert( char16_t('\\'), offset );
            // Increment offset because we just inserted a slash
            offset++;
        }
@@ -1211,14 +1212,14 @@ void nsNativeAppSupportWin::ParseDDEArg( const WCHAR* args, int index, nsString&
 
 // Utility to parse out argument from a DDE item string.
 void nsNativeAppSupportWin::ParseDDEArg( HSZ args, int index, nsString& aString) {
-    DWORD argLen = DdeQueryStringW( mInstance, args, NULL, 0, CP_WINUNICODE );
+    DWORD argLen = DdeQueryStringW( mInstance, args, nullptr, 0, CP_WINUNICODE );
     // there wasn't any string, so return empty string
     if ( !argLen ) return;
     nsAutoString temp;
     // Ensure result's buffer is sufficiently big.
     temp.SetLength( argLen );
     // Now get the string contents.
-    DdeQueryString( mInstance, args, temp.BeginWriting(), temp.Length(), CP_WINUNICODE );
+    DdeQueryString( mInstance, args, reinterpret_cast<wchar_t*>(temp.BeginWriting()), temp.Length(), CP_WINUNICODE );
     // Parse out the given arg.
     ParseDDEArg(temp.get(), index, aString);
     return;
@@ -1241,7 +1242,7 @@ HDDEDATA nsNativeAppSupportWin::CreateDDEData( LPBYTE value, DWORD len ) {
 
 void nsNativeAppSupportWin::ActivateLastWindow() {
     nsCOMPtr<nsIDOMWindow> navWin;
-    GetMostRecentWindow( NS_LITERAL_STRING("navigator:browser").get(), getter_AddRefs( navWin ) );
+    GetMostRecentWindow( MOZ_UTF16("navigator:browser"), getter_AddRefs( navWin ) );
     if ( navWin ) {
         // Activate that window.
         activateWindow( navWin );

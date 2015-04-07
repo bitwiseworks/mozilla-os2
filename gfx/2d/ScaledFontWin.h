@@ -15,9 +15,10 @@ namespace gfx {
 class ScaledFontWin : public ScaledFontBase
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(ScaledFontWin)
   ScaledFontWin(LOGFONT* aFont, Float aSize);
 
-  virtual FontType GetType() const { return FONT_GDI; }
+  virtual FontType GetType() const { return FontType::GDI; }
 #ifdef USE_SKIA
   virtual SkTypeface* GetSkTypeface();
 #endif

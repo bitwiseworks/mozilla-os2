@@ -27,26 +27,41 @@
     <script type="text/javascript;version=1.8" src="chrome://browser/content/aboutApps.js"></script>
   </head>
 
-  <body dir="&locale.dir;" onload="onLoad(event)">
+  <body dir="&locale.dir;">
 
+#ifndef MOZ_ANDROID_SYNTHAPKS
     <menu type="context" id="appmenu">
-      <menuitem label="&aboutApps.addToHomescreen;" onclick="ContextMenus.addToHomescreen();"></menuitem>
-      <menuitem label="&aboutApps.uninstall;" onclick="ContextMenus.uninstall();"></menuitem>
+      <menuitem id="addToHomescreenLabel" label="&aboutApps.addToHomescreen;"></menuitem>
+      <menuitem id="uninstallLabel" label="&aboutApps.uninstall;"></menuitem>
     </menu>
-  
+#endif
+
     <div class="header">
       <div>&aboutApps.header;</div>
-      <div id="header-button" role="button" pref="app.marketplaceURL" onclick="openLink(this);"/>
+      <div id="header-button" role="button" aria-label="&aboutApps.browseMarketplace;" pref="app.marketplaceURL"/>
     </div>
-    <div id="main-container" class="list">
-      <div id="noapps" class="hidden">
-        &aboutApps.noApps.pre;<a id="marketplaceURL" pref="app.marketplaceURL">&aboutApps.noApps.middle3;</a>&aboutApps.noApps.post;
-      </div>
+
+    <div id="main-container" class="hidden">
       <div>
         <div class="spacer" id="spacer1"> </div>
         <div id="appgrid"/>
         <div class="spacer" id="spacer1"> </div>
       </div>
     </div>
+
+    <div class="list-item" role="button" pref="app.marketplaceURL">
+      <img class="icon" src="chrome://browser/skin/images/marketplace-logo.png" />
+      <div class="inner">
+        <div id="browse-title" class="title">&aboutApps.browseMarketplace;</div>
+      </div>
+    </div>
+#ifdef MOZ_ANDROID_SYNTHAPKS
+    <div class="list-item" id="update-item" role="button">
+      <img class="icon" src="chrome://browser/skin/images/update.png" />
+      <div class="inner">
+        <div id="browse-title" class="title">&aboutApps.checkForUpdates;</div>
+      </div>
+    </div>
+#endif
   </body>
 </html>

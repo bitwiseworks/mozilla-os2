@@ -8,8 +8,8 @@
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsError.h"
+#include "nsISupportsImpl.h"
 #include "nsITransaction.h"
-#include "nsTraceRefcnt.h"
 #include "nsTransactionItem.h"
 #include "nsTransactionManager.h"
 #include "nsTransactionStack.h"
@@ -26,18 +26,27 @@ nsTransactionItem::~nsTransactionItem()
   delete mUndoStack;
 }
 
+void
+nsTransactionItem::CleanUp()
+{
+  mData.Clear();
+  mTransaction = nullptr;
+  if (mRedoStack) {
+    mRedoStack->DoUnlink();
+  }
+  if (mUndoStack) {
+    mUndoStack->DoUnlink();
+  }
+}
+
 NS_IMPL_CYCLE_COLLECTING_NATIVE_ADDREF(nsTransactionItem)
-NS_IMPL_CYCLE_COLLECTING_NATIVE_RELEASE(nsTransactionItem)
+NS_IMPL_CYCLE_COLLECTING_NATIVE_RELEASE_WITH_LAST_RELEASE(nsTransactionItem,
+                                                          CleanUp())
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsTransactionItem)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsTransactionItem)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mData)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mTransaction)
-  if (tmp->mRedoStack) {
-    tmp->mRedoStack->DoUnlink();
-  }
-  if (tmp->mUndoStack) {
-    tmp->mUndoStack->DoUnlink();
-  }
+  tmp->CleanUp();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsTransactionItem)

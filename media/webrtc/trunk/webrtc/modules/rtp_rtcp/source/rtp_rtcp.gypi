@@ -10,11 +10,11 @@
   'targets': [
     {
       'target_name': 'rtp_rtcp',
-      'type': '<(library)',
+      'type': 'static_library',
       'dependencies': [
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
-        '<(webrtc_root)/modules/modules.gyp:remote_bitrate_estimator',
         '<(webrtc_root)/modules/modules.gyp:paced_sender',
+        '<(webrtc_root)/modules/modules.gyp:remote_bitrate_estimator',
       ],
       'include_dirs': [
         '../interface',
@@ -28,10 +28,20 @@
       },
       'sources': [
         # Common
+        '../interface/fec_receiver.h',
+        '../interface/receive_statistics.h',
+        '../interface/rtp_header_parser.h',
+        '../interface/rtp_payload_registry.h',
+        '../interface/rtp_receiver.h',
         '../interface/rtp_rtcp.h',
         '../interface/rtp_rtcp_defines.h',
         'bitrate.cc',
         'bitrate.h',
+        'fec_receiver_impl.cc',
+        'fec_receiver_impl.h',
+        'receive_statistics_impl.cc',
+        'receive_statistics_impl.h',
+        'rtp_header_parser.cc',
         'rtp_rtcp_config.h',
         'rtp_rtcp_impl.cc',
         'rtp_rtcp_impl.h',
@@ -45,8 +55,8 @@
         'rtcp_utility.h',
         'rtp_header_extension.cc',
         'rtp_header_extension.h',
-        'rtp_receiver.cc',
-        'rtp_receiver.h',
+        'rtp_receiver_impl.cc',
+        'rtp_receiver_impl.h',
         'rtp_sender.cc',
         'rtp_sender.h',
         'rtp_utility.cc',
@@ -73,28 +83,25 @@
         'producer_fec.h',
         'rtp_packet_history.cc',
         'rtp_packet_history.h',
+        'rtp_payload_registry.cc',
         'rtp_receiver_strategy.cc',
         'rtp_receiver_strategy.h',
         'rtp_receiver_video.cc',
         'rtp_receiver_video.h',
         'rtp_sender_video.cc',
         'rtp_sender_video.h',
-        'receiver_fec.cc',
-        'receiver_fec.h',
         'video_codec_information.h',
         'rtp_format_vp8.cc',
         'rtp_format_vp8.h',
+        'rtp_format_video_generic.h',
         'vp8_partition_aggregator.cc',
         'vp8_partition_aggregator.h',
         # Mocks
         '../mocks/mock_rtp_rtcp.h',
+        'mock/mock_rtp_payload_strategy.h',
       ], # source
+      # TODO(jschuh): Bug 1348: fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

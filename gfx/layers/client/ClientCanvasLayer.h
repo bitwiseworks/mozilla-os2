@@ -6,35 +6,39 @@
 #ifndef GFX_CLIENTCANVASLAYER_H
 #define GFX_CLIENTCANVASLAYER_H
 
-#include "ClientLayerManager.h"
-#include "nsXULAppAPI.h"
-#include "gfxASurface.h"
-#include "mozilla/Preferences.h"
-#include "mozilla/layers/LayerTransaction.h"
-#include "mozilla/layers/CanvasClient.h"
-#include "CopyableCanvasLayer.h"
-
-using namespace mozilla::gfx;
+#include "mozilla/layers/CanvasClient.h"  // for CanvasClient, etc
+#include "ClientLayerManager.h"         // for ClientLayerManager, etc
+#include "CopyableCanvasLayer.h"        // for CopyableCanvasLayer
+#include "Layers.h"                     // for CanvasLayer, etc
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/layers/LayersMessages.h"  // for CanvasLayerAttributes, etc
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
+#include "nsRegion.h"                   // for nsIntRegion
 
 namespace mozilla {
 namespace layers {
 
-class CanvasClient2D;
-class CanvasClientWebGL;
+class CompositableClient;
+class ShadowableLayer;
 
 class ClientCanvasLayer : public CopyableCanvasLayer,
                           public ClientLayer
 {
+  typedef CanvasClient::CanvasClientType CanvasClientType;
 public:
   ClientCanvasLayer(ClientLayerManager* aLayerManager) :
-    CopyableCanvasLayer(aLayerManager, static_cast<ClientLayer*>(this))
+    CopyableCanvasLayer(aLayerManager,
+                        static_cast<ClientLayer*>(MOZ_THIS_IN_INITIALIZER_LIST()))
+    , mTextureSurface(nullptr)
+    , mFactory(nullptr)
   {
     MOZ_COUNT_CTOR(ClientCanvasLayer);
   }
-  virtual ~ClientCanvasLayer()
-  {
-    MOZ_COUNT_DTOR(ClientCanvasLayer);
-  }
+  virtual ~ClientCanvasLayer();
 
   virtual void SetVisibleRegion(const nsIntRegion& aRegion)
   {
@@ -42,11 +46,18 @@ public:
                  "Can only set properties in construction phase");
     CanvasLayer::SetVisibleRegion(aRegion);
   }
-  
+
   virtual void Initialize(const Data& aData);
 
   virtual void RenderLayer();
-  
+
+  virtual void ClearCachedResources()
+  {
+    if (mCanvasClient) {
+      mCanvasClient->Clear();
+    }
+  }
+
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs)
   {
     aAttrs = CanvasLayerAttributes(mFilter, mBounds);
@@ -54,7 +65,7 @@ public:
 
   virtual Layer* AsLayer() { return this; }
   virtual ShadowableLayer* AsShadowableLayer() { return this; }
-  
+
   virtual void Disconnect()
   {
     mCanvasClient = nullptr;
@@ -70,19 +81,24 @@ protected:
   {
     return static_cast<ClientLayerManager*>(mManager);
   }
-  
-  CompositableType GetCompositableClientType()
+
+  CanvasClientType GetCanvasClientType()
   {
     if (mGLContext) {
-      return BUFFER_IMAGE_BUFFERED;
+      return CanvasClient::CanvasClientGLContext;
     }
-    return BUFFER_IMAGE_SINGLE;
+    return CanvasClient::CanvasClientSurface;
   }
 
   RefPtr<CanvasClient> mCanvasClient;
 
+  gfx::SharedSurface* mTextureSurface;
+  gfx::SurfaceFactory* mFactory;
+
+  friend class DeprecatedCanvasClient2D;
   friend class CanvasClient2D;
-  friend class CanvasClientWebGL;
+  friend class DeprecatedCanvasClientSurfaceStream;
+  friend class CanvasClientSurfaceStream;
 };
 }
 }

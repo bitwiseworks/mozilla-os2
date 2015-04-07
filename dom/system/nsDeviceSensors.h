@@ -6,26 +6,15 @@
 #define nsDeviceSensors_h
 
 #include "nsIDeviceSensors.h"
-#include "nsIDOMDeviceMotionEvent.h"
 #include "nsCOMArray.h"
 #include "nsTArray.h"
 #include "nsCOMPtr.h"
 #include "nsITimer.h"
-#include "nsIDOMDeviceLightEvent.h"
 #include "nsIDOMDeviceOrientationEvent.h"
-#include "nsIDOMDeviceProximityEvent.h"
-#include "nsIDOMUserProximityEvent.h"
-#include "nsIDOMDeviceMotionEvent.h"
-#include "nsDOMDeviceMotionEvent.h"
+#include "mozilla/dom/DeviceMotionEvent.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/HalSensor.h"
 #include "nsDataHashtable.h"
-
-#define NS_DEVICE_SENSORS_CID \
-{ 0xecba5203, 0x77da, 0x465a, \
-{ 0x86, 0x5e, 0x78, 0xb7, 0xaf, 0x10, 0xd8, 0xf7 } }
-
-#define NS_DEVICE_SENSORS_CONTRACTID "@mozilla.org/devicesensors;1"
 
 class nsIDOMWindow;
 
@@ -37,6 +26,8 @@ class EventTarget;
 
 class nsDeviceSensors : public nsIDeviceSensors, public mozilla::hal::ISensorObserver
 {
+  typedef mozilla::dom::DeviceAccelerationInit DeviceAccelerationInit;
+  typedef mozilla::dom::DeviceRotationRateInit DeviceRotationRateInit;
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDEVICESENSORS
@@ -83,9 +74,9 @@ private:
 
   mozilla::TimeStamp mLastDOMMotionEventTime;
   bool mIsUserProximityNear;
-  nsRefPtr<nsDOMDeviceAcceleration> mLastAcceleration;
-  nsRefPtr<nsDOMDeviceAcceleration> mLastAccelerationIncluduingGravity;
-  nsRefPtr<nsDOMDeviceRotationRate> mLastRotationRate;
+  mozilla::Maybe<DeviceAccelerationInit> mLastAcceleration;
+  mozilla::Maybe<DeviceAccelerationInit> mLastAccelerationIncluduingGravity;
+  mozilla::Maybe<DeviceRotationRateInit> mLastRotationRate;
 };
 
 #endif

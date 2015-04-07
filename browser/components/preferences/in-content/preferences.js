@@ -12,15 +12,14 @@ const Cr = Components.results;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
+addEventListener("DOMContentLoaded", function onLoad() {
+  removeEventListener("DOMContentLoaded", onLoad);
+  init_all();
+});
+
 function init_all() {
   document.documentElement.instantApply = true;
-  window.history.replaceState("landing", document.title);
-  window.addEventListener("popstate", onStatePopped, true);
-  updateCommands();
   gMainPane.init();
-#ifdef XP_WIN
-  gTabsPane.init();
-#endif
   gPrivacyPane.init();
   gAdvancedPane.init();
   gApplicationsPane.init();
@@ -30,42 +29,26 @@ function init_all() {
   var initFinished = document.createEvent("Event");
   initFinished.initEvent("Initialized", true, true);
   document.dispatchEvent(initFinished);
+
+  let categories = document.getElementById("categories");
+  categories.addEventListener("select", event => gotoPref(event.target.value));
+
+  if (history.length > 1 && history.state) {
+    selectCategory(history.state);
+  } else {
+    history.replaceState("paneGeneral", document.title);
+  }
+}
+
+function selectCategory(name) {
+  let categories = document.getElementById("categories");
+  let item = categories.querySelector(".category[value=" + name + "]");
+  categories.selectedItem = item;
 }
 
 function gotoPref(page) {
+  window.history.replaceState(page, document.title);
   search(page, "data-category");
-  window.history.pushState(page, document.title);
-  updateCommands();
-}
- 
-function cmd_back() {
-  window.history.back();
-}
- 
-function cmd_forward() {
-  window.history.forward();
-}
-
-function onStatePopped(aEvent) {
-  updateCommands();
-  search(aEvent.state, "data-category");
-}
-
-function updateCommands() {
-  document.getElementById("back-btn").disabled = !canGoBack();
-  document.getElementById("forward-btn").disabled = !canGoForward();
-}
-
-function canGoBack() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIWebNavigation)
-               .canGoBack;
-}
-
-function canGoForward() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIWebNavigation)
-               .canGoForward;
 }
 
 function search(aQuery, aAttribute) {

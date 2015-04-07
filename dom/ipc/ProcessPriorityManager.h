@@ -8,9 +8,6 @@
 #define mozilla_ProcessPriorityManager_h_
 
 #include "mozilla/HalTypes.h"
-#include "mozilla/StaticPtr.h"
-#include "nsIObserver.h"
-#include "nsDataHashtable.h"
 
 namespace mozilla {
 namespace dom {
@@ -70,6 +67,24 @@ public:
    * what you use this for.
    */
   static bool CurrentProcessIsForeground();
+
+  /**
+   * Returns true if one or more processes with FOREGROUND_HIGH priority are
+   * present, false otherwise.
+   */
+  static bool AnyProcessHasHighPriority();
+
+  /**
+   * Used to remove a ContentParent from background LRU pool when
+   * it is destroyed or its priority changed from BACKGROUND to others.
+   */
+  static void RemoveFromBackgroundLRUPool(dom::ContentParent* aContentParent);
+
+  /**
+   * Used to add a ContentParent into background LRU pool when
+   * its priority changed to BACKGROUND from others.
+   */
+  static void AddIntoBackgroundLRUPool(dom::ContentParent* aContentParent);
 
 private:
   ProcessPriorityManager();

@@ -36,3 +36,30 @@
 .ruleview-warning[hidden] {
   display: none;
 }
+
+.ruleview-rule-pseudo-element {
+  display: none;
+}
+
+.show-pseudo-elements .ruleview-rule-pseudo-element {
+  display: block;
+}
+
+.ruleview .ruleview-expander {
+  vertical-align: middle;
+}
+
+.ruleview-header {
+  vertical-align: middle;
+  min-height: 1.5em;
+  line-height: 1.5em;
+}
+
+.ruleview-header.ruleview-expandable-header {
+  cursor: pointer;
+}
+
+.ruleview-colorswatch {
+  display: inline-block;
+  cursor: pointer;
+}

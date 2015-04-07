@@ -6,11 +6,12 @@
 #ifndef mozilla_dom_network_Connection_h
 #define mozilla_dom_network_Connection_h
 
-#include "nsIDOMConnection.h"
-#include "nsDOMEventTargetHelper.h"
-#include "nsCycleCollectionParticipant.h"
-#include "mozilla/Observer.h"
 #include "Types.h"
+#include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/Observer.h"
+#include "mozilla/dom/NetworkInformationBinding.h"
+#include "nsCycleCollectionParticipant.h"
+#include "nsINetworkProperties.h"
 
 namespace mozilla {
 
@@ -21,15 +22,15 @@ class NetworkInformation;
 namespace dom {
 namespace network {
 
-class Connection : public nsDOMEventTargetHelper
-                 , public nsIDOMMozConnection
-                 , public NetworkObserver
+class Connection MOZ_FINAL : public DOMEventTargetHelper
+                           , public NetworkObserver
+                           , public nsINetworkProperties
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIDOMMOZCONNECTION
+  NS_DECL_NSINETWORKPROPERTIES
 
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
 
   Connection();
 
@@ -39,6 +40,14 @@ public:
   // For IObserver
   void Notify(const hal::NetworkInformation& aNetworkInfo);
 
+  // WebIDL
+
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+
+  ConnectionType Type() const { return mType; }
+
+  IMPL_EVENT_HANDLER(typechange)
+
 private:
   /**
    * Update the connection information stored in the object using a
@@ -47,17 +56,19 @@ private:
   void UpdateFromNetworkInfo(const hal::NetworkInformation& aNetworkInfo);
 
   /**
-   * If the connection is of a type that can be metered.
+   * The type of current connection.
    */
-  bool mCanBeMetered;
+  ConnectionType mType;
 
   /**
-   * The connection bandwidth.
+   * If the connection is WIFI
    */
-  double mBandwidth;
+  bool mIsWifi;
 
-  static const char* sMeteredPrefName;
-  static const bool  sMeteredDefaultValue;
+  /**
+   * DHCP Gateway information for IPV4, in network byte order. 0 if unassigned.
+   */
+  uint32_t mDHCPGateway;
 };
 
 } // namespace network

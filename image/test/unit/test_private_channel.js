@@ -1,16 +1,20 @@
-Components.utils.import("resource://testing-common/httpd.js");
 const Cc = Components.classes;
 const Ci = Components.interfaces;
+const Cr = Components.results;
+const Cu = Components.utils;
+
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://testing-common/httpd.js");
 
 var server = new HttpServer();
 server.registerPathHandler('/image.png', imageHandler);
-server.start(8088);
+server.start(-1);
 
 load('image_load_helpers.js');
 
 var gHits = 0;
 
-var gIoService = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);  
+var gIoService = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
 var gPublicLoader = Cc["@mozilla.org/image/loader;1"].createInstance(Ci.imgILoader);
 var gPrivateLoader = Cc["@mozilla.org/image/loader;1"].createInstance(Ci.imgILoader);
 gPrivateLoader.QueryInterface(Ci.imgICache).respectPrivacyNotifications();
@@ -45,7 +49,7 @@ NotificationCallbacks.prototype = {
   }
 };
 
-var gImgPath = 'http://localhost:8088/image.png';
+var gImgPath = 'http://localhost:' + server.identity.primaryPort + '/image.png';
 
 function setup_chan(path, isPrivate, callback) {
   var uri = gIoService.newURI(gImgPath, null, null);
@@ -53,7 +57,7 @@ function setup_chan(path, isPrivate, callback) {
   chan.notificationCallbacks = new NotificationCallbacks(isPrivate);
   var channelListener = new ChannelListener();
   chan.asyncOpen(channelListener, null);
-  
+
   var listener = new ImageListener(null, callback);
   var outlistener = {};
   var loader = isPrivate ? gPrivateLoader : gPublicLoader;
@@ -74,24 +78,29 @@ function loadImage(isPrivate, callback) {
   loadGroup.notificationCallbacks = new NotificationCallbacks(isPrivate);
   var loader = isPrivate ? gPrivateLoader : gPublicLoader;
   requests.push(loader.loadImageXPCOM(uri, null, null, null, loadGroup, outer, null, 0, null, null));
-  listener.synchronous = false;  
+  listener.synchronous = false;
 }
 
 function run_loadImage_tests() {
-  let cs = Cc["@mozilla.org/network/cache-service;1"].getService(Ci.nsICacheService);
-  cs.evictEntries(Ci.nsICache.STORE_ANYWHERE);
-
-  gHits = 0;
-  loadImage(false, function() {
+  function observer() {
+    Services.obs.removeObserver(observer, "cacheservice:empty-cache");
+    gHits = 0;
     loadImage(false, function() {
-      loadImage(true, function() {
+      loadImage(false, function() {
         loadImage(true, function() {
-          do_check_eq(gHits, 2);
-          server.stop(do_test_finished);
+          loadImage(true, function() {
+            do_check_eq(gHits, 2);
+            server.stop(do_test_finished);
+          });
         });
       });
     });
-  });
+  }
+
+  Services.obs.addObserver(observer, "cacheservice:empty-cache", false);
+  let cs = Cc["@mozilla.org/netwerk/cache-storage-service;1"]
+             .getService(Ci.nsICacheStorageService);
+  cs.clear();
 }
 
 function cleanup()
@@ -105,7 +114,7 @@ function run_test() {
   do_register_cleanup(cleanup);
 
   do_test_pending();
- 
+
   // We create a public channel that loads an image, then an identical
   // one that should cause a cache read. We then create a private channel
   // and load the same image, and do that a second time to ensure a cache

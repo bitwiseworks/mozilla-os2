@@ -10,7 +10,6 @@ DIRS += [
     'bounds',
     'editabletext',
     'elm',
-    'events',
     'focus',
     'hittest',
     'hyperlink',
@@ -28,7 +27,13 @@ DIRS += [
     'textattrs',
     'textcaret',
     'textselection',
-    'tree',
     'treeupdate',
     'value',
+]
+
+A11Y_MANIFESTS += [
+    'a11y.ini',
+    'events/a11y.ini',
+    'textrange/a11y.ini',
+    'tree/a11y.ini',
 ]

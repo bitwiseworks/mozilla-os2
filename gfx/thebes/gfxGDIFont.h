@@ -6,6 +6,7 @@
 #ifndef GFX_GDIFONT_H
 #define GFX_GDIFONT_H
 
+#include "mozilla/MemoryReporting.h"
 #include "gfxFont.h"
 #include "gfxGDIFontList.h"
 
@@ -53,10 +54,10 @@ public:
     // get hinted glyph width in pixels as 16.16 fixed-point value
     virtual int32_t GetGlyphWidth(gfxContext *aCtx, uint16_t aGID);
 
-    virtual void SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                     FontCacheSizes*   aSizes) const;
-    virtual void SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                     FontCacheSizes*   aSizes) const;
+    virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontCacheSizes* aSizes) const;
+    virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontCacheSizes* aSizes) const;
 
     virtual FontType GetType() const { return FONT_TYPE_GDI; }
 
@@ -65,7 +66,7 @@ protected:
 
     /* override to check for uniscribe failure and fall back to GDI */
     virtual bool ShapeText(gfxContext      *aContext,
-                           const PRUnichar *aText,
+                           const char16_t *aText,
                            uint32_t         aOffset,
                            uint32_t         aLength,
                            int32_t          aScript,
@@ -92,7 +93,7 @@ protected:
     bool                  mNeedsBold;
 
     // cache of glyph widths in 16.16 fixed-point pixels
-    nsDataHashtable<nsUint32HashKey,int32_t>    mGlyphWidths;
+    nsAutoPtr<nsDataHashtable<nsUint32HashKey,int32_t> > mGlyphWidths;
 };
 
 #endif /* GFX_GDIFONT_H */

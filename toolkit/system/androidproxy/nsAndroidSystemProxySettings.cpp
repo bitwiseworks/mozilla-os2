@@ -6,7 +6,6 @@
 #include "nsNetUtil.h"
 #include "nsIURI.h"
 
-#include "mozilla/Util.h"
 #include "nsISystemProxySettings.h"
 #include "nsIServiceManager.h"
 #include "mozilla/ModuleUtils.h"
@@ -20,7 +19,7 @@
 class nsAndroidSystemProxySettings : public nsISystemProxySettings
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSISYSTEMPROXYSETTINGS
 
     nsAndroidSystemProxySettings() {};
@@ -30,7 +29,7 @@ private:
     ~nsAndroidSystemProxySettings() {};
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsAndroidSystemProxySettings, nsISystemProxySettings)
+NS_IMPL_ISUPPORTS(nsAndroidSystemProxySettings, nsISystemProxySettings)
 
 NS_IMETHODIMP
 nsAndroidSystemProxySettings::GetMainThreadOnly(bool *aMainThreadOnly)
@@ -73,13 +72,13 @@ NS_DEFINE_NAMED_CID(NS_ANDROIDSYSTEMPROXYSERVICE_CID);
 void test() {};
 
 static const mozilla::Module::CIDEntry kSysProxyCIDs[] = {
-    { &kNS_ANDROIDSYSTEMPROXYSERVICE_CID, false, NULL, nsAndroidSystemProxySettingsConstructor },
-    { NULL }
+    { &kNS_ANDROIDSYSTEMPROXYSERVICE_CID, false, nullptr, nsAndroidSystemProxySettingsConstructor },
+    { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kSysProxyContracts[] = {
     { NS_SYSTEMPROXYSETTINGS_CONTRACTID, &kNS_ANDROIDSYSTEMPROXYSERVICE_CID },
-    { NULL }
+    { nullptr }
 };
 
 static const mozilla::Module kSysProxyModule = {

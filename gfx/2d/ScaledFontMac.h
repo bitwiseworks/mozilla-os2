@@ -17,14 +17,17 @@ namespace gfx {
 class ScaledFontMac : public ScaledFontBase
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(ScaledFontMac)
   ScaledFontMac(CGFontRef aFont, Float aSize);
   virtual ~ScaledFontMac();
 
-  virtual FontType GetType() const { return FONT_MAC; }
+  virtual FontType GetType() const { return FontType::MAC; }
 #ifdef USE_SKIA
   virtual SkTypeface* GetSkTypeface();
 #endif
   virtual TemporaryRef<Path> GetPathForGlyphs(const GlyphBuffer &aBuffer, const DrawTarget *aTarget);
+  virtual void CopyGlyphsToBuilder(const GlyphBuffer &aBuffer, PathBuilder *aBuilder, BackendType aBackendType, const Matrix *aTransformHint);
+  virtual bool GetFontFileData(FontFileDataOutput aDataCallback, void *aBaton);
 
 private:
   friend class DrawTargetCG;

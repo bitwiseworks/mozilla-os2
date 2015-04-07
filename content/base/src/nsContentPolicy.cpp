@@ -20,7 +20,7 @@
 #include "nsIContent.h"
 #include "nsCOMArray.h"
 
-NS_IMPL_ISUPPORTS1(nsContentPolicy, nsIContentPolicy)
+NS_IMPL_ISUPPORTS(nsContentPolicy, nsIContentPolicy)
 
 #ifdef PR_LOGGING
 static PRLogModuleInfo* gConPolLog;
@@ -117,7 +117,8 @@ nsContentPolicy::CheckPolicy(CPMethod          policyMethod,
      * their permissions.
      */
     nsresult rv;
-    const nsCOMArray<nsIContentPolicy>& entries = mPolicies.GetEntries();
+    nsCOMArray<nsIContentPolicy> entries;
+    mPolicies.GetEntries(entries);
     int32_t count = entries.Count();
     for (int32_t i = 0; i < count; i++) {
         /* check the appropriate policy */

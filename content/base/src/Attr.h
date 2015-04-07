@@ -20,18 +20,20 @@
 #include "nsINodeInfo.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsStubMutationObserver.h"
+#include "nsIDocument.h"
 
 namespace mozilla {
+class EventChainPreVisitor;
 namespace dom {
 
 // Attribute helper class used to wrap up an attribute with a dom
 // object that implements nsIDOMAttr and nsIDOMNode
-class Attr : public nsIAttribute,
-             public nsIDOMAttr
+class Attr MOZ_FINAL : public nsIAttribute,
+                       public nsIDOMAttr
 {
 public:
   Attr(nsDOMAttributeMap* aAttrMap,
-       already_AddRefed<nsINodeInfo> aNodeInfo,
+       already_AddRefed<nsINodeInfo>&& aNodeInfo,
        const nsAString& aValue,
        bool aNsAware);
   virtual ~Attr() {}
@@ -50,11 +52,11 @@ public:
   // nsIDOMAttr interface
   NS_DECL_NSIDOMATTR
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   // nsIAttribute interface
   void SetMap(nsDOMAttributeMap *aMap) MOZ_OVERRIDE;
-  nsIContent *GetContent() const MOZ_OVERRIDE;
+  Element* GetElement() const;
   nsresult SetOwnerDocument(nsIDocument* aDocument) MOZ_OVERRIDE;
 
   // nsINode interface
@@ -67,7 +69,7 @@ public:
                                  bool aNotify) MOZ_OVERRIDE;
   virtual void RemoveChildAt(uint32_t aIndex, bool aNotify) MOZ_OVERRIDE;
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
-  virtual already_AddRefed<nsIURI> GetBaseURI() const MOZ_OVERRIDE;
+  virtual already_AddRefed<nsIURI> GetBaseURI(bool aTryUseXHRDocBaseURI = false) const MOZ_OVERRIDE;
 
   static void Initialize();
   static void Shutdown();
@@ -78,8 +80,7 @@ public:
   virtual nsIDOMNode* AsDOMNode() { return this; }
 
   // WebIDL
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   // XPCOM GetName() is OK
   // XPCOM GetValue() is OK
@@ -97,14 +98,13 @@ public:
 protected:
   virtual Element* GetNameSpaceElement()
   {
-    return GetContentInternal();
+    return GetElement();
   }
 
   static bool sInitialized;
 
 private:
   already_AddRefed<nsIAtom> GetNameAtom(nsIContent* aContent);
-  Element* GetContentInternal() const;
 
   nsString mValue;
 };

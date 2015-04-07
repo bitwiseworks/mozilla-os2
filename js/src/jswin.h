@@ -11,8 +11,11 @@
  * This file is a wrapper around <windows.h> to prevent the mangling of
  * various function names throughout the codebase.
  */
+
 #ifdef XP_WIN
 # include <windows.h>
+# undef min
+# undef max
 # undef GetProp
 # undef SetProp
 # undef CONST

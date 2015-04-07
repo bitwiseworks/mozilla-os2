@@ -7,6 +7,7 @@
 
 #include "mozIStorageService.h"
 #include "nsIAlertsService.h"
+#include "nsIArray.h"
 #include "nsIClassInfoImpl.h"
 #include "nsIDOMWindow.h"
 #include "nsIDownloadHistory.h"
@@ -20,6 +21,7 @@
 #include "nsIWindowMediator.h"
 #include "nsILocalFileWin.h"
 #include "nsILoadContext.h"
+#include "nsIXULAppInfo.h"
 
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsArrayEnumerator.h"
@@ -36,8 +38,11 @@
 
 #include "SQLFunctions.h"
 
+#include "mozilla/Preferences.h"
+
 #ifdef XP_WIN
 #include <shlobj.h>
+#include "nsWindowsHelpers.h"
 #ifdef DOWNLOAD_SCANNER
 #include "nsDownloadScanner.h"
 #endif
@@ -49,9 +54,10 @@
 
 #ifdef MOZ_WIDGET_ANDROID
 #include "AndroidBridge.h"
+using namespace mozilla::widget::android;
 #endif
 
-#ifdef MOZ_WIDGET_GTK2
+#ifdef MOZ_WIDGET_GTK
 #include <gtk/gtk.h>
 #endif
 
@@ -60,6 +66,7 @@ using mozilla::downloads::GenerateGUID;
 
 #define DOWNLOAD_MANAGER_BUNDLE "chrome://mozapps/locale/downloads/downloads.properties"
 #define DOWNLOAD_MANAGER_ALERT_ICON "chrome://mozapps/skin/downloads/downloadIcon.png"
+#define PREF_BD_USEJSTRANSFER "browser.download.useJSTransfer"
 #define PREF_BDM_SHOWALERTONCOMPLETE "browser.download.manager.showAlertOnComplete"
 #define PREF_BDM_SHOWALERTINTERVAL "browser.download.manager.showAlertInterval"
 #define PREF_BDM_RETENTION "browser.download.manager.retention"
@@ -80,7 +87,7 @@ static const int64_t gUpdateInterval = 400 * PR_USEC_PER_MSEC;
 ////////////////////////////////////////////////////////////////////////////////
 //// nsDownloadManager
 
-NS_IMPL_ISUPPORTS4(
+NS_IMPL_ISUPPORTS(
   nsDownloadManager
 , nsIDownloadManager
 , nsINavHistoryObserver
@@ -100,7 +107,7 @@ nsDownloadManager::GetSingleton()
 
   gDownloadManagerService = new nsDownloadManager();
   if (gDownloadManagerService) {
-#if defined(MOZ_WIDGET_GTK2)
+#if defined(MOZ_WIDGET_GTK)
     g_type_init();
 #endif
     NS_ADDREF(gDownloadManagerService);
@@ -923,6 +930,51 @@ nsDownloadManager::InitStatements(mozIStorageConnection* aDBConn,
 nsresult
 nsDownloadManager::Init()
 {
+  nsresult rv;
+
+  nsCOMPtr<nsIStringBundleService> bundleService =
+    mozilla::services::GetStringBundleService();
+  if (!bundleService)
+    return NS_ERROR_FAILURE;
+
+  rv = bundleService->CreateBundle(DOWNLOAD_MANAGER_BUNDLE,
+                                   getter_AddRefs(mBundle));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+#if !defined(MOZ_JSDOWNLOADS)
+  // When MOZ_JSDOWNLOADS is undefined, we still check the preference that can
+  // be used to enable the JavaScript API during the migration process.
+  mUseJSTransfer = Preferences::GetBool(PREF_BD_USEJSTRANSFER, false);
+#else
+
+  nsAutoCString appID;
+  nsCOMPtr<nsIXULAppInfo> info = do_GetService("@mozilla.org/xre/app-info;1");
+  if (info) {
+    rv = info->GetID(appID);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  // The webapp runtime doesn't use the new JS downloads API yet.
+  // The conversion of the webapp runtime to use the JavaScript API for
+  // downloads is tracked in bug 911636.
+  if (appID.EqualsLiteral("webapprt@mozilla.org")) {
+    mUseJSTransfer = false;
+  } else {
+#if !defined(XP_WIN)
+    mUseJSTransfer = true;
+#else
+    // When MOZ_JSDOWNLOADS is defined on Windows, this component is disabled
+    // unless we are running in Windows Metro.  The conversion of Windows Metro
+    // to use the JavaScript API for downloads is tracked in bug 906042.
+    mUseJSTransfer = !IsRunningInWindowsMetro();
+#endif
+  }
+
+#endif
+
+  if (mUseJSTransfer)
+    return NS_OK;
+
   // Clean up any old downloads.rdf files from before Firefox 3
   {
     nsCOMPtr<nsIFile> oldDownloadsFile;
@@ -939,16 +991,7 @@ nsDownloadManager::Init()
   if (!mObserverService)
     return NS_ERROR_FAILURE;
 
-  nsCOMPtr<nsIStringBundleService> bundleService =
-    mozilla::services::GetStringBundleService();
-  if (!bundleService)
-    return NS_ERROR_FAILURE;
-
-  nsresult rv = InitDB();
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = bundleService->CreateBundle(DOWNLOAD_MANAGER_BUNDLE,
-                                   getter_AddRefs(mBundle));
+  rv = InitDB();
   NS_ENSURE_SUCCESS(rv, rv);
 
 #ifdef DOWNLOAD_SCANNER
@@ -1062,7 +1105,7 @@ nsDownloadManager::GetDownloadFromDB(const nsACString& aGUID, nsDownload **retVa
   MOZ_ASSERT(!FindDownload(aGUID),
              "If it is a current download, you should not call this method!");
 
-  nsDependentCString query = NS_LITERAL_CSTRING(
+  NS_NAMED_LITERAL_CSTRING(query,
     "SELECT id, state, startTime, source, target, tempPath, name, referrer, "
            "entityID, currBytes, maxBytes, mimeType, preferredAction, "
            "preferredApplication, autoResume, guid "
@@ -1281,6 +1324,8 @@ nsDownloadManager::SendEvent(nsDownload *aDownload, const char *aTopic)
 NS_IMETHODIMP
 nsDownloadManager::GetActivePrivateDownloadCount(int32_t* aResult)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   *aResult = mCurrentPrivateDownloads.Count();
   return NS_OK;
 }
@@ -1288,6 +1333,8 @@ nsDownloadManager::GetActivePrivateDownloadCount(int32_t* aResult)
 NS_IMETHODIMP
 nsDownloadManager::GetActiveDownloadCount(int32_t *aResult)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   *aResult = mCurrentDownloads.Count();
 
   return NS_OK;
@@ -1296,12 +1343,16 @@ nsDownloadManager::GetActiveDownloadCount(int32_t *aResult)
 NS_IMETHODIMP
 nsDownloadManager::GetActiveDownloads(nsISimpleEnumerator **aResult)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   return NS_NewArrayEnumerator(aResult, mCurrentDownloads);
 }
 
 NS_IMETHODIMP
 nsDownloadManager::GetActivePrivateDownloads(nsISimpleEnumerator **aResult)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   return NS_NewArrayEnumerator(aResult, mCurrentPrivateDownloads);
 }
 
@@ -1331,7 +1382,7 @@ nsDownloadManager::GetDefaultDownloadsDirectory(nsIFile **aResult)
   // XDG user dir spec, with a fallback to Home/Downloads
 
   nsXPIDLString folderName;
-  mBundle->GetStringFromName(NS_LITERAL_STRING("downloadsFolder").get(),
+  mBundle->GetStringFromName(MOZ_UTF16("downloadsFolder"),
                              getter_Copies(folderName));
 
 #if defined (XP_MACOSX)
@@ -1375,16 +1426,7 @@ nsDownloadManager::GetDefaultDownloadsDirectory(nsIFile **aResult)
     }
   }
 #elif defined(XP_UNIX)
-#if defined(MOZ_PLATFORM_MAEMO)
-    // As maemo does not follow the XDG "standard" (as usually desktop
-    // Linux distros do) neither has a working $HOME/Desktop folder
-    // for us to fallback into, "$HOME/MyDocs/.documents/" is the folder
-    // we found most apropriate to be the default target folder for downloads
-    // on the platform.
-    rv = dirService->Get(NS_UNIX_XDG_DOCUMENTS_DIR,
-                         NS_GET_IID(nsIFile),
-                         getter_AddRefs(downloadDir));
-#elif defined(MOZ_WIDGET_ANDROID)
+#if defined(MOZ_WIDGET_ANDROID)
     // Android doesn't have a $HOME directory, and by default we only have
     // write access to /data/data/org.mozilla.{$APP} and /sdcard
     char* downloadDirPath = getenv("DOWNLOADS_DIRECTORY");
@@ -1523,6 +1565,8 @@ nsDownloadManager::AddDownload(DownloadType aDownloadType,
                                bool aIsPrivate,
                                nsIDownload **aDownload)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   NS_ENSURE_ARG_POINTER(aSource);
   NS_ENSURE_ARG_POINTER(aTarget);
   NS_ENSURE_ARG_POINTER(aDownload);
@@ -1655,6 +1699,8 @@ nsDownloadManager::AddDownload(DownloadType aDownloadType,
 NS_IMETHODIMP
 nsDownloadManager::GetDownload(uint32_t aID, nsIDownload **aDownloadItem)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   NS_WARNING("Using integer IDs without compat mode enabled");
 
   nsDownload *itm = FindDownload(aID);
@@ -1699,6 +1745,8 @@ NS_IMETHODIMP
 nsDownloadManager::GetDownloadByGUID(const nsACString& aGUID,
                                      nsIDownloadManagerResult* aCallback)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   nsDownload *itm = FindDownload(aGUID);
 
   nsresult rv = NS_OK;
@@ -1748,6 +1796,8 @@ nsDownloadManager::FindDownload(const nsACString& aGUID)
 NS_IMETHODIMP
 nsDownloadManager::CancelDownload(uint32_t aID)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   NS_WARNING("Using integer IDs without compat mode enabled");
 
   // We AddRef here so we don't lose access to member variables when we remove
@@ -1774,6 +1824,8 @@ nsDownloadManager::RetryDownload(const nsACString& aGUID)
 NS_IMETHODIMP
 nsDownloadManager::RetryDownload(uint32_t aID)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   NS_WARNING("Using integer IDs without compat mode enabled");
 
   nsRefPtr<nsDownload> dl;
@@ -1876,6 +1928,8 @@ nsDownloadManager::RemoveDownload(const nsACString& aGUID)
 NS_IMETHODIMP
 nsDownloadManager::RemoveDownload(uint32_t aID)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   NS_WARNING("Using integer IDs without compat mode enabled");
 
   nsRefPtr<nsDownload> dl = FindDownload(aID);
@@ -1982,6 +2036,8 @@ NS_IMETHODIMP
 nsDownloadManager::RemoveDownloadsByTimeframe(int64_t aStartTime,
                                               int64_t aEndTime)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   nsresult rv = DoRemoveDownloadsByTimeframe(mDBConn, aStartTime, aEndTime);
   nsresult rv2 = DoRemoveDownloadsByTimeframe(mPrivateDBConn, aStartTime, aEndTime);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1994,12 +2050,16 @@ nsDownloadManager::RemoveDownloadsByTimeframe(int64_t aStartTime,
 NS_IMETHODIMP
 nsDownloadManager::CleanUp()
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   return CleanUp(mDBConn);
 }
 
 NS_IMETHODIMP
 nsDownloadManager::CleanUpPrivate()
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   return CleanUp(mPrivateDBConn);
 }
 
@@ -2083,18 +2143,24 @@ DoGetCanCleanUp(mozIStorageConnection* aDBConn, bool *aResult)
 NS_IMETHODIMP
 nsDownloadManager::GetCanCleanUp(bool *aResult)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   return DoGetCanCleanUp(mDBConn, aResult);
 }
 
 NS_IMETHODIMP
 nsDownloadManager::GetCanCleanUpPrivate(bool *aResult)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   return DoGetCanCleanUp(mPrivateDBConn, aResult);
 }
 
 NS_IMETHODIMP
 nsDownloadManager::PauseDownload(uint32_t aID)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   NS_WARNING("Using integer IDs without compat mode enabled");
 
   nsDownload *dl = FindDownload(aID);
@@ -2107,6 +2173,8 @@ nsDownloadManager::PauseDownload(uint32_t aID)
 NS_IMETHODIMP
 nsDownloadManager::ResumeDownload(uint32_t aID)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   NS_WARNING("Using integer IDs without compat mode enabled");
 
   nsDownload *dl = FindDownload(aID);
@@ -2119,6 +2187,8 @@ nsDownloadManager::ResumeDownload(uint32_t aID)
 NS_IMETHODIMP
 nsDownloadManager::GetDBConnection(mozIStorageConnection **aDBConn)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   NS_ADDREF(*aDBConn = mDBConn);
 
   return NS_OK;
@@ -2127,6 +2197,8 @@ nsDownloadManager::GetDBConnection(mozIStorageConnection **aDBConn)
 NS_IMETHODIMP
 nsDownloadManager::GetPrivateDBConnection(mozIStorageConnection **aDBConn)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   NS_ADDREF(*aDBConn = mPrivateDBConn);
 
   return NS_OK;
@@ -2135,6 +2207,8 @@ nsDownloadManager::GetPrivateDBConnection(mozIStorageConnection **aDBConn)
 NS_IMETHODIMP
 nsDownloadManager::AddListener(nsIDownloadProgressListener *aListener)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   mListeners.AppendObject(aListener);
   return NS_OK;
 }
@@ -2142,6 +2216,8 @@ nsDownloadManager::AddListener(nsIDownloadProgressListener *aListener)
 NS_IMETHODIMP
 nsDownloadManager::AddPrivacyAwareListener(nsIDownloadProgressListener *aListener)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   mPrivacyAwareListeners.AppendObject(aListener);
   return NS_OK;
 }
@@ -2149,6 +2225,8 @@ nsDownloadManager::AddPrivacyAwareListener(nsIDownloadProgressListener *aListene
 NS_IMETHODIMP
 nsDownloadManager::RemoveListener(nsIDownloadProgressListener *aListener)
 {
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   mListeners.RemoveObject(aListener);
   mPrivacyAwareListeners.RemoveObject(aListener);
   return NS_OK;
@@ -2231,6 +2309,10 @@ nsDownloadManager::NotifyListenersOnStateChange(nsIWebProgress *aProgress,
 NS_IMETHODIMP
 nsDownloadManager::OnBeginUpdateBatch()
 {
+  // This method in not normally invoked when mUseJSTransfer is enabled, however
+  // we provide an extra check in case it is called manually by add-ons.
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   // We already have a transaction, so don't make another
   if (mHistoryTransaction)
     return NS_OK;
@@ -2268,10 +2350,30 @@ nsDownloadManager::OnTitleChanged(nsIURI *aURI,
 }
 
 NS_IMETHODIMP
+nsDownloadManager::OnFrecencyChanged(nsIURI* aURI,
+                                     int32_t aNewFrecency,
+                                     const nsACString& aGUID,
+                                     bool aHidden,
+                                     PRTime aLastVisitDate)
+{
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDownloadManager::OnManyFrecenciesChanged()
+{
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDownloadManager::OnDeleteURI(nsIURI *aURI,
                                const nsACString& aGUID,
                                uint16_t aReason)
 {
+  // This method in not normally invoked when mUseJSTransfer is enabled, however
+  // we provide an extra check in case it is called manually by add-ons.
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   nsresult rv = RemoveDownloadsForURI(mGetIdsForURIStatement, aURI);
   nsresult rv2 = RemoveDownloadsForURI(mGetPrivateIdsForURIStatement, aURI);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2309,8 +2411,12 @@ nsDownloadManager::OnDeleteVisits(nsIURI *aURI, PRTime aVisitTime,
 NS_IMETHODIMP
 nsDownloadManager::Observe(nsISupports *aSubject,
                            const char *aTopic,
-                           const PRUnichar *aData)
+                           const char16_t *aData)
 {
+  // This method in not normally invoked when mUseJSTransfer is enabled, however
+  // we provide an extra check in case it is called manually by add-ons.
+  NS_ENSURE_STATE(!mUseJSTransfer);
+
   // We need to count the active public downloads that could be lost
   // by quitting, and add any active private ones as well, since per-window
   // private browsing may be active.
@@ -2360,26 +2466,26 @@ nsDownloadManager::Observe(nsISupports *aSubject,
     NS_ENSURE_SUCCESS(rv, rv);
 #ifndef XP_MACOSX
     ConfirmCancelDownloads(currDownloadCount, cancelDownloads,
-                           NS_LITERAL_STRING("quitCancelDownloadsAlertTitle").get(),
-                           NS_LITERAL_STRING("quitCancelDownloadsAlertMsgMultiple").get(),
-                           NS_LITERAL_STRING("quitCancelDownloadsAlertMsg").get(),
-                           NS_LITERAL_STRING("dontQuitButtonWin").get());
+                           MOZ_UTF16("quitCancelDownloadsAlertTitle"),
+                           MOZ_UTF16("quitCancelDownloadsAlertMsgMultiple"),
+                           MOZ_UTF16("quitCancelDownloadsAlertMsg"),
+                           MOZ_UTF16("dontQuitButtonWin"));
 #else
     ConfirmCancelDownloads(currDownloadCount, cancelDownloads,
-                           NS_LITERAL_STRING("quitCancelDownloadsAlertTitle").get(),
-                           NS_LITERAL_STRING("quitCancelDownloadsAlertMsgMacMultiple").get(),
-                           NS_LITERAL_STRING("quitCancelDownloadsAlertMsgMac").get(),
-                           NS_LITERAL_STRING("dontQuitButtonMac").get());
+                           MOZ_UTF16("quitCancelDownloadsAlertTitle"),
+                           MOZ_UTF16("quitCancelDownloadsAlertMsgMacMultiple"),
+                           MOZ_UTF16("quitCancelDownloadsAlertMsgMac"),
+                           MOZ_UTF16("dontQuitButtonMac"));
 #endif
   } else if (strcmp(aTopic, "offline-requested") == 0 && currDownloadCount) {
     nsCOMPtr<nsISupportsPRBool> cancelDownloads =
       do_QueryInterface(aSubject, &rv);
     NS_ENSURE_SUCCESS(rv, rv);
     ConfirmCancelDownloads(currDownloadCount, cancelDownloads,
-                           NS_LITERAL_STRING("offlineCancelDownloadsAlertTitle").get(),
-                           NS_LITERAL_STRING("offlineCancelDownloadsAlertMsgMultiple").get(),
-                           NS_LITERAL_STRING("offlineCancelDownloadsAlertMsg").get(),
-                           NS_LITERAL_STRING("dontGoOfflineButton").get());
+                           MOZ_UTF16("offlineCancelDownloadsAlertTitle"),
+                           MOZ_UTF16("offlineCancelDownloadsAlertMsgMultiple"),
+                           MOZ_UTF16("offlineCancelDownloadsAlertMsg"),
+                           MOZ_UTF16("dontGoOfflineButton"));
   }
   else if (strcmp(aTopic, NS_IOSERVICE_GOING_OFFLINE_TOPIC) == 0) {
     // Pause all downloads, and mark them to auto-resume.
@@ -2395,7 +2501,7 @@ nsDownloadManager::Observe(nsISupports *aSubject,
       do_GetService("@mozilla.org/download-manager-ui;1", &rv);
     NS_ENSURE_SUCCESS(rv, rv);
     return dmui->Show(nullptr, nullptr, nsIDownloadManagerUI::REASON_USER_INTERACTED,
-                      aData && NS_strcmp(aData, NS_LITERAL_STRING("private").get()) == 0);
+                      aData && NS_strcmp(aData, MOZ_UTF16("private")) == 0);
   } else if (strcmp(aTopic, "sleep_notification") == 0 ||
              strcmp(aTopic, "suspend_process_notification") == 0) {
     // Pause downloads if we're sleeping, and mark the downloads as auto-resume
@@ -2430,10 +2536,10 @@ nsDownloadManager::Observe(nsISupports *aSubject,
     NS_ENSURE_SUCCESS(rv, rv);
 
     ConfirmCancelDownloads(mCurrentPrivateDownloads.Count(), cancelDownloads,
-                           NS_LITERAL_STRING("leavePrivateBrowsingCancelDownloadsAlertTitle").get(),
-                           NS_LITERAL_STRING("leavePrivateBrowsingWindowsCancelDownloadsAlertMsgMultiple").get(),
-                           NS_LITERAL_STRING("leavePrivateBrowsingWindowsCancelDownloadsAlertMsg").get(),
-                           NS_LITERAL_STRING("dontLeavePrivateBrowsingButton").get());
+                           MOZ_UTF16("leavePrivateBrowsingCancelDownloadsAlertTitle"),
+                           MOZ_UTF16("leavePrivateBrowsingWindowsCancelDownloadsAlertMsgMultiple"),
+                           MOZ_UTF16("leavePrivateBrowsingWindowsCancelDownloadsAlertMsg"),
+                           MOZ_UTF16("dontLeavePrivateBrowsingButton"));
   }
 
   return NS_OK;
@@ -2442,10 +2548,10 @@ nsDownloadManager::Observe(nsISupports *aSubject,
 void
 nsDownloadManager::ConfirmCancelDownloads(int32_t aCount,
                                           nsISupportsPRBool *aCancelDownloads,
-                                          const PRUnichar *aTitle,
-                                          const PRUnichar *aCancelMessageMultiple,
-                                          const PRUnichar *aCancelMessageSingle,
-                                          const PRUnichar *aDontCancelButton)
+                                          const char16_t *aTitle,
+                                          const char16_t *aCancelMessageMultiple,
+                                          const char16_t *aCancelMessageSingle,
+                                          const char16_t *aDontCancelButton)
 {
   // If user has already dismissed quit request, then do nothing
   bool quitRequestCancelled = false;
@@ -2459,15 +2565,15 @@ nsDownloadManager::ConfirmCancelDownloads(int32_t aCount,
 
   nsAutoString countString;
   countString.AppendInt(aCount);
-  const PRUnichar *strings[1] = { countString.get() };
+  const char16_t *strings[1] = { countString.get() };
   if (aCount > 1) {
     mBundle->FormatStringFromName(aCancelMessageMultiple, strings, 1,
                                   getter_Copies(message));
-    mBundle->FormatStringFromName(NS_LITERAL_STRING("cancelDownloadsOKTextMultiple").get(),
+    mBundle->FormatStringFromName(MOZ_UTF16("cancelDownloadsOKTextMultiple"),
                                   strings, 1, getter_Copies(quitButton));
   } else {
     mBundle->GetStringFromName(aCancelMessageSingle, getter_Copies(message));
-    mBundle->GetStringFromName(NS_LITERAL_STRING("cancelDownloadsOKText").get(),
+    mBundle->GetStringFromName(MOZ_UTF16("cancelDownloadsOKText"),
                                getter_Copies(quitButton));
   }
 
@@ -2477,7 +2583,7 @@ nsDownloadManager::ConfirmCancelDownloads(int32_t aCount,
   nsCOMPtr<nsIWindowMediator> wm = do_GetService(NS_WINDOWMEDIATOR_CONTRACTID);
   nsCOMPtr<nsIDOMWindow> dmWindow;
   if (wm) {
-    wm->GetMostRecentWindow(NS_LITERAL_STRING("Download:Manager").get(),
+    wm->GetMostRecentWindow(MOZ_UTF16("Download:Manager"),
                             getter_AddRefs(dmWindow));
   }
 
@@ -2496,8 +2602,8 @@ nsDownloadManager::ConfirmCancelDownloads(int32_t aCount,
 ////////////////////////////////////////////////////////////////////////////////
 //// nsDownload
 
-NS_IMPL_CLASSINFO(nsDownload, NULL, 0, NS_DOWNLOAD_CID)
-NS_IMPL_ISUPPORTS4_CI(
+NS_IMPL_CLASSINFO(nsDownload, nullptr, 0, NS_DOWNLOAD_CID)
+NS_IMPL_ISUPPORTS_CI(
     nsDownload
   , nsIDownload
   , nsITransfer
@@ -2525,14 +2631,24 @@ nsDownload::~nsDownload()
 }
 
 NS_IMETHODIMP nsDownload::SetSha256Hash(const nsACString& aHash) {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  MOZ_ASSERT(NS_IsMainThread(), "Must call SetSha256Hash on main thread");
+  // This will be used later to query the application reputation service.
+  mHash = aHash;
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsDownload::SetSignatureInfo(nsIArray* aSignatureInfo) {
+  MOZ_ASSERT(NS_IsMainThread(), "Must call SetSignatureInfo on main thread");
+  // This will be used later to query the application reputation service.
+  mSignatureInfo = aSignatureInfo;
+  return NS_OK;
 }
 
 #ifdef MOZ_ENABLE_GIO
 static void gio_set_metadata_done(GObject *source_obj, GAsyncResult *res, gpointer user_data)
 {
-  GError *err = NULL;
-  g_file_set_attributes_finish(G_FILE(source_obj), res, NULL, &err);
+  GError *err = nullptr;
+  g_file_set_attributes_finish(G_FILE(source_obj), res, nullptr, &err);
   if (err) {
 #ifdef DEBUG
     NS_DebugBreak(NS_DEBUG_WARNING, "Set file metadata failed: ", err->message, __FILE__, __LINE__);
@@ -2590,7 +2706,6 @@ nsDownload::SetState(DownloadState aState)
 #endif
     case nsIDownloadManager::DOWNLOAD_FINISHED:
     {
-      // Do what exthandler would have done if necessary
       nsresult rv = ExecuteDesiredAction();
       if (NS_FAILED(rv)) {
         // We've failed to execute the desired action.  As a result, we should
@@ -2628,10 +2743,10 @@ nsDownload::SetState(DownloadState aState)
               nsXPIDLString title, message;
 
               mDownloadManager->mBundle->GetStringFromName(
-                  NS_LITERAL_STRING("downloadsCompleteTitle").get(),
+                  MOZ_UTF16("downloadsCompleteTitle"),
                   getter_Copies(title));
               mDownloadManager->mBundle->GetStringFromName(
-                  NS_LITERAL_STRING("downloadsCompleteMsg").get(),
+                  MOZ_UTF16("downloadsCompleteMsg"),
                   getter_Copies(message));
 
               bool removeWhenDone =
@@ -2645,12 +2760,13 @@ nsDownload::SetState(DownloadState aState)
                   NS_LITERAL_STRING(DOWNLOAD_MANAGER_ALERT_ICON), title,
                   message, !removeWhenDone,
                   mPrivate ? NS_LITERAL_STRING("private") : NS_LITERAL_STRING("non-private"),
-                  mDownloadManager, EmptyString(), NS_LITERAL_STRING("auto"), EmptyString());
+                  mDownloadManager, EmptyString(), NS_LITERAL_STRING("auto"),
+                  EmptyString(), nullptr);
             }
         }
       }
 
-#if defined(XP_WIN) || defined(XP_MACOSX) || defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GTK2)
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GTK)
       nsCOMPtr<nsIFileURL> fileURL = do_QueryInterface(mTarget);
       nsCOMPtr<nsIFile> file;
       nsAutoString path;
@@ -2660,7 +2776,7 @@ nsDownload::SetState(DownloadState aState)
           file &&
           NS_SUCCEEDED(file->GetPath(path))) {
 
-#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK2)
+#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
         // On Windows and Gtk, add the download to the system's "recent documents"
         // list, with a pref to disable.
         {
@@ -2671,11 +2787,11 @@ nsDownload::SetState(DownloadState aState)
           if (addToRecentDocs && !mPrivate) {
 #ifdef XP_WIN
             ::SHAddToRecentDocs(SHARD_PATHW, path.get());
-#elif defined(MOZ_WIDGET_GTK2)
+#elif defined(MOZ_WIDGET_GTK)
             GtkRecentManager* manager = gtk_recent_manager_get_default();
 
             gchar* uri = g_filename_to_uri(NS_ConvertUTF16toUTF8(path).get(),
-                                           NULL, NULL);
+                                           nullptr, nullptr);
             if (uri) {
               gtk_recent_manager_add_item(manager, uri);
               g_free(uri);
@@ -2693,7 +2809,7 @@ nsDownload::SetState(DownloadState aState)
                                       file_info,
                                       G_FILE_QUERY_INFO_NONE,
                                       G_PRIORITY_DEFAULT,
-                                      NULL, gio_set_metadata_done, NULL);
+                                      nullptr, gio_set_metadata_done, nullptr);
           g_object_unref(file_info);
           g_object_unref(gio_file);
 #endif
@@ -2706,7 +2822,7 @@ nsDownload::SetState(DownloadState aState)
                                                  kCFStringEncodingUTF8);
         CFNotificationCenterRef center = ::CFNotificationCenterGetDistributedCenter();
         ::CFNotificationCenterPostNotification(center, CFSTR("com.apple.DownloadFileFinished"),
-                                               observedObject, NULL, TRUE);
+                                               observedObject, nullptr, TRUE);
         ::CFRelease(observedObject);
 #endif
 #ifdef MOZ_WIDGET_ANDROID
@@ -2717,7 +2833,7 @@ nsDownload::SetState(DownloadState aState)
         if (mimeInfo)
           mimeInfo->GetMIMEType(contentType);
 
-        mozilla::AndroidBridge::Bridge()->ScanMedia(path, contentType);
+        mozilla::widget::android::GeckoAppShell::ScanMedia(path, NS_ConvertUTF8toUTF16(contentType));
 #endif
       }
 
@@ -2920,7 +3036,7 @@ nsDownload::OnLocationChange(nsIWebProgress *aWebProgress,
 NS_IMETHODIMP
 nsDownload::OnStatusChange(nsIWebProgress *aWebProgress,
                            nsIRequest *aRequest, nsresult aStatus,
-                           const PRUnichar *aMessage)
+                           const char16_t *aMessage)
 {
   if (NS_FAILED(aStatus))
     return FailDownload(aStatus, aMessage);
@@ -2932,6 +3048,8 @@ nsDownload::OnStateChange(nsIWebProgress *aWebProgress,
                           nsIRequest *aRequest, uint32_t aStateFlags,
                           nsresult aStatus)
 {
+  MOZ_ASSERT(NS_IsMainThread(), "Must call OnStateChange in main thread");
+
   // We don't want to lose access to our member variables
   nsRefPtr<nsDownload> kungFuDeathGrip = this;
 
@@ -3111,12 +3229,17 @@ nsDownload::GetTargetFile(nsIFile **aTargetFile)
   nsresult rv;
 
   nsCOMPtr<nsIFileURL> fileURL = do_QueryInterface(mTarget, &rv);
-  if (NS_FAILED(rv)) return rv;
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
 
   nsCOMPtr<nsIFile> file;
   rv = fileURL->GetFile(getter_AddRefs(file));
-  if (NS_SUCCEEDED(rv))
-    rv = CallQueryInterface(file, aTargetFile);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  file.forget(aTargetFile);
   return rv;
 }
 
@@ -3191,10 +3314,12 @@ nsDownload::Finalize()
 nsresult
 nsDownload::ExecuteDesiredAction()
 {
-  // If we have a temp file and we have resumed, we have to do what the
-  // external helper app service would have done.
-  if (!mTempFile || !WasResumed())
+  // nsExternalHelperAppHandler is the only caller of AddDownload that sets a
+  // tempfile parameter. In this case, execute the desired action according to
+  // the saved mime info.
+  if (!mTempFile) {
     return NS_OK;
+  }
 
   // We need to bail if for some reason the temp file got removed
   bool fileExists;
@@ -3584,7 +3709,7 @@ nsDownload::UpdateDB()
 }
 
 nsresult
-nsDownload::FailDownload(nsresult aStatus, const PRUnichar *aMessage)
+nsDownload::FailDownload(nsresult aStatus, const char16_t *aMessage)
 {
   // Grab the bundle before potentially losing our member variables
   nsCOMPtr<nsIStringBundle> bundle = mDownloadManager->mBundle;
@@ -3594,7 +3719,7 @@ nsDownload::FailDownload(nsresult aStatus, const PRUnichar *aMessage)
   // Get title for alert.
   nsXPIDLString title;
   nsresult rv = bundle->GetStringFromName(
-    NS_LITERAL_STRING("downloadErrorAlertTitle").get(), getter_Copies(title));
+    MOZ_UTF16("downloadErrorAlertTitle"), getter_Copies(title));
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Get a generic message if we weren't supplied one
@@ -3602,7 +3727,7 @@ nsDownload::FailDownload(nsresult aStatus, const PRUnichar *aMessage)
   message = aMessage;
   if (message.IsEmpty()) {
     rv = bundle->GetStringFromName(
-      NS_LITERAL_STRING("downloadErrorGeneric").get(), getter_Copies(message));
+      MOZ_UTF16("downloadErrorGeneric"), getter_Copies(message));
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -3611,7 +3736,7 @@ nsDownload::FailDownload(nsresult aStatus, const PRUnichar *aMessage)
     do_GetService(NS_WINDOWMEDIATOR_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIDOMWindow> dmWindow;
-  rv = wm->GetMostRecentWindow(NS_LITERAL_STRING("Download:Manager").get(),
+  rv = wm->GetMostRecentWindow(MOZ_UTF16("Download:Manager"),
                                getter_AddRefs(dmWindow));
   NS_ENSURE_SUCCESS(rv, rv);
 

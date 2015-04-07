@@ -10,23 +10,22 @@
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
-#include "EnableWebAudioCheck.h"
 #include "AudioContext.h"
+#include "AudioNodeEngine.h"
 #include "nsAutoPtr.h"
 
 namespace mozilla {
 
 namespace dom {
 
-class PeriodicWave MOZ_FINAL : public nsWrapperCache,
-                               public EnableWebAudioCheck
+class PeriodicWave MOZ_FINAL : public nsWrapperCache
 {
 public:
   PeriodicWave(AudioContext* aContext,
                const float* aRealData,
-               uint32_t aRealDataLength,
                const float* aImagData,
-               uint32_t aImagDataLength);
+               const uint32_t aLength,
+               ErrorResult& aRv);
 
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(PeriodicWave)
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(PeriodicWave)
@@ -36,15 +35,27 @@ public:
     return mContext;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+
+  uint32_t DataLength() const
+  {
+    return mLength;
+  }
+
+  ThreadSharedFloatArrayBufferList* GetThreadSharedBuffer() const
+  {
+    return mCoefficients;
+  }
+
+  size_t SizeOfExcludingThisIfNotShared(MallocSizeOf aMallocSizeOf) const;
 
 private:
   nsRefPtr<AudioContext> mContext;
+  nsRefPtr<ThreadSharedFloatArrayBufferList> mCoefficients;
+  uint32_t mLength;
 };
 
 }
 }
 
 #endif
-

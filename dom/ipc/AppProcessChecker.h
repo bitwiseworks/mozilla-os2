@@ -8,6 +8,10 @@
 #ifndef mozilla_AppProcessChecker_h
 #define mozilla_AppProcessChecker_h
 
+#include <stdint.h>
+
+class nsIPrincipal;
+
 namespace mozilla {
 
 namespace dom {
@@ -26,7 +30,7 @@ enum AssertAppProcessType {
 };
 
 /**
- * Return true iff the specified browser has the specified capability.
+ * Return true if the specified browser has the specified capability.
  * If this returns false, the browser didn't have the capability and
  * will be killed.
  */
@@ -36,7 +40,15 @@ AssertAppProcess(mozilla::dom::PBrowserParent* aActor,
                  const char* aCapability);
 
 /**
- * Return true iff any of the PBrowsers loaded in this content process
+ * Return true if the specified app has the specified status.
+ * If this returns false, the browser will be killed.
+ */
+bool
+AssertAppStatus(mozilla::dom::PBrowserParent* aActor,
+                unsigned short aStatus);
+
+/**
+ * Return true if any of the PBrowsers loaded in this content process
  * has the specified capability.  If this returns false, the process
  * didn't have the capability and will be killed.
  */
@@ -44,6 +56,15 @@ bool
 AssertAppProcess(mozilla::dom::PContentParent* aActor,
                  AssertAppProcessType aType,
                  const char* aCapability);
+
+/**
+ * Return true if any of the PBrowsers loaded in this content process
+ * has an app with the specified status. If this returns false, the process
+ * didn't have the status and will be killed.
+ */
+bool
+AssertAppStatus(mozilla::dom::PContentParent* aActor,
+                unsigned short aStatus);
 
 bool
 AssertAppProcess(mozilla::hal_sandbox::PHalParent* aActor,
@@ -57,6 +78,21 @@ AssertAppProcess(mozilla::hal_sandbox::PHalParent* aActor,
 //   bool AppProcessHasCapability(PNeckoParent* aActor, AssertAppProcessType aType) {
 //     return AssertAppProcess(aActor->Manager(), aType);
 //   }
+
+bool
+AssertAppPrincipal(mozilla::dom::PContentParent* aParent,
+                   nsIPrincipal* aPrincipal);
+
+/**
+ * Check if the specified principal is valid, and return the saved permission
+ * value for permission `aPermission' on that principal.
+ * See nsIPermissionManager.idl for possible return values.
+ *
+ * nsIPermissionManager::UNKNOWN_ACTION is retuned if the principal is invalid.
+ */
+uint32_t
+CheckPermission(mozilla::dom::PContentParent* aParent,
+                nsIPrincipal* aPrincipal, const char* aPermission);
 
 /**
  * Inline function for asserting the process's permission.
@@ -92,6 +128,13 @@ AssertAppHasPermission(T* aActor,
   return AssertAppProcess(aActor,
                           ASSERT_APP_HAS_PERMISSION,
                           aPermission);
+}
+
+template<typename T>
+inline bool
+AssertAppHasStatus(T* aActor,
+                   unsigned short aStatus) {
+  return AssertAppStatus(aActor, aStatus);
 }
 
 } // namespace mozilla

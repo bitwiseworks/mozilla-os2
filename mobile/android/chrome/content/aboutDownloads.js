@@ -10,6 +10,8 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/PluralForm.jsm");
 Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
+
 let gStrings = Services.strings.createBundle("chrome://browser/locale/aboutDownloads.properties");
 
 let downloadTemplate =
@@ -42,6 +44,13 @@ var ContextMenus = {
 
   init: function() {
     document.addEventListener("contextmenu", this, false);
+    document.getElementById("contextmenu-open").addEventListener("click", this.open.bind(this), false);
+    document.getElementById("contextmenu-retry").addEventListener("click", this.retry.bind(this), false);
+    document.getElementById("contextmenu-remove").addEventListener("click", this.remove.bind(this), false);
+    document.getElementById("contextmenu-pause").addEventListener("click", this.pause.bind(this), false);
+    document.getElementById("contextmenu-resume").addEventListener("click", this.resume.bind(this), false);
+    document.getElementById("contextmenu-cancel").addEventListener("click", this.cancel.bind(this), false);
+    document.getElementById("contextmenu-removeall").addEventListener("click", this.removeAll.bind(this), false);
     this.items = [
       { name: "open", states: [Downloads._dlmgr.DOWNLOAD_FINISHED] },
       { name: "retry", states: [Downloads._dlmgr.DOWNLOAD_FAILED, Downloads._dlmgr.DOWNLOAD_CANCELED] },
@@ -250,11 +259,11 @@ let Downloads = {
   },
 
   _getDownloadSize: function dl_getDownloadSize(aSize) {
-    let displaySize = DownloadUtils.convertByteUnits(aSize);
-    if (displaySize[0] > 0) // [0] is size, [1] is units
-      return displaySize.join("");
-    else
-      return gStrings.GetStringFromName("downloadState.unknownSize");
+    if (aSize > 0) {
+      let displaySize = DownloadUtils.convertByteUnits(aSize);
+      return displaySize.join(""); // [0] is size, [1] is units
+    }
+    return gStrings.GetStringFromName("downloadState.unknownSize");
   },
 
   // Not all states are displayed as-is on mobile, some are translated to a generic state
@@ -449,6 +458,10 @@ let Downloads = {
 
   openDownload: function dl_openDownload(aItem) {
     this._getDownloadForElement(aItem, function(aDownload) {
+      if (aDownload.state !== Ci.nsIDownloadManager.DOWNLOAD_FINISHED) {
+        // Do not open unfinished downloads.
+        return;
+      }
       try {
         let f = aDownload.targetFile;
         if (f) f.launch();
@@ -460,20 +473,15 @@ let Downloads = {
 
   removeDownload: function dl_removeDownload(aItem) {
     this._getDownloadForElement(aItem, function(aDownload) {
-      let f = null;
-      try {
-        f = aDownload.targetFile;
-      } catch (ex) {
-        // even if there is no file, pretend that there is so that we can remove
-        // it from the list
-        f = { leafName: "" };
+      if (aDownload.targetFile) {
+        OS.File.remove(aDownload.targetFile.path).then(null, function onError(reason) {
+          if (!(reason instanceof OS.File.Error && reason.becauseNoSuchFile)) {
+            this.logError("removeDownload() " + reason, aDownload);
+          }
+        }.bind(this));
       }
+
       aDownload.remove();
-      try {
-        if (f) f.remove(false);
-      } catch (ex) {
-        this.logError("removeDownload() " + ex, aDownload);
-      }
     }.bind(this));
   },
 
@@ -531,17 +539,15 @@ let Downloads = {
 
   cancelDownload: function dl_cancelDownload(aItem) {
     this._getDownloadForElement(aItem, function(aDownload) {
-      try {
-        aDownload.cancel();
-        let f = aDownload.targetFile;
+      OS.File.remove(aDownload.targetFile.path).then(null, function onError(reason) {
+        if (!(reason instanceof OS.File.Error && reason.becauseNoSuchFile)) {
+          this.logError("cancelDownload() " + reason, aDownload);
+        }
+      }.bind(this));
 
-        if (f.exists())
-          f.remove(false);
+      aDownload.cancel();
 
-        this._updateDownloadRow(aItem, aDownload);
-      } catch (ex) {
-        this.logError("cancelDownload() " + ex, aDownload);
-      }
+      this._updateDownloadRow(aItem, aDownload);
     }.bind(this));
   },
 
@@ -604,3 +610,8 @@ let Downloads = {
     return this;
   }
 }
+
+document.addEventListener("DOMContentLoaded", Downloads.init.bind(Downloads), true);
+window.addEventListener("unload", Downloads.uninit.bind(Downloads), false);
+
+

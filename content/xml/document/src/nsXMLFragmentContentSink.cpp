@@ -51,13 +51,13 @@ public:
                                const nsAString & aSystemId, 
                                const nsAString & aPublicId,
                                nsISupports* aCatalogData);
-  NS_IMETHOD HandleProcessingInstruction(const PRUnichar *aTarget, 
-                                         const PRUnichar *aData);
-  NS_IMETHOD HandleXMLDeclaration(const PRUnichar *aVersion,
-                                  const PRUnichar *aEncoding,
+  NS_IMETHOD HandleProcessingInstruction(const char16_t *aTarget, 
+                                         const char16_t *aData);
+  NS_IMETHOD HandleXMLDeclaration(const char16_t *aVersion,
+                                  const char16_t *aEncoding,
                                   int32_t aStandalone);
-  NS_IMETHOD ReportError(const PRUnichar* aErrorText, 
-                         const PRUnichar* aSourceText,
+  NS_IMETHOD ReportError(const char16_t* aErrorText, 
+                         const char16_t* aSourceText,
                          nsIScriptError *aError,
                          bool *_retval);
 
@@ -82,7 +82,7 @@ protected:
   virtual bool SetDocElement(int32_t aNameSpaceID, 
                                nsIAtom *aTagName,
                                nsIContent *aContent);
-  virtual nsresult CreateElement(const PRUnichar** aAtts, uint32_t aAttsCount,
+  virtual nsresult CreateElement(const char16_t** aAtts, uint32_t aAttsCount,
                                  nsINodeInfo* aNodeInfo, uint32_t aLineNumber,
                                  nsIContent** aResult, bool* aAppendContent,
                                  mozilla::dom::FromParser aFromParser);
@@ -110,9 +110,6 @@ static nsresult
 NewXMLFragmentContentSinkHelper(nsIFragmentContentSink** aResult)
 {
   nsXMLFragmentContentSink* it = new nsXMLFragmentContentSink();
-  if (!it) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
   
   NS_ADDREF(*aResult = it);
   
@@ -141,6 +138,8 @@ NS_INTERFACE_MAP_END_INHERITING(nsXMLContentSink)
 
 NS_IMPL_ADDREF_INHERITED(nsXMLFragmentContentSink, nsXMLContentSink)
 NS_IMPL_RELEASE_INHERITED(nsXMLFragmentContentSink, nsXMLContentSink)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsXMLFragmentContentSink)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXMLFragmentContentSink,
                                                   nsXMLContentSink)
@@ -201,7 +200,7 @@ nsXMLFragmentContentSink::SetDocElement(int32_t aNameSpaceID,
 }
 
 nsresult
-nsXMLFragmentContentSink::CreateElement(const PRUnichar** aAtts, uint32_t aAttsCount,
+nsXMLFragmentContentSink::CreateElement(const char16_t** aAtts, uint32_t aAttsCount,
                                         nsINodeInfo* aNodeInfo, uint32_t aLineNumber,
                                         nsIContent** aResult, bool* aAppendContent,
                                         FromParser /*aFromParser*/)
@@ -257,8 +256,8 @@ nsXMLFragmentContentSink::HandleDoctypeDecl(const nsAString & aSubset,
 }
 
 NS_IMETHODIMP
-nsXMLFragmentContentSink::HandleProcessingInstruction(const PRUnichar *aTarget, 
-                                                      const PRUnichar *aData)
+nsXMLFragmentContentSink::HandleProcessingInstruction(const char16_t *aTarget, 
+                                                      const char16_t *aData)
 {
   FlushText();
 
@@ -273,8 +272,8 @@ nsXMLFragmentContentSink::HandleProcessingInstruction(const PRUnichar *aTarget,
 }
 
 NS_IMETHODIMP
-nsXMLFragmentContentSink::HandleXMLDeclaration(const PRUnichar *aVersion,
-                                               const PRUnichar *aEncoding,
+nsXMLFragmentContentSink::HandleXMLDeclaration(const char16_t *aVersion,
+                                               const char16_t *aEncoding,
                                                int32_t aStandalone)
 {
   NS_NOTREACHED("fragments shouldn't have XML declarations");
@@ -282,8 +281,8 @@ nsXMLFragmentContentSink::HandleXMLDeclaration(const PRUnichar *aVersion,
 }
 
 NS_IMETHODIMP
-nsXMLFragmentContentSink::ReportError(const PRUnichar* aErrorText, 
-                                      const PRUnichar* aSourceText,
+nsXMLFragmentContentSink::ReportError(const char16_t* aErrorText, 
+                                      const char16_t* aSourceText,
                                       nsIScriptError *aError,
                                       bool *_retval)
 {
@@ -363,6 +362,8 @@ nsXMLFragmentContentSink::FinishFragmentParsing(nsIDOMDocumentFragment** aFragme
   mContentStack.Clear();
   mDocumentURI = nullptr;
   mDocShell = nullptr;
+  mDocElement = nullptr;
+  mCurrentHead = nullptr;
   if (mParseError) {
     //XXX PARSE_ERR from DOM3 Load and Save would be more appropriate
     mRoot = nullptr;

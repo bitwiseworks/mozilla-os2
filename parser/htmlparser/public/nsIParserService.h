@@ -7,12 +7,10 @@
 #define nsIParserService_h__
 
 #include "nsISupports.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "nsHTMLTags.h"
-#include "nsIElementObserver.h"
 
 class nsIParser;
-class nsIParserNode;
 
 #define NS_PARSERSERVICE_CONTRACTID "@mozilla.org/parser/parser-service;1"
 
@@ -65,12 +63,12 @@ class nsIParserService : public nsISupports {
    *
    * @param aId The nsHTMLTag enum value to get the tag for.
    *
-   * @return const PRUnichar* The tag corresponding to the nsHTMLTag enum
+   * @return const char16_t* The tag corresponding to the nsHTMLTag enum
    *                          value, or nullptr if the enum value doesn't
    *                          correspond to a tag (eHTMLTag_unknown,
    *                          eHTMLTag_userdefined, eHTMLTag_text, ...).
    */
-  virtual const PRUnichar *HTMLIdToStringTag(int32_t aId) const = 0;
+  virtual const char16_t *HTMLIdToStringTag(int32_t aId) const = 0;
 
   /**
    * Gets the tag corresponding to the nsHTMLTag enum value in aId. The

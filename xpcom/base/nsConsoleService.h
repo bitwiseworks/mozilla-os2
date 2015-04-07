@@ -13,7 +13,6 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/Mutex.h"
 
-#include "nsCOMPtr.h"
 #include "nsInterfaceHashtable.h"
 #include "nsHashKeys.h"
 
@@ -25,7 +24,7 @@ public:
     nsConsoleService();
     nsresult Init();
 
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSICONSOLESERVICE
 
     void SetIsDelivering() {

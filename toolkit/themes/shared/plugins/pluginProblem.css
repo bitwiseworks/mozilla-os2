@@ -5,7 +5,7 @@
 @namespace html url(http://www.w3.org/1999/xhtml);
 
 /* These styles affect only the bound element, not other page content. */
-
+/* Keep any changes to these styles in sync with plugin-doorhanger.inc.css */
 .mainBox {
   font: message-box;
   font-size: 12px;
@@ -21,7 +21,7 @@
 
 .hoverBox {
   display: table-cell;
-  -moz-box-sizing: border-box;
+  box-sizing: border-box;
   padding: 5px;
   vertical-align: middle;
   width: 100%;
@@ -31,6 +31,15 @@
 :-moz-handler-vulnerable-no-update .hoverBox:active,
 :-moz-handler-clicktoplay .hoverBox:active {
   background-color: rgb(65, 65, 65);
+}
+
+:-moz-handler-clicktoplay .hoverBox:active .msgTapToPlay,
+:-moz-handler-clicktoplay .hoverBox:active .msgClickToPlay,
+:-moz-handler-vulnerable-updatable .hoverBox:active .msgTapToPlay,
+:-moz-handler-vulnerable-updatable .hoverBox:active .msgClickToPlay,
+:-moz-handler-vulnerable-no-update .hoverBox:active .msgTapToPlay,
+:-moz-handler-vulnerable-no-update .hoverBox:active .msgClickToPlay {
+  color: red;
 }
 
 :-moz-handler-vulnerable-updatable .hoverBox,
@@ -85,6 +94,11 @@ html|a {
   padding-left: 16px; /* width of the background image */
   background: url(chrome://global/skin/icons/loading_16.png) no-repeat;
   margin-left: 5px;
+}
+
+.msgTapToPlay,
+.msgClickToPlay {
+  text-decoration: underline;
 }
 
 @media not all and (-moz-touch-enabled) {

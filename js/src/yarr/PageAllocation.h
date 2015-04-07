@@ -23,16 +23,16 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * ***** END LICENSE BLOCK ***** */
 
 #ifndef yarr_PageAllocation_h
 #define yarr_PageAllocation_h
 
-#include "wtfbridge.h"
-#include "OSAllocator.h"
-#include "PageBlock.h"
+#include "yarr/wtfbridge.h"
+#include "yarr/OSAllocator.h"
+#include "yarr/PageBlock.h"
 #include "assembler/wtf/VMTags.h"
 
 #if WTF_OS_DARWIN

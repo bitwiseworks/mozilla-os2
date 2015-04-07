@@ -18,7 +18,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
   var gHostedManifestURL = gBaseURL + 'file_app.sjs?apptype=hosted&getmanifest=true';
   var gCachedManifestURL = gBaseURL + 'file_app.sjs?apptype=cached&getmanifest=true';
   var gGenerator = runTest();
-  var launchableValue = undefined;
 
   function go() {
     SpecialPowers.pushPermissions(
@@ -29,38 +28,63 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
   }
 
   function continueTest() {
-    try { gGenerator.next(); }
-    catch (e) { dump("Got exception: " + e + "\n"); }
+    try {
+      gGenerator.next();
+    } catch (e if e instanceof StopIteration) {
+      finish();
+    }
   }
 
-  function cbError() {
-    ok(false, "Error callback invoked: " + this.error.name);
+  function mozAppsError() {
+    ok(false, "mozApps error: " + this.error.name);
+    finish();
+  }
+
+  function xhrError(event, url) {
+    var xhr = event.target;
+    ok(false, "XHR error loading " + url + ": " + xhr.status + " - " +
+              xhr.statusText);
+    finish();
+  }
+
+  function xhrAbort(url) {
+    ok(false, "XHR abort loading " + url);
     finish();
   }
 
   function runTest() {
     // Set up.
 
-    launchableValue = SpecialPowers.setAllAppsLaunchable(true);
+    SpecialPowers.setAllAppsLaunchable(true);
     SpecialPowers.setBoolPref("dom.mozBrowserFramesEnabled", true);
 
+    // Test Bug 927699 - navigator.mozApps.install(url) lets NS_ERROR_FAILURE
+    //                   onto the web
+    var request = navigator.mozApps.install("");
+    request.onerror = function() {
+      ok(request.error.name == "INVALID_URL", "Got expected INVALID_URL");
+      continueTest();
+    };
+    request.onsuccess = mozAppsError;
+    yield undefined;
+
     setAppVersion(1, continueTest);
-    yield;
+    yield undefined;
     SpecialPowers.autoConfirmAppInstall(continueTest);
-    yield;
+    yield undefined;
 
     // Load the app, uninstalled.
     checkAppState(null, false, 1, continueTest);
-    yield;
+    yield undefined;
 
     // Bump the version and install the app.
     setAppVersion(2, continueTest);
-    yield;
+    yield undefined;
 
-    var request = navigator.mozApps.install(gHostedManifestURL);
-    request.onerror = cbError;
+    request = navigator.mozApps.install(gHostedManifestURL);
+    request.onerror = mozAppsError;
     request.onsuccess = continueTest;
-    yield;
+    yield undefined;
     var app = request.result;
     ok(app, "App is non-null");
     ok(app.manifest.description == "Updated even faster than Firefox, just to annoy slashdotters.",
@@ -68,23 +92,23 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
 
     // Check the app a few times.
     checkAppState(app, true, 2, continueTest);
-    yield;
+    yield undefined;
     checkAppState(app, true, 2, continueTest);
-    yield;
+    yield undefined;
 
     // Bump the version and check the app again. The app is not cached, so the
     // version bump takes effect.
     setAppVersion(3, continueTest);
-    yield;
+    yield undefined;
     checkAppState(app, true, 3, continueTest);
-    yield;
+    yield undefined;
 
     // check for update
     var icons = app.manifest.icons;
     var oldIcon = icons[Object.keys(icons)[0]];
     var oldUpdateTime = app.updateTime;
     setAppIcon('new_icon', continueTest);
-    yield;
+    yield undefined;
 
     app.ondownloadavailable = function() {
       ok(false, 'Got a downloadavailable event for non-cached hosted apps');
@@ -95,8 +119,14 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
       app.ondownloadapplied = app.ondownloadavailable = null;
       continueTest();
     };
-    app.checkForUpdate();
-    yield;
+    request = app.checkForUpdate();
+    request.onerror = mozAppsError;
+    request.onsuccess = function() {
+      ok(true, "Got onsuccess");
+      continueTest();
+    };
+    yield undefined;
+    yield undefined;
 
     icons = app.manifest.icons;
     var newIcon = icons[Object.keys(icons)[0]];
@@ -106,36 +136,36 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
 
     // Uninstall the app.
     request = navigator.mozApps.mgmt.uninstall(app);
-    request.onerror = cbError;
+    request.onerror = mozAppsError;
     request.onsuccess = continueTest;
-    yield;
+    yield undefined;
 
     // Check the uninstalled app.
     checkAppState(app, false, 3, continueTest);
-    yield;
+    yield undefined;
 
     // Install the cached app.
     setAppVersion(3, continueTest);
-    yield;
+    yield undefined;
     ok(true, "Installing cached app");
     var request = navigator.mozApps.install(gCachedManifestURL);
-    request.onerror = cbError;
+    request.onerror = mozAppsError;
     request.onsuccess = continueTest;
-    yield;
+    yield undefined;
     var app = request.result;
     ok(app, "App is non-null");
     if (app.installState == "pending") {
       ok(true, "App is pending. Waiting for progress");
       app.onprogress = function() ok(true, "Got download progress");
       app.ondownloadsuccess = continueTest;
-      app.ondownloaderror = cbError;
-      yield;
+      app.ondownloaderror = mozAppsError;
+      yield undefined;
     }
     is(app.installState, "installed", "App is installed");
 
     // Check the cached app.
     checkAppState(app, true, 3, continueTest);
-    yield;
+    yield undefined;
 
     // Check for updates. The current infrastructure always returns a new appcache
     // manifest, so there should always be an update.
@@ -145,43 +175,41 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
     app.ondownloadavailable = function() ok(false, "downloadavailable fired");
     ok(true, "Checking for updates");
     var request = app.checkForUpdate();
-    request.onerror = cbError;
+    request.onerror = mozAppsError;
     request.onsuccess = continueTest;
-    yield;
+    yield undefined;
     todo(app.lastUpdateCheck > lastCheck, "lastUpdateCheck updated appropriately");
 
 
     // Uninstall the app.
     request = navigator.mozApps.mgmt.uninstall(app);
-    request.onerror = cbError;
+    request.onerror = mozAppsError;
     request.onsuccess = continueTest;
-    yield;
+    yield undefined;
     ok(true, "Uninstalled app");
 
     // Check the uninstalled app.
     checkAppState(app, false, 3, continueTest);
-    yield;
-
-    // All done.
-    ok(true, "All done");
-    finish();
+    yield undefined;
   }
 
   function setAppVersion(version, cb) {
     var xhr = new XMLHttpRequest();
-    xhr.addEventListener("load", function() { is(xhr.responseText, "OK", "setVersion OK"); cb(); });
-    xhr.addEventListener("error", cbError);
-    xhr.addEventListener("abort", cbError);
-    xhr.open('GET', gBaseURL + 'file_app.sjs?setVersion=' + version, true);
+    var url = gBaseURL + 'file_app.sjs?setVersion=' + version;
+    xhr.addEventListener("load", function() { is(xhr.responseText, "OK", "setAppVersion OK"); cb(); });
+    xhr.addEventListener("error", event => xhrError(event, url));
+    xhr.addEventListener("abort", event => xhrAbort(url));
+    xhr.open('GET', url, true);
     xhr.send();
   }
 
   function setAppIcon(icon, cb) {
     var xhr = new XMLHttpRequest();
-    xhr.addEventListener("load", function() { is(xhr.responseText, "OK", "setIcon OK"); cb(); });
-    xhr.addEventListener("error", cbError);
-    xhr.addEventListener("abort", cbError);
-    xhr.open('GET', gBaseURL + 'file_app.sjs?setIcon=' + icon, true);
+    var url = gBaseURL + 'file_app.sjs?setIcon=' + icon;
+    xhr.addEventListener("load", function() { is(xhr.responseText, "OK", "setAppIcon OK"); cb(); });
+    xhr.addEventListener("error", event => xhrError(event, url));
+    xhr.addEventListener("abort", event => xhrAbort(url));
+    xhr.open('GET', url, true);
     xhr.send();
   }
 
@@ -245,7 +273,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
 
   function finish() {
     SpecialPowers.clearUserPref("dom.mozBrowserFramesEnabled");
-    //SpecialPowers.setAllAppsLaunchable(launchableValue);
     SimpleTest.finish();
   }
 

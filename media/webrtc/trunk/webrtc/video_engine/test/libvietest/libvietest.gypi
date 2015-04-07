@@ -9,21 +9,12 @@
   'targets': [
     {
       'target_name': 'libvietest',
-      'type': '<(library)',
+      'type': 'static_library',
       'dependencies': [
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
         '<(DEPTH)/testing/gtest.gyp:gtest',
         '<(webrtc_root)/test/test.gyp:test_support',
         'video_engine_core',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          'include/',
-        ]
-      },
-      'include_dirs': [
-        'include/',
-        'helpers/',
       ],
       'sources': [
         # Helper classes
@@ -51,6 +42,10 @@
         'testbed/tb_interfaces.cc',
         'testbed/tb_video_channel.cc',
       ],
+      # Disable warnings to enable Win64 build, issue 1323.
+      'msvs_disabled_warnings': [
+        4267,  # size_t to int truncation.
+      ],
     },
   ],
   'conditions': [
@@ -64,9 +59,6 @@
             '<(DEPTH)/testing/gtest.gyp:gtest',
             '<(DEPTH)/testing/gmock.gyp:gmock',
             '<(webrtc_root)/test/test.gyp:test_support_main',
-          ],
-          'include_dirs': [
-            'include/',
           ],
           'sources': [
             'testbed/fake_network_pipe_unittest.cc',

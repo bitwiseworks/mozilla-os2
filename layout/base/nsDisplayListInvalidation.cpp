@@ -5,6 +5,7 @@
 
 #include "nsDisplayListInvalidation.h"
 #include "nsDisplayList.h"
+#include "nsIFrame.h"
 
 nsDisplayItemGeometry::nsDisplayItemGeometry(nsDisplayItem* aItem, nsDisplayListBuilder* aBuilder)
 {
@@ -63,6 +64,20 @@ nsDisplayBackgroundGeometry::nsDisplayBackgroundGeometry(nsDisplayBackgroundImag
 
 void
 nsDisplayBackgroundGeometry::MoveBy(const nsPoint& aOffset)
+{
+  mBounds.MoveBy(aOffset);
+  mPositioningArea.MoveBy(aOffset);
+}
+
+nsDisplayThemedBackgroundGeometry::nsDisplayThemedBackgroundGeometry(nsDisplayThemedBackground* aItem,
+                                                                     nsDisplayListBuilder* aBuilder)
+  : nsDisplayItemGeometry(aItem, aBuilder)
+  , mPositioningArea(aItem->GetPositioningArea())
+  , mWindowIsActive(aItem->IsWindowActive())
+{}
+
+void
+nsDisplayThemedBackgroundGeometry::MoveBy(const nsPoint& aOffset)
 {
   mBounds.MoveBy(aOffset);
   mPositioningArea.MoveBy(aOffset);

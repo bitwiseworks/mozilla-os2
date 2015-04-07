@@ -7,6 +7,8 @@
 #include "mozilla/FloatingPoint.h"
 
 #include "Key.h"
+#include "ReportInternalError.h"
+
 #include "jsfriendapi.h"
 #include "nsAlgorithm.h"
 #include "nsJSUtils.h"
@@ -101,30 +103,26 @@ const int MaxArrayCollapse = 3;
 const int MaxRecursionDepth = 256;
 
 nsresult
-Key::EncodeJSValInternal(JSContext* aCx, const jsval aVal,
+Key::EncodeJSValInternal(JSContext* aCx, JS::Handle<JS::Value> aVal,
                          uint8_t aTypeOffset, uint16_t aRecursionDepth)
 {
   NS_ENSURE_TRUE(aRecursionDepth < MaxRecursionDepth, NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
 
-  MOZ_STATIC_ASSERT(eMaxType * MaxArrayCollapse < 256,
-                    "Unable to encode jsvals.");
+  static_assert(eMaxType * MaxArrayCollapse < 256,
+                "Unable to encode jsvals.");
 
-  if (JSVAL_IS_STRING(aVal)) {
+  if (aVal.isString()) {
     nsDependentJSString str;
     if (!str.init(aCx, aVal)) {
+      IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
     EncodeString(str, aTypeOffset);
     return NS_OK;
   }
 
-  if (JSVAL_IS_INT(aVal)) {
-    EncodeNumber((double)JSVAL_TO_INT(aVal), eFloat + aTypeOffset);
-    return NS_OK;
-  }
-
-  if (JSVAL_IS_DOUBLE(aVal)) {
-    double d = JSVAL_TO_DOUBLE(aVal);
+  if (aVal.isNumber()) {
+    double d = aVal.toNumber();
     if (mozilla::IsNaN(d)) {
       return NS_ERROR_DOM_INDEXEDDB_DATA_ERR;
     }
@@ -132,8 +130,8 @@ Key::EncodeJSValInternal(JSContext* aCx, const jsval aVal,
     return NS_OK;
   }
 
-  if (!JSVAL_IS_PRIMITIVE(aVal)) {
-    JS::Rooted<JSObject*> obj(aCx, JSVAL_TO_OBJECT(aVal));
+  if (aVal.isObject()) {
+    JS::Rooted<JSObject*> obj(aCx, &aVal.toObject());
     if (JS_IsArrayObject(aCx, obj)) {
       aTypeOffset += eMaxType;
 
@@ -147,12 +145,14 @@ Key::EncodeJSValInternal(JSContext* aCx, const jsval aVal,
 
       uint32_t length;
       if (!JS_GetArrayLength(aCx, obj, &length)) {
+        IDB_REPORT_INTERNAL_ERR();
         return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
       }
 
       for (uint32_t index = 0; index < length; index++) {
         JS::Rooted<JS::Value> val(aCx);
-        if (!JS_GetElement(aCx, obj, index, val.address())) {
+        if (!JS_GetElement(aCx, obj, index, &val)) {
+          IDB_REPORT_INTERNAL_ERR();
           return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
         }
 
@@ -191,9 +191,10 @@ Key::DecodeJSValInternal(const unsigned char*& aPos, const unsigned char* aEnd,
   NS_ENSURE_TRUE(aRecursionDepth < MaxRecursionDepth, NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
 
   if (*aPos - aTypeOffset >= eArray) {
-    JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0, nullptr));
+    JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
     if (!array) {
       NS_WARNING("Failed to make array!");
+      IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
 
@@ -205,16 +206,17 @@ Key::DecodeJSValInternal(const unsigned char*& aPos, const unsigned char* aEnd,
     }
 
     uint32_t index = 0;
+    JS::Rooted<JS::Value> val(aCx);
     while (aPos < aEnd && *aPos - aTypeOffset != eTerminator) {
-      JS::Rooted<JS::Value> val(aCx);
       nsresult rv = DecodeJSValInternal(aPos, aEnd, aCx, aTypeOffset,
                                         &val, aRecursionDepth + 1);
       NS_ENSURE_SUCCESS(rv, rv);
 
       aTypeOffset = 0;
 
-      if (!JS_SetElement(aCx, array, index++, val.address())) {
+      if (!JS_SetElement(aCx, array, index++, val)) {
         NS_WARNING("Failed to set array element!");
+        IDB_REPORT_INTERNAL_ERR();
         return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
       }
     }
@@ -228,7 +230,8 @@ Key::DecodeJSValInternal(const unsigned char*& aPos, const unsigned char* aEnd,
   else if (*aPos - aTypeOffset == eString) {
     nsString key;
     DecodeString(aPos, aEnd, key);
-    if (!xpc::StringToJsval(aCx, key, aVal.address())) {
+    if (!xpc::StringToJsval(aCx, key, aVal)) {
+      IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
   }
@@ -236,7 +239,7 @@ Key::DecodeJSValInternal(const unsigned char*& aPos, const unsigned char* aEnd,
     double msec = static_cast<double>(DecodeNumber(aPos, aEnd));
     JSObject* date = JS_NewDateObjectMsec(aCx, msec);
     if (!date) {
-      NS_WARNING("Failed to make date!");
+      IDB_WARNING("Failed to make date!");
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
 
@@ -268,9 +271,9 @@ Key::EncodeString(const nsAString& aString, uint8_t aTypeOffset)
   // chars below.
   uint32_t size = aString.Length() + 2;
   
-  const PRUnichar* start = aString.BeginReading();
-  const PRUnichar* end = aString.EndReading();
-  for (const PRUnichar* iter = start; iter < end; ++iter) {
+  const char16_t* start = aString.BeginReading();
+  const char16_t* end = aString.EndReading();
+  for (const char16_t* iter = start; iter < end; ++iter) {
     if (*iter > ONE_BYTE_LIMIT) {
       size += *iter > TWO_BYTE_LIMIT ? 2 : 1;
     }
@@ -288,12 +291,12 @@ Key::EncodeString(const nsAString& aString, uint8_t aTypeOffset)
   *(buffer++) = eString + aTypeOffset;
 
   // Encode string
-  for (const PRUnichar* iter = start; iter < end; ++iter) {
+  for (const char16_t* iter = start; iter < end; ++iter) {
     if (*iter <= ONE_BYTE_LIMIT) {
       *(buffer++) = *iter + ONE_BYTE_ADJUST;
     }
     else if (*iter <= TWO_BYTE_LIMIT) {
-      PRUnichar c = PRUnichar(*iter) + TWO_BYTE_ADJUST + 0x8000;
+      char16_t c = char16_t(*iter) + TWO_BYTE_ADJUST + 0x8000;
       *(buffer++) = (char)(c >> 8);
       *(buffer++) = (char)(c & 0xFF);
     }
@@ -336,7 +339,7 @@ Key::DecodeString(const unsigned char*& aPos, const unsigned char* aEnd,
     aEnd = iter;
   }
 
-  PRUnichar* out;
+  char16_t* out;
   if (size && !aString.GetMutableData(&out, size)) {
     return;
   }
@@ -346,7 +349,7 @@ Key::DecodeString(const unsigned char*& aPos, const unsigned char* aEnd,
       *out = *(iter++) - ONE_BYTE_ADJUST;
     }
     else if (!(*iter & 0x40)) {
-      PRUnichar c = (PRUnichar(*(iter++)) << 8);
+      char16_t c = (char16_t(*(iter++)) << 8);
       if (iter < aEnd) {
         c |= *(iter++);
       }
@@ -360,7 +363,7 @@ Key::DecodeString(const unsigned char*& aPos, const unsigned char* aEnd,
       if (iter < aEnd) {
         c |= *(iter++) >> THREE_BYTE_SHIFT;
       }
-      *out = (PRUnichar)c;
+      *out = (char16_t)c;
     }
     
     ++out;

@@ -13,7 +13,7 @@
 #include "nsString.h"
 #include "nsWrapperCache.h"
 #include "nsGenericHTMLElement.h"
-#include "jsfriendapi.h"
+#include "jsfriendapi.h" // For js::ExpandoAndGeneration
 
 namespace mozilla {
 class ErrorResult;
@@ -36,14 +36,14 @@ public:
   nsDOMStringMap(nsGenericHTMLElement* aElement);
 
   // WebIDL API
-  virtual JSObject* WrapObject(JSContext *cx,
-                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
   void NamedGetter(const nsAString& aProp, bool& found,
                    mozilla::dom::DOMString& aResult) const;
   void NamedSetter(const nsAString& aProp, const nsAString& aValue,
                    mozilla::ErrorResult& rv);
   void NamedDeleter(const nsAString& aProp, bool &found);
-  void GetSupportedNames(nsTArray<nsString>& aNames);
+  bool NameIsEnumerable(const nsAString& aName);
+  void GetSupportedNames(unsigned, nsTArray<nsString>& aNames);
 
   js::ExpandoAndGeneration mExpandoAndGeneration;
 

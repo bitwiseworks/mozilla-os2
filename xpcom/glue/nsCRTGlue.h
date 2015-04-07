@@ -32,28 +32,28 @@ NS_strspnp(const char *delims, const char *str);
  *               reset to the end of the found token + 1, or to the
  *               end-of-string if there are no more tokens.
  * @return       The token. If no token is found (the string is only
- *               delimiter characters), NULL is returned.
+ *               delimiter characters), nullptr is returned.
  */
 NS_COM_GLUE char*
 NS_strtok(const char *delims, char **str);
 
 /**
- * "strlen" for PRUnichar strings
+ * "strlen" for char16_t strings
  */
 NS_COM_GLUE uint32_t
-NS_strlen(const PRUnichar *aString);
+NS_strlen(const char16_t *aString);
 
 /**
- * "strcmp" for PRUnichar strings
+ * "strcmp" for char16_t strings
  */
 NS_COM_GLUE int
-NS_strcmp(const PRUnichar *a, const PRUnichar *b);
+NS_strcmp(const char16_t *a, const char16_t *b);
 
 /**
- * "strdup" for PRUnichar strings, uses the NS_Alloc allocator.
+ * "strdup" for char16_t strings, uses the NS_Alloc allocator.
  */
-NS_COM_GLUE PRUnichar*
-NS_strdup(const PRUnichar *aString);
+NS_COM_GLUE char16_t*
+NS_strdup(const char16_t *aString);
 
 /**
  * "strdup", but using the NS_Alloc allocator.
@@ -62,11 +62,11 @@ NS_COM_GLUE char*
 NS_strdup(const char *aString);
 
 /**
- * strndup for PRUnichar strings... this function will ensure that the
+ * strndup for char16_t strings... this function will ensure that the
  * new string is null-terminated. Uses the NS_Alloc allocator.
  */
-NS_COM_GLUE PRUnichar*
-NS_strndup(const PRUnichar *aString, uint32_t aLen);
+NS_COM_GLUE char16_t*
+NS_strndup(const char16_t *aString, uint32_t aLen);
 
 // The following case-conversion methods only deal in the ascii repertoire
 // A-Z and a-z
@@ -91,11 +91,11 @@ inline char NS_ToLower(char aChar)
 NS_COM_GLUE bool NS_IsUpper(char aChar);
 NS_COM_GLUE bool NS_IsLower(char aChar);
 
-NS_COM_GLUE bool NS_IsAscii(PRUnichar aChar);
-NS_COM_GLUE bool NS_IsAscii(const PRUnichar* aString);
-NS_COM_GLUE bool NS_IsAsciiAlpha(PRUnichar aChar);
-NS_COM_GLUE bool NS_IsAsciiDigit(PRUnichar aChar);
-NS_COM_GLUE bool NS_IsAsciiWhitespace(PRUnichar aChar);
+NS_COM_GLUE bool NS_IsAscii(char16_t aChar);
+NS_COM_GLUE bool NS_IsAscii(const char16_t* aString);
+NS_COM_GLUE bool NS_IsAsciiAlpha(char16_t aChar);
+NS_COM_GLUE bool NS_IsAsciiDigit(char16_t aChar);
+NS_COM_GLUE bool NS_IsAsciiWhitespace(char16_t aChar);
 NS_COM_GLUE bool NS_IsAscii(const char* aString);
 NS_COM_GLUE bool NS_IsAscii(const char* aString, uint32_t aLength);
 
@@ -110,17 +110,22 @@ NS_COM_GLUE void NS_MakeRandomString(char *buf, int32_t bufLen);
 #define LFSTR "\012"
 #define CRLF "\015\012"     /* A CR LF equivalent string */
 
+// We use the most restrictive filesystem as our default set of illegal filename
+// characters. This is currently Windows.
+#define OS_FILE_ILLEGAL_CHARACTERS "/:*?\"<>|"
+// We also provide a list of all known file path separators for all filesystems.
+// This can be used in replacement of FILE_PATH_SEPARATOR when you need to
+// identify or replace all known path separators.
+#define KNOWN_PATH_SEPARATORS "\\/"
+
 #if defined(XP_MACOSX)
   #define FILE_PATH_SEPARATOR        "/"
-  #define OS_FILE_ILLEGAL_CHARACTERS ":"
-#elif defined(XP_WIN) || defined(XP_OS2)
+#elif defined(XP_WIN)
   #define FILE_PATH_SEPARATOR        "\\"
-  #define OS_FILE_ILLEGAL_CHARACTERS "/:*?\"<>|"
 #elif defined(XP_UNIX)
   #define FILE_PATH_SEPARATOR        "/"
-  #define OS_FILE_ILLEGAL_CHARACTERS ""
 #else
-  #error need_to_define_your_file_path_separator_and_illegal_characters
+  #error need_to_define_your_file_path_separator_and_maybe_illegal_characters
 #endif
 
 // Not all these control characters are illegal in all OSs, but we don't really

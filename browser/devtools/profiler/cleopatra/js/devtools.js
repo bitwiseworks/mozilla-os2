@@ -2,7 +2,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+"use strict";
+
 var gInstanceUID;
+var gParsedQS;
+var gHideSourceLinks;
+
+function getParam(key) {
+  if (gParsedQS)
+    return gParsedQS[key];
+
+  var query = window.location.search.substring(1);
+  gParsedQS = {};
+
+  query.split("&").forEach(function (pair) {
+    pair = pair.split("=");
+    gParsedQS[decodeURIComponent(pair[0])] = decodeURIComponent(pair[1]);
+  });
+
+  return gParsedQS[key];
+}
 
 /**
  * Sends a message to the parent window with a status
@@ -11,17 +30,13 @@ var gInstanceUID;
  * @param string status
  *   Status to send to the parent page:
  *    - loaded, when page is loaded.
- *    - start, when user wants to start profiling.
- *    - stop, when user wants to stop profiling.
- *    - disabled, when the profiler was disabled
- *    - enabled, when the profiler was enabled
  *    - displaysource, when user wants to display source
  * @param object data (optional)
  *    Additional data to send to the parent page.
  */
 function notifyParent(status, data={}) {
   if (!gInstanceUID) {
-    gInstanceUID = window.location.search.substr(1);
+    gInstanceUID = getParam("uid");
   }
 
   window.parent.postMessage({
@@ -81,8 +96,7 @@ window.addEventListener("message", onParentMessage);
  * in the light mode and creates all the UI we need.
  */
 function initUI() {
-  gLightMode = true;
-
+  gHideSourceLinks = getParam("ext") === "true";
   gFileList = { profileParsingFinished: function () {} };
   gInfoBar = { display: function () {} };
 
@@ -94,37 +108,6 @@ function initUI() {
 
   container.appendChild(gMainArea);
   document.body.appendChild(container);
-
-  var startButton = document.createElement("button");
-  startButton.innerHTML = gStrings.getStr("profiler.start");
-  startButton.addEventListener("click", function (event) {
-    event.target.setAttribute("disabled", true);
-    notifyParent("start");
-  }, false);
-
-  var stopButton = document.createElement("button");
-  stopButton.innerHTML = gStrings.getStr("profiler.stop");
-  stopButton.addEventListener("click", function (event) {
-    event.target.setAttribute("disabled", true);
-    notifyParent("stop");
-  }, false);
-
-  var controlPane = document.createElement("div");
-  var startProfiling = gStrings.getFormatStr("profiler.startProfiling",
-    ["<span class='btn'></span>"]);
-  var stopProfiling = gStrings.getFormatStr("profiler.stopProfiling",
-    ["<span class='btn'></span>"]);
-
-  controlPane.className = "controlPane";
-  controlPane.innerHTML =
-    "<p id='startWrapper'>" + startProfiling + "</p>" +
-    "<p id='stopWrapper'>" + stopProfiling + "</p>" +
-    "<p id='profilerMessage'></p>";
-
-  controlPane.querySelector("#startWrapper > span.btn").appendChild(startButton);
-  controlPane.querySelector("#stopWrapper > span.btn").appendChild(stopButton);
-
-  gMainArea.appendChild(controlPane);
 }
 
 /**
@@ -224,7 +207,9 @@ function enterFinishedProfileUI() {
     }
   }
 
-  toggleJavascriptOnly();
+  // Show platform data?
+  if (getParam("spd") !== "true")
+    toggleJavascriptOnly();
 }
 
 function enterProgressUI() {

@@ -7,7 +7,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-  "resource://gre/modules/commonjs/sdk/core/promise.js");
+  "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
 
@@ -71,6 +71,7 @@ function initApp() {
     blocklistFile.remove(false);
   var source = do_get_file("blocklist.xml");
   source.copyTo(gProfD, "blocklist.xml");
+  blocklistFile.lastModifiedTime = Date.now();
 }
 
 function AsyncRunner() {

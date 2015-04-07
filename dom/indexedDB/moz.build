@@ -8,28 +8,10 @@ DIRS += ['ipc']
 TEST_DIRS += ['test']
 
 XPIDL_SOURCES += [
-    'nsIIDBCursor.idl',
-    'nsIIDBCursorWithValue.idl',
-    'nsIIDBDatabase.idl',
-    'nsIIDBFileHandle.idl',
-    'nsIIDBIndex.idl',
-    'nsIIDBKeyRange.idl',
-    'nsIIDBObjectStore.idl',
-    'nsIIDBOpenDBRequest.idl',
-    'nsIIDBRequest.idl',
-    'nsIIDBTransaction.idl',
-    'nsIIDBVersionChangeEvent.idl',
     'nsIIndexedDatabaseManager.idl',
 ]
 
 XPIDL_MODULE = 'dom_indexeddb'
-
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/dom/interfaces/base',
-    '-I$(topsrcdir)/dom/interfaces/events',
-]
-
-MODULE = 'dom'
 
 EXPORTS.mozilla.dom.indexedDB += [
     'Client.h',
@@ -53,21 +35,18 @@ EXPORTS.mozilla.dom.indexedDB += [
     'KeyPath.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'AsyncConnectionHelper.cpp',
     'CheckPermissionsHelper.cpp',
     'Client.cpp',
     'DatabaseInfo.cpp',
     'FileInfo.cpp',
     'FileManager.cpp',
-    'IDBCursor.cpp',
     'IDBDatabase.cpp',
     'IDBEvents.cpp',
     'IDBFactory.cpp',
     'IDBFileHandle.cpp',
-    'IDBIndex.cpp',
     'IDBKeyRange.cpp',
-    'IDBObjectStore.cpp',
     'IDBRequest.cpp',
     'IDBTransaction.cpp',
     'IDBWrapperCache.cpp',
@@ -76,5 +55,28 @@ CPP_SOURCES += [
     'KeyPath.cpp',
     'OpenDatabaseHelper.cpp',
     'TransactionThreadPool.cpp',
+]
+
+# These files cannot be built in unified mode because of name collisions
+SOURCES += [
+    'IDBCursor.cpp',
+    'IDBIndex.cpp',
+    'IDBObjectStore.cpp',
+    'ReportInternalError.cpp',
+]
+
+FAIL_ON_WARNINGS = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'
+LOCAL_INCLUDES += [
+    '/caps/include',
+    '/content/base/src',
+    '/db/sqlite3/src',
+    '/dom/base',
+    '/dom/quota',
+    '/dom/src/storage',
+    '/xpcom/build',
 ]
 

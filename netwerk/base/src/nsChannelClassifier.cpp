@@ -18,10 +18,11 @@
 //
 static PRLogModuleInfo *gChannelClassifierLog;
 #endif
+#undef LOG
 #define LOG(args)     PR_LOG(gChannelClassifierLog, PR_LOG_DEBUG, args)
 
-NS_IMPL_ISUPPORTS1(nsChannelClassifier,
-                   nsIURIClassifierCallback)
+NS_IMPL_ISUPPORTS(nsChannelClassifier,
+                  nsIURIClassifierCallback)
 
 nsChannelClassifier::nsChannelClassifier()
 {

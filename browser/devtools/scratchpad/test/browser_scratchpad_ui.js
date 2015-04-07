@@ -29,15 +29,19 @@ function runTests()
     "sp-text-run": "run",
     "sp-text-inspect": "inspect",
     "sp-text-display": "display",
-    "sp-text-resetContext": "resetContext",
+    "sp-text-reloadAndRun": "reloadAndRun",
     "sp-menu-content": "setContentContext",
     "sp-menu-browser": "setBrowserContext",
+    "sp-menu-pprint": "prettyPrint",
+    "sp-menu-line-numbers": "toggleEditorOption",
+    "sp-menu-word-wrap": "toggleEditorOption",
+    "sp-menu-highlight-trailing-space": "toggleEditorOption",
+    "sp-menu-larger-font": "increaseFontSize",
+    "sp-menu-smaller-font": "decreaseFontSize",
+    "sp-menu-normal-size-font": "normalFontSize",
   };
 
   let lastMethodCalled = null;
-  sp.__noSuchMethod__ = function(aMethodName) {
-    lastMethodCalled = aMethodName;
-  };
 
   for (let id in methodsAndItems) {
     lastMethodCalled = null;
@@ -46,7 +50,9 @@ function runTests()
     let oldMethod = sp[methodName];
     ok(oldMethod, "found method " + methodName + " in Scratchpad object");
 
-    delete sp[methodName];
+    sp[methodName] = () => {
+      lastMethodCalled = methodName;
+    }
 
     let menu = doc.getElementById(id);
     ok(menu, "found menuitem #" + id);
@@ -63,8 +69,6 @@ function runTests()
 
     sp[methodName] = oldMethod;
   }
-
-  delete sp.__noSuchMethod__;
 
   finish();
 }

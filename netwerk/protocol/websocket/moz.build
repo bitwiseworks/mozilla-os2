@@ -11,8 +11,6 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'necko_websocket'
 
-MODULE = 'necko'
-
 EXPORTS.mozilla.net += [
     'BaseWebSocketChannel.h',
     'WebSocketChannel.h',
@@ -20,10 +18,28 @@ EXPORTS.mozilla.net += [
     'WebSocketChannelParent.h',
 ]
 
-CPP_SOURCES += [
+# These files cannot be built in unified mode because they want to force NSPR
+# logging.
+SOURCES += [
     'BaseWebSocketChannel.cpp',
     'WebSocketChannel.cpp',
     'WebSocketChannelChild.cpp',
     'WebSocketChannelParent.cpp',
 ]
 
+IPDL_SOURCES += [
+    'PWebSocket.ipdl',
+]
+
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'necko'
+
+LOCAL_INCLUDES += [
+    '../../base/src',
+    '/content/base/src',
+]

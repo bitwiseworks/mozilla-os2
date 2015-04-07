@@ -2,31 +2,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH           = @DEPTH@
-topsrcdir       = @top_srcdir@
-srcdir          = @srcdir@
-VPATH           = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-FORCE_STATIC_LIB = 1
-LIBXUL_LIBRARY   = 1
-
-
-ifndef MOZ_NATIVE_HUNSPELL
-# This variable is referenced in configure.in.  Make sure to change that file
-# too if you need to change this variable.
-DEFINES = -DHUNSPELL_STATIC
-endif
-
 include $(topsrcdir)/config/rules.mk
 
-INCLUDES        += -I$(topsrcdir)/extensions/spellcheck/src
-
 ifdef MOZ_NATIVE_HUNSPELL
+# MOZ_HUNSPELL_CFLAGS is extracted through pkgconfig during configure,
+# even though the variable doesn't show up in configure.in.
 CXXFLAGS += $(MOZ_HUNSPELL_CFLAGS)
 endif
 
-LOCAL_INCLUDES += \
-	-I$(topsrcdir)/editor/libeditor/base \
-	$(NULL)

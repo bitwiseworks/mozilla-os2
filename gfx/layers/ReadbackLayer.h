@@ -6,7 +6,20 @@
 #ifndef GFX_READBACKLAYER_H
 #define GFX_READBACKLAYER_H
 
-#include "Layers.h"
+#include <stdint.h>                     // for uint64_t
+#include "Layers.h"                     // for Layer, etc
+#include "gfxColor.h"                   // for gfxRGBA
+#include "gfxRect.h"                    // for gfxRect
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "nsAutoPtr.h"                  // for nsAutoPtr
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRect.h"                     // for nsIntRect
+#include "nsSize.h"                     // for nsIntSize
+#include "nscore.h"                     // for nsACString
+
+class gfxContext;
 
 namespace mozilla {
 namespace layers {
@@ -70,7 +83,7 @@ class ReadbackLayer : public Layer {
 public:
   MOZ_LAYER_DECL_NAME("ReadbackLayer", TYPE_READBACK)
 
-  virtual void ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface)
+  virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface)
   {
     // Snap our local transform first, and snap the inherited transform as well.
     // This makes our snapping equivalent to what would happen if our content

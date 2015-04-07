@@ -28,6 +28,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+#include "nsDebug.h"
 #include "base/message_loop.h"
 #include "mozilla/FileUtils.h"
 #include "nsAutoPtr.h"
@@ -58,7 +59,7 @@ public:
   // no writing to the netlink socket
   virtual void OnFileCanWriteWithoutBlocking(int fd)
   {
-    MOZ_NOT_REACHED("Must not write to netlink socket");
+    MOZ_CRASH("Must not write to netlink socket");
   }
 
   MessageLoopForIO *GetIOLoop () const { return mIOLoop; }
@@ -115,10 +116,26 @@ NetlinkPoller::OpenSocket()
   bzero(&saddr, sizeof(saddr));
   saddr.nl_family = AF_NETLINK;
   saddr.nl_groups = 1;
-  saddr.nl_pid = getpid();
+  saddr.nl_pid = gettid();
 
-  if (bind(mSocket.get(), (struct sockaddr *)&saddr, sizeof(saddr)) == -1)
-    return false;
+  do {
+    if (bind(mSocket.get(), (struct sockaddr *)&saddr, sizeof(saddr)) == 0) {
+      break;
+    }
+
+    if (errno != EADDRINUSE) {
+      return false;
+    }
+
+    if (saddr.nl_pid == 0) {
+      return false;
+    }
+
+    // Once there was any other place in the same process assigning saddr.nl_pid by
+    // gettid(), we can detect it and print warning message.
+    printf_stderr("The netlink socket address saddr.nl_pid=%u is in use. Let the kernel re-assign.\n", saddr.nl_pid);
+    saddr.nl_pid = 0;
+  } while (true);
 
   if (!mIOLoop->WatchFileDescriptor(mSocket.get(),
                                     true,
@@ -183,7 +200,7 @@ InitializeUevent()
 static void
 ShutdownUevent()
 {
-  sPoller = NULL;
+  sPoller = nullptr;
 }
 
 void

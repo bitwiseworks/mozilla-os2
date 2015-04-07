@@ -40,34 +40,30 @@ let CrossSlidingStateNames = [
 
 function isSelectable(aElement) {
   // placeholder logic
-  return aElement.nodeName == 'richgriditem';
+  return aElement.nodeName == 'richgriditem' && aElement.hasAttribute("value");
 }
-
 function withinCone(aLen, aHeight) {
   // check pt falls within 45deg either side of the cross axis
   return aLen > aHeight;
 }
-
 function getScrollAxisFromElement(aElement) {
-  let elem = aElement,
-      win = elem.ownerDocument.defaultView;
-  let scrollX, scrollY;
-  for (; elem && 1==elem.nodeType; elem = elem.parentNode) {
-    let cs = win.getComputedStyle(elem);
-    scrollX = (cs.overflowX=='scroll' || cs.overflowX=='auto');
-    scrollY = (cs.overflowX=='scroll' || cs.overflowX=='auto');
-    if (scrollX || scrollY) {
-      break;
-    }
-  }
-  return scrollX ? 'x' : 'y';
-}
+  // keeping it simple - just return apparent scroll axis for the document
+  let win = aElement.ownerDocument.defaultView;
+  let scrollX = win.scrollMaxX,
+      scrollY = win.scrollMaxY;
+  // determine scroll axis from scrollable content when possible
+  if (scrollX || scrollY)
+    return scrollX >= scrollY ? 'x' : 'y';
 
+  // fall back to guessing at scroll axis from document aspect ratio
+  let docElem = aElement.ownerDocument.documentElement;
+  return  docElem.clientWidth >= docElem.clientHeight ?
+          'x' : 'y';
+}
 function pointFromTouchEvent(aEvent) {
   let touch = aEvent.touches[0];
   return { x: touch.clientX, y: touch.clientY };
 }
-
 // This damping function has these important properties:
 // f(0) = 0
 // f'(0) = 1
@@ -105,6 +101,11 @@ function CrossSlideHandler(aNode, aThresholds) {
     for(let key in aThresholds)
       this.thresholds[key] = aThresholds[key];
   }
+  aNode.addEventListener("touchstart", this, false);
+  aNode.addEventListener("touchmove", this, false);
+  aNode.addEventListener("touchend", this, false);
+  aNode.addEventListener("touchcancel", this, false);
+  aNode.ownerDocument.defaultView.addEventListener("scroll", this, false);
 }
 
 CrossSlideHandler.prototype = {
@@ -139,6 +140,10 @@ CrossSlideHandler.prototype = {
       case "touchmove":
         this._onTouchMove(aEvent);
         break;
+      case "scroll":
+      case "touchcancel":
+        this.cancel(aEvent);
+        break;
       case "touchend":
         this._onTouchEnd(aEvent);
         break;
@@ -161,9 +166,6 @@ CrossSlideHandler.prototype = {
     if (!isSelectable(target))
         return;
 
-    // we'll handle this event, dont let it bubble further
-    aEvent.stopPropagation();
-
     let scrollAxis = getScrollAxisFromElement(target);
 
     this.drag = {
@@ -178,8 +180,6 @@ CrossSlideHandler.prototype = {
     if (!this.drag) {
       return;
     }
-    // event is handled here, dont let it bubble further
-    aEvent.stopPropagation();
 
     if (aEvent.touches.length!==1) {
       // cancel if another touch point gets involved
@@ -196,40 +196,42 @@ CrossSlideHandler.prototype = {
     let crossAxisDistance = Math.abs(endPt[crossAxis] - startPt[crossAxis]);
     // distance along the scrolling axis
     let scrollAxisDistance = Math.abs(endPt[scrollAxis] - startPt[scrollAxis]);
-
     let currState = this.drag.state;
     let newState = this.getCrossSlideState(crossAxisDistance, scrollAxisDistance);
 
-    if (-1 == newState) {
-      // out of bounds, cancel the event always
-      return this.cancel(aEvent);
+    switch (newState) {
+      case -1 :
+        // dodgy input/out of bounds
+        return this.cancel(aEvent);
+      case CrossSlidingState.STARTED :
+        break;
+      case CrossSlidingState.DRAGGING :
+        if (scrollAxisDistance > this.thresholds.SELECTIONSTART) {
+          // looks like a pan/scroll was intended
+          return this.cancel(aEvent);
+        }
+        // else fall-thru'
+      case CrossSlidingState.SELECTING :
+      case CrossSlidingState.SELECT_SPEED_BUMPING :
+      case CrossSlidingState.SPEED_BUMPING :
+        // we're committed to a cross-slide gesture,
+        // so going out of bounds at this point means aborting
+        if (!withinCone(crossAxisDistance, scrollAxisDistance)) {
+          return this.cancel(aEvent);
+        }
+        // we're mid-gesture, consume this event
+        aEvent.stopPropagation();
+        break;
     }
 
-    let isWithinCone = withinCone(crossAxisDistance, scrollAxisDistance);
-    if (currState < CrossSlidingState.SELECTING && !isWithinCone) {
-      // ignore, no progress to report
-      return;
+    if (currState !== newState) {
+      this.drag.state = newState;
+      this._fireProgressEvent( CrossSlidingStateNames[newState], aEvent );
     }
-    if (currState >= CrossSlidingState.SELECTING && !isWithinCone) {
-      // we're committed to a cross-slide gesture,
-      // so going out of bounds at this point means aborting
-      return this.cancel(aEvent);
-    }
-
-    if (currState > newState) {
-      // moved backwards, ignoring
-      return;
-    }
-
-    this.drag.state = newState;
-    this._fireProgressEvent( CrossSlidingStateNames[newState], aEvent );
   },
   _onTouchEnd: function(aEvent){
     if (!this.drag)
       return;
-
-    // event is handled, dont let it bubble further
-    aEvent.stopPropagation();
 
     if (this.drag.state < CrossSlidingState.SELECTING) {
       return this.cancel(aEvent);
@@ -247,14 +249,20 @@ CrossSlideHandler.prototype = {
    */
   _fireProgressEvent: function CrossSliding_fireEvent(aState, aEvent) {
     if (!this.drag)
-        return;
+      return;
     let event = this.node.ownerDocument.createEvent("Events");
-    let crossAxis = this.drag.crossAxis;
+    let crossAxisName = this.drag.crossAxis;
     event.initEvent("MozCrossSliding", true, true);
     event.crossSlidingState = aState;
-    event.position = this.drag.position;
-    event.direction = this.drag.crossAxis;
-    event.delta = this.drag.position[crossAxis] - this.drag.origin[crossAxis];
+    if ('position' in this.drag) {
+      event.position = this.drag.position;
+      if (crossAxisName) {
+        event.direction = crossAxisName;
+        if('origin' in this.drag) {
+          event.delta = this.drag.position[crossAxisName] - this.drag.origin[crossAxisName];
+        }
+      }
+    }
     aEvent.target.dispatchEvent(event);
   },
 

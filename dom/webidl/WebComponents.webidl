@@ -11,13 +11,18 @@
  */
 
 callback LifecycleCreatedCallback = void();
+callback LifecycleAttachedCallback = void();
+callback LifecycleDetachedCallback = void();
+callback LifecycleAttributeChangedCallback = void(DOMString attrName, DOMString? oldValue, DOMString? newValue);
 
 dictionary LifecycleCallbacks {
-  LifecycleCreatedCallback? created = null;
+  LifecycleCreatedCallback? createdCallback;
+  LifecycleAttachedCallback? attachedCallback;
+  LifecycleDetachedCallback? detachedCallback;
+  LifecycleAttributeChangedCallback? attributeChangedCallback;
 };
 
 dictionary ElementRegistrationOptions {
   object? prototype = null;
-  LifecycleCallbacks lifecycle;
+  DOMString? extends = null;
 };
-

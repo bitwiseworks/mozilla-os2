@@ -8,18 +8,20 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/ProcessingInstruction.h"
+#include "nsIURI.h"
 #include "nsStyleLinkElement.h"
 
 namespace mozilla {
 namespace dom {
 
-class XMLStylesheetProcessingInstruction : public ProcessingInstruction,
-                                           public nsStyleLinkElement
+class XMLStylesheetProcessingInstruction MOZ_FINAL
+: public ProcessingInstruction
+, public nsStyleLinkElement
 {
 public:
-  XMLStylesheetProcessingInstruction(already_AddRefed<nsINodeInfo> aNodeInfo,
+  XMLStylesheetProcessingInstruction(already_AddRefed<nsINodeInfo>&& aNodeInfo,
                                      const nsAString& aData)
-    : ProcessingInstruction(aNodeInfo, aData)
+    : ProcessingInstruction(Move(aNodeInfo), aData)
   {
   }
 
@@ -35,8 +37,7 @@ public:
 
   virtual ~XMLStylesheetProcessingInstruction();
 
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
@@ -61,6 +62,16 @@ public:
 
   // nsStyleLinkElement
   NS_IMETHOD GetCharset(nsAString& aCharset) MOZ_OVERRIDE;
+
+  virtual void SetData(const nsAString& aData, mozilla::ErrorResult& rv) MOZ_OVERRIDE
+  {
+    nsGenericDOMDataNode::SetData(aData, rv);
+    if (rv.Failed()) {
+      return;
+    }
+    UpdateStyleSheetInternal(nullptr, nullptr, true);
+  }
+  using ProcessingInstruction::SetData; // Prevent hiding overloaded virtual function.
 
 protected:
   nsCOMPtr<nsIURI> mOverriddenBaseURI;

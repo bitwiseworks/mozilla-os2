@@ -30,7 +30,7 @@ class nsVolumeService MOZ_FINAL : public nsIVolumeService,
                                   public nsIDOMMozWakeLockListener
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIVOLUMESERVICE
   NS_DECL_NSIDOMMOZWAKELOCKLISTENER
 
@@ -50,7 +50,7 @@ private:
                       const nsAString& aMountLockState);
   already_AddRefed<nsVolume> FindVolumeByMountLockName(const nsAString& aMountLockName);
   already_AddRefed<nsVolume> FindVolumeByName(const nsAString& aName);
-  already_AddRefed<nsVolume> CreateOrFindVolumeByName(const nsAString& aName);
+  already_AddRefed<nsVolume> CreateOrFindVolumeByName(const nsAString& aName, bool aIsFake = false);
 
   Monitor mArrayMonitor;
   nsVolume::Array mVolumeArray;

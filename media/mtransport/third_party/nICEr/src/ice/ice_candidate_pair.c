@@ -53,9 +53,6 @@ int nr_ice_candidate_pair_create(nr_ice_peer_ctx *pctx, nr_ice_candidate *lcand,
   {
     nr_ice_cand_pair *pair=0;
     UINT8 o_priority, a_priority;
-    char *lufrag,*rufrag;
-    char *lpwd,*rpwd;
-    char *l2ruser=0,*r2lpass=0;
     int r,_status;
     UINT4 RTO;
     nr_ice_candidate tmpcand;
@@ -91,23 +88,17 @@ int nr_ice_candidate_pair_create(nr_ice_peer_ctx *pctx, nr_ice_candidate *lcand,
     pair->priority=(MIN(o_priority, a_priority))<<32 |
       (MAX(o_priority, a_priority))<<1 | (o_priority > a_priority?0:1);
 
-    r_log(LOG_ICE,LOG_DEBUG,"ICE(%s): Pairing candidate %s (%x):%s (%x) priority=%llu (%llx) codeword=%s",pctx->ctx->label,lcand->addr.as_string,lcand->priority,rcand->addr.as_string,rcand->priority,pair->priority,pair->priority,pair->codeword);
+    /*
+       TODO(bcampen@mozilla.com): Would be nice to log why this candidate was
+       created (initial pair generation, triggered check, and new trickle
+       candidate seem to be the possibilities here).
+    */
+    r_log(LOG_ICE,LOG_INFO,"ICE(%s)/CAND-PAIR(%s): Pairing candidate %s (%x):%s (%x) priority=%llu (%llx)",pctx->ctx->label,pair->codeword,lcand->addr.as_string,lcand->priority,rcand->addr.as_string,rcand->priority,pair->priority,pair->priority);
 
     /* Foundation */
     if(r=nr_concat_strings(&pair->foundation,lcand->foundation,"|",
       rcand->foundation,NULL))
       ABORT(r);
-
-
-    /* OK, now the STUN data */
-    lufrag=lcand->stream->ufrag?lcand->stream->ufrag:pctx->ctx->ufrag;
-    lpwd=lcand->stream->pwd?lcand->stream->pwd:pctx->ctx->pwd;
-    assert(lufrag);
-    assert(lpwd);
-    rufrag=rcand->stream->ufrag?rcand->stream->ufrag:pctx->peer_ufrag;
-    rpwd=rcand->stream->pwd?rcand->stream->pwd:pctx->peer_pwd;
-    if (!rufrag || !rpwd)
-      ABORT(R_BAD_DATA);
 
     /* Compute the RTO per S 16 */
     RTO = MAX(100, (pctx->ctx->Ta * pctx->waiting_pairs));
@@ -121,38 +112,27 @@ int nr_ice_candidate_pair_create(nr_ice_peer_ctx *pctx, nr_ice_candidate *lcand,
     t_priority = tmpcand.priority;
 
     /* Our sending context */
-    if(r=nr_concat_strings(&l2ruser,rufrag,":",lufrag,NULL))
-      ABORT(r);
     if(r=nr_stun_client_ctx_create(pair->as_string,
       lcand->osock,
       &rcand->addr,RTO,&pair->stun_client))
       ABORT(r);
-    if(!(pair->stun_client->params.ice_binding_request.username=r_strdup(l2ruser)))
+    if(!(pair->stun_client->params.ice_binding_request.username=r_strdup(rcand->stream->l2r_user)))
       ABORT(R_NO_MEMORY);
-    if(r=r_data_make(&pair->stun_client->params.ice_binding_request.password,(UCHAR *)rpwd,strlen(rpwd)))
+    if(r=r_data_copy(&pair->stun_client->params.ice_binding_request.password,
+      &rcand->stream->l2r_pass))
       ABORT(r);
     pair->stun_client->params.ice_binding_request.priority=t_priority;
+    /* TODO(ekr@rtfm.com): Do we need to frob this when we change role. Bug 890667 */
     pair->stun_client->params.ice_binding_request.control = pctx->controlling?
       NR_ICE_CONTROLLING:NR_ICE_CONTROLLED;
+    pair->stun_client->params.ice_use_candidate.priority=t_priority;
 
     pair->stun_client->params.ice_binding_request.tiebreaker=pctx->tiebreaker;
-
-    /* Our receiving username/passwords. Stash these for later
-       injection into the stun server ctx*/
-    if(r=nr_concat_strings(&pair->r2l_user,lufrag,":",rufrag,NULL))
-      ABORT(r);
-    if(!(r2lpass=r_strdup(lpwd)))
-      ABORT(R_NO_MEMORY);
-    INIT_DATA(pair->r2l_pwd,(UCHAR *)r2lpass,strlen(r2lpass));
-    // Give up ownership of r2lpass
-    r2lpass=0;
 
     *pairp=pair;
 
     _status=0;
   abort:
-    RFREE(l2ruser);
-    RFREE(r2lpass);
     if(_status){
       nr_ice_candidate_pair_destroy(&pair);
     }
@@ -177,9 +157,6 @@ int nr_ice_candidate_pair_destroy(nr_ice_cand_pair **pairp)
       RFREE(pair->stun_client->params.ice_binding_request.password.data);
       nr_stun_client_ctx_destroy(&pair->stun_client);
     }
-
-    RFREE(pair->r2l_user);
-    RFREE(pair->r2l_pwd.data);
 
     NR_async_timer_cancel(pair->stun_cb_timer);
     NR_async_timer_cancel(pair->restart_controlled_cb_timer);
@@ -212,8 +189,8 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
 
     pair->stun_cb_timer=0;
 
-    r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s)/STREAM(%s): STUN cb on pair %s",
-      pair->pctx->label,pair->local->stream->label,pair->as_string);
+    r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s)/STREAM(%s)/CAND-PAIR(%s): STUN cb on pair addr = %s",
+      pair->pctx->label,pair->local->stream->label,pair->codeword,pair->as_string);
 
     /* This ordinarily shouldn't happen, but can if we're
        doing the second check to confirm nomination.
@@ -225,7 +202,7 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
       case NR_STUN_CLIENT_STATE_FAILED:
         sres=pair->stun_client->response;
         if(sres && nr_stun_message_has_attribute(sres,NR_STUN_ATTR_ERROR_CODE,&attr)&&attr->u.error_code.number==487){
-          r_log(LOG_ICE,LOG_ERR,"ICE-PEER(%s): detected role conflict. Switching to controlled",pair->pctx->label);
+          r_log(LOG_ICE,LOG_INFO,"ICE-PEER(%s)/CAND-PAIR(%s): detected role conflict. Switching to controlled",pair->pctx->label,pair->codeword);
 
           pair->pctx->controlling=0;
 
@@ -244,14 +221,14 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
         response_src=&pair->stun_client->peer_addr;
         request_dst=&pair->remote->addr;
         if (nr_transport_addr_cmp(response_src,request_dst,NR_TRANSPORT_ADDR_CMP_MODE_ALL)){
-          r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s): Peer address mismatch %s/%s",pair->pctx->label, response_src->as_string,request_dst->as_string);
+          r_log(LOG_ICE,LOG_WARNING,"ICE-PEER(%s)/CAND-PAIR(%s): Peer address mismatch %s != %s",pair->pctx->label,pair->codeword,response_src->as_string,request_dst->as_string);
           nr_ice_candidate_pair_set_state(pair->pctx,pair,NR_ICE_PAIR_STATE_FAILED);
           break;
         }
         request_src=&pair->stun_client->my_addr;
         nr_socket_getaddr(pair->local->osock,&response_dst);
         if (nr_transport_addr_cmp(request_src,&response_dst,NR_TRANSPORT_ADDR_CMP_MODE_ALL)){
-          r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s): Address mismatch %s/%s",pair->pctx->label, request_src->as_string,response_dst.as_string);
+          r_log(LOG_ICE,LOG_WARNING,"ICE-PEER(%s)/CAND-PAIR(%s): Local address mismatch %s != %s",pair->pctx->label,pair->codeword,request_src->as_string,response_dst.as_string);
           nr_ice_candidate_pair_set_state(pair->pctx,pair,NR_ICE_PAIR_STATE_FAILED);
           break;
         }
@@ -264,7 +241,7 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
            * just assume that it's the server we're talking to and that our
            * peer is ok, but I'm not sure how that'll interact with the
            * peer reflexive logic below */
-          r_log(LOG_ICE,LOG_ERR,"ICE-PEER(%s): server failed to return mapped address on pair %s", pair->pctx->label,pair->as_string);
+          r_log(LOG_ICE,LOG_WARNING,"ICE-PEER(%s)/CAND-PAIR(%s): server failed to return mapped address on pair %s", pair->pctx->label,pair->codeword,pair->as_string);
           nr_ice_candidate_pair_set_state(pair->pctx,pair,NR_ICE_PAIR_STATE_FAILED);
           break;
         }
@@ -303,7 +280,7 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
 
           nr_ice_candidate_pair_set_state(pair->pctx,pair,NR_ICE_PAIR_STATE_SUCCEEDED);
 
-          if(r=nr_ice_candidate_pair_insert(&pair->remote->stream->check_list,pair))
+          if(r=nr_ice_component_insert_pair(pair->remote->component,pair))
             ABORT(r);
 
           /* If the original pair was nominated, make us nominated,
@@ -406,7 +383,7 @@ int nr_ice_candidate_pair_do_triggered_check(nr_ice_peer_ctx *pctx, nr_ice_cand_
   {
     int r,_status;
 
-    r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s): triggered check on %s",pctx->label,pair->as_string);
+    r_log(LOG_ICE,LOG_INFO,"ICE-PEER(%s)/CAND-PAIR(%s): triggered check on %s",pctx->label,pair->codeword,pair->as_string);
 
     switch(pair->state){
       case NR_ICE_PAIR_STATE_FROZEN:
@@ -459,7 +436,7 @@ int nr_ice_candidate_pair_select(nr_ice_cand_pair *pair)
     }
 
     if(pair->state!=NR_ICE_PAIR_STATE_SUCCEEDED){
-      r_log(LOG_ICE,LOG_ERR,"ICE-PEER(%s): tried to install non-succeeded pair %s, ignoring",pair->pctx->label,pair->as_string);
+      r_log(LOG_ICE,LOG_ERR,"ICE-PEER(%s)/CAND-PAIR(%s): tried to install non-succeeded pair, ignoring: %s",pair->pctx->label,pair->codeword,pair->as_string);
     }
     else{
       /* Ok, they chose one */
@@ -484,8 +461,8 @@ int nr_ice_candidate_pair_set_state(nr_ice_peer_ctx *pctx, nr_ice_cand_pair *pai
   {
     int r,_status;
 
-    r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s): setting pair %s to %s",
-      pctx->label,pair->as_string,nr_ice_cand_pair_states[state]);
+    r_log(LOG_ICE,LOG_INFO,"ICE-PEER(%s)/CAND-PAIR(%s): setting pair to state %s: %s",
+      pctx->label,pair->codeword,nr_ice_cand_pair_states[state],pair->as_string);
 
     /* NOTE: This function used to reference pctx->state instead of
        pair->state and the assignment to pair->state was at the top
@@ -525,7 +502,7 @@ int nr_ice_candidate_pair_set_state(nr_ice_peer_ctx *pctx, nr_ice_cand_pair *pai
 
 int nr_ice_candidate_pair_dump_state(nr_ice_cand_pair *pair, FILE *out)
   {
-    //r_log(LOG_ICE,LOG_DEBUG,"pair %s: state=%s, priority=0x%llx\n",pair->as_string,nr_ice_cand_pair_states[pair->state],pair->priority);
+    /*r_log(LOG_ICE,LOG_DEBUG,"CAND-PAIR(%s): pair %s: state=%s, priority=0x%llx\n",pair->codeword,pair->as_string,nr_ice_cand_pair_states[pair->state],pair->priority);*/
 
     return(0);
   }
@@ -556,10 +533,9 @@ void nr_ice_candidate_pair_restart_stun_nominated_cb(NR_SOCKET s, int how, void 
 
     pair->restart_nominated_cb_timer=0;
 
-    r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s)/STREAM(%s):%d: Restarting pair %s as nominated",pair->pctx->label,pair->local->stream->label,pair->remote->component->component_id,pair->as_string);
+    r_log(LOG_ICE,LOG_INFO,"ICE-PEER(%s)/STREAM(%s)/CAND-PAIR(%s)/COMP(%d): Restarting pair as nominated: %s",pair->pctx->label,pair->local->stream->label,pair->codeword,pair->remote->component->component_id,pair->as_string);
 
     nr_stun_client_reset(pair->stun_client);
-    pair->stun_client->params.ice_binding_request.control=NR_ICE_CONTROLLING;
 
     if(r=nr_stun_client_start(pair->stun_client,NR_ICE_CLIENT_MODE_USE_CANDIDATE,nr_ice_candidate_pair_stun_cb,pair))
       ABORT(r);
@@ -579,7 +555,7 @@ static void nr_ice_candidate_pair_restart_stun_controlled_cb(NR_SOCKET s, int ho
 
     pair->restart_controlled_cb_timer=0;
 
-    r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s)/STREAM(%s):%d: Restarting pair %s as CONTROLLED",pair->pctx->label,pair->local->stream->label,pair->remote->component->component_id,pair->as_string);
+    r_log(LOG_ICE,LOG_INFO,"ICE-PEER(%s)/STREAM(%s)/CAND-PAIR(%s):COMP(%d): Restarting pair as CONTROLLED: %s",pair->pctx->label,pair->local->stream->label,pair->codeword,pair->remote->component->component_id,pair->as_string);
 
     nr_stun_client_reset(pair->stun_client);
     pair->stun_client->params.ice_binding_request.control=NR_ICE_CONTROLLED;
@@ -600,18 +576,16 @@ static void nr_ice_candidate_pair_restart_stun_controlled_cb(NR_SOCKET s, int ho
 static void nr_ice_candidate_pair_compute_codeword(nr_ice_cand_pair *pair,
   nr_ice_candidate *lcand, nr_ice_candidate *rcand)
   {
-    int r,_status;
-    char *as_string=0;
+    char as_string[2048];
 
-    if(r=nr_concat_strings(&as_string,lcand->addr.as_string,"|",
-      rcand->addr.as_string,"(",lcand->label,"|",rcand->label,")",NULL))
-      ABORT(r);
+    snprintf(as_string,
+             sizeof(as_string),
+             "%s|%s(%s|%s)",
+             lcand->addr.as_string,
+             rcand->addr.as_string,
+             lcand->label,
+             rcand->label);
 
     nr_ice_compute_codeword(as_string,strlen(as_string),pair->codeword);
-
-    _status=0;
-      abort:
-    RFREE(as_string);
-return;
   }
 

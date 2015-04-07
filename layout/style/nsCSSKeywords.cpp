@@ -8,7 +8,6 @@
 #include "nsCSSKeywords.h"
 #include "nsString.h"
 #include "nsStaticNameTable.h"
-#include "nsReadableUtils.h"
 
 // required to make the symbol external, so that TestCSSPropertyLookup.cpp can link with it
 extern const char* const kCSSRawKeywords[];
@@ -20,13 +19,13 @@ const char* const kCSSRawKeywords[] = {
 };
 #undef CSS_KEY
 
-static int32_t gTableRefCount;
+static int32_t gKeywordTableRefCount;
 static nsStaticCaseInsensitiveNameTable* gKeywordTable;
 
 void
 nsCSSKeywords::AddRefTable(void) 
 {
-  if (0 == gTableRefCount++) {
+  if (0 == gKeywordTableRefCount++) {
     NS_ASSERTION(!gKeywordTable, "pre existing array!");
     gKeywordTable = new nsStaticCaseInsensitiveNameTable();
     if (gKeywordTable) {
@@ -52,7 +51,7 @@ nsCSSKeywords::AddRefTable(void)
 void
 nsCSSKeywords::ReleaseTable(void) 
 {
-  if (0 == --gTableRefCount) {
+  if (0 == --gKeywordTableRefCount) {
     if (gKeywordTable) {
       delete gKeywordTable;
       gKeywordTable = nullptr;

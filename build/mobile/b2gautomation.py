@@ -13,7 +13,6 @@ import time
 import traceback
 
 from automation import Automation
-from devicemanager import NetworkTools
 from mozprocess import ProcessHandlerMixin
 
 
@@ -76,7 +75,7 @@ class B2GRemoteAutomation(Automation):
             Automation.installExtension(self, extensionSource, profileDir, extensionID)
 
     # Set up what we need for the remote environment
-    def environment(self, env=None, xrePath=None, crashreporter=True):
+    def environment(self, env=None, xrePath=None, crashreporter=True, debugger=False):
         # Because we are running remote, we don't want to mimic the local env
         # so no copying of os.environ
         if env is None:
@@ -129,10 +128,6 @@ class B2GRemoteAutomation(Automation):
 
         return app, args
 
-    def getLanIp(self):
-        nettools = NetworkTools()
-        return nettools.getLanIp()
-
     def waitForFinish(self, proc, utilityPath, timeout, maxTime, startTime,
                       debuggerInfo, symbolsPath):
         """ Wait for tests to finish (as evidenced by a signature string
@@ -140,11 +135,9 @@ class B2GRemoteAutomation(Automation):
             output.
         """
         timeout = timeout or 120
-        responseDueBy = time.time() + timeout
         while True:
-            currentlog = proc.stdout
+            currentlog = proc.getStdoutLines(timeout)
             if currentlog:
-                responseDueBy = time.time() + timeout
                 print currentlog
                 # Match the test filepath from the last TEST-START line found in the new
                 # log content. These lines are in the form:
@@ -155,11 +148,10 @@ class B2GRemoteAutomation(Automation):
                 if hasattr(self, 'logFinish') and self.logFinish in currentlog:
                     return 0
             else:
-                if time.time() > responseDueBy:
-                    self.log.info("TEST-UNEXPECTED-FAIL | %s | application timed "
-                                  "out after %d seconds with no output",
-                                  self.lastTestSeen, int(timeout))
-                    return 1
+                self.log.info("TEST-UNEXPECTED-FAIL | %s | application timed "
+                              "out after %d seconds with no output",
+                              self.lastTestSeen, int(timeout))
+                return 1
 
     def getDeviceStatus(self, serial=None):
         # Get the current status of the device.  If we know the device
@@ -329,16 +321,22 @@ class B2GRemoteAutomation(Automation):
             # a dummy value to make the automation happy
             return 0
 
-        @property
-        def stdout(self):
+        def getStdoutLines(self, timeout):
             # Return any lines in the queue used by the
             # b2g process handler.
             lines = []
+            # get all of the lines that are currently available
             while True:
                 try:
                     lines.append(self.queue.get_nowait())
                 except Queue.Empty:
                     break
+
+            # wait 'timeout' for any additional lines
+            try:
+                lines.append(self.queue.get(True, timeout))
+            except Queue.Empty:
+                pass
             return '\n'.join(lines)
 
         def wait(self, timeout=None):
@@ -349,25 +347,3 @@ class B2GRemoteAutomation(Automation):
             # this should never happen
             raise Exception("'kill' called on B2GInstance")
 
-
-class B2GDesktopAutomation(Automation):
-
-    def buildCommandLine(self, app, debuggerInfo, profileDir, testURL, extraArgs):
-        """ build the application command line """
-
-        cmd = os.path.abspath(app)
-        args = []
-
-        if debuggerInfo:
-            args.extend(debuggerInfo["args"])
-            args.append(cmd)
-            cmd = os.path.abspath(debuggerInfo["path"])
-
-        if self.IS_MAC:
-            args.append("-foreground")
-
-        profileDirectory = profileDir + "/"
-
-        args.extend(("-profile", profileDirectory))
-        args.extend(extraArgs)
-        return cmd, args

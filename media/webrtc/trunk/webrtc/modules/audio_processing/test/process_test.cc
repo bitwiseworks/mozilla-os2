@@ -17,8 +17,6 @@
 
 #include <algorithm>
 
-#include "gtest/gtest.h"
-
 #include "webrtc/modules/audio_processing/include/audio_processing.h"
 #include "webrtc/modules/interface/module_common_types.h"
 #include "webrtc/system_wrappers/interface/cpu_features_wrapper.h"
@@ -27,8 +25,10 @@
 #include "webrtc/test/testsupport/fileutils.h"
 #include "webrtc/test/testsupport/perf_test.h"
 #ifdef WEBRTC_ANDROID_PLATFORM_BUILD
+#include "gtest/gtest.h"
 #include "external/webrtc/webrtc/modules/audio_processing/debug.pb.h"
 #else
+#include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/audio_processing/debug.pb.h"
 #endif
 
@@ -38,6 +38,7 @@ using webrtc::EchoCancellation;
 using webrtc::GainControl;
 using webrtc::NoiseSuppression;
 using webrtc::scoped_array;
+using webrtc::scoped_ptr;
 using webrtc::TickInterval;
 using webrtc::TickTime;
 using webrtc::VoiceDetection;
@@ -104,9 +105,12 @@ void usage() {
   printf("  --no_drift_compensation\n");
   printf("  --no_echo_metrics\n");
   printf("  --no_delay_logging\n");
+  printf("  --aec_suppression_level LEVEL  [0 - 2]\n");
   printf("\n  -aecm    Echo control mobile\n");
   printf("  --aecm_echo_path_in_file FILE\n");
   printf("  --aecm_echo_path_out_file FILE\n");
+  printf("  --no_comfort_noise\n");
+  printf("  --routing_mode MODE  [0 - 4]\n");
   printf("\n  -agc     Gain control\n");
   printf("  --analog\n");
   printf("  --adaptive_digital\n");
@@ -136,18 +140,18 @@ void usage() {
   printf("  --debug_file FILE  Dump a debug recording.\n");
 }
 
-static double MicLevel2Gain(int level) {
-  return pow(10.0, ((level - 127.0) / 128.0 * 80.) / 20.);
+static float MicLevel2Gain(int level) {
+  return pow(10.0f, ((level - 127.0f) / 128.0f * 40.0f) / 20.0f);
 }
 
 static void SimulateMic(int mic_level, AudioFrame* frame) {
   mic_level = std::min(std::max(mic_level, 0), 255);
-  double mic_gain = MicLevel2Gain(mic_level);
+  float mic_gain = MicLevel2Gain(mic_level);
   int num_samples = frame->samples_per_channel_ * frame->num_channels_;
-  double v;
+  float v;
   for (int n = 0; n < num_samples; n++) {
     v = floor(frame->data_[n] * mic_gain + 0.5);
-    v = std::max(std::min(32767., v), -32768.);
+    v = std::max(std::min(32767.0f, v), -32768.0f);
     frame->data_[n] = static_cast<int16_t>(v);
   }
 }
@@ -164,8 +168,8 @@ void void_main(int argc, char* argv[]) {
     printf("Try `process_test --help' for more information.\n\n");
   }
 
-  AudioProcessing* apm = AudioProcessing::Create(0);
-  ASSERT_TRUE(apm != NULL);
+  scoped_ptr<AudioProcessing> apm(AudioProcessing::Create(0));
+  ASSERT_TRUE(apm.get() != NULL);
 
   const char* pb_filename = NULL;
   const char* far_filename = NULL;
@@ -275,6 +279,16 @@ void void_main(int argc, char* argv[]) {
     } else if (strcmp(argv[i], "--no_level_metrics") == 0) {
       ASSERT_EQ(apm->kNoError, apm->level_estimator()->Enable(false));
 
+    } else if (strcmp(argv[i], "--aec_suppression_level") == 0) {
+      i++;
+      ASSERT_LT(i, argc) << "Specify level after --aec_suppression_level";
+      int suppression_level;
+      ASSERT_EQ(1, sscanf(argv[i], "%d", &suppression_level));
+      ASSERT_EQ(apm->kNoError,
+                apm->echo_cancellation()->set_suppression_level(
+                    static_cast<webrtc::EchoCancellation::SuppressionLevel>(
+                        suppression_level)));
+
     } else if (strcmp(argv[i], "-aecm") == 0) {
       ASSERT_EQ(apm->kNoError, apm->echo_control_mobile()->Enable(true));
 
@@ -287,6 +301,20 @@ void void_main(int argc, char* argv[]) {
       i++;
       ASSERT_LT(i, argc) << "Specify filename after --aecm_echo_path_out_file";
       aecm_echo_path_out_filename = argv[i];
+
+    } else if (strcmp(argv[i], "--no_comfort_noise") == 0) {
+      ASSERT_EQ(apm->kNoError,
+                apm->echo_control_mobile()->enable_comfort_noise(false));
+
+    } else if (strcmp(argv[i], "--routing_mode") == 0) {
+      i++;
+      ASSERT_LT(i, argc) << "Specify mode after --routing_mode";
+      int routing_mode;
+      ASSERT_EQ(1, sscanf(argv[i], "%d", &routing_mode));
+      ASSERT_EQ(apm->kNoError,
+                apm->echo_control_mobile()->set_routing_mode(
+                    static_cast<webrtc::EchoControlMobile::RoutingMode>(
+                        routing_mode)));
 
     } else if (strcmp(argv[i], "-agc") == 0) {
       ASSERT_EQ(apm->kNoError, apm->gain_control()->Enable(true));
@@ -574,10 +602,10 @@ void void_main(int argc, char* argv[]) {
 
   TickTime t0 = TickTime::Now();
   TickTime t1 = t0;
-  WebRtc_Word64 max_time_us = 0;
-  WebRtc_Word64 max_time_reverse_us = 0;
-  WebRtc_Word64 min_time_us = 1e6;
-  WebRtc_Word64 min_time_reverse_us = 1e6;
+  int64_t max_time_us = 0;
+  int64_t max_time_reverse_us = 0;
+  int64_t min_time_us = 1e6;
+  int64_t min_time_reverse_us = 1e6;
 
   // TODO(ajm): Ideally we would refactor this block into separate functions,
   //            but for now we want to share the variables.
@@ -618,6 +646,7 @@ void void_main(int argc, char* argv[]) {
         far_frame.num_channels_ = msg.num_reverse_channels();
         near_frame.sample_rate_hz_ = msg.sample_rate();
         near_frame.samples_per_channel_ = samples_per_channel;
+        near_frame.num_channels_ = msg.num_input_channels();
 
         if (verbose) {
           printf("Init at frame: %d (primary), %d (reverse)\n",
@@ -680,10 +709,6 @@ void void_main(int argc, char* argv[]) {
           fflush(stdout);
         }
 
-        if (apm->gain_control()->mode() == GainControl::kAdaptiveAnalog) {
-          SimulateMic(capture_level, &near_frame);
-        }
-
         if (perf_testing) {
           t0 = TickTime::Now();
         }
@@ -692,8 +717,7 @@ void void_main(int argc, char* argv[]) {
                   apm->gain_control()->set_stream_analog_level(msg.level()));
         ASSERT_EQ(apm->kNoError,
                   apm->set_stream_delay_ms(msg.delay() + extra_delay_ms));
-        ASSERT_EQ(apm->kNoError,
-            apm->echo_cancellation()->set_stream_drift_samples(msg.drift()));
+        apm->echo_cancellation()->set_stream_drift_samples(msg.drift());
 
         int err = apm->ProcessStream(&near_frame);
         if (err == apm->kBadStreamParameterWarning) {
@@ -702,8 +726,6 @@ void void_main(int argc, char* argv[]) {
         ASSERT_TRUE(err == apm->kNoError ||
                     err == apm->kBadStreamParameterWarning);
         ASSERT_TRUE(near_frame.num_channels_ == apm->num_output_channels());
-
-        capture_level = apm->gain_control()->stream_analog_level();
 
         stream_has_voice =
             static_cast<int8_t>(apm->voice_detection()->stream_has_voice());
@@ -720,10 +742,6 @@ void void_main(int argc, char* argv[]) {
                                sizeof(ns_speech_prob),
                                1,
                                ns_prob_file));
-        }
-
-        if (apm->gain_control()->mode() != GainControl::kAdaptiveAnalog) {
-          ASSERT_EQ(msg.level(), capture_level);
         }
 
         if (perf_testing) {
@@ -888,7 +906,8 @@ void void_main(int argc, char* argv[]) {
               fread(&drift_samples, sizeof(drift_samples), 1, drift_file));
         }
 
-        if (apm->gain_control()->mode() == GainControl::kAdaptiveAnalog) {
+        if (apm->gain_control()->is_enabled() &&
+            apm->gain_control()->mode() == GainControl::kAdaptiveAnalog) {
           SimulateMic(capture_level, &near_frame);
         }
 
@@ -896,15 +915,12 @@ void void_main(int argc, char* argv[]) {
           t0 = TickTime::Now();
         }
 
-        // TODO(ajm): fake an analog gain while simulating.
-
-        int capture_level_in = capture_level;
+        const int capture_level_in = capture_level;
         ASSERT_EQ(apm->kNoError,
                   apm->gain_control()->set_stream_analog_level(capture_level));
         ASSERT_EQ(apm->kNoError,
                   apm->set_stream_delay_ms(delay_ms + extra_delay_ms));
-        ASSERT_EQ(apm->kNoError,
-            apm->echo_cancellation()->set_stream_drift_samples(drift_samples));
+        apm->echo_cancellation()->set_stream_drift_samples(drift_samples);
 
         int err = apm->ProcessStream(&near_frame);
         if (err == apm->kBadStreamParameterWarning) {
@@ -1027,7 +1043,7 @@ void void_main(int argc, char* argv[]) {
 
   if (perf_testing) {
     if (primary_count > 0) {
-      WebRtc_Word64 exec_time = acc_ticks.Milliseconds();
+      int64_t exec_time = acc_ticks.Milliseconds();
       printf("\nTotal time: %.3f s, file time: %.2f s\n",
         exec_time * 0.001, primary_count * 0.01);
       printf("Time per frame: %.3f ms (average), %.3f ms (max),"
@@ -1036,15 +1052,12 @@ void void_main(int argc, char* argv[]) {
           (max_time_us + max_time_reverse_us) / 1000.0,
           (min_time_us + min_time_reverse_us) / 1000.0);
       // Record the results with Perf test tools.
-      webrtc::test::PrintResult("time_per_10ms_frame", "", "audioproc",
+      webrtc::test::PrintResult("audioproc", "", "time_per_10ms_frame",
           (exec_time * 1000) / primary_count, "us", false);
     } else {
       printf("Warning: no capture frames\n");
     }
   }
-
-  AudioProcessing::Destroy(apm);
-  apm = NULL;
 }
 }  // namespace
 

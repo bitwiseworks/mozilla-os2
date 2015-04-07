@@ -8,7 +8,7 @@
 #include "nsUnicharStreamLoader.h"
 #include "nsIInputStream.h"
 #include "nsICharsetConverterManager.h"
-#include "nsIServiceManager.h"
+#include "nsServiceManagerUtils.h"
 #include <algorithm>
 
 // 1024 bytes is specified in
@@ -46,8 +46,8 @@ nsUnicharStreamLoader::Create(nsISupports *aOuter,
   return rv;
 }
 
-NS_IMPL_ISUPPORTS3(nsUnicharStreamLoader, nsIUnicharStreamLoader,
-                   nsIRequestObserver, nsIStreamListener)
+NS_IMPL_ISUPPORTS(nsUnicharStreamLoader, nsIUnicharStreamLoader,
+                  nsIRequestObserver, nsIStreamListener)
 
 /* readonly attribute nsIChannel channel; */
 NS_IMETHODIMP
@@ -181,7 +181,16 @@ nsUnicharStreamLoader::DetermineCharset()
     do_GetService(kCharsetConverterManagerCID, &rv);
   if (NS_FAILED(rv)) return rv;
 
-  rv = ccm->GetUnicodeDecoder(mCharset.get(), getter_AddRefs(mDecoder));
+  // Sadly, nsIUnicharStreamLoader is exposed to extensions, so we can't
+  // assume mozilla::css::Loader to be the only caller. Since legacy
+  // charset alias code doesn't know about the replacement encoding,
+  // special-case it here, but let other stuff go through legacy alias
+  // resolution for now.
+  if (mCharset.EqualsLiteral("replacement")) {
+    rv = ccm->GetUnicodeDecoderRaw(mCharset.get(), getter_AddRefs(mDecoder));
+  } else {
+    rv = ccm->GetUnicodeDecoder(mCharset.get(), getter_AddRefs(mDecoder));
+  }
   if (NS_FAILED(rv)) return rv;
 
   // Process the data into mBuffer

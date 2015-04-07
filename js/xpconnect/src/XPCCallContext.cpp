@@ -1,16 +1,13 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=99:
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* Call context. */
 
-#include "mozilla/Util.h"
-#include "AccessCheck.h"
-
 #include "xpcprivate.h"
+#include "jswrapper.h"
 
 using namespace mozilla;
 using namespace xpc;
@@ -19,14 +16,14 @@ using namespace JS;
 #define IS_TEAROFF_CLASS(clazz) ((clazz) == &XPC_WN_Tearoff_JSClass)
 
 XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
-                               JSContext* cx       /* = GetDefaultJSContext() */,
+                               JSContext* cx,
                                HandleObject obj    /* = nullptr               */,
                                HandleObject funobj /* = nullptr               */,
                                HandleId name       /* = JSID_VOID             */,
                                unsigned argc       /* = NO_ARGS               */,
                                jsval *argv         /* = nullptr               */,
                                jsval *rval         /* = nullptr               */)
-    :   mPusher(cx),
+    :   mAr(cx),
         mState(INIT_FAILED),
         mXPC(nsXPConnect::XPConnect()),
         mXPCContext(nullptr),
@@ -38,8 +35,8 @@ XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
         mName(cx)
 {
     MOZ_ASSERT(cx);
+    MOZ_ASSERT(cx == XPCJSRuntime::Get()->GetJSContextStack()->Peek());
 
-    NS_ASSERTION(mJSContext, "No JSContext supplied to XPCCallContext");
     if (!mXPC)
         return;
 
@@ -71,7 +68,7 @@ XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
             return;
         }
     } else {
-        js::Class *clasp = js::GetObjectClass(unwrapped);
+        const js::Class *clasp = js::GetObjectClass(unwrapped);
         if (IS_WN_CLASS(clasp)) {
             mWrapper = XPCWrappedNative::Get(unwrapped);
         } else if (IS_TEAROFF_CLASS(clasp)) {
@@ -87,7 +84,7 @@ XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
         else
             mScriptableInfo = mWrapper->GetScriptableInfo();
     } else {
-        NS_ABORT_IF_FALSE(!mFlattenedJSObject, "What object do we have?");
+        MOZ_ASSERT(!mFlattenedJSObject, "What object do we have?");
     }
 
     if (!JSID_IS_VOID(name))
@@ -154,7 +151,7 @@ XPCCallContext::SetName(jsid name)
 
 void
 XPCCallContext::SetCallInfo(XPCNativeInterface* iface, XPCNativeMember* member,
-                            JSBool isSetter)
+                            bool isSetter)
 {
     CHECK_STATE(HAVE_CONTEXT);
 
@@ -240,7 +237,7 @@ XPCCallContext::~XPCCallContext()
         mXPCContext->SetCallingLangType(mPrevCallerLanguage);
 
         DebugOnly<XPCCallContext*> old = XPCJSRuntime::Get()->SetCallContext(mPrevCallContext);
-        NS_ASSERTION(old == this, "bad pop from per thread data");
+        MOZ_ASSERT(old == this, "bad pop from per thread data");
     }
 }
 
@@ -248,9 +245,8 @@ XPCCallContext::~XPCCallContext()
 NS_IMETHODIMP
 XPCCallContext::GetCallee(nsISupports * *aCallee)
 {
-    nsISupports* temp = mWrapper ? mWrapper->GetIdentityObject() : nullptr;
-    NS_IF_ADDREF(temp);
-    *aCallee = temp;
+    nsCOMPtr<nsISupports> rval = mWrapper ? mWrapper->GetIdentityObject() : nullptr;
+    rval.forget(aCallee);
     return NS_OK;
 }
 
@@ -266,9 +262,8 @@ XPCCallContext::GetCalleeMethodIndex(uint16_t *aCalleeMethodIndex)
 NS_IMETHODIMP
 XPCCallContext::GetCalleeWrapper(nsIXPConnectWrappedNative * *aCalleeWrapper)
 {
-    nsIXPConnectWrappedNative* temp = mWrapper;
-    NS_IF_ADDREF(temp);
-    *aCalleeWrapper = temp;
+    nsCOMPtr<nsIXPConnectWrappedNative> rval = mWrapper;
+    rval.forget(aCalleeWrapper);
     return NS_OK;
 }
 
@@ -276,9 +271,8 @@ XPCCallContext::GetCalleeWrapper(nsIXPConnectWrappedNative * *aCalleeWrapper)
 NS_IMETHODIMP
 XPCCallContext::GetCalleeInterface(nsIInterfaceInfo * *aCalleeInterface)
 {
-    nsIInterfaceInfo* temp = mInterface->GetInterfaceInfo();
-    NS_IF_ADDREF(temp);
-    *aCalleeInterface = temp;
+    nsCOMPtr<nsIInterfaceInfo> rval = mInterface->GetInterfaceInfo();
+    rval.forget(aCalleeInterface);
     return NS_OK;
 }
 
@@ -286,9 +280,8 @@ XPCCallContext::GetCalleeInterface(nsIInterfaceInfo * *aCalleeInterface)
 NS_IMETHODIMP
 XPCCallContext::GetCalleeClassInfo(nsIClassInfo * *aCalleeClassInfo)
 {
-    nsIClassInfo* temp = mWrapper ? mWrapper->GetClassInfo() : nullptr;
-    NS_IF_ADDREF(temp);
-    *aCalleeClassInfo = temp;
+    nsCOMPtr<nsIClassInfo> rval = mWrapper ? mWrapper->GetClassInfo() : nullptr;
+    rval.forget(aCalleeClassInfo);
     return NS_OK;
 }
 
@@ -357,7 +350,10 @@ XPCCallContext::UnwrapThisIfAllowed(HandleObject obj, HandleObject fun, unsigned
     // here, potentially an outer window proxy, and then an XPCWN.
     MOZ_ASSERT(js::IsWrapper(obj));
     RootedObject unwrapped(mJSContext, js::UncheckedUnwrap(obj, /* stopAtOuter = */ false));
-    MOZ_ASSERT(unwrapped == JS_ObjectToInnerObject(mJSContext, js::Wrapper::wrappedObject(obj)));
+#ifdef DEBUG
+    JS::Rooted<JSObject*> wrappedObj(mJSContext, js::Wrapper::wrappedObject(obj));
+    MOZ_ASSERT(unwrapped == JS_ObjectToInnerObject(mJSContext, wrappedObj));
+#endif
 
     // Make sure we have an XPCWN, and grab it.
     if (!IS_WN_REFLECTOR(unwrapped))

@@ -40,8 +40,6 @@ FileService::~FileService()
 nsresult
 FileService::Init()
 {
-  mFileStorageInfos.Init();
-
   nsresult rv;
   mStreamTransportTarget =
     do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID, &rv);
@@ -156,7 +154,7 @@ FileService::Enqueue(LockedFile* aLockedFile, FileHelper* aFileHelper)
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  nsIAtom* storageId = fileHandle->mFileStorage->Id();
+  const nsACString& storageId = fileHandle->mFileStorage->Id();
   const nsAString& fileName = fileHandle->mFileName;
   bool modeIsWrite = aLockedFile->mMode == FileMode::Readwrite;
 
@@ -226,7 +224,7 @@ FileService::NotifyLockedFileCompleted(LockedFile* aLockedFile)
   NS_ASSERTION(aLockedFile, "Null pointer!");
 
   FileHandle* fileHandle = aLockedFile->mFileHandle;
-  nsIAtom* storageId = fileHandle->mFileStorage->Id();
+  const nsACString& storageId = fileHandle->mFileStorage->Id();
 
   FileStorageInfo* fileStorageInfo;
   if (!mFileStorageInfos.Get(storageId, &fileStorageInfo)) {
@@ -239,11 +237,7 @@ FileService::NotifyLockedFileCompleted(LockedFile* aLockedFile)
   if (!fileStorageInfo->HasRunningLockedFiles()) {
     mFileStorageInfos.Remove(storageId);
 
-#ifdef DEBUG
-    storageId = nullptr;
-#endif
-
-     // See if we need to fire any complete callbacks.
+    // See if we need to fire any complete callbacks.
     uint32_t index = 0;
     while (index < mCompleteCallbacks.Length()) {
       if (MaybeFireCallback(mCompleteCallbacks[index])) {
@@ -290,7 +284,8 @@ FileService::AbortLockedFilesForStorage(nsIFileStorage* aFileStorage)
                                                        lockedFiles);
 
   for (uint32_t index = 0; index < lockedFiles.Length(); index++) {
-    lockedFiles[index]->Abort();
+    ErrorResult ignored;
+    lockedFiles[index]->Abort(ignored);
   }
 }
 
@@ -308,11 +303,11 @@ FileService::HasLockedFilesForStorage(nsIFileStorage* aFileStorage)
   return fileStorageInfo->HasRunningLockedFiles(aFileStorage);
 }
 
-NS_IMPL_ISUPPORTS1(FileService, nsIObserver)
+NS_IMPL_ISUPPORTS(FileService, nsIObserver)
 
 NS_IMETHODIMP
 FileService::Observe(nsISupports* aSubject, const char*  aTopic,
-                     const PRUnichar* aData)
+                     const char16_t* aData)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(!strcmp(aTopic, "profile-before-change"), "Wrong topic!");
@@ -343,8 +338,8 @@ FileService::LockedFileQueue::LockedFileQueue(LockedFile* aLockedFile)
   NS_ASSERTION(aLockedFile, "Null pointer!");
 }
 
-NS_IMPL_THREADSAFE_ADDREF(FileService::LockedFileQueue)
-NS_IMPL_THREADSAFE_RELEASE(FileService::LockedFileQueue)
+NS_IMPL_ADDREF(FileService::LockedFileQueue)
+NS_IMPL_RELEASE(FileService::LockedFileQueue)
 
 nsresult
 FileService::LockedFileQueue::Enqueue(FileHelper* aFileHelper)

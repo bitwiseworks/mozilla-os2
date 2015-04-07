@@ -5,6 +5,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ARIAMap.h"
+#include "nsAccUtils.h"
 #include "States.h"
 
 #include "mozilla/dom/Element.h"
@@ -244,7 +245,7 @@ aria::MapToState(EStateRule aRule, dom::Element* aElement, uint64_t* aState)
     {
       static const TokenTypeData data(
         nsGkAtoms::aria_pressed, eMixedType,
-        states::CHECKABLE, states::PRESSED);
+        0, states::PRESSED);
 
       MapTokenType(aElement, aState, data);
       return true;
@@ -300,6 +301,16 @@ aria::MapToState(EStateRule aRule, dom::Element* aElement, uint64_t* aState)
       return true;
     }
 
+    case eARIASelectableIfDefined:
+    {
+      static const TokenTypeData data(
+        nsGkAtoms::aria_selected, eBoolType,
+        states::SELECTABLE, states::SELECTED);
+
+      MapTokenType(aElement, aState, data);
+      return true;
+    }
+
     case eReadonlyUntilEditable:
     {
       if (!(*aState & states::EDITABLE))
@@ -313,6 +324,16 @@ aria::MapToState(EStateRule aRule, dom::Element* aElement, uint64_t* aState)
       if (!aElement->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_valuenow) &&
           !aElement->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_valuetext))
         *aState |= states::MIXED;
+
+      return true;
+    }
+
+    case eFocusableUntilDisabled:
+    {
+      if (!nsAccUtils::HasDefinedARIAToken(aElement, nsGkAtoms::aria_disabled) ||
+          aElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::aria_disabled,
+                                nsGkAtoms::_false, eCaseMatters))
+        *aState |= states::FOCUSABLE;
 
       return true;
     }
@@ -345,7 +366,7 @@ static void
 MapTokenType(dom::Element* aElement, uint64_t* aState,
              const TokenTypeData& aData)
 {
-  if (aElement->HasAttr(kNameSpaceID_None, aData.mAttrName)) {
+  if (nsAccUtils::HasDefinedARIAToken(aElement, aData.mAttrName)) {
     if ((aData.mType & eMixedType) &&
         aElement->AttrValueIs(kNameSpaceID_None, aData.mAttrName,
                               nsGkAtoms::mixed, eCaseMatters)) {
@@ -359,12 +380,7 @@ MapTokenType(dom::Element* aElement, uint64_t* aState,
       return;
     }
 
-    if (!aElement->AttrValueIs(kNameSpaceID_None, aData.mAttrName,
-                               nsGkAtoms::_undefined, eCaseMatters) &&
-        !aElement->AttrValueIs(kNameSpaceID_None, aData.mAttrName,
-                               nsGkAtoms::_empty, eCaseMatters)) {
-      *aState |= aData.mPermanentState | aData.mTrueState;
-    }
+    *aState |= aData.mPermanentState | aData.mTrueState;
     return;
   }
 

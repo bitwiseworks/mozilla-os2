@@ -8,11 +8,11 @@
 
 #include "gfxPlatform.h"
 
+#include "mozilla/MathAlgorithms.h"
 #include "nsAutoRef.h"
 #include "nsTArray.h"
 #include "nsTHashtable.h"
 #include "nsISupportsImpl.h"
-#include "prbit.h" // for PR_ROTATE_LEFT32
 
 #include <fontconfig/fontconfig.h>
 
@@ -51,13 +51,6 @@ class gfxIgnoreCaseCStringComparator
     { 
       return a < b;
     }
-};
-
-class gfxFontNameList : public nsTArray<nsString>
-{
-public:
-    NS_INLINE_DECL_REFCOUNTING(gfxFontNameList)
-    bool Exists(nsAString& aName);
 };
 
 class gfxFontconfigUtils {
@@ -165,7 +158,7 @@ protected:
         static PLDHashNumber HashKey(const FcChar8 *aKey) {
             uint32_t hash = 0;
             for (const FcChar8 *c = aKey; *c != '\0'; ++c) {
-                hash = PR_ROTATE_LEFT32(hash, 3) ^ FcToLower(*c);
+                hash = mozilla::RotateLeft(hash, 3) ^ FcToLower(*c);
             }
             return hash;
         }
@@ -181,11 +174,11 @@ public:
     class DepFcStrEntry : public FcStrEntryBase {
     public:
         // When constructing a new entry in the hashtable, the key is left
-        // NULL.  The caller of PutEntry() must fill in mKey when NULL.  This
-        // provides a mechanism for the caller of PutEntry() to determine
+        // nullptr.  The caller of PutEntry() must fill in mKey when nullptr.
+        // This provides a mechanism for the caller of PutEntry() to determine
         // whether the entry has been initialized.
         DepFcStrEntry(KeyTypePointer aName)
-            : mKey(NULL) { }
+            : mKey(nullptr) { }
 
         DepFcStrEntry(const DepFcStrEntry& toCopy)
             : mKey(toCopy.mKey) { }
@@ -253,7 +246,7 @@ protected:
     class FontsByFullnameEntry : public DepFcStrEntry {
     public:
         // When constructing a new entry in the hashtable, the key is left
-        // NULL.  The caller of PutEntry() is must fill in mKey when adding
+        // nullptr.  The caller of PutEntry() is must fill in mKey when adding
         // the first font if the key is not derived from the family and style.
         // If the key is derived from family and style, a font must be added.
         FontsByFullnameEntry(KeyTypePointer aName)

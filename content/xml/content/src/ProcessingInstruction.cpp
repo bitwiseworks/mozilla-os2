@@ -8,6 +8,7 @@
 #include "mozilla/dom/ProcessingInstruction.h"
 #include "mozilla/dom/ProcessingInstructionBinding.h"
 #include "mozilla/dom/XMLStylesheetProcessingInstruction.h"
+#include "mozilla/IntegerPrintfMacros.h"
 #include "nsContentUtils.h"
 
 already_AddRefed<mozilla::dom::ProcessingInstruction>
@@ -44,9 +45,9 @@ NS_NewXMLProcessingInstruction(nsNodeInfoManager *aNodeInfoManager,
 namespace mozilla {
 namespace dom {
 
-ProcessingInstruction::ProcessingInstruction(already_AddRefed<nsINodeInfo> aNodeInfo,
+ProcessingInstruction::ProcessingInstruction(already_AddRefed<nsINodeInfo>&& aNodeInfo,
                                              const nsAString& aData)
-  : nsGenericDOMDataNode(aNodeInfo)
+  : nsGenericDOMDataNode(Move(aNodeInfo))
 {
   NS_ABORT_IF_FALSE(mNodeInfo->NodeType() ==
                       nsIDOMNode::PROCESSING_INSTRUCTION_NODE,
@@ -55,22 +56,20 @@ ProcessingInstruction::ProcessingInstruction(already_AddRefed<nsINodeInfo> aNode
   SetTextInternal(0, mText.GetLength(),
                   aData.BeginReading(), aData.Length(),
                   false);  // Don't notify (bug 420429).
-
-  SetIsDOMBinding();
 }
 
 ProcessingInstruction::~ProcessingInstruction()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED3(ProcessingInstruction, nsGenericDOMDataNode,
-                             nsIDOMNode, nsIDOMCharacterData,
-                             nsIDOMProcessingInstruction)
+NS_IMPL_ISUPPORTS_INHERITED(ProcessingInstruction, nsGenericDOMDataNode,
+                            nsIDOMNode, nsIDOMCharacterData,
+                            nsIDOMProcessingInstruction)
 
 JSObject*
-ProcessingInstruction::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+ProcessingInstruction::WrapNode(JSContext *aCx)
 {
-  return ProcessingInstructionBinding::Wrap(aCx, aScope, this);
+  return ProcessingInstructionBinding::Wrap(aCx, this);
 }
 
 NS_IMETHODIMP
@@ -113,7 +112,7 @@ ProcessingInstruction::List(FILE* out, int32_t aIndent) const
   int32_t index;
   for (index = aIndent; --index >= 0; ) fputs("  ", out);
 
-  fprintf(out, "Processing instruction refcount=%d<", mRefCnt.get());
+  fprintf(out, "Processing instruction refcount=%" PRIuPTR "<", mRefCnt.get());
 
   nsAutoString tmp;
   ToCString(tmp, 0, mText.GetLength());

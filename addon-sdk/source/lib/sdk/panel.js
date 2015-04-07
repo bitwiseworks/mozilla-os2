@@ -13,15 +13,15 @@ module.metadata = {
 };
 
 const { Ci } = require("chrome");
-const { validateOptions: valid } = require('./deprecated/api-utils');
 const { setTimeout } = require('./timers');
 const { isPrivateBrowsingSupported } = require('./self');
 const { isWindowPBSupported } = require('./private-browsing/utils');
 const { Class } = require("./core/heritage");
 const { merge } = require("./util/object");
-const { WorkerHost, Worker, detach, attach,
-        requiresAddonGlobal } = require("./worker/utils");
+const { WorkerHost } = require("./content/utils");
+const { Worker } = require("./content/worker");
 const { Disposable } = require("./core/disposable");
+const { WeakReference } = require('./core/reference');
 const { contract: loaderContract } = require("./content/loader");
 const { contract } = require("./util/contract");
 const { on, off, emit, setListeners } = require("./event/core");
@@ -29,22 +29,18 @@ const { EventTarget } = require("./event/target");
 const domPanel = require("./panel/utils");
 const { events } = require("./panel/events");
 const systemEvents = require("./system/events");
-const { filter, pipe } = require("./event/utils");
+const { filter, pipe, stripListeners } = require("./event/utils");
 const { getNodeView, getActiveView } = require("./view/core");
-const { isNil, isObject } = require("./lang/type");
+const { isNil, isObject, isNumber } = require("./lang/type");
+const { getAttachEventType } = require("./content/utils");
+const { number, boolean, object } = require('./deprecated/api-utils');
+const { Style } = require("./stylesheet/style");
+const { attach, detach } = require("./content/mod");
 
-function getAttachEventType(model) {
-  let when = model.contentScriptWhen;
-  return requiresAddonGlobal(model) ? "sdk-panel-content-changed" :
-         when === "start" ? "sdk-panel-content-changed" :
-         when === "end" ? "sdk-panel-document-loaded" :
-         when === "ready" ? "sdk-panel-content-loaded" :
-         null;
-}
+let isRect = ({top, right, bottom, left}) => [top, right, bottom, left].
+  some(value => isNumber(value) && !isNaN(value));
 
-
-let number = { is: ['number', 'undefined', 'null'] };
-let boolean = { is: ['boolean', 'undefined', 'null'] };
+let isSDKObj = obj => obj instanceof Class;
 
 let rectContract = contract({
   top: number,
@@ -53,19 +49,32 @@ let rectContract = contract({
   left: number
 });
 
-let rect = {
-  is: ['object', 'undefined', 'null'],
-  map: function(v) isNil(v) || !isObject(v) ? v : rectContract(v)
+let position = {
+  is: object,
+  map: v => (isNil(v) || isSDKObj(v) || !isObject(v)) ? v : rectContract(v),
+  ok: v => isNil(v) || isSDKObj(v) || (isObject(v) && isRect(v)),
+  msg: 'The option "position" must be a SDK object registered as anchor; ' +
+        'or an object with one or more of the following keys set to numeric ' +
+        'values: top, right, bottom, left.'
 }
 
 let displayContract = contract({
   width: number,
   height: number,
   focus: boolean,
-  position: rect
+  position: position
 });
 
-let panelContract = contract(merge({}, displayContract.rules, loaderContract.rules));
+let panelContract = contract(merge({
+  // contentStyle* / contentScript* are sharing the same validation constraints,
+  // so they can be mostly reused, except for the messages.
+  contentStyle: merge(Object.create(loaderContract.rules.contentScript), {
+    msg: 'The `contentStyle` option must be a string or an array of strings.'
+  }),
+  contentStyleFile: merge(Object.create(loaderContract.rules.contentScriptFile), {
+    msg: 'The `contentStyleFile` option must be a local URL or an array of URLs'
+  })
+}, displayContract.rules, loaderContract.rules));
 
 
 function isDisposed(panel) !views.has(panel);
@@ -74,11 +83,13 @@ let panels = new WeakMap();
 let models = new WeakMap();
 let views = new WeakMap();
 let workers = new WeakMap();
+let styles = new WeakMap();
 
-function viewFor(panel) views.get(panel)
-function modelFor(panel) models.get(panel)
-function panelFor(view) panels.get(view)
-function workerFor(panel) workers.get(panel)
+const viewFor = (panel) => views.get(panel);
+const modelFor = (panel) => models.get(panel);
+const panelFor = (view) => panels.get(view);
+const workerFor = (panel) => workers.get(panel);
+const styleFor = (panel) => styles.get(panel);
 
 // Utility function takes `panel` instance and makes sure it will be
 // automatically hidden as soon as other panel is shown.
@@ -92,14 +103,14 @@ let setupAutoHide = new function() {
       // It could be that listener is not GC-ed in the same cycle as
       // panel in such case we remove listener manually.
       let view = viewFor(panel);
-      if (!view) systemEvents.off("sdk-panel-show", listener);
+      if (!view) systemEvents.off("popupshowing", listener);
       else if (subject !== view) panel.hide();
     }
 
     // system event listener is intentionally weak this way we'll allow GC
     // to claim panel if it's no longer referenced by an add-on code. This also
     // helps minimizing cleanup required on unload.
-    systemEvents.on("sdk-panel-show", listener);
+    systemEvents.on("popupshowing", listener);
     // To make sure listener is not claimed by GC earlier than necessary we
     // associate it with `panel` it's associated with. This way it won't be
     // GC-ed earlier than `panel` itself.
@@ -113,7 +124,8 @@ const Panel = Class({
     // set and return values from model on get.
     panelContract.properties(modelFor),
     EventTarget,
-    Disposable
+    Disposable,
+    WeakReference
   ],
   extends: WorkerHost(workerFor),
   setup: function setup(options) {
@@ -125,8 +137,12 @@ const Panel = Class({
     }, panelContract(options));
     models.set(this, model);
 
-    // Setup listeners.
-    setListeners(this, options);
+    if (model.contentStyle || model.contentStyleFile) {
+      styles.set(this, Style({
+        uri: model.contentStyleFile,
+        source: model.contentStyle
+      }));
+    }
 
     // Setup view
     let view = domPanel.make();
@@ -138,7 +154,9 @@ const Panel = Class({
 
     setupAutoHide(this);
 
-    let worker = new Worker(options);
+    // Setup listeners.
+    setListeners(this, options);
+    let worker = new Worker(stripListeners(options));
     workers.set(this, worker);
 
     // pipe events from worker to a panel.
@@ -148,7 +166,8 @@ const Panel = Class({
     this.hide();
     off(this);
 
-    detach(workerFor(this));
+    workerFor(this).destroy();
+    detach(styleFor(this));
 
     domPanel.dispose(viewFor(this));
 
@@ -175,13 +194,16 @@ const Panel = Class({
     let model = modelFor(this);
     model.contentURL = panelContract({ contentURL: value }).contentURL;
     domPanel.setURL(viewFor(this), model.contentURL);
+    // Detach worker so that messages send will be queued until it's
+    // reatached once panel content is ready.
+    workerFor(this).detach();
   },
 
   /* Public API: Panel.isShowing */
   get isShowing() !isDisposed(this) && domPanel.isOpen(viewFor(this)),
 
   /* Public API: Panel.show */
-  show: function show(options, anchor) {
+  show: function show(options={}, anchor) {
     if (options instanceof Ci.nsIDOMElement) {
       [anchor, options] = [options, null];
     }
@@ -196,7 +218,7 @@ const Panel = Class({
 
     let model = modelFor(this);
     let view = viewFor(this);
-    let anchorView = getNodeView(anchor);
+    let anchorView = getNodeView(anchor || options.position || model.position);
 
     options = merge({
       position: model.position,
@@ -240,34 +262,44 @@ const Panel = Class({
 });
 exports.Panel = Panel;
 
-// Note must be defined only after value to `Panel` is assigned. 
+// Note must be defined only after value to `Panel` is assigned.
 getActiveView.define(Panel, viewFor);
 
 // Filter panel events to only panels that are create by this module.
-let panelEvents = filter(events, function({target}) panelFor(target));
+let panelEvents = filter(events, ({target}) => panelFor(target));
 
 // Panel events emitted after panel has being shown.
-let shows = filter(panelEvents, function({type}) type === "sdk-panel-shown");
+let shows = filter(panelEvents, ({type}) => type === "popupshown");
 
 // Panel events emitted after panel became hidden.
-let hides = filter(panelEvents, function({type}) type === "sdk-panel-hidden");
+let hides = filter(panelEvents, ({type}) => type === "popuphidden");
 
 // Panel events emitted after content inside panel is ready. For different
 // panels ready may mean different state based on `contentScriptWhen` attribute.
 // Weather given event represents readyness is detected by `getAttachEventType`
 // helper function.
-let ready = filter(panelEvents, function({type, target})
+let ready = filter(panelEvents, ({type, target}) =>
   getAttachEventType(modelFor(panelFor(target))) === type);
 
-// Panel events emitted after content document in the panel has changed.
-let change = filter(panelEvents, function({type})
-  type === "sdk-panel-content-changed");
+// Styles should be always added as soon as possible, and doesn't makes them
+// depends on `contentScriptWhen`
+let start = filter(panelEvents, ({type}) => type === "document-element-inserted");
 
 // Forward panel show / hide events to panel's own event listeners.
-on(shows, "data", function({target}) emit(panelFor(target), "show"));
-on(hides, "data", function({target}) emit(panelFor(target), "hide"));
+on(shows, "data", ({target}) => emit(panelFor(target), "show"));
 
-on(ready, "data", function({target}) {
-  let worker = workerFor(panelFor(target));
-  attach(worker, domPanel.getContentDocument(target).defaultView);
+on(hides, "data", ({target}) => emit(panelFor(target), "hide"));
+
+on(ready, "data", ({target}) => {
+  let panel = panelFor(target);
+  let window = domPanel.getContentDocument(target).defaultView;
+  
+  workerFor(panel).attach(window);
+});
+
+on(start, "data", ({target}) => {
+  let panel = panelFor(target);
+  let window = domPanel.getContentDocument(target).defaultView;
+  
+  attach(styleFor(panel), window);
 });

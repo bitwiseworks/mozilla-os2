@@ -84,6 +84,10 @@ setting[type="integer"] {
   -moz-binding: url("chrome://mozapps/content/extensions/setting.xml#setting-integer");
 }
 
+setting[type="integer"]:not([size]) textbox {
+  -moz-box-flex: 1;
+}
+
 setting[type="control"] {
   display: -moz-grid-line;
   -moz-binding: url("chrome://mozapps/content/extensions/setting.xml#setting-control");
@@ -184,11 +188,18 @@ setting[type="menulist"] {
   display: none;
 }
 
-#addons-page .view-pane:not([type="plugin"]) .global-info-container {
+#addons-page .view-pane:not([type="plugin"]) .plugin-info-container {
+  display: none;
+}
+
+#addons-page .view-pane:not([type="experiment"]) .experiment-info-container {
   display: none;
 }
 
 .addon .relnotes {
+  -moz-user-select: text;
+}
+#detail-name, #detail-desc, #detail-fulldesc {
   -moz-user-select: text;
 }
 
@@ -207,6 +218,40 @@ richlistitem:not([selected]) * {
   width: 22em;
 }
 
+#header-utils-btn {
+  -moz-user-focus: normal;
+}
+
 .discover-button[disabled="true"] {
+  display: none;
+}
+
+#experiments-learn-more[disabled="true"] {
+  display: none;
+}
+
+#experiments-change-telemetry[disabled="true"] {
+  display: none;
+}
+
+.view-pane[type="experiment"] .error,
+.view-pane[type="experiment"] .warning,
+.view-pane[type="experiment"] .addon:not([pending="uninstall"]) .pending,
+.view-pane[type="experiment"] .disabled-postfix,
+.view-pane[type="experiment"] .update-postfix,
+.view-pane[type="experiment"] .version,
+#detail-view[type="experiment"] .alert-container,
+#detail-view[type="experiment"] #detail-version,
+#detail-view[type="experiment"] #detail-creator {
+  display: none;
+}
+
+.view-pane:not([type="experiment"]) .experiment-container,
+.view-pane:not([type="experiment"]) #detail-experiment-container {
+  display: none;
+}
+
+.addon[type="experiment"][status="installing"] .experiment-time,
+.addon[type="experiment"][status="installing"] .experiment-state {
   display: none;
 }

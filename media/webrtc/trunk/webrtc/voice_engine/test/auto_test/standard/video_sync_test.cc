@@ -8,11 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <cmath>
+#include <math.h>
+
 #include <numeric>
 #include <vector>
 
-#include "voice_engine/test/auto_test/fixtures/after_streaming_fixture.h"
+#include "webrtc/voice_engine/test/auto_test/fixtures/after_streaming_fixture.h"
 
 #ifdef WEBRTC_IOS
   const int kMinimumReasonableDelayEstimateMs = 30;
@@ -31,14 +32,19 @@ class VideoSyncTest : public AfterStreamingFixture {
 
     std::vector<int> all_delay_estimates;
     for (int second = 0; second < 15; second++) {
-      int delay_estimate = 0;
-      EXPECT_EQ(0, voe_vsync_->GetDelayEstimate(channel_, delay_estimate));
+      int jitter_buffer_delay_ms = 0;
+      int playout_buffer_delay_ms = 0;
+      int avsync_offset_ms = 0;
+      EXPECT_EQ(0, voe_vsync_->GetDelayEstimate(channel_,
+                                                &jitter_buffer_delay_ms,
+                                                &playout_buffer_delay_ms,
+                                                &avsync_offset_ms));
 
-      EXPECT_GT(delay_estimate, min_estimate) <<
+      EXPECT_GT(jitter_buffer_delay_ms, min_estimate) <<
           "The delay estimate can not conceivably get lower than " <<
           min_estimate << " ms, it's unrealistic.";
 
-      all_delay_estimates.push_back(delay_estimate);
+      all_delay_estimates.push_back(jitter_buffer_delay_ms);
       Sleep(1000);
     }
 
@@ -63,13 +69,14 @@ class VideoSyncTest : public AfterStreamingFixture {
     for (; start != end; ++start) {
       variance += (*start - mean) * (*start - mean) / (num_elements - 1);
     }
-    return std::sqrt(variance);
+    return sqrt(variance);
   }
 };
 
-TEST_F(VideoSyncTest, CanGetPlayoutTimestampWhilePlayingWithoutSettingItFirst) {
+TEST_F(VideoSyncTest,
+       CanNotGetPlayoutTimestampWhilePlayingWithoutSettingItFirst) {
   unsigned int ignored;
-  EXPECT_EQ(0, voe_vsync_->GetPlayoutTimestamp(channel_, ignored));
+  EXPECT_EQ(-1, voe_vsync_->GetPlayoutTimestamp(channel_, ignored));
 }
 
 TEST_F(VideoSyncTest, CannotSetInitTimestampWhilePlaying) {

@@ -3,6 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef nsAppFileLocationProvider_h
+#define nsAppFileLocationProvider_h
+
 #include "nsIDirectoryService.h"
 #include "nsIFile.h"
 #include "mozilla/Attributes.h"
@@ -18,7 +21,7 @@ class nsAppFileLocationProvider MOZ_FINAL : public nsIDirectoryServiceProvider2
 public:
                         nsAppFileLocationProvider();
 
-   NS_DECL_ISUPPORTS
+   NS_DECL_THREADSAFE_ISUPPORTS
    NS_DECL_NSIDIRECTORYSERVICEPROVIDER
    NS_DECL_NSIDIRECTORYSERVICEPROVIDER2
 
@@ -45,3 +48,5 @@ protected:
 
    nsCOMPtr<nsIFile> mMozBinDirectory;
 };
+
+#endif

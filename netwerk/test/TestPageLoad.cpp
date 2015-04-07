@@ -13,7 +13,6 @@
 #include "prprf.h"
 #include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
-#include "prlong.h"
 #include "plstr.h"
 #include "nsCOMArray.h"
 #include "nsIComponentRegistrar.h"
@@ -75,10 +74,10 @@ static NS_METHOD streamParse (nsIInputStream* in,
       return NS_OK;
     }
     parseBuf[0]='\0';
-    if((loc_t=PL_strcasestr(lineBuf, "img"))!= NULL 
-       || (loc_t=PL_strcasestr(lineBuf, "script"))!=NULL) {
+    if((loc_t=PL_strcasestr(lineBuf, "img"))!= nullptr 
+       || (loc_t=PL_strcasestr(lineBuf, "script"))!=nullptr) {
       loc_t2=PL_strcasestr(loc_t, "src");
-      if(loc_t2!=NULL) {
+      if(loc_t2!=nullptr) {
         loc_t2+=3;
         strcpy(loc, loc_t2);
         sscanf(loc, "=\"%[^\"]", parseBuf);
@@ -92,9 +91,9 @@ static NS_METHOD streamParse (nsIInputStream* in,
     }
 
     /***NEED BETTER CHECK FOR STYLESHEETS
-    if((loc_t=PL_strcasestr(lineBuf, "link"))!= NULL) { 
+    if((loc_t=PL_strcasestr(lineBuf, "link"))!= nullptr) { 
        loc_t2=PL_strcasestr(loc_t, "href");
-      if(loc_t2!=NULL) {
+      if(loc_t2!=nullptr) {
         loc_t2+=4;
         strcpy(loc, loc_t2);
         //printf("%s\n", loc);
@@ -107,7 +106,7 @@ static NS_METHOD streamParse (nsIInputStream* in,
       }
     }
     */
-    if((loc_t=PL_strcasestr(lineBuf, "background"))!=NULL) {
+    if((loc_t=PL_strcasestr(lineBuf, "background"))!=nullptr) {
       loc_t+=10;
       strcpy(loc, loc_t);
       sscanf(loc, "=\"%[^\"]", parseBuf);
@@ -138,9 +137,9 @@ public:
     virtual ~MyListener() {}
 };
 
-NS_IMPL_ISUPPORTS2(MyListener,
-                   nsIRequestObserver,
-                   nsIStreamListener)
+NS_IMPL_ISUPPORTS(MyListener,
+                  nsIRequestObserver,
+                  nsIStreamListener)
 
 NS_IMETHODIMP
 MyListener::OnStartRequest(nsIRequest *req, nsISupports *ctxt)
@@ -197,7 +196,7 @@ class MyNotifications : public nsIInterfaceRequestor
                       , public nsIProgressEventSink
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIINTERFACEREQUESTOR
     NS_DECL_NSIPROGRESSEVENTSINK
 
@@ -205,9 +204,9 @@ public:
     virtual ~MyNotifications() {}
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(MyNotifications,
-                              nsIInterfaceRequestor,
-                              nsIProgressEventSink)
+NS_IMPL_ISUPPORTS(MyNotifications,
+                  nsIInterfaceRequestor,
+                  nsIProgressEventSink)
 
 NS_IMETHODIMP
 MyNotifications::GetInterface(const nsIID &iid, void **result)
@@ -217,7 +216,7 @@ MyNotifications::GetInterface(const nsIID &iid, void **result)
 
 NS_IMETHODIMP
 MyNotifications::OnStatus(nsIRequest *req, nsISupports *ctx,
-                          nsresult status, const PRUnichar *statusText)
+                          nsresult status, const char16_t *statusText)
 {
     //printf("status: %x\n", status);
     return NS_OK;

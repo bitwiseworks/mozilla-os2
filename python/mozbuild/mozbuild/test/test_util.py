@@ -7,7 +7,9 @@ from __future__ import unicode_literals
 import hashlib
 import os
 import unittest
+import shutil
 import sys
+import tempfile
 
 from mozfile.mozfile import NamedTemporaryFile
 from mozunit import (
@@ -21,7 +23,9 @@ from mozbuild.util import (
     resolve_target_to_make,
     MozbuildDeletionError,
     HierarchicalStringList,
+    HierarchicalStringListWithFlagsFactory,
     StrictOrderingOnAppendList,
+    StrictOrderingOnAppendListWithFlagsFactory,
     UnsortedError,
 )
 
@@ -107,6 +111,41 @@ class TestFileAvoidWrite(unittest.TestCase):
             faw.write('content')
             self.assertEqual(faw.close(), (True, False))
 
+    def test_diff_not_default(self):
+        """Diffs are not produced by default."""
+
+        with MockedOpen({'file': 'old'}):
+            faw = FileAvoidWrite('file')
+            faw.write('dummy')
+            faw.close()
+            self.assertIsNone(faw.diff)
+
+    def test_diff_update(self):
+        """Diffs are produced on file update."""
+
+        with MockedOpen({'file': 'old'}):
+            faw = FileAvoidWrite('file', capture_diff=True)
+            faw.write('new')
+            faw.close()
+
+            diff = '\n'.join(faw.diff)
+            self.assertIn('-old', diff)
+            self.assertIn('+new', diff)
+
+    def test_diff_create(self):
+        """Diffs are produced when files are created."""
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmpdir, 'file')
+            faw = FileAvoidWrite(path, capture_diff=True)
+            faw.write('new')
+            faw.close()
+
+            diff = '\n'.join(faw.diff)
+            self.assertIn('+new', diff)
+        finally:
+            shutil.rmtree(tmpdir)
 
 class TestResolveTargetToMake(unittest.TestCase):
     def setUp(self):
@@ -121,9 +160,11 @@ class TestResolveTargetToMake(unittest.TestCase):
             target = target.replace(os.sep, '/')
         self.assertEqual((reldir, target), expected)
 
-    def test_absolute_path(self):
-        abspath = os.path.abspath(os.path.join(self.topobjdir, 'test-dir'))
-        self.assertResolve(abspath, (None, None))
+    def test_root_path(self):
+        self.assertResolve('/test-dir', ('test-dir', None))
+        self.assertResolve('/test-dir/with', ('test-dir/with', None))
+        self.assertResolve('/test-dir/without', ('test-dir', None))
+        self.assertResolve('/test-dir/without/with', ('test-dir/without/with', None))
 
     def test_dir(self):
         self.assertResolve('test-dir', ('test-dir', None))
@@ -281,6 +322,99 @@ class TestStrictOrderingOnAppendList(unittest.TestCase):
             l += ['b', 'a']
 
         self.assertEqual(len(l), 2)
+
+
+class TestStrictOrderingOnAppendListWithFlagsFactory(unittest.TestCase):
+    def test_strict_ordering_on_append_list_with_flags_factory(self):
+        cls = StrictOrderingOnAppendListWithFlagsFactory({
+            'foo': bool,
+            'bar': int,
+        })
+
+        l = cls()
+        l += ['a', 'b']
+
+        with self.assertRaises(Exception):
+            l['a'] = 'foo'
+
+        with self.assertRaises(Exception):
+            c = l['c']
+
+        self.assertEqual(l['a'].foo, False)
+        l['a'].foo = True
+        self.assertEqual(l['a'].foo, True)
+
+        with self.assertRaises(TypeError):
+            l['a'].bar = 'bar'
+
+        self.assertEqual(l['a'].bar, 0)
+        l['a'].bar = 42
+        self.assertEqual(l['a'].bar, 42)
+
+        l['b'].foo = True
+        self.assertEqual(l['b'].foo, True)
+
+        with self.assertRaises(AttributeError):
+            l['b'].baz = False
+
+
+class TestHierarchicalStringListWithFlagsFactory(unittest.TestCase):
+    def test_hierarchical_string_list_with_flags_factory(self):
+        cls = HierarchicalStringListWithFlagsFactory({
+            'foo': bool,
+            'bar': int,
+        })
+
+        l = cls()
+        l += ['a', 'b']
+
+        with self.assertRaises(Exception):
+            l['a'] = 'foo'
+
+        with self.assertRaises(Exception):
+            c = l['c']
+
+        self.assertEqual(l['a'].foo, False)
+        l['a'].foo = True
+        self.assertEqual(l['a'].foo, True)
+
+        with self.assertRaises(TypeError):
+            l['a'].bar = 'bar'
+
+        self.assertEqual(l['a'].bar, 0)
+        l['a'].bar = 42
+        self.assertEqual(l['a'].bar, 42)
+
+        l['b'].foo = True
+        self.assertEqual(l['b'].foo, True)
+
+        with self.assertRaises(AttributeError):
+            l['b'].baz = False
+
+        l.x += ['x', 'y']
+
+        with self.assertRaises(Exception):
+            l.x['x'] = 'foo'
+
+        with self.assertRaises(Exception):
+            c = l.x['c']
+
+        self.assertEqual(l.x['x'].foo, False)
+        l.x['x'].foo = True
+        self.assertEqual(l.x['x'].foo, True)
+
+        with self.assertRaises(TypeError):
+            l.x['x'].bar = 'bar'
+
+        self.assertEqual(l.x['x'].bar, 0)
+        l.x['x'].bar = 42
+        self.assertEqual(l.x['x'].bar, 42)
+
+        l.x['y'].foo = True
+        self.assertEqual(l.x['y'].foo, True)
+
+        with self.assertRaises(AttributeError):
+            l.x['y'].baz = False
 
 
 if __name__ == '__main__':

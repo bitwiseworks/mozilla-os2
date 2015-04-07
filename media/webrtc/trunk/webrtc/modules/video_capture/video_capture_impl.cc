@@ -8,24 +8,26 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "video_capture_impl.h"
-
-#include "common_video/libyuv/include/webrtc_libyuv.h"
-#include "critical_section_wrapper.h"
-#include "module_common_types.h"
-#include "ref_count.h"
-#include "tick_util.h"
-#include "trace.h"
-#include "video_capture_config.h"
+#include "webrtc/modules/video_capture/video_capture_impl.h"
 
 #include <stdlib.h>
+
+#include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/modules/video_capture/video_capture_config.h"
+#include "webrtc/system_wrappers/interface/clock.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/ref_count.h"
+#include "webrtc/system_wrappers/interface/tick_util.h"
+#include "webrtc/system_wrappers/interface/trace.h"
+#include "webrtc/system_wrappers/interface/trace_event.h"
 
 namespace webrtc
 {
 namespace videocapturemodule
 {
 VideoCaptureModule* VideoCaptureImpl::Create(
-    const WebRtc_Word32 id,
+    const int32_t id,
     VideoCaptureExternal*& externalCapture)
 {
     RefCountImpl<VideoCaptureImpl>* implementation =
@@ -39,25 +41,25 @@ const char* VideoCaptureImpl::CurrentDeviceName() const
     return _deviceUniqueId;
 }
 
-WebRtc_Word32 VideoCaptureImpl::ChangeUniqueId(const WebRtc_Word32 id)
+int32_t VideoCaptureImpl::ChangeUniqueId(const int32_t id)
 {
     _id = id;
     return 0;
 }
 
 // returns the number of milliseconds until the module want a worker thread to call Process
-WebRtc_Word32 VideoCaptureImpl::TimeUntilNextProcess()
+int32_t VideoCaptureImpl::TimeUntilNextProcess()
 {
     CriticalSectionScoped cs(&_callBackCs);
 
-    WebRtc_Word32 timeToNormalProcess = kProcessInterval
-        - (WebRtc_Word32)((TickTime::Now() - _lastProcessTime).Milliseconds());
+    int32_t timeToNormalProcess = kProcessInterval
+        - (int32_t)((TickTime::Now() - _lastProcessTime).Milliseconds());
 
     return timeToNormalProcess;
 }
 
 // Process any pending tasks such as timeouts
-WebRtc_Word32 VideoCaptureImpl::Process()
+int32_t VideoCaptureImpl::Process()
 {
     CriticalSectionScoped cs(&_callBackCs);
 
@@ -92,7 +94,7 @@ WebRtc_Word32 VideoCaptureImpl::Process()
     {
         if (_frameRateCallBack && _captureCallBack)
         {
-            const WebRtc_UWord32 frameRate = CalculateFrameRate(now);
+            const uint32_t frameRate = CalculateFrameRate(now);
             _captureCallBack->OnCaptureFrameRate(_id, frameRate);
         }
         _lastFrameRateCallbackTime = now; // Can be set by EnableFrameRateCallback
@@ -104,18 +106,27 @@ WebRtc_Word32 VideoCaptureImpl::Process()
     return 0;
 }
 
-VideoCaptureImpl::VideoCaptureImpl(const WebRtc_Word32 id)
-    : _id(id), _deviceUniqueId(NULL), _apiCs(*CriticalSectionWrapper::CreateCriticalSection()),
-      _captureDelay(0), _requestedCapability(),
+VideoCaptureImpl::VideoCaptureImpl(const int32_t id)
+    : _id(id),
+      _deviceUniqueId(NULL),
+      _apiCs(*CriticalSectionWrapper::CreateCriticalSection()),
+      _captureDelay(0),
+      _requestedCapability(),
       _callBackCs(*CriticalSectionWrapper::CreateCriticalSection()),
       _lastProcessTime(TickTime::Now()),
-      _lastFrameRateCallbackTime(TickTime::Now()), _frameRateCallBack(false),
-      _noPictureAlarmCallBack(false), _captureAlarm(Cleared), _setCaptureDelay(0),
-      _dataCallBack(NULL), _captureCallBack(NULL),
-      _lastProcessFrameCount(TickTime::Now()), _rotateFrame(kRotateNone),
-      last_capture_time_(TickTime::MillisecondTimestamp())
-
-{
+      _lastFrameRateCallbackTime(TickTime::Now()),
+      _frameRateCallBack(false),
+      _noPictureAlarmCallBack(false),
+      _captureAlarm(Cleared),
+      _setCaptureDelay(0),
+      _dataCallBack(NULL),
+      _captureCallBack(NULL),
+      _lastProcessFrameCount(TickTime::Now()),
+      _rotateFrame(kRotateNone),
+      last_capture_time_(TickTime::MillisecondTimestamp()),
+      delta_ntp_internal_ms_(
+          Clock::GetRealTimeClock()->CurrentNtpInMilliseconds() -
+          TickTime::MillisecondTimestamp()) {
     _requestedCapability.width = kDefaultWidth;
     _requestedCapability.height = kDefaultHeight;
     _requestedCapability.maxFPS = 30;
@@ -135,7 +146,7 @@ VideoCaptureImpl::~VideoCaptureImpl()
         delete[] _deviceUniqueId;
 }
 
-WebRtc_Word32 VideoCaptureImpl::RegisterCaptureDataCallback(
+int32_t VideoCaptureImpl::RegisterCaptureDataCallback(
                                         VideoCaptureDataCallback& dataCallBack)
 {
     CriticalSectionScoped cs(&_apiCs);
@@ -145,14 +156,14 @@ WebRtc_Word32 VideoCaptureImpl::RegisterCaptureDataCallback(
     return 0;
 }
 
-WebRtc_Word32 VideoCaptureImpl::DeRegisterCaptureDataCallback()
+int32_t VideoCaptureImpl::DeRegisterCaptureDataCallback()
 {
     CriticalSectionScoped cs(&_apiCs);
     CriticalSectionScoped cs2(&_callBackCs);
     _dataCallBack = NULL;
     return 0;
 }
-WebRtc_Word32 VideoCaptureImpl::RegisterCaptureCallback(VideoCaptureFeedBack& callBack)
+int32_t VideoCaptureImpl::RegisterCaptureCallback(VideoCaptureFeedBack& callBack)
 {
 
     CriticalSectionScoped cs(&_apiCs);
@@ -160,7 +171,7 @@ WebRtc_Word32 VideoCaptureImpl::RegisterCaptureCallback(VideoCaptureFeedBack& ca
     _captureCallBack = &callBack;
     return 0;
 }
-WebRtc_Word32 VideoCaptureImpl::DeRegisterCaptureCallback()
+int32_t VideoCaptureImpl::DeRegisterCaptureCallback()
 {
 
     CriticalSectionScoped cs(&_apiCs);
@@ -169,20 +180,20 @@ WebRtc_Word32 VideoCaptureImpl::DeRegisterCaptureCallback()
     return 0;
 
 }
-WebRtc_Word32 VideoCaptureImpl::SetCaptureDelay(WebRtc_Word32 delayMS)
+int32_t VideoCaptureImpl::SetCaptureDelay(int32_t delayMS)
 {
     CriticalSectionScoped cs(&_apiCs);
     _captureDelay = delayMS;
     return 0;
 }
-WebRtc_Word32 VideoCaptureImpl::CaptureDelay()
+int32_t VideoCaptureImpl::CaptureDelay()
 {
     CriticalSectionScoped cs(&_apiCs);
     return _setCaptureDelay;
 }
 
-WebRtc_Word32 VideoCaptureImpl::DeliverCapturedFrame(I420VideoFrame&
-  captureFrame, WebRtc_Word64 capture_time) {
+int32_t VideoCaptureImpl::DeliverCapturedFrame(I420VideoFrame& captureFrame,
+                                               int64_t capture_time) {
   UpdateFrameCount();  // frame count used for local frame rate callback.
 
   const bool callOnCaptureDelayChanged = _setCaptureDelay != _captureDelay;
@@ -193,10 +204,9 @@ WebRtc_Word32 VideoCaptureImpl::DeliverCapturedFrame(I420VideoFrame&
 
   // Set the capture time
   if (capture_time != 0) {
-      captureFrame.set_render_time_ms(capture_time);
-  }
-  else {
-      captureFrame.set_render_time_ms(TickTime::MillisecondTimestamp());
+    captureFrame.set_render_time_ms(capture_time - delta_ntp_internal_ms_);
+  } else {
+    captureFrame.set_render_time_ms(TickTime::MillisecondTimestamp());
   }
 
   if (captureFrame.render_time_ms() == last_capture_time_) {
@@ -215,46 +225,11 @@ WebRtc_Word32 VideoCaptureImpl::DeliverCapturedFrame(I420VideoFrame&
   return 0;
 }
 
-WebRtc_Word32 VideoCaptureImpl::DeliverEncodedCapturedFrame(
-    VideoFrame& captureFrame, WebRtc_Word64 capture_time,
-    VideoCodecType codecType) {
-  UpdateFrameCount();  // frame count used for local frame rate callback.
-
-  const bool callOnCaptureDelayChanged = _setCaptureDelay != _captureDelay;
-  // Capture delay changed
-  if (_setCaptureDelay != _captureDelay) {
-      _setCaptureDelay = _captureDelay;
-  }
-
-  // Set the capture time
-  if (capture_time != 0) {
-     captureFrame.SetRenderTime(capture_time);
-  }
-  else {
-      captureFrame.SetRenderTime(TickTime::MillisecondTimestamp());
-  }
-
-  if (captureFrame.RenderTimeMs() == last_capture_time_) {
-    // We don't allow the same capture time for two frames, drop this one.
-    return -1;
-  }
-  last_capture_time_ = captureFrame.RenderTimeMs();
-
-  if (_dataCallBack) {
-    if (callOnCaptureDelayChanged) {
-      _dataCallBack->OnCaptureDelayChanged(_id, _captureDelay);
-    }
-    _dataCallBack->OnIncomingCapturedEncodedFrame(_id, captureFrame, codecType);
-  }
-
-  return 0;
-}
-
-WebRtc_Word32 VideoCaptureImpl::IncomingFrame(
-    WebRtc_UWord8* videoFrame,
-    WebRtc_Word32 videoFrameLength,
+int32_t VideoCaptureImpl::IncomingFrame(
+    uint8_t* videoFrame,
+    int32_t videoFrameLength,
     const VideoCaptureCapability& frameInfo,
-    WebRtc_Word64 captureTime/*=0*/)
+    int64_t captureTime/*=0*/)
 {
     WEBRTC_TRACE(webrtc::kTraceStream, webrtc::kTraceVideoCapture, _id,
                "IncomingFrame width %d, height %d", (int) frameInfo.width,
@@ -264,8 +239,10 @@ WebRtc_Word32 VideoCaptureImpl::IncomingFrame(
 
     CriticalSectionScoped cs(&_callBackCs);
 
-    const WebRtc_Word32 width = frameInfo.width;
-    const WebRtc_Word32 height = frameInfo.height;
+    const int32_t width = frameInfo.width;
+    const int32_t height = frameInfo.height;
+
+    TRACE_EVENT1("webrtc", "VC::IncomingFrame", "capture_time", captureTime);
 
     if (frameInfo.codecType == kVideoCodecUnknown)
     {
@@ -324,18 +301,12 @@ WebRtc_Word32 VideoCaptureImpl::IncomingFrame(
     }
     else // Encoded format
     {
-        if (_capture_encoded_frame.CopyFrame(videoFrameLength, videoFrame) != 0)
-        {
-            WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,
-                       "Failed to copy captured frame of length %d",
-                       static_cast<int>(videoFrameLength));
-        }
-        DeliverEncodedCapturedFrame(_capture_encoded_frame, captureTime,
-                                    frameInfo.codecType);
+        assert(false);
+        return -1;
     }
 
-    const WebRtc_UWord32 processTime =
-        (WebRtc_UWord32)(TickTime::Now() - startProcessTime).Milliseconds();
+    const uint32_t processTime =
+        (uint32_t)(TickTime::Now() - startProcessTime).Milliseconds();
     if (processTime > 10) // If the process time is too long MJPG will not work well.
     {
         WEBRTC_TRACE(webrtc::kTraceWarning, webrtc::kTraceVideoCapture, _id,
@@ -346,8 +317,8 @@ WebRtc_Word32 VideoCaptureImpl::IncomingFrame(
     return 0;
 }
 
-WebRtc_Word32 VideoCaptureImpl::IncomingFrameI420(
-    const VideoFrameI420& video_frame, WebRtc_Word64 captureTime) {
+int32_t VideoCaptureImpl::IncomingFrameI420(
+    const VideoFrameI420& video_frame, int64_t captureTime) {
 
   CriticalSectionScoped cs(&_callBackCs);
   int size_y = video_frame.height * video_frame.y_pitch;
@@ -371,8 +342,7 @@ WebRtc_Word32 VideoCaptureImpl::IncomingFrameI420(
   return 0;
 }
 
-WebRtc_Word32 VideoCaptureImpl::SetCaptureRotation(VideoCaptureRotation
-                                                   rotation) {
+int32_t VideoCaptureImpl::SetCaptureRotation(VideoCaptureRotation rotation) {
   CriticalSectionScoped cs(&_apiCs);
   CriticalSectionScoped cs2(&_callBackCs);
   switch (rotation){
@@ -392,7 +362,7 @@ WebRtc_Word32 VideoCaptureImpl::SetCaptureRotation(VideoCaptureRotation
   return 0;
 }
 
-WebRtc_Word32 VideoCaptureImpl::EnableFrameRateCallback(const bool enable)
+int32_t VideoCaptureImpl::EnableFrameRateCallback(const bool enable)
 {
     CriticalSectionScoped cs(&_apiCs);
     CriticalSectionScoped cs2(&_callBackCs);
@@ -404,7 +374,7 @@ WebRtc_Word32 VideoCaptureImpl::EnableFrameRateCallback(const bool enable)
     return 0;
 }
 
-WebRtc_Word32 VideoCaptureImpl::EnableNoPictureAlarm(const bool enable)
+int32_t VideoCaptureImpl::EnableNoPictureAlarm(const bool enable)
 {
     CriticalSectionScoped cs(&_apiCs);
     CriticalSectionScoped cs2(&_callBackCs);
@@ -429,10 +399,10 @@ void VideoCaptureImpl::UpdateFrameCount()
     _incomingFrameTimes[0] = TickTime::Now();
 }
 
-WebRtc_UWord32 VideoCaptureImpl::CalculateFrameRate(const TickTime& now)
+uint32_t VideoCaptureImpl::CalculateFrameRate(const TickTime& now)
 {
-    WebRtc_Word32 num = 0;
-    WebRtc_Word32 nrOfFrames = 0;
+    int32_t num = 0;
+    int32_t nrOfFrames = 0;
     for (num = 1; num < (kFrameRateCountHistorySize - 1); num++)
     {
         if (_incomingFrameTimes[num].Ticks() <= 0
@@ -447,14 +417,14 @@ WebRtc_UWord32 VideoCaptureImpl::CalculateFrameRate(const TickTime& now)
     }
     if (num > 1)
     {
-        WebRtc_Word64 diff = (now - _incomingFrameTimes[num - 1]).Milliseconds();
+        int64_t diff = (now - _incomingFrameTimes[num - 1]).Milliseconds();
         if (diff > 0)
         {
-            return WebRtc_UWord32((nrOfFrames * 1000.0f / diff) + 0.5f);
+            return uint32_t((nrOfFrames * 1000.0f / diff) + 0.5f);
         }
     }
 
     return nrOfFrames;
 }
-} // namespace videocapturemodule
-} // namespace webrtc
+}  // namespace videocapturemodule
+}  // namespace webrtc

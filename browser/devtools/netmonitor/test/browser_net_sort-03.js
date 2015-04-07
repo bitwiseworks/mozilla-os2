@@ -13,7 +13,7 @@ function test() {
     // of the heavy dom manipulation associated with sorting.
     requestLongerTimeout(2);
 
-    let { $, L10N, NetMonitorView } = aMonitor.panelWin;
+    let { $, $all, L10N, NetMonitorView } = aMonitor.panelWin;
     let { RequestsMenu } = NetMonitorView;
 
     RequestsMenu.lazyUpdate = false;
@@ -60,7 +60,19 @@ function test() {
         .then(() => {
           info("Testing status sort again, descending.");
           testHeaders("status", "descending");
-          return testContents([14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0], 12);
+          return testContents([14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0], 14);
+        })
+        .then(() => {
+          info("Testing status sort yet again, ascending.");
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-status-button"));
+          testHeaders("status", "ascending");
+          return testContents([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], 0);
+        })
+        .then(() => {
+          info("Testing status sort yet again, descending.");
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-status-button"));
+          testHeaders("status", "descending");
+          return testContents([14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0], 14);
         })
         .then(() => {
           return teardown(aMonitor);
@@ -98,13 +110,15 @@ function test() {
       is(NetMonitorView.detailsPaneHidden, false,
         "The details pane should still be visible after sorting.");
 
-      is(RequestsMenu.orderedItems.length, aOrder.length,
+      is(RequestsMenu.items.length, aOrder.length,
         "There should be a specific number of items in the requests menu.");
       is(RequestsMenu.visibleItems.length, aOrder.length,
         "There should be a specific number of visbile items in the requests menu.");
+      is($all(".side-menu-widget-item").length, aOrder.length,
+        "The visible items in the requests menu are, in fact, visible!");
 
       for (let i = 0; i < aOrder.length; i++) {
-        is(RequestsMenu.getItemAtIndex(i), RequestsMenu.orderedItems[i],
+        is(RequestsMenu.getItemAtIndex(i), RequestsMenu.items[i],
           "The requests menu items aren't ordered correctly. Misplaced item " + i + ".");
       }
 
@@ -169,7 +183,7 @@ function test() {
           });
       }
 
-      return Promise.resolve(null);
+      return promise.resolve(null);
     }
 
     aDebuggee.performRequests();

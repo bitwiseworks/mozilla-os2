@@ -7,6 +7,11 @@
 #ifndef jit_FixedList_h
 #define jit_FixedList_h
 
+#include <stddef.h>
+
+#include "jit/Ion.h"
+#include "jit/IonAllocPolicy.h"
+
 namespace js {
 namespace jit {
 
@@ -14,8 +19,8 @@ namespace jit {
 template <typename T>
 class FixedList
 {
-    size_t length_;
     T *list_;
+    size_t length_;
 
   private:
     FixedList(const FixedList&); // no copy definition.
@@ -23,19 +28,19 @@ class FixedList
 
   public:
     FixedList()
-      : length_(0), list_(NULL)
+      : list_(nullptr), length_(0)
     { }
 
     // Dynamic memory allocation requires the ability to report failure.
-    bool init(size_t length) {
+    bool init(TempAllocator &alloc, size_t length) {
         length_ = length;
         if (length == 0)
             return true;
 
-        if (length & tl::MulOverflowMask<sizeof(T)>::result)
+        if (length & mozilla::tl::MulOverflowMask<sizeof(T)>::value)
             return false;
-        list_ = (T *)GetIonContext()->temp->allocate(length * sizeof(T));
-        return list_ != NULL;
+        list_ = (T *)alloc.allocate(length * sizeof(T));
+        return list_ != nullptr;
     }
 
     size_t length() const {
@@ -47,13 +52,13 @@ class FixedList
         length_ -= num;
     }
 
-    bool growBy(size_t num) {
+    bool growBy(TempAllocator &alloc, size_t num) {
         size_t newlength = length_ + num;
         if (newlength < length_)
             return false;
-        if (newlength & tl::MulOverflowMask<sizeof(T)>::result)
+        if (newlength & mozilla::tl::MulOverflowMask<sizeof(T)>::value)
             return false;
-        T *list = (T *)GetIonContext()->temp->allocate((length_ + num) * sizeof(T));
+        T *list = (T *)alloc.allocate((length_ + num) * sizeof(T));
         if (!list)
             return false;
 

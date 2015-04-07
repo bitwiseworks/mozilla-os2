@@ -68,8 +68,7 @@ SourceSurfaceD2D::InitFromData(unsigned char *aData,
     return false;
   }
 
-  D2D1_BITMAP_PROPERTIES props =
-    D2D1::BitmapProperties(D2D1::PixelFormat(DXGIFormat(aFormat), AlphaMode(aFormat)));
+  D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(D2DPixelFormat(aFormat));
   hr = aRT->CreateBitmap(D2DIntSize(aSize), aData, aStride, props, byRef(mBitmap));
 
   if (FAILED(hr)) {
@@ -105,8 +104,7 @@ SourceSurfaceD2D::InitFromTexture(ID3D10Texture2D *aTexture,
   mSize = IntSize(desc.Width, desc.Height);
   mFormat = aFormat;
 
-  D2D1_BITMAP_PROPERTIES props =
-    D2D1::BitmapProperties(D2D1::PixelFormat(DXGIFormat(aFormat), AlphaMode(aFormat)));
+  D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(D2DPixelFormat(aFormat));
   hr = aRT->CreateSharedBitmap(IID_IDXGISurface, surf, &props, byRef(mBitmap));
 
   if (FAILED(hr)) {
@@ -170,13 +168,18 @@ DataSourceSurfaceD2D::DataSourceSurfaceD2D(SourceSurfaceD2D* aSourceSurface)
   }
 
   renderTarget->BeginDraw();
+  renderTarget->Clear(D2D1::ColorF(0, 0.0f));
   renderTarget->DrawBitmap(aSourceSurface->mBitmap,
                            D2D1::RectF(0, 0,
                                        Float(mSize.width),
                                        Float(mSize.height)));
-  renderTarget->EndDraw();
+  hr = renderTarget->EndDraw();
+  if (FAILED(hr)) {
+    gfxWarning() << "Failed to draw bitmap. Code: " << hr;
+    return;
+  }
 
-  desc.CPUAccessFlags = D3D10_CPU_ACCESS_READ;
+  desc.CPUAccessFlags = D3D10_CPU_ACCESS_READ | D3D10_CPU_ACCESS_WRITE;
   desc.Usage = D3D10_USAGE_STAGING;
   desc.BindFlags = 0;
   hr = aSourceSurface->mDevice->CreateTexture2D(&desc, nullptr, byRef(mTexture));
@@ -230,9 +233,58 @@ DataSourceSurfaceD2D::GetFormat() const
   return mFormat;
 }
 
+bool
+DataSourceSurfaceD2D::Map(MapType aMapType, MappedSurface *aMappedSurface)
+{
+  // DataSourceSurfaces used with the new Map API should not be used with GetData!!
+  MOZ_ASSERT(!mMapped);
+  MOZ_ASSERT(!mIsMapped);
+
+  if (!mTexture) {
+    return false;
+  }
+
+  D3D10_MAP mapType;
+
+  if (aMapType == MapType::READ) {
+    mapType = D3D10_MAP_READ;
+  } else if (aMapType == MapType::WRITE) {
+    mapType = D3D10_MAP_WRITE;
+  } else {
+    mapType = D3D10_MAP_READ_WRITE;
+  }
+
+  D3D10_MAPPED_TEXTURE2D map;
+
+  HRESULT hr = mTexture->Map(0, mapType, 0, &map);
+
+  if (FAILED(hr)) {
+    gfxWarning() << "Texture map failed with code: " << hr;
+    return false;
+  }
+
+  aMappedSurface->mData = (uint8_t*)map.pData;
+  aMappedSurface->mStride = map.RowPitch;
+  mIsMapped = true;
+
+  return true;
+}
+
+void
+DataSourceSurfaceD2D::Unmap()
+{
+  MOZ_ASSERT(mIsMapped);
+
+  mIsMapped = false;
+  mTexture->Unmap(0);
+}
+
 void
 DataSourceSurfaceD2D::EnsureMappedTexture()
 {
+  // Do not use GetData() after having used Map!
+  MOZ_ASSERT(!mIsMapped);
+
   if (mMapped ||
       !mTexture) {
     return;

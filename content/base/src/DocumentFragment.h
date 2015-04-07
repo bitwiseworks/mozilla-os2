@@ -21,23 +21,10 @@ namespace mozilla {
 namespace dom {
 
 class Element;
-class HTMLTemplateElement;
 
 class DocumentFragment : public FragmentOrElement,
                          public nsIDOMDocumentFragment
 {
-public:
-  using FragmentOrElement::GetFirstChild;
-
-  // nsISupports
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // interface nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // interface nsIDOMDocumentFragment
-  // NS_DECL_NSIDOCUMENTFRAGMENT  Empty
-
 private:
   void Init()
   {
@@ -46,12 +33,25 @@ private:
                       mNodeInfo->Equals(nsGkAtoms::documentFragmentNodeName,
                                         kNameSpaceID_None),
                       "Bad NodeType in aNodeInfo");
-
-    SetIsDOMBinding();
   }
 
 public:
-  DocumentFragment(already_AddRefed<nsINodeInfo> aNodeInfo)
+  using FragmentOrElement::GetFirstChild;
+  using nsINode::QuerySelector;
+  using nsINode::QuerySelectorAll;
+  // Make sure bindings can see our superclass' protected GetElementById method.
+  using nsINode::GetElementById;
+
+  // nsISupports
+  NS_DECL_ISUPPORTS_INHERITED
+
+  // interface nsIDOMNode
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
+
+  // interface nsIDOMDocumentFragment
+  NS_DECL_NSIDOMDOCUMENTFRAGMENT
+
+  DocumentFragment(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : FragmentOrElement(aNodeInfo), mHost(nullptr)
   {
     Init();
@@ -71,16 +71,9 @@ public:
   {
   }
 
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
   // nsIContent
-  virtual already_AddRefed<nsINodeInfo>
-    GetExistingAttrNameFromQName(const nsAString& aStr) const MOZ_OVERRIDE
-  {
-    return nullptr;
-  }
-
   nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                    const nsAString& aValue, bool aNotify)
   {
@@ -132,12 +125,12 @@ public:
     return nullptr;
   }
 
-  HTMLTemplateElement* GetHost() const
+  nsIContent* GetHost() const
   {
     return mHost;
   }
 
-  void SetHost(HTMLTemplateElement* aHost)
+  void SetHost(nsIContent* aHost)
   {
     mHost = aHost;
   }
@@ -152,7 +145,7 @@ public:
 
 protected:
   nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
-  mozilla::dom::HTMLTemplateElement* mHost; // Weak
+  nsIContent* mHost; // Weak
 };
 
 } // namespace dom

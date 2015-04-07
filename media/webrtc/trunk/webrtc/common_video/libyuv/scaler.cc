@@ -8,9 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "common_video/libyuv/include/scaler.h"
+#include "webrtc/common_video/libyuv/include/scaler.h"
 
-#include "libyuv.h"
+// NOTE(ajm): Path provided by gyp.
+#include "libyuv.h"  // NOLINT
 
 namespace webrtc {
 
@@ -54,7 +55,6 @@ int Scaler::Scale(const I420VideoFrame& src_frame,
 
   // Making sure that destination frame is of sufficient size.
   // Aligning stride values based on width.
-
   dst_frame->CreateEmptyFrame(dst_width_, dst_height_,
                               dst_width_, (dst_width_ + 1) / 2,
                               (dst_width_ + 1) / 2);
@@ -76,7 +76,6 @@ int Scaler::Scale(const I420VideoFrame& src_frame,
                            libyuv::FilterMode(method_));
 }
 
-// TODO(mikhal): Add support for more types.
 bool Scaler::SupportedVideoType(VideoType src_video_type,
                                 VideoType dst_video_type) {
   if (src_video_type != dst_video_type)

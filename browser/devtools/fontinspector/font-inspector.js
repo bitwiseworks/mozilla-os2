@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -20,12 +20,11 @@ FontInspector.prototype = {
   init: function FI_init() {
     this.update = this.update.bind(this);
     this.onNewNode = this.onNewNode.bind(this);
-    this.onHighlighterLocked = this.onHighlighterLocked.bind(this);
     this.inspector.selection.on("new-node", this.onNewNode);
     this.inspector.sidebar.on("fontinspector-selected", this.onNewNode);
-    if (this.inspector.highlighter) {
-      this.inspector.highlighter.on("locked", this.onHighlighterLocked);
-    }
+    this.showAll = this.showAll.bind(this);
+    this.showAllButton = this.chromeDoc.getElementById("showall");
+    this.showAllButton.addEventListener("click", this.showAll);
     this.update();
   },
 
@@ -44,9 +43,7 @@ FontInspector.prototype = {
     this.chromeDoc = null;
     this.inspector.sidebar.off("layoutview-selected", this.onNewNode);
     this.inspector.selection.off("new-node", this.onNewNode);
-    if (this.inspector.highlighter) {
-      this.inspector.highlighter.off("locked", this.onHighlighterLocked);
-    }
+    this.showAllButton.removeEventListener("click", this.showAll);
   },
 
   /**
@@ -54,22 +51,14 @@ FontInspector.prototype = {
    */
   onNewNode: function FI_onNewNode() {
     if (this.isActive() &&
+        this.inspector.selection.isLocal() &&
         this.inspector.selection.isConnected() &&
-        this.inspector.selection.isElementNode() &&
-        this.inspector.selection.reason != "highlighter") {
+        this.inspector.selection.isElementNode()) {
       this.undim();
       this.update();
     } else {
       this.dim();
     }
-  },
-
-  /**
-   * Highlighter 'locked' event handler
-   */
-  onHighlighterLocked: function FI_onHighlighterLocked() {
-    this.undim();
-    this.update();
   },
 
   /**
@@ -179,13 +168,13 @@ FontInspector.prototype = {
      *   p {font-family: {name};}
      *   * {font-size: 40px;line-height:60px;padding:0 10px;margin:0};
      *   </style>
-     *   <p contenteditable>Abc</p>
+     *   <p contenteditable spellcheck='false'>Abc</p>
      */
     let extraCSS = "* {padding:0;margin:0}";
     extraCSS += ".theme-dark {color: white}";
     extraCSS += "p {font-size: 40px;line-height:60px;padding:0 10px;margin:0;}";
     cssCode += extraCSS;
-    let src = "data:text/html;charset=utf-8,<!DOCTYPE HTML><head><base></base></head><style></style><p contenteditable>Abc</p>";
+    let src = "data:text/html;charset=utf-8,<!DOCTYPE HTML><head><base></base></head><style></style><p contenteditable spellcheck='false'>Abc</p>";
     iframe.addEventListener("load", function onload() {
       iframe.removeEventListener("load", onload, true);
       let doc = iframe.contentWindow.document;
@@ -209,16 +198,15 @@ FontInspector.prototype = {
         !this.inspector.selection.isElementNode()) {
       return;
     }
-    let node = this.inspector.selection.node;
-    let contentDocument = node.ownerDocument;
-    let root = contentDocument.documentElement;
-    if (contentDocument.body) {
-      root = contentDocument.body;
-    }
-    this.inspector.selection.setNode(root, "fontinspector");
+
+    // Select the body node to show all fonts
+    let walker = this.inspector.walker;
+
+    walker.getRootNode().then(root => walker.querySelector(root, "body")).then(body => {
+      this.inspector.selection.setNodeFront(body, "fontinspector");
+    });
   },
 }
-
 
 window.setPanel = function(panel) {
   window.fontInspector = new FontInspector(panel, window);

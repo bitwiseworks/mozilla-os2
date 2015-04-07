@@ -11,26 +11,32 @@
 #include "nsImageLoadingContent.h"
 #include "nsIDOMHTMLInputElement.h"
 #include "nsITextControlElement.h"
+#include "nsITimer.h"
 #include "nsIPhonetic.h"
 #include "nsIDOMNSEditableElement.h"
-#include "nsTextEditorState.h"
 #include "nsCOMPtr.h"
 #include "nsIConstraintValidation.h"
-#include "nsDOMFile.h"
-#include "mozilla/dom/HTMLFormElement.h" // for ShouldShowInvalidUI()
-#include "nsIFile.h"
+#include "mozilla/dom/HTMLFormElement.h" // for HasEverTriedInvalidSubmit()
+#include "mozilla/dom/HTMLInputElementBinding.h"
 #include "nsIFilePicker.h"
 #include "nsIContentPrefService2.h"
 #include "mozilla/Decimal.h"
 
 class nsDOMFileList;
-class nsIFilePicker;
 class nsIRadioGroupContainer;
 class nsIRadioGroupVisitor;
 class nsIRadioVisitor;
+class nsTextEditorState;
 
 namespace mozilla {
+
+class EventChainPostVisitor;
+class EventChainPreVisitor;
+
 namespace dom {
+
+class Date;
+class DirPickerFileListBuilderTask;
 
 class UploadLastDir MOZ_FINAL : public nsIObserver, public nsSupportsWeakReference {
 public:
@@ -53,10 +59,9 @@ public:
    * Store the last used directory for this location using the
    * content pref service, if it is available
    * @param aURI URI of the current page
-   * @param aDomFile file chosen by the user - the path to the parent of this
-   *        file will be stored
+   * @param aDir Parent directory of the file(s)/directory chosen by the user
    */
-  nsresult StoreLastUsedDirectory(nsIDocument* aDoc, nsIDOMFile* aDomFile);
+  nsresult StoreLastUsedDirectory(nsIDocument* aDoc, nsIFile* aDir);
 
   class ContentPrefCallback MOZ_FINAL : public nsIContentPrefCallback2
   {
@@ -78,22 +83,25 @@ public:
   };
 };
 
-class HTMLInputElement : public nsGenericHTMLFormElement,
-                         public nsImageLoadingContent,
-                         public nsIDOMHTMLInputElement,
-                         public nsITextControlElement,
-                         public nsIPhonetic,
-                         public nsIDOMNSEditableElement,
-                         public nsIConstraintValidation
+class HTMLInputElement MOZ_FINAL : public nsGenericHTMLFormElementWithState,
+                                   public nsImageLoadingContent,
+                                   public nsIDOMHTMLInputElement,
+                                   public nsITextControlElement,
+                                   public nsIPhonetic,
+                                   public nsIDOMNSEditableElement,
+                                   public nsITimerCallback,
+                                   public nsIConstraintValidation
 {
+  friend class DirPickerFileListBuilderTask;
+
 public:
   using nsIConstraintValidation::GetValidationMessage;
   using nsIConstraintValidation::CheckValidity;
   using nsIConstraintValidation::WillValidate;
   using nsIConstraintValidation::Validity;
-  using nsGenericHTMLFormElement::GetForm;
+  using nsGenericHTMLFormElementWithState::GetForm;
 
-  HTMLInputElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+  HTMLInputElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
                    mozilla::dom::FromParser aFromParser);
   virtual ~HTMLInputElement();
 
@@ -102,15 +110,9 @@ public:
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
   virtual int32_t TabIndexDefault() MOZ_OVERRIDE;
+  using nsGenericHTMLElement::Focus;
+  virtual void Blur(ErrorResult& aError) MOZ_OVERRIDE;
   virtual void Focus(ErrorResult& aError) MOZ_OVERRIDE;
 
   // nsIDOMHTMLInputElement
@@ -150,11 +152,12 @@ public:
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
   virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const MOZ_OVERRIDE;
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
-  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
-  void PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisitor);
-  void StartRangeThumbDrag(nsGUIEvent* aEvent);
-  void FinishRangeThumbDrag(nsGUIEvent* aEvent = nullptr);
+  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PostHandleEvent(
+                     EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
+  void PostHandleEventForRangeThumb(EventChainPostVisitor& aVisitor);
+  void StartRangeThumbDrag(WidgetGUIEvent* aEvent);
+  void FinishRangeThumbDrag(WidgetGUIEvent* aEvent = nullptr);
   void CancelRangeThumbDrag(bool aIsForUserEvent = true);
   void SetValueOfRangeForUserEvent(Decimal aValue);
 
@@ -166,7 +169,14 @@ public:
 
   virtual void DoneCreatingElement() MOZ_OVERRIDE;
 
-  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  virtual EventStates IntrinsicState() const MOZ_OVERRIDE;
+
+  // Element
+private:
+  virtual void AddStates(EventStates aStates);
+  virtual void RemoveStates(EventStates aStates);
+
+public:
 
   // nsITextControlElement
   NS_IMETHOD SetValueChanged(bool aValueChanged) MOZ_OVERRIDE;
@@ -187,8 +197,8 @@ public:
   NS_IMETHOD_(void) UnbindFromFrame(nsTextControlFrame* aFrame) MOZ_OVERRIDE;
   NS_IMETHOD CreateEditor() MOZ_OVERRIDE;
   NS_IMETHOD_(nsIContent*) GetRootEditorNode() MOZ_OVERRIDE;
-  NS_IMETHOD_(nsIContent*) CreatePlaceholderNode() MOZ_OVERRIDE;
-  NS_IMETHOD_(nsIContent*) GetPlaceholderNode() MOZ_OVERRIDE;
+  NS_IMETHOD_(Element*) CreatePlaceholderNode() MOZ_OVERRIDE;
+  NS_IMETHOD_(Element*) GetPlaceholderNode() MOZ_OVERRIDE;
   NS_IMETHOD_(void) UpdatePlaceholderVisibility(bool aNotify) MOZ_OVERRIDE;
   NS_IMETHOD_(bool) GetPlaceholderVisibility() MOZ_OVERRIDE;
   NS_IMETHOD_(void) InitializeKeyboardEventListeners() MOZ_OVERRIDE;
@@ -197,13 +207,16 @@ public:
 
   void GetDisplayFileName(nsAString& aFileName) const;
 
-  const nsCOMArray<nsIDOMFile>& GetFilesInternal() const
+  const nsTArray<nsCOMPtr<nsIDOMFile> >& GetFilesInternal() const
   {
     return mFiles;
   }
 
-  void SetFiles(const nsCOMArray<nsIDOMFile>& aFiles, bool aSetValueChanged);
+  void SetFiles(const nsTArray<nsCOMPtr<nsIDOMFile> >& aFiles, bool aSetValueChanged);
   void SetFiles(nsIDOMFileList* aFiles, bool aSetValueChanged);
+
+  // Called when a nsIFilePicker or a nsIColorPicker terminate.
+  void PickerClosed();
 
   void SetCheckedChangedInternal(bool aCheckedChanged);
   bool GetCheckedChanged() const {
@@ -223,11 +236,8 @@ public:
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
-  void MaybeFireAsyncClickHandler(nsEventChainPostVisitor& aVisitor);
-  NS_IMETHOD FireAsyncClickHandler();
-
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLInputElement,
-                                           nsGenericHTMLFormElement)
+                                           nsGenericHTMLFormElementWithState)
 
   static UploadLastDir* gUploadLastDir;
   // create and destroy the static UploadLastDir object for remembering
@@ -237,7 +247,13 @@ public:
 
   void MaybeLoadImage();
 
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
+  // nsITimerCallback
+  NS_DECL_NSITIMERCALLBACK
+
+  // Avoid warning about the implementation of nsITimerCallback::Notify hiding
+  // our nsImageLoadingContent base class' implementation of
+  // imgINotificationObserver::Notify:
+  using nsImageLoadingContent::Notify;
 
   // nsIConstraintValidation
   bool     IsTooLong();
@@ -246,7 +262,8 @@ public:
   bool     HasPatternMismatch() const;
   bool     IsRangeOverflow() const;
   bool     IsRangeUnderflow() const;
-  bool     HasStepMismatch() const;
+  bool     HasStepMismatch(bool aUseZeroIfValueNaN = false) const;
+  bool     HasBadInput() const;
   void     UpdateTooLongValidityState();
   void     UpdateValueMissingValidityState();
   void     UpdateTypeMismatchValidityState();
@@ -254,6 +271,7 @@ public:
   void     UpdateRangeOverflowValidityState();
   void     UpdateRangeUnderflowValidityState();
   void     UpdateStepMismatchValidityState();
+  void     UpdateBadInputValidityState();
   void     UpdateAllValidityStates(bool aNotify);
   void     UpdateBarredFromConstraintValidation();
   nsresult GetValidationMessage(nsAString& aValidationMessage,
@@ -403,6 +421,15 @@ public:
   // XPCOM GetForm() is OK
 
   nsDOMFileList* GetFiles();
+
+  void OpenDirectoryPicker(ErrorResult& aRv);
+  void CancelDirectoryPickerScanIfRunning();
+
+  void StartProgressEventTimer();
+  void MaybeDispatchProgressEvent(bool aFinalProgress);
+  void DispatchProgressEvent(const nsAString& aType,
+                             bool aLengthComputable,
+                             uint64_t aLoaded, uint64_t aTotal);
 
   // XPCOM GetFormAction() is OK
   void SetFormAction(const nsAString& aValue, ErrorResult& aRv)
@@ -565,6 +592,13 @@ public:
   void SetType(const nsAString& aValue, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::type, aValue, aRv);
+    if (aValue.Equals(NS_LITERAL_STRING("number"))) {
+      // For NS_FORM_INPUT_NUMBER we rely on having frames to process key
+      // events. Make sure we have them in case someone changes the type of
+      // this element to "number" and then expects to be able to send key
+      // events to it (type changes are rare, so not a big perf issue):
+      FlushFrames();
+    }
   }
 
   // XPCOM GetDefaultValue() is OK
@@ -583,7 +617,7 @@ public:
   double ValueAsNumber() const
   {
     return DoesValueAsNumberApply() ? GetValueAsDecimal().toDouble()
-                                    : UnspecifiedNaN();
+                                    : UnspecifiedNaN<double>();
   }
 
   void SetValueAsNumber(double aValue, ErrorResult& aRv);
@@ -632,6 +666,13 @@ public:
                          const Optional< nsAString >& direction,
                          ErrorResult& aRv);
 
+  void SetRangeText(const nsAString& aReplacement, ErrorResult& aRv);
+
+  void SetRangeText(const nsAString& aReplacement, uint32_t aStart,
+                    uint32_t aEnd, const SelectionMode& aSelectMode,
+                    ErrorResult& aRv, int32_t aSelectionStart = -1,
+                    int32_t aSelectionEnd = -1);
+
   // XPCOM GetAlign() is OK
   void SetAlign(const nsAString& aValue, ErrorResult& aRv)
   {
@@ -652,6 +693,28 @@ public:
 
   void MozSetFileNameArray(const Sequence< nsString >& aFileNames);
 
+  HTMLInputElement* GetOwnerNumberControl();
+
+  void StartNumberControlSpinnerSpin();
+  void StopNumberControlSpinnerSpin();
+  void StepNumberControlForUserEvent(int32_t aDirection);
+
+  /**
+   * The callback function used by the nsRepeatService that we use to spin the
+   * spinner for <input type=number>.
+   */
+  static void HandleNumberControlSpin(void* aData);
+
+  bool NumberSpinnerUpButtonIsDepressed() const
+  {
+    return mNumberControlSpinnerIsSpinning && mNumberControlSpinnerSpinsUp;
+  }
+
+  bool NumberSpinnerDownButtonIsDepressed() const
+  {
+    return mNumberControlSpinnerIsSpinning && !mNumberControlSpinnerSpinsUp;
+  }
+
   bool MozIsTextField(bool aExcludePassword);
 
   nsIEditor* GetEditor();
@@ -660,13 +723,23 @@ public:
 
   // XPCOM GetPhonetic() is OK
 
+  /**
+   * If aValue contains a valid floating-point number in the format specified
+   * by the HTML 5 spec:
+   *
+   *   http://www.whatwg.org/specs/web-apps/current-work/multipage/common-microsyntaxes.html#floating-point-numbers
+   *
+   * then this function will return the number parsed as a Decimal, otherwise
+   * it will return a Decimal for which Decimal::isFinite() will return false.
+   */
+  static Decimal StringToDecimal(const nsAString& aValue);
+
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
   // Pull IsSingleLineTextControl into our scope, otherwise it'd be hidden
   // by the nsITextControlElement version.
-  using nsGenericHTMLFormElement::IsSingleLineTextControl;
+  using nsGenericHTMLFormElementWithState::IsSingleLineTextControl;
 
   /**
    * The ValueModeType specifies how the value IDL attribute should behave.
@@ -744,10 +817,7 @@ protected:
    */
   bool IsValueEmpty() const;
 
-  void ClearFiles(bool aSetValueChanged) {
-    nsCOMArray<nsIDOMFile> files;
-    SetFiles(files, aSetValueChanged);
-  }
+  void ClearFiles(bool aSetValueChanged);
 
   void SetIndeterminateInternal(bool aValue,
                                 bool aShouldInvalidate);
@@ -826,7 +896,7 @@ protected:
    * Determine whether the editor needs to be initialized explicitly for
    * a particular event.
    */
-  bool NeedToInitializeEditorForEvent(nsEventChainPreVisitor& aVisitor) const;
+  bool NeedToInitializeEditorForEvent(EventChainPreVisitor& aVisitor) const;
 
   /**
    * Get the value mode of the element, depending of the type.
@@ -1060,6 +1130,27 @@ protected:
    */
   Decimal GetDefaultStep() const;
 
+  enum StepCallerType {
+    CALLED_FOR_USER_EVENT,
+    CALLED_FOR_SCRIPT
+  };
+
+  /**
+   * Sets the aValue outparam to the value that this input would take if
+   * someone tries to step aStep steps and this input's value would change as
+   * a result. Leaves aValue untouched if this inputs value would not change
+   * (e.g. already at max, and asking for the next step up).
+   *
+   * Negative aStep means step down, positive means step up.
+   *
+   * Returns NS_OK or else the error values that should be thrown if this call
+   * was initiated by a stepUp()/stepDown() call from script under conditions
+   * that such a call should throw.
+   */
+  nsresult GetValueIfStepped(int32_t aStepCount,
+                             StepCallerType aCallerType,
+                             Decimal* aNextStep);
+
   /**
    * Apply a step change from stepUp or stepDown by multiplying aStep by the
    * current step value.
@@ -1073,9 +1164,13 @@ protected:
    */
   static bool IsExperimentalMobileType(uint8_t aType)
   {
-    return aType == NS_FORM_INPUT_NUMBER || aType == NS_FORM_INPUT_DATE ||
-           aType == NS_FORM_INPUT_TIME;
+    return aType == NS_FORM_INPUT_DATE || aType == NS_FORM_INPUT_TIME;
   }
+
+  /**
+   * Flushes the layout frame tree to make sure we have up-to-date frames.
+   */
+  void FlushFrames();
 
   /**
    * Returns true if the element should prevent dispatching another DOMActivate.
@@ -1083,6 +1178,29 @@ protected:
    * sent a DOMActivate and prevents firing more than once.
    */
   bool ShouldPreventDOMActivateDispatch(EventTarget* aOriginalTarget);
+
+  /**
+   * Some input type (color and file) let user choose a value using a picker:
+   * this function checks if it is needed, and if so, open the corresponding
+   * picker (color picker or file picker).
+   */
+  nsresult MaybeInitPickers(EventChainPostVisitor& aVisitor);
+
+  enum FilePickerType {
+    FILE_PICKER_FILE,
+    FILE_PICKER_DIRECTORY
+  };
+  nsresult InitFilePicker(FilePickerType aType);
+  nsresult InitColorPicker();
+
+  /**
+   * Use this function before trying to open a picker.
+   * It checks if the page is allowed to open a new pop-up.
+   * If it returns true, you should not create the picker.
+   *
+   * @return true if popup should be blocked, false otherwise
+   */
+  bool IsPopupBlocked() const;
 
   nsCOMPtr<nsIControllers> mControllers;
 
@@ -1098,7 +1216,7 @@ protected:
     /**
      * The current value of the input if it has been changed from the default
      */
-    PRUnichar*               mValue;
+    char16_t*               mValue;
     /**
      * The state of the text editor associated with the text/password input
      */
@@ -1114,9 +1232,11 @@ protected:
    * the frame. Whenever the frame wants to change the filename it has to call
    * SetFileNames to update this member.
    */
-  nsCOMArray<nsIDOMFile>   mFiles;
+  nsTArray<nsCOMPtr<nsIDOMFile> >   mFiles;
 
   nsRefPtr<nsDOMFileList>  mFileList;
+
+  nsRefPtr<DirPickerFileListBuilderTask> mDirPickerFileListBuilderTask;
 
   nsString mStaticDocFileList;
   
@@ -1135,6 +1255,13 @@ protected:
    * canceled.
    */
   Decimal mRangeThumbDragStartValue;
+
+  /**
+   * Timer that is used when mType == NS_FORM_INPUT_FILE and the user selects a
+   * directory. It is used to fire progress events while the list of files
+   * under that directory tree is built.
+   */
+  nsCOMPtr<nsITimer> mProgressTimer;
 
   // Step scale factor values, for input types that have one.
   static const Decimal kStepScaleFactorDate;
@@ -1171,8 +1298,14 @@ protected:
   bool                     mCanShowInvalidUI    : 1;
   bool                     mHasRange            : 1;
   bool                     mIsDraggingRange     : 1;
+  bool                     mProgressTimerIsActive : 1;
+  bool                     mNumberControlSpinnerIsSpinning : 1;
+  bool                     mNumberControlSpinnerSpinsUp : 1;
+  bool                     mPickerRunning : 1;
 
 private:
+  static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                    nsRuleData* aData);
 
   /**
    * Returns true if this input's type will fire a DOM "change" event when it
@@ -1182,9 +1315,19 @@ private:
     return MayFireChangeOnBlur(mType);
   }
 
+  /**
+   * Returns true if setRangeText can be called on element
+   */
+  bool SupportsSetRangeText() const {
+    return mType == NS_FORM_INPUT_TEXT || mType == NS_FORM_INPUT_SEARCH ||
+           mType == NS_FORM_INPUT_URL || mType == NS_FORM_INPUT_TEL ||
+           mType == NS_FORM_INPUT_PASSWORD || mType == NS_FORM_INPUT_NUMBER;
+  }
+
   static bool MayFireChangeOnBlur(uint8_t aType) {
     return IsSingleLineTextControl(false, aType) ||
-           aType == NS_FORM_INPUT_RANGE;
+           aType == NS_FORM_INPUT_RANGE ||
+           aType == NS_FORM_INPUT_NUMBER;
   }
 
   struct nsFilePickerFilter {
@@ -1231,28 +1374,12 @@ private:
     bool mIsTrusted; 
   };
 
-  class AsyncClickHandler
-    : public nsRunnable
-  {
-  public:
-    AsyncClickHandler(HTMLInputElement* aInput);
-    NS_IMETHOD Run() MOZ_OVERRIDE;
-
-  protected:
-    nsresult InitFilePicker();
-    nsresult InitColorPicker();
-
-    nsRefPtr<HTMLInputElement> mInput;
-    PopupControlState mPopupControlState;
-  };
-
   class nsFilePickerShownCallback
     : public nsIFilePickerShownCallback
   {
   public:
     nsFilePickerShownCallback(HTMLInputElement* aInput,
-                              nsIFilePicker* aFilePicker,
-                              bool aMulti);
+                              nsIFilePicker* aFilePicker);
     virtual ~nsFilePickerShownCallback()
     { }
 
@@ -1263,7 +1390,6 @@ private:
   private:
     nsCOMPtr<nsIFilePicker> mFilePicker;
     nsRefPtr<HTMLInputElement> mInput;
-    bool mMulti;
   };
 };
 

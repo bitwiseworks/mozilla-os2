@@ -14,25 +14,8 @@
 
 #define BUFFSIZE 512
 
-BOOL IsXPOrGreater()
-{
-  OSVERSIONINFO osvi;
-
-  ZeroMemory(&osvi, sizeof(OSVERSIONINFO));
-  osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-
-  GetVersionEx(&osvi);
-
-  return ( (osvi.dwMajorVersion > 5) ||
-     ( (osvi.dwMajorVersion == 5) && (osvi.dwMinorVersion >= 1) ));
-}
-
 nsresult TestWinAttribs()
 {
-    if (!IsXPOrGreater())
-      return NS_OK;
-  
-    printf("Is XP or greater, running tests...\n");
 
     nsresult rv;
 
@@ -45,10 +28,10 @@ nsresult TestWinAttribs()
     hIndexed = CreateFileW(L".\\indexbit.txt", 
                             GENERIC_READ | GENERIC_WRITE,
                             0, 
-                            NULL,
+                            nullptr,
                             CREATE_ALWAYS,        
                             FILE_ATTRIBUTE_NORMAL, //FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, not supported by cf
-                            NULL);  
+                            nullptr);  
 
     if(hIndexed == INVALID_HANDLE_VALUE)
     {
@@ -59,7 +42,7 @@ nsresult TestWinAttribs()
     CloseHandle(hIndexed);
 
     GetFullPathNameW((LPCWSTR)L".\\indexbit.txt", 
-                        MAX_PATH, filePath, NULL);
+                        MAX_PATH, filePath, nullptr);
 
     //wprintf(filePath);
     //wprintf(L"\n");

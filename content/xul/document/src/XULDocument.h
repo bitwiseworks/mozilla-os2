@@ -25,6 +25,9 @@
 
 #include "mozilla/Attributes.h"
 
+#include "js/TracingAPI.h"
+#include "js/TypeDecls.h"
+
 class nsIRDFResource;
 class nsIRDFService;
 class nsPIWindowRoot;
@@ -40,8 +43,6 @@ class nsIXULPrototypeScript;
 #include "nsURIHashKey.h"
 #include "nsInterfaceHashtable.h"
 
-class JSObject;
-struct JSTracer;
 struct PRLogModuleInfo;
 
 class nsRefMapEntry : public nsStringHashKey
@@ -84,11 +85,12 @@ private:
 namespace mozilla {
 namespace dom {
 
-class XULDocument : public XMLDocument,
-                    public nsIXULDocument,
-                    public nsIDOMXULDocument,
-                    public nsIStreamLoaderObserver,
-                    public nsICSSLoaderObserver
+class XULDocument MOZ_FINAL : public XMLDocument,
+                              public nsIXULDocument,
+                              public nsIDOMXULDocument,
+                              public nsIStreamLoaderObserver,
+                              public nsICSSLoaderObserver,
+                              public nsIOffThreadScriptReceiver
 {
 public:
     XULDocument();
@@ -142,6 +144,8 @@ public:
     NS_FORWARD_NSIDOMNODE_TO_NSINODE
 
     // nsIDOMDocument interface
+    using nsDocument::CreateElement;
+    using nsDocument::CreateElementNS;
     NS_FORWARD_NSIDOMDOCUMENT(XMLDocument::)
     // And explicitly import the things from nsDocument that we just shadowed
     using nsDocument::GetImplementation;
@@ -172,6 +176,8 @@ public:
     virtual int GetDocumentLWTheme() MOZ_OVERRIDE;
 
     virtual void ResetDocumentLWTheme() MOZ_OVERRIDE { mDocLWTheme = Doc_Theme_Uninitialized; }
+
+    NS_IMETHOD OnScriptCompileComplete(JSScript* aScript, nsresult aStatus) MOZ_OVERRIDE;
 
     static bool
     MatchAttribute(nsIContent* aContent,
@@ -275,7 +281,7 @@ protected:
 
     already_AddRefed<nsPIWindowRoot> GetWindowRoot();
 
-    static NS_HIDDEN_(int) DirectionChanged(const char* aPrefName, void* aData);
+    static NS_HIDDEN_(void) DirectionChanged(const char* aPrefName, void* aData);
 
     // pseudo constants
     static int32_t gRefCnt;
@@ -292,8 +298,7 @@ protected:
     nsresult
     Persist(nsIContent* aElement, int32_t aNameSpaceID, nsIAtom* aAttribute);
 
-    virtual JSObject* WrapNode(JSContext *aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+    virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
     // IMPORTANT: The ownership implicit in the following member
     // variables has been explicitly checked and set using nsCOMPtr
@@ -320,6 +325,12 @@ protected:
      * called in this situation.
      */
     bool                       mStillWalking;
+
+    /**
+     * These two values control where persistent attributes get applied.
+     */
+    bool                           mRestrictPersistence;
+    nsTHashtable<nsStringHashKey>  mPersistenceIds;
 
     /**
      * An array of style sheets, that will be added (preserving order) to the
@@ -438,6 +449,19 @@ protected:
      * the top of stack here.
      */
     nsXULPrototypeScript* mCurrentScriptProto;
+
+    /**
+     * Whether the current transcluded script is being compiled off thread.
+     * The load event is blocked while this is in progress.
+     */
+    bool mOffThreadCompiling;
+
+    /**
+     * If the current transcluded script is being compiled off thread, the
+     * source for that script.
+     */
+    jschar* mOffThreadCompileStringBuf;
+    size_t mOffThreadCompileStringLength;
 
     /**
      * Check if a XUL template builder has already been hooked up.
@@ -576,11 +600,11 @@ protected:
 
     static
     nsresult
-    InsertElement(nsIContent* aParent, nsIContent* aChild, bool aNotify);
+    InsertElement(nsINode* aParent, nsIContent* aChild, bool aNotify);
 
     static 
     nsresult
-    RemoveElement(nsIContent* aParent, nsIContent* aChild);
+    RemoveElement(nsINode* aParent, nsINode* aChild);
 
     /**
      * The current prototype that we are walking to construct the
@@ -703,9 +727,9 @@ protected:
      */
     PLDHashTable* mBroadcasterMap;
 
-    nsInterfaceHashtable<nsURIHashKey,nsIObserver> mOverlayLoadObservers;
-    nsInterfaceHashtable<nsURIHashKey,nsIObserver> mPendingOverlayLoadNotifications;
-    
+    nsAutoPtr<nsInterfaceHashtable<nsURIHashKey,nsIObserver> > mOverlayLoadObservers;
+    nsAutoPtr<nsInterfaceHashtable<nsURIHashKey,nsIObserver> > mPendingOverlayLoadNotifications;
+
     bool mInitialLayoutComplete;
 
     class nsDelayedBroadcastUpdate

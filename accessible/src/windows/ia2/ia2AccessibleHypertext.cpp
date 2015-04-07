@@ -21,13 +21,16 @@ ia2AccessibleHypertext::get_nHyperlinks(long* aHyperlinkCount)
 {
   A11Y_TRYBLOCK_BEGIN
 
+  if (!aHyperlinkCount)
+    return E_INVALIDARG;
+
   *aHyperlinkCount = 0;
 
   HyperTextAccessibleWrap* hyperText = static_cast<HyperTextAccessibleWrap*>(this);
   if (hyperText->IsDefunct())
     return CO_E_OBJNOTCONNECTED;
 
-  *aHyperlinkCount = hyperText->GetLinkCount();
+  *aHyperlinkCount = hyperText->LinkCount();
   return S_OK;
 
   A11Y_TRYBLOCK_END
@@ -39,13 +42,16 @@ ia2AccessibleHypertext::get_hyperlink(long aLinkIndex,
 {
   A11Y_TRYBLOCK_BEGIN
 
+  if (!aHyperlink)
+    return E_INVALIDARG;
+
   *aHyperlink = nullptr;
 
   HyperTextAccessibleWrap* hyperText = static_cast<HyperTextAccessibleWrap*>(this);
   if (hyperText->IsDefunct())
     return CO_E_OBJNOTCONNECTED;
 
-  Accessible* hyperLink = hyperText->GetLinkAt(aLinkIndex);
+  Accessible* hyperLink = hyperText->LinkAt(aLinkIndex);
   if (!hyperLink)
     return E_FAIL;
 
@@ -62,13 +68,16 @@ ia2AccessibleHypertext::get_hyperlinkIndex(long aCharIndex, long* aHyperlinkInde
 {
   A11Y_TRYBLOCK_BEGIN
 
+  if (!aHyperlinkIndex)
+    return E_INVALIDARG;
+
   *aHyperlinkIndex = 0;
 
   HyperTextAccessibleWrap* hyperAcc = static_cast<HyperTextAccessibleWrap*>(this);
   if (hyperAcc->IsDefunct())
     return CO_E_OBJNOTCONNECTED;
 
-  *aHyperlinkIndex = hyperAcc->GetLinkIndexAtOffset(aCharIndex);
+  *aHyperlinkIndex = hyperAcc->LinkIndexAtOffset(aCharIndex);
   return S_OK;
 
   A11Y_TRYBLOCK_END

@@ -24,7 +24,7 @@ SpecialPowers.addPermission("cellbroadcast", true, document);
 SpecialPowers.addPermission("mobileconnection", true, document);
 
 let cbs = window.navigator.mozCellBroadcast;
-ok(cbs instanceof MozCellBroadcast,
+ok(cbs instanceof window.MozCellBroadcast,
    "mozCellBroadcast is instanceof " + cbs.constructor);
 
 let pendingEmulatorCmdCount = 0;
@@ -32,7 +32,7 @@ function sendCellBroadcastMessage(pdu, callback) {
   pendingEmulatorCmdCount++;
 
   let cmd = "cbs pdu " + pdu;
-  runEmulatorCmd(cmd, function (result) {
+  runEmulatorCmd(cmd, function(result) {
     pendingEmulatorCmdCount--;
 
     is(result[0], "OK", "Emulator response");
@@ -102,7 +102,7 @@ function testEtwsMessageAttributes() {
     ok(message, "event.message is valid");
 
     // Attributes other than `language` and `body` should always be assigned.
-    ok(message.geographicalScope != null, "message.geographicalScope");
+    ok(message.gsmGeographicalScope != null, "message.gsmGeographicalScope");
     ok(message.messageCode != null, "message.messageCode");
     ok(message.messageId != null, "message.messageId");
     ok('language' in message, "message.language");
@@ -116,6 +116,7 @@ function testEtwsMessageAttributes() {
     ok(message.etws.emergencyUserAlert != null,
        "message.etws.emergencyUserAlert");
     ok(message.etws.popup != null, "message.etws.popup");
+    ok(message.cdmaServiceCategory != null, "message.cdmaServiceCategory");
 
     window.setTimeout(testReceiving_ETWS_GeographicalScope, 0);
   });
@@ -133,9 +134,9 @@ function testReceiving_ETWS_GeographicalScope() {
     let pdu = buildHexStr(((gs & 0x03) << 14), 4)
             + buildHexStr(0, (CB_MESSAGE_SIZE_ETWS - 2) * 2);
 
-    doTestHelper(pdu, nextTest, function (message) {
-      is(message.geographicalScope, CB_GSM_GEOGRAPHICAL_SCOPE_NAMES[gs],
-         "message.geographicalScope");
+    doTestHelper(pdu, nextTest, function(message) {
+      is(message.gsmGeographicalScope, CB_GSM_GEOGRAPHICAL_SCOPE_NAMES[gs],
+         "message.gsmGeographicalScope");
     });
   }
 
@@ -157,7 +158,7 @@ function testReceiving_ETWS_MessageCode() {
     let pdu = buildHexStr(((messageCode & 0x3FF) << 4), 4)
             + buildHexStr(0, (CB_MESSAGE_SIZE_ETWS - 2) * 2);
 
-    doTestHelper(pdu, nextTest, function (message) {
+    doTestHelper(pdu, nextTest, function(message) {
       is(message.messageCode, messageCode, "message.messageCode");
     });
   }
@@ -179,7 +180,7 @@ function testReceiving_ETWS_MessageId() {
             + buildHexStr((messageId & 0xFFFF), 4)
             + buildHexStr(0, (CB_MESSAGE_SIZE_ETWS - 4) * 2);
 
-    doTestHelper(pdu, nextTest, function (message) {
+    doTestHelper(pdu, nextTest, function(message) {
       is(message.messageId, messageId, "message.messageId");
     });
   }
@@ -192,7 +193,7 @@ function testReceiving_ETWS_Timestamp() {
 
   // Here we use a simple ETWS message for test.
   let pdu = buildHexStr(0, 12); // 6 octets
-  doTestHelper(pdu, testReceiving_ETWS_WarningType, function (message) {
+  doTestHelper(pdu, testReceiving_ETWS_WarningType, function(message) {
     // Cell Broadcast messages do not contain a timestamp field (however, ETWS
     // does). We only check the timestamp doesn't go too far (60 seconds) here.
     let msMessage = message.timestamp.getTime();
@@ -215,7 +216,7 @@ function testReceiving_ETWS_WarningType() {
             + buildHexStr(((warningType & 0x7F) << 9), 4)
             + buildHexStr(0, (CB_MESSAGE_SIZE_ETWS - 6) * 2);
 
-    doTestHelper(pdu, nextTest, function (message) {
+    doTestHelper(pdu, nextTest, function(message) {
       ok(message.etws, "message.etws");
       is(message.etws.warningType, CB_ETWS_WARNING_TYPE_NAMES[warningType],
          "message.etws.warningType");
@@ -229,7 +230,7 @@ function doTestEmergencyUserAlert_or_Popup(name, mask, nextTest) {
   let pdu = buildHexStr(0, 8)
           + buildHexStr(mask, 4)
           + buildHexStr(0, (CB_MESSAGE_SIZE_ETWS - 6) * 2);
-  doTestHelper(pdu, nextTest, function (message) {
+  doTestHelper(pdu, nextTest, function(message) {
     ok(message.etws != null, "message.etws");
     is(message.etws[name], mask != 0, "message.etws." + name);
   });
@@ -261,7 +262,7 @@ function cleanUp() {
   finish();
 }
 
-waitFor(testEtwsMessageAttributes, function () {
-  return navigator.mozMobileConnection.voice.connected;
+waitFor(testEtwsMessageAttributes, function() {
+  return navigator.mozMobileConnections[0].voice.connected;
 });
 

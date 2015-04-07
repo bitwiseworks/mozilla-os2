@@ -7,7 +7,7 @@ HTTP(..) == download-2.html download-2-ref.html
 HTTP(..) != download-2.html about:blank
 random-if(winWidget) HTTP(..) == download-2-big.html download-2-big-otf.html # bug 470713
 HTTP(..) != download-2-big-otf.html about:blank
-HTTP(..) != download-3-notref.html download-3.html
+skip-if(Android&&AndroidVersion==17) HTTP(..) != download-3-notref.html download-3.html
 HTTP(..) == download-3-ref.html download-3.html
 HTTP(..) == fallback-to-system-1.html fallback-to-system-1-ref.html
 HTTP(..) == name-override-simple-1.html name-override-simple-1-ref.html
@@ -90,13 +90,10 @@ HTTP(..) == ex-unit-1.html ex-unit-1-ref.html
 HTTP(..) == ex-unit-1-dynamic.html ex-unit-1-ref.html
 
 # bug 493976 - for some reason the Arabic tests below cause Tinderbox timeouts
-# Arabic support requires AAT fonts under Mac OS, OpenType otherwise
-# random-if(!cocoaWidget) HTTP(..) == src-format-arabic.html src-format-arabic-aat-ref.html
-# random-if(cocoaWidget) HTTP(..) == src-format-arabic.html src-format-arabic-ot-ref.html
+# HTTP(..) == src-format-arabic.html src-format-arabic-ot-ref.html
 
-# bug 769194 - src:local() completely broken on android
-skip-if(B2G) fails-if(Android) == local-1.html local-1-ref.html # bug 773482
-skip-if(B2G) fails-if(Android) == local-styled-1.html local-styled-1-ref.html # bug 773482
+== local-1.html local-1-ref.html
+== local-styled-1.html local-styled-1-ref.html
 
 skip-if(B2G) HTTP(..) == synthetic-weight-style.html synthetic-weight-style-ref.html # bug 773482
 skip-if(B2G) HTTP(..) == synthetic-variations.html synthetic-variations-ref.html
@@ -112,8 +109,6 @@ skip-if(B2G) HTTP(..) == name-collision.html name-collision-ref.html # bug 77348
 skip-if(B2G) HTTP(..) == name-collision-bad-url.html name-collision-bad-url-ref.html # bug 773482
 
 HTTP(..) == name-collision-with-prefs-font.html name-collision-with-prefs-font-ref.html # bug 668758
-
-# t2embed lib on windows is picky about fullname
 HTTP(..) == load-badfullname.html load-badfullname-ref.html
 
 # 507960-1-* : a collection of tests using DeLarge from openfontlibrary.org
@@ -145,7 +140,8 @@ HTTP(..) == bug533251.html bug533251-ref.html
 HTTP(..) == font-familiy-whitespace-1.html font-familiy-whitespace-1-ref.html
 HTTP(..) != font-familiy-whitespace-1.html font-familiy-whitespace-1-notref.html
 
-skip-if(B2G) fails-if(Android) HTTP(..) == ivs-1.html ivs-1-ref.html # bug 773482
+skip-if(B2G) HTTP(..) == ivs-1.html ivs-1-ref.html # bug 773482
+skip-if(B2G) HTTP(..) == cjkcisvs-1.html cjkcisvs-1-ref.html
 
 skip-if(B2G) HTTP(..) == missing-names.html missing-names-ref.html # bug 773482
 
@@ -157,3 +153,8 @@ HTTP(..) != font-error-404-1.html font-error-404-2.html # sanity-check that the 
 
 # Font load redirection
 HTTP(..) == font-redirect.html order-1-ref.html
+
+# Tests for potential regressions from bug 879963
+== dynamic-duplicate-rule-1a.html dynamic-duplicate-rule-1-ref.html
+== dynamic-duplicate-rule-1b.html dynamic-duplicate-rule-1-ref.html
+== dynamic-duplicate-rule-1c.html dynamic-duplicate-rule-1-ref.html

@@ -4,12 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include <stdlib.h>
 #include <stdio.h>
 #include "nsTArray.h"
-#include "nsMemory.h"
 #include "nsAutoPtr.h"
 #include "nsStringAPI.h"
 #include "nsDirectoryServiceDefs.h"
@@ -314,7 +313,7 @@ static bool test_string_array() {
   if (strArray.BinaryIndexOf(EmptyCString()) != strArray.NoIndex)
     return false;
 
-  nsCString rawArray[NS_ARRAY_LENGTH(kdata) - 1];
+  nsCString rawArray[MOZ_ARRAY_LENGTH(kdata) - 1];
   for (i = 0; i < ArrayLength(rawArray); ++i)
     rawArray[i].Assign(kdata + i);  // substrings of kdata
   return test_basic_array(rawArray, ArrayLength(rawArray),
@@ -439,12 +438,12 @@ static bool test_ptrarray() {
 #ifdef DEBUG
 static bool test_autoarray() {
   uint32_t data[] = {4,6,8,2,4,1,5,7,3};
-  nsAutoTArray<uint32_t, NS_ARRAY_LENGTH(data)> array;
+  nsAutoTArray<uint32_t, MOZ_ARRAY_LENGTH(data)> array;
 
   void* hdr = array.DebugGetHeader();
   if (hdr == nsTArray<uint32_t>().DebugGetHeader())
     return false;
-  if (hdr == nsAutoTArray<uint32_t, NS_ARRAY_LENGTH(data)>().DebugGetHeader())
+  if (hdr == nsAutoTArray<uint32_t, MOZ_ARRAY_LENGTH(data)>().DebugGetHeader())
     return false;
 
   array.AppendElement(1u);
@@ -486,7 +485,7 @@ static bool test_autoarray() {
   array.Compact();
   array.AppendElements(data, ArrayLength(data));
   uint32_t data3[] = {5, 7, 11};
-  nsAutoTArray<uint32_t, NS_ARRAY_LENGTH(data3)> array3;
+  nsAutoTArray<uint32_t, MOZ_ARRAY_LENGTH(data3)> array3;
   array3.AppendElements(data3, ArrayLength(data3));  
   array.SwapElements(array3);
   for (i = 0; i < ArrayLength(data); ++i) {
@@ -847,18 +846,17 @@ static bool test_fallible()
     return true;
   }
 
-  // Allocate a bunch of 512MB arrays.  We could go bigger, but nsTArray will
-  // bail before even attempting to malloc() for gigantic arrays.  512MB should
-  // be under that threshold.
+  // Allocate a bunch of 128MB arrays.  Larger allocations will fail on some
+  // platforms without actually hitting OOM.
   //
-  // 9 * 512MB > 4GB, so we should definitely OOM by the 9th array.
-  const unsigned numArrays = 9;
+  // 36 * 128MB > 4GB, so we should definitely OOM by the 36th array.
+  const unsigned numArrays = 36;
   FallibleTArray<char> arrays[numArrays];
   for (uint32_t i = 0; i < numArrays; i++) {
-    bool success = arrays[i].SetCapacity(512 * 1024 * 1024);
+    bool success = arrays[i].SetCapacity(128 * 1024 * 1024);
     if (!success) {
       // We got our OOM.  Check that it didn't come too early.
-      if (i < 2) {
+      if (i < 8) {
         printf("test_fallible: Got OOM on iteration %d.  Too early!\n", i);
         return false;
       }
@@ -925,6 +923,92 @@ static bool test_conversion_operator() {
   return true;
 }
 
+template<class T>
+struct BufAccessor : public T
+{
+  void* GetHdr() { return T::mHdr; }
+};
+
+static bool test_SetLengthAndRetainStorage_no_ctor() {
+  // 1050 because sizeof(int)*1050 is more than a page typically.
+  const int N = 1050;
+  FallibleTArray<int> f;
+  AutoFallibleTArray<int, N> fauto;
+
+  InfallibleTArray<int> i;
+  AutoInfallibleTArray<int, N> iauto;
+
+  nsTArray<int> t;
+  nsAutoTArray<int, N> tauto;
+
+#define LPAREN (
+#define RPAREN )
+#define FOR_EACH(pre, post)                                    \
+  do {                                                         \
+    pre f post;                                                \
+    pre fauto post;                                            \
+    pre i post;                                                \
+    pre iauto post;                                            \
+    pre t post;                                                \
+    pre tauto post;                                            \
+  } while (0)
+  
+  // Setup test arrays.
+  FOR_EACH(;, .SetLength(N));
+  for (int n = 0; n < N; ++n) {
+    FOR_EACH(;, [n] = n);
+  }
+
+  void* initial_Hdrs[] = {
+    static_cast<BufAccessor<FallibleTArray<int> >&>(f).GetHdr(),
+    static_cast<BufAccessor<AutoFallibleTArray<int, N> >&>(fauto).GetHdr(),
+    static_cast<BufAccessor<InfallibleTArray<int> >&>(i).GetHdr(),
+    static_cast<BufAccessor<AutoInfallibleTArray<int, N> >&>(iauto).GetHdr(),
+    static_cast<BufAccessor<nsTArray<int> >&>(t).GetHdr(),
+    static_cast<BufAccessor<nsAutoTArray<int, N> >&>(tauto).GetHdr(),
+    nullptr
+  };
+
+  // SetLengthAndRetainStorage(n), should NOT overwrite memory when T hasn't
+  // a default constructor.
+  FOR_EACH(;, .SetLengthAndRetainStorage(8));
+  FOR_EACH(;, .SetLengthAndRetainStorage(12));
+  for (int n = 0; n < 12; ++n) {
+    FOR_EACH(if LPAREN, [n] != n RPAREN return false);
+  }
+  FOR_EACH(;, .SetLengthAndRetainStorage(0));
+  FOR_EACH(;, .SetLengthAndRetainStorage(N));
+  for (int n = 0; n < N; ++n) {
+    FOR_EACH(if LPAREN, [n] != n RPAREN return false);
+  }
+
+  void* current_Hdrs[] = {
+    static_cast<BufAccessor<FallibleTArray<int> >&>(f).GetHdr(),
+    static_cast<BufAccessor<AutoFallibleTArray<int, N> >&>(fauto).GetHdr(),
+    static_cast<BufAccessor<InfallibleTArray<int> >&>(i).GetHdr(),
+    static_cast<BufAccessor<AutoInfallibleTArray<int, N> >&>(iauto).GetHdr(),
+    static_cast<BufAccessor<nsTArray<int> >&>(t).GetHdr(),
+    static_cast<BufAccessor<nsAutoTArray<int, N> >&>(tauto).GetHdr(),
+    nullptr
+  };
+
+  // SetLengthAndRetainStorage(n) should NOT have reallocated the internal
+  // memory.
+  if (sizeof(initial_Hdrs) != sizeof(current_Hdrs)) return false;
+  for (size_t n = 0; n < sizeof(current_Hdrs) / sizeof(current_Hdrs[0]); ++n) {
+    if (current_Hdrs[n] != initial_Hdrs[n]) {
+      return false;
+    }
+  }
+
+
+#undef FOR_EACH
+#undef LPAREN
+#undef RPAREN
+
+  return true;
+}
+
 //----
 
 typedef bool (*TestFunc)();
@@ -951,6 +1035,7 @@ static const struct Test {
   DECL_TEST(test_swap),
   DECL_TEST(test_fallible),
   DECL_TEST(test_conversion_operator),
+  DECL_TEST(test_SetLengthAndRetainStorage_no_ctor),
   { nullptr, nullptr }
 };
 

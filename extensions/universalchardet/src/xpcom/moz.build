@@ -4,12 +4,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'universalchardet'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsUdetXPCOMWrapper.cpp',
     'nsUniversalCharDetModule.cpp',
 ]
 
 LIBRARY_NAME = 'universalchardet'
 
+FINAL_LIBRARY = 'xul'
+
+LOCAL_INCLUDES += [
+    '../base',
+]

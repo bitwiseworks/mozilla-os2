@@ -10,13 +10,13 @@
 #include "nsIDOMCanvasRenderingContext2D.h"
 
 #include "mozilla/Attributes.h"
-#include "mozilla/StandardInteger.h"
+#include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/TypedArray.h"
+#include <stdint.h>
 
 #include "nsCycleCollectionParticipant.h"
-#include "nsTraceRefcnt.h"
-#include "xpcpublic.h"
-
-#include "jsapi.h"
+#include "nsISupportsImpl.h"
+#include "js/GCAPI.h"
 
 namespace mozilla {
 namespace dom {
@@ -42,6 +42,17 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(ImageData)
 
+  static ImageData* Constructor(const GlobalObject& aGlobal,
+                                const uint32_t aWidth,
+                                const uint32_t aHeight,
+                                ErrorResult& aRv);
+
+  static ImageData* Constructor(const GlobalObject& aGlobal,
+                                const Uint8ClampedArray& aData,
+                                const uint32_t aWidth,
+                                const Optional<uint32_t>& aHeight,
+                                ErrorResult& aRv);
+
   uint32_t Width() const
   {
     return mWidth;
@@ -50,17 +61,17 @@ public:
   {
     return mHeight;
   }
-  JSObject* Data(JSContext* cx) const
+  void GetData(JSContext* cx, JS::MutableHandle<JSObject*> aData) const
   {
-    return GetDataObject();
+    aData.set(GetDataObject());
   }
   JSObject* GetDataObject() const
   {
-    xpc_UnmarkGrayObject(mData);
+    JS::ExposeObjectToActiveJS(mData);
     return mData;
   }
 
-  JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> scope);
+  JSObject* WrapObject(JSContext* cx);
 
 private:
   void HoldData();

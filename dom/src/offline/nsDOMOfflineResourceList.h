@@ -19,18 +19,22 @@
 #include "nsWeakReference.h"
 #include "nsCOMArray.h"
 #include "nsIDOMEventListener.h"
-#include "nsDOMEvent.h"
 #include "nsIObserver.h"
 #include "nsIScriptContext.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsPIDOMWindow.h"
-#include "nsDOMEventTargetHelper.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/ErrorResult.h"
-#include "nsIDOMDOMStringList.h"
 
 class nsIDOMWindow;
 
-class nsDOMOfflineResourceList : public nsDOMEventTargetHelper,
+namespace mozilla {
+namespace dom {
+class DOMStringList;
+} // namespace dom
+} // namespace mozilla
+
+class nsDOMOfflineResourceList : public mozilla::DOMEventTargetHelper,
                                  public nsIDOMOfflineResourceList,
                                  public nsIObserver,
                                  public nsIOfflineCacheUpdateObserver,
@@ -45,7 +49,7 @@ public:
   NS_DECL_NSIOFFLINECACHEUPDATEOBSERVER
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsDOMOfflineResourceList,
-                                           nsDOMEventTargetHelper)
+                                           mozilla::DOMEventTargetHelper)
 
   nsDOMOfflineResourceList(nsIURI* aManifestURI,
                            nsIURI* aDocumentURI,
@@ -62,7 +66,7 @@ public:
     return GetOwner();
   }
   virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   uint16_t GetStatus(ErrorResult& aRv)
   {
@@ -88,12 +92,7 @@ public:
   IMPL_EVENT_HANDLER(updateready)
   IMPL_EVENT_HANDLER(obsolete)
 
-  already_AddRefed<nsIDOMDOMStringList> GetMozItems(ErrorResult& aRv)
-  {
-    nsCOMPtr<nsIDOMDOMStringList> items;
-    aRv = GetMozItems(getter_AddRefs(items));
-    return items.forget();
-  }
+  already_AddRefed<mozilla::dom::DOMStringList> GetMozItems(ErrorResult& aRv);
   bool MozHasItem(const nsAString& aURI, ErrorResult& aRv)
   {
     bool hasItem = false;
@@ -157,7 +156,6 @@ private:
   nsCOMPtr<nsIApplicationCache> mAvailableApplicationCache;
   nsCOMPtr<nsIOfflineCacheUpdate> mCacheUpdate;
   bool mExposeCacheUpdateStatus;
-  bool mDontSetDocumentCache;
   uint16_t mStatus;
 
   // The set of dynamic keys for this application cache object.

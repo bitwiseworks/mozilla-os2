@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-let Promise = devtools.require("sdk/core/promise");
+let {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
 let Toolbox = devtools.Toolbox;
 let TargetFactory = devtools.TargetFactory;
 
@@ -16,7 +16,7 @@ function test() {
   // open tab, load URL_1, and wait for load to finish
   let tab = gBrowser.selectedTab = gBrowser.addTab();
   let target = TargetFactory.forTab(gBrowser.selectedTab);
-  let deferred = Promise.defer();
+  let deferred = promise.defer();
   let browser = gBrowser.getBrowserForTab(tab);
   function onTabLoad() {
     browser.removeEventListener("load", onTabLoad, true);
@@ -33,9 +33,16 @@ function test() {
   // select the inspector
     .then(function () toolbox.selectTool("inspector"))
 
+  // wait until inspector ready
+    .then(function () {
+      let deferred = promise.defer();
+      toolbox.getPanel("inspector").once("inspector-updated", deferred.resolve);
+      return deferred.promise;
+    })
+
   // navigate to URL_2
     .then(function () {
-      let deferred = Promise.defer();
+      let deferred = promise.defer();
       target.once("navigate", function () deferred.resolve());
       browser.loadURI(URL_2);
       return deferred.promise;

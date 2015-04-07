@@ -7,15 +7,11 @@
 #define nsMathMLContainerFrame_h___
 
 #include "mozilla/Attributes.h"
-#include "nsCOMPtr.h"
 #include "nsContainerFrame.h"
 #include "nsBlockFrame.h"
 #include "nsInlineFrame.h"
-#include "nsMathMLAtoms.h"
 #include "nsMathMLOperators.h"
-#include "nsMathMLChar.h"
 #include "nsMathMLFrame.h"
-#include "nsMathMLParts.h"
 #include "mozilla/Likely.h"
 
 /*
@@ -37,6 +33,7 @@ class nsMathMLContainerFrame : public nsContainerFrame,
 public:
   nsMathMLContainerFrame(nsStyleContext* aContext) : nsContainerFrame(aContext) {}
 
+  NS_DECL_QUERYFRAME_TARGET(nsMathMLContainerFrame)
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
@@ -82,45 +79,47 @@ public:
               ~(nsIFrame::eMathML | nsIFrame::eExcludesIgnorableWhitespace));
   }
 
-  NS_IMETHOD
+  virtual nsresult
   AppendFrames(ChildListID     aListID,
                nsFrameList&    aFrameList) MOZ_OVERRIDE;
 
-  NS_IMETHOD
+  virtual nsresult
   InsertFrames(ChildListID     aListID,
                nsIFrame*       aPrevFrame,
                nsFrameList&    aFrameList) MOZ_OVERRIDE;
 
-  NS_IMETHOD
+  virtual nsresult
   RemoveFrame(ChildListID     aListID,
               nsIFrame*       aOldFrame) MOZ_OVERRIDE;
 
   /**
-   * Both GetMinWidth and GetPrefWidth return whatever
-   * GetIntrinsicWidth returns.
+   * Both GetMinWidth and GetPrefWidth use the intrinsic width metrics
+   * returned by GetIntrinsicMetrics, including ink overflow.
    */
   virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
   virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
 
   /**
-   * Return the intrinsic width of the frame's content area.
+   * Return the intrinsic horizontal metrics of the frame's content area.
    */
-  virtual nscoord GetIntrinsicWidth(nsRenderingContext *aRenderingContext);
+  virtual void
+  GetIntrinsicWidthMetrics(nsRenderingContext* aRenderingContext,
+                           nsHTMLReflowMetrics& aDesiredSize);
 
-  NS_IMETHOD
+  virtual nsresult
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,
          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
-  NS_IMETHOD
+  virtual nsresult
   WillReflow(nsPresContext* aPresContext) MOZ_OVERRIDE
   {
     mPresentationData.flags &= ~NS_MATHML_ERROR;
     return nsContainerFrame::WillReflow(aPresContext);
   }
 
-  NS_IMETHOD
+  virtual nsresult
   DidReflow(nsPresContext*           aPresContext,
             const nsHTMLReflowState*  aReflowState,
             nsDidReflowStatus         aStatus) MOZ_OVERRIDE
@@ -152,8 +151,8 @@ public:
   //    2b. If the automatic data to update affects us in some way, we ask our parent
   //        to re-layout its children using ReLayoutChildren(mParent);
   //        Therefore, there is an overhead here in that our siblings are re-laid
-  //        too (e.g., this happens with <mstyle>, <munder>, <mover>, <munderover>). 
-  NS_IMETHOD
+  //        too (e.g., this happens with <munder>, <mover>, <munderover>). 
+  virtual nsresult
   AttributeChanged(int32_t         aNameSpaceID,
                    nsIAtom*        aAttribute,
                    int32_t         aModType) MOZ_OVERRIDE;
@@ -248,8 +247,8 @@ public:
    * @param aValue The value for which the parse error occured.
    */
   nsresult
-  ReportParseError(const PRUnichar*           aAttribute,
-                   const PRUnichar*           aValue);
+  ReportParseError(const char16_t*           aAttribute,
+                   const char16_t*           aValue);
 
   /*
    * Helper to call ReportErrorToConsole when certain tags
@@ -259,12 +258,20 @@ public:
   ReportChildCountError();
 
   /*
+   * Helper to call ReportErrorToConsole when certain tags have
+   * invalid child tags
+   * @param aChildTag The tag which is forbidden in this context
+   */
+  nsresult
+  ReportInvalidChildError(nsIAtom* aChildTag);
+
+  /*
    * Helper to call ReportToConsole when an error occurs.
    * @param aParams see nsContentUtils::ReportToConsole
    */
   nsresult
   ReportErrorToConsole(const char*       aErrorMsgId,
-                       const PRUnichar** aParams = nullptr,
+                       const char16_t** aParams = nullptr,
                        uint32_t          aParamCount = 0);
 
   // helper method to reflow a child frame. We are inline frames, and we don't
@@ -332,6 +339,11 @@ public:
                                        uint32_t        aFlagsValues,
                                        uint32_t        aFlagsToUpdate);
 
+  // Sets flags on aFrame and all descendant frames
+  static void
+  PropagateFrameFlagFor(nsIFrame* aFrame,
+                        nsFrameState aFlags);
+
   // helper to let the rebuild of automatic data (presentation data
   // and embellishement data) walk through a subtree that may contain
   // non-MathML container frames. Note that this method re-builds the
@@ -396,14 +408,16 @@ private:
 // Issues: If/when mathml becomes a pluggable component, the separation will be needed.
 class nsMathMLmathBlockFrame : public nsBlockFrame {
 public:
+  NS_DECL_QUERYFRAME_TARGET(nsMathMLmathBlockFrame)
+  NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
   friend nsIFrame* NS_NewMathMLmathBlockFrame(nsIPresShell* aPresShell,
-          nsStyleContext* aContext, uint32_t aFlags);
+          nsStyleContext* aContext, nsFrameState aFlags);
 
   // beware, mFrames is not set by nsBlockFrame
   // cannot use mFrames{.FirstChild()|.etc} since the block code doesn't set mFrames
-  NS_IMETHOD
+  virtual nsresult
   SetInitialChildList(ChildListID     aListID,
                       nsFrameList&    aChildList) MOZ_OVERRIDE
   {
@@ -414,7 +428,7 @@ public:
     return rv;
   }
 
-  NS_IMETHOD
+  virtual nsresult
   AppendFrames(ChildListID     aListID,
                nsFrameList&    aFrameList) MOZ_OVERRIDE
   {
@@ -426,7 +440,7 @@ public:
     return rv;
   }
 
-  NS_IMETHOD
+  virtual nsresult
   InsertFrames(ChildListID     aListID,
                nsIFrame*       aPrevFrame,
                nsFrameList&    aFrameList) MOZ_OVERRIDE
@@ -439,7 +453,7 @@ public:
     return rv;
   }
 
-  NS_IMETHOD
+  virtual nsresult
   RemoveFrame(ChildListID     aListID,
               nsIFrame*       aOldFrame) MOZ_OVERRIDE
   {
@@ -456,6 +470,12 @@ public:
               ~(nsIFrame::eMathML | nsIFrame::eExcludesIgnorableWhitespace));
   }
 
+  // See nsIMathMLFrame.h
+  bool IsMrowLike() {
+    return mFrames.FirstChild() != mFrames.LastChild() ||
+           !mFrames.FirstChild();
+  }
+
 protected:
   nsMathMLmathBlockFrame(nsStyleContext* aContext) : nsBlockFrame(aContext) {
     // We should always have a float manager.  Not that things can really try
@@ -467,13 +487,16 @@ protected:
 
 // --------------
 
-class nsMathMLmathInlineFrame : public nsInlineFrame {
+class nsMathMLmathInlineFrame : public nsInlineFrame,
+                                public nsMathMLFrame {
 public:
+  NS_DECL_QUERYFRAME_TARGET(nsMathMLmathInlineFrame)
+  NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
   friend nsIFrame* NS_NewMathMLmathInlineFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
-  NS_IMETHOD
+  virtual nsresult
   SetInitialChildList(ChildListID     aListID,
                       nsFrameList&    aChildList) MOZ_OVERRIDE
   {
@@ -484,7 +507,7 @@ public:
     return rv;
   }
 
-  NS_IMETHOD
+  virtual nsresult
   AppendFrames(ChildListID     aListID,
                nsFrameList&    aFrameList) MOZ_OVERRIDE
   {
@@ -496,7 +519,7 @@ public:
     return rv;
   }
 
-  NS_IMETHOD
+  virtual nsresult
   InsertFrames(ChildListID     aListID,
                nsIFrame*       aPrevFrame,
                nsFrameList&    aFrameList) MOZ_OVERRIDE
@@ -509,7 +532,7 @@ public:
     return rv;
   }
 
-  NS_IMETHOD
+  virtual nsresult
   RemoveFrame(ChildListID     aListID,
               nsIFrame*       aOldFrame) MOZ_OVERRIDE
   {
@@ -524,6 +547,12 @@ public:
   virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE {
       return nsInlineFrame::IsFrameOfType(aFlags &
                 ~(nsIFrame::eMathML | nsIFrame::eExcludesIgnorableWhitespace));
+  }
+
+  bool
+  IsMrowLike() MOZ_OVERRIDE {
+    return mFrames.FirstChild() != mFrames.LastChild() ||
+           !mFrames.FirstChild();
   }
 
 protected:

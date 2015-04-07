@@ -43,8 +43,6 @@ nsProfileLock::nsProfileLock() :
     mReplacedLockTime(0)
 #if defined (XP_WIN)
     ,mLockFileHandle(INVALID_HANDLE_VALUE)
-#elif defined (XP_OS2)
-    ,mLockFileHandle(-1)
 #elif defined (XP_UNIX)
     ,mPidLockFileName(nullptr)
     ,mLockFileDesc(-1)
@@ -73,9 +71,6 @@ nsProfileLock& nsProfileLock::operator=(nsProfileLock& rhs)
 #if defined (XP_WIN)
     mLockFileHandle = rhs.mLockFileHandle;
     rhs.mLockFileHandle = INVALID_HANDLE_VALUE;
-#elif defined (XP_OS2)
-    mLockFileHandle = rhs.mLockFileHandle;
-    rhs.mLockFileHandle = -1;
 #elif defined (XP_UNIX)
     mLockFileDesc = rhs.mLockFileDesc;
     rhs.mLockFileDesc = -1;
@@ -166,7 +161,7 @@ void nsProfileLock::FatalSignalHandler(int signo
         if (oldact->sa_handler == SIG_DFL) {
             // Make sure the default sig handler is executed
             // We need it to get Mozilla to dump core.
-            sigaction(signo,oldact,NULL);
+            sigaction(signo,oldact, nullptr);
 
             // Now that we've restored the default handler, unmask the
             // signal and invoke it.
@@ -175,7 +170,7 @@ void nsProfileLock::FatalSignalHandler(int signo
             sigemptyset(&unblock_sigs);
             sigaddset(&unblock_sigs, signo);
 
-            sigprocmask(SIG_UNBLOCK, &unblock_sigs, NULL);
+            sigprocmask(SIG_UNBLOCK, &unblock_sigs, nullptr);
 
             raise(signo);
         }
@@ -391,7 +386,7 @@ nsresult nsProfileLock::LockWithSymlink(nsIFile *aLockFile, bool aHaveFcntlLock)
 
 #define CATCH_SIGNAL(signame)                                           \
 PR_BEGIN_MACRO                                                          \
-  if (sigaction(signame, NULL, &oldact) == 0 &&                         \
+  if (sigaction(signame, nullptr, &oldact) == 0 &&                      \
       oldact.sa_handler != SIG_IGN)                                     \
   {                                                                     \
       sigaction(signame, &act, &signame##_oldact);                      \
@@ -505,11 +500,11 @@ nsresult nsProfileLock::Lock(nsIFile* aProfileDir,
             if (ioBytes == sizeof(LockProcessInfo))
             {
 #ifdef __LP64__
-                processInfo.processAppRef = NULL;
+                processInfo.processAppRef = nullptr;
 #else
-                processInfo.processAppSpec = NULL;
+                processInfo.processAppSpec = nullptr;
 #endif
-                processInfo.processName = NULL;
+                processInfo.processName = nullptr;
                 processInfo.processInfoLength = sizeof(ProcessInfoRec);
                 if (::GetProcessInformation(&lockProcessInfo.psn, &processInfo) == noErr &&
                     processInfo.processLaunchDate == lockProcessInfo.launchDate)
@@ -583,29 +578,6 @@ nsresult nsProfileLock::Lock(nsIFile* aProfileDir,
         // XXXbsmedberg: provide a profile-unlocker here!
         return NS_ERROR_FILE_ACCESS_DENIED;
     }
-#elif defined(XP_OS2)
-    nsAutoCString filePath;
-    rv = lockFile->GetNativePath(filePath);
-    if (NS_FAILED(rv))
-        return rv;
-
-    lockFile->GetLastModifiedTime(&mReplacedLockTime);
-
-    ULONG   ulAction = 0;
-    APIRET  rc;
-    rc = DosOpen(filePath.get(),
-                  &mLockFileHandle,
-                  &ulAction,
-                  0,
-                  FILE_NORMAL,
-                  OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_OPEN_IF_EXISTS,
-                  OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYREADWRITE | OPEN_FLAGS_NOINHERIT,
-                  0 );
-    if (rc != NO_ERROR)
-    {
-        mLockFileHandle = -1;
-        return NS_ERROR_FILE_ACCESS_DENIED;
-    }
 #elif defined(VMS)
     nsAutoCString filePath;
     rv = lockFile->GetNativePath(filePath);
@@ -647,12 +619,6 @@ nsresult nsProfileLock::Unlock(bool aFatalSignal)
             CloseHandle(mLockFileHandle);
             mLockFileHandle = INVALID_HANDLE_VALUE;
         }
-#elif defined (XP_OS2)
-        if (mLockFileHandle != -1)
-        {
-            DosClose(mLockFileHandle);
-            mLockFileHandle = -1;
-        }
 #elif defined (XP_UNIX)
         if (mPidLockFileName)
         {
@@ -668,7 +634,7 @@ nsresult nsProfileLock::Unlock(bool aFatalSignal)
                 free(mPidLockFileName);
             mPidLockFileName = nullptr;
         }
-        else if (mLockFileDesc != -1)
+        if (mLockFileDesc != -1)
         {
             close(mLockFileDesc);
             mLockFileDesc = -1;

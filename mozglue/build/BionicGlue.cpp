@@ -9,12 +9,15 @@
 #include <time.h>
 #include <unistd.h>
 #include <android/log.h>
-#include <mozilla/Util.h>
+#include <sys/syscall.h>
+
+#include "mozilla/Alignment.h"
 
 #include <vector>
 
 #define NS_EXPORT __attribute__ ((visibility("default")))
 
+#if ANDROID_VERSION < 17 || defined(MOZ_WIDGET_ANDROID)
 /* Android doesn't have pthread_atfork(), so we need to use our own. */
 struct AtForkFuncs {
   void (*prepare)(void);
@@ -59,11 +62,13 @@ private:
 };
 
 static std::vector<AtForkFuncs, SpecialAllocator<AtForkFuncs> > atfork;
+#endif
 
 #ifdef MOZ_WIDGET_GONK
 #include "cpuacct.h"
 #define WRAP(x) x
 
+#if ANDROID_VERSION < 17 || defined(MOZ_WIDGET_ANDROID)
 extern "C" NS_EXPORT int
 timer_create(clockid_t, struct sigevent*, timer_t*)
 {
@@ -71,12 +76,14 @@ timer_create(clockid_t, struct sigevent*, timer_t*)
   abort();
   return -1;
 }
+#endif
 
 #else
 #define cpuacct_add(x)
 #define WRAP(x) __wrap_##x
 #endif
 
+#if ANDROID_VERSION < 17 || defined(MOZ_WIDGET_ANDROID)
 extern "C" NS_EXPORT int
 WRAP(pthread_atfork)(void (*prepare)(void), void (*parent)(void), void (*child)(void))
 {
@@ -90,38 +97,46 @@ WRAP(pthread_atfork)(void (*prepare)(void), void (*parent)(void), void (*child)(
   return 0;
 }
 
-extern "C" pid_t __fork(void);
-
 extern "C" NS_EXPORT pid_t
 WRAP(fork)(void)
 {
   pid_t pid;
-  for (std::vector<AtForkFuncs>::reverse_iterator it = atfork.rbegin();
+  for (auto it = atfork.rbegin();
        it < atfork.rend(); ++it)
     if (it->prepare)
       it->prepare();
 
-  switch ((pid = __fork())) {
+  switch ((pid = syscall(__NR_clone, SIGCHLD, NULL, NULL, NULL, NULL))) {
   case 0:
     cpuacct_add(getuid());
-    for (std::vector<AtForkFuncs>::iterator it = atfork.begin();
+    for (auto it = atfork.begin();
          it < atfork.end(); ++it)
       if (it->child)
         it->child();
     break;
   default:
-    for (std::vector<AtForkFuncs>::iterator it = atfork.begin();
+    for (auto it = atfork.begin();
          it < atfork.end(); ++it)
       if (it->parent)
         it->parent();
   }
   return pid;
 }
+#endif
 
 extern "C" NS_EXPORT int
 WRAP(raise)(int sig)
 {
-  return pthread_kill(pthread_self(), sig);
+  // Bug 741272: Bionic incorrectly uses kill(), which signals the
+  // process, and thus could signal another thread (and let this one
+  // return "successfully" from raising a fatal signal).
+  //
+  // Bug 943170: POSIX specifies pthread_kill(pthread_self(), sig) as
+  // equivalent to raise(sig), but Bionic also has a bug with these
+  // functions, where a forked child will kill its parent instead.
+
+  extern pid_t gettid(void);
+  return syscall(__NR_tgkill, getpid(), gettid(), sig);
 }
 
 /*

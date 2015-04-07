@@ -9,7 +9,7 @@
 #include "nsIVolume.h"
 #include "nsString.h"
 #include "mozilla/Observer.h"
-#include "mozilla/RefPtr.h"
+#include "nsISupportsImpl.h"
 #include "nsWhitespaceTokenizer.h"
 
 namespace mozilla {
@@ -24,9 +24,11 @@ namespace system {
 *
 ***************************************************************************/
 
-class Volume : public RefCounted<Volume>
+class Volume MOZ_FINAL
 {
 public:
+  NS_INLINE_DECL_REFCOUNTING(Volume)
+
   Volume(const nsCSubstring& aVolumeName);
 
   typedef long STATE; // States are now defined in nsIVolume.idl
@@ -46,9 +48,19 @@ public:
   bool IsMountLocked() const          { return mMountLocked; }
   bool MediaPresent() const           { return mMediaPresent; }
   bool CanBeShared() const            { return mCanBeShared; }
+  bool CanBeFormatted() const         { return CanBeShared(); }
+  bool CanBeMounted() const           { return CanBeShared(); }
   bool IsSharingEnabled() const       { return mCanBeShared && mSharingEnabled; }
+  bool IsFormatRequested() const      { return CanBeFormatted() && mFormatRequested; }
+  bool IsMountRequested() const       { return CanBeMounted() && mMountRequested; }
+  bool IsUnmountRequested() const     { return CanBeMounted() && mUnmountRequested; }
+  bool IsSharing() const              { return mIsSharing; }
+  bool IsFormatting() const           { return mIsFormatting; }
 
   void SetSharingEnabled(bool aSharingEnabled);
+  void SetFormatRequested(bool aFormatRequested);
+  void SetMountRequested(bool aMountRequested);
+  void SetUnmountRequested(bool aUnmountRequested);
 
   typedef mozilla::Observer<Volume *>     EventObserver;
   typedef mozilla::ObserverList<Volume *> EventObserverList;
@@ -68,9 +80,12 @@ private:
   // be called as each one completes.
   void StartMount(VolumeResponseCallback* aCallback);
   void StartUnmount(VolumeResponseCallback* aCallback);
+  void StartFormat(VolumeResponseCallback* aCallback);
   void StartShare(VolumeResponseCallback* aCallback);
   void StartUnshare(VolumeResponseCallback* aCallback);
 
+  void SetIsSharing(bool aIsSharing);
+  void SetIsFormatting(bool aIsFormatting);
   void SetState(STATE aNewState);
   void SetMediaPresent(bool aMediaPresent);
   void SetMountPoint(const nsCSubstring& aMountPoint);
@@ -89,7 +104,12 @@ private:
   int32_t           mMountGeneration;
   bool              mMountLocked;
   bool              mSharingEnabled;
+  bool              mFormatRequested;
+  bool              mMountRequested;
+  bool              mUnmountRequested;
   bool              mCanBeShared;
+  bool              mIsSharing;
+  bool              mIsFormatting;
 
   static EventObserverList mEventObserverList;
 };

@@ -138,7 +138,7 @@ static void mount_operation_ask_password (GMountOperation   *mount_op,
 class nsGIOInputStream MOZ_FINAL : public nsIInputStream
 {
   public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIINPUTSTREAM
 
     nsGIOInputStream(const nsCString &uriSpec)
@@ -580,7 +580,7 @@ nsGIOInputStream::SetContentTypeOfChannel(const char *contentType)
   return rv;
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsGIOInputStream, nsIInputStream)
+NS_IMPL_ISUPPORTS(nsGIOInputStream, nsIInputStream)
 
 /**
  * Free all used memory and close stream.
@@ -826,18 +826,18 @@ mount_operation_ask_password (GMountOperation   *mount_op,
   if (flags & G_ASK_PASSWORD_NEED_PASSWORD) {
     if (flags & G_ASK_PASSWORD_NEED_USERNAME) {
       if (!realm.IsEmpty()) {
-        const PRUnichar *strings[] = { realm.get(), dispHost.get() };
-        bundle->FormatStringFromName(NS_LITERAL_STRING("EnterLoginForRealm").get(),
+        const char16_t *strings[] = { realm.get(), dispHost.get() };
+        bundle->FormatStringFromName(MOZ_UTF16("EnterLoginForRealm"),
                                      strings, 2, getter_Copies(nsmessage));
       } else {
-        const PRUnichar *strings[] = { dispHost.get() };
-        bundle->FormatStringFromName(NS_LITERAL_STRING("EnterUserPasswordFor").get(),
+        const char16_t *strings[] = { dispHost.get() };
+        bundle->FormatStringFromName(MOZ_UTF16("EnterUserPasswordFor"),
                                      strings, 1, getter_Copies(nsmessage));
       }
     } else {
       NS_ConvertUTF8toUTF16 userName(default_user);
-      const PRUnichar *strings[] = { userName.get(), dispHost.get() };
-      bundle->FormatStringFromName(NS_LITERAL_STRING("EnterPasswordFor").get(),
+      const char16_t *strings[] = { userName.get(), dispHost.get() };
+      bundle->FormatStringFromName(MOZ_UTF16("EnterPasswordFor"),
                                    strings, 2, getter_Copies(nsmessage));
     }
   } else {
@@ -851,7 +851,7 @@ mount_operation_ask_password (GMountOperation   *mount_op,
   // Prompt the user...
   nsresult rv;
   bool retval = false;
-  PRUnichar *user = nullptr, *pass = nullptr;
+  char16_t *user = nullptr, *pass = nullptr;
   if (default_user) {
     // user will be freed by PromptUsernameAndPassword
     user = ToNewUnicode(NS_ConvertUTF8toUTF16(default_user));
@@ -898,7 +898,7 @@ class nsGIOProtocolHandler MOZ_FINAL : public nsIProtocolHandler
     nsCString mSupportedProtocols;
 };
 
-NS_IMPL_ISUPPORTS2(nsGIOProtocolHandler, nsIProtocolHandler, nsIObserver)
+NS_IMPL_ISUPPORTS(nsGIOProtocolHandler, nsIProtocolHandler, nsIObserver)
 
 nsresult
 nsGIOProtocolHandler::Init()
@@ -1085,7 +1085,7 @@ nsGIOProtocolHandler::AllowPort(int32_t aPort,
 NS_IMETHODIMP
 nsGIOProtocolHandler::Observe(nsISupports *aSubject,
                               const char *aTopic,
-                              const PRUnichar *aData)
+                              const char16_t *aData)
 {
   if (strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0) {
     nsCOMPtr<nsIPrefBranch> prefs = do_QueryInterface(aSubject);

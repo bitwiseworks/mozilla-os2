@@ -19,19 +19,9 @@
 #include <shlobj.h>
 #include <knownfolders.h>
 #include <guiddef.h>
+#include "mozilla/WindowsVersion.h"
 
-#elif defined(XP_OS2)
-
-#define MAX_PATH _MAX_PATH
-#define INCL_WINWORKPLACE
-#define INCL_DOSMISC
-#define INCL_DOSMODULEMGR
-#define INCL_DOSPROCESS
-#define INCL_WINSHELLDATA
-#include <os2.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include "prenv.h"
+using mozilla::IsWin7OrLater;
 
 #elif defined(XP_UNIX)
 
@@ -67,7 +57,7 @@ typedef HRESULT (WINAPI* nsGetKnownFolderPath)(GUID& rfid,
                                                HANDLE hToken,
                                                PWSTR *ppszPath);
 
-static nsGetKnownFolderPath gGetKnownFolderPath = NULL;
+static nsGetKnownFolderPath gGetKnownFolderPath = nullptr;
 #endif
 
 void StartupSpecialSystemDirectory()
@@ -91,8 +81,8 @@ static nsresult GetKnownFolder(GUID* guid, nsIFile** aFile)
     if (!guid || !gGetKnownFolderPath)
         return NS_ERROR_FAILURE;
 
-    PWSTR path = NULL;
-    gGetKnownFolderPath(*guid, 0, NULL, &path);
+    PWSTR path = nullptr;
+    gGetKnownFolderPath(*guid, 0, nullptr, &path);
 
     if (!path)
         return NS_ERROR_FAILURE;
@@ -110,7 +100,7 @@ GetWindowsFolder(int folder, nsIFile** aFile)
 {
     WCHAR path_orig[MAX_PATH + 3];
     WCHAR *path = path_orig+1;
-    HRESULT result = SHGetSpecialFolderPathW(NULL, path, folder, true);
+    HRESULT result = SHGetSpecialFolderPathW(nullptr, path, folder, true);
 
     if (!SUCCEEDED(result))
         return NS_ERROR_FAILURE;
@@ -130,9 +120,9 @@ __inline HRESULT
 SHLoadLibraryFromKnownFolder(REFKNOWNFOLDERID aFolderId, DWORD aMode,
                              REFIID riid, void **ppv)
 {
-    *ppv = NULL;
+    *ppv = nullptr;
     IShellLibrary *plib;
-    HRESULT hr = CoCreateInstance(CLSID_ShellLibrary, NULL,
+    HRESULT hr = CoCreateInstance(CLSID_ShellLibrary, nullptr,
                                   CLSCTX_INPROC_SERVER,
                                   IID_PPV_ARGS(&plib));
     if (SUCCEEDED(hr)) {
@@ -155,10 +145,7 @@ GetLibrarySaveToPath(int aFallbackFolderId, REFKNOWNFOLDERID aFolderId,
                      nsIFile** aFile)
 {
     // Skip off checking for library support if the os is Vista or lower.
-    DWORD dwVersion = GetVersion();
-    if ((DWORD)(LOBYTE(LOWORD(dwVersion))) < 6 ||
-        ((DWORD)(LOBYTE(LOWORD(dwVersion))) == 6 &&
-         (DWORD)(HIBYTE(LOWORD(dwVersion))) == 0))
+    if (!IsWin7OrLater())
       return GetWindowsFolder(aFallbackFolderId, aFile);
 
     nsRefPtr<IShellLibrary> shellLib;
@@ -170,7 +157,7 @@ GetLibrarySaveToPath(int aFallbackFolderId, REFKNOWNFOLDERID aFolderId,
     if (shellLib &&
         SUCCEEDED(shellLib->GetDefaultSaveFolder(DSFT_DETECT, IID_IShellItem,
                                                  getter_AddRefs(savePath)))) {
-        PRUnichar* str = nullptr;
+        wchar_t* str = nullptr;
         if (SUCCEEDED(savePath->GetDisplayName(SIGDN_FILESYSPATH, &str))) {
             nsAutoString path;
             path.Assign(str);
@@ -202,8 +189,8 @@ static nsresult GetRegWindowsAppDataFolder(bool aLocal, nsIFile** aFile)
 
     WCHAR path[MAX_PATH + 2];
     DWORD type, size;
-    res = RegQueryValueExW(key, (aLocal ? L"Local AppData" : L"AppData"), NULL,
-                           &type, (LPBYTE)&path, &size);
+    res = RegQueryValueExW(key, (aLocal ? L"Local AppData" : L"AppData"),
+                           nullptr, &type, (LPBYTE)&path, &size);
     ::RegCloseKey(key);
     // The call to RegQueryValueExW must succeed, the type must be REG_SZ, the
     // buffer size must not equal 0, and the buffer size be a multiple of 2.
@@ -287,14 +274,14 @@ xdg_user_dir_lookup (const char *type)
 
   home_dir = getenv ("HOME");
 
-  if (home_dir == NULL)
+  if (home_dir == nullptr)
     goto error;
 
   config_home = getenv ("XDG_CONFIG_HOME");
-  if (config_home == NULL || config_home[0] == 0)
+  if (config_home == nullptr || config_home[0] == 0)
     {
       config_file = (char*) malloc (strlen (home_dir) + strlen ("/.config/user-dirs.dirs") + 1);
-      if (config_file == NULL)
+      if (config_file == nullptr)
         goto error;
 
       strcpy (config_file, home_dir);
@@ -303,7 +290,7 @@ xdg_user_dir_lookup (const char *type)
   else
     {
       config_file = (char*) malloc (strlen (config_home) + strlen ("/user-dirs.dirs") + 1);
-      if (config_file == NULL)
+      if (config_file == nullptr)
         goto error;
 
       strcpy (config_file, config_home);
@@ -312,10 +299,10 @@ xdg_user_dir_lookup (const char *type)
 
   file = fopen (config_file, "r");
   free (config_file);
-  if (file == NULL)
+  if (file == nullptr)
     goto error;
 
-  user_dir = NULL;
+  user_dir = nullptr;
   while (fgets (buffer, sizeof (buffer), file))
     {
       /* Remove newline at end */
@@ -363,7 +350,7 @@ xdg_user_dir_lookup (const char *type)
       if (relative)
 	{
 	  user_dir = (char*) malloc (strlen (home_dir) + 1 + strlen (p) + 1);
-          if (user_dir == NULL)
+          if (user_dir == nullptr)
             goto error2;
 
 	  strcpy (user_dir, home_dir);
@@ -372,7 +359,7 @@ xdg_user_dir_lookup (const char *type)
       else
 	{
 	  user_dir = (char*) malloc (strlen (p) + 1);
-          if (user_dir == NULL)
+          if (user_dir == nullptr)
             goto error2;
 
 	  *user_dir = 0;
@@ -394,7 +381,7 @@ error2:
     return user_dir;
 
  error:
-  return NULL;
+  return nullptr;
 }
 
 static const char xdg_user_dirs[] =
@@ -441,22 +428,6 @@ GetUnixXDGUserDirectory(SystemDirectories aSystemDirectory,
 
         rv = file->AppendNative(NS_LITERAL_CSTRING("Desktop"));
     }
-#if defined(MOZ_PLATFORM_MAEMO)
-    // "MYDOCSDIR" is exported to point to "/home/user/MyDocs" in maemo.
-    else if (Unix_XDG_Documents == aSystemDirectory) {
-
-        char *myDocs = PR_GetEnv("MYDOCSDIR");
-        if (!myDocs || !*myDocs)
-            return NS_ERROR_FAILURE;
-
-        rv = NS_NewNativeLocalFile(nsDependentCString(myDocs), true,
-                                   getter_AddRefs(file));
-        if (NS_FAILED(rv))
-            return rv;
-
-        rv = file->AppendNative(NS_LITERAL_CSTRING(".documents"));
-    }
-#endif
     else {
       // no fallback for the other XDG dirs
       rv = NS_ERROR_FAILURE;
@@ -501,9 +472,6 @@ GetSpecialSystemDirectory(SystemDirectories aSystemSystemDirectory,
             return NS_NewLocalFile(nsDependentString(path),
                                    true,
                                    aFile);
-#elif defined(XP_OS2)
-            if (DosQueryPathInfo( ".", FIL_QUERYFULLNAME, path, MAXPATHLEN))
-                return NS_ERROR_FAILURE;
 #else
             if(!getcwd(path, MAXPATHLEN))
                 return NS_ERROR_FAILURE;
@@ -521,24 +489,12 @@ GetSpecialSystemDirectory(SystemDirectories aSystemSystemDirectory,
             int32_t len = ::GetWindowsDirectoryW(path, MAX_PATH);
             if (len == 0)
                 break;
-            if (path[1] == PRUnichar(':') && path[2] == PRUnichar('\\'))
+            if (path[1] == char16_t(':') && path[2] == char16_t('\\'))
                 path[3] = 0;
 
             return NS_NewLocalFile(nsDependentString(path),
                                    true,
                                    aFile);
-        }
-#elif defined(XP_OS2)
-        {
-            ULONG ulBootDrive = 0;
-            char  buffer[] = " :\\OS2\\";
-            DosQuerySysInfo( QSV_BOOT_DRIVE, QSV_BOOT_DRIVE,
-                             &ulBootDrive, sizeof ulBootDrive);
-            buffer[0] = 'A' - 1 + ulBootDrive; // duh, 1-based index...
-
-            return NS_NewNativeLocalFile(nsDependentCString(buffer),
-                                         true,
-                                         aFile);
         }
 #else
         return NS_NewNativeLocalFile(nsDependentCString("/"),
@@ -556,23 +512,6 @@ GetSpecialSystemDirectory(SystemDirectories aSystemSystemDirectory,
             return NS_NewLocalFile(nsDependentString(path, len),
                                    true,
                                    aFile);
-        }
-#elif defined(XP_OS2)
-        {
-            char *tPath = PR_GetEnv("TMP");
-            if (!tPath || !*tPath) {
-                tPath = PR_GetEnv("TEMP");
-                if (!tPath || !*tPath) {
-                    // if an OS/2 system has neither TMP nor TEMP defined
-                    // then it is severely broken, so this will never happen.
-                    return NS_ERROR_UNEXPECTED;
-                }
-            }
-            nsCString tString = nsDependentCString(tPath);
-            if (tString.Find("/", false, 0, -1)) {
-                tString.ReplaceChar('/','\\');
-            }
-            return NS_NewNativeLocalFile(tString, true, aFile);
         }
 #elif defined(MOZ_WIDGET_COCOA)
         {
@@ -859,77 +798,6 @@ GetSpecialSystemDirectory(SystemDirectories aSystemSystemDirectory,
             return GetUnixXDGUserDirectory(aSystemSystemDirectory, aFile);
 #endif
 
-#ifdef XP_OS2
-        case OS2_SystemDirectory:
-        {
-            ULONG ulBootDrive = 0;
-            char  buffer[] = " :\\OS2\\System\\";
-            DosQuerySysInfo( QSV_BOOT_DRIVE, QSV_BOOT_DRIVE,
-                             &ulBootDrive, sizeof ulBootDrive);
-            buffer[0] = 'A' - 1 + ulBootDrive; // duh, 1-based index...
-
-            return NS_NewNativeLocalFile(nsDependentCString(buffer),
-                                         true,
-                                         aFile);
-        }
-
-     case OS2_OS2Directory:
-        {
-            ULONG ulBootDrive = 0;
-            char  buffer[] = " :\\OS2\\";
-            DosQuerySysInfo( QSV_BOOT_DRIVE, QSV_BOOT_DRIVE,
-                             &ulBootDrive, sizeof ulBootDrive);
-            buffer[0] = 'A' - 1 + ulBootDrive; // duh, 1-based index...
-
-            return NS_NewNativeLocalFile(nsDependentCString(buffer),
-                                         true,
-                                         aFile);
-        }
-
-     case OS2_HomeDirectory:
-        {
-            nsresult rv;
-            char *tPath = PR_GetEnv("MOZILLA_HOME");
-            char buffer[CCHMAXPATH];
-            /* If MOZILLA_HOME is not set, use GetCurrentProcessDirectory */
-            /* To ensure we get a long filename system */
-            if (!tPath || !*tPath) {
-                PPIB ppib;
-                PTIB ptib;
-                DosGetInfoBlocks( &ptib, &ppib);
-                DosQueryModuleName( ppib->pib_hmte, CCHMAXPATH, buffer);
-                *strrchr( buffer, '\\') = '\0'; // XXX DBCS misery
-                tPath = buffer;
-            }
-            rv = NS_NewNativeLocalFile(nsDependentCString(tPath),
-                                       true,
-                                       aFile);
-
-            PrfWriteProfileString(HINI_USERPROFILE, "Mozilla", "Home", tPath);
-            return rv;
-        }
-
-        case OS2_DesktopDirectory:
-        {
-            char szPath[CCHMAXPATH + 1];
-            BOOL fSuccess;
-            fSuccess = WinQueryActiveDesktopPathname (szPath, sizeof(szPath));
-            if (!fSuccess) {
-                // this could happen if we are running without the WPS, return
-                // the Home directory instead
-                return GetSpecialSystemDirectory(OS2_HomeDirectory, aFile);
-            }
-            int len = strlen (szPath);
-            if (len > CCHMAXPATH -1)
-                break;
-            szPath[len] = '\\';
-            szPath[len + 1] = '\0';
-
-            return NS_NewNativeLocalFile(nsDependentCString(szPath),
-                                         true,
-                                         aFile);
-        }
-#endif
         default:
             break;
     }

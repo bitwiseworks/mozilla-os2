@@ -4,16 +4,21 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['test']
+MOCHITEST_MANIFESTS += ['test/mochitest.ini']
 
 XPIDL_SOURCES += [
     'nsIAlertsService.idl',
 ]
 
-MODULE = 'alerts'
+XPIDL_MODULE = 'alerts'
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsAlertsService.cpp',
     'nsXULAlerts.cpp',
 ]
 
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'toolkitcomps'
+
+JAR_MANIFESTS += ['jar.mn']

@@ -7,7 +7,6 @@ const CURRENT_SCHEMA_VERSION = 23;
 
 const NS_APP_USER_PROFILE_50_DIR = "ProfD";
 const NS_APP_PROFILE_DIR_STARTUP = "ProfDS";
-const NS_APP_BOOKMARKS_50_FILE = "BMarks";
 
 // Shortcuts to transitions type.
 const TRANSITION_LINK = Ci.nsINavHistoryService.TRANSITION_LINK;
@@ -28,15 +27,21 @@ XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-                                  "resource://gre/modules/commonjs/sdk/core/promise.js");
+                                  "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "BookmarkJSONUtils",
                                   "resource://gre/modules/BookmarkJSONUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "BookmarkHTMLUtils",
+                                  "resource://gre/modules/BookmarkHTMLUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesBackups",
                                   "resource://gre/modules/PlacesBackups.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesTransactions",
+                                  "resource://gre/modules/PlacesTransactions.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "OS",
+                                  "resource://gre/modules/osfile.jsm");
 
 // This imports various other objects in addition to PlacesUtils.
 Cu.import("resource://gre/modules/PlacesUtils.jsm");
@@ -470,18 +475,22 @@ function check_bookmarks_html() {
 function create_JSON_backup(aFilename) {
   if (!aFilename)
     do_throw("you must pass a filename to create_JSON_backup function");
-  remove_all_JSON_backups();
   let bookmarksBackupDir = gProfD.clone();
   bookmarksBackupDir.append("bookmarkbackups");
   if (!bookmarksBackupDir.exists()) {
     bookmarksBackupDir.create(Ci.nsIFile.DIRECTORY_TYPE, parseInt("0755", 8));
     do_check_true(bookmarksBackupDir.exists());
   }
+  let profileBookmarksJSONFile = bookmarksBackupDir.clone();
+  profileBookmarksJSONFile.append(FILENAME_BOOKMARKS_JSON);
+  if (profileBookmarksJSONFile.exists()) {
+    profileBookmarksJSONFile.remove();
+  }
   let bookmarksJSONFile = gTestDir.clone();
   bookmarksJSONFile.append(aFilename);
   do_check_true(bookmarksJSONFile.exists());
   bookmarksJSONFile.copyTo(bookmarksBackupDir, FILENAME_BOOKMARKS_JSON);
-  let profileBookmarksJSONFile = bookmarksBackupDir.clone();
+  profileBookmarksJSONFile = bookmarksBackupDir.clone();
   profileBookmarksJSONFile.append(FILENAME_BOOKMARKS_JSON);
   do_check_true(profileBookmarksJSONFile.exists());
   return profileBookmarksJSONFile;
@@ -504,12 +513,29 @@ function remove_all_JSON_backups() {
 /**
  * Check a JSON backup file for today exists in the profile folder.
  *
+ * @param aIsAutomaticBackup The boolean indicates whether it's an automatic
+ *        backup.
  * @return nsIFile object for the file.
  */
-function check_JSON_backup() {
-  let profileBookmarksJSONFile = gProfD.clone();
-  profileBookmarksJSONFile.append("bookmarkbackups");
-  profileBookmarksJSONFile.append(FILENAME_BOOKMARKS_JSON);
+function check_JSON_backup(aIsAutomaticBackup) {
+  let profileBookmarksJSONFile;
+  if (aIsAutomaticBackup) {
+    let bookmarksBackupDir = gProfD.clone();
+    bookmarksBackupDir.append("bookmarkbackups");
+    let files = bookmarksBackupDir.directoryEntries;
+    let backup_date = new Date().toLocaleFormat("%Y-%m-%d");
+    while (files.hasMoreElements()) {
+      let entry = files.getNext().QueryInterface(Ci.nsIFile);
+      if (PlacesBackups.filenamesRegex.test(entry.leafName)) {
+        profileBookmarksJSONFile = entry;
+        break;
+      }
+    }
+  } else {
+    profileBookmarksJSONFile = gProfD.clone();
+    profileBookmarksJSONFile.append("bookmarkbackups");
+    profileBookmarksJSONFile.append(FILENAME_BOOKMARKS_JSON);
+  }
   do_check_true(profileBookmarksJSONFile.exists());
   return profileBookmarksJSONFile;
 }
@@ -825,8 +851,6 @@ function NavHistoryResultObserver() {}
 
 NavHistoryResultObserver.prototype = {
   batching: function () {},
-  containerClosed: function () {},
-  containerOpened: function () {},
   containerStateChanged: function () {},
   invalidateContainer: function () {},
   nodeAnnotationChanged: function () {},

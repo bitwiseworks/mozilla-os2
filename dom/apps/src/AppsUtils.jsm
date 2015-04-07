@@ -9,18 +9,24 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cr = Components.results;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/FileUtils.jsm");
+Cu.import("resource://gre/modules/Task.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Promise.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "NetUtil", function() {
-  return Cc["@mozilla.org/network/util;1"]
-           .getService(Ci.nsINetUtil);
-});
+XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
+  "resource://gre/modules/FileUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "WebappOSUtils",
+  "resource://gre/modules/WebappOSUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+  "resource://gre/modules/NetUtil.jsm");
 
 // Shared code for AppsServiceChild.jsm, Webapps.jsm and Webapps.js
 
-this.EXPORTED_SYMBOLS = ["AppsUtils", "ManifestHelper", "isAbsoluteURI"];
+this.EXPORTED_SYMBOLS = ["AppsUtils", "ManifestHelper", "isAbsoluteURI", "mozIApplication"];
 
 function debug(s) {
   //dump("-*- AppsUtils.jsm: " + s + "\n");
@@ -33,7 +39,8 @@ this.isAbsoluteURI = function(aURI) {
          Services.io.newURI(aURI, null, bar).prePath != bar.prePath;
 }
 
-function mozIApplication() {
+this.mozIApplication = function(aApp) {
+  _setAppProperties(this, aApp);
 }
 
 mozIApplication.prototype = {
@@ -52,55 +59,56 @@ mozIApplication.prototype = {
   },
 
   QueryInterface: function(aIID) {
-    if (aIID.equals(Ci.mozIDOMApplication) ||
-        aIID.equals(Ci.mozIApplication) ||
+    if (aIID.equals(Ci.mozIApplication) ||
         aIID.equals(Ci.nsISupports))
       return this;
     throw Cr.NS_ERROR_NO_INTERFACE;
   }
 }
 
+function _setAppProperties(aObj, aApp) {
+  aObj.name = aApp.name;
+  aObj.csp = aApp.csp;
+  aObj.installOrigin = aApp.installOrigin;
+  aObj.origin = aApp.origin;
+#ifdef MOZ_ANDROID_SYNTHAPKS
+  aObj.apkPackageName = aApp.apkPackageName;
+#endif
+  aObj.receipts = aApp.receipts ? JSON.parse(JSON.stringify(aApp.receipts)) : null;
+  aObj.installTime = aApp.installTime;
+  aObj.manifestURL = aApp.manifestURL;
+  aObj.appStatus = aApp.appStatus;
+  aObj.removable = aApp.removable;
+  aObj.id = aApp.id;
+  aObj.localId = aApp.localId;
+  aObj.basePath = aApp.basePath;
+  aObj.progress = aApp.progress || 0.0;
+  aObj.installState = aApp.installState || "installed";
+  aObj.downloadAvailable = aApp.downloadAvailable;
+  aObj.downloading = aApp.downloading;
+  aObj.readyToApplyDownload = aApp.readyToApplyDownload;
+  aObj.downloadSize = aApp.downloadSize || 0;
+  aObj.lastUpdateCheck = aApp.lastUpdateCheck;
+  aObj.updateTime = aApp.updateTime;
+  aObj.etag = aApp.etag;
+  aObj.packageEtag = aApp.packageEtag;
+  aObj.manifestHash = aApp.manifestHash;
+  aObj.packageHash = aApp.packageHash;
+  aObj.staged = aApp.staged;
+  aObj.installerAppId = aApp.installerAppId || Ci.nsIScriptSecurityManager.NO_APP_ID;
+  aObj.installerIsBrowser = !!aApp.installerIsBrowser;
+  aObj.storeId = aApp.storeId || "";
+  aObj.storeVersion = aApp.storeVersion || 0;
+  aObj.role = aApp.role || "";
+  aObj.redirects = aApp.redirects;
+}
+
 this.AppsUtils = {
   // Clones a app, without the manifest.
-  cloneAppObject: function cloneAppObject(aApp) {
-    return {
-      name: aApp.name,
-      csp: aApp.csp,
-      installOrigin: aApp.installOrigin,
-      origin: aApp.origin,
-      receipts: aApp.receipts ? JSON.parse(JSON.stringify(aApp.receipts)) : null,
-      installTime: aApp.installTime,
-      manifestURL: aApp.manifestURL,
-      appStatus: aApp.appStatus,
-      removable: aApp.removable,
-      id: aApp.id,
-      localId: aApp.localId,
-      basePath: aApp.basePath,
-      progress: aApp.progress || 0.0,
-      installState: aApp.installState || "installed",
-      downloadAvailable: aApp.downloadAvailable,
-      downloading: aApp.downloading,
-      readyToApplyDownload: aApp.readyToApplyDownload,
-      downloadSize: aApp.downloadSize || 0,
-      lastUpdateCheck: aApp.lastUpdateCheck,
-      updateTime: aApp.updateTime,
-      etag: aApp.etag,
-      packageEtag: aApp.packageEtag,
-      manifestHash: aApp.manifestHash,
-      packageHash: aApp.packageHash,
-      staged: aApp.staged,
-      installerAppId: aApp.installerAppId || Ci.nsIScriptSecurityManager.NO_APP_ID,
-      installerIsBrowser: !!aApp.installerIsBrowser,
-      storeId: aApp.storeId || "",
-      storeVersion: aApp.storeVersion || 0,
-      redirects: aApp.redirects
-    };
-  },
-
-  cloneAsMozIApplication: function cloneAsMozIApplication(aApp) {
-    let res = this.cloneAppObject(aApp);
-    res.__proto__ = mozIApplication.prototype;
-    return res;
+  cloneAppObject: function(aApp) {
+    let obj = {};
+    _setAppProperties(obj, aApp);
+    return obj;
   },
 
   getAppByManifestURL: function getAppByManifestURL(aApps, aManifestURL) {
@@ -111,7 +119,7 @@ this.AppsUtils = {
     for (let id in aApps) {
       let app = aApps[id];
       if (app.manifestURL == aManifestURL) {
-        return this.cloneAsMozIApplication(app);
+        return new mozIApplication(app);
       }
     }
 
@@ -157,7 +165,7 @@ this.AppsUtils = {
     for (let id in aApps) {
       let app = aApps[id];
       if (app.localId == aLocalId) {
-        return this.cloneAsMozIApplication(app);
+        return new mozIApplication(app);
       }
     }
 
@@ -176,21 +184,6 @@ this.AppsUtils = {
     return "";
   },
 
-  getAppFromObserverMessage: function(aApps, aMessage) {
-    let data = JSON.parse(aMessage);
-
-    for (let id in aApps) {
-      let app = aApps[id];
-      if (app.origin != data.origin) {
-        continue;
-      }
-
-      return this.cloneAsMozIApplication(app);
-    }
-
-    return null;
-  },
-
   getCoreAppsBasePath: function getCoreAppsBasePath() {
     debug("getCoreAppsBasePath()");
     try {
@@ -201,7 +194,9 @@ this.AppsUtils = {
   },
 
   getAppInfo: function getAppInfo(aApps, aAppId) {
-    if (!aApps[aAppId]) {
+    let app = aApps[aAppId];
+
+    if (!app) {
       debug("No webapp for " + aAppId);
       return null;
     }
@@ -210,12 +205,12 @@ this.AppsUtils = {
     // so we can't use the 'removable' property for isCoreApp
     // Instead, we check if the app is installed under /system/b2g
     let isCoreApp = false;
-    let app = aApps[aAppId];
+
 #ifdef MOZ_WIDGET_GONK
     isCoreApp = app.basePath == this.getCoreAppsBasePath();
 #endif
-    debug(app.name + " isCoreApp: " + isCoreApp);
-    return { "basePath":  app.basePath + "/",
+    debug(app.basePath + " isCoreApp: " + isCoreApp);
+    return { "path": WebappOSUtils.getPackagePath(app),
              "isCoreApp": isCoreApp };
   },
 
@@ -335,6 +330,10 @@ this.AppsUtils = {
       }
     }
 
+    // The 'role' field must be a string.
+    if (aManifest.role && (typeof aManifest.role !== "string")) {
+      return false;
+    }
     return true;
   },
 
@@ -342,7 +341,8 @@ this.AppsUtils = {
      checkManifestContentType(aInstallOrigin, aWebappOrigin, aContentType) {
     let hadCharset = { };
     let charset = { };
-    let contentType = NetUtil.parseContentType(aContentType, charset, hadCharset);
+    let netutil = Cc["@mozilla.org/network/util;1"].getService(Ci.nsINetUtil);
+    let contentType = netutil.parseContentType(aContentType, charset, hadCharset);
     if (aInstallOrigin != aWebappOrigin &&
         contentType != "application/x-web-app-manifest+json") {
       return false;
@@ -497,6 +497,83 @@ this.AppsUtils = {
 
     // Nothing failed.
     return true;
+  },
+
+  // Asynchronously loads a JSON file. aPath is a string representing the path
+  // of the file to be read.
+  loadJSONAsync: function(aPath) {
+    let deferred = Promise.defer();
+
+    try {
+      let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+      file.initWithPath(aPath);
+
+      let channel = NetUtil.newChannel(file);
+      channel.contentType = "application/json";
+
+      NetUtil.asyncFetch(channel, function(aStream, aResult) {
+        if (!Components.isSuccessCode(aResult)) {
+          deferred.resolve(null);
+
+          if (aResult == Cr.NS_ERROR_FILE_NOT_FOUND) {
+            // We expect this under certain circumstances, like for webapps.json
+            // on firstrun, so we return early without reporting an error.
+            return;
+          }
+
+          Cu.reportError("AppsUtils: Could not read from json file " + aPath);
+          return;
+        }
+
+        try {
+          // Obtain a converter to read from a UTF-8 encoded input stream.
+          let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+                            .createInstance(Ci.nsIScriptableUnicodeConverter);
+          converter.charset = "UTF-8";
+
+          // Read json file into a string
+          let data = JSON.parse(converter.ConvertToUnicode(NetUtil.readInputStreamToString(aStream,
+                                                            aStream.available()) || ""));
+          aStream.close();
+
+          deferred.resolve(data);
+        } catch (ex) {
+          Cu.reportError("AppsUtils: Could not parse JSON: " +
+                         aPath + " " + ex + "\n" + ex.stack);
+          deferred.resolve(null);
+        }
+      });
+    } catch (ex) {
+      Cu.reportError("AppsUtils: Could not read from " +
+                     aPath + " : " + ex + "\n" + ex.stack);
+      deferred.resolve(null);
+    }
+
+    return deferred.promise;
+  },
+
+  // Returns the MD5 hash of a string.
+  computeHash: function(aString) {
+    let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+                      .createInstance(Ci.nsIScriptableUnicodeConverter);
+    converter.charset = "UTF-8";
+    let result = {};
+    // Data is an array of bytes.
+    let data = converter.convertToByteArray(aString, result);
+
+    let hasher = Cc["@mozilla.org/security/hash;1"]
+                   .createInstance(Ci.nsICryptoHash);
+    hasher.init(hasher.MD5);
+    hasher.update(data, data.length);
+    // We're passing false to get the binary hash and not base64.
+    let hash = hasher.finish(false);
+
+    function toHexString(charCode) {
+      return ("0" + charCode.toString(16)).slice(-2);
+    }
+
+    // Convert the binary hash data to a hex string.
+    return [toHexString(hash.charCodeAt(i)) for (i in hash)].join("");
   }
 }
 
@@ -535,6 +612,10 @@ ManifestHelper.prototype = {
 
   get description() {
     return this._localeProp("description");
+  },
+
+  get type() {
+    return this._localeProp("type");
   },
 
   get version() {
@@ -576,6 +657,25 @@ ManifestHelper.prototype = {
       return this._manifest.permissions;
     }
     return {};
+  },
+
+  get biggestIconURL() {
+    let icons = this._localeProp("icons");
+    if (!icons) {
+      return null;
+    }
+
+    let iconSizes = Object.keys(icons);
+    if (iconSizes.length == 0) {
+      return null;
+    }
+
+    iconSizes.sort((a, b) => a - b);
+    let biggestIconSize = iconSizes.pop();
+    let biggestIcon = icons[biggestIconSize];
+    let biggestIconURL = this._origin.resolve(biggestIcon);
+
+    return biggestIconURL;
   },
 
   iconURLForSize: function(aSize) {
@@ -630,5 +730,9 @@ ManifestHelper.prototype = {
   fullPackagePath: function() {
     let packagePath = this._localeProp("package_path");
     return this._origin.resolve(packagePath ? packagePath : "");
+  },
+
+  get role() {
+    return this._manifest.role || "";
   }
 }

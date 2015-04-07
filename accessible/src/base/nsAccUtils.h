@@ -7,23 +7,21 @@
 #define nsAccUtils_h_
 
 #include "mozilla/a11y/Accessible.h"
-#include "nsIAccessibleText.h"
 
 #include "nsAccessibilityService.h"
 #include "nsCoreUtils.h"
 
-#include "mozilla/dom/Element.h"
 #include "nsIDocShell.h"
-#include "nsIPersistentProperties2.h"
-#include "nsIPresShell.h"
 #include "nsPoint.h"
 
-struct nsRoleMapEntry;
-
 namespace mozilla {
+
+namespace dom {
+class Element;
+}
+
 namespace a11y {
 
-class Accessible;
 class HyperTextAccessible;
 class DocAccessible;
 
@@ -119,17 +117,6 @@ public:
   }
 
   /**
-    * Return ancestor in this document with the given role if it exists.
-    *
-    * @param  aDescendant  [in] descendant to start search with
-    * @param  aRole        [in] role to find matching ancestor for
-    * @return               the ancestor accessible with the given role, or
-    *                       nullptr if no match is found
-    */
-   static Accessible* GetAncestorWithRole(Accessible* aDescendant,
-                                          uint32_t aRole);
-
-  /**
    * Return single or multi selectable container for the given item.
    *
    * @param  aAccessible  [in] the item accessible
@@ -139,20 +126,15 @@ public:
                                             uint64_t aState);
 
   /**
+   * Return a text container accessible for the given node.
+   */
+  static HyperTextAccessible* GetTextContainer(nsINode* aNode);
+
+  /**
    * Return true if the DOM node of given accessible has aria-selected="true"
    * attribute.
    */
   static bool IsARIASelected(Accessible* aAccessible);
-
-  /**
-   * Return text accessible containing focus point of the given selection.
-   * Used for normal and misspelling selection changes processing.
-   *
-   * @param aSelection  [in] the given selection
-   * @return            text accessible
-   */
-  static HyperTextAccessible*
-    GetTextAccessibleFromSelection(nsISelection* aSelection);
 
   /**
    * Converts the given coordinates to coordinates relative screen.

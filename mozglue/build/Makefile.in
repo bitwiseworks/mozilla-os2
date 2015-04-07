@@ -3,31 +3,14 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 DIST_INSTALL = 1
 
-# Build mozglue as a shared lib on Windows, OSX and Android.
-# If this is ever changed, update MOZ_SHARED_MOZGLUE in browser/installer/Makefile.in
-ifneq (,$(filter WINNT Darwin Android,$(OS_TARGET)))
-FORCE_SHARED_LIB = 1
-else
-FORCE_STATIC_LIB = 1
-endif
+# For FORCE_SHARED_LIB
+include $(topsrcdir)/config/config.mk
 
-# Keep jemalloc separated when mozglue is statically linked
-ifeq (1_1,$(MOZ_MEMORY)_$(or $(MOZ_NATIVE_JEMALLOC),$(FORCE_SHARED_LIB)))
-SHARED_LIBRARY_LIBS = $(call EXPAND_LIBNAME_PATH,memory,$(DEPTH)/memory/build)
-else
-# Temporary, until bug 662814 lands
-VISIBILITY_FLAGS =
+ifneq (1_1,$(MOZ_MEMORY)_$(or $(MOZ_NATIVE_JEMALLOC),$(FORCE_SHARED_LIB)))
 
-ifneq (,$(filter OS2 WINNT,$(OS_ARCH)))
+ifneq (,$(filter WINNT,$(OS_ARCH)))
 SDK_LIBRARY = $(IMPORT_LIBRARY)
 else
 ifdef FORCE_SHARED_LIB
@@ -41,11 +24,19 @@ endif
  
 MOZ_GLUE_LDFLAGS = # Don't link against ourselves
 
-ifeq (WINNT,$(OS_TARGET))
-DEFFILE = mozglue.def
+SHARED_LIBRARY_LIBS += $(call EXPAND_LIBNAME_PATH,mfbt,$(DEPTH)/mfbt)
 
+ifneq (,$(ZLIB_IN_MOZGLUE)$(MOZ_LINKER))
+ifdef MOZ_NATIVE_ZLIB
+EXTRA_DSO_LDOPTS += $(MOZ_ZLIB_LIBS)
+else
+SHARED_LIBRARY_LIBS += $(MOZ_ZLIB_LIBS)
+endif
+endif
+
+ifeq (WINNT,$(OS_TARGET))
 mozglue.def: mozglue.def.in
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(if $(MOZ_REPLACE_MALLOC),-DMOZ_REPLACE_MALLOC) $(ACDEFINES) $< > $@
+	$(call py_action,preprocessor,$(if $(MOZ_REPLACE_MALLOC),-DMOZ_REPLACE_MALLOC) $(ACDEFINES) $< -o $@)
 
 GARBAGE += mozglue.def
 
@@ -54,7 +45,11 @@ ifneq (,$(filter -DEFAULTLIB:mozcrt,$(MOZ_GLUE_LDFLAGS)))
 NO_INSTALL_IMPORT_LIBRARY = 1
 endif
 
-EXTRA_DSO_LDOPTS += $(MOZ_ZLIB_LIBS)
+
+EXTRA_DSO_LDOPTS += \
+	$(call EXPAND_LIBNAME,version) \
+	$(NULL)
+
 endif
 
 ifeq (Darwin_1,$(OS_TARGET)_$(MOZ_REPLACE_MALLOC))
@@ -83,33 +78,17 @@ EXTRA_DSO_LDOPTS += -Wl,-weak_library,$(DEPTH)/memory/replace/dummy/$(DLL_PREFIX
 endif
 endif
 
-ifeq (Android,$(OS_TARGET))
-SHARED_LIBRARY_LIBS += $(call EXPAND_LIBNAME_PATH,android,$(DEPTH)/other-licenses/android)
-endif
-
 ifeq (android, $(MOZ_WIDGET_TOOLKIT))
-# Add Android specific code
-EXTRA_DSO_LDOPTS += $(MOZ_ZLIB_LIBS)
-SHARED_LIBRARY_LIBS += $(call EXPAND_LIBNAME_PATH,android,../android)
 # To properly wrap jemalloc's pthread_atfork call.
 EXTRA_DSO_LDOPTS += -Wl,--wrap=pthread_atfork
 endif
 
-ifeq (gonk, $(MOZ_WIDGET_TOOLKIT))
-CSRCS += cpuacct.c
-endif
-
 ifdef MOZ_LINKER
-# Add custom dynamic linker
-SHARED_LIBRARY_LIBS += $(call EXPAND_LIBNAME_PATH,linker,../linker)
-
 ifeq (arm, $(TARGET_CPU))
 EXTRA_DSO_LDOPTS += -Wl,-version-script,$(srcdir)/arm-eabi-filter
 endif
 
 endif
-
-SHARED_LIBRARY_LIBS += $(call EXPAND_LIBNAME_PATH,mfbt,$(DEPTH)/mfbt)
 
 ifeq (Android, $(OS_TARGET))
 WRAP_LDFLAGS := $(filter -Wl%,$(WRAP_LDFLAGS))

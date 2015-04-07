@@ -8,24 +8,24 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "video_render_android_native_opengl2.h"
-#include "critical_section_wrapper.h"
-#include "tick_util.h"
+#include "webrtc/modules/video_render/android/video_render_android_native_opengl2.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/tick_util.h"
 
 #ifdef ANDROID_LOG
-#include <stdio.h>
 #include <android/log.h>
+#include <stdio.h>
 
 #undef WEBRTC_TRACE
 #define WEBRTC_TRACE(a,b,c,...)  __android_log_print(ANDROID_LOG_DEBUG, "*WEBRTC*", __VA_ARGS__)
 #else
-#include "trace.h"
+#include "webrtc/system_wrappers/interface/trace.h"
 #endif
 
 namespace webrtc {
 
 AndroidNativeOpenGl2Renderer::AndroidNativeOpenGl2Renderer(
-    const WebRtc_Word32 id,
+    const int32_t id,
     const VideoRenderType videoRenderType,
     void* window,
     const bool fullscreen) :
@@ -129,7 +129,7 @@ AndroidNativeOpenGl2Renderer::~AndroidNativeOpenGl2Renderer() {
   }
 }
 
-WebRtc_Word32 AndroidNativeOpenGl2Renderer::Init() {
+int32_t AndroidNativeOpenGl2Renderer::Init() {
   WEBRTC_TRACE(kTraceDebug, kTraceVideoRenderer, _id, "%s", __FUNCTION__);
   if (!g_jvm) {
     WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id,
@@ -211,8 +211,8 @@ WebRtc_Word32 AndroidNativeOpenGl2Renderer::Init() {
 }
 AndroidStream*
 AndroidNativeOpenGl2Renderer::CreateAndroidRenderChannel(
-    WebRtc_Word32 streamId,
-    WebRtc_Word32 zOrder,
+    int32_t streamId,
+    int32_t zOrder,
     const float left,
     const float top,
     const float right,
@@ -232,7 +232,7 @@ AndroidNativeOpenGl2Renderer::CreateAndroidRenderChannel(
 }
 
 AndroidNativeOpenGl2Channel::AndroidNativeOpenGl2Channel(
-    WebRtc_UWord32 streamId,
+    uint32_t streamId,
     JavaVM* jvm,
     VideoRenderAndroid& renderer,jobject javaRenderObj):
     _id(streamId),
@@ -279,11 +279,11 @@ AndroidNativeOpenGl2Channel::~AndroidNativeOpenGl2Channel() {
   }
 }
 
-WebRtc_Word32 AndroidNativeOpenGl2Channel::Init(WebRtc_Word32 zOrder,
-                                                const float left,
-                                                const float top,
-                                                const float right,
-                                                const float bottom)
+int32_t AndroidNativeOpenGl2Channel::Init(int32_t zOrder,
+                                          const float left,
+                                          const float top,
+                                          const float right,
+                                          const float bottom)
 {
   WEBRTC_TRACE(kTraceDebug, kTraceVideoRenderer, _id,
                "%s: AndroidNativeOpenGl2Channel", __FUNCTION__);
@@ -380,8 +380,8 @@ WebRtc_Word32 AndroidNativeOpenGl2Channel::Init(WebRtc_Word32 zOrder,
   return 0;
 }
 
-WebRtc_Word32 AndroidNativeOpenGl2Channel::RenderFrame(
-    const WebRtc_UWord32 /*streamId*/,
+int32_t AndroidNativeOpenGl2Channel::RenderFrame(
+    const uint32_t /*streamId*/,
     I420VideoFrame& videoFrame) {
   //   WEBRTC_TRACE(kTraceInfo, kTraceVideoRenderer,_id, "%s:" ,__FUNCTION__);
   _renderCritSect.Enter();
@@ -419,7 +419,9 @@ void JNICALL AndroidNativeOpenGl2Channel::DrawNativeStatic(
 }
 
 void AndroidNativeOpenGl2Channel::DrawNative() {
+  _renderCritSect.Enter();
   _openGLRenderer.Render(_bufferToRender);
+  _renderCritSect.Leave();
 }
 
 /*
@@ -445,4 +447,4 @@ jint AndroidNativeOpenGl2Channel::CreateOpenGLNative(
   return _openGLRenderer.Setup(width, height);
 }
 
-}  //namespace webrtc
+}  // namespace webrtc

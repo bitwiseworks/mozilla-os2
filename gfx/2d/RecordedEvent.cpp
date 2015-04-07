@@ -7,6 +7,7 @@
 #include "PathRecording.h"
 
 #include "Tools.h"
+#include "Filters.h"
 
 namespace mozilla {
 namespace gfx {
@@ -16,9 +17,9 @@ using namespace std;
 static std::string NameFromBackend(BackendType aType)
 {
   switch (aType) {
-  case BACKEND_NONE:
+  case BackendType::NONE:
     return "None";
-  case BACKEND_DIRECT2D:
+  case BackendType::DIRECT2D:
     return "Direct2D";
   default:
     return "Unknown";
@@ -49,18 +50,96 @@ RecordedEvent::LoadEventFromStream(std::istream &aStream, EventType aType)
     LOAD_EVENT_TYPE(STROKE, RecordedStroke);
     LOAD_EVENT_TYPE(DRAWSURFACE, RecordedDrawSurface);
     LOAD_EVENT_TYPE(DRAWSURFACEWITHSHADOW, RecordedDrawSurfaceWithShadow);
+    LOAD_EVENT_TYPE(DRAWFILTER, RecordedDrawFilter);
     LOAD_EVENT_TYPE(PATHCREATION, RecordedPathCreation);
     LOAD_EVENT_TYPE(PATHDESTRUCTION, RecordedPathDestruction);
     LOAD_EVENT_TYPE(SOURCESURFACECREATION, RecordedSourceSurfaceCreation);
     LOAD_EVENT_TYPE(SOURCESURFACEDESTRUCTION, RecordedSourceSurfaceDestruction);
+    LOAD_EVENT_TYPE(FILTERNODECREATION, RecordedFilterNodeCreation);
+    LOAD_EVENT_TYPE(FILTERNODEDESTRUCTION, RecordedFilterNodeDestruction);
     LOAD_EVENT_TYPE(GRADIENTSTOPSCREATION, RecordedGradientStopsCreation);
     LOAD_EVENT_TYPE(GRADIENTSTOPSDESTRUCTION, RecordedGradientStopsDestruction);
     LOAD_EVENT_TYPE(SNAPSHOT, RecordedSnapshot);
     LOAD_EVENT_TYPE(SCALEDFONTCREATION, RecordedScaledFontCreation);
     LOAD_EVENT_TYPE(SCALEDFONTDESTRUCTION, RecordedScaledFontDestruction);
     LOAD_EVENT_TYPE(MASKSURFACE, RecordedMaskSurface);
+    LOAD_EVENT_TYPE(FILTERNODESETATTRIBUTE, RecordedFilterNodeSetAttribute);
+    LOAD_EVENT_TYPE(FILTERNODESETINPUT, RecordedFilterNodeSetInput);
   default:
-    return NULL;
+    return nullptr;
+  }
+}
+
+string
+RecordedEvent::GetEventName(EventType aType)
+{
+  switch (aType) {
+  case DRAWTARGETCREATION:
+    return "DrawTarget Creation";
+  case DRAWTARGETDESTRUCTION:
+    return "DrawTarget Destruction";
+  case FILLRECT:
+    return "FillRect";
+  case STROKERECT:
+    return "StrokeRect";
+  case STROKELINE:
+    return "StrokeLine";
+  case CLEARRECT:
+    return "ClearRect";
+  case COPYSURFACE:
+    return "CopySurface";
+  case SETTRANSFORM:
+    return "SetTransform";
+  case PUSHCLIP:
+    return "PushClip";
+  case PUSHCLIPRECT:
+    return "PushClipRect";
+  case POPCLIP:
+    return "PopClip";
+  case FILL:
+    return "Fill";
+  case FILLGLYPHS:
+    return "FillGlyphs";
+  case MASK:
+    return "Mask";
+  case STROKE:
+    return "Stroke";
+  case DRAWSURFACE:
+    return "DrawSurface";
+  case DRAWSURFACEWITHSHADOW:
+    return "DrawSurfaceWithShadow";
+  case DRAWFILTER:
+    return "DrawFilter";
+  case PATHCREATION:
+    return "PathCreation";
+  case PATHDESTRUCTION:
+    return "PathDestruction";
+  case SOURCESURFACECREATION:
+    return "SourceSurfaceCreation";
+  case SOURCESURFACEDESTRUCTION:
+    return "SourceSurfaceDestruction";
+  case FILTERNODECREATION:
+    return "FilterNodeCreation";
+  case FILTERNODEDESTRUCTION:
+    return "FilterNodeDestruction";
+  case GRADIENTSTOPSCREATION:
+    return "GradientStopsCreation";
+  case GRADIENTSTOPSDESTRUCTION:
+    return "GradientStopsDestruction";
+  case SNAPSHOT:
+    return "Snapshot";
+  case SCALEDFONTCREATION:
+    return "ScaledFontCreation";
+  case SCALEDFONTDESTRUCTION:
+    return "ScaledFontDestruction";
+  case MASKSURFACE:
+    return "MaskSurface";
+  case FILTERNODESETATTRIBUTE:
+    return "SetAttribute";
+  case FILTERNODESETINPUT:
+    return "SetInput";
+  default:
+    return "Unknown";
   }
 }
 
@@ -70,22 +149,22 @@ RecordedEvent::RecordPatternData(std::ostream &aStream, const PatternStorage &aP
   WriteElement(aStream, aPattern.mType);
 
   switch (aPattern.mType) {
-  case PATTERN_COLOR:
+  case PatternType::COLOR:
     {
       WriteElement(aStream, *reinterpret_cast<const ColorPatternStorage*>(&aPattern.mStorage));
       return;
     }
-  case PATTERN_LINEAR_GRADIENT:
+  case PatternType::LINEAR_GRADIENT:
     {
       WriteElement(aStream, *reinterpret_cast<const LinearGradientPatternStorage*>(&aPattern.mStorage));
       return;
     }
-  case PATTERN_RADIAL_GRADIENT:
+  case PatternType::RADIAL_GRADIENT:
     {
       WriteElement(aStream, *reinterpret_cast<const RadialGradientPatternStorage*>(&aPattern.mStorage));
       return;
     }
-  case PATTERN_SURFACE:
+  case PatternType::SURFACE:
     {
       WriteElement(aStream, *reinterpret_cast<const SurfacePatternStorage*>(&aPattern.mStorage));
       return;
@@ -101,22 +180,22 @@ RecordedEvent::ReadPatternData(std::istream &aStream, PatternStorage &aPattern) 
   ReadElement(aStream, aPattern.mType);
 
   switch (aPattern.mType) {
-  case PATTERN_COLOR:
+  case PatternType::COLOR:
     {
       ReadElement(aStream, *reinterpret_cast<ColorPatternStorage*>(&aPattern.mStorage));
       return;
     }
-  case PATTERN_LINEAR_GRADIENT:
+  case PatternType::LINEAR_GRADIENT:
     {
       ReadElement(aStream, *reinterpret_cast<LinearGradientPatternStorage*>(&aPattern.mStorage));
       return;
     }
-  case PATTERN_RADIAL_GRADIENT:
+  case PatternType::RADIAL_GRADIENT:
     {
       ReadElement(aStream, *reinterpret_cast<RadialGradientPatternStorage*>(&aPattern.mStorage));
       return;
     }
-  case PATTERN_SURFACE:
+  case PatternType::SURFACE:
     {
       ReadElement(aStream, *reinterpret_cast<SurfacePatternStorage*>(&aPattern.mStorage));
       return;
@@ -132,13 +211,13 @@ RecordedEvent::StorePattern(PatternStorage &aDestination, const Pattern &aSource
   aDestination.mType = aSource.GetType();
   
   switch (aSource.GetType()) {
-  case PATTERN_COLOR:
+  case PatternType::COLOR:
     {
       reinterpret_cast<ColorPatternStorage*>(&aDestination.mStorage)->mColor =
         static_cast<const ColorPattern*>(&aSource)->mColor;
       return;
     }
-  case PATTERN_LINEAR_GRADIENT:
+  case PatternType::LINEAR_GRADIENT:
     {
       LinearGradientPatternStorage *store =
         reinterpret_cast<LinearGradientPatternStorage*>(&aDestination.mStorage);
@@ -150,7 +229,7 @@ RecordedEvent::StorePattern(PatternStorage &aDestination, const Pattern &aSource
       store->mStops = pat->mStops.get();
       return;
     }
-  case PATTERN_RADIAL_GRADIENT:
+  case PatternType::RADIAL_GRADIENT:
     {
       RadialGradientPatternStorage *store =
         reinterpret_cast<RadialGradientPatternStorage*>(&aDestination.mStorage);
@@ -164,7 +243,7 @@ RecordedEvent::StorePattern(PatternStorage &aDestination, const Pattern &aSource
       store->mStops = pat->mStops.get();
       return;
     }
-  case PATTERN_SURFACE:
+  case PatternType::SURFACE:
     {
       SurfacePatternStorage *store =
         reinterpret_cast<SurfacePatternStorage*>(&aDestination.mStorage);
@@ -231,13 +310,13 @@ void
 RecordedEvent::OutputSimplePatternInfo(const PatternStorage &aStorage, std::stringstream &aOutput) const
 {
   switch (aStorage.mType) {
-  case PATTERN_COLOR:
+  case PatternType::COLOR:
     {
       const Color color = reinterpret_cast<const ColorPatternStorage*>(&aStorage.mStorage)->mColor;
       aOutput << "Color: (" << color.r << ", " << color.g << ", " << color.b << ", " << color.a << ")";
       return;
     }
-  case PATTERN_LINEAR_GRADIENT:
+  case PatternType::LINEAR_GRADIENT:
     {
       const LinearGradientPatternStorage *store =
         reinterpret_cast<const LinearGradientPatternStorage*>(&aStorage.mStorage);
@@ -246,7 +325,7 @@ RecordedEvent::OutputSimplePatternInfo(const PatternStorage &aStorage, std::stri
         ") - (" << store->mEnd.x << ", " << store->mEnd.y << ") Stops: " << store->mStops;
       return;
     }
-  case PATTERN_RADIAL_GRADIENT:
+  case PatternType::RADIAL_GRADIENT:
     {
       const RadialGradientPatternStorage *store =
         reinterpret_cast<const RadialGradientPatternStorage*>(&aStorage.mStorage);
@@ -254,7 +333,7 @@ RecordedEvent::OutputSimplePatternInfo(const PatternStorage &aStorage, std::stri
         store->mCenter2.y << ") Radius 2: " << store->mRadius2;
       return;
     }
-  case PATTERN_SURFACE:
+  case PatternType::SURFACE:
     {
       const SurfacePatternStorage *store =
         reinterpret_cast<const SurfacePatternStorage*>(&aStorage.mStorage);
@@ -277,7 +356,7 @@ RecordedDrawingEvent::RecordToStream(ostream &aStream) const
 }
 
 ReferencePtr
-RecordedDrawingEvent::GetObject() const
+RecordedDrawingEvent::GetObjectRef() const
 {
   return mDT;
 }
@@ -288,6 +367,11 @@ RecordedDrawTargetCreation::PlayEvent(Translator *aTranslator) const
   RefPtr<DrawTarget> newDT =
     aTranslator->GetReferenceDrawTarget()->CreateSimilarDrawTarget(mSize, mFormat);
   aTranslator->AddDrawTarget(mRefPtr, newDT);
+
+  if (mHasExistingData) {
+    Rect dataRect(0, 0, mExistingData->GetSize().width, mExistingData->GetSize().height);
+    newDT->DrawSurface(mExistingData, dataRect, dataRect);
+  }
 }
 
 void
@@ -297,6 +381,17 @@ RecordedDrawTargetCreation::RecordToStream(ostream &aStream) const
   WriteElement(aStream, mBackendType);
   WriteElement(aStream, mSize);
   WriteElement(aStream, mFormat);
+  WriteElement(aStream, mHasExistingData);
+
+  if (mHasExistingData) {
+    MOZ_ASSERT(mExistingData);
+    MOZ_ASSERT(mExistingData->GetSize() == mSize);
+    RefPtr<DataSourceSurface> dataSurf = mExistingData->GetDataSurface();
+    for (int y = 0; y < mSize.height; y++) {
+      aStream.write((const char*)dataSurf->GetData() + y * dataSurf->Stride(),
+                    BytesPerPixel(mFormat) * mSize.width);
+    }
+  }
 }
 
 RecordedDrawTargetCreation::RecordedDrawTargetCreation(istream &aStream)
@@ -306,6 +401,16 @@ RecordedDrawTargetCreation::RecordedDrawTargetCreation(istream &aStream)
   ReadElement(aStream, mBackendType);
   ReadElement(aStream, mSize);
   ReadElement(aStream, mFormat);
+  ReadElement(aStream, mHasExistingData);
+
+  if (mHasExistingData) {
+    RefPtr<DataSourceSurface> dataSurf = Factory::CreateDataSourceSurface(mSize, mFormat);
+    for (int y = 0; y < mSize.height; y++) {
+      aStream.read((char*)dataSurf->GetData() + y * dataSurf->Stride(),
+                    BytesPerPixel(mFormat) * mSize.width);
+    }
+    mExistingData = dataSurf;
+  }
 }
 
 void
@@ -342,7 +447,7 @@ RecordedDrawTargetDestruction::OutputSimpleEventInfo(stringstream &aStringStream
 struct GenericPattern
 {
   GenericPattern(const PatternStorage &aStorage, Translator *aTranslator)
-    : mPattern(NULL), mTranslator(aTranslator)
+    : mPattern(nullptr), mTranslator(aTranslator)
   {
     mStorage = const_cast<PatternStorage*>(&aStorage);
   }
@@ -356,9 +461,9 @@ struct GenericPattern
   operator Pattern*()
   {
     switch(mStorage->mType) {
-    case PATTERN_COLOR:
+    case PatternType::COLOR:
       return new (mColPat) ColorPattern(reinterpret_cast<ColorPatternStorage*>(&mStorage->mStorage)->mColor);
-    case PATTERN_SURFACE:
+    case PatternType::SURFACE:
       {
         SurfacePatternStorage *storage = reinterpret_cast<SurfacePatternStorage*>(&mStorage->mStorage);
         mPattern =
@@ -366,7 +471,7 @@ struct GenericPattern
                                         storage->mExtend, storage->mMatrix, storage->mFilter);
         return mPattern;
       }
-    case PATTERN_LINEAR_GRADIENT:
+    case PatternType::LINEAR_GRADIENT:
       {
         LinearGradientPatternStorage *storage = reinterpret_cast<LinearGradientPatternStorage*>(&mStorage->mStorage);
         mPattern =
@@ -375,7 +480,7 @@ struct GenericPattern
                                                   storage->mMatrix);
         return mPattern;
       }
-    case PATTERN_RADIAL_GRADIENT:
+    case PatternType::RADIAL_GRADIENT:
       {
         RadialGradientPatternStorage *storage = reinterpret_cast<RadialGradientPatternStorage*>(&mStorage->mStorage);
         mPattern =
@@ -829,6 +934,39 @@ RecordedDrawSurface::OutputSimpleEventInfo(stringstream &aStringStream) const
 }
 
 void
+RecordedDrawFilter::PlayEvent(Translator *aTranslator) const
+{
+  aTranslator->LookupDrawTarget(mDT)->
+    DrawFilter(aTranslator->LookupFilterNode(mNode), mSourceRect,
+                mDestPoint, mOptions);
+}
+
+void
+RecordedDrawFilter::RecordToStream(ostream &aStream) const
+{
+  RecordedDrawingEvent::RecordToStream(aStream);
+  WriteElement(aStream, mNode);
+  WriteElement(aStream, mSourceRect);
+  WriteElement(aStream, mDestPoint);
+  WriteElement(aStream, mOptions);
+}
+
+RecordedDrawFilter::RecordedDrawFilter(istream &aStream)
+  : RecordedDrawingEvent(DRAWFILTER, aStream)
+{
+  ReadElement(aStream, mNode);
+  ReadElement(aStream, mSourceRect);
+  ReadElement(aStream, mDestPoint);
+  ReadElement(aStream, mOptions);
+}
+
+void
+RecordedDrawFilter::OutputSimpleEventInfo(stringstream &aStringStream) const
+{
+  aStringStream << "[" << mDT << "] DrawFilter (" << mNode << ")";
+}
+
+void
 RecordedDrawSurfaceWithShadow::PlayEvent(Translator *aTranslator) const
 {
   aTranslator->LookupDrawTarget(mDT)->
@@ -1050,6 +1188,62 @@ RecordedSourceSurfaceDestruction::OutputSimpleEventInfo(stringstream &aStringStr
   aStringStream << "[" << mRefPtr << "] SourceSurface Destroyed";
 }
 
+RecordedFilterNodeCreation::~RecordedFilterNodeCreation()
+{
+}
+
+void
+RecordedFilterNodeCreation::PlayEvent(Translator *aTranslator) const
+{
+  RefPtr<FilterNode> node = aTranslator->GetReferenceDrawTarget()->
+    CreateFilter(mType);
+  aTranslator->AddFilterNode(mRefPtr, node);
+}
+
+void
+RecordedFilterNodeCreation::RecordToStream(ostream &aStream) const
+{
+  WriteElement(aStream, mRefPtr);
+  WriteElement(aStream, mType);
+}
+
+RecordedFilterNodeCreation::RecordedFilterNodeCreation(istream &aStream)
+  : RecordedEvent(FILTERNODECREATION)
+{
+  ReadElement(aStream, mRefPtr);
+  ReadElement(aStream, mType);
+}
+
+void
+RecordedFilterNodeCreation::OutputSimpleEventInfo(stringstream &aStringStream) const
+{
+  aStringStream << "[" << mRefPtr << "] FilterNode created (Type: " << int(mType) << ")";
+}
+
+void
+RecordedFilterNodeDestruction::PlayEvent(Translator *aTranslator) const
+{
+  aTranslator->RemoveFilterNode(mRefPtr);
+}
+
+void
+RecordedFilterNodeDestruction::RecordToStream(ostream &aStream) const
+{
+  WriteElement(aStream, mRefPtr);
+}
+
+RecordedFilterNodeDestruction::RecordedFilterNodeDestruction(istream &aStream)
+  : RecordedEvent(FILTERNODEDESTRUCTION)
+{
+  ReadElement(aStream, mRefPtr);
+}
+
+void
+RecordedFilterNodeDestruction::OutputSimpleEventInfo(stringstream &aStringStream) const
+{
+  aStringStream << "[" << mRefPtr << "] FilterNode Destroyed";
+}
+
 RecordedGradientStopsCreation::~RecordedGradientStopsCreation()
 {
   if (mDataOwned) {
@@ -1250,6 +1444,117 @@ RecordedMaskSurface::OutputSimpleEventInfo(stringstream &aStringStream) const
 {
   aStringStream << "[" << mDT << "] MaskSurface (" << mRefMask << ")  Offset: (" << mOffset.x << "x" << mOffset.y << ") Pattern: ";
   OutputSimplePatternInfo(mPattern, aStringStream);
+}
+
+template<typename T>
+void
+ReplaySetAttribute(FilterNode *aNode, uint32_t aIndex, T aValue)
+{
+  aNode->SetAttribute(aIndex, aValue);
+}
+
+void
+RecordedFilterNodeSetAttribute::PlayEvent(Translator *aTranslator) const
+{
+#define REPLAY_SET_ATTRIBUTE(type, argtype) \
+  case ARGTYPE_##argtype: \
+  ReplaySetAttribute(aTranslator->LookupFilterNode(mNode), mIndex, *(type*)&mPayload.front()); \
+  break
+
+  switch (mArgType) {
+    REPLAY_SET_ATTRIBUTE(bool, BOOL);
+    REPLAY_SET_ATTRIBUTE(uint32_t, UINT32);
+    REPLAY_SET_ATTRIBUTE(Float, FLOAT);
+    REPLAY_SET_ATTRIBUTE(Size, SIZE);
+    REPLAY_SET_ATTRIBUTE(IntSize, INTSIZE);
+    REPLAY_SET_ATTRIBUTE(IntPoint, INTPOINT);
+    REPLAY_SET_ATTRIBUTE(Rect, RECT);
+    REPLAY_SET_ATTRIBUTE(IntRect, INTRECT);
+    REPLAY_SET_ATTRIBUTE(Point, POINT);
+    REPLAY_SET_ATTRIBUTE(Matrix5x4, MATRIX5X4);
+    REPLAY_SET_ATTRIBUTE(Point3D, POINT3D);
+    REPLAY_SET_ATTRIBUTE(Color, COLOR);
+  case ARGTYPE_FLOAT_ARRAY:
+    aTranslator->LookupFilterNode(mNode)->SetAttribute(
+      mIndex,
+      reinterpret_cast<const Float*>(&mPayload.front()),
+      mPayload.size() / sizeof(Float));
+    break;
+  }
+}
+
+void
+RecordedFilterNodeSetAttribute::RecordToStream(ostream &aStream) const
+{
+  RecordedEvent::RecordToStream(aStream);
+  WriteElement(aStream, mNode);
+  WriteElement(aStream, mIndex);
+  WriteElement(aStream, mArgType);
+  WriteElement(aStream, uint64_t(mPayload.size()));
+  aStream.write((const char*)&mPayload.front(), mPayload.size());
+}
+
+RecordedFilterNodeSetAttribute::RecordedFilterNodeSetAttribute(istream &aStream)
+  : RecordedEvent(FILTERNODESETATTRIBUTE)
+{
+  ReadElement(aStream, mNode);
+  ReadElement(aStream, mIndex);
+  ReadElement(aStream, mArgType);
+  uint64_t size;
+  ReadElement(aStream, size);
+  mPayload.resize(size_t(size));
+  aStream.read((char*)&mPayload.front(), size);
+}
+
+void
+RecordedFilterNodeSetAttribute::OutputSimpleEventInfo(stringstream &aStringStream) const
+{
+  aStringStream << "[" << mNode << "] SetAttribute (" << mIndex << ")";
+}
+
+void
+RecordedFilterNodeSetInput::PlayEvent(Translator *aTranslator) const
+{
+  if (mInputFilter) {
+    aTranslator->LookupFilterNode(mNode)->SetInput(
+      mIndex, aTranslator->LookupFilterNode(mInputFilter));
+  } else {
+    aTranslator->LookupFilterNode(mNode)->SetInput(
+      mIndex, aTranslator->LookupSourceSurface(mInputSurface));
+  }
+}
+
+void
+RecordedFilterNodeSetInput::RecordToStream(ostream &aStream) const
+{
+  RecordedEvent::RecordToStream(aStream);
+  WriteElement(aStream, mNode);
+  WriteElement(aStream, mIndex);
+  WriteElement(aStream, mInputFilter);
+  WriteElement(aStream, mInputSurface);
+}
+
+RecordedFilterNodeSetInput::RecordedFilterNodeSetInput(istream &aStream)
+  : RecordedEvent(FILTERNODESETINPUT)
+{
+  ReadElement(aStream, mNode);
+  ReadElement(aStream, mIndex);
+  ReadElement(aStream, mInputFilter);
+  ReadElement(aStream, mInputSurface);
+}
+
+void
+RecordedFilterNodeSetInput::OutputSimpleEventInfo(stringstream &aStringStream) const
+{
+  aStringStream << "[" << mNode << "] SetAttribute (" << mIndex << ", ";
+
+  if (mInputFilter) {
+    aStringStream << "Filter: " << mInputFilter;
+  } else {
+    aStringStream << "Surface: " << mInputSurface;
+  }
+
+  aStringStream << ")";
 }
 
 }

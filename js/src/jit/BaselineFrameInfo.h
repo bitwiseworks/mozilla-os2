@@ -9,18 +9,17 @@
 
 #ifdef JS_ION
 
-#include "jscntxt.h"
-#include "jscompartment.h"
+#include "mozilla/Alignment.h"
 
-#include "BaselineJIT.h"
-#include "BaselineFrame.h"
-#include "BaselineRegisters.h"
-#include "BytecodeAnalysis.h"
-#include "IonMacroAssembler.h"
-#include "FixedList.h"
+#include "jit/BaselineFrame.h"
+#include "jit/BaselineRegisters.h"
+#include "jit/FixedList.h"
+#include "jit/IonMacroAssembler.h"
 
 namespace js {
 namespace jit {
+
+struct BytecodeInfo;
 
 // FrameInfo overview.
 //
@@ -161,31 +160,29 @@ class StackValue
 
 enum StackAdjustment { AdjustStack, DontAdjustStack };
 
-class BaselineCompilerShared;
-
 class FrameInfo
 {
-    RootedScript script;
+    JSScript *script;
     MacroAssembler &masm;
 
     FixedList<StackValue> stack;
     size_t spIndex;
 
   public:
-    FrameInfo(JSContext *cx, HandleScript script, MacroAssembler &masm)
-      : script(cx, script),
+    FrameInfo(JSScript *script, MacroAssembler &masm)
+      : script(script),
         masm(masm),
         stack(),
         spIndex(0)
     { }
 
-    bool init();
+    bool init(TempAllocator &alloc);
 
     uint32_t nlocals() const {
-        return script->nfixed;
+        return script->nfixed();
     }
     uint32_t nargs() const {
-        return script->function()->nargs;
+        return script->functionNonDelazifying()->nargs();
     }
 
   private:
@@ -246,6 +243,7 @@ class FrameInfo
         sv->setRegister(val, knownType);
     }
     inline void pushLocal(uint32_t local) {
+        JS_ASSERT(local < nlocals());
         StackValue *sv = rawPush();
         sv->setLocalSlot(local);
     }
@@ -263,15 +261,7 @@ class FrameInfo
         sv->setStack();
     }
     inline Address addressOfLocal(size_t local) const {
-#ifdef DEBUG
-        if (local >= nlocals()) {
-            // GETLOCAL and SETLOCAL can be used to access stack values. This is
-            // fine, as long as they are synced.
-            size_t slot = local - nlocals();
-            JS_ASSERT(slot < stackDepth());
-            JS_ASSERT(stack[slot].kind() == StackValue::Stack);
-        }
-#endif
+        JS_ASSERT(local < nlocals());
         return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfLocal(local));
     }
     Address addressOfArg(size_t arg) const {
@@ -286,9 +276,6 @@ class FrameInfo
     }
     Address addressOfScopeChain() const {
         return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfScopeChain());
-    }
-    Address addressOfBlockChain() const {
-        return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfBlockChain());
     }
     Address addressOfFlags() const {
         return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFlags());

@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "mozilla/dom/SVGUseElement.h"
 #include "mozilla/dom/SVGUseElementBinding.h"
@@ -13,6 +13,7 @@
 #include "nsIPresShell.h"
 #include "mozilla/dom/Element.h"
 #include "nsContentUtils.h"
+#include "nsIURI.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Use)
 
@@ -20,9 +21,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGUseElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGUseElement::WrapNode(JSContext *aCx)
 {
-  return SVGUseElementBinding::Wrap(aCx, aScope, this);
+  return SVGUseElementBinding::Wrap(aCx, this);
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -44,6 +45,8 @@ nsSVGElement::StringInfo SVGUseElement::sStringInfo[1] =
 //----------------------------------------------------------------------
 // nsISupports methods
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(SVGUseElement)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(SVGUseElement,
                                                 SVGUseElementBase)
   nsAutoScriptBlocker scriptBlocker;
@@ -62,24 +65,14 @@ NS_IMPL_ADDREF_INHERITED(SVGUseElement,SVGUseElementBase)
 NS_IMPL_RELEASE_INHERITED(SVGUseElement,SVGUseElementBase)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(SVGUseElement)
-  NS_INTERFACE_TABLE_INHERITED1(SVGUseElement, nsIMutationObserver)
+  NS_INTERFACE_TABLE_INHERITED(SVGUseElement, nsIMutationObserver)
 NS_INTERFACE_TABLE_TAIL_INHERITING(SVGUseElementBase)
 
 //----------------------------------------------------------------------
 // Implementation
 
-#ifdef _MSC_VER
-// Disable "warning C4355: 'this' : used in base member initializer list".
-// We can ignore that warning because we know that mSource's constructor 
-// doesn't dereference the pointer passed to it.
-#pragma warning(push)
-#pragma warning(disable:4355)
-#endif
-SVGUseElement::SVGUseElement(already_AddRefed<nsINodeInfo> aNodeInfo)
-  : SVGUseElementBase(aNodeInfo), mSource(this)
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
+SVGUseElement::SVGUseElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  : SVGUseElementBase(aNodeInfo), mSource(MOZ_THIS_IN_INITIALIZER_LIST())
 {
 }
 
@@ -95,11 +88,8 @@ nsresult
 SVGUseElement::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
 {
   *aResult = nullptr;
-  nsCOMPtr<nsINodeInfo> ni = aNodeInfo;
-  SVGUseElement *it = new SVGUseElement(ni.forget());
-  if (!it) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  already_AddRefed<nsINodeInfo> ni = nsCOMPtr<nsINodeInfo>(aNodeInfo).forget();
+  SVGUseElement *it = new SVGUseElement(ni);
 
   nsCOMPtr<nsINode> kungFuDeathGrip(it);
   nsresult rv1 = it->Init();

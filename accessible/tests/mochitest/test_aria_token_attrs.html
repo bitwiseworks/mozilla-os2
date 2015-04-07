@@ -28,8 +28,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=452388
       testRole("button_pressed_absent", ROLE_PUSHBUTTON);
 
       // test button aria-pressed states
-      testStates("button_pressed_true", STATE_PRESSED | STATE_CHECKABLE);
-      testStates("button_pressed_false", STATE_CHECKABLE, 0, STATE_PRESSED);
+      testStates("button_pressed_true", STATE_PRESSED, 0, STATE_CHECKABLE);
+      testStates("button_pressed_false", 0, 0, STATE_CHECKABLE | STATE_PRESSED);
       testStates("button_pressed_empty", 0, 0, STATE_PRESSED | STATE_CHECKABLE);
       testStates("button_pressed_undefined", 0, 0, STATE_PRESSED | STATE_CHECKABLE);
       testStates("button_pressed_absent", 0, 0, STATE_PRESSED | STATE_CHECKABLE);
@@ -37,8 +37,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=452388
       // test (checkbox) checkable and checked states
       testStates("checkbox_checked_true", (STATE_CHECKABLE | STATE_CHECKED));
       testStates("checkbox_checked_false", STATE_CHECKABLE, 0, STATE_CHECKED);
-      testStates("checkbox_checked_empty", 0 , 0, STATE_CHECKABLE | STATE_CHECKED);
-      testStates("checkbox_checked_undefined", 0, 0, STATE_CHECKABLE | STATE_CHECKED);
+      testStates("checkbox_checked_empty", STATE_CHECKABLE , 0, STATE_CHECKED);
+      testStates("checkbox_checked_undefined", STATE_CHECKABLE, 0, STATE_CHECKED);
       testStates("checkbox_checked_absent", STATE_CHECKABLE, 0, STATE_CHECKED);
 
       // test native checkbox checked state and aria-checked state (if conflict, native wins)
@@ -106,29 +106,29 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=452388
       // test (menuitemradio) checkable and checked states
       testStates("menuitemradio_checked_true", (STATE_CHECKABLE | STATE_CHECKED));
       testStates("menuitemradio_checked_false", STATE_CHECKABLE, 0, STATE_CHECKED);
-      testStates("menuitemradio_checked_empty", 0, 0, (STATE_CHECKABLE | STATE_CHECKED));
-      testStates("menuitemradio_checked_undefined", 0, 0, (STATE_CHECKABLE | STATE_CHECKED));
+      testStates("menuitemradio_checked_empty", STATE_CHECKABLE, 0, STATE_CHECKED);
+      testStates("menuitemradio_checked_undefined", STATE_CHECKABLE, 0, STATE_CHECKED);
       testStates("menuitemradio_checked_absent", STATE_CHECKABLE, 0, STATE_CHECKED);
 
       // test (radio) checkable and checked states
       testStates("radio_checked_true", (STATE_CHECKABLE | STATE_CHECKED));
       testStates("radio_checked_false", STATE_CHECKABLE, 0, STATE_CHECKED);
-      testStates("radio_checked_empty", 0, 0, (STATE_CHECKABLE | STATE_CHECKED));
-      testStates("radio_checked_undefined", 0, 0, (STATE_CHECKABLE | STATE_CHECKED));
+      testStates("radio_checked_empty", STATE_CHECKABLE, 0, STATE_CHECKED);
+      testStates("radio_checked_undefined", STATE_CHECKABLE, 0, STATE_CHECKED);
       testStates("radio_checked_absent", STATE_CHECKABLE, 0, STATE_CHECKED);
 
       // test (textbox) multiline states
       testStates("textbox_multiline_true", 0, EXT_STATE_MULTI_LINE);
       testStates("textbox_multiline_false", 0, EXT_STATE_SINGLE_LINE);
-      testStates("textbox_multiline_empty", 0, 0, 0, EXT_STATE_SINGLE_LINE | EXT_STATE_MULTI_LINE);
-      testStates("textbox_multiline_undefined", 0, 0, 0, EXT_STATE_SINGLE_LINE | EXT_STATE_MULTI_LINE);
+      testStates("textbox_multiline_empty", 0, EXT_STATE_SINGLE_LINE);
+      testStates("textbox_multiline_undefined", 0, EXT_STATE_SINGLE_LINE);
       testStates("textbox_multiline_absent", 0, EXT_STATE_SINGLE_LINE);
 
       // test (textbox) readonly states
       testStates("textbox_readonly_true", STATE_READONLY);
       testStates("textbox_readonly_false", 0, EXT_STATE_EDITABLE, STATE_READONLY);
-      testStates("textbox_readonly_empty", 0, 0, STATE_READONLY, EXT_STATE_EDITABLE);
-      testStates("textbox_readonly_undefined", 0, 0, STATE_READONLY, EXT_STATE_EDITABLE);
+      testStates("textbox_readonly_empty", 0, EXT_STATE_EDITABLE, STATE_READONLY);
+      testStates("textbox_readonly_undefined", 0, EXT_STATE_EDITABLE, STATE_READONLY);
       testStates("textbox_readonly_absent", 0, EXT_STATE_EDITABLE, STATE_READONLY);
 
       // test native textbox readonly state and aria-readonly state (if conflict, native wins)
@@ -147,8 +147,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=452388
       // test (treeitem) selectable and selected states
       testStates("treeitem_selected_true", (STATE_SELECTABLE | STATE_SELECTED));
       testStates("treeitem_selected_false", STATE_SELECTABLE, 0, STATE_SELECTED);
-      testStates("treeitem_selected_empty", 0, 0, (STATE_SELECTABLE | STATE_SELECTED));
-      testStates("treeitem_selected_undefined", 0, 0, (STATE_SELECTABLE | STATE_SELECTED));
+      testStates("treeitem_selected_empty", STATE_SELECTABLE, 0, STATE_SELECTED);
+      testStates("treeitem_selected_undefined", STATE_SELECTABLE, 0, STATE_SELECTED);
       testStates("treeitem_selected_absent", STATE_SELECTABLE, 0, STATE_SELECTED);
 
       // test (treeitem) haspopup states
@@ -182,6 +182,11 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=452388
      href="https://bugzilla.mozilla.org/show_bug.cgi?id=499653"
      title="Unify ARIA state attributes mapping rules">
     Mozilla Bug 499653
+  </a>
+  <a target="_blank"
+     href="https://bugzilla.mozilla.org/show_bug.cgi?id=989958"
+     title="Pressed state is not exposed on a button element with aria-pressed attribute"
+    Mozilla Bug 989958
   </a>
   <p id="display"></p>
   <div id="content" style="display: none"></div>

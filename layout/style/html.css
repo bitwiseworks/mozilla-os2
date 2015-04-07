@@ -247,7 +247,7 @@ table {
   margin-top: 0;
   margin-bottom: 0;
   /* XXXldb do we want this if we're border-collapse:collapse ? */
-  -moz-box-sizing: border-box;
+  box-sizing: border-box;
   text-indent: 0;
 }
 
@@ -604,7 +604,7 @@ hr {
   margin: 0.5em auto 0.5em auto;
   color: gray;
   -moz-float-edge: margin-box;
-  -moz-box-sizing: border-box;
+  box-sizing: border-box;
 }
 
 hr[size="1"] {
@@ -728,25 +728,7 @@ audio:not([controls]) {
 
 video > .caption-box {
   position: relative;
-  pointer-events: none;
-}
-
-video > div .caption-text {
-  position: absolute;
-  bottom: 24px;
-  padding: 5px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  pointer-events: auto;
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  font-size: 20px;
-  color: white;
-  text-shadow:
-    -2px -2px 1px #000,
-    2px -2px 1px #000,
-    -2px 2px 1px #000,
-    2px 2px 1px #000;
+  overflow: hidden;
 }
 
 /* emulation of non-standard HTML <marquee> tag */

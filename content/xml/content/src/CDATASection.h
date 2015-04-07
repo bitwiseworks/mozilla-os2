@@ -13,15 +13,14 @@
 namespace mozilla {
 namespace dom {
 
-class CDATASection : public Text,
-                     public nsIDOMCDATASection
+class CDATASection MOZ_FINAL : public Text,
+                               public nsIDOMCDATASection
 {
 private:
   void Init()
   {
     NS_ABORT_IF_FALSE(mNodeInfo->NodeType() == nsIDOMNode::CDATA_SECTION_NODE,
                       "Bad NodeType in aNodeInfo");
-    SetIsDOMBinding();
   }
 
 public:
@@ -49,6 +48,7 @@ public:
 
   // nsIDOMCharacterData
   NS_FORWARD_NSIDOMCHARACTERDATA(nsGenericDOMDataNode::)
+  using nsGenericDOMDataNode::SetData; // Prevent hiding overloaded virtual function.
 
   // nsIDOMText
   NS_FORWARD_NSIDOMTEXT(nsGenericDOMDataNode::)
@@ -69,8 +69,7 @@ public:
 #endif
 
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 };
 
 } // namespace dom

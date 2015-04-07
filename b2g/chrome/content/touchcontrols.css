@@ -29,6 +29,7 @@
 
 .fullscreenButton,
 .playButton,
+.castingButton,
 .muteButton {
   -moz-appearance: none;
   min-height: 42px;
@@ -37,15 +38,15 @@
 }
 
 .fullscreenButton {
-  background: url("chrome://browser/content/images/fullscreen-hdpi.png") no-repeat center;
+  background: url("chrome://b2g/content/images/fullscreen-hdpi.png") no-repeat center;
 }
 
 .fullscreenButton[fullscreened="true"] {
-  background: url("chrome://browser/content/images/exitfullscreen-hdpi.png") no-repeat center;
+  background: url("chrome://b2g/content/images/exitfullscreen-hdpi.png") no-repeat center;
 }
 
 .playButton {
-  background: url("chrome://browser/content/images/pause-hdpi.png") no-repeat center;
+  background: url("chrome://b2g/content/images/pause-hdpi.png") no-repeat center;
 }
 
 /*
@@ -54,20 +55,24 @@
  * is hidden by videocontrols.xml, and that alters the position of the
  * play button.  This workaround moves it back to center.
  */
-.controlBar.audio .playButton {
+.controlBar.audio-only .playButton {
   transform: translateX(28px);
 }
 
 .playButton[paused="true"] {
-  background: url("chrome://browser/content/images/play-hdpi.png") no-repeat center;
+  background: url("chrome://b2g/content/images/play-hdpi.png") no-repeat center;
+}
+
+.castingButton {
+  display: none;
 }
 
 .muteButton {
-  background: url("chrome://browser/content/images/mute-hdpi.png") no-repeat center;
+  background: url("chrome://b2g/content/images/mute-hdpi.png") no-repeat center;
 }
 
 .muteButton[muted="true"] {
-  background: url("chrome://browser/content/images/unmute-hdpi.png") no-repeat center;
+  background: url("chrome://b2g/content/images/unmute-hdpi.png") no-repeat center;
 }
 
 /* bars */
@@ -121,7 +126,7 @@
   display: -moz-box;
   margin: 0px !important;
   padding: 0px !important;
-  background: url("chrome://browser/content/images/scrubber-hdpi.png") no-repeat;
+  background: url("chrome://b2g/content/images/scrubber-hdpi.png") no-repeat;
   background-size: 32px 32px;
   height: 32px;
   width: 32px;
@@ -154,17 +159,17 @@
 }
 
 .statusIcon[type="throbber"] {
-  background: url("chrome://browser/content/images/throbber.png") no-repeat center;
+  background: url("chrome://b2g/content/images/throbber.png") no-repeat center;
 }
 
 .statusIcon[type="error"] {
-  background: url("chrome://browser/content/images/error.png") no-repeat center;
+  background: url("chrome://b2g/content/images/error.png") no-repeat center;
 }
 
 /* CSS Transitions */
 .controlBar:not([immediate]) {
-  -moz-transition-property: opacity;
-  -moz-transition-duration: 200ms;
+  transition-property: opacity;
+  transition-duration: 200ms;
 }
 
 .controlBar[fadeout] {
@@ -172,9 +177,9 @@
 }
 
 .statusOverlay:not([immediate]) {
-  -moz-transition-property: opacity;
-  -moz-transition-duration: 300ms;
-  -moz-transition-delay: 750ms;
+  transition-property: opacity;
+  transition-duration: 300ms;
+  transition-delay: 750ms;
 }
 
 .statusOverlay[fadeout] {

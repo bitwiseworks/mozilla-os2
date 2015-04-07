@@ -20,7 +20,6 @@
 #include "nsStubMutationObserver.h"
 #include "nsSVGUtils.h"
 #include "nsTHashtable.h"
-#include "nsTraceRefcnt.h"
 #include "nsURIHashKey.h"
 
 class nsIAtom;
@@ -150,12 +149,25 @@ protected:
   nsIPresShell *mFramePresShell;
 };
 
-class nsSVGFilterProperty :
-  public nsSVGIDRenderingObserver, public nsISVGFilterProperty {
+/**
+ * In a filter chain, there can be multiple SVG reference filters.
+ * e.g. filter: url(#svg-filter-1) blur(10px) url(#svg-filter-2);
+ *
+ * This class keeps track of one SVG reference filter in a filter chain.
+ * e.g. url(#svg-filter-1)
+ *
+ * It fires invalidations when the SVG filter element's id changes or when
+ * the SVG filter element's content changes.
+ *
+ * The nsSVGFilterProperty class manages a list of nsSVGFilterReferences.
+ */
+class nsSVGFilterReference :
+  public nsSVGIDRenderingObserver, public nsISVGFilterReference {
 public:
-  nsSVGFilterProperty(nsIURI *aURI, nsIFrame *aFilteredFrame,
-                      bool aReferenceImage)
-    : nsSVGIDRenderingObserver(aURI, aFilteredFrame, aReferenceImage) {}
+  nsSVGFilterReference(nsIURI *aURI, nsIFrame *aFilteredFrame)
+    : nsSVGIDRenderingObserver(aURI, aFilteredFrame, false) {}
+
+  bool ReferencesValidResource() { return GetFilterFrame(); }
 
   /**
    * @return the filter frame, or null if there is no filter frame
@@ -165,12 +177,41 @@ public:
   // nsISupports
   NS_DECL_ISUPPORTS
 
-  // nsISVGFilterProperty
-  virtual void Invalidate() MOZ_OVERRIDE { DoUpdate(); }
+  // nsISVGFilterReference
+  virtual void Invalidate() MOZ_OVERRIDE { DoUpdate(); };
 
 private:
-  // nsSVGRenderingObserver
+  // nsSVGIDRenderingObserver
   virtual void DoUpdate() MOZ_OVERRIDE;
+};
+
+/**
+ * This class manages a list of nsSVGFilterReferences, which represent SVG
+ * reference filters in a filter chain.
+ * e.g. filter: url(#svg-filter-1) blur(10px) url(#svg-filter-2);
+ *
+ * In the above example, the nsSVGFilterProperty will manage two
+ * nsSVGFilterReferences, one for each SVG reference filter. CSS filters like
+ * "blur(10px)" don't reference filter elements, so they don't need an
+ * nsSVGFilterReference. The style system invalidates changes to CSS filters.
+ */
+class nsSVGFilterProperty : public nsISupports {
+public:
+  nsSVGFilterProperty(const nsTArray<nsStyleFilter> &aFilters,
+                      nsIFrame *aFilteredFrame);
+  virtual ~nsSVGFilterProperty();
+
+  const nsTArray<nsStyleFilter>& GetFilters() { return mFilters; }
+  bool ReferencesValidResources();
+  bool IsInObserverLists() const;
+  void Invalidate();
+
+  // nsISupports
+  NS_DECL_ISUPPORTS
+
+private:
+  nsTArray<nsSVGFilterReference*> mReferences;
+  nsTArray<nsStyleFilter> mFilters;
 };
 
 class nsSVGMarkerProperty : public nsSVGIDRenderingObserver {
@@ -229,9 +270,10 @@ protected:
  */
 class nsSVGRenderingObserverList {
 public:
-  nsSVGRenderingObserverList() {
+  nsSVGRenderingObserverList()
+    : mObservers(5)
+  {
     MOZ_COUNT_CTOR(nsSVGRenderingObserverList);
-    mObservers.Init(5);
   }
 
   ~nsSVGRenderingObserverList() {
@@ -326,20 +368,13 @@ public:
      * Otherwise *aOK is untouched.
      */
     nsSVGMaskFrame *GetMaskFrame(bool *aOK);
-    /**
-     * @return the filter frame, or null if there is no filter frame
-     * @param aOK if a filter was specified but the designated element
-     * does not exist or is an element of the wrong type, *aOK is set
-     * to false. Otherwise *aOK is untouched.
-     */
-    nsSVGFilterFrame *GetFilterFrame(bool *aOK) {
-      if (!mFilter)
-        return nullptr;
-      nsSVGFilterFrame *filter = mFilter->GetFilterFrame();
-      if (!filter) {
-        *aOK = false;
-      }
-      return filter;
+
+    bool HasValidFilter() {
+      return mFilter && mFilter->ReferencesValidResources();
+    }
+
+    bool HasNoFilterOrHasValidFilter() {
+      return !mFilter || mFilter->ReferencesValidResources();
     }
   };
 
@@ -367,10 +402,6 @@ public:
    * @param aFrame should be the first continuation
    */
   static nsSVGFilterProperty *GetFilterProperty(nsIFrame *aFrame);
-  static nsSVGFilterFrame *GetFilterFrame(nsIFrame *aFrame) {
-    nsSVGFilterProperty *prop = GetFilterProperty(aFrame);
-    return prop ? prop->GetFilterFrame() : nullptr;
-  }
 
   /**
    * @param aFrame must be a first-continuation.

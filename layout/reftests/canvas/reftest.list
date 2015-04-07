@@ -1,5 +1,5 @@
 == default-size.html default-size-ref.html
-skip-if(B2G) == size-1.html size-1-ref.html
+skip-if(B2G) fuzzy-if(Android&&AndroidVersion>=15,8,1000) == size-1.html size-1-ref.html
 
 == empty-transaction-1.html empty-transaction-1-ref.html
 
@@ -7,6 +7,8 @@ skip-if(B2G) == size-1.html size-1-ref.html
 == image-shadow.html image-shadow-ref.html
 
 skip-if(B2G) asserts-if(cocoaWidget,0-2) == size-change-1.html size-change-1-ref.html
+
+random-if(cocoaWidget) == subpixel-1.html about:blank
 
 != text-ltr-left.html text-blank.html
 != text-ltr-right.html text-blank.html
@@ -25,8 +27,8 @@ skip-if(B2G) asserts-if(cocoaWidget,0-2) == size-change-1.html size-change-1-ref
 == text-ltr-alignment-test.html text-ltr-alignment-ref.html
 == text-rtl-alignment-test.html text-rtl-alignment-ref.html
 
-== text-horzline-with-bottom.html text-horzline.html
-== text-horzline-with-top.html text-horzline.html
+fuzzy-if(B2G&&azureSkiaGL,1,256) == text-horzline-with-bottom.html text-horzline.html
+fuzzy-if(B2G&&azureSkiaGL,1,256) == text-horzline-with-top.html text-horzline.html
 
 != text-big-stroke.html text-blank.html
 != text-big-stroke.html text-big-fill.html
@@ -37,13 +39,13 @@ skip-if(B2G) asserts-if(cocoaWidget,0-2) == size-change-1.html size-change-1-ref
 
 == text-no-frame-test.html text-no-frame-ref.html
 == text-no-frame-2-test.html text-not-in-doc-ref.html
-== text-not-in-doc-test.html text-not-in-doc-ref.html
+fuzzy-if(azureSkiaGL,10,400) == text-not-in-doc-test.html text-not-in-doc-ref.html
 
 == text-bidi-ltr-test.html text-bidi-ltr-ref.html
 != text-bidi-ltr-test.html text-bidi-ltr-notref.html # for bug 698185
 == text-bidi-rtl-test.html text-bidi-rtl-ref.html
 
-!= text-font-lang.html text-font-lang-notref.html
+skip-if(B2G) != text-font-lang.html text-font-lang-notref.html
 
 == text-measure.html text-measure-ref.html
 
@@ -62,17 +64,17 @@ random-if(!cocoaWidget||OSX==10.6||OSX==10.7) != text-emoji.html text-emoji-notr
 # azure quartz uses CGDrawLinearGradient instead of DrawShading
 # so we have less control over degenerate behaviour as tested by this
 # test
-fails-if(azureQuartz) == linear-gradient-1a.html linear-gradient-1-ref.html
+fails-if(azureSkia||azureSkiaGL||azureQuartz) == linear-gradient-1a.html linear-gradient-1-ref.html
 
 # this passes with cairo on 10.7 and 10.8 but not with azure for reasons unknown
-fails-if(OSX==10.6||(azureQuartz&&(OSX==10.7||OSX==10.8))) == linear-gradient-1b.html linear-gradient-1-ref.html
+fails-if(!(Android&&AndroidVersion>=15)&&(OSX==10.6||(azureQuartz&&(OSX==10.7||OSX==10.8)))||azureSkiaGL||azureSkia) == linear-gradient-1b.html linear-gradient-1-ref.html
 
 == zero-dimensions.html zero-dimensions-ref.html
 
 == evenodd-fill-sanity.html data:text/html,<body>Pass
 != evenodd-fill-1.html nonzero-fill-1.html
 == evenodd-fill-1.html evenodd-fill-ref.html
-== evenodd-fill-2.html evenodd-fill-ref.html
+random-if(azureSkiaGL) == evenodd-fill-2.html evenodd-fill-ref.html
 == evenodd-fill-3.html nonzero-fill-2.html
 
 == dash-sanity.html data:text/html,<body>Pass

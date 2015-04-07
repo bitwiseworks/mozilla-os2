@@ -6,7 +6,9 @@
 #ifndef MOZILLA_AUDIOCHANNELFORMAT_H_
 #define MOZILLA_AUDIOCHANNELFORMAT_H_
 
-#include "nsTArray.h"
+#include <stdint.h>
+
+#include "nsTArrayForwardDeclare.h"
 
 namespace mozilla {
 

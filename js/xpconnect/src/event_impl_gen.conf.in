@@ -10,36 +10,27 @@
 simple_events = [
     'ProgressEvent',
     'StorageEvent',
-    'DeviceProximityEvent',
     'MozSettingsEvent',
-    'UserProximityEvent',
     'CustomEvent',
     'PageTransitionEvent',
     'DOMTransactionEvent',
     'PopStateEvent',
     'HashChangeEvent',
     'CloseEvent',
-    'MozContactChangeEvent',
     'DeviceOrientationEvent',
-    'DeviceLightEvent',
     'MozApplicationEvent',
     'SmartCardEvent',
     'StyleRuleChangeEvent',
     'StyleSheetChangeEvent',
     'StyleSheetApplicableStateChangeEvent',
-#ifdef MOZ_B2G_BT
-    'BluetoothDeviceEvent',
-#endif
-#ifdef MOZ_B2G_RIL
-    'CallEvent',
-    'CFStateChangeEvent',
-    'DataErrorEvent',
-    'IccCardLockErrorEvent',
+#ifdef MOZ_WIDGET_GONK
+    'MozWifiP2pStatusChangeEvent',
     'MozWifiStatusChangeEvent',
     'MozWifiConnectionInfoEvent',
+#endif
+#ifdef MOZ_B2G_RIL
     'MozCellBroadcastEvent',
     'MozVoicemailEvent',
-    'USSDReceivedEvent',
 #endif
     'ElementReplaceEvent',
     'MozSmsEvent',
@@ -49,21 +40,14 @@ simple_events = [
 #endif
     'DeviceStorageChangeEvent',
     'PopupBlockedEvent',
-    'BlobEvent',
-#ifdef MOZ_GAMEPAD
-    'GamepadEvent',
-    'GamepadButtonEvent',
-    'GamepadAxisMoveEvent',
-#endif
+    'RecordErrorEvent',
 #ifdef MOZ_WEBSPEECH
     'SpeechRecognitionEvent',
-    'SpeechRecognitionError',
 #endif
   ]
 
 """ include file names """
 special_includes = [
-    'DictionaryHelpers.h',
     'nsContentUtils.h',
     'nsIDOMApplicationRegistry.h',
     'nsIDOMFile.h'
@@ -81,6 +65,6 @@ xpidl_to_native = [
     ['nsIDOMDocument', 'nsIDocument', 'nsIDocument'],
     ['nsIDOMElement', 'mozilla::dom::Element', 'mozilla::dom::Element'],
     ['nsIDOMCSSStyleSheet', 'nsCSSStyleSheet', 'nsIStyleSheet'],
-    ['nsIDOMGamepad', 'Gamepad', 'nsIDOMGamepad']
+    ['nsIDOMWindow', 'nsGlobalWindow', 'nsIDOMEventTarget']
   ]
 

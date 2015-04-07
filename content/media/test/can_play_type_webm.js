@@ -1,23 +1,26 @@
 function check_webm(v, enabled) {
   function check(type, expected) {
-    is(v.canPlayType(type), enabled ? expected : "no", type);
+    is(v.canPlayType(type), enabled ? expected : "", type);
   }
 
   // WebM types
-  check("video/webm", "probably");
-  check("audio/webm", "probably");
+  check("video/webm", "maybe");
+  check("audio/webm", "maybe");
 
   // Supported Webm codecs
-  check("audio/webm; codecs=vorbis", "probably");
-  check("video/webm; codecs=vorbis", "probably");
-  check("video/webm; codecs=vorbis,vp8", "probably");
-  check("video/webm; codecs=vorbis,vp8.0", "probably");
-  check("video/webm; codecs=\"vorbis,vp8\"", "probably");
-  check("video/webm; codecs=\"vorbis,vp8.0\"", "probably");
-  check("video/webm; codecs=\"vp8, vorbis\"", "probably");
-  check("video/webm; codecs=\"vp8.0, vorbis\"", "probably");
-  check("video/webm; codecs=vp8", "probably");
-  check("video/webm; codecs=vp8.0", "probably");
+  var video = ['vp8', 'vp8.0', 'vp9', 'vp9.0'];
+  var audio = ['vorbis', 'opus'];
+  audio.forEach(function(acodec) {
+    check("audio/webm; codecs=" + acodec, "probably");
+    check("video/webm; codecs=" + acodec, "probably");
+  });
+  video.forEach(function(vcodec) {
+    check("video/webm; codecs=" + vcodec, "probably");
+    audio.forEach(function(acodec) {
+        check("video/webm; codecs=\"" + vcodec + ", " + acodec + "\"", "probably");
+        check("video/webm; codecs=\"" + acodec + ", " + vcodec + "\"", "probably");
+    });
+  });
 
   // Unsupported WebM codecs
   check("video/webm; codecs=xyz", "");

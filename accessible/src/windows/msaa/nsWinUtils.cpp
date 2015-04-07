@@ -16,13 +16,14 @@
 #include "nsIArray.h"
 #include "nsIDocument.h"
 #include "nsIDocShellTreeItem.h"
+#include "nsXULAppAPI.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
 
 // Window property used by ipc related code in identifying accessible
 // tab windows.
-const PRUnichar* kPropNameTabContent = L"AccessibleTabWindow";
+const wchar_t* kPropNameTabContent = L"AccessibleTabWindow";
 
 /**
  * WindowProc to process WM_GETOBJECT messages, used in windows emulation mode.
@@ -30,7 +31,7 @@ const PRUnichar* kPropNameTabContent = L"AccessibleTabWindow";
 static LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg,
                                    WPARAM wParam, LPARAM lParam);
 
-nsRefPtrHashtable<nsPtrHashKey<void>, DocAccessible> nsWinUtils::sHWNDCache;
+nsRefPtrHashtable<nsPtrHashKey<void>, DocAccessible>* nsWinUtils::sHWNDCache = nullptr;
 
 already_AddRefed<nsIDOMCSSStyleDeclaration>
 nsWinUtils::GetComputedStyleDeclaration(nsIContent* aContent)
@@ -58,9 +59,9 @@ nsWinUtils::MaybeStartWindowEmulation()
   // with tabs.
   if (Compatibility::IsJAWS() || Compatibility::IsWE() ||
       Compatibility::IsDolphin() ||
-      Preferences::GetBool("browser.tabs.remote")) {
+      XRE_GetProcessType() == GeckoProcessType_Content) {
     RegisterNativeWindow(kClassNameTabContent);
-    sHWNDCache.Init(4);
+    sHWNDCache = new nsRefPtrHashtable<nsPtrHashKey<void>, DocAccessible>(4);
     return true;
   }
 
@@ -79,7 +80,7 @@ nsWinUtils::ShutdownWindowEmulation()
 bool
 nsWinUtils::IsWindowEmulationStarted()
 {
-  return sHWNDCache.IsInitialized();
+  return sHWNDCache != nullptr;
 }
 
 void
@@ -145,7 +146,7 @@ WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     {
       if (lParam == OBJID_CLIENT) {
         DocAccessible* document =
-          nsWinUtils::sHWNDCache.GetWeak(static_cast<void*>(hWnd));
+          nsWinUtils::sHWNDCache->GetWeak(static_cast<void*>(hWnd));
         if (document) {
           IAccessible* msaaAccessible = nullptr;
           document->GetNativeInterface((void**)&msaaAccessible); // does an addref

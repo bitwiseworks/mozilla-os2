@@ -1,3 +1,4 @@
+// IWYU pragma: private, include "nsError.h"
 /* Helper file for nsError.h, via preprocessor magic */
   /* Standard "it worked" return value */
   ERROR(NS_OK,  0),
@@ -15,8 +16,6 @@
   /* Returned when a given interface is not supported. */
   ERROR(NS_NOINTERFACE,                         0x80004002),
   ERROR(NS_ERROR_NO_INTERFACE,                  NS_NOINTERFACE),
-  ERROR(NS_ERROR_INVALID_POINTER,               0x80004003),
-  ERROR(NS_ERROR_NULL_POINTER,                  NS_ERROR_INVALID_POINTER),
   /* Returned when a function aborts */
   ERROR(NS_ERROR_ABORT,                         0x80004004),
   /* Returned when a function fails */
@@ -28,6 +27,8 @@
   /* Returned when an illegal value is passed */
   ERROR(NS_ERROR_ILLEGAL_VALUE,                 0x80070057),
   ERROR(NS_ERROR_INVALID_ARG,                   NS_ERROR_ILLEGAL_VALUE),
+  ERROR(NS_ERROR_INVALID_POINTER,               NS_ERROR_INVALID_ARG),
+  ERROR(NS_ERROR_NULL_POINTER,                  NS_ERROR_INVALID_ARG),
   /* Returned when a class doesn't allow aggregation */
   ERROR(NS_ERROR_NO_AGGREGATION,                0x80040110),
   /* Returned when an operation can't complete due to an unavailable resource */
@@ -107,8 +108,6 @@
   ERROR(NS_ERROR_GFX_PRINTER_STARTPAGE,                   FAILURE(6)),
   /* The document is still being loaded */
   ERROR(NS_ERROR_GFX_PRINTER_DOC_IS_BUSY,                 FAILURE(7)),
-  /* Cannot Print or Print Preview XUL Documents (bug 136185 / bug 240490) */
-  ERROR(NS_ERROR_GFX_PRINTER_NO_XUL,                      FAILURE(8)),
 
   /* Font cmap is strangely structured - avoid this font! */
   ERROR(NS_ERROR_GFX_CMAP_MALFORMED,                      FAILURE(51)),
@@ -250,7 +249,10 @@
   ERROR(NS_ERROR_UNKNOWN_SOCKET_TYPE,   FAILURE(51)),
   /* The specified socket type could not be created. */
   ERROR(NS_ERROR_SOCKET_CREATE_FAILED,  FAILURE(52)),
-
+  /* The operating system doesn't support the given type of address. */
+  ERROR(NS_ERROR_SOCKET_ADDRESS_NOT_SUPPORTED, FAILURE(53)),
+  /* The address to which we tried to bind the socket was busy. */
+  ERROR(NS_ERROR_SOCKET_ADDRESS_IN_USE, FAILURE(54)),
 
   /* Cache specific error codes: */
   ERROR(NS_ERROR_CACHE_KEY_NOT_FOUND,        FAILURE(61)),
@@ -484,6 +486,7 @@
   ERROR(NS_ERROR_DOM_ENCODING_NOT_SUPPORTED_ERR,   FAILURE(28)),
   ERROR(NS_ERROR_DOM_ENCODING_NOT_UTF_ERR,         FAILURE(29)),
   ERROR(NS_ERROR_DOM_ENCODING_DECODE_ERR,          FAILURE(30)),
+  ERROR(NS_ERROR_DOM_INVALID_POINTER_ERR,          FAILURE(31)),
   /* DOM error codes defined by us */
   ERROR(NS_ERROR_DOM_SECMAN_ERR,                   FAILURE(1001)),
   ERROR(NS_ERROR_DOM_WRONG_TYPE_ERR,               FAILURE(1002)),
@@ -596,10 +599,6 @@
   /* any new errors here should have an associated entry added in xpc.msg */
 
   ERROR(NS_SUCCESS_I_DID_SOMETHING,      SUCCESS(1)),
-  /* Classes that want to only be touched by chrome (or from code whose
-   * filename begins with chrome://global/) shoudl return this from their
-   * scriptable helper's PreCreate hook. */
-  ERROR(NS_SUCCESS_CHROME_ACCESS_ONLY,   SUCCESS(2)),
 #undef MODULE
 
 
@@ -686,6 +685,8 @@
   ERROR(NS_PROPTABLE_PROP_NOT_THERE,            FAILURE(10)),
   /* Error code for XBL */
   ERROR(NS_ERROR_XBL_BLOCKED,                   FAILURE(15)),
+  /* Error code for when the content process crashed */
+  ERROR(NS_ERROR_CONTENT_CRASHED,               FAILURE(16)),
 
   /* XXX this is not really used */
   ERROR(NS_HTML_STYLE_PROPERTY_NOT_THERE,   SUCCESS(2)),
@@ -809,6 +810,7 @@
   ERROR(NS_ERROR_DOM_FILEHANDLE_LOCKEDFILE_INACTIVE_ERR,  FAILURE(3)),
   ERROR(NS_ERROR_DOM_FILEHANDLE_ABORT_ERR,                FAILURE(4)),
   ERROR(NS_ERROR_DOM_FILEHANDLE_READ_ONLY_ERR,            FAILURE(5)),
+  ERROR(NS_ERROR_DOM_FILEHANDLE_QUOTA_ERR,                FAILURE(6)),
 #undef MODULE
 
   /* ======================================================================= */
@@ -823,6 +825,18 @@
   ERROR(NS_ERROR_SIGNED_JAR_ENTRY_TOO_LARGE,              FAILURE(6)),
   ERROR(NS_ERROR_SIGNED_JAR_ENTRY_INVALID,                FAILURE(7)),
   ERROR(NS_ERROR_SIGNED_JAR_MANIFEST_INVALID,             FAILURE(8)),
+#undef MODULE
+
+  /* ======================================================================= */
+  /* 36: NS_ERROR_MODULE_DOM_FILESYSTEM */
+  /* ======================================================================= */
+#define MODULE NS_ERROR_MODULE_DOM_FILESYSTEM
+  ERROR(NS_ERROR_DOM_FILESYSTEM_INVALID_PATH_ERR,          FAILURE(1)),
+  ERROR(NS_ERROR_DOM_FILESYSTEM_INVALID_MODIFICATION_ERR,  FAILURE(2)),
+  ERROR(NS_ERROR_DOM_FILESYSTEM_NO_MODIFICATION_ALLOWED_ERR, FAILURE(3)),
+  ERROR(NS_ERROR_DOM_FILESYSTEM_PATH_EXISTS_ERR,           FAILURE(4)),
+  ERROR(NS_ERROR_DOM_FILESYSTEM_TYPE_MISMATCH_ERR,         FAILURE(5)),
+  ERROR(NS_ERROR_DOM_FILESYSTEM_UNKNOWN_ERR,               FAILURE(6)),
 #undef MODULE
 
   /* ======================================================================= */
@@ -850,6 +864,7 @@
    * the application should be restarted.  This condition corresponds to the
    * case in which nsIAppStartup::Quit was called with the eRestart flag. */
   ERROR(NS_SUCCESS_RESTART_APP,          SUCCESS(1)),
+  ERROR(NS_SUCCESS_RESTART_METRO_APP,    SUCCESS(2)),
   ERROR(NS_SUCCESS_UNORM_NOTFOUND,  SUCCESS(17)),
 
 
@@ -857,8 +872,6 @@
   /* raised when current pivot's position is needed but it's not in the tree */
   ERROR(NS_ERROR_NOT_IN_TREE,  FAILURE(38)),
 
-  /* see Accessible::GetAttrValue */
-  ERROR(NS_OK_NO_ARIA_VALUE,           SUCCESS(33)),
   /* see nsTextEquivUtils */
   ERROR(NS_OK_NO_NAME_CLAUSE_HANDLED,  SUCCESS(34))
 #undef MODULE

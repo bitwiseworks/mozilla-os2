@@ -19,8 +19,6 @@
 
 #if defined(XP_WIN)
 #define READ_BINARYMODE L"rb"
-#elif defined(XP_OS2)
-#define READ_BINARYMODE "rb"
 #else
 #define READ_BINARYMODE "r"
 #endif
@@ -65,7 +63,8 @@ nsINIParser::Init(nsIFile* aFile)
 #ifdef XP_WIN
     nsAutoString path;
     nsresult rv = aFile->GetPath(path);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_WARN_IF(NS_FAILED(rv)))
+      return rv;
 
     fd = _wfopen(path.get(), READ_BINARYMODE);
 #else
@@ -101,8 +100,6 @@ static const char kRBracket[] = "]";
 nsresult
 nsINIParser::InitFromFILE(FILE *fd)
 {
-    mSections.Init();
-
     /* get file size */
     if (fseek(fd, 0, SEEK_END) != 0)
         return NS_ERROR_FAILURE;
@@ -150,10 +147,10 @@ nsINIParser::InitFromFILE(FILE *fd)
                                    0,
                                    reinterpret_cast<LPWSTR>(buffer),
                                    -1,
-                                   NULL,
+                                   nullptr,
                                    0,
-                                   NULL,
-                                   NULL);
+                                   nullptr,
+                                   nullptr);
         if (0 == flen) {
             return NS_ERROR_FAILURE;
         }
@@ -165,8 +162,8 @@ nsINIParser::InitFromFILE(FILE *fd)
                                      -1,
                                      utf8Buffer,
                                      flen,
-                                     NULL,
-                                     NULL)) {
+                                     nullptr,
+                                     nullptr)) {
             return NS_ERROR_FAILURE;
         }
         mFileContents = utf8Buffer.forget();

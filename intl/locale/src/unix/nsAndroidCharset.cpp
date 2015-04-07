@@ -6,7 +6,7 @@
 #include "nsIPlatformCharset.h"
 #include "nsPlatformCharset.h"
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsPlatformCharset, nsIPlatformCharset)
+NS_IMPL_ISUPPORTS(nsPlatformCharset, nsIPlatformCharset)
 
 nsPlatformCharset::nsPlatformCharset()
 {

@@ -38,11 +38,6 @@
 #include "nsDirectoryServiceDefs.h"
 #endif
 
-#ifdef XP_OS2
-#define INCL_DOSFILEMGR
-#include <os2.h>
-#endif
-
 #define NS_MOZICON_SCHEME           "moz-icon:"
 
 static const char kFileProtocol[]         = "file://";
@@ -153,8 +148,8 @@ FileSystemDataSource::Init()
     tmp = mRDFService->GetResource(NS_LITERAL_CSTRING(RDF_NAMESPACE_URI "type"),
                                    getter_AddRefs(mRDF_type));
 
-    static const PRUnichar kTrue[] = {'t','r','u','e','\0'};
-    static const PRUnichar kFalse[] = {'f','a','l','s','e','\0'};
+    static const char16_t kTrue[] = {'t','r','u','e','\0'};
+    static const char16_t kFalse[] = {'f','a','l','s','e','\0'};
 
     tmp = mRDFService->GetLiteral(kTrue, getter_AddRefs(mLiteralTrue));
     if (NS_FAILED(tmp)) {
@@ -213,7 +208,7 @@ FileSystemDataSource::Create(nsISupports* aOuter, const nsIID& aIID, void **aRes
     return self->QueryInterface(aIID, aResult);
 }
 
-NS_IMPL_ISUPPORTS1(FileSystemDataSource, nsIRDFDataSource)
+NS_IMPL_ISUPPORTS(FileSystemDataSource, nsIRDFDataSource)
 
 NS_IMETHODIMP
 FileSystemDataSource::GetURI(char **uri)
@@ -297,7 +292,7 @@ FileSystemDataSource::GetTarget(nsIRDFResource *source,
         if (property == mNC_pulse)
         {
             nsIRDFLiteral   *pulseLiteral;
-            mRDFService->GetLiteral(NS_LITERAL_STRING("12").get(), &pulseLiteral);
+            mRDFService->GetLiteral(MOZ_UTF16("12"), &pulseLiteral);
             *target = pulseLiteral;
             return NS_OK;
         }
@@ -332,7 +327,7 @@ FileSystemDataSource::GetTarget(nsIRDFResource *source,
             if (isFavorite || !url) rv = NS_RDF_NO_VALUE;
             if (rv == NS_RDF_NO_VALUE)  return(rv);
             
-            const PRUnichar *uni = nullptr;
+            const char16_t *uni = nullptr;
             url->GetValueConst(&uni);
             if (!uni)   return(NS_RDF_NO_VALUE);
             nsAutoString    urlStr;
@@ -409,7 +404,7 @@ FileSystemDataSource::GetTarget(nsIRDFResource *source,
         else if (property == mNC_pulse)
         {
             nsCOMPtr<nsIRDFLiteral> pulseLiteral;
-            mRDFService->GetLiteral(NS_LITERAL_STRING("12").get(), getter_AddRefs(pulseLiteral));
+            mRDFService->GetLiteral(MOZ_UTF16("12"), getter_AddRefs(pulseLiteral));
             rv = pulseLiteral->QueryInterface(NS_GET_IID(nsIRDFNode), (void**) target);
             return(rv);
         }
@@ -485,7 +480,7 @@ FileSystemDataSource::GetTargets(nsIRDFResource *source,
         else if (property == mNC_pulse)
         {
             nsCOMPtr<nsIRDFLiteral> pulseLiteral;
-            mRDFService->GetLiteral(NS_LITERAL_STRING("12").get(),
+            mRDFService->GetLiteral(MOZ_UTF16("12"),
                                     getter_AddRefs(pulseLiteral));
             return NS_NewSingletonEnumerator(targets, pulseLiteral);
         }
@@ -529,7 +524,7 @@ FileSystemDataSource::GetTargets(nsIRDFResource *source,
         else if (property == mNC_pulse)
         {
             nsCOMPtr<nsIRDFLiteral> pulseLiteral;
-            rv = mRDFService->GetLiteral(NS_LITERAL_STRING("12").get(),
+            rv = mRDFService->GetLiteral(MOZ_UTF16("12"),
                 getter_AddRefs(pulseLiteral));
             if (NS_FAILED(rv)) return rv;
 
@@ -843,30 +838,29 @@ FileSystemDataSource::EndUpdateBatch()
 nsresult
 FileSystemDataSource::GetVolumeList(nsISimpleEnumerator** aResult)
 {
-    nsresult rv;
     nsCOMArray<nsIRDFResource> volumes;
     nsCOMPtr<nsIRDFResource> vol;
 
 #ifdef XP_WIN
 
     int32_t         driveType;
-    PRUnichar       drive[32];
+    wchar_t         drive[32];
     int32_t         volNum;
 
     for (volNum = 0; volNum < 26; volNum++)
     {
-        swprintf( drive, L"%c:\\", volNum + (PRUnichar)'A');
+        swprintf( drive, L"%c:\\", volNum + (char16_t)'A');
 
         driveType = GetDriveTypeW(drive);
         if (driveType != DRIVE_UNKNOWN && driveType != DRIVE_NO_ROOT_DIR)
         {
           nsAutoCString url;
           url.AppendPrintf("file:///%c|/", volNum + 'A');
-          rv = mRDFService->GetResource(url, getter_AddRefs(vol));
+          nsresult rv = mRDFService->GetResource(url, getter_AddRefs(vol));
           if (NS_FAILED(rv))
             return rv;
 
-                volumes.AppendObject(vol);
+          volumes.AppendObject(vol);
         }
     }
 #endif
@@ -874,29 +868,6 @@ FileSystemDataSource::GetVolumeList(nsISimpleEnumerator** aResult)
 #ifdef XP_UNIX
     mRDFService->GetResource(NS_LITERAL_CSTRING("file:///"), getter_AddRefs(vol));
     volumes.AppendObject(vol);
-#endif
-
-#ifdef XP_OS2
-    ULONG ulDriveNo = 0;
-    ULONG ulDriveMap = 0;
-
-    rv = DosQueryCurrentDisk(&ulDriveNo, &ulDriveMap);
-    if (NS_FAILED(rv))
-        return rv;
-
-    for (int volNum = 0; volNum < 26; volNum++)
-    {
-        if (((ulDriveMap << (31 - volNum)) >> 31))
-        {
-          nsAutoCString url;
-          url.AppendPrintf("file:///%c|/", volNum + 'A');
-          rv = mRDFService->GetResource(nsDependentCString(url), getter_AddRefs(vol));
-
-          if (NS_FAILED(rv)) return rv;
-                volumes.AppendObject(vol);
-        }
-
-    }
 #endif
 
     return NS_NewArrayEnumerator(aResult, volumes);
@@ -940,7 +911,7 @@ FileSystemDataSource::isValidFolder(nsIRDFResource *source)
                 if (NS_FAILED(rv = GetName(res, getter_AddRefs(nameLiteral))))
                     break;
                 
-                const PRUnichar         *uniName;
+                const char16_t         *uniName;
                 if (NS_FAILED(rv = nameLiteral->GetValueConst(&uniName)))
                     break;
                 nsAutoString            name(uniName);
@@ -1109,11 +1080,7 @@ FileSystemDataSource::GetLastMod(nsIRDFResource *source, nsIRDFDate **aResult)
         return(rv);
 
     // convert from milliseconds to seconds
-    PRTime      temp64, thousand;
-    LL_I2L(thousand, PR_MSEC_PER_SEC);
-    temp64 = lastModDate * thousand;
-
-    mRDFService->GetDateLiteral(temp64, aResult);
+    mRDFService->GetDateLiteral(lastModDate * PR_MSEC_PER_SEC, aResult);
 
     return(NS_OK);
 }
@@ -1238,7 +1205,7 @@ FileSystemDataSource::GetExtension(nsIRDFResource *source, nsIRDFLiteral **aResu
     if (NS_FAILED(rv))
         return rv;
 
-    const PRUnichar* unicodeLeafName;
+    const char16_t* unicodeLeafName;
     rv = name->GetValueConst(&unicodeLeafName);
     if (NS_FAILED(rv))
         return rv;

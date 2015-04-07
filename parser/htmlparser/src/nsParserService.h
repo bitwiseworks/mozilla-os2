@@ -7,12 +7,11 @@
 #define NS_PARSERSERVICE_H__
 
 #include "nsIParserService.h"
-#include "nsDTDUtils.h"
 
 extern "C" int MOZ_XMLIsLetter(const char* ptr);
 extern "C" int MOZ_XMLIsNCNameChar(const char* ptr);
 extern "C" int MOZ_XMLTranslateEntity(const char* ptr, const char* end,
-                                      const char** next, PRUnichar* result);
+                                      const char** next, char16_t* result);
 
 class nsParserService : public nsIParserService {
 public:
@@ -27,7 +26,7 @@ public:
 
   int32_t HTMLStringTagToId(const nsAString& aTag) const;
 
-  const PRUnichar *HTMLIdToStringTag(int32_t aId) const;
+  const char16_t *HTMLIdToStringTag(int32_t aId) const;
   
   nsIAtom *HTMLIdToAtomTag(int32_t aId) const;
 

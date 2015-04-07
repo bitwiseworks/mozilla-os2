@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,77 +8,17 @@
 
 #include "xpcprivate.h"
 #include "XPCWrapper.h"
-#include "jsproxy.h"
 #include "nsContentUtils.h"
 #include "nsCycleCollectionNoteRootCallback.h"
 #include "nsPrincipal.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Preferences.h"
 
 #include "mozilla/dom/BindingUtils.h"
 
 using namespace mozilla;
 using namespace xpc;
-
-/***************************************************************************/
-
-#ifdef XPC_TRACK_SCOPE_STATS
-static int DEBUG_TotalScopeCount;
-static int DEBUG_TotalLiveScopeCount;
-static int DEBUG_TotalMaxScopeCount;
-static int DEBUG_TotalScopeTraversalCount;
-static bool    DEBUG_DumpedStats;
-#endif
-
-#ifdef DEBUG
-static void DEBUG_TrackNewScope(XPCWrappedNativeScope* scope)
-{
-#ifdef XPC_TRACK_SCOPE_STATS
-    DEBUG_TotalScopeCount++;
-    DEBUG_TotalLiveScopeCount++;
-    if (DEBUG_TotalMaxScopeCount < DEBUG_TotalLiveScopeCount)
-        DEBUG_TotalMaxScopeCount = DEBUG_TotalLiveScopeCount;
-#endif
-}
-
-static void DEBUG_TrackDeleteScope(XPCWrappedNativeScope* scope)
-{
-#ifdef XPC_TRACK_SCOPE_STATS
-    DEBUG_TotalLiveScopeCount--;
-#endif
-}
-
-static void DEBUG_TrackScopeTraversal()
-{
-#ifdef XPC_TRACK_SCOPE_STATS
-    DEBUG_TotalScopeTraversalCount++;
-#endif
-}
-
-static void DEBUG_TrackScopeShutdown()
-{
-#ifdef XPC_TRACK_SCOPE_STATS
-    if (!DEBUG_DumpedStats) {
-        DEBUG_DumpedStats = true;
-        printf("%d XPCWrappedNativeScope(s) were constructed.\n",
-               DEBUG_TotalScopeCount);
-
-        printf("%d XPCWrappedNativeScopes(s) max alive at one time.\n",
-               DEBUG_TotalMaxScopeCount);
-
-        printf("%d XPCWrappedNativeScope(s) alive now.\n" ,
-               DEBUG_TotalLiveScopeCount);
-
-        printf("%d traversals of Scope list.\n",
-               DEBUG_TotalScopeTraversalCount);
-    }
-#endif
-}
-#else
-#define DEBUG_TrackNewScope(scope) ((void)0)
-#define DEBUG_TrackDeleteScope(scope) ((void)0)
-#define DEBUG_TrackScopeTraversal() ((void)0)
-#define DEBUG_TrackScopeShutdown() ((void)0)
-#endif
+using namespace JS;
 
 /***************************************************************************/
 
@@ -96,17 +37,24 @@ XPCWrappedNativeScope::GetNewOrUsed(JSContext *cx, JS::HandleObject aGlobal)
 }
 
 static bool
-RemoteXULForbidsXBLScope(nsIPrincipal *aPrincipal)
+RemoteXULForbidsXBLScope(nsIPrincipal *aPrincipal, HandleObject aGlobal)
 {
-  // We end up getting called during SSM bootstrapping to create the
-  // SafeJSContext. In that case, nsContentUtils isn't ready for us.
-  //
-  // Also check for random JSD scopes that don't have a principal.
-  if (!nsContentUtils::IsInitialized() || !aPrincipal)
+  // Check for random JSD scopes that don't have a principal.
+  if (!aPrincipal)
+      return false;
+
+  // The SafeJSContext is lazily created, and tends to be created at really
+  // weird times, at least for xpcshell (often very early in startup or late
+  // in shutdown). Its scope isn't system principal, so if we proceeded we'd
+  // end up calling into AllowXULXBLForPrincipal, which depends on all kinds
+  // of persistent storage and permission machinery that may or not be running.
+  // We know the answer to the question here, so just short-circuit.
+  if (JS_GetClass(aGlobal) == &SafeJSContextGlobalClass)
       return false;
 
   // AllowXULXBLForPrincipal will return true for system principal, but we
   // don't want that here.
+  MOZ_ASSERT(nsContentUtils::IsInitialized());
   if (nsContentUtils::IsSystemPrincipal(aPrincipal))
       return false;
 
@@ -122,7 +70,6 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext *cx,
                                              JS::HandleObject aGlobal)
       : mWrappedNativeMap(Native2WrappedNativeMap::newMap(XPC_NATIVE_MAP_SIZE)),
         mWrappedNativeProtoMap(ClassInfo2WrappedNativeProtoMap::newMap(XPC_NATIVE_PROTO_MAP_SIZE)),
-        mMainThreadWrappedNativeProtoMap(ClassInfo2WrappedNativeProtoMap::newMap(XPC_NATIVE_PROTO_MAP_SIZE)),
         mComponents(nullptr),
         mNext(nullptr),
         mGlobalJSObject(aGlobal),
@@ -133,9 +80,6 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext *cx,
         MOZ_ASSERT(aGlobal);
         MOZ_ASSERT(js::GetObjectClass(aGlobal)->flags & (JSCLASS_PRIVATE_IS_NSISUPPORTS |
                                                          JSCLASS_HAS_PRIVATE)); 
-        // scoped lock
-        XPCAutoLock lock(XPCJSRuntime::Get()->GetMapLock());
-
 #ifdef DEBUG
         for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext)
             MOZ_ASSERT(aGlobal != cur->GetGlobalJSObjectPreserveColor(), "dup object");
@@ -149,7 +93,6 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext *cx,
         mContext->AddScope(this);
     }
 
-    DEBUG_TrackNewScope(this);
     MOZ_COUNT_CTOR(XPCWrappedNativeScope);
 
     // Attach ourselves to the compartment private.
@@ -160,12 +103,12 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext *cx,
     // In addition to being pref-controlled, we also disable XBL scopes for
     // remote XUL domains, _except_ if we have an additional pref override set.
     nsIPrincipal *principal = GetPrincipal();
-    mAllowXBLScope = !RemoteXULForbidsXBLScope(principal);
+    mAllowXBLScope = !RemoteXULForbidsXBLScope(principal, aGlobal);
 
     // Determine whether to use an XBL scope.
     mUseXBLScope = mAllowXBLScope;
     if (mUseXBLScope) {
-      js::Class *clasp = js::GetObjectClass(mGlobalJSObject);
+      const js::Class *clasp = js::GetObjectClass(mGlobalJSObject);
       mUseXBLScope = !strcmp(clasp->name, "Window") ||
                      !strcmp(clasp->name, "ChromeWindow") ||
                      !strcmp(clasp->name, "ModalContentWindow");
@@ -176,7 +119,7 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext *cx,
 }
 
 // static
-JSBool
+bool
 XPCWrappedNativeScope::IsDyingScope(XPCWrappedNativeScope *scope)
 {
     for (XPCWrappedNativeScope *cur = gDyingScopes; cur; cur = cur->mNext) {
@@ -186,31 +129,62 @@ XPCWrappedNativeScope::IsDyingScope(XPCWrappedNativeScope *scope)
     return false;
 }
 
-JSObject*
-XPCWrappedNativeScope::GetComponentsJSObject()
+bool
+XPCWrappedNativeScope::GetComponentsJSObject(JS::MutableHandleObject obj)
 {
     AutoJSContext cx;
-    if (!mComponents)
-        mComponents = new nsXPCComponents(this);
+    if (!mComponents) {
+        nsIPrincipal *p = GetPrincipal();
+        bool system = XPCWrapper::GetSecurityManager()->IsSystemPrincipal(p);
+        mComponents = system ? new nsXPCComponents(this)
+                             : new nsXPCComponentsBase(this);
+    }
 
-    AutoMarkingNativeInterfacePtr iface(cx);
-    iface = XPCNativeInterface::GetNewOrUsed(&NS_GET_IID(nsIXPCComponents));
-    if (!iface)
-        return nullptr;
+    RootedValue val(cx);
+    xpcObjectHelper helper(mComponents);
+    bool ok = XPCConvert::NativeInterface2JSObject(&val, nullptr, helper,
+                                                   nullptr, nullptr, false,
+                                                   nullptr);
+    if (NS_WARN_IF(!ok))
+        return false;
 
-    nsCOMPtr<nsIXPCComponents> cholder(mComponents);
-    xpcObjectHelper helper(cholder);
-    nsCOMPtr<XPCWrappedNative> wrapper;
-    XPCWrappedNative::GetNewOrUsed(helper, this, iface, getter_AddRefs(wrapper));
-    if (!wrapper)
-        return nullptr;
+    if (NS_WARN_IF(!val.isObject()))
+        return false;
 
     // The call to wrap() here is necessary even though the object is same-
     // compartment, because it applies our security wrapper.
-    JS::RootedObject obj(cx, wrapper->GetFlatJSObject());
-    if (!JS_WrapObject(cx, obj.address()))
-        return nullptr;
-    return obj;
+    obj.set(&val.toObject());
+    if (NS_WARN_IF(!JS_WrapObject(cx, obj)))
+        return false;
+    return true;
+}
+
+void
+XPCWrappedNativeScope::ForcePrivilegedComponents()
+{
+    // This may only be called on unprivileged scopes during automation where
+    // we allow insecure things.
+    MOZ_RELEASE_ASSERT(Preferences::GetBool("security.turn_off_all_security_so_"
+                                            "that_viruses_can_take_over_this_"
+                                            "computer"));
+    nsCOMPtr<nsIXPCComponents> c = do_QueryInterface(mComponents);
+    if (!c)
+        mComponents = new nsXPCComponents(this);
+}
+
+bool
+XPCWrappedNativeScope::AttachComponentsObject(JSContext* aCx)
+{
+    RootedObject components(aCx);
+    if (!GetComponentsJSObject(&components))
+        return false;
+
+    RootedObject global(aCx, GetGlobalJSObject());
+    MOZ_ASSERT(js::IsObjectInContextCompartment(global, aCx));
+
+    RootedId id(aCx, XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_COMPONENTS));
+    return JS_DefinePropertyById(aCx, global, id, ObjectValue(*components),
+                                 nullptr, nullptr, JSPROP_PERMANENT | JSPROP_READONLY);
 }
 
 JSObject*
@@ -238,10 +212,9 @@ XPCWrappedNativeScope::EnsureXBLScope(JSContext *cx)
     // However, wantXrays lives a secret double life, and one of its other
     // hobbies is to waive Xray on the returned sandbox when set to false.
     // So make sure to keep this set to true, here.
-    SandboxOptions options(cx);
+    SandboxOptions options;
     options.wantXrays = true;
     options.wantComponents = true;
-    options.wantXHRConstructor = false;
     options.proto = global;
     options.sameZoneAs = global;
 
@@ -254,8 +227,8 @@ XPCWrappedNativeScope::EnsureXBLScope(JSContext *cx)
     ep = new nsExpandedPrincipal(principalAsArray);
 
     // Create the sandbox.
-    JS::RootedValue v(cx, JS::UndefinedValue());
-    nsresult rv = xpc_CreateSandboxObject(cx, v.address(), ep, options);
+    RootedValue v(cx);
+    nsresult rv = CreateSandboxObject(cx, &v, ep, options);
     NS_ENSURE_SUCCESS(rv, nullptr);
     mXBLScope = &v.toObject();
 
@@ -283,7 +256,7 @@ JSObject *GetXBLScope(JSContext *cx, JSObject *contentScopeArg)
     JSObject *scope = EnsureCompartmentPrivate(contentScope)->scope->EnsureXBLScope(cx);
     NS_ENSURE_TRUE(scope, nullptr); // See bug 858642.
     scope = js::UncheckedUnwrap(scope);
-    xpc_UnmarkGrayObject(scope);
+    JS::ExposeObjectToActiveJS(scope);
     return scope;
 }
 
@@ -304,23 +277,17 @@ bool UseXBLScope(JSCompartment *c)
 XPCWrappedNativeScope::~XPCWrappedNativeScope()
 {
     MOZ_COUNT_DTOR(XPCWrappedNativeScope);
-    DEBUG_TrackDeleteScope(this);
 
     // We can do additional cleanup assertions here...
 
     if (mWrappedNativeMap) {
-        NS_ASSERTION(0 == mWrappedNativeMap->Count(), "scope has non-empty map");
+        MOZ_ASSERT(0 == mWrappedNativeMap->Count(), "scope has non-empty map");
         delete mWrappedNativeMap;
     }
 
     if (mWrappedNativeProtoMap) {
-        NS_ASSERTION(0 == mWrappedNativeProtoMap->Count(), "scope has non-empty map");
+        MOZ_ASSERT(0 == mWrappedNativeProtoMap->Count(), "scope has non-empty map");
         delete mWrappedNativeProtoMap;
-    }
-
-    if (mMainThreadWrappedNativeProtoMap) {
-        NS_ASSERTION(0 == mMainThreadWrappedNativeProtoMap->Count(), "scope has non-empty map");
-        delete mMainThreadWrappedNativeProtoMap;
     }
 
     if (mContext)
@@ -334,6 +301,9 @@ XPCWrappedNativeScope::~XPCWrappedNativeScope()
     // XXX we should assert that we are dead or that xpconnect has shutdown
     // XXX might not want to do this at xpconnect shutdown time???
     mComponents = nullptr;
+
+    if (mXrayExpandos.initialized())
+        mXrayExpandos.destroy();
 
     JSRuntime *rt = XPCJSRuntime::Get()->Runtime();
     mXBLScope.finalize(rt);
@@ -355,10 +325,6 @@ WrappedNativeJSGCThingTracer(PLDHashTable *table, PLDHashEntryHdr *hdr,
 void
 XPCWrappedNativeScope::TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSRuntime* rt)
 {
-    // FIXME The lock may not be necessary during tracing as that serializes
-    // access to JS runtime. See bug 380139.
-    XPCAutoLock lock(rt->GetMapLock());
-
     // Do JS_CallTracer for all wrapped natives with external references, as
     // well as any DOM expando objects.
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
@@ -398,8 +364,6 @@ void
 XPCWrappedNativeScope::SuspectAllWrappers(XPCJSRuntime* rt,
                                           nsCycleCollectionNoteRootCallback& cb)
 {
-    XPCAutoLock lock(rt->GetMapLock());
-
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
         cur->mWrappedNativeMap->Enumerate(WrappedNativeSuspecter, &cb);
         if (cur->mDOMExpandoSet) {
@@ -413,15 +377,10 @@ XPCWrappedNativeScope::SuspectAllWrappers(XPCJSRuntime* rt,
 void
 XPCWrappedNativeScope::StartFinalizationPhaseOfGC(JSFreeOp *fop, XPCJSRuntime* rt)
 {
-    // FIXME The lock may not be necessary since we are inside JSGC_MARK_END
-    // callback and GX serializes access to JS runtime. See bug 380139.
-    XPCAutoLock lock(rt->GetMapLock());
-
     // We are in JSGC_MARK_END and JSGC_FINALIZE_END must always follow it
     // calling FinishedFinalizationPhaseOfGC and clearing gDyingScopes in
     // KillDyingScopes.
-    NS_ASSERTION(gDyingScopes == nullptr,
-                 "JSGC_MARK_END without JSGC_FINALIZE_END");
+    MOZ_ASSERT(!gDyingScopes, "JSGC_MARK_END without JSGC_FINALIZE_END");
 
     XPCWrappedNativeScope* prev = nullptr;
     XPCWrappedNativeScope* cur = gScopes;
@@ -454,12 +413,6 @@ XPCWrappedNativeScope::StartFinalizationPhaseOfGC(JSFreeOp *fop, XPCJSRuntime* r
 void
 XPCWrappedNativeScope::FinishedFinalizationPhaseOfGC()
 {
-    XPCJSRuntime* rt = nsXPConnect::GetRuntimeInstance();
-
-    // FIXME The lock may not be necessary since we are inside
-    // JSGC_FINALIZE_END callback and at this point GC still serializes access
-    // to JS runtime. See bug 380139.
-    XPCAutoLock lock(rt->GetMapLock());
     KillDyingScopes();
 }
 
@@ -488,10 +441,7 @@ XPCWrappedNativeScope::MarkAllWrappedNativesAndProtos()
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
         cur->mWrappedNativeMap->Enumerate(WrappedNativeMarker, nullptr);
         cur->mWrappedNativeProtoMap->Enumerate(WrappedNativeProtoMarker, nullptr);
-        cur->mMainThreadWrappedNativeProtoMap->Enumerate(WrappedNativeProtoMarker, nullptr);
     }
-
-    DEBUG_TrackScopeTraversal();
 }
 
 #ifdef DEBUG
@@ -518,7 +468,6 @@ XPCWrappedNativeScope::ASSERT_NoInterfaceSetsAreMarked()
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
         cur->mWrappedNativeMap->Enumerate(ASSERT_WrappedNativeSetNotMarked, nullptr);
         cur->mWrappedNativeProtoMap->Enumerate(ASSERT_WrappedNativeProtoSetNotMarked, nullptr);
-        cur->mMainThreadWrappedNativeProtoMap->Enumerate(ASSERT_WrappedNativeProtoSetNotMarked, nullptr);
     }
 }
 #endif
@@ -537,18 +486,17 @@ XPCWrappedNativeScope::SweepAllWrappedNativeTearOffs()
 {
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext)
         cur->mWrappedNativeMap->Enumerate(WrappedNativeTearoffSweeper, nullptr);
-
-    DEBUG_TrackScopeTraversal();
 }
 
 // static
 void
 XPCWrappedNativeScope::KillDyingScopes()
 {
-    // always called inside the lock!
     XPCWrappedNativeScope* cur = gDyingScopes;
     while (cur) {
         XPCWrappedNativeScope* next = cur->mNext;
+        if (cur->mGlobalJSObject)
+            GetCompartmentPrivate(cur->mGlobalJSObject)->scope = nullptr;
         delete cur;
         cur = next;
     }
@@ -593,9 +541,6 @@ WrappedNativeProtoShutdownEnumerator(PLDHashTable *table, PLDHashEntryHdr *hdr,
 void
 XPCWrappedNativeScope::SystemIsBeingShutDown()
 {
-    DEBUG_TrackScopeTraversal();
-    DEBUG_TrackScopeShutdown();
-
     int liveScopeCount = 0;
 
     ShutdownData data;
@@ -627,57 +572,16 @@ XPCWrappedNativeScope::SystemIsBeingShutDown()
         // proto pointers in the proto map.
         cur->mWrappedNativeProtoMap->
                 Enumerate(WrappedNativeProtoShutdownEnumerator,  &data);
-        cur->mMainThreadWrappedNativeProtoMap->
-                Enumerate(WrappedNativeProtoShutdownEnumerator,  &data);
         cur->mWrappedNativeMap->
                 Enumerate(WrappedNativeShutdownEnumerator,  &data);
     }
 
     // Now it is safe to kill all the scopes.
     KillDyingScopes();
-
-#ifdef XPC_DUMP_AT_SHUTDOWN
-    if (data.wrapperCount)
-        printf("deleting nsXPConnect  with %d live XPCWrappedNatives\n",
-               data.wrapperCount);
-    if (data.protoCount)
-        printf("deleting nsXPConnect  with %d live XPCWrappedNativeProtos\n",
-               data.protoCount);
-    if (liveScopeCount)
-        printf("deleting nsXPConnect  with %d live XPCWrappedNativeScopes\n",
-               liveScopeCount);
-#endif
 }
 
 
 /***************************************************************************/
-
-static PLDHashOperator
-WNProtoSecPolicyClearer(PLDHashTable *table, PLDHashEntryHdr *hdr,
-                        uint32_t number, void *arg)
-{
-    XPCWrappedNativeProto* proto =
-        ((ClassInfo2WrappedNativeProtoMap::Entry*)hdr)->value;
-    *(proto->GetSecurityInfoAddr()) = nullptr;
-    return PL_DHASH_NEXT;
-}
-
-// static
-nsresult
-XPCWrappedNativeScope::ClearAllWrappedNativeSecurityPolicies()
-{
-    // Hold the lock throughout.
-    XPCAutoLock lock(XPCJSRuntime::Get()->GetMapLock());
-
-    for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
-        cur->mWrappedNativeProtoMap->Enumerate(WNProtoSecPolicyClearer, nullptr);
-        cur->mMainThreadWrappedNativeProtoMap->Enumerate(WNProtoSecPolicyClearer, nullptr);
-    }
-
-    DEBUG_TrackScopeTraversal();
-
-    return NS_OK;
-}
 
 static PLDHashOperator
 WNProtoRemover(PLDHashTable *table, PLDHashEntryHdr *hdr,
@@ -696,12 +600,29 @@ WNProtoRemover(PLDHashTable *table, PLDHashEntryHdr *hdr,
 void
 XPCWrappedNativeScope::RemoveWrappedNativeProtos()
 {
-    XPCAutoLock al(XPCJSRuntime::Get()->GetMapLock());
-
     mWrappedNativeProtoMap->Enumerate(WNProtoRemover,
                                       GetRuntime()->GetDetachedWrappedNativeProtoMap());
-    mMainThreadWrappedNativeProtoMap->Enumerate(WNProtoRemover,
-                                                GetRuntime()->GetDetachedWrappedNativeProtoMap());
+}
+
+JSObject *
+XPCWrappedNativeScope::GetExpandoChain(HandleObject target)
+{
+    MOZ_ASSERT(GetObjectScope(target) == this);
+    if (!mXrayExpandos.initialized())
+        return nullptr;
+    return mXrayExpandos.lookup(target);
+}
+
+bool
+XPCWrappedNativeScope::SetExpandoChain(JSContext *cx, HandleObject target,
+                                       HandleObject chain)
+{
+    MOZ_ASSERT(GetObjectScope(target) == this);
+    MOZ_ASSERT(js::IsObjectInContextCompartment(target, cx));
+    MOZ_ASSERT_IF(chain, GetObjectScope(chain) == this);
+    if (!mXrayExpandos.initialized() && !mXrayExpandos.init(cx))
+        return false;
+    return mXrayExpandos.put(cx, target, chain);
 }
 
 /***************************************************************************/
@@ -776,45 +697,33 @@ XPCWrappedNativeScope::DebugDump(int16_t depth)
             mWrappedNativeProtoMap->Enumerate(WrappedNativeProtoMapDumpEnumerator, &depth);
             XPC_LOG_OUTDENT();
         }
-
-        XPC_LOG_ALWAYS(("mMainThreadWrappedNativeProtoMap @ %x with %d protos(s)", \
-                        mMainThreadWrappedNativeProtoMap,                     \
-                        mMainThreadWrappedNativeProtoMap ? mMainThreadWrappedNativeProtoMap->Count() : 0));
-        // iterate contexts...
-        if (depth && mMainThreadWrappedNativeProtoMap && mMainThreadWrappedNativeProtoMap->Count()) {
-            XPC_LOG_INDENT();
-            mMainThreadWrappedNativeProtoMap->Enumerate(WrappedNativeProtoMapDumpEnumerator, &depth);
-            XPC_LOG_OUTDENT();
-        }
     XPC_LOG_OUTDENT();
 #endif
 }
 
-size_t
-XPCWrappedNativeScope::SizeOfAllScopesIncludingThis(nsMallocSizeOfFun mallocSizeOf)
+void
+XPCWrappedNativeScope::AddSizeOfAllScopesIncludingThis(ScopeSizeInfo* scopeSizeInfo)
 {
-    XPCJSRuntime *rt = nsXPConnect::GetRuntimeInstance();
-    XPCAutoLock lock(rt->GetMapLock());
-
-    size_t n = 0;
-    for (XPCWrappedNativeScope *cur = gScopes; cur; cur = cur->mNext) {
-        n += cur->SizeOfIncludingThis(mallocSizeOf);
-    }
-    return n;
+    for (XPCWrappedNativeScope *cur = gScopes; cur; cur = cur->mNext)
+        cur->AddSizeOfIncludingThis(scopeSizeInfo);
 }
 
-size_t
-XPCWrappedNativeScope::SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf)
+void
+XPCWrappedNativeScope::AddSizeOfIncludingThis(ScopeSizeInfo* scopeSizeInfo)
 {
-    size_t n = 0;
-    n += mallocSizeOf(this);
-    n += mWrappedNativeMap->SizeOfIncludingThis(mallocSizeOf);
-    n += mWrappedNativeProtoMap->SizeOfIncludingThis(mallocSizeOf);
-    n += mMainThreadWrappedNativeProtoMap->SizeOfIncludingThis(mallocSizeOf);
+    scopeSizeInfo->mScopeAndMapSize += scopeSizeInfo->mMallocSizeOf(this);
+    scopeSizeInfo->mScopeAndMapSize +=
+        mWrappedNativeMap->SizeOfIncludingThis(scopeSizeInfo->mMallocSizeOf);
+    scopeSizeInfo->mScopeAndMapSize +=
+        mWrappedNativeProtoMap->SizeOfIncludingThis(scopeSizeInfo->mMallocSizeOf);
+
+    if (dom::HasProtoAndIfaceCache(mGlobalJSObject)) {
+        dom::ProtoAndIfaceCache* cache = dom::GetProtoAndIfaceCache(mGlobalJSObject);
+        scopeSizeInfo->mProtoAndIfaceCacheSize +=
+            cache->SizeOfIncludingThis(scopeSizeInfo->mMallocSizeOf);
+    }
 
     // There are other XPCWrappedNativeScope members that could be measured;
     // the above ones have been seen by DMD to be worth measuring.  More stuff
     // may be added later.
-
-    return n;
 }

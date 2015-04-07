@@ -3,6 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef nsAppShellWindowEnumerator_h
+#define nsAppShellWindowEnumerator_h
+
 #include "nsCOMPtr.h"
 #include "nsString.h"
 
@@ -45,7 +48,7 @@ class nsAppShellWindowEnumerator : public nsISimpleEnumerator {
 friend class nsWindowMediator;
 
 public:
-  nsAppShellWindowEnumerator(const PRUnichar* aTypeString,
+  nsAppShellWindowEnumerator(const char16_t* aTypeString,
                              nsWindowMediator& inMediator);
   virtual ~nsAppShellWindowEnumerator();
   NS_IMETHOD GetNext(nsISupports **retval) = 0;
@@ -68,7 +71,7 @@ protected:
 class nsASDOMWindowEnumerator : public nsAppShellWindowEnumerator {
 
 public:
-  nsASDOMWindowEnumerator(const PRUnichar* aTypeString,
+  nsASDOMWindowEnumerator(const char16_t* aTypeString,
                           nsWindowMediator& inMediator);
   virtual ~nsASDOMWindowEnumerator();
   NS_IMETHOD GetNext(nsISupports **retval);
@@ -77,7 +80,7 @@ public:
 class nsASXULWindowEnumerator : public nsAppShellWindowEnumerator {
 
 public:
-  nsASXULWindowEnumerator(const PRUnichar* aTypeString,
+  nsASXULWindowEnumerator(const char16_t* aTypeString,
                           nsWindowMediator& inMediator);
   virtual ~nsASXULWindowEnumerator();
   NS_IMETHOD GetNext(nsISupports **retval);
@@ -90,7 +93,7 @@ public:
 class nsASDOMWindowEarlyToLateEnumerator : public nsASDOMWindowEnumerator {
 
 public:
-  nsASDOMWindowEarlyToLateEnumerator(const PRUnichar* aTypeString,
+  nsASDOMWindowEarlyToLateEnumerator(const char16_t* aTypeString,
                                      nsWindowMediator& inMediator);
 
   virtual ~nsASDOMWindowEarlyToLateEnumerator();
@@ -102,7 +105,7 @@ protected:
 class nsASXULWindowEarlyToLateEnumerator : public nsASXULWindowEnumerator {
 
 public:
-  nsASXULWindowEarlyToLateEnumerator(const PRUnichar* aTypeString,
+  nsASXULWindowEarlyToLateEnumerator(const char16_t* aTypeString,
                                      nsWindowMediator& inMediator);
 
   virtual ~nsASXULWindowEarlyToLateEnumerator();
@@ -114,7 +117,7 @@ protected:
 class nsASDOMWindowFrontToBackEnumerator : public nsASDOMWindowEnumerator {
 
 public:
-  nsASDOMWindowFrontToBackEnumerator(const PRUnichar* aTypeString,
+  nsASDOMWindowFrontToBackEnumerator(const char16_t* aTypeString,
                                      nsWindowMediator& inMediator);
 
   virtual ~nsASDOMWindowFrontToBackEnumerator();
@@ -126,7 +129,7 @@ protected:
 class nsASXULWindowFrontToBackEnumerator : public nsASXULWindowEnumerator {
 
 public:
-  nsASXULWindowFrontToBackEnumerator(const PRUnichar* aTypeString,
+  nsASXULWindowFrontToBackEnumerator(const char16_t* aTypeString,
                                      nsWindowMediator& inMediator);
 
   virtual ~nsASXULWindowFrontToBackEnumerator();
@@ -138,7 +141,7 @@ protected:
 class nsASDOMWindowBackToFrontEnumerator : public nsASDOMWindowEnumerator {
 
 public:
-  nsASDOMWindowBackToFrontEnumerator(const PRUnichar* aTypeString,
+  nsASDOMWindowBackToFrontEnumerator(const char16_t* aTypeString,
                                      nsWindowMediator& inMediator);
 
   virtual ~nsASDOMWindowBackToFrontEnumerator();
@@ -150,7 +153,7 @@ protected:
 class nsASXULWindowBackToFrontEnumerator : public nsASXULWindowEnumerator {
 
 public:
-  nsASXULWindowBackToFrontEnumerator(const PRUnichar* aTypeString,
+  nsASXULWindowBackToFrontEnumerator(const char16_t* aTypeString,
                                      nsWindowMediator& inMediator);
 
   virtual ~nsASXULWindowBackToFrontEnumerator();
@@ -158,3 +161,5 @@ public:
 protected:
   virtual nsWindowInfo *FindNext();
 };
+
+#endif

@@ -10,7 +10,6 @@
  * liability, trademark and document use rules apply.
  */
 
-[PrefControlled]
 interface AudioBuffer {
 
     readonly attribute float sampleRate;
@@ -24,5 +23,9 @@ interface AudioBuffer {
     [Throws]
     Float32Array getChannelData(unsigned long channel);
 
+    [Throws]
+    void copyFromChannel(Float32Array destination, long channelNumber, optional unsigned long startInChannel = 0);
+    [Throws]
+    void copyToChannel(Float32Array source, long channelNumber, optional unsigned long startInChannel = 0);
 };
 

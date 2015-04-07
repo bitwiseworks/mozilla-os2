@@ -717,6 +717,7 @@ _cairo_win32_printing_surface_paint_image_pattern (cairo_win32_surface_t   *surf
     assert (status == CAIRO_STATUS_SUCCESS);
 
     cairo_matrix_multiply (&m, &m, &surface->gdi_ctm);
+    cairo_matrix_multiply(&m, &m, &surface->ctm);
     SaveDC (surface->dc);
     _cairo_matrix_to_win32_xform (&m, &xform);
 
@@ -1857,6 +1858,7 @@ cairo_win32_printing_surface_create (HDC hdc)
     surface->image = NULL;
     surface->format = CAIRO_FORMAT_RGB24;
     surface->content = CAIRO_CONTENT_COLOR_ALPHA;
+    surface->d3d9surface = NULL;
 
     surface->dc = hdc;
     surface->bitmap = NULL;

@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -9,9 +9,9 @@ let div1;
 let div2;
 let iframe1;
 let iframe2;
+let inspector;
 
-function createDocument()
-{
+function createDocument() {
   doc.title = "Inspector iframe Tests";
 
   iframe1 = doc.createElement('iframe');
@@ -32,7 +32,11 @@ function createDocument()
       div2.textContent = 'nested div';
       iframe2.contentDocument.body.appendChild(div2);
 
-      openInspector(runIframeTests);
+      // Open the inspector, start the picker mode, and start the tests
+      openInspector(aInspector => {
+        inspector = aInspector;
+        inspector.toolbox.highlighterUtils.startPicker().then(runTests);
+      });
     }, false);
 
     iframe2.src = 'data:text/html,nested iframe';
@@ -43,38 +47,55 @@ function createDocument()
   doc.body.appendChild(iframe1);
 }
 
-function moveMouseOver(aElement)
-{
-  EventUtils.synthesizeMouse(aElement, 2, 2, {type: "mousemove"},
+function moveMouseOver(aElement, cb) {
+  inspector.toolbox.once("picker-node-hovered", cb);
+  EventUtils.synthesizeMouseAtCenter(aElement, {type: "mousemove"},
     aElement.ownerDocument.defaultView);
 }
 
-function runIframeTests()
-{
-  getActiveInspector().selection.once("new-node", performTestComparisons1);
-  moveMouseOver(div1)
+function runTests() {
+  testDiv1Highlighter();
 }
 
-function performTestComparisons1()
-{
-  let i = getActiveInspector();
-  is(i.selection.node, div1, "selection matches div1 node");
-  is(getHighlitNode(), div1, "highlighter matches selection");
-
-  i.selection.once("new-node", performTestComparisons2);
-  executeSoon(function() {
-    moveMouseOver(div2);
+function testDiv1Highlighter() {
+  moveMouseOver(div1, () => {
+    is(getHighlitNode(), div1, "highlighter matches selection of div1");
+    testDiv2Highlighter();
   });
 }
 
-function performTestComparisons2()
-{
-  let i = getActiveInspector();
+function testDiv2Highlighter() {
+  moveMouseOver(div2, () => {
+    is(getHighlitNode(), div2, "highlighter matches selection of div2");
+    selectRoot();
+  });
+}
 
-  is(i.selection.node, div2, "selection matches div2 node");
-  is(getHighlitNode(), div2, "highlighter matches selection");
+function selectRoot() {
+  // Select the root document element to clear the breadcrumbs.
+  inspector.selection.setNode(doc.documentElement, null);
+  inspector.once("inspector-updated", selectIframe);
+}
 
-  finish();
+function selectIframe() {
+  // Directly select an element in an iframe (without navigating to it
+  // with mousemoves).
+  inspector.selection.setNode(div2, null);
+  inspector.once("inspector-updated", () => {
+    let breadcrumbs = inspector.breadcrumbs;
+    is(breadcrumbs.nodeHierarchy.length, 9, "Should have 9 items");
+    finishUp();
+  });
+}
+
+function finishUp() {
+  inspector.toolbox.highlighterUtils.stopPicker().then(() => {
+    doc = div1 = div2 = iframe1 = iframe2 = inspector = null;
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    gDevTools.closeToolbox(target);
+    gBrowser.removeCurrentTab();
+    finish();
+  });
 }
 
 function test() {
@@ -89,11 +110,4 @@ function test() {
   }, true);
 
   content.location = "data:text/html,iframe tests for inspector";
-
-  registerCleanupFunction(function () {
-    let target = TargetFactory.forTab(gBrowser.selectedTab);
-    gDevTools.closeToolbox(target);
-    gBrowser.removeCurrentTab();
-  });
 }
-

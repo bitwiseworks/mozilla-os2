@@ -9,7 +9,8 @@
  * hold all information required to recreate the document from history
  * 
  */
-#include "nsIHistoryEntry.idl"
+
+#include "nsISupports.idl"
 
 interface nsILayoutHistoryState;
 interface nsIContentViewer;
@@ -29,9 +30,34 @@ class nsSHEntryShared;
 [ptr] native nsDocShellEditorDataPtr(nsDocShellEditorData);
 [ptr] native nsSHEntryShared(nsSHEntryShared);
 
-[scriptable, uuid(6443FD72-A50F-4B8B-BB82-BB1FA04CB15D)]
-interface nsISHEntry : nsIHistoryEntry
+[scriptable, uuid(9eed7e92-1121-46f2-95e5-2f5c0dca46f0)]
+interface nsISHEntry : nsISupports
 {
+    /**
+     * A readonly property that returns the URI
+     * of the current entry. The object returned is
+     * of type nsIURI
+     */
+    readonly attribute nsIURI URI;
+
+    /**
+     * A readonly property that returns the title
+     * of the current entry.  The object returned
+     * is a encoded string
+     */
+    readonly attribute wstring title;
+
+    /**
+     * A readonly property that returns a boolean
+     * flag which indicates if the entry was created as a
+     * result of a subframe navigation. This flag will be
+     * 'false' when a frameset page is visited for
+     * the first time. This flag will be 'true' for all
+     * history entries created as a result of a subframe
+     * navigation.
+     */
+    readonly attribute boolean isSubFrame;
+
     /** URI for the document */
     void setURI(in nsIURI aURI);
 
@@ -237,6 +263,27 @@ interface nsISHEntry : nsIHistoryEntry
      * it's preceeded by a call to adoptBFCacheEntry(aEntry).
      */
     boolean sharesDocumentWith(in nsISHEntry aEntry);
+
+    /**
+     * True if this SHEntry corresponds to a document created by a srcdoc iframe.
+     * Set when a value is assigned to  srcdocData.
+     */
+    readonly attribute boolean isSrcdocEntry;
+
+    /**
+     * Contents of the srcdoc attribute in a srcdoc iframe to be loaded instead
+     * of the URI.  Similar to a Data URI, this information is needed to
+     * recreate the document at a later stage.
+     * Setting this sets isSrcdocEntry to true
+     */
+    attribute AString srcdocData;
+
+    /**
+     * When isSrcdocEntry is true, this contains the baseURI of the srcdoc
+     * document for use in situations where it cannot otherwise be determined,
+     * for example with view-source.
+     */
+    attribute nsIURI baseURI;
 };
 
 [scriptable, uuid(bb66ac35-253b-471f-a317-3ece940f04c5)]

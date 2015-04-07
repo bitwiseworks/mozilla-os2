@@ -60,6 +60,16 @@ other_features[] =
   HB_TAG('p','s','t','s'),
   /* Positioning features, though we don't care about the types. */
   HB_TAG('d','i','s','t'),
+  /* Pre-release version of Windows 8 Myanmar font had abvm,blwm
+   * features.  The released Windows 8 version of the font (as well
+   * as the released spec) used 'mark' instead.  The Windows 8
+   * shaper however didn't apply 'mark' but did apply 'mkmk'.
+   * Perhaps it applied abvm/blwm.  This was fixed in a Windows 8
+   * update, so now it applies mark/mkmk.  We are guessing that
+   * it still applies abvm/blwm too.
+   */
+  HB_TAG('a','b','v','m'),
+  HB_TAG('b','l','w','m'),
 };
 
 static void
@@ -104,22 +114,12 @@ static void
 override_features_myanmar (hb_ot_shape_planner_t *plan)
 {
   plan->map.add_feature (HB_TAG('l','i','g','a'), 0, F_GLOBAL);
-
-  /*
-   * Note:
-   *
-   * Spec says 'mark' is used, and the mmrtext.ttf font from
-   * Windows 8 has lookups for it.  But testing suggests that
-   * Windows 8 Uniscribe is NOT applying it.  It *is* applying
-   * 'mkmk' however.
-   */
-  if (hb_options ().uniscribe_bug_compatible)
-    plan->map.add_feature (HB_TAG('m','a','r','k'), 0, F_GLOBAL);
 }
 
 
 enum syllable_type_t {
   consonant_syllable,
+  punctuation_cluster,
   broken_cluster,
   non_myanmar_cluster,
 };
@@ -144,7 +144,8 @@ enum myanmar_category_t {
   OT_VBlw = 27,
   OT_VPre = 28,
   OT_VPst = 29,
-  OT_VS   = 30 /* Variation selectors */
+  OT_VS   = 30, /* Variation selectors */
+  OT_P    = 31  /* Punctuation */
 };
 
 
@@ -152,7 +153,7 @@ static inline bool
 is_one_of (const hb_glyph_info_t &info, unsigned int flags)
 {
   /* If it ligated, all bets are off. */
-  if (is_a_ligature (info)) return false;
+  if (_hb_glyph_info_ligated (&info)) return false;
   return !!(FLAG (info.myanmar_category()) & flags);
 }
 
@@ -187,6 +188,10 @@ set_myanmar_properties (hb_glyph_info_t &info)
 
   switch (u)
   {
+    case 0x104E:
+      cat = (indic_category_t) OT_C; /* The spec says C, IndicSyllableCategory doesn't have. */
+      break;
+
     case 0x002D: case 0x00A0: case 0x00D7: case 0x2012:
     case 0x2013: case 0x2014: case 0x2015: case 0x2022:
     case 0x25CC: case 0x25FB: case 0x25FC: case 0x25FD:
@@ -243,6 +248,10 @@ set_myanmar_properties (hb_glyph_info_t &info)
     case 0x108A: case 0x108B: case 0x108C: case 0x108D:
     case 0x108F: case 0x109A: case 0x109B: case 0x109C:
       cat = (indic_category_t) OT_SM;
+      break;
+
+    case 0x104A: case 0x104B:
+      cat = (indic_category_t) OT_P;
       break;
   }
 
@@ -407,6 +416,16 @@ initial_reordering_broken_cluster (const hb_ot_shape_plan_t *plan,
 }
 
 static void
+initial_reordering_punctuation_cluster (const hb_ot_shape_plan_t *plan HB_UNUSED,
+					hb_face_t *face HB_UNUSED,
+					hb_buffer_t *buffer HB_UNUSED,
+					unsigned int start HB_UNUSED, unsigned int end HB_UNUSED)
+{
+  /* Nothing to do right now.  If we ever switch to using the output
+   * buffer in the reordering process, we'd need to next_glyph() here. */
+}
+
+static void
 initial_reordering_non_myanmar_cluster (const hb_ot_shape_plan_t *plan HB_UNUSED,
 					hb_face_t *face HB_UNUSED,
 					hb_buffer_t *buffer HB_UNUSED,
@@ -426,6 +445,7 @@ initial_reordering_syllable (const hb_ot_shape_plan_t *plan,
   syllable_type_t syllable_type = (syllable_type_t) (buffer->info[start].syllable() & 0x0F);
   switch (syllable_type) {
   case consonant_syllable:	initial_reordering_consonant_syllable  (plan, face, buffer, start, end); return;
+  case punctuation_cluster:	initial_reordering_punctuation_cluster (plan, face, buffer, start, end); return;
   case broken_cluster:		initial_reordering_broken_cluster      (plan, face, buffer, start, end); return;
   case non_myanmar_cluster:	initial_reordering_non_myanmar_cluster (plan, face, buffer, start, end); return;
   }
@@ -521,13 +541,6 @@ final_reordering (const hb_ot_shape_plan_t *plan,
 }
 
 
-static hb_ot_shape_normalization_mode_t
-normalization_preference_myanmar (const hb_segment_properties_t *props HB_UNUSED)
-{
-  return HB_OT_SHAPE_NORMALIZATION_MODE_COMPOSED_DIACRITICS_NO_SHORT_CIRCUIT;
-}
-
-
 const hb_ot_complex_shaper_t _hb_ot_complex_shaper_myanmar =
 {
   "myanmar",
@@ -536,7 +549,7 @@ const hb_ot_complex_shaper_t _hb_ot_complex_shaper_myanmar =
   NULL, /* data_create */
   NULL, /* data_destroy */
   NULL, /* preprocess_text */
-  normalization_preference_myanmar,
+  HB_OT_SHAPE_NORMALIZATION_MODE_COMPOSED_DIACRITICS_NO_SHORT_CIRCUIT,
   NULL, /* decompose */
   NULL, /* compose */
   setup_masks_myanmar,

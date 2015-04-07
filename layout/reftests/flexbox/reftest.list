@@ -9,17 +9,8 @@
 # tests over to the w3c-css directory, so that they can become part of the
 # W3C's test suite.
 
-# Tests for flexbox pref "layout.css.flexbox.enabled"
-# (Note that it defaults to being off in release builds - see bug 841876)
-# Check that manually setting the pref on/off w/ test-pref() works correctly:
-test-pref(layout.css.flexbox.enabled,false) == flexbox-pref-1.xhtml flexbox-pref-1-disabled-ref.xhtml
-test-pref(layout.css.flexbox.enabled,true) == flexbox-pref-1.xhtml flexbox-pref-1-enabled-ref.xhtml
-
-# Enable pref for remaining tests
-# (Most tests only need it in the testcase, but a few use it in the
-# reference case, so we'll just enable it using "pref()" to make
-# it available for both.)
-default-preferences pref(layout.css.flexbox.enabled,true)
+# SUBDIRECTORY: Reftests for paginated flex containers
+include pagination/reftest.list
 
 # Tests for cross-axis alignment (align-self / align-items properties)
 fails == flexbox-align-self-baseline-horiz-2.xhtml  flexbox-align-self-baseline-horiz-2-ref.xhtml # bug 793456, and possibly others
@@ -56,6 +47,14 @@ fuzzy-if(B2G,10,3) random-if(winWidget) == flexbox-align-self-baseline-horiz-3.x
 # fail until bug 794660 is fixed:
 == flexbox-basic-video-vert-2.xhtml flexbox-basic-video-vert-2-ref.xhtml
 
+# Tests for box-sizing on flex containers and flex items.
+== flexbox-box-sizing-on-container-horiz-1.html flexbox-box-sizing-on-container-horiz-1-ref.html
+== flexbox-box-sizing-on-container-vert-1.html flexbox-box-sizing-on-container-vert-1-ref.html
+== flexbox-box-sizing-on-items-horiz-1a.html flexbox-box-sizing-on-items-horiz-1-ref.html
+== flexbox-box-sizing-on-items-horiz-1b.html flexbox-box-sizing-on-items-horiz-1-ref.html
+== flexbox-box-sizing-on-items-vert-1a.html flexbox-box-sizing-on-items-vert-1-ref.html
+== flexbox-box-sizing-on-items-vert-1b.html flexbox-box-sizing-on-items-vert-1-ref.html
+
 # Tests for dynamic modifications of content inside/around a flex container
 == flexbox-dyn-changeFrameWidth-1.xhtml flexbox-dyn-changeFrameWidth-1-ref.xhtml
 == flexbox-dyn-changeFrameWidth-2.xhtml flexbox-dyn-changeFrameWidth-2-ref.xhtml
@@ -68,11 +67,11 @@ fuzzy-if(B2G,10,3) random-if(winWidget) == flexbox-align-self-baseline-horiz-3.x
 # (with existing [div | span | text] inside the flexbox, and new content
 # inserted adjacent to that existing content.)
 == flexbox-dyn-insertAroundDiv-1.xhtml flexbox-dyn-insertAroundDiv-1-ref.xhtml
-fuzzy-if(d2d&&layersGPUAccelerated,24,14) == flexbox-dyn-insertAroundDiv-2.xhtml flexbox-dyn-insertAroundDiv-2-ref.xhtml # bug 849692
+== flexbox-dyn-insertAroundDiv-2.xhtml flexbox-dyn-insertAroundDiv-2-ref.xhtml
 == flexbox-dyn-insertAroundDiv-3.xhtml flexbox-dyn-insertAroundDiv-3-ref.xhtml
 
 == flexbox-dyn-insertAroundSpan-1.xhtml flexbox-dyn-insertAroundDiv-1-ref.xhtml
-fuzzy-if(d2d&&layersGPUAccelerated,24,14) == flexbox-dyn-insertAroundSpan-2.xhtml flexbox-dyn-insertAroundDiv-2-ref.xhtml # bug 849692
+== flexbox-dyn-insertAroundSpan-2.xhtml flexbox-dyn-insertAroundDiv-2-ref.xhtml
 == flexbox-dyn-insertAroundSpan-3.xhtml flexbox-dyn-insertAroundDiv-3-ref.xhtml
 
 == flexbox-dyn-insertAroundText-1.xhtml flexbox-dyn-insertAroundText-1-ref.xhtml
@@ -107,8 +106,8 @@ fails == flexbox-paint-ordering-3.html  flexbox-paint-ordering-3-ref.html # bug 
 == flexbox-position-absolute-3.xhtml  flexbox-position-absolute-3-ref.xhtml
 == flexbox-position-absolute-4.xhtml  flexbox-position-absolute-4-ref.xhtml
 == flexbox-position-fixed-3.xhtml     flexbox-position-fixed-3-ref.xhtml
-== flexbox-position-fixed-1.xhtml     flexbox-position-fixed-1-ref.xhtml
-== flexbox-position-fixed-2.xhtml     flexbox-position-fixed-2-ref.xhtml
+fuzzy-if(Android&&AndroidVersion>=15,16,400) == flexbox-position-fixed-1.xhtml     flexbox-position-fixed-1-ref.xhtml
+fuzzy-if(Android&&AndroidVersion>=15,16,400) == flexbox-position-fixed-2.xhtml     flexbox-position-fixed-2-ref.xhtml
 == flexbox-position-fixed-3.xhtml     flexbox-position-fixed-3-ref.xhtml
 == flexbox-position-fixed-4.xhtml     flexbox-position-fixed-4-ref.xhtml
 
@@ -133,6 +132,9 @@ fails == flexbox-inlinecontent-horiz-1b.xhtml flexbox-inlinecontent-horiz-1-ref.
 
 # Tests for flexbox in an iframe that gets resized.
 skip-if(B2G) == flexbox-resizeviewport-1.xhtml flexbox-resizeviewport-1-ref.xhtml
+
+# Tests for flexbox styling on things that don't support it
+== flexbox-styling-on-svg-1.svg flexbox-styling-on-svg-1-ref.svg
 
 # Tests with widgets as flex items
 fuzzy-if(gtk2Widget,1,66) == flexbox-widget-flex-items-1.html flexbox-widget-flex-items-1-ref.html

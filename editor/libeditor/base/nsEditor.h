@@ -58,21 +58,22 @@ class nsIEditorObserver;
 class nsIInlineSpellChecker;
 class nsINode;
 class nsIPresShell;
-class nsIPrivateTextRangeList;
 class nsISelection;
 class nsISupports;
 class nsITransaction;
 class nsIWidget;
-class nsKeyEvent;
 class nsRange;
 class nsString;
 class nsTransactionManager;
 
 namespace mozilla {
-class Selection;
+class TextComposition;
 
 namespace dom {
+class DataTransfer;
 class Element;
+class EventTarget;
+class Selection;
 }  // namespace dom
 }  // namespace mozilla
 
@@ -170,6 +171,7 @@ public:
   already_AddRefed<nsIDOMDocument> GetDOMDocument();
   already_AddRefed<nsIDocument> GetDocument();
   already_AddRefed<nsIPresShell> GetPresShell();
+  already_AddRefed<nsIWidget> GetWidget();
   void NotifyEditorObservers();
 
   /* ------------ nsIEditor methods -------------- */
@@ -186,7 +188,6 @@ public:
 
 public:
 
-  nsresult MarkNodeDirty(nsINode* aNode);
   virtual bool IsModifiableNode(nsINode *aNode);
 
   NS_IMETHOD InsertTextImpl(const nsAString& aStringToInsert, 
@@ -230,7 +231,7 @@ public:
                                 const nsAString *aAttribute = nullptr,
                                 const nsAString *aValue = nullptr);
   nsresult JoinNodes(nsINode* aNodeToKeep, nsIContent* aNodeToMove);
-  nsresult MoveNode(nsIContent* aNode, nsINode* aParent, int32_t aOffset);
+  nsresult MoveNode(nsINode* aNode, nsINode* aParent, int32_t aOffset);
   nsresult MoveNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset);
 
   /* Method to replace certain CreateElementNS() calls. 
@@ -242,40 +243,40 @@ public:
                              mozilla::dom::Element** aContent);
 
   // IME event handlers
-  virtual nsresult BeginIMEComposition();
-  virtual nsresult UpdateIMEComposition(const nsAString &aCompositionString,
-                                        nsIPrivateTextRangeList *aTextRange)=0;
+  virtual nsresult BeginIMEComposition(mozilla::WidgetCompositionEvent* aEvent);
+  virtual nsresult UpdateIMEComposition(nsIDOMEvent* aDOMTextEvent) = 0;
   void EndIMEComposition();
 
   void SwitchTextDirectionTo(uint32_t aDirection);
 
 protected:
   nsresult DetermineCurrentDirection();
+  void FireInputEvent();
 
   /** create a transaction for setting aAttribute to aValue on aElement
     */
-  NS_IMETHOD CreateTxnForSetAttribute(mozilla::dom::Element *aElement,
-                                      const nsAString &  aAttribute,
+  NS_IMETHOD CreateTxnForSetAttribute(nsIDOMElement *aElement, 
+                                      const nsAString &  aAttribute, 
                                       const nsAString &  aValue,
                                       ChangeAttributeTxn ** aTxn);
 
   /** create a transaction for removing aAttribute on aElement
     */
-  NS_IMETHOD CreateTxnForRemoveAttribute(mozilla::dom::Element *aElement,
+  NS_IMETHOD CreateTxnForRemoveAttribute(nsIDOMElement *aElement, 
                                          const nsAString &  aAttribute,
                                          ChangeAttributeTxn ** aTxn);
 
   /** create a transaction for creating a new child node of aParent of type aTag.
     */
   NS_IMETHOD CreateTxnForCreateElement(const nsAString & aTag,
-                                       nsINode         *aParent,
+                                       nsIDOMNode     *aParent,
                                        int32_t         aPosition,
                                        CreateElementTxn ** aTxn);
 
   /** create a transaction for inserting aNode as a child of aParent.
     */
-  NS_IMETHOD CreateTxnForInsertElement(nsINode    * aNode,
-                                       nsINode    * aParent,
+  NS_IMETHOD CreateTxnForInsertElement(nsIDOMNode * aNode,
+                                       nsIDOMNode * aParent,
                                        int32_t      aOffset,
                                        InsertElementTxn ** aTxn);
 
@@ -333,12 +334,12 @@ protected:
                                        EDirection           aDirection,
                                        DeleteTextTxn**      aTxn);
 	
-  NS_IMETHOD CreateTxnForSplitNode(nsINode *aNode,
+  NS_IMETHOD CreateTxnForSplitNode(nsIDOMNode *aNode,
                                    uint32_t    aOffset,
                                    SplitElementTxn **aTxn);
 
-  NS_IMETHOD CreateTxnForJoinNode(nsINode  *aLeftNode,
-                                  nsINode  *aRightNode,
+  NS_IMETHOD CreateTxnForJoinNode(nsIDOMNode  *aLeftNode,
+                                  nsIDOMNode  *aRightNode,
                                   JoinElementTxn **aTxn);
 
   /**
@@ -405,14 +406,19 @@ protected:
    */
   bool GetDesiredSpellCheckState();
 
-  nsKeyEvent* GetNativeKeyEvent(nsIDOMKeyEvent* aDOMKeyEvent);
-
   bool CanEnableSpellCheck()
   {
     // Check for password/readonly/disabled, which are not spellchecked
     // regardless of DOM. Also, check to see if spell check should be skipped or not.
     return !IsPasswordEditor() && !IsReadonly() && !IsDisabled() && !ShouldSkipSpellCheck();
   }
+
+  /**
+   * EnsureComposition() should be composition event handlers or text event
+   * handler.  This tries to get the composition for the event and set it to
+   * mComposition.
+   */
+  void EnsureComposition(mozilla::WidgetGUIEvent* aEvent);
 
 public:
 
@@ -428,7 +434,7 @@ public:
   /** routines for managing the preservation of selection across 
    *  various editor actions */
   bool     ArePreservingSelection();
-  void     PreserveSelectionAcrossActions(mozilla::Selection* aSel);
+  void     PreserveSelectionAcrossActions(mozilla::dom::Selection* aSel);
   nsresult RestorePreservedSelection(nsISelection *aSel);
   void     StopPreservingSelection();
 
@@ -450,13 +456,10 @@ public:
    * @param aNodeToJoin   The node that will be joined with aNodeToKeep.
    *                      There is no requirement that the two nodes be of the same type.
    * @param aParent       The parent of aNodeToKeep
-   * @param aNodeToKeepIsFirst  if true, the contents|children of aNodeToKeep come before the
-   *                            contents|children of aNodeToJoin, otherwise their positions are switched.
    */
-  nsresult JoinNodesImpl(nsIDOMNode *aNodeToKeep,
-                         nsIDOMNode *aNodeToJoin,
-                         nsIDOMNode *aParent,
-                         bool        aNodeToKeepIsFirst);
+  nsresult JoinNodesImpl(nsINode* aNodeToKeep,
+                         nsINode* aNodeToJoin,
+                         nsINode* aParent);
 
   /**
    * Return the offset of aChild in aParent.  Asserts fatally if parent or
@@ -471,6 +474,7 @@ public:
    */
   static already_AddRefed<nsIDOMNode> GetNodeLocation(nsIDOMNode* aChild,
                                                       int32_t* outOffset);
+  static nsINode* GetNodeLocation(nsINode* aChild, int32_t* aOffset);
 
   /** returns the number of things inside aNode in the out-param aCount.  
     * @param  aNode is the node to get the length of.  
@@ -595,9 +599,14 @@ public:
   /** Find the deep first and last children. */
   nsINode* GetFirstEditableNode(nsINode* aRoot);
 
-  int32_t GetIMEBufferLength();
-  bool IsIMEComposing();    /* test if IME is in composition state */
-  void SetIsIMEComposing(); /* call this before |IsIMEComposing()| */
+  /**
+   * Returns current composition.
+   */
+  mozilla::TextComposition* GetComposition() const;
+  /**
+   * Returns true if there is composition string and not fixed.
+   */
+  bool IsIMEComposing() const;
 
   /** from html rules code - migration in progress */
   static nsresult GetTagString(nsIDOMNode *aNode, nsAString& outString);
@@ -613,11 +622,17 @@ public:
   static nsCOMPtr<nsIDOMNode> GetNodeAtRangeOffsetPoint(nsIDOMNode* aParentOrNode, int32_t aOffset);
 
   static nsresult GetStartNodeAndOffset(nsISelection *aSelection, nsIDOMNode **outStartNode, int32_t *outStartOffset);
+  static nsresult GetStartNodeAndOffset(mozilla::dom::Selection* aSelection,
+                                        nsINode** aStartNode,
+                                        int32_t* aStartOffset);
   static nsresult GetEndNodeAndOffset(nsISelection *aSelection, nsIDOMNode **outEndNode, int32_t *outEndOffset);
+  static nsresult GetEndNodeAndOffset(mozilla::dom::Selection* aSelection,
+                                      nsINode** aEndNode,
+                                      int32_t* aEndOffset);
 #if DEBUG_JOE
   static void DumpNode(nsIDOMNode *aNode, int32_t indent=0);
 #endif
-  mozilla::Selection* GetSelection();
+  mozilla::dom::Selection* GetSelection();
 
   // Helpers to add a node to the selection. 
   // Used by table cell selection methods
@@ -659,7 +674,7 @@ public:
                                     nsIDOMNode *aEndNode,
                                     int32_t aEndOffset);
 
-  virtual already_AddRefed<nsIDOMEventTarget> GetDOMEventTarget() = 0;
+  virtual already_AddRefed<mozilla::dom::EventTarget> GetDOMEventTarget() = 0;
 
   // Fast non-refcounting editor root element accessor
   mozilla::dom::Element *GetRoot();
@@ -667,6 +682,10 @@ public:
   // Likewise, but gets the editor's root instead, which is different for HTML
   // editors
   virtual mozilla::dom::Element* GetEditorRoot();
+
+  // Likewise, but gets the text control element instead of the root for
+  // plaintext editors
+  mozilla::dom::Element* GetExposedRoot();
 
   // Accessor methods to flags
   bool IsPlaintextEditor() const
@@ -751,7 +770,7 @@ public:
   // Get the focused content, if we're focused.  Returns null otherwise.
   virtual already_AddRefed<nsIContent> GetFocusedContent();
 
-  // Get the focused content for the argument of some nsIMEStateManager's
+  // Get the focused content for the argument of some IMEStateManager's
   // methods.
   virtual already_AddRefed<nsIContent> GetFocusedContentForIME();
 
@@ -789,7 +808,7 @@ public:
   // Used to insert content from a data transfer into the editable area.
   // This is called for each item in the data transfer, with the index of
   // each item passed as aIndex.
-  virtual nsresult InsertFromDataTransfer(nsIDOMDataTransfer *aDataTransfer,
+  virtual nsresult InsertFromDataTransfer(mozilla::dom::DataTransfer *aDataTransfer,
                                           int32_t aIndex,
                                           nsIDOMDocument *aSourceDoc,
                                           nsIDOMNode *aDestinationNode,
@@ -813,9 +832,8 @@ protected:
 
   nsRefPtr<nsTransactionManager> mTxnMgr;
   nsCOMPtr<mozilla::dom::Element> mRootElement; // cached root node
-  nsCOMPtr<nsIPrivateTextRangeList> mIMETextRangeList; // IME special selection ranges
   nsCOMPtr<nsIDOMCharacterData>     mIMETextNode;      // current IME text node
-  nsCOMPtr<nsIDOMEventTarget> mEventTarget; // The form field as an event receiver
+  nsCOMPtr<mozilla::dom::EventTarget> mEventTarget; // The form field as an event receiver
   nsCOMPtr<nsIDOMEventListener> mEventListener;
   nsWeakPtr        mSelConWeak;          // weak reference to the nsISelectionController
   nsWeakPtr        mPlaceHolderTxn;      // weak reference to placeholder for begin/end batch purposes
@@ -823,6 +841,9 @@ protected:
   nsIAtom          *mPlaceHolderName;    // name of placeholder transaction
   nsSelectionState *mSelState;           // saved selection state for placeholder txn batching
   nsString         *mPhonetic;
+  // IME composition this is not null between compositionstart and
+  // compositionend.
+  nsRefPtr<mozilla::TextComposition> mComposition;
 
   // various listeners
   nsCOMArray<nsIEditActionListener> mActionListeners;  // listens to all low level actions on the doc
@@ -841,15 +862,10 @@ protected:
   EditAction        mAction;             // the current editor action
 
   uint32_t          mIMETextOffset;    // offset in text node where IME comp string begins
-  uint32_t          mIMEBufferLength;  // current length of IME comp string
 
   EDirection        mDirection;          // the current direction of editor action
   int8_t            mDocDirtyState;      // -1 = not initialized
   uint8_t           mSpellcheckCheckboxState; // a Tristate value
-
-  bool mInIMEMode;        // are we inside an IME composition?
-  bool mIsIMEComposing;   // is IME in composition state?
-                                                       // This is different from mInIMEMode. see Bug 98434.
 
   bool mShouldTxnSetSelection;  // turn off for conservative selection adjustment by txns
   bool mDidPreDestroy;    // whether PreDestroy has been called

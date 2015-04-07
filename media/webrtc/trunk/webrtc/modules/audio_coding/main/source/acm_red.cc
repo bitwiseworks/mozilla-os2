@@ -10,7 +10,7 @@
 
 #include "webrtc/modules/audio_coding/main/source/acm_red.h"
 
-#include "webrtc/modules/audio_coding/main/source/acm_common_defs.h"
+#include "webrtc/modules/audio_coding/main/acm2/acm_common_defs.h"
 #include "webrtc/modules/audio_coding/main/source/acm_neteq.h"
 #include "webrtc/modules/audio_coding/neteq/interface/webrtc_neteq.h"
 #include "webrtc/modules/audio_coding/neteq/interface/webrtc_neteq_help_macros.h"
@@ -18,7 +18,9 @@
 
 namespace webrtc {
 
-ACMRED::ACMRED(WebRtc_Word16 codec_id) {
+namespace acm1 {
+
+ACMRED::ACMRED(int16_t codec_id) {
   codec_id_ = codec_id;
 }
 
@@ -26,37 +28,37 @@ ACMRED::~ACMRED() {
   return;
 }
 
-WebRtc_Word16 ACMRED::InternalEncode(WebRtc_UWord8* /* bitstream */,
-                                     WebRtc_Word16* /* bitstream_len_byte */) {
+int16_t ACMRED::InternalEncode(uint8_t* /* bitstream */,
+                               int16_t* /* bitstream_len_byte */) {
   // RED is never used as an encoder
   // RED has no instance
   return 0;
 }
 
-WebRtc_Word16 ACMRED::DecodeSafe(WebRtc_UWord8* /* bitstream */,
-                                 WebRtc_Word16 /* bitstream_len_byte */,
-                                 WebRtc_Word16* /* audio */,
-                                 WebRtc_Word16* /* audio_samples */,
-                                 WebRtc_Word8* /* speech_type */) {
+int16_t ACMRED::DecodeSafe(uint8_t* /* bitstream */,
+                           int16_t /* bitstream_len_byte */,
+                           int16_t* /* audio */,
+                           int16_t* /* audio_samples */,
+                           int8_t* /* speech_type */) {
   return 0;
 }
 
-WebRtc_Word16 ACMRED::InternalInitEncoder(
+int16_t ACMRED::InternalInitEncoder(
     WebRtcACMCodecParams* /* codec_params */) {
   // This codec does not need initialization,
   // RED has no instance
   return 0;
 }
 
-WebRtc_Word16 ACMRED::InternalInitDecoder(
+int16_t ACMRED::InternalInitDecoder(
     WebRtcACMCodecParams* /* codec_params */) {
   // This codec does not need initialization,
   // RED has no instance
   return 0;
 }
 
-WebRtc_Word32 ACMRED::CodecDef(WebRtcNetEQ_CodecDef& codec_def,
-                               const CodecInst& codec_inst) {
+int32_t ACMRED::CodecDef(WebRtcNetEQ_CodecDef& codec_def,
+                         const CodecInst& codec_inst) {
   if (!decoder_initialized_) {
     // Todo:
     // log error
@@ -76,12 +78,12 @@ ACMGenericCodec* ACMRED::CreateInstance(void) {
   return NULL;
 }
 
-WebRtc_Word16 ACMRED::InternalCreateEncoder() {
+int16_t ACMRED::InternalCreateEncoder() {
   // RED has no instance
   return 0;
 }
 
-WebRtc_Word16 ACMRED::InternalCreateDecoder() {
+int16_t ACMRED::InternalCreateDecoder() {
   // RED has no instance
   return 0;
 }
@@ -100,5 +102,7 @@ void ACMRED::DestructDecoderSafe() {
   // RED has no instance
   return;
 }
+
+}  // namespace acm1
 
 }  // namespace webrtc

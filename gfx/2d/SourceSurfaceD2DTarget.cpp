@@ -54,7 +54,7 @@ TemporaryRef<DataSourceSurface>
 SourceSurfaceD2DTarget::GetDataSurface()
 {
   RefPtr<DataSourceSurfaceD2DTarget> dataSurf =
-    new DataSourceSurfaceD2DTarget();
+    new DataSourceSurfaceD2DTarget(mFormat);
 
   D3D10_TEXTURE2D_DESC desc;
   mTexture->GetDesc(&desc);
@@ -73,6 +73,15 @@ SourceSurfaceD2DTarget::GetDataSurface()
   Factory::GetDirect3D10Device()->CopyResource(dataSurf->mTexture, mTexture);
 
   return dataSurf;
+}
+
+void*
+SourceSurfaceD2DTarget::GetNativeSurface(NativeSurfaceType aType)
+{
+  if (aType == NativeSurfaceType::D3D10_TEXTURE) {
+    return static_cast<void*>(mTexture.get());
+  }
+  return nullptr;
 }
 
 ID3D10ShaderResourceView*
@@ -138,16 +147,19 @@ SourceSurfaceD2DTarget::GetBitmap(ID2D1RenderTarget *aRT)
     return nullptr;
   }
 
-  D2D1_BITMAP_PROPERTIES props =
-    D2D1::BitmapProperties(D2D1::PixelFormat(DXGIFormat(mFormat), AlphaMode(mFormat)));
+  D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(D2DPixelFormat(mFormat));
   hr = aRT->CreateSharedBitmap(IID_IDXGISurface, surf, &props, byRef(mBitmap));
 
   if (FAILED(hr)) {
-    // This seems to happen for FORMAT_A8 sometimes...
-    aRT->CreateBitmap(D2D1::SizeU(desc.Width, desc.Height),
-                      D2D1::BitmapProperties(D2D1::PixelFormat(DXGIFormat(mFormat),
-                                             AlphaMode(mFormat))),
-                      byRef(mBitmap));
+    // This seems to happen for SurfaceFormat::A8 sometimes...
+    hr = aRT->CreateBitmap(D2D1::SizeU(desc.Width, desc.Height),
+                           D2D1::BitmapProperties(D2DPixelFormat(mFormat)),
+                           byRef(mBitmap));
+
+    if (FAILED(hr)) {
+      gfxWarning() << "Failed in CreateBitmap. Code: " << hr;
+      return nullptr;
+    }
 
     RefPtr<ID2D1RenderTarget> rt;
 
@@ -169,7 +181,7 @@ SourceSurfaceD2DTarget::GetBitmap(ID2D1RenderTarget *aRT)
       }
 
       D2D1_RENDER_TARGET_PROPERTIES props =
-        D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGIFormat(mFormat), AlphaMode(mFormat)));
+        D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2DPixelFormat(mFormat));
       hr = DrawTargetD2D::factory()->CreateDxgiSurfaceRenderTarget(surface, props, byRef(rt));
 
       if (FAILED(hr)) {
@@ -195,8 +207,8 @@ SourceSurfaceD2DTarget::MarkIndependent()
   }
 }
 
-DataSourceSurfaceD2DTarget::DataSourceSurfaceD2DTarget()
-  : mFormat(FORMAT_B8G8R8A8)
+DataSourceSurfaceD2DTarget::DataSourceSurfaceD2DTarget(SurfaceFormat aFormat)
+  : mFormat(aFormat)
   , mMapped(false)
 {
 }
@@ -238,9 +250,57 @@ DataSourceSurfaceD2DTarget::Stride()
   return mMap.RowPitch;
 }
 
+bool
+DataSourceSurfaceD2DTarget::Map(MapType aMapType, MappedSurface *aMappedSurface)
+{
+  // DataSourceSurfaces used with the new Map API should not be used with GetData!!
+  MOZ_ASSERT(!mMapped);
+  MOZ_ASSERT(!mIsMapped);
+
+  if (!mTexture) {
+    return false;
+  }
+
+  D3D10_MAP mapType;
+
+  if (aMapType == MapType::READ) {
+    mapType = D3D10_MAP_READ;
+  } else if (aMapType == MapType::WRITE) {
+    mapType = D3D10_MAP_WRITE;
+  } else {
+    mapType = D3D10_MAP_READ_WRITE;
+  }
+
+  D3D10_MAPPED_TEXTURE2D map;
+
+  HRESULT hr = mTexture->Map(0, mapType, 0, &map);
+
+  if (FAILED(hr)) {
+    gfxWarning() << "Texture map failed with code: " << hr;
+    return false;
+  }
+
+  aMappedSurface->mData = (uint8_t*)map.pData;
+  aMappedSurface->mStride = map.RowPitch;
+  mIsMapped = true;
+
+  return true;
+}
+
+void
+DataSourceSurfaceD2DTarget::Unmap()
+{
+  MOZ_ASSERT(mIsMapped);
+
+  mIsMapped = false;
+  mTexture->Unmap(0);
+}
+
 void
 DataSourceSurfaceD2DTarget::EnsureMapped()
 {
+  // Do not use GetData() after having used Map!
+  MOZ_ASSERT(!mIsMapped);
   if (!mMapped) {
     HRESULT hr = mTexture->Map(0, D3D10_MAP_READ, 0, &mMap);
     if (FAILED(hr)) {

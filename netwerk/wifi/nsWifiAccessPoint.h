@@ -7,6 +7,7 @@
 
 #include "nsString.h"
 #include "nsCOMArray.h"
+#include "mozilla/ArrayUtils.h" // ArrayLength
 #include "mozilla/Attributes.h"
 
 #ifndef __nsWifiAccessPoint__
@@ -15,7 +16,7 @@
 class nsWifiAccessPoint MOZ_FINAL : public nsIWifiAccessPoint
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIWIFIACCESSPOINT
 
   nsWifiAccessPoint();

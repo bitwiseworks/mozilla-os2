@@ -2,10 +2,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-__all__ = ['check_for_crashes']
+__all__ = ['check_for_crashes',
+           'check_for_java_exception']
 
 import glob
-import mozlog
 import os
 import re
 import shutil
@@ -15,8 +15,9 @@ import tempfile
 import urllib2
 import zipfile
 
-from mozfile import extract_zip
-from mozfile import is_url
+import mozfile
+import mozlog
+
 
 def check_for_crashes(dump_directory, symbols_path,
                       stackwalk_binary=None,
@@ -69,7 +70,7 @@ def check_for_crashes(dump_directory, symbols_path,
         remove_symbols = False
         # If our symbols are at a remote URL, download them now
         # We want to download URLs like http://... but not Windows paths like c:\...
-        if symbols_path and is_url(symbols_path):
+        if symbols_path and mozfile.is_url(symbols_path):
             log.info("Downloading symbols from: %s", symbols_path)
             remove_symbols = True
             # Get the symbols and write them to a temporary zipfile
@@ -80,10 +81,12 @@ def check_for_crashes(dump_directory, symbols_path,
             # processing all crashes)
             symbols_path = tempfile.mkdtemp()
             zfile = zipfile.ZipFile(symbols_file, 'r')
-            extract_zip(zfile, symbols_path)
+            mozfile.extract_zip(zfile, symbols_path)
             zfile.close()
 
         for d in dumps:
+            extra = os.path.splitext(d)[0] + '.extra'
+
             stackwalk_output = []
             stackwalk_output.append("Crash dump filename: " + d)
             top_frame = None
@@ -139,16 +142,65 @@ def check_for_crashes(dump_directory, symbols_path,
                         os.makedirs(dump_save_path)
                     except OSError:
                         pass
+
                 shutil.move(d, dump_save_path)
-                log.info("Saved dump as %s", os.path.join(dump_save_path,
-                                                          os.path.basename(d)))
+                log.info("Saved minidump as %s",
+                         os.path.join(dump_save_path, os.path.basename(d)))
+
+                if os.path.isfile(extra):
+                    shutil.move(extra, dump_save_path)
+                    log.info("Saved app info as %s",
+                             os.path.join(dump_save_path, os.path.basename(extra)))
             else:
-                os.remove(d)
-            extra = os.path.splitext(d)[0] + ".extra"
-            if os.path.exists(extra):
-                os.remove(extra)
+                mozfile.remove(d)
+                mozfile.remove(extra)
     finally:
         if remove_symbols:
-            shutil.rmtree(symbols_path)
+            mozfile.remove(symbols_path)
 
     return True
+
+
+def check_for_java_exception(logcat, quiet=False):
+    """
+    Print a summary of a fatal Java exception, if present in the provided
+    logcat output.
+
+    Example:
+    PROCESS-CRASH | java-exception | java.lang.NullPointerException at org.mozilla.gecko.GeckoApp$21.run(GeckoApp.java:1833)
+
+    `logcat` should be a list of strings.
+
+    If `quiet` is set, no PROCESS-CRASH message will be printed to stdout if a
+    crash is detected.
+
+    Returns True if a fatal Java exception was found, False otherwise.
+    """
+    found_exception = False
+
+    for i, line in enumerate(logcat):
+        # Logs will be of form:
+        #
+        # 01-30 20:15:41.937 E/GeckoAppShell( 1703): >>> REPORTING UNCAUGHT EXCEPTION FROM THREAD 9 ("GeckoBackgroundThread")
+        # 01-30 20:15:41.937 E/GeckoAppShell( 1703): java.lang.NullPointerException
+        # 01-30 20:15:41.937 E/GeckoAppShell( 1703): 	at org.mozilla.gecko.GeckoApp$21.run(GeckoApp.java:1833)
+        # 01-30 20:15:41.937 E/GeckoAppShell( 1703): 	at android.os.Handler.handleCallback(Handler.java:587)
+        if "REPORTING UNCAUGHT EXCEPTION" in line or "FATAL EXCEPTION" in line:
+            # Strip away the date, time, logcat tag and pid from the next two lines and
+            # concatenate the remainder to form a concise summary of the exception.
+            found_exception = True
+            if len(logcat) >= i + 3:
+                logre = re.compile(r".*\): \t?(.*)")
+                m = logre.search(logcat[i+1])
+                if m and m.group(1):
+                    exception_type = m.group(1)
+                m = logre.search(logcat[i+2])
+                if m and m.group(1):
+                    exception_location = m.group(1)
+                if not quiet:
+                    print "PROCESS-CRASH | java-exception | %s %s" % (exception_type, exception_location)
+            else:
+                print "Automation Error: Logcat is truncated!"
+            break
+
+    return found_exception

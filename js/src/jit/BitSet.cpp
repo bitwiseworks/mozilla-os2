@@ -4,30 +4,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jsutil.h"
-#include "BitSet.h"
-
-#include "jsscriptinlines.h"
+#include "jit/BitSet.h"
 
 using namespace js;
 using namespace js::jit;
 
 BitSet *
-BitSet::New(unsigned int max)
+BitSet::New(TempAllocator &alloc, unsigned int numBits)
 {
-    BitSet *result = new BitSet(max);
-    if (!result->init())
-        return NULL;
+    BitSet *result = new(alloc) BitSet(numBits);
+    if (!result->init(alloc))
+        return nullptr;
     return result;
 }
 
 bool
-BitSet::init()
+BitSet::init(TempAllocator &alloc)
 {
     size_t sizeRequired = numWords() * sizeof(*bits_);
 
-    TempAllocator *alloc = GetIonContext()->temp;
-    bits_ = (uint32_t *)alloc->allocate(sizeRequired);
+    bits_ = (uint32_t *)alloc.allocate(sizeRequired);
     if (!bits_)
         return false;
 
@@ -40,8 +36,9 @@ bool
 BitSet::empty() const
 {
     JS_ASSERT(bits_);
-    for (unsigned int i = 0; i < numWords(); i++) {
-        if (bits_[i])
+    const uint32_t *bits = bits_;
+    for (unsigned int i = 0, e = numWords(); i < e; i++) {
+        if (bits[i])
             return false;
     }
     return true;
@@ -51,33 +48,39 @@ void
 BitSet::insertAll(const BitSet *other)
 {
     JS_ASSERT(bits_);
-    JS_ASSERT(other->max_ == max_);
+    JS_ASSERT(other->numBits_ == numBits_);
     JS_ASSERT(other->bits_);
 
-    for (unsigned int i = 0; i < numWords(); i++)
-        bits_[i] |= other->bits_[i];
+    uint32_t *bits = bits_;
+    const uint32_t *otherBits = other->bits_;
+    for (unsigned int i = 0, e = numWords(); i < e; i++)
+        bits[i] |= otherBits[i];
 }
 
 void
 BitSet::removeAll(const BitSet *other)
 {
     JS_ASSERT(bits_);
-    JS_ASSERT(other->max_ == max_);
+    JS_ASSERT(other->numBits_ == numBits_);
     JS_ASSERT(other->bits_);
 
-    for (unsigned int i = 0; i < numWords(); i++)
-        bits_[i] &= ~other->bits_[i];
+    uint32_t *bits = bits_;
+    const uint32_t *otherBits = other->bits_;
+    for (unsigned int i = 0, e = numWords(); i < e; i++)
+        bits[i] &= ~otherBits[i];
 }
 
 void
 BitSet::intersect(const BitSet *other)
 {
     JS_ASSERT(bits_);
-    JS_ASSERT(other->max_ == max_);
+    JS_ASSERT(other->numBits_ == numBits_);
     JS_ASSERT(other->bits_);
 
-    for (unsigned int i = 0; i < numWords(); i++)
-        bits_[i] &= other->bits_[i];
+    uint32_t *bits = bits_;
+    const uint32_t *otherBits = other->bits_;
+    for (unsigned int i = 0, e = numWords(); i < e; i++)
+        bits[i] &= otherBits[i];
 }
 
 // returns true if the intersection caused the contents of the set to change.
@@ -85,16 +88,18 @@ bool
 BitSet::fixedPointIntersect(const BitSet *other)
 {
     JS_ASSERT(bits_);
-    JS_ASSERT(other->max_ == max_);
+    JS_ASSERT(other->numBits_ == numBits_);
     JS_ASSERT(other->bits_);
 
     bool changed = false;
 
-    for (unsigned int i = 0; i < numWords(); i++) {
-        uint32_t old = bits_[i];
-        bits_[i] &= other->bits_[i];
+    uint32_t *bits = bits_;
+    const uint32_t *otherBits = other->bits_;
+    for (unsigned int i = 0, e = numWords(); i < e; i++) {
+        uint32_t old = bits[i];
+        bits[i] &= otherBits[i];
 
-        if (!changed && old != bits_[i])
+        if (!changed && old != bits[i])
             changed = true;
     }
     return changed;
@@ -104,14 +109,16 @@ void
 BitSet::complement()
 {
     JS_ASSERT(bits_);
-    for (unsigned int i = 0; i < numWords(); i++)
-        bits_[i] = ~bits_[i];
+    uint32_t *bits = bits_;
+    for (unsigned int i = 0, e = numWords(); i < e; i++)
+        bits[i] = ~bits[i];
 }
 
 void
 BitSet::clear()
 {
     JS_ASSERT(bits_);
-    for (unsigned int i = 0; i < numWords(); i++)
-        bits_[i] = 0;
+    uint32_t *bits = bits_;
+    for (unsigned int i = 0, e = numWords(); i < e; i++)
+        bits[i] = 0;
 }

@@ -6,20 +6,15 @@
 #ifndef _GFXALPHARECOVERY_H_
 #define _GFXALPHARECOVERY_H_
 
-#include "gfxContext.h"
-#include "gfxImageSurface.h"
 #include "mozilla/SSE.h"
+#include "gfxTypes.h"
 #include "nsRect.h"
+
+struct nsIntRect;
+class gfxImageSurface;
 
 class gfxAlphaRecovery {
 public:
-    struct Analysis {
-        bool uniformColor;
-        bool uniformAlpha;
-        gfxFloat alpha;
-        gfxFloat r, g, b;
-    };
-
     /**
      * Some SIMD fast-paths only can be taken if the relative
      * byte-alignment of images' pointers and strides meets certain
@@ -37,8 +32,7 @@ public:
      * Returns true on success.
      */
     static bool RecoverAlpha (gfxImageSurface *blackSurface,
-                                const gfxImageSurface *whiteSurface,
-                                Analysis *analysis = nullptr);
+                                const gfxImageSurface *whiteSurface);
 
 #ifdef MOZILLA_MAY_SUPPORT_SSE2
     /* This does the same as the previous function, but uses SSE2

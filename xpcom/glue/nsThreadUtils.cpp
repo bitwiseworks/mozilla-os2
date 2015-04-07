@@ -18,7 +18,8 @@
 
 #ifdef XP_WIN
 #include <windows.h>
-#include "nsWindowsHelpers.h"
+#include "mozilla/WindowsVersion.h"
+using mozilla::IsVistaOrLater;
 #elif defined(XP_MACOSX)
 #include <sys/resource.h>
 #endif
@@ -28,7 +29,7 @@
 
 #ifndef XPCOM_GLUE_AVOID_NSPR
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsRunnable, nsIRunnable)
+NS_IMPL_ISUPPORTS(nsRunnable, nsIRunnable)
 
 NS_IMETHODIMP
 nsRunnable::Run()
@@ -37,8 +38,8 @@ nsRunnable::Run()
   return NS_OK;
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsCancelableRunnable, nsICancelableRunnable,
-                              nsIRunnable)
+NS_IMPL_ISUPPORTS(nsCancelableRunnable, nsICancelableRunnable,
+                  nsIRunnable)
 
 NS_IMETHODIMP
 nsCancelableRunnable::Run()
@@ -69,15 +70,18 @@ NS_NewThread(nsIThread **result, nsIRunnable *event, uint32_t stackSize)
   nsresult rv;
   nsCOMPtr<nsIThreadManager> mgr =
       do_GetService(NS_THREADMANAGER_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv)))
+    return rv;
 
   rv = mgr->NewThread(0, stackSize, getter_AddRefs(thread));
 #endif
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv)))
+    return rv;
 
   if (event) {
     rv = thread->Dispatch(event, NS_DISPATCH_NORMAL);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_WARN_IF(NS_FAILED(rv)))
+      return rv;
   }
 
   *result = nullptr;
@@ -94,7 +98,8 @@ NS_GetCurrentThread(nsIThread **result)
   nsresult rv;
   nsCOMPtr<nsIThreadManager> mgr =
       do_GetService(NS_THREADMANAGER_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv)))
+    return rv;
   return mgr->GetCurrentThread(result);
 #endif
 }
@@ -108,12 +113,38 @@ NS_GetMainThread(nsIThread **result)
   nsresult rv;
   nsCOMPtr<nsIThreadManager> mgr =
       do_GetService(NS_THREADMANAGER_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv)))
+    return rv;
   return mgr->GetMainThread(result);
 #endif
 }
 
-#ifndef MOZILLA_INTERNAL_API
+#if defined(MOZILLA_INTERNAL_API) && defined(XP_WIN)
+extern DWORD gTLSThreadIDIndex;
+bool
+NS_IsMainThread()
+{
+  return TlsGetValue(gTLSThreadIDIndex) == (void*) mozilla::threads::Main;
+}
+#elif defined(MOZILLA_INTERNAL_API) && defined(NS_TLS)
+#ifdef MOZ_ASAN
+// Temporary workaround, see bug 895845
+bool NS_IsMainThread()
+{
+  return gTLSThreadID == mozilla::threads::Main;
+}
+#else
+// NS_IsMainThread() is defined inline in MainThreadUtils.h
+#endif
+#else
+#ifdef MOZILLA_INTERNAL_API
+bool NS_IsMainThread()
+{
+  bool result = false;
+  nsThreadManager::get()->nsThreadManager::GetIsMainThread(&result);
+  return bool(result);
+}
+#else
 bool NS_IsMainThread()
 {
   bool result = false;
@@ -123,20 +154,7 @@ bool NS_IsMainThread()
     mgr->GetIsMainThread(&result);
   return bool(result);
 }
-#elif defined(XP_WIN)
-extern DWORD gTLSThreadIDIndex;
-bool
-NS_IsMainThread()
-{
-  return TlsGetValue(gTLSThreadIDIndex) == (void*) mozilla::threads::Main;
-}
-#elif !defined(NS_TLS)
-bool NS_IsMainThread()
-{
-  bool result = false;
-  nsThreadManager::get()->nsThreadManager::GetIsMainThread(&result);
-  return bool(result);
-}
+#endif
 #endif
 
 NS_METHOD
@@ -148,7 +166,8 @@ NS_DispatchToCurrentThread(nsIRunnable *event)
 #else
   nsCOMPtr<nsIThread> thread;
   nsresult rv = NS_GetCurrentThread(getter_AddRefs(thread));
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv)))
+    return rv;
 #endif
   return thread->Dispatch(event, NS_DISPATCH_NORMAL);
 }
@@ -158,7 +177,8 @@ NS_DispatchToMainThread(nsIRunnable *event, uint32_t dispatchFlags)
 {
   nsCOMPtr<nsIThread> thread;
   nsresult rv = NS_GetMainThread(getter_AddRefs(thread));
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv)))
+    return rv;
   return thread->Dispatch(event, dispatchFlags);
 }
 
@@ -171,13 +191,15 @@ NS_ProcessPendingEvents(nsIThread *thread, PRIntervalTime timeout)
 #ifdef MOZILLA_INTERNAL_API
   if (!thread) {
     thread = NS_GetCurrentThread();
-    NS_ENSURE_STATE(thread);
+    if (NS_WARN_IF(!thread))
+      return NS_ERROR_UNEXPECTED;
   }
 #else
   nsCOMPtr<nsIThread> current;
   if (!thread) {
     rv = NS_GetCurrentThread(getter_AddRefs(current));
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_WARN_IF(NS_FAILED(rv)))
+      return rv;
     thread = current.get();
   }
 #endif
@@ -212,7 +234,8 @@ NS_HasPendingEvents(nsIThread *thread)
     return hasPendingEvents(current);
 #else
     thread = NS_GetCurrentThread();
-    NS_ENSURE_TRUE(thread, false);
+    if (NS_WARN_IF(!thread))
+      return false;
 #endif
   }
   return hasPendingEvents(thread);
@@ -224,13 +247,15 @@ NS_ProcessNextEvent(nsIThread *thread, bool mayWait)
 #ifdef MOZILLA_INTERNAL_API
   if (!thread) {
     thread = NS_GetCurrentThread();
-    NS_ENSURE_TRUE(thread, false);
+    if (NS_WARN_IF(!thread))
+      return false;
   }
 #else
   nsCOMPtr<nsIThread> current;
   if (!thread) {
     NS_GetCurrentThread(getter_AddRefs(current));
-    NS_ENSURE_TRUE(current, false);
+    if (NS_WARN_IF(!current))
+      return false;
     thread = current.get();
   }
 #endif
@@ -247,14 +272,14 @@ class nsNameThreadRunnable MOZ_FINAL : public nsIRunnable
 public:
   nsNameThreadRunnable(const nsACString &name) : mName(name) { }
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
 
 protected:
   const nsCString mName;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsNameThreadRunnable, nsIRunnable)
+NS_IMPL_ISUPPORTS(nsNameThreadRunnable, nsIRunnable)
 
 NS_IMETHODIMP
 nsNameThreadRunnable::Run()

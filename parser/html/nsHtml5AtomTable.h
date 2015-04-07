@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsHtml5AtomTable_h_
-#define nsHtml5AtomTable_h_
+#ifndef nsHtml5AtomTable_h
+#define nsHtml5AtomTable_h
 
 #include "nsHashKeys.h"
 #include "nsTHashtable.h"
@@ -19,7 +19,8 @@ class nsHtml5AtomEntry : public nsStringHashKey
     nsHtml5AtomEntry(KeyTypePointer aStr);
     nsHtml5AtomEntry(const nsHtml5AtomEntry& aOther);
     ~nsHtml5AtomEntry();
-    inline nsHtml5Atom* GetAtom() {
+    inline nsHtml5Atom* GetAtom()
+    {
       return mAtom;
     }
   private:
@@ -77,13 +78,6 @@ class nsHtml5AtomTable
     ~nsHtml5AtomTable();
     
     /**
-     * Must be called after the constructor before use.
-     */
-    inline void Init() {
-      mTable.Init();
-    }
-    
-    /**
      * Obtains the atom for the given string in the scope of this atom table.
      */
     nsIAtom* GetAtom(const nsAString& aKey);
@@ -91,12 +85,14 @@ class nsHtml5AtomTable
     /**
      * Empties the table.
      */
-    void Clear() {
+    void Clear()
+    {
       mTable.Clear();
     }
     
 #ifdef DEBUG
-    void SetPermittedLookupThread(nsIThread* aThread) {
+    void SetPermittedLookupThread(nsIThread* aThread)
+    {
       mPermittedLookupThread = aThread;
     }
 #endif  
@@ -108,4 +104,4 @@ class nsHtml5AtomTable
 #endif
 };
 
-#endif // nsHtml5AtomTable_h_
+#endif // nsHtml5AtomTable_h

@@ -9,6 +9,8 @@
 #include "nsIDOMHTMLElement.h"
 #include "nsIDOMHTMLMenuItemElement.h"
 #include "nsXULContextMenuBuilder.h"
+#include "nsIDocument.h"
+#include "mozilla/dom/Element.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -22,8 +24,8 @@ nsXULContextMenuBuilder::~nsXULContextMenuBuilder()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_4(nsXULContextMenuBuilder, mFragment, mDocument,
-                           mCurrentNode, mElements)
+NS_IMPL_CYCLE_COLLECTION(nsXULContextMenuBuilder, mFragment, mDocument,
+                         mCurrentNode, mElements)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsXULContextMenuBuilder)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsXULContextMenuBuilder)
@@ -45,13 +47,13 @@ nsXULContextMenuBuilder::OpenContainer(const nsAString& aLabel)
   if (!mCurrentNode) {
     mCurrentNode = mFragment;
   } else {
-    nsCOMPtr<nsIContent> menu;
+    nsCOMPtr<Element> menu;
     nsresult rv = CreateElement(nsGkAtoms::menu, nullptr, getter_AddRefs(menu));
     NS_ENSURE_SUCCESS(rv, rv);
 
     menu->SetAttr(kNameSpaceID_None, nsGkAtoms::label, aLabel, false);
 
-    nsCOMPtr<nsIContent> menuPopup;
+    nsCOMPtr<Element> menuPopup;
     rv = CreateElement(nsGkAtoms::menupopup, nullptr,
                        getter_AddRefs(menuPopup));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -76,8 +78,9 @@ nsXULContextMenuBuilder::AddItemFor(nsIDOMHTMLMenuItemElement* aElement,
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  nsCOMPtr<nsIContent> menuitem;
-  nsresult rv = CreateElement(nsGkAtoms::menuitem, aElement,
+  nsCOMPtr<Element> menuitem;
+  nsCOMPtr<nsIDOMHTMLElement> element = do_QueryInterface(aElement);
+  nsresult rv = CreateElement(nsGkAtoms::menuitem, element,
                               getter_AddRefs(menuitem));
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -127,7 +130,7 @@ nsXULContextMenuBuilder::AddSeparator()
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  nsCOMPtr<nsIContent> menuseparator;
+  nsCOMPtr<Element> menuseparator;
   nsresult rv = CreateElement(nsGkAtoms::menuseparator, nullptr,
                               getter_AddRefs(menuseparator));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -201,7 +204,7 @@ nsXULContextMenuBuilder::Click(const nsAString& aGeneratedItemId)
 nsresult
 nsXULContextMenuBuilder::CreateElement(nsIAtom* aTag,
                                        nsIDOMHTMLElement* aHTMLElement,
-                                       nsIContent** aResult)
+                                       Element** aResult)
 {
   *aResult = nullptr;
 

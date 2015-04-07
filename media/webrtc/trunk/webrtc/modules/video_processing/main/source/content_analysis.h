@@ -11,10 +11,10 @@
 #ifndef VPM_CONTENT_ANALYSIS_H
 #define VPM_CONTENT_ANALYSIS_H
 
-#include "common_video/interface/i420_video_frame.h"
-#include "typedefs.h"
-#include "module_common_types.h"
-#include "video_processing_defines.h"
+#include "webrtc/common_video/interface/i420_video_frame.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/modules/video_processing/main/interface/video_processing_defines.h"
+#include "webrtc/typedefs.h"
 
 namespace webrtc {
 
@@ -30,7 +30,7 @@ public:
     //  extractContentFeature
     // Inputs:         width, height
     // Return value:   0 if OK, negative value upon error
-    WebRtc_Word32 Initialize(int width, int height);
+    int32_t Initialize(int width, int height);
 
     // Extract content Feature - main function of ContentAnalysis
     // Input:           new frame
@@ -41,7 +41,7 @@ public:
 
     // Release all allocated memory
     // Output: 0 if OK, negative value upon error
-    WebRtc_Word32 Release();
+    int32_t Release();
 
 private:
 
@@ -49,26 +49,26 @@ private:
     VideoContentMetrics* ContentMetrics();
 
     // Normalized temporal difference metric: for motion magnitude
-    typedef WebRtc_Word32 (VPMContentAnalysis::*TemporalDiffMetricFunc)();
+    typedef int32_t (VPMContentAnalysis::*TemporalDiffMetricFunc)();
     TemporalDiffMetricFunc TemporalDiffMetric;
-    WebRtc_Word32 TemporalDiffMetric_C();
+    int32_t TemporalDiffMetric_C();
 
     // Motion metric method: call 2 metrics (magnitude and size)
-    WebRtc_Word32 ComputeMotionMetrics();
+    int32_t ComputeMotionMetrics();
 
     // Spatial metric method: computes the 3 frame-average spatial
     //  prediction errors (1x2,2x1,2x2)
-    typedef WebRtc_Word32 (VPMContentAnalysis::*ComputeSpatialMetricsFunc)();
+    typedef int32_t (VPMContentAnalysis::*ComputeSpatialMetricsFunc)();
     ComputeSpatialMetricsFunc ComputeSpatialMetrics;
-    WebRtc_Word32 ComputeSpatialMetrics_C();
+    int32_t ComputeSpatialMetrics_C();
 
 #if defined(WEBRTC_ARCH_X86_FAMILY)
-    WebRtc_Word32 ComputeSpatialMetrics_SSE2();
-    WebRtc_Word32 TemporalDiffMetric_SSE2();
+    int32_t ComputeSpatialMetrics_SSE2();
+    int32_t TemporalDiffMetric_SSE2();
 #endif
 
-    const WebRtc_UWord8*       _origFrame;
-    WebRtc_UWord8*             _prevFrame;
+    const uint8_t*       _origFrame;
+    uint8_t*             _prevFrame;
     int                        _width;
     int                        _height;
     int                        _skipNum;
@@ -87,6 +87,6 @@ private:
 
 }; // end of VPMContentAnalysis class definition
 
-} // namespace
+}  // namespace
 
 #endif

@@ -9,9 +9,9 @@
 
 #include "nsCOMPtr.h"
 #include "nsIWidget.h"
-#include "nsEvent.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDOMWindow.h"
+#include "mozilla/EventForwards.h"
 
 namespace mozilla {
 namespace widget {
@@ -41,11 +41,11 @@ public:
    * @param aUnshiftedCharCode  CharCode for aKeyCode without Shift key.
    *                            This may be zero if aKeyCode key doesn't input
    *                            a Latin character.
-   *                            Note that must not be NULL.
+   *                            Note that must not be nullptr.
    * @param aShiftedCharCode    CharCode for aKeyCOde with Shift key.
    *                            This is always 0 when aKeyCode isn't
    *                            NS_VK_[A-Z].
-   *                            Note that must not be NULL.
+   *                            Note that must not be nullptr.
    */
   static void GetLatinCharCodeForKeyCode(uint32_t aKeyCode,
                                          bool aIsCapsLock,
@@ -58,7 +58,7 @@ public:
    * unicode character, e.g., '`' returns KEY_NAME_INDEX_DeadGrave.
    * So, you cannot use this method for checking if the char is a dead char.
    */
-  static KeyNameIndex GetDeadKeyNameIndex(PRUnichar aChar);
+  static KeyNameIndex GetDeadKeyNameIndex(char16_t aChar);
 };
 
 } // namespace widget

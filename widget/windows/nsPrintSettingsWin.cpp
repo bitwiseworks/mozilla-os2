@@ -5,9 +5,9 @@
 #include "nsPrintSettingsWin.h"
 #include "nsCRT.h"
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsPrintSettingsWin, 
-                             nsPrintSettings, 
-                             nsIPrintSettingsWin)
+NS_IMPL_ISUPPORTS_INHERITED(nsPrintSettingsWin, 
+                            nsPrintSettings, 
+                            nsIPrintSettingsWin)
 
 /** ---------------------------------------------------
  *  See documentation in nsPrintSettingsWin.h
@@ -46,34 +46,34 @@ nsPrintSettingsWin::~nsPrintSettingsWin()
 }
 
 /* [noscript] attribute charPtr deviceName; */
-NS_IMETHODIMP nsPrintSettingsWin::SetDeviceName(const PRUnichar * aDeviceName)
+NS_IMETHODIMP nsPrintSettingsWin::SetDeviceName(const char16_t * aDeviceName)
 {
   if (mDeviceName) {
     nsMemory::Free(mDeviceName);
   }
-  mDeviceName = aDeviceName?wcsdup(aDeviceName):nullptr;
+  mDeviceName = aDeviceName?wcsdup(char16ptr_t(aDeviceName)):nullptr;
   return NS_OK;
 }
-NS_IMETHODIMP nsPrintSettingsWin::GetDeviceName(PRUnichar **aDeviceName)
+NS_IMETHODIMP nsPrintSettingsWin::GetDeviceName(char16_t **aDeviceName)
 {
   NS_ENSURE_ARG_POINTER(aDeviceName);
-  *aDeviceName = mDeviceName?wcsdup(mDeviceName):nullptr;
+  *aDeviceName = mDeviceName?reinterpret_cast<char16_t*>(wcsdup(mDeviceName)):nullptr;
   return NS_OK;
 }
 
 /* [noscript] attribute charPtr driverName; */
-NS_IMETHODIMP nsPrintSettingsWin::SetDriverName(const PRUnichar * aDriverName)
+NS_IMETHODIMP nsPrintSettingsWin::SetDriverName(const char16_t * aDriverName)
 {
   if (mDriverName) {
     nsMemory::Free(mDriverName);
   }
-  mDriverName = aDriverName?wcsdup(aDriverName):nullptr;
+  mDriverName = aDriverName?wcsdup(char16ptr_t(aDriverName)):nullptr;
   return NS_OK;
 }
-NS_IMETHODIMP nsPrintSettingsWin::GetDriverName(PRUnichar **aDriverName)
+NS_IMETHODIMP nsPrintSettingsWin::GetDriverName(char16_t **aDriverName)
 {
   NS_ENSURE_ARG_POINTER(aDriverName);
-  *aDriverName = mDriverName?wcsdup(mDriverName):nullptr;
+  *aDriverName = mDriverName?reinterpret_cast<char16_t*>(wcsdup(mDriverName)):nullptr;
   return NS_OK;
 }
 
@@ -105,7 +105,7 @@ NS_IMETHODIMP nsPrintSettingsWin::SetDevMode(DEVMODEW * aDevMode)
 {
   if (mDevMode) {
     ::HeapFree(::GetProcessHeap(), 0, mDevMode);
-    mDevMode = NULL;
+    mDevMode = nullptr;
   }
 
   if (aDevMode) {
@@ -132,11 +132,11 @@ nsPrintSettingsWin& nsPrintSettingsWin::operator=(const nsPrintSettingsWin& rhs)
   ((nsPrintSettings&) *this) = rhs;
 
   if (mDeviceName) {
-    nsCRT::free(mDeviceName);
+    free(mDeviceName);
   }
 
   if (mDriverName) {
-    nsCRT::free(mDriverName);
+    free(mDriverName);
   }
 
   // Use free because we used the native malloc to create the memory

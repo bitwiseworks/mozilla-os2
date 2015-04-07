@@ -3,16 +3,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#pragma once
+#ifndef MOZILLA_CONTENT_SVGPRESERVEASPECTRATIO_H_
+#define MOZILLA_CONTENT_SVGPRESERVEASPECTRATIO_H_
 
+#include "mozilla/HashFunctions.h"  // for HashGeneric
 #include "mozilla/TypedEnum.h"
 
 #include "nsWrapperCache.h"
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/ErrorResult.h"
-
-class nsSVGElement;
+#include "nsSVGElement.h"
 
 namespace mozilla {
 // Alignment Types
@@ -99,6 +100,10 @@ public:
     return mDefer;
   }
 
+  uint32_t Hash() const {
+    return HashGeneric(mAlign, mMeetOrSlice, mDefer);
+  }
+
 private:
   // We can't use enum types here because some compilers fail to pack them.
   uint8_t mAlign;
@@ -126,8 +131,7 @@ public:
 
   // WebIDL
   nsSVGElement* GetParentObject() const { return mSVGElement; }
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   uint16_t Align();
   void SetAlign(uint16_t aAlign, ErrorResult& rv);
@@ -142,3 +146,5 @@ protected:
 
 } //namespace dom
 } //namespace mozilla
+
+#endif // MOZILLA_CONTENT_SVGPRESERVEASPECTRATIO_H_

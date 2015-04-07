@@ -22,7 +22,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef yarr_YarrJIT_h
@@ -32,11 +32,10 @@
 
 #if ENABLE_YARR_JIT
 
-#include "assembler/assembler/MacroAssembler.h"
+#include "assembler/assembler/MacroAssemblerCodeRef.h"
 
-#include "MatchResult.h"
-#include "Yarr.h"
-#include "YarrPattern.h"
+#include "yarr/MatchResult.h"
+#include "yarr/Yarr.h"
 
 #if WTF_CPU_X86 && !WTF_COMPILER_MSVC && !WTF_COMPILER_SUNCC
 #define YARR_CALL __attribute__ ((regparm (3)))
@@ -44,9 +43,7 @@
 #define YARR_CALL
 #endif
 
-#if JS_TRACE_LOGGING
-#include "TraceLogging.h"
-#endif
+#include "jit/JitCommon.h"
 
 namespace JSC {
 
@@ -81,16 +78,16 @@ public:
     bool isFallBack() { return m_needFallBack; }
 
 #ifdef YARR_8BIT_CHAR_SUPPORT
-    bool has8BitCode() const { return m_ref8.size(); }
+    bool has8BitCode() const { return m_ref8.allocSize(); }
     void set8BitCode(MacroAssemblerCodeRef ref) { m_ref8 = ref; }
-    bool has8BitCodeMatchOnly() const { return m_matchOnly8.size(); }
+    bool has8BitCodeMatchOnly() const { return m_matchOnly8.allocSize(); }
     void set8BitCodeMatchOnly(MacroAssemblerCodeRef matchOnly) { m_matchOnly8 = matchOnly; }
 #endif
 
-    bool has16BitCode() const { return m_ref16.size(); }
+    bool has16BitCode() const { return m_ref16.allocSize(); }
     void set16BitCode(MacroAssemblerCodeRef ref) { m_ref16 = ref; }
 
-    bool has16BitCodeMatchOnly() const { return m_matchOnly16.size(); }
+    bool has16BitCodeMatchOnly() const { return m_matchOnly16.allocSize(); }
     void set16BitCodeMatchOnly(MacroAssemblerCodeRef matchOnly) { m_matchOnly16 = matchOnly; }
 
 #if YARR_8BIT_CHAR_SUPPORT
@@ -98,24 +95,12 @@ public:
     {
         ASSERT(has8BitCode());
 
-#if JS_TRACE_LOGGING
-        js::AutoTraceLog logger(js::TraceLogging::defaultLogger(),
-                                js::TraceLogging::YARR_JIT_START,
-                                js::TraceLogging::YARR_JIT_STOP);
-#endif
-
         return MatchResult(reinterpret_cast<YarrJITCode8>(m_ref8.code().executableAddress())(input, start, length, output));
     }
 
     MatchResult execute(const LChar* input, unsigned start, unsigned length)
     {
         ASSERT(has8BitCodeMatchOnly());
-
-#if JS_TRACE_LOGGING
-        js::AutoTraceLog logger(js::TraceLogging::defaultLogger(),
-                                js::TraceLogging::YARR_JIT_START,
-                                js::TraceLogging::YARR_JIT_STOP);
-#endif
 
         return MatchResult(reinterpret_cast<YarrJITCodeMatchOnly8>(m_matchOnly8.code().executableAddress())(input, start, length));
     }
@@ -125,28 +110,16 @@ public:
     {
         ASSERT(has16BitCode());
 
-#if JS_TRACE_LOGGING
-        js::AutoTraceLog logger(js::TraceLogging::defaultLogger(),
-                                js::TraceLogging::YARR_JIT_START,
-                                js::TraceLogging::YARR_JIT_STOP);
-#endif
-
         YarrJITCode16 fn = JS_FUNC_TO_DATA_PTR(YarrJITCode16, m_ref16.code().executableAddress());
-        return MatchResult(fn(input, start, length, output));
+        return MatchResult(CALL_GENERATED_YARR_CODE4(fn, input, start, length, output));
     }
 
     MatchResult execute(const UChar* input, unsigned start, unsigned length)
     {
         ASSERT(has16BitCodeMatchOnly());
 
-#if JS_TRACE_LOGGING
-        js::AutoTraceLog logger(js::TraceLogging::defaultLogger(),
-                                js::TraceLogging::YARR_JIT_START,
-                                js::TraceLogging::YARR_JIT_STOP);
-#endif
-
         YarrJITCodeMatchOnly16 fn = JS_FUNC_TO_DATA_PTR(YarrJITCodeMatchOnly16, m_matchOnly16.code().executableAddress());
-        return MatchResult(fn(input, start, length));
+        return MatchResult(CALL_GENERATED_YARR_CODE3(fn, input, start, length));
     }
 
 #if ENABLE_REGEXP_TRACING

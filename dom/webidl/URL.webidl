@@ -4,6 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origins of this IDL file are
+ * http://url.spec.whatwg.org/#api
  * http://dev.w3.org/2006/webapi/FileAPI/#creating-revoking
  * http://dev.w3.org/2011/webrtc/editor/getusermedia.html#url
  *
@@ -11,7 +12,14 @@
  * liability, trademark and document use rules apply.
  */
 
+// [Constructor(DOMString url, optional (URL or DOMString) base = "about:blank")]
+[Constructor(DOMString url, URL base),
+ Constructor(DOMString url, optional DOMString base = "about:blank")]
 interface URL {
+};
+URL implements URLUtils;
+
+partial interface URL {
   [Throws]
   static DOMString? createObjectURL(Blob blob, optional objectURLOptions options);
   [Throws]
@@ -22,4 +30,10 @@ interface URL {
 dictionary objectURLOptions
 {
 /* boolean autoRevoke = true; */ /* not supported yet */
+};
+
+// https://dvcs.w3.org/hg/html-media/raw-file/default/media-source/media-source.html
+partial interface URL {
+  [Throws]
+  static DOMString? createObjectURL(MediaSource source, optional objectURLOptions options);
 };

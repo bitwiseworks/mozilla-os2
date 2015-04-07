@@ -16,12 +16,13 @@ import java.util.Set;
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.sync.crypto.KeyBundle;
 import org.mozilla.gecko.sync.crypto.PersistedCrypto5Keys;
+import org.mozilla.gecko.sync.net.AuthHeaderProvider;
 import org.mozilla.gecko.sync.stage.GlobalSyncStage.Stage;
 
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
 
-public class SyncConfiguration implements CredentialsSource {
+public class SyncConfiguration {
 
   public class EditorBranch implements Editor {
 
@@ -174,22 +175,18 @@ public class SyncConfiguration implements CredentialsSource {
     }
   }
 
-  public static final String DEFAULT_USER_API = "https://auth.services.mozilla.com/user/1.0/";
-
   private static final String LOG_TAG = "SyncConfiguration";
 
   // These must be set in GlobalSession's constructor.
-  public String          userAPI;
-  public URI             serverURL;
   public URI             clusterURL;
-  public String          username;
   public KeyBundle       syncKeyBundle;
 
   public CollectionKeys  collectionKeys;
   public InfoCollections infoCollections;
   public MetaGlobal      metaGlobal;
-  public String          password;
   public String          syncID;
+
+  protected final String username;
 
   /**
    * Persisted collection of enabledEngineNames.
@@ -201,6 +198,7 @@ public class SyncConfiguration implements CredentialsSource {
    * fresh meta/global record for upload.
    */
   public Set<String> enabledEngineNames;
+  public Set<String> declinedEngineNames = new HashSet<String>();
 
   /**
    * Names of stages to sync <it>this sync</it>, or <code>null</code> to sync
@@ -237,11 +235,9 @@ public class SyncConfiguration implements CredentialsSource {
   public Map<String, Boolean> userSelectedEngines;
   public long userSelectedEnginesTimestamp;
 
-  // Fields that maintain a reference to a SharedPreferences instance, used for
-  // persistence.
-  // Behavior is undefined if the PrefsSource is switched out in flight.
-  public String          prefsPath;
-  public PrefsSource     prefsSource;
+  public SharedPreferences prefs;
+
+  protected final AuthHeaderProvider authHeaderProvider;
 
   public static final String PREF_PREFS_VERSION = "prefs.version";
   public static final long CURRENT_PREFS_VERSION = 1;
@@ -253,29 +249,36 @@ public class SyncConfiguration implements CredentialsSource {
   public static final String PREF_SYNC_ID = "syncID";
 
   public static final String PREF_ENABLED_ENGINE_NAMES = "enabledEngineNames";
+  public static final String PREF_DECLINED_ENGINE_NAMES = "declinedEngineNames";
   public static final String PREF_USER_SELECTED_ENGINES_TO_SYNC = "userSelectedEngines";
   public static final String PREF_USER_SELECTED_ENGINES_TO_SYNC_TIMESTAMP = "userSelectedEnginesTimestamp";
 
-  public static final String PREF_EARLIEST_NEXT_SYNC = "earliestnextsync";
   public static final String PREF_CLUSTER_URL_IS_STALE = "clusterurlisstale";
 
   public static final String PREF_ACCOUNT_GUID = "account.guid";
   public static final String PREF_CLIENT_NAME = "account.clientName";
   public static final String PREF_NUM_CLIENTS = "account.numClients";
 
-  /**
-   * Create a new SyncConfiguration instance. Pass in a PrefsSource to
-   * provide access to preferences.
-   */
-  public SyncConfiguration(String prefsPath, PrefsSource prefsSource) {
-    this.prefsPath   = prefsPath;
-    this.prefsSource = prefsSource;
-    this.loadFromPrefs(getPrefs());
+  private static final String API_VERSION = "1.5";
+
+  public SyncConfiguration(String username, AuthHeaderProvider authHeaderProvider, SharedPreferences prefs) {
+    this.username = username;
+    this.authHeaderProvider = authHeaderProvider;
+    this.prefs = prefs;
+    this.loadFromPrefs(prefs);
+  }
+
+  public SyncConfiguration(String username, AuthHeaderProvider authHeaderProvider, SharedPreferences prefs, KeyBundle syncKeyBundle) {
+    this(username, authHeaderProvider, prefs);
+    this.syncKeyBundle = syncKeyBundle;
+  }
+
+  public String getAPIVersion() {
+    return API_VERSION;
   }
 
   public SharedPreferences getPrefs() {
-    Logger.trace(LOG_TAG, "Returning prefs for " + prefsPath);
-    return prefsSource.getPrefs(prefsPath, Utils.SHARED_PREFERENCES_MODE);
+    return this.prefs;
   }
 
   /**
@@ -302,25 +305,45 @@ public class SyncConfiguration implements CredentialsSource {
   }
 
   /**
-   * Gets the engine names that are enabled in meta/global.
+   * Gets the engine names that are enabled, declined, or other (depending on pref) in meta/global.
    *
    * @param prefs
    *          SharedPreferences that the engines are associated with.
+   * @param pref
+   *          The preference name to use. E.g, PREF_ENABLED_ENGINE_NAMES.
    * @return Set<String> of the enabled engine names if they have been stored,
    *         or null otherwise.
    */
-  public static Set<String> getEnabledEngineNames(SharedPreferences prefs) {
-    String json = prefs.getString(PREF_ENABLED_ENGINE_NAMES, null);
+  protected static Set<String> getEngineNamesFromPref(SharedPreferences prefs, String pref) {
+    final String json = prefs.getString(pref, null);
     if (json == null) {
       return null;
     }
     try {
-      ExtendedJSONObject o = ExtendedJSONObject.parseJSONObject(json);
+      final ExtendedJSONObject o = ExtendedJSONObject.parseJSONObject(json);
       return new HashSet<String>(o.keySet());
     } catch (Exception e) {
-      // enabledEngineNames can be null.
       return null;
     }
+  }
+
+  /**
+   * Returns the set of engine names that the user has enabled. If none
+   * have been stored in prefs, <code>null</code> is returned.
+   */
+  public static Set<String> getEnabledEngineNames(SharedPreferences prefs) {
+      return getEngineNamesFromPref(prefs, PREF_ENABLED_ENGINE_NAMES);
+  }
+
+  /**
+   * Returns the set of engine names that the user has declined.
+   */
+  public static Set<String> getDeclinedEngineNames(SharedPreferences prefs) {
+    final Set<String> names = getEngineNamesFromPref(prefs, PREF_DECLINED_ENGINE_NAMES);
+    if (names == null) {
+        return new HashSet<String>();
+    }
+    return names;
   }
 
   /**
@@ -362,6 +385,9 @@ public class SyncConfiguration implements CredentialsSource {
   /**
    * Store a Map of engines and their sync states to prefs.
    *
+   * Any engine that's disabled in the input is also recorded
+   * as a declined engine, overwriting the stored values.
+   *
    * @param prefs
    *          SharedPreferences that the engines are associated with.
    * @param selectedEngines
@@ -369,20 +395,33 @@ public class SyncConfiguration implements CredentialsSource {
    */
   public static void storeSelectedEnginesToPrefs(SharedPreferences prefs, Map<String, Boolean> selectedEngines) {
     ExtendedJSONObject jObj = new ExtendedJSONObject();
+    HashSet<String> declined = new HashSet<String>();
     for (Entry<String, Boolean> e : selectedEngines.entrySet()) {
-      jObj.put(e.getKey(), e.getValue());
+      final Boolean enabled = e.getValue();
+      final String engine = e.getKey();
+      jObj.put(engine, enabled);
+      if (!enabled) {
+        declined.add(engine);
+      }
     }
+
+    // Our history checkbox drives form history, too.
+    // We don't need to do this for enablement: that's done at retrieval time.
+    if (selectedEngines.containsKey("history") && !selectedEngines.get("history").booleanValue()) {
+        declined.add("forms");
+    }
+
     String json = jObj.toJSONString();
     long currentTime = System.currentTimeMillis();
     Editor edit = prefs.edit();
     edit.putString(PREF_USER_SELECTED_ENGINES_TO_SYNC, json);
+    edit.putString(PREF_DECLINED_ENGINE_NAMES, setToJSONObjectString(declined));
     edit.putLong(PREF_USER_SELECTED_ENGINES_TO_SYNC_TIMESTAMP, currentTime);
     Logger.error(LOG_TAG, "Storing user-selected engines at [" + currentTime + "].");
     edit.commit();
   }
 
   public void loadFromPrefs(SharedPreferences prefs) {
-
     if (prefs.contains(PREF_CLUSTER_URL)) {
       String u = prefs.getString(PREF_CLUSTER_URL, null);
       try {
@@ -397,6 +436,7 @@ public class SyncConfiguration implements CredentialsSource {
       Logger.trace(LOG_TAG, "Set syncID from bundle: " + syncID);
     }
     enabledEngineNames = getEnabledEngineNames(prefs);
+    declinedEngineNames = getDeclinedEngineNames(prefs);
     userSelectedEngines = getUserSelectedEngines(prefs);
     userSelectedEnginesTimestamp = prefs.getLong(PREF_USER_SELECTED_ENGINES_TO_SYNC_TIMESTAMP, 0);
     // We don't set crypto/keys here because we need the syncKeyBundle to decrypt the JSON
@@ -406,6 +446,14 @@ public class SyncConfiguration implements CredentialsSource {
 
   public void persistToPrefs() {
     this.persistToPrefs(this.getPrefs());
+  }
+
+  private static String setToJSONObjectString(Set<String> set) {
+    ExtendedJSONObject o = new ExtendedJSONObject();
+    for (String name : set) {
+      o.put(name, 0);
+    }
+    return o.toJSONString();
   }
 
   public void persistToPrefs(SharedPreferences prefs) {
@@ -421,11 +469,12 @@ public class SyncConfiguration implements CredentialsSource {
     if (enabledEngineNames == null) {
       edit.remove(PREF_ENABLED_ENGINE_NAMES);
     } else {
-      ExtendedJSONObject o = new ExtendedJSONObject();
-      for (String engineName : enabledEngineNames) {
-        o.put(engineName, 0);
-      }
-      edit.putString(PREF_ENABLED_ENGINE_NAMES, o.toJSONString());
+      edit.putString(PREF_ENABLED_ENGINE_NAMES, setToJSONObjectString(enabledEngineNames));
+    }
+    if (declinedEngineNames.isEmpty()) {
+      edit.remove(PREF_DECLINED_ENGINE_NAMES);
+    } else {
+      edit.putString(PREF_DECLINED_ENGINE_NAMES, setToJSONObjectString(declinedEngineNames));
     }
     if (userSelectedEngines == null) {
       edit.remove(PREF_USER_SELECTED_ENGINES_TO_SYNC);
@@ -437,9 +486,8 @@ public class SyncConfiguration implements CredentialsSource {
     // TODO: keys.
   }
 
-  @Override
-  public String credentials() {
-    return username + ":" + password;
+  public AuthHeaderProvider getAuthHeaderProvider() {
+    return authHeaderProvider;
   }
 
   public CollectionKeys getCollectionKeys() {
@@ -450,23 +498,17 @@ public class SyncConfiguration implements CredentialsSource {
     collectionKeys = k;
   }
 
-  public String nodeWeaveURL() {
-    return this.nodeWeaveURL((this.serverURL == null) ? null : this.serverURL.toASCIIString());
-  }
-
-  public String nodeWeaveURL(String serverURL) {
-    String userPart = username + "/node/weave";
-    if (serverURL == null) {
-      return DEFAULT_USER_API + userPart;
-    }
-    if (!serverURL.endsWith("/")) {
-      serverURL = serverURL + "/";
-    }
-    return serverURL + "user/1.0/" + userPart;
+  /**
+   * Return path to storage endpoint without trailing slash.
+   *
+   * @return storage endpoint without trailing slash.
+   */
+  public String storageURL() {
+    return clusterURL + "/storage";
   }
 
   protected String infoBaseURL() {
-    return clusterURL + GlobalSession.API_VERSION + "/" + username + "/info/";
+    return clusterURL + "/info/";
   }
 
   public String infoCollectionsURL() {
@@ -478,16 +520,11 @@ public class SyncConfiguration implements CredentialsSource {
   }
 
   public String metaURL() {
-    return clusterURL + GlobalSession.API_VERSION + "/" + username + "/storage/meta/global";
-  }
-
-  public String storageURL(boolean trailingSlash) {
-    return clusterURL + GlobalSession.API_VERSION + "/" + username +
-           (trailingSlash ? "/storage/" : "/storage");
+    return storageURL() + "/meta/global";
   }
 
   public URI collectionURI(String collection) throws URISyntaxException {
-    return new URI(storageURL(true) + collection);
+    return new URI(storageURL() + "/" + collection);
   }
 
   public URI collectionURI(String collection, boolean full) throws URISyntaxException {
@@ -502,12 +539,12 @@ public class SyncConfiguration implements CredentialsSource {
       }
       uriParams = params.toString();
     }
-    String uri = storageURL(true) + collection + uriParams;
+    String uri = storageURL() + "/" + collection + uriParams;
     return new URI(uri);
   }
 
   public URI wboURI(String collection, String id) throws URISyntaxException {
-    return new URI(storageURL(true) + collection + "/" + id);
+    return new URI(storageURL() + "/" + collection + "/" + id);
   }
 
   public URI keysURI() throws URISyntaxException {
@@ -525,35 +562,8 @@ public class SyncConfiguration implements CredentialsSource {
     return clusterURL.toASCIIString();
   }
 
-  protected void setAndPersistClusterURL(URI u, SharedPreferences prefs) {
-    boolean shouldPersist = (prefs != null) && (clusterURL == null);
-
-    Logger.trace(LOG_TAG, "Setting cluster URL to " + u.toASCIIString() +
-                          (shouldPersist ? ". Persisting." : ". Not persisting."));
-    clusterURL = u;
-    if (shouldPersist) {
-      Editor edit = prefs.edit();
-      edit.putString(PREF_CLUSTER_URL, clusterURL.toASCIIString());
-      edit.commit();
-    }
-  }
-
-  protected void setClusterURL(URI u, SharedPreferences prefs) {
-    if (u == null) {
-      Logger.warn(LOG_TAG, "Refusing to set cluster URL to null.");
-      return;
-    }
-    URI uri = u.normalize();
-    if (uri.toASCIIString().endsWith("/")) {
-      setAndPersistClusterURL(u, prefs);
-      return;
-    }
-    setAndPersistClusterURL(uri.resolve("/"), prefs);
-    Logger.trace(LOG_TAG, "Set cluster URL to " + clusterURL.toASCIIString() + ", given input " + u.toASCIIString());
-  }
-
   public void setClusterURL(URI u) {
-    setClusterURL(u, this.getPrefs());
+    this.clusterURL = u;
   }
 
   /**

@@ -302,13 +302,6 @@ void SetCurrentProcessPrivileges(ChildPrivileges privs) {
     gid += getpid();
     uid += getpid();
   }
-  if (privs == PRIVILEGES_CAMERA) {
-    gid_t groups[] = { AID_SDCARD_RW };
-    if (setgroups(sizeof(groups) / sizeof(groups[0]), groups) != 0) {
-      DLOG(ERROR) << "FAILED TO setgroups() CHILD PROCESS";
-      _exit(127);
-    }
-  }
 #endif
   if (setgid(gid) != 0) {
     DLOG(ERROR) << "FAILED TO setgid() CHILD PROCESS";
@@ -435,43 +428,6 @@ bool NamedProcessIterator::IncludeEntry() {
   if (!filter_)
     return true;
   return filter_->Includes(entry_.pid, entry_.ppid);
-}
-
-// To have /proc/self/io file you must enable CONFIG_TASK_IO_ACCOUNTING
-// in your kernel configuration.
-bool ProcessMetrics::GetIOCounters(IoCounters* io_counters) const {
-  std::string proc_io_contents;
-  if (!file_util::ReadFileToString(L"/proc/self/io", &proc_io_contents))
-    return false;
-
-  (*io_counters).OtherOperationCount = 0;
-  (*io_counters).OtherTransferCount = 0;
-
-  StringTokenizer tokenizer(proc_io_contents, ": \n");
-  ParsingState state = KEY_NAME;
-  std::string last_key_name;
-  while (tokenizer.GetNext()) {
-    switch (state) {
-      case KEY_NAME:
-        last_key_name = tokenizer.token();
-        state = KEY_VALUE;
-        break;
-      case KEY_VALUE:
-        DCHECK(!last_key_name.empty());
-        if (last_key_name == "syscr") {
-          (*io_counters).ReadOperationCount = StringToInt64(tokenizer.token());
-        } else if (last_key_name == "syscw") {
-          (*io_counters).WriteOperationCount = StringToInt64(tokenizer.token());
-        } else if (last_key_name == "rchar") {
-          (*io_counters).ReadTransferCount = StringToInt64(tokenizer.token());
-        } else if (last_key_name == "wchar") {
-          (*io_counters).WriteTransferCount = StringToInt64(tokenizer.token());
-        }
-        state = KEY_NAME;
-        break;
-    }
-  }
-  return true;
 }
 
 }  // namespace base

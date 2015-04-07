@@ -1,8 +1,8 @@
 // Utility functions for offline tests.
-netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-
-var Cc = Components.classes;
-var Ci = Components.interfaces;
+var Cc = SpecialPowers.Cc;
+var Ci = SpecialPowers.Ci;
+var Cu = SpecialPowers.Cu;
+var LoadContextInfo = Cu.import("resource://gre/modules/LoadContextInfo.jsm", {}).LoadContextInfo;
 
 const kNetBase = 2152398848; // 0x804B0000
 var NS_ERROR_CACHE_KEY_NOT_FOUND = kNetBase + 61;
@@ -23,16 +23,14 @@ QueryInterface: function(iid) {
     return this;
   },
 onCacheEntryAvailable: function(desc, accessGranted, status) {
-    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-
     if (!desc) {
       this.fetch(this.callback);
       return;
     }
 
     var stream = desc.QueryInterface(Ci.nsICacheEntryDescriptor).openInputStream(0);
-    var sstream = Components.classes["@mozilla.org/scriptableinputstream;1"]
-                 .createInstance(Components.interfaces.nsIScriptableInputStream);
+    var sstream = Cc["@mozilla.org/scriptableinputstream;1"]
+                 .createInstance(SpecialPowers.Ci.nsIScriptableInputStream);
     sstream.init(stream);
     this.contents[desc.key] = sstream.read(sstream.available());
     sstream.close();
@@ -58,6 +56,8 @@ fetch: function(callback)
 
 var OfflineTest = {
 
+_allowedByDefault: false,
+
 _hasSlave: false,
 
 // The window where test results should be sent.
@@ -71,6 +71,11 @@ _SJSsStated: [],
 
 setupChild: function()
 {
+  if (this._allowedByDefault) {
+    this._masterWindow = window;
+    return true;
+  }
+
   if (window.parent.OfflineTest._hasSlave) {
     return false;
   }
@@ -91,6 +96,16 @@ setup: function()
 {
   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
 
+  try {
+    this._allowedByDefault = SpecialPowers.getBoolPref("offline-apps.allow_by_default");
+  } catch (e) {}
+
+  if (this._allowedByDefault) {
+    this._masterWindow = window;
+
+    return true;
+  }
+
   if (!window.opener || !window.opener.OfflineTest ||
       !window.opener.OfflineTest._hasSlave) {
     // Offline applications must be toplevel windows and have the
@@ -99,19 +114,11 @@ setup: function()
     // enable the pref and spawn a new window to perform the actual
     // tests.  It will use this window to report successes and
     // failures.
-    var pm = Cc["@mozilla.org/permissionmanager;1"]
-      .getService(Ci.nsIPermissionManager);
-    var uri = Cc["@mozilla.org/network/io-service;1"]
-      .getService(Ci.nsIIOService)
-      .newURI(window.location.href, null, null);
-    var principal = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
-                      .getService(Ci.nsIScriptSecurityManager)
-                      .getNoAppCodebasePrincipal(uri);
 
-    if (pm.testPermissionFromPrincipal(principal, "offline-app") != 0) {
+    if (SpecialPowers.testPermission("offline-app", Ci.nsIPermissionManager.ALLOW_ACTION, document)) {
       ok(false, "Previous test failed to clear offline-app permission!  Expect failures.");
     }
-    pm.addFromPrincipal(principal, "offline-app", Ci.nsIPermissionManager.ALLOW_ACTION);
+    SpecialPowers.addPermission("offline-app", Ci.nsIPermissionManager.ALLOW_ACTION, document);
 
     // Tests must run as toplevel windows.  Open a slave window to run
     // the test.
@@ -126,35 +133,35 @@ setup: function()
   return true;
 },
 
-teardown: function()
+teardownAndFinish: function()
 {
-  // Remove the offline-app permission we gave ourselves.
+  this.teardown(function(self) { self.finish(); });
+},
 
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+teardown: function(callback)
+{
+  // First wait for any pending scheduled updates to finish
+  this.waitForUpdates(function(self) {
+    // Remove the offline-app permission we gave ourselves.
 
-  var pm = Cc["@mozilla.org/permissionmanager;1"]
-           .getService(Ci.nsIPermissionManager);
-  var uri = Cc["@mozilla.org/network/io-service;1"]
-            .getService(Ci.nsIIOService)
-            .newURI(window.location.href, null, null);
-  var principal = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
-                    .getService(Ci.nsIScriptSecurityManager)
-                    .getNoAppCodebasePrincipal(uri);
+    SpecialPowers.removePermission("offline-app", window.document);
 
-  pm.removeFromPrincipal(principal, "offline-app");
+    // Clear all overrides on the server
+    for (override in self._pathOverrides)
+      self.deleteData(self._pathOverrides[override]);
+    for (statedSJS in self._SJSsStated)
+      self.setSJSState(self._SJSsStated[statedSJS], "");
 
-  // Clear all overrides on the server
-  for (override in this._pathOverrides)
-    this.deleteData(this._pathOverrides[override]);
-  for (statedSJS in this._SJSsStated)
-    this.setSJSState(this._SJSsStated[statedSJS], "");
-
-  this.clear();
+    self.clear();
+    callback(self);
+  });
 },
 
 finish: function()
 {
-  if (this._masterWindow) {
+  if (this._allowedByDefault) {
+    SimpleTest.executeSoon(SimpleTest.finish);
+  } else if (this._masterWindow) {
     // Slave window: pass control back to master window, close itself.
     this._masterWindow.SimpleTest.executeSoon(this._masterWindow.OfflineTest.finish);
     window.close();
@@ -196,6 +203,46 @@ clear: function()
   }
 },
 
+waitForUpdates: function(callback)
+{
+  var self = this;
+  var observer = {
+    notified: false,
+    observe: function(subject, topic, data) {
+      if (subject) {
+        subject.QueryInterface(SpecialPowers.Ci.nsIOfflineCacheUpdate);
+        dump("Update of " + subject.manifestURI.spec + " finished\n");
+      }
+
+      SimpleTest.executeSoon(function() {
+        if (observer.notified) {
+          return;
+        }
+
+        var updateservice = Cc["@mozilla.org/offlinecacheupdate-service;1"]
+                            .getService(SpecialPowers.Ci.nsIOfflineCacheUpdateService);
+        var updatesPending = updateservice.numUpdates;
+        if (updatesPending == 0) {
+          try {
+            SpecialPowers.removeObserver(observer, "offline-cache-update-completed");
+          } catch(ex) {}
+          dump("All pending updates done\n");
+          observer.notified = true;
+          callback(self);
+          return;
+        }
+
+        dump("Waiting for " + updateservice.numUpdates + " update(s) to finish\n");
+      });
+    }
+  }
+
+  SpecialPowers.addObserver(observer, "offline-cache-update-completed", false);
+
+  // Call now to check whether there are some updates scheduled
+  observer.observe();
+},
+
 failEvent: function(e)
 {
   OfflineTest.ok(false, "Unexpected event: " + e.type);
@@ -209,7 +256,6 @@ waitForAdd: function(url, onFinished) {
 
   var waitForAddListener = {
     onCacheEntryAvailable: function(entry, access, status) {
-      netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
       if (entry) {
         entry.close();
         onFinished();
@@ -237,7 +283,19 @@ waitForAdd: function(url, onFinished) {
 
 manifestURL: function(overload)
 {
-  var manifestURLspec = overload || window.top.document.documentElement.getAttribute("manifest");
+  var manifestURLspec;
+  if (overload) {
+    manifestURLspec = overload;
+  } else {
+    var win = window;
+    while (win && !win.document.documentElement.getAttribute("manifest")) {
+      if (win == win.parent)
+        break;
+      win = win.parent;
+    }
+    if (win)
+      manifestURLspec = win.document.documentElement.getAttribute("manifest");
+  }
 
   var ios = Cc["@mozilla.org/network/io-service;1"]
             .getService(Ci.nsIIOService)
@@ -248,10 +306,15 @@ manifestURL: function(overload)
 
 loadContext: function()
 {
-  return SpecialPowers.wrap(window).QueryInterface(Components.interfaces.nsIInterfaceRequestor)
-                                   .getInterface(Components.interfaces.nsIWebNavigation)
-                                   .QueryInterface(Components.interfaces.nsIInterfaceRequestor)
-                                   .getInterface(Components.interfaces.nsILoadContext);
+  return SpecialPowers.wrap(window).QueryInterface(SpecialPowers.Ci.nsIInterfaceRequestor)
+                                   .getInterface(SpecialPowers.Ci.nsIWebNavigation)
+                                   .QueryInterface(SpecialPowers.Ci.nsIInterfaceRequestor)
+                                   .getInterface(SpecialPowers.Ci.nsILoadContext);
+},
+
+loadContextInfo: function()
+{
+  return LoadContextInfo.fromLoadContext(this.loadContext(), false);
 },
 
 getActiveCache: function(overload)
@@ -260,15 +323,16 @@ getActiveCache: function(overload)
   // one associated with this window.
   var serv = Cc["@mozilla.org/network/application-cache-service;1"]
              .getService(Ci.nsIApplicationCacheService);
-  var groupID = serv.buildGroupID(this.manifestURL(overload), this.loadContext());
+  var groupID = serv.buildGroupID(this.manifestURL(overload), this.loadContextInfo());
   return serv.getActiveCache(groupID);
 },
 
 getActiveSession: function()
 {
   var cache = this.getActiveCache();
-  if (!cache)
+  if (!cache) {
     return null;
+  }
 
   var cacheService = Cc["@mozilla.org/network/cache-service;1"]
                      .getService(Ci.nsICacheService);
@@ -281,7 +345,6 @@ priv: function(func)
 {
   var self = this;
   return function() {
-    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
     func(arguments);
   }
 },
@@ -310,17 +373,16 @@ _checkCache: function(cacheSession, url, expectEntry, callback)
 {
   if (!cacheSession) {
     if (expectEntry) {
-      this.ok(false, url + " should exist in the offline cache");
+      this.ok(false, url + " should exist in the offline cache (no session)");
     } else {
-      this.ok(true, url + " should not exist in the offline cache");
+      this.ok(true, url + " should not exist in the offline cache (no session)");
     }
-    setTimeout(this.priv(callback), 0);
+    if (callback) setTimeout(this.priv(callback), 0);
     return;
   }
 
   var _checkCacheListener = {
     onCacheEntryAvailable: function(entry, access, status) {
-      netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
       if (entry) {
         if (expectEntry) {
           OfflineTest.ok(true, url + " should exist in the offline cache");
@@ -346,7 +408,7 @@ _checkCache: function(cacheSession, url, expectEntry, callback)
           OfflineTest.ok(false, "got invalid error for " + url);
         }
       }
-      setTimeout(OfflineTest.priv(callback), 0);
+      if (callback) setTimeout(OfflineTest.priv(callback), 0);
     }
   };
 

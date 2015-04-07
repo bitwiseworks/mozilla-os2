@@ -7,16 +7,92 @@
 #include "InterfaceInitFuncs.h"
 
 #include "Accessible-inl.h"
-#include "HyperTextAccessible.h"
+#include "HyperTextAccessible-inl.h"
 #include "nsMai.h"
 
+#include "nsIAccessibleTypes.h"
 #include "nsIPersistentProperties2.h"
+#include "nsISimpleEnumerator.h"
 
 #include "mozilla/Likely.h"
 
+using namespace mozilla;
 using namespace mozilla::a11y;
 
-AtkAttributeSet* ConvertToAtkAttributeSet(nsIPersistentProperties* aAttributes);
+static const char* sAtkTextAttrNames[ATK_TEXT_ATTR_LAST_DEFINED];
+
+static AtkAttributeSet*
+ConvertToAtkTextAttributeSet(nsIPersistentProperties* aAttributes)
+{
+  if (!aAttributes)
+    return nullptr;
+
+  AtkAttributeSet* objAttributeSet = nullptr;
+  nsCOMPtr<nsISimpleEnumerator> propEnum;
+  nsresult rv = aAttributes->Enumerate(getter_AddRefs(propEnum));
+  NS_ENSURE_SUCCESS(rv, nullptr);
+
+  bool hasMore = false;
+  while (NS_SUCCEEDED(propEnum->HasMoreElements(&hasMore)) && hasMore) {
+    nsCOMPtr<nsISupports> sup;
+    rv = propEnum->GetNext(getter_AddRefs(sup));
+    NS_ENSURE_SUCCESS(rv, objAttributeSet);
+
+    nsCOMPtr<nsIPropertyElement> propElem(do_QueryInterface(sup));
+    NS_ENSURE_TRUE(propElem, objAttributeSet);
+
+    nsAutoCString name;
+    rv = propElem->GetKey(name);
+    NS_ENSURE_SUCCESS(rv, objAttributeSet);
+
+    nsAutoString value;
+    rv = propElem->GetValue(value);
+    NS_ENSURE_SUCCESS(rv, objAttributeSet);
+
+    AtkAttribute* objAttr = (AtkAttribute*)g_malloc(sizeof(AtkAttribute));
+    objAttr->name = g_strdup(name.get());
+    objAttr->value = g_strdup(NS_ConvertUTF16toUTF8(value).get());
+    objAttributeSet = g_slist_prepend(objAttributeSet, objAttr);
+
+    // Handle attributes where atk has its own name.
+    const char* atkName = nullptr;
+    nsAutoString atkValue;
+    if (name.EqualsLiteral("color")) {
+      // The format of the atk attribute is r,g,b and the gecko one is
+      // rgb(r,g,b).
+      atkValue = Substring(value, 5, value.Length() - 1);
+      atkName = sAtkTextAttrNames[ATK_TEXT_ATTR_FG_COLOR];
+    } else if (name.EqualsLiteral("background-color")) {
+      // The format of the atk attribute is r,g,b and the gecko one is
+      // rgb(r,g,b).
+      atkValue = Substring(value, 5, value.Length() - 1);
+      atkName = sAtkTextAttrNames[ATK_TEXT_ATTR_BG_COLOR];
+    } else if (name.EqualsLiteral("font-family")) {
+      atkValue = value;
+      atkName = sAtkTextAttrNames[ATK_TEXT_ATTR_FAMILY_NAME];
+    } else if (name.Equals("font-size")) {
+      // ATK wants the number of pixels without px at the end.
+      atkValue = StringHead(value, value.Length() - 2);
+      atkName = sAtkTextAttrNames[ATK_TEXT_ATTR_SIZE];
+    } else if (name.EqualsLiteral("font-weight")) {
+      atkValue = value;
+      atkName = sAtkTextAttrNames[ATK_TEXT_ATTR_WEIGHT];
+    } else if (name.EqualsLiteral("invalid")) {
+      atkValue = value;
+      atkName = sAtkTextAttrNames[ATK_TEXT_ATTR_INVALID];
+    }
+
+    if (atkName) {
+      objAttr = static_cast<AtkAttribute*>(g_malloc(sizeof(AtkAttribute)));
+      objAttr->name = g_strdup(atkName);
+      objAttr->value = g_strdup(NS_ConvertUTF16toUTF8(atkValue).get());
+      objAttributeSet = g_slist_prepend(objAttributeSet, objAttr);
+    }
+  }
+
+  // libatk-adaptor will free it
+  return objAttributeSet;
+}
 
 static void
 ConvertTexttoAsterisks(AccessibleWrap* accWrap, nsAString& aString)
@@ -42,8 +118,7 @@ getTextCB(AtkText *aText, gint aStartOffset, gint aEndOffset)
     return nullptr;
 
     nsAutoString autoStr;
-    nsresult rv = text->GetText(aStartOffset, aEndOffset, autoStr);
-    NS_ENSURE_SUCCESS(rv, nullptr);
+    text->TextSubstring(aStartOffset, aEndOffset, autoStr);
 
     ConvertTexttoAsterisks(accWrap, autoStr);
     NS_ConvertUTF16toUTF8 cautoStr(autoStr);
@@ -67,18 +142,14 @@ getTextAfterOffsetCB(AtkText *aText, gint aOffset,
 
   nsAutoString autoStr;
   int32_t startOffset = 0, endOffset = 0;
-  nsresult rv =
-    text->GetTextAfterOffset(aOffset, aBoundaryType,
-                             &startOffset, &endOffset, autoStr);
+  text->TextAfterOffset(aOffset, aBoundaryType, &startOffset, &endOffset, autoStr);
 
   *aStartOffset = startOffset;
   *aEndOffset = endOffset;
 
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-    ConvertTexttoAsterisks(accWrap, autoStr);
-    NS_ConvertUTF16toUTF8 cautoStr(autoStr);
-    return (cautoStr.get()) ? g_strdup(cautoStr.get()) : nullptr;
+  ConvertTexttoAsterisks(accWrap, autoStr);
+  NS_ConvertUTF16toUTF8 cautoStr(autoStr);
+  return (cautoStr.get()) ? g_strdup(cautoStr.get()) : nullptr;
 }
 
 static gchar*
@@ -96,13 +167,9 @@ getTextAtOffsetCB(AtkText *aText, gint aOffset,
 
     nsAutoString autoStr;
     int32_t startOffset = 0, endOffset = 0;
-    nsresult rv =
-        text->GetTextAtOffset(aOffset, aBoundaryType,
-                              &startOffset, &endOffset, autoStr);
+    text->TextAtOffset(aOffset, aBoundaryType, &startOffset, &endOffset, autoStr);
     *aStartOffset = startOffset;
     *aEndOffset = endOffset;
-
-    NS_ENSURE_SUCCESS(rv, nullptr);
 
     ConvertTexttoAsterisks(accWrap, autoStr);
     NS_ConvertUTF16toUTF8 cautoStr(autoStr);
@@ -120,18 +187,8 @@ getCharacterAtOffsetCB(AtkText* aText, gint aOffset)
   if (!text || !text->IsTextRole())
     return 0;
 
-  // PRUnichar is unsigned short in Mozilla
-  // gnuichar is guint32 in glib
-  PRUnichar uniChar = 0;
-  nsresult rv = text->GetCharacterAtOffset(aOffset, &uniChar);
-  if (NS_FAILED(rv))
-    return 0;
-
-  // Convert char to "*" when it's "password text".
-  if (accWrap->NativeRole() == roles::PASSWORD_TEXT)
-    uniChar = '*';
-
-  return static_cast<gunichar>(uniChar);
+  // char16_t is unsigned short in Mozilla, gnuichar is guint32 in glib.
+  return static_cast<gunichar>(text->CharAt(aOffset));
 }
 
 static gchar*
@@ -147,19 +204,16 @@ getTextBeforeOffsetCB(AtkText *aText, gint aOffset,
   if (!text || !text->IsTextRole())
     return nullptr;
 
-    nsAutoString autoStr;
-    int32_t startOffset = 0, endOffset = 0;
-    nsresult rv =
-        text->GetTextBeforeOffset(aOffset, aBoundaryType,
-                                  &startOffset, &endOffset, autoStr);
-    *aStartOffset = startOffset;
-    *aEndOffset = endOffset;
+  nsAutoString autoStr;
+  int32_t startOffset = 0, endOffset = 0;
+  text->TextBeforeOffset(aOffset, aBoundaryType,
+                         &startOffset, &endOffset, autoStr);
+  *aStartOffset = startOffset;
+  *aEndOffset = endOffset;
 
-    NS_ENSURE_SUCCESS(rv, nullptr);
-
-    ConvertTexttoAsterisks(accWrap, autoStr);
-    NS_ConvertUTF16toUTF8 cautoStr(autoStr);
-    return (cautoStr.get()) ? g_strdup(cautoStr.get()) : nullptr;
+  ConvertTexttoAsterisks(accWrap, autoStr);
+  NS_ConvertUTF16toUTF8 cautoStr(autoStr);
+  return (cautoStr.get()) ? g_strdup(cautoStr.get()) : nullptr;
 }
 
 static gint
@@ -173,9 +227,7 @@ getCaretOffsetCB(AtkText *aText)
   if (!text || !text->IsTextRole())
     return 0;
 
-    int32_t offset;
-    nsresult rv = text->GetCaretOffset(&offset);
-    return (NS_FAILED(rv)) ? 0 : static_cast<gint>(offset);
+  return static_cast<gint>(text->CaretOffset());
 }
 
 static AtkAttributeSet*
@@ -194,17 +246,14 @@ getRunAttributesCB(AtkText *aText, gint aOffset,
   if (!text || !text->IsTextRole())
     return nullptr;
 
-    nsCOMPtr<nsIPersistentProperties> attributes;
-    int32_t startOffset = 0, endOffset = 0;
-    nsresult rv = text->GetTextAttributes(false, aOffset,
-                                          &startOffset, &endOffset,
-                                          getter_AddRefs(attributes));
-    NS_ENSURE_SUCCESS(rv, nullptr);
+  int32_t startOffset = 0, endOffset = 0;
+  nsCOMPtr<nsIPersistentProperties> attributes =
+    text->TextAttributes(false, aOffset, &startOffset, &endOffset);
 
-    *aStartOffset = startOffset;
-    *aEndOffset = endOffset;
+  *aStartOffset = startOffset;
+  *aEndOffset = endOffset;
 
-    return ConvertToAtkAttributeSet(attributes);
+  return ConvertToAtkTextAttributeSet(attributes);
 }
 
 static AtkAttributeSet*
@@ -218,12 +267,8 @@ getDefaultAttributesCB(AtkText *aText)
   if (!text || !text->IsTextRole())
     return nullptr;
 
-    nsCOMPtr<nsIPersistentProperties> attributes;
-    nsresult rv = text->GetDefaultTextAttributes(getter_AddRefs(attributes));
-    if (NS_FAILED(rv))
-        return nullptr;
-
-    return ConvertToAtkAttributeSet(attributes);
+  nsCOMPtr<nsIPersistentProperties> attributes = text->DefaultTextAttributes();
+  return ConvertToAtkTextAttributeSet(attributes);
 }
 
 static void
@@ -240,27 +285,17 @@ getCharacterExtentsCB(AtkText *aText, gint aOffset,
   if (!text || !text->IsTextRole())
     return;
 
-    int32_t extY = 0, extX = 0;
-    int32_t extWidth = 0, extHeight = 0;
-
     uint32_t geckoCoordType;
     if (aCoords == ATK_XY_SCREEN)
         geckoCoordType = nsIAccessibleCoordinateType::COORDTYPE_SCREEN_RELATIVE;
     else
         geckoCoordType = nsIAccessibleCoordinateType::COORDTYPE_WINDOW_RELATIVE;
 
-#ifdef DEBUG
-    nsresult rv =
-#endif
-    text->GetCharacterExtents(aOffset, &extX, &extY,
-                              &extWidth, &extHeight,
-                              geckoCoordType);
-    *aX = extX;
-    *aY = extY;
-    *aWidth = extWidth;
-    *aHeight = extHeight;
-    NS_ASSERTION(NS_SUCCEEDED(rv),
-                 "MaiInterfaceText::GetCharacterExtents, failed\n");
+  nsIntRect rect = text->CharBounds(aOffset, geckoCoordType);
+  *aX = rect.x;
+  *aY = rect.y;
+  *aWidth = rect.width;
+  *aHeight = rect.height;
 }
 
 static void
@@ -275,28 +310,17 @@ getRangeExtentsCB(AtkText *aText, gint aStartOffset, gint aEndOffset,
   if (!text || !text->IsTextRole())
     return;
 
-    int32_t extY = 0, extX = 0;
-    int32_t extWidth = 0, extHeight = 0;
-
     uint32_t geckoCoordType;
     if (aCoords == ATK_XY_SCREEN)
         geckoCoordType = nsIAccessibleCoordinateType::COORDTYPE_SCREEN_RELATIVE;
     else
         geckoCoordType = nsIAccessibleCoordinateType::COORDTYPE_WINDOW_RELATIVE;
 
-#ifdef DEBUG
-    nsresult rv =
-#endif
-    text->GetRangeExtents(aStartOffset, aEndOffset,
-                          &extX, &extY,
-                          &extWidth, &extHeight,
-                          geckoCoordType);
-    aRect->x = extX;
-    aRect->y = extY;
-    aRect->width = extWidth;
-    aRect->height = extHeight;
-    NS_ASSERTION(NS_SUCCEEDED(rv),
-                 "MaiInterfaceText::GetRangeExtents, failed\n");
+  nsIntRect rect = text->TextBounds(aStartOffset, aEndOffset, geckoCoordType);
+  aRect->x = rect.x;
+  aRect->y = rect.y;
+  aRect->width = rect.width;
+  aRect->height = rect.height;
 }
 
 static gint
@@ -324,15 +348,11 @@ getOffsetAtPointCB(AtkText *aText,
   if (!text || !text->IsTextRole())
     return -1;
 
-    int32_t offset = 0;
-    uint32_t geckoCoordType;
-    if (aCoords == ATK_XY_SCREEN)
-        geckoCoordType = nsIAccessibleCoordinateType::COORDTYPE_SCREEN_RELATIVE;
-    else
-        geckoCoordType = nsIAccessibleCoordinateType::COORDTYPE_WINDOW_RELATIVE;
-
-    text->GetOffsetAtPoint(aX, aY, geckoCoordType, &offset);
-    return static_cast<gint>(offset);
+  return static_cast<gint>(
+    text->OffsetAtPoint(aX, aY,
+                        (aCoords == ATK_XY_SCREEN ?
+                         nsIAccessibleCoordinateType::COORDTYPE_SCREEN_RELATIVE :
+                         nsIAccessibleCoordinateType::COORDTYPE_WINDOW_RELATIVE)));
 }
 
 static gint
@@ -346,10 +366,7 @@ getTextSelectionCountCB(AtkText *aText)
   if (!text || !text->IsTextRole())
     return 0;
 
-    int32_t selectionCount;
-    nsresult rv = text->GetSelectionCount(&selectionCount);
- 
-    return NS_FAILED(rv) ? 0 : selectionCount;
+  return text->SelectionCount();
 }
 
 static gchar*
@@ -364,14 +381,11 @@ getTextSelectionCB(AtkText *aText, gint aSelectionNum,
   if (!text || !text->IsTextRole())
     return nullptr;
 
-    int32_t startOffset = 0, endOffset = 0;
-    nsresult rv = text->GetSelectionBounds(aSelectionNum,
-                                           &startOffset, &endOffset);
+  int32_t startOffset = 0, endOffset = 0;
+  text->SelectionBoundsAt(aSelectionNum, &startOffset, &endOffset);
 
     *aStartOffset = startOffset;
     *aEndOffset = endOffset;
-
-    NS_ENSURE_SUCCESS(rv, nullptr);
 
     return getTextCB(aText, *aStartOffset, *aEndOffset);
 }
@@ -388,11 +402,9 @@ addTextSelectionCB(AtkText *aText,
 
   HyperTextAccessible* text = accWrap->AsHyperText();
   if (!text || !text->IsTextRole())
-    return false;
+    return FALSE;
 
-    nsresult rv = text->AddSelection(aStartOffset, aEndOffset);
-
-    return NS_SUCCEEDED(rv) ? TRUE : FALSE;
+  return text->AddToSelection(aStartOffset, aEndOffset);
 }
 
 static gboolean
@@ -405,11 +417,9 @@ removeTextSelectionCB(AtkText *aText,
 
   HyperTextAccessible* text = accWrap->AsHyperText();
   if (!text || !text->IsTextRole())
-    return false;
+    return FALSE;
 
-    nsresult rv = text->RemoveSelection(aSelectionNum);
-
-    return NS_SUCCEEDED(rv) ? TRUE : FALSE;
+  return text->RemoveFromSelection(aSelectionNum);
 }
 
 static gboolean
@@ -422,11 +432,9 @@ setTextSelectionCB(AtkText *aText, gint aSelectionNum,
 
   HyperTextAccessible* text = accWrap->AsHyperText();
   if (!text || !text->IsTextRole())
-    return false;
+    return FALSE;
 
-    nsresult rv = text->SetSelectionBounds(aSelectionNum,
-                                           aStartOffset, aEndOffset);
-    return NS_SUCCEEDED(rv) ? TRUE : FALSE;
+  return text->SetSelectionBoundsAt(aSelectionNum, aStartOffset, aEndOffset);
 }
 
 static gboolean
@@ -437,11 +445,11 @@ setCaretOffsetCB(AtkText *aText, gint aOffset)
     return FALSE;
 
   HyperTextAccessible* text = accWrap->AsHyperText();
-  if (!text || !text->IsTextRole())
-    return false;
+  if (!text || !text->IsTextRole() || !text->IsValidOffset(aOffset))
+    return FALSE;
 
-    nsresult rv = text->SetCaretOffset(aOffset);
-    return NS_SUCCEEDED(rv) ? TRUE : FALSE;
+  text->SetCaretOffset(aOffset);
+  return TRUE;
 }
 }
 
@@ -472,4 +480,9 @@ textInterfaceInitCB(AtkTextIface* aIface)
   aIface->remove_selection = removeTextSelectionCB;
   aIface->set_selection = setTextSelectionCB;
   aIface->set_caret_offset = setCaretOffsetCB;
+
+  // Cache the string values of the atk text attribute names.
+  for (uint32_t i = 0; i < ArrayLength(sAtkTextAttrNames); i++)
+    sAtkTextAttrNames[i] =
+      atk_text_attribute_get_name(static_cast<AtkTextAttribute>(i));
 }

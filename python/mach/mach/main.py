@@ -5,7 +5,8 @@
 # This module provides functionality for the command-line build tool
 # (mach). It is packaged as a module because everything is a library.
 
-from __future__ import absolute_import, unicode_literals
+from __future__ import absolute_import, print_function, unicode_literals
+from collections import Iterable
 
 import argparse
 import codecs
@@ -87,6 +88,23 @@ It looks like you passed an unrecognized argument into mach.
 The %s command does not accept the arguments: %s
 '''.lstrip()
 
+INVALID_COMMAND_CONTEXT = r'''
+It looks like you tried to run a mach command from an invalid context. The %s
+command failed to meet the following conditions: %s
+
+Run |mach help| to show a list of all commands available to the current context.
+'''.lstrip()
+
+INVALID_ENTRY_POINT = r'''
+Entry points should return a list of command providers or directories
+containing command providers. The following entry point is invalid:
+
+    %s
+
+You are seeing this because there is an error in an external module attempting
+to implement a mach command. Please fix the error, or uninstall the module from
+your system.
+'''.lstrip()
 
 class ArgumentParser(argparse.ArgumentParser):
     """Custom implementation argument parser to make things look pretty."""
@@ -125,9 +143,53 @@ class ArgumentParser(argparse.ArgumentParser):
         return text
 
 
+class ContextWrapper(object):
+    def __init__(self, context, handler):
+        object.__setattr__(self, '_context', context)
+        object.__setattr__(self, '_handler', handler)
+
+    def __getattribute__(self, key):
+        try:
+            return getattr(object.__getattribute__(self, '_context'), key)
+        except AttributeError as e:
+            try:
+                ret = object.__getattribute__(self, '_handler')(self, key)
+            except AttributeError, TypeError:
+                # TypeError is in case the handler comes from old code not
+                # taking a key argument.
+                raise e
+            setattr(self, key, ret)
+            return ret
+
+    def __setattr__(self, key, value):
+        setattr(object.__getattribute__(self, '_context'), key, value)
+
+
 @CommandProvider
 class Mach(object):
-    """Contains code for the command-line `mach` interface."""
+    """Main mach driver type.
+
+    This type is responsible for holding global mach state and dispatching
+    a command from arguments.
+
+    The following attributes may be assigned to the instance to influence
+    behavior:
+
+        populate_context_handler -- If defined, it must be a callable. The
+            callable signature is the following:
+                populate_context_handler(context, key=None)
+            It acts as a fallback getter for the mach.base.CommandContext
+            instance.
+            This allows to augment the context instance with arbitrary data
+            for use in command handlers.
+            For backwards compatibility, it is also called before command
+            dispatch without a key, allowing the context handler to add
+            attributes to the context instance.
+
+        require_conditions -- If True, commands that do not have any condition
+            functions applied will be skipped. Defaults to False.
+
+    """
 
     USAGE = """%(prog)s [global arguments] command [command arguments]
 
@@ -155,6 +217,16 @@ To see more help for a specific command, run:
         self.settings = ConfigSettings()
 
         self.log_manager.register_structured_logger(self.logger)
+        self.global_arguments = []
+        self.populate_context_handler = None
+
+    def add_global_argument(self, *args, **kwargs):
+        """Register a global argument with the argument parser.
+
+        Arguments are proxied to ArgumentParser.add_argument()
+        """
+
+        self.global_arguments.append((args, kwargs))
 
     def load_commands_from_directory(self, path):
         """Scan for mach commands from modules in a directory.
@@ -189,10 +261,47 @@ To see more help for a specific command, run:
 
         imp.load_source(module_name, path)
 
+    def load_commands_from_entry_point(self, group='mach.providers'):
+        """Scan installed packages for mach command provider entry points. An
+        entry point is a function that returns a list of paths to files or
+        directories containing command providers.
+
+        This takes an optional group argument which specifies the entry point
+        group to use. If not specified, it defaults to 'mach.providers'.
+        """
+        try:
+            import pkg_resources
+        except ImportError:
+            print("Could not find setuptools, ignoring command entry points",
+                  file=sys.stderr)
+            return
+
+        for entry in pkg_resources.iter_entry_points(group=group, name=None):
+            paths = entry.load()()
+            if not isinstance(paths, Iterable):
+                print(INVALID_ENTRY_POINT % entry)
+                sys.exit(1)
+
+            for path in paths:
+                if os.path.isfile(path):
+                    self.load_commands_from_file(path)
+                elif os.path.isdir(path):
+                    self.load_commands_from_directory(path)
+                else:
+                    print("command provider '%s' does not exist" % path)
+
     def define_category(self, name, title, description, priority=50):
         """Provide a description for a named command category."""
 
         Registrar.register_category(name, title, description, priority)
+
+    @property
+    def require_conditions(self):
+        return Registrar.require_conditions
+
+    @require_conditions.setter
+    def require_conditions(self, value):
+        Registrar.require_conditions = value
 
     def run(self, argv, stdin=None, stdout=None, stderr=None):
         """Runs mach with arguments provided from the command line.
@@ -255,7 +364,15 @@ To see more help for a specific command, run:
             sys.stderr = orig_stderr
 
     def _run(self, argv):
-        parser = self.get_argument_parser()
+        context = CommandContext(cwd=self.cwd,
+            settings=self.settings, log_manager=self.log_manager,
+            commands=Registrar)
+
+        if self.populate_context_handler:
+            self.populate_context_handler(context)
+            context = ContextWrapper(context, self.populate_context_handler)
+
+        parser = self.get_argument_parser(context)
 
         if not len(argv):
             # We don't register the usage until here because if it is globally
@@ -289,19 +406,19 @@ To see more help for a specific command, run:
 
         self.log_manager.register_structured_logger(logging.getLogger('mach'))
 
+        write_times = True
+        if args.log_no_times or 'MACH_NO_WRITE_TIMES' in os.environ:
+            write_times = False
+
         # Always enable terminal logging. The log manager figures out if we are
         # actually in a TTY or are a pipe and does the right thing.
         self.log_manager.add_terminal_logging(level=log_level,
-            write_interval=args.log_interval)
+            write_interval=args.log_interval, write_times=write_times)
 
         self.load_settings(args)
 
         if not hasattr(args, 'mach_handler'):
             raise MachError('ArgumentParser result missing mach handler info.')
-
-        context = CommandContext(topdir=self.cwd, cwd=self.cwd,
-            settings=self.settings, log_manager=self.log_manager,
-            commands=Registrar)
 
         handler = getattr(args, 'mach_handler')
         cls = handler.cls
@@ -310,6 +427,16 @@ To see more help for a specific command, run:
             instance = cls(context)
         else:
             instance = cls()
+
+        if handler.conditions:
+            fail_conditions = []
+            for c in handler.conditions:
+                if not c(instance):
+                    fail_conditions.append(c)
+
+            if fail_conditions:
+                print(self._condition_failed_message(handler.name, fail_conditions))
+                return 1
 
         fn = getattr(instance, handler.method)
 
@@ -375,6 +502,16 @@ To see more help for a specific command, run:
         self.logger.log(level, format_str,
             extra={'action': action, 'params': params})
 
+    @classmethod
+    def _condition_failed_message(cls, name, conditions):
+        msg = ['\n']
+        for c in conditions:
+            part = ['  %s' % c.__name__]
+            if c.__doc__ is not None:
+                part.append(c.__doc__)
+            msg.append(' - '.join(part))
+        return INVALID_COMMAND_CONTEXT % (name, '\n'.join(msg))
+
     def _print_error_header(self, argv, fh):
         fh.write('Error running mach:\n\n')
         fh.write('    ')
@@ -430,7 +567,7 @@ To see more help for a specific command, run:
 
         return os.path.exists(p)
 
-    def get_argument_parser(self):
+    def get_argument_parser(self, context):
         """Returns an argument parser for the command-line interface."""
 
         parser = ArgumentParser(add_help=False,
@@ -454,11 +591,17 @@ To see more help for a specific command, run:
             help='Prefix log line with interval from last message rather '
                 'than relative time. Note that this is NOT execution time '
                 'if there are parallel operations.')
+        global_group.add_argument('--log-no-times', dest='log_no_times',
+            action='store_true', default=False,
+            help='Do not prefix log lines with times. By default, mach will '
+                'prefix each output line with the time since command start.')
+
+        for args, kwargs in self.global_arguments:
+            global_group.add_argument(*args, **kwargs)
 
         # We need to be last because CommandAction swallows all remaining
         # arguments and argparse parses arguments in the order they were added.
         parser.add_argument('command', action=CommandAction,
-            registrar=Registrar)
+            registrar=Registrar, context=context)
 
         return parser
-

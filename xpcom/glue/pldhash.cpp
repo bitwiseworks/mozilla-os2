@@ -9,17 +9,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "prbit.h"
 #include "pldhash.h"
 #include "mozilla/HashFunctions.h"
+#include "mozilla/MathAlgorithms.h"
 #include "nsDebug.h"     /* for PR_ASSERT */
 #include "nsAlgorithm.h"
 #include "mozilla/Likely.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/ChaosMode.h"
 
 #ifdef PL_DHASHMETER
-# if defined MOZILLA_CLIENT && defined DEBUG_XXXbrendan
-#  include "nsTraceMalloc.h"
-# endif
 # define METER(x)       x
 #else
 # define METER(x)       /* nothing */
@@ -28,16 +27,10 @@
 /*
  * The following DEBUG-only code is used to assert that calls to one of
  * table->ops or to an enumerator do not cause re-entry into a call that
- * can mutate the table.  The recursion level is stored in additional
- * space allocated at the end of the entry store to avoid changing
- * PLDHashTable, which could cause issues when mixing DEBUG and
- * non-DEBUG components.
+ * can mutate the table.
  */
 #ifdef DEBUG
 
-#define RECURSION_LEVEL(table_) (*(uint32_t*)(table_->entryStore + \
-                                            PL_DHASH_TABLE_SIZE(table_) * \
-                                            table_->entrySize))
 /*
  * Most callers that assert about the recursion level don't care about
  * this magical value because they are asserting that mutation is
@@ -46,31 +39,29 @@
  *
  * Only PL_DHashTableFinish needs to allow this special value.
  */
-#define IMMUTABLE_RECURSION_LEVEL ((uint32_t)-1)
+#define IMMUTABLE_RECURSION_LEVEL ((uint16_t)-1)
 
 #define RECURSION_LEVEL_SAFE_TO_FINISH(table_)                                \
-    (RECURSION_LEVEL(table_) == 0 ||                                          \
-     RECURSION_LEVEL(table_) == IMMUTABLE_RECURSION_LEVEL)
+    (table_->recursionLevel == 0 ||                                           \
+     table_->recursionLevel == IMMUTABLE_RECURSION_LEVEL)
 
-#define ENTRY_STORE_EXTRA                   sizeof(uint32_t)
 #define INCREMENT_RECURSION_LEVEL(table_)                                     \
-    PR_BEGIN_MACRO                                                            \
-        if (RECURSION_LEVEL(table_) != IMMUTABLE_RECURSION_LEVEL)             \
-            ++RECURSION_LEVEL(table_);                                        \
-    PR_END_MACRO
+    do {                                                                      \
+        if (table_->recursionLevel != IMMUTABLE_RECURSION_LEVEL)              \
+            ++table_->recursionLevel;                                         \
+    } while(0)
 #define DECREMENT_RECURSION_LEVEL(table_)                                     \
-    PR_BEGIN_MACRO                                                            \
-        if (RECURSION_LEVEL(table_) != IMMUTABLE_RECURSION_LEVEL) {           \
-            MOZ_ASSERT(RECURSION_LEVEL(table_) > 0);                          \
-            --RECURSION_LEVEL(table_);                                        \
+    do {                                                                      \
+        if (table->recursionLevel != IMMUTABLE_RECURSION_LEVEL) {             \
+            MOZ_ASSERT(table->recursionLevel > 0);                            \
+            --table->recursionLevel;                                          \
         }                                                                     \
-    PR_END_MACRO
+    } while(0)
 
 #else
 
-#define ENTRY_STORE_EXTRA 0
-#define INCREMENT_RECURSION_LEVEL(table_)   PR_BEGIN_MACRO PR_END_MACRO
-#define DECREMENT_RECURSION_LEVEL(table_)   PR_BEGIN_MACRO PR_END_MACRO
+#define INCREMENT_RECURSION_LEVEL(table_)   do { } while(0)
+#define DECREMENT_RECURSION_LEVEL(table_)   do { } while(0)
 
 #endif /* defined(DEBUG) */
 
@@ -159,7 +150,7 @@ static const PLDHashTableOps stub_ops = {
     PL_DHashMoveEntryStub,
     PL_DHashClearEntryStub,
     PL_DHashFinalizeStub,
-    NULL
+    nullptr
 };
 
 const PLDHashTableOps *
@@ -168,18 +159,24 @@ PL_DHashGetStubOps(void)
     return &stub_ops;
 }
 
+static bool
+SizeOfEntryStore(uint32_t capacity, uint32_t entrySize, uint32_t *nbytes)
+{
+    uint64_t nbytes64 = uint64_t(capacity) * uint64_t(entrySize);
+    *nbytes = capacity * entrySize;
+    return uint64_t(*nbytes) == nbytes64;   // returns false on overflow
+}
+
 PLDHashTable *
 PL_NewDHashTable(const PLDHashTableOps *ops, void *data, uint32_t entrySize,
                  uint32_t capacity)
 {
-    PLDHashTable *table;
-
-    table = (PLDHashTable *) malloc(sizeof *table);
+    PLDHashTable *table = (PLDHashTable *) malloc(sizeof *table);
     if (!table)
-        return NULL;
-    if (!PL_DHashTableInit(table, ops, data, entrySize, capacity)) {
+        return nullptr;
+    if (!PL_DHashTableInit(table, ops, data, entrySize, capacity, fallible_t())) {
         free(table);
-        return NULL;
+        return nullptr;
     }
     return table;
 }
@@ -192,12 +189,10 @@ PL_DHashTableDestroy(PLDHashTable *table)
 }
 
 bool
-PL_DHashTableInit(PLDHashTable *table, const PLDHashTableOps *ops, void *data,
-                  uint32_t entrySize, uint32_t capacity)
+PL_DHashTableInit(PLDHashTable *table, const PLDHashTableOps *ops,
+                  void *data, uint32_t entrySize, uint32_t capacity,
+                  const fallible_t& )
 {
-    int log2;
-    uint32_t nbytes;
-
 #ifdef DEBUG
     if (entrySize > 16 * sizeof(void *)) {
         printf_stderr(
@@ -213,82 +208,63 @@ PL_DHashTableInit(PLDHashTable *table, const PLDHashTableOps *ops, void *data,
     if (capacity < PL_DHASH_MIN_SIZE)
         capacity = PL_DHASH_MIN_SIZE;
 
-    PR_CEILING_LOG2(log2, capacity);
+    int log2 = CeilingLog2(capacity);
 
     capacity = 1u << log2;
-    if (capacity >= PL_DHASH_SIZE_LIMIT)
+    if (capacity > PL_DHASH_MAX_SIZE)
         return false;
     table->hashShift = PL_DHASH_BITS - log2;
-    table->maxAlphaFrac = (uint8_t)(0x100 * PL_DHASH_DEFAULT_MAX_ALPHA);
-    table->minAlphaFrac = (uint8_t)(0x100 * PL_DHASH_DEFAULT_MIN_ALPHA);
     table->entrySize = entrySize;
     table->entryCount = table->removedCount = 0;
     table->generation = 0;
-    nbytes = capacity * entrySize;
+    uint32_t nbytes;
+    if (!SizeOfEntryStore(capacity, entrySize, &nbytes))
+        return false;   // overflowed
 
-    table->entryStore = (char *) ops->allocTable(table,
-                                                 nbytes + ENTRY_STORE_EXTRA);
+    table->entryStore = (char *) ops->allocTable(table, nbytes);
     if (!table->entryStore)
         return false;
     memset(table->entryStore, 0, nbytes);
     METER(memset(&table->stats, 0, sizeof table->stats));
 
 #ifdef DEBUG
-    RECURSION_LEVEL(table) = 0;
+    table->recursionLevel = 0;
 #endif
 
     return true;
 }
 
-/*
- * Compute max and min load numbers (entry counts) from table params.
- */
-#define MAX_LOAD(table, size)   (((table)->maxAlphaFrac * (size)) >> 8)
-#define MIN_LOAD(table, size)   (((table)->minAlphaFrac * (size)) >> 8)
-
 void
-PL_DHashTableSetAlphaBounds(PLDHashTable *table,
-                            float maxAlpha,
-                            float minAlpha)
+PL_DHashTableInit(PLDHashTable *table, const PLDHashTableOps *ops, void *data,
+                  uint32_t entrySize, uint32_t capacity)
 {
-    uint32_t size;
-
-    /*
-     * Reject obviously insane bounds, rather than trying to guess what the
-     * buggy caller intended.
-     */
-    NS_ASSERTION(0.5 <= maxAlpha && maxAlpha < 1 && 0 <= minAlpha,
-                 "0.5 <= maxAlpha && maxAlpha < 1 && 0 <= minAlpha");
-    if (maxAlpha < 0.5 || 1 <= maxAlpha || minAlpha < 0)
-        return;
-
-    /*
-     * Ensure that at least one entry will always be free.  If maxAlpha at
-     * minimum size leaves no entries free, reduce maxAlpha based on minimum
-     * size and the precision limit of maxAlphaFrac's fixed point format.
-     */
-    NS_ASSERTION(PL_DHASH_MIN_SIZE - (maxAlpha * PL_DHASH_MIN_SIZE) >= 1,
-                 "PL_DHASH_MIN_SIZE - (maxAlpha * PL_DHASH_MIN_SIZE) >= 1");
-    if (PL_DHASH_MIN_SIZE - (maxAlpha * PL_DHASH_MIN_SIZE) < 1) {
-        maxAlpha = (float)
-                   (PL_DHASH_MIN_SIZE - XPCOM_MAX(PL_DHASH_MIN_SIZE / 256, 1))
-                   / PL_DHASH_MIN_SIZE;
+    if (!PL_DHashTableInit(table, ops, data, entrySize, capacity, fallible_t())) {
+        if (capacity > PL_DHASH_MAX_SIZE) {
+            MOZ_CRASH();
+        }
+        uint32_t nbytes;
+        if (!SizeOfEntryStore(capacity, entrySize, &nbytes)) {
+            MOZ_CRASH();
+        }
+        NS_ABORT_OOM(nbytes);
     }
+}
 
-    /*
-     * Ensure that minAlpha is strictly less than half maxAlpha.  Take care
-     * not to truncate an entry's worth of alpha when storing in minAlphaFrac
-     * (8-bit fixed point format).
-     */
-    NS_ASSERTION(minAlpha < maxAlpha / 2,
-                 "minAlpha < maxAlpha / 2");
-    if (minAlpha >= maxAlpha / 2) {
-        size = PL_DHASH_TABLE_SIZE(table);
-        minAlpha = (size * maxAlpha - XPCOM_MAX(size / 256, 1u)) / (2 * size);
-    }
-
-    table->maxAlphaFrac = (uint8_t)(maxAlpha * 256);
-    table->minAlphaFrac = (uint8_t)(minAlpha * 256);
+/*
+ * Compute max and min load numbers (entry counts).  We have a secondary max
+ * that allows us to overload a table reasonably if it cannot be grown further
+ * (i.e. if ChangeTable() fails).  The table slows down drastically if the
+ * secondary max is too close to 1, but 0.96875 gives only a slight slowdown
+ * while allowing 1.3x more elements.
+ */
+static inline uint32_t MaxLoad(uint32_t size) {
+    return size - (size >> 2);  // == size * 0.75
+}
+static inline uint32_t MaxLoadOnGrowthFailure(uint32_t size) {
+    return size - (size >> 5);  // == size * 0.96875
+}
+static inline uint32_t MinLoad(uint32_t size) {
+    return size >> 2;           // == size * 0.25
 }
 
 /*
@@ -328,33 +304,17 @@ PL_DHashTableSetAlphaBounds(PLDHashTable *table,
 void
 PL_DHashTableFinish(PLDHashTable *table)
 {
-    char *entryAddr, *entryLimit;
-    uint32_t entrySize;
-    PLDHashEntryHdr *entry;
-
-#ifdef DEBUG_XXXbrendan
-    static FILE *dumpfp = NULL;
-    if (!dumpfp) dumpfp = fopen("/tmp/pldhash.bigdump", "w");
-    if (dumpfp) {
-#ifdef MOZILLA_CLIENT
-        NS_TraceStack(1, dumpfp);
-#endif
-        PL_DHashTableDumpMeter(table, NULL, dumpfp);
-        fputc('\n', dumpfp);
-    }
-#endif
-
     INCREMENT_RECURSION_LEVEL(table);
 
     /* Call finalize before clearing entries, so it can enumerate them. */
     table->ops->finalize(table);
 
     /* Clear any remaining live entries. */
-    entryAddr = table->entryStore;
-    entrySize = table->entrySize;
-    entryLimit = entryAddr + PL_DHASH_TABLE_SIZE(table) * entrySize;
+    char *entryAddr = table->entryStore;
+    uint32_t entrySize = table->entrySize;
+    char *entryLimit = entryAddr + PL_DHASH_TABLE_SIZE(table) * entrySize;
     while (entryAddr < entryLimit) {
-        entry = (PLDHashEntryHdr *)entryAddr;
+        PLDHashEntryHdr *entry = (PLDHashEntryHdr *)entryAddr;
         if (ENTRY_IS_LIVE(entry)) {
             METER(table->stats.removeEnums++);
             table->ops->clearEntry(table, entry);
@@ -373,20 +333,14 @@ static PLDHashEntryHdr * PL_DHASH_FASTCALL
 SearchTable(PLDHashTable *table, const void *key, PLDHashNumber keyHash,
             PLDHashOperator op)
 {
-    PLDHashNumber hash1, hash2;
-    int hashShift, sizeLog2;
-    PLDHashEntryHdr *entry, *firstRemoved;
-    PLDHashMatchEntry matchEntry;
-    uint32_t sizeMask;
-
     METER(table->stats.searches++);
     NS_ASSERTION(!(keyHash & COLLISION_FLAG),
                  "!(keyHash & COLLISION_FLAG)");
 
     /* Compute the primary hash address. */
-    hashShift = table->hashShift;
-    hash1 = HASH1(keyHash, hashShift);
-    entry = ADDRESS_ENTRY(table, hash1);
+    int hashShift = table->hashShift;
+    PLDHashNumber hash1 = HASH1(keyHash, hashShift);
+    PLDHashEntryHdr *entry = ADDRESS_ENTRY(table, hash1);
 
     /* Miss: return space for a new entry. */
     if (PL_DHASH_ENTRY_IS_FREE(entry)) {
@@ -395,19 +349,19 @@ SearchTable(PLDHashTable *table, const void *key, PLDHashNumber keyHash,
     }
 
     /* Hit: return entry. */
-    matchEntry = table->ops->matchEntry;
+    PLDHashMatchEntry matchEntry = table->ops->matchEntry;
     if (MATCH_ENTRY_KEYHASH(entry, keyHash) && matchEntry(table, entry, key)) {
         METER(table->stats.hits++);
         return entry;
     }
 
     /* Collision: double hash. */
-    sizeLog2 = PL_DHASH_BITS - table->hashShift;
-    hash2 = HASH2(keyHash, sizeLog2, hashShift);
-    sizeMask = (1u << sizeLog2) - 1;
+    int sizeLog2 = PL_DHASH_BITS - table->hashShift;
+    PLDHashNumber hash2 = HASH2(keyHash, sizeLog2, hashShift);
+    uint32_t sizeMask = (1u << sizeLog2) - 1;
 
     /* Save the first removed entry pointer so PL_DHASH_ADD can recycle it. */
-    firstRemoved = NULL;
+    PLDHashEntryHdr *firstRemoved = nullptr;
 
     for (;;) {
         if (MOZ_UNLIKELY(ENTRY_IS_REMOVED(entry))) {
@@ -436,7 +390,7 @@ SearchTable(PLDHashTable *table, const void *key, PLDHashNumber keyHash,
     }
 
     /* NOTREACHED */
-    return NULL;
+    return nullptr;
 }
 
 /*
@@ -452,19 +406,14 @@ SearchTable(PLDHashTable *table, const void *key, PLDHashNumber keyHash,
 static PLDHashEntryHdr * PL_DHASH_FASTCALL
 FindFreeEntry(PLDHashTable *table, PLDHashNumber keyHash)
 {
-    PLDHashNumber hash1, hash2;
-    int hashShift, sizeLog2;
-    PLDHashEntryHdr *entry;
-    uint32_t sizeMask;
-
     METER(table->stats.searches++);
     NS_ASSERTION(!(keyHash & COLLISION_FLAG),
                  "!(keyHash & COLLISION_FLAG)");
 
     /* Compute the primary hash address. */
-    hashShift = table->hashShift;
-    hash1 = HASH1(keyHash, hashShift);
-    entry = ADDRESS_ENTRY(table, hash1);
+    int hashShift = table->hashShift;
+    PLDHashNumber hash1 = HASH1(keyHash, hashShift);
+    PLDHashEntryHdr *entry = ADDRESS_ENTRY(table, hash1);
 
     /* Miss: return space for a new entry. */
     if (PL_DHASH_ENTRY_IS_FREE(entry)) {
@@ -473,9 +422,9 @@ FindFreeEntry(PLDHashTable *table, PLDHashNumber keyHash)
     }
 
     /* Collision: double hash. */
-    sizeLog2 = PL_DHASH_BITS - table->hashShift;
-    hash2 = HASH2(keyHash, sizeLog2, hashShift);
-    sizeMask = (1u << sizeLog2) - 1;
+    int sizeLog2 = PL_DHASH_BITS - table->hashShift;
+    PLDHashNumber hash2 = HASH2(keyHash, sizeLog2, hashShift);
+    uint32_t sizeMask = (1u << sizeLog2) - 1;
 
     for (;;) {
         NS_ASSERTION(!ENTRY_IS_REMOVED(entry),
@@ -494,40 +443,31 @@ FindFreeEntry(PLDHashTable *table, PLDHashNumber keyHash)
     }
 
     /* NOTREACHED */
-    return NULL;
+    return nullptr;
 }
 
 static bool
 ChangeTable(PLDHashTable *table, int deltaLog2)
 {
-    int oldLog2, newLog2;
-    uint32_t oldCapacity, newCapacity;
-    char *newEntryStore, *oldEntryStore, *oldEntryAddr;
-    uint32_t entrySize, i, nbytes;
-    PLDHashEntryHdr *oldEntry, *newEntry;
-    PLDHashMoveEntry moveEntry;
-#ifdef DEBUG
-    uint32_t recursionLevel;
-#endif
-
     /* Look, but don't touch, until we succeed in getting new entry store. */
-    oldLog2 = PL_DHASH_BITS - table->hashShift;
-    newLog2 = oldLog2 + deltaLog2;
-    oldCapacity = 1u << oldLog2;
-    newCapacity = 1u << newLog2;
-    if (newCapacity >= PL_DHASH_SIZE_LIMIT)
+    int oldLog2 = PL_DHASH_BITS - table->hashShift;
+    int newLog2 = oldLog2 + deltaLog2;
+    uint32_t newCapacity = 1u << newLog2;
+    if (newCapacity > PL_DHASH_MAX_SIZE)
         return false;
-    entrySize = table->entrySize;
-    nbytes = newCapacity * entrySize;
 
-    newEntryStore = (char *) table->ops->allocTable(table,
-                                                    nbytes + ENTRY_STORE_EXTRA);
+    uint32_t entrySize = table->entrySize;
+    uint32_t nbytes;
+    if (!SizeOfEntryStore(newCapacity, entrySize, &nbytes))
+        return false;   // overflowed
+
+    char *newEntryStore = (char *) table->ops->allocTable(table, nbytes);
     if (!newEntryStore)
         return false;
 
     /* We can't fail from here on, so update table parameters. */
 #ifdef DEBUG
-    recursionLevel = RECURSION_LEVEL(table);
+    uint32_t recursionLevel = table->recursionLevel;
 #endif
     table->hashShift = PL_DHASH_BITS - newLog2;
     table->removedCount = 0;
@@ -535,19 +475,21 @@ ChangeTable(PLDHashTable *table, int deltaLog2)
 
     /* Assign the new entry store to table. */
     memset(newEntryStore, 0, nbytes);
+    char *oldEntryStore, *oldEntryAddr;
     oldEntryAddr = oldEntryStore = table->entryStore;
     table->entryStore = newEntryStore;
-    moveEntry = table->ops->moveEntry;
+    PLDHashMoveEntry moveEntry = table->ops->moveEntry;
 #ifdef DEBUG
-    RECURSION_LEVEL(table) = recursionLevel;
+    table->recursionLevel = recursionLevel;
 #endif
 
     /* Copy only live entries, leaving removed ones behind. */
-    for (i = 0; i < oldCapacity; i++) {
-        oldEntry = (PLDHashEntryHdr *)oldEntryAddr;
+    uint32_t oldCapacity = 1u << oldLog2;
+    for (uint32_t i = 0; i < oldCapacity; i++) {
+        PLDHashEntryHdr *oldEntry = (PLDHashEntryHdr *)oldEntryAddr;
         if (ENTRY_IS_LIVE(oldEntry)) {
             oldEntry->keyHash &= ~COLLISION_FLAG;
-            newEntry = FindFreeEntry(table, oldEntry->keyHash);
+            PLDHashEntryHdr *newEntry = FindFreeEntry(table, oldEntry->keyHash);
             NS_ASSERTION(PL_DHASH_ENTRY_IS_FREE(newEntry),
                          "PL_DHASH_ENTRY_IS_FREE(newEntry)");
             moveEntry(table, oldEntry, newEntry);
@@ -563,15 +505,12 @@ ChangeTable(PLDHashTable *table, int deltaLog2)
 PLDHashEntryHdr * PL_DHASH_FASTCALL
 PL_DHashTableOperate(PLDHashTable *table, const void *key, PLDHashOperator op)
 {
-    PLDHashNumber keyHash;
     PLDHashEntryHdr *entry;
-    uint32_t size;
-    int deltaLog2;
 
-    MOZ_ASSERT(op == PL_DHASH_LOOKUP || RECURSION_LEVEL(table) == 0);
+    MOZ_ASSERT(op == PL_DHASH_LOOKUP || table->recursionLevel == 0);
     INCREMENT_RECURSION_LEVEL(table);
 
-    keyHash = table->ops->hashKey(table, key);
+    PLDHashNumber keyHash = table->ops->hashKey(table, key);
     keyHash *= PL_DHASH_GOLDEN_RATIO;
 
     /* Avoid 0 and 1 hash codes, they indicate free and removed entries. */
@@ -584,15 +523,16 @@ PL_DHashTableOperate(PLDHashTable *table, const void *key, PLDHashOperator op)
         entry = SearchTable(table, key, keyHash, op);
         break;
 
-      case PL_DHASH_ADD:
+      case PL_DHASH_ADD: {
         /*
          * If alpha is >= .75, grow or compress the table.  If key is already
          * in the table, we may grow once more than necessary, but only if we
          * are on the edge of being overloaded.
          */
-        size = PL_DHASH_TABLE_SIZE(table);
-        if (table->entryCount + table->removedCount >= MAX_LOAD(table, size)) {
+        uint32_t size = PL_DHASH_TABLE_SIZE(table);
+        if (table->entryCount + table->removedCount >= MaxLoad(size)) {
             /* Compress if a quarter or more of all entries are removed. */
+            int deltaLog2;
             if (table->removedCount >= size >> 2) {
                 METER(table->stats.compresses++);
                 deltaLog2 = 0;
@@ -602,13 +542,16 @@ PL_DHashTableOperate(PLDHashTable *table, const void *key, PLDHashOperator op)
             }
 
             /*
-             * Grow or compress table, returning null if ChangeTable fails and
-             * falling through might claim the last free entry.
+             * Grow or compress table.  If ChangeTable() fails, allow
+             * overloading up to the secondary max.  Once we hit the secondary
+             * max, return null.
              */
             if (!ChangeTable(table, deltaLog2) &&
-                table->entryCount + table->removedCount == size - 1) {
+                table->entryCount + table->removedCount >=
+                    MaxLoadOnGrowthFailure(size))
+            {
                 METER(table->stats.addFailures++);
-                entry = NULL;
+                entry = nullptr;
                 break;
             }
         }
@@ -630,7 +573,7 @@ PL_DHashTableOperate(PLDHashTable *table, const void *key, PLDHashOperator op)
                 !table->ops->initEntry(table, entry, key)) {
                 /* We haven't claimed entry yet; fail with null return. */
                 memset(entry + 1, 0, table->entrySize - sizeof *entry);
-                entry = NULL;
+                entry = nullptr;
                 break;
             }
             entry->keyHash = keyHash;
@@ -638,6 +581,7 @@ PL_DHashTableOperate(PLDHashTable *table, const void *key, PLDHashOperator op)
         }
         METER(else table->stats.addHits++);
         break;
+      }
 
       case PL_DHASH_REMOVE:
         entry = SearchTable(table, key, keyHash, op);
@@ -647,20 +591,20 @@ PL_DHashTableOperate(PLDHashTable *table, const void *key, PLDHashOperator op)
             PL_DHashTableRawRemove(table, entry);
 
             /* Shrink if alpha is <= .25 and table isn't too small already. */
-            size = PL_DHASH_TABLE_SIZE(table);
+            uint32_t size = PL_DHASH_TABLE_SIZE(table);
             if (size > PL_DHASH_MIN_SIZE &&
-                table->entryCount <= MIN_LOAD(table, size)) {
+                table->entryCount <= MinLoad(size)) {
                 METER(table->stats.shrinks++);
                 (void) ChangeTable(table, -1);
             }
         }
         METER(else table->stats.removeMisses++);
-        entry = NULL;
+        entry = nullptr;
         break;
 
       default:
         NS_NOTREACHED("0");
-        entry = NULL;
+        entry = nullptr;
     }
 
     DECREMENT_RECURSION_LEVEL(table);
@@ -671,13 +615,13 @@ PL_DHashTableOperate(PLDHashTable *table, const void *key, PLDHashOperator op)
 void
 PL_DHashTableRawRemove(PLDHashTable *table, PLDHashEntryHdr *entry)
 {
-    PLDHashNumber keyHash;      /* load first in case clearEntry goofs it */
-
-    MOZ_ASSERT(RECURSION_LEVEL(table) != IMMUTABLE_RECURSION_LEVEL);
+    MOZ_ASSERT(table->recursionLevel != IMMUTABLE_RECURSION_LEVEL);
 
     NS_ASSERTION(PL_DHASH_ENTRY_IS_LIVE(entry),
                  "PL_DHASH_ENTRY_IS_LIVE(entry)");
-    keyHash = entry->keyHash;
+
+    /* Load keyHash first in case clearEntry() goofs it. */
+    PLDHashNumber keyHash = entry->keyHash;
     table->ops->clearEntry(table, entry);
     if (keyHash & COLLISION_FLAG) {
         MARK_ENTRY_REMOVED(entry);
@@ -692,24 +636,30 @@ PL_DHashTableRawRemove(PLDHashTable *table, PLDHashEntryHdr *entry)
 uint32_t
 PL_DHashTableEnumerate(PLDHashTable *table, PLDHashEnumerator etor, void *arg)
 {
-    char *entryAddr, *entryLimit;
-    uint32_t i, capacity, entrySize, ceiling;
-    bool didRemove;
-    PLDHashEntryHdr *entry;
-    PLDHashOperator op;
-
     INCREMENT_RECURSION_LEVEL(table);
 
-    entryAddr = table->entryStore;
-    entrySize = table->entrySize;
-    capacity = PL_DHASH_TABLE_SIZE(table);
-    entryLimit = entryAddr + capacity * entrySize;
-    i = 0;
-    didRemove = false;
-    while (entryAddr < entryLimit) {
-        entry = (PLDHashEntryHdr *)entryAddr;
+    char *entryAddr = table->entryStore;
+    uint32_t entrySize = table->entrySize;
+    uint32_t capacity = PL_DHASH_TABLE_SIZE(table);
+    uint32_t tableSize = capacity * entrySize;
+    char *entryLimit = entryAddr + tableSize;
+    uint32_t i = 0;
+    bool didRemove = false;
+
+    if (ChaosMode::isActive()) {
+        // Start iterating at a random point in the hashtable. It would be
+        // even more chaotic to iterate in fully random order, but that's a lot
+        // more work.
+        entryAddr += ChaosMode::randomUint32LessThan(capacity) * entrySize;
+        if (entryAddr >= entryLimit) {
+            entryAddr -= tableSize;
+        }
+    }
+
+    for (uint32_t e = 0; e < capacity; ++e) {
+        PLDHashEntryHdr *entry = (PLDHashEntryHdr *)entryAddr;
         if (ENTRY_IS_LIVE(entry)) {
-            op = etor(table, entry, i++, arg);
+            PLDHashOperator op = etor(table, entry, i++, arg);
             if (op & PL_DHASH_REMOVE) {
                 METER(table->stats.removeEnums++);
                 PL_DHashTableRawRemove(table, entry);
@@ -719,28 +669,31 @@ PL_DHashTableEnumerate(PLDHashTable *table, PLDHashEnumerator etor, void *arg)
                 break;
         }
         entryAddr += entrySize;
+        if (entryAddr >= entryLimit) {
+            entryAddr -= tableSize;
+        }
     }
 
-    MOZ_ASSERT(!didRemove || RECURSION_LEVEL(table) == 1);
+    MOZ_ASSERT(!didRemove || table->recursionLevel == 1);
 
     /*
      * Shrink or compress if a quarter or more of all entries are removed, or
-     * if the table is underloaded according to the configured minimum alpha,
-     * and is not minimal-size already.  Do this only if we removed above, so
-     * non-removing enumerations can count on stable table->entryStore until
-     * the next non-lookup-Operate or removing-Enumerate.
+     * if the table is underloaded according to the minimum alpha, and is not
+     * minimal-size already.  Do this only if we removed above, so non-removing
+     * enumerations can count on stable table->entryStore until the next
+     * non-lookup-Operate or removing-Enumerate.
      */
     if (didRemove &&
         (table->removedCount >= capacity >> 2 ||
          (capacity > PL_DHASH_MIN_SIZE &&
-          table->entryCount <= MIN_LOAD(table, capacity)))) {
+          table->entryCount <= MinLoad(capacity)))) {
         METER(table->stats.enumShrinks++);
         capacity = table->entryCount;
         capacity += capacity >> 1;
         if (capacity < PL_DHASH_MIN_SIZE)
             capacity = PL_DHASH_MIN_SIZE;
 
-        PR_CEILING_LOG2(ceiling, capacity);
+        uint32_t ceiling = CeilingLog2(capacity);
         ceiling -= PL_DHASH_BITS - table->hashShift;
 
         (void) ChangeTable(table, ceiling);
@@ -755,7 +708,7 @@ struct SizeOfEntryExcludingThisArg
 {
     size_t total;
     PLDHashSizeOfEntryExcludingThisFun sizeOfEntryExcludingThis;
-    nsMallocSizeOfFun mallocSizeOf;
+    MallocSizeOf mallocSizeOf;
     void *arg;      // the arg passed by the user
 };
 
@@ -771,8 +724,8 @@ SizeOfEntryExcludingThisEnumerator(PLDHashTable *table, PLDHashEntryHdr *hdr,
 size_t
 PL_DHashTableSizeOfExcludingThis(const PLDHashTable *table,
                                  PLDHashSizeOfEntryExcludingThisFun sizeOfEntryExcludingThis,
-                                 nsMallocSizeOfFun mallocSizeOf,
-                                 void *arg /* = NULL */)
+                                 MallocSizeOf mallocSizeOf,
+                                 void *arg /* = nullptr */)
 {
     size_t n = 0;
     n += mallocSizeOf(table->entryStore);
@@ -788,8 +741,8 @@ PL_DHashTableSizeOfExcludingThis(const PLDHashTable *table,
 size_t
 PL_DHashTableSizeOfIncludingThis(const PLDHashTable *table,
                                  PLDHashSizeOfEntryExcludingThisFun sizeOfEntryExcludingThis,
-                                 nsMallocSizeOfFun mallocSizeOf,
-                                 void *arg /* = NULL */)
+                                 MallocSizeOf mallocSizeOf,
+                                 void *arg /* = nullptr */)
 {
     return mallocSizeOf(table) +
            PL_DHashTableSizeOfExcludingThis(table, sizeOfEntryExcludingThis,
@@ -800,7 +753,7 @@ PL_DHashTableSizeOfIncludingThis(const PLDHashTable *table,
 void
 PL_DHashMarkTableImmutable(PLDHashTable *table)
 {
-    RECURSION_LEVEL(table) = IMMUTABLE_RECURSION_LEVEL;
+    table->recursionLevel = IMMUTABLE_RECURSION_LEVEL;
 }
 #endif
 
@@ -810,33 +763,29 @@ PL_DHashMarkTableImmutable(PLDHashTable *table)
 void
 PL_DHashTableDumpMeter(PLDHashTable *table, PLDHashEnumerator dump, FILE *fp)
 {
-    char *entryAddr;
-    uint32_t entrySize, entryCount;
-    int hashShift, sizeLog2;
-    uint32_t i, tableSize, sizeMask, chainLen, maxChainLen, chainCount;
-    PLDHashNumber hash1, hash2, saveHash1, maxChainHash1, maxChainHash2;
+    PLDHashNumber hash1, hash2, maxChainHash1, maxChainHash2;
     double sqsum, mean, variance, sigma;
-    PLDHashEntryHdr *entry, *probe;
+    PLDHashEntryHdr *entry;
 
-    entryAddr = table->entryStore;
-    entrySize = table->entrySize;
-    hashShift = table->hashShift;
-    sizeLog2 = PL_DHASH_BITS - hashShift;
-    tableSize = PL_DHASH_TABLE_SIZE(table);
-    sizeMask = (1u << sizeLog2) - 1;
-    chainCount = maxChainLen = 0;
+    char *entryAddr = table->entryStore;
+    uint32_t entrySize = table->entrySize;
+    int hashShift = table->hashShift;
+    int sizeLog2 = PL_DHASH_BITS - hashShift;
+    uint32_t tableSize = PL_DHASH_TABLE_SIZE(table);
+    uint32_t sizeMask = (1u << sizeLog2) - 1;
+    uint32_t chainCount = 0, maxChainLen = 0;
     hash2 = 0;
     sqsum = 0;
 
-    for (i = 0; i < tableSize; i++) {
+    for (uint32_t i = 0; i < tableSize; i++) {
         entry = (PLDHashEntryHdr *)entryAddr;
         entryAddr += entrySize;
         if (!ENTRY_IS_LIVE(entry))
             continue;
         hash1 = HASH1(entry->keyHash & ~COLLISION_FLAG, hashShift);
-        saveHash1 = hash1;
-        probe = ADDRESS_ENTRY(table, hash1);
-        chainLen = 1;
+        PLDHashNumber saveHash1 = hash1;
+        PLDHashEntryHdr *probe = ADDRESS_ENTRY(table, hash1);
+        uint32_t chainLen = 1;
         if (probe == entry) {
             /* Start of a (possibly unit-length) chain. */
             chainCount++;
@@ -858,7 +807,7 @@ PL_DHashTableDumpMeter(PLDHashTable *table, PLDHashEnumerator dump, FILE *fp)
         }
     }
 
-    entryCount = table->entryCount;
+    uint32_t entryCount = table->entryCount;
     if (entryCount && chainCount) {
         mean = (double)entryCount / chainCount;
         variance = chainCount * sqsum - entryCount * entryCount;
@@ -904,7 +853,7 @@ PL_DHashTableDumpMeter(PLDHashTable *table, PLDHashEnumerator dump, FILE *fp)
         hash1 = maxChainHash1;
         hash2 = maxChainHash2;
         entry = ADDRESS_ENTRY(table, hash1);
-        i = 0;
+        uint32_t i = 0;
         do {
             if (dump(table, entry, i++, fp) != PL_DHASH_NEXT)
                 break;

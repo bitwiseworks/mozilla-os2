@@ -15,11 +15,12 @@
 #include "nsGenericHTMLElement.h"
 #include "nsIDocument.h"
 #include "nsIImageLoadingContent.h"
-#include "nsILink.h"
 #include "nsIPresShell.h"
 #include "nsIServiceManager.h"
 #include "nsIDOMHTMLImageElement.h"
+#include "nsIPersistentProperties2.h"
 #include "nsPIDOMWindow.h"
+#include "nsIURI.h"
 
 using namespace mozilla::a11y;
 
@@ -34,8 +35,8 @@ ImageAccessible::
   mType = eImageType;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(ImageAccessible, Accessible,
-                             nsIAccessibleImage)
+NS_IMPL_ISUPPORTS_INHERITED(ImageAccessible, Accessible,
+                            nsIAccessibleImage)
 
 ////////////////////////////////////////////////////////////////////////////////
 // Accessible public

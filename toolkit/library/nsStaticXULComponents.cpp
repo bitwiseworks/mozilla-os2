@@ -3,11 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#define XPCOM_TRANSLATE_NSGM_ENTRY_POINT 1
-
 #include "mozilla/Module.h"
 #include "nsXPCOM.h"
-#include "nsStaticComponents.h"
 #include "nsMemory.h"
 
 #ifdef MOZ_AUTH_EXTENSION
@@ -34,8 +31,6 @@
 #  define WIDGET_MODULES MODULE(nsWidgetModule)
 #elif defined(XP_MACOSX)
 #  define WIDGET_MODULES MODULE(nsWidgetMacModule)
-#elif defined(XP_OS2)
-#  define WIDGET_MODULES MODULE(nsWidgetOS2Module)
 #elif defined(MOZ_WIDGET_GTK)
 #  define WIDGET_MODULES MODULE(nsWidgetGtk2Module)
 #elif defined(MOZ_WIDGET_QT)
@@ -46,6 +41,12 @@
 #  define WIDGET_MODULES MODULE(nsWidgetGonkModule)
 #else
 #  error Unknown widget module.
+#endif
+
+#ifndef MOZ_B2G
+#define CONTENT_PROCESS_WIDGET_MODULES MODULE(nsContentProcessWidgetModule)
+#else
+#define CONTENT_PROCESS_WIDGET_MODULES
 #endif
 
 #ifdef ICON_DECODER
@@ -176,6 +177,12 @@
 #define GIO_MODULE
 #endif
 
+#if defined(MOZ_SYNTH_PICO)
+#define SYNTH_PICO_MODULE MODULE(synthpico)
+#else
+#define SYNTH_PICO_MODULE
+#endif
+
 #define XUL_MODULES                          \
     MODULE(nsUConvModule)                    \
     MODULE(nsI18nModule)                     \
@@ -196,6 +203,7 @@
     MODULE(nsGfxModule)                      \
     PROFILER_MODULE                          \
     WIDGET_MODULES                           \
+    CONTENT_PROCESS_WIDGET_MODULES           \
     ICON_MODULE                              \
     MODULE(nsPluginModule)                   \
     MODULE(nsLayoutModule)                   \
@@ -235,6 +243,7 @@
     MODULE(jsdebugger)                       \
     PEERCONNECTION_MODULE                    \
     GIO_MODULE                               \
+    SYNTH_PICO_MODULE                        \
     MODULE(DiskSpaceWatcherModule)           \
     /* end of list */
 
@@ -243,14 +252,23 @@
 
 XUL_MODULES
 
+#ifdef MOZ_WIDGET_GONK
+MODULE(WifiProxyServiceModule)
+MODULE(NetworkWorkerModule)
+#endif
+
 #undef MODULE
 
 #define MODULE(_name) \
     &NSMODULE_NAME(_name),
 
-const mozilla::Module *const *const kPStaticModules[] = {
+extern const mozilla::Module *const *const kPStaticModules[] = {
   XUL_MODULES
-  NULL
+#ifdef MOZ_WIDGET_GONK
+MODULE(WifiProxyServiceModule)
+MODULE(NetworkWorkerModule)
+#endif
+  nullptr
 };
 
 #undef MODULE

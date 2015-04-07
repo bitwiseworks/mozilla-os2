@@ -804,6 +804,8 @@ let TabItems = {
       AllTabs.unregister(name, this._eventListeners[name]);
     }
     this.items.forEach(function(tabItem) {
+      delete tabItem.tab._tabViewTabItem;
+
       for (let x in tabItem) {
         if (typeof tabItem[x] == "object")
           tabItem[x] = null;
@@ -843,6 +845,12 @@ let TabItems = {
   // boolean indicates whether the tab is loaded or not.
   _isComplete: function TabItems__isComplete(tab, callback) {
     Utils.assertThrow(tab, "tab");
+
+    // A pending tab can't be complete, yet.
+    if (tab.hasAttribute("pending")) {
+      setTimeout(() => callback(false));
+      return;
+    }
 
     let mm = tab.linkedBrowser.messageManager;
     let message = "Panorama:isDocumentLoaded";

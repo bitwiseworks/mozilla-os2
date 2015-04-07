@@ -9,6 +9,7 @@ const Cr = Components.results;
 const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/LoadContextInfo.jsm");
 
 // Import common head.
 let (commonFile = do_get_file("../../../../../toolkit/components/places/tests/head_common.js", false)) {
@@ -62,9 +63,9 @@ let (XULAppInfo = {
 }
 
 // Smart bookmarks constants.
-const SMART_BOOKMARKS_VERSION = 4;
+const SMART_BOOKMARKS_VERSION = 7;
 const SMART_BOOKMARKS_ON_TOOLBAR = 1;
-const SMART_BOOKMARKS_ON_MENU = 3; // Takes in count the additional separator.
+const SMART_BOOKMARKS_ON_MENU =  3; // Takes into account the additional separator.
 
 // Default bookmarks constants.
 const DEFAULT_BOOKMARKS_ON_TOOLBAR = 1;

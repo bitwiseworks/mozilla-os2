@@ -1,8 +1,5 @@
 /* run some tests on the file:// protocol handler */
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cr = Components.results;
 const PR_RDONLY = 0x1;  // see prio.h
 
 const special_type = "application/x-our-special-type";
@@ -145,7 +142,7 @@ function test_read_file() {
 function do_test_read_dir(set_type, expected_type) {
   dump("*** test_read_dir(" + set_type + ", " + expected_type + ")\n");
 
-  var file = getFile("TmpD");
+  var file = do_get_tempdir();
   var chan = new_file_channel(file);
 
   function on_read_complete(data) {
@@ -176,7 +173,7 @@ function test_upload_file() {
   dump("*** test_upload_file\n");
 
   var file = do_get_file("../unit/data/test_readline6.txt"); // file to upload
-  var dest = getFile("TmpD");      // file upload destination
+  var dest = do_get_tempdir();      // file upload destination
   dest.append("junk.dat");
   dest.createUnique(dest.NORMAL_FILE_TYPE, 0600);
 

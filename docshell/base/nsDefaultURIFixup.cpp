@@ -4,13 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsString.h"
-#include "nsReadableUtils.h"
 #include "nsNetUtil.h"
-#include "nsEscape.h"
 #include "nsCRT.h"
 
-#include "nsIPlatformCharset.h"
 #include "nsIFile.h"
 #include <algorithm>
 
@@ -21,12 +17,19 @@
 #include "nsIURIFixup.h"
 #include "nsDefaultURIFixup.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/ipc/InputStreamUtils.h"
+#include "mozilla/ipc/URIUtils.h"
 #include "nsIObserverService.h"
+#include "nsXULAppAPI.h"
 
 using namespace mozilla;
 
 /* Implementation file */
-NS_IMPL_ISUPPORTS1(nsDefaultURIFixup, nsIURIFixup)
+NS_IMPL_ISUPPORTS(nsDefaultURIFixup, nsIURIFixup)
+
+static bool sInitializedPrefCaches = false;
+static bool sFixTypos = true;
 
 nsDefaultURIFixup::nsDefaultURIFixup()
 {
@@ -161,7 +164,7 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
         if(*aURI)
             return NS_OK;
 
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
         // Not a file URL, so translate '\' to '/' for convenience in the common protocols
         // e.g. catch
         //
@@ -200,18 +203,52 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
 #endif
     }
 
-    // For these protocols, use system charset instead of the default UTF-8,
-    // if the URI is non ASCII.
-    bool bAsciiURI = IsASCII(uriString);
-    bool useUTF8 = (aFixupFlags & FIXUP_FLAG_USE_UTF8) ||
-                   Preferences::GetBool("browser.fixup.use-utf8", false);
-    bool bUseNonDefaultCharsetForURI =
-                        !bAsciiURI && !useUTF8 &&
-                        (scheme.IsEmpty() ||
-                         scheme.LowerCaseEqualsLiteral("http") ||
-                         scheme.LowerCaseEqualsLiteral("https") ||
-                         scheme.LowerCaseEqualsLiteral("ftp") ||
-                         scheme.LowerCaseEqualsLiteral("file"));
+    if (!sInitializedPrefCaches) {
+      // Check if we want to fix up common scheme typos.
+      rv = Preferences::AddBoolVarCache(&sFixTypos,
+                                        "browser.fixup.typo.scheme",
+                                        sFixTypos);
+      MOZ_ASSERT(NS_SUCCEEDED(rv),
+                "Failed to observe \"browser.fixup.typo.scheme\"");
+      sInitializedPrefCaches = true;
+    }
+
+    // Fix up common scheme typos.
+    if (sFixTypos && (aFixupFlags & FIXUP_FLAG_FIX_SCHEME_TYPOS)) {
+
+        // Fast-path for common cases.
+        if (scheme.IsEmpty() ||
+            scheme.LowerCaseEqualsLiteral("http") ||
+            scheme.LowerCaseEqualsLiteral("https") ||
+            scheme.LowerCaseEqualsLiteral("ftp") ||
+            scheme.LowerCaseEqualsLiteral("file")) {
+            // Do nothing.
+        } else if (scheme.LowerCaseEqualsLiteral("ttp")) {
+            // ttp -> http.
+            uriString.Replace(0, 3, "http");
+            scheme.AssignLiteral("http");
+        } else if (scheme.LowerCaseEqualsLiteral("ttps")) {
+            // ttps -> https.
+            uriString.Replace(0, 4, "https");
+            scheme.AssignLiteral("https");
+        } else if (scheme.LowerCaseEqualsLiteral("tps")) {
+            // tps -> https.
+            uriString.Replace(0, 3, "https");
+            scheme.AssignLiteral("https");
+        } else if (scheme.LowerCaseEqualsLiteral("ps")) {
+            // ps -> https.
+            uriString.Replace(0, 2, "https");
+            scheme.AssignLiteral("https");
+        } else if (scheme.LowerCaseEqualsLiteral("ile")) {
+            // ile -> file.
+            uriString.Replace(0, 3, "file");
+            scheme.AssignLiteral("file");
+        } else if (scheme.LowerCaseEqualsLiteral("le")) {
+            // le -> file.
+            uriString.Replace(0, 2, "file");
+            scheme.AssignLiteral("file");
+        }
+    }
 
     // Now we need to check whether "scheme" is something we don't
     // really know about.
@@ -222,8 +259,7 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
     
     if (ourHandler != extHandler || !PossiblyHostPortUrl(uriString)) {
         // Just try to create an URL out of it
-        rv = NS_NewURI(aURI, uriString,
-                       bUseNonDefaultCharsetForURI ? GetCharsetForUrlBar() : nullptr);
+        rv = NS_NewURI(aURI, uriString, nullptr);
 
         if (!*aURI && rv != NS_ERROR_MALFORMED_URI) {
             return rv;
@@ -291,13 +327,9 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
             uriString.Assign(NS_LITERAL_CSTRING("ftp://") + uriString);
         else 
             uriString.Assign(NS_LITERAL_CSTRING("http://") + uriString);
-
-        // For ftp & http, we want to use system charset.
-        if (!bAsciiURI && !useUTF8)
-          bUseNonDefaultCharsetForURI = true;
     } // end if checkprotocol
 
-    rv = NS_NewURI(aURI, uriString, bUseNonDefaultCharsetForURI ? GetCharsetForUrlBar() : nullptr);
+    rv = NS_NewURI(aURI, uriString, nullptr);
 
     // Did the caller want us to try an alternative URI?
     // If so, attempt to fixup http://foo into http://www.foo.com
@@ -334,6 +366,31 @@ NS_IMETHODIMP nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
         keyword.Cut(0, 1);
     }
     keyword.Trim(" ");
+
+    if (XRE_GetProcessType() == GeckoProcessType_Content) {
+        dom::ContentChild* contentChild = dom::ContentChild::GetSingleton();
+        if (!contentChild) {
+            return NS_ERROR_NOT_AVAILABLE;
+        }
+
+        ipc::OptionalInputStreamParams postData;
+        ipc::OptionalURIParams uri;
+        if (!contentChild->SendKeywordToURI(keyword, &postData, &uri)) {
+            return NS_ERROR_FAILURE;
+        }
+
+        if (aPostData) {
+            nsTArray<ipc::FileDescriptor> fds;
+            nsCOMPtr<nsIInputStream> temp = DeserializeInputStream(postData, fds);
+            temp.forget(aPostData);
+
+            MOZ_ASSERT(fds.IsEmpty());
+        }
+
+        nsCOMPtr<nsIURI> temp = DeserializeURI(uri);
+        temp.forget(aURI);
+        return NS_OK;
+    }
 
 #ifdef MOZ_TOOLKIT_SEARCH
     // Try falling back to the search service's default search engine
@@ -380,7 +437,9 @@ NS_IMETHODIMP nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
                 // the search engine's name through various function calls.
                 nsCOMPtr<nsIObserverService> obsSvc = mozilla::services::GetObserverService();
                 if (obsSvc) {
-                    obsSvc->NotifyObservers(defaultEngine, "keyword-search", NS_ConvertUTF8toUTF16(keyword).get());
+                  // Note that "keyword-search" refers to a search via the url
+                  // bar, not a bookmarks keyword search.
+                  obsSvc->NotifyObservers(defaultEngine, "keyword-search", NS_ConvertUTF8toUTF16(keyword).get());
                 }
 
                 return submission->GetUri(aURI);
@@ -550,7 +609,7 @@ nsresult nsDefaultURIFixup::ConvertFileToStringURI(const nsACString& aIn,
 {
     bool attemptFixup = false;
 
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
     // Check for \ in the url-string or just a drive (PC)
     if(kNotFound != aIn.FindChar('\\') ||
        (aIn.Length() == 2 && (aIn.Last() == ':' || aIn.Last() == '|')))
@@ -586,7 +645,7 @@ nsresult nsDefaultURIFixup::ConvertFileToStringURI(const nsACString& aIn,
         // in non ascii.(see bug 87127) Since it is too risky to make interface change right
         // now, we decide not to do so now.
         // Therefore, the aIn we receive here maybe already in damage form
-        // (e.g. treat every bytes as ISO-8859-1 and cast up to PRUnichar
+        // (e.g. treat every bytes as ISO-8859-1 and cast up to char16_t
         //  while the real data could be in file system charset )
         // we choice the following logic which will work for most of the case.
         // Case will still failed only if it meet ALL the following condiction:
@@ -732,8 +791,8 @@ bool nsDefaultURIFixup::PossiblyByteExpandedFileName(const nsAString& aIn)
     // have proper Unicode code points.
     // This is a temporary fix.  Please refer to 58866, 86948
 
-    nsReadingIterator<PRUnichar> iter;
-    nsReadingIterator<PRUnichar> iterEnd;
+    nsReadingIterator<char16_t> iter;
+    nsReadingIterator<char16_t> iterEnd;
     aIn.BeginReading(iter);
     aIn.EndReading(iterEnd);
     while (iter != iterEnd)
@@ -743,31 +802,6 @@ bool nsDefaultURIFixup::PossiblyByteExpandedFileName(const nsAString& aIn)
         ++iter;
     }
     return false;
-}
-
-const char * nsDefaultURIFixup::GetFileSystemCharset()
-{
-  if (mFsCharset.IsEmpty())
-  {
-    nsresult rv;
-    nsAutoCString charset;
-    nsCOMPtr<nsIPlatformCharset> plat(do_GetService(NS_PLATFORMCHARSET_CONTRACTID, &rv));
-    if (NS_SUCCEEDED(rv))
-      rv = plat->GetCharset(kPlatformCharsetSel_FileName, charset);
-
-    if (charset.IsEmpty())
-      mFsCharset.AssignLiteral("ISO-8859-1");
-    else
-      mFsCharset.Assign(charset);
-  }
-
-  return mFsCharset.get();
-}
-
-const char * nsDefaultURIFixup::GetCharsetForUrlBar()
-{
-  const char *charset = GetFileSystemCharset();
-  return charset;
 }
 
 void nsDefaultURIFixup::KeywordURIFixup(const nsACString & aURIString,

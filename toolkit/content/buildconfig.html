@@ -3,9 +3,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 #
-# IMPORTANT: Do not modify this file without checking the results of 
-# build/macosx/universal/fix-buildconfig in a Mac Universal binary.
-#
 #filter substitution
 <html>
 <head>
@@ -30,6 +27,9 @@
 <h2>Source</h2>
 <p>Built from <a href="@SOURCE_REPO@/rev/@SOURCE_CHANGESET@">@SOURCE_REPO@/rev/@SOURCE_CHANGESET@</a></p>
 #endif
+#elifdef SOURCE_GIT_COMMIT
+<h2>Source</h2>
+<p>Built from git commit <a href="#">@SOURCE_GIT_COMMIT@</a></p>
 #endif
 <h2>Build platform</h2>
 <table>

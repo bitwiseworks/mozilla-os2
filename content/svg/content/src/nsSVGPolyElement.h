@@ -21,7 +21,7 @@ class DOMSVGPointList;
 class nsSVGPolyElement : public nsSVGPolyElementBase
 {
 protected:
-  nsSVGPolyElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  nsSVGPolyElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
 
 public:
   //interfaces
@@ -38,11 +38,15 @@ public:
     return nsGkAtoms::points;
   }
 
+  // nsSVGElement methods:
+  virtual bool HasValidDimensions() const MOZ_OVERRIDE;
+
   // nsSVGPathGeometryElement methods:
   virtual bool AttributeDefinesGeometry(const nsIAtom *aName) MOZ_OVERRIDE;
   virtual bool IsMarkable() MOZ_OVERRIDE { return true; }
   virtual void GetMarkPoints(nsTArray<nsSVGMark> *aMarks) MOZ_OVERRIDE;
   virtual void ConstructPath(gfxContext *aCtx) MOZ_OVERRIDE;
+  virtual mozilla::TemporaryRef<Path> BuildPath() MOZ_OVERRIDE;
 
   // WebIDL
   already_AddRefed<mozilla::DOMSVGPointList> Points();

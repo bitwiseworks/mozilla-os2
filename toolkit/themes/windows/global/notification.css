@@ -42,19 +42,9 @@ notification[type="critical"] {
 }
 
 .messageCloseButton {
-  list-style-image: url("chrome://global/skin/icons/close.png");
   -moz-appearance: none;
-  -moz-image-region: rect(0, 16px, 16px, 0);
   padding: 4px 2px;
   border: none !important;
-}
-
-.messageCloseButton:hover {
-  -moz-image-region: rect(0, 32px, 16px, 16px);
-}
-
-.messageCloseButton:hover:active {
-  -moz-image-region: rect(0, 48px, 16px, 32px);
 }
 
 .messageCloseButton > .toolbarbutton-icon {
@@ -65,6 +55,14 @@ notification[type="critical"] {
 
 .popup-notification-description {
   max-width: 24em;
+}
+
+.popup-notification-learnmore-link {
+  margin-top: 1em !important;
+}
+
+.popup-notification-learnmore-link:not([href]) {
+  display: none;
 }
 
 .popup-notification-button-container {
@@ -171,9 +169,4 @@ XXX: apply styles to all themes until bug 509642 is fixed
 .popup-notification-closebutton {
   -moz-margin-end: -14px;
   margin-top: -10px;
-}
-
-.popup-notification-closeitem {
-  list-style-image: url("chrome://global/skin/icons/close.png");
-  -moz-image-region: rect(0, 16px, 16px, 0);
 }

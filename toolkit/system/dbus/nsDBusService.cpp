@@ -27,8 +27,7 @@ nsDBusService::~nsDBusService() {
   gSingleton = nullptr;
 }
 
-NS_IMPL_ISUPPORTS1(nsDBusService, nsDBusService)
-NS_DEFINE_STATIC_IID_ACCESSOR(nsDBusService, NS_DBUS_IID)
+NS_IMPL_ISUPPORTS(nsDBusService, nsDBusService)
 
 nsDBusService* nsDBusService::gSingleton = nullptr;
 
@@ -128,14 +127,14 @@ void nsDBusService::HandleDBusDisconnect() {
 }
 
 nsresult nsDBusService::CreateConnection() {
-  mConnection = dbus_bus_get(DBUS_BUS_SYSTEM, NULL);
+  mConnection = dbus_bus_get(DBUS_BUS_SYSTEM, nullptr);
   if (!mConnection)
     return NS_ERROR_FAILURE;
 
   dbus_connection_set_exit_on_disconnect(mConnection, false);
-  dbus_connection_setup_with_g_main(mConnection, NULL);
+  dbus_connection_setup_with_g_main(mConnection, nullptr);
 
-  if (!dbus_connection_add_filter(mConnection, dbus_filter, this, NULL))
+  if (!dbus_connection_add_filter(mConnection, dbus_filter, this, nullptr))
     return NS_ERROR_FAILURE;
 
   mSingleClient->RegisterWithConnection(mConnection);

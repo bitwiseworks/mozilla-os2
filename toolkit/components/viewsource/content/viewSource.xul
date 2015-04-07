@@ -8,13 +8,14 @@
 <?xml-stylesheet href="chrome://global/content/viewSource.css" type="text/css"?>
 <?xml-stylesheet href="chrome://mozapps/skin/viewsource/viewsource.css" type="text/css"?>
 <?xul-overlay href="chrome://global/content/editMenuOverlay.xul"?>
-<?xul-overlay href="chrome://global/content/charsetOverlay.xul"?>
 
 <!DOCTYPE window [
 <!ENTITY % brandDTD SYSTEM "chrome://branding/locale/brand.dtd" >
 %brandDTD;
 <!ENTITY % sourceDTD SYSTEM "chrome://global/locale/viewSource.dtd" >
 %sourceDTD;
+<!ENTITY % charsetDTD SYSTEM "chrome://global/locale/charsetMenu.dtd" >
+%charsetDTD;
 ]>
 
 <window id="viewSource"
@@ -50,6 +51,10 @@
            oncommand="document.getElementById('FindToolbar').onFindAgainCommand(false);"/>
   <command id="cmd_findPrevious"
            oncommand="document.getElementById('FindToolbar').onFindAgainCommand(true);"/>
+#ifdef XP_MACOSX
+  <command id="cmd_findSelection"
+           oncommand="document.getElementById('FindToolbar').onFindSelectionCommand();"/>
+#endif
   <command id="cmd_reload" oncommand="ViewSourceReload();"/>
   <command id="cmd_goToLine" oncommand="ViewSourceGoToLine();" disabled="true"/>
   <command id="cmd_highlightSyntax" oncommand="highlightSyntax();"/>
@@ -85,6 +90,9 @@
     <key id="key_find" key="&findOnCmd.commandkey;" command="cmd_find" modifiers="accel"/>
     <key id="key_findAgain" key="&findAgainCmd.commandkey;" command="cmd_findAgain" modifiers="accel"/>
     <key id="key_findPrevious" key="&findAgainCmd.commandkey;" command="cmd_findPrevious" modifiers="accel,shift"/>
+#ifdef XP_MACOSX
+    <key id="key_findSelection" key="&findSelectionCmd.commandkey;" command="cmd_findSelection" modifiers="accel"/>
+#endif
     <key keycode="&findAgainCmd.commandkey2;" command="cmd_findAgain"/>
     <key keycode="&findAgainCmd.commandkey2;"  command="cmd_findPrevious" modifiers="shift"/>
 
@@ -195,7 +203,16 @@
                         key="key_textZoomReset"/>
             </menupopup>
           </menu>
-          <menu id="charsetMenu"/>
+
+          <!-- Charset Menu -->
+          <menu id="charsetMenu"
+                label="&charsetMenu.label;"
+                accesskey="&charsetMenu.accesskey;"
+                oncommand="BrowserSetCharacterSet(event);"
+                onpopupshowing="CharsetMenu.build(event.target);"
+                onpopupshown="CharsetMenu.update(event.target, content.document.characterSet);">
+            <menupopup/>
+          </menu>
           <menuseparator/>
           <menuitem id="menu_wrapLongLines" type="checkbox" command="cmd_wrapLongLines"
                     label="&menu_wrapLongLines.title;" accesskey="&menu_wrapLongLines.accesskey;"/>

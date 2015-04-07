@@ -26,8 +26,8 @@
 
 #include "nsCOMPtr.h"            // for member
 #include "nsIAtom.h"             // for member (in nsCOMPtr)
-#include "nsINameSpaceManager.h" // for kNameSpaceID_*
 #include "nsISupports.h"         // for base class
+#include "nsNameSpaceManager.h"  // for kNameSpaceID_*
 
 #ifdef MOZILLA_INTERNAL_API
 #include "nsDOMString.h"
@@ -49,8 +49,7 @@ public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_INODEINFO_IID)
 
   nsINodeInfo()
-    : mInner(nullptr, nullptr, kNameSpaceID_None, 0, nullptr),
-      mOwnerManager(nullptr)
+    : mInner(nullptr, nullptr, kNameSpaceID_None, 0, nullptr)
   {
   }
 
@@ -332,7 +331,7 @@ protected:
   nsNodeInfoInner mInner;
 
   nsCOMPtr<nsIAtom> mIDAttributeAtom;
-  nsNodeInfoManager* mOwnerManager; // Strong reference!
+  nsRefPtr<nsNodeInfoManager> mOwnerManager;
 
   /*
    * Members for various functions of mName+mPrefix that we can be

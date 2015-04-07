@@ -4,11 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/SVGRect.h"
-#include "nsContentUtils.h"
-#include "nsDOMClassInfoID.h"
 #include "nsSVGElement.h"
 
-DOMCI_DATA(SVGRect, mozilla::dom::SVGRect)
+using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace dom {
@@ -51,9 +49,9 @@ NS_NewSVGRect(nsIContent* aParent, float aX, float aY, float aWidth,
 }
 
 already_AddRefed<mozilla::dom::SVGRect>
-NS_NewSVGRect(nsIContent* aParent, const gfxRect& aRect)
+NS_NewSVGRect(nsIContent* aParent, const Rect& aRect)
 {
-  return NS_NewSVGRect(aParent, aRect.X(), aRect.Y(),
-                       aRect.Width(), aRect.Height());
+  return NS_NewSVGRect(aParent, aRect.x, aRect.y,
+                       aRect.width, aRect.height);
 }
 

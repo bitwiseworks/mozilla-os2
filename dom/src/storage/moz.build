@@ -4,13 +4,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'dom'
-
 EXPORTS.mozilla.dom += [
     'DOMStorageIPC.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'DOMStorage.cpp',
     'DOMStorageCache.cpp',
     'DOMStorageDBThread.cpp',
@@ -19,3 +17,20 @@ CPP_SOURCES += [
     'DOMStorageObserver.cpp',
 ]
 
+IPDL_SOURCES += [
+    'PStorage.ipdl',
+]
+
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'
+LOCAL_INCLUDES += [
+    '/dom/base',
+]
+
+if CONFIG['ENABLE_TESTS']:
+    DEFINES['DOM_STORAGE_TESTS'] = True

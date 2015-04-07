@@ -23,10 +23,12 @@
 #include "Relation.h"
 #include "RootAccessible.h"
 #include "States.h"
+#include "nsISimpleEnumerator.h"
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 #include "nsXPCOMStrings.h"
 #include "nsComponentManagerUtils.h"
+#include "nsIPersistentProperties2.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -155,6 +157,7 @@ static const gchar*        getNameCB (AtkObject *aAtkObj);
        const gchar*        getDescriptionCB (AtkObject *aAtkObj);
 static AtkRole             getRoleCB(AtkObject *aAtkObj);
 static AtkAttributeSet*    getAttributesCB(AtkObject *aAtkObj);
+static const gchar* GetLocaleCB(AtkObject*);
 static AtkObject*          getParentCB(AtkObject *aAtkObj);
 static gint                getChildCountCB(AtkObject *aAtkObj);
 static AtkObject*          refChildCB(AtkObject *aAtkObj, gint aChildIndex);
@@ -487,6 +490,7 @@ classInitCB(AtkObjectClass *aClass)
     aClass->get_index_in_parent = getIndexInParentCB;
     aClass->get_role = getRoleCB;
     aClass->get_attributes = getAttributesCB;
+    aClass->get_object_locale = GetLocaleCB;
     aClass->ref_state_set = refStateSetCB;
     aClass->ref_relation_set = refRelationSetCB;
 
@@ -680,16 +684,20 @@ getRoleCB(AtkObject *aAtkObj)
   switch (accWrap->Role()) {
 #include "RoleMap.h"
     default:
-      MOZ_NOT_REACHED("Unknown role.");
-      aAtkObj->role = ATK_ROLE_UNKNOWN;
+      MOZ_CRASH("Unknown role.");
   };
 
 #undef ROLE
 
+  if (aAtkObj->role == ATK_ROLE_LIST_BOX && !IsAtkVersionAtLeast(2, 1))
+    aAtkObj->role = ATK_ROLE_LIST;
+  else if (aAtkObj->role == ATK_ROLE_TABLE_ROW && !IsAtkVersionAtLeast(2, 1))
+    aAtkObj->role = ATK_ROLE_LIST_ITEM;
+
   return aAtkObj->role;
 }
 
-AtkAttributeSet*
+static AtkAttributeSet*
 ConvertToAtkAttributeSet(nsIPersistentProperties* aAttributes)
 {
     if (!aAttributes)
@@ -751,6 +759,18 @@ getAttributesCB(AtkObject *aAtkObj)
 {
   AccessibleWrap* accWrap = GetAccessibleWrap(aAtkObj);
   return accWrap ? GetAttributeSet(accWrap) : nullptr;
+}
+
+const gchar*
+GetLocaleCB(AtkObject* aAtkObj)
+{
+  AccessibleWrap* accWrap = GetAccessibleWrap(aAtkObj);
+  if (!accWrap)
+    return nullptr;
+
+  nsAutoString locale;
+  accWrap->Language(locale);
+  return AccessibleWrap::ReturnString(locale);
 }
 
 AtkObject *
@@ -833,6 +853,10 @@ getIndexInParentCB(AtkObject *aAtkObj)
 static void
 TranslateStates(uint64_t aState, AtkStateSet* aStateSet)
 {
+  // atk doesn't have a read only state so read only things shouldn't be
+  // editable.
+  if (aState & states::READONLY)
+    aState &= ~states::EDITABLE;
 
   // Convert every state to an entry in AtkStateMap
   uint32_t stateIndex = 0;
@@ -870,6 +894,32 @@ refStateSetCB(AtkObject *aAtkObj)
     return state_set;
 }
 
+static void
+UpdateAtkRelation(RelationType aType, Accessible* aAcc,
+                  AtkRelationType aAtkType, AtkRelationSet* aAtkSet)
+{
+  if (aAtkType == ATK_RELATION_NULL)
+    return;
+
+  AtkRelation* atkRelation =
+    atk_relation_set_get_relation_by_type(aAtkSet, aAtkType);
+  if (atkRelation)
+    atk_relation_set_remove(aAtkSet, atkRelation);
+
+  Relation rel(aAcc->RelationByType(aType));
+  nsTArray<AtkObject*> targets;
+  Accessible* tempAcc = nullptr;
+  while ((tempAcc = rel.Next()))
+    targets.AppendElement(AccessibleWrap::GetAtkObject(tempAcc));
+
+  if (targets.Length()) {
+    atkRelation = atk_relation_new(targets.Elements(),
+                                   targets.Length(), aAtkType);
+    atk_relation_set_add(aAtkSet, atkRelation);
+    g_object_unref(atkRelation);
+  }
+}
+
 AtkRelationSet *
 refRelationSetCB(AtkObject *aAtkObj)
 {
@@ -880,46 +930,12 @@ refRelationSetCB(AtkObject *aAtkObj)
   if (!accWrap)
     return relation_set;
 
-  // Keep in sync with AtkRelationType enum.
-  static const uint32_t relationTypes[] = {
-    nsIAccessibleRelation::RELATION_CONTROLLED_BY,
-    nsIAccessibleRelation::RELATION_CONTROLLER_FOR,
-    nsIAccessibleRelation::RELATION_LABEL_FOR,
-    nsIAccessibleRelation::RELATION_LABELLED_BY,
-    nsIAccessibleRelation::RELATION_MEMBER_OF,
-    nsIAccessibleRelation::RELATION_NODE_CHILD_OF,
-    nsIAccessibleRelation::RELATION_FLOWS_TO,
-    nsIAccessibleRelation::RELATION_FLOWS_FROM,
-    nsIAccessibleRelation::RELATION_SUBWINDOW_OF,
-    nsIAccessibleRelation::RELATION_EMBEDS,
-    nsIAccessibleRelation::RELATION_EMBEDDED_BY,
-    nsIAccessibleRelation::RELATION_POPUP_FOR,
-    nsIAccessibleRelation::RELATION_PARENT_WINDOW_OF,
-    nsIAccessibleRelation::RELATION_DESCRIBED_BY,
-    nsIAccessibleRelation::RELATION_DESCRIPTION_FOR,
-    nsIAccessibleRelation::RELATION_NODE_PARENT_OF
-  };
+#define RELATIONTYPE(geckoType, geckoTypeName, atkType, msaaType, ia2Type) \
+  UpdateAtkRelation(RelationType::geckoType, accWrap, atkType, relation_set);
 
-  for (uint32_t i = 0; i < ArrayLength(relationTypes); i++) {
-    // Shift to 1 to skip ATK_RELATION_NULL.
-    AtkRelationType atkType = static_cast<AtkRelationType>(i + 1);
-    AtkRelation* atkRelation =
-      atk_relation_set_get_relation_by_type(relation_set, atkType);
-    if (atkRelation)
-      atk_relation_set_remove(relation_set, atkRelation);
+#include "RelationTypeMap.h"
 
-    Relation rel(accWrap->RelationByType(relationTypes[i]));
-    nsTArray<AtkObject*> targets;
-    Accessible* tempAcc = nullptr;
-    while ((tempAcc = rel.Next()))
-      targets.AppendElement(AccessibleWrap::GetAtkObject(tempAcc));
-
-    if (targets.Length()) {
-      atkRelation = atk_relation_new(targets.Elements(), targets.Length(), atkType);
-      atk_relation_set_add(relation_set, atkRelation);
-      g_object_unref(atkRelation);
-    }
-  }
+#undef RELATIONTYPE
 
   return relation_set;
 }
@@ -991,9 +1007,8 @@ AccessibleWrap::HandleAccEvent(AccEvent* aEvent)
         if (rootAccWrap && rootAccWrap->mActivated) {
             atk_focus_tracker_notify(atkObj);
             // Fire state change event for focus
-            nsRefPtr<AccEvent> stateChangeEvent =
-              new AccStateChangeEvent(accessible, states::FOCUSED, true);
-            return FireAtkStateChangeEvent(stateChangeEvent, atkObj);
+            atk_object_notify_state_change(atkObj, ATK_STATE_FOCUSED, true);
+            return NS_OK;
         }
       } break;
 
@@ -1116,6 +1131,12 @@ AccessibleWrap::HandleAccEvent(AccEvent* aEvent)
         return FireAtkShowHideEvent(aEvent, atkObj, true);
 
     case nsIAccessibleEvent::EVENT_HIDE:
+        // XXX - Handle native dialog accessibles.
+        if (!accessible->IsRoot() && accessible->HasARIARole() &&
+            accessible->ARIARole() == roles::DIALOG) {
+          guint id = g_signal_lookup("deactivate", MAI_TYPE_ATK_OBJECT);
+          g_signal_emit(atkObj, id, 0);
+        }
         return FireAtkShowHideEvent(aEvent, atkObj, false);
 
         /*
@@ -1131,7 +1152,7 @@ AccessibleWrap::HandleAccEvent(AccEvent* aEvent)
     case nsIAccessibleEvent::EVENT_WINDOW_ACTIVATE:
       {
         accessible->AsRoot()->mActivated = true;
-        guint id = g_signal_lookup ("activate", MAI_TYPE_ATK_OBJECT);
+        guint id = g_signal_lookup("activate", MAI_TYPE_ATK_OBJECT);
         g_signal_emit(atkObj, id, 0);
 
         // Always fire a current focus event after activation.
@@ -1141,30 +1162,36 @@ AccessibleWrap::HandleAccEvent(AccEvent* aEvent)
     case nsIAccessibleEvent::EVENT_WINDOW_DEACTIVATE:
       {
         accessible->AsRoot()->mActivated = false;
-        guint id = g_signal_lookup ("deactivate", MAI_TYPE_ATK_OBJECT);
+        guint id = g_signal_lookup("deactivate", MAI_TYPE_ATK_OBJECT);
         g_signal_emit(atkObj, id, 0);
       } break;
 
     case nsIAccessibleEvent::EVENT_WINDOW_MAXIMIZE:
       {
-        guint id = g_signal_lookup ("maximize", MAI_TYPE_ATK_OBJECT);
+        guint id = g_signal_lookup("maximize", MAI_TYPE_ATK_OBJECT);
         g_signal_emit(atkObj, id, 0);
       } break;
 
     case nsIAccessibleEvent::EVENT_WINDOW_MINIMIZE:
       {
-        guint id = g_signal_lookup ("minimize", MAI_TYPE_ATK_OBJECT);
+        guint id = g_signal_lookup("minimize", MAI_TYPE_ATK_OBJECT);
         g_signal_emit(atkObj, id, 0);
       } break;
 
     case nsIAccessibleEvent::EVENT_WINDOW_RESTORE:
       {
-        guint id = g_signal_lookup ("restore", MAI_TYPE_ATK_OBJECT);
+        guint id = g_signal_lookup("restore", MAI_TYPE_ATK_OBJECT);
         g_signal_emit(atkObj, id, 0);
       } break;
 
     case nsIAccessibleEvent::EVENT_DOCUMENT_LOAD_COMPLETE:
         g_signal_emit_by_name (atkObj, "load_complete");
+        // XXX - Handle native dialog accessibles.
+        if (!accessible->IsRoot() && accessible->HasARIARole() &&
+            accessible->ARIARole() == roles::DIALOG) {
+          guint id = g_signal_lookup("activate", MAI_TYPE_ATK_OBJECT);
+          g_signal_emit(atkObj, id, 0);
+        }
       break;
 
     case nsIAccessibleEvent::EVENT_DOCUMENT_RELOAD:

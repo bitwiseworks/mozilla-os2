@@ -81,11 +81,13 @@ cp ${tmp_dir}/LICENSE ${test262_dir}
 # pass -- see the comment at the end of this script.)
 cp -r ${tmp_dir}/test/suite/ch06 ${test262_dir}/ch06
 cp -r ${tmp_dir}/test/suite/ch07 ${test262_dir}/ch07
+cp -r ${tmp_dir}/test/suite/ch08 ${test262_dir}/ch08
 cp -r ${tmp_dir}/test/suite/ch09 ${test262_dir}/ch09
 cp -r ${tmp_dir}/test/suite/ch10 ${test262_dir}/ch10
 cp -r ${tmp_dir}/test/suite/ch11 ${test262_dir}/ch11
 cp -r ${tmp_dir}/test/suite/ch12 ${test262_dir}/ch12
 cp -r ${tmp_dir}/test/suite/ch13 ${test262_dir}/ch13
+cp -r ${tmp_dir}/test/suite/ch14 ${test262_dir}/ch14
 
 # The test402 tests are in test/suite/intl402/.  For now there are no
 # "bestPractice" tests to omit.  The remaining tests are in chNN directories,
@@ -112,8 +114,13 @@ done
 cp ${js_src_tests_dir}/supporting/test262-browser.js ${test262_dir}/browser.js
 cat ${js_src_tests_dir}/supporting/sta.js ${js_src_tests_dir}/supporting/test262-shell.js > ${test262_dir}/shell.js
 
-# Restore the Intl tests' jstests adapter files.
-cp ${js_src_tests_dir}/supporting/test402-browser.js ${test262_dir}/intl402/browser.js
+# Restore the Intl tests' jstests adapter files. Loading include files into the
+# browser from a script so that they become synchronously available to that same
+# script is basically impossible. Instead, just concatenate all the scripts
+# together into one script loaded before the test executes.
+cat ${js_src_tests_dir}/supporting/test402-browser.js \
+    ${js_src_tests_dir}/supporting/testBuiltInObject.js \
+    ${js_src_tests_dir}/supporting/testIntl.js > ${test262_dir}/intl402/browser.js
 cp ${js_src_tests_dir}/supporting/test402-shell.js ${test262_dir}/intl402/shell.js
 
 # Keep a record of what we imported.

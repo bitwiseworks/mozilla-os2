@@ -208,6 +208,10 @@ xlib-flush-glyphs.patch: bug 839745, flush glyphs when necessary
 
 dasharray-zero-gap.patch: bug 885585, ensure strokes get painted when the gaps in a dash array are all zero length
 
+cairo-mask-extends-bug.patch: bug 918671, sometimes when building a mask we wouldn't clear it properly. This is fixed in cairo 1.12
+
+ft-no-subpixel-if-surface-disables.patch: bug 929451, don't use subpixel aa for ft fonts on surfaces that don't support it
+
 ==== pixman patches ====
 
 pixman-android-cpu-detect.patch: Add CPU detection support for Android, where we can't reliably access /proc/self/auxv.
@@ -233,6 +237,10 @@ quartz-support-color-emoji-font.patch: support Apple Color Emoji font in cairo-q
 use-show-text-glyphs-if-glyph-path-fails.patch: fall back to show_text_glyphs even at huge sizes if scaled_font_glyph_path didn't work
 
 pixman-enable-altivec-acceleration.patch: enable building the altivec acceleration
+
+win32-d3dsurface9.patch: Create a win32 d3d9 surface to support LockRect
+
+win32-avoid-extend-pad-fallback: Avoid falling back to pixman when using EXTEND_PAD
 
 ==== disable printing patch ====
 

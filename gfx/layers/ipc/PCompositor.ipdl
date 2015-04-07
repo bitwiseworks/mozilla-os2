@@ -8,11 +8,17 @@
 include LayersSurfaces;
 include protocol PGrallocBuffer;
 include protocol PLayerTransaction;
-include "mozilla/layers/CompositorTypes.h";
+include "mozilla/GfxMessageUtils.h";
+include "nsRegion.h";
 
-using mozilla::null_t;
-using mozilla::layers::TextureFactoryIdentifier;
-using mozilla::layers::LayersBackend;
+using struct mozilla::null_t from "ipc/IPCMessageUtils.h";
+using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
+using struct mozilla::layers::FrameMetrics from "FrameMetrics.h";
+using mozilla::layers::FrameMetrics::ViewID from "FrameMetrics.h";
+using mozilla::layers::LayersBackend from "mozilla/layers/LayersTypes.h";
+using mozilla::CrossProcessMutexHandle from "mozilla/ipc/CrossProcessMutex.h";
+using mozilla::ipc::SharedMemoryBasic::Handle from "mozilla/ipc/SharedMemoryBasic.h";
+using class mozilla::TimeStamp from "mozilla/TimeStamp.h";
 
 namespace mozilla {
 namespace layers {
@@ -25,10 +31,19 @@ namespace layers {
  */
 // This should really be 'sync', but we're using 'rpc' as a workaround
 // for Bug 716631.
-rpc protocol PCompositor
+intr protocol PCompositor
 {
   // A Compositor manages a single Layer Manager (PLayerTransaction)
   manages PLayerTransaction;
+
+child:
+  // The child should invalidate everything so that the whole window is redrawn.
+  async InvalidateAll();
+
+  // The compositor completed a layers transaction. id is the layers id
+  // of the child layer tree that was composited (or 0 when notifying
+  // the root layer tree).
+  async DidComposite(uint64_t id);
 
 parent:
 
@@ -42,6 +57,8 @@ parent:
   // the compositor needs to pause/resume in lockstep with the application.
   sync Pause();
   sync Resume();
+
+  async NotifyChildCreated(uint64_t id);
 
   // Make a snapshot of the content that would have been drawn to our
   // render target at the time this message is received.  If the size
@@ -57,8 +74,26 @@ parent:
   // block until they are completed.
   sync FlushRendering();
 
-  sync PLayerTransaction(LayersBackend layersBackendHint, uint64_t id)
-    returns (TextureFactoryIdentifier textureFactoryIdentifier);
+  sync StartFrameTimeRecording(int32_t bufferSize)
+    returns (uint32_t startIndex);
+
+  sync StopFrameTimeRecording(uint32_t startIndex)
+    returns (float[] intervals);
+
+  // layersBackendHints is an ordered list of preffered backends where
+  // layersBackendHints[0] is the best backend. If any hints are LayersBackend::LAYERS_NONE
+  // that hint is ignored.
+  sync PLayerTransaction(LayersBackend[] layersBackendHints, uint64_t id)
+    returns (TextureFactoryIdentifier textureFactoryIdentifier, bool success);
+
+  // Notify the compositor that a region of the screen has been invalidated.
+  async NotifyRegionInvalidated(nsIntRegion region);
+
+child:
+  // Send back Compositor Frame Metrics from APZCs so tiled layers can
+  // update progressively.
+  async SharedCompositorFrameMetrics(Handle metrics, CrossProcessMutexHandle mutex, uint32_t aAPZCId);
+  async ReleaseSharedCompositorFrameMetrics(ViewID aId, uint32_t aAPZCId);
 };
 
 } // layers

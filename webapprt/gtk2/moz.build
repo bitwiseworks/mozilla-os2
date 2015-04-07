@@ -6,6 +6,19 @@
 
 PROGRAM = 'webapprt-stub'
 
-CPP_SOURCES += [
+SOURCES += [
     'webapprt.cpp',
 ]
+
+FAIL_ON_WARNINGS = True
+
+DEFINES['XPCOM_GLUE'] = True
+
+GENERATED_INCLUDES += ['/build']
+LOCAL_INCLUDES += [
+    '/toolkit/xre',
+    '/xpcom/base',
+    '/xpcom/build',
+]
+
+DISABLE_STL_WRAPPING = True

@@ -10,7 +10,6 @@
 #include "FileCommon.h"
 
 #include "nsIRequestObserver.h"
-#include "nsThreadUtils.h"
 
 class nsIFileStorage;
 
@@ -24,10 +23,10 @@ class LockedFile;
 class FileHelperListener
 {
 public:
-  NS_IMETHOD_(nsrefcnt)
+  NS_IMETHOD_(MozExternalRefCountType)
   AddRef() = 0;
 
-  NS_IMETHOD_(nsrefcnt)
+  NS_IMETHOD_(MozExternalRefCountType)
   Release() = 0;
 
   virtual void
@@ -45,7 +44,7 @@ class FileHelper : public nsIRequestObserver
   friend class FileOutputStreamWrapper;
 
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIREQUESTOBSERVER
 
   nsresult
@@ -58,18 +57,10 @@ public:
   OnStreamProgress(uint64_t aProgress, uint64_t aProgressMax);
 
   void
-  OnStreamClose()
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-    Finish();
-  }
+  OnStreamClose();
 
   void
-  OnStreamDestroy()
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-    Finish();
-  }
+  OnStreamDestroy();
 
   static LockedFile*
   GetCurrentLockedFile();
@@ -83,7 +74,7 @@ protected:
   DoAsyncRun(nsISupports* aStream) = 0;
 
   virtual nsresult
-  GetSuccessResult(JSContext* aCx, JS::Value* aVal);
+  GetSuccessResult(JSContext* aCx, JS::MutableHandle<JS::Value> aVal);
 
   virtual void
   ReleaseObjects();

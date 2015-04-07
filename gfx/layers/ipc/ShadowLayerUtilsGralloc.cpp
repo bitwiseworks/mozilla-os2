@@ -7,12 +7,14 @@
 
 #include "mozilla/DebugOnly.h"
 
+#include "mozilla/gfx/Point.h"
 #include "mozilla/layers/PGrallocBufferChild.h"
 #include "mozilla/layers/PGrallocBufferParent.h"
-#include "mozilla/layers/PLayerTransactionChild.h"
+#include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/ShadowLayers.h"
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/TextureHost.h"
 #include "mozilla/unused.h"
 #include "nsXULAppAPI.h"
 
@@ -20,12 +22,15 @@
 
 #include "nsIMemoryReporter.h"
 
-#include "gfxImageSurface.h"
 #include "gfxPlatform.h"
+#include "gfx2DGlue.h"
+#include "GLContext.h"
 
 #include "GeckoProfiler.h"
 
 #include "cutils/properties.h"
+
+#include "MainThreadUtils.h"
 
 using namespace android;
 using namespace base;
@@ -38,13 +43,33 @@ void
 ParamTraits<MagicGrallocBufferHandle>::Write(Message* aMsg,
                                              const paramType& aParam)
 {
+#if ANDROID_VERSION >= 19
+  sp<GraphicBuffer> flattenable = aParam.mGraphicBuffer;
+#else
   Flattenable *flattenable = aParam.mGraphicBuffer.get();
+#endif
   size_t nbytes = flattenable->getFlattenedSize();
   size_t nfds = flattenable->getFdCount();
 
   char data[nbytes];
   int fds[nfds];
+
+#if ANDROID_VERSION >= 19
+  // Make a copy of "data" and "fds" for flatten() to avoid casting problem
+  void *pdata = (void *)data;
+  int *pfds = fds;
+
+  flattenable->flatten(pdata, nbytes, pfds, nfds);
+
+  // In Kitkat, flatten() will change the value of nbytes and nfds, which dues
+  // to multiple parcelable object consumption. The actual size and fd count
+  // which returned by getFlattenedSize() and getFdCount() are not changed.
+  // So we change nbytes and nfds back by call corresponding calls.
+  nbytes = flattenable->getFlattenedSize();
+  nfds = flattenable->getFdCount();
+#else
   flattenable->flatten(data, nbytes, fds, nfds);
+#endif
 
   aMsg->WriteSize(nbytes);
   aMsg->WriteSize(nfds);
@@ -90,9 +115,17 @@ ParamTraits<MagicGrallocBufferHandle>::Read(const Message* aMsg,
   }
 
   sp<GraphicBuffer> buffer(new GraphicBuffer());
+#if ANDROID_VERSION >= 19
+  // Make a copy of "data" and "fds" for unflatten() to avoid casting problem
+  void const *pdata = (void const *)data;
+  int const *pfds = fds;
+
+  if (NO_ERROR == buffer->unflatten(pdata, nbytes, pfds, nfds)) {
+#else
   Flattenable *flattenable = buffer.get();
 
   if (NO_ERROR == flattenable->unflatten(data, nbytes, fds, nfds)) {
+#endif
     aResult->mGraphicBuffer = buffer;
     return true;
   }
@@ -112,40 +145,39 @@ MagicGrallocBufferHandle::MagicGrallocBufferHandle(const sp<GraphicBuffer>& aGra
 //-----------------------------------------------------------------------------
 // Parent process
 
-static gfxASurface::gfxImageFormat
+static gfxImageFormat
 ImageFormatForPixelFormat(android::PixelFormat aFormat)
 {
   switch (aFormat) {
   case PIXEL_FORMAT_RGBA_8888:
-    return gfxASurface::ImageFormatARGB32;
+    return gfxImageFormat::ARGB32;
   case PIXEL_FORMAT_RGBX_8888:
-    return gfxASurface::ImageFormatRGB24;
+    return gfxImageFormat::RGB24;
   case PIXEL_FORMAT_RGB_565:
-    return gfxASurface::ImageFormatRGB16_565;
-  case PIXEL_FORMAT_A_8:
-    return gfxASurface::ImageFormatA8;
+    return gfxImageFormat::RGB16_565;
   default:
-    MOZ_NOT_REACHED("Unknown gralloc pixel format");
+    MOZ_CRASH("Unknown gralloc pixel format");
   }
-  return gfxASurface::ImageFormatARGB32;
+  return gfxImageFormat::ARGB32;
 }
 
 static android::PixelFormat
-PixelFormatForImageFormat(gfxASurface::gfxImageFormat aFormat)
+PixelFormatForImageFormat(gfxImageFormat aFormat)
 {
   switch (aFormat) {
-  case gfxASurface::ImageFormatARGB32:
+  case gfxImageFormat::ARGB32:
     return android::PIXEL_FORMAT_RGBA_8888;
-  case gfxASurface::ImageFormatRGB24:
+  case gfxImageFormat::RGB24:
     return android::PIXEL_FORMAT_RGBX_8888;
-  case gfxASurface::ImageFormatRGB16_565:
+  case gfxImageFormat::RGB16_565:
     return android::PIXEL_FORMAT_RGB_565;
-  case gfxASurface::ImageFormatA8:
-    return android::PIXEL_FORMAT_A_8;
+  case gfxImageFormat::A8:
+    NS_WARNING("gralloc does not support gfxImageFormat::A8");
+    return android::PIXEL_FORMAT_UNKNOWN;
   default:
-    MOZ_NOT_REACHED("Unknown gralloc pixel format");
+    MOZ_CRASH("Unknown gralloc pixel format");
   }
-  return gfxASurface::ImageFormatARGB32;
+  return android::PIXEL_FORMAT_RGBA_8888;
 }
 
 static size_t
@@ -162,8 +194,6 @@ BytesPerPixelForPixelFormat(android::PixelFormat aFormat)
   case PIXEL_FORMAT_RGBA_5551:
   case PIXEL_FORMAT_RGBA_4444:
     return 2;
-  case PIXEL_FORMAT_A_8:
-    return 1;
   default:
     return 0;
   }
@@ -171,56 +201,76 @@ BytesPerPixelForPixelFormat(android::PixelFormat aFormat)
 }
 
 static android::PixelFormat
-PixelFormatForContentType(gfxASurface::gfxContentType aContentType)
+PixelFormatForContentType(gfxContentType aContentType)
 {
   return PixelFormatForImageFormat(
     gfxPlatform::GetPlatform()->OptimalFormatForContent(aContentType));
 }
 
-static gfxASurface::gfxContentType
+static gfxContentType
 ContentTypeFromPixelFormat(android::PixelFormat aFormat)
 {
   return gfxASurface::ContentFromFormat(ImageFormatForPixelFormat(aFormat));
 }
 
-static size_t sCurrentAlloc;
-static int64_t GetGrallocSize() { return sCurrentAlloc; }
+class GrallocReporter MOZ_FINAL : public nsIMemoryReporter
+{
+  friend class GrallocBufferActor;
 
-NS_MEMORY_REPORTER_IMPLEMENT(GrallocBufferActor,
-  "gralloc",
-  KIND_OTHER,
-  UNITS_BYTES,
-  GetGrallocSize,
-  "Special RAM that can be shared between processes and directly "
-  "accessed by both the CPU and GPU.  Gralloc memory is usually a "
-  "relatively precious resource, with much less available than generic "
-  "RAM.  When it's exhausted, graphics performance can suffer. "
-  "This value can be incorrect because of race conditions.");
+public:
+  NS_DECL_ISUPPORTS
+
+  GrallocReporter()
+  {
+#ifdef DEBUG
+    // There must be only one instance of this class, due to |sAmount|
+    // being static.  Assert this.
+    static bool hasRun = false;
+    MOZ_ASSERT(!hasRun);
+    hasRun = true;
+#endif
+  }
+
+  NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
+                            nsISupports* aData)
+  {
+    return MOZ_COLLECT_REPORT(
+      "gralloc", KIND_OTHER, UNITS_BYTES, sAmount,
+"Special RAM that can be shared between processes and directly accessed by "
+"both the CPU and GPU. Gralloc memory is usually a relatively precious "
+"resource, with much less available than generic RAM. When it's exhausted, "
+"graphics performance can suffer. This value can be incorrect because of race "
+"conditions.");
+  }
+
+private:
+  static int64_t sAmount;
+};
+
+NS_IMPL_ISUPPORTS(GrallocReporter, nsIMemoryReporter)
+
+int64_t GrallocReporter::sAmount = 0;
+
+void InitGralloc() {
+  NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
+  RegisterStrongMemoryReporter(new GrallocReporter());
+}
 
 GrallocBufferActor::GrallocBufferActor()
 : mAllocBytes(0)
 , mTextureHost(nullptr)
 {
-  static bool registered;
-  if (!registered) {
-    // We want to be sure that the first call here will always run on
-    // the main thread.
-    NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
-
-    NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(GrallocBufferActor));
-    registered = true;
-  }
 }
 
 GrallocBufferActor::~GrallocBufferActor()
 {
   if (mAllocBytes > 0) {
-    sCurrentAlloc -= mAllocBytes;
+    GrallocReporter::sAmount -= mAllocBytes;
   }
 }
 
 /*static*/ PGrallocBufferParent*
-GrallocBufferActor::Create(const gfxIntSize& aSize,
+GrallocBufferActor::Create(const gfx::IntSize& aSize,
                            const uint32_t& aFormat,
                            const uint32_t& aUsage,
                            MaybeMagicGrallocBufferHandle* aOutHandle)
@@ -236,13 +286,23 @@ GrallocBufferActor::Create(const gfxIntSize& aSize,
     return actor;
   }
 
+  // If the requested size is too big (i.e. exceeds the commonly used max GL texture size)
+  // then we risk OOMing the parent process. It's better to just deny the allocation and
+  // kill the child process, which is what the following code does.
+  // TODO: actually use GL_MAX_TEXTURE_SIZE instead of hardcoding 4096
+  if (aSize.width > 4096 || aSize.height > 4096) {
+    printf_stderr("GrallocBufferActor::Create -- requested gralloc buffer is too big. Killing child instead.");
+    delete actor;
+    return nullptr;
+  }
+
   sp<GraphicBuffer> buffer(new GraphicBuffer(aSize.width, aSize.height, format, usage));
   if (buffer->initCheck() != OK)
     return actor;
 
   size_t bpp = BytesPerPixelForPixelFormat(format);
   actor->mAllocBytes = aSize.width * aSize.height * bpp;
-  sCurrentAlloc += actor->mAllocBytes;
+  GrallocReporter::sAmount += actor->mAllocBytes;
 
   actor->mGraphicBuffer = buffer;
   *aOutHandle = MagicGrallocBufferHandle(buffer);
@@ -250,31 +310,23 @@ GrallocBufferActor::Create(const gfxIntSize& aSize,
   return actor;
 }
 
-// used only for hacky fix in gecko 23 for bug 862324
 void GrallocBufferActor::ActorDestroy(ActorDestroyReason)
 {
+  // Used only for hacky fix for bug 966446.
   if (mTextureHost) {
-    mTextureHost->ForgetBuffer();
+    mTextureHost->ForgetBufferActor();
+    mTextureHost = nullptr;
   }
 }
 
-// used only for hacky fix in gecko 23 for bug 862324
-void GrallocBufferActor::SetTextureHost(TextureHost* aTextureHost)
+void GrallocBufferActor::AddTextureHost(TextureHost* aTextureHost)
 {
   mTextureHost = aTextureHost;
 }
 
-/*static*/ already_AddRefed<TextureImage>
-LayerManagerComposite::OpenDescriptorForDirectTexturing(GLContext* aGL,
-                                                        const SurfaceDescriptor& aDescriptor,
-                                                        GLenum aWrapMode)
+void GrallocBufferActor::RemoveTextureHost()
 {
-  PROFILER_LABEL("LayerManagerComposite", "OpenDescriptorForDirectTexturing");
-  if (SurfaceDescriptor::TSurfaceDescriptorGralloc != aDescriptor.type()) {
-    return nullptr;
-  }
-  sp<GraphicBuffer> buffer = GrallocBufferActor::GetFrom(aDescriptor);
-  return aGL->CreateDirectTextureImage(buffer.get(), aWrapMode);
+  mTextureHost = nullptr;
 }
 
 /*static*/ bool
@@ -287,29 +339,6 @@ LayerManagerComposite::SupportsDirectTexturing()
 LayerManagerComposite::PlatformSyncBeforeReplyUpdate()
 {
   // Nothing to be done for gralloc.
-}
-
-bool
-ISurfaceAllocator::PlatformDestroySharedSurface(SurfaceDescriptor* aSurface)
-{
-  if (SurfaceDescriptor::TSurfaceDescriptorGralloc != aSurface->type()) {
-    return false;
-  }
-
-  // we should have either a bufferParent or bufferChild
-  // depending on whether we're on the parent or child side.
-  PGrallocBufferParent* gbp =
-    aSurface->get_SurfaceDescriptorGralloc().bufferParent();
-  if (gbp) {
-    unused << PGrallocBufferParent::Send__delete__(gbp);
-  } else {
-    PGrallocBufferChild* gbc =
-      aSurface->get_SurfaceDescriptorGralloc().bufferChild();
-    unused << PGrallocBufferChild::Send__delete__(gbc);
-  }
-
-  *aSurface = SurfaceDescriptor();
-  return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -331,191 +360,31 @@ GrallocBufferActor::InitFromHandle(const MagicGrallocBufferHandle& aHandle)
 }
 
 PGrallocBufferChild*
-ShadowLayerForwarder::AllocGrallocBuffer(const gfxIntSize& aSize,
+ShadowLayerForwarder::AllocGrallocBuffer(const gfx::IntSize& aSize,
                                          uint32_t aFormat,
                                          uint32_t aUsage,
                                          MaybeMagicGrallocBufferHandle* aHandle)
 {
+  if (!mShadowManager->IPCOpen()) {
+    return nullptr;
+  }
   return mShadowManager->SendPGrallocBufferConstructor(aSize, aFormat, aUsage, aHandle);
 }
 
-bool
-ISurfaceAllocator::PlatformAllocSurfaceDescriptor(const gfxIntSize& aSize,
-                                                  gfxASurface::gfxContentType aContent,
-                                                  uint32_t aCaps,
-                                                  SurfaceDescriptor* aBuffer)
+void
+ShadowLayerForwarder::DeallocGrallocBuffer(PGrallocBufferChild* aChild)
 {
-
-  // Check for Nexus S to disable gralloc. We only check for this on ICS or
-  // earlier, in hopes that JB will work.
-#if ANDROID_VERSION <= 15
-  char propValue[PROPERTY_VALUE_MAX];
-  property_get("ro.product.device", propValue, "None");
-  if (strcmp("crespo",propValue) == 0) {
-    NS_WARNING("Nexus S has issues with gralloc, falling back to shmem");
-    return false;
-  }
-#endif
-
-  // Some GL implementations fail to render gralloc textures with
-  // width < 64.  There's not much point in gralloc'ing buffers that
-  // small anyway, so fall back on shared memory plus a texture
-  // upload.
-  if (aSize.width < 64) {
-    return false;
-  }
-  PROFILER_LABEL("ShadowLayerForwarder", "PlatformAllocSurfaceDescriptor");
-  // Gralloc buffers are efficiently mappable as gfxImageSurface, so
-  // no need to check |aCaps & MAP_AS_IMAGE_SURFACE|.
-  MaybeMagicGrallocBufferHandle handle;
-  PGrallocBufferChild* gc;
-  bool defaultRBSwap;
-
-  if (aCaps & USING_GL_RENDERING_ONLY) {
-    gc = AllocGrallocBuffer(aSize,
-                            PixelFormatForContentType(aContent),
-                            GraphicBuffer::USAGE_HW_RENDER |
-                            GraphicBuffer::USAGE_HW_TEXTURE,
-                            &handle);
-    // If you're allocating for USING_GL_RENDERING_ONLY, then we don't flag
-    // this for RB swap.
-    defaultRBSwap = false;
-  } else {
-    gc = AllocGrallocBuffer(aSize,
-                            PixelFormatForContentType(aContent),
-                            GraphicBuffer::USAGE_SW_READ_OFTEN |
-                            GraphicBuffer::USAGE_SW_WRITE_OFTEN |
-                            GraphicBuffer::USAGE_HW_TEXTURE,
-                            &handle);
-    // But if you're allocating for non-GL-only rendering, we flag for
-    // RB swap to preserve old behaviour and proper interaction with
-    // cairo.
-    defaultRBSwap = true;
-  }
-
-  if (!gc) {
-    NS_ERROR("GrallocBufferConstructor failed by returned null");
-    return false;
-  } else if (handle.Tnull_t == handle.type()) {
-    NS_ERROR("GrallocBufferConstructor failed by returning handle with type Tnull_t");
-    PGrallocBufferChild::Send__delete__(gc);
-    return false;
-  }
-
-  GrallocBufferActor* gba = static_cast<GrallocBufferActor*>(gc);
-  gba->InitFromHandle(handle.get_MagicGrallocBufferHandle());
-
-  *aBuffer = SurfaceDescriptorGralloc(nullptr, gc, aSize,
-                                      /* external */ false,
-                                      defaultRBSwap);
-  return true;
+  MOZ_ASSERT(aChild);
+  PGrallocBufferChild::Send__delete__(aChild);
 }
 
 //-----------------------------------------------------------------------------
 // Both processes
 
-/*static*/ sp<GraphicBuffer>
-GrallocBufferActor::GetFrom(const SurfaceDescriptorGralloc& aDescriptor)
+android::GraphicBuffer*
+GrallocBufferActor::GetGraphicBuffer()
 {
-  GrallocBufferActor* gba = nullptr;
-  if (PGrallocBufferChild* child = aDescriptor.bufferChild()) {
-    gba = static_cast<GrallocBufferActor*>(child);
-  } else if (PGrallocBufferParent* parent = aDescriptor.bufferParent()) {
-    gba = static_cast<GrallocBufferActor*>(parent);
-  }
-  return gba->mGraphicBuffer;
-}
-
-
-/*static*/ already_AddRefed<gfxASurface>
-ShadowLayerForwarder::PlatformOpenDescriptor(OpenMode aMode,
-                                             const SurfaceDescriptor& aSurface)
-{
-  PROFILER_LABEL("ShadowLayerForwarder", "PlatformOpenDescriptor");
-  if (SurfaceDescriptor::TSurfaceDescriptorGralloc != aSurface.type()) {
-    return nullptr;
-  }
-
-  sp<GraphicBuffer> buffer =
-    GrallocBufferActor::GetFrom(aSurface.get_SurfaceDescriptorGralloc());
-  uint32_t usage = GRALLOC_USAGE_SW_READ_OFTEN;
-  if (OPEN_READ_WRITE == aMode) {
-    usage |= GRALLOC_USAGE_SW_WRITE_OFTEN;
-  }
-  void *vaddr;
-  DebugOnly<status_t> status = buffer->lock(usage, &vaddr);
-  // If we fail to lock, we'll just end up aborting anyway.
-  MOZ_ASSERT(status == OK);
-
-  gfxIntSize size = aSurface.get_SurfaceDescriptorGralloc().size();
-  gfxImageFormat format = ImageFormatForPixelFormat(buffer->getPixelFormat());
-  long pixelStride = buffer->getStride();
-  long byteStride = pixelStride * gfxASurface::BytePerPixelFromFormat(format);
-
-  nsRefPtr<gfxASurface> surf =
-    new gfxImageSurface((unsigned char*)vaddr, size, byteStride, format);
-  return surf->CairoStatus() ? nullptr : surf.forget();
-}
-
-/*static*/ bool
-ShadowLayerForwarder::PlatformGetDescriptorSurfaceContentType(
-  const SurfaceDescriptor& aDescriptor, OpenMode aMode,
-  gfxContentType* aContent,
-  gfxASurface** aSurface)
-{
-  if (SurfaceDescriptor::TSurfaceDescriptorGralloc != aDescriptor.type()) {
-    return false;
-  }
-
-  sp<GraphicBuffer> buffer =
-    GrallocBufferActor::GetFrom(aDescriptor.get_SurfaceDescriptorGralloc());
-  *aContent = ContentTypeFromPixelFormat(buffer->getPixelFormat());
-  return true;
-}
-
-/*static*/ bool
-ShadowLayerForwarder::PlatformGetDescriptorSurfaceSize(
-  const SurfaceDescriptor& aDescriptor, OpenMode aMode,
-  gfxIntSize* aSize,
-  gfxASurface** aSurface)
-{
-  if (SurfaceDescriptor::TSurfaceDescriptorGralloc != aDescriptor.type()) {
-    return false;
-  }
-
-  sp<GraphicBuffer> buffer =
-    GrallocBufferActor::GetFrom(aDescriptor.get_SurfaceDescriptorGralloc());
-  *aSize = aDescriptor.get_SurfaceDescriptorGralloc().size();
-  return true;
-}
-
-/*static*/ bool
-ShadowLayerForwarder::PlatformDestroySharedSurface(SurfaceDescriptor* aSurface)
-{
-  if (SurfaceDescriptor::TSurfaceDescriptorGralloc != aSurface->type()) {
-    return false;
-  }
-
-  PGrallocBufferChild* gbp =
-    aSurface->get_SurfaceDescriptorGralloc().bufferChild();
-  PGrallocBufferChild::Send__delete__(gbp);
-  *aSurface = SurfaceDescriptor();
-  return true;
-}
-
-/*static*/ bool
-ShadowLayerForwarder::PlatformCloseDescriptor(const SurfaceDescriptor& aDescriptor)
-{
-  PROFILER_LABEL("ShadowLayerForwarder", "PlatformCloseDescriptor");
-  if (SurfaceDescriptor::TSurfaceDescriptorGralloc != aDescriptor.type()) {
-    return false;
-  }
-
-  sp<GraphicBuffer> buffer = GrallocBufferActor::GetFrom(aDescriptor);
-  DebugOnly<status_t> status = buffer->unlock();
-  // If we fail to unlock, we'll subsequently fail to lock and end up aborting anyway.
-  MOZ_ASSERT(status == OK);
-  return true;
+  return mGraphicBuffer.get();
 }
 
 /*static*/ void

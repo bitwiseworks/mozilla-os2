@@ -1,76 +1,30 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this file,
-# You can obtain one at http://mozilla.org/MPL/2.0/.
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir = @srcdir@
-VPATH = @srcdir@
 
-include $(DEPTH)/config/autoconf.mk
+ifdef GNU_AS
+ifeq ($(CPU_ARCH),arm)
 
-MSVC_ENABLE_PGO := 1
-FORCE_STATIC_LIB= 1
+# These flags are a lie; they're just used to enable the requisite
+# opcodes; actual arch detection is done at runtime.
+ASFLAGS = -march=armv7-a -mfpu=neon
 
-DEFINES += \
-  -DOPUS_BUILD \
-  -DOPUS_VERSION='"draft-11-mozilla"' \
-  -DUSE_ALLOCA \
-  -Drestrict= \
-  $(NULL)
+celt_pitch_xcorr_arm-gnu.$(ASM_SUFFIX): celt_arm_dir celt/arm/armopts-gnu.S
 
-ifneq ($(filter $(OS_ARCH),Linux Darwin DragonFly FreeBSD NetBSD OpenBSD),)
-  DEFINES += -DHAVE_LRINTF
+# we need to throw this here because upstream has this path hardcoded
+celt_arm_dir:
+	mkdir -p celt/arm
+
+# armopts needs a specific rule, because arm2gnu.pl will always add the .S
+# suffix when translating the files that include it.
+celt/arm/armopts-gnu.S: celt/arm/armopts.s
+	$(PERL) $(srcdir)/celt/arm/arm2gnu.pl < $< > $@
+# For all others, we can use an implicit rule with the configured $(ASM_SUFFIX).
+%-gnu.$(ASM_SUFFIX): celt/arm/%.s
+	$(PERL) $(srcdir)/celt/arm/arm2gnu.pl < $< > $@
+
 endif
-ifeq ($(OS_ARCH), WINNT)
-  DEFINES += -Dinline=__inline
-ifdef GNU_CC
-  DEFINES += -DHAVE_LRINTF
-endif
-endif
-ifeq ($(OS_ARCH),AIX)
-DEFINES += -Dalloca=__alloca
-endif
-ifeq ($(OS_ARCH),SunOS)
-DEFINES += -DHAVE_ALLOCA_H
-endif
-
-LOCAL_INCLUDES += \
-  -I$(srcdir)/include \
-  -I$(srcdir)/celt \
-  -I$(srcdir)/silk \
-  -I$(srcdir)/src \
-  $(NULL)
-
-VPATH += \
-  $(srcdir)/celt \
-  $(srcdir)/silk \
-  $(srcdir)/src \
-  $(NULL)
-
-include $(srcdir)/celt_sources.mk
-include $(srcdir)/silk_sources.mk
-include $(srcdir)/opus_sources.mk
-
-CSRCS = \
-  $(notdir $(CELT_SOURCES)) \
-  $(notdir $(SILK_SOURCES)) \
-  $(notdir $(OPUS_SOURCES)) \
-  $(NULL)
-
-ifndef MOZ_SAMPLE_TYPE_FLOAT32
-  MOZ_OPUS_FIXED = 1
-endif
-
-ifdef MOZ_OPUS_FIXED
-DEFINES += -DFIXED_POINT=1 -DDISABLE_FLOAT_API
-LOCAL_INCLUDES += -I$(srcdir)/silk/fixed
-VPATH += $(srcdir)/silk/fixed
-CSRCS += $(notdir $(SILK_SOURCES_FIXED))
-else
-LOCAL_INCLUDES += -I$(srcdir)/silk/float
-VPATH += $(srcdir)/silk/float
-CSRCS += $(notdir $(SILK_SOURCES_FLOAT))
 endif
 
 include $(topsrcdir)/config/rules.mk

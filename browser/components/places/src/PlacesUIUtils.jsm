@@ -19,6 +19,11 @@ XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
                                   "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
+#ifdef MOZ_SERVICES_SYNC
+XPCOMUtils.defineLazyModuleGetter(this, "Weave",
+                                  "resource://services-sync/main.js");
+#endif
+
 XPCOMUtils.defineLazyGetter(this, "PlacesUtils", function() {
   Cu.import("resource://gre/modules/PlacesUtils.jsm");
   return PlacesUtils;
@@ -799,6 +804,7 @@ this.PlacesUIUtils = {
       let items = as.getItemsWithAnnotation(this.ORGANIZER_QUERY_ANNO);
       // While looping through queries we will also check for their validity.
       let queriesCount = 0;
+      let corrupt = false;
       for (let i = 0; i < items.length; i++) {
         let queryName = as.getItemAnnotation(items[i], this.ORGANIZER_QUERY_ANNO);
 
@@ -812,6 +818,7 @@ this.PlacesUIUtils = {
 
         if (!itemExists(query.itemId)) {
           // Orphan annotation, bail out and create a new left pane root.
+          corrupt = true;
           break;
         }
 
@@ -820,6 +827,7 @@ this.PlacesUIUtils = {
         if (items.indexOf(parentId) == -1 && parentId != leftPaneRoot) {
           // The parent is not part of the left pane, bail out and create a new
           // left pane root.
+          corrupt = true;
           break;
         }
 
@@ -837,7 +845,11 @@ this.PlacesUIUtils = {
         queriesCount++;
       }
 
-      if (queriesCount != EXPECTED_QUERY_COUNT) {
+      // Note: it's not enough to just check for queriesCount, since we may
+      // find an invalid query just after accounting for a sufficient number of
+      // valid ones.  As well as we can't just rely on corrupt since we may find
+      // less valid queries than expected.
+      if (corrupt || queriesCount != EXPECTED_QUERY_COUNT) {
         // Queries number is wrong, so the left pane must be corrupt.
         // Note: we can't just remove the leftPaneRoot, because some query could
         // have a bad parent, so we have to remove all items one by one.
@@ -987,7 +999,21 @@ this.PlacesUIUtils = {
       }
     }
     return queryName;
-  }
+  },
+
+  shouldShowTabsFromOtherComputersMenuitem: function() {
+    // If Sync isn't configured yet, then don't show the menuitem.
+    return Weave.Status.checkSetup() != Weave.CLIENT_NOT_CONFIGURED &&
+           Weave.Svc.Prefs.get("firstSync", "") != "notReady";
+  },
+
+  shouldEnableTabsFromOtherComputersMenuitem: function() {
+    // The tabs engine might never be inited (if services.sync.registerEngines
+    // is modified), so make sure we avoid undefined errors.
+    return Weave.Service.isLoggedIn &&
+           Weave.Service.engineManager.get("tabs") &&
+           Weave.Service.engineManager.get("tabs").enabled;
+  },
 };
 
 XPCOMUtils.defineLazyServiceGetter(PlacesUIUtils, "RDF",
@@ -1001,6 +1027,14 @@ XPCOMUtils.defineLazyGetter(PlacesUIUtils, "localStore", function() {
 XPCOMUtils.defineLazyGetter(PlacesUIUtils, "ellipsis", function() {
   return Services.prefs.getComplexValue("intl.ellipsis",
                                         Ci.nsIPrefLocalizedString).data;
+});
+
+XPCOMUtils.defineLazyGetter(PlacesUIUtils, "useAsyncTransactions", function() {
+  try {
+    return Services.prefs.getBoolPref("browser.places.useAsyncTransactions");
+  }
+  catch(ex) { }
+  return false;
 });
 
 XPCOMUtils.defineLazyServiceGetter(this, "URIFixup",

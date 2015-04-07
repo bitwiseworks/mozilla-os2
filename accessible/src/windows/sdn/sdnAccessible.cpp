@@ -11,8 +11,10 @@
 
 #include "nsAttrName.h"
 #include "nsCoreUtils.h"
+#include "nsIAccessibleTypes.h"
 #include "nsIDOMHTMLElement.h"
 #include "nsIDOMCSSStyleDeclaration.h"
+#include "nsNameSpaceManager.h"
 #include "nsServiceManagerUtils.h"
 #include "nsWinUtils.h"
 
@@ -175,8 +177,7 @@ sdnAccessible::get_attributesForNames(unsigned short aMaxAttribs,
     return S_FALSE;
 
   nsCOMPtr<nsIDOMElement> domElement(do_QueryInterface(mNode));
-  nsCOMPtr<nsINameSpaceManager> nameSpaceManager =
-    do_GetService(NS_NAMESPACEMANAGER_CONTRACTID);
+  nsNameSpaceManager* nameSpaceManager = nsNameSpaceManager::GetInstance();
 
   int32_t index = 0;
   for (index = 0; index < aMaxAttribs; index++) {
@@ -184,7 +185,7 @@ sdnAccessible::get_attributesForNames(unsigned short aMaxAttribs,
     if (aAttribNames[index]) {
       nsAutoString attributeValue, nameSpaceURI;
       nsAutoString attributeName(nsDependentString(
-        static_cast<PRUnichar*>(aAttribNames[index])));
+        static_cast<const wchar_t*>(aAttribNames[index])));
 
       nsresult rv = NS_OK;
       if (aNameSpaceID[index]>0 &&
@@ -281,8 +282,7 @@ sdnAccessible::get_computedStyleForProperties(unsigned short aNumStyleProperties
   for (index = 0; index < aNumStyleProperties; index++) {
     nsAutoString value;
     if (aStyleProperties[index])
-      cssDecl->GetPropertyValue(nsDependentString(static_cast<PRUnichar*>(
-        aStyleProperties[index])), value);  // Get property value
+      cssDecl->GetPropertyValue(nsDependentString(aStyleProperties[index]), value);  // Get property value
     aStyleValues[index] = ::SysAllocString(value.get());
   }
 
@@ -465,12 +465,11 @@ sdnAccessible::get_innerHTML(BSTR __RPC_FAR* aInnerHTML)
   if (IsDefunct())
     return CO_E_OBJNOTCONNECTED;
 
-  nsCOMPtr<nsIDOMHTMLElement> htmlElement = do_QueryInterface(mNode);
-  if (!htmlElement)
+  if (!mNode->IsElement())
     return S_FALSE;
 
   nsAutoString innerHTML;
-  htmlElement->GetInnerHTML(innerHTML);
+  mNode->AsElement()->GetInnerHTML(innerHTML);
   if (innerHTML.IsEmpty())
     return S_FALSE;
 
@@ -516,8 +515,8 @@ sdnAccessible::get_language(BSTR __RPC_FAR* aLanguage)
     return CO_E_OBJNOTCONNECTED;
 
   nsAutoString language;
-  if (mNode->IsElement())
-    nsCoreUtils::GetLanguageFor(mNode->AsElement(), nullptr, language);
+  if (mNode->IsContent())
+    nsCoreUtils::GetLanguageFor(mNode->AsContent(), nullptr, language);
   if (language.IsEmpty()) { // Nothing found, so use document's language
     mNode->OwnerDoc()->GetHeaderData(nsGkAtoms::headerContentLanguage,
                                      language);

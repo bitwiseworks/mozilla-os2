@@ -20,8 +20,6 @@
     {0x93, 0xb6, 0x00, 0x10, 0x4b, 0xa0, 0xfd, 0x40} \
 }
 
-class nsIUnicharInputStream;
-
 typedef nsInterfaceHashtable<nsCharPtrHashKey, nsISupports>
         nsProperties_HashBase;
 
@@ -33,9 +31,6 @@ public:
   NS_DECL_NSIPROPERTIES
 
   nsProperties(nsISupports *aOuter) { NS_INIT_AGGREGATED(aOuter); }
-  nsresult Init() { nsProperties_HashBase::Init(); return NS_OK; }
-
-private:
   ~nsProperties() { }
 };
 

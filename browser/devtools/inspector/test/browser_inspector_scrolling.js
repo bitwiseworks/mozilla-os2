@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -33,32 +33,34 @@ function inspectNode(aInspector)
 {
   inspector = aInspector;
 
-  inspector.highlighter.once("locked", performScrollingTest);
-  executeSoon(function() {
-    inspector.selection.setNode(div, "");
-  });
+  let highlighter = inspector.toolbox.highlighter;
+  highlighter.showBoxModel(getNodeFront(div)).then(performScrollingTest);
 }
 
 function performScrollingTest()
 {
-  executeSoon(function() {
-    EventUtils.synthesizeWheel(div, 10, 10,
-      { deltaY: 50.0, deltaMode: WheelEvent.DOM_DELTA_PIXEL },
-      iframe.contentWindow);
-  });
-
   gBrowser.selectedBrowser.addEventListener("scroll", function() {
     gBrowser.selectedBrowser.removeEventListener("scroll", arguments.callee,
       false);
+    let isRetina = devicePixelRatio === 2;
+    is(iframe.contentDocument.body.scrollTop,
+      isRetina ? 25 : 50, "inspected iframe scrolled");
 
-    is(iframe.contentDocument.body.scrollTop, 50, "inspected iframe scrolled");
-
-    inspector = div = iframe = doc = null;
-    let target = TargetFactory.forTab(gBrowser.selectedTab);
-    gDevTools.closeToolbox(target);
-    gBrowser.removeCurrentTab();
-    finish();
+    finishUp();
   }, false);
+
+  EventUtils.synthesizeWheel(div, 10, 10,
+    { deltaY: 50.0, deltaMode: WheelEvent.DOM_DELTA_PIXEL },
+    iframe.contentWindow);
+}
+
+function finishUp()
+{
+  inspector = div = iframe = doc = null;
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  gDevTools.closeToolbox(target);
+  gBrowser.removeCurrentTab();
+  finish();
 }
 
 function test()

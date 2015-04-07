@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/service.js");
 Cu.import("resource://services-sync/util.js");
@@ -27,9 +27,10 @@ function service_unavailable(request, response) {
 }
 
 function run_test() {
-  let logger = Log4Moz.repository.rootLogger;
-  Log4Moz.repository.rootLogger.addAppender(new Log4Moz.DumpAppender());
+  let logger = Log.repository.rootLogger;
+  Log.repository.rootLogger.addAppender(new Log.DumpAppender());
 
+  ensureLegacyIdentityManager();
   // This test expects a clean slate -- no saved passphrase.
   Services.logins.removeAllLogins();
   let johnHelper = track_collections_helper();
@@ -37,17 +38,25 @@ function run_test() {
   let johnColls  = johnHelper.collections;
 
   do_test_pending();
-  let server = httpd_setup({
+
+  let server;
+  function weaveHandler (request, response) {
+    response.setStatusLine(request.httpVersion, 200, "OK");
+    let body = server.baseURI + "/api/";
+    response.bodyOutputStream.write(body, body.length);
+  }
+
+  server = httpd_setup({
     "/api/1.1/johndoe/info/collections": login_handling(johnHelper.handler),
     "/api/1.1/janedoe/info/collections": service_unavailable,
 
     "/api/1.1/johndoe/storage/crypto/keys": johnU("crypto", new ServerWBO("keys").handler()),
     "/api/1.1/johndoe/storage/meta/global": johnU("meta",   new ServerWBO("global").handler()),
-    "/user/1.0/johndoe/node/weave": httpd_handler(200, "OK", "http://localhost:8080/api/")
+    "/user/1.0/johndoe/node/weave": weaveHandler,
   });
 
   try {
-    Service.serverURL = TEST_SERVER_URL;
+    Service.serverURL = server.baseURI;
 
     _("Force the initial state.");
     Service.status.service = STATUS_OK;
@@ -67,7 +76,7 @@ function run_test() {
     do_check_eq(Service.status.login, LOGIN_FAILED_NO_PASSPHRASE);
 
     _("verifyLogin() has found out the user's cluster URL, though.");
-    do_check_eq(Service.clusterURL, "http://localhost:8080/api/");
+    do_check_eq(Service.clusterURL, server.baseURI + "/api/");
 
     _("Success if passphrase is set.");
     Service.status.resetSync();

@@ -6,16 +6,19 @@
 #include "nsISupports.idl"
 
 %{C++
-#include "nsTArray.h"
+template<class T> class nsTArray;
+template<class T> class nsCOMArray;
 class nsCString;
 %}
 [ptr] native StringArray(nsTArray<nsCString>);
+[ref] native securityMessagesArray(nsCOMArray<nsISecurityConsoleMessage>);
 
 interface nsISocketTransport;
 interface nsIAsyncInputStream;
 interface nsIAsyncOutputStream;
 interface nsIURI;
 interface nsIProxyInfo;
+interface nsISecurityConsoleMessage;
 
 /**
  * The callback interface for nsIHttpChannelInternal::HTTPUpgrade()
@@ -34,7 +37,7 @@ interface nsIHttpUpgradeListener : nsISupports
  * using any feature exposed by this interface, be aware that this interface
  * will change and you will be broken.  You have been warned.
  */
-[scriptable, uuid(2cd7f6a6-63f3-4bd6-a0f5-6e3d6dcff81b)]
+[scriptable, uuid(b733194f-6751-4876-a444-bca4ba3f2fcb)]
 interface nsIHttpChannelInternal : nsISupports
 {
     /**
@@ -51,6 +54,12 @@ interface nsIHttpChannelInternal : nsISupports
      * Get the major/minor version numbers for the response
      */
     void getResponseVersion(out unsigned long major, out unsigned long minor);
+
+    /*
+     * Retrieves all security messages from the security message queue
+     * and empties the queue after retrieval
+     */
+    [noscript] void takeAllSecurityMessages(in securityMessagesArray aMessages);
 
     /**
      * Helper method to set a cookie with a consumer-provided
@@ -172,4 +181,15 @@ interface nsIHttpChannelInternal : nsISupports
      */
     attribute boolean loadUnblocked;
 
+    /**
+     * This attribute en/disables the timeout for the first byte of an HTTP
+     * response. Enabled by default.
+     */
+    attribute boolean responseTimeoutEnabled;
+
+    /**
+     * Get value of the URI passed to nsIHttpChannel.redirectTo() if any.
+     * May return null when redirectTo() has not been called.
+     */
+    readonly attribute nsIURI apiRedirectToURI;
 };

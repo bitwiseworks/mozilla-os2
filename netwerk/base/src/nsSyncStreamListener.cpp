@@ -5,6 +5,7 @@
 #include "nsIOService.h"
 #include "nsSyncStreamListener.h"
 #include "nsIPipe.h"
+#include "nsThreadUtils.h"
 #include <algorithm>
 
 nsresult
@@ -33,11 +34,11 @@ nsSyncStreamListener::WaitForData()
 // nsSyncStreamListener::nsISupports
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS4(nsSyncStreamListener,
-                   nsIStreamListener,
-                   nsIRequestObserver,
-                   nsIInputStream,
-                   nsISyncStreamListener)
+NS_IMPL_ISUPPORTS(nsSyncStreamListener,
+                  nsIStreamListener,
+                  nsIRequestObserver,
+                  nsIInputStream,
+                  nsISyncStreamListener)
 
 //-----------------------------------------------------------------------------
 // nsSyncStreamListener::nsISyncStreamListener

@@ -4,10 +4,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'migration'
-
 if CONFIG['OS_ARCH'] == 'WINNT':
-    CPP_SOURCES += [
+    SOURCES += [
         'nsIEHistoryEnumerator.cpp',
     ]
 
@@ -20,6 +18,7 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     EXTRA_COMPONENTS += [
         'IEProfileMigrator.js',
     ]
+    DEFINES['HAS_IE_MIGRATOR'] = True
 
 EXTRA_PP_COMPONENTS += [
     'BrowserProfileMigrators.manifest',
@@ -30,11 +29,16 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     EXTRA_PP_COMPONENTS += [
         'SafariProfileMigrator.js',
     ]
+    DEFINES['HAS_SAFARI_MIGRATOR'] = True
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     EXTRA_PP_COMPONENTS += [
         'SafariProfileMigrator.js',
     ]
+    DEFINES['HAS_SAFARI_MIGRATOR'] = True
 
-LIBRARY_NAME = 'migration_s'
+EXTRA_PP_JS_MODULES += [
+    'MigrationUtils.jsm',
+]
 
+FINAL_LIBRARY = 'browsercomps'

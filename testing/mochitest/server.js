@@ -578,9 +578,13 @@ function regularListing(metadata, response)
  */
 function testListing(metadata, response)
 {
-  var [links, count] = list(metadata.path,
-                            metadata.getProperty("directory"),
-                            true);
+  var links = {};
+  var count = 0;
+  if (metadata.queryString.indexOf('manifestFile') == -1) {
+    [links, count] = list(metadata.path,
+                          metadata.getProperty("directory"),
+                          true);
+  }
   var table_class = metadata.queryString.indexOf("hideResultsTable=1") > -1 ? "invisible": "";
 
   let testname = (metadata.queryString.indexOf("testname=") > -1)
@@ -601,11 +605,15 @@ function testListing(metadata, response)
         SCRIPT({type: "text/javascript",
                  src: "/tests/SimpleTest/LogController.js"}),
         SCRIPT({type: "text/javascript",
+                 src: "/tests/SimpleTest/MemoryStats.js"}),
+        SCRIPT({type: "text/javascript",
                  src: "/tests/SimpleTest/TestRunner.js"}),
         SCRIPT({type: "text/javascript",
                  src: "/tests/SimpleTest/MozillaLogger.js"}),
         SCRIPT({type: "text/javascript",
                  src: "/chunkifyTests.js"}),
+        SCRIPT({type: "text/javascript",
+                 src: "/manifestLibrary.js"}),
         SCRIPT({type: "text/javascript",
                  src: "/tests/SimpleTest/setup.js"}),
         SCRIPT({type: "text/javascript"},
@@ -670,7 +678,7 @@ function testListing(metadata, response)
 function defaultDirHandler(metadata, response)
 {
   response.setStatusLine("1.1", 200, "OK");
-  response.setHeader("Content-type", "text/html", false);
+  response.setHeader("Content-type", "text/html;charset=utf-8", false);
   try {
     if (metadata.path.indexOf("/tests") != 0) {
       regularListing(metadata, response);

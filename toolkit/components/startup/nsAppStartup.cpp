@@ -23,7 +23,7 @@
 #include "nsNativeCharsetUtils.h"
 #include "nsThreadUtils.h"
 #include "nsAutoPtr.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "mozilla/Preferences.h"
 #include "GeckoProfiler.h"
 
@@ -37,13 +37,13 @@
 #include "jsapi.h"
 #include "prenv.h"
 #include "nsAppDirectoryServiceDefs.h"
-#include "mozilla/mozPoisonWrite.h"
 
 #if defined(XP_WIN)
 // Prevent collisions with nsAppStartup::GetStartupInfo()
 #undef GetStartupInfo
 #endif
 
+#include "mozilla/IOInterposer.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/StartupTimeline.h"
 
@@ -107,8 +107,6 @@ public:
     // Tell the appshell to exit
     mService->mAppShell->Exit();
 
-    // We're done "shutting down".
-    mService->mShuttingDown = false;
     mService->mRunning = false;
     return NS_OK;
   }
@@ -139,11 +137,13 @@ nsAppStartup::nsAppStartup() :
   mConsiderQuitStopper(0),
   mRunning(false),
   mShuttingDown(false),
+  mStartingUp(true),
   mAttemptingQuit(false),
   mRestart(false),
   mInterrupted(false),
   mIsSafeModeNecessary(false),
-  mStartupCrashTrackingEnded(false)
+  mStartupCrashTrackingEnded(false),
+  mRestartTouchEnvironment(false)
 { }
 
 
@@ -162,13 +162,14 @@ nsAppStartup::Init()
     return NS_ERROR_FAILURE;
 
   os->AddObserver(this, "quit-application-forced", true);
+  os->AddObserver(this, "sessionstore-init-started", true);
   os->AddObserver(this, "sessionstore-windows-restored", true);
   os->AddObserver(this, "profile-change-teardown", true);
   os->AddObserver(this, "xul-window-registered", true);
   os->AddObserver(this, "xul-window-destroyed", true);
+  os->AddObserver(this, "xpcom-shutdown", true);
 
 #if defined(XP_WIN)
-  os->AddObserver(this, "xpcom-shutdown", true);
   os->AddObserver(this, "places-init-complete", true);
   // This last event is only interesting to us for xperf-based measures
 
@@ -216,12 +217,12 @@ nsAppStartup::Init()
 // nsAppStartup->nsISupports
 //
 
-NS_IMPL_THREADSAFE_ISUPPORTS5(nsAppStartup,
-                              nsIAppStartup,
-                              nsIWindowCreator,
-                              nsIWindowCreator2,
-                              nsIObserver,
-                              nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(nsAppStartup,
+                  nsIAppStartup,
+                  nsIWindowCreator,
+                  nsIWindowCreator2,
+                  nsIObserver,
+                  nsISupportsWeakReference)
 
 
 //
@@ -231,22 +232,30 @@ NS_IMPL_THREADSAFE_ISUPPORTS5(nsAppStartup,
 NS_IMETHODIMP
 nsAppStartup::CreateHiddenWindow()
 {
+#ifdef MOZ_WIDGET_GONK
+  return NS_OK;
+#else
   nsCOMPtr<nsIAppShellService> appShellService
     (do_GetService(NS_APPSHELLSERVICE_CONTRACTID));
   NS_ENSURE_TRUE(appShellService, NS_ERROR_FAILURE);
 
   return appShellService->CreateHiddenWindow();
+#endif
 }
 
 
 NS_IMETHODIMP
 nsAppStartup::DestroyHiddenWindow()
 {
+#ifdef MOZ_WIDGET_GONK
+  return NS_OK;
+#else
   nsCOMPtr<nsIAppShellService> appShellService
     (do_GetService(NS_APPSHELLSERVICE_CONTRACTID));
   NS_ENSURE_TRUE(appShellService, NS_ERROR_FAILURE);
 
   return appShellService->DestroyHiddenWindow();
+#endif
 }
 
 NS_IMETHODIMP
@@ -271,7 +280,14 @@ nsAppStartup::Run(void)
       return rv;
   }
 
-  return mRestart ? NS_SUCCESS_RESTART_APP : NS_OK;
+  nsresult retval = NS_OK;
+  if (mRestartTouchEnvironment) {
+    retval = NS_SUCCESS_RESTART_METRO_APP;
+  } else if (mRestart) {
+    retval = NS_SUCCESS_RESTART_APP;
+  }
+
+  return retval;
 }
 
 
@@ -362,7 +378,15 @@ nsAppStartup::Quit(uint32_t aMode)
       gRestartMode = (aMode & 0xF0);
     }
 
-    if (mRestart) {
+    if (!mRestartTouchEnvironment) {
+      mRestartTouchEnvironment = (aMode & eRestartTouchEnvironment) != 0;
+      gRestartMode = (aMode & 0xF0);
+    }
+
+    if (mRestart || mRestartTouchEnvironment) {
+      // Mark the next startup as a restart.
+      PR_SetEnv("MOZ_APP_RESTART=1");
+
       /* Firefox-restarts reuse the process so regular process start-time isn't
          a useful indicator of startup time anymore. */
       TimeStamp::RecordProcessRestart();
@@ -429,7 +453,8 @@ nsAppStartup::Quit(uint32_t aMode)
       NS_NAMED_LITERAL_STRING(shutdownStr, "shutdown");
       NS_NAMED_LITERAL_STRING(restartStr, "restart");
       obsService->NotifyObservers(nullptr, "quit-application",
-        mRestart ? restartStr.get() : shutdownStr.get());
+        (mRestart || mRestartTouchEnvironment) ?
+         restartStr.get() : shutdownStr.get());
     }
 
     if (!mRunning) {
@@ -512,6 +537,51 @@ NS_IMETHODIMP
 nsAppStartup::GetShuttingDown(bool *aResult)
 {
   *aResult = mShuttingDown;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsAppStartup::GetStartingUp(bool *aResult)
+{
+  *aResult = mStartingUp;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsAppStartup::DoneStartingUp()
+{
+  // This must be called once at most
+  MOZ_ASSERT(mStartingUp);
+
+  mStartingUp = false;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsAppStartup::GetRestarting(bool *aResult)
+{
+  *aResult = mRestart;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsAppStartup::GetWasRestarted(bool *aResult)
+{
+  char *mozAppRestart = PR_GetEnv("MOZ_APP_RESTART");
+
+  /* When calling PR_SetEnv() with an empty value the existing variable may
+   * be unset or set to the empty string depending on the underlying platform
+   * thus we have to check if the variable is present and not empty. */
+  *aResult = mozAppRestart && (strcmp(mozAppRestart, "") != 0);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsAppStartup::GetRestartingTouchEnvironment(bool *aResult)
+{
+  NS_ENSURE_ARG_POINTER(aResult);
+  *aResult = mRestartTouchEnvironment;
   return NS_OK;
 }
 
@@ -609,7 +679,7 @@ nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome *aParent,
 
 NS_IMETHODIMP
 nsAppStartup::Observe(nsISupports *aSubject,
-                      const char *aTopic, const PRUnichar *aData)
+                      const char *aTopic, const char16_t *aData)
 {
   NS_ASSERTION(mAppShell, "appshell service notified before appshell built");
   if (!strcmp(aTopic, "quit-application-forced")) {
@@ -627,6 +697,7 @@ nsAppStartup::Observe(nsISupports *aSubject,
     ExitLastWindowClosingSurvivalArea();
   } else if (!strcmp(aTopic, "sessionstore-windows-restored")) {
     StartupTimeline::Record(StartupTimeline::SESSION_RESTORED);
+    IOInterposer::EnteringNextStage();
 #if defined(XP_WIN)
     if (mSessionWindowRestoredProbe) {
       mSessionWindowRestoredProbe->Trigger();
@@ -635,11 +706,16 @@ nsAppStartup::Observe(nsISupports *aSubject,
     if (mPlacesInitCompleteProbe) {
       mPlacesInitCompleteProbe->Trigger();
     }
+#endif //defined(XP_WIN)
+  } else if (!strcmp(aTopic, "sessionstore-init-started")) {
+    StartupTimeline::Record(StartupTimeline::SESSION_RESTORE_INIT);
   } else if (!strcmp(aTopic, "xpcom-shutdown")) {
+    IOInterposer::EnteringNextStage();
+#if defined(XP_WIN)
     if (mXPCOMShutdownProbe) {
       mXPCOMShutdownProbe->Trigger();
     }
-#endif //defined(XP_WIN)
+#endif // defined(XP_WIN)
   } else {
     NS_ERROR("Unexpected observer topic.");
   }
@@ -648,10 +724,11 @@ nsAppStartup::Observe(nsISupports *aSubject,
 }
 
 NS_IMETHODIMP
-nsAppStartup::GetStartupInfo(JSContext* aCx, JS::Value* aRetval)
+nsAppStartup::GetStartupInfo(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval)
 {
-  JS::Rooted<JSObject*> obj(aCx, JS_NewObject(aCx, NULL, NULL, NULL));
-  *aRetval = OBJECT_TO_JSVAL(obj);
+  JS::Rooted<JSObject*> obj(aCx, JS_NewObject(aCx, nullptr, JS::NullPtr(), JS::NullPtr()));
+
+  aRetval.setObject(*obj);
 
   TimeStamp procTime = StartupTimeline::Get(StartupTimeline::PROCESS_CREATION);
   TimeStamp now = TimeStamp::Now();
@@ -690,8 +767,7 @@ nsAppStartup::GetStartupInfo(JSContext* aCx, JS::Value* aRetval)
         PRTime prStamp = ComputeAbsoluteTimestamp(absNow, now, stamp)
           / PR_USEC_PER_MSEC;
         JS::Rooted<JSObject*> date(aCx, JS_NewDateObjectMsec(aCx, prStamp));
-        JS_DefineProperty(aCx, obj, StartupTimeline::Describe(ev),
-          OBJECT_TO_JSVAL(date), NULL, NULL, JSPROP_ENUMERATE);
+        JS_DefineProperty(aCx, obj, StartupTimeline::Describe(ev), date, JSPROP_ENUMERATE);
       } else {
         Telemetry::Accumulate(Telemetry::STARTUP_MEASUREMENT_ERRORS, ev);
       }

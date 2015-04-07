@@ -2,239 +2,62 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "base/basictypes.h"
-#include "DOMCameraPreview.h"
-#include "CameraRecorderProfiles.h"
 #include "CameraControlImpl.h"
+#include "base/basictypes.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/unused.h"
+#include "nsIWeakReferenceUtils.h"
+#include "CameraRecorderProfiles.h"
 #include "CameraCommon.h"
 #include "nsGlobalWindow.h"
+#include "DeviceStorageFileDescriptor.h"
+#include "CameraControlListener.h"
 
 using namespace mozilla;
-using namespace mozilla::dom;
-using namespace mozilla::idl;
 
-CameraControlImpl::CameraControlImpl(uint32_t aCameraId, nsIThread* aCameraThread, uint64_t aWindowId)
+nsWeakPtr CameraControlImpl::sCameraThread;
+
+CameraControlImpl::CameraControlImpl(uint32_t aCameraId)
   : mCameraId(aCameraId)
-  , mCameraThread(aCameraThread)
-  , mWindowId(aWindowId)
-  , mFileFormat()
-  , mMaxMeteringAreas(0)
-  , mMaxFocusAreas(0)
-  , mDOMPreview(nullptr)
-  , mAutoFocusOnSuccessCb(nullptr)
-  , mAutoFocusOnErrorCb(nullptr)
-  , mTakePictureOnSuccessCb(nullptr)
-  , mTakePictureOnErrorCb(nullptr)
-  , mOnShutterCb(nullptr)
-  , mOnClosedCb(nullptr)
-  , mOnRecorderStateChangeCb(nullptr)
+  , mPreviewState(CameraControlListener::kPreviewStopped)
+  , mHardwareState(CameraControlListener::kHardwareClosed)
 {
   DOM_CAMERA_LOGT("%s:%d : this=%p\n", __func__, __LINE__, this);
+
+  // reuse the same camera thread to conserve resources
+  nsCOMPtr<nsIThread> ct = do_QueryReferent(sCameraThread);
+  if (ct) {
+    mCameraThread = ct.forget();
+  } else {
+    nsresult rv = NS_NewNamedThread("CameraThread", getter_AddRefs(mCameraThread));
+    unused << rv; // swallow rv to suppress a compiler warning when the macro
+                  // is #defined to nothing (i.e. in non-DEBUG builds).
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+    // keep a weak reference to the new thread
+    sCameraThread = do_GetWeakReference(mCameraThread);
+  }
+
+  // Care must be taken with the mListenerLock read-write lock to prevent
+  // deadlocks. Currently this is handled by ensuring that any attempts to
+  // acquire the lock for writing (as in Add/RemoveListener()) happen in a
+  // runnable dispatched to the Camera Thread--even if the method is being
+  // called from that thread. This ensures that if a registered listener
+  // (which is invoked with a read-lock) tries to call Add/RemoveListener(),
+  // the lock-for-writing attempt won't happen until the listener has
+  // completed.
+  //
+  // Multiple parallel listeners being invoked are not a problem because
+  // the read-write lock allows multiple simultaneous read-locks.
+  mListenerLock = PR_NewRWLock(PR_RWLOCK_RANK_NONE, "CameraControlImpl.Listeners.Lock");
 }
 
 CameraControlImpl::~CameraControlImpl()
 {
-  DOM_CAMERA_LOGT("%s:%d : this=%p\n", __func__, __LINE__, this);
-}
-
-// Helpers for string properties.
-nsresult
-CameraControlImpl::Set(uint32_t aKey, const nsAString& aValue)
-{
-  SetParameter(aKey, NS_ConvertUTF16toUTF8(aValue).get());
-  return NS_OK;
-}
-
-nsresult
-CameraControlImpl::Get(uint32_t aKey, nsAString& aValue)
-{
-  const char* value = GetParameterConstChar(aKey);
-  if (!value) {
-    return NS_ERROR_FAILURE;
+  if (mListenerLock) {
+    PR_DestroyRWLock(mListenerLock);
+    mListenerLock = nullptr;
   }
-
-  aValue.AssignASCII(value);
-  return NS_OK;
-}
-
-// Helpers for doubles.
-nsresult
-CameraControlImpl::Set(uint32_t aKey, double aValue)
-{
-  SetParameter(aKey, aValue);
-  return NS_OK;
-}
-
-nsresult
-CameraControlImpl::Get(uint32_t aKey, double* aValue)
-{
-  MOZ_ASSERT(aValue);
-  *aValue = GetParameterDouble(aKey);
-  return NS_OK;
-}
-
-// Helper for weighted regions.
-nsresult
-CameraControlImpl::Set(JSContext* aCx, uint32_t aKey, const JS::Value& aValue, uint32_t aLimit)
-{
-  if (aLimit == 0) {
-    DOM_CAMERA_LOGI("%s:%d : aLimit = 0, nothing to do\n", __func__, __LINE__);
-    return NS_OK;
-  }
-
-  if (!aValue.isObject()) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  uint32_t length = 0;
-
-  JS::Rooted<JSObject*> regions(aCx, &aValue.toObject());
-  if (!JS_GetArrayLength(aCx, regions, &length)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  DOM_CAMERA_LOGI("%s:%d : got %d regions (limited to %d)\n", __func__, __LINE__, length, aLimit);
-  if (length > aLimit) {
-    length = aLimit;
-  }
-
-  nsTArray<CameraRegion> regionArray;
-  regionArray.SetCapacity(length);
-
-  for (uint32_t i = 0; i < length; ++i) {
-    JS::Rooted<JS::Value> v(aCx);
-
-    if (!JS_GetElement(aCx, regions, i, v.address())) {
-      return NS_ERROR_FAILURE;
-    }
-
-    CameraRegion* r = regionArray.AppendElement();
-    /**
-     * These are the default values.  We can remove these when the xpidl
-     * dictionary parser gains the ability to grok default values.
-     */
-    r->top = -1000;
-    r->left = -1000;
-    r->bottom = 1000;
-    r->right = 1000;
-    r->weight = 1000;
-
-    nsresult rv = r->Init(aCx, v.address());
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    DOM_CAMERA_LOGI("region %d: top=%d, left=%d, bottom=%d, right=%d, weight=%d\n",
-      i,
-      r->top,
-      r->left,
-      r->bottom,
-      r->right,
-      r->weight
-    );
-  }
-  SetParameter(aKey, regionArray);
-  return NS_OK;
-}
-
-nsresult
-CameraControlImpl::Get(JSContext* aCx, uint32_t aKey, JS::Value* aValue)
-{
-  nsTArray<CameraRegion> regionArray;
-
-  GetParameter(aKey, regionArray);
-
-  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0, nullptr));
-  if (!array) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  uint32_t length = regionArray.Length();
-  DOM_CAMERA_LOGI("%s:%d : got %d regions\n", __func__, __LINE__, length);
-
-  for (uint32_t i = 0; i < length; ++i) {
-    CameraRegion* r = &regionArray[i];
-    JS::Rooted<JS::Value> v(aCx);
-
-    JS::Rooted<JSObject*> o(aCx, JS_NewObject(aCx, nullptr, nullptr, nullptr));
-    if (!o) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    DOM_CAMERA_LOGI("top=%d\n", r->top);
-    v = INT_TO_JSVAL(r->top);
-    if (!JS_SetProperty(aCx, o, "top", v.address())) {
-      return NS_ERROR_FAILURE;
-    }
-    DOM_CAMERA_LOGI("left=%d\n", r->left);
-    v = INT_TO_JSVAL(r->left);
-    if (!JS_SetProperty(aCx, o, "left", v.address())) {
-      return NS_ERROR_FAILURE;
-    }
-    DOM_CAMERA_LOGI("bottom=%d\n", r->bottom);
-    v = INT_TO_JSVAL(r->bottom);
-    if (!JS_SetProperty(aCx, o, "bottom", v.address())) {
-      return NS_ERROR_FAILURE;
-    }
-    DOM_CAMERA_LOGI("right=%d\n", r->right);
-    v = INT_TO_JSVAL(r->right);
-    if (!JS_SetProperty(aCx, o, "right", v.address())) {
-      return NS_ERROR_FAILURE;
-    }
-    DOM_CAMERA_LOGI("weight=%d\n", r->weight);
-    v = INT_TO_JSVAL(r->weight);
-    if (!JS_SetProperty(aCx, o, "weight", v.address())) {
-      return NS_ERROR_FAILURE;
-    }
-
-    v = OBJECT_TO_JSVAL(o);
-    if (!JS_SetElement(aCx, array, i, v.address())) {
-      return NS_ERROR_FAILURE;
-    }
-  }
-
-  *aValue = JS::ObjectValue(*array);
-  return NS_OK;
-}
-
-nsresult
-CameraControlImpl::Set(nsICameraShutterCallback* aOnShutter)
-{
-  mOnShutterCb = new nsMainThreadPtrHolder<nsICameraShutterCallback>(aOnShutter);
-  return NS_OK;
-}
-
-nsresult
-CameraControlImpl::Get(nsICameraShutterCallback** aOnShutter)
-{
-  *aOnShutter = mOnShutterCb;
-  return NS_OK;
-}
-
-nsresult
-CameraControlImpl::Set(nsICameraClosedCallback* aOnClosed)
-{
-  mOnClosedCb = new nsMainThreadPtrHolder<nsICameraClosedCallback>(aOnClosed);
-  return NS_OK;
-}
-
-nsresult
-CameraControlImpl::Get(nsICameraClosedCallback** aOnClosed)
-{
-  *aOnClosed = mOnClosedCb;
-  return NS_OK;
-}
-
-nsresult
-CameraControlImpl::Set(nsICameraRecorderStateChange* aOnRecorderStateChange)
-{
-  mOnRecorderStateChangeCb = new nsMainThreadPtrHolder<nsICameraRecorderStateChange>(aOnRecorderStateChange);
-  return NS_OK;
-}
-
-nsresult
-CameraControlImpl::Get(nsICameraRecorderStateChange** aOnRecorderStateChange)
-{
-  *aOnRecorderStateChange = mOnRecorderStateChangeCb;
-  return NS_OK;
 }
 
 already_AddRefed<RecorderProfileManager>
@@ -247,207 +70,666 @@ void
 CameraControlImpl::Shutdown()
 {
   DOM_CAMERA_LOGT("%s:%d\n", __func__, __LINE__);
-  mAutoFocusOnSuccessCb = nullptr;
-  mAutoFocusOnErrorCb = nullptr;
-  mTakePictureOnSuccessCb = nullptr;
-  mTakePictureOnErrorCb = nullptr;
-  mOnShutterCb = nullptr;
-  mOnClosedCb = nullptr;
-  mOnRecorderStateChangeCb = nullptr;
 }
 
 void
-CameraControlImpl::OnShutterInternal()
+CameraControlImpl::OnHardwareStateChange(CameraControlListener::HardwareState aNewState)
 {
-  DOM_CAMERA_LOGI("** SNAP **\n");
-  if (mOnShutterCb.get()) {
-    mOnShutterCb->HandleEvent();
+  // This callback can run on threads other than the Main Thread and
+  //  the Camera Thread. On Gonk, it may be called from the camera's
+  //  local binder thread, should the mediaserver process die.
+  RwLockAutoEnterRead lock(mListenerLock);
+
+  if (aNewState == mHardwareState) {
+    DOM_CAMERA_LOGI("OnHardwareStateChange: state did not change from %d\n", mHardwareState);
+    return;
+  }
+
+#ifdef PR_LOGGING
+  const char* state[] = { "open", "closed", "failed" };
+  MOZ_ASSERT(aNewState >= 0);
+  if (static_cast<unsigned int>(aNewState) < sizeof(state) / sizeof(state[0])) {
+    DOM_CAMERA_LOGI("New hardware state is '%s'\n", state[aNewState]);
+  } else {
+    DOM_CAMERA_LOGE("OnHardwareStateChange: got invalid HardwareState value %d\n", aNewState);
+  }
+#endif
+
+  mHardwareState = aNewState;
+
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    l->OnHardwareStateChange(mHardwareState);
+  }
+}
+
+void
+CameraControlImpl::OnConfigurationChange()
+{
+  MOZ_ASSERT(NS_GetCurrentThread() == mCameraThread);
+  RwLockAutoEnterRead lock(mListenerLock);
+
+  DOM_CAMERA_LOGI("OnConfigurationChange : %d listeners\n", mListeners.Length());
+
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    l->OnConfigurationChange(mCurrentConfiguration);
+  }
+}
+
+void
+CameraControlImpl::OnAutoFocusComplete(bool aAutoFocusSucceeded)
+{
+  // This callback can run on threads other than the Main Thread and
+  //  the Camera Thread. On Gonk, it is called from the camera
+  //  library's auto focus thread.
+  RwLockAutoEnterRead lock(mListenerLock);
+
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    l->OnAutoFocusComplete(aAutoFocusSucceeded);
+  }
+}
+
+void
+CameraControlImpl::OnAutoFocusMoving(bool aIsMoving)
+{
+  RwLockAutoEnterRead lock(mListenerLock);
+
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    l->OnAutoFocusMoving(aIsMoving);
+  }
+}
+
+void
+CameraControlImpl::OnFacesDetected(const nsTArray<Face>& aFaces)
+{
+  // This callback can run on threads other than the Main Thread and
+  //  the Camera Thread. On Gonk, it is called from the camera
+  //  library's face detection thread.
+  RwLockAutoEnterRead lock(mListenerLock);
+
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    l->OnFacesDetected(aFaces);
+  }
+}
+
+void
+CameraControlImpl::OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType)
+{
+  // This callback can run on threads other than the Main Thread and
+  //  the Camera Thread. On Gonk, it is called from the camera
+  //  library's snapshot thread.
+  RwLockAutoEnterRead lock(mListenerLock);
+
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    l->OnTakePictureComplete(aData, aLength, aMimeType);
   }
 }
 
 void
 CameraControlImpl::OnShutter()
 {
-  nsCOMPtr<nsIRunnable> onShutter = NS_NewRunnableMethod(this, &CameraControlImpl::OnShutterInternal);
-  nsresult rv = NS_DispatchToMainThread(onShutter);
-  if (NS_FAILED(rv)) {
-    DOM_CAMERA_LOGW("Failed to dispatch onShutter event to main thread (%d)\n", rv);
+  // This callback can run on threads other than the Main Thread and
+  //  the Camera Thread. On Gonk, it is called from the camera driver's
+  //  preview thread.
+  RwLockAutoEnterRead lock(mListenerLock);
+
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    l->OnShutter();
   }
 }
-
-class OnClosedTask : public nsRunnable
-{
-public:
-  OnClosedTask(nsMainThreadPtrHandle<nsICameraClosedCallback> onClosed, uint64_t aWindowId)
-    : mOnClosedCb(onClosed)
-    , mWindowId(aWindowId)
-  {
-    DOM_CAMERA_LOGT("%s:%d : this=%p\n", __func__, __LINE__, this);
-  }
-
-  virtual ~OnClosedTask()
-  {
-    DOM_CAMERA_LOGT("%s:%d : this=%p\n", __func__, __LINE__, this);
-  }
-
-  NS_IMETHOD Run()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    if (mOnClosedCb.get() && nsDOMCameraManager::IsWindowStillActive(mWindowId)) {
-      mOnClosedCb->HandleEvent();
-    }
-    return NS_OK;
-  }
-
-protected:
-  nsMainThreadPtrHandle<nsICameraClosedCallback> mOnClosedCb;
-  uint64_t mWindowId;
-};
 
 void
 CameraControlImpl::OnClosed()
 {
-  nsCOMPtr<nsIRunnable> onClosed = new OnClosedTask(mOnClosedCb, mWindowId);
-  nsresult rv = NS_DispatchToMainThread(onClosed);
-  if (NS_FAILED(rv)) {
-    DOM_CAMERA_LOGW("Failed to dispatch onClosed event to main thread (%d)\n", rv);
+  // This callback can run on threads other than the Main Thread and
+  //  the Camera Thread.
+  RwLockAutoEnterRead lock(mListenerLock);
+
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    l->OnHardwareStateChange(CameraControlListener::kHardwareClosed);
   }
 }
 
 void
-CameraControlImpl::OnRecorderStateChange(const nsString& aStateMsg, int32_t aStatus, int32_t aTrackNumber)
+CameraControlImpl::OnRecorderStateChange(CameraControlListener::RecorderState aState,
+                                         int32_t aStatus, int32_t aTrackNumber)
 {
-  DOM_CAMERA_LOGI("OnRecorderStateChange: '%s'\n", NS_ConvertUTF16toUTF8(aStateMsg).get());
+  // This callback can run on threads other than the Main Thread and
+  //  the Camera Thread. On Gonk, it is called from the media encoder
+  //  thread.
+  RwLockAutoEnterRead lock(mListenerLock);
 
-  nsCOMPtr<nsIRunnable> onRecorderStateChange = new CameraRecorderStateChange(mOnRecorderStateChangeCb, aStateMsg, aStatus, aTrackNumber, mWindowId);
-  nsresult rv = NS_DispatchToMainThread(onRecorderStateChange);
-  if (NS_FAILED(rv)) {
-    DOM_CAMERA_LOGE("Failed to dispatch onRecorderStateChange event to main thread (%d)\n", rv);
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    l->OnRecorderStateChange(aState, aStatus, aTrackNumber);
   }
 }
 
-nsresult
-CameraControlImpl::GetPreviewStream(CameraSize aSize, nsICameraPreviewStreamCallback* onSuccess, nsICameraErrorCallback* onError)
+void
+CameraControlImpl::OnPreviewStateChange(CameraControlListener::PreviewState aNewState)
 {
-  nsCOMPtr<nsIRunnable> getPreviewStreamTask = new GetPreviewStreamTask(this, aSize, onSuccess, onError);
-  return mCameraThread->Dispatch(getPreviewStreamTask, NS_DISPATCH_NORMAL);
-}
+  // This callback runs on the Main Thread and the Camera Thread, and
+  //  may run on the local binder thread, should the mediaserver
+  //  process die.
+  RwLockAutoEnterRead lock(mListenerLock);
 
-nsresult
-CameraControlImpl::AutoFocus(nsICameraAutoFocusCallback* onSuccess, nsICameraErrorCallback* onError)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  bool cancel = false;
-
-  nsCOMPtr<nsICameraAutoFocusCallback> cb = mAutoFocusOnSuccessCb.get();
-  if (cb) {
-    /**
-     * We already have a callback, so someone has already
-     * called autoFocus() -- cancel it.
-     */
-    mAutoFocusOnSuccessCb = nullptr;
-    mAutoFocusOnErrorCb = nullptr;
-    cancel = true;
+  if (aNewState == mPreviewState) {
+    DOM_CAMERA_LOGI("OnPreviewStateChange: state did not change from %d\n", mPreviewState);
+    return;
   }
 
-  nsCOMPtr<nsIRunnable> autoFocusTask = new AutoFocusTask(this, cancel, onSuccess, onError);
-  return mCameraThread->Dispatch(autoFocusTask, NS_DISPATCH_NORMAL);
+#ifdef PR_LOGGING
+  const char* state[] = { "stopped", "paused", "started" };
+  MOZ_ASSERT(aNewState >= 0);
+  if (static_cast<unsigned int>(aNewState) < sizeof(state) / sizeof(state[0])) {
+    DOM_CAMERA_LOGI("New preview state is '%s'\n", state[aNewState]);
+  } else {
+    DOM_CAMERA_LOGE("OnPreviewStateChange: got unknown PreviewState value %d\n", aNewState);
+  }
+#endif
+
+  mPreviewState = aNewState;
+
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    l->OnPreviewStateChange(mPreviewState);
+  }
 }
 
-nsresult
-CameraControlImpl::TakePicture(CameraSize aSize, int32_t aRotation, const nsAString& aFileFormat, CameraPosition aPosition, uint64_t aDateTime, nsICameraTakePictureCallback* onSuccess, nsICameraErrorCallback* onError)
+bool
+CameraControlImpl::OnNewPreviewFrame(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  bool cancel = false;
+  // This function runs on neither the Main Thread nor the Camera Thread.
+  //  On Gonk, it is called from the camera driver's preview thread.
+  RwLockAutoEnterRead lock(mListenerLock);
 
-  nsCOMPtr<nsICameraTakePictureCallback> cb = mTakePictureOnSuccessCb.get();
-  if (cb) {
-    /**
-     * We already have a callback, so someone has already
-     * called takePicture() -- cancel it.
-     */
-    mTakePictureOnSuccessCb = nullptr;
-    mTakePictureOnErrorCb = nullptr;
-    cancel = true;
+  DOM_CAMERA_LOGI("OnNewPreviewFrame: we have %d preview frame listener(s)\n",
+    mListeners.Length());
+
+  bool consumed = false;
+
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    consumed = l->OnNewPreviewFrame(aImage, aWidth, aHeight) || consumed;
+  }
+  return consumed;
+}
+
+void
+CameraControlImpl::OnError(CameraControlListener::CameraErrorContext aContext,
+                           CameraControlListener::CameraError aError)
+{
+  // This callback can run on threads other than the Main Thread and
+  //  the Camera Thread.
+  RwLockAutoEnterRead lock(mListenerLock);
+
+#ifdef PR_LOGGING
+  const char* error[] = {
+    "api-failed",
+    "init-failed",
+    "invalid-configuration",
+    "service-failed",
+    "set-picture-size-failed",
+    "set-thumbnail-size-failed",
+    "unknown"
+  };
+  const char* context[] = {
+    "StartCamera",
+    "StopCamera",
+    "AutoFocus",
+    "StartFaceDetection",
+    "StopFaceDetection",
+    "TakePicture",
+    "StartRecording",
+    "StopRecording",
+    "SetConfiguration",
+    "StartPreview",
+    "StopPreview",
+    "ResumeContinuousFocus",
+    "Unspecified"
+  };
+  if (static_cast<unsigned int>(aError) < sizeof(error) / sizeof(error[0]) &&
+    static_cast<unsigned int>(aContext) < sizeof(context) / sizeof(context[0])) {
+    DOM_CAMERA_LOGW("CameraControlImpl::OnError : aContext='%s' (%u), aError='%s' (%u)\n",
+      context[aContext], aContext, error[aError], aError);
+  } else {
+    DOM_CAMERA_LOGE("CameraControlImpl::OnError : aContext=%u, aError=%d\n",
+      aContext, aError);
+  }
+#endif
+
+  for (uint32_t i = 0; i < mListeners.Length(); ++i) {
+    CameraControlListener* l = mListeners[i];
+    l->OnError(aContext, aError);
+  }
+}
+
+// Camera control asynchronous message; these are dispatched from
+//  the Main Thread to the Camera Thread, where they are consumed.
+
+class CameraControlImpl::ControlMessage : public nsRunnable
+{
+public:
+  ControlMessage(CameraControlImpl* aCameraControl,
+                 CameraControlListener::CameraErrorContext aContext)
+    : mCameraControl(aCameraControl)
+    , mContext(aContext)
+  {
+    MOZ_COUNT_CTOR(CameraControlImpl::ControlMessage);
   }
 
-  nsCOMPtr<nsIRunnable> takePictureTask = new TakePictureTask(this, cancel, aSize, aRotation, aFileFormat, aPosition, aDateTime, onSuccess, onError);
-  return mCameraThread->Dispatch(takePictureTask, NS_DISPATCH_NORMAL);
+  virtual ~ControlMessage()
+  {
+    MOZ_COUNT_DTOR(CameraControlImpl::ControlMessage);
+  }
+
+  virtual nsresult RunImpl() = 0;
+
+  NS_IMETHOD
+  Run() MOZ_OVERRIDE
+  {
+    MOZ_ASSERT(mCameraControl);
+    MOZ_ASSERT(NS_GetCurrentThread() == mCameraControl->mCameraThread);
+
+    nsresult rv = RunImpl();
+    if (NS_FAILED(rv)) {
+      DOM_CAMERA_LOGW("Camera control API failed at %d with 0x%x\n", mContext, rv);
+      // XXXmikeh - do we want to report a more specific error code?
+      mCameraControl->OnError(mContext, CameraControlListener::kErrorApiFailed);
+    }
+
+    return NS_OK;
+  }
+
+protected:
+  nsRefPtr<CameraControlImpl> mCameraControl;
+  CameraControlListener::CameraErrorContext mContext;
+};
+
+nsresult
+CameraControlImpl::Start(const Configuration* aConfig)
+{
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext,
+            const Configuration* aConfig)
+      : ControlMessage(aCameraControl, aContext)
+      , mHaveInitialConfig(false)
+    {
+      if (aConfig) {
+        mConfig = *aConfig;
+        mHaveInitialConfig = true;
+      }
+    }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      if (mHaveInitialConfig) {
+        return mCameraControl->StartImpl(&mConfig);
+      }
+      return mCameraControl->StartImpl();
+    }
+
+  protected:
+    bool mHaveInitialConfig;
+    Configuration mConfig;
+  };
+
+  return mCameraThread->Dispatch(
+    new Message(this, CameraControlListener::kInStartCamera, aConfig), NS_DISPATCH_NORMAL);
 }
 
 nsresult
-CameraControlImpl::StartRecording(CameraStartRecordingOptions* aOptions, nsIFile* aFolder, const nsAString& aFilename, nsICameraStartRecordingCallback* onSuccess, nsICameraErrorCallback* onError)
+CameraControlImpl::SetConfiguration(const Configuration& aConfig)
 {
-  nsCOMPtr<nsIFile> clone;
-  aFolder->Clone(getter_AddRefs(clone));
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext,
+            const Configuration& aConfig)
+      : ControlMessage(aCameraControl, aContext)
+      , mConfig(aConfig)
+    { }
 
-  nsCOMPtr<nsIRunnable> startRecordingTask = new StartRecordingTask(this, *aOptions, clone, aFilename, onSuccess, onError, mWindowId);
-  return mCameraThread->Dispatch(startRecordingTask, NS_DISPATCH_NORMAL);
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      return mCameraControl->SetConfigurationImpl(mConfig);
+    }
+
+  protected:
+    Configuration mConfig;
+  };
+
+  return mCameraThread->Dispatch(
+    new Message(this, CameraControlListener::kInSetConfiguration, aConfig), NS_DISPATCH_NORMAL);
+}
+
+nsresult
+CameraControlImpl::AutoFocus()
+{
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext)
+      : ControlMessage(aCameraControl, aContext)
+    { }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      return mCameraControl->AutoFocusImpl();
+    }
+  };
+
+  return mCameraThread->Dispatch(
+    new Message(this, CameraControlListener::kInAutoFocus), NS_DISPATCH_NORMAL);
+}
+
+nsresult
+CameraControlImpl::StartFaceDetection()
+{
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext)
+      : ControlMessage(aCameraControl, aContext)
+    { }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      return mCameraControl->StartFaceDetectionImpl();
+    }
+  };
+
+  return mCameraThread->Dispatch(
+    new Message(this, CameraControlListener::kInStartFaceDetection), NS_DISPATCH_NORMAL);
+}
+
+nsresult
+CameraControlImpl::StopFaceDetection()
+{
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext)
+      : ControlMessage(aCameraControl, aContext)
+    { }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      return mCameraControl->StopFaceDetectionImpl();
+    }
+  };
+
+  return mCameraThread->Dispatch(
+    new Message(this, CameraControlListener::kInStopFaceDetection), NS_DISPATCH_NORMAL);
+}
+
+nsresult
+CameraControlImpl::TakePicture()
+{
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext)
+      : ControlMessage(aCameraControl, aContext)
+    { }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      return mCameraControl->TakePictureImpl();
+    }
+  };
+
+  return mCameraThread->Dispatch(
+    new Message(this, CameraControlListener::kInTakePicture), NS_DISPATCH_NORMAL);
+}
+
+nsresult
+CameraControlImpl::StartRecording(DeviceStorageFileDescriptor* aFileDescriptor,
+                                  const StartRecordingOptions* aOptions)
+{
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext,
+            const StartRecordingOptions* aOptions,
+            DeviceStorageFileDescriptor* aFileDescriptor)
+      : ControlMessage(aCameraControl, aContext)
+      , mOptionsPassed(false)
+      , mFileDescriptor(aFileDescriptor)
+    {
+      if (aOptions) {
+        mOptions = *aOptions;
+        mOptionsPassed = true;
+      }
+    }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      return mCameraControl->StartRecordingImpl(mFileDescriptor,
+        mOptionsPassed ? &mOptions : nullptr);
+    }
+
+  protected:
+    StartRecordingOptions mOptions;
+    bool mOptionsPassed;
+    nsRefPtr<DeviceStorageFileDescriptor> mFileDescriptor;
+  };
+
+
+  return mCameraThread->Dispatch(new Message(this, CameraControlListener::kInStartRecording,
+    aOptions, aFileDescriptor), NS_DISPATCH_NORMAL);
 }
 
 nsresult
 CameraControlImpl::StopRecording()
 {
-  nsCOMPtr<nsIRunnable> stopRecordingTask = new StopRecordingTask(this);
-  return mCameraThread->Dispatch(stopRecordingTask, NS_DISPATCH_NORMAL);
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext)
+      : ControlMessage(aCameraControl, aContext)
+    { }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      return mCameraControl->StopRecordingImpl();
+    }
+  };
+
+  return mCameraThread->Dispatch(
+    new Message(this, CameraControlListener::kInStopRecording), NS_DISPATCH_NORMAL);
 }
 
 nsresult
-CameraControlImpl::StartPreview(DOMCameraPreview* aDOMPreview)
+CameraControlImpl::StartPreview()
 {
-  nsCOMPtr<nsIRunnable> startPreviewTask = new StartPreviewTask(this, aDOMPreview);
-  return mCameraThread->Dispatch(startPreviewTask, NS_DISPATCH_NORMAL);
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext)
+      : ControlMessage(aCameraControl, aContext)
+    { }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      return mCameraControl->StartPreviewImpl();
+    }
+  };
+
+  return mCameraThread->Dispatch(
+    new Message(this, CameraControlListener::kInStartPreview), NS_DISPATCH_NORMAL);
+}
+
+nsresult
+CameraControlImpl::StopPreview()
+{
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext)
+      : ControlMessage(aCameraControl, aContext)
+    { }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      return mCameraControl->StopPreviewImpl();
+    }
+  };
+
+  return mCameraThread->Dispatch(
+    new Message(this, CameraControlListener::kInStopPreview), NS_DISPATCH_NORMAL);
+}
+
+nsresult
+CameraControlImpl::ResumeContinuousFocus()
+{
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext)
+      : ControlMessage(aCameraControl, aContext)
+    { }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      return mCameraControl->ResumeContinuousFocusImpl();
+    }
+  };
+
+  return mCameraThread->Dispatch(
+    new Message(this, CameraControlListener::kInResumeContinuousFocus), NS_DISPATCH_NORMAL);
+}
+
+nsresult
+CameraControlImpl::Stop()
+{
+  class Message : public ControlMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener::CameraErrorContext aContext)
+      : ControlMessage(aCameraControl, aContext)
+    { }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      return mCameraControl->StopImpl();
+    }
+  };
+
+  return mCameraThread->Dispatch(
+    new Message(this, CameraControlListener::kInStopCamera), NS_DISPATCH_NORMAL);
+}
+
+class CameraControlImpl::ListenerMessage : public CameraControlImpl::ControlMessage
+{
+public:
+  ListenerMessage(CameraControlImpl* aCameraControl,
+                  CameraControlListener* aListener)
+    : ControlMessage(aCameraControl, CameraControlListener::kInUnspecified)
+    , mListener(aListener)
+  { }
+
+protected:
+  nsRefPtr<CameraControlListener> mListener;
+};
+
+void
+CameraControlImpl::AddListenerImpl(already_AddRefed<CameraControlListener> aListener)
+{
+  RwLockAutoEnterWrite lock(mListenerLock);
+
+  CameraControlListener* l = *mListeners.AppendElement() = aListener;
+  DOM_CAMERA_LOGI("Added camera control listener %p\n", l);
+
+  // Update the newly-added listener's state
+  l->OnConfigurationChange(mCurrentConfiguration);
+  l->OnHardwareStateChange(mHardwareState);
+  l->OnPreviewStateChange(mPreviewState);
 }
 
 void
-CameraControlImpl::StopPreview()
-{
-  nsCOMPtr<nsIRunnable> stopPreviewTask = new StopPreviewTask(this);
-  mCameraThread->Dispatch(stopPreviewTask, NS_DISPATCH_NORMAL);
+CameraControlImpl::AddListener(CameraControlListener* aListener)
+ {
+  class Message : public ListenerMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl,
+            CameraControlListener* aListener)
+      : ListenerMessage(aCameraControl, aListener)
+    { }
+
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      mCameraControl->AddListenerImpl(mListener.forget());
+      return NS_OK;
+    }
+  };
+
+  mCameraThread->Dispatch(new Message(this, aListener), NS_DISPATCH_NORMAL);
 }
 
-nsresult
-CameraControlImpl::GetPreviewStreamVideoMode(CameraRecorderOptions* aOptions, nsICameraPreviewStreamCallback* onSuccess, nsICameraErrorCallback* onError)
+void
+CameraControlImpl::RemoveListenerImpl(CameraControlListener* aListener)
 {
-  nsCOMPtr<nsIRunnable> getPreviewStreamVideoModeTask = new GetPreviewStreamVideoModeTask(this, *aOptions, onSuccess, onError);
-  return mCameraThread->Dispatch(getPreviewStreamVideoModeTask, NS_DISPATCH_NORMAL);
+  RwLockAutoEnterWrite lock(mListenerLock);
+
+  nsRefPtr<CameraControlListener> l(aListener);
+  mListeners.RemoveElement(l);
+  DOM_CAMERA_LOGI("Removed camera control listener %p\n", l.get());
+  // XXXmikeh - do we want to notify the listener that it has been removed?
 }
 
-nsresult
-CameraControlImpl::ReleaseHardware(nsICameraReleaseCallback* onSuccess, nsICameraErrorCallback* onError)
-{
-  nsCOMPtr<nsIRunnable> releaseHardwareTask = new ReleaseHardwareTask(this, onSuccess, onError);
-  return mCameraThread->Dispatch(releaseHardwareTask, NS_DISPATCH_NORMAL);
-}
+void
+CameraControlImpl::RemoveListener(CameraControlListener* aListener)
+ {
+  class Message : public ListenerMessage
+  {
+  public:
+    Message(CameraControlImpl* aCameraControl, CameraControlListener* aListener)
+      : ListenerMessage(aCameraControl, aListener)
+    { }
 
-bool
-CameraControlImpl::ReceiveFrame(void* aBuffer, ImageFormat aFormat, FrameBuilder aBuilder)
-{
-  if (!mDOMPreview) {
-    return false;
-  }
+    nsresult
+    RunImpl() MOZ_OVERRIDE
+    {
+      mCameraControl->RemoveListenerImpl(mListener);
+      return NS_OK;
+    }
+  };
 
-  return mDOMPreview->ReceiveFrame(aBuffer, aFormat, aBuilder);
-}
-
-NS_IMETHODIMP
-GetPreviewStreamResult::Run()
-{
-  /**
-   * The camera preview stream object is DOM-facing, and as such
-   * must be a cycle-collection participant created on the main
-   * thread.
-   */
-  MOZ_ASSERT(NS_IsMainThread());
-
-  nsCOMPtr<nsICameraPreviewStreamCallback> onSuccess = mOnSuccessCb.get();
-  nsGlobalWindow* window = nsGlobalWindow::GetInnerWindowWithId(mWindowId);
-  if (onSuccess && nsDOMCameraManager::IsWindowStillActive(mWindowId) && window) {
-    nsCOMPtr<nsIDOMMediaStream> stream =
-      new DOMCameraPreview(window, mCameraControl, mWidth, mHeight,
-	                         mFramesPerSecond);
-    onSuccess->HandleEvent(stream);
-  }
-  return NS_OK;
+  mCameraThread->Dispatch(new Message(this, aListener), NS_DISPATCH_NORMAL);
 }

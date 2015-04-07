@@ -12,32 +12,20 @@
    * nsScannerBufferList
    */
 
-#define MAX_CAPACITY ((UINT32_MAX / sizeof(PRUnichar)) - \
-                      (sizeof(Buffer) + sizeof(PRUnichar)))
+#define MAX_CAPACITY ((UINT32_MAX / sizeof(char16_t)) - \
+                      (sizeof(Buffer) + sizeof(char16_t)))
 
 nsScannerBufferList::Buffer*
 nsScannerBufferList::AllocBufferFromString( const nsAString& aString )
   {
     uint32_t len = aString.Length();
+    Buffer* buf = AllocBuffer(len);
 
-    if (len > MAX_CAPACITY)
-      return nullptr;
-
-    Buffer* buf = (Buffer*) malloc(sizeof(Buffer) + (len + 1) * sizeof(PRUnichar));
     if (buf)
       {
-        // leave PRCList members of Buffer uninitialized
-
-        buf->mUsageCount = 0;
-        buf->mDataEnd = buf->DataStart() + len;
-
         nsAString::const_iterator source;
         aString.BeginReading(source);
-        nsCharTraits<PRUnichar>::copy(buf->DataStart(), source.get(), len);
-
-        // XXX null terminate.  this shouldn't be required, but we do it because
-        // nsScanner erroneously thinks it can dereference DataEnd :-(
-        *buf->mDataEnd = PRUnichar(0);
+        nsCharTraits<char16_t>::copy(buf->DataStart(), source.get(), len);
       }
     return buf;
   }
@@ -48,30 +36,29 @@ nsScannerBufferList::AllocBuffer( uint32_t capacity )
     if (capacity > MAX_CAPACITY)
       return nullptr;
 
-    Buffer* buf = (Buffer*) malloc(sizeof(Buffer) + (capacity + 1) * sizeof(PRUnichar));
-    if (buf)
-      {
-        // leave PRCList members of Buffer uninitialized
+    void* ptr = malloc(sizeof(Buffer) + (capacity + 1) * sizeof(char16_t));
+    if (!ptr)
+      return nullptr;
 
-        buf->mUsageCount = 0;
-        buf->mDataEnd = buf->DataStart() + capacity;
+    Buffer* buf = new (ptr) Buffer();
 
-        // XXX null terminate.  this shouldn't be required, but we do it because
-        // nsScanner erroneously thinks it can dereference DataEnd :-(
-        *buf->mDataEnd = PRUnichar(0);
-      }
+    buf->mUsageCount = 0;
+    buf->mDataEnd = buf->DataStart() + capacity;
+
+    // XXX null terminate.  this shouldn't be required, but we do it because
+    // nsScanner erroneously thinks it can dereference DataEnd :-(
+    *buf->mDataEnd = char16_t(0);
     return buf;
   }
 
 void
 nsScannerBufferList::ReleaseAll()
   {
-    while (!PR_CLIST_IS_EMPTY(&mBuffers))
+    while (!mBuffers.isEmpty())
       {
-        PRCList* node = PR_LIST_HEAD(&mBuffers);
-        PR_REMOVE_LINK(node);
+        Buffer* node = mBuffers.popFirst();
         //printf(">>> freeing buffer @%p\n", node);
-        free(static_cast<Buffer*>(node));
+        free(node);
       }
   }
 
@@ -93,7 +80,7 @@ nsScannerBufferList::SplitBuffer( const Position& pos )
     Buffer* new_buffer = AllocBuffer(len);
     if (new_buffer)
       {
-        nsCharTraits<PRUnichar>::copy(new_buffer->DataStart(),
+        nsCharTraits<char16_t>::copy(new_buffer->DataStart(),
                                       bufferToSplit->DataStart() + splitOffset,
                                       len);
         InsertAfter(new_buffer, bufferToSplit);
@@ -106,10 +93,10 @@ nsScannerBufferList::DiscardUnreferencedPrefix( Buffer* aBuf )
   {
     if (aBuf == Head())
       {
-        while (!PR_CLIST_IS_EMPTY(&mBuffers) && !Head()->IsInUse())
+        while (!mBuffers.isEmpty() && !Head()->IsInUse())
           {
             Buffer* buffer = Head();
-            PR_REMOVE_LINK(buffer);
+            buffer->remove();
             free(buffer);
           }
       }
@@ -160,7 +147,7 @@ nsScannerSubstring::~nsScannerSubstring()
   }
 
 int32_t
-nsScannerSubstring::CountChar( PRUnichar c ) const
+nsScannerSubstring::CountChar( char16_t c ) const
   {
       /*
         re-write this to use a counting sink
@@ -173,7 +160,7 @@ nsScannerSubstring::CountChar( PRUnichar c ) const
     for ( BeginReading(iter); ; )
       {
         int32_t lengthToExamineInThisFragment = iter.size_forward();
-        const PRUnichar* fromBegin = iter.get();
+        const char16_t* fromBegin = iter.get();
         result += size_type(NS_COUNT(fromBegin, fromBegin+lengthToExamineInThisFragment, c));
         if ( !(lengthToExamine -= lengthToExamineInThisFragment) )
           return result;
@@ -276,7 +263,7 @@ nsScannerSubstring::GetNextFragment( nsScannerFragment& frag ) const
     if (frag.mBuffer == mEnd.mBuffer)
       return false;
 
-    frag.mBuffer = static_cast<const Buffer*>(PR_NEXT_LINK(frag.mBuffer));
+    frag.mBuffer = frag.mBuffer->getNext();
 
     if (frag.mBuffer == mStart.mBuffer)
       frag.mFragmentStart = mStart.mPosition;
@@ -298,7 +285,7 @@ nsScannerSubstring::GetPrevFragment( nsScannerFragment& frag ) const
     if (frag.mBuffer == mStart.mBuffer)
       return false;
 
-    frag.mBuffer = static_cast<const Buffer*>(PR_PREV_LINK(frag.mBuffer));
+    frag.mBuffer = frag.mBuffer->getPrevious();
 
     if (frag.mBuffer == mStart.mBuffer)
       frag.mFragmentStart = mStart.mPosition;
@@ -386,12 +373,12 @@ nsScannerString::UngetReadable( const nsAString& aReadable, const nsScannerItera
   }
 
 void
-nsScannerString::ReplaceCharacter(nsScannerIterator& aPosition, PRUnichar aChar)
+nsScannerString::ReplaceCharacter(nsScannerIterator& aPosition, char16_t aChar)
   {
     // XXX Casting a const to non-const. Unless the base class
     // provides support for writing iterators, this is the best
     // that can be done.
-    PRUnichar* pos = const_cast<PRUnichar*>(aPosition.get());
+    char16_t* pos = const_cast<char16_t*>(aPosition.get());
     *pos = aChar;
 
     mIsDirty = true;
@@ -527,7 +514,7 @@ AppendUnicodeTo( const nsScannerIterator& aSrcStart,
   }
 
 bool
-FindCharInReadable( PRUnichar aChar,
+FindCharInReadable( char16_t aChar,
                     nsScannerIterator& aSearchStart,
                     const nsScannerIterator& aSearchEnd )
   {
@@ -539,7 +526,7 @@ FindCharInReadable( PRUnichar aChar,
         else
           fragmentLength = aSearchStart.size_forward();
 
-        const PRUnichar* charFoundAt = nsCharTraits<PRUnichar>::find(aSearchStart.get(), fragmentLength, aChar);
+        const char16_t* charFoundAt = nsCharTraits<char16_t>::find(aSearchStart.get(), fragmentLength, aChar);
         if ( charFoundAt ) {
           aSearchStart.advance( charFoundAt - aSearchStart.get() );
           return true;

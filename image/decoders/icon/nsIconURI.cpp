@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsIconURI.h"
 #include "nsNetUtil.h"
@@ -59,7 +59,7 @@ nsMozIconURI::~nsMozIconURI()
 {
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsMozIconURI, nsIMozIconURI, nsIURI)
+NS_IMPL_ISUPPORTS(nsMozIconURI, nsIMozIconURI, nsIURI)
 
 #define MOZICON_SCHEME "moz-icon:"
 #define MOZICON_SCHEME_LEN (sizeof(MOZICON_SCHEME) - 1)
