@@ -89,7 +89,12 @@ enum SystemDirectories {
   Unix_XDG_Pictures         =   308,
   Unix_XDG_PublicShare      =   309,
   Unix_XDG_Templates        =   310,
-  Unix_XDG_Videos           =   311
+  Unix_XDG_Videos           =   311,
+
+  OS2_SystemDirectory       =   401,   
+  OS2_OS2Directory          =   402,   
+  OS2_DesktopDirectory      =   403,   
+  OS2_HomeDirectory         =   404
 };
 
 nsresult
