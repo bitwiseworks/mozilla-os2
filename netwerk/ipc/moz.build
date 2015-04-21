@@ -10,8 +10,6 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'necko_ipc'
 
-MODULE = 'necko'
-
 EXPORTS.mozilla.net += [
     'ChannelEventQueue.h',
     'NeckoChild.h',
@@ -22,7 +20,7 @@ EXPORTS.mozilla.net += [
     'RemoteOpenFileParent.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'ChannelEventQueue.cpp',
     'NeckoChild.cpp',
     'NeckoCommon.cpp',
@@ -31,3 +29,23 @@ CPP_SOURCES += [
     'RemoteOpenFileParent.cpp',
 ]
 
+IPDL_SOURCES = [
+    'NeckoChannelParams.ipdlh',
+    'PChannelDiverter.ipdl',
+    'PNecko.ipdl',
+    'PRemoteOpenFile.ipdl',
+    'PRtspChannel.ipdl',
+    'PRtspController.ipdl',
+]
+
+FAIL_ON_WARNINGS = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'necko'
+
+LOCAL_INCLUDES += [
+    '../base/src',
+    '../protocol/http',
+    '/modules/libjar',
+]

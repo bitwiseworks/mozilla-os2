@@ -3,8 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
-
 #include "HTMLDivElement.h"
 #include "nsGenericHTMLElement.h"
 #include "nsStyleConsts.h"
@@ -20,22 +18,15 @@ HTMLDivElement::~HTMLDivElement()
 {
 }
 
-NS_IMPL_ADDREF_INHERITED(HTMLDivElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLDivElement, Element)
-
-// QueryInterface implementation for HTMLDivElement
-NS_INTERFACE_TABLE_HEAD(HTMLDivElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLDivElement, nsIDOMHTMLDivElement)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
+NS_IMPL_ISUPPORTS_INHERITED(HTMLDivElement, nsGenericHTMLElement,
+                            nsIDOMHTMLDivElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLDivElement)
 
 JSObject*
-HTMLDivElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLDivElement::WrapNode(JSContext *aCx)
 {
-  return dom::HTMLDivElementBinding::Wrap(aCx, aScope, this);
+  return dom::HTMLDivElementBinding::Wrap(aCx, this);
 }
 
 bool
@@ -69,8 +60,9 @@ HTMLDivElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-static void
-MapAttributesIntoRule(const nsMappedAttributes* aAttributes, nsRuleData* aData)
+void
+HTMLDivElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                      nsRuleData* aData)
 {
   nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aData);
   nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);

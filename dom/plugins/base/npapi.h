@@ -154,7 +154,7 @@ typedef struct _NPStream
   void*    notifyData;
   const    char* headers; /* Response headers from host.
                            * Exists only for >= NPVERS_HAS_RESPONSE_HEADERS.
-                           * Used for HTTP only; NULL for non-HTTP.
+                           * Used for HTTP only; nullptr for non-HTTP.
                            * Available from NPP_NewStream onwards.
                            * Plugin should copy this data before storing it.
                            * Includes HTTP status line and all headers,
@@ -386,9 +386,6 @@ typedef enum {
   , NPPVpluginCoreAnimationLayer = 1003
 #endif
 
-#if defined(MOZ_PLATFORM_MAEMO) && ((MOZ_PLATFORM_MAEMO == 5) || (MOZ_PLATFORM_MAEMO == 6))
-  , NPPVpluginWindowlessLocalBool = 2002
-#endif
 } NPPVariable;
 
 /*
@@ -446,9 +443,6 @@ typedef enum {
                                                     Cocoa text input specification. */
   , NPNVsupportsCompositingCoreAnimationPluginsBool = 74656 /* TRUE if the browser supports
                                                                CA model compositing */
-#endif
-#if defined(MOZ_PLATFORM_MAEMO) && ((MOZ_PLATFORM_MAEMO == 5) || (MOZ_PLATFORM_MAEMO == 6))
-  , NPNVSupportsWindowlessLocal = 2002
 #endif
 } NPNVariable;
 

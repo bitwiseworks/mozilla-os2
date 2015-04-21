@@ -239,6 +239,9 @@ nr_stun_build_use_candidate(nr_stun_client_ice_use_candidate_params *params, nr_
    if ((r=nr_stun_message_add_priority_attribute(req, params->priority)))
        ABORT(r);
 
+   if ((r=nr_stun_message_add_ice_controlling_attribute(req, params->tiebreaker)))
+     ABORT(r);
+
    *msg = req;
 
    _status=0;
@@ -274,6 +277,9 @@ nr_stun_build_req_ice(nr_stun_client_ice_binding_request_params *params, nr_stun
        if ((r=nr_stun_message_add_ice_controlled_attribute(req, params->tiebreaker)))
            ABORT(r);
        break;
+   default:
+       assert(0);
+       ABORT(R_INTERNAL);
    }
 
    *msg = req;
@@ -359,22 +365,22 @@ nr_stun_build_auth_params(nr_stun_client_auth_params *auth, nr_stun_message *req
     ABORT(r);
 
   if (!auth->username) {
-    r_log(NR_LOG_STUN, LOG_ERR, "STUN authentication requested but no username provided");
+    r_log(NR_LOG_STUN, LOG_WARNING, "STUN authentication requested but no username provided");
     ABORT(R_INTERNAL);
   }
 
   if (!auth->password.len) {
-    r_log(NR_LOG_STUN, LOG_ERR, "STUN authentication requested but no password provided");
+    r_log(NR_LOG_STUN, LOG_WARNING, "STUN authentication requested but no password provided");
     ABORT(R_INTERNAL);
   }
 
   if (!auth->realm) {
-    r_log(NR_LOG_STUN, LOG_ERR, "STUN authentication requested but no realm provided");
+    r_log(NR_LOG_STUN, LOG_WARNING, "STUN authentication requested but no realm provided");
     ABORT(R_INTERNAL);
   }
 
   if (!auth->nonce) {
-    r_log(NR_LOG_STUN, LOG_ERR, "STUN authentication requested but no nonce provided");
+    r_log(NR_LOG_STUN, LOG_WARNING, "STUN authentication requested but no nonce provided");
     ABORT(R_INTERNAL);
   }
 
@@ -572,7 +578,7 @@ nr_stun_form_error_response(nr_stun_message *req, nr_stun_message* res, int numb
     if (number < 300 || number > 699)
         number = 500;
 
-    r_log(NR_LOG_STUN, LOG_DEBUG, "Responding with error %d: %s", number, msg);
+    r_log(NR_LOG_STUN, LOG_INFO, "Responding with error %d: %s", number, msg);
 
     request_method = NR_STUN_GET_TYPE_METHOD(req->header.type);
     res->header.type = NR_STUN_TYPE(request_method, NR_CLASS_ERROR_RESPONSE);

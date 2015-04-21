@@ -7,7 +7,8 @@ package org.mozilla.gecko.sync.config;
 import java.net.URI;
 
 import org.mozilla.gecko.background.common.log.Logger;
-import org.mozilla.gecko.sync.GlobalSession;
+import org.mozilla.gecko.sync.SyncConfiguration;
+import org.mozilla.gecko.sync.net.AuthHeaderProvider;
 import org.mozilla.gecko.sync.net.BaseResource;
 import org.mozilla.gecko.sync.net.SyncStorageRecordRequest;
 import org.mozilla.gecko.sync.net.SyncStorageRequestDelegate;
@@ -26,22 +27,18 @@ public class ClientRecordTerminator {
     super(); // Stop this class from being instantiated.
   }
 
-  public static void deleteClientRecord(final String username,
-      final String password,
-      final String clusterURL,
-      final String clientGuid)
+  public static void deleteClientRecord(final SyncConfiguration config, final String clientGUID)
     throws Exception {
 
-    // Would prefer to delegate to SyncConfiguration, but that would proliferate static methods.
     final String collection = "clients";
-    final URI wboURI = new URI(clusterURL + GlobalSession.API_VERSION + "/" + username + "/storage/" + collection + "/" + clientGuid);
+    final URI wboURI = config.wboURI(collection, clientGUID);
 
     // Would prefer to break this out into a self-contained client library.
     final SyncStorageRecordRequest r = new SyncStorageRecordRequest(wboURI);
     r.delegate = new SyncStorageRequestDelegate() {
       @Override
-      public String credentials() {
-        return username + ":" + password;
+      public AuthHeaderProvider getAuthHeaderProvider() {
+        return config.getAuthHeaderProvider();
       }
 
       @Override
@@ -51,13 +48,13 @@ public class ClientRecordTerminator {
 
       @Override
       public void handleRequestSuccess(SyncStorageResponse response) {
-        Logger.info(LOG_TAG, "Deleted client record with GUID " + clientGuid + " from server.");
+        Logger.info(LOG_TAG, "Deleted client record with GUID " + clientGUID + " from server.");
         BaseResource.consumeEntity(response);
       }
 
       @Override
       public void handleRequestFailure(SyncStorageResponse response) {
-        Logger.warn(LOG_TAG, "Failed to delete client record with GUID " + clientGuid + " from server.");
+        Logger.warn(LOG_TAG, "Failed to delete client record with GUID " + clientGUID + " from server.");
         try {
           Logger.warn(LOG_TAG, "Server error message was: " + response.getErrorMessage());
         } catch (Exception e) {
@@ -70,7 +67,7 @@ public class ClientRecordTerminator {
       public void handleRequestError(Exception ex) {
         // It could be that we don't have network access when trying
         // to remove an Account; not much to be done in this situation.
-        Logger.error(LOG_TAG, "Got exception trying to delete client record with GUID " + clientGuid + " from server; ignoring.", ex);
+        Logger.error(LOG_TAG, "Got exception trying to delete client record with GUID " + clientGUID + " from server; ignoring.", ex);
       }
     };
 

@@ -8,13 +8,13 @@ import java.io.File;
 import java.io.UnsupportedEncodingException;
 import java.security.NoSuchAlgorithmException;
 
+import org.mozilla.gecko.background.common.GlobalConstants;
+import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.sync.CredentialException;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
-import org.mozilla.gecko.background.common.GlobalConstants;
-import org.mozilla.gecko.background.common.log.Logger;
-import org.mozilla.gecko.sync.SyncConstants;
 import org.mozilla.gecko.sync.SyncConfiguration;
+import org.mozilla.gecko.sync.SyncConstants;
 import org.mozilla.gecko.sync.ThreadPool;
 import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.config.AccountPickler;
@@ -28,7 +28,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager.NameNotFoundException;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Log;
@@ -44,8 +43,6 @@ public class SyncAccounts {
 
   private static final String MOTO_BLUR_SETTINGS_ACTIVITY = "com.motorola.blur.settings.AccountsAndServicesPreferenceActivity";
   private static final String MOTO_BLUR_PACKAGE           = "com.motorola.blur.setup";
-
-  public final static String DEFAULT_SERVER = "https://auth.services.mozilla.com/";
 
   /**
    * Return Sync accounts.
@@ -81,20 +78,6 @@ public class SyncAccounts {
     // exist.
     final Account account = AccountPickler.unpickle(c, Constants.ACCOUNT_PICKLE_FILENAME);
     return (account != null);
-  }
-
-  /**
-   * This class provides background-thread abstracted access to whether a
-   * Firefox Sync account has been set up on this device.
-   * <p>
-   * Subclass this task and override `onPostExecute` to act on the result.
-   */
-  public static class AccountsExistTask extends AsyncTask<Context, Void, Boolean> {
-    @Override
-    protected Boolean doInBackground(Context... params) {
-      Context c = params[0];
-      return syncAccountsExist(c);
-    }
   }
 
   /**
@@ -197,37 +180,6 @@ public class SyncAccounts {
   }
 
   /**
-   * This class provides background-thread abstracted access to creating a
-   * Firefox Sync account.
-   * <p>
-   * Subclass this task and override `onPostExecute` to act on the result. The
-   * <code>Result</code> (of type <code>Account</code>) is null if an error
-   * occurred and the account could not be added.
-   */
-  public static class CreateSyncAccountTask extends AsyncTask<SyncAccountParameters, Void, Account> {
-    protected final boolean syncAutomatically;
-
-    public CreateSyncAccountTask() {
-      this(true);
-    }
-
-    public CreateSyncAccountTask(final boolean syncAutomically) {
-      this.syncAutomatically = syncAutomically;
-    }
-
-    @Override
-    protected Account doInBackground(SyncAccountParameters... params) {
-      SyncAccountParameters syncAccount = params[0];
-      try {
-        return createSyncAccount(syncAccount, syncAutomatically);
-      } catch (Exception e) {
-        Log.e(SyncConstants.GLOBAL_LOG_TAG, "Unable to create account.", e);
-        return null;
-      }
-    }
-  }
-
-  /**
    * Create a sync account, clearing any existing preferences, and set it to
    * sync automatically.
    * <p>
@@ -295,10 +247,10 @@ public class SyncAccounts {
     final String syncKey   = syncAccount.syncKey;
     final String password  = syncAccount.password;
     final String serverURL = (syncAccount.serverURL == null) ?
-        DEFAULT_SERVER : syncAccount.serverURL;
+        SyncConstants.DEFAULT_AUTH_SERVER : syncAccount.serverURL;
 
     Logger.debug(LOG_TAG, "Using account manager " + accountManager);
-    if (!RepoUtils.stringsEqual(syncAccount.serverURL, DEFAULT_SERVER)) {
+    if (!RepoUtils.stringsEqual(syncAccount.serverURL, SyncConstants.DEFAULT_AUTH_SERVER)) {
       Logger.info(LOG_TAG, "Setting explicit server URL: " + serverURL);
     }
 

@@ -9,7 +9,8 @@
 
 #include "base/basictypes.h"
 #include "ipc/IPCMessageUtils.h"
-#include "nsILoadContext.h"
+
+class nsILoadContext;
 
 /*
  *  This file contains the IPC::SerializedLoadContext class, which is used to
@@ -53,6 +54,7 @@ public:
   bool          mIsPrivateBitValid;
   bool          mIsContent;
   bool          mUsePrivateBrowsing;
+  bool          mUseRemoteTabs;
   bool          mIsInBrowserElement;
   uint32_t      mAppId;
 };
@@ -69,6 +71,7 @@ struct ParamTraits<SerializedLoadContext>
     WriteParam(aMsg, aParam.mIsContent);
     WriteParam(aMsg, aParam.mIsPrivateBitValid);
     WriteParam(aMsg, aParam.mUsePrivateBrowsing);
+    WriteParam(aMsg, aParam.mUseRemoteTabs);
     WriteParam(aMsg, aParam.mAppId);
     WriteParam(aMsg, aParam.mIsInBrowserElement);
   }
@@ -79,6 +82,7 @@ struct ParamTraits<SerializedLoadContext>
         !ReadParam(aMsg, aIter, &aResult->mIsContent)  ||
         !ReadParam(aMsg, aIter, &aResult->mIsPrivateBitValid)  ||
         !ReadParam(aMsg, aIter, &aResult->mUsePrivateBrowsing)  ||
+        !ReadParam(aMsg, aIter, &aResult->mUseRemoteTabs)  ||
         !ReadParam(aMsg, aIter, &aResult->mAppId)  ||
         !ReadParam(aMsg, aIter, &aResult->mIsInBrowserElement)) {
       return false;

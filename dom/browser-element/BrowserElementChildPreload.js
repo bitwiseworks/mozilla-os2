@@ -60,7 +60,7 @@ let CERTIFICATE_ERROR_PAGE_PREF = 'security.alternate_certificate_error_page';
 let NS_ERROR_MODULE_BASE_OFFSET = 0x45;
 let NS_ERROR_MODULE_SECURITY= 21;
 function NS_ERROR_GET_MODULE(err) {
-  return ((((err) >> 16) - NS_ERROR_MODULE_BASE_OFFSET) & 0x1fff) 
+  return ((((err) >> 16) - NS_ERROR_MODULE_BASE_OFFSET) & 0x1fff);
 }
 
 function NS_ERROR_GET_CODE(err) {
@@ -73,7 +73,6 @@ let SEC_ERROR_CA_CERT_INVALID =   (SEC_ERROR_BASE + 36);
 let SEC_ERROR_UNTRUSTED_ISSUER = (SEC_ERROR_BASE + 20);
 let SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE = (SEC_ERROR_BASE + 30);
 let SEC_ERROR_UNTRUSTED_CERT = (SEC_ERROR_BASE + 21);
-let SEC_ERROR_INADEQUATE_KEY_USAGE = (SEC_ERROR_BASE + 90);
 let SEC_ERROR_EXPIRED_CERTIFICATE = (SEC_ERROR_BASE + 11);
 let SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED = (SEC_ERROR_BASE + 176);
 
@@ -82,17 +81,16 @@ let SSL_ERROR_BAD_CERT_DOMAIN = (SSL_ERROR_BASE + 12);
 
 function getErrorClass(errorCode) {
   let NSPRCode = -1 * NS_ERROR_GET_CODE(errorCode);
- 
+
   switch (NSPRCode) {
     case SEC_ERROR_UNKNOWN_ISSUER:
-    case SEC_ERROR_CA_CERT_INVALID:
     case SEC_ERROR_UNTRUSTED_ISSUER:
     case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
     case SEC_ERROR_UNTRUSTED_CERT:
-    case SEC_ERROR_INADEQUATE_KEY_USAGE:
     case SSL_ERROR_BAD_CERT_DOMAIN:
     case SEC_ERROR_EXPIRED_CERTIFICATE:
     case SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED:
+    case SEC_ERROR_CA_CERT_INVALID:
       return Ci.nsINSSErrorsService.ERROR_CLASS_BAD_CERT;
     default:
       return Ci.nsINSSErrorsService.ERROR_CLASS_SSL_PROTOCOL;
@@ -100,6 +98,14 @@ function getErrorClass(errorCode) {
 
   return null;
 }
+
+const OBSERVED_EVENTS = [
+  'fullscreen-origin-change',
+  'ask-parent-to-exit-fullscreen',
+  'ask-parent-to-rollback-fullscreen',
+  'xpcom-shutdown',
+  'activity-done'
+];
 
 /**
  * The BrowserElementChild implements one half of <iframe mozbrowser>.
@@ -128,6 +134,9 @@ function BrowserElementChild() {
   this._ownerVisible = true;
 
   this._nextPaintHandler = null;
+
+  this._isContentWindowCreated = false;
+  this._pendingSetInputMethodActive = [];
 
   this._init();
 };
@@ -171,7 +180,12 @@ BrowserElementChild.prototype = {
                      /* wantsUntrusted = */ false);
 
     addEventListener('DOMLinkAdded',
-                     this._iconChangedHandler.bind(this),
+                     this._linkAddedHandler.bind(this),
+                     /* useCapture = */ true,
+                     /* wantsUntrusted = */ false);
+
+    addEventListener('DOMMetaAdded',
+                     this._metaAddedHandler.bind(this),
                      /* useCapture = */ true,
                      /* wantsUntrusted = */ false);
 
@@ -210,6 +224,7 @@ BrowserElementChild.prototype = {
       "owner-visibility-change": this._recvOwnerVisibilityChange,
       "exit-fullscreen": this._recvExitFullscreen.bind(this),
       "activate-next-paint-listener": this._activateNextPaintListener.bind(this),
+      "set-input-method-active": this._recvSetInputMethodActive.bind(this),
       "deactivate-next-paint-listener": this._deactivateNextPaintListener.bind(this)
     }
 
@@ -239,6 +254,9 @@ BrowserElementChild.prototype = {
     els.addSystemEventListener(global, 'DOMWindowCreated',
                                this._windowCreatedHandler.bind(this),
                                /* useCapture = */ true);
+    els.addSystemEventListener(global, 'DOMWindowResize',
+                               this._windowResizeHandler.bind(this),
+                               /* useCapture = */ false);
     els.addSystemEventListener(global, 'contextmenu',
                                this._contextmenuHandler.bind(this),
                                /* useCapture = */ false);
@@ -246,27 +264,17 @@ BrowserElementChild.prototype = {
                                this._scrollEventHandler.bind(this),
                                /* useCapture = */ false);
 
-    Services.obs.addObserver(this,
-                             "fullscreen-origin-change",
-                             /* ownsWeak = */ true);
-
-    Services.obs.addObserver(this,
-                             'ask-parent-to-exit-fullscreen',
-                             /* ownsWeak = */ true);
-
-    Services.obs.addObserver(this,
-                             'ask-parent-to-rollback-fullscreen',
-                             /* ownsWeak = */ true);
-
-    Services.obs.addObserver(this,
-                             'xpcom-shutdown',
-                             /* ownsWeak = */ true);
+    OBSERVED_EVENTS.forEach((aTopic) => {
+      Services.obs.addObserver(this, aTopic, false);
+    });
   },
 
   observe: function(subject, topic, data) {
     // Ignore notifications not about our document.  (Note that |content| /can/
     // be null; see bug 874900.)
-    if (!content || subject != content.document)
+    if (topic !== 'activity-done' && (!content || subject != content.document))
+      return;
+    if (topic == 'activity-done' && docShell !== subject)
       return;
     switch (topic) {
       case 'fullscreen-origin-change':
@@ -277,6 +285,9 @@ BrowserElementChild.prototype = {
         break;
       case 'ask-parent-to-rollback-fullscreen':
         sendAsyncMsg('rollback-fullscreen');
+        break;
+      case 'activity-done':
+        sendAsyncMsg('activitydone', { success: (data == 'activity-success') });
         break;
       case 'xpcom-shutdown':
         this._shuttingDown = true;
@@ -290,6 +301,9 @@ BrowserElementChild.prototype = {
    */
   _unloadHandler: function() {
     this._shuttingDown = true;
+    OBSERVED_EVENTS.forEach((aTopic) => {
+      Services.obs.removeObserver(this, aTopic);
+    });
   },
 
   _tryGetInnerWindowID: function(win) {
@@ -315,6 +329,8 @@ BrowserElementChild.prototype = {
     sendAsyncMsg('showmodalprompt', args);
 
     let returnValue = this._waitForResult(win);
+
+    Services.obs.notifyObservers(null, 'BEC:ShownModalPrompt', null);
 
     if (args.promptType == 'prompt' ||
         args.promptType == 'confirm' ||
@@ -346,12 +362,7 @@ BrowserElementChild.prototype = {
     debug("Entering modal state (outerWindowID=" + outerWindowID + ", " +
                                 "innerWindowID=" + innerWindowID + ")");
 
-    // In theory, we're supposed to pass |modalStateWin| back to
-    // leaveModalStateWithWindow.  But in practice, the window is always null,
-    // because it's the window associated with this script context, which
-    // doesn't have a window.  But we'll play along anyway in case this
-    // changes.
-    var modalStateWin = utils.enterModalStateWithWindow();
+    utils.enterModalState();
 
     // We'll decrement win.modalDepth when we receive a unblock-modal-prompt message
     // for the window.
@@ -388,7 +399,7 @@ BrowserElementChild.prototype = {
     delete win.modalReturnValue;
 
     if (!this._shuttingDown) {
-      utils.leaveModalStateWithWindow(modalStateWin);
+      utils.leaveModalState();
     }
 
     debug("Leaving modal state (outerID=" + outerWindowID + ", " +
@@ -448,21 +459,104 @@ BrowserElementChild.prototype = {
   },
 
   _iconChangedHandler: function(e) {
-    debug("Got iconchanged: (" + e.target.href + ")");
-    var hasIcon = e.target.rel.split(' ').some(function(x) {
-      return x.toLowerCase() === 'icon';
-    });
+    debug('Got iconchanged: (' + e.target.href + ')');
+    let icon = { href: e.target.href };
+    if (e.target.getAttribute('sizes')) {
+      icon.sizes = e.target.getAttribute('sizes');
+    }
 
-    if (hasIcon) {
-      var win = e.target.ownerDocument.defaultView;
-      // Ignore iconchanges which don't come from the top-level
-      // <iframe mozbrowser> window.
-      if (win == content) {
-        sendAsyncMsg('iconchange', { _payload_: e.target.href });
+    sendAsyncMsg('iconchange', icon);
+  },
+
+  _openSearchHandler: function(e) {
+    debug('Got opensearch: (' + e.target.href + ')');
+
+    if (e.target.type !== "application/opensearchdescription+xml") {
+      return;
+    }
+
+    sendAsyncMsg('opensearch', { title: e.target.title,
+                                 href: e.target.href });
+
+  },
+
+  _manifestChangedHandler: function(e) {
+    debug('Got manifestchanged: (' + e.target.href + ')');
+    let manifest = { href: e.target.href };
+    sendAsyncMsg('manifestchange', manifest);
+
+  },
+
+  // Processes the "rel" field in <link> tags and forward to specific handlers.
+  _linkAddedHandler: function(e) {
+    let win = e.target.ownerDocument.defaultView;
+    // Ignore links which don't come from the top-level
+    // <iframe mozbrowser> window.
+    if (win != content) {
+      debug('Not top level!');
+      return;
+    }
+
+    let handlers = {
+      'icon': this._iconChangedHandler,
+      'search': this._openSearchHandler,
+      'manifest': this._manifestChangedHandler
+    };
+
+    debug('Got linkAdded: (' + e.target.href + ') ' + e.target.rel);
+    e.target.rel.split(' ').forEach(function(x) {
+      let token = x.toLowerCase();
+      if (handlers[token]) {
+        handlers[token](e);
       }
-      else {
-        debug("Not top level!");
+    }, this);
+  },
+
+  _metaAddedHandler: function(e) {
+    let win = e.target.ownerDocument.defaultView;
+    // Ignore metas which don't come from the top-level
+    // <iframe mozbrowser> window.
+    if (win != content) {
+      debug('Not top level!');
+      return;
+    }
+
+    if (!e.target.name) {
+      return;
+    }
+
+    debug('Got metaAdded: (' + e.target.name + ') ' + e.target.content);
+    if (e.target.name == 'application-name') {
+      let meta = { name: e.target.name,
+                   content: e.target.content };
+
+      let lang;
+      let elm;
+
+      for (elm = e.target;
+           !lang && elm && elm.nodeType == e.target.ELEMENT_NODE;
+           elm = elm.parentNode) {
+        if (elm.hasAttribute('lang')) {
+          lang = elm.getAttribute('lang');
+          continue;
+        }
+
+        if (elm.hasAttributeNS('http://www.w3.org/XML/1998/namespace', 'lang')) {
+          lang = elm.getAttributeNS('http://www.w3.org/XML/1998/namespace', 'lang');
+          continue;
+        }
       }
+
+      // No lang has been detected.
+      if (!lang && elm.nodeType == e.target.DOCUMENT_NODE) {
+        lang = elm.contentLanguage;
+      }
+
+      if (lang) {
+        meta.lang = lang;
+      }
+
+      sendAsyncMsg('metachange', meta);
     }
   },
 
@@ -529,7 +623,25 @@ BrowserElementChild.prototype = {
       this._addMozAfterPaintHandler(function () {
         sendAsyncMsg('documentfirstpaint');
       });
+      this._isContentWindowCreated = true;
+      // Handle pending SetInputMethodActive request.
+      while (this._pendingSetInputMethodActive.length > 0) {
+        this._recvSetInputMethodActive(this._pendingSetInputMethodActive.shift());
+      }
     }
+  },
+
+  _windowResizeHandler: function(e) {
+    let win = e.target;
+    if (win != content || e.defaultPrevented) {
+      return;
+    }
+
+    debug("resizing window " + win);
+    sendAsyncMsg('resize', { width: e.detail.width, height: e.detail.height });
+
+    // Inform the window implementation that we handled this resize ourselves.
+    e.preventDefault();
   },
 
   _contextmenuHandler: function(e) {
@@ -584,14 +696,18 @@ BrowserElementChild.prototype = {
   _getSystemCtxMenuData: function(elem) {
     if ((elem instanceof Ci.nsIDOMHTMLAnchorElement && elem.href) ||
         (elem instanceof Ci.nsIDOMHTMLAreaElement && elem.href)) {
-      return elem.href;
+      return {uri: elem.href};
     }
     if (elem instanceof Ci.nsIImageLoadingContent && elem.currentURI) {
-      return elem.currentURI.spec;
+      return {uri: elem.currentURI.spec};
     }
-    if ((elem instanceof Ci.nsIDOMHTMLMediaElement) ||
-        (elem instanceof Ci.nsIDOMHTMLImageElement)) {
-      return elem.currentSrc || elem.src;
+    if (elem instanceof Ci.nsIDOMHTMLImageElement) {
+      return {uri: elem.src};
+    }
+    if (elem instanceof Ci.nsIDOMHTMLMediaElement) {
+      let hasVideo = !(elem.readyState >= elem.HAVE_METADATA &&
+                       (elem.videoWidth == 0 || elem.videoHeight == 0));
+      return {uri: elem.currentSrc || elem.src, hasVideo: hasVideo};
     }
     return false;
   },
@@ -626,10 +742,11 @@ BrowserElementChild.prototype = {
     let self = this;
     let maxWidth = data.json.args.width;
     let maxHeight = data.json.args.height;
+    let mimeType = data.json.args.mimeType;
     let domRequestID = data.json.id;
 
     let takeScreenshotClosure = function() {
-      self._takeScreenshot(maxWidth, maxHeight, domRequestID);
+      self._takeScreenshot(maxWidth, maxHeight, mimeType, domRequestID);
     };
 
     let maxDelayMS = 2000;
@@ -647,17 +764,21 @@ BrowserElementChild.prototype = {
 
   /**
    * Actually take a screenshot and foward the result up to our parent, given
-   * the desired maxWidth and maxHeight, and given the DOMRequest ID associated
-   * with the request from the parent.
+   * the desired maxWidth and maxHeight (in CSS pixels), and given the
+   * DOMRequest ID associated with the request from the parent.
    */
-  _takeScreenshot: function(maxWidth, maxHeight, domRequestID) {
+  _takeScreenshot: function(maxWidth, maxHeight, mimeType, domRequestID) {
     // You can think of the screenshotting algorithm as carrying out the
     // following steps:
     //
+    // - Calculate maxWidth, maxHeight, and viewport's width and height in the
+    //   dimension of device pixels by multiply the numbers with
+    //   window.devicePixelRatio.
+    //
     // - Let scaleWidth be the factor by which we'd need to downscale the
-    //   viewport so it would fit within maxWidth.  (If the viewport's width
-    //   is less than maxWidth, let scaleWidth be 1.) Compute scaleHeight
-    //   the same way.
+    //   viewport pixel width so it would fit within maxPixelWidth.
+    //   (If the viewport's pixel width is less than maxPixelWidth, let
+    //   scaleWidth be 1.) Compute scaleHeight the same way.
     //
     // - Scale the viewport by max(scaleWidth, scaleHeight).  Now either the
     //   viewport's width is no larger than maxWidth, the viewport's height is
@@ -666,33 +787,63 @@ BrowserElementChild.prototype = {
     // - Crop the viewport so its width is no larger than maxWidth and its
     //   height is no larger than maxHeight.
     //
+    // - Set mozOpaque to true and background color to solid white
+    //   if we are taking a JPEG screenshot, keep transparent if otherwise.
+    //
     // - Return a screenshot of the page's viewport scaled and cropped per
     //   above.
     debug("Taking a screenshot: maxWidth=" + maxWidth +
           ", maxHeight=" + maxHeight +
+          ", mimeType=" + mimeType +
           ", domRequestID=" + domRequestID + ".");
 
-    let scaleWidth = Math.min(1, maxWidth / content.innerWidth);
-    let scaleHeight = Math.min(1, maxHeight / content.innerHeight);
+    if (!content) {
+      // If content is not loaded yet, bail out since even sendAsyncMessage
+      // fails...
+      debug("No content yet!");
+      return;
+    }
+
+    let devicePixelRatio = content.devicePixelRatio;
+
+    let maxPixelWidth = Math.round(maxWidth * devicePixelRatio);
+    let maxPixelHeight = Math.round(maxHeight * devicePixelRatio);
+
+    let contentPixelWidth = content.innerWidth * devicePixelRatio;
+    let contentPixelHeight = content.innerHeight * devicePixelRatio;
+
+    let scaleWidth = Math.min(1, maxPixelWidth / contentPixelWidth);
+    let scaleHeight = Math.min(1, maxPixelHeight / contentPixelHeight);
 
     let scale = Math.max(scaleWidth, scaleHeight);
 
-    let canvasWidth = Math.min(maxWidth, Math.round(content.innerWidth * scale));
-    let canvasHeight = Math.min(maxHeight, Math.round(content.innerHeight * scale));
+    let canvasWidth =
+      Math.min(maxPixelWidth, Math.round(contentPixelWidth * scale));
+    let canvasHeight =
+      Math.min(maxPixelHeight, Math.round(contentPixelHeight * scale));
+
+    let transparent = (mimeType !== 'image/jpeg');
 
     var canvas = content.document
       .createElementNS("http://www.w3.org/1999/xhtml", "canvas");
-    canvas.mozOpaque = true;
+    if (!transparent)
+      canvas.mozOpaque = true;
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
 
-    var ctx = canvas.getContext("2d");
-    ctx.scale(scale, scale);
-    ctx.drawWindow(content, 0, 0, content.innerWidth, content.innerHeight,
-                   "rgb(255,255,255)");
+    let ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.scale(scale * devicePixelRatio, scale * devicePixelRatio);
 
-    // Take a JPEG screenshot to hack around the fact that we can't specify
-    // opaque PNG.  This requires us to unpremultiply the alpha channel, which
+    let flags = ctx.DRAWWINDOW_DRAW_VIEW |
+                ctx.DRAWWINDOW_USE_WIDGET_LAYERS |
+                ctx.DRAWWINDOW_DO_NOT_FLUSH |
+                ctx.DRAWWINDOW_ASYNC_DECODE_IMAGES;
+    ctx.drawWindow(content, 0, 0, content.innerWidth, content.innerHeight,
+                   transparent ? "rgba(255,255,255,0)" : "rgb(255,255,255)",
+                   flags);
+
+    // Take a JPEG screenshot by default instead of PNG with alpha channel.
+    // This requires us to unpremultiply the alpha channel, which
     // is expensive on ARM processors because they lack a hardware integer
     // division instruction.
     canvas.toBlob(function(blob) {
@@ -700,7 +851,7 @@ BrowserElementChild.prototype = {
         id: domRequestID,
         successRv: blob
       });
-    }, 'image/jpeg');
+    }, mimeType);
   },
 
   _recvFireCtxCallback: function(data) {
@@ -778,18 +929,18 @@ BrowserElementChild.prototype = {
     let json = data.json;
     let utils = content.QueryInterface(Ci.nsIInterfaceRequestor)
                        .getInterface(Ci.nsIDOMWindowUtils);
-    utils.sendMouseEvent(json.type, json.x, json.y, json.button,
-                         json.clickCount, json.modifiers);
+    utils.sendMouseEventToWindow(json.type, json.x, json.y, json.button,
+                                 json.clickCount, json.modifiers);
   },
 
   _recvSendTouchEvent: function(data) {
     let json = data.json;
     let utils = content.QueryInterface(Ci.nsIInterfaceRequestor)
                        .getInterface(Ci.nsIDOMWindowUtils);
-    utils.sendTouchEvent(json.type, json.identifiers, json.touchesX,
-                         json.touchesY, json.radiisX, json.radiisY,
-                         json.rotationAngles, json.forces, json.count,
-                         json.modifiers);
+    utils.sendTouchEventToWindow(json.type, json.identifiers, json.touchesX,
+                                 json.touchesY, json.radiisX, json.radiisY,
+                                 json.rotationAngles, json.forces, json.count,
+                                 json.modifiers);
   },
 
   _recvCanGoBack: function(data) {
@@ -839,6 +990,31 @@ BrowserElementChild.prototype = {
   _recvStop: function(data) {
     let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
     webNav.stop(webNav.STOP_NETWORK);
+  },
+
+  _recvSetInputMethodActive: function(data) {
+    let msgData = { id: data.json.id };
+    if (!this._isContentWindowCreated) {
+      if (data.json.args.isActive) {
+        // To activate the input method, we should wait before the content
+        // window is ready.
+        this._pendingSetInputMethodActive.push(data);
+        return;
+      }
+      msgData.successRv = null;
+      sendAsyncMsg('got-set-input-method-active', msgData);
+      return;
+    }
+    // Unwrap to access webpage content.
+    let nav = XPCNativeWrapper.unwrap(content.document.defaultView.navigator);
+    if (nav.mozInputMethod) {
+      // Wrap to access the chrome-only attribute setActive.
+      new XPCNativeWrapper(nav.mozInputMethod).setActive(data.json.args.isActive);
+      msgData.successRv = null;
+    } else {
+      msgData.errorMsg = 'Cannot access mozInputMethod.';
+    }
+    sendAsyncMsg('got-set-input-method-active', msgData);
   },
 
   _keyEventHandler: function(e) {
@@ -902,7 +1078,7 @@ BrowserElementChild.prototype = {
           return;
         }
 
-        if (NS_ERROR_GET_MODULE(status) == NS_ERROR_MODULE_SECURITY && 
+        if (NS_ERROR_GET_MODULE(status) == NS_ERROR_MODULE_SECURITY &&
             getErrorClass(status) == Ci.nsINSSErrorsService.ERROR_CLASS_BAD_CERT) {
 
           // XXX Is there a point firing the event if the error page is not

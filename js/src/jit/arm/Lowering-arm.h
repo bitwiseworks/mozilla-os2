@@ -26,7 +26,20 @@ class LIRGeneratorARM : public LIRGeneratorShared
                 LUse::Policy policy = LUse::REGISTER, bool useAtStart = false);
     bool useBoxFixed(LInstruction *lir, size_t n, MDefinition *mir, Register reg1, Register reg2);
 
+    // x86 has constraints on what registers can be formatted for 1-byte
+    // stores and loads; on ARM all registers are okay.
+    LAllocation useByteOpRegister(MDefinition *mir);
+    LAllocation useByteOpRegisterOrNonDoubleConstant(MDefinition *mir);
+
     inline LDefinition tempToUnbox() {
+        return LDefinition::BogusTemp();
+    }
+
+    bool needTempForPostBarrier() { return false; }
+
+    // x64 has a scratch register, so no need for another temp for dispatch
+    // ICs.
+    LDefinition tempForDispatchCache(MIRType outputType = MIRType_None) {
         return LDefinition::BogusTemp();
     }
 
@@ -45,22 +58,23 @@ class LIRGeneratorARM : public LIRGeneratorShared
                      MDefinition *src);
     bool lowerForFPU(LInstructionHelper<1, 2, 0> *ins, MDefinition *mir,
                      MDefinition *lhs, MDefinition *rhs);
-
-    bool lowerTruncateDToInt32(MTruncateToInt32 *ins);
-
+    bool lowerForBitAndAndBranch(LBitAndAndBranch *baab, MInstruction *mir,
+                                 MDefinition *lhs, MDefinition *rhs);
     bool lowerConstantDouble(double d, MInstruction *ins);
+    bool lowerConstantFloat32(float d, MInstruction *ins);
+    bool lowerTruncateDToInt32(MTruncateToInt32 *ins);
+    bool lowerTruncateFToInt32(MTruncateToInt32 *ins);
     bool lowerDivI(MDiv *div);
     bool lowerModI(MMod *mod);
     bool lowerMulI(MMul *mul, MDefinition *lhs, MDefinition *rhs);
+    bool lowerUDiv(MDiv *div);
+    bool lowerUMod(MMod *mod);
     bool visitPowHalf(MPowHalf *ins);
     bool visitAsmJSNeg(MAsmJSNeg *ins);
-    bool visitAsmJSUDiv(MAsmJSUDiv *ins);
-    bool visitAsmJSUMod(MAsmJSUMod *ins);
 
     LTableSwitch *newLTableSwitch(const LAllocation &in, const LDefinition &inputCopy,
                                   MTableSwitch *ins);
     LTableSwitchV *newLTableSwitchV(MTableSwitch *ins);
-    LGetPropertyCacheT *newLGetPropertyCacheT(MGetPropertyCache *ins);
 
   public:
     bool visitConstant(MConstant *ins);
@@ -70,13 +84,17 @@ class LIRGeneratorARM : public LIRGeneratorShared
     bool lowerPhi(MPhi *phi);
     bool visitGuardShape(MGuardShape *ins);
     bool visitGuardObjectType(MGuardObjectType *ins);
-    bool visitStoreTypedArrayElement(MStoreTypedArrayElement *ins);
-    bool visitStoreTypedArrayElementHole(MStoreTypedArrayElementHole *ins);
     bool visitAsmJSUnsignedToDouble(MAsmJSUnsignedToDouble *ins);
+    bool visitAsmJSUnsignedToFloat32(MAsmJSUnsignedToFloat32 *ins);
+    bool visitAsmJSLoadHeap(MAsmJSLoadHeap *ins);
     bool visitAsmJSStoreHeap(MAsmJSStoreHeap *ins);
     bool visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr *ins);
-    bool visitInterruptCheck(MInterruptCheck *ins);
     bool visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStatic *ins);
+    bool visitForkJoinGetSlice(MForkJoinGetSlice *ins);
+
+    static bool allowFloat32Optimizations() {
+        return true;
+    }
 };
 
 typedef LIRGeneratorARM LIRGeneratorSpecific;

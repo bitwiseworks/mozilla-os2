@@ -4,14 +4,27 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "IonBuilder.h"
-#include "MIRGraph.h"
-#include "Ion.h"
-#include "IonAnalysis.h"
-#include "LIR.h"
+#include "jit/IonAnalysis.h"
+
+#include "jsanalyze.h"
+
+#include "jit/BaselineInspector.h"
+#include "jit/BaselineJIT.h"
+#include "jit/Ion.h"
+#include "jit/IonBuilder.h"
+#include "jit/IonOptimizationLevels.h"
+#include "jit/LIR.h"
+#include "jit/Lowering.h"
+#include "jit/MIRGraph.h"
+
+#include "jsinferinlines.h"
+#include "jsobjinlines.h"
+#include "jsopcodeinlines.h"
 
 using namespace js;
 using namespace js::jit;
+
+using mozilla::DebugOnly;
 
 // A critical edge is an edge which is neither its successor's only predecessor
 // nor its predecessor's only successor. Critical edges must be split to
@@ -29,9 +42,11 @@ jit::SplitCriticalEdges(MIRGraph &graph)
 
             // Create a new block inheriting from the predecessor.
             MBasicBlock *split = MBasicBlock::NewSplitEdge(graph, block->info(), *block);
+            if (!split)
+                return false;
             split->setLoopDepth(block->loopDepth());
             graph.insertBlockAfter(*block, split);
-            split->end(MGoto::New(target));
+            split->end(MGoto::New(graph.alloc(), target));
 
             block->replaceSuccessor(i, split);
             target->replacePredecessor(*block, split);
@@ -53,6 +68,12 @@ jit::SplitCriticalEdges(MIRGraph &graph)
 bool
 jit::EliminateDeadResumePointOperands(MIRGenerator *mir, MIRGraph &graph)
 {
+    // If we are compiling try blocks, locals and arguments may be observable
+    // from catch or finally blocks (which Ion does not compile). For now just
+    // disable the pass in this case.
+    if (graph.hasTryBlock())
+        return true;
+
     for (PostorderIterator block = graph.poBegin(); block != graph.poEnd(); block++) {
         if (mir->shouldCancel("Eliminate Dead Resume Point Operands (main loop)"))
             return false;
@@ -71,13 +92,13 @@ jit::EliminateDeadResumePointOperands(MIRGenerator *mir, MIRGraph &graph)
             // parameter passing might be live. Rewriting uses of these terms
             // in resume points may affect the interpreter's behavior. Rather
             // than doing a more sophisticated analysis, just ignore these.
-            if (ins->isUnbox() || ins->isParameter())
+            if (ins->isUnbox() || ins->isParameter() || ins->isTypeBarrier() || ins->isComputeThis())
                 continue;
 
             // If the instruction's behavior has been constant folded into a
             // separate instruction, we can't determine precisely where the
             // instruction becomes dead and can't eliminate its uses.
-            if (ins->isFolded())
+            if (ins->isImplicitlyUsed())
                 continue;
 
             // Check if this instruction's result is only used within the
@@ -89,7 +110,6 @@ jit::EliminateDeadResumePointOperands(MIRGenerator *mir, MIRGraph &graph)
             for (MUseDefIterator uses(*ins); uses; uses++) {
                 if (uses.def()->block() != *block ||
                     uses.def()->isBox() ||
-                    uses.def()->isPassArg() ||
                     uses.def()->isPhi())
                 {
                     maxDefinition = UINT32_MAX;
@@ -117,15 +137,23 @@ jit::EliminateDeadResumePointOperands(MIRGenerator *mir, MIRGraph &graph)
                     continue;
                 }
 
-                // Store an undefined value in place of all dead resume point
-                // operands. Making any such substitution can in general alter
-                // the interpreter's behavior, even though the code is dead, as
-                // the interpreter will still execute opcodes whose effects
-                // cannot be observed. If the undefined value were to flow to,
-                // say, a dead property access the interpreter could throw an
-                // exception; we avoid this problem by removing dead operands
-                // before removing dead code.
-                MConstant *constant = MConstant::New(UndefinedValue());
+                // The operand is an uneliminable slot. This currently
+                // includes argument slots in non-strict scripts (due to being
+                // observable via Function.arguments).
+                if (!block->info().canOptimizeOutSlot(uses->index())) {
+                    uses++;
+                    continue;
+                }
+
+                // Store an optimized out magic value in place of all dead
+                // resume point operands. Making any such substitution can in
+                // general alter the interpreter's behavior, even though the
+                // code is dead, as the interpreter will still execute opcodes
+                // whose effects cannot be observed. If the undefined value
+                // were to flow to, say, a dead property access the
+                // interpreter could throw an exception; we avoid this problem
+                // by removing dead operands before removing dead code.
+                MConstant *constant = MConstant::New(graph.alloc(), MagicValue(JS_OPTIMIZED_OUT));
                 block->insertBefore(*(block->begin()), constant);
                 uses = mrp->replaceOperand(uses, constant);
             }
@@ -167,7 +195,7 @@ IsPhiObservable(MPhi *phi, Observability observe)
 {
     // If the phi has uses which are not reflected in SSA, then behavior in the
     // interpreter may be affected by removing the phi.
-    if (phi->isFolded())
+    if (phi->isImplicitlyUsed())
         return true;
 
     // Check for uses of this phi node outside of other phi nodes.
@@ -195,40 +223,45 @@ IsPhiObservable(MPhi *phi, Observability observe)
         break;
     }
 
-    // If the Phi is of the |this| value, it must always be observable.
     uint32_t slot = phi->slot();
     CompileInfo &info = phi->block()->info();
-    if (info.fun() && slot == info.thisSlot())
+    JSFunction *fun = info.funMaybeLazy();
+
+    // If the Phi is of the |this| value, it must always be observable.
+    if (fun && slot == info.thisSlot())
         return true;
 
-    // If the Phi is one of the formal argument, and we are using an argument
-    // object in the function. The phi might be observable after a bailout.
-    // For inlined frames this is not needed, as they are captured in the inlineResumePoint.
-    if (info.fun() && info.hasArguments()) {
-        uint32_t first = info.firstArgSlot();
-        if (first <= slot && slot - first < info.nargs()) {
-            // If arguments obj aliases formals, then the arg slots will never be used.
-            if (info.argsObjAliasesFormals())
-                return false;
-            return true;
-        }
+    // If the function may need an arguments object, then make sure to
+    // preserve the scope chain, because it may be needed to construct the
+    // arguments object during bailout. If we've already created an arguments
+    // object (or got one via OSR), preserve that as well.
+    if (fun && info.hasArguments() &&
+        (slot == info.scopeChainSlot() || slot == info.argsObjSlot()))
+    {
+        return true;
     }
+
+    // The Phi is an uneliminable slot. Currently this includes argument slots
+    // in non-strict scripts (due to being observable via Function.arguments).
+    if (fun && !info.canOptimizeOutSlot(slot))
+        return true;
+
     return false;
 }
 
 // Handles cases like:
 //    x is phi(a, x) --> a
 //    x is phi(a, a) --> a
-inline MDefinition *
+static inline MDefinition *
 IsPhiRedundant(MPhi *phi)
 {
     MDefinition *first = phi->operandIfRedundant();
-    if (first == NULL)
-        return NULL;
+    if (first == nullptr)
+        return nullptr;
 
-    // Propagate the Folded flag if |phi| is replaced with another phi.
-    if (phi->isFolded())
-        first->setFoldedUnchecked();
+    // Propagate the ImplicitlyUsed flag if |phi| is replaced with another phi.
+    if (phi->isImplicitlyUsed())
+        first->setImplicitlyUsedUnchecked();
 
     return first;
 }
@@ -321,7 +354,7 @@ jit::EliminatePhis(MIRGenerator *mir, MIRGraph &graph,
         }
 
         // The current phi is/was used, so all its operands are used.
-        for (size_t i = 0; i < phi->numOperands(); i++) {
+        for (size_t i = 0, e = phi->numOperands(); i < e; i++) {
             MDefinition *in = phi->getOperand(i);
             if (!in->isPhi() || !in->isUnused() || in->isInWorklist())
                 continue;
@@ -345,6 +378,8 @@ jit::EliminatePhis(MIRGenerator *mir, MIRGraph &graph,
     return true;
 }
 
+namespace {
+
 // The type analysis algorithm inserts conversions and box/unbox instructions
 // to make the IR graph well-typed for future passes.
 //
@@ -360,6 +395,10 @@ class TypeAnalyzer
     MIRGenerator *mir;
     MIRGraph &graph;
     Vector<MPhi *, 0, SystemAllocPolicy> phiWorklist_;
+
+    TempAllocator &alloc() const {
+        return graph.alloc();
+    }
 
     bool addPhiToWorklist(MPhi *phi) {
         if (phi->isInWorklist())
@@ -383,6 +422,13 @@ class TypeAnalyzer
     bool adjustInputs(MDefinition *def);
     bool insertConversions();
 
+    bool checkFloatCoherency();
+    bool graphContainsFloat32();
+    bool markPhiConsumers();
+    bool markPhiProducers();
+    bool specializeValidFloatOps();
+    bool tryEmitFloatOperations();
+
   public:
     TypeAnalyzer(MIRGenerator *mir, MIRGraph &graph)
       : mir(mir), graph(graph)
@@ -391,14 +437,39 @@ class TypeAnalyzer
     bool analyze();
 };
 
+} /* anonymous namespace */
+
 // Try to specialize this phi based on its non-cyclic inputs.
 static MIRType
-GuessPhiType(MPhi *phi)
+GuessPhiType(MPhi *phi, bool *hasInputsWithEmptyTypes)
 {
-    MIRType type = MIRType_None;
+#ifdef DEBUG
+    // Check that different magic constants aren't flowing together. Ignore
+    // JS_OPTIMIZED_OUT, since an operand could be legitimately optimized
+    // away.
+    MIRType magicType = MIRType_None;
     for (size_t i = 0; i < phi->numOperands(); i++) {
         MDefinition *in = phi->getOperand(i);
+        if (in->type() == MIRType_MagicOptimizedArguments ||
+            in->type() == MIRType_MagicHole ||
+            in->type() == MIRType_MagicIsConstructing)
+        {
+            if (magicType == MIRType_None)
+                magicType = in->type();
+            MOZ_ASSERT(magicType == in->type());
+        }
+    }
+#endif
+
+    *hasInputsWithEmptyTypes = false;
+
+    MIRType type = MIRType_None;
+    bool convertibleToFloat32 = false;
+    bool hasPhiInputs = false;
+    for (size_t i = 0, e = phi->numOperands(); i < e; i++) {
+        MDefinition *in = phi->getOperand(i);
         if (in->isPhi()) {
+            hasPhiInputs = true;
             if (!in->toPhi()->triedToSpecialize())
                 continue;
             if (in->type() == MIRType_None) {
@@ -408,18 +479,41 @@ GuessPhiType(MPhi *phi)
                 continue;
             }
         }
+
+        // Ignore operands which we've never observed.
+        if (in->resultTypeSet() && in->resultTypeSet()->empty()) {
+            *hasInputsWithEmptyTypes = true;
+            continue;
+        }
+
         if (type == MIRType_None) {
             type = in->type();
+            if (in->canProduceFloat32())
+                convertibleToFloat32 = true;
             continue;
         }
         if (type != in->type()) {
-            // Specialize phis with int32 and double operands as double.
-            if (IsNumberType(type) && IsNumberType(in->type()))
+            if (convertibleToFloat32 && in->type() == MIRType_Float32) {
+                // If we only saw definitions that can be converted into Float32 before and
+                // encounter a Float32 value, promote previous values to Float32
+                type = MIRType_Float32;
+            } else if (IsNumberType(type) && IsNumberType(in->type())) {
+                // Specialize phis with int32 and double operands as double.
                 type = MIRType_Double;
-            else
+                convertibleToFloat32 &= in->canProduceFloat32();
+            } else {
                 return MIRType_Value;
+            }
         }
     }
+
+    if (type == MIRType_None && !hasPhiInputs) {
+        // All inputs are non-phis with empty typesets. Use MIRType_Value
+        // in this case, as it's impossible to get better type information.
+        JS_ASSERT(*hasInputsWithEmptyTypes);
+        type = MIRType_Value;
+    }
+
     return type;
 }
 
@@ -453,6 +547,15 @@ TypeAnalyzer::propagateSpecialization(MPhi *phi)
             continue;
         }
         if (use->type() != phi->type()) {
+            // Specialize phis with int32 that can be converted to float and float operands as floats.
+            if ((use->type() == MIRType_Int32 && use->canProduceFloat32() && phi->type() == MIRType_Float32) ||
+                (phi->type() == MIRType_Int32 && phi->canProduceFloat32() && use->type() == MIRType_Float32))
+            {
+                if (!respecialize(use, MIRType_Float32))
+                    return false;
+                continue;
+            }
+
             // Specialize phis with int32 and double operands as double.
             if (IsNumberType(use->type()) && IsNumberType(phi->type())) {
                 if (!respecialize(use, MIRType_Double))
@@ -472,18 +575,28 @@ TypeAnalyzer::propagateSpecialization(MPhi *phi)
 bool
 TypeAnalyzer::specializePhis()
 {
+    Vector<MPhi *, 0, SystemAllocPolicy> phisWithEmptyInputTypes;
+
     for (PostorderIterator block(graph.poBegin()); block != graph.poEnd(); block++) {
         if (mir->shouldCancel("Specialize Phis (main loop)"))
             return false;
 
         for (MPhiIterator phi(block->phisBegin()); phi != block->phisEnd(); phi++) {
-            MIRType type = GuessPhiType(*phi);
+            bool hasInputsWithEmptyTypes;
+            MIRType type = GuessPhiType(*phi, &hasInputsWithEmptyTypes);
             phi->specialize(type);
             if (type == MIRType_None) {
                 // We tried to guess the type but failed because all operands are
                 // phis we still have to visit. Set the triedToSpecialize flag but
                 // don't propagate the type to other phis, propagateSpecialization
                 // will do that once we know the type of one of the operands.
+
+                // Edge case: when this phi has a non-phi input with an empty
+                // typeset, it's possible for two phis to have a cyclic
+                // dependency and they will both have MIRType_None. Specialize
+                // such phis to MIRType_Value later on.
+                if (hasInputsWithEmptyTypes && !phisWithEmptyInputTypes.append(*phi))
+                    return false;
                 continue;
             }
             if (!propagateSpecialization(*phi))
@@ -491,14 +604,31 @@ TypeAnalyzer::specializePhis()
         }
     }
 
-    while (!phiWorklist_.empty()) {
-        if (mir->shouldCancel("Specialize Phis (worklist)"))
-            return false;
+    do {
+        while (!phiWorklist_.empty()) {
+            if (mir->shouldCancel("Specialize Phis (worklist)"))
+                return false;
 
-        MPhi *phi = popPhi();
-        if (!propagateSpecialization(phi))
-            return false;
-    }
+            MPhi *phi = popPhi();
+            if (!propagateSpecialization(phi))
+                return false;
+        }
+
+        // When two phis have a cyclic dependency and inputs that have an empty
+        // typeset (which are ignored by GuessPhiType), we may still have to
+        // specialize these to MIRType_Value.
+        while (!phisWithEmptyInputTypes.empty()) {
+            if (mir->shouldCancel("Specialize Phis (phisWithEmptyInputTypes)"))
+                return false;
+
+            MPhi *phi = phisWithEmptyInputTypes.popCopy();
+            if (phi->type() == MIRType_None) {
+                phi->specialize(MIRType_Value);
+                if (!propagateSpecialization(phi))
+                    return false;
+            }
+        }
+    } while (!phiWorklist_.empty());
 
     return true;
 }
@@ -507,28 +637,66 @@ void
 TypeAnalyzer::adjustPhiInputs(MPhi *phi)
 {
     MIRType phiType = phi->type();
+    JS_ASSERT(phiType != MIRType_None);
 
-    if (phiType == MIRType_Double) {
-        // Convert int32 operands to double.
-        for (size_t i = 0; i < phi->numOperands(); i++) {
+    // If we specialized a type that's not Value, there are 3 cases:
+    // 1. Every input is of that type.
+    // 2. Every observed input is of that type (i.e., some inputs haven't been executed yet).
+    // 3. Inputs were doubles and int32s, and was specialized to double.
+    if (phiType != MIRType_Value) {
+        for (size_t i = 0, e = phi->numOperands(); i < e; i++) {
             MDefinition *in = phi->getOperand(i);
+            if (in->type() == phiType)
+                continue;
 
-            if (in->type() == MIRType_Int32) {
-                MToDouble *toDouble = MToDouble::New(in);
-                in->block()->insertBefore(in->block()->lastIns(), toDouble);
-                phi->replaceOperand(i, toDouble);
+            if (in->isBox() && in->toBox()->input()->type() == phiType) {
+                phi->replaceOperand(i, in->toBox()->input());
             } else {
-                JS_ASSERT(in->type() == MIRType_Double);
+                MInstruction *replacement;
+
+                if (phiType == MIRType_Double && IsFloatType(in->type())) {
+                    // Convert int32 operands to double.
+                    replacement = MToDouble::New(alloc(), in);
+                } else if (phiType == MIRType_Float32) {
+                    if (in->type() == MIRType_Int32 || in->type() == MIRType_Double) {
+                        replacement = MToFloat32::New(alloc(), in);
+                    } else {
+                        // See comment below
+                        if (in->type() != MIRType_Value) {
+                            MBox *box = MBox::New(alloc(), in);
+                            in->block()->insertBefore(in->block()->lastIns(), box);
+                            in = box;
+                        }
+
+                        MUnbox *unbox = MUnbox::New(alloc(), in, MIRType_Double, MUnbox::Fallible);
+                        in->block()->insertBefore(in->block()->lastIns(), unbox);
+                        replacement = MToFloat32::New(alloc(), in);
+                    }
+                } else {
+                    // If we know this branch will fail to convert to phiType,
+                    // insert a box that'll immediately fail in the fallible unbox
+                    // below.
+                    if (in->type() != MIRType_Value) {
+                        MBox *box = MBox::New(alloc(), in);
+                        in->block()->insertBefore(in->block()->lastIns(), box);
+                        in = box;
+                    }
+
+                    // Be optimistic and insert unboxes when the operand is a
+                    // value.
+                    replacement = MUnbox::New(alloc(), in, phiType, MUnbox::Fallible);
+                }
+
+                in->block()->insertBefore(in->block()->lastIns(), replacement);
+                phi->replaceOperand(i, replacement);
             }
         }
+
         return;
     }
 
-    if (phiType != MIRType_Value)
-        return;
-
     // Box every typed input.
-    for (size_t i = 0; i < phi->numOperands(); i++) {
+    for (size_t i = 0, e = phi->numOperands(); i < e; i++) {
         MDefinition *in = phi->getOperand(i);
         if (in->type() == MIRType_Value)
             continue;
@@ -538,8 +706,7 @@ TypeAnalyzer::adjustPhiInputs(MPhi *phi)
             // the original box.
             phi->replaceOperand(i, in->toUnbox()->input());
         } else {
-            MBox *box = MBox::New(in);
-            in->block()->insertBefore(in->block()->lastIns(), box);
+            MDefinition *box = BoxInputsPolicy::alwaysBoxAt(alloc(), in->block()->lastIns(), in);
             phi->replaceOperand(i, box);
         }
     }
@@ -549,7 +716,7 @@ bool
 TypeAnalyzer::adjustInputs(MDefinition *def)
 {
     TypePolicy *policy = def->typePolicy();
-    if (policy && !policy->adjustInputs(def->toInstruction()))
+    if (policy && !policy->adjustInputs(alloc(), def->toInstruction()))
         return false;
     return true;
 }
@@ -566,14 +733,16 @@ TypeAnalyzer::replaceRedundantPhi(MPhi *phi)
       case MIRType_Null:
         v = NullValue();
         break;
-      case MIRType_Magic:
+      case MIRType_MagicOptimizedArguments:
         v = MagicValue(JS_OPTIMIZED_ARGUMENTS);
         break;
+      case MIRType_MagicOptimizedOut:
+        v = MagicValue(JS_OPTIMIZED_OUT);
+        break;
       default:
-        JS_NOT_REACHED("unexpected type");
-        return;
+        MOZ_ASSUME_UNREACHABLE("unexpected type");
     }
-    MConstant *c = MConstant::New(v);
+    MConstant *c = MConstant::New(alloc(), v);
     // The instruction pass will insert the box
     block->insertBefore(*(block->begin()), c);
     phi->replaceAllUsesWith(c);
@@ -590,7 +759,11 @@ TypeAnalyzer::insertConversions()
             return false;
 
         for (MPhiIterator phi(block->phisBegin()); phi != block->phisEnd();) {
-            if (phi->type() <= MIRType_Null || phi->type() == MIRType_Magic) {
+            if (phi->type() == MIRType_Undefined ||
+                phi->type() == MIRType_Null ||
+                phi->type() == MIRType_MagicOptimizedArguments ||
+                phi->type() == MIRType_MagicOptimizedOut)
+            {
                 replaceRedundantPhi(*phi);
                 phi = block->discardPhiAt(phi);
             } else {
@@ -606,12 +779,251 @@ TypeAnalyzer::insertConversions()
     return true;
 }
 
+// This function tries to emit Float32 specialized operations whenever it's possible.
+// MIR nodes are flagged as:
+// - Producers, when they can create Float32 that might need to be coerced into a Double.
+//   Loads in Float32 arrays and conversions to Float32 are producers.
+// - Consumers, when they can have Float32 as inputs and validate a legal use of a Float32.
+//   Stores in Float32 arrays and conversions to Float32 are consumers.
+// - Float32 commutative, when using the Float32 instruction instead of the Double instruction
+//   does not result in a compound loss of precision. This is the case for +, -, /, * with 2
+//   operands, for instance. However, an addition with 3 operands is not commutative anymore,
+//   so an intermediate coercion is needed.
+// Except for phis, all these flags are known after Ion building, so they cannot change during
+// the process.
+//
+// The idea behind the algorithm is easy: whenever we can prove that a commutative operation
+// has only producers as inputs and consumers as uses, we can specialize the operation as a
+// float32 operation. Otherwise, we have to convert all float32 inputs to doubles. Even
+// if a lot of conversions are produced, GVN will take care of eliminating the redundant ones.
+//
+// Phis have a special status. Phis need to be flagged as producers or consumers as they can
+// be inputs or outputs of commutative instructions. Fortunately, producers and consumers
+// properties are such that we can deduce the property using all non phis inputs first (which form
+// an initial phi graph) and then propagate all properties from one phi to another using a
+// fixed point algorithm. The algorithm is ensured to terminate as each iteration has less or as
+// many flagged phis as the previous iteration (so the worst steady state case is all phis being
+// flagged as false).
+//
+// In a nutshell, the algorithm applies three passes:
+// 1 - Determine which phis are consumers. Each phi gets an initial value by making a global AND on
+// all its non-phi inputs. Then each phi propagates its value to other phis. If after propagation,
+// the flag value changed, we have to reapply the algorithm on all phi operands, as a phi is a
+// consumer if all of its uses are consumers.
+// 2 - Determine which phis are producers. It's the same algorithm, except that we have to reapply
+// the algorithm on all phi uses, as a phi is a producer if all of its operands are producers.
+// 3 - Go through all commutative operations and ensure their inputs are all producers and their
+// uses are all consumers.
+bool
+TypeAnalyzer::markPhiConsumers()
+{
+    JS_ASSERT(phiWorklist_.empty());
+
+    // Iterate in postorder so worklist is initialized to RPO.
+    for (PostorderIterator block(graph.poBegin()); block != graph.poEnd(); ++block) {
+        if (mir->shouldCancel("Ensure Float32 commutativity - Consumer Phis - Initial state"))
+            return false;
+
+        for (MPhiIterator phi(block->phisBegin()); phi != block->phisEnd(); ++phi) {
+            JS_ASSERT(!phi->isInWorklist());
+            bool canConsumeFloat32 = true;
+            for (MUseDefIterator use(*phi); canConsumeFloat32 && use; use++) {
+                MDefinition *usedef = use.def();
+                canConsumeFloat32 &= usedef->isPhi() || usedef->canConsumeFloat32(use.use());
+            }
+            phi->setCanConsumeFloat32(canConsumeFloat32);
+            if (canConsumeFloat32 && !addPhiToWorklist(*phi))
+                return false;
+        }
+    }
+
+    while (!phiWorklist_.empty()) {
+        if (mir->shouldCancel("Ensure Float32 commutativity - Consumer Phis - Fixed point"))
+            return false;
+
+        MPhi *phi = popPhi();
+        JS_ASSERT(phi->canConsumeFloat32(nullptr /* unused */));
+
+        bool validConsumer = true;
+        for (MUseDefIterator use(phi); use; use++) {
+            MDefinition *def = use.def();
+            if (def->isPhi() && !def->canConsumeFloat32(use.use())) {
+                validConsumer = false;
+                break;
+            }
+        }
+
+        if (validConsumer)
+            continue;
+
+        // Propagate invalidated phis
+        phi->setCanConsumeFloat32(false);
+        for (size_t i = 0, e = phi->numOperands(); i < e; ++i) {
+            MDefinition *input = phi->getOperand(i);
+            if (input->isPhi() && !input->isInWorklist() && input->canConsumeFloat32(nullptr /* unused */))
+            {
+                if (!addPhiToWorklist(input->toPhi()))
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool
+TypeAnalyzer::markPhiProducers()
+{
+    JS_ASSERT(phiWorklist_.empty());
+
+    // Iterate in reverse postorder so worklist is initialized to PO.
+    for (ReversePostorderIterator block(graph.rpoBegin()); block != graph.rpoEnd(); ++block) {
+        if (mir->shouldCancel("Ensure Float32 commutativity - Producer Phis - initial state"))
+            return false;
+
+        for (MPhiIterator phi(block->phisBegin()); phi != block->phisEnd(); ++phi) {
+            JS_ASSERT(!phi->isInWorklist());
+            bool canProduceFloat32 = true;
+            for (size_t i = 0, e = phi->numOperands(); canProduceFloat32 && i < e; ++i) {
+                MDefinition *input = phi->getOperand(i);
+                canProduceFloat32 &= input->isPhi() || input->canProduceFloat32();
+            }
+            phi->setCanProduceFloat32(canProduceFloat32);
+            if (canProduceFloat32 && !addPhiToWorklist(*phi))
+                return false;
+        }
+    }
+
+    while (!phiWorklist_.empty()) {
+        if (mir->shouldCancel("Ensure Float32 commutativity - Producer Phis - Fixed point"))
+            return false;
+
+        MPhi *phi = popPhi();
+        JS_ASSERT(phi->canProduceFloat32());
+
+        bool validProducer = true;
+        for (size_t i = 0, e = phi->numOperands(); i < e; ++i) {
+            MDefinition *input = phi->getOperand(i);
+            if (input->isPhi() && !input->canProduceFloat32()) {
+                validProducer = false;
+                break;
+            }
+        }
+
+        if (validProducer)
+            continue;
+
+        // Propagate invalidated phis
+        phi->setCanProduceFloat32(false);
+        for (MUseDefIterator use(phi); use; use++) {
+            MDefinition *def = use.def();
+            if (def->isPhi() && !def->isInWorklist() && def->canProduceFloat32())
+            {
+                if (!addPhiToWorklist(def->toPhi()))
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool
+TypeAnalyzer::specializeValidFloatOps()
+{
+    for (ReversePostorderIterator block(graph.rpoBegin()); block != graph.rpoEnd(); ++block) {
+        if (mir->shouldCancel("Ensure Float32 commutativity - Instructions"))
+            return false;
+
+        for (MInstructionIterator ins(block->begin()); ins != block->end(); ++ins) {
+            if (!ins->isFloat32Commutative())
+                continue;
+
+            if (ins->type() == MIRType_Float32)
+                continue;
+
+            // This call will try to specialize the instruction iff all uses are consumers and
+            // all inputs are producers.
+            ins->trySpecializeFloat32(alloc());
+        }
+    }
+    return true;
+}
+
+bool
+TypeAnalyzer::graphContainsFloat32()
+{
+    for (ReversePostorderIterator block(graph.rpoBegin()); block != graph.rpoEnd(); ++block) {
+        if (mir->shouldCancel("Ensure Float32 commutativity - Graph contains Float32"))
+            return false;
+
+        for (MDefinitionIterator def(*block); def; def++) {
+            if (def->type() == MIRType_Float32)
+                return true;
+        }
+    }
+    return false;
+}
+
+bool
+TypeAnalyzer::tryEmitFloatOperations()
+{
+    // Backends that currently don't know how to generate Float32 specialized instructions
+    // shouldn't run this pass and just let all instructions as specialized for Double.
+    if (!LIRGenerator::allowFloat32Optimizations())
+        return true;
+
+    // Asm.js uses the ahead of time type checks to specialize operations, no need to check
+    // them again at this point.
+    if (mir->compilingAsmJS())
+        return true;
+
+    // Check ahead of time that there is at least one definition typed as Float32, otherwise we
+    // don't need this pass.
+    if (!graphContainsFloat32())
+        return true;
+
+    if (!markPhiConsumers())
+       return false;
+    if (!markPhiProducers())
+       return false;
+    if (!specializeValidFloatOps())
+       return false;
+    return true;
+}
+
+bool
+TypeAnalyzer::checkFloatCoherency()
+{
+#ifdef DEBUG
+    // Asserts that all Float32 instructions are flowing into Float32 consumers or specialized
+    // operations
+    for (ReversePostorderIterator block(graph.rpoBegin()); block != graph.rpoEnd(); ++block) {
+        if (mir->shouldCancel("Check Float32 coherency"))
+            return false;
+
+        for (MDefinitionIterator def(*block); def; def++) {
+            if (def->type() != MIRType_Float32)
+                continue;
+
+            for (MUseDefIterator use(*def); use; use++) {
+                MDefinition *consumer = use.def();
+                JS_ASSERT(consumer->isConsistentFloat32Use(use.use()));
+            }
+        }
+    }
+#endif
+    return true;
+}
+
 bool
 TypeAnalyzer::analyze()
 {
+    if (!tryEmitFloatOperations())
+        return false;
     if (!specializePhis())
         return false;
     if (!insertConversions())
+        return false;
+    if (!checkFloatCoherency())
         return false;
     return true;
 }
@@ -623,6 +1035,63 @@ jit::ApplyTypeInformation(MIRGenerator *mir, MIRGraph &graph)
 
     if (!analyzer.analyze())
         return false;
+
+    return true;
+}
+
+bool
+jit::MakeMRegExpHoistable(MIRGraph &graph)
+{
+    for (ReversePostorderIterator block(graph.rpoBegin()); block != graph.rpoEnd(); block++) {
+        for (MDefinitionIterator iter(*block); iter; iter++) {
+            if (!iter->isRegExp())
+                continue;
+
+            MRegExp *regexp = iter->toRegExp();
+
+            // Test if MRegExp is hoistable by looking at all uses.
+            bool hoistable = true;
+            for (MUseIterator i = regexp->usesBegin(); i != regexp->usesEnd(); i++) {
+                // Ignore resume points. At this point all uses are listed.
+                // No DCE or GVN or something has happened.
+                if (i->consumer()->isResumePoint())
+                    continue;
+
+                JS_ASSERT(i->consumer()->isDefinition());
+
+                // All MRegExp* MIR's don't adjust the regexp.
+                MDefinition *use = i->consumer()->toDefinition();
+                if (use->isRegExpReplace())
+                    continue;
+                if (use->isRegExpExec())
+                    continue;
+                if (use->isRegExpTest())
+                    continue;
+
+                hoistable = false;
+                break;
+            }
+
+            if (!hoistable)
+                continue;
+
+            // Make MRegExp hoistable
+            regexp->setMovable();
+
+            // That would be incorrect for global/sticky, because lastIndex could be wrong.
+            // Therefore setting the lastIndex to 0. That is faster than a not movable regexp.
+            RegExpObject *source = regexp->source();
+            if (source->sticky() || source->global()) {
+                JS_ASSERT(regexp->mustClone());
+                MConstant *zero = MConstant::New(graph.alloc(), Int32Value(0));
+                regexp->block()->insertAfter(regexp, zero);
+
+                MStoreFixedSlot *lastIndex =
+                    MStoreFixedSlot::New(graph.alloc(), regexp, RegExpObject::lastIndexSlot(), zero);
+                regexp->block()->insertAfter(zero, lastIndex);
+            }
+        }
+    }
 
     return true;
 }
@@ -654,20 +1123,20 @@ IntersectDominators(MBasicBlock *block1, MBasicBlock *block2)
     // For this function to be called, the block must have multiple predecessors.
     // If a finger is then found to be self-dominating, it must therefore be
     // reachable from multiple roots through non-intersecting control flow.
-    // NULL is returned in this case, to denote an empty intersection.
+    // nullptr is returned in this case, to denote an empty intersection.
 
     while (finger1->id() != finger2->id()) {
         while (finger1->id() > finger2->id()) {
             MBasicBlock *idom = finger1->immediateDominator();
             if (idom == finger1)
-                return NULL; // Empty intersection.
+                return nullptr; // Empty intersection.
             finger1 = idom;
         }
 
         while (finger2->id() > finger1->id()) {
             MBasicBlock *idom = finger2->immediateDominator();
             if (idom == finger2)
-                return NULL; // Empty intersection.
+                return nullptr; // Empty intersection.
             finger2 = idom;
         }
     }
@@ -705,13 +1174,13 @@ ComputeImmediateDominators(MIRGraph &graph)
             // Find the first common dominator.
             for (size_t i = 1; i < block->numPredecessors(); i++) {
                 MBasicBlock *pred = block->getPredecessor(i);
-                if (pred->immediateDominator() == NULL)
+                if (pred->immediateDominator() == nullptr)
                     continue;
 
                 newIdom = IntersectDominators(pred, newIdom);
 
                 // If there is no common dominator, the block self-dominates.
-                if (newIdom == NULL) {
+                if (newIdom == nullptr) {
                     block->setImmediateDominator(*block);
                     changed = true;
                     break;
@@ -728,7 +1197,7 @@ ComputeImmediateDominators(MIRGraph &graph)
 #ifdef DEBUG
     // Assert that all blocks have dominator information.
     for (MBasicBlockIterator block(graph.begin()); block != graph.end(); block++) {
-        JS_ASSERT(block->immediateDominator() != NULL);
+        JS_ASSERT(block->immediateDominator() != nullptr);
     }
 #endif
 }
@@ -767,7 +1236,7 @@ jit::BuildDominatorTree(MIRGraph &graph)
     // Now, iterate through the dominator tree and annotate every
     // block with its index in the pre-order traversal of the
     // dominator tree.
-    Vector<MBasicBlock *, 1, IonAllocPolicy> worklist;
+    Vector<MBasicBlock *, 1, IonAllocPolicy> worklist(graph.alloc());
 
     // The index of the current block in the CFG traversal.
     size_t index = 0;
@@ -787,8 +1256,9 @@ jit::BuildDominatorTree(MIRGraph &graph)
         block->setDomIndex(index);
 
         if (!worklist.append(block->immediatelyDominatedBlocksBegin(),
-                             block->immediatelyDominatedBlocksEnd()))
+                             block->immediatelyDominatedBlocksEnd())) {
             return false;
+        }
         index++;
     }
 
@@ -844,19 +1314,6 @@ jit::BuildPhiReverseMapping(MIRGraph &graph)
     return true;
 }
 
-static inline MBasicBlock *
-SkipContainedLoop(MBasicBlock *block, MBasicBlock *header)
-{
-    while (block->loopHeader() || block->isLoopHeader()) {
-        if (block->loopHeader())
-            block = block->loopHeader();
-        if (block == header)
-            break;
-        block = block->loopPredecessor();
-    }
-    return block;
-}
-
 #ifdef DEBUG
 static bool
 CheckSuccessorImpliesPredecessor(MBasicBlock *A, MBasicBlock *B)
@@ -881,29 +1338,19 @@ CheckPredecessorImpliesSuccessor(MBasicBlock *A, MBasicBlock *B)
 }
 
 static bool
-CheckOperandImpliesUse(MInstruction *ins, MDefinition *operand)
+CheckOperandImpliesUse(MNode *n, MDefinition *operand)
 {
     for (MUseIterator i = operand->usesBegin(); i != operand->usesEnd(); i++) {
-        if (i->consumer()->isDefinition() && i->consumer()->toDefinition() == ins)
+        if (i->consumer() == n)
             return true;
     }
     return false;
 }
 
 static bool
-CheckUseImpliesOperand(MInstruction *ins, MUse *use)
+CheckUseImpliesOperand(MDefinition *def, MUse *use)
 {
-    MNode *consumer = use->consumer();
-    uint32_t index = use->index();
-
-    if (consumer->isDefinition()) {
-        MDefinition *def = consumer->toDefinition();
-        return (def->getOperand(index) == ins);
-    }
-
-    JS_ASSERT(consumer->isResumePoint());
-    MResumePoint *res = consumer->toResumePoint();
-    return (res->getOperand(index) == ins);
+    return use->consumer()->getOperand(use->index()) == def;
 }
 #endif // DEBUG
 
@@ -911,10 +1358,26 @@ void
 jit::AssertBasicGraphCoherency(MIRGraph &graph)
 {
 #ifdef DEBUG
+    JS_ASSERT(graph.entryBlock()->numPredecessors() == 0);
+    JS_ASSERT(graph.entryBlock()->phisEmpty());
+    JS_ASSERT(!graph.entryBlock()->unreachable());
+
+    if (MBasicBlock *osrBlock = graph.osrBlock()) {
+        JS_ASSERT(osrBlock->numPredecessors() == 0);
+        JS_ASSERT(osrBlock->phisEmpty());
+        JS_ASSERT(osrBlock != graph.entryBlock());
+        JS_ASSERT(!osrBlock->unreachable());
+    }
+
+    if (MResumePoint *resumePoint = graph.entryResumePoint())
+        JS_ASSERT(resumePoint->block() == graph.entryBlock());
+
     // Assert successor and predecessor list coherency.
     uint32_t count = 0;
     for (MBasicBlockIterator block(graph.begin()); block != graph.end(); block++) {
         count++;
+
+        JS_ASSERT(&block->graph() == &graph);
 
         for (size_t i = 0; i < block->numSuccessors(); i++)
             JS_ASSERT(CheckSuccessorImpliesPredecessor(*block, block->getSuccessor(i)));
@@ -923,13 +1386,30 @@ jit::AssertBasicGraphCoherency(MIRGraph &graph)
             JS_ASSERT(CheckPredecessorImpliesSuccessor(*block, block->getPredecessor(i)));
 
         // Assert that use chains are valid for this instruction.
-        for (MInstructionIterator ins = block->begin(); ins != block->end(); ins++) {
-            for (uint32_t i = 0; i < ins->numOperands(); i++)
-                JS_ASSERT(CheckOperandImpliesUse(*ins, ins->getOperand(i)));
+        for (MDefinitionIterator iter(*block); iter; iter++) {
+            for (uint32_t i = 0, e = iter->numOperands(); i < e; i++)
+                JS_ASSERT(CheckOperandImpliesUse(*iter, iter->getOperand(i)));
         }
-        for (MInstructionIterator ins = block->begin(); ins != block->end(); ins++) {
-            for (MUseIterator i(ins->usesBegin()); i != ins->usesEnd(); i++)
-                JS_ASSERT(CheckUseImpliesOperand(*ins, *i));
+        for (MResumePointIterator iter(block->resumePointsBegin()); iter != block->resumePointsEnd(); iter++) {
+            for (uint32_t i = 0, e = iter->numOperands(); i < e; i++) {
+                if (iter->getUseFor(i)->hasProducer())
+                    JS_ASSERT(CheckOperandImpliesUse(*iter, iter->getOperand(i)));
+            }
+        }
+        for (MPhiIterator phi(block->phisBegin()); phi != block->phisEnd(); phi++) {
+            JS_ASSERT(phi->numOperands() == block->numPredecessors());
+        }
+        for (MDefinitionIterator iter(*block); iter; iter++) {
+            JS_ASSERT(iter->block() == *block);
+            for (MUseIterator i(iter->usesBegin()); i != iter->usesEnd(); i++)
+                JS_ASSERT(CheckUseImpliesOperand(*iter, *i));
+
+            if (iter->isInstruction()) {
+                if (MResumePoint *resume = iter->toInstruction()->resumePoint()) {
+                    if (MInstruction *ins = resume->instruction())
+                        JS_ASSERT(ins->block() == iter->block());
+                }
+            }
         }
     }
 
@@ -961,6 +1441,8 @@ void
 jit::AssertGraphCoherency(MIRGraph &graph)
 {
 #ifdef DEBUG
+    if (!js_JitOptions.checkGraphConsistency)
+        return;
     AssertBasicGraphCoherency(graph);
     AssertReversePostOrder(graph);
 #endif
@@ -974,6 +1456,8 @@ jit::AssertExtendedGraphCoherency(MIRGraph &graph)
     // are split)
 
 #ifdef DEBUG
+    if (!js_JitOptions.checkGraphConsistency)
+        return;
     AssertGraphCoherency(graph);
 
     uint32_t idx = 0;
@@ -1007,13 +1491,13 @@ jit::AssertExtendedGraphCoherency(MIRGraph &graph)
                 successorWithPhis++;
 
         JS_ASSERT(successorWithPhis <= 1);
-        JS_ASSERT_IF(successorWithPhis, block->successorWithPhis() != NULL);
+        JS_ASSERT_IF(successorWithPhis, block->successorWithPhis() != nullptr);
 
         // I'd like to assert this, but it's not necc. true.  Sometimes we set this
-        // flag to non-NULL just because a successor has multiple preds, even if it
+        // flag to non-nullptr just because a successor has multiple preds, even if it
         // does not actually have any phis.
         //
-        // JS_ASSERT_IF(!successorWithPhis, block->successorWithPhis() == NULL);
+        // JS_ASSERT_IF(!successorWithPhis, block->successorWithPhis() == nullptr);
     }
 #endif
 }
@@ -1046,19 +1530,19 @@ FindDominatingBoundsCheck(BoundsCheckMap &checks, MBoundsCheck *check, size_t in
     // See the comment in ValueNumberer::findDominatingDef.
     HashNumber hash = BoundsCheckHashIgnoreOffset(check);
     BoundsCheckMap::Ptr p = checks.lookup(hash);
-    if (!p || index > p->value.validUntil) {
+    if (!p || index > p->value().validUntil) {
         // We didn't find a dominating bounds check.
         BoundsCheckInfo info;
         info.check = check;
         info.validUntil = index + check->block()->numDominated();
 
         if(!checks.put(hash, info))
-            return NULL;
+            return nullptr;
 
         return check;
     }
 
-    return p->value.check;
+    return p->value().check;
 }
 
 // Extract a linear sum from ins, if possible (otherwise giving the sum 'ins + 0').
@@ -1074,7 +1558,7 @@ jit::ExtractLinearSum(MDefinition *ins)
     if (ins->isConstant()) {
         const Value &v = ins->toConstant()->value();
         JS_ASSERT(v.isInt32());
-        return SimpleLinearSum(NULL, v.toInt32());
+        return SimpleLinearSum(nullptr, v.toInt32());
     } else if (ins->isAdd() || ins->isSub()) {
         MDefinition *lhs = ins->getOperand(0);
         MDefinition *rhs = ins->getOperand(1);
@@ -1118,7 +1602,7 @@ jit::ExtractLinearInequality(MTest *test, BranchDirection direction,
     MDefinition *rhs = compare->getOperand(1);
 
     // TODO: optimize Compare_UInt32
-    if (compare->compareType() != MCompare::Compare_Int32)
+    if (!compare->isInt32Comparison())
         return false;
 
     JS_ASSERT(lhs->type() == MIRType_Int32);
@@ -1126,7 +1610,7 @@ jit::ExtractLinearInequality(MTest *test, BranchDirection direction,
 
     JSOp jsop = compare->jsop();
     if (direction == FALSE_BRANCH)
-        jsop = analyze::NegateCompareOp(jsop);
+        jsop = NegateCompareOp(jsop);
 
     SimpleLinearSum lsum = ExtractLinearSum(lhs);
     SimpleLinearSum rsum = ExtractLinearSum(rhs);
@@ -1196,7 +1680,7 @@ TryEliminateBoundsCheck(BoundsCheckMap &checks, size_t blockIndex, MBoundsCheck 
     SimpleLinearSum sumA = ExtractLinearSum(dominating->index());
     SimpleLinearSum sumB = ExtractLinearSum(dominated->index());
 
-    // Both terms should be NULL or the same definition.
+    // Both terms should be nullptr or the same definition.
     if (sumA.term != sumB.term)
         return true;
 
@@ -1241,41 +1725,43 @@ TryEliminateTypeBarrierFromTest(MTypeBarrier *barrier, bool filtersNull, bool fi
     // types that have been seen in the first access but not the second.
 
     // A test 'if (x.f)' filters both null and undefined.
-    if (test->getOperand(0) == barrier->input() && direction == TRUE_BRANCH) {
-        *eliminated = true;
-        barrier->replaceAllUsesWith(barrier->input());
-        return;
+
+    // Disregard the possible unbox added before the Typebarrier for checking.
+    MDefinition *input = barrier->input();
+    MUnbox *inputUnbox = nullptr;
+    if (input->isUnbox() && input->toUnbox()->mode() != MUnbox::Fallible) {
+        inputUnbox = input->toUnbox();
+        input = inputUnbox->input();
     }
 
-    if (!test->getOperand(0)->isCompare())
+    MDefinition *subject = nullptr;
+    bool removeUndefined;
+    bool removeNull;
+    test->filtersUndefinedOrNull(direction == TRUE_BRANCH, &subject, &removeUndefined, &removeNull);
+
+    // The Test doesn't filter undefined nor null.
+    if (!subject)
         return;
 
-    MCompare *compare = test->getOperand(0)->toCompare();
-    MCompare::CompareType compareType = compare->compareType();
-
-    if (compareType != MCompare::Compare_Undefined && compareType != MCompare::Compare_Null)
-        return;
-    if (compare->getOperand(0) != barrier->input())
+    // Make sure the subject equals the input to the TypeBarrier.
+    if (subject != input)
         return;
 
-    JSOp op = compare->jsop();
-    JS_ASSERT(op == JSOP_EQ || op == JSOP_STRICTEQ ||
-              op == JSOP_NE || op == JSOP_STRICTNE);
-
-    if ((direction == TRUE_BRANCH) != (op == JSOP_NE || op == JSOP_STRICTNE))
+    // When the TypeBarrier filters undefined, the test must at least also do,
+    // this, before the TypeBarrier can get removed.
+    if (!removeUndefined && filtersUndefined)
         return;
 
-    // A test 'if (x.f != null)' or 'if (x.f != undefined)' filters both null
-    // and undefined. If strict equality is used, only the specified rhs is
-    // tested for.
-    if (op == JSOP_STRICTEQ || op == JSOP_STRICTNE) {
-        if (compareType == MCompare::Compare_Undefined && !filtersUndefined)
-            return;
-        if (compareType == MCompare::Compare_Null && !filtersNull)
-            return;
-    }
+    // When the TypeBarrier filters null, the test must at least also do,
+    // this, before the TypeBarrier can get removed.
+    if (!removeNull && filtersNull)
+        return;
 
+    // Eliminate the TypeBarrier. The possible TypeBarrier unboxing is kept,
+    // but made infallible.
     *eliminated = true;
+    if (inputUnbox)
+        inputUnbox->makeInfallible();
     barrier->replaceAllUsesWith(barrier->input());
 }
 
@@ -1284,8 +1770,12 @@ TryEliminateTypeBarrier(MTypeBarrier *barrier, bool *eliminated)
 {
     JS_ASSERT(!*eliminated);
 
-    const types::StackTypeSet *barrierTypes = barrier->resultTypeSet();
-    const types::StackTypeSet *inputTypes = barrier->input()->resultTypeSet();
+    const types::TemporaryTypeSet *barrierTypes = barrier->resultTypeSet();
+    const types::TemporaryTypeSet *inputTypes = barrier->input()->resultTypeSet();
+
+    // Disregard the possible unbox added before the Typebarrier.
+    if (barrier->input()->isUnbox() && barrier->input()->toUnbox()->mode() != MUnbox::Fallible)
+        inputTypes = barrier->input()->toUnbox()->input()->resultTypeSet();
 
     if (!barrierTypes || !inputTypes)
         return true;
@@ -1331,13 +1821,13 @@ TryEliminateTypeBarrier(MTypeBarrier *barrier, bool *eliminated)
 bool
 jit::EliminateRedundantChecks(MIRGraph &graph)
 {
-    BoundsCheckMap checks;
+    BoundsCheckMap checks(graph.alloc());
 
     if (!checks.init())
         return false;
 
     // Stack for pre-order CFG traversal.
-    Vector<MBasicBlock *, 1, IonAllocPolicy> worklist;
+    Vector<MBasicBlock *, 1, IonAllocPolicy> worklist(graph.alloc());
 
     // The index of the current block in the CFG traversal.
     size_t index = 0;
@@ -1358,8 +1848,9 @@ jit::EliminateRedundantChecks(MIRGraph &graph)
 
         // Add all immediate dominators to the front of the worklist.
         if (!worklist.append(block->immediatelyDominatedBlocksBegin(),
-                             block->immediatelyDominatedBlocksEnd()))
+                             block->immediatelyDominatedBlocksEnd())) {
             return false;
+        }
 
         for (MDefinitionIterator iter(block); iter; ) {
             bool eliminated = false;
@@ -1390,7 +1881,7 @@ jit::EliminateRedundantChecks(MIRGraph &graph)
 }
 
 // If the given block contains a goto and nothing interesting before that,
-// return the goto. Return NULL otherwise.
+// return the goto. Return nullptr otherwise.
 static LGoto *
 FindLeadingGoto(LBlock *bb)
 {
@@ -1398,15 +1889,12 @@ FindLeadingGoto(LBlock *bb)
         // Ignore labels.
         if (ins->isLabel())
             continue;
-        // Ignore empty move groups.
-        if (ins->isMoveGroup() && ins->toMoveGroup()->numMoves() == 0)
-            continue;
         // If we have a goto, we're good to go.
         if (ins->isGoto())
             return ins->toGoto();
         break;
     }
-    return NULL;
+    return nullptr;
 }
 
 // Eliminate blocks containing nothing interesting besides gotos. These are
@@ -1433,7 +1921,7 @@ jit::UnsplitEdges(LIRGraph *lir)
         // over-conservative, but we're attempting to keep everything in MIR
         // current as we modify the LIR, so only proceed if the MIR is simple.
         if (mirBlock->numPredecessors() == 0 || mirBlock->numSuccessors() != 1 ||
-            !mirBlock->resumePointsEmpty() || !mirBlock->begin()->isGoto())
+            !mirBlock->begin()->isGoto())
         {
             continue;
         }
@@ -1564,4 +2052,423 @@ LinearSum::print(Sprinter &sp) const
         sp.printf("+%d", constant_);
     else if (constant_ < 0)
         sp.printf("%d", constant_);
+}
+
+void
+LinearSum::dump(FILE *fp) const
+{
+    Sprinter sp(GetIonContext()->cx);
+    sp.init();
+    print(sp);
+    fprintf(fp, "%s\n", sp.string());
+}
+
+void
+LinearSum::dump() const
+{
+    dump(stderr);
+}
+
+static bool
+AnalyzePoppedThis(JSContext *cx, types::TypeObject *type,
+                  MDefinition *thisValue, MInstruction *ins, bool definitelyExecuted,
+                  HandleObject baseobj,
+                  Vector<types::TypeNewScript::Initializer> *initializerList,
+                  Vector<PropertyName *> *accessedProperties,
+                  bool *phandled)
+{
+    // Determine the effect that a use of the |this| value when calling |new|
+    // on a script has on the properties definitely held by the new object.
+
+    if (ins->isCallSetProperty()) {
+        MCallSetProperty *setprop = ins->toCallSetProperty();
+
+        if (setprop->object() != thisValue)
+            return true;
+
+        // Don't use GetAtomId here, we need to watch for SETPROP on
+        // integer properties and bail out. We can't mark the aggregate
+        // JSID_VOID type property as being in a definite slot.
+        if (setprop->name() == cx->names().prototype ||
+            setprop->name() == cx->names().proto ||
+            setprop->name() == cx->names().constructor)
+        {
+            return true;
+        }
+
+        // Ignore assignments to properties that were already written to.
+        if (baseobj->nativeLookup(cx, NameToId(setprop->name()))) {
+            *phandled = true;
+            return true;
+        }
+
+        // Don't add definite properties for properties that were already
+        // read in the constructor.
+        for (size_t i = 0; i < accessedProperties->length(); i++) {
+            if ((*accessedProperties)[i] == setprop->name())
+                return true;
+        }
+
+        // Don't add definite properties to an object which won't fit in its
+        // fixed slots.
+        if (GetGCKindSlots(gc::GetGCObjectKind(baseobj->slotSpan() + 1)) <= baseobj->slotSpan())
+            return true;
+
+        // Assignments to new properties must always execute.
+        if (!definitelyExecuted)
+            return true;
+
+        RootedId id(cx, NameToId(setprop->name()));
+        if (!types::AddClearDefiniteGetterSetterForPrototypeChain(cx, type, id)) {
+            // The prototype chain already contains a getter/setter for this
+            // property, or type information is too imprecise.
+            return true;
+        }
+
+        DebugOnly<unsigned> slotSpan = baseobj->slotSpan();
+        if (!DefineNativeProperty(cx, baseobj, id, UndefinedHandleValue, nullptr, nullptr,
+                                  JSPROP_ENUMERATE))
+        {
+            return false;
+        }
+        JS_ASSERT(baseobj->slotSpan() != slotSpan);
+        JS_ASSERT(!baseobj->inDictionaryMode());
+
+        Vector<MResumePoint *> callerResumePoints(cx);
+        MBasicBlock *block = ins->block();
+        for (MResumePoint *rp = block->callerResumePoint();
+             rp;
+             block = rp->block(), rp = block->callerResumePoint())
+        {
+            JSScript *script = rp->block()->info().script();
+            if (!types::AddClearDefiniteFunctionUsesInScript(cx, type, script, block->info().script()))
+                return true;
+            if (!callerResumePoints.append(rp))
+                return false;
+        }
+
+        for (int i = callerResumePoints.length() - 1; i >= 0; i--) {
+            MResumePoint *rp = callerResumePoints[i];
+            JSScript *script = rp->block()->info().script();
+            types::TypeNewScript::Initializer entry(types::TypeNewScript::Initializer::SETPROP_FRAME,
+                                                    script->pcToOffset(rp->pc()));
+            if (!initializerList->append(entry))
+                return false;
+        }
+
+        JSScript *script = ins->block()->info().script();
+        types::TypeNewScript::Initializer entry(types::TypeNewScript::Initializer::SETPROP,
+                                                script->pcToOffset(setprop->resumePoint()->pc()));
+        if (!initializerList->append(entry))
+            return false;
+
+        *phandled = true;
+        return true;
+    }
+
+    if (ins->isCallGetProperty()) {
+        MCallGetProperty *get = ins->toCallGetProperty();
+
+        /*
+         * Properties can be read from the 'this' object if the following hold:
+         *
+         * - The read is not on a getter along the prototype chain, which
+         *   could cause 'this' to escape.
+         *
+         * - The accessed property is either already a definite property or
+         *   is not later added as one. Since the definite properties are
+         *   added to the object at the point of its creation, reading a
+         *   definite property before it is assigned could incorrectly hit.
+         */
+        RootedId id(cx, NameToId(get->name()));
+        if (!baseobj->nativeLookup(cx, id) && !accessedProperties->append(get->name()))
+            return false;
+
+        if (!types::AddClearDefiniteGetterSetterForPrototypeChain(cx, type, id)) {
+            // The |this| value can escape if any property reads it does go
+            // through a getter.
+            return true;
+        }
+
+        *phandled = true;
+        return true;
+    }
+
+    if (ins->isPostWriteBarrier()) {
+        *phandled = true;
+        return true;
+    }
+
+    return true;
+}
+
+static int
+CmpInstructions(const void *a, const void *b)
+{
+    return (*static_cast<MInstruction * const *>(a))->id() -
+           (*static_cast<MInstruction * const *>(b))->id();
+}
+
+bool
+jit::AnalyzeNewScriptProperties(JSContext *cx, JSFunction *fun,
+                                types::TypeObject *type, HandleObject baseobj,
+                                Vector<types::TypeNewScript::Initializer> *initializerList)
+{
+    JS_ASSERT(cx->compartment()->activeAnalysis);
+
+    // When invoking 'new' on the specified script, try to find some properties
+    // which will definitely be added to the created object before it has a
+    // chance to escape and be accessed elsewhere.
+
+    RootedScript script(cx, fun->getOrCreateScript(cx));
+    if (!script)
+        return false;
+
+    if (!jit::IsIonEnabled(cx) || !jit::IsBaselineEnabled(cx) ||
+        !script->compileAndGo() || !script->canBaselineCompile())
+    {
+        return true;
+    }
+
+    static const uint32_t MAX_SCRIPT_SIZE = 2000;
+    if (script->length() > MAX_SCRIPT_SIZE)
+        return true;
+
+    Vector<PropertyName *> accessedProperties(cx);
+
+    LifoAlloc alloc(types::TypeZone::TYPE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
+
+    TempAllocator temp(&alloc);
+    IonContext ictx(cx, &temp);
+
+    if (!cx->compartment()->ensureJitCompartmentExists(cx))
+        return false;
+
+    if (!script->hasBaselineScript()) {
+        MethodStatus status = BaselineCompile(cx, script);
+        if (status == Method_Error)
+            return false;
+        if (status != Method_Compiled)
+            return true;
+    }
+
+    types::TypeScript::SetThis(cx, script, types::Type::ObjectType(type));
+
+    MIRGraph graph(&temp);
+    CompileInfo info(script, fun,
+                     /* osrPc = */ nullptr, /* constructing = */ false,
+                     DefinitePropertiesAnalysis,
+                     script->needsArgsObj());
+
+    AutoTempAllocatorRooter root(cx, &temp);
+
+    const OptimizationInfo *optimizationInfo = js_IonOptimizations.get(Optimization_Normal);
+
+    types::CompilerConstraintList *constraints = types::NewCompilerConstraintList(temp);
+    if (!constraints) {
+        js_ReportOutOfMemory(cx);
+        return false;
+    }
+
+    BaselineInspector inspector(script);
+    const JitCompileOptions options(cx);
+
+    IonBuilder builder(cx, CompileCompartment::get(cx->compartment()), options, &temp, &graph, constraints,
+                       &inspector, &info, optimizationInfo, /* baselineFrame = */ nullptr);
+
+    if (!builder.build()) {
+        if (builder.abortReason() == AbortReason_Alloc)
+            return false;
+        return true;
+    }
+
+    types::FinishDefinitePropertiesAnalysis(cx, constraints);
+
+    if (!SplitCriticalEdges(graph))
+        return false;
+
+    if (!RenumberBlocks(graph))
+        return false;
+
+    if (!BuildDominatorTree(graph))
+        return false;
+
+    if (!EliminatePhis(&builder, graph, AggressiveObservability))
+        return false;
+
+    MDefinition *thisValue = graph.begin()->getSlot(info.thisSlot());
+
+    // Get a list of instructions using the |this| value in the order they
+    // appear in the graph.
+    Vector<MInstruction *> instructions(cx);
+
+    for (MUseDefIterator uses(thisValue); uses; uses++) {
+        MDefinition *use = uses.def();
+
+        // Don't track |this| through assignments to phis.
+        if (!use->isInstruction())
+            return true;
+
+        if (!instructions.append(use->toInstruction()))
+            return false;
+    }
+
+    // Sort the instructions to visit in increasing order.
+    qsort(instructions.begin(), instructions.length(),
+          sizeof(MInstruction *), CmpInstructions);
+
+    // Find all exit blocks in the graph.
+    Vector<MBasicBlock *> exitBlocks(cx);
+    for (MBasicBlockIterator block(graph.begin()); block != graph.end(); block++) {
+        if (!block->numSuccessors() && !exitBlocks.append(*block))
+            return false;
+    }
+
+    for (size_t i = 0; i < instructions.length(); i++) {
+        MInstruction *ins = instructions[i];
+
+        // Track whether the use of |this| is in unconditional code, i.e.
+        // the block dominates all graph exits.
+        bool definitelyExecuted = true;
+        for (size_t i = 0; i < exitBlocks.length(); i++) {
+            for (MBasicBlock *exit = exitBlocks[i];
+                 exit != ins->block();
+                 exit = exit->immediateDominator())
+            {
+                if (exit == exit->immediateDominator()) {
+                    definitelyExecuted = false;
+                    break;
+                }
+            }
+        }
+
+        // Also check to see if the instruction is inside a loop body. Even if
+        // an access will always execute in the script, if it executes multiple
+        // times then we can get confused when rolling back objects while
+        // clearing the new script information.
+        if (ins->block()->loopDepth() != 0)
+            definitelyExecuted = false;
+
+        bool handled = false;
+        if (!AnalyzePoppedThis(cx, type, thisValue, ins, definitelyExecuted,
+                               baseobj, initializerList, &accessedProperties, &handled))
+        {
+            return false;
+        }
+        if (!handled)
+            return true;
+    }
+
+    return true;
+}
+
+static bool
+ArgumentsUseCanBeLazy(JSContext *cx, JSScript *script, MInstruction *ins, size_t index)
+{
+    // We can read the frame's arguments directly for f.apply(x, arguments).
+    if (ins->isCall()) {
+        if (*ins->toCall()->resumePoint()->pc() == JSOP_FUNAPPLY &&
+            ins->toCall()->numActualArgs() == 2 &&
+            index == MCall::IndexOfArgument(1))
+        {
+            return true;
+        }
+    }
+
+    // arguments[i] can read fp->canonicalActualArg(i) directly.
+    if (ins->isCallGetElement() && index == 0)
+        return true;
+
+    // arguments.length length can read fp->numActualArgs() directly.
+    if (ins->isCallGetProperty() && index == 0 && ins->toCallGetProperty()->name() == cx->names().length)
+        return true;
+
+    return false;
+}
+
+bool
+jit::AnalyzeArgumentsUsage(JSContext *cx, JSScript *scriptArg)
+{
+    RootedScript script(cx, scriptArg);
+    types::AutoEnterAnalysis enter(cx);
+
+    JS_ASSERT(!script->analyzedArgsUsage());
+
+    // Treat the script as needing an arguments object until we determine it
+    // does not need one. This both allows us to easily see where the arguments
+    // object can escape through assignments to the function's named arguments,
+    // and also simplifies handling of early returns.
+    script->setNeedsArgsObj(true);
+
+    if (!jit::IsIonEnabled(cx) || !script->compileAndGo())
+        return true;
+
+    static const uint32_t MAX_SCRIPT_SIZE = 10000;
+    if (script->length() > MAX_SCRIPT_SIZE)
+        return true;
+
+    if (!script->ensureHasTypes(cx))
+        return false;
+
+    LifoAlloc alloc(types::TypeZone::TYPE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
+
+    TempAllocator temp(&alloc);
+    IonContext ictx(cx, &temp);
+
+    if (!cx->compartment()->ensureJitCompartmentExists(cx))
+        return false;
+
+    MIRGraph graph(&temp);
+    CompileInfo info(script, script->functionNonDelazifying(),
+                     /* osrPc = */ nullptr, /* constructing = */ false,
+                     ArgumentsUsageAnalysis,
+                     /* needsArgsObj = */ true);
+
+    AutoTempAllocatorRooter root(cx, &temp);
+
+    const OptimizationInfo *optimizationInfo = js_IonOptimizations.get(Optimization_Normal);
+
+    types::CompilerConstraintList *constraints = types::NewCompilerConstraintList(temp);
+    if (!constraints)
+        return false;
+
+    BaselineInspector inspector(script);
+    const JitCompileOptions options(cx);
+
+    IonBuilder builder(nullptr, CompileCompartment::get(cx->compartment()), options, &temp, &graph, constraints,
+                       &inspector, &info, optimizationInfo, /* baselineFrame = */ nullptr);
+
+    if (!builder.build()) {
+        if (builder.abortReason() == AbortReason_Alloc)
+            return false;
+        return true;
+    }
+
+    if (!SplitCriticalEdges(graph))
+        return false;
+
+    if (!RenumberBlocks(graph))
+        return false;
+
+    if (!BuildDominatorTree(graph))
+        return false;
+
+    if (!EliminatePhis(&builder, graph, AggressiveObservability))
+        return false;
+
+    MDefinition *argumentsValue = graph.begin()->getSlot(info.argsObjSlot());
+
+    for (MUseDefIterator uses(argumentsValue); uses; uses++) {
+        MDefinition *use = uses.def();
+
+        // Don't track |arguments| through assignments to phis.
+        if (!use->isInstruction())
+            return true;
+
+        if (!ArgumentsUseCanBeLazy(cx, script, use->toInstruction(), uses.index()))
+            return true;
+    }
+
+    script->setNeedsArgsObj(false);
+    return true;
 }

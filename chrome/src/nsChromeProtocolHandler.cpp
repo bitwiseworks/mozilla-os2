@@ -10,38 +10,26 @@
 
 */
 
-#include "nsAutoPtr.h"
 #include "nsChromeProtocolHandler.h"
 #include "nsChromeRegistry.h"
 #include "nsCOMPtr.h"
-#include "nsContentCID.h"
-#include "nsCRT.h"
 #include "nsThreadUtils.h"
 #include "nsIChannel.h"
 #include "nsIChromeRegistry.h"
-#include "nsIComponentManager.h"
 #include "nsIFile.h"
-#include "nsIFileURL.h"
 #include "nsIFileChannel.h"
 #include "nsIIOService.h"
-#include "nsIJARChannel.h"
-#include "nsIJARURI.h"
 #include "nsILoadGroup.h"
-#include "nsIObjectOutputStream.h"
 #include "nsIScriptSecurityManager.h"
-#include "nsIServiceManager.h"
 #include "nsIStandardURL.h"
-#include "nsIStreamListener.h"
 #include "nsNetUtil.h"
-#include "nsXPIDLString.h"
 #include "nsString.h"
-#include "prlog.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsChromeProtocolHandler,
-                              nsIProtocolHandler,
-                              nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(nsChromeProtocolHandler,
+                  nsIProtocolHandler,
+                  nsISupportsWeakReference)
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIProtocolHandler methods:

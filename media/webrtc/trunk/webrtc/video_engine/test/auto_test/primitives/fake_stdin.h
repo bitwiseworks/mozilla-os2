@@ -10,10 +10,11 @@
 #ifndef FAKE_STDIN_H_
 #define FAKE_STDIN_H_
 
-#include <cstdio>
+#include <stdio.h>
+
 #include <string>
 
-#include "gtest/gtest.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace webrtc {
 

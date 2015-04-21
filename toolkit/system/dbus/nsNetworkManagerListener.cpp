@@ -38,7 +38,7 @@ nsNetworkManagerListener::~nsNetworkManagerListener()
   }
 }
 
-NS_IMPL_ISUPPORTS1(nsNetworkManagerListener, nsINetworkLinkService)
+NS_IMPL_ISUPPORTS(nsNetworkManagerListener, nsINetworkLinkService)
 
 nsresult
 nsNetworkManagerListener::GetIsLinkUp(bool* aIsUp)
@@ -125,7 +125,7 @@ nsNetworkManagerListener::RegisterWithConnection(DBusConnection* connection)
     return;
   }
 
-  dbus_pending_call_set_notify(reply, NetworkStatusNotify, this, NULL);
+  dbus_pending_call_set_notify(reply, NetworkStatusNotify, this, nullptr);
   dbus_pending_call_unref(reply);
 }
 
@@ -136,7 +136,7 @@ nsNetworkManagerListener::NotifyNetworkStatusObservers() {
   if (!observerService) {
     return;
   }
-  const PRUnichar* status;
+  const char16_t* status;
   if (mNetworkManagerActive) {
     status = mLinkUp ? NS_LITERAL_STRING(NS_NETWORK_LINK_DATA_UP).get()
                      : NS_LITERAL_STRING(NS_NETWORK_LINK_DATA_DOWN).get();
@@ -172,7 +172,7 @@ void
 nsNetworkManagerListener::UpdateNetworkStatus(DBusMessage* msg)
 {
   int32_t result;
-  if (!dbus_message_get_args(msg, NULL, DBUS_TYPE_UINT32, &result,
+  if (!dbus_message_get_args(msg, nullptr, DBUS_TYPE_UINT32, &result,
                              DBUS_TYPE_INVALID)) {
     return;
   }

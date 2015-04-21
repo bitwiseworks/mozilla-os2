@@ -3,54 +3,22 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir = @srcdir@
-VPATH = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
 USE_RCS_MK := 1
 include $(topsrcdir)/config/makefiles/rcs.mk
 
-MODULE_NAME = telemetry
+DEFINES += -DMOZ_APP_VERSION='"$(MOZ_APP_VERSION)"'
 
-LIBXUL_LIBRARY = 1
-EXPORT_LIBRARY = 1
-IS_COMPONENT = 1
-FAIL_ON_WARNINGS = 1
-
-LIBRARY_NAME = telemetry
-MSVC_ENABLE_PGO := 1
-
-DISABLED_EXTRA_COMPONENTS = \
-  TelemetryPing.manifest \
-  $(NULL)
-
-EXTRA_JS_MODULES = \
-  TelemetryStopwatch.jsm \
-  ThirdPartyCookieProbe.jsm \
-  $(NULL)
-
-LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/build
-LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/threads
-
-EXTRA_DSO_LDOPTS += \
-  $(MOZ_COMPONENT_LIBS) \
-  $(MOZ_JS_LIBS) \
-  $(NULL)
-
-ifdef MOZILLA_OFFICIAL
-DEFINES += -DMOZILLA_OFFICIAL
-endif
-
-MOZ_HISTOGRAMS_VERSION ?= $(call getSourceRepo)/rev/$(firstword $(shell hg -R $(topsrcdir) parent --template="{node|short}\n" 2>/dev/null))
+MOZ_HISTOGRAMS_VERSION ?= $(call getSourceRepo)/rev/$(firstword $(shell hg -R $(topsrcdir) parent --template='{node|short}\n' 2>/dev/null))
 ifdef MOZ_HISTOGRAMS_VERSION
-DEFINES += -DHISTOGRAMS_FILE_VERSION="$(MOZ_HISTOGRAMS_VERSION)"
+DEFINES += -DHISTOGRAMS_FILE_VERSION='$(MOZ_HISTOGRAMS_VERSION)'
 endif
 
-include $(topsrcdir)/config/config.mk
+INSTALL_TARGETS += histoenums
+histoenums_FILES := TelemetryHistogramEnums.h
+histoenums_DEST = $(DIST)/include/mozilla
+histoenums_TARGET := export
+
 include $(topsrcdir)/config/rules.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 histograms_file := $(srcdir)/Histograms.json
 histogram_enum_file := TelemetryHistogramEnums.h
@@ -71,6 +39,4 @@ $(histogram_enum_file): $(histograms_file) $(enum_python_deps)
 $(histogram_data_file): $(histograms_file) $(data_python_deps)
 	$(PYTHON) $(srcdir)/gen-histogram-data.py $< > $@
 
-Telemetry.$(OBJ_SUFFIX): $(histogram_data_file)
-
-GARBAGE += $(histogram_data_file) $(histogram_enum_file)
+GARBAGE += $(histogram_enum_file)

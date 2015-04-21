@@ -6,9 +6,24 @@
 #ifndef GFX_GLXLIBRARY_H
 #define GFX_GLXLIBRARY_H
 
-#include "GLContext.h"
+#include "GLContextTypes.h"
 typedef realGLboolean GLboolean;
-#include <GL/glx.h>
+
+// stuff from glx.h
+#include "X11/Xlib.h"
+typedef struct __GLXcontextRec *GLXContext;
+typedef XID GLXPixmap;
+typedef XID GLXDrawable;
+/* GLX 1.3 and later */
+typedef struct __GLXFBConfigRec *GLXFBConfig;
+typedef XID GLXFBConfigID;
+typedef XID GLXContextID;
+typedef XID GLXWindow;
+typedef XID GLXPbuffer;
+// end of stuff from glx.h
+
+struct PRLibrary;
+class gfxASurface;
 
 namespace mozilla {
 namespace gl {
@@ -18,22 +33,15 @@ class GLXLibrary
 public:
     GLXLibrary() : mInitialized(false), mTriedInitializing(false),
                    mUseTextureFromPixmap(false), mDebug(false),
-                   mHasRobustness(false), mIsATI(false),
+                   mHasRobustness(false), mIsATI(false), mIsNVIDIA(false),
                    mClientIsMesa(false), mGLXMajorVersion(0),
-                   mGLXMinorVersion(0), mLibType(OPENGL_LIB),
+                   mGLXMinorVersion(0),
                    mOGLLibrary(nullptr) {}
 
     void xDestroyContext(Display* display, GLXContext context);
     Bool xMakeCurrent(Display* display, 
                       GLXDrawable drawable, 
                       GLXContext context);
-
-    enum LibraryType
-    {
-      OPENGL_LIB = 0,
-      MESA_LLVMPIPE_LIB = 1,
-      LIBS_MAX
-    };
 
     GLXContext xGetCurrentContext();
     static void* xGetProcAddress(const char *procName);
@@ -87,19 +95,19 @@ public:
                                      Bool direct,
                                      const int* attrib_list);
 
-    bool EnsureInitialized(LibraryType libType);
+    bool EnsureInitialized();
 
     GLXPixmap CreatePixmap(gfxASurface* aSurface);
-    void DestroyPixmap(GLXPixmap aPixmap);
-    void BindTexImage(GLXPixmap aPixmap);
-    void ReleaseTexImage(GLXPixmap aPixmap);
+    void DestroyPixmap(Display* aDisplay, GLXPixmap aPixmap);
+    void BindTexImage(Display* aDisplay, GLXPixmap aPixmap);
+    void ReleaseTexImage(Display* aDisplay, GLXPixmap aPixmap);
+    void UpdateTexImage(Display* aDisplay, GLXPixmap aPixmap);
 
     bool UseTextureFromPixmap() { return mUseTextureFromPixmap; }
     bool HasRobustness() { return mHasRobustness; }
     bool SupportsTextureFromPixmap(gfxASurface* aSurface);
     bool IsATI() { return mIsATI; }
     bool GLXVersionCheck(int aMajor, int aMinor);
-    static LibraryType SelectLibrary(const GLContext::ContextFlags& aFlags);
 
 private:
     
@@ -202,16 +210,15 @@ private:
     bool mDebug;
     bool mHasRobustness;
     bool mIsATI;
+    bool mIsNVIDIA;
     bool mClientIsMesa;
     int mGLXMajorVersion;
     int mGLXMinorVersion;
-    LibraryType mLibType;
     PRLibrary *mOGLLibrary;
 };
 
 // a global GLXLibrary instance
-extern GLXLibrary sGLXLibrary[GLXLibrary::LIBS_MAX];
-extern GLXLibrary& sDefGLXLib;
+extern GLXLibrary sGLXLibrary;
 
 } /* namespace gl */
 } /* namespace mozilla */

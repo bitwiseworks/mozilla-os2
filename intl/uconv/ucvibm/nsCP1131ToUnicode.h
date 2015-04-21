@@ -5,7 +5,10 @@
 #ifndef nsCP1131ToUnicode_h___
 #define nsCP1131ToUnicode_h___
 
-#include "nsISupports.h"
+#include "nsID.h"
+
+class nsISupports;
+
 /**
  * A character set converter from CP1131 to Unicode.
  */

@@ -12,7 +12,6 @@
 #include "nsIDOMHTMLDocument.h"
 #include "nsIDOMHTMLCollection.h"
 #include "nsIScriptElement.h"
-#include "jsapi.h"
 #include "nsTArray.h"
 
 #include "pldhash.h"
@@ -21,7 +20,6 @@
 
 #include "nsICommandManager.h"
 #include "mozilla/dom/HTMLSharedElement.h"
-#include "nsDOMEvent.h"
 
 class nsIEditor;
 class nsIParser;
@@ -31,6 +29,12 @@ class nsIDocShell;
 class nsICachingChannel;
 class nsIWyciwygChannel;
 class nsILoadGroup;
+
+namespace mozilla {
+namespace dom {
+class HTMLAllCollection;
+} // namespace dom
+} // namespace mozilla
 
 class nsHTMLDocument : public nsDocument,
                        public nsIHTMLDocument,
@@ -45,8 +49,7 @@ public:
   virtual nsresult Init() MOZ_OVERRIDE;
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(nsHTMLDocument,
-                                                         nsDocument)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsHTMLDocument, nsDocument)
 
   // nsIDocument
   virtual void Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup) MOZ_OVERRIDE;
@@ -69,12 +72,6 @@ public:
   virtual void BeginLoad() MOZ_OVERRIDE;
   virtual void EndLoad() MOZ_OVERRIDE;
 
-  virtual NS_HIDDEN_(void) Destroy() MOZ_OVERRIDE
-  {
-    mAll = nullptr;
-    nsDocument::Destroy();
-  }
-
   // nsIHTMLDocument
   virtual void SetCompatibilityMode(nsCompatibility aMode) MOZ_OVERRIDE;
 
@@ -88,6 +85,8 @@ public:
   virtual NS_HIDDEN_(nsContentList*) GetFormControls();
  
   // nsIDOMDocument interface
+  using nsDocument::CreateElement;
+  using nsDocument::CreateElementNS;
   NS_FORWARD_NSIDOMDOCUMENT(nsDocument::)
 
   // And explicitly import the things from nsDocument that we just shadowed
@@ -104,20 +103,9 @@ public:
   // nsIDOMHTMLDocument interface
   NS_DECL_NSIDOMHTMLDOCUMENT
 
-  void RouteEvent(nsDOMEvent& aEvent)
-  {
-    RouteEvent(&aEvent);
-  }
-
-  /**
-   * Returns the result of document.all[aID] which can either be a node
-   * or a nodelist depending on if there are multiple nodes with the same
-   * id.
-   */
-  nsISupports *GetDocumentAllResult(const nsAString& aID,
-                                    nsWrapperCache **aCache,
-                                    nsresult *aResult);
-  JSObject* GetAll(JSContext* aCx, mozilla::ErrorResult& aRv);
+  mozilla::dom::HTMLAllCollection* All();
+  void GetAll(JSContext* aCx, JS::MutableHandle<JSObject*> aRetval,
+              mozilla::ErrorResult& aRv);
 
   nsISupports* ResolveName(const nsAString& aName, nsWrapperCache **aCache);
 
@@ -173,21 +161,23 @@ public:
     return nsDocument::GetElementById(aElementId);
   }
 
-  virtual void DocSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const MOZ_OVERRIDE;
-  // DocSizeOfIncludingThis is inherited from nsIDocument.
+  virtual void DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const MOZ_OVERRIDE;
+  // DocAddSizeOfIncludingThis is inherited from nsIDocument.
 
   virtual bool WillIgnoreCharsetOverride() MOZ_OVERRIDE;
 
   // WebIDL API
-  virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+  virtual JSObject* WrapNode(JSContext* aCx)
     MOZ_OVERRIDE;
   void GetDomain(nsAString& aDomain, mozilla::ErrorResult& rv);
   void SetDomain(const nsAString& aDomain, mozilla::ErrorResult& rv);
   void GetCookie(nsAString& aCookie, mozilla::ErrorResult& rv);
   void SetCookie(const nsAString& aCookie, mozilla::ErrorResult& rv);
-  JSObject* NamedGetter(JSContext* cx, const nsAString& aName, bool& aFound,
-                        mozilla::ErrorResult& rv);
-  void GetSupportedNames(nsTArray<nsString>& aNames);
+  void NamedGetter(JSContext* cx, const nsAString& aName, bool& aFound,
+                   JS::MutableHandle<JSObject*> aRetval,
+                   mozilla::ErrorResult& rv);
+  bool NameIsEnumerable(const nsAString& aName);
+  void GetSupportedNames(unsigned, nsTArray<nsString>& aNames);
   nsGenericHTMLElement *GetBody();
   void SetBody(nsGenericHTMLElement* aBody, mozilla::ErrorResult& rv);
   mozilla::dom::HTMLSharedElement *GetHead() {
@@ -246,10 +236,9 @@ public:
   {
     // Deprecated
   }
-  already_AddRefed<nsISelection> GetSelection(mozilla::ErrorResult& rv);
+  mozilla::dom::Selection* GetSelection(mozilla::ErrorResult& aRv);
   // The XPCOM CaptureEvents works fine for us.
   // The XPCOM ReleaseEvents works fine for us.
-  // The XPCOM RouteEvent works fine for us.
   // We're picking up GetLocation from Document
   already_AddRefed<nsIDOMLocation> GetLocation() const {
     return nsIDocument::GetLocation();
@@ -302,7 +291,7 @@ protected:
   nsRefPtr<nsContentList> mForms;
   nsRefPtr<nsContentList> mFormControls;
 
-  JS::Heap<JSObject*> mAll;
+  nsRefPtr<mozilla::dom::HTMLAllCollection> mAll;
 
   /** # of forms in the document, synchronously set */
   int32_t mNumForms;
@@ -319,15 +308,10 @@ protected:
   static void TryCacheCharset(nsICachingChannel* aCachingChannel,
                                 int32_t& aCharsetSource,
                                 nsACString& aCharset);
-  // aParentDocument could be null.
   void TryParentCharset(nsIDocShell*  aDocShell,
-                        nsIDocument* aParentDocument,
                         int32_t& charsetSource, nsACString& aCharset);
-  static void TryWeakDocTypeDefault(int32_t& aCharsetSource,
-                                    nsACString& aCharset);
-  static void TryDefaultCharset(nsIMarkupDocumentViewer* aMarkupDV,
-                                int32_t& aCharsetSource,
-                                nsACString& aCharset);
+  void TryTLD(int32_t& aCharsetSource, nsACString& aCharset);
+  static void TryFallback(int32_t& aCharsetSource, nsACString& aCharset);
 
   // Override so we can munge the charset on our wyciwyg channel as needed.
   virtual void SetDocumentCharacterSet(const nsACString& aCharSetID) MOZ_OVERRIDE;
@@ -360,10 +344,6 @@ protected:
 
   uint32_t mContentEditableCount;
   EditingState mEditingState;
-
-  nsresult   DoClipboardSecurityCheck(bool aPaste);
-  static jsid        sCutCopyInternal_id;
-  static jsid        sPasteInternal_id;
 
   // When false, the .cookies property is completely disabled
   bool mDisableCookieAccess;

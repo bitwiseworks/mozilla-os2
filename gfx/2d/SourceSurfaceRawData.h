@@ -7,6 +7,7 @@
 #define MOZILLA_GFX_SOURCESURFACERAWDATA_H_
 
 #include "2D.h"
+#include "Tools.h"
 
 namespace mozilla {
 namespace gfx {
@@ -14,13 +15,14 @@ namespace gfx {
 class SourceSurfaceRawData : public DataSourceSurface
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceRawData)
   SourceSurfaceRawData() {}
   ~SourceSurfaceRawData() { if(mOwnData) delete [] mRawData; }
 
   virtual uint8_t *GetData() { return mRawData; }
   virtual int32_t Stride() { return mStride; }
 
-  virtual SurfaceType GetType() const { return SURFACE_DATA; }
+  virtual SurfaceType GetType() const { return SurfaceType::DATA; }
   virtual IntSize GetSize() const { return mSize; }
   virtual SurfaceFormat GetFormat() const { return mFormat; }
 
@@ -36,6 +38,32 @@ private:
   SurfaceFormat mFormat;
   IntSize mSize;
   bool mOwnData;
+};
+
+class SourceSurfaceAlignedRawData : public DataSourceSurface
+{
+public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceAlignedRawData)
+  SourceSurfaceAlignedRawData() {}
+
+  virtual uint8_t *GetData() { return mArray; }
+  virtual int32_t Stride() { return mStride; }
+
+  virtual SurfaceType GetType() const { return SurfaceType::DATA; }
+  virtual IntSize GetSize() const { return mSize; }
+  virtual SurfaceFormat GetFormat() const { return mFormat; }
+
+  bool Init(const IntSize &aSize,
+            SurfaceFormat aFormat);
+  bool InitWithStride(const IntSize &aSize,
+                      SurfaceFormat aFormat,
+                      int32_t aStride);
+
+private:
+  AlignedArray<uint8_t> mArray;
+  int32_t mStride;
+  SurfaceFormat mFormat;
+  IntSize mSize;
 };
 
 }

@@ -1793,8 +1793,25 @@ _cairo_image_surface_fixup_unbounded_boxes (cairo_image_surface_t *dst,
     struct _cairo_boxes_chunk *chunk;
     int i;
 
-    if (boxes->num_boxes < 1 && clip_region == NULL)
-	return _cairo_image_surface_fixup_unbounded (dst, extents, NULL);
+    // If we have no boxes then we need to clear the entire extents
+    // because we have nothing to draw.
+    if (boxes->num_boxes < 1 && clip_region == NULL) {
+        int x = extents->unbounded.x;
+        int y = extents->unbounded.y;
+        int width = extents->unbounded.width;
+        int height = extents->unbounded.height;
+
+        pixman_color_t color = { 0 };
+        pixman_box32_t box = { x, y, x + width, y + height };
+
+        if (! pixman_image_fill_boxes (PIXMAN_OP_CLEAR,
+                                       dst->pixman_image,
+                                       &color,
+                                       1, &box)) {
+            return _cairo_error (CAIRO_STATUS_NO_MEMORY);
+        }
+        return CAIRO_STATUS_SUCCESS;
+    }
 
     _cairo_boxes_init (&clear);
 
@@ -3941,16 +3958,6 @@ _composite_glyphs (void				*closure,
     cairo_status_t status;
     int i;
 
-    if (pattern != NULL) {
-	src = _pixman_image_for_pattern (pattern, FALSE, extents, &src_x, &src_y);
-	src_x -= dst_x;
-	src_y -= dst_y;
-    } else {
-	src = _pixman_white_image ();
-    }
-    if (unlikely (src == NULL))
-	return _cairo_error (CAIRO_STATUS_NO_MEMORY);
-
     memset (glyph_cache, 0, sizeof (glyph_cache));
     status = CAIRO_STATUS_SUCCESS;
 
@@ -4001,17 +4008,45 @@ _composite_glyphs (void				*closure,
 	    if (y2 > extents->y + extents->height)
 		y2 = extents->y + extents->height;
 
-	    pixman_image_composite32 (pixman_op,
-                                      src, glyph_surface->pixman_image, dst,
-                                      x1 + src_x,  y1 + src_y,
-                                      x1 - x, y1 - y,
-                                      x1 - dst_x, y1 - dst_y,
-                                      x2 - x1, y2 - y1);
+	    if (glyph_surface->format == CAIRO_FORMAT_A8 ||
+	        glyph_surface->format == CAIRO_FORMAT_A1 ||
+	        (glyph_surface->format == CAIRO_FORMAT_ARGB32 &&
+	         pixman_image_get_component_alpha (glyph_surface->pixman_image)))
+	    {
+		if (unlikely (src == NULL)) {
+		    if (pattern != NULL) {
+			src = _pixman_image_for_pattern (pattern, FALSE, extents, &src_x, &src_y);
+			src_x -= dst_x;
+			src_y -= dst_y;
+		    } else {
+			src = _pixman_white_image ();
+		    }
+		    if (unlikely (src == NULL)) {
+			status = _cairo_error (CAIRO_STATUS_NO_MEMORY);
+			break;
+		    }
+		}
+
+		pixman_image_composite32 (pixman_op,
+					  src, glyph_surface->pixman_image, dst,
+					  x1 + src_x, y1 + src_y,
+					  x1 - x, y1 - y,
+					  x1 - dst_x, y1 - dst_y,
+					  x2 - x1, y2 - y1);
+	    } else {
+		pixman_image_composite32 (pixman_op,
+					  glyph_surface->pixman_image, NULL, dst,
+					  x1 - x, y1 - y,
+					  0, 0,
+					  x1 - dst_x, y1 - dst_y,
+					  x2 - x1, y2 - y1);
+	    }
 	}
     }
     _cairo_scaled_font_thaw_cache (info->font);
 
-    pixman_image_unref (src);
+    if (src != NULL)
+	pixman_image_unref (src);
 
     return status;
 }

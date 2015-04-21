@@ -11,7 +11,7 @@
 /* Prototype specifies unmangled function name and disables unused warning */
 static nsresult
 PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint64_t* args)
-__asm__("PrepareAndDispatch") __attribute__((used));
+__asm__("PrepareAndDispatch") ATTRIBUTE_USED;
 
 static nsresult
 PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint64_t* args)
@@ -20,7 +20,7 @@ PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint64_t* args)
     const uint8_t NUM_ARG_REGS = 6-1;        // -1 for "this" pointer
 
     nsXPTCMiniVariant paramBuffer[PARAM_BUFFER_COUNT];
-    nsXPTCMiniVariant* dispatchParams = NULL;
+    nsXPTCMiniVariant* dispatchParams = nullptr;
     const nsXPTMethodInfo* info;
     uint8_t paramCount;
     uint8_t i;
@@ -81,7 +81,7 @@ PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint64_t* args)
             break;
         case nsXPTType::T_BOOL   : dp->val.b   = (bool)    *ap;    break;
         case nsXPTType::T_CHAR   : dp->val.c   = (char)      *ap;    break;
-        case nsXPTType::T_WCHAR  : dp->val.wc  = (PRUnichar) *ap;    break;
+        case nsXPTType::T_WCHAR  : dp->val.wc  = (char16_t) *ap;    break;
         default:
             NS_ERROR("bad type");
             break;

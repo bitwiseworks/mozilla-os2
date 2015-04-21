@@ -264,22 +264,18 @@ nsRect
 nsFloatManager::CalculateRegionFor(nsIFrame*       aFloat,
                                    const nsMargin& aMargin)
 {
-  nsRect region = aFloat->GetRect();
+  // We consider relatively positioned frames at their original position.
+  nsRect region(aFloat->GetNormalPosition(), aFloat->GetSize());
 
   // Float region includes its margin
   region.Inflate(aMargin);
-
-  // If the element is relatively positioned, then adjust x and y
-  // accordingly so that we consider relatively positioned frames
-  // at their original position.
-  const nsStyleDisplay* display = aFloat->StyleDisplay();
-  region -= aFloat->GetRelativeOffset(display);
 
   // Don't store rectangles with negative margin-box width or height in
   // the float manager; it can't deal with them.
   if (region.width < 0) {
     // Preserve the right margin-edge for left floats and the left
     // margin-edge for right floats
+    const nsStyleDisplay* display = aFloat->StyleDisplay();
     if (NS_STYLE_FLOAT_LEFT == display->mFloats) {
       region.x = region.XMost();
     }
@@ -335,9 +331,8 @@ nsFloatManager::RemoveTrailingRegions(nsIFrame* aFrameList)
   // floats given were at the end of our list, so we could just search
   // for the head of aFrameList.  (But we can't;
   // layout/reftests/bugs/421710-1.html crashes.)
-  nsTHashtable<nsPtrHashKey<nsIFrame> > frameSet;
+  nsTHashtable<nsPtrHashKey<nsIFrame> > frameSet(1);
 
-  frameSet.Init(1);
   for (nsIFrame* f = aFrameList; f; f = f->GetNextSibling()) {
     frameSet.PutEntry(f);
   }
@@ -421,7 +416,7 @@ nsFloatManager::GetLowestFloatTop() const
   return mFloats[mFloats.Length() - 1].mRect.y - mY;
 }
 
-#ifdef DEBUG
+#ifdef DEBUG_FRAME_DUMP
 void
 DebugListFloatManager(const nsFloatManager *aFloatManager)
 {
@@ -436,10 +431,10 @@ nsFloatManager::List(FILE* out) const
 
   for (uint32_t i = 0; i < mFloats.Length(); ++i) {
     const FloatInfo &fi = mFloats[i];
-    printf("Float %u: frame=%p rect={%d,%d,%d,%d} ymost={l:%d, r:%d}\n",
-           i, static_cast<void*>(fi.mFrame),
-           fi.mRect.x, fi.mRect.y, fi.mRect.width, fi.mRect.height,
-           fi.mLeftYMost, fi.mRightYMost);
+    fprintf_stderr(out, "Float %u: frame=%p rect={%d,%d,%d,%d} ymost={l:%d, r:%d}\n",
+                   i, static_cast<void*>(fi.mFrame),
+                   fi.mRect.x, fi.mRect.y, fi.mRect.width, fi.mRect.height,
+                   fi.mLeftYMost, fi.mRightYMost);
   }
   return NS_OK;
 }
@@ -460,7 +455,7 @@ nsFloatManager::ClearFloats(nscoord aY, uint8_t aBreakType,
 
   const FloatInfo &tail = mFloats[mFloats.Length() - 1];
   switch (aBreakType) {
-    case NS_STYLE_CLEAR_LEFT_AND_RIGHT:
+    case NS_STYLE_CLEAR_BOTH:
       bottom = std::max(bottom, tail.mLeftYMost);
       bottom = std::max(bottom, tail.mRightYMost);
       break;
@@ -484,10 +479,10 @@ bool
 nsFloatManager::ClearContinues(uint8_t aBreakType) const
 {
   return ((mPushedLeftFloatPastBreak || mSplitLeftFloatAcrossBreak) &&
-          (aBreakType == NS_STYLE_CLEAR_LEFT_AND_RIGHT ||
+          (aBreakType == NS_STYLE_CLEAR_BOTH ||
            aBreakType == NS_STYLE_CLEAR_LEFT)) ||
          ((mPushedRightFloatPastBreak || mSplitRightFloatAcrossBreak) &&
-          (aBreakType == NS_STYLE_CLEAR_LEFT_AND_RIGHT ||
+          (aBreakType == NS_STYLE_CLEAR_BOTH ||
            aBreakType == NS_STYLE_CLEAR_RIGHT));
 }
 

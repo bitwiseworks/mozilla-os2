@@ -60,7 +60,7 @@ public:
   ULONG  GetMsg()    { return mMsg; };
   MPARAM GetWParam() { return mWParam; };
   MPARAM GetLParam() { return mLParam; };
-  bool InUse()     { return (mWnd!=NULL); };
+  bool InUse()     { return (mWnd!=nullptr); };
   
   NS_DECL_NSIRUNNABLE
 
@@ -79,7 +79,7 @@ PluginWindowEvent::PluginWindowEvent()
 
 void PluginWindowEvent::Clear()
 {
-  mWnd    = NULL;
+  mWnd    = nullptr;
   mMsg    = 0;
   mWParam = 0;
   mLParam = 0;
@@ -88,8 +88,8 @@ void PluginWindowEvent::Clear()
 void PluginWindowEvent::Init(const PluginWindowWeakRef &ref, HWND aWnd,
                              ULONG aMsg, MPARAM mp1, MPARAM mp2)
 {
-  NS_ASSERTION(aWnd != NULL, "invalid plugin event value");
-  NS_ASSERTION(mWnd == NULL, "event already in use");
+  NS_ASSERTION(aWnd != nullptr, "invalid plugin event value");
+  NS_ASSERTION(mWnd == nullptr, "event already in use");
   mPluginWindowRef = ref;
   mWnd    = aWnd;
   mMsg    = aMsg;
@@ -352,7 +352,7 @@ nsPluginNativeWindowOS2::nsPluginNativeWindowOS2() : nsPluginNativeWindow()
   width = 0; 
   height = 0; 
 
-  mPluginWinProc = NULL;
+  mPluginWinProc = nullptr;
   mPluginType = nsPluginType_Unknown;
 
   // once the atom has been added, it won't be deleted

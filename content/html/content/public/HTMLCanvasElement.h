@@ -12,10 +12,7 @@
 #include "nsGkAtoms.h"
 #include "nsSize.h"
 #include "nsError.h"
-#include "nsNodeInfoManager.h"
 
-#include "nsICanvasElementExternal.h"
-#include "nsLayoutUtils.h"
 #include "mozilla/gfx/Rect.h"
 
 class nsICanvasRenderingContextInternal;
@@ -28,13 +25,17 @@ namespace layers {
 class CanvasLayer;
 class LayerManager;
 }
+namespace gfx {
+class SourceSurface;
+}
 
 namespace dom {
 
+class FileCallback;
 class HTMLCanvasPrintState;
+class PrintCallback;
 
 class HTMLCanvasElement MOZ_FINAL : public nsGenericHTMLElement,
-                                    public nsICanvasElementExternal,
                                     public nsIDOMHTMLCanvasElement
 {
   enum {
@@ -46,22 +47,13 @@ class HTMLCanvasElement MOZ_FINAL : public nsGenericHTMLElement,
   typedef layers::LayerManager LayerManager;
 
 public:
-  HTMLCanvasElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  HTMLCanvasElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
   virtual ~HTMLCanvasElement();
 
   NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLCanvasElement, canvas)
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLCanvasElement
   NS_DECL_NSIDOMHTMLCANVASELEMENT
@@ -92,19 +84,16 @@ public:
              JS::Handle<JS::Value> aContextOptions,
              ErrorResult& aRv);
   void ToDataURL(JSContext* aCx, const nsAString& aType,
-                 const Optional<JS::Handle<JS::Value> >& aParams,
+                 JS::Handle<JS::Value> aParams,
                  nsAString& aDataURL, ErrorResult& aRv)
   {
-    JS::Value params = aParams.WasPassed()
-                     ? aParams.Value()
-                     : JS::UndefinedValue();
-    aRv = ToDataURL(aType, params, aCx, aDataURL);
+    aRv = ToDataURL(aType, aParams, aCx, aDataURL);
   }
-  void ToBlob(nsIFileCallback* aCallback, const nsAString& aType,
-              ErrorResult& aRv)
-  {
-    aRv = ToBlob(aCallback, aType);
-  }
+  void ToBlob(JSContext* aCx,
+              FileCallback& aCallback,
+              const nsAString& aType,
+              JS::Handle<JS::Value> aParams,
+              ErrorResult& aRv);
 
   bool MozOpaque() const
   {
@@ -129,8 +118,8 @@ public:
   {
     aRv = MozFetchAsStream(aCallback, aType);
   }
-  nsIPrintCallback* GetMozPrintCallback() const;
-  // Using XPCOM SetMozPrintCallback.
+  PrintCallback* GetMozPrintCallback() const;
+  void SetMozPrintCallback(PrintCallback* aCallback);
 
   /**
    * Get the size in pixels of this canvas element
@@ -171,13 +160,7 @@ public:
    */
   bool GetIsOpaque();
 
-  /*
-   * nsICanvasElementExternal -- for use outside of content/layout
-   */
-  NS_IMETHOD_(nsIntSize) GetSizeExternal() MOZ_OVERRIDE;
-  NS_IMETHOD RenderContextsExternal(gfxContext *aContext,
-                                    gfxPattern::GraphicsFilter aFilter,
-                                    uint32_t aFlags = RenderFlagPremultAlpha) MOZ_OVERRIDE;
+  virtual TemporaryRef<gfx::SourceSurface> GetSurfaceSnapshot(bool* aPremultAlpha = nullptr);
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
                                 nsIAtom* aAttribute,
@@ -195,6 +178,10 @@ public:
   virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                            nsIAtom* aPrefix, const nsAString& aValue,
                            bool aNotify) MOZ_OVERRIDE;
+
+  virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                             bool aNotify) MOZ_OVERRIDE;
+
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
   nsresult CopyInnerTo(mozilla::dom::Element* aDest);
 
@@ -218,19 +205,20 @@ public:
 
   nsresult GetContext(const nsAString& aContextId, nsISupports** aContext);
 
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
-
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
   nsIntSize GetWidthHeight();
 
   nsresult UpdateContext(JSContext* aCx, JS::Handle<JS::Value> options);
-  nsresult ExtractData(const nsAString& aType,
+  nsresult ParseParams(JSContext* aCx,
+                       const nsAString& aType,
+                       const JS::Value& aEncoderOptions,
+                       nsAString& aParams,
+                       bool* usingCustomParseOptions);
+  nsresult ExtractData(nsAString& aType,
                        const nsAString& aOptions,
-                       nsIInputStream** aStream,
-                       bool& aFellBackToPNG);
+                       nsIInputStream** aStream);
   nsresult ToDataURLImpl(JSContext* aCx,
                          const nsAString& aMimeType,
                          const JS::Value& aEncoderOptions,
@@ -244,9 +232,9 @@ protected:
 
   nsString mCurrentContextId;
   nsRefPtr<HTMLCanvasElement> mOriginalCanvas;
-  nsCOMPtr<nsIPrintCallback> mPrintCallback;
+  nsRefPtr<PrintCallback> mPrintCallback;
   nsCOMPtr<nsICanvasRenderingContextInternal> mCurrentContext;
-  nsCOMPtr<HTMLCanvasPrintState> mPrintState;
+  nsRefPtr<HTMLCanvasPrintState> mPrintState;
 
 public:
   // Record whether this canvas should be write-only or not.
@@ -264,6 +252,41 @@ public:
   void ResetPrintCallback();
 
   HTMLCanvasElement* GetOriginalCanvas();
+};
+
+class HTMLCanvasPrintState MOZ_FINAL : public nsWrapperCache
+{
+public:
+  HTMLCanvasPrintState(HTMLCanvasElement* aCanvas,
+                       nsICanvasRenderingContextInternal* aContext,
+                       nsITimerCallback* aCallback);
+
+  nsISupports* Context() const;
+
+  void Done();
+
+  void NotifyDone();
+
+  bool mIsDone;
+
+  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(HTMLCanvasPrintState)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(HTMLCanvasPrintState)
+
+  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
+
+  HTMLCanvasElement* GetParentObject()
+  {
+    return mCanvas;
+  }
+
+private:
+  ~HTMLCanvasPrintState();
+  bool mPendingNotify;
+
+protected:
+  nsRefPtr<HTMLCanvasElement> mCanvas;
+  nsCOMPtr<nsICanvasRenderingContextInternal> mContext;
+  nsCOMPtr<nsITimerCallback> mCallback;
 };
 
 } // namespace dom

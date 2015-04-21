@@ -10,7 +10,10 @@ SpecialPowers.addPermission("sms", true, document);
 
 const SENDER = "15555215554"; // the emulator's number
 
-let sms = window.navigator.mozSms;
+let manager = window.navigator.mozMobileMessage;
+ok(manager instanceof MozMobileMessageManager,
+   "manager is instance of " + manager.constructor);
+
 const SHORT_BODY = "Hello SMS world!";
 const LONG_BODY = "Let me not to the marriage of true minds\n"
                 + "Admit impediments. Love is not love\n"
@@ -40,9 +43,17 @@ function checkMessage(message, delivery, body) {
   ok(message.receiver, "message.receiver");
   is(message.body, body, "message.body");
   is(message.messageClass, "normal", "message.messageClass");
-  ok(message.timestamp instanceof Date,
-     "message.timestamp is instanceof " + message.timestamp.constructor);
   is(message.read, true, "message.read");
+
+  // TODO: bug 788928 - add test cases for deliverysuccess event.
+  is(message.deliveryTimestamp, 0, "deliveryTimestamp is 0");
+
+  // Test message.sentTimestamp.
+  if (message.delivery == "sending") {
+    ok(message.sentTimestamp == 0, "message.sentTimestamp should be 0");
+  } else if (message.delivery == "sent") {
+    ok(message.sentTimestamp != 0, "message.sentTimestamp shouldn't be 0");
+  }
 }
 
 function doSendMessageAndCheckSuccess(receivers, body, callback) {
@@ -59,8 +70,8 @@ function doSendMessageAndCheckSuccess(receivers, body, callback) {
       }
     }
 
-    sms.removeEventListener("sending", onSmsSending);
-    sms.removeEventListener("sent", onSmsSent);
+    manager.removeEventListener("sending", onSmsSending);
+    manager.removeEventListener("sent", onSmsSent);
 
     log("Done!");
     window.setTimeout(callback, 0);
@@ -85,8 +96,7 @@ function doSendMessageAndCheckSuccess(receivers, body, callback) {
     is(message.id, saved.id, "message.id");
     is(message.receiver, saved.receiver, "message.receiver");
     is(message.body, saved.body, "message.body");
-    is(message.timestamp.getTime(), saved.timestamp.getTime(),
-       "the messages got from onsent event and request result must be the same");
+    is(message.timestamp, saved.timestamp, "message.timestamp");
 
     opt[mark] = true;
 
@@ -104,7 +114,7 @@ function doSendMessageAndCheckSuccess(receivers, body, callback) {
   }
 
   function onSmsSending(event) {
-    log("SmsManager.onsending event received.");
+    log("onsending event received.");
 
     // Bug 838542: following check throws an exception and fails this case.
     // ok(event instanceof MozSmsEvent,
@@ -113,8 +123,8 @@ function doSendMessageAndCheckSuccess(receivers, body, callback) {
 
     let message = event.message;
     checkMessage(message, "sending", body);
-    // SMSC timestamp is in seconds.
-    ok(Math.floor(message.timestamp.getTime() / 1000) >= Math.floor(now / 1000),
+    // timestamp is in seconds.
+    ok(Math.floor(message.timestamp / 1000) >= Math.floor(now / 1000),
        "sent timestamp is valid");
 
     let receiver = message.receiver;
@@ -135,7 +145,7 @@ function doSendMessageAndCheckSuccess(receivers, body, callback) {
   }
 
   function onSmsSent(event) {
-    log("SmsManager.onsent event received.");
+    log("onsent event received.");
 
     // Bug 838542: following check throws an exception and fails this case.
     // ok(event instanceof MozSmsEvent,
@@ -145,10 +155,10 @@ function doSendMessageAndCheckSuccess(receivers, body, callback) {
     checkSentMessage(event.message, "onSentCalled");
   }
 
-  sms.addEventListener("sending", onSmsSending);
-  sms.addEventListener("sent", onSmsSent);
+  manager.addEventListener("sending", onSmsSending);
+  manager.addEventListener("sent", onSmsSent);
 
-  let result = sms.send(receivers, body);
+  let result = manager.send(receivers, body);
   is(Array.isArray(result), Array.isArray(receivers),
      "send() returns an array of requests if receivers is an array");
   if (Array.isArray(receivers)) {
@@ -178,7 +188,7 @@ function testSendMultipartMessage() {
 
 function testSendMessageToMultipleRecipients() {
   log("Testing sending message to multiple receivers:");
-  // TODO: bug 788928 - add test cases for nsIDOMSmsManager.ondelivered event
+  // TODO: bug 788928 - add test cases for ondelivered event.
   doSendMessageAndCheckSuccess(["1", "2"], SHORT_BODY, cleanUp);
 }
 

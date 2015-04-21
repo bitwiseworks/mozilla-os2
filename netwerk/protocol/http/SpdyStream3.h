@@ -6,10 +6,15 @@
 #ifndef mozilla_net_SpdyStream3_h
 #define mozilla_net_SpdyStream3_h
 
-#include "mozilla/Attributes.h"
 #include "nsAHttpTransaction.h"
+#include "zlib.h"
+
+class nsISocketTransport;
 
 namespace mozilla { namespace net {
+
+class SpdySession3;
+class SpdyPushedStream3;
 
 class SpdyStream3 : public nsAHttpSegmentReader
                   , public nsAHttpSegmentWriter
@@ -61,16 +66,13 @@ public:
   void UpdateTransportSendEvents(uint32_t count);
   void UpdateTransportReadEvents(uint32_t count);
 
-  // The zlib header compression dictionary defined by SPDY,
-  // and hooks to the mozilla allocator for zlib to use.
+  // The zlib header compression dictionary defined by SPDY.
   static const unsigned char kDictionary[1423];
-  static void *zlib_allocator(void *, uInt, uInt);
-  static void zlib_destructor(void *, void *);
 
   nsresult Uncompress(z_stream *, char *, uint32_t);
   nsresult ConvertHeaders(nsACString &);
 
-  void UpdateRemoteWindow(int32_t delta) { mRemoteWindow += delta; }
+  void UpdateRemoteWindow(int32_t delta);
   int64_t RemoteWindow() { return mRemoteWindow; }
 
   void DecrementLocalWindow(uint32_t delta) {

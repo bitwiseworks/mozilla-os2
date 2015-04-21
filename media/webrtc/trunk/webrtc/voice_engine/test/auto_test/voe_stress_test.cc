@@ -13,23 +13,27 @@
 //       How much trace should we have enabled?
 //       API error counter, to print info and return -1 if any error.
 
-#include <stdlib.h>
+#include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <cassert>
 #if defined(_WIN32)
 #include <conio.h>
 #endif
 
 #include "webrtc/voice_engine/test/auto_test/voe_stress_test.h"
-#include "webrtc/voice_engine/test/auto_test/voe_standard_test.h"
 
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/system_wrappers/interface/sleep.h"
 #include "webrtc/system_wrappers/interface/thread_wrapper.h"
+#include "webrtc/test/channel_transport/include/channel_transport.h"
+#include "webrtc/voice_engine/test/auto_test/voe_standard_test.h"
+#include "webrtc/voice_engine/test/auto_test/voe_test_defines.h"
 #include "webrtc/voice_engine/voice_engine_defines.h"  // defines build macros
 
 using namespace webrtc;
+using namespace test;
 
 namespace voetest {
 
@@ -47,13 +51,6 @@ namespace voetest {
 // Sleep a bit instead if pause not supported
 #define PAUSE_OR_SLEEP(x) SleepMs(x);
 #endif
-
-const char* VoEStressTest::_key = "====YUtFWRAAAAADBtIHgAAAAAEAAAAcAAAAAQBHU0ds"
-  "b2JhbCBJUCBTb3VuZAAC\nAAAAIwAAAExpY2Vuc2VkIHRvIE5vcnRlbCBOZXR3cm9rcwAAAAA"
-  "xAAAAZxZ7/u0M\niFYyTwSwko5Uutf7mh8S0O4rYZYTFidbzQeuGonuL17F/2oD/2pfDp3jL4"
-  "Rf3z/A\nnlJsEJgEtASkDNFuwLILjGY0pzjjAYQp3pCl6z6k2MtE06AirdjGLYCjENpq/opX"
-  "\nOrs3sIuwdYK5va/aFcsjBDmlsGCUM48RDYG9s23bIHYafXUC4ofOaubbZPWiPTmL\nEVJ8WH"
-  "4F9pgNjALc14oJXfON7r/3\n=EsLx";
 
 int VoEStressTest::DoTest() {
   int test(-1);
@@ -82,8 +79,8 @@ int VoEStressTest::DoTest() {
         // Should not be possible
         printf("Invalid selection! (Test code error)\n");
         assert(false);
-    } // switch
-  } // while
+    }  // switch
+  }  // while
 
   return 0;
 }
@@ -122,6 +119,7 @@ int VoEStressTest::StartStopTest() {
 
   // Get sub-API pointers
   VoEBase* base = _mgr.BasePtr();
+  VoENetwork* voe_network = _mgr.NetworkPtr();
 
   // Set trace
   //     VALIDATE_STRESS(base->SetTraceFileName(
@@ -147,9 +145,12 @@ int VoEStressTest::StartStopTest() {
   printf("Test will take approximately %d minutes. \n",
          numberOfLoops * loopSleep / 1000 / 60 + 1);
 
+  scoped_ptr<VoiceChannelTransport> voice_channel_transport(
+      new VoiceChannelTransport(voe_network, 0));
+
   for (i = 0; i < numberOfLoops; ++i) {
-    VALIDATE_STRESS(base->SetLocalReceiver(0, 4800));
-    VALIDATE_STRESS(base->SetSendDestination(0, 4800, "127.0.0.1"));
+    voice_channel_transport->SetSendDestination("127.0.0.1", 4800);
+    voice_channel_transport->SetLocalReceiver(4800);
     VALIDATE_STRESS(base->StartReceive(0));
     VALIDATE_STRESS(base->StartPlayout(0));
     VALIDATE_STRESS(base->StartSend(0));
@@ -162,8 +163,9 @@ int VoEStressTest::StartStopTest() {
   }
   ANL();
 
-  VALIDATE_STRESS(base->SetLocalReceiver(0, 4800));
-  VALIDATE_STRESS(base->SetSendDestination(0, 4800, "127.0.0.1"));
+  VALIDATE_STRESS(voice_channel_transport->SetSendDestination("127.0.0.1",
+                                                              4800));
+  VALIDATE_STRESS(voice_channel_transport->SetLocalReceiver(4800));
   VALIDATE_STRESS(base->StartReceive(0));
   VALIDATE_STRESS(base->StartPlayout(0));
   VALIDATE_STRESS(base->StartSend(0));
@@ -224,7 +226,7 @@ int VoEStressTest::CreateDeleteChannelsTest() {
   //       Make sure audio is OK after test has finished.
 
   // Set up, start with maxChannels/2 channels
-  const int maxChannels = base->MaxNumOfChannels();
+  const int maxChannels = 100;
   VALIDATE_STRESS(maxChannels < 1); // Should always have at least one channel
   bool* channelState = new bool[maxChannels];
   memset(channelState, 0, maxChannels * sizeof(bool));
@@ -407,4 +409,4 @@ bool VoEStressTest::ProcessExtraApi() {
   return true;
 }
 
-} //  namespace voetest
+}  // namespace voetest

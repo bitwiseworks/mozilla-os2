@@ -26,8 +26,12 @@ nsTableColGroupFrame::GetColType() const
 
 void nsTableColGroupFrame::SetColType(nsTableColGroupType aType) 
 {
+  NS_ASSERTION(GetColType() == eColGroupContent,
+               "should only call nsTableColGroupFrame::SetColType with aType "
+               "!= eColGroupContent once");
   uint32_t type = aType - eColGroupContent;
-  mState |= (type << COL_GROUP_TYPE_OFFSET);
+  RemoveStateBits(COL_GROUP_TYPE_BITS);
+  AddStateBits(nsFrameState(type << COL_GROUP_TYPE_OFFSET));
 }
 
 void nsTableColGroupFrame::ResetColIndices(nsIFrame*       aFirstColGroup,
@@ -127,7 +131,7 @@ nsTableColGroupFrame::GetLastRealColGroup(nsTableFrame* aTableFrame)
 }
 
 // don't set mColCount here, it is done in AddColsToTable
-NS_IMETHODIMP
+nsresult
 nsTableColGroupFrame::SetInitialChildList(ChildListID     aListID,
                                           nsFrameList&    aChildList)
 {
@@ -173,7 +177,7 @@ nsTableColGroupFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
   }
 }
 
-NS_IMETHODIMP
+nsresult
 nsTableColGroupFrame::AppendFrames(ChildListID     aListID,
                                    nsFrameList&    aFrameList)
 {
@@ -197,7 +201,7 @@ nsTableColGroupFrame::AppendFrames(ChildListID     aListID,
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsTableColGroupFrame::InsertFrames(ChildListID     aListID,
                                    nsIFrame*       aPrevFrame,
                                    nsFrameList&    aFrameList)
@@ -225,7 +229,7 @@ nsTableColGroupFrame::InsertFrames(ChildListID     aListID,
     col = nextCol;
   }
 
-  NS_ASSERTION(!aPrevFrame || aPrevFrame == aPrevFrame->GetLastContinuation(),
+  NS_ASSERTION(!aPrevFrame || aPrevFrame == aPrevFrame->LastContinuation(),
                "Prev frame should be last in continuation chain");
   NS_ASSERTION(!aPrevFrame || !GetNextColumn(aPrevFrame) ||
                GetNextColumn(aPrevFrame)->GetColType() != eColAnonymousCol,
@@ -281,7 +285,7 @@ nsTableColGroupFrame::RemoveChild(nsTableColFrame& aChild,
                                                NS_FRAME_HAS_DIRTY_CHILDREN);
 }
 
-NS_IMETHODIMP
+nsresult
 nsTableColGroupFrame::RemoveFrame(ChildListID     aListID,
                                   nsIFrame*       aOldFrame)
 {
@@ -337,19 +341,19 @@ nsTableColGroupFrame::RemoveFrame(ChildListID     aListID,
 }
 
 int
-nsTableColGroupFrame::GetSkipSides() const
+nsTableColGroupFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) const
 {
   int skip = 0;
   if (nullptr != GetPrevInFlow()) {
-    skip |= 1 << NS_SIDE_TOP;
+    skip |= 1 << LOGICAL_SIDE_B_START;
   }
   if (nullptr != GetNextInFlow()) {
-    skip |= 1 << NS_SIDE_BOTTOM;
+    skip |= 1 << LOGICAL_SIDE_B_END;
   }
   return skip;
 }
 
-NS_METHOD nsTableColGroupFrame::Reflow(nsPresContext*          aPresContext,
+nsresult nsTableColGroupFrame::Reflow(nsPresContext*          aPresContext,
                                        nsHTMLReflowMetrics&     aDesiredSize,
                                        const nsHTMLReflowState& aReflowState,
                                        nsReflowStatus&          aStatus)
@@ -371,17 +375,17 @@ NS_METHOD nsTableColGroupFrame::Reflow(nsPresContext*          aPresContext,
   for (nsIFrame *kidFrame = mFrames.FirstChild(); kidFrame;
        kidFrame = kidFrame->GetNextSibling()) {
     // Give the child frame a chance to reflow, even though we know it'll have 0 size
-    nsHTMLReflowMetrics kidSize;
+    nsHTMLReflowMetrics kidSize(aReflowState);
     nsHTMLReflowState kidReflowState(aPresContext, aReflowState, kidFrame,
                                      nsSize(0,0));
 
     nsReflowStatus status;
     ReflowChild(kidFrame, aPresContext, kidSize, kidReflowState, 0, 0, 0, status);
-    FinishReflowChild(kidFrame, aPresContext, nullptr, kidSize, 0, 0, 0);
+    FinishReflowChild(kidFrame, aPresContext, kidSize, nullptr, 0, 0, 0);
   }
 
-  aDesiredSize.width=0;
-  aDesiredSize.height=0;
+  aDesiredSize.Width() = 0;
+  aDesiredSize.Height() = 0;
   aStatus = NS_FRAME_COMPLETE;
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
   return rv;
@@ -480,8 +484,8 @@ nsTableColGroupFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDis
   GetParent()->InvalidateFrameWithRect(aRect + GetPosition(), aDisplayItemKey);
 }
 
-#ifdef DEBUG
-NS_IMETHODIMP
+#ifdef DEBUG_FRAME_DUMP
+nsresult
 nsTableColGroupFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("TableColGroup"), aResult);

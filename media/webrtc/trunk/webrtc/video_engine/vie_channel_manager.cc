@@ -8,28 +8,27 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "video_engine/vie_channel_manager.h"
+#include "webrtc/video_engine/vie_channel_manager.h"
 
-#include "engine_configurations.h"  // NOLINT
-#include "modules/rtp_rtcp/interface/rtp_rtcp.h"
-#include "modules/utility/interface/process_thread.h"
-#include "system_wrappers/interface/critical_section_wrapper.h"
-#include "system_wrappers/interface/map_wrapper.h"
-#include "system_wrappers/interface/trace.h"
-#include "video_engine/call_stats.h"
-#include "video_engine/encoder_state_feedback.h"
-#include "video_engine/vie_channel.h"
-#include "video_engine/vie_defines.h"
-#include "video_engine/vie_encoder.h"
-#include "video_engine/vie_remb.h"
-#include "voice_engine/include/voe_video_sync.h"
+#include "webrtc/engine_configurations.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
+#include "webrtc/modules/utility/interface/process_thread.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/trace.h"
+#include "webrtc/video_engine/call_stats.h"
+#include "webrtc/video_engine/encoder_state_feedback.h"
+#include "webrtc/video_engine/vie_channel.h"
+#include "webrtc/video_engine/vie_defines.h"
+#include "webrtc/video_engine/vie_encoder.h"
+#include "webrtc/video_engine/vie_remb.h"
+#include "webrtc/voice_engine/include/voe_video_sync.h"
 
 namespace webrtc {
 
 ViEChannelManager::ViEChannelManager(
     int engine_id,
     int number_of_cores,
-    const OverUseDetectorOptions& options)
+    const Config& config)
     : channel_id_critsect_(CriticalSectionWrapper::CreateCriticalSection()),
       engine_id_(engine_id),
       number_of_cores_(number_of_cores),
@@ -38,8 +37,9 @@ ViEChannelManager::ViEChannelManager(
       voice_sync_interface_(NULL),
       voice_engine_(NULL),
       module_process_thread_(NULL),
-      over_use_detector_options_(options),
-      bwe_mode_(RemoteBitrateEstimator::kSingleStreamEstimation) {
+      config_(config),
+      load_manager_(NULL)
+{
   WEBRTC_TRACE(kTraceMemory, kTraceVideo, ViEId(engine_id),
                "ViEChannelManager::ViEChannelManager(engine_id: %d)",
                engine_id);
@@ -81,6 +81,15 @@ void ViEChannelManager::SetModuleProcessThread(
   module_process_thread_ = module_process_thread;
 }
 
+void ViEChannelManager::SetLoadManager(
+    CPULoadStateCallbackInvoker* load_manager) {
+  load_manager_ = load_manager;
+  for (EncoderMap::const_iterator comp_it = vie_encoder_map_.begin();
+       comp_it != vie_encoder_map_.end(); ++comp_it) {
+    comp_it->second->SetLoadManager(load_manager);
+  }
+}
+
 int ViEChannelManager::CreateChannel(int* channel_id) {
   CriticalSectionScoped cs(channel_id_critsect_);
 
@@ -92,11 +101,11 @@ int ViEChannelManager::CreateChannel(int* channel_id) {
 
   // Create a new channel group and add this channel.
   ChannelGroup* group = new ChannelGroup(module_process_thread_,
-                                         over_use_detector_options_,
-                                         bwe_mode_);
+                                         config_);
   BitrateController* bitrate_controller = group->GetBitrateController();
   ViEEncoder* vie_encoder = new ViEEncoder(engine_id_, new_channel_id,
                                            number_of_cores_,
+                                           config_,
                                            *module_process_thread_,
                                            bitrate_controller);
 
@@ -165,6 +174,7 @@ int ViEChannelManager::CreateChannel(int* channel_id,
   if (sender) {
     // We need to create a new ViEEncoder.
     vie_encoder = new ViEEncoder(engine_id_, new_channel_id, number_of_cores_,
+                                 config_,
                                  *module_process_thread_,
                                  bitrate_controller);
     if (!(vie_encoder->Init() &&
@@ -241,8 +251,7 @@ int ViEChannelManager::DeleteChannel(int channel_id) {
     group = FindGroup(channel_id);
     group->GetCallStats()->DeregisterStatsObserver(
         vie_channel->GetStatsObserver());
-    group->SetChannelRembStatus(channel_id, false, false, vie_channel,
-                                vie_encoder);
+    group->SetChannelRembStatus(channel_id, false, false, vie_channel);
 
     // Remove the feedback if we're owning the encoder.
     if (vie_encoder->channel_id() == channel_id) {
@@ -364,37 +373,43 @@ bool ViEChannelManager::SetRembStatus(int channel_id, bool sender,
   }
   ViEChannel* channel = ViEChannelPtr(channel_id);
   assert(channel);
-  ViEEncoder* encoder = ViEEncoderPtr(channel_id);
-  assert(encoder);
 
-  return group->SetChannelRembStatus(channel_id, sender, receiver, channel,
-                                     encoder);
+  return group->SetChannelRembStatus(channel_id, sender, receiver, channel);
 }
 
-bool ViEChannelManager::SetBandwidthEstimationMode(
-    BandwidthEstimationMode mode) {
+bool ViEChannelManager::SetReceiveAbsoluteSendTimeStatus(int channel_id,
+                                                         bool enable,
+                                                         int id) {
   CriticalSectionScoped cs(channel_id_critsect_);
-  if (channel_groups_.size() > 0) {
+  ViEChannel* channel = ViEChannelPtr(channel_id);
+  if (!channel) {
     return false;
   }
-  switch (mode) {
-    case kViEMultiStreamEstimation:
-      bwe_mode_ = RemoteBitrateEstimator::kMultiStreamEstimation;
-      break;
-    case kViESingleStreamEstimation:
-      bwe_mode_ = RemoteBitrateEstimator::kSingleStreamEstimation;
-      break;
-    default:
-      assert(false);
-      return false;
+  if (channel->SetReceiveAbsoluteSendTimeStatus(enable, id) != 0) {
+    return false;
   }
+
+  // Enable absolute send time extension on the group if at least one of the
+  // channels use it.
+  ChannelGroup* group = FindGroup(channel_id);
+  assert(group);
+  bool any_enabled = false;
+  for (ChannelMap::const_iterator c_it = channel_map_.begin();
+       c_it != channel_map_.end(); ++c_it) {
+    if (group->HasChannel(c_it->first) &&
+        c_it->second->GetReceiveAbsoluteSendTimeStatus()) {
+      any_enabled = true;
+      break;
+    }
+  }
+  group->SetReceiveAbsoluteSendTimeStatus(any_enabled);
   return true;
 }
 
 void ViEChannelManager::UpdateSsrcs(int channel_id,
                                     const std::list<unsigned int>& ssrcs) {
   CriticalSectionScoped cs(channel_id_critsect_);
-  ChannelGroup* channel_group =  FindGroup(channel_id);
+  ChannelGroup* channel_group = FindGroup(channel_id);
   if (channel_group == NULL) {
     return;
   }
@@ -403,6 +418,9 @@ void ViEChannelManager::UpdateSsrcs(int channel_id,
 
   EncoderStateFeedback* encoder_state_feedback =
       channel_group->GetEncoderStateFeedback();
+  // Remove a possible previous setting for this encoder before adding the new
+  // setting.
+  encoder_state_feedback->RemoveEncoder(encoder);
   for (std::list<unsigned int>::const_iterator it = ssrcs.begin();
        it != ssrcs.end(); ++it) {
     encoder_state_feedback->AddEncoder(*it, encoder);
@@ -424,6 +442,7 @@ bool ViEChannelManager::CreateChannelObject(
 
   ViEChannel* vie_channel = new ViEChannel(channel_id, engine_id_,
                                            number_of_cores_,
+                                           config_,
                                            *module_process_thread_,
                                            intra_frame_observer,
                                            bandwidth_observer,

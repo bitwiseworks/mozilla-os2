@@ -11,45 +11,34 @@
 #include "nsSVGNumber2.h"
 
 nsresult NS_NewSVGFECompositeElement(nsIContent **aResult,
-                                     already_AddRefed<nsINodeInfo> aNodeInfo);
+                                     already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
-
-// Composite Operators
-static const unsigned short SVG_FECOMPOSITE_OPERATOR_UNKNOWN = 0;
-static const unsigned short SVG_FECOMPOSITE_OPERATOR_OVER = 1;
-static const unsigned short SVG_FECOMPOSITE_OPERATOR_IN = 2;
-static const unsigned short SVG_FECOMPOSITE_OPERATOR_OUT = 3;
-static const unsigned short SVG_FECOMPOSITE_OPERATOR_ATOP = 4;
-static const unsigned short SVG_FECOMPOSITE_OPERATOR_XOR = 5;
-static const unsigned short SVG_FECOMPOSITE_OPERATOR_ARITHMETIC = 6;
 
 typedef nsSVGFE SVGFECompositeElementBase;
 
 class SVGFECompositeElement : public SVGFECompositeElementBase
 {
   friend nsresult (::NS_NewSVGFECompositeElement(nsIContent **aResult,
-                                                 already_AddRefed<nsINodeInfo> aNodeInfo));
+                                                 already_AddRefed<nsINodeInfo>&& aNodeInfo));
 protected:
-  SVGFECompositeElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  SVGFECompositeElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : SVGFECompositeElementBase(aNodeInfo)
   {
   }
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
 public:
-  virtual nsresult Filter(nsSVGFilterInstance* aInstance,
-                          const nsTArray<const Image*>& aSources,
-                          const Image* aTarget,
-                          const nsIntRect& aDataRect) MOZ_OVERRIDE;
+  virtual FilterPrimitiveDescription
+    GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
+                            const IntRect& aFilterSubregion,
+                            const nsTArray<bool>& aInputsAreTainted,
+                            nsTArray<mozilla::RefPtr<SourceSurface>>& aInputImages) MOZ_OVERRIDE;
   virtual bool AttributeAffectsRendering(
           int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
   virtual nsSVGString& GetResultImageName() MOZ_OVERRIDE { return mStringAttributes[RESULT]; }
   virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources) MOZ_OVERRIDE;
-  virtual nsIntRect ComputeTargetBBox(const nsTArray<nsIntRect>& aSourceBBoxes,
-          const nsSVGFilterInstance& aInstance) MOZ_OVERRIDE;
 
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
@@ -57,11 +46,11 @@ public:
   // WebIDL
   already_AddRefed<SVGAnimatedString> In1();
   already_AddRefed<SVGAnimatedString> In2();
-  already_AddRefed<nsIDOMSVGAnimatedEnumeration> Operator();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> K1();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> K2();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> K3();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> K4();
+  already_AddRefed<SVGAnimatedEnumeration> Operator();
+  already_AddRefed<SVGAnimatedNumber> K1();
+  already_AddRefed<SVGAnimatedNumber> K2();
+  already_AddRefed<SVGAnimatedNumber> K3();
+  already_AddRefed<SVGAnimatedNumber> K4();
   void SetK(float k1, float k2, float k3, float k4);
 
 protected:

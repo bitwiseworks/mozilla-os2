@@ -6,7 +6,6 @@
 #ifndef mozilla_dom_SVGIRect_h
 #define mozilla_dom_SVGIRect_h
 
-#include "nsContentUtils.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/dom/SVGRectBinding.h"
 #include "mozilla/Attributes.h"
@@ -32,9 +31,9 @@ public:
   {
   }
 
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
+  JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
   {
-    return SVGRectBinding::Wrap(aCx, aScope, this);
+    return SVGRectBinding::Wrap(aCx, this);
   }
 
   virtual nsIContent* GetParentObject() const = 0;

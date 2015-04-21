@@ -51,6 +51,11 @@ public class CrashReporter extends Activity
     private static final String PENDING_SUFFIX = CRASH_REPORT_SUFFIX + "pending";
     private static final String SUBMITTED_SUFFIX = CRASH_REPORT_SUFFIX + "submitted";
 
+    private static final String PREFS_SEND_REPORT   = "sendReport";
+    private static final String PREFS_INCLUDE_URL   = "includeUrl";
+    private static final String PREFS_ALLOW_CONTACT = "allowContact";
+    private static final String PREFS_CONTACT_EMAIL = "contactEmail";
+
     private Handler mHandler;
     private ProgressDialog mProgressDialog;
     private File mPendingMinidumpFile;
@@ -128,8 +133,7 @@ public class CrashReporter extends Activity
 
         // Set the flag that indicates we were stopped as expected, as
         // we will send a crash report, so it is not a silent OOM crash.
-        SharedPreferences prefs =
-            getSharedPreferences(GeckoApp.PREFS_NAME, 0);
+        SharedPreferences prefs = GeckoSharedPrefs.forApp(this);
         SharedPreferences.Editor editor = prefs.edit();
         editor.putBoolean(GeckoApp.PREFS_WAS_STOPPED, true);
         editor.putBoolean(GeckoApp.PREFS_CRASHED, true);
@@ -140,6 +144,17 @@ public class CrashReporter extends Activity
         final CheckBox sendReportCheckBox = (CheckBox) findViewById(R.id.send_report);
         final EditText commentsEditText = (EditText) findViewById(R.id.comment);
         final EditText emailEditText = (EditText) findViewById(R.id.email);
+
+        // Load CrashReporter preferences to avoid redundant user input.
+        final boolean sendReport   = prefs.getBoolean(PREFS_SEND_REPORT, true);
+        final boolean includeUrl   = prefs.getBoolean(PREFS_INCLUDE_URL, false);
+        final boolean allowContact = prefs.getBoolean(PREFS_ALLOW_CONTACT, false);
+        final String contactEmail  = prefs.getString(PREFS_CONTACT_EMAIL, "");
+
+        allowContactCheckBox.setChecked(allowContact);
+        includeUrlCheckBox.setChecked(includeUrl);
+        sendReportCheckBox.setChecked(sendReport);
+        emailEditText.setText(contactEmail);
 
         sendReportCheckBox.setOnCheckedChangeListener(new CheckBox.OnCheckedChangeListener() {
             @Override
@@ -203,6 +218,9 @@ public class CrashReporter extends Activity
             return;
         }
 
+        // Persist settings to avoid redundant user input.
+        savePrefs();
+
         mProgressDialog.show();
         new Thread(new Runnable() {
             @Override
@@ -210,6 +228,27 @@ public class CrashReporter extends Activity
                 sendReport(mPendingMinidumpFile, mExtrasStringMap, mPendingExtrasFile);
             }
         }, "CrashReporter Thread").start();
+    }
+
+    private void savePrefs() {
+        SharedPreferences.Editor editor = GeckoSharedPrefs.forApp(this).edit();
+                  
+        final boolean allowContact = ((CheckBox) findViewById(R.id.allow_contact)).isChecked();
+        final boolean includeUrl   = ((CheckBox) findViewById(R.id.include_url)).isChecked();
+        final boolean sendReport   = ((CheckBox) findViewById(R.id.send_report)).isChecked();
+        final String contactEmail  = ((EditText) findViewById(R.id.email)).getText().toString();
+                   
+        editor.putBoolean(PREFS_ALLOW_CONTACT, allowContact);
+        editor.putBoolean(PREFS_INCLUDE_URL, includeUrl);
+        editor.putBoolean(PREFS_SEND_REPORT, sendReport);
+        editor.putString(PREFS_CONTACT_EMAIL, contactEmail);
+                    
+        // A slight performance improvement via async apply() vs. blocking on commit().
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.GINGERBREAD) {
+            editor.commit();
+        } else { 
+            editor.apply();
+        }
     }
 
     public void onCloseClick(View v) {  // bound via crash_reporter.xml
@@ -283,7 +322,7 @@ public class CrashReporter extends Activity
             Process proc = Runtime.getRuntime().exec(new String[] {
                 "logcat", "-v", "threadtime", "-t", "200", "-d", "*:D"
             });
-            StringBuffer sb = new StringBuffer();
+            StringBuilder sb = new StringBuilder();
             br = new BufferedReader(new InputStreamReader(proc.getInputStream()));
             for (String s = br.readLine(); s != null; s = br.readLine()) {
                 sb.append(s).append('\n');
@@ -334,7 +373,7 @@ public class CrashReporter extends Activity
 
             // Add some extra information to notes so its displayed by
             // crash-stats.mozilla.org. Remove this when bug 607942 is fixed.
-            StringBuffer sb = new StringBuffer();
+            StringBuilder sb = new StringBuilder();
             sb.append(extras.containsKey(NOTES_KEY) ? extras.get(NOTES_KEY) + "\n" : "");
             if (AppConstants.MOZ_MIN_CPU_VERSION < 7) {
                 sb.append("nothumb Build\n");
@@ -412,7 +451,8 @@ public class CrashReporter extends Activity
             String action = "android.intent.action.MAIN";
             Intent intent = new Intent(action);
             intent.setClassName(AppConstants.ANDROID_PACKAGE_NAME,
-                                AppConstants.BROWSER_INTENT_CLASS);
+                                AppConstants.BROWSER_INTENT_CLASS_NAME);
+            intent.putExtra("didRestart", true);
             Log.i(LOGTAG, intent.toString());
             startActivity(intent);
         } catch (Exception e) {

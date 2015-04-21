@@ -6,13 +6,18 @@
 #ifndef GFX_LAYERSTYPES_H
 #define GFX_LAYERSTYPES_H
 
-#include "nsPoint.h"
+#include <stdint.h>                     // for uint32_t
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRegion.h"
+
+#include "mozilla/TypedEnum.h"
+
 #ifdef MOZ_WIDGET_GONK
 #include <ui/GraphicBuffer.h>
 #endif
 #if defined(DEBUG) || defined(PR_LOGGING)
 #  include <stdio.h>            // FILE
-#  include "prlog.h"
+#  include "prlog.h"            // for PR_LOG
 #  ifndef MOZ_LAYERS_HAVE_LOG
 #    define MOZ_LAYERS_HAVE_LOG
 #  endif
@@ -33,10 +38,14 @@ class GraphicBuffer;
 namespace mozilla {
 namespace layers {
 
+class TextureHost;
 
 typedef uint32_t TextureFlags;
 
-enum LayersBackend {
+#undef NONE
+#undef OPAQUE
+
+MOZ_BEGIN_ENUM_CLASS(LayersBackend, int8_t)
   LAYERS_NONE = 0,
   LAYERS_BASIC,
   LAYERS_OPENGL,
@@ -45,21 +54,25 @@ enum LayersBackend {
   LAYERS_D3D11,
   LAYERS_CLIENT,
   LAYERS_LAST
-};
+MOZ_END_ENUM_CLASS(LayersBackend)
 
-enum BufferMode {
+MOZ_BEGIN_ENUM_CLASS(BufferMode, int8_t)
   BUFFER_NONE,
-  BUFFER_BUFFERED
-};
+  BUFFERED
+MOZ_END_ENUM_CLASS(BufferMode)
 
-// The kinds of mask layer a shader can support
-// We rely on the items in this enum being sequential
-enum MaskType {
-  MaskNone = 0,   // no mask layer
-  Mask2d,         // mask layer for layers with 2D transforms
-  Mask3d,         // mask layer for layers with 3D transforms
-  NumMaskTypes
-};
+MOZ_BEGIN_ENUM_CLASS(DrawRegionClip, int8_t)
+  DRAW,
+  DRAW_SNAPPED,
+  CLIP_NONE
+MOZ_END_ENUM_CLASS(DrawRegionClip)
+
+MOZ_BEGIN_ENUM_CLASS(SurfaceMode, int8_t)
+  SURFACE_NONE = 0,
+  SURFACE_OPAQUE,
+  SURFACE_SINGLE_CHANNEL_ALPHA,
+  SURFACE_COMPONENT_ALPHA
+MOZ_END_ENUM_CLASS(SurfaceMode)
 
 // LayerRenderState for Composer2D
 // We currently only support Composer2D using gralloc. If we want to be backed
@@ -76,16 +89,18 @@ enum LayerRenderStateFlags {
 struct LayerRenderState {
   LayerRenderState()
 #ifdef MOZ_WIDGET_GONK
-    : mSurface(nullptr), mFlags(0), mHasOwnOffset(false)
+    : mSurface(nullptr), mTexture(nullptr), mFlags(0), mHasOwnOffset(false)
 #endif
   {}
 
 #ifdef MOZ_WIDGET_GONK
   LayerRenderState(android::GraphicBuffer* aSurface,
                    const nsIntSize& aSize,
-                   uint32_t aFlags)
+                   uint32_t aFlags,
+                   TextureHost* aTexture)
     : mSurface(aSurface)
     , mSize(aSize)
+    , mTexture(aTexture)
     , mFlags(aFlags)
     , mHasOwnOffset(false)
   {}
@@ -111,6 +126,7 @@ struct LayerRenderState {
   android::sp<android::GraphicBuffer> mSurface;
   // size of mSurface 
   nsIntSize mSize;
+  TextureHost* mTexture;
 #endif
   // see LayerRenderStateFlags
   uint32_t mFlags;
@@ -118,6 +134,36 @@ struct LayerRenderState {
   nsIntPoint mOffset;
   // true if mOffset is applicable
   bool mHasOwnOffset;
+};
+
+MOZ_BEGIN_ENUM_CLASS(ScaleMode, int8_t)
+  SCALE_NONE,
+  STRETCH,
+  SENTINEL
+// Unimplemented - PRESERVE_ASPECT_RATIO_CONTAIN
+MOZ_END_ENUM_CLASS(ScaleMode)
+
+struct EventRegions {
+  nsIntRegion mHitRegion;
+  nsIntRegion mDispatchToContentHitRegion;
+
+  bool operator==(const EventRegions& aRegions) const
+  {
+    return mHitRegion == aRegions.mHitRegion &&
+           mDispatchToContentHitRegion == aRegions.mDispatchToContentHitRegion;
+  }
+  bool operator!=(const EventRegions& aRegions) const
+  {
+    return !(*this == aRegions);
+  }
+
+  nsCString ToString() const
+  {
+    nsCString result = mHitRegion.ToString();
+    result.AppendLiteral(";dispatchToContent=");
+    result.Append(mDispatchToContentHitRegion.ToString());
+    return result;
+  }
 };
 
 } // namespace

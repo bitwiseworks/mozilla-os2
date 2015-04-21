@@ -11,10 +11,10 @@
 #ifndef WEBRTC_VOICE_ENGINE_VOE_BASE_IMPL_H
 #define WEBRTC_VOICE_ENGINE_VOE_BASE_IMPL_H
 
-#include "voe_base.h"
+#include "webrtc/voice_engine/include/voe_base.h"
 
-#include "module_common_types.h"
-#include "shared_data.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/voice_engine/shared_data.h"
 
 namespace webrtc
 {
@@ -30,34 +30,17 @@ public:
 
     virtual int DeRegisterVoiceEngineObserver();
 
-    virtual int Init(AudioDeviceModule* external_adm = NULL);
+    virtual int Init(AudioDeviceModule* external_adm = NULL,
+                     AudioProcessing* audioproc = NULL);
+    virtual AudioProcessing* audio_processing() {
+      return _shared->audio_processing();
+    }
 
     virtual int Terminate();
-
-    virtual int MaxNumOfChannels();
 
     virtual int CreateChannel();
 
     virtual int DeleteChannel(int channel);
-
-    virtual int SetLocalReceiver(int channel, int port,
-                                 int RTCPport = kVoEDefault,
-                                 const char ipAddr[64] = NULL,
-                                 const char multiCastAddr[64] = NULL);
-
-    virtual int GetLocalReceiver(int channel, int& port, int& RTCPport,
-                                 char ipAddr[64]);
-
-    virtual int SetSendDestination(int channel, int port,
-                                   const char ipAddr[64],
-                                   int sourcePort = kVoEDefault,
-                                   int RTCPport = kVoEDefault);
-
-    virtual int GetSendDestination(int channel,
-                                   int& port,
-                                   char ipAddr[64],
-                                   int& sourcePort,
-                                   int& RTCPport);
 
     virtual int StartReceive(int channel);
 
@@ -75,11 +58,6 @@ public:
 
     virtual int GetNetEQPlayoutMode(int channel, NetEqModes& mode);
 
-    virtual int SetNetEQBGNMode(int channel, NetEqBgnModes mode);
-
-    virtual int GetNetEQBGNMode(int channel, NetEqBgnModes& mode);
-
-
     virtual int SetOnHoldStatus(int channel,
                                 bool enable,
                                 OnHoldModes mode = kHoldSendAndPlay);
@@ -91,58 +69,86 @@ public:
     virtual int LastError();
 
     // AudioTransport
-    virtual WebRtc_Word32
+    virtual int32_t
         RecordedDataIsAvailable(const void* audioSamples,
-                                const WebRtc_UWord32 nSamples,
-                                const WebRtc_UWord8 nBytesPerSample,
-                                const WebRtc_UWord8 nChannels,
-                                const WebRtc_UWord32 samplesPerSec,
-                                const WebRtc_UWord32 totalDelayMS,
-                                const WebRtc_Word32 clockDrift,
-                                const WebRtc_UWord32 currentMicLevel,
-                                WebRtc_UWord32& newMicLevel);
+                                uint32_t nSamples,
+                                uint8_t nBytesPerSample,
+                                uint8_t nChannels,
+                                uint32_t samplesPerSec,
+                                uint32_t totalDelayMS,
+                                int32_t clockDrift,
+                                uint32_t currentMicLevel,
+                                bool keyPressed,
+                                uint32_t& newMicLevel);
 
-    virtual WebRtc_Word32 NeedMorePlayData(const WebRtc_UWord32 nSamples,
-                                           const WebRtc_UWord8 nBytesPerSample,
-                                           const WebRtc_UWord8 nChannels,
-                                           const WebRtc_UWord32 samplesPerSec,
-                                           void* audioSamples,
-                                           WebRtc_UWord32& nSamplesOut);
+    virtual int32_t NeedMorePlayData(uint32_t nSamples,
+                                     uint8_t nBytesPerSample,
+                                     uint8_t nChannels,
+                                     uint32_t samplesPerSec,
+                                     void* audioSamples,
+                                     uint32_t& nSamplesOut);
+
+    virtual int OnDataAvailable(const int voe_channels[],
+                                int number_of_voe_channels,
+                                const int16_t* audio_data,
+                                int sample_rate,
+                                int number_of_channels,
+                                int number_of_frames,
+                                int audio_delay_milliseconds,
+                                int current_volume,
+                                bool key_pressed,
+                                bool need_audio_processing);
 
     // AudioDeviceObserver
-    virtual void OnErrorIsReported(const ErrorCode error);
-    virtual void OnWarningIsReported(const WarningCode warning);
+    virtual void OnErrorIsReported(ErrorCode error);
+    virtual void OnWarningIsReported(WarningCode warning);
 
 protected:
     VoEBaseImpl(voe::SharedData* shared);
     virtual ~VoEBaseImpl();
 
 private:
-    WebRtc_Word32 StartPlayout();
-    WebRtc_Word32 StopPlayout();
-    WebRtc_Word32 StartSend();
-    WebRtc_Word32 StopSend();
-    WebRtc_Word32 TerminateInternal();
+    int32_t StartPlayout();
+    int32_t StopPlayout();
+    int32_t StartSend();
+    int32_t StopSend();
+    int32_t TerminateInternal();
 
-    WebRtc_Word32 AddBuildInfo(char* str) const;
-    WebRtc_Word32 AddVoEVersion(char* str) const;
+    // Helper function to process the recorded data with AudioProcessing Module,
+    // demultiplex the data to specific voe channels, encode and send to the
+    // network. When |number_of_VoE_channels| is 0, it will demultiplex the
+    // data to all the existing VoE channels.
+    // It returns new AGC microphone volume or 0 if no volume changes
+    // should be done.
+    int ProcessRecordedDataWithAPM(const int voe_channels[],
+                                   int number_of_voe_channels,
+                                   const void* audio_data,
+                                   uint32_t sample_rate,
+                                   uint8_t number_of_channels,
+                                   uint32_t number_of_frames,
+                                   uint32_t audio_delay_milliseconds,
+                                   int32_t clock_drift,
+                                   uint32_t current_volume,
+                                   bool key_pressed);
+
+    int32_t AddBuildInfo(char* str) const;
+    int32_t AddVoEVersion(char* str) const;
 #ifdef WEBRTC_EXTERNAL_TRANSPORT
-    WebRtc_Word32 AddExternalTransportBuild(char* str) const;
+    int32_t AddExternalTransportBuild(char* str) const;
 #endif
 #ifdef WEBRTC_VOE_EXTERNAL_REC_AND_PLAYOUT
-    WebRtc_Word32 AddExternalRecAndPlayoutBuild(char* str) const;
+    int32_t AddExternalRecAndPlayoutBuild(char* str) const;
 #endif
     VoiceEngineObserver* _voiceEngineObserverPtr;
     CriticalSectionWrapper& _callbackCritSect;
 
     bool _voiceEngineObserver;
-    WebRtc_UWord32 _oldVoEMicLevel;
-    WebRtc_UWord32 _oldMicLevel;
+    uint32_t _oldVoEMicLevel;
+    uint32_t _oldMicLevel;
     AudioFrame _audioFrame;
     voe::SharedData* _shared;
-
 };
 
-} // namespace webrtc
+}  // namespace webrtc
 
 #endif  // WEBRTC_VOICE_ENGINE_VOE_BASE_IMPL_H

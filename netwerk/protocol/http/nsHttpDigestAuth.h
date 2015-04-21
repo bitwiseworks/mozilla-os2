@@ -8,10 +8,13 @@
 #define nsDigestAuth_h__
 
 #include "nsIHttpAuthenticator.h"
-#include "nsICryptoHash.h"
-#include "nsString.h"
+#include "nsStringFwd.h"
 #include "nsCOMPtr.h"
 #include "mozilla/Attributes.h"
+
+class nsICryptoHash;
+
+namespace mozilla { namespace net {
 
 #define ALGO_SPECIFIED 0x01
 #define ALGO_MD5 0x02
@@ -84,5 +87,7 @@ class nsHttpDigestAuth MOZ_FINAL : public nsIHttpAuthenticator
     nsCOMPtr<nsICryptoHash>        mVerifier;
     char                           mHashBuf[DIGEST_LENGTH];
 };
+
+}} // namespace mozilla::net
 
 #endif // nsHttpDigestAuth_h__

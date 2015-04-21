@@ -15,20 +15,17 @@
 
 #include "mozilla/Assertions.h"
 
-#include "nsISupports.h"
 #include "jsapi.h"
 #include "nsString.h"
 
-class nsIDOMEventListener;
 class nsIScriptContext;
 class nsIScriptGlobalObject;
-class nsIPrincipal;
 
 class nsJSUtils
 {
 public:
-  static JSBool GetCallingLocation(JSContext* aContext, const char* *aFilename,
-                                   uint32_t* aLineno);
+  static bool GetCallingLocation(JSContext* aContext, const char* *aFilename,
+                                 uint32_t* aLineno);
 
   static nsIScriptGlobalObject *GetStaticScriptGlobal(JSObject* aObj);
 
@@ -56,7 +53,7 @@ public:
   static void ReportPendingException(JSContext *aContext);
 
   static nsresult CompileFunction(JSContext* aCx,
-                                  JS::HandleObject aTarget,
+                                  JS::Handle<JSObject*> aTarget,
                                   JS::CompileOptions& aOptions,
                                   const nsACString& aName,
                                   uint32_t aArgCount,
@@ -64,6 +61,80 @@ public:
                                   const nsAString& aBody,
                                   JSObject** aFunctionObject);
 
+  struct EvaluateOptions {
+    bool coerceToString;
+    bool reportUncaught;
+    bool needResult;
+
+    explicit EvaluateOptions() : coerceToString(false)
+                               , reportUncaught(true)
+                               , needResult(true)
+    {}
+
+    EvaluateOptions& setCoerceToString(bool aCoerce) {
+      coerceToString = aCoerce;
+      return *this;
+    }
+
+    EvaluateOptions& setReportUncaught(bool aReport) {
+      reportUncaught = aReport;
+      return *this;
+    }
+
+    EvaluateOptions& setNeedResult(bool aNeedResult) {
+      needResult = aNeedResult;
+      return *this;
+    }
+  };
+
+  static nsresult EvaluateString(JSContext* aCx,
+                                 const nsAString& aScript,
+                                 JS::Handle<JSObject*> aScopeObject,
+                                 JS::CompileOptions &aCompileOptions,
+                                 const EvaluateOptions& aEvaluateOptions,
+                                 JS::MutableHandle<JS::Value> aRetValue,
+                                 void **aOffThreadToken = nullptr);
+
+  static nsresult EvaluateString(JSContext* aCx,
+                                 JS::SourceBufferHolder& aSrcBuf,
+                                 JS::Handle<JSObject*> aScopeObject,
+                                 JS::CompileOptions &aCompileOptions,
+                                 const EvaluateOptions& aEvaluateOptions,
+                                 JS::MutableHandle<JS::Value> aRetValue,
+                                 void **aOffThreadToken = nullptr);
+
+
+  static nsresult EvaluateString(JSContext* aCx,
+                                 const nsAString& aScript,
+                                 JS::Handle<JSObject*> aScopeObject,
+                                 JS::CompileOptions &aCompileOptions,
+                                 void **aOffThreadToken = nullptr);
+
+  static nsresult EvaluateString(JSContext* aCx,
+                                 JS::SourceBufferHolder& aSrcBuf,
+                                 JS::Handle<JSObject*> aScopeObject,
+                                 JS::CompileOptions &aCompileOptions,
+                                 void **aOffThreadToken = nullptr);
+
+};
+
+class MOZ_STACK_CLASS AutoDontReportUncaught {
+  JSContext* mContext;
+  bool mWasSet;
+
+public:
+  AutoDontReportUncaught(JSContext* aContext) : mContext(aContext) {
+    MOZ_ASSERT(aContext);
+    mWasSet = JS::ContextOptionsRef(mContext).dontReportUncaught();
+    if (!mWasSet) {
+      JS::ContextOptionsRef(mContext).setDontReportUncaught(true);
+    }
+  }
+  ~AutoDontReportUncaught() {
+    if (!mWasSet) {
+      JS::ContextOptionsRef(mContext).setDontReportUncaught(false);
+    }
+  }
 };
 
 
@@ -99,20 +170,20 @@ public:
   {
   }
 
-  JSBool init(JSContext* aContext, JSString* str)
+  bool init(JSContext* aContext, JSString* str)
   {
       size_t length;
       const jschar* chars = JS_GetStringCharsZAndLength(aContext, str, &length);
       if (!chars)
-          return JS_FALSE;
+          return false;
 
       NS_ASSERTION(IsEmpty(), "init() on initialized string");
       nsDependentString* base = this;
       new(base) nsDependentString(chars, length);
-      return JS_TRUE;
+      return true;
   }
 
-  JSBool init(JSContext* aContext, const JS::Value &v)
+  bool init(JSContext* aContext, const JS::Value &v)
   {
       return init(aContext, JSVAL_TO_STRING(v));
   }

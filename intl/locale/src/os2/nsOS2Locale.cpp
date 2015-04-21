@@ -20,7 +20,6 @@
 #include "nscore.h"
 #include "nsString.h"
 #include "nsOS2Locale.h"
-#include "nsLocaleCID.h"
 #include "prprf.h"
 #include "nsReadableUtils.h"
 #include <unidef.h>
@@ -54,7 +53,7 @@ nsOS2Locale::~nsOS2Locale(void)
 NS_IMETHODIMP 
 nsOS2Locale::GetPlatformLocale(const nsAString& locale, PULONG os2Codepage)
 {
-  LocaleObject locObj = NULL;
+  LocaleObject locObj = nullptr;
   int codePage;
   nsAutoString tempLocale(locale);
   tempLocale.ReplaceChar('-', '_');

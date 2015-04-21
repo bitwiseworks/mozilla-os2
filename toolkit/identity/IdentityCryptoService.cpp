@@ -12,9 +12,9 @@
 #include "nsThreadUtils.h"
 #include "nsCOMPtr.h"
 #include "nsProxyRelease.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
+#include "mozilla/ArrayUtils.h" // ArrayLength
 #include "mozilla/Base64.h"
-#include "mozilla/Util.h" // ArrayLength
 #include "ScopedNSSTypes.h"
 
 #include "nss.h"
@@ -71,7 +71,7 @@ Base64UrlEncodeImpl(const nsACString & utf8Input, nsACString & result)
 class KeyPair : public nsIIdentityKeyPair, public nsNSSShutDownObject
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIIDENTITYKEYPAIR
 
   KeyPair(SECKEYPrivateKey* aPrivateKey, SECKEYPublicKey* aPublicKey);
@@ -79,6 +79,10 @@ public:
 private:
   ~KeyPair()
   {
+    nsNSSShutDownPreventionLock locker;
+    if (isAlreadyShutDown()) {
+      return;
+    }
     destructorSafeDestroyNSSReference();
     shutdown(calledFromObject);
   }
@@ -90,14 +94,10 @@ private:
 
   void destructorSafeDestroyNSSReference()
   {
-    nsNSSShutDownPreventionLock locker;
-    if (isAlreadyShutDown())
-      return;
-
     SECKEY_DestroyPrivateKey(mPrivateKey);
-    mPrivateKey = NULL;
+    mPrivateKey = nullptr;
     SECKEY_DestroyPublicKey(mPublicKey);
-    mPublicKey = NULL;
+    mPublicKey = nullptr;
   }
 
   SECKEYPrivateKey * mPrivateKey;
@@ -107,7 +107,7 @@ private:
   void operator=(const KeyPair &) MOZ_DELETE;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(KeyPair, nsIIdentityKeyPair)
+NS_IMPL_ISUPPORTS(KeyPair, nsIIdentityKeyPair)
 
 class KeyGenRunnable : public nsRunnable, public nsNSSShutDownObject
 {
@@ -119,6 +119,10 @@ public:
 private:
   ~KeyGenRunnable()
   {
+    nsNSSShutDownPreventionLock locker;
+    if (isAlreadyShutDown()) {
+      return;
+    }
     destructorSafeDestroyNSSReference();
     shutdown(calledFromObject);
   }
@@ -130,17 +134,12 @@ private:
 
   void destructorSafeDestroyNSSReference()
   {
-    nsNSSShutDownPreventionLock locker;
-    if (isAlreadyShutDown())
-      return;
-
-     mKeyPair = NULL;
   }
 
   const KeyType mKeyType; // in
   nsMainThreadPtrHandle<nsIIdentityKeyGenCallback> mCallback; // in
   nsresult mRv; // out
-  nsCOMPtr<KeyPair> mKeyPair; // out
+  nsCOMPtr<nsIIdentityKeyPair> mKeyPair; // out
 
   KeyGenRunnable(const KeyGenRunnable &) MOZ_DELETE;
   void operator=(const KeyGenRunnable &) MOZ_DELETE;
@@ -157,6 +156,10 @@ public:
 private:
   ~SignRunnable()
   {
+    nsNSSShutDownPreventionLock locker;
+    if (isAlreadyShutDown()) {
+      return;
+    }
     destructorSafeDestroyNSSReference();
     shutdown(calledFromObject);
   }
@@ -168,12 +171,8 @@ private:
 
   void destructorSafeDestroyNSSReference()
   {
-    nsNSSShutDownPreventionLock locker;
-    if (isAlreadyShutDown())
-      return;
-
     SECKEY_DestroyPrivateKey(mPrivateKey);
-    mPrivateKey = NULL;
+    mPrivateKey = nullptr;
   }
 
   const nsCString mTextToSign; // in
@@ -190,7 +189,7 @@ private:
 class IdentityCryptoService MOZ_FINAL : public nsIIdentityCryptoService
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIIDENTITYCRYPTOSERVICE
 
   IdentityCryptoService() { }
@@ -209,7 +208,7 @@ private:
   void operator=(const IdentityCryptoService &) MOZ_DELETE;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(IdentityCryptoService, nsIIdentityCryptoService)
+NS_IMPL_ISUPPORTS(IdentityCryptoService, nsIIdentityCryptoService)
 
 NS_IMETHODIMP
 IdentityCryptoService::GenerateKeyPair(
@@ -347,21 +346,19 @@ GenerateKeyPair(PK11SlotInfo * slot,
                 CK_MECHANISM_TYPE mechanism,
                 void * params)
 {
-  *publicKey = NULL;
+  *publicKey = nullptr;
   *privateKey = PK11_GenerateKeyPair(slot, mechanism, params, publicKey,
                                      PR_FALSE /*isPerm*/,
                                      PR_TRUE /*isSensitive*/,
-                                     NULL /*&pwdata*/);
+                                     nullptr /*&pwdata*/);
   if (!*privateKey) {
     MOZ_ASSERT(!*publicKey);
     return PRErrorCode_to_nsresult(PR_GetError());
   }
   if (!*publicKey) {
-	SECKEY_DestroyPrivateKey(*privateKey);
-	*privateKey = NULL;
-    MOZ_NOT_REACHED("PK11_GnerateKeyPair returned private key without public "
-                    "key");
-    return NS_ERROR_UNEXPECTED;
+	  SECKEY_DestroyPrivateKey(*privateKey);
+	  *privateKey = nullptr;
+    MOZ_CRASH("PK11_GnerateKeyPair returned private key without public key");
   }
 
   return NS_OK;
@@ -428,12 +425,12 @@ GenerateDSAKeyPair(PK11SlotInfo * slot,
     0x72,0xDF,0xFA,0x89,0x62,0x33,0x39,0x7A
   };
 
-  MOZ_STATIC_ASSERT(MOZ_ARRAY_LENGTH(P) == 1024 / CHAR_BIT, "bad DSA P");
-  MOZ_STATIC_ASSERT(MOZ_ARRAY_LENGTH(Q) ==  160 / CHAR_BIT, "bad DSA Q");
-  MOZ_STATIC_ASSERT(MOZ_ARRAY_LENGTH(G) == 1024 / CHAR_BIT, "bad DSA G");
+  static_assert(MOZ_ARRAY_LENGTH(P) == 1024 / CHAR_BIT, "bad DSA P");
+  static_assert(MOZ_ARRAY_LENGTH(Q) ==  160 / CHAR_BIT, "bad DSA Q");
+  static_assert(MOZ_ARRAY_LENGTH(G) == 1024 / CHAR_BIT, "bad DSA G");
 
   PQGParams pqgParams  = {
-    NULL /*arena*/,
+    nullptr /*arena*/,
     { siBuffer, P, static_cast<unsigned int>(mozilla::ArrayLength(P)) },
     { siBuffer, Q, static_cast<unsigned int>(mozilla::ArrayLength(Q)) },
     { siBuffer, G, static_cast<unsigned int>(mozilla::ArrayLength(G)) }
@@ -457,8 +454,8 @@ KeyGenRunnable::Run()
       if (!slot) {
         mRv = NS_ERROR_UNEXPECTED;
       } else {
-        SECKEYPrivateKey *privk = NULL;
-        SECKEYPublicKey *pubk = NULL;
+        SECKEYPrivateKey *privk = nullptr;
+        SECKEYPublicKey *pubk = nullptr;
 
         switch (mKeyType) {
         case rsaKey:
@@ -468,8 +465,7 @@ KeyGenRunnable::Run()
           mRv = GenerateDSAKeyPair(slot, &privk, &pubk);
           break;
         default:
-          MOZ_NOT_REACHED("unknown key type");
-          mRv = NS_ERROR_UNEXPECTED;
+          MOZ_CRASH("unknown key type");
         }
 
         PK11_FreeSlot(slot);
@@ -512,11 +508,11 @@ SignRunnable::Run()
       // We need the output in PKCS#11 format, not DER encoding, so we must use
       // PK11_HashBuf and PK11_Sign instead of SEC_SignData.
 
-      SECItem sig = { siBuffer, NULL, 0 };
+      SECItem sig = { siBuffer, nullptr, 0 };
       int sigLength = PK11_SignatureLen(mPrivateKey);
       if (sigLength <= 0) {
         mRv = PRErrorCode_to_nsresult(PR_GetError());
-      } else if (!SECITEM_AllocItem(NULL, &sig, sigLength)) {
+      } else if (!SECITEM_AllocItem(nullptr, &sig, sigLength)) {
         mRv = PRErrorCode_to_nsresult(PR_GetError());
       } else {
         uint8_t hash[32]; // big enough for SHA-1 or SHA-256
@@ -560,13 +556,13 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(IdentityCryptoService, Init)
 NS_DEFINE_NAMED_CID(NS_IDENTITYCRYPTOSERVICE_CID);
 
 const mozilla::Module::CIDEntry kCIDs[] = {
-  { &kNS_IDENTITYCRYPTOSERVICE_CID, false, NULL, IdentityCryptoServiceConstructor },
-  { NULL }
+  { &kNS_IDENTITYCRYPTOSERVICE_CID, false, nullptr, IdentityCryptoServiceConstructor },
+  { nullptr }
 };
 
 const mozilla::Module::ContractIDEntry kContracts[] = {
   { "@mozilla.org/identity/crypto-service;1", &kNS_IDENTITYCRYPTOSERVICE_CID },
-  { NULL }
+  { nullptr }
 };
 
 const mozilla::Module kModule = {

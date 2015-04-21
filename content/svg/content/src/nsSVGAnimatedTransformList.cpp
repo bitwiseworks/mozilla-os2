@@ -6,11 +6,12 @@
 #include "nsSVGAnimatedTransformList.h"
 #include "mozilla/dom/SVGAnimatedTransformList.h"
 #include "mozilla/dom/SVGAnimationElement.h"
-#include "nsSMILValue.h"
-#include "prdtoa.h"
-#include "SVGContentUtils.h"
+#include "nsCharSeparatedTokenizer.h"
 #include "nsSVGTransform.h"
+#include "nsSMILValue.h"
+#include "SVGContentUtils.h"
 #include "SVGTransformListSMILType.h"
+#include "nsIDOMMutationEvent.h"
 
 namespace mozilla {
 
@@ -75,6 +76,7 @@ nsresult
 nsSVGAnimatedTransformList::SetAnimValue(const SVGTransformList& aValue,
                                          nsSVGElement *aElement)
 {
+  bool prevSet = HasTransform() || aElement->GetAnimateMotionTransform();
   SVGAnimatedTransformList *domWrapper =
     SVGAnimatedTransformList::GetDOMWrapperIfExists(this);
   if (domWrapper) {
@@ -106,7 +108,13 @@ nsSVGAnimatedTransformList::SetAnimValue(const SVGTransformList& aValue,
     ClearAnimValue(aElement);
     return rv;
   }
-  aElement->DidAnimateTransformList();
+  int32_t modType;
+  if(prevSet) {
+    modType = nsIDOMMutationEvent::MODIFICATION;
+  } else {
+    modType = nsIDOMMutationEvent::ADDITION;
+  }
+  aElement->DidAnimateTransformList(modType);
   return NS_OK;
 }
 
@@ -124,7 +132,13 @@ nsSVGAnimatedTransformList::ClearAnimValue(nsSVGElement *aElement)
     domWrapper->InternalAnimValListWillChangeLengthTo(mBaseVal.Length());
   }
   mAnimVal = nullptr;
-  aElement->DidAnimateTransformList();
+  int32_t modType;
+  if (HasTransform() || aElement->GetAnimateMotionTransform()) {
+    modType = nsIDOMMutationEvent::MODIFICATION;
+  } else {
+    modType = nsIDOMMutationEvent::REMOVAL;
+  }
+  aElement->DidAnimateTransformList(modType);
 }
 
 bool
@@ -186,8 +200,9 @@ nsSVGAnimatedTransformList::SMILAnimatedTransformList::ParseValue(
 {
   NS_ABORT_IF_FALSE(aResult.IsNull(), "Unexpected type for SMIL value");
 
-  // nsSVGSMILTransform constructor should be expecting array with 3 params
-  PR_STATIC_ASSERT(SVGTransformSMILData::NUM_SIMPLE_PARAMS == 3);
+  static_assert(SVGTransformSMILData::NUM_SIMPLE_PARAMS == 3,
+                "nsSVGSMILTransform constructor should be expecting array "
+                "with 3 params");
 
   float params[3] = { 0.f };
   int32_t numParsed = ParseParameterList(aSpec, params, 3);
@@ -235,54 +250,27 @@ nsSVGAnimatedTransformList::SMILAnimatedTransformList::ParseValue(
   aResult.Swap(val);
 }
 
-namespace
-{
-  inline void
-  SkipWsp(nsACString::const_iterator& aIter,
-          const nsACString::const_iterator& aIterEnd)
-  {
-    while (aIter != aIterEnd && IsSVGWhitespace(*aIter))
-      ++aIter;
-  }
-} // end anonymous namespace block
-
 int32_t
 nsSVGAnimatedTransformList::SMILAnimatedTransformList::ParseParameterList(
   const nsAString& aSpec,
   float* aVars,
   int32_t aNVars)
 {
-  NS_ConvertUTF16toUTF8 spec(aSpec);
-
-  nsACString::const_iterator start, end;
-  spec.BeginReading(start);
-  spec.EndReading(end);
-
-  SkipWsp(start, end);
+  nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
+    tokenizer(aSpec, ',', nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
 
   int numArgsFound = 0;
 
-  while (start != end) {
-    char const *arg = start.get();
-    char *argend;
-    float f = float(PR_strtod(arg, &argend));
-    if (arg == argend || argend > end.get() || !NS_finite(f))
-      return -1;
-
+  while (tokenizer.hasMoreTokens()) {
+    float f;
+    if (!SVGContentUtils::ParseNumber(tokenizer.nextToken(), f)) {
+      return -1;    
+    }
     if (numArgsFound < aNVars) {
       aVars[numArgsFound] = f;
     }
-
-    start.advance(argend - arg);
     numArgsFound++;
-
-    SkipWsp(start, end);
-    if (*start == ',') {
-      ++start;
-      SkipWsp(start, end);
-    }
   }
-
   return numArgsFound;
 }
 

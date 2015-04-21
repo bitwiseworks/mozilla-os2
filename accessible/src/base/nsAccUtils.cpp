@@ -15,13 +15,10 @@
 #include "Role.h"
 #include "States.h"
 #include "TextLeafAccessible.h"
-#include "nsIMutableArray.h"
 
 #include "nsIDOMXULContainerElement.h"
-#include "nsIDOMXULSelectCntrlEl.h"
-#include "nsIDOMXULSelectCntrlItemEl.h"
-#include "nsWhitespaceTokenizer.h"
-#include "nsComponentManagerUtils.h"
+#include "nsIPersistentProperties2.h"
+#include "mozilla/dom/Element.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -130,7 +127,7 @@ nsAccUtils::SetLiveContainerAttributes(nsIPersistentProperties *aAttributes,
                                        nsIContent *aStartContent,
                                        nsIContent *aTopContent)
 {
-  nsAutoString atomic, live, relevant, busy;
+  nsAutoString live, relevant, busy;
   nsIContent *ancestor = aStartContent;
   while (ancestor) {
 
@@ -159,10 +156,11 @@ nsAccUtils::SetLiveContainerAttributes(nsIPersistentProperties *aAttributes,
     }
 
     // container-atomic attribute
-    if (atomic.IsEmpty() &&
-        HasDefinedARIAToken(ancestor, nsGkAtoms::aria_atomic) &&
-        ancestor->GetAttr(kNameSpaceID_None, nsGkAtoms::aria_atomic, atomic))
-      SetAccAttr(aAttributes, nsGkAtoms::containerAtomic, atomic);
+    if (ancestor->AttrValueIs(kNameSpaceID_None, nsGkAtoms::aria_atomic,
+                              nsGkAtoms::_true, eCaseMatters)) {
+      SetAccAttr(aAttributes, nsGkAtoms::containerAtomic,
+                 NS_LITERAL_STRING("true"));
+    }
 
     // container-busy attribute
     if (busy.IsEmpty() &&
@@ -213,22 +211,6 @@ nsAccUtils::GetARIAToken(dom::Element* aElement, nsIAtom* aAttr)
 }
 
 Accessible*
-nsAccUtils::GetAncestorWithRole(Accessible* aDescendant, uint32_t aRole)
-{
-  Accessible* document = aDescendant->Document();
-  Accessible* parent = aDescendant;
-  while ((parent = parent->Parent())) {
-    uint32_t testRole = parent->Role();
-    if (testRole == aRole)
-      return parent;
-
-    if (parent == document)
-      break;
-  }
-  return nullptr;
-}
-
-Accessible*
 nsAccUtils::GetSelectableContainer(Accessible* aAccessible, uint64_t aState)
 {
   if (!aAccessible)
@@ -254,32 +236,15 @@ nsAccUtils::IsARIASelected(Accessible* aAccessible)
 }
 
 HyperTextAccessible*
-nsAccUtils::GetTextAccessibleFromSelection(nsISelection* aSelection)
+nsAccUtils::GetTextContainer(nsINode* aNode)
 {
-  // Get accessible from selection's focus DOM point (the DOM point where
-  // selection is ended).
-
-  nsCOMPtr<nsIDOMNode> focusDOMNode;
-  aSelection->GetFocusNode(getter_AddRefs(focusDOMNode));
-  if (!focusDOMNode)
-    return nullptr;
-
-  int32_t focusOffset = 0;
-  aSelection->GetFocusOffset(&focusOffset);
-
-  nsCOMPtr<nsINode> focusNode(do_QueryInterface(focusDOMNode));
-  nsCOMPtr<nsINode> resultNode =
-    nsCoreUtils::GetDOMNodeFromDOMPoint(focusNode, focusOffset);
-
   // Get text accessible containing the result node.
-  DocAccessible* doc = 
-    GetAccService()->GetDocAccessible(resultNode->OwnerDoc());
-  Accessible* accessible = doc ? 
-    doc->GetAccessibleOrContainer(resultNode) : nullptr;
-  if (!accessible) {
-    NS_NOTREACHED("No nsIAccessibleText for selection change event!");
+  DocAccessible* doc =
+    GetAccService()->GetDocAccessible(aNode->OwnerDoc());
+  Accessible* accessible =
+    doc ? doc->GetAccessibleOrContainer(aNode) : nullptr;
+  if (!accessible)
     return nullptr;
-  }
 
   do {
     HyperTextAccessible* textAcc = accessible->AsHyperText();
@@ -289,7 +254,6 @@ nsAccUtils::GetTextAccessibleFromSelection(nsISelection* aSelection)
     accessible = accessible->Parent();
   } while (accessible);
 
-  NS_NOTREACHED("We must reach document accessible implementing nsIAccessibleText!");
   return nullptr;
 }
 

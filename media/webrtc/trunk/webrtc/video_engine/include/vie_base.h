@@ -19,16 +19,31 @@
 #ifndef WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_BASE_H_
 #define WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_BASE_H_
 
-#include "common_types.h"
+#include "webrtc/common_types.h"
 
 namespace webrtc {
 
+class Config;
 class VoiceEngine;
+
+// CpuOveruseObserver is called when a system overuse is detected and
+// VideoEngine cannot keep up the encoding frequency.
+class CpuOveruseObserver {
+ public:
+  // Called as soon as an overuse is detected.
+  virtual void OveruseDetected() = 0;
+  // Called periodically when the system is not overused any longer.
+  virtual void NormalUsage() = 0;
+
+ protected:
+  virtual ~CpuOveruseObserver() {}
+};
 
 class WEBRTC_DLLEXPORT VideoEngine {
  public:
   // Creates a VideoEngine object, which can then be used to acquire sub‐APIs.
   static VideoEngine* Create();
+  static VideoEngine* Create(const Config& config);
 
   // Deletes a VideoEngine instance.
   static bool Delete(VideoEngine*& video_engine);
@@ -93,6 +108,16 @@ class WEBRTC_DLLEXPORT ViEBase {
 
   // Deletes an existing channel and releases the utilized resources.
   virtual int DeleteChannel(const int video_channel) = 0;
+
+  // Registers an observer to be called when an overuse is detected, see
+  // 'CpuOveruseObserver' for details.
+  // NOTE: This is still very experimental functionality.
+  virtual int RegisterCpuOveruseObserver(int channel,
+                                         CpuOveruseObserver* observer) = 0;
+
+  // Changing the current state of the host CPU. Encoding engines
+  // can adapt their behavior if needed. (Optional)
+  virtual void SetLoadManager(CPULoadStateCallbackInvoker* load_manager) = 0;
 
   // Specifies the VoiceEngine and VideoEngine channel pair to use for
   // audio/video synchronization.

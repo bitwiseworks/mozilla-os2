@@ -16,11 +16,11 @@
 
 #include "nsTextFragment.h"
 #include "nsError.h"
-#include "nsEventListenerManager.h"
 #include "mozilla/dom/Element.h"
 #include "nsCycleCollectionParticipant.h"
 
 #include "nsISMILAttr.h"
+#include "nsIDocument.h"
 
 class nsIDOMAttr;
 class nsIDOMEventListener;
@@ -41,11 +41,20 @@ enum {
 
   // This bit is set to indicate that if the text node changes to
   // whitespace, we may need to reframe it (or its ancestors).
-  NS_REFRAME_IF_WHITESPACE =              DATA_NODE_FLAG_BIT(1)
+  NS_REFRAME_IF_WHITESPACE =              DATA_NODE_FLAG_BIT(1),
+
+  // This bit is set to indicate that we have a cached
+  // TextIsOnlyWhitespace value
+  NS_CACHED_TEXT_IS_ONLY_WHITESPACE =     DATA_NODE_FLAG_BIT(2),
+
+  // This bit is only meaningful if the NS_CACHED_TEXT_IS_ONLY_WHITESPACE
+  // bit is set, and if so it indicates whether we're only whitespace or
+  // not.
+  NS_TEXT_IS_ONLY_WHITESPACE =            DATA_NODE_FLAG_BIT(3),
 };
 
 // Make sure we have enough space for those bits
-ASSERT_NODE_FLAGS_SPACE(NODE_TYPE_SPECIFIC_BITS_OFFSET + 2);
+ASSERT_NODE_FLAGS_SPACE(NODE_TYPE_SPECIFIC_BITS_OFFSET + 4);
 
 #undef DATA_NODE_FLAG_BIT
 
@@ -56,7 +65,8 @@ public:
 
   NS_DECL_SIZEOF_EXCLUDING_THIS
 
-  nsGenericDOMDataNode(already_AddRefed<nsINodeInfo> aNodeInfo);
+  nsGenericDOMDataNode(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  nsGenericDOMDataNode(already_AddRefed<nsINodeInfo>&& aNodeInfo);
   virtual ~nsGenericDOMDataNode();
 
   virtual void GetNodeValueInternal(nsAString& aNodeValue) MOZ_OVERRIDE;
@@ -106,7 +116,7 @@ public:
   virtual already_AddRefed<nsINodeList> GetChildren(uint32_t aFilter) MOZ_OVERRIDE;
 
   virtual nsIAtom *GetIDAttributeName() const MOZ_OVERRIDE;
-  virtual already_AddRefed<nsINodeInfo> GetExistingAttrNameFromQName(const nsAString& aStr) const MOZ_OVERRIDE;
+
   nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                    const nsAString& aValue, bool aNotify)
   {
@@ -121,17 +131,20 @@ public:
   virtual uint32_t GetAttrCount() const MOZ_OVERRIDE;
   virtual const nsTextFragment *GetText() MOZ_OVERRIDE;
   virtual uint32_t TextLength() const MOZ_OVERRIDE;
-  virtual nsresult SetText(const PRUnichar* aBuffer, uint32_t aLength,
+  virtual nsresult SetText(const char16_t* aBuffer, uint32_t aLength,
                            bool aNotify) MOZ_OVERRIDE;
   // Need to implement this here too to avoid hiding.
   nsresult SetText(const nsAString& aStr, bool aNotify)
   {
     return SetText(aStr.BeginReading(), aStr.Length(), aNotify);
   }
-  virtual nsresult AppendText(const PRUnichar* aBuffer, uint32_t aLength,
+  virtual nsresult AppendText(const char16_t* aBuffer, uint32_t aLength,
                               bool aNotify) MOZ_OVERRIDE;
   virtual bool TextIsOnlyWhitespace() MOZ_OVERRIDE;
+  virtual bool HasTextForTranslation() MOZ_OVERRIDE;
   virtual void AppendTextTo(nsAString& aResult) MOZ_OVERRIDE;
+  virtual bool AppendTextTo(nsAString& aResult,
+                            const mozilla::fallible_t&) MOZ_OVERRIDE NS_WARN_UNUSED_RESULT;
   virtual void DestroyContent() MOZ_OVERRIDE;
   virtual void SaveSubtreeState() MOZ_OVERRIDE;
 
@@ -141,8 +154,19 @@ public:
 #endif
 
   virtual nsIContent *GetBindingParent() const MOZ_OVERRIDE;
+  virtual nsXBLBinding *GetXBLBinding() const MOZ_OVERRIDE;
+  virtual void SetXBLBinding(nsXBLBinding* aBinding,
+                             nsBindingManager* aOldBindingManager = nullptr) MOZ_OVERRIDE;
+  virtual mozilla::dom::ShadowRoot *GetContainingShadow() const MOZ_OVERRIDE;
+  virtual mozilla::dom::ShadowRoot *GetShadowRoot() const MOZ_OVERRIDE;
+  virtual void SetShadowRoot(mozilla::dom::ShadowRoot* aShadowRoot) MOZ_OVERRIDE;
+  virtual nsIContent *GetXBLInsertionParent() const MOZ_OVERRIDE;
+  virtual void SetXBLInsertionParent(nsIContent* aContent) MOZ_OVERRIDE;
   virtual bool IsNodeOfType(uint32_t aFlags) const MOZ_OVERRIDE;
   virtual bool IsLink(nsIURI** aURI) const MOZ_OVERRIDE;
+
+  virtual mozilla::dom::CustomElementData* GetCustomElementData() const MOZ_OVERRIDE;
+  virtual void SetCustomElementData(mozilla::dom::CustomElementData* aData) MOZ_OVERRIDE;
 
   virtual nsIAtom* DoGetID() const MOZ_OVERRIDE;
   virtual const nsAttrValue* DoGetClasses() const MOZ_OVERRIDE;
@@ -169,7 +193,7 @@ public:
 
   // WebIDL API
   // Our XPCOM GetData is just fine for WebIDL
-  void SetData(const nsAString& aData, mozilla::ErrorResult& rv)
+  virtual void SetData(const nsAString& aData, mozilla::ErrorResult& rv)
   {
     rv = SetData(aData);
   }
@@ -222,17 +246,26 @@ protected:
   class nsDataSlots : public nsINode::nsSlots
   {
   public:
-    nsDataSlots()
-      : nsINode::nsSlots(),
-        mBindingParent(nullptr)
-    {
-    }
+    nsDataSlots();
+
+    void Traverse(nsCycleCollectionTraversalCallback &cb);
+    void Unlink();
 
     /**
      * The nearest enclosing content node with a binding that created us.
      * @see nsIContent::GetBindingParent
      */
     nsIContent* mBindingParent;  // [Weak]
+
+    /**
+     * @see nsIContent::GetXBLInsertionParent
+     */
+    nsCOMPtr<nsIContent> mXBLInsertionParent;
+
+    /**
+     * @see nsIContent::GetContainingShadow
+     */
+    nsRefPtr<mozilla::dom::ShadowRoot> mContainingShadow;
   };
 
   // Override from nsINode
@@ -260,7 +293,7 @@ protected:
                                                uint32_t aCount);
 
   nsresult SetTextInternal(uint32_t aOffset, uint32_t aCount,
-                           const PRUnichar* aBuffer, uint32_t aLength,
+                           const char16_t* aBuffer, uint32_t aLength,
                            bool aNotify,
                            CharacterDataChangeInfo::Details* aDetails = nullptr);
 

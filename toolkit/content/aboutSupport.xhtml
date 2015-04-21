@@ -16,6 +16,8 @@
   <head>
     <title>&aboutSupport.pageTitle;</title>
 
+    <link rel="icon" type="image/png" id="favicon"
+          href="chrome://branding/content/icon32.png"/>
     <link rel="stylesheet" href="chrome://global/skin/aboutSupport.css"
           type="text/css"/>
 
@@ -27,10 +29,10 @@
 
   <body dir="&locale.dir;">
 
-    <div id="reset-box" style="visibility: hidden">
+    <div id="reset-box">
       <h3>&resetProfile.title;</h3>
       <p>&resetProfile.description;</p>
-      <button onclick="resetProfileAndRestart()">
+      <button id="reset-box-button">
         &resetProfile.button.label2;
       </button>
     </div>
@@ -44,11 +46,10 @@
     </div>
 
     <div>
-      <button id="copy-raw-data-to-clipboard"
-              onclick="copyRawDataToClipboard(this);">
+      <button id="copy-raw-data-to-clipboard">
         &aboutSupport.copyRawDataToClipboard.label;
       </button>
-      <button id="copy-to-clipboard" onclick="copyContentsToClipboard()">
+      <button id="copy-to-clipboard">
         &aboutSupport.copyTextToClipboard.label;
       </button>
     </div>
@@ -88,7 +89,7 @@
             </th>
 
             <td>
-              <button onclick="showUpdateHistory()">
+              <button id="show-update-history-button">
                 &aboutSupport.appBasicsShowUpdateHistory;
               </button>
             </td>
@@ -118,7 +119,7 @@
             </th>
 
             <td>
-              <button onclick="openProfileDirectory()">
+              <button id="profile-dir-button">
 #ifdef XP_WIN
                 &aboutSupport.showWin.label;
 #else
@@ -154,16 +155,6 @@
 
           <tr class="no-copy">
             <th class="column">
-              &aboutSupport.appBasicsCrashIDs;
-            </th>
-
-            <td>
-              <a href="about:crashes">about:crashes</a>
-            </td>
-          </tr>
-
-          <tr class="no-copy">
-            <th class="column">
               &aboutSupport.appBasicsMemoryUse;
             </th>
 
@@ -175,6 +166,33 @@
         </tbody>
       </table>
 
+      <!-- - - - - - - - - - - - - - - - - - - - - -->
+#ifdef MOZ_CRASHREPORTER
+
+      <h2 class="major-section" id="crashes-title">
+        &aboutSupport.crashes.title;
+      </h2>
+
+      <table id="crashes-table">
+        <thead>
+          <tr>
+            <th>
+              &aboutSupport.crashes.id;
+            </th>
+            <th>
+              &aboutSupport.crashes.sendDate;
+            </th>
+          </tr>
+        </thead>
+        <tbody id="crashes-tbody">
+        </tbody>
+      </table>
+      <p id="crashes-allReports" class="hidden no-copy">
+        <a href="about:crashes" id="crashes-allReportsWithPending" class="block">&aboutSupport.crashes.allReports;</a>
+      </p>
+      <p id="crashes-noConfig" class="hidden no-copy">&aboutSupport.crashes.noConfig;</p>
+
+#endif
       <!-- - - - - - - - - - - - - - - - - - - - - -->
 
       <h2 class="major-section">
@@ -205,6 +223,23 @@
       <!-- - - - - - - - - - - - - - - - - - - - - -->
 
       <h2 class="major-section">
+        &aboutSupport.graphicsTitle;
+      </h2>
+
+      <table>
+        <tbody id="graphics-tbody">
+        </tbody>
+
+        <tbody id="graphics-info-properties">
+        </tbody>
+
+        <tbody id="graphics-failures-tbody">
+        </tbody>
+      </table>
+
+      <!-- - - - - - - - - - - - - - - - - - - - - -->
+
+      <h2 class="major-section">
         &aboutSupport.modifiedKeyPrefsTitle;
       </h2>
 
@@ -223,26 +258,10 @@
         </tbody>
       </table>
 
-      <section id="prefs-user-js-section" class="no-copy" style="display:none">
+      <section id="prefs-user-js-section" class="hidden no-copy">
         <h3>&aboutSupport.userJSTitle;</h3>
         <p>&aboutSupport.userJSDescription;</p>
       </section>
-
-      <!-- - - - - - - - - - - - - - - - - - - - - -->
-      <h2 class="major-section">
-        &aboutSupport.graphicsTitle;
-      </h2>
-
-      <table>
-        <tbody id="graphics-tbody">
-        </tbody>
-
-        <tbody id="graphics-info-properties">
-        </tbody>
-
-        <tbody id="graphics-failures-tbody">
-        </tbody>
-      </table>
 
       <!-- - - - - - - - - - - - - - - - - - - - - -->
       <h2 class="major-section">
@@ -297,6 +316,39 @@
         <tbody id="libversions-tbody">
         </tbody>
       </table>
+
+
+      <h2 class="major-section">
+        &aboutSupport.experimentsTitle;
+      </h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>
+              &aboutSupport.experimentName;
+            </th>
+            <th>
+              &aboutSupport.experimentId;
+            </th>
+            <th>
+              &aboutSupport.experimentDescription;
+            </th>
+            <th>
+              &aboutSupport.experimentActive;
+            </th>
+            <th>
+              &aboutSupport.experimentEndDate;
+            </th>
+            <th>
+              &aboutSupport.experimentHomepage;
+            </th>
+          </tr>
+        </thead>
+        <tbody id="experiments-tbody">
+        </tbody>
+      </table>
+      <!-- - - - - - - - - - - - - - - - - - - - - -->
 
     </div>
 

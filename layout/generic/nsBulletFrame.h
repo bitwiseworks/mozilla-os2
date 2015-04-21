@@ -10,16 +10,11 @@
 
 #include "mozilla/Attributes.h"
 #include "nsFrame.h"
-#include "nsStyleContext.h"
 
-#include "imgIRequest.h"
 #include "imgINotificationObserver.h"
 
 class imgIContainer;
 class imgRequestProxy;
-
-#define BULLET_FRAME_IMAGE_LOADING NS_FRAME_STATE_BIT(63)
-#define BULLET_FRAME_HAS_FONT_INFLATION NS_FRAME_STATE_BIT(62)
 
 class nsBulletFrame;
 
@@ -45,6 +40,10 @@ private:
 class nsBulletFrame : public nsFrame {
 public:
   NS_DECL_FRAMEARENA_HELPERS
+#ifdef DEBUG
+  NS_DECL_QUERYFRAME_TARGET(nsBulletFrame)
+  NS_DECL_QUERYFRAME
+#endif
 
   nsBulletFrame(nsStyleContext* aContext)
     : nsFrame(aContext)
@@ -61,15 +60,15 @@ public:
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
-#ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+#ifdef DEBUG_FRAME_DUMP
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   // nsIHTMLReflow
-  NS_IMETHOD Reflow(nsPresContext* aPresContext,
-                    nsHTMLReflowMetrics& aMetrics,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus& aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext* aPresContext,
+                          nsHTMLReflowMetrics& aMetrics,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus& aStatus) MOZ_OVERRIDE;
   virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
   virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
 
@@ -79,13 +78,18 @@ public:
 
 
   /* get list item text, without '.' */
-  static bool AppendCounterText(int32_t aListStyleType,
-                                  int32_t aOrdinal,
-                                  nsString& aResult);
+  static void AppendCounterText(int32_t aListStyleType,
+                                int32_t aOrdinal,
+                                nsString& aResult,
+                                bool& aIsRTL);
+
+  /* get suffix of list item */
+  static void GetListItemSuffix(int32_t aListStyleType,
+                                nsString& aResult,
+                                bool& aSuppressPadding);
 
   /* get list item text, with '.' */
-  bool GetListItemText(const nsStyleList& aStyleList,
-                         nsString& aResult);
+  void GetListItemText(const nsStyleList& aStyleList, nsString& aResult);
                          
   void PaintBullet(nsRenderingContext& aRenderingContext, nsPoint aPt,
                    const nsRect& aDirtyRect, uint32_t aFlags);
@@ -121,6 +125,12 @@ protected:
   nsSize mIntrinsicSize;
   int32_t mOrdinal;
   bool mTextIsRTL;
+
+  // If set to true, any padding of bullet defined in the UA style sheet will
+  // be suppressed.  This is used for some CJK numbering styles where extra
+  // space after the suffix is not desired.  Note that, any author-specified
+  // padding overriding the default style will NOT be suppressed.
+  bool mSuppressPadding;
 
 private:
 

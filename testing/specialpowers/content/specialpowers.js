@@ -40,6 +40,14 @@ SpecialPowers.prototype._sendAsyncMessage = function(msgname, msg) {
   sendAsyncMessage(msgname, msg);
 };
 
+SpecialPowers.prototype._addMessageListener = function(msgname, listener) {
+  addMessageListener(msgname, listener);
+};
+
+SpecialPowers.prototype._removeMessageListener = function(msgname, listener) {
+  removeMessageListener(msgname, listener);
+};
+
 SpecialPowers.prototype.registerProcessCrashObservers = function() {
   addMessageListener("SPProcessCrashService", this._messageListener);
   sendSyncMessage("SPProcessCrashService", { op: "register-observer" });
@@ -96,17 +104,7 @@ function attachSpecialPowersToWindow(aWindow) {
     if ((aWindow !== null) &&
         (aWindow !== undefined) &&
         (aWindow.wrappedJSObject) &&
-        (aWindow.parent !== null) &&
-        (aWindow.parent !== undefined) &&
-        (aWindow.parent.wrappedJSObject.SpecialPowers) &&
-        !(aWindow.wrappedJSObject.SpecialPowers) &&
-        aWindow.location.hostname == aWindow.parent.location.hostname) {
-      aWindow.wrappedJSObject.SpecialPowers = aWindow.parent.wrappedJSObject.SpecialPowers;
-    }
-    else if ((aWindow !== null) &&
-             (aWindow !== undefined) &&
-             (aWindow.wrappedJSObject) &&
-             !(aWindow.wrappedJSObject.SpecialPowers)) {
+        !(aWindow.wrappedJSObject.SpecialPowers)) {
       aWindow.wrappedJSObject.SpecialPowers = new SpecialPowers(aWindow);
     }
   } catch(ex) {
@@ -131,3 +129,6 @@ SpecialPowersManager.prototype = {
 };
 
 var specialpowersmanager = new SpecialPowersManager();
+
+this.SpecialPowers = SpecialPowers;
+this.attachSpecialPowersToWindow = attachSpecialPowersToWindow;

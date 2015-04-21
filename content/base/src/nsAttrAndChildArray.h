@@ -12,6 +12,7 @@
 #define nsAttrAndChildArray_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/MemoryReporting.h"
 
 #include "nscore.h"
 #include "nsAttrName.h"
@@ -70,6 +71,11 @@ public:
   already_AddRefed<nsIContent> TakeChildAt(uint32_t aPos);
   int32_t IndexOfChild(const nsINode* aPossibleChild) const;
 
+  bool HasAttrs() const
+  {
+    return MappedAttrCount() || (AttrSlotCount() && AttrSlotIsTaken(0));
+  }
+
   uint32_t AttrCount() const;
   const nsAttrValue* GetAttr(nsIAtom* aLocalName,
                              int32_t aNamespaceID = kNameSpaceID_None) const;
@@ -116,7 +122,7 @@ public:
            !AttrSlotIsTaken(ATTRCHILD_ARRAY_MAX_ATTR_COUNT - 1);
   }
 
-  size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
   bool HasMappedAttrs() const
   {
     return MappedAttrCount();

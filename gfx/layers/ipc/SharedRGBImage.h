@@ -5,71 +5,61 @@
 #ifndef SHAREDRGBIMAGE_H_
 #define SHAREDRGBIMAGE_H_
 
-#include "ImageContainer.h"
-#include "ISurfaceAllocator.h"
+#include <stddef.h>                     // for size_t
+#include <stdint.h>                     // for uint8_t
+#include "ImageContainer.h"             // for ISharedImage, Image, etc
+#include "gfxTypes.h"
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/gfx/Point.h"          // for IntSize
+#include "mozilla/gfx/Types.h"          // for SurfaceFormat
+#include "nsCOMPtr.h"                   // for already_AddRefed
 
 namespace mozilla {
 namespace ipc {
 class Shmem;
 }
+
 namespace layers {
+
+class BufferTextureClient;
+class ImageClient;
+class ISurfaceAllocator;
+class TextureClient;
+class SurfaceDescriptor;
+
+already_AddRefed<Image> CreateSharedRGBImage(ImageContainer* aImageContainer,
+                                             nsIntSize aSize,
+                                             gfxImageFormat aImageFormat);
 
 /**
  * Stores RGB data in shared memory
  * It is assumed that the image width and stride are equal
  */
 class SharedRGBImage : public Image
+                     , public ISharedImage
 {
-  typedef gfxASurface::gfxImageFormat gfxImageFormat;
 public:
-  struct Header {
-    gfxImageFormat mImageFormat;
-  };
-
-  SharedRGBImage(ISurfaceAllocator *aAllocator);
+  SharedRGBImage(ImageClient* aCompositable);
   ~SharedRGBImage();
 
-  static already_AddRefed<SharedRGBImage> Create(ImageContainer* aImageContainer,
-                                                 nsIntSize aSize,
-                                                 gfxImageFormat aImageFormat);
-  uint8_t *GetBuffer();
+  virtual ISharedImage* AsSharedImage() MOZ_OVERRIDE { return this; }
 
-  gfxIntSize GetSize();
+  virtual TextureClient* GetTextureClient(CompositableClient* aClient) MOZ_OVERRIDE;
+
+  virtual uint8_t* GetBuffer() MOZ_OVERRIDE;
+
+  gfx::IntSize GetSize();
+
   size_t GetBufferSize();
 
-  static uint8_t BytesPerPixel(gfxImageFormat aImageFormat);
-  already_AddRefed<gfxASurface> GetAsSurface();
+  TemporaryRef<gfx::SourceSurface> GetAsSourceSurface();
 
-  /**
-   * Setup the Surface descriptor to contain this image's shmem, while keeping
-   * ownership of the shmem.
-   * if the operation succeeds, return true and AddRef this SharedRGBImage.
-   */
-  bool ToSurfaceDescriptor(SurfaceDescriptor& aResult);
-
-  /**
-   * Setup the Surface descriptor to contain this image's shmem, and loose
-   * ownership of the shmem.
-   * if the operation succeeds, return true (and does _not_ AddRef this
-   * SharedRGBImage).
-   */
-  bool DropToSurfaceDescriptor(SurfaceDescriptor& aResult);
-
-  /**
-   * Returns a SharedRGBImage* iff the descriptor was initialized with
-   * ToSurfaceDescriptor.
-   */
-  static SharedRGBImage* FromSurfaceDescriptor(const SurfaceDescriptor& aDescriptor);
-
+  bool Allocate(gfx::IntSize aSize, gfx::SurfaceFormat aFormat);
 private:
-  bool AllocateBuffer(nsIntSize aSize, gfxImageFormat aImageFormat);
-
-  gfxIntSize mSize;
-  gfxImageFormat mImageFormat;
-  ISurfaceAllocator* mSurfaceAllocator;
-
-  bool mAllocated;
-  ipc::Shmem *mShmem;
+  gfx::IntSize mSize;
+  RefPtr<ImageClient> mCompositable;
+  RefPtr<BufferTextureClient> mTextureClient;
 };
 
 } // namespace layers

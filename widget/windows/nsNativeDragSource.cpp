@@ -12,8 +12,6 @@
 #include "nsWidgetsCID.h"
 #include "nsIDragService.h"
 
-static NS_DEFINE_IID(kCDragServiceCID,  NS_DRAGSERVICE_CID);
-
 /*
  * class nsNativeDragSource
  */
@@ -32,12 +30,12 @@ nsNativeDragSource::~nsNativeDragSource()
 STDMETHODIMP
 nsNativeDragSource::QueryInterface(REFIID riid, void** ppv)
 {
-  *ppv=NULL;
+  *ppv=nullptr;
 
   if (IID_IUnknown==riid || IID_IDropSource==riid)
     *ppv=this;
 
-  if (NULL!=*ppv) {
+  if (nullptr!=*ppv) {
     ((LPUNKNOWN)*ppv)->AddRef();
     return S_OK;
   }
@@ -68,6 +66,8 @@ nsNativeDragSource::Release(void)
 STDMETHODIMP
 nsNativeDragSource::QueryContinueDrag(BOOL fEsc, DWORD grfKeyState)
 {
+  static NS_DEFINE_IID(kCDragServiceCID,  NS_DRAGSERVICE_CID);
+
   nsCOMPtr<nsIDragService> dragService = do_GetService(kCDragServiceCID);
   if (dragService) {
     DWORD pos = ::GetMessagePos();

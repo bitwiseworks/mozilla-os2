@@ -5,6 +5,7 @@
 
 #include "XMLStylesheetProcessingInstruction.h"
 #include "mozilla/dom/XMLStylesheetProcessingInstructionBinding.h"
+#include "nsContentUtils.h"
 #include "nsNetUtil.h"
 
 namespace mozilla {
@@ -13,9 +14,9 @@ namespace dom {
 // nsISupports implementation
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(XMLStylesheetProcessingInstruction)
-  NS_INTERFACE_TABLE_INHERITED4(XMLStylesheetProcessingInstruction, nsIDOMNode,
-                                nsIDOMProcessingInstruction, nsIDOMLinkStyle,
-                                nsIStyleSheetLinkingElement)
+  NS_INTERFACE_TABLE_INHERITED(XMLStylesheetProcessingInstruction, nsIDOMNode,
+                               nsIDOMProcessingInstruction,
+                               nsIStyleSheetLinkingElement)
 NS_INTERFACE_TABLE_TAIL_INHERITING(ProcessingInstruction)
 
 NS_IMPL_ADDREF_INHERITED(XMLStylesheetProcessingInstruction,
@@ -23,10 +24,13 @@ NS_IMPL_ADDREF_INHERITED(XMLStylesheetProcessingInstruction,
 NS_IMPL_RELEASE_INHERITED(XMLStylesheetProcessingInstruction,
                           ProcessingInstruction)
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(XMLStylesheetProcessingInstruction)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(XMLStylesheetProcessingInstruction,
                                                   ProcessingInstruction)
   tmp->nsStyleLinkElement::Traverse(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(XMLStylesheetProcessingInstruction,
                                                 ProcessingInstruction)
   tmp->nsStyleLinkElement::Unlink();
@@ -38,9 +42,9 @@ XMLStylesheetProcessingInstruction::~XMLStylesheetProcessingInstruction()
 }
 
 JSObject*
-XMLStylesheetProcessingInstruction::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+XMLStylesheetProcessingInstruction::WrapNode(JSContext *aCx)
 {
-  return XMLStylesheetProcessingInstructionBinding::Wrap(aCx, aScope, this);
+  return XMLStylesheetProcessingInstructionBinding::Wrap(aCx, this);
 }
 
 // nsIContent
@@ -69,7 +73,7 @@ XMLStylesheetProcessingInstruction::UnbindFromTree(bool aDeep, bool aNullParent)
   nsCOMPtr<nsIDocument> oldDoc = GetCurrentDoc();
 
   ProcessingInstruction::UnbindFromTree(aDeep, aNullParent);
-  UpdateStyleSheetInternal(oldDoc);
+  UpdateStyleSheetInternal(oldDoc, nullptr);
 }
 
 // nsIDOMNode
@@ -80,7 +84,7 @@ XMLStylesheetProcessingInstruction::SetNodeValueInternal(const nsAString& aNodeV
 {
   nsGenericDOMDataNode::SetNodeValueInternal(aNodeValue, aError);
   if (!aError.Failed()) {
-    UpdateStyleSheetInternal(nullptr, true);
+    UpdateStyleSheetInternal(nullptr, nullptr, true);
   }
 }
 

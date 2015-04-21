@@ -24,7 +24,7 @@
  */
 
 
-#include "ExecutableAllocator.h"
+#include "assembler/jit/ExecutableAllocator.h"
 
 #if ENABLE_ASSEMBLER && WTF_OS_OS2
 
@@ -41,8 +41,9 @@ size_t ExecutableAllocator::determinePageSize()
 ExecutablePool::Allocation ExecutableAllocator::systemAlloc(size_t n)
 {
     void* allocation = NULL;
-    if (DosAllocMem(&allocation, n, OBJ_ANY|PAG_COMMIT|PAG_READ|PAG_WRITE))
-        DosAllocMem(&allocation, n, PAG_COMMIT|PAG_READ|PAG_WRITE);
+    if (DosAllocMem(&allocation, n, OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE))
+        if (DosAllocMem(&allocation, n, PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE))
+            MOZ_CRASH();
     ExecutablePool::Allocation alloc = { reinterpret_cast<char*>(allocation), n };
     return alloc;
 }
@@ -50,6 +51,21 @@ ExecutablePool::Allocation ExecutableAllocator::systemAlloc(size_t n)
 void ExecutableAllocator::systemRelease(const ExecutablePool::Allocation& alloc)
 {
     DosFreeMem(alloc.pages);
+}
+
+void
+ExecutablePool::toggleAllCodeAsAccessible(bool accessible)
+{
+    char* begin = m_allocation.pages;
+    size_t size = m_freePtr - begin;
+
+    if (size) {
+        // N.B. DEP is not on automatically in Windows XP, so be sure to use
+        // PAGE_NOACCESS instead of PAGE_READWRITE when making inaccessible.
+        ULONG flags = accessible ? PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE : PAG_DECOMMIT;
+        if (DosSetMem(begin, size, flags))
+            MOZ_CRASH();
+    }
 }
 
 #if ENABLE_ASSEMBLER_WX_EXCLUSIVE

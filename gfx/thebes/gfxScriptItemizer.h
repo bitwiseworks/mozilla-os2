@@ -50,9 +50,7 @@
 #ifndef GFX_SCRIPTITEMIZER_H
 #define GFX_SCRIPTITEMIZER_H
 
-#include "mozilla/StandardInteger.h"
-#include "prtypes.h"
-#include "harfbuzz/hb.h"
+#include <stdint.h>
 #include "nsUnicodeScriptCodes.h"
 
 #define PAREN_STACK_DEPTH 32
@@ -60,9 +58,9 @@
 class gfxScriptItemizer
 {
 public:
-    gfxScriptItemizer(const PRUnichar *src, uint32_t length);
+    gfxScriptItemizer(const char16_t *src, uint32_t length);
 
-    void SetText(const PRUnichar *src, uint32_t length);
+    void SetText(const char16_t *src, uint32_t length);
 
     bool Next(uint32_t& aRunStart, uint32_t& aRunLimit,
               int32_t& aRunScript);
@@ -86,7 +84,7 @@ protected:
         int32_t  scriptCode;
     };
 
-    const PRUnichar *textPtr;
+    const char16_t *textPtr;
     uint32_t textLength;
 
     uint32_t scriptStart;

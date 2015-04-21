@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsCOMPtr.h"
 #include "mozilla/dom/SVGForeignObjectElement.h"
@@ -15,9 +15,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGForeignObjectElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGForeignObjectElement::WrapNode(JSContext *aCx)
 {
-  return SVGForeignObjectElementBinding::Wrap(aCx, aScope, this);
+  return SVGForeignObjectElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::LengthInfo SVGForeignObjectElement::sLengthInfo[4] =
@@ -31,7 +31,7 @@ nsSVGElement::LengthInfo SVGForeignObjectElement::sLengthInfo[4] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGForeignObjectElement::SVGForeignObjectElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+SVGForeignObjectElement::SVGForeignObjectElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : SVGGraphicsElement(aNodeInfo)
 {
 }

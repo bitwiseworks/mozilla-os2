@@ -11,6 +11,8 @@
 #include "plarena.h"
 #include "nsClassHashtable.h"
 #include "nsICategoryManager.h"
+#include "nsIMemoryReporter.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Attributes.h"
 
@@ -34,7 +36,7 @@ class CategoryLeaf : public nsDepCharHashKey
 public:
   CategoryLeaf(const char* aKey)
     : nsDepCharHashKey(aKey),
-      value(NULL) { }
+      value(nullptr) { }
   const char* value;
 };
 
@@ -76,7 +78,7 @@ public:
   ~CategoryNode();
   void operator delete(void*) { }
 
-  size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf);
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
 private:
   CategoryNode()
@@ -97,10 +99,12 @@ private:
  */
 class nsCategoryManager MOZ_FINAL
   : public nsICategoryManager
+  , public nsIMemoryReporter
 {
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSICATEGORYMANAGER
+  NS_DECL_NSIMEMORYREPORTER
 
   /**
    * Suppress or unsuppress notifications of category changes to the
@@ -113,7 +117,7 @@ public:
                         const char* aKey,
                         const char* aValue,
                         bool aReplace = true,
-                        char** aOldValue = NULL);
+                        char** aOldValue = nullptr);
 
   static nsresult Create(nsISupports* aOuter, REFNSIID aIID, void** aResult);
   void InitMemoryReporter();
@@ -121,14 +125,13 @@ public:
   static nsCategoryManager* GetSingleton();
   static void Destroy();
 
-  static int64_t GetCategoryManagerSize();
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf);
-
 private:
   static nsCategoryManager* gCategoryManager;
 
   nsCategoryManager();
   ~nsCategoryManager();
+
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
   CategoryNode* get_category(const char* aName);
   void NotifyObservers(const char* aTopic,
@@ -139,8 +142,6 @@ private:
   nsClassHashtable<nsDepCharHashKey, CategoryNode> mTable;
   mozilla::Mutex mLock;
   bool mSuppressNotifications;
-
-  nsIMemoryReporter* mReporter;
 };
 
 #endif

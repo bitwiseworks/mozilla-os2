@@ -221,7 +221,7 @@ Notice for all the files in this folder.
     <property name="sdk.dir" location="${env.ANDROID_SDK_ROOT}"/>
     <property name="sdk.version" value="${env.ANDROID_SDK_VERSION}"/>
 
-    <property name="target" value="android-16"/>
+    <property name="target" value="android-17"/>
 
     <!-- ******************************************************* -->
     <!-- **************** Overridable Properties *************** -->
@@ -283,7 +283,7 @@ Notice for all the files in this folder.
 
     <!-- jar file from where the tasks are loaded -->
     <path id="android.antlibs">
-        <pathelement path="${sdk.dir}/tools/lib/anttasks.jar" />
+        <pathelement path="${sdk.dir}/tools/lib/ant-tasks.jar" />
     </path>
 
     <!-- Custom tasks -->
@@ -329,14 +329,15 @@ Notice for all the files in this folder.
 
     <!-- tools location -->
     <property name="android.tools.dir" location="${sdk.dir}/tools" />
+    <property name="android.build.tools.dir" location="${sdk.dir}/build-tools/${env.ANDROID_SDK_BUILD_TOOLS_VERSION}" />
     <property name="android.platform.tools.dir" location="${sdk.dir}/platform-tools" />
     <condition property="exe" value=".exe" else=""><os family="windows" /></condition>
     <condition property="bat" value=".bat" else=""><os family="windows" /></condition>
     <property name="adb" location="${android.platform.tools.dir}/adb${exe}" />
     <property name="zipalign" location="${android.tools.dir}/zipalign${exe}" />
-    <property name="aidl" location="${android.platform.tools.dir}/aidl${exe}" />
-    <property name="aapt" location="${android.platform.tools.dir}/aapt${exe}" />
-    <property name="dx" location="${android.platform.tools.dir}/dx${bat}" />
+    <property name="aidl" location="${android.build.tools.dir}/aidl${exe}" />
+    <property name="aapt" location="${android.build.tools.dir}/aapt${exe}" />
+    <property name="dx" location="${android.build.tools.dir}/dx${bat}" />
     <property name="renderscript" location="${android.platform.tools.dir}/llvm-rs-cc${exe}"/>
 
     <!-- Renderscript include Path -->
@@ -739,6 +740,7 @@ Notice for all the files in this folder.
                 libraryPackagesOut="project.library.packages"
                 libraryManifestFilePathOut="project.library.manifest.file.path"
                 libraryResFolderPathOut="project.library.res.folder.path"
+                libraryRFilePathOut="project.library.r.file.path"
                 libraryBinAidlFolderPathOut="project.library.bin.aidl.folder.path"
                 libraryNativeFolderPathOut="project.library.native.folder.path"
                 jarLibraryPathOut="project.all.jars.path"
@@ -832,7 +834,7 @@ Notice for all the files in this folder.
             <!-- renderscript generates resources so it must be called before aapt -->
             <echo level="info">----------</echo>
             <echo level="info">Handling RenderScript files...</echo>
-            <renderscript executable="${renderscript}"
+            <renderscript buildToolsRoot="${android.platform.tools.dir}"
                     includePathRefId="android.renderscript.include.path"
                     genFolder="${gen.absolute.dir}"
                     resFolder="${out.res.absolute.dir}/raw"
@@ -853,6 +855,7 @@ Notice for all the files in this folder.
                     rfolder="${gen.absolute.dir}"
                     nonConstantId="${android.library}"
                     libraryResFolderPathRefid="project.library.res.folder.path"
+                    libraryRFileRefid="project.library.r.file"
                     libraryPackagesRefid="project.library.packages"
                     ignoreAssets="${aapt.ignore.assets}"
                     proguardFile="${out.absolute.dir}/proguard.txt">
@@ -1106,6 +1109,7 @@ Notice for all the files in this folder.
                     resourcefilename="${resource.package.file.name}"
                     resourcefilter="${aapt.resource.filter}"
                     libraryResFolderPathRefid="project.library.res.folder.path"
+                    libraryRFileRefid="project.library.r.file"
                     libraryPackagesRefid="project.library.packages"
                     previousBuildType="${build.last.target}"
                     buildType="${build.target}"

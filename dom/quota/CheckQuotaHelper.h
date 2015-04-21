@@ -13,8 +13,8 @@
 #include "nsIObserver.h"
 #include "nsIRunnable.h"
 
-#include "mozilla/Mutex.h"
 #include "mozilla/CondVar.h"
+#include "mozilla/Mutex.h"
 
 class nsIPrincipal;
 class nsPIDOMWindow;
@@ -26,7 +26,7 @@ class CheckQuotaHelper MOZ_FINAL : public nsIRunnable,
                                    public nsIObserver
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSIOBSERVER
@@ -34,11 +34,14 @@ public:
   CheckQuotaHelper(nsPIDOMWindow* aWindow,
                    mozilla::Mutex& aMutex);
 
-  bool PromptAndReturnQuotaIsDisabled();
+  bool
+  PromptAndReturnQuotaIsDisabled();
 
-  void Cancel();
+  void
+  Cancel();
 
-  static uint32_t GetQuotaPermission(nsIPrincipal* aPrincipal);
+  static uint32_t
+  GetQuotaPermission(nsIPrincipal* aPrincipal);
 
 private:
   nsPIDOMWindow* mWindow;

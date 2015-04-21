@@ -37,9 +37,6 @@
                 label="&bookmarkThisLinkCmd.label;"
                 accesskey="&bookmarkThisLinkCmd.accesskey;"
                 oncommand="gContextMenu.bookmarkLink();"/>
-      <menuitem id="context-marklink"
-                accesskey="&social.marklink.accesskey;"
-                oncommand="gContextMenu.markLink();"/>
       <menuitem id="context-sharelink"
                 label="&shareLinkCmd.label;"
                 accesskey="&shareLinkCmd.accesskey;"
@@ -48,6 +45,10 @@
                 label="&saveLinkCmd.label;"
                 accesskey="&saveLinkCmd.accesskey;"
                 oncommand="gContextMenu.saveLink();"/>
+      <menu id="context-marklinkMenu" label="&social.marklinkMenu.label;"
+            accesskey="&social.marklinkMenu.accesskey;">
+        <menupopup/>
+      </menu>
       <menuitem id="context-copyemail"
                 label="&copyEmailCmd.label;"
                 accesskey="&copyEmailCmd.accesskey;"
@@ -55,7 +56,7 @@
       <menuitem id="context-copylink"
                 label="&copyLinkCmd.label;"
                 accesskey="&copyLinkCmd.accesskey;"
-                oncommand="goDoCommand('cmd_copyLink');"/>
+                oncommand="gContextMenu.copyLink();"/>
       <menuseparator id="context-sep-copylink"/>
       <menuitem id="context-media-play"
                 label="&mediaPlay.label;"
@@ -180,6 +181,11 @@
                 label="&viewImageInfoCmd.label;"
                 accesskey="&viewImageInfoCmd.accesskey;"
                 oncommand="gContextMenu.viewImageInfo();"/>
+      <menuitem id="context-viewimagedesc"
+                label="&viewImageDescCmd.label;"
+                accesskey="&viewImageDescCmd.accesskey;"
+                oncommand="gContextMenu.viewImageDesc(event);"
+                onclick="checkForMiddleClick(this, event);"/>
       <menuitem id="context-savevideo"
                 label="&saveVideoCmd.label;"
                 accesskey="&saveVideoCmd.accesskey;"
@@ -237,9 +243,6 @@
                 label="&bookmarkPageCmd2.label;"
                 accesskey="&bookmarkPageCmd2.accesskey;"
                 oncommand="gContextMenu.bookmarkThisPage();"/>
-      <menuitem id="context-markpage"
-                accesskey="&social.markpage.accesskey;"
-                command="Social:TogglePageMark"/>
       <menuitem id="context-sharepage"
                 label="&sharePageCmd.label;"
                 accesskey="&sharePageCmd.accesskey;"
@@ -248,6 +251,10 @@
                 label="&savePageCmd.label;"
                 accesskey="&savePageCmd.accesskey2;"
                 oncommand="gContextMenu.savePageAs();"/>
+      <menu id="context-markpageMenu" label="&social.markpageMenu.label;"
+            accesskey="&social.markpageMenu.accesskey;">
+        <menupopup/>
+      </menu>
       <menuseparator id="context-sep-viewbgimage"/>
       <menuitem id="context-viewbgimage"
                 label="&viewBGImageCmd.label;"
@@ -286,7 +293,7 @@
                 accesskey="&keywordfield.accesskey;"
                 oncommand="AddKeywordForSearchField();"/>
       <menuitem id="context-searchselect"
-                oncommand="BrowserSearch.loadSearchFromContext(getBrowserSelection());"/>
+                oncommand="BrowserSearch.loadSearchFromContext(this.searchTerms);"/>
       <menuitem id="context-shareselect"
                 label="&shareSelectCmd.label;"
                 accesskey="&shareSelectCmd.accesskey;"
@@ -306,7 +313,7 @@
                     label="&openFrameCmd.label;"
                     accesskey="&openFrameCmd.accesskey;"
                     oncommand="gContextMenu.openFrame();"/>
-          <menuseparator/>
+          <menuseparator id="open-frame-sep"/>
           <menuitem id="context-reloadframe"
                     label="&reloadFrameCmd.label;"
                     accesskey="&reloadFrameCmd.accesskey;"

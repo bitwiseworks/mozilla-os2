@@ -11,17 +11,20 @@
 #include "nsGenericHTMLElement.h"
 
 namespace mozilla {
+
+class EventChainPreVisitor;
+
 namespace dom {
 
 class Visitor;
 
-class HTMLMenuItemElement : public nsGenericHTMLElement,
-                            public nsIDOMHTMLMenuItemElement
+class HTMLMenuItemElement MOZ_FINAL : public nsGenericHTMLElement,
+                                      public nsIDOMHTMLMenuItemElement
 {
 public:
   using mozilla::dom::Element::GetText;
 
-  HTMLMenuItemElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+  HTMLMenuItemElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
                       mozilla::dom::FromParser aFromParser);
   virtual ~HTMLMenuItemElement();
 
@@ -30,20 +33,12 @@ public:
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
-
   // nsIDOMHTMLMenuItemElement
   NS_DECL_NSIDOMHTMLMENUITEMELEMENT
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
-  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PostHandleEvent(
+                     EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
 
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
@@ -57,8 +52,6 @@ public:
   virtual void DoneCreatingElement() MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
-
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
   uint8_t GetType() const { return mType; }
 
@@ -124,8 +117,7 @@ public:
   }
 
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
 
 protected:

@@ -5,7 +5,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "GfxInfoBase.h"
 
@@ -25,7 +25,9 @@
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
 #include "nsTArray.h"
+#include "nsXULAppAPI.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/ContentChild.h"
 
 #if defined(MOZ_CRASHREPORTER)
 #include "nsExceptionHandler.h"
@@ -48,7 +50,7 @@ public:
   NS_DECL_ISUPPORTS
 
   NS_IMETHOD Observe(nsISupports *subject, const char *aTopic,
-                     const PRUnichar *aData)
+                     const char16_t *aData)
   {
     MOZ_ASSERT(strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0);
 
@@ -65,7 +67,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(ShutdownObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(ShutdownObserver, nsIObserver)
 
 void InitGfxDriverInfoShutdownObserver()
 {
@@ -87,7 +89,7 @@ void InitGfxDriverInfoShutdownObserver()
 using namespace mozilla::widget;
 using namespace mozilla;
 
-NS_IMPL_THREADSAFE_ISUPPORTS3(GfxInfoBase, nsIGfxInfo, nsIObserver, nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(GfxInfoBase, nsIGfxInfo, nsIObserver, nsISupportsWeakReference)
 
 #define BLACKLIST_PREF_BRANCH "gfx.blacklist."
 #define SUGGESTED_VERSION_PREF BLACKLIST_PREF_BRANCH "suggested-driver-version"
@@ -211,6 +213,8 @@ BlacklistOSToOperatingSystem(const nsAString& os)
     return DRIVER_OS_WINDOWS_7;
   else if (os == NS_LITERAL_STRING("WINNT 6.2"))
     return DRIVER_OS_WINDOWS_8;
+  else if (os == NS_LITERAL_STRING("WINNT 6.3"))
+    return DRIVER_OS_WINDOWS_8_1;
   else if (os == NS_LITERAL_STRING("Linux"))
     return DRIVER_OS_LINUX;
   else if (os == NS_LITERAL_STRING("Darwin 9"))
@@ -340,7 +344,7 @@ BlacklistNodeGetChildByName(nsIDOMElement *element,
   if (NS_FAILED(nodelist->Item(0, getter_AddRefs(node))) || !node)
     return false;
 
-  *firstchild = node.forget().get();
+  node.forget(firstchild);
   return true;
 }
 
@@ -388,7 +392,8 @@ BlacklistEntryToDriverInfo(nsIDOMNode* aBlacklistEntry,
   if (BlacklistNodeGetChildByName(element, NS_LITERAL_STRING("osversion"),
                                   getter_AddRefs(dataNode))) {
     BlacklistNodeToTextValue(dataNode, dataValue);
-    aDriverInfo.mOperatingSystemVersion = strtoul(NS_LossyConvertUTF16toASCII(dataValue).get(), NULL, 10);
+    aDriverInfo.mOperatingSystemVersion = strtoul(NS_LossyConvertUTF16toASCII(dataValue).get(),
+                                                  nullptr, 10);
   }
 
   // <vendor>0x8086</vendor>
@@ -509,7 +514,7 @@ BlacklistEntriesToDriverInfo(nsIDOMHTMLCollection* aBlacklistEntries,
 
 NS_IMETHODIMP
 GfxInfoBase::Observe(nsISupports* aSubject, const char* aTopic,
-                     const PRUnichar* aData)
+                     const char16_t* aData)
 {
   if (strcmp(aTopic, "blocklist-data-gfxItems") == 0) {
     nsCOMPtr<nsIDOMElement> gfxItems = do_QueryInterface(aSubject);
@@ -559,6 +564,14 @@ GfxInfoBase::GetFeatureStatus(int32_t aFeature, int32_t* aStatus)
   if (GetPrefValueForFeature(aFeature, *aStatus))
     return NS_OK;
 
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+      // Delegate to the parent process.
+      mozilla::dom::ContentChild* cc = mozilla::dom::ContentChild::GetSingleton();
+      bool success;
+      cc->SendGetGraphicsFeatureStatus(aFeature, aStatus, &success);
+      return success ? NS_OK : NS_ERROR_FAILURE;
+  }
+
   nsString version;
   nsTArray<GfxDriverInfo> driverInfo;
   return GetFeatureStatusImpl(aFeature, aStatus, version, driverInfo);
@@ -582,8 +595,10 @@ GfxInfoBase::FindBlocklistedDeviceInList(const nsTArray<GfxDriverInfo>& info,
     return 0;
   }
 
+#if defined(XP_WIN) || defined(ANDROID)
   uint64_t driverVersion;
   ParseDriverVersion(adapterDriverVersionString, &driverVersion);
+#endif
 
   uint32_t i = 0;
   for (; i < info.Length(); i++) {
@@ -733,9 +748,6 @@ GfxInfoBase::GetFeatureStatusImpl(int32_t aFeature,
   {
     return NS_OK;
   }
-
-  uint64_t driverVersion;
-  ParseDriverVersion(adapterDriverVersionString, &driverVersion);
 
   // Check if the device is blocked from the downloaded blocklist. If not, check
   // the static list after that. This order is used so that we can later escape
@@ -894,7 +906,7 @@ InitCollectors()
     sCollectors = new nsTArray<GfxInfoCollectorBase*>;
 }
 
-nsresult GfxInfoBase::GetInfo(JSContext* aCx, jsval* aResult)
+nsresult GfxInfoBase::GetInfo(JSContext* aCx, JS::MutableHandle<JS::Value> aResult)
 {
   InitCollectors();
   InfoObject obj(aCx);
@@ -912,7 +924,7 @@ nsresult GfxInfoBase::GetInfo(JSContext* aCx, jsval* aResult)
     return NS_ERROR_FAILURE;
   }
 
-  *aResult = OBJECT_TO_JSVAL(obj.mObj);
+  aResult.setObject(*obj.mObj);
   return NS_OK;
 }
 

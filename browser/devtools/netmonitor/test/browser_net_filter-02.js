@@ -9,6 +9,9 @@ function test() {
   initNetMonitor(FILTERING_URL).then(([aTab, aDebuggee, aMonitor]) => {
     info("Starting test... ");
 
+    // It seems that this test may be slow on Ubuntu builds running on ec2.
+    requestLongerTimeout(2);
+
     let { $, NetMonitorView } = aMonitor.panelWin;
     let { RequestsMenu } = NetMonitorView;
 
@@ -24,12 +27,12 @@ function test() {
       is(NetMonitorView.detailsPaneHidden, false,
         "The details pane should not be hidden after toggle button was pressed.");
 
-      testButtons("all");
+      testFilterButtons(aMonitor, "all");
       testContents([1, 1, 1, 1, 1, 1, 1, 1])
         .then(() => {
           info("Testing html filtering.");
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-html-button"));
-          testButtons("html");
+          testFilterButtons(aMonitor, "html");
           return testContents([1, 0, 0, 0, 0, 0, 0, 0]);
         })
         .then(() => {
@@ -39,7 +42,7 @@ function test() {
         })
         .then(() => {
           info("Testing html filtering again.");
-          testButtons("html");
+          testFilterButtons(aMonitor, "html");
           return testContents([1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]);
         })
         .then(() => {
@@ -49,30 +52,20 @@ function test() {
         })
         .then(() => {
           info("Testing html filtering again.");
-          testButtons("html");
+          testFilterButtons(aMonitor, "html");
           return testContents([1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]);
+        })
+        .then(() => {
+          info("Resetting filters.");
+          EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-all-button"));
+          testFilterButtons(aMonitor, "all");
+          return testContents([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
         })
         .then(() => {
           return teardown(aMonitor);
         })
         .then(finish);
     });
-
-    function testButtons(aFilterType) {
-      let doc = aMonitor.panelWin.document;
-      let target = doc.querySelector("#requests-menu-filter-" + aFilterType + "-button");
-      let buttons = doc.querySelectorAll(".requests-menu-footer-button");
-
-      for (let button of buttons) {
-        if (button != target) {
-          is(button.hasAttribute("checked"), false,
-            "The " + button.id + " button should not have a 'checked' attribute.");
-        } else {
-          is(button.hasAttribute("checked"), true,
-            "The " + button.id + " button should have a 'checked' attribute.");
-        }
-      }
-    }
 
     function testContents(aVisibility) {
       isnot(RequestsMenu.selectedItem, null,
@@ -82,7 +75,7 @@ function test() {
       is(NetMonitorView.detailsPaneHidden, false,
         "The details pane should still be visible after filtering.");
 
-      is(RequestsMenu.orderedItems.length, aVisibility.length,
+      is(RequestsMenu.items.length, aVisibility.length,
         "There should be a specific amount of items in the requests menu.");
       is(RequestsMenu.visibleItems.length, aVisibility.filter(e => e).length,
         "There should be a specific amount of visbile items in the requests menu.");
@@ -173,7 +166,7 @@ function test() {
         });
       }
 
-      return Promise.resolve(null);
+      return promise.resolve(null);
     }
 
     aDebuggee.performRequests('{ "getMedia": true, "getFlash": true }');

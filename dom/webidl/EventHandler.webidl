@@ -10,184 +10,141 @@
  * Opera Software ASA. You are granted a license to use, reproduce
  * and create derivative works of this document.
  */
-[TreatNonCallableAsNull]
+[TreatNonObjectAsNull]
 callback EventHandlerNonNull = any (Event event);
 typedef EventHandlerNonNull? EventHandler;
 
-[TreatNonCallableAsNull]
-callback BeforeUnloadEventHandlerNonNull = DOMString? (Event event);
-typedef BeforeUnloadEventHandlerNonNull? BeforeUnloadEventHandler;
+[TreatNonObjectAsNull]
+// https://www.w3.org/Bugs/Public/show_bug.cgi?id=23489
+//callback OnBeforeUnloadEventHandlerNonNull = DOMString (Event event);
+callback OnBeforeUnloadEventHandlerNonNull = DOMString? (Event event);
+typedef OnBeforeUnloadEventHandlerNonNull? OnBeforeUnloadEventHandler;
 
-[TreatNonCallableAsNull]
-callback OnErrorEventHandlerNonNull = boolean ((Event or DOMString) event, optional DOMString source, optional unsigned long lineno, optional unsigned long column);
+[TreatNonObjectAsNull]
+callback OnErrorEventHandlerNonNull = boolean ((Event or DOMString) event, optional DOMString source, optional unsigned long lineno, optional unsigned long column, optional any error);
 typedef OnErrorEventHandlerNonNull? OnErrorEventHandler;
 
 [NoInterfaceObject]
 interface GlobalEventHandlers {
-           [SetterThrows]
            attribute EventHandler onabort;
-           //(Not implemented)[SetterThrows]
+           attribute EventHandler onblur;
+// We think the spec is wrong here. See OnErrorEventHandlerForNodes/Window
+// below.
+//         attribute OnErrorEventHandler onerror;
+           attribute EventHandler onfocus;
            //(Not implemented)attribute EventHandler oncancel;
-           [SetterThrows]
            attribute EventHandler oncanplay;
-           [SetterThrows]
            attribute EventHandler oncanplaythrough;
-           [SetterThrows]
            attribute EventHandler onchange;
-           [SetterThrows]
            attribute EventHandler onclick;
-           //(Not implemented)[SetterThrows]
            //(Not implemented)attribute EventHandler onclose;
-           [SetterThrows]
            attribute EventHandler oncontextmenu;
-           //(Not implemented)[SetterThrows]
            //(Not implemented)attribute EventHandler oncuechange;
-           [SetterThrows]
            attribute EventHandler ondblclick;
-           [SetterThrows]
            attribute EventHandler ondrag;
-           [SetterThrows]
            attribute EventHandler ondragend;
-           [SetterThrows]
            attribute EventHandler ondragenter;
-           [SetterThrows]
+           //(Not implemented)attribute EventHandler ondragexit;
            attribute EventHandler ondragleave;
-           [SetterThrows]
            attribute EventHandler ondragover;
-           [SetterThrows]
            attribute EventHandler ondragstart;
-           [SetterThrows]
            attribute EventHandler ondrop;
-           [SetterThrows]
            attribute EventHandler ondurationchange;
-           [SetterThrows]
            attribute EventHandler onemptied;
-           [SetterThrows]
            attribute EventHandler onended;
-           [SetterThrows]
            attribute EventHandler oninput;
-           [SetterThrows]
            attribute EventHandler oninvalid;
-           [SetterThrows]
            attribute EventHandler onkeydown;
-           [SetterThrows]
            attribute EventHandler onkeypress;
-           [SetterThrows]
            attribute EventHandler onkeyup;
-           [SetterThrows]
+           attribute EventHandler onload;
            attribute EventHandler onloadeddata;
-           [SetterThrows]
            attribute EventHandler onloadedmetadata;
-           [SetterThrows]
            attribute EventHandler onloadstart;
-           [SetterThrows]
            attribute EventHandler onmousedown;
-           [SetterThrows]
+  [LenientThis] attribute EventHandler onmouseenter;
+  [LenientThis] attribute EventHandler onmouseleave;
            attribute EventHandler onmousemove;
-           [SetterThrows]
            attribute EventHandler onmouseout;
-           [SetterThrows]
            attribute EventHandler onmouseover;
-           [SetterThrows]
            attribute EventHandler onmouseup;
-           //(Not implemented)[SetterThrows]
            //(Not implemented)attribute EventHandler onmousewheel;
-           [SetterThrows]
            attribute EventHandler onpause;
-           [SetterThrows]
            attribute EventHandler onplay;
-           [SetterThrows]
            attribute EventHandler onplaying;
-           [SetterThrows]
            attribute EventHandler onprogress;
-           [SetterThrows]
            attribute EventHandler onratechange;
-           [SetterThrows]
            attribute EventHandler onreset;
-           [SetterThrows]
+           attribute EventHandler onscroll;
            attribute EventHandler onseeked;
-           [SetterThrows]
            attribute EventHandler onseeking;
-           [SetterThrows]
            attribute EventHandler onselect;
-           [SetterThrows]
            attribute EventHandler onshow;
-           //(Not implemented)[SetterThrows]
            //(Not implemented)attribute EventHandler onsort;
-           [SetterThrows]
            attribute EventHandler onstalled;
-           [SetterThrows]
            attribute EventHandler onsubmit;
-           [SetterThrows]
            attribute EventHandler onsuspend;
-           [SetterThrows]
            attribute EventHandler ontimeupdate;
-           [SetterThrows]
            attribute EventHandler onvolumechange;
-           [SetterThrows]
            attribute EventHandler onwaiting;
 
+           // Pointer events handlers
+           [Pref="dom.w3c_pointer_events.enabled"]
+           attribute EventHandler onpointercancel;
+           [Pref="dom.w3c_pointer_events.enabled"]
+           attribute EventHandler onpointerdown;
+           [Pref="dom.w3c_pointer_events.enabled"]
+           attribute EventHandler onpointerup;
+           [Pref="dom.w3c_pointer_events.enabled"]
+           attribute EventHandler onpointermove;
+           [Pref="dom.w3c_pointer_events.enabled"]
+           attribute EventHandler onpointerout;
+           [Pref="dom.w3c_pointer_events.enabled"]
+           attribute EventHandler onpointerover;
+           [Pref="dom.w3c_pointer_events.enabled"]
+           attribute EventHandler onpointerenter;
+           [Pref="dom.w3c_pointer_events.enabled"]
+           attribute EventHandler onpointerleave;
+           [Pref="dom.w3c_pointer_events.enabled"]
+           attribute EventHandler ongotpointercapture;
+           [Pref="dom.w3c_pointer_events.enabled"]
+           attribute EventHandler onlostpointercapture;
+
            // Mozilla-specific handlers
-           [SetterThrows]
            attribute EventHandler onmozfullscreenchange;
-           [SetterThrows]
            attribute EventHandler onmozfullscreenerror;
-           [SetterThrows]
            attribute EventHandler onmozpointerlockchange;
-           [SetterThrows]
            attribute EventHandler onmozpointerlockerror;
 };
 
 [NoInterfaceObject]
-interface NodeEventHandlers {
-           [SetterThrows]
-           attribute EventHandler onblur;
-  // We think the spec is wrong here.
-  //         attribute OnErrorEventHandler onerror;
-           [SetterThrows]
+interface WindowEventHandlers {
+           attribute EventHandler onafterprint;
+           attribute EventHandler onbeforeprint;
+           attribute OnBeforeUnloadEventHandler onbeforeunload;
+           attribute EventHandler onhashchange;
+           attribute EventHandler onmessage;
+           attribute EventHandler onoffline;
+           attribute EventHandler ononline;
+           attribute EventHandler onpagehide;
+           attribute EventHandler onpageshow;
+           attribute EventHandler onpopstate;
+           attribute EventHandler onresize;
+           //(Not implemented)attribute EventHandler onstorage;
+           attribute EventHandler onunload;
+};
+
+// The spec has |attribute OnErrorEventHandler onerror;| on
+// GlobalEventHandlers, and calls the handler differently depending on
+// whether an ErrorEvent was fired. We don't do that, and until we do we'll
+// need to distinguish between onerror on Window or on nodes.
+
+[NoInterfaceObject]
+interface OnErrorEventHandlerForNodes {
            attribute EventHandler onerror;
-           [SetterThrows]
-           attribute EventHandler onfocus;
-           [SetterThrows]
-           attribute EventHandler onload;
-           [SetterThrows]
-           attribute EventHandler onscroll;
 };
 
 [NoInterfaceObject]
-interface WindowEventHandlers {
-           [SetterThrows]
-           attribute EventHandler onafterprint;
-           [SetterThrows]
-           attribute EventHandler onbeforeprint;
-           [SetterThrows]
-           attribute BeforeUnloadEventHandler onbeforeunload;
-  //       For now, onerror comes from NodeEventHandlers
-  //       When we convert Window to WebIDL this may need to change.
-  //       [SetterThrows]
-  //       attribute OnErrorEventHandler onerror;
-           //(Not implemented)[SetterThrows]
-           //(Not implemented)attribute EventHandler onfullscreenchange;
-           //(Not implemented)[SetterThrows]
-           //(Not implemented)attribute EventHandler onfullscreenerror;
-           [SetterThrows]
-           attribute EventHandler onhashchange;
-           [SetterThrows]
-           attribute EventHandler onmessage;
-           [SetterThrows]
-           attribute EventHandler onoffline;
-           [SetterThrows]
-           attribute EventHandler ononline;
-           [SetterThrows]
-           attribute EventHandler onpagehide;
-           [SetterThrows]
-           attribute EventHandler onpageshow;
-           [SetterThrows]
-           attribute EventHandler onpopstate;
-           [SetterThrows]
-           attribute EventHandler onresize;
-           //(Not implemented)[SetterThrows]
-           //(Not implemented)attribute EventHandler onstorage;
-           [SetterThrows]
-           attribute EventHandler onunload;
+interface OnErrorEventHandlerForWindow {
+           attribute OnErrorEventHandler onerror;
 };

@@ -1,10 +1,28 @@
 #include "TestUrgency.h"
 
 #include "IPDLUnitTests.h"      // fail etc.
+#if defined(OS_POSIX)
 #include <unistd.h>
+#else
+#include <windows.h>
+#endif
+
+template<>
+struct RunnableMethodTraits<mozilla::_ipdltest::TestUrgencyParent>
+{
+    static void RetainCallee(mozilla::_ipdltest::TestUrgencyParent* obj) { }
+    static void ReleaseCallee(mozilla::_ipdltest::TestUrgencyParent* obj) { }
+};
 
 namespace mozilla {
 namespace _ipdltest {
+
+#if defined(OS_POSIX)
+static void Sleep(int ms)
+{
+    sleep(ms / 1000);
+}
+#endif
 
 //-----------------------------------------------------------------------------
 // parent
@@ -59,6 +77,21 @@ TestUrgencyParent::RecvTest3(uint32_t *value)
   return true;
 }
 
+bool
+TestUrgencyParent::RecvFinalTest_Begin()
+{
+  SetReplyTimeoutMs(2000);
+  if (CallFinalTest_Hang())
+    fail("should have failed due to timeout");
+  if (!GetIPCChannel()->Unsound_IsClosed())
+    fail("channel should have closed");
+
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(this, &TestUrgencyParent::Close));
+  return false;
+}
+
 //-----------------------------------------------------------------------------
 // child
 
@@ -97,6 +130,10 @@ TestUrgencyChild::RecvStart()
   if (result != 1000)
     fail("wrong value from test3");
 
+  // This must be the last test, since the child process may die.
+  if (SendFinalTest_Begin())
+    fail("Final test should not have succeeded");
+
   Close();
 
   return true;
@@ -120,10 +157,17 @@ TestUrgencyChild::AnswerReply2(uint32_t *reply)
     fail("wrong test # in AnswerReply2");
 
   // sleep for 5 seconds so the parent process tries to deliver more messages.
-  sleep(5);
+  Sleep(5000);
 
   *reply = 500;
   test_ = kSecondTestGotReply;
+  return true;
+}
+
+bool
+TestUrgencyChild::AnswerFinalTest_Hang()
+{
+  Sleep(10);
   return true;
 }
 

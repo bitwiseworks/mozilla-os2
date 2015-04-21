@@ -9,16 +9,21 @@ const TEST_URI = "http://example.com/browser/browser/devtools/webconsole/test/te
 
 function test()
 {
-  let oldFunction = HUDConsoleUI.toggleBrowserConsole;
-  let functionExecuted = false;
-  HUDConsoleUI.toggleBrowserConsole = () => functionExecuted = true;
-  EventUtils.synthesizeKey("j", { accelKey: true, shiftKey: true }, content);
+  Services.obs.addObserver(function observer(aSubject) {
+    Services.obs.removeObserver(observer, "web-console-created");
+    aSubject.QueryInterface(Ci.nsISupportsString);
 
-  ok(functionExecuted,
-     "toggleBrowserConsole() was executed by the Ctrl-Shift-J key shortcut");
+    let hud = HUDService.getBrowserConsole();
+    ok(hud, "browser console is open");
+    is(aSubject.data, hud.hudId, "notification hudId is correct");
 
-  HUDConsoleUI.toggleBrowserConsole = oldFunction;
-  HUDConsoleUI.toggleBrowserConsole().then(consoleOpened);
+    executeSoon(() => consoleOpened(hud));
+  }, "web-console-created", false);
+
+  let hud = HUDService.getBrowserConsole();
+  ok(!hud, "browser console is not open");
+  info("wait for the browser console to open with ctrl-shift-j");
+  EventUtils.synthesizeKey("j", { accelKey: true, shiftKey: true }, window);
 }
 
 function consoleOpened(hud)
@@ -45,58 +50,39 @@ function consoleOpened(hud)
   xhr.open("get", TEST_URI, true);
   xhr.send();
 
-  let chromeConsole = -1;
-  let contentConsole = -1;
-  let execValue = -1;
-  let exception = -1;
-  let xhrRequest = false;
-
-  let output = hud.outputNode;
-  function performChecks()
-  {
-    let text = output.textContent;
-    chromeConsole = text.indexOf("bug587757a");
-    contentConsole = text.indexOf("bug587757b");
-    execValue = text.indexOf("browser.xul");
-    exception = text.indexOf("foobarExceptionBug587757");
-
-    xhrRequest = false;
-    let urls = output.querySelectorAll(".webconsole-msg-url");
-    for (let url of urls) {
-      if (url.value.indexOf(TEST_URI) > -1) {
-        xhrRequest = true;
-        break;
-      }
-    }
-  }
-
-  function showResults()
-  {
-    isnot(chromeConsole, -1, "chrome window console.log() is displayed");
-    isnot(contentConsole, -1, "content window console.log() is displayed");
-    isnot(execValue, -1, "jsterm eval result is displayed");
-    isnot(exception, -1, "exception is displayed");
-    ok(xhrRequest, "xhr request is displayed");
-  }
-
-  waitForSuccess({
-    name: "messages displayed",
-    validatorFn: () => {
-      performChecks();
-      return chromeConsole > -1 &&
-             contentConsole > -1 &&
-             execValue > -1 &&
-             exception > -1 &&
-             xhrRequest;
-    },
-    successFn: () => {
-      showResults();
-      executeSoon(finishTest);
-    },
-    failureFn: () => {
-      showResults();
-      info("output: " + output.textContent);
-      executeSoon(finishTest);
-    },
-  });
+  waitForMessages({
+    webconsole: hud,
+    messages: [
+      {
+        name: "chrome window console.log() is displayed",
+        text: "bug587757a",
+        category: CATEGORY_WEBDEV,
+        severity: SEVERITY_LOG,
+      },
+      {
+        name: "content window console.log() is displayed",
+        text: "bug587757b",
+        category: CATEGORY_WEBDEV,
+        severity: SEVERITY_LOG,
+      },
+      {
+        name: "jsterm eval result",
+        text: "browser.xul",
+        category: CATEGORY_OUTPUT,
+        severity: SEVERITY_LOG,
+      },
+      {
+        name: "exception message",
+        text: "foobarExceptionBug587757",
+        category: CATEGORY_JS,
+        severity: SEVERITY_ERROR,
+      },
+      {
+        name: "network message",
+        text: "test-console.html",
+        category: CATEGORY_NETWORK,
+        severity: SEVERITY_LOG,
+      },
+    ],
+  }).then(finishTest);
 }

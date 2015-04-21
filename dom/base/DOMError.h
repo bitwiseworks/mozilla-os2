@@ -8,13 +8,15 @@
 #define mozilla_dom_domerror_h__
 
 #include "mozilla/Attributes.h"
-#include "mozilla/ErrorResult.h"
-#include "mozilla/dom/BindingUtils.h"
-#include "nsCycleCollectionParticipant.h"
-#include "nsPIDOMWindow.h"
 #include "nsWrapperCache.h"
+#include "nsCOMPtr.h"
+#include "nsString.h"
+#include "nsPIDOMWindow.h"
 
 namespace mozilla {
+
+class ErrorResult;
+
 namespace dom {
 
 class GlobalObject;
@@ -33,6 +35,8 @@ public:
   // aWindow can be null if this DOMError is not associated with a particular
   // window.
 
+  DOMError(nsPIDOMWindow* aWindow);
+
   DOMError(nsPIDOMWindow* aWindow, nsresult aValue);
 
   DOMError(nsPIDOMWindow* aWindow, const nsAString& aName);
@@ -48,7 +52,7 @@ public:
   }
 
   virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   static already_AddRefed<DOMError>
   Constructor(const GlobalObject& global, const nsAString& name,
@@ -62,6 +66,12 @@ public:
   void GetMessage(nsString& aRetval) const
   {
     aRetval = mMessage;
+  }
+
+  void Init(const nsAString& aName, const nsAString& aMessage)
+  {
+    mName = aName;
+    mMessage = aMessage;
   }
 };
 

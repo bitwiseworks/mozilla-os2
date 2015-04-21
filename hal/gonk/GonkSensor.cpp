@@ -25,6 +25,7 @@
 #include "Hal.h"
 #include "HalSensor.h"
 #include "hardware/sensors.h"
+#include "nsThreadUtils.h"
 
 #undef LOG
 
@@ -39,6 +40,9 @@ namespace mozilla {
 
 // The value from SensorDevice.h (Android)
 #define DEFAULT_DEVICE_POLL_RATE 200000000 /*200ms*/
+// ProcessOrientation.cpp needs smaller poll rate to detect delay between
+// different orientation angles
+#define ACCELEROMETER_POLL_RATE 66667000 /*66.667ms*/
 
 double radToDeg(double a) {
   return a * (180.0 / M_PI);
@@ -182,6 +186,14 @@ PollSensors()
       if (buffer[i].type == SENSOR_TYPE_MAGNETIC_FIELD)
         continue;
 
+      // Bug 938035, transfer HAL data for orientation sensor to meet w3c spec
+      // ex: HAL report alpha=90 means East but alpha=90 means West in w3c spec
+      if (buffer[i].type == SENSOR_TYPE_ORIENTATION) {
+        buffer[i].orientation.azimuth = 360 - buffer[i].orientation.azimuth;
+        buffer[i].orientation.pitch = -buffer[i].orientation.pitch;
+        buffer[i].orientation.roll = -buffer[i].orientation.roll;
+      }
+
       if (HardwareSensorToHalSensor(buffer[i].type) == SENSOR_UNKNOWN) {
         // Emulator is broken and gives us events without types set
         int index;
@@ -214,8 +226,13 @@ SwitchSensor(bool aActivate, sensor_t aSensor, pthread_t aThreadId)
   sSensorDevice->activate(sSensorDevice, aSensor.handle, aActivate);
 
   if (aActivate) {
-    sSensorDevice->setDelay(sSensorDevice, aSensor.handle,
+    if (aSensor.type == SENSOR_TYPE_ACCELEROMETER) {
+      sSensorDevice->setDelay(sSensorDevice, aSensor.handle,
+                   ACCELEROMETER_POLL_RATE);
+    } else {
+      sSensorDevice->setDelay(sSensorDevice, aSensor.handle,
                    DEFAULT_DEVICE_POLL_RATE);
+    }
   }
 
   if (aActivate) {
@@ -229,7 +246,7 @@ static void
 SetSensorState(SensorType aSensor, bool activate)
 {
   int type = HalSensorToHardwareSensor(aSensor);
-  const sensor_t* sensors = NULL;
+  const sensor_t* sensors = nullptr;
 
   int size = sSensorModule->get_sensors_list(sSensorModule, &sensors);
   for (ssize_t i = 0; i < size; i++) {
@@ -253,7 +270,7 @@ EnableSensorNotifications(SensorType aSensor)
 
     sensors_open(&sSensorModule->common, &sSensorDevice);
     if (!sSensorDevice) {
-      sSensorModule = NULL;
+      sSensorModule = nullptr;
       LOGE("Can't get sensor poll device from module \n");
       return;
     }

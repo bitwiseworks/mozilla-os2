@@ -109,7 +109,7 @@
       substitute: function(source) {
         let map = this._map;
         return source.replace(this.regexp, function(url) {
-          return map.get(url);
+          return map.get(url) || url;
         }, "g");
       }
     };
@@ -147,10 +147,12 @@
       if (typeof path != "string" || path.indexOf("://") == -1) {
         throw new TypeError("The argument to require() must be a string uri, got " + path);
       }
-      // Determine uri for the module
-      let uri = path;
-      if (!(uri.endsWith(".js"))) {
-        uri += ".js";
+      // Automatically add ".js" if there is no extension
+      let uri;
+      if (path.lastIndexOf(".") <= path.lastIndexOf("/")) {
+        uri = path + ".js";
+      } else {
+        uri = path;
       }
 
       // Exports provided by the module
@@ -166,22 +168,21 @@
       // Make module available immediately
       // (necessary in case of circular dependencies)
       if (modules.has(path)) {
-        return modules.get(path);
+        return modules.get(path).exports;
       }
-      modules.set(path, exports);
+      modules.set(path, module);
 
-
-      // Load source of module, synchronously
-      let xhr = new XMLHttpRequest();
-      xhr.open("GET", uri, false);
-      xhr.responseType = "text";
-      xhr.send();
-
-
-      let source = xhr.responseText;
       let name = ":" + path;
       let objectURL;
       try {
+        // Load source of module, synchronously
+        let xhr = new XMLHttpRequest();
+        xhr.open("GET", uri, false);
+        xhr.responseType = "text";
+        xhr.send();
+
+
+        let source = xhr.responseText;
         if (source == "") {
           // There doesn't seem to be a better way to detect that the file couldn't be found
           throw new Error("Could not find module " + path);
@@ -191,14 +192,19 @@
         // we do not mess up with line numbers. However, using object URLs
         // messes up with stack traces in instances of Error().
         source = "require._tmpModules[\"" + name + "\"] = " +
-          "function(exports, require, modules) {" +
+          "function(exports, require, module) {" +
           source +
         "\n}\n";
-        let blob = new Blob([(new TextEncoder()).encode(source)]);
+        let blob = new Blob(
+          [
+            (new TextEncoder()).encode(source)
+          ], {
+            type: "application/javascript"
+          });
         objectURL = URL.createObjectURL(blob);
         paths.set(objectURL, path);
         importScripts(objectURL);
-        require._tmpModules[name](exports, require, modules);
+        require._tmpModules[name].call(null, exports, require, module);
 
       } catch (ex) {
         // Module loading has failed, exports should not be made available
@@ -214,6 +220,7 @@
       }
 
       Object.freeze(module.exports);
+      Object.freeze(module);
       return module.exports;
     };
   })();

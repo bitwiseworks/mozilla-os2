@@ -2,7 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#pragma once
+#ifndef mozilla_dom_SpeechSynthesisParent_h
+#define mozilla_dom_SpeechSynthesisParent_h
 
 #include "mozilla/dom/PSpeechSynthesisParent.h"
 #include "mozilla/dom/PSpeechSynthesisRequestParent.h"
@@ -22,19 +23,20 @@ class SpeechSynthesisParent : public PSpeechSynthesisParent
 
 public:
   bool RecvReadVoiceList(InfallibleTArray<RemoteVoice>* aVoices,
-                         InfallibleTArray<nsString>* aDefaults);
+                         InfallibleTArray<nsString>* aDefaults) MOZ_OVERRIDE;
 
 protected:
   SpeechSynthesisParent();
   virtual ~SpeechSynthesisParent();
-  PSpeechSynthesisRequestParent* AllocPSpeechSynthesisRequest(const nsString& aText,
-                                                              const nsString& aLang,
-                                                              const nsString& aUri,
-                                                              const float& aVolume,
-                                                              const float& aRate,
-                                                              const float& aPitch);
+  PSpeechSynthesisRequestParent* AllocPSpeechSynthesisRequestParent(const nsString& aText,
+                                                                    const nsString& aLang,
+                                                                    const nsString& aUri,
+                                                                    const float& aVolume,
+                                                                    const float& aRate,
+                                                                    const float& aPitch)
+                                                                    MOZ_OVERRIDE;
 
-  bool DeallocPSpeechSynthesisRequest(PSpeechSynthesisRequestParent* aActor);
+  bool DeallocPSpeechSynthesisRequestParent(PSpeechSynthesisRequestParent* aActor) MOZ_OVERRIDE;
 
   bool RecvPSpeechSynthesisRequestConstructor(PSpeechSynthesisRequestParent* aActor,
                                               const nsString& aText,
@@ -42,7 +44,7 @@ protected:
                                               const nsString& aUri,
                                               const float& aVolume,
                                               const float& aRate,
-                                              const float& aPitch);
+                                              const float& aPitch) MOZ_OVERRIDE;
 };
 
 class SpeechSynthesisRequestParent : public PSpeechSynthesisRequestParent
@@ -55,11 +57,11 @@ public:
 
 protected:
 
-  virtual bool RecvPause();
+  virtual bool RecvPause() MOZ_OVERRIDE;
 
-  virtual bool RecvResume();
+  virtual bool RecvResume() MOZ_OVERRIDE;
 
-  virtual bool RecvCancel();
+  virtual bool RecvCancel() MOZ_OVERRIDE;
 };
 
 class SpeechTaskParent : public nsSpeechTask
@@ -91,3 +93,5 @@ private:
 
 } // namespace dom
 } // namespace mozilla
+
+#endif

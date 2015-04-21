@@ -11,7 +11,9 @@
 #include "ImageContainer.h"
 #include "ImageTypes.h"
 #include "prmem.h"
+#include "nsContentUtils.h"
 
+#include "nsIFilePicker.h"
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 
@@ -20,19 +22,26 @@
 #include "nsISupportsUtils.h"
 #endif
 
+#if defined(MOZ_WEBRTC) && defined(MOZ_WEBRTC_SIGNALING)
+#include "YuvStamper.h"
+#endif
+
 #define VIDEO_RATE USECS_PER_S
 #define AUDIO_RATE 16000
-
+#define AUDIO_FRAME_LENGTH ((AUDIO_RATE * MediaEngine::DEFAULT_AUDIO_TIMER_MS) / 1000)
 namespace mozilla {
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(MediaEngineDefaultVideoSource, nsITimerCallback)
+using namespace mozilla::gfx;
+
+NS_IMPL_ISUPPORTS(MediaEngineDefaultVideoSource, nsITimerCallback)
 /**
  * Default video source.
  */
 
 MediaEngineDefaultVideoSource::MediaEngineDefaultVideoSource()
-  : mTimer(nullptr)
+  : mTimer(nullptr), mMonitor("Fake video")
 {
+  mImageContainer = layers::LayerManager::CreateImageContainer();
   mState = kReleased;
 }
 
@@ -54,13 +63,16 @@ MediaEngineDefaultVideoSource::GetUUID(nsAString& aUUID)
 }
 
 nsresult
-MediaEngineDefaultVideoSource::Allocate(const MediaEnginePrefs &aPrefs)
+MediaEngineDefaultVideoSource::Allocate(const VideoTrackConstraintsN &aConstraints,
+                                        const MediaEnginePrefs &aPrefs)
 {
   if (mState != kReleased) {
     return NS_ERROR_FAILURE;
   }
 
   mOpts = aPrefs;
+  mOpts.mWidth = mOpts.mWidth ? mOpts.mWidth : MediaEngine::DEFAULT_43_VIDEO_WIDTH;
+  mOpts.mHeight = mOpts.mHeight ? mOpts.mHeight : MediaEngine::DEFAULT_43_VIDEO_HEIGHT;
   mState = kAllocated;
   return NS_OK;
 }
@@ -75,7 +87,7 @@ MediaEngineDefaultVideoSource::Deallocate()
   return NS_OK;
 }
 
-static void AllocateSolidColorFrame(layers::PlanarYCbCrImage::Data& aData,
+static void AllocateSolidColorFrame(layers::PlanarYCbCrData& aData,
                                     int aWidth, int aHeight,
                                     int aY, int aCb, int aCr)
 {
@@ -91,19 +103,19 @@ static void AllocateSolidColorFrame(layers::PlanarYCbCrImage::Data& aData,
   memset(frame+yLen+cbLen, aCr, crLen);
 
   aData.mYChannel = frame;
-  aData.mYSize = gfxIntSize(aWidth, aHeight);
+  aData.mYSize = IntSize(aWidth, aHeight);
   aData.mYStride = aWidth;
   aData.mCbCrStride = aWidth>>1;
   aData.mCbChannel = frame + yLen;
   aData.mCrChannel = aData.mCbChannel + cbLen;
-  aData.mCbCrSize = gfxIntSize(aWidth>>1, aHeight>>1);
+  aData.mCbCrSize = IntSize(aWidth>>1, aHeight>>1);
   aData.mPicX = 0;
   aData.mPicY = 0;
-  aData.mPicSize = gfxIntSize(aWidth, aHeight);
-  aData.mStereoMode = STEREO_MODE_MONO;
+  aData.mPicSize = IntSize(aWidth, aHeight);
+  aData.mStereoMode = StereoMode::MONO;
 }
 
-static void ReleaseFrame(layers::PlanarYCbCrImage::Data& aData)
+static void ReleaseFrame(layers::PlanarYCbCrData& aData)
 {
   PR_Free(aData.mYChannel);
 }
@@ -120,38 +132,19 @@ MediaEngineDefaultVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
     return NS_ERROR_FAILURE;
   }
 
-  mSource = aStream;
-
-  // Allocate a single blank Image
-  ImageFormat format = PLANAR_YCBCR;
-  mImageContainer = layers::LayerManager::CreateImageContainer();
-
-  nsRefPtr<layers::Image> image = mImageContainer->CreateImage(&format, 1);
-  mImage = static_cast<layers::PlanarYCbCrImage*>(image.get());
-
-  layers::PlanarYCbCrImage::Data data;
-  // Allocate a single blank Image
-  mCb = 16;
-  mCr = 16;
-  AllocateSolidColorFrame(data, mOpts.mWidth, mOpts.mHeight, 0x80, mCb, mCr);
-  // SetData copies data, so we can free the frame
-  mImage->SetData(data);
-  ReleaseFrame(data);
-
-  // AddTrack takes ownership of segment
-  VideoSegment *segment = new VideoSegment();
-  segment->AppendFrame(image.forget(), USECS_PER_S / mOpts.mFPS,
-                       gfxIntSize(mOpts.mWidth, mOpts.mHeight));
-  mSource->AddTrack(aID, VIDEO_RATE, 0, segment);
-
-  // We aren't going to add any more tracks
-  mSource->AdvanceKnownTracksTime(STREAM_TIME_MAX);
+  aStream->AddTrack(aID, VIDEO_RATE, 0, new VideoSegment());
+  aStream->AdvanceKnownTracksTime(STREAM_TIME_MAX);
 
   // Remember TrackID so we can end it later
   mTrackID = aID;
 
   // Start timer for subsequent frames
+#if defined(MOZ_WIDGET_GONK) && defined(DEBUG)
+// B2G emulator debug is very, very slow and has problems dealing with realtime audio inputs
+  mTimer->InitWithCallback(this, (1000 / mOpts.mFPS)*10, nsITimer::TYPE_REPEATING_SLACK);
+#else
   mTimer->InitWithCallback(this, 1000 / mOpts.mFPS, nsITimer::TYPE_REPEATING_SLACK);
+#endif
   mState = kStarted;
 
   return NS_OK;
@@ -168,7 +161,7 @@ MediaEngineDefaultVideoSource::Stop(SourceMediaStream *aSource, TrackID aID)
   }
 
   mTimer->Cancel();
-  mTimer = NULL;
+  mTimer = nullptr;
 
   aSource->EndTrack(aID);
   aSource->Finish();
@@ -185,18 +178,38 @@ MediaEngineDefaultVideoSource::Snapshot(uint32_t aDuration, nsIDOMFile** aFile)
 #ifndef MOZ_WIDGET_ANDROID
   return NS_ERROR_NOT_IMPLEMENTED;
 #else
-  if (!AndroidBridge::Bridge()) {
-    return NS_ERROR_UNEXPECTED;
+  nsAutoString filePath;
+  nsCOMPtr<nsIFilePicker> filePicker = do_CreateInstance("@mozilla.org/filepicker;1");
+  if (!filePicker)
+    return NS_ERROR_FAILURE;
+
+  nsXPIDLString title;
+  nsContentUtils::GetLocalizedString(nsContentUtils::eFORMS_PROPERTIES, "Browse", title);
+  int16_t mode = static_cast<int16_t>(nsIFilePicker::modeOpen);
+
+  nsresult rv = filePicker->Init(nullptr, title, mode);
+  NS_ENSURE_SUCCESS(rv, rv);
+  filePicker->AppendFilters(nsIFilePicker::filterImages);
+
+  // XXX - This API should be made async
+  PRInt16 dialogReturn;
+  rv = filePicker->Show(&dialogReturn);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (dialogReturn == nsIFilePicker::returnCancel) {
+    *aFile = nullptr;
+    return NS_OK;
   }
 
-  nsAutoString filePath;
-  AndroidBridge::Bridge()->ShowFilePickerForMimeType(filePath, NS_LITERAL_STRING("image/*"));
+  nsCOMPtr<nsIFile> localFile;
+  filePicker->GetFile(getter_AddRefs(localFile));
 
-  nsCOMPtr<nsIFile> file;
-  nsresult rv = NS_NewLocalFile(filePath, false, getter_AddRefs(file));
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (!localFile) {
+    *aFile = nullptr;
+    return NS_OK;
+  }
 
-  NS_ADDREF(*aFile = new nsDOMFileFile(file));
+  nsCOMPtr<nsIDOMFile> domFile = new nsDOMFileFile(localFile);
+  domFile.forget(aFile);
   return NS_OK;
 #endif
 }
@@ -228,37 +241,114 @@ MediaEngineDefaultVideoSource::Notify(nsITimer* aTimer)
   }
 
   // Allocate a single solid color image
-  ImageFormat format = PLANAR_YCBCR;
-  nsRefPtr<layers::Image> image = mImageContainer->CreateImage(&format, 1);
+  nsRefPtr<layers::Image> image = mImageContainer->CreateImage(ImageFormat::PLANAR_YCBCR);
   nsRefPtr<layers::PlanarYCbCrImage> ycbcr_image =
       static_cast<layers::PlanarYCbCrImage*>(image.get());
-  layers::PlanarYCbCrImage::Data data;
+  layers::PlanarYCbCrData data;
   AllocateSolidColorFrame(data, mOpts.mWidth, mOpts.mHeight, 0x80, mCb, mCr);
+
+#if defined(MOZ_WEBRTC) && defined(MOZ_WEBRTC_SIGNALING)
+  uint64_t timestamp = PR_Now();
+  YuvStamper::Encode(mOpts.mWidth, mOpts.mHeight, mOpts.mWidth,
+		     data.mYChannel,
+		     reinterpret_cast<unsigned char*>(&timestamp), sizeof(timestamp),
+		     0, 0);
+#endif
+
   ycbcr_image->SetData(data);
   // SetData copies data, so we can free the frame
   ReleaseFrame(data);
 
-  // AddTrack takes ownership of segment
-  VideoSegment segment;
-  segment.AppendFrame(ycbcr_image.forget(), USECS_PER_S / mOpts.mFPS,
-                      gfxIntSize(mOpts.mWidth, mOpts.mHeight));
-  mSource->AppendToTrack(mTrackID, &segment);
+  MonitorAutoLock lock(mMonitor);
+
+  // implicitly releases last image
+  mImage = ycbcr_image.forget();
 
   return NS_OK;
 }
 
 void
 MediaEngineDefaultVideoSource::NotifyPull(MediaStreamGraph* aGraph,
-                                          StreamTime aDesiredTime)
+                                          SourceMediaStream *aSource,
+                                          TrackID aID,
+                                          StreamTime aDesiredTime,
+                                          TrackTicks &aLastEndTime)
 {
-  // Ignore - we push video data
+  // AddTrack takes ownership of segment
+  VideoSegment segment;
+  MonitorAutoLock lock(mMonitor);
+  if (mState != kStarted) {
+    return;
+  }
+
+  // Note: we're not giving up mImage here
+  nsRefPtr<layers::Image> image = mImage;
+  TrackTicks target = TimeToTicksRoundUp(USECS_PER_S, aDesiredTime);
+  TrackTicks delta = target - aLastEndTime;
+
+  if (delta > 0) {
+    // nullptr images are allowed
+    IntSize size(image ? mOpts.mWidth : 0, image ? mOpts.mHeight : 0);
+    segment.AppendFrame(image.forget(), delta, size);
+    // This can fail if either a) we haven't added the track yet, or b)
+    // we've removed or finished the track.
+    if (aSource->AppendToTrack(aID, &segment)) {
+      aLastEndTime = target;
+    }
+  }
 }
 
+// generate 1k sine wave per second
+class SineWaveGenerator
+{
+public:
+  static const int bytesPerSample = 2;
+  static const int millisecondsPerSecond = 1000;
+  static const int frequency = 1000;
+
+  SineWaveGenerator(int aSampleRate) :
+    mTotalLength(aSampleRate / frequency),
+    mReadLength(0) {
+    MOZ_ASSERT(mTotalLength * frequency == aSampleRate);
+    mAudioBuffer = new int16_t[mTotalLength];
+    for(int i = 0; i < mTotalLength; i++) {
+      // Set volume to -20db. It's from 32768.0 * 10^(-20/20) = 3276.8
+      mAudioBuffer[i] = (3276.8f * sin(2 * M_PI * i / mTotalLength));
+    }
+  }
+
+  // NOTE: only safely called from a single thread (MSG callback)
+  void generate(int16_t* aBuffer, int16_t aLengthInSamples) {
+    int16_t remaining = aLengthInSamples;
+
+    while (remaining) {
+      int16_t processSamples = 0;
+
+      if (mTotalLength - mReadLength >= remaining) {
+        processSamples = remaining;
+      } else {
+        processSamples = mTotalLength - mReadLength;
+      }
+      memcpy(aBuffer, mAudioBuffer + mReadLength, processSamples * bytesPerSample);
+      aBuffer += processSamples;
+      mReadLength += processSamples;
+      remaining -= processSamples;
+      if (mReadLength == mTotalLength) {
+        mReadLength = 0;
+      }
+    }
+  }
+
+private:
+  nsAutoArrayPtr<int16_t> mAudioBuffer;
+  int16_t mTotalLength;
+  int16_t mReadLength;
+};
 
 /**
  * Default audio source.
  */
-NS_IMPL_THREADSAFE_ISUPPORTS1(MediaEngineDefaultAudioSource, nsITimerCallback)
+NS_IMPL_ISUPPORTS(MediaEngineDefaultAudioSource, nsITimerCallback)
 
 MediaEngineDefaultAudioSource::MediaEngineDefaultAudioSource()
   : mTimer(nullptr)
@@ -268,13 +358,6 @@ MediaEngineDefaultAudioSource::MediaEngineDefaultAudioSource()
 
 MediaEngineDefaultAudioSource::~MediaEngineDefaultAudioSource()
 {}
-
-void
-MediaEngineDefaultAudioSource::NotifyPull(MediaStreamGraph* aGraph,
-                                          StreamTime aDesiredTime)
-{
-  // Ignore - we push audio data
-}
 
 void
 MediaEngineDefaultAudioSource::GetName(nsAString& aName)
@@ -291,13 +374,16 @@ MediaEngineDefaultAudioSource::GetUUID(nsAString& aUUID)
 }
 
 nsresult
-MediaEngineDefaultAudioSource::Allocate(const MediaEnginePrefs &aPrefs)
+MediaEngineDefaultAudioSource::Allocate(const AudioTrackConstraintsN &aConstraints,
+                                        const MediaEnginePrefs &aPrefs)
 {
   if (mState != kReleased) {
     return NS_ERROR_FAILURE;
   }
 
   mState = kAllocated;
+  // generate 1Khz sine wave
+  mSineGenerator = new SineWaveGenerator(AUDIO_RATE);
   return NS_OK;
 }
 
@@ -335,9 +421,15 @@ MediaEngineDefaultAudioSource::Start(SourceMediaStream* aStream, TrackID aID)
   // Remember TrackID so we can finish later
   mTrackID = aID;
 
-  // 1 Audio frame per Video frame
+  // 1 Audio frame per 10ms
+#if defined(MOZ_WIDGET_GONK) && defined(DEBUG)
+// B2G emulator debug is very, very slow and has problems dealing with realtime audio inputs
+  mTimer->InitWithCallback(this, MediaEngine::DEFAULT_AUDIO_TIMER_MS*10,
+                           nsITimer::TYPE_REPEATING_PRECISE_CAN_SKIP);
+#else
   mTimer->InitWithCallback(this, MediaEngine::DEFAULT_AUDIO_TIMER_MS,
-                           nsITimer::TYPE_REPEATING_SLACK);
+                           nsITimer::TYPE_REPEATING_PRECISE_CAN_SKIP);
+#endif
   mState = kStarted;
 
   return NS_OK;
@@ -354,7 +446,7 @@ MediaEngineDefaultAudioSource::Stop(SourceMediaStream *aSource, TrackID aID)
   }
 
   mTimer->Cancel();
-  mTimer = NULL;
+  mTimer = nullptr;
 
   aSource->EndTrack(aID);
   aSource->Finish();
@@ -373,10 +465,13 @@ NS_IMETHODIMP
 MediaEngineDefaultAudioSource::Notify(nsITimer* aTimer)
 {
   AudioSegment segment;
+  nsRefPtr<SharedBuffer> buffer = SharedBuffer::Create(AUDIO_FRAME_LENGTH * sizeof(int16_t));
+  int16_t* dest = static_cast<int16_t*>(buffer->Data());
 
-  // Notify timer is set every DEFAULT_AUDIO_TIMER_MS milliseconds.
-  segment.InsertNullDataAtStart((AUDIO_RATE * MediaEngine::DEFAULT_AUDIO_TIMER_MS) / 1000);
-
+  mSineGenerator->generate(dest, AUDIO_FRAME_LENGTH);
+  nsAutoTArray<const int16_t*,1> channels;
+  channels.AppendElement(dest);
+  segment.AppendFrames(buffer.forget(), channels, AUDIO_FRAME_LENGTH);
   mSource->AppendToTrack(mTrackID, &segment);
 
   return NS_OK;

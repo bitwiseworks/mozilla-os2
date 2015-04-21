@@ -59,9 +59,42 @@ Volume::Volume(const nsCSubstring& aName)
     mMountGeneration(-1),
     mMountLocked(true),  // Needs to agree with nsVolume::nsVolume
     mSharingEnabled(false),
-    mCanBeShared(true)
+    mCanBeShared(true),
+    mIsSharing(false),
+    mFormatRequested(false),
+    mMountRequested(false),
+    mUnmountRequested(false),
+    mIsFormatting(false)
 {
   DBG("Volume %s: created", NameStr());
+}
+
+void
+Volume::SetIsSharing(bool aIsSharing)
+{
+  if (aIsSharing == mIsSharing) {
+    return;
+  }
+  mIsSharing = aIsSharing;
+  LOG("Volume %s: IsSharing set to %d state %s",
+      NameStr(), (int)mIsSharing, StateStr(mState));
+  if (mIsSharing) {
+    mEventObserverList.Broadcast(this);
+  }
+}
+
+void
+Volume::SetIsFormatting(bool aIsFormatting)
+{
+  if (aIsFormatting == mIsFormatting) {
+    return;
+  }
+  mIsFormatting = aIsFormatting;
+  LOG("Volume %s: IsFormatting set to %d state %s",
+      NameStr(), (int)mIsFormatting, StateStr(mState));
+  if (mIsFormatting) {
+    mEventObserverList.Broadcast(this);
+  }
 }
 
 void
@@ -112,11 +145,37 @@ Volume::SetSharingEnabled(bool aSharingEnabled)
 }
 
 void
+Volume::SetFormatRequested(bool aFormatRequested)
+{
+  mFormatRequested = aFormatRequested;
+
+  LOG("SetFormatRequested for volume %s to %d CanBeFormatted = %d",
+      NameStr(), (int)mFormatRequested, (int)CanBeFormatted());
+}
+
+void
+Volume::SetMountRequested(bool aMountRequested)
+{
+  mMountRequested = aMountRequested;
+
+  LOG("SetMountRequested for volume %s to %d CanBeMounted = %d",
+      NameStr(), (int)mMountRequested, (int)CanBeMounted());
+}
+
+void
+Volume::SetUnmountRequested(bool aUnmountRequested)
+{
+  mUnmountRequested = aUnmountRequested;
+
+  LOG("SetUnmountRequested for volume %s to %d CanBeMounted = %d",
+      NameStr(), (int)mUnmountRequested, (int)CanBeMounted());
+}
+
+void
 Volume::SetState(Volume::STATE aNewState)
 {
   MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
   MOZ_ASSERT(MessageLoop::current() == XRE_GetIOMessageLoop());
-
   if (aNewState == mState) {
     return;
   }
@@ -133,9 +192,39 @@ Volume::SetState(Volume::STATE aNewState)
         StateStr(aNewState), mEventObserverList.Length());
   }
 
-  if (aNewState == nsIVolume::STATE_NOMEDIA) {
-    // Cover the startup case where we don't get insertion/removal events
-    mMediaPresent = false;
+  switch (aNewState) {
+     case nsIVolume::STATE_NOMEDIA:
+       // Cover the startup case where we don't get insertion/removal events
+       mMediaPresent = false;
+       mIsSharing = false;
+       mUnmountRequested = false;
+       mMountRequested = false;
+       break;
+
+     case nsIVolume::STATE_MOUNTED:
+       mMountRequested = false;
+       mIsFormatting = false;
+       mIsSharing = false;
+       break;
+     case nsIVolume::STATE_FORMATTING:
+       mFormatRequested = false;
+       mIsFormatting = true;
+       mIsSharing = false;
+       break;
+
+     case nsIVolume::STATE_SHARED:
+     case nsIVolume::STATE_SHAREDMNT:
+       // Covers startup cases. Normally, mIsSharing would be set to true
+       // when we issue the command to initiate the sharing process, but
+       // it's conceivable that a volume could already be in a shared state
+       // when b2g starts.
+       mIsSharing = true;
+       break;
+
+     case nsIVolume::STATE_IDLE:
+       break;
+     default:
+       break;
   }
   mState = aNewState;
   mEventObserverList.Broadcast(this);
@@ -170,6 +259,15 @@ Volume::StartUnmount(VolumeResponseCallback* aCallback)
   MOZ_ASSERT(MessageLoop::current() == XRE_GetIOMessageLoop());
 
   StartCommand(new VolumeActionCommand(this, "unmount", "force", aCallback));
+}
+
+void
+Volume::StartFormat(VolumeResponseCallback* aCallback)
+{
+  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+  MOZ_ASSERT(MessageLoop::current() == XRE_GetIOMessageLoop());
+
+  StartCommand(new VolumeActionCommand(this, "format", "", aCallback));
 }
 
 void

@@ -10,8 +10,6 @@
 #include "AudioNode.h"
 
 namespace mozilla {
-class DOMMediaStream;
-
 namespace dom {
 
 class MediaStreamAudioDestinationNode : public AudioNode
@@ -22,8 +20,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MediaStreamAudioDestinationNode, AudioNode)
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   virtual uint16_t NumberOfOutputs() const MOZ_FINAL MOZ_OVERRIDE
   {
@@ -36,6 +33,14 @@ public:
   {
     return mDOMStream;
   }
+
+  virtual const char* NodeType() const
+  {
+    return "MediaStreamAudioDestinationNode";
+  }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
 
 private:
   nsRefPtr<DOMMediaStream> mDOMStream;

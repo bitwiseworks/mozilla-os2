@@ -81,31 +81,35 @@
 #include "nsIOfflineCacheUpdate.h"
 #include "nsIContentSniffer.h"
 #include "nsCategoryCache.h"
+#include "nsStringStream.h"
+#include "nsIViewSourceChannel.h"
 
 #include <limits>
 
 #ifdef MOZILLA_INTERNAL_API
 
+#include "nsReadableUtils.h"
+
 inline already_AddRefed<nsIIOService>
 do_GetIOService(nsresult* error = 0)
 {
-    already_AddRefed<nsIIOService> ret = mozilla::services::GetIOService();
+    nsCOMPtr<nsIIOService> io = mozilla::services::GetIOService();
     if (error)
-        *error = ret.get() ? NS_OK : NS_ERROR_FAILURE;
-    return ret;
+        *error = io ? NS_OK : NS_ERROR_FAILURE;
+    return io.forget();
 }
 
 inline already_AddRefed<nsINetUtil>
 do_GetNetUtil(nsresult *error = 0) 
 {
     nsCOMPtr<nsIIOService> io = mozilla::services::GetIOService();
-    already_AddRefed<nsINetUtil> ret = nullptr;
+    nsCOMPtr<nsINetUtil> util;
     if (io)
-        CallQueryInterface(io, &ret.mRawPtr);
+        util = do_QueryInterface(io);
 
     if (error)
-        *error = ret.get() ? NS_OK : NS_ERROR_FAILURE;
-    return ret;
+        *error = !!util ? NS_OK : NS_ERROR_FAILURE;
+    return util.forget();
 }
 #else
 // Helper, to simplify getting the I/O service.
@@ -460,6 +464,47 @@ NS_NewInputStreamChannel(nsIChannel      **result,
 {
     return NS_NewInputStreamChannel(result, uri, stream, contentType,
                                     &contentCharset);
+}
+
+inline nsresult
+NS_NewInputStreamChannel(nsIChannel      **result,
+                         nsIURI           *uri,
+                         const nsAString  &data,
+                         const nsACString &contentType,
+                         bool              isSrcdocChannel = false)
+{
+
+    nsresult rv;
+
+    nsCOMPtr<nsIStringInputStream> stream;
+    stream = do_CreateInstance(NS_STRINGINPUTSTREAM_CONTRACTID, &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+#ifdef MOZILLA_INTERNAL_API
+    uint32_t len;
+    char* utf8Bytes = ToNewUTF8String(data, &len);
+    rv = stream->AdoptData(utf8Bytes, len);
+#else
+    char* utf8Bytes = ToNewUTF8String(data);
+    rv = stream->AdoptData(utf8Bytes, strlen(utf8Bytes));
+#endif
+
+    nsCOMPtr<nsIChannel> chan;
+
+    rv = NS_NewInputStreamChannel(getter_AddRefs(chan), uri, stream,
+                                  contentType, NS_LITERAL_CSTRING("UTF-8"));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (isSrcdocChannel) {
+        nsCOMPtr<nsIInputStreamChannel> inStrmChan = do_QueryInterface(chan);
+        NS_ENSURE_TRUE(inStrmChan, NS_ERROR_FAILURE);
+        inStrmChan->SetSrcdocData(data);
+    }
+
+    *result = nullptr;
+    chan.swap(*result);
+
+    return NS_OK;
 }
 
 inline nsresult
@@ -949,6 +994,25 @@ NS_NewLocalFileOutputStream(nsIOutputStream **result,
 
 // returns a file output stream which can be QI'ed to nsISafeOutputStream.
 inline nsresult
+NS_NewAtomicFileOutputStream(nsIOutputStream **result,
+                                nsIFile          *file,
+                                int32_t           ioFlags       = -1,
+                                int32_t           perm          = -1,
+                                int32_t           behaviorFlags = 0)
+{
+    nsresult rv;
+    nsCOMPtr<nsIFileOutputStream> out =
+        do_CreateInstance(NS_ATOMICLOCALFILEOUTPUTSTREAM_CONTRACTID, &rv);
+    if (NS_SUCCEEDED(rv)) {
+        rv = out->Init(file, ioFlags, perm, behaviorFlags);
+        if (NS_SUCCEEDED(rv))
+            out.forget(result);
+    }
+    return rv;
+}
+
+// returns a file output stream which can be QI'ed to nsISafeOutputStream.
+inline nsresult
 NS_NewSafeLocalFileOutputStream(nsIOutputStream **result,
                                 nsIFile          *file,
                                 int32_t           ioFlags       = -1,
@@ -1309,6 +1373,8 @@ NS_UsePrivateBrowsing(nsIChannel *channel)
 // know about script security manager.
 #define NECKO_NO_APP_ID 0
 #define NECKO_UNKNOWN_APP_ID UINT32_MAX
+// special app id reserved for separating the safebrowsing cookie
+#define NECKO_SAFEBROWSING_APP_ID UINT32_MAX - 1
 
 /**
  * Gets AppId and isInBrowserElement from channel's nsILoadContext.
@@ -1389,6 +1455,26 @@ NS_ShouldCheckAppCache(nsIURI *aURI, bool usePrivateBrowsing)
     nsresult rv = offlineService->OfflineAppAllowedForURI(aURI,
                                                           nullptr,
                                                           &allowed);
+    return NS_SUCCEEDED(rv) && allowed;
+}
+
+inline bool
+NS_ShouldCheckAppCache(nsIPrincipal * aPrincipal, bool usePrivateBrowsing)
+{
+    if (usePrivateBrowsing) {
+        return false;
+    }
+
+    nsCOMPtr<nsIOfflineCacheUpdateService> offlineService =
+        do_GetService("@mozilla.org/offlinecacheupdate-service;1");
+    if (!offlineService) {
+        return false;
+    }
+
+    bool allowed;
+    nsresult rv = offlineService->OfflineAppAllowed(aPrincipal,
+                                                    nullptr,
+                                                    &allowed);
     return NS_SUCCEEDED(rv) && allowed;
 }
 
@@ -2279,7 +2365,8 @@ NS_SniffContent(const char* aSnifferType, nsIRequest* aRequest,
     return;
   }
 
-  const nsCOMArray<nsIContentSniffer>& sniffers = cache->GetEntries();
+  nsCOMArray<nsIContentSniffer> sniffers;
+  cache->GetEntries(sniffers);
   for (int32_t i = 0; i < sniffers.Count(); ++i) {
     nsresult rv = sniffers[i]->GetMIMETypeFromContent(aRequest, aData, aLength, aSniffedType);
     if (NS_SUCCEEDED(rv) && !aSniffedType.IsEmpty()) {
@@ -2288,6 +2375,28 @@ NS_SniffContent(const char* aSnifferType, nsIRequest* aRequest,
   }
 
   aSniffedType.Truncate();
+}
+
+/**
+ * Whether the channel was created to load a srcdoc document.
+ * Note that view-source:about:srcdoc is classified as a srcdoc document by 
+ * this function, which may not be applicable everywhere.
+ */
+inline bool
+NS_IsSrcdocChannel(nsIChannel *aChannel)
+{
+  bool isSrcdoc;
+  nsCOMPtr<nsIInputStreamChannel> isr = do_QueryInterface(aChannel);
+  if (isr) {
+    isr->GetIsSrcdocChannel(&isSrcdoc);
+    return isSrcdoc;
+  }
+  nsCOMPtr<nsIViewSourceChannel> vsc = do_QueryInterface(aChannel);
+  if (vsc) {
+    vsc->GetIsSrcdocChannel(&isSrcdoc);
+    return isSrcdoc;
+  }
+  return false;
 }
 
 #endif // !nsNetUtil_h__

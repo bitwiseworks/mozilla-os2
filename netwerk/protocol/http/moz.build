@@ -6,9 +6,9 @@
 
 XPIDL_SOURCES += [
     'nsIHttpActivityObserver.idl',
-    'nsIHttpAuthManager.idl',
     'nsIHttpAuthenticableChannel.idl',
     'nsIHttpAuthenticator.idl',
+    'nsIHttpAuthManager.idl',
     'nsIHttpChannel.idl',
     'nsIHttpChannelAuthProvider.idl',
     'nsIHttpChannelChild.idl',
@@ -19,12 +19,6 @@ XPIDL_SOURCES += [
 ]
 
 XPIDL_MODULE = 'necko_http'
-
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/netwerk/base/public',
-]
-
-MODULE = 'necko'
 
 EXPORTS += [
     'nsHttp.h',
@@ -39,23 +33,25 @@ EXPORTS.mozilla.net += [
     'HttpChannelParent.h',
     'HttpInfo.h',
     'PHttpChannelParams.h',
-    'PSpdyPush3.h',
+    'PSpdyPush.h',
 ]
 
-CPP_SOURCES += [
+# ASpdySession.cpp and nsHttpAuthCache cannot be built in unified mode because
+# they use plarena.h.
+# The rest of these files cannot be built in unified mode because they want to
+# force NSPR logging.
+SOURCES += [
     'ASpdySession.cpp',
     'ConnectionDiagnostics.cpp',
+    'Http2Compression.cpp',
+    'Http2Push.cpp',
+    'Http2Session.cpp',
+    'Http2Stream.cpp',
     'HttpBaseChannel.cpp',
     'HttpChannelChild.cpp',
     'HttpChannelParent.cpp',
     'HttpChannelParentListener.cpp',
     'HttpInfo.cpp',
-    'NullHttpTransaction.cpp',
-    'SpdyPush3.cpp',
-    'SpdySession2.cpp',
-    'SpdySession3.cpp',
-    'SpdyStream2.cpp',
-    'SpdyStream3.cpp',
     'nsHttp.cpp',
     'nsHttpActivityDistributor.cpp',
     'nsHttpAuthCache.cpp',
@@ -68,12 +64,45 @@ CPP_SOURCES += [
     'nsHttpConnectionInfo.cpp',
     'nsHttpConnectionMgr.cpp',
     'nsHttpDigestAuth.cpp',
-    'nsHttpHandler.cpp',
     'nsHttpHeaderArray.cpp',
     'nsHttpNTLMAuth.cpp',
     'nsHttpPipeline.cpp',
     'nsHttpRequestHead.cpp',
     'nsHttpResponseHead.cpp',
     'nsHttpTransaction.cpp',
+    'NullHttpTransaction.cpp',
+    'SpdyPush3.cpp',
+    'SpdyPush31.cpp',
+    'SpdySession3.cpp',
+    'SpdySession31.cpp',
+    'SpdyStream3.cpp',
+    'SpdyStream31.cpp',
+    'SpdyZlibReporter.cpp',
 ]
 
+# These files cannot be built in unified mode because of OS X headers.
+SOURCES += [
+    'nsHttpHandler.cpp',
+]
+
+IPDL_SOURCES += [
+    'PHttpChannel.ipdl',
+]
+
+EXTRA_JS_MODULES += [
+    'UserAgentOverrides.jsm',
+    'UserAgentUpdates.jsm',
+]
+
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'necko'
+
+LOCAL_INCLUDES += [
+    '../../base/src',
+    '/content/base/src',
+]

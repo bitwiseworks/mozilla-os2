@@ -20,7 +20,6 @@ public:
   struct ForwardedUpdate {
     nsCString table;
     nsCString url;
-    nsCString mac;
   };
 
   ProtocolParser();
@@ -29,10 +28,6 @@ public:
   nsresult Status() const { return mUpdateStatus; }
 
   nsresult Init(nsICryptoHash* aHasher);
-
-  nsresult InitHMAC(const nsACString& aClientKey,
-                    const nsACString& aServerMAC);
-  nsresult FinishHMAC();
 
   void SetCurrentTable(const nsACString& aTable);
 
@@ -49,16 +44,15 @@ public:
   const nsTArray<ForwardedUpdate> &Forwards() const { return mForwards; }
   int32_t UpdateWait() { return mUpdateWait; }
   bool ResetRequested() { return mResetRequested; }
-  bool RekeyRequested() { return mRekeyRequested; }
 
 private:
   nsresult ProcessControl(bool* aDone);
-  nsresult ProcessMAC(const nsCString& aLine);
   nsresult ProcessExpirations(const nsCString& aLine);
   nsresult ProcessChunkControl(const nsCString& aLine);
   nsresult ProcessForward(const nsCString& aLine);
-  nsresult AddForward(const nsACString& aUrl, const nsACString& aMac);
+  nsresult AddForward(const nsACString& aUrl);
   nsresult ProcessChunk(bool* done);
+  // Remove this, it's only used for testing
   nsresult ProcessPlaintextChunk(const nsACString& aChunk);
   nsresult ProcessShaChunk(const nsACString& aChunk);
   nsresult ProcessHostAdd(const Prefix& aDomain, uint8_t aNumEntries,
@@ -69,6 +63,12 @@ private:
                                   uint32_t *aStart);
   nsresult ProcessHostSubComplete(uint8_t numEntries, const nsACString& aChunk,
                                   uint32_t* start);
+  // Digest chunks are very similar to shavar chunks, except digest chunks
+  // always contain the full hash, so there is no need for chunk data to
+  // contain prefix sizes.
+  nsresult ProcessDigestChunk(const nsACString& aChunk);
+  nsresult ProcessDigestAdd(const nsACString& aChunk);
+  nsresult ProcessDigestSub(const nsACString& aChunk);
   bool NextLine(nsACString& aLine);
 
   void CleanupUpdates();
@@ -80,8 +80,13 @@ private:
   ParserState mState;
 
   enum ChunkType {
+    // Types for shavar tables.
     CHUNK_ADD,
-    CHUNK_SUB
+    CHUNK_SUB,
+    // Types for digest256 tables. digest256 tables differ in format from
+    // shavar tables since they only contain complete hashes.
+    CHUNK_ADD_DIGEST,
+    CHUNK_SUB_DIGEST
   };
 
   struct ChunkState {
@@ -98,15 +103,13 @@ private:
   nsresult mUpdateStatus;
   nsCString mPending;
 
-  nsCOMPtr<nsICryptoHMAC> mHMAC;
-  nsCString mServerMAC;
-
   uint32_t mUpdateWait;
   bool mResetRequested;
-  bool mRekeyRequested;
 
   nsTArray<ForwardedUpdate> mForwards;
+  // Keep track of updates to apply before passing them to the DBServiceWorkers.
   nsTArray<TableUpdate*> mTableUpdates;
+  // Updates to apply to the current table being parsed.
   TableUpdate *mTableUpdate;
 };
 

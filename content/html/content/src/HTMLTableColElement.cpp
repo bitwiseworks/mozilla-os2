@@ -3,8 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
-
 #include "mozilla/dom/HTMLTableColElement.h"
 #include "nsMappedAttributes.h"
 #include "nsAttrValueInlines.h"
@@ -25,123 +23,12 @@ HTMLTableColElement::~HTMLTableColElement()
 }
 
 JSObject*
-HTMLTableColElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLTableColElement::WrapNode(JSContext *aCx)
 {
-  return HTMLTableColElementBinding::Wrap(aCx, aScope, this);
+  return HTMLTableColElementBinding::Wrap(aCx, this);
 }
-
-NS_IMPL_ADDREF_INHERITED(HTMLTableColElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLTableColElement, Element)
-
-// QueryInterface implementation for HTMLTableColElement
-NS_INTERFACE_TABLE_HEAD(HTMLTableColElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLTableColElement,
-                                nsIDOMHTMLTableColElement)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
 
 NS_IMPL_ELEMENT_CLONE(HTMLTableColElement)
-
-NS_IMETHODIMP
-HTMLTableColElement::SetSpan(int32_t aSpan)
-{
-  ErrorResult rv;
-  SetSpan(aSpan, rv);
-  return rv.ErrorCode();
-}
-
-NS_IMETHODIMP
-HTMLTableColElement::GetSpan(int32_t* aSpan)
-{
-  *aSpan = Span();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HTMLTableColElement::SetAlign(const nsAString& aAlign)
-{
-  ErrorResult rv;
-  SetAlign(aAlign, rv);
-  return rv.ErrorCode();
-}
-
-NS_IMETHODIMP
-HTMLTableColElement::GetAlign(nsAString& aAlign)
-{
-  nsString align;
-  GetAlign(align);
-  aAlign = align;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HTMLTableColElement::SetVAlign(const nsAString& aVAlign)
-{
-  ErrorResult rv;
-  SetVAlign(aVAlign, rv);
-  return rv.ErrorCode();
-}
-
-NS_IMETHODIMP
-HTMLTableColElement::GetVAlign(nsAString& aVAlign)
-{
-  nsString vAlign;
-  GetVAlign(vAlign);
-  aVAlign = vAlign;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HTMLTableColElement::SetCh(const nsAString& aCh)
-{
-  ErrorResult rv;
-  SetCh(aCh, rv);
-  return rv.ErrorCode();
-}
-
-NS_IMETHODIMP
-HTMLTableColElement::GetCh(nsAString& aCh)
-{
-  nsString ch;
-  GetCh(ch);
-  aCh = ch;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HTMLTableColElement::SetChOff(const nsAString& aChOff)
-{
-  ErrorResult rv;
-  SetChOff(aChOff, rv);
-  return rv.ErrorCode();
-}
-
-NS_IMETHODIMP
-HTMLTableColElement::GetChOff(nsAString& aChOff)
-{
-  nsString chOff;
-  GetChOff(chOff);
-  aChOff = chOff;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HTMLTableColElement::SetWidth(const nsAString& aWidth)
-{
-  ErrorResult rv;
-  SetWidth(aWidth, rv);
-  return rv.ErrorCode();
-}
-
-NS_IMETHODIMP
-HTMLTableColElement::GetWidth(nsAString& aWidth)
-{
-  nsString width;
-  GetWidth(width);
-  aWidth = width;
-  return NS_OK;
-}
 
 bool
 HTMLTableColElement::ParseAttribute(int32_t aNamespaceID,
@@ -173,8 +60,9 @@ HTMLTableColElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-static 
-void MapAttributesIntoRule(const nsMappedAttributes* aAttributes, nsRuleData* aData)
+void
+HTMLTableColElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                           nsRuleData* aData)
 {
   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Table)) {
     nsCSSValue *span = aData->ValueForSpan();

@@ -9,12 +9,9 @@
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 
-#ifdef IBMBIDI
-#include "nsCOMPtr.h"
 #include "nsGkAtoms.h"
 #include "nsILineIterator.h"
 #include "nsBidiPresUtils.h"
-#endif // IBMBIDI
 
 namespace mozilla {
 namespace layout {
@@ -332,20 +329,19 @@ nsFrameList::UnhookFrameFromSiblings(nsIFrame* aFrame)
   MOZ_ASSERT(!aFrame->GetPrevSibling() && !aFrame->GetNextSibling());
 }
 
-#ifdef DEBUG
+#ifdef DEBUG_FRAME_DUMP
 void
 nsFrameList::List(FILE* out) const
 {
-  fputs("<\n", out);
+  fprintf_stderr(out, "<\n");
   for (nsIFrame* frame = mFirstChild; frame;
        frame = frame->GetNextSibling()) {
-    frame->List(out, 1);
+    frame->List(out, "  ");
   }
-  fputs(">\n", out);
+  fprintf_stderr(out, ">\n");
 }
 #endif
 
-#ifdef IBMBIDI
 nsIFrame*
 nsFrameList::GetPrevVisualFor(nsIFrame* aFrame) const
 {
@@ -494,7 +490,6 @@ nsFrameList::GetNextVisualFor(nsIFrame* aFrame) const
   }
   return frame;
 }
-#endif
 
 #ifdef DEBUG_FRAME_LIST
 void

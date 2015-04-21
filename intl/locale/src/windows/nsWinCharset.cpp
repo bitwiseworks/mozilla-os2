@@ -3,16 +3,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsIPlatformCharset.h"
 #include "nsUConvPropertySearch.h"
-#include "pratom.h"
 #include <windows.h>
 #include "nsWin32Locale.h"
 #include "nsCOMPtr.h"
 #include "nsReadableUtils.h"
-#include "nsLocaleCID.h"
 #include "nsServiceManagerUtils.h"
 #include "nsPlatformCharset.h"
 #include "nsEncoderDecoderUtils.h"
@@ -23,7 +21,7 @@ static const char* kWinCharsets[][3] = {
 #include "wincharset.properties.h"
 };
 
-NS_IMPL_ISUPPORTS1(nsPlatformCharset, nsIPlatformCharset)
+NS_IMPL_ISUPPORTS(nsPlatformCharset, nsIPlatformCharset)
 
 nsPlatformCharset::nsPlatformCharset()
 {
@@ -73,7 +71,7 @@ nsPlatformCharset::GetDefaultCharsetForLocale(const nsAString& localeName, nsACS
   rv = nsWin32Locale::GetPlatformLocale(localeName, &localeAsLCID);
   if (NS_FAILED(rv)) { return rv; }
 
-  PRUnichar acp_name[6];
+  wchar_t acp_name[6];
   if (GetLocaleInfoW(localeAsLCID, LOCALE_IDEFAULTANSICODEPAGE, acp_name,
                      ArrayLength(acp_name))==0) {
     return NS_ERROR_FAILURE; 

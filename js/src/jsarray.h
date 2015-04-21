@@ -9,15 +9,15 @@
 #ifndef jsarray_h
 #define jsarray_h
 
-#include "jspubtd.h"
 #include "jsobj.h"
+#include "jspubtd.h"
 
 namespace js {
 /* 2^32-2, inclusive */
 const uint32_t MAX_ARRAY_INDEX = 4294967294u;
 }
 
-inline JSBool
+inline bool
 js_IdIsIndex(jsid id, uint32_t *indexp)
 {
     if (JSID_IS_INT(id)) {
@@ -27,7 +27,7 @@ js_IdIsIndex(jsid id, uint32_t *indexp)
         return true;
     }
 
-    if (JS_UNLIKELY(!JSID_IS_STRING(id)))
+    if (MOZ_UNLIKELY(!JSID_IS_STRING(id)))
         return false;
 
     return js::StringIsArrayIndex(JSID_TO_ATOM(id), indexp);
@@ -41,32 +41,38 @@ js_InitContextBusyArrayTable(JSContext *cx);
 
 namespace js {
 
+class ArrayObject;
+
 /* Create a dense array with no capacity allocated, length set to 0. */
-extern JSObject * JS_FASTCALL
-NewDenseEmptyArray(JSContext *cx, JSObject *proto = NULL,
+extern ArrayObject * JS_FASTCALL
+NewDenseEmptyArray(JSContext *cx, JSObject *proto = nullptr,
                    NewObjectKind newKind = GenericObject);
 
 /* Create a dense array with length and capacity == 'length', initialized length set to 0. */
-extern JSObject * JS_FASTCALL
-NewDenseAllocatedArray(JSContext *cx, uint32_t length, JSObject *proto = NULL,
+extern ArrayObject * JS_FASTCALL
+NewDenseAllocatedArray(ExclusiveContext *cx, uint32_t length, JSObject *proto = nullptr,
                        NewObjectKind newKind = GenericObject);
 
 /*
  * Create a dense array with a set length, but without allocating space for the
  * contents. This is useful, e.g., when accepting length from the user.
  */
-extern JSObject * JS_FASTCALL
-NewDenseUnallocatedArray(JSContext *cx, uint32_t length, JSObject *proto = NULL,
+extern ArrayObject * JS_FASTCALL
+NewDenseUnallocatedArray(ExclusiveContext *cx, uint32_t length, JSObject *proto = nullptr,
                          NewObjectKind newKind = GenericObject);
 
 /* Create a dense array with a copy of the dense array elements in src. */
-extern JSObject *
-NewDenseCopiedArray(JSContext *cx, uint32_t length, HandleObject src, uint32_t elementOffset, JSObject *proto = NULL);
+extern ArrayObject *
+NewDenseCopiedArray(JSContext *cx, uint32_t length, HandleObject src, uint32_t elementOffset, JSObject *proto = nullptr);
 
 /* Create a dense array from the given array values, which must be rooted */
-extern JSObject *
-NewDenseCopiedArray(JSContext *cx, uint32_t length, const Value *values, JSObject *proto = NULL,
+extern ArrayObject *
+NewDenseCopiedArray(JSContext *cx, uint32_t length, const Value *values, JSObject *proto = nullptr,
                     NewObjectKind newKind = GenericObject);
+
+/* Create a dense array based on templateObject with the given length. */
+extern ArrayObject *
+NewDenseAllocatedArrayWithTemplate(JSContext *cx, uint32_t length, JSObject *templateObject);
 
 /*
  * Determines whether a write to the given element on |obj| should fail because
@@ -74,23 +80,28 @@ NewDenseCopiedArray(JSContext *cx, uint32_t length, const Value *values, JSObjec
  * increase the length of the array.
  */
 extern bool
-WouldDefinePastNonwritableLength(JSContext *cx, HandleObject obj, uint32_t index, bool strict,
+WouldDefinePastNonwritableLength(ThreadSafeContext *cx,
+                                 HandleObject obj, uint32_t index, bool strict,
                                  bool *definesPast);
 
 /*
  * Canonicalize |vp| to a uint32_t value potentially suitable for use as an
  * array length.
+ *
+ * For parallel execution we can only canonicalize non-object values.
  */
+template <ExecutionMode mode>
 extern bool
-CanonicalizeArrayLengthValue(JSContext *cx, HandleValue v, uint32_t *canonicalized);
+CanonicalizeArrayLengthValue(typename ExecutionModeTraits<mode>::ContextType cx,
+                             HandleValue v, uint32_t *canonicalized);
 
-extern JSBool
+extern bool
 GetLengthProperty(JSContext *cx, HandleObject obj, uint32_t *lengthp);
 
-extern JSBool
+extern bool
 SetLengthProperty(JSContext *cx, HandleObject obj, double length);
 
-extern JSBool
+extern bool
 ObjectMayHaveExtraIndexedProperties(JSObject *obj);
 
 /*
@@ -104,33 +115,33 @@ GetElements(JSContext *cx, HandleObject aobj, uint32_t length, js::Value *vp);
 
 /* Natives exposed for optimization by the interpreter and JITs. */
 
-extern JSBool
+extern bool
 array_sort(JSContext *cx, unsigned argc, js::Value *vp);
 
-extern JSBool
+extern bool
 array_push(JSContext *cx, unsigned argc, js::Value *vp);
 
-extern JSBool
+extern bool
 array_pop(JSContext *cx, unsigned argc, js::Value *vp);
 
-extern JSBool
+extern bool
+array_splice(JSContext *cx, unsigned argc, js::Value *vp);
+
+extern bool
+array_splice_impl(JSContext *cx, unsigned argc, js::Value *vp, bool pop);
+
+extern bool
 array_concat(JSContext *cx, unsigned argc, js::Value *vp);
 
 extern bool
-array_concat_dense(JSContext *cx, HandleObject obj1, HandleObject obj2, HandleObject result);
+array_concat_dense(JSContext *cx, Handle<ArrayObject*> arr1, Handle<ArrayObject*> arr2,
+                   Handle<ArrayObject*> result);
 
 extern void
 ArrayShiftMoveElements(JSObject *obj);
 
-extern JSBool
+extern bool
 array_shift(JSContext *cx, unsigned argc, js::Value *vp);
-
-} /* namespace js */
-
-#ifdef DEBUG
-extern JSBool
-js_ArrayInfo(JSContext *cx, unsigned argc, js::Value *vp);
-#endif
 
 /*
  * Append the given (non-hole) value to the end of an array.  The array must be
@@ -139,11 +150,18 @@ js_ArrayInfo(JSContext *cx, unsigned argc, js::Value *vp);
  * extending the array to accommodate the element will never make the array
  * sparse, which requires that the array be completely filled.)
  */
-extern JSBool
-js_NewbornArrayPush(JSContext *cx, js::HandleObject obj, const js::Value &v);
+extern bool
+NewbornArrayPush(JSContext *cx, HandleObject obj, const Value &v);
+
+} /* namespace js */
+
+#ifdef DEBUG
+extern bool
+js_ArrayInfo(JSContext *cx, unsigned argc, js::Value *vp);
+#endif
 
 /* Array constructor native. Exposed only so the JIT can know its address. */
-JSBool
+bool
 js_Array(JSContext *cx, unsigned argc, js::Value *vp);
 
 #endif /* jsarray_h */

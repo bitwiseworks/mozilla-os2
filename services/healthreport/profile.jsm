@@ -25,20 +25,20 @@ const REQUIRED_UINT32_TYPE = {type: "TYPE_UINT32"};
 Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/osfile.jsm")
 Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-common/utils.js");
 
 // Profile creation time access.
 // This is separate from the provider to simplify testing and enable extraction
 // to a shared location in the future.
-function ProfileCreationTimeAccessor(profile, log) {
+this.ProfileCreationTimeAccessor = function(profile, log) {
   this.profilePath = profile || OS.Constants.Path.profileDir;
   if (!this.profilePath) {
     throw new Error("No profile directory.");
   }
   this._log = log || {"debug": function (s) { dump(s + "\n"); }};
 }
-ProfileCreationTimeAccessor.prototype = {
+this.ProfileCreationTimeAccessor.prototype = {
   /**
    * There are three ways we can get our creation time:
    *
@@ -210,10 +210,10 @@ function truncate(msec) {
 /**
  * A Metrics.Provider for profile metadata, such as profile creation time.
  */
-function ProfileMetadataProvider() {
+this.ProfileMetadataProvider = function() {
   Metrics.Provider.call(this);
 }
-ProfileMetadataProvider.prototype = {
+this.ProfileMetadataProvider.prototype = {
   __proto__: Metrics.Provider.prototype,
 
   name: "org.mozilla.profile",

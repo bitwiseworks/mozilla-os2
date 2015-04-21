@@ -9,6 +9,7 @@
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLFrameElement.h"
 #include "nsIDOMHTMLIFrameElement.h"
+#include "nsDOMSettableTokenList.h"
 
 namespace mozilla {
 namespace dom {
@@ -17,7 +18,7 @@ class HTMLIFrameElement MOZ_FINAL : public nsGenericHTMLFrameElement
                                   , public nsIDOMHTMLIFrameElement
 {
 public:
-  HTMLIFrameElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+  HTMLIFrameElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
                     FromParser aFromParser = NOT_FROM_PARSER);
   virtual ~HTMLIFrameElement();
 
@@ -25,15 +26,6 @@ public:
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLIFrameElement
   NS_DECL_NSIDOMHTMLIFRAMEELEMENT
@@ -47,11 +39,20 @@ public:
   virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
+  nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                   const nsAString& aValue, bool aNotify)
+  {
+    return SetAttr(aNameSpaceID, aName, nullptr, aValue, aNotify);
+  }
+  virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                           nsIAtom* aPrefix, const nsAString& aValue,
+                           bool aNotify) MOZ_OVERRIDE;
   virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                                 const nsAttrValue* aValue,
                                 bool aNotify) MOZ_OVERRIDE;
+  virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
+                             bool aNotify) MOZ_OVERRIDE;
 
   uint32_t GetSandboxFlags();
 
@@ -61,6 +62,14 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::src, aSrc, aError);
   }
+  void GetSrcdoc(DOMString& aSrcdoc)
+  {
+    GetHTMLAttr(nsGkAtoms::srcdoc, aSrcdoc);
+  }
+  void SetSrcdoc(const nsAString& aSrcdoc, ErrorResult& aError)
+  {
+    SetHTMLAttr(nsGkAtoms::srcdoc, aSrcdoc, aError);
+  }
   void GetName(DOMString& aName)
   {
     GetHTMLAttr(nsGkAtoms::name, aName);
@@ -69,9 +78,9 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::name, aName, aError);
   }
-  void GetSandbox(DOMString& aSandbox)
+  nsDOMSettableTokenList* Sandbox()
   {
-    GetHTMLAttr(nsGkAtoms::sandbox, aSandbox);
+    return GetTokenList(nsGkAtoms::sandbox);
   }
   bool AllowFullscreen() const
   {
@@ -164,8 +173,11 @@ protected:
   virtual void GetItemValueText(nsAString& text) MOZ_OVERRIDE;
   virtual void SetItemValueText(const nsAString& text) MOZ_OVERRIDE;
 
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
+
+private:
+  static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                    nsRuleData* aData);
 };
 
 } // namespace dom

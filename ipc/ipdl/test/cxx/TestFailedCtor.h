@@ -35,8 +35,8 @@ public:
     void Main();
 
 protected:
-    virtual PTestFailedCtorSubParent* AllocPTestFailedCtorSub() MOZ_OVERRIDE;
-    virtual bool DeallocPTestFailedCtorSub(PTestFailedCtorSubParent* actor) MOZ_OVERRIDE;
+    virtual PTestFailedCtorSubParent* AllocPTestFailedCtorSubParent() MOZ_OVERRIDE;
+    virtual bool DeallocPTestFailedCtorSubParent(PTestFailedCtorSubParent* actor) MOZ_OVERRIDE;
 
     virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE
     {
@@ -56,11 +56,11 @@ public:
     virtual ~TestFailedCtorChild() { }
 
 protected:
-    virtual PTestFailedCtorSubChild* AllocPTestFailedCtorSub() MOZ_OVERRIDE;
+    virtual PTestFailedCtorSubChild* AllocPTestFailedCtorSubChild() MOZ_OVERRIDE;
 
     virtual bool AnswerPTestFailedCtorSubConstructor(PTestFailedCtorSubChild* actor) MOZ_OVERRIDE;
 
-    virtual bool DeallocPTestFailedCtorSub(PTestFailedCtorSubChild* actor) MOZ_OVERRIDE;
+    virtual bool DeallocPTestFailedCtorSubChild(PTestFailedCtorSubChild* actor) MOZ_OVERRIDE;
 
     virtual void ProcessingError(Result what) MOZ_OVERRIDE;
 
@@ -80,13 +80,13 @@ class TestFailedCtorSubParent :
     public PTestFailedCtorSubParent
 {
 public:
-    TestFailedCtorSubParent() : mOne(NULL), mTwo(NULL), mThree(NULL) { }
+    TestFailedCtorSubParent() : mOne(nullptr), mTwo(nullptr), mThree(nullptr) { }
     virtual ~TestFailedCtorSubParent();
 
 protected:
-    virtual PTestFailedCtorSubsubParent* AllocPTestFailedCtorSubsub() MOZ_OVERRIDE;
+    virtual PTestFailedCtorSubsubParent* AllocPTestFailedCtorSubsubParent() MOZ_OVERRIDE;
 
-    virtual bool DeallocPTestFailedCtorSubsub(PTestFailedCtorSubsubParent* actor) MOZ_OVERRIDE;
+    virtual bool DeallocPTestFailedCtorSubsubParent(PTestFailedCtorSubsubParent* actor) MOZ_OVERRIDE;
     virtual bool RecvSync() MOZ_OVERRIDE { return true; }
 
     virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
@@ -105,8 +105,8 @@ public:
     virtual ~TestFailedCtorSubChild() { }
 
 protected:
-    virtual PTestFailedCtorSubsubChild* AllocPTestFailedCtorSubsub() MOZ_OVERRIDE;
-    virtual bool DeallocPTestFailedCtorSubsub(PTestFailedCtorSubsubChild* actor) MOZ_OVERRIDE;
+    virtual PTestFailedCtorSubsubChild* AllocPTestFailedCtorSubsubChild() MOZ_OVERRIDE;
+    virtual bool DeallocPTestFailedCtorSubsubChild(PTestFailedCtorSubsubChild* actor) MOZ_OVERRIDE;
 
     virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
 };

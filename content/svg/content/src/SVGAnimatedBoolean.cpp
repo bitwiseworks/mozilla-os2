@@ -5,24 +5,18 @@
 
 #include "SVGAnimatedBoolean.h"
 #include "mozilla/dom/SVGAnimatedBooleanBinding.h"
-#include "nsContentUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
 NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(SVGAnimatedBoolean, mSVGElement)
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(SVGAnimatedBoolean)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(SVGAnimatedBoolean)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SVGAnimatedBoolean)
-  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
+NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(SVGAnimatedBoolean, AddRef)
+NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(SVGAnimatedBoolean, Release)
 
 JSObject*
-SVGAnimatedBoolean::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+SVGAnimatedBoolean::WrapObject(JSContext* aCx)
 {
-  return SVGAnimatedBooleanBinding::Wrap(aCx, aScope, this);
+  return SVGAnimatedBooleanBinding::Wrap(aCx, this);
 }
 

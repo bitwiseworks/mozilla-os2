@@ -3,47 +3,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-LIBRARY_NAME	= gkplugin
-MSVC_ENABLE_PGO := 1
-EXPORT_LIBRARY = 1
-IS_COMPONENT    = 1
-MODULE_NAME	= nsPluginModule
-LIBXUL_LIBRARY = 1
-
-ifeq ($(MOZ_WIDGET_TOOLKIT),android)
-LOCAL_INCLUDES += -I$(topsrcdir)/dom/plugins/base/android
-else
-# android_npapi.h extends the NPNVariable and NPPVariable enums
-# using #defines, which results in Wswitch warnings in gcc-4.6.
-# Therefore, enable FAIL_ON_WARNINGS only on non-Android platforms.
-FAIL_ON_WARNINGS := 1
-endif
-
-ifeq ($(OS_ARCH),WINNT)
-	LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/base
-endif
-
-LOCAL_INCLUDES += \
-  -DSK_BUILD_FOR_ANDROID_NDK \
-  -I$(topsrcdir)/widget/android \
-  -I$(topsrcdir)/widget/xpwidgets \
-  -I$(topsrcdir)/xpcom/base/ \
-  -I$(topsrcdir)/gfx/skia/include/core \
-  -I$(topsrcdir)/gfx/skia/include/config \
-  $(MOZ_CAIRO_CFLAGS) \
-  $(MOZ_PIXMAN_CFLAGS) \
-  $(NULL)
-
-include $(topsrcdir)/dom/dom-config.mk
-include $(topsrcdir)/config/config.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
 
-CXXFLAGS         += $(TK_CFLAGS)
+CXXFLAGS += \
+  $(MOZ_CAIRO_CFLAGS) \
+  $(TK_CFLAGS) \
+  $(NULL)

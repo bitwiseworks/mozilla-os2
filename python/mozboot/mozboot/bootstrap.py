@@ -11,8 +11,8 @@ import sys
 from mozboot.centos import CentOSBootstrapper
 from mozboot.debian import DebianBootstrapper
 from mozboot.fedora import FedoraBootstrapper
+from mozboot.freebsd import FreeBSDBootstrapper
 from mozboot.gentoo import GentooBootstrapper
-from mozboot.mint import MintBootstrapper
 from mozboot.osx import OSXBootstrapper
 from mozboot.openbsd import OpenBSDBootstrapper
 from mozboot.ubuntu import UbuntuBootstrapper
@@ -26,14 +26,16 @@ obtain a copy of the source code by running:
 
 Or, if you prefer Git:
 
-    git clone git://github.com/mozilla/mozilla-central.git
+    git clone https://git.mozilla.org/integration/gecko-dev.git
 '''
 
 
 class Bootstrapper(object):
     """Main class that performs system bootstrap."""
 
-    def bootstrap(self):
+    def __init__(self, finished=FINISHED):
+        self.instance = None
+        self.finished = finished
         cls = None
         args = {}
 
@@ -49,8 +51,15 @@ class Bootstrapper(object):
             elif distro == 'Gentoo Base System':
                 cls = GentooBootstrapper
             elif distro in ('Mint', 'LinuxMint'):
-                cls = MintBootstrapper
+                # Most Linux Mint editions are based on Ubuntu; one is based on
+                # Debian, and reports this in dist_id
+                if dist_id == 'debian':
+                    cls = DebianBootstrapper
+                else:
+                    cls = UbuntuBootstrapper
             elif distro == 'Ubuntu':
+                cls = UbuntuBootstrapper
+            elif distro == 'Elementary':
                 cls = UbuntuBootstrapper
             else:
                 raise NotImplementedError('Bootstrap support for this Linux '
@@ -70,13 +79,20 @@ class Bootstrapper(object):
             cls = OpenBSDBootstrapper
             args['version'] = platform.uname()[2]
 
+        elif sys.platform.startswith('freebsd'):
+            cls = FreeBSDBootstrapper
+            args['version'] = platform.release()
+
         if cls is None:
             raise NotImplementedError('Bootstrap support is not yet available '
                                       'for your OS.')
 
-        instance = cls(**args)
-        instance.install_system_packages()
-        instance.ensure_mercurial_modern()
-        instance.ensure_python_modern()
+        self.instance = cls(**args)
 
-        print(FINISHED)
+
+    def bootstrap(self):
+        self.instance.install_system_packages()
+        self.instance.ensure_mercurial_modern()
+        self.instance.ensure_python_modern()
+
+        print(self.finished)

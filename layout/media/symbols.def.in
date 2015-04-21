@@ -11,6 +11,7 @@ nestegg_free_packet
 nestegg_init
 nestegg_offset_seek
 nestegg_packet_count
+nestegg_packet_discard_padding
 nestegg_packet_data
 nestegg_packet_track
 nestegg_packet_tstamp
@@ -27,8 +28,20 @@ nestegg_track_video_params
 nestegg_tstamp_scale
 nestegg_has_cues
 nestegg_sniff
+nestegg_set_halloc_func
 #endif
-#ifdef MOZ_VP8
+#ifdef MOZ_WEBM_ENCODER
+writeSimpleBlock
+writeHeader
+writeSegmentInformation
+writeVideoTrack
+writeAudioTrack
+Ebml_Serialize
+Ebml_SerializeUnsigned
+Ebml_StartSubElement
+Ebml_EndSubElement
+#endif
+#ifdef MOZ_VPX
 #ifndef MOZ_NATIVE_LIBVPX
 vpx_codec_control_
 vpx_codec_dec_init_ver
@@ -37,24 +50,26 @@ vpx_codec_destroy
 vpx_codec_get_frame
 vpx_codec_peek_stream_info
 vpx_codec_vp8_dx
+vpx_codec_vp9_dx
 vpx_img_free
 vpx_codec_enc_config_set
 vpx_codec_enc_init_ver
-#ifdef MOZ_VP8_ENCODER
 vpx_codec_vp8_cx
-#endif
+vpx_codec_vp9_cx
 vpx_img_set_rect
 vpx_img_wrap
 vpx_codec_get_cx_data
 vpx_codec_enc_config_default
 vpx_img_alloc
 vpx_codec_encode
+vpx_mem_set_functions
 #endif
 #endif
 #ifdef MOZ_VORBIS
 ogg_page_bos
 ogg_page_granulepos
 ogg_page_serialno
+ogg_set_mem_functions
 ogg_stream_check
 ogg_stream_clear
 ogg_stream_eos
@@ -71,11 +86,19 @@ ogg_sync_init
 ogg_sync_pageseek
 ogg_sync_reset
 ogg_sync_wrote
+vorbis_analysis
+vorbis_analysis_blockout
+vorbis_analysis_buffer
+vorbis_analysis_init
+vorbis_analysis_headerout
+vorbis_analysis_wrote
 vorbis_block_clear
 vorbis_block_init
+vorbis_comment_add_tag
 vorbis_comment_clear
 vorbis_comment_init
 vorbis_dsp_clear
+vorbis_encode_init_vbr
 vorbis_info_clear
 vorbis_info_init
 vorbis_packet_blocksize
@@ -87,7 +110,6 @@ vorbis_synthesis_pcmout
 vorbis_synthesis_read
 vorbis_synthesis_restart
 #endif
-#ifdef MOZ_SPEEX_RESAMPLER
 speex_resampler_init
 speex_resampler_init_frac
 speex_resampler_destroy
@@ -108,20 +130,21 @@ speex_resampler_get_output_stride
 speex_resampler_get_input_latency
 speex_resampler_get_output_latency
 speex_resampler_skip_zeros
+speex_resampler_set_skip_frac_num
 speex_resampler_reset_mem
 speex_resampler_strerror
-#endif
-#ifdef MOZ_CUBEB
 cubeb_destroy
 cubeb_init
+cubeb_get_backend_id
 cubeb_get_max_channel_count
+cubeb_get_min_latency
+cubeb_get_preferred_sample_rate
 cubeb_stream_destroy
 cubeb_stream_get_position
 cubeb_stream_init
 cubeb_stream_start
 cubeb_stream_stop
-#endif
-#ifdef MOZ_OGG
+cubeb_stream_get_latency
 th_comment_clear
 th_comment_init
 th_decode_alloc
@@ -135,7 +158,6 @@ th_info_init
 th_packet_isheader
 th_packet_iskeyframe
 th_setup_free
-#endif
 #ifdef MOZ_OPUS
 opus_decoder_create
 opus_decoder_destroy
@@ -164,21 +186,6 @@ ShGetInfoLog
 ShCompile
 ShGetInfo
 ShConstructCompiler
-#ifdef MOZ_WEBRTC_GKMEDIA
-#ifdef HAVE_64BIT_OS
-?GetInterface@ViERender@webrtc@@SAPEAV12@PEAVVideoEngine@2@@Z
-?GetInterface@ViECapture@webrtc@@SAPEAV12@PEAVVideoEngine@2@@Z
-?GetInterface@ViEBase@webrtc@@SAPEAV12@PEAVVideoEngine@2@@Z
-?Create@VideoEngine@webrtc@@SAPEAV12@XZ
-?Delete@VideoEngine@webrtc@@SA_NAEAPEAV12@@Z
-#else
-?GetInterface@ViERender@webrtc@@SAPAV12@PAVVideoEngine@2@@Z
-?GetInterface@ViECapture@webrtc@@SAPAV12@PAVVideoEngine@2@@Z
-?GetInterface@ViEBase@webrtc@@SAPAV12@PAVVideoEngine@2@@Z
-?Create@VideoEngine@webrtc@@SAPAV12@XZ
-?Delete@VideoEngine@webrtc@@SA_NAAPAV12@@Z
-#endif
-#endif
 ShGetActiveAttrib
 ShGetActiveUniform
 #ifndef MOZ_NATIVE_PNG
@@ -264,6 +271,8 @@ jpeg_abort_decompress
 jpeg_read_raw_data
 #endif
 qcms_enable_iccv4
+qcms_data_from_unicode_path
+qcms_data_from_path
 qcms_profile_create_rgb_with_gamma
 qcms_profile_from_memory
 qcms_profile_from_path
@@ -372,6 +381,7 @@ _moz_cairo_mask_surface
 _moz_cairo_matrix_init
 _moz_cairo_matrix_init_identity
 _moz_cairo_matrix_init_scale
+_moz_cairo_matrix_init_translate
 _moz_cairo_matrix_invert
 _moz_cairo_matrix_multiply
 _moz_cairo_matrix_rotate
@@ -410,6 +420,7 @@ _moz_cairo_pattern_status
 _moz_cairo_pdf_surface_create_for_stream
 _moz_cairo_pop_group
 _moz_cairo_pop_group_to_source
+_moz_cairo_push_group
 _moz_cairo_push_group_with_content
 _moz_cairo_rectangle
 _moz_cairo_rectangle_list_destroy
@@ -473,9 +484,12 @@ _moz_cairo_translate
 _moz_cairo_user_to_device
 _moz_cairo_user_to_device_distance
 _moz_cairo_win32_font_face_create_for_logfontw_hfont
+#ifdef NS_PRINTING
 _moz_cairo_win32_printing_surface_create
+#endif
 _moz_cairo_win32_scaled_font_select_font
 _moz_cairo_win32_surface_create
+_moz_cairo_win32_surface_create_with_d3dsurface9
 _moz_cairo_win32_surface_create_with_ddb
 _moz_cairo_win32_surface_create_with_dib
 _moz_cairo_win32_surface_get_dc
@@ -487,6 +501,30 @@ _moz_pixman_image_set_transform
 _moz_pixman_image_unref
 _moz_pixman_transform_from_pixman_f_transform
 _moz_pixman_transform_invert
+_moz_pixman_region32_reset
+_moz_pixman_region32_init
+_moz_pixman_region32_init_rect
+_moz_pixman_region32_init_rects
+_moz_pixman_region32_init_with_extents
+_moz_pixman_region32_fini
+_moz_pixman_region32_translate
+_moz_pixman_region32_copy
+_moz_pixman_region32_intersect
+_moz_pixman_region32_intersect_rect
+_moz_pixman_region32_union
+_moz_pixman_region32_union_rect
+_moz_pixman_region32_subtract
+_moz_pixman_region32_inverse
+_moz_pixman_region32_contains_point
+_moz_pixman_region32_contains_rectangle
+_moz_pixman_region32_not_empty
+_moz_pixman_region32_extents
+_moz_pixman_region32_n_rects
+_moz_pixman_region32_rectangles
+_moz_pixman_region32_equal
+_moz_pixman_region32_selfcheck
+_moz_pixman_region32_reset
+_moz_pixman_region32_clear
 #endif
 cairo_d2d_create_device
 cairo_d2d_create_device_from_d3d10device
@@ -562,6 +600,7 @@ hb_ot_layout_script_get_language_tags
 hb_ot_layout_table_choose_script
 hb_ot_layout_table_get_script_tags
 hb_ot_tag_to_language
+hb_ot_tag_to_script
 hb_ot_tags_from_script
 hb_set_add
 hb_set_clear
@@ -580,11 +619,3 @@ hb_unicode_funcs_set_eastasian_width_func
 hb_unicode_funcs_set_general_category_func
 hb_unicode_funcs_set_mirroring_func
 hb_unicode_funcs_set_script_func
-webvtt_create_parser
-webvtt_delete_parser
-webvtt_finish_parsing
-webvtt_parse_chunk
-webvtt_ref_node
-webvtt_release_node
-webvtt_strerror
-webvtt_string_text

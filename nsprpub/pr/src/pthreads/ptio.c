@@ -2854,6 +2854,7 @@ static PRStatus pt_GetSocketOption(PRFileDesc *fd, PRSocketOptionData *data)
             case PR_SockOpt_Keepalive:
             case PR_SockOpt_NoDelay:
             case PR_SockOpt_Broadcast:
+            case PR_SockOpt_Reuseport:
             {
                 PRIntn value;
                 length = sizeof(PRIntn);
@@ -2973,6 +2974,7 @@ static PRStatus pt_SetSocketOption(PRFileDesc *fd, const PRSocketOptionData *dat
             case PR_SockOpt_Keepalive:
             case PR_SockOpt_NoDelay:
             case PR_SockOpt_Broadcast:
+            case PR_SockOpt_Reuseport:
             {
                 PRIntn value = (data->value.reuse_addr) ? 1 : 0;
                 rv = setsockopt(
@@ -3400,7 +3402,7 @@ PR_EXTERN(PRStatus) _pr_push_ipv6toipv4_layer(PRFileDesc *fd);
 extern PRBool _pr_ipv6_is_present(void);
 PR_IMPLEMENT(PRBool) _pr_test_ipv6_socket()
 {
-PRInt32 osfd;
+    int osfd;
 
 #if defined(DARWIN)
     /*

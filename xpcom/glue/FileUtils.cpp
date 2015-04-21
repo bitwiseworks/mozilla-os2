@@ -228,7 +228,7 @@ mozilla::ReadAheadFile(nsIFile* aFile, const size_t aOffset,
 
 static const unsigned int bufsize = 4096;
 
-#ifdef HAVE_64BIT_OS
+#ifdef __LP64__
 typedef Elf64_Ehdr Elf_Ehdr;
 typedef Elf64_Phdr Elf_Phdr;
 static const unsigned char ELFCLASS = ELFCLASS64;
@@ -254,7 +254,7 @@ static const uint32_t CPU_TYPE = CPU_TYPE_POWERPC64;
 #error Unsupported CPU type
 #endif
 
-#ifdef HAVE_64BIT_OS
+#ifdef __LP64__
 #undef LC_SEGMENT
 #define LC_SEGMENT LC_SEGMENT_64
 #undef MH_MAGIC
@@ -269,7 +269,7 @@ class ScopedMMap
 {
 public:
   ScopedMMap(const char *aFilePath)
-    : buf(NULL)
+    : buf(nullptr)
   {
     fd = open(aFilePath, O_RDONLY);
     if (fd < 0) {
@@ -280,7 +280,7 @@ public:
       return;
     }
     size = st.st_size;
-    buf = (char *)mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    buf = (char *)mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
   }
   ~ScopedMMap()
   {
@@ -477,7 +477,7 @@ mozilla::ReadAheadLib(mozilla::pathstr_t aFilePath)
   // information to find the biggest offset from the library that
   // will be mapped in memory.
   char *cmd = &base[sizeof(struct cpu_mach_header)];
-  off_t end = 0;
+  uint32_t end = 0;
   for (uint32_t ncmds = mh->ncmds; ncmds; ncmds--) {
     struct segment_command *sh = (struct segment_command *)cmd;
     if (sh->cmd != LC_SEGMENT) {
@@ -507,8 +507,8 @@ mozilla::ReadAheadFile(mozilla::pathstr_t aFilePath, const size_t aOffset,
     }
     return;
   }
-  HANDLE fd = CreateFileW(aFilePath, GENERIC_READ, FILE_SHARE_READ,
-                          NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+  HANDLE fd = CreateFileW(aFilePath, GENERIC_READ, FILE_SHARE_READ, nullptr,
+                          OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
   if (aOutFd) {
     *aOutFd = fd;
   }

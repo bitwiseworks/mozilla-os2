@@ -4,10 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "UnreachableCodeElimination.h"
-#include "IonAnalysis.h"
-#include "AliasAnalysis.h"
-#include "ValueNumbering.h"
+#include "jit/UnreachableCodeElimination.h"
+
+#include "jit/AliasAnalysis.h"
+#include "jit/IonAnalysis.h"
+#include "jit/MIRGenerator.h"
+#include "jit/ValueNumbering.h"
 
 using namespace js;
 using namespace jit;
@@ -80,8 +82,8 @@ UnreachableCodeElimination::removeUnmarkedBlocksAndCleanup()
 
     // Pass 5: It's important for optimizations to re-run GVN (and in
     // turn alias analysis) after UCE if we eliminated branches.
-    if (rerunAliasAnalysis_ && js_IonOptions.gvn) {
-        ValueNumberer gvn(mir_, graph_, js_IonOptions.gvnIsOptimistic);
+    if (rerunAliasAnalysis_ && mir_->optimizationInfo().gvnEnabled()) {
+        ValueNumberer gvn(mir_, graph_, mir_->optimizationInfo().gvnKind() == GVN_Optimistic);
         if (!gvn.clear() || !gvn.analyze())
             return false;
         IonSpewPass("GVN-after-UCE");
@@ -110,19 +112,18 @@ UnreachableCodeElimination::optimizableSuccessor(MBasicBlock *block)
 {
     // If the last instruction in `block` is a test instruction of a
     // constant value, returns the successor that the branch will
-    // always branch to at runtime. Otherwise, returns NULL.
+    // always branch to at runtime. Otherwise, returns nullptr.
 
     MControlInstruction *ins = block->lastIns();
     if (!ins->isTest())
-        return NULL;
+        return nullptr;
 
     MTest *testIns = ins->toTest();
     MDefinition *v = testIns->getOperand(0);
     if (!v->isConstant())
-        return NULL;
+        return nullptr;
 
-    const Value &val = v->toConstant()->value();
-    BranchDirection bdir = ToBoolean(val) ? TRUE_BRANCH : FALSE_BRANCH;
+    BranchDirection bdir = v->toConstant()->valueToBoolean() ? TRUE_BRANCH : FALSE_BRANCH;
     return testIns->branchSuccessor(bdir);
 }
 
@@ -187,12 +188,12 @@ UnreachableCodeElimination::prunePointlessBranchesAndMarkReachableBlocks()
         MBasicBlock *succ = optimizableSuccessor(block);
         JS_ASSERT(succ);
 
-        MGoto *gotoIns = MGoto::New(succ);
+        MGoto *gotoIns = MGoto::New(graph_.alloc(), succ);
         block->discardLastIns();
         block->end(gotoIns);
         MBasicBlock *successorWithPhis = block->successorWithPhis();
         if (successorWithPhis && successorWithPhis != succ)
-            block->setSuccessorWithPhis(NULL, 0);
+            block->setSuccessorWithPhis(nullptr, 0);
     }
 
     return true;
@@ -203,7 +204,7 @@ UnreachableCodeElimination::checkDependencyAndRemoveUsesFromUnmarkedBlocks(MDefi
 {
     // When the instruction depends on removed block,
     // alias analysis needs to get rerun to have the right dependency.
-    if (instr->dependency() && !instr->dependency()->block()->isMarked())
+    if (!disableAliasAnalysis_ && instr->dependency() && !instr->dependency()->block()->isMarked())
         rerunAliasAnalysis_ = true;
 
     for (MUseIterator iter(instr->usesBegin()); iter != instr->usesEnd(); ) {
@@ -248,7 +249,7 @@ UnreachableCodeElimination::removeUnmarkedBlocksAndClearDominators()
                 // predecessors need to have the successorWithPhis
                 // flag cleared.
                 for (size_t i = 0; i < block->numPredecessors(); i++)
-                    block->getPredecessor(i)->setSuccessorWithPhis(NULL, 0);
+                    block->getPredecessor(i)->setSuccessorWithPhis(nullptr, 0);
             }
 
             if (block->isLoopBackedge()) {
@@ -283,22 +284,6 @@ UnreachableCodeElimination::removeUnmarkedBlocksAndClearDominators()
                                 break;
                             }
                         }
-                    }
-                }
-            }
-
-            // When we remove a call, we can't leave the corresponding MPassArg
-            // in the graph. Since lowering will fail. Replace it with the
-            // argument for the exceptional case when it is kept alive in a
-            // ResumePoint. DCE will remove the unused MPassArg instruction.
-            for (MInstructionIterator iter(block->begin()); iter != block->end(); iter++) {
-                if (iter->isCall()) {
-                    MCall *call = iter->toCall();
-                    for (size_t i = 0; i < call->numStackArgs(); i++) {
-                        JS_ASSERT(call->getArg(i)->isPassArg());
-                        JS_ASSERT(call->getArg(i)->defUseCount() == 1);
-                        MPassArg *arg = call->getArg(i)->toPassArg();
-                        arg->replaceAllUsesWith(arg->getArgument());
                     }
                 }
             }

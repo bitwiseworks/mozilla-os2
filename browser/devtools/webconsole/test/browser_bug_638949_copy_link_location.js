@@ -13,9 +13,13 @@ let output = null;
 let menu = null;
 
 function test() {
+  let originalNetPref = Services.prefs.getBoolPref("devtools.webconsole.filter.networkinfo");
   registerCleanupFunction(() => {
+    Services.prefs.setBoolPref("devtools.webconsole.filter.networkinfo", originalNetPref);
     HUD = output = menu = null;
   });
+
+  Services.prefs.setBoolPref("devtools.webconsole.filter.networkinfo", true);
 
   addTab(TEST_URI);
   browser.addEventListener("load", function onLoad() {
@@ -56,14 +60,15 @@ function testWithoutNetActivity() {
 
 function onConsoleMessage(aResults) {
   output.focus();
-  output.selectedItem = [...aResults[0].matched][0];
+  let message = [...aResults[0].matched][0];
 
   goUpdateCommand(COMMAND_NAME);
   ok(!isEnabled(), COMMAND_NAME + "is disabled");
 
   // Test that the "Copy Link Location" menu item is hidden for non-network
   // messages.
-  waitForContextMenu(menu, output.selectedItem, () => {
+  message.scrollIntoView();
+  waitForContextMenu(menu, message, () => {
     let isHidden = menu.querySelector(CONTEXT_MENU_ID).hidden;
     ok(isHidden, CONTEXT_MENU_ID + " is hidden");
   }, testWithNetActivity);
@@ -88,20 +93,26 @@ function testWithNetActivity() {
 
 function onNetworkMessage(aResults) {
   output.focus();
-  output.selectedItem = [...aResults[0].matched][0];
+  let message = [...aResults[0].matched][0];
+  HUD.ui.output.selectMessage(message);
 
   goUpdateCommand(COMMAND_NAME);
   ok(isEnabled(), COMMAND_NAME + " is enabled");
 
-  waitForClipboard(output.selectedItem.url, () => goDoCommand(COMMAND_NAME),
-                   testMenuWithNetActivity, testMenuWithNetActivity);
+  info("expected clipboard value: " + message.url);
+
+  waitForClipboard((aData) => { return aData.trim() == message.url; },
+    () => { goDoCommand(COMMAND_NAME) },
+    testMenuWithNetActivity, testMenuWithNetActivity);
+
+  function testMenuWithNetActivity() {
+    // Test that the "Copy Link Location" menu item is visible for network-related
+    // messages.
+    message.scrollIntoView();
+    waitForContextMenu(menu, message, () => {
+      let isVisible = !menu.querySelector(CONTEXT_MENU_ID).hidden;
+      ok(isVisible, CONTEXT_MENU_ID + " is visible");
+    }, finishTest);
+  }
 }
 
-function testMenuWithNetActivity() {
-  // Test that the "Copy Link Location" menu item is visible for network-related
-  // messages.
-  waitForContextMenu(menu, output.selectedItem, () => {
-    let isVisible = !menu.querySelector(CONTEXT_MENU_ID).hidden;
-    ok(isVisible, CONTEXT_MENU_ID + " is visible");
-  }, finishTest);
-}

@@ -10,15 +10,16 @@
 
 
 // This file includes unit tests for EncoderStateFeedback.
-#include "video_engine/encoder_state_feedback.h"
+#include "webrtc/video_engine/encoder_state_feedback.h"
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
+#include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
-#include "modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
-#include "modules/utility/interface/process_thread.h"
-#include "system_wrappers/interface/scoped_ptr.h"
-#include "video_engine/vie_encoder.h"
+#include "webrtc/common.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
+#include "webrtc/modules/utility/interface/process_thread.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/video_engine/vie_encoder.h"
 
 namespace webrtc {
 
@@ -27,16 +28,16 @@ class TestProcessThread : public ProcessThread {
  public:
   TestProcessThread() {}
   ~TestProcessThread() {}
-  virtual WebRtc_Word32 Start() { return 0; }
-  virtual WebRtc_Word32 Stop() { return 0; }
-  virtual WebRtc_Word32 RegisterModule(const Module* module) { return 0; }
-  virtual WebRtc_Word32 DeRegisterModule(const Module* module) { return 0; }
+  virtual int32_t Start() { return 0; }
+  virtual int32_t Stop() { return 0; }
+  virtual int32_t RegisterModule(const Module* module) { return 0; }
+  virtual int32_t DeRegisterModule(const Module* module) { return 0; }
 };
 
 class MockVieEncoder : public ViEEncoder {
  public:
   explicit MockVieEncoder(TestProcessThread* process_thread)
-      : ViEEncoder(1, 1, 1, *process_thread, NULL) {}
+      : ViEEncoder(1, 1, 1, config_, *process_thread, NULL) {}
   ~MockVieEncoder() {}
 
   MOCK_METHOD1(OnReceivedIntraFrameRequest,
@@ -47,6 +48,8 @@ class MockVieEncoder : public ViEEncoder {
                void(uint32_t ssrc, uint64_t picture_id));
   MOCK_METHOD2(OnLocalSsrcChanged,
                void(uint32_t old_ssrc, uint32_t new_ssrc));
+
+  const Config config_;
 };
 
 class VieKeyRequestTest : public ::testing::Test {

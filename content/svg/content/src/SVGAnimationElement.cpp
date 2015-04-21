@@ -9,6 +9,8 @@
 #include "nsSMILAnimationController.h"
 #include "nsSMILAnimationFunction.h"
 #include "nsContentUtils.h"
+#include "nsIURI.h"
+#include "prtime.h"
 
 namespace mozilla {
 namespace dom {
@@ -24,6 +26,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SVGAnimationElement)
 NS_INTERFACE_MAP_END_INHERITING(SVGAnimationElementBase)
 
 // Cycle collection magic -- based on nsSVGUseElement
+NS_IMPL_CYCLE_COLLECTION_CLASS(SVGAnimationElement)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(SVGAnimationElement,
                                                 SVGAnimationElementBase)
   tmp->mHrefTarget.Unlink();
@@ -39,19 +43,9 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 //----------------------------------------------------------------------
 // Implementation
 
-#ifdef _MSC_VER
-// Disable "warning C4355: 'this' : used in base member initializer list".
-// We can ignore that warning because we know that mHrefTarget's constructor 
-// doesn't dereference the pointer passed to it.
-#pragma warning(push)
-#pragma warning(disable:4355)
-#endif
-SVGAnimationElement::SVGAnimationElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+SVGAnimationElement::SVGAnimationElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : SVGAnimationElementBase(aNodeInfo),
-    mHrefTarget(this)
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
+    mHrefTarget(MOZ_THIS_IN_INITIALIZER_LIST())
 {
 }
 

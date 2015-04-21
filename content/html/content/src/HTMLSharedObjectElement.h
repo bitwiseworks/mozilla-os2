@@ -18,27 +18,18 @@
 namespace mozilla {
 namespace dom {
 
-class HTMLSharedObjectElement : public nsGenericHTMLElement
-                              , public nsObjectLoadingContent
-                              , public nsIDOMHTMLAppletElement
-                              , public nsIDOMHTMLEmbedElement
+class HTMLSharedObjectElement MOZ_FINAL : public nsGenericHTMLElement
+                                        , public nsObjectLoadingContent
+                                        , public nsIDOMHTMLAppletElement
+                                        , public nsIDOMHTMLEmbedElement
 {
 public:
-  HTMLSharedObjectElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+  HTMLSharedObjectElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
                           mozilla::dom::FromParser aFromParser = mozilla::dom::NOT_FROM_PARSER);
   virtual ~HTMLSharedObjectElement();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   virtual int32_t TabIndexDefault() MOZ_OVERRIDE;
 
@@ -75,7 +66,7 @@ public:
                                 nsAttrValue &aResult) MOZ_OVERRIDE;
   virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const MOZ_OVERRIDE;
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom *aAttribute) const MOZ_OVERRIDE;
-  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  virtual EventStates IntrinsicState() const MOZ_OVERRIDE;
   virtual void DestroyContent() MOZ_OVERRIDE;
 
   // nsObjectLoadingContent
@@ -89,11 +80,6 @@ public:
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED_NO_UNLINK(HTMLSharedObjectElement,
                                                      nsGenericHTMLElement)
-
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE
-  {
-    return static_cast<nsIDOMHTMLAppletElement*>(this);
-  }
 
   // WebIDL API for <applet>
   void GetAlign(DOMString& aValue)
@@ -208,19 +194,6 @@ private:
    */
   NS_HIDDEN_(void) StartObjectLoad(bool aNotify);
 
-  void GetTypeAttrValue(nsCString &aValue) const
-  {
-    if (mNodeInfo->Equals(nsGkAtoms::applet)) {
-      aValue.AppendLiteral("application/x-java-vm");
-    }
-    else {
-      nsAutoString type;
-      GetAttr(kNameSpaceID_None, nsGkAtoms::type, type);
-
-      CopyUTF16toUTF8(type, aValue);
-    }
-  }
-
   nsIAtom *URIAttrName() const
   {
     return mNodeInfo->Equals(nsGkAtoms::applet) ?
@@ -235,8 +208,10 @@ private:
   virtual void GetItemValueText(nsAString& text) MOZ_OVERRIDE;
   virtual void SetItemValueText(const nsAString& text) MOZ_OVERRIDE;
 
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
+
+  static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                    nsRuleData* aData);
 };
 
 } // namespace dom

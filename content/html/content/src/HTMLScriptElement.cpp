@@ -11,7 +11,6 @@
 #include "nsNetUtil.h"
 #include "nsContentUtils.h"
 #include "nsUnicharUtils.h"  // for nsCaseInsensitiveStringComparator()
-#include "jsapi.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIXPConnect.h"
@@ -20,6 +19,7 @@
 #include "nsIArray.h"
 #include "nsTArray.h"
 #include "nsDOMJSUtils.h"
+#include "nsISupportsImpl.h"
 #include "mozilla/dom/HTMLScriptElement.h"
 #include "mozilla/dom/HTMLScriptElementBinding.h"
 
@@ -29,17 +29,16 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-HTMLScriptElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLScriptElement::WrapNode(JSContext *aCx)
 {
-  return HTMLScriptElementBinding::Wrap(aCx, aScope, this);
+  return HTMLScriptElementBinding::Wrap(aCx, this);
 }
 
-HTMLScriptElement::HTMLScriptElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+HTMLScriptElement::HTMLScriptElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
                                      FromParser aFromParser)
   : nsGenericHTMLElement(aNodeInfo)
   , nsScriptElement(aFromParser)
 {
-  SetIsDOMBinding();
   AddMutationObserver(this);
 }
 
@@ -47,21 +46,11 @@ HTMLScriptElement::~HTMLScriptElement()
 {
 }
 
-
-NS_IMPL_ADDREF_INHERITED(HTMLScriptElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLScriptElement, Element)
-
-// QueryInterface implementation for HTMLScriptElement
-NS_INTERFACE_TABLE_HEAD(HTMLScriptElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED4(HTMLScriptElement,
-                                nsIDOMHTMLScriptElement,
-                                nsIScriptLoaderObserver,
-                                nsIScriptElement,
-                                nsIMutationObserver)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
-
+NS_IMPL_ISUPPORTS_INHERITED(HTMLScriptElement, nsGenericHTMLElement,
+                            nsIDOMHTMLScriptElement,
+                            nsIScriptLoaderObserver,
+                            nsIScriptElement,
+                            nsIMutationObserver)
 
 nsresult
 HTMLScriptElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
@@ -101,9 +90,8 @@ HTMLScriptElement::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
 {
   *aResult = nullptr;
 
-  nsCOMPtr<nsINodeInfo> ni = aNodeInfo;
-  HTMLScriptElement* it =
-    new HTMLScriptElement(ni.forget(), NOT_FROM_PARSER);
+  already_AddRefed<nsINodeInfo> ni = nsCOMPtr<nsINodeInfo>(aNodeInfo).forget();
+  HTMLScriptElement* it = new HTMLScriptElement(ni, NOT_FROM_PARSER);
 
   nsCOMPtr<nsINode> kungFuDeathGrip = it;
   nsresult rv = const_cast<HTMLScriptElement*>(this)->CopyInnerTo(it);
@@ -122,7 +110,9 @@ HTMLScriptElement::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
 NS_IMETHODIMP
 HTMLScriptElement::GetText(nsAString& aValue)
 {
-  nsContentUtils::GetNodeTextContent(this, false, aValue);
+  if (!nsContentUtils::GetNodeTextContent(this, false, aValue)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
   return NS_OK;
 }
 
@@ -236,10 +226,13 @@ HTMLScriptElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
                                             aNotify);
 }
 
-void
-HTMLScriptElement::GetInnerHTML(nsAString& aInnerHTML, ErrorResult& aError)
+NS_IMETHODIMP
+HTMLScriptElement::GetInnerHTML(nsAString& aInnerHTML)
 {
-  nsContentUtils::GetNodeTextContent(this, false, aInnerHTML);
+  if (!nsContentUtils::GetNodeTextContent(this, false, aInnerHTML)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  return NS_OK;
 }
 
 void

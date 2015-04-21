@@ -4,16 +4,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-#include "nsCOMPtr.h"
-#include "nsFrame.h"
-#include "nsPresContext.h"
-#include "nsStyleContext.h"
-#include "nsStyleConsts.h"
-#include "nsRenderingContext.h"
-
 #include "nsMathMLmfracFrame.h"
+#include "nsPresContext.h"
+#include "nsRenderingContext.h"
 #include "nsDisplayList.h"
 #include "gfxContext.h"
+#include "nsMathMLElement.h"
 #include <algorithm>
 
 //
@@ -47,24 +43,34 @@ nsMathMLmfracFrame::GetMathMLFrameType()
   return eMathMLFrameType_Inner;
 }
 
+uint8_t
+nsMathMLmfracFrame::ScriptIncrement(nsIFrame* aFrame)
+{
+  if (!StyleFont()->mMathDisplay &&
+      aFrame && (mFrames.FirstChild() == aFrame ||
+                 mFrames.LastChild() == aFrame)) {
+    return 1;
+  }
+  return 0;
+}
+
 NS_IMETHODIMP
 nsMathMLmfracFrame::TransmitAutomaticData()
 {
-  // 1. The REC says:
-  //    The <mfrac> element sets displaystyle to "false", or if it was already
-  //    false increments scriptlevel by 1, within numerator and denominator.
-  // 2. The TeXbook (Ch 17. p.141) says the numerator inherits the compression
-  //    while the denominator is compressed
-  bool increment = !NS_MATHML_IS_DISPLAYSTYLE(mPresentationData.flags);
-  SetIncrementScriptLevel(0, increment);
-  SetIncrementScriptLevel(1, increment);
-
-  UpdatePresentationDataFromChildAt(0, -1,
-    ~NS_MATHML_DISPLAYSTYLE,
-     NS_MATHML_DISPLAYSTYLE);
+  // The TeXbook (Ch 17. p.141) says the numerator inherits the compression
+  //  while the denominator is compressed
   UpdatePresentationDataFromChildAt(1,  1,
      NS_MATHML_COMPRESSED,
      NS_MATHML_COMPRESSED);
+
+  // If displaystyle is false, then scriptlevel is incremented, so notify the
+  // children of this.
+  if (!StyleFont()->mMathDisplay) {
+    PropagateFrameFlagFor(mFrames.FirstChild(),
+                          NS_FRAME_MATHML_SCRIPT_DESCENDANT);
+    PropagateFrameFlagFor(mFrames.LastChild(),
+                          NS_FRAME_MATHML_SCRIPT_DESCENDANT);
+  }
 
   // if our numerator is an embellished operator, let its state bubble to us
   GetEmbellishDataFrom(mFrames.FirstChild(), mEmbellishData);
@@ -189,8 +195,8 @@ nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
   ////////////////////////////////////
   // Get the children's desired sizes
   nsBoundingMetrics bmNum, bmDen;
-  nsHTMLReflowMetrics sizeNum;
-  nsHTMLReflowMetrics sizeDen;
+  nsHTMLReflowMetrics sizeNum(aDesiredSize.GetWritingMode());
+  nsHTMLReflowMetrics sizeDen(aDesiredSize.GetWritingMode());
   nsIFrame* frameDen = nullptr;
   nsIFrame* frameNum = mFrames.FirstChild();
   if (frameNum) 
@@ -216,34 +222,41 @@ nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
   GetRuleThickness(aRenderingContext, fm, defaultRuleThickness);
   GetAxisHeight(aRenderingContext, fm, axisHeight);
 
-  nsEmbellishData coreData;
-  GetEmbellishDataFrom(mEmbellishData.coreFrame, coreData);
+  bool outermostEmbellished = false;
+  if (mEmbellishData.coreFrame) {
+    nsEmbellishData parentData;
+    GetEmbellishDataFrom(mParent, parentData);
+    outermostEmbellished = parentData.coreFrame != mEmbellishData.coreFrame;
+  }
 
   // see if the linethickness attribute is there 
   nsAutoString value;
-  GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::linethickness_,
-               value);
-
+  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::linethickness_, value);
   mLineThickness = CalcLineThickness(presContext, mStyleContext, value,
                                      onePixel, defaultRuleThickness);
 
   // bevelled attribute
-  GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::bevelled_,
-               value);
+  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::bevelled_, value);
   mIsBevelled = value.EqualsLiteral("true");
 
   if (!mIsBevelled) {
     mLineRect.height = mLineThickness;
-    
-    // by default, leave at least one-pixel padding at either end, or use
-    // lspace & rspace that may come from <mo> if we are an embellished
-    // container (we fetch values from the core since they may use units that
-    // depend on style data, and style changes could have occurred in the
-    // core since our last visit there)
-    nscoord leftSpace = std::max(onePixel, StyleVisibility()->mDirection ?
-                               coreData.trailingSpace : coreData.leadingSpace);
-    nscoord rightSpace = std::max(onePixel, StyleVisibility()->mDirection ?
-                                coreData.leadingSpace : coreData.trailingSpace);
+
+    // by default, leave at least one-pixel padding at either end, and add
+    // lspace & rspace that may come from <mo> if we are an outermost
+    // embellished container (we fetch values from the core since they may use
+    // units that depend on style data, and style changes could have occurred
+    // in the core since our last visit there)
+    nscoord leftSpace = onePixel;
+    nscoord rightSpace = onePixel;
+    if (outermostEmbellished) {
+      nsEmbellishData coreData;
+      GetEmbellishDataFrom(mEmbellishData.coreFrame, coreData);
+      leftSpace += StyleVisibility()->mDirection ?
+                     coreData.trailingSpace : coreData.leadingSpace;
+      rightSpace += StyleVisibility()->mDirection ?
+                      coreData.leadingSpace : coreData.trailingSpace;
+    }
 
     //////////////////
     // Get shifts
@@ -256,7 +269,7 @@ nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
 
     GetNumeratorShifts(fm, numShift1, numShift2, numShift3);
     GetDenominatorShifts(fm, denShift1, denShift2);
-    if (NS_MATHML_IS_DISPLAYSTYLE(mPresentationData.flags)) {
+    if (StyleFont()->mMathDisplay == NS_MATHML_DISPLAYSTYLE_BLOCK) {
       // C > T
       numShift = numShift1;
       denShift = denShift1;
@@ -275,7 +288,7 @@ nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       // Rule 15c, App. G, TeXbook
 
       // min clearance between numerator and denominator
-      minClearance = (NS_MATHML_IS_DISPLAYSTYLE(mPresentationData.flags)) ?
+      minClearance = StyleFont()->mMathDisplay == NS_MATHML_DISPLAYSTYLE_BLOCK ?
         7 * defaultRuleThickness : 3 * defaultRuleThickness;
       actualClearance =
         (numShift - bmNum.descent) - (bmDen.ascent - denShift);
@@ -293,14 +306,14 @@ nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
 
     // TeX has a different interpretation of the thickness.
     // Try $a \above10pt b$ to see. Here is what TeX does:
-//     minClearance = (NS_MATHML_IS_DISPLAYSTYLE(mPresentationData.flags)) ?
-//      3 * actualRuleThickness : actualRuleThickness;
+    // minClearance = StyleFont()->mMathDisplay == NS_MATHML_DISPLAYSTYLE_BLOCK
+    // ? 3 * actualRuleThickness : actualRuleThickness;
  
     // we slightly depart from TeX here. We use the defaultRuleThickness instead
     // of the value coming from the linethickness attribute, i.e., we recover what
     // TeX does if the user hasn't set linethickness. But when the linethickness
     // is set, we avoid the wide gap problem.
-     minClearance = (NS_MATHML_IS_DISPLAYSTYLE(mPresentationData.flags)) ?
+     minClearance = StyleFont()->mMathDisplay == NS_MATHML_DISPLAYSTYLE_BLOCK ?
       3 * defaultRuleThickness : defaultRuleThickness + onePixel;
 
       // adjust numShift to maintain minClearance if needed
@@ -323,25 +336,23 @@ nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
     // XXX Need revisiting the width. TeX uses the exact width
     // e.g. in $$\huge\frac{\displaystyle\int}{i}$$
     nscoord width = std::max(bmNum.width, bmDen.width);
-    nscoord dxNum = leftSpace + (width - sizeNum.width)/2;
-    nscoord dxDen = leftSpace + (width - sizeDen.width)/2;
+    nscoord dxNum = leftSpace + (width - sizeNum.Width())/2;
+    nscoord dxDen = leftSpace + (width - sizeDen.Width())/2;
     width += leftSpace + rightSpace;
 
     // see if the numalign attribute is there 
-    GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::numalign_,
-                 value);
+    mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::numalign_, value);
     if (value.EqualsLiteral("left"))
       dxNum = leftSpace;
     else if (value.EqualsLiteral("right"))
-      dxNum = width - rightSpace - sizeNum.width;
+      dxNum = width - rightSpace - sizeNum.Width();
 
     // see if the denomalign attribute is there 
-    GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::denomalign_,
-                 value);
+    mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::denomalign_, value);
     if (value.EqualsLiteral("left"))
       dxDen = leftSpace;
     else if (value.EqualsLiteral("right"))
-      dxDen = width - rightSpace - sizeDen.width;
+      dxDen = width - rightSpace - sizeDen.Width();
 
     mBoundingMetrics.rightBearing =
       std::max(dxNum + bmNum.rightBearing, dxDen + bmDen.rightBearing);
@@ -355,25 +366,25 @@ nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
     mBoundingMetrics.descent = bmDen.descent + denShift;
     mBoundingMetrics.width = width;
 
-    aDesiredSize.ascent = sizeNum.ascent + numShift;
-    aDesiredSize.height = aDesiredSize.ascent +
-      sizeDen.height - sizeDen.ascent + denShift;
-    aDesiredSize.width = mBoundingMetrics.width;
+    aDesiredSize.SetTopAscent(sizeNum.TopAscent() + numShift);
+    aDesiredSize.Height() = aDesiredSize.TopAscent() +
+      sizeDen.Height() - sizeDen.TopAscent() + denShift;
+    aDesiredSize.Width() = mBoundingMetrics.width;
     aDesiredSize.mBoundingMetrics = mBoundingMetrics;
 
     mReference.x = 0;
-    mReference.y = aDesiredSize.ascent;
+    mReference.y = aDesiredSize.TopAscent();
 
     if (aPlaceOrigin) {
       nscoord dy;
       // place numerator
       dy = 0;
-      FinishReflowChild(frameNum, presContext, nullptr, sizeNum, dxNum, dy, 0);
+      FinishReflowChild(frameNum, presContext, sizeNum, nullptr, dxNum, dy, 0);
       // place denominator
-      dy = aDesiredSize.height - sizeDen.height;
-      FinishReflowChild(frameDen, presContext, nullptr, sizeDen, dxDen, dy, 0);
+      dy = aDesiredSize.Height() - sizeDen.Height();
+      FinishReflowChild(frameDen, presContext, sizeDen, nullptr, dxDen, dy, 0);
       // place the fraction bar - dy is top of bar
-      dy = aDesiredSize.ascent - (axisHeight + actualRuleThickness/2);
+      dy = aDesiredSize.TopAscent() - (axisHeight + actualRuleThickness/2);
       mLineRect.SetRect(leftSpace, dy, width - (leftSpace + rightSpace),
                         actualRuleThickness);
     }
@@ -392,8 +403,14 @@ nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
     nscoord slashMinHeight = slashRatio *
       std::min(2 * mLineThickness, slashMaxWidthConstant);
 
-    nscoord leadingSpace = std::max(padding, coreData.leadingSpace);
-    nscoord trailingSpace = std::max(padding, coreData.trailingSpace);
+    nscoord leadingSpace = padding;
+    nscoord trailingSpace = padding;
+    if (outermostEmbellished) {
+      nsEmbellishData coreData;
+      GetEmbellishDataFrom(mEmbellishData.coreFrame, coreData);
+      leadingSpace += coreData.leadingSpace;
+      trailingSpace += coreData.trailingSpace;
+    }
     nscoord delta;
     
     //           ___________
@@ -418,7 +435,7 @@ nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       denShift += delta;
     }
 
-    if (NS_MATHML_IS_DISPLAYSTYLE(mPresentationData.flags)) {
+    if (StyleFont()->mMathDisplay == NS_MATHML_DISPLAYSTYLE_BLOCK) {
       delta = std::min(bmDen.ascent + bmDen.descent,
                      bmNum.ascent + bmNum.descent) / 2;
       numShift += delta;
@@ -466,66 +483,41 @@ nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       trailingSpace;
 
     // Set aDesiredSize
-    aDesiredSize.ascent = mBoundingMetrics.ascent + padding;
-    aDesiredSize.height =
+    aDesiredSize.SetTopAscent(mBoundingMetrics.ascent + padding);
+    aDesiredSize.Height() =
       mBoundingMetrics.ascent + mBoundingMetrics.descent + 2 * padding;
-    aDesiredSize.width = mBoundingMetrics.width;
+    aDesiredSize.Width() = mBoundingMetrics.width;
     aDesiredSize.mBoundingMetrics = mBoundingMetrics;
 
     mReference.x = 0;
-    mReference.y = aDesiredSize.ascent;
+    mReference.y = aDesiredSize.TopAscent();
     
     if (aPlaceOrigin) {
       nscoord dx, dy;
 
       // place numerator
-      dx = MirrorIfRTL(aDesiredSize.width, sizeNum.width,
+      dx = MirrorIfRTL(aDesiredSize.Width(), sizeNum.Width(),
                        leadingSpace);
-      dy = aDesiredSize.ascent - numShift - sizeNum.ascent;
-      FinishReflowChild(frameNum, presContext, nullptr, sizeNum, dx, dy, 0);
+      dy = aDesiredSize.TopAscent() - numShift - sizeNum.TopAscent();
+      FinishReflowChild(frameNum, presContext, sizeNum, nullptr, dx, dy, 0);
 
       // place the fraction bar
-      dx = MirrorIfRTL(aDesiredSize.width, mLineRect.width,
+      dx = MirrorIfRTL(aDesiredSize.Width(), mLineRect.width,
                        leadingSpace + bmNum.width);
-      dy = aDesiredSize.ascent - mBoundingMetrics.ascent;
+      dy = aDesiredSize.TopAscent() - mBoundingMetrics.ascent;
       mLineRect.SetRect(dx, dy,
-                        mLineRect.width, aDesiredSize.height - 2 * padding);
+                        mLineRect.width, aDesiredSize.Height() - 2 * padding);
 
       // place denominator
-      dx = MirrorIfRTL(aDesiredSize.width, sizeDen.width,
+      dx = MirrorIfRTL(aDesiredSize.Width(), sizeDen.Width(),
                        leadingSpace + bmNum.width + mLineRect.width);
-      dy = aDesiredSize.ascent + denShift - sizeDen.ascent;
-      FinishReflowChild(frameDen, presContext, nullptr, sizeDen, dx, dy, 0);
+      dy = aDesiredSize.TopAscent() + denShift - sizeDen.TopAscent();
+      FinishReflowChild(frameDen, presContext, sizeDen, nullptr, dx, dy, 0);
     }
 
   }
 
   return NS_OK;
-}
-
-NS_IMETHODIMP
-nsMathMLmfracFrame::UpdatePresentationDataFromChildAt(int32_t         aFirstIndex,
-                                                      int32_t         aLastIndex,
-                                                      uint32_t        aFlagsValues,
-                                                      uint32_t        aFlagsToUpdate)
-{
-  // The REC says "The <mfrac> element sets displaystyle to "false" within
-  // numerator and denominator"
-#if 0
-  // At one point I thought that it meant that the displaystyle state of
-  // the numerator and denominator cannot be modified by an ancestor, i.e.,
-  // to change the displaystyle, one has to use displaystyle="true" with mstyle:
-  // <mfrac> <mstyle>numerator</mstyle> <mstyle>denominator</mstyle> </mfrac>
-
-  // Commenting out for now until it is clear what the intention really is.
-  // See also the variants for <mover>, <munder>, <munderover>
-
-  aFlagsToUpdate &= ~NS_MATHML_DISPLAYSTYLE;
-  aFlagsValues &= ~NS_MATHML_DISPLAYSTYLE;
-#endif
-  return nsMathMLContainerFrame::
-    UpdatePresentationDataFromChildAt(aFirstIndex, aLastIndex,
-                                      aFlagsValues, aFlagsToUpdate);
 }
 
 class nsDisplayMathMLSlash : public nsDisplayItem {
@@ -543,7 +535,8 @@ public:
   }
 #endif
 
-  virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx);
+  virtual void Paint(nsDisplayListBuilder* aBuilder,
+                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
   NS_DISPLAY_DECL_NAME("MathMLSlash", TYPE_MATHML_SLASH)
 
 private:

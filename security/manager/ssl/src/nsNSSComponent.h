@@ -13,41 +13,43 @@
 #include "nsISignatureVerifier.h"
 #include "nsIEntropyCollector.h"
 #include "nsIStringBundle.h"
-#include "nsIPrefBranch.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #ifndef MOZ_DISABLE_CRYPTOLEGACY
-#include "nsIDOMEventTarget.h"
 #endif
 #include "nsINSSErrorsService.h"
 #include "nsNSSCallbacks.h"
 #include "ScopedNSSTypes.h"
+#include "SharedCertVerifier.h"
 #include "nsNSSHelper.h"
 #include "nsClientAuthRemember.h"
 #include "prerror.h"
 
+class nsIDOMWindow;
 class nsIPrompt;
 class SmartCardThreadList;
 
 namespace mozilla { namespace psm {
 
-class CertVerifier;
+MOZ_WARN_UNUSED_RESULT
+  ::mozilla::TemporaryRef<mozilla::psm::SharedCertVerifier>
+  GetDefaultCertVerifier();
 
 } } // namespace mozilla::psm
 
 
 #define NS_NSSCOMPONENT_CID \
-{0xa277189c, 0x1dd1, 0x11b2, {0xa8, 0xc9, 0xe4, 0xe8, 0xbf, 0xb1, 0x33, 0x8e}}
+{0x4cb64dfd, 0xca98, 0x4e24, {0xbe, 0xfd, 0x0d, 0x92, 0x85, 0xa3, 0x3b, 0xcb}}
 
 #define PSM_COMPONENT_CONTRACTID "@mozilla.org/psm;1"
 
 //Define an interface that we can use to look up from the
 //callbacks passed to NSS.
 
-#define NS_INSSCOMPONENT_IID_STR "6ffbb526-205b-49c5-ae3f-5959c084075e"
+#define NS_INSSCOMPONENT_IID_STR "538c5093-7cfe-4f13-bc8e-e767766a2d4d"
 #define NS_INSSCOMPONENT_IID \
-  { 0x6ffbb526, 0x205b, 0x49c5, \
-    { 0xae, 0x3f, 0x59, 0x59, 0xc0, 0x84, 0x7, 0x5e } }
+  { 0x538c5093, 0x7cfe, 0x4f13, \
+    { 0xbc, 0x8e, 0xe7, 0x67, 0x76, 0x6a, 0x2d, 0x4d } }
 
 enum EnsureNSSOperator
 {
@@ -67,50 +69,40 @@ class NS_NO_VTABLE nsINSSComponent : public nsISupports {
  public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_INSSCOMPONENT_IID)
 
-  NS_IMETHOD ShowAlertFromStringBundle(const char * messageID) = 0;
+  NS_IMETHOD ShowAlertFromStringBundle(const char* messageID) = 0;
 
-  NS_IMETHOD GetPIPNSSBundleString(const char *name,
-                                   nsAString &outString) = 0;
-  NS_IMETHOD PIPBundleFormatStringFromName(const char *name,
-                                           const PRUnichar **params,
+  NS_IMETHOD GetPIPNSSBundleString(const char* name,
+                                   nsAString& outString) = 0;
+  NS_IMETHOD PIPBundleFormatStringFromName(const char* name,
+                                           const char16_t** params,
                                            uint32_t numParams,
-                                           nsAString &outString) = 0;
+                                           nsAString& outString) = 0;
 
-  NS_IMETHOD GetNSSBundleString(const char *name,
-                                nsAString &outString) = 0;
-  NS_IMETHOD NSSBundleFormatStringFromName(const char *name,
-                                           const PRUnichar **params,
+  NS_IMETHOD GetNSSBundleString(const char* name,
+                                nsAString& outString) = 0;
+  NS_IMETHOD NSSBundleFormatStringFromName(const char* name,
+                                           const char16_t** params,
                                            uint32_t numParams,
-                                           nsAString &outString) = 0;
-
-  // This method will just disable OCSP in NSS, it will not
-  // alter the respective pref values.
-  NS_IMETHOD SkipOcsp() = 0;
-
-  // This method will set the OCSP value according to the 
-  // values in the preferences.
-  NS_IMETHOD SkipOcspOff() = 0;
+                                           nsAString& outString) = 0;
 
   NS_IMETHOD LogoutAuthenticatedPK11() = 0;
 
 #ifndef MOZ_DISABLE_CRYPTOLEGACY
-  NS_IMETHOD LaunchSmartCardThread(SECMODModule *module) = 0;
+  NS_IMETHOD LaunchSmartCardThread(SECMODModule* module) = 0;
 
-  NS_IMETHOD ShutdownSmartCardThread(SECMODModule *module) = 0;
+  NS_IMETHOD ShutdownSmartCardThread(SECMODModule* module) = 0;
 
-  NS_IMETHOD PostEvent(const nsAString &eventType, const nsAString &token) = 0;
+  NS_IMETHOD PostEvent(const nsAString& eventType,
+                       const nsAString& token) = 0;
 
-  NS_IMETHOD DispatchEvent(const nsAString &eventType, const nsAString &token) = 0;
+  NS_IMETHOD DispatchEvent(const nsAString& eventType,
+                           const nsAString& token) = 0;
 #endif
 
-#ifndef NSS_NO_LIBPKIX  
-  NS_IMETHOD EnsureIdentityInfoLoaded() = 0;
-#endif
+  NS_IMETHOD IsNSSInitialized(bool* initialized) = 0;
 
-  NS_IMETHOD IsNSSInitialized(bool *initialized) = 0;
-
-  NS_IMETHOD GetDefaultCertVerifier(
-                  mozilla::RefPtr<mozilla::psm::CertVerifier> &out) = 0;
+  virtual ::mozilla::TemporaryRef<mozilla::psm::SharedCertVerifier>
+    GetDefaultCertVerifier() = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsINSSComponent, NS_INSSCOMPONENT_IID)
@@ -133,60 +125,56 @@ public:
   nsNSSComponent();
   virtual ~nsNSSComponent();
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSISIGNATUREVERIFIER
   NS_DECL_NSIENTROPYCOLLECTOR
   NS_DECL_NSIOBSERVER
 
   NS_METHOD Init();
 
-  static nsresult GetNewPrompter(nsIPrompt ** result);
-  static nsresult ShowAlertWithConstructedString(const nsString & message);
-  NS_IMETHOD ShowAlertFromStringBundle(const char * messageID);
+  static nsresult GetNewPrompter(nsIPrompt** result);
+  static nsresult ShowAlertWithConstructedString(const nsString& message);
+  NS_IMETHOD ShowAlertFromStringBundle(const char* messageID);
 
-  NS_IMETHOD GetPIPNSSBundleString(const char *name,
-                                   nsAString &outString);
-  NS_IMETHOD PIPBundleFormatStringFromName(const char *name,
-                                           const PRUnichar **params,
+  NS_IMETHOD GetPIPNSSBundleString(const char* name,
+                                   nsAString& outString);
+  NS_IMETHOD PIPBundleFormatStringFromName(const char* name,
+                                           const char16_t** params,
                                            uint32_t numParams,
-                                           nsAString &outString);
-  NS_IMETHOD GetNSSBundleString(const char *name,
-                               nsAString &outString);
-  NS_IMETHOD NSSBundleFormatStringFromName(const char *name,
-                                           const PRUnichar **params,
+                                           nsAString& outString);
+  NS_IMETHOD GetNSSBundleString(const char* name, nsAString& outString);
+  NS_IMETHOD NSSBundleFormatStringFromName(const char* name,
+                                           const char16_t** params,
                                            uint32_t numParams,
-                                           nsAString &outString);
-  NS_IMETHOD SkipOcsp();
-  NS_IMETHOD SkipOcspOff();
+                                           nsAString& outString);
   NS_IMETHOD LogoutAuthenticatedPK11();
 
 #ifndef MOZ_DISABLE_CRYPTOLEGACY
-  NS_IMETHOD LaunchSmartCardThread(SECMODModule *module);
-  NS_IMETHOD ShutdownSmartCardThread(SECMODModule *module);
-  NS_IMETHOD PostEvent(const nsAString &eventType, const nsAString &token);
-  NS_IMETHOD DispatchEvent(const nsAString &eventType, const nsAString &token);
+  NS_IMETHOD LaunchSmartCardThread(SECMODModule* module);
+  NS_IMETHOD ShutdownSmartCardThread(SECMODModule* module);
+  NS_IMETHOD PostEvent(const nsAString& eventType, const nsAString& token);
+  NS_IMETHOD DispatchEvent(const nsAString& eventType, const nsAString& token);
   void LaunchSmartCardThreads();
   void ShutdownSmartCardThreads();
-  nsresult DispatchEventToWindow(nsIDOMWindow *domWin, const nsAString &eventType, const nsAString &token);
+  nsresult DispatchEventToWindow(nsIDOMWindow* domWin,
+                                 const nsAString& eventType,
+                                 const nsAString& token);
 #endif
 
-#ifndef NSS_NO_LIBPKIX
-  NS_IMETHOD EnsureIdentityInfoLoaded();
-#endif
-  NS_IMETHOD IsNSSInitialized(bool *initialized);
+  NS_IMETHOD IsNSSInitialized(bool* initialized);
 
-  NS_IMETHOD GetDefaultCertVerifier(
-                  mozilla::RefPtr<mozilla::psm::CertVerifier> &out);
+  ::mozilla::TemporaryRef<mozilla::psm::SharedCertVerifier>
+    GetDefaultCertVerifier() MOZ_OVERRIDE;
+
 private:
-
-  nsresult InitializeNSS(bool showWarningBox);
+  nsresult InitializeNSS();
   void ShutdownNSS();
 
-  void InstallLoadableRoots();
+  void LoadLoadableRoots();
   void UnloadLoadableRoots();
-  void CleanupIdentityInfo();
-  void setValidationOptions(nsIPrefBranch * pref);
-  nsresult setEnabledTLSVersions(nsIPrefBranch * pref);
+  void setValidationOptions(bool isInitialSetting,
+                            const mozilla::MutexAutoLock& lock);
+  nsresult setEnabledTLSVersions();
   nsresult InitializePIPNSSBundle();
   nsresult ConfigureInternalPKCS11Token();
   nsresult RegisterObservers();
@@ -198,44 +186,39 @@ private:
   void DoProfileChangeTeardown(nsISupports* aSubject);
   void DoProfileBeforeChange(nsISupports* aSubject);
   void DoProfileChangeNetRestore();
-  
+
   Mutex mutex;
-  
+
   nsCOMPtr<nsIStringBundle> mPIPNSSBundle;
   nsCOMPtr<nsIStringBundle> mNSSErrorsBundle;
-  nsCOMPtr<nsIPrefBranch> mPrefBranch;
   bool mNSSInitialized;
   bool mObserversRegistered;
   static int mInstanceCount;
-  nsNSSShutDownList *mShutdownObjectList;
+  nsNSSShutDownList* mShutdownObjectList;
 #ifndef MOZ_DISABLE_CRYPTOLEGACY
-  SmartCardThreadList *mThreadList;
+  SmartCardThreadList* mThreadList;
 #endif
   bool mIsNetworkDown;
 
   void deleteBackgroundThreads();
   void createBackgroundThreads();
-  nsCertVerificationThread *mCertVerificationThread;
+  nsCertVerificationThread* mCertVerificationThread;
 
   nsNSSHttpInterface mHttpForNSS;
-  mozilla::RefPtr<mozilla::psm::CertVerifier> mDefaultCertVerifier;
+  mozilla::RefPtr<mozilla::psm::SharedCertVerifier> mDefaultCertVerifier;
 
 
   static PRStatus IdentityInfoInit(void);
-  PRCallOnceType mIdentityInfoCallOnce;
-
-public:
-  static bool globalConstFlagUsePKIXVerification;
 };
 
 class nsNSSErrors
 {
 public:
-  static const char *getDefaultErrorStringName(PRErrorCode err);
-  static const char *getOverrideErrorStringName(PRErrorCode aErrorCode);
+  static const char* getDefaultErrorStringName(PRErrorCode err);
+  static const char* getOverrideErrorStringName(PRErrorCode aErrorCode);
   static nsresult getErrorMessageFromCode(PRErrorCode err,
-                                          nsINSSComponent *component,
-                                          nsString &returnedMessage);
+                                          nsINSSComponent* component,
+                                          nsString& returnedMessage);
 };
 
 class nsPSMInitPanic
@@ -248,4 +231,3 @@ public:
 };
 
 #endif // _nsNSSComponent_h_
-

@@ -1,12 +1,12 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 this.EXPORTED_SYMBOLS = ["ClusterManager"];
 
 const {utils: Cu} = Components;
 
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/policies.js");
 Cu.import("resource://services-sync/util.js");
@@ -15,8 +15,8 @@ Cu.import("resource://services-sync/util.js");
  * Contains code for managing the Sync cluster we are in.
  */
 this.ClusterManager = function ClusterManager(service) {
-  this._log = Log4Moz.repository.getLogger("Sync.Service");
-  this._log.level = Log4Moz.Level[Svc.Prefs.get("log.logger.service.main")];
+  this._log = Log.repository.getLogger("Sync.Service");
+  this._log.level = Log.Level[Svc.Prefs.get("log.logger.service.main")];
 
   this.service = service;
 }
@@ -91,5 +91,21 @@ ClusterManager.prototype = {
 
     return true;
   },
+
+  getUserBaseURL: function getUserBaseURL() {
+    // Legacy Sync and FxA Sync construct the userBaseURL differently. Legacy
+    // Sync appends path components onto an empty path, and in FxA Sync, the
+    // token server constructs this for us in an opaque manner. Since the
+    // cluster manager already sets the clusterURL on Service and also has
+    // access to the current identity, we added this functionality here.
+
+    // If the clusterURL hasn't been set, the userBaseURL shouldn't be set
+    // either. Some tests expect "undefined" to be returned here.
+    if (!this.service.clusterURL) {
+      return undefined;
+    }
+    let storageAPI = this.service.clusterURL + SYNC_API_VERSION + "/";
+    return storageAPI + this.identity.username + "/";
+  }
 };
 Object.freeze(ClusterManager.prototype);

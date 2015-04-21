@@ -18,12 +18,6 @@
 #include "jscntxt.h"
 #include "jsobj.h"
 
-#include "vm/DateTime.h"
-#include "vm/GlobalObject.h"
-#include "vm/Interpreter.h"
-#include "vm/Stack.h"
-#include "vm/StringBuffer.h"
-
 #if ENABLE_INTL_API
 #include "unicode/locid.h"
 #include "unicode/numsys.h"
@@ -35,9 +29,15 @@
 #include "unicode/unum.h"
 #include "unicode/ustring.h"
 #endif
-#include "unicode/utypes.h"
+#include "vm/DateTime.h"
+#include "vm/GlobalObject.h"
+#include "vm/Interpreter.h"
+#include "vm/Stack.h"
+#include "vm/StringBuffer.h"
 
 #include "jsobjinlines.h"
+
+#include "vm/ObjectImpl-inl.h"
 
 using namespace js;
 
@@ -76,8 +76,7 @@ using icu::NumberingSystem;
 static int32_t
 u_strlen(const UChar *s)
 {
-    MOZ_NOT_REACHED("u_strlen: Intl API disabled");
-    return 0;
+    MOZ_ASSUME_UNREACHABLE("u_strlen: Intl API disabled");
 }
 
 struct UEnumeration;
@@ -85,23 +84,19 @@ struct UEnumeration;
 static int32_t
 uenum_count(UEnumeration *en, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("uenum_count: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
-    return 0;
+    MOZ_ASSUME_UNREACHABLE("uenum_count: Intl API disabled");
 }
 
 static const char *
 uenum_next(UEnumeration *en, int32_t *resultLength, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("uenum_next: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("uenum_next: Intl API disabled");
 }
 
 static void
 uenum_close(UEnumeration *en)
 {
-    MOZ_NOT_REACHED("uenum_close: Intl API disabled");
+    MOZ_ASSUME_UNREACHABLE("uenum_close: Intl API disabled");
 }
 
 struct UCollator;
@@ -136,53 +131,45 @@ enum UCollationResult {
 static int32_t
 ucol_countAvailable(void)
 {
-    MOZ_NOT_REACHED("ucol_countAvailable: Intl API disabled");
-    return 0;
+    MOZ_ASSUME_UNREACHABLE("ucol_countAvailable: Intl API disabled");
 }
 
 static const char *
 ucol_getAvailable(int32_t localeIndex)
 {
-    MOZ_NOT_REACHED("ucol_getAvailable: Intl API disabled");
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("ucol_getAvailable: Intl API disabled");
 }
 
 static UCollator *
 ucol_open(const char *loc, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("ucol_open: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("ucol_open: Intl API disabled");
 }
 
 static void
 ucol_setAttribute(UCollator *coll, UColAttribute attr, UColAttributeValue value, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("ucol_setAttribute: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
+    MOZ_ASSUME_UNREACHABLE("ucol_setAttribute: Intl API disabled");
 }
 
 static UCollationResult
 ucol_strcoll(const UCollator *coll, const UChar *source, int32_t sourceLength,
              const UChar *target, int32_t targetLength)
 {
-    MOZ_NOT_REACHED("ucol_strcoll: Intl API disabled");
-    return (UCollationResult) 0;
+    MOZ_ASSUME_UNREACHABLE("ucol_strcoll: Intl API disabled");
 }
 
 static void
 ucol_close(UCollator *coll)
 {
-    MOZ_NOT_REACHED("ucol_close: Intl API disabled");
+    MOZ_ASSUME_UNREACHABLE("ucol_close: Intl API disabled");
 }
 
 static UEnumeration *
 ucol_getKeywordValuesForLocale(const char *key, const char *locale, UBool commonlyUsed,
                                UErrorCode *status)
 {
-    MOZ_NOT_REACHED("ucol_getKeywordValuesForLocale: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("ucol_getKeywordValuesForLocale: Intl API disabled");
 }
 
 struct UParseError;
@@ -219,53 +206,46 @@ enum UNumberFormatTextAttribute {
 static int32_t
 unum_countAvailable(void)
 {
-    MOZ_NOT_REACHED("unum_countAvailable: Intl API disabled");
-    return 0;
+    MOZ_ASSUME_UNREACHABLE("unum_countAvailable: Intl API disabled");
 }
 
 static const char *
 unum_getAvailable(int32_t localeIndex)
 {
-    MOZ_NOT_REACHED("unum_getAvailable: Intl API disabled");
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("unum_getAvailable: Intl API disabled");
 }
 
 static UNumberFormat *
 unum_open(UNumberFormatStyle style, const UChar *pattern, int32_t patternLength,
           const char *locale, UParseError *parseErr, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("unum_open: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("unum_open: Intl API disabled");
 }
 
 static void
 unum_setAttribute(UNumberFormat *fmt, UNumberFormatAttribute  attr, int32_t newValue)
 {
-    MOZ_NOT_REACHED("unum_setAttribute: Intl API disabled");
+    MOZ_ASSUME_UNREACHABLE("unum_setAttribute: Intl API disabled");
 }
 
 static int32_t
 unum_formatDouble(const UNumberFormat *fmt, double number, UChar *result,
                   int32_t resultLength, UFieldPosition *pos, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("unum_formatDouble: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
-    return 0;
+    MOZ_ASSUME_UNREACHABLE("unum_formatDouble: Intl API disabled");
 }
 
 static void
 unum_close(UNumberFormat *fmt)
 {
-    MOZ_NOT_REACHED("unum_close: Intl API disabled");
+    MOZ_ASSUME_UNREACHABLE("unum_close: Intl API disabled");
 }
 
 static void
 unum_setTextAttribute(UNumberFormat *fmt, UNumberFormatTextAttribute tag, const UChar *newValue,
                       int32_t newValueLength, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("unum_setTextAttribute: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
+    MOZ_ASSUME_UNREACHABLE("unum_setTextAttribute: Intl API disabled");
 }
 
 class Locale {
@@ -277,7 +257,7 @@ class Locale {
 Locale::Locale(const char *language, const char *country, const char *variant,
                const char *keywordsAndValues)
 {
-    MOZ_NOT_REACHED("Locale::Locale: Intl API disabled");
+    MOZ_ASSUME_UNREACHABLE("Locale::Locale: Intl API disabled");
 }
 
 class NumberingSystem {
@@ -289,16 +269,13 @@ class NumberingSystem {
 NumberingSystem *
 NumberingSystem::createInstance(const Locale &inLocale, UErrorCode &status)
 {
-    MOZ_NOT_REACHED("NumberingSystem::createInstance: Intl API disabled");
-    status = U_UNSUPPORTED_ERROR;
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("NumberingSystem::createInstance: Intl API disabled");
 }
 
 const char *
 NumberingSystem::getName()
 {
-    MOZ_NOT_REACHED("NumberingSystem::getName: Intl API disabled");
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("NumberingSystem::getName: Intl API disabled");
 }
 
 typedef void *UCalendar;
@@ -313,32 +290,26 @@ static UCalendar *
 ucal_open(const UChar *zoneID, int32_t len, const char *locale,
           UCalendarType type, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("ucal_open: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("ucal_open: Intl API disabled");
 }
 
 static const char *
 ucal_getType(const UCalendar *cal, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("ucal_getType: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("ucal_getType: Intl API disabled");
 }
 
 static UEnumeration *
 ucal_getKeywordValuesForLocale(const char *key, const char *locale,
                                UBool commonlyUsed, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("ucal_getKeywordValuesForLocale: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("ucal_getKeywordValuesForLocale: Intl API disabled");
 }
 
 static void
 ucal_close(UCalendar *cal)
 {
-    MOZ_NOT_REACHED("ucal_close: Intl API disabled");
+    MOZ_ASSUME_UNREACHABLE("ucal_close: Intl API disabled");
 }
 
 typedef void *UDateTimePatternGenerator;
@@ -346,9 +317,7 @@ typedef void *UDateTimePatternGenerator;
 static UDateTimePatternGenerator *
 udatpg_open(const char *locale, UErrorCode *pErrorCode)
 {
-    MOZ_NOT_REACHED("udatpg_open: Intl API disabled");
-    *pErrorCode = U_UNSUPPORTED_ERROR;
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("udatpg_open: Intl API disabled");
 }
 
 static int32_t
@@ -356,15 +325,13 @@ udatpg_getBestPattern(UDateTimePatternGenerator *dtpg, const UChar *skeleton,
                       int32_t length, UChar *bestPattern, int32_t capacity,
                       UErrorCode *pErrorCode)
 {
-    MOZ_NOT_REACHED("udatpg_getBestPattern: Intl API disabled");
-    *pErrorCode = U_UNSUPPORTED_ERROR;
-    return 0;
+    MOZ_ASSUME_UNREACHABLE("udatpg_getBestPattern: Intl API disabled");
 }
 
 static void
 udatpg_close(UDateTimePatternGenerator *dtpg)
 {
-    MOZ_NOT_REACHED("udatpg_close: Intl API disabled");
+    MOZ_ASSUME_UNREACHABLE("udatpg_close: Intl API disabled");
 }
 
 typedef void *UCalendar;
@@ -378,15 +345,13 @@ enum UDateFormatStyle {
 static int32_t
 udat_countAvailable(void)
 {
-    MOZ_NOT_REACHED("udat_countAvailable: Intl API disabled");
-    return 0;
+    MOZ_ASSUME_UNREACHABLE("udat_countAvailable: Intl API disabled");
 }
 
 static const char *
 udat_getAvailable(int32_t localeIndex)
 {
-    MOZ_NOT_REACHED("udat_getAvailable: Intl API disabled");
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("udat_getAvailable: Intl API disabled");
 }
 
 static UDateFormat *
@@ -394,38 +359,32 @@ udat_open(UDateFormatStyle timeStyle, UDateFormatStyle dateStyle, const char *lo
           const UChar *tzID, int32_t tzIDLength, const UChar *pattern,
           int32_t patternLength, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("udat_open: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("udat_open: Intl API disabled");
 }
 
 static const UCalendar *
 udat_getCalendar(const UDateFormat *fmt)
 {
-    MOZ_NOT_REACHED("udat_getCalendar: Intl API disabled");
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("udat_getCalendar: Intl API disabled");
 }
 
 static void
 ucal_setGregorianChange(UCalendar *cal, UDate date, UErrorCode *pErrorCode)
 {
-    MOZ_NOT_REACHED("ucal_setGregorianChange: Intl API disabled");
-    *pErrorCode = U_UNSUPPORTED_ERROR;
+    MOZ_ASSUME_UNREACHABLE("ucal_setGregorianChange: Intl API disabled");
 }
 
 static int32_t
 udat_format(const UDateFormat *format, UDate dateToFormat, UChar *result,
             int32_t resultLength, UFieldPosition *position, UErrorCode *status)
 {
-    MOZ_NOT_REACHED("udat_format: Intl API disabled");
-    *status = U_UNSUPPORTED_ERROR;
-    return 0;
+    MOZ_ASSUME_UNREACHABLE("udat_format: Intl API disabled");
 }
 
 static void
 udat_close(UDateFormat *format)
 {
-    MOZ_NOT_REACHED("udat_close: Intl API disabled");
+    MOZ_ASSUME_UNREACHABLE("udat_close: Intl API disabled");
 }
 
 #endif
@@ -438,7 +397,7 @@ IntlInitialize(JSContext *cx, HandleObject obj, Handle<PropertyName*> initialize
                HandleValue locales, HandleValue options)
 {
     RootedValue initializerValue(cx);
-    if (!cx->global()->getIntrinsicValue(cx, initializer, &initializerValue))
+    if (!GlobalObject::getIntrinsicValue(cx, cx->global(), initializer, &initializerValue))
         return false;
     JS_ASSERT(initializerValue.isObject());
     JS_ASSERT(initializerValue.toObject().is<JSFunction>());
@@ -449,9 +408,9 @@ IntlInitialize(JSContext *cx, HandleObject obj, Handle<PropertyName*> initialize
 
     args.setCallee(initializerValue);
     args.setThis(NullValue());
-    args[0] = ObjectValue(*obj);
-    args[1] = locales;
-    args[2] = options;
+    args[0].setObject(*obj);
+    args[1].set(locales);
+    args[2].set(options);
 
     return Invoke(cx, args);
 }
@@ -468,7 +427,7 @@ static bool
 intl_availableLocales(JSContext *cx, CountAvailable countAvailable,
                       GetAvailable getAvailable, MutableHandleValue result)
 {
-    RootedObject locales(cx, NewObjectWithGivenProto(cx, &ObjectClass, NULL, NULL));
+    RootedObject locales(cx, NewObjectWithGivenProto(cx, &JSObject::class_, nullptr, nullptr));
     if (!locales)
         return false;
 
@@ -504,7 +463,7 @@ static bool
 GetInternals(JSContext *cx, HandleObject obj, MutableHandleObject internals)
 {
     RootedValue getInternalsValue(cx);
-    if (!cx->global()->getIntrinsicValue(cx, cx->names().getInternals, &getInternalsValue))
+    if (!GlobalObject::getIntrinsicValue(cx, cx->global(), cx->names().getInternals, &getInternalsValue))
         return false;
     JS_ASSERT(getInternalsValue.isObject());
     JS_ASSERT(getInternalsValue.toObject().is<JSFunction>());
@@ -515,7 +474,7 @@ GetInternals(JSContext *cx, HandleObject obj, MutableHandleObject internals)
 
     args.setCallee(getInternalsValue);
     args.setThis(NullValue());
-    args[0] = ObjectValue(*obj);
+    args[0].setObject(*obj);
 
     if (!Invoke(cx, args))
         return false;
@@ -570,7 +529,7 @@ class ScopedICUObject
     // to transfer the object just before returning.
     T *forget() {
         T *tmp = ptr_;
-        ptr_ = NULL;
+        ptr_ = nullptr;
         return tmp;
     }
 };
@@ -587,7 +546,7 @@ static void collator_finalize(FreeOp *fop, JSObject *obj);
 static const uint32_t UCOLLATOR_SLOT = 0;
 static const uint32_t COLLATOR_SLOTS_COUNT = 1;
 
-static Class CollatorClass = {
+static const Class CollatorClass = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(COLLATOR_SLOTS_COUNT),
     JS_PropertyStub,         /* addProperty */
@@ -601,21 +560,22 @@ static Class CollatorClass = {
 };
 
 #if JS_HAS_TOSOURCE
-static JSBool
+static bool
 collator_toSource(JSContext *cx, unsigned argc, Value *vp)
 {
-    vp->setString(cx->names().Collator);
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setString(cx->names().Collator);
     return true;
 }
 #endif
 
 static const JSFunctionSpec collator_static_methods[] = {
-    {"supportedLocalesOf", JSOP_NULLWRAPPER, 1, JSFunction::INTERPRETED, "Intl_Collator_supportedLocalesOf"},
+    JS_SELF_HOSTED_FN("supportedLocalesOf", "Intl_Collator_supportedLocalesOf", 1, 0),
     JS_FS_END
 };
 
 static const JSFunctionSpec collator_methods[] = {
-    {"resolvedOptions", JSOP_NULLWRAPPER, 0, JSFunction::INTERPRETED, "Intl_Collator_resolvedOptions"},
+    JS_SELF_HOSTED_FN("resolvedOptions", "Intl_Collator_resolvedOptions", 0, 0),
 #if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str, collator_toSource, 0, 0),
 #endif
@@ -644,7 +604,10 @@ Collator(JSContext *cx, CallArgs args, bool construct)
                 return false;
 
             // 10.1.2.1 step 5
-            if (!obj->isExtensible())
+            bool extensible;
+            if (!JSObject::isExtensible(cx, obj, &extensible))
+                return false;
+            if (!extensible)
                 return Throw(cx, obj, JSMSG_OBJECT_NOT_EXTENSIBLE);
         } else {
             // 10.1.2.1 step 3.a
@@ -660,7 +623,7 @@ Collator(JSContext *cx, CallArgs args, bool construct)
         if (!obj)
             return false;
 
-        obj->setReservedSlot(UCOLLATOR_SLOT, PrivateValue(NULL));
+        obj->setReservedSlot(UCOLLATOR_SLOT, PrivateValue(nullptr));
     }
 
     // 10.1.2.1 steps 1 and 2; 10.1.3.1 steps 1 and 2
@@ -676,18 +639,20 @@ Collator(JSContext *cx, CallArgs args, bool construct)
     return true;
 }
 
-static JSBool
+static bool
 Collator(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    return Collator(cx, args, IsConstructing(args));
+    return Collator(cx, args, args.isConstructing());
 }
 
-JSBool
+bool
 js::intl_Collator(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     JS_ASSERT(args.length() == 2);
+    // intl_Collator is an intrinsic for self-hosted JavaScript, so it cannot
+    // be used with "new", but it still has to be treated as a constructor.
     return Collator(cx, args, true);
 }
 
@@ -704,21 +669,21 @@ InitCollatorClass(JSContext *cx, HandleObject Intl, Handle<GlobalObject*> global
 {
     RootedFunction ctor(cx, global->createConstructor(cx, &Collator, cx->names().Collator, 0));
     if (!ctor)
-        return NULL;
+        return nullptr;
 
     RootedObject proto(cx, global->as<GlobalObject>().getOrCreateCollatorPrototype(cx));
     if (!proto)
-        return NULL;
+        return nullptr;
     if (!LinkConstructorAndPrototype(cx, ctor, proto))
-        return NULL;
+        return nullptr;
 
     // 10.2.2
     if (!JS_DefineFunctions(cx, ctor, collator_static_methods))
-        return NULL;
+        return nullptr;
 
     // 10.3.2 and 10.3.3
     if (!JS_DefineFunctions(cx, proto, collator_methods))
-        return NULL;
+        return nullptr;
 
     /*
      * Install the getter for Collator.prototype.compare, which returns a bound
@@ -726,28 +691,28 @@ InitCollatorClass(JSContext *cx, HandleObject Intl, Handle<GlobalObject*> global
      * passing to methods like Array.prototype.sort).
      */
     RootedValue getter(cx);
-    if (!cx->global()->getIntrinsicValue(cx, cx->names().CollatorCompareGet, &getter))
-        return NULL;
-    RootedValue undefinedValue(cx, UndefinedValue());
-    if (!JSObject::defineProperty(cx, proto, cx->names().compare, undefinedValue,
+    if (!GlobalObject::getIntrinsicValue(cx, cx->global(), cx->names().CollatorCompareGet, &getter))
+        return nullptr;
+    if (!JSObject::defineProperty(cx, proto, cx->names().compare, UndefinedHandleValue,
                                   JS_DATA_TO_FUNC_PTR(JSPropertyOp, &getter.toObject()),
-                                  NULL, JSPROP_GETTER))
+                                  nullptr, JSPROP_GETTER | JSPROP_SHARED))
     {
-        return NULL;
+        return nullptr;
     }
 
     // 10.2.1 and 10.3
-    RootedValue locales(cx, UndefinedValue());
-    RootedValue options(cx, UndefinedValue());
-    if (!IntlInitialize(cx, proto, cx->names().InitializeCollator, locales, options))
-        return NULL;
+    if (!IntlInitialize(cx, proto, cx->names().InitializeCollator, UndefinedHandleValue,
+                        UndefinedHandleValue))
+    {
+        return nullptr;
+    }
 
     // 8.1
     RootedValue ctorValue(cx, ObjectValue(*ctor));
     if (!JSObject::defineProperty(cx, Intl, cx->names().Collator, ctorValue,
                                   JS_PropertyStub, JS_StrictPropertyStub, 0))
     {
-        return NULL;
+        return nullptr;
     }
 
     return ctor;
@@ -759,12 +724,12 @@ GlobalObject::initCollatorProto(JSContext *cx, Handle<GlobalObject*> global)
     RootedObject proto(cx, global->createBlankPrototype(cx, &CollatorClass));
     if (!proto)
         return false;
-    proto->setReservedSlot(UCOLLATOR_SLOT, PrivateValue(NULL));
+    proto->setReservedSlot(UCOLLATOR_SLOT, PrivateValue(nullptr));
     global->setReservedSlot(COLLATOR_PROTO, ObjectValue(*proto));
     return true;
 }
 
-JSBool
+bool
 js::intl_Collator_availableLocales(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -777,7 +742,7 @@ js::intl_Collator_availableLocales(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
-JSBool
+bool
 js::intl_availableCollations(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -790,14 +755,14 @@ js::intl_availableCollations(JSContext *cx, unsigned argc, Value *vp)
     UErrorCode status = U_ZERO_ERROR;
     UEnumeration *values = ucol_getKeywordValuesForLocale("co", locale.ptr(), false, &status);
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
         return false;
     }
     ScopedICUObject<UEnumeration> toClose(values, uenum_close);
 
     uint32_t count = uenum_count(values, &status);
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
         return false;
     }
 
@@ -807,9 +772,9 @@ js::intl_availableCollations(JSContext *cx, unsigned argc, Value *vp)
 
     uint32_t index = 0;
     for (uint32_t i = 0; i < count; i++) {
-        const char *collation = uenum_next(values, NULL, &status);
+        const char *collation = uenum_next(values, nullptr, &status);
         if (U_FAILURE(status)) {
-            JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+            JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
             return false;
         }
 
@@ -854,13 +819,13 @@ NewUCollator(JSContext *cx, HandleObject collator)
 
     RootedObject internals(cx);
     if (!GetInternals(cx, collator, &internals))
-        return NULL;
+        return nullptr;
 
     if (!JSObject::getProperty(cx, internals, internals, cx->names().locale, &value))
-        return NULL;
+        return nullptr;
     JSAutoByteString locale(cx, value.toString());
     if (!locale)
-        return NULL;
+        return nullptr;
 
     // UCollator options with default values.
     UColAttributeValue uStrength = UCOL_DEFAULT;
@@ -872,10 +837,10 @@ NewUCollator(JSContext *cx, HandleObject collator)
     UColAttributeValue uCaseFirst = UCOL_DEFAULT;
 
     if (!JSObject::getProperty(cx, internals, internals, cx->names().usage, &value))
-        return NULL;
+        return nullptr;
     JSAutoByteString usage(cx, value.toString());
     if (!usage)
-        return NULL;
+        return nullptr;
     if (equal(usage, "search")) {
         // ICU expects search as a Unicode locale extension on locale.
         // Unicode locale extensions must occur before private use extensions.
@@ -898,7 +863,7 @@ NewUCollator(JSContext *cx, HandleObject collator)
         size_t insertLen = strlen(insert);
         char *newLocale = cx->pod_malloc<char>(localeLen + insertLen + 1);
         if (!newLocale)
-            return NULL;
+            return nullptr;
         memcpy(newLocale, oldLocale, index);
         memcpy(newLocale + index, insert, insertLen);
         memcpy(newLocale + index + insertLen, oldLocale + index, localeLen - index + 1); // '\0'
@@ -911,10 +876,10 @@ NewUCollator(JSContext *cx, HandleObject collator)
     // locale.
 
     if (!JSObject::getProperty(cx, internals, internals, cx->names().sensitivity, &value))
-        return NULL;
+        return nullptr;
     JSAutoByteString sensitivity(cx, value.toString());
     if (!sensitivity)
-        return NULL;
+        return nullptr;
     if (equal(sensitivity, "base")) {
         uStrength = UCOL_PRIMARY;
     } else if (equal(sensitivity, "accent")) {
@@ -928,7 +893,7 @@ NewUCollator(JSContext *cx, HandleObject collator)
     }
 
     if (!JSObject::getProperty(cx, internals, internals, cx->names().ignorePunctuation, &value))
-        return NULL;
+        return nullptr;
     // According to the ICU team, UCOL_SHIFTED causes punctuation to be
     // ignored. Looking at Unicode Technical Report 35, Unicode Locale Data
     // Markup Language, "shifted" causes whitespace and punctuation to be
@@ -938,16 +903,16 @@ NewUCollator(JSContext *cx, HandleObject collator)
         uAlternate = UCOL_SHIFTED;
 
     if (!JSObject::getProperty(cx, internals, internals, cx->names().numeric, &value))
-        return NULL;
+        return nullptr;
     if (!value.isUndefined() && value.toBoolean())
         uNumeric = UCOL_ON;
 
     if (!JSObject::getProperty(cx, internals, internals, cx->names().caseFirst, &value))
-        return NULL;
+        return nullptr;
     if (!value.isUndefined()) {
         JSAutoByteString caseFirst(cx, value.toString());
         if (!caseFirst)
-            return NULL;
+            return nullptr;
         if (equal(caseFirst, "upper"))
             uCaseFirst = UCOL_UPPER_FIRST;
         else if (equal(caseFirst, "lower"))
@@ -959,8 +924,8 @@ NewUCollator(JSContext *cx, HandleObject collator)
     UErrorCode status = U_ZERO_ERROR;
     UCollator *coll = ucol_open(icuLocale(locale.ptr()), &status);
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
-        return NULL;
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
+        return nullptr;
     }
 
     ucol_setAttribute(coll, UCOL_STRENGTH, uStrength, &status);
@@ -971,8 +936,8 @@ NewUCollator(JSContext *cx, HandleObject collator)
     ucol_setAttribute(coll, UCOL_CASE_FIRST, uCaseFirst, &status);
     if (U_FAILURE(status)) {
         ucol_close(coll);
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
-        return NULL;
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
+        return nullptr;
     }
 
     return coll;
@@ -998,19 +963,22 @@ intl_CompareStrings(JSContext *cx, UCollator *coll, HandleString str1, HandleStr
     if (!chars2)
         return false;
 
-    UCollationResult uresult = ucol_strcoll(coll, chars1, length1, chars2, length2);
+    UCollationResult uresult = ucol_strcoll(coll, JSCharToUChar(chars1),
+                                            length1, JSCharToUChar(chars2),
+                                            length2);
 
     int32_t res;
     switch (uresult) {
         case UCOL_LESS: res = -1; break;
         case UCOL_EQUAL: res = 0; break;
         case UCOL_GREATER: res = 1; break;
+        default: MOZ_ASSUME_UNREACHABLE("ucol_strcoll returned bad UCollationResult");
     }
     result.setInt32(res);
     return true;
 }
 
-JSBool
+bool
 js::intl_CompareStrings(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1065,7 +1033,7 @@ static void numberFormat_finalize(FreeOp *fop, JSObject *obj);
 static const uint32_t UNUMBER_FORMAT_SLOT = 0;
 static const uint32_t NUMBER_FORMAT_SLOTS_COUNT = 1;
 
-static Class NumberFormatClass = {
+static const Class NumberFormatClass = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(NUMBER_FORMAT_SLOTS_COUNT),
     JS_PropertyStub,         /* addProperty */
@@ -1079,21 +1047,22 @@ static Class NumberFormatClass = {
 };
 
 #if JS_HAS_TOSOURCE
-static JSBool
+static bool
 numberFormat_toSource(JSContext *cx, unsigned argc, Value *vp)
 {
-    vp->setString(cx->names().NumberFormat);
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setString(cx->names().NumberFormat);
     return true;
 }
 #endif
 
 static const JSFunctionSpec numberFormat_static_methods[] = {
-    {"supportedLocalesOf", JSOP_NULLWRAPPER, 1, JSFunction::INTERPRETED, "Intl_NumberFormat_supportedLocalesOf"},
+    JS_SELF_HOSTED_FN("supportedLocalesOf", "Intl_NumberFormat_supportedLocalesOf", 1, 0),
     JS_FS_END
 };
 
 static const JSFunctionSpec numberFormat_methods[] = {
-    {"resolvedOptions", JSOP_NULLWRAPPER, 0, JSFunction::INTERPRETED, "Intl_NumberFormat_resolvedOptions"},
+    JS_SELF_HOSTED_FN("resolvedOptions", "Intl_NumberFormat_resolvedOptions", 0, 0),
 #if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str, numberFormat_toSource, 0, 0),
 #endif
@@ -1122,7 +1091,10 @@ NumberFormat(JSContext *cx, CallArgs args, bool construct)
                 return false;
 
             // 11.1.2.1 step 5
-            if (!obj->isExtensible())
+            bool extensible;
+            if (!JSObject::isExtensible(cx, obj, &extensible))
+                return false;
+            if (!extensible)
                 return Throw(cx, obj, JSMSG_OBJECT_NOT_EXTENSIBLE);
         } else {
             // 11.1.2.1 step 3.a
@@ -1138,7 +1110,7 @@ NumberFormat(JSContext *cx, CallArgs args, bool construct)
         if (!obj)
             return false;
 
-        obj->setReservedSlot(UNUMBER_FORMAT_SLOT, PrivateValue(NULL));
+        obj->setReservedSlot(UNUMBER_FORMAT_SLOT, PrivateValue(nullptr));
     }
 
     // 11.1.2.1 steps 1 and 2; 11.1.3.1 steps 1 and 2
@@ -1154,18 +1126,21 @@ NumberFormat(JSContext *cx, CallArgs args, bool construct)
     return true;
 }
 
-static JSBool
+static bool
 NumberFormat(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    return NumberFormat(cx, args, IsConstructing(args));
+    return NumberFormat(cx, args, args.isConstructing());
 }
 
-JSBool
+bool
 js::intl_NumberFormat(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     JS_ASSERT(args.length() == 2);
+    // intl_NumberFormat is an intrinsic for self-hosted JavaScript, so it
+    // cannot be used with "new", but it still has to be treated as a
+    // constructor.
     return NumberFormat(cx, args, true);
 }
 
@@ -1183,21 +1158,21 @@ InitNumberFormatClass(JSContext *cx, HandleObject Intl, Handle<GlobalObject*> gl
 {
     RootedFunction ctor(cx, global->createConstructor(cx, &NumberFormat, cx->names().NumberFormat, 0));
     if (!ctor)
-        return NULL;
+        return nullptr;
 
     RootedObject proto(cx, global->as<GlobalObject>().getOrCreateNumberFormatPrototype(cx));
     if (!proto)
-        return NULL;
+        return nullptr;
     if (!LinkConstructorAndPrototype(cx, ctor, proto))
-        return NULL;
+        return nullptr;
 
     // 11.2.2
     if (!JS_DefineFunctions(cx, ctor, numberFormat_static_methods))
-        return NULL;
+        return nullptr;
 
     // 11.3.2 and 11.3.3
     if (!JS_DefineFunctions(cx, proto, numberFormat_methods))
-        return NULL;
+        return nullptr;
 
     /*
      * Install the getter for NumberFormat.prototype.format, which returns a
@@ -1205,28 +1180,28 @@ InitNumberFormatClass(JSContext *cx, HandleObject Intl, Handle<GlobalObject*> gl
      * for passing to methods like Array.prototype.map).
      */
     RootedValue getter(cx);
-    if (!cx->global()->getIntrinsicValue(cx, cx->names().NumberFormatFormatGet, &getter))
-        return NULL;
-    RootedValue undefinedValue(cx, UndefinedValue());
-    if (!JSObject::defineProperty(cx, proto, cx->names().format, undefinedValue,
+    if (!GlobalObject::getIntrinsicValue(cx, cx->global(), cx->names().NumberFormatFormatGet, &getter))
+        return nullptr;
+    if (!JSObject::defineProperty(cx, proto, cx->names().format, UndefinedHandleValue,
                                   JS_DATA_TO_FUNC_PTR(JSPropertyOp, &getter.toObject()),
-                                  NULL, JSPROP_GETTER))
+                                  nullptr, JSPROP_GETTER | JSPROP_SHARED))
     {
-        return NULL;
+        return nullptr;
     }
 
     // 11.2.1 and 11.3
-    RootedValue locales(cx, UndefinedValue());
-    RootedValue options(cx, UndefinedValue());
-    if (!IntlInitialize(cx, proto, cx->names().InitializeNumberFormat, locales, options))
-        return NULL;
+    if (!IntlInitialize(cx, proto, cx->names().InitializeNumberFormat, UndefinedHandleValue,
+                        UndefinedHandleValue))
+    {
+        return nullptr;
+    }
 
     // 8.1
     RootedValue ctorValue(cx, ObjectValue(*ctor));
     if (!JSObject::defineProperty(cx, Intl, cx->names().NumberFormat, ctorValue,
                                   JS_PropertyStub, JS_StrictPropertyStub, 0))
     {
-        return NULL;
+        return nullptr;
     }
 
     return ctor;
@@ -1238,12 +1213,12 @@ GlobalObject::initNumberFormatProto(JSContext *cx, Handle<GlobalObject*> global)
     RootedObject proto(cx, global->createBlankPrototype(cx, &NumberFormatClass));
     if (!proto)
         return false;
-    proto->setReservedSlot(UNUMBER_FORMAT_SLOT, PrivateValue(NULL));
+    proto->setReservedSlot(UNUMBER_FORMAT_SLOT, PrivateValue(nullptr));
     global->setReservedSlot(NUMBER_FORMAT_PROTO, ObjectValue(*proto));
     return true;
 }
 
-JSBool
+bool
 js::intl_NumberFormat_availableLocales(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1256,7 +1231,7 @@ js::intl_NumberFormat_availableLocales(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
-JSBool
+bool
 js::intl_numberingSystem(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1273,7 +1248,7 @@ js::intl_numberingSystem(JSContext *cx, unsigned argc, Value *vp)
     UErrorCode status = U_ZERO_ERROR;
     NumberingSystem *numbers = NumberingSystem::createInstance(ulocale, status);
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
         return false;
     }
     const char *name = numbers->getName();
@@ -1296,17 +1271,17 @@ NewUNumberFormat(JSContext *cx, HandleObject numberFormat)
 
     RootedObject internals(cx);
     if (!GetInternals(cx, numberFormat, &internals))
-       return NULL;
+       return nullptr;
 
     if (!JSObject::getProperty(cx, internals, internals, cx->names().locale, &value))
-        return NULL;
+        return nullptr;
     JSAutoByteString locale(cx, value.toString());
     if (!locale)
-        return NULL;
+        return nullptr;
 
     // UNumberFormat options with default values
     UNumberFormatStyle uStyle = UNUM_DECIMAL;
-    const UChar *uCurrency = NULL;
+    const UChar *uCurrency = nullptr;
     uint32_t uMinimumIntegerDigits = 1;
     uint32_t uMinimumFractionDigits = 0;
     uint32_t uMaximumFractionDigits = 3;
@@ -1315,33 +1290,32 @@ NewUNumberFormat(JSContext *cx, HandleObject numberFormat)
     bool uUseGrouping = true;
 
     // Sprinkle appropriate rooting flavor over things the GC might care about.
-    SkipRoot skip(cx, &uCurrency);
     RootedString currency(cx);
 
     // We don't need to look at numberingSystem - it can only be set via
     // the Unicode locale extension and is therefore already set on locale.
 
     if (!JSObject::getProperty(cx, internals, internals, cx->names().style, &value))
-        return NULL;
+        return nullptr;
     JSAutoByteString style(cx, value.toString());
     if (!style)
-        return NULL;
+        return nullptr;
 
     if (equal(style, "currency")) {
         if (!JSObject::getProperty(cx, internals, internals, cx->names().currency, &value))
-            return NULL;
+            return nullptr;
         currency = value.toString();
         MOZ_ASSERT(currency->length() == 3, "IsWellFormedCurrencyCode permits only length-3 strings");
         // uCurrency remains owned by currency.
-        uCurrency = JS_GetStringCharsZ(cx, currency);
+        uCurrency = JSCharToUChar(JS_GetStringCharsZ(cx, currency));
         if (!uCurrency)
-            return NULL;
+            return nullptr;
 
         if (!JSObject::getProperty(cx, internals, internals, cx->names().currencyDisplay, &value))
-            return NULL;
+            return nullptr;
         JSAutoByteString currencyDisplay(cx, value.toString());
         if (!currencyDisplay)
-            return NULL;
+            return nullptr;
         if (equal(currencyDisplay, "code")) {
             uStyle = UNUM_CURRENCY_ISO;
         } else if (equal(currencyDisplay, "symbol")) {
@@ -1360,58 +1334,58 @@ NewUNumberFormat(JSContext *cx, HandleObject numberFormat)
     RootedId id(cx, NameToId(cx->names().minimumSignificantDigits));
     bool hasP;
     if (!JSObject::hasProperty(cx, internals, id, &hasP))
-        return NULL;
+        return nullptr;
     if (hasP) {
         if (!JSObject::getProperty(cx, internals, internals, cx->names().minimumSignificantDigits,
                                    &value))
         {
-            return NULL;
+            return nullptr;
         }
         uMinimumSignificantDigits = int32_t(value.toNumber());
         if (!JSObject::getProperty(cx, internals, internals, cx->names().maximumSignificantDigits,
                                    &value))
         {
-            return NULL;
+            return nullptr;
         }
         uMaximumSignificantDigits = int32_t(value.toNumber());
     } else {
         if (!JSObject::getProperty(cx, internals, internals, cx->names().minimumIntegerDigits,
                                    &value))
         {
-            return NULL;
+            return nullptr;
         }
         uMinimumIntegerDigits = int32_t(value.toNumber());
         if (!JSObject::getProperty(cx, internals, internals, cx->names().minimumFractionDigits,
                                    &value))
         {
-            return NULL;
+            return nullptr;
         }
         uMinimumFractionDigits = int32_t(value.toNumber());
         if (!JSObject::getProperty(cx, internals, internals, cx->names().maximumFractionDigits,
                                    &value))
         {
-            return NULL;
+            return nullptr;
         }
         uMaximumFractionDigits = int32_t(value.toNumber());
     }
 
     if (!JSObject::getProperty(cx, internals, internals, cx->names().useGrouping, &value))
-        return NULL;
+        return nullptr;
     uUseGrouping = value.toBoolean();
 
     UErrorCode status = U_ZERO_ERROR;
-    UNumberFormat *nf = unum_open(uStyle, NULL, 0, icuLocale(locale.ptr()), NULL, &status);
+    UNumberFormat *nf = unum_open(uStyle, nullptr, 0, icuLocale(locale.ptr()), nullptr, &status);
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
-        return NULL;
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
+        return nullptr;
     }
     ScopedICUObject<UNumberFormat> toClose(nf, unum_close);
 
     if (uCurrency) {
         unum_setTextAttribute(nf, UNUM_CURRENCY_CODE, uCurrency, 3, &status);
         if (U_FAILURE(status)) {
-            JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
-            return NULL;
+            JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
+            return nullptr;
         }
     }
     if (uMinimumSignificantDigits != -1) {
@@ -1440,15 +1414,17 @@ intl_FormatNumber(JSContext *cx, UNumberFormat *nf, double x, MutableHandleValue
     if (!chars.resize(INITIAL_STRING_BUFFER_SIZE))
         return false;
     UErrorCode status = U_ZERO_ERROR;
-    int size = unum_formatDouble(nf, x, chars.begin(), INITIAL_STRING_BUFFER_SIZE, NULL, &status);
+    int size = unum_formatDouble(nf, x, JSCharToUChar(chars.begin()),
+                                 INITIAL_STRING_BUFFER_SIZE, nullptr, &status);
     if (status == U_BUFFER_OVERFLOW_ERROR) {
         if (!chars.resize(size))
             return false;
         status = U_ZERO_ERROR;
-        unum_formatDouble(nf, x, chars.begin(), size, NULL, &status);
+        unum_formatDouble(nf, x, JSCharToUChar(chars.begin()),
+                          size, nullptr, &status);
     }
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
         return false;
     }
 
@@ -1464,7 +1440,7 @@ intl_FormatNumber(JSContext *cx, UNumberFormat *nf, double x, MutableHandleValue
     return true;
 }
 
-JSBool
+bool
 js::intl_FormatNumber(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1515,7 +1491,7 @@ static void dateTimeFormat_finalize(FreeOp *fop, JSObject *obj);
 static const uint32_t UDATE_FORMAT_SLOT = 0;
 static const uint32_t DATE_TIME_FORMAT_SLOTS_COUNT = 1;
 
-static Class DateTimeFormatClass = {
+static const Class DateTimeFormatClass = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(DATE_TIME_FORMAT_SLOTS_COUNT),
     JS_PropertyStub,         /* addProperty */
@@ -1529,21 +1505,22 @@ static Class DateTimeFormatClass = {
 };
 
 #if JS_HAS_TOSOURCE
-static JSBool
+static bool
 dateTimeFormat_toSource(JSContext *cx, unsigned argc, Value *vp)
 {
-    vp->setString(cx->names().DateTimeFormat);
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setString(cx->names().DateTimeFormat);
     return true;
 }
 #endif
 
 static const JSFunctionSpec dateTimeFormat_static_methods[] = {
-    {"supportedLocalesOf", JSOP_NULLWRAPPER, 1, JSFunction::INTERPRETED, "Intl_DateTimeFormat_supportedLocalesOf"},
+    JS_SELF_HOSTED_FN("supportedLocalesOf", "Intl_DateTimeFormat_supportedLocalesOf", 1, 0),
     JS_FS_END
 };
 
 static const JSFunctionSpec dateTimeFormat_methods[] = {
-    {"resolvedOptions", JSOP_NULLWRAPPER, 0, JSFunction::INTERPRETED, "Intl_DateTimeFormat_resolvedOptions"},
+    JS_SELF_HOSTED_FN("resolvedOptions", "Intl_DateTimeFormat_resolvedOptions", 0, 0),
 #if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str, dateTimeFormat_toSource, 0, 0),
 #endif
@@ -1572,7 +1549,10 @@ DateTimeFormat(JSContext *cx, CallArgs args, bool construct)
                 return false;
 
             // 12.1.2.1 step 5
-            if (!obj->isExtensible())
+            bool extensible;
+            if (!JSObject::isExtensible(cx, obj, &extensible))
+                return false;
+            if (!extensible)
                 return Throw(cx, obj, JSMSG_OBJECT_NOT_EXTENSIBLE);
         } else {
             // 12.1.2.1 step 3.a
@@ -1588,7 +1568,7 @@ DateTimeFormat(JSContext *cx, CallArgs args, bool construct)
         if (!obj)
             return false;
 
-        obj->setReservedSlot(UDATE_FORMAT_SLOT, PrivateValue(NULL));
+        obj->setReservedSlot(UDATE_FORMAT_SLOT, PrivateValue(nullptr));
     }
 
     // 12.1.2.1 steps 1 and 2; 12.1.3.1 steps 1 and 2
@@ -1604,18 +1584,21 @@ DateTimeFormat(JSContext *cx, CallArgs args, bool construct)
     return true;
 }
 
-static JSBool
+static bool
 DateTimeFormat(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    return DateTimeFormat(cx, args, IsConstructing(args));
+    return DateTimeFormat(cx, args, args.isConstructing());
 }
 
-JSBool
+bool
 js::intl_DateTimeFormat(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     JS_ASSERT(args.length() == 2);
+    // intl_DateTimeFormat is an intrinsic for self-hosted JavaScript, so it
+    // cannot be used with "new", but it still has to be treated as a
+    // constructor.
     return DateTimeFormat(cx, args, true);
 }
 
@@ -1632,21 +1615,21 @@ InitDateTimeFormatClass(JSContext *cx, HandleObject Intl, Handle<GlobalObject*> 
 {
     RootedFunction ctor(cx, global->createConstructor(cx, &DateTimeFormat, cx->names().DateTimeFormat, 0));
     if (!ctor)
-        return NULL;
+        return nullptr;
 
     RootedObject proto(cx, global->as<GlobalObject>().getOrCreateDateTimeFormatPrototype(cx));
     if (!proto)
-        return NULL;
+        return nullptr;
     if (!LinkConstructorAndPrototype(cx, ctor, proto))
-        return NULL;
+        return nullptr;
 
     // 12.2.2
     if (!JS_DefineFunctions(cx, ctor, dateTimeFormat_static_methods))
-        return NULL;
+        return nullptr;
 
     // 12.3.2 and 12.3.3
     if (!JS_DefineFunctions(cx, proto, dateTimeFormat_methods))
-        return NULL;
+        return nullptr;
 
     /*
      * Install the getter for DateTimeFormat.prototype.format, which returns a
@@ -1654,28 +1637,28 @@ InitDateTimeFormatClass(JSContext *cx, HandleObject Intl, Handle<GlobalObject*> 
      * (suitable for passing to methods like Array.prototype.map).
      */
     RootedValue getter(cx);
-    if (!cx->global()->getIntrinsicValue(cx, cx->names().DateTimeFormatFormatGet, &getter))
-        return NULL;
-    RootedValue undefinedValue(cx, UndefinedValue());
-    if (!JSObject::defineProperty(cx, proto, cx->names().format, undefinedValue,
+    if (!GlobalObject::getIntrinsicValue(cx, cx->global(), cx->names().DateTimeFormatFormatGet, &getter))
+        return nullptr;
+    if (!JSObject::defineProperty(cx, proto, cx->names().format, UndefinedHandleValue,
                                   JS_DATA_TO_FUNC_PTR(JSPropertyOp, &getter.toObject()),
-                                  NULL, JSPROP_GETTER))
+                                  nullptr, JSPROP_GETTER | JSPROP_SHARED))
     {
-        return NULL;
+        return nullptr;
     }
 
     // 12.2.1 and 12.3
-    RootedValue locales(cx, UndefinedValue());
-    RootedValue options(cx, UndefinedValue());
-    if (!IntlInitialize(cx, proto, cx->names().InitializeDateTimeFormat, locales, options))
-        return NULL;
+    if (!IntlInitialize(cx, proto, cx->names().InitializeDateTimeFormat, UndefinedHandleValue,
+                        UndefinedHandleValue))
+    {
+        return nullptr;
+    }
 
     // 8.1
     RootedValue ctorValue(cx, ObjectValue(*ctor));
     if (!JSObject::defineProperty(cx, Intl, cx->names().DateTimeFormat, ctorValue,
                                   JS_PropertyStub, JS_StrictPropertyStub, 0))
     {
-        return NULL;
+        return nullptr;
     }
 
     return ctor;
@@ -1687,12 +1670,12 @@ GlobalObject::initDateTimeFormatProto(JSContext *cx, Handle<GlobalObject*> globa
     RootedObject proto(cx, global->createBlankPrototype(cx, &DateTimeFormatClass));
     if (!proto)
         return false;
-    proto->setReservedSlot(UDATE_FORMAT_SLOT, PrivateValue(NULL));
+    proto->setReservedSlot(UDATE_FORMAT_SLOT, PrivateValue(nullptr));
     global->setReservedSlot(DATE_TIME_FORMAT_PROTO, ObjectValue(*proto));
     return true;
 }
 
-JSBool
+bool
 js::intl_DateTimeFormat_availableLocales(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1719,7 +1702,7 @@ bcp47CalendarName(const char *icuName)
     return icuName;
 }
 
-JSBool
+bool
 js::intl_availableCalendars(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1737,10 +1720,10 @@ js::intl_availableCalendars(JSContext *cx, unsigned argc, Value *vp)
 
     // We need the default calendar for the locale as the first result.
     UErrorCode status = U_ZERO_ERROR;
-    UCalendar *cal = ucal_open(NULL, 0, locale.ptr(), UCAL_DEFAULT, &status);
+    UCalendar *cal = ucal_open(nullptr, 0, locale.ptr(), UCAL_DEFAULT, &status);
     const char *calendar = ucal_getType(cal, &status);
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
         return false;
     }
     ucal_close(cal);
@@ -1754,21 +1737,21 @@ js::intl_availableCalendars(JSContext *cx, unsigned argc, Value *vp)
     // Now get the calendars that "would make a difference", i.e., not the default.
     UEnumeration *values = ucal_getKeywordValuesForLocale("ca", locale.ptr(), false, &status);
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
         return false;
     }
     ScopedICUObject<UEnumeration> toClose(values, uenum_close);
 
     uint32_t count = uenum_count(values, &status);
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
         return false;
     }
 
     for (; count > 0; count--) {
-        calendar = uenum_next(values, NULL, &status);
+        calendar = uenum_next(values, nullptr, &status);
         if (U_FAILURE(status)) {
-            JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+            JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
             return false;
         }
 
@@ -1784,7 +1767,7 @@ js::intl_availableCalendars(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
-JSBool
+bool
 js::intl_patternForSkeleton(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1799,20 +1782,20 @@ js::intl_patternForSkeleton(JSContext *cx, unsigned argc, Value *vp)
     const jschar *skeleton = JS_GetStringCharsZ(cx, jsskeleton);
     if (!skeleton)
         return false;
-    SkipRoot skip(cx, &skeleton);
-    uint32_t skeletonLen = u_strlen(skeleton);
+    uint32_t skeletonLen = u_strlen(JSCharToUChar(skeleton));
 
     UErrorCode status = U_ZERO_ERROR;
     UDateTimePatternGenerator *gen = udatpg_open(icuLocale(locale.ptr()), &status);
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
         return false;
     }
     ScopedICUObject<UDateTimePatternGenerator> toClose(gen, udatpg_close);
 
-    int32_t size = udatpg_getBestPattern(gen, skeleton, skeletonLen, NULL, 0, &status);
+    int32_t size = udatpg_getBestPattern(gen, JSCharToUChar(skeleton),
+                                         skeletonLen, nullptr, 0, &status);
     if (U_FAILURE(status) && status != U_BUFFER_OVERFLOW_ERROR) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
         return false;
     }
     ScopedJSFreePtr<UChar> pattern(cx->pod_malloc<UChar>(size + 1));
@@ -1820,13 +1803,14 @@ js::intl_patternForSkeleton(JSContext *cx, unsigned argc, Value *vp)
         return false;
     pattern[size] = '\0';
     status = U_ZERO_ERROR;
-    udatpg_getBestPattern(gen, skeleton, skeletonLen, pattern, size, &status);
+    udatpg_getBestPattern(gen, JSCharToUChar(skeleton),
+                          skeletonLen, pattern, size, &status);
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
         return false;
     }
 
-    RootedString str(cx, JS_NewUCStringCopyZ(cx, pattern));
+    RootedString str(cx, JS_NewUCStringCopyZ(cx, reinterpret_cast<jschar*>(pattern.get())));
     if (!str)
         return false;
     args.rval().setString(str);
@@ -1844,23 +1828,20 @@ NewUDateFormat(JSContext *cx, HandleObject dateTimeFormat)
 
     RootedObject internals(cx);
     if (!GetInternals(cx, dateTimeFormat, &internals))
-       return NULL;
+       return nullptr;
 
     if (!JSObject::getProperty(cx, internals, internals, cx->names().locale, &value)) {
-        return NULL;
+        return nullptr;
     }
     JSAutoByteString locale(cx, value.toString());
     if (!locale)
-        return NULL;
+        return nullptr;
 
     // UDateFormat options with default values.
-    const UChar *uTimeZone = NULL;
+    const UChar *uTimeZone = nullptr;
     uint32_t uTimeZoneLength = 0;
-    const UChar *uPattern = NULL;
+    const UChar *uPattern = nullptr;
     uint32_t uPatternLength = 0;
-
-    SkipRoot skipTimeZone(cx, &uTimeZone);
-    SkipRoot skipPattern(cx, &uPattern);
 
     // We don't need to look at calendar and numberingSystem - they can only be
     // set via the Unicode locale extension and are therefore already set on
@@ -1869,22 +1850,22 @@ NewUDateFormat(JSContext *cx, HandleObject dateTimeFormat)
     RootedId id(cx, NameToId(cx->names().timeZone));
     bool hasP;
     if (!JSObject::hasProperty(cx, internals, id, &hasP))
-        return NULL;
+        return nullptr;
     if (hasP) {
         if (!JSObject::getProperty(cx, internals, internals, cx->names().timeZone, &value))
-            return NULL;
+            return nullptr;
         if (!value.isUndefined()) {
-            uTimeZone = JS_GetStringCharsZ(cx, value.toString());
+            uTimeZone = JSCharToUChar(JS_GetStringCharsZ(cx, value.toString()));
             if (!uTimeZone)
-                return NULL;
+                return nullptr;
             uTimeZoneLength = u_strlen(uTimeZone);
         }
     }
     if (!JSObject::getProperty(cx, internals, internals, cx->names().pattern, &value))
-        return NULL;
-    uPattern = JS_GetStringCharsZ(cx, value.toString());
+        return nullptr;
+    uPattern = JSCharToUChar(JS_GetStringCharsZ(cx, value.toString()));
     if (!uPattern)
-        return NULL;
+        return nullptr;
     uPatternLength = u_strlen(uPattern);
 
     UErrorCode status = U_ZERO_ERROR;
@@ -1895,8 +1876,8 @@ NewUDateFormat(JSContext *cx, HandleObject dateTimeFormat)
         udat_open(UDAT_PATTERN, UDAT_PATTERN, icuLocale(locale.ptr()), uTimeZone, uTimeZoneLength,
                   uPattern, uPatternLength, &status);
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
-        return NULL;
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
+        return nullptr;
     }
 
     // ECMAScript requires the Gregorian calendar to be used from the beginning
@@ -1913,7 +1894,7 @@ static bool
 intl_FormatDateTime(JSContext *cx, UDateFormat *df, double x, MutableHandleValue result)
 {
     if (!IsFinite(x)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_DATE_NOT_FINITE);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_DATE_NOT_FINITE);
         return false;
     }
 
@@ -1921,15 +1902,15 @@ intl_FormatDateTime(JSContext *cx, UDateFormat *df, double x, MutableHandleValue
     if (!chars.resize(INITIAL_STRING_BUFFER_SIZE))
         return false;
     UErrorCode status = U_ZERO_ERROR;
-    int size = udat_format(df, x, chars.begin(), INITIAL_STRING_BUFFER_SIZE, NULL, &status);
+    int size = udat_format(df, x, JSCharToUChar(chars.begin()), INITIAL_STRING_BUFFER_SIZE, nullptr, &status);
     if (status == U_BUFFER_OVERFLOW_ERROR) {
         if (!chars.resize(size))
             return false;
         status = U_ZERO_ERROR;
-        udat_format(df, x, chars.begin(), size, NULL, &status);
+        udat_format(df, x, JSCharToUChar(chars.begin()), size, nullptr, &status);
     }
     if (U_FAILURE(status)) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INTERNAL_INTL_ERROR);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
         return false;
     }
 
@@ -1945,7 +1926,7 @@ intl_FormatDateTime(JSContext *cx, UDateFormat *df, double x, MutableHandleValue
     return true;
 }
 
-JSBool
+bool
 js::intl_FormatDateTime(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1991,7 +1972,7 @@ js::intl_FormatDateTime(JSContext *cx, unsigned argc, Value *vp)
 
 /******************** Intl ********************/
 
-Class js::IntlClass = {
+const Class js::IntlClass = {
     js_Object_str,
     JSCLASS_HAS_CACHED_PROTO(JSProto_Intl),
     JS_PropertyStub,         /* addProperty */
@@ -2004,10 +1985,11 @@ Class js::IntlClass = {
 };
 
 #if JS_HAS_TOSOURCE
-static JSBool
+static bool
 intl_toSource(JSContext *cx, unsigned argc, Value *vp)
 {
-    vp->setString(cx->names().Intl);
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setString(cx->names().Intl);
     return true;
 }
 #endif
@@ -2035,31 +2017,31 @@ js_InitIntlClass(JSContext *cx, HandleObject obj)
     // normally keep references to non-constructors. This makes sure there is one.
     RootedObject Intl(cx, global->getOrCreateIntlObject(cx));
     if (!Intl)
-        return NULL;
+        return nullptr;
 
     RootedValue IntlValue(cx, ObjectValue(*Intl));
     if (!JSObject::defineProperty(cx, global, cx->names().Intl, IntlValue,
                                   JS_PropertyStub, JS_StrictPropertyStub, 0))
     {
-        return NULL;
+        return nullptr;
     }
 
     if (!JS_DefineFunctions(cx, Intl, intl_static_methods))
-        return NULL;
+        return nullptr;
 
     // Skip initialization of the Intl constructors during initialization of the
     // self-hosting global as we may get here before self-hosted code is compiled,
     // and no core code refers to the Intl classes.
     if (!cx->runtime()->isSelfHostingGlobal(cx->global())) {
         if (!InitCollatorClass(cx, Intl, global))
-            return NULL;
+            return nullptr;
         if (!InitNumberFormatClass(cx, Intl, global))
-            return NULL;
+            return nullptr;
         if (!InitDateTimeFormatClass(cx, Intl, global))
-            return NULL;
+            return nullptr;
     }
 
-    MarkStandardClassInitializedNoProto(global, &IntlClass);
+    global->setConstructor(JSProto_Intl, ObjectValue(*Intl));
 
     return Intl;
 }
@@ -2073,6 +2055,6 @@ GlobalObject::initIntlObject(JSContext *cx, Handle<GlobalObject*> global)
     if (!Intl)
         return false;
 
-    global->setReservedSlot(JSProto_Intl, ObjectValue(*Intl));
+    global->setConstructor(JSProto_Intl, ObjectValue(*Intl));
     return true;
 }

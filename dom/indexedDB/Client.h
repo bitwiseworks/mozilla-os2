@@ -11,20 +11,21 @@
 
 #include "mozilla/dom/quota/Client.h"
 
-#define IDB_DIRECTORY_NAME "idb"
 #define JOURNAL_DIRECTORY_NAME "journals"
 
 BEGIN_INDEXEDDB_NAMESPACE
 
 class Client : public mozilla::dom::quota::Client
 {
-  typedef mozilla::dom::quota::UsageRunnable UsageRunnable;
+  typedef mozilla::dom::quota::OriginOrPatternString OriginOrPatternString;
+  typedef mozilla::dom::quota::PersistenceType PersistenceType;
+  typedef mozilla::dom::quota::UsageInfo UsageInfo;
 
 public:
-  NS_IMETHOD_(nsrefcnt)
+  NS_IMETHOD_(MozExternalRefCountType)
   AddRef() MOZ_OVERRIDE;
 
-  NS_IMETHOD_(nsrefcnt)
+  NS_IMETHOD_(MozExternalRefCountType)
   Release() MOZ_OVERRIDE;
 
   virtual Type
@@ -34,15 +35,21 @@ public:
   }
 
   virtual nsresult
-  InitOrigin(const nsACString& aOrigin,
-             UsageRunnable* aUsageRunnable) MOZ_OVERRIDE;
+  InitOrigin(PersistenceType aPersistenceType,
+             const nsACString& aGroup,
+             const nsACString& aOrigin,
+             UsageInfo* aUsageInfo) MOZ_OVERRIDE;
 
   virtual nsresult
-  GetUsageForOrigin(const nsACString& aOrigin,
-                    UsageRunnable* aUsageRunnable) MOZ_OVERRIDE;
+  GetUsageForOrigin(PersistenceType aPersistenceType,
+                    const nsACString& aGroup,
+                    const nsACString& aOrigin,
+                    UsageInfo* aUsageInfo) MOZ_OVERRIDE;
 
   virtual void
-  OnOriginClearCompleted(const nsACString& aPattern) MOZ_OVERRIDE;
+  OnOriginClearCompleted(PersistenceType aPersistenceType,
+                         const OriginOrPatternString& aOriginOrPattern)
+                         MOZ_OVERRIDE;
 
   virtual void
   ReleaseIOThreadObjects() MOZ_OVERRIDE;
@@ -71,11 +78,12 @@ public:
 
 private:
   nsresult
-  GetDirectory(const nsACString& aOrigin, nsIFile** aDirectory);
+  GetDirectory(PersistenceType aPersistenceType, const nsACString& aOrigin,
+               nsIFile** aDirectory);
 
   nsresult
   GetUsageForDirectoryInternal(nsIFile* aDirectory,
-                               UsageRunnable* aUsageRunnable,
+                               UsageInfo* aUsageInfo,
                                bool aDatabaseFiles);
 
   nsAutoRefCnt mRefCnt;

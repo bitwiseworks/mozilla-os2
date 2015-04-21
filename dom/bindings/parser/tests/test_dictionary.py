@@ -113,20 +113,6 @@ def WebIDLTest(parser, harness):
     try:
         parser.parse("""
             dictionary A {
-              [TreatUndefinedAs=EmptyString] DOMString foo;
-            };
-        """)
-        results = parser.finish()
-    except:
-        threw = True
-
-    harness.ok(threw, "Should not allow [TreatUndefinedAs] on dictionary members");
-
-    parser = parser.reset()
-    threw = False
-    try:
-        parser.parse("""
-            dictionary A {
             };
             interface X {
               void doFoo(A arg);
@@ -170,6 +156,23 @@ def WebIDLTest(parser, harness):
         threw = True
 
     harness.ok(threw, "Dictionary arg followed by optional arg must be optional")
+
+    parser = parser.reset()
+    threw = False
+    try:
+        parser.parse("""
+            dictionary A {
+            };
+            interface X {
+              void doFoo(A arg1, optional long arg2, long arg3);
+            };
+        """)
+        results = parser.finish()
+    except:
+        threw = True
+
+    harness.ok(not threw,
+               "Dictionary arg followed by non-optional arg doesn't have to be optional")
 
     parser = parser.reset()
     threw = False

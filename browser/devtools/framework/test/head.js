@@ -7,11 +7,16 @@ let TargetFactory = gDevTools.TargetFactory;
 let tempScope = {};
 Components.utils.import("resource://gre/modules/devtools/Console.jsm", tempScope);
 let console = tempScope.console;
-Components.utils.import("resource://gre/modules/commonjs/sdk/core/promise.js", tempScope);
-let Promise = tempScope.Promise;
+Components.utils.import("resource://gre/modules/Promise.jsm", tempScope);
+let promise = tempScope.Promise;
 
 let {devtools} = Components.utils.import("resource://gre/modules/devtools/Loader.jsm", {});
 let TargetFactory = devtools.TargetFactory;
+
+gDevTools.testing = true;
+SimpleTest.registerCleanupFunction(() => {
+  gDevTools.testing = false;
+});
 
 /**
  * Open a new tab at a URL and call a callback on load
@@ -25,7 +30,7 @@ function addTab(aURL, aCallback)
     content.location = aURL;
   }
 
-  let deferred = Promise.defer();
+  let deferred = promise.defer();
 
   let tab = gBrowser.selectedTab;
   let target = TargetFactory.forTab(gBrowser.selectedTab);

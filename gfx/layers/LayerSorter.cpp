@@ -4,11 +4,26 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "LayerSorter.h"
-#include "DirectedGraph.h"
+#include <math.h>                       // for fabs
+#include <stdint.h>                     // for uint32_t
+#include <stdio.h>                      // for fprintf, stderr, FILE
+#include <stdlib.h>                     // for getenv
+#include "DirectedGraph.h"              // for DirectedGraph
+#include "Layers.h"                     // for Layer
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxLineSegment.h"             // for gfxLineSegment
+#include "gfxPoint.h"                   // for gfxPoint
+#include "gfxPoint3D.h"                 // for gfxPoint3D
+#include "gfxQuad.h"                    // for gfxQuad
+#include "gfxRect.h"                    // for gfxRect
+#include "gfxTypes.h"                   // for gfxFloat
+#include "mozilla/gfx/BasePoint3D.h"    // for BasePoint3D
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsTArray.h"                   // for nsTArray, etc
 #include "limits.h"
-#include "gfxLineSegment.h"
-#include "Layers.h"
 #include "mozilla/Assertions.h"
+
+using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace layers {
@@ -65,8 +80,10 @@ static LayerSortOrder CompareDepth(Layer* aOne, Layer* aTwo) {
   gfxRect ourRect = aOne->GetEffectiveVisibleRegion().GetBounds();
   gfxRect otherRect = aTwo->GetEffectiveVisibleRegion().GetBounds();
 
-  gfx3DMatrix ourTransform = aOne->GetTransform();
-  gfx3DMatrix otherTransform = aTwo->GetTransform();
+  gfx3DMatrix ourTransform;
+  To3DMatrix(aOne->GetTransform(), ourTransform);
+  gfx3DMatrix otherTransform;
+  To3DMatrix(aTwo->GetTransform(), otherTransform);
 
   // Transform both rectangles and project into 2d space.
   gfxQuad ourTransformedRect = ourTransform.TransformRect(ourRect);
@@ -136,25 +153,25 @@ static LayerSortOrder CompareDepth(Layer* aOne, Layer* aTwo) {
 #ifdef DEBUG
 static bool gDumpLayerSortList = getenv("MOZ_DUMP_LAYER_SORT_LIST") != 0;
 
-#define BLACK       0
-#define RED         1
-#define GREEN       2
-#define YELLOW      3
-#define BLUE        4
-#define MAGENTA     5
-#define CYAN        6
-#define WHITE       7
+static const int BLACK = 0;
+static const int RED = 1;
+static const int GREEN = 2;
+static const int YELLOW = 3;
+static const int BLUE = 4;
+static const int MAGENTA = 5;
+static const int CYAN = 6;
+static const int WHITE = 7;
 
 //#define USE_XTERM_COLORING
 #ifdef USE_XTERM_COLORING
 
-#define RESET       0
-#define BRIGHT      1
-#define DIM         2
-#define UNDERLINE   3
-#define BLINK       4
-#define REVERSE     7
-#define HIDDEN      8
+static const int RESET = 0;
+static const int BRIGHT = 1;
+static const int DIM = 2;
+static const int UNDERLINE = 3;
+static const int BLINK = 4;
+static const int REVERSE = 7;
+static const int HIDDEN = 8;
 
 static void SetTextColor(uint32_t aColor)
 {

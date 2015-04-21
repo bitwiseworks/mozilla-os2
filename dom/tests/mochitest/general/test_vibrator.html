@@ -12,35 +12,24 @@
      navigator.vibrate throws an exception where appropriate. -->
 
 <script class="testbody" type="text/javascript;version=1.7">
+var result;
 function expectFailure(param) {
-  try {
-    navigator.vibrate(param);
-  }
-  catch(e) {
-    ok(true, 'vibrate(' + param + ') threw an expected exception.');
-    return;
-  }
-  ok(false, 'vibrate(' + param + ') should have thrown an exception.');
+  result = navigator.vibrate(param);
+  is(result, false, 'vibrate(' + param + ') should have failed.');
 }
 
 function expectSuccess(param) {
-  try {
-    navigator.vibrate(param);
-  }
-  catch(e) {
-    ok(false, 'vibrate(' + param + ') threw an unexpected exception.');
-    return;
-  }
-  ok(true, 'vibrate(' + param + ') did not throw an exception.');
+  result = navigator.vibrate(param);
+  is(result, true, 'vibrate(' + param + ') must succeed.');
 }
 
 function testFailures() {
-  expectFailure(null);
-  expectFailure(undefined);
+  expectSuccess(null);
+  expectSuccess(undefined);
   expectFailure(-1);
-  expectFailure('a');
+  expectSuccess('a');
   expectFailure([100, -1]);
-  expectFailure([100, 'a']);
+  expectSuccess([100, 'a']);
 
   var maxVibrateMs = SpecialPowers.getIntPref('dom.vibrator.max_vibrate_ms');
   var maxVibrateListLen = SpecialPowers.getIntPref('dom.vibrator.max_vibrate_list_len');

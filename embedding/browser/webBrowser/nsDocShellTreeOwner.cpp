@@ -18,7 +18,6 @@
 #include "nsReadableUtils.h"
 #include "nsUnicharUtils.h"
 #include "nsISimpleEnumerator.h"
-#include "nsGUIEvent.h"
 #include "mozilla/LookAndFeel.h"
 
 // Interfaces needed to be included
@@ -62,11 +61,11 @@
 #include "nsPresContext.h"
 #include "nsViewManager.h"
 #include "nsView.h"
-#include "nsEventListenerManager.h"
 #include "nsIDOMDragEvent.h"
 #include "nsIConstraintValidation.h"
 #include "mozilla/Attributes.h"
-#include "nsDOMEvent.h"
+#include "mozilla/EventListenerManager.h"
+#include "mozilla/dom/Event.h" // for nsIDOMEvent::InternalDOMEvent()
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -192,7 +191,7 @@ nsDocShellTreeOwner::GetInterface(const nsIID& aIID, void** aSink)
 //*****************************************************************************   
 
 NS_IMETHODIMP
-nsDocShellTreeOwner::FindItemWithName(const PRUnichar* aName,
+nsDocShellTreeOwner::FindItemWithName(const char16_t* aName,
                                       nsIDocShellTreeItem* aRequestor,
                                       nsIDocShellTreeItem* aOriginalRequestor,
                                       nsIDocShellTreeItem** aFoundItem)
@@ -246,7 +245,7 @@ nsDocShellTreeOwner::FindItemWithName(const PRUnichar* aName,
 }
 
 nsresult
-nsDocShellTreeOwner::FindItemWithNameAcrossWindows(const PRUnichar* aName,
+nsDocShellTreeOwner::FindItemWithNameAcrossWindows(const char16_t* aName,
                                                    nsIDocShellTreeItem* aRequestor,
                                                    nsIDocShellTreeItem* aOriginalRequestor,
                                                    nsIDocShellTreeItem** aFoundItem)
@@ -353,13 +352,23 @@ nsDocShellTreeOwner::GetPrimaryContentShell(nsIDocShellTreeItem** aShell)
 {
    NS_ENSURE_ARG_POINTER(aShell);
 
-   if(mTreeOwner)
+   if (mTreeOwner)
        return mTreeOwner->GetPrimaryContentShell(aShell);
 
    *aShell = (mPrimaryContentShell ? mPrimaryContentShell : mWebBrowser->mDocShell);
    NS_IF_ADDREF(*aShell);
 
    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellTreeOwner::GetContentWindow(JSContext* aCx,
+                                      JS::MutableHandle<JS::Value> aVal)
+{
+  if (mTreeOwner)
+    return mTreeOwner->GetContentWindow(aCx, aVal);
+
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
@@ -654,7 +663,7 @@ nsDocShellTreeOwner::SetFocus()
 }
 
 NS_IMETHODIMP
-nsDocShellTreeOwner::GetTitle(PRUnichar** aTitle)
+nsDocShellTreeOwner::GetTitle(char16_t** aTitle)
 {
   nsCOMPtr<nsIEmbeddingSiteWindow> ownerWin = GetOwnerWin();
   if (ownerWin)
@@ -665,7 +674,7 @@ nsDocShellTreeOwner::GetTitle(PRUnichar** aTitle)
 }
 
 NS_IMETHODIMP
-nsDocShellTreeOwner::SetTitle(const PRUnichar* aTitle)
+nsDocShellTreeOwner::SetTitle(const char16_t* aTitle)
 {
   nsCOMPtr<nsIEmbeddingSiteWindow> ownerWin = GetOwnerWin();
   if (ownerWin)
@@ -717,7 +726,7 @@ NS_IMETHODIMP
 nsDocShellTreeOwner::OnStatusChange(nsIWebProgress* aWebProgress,
                                     nsIRequest* aRequest,
                                     nsresult aStatus,
-                                    const PRUnichar* aMessage)
+                                    const char16_t* aMessage)
 {
     return NS_OK;
 }
@@ -857,12 +866,12 @@ nsDocShellTreeOwner::AddChromeListeners()
   nsCOMPtr<EventTarget> target;
   GetDOMEventTarget(mWebBrowser, getter_AddRefs(target));
 
-  nsEventListenerManager* elmP = target->GetListenerManager(true);
+  EventListenerManager* elmP = target->GetOrCreateListenerManager();
   if (elmP) {
     elmP->AddEventListenerByType(this, NS_LITERAL_STRING("dragover"),
-                                 dom::TrustedEventsAtSystemGroupBubble());
+                                 TrustedEventsAtSystemGroupBubble());
     elmP->AddEventListenerByType(this, NS_LITERAL_STRING("drop"),
-                                 dom::TrustedEventsAtSystemGroupBubble());
+                                 TrustedEventsAtSystemGroupBubble());
   }
 
   return rv;
@@ -887,13 +896,13 @@ nsDocShellTreeOwner::RemoveChromeListeners()
   if (!piTarget)
     return NS_OK;
 
-  nsEventListenerManager* elmP = piTarget->GetListenerManager(true);
+  EventListenerManager* elmP = piTarget->GetOrCreateListenerManager();
   if (elmP)
   {
     elmP->RemoveEventListenerByType(this, NS_LITERAL_STRING("dragover"),
-                                    dom::TrustedEventsAtSystemGroupBubble());
+                                    TrustedEventsAtSystemGroupBubble());
     elmP->RemoveEventListenerByType(this, NS_LITERAL_STRING("drop"),
-                                    dom::TrustedEventsAtSystemGroupBubble());
+                                    TrustedEventsAtSystemGroupBubble());
   }
 
   return NS_OK;
@@ -985,7 +994,7 @@ class DefaultTooltipTextProvider MOZ_FINAL : public nsITooltipTextProvider
 public:
     DefaultTooltipTextProvider();
 
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSITOOLTIPTEXTPROVIDER
     
 protected:
@@ -994,7 +1003,7 @@ protected:
     nsCOMPtr<nsIAtom>   mTag_window;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(DefaultTooltipTextProvider, nsITooltipTextProvider)
+NS_IMPL_ISUPPORTS(DefaultTooltipTextProvider, nsITooltipTextProvider)
 
 DefaultTooltipTextProvider::DefaultTooltipTextProvider()
 {
@@ -1024,7 +1033,7 @@ UseSVGTitle(nsIDOMElement *currElement)
 
 /* void getNodeText (in nsIDOMNode aNode, out wstring aText); */
 NS_IMETHODIMP
-DefaultTooltipTextProvider::GetNodeText(nsIDOMNode *aNode, PRUnichar **aText,
+DefaultTooltipTextProvider::GetNodeText(nsIDOMNode *aNode, char16_t **aText,
                                         bool *_retval)
 {
   NS_ENSURE_ARG_POINTER(aNode);
@@ -1123,7 +1132,7 @@ DefaultTooltipTextProvider::GetNodeText(nsIDOMNode *aNode, PRUnichar **aText,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-NS_IMPL_ISUPPORTS1(ChromeTooltipListener, nsIDOMEventListener)
+NS_IMPL_ISUPPORTS(ChromeTooltipListener, nsIDOMEventListener)
 
 //
 // ChromeTooltipListener ctor
@@ -1516,7 +1525,7 @@ ChromeTooltipListener::sAutoHideCallback(nsITimer *aTimer, void* aListener)
 } // sAutoHideCallback
 
 
-NS_IMPL_ISUPPORTS1(ChromeContextMenuListener, nsIDOMEventListener)
+NS_IMPL_ISUPPORTS(ChromeContextMenuListener, nsIDOMEventListener)
 
 
 //

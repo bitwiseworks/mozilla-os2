@@ -8,11 +8,12 @@
 
 #include "nscore.h"
 #include "nsView.h"
-#include "nsEvent.h"
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
 #include "nsVoidArray.h"
 #include "nsDeviceContext.h"
+#include "nsTArray.h"
+#include "mozilla/EventForwards.h"
 
 class nsIWidget;
 struct nsRect;
@@ -121,8 +122,9 @@ public:
    * @param aViewTarget dispatch the event to this view
    * @param aStatus event handling status
    */
-  void DispatchEvent(nsGUIEvent *aEvent,
-      nsView* aViewTarget, nsEventStatus* aStatus);
+  void DispatchEvent(mozilla::WidgetGUIEvent *aEvent,
+                     nsView* aViewTarget,
+                     nsEventStatus* aStatus);
 
   /**
    * Given a parent view, insert another view as its child.
@@ -203,12 +205,8 @@ public:
    * relative to the view's siblings.
    * @param aView view to change z depth of
    * @param aZindex explicit z depth
-   * @param aTopMost used when this view is z-index:auto to compare against 
-   *        other z-index:auto views.
-   *        true if the view should be topmost when compared with 
-   *        other z-index:auto views.
    */
-  void SetViewZIndex(nsView *aView, bool aAutoZIndex, int32_t aZindex, bool aTopMost = false);
+  void SetViewZIndex(nsView *aView, bool aAutoZIndex, int32_t aZindex);
 
   /**
    * Set whether the view "floats" above all other views,
@@ -330,6 +328,10 @@ private:
 
   void ProcessPendingUpdatesForView(nsView *aView,
                                     bool aFlushDirtyRegion = true);
+  void ProcessPendingUpdatesRecurse(nsView* aView,
+                                    nsTArray<nsCOMPtr<nsIWidget> >& aWidgets);
+  void ProcessPendingUpdatesPaint(nsIWidget* aWidget);
+
   void FlushDirtyRegionToWidget(nsView* aView);
   /**
    * Call WillPaint() on all view observers under this vm root.

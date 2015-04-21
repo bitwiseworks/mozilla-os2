@@ -5,7 +5,6 @@ const Cu = Components.utils;
 const Cr = Components.results;
 
 Cu.import('resource://gre/modules/CSPUtils.jsm');
-Cu.import("resource://testing-common/httpd.js");
 
 var httpserv = null;
 
@@ -68,7 +67,7 @@ listener.prototype = {
       // nsIContentSecurityPolicy instance.  The problem is, this cspr_str is a
       // string and not a policy due to the way it's exposed from
       // nsIContentSecurityPolicy, so we have to re-parse it.
-      let cspr_str = this._csp.policy;
+      let cspr_str = this._csp.getPolicy(0);
       let cspr = CSPRep.fromString(cspr_str, mkuri(DOCUMENT_URI));
 
       // and in reparsing it, we lose the 'self' relationships, so need to also
@@ -140,7 +139,7 @@ function test_CSPRep_fromPolicyURI() {
   // "allow *"; when the policy-uri fetching call-back happens, the *real*
   // policy will be in csp.policy
   CSPRep.fromString("policy-uri " + POLICY_URI,
-                    mkuri(DOCUMENT_URI), docChan, csp);
+                    mkuri(DOCUMENT_URI), false, docChan, csp);
 }
 
 function test_CSPRep_fromRelativePolicyURI() {
@@ -160,5 +159,5 @@ function test_CSPRep_fromRelativePolicyURI() {
   // "allow *"; when the policy-uri fetching call-back happens, the *real*
   // policy will be in csp.policy
   CSPRep.fromString("policy-uri " + POLICY_URI_RELATIVE,
-                    mkuri(DOCUMENT_URI), docChan, csp);
+                    mkuri(DOCUMENT_URI), false, docChan, csp);
 }

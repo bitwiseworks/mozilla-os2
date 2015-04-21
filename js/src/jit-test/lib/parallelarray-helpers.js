@@ -10,7 +10,7 @@
 // detect a failure.
 //
 // The maximum number of items processed by sequential warmups for
-// ParallelArrayBuild is:
+// ArrayBuildPar is:
 //      maxSeqItems = maxBailouts * numSlices * CHUNK_SIZE
 //
 // For maxBailouts = 3, maxSeqItems == 3 * 8 * 32 == 768
@@ -79,13 +79,7 @@ function assertAlmostEq(v1, v2) {
 }
 
 function assertStructuralEq(e1, e2) {
-    if (e1 instanceof ParallelArray && e2 instanceof ParallelArray) {
-      assertEqParallelArray(e1, e2);
-    } else if (e1 instanceof Array && e2 instanceof ParallelArray) {
-      assertEqParallelArrayArray(e2, e1);
-    } else if (e1 instanceof ParallelArray && e2 instanceof Array) {
-      assertEqParallelArrayArray(e1, e2);
-    } else if (e1 instanceof Array && e2 instanceof Array) {
+    if (e1 instanceof Array && e2 instanceof Array) {
       assertEqArray(e1, e2);
     } else if (e1 instanceof Object && e2 instanceof Object) {
       assertEq(e1.__proto__, e2.__proto__);
@@ -100,60 +94,16 @@ function assertStructuralEq(e1, e2) {
     }
 }
 
-function assertEqParallelArrayArray(a, b) {
-  assertEq(a.shape.length, 1);
-  assertEq(a.length, b.length);
-  for (var i = 0, l = a.length; i < l; i++) {
-    try {
-      assertStructuralEq(a.get(i), b[i]);
-    } catch (e) {
-      print("...in index ", i, " of ", l);
-      throw e;
-    }
-  }
-}
-
 function assertEqArray(a, b) {
     assertEq(a.length, b.length);
     for (var i = 0, l = a.length; i < l; i++) {
       try {
         assertStructuralEq(a[i], b[i]);
       } catch (e) {
-        print("...in index ", i, " of ", l);
+        print("...in index", i, "of", l);
         throw e;
       }
     }
-}
-
-function assertEqParallelArray(a, b) {
-  assertEq(a instanceof ParallelArray, true);
-  assertEq(b instanceof ParallelArray, true);
-
-  var shape = a.shape;
-  assertEqArray(shape, b.shape);
-
-  function bump(indices) {
-    var d = indices.length - 1;
-    while (d >= 0) {
-      if (++indices[d] < shape[d])
-        break;
-      indices[d] = 0;
-      d--;
-    }
-    return d >= 0;
-  }
-
-  var iv = shape.map(function () { return 0; });
-  do {
-    try {
-      var e1 = a.get.apply(a, iv);
-      var e2 = b.get.apply(b, iv);
-      assertStructuralEq(e1, e2);
-    } catch (e) {
-      print("...in indices ", iv, " of ", shape);
-      throw e;
-    }
-  } while (bump(iv));
 }
 
 // Checks that whenever we execute this in parallel mode,
@@ -164,10 +114,10 @@ function assertEqParallelArray(a, b) {
 // Here is an example of the expected usage:
 //
 //    assertParallelExecWillBail(function(m) {
-//        new ParallelArray(..., m)
+//        Array.buildPar(..., m)
 //    });
 //
-// where the `new ParallelArray(...)` is a stand-in
+// where the `Array.buildPar(...)` is a stand-in
 // for some parallel array operation.
 function assertParallelExecWillBail(opFunction) {
   opFunction({mode:"compile"}); // get the script compiled
@@ -217,37 +167,31 @@ function assertParallelExecSucceeds(opFunction, cmpFunction) {
   cmpFunction(result);
 }
 
-// Compares a ParallelArray function against its equivalent on the
-// `Array` prototype. `func` should be the closure to provide as
-// argument. For example:
+// Compares an Array constructed in parallel against one constructed
+// sequentially. `func` should be the closure to provide as argument. For
+// example:
 //
-//    compareAgainstArray([1, 2, 3], "map", i => i + 1)
+//    assertArraySeqParResultsEq([1, 2, 3], "map", i => i + 1)
 //
-// would check that `[1, 2, 3].map(i => i+1)` and `new
-// ParallelArray([1, 2, 3]).map(i => i+1)` yield the same result.
+// would check that `[1, 2, 3].map(i => i+1)` and `[1, 2, 3].mapPar(i => i+1)`
+// yield the same result.
 //
 // Based on `assertParallelExecSucceeds`
-function compareAgainstArray(jsarray, opname, func, cmpFunction) {
-  if (!cmpFunction)
-    cmpFunction = assertStructuralEq;
-  var expected = jsarray[opname].apply(jsarray, [func]);
-  var parray = new ParallelArray(jsarray);
+function assertArraySeqParResultsEq(arr, op, func, cmpFunc) {
+  if (!cmpFunc)
+    cmpFunc = assertStructuralEq;
+  var expected = arr[op].apply(arr, [func]);
   assertParallelExecSucceeds(
-    function(m) {
-      return parray[opname].apply(parray, [func, m]);
-    },
-    function(r) {
-      cmpFunction(expected, r);
-    });
+    function (m) { return arr[op + "Par"].apply(arr, [func, m]); },
+    function (r) { cmpFunc(expected, r); });
 }
 
 // Similar to `compareAgainstArray`, but for the `scan` method which
 // does not appear on array.
-function testScan(jsarray, func, cmpFunction) {
+function testArrayScanPar(jsarray, func, cmpFunction) {
   if (!cmpFunction)
     cmpFunction = assertStructuralEq;
   var expected = seq_scan(jsarray, func);
-  var parray = new ParallelArray(jsarray);
 
   // Unfortunately, it sometimes happens that running 'par' twice in a
   // row causes bailouts and other unfortunate things!
@@ -255,7 +199,7 @@ function testScan(jsarray, func, cmpFunction) {
   assertParallelExecSucceeds(
     function(m) {
       print(m.mode + " " + m.expect);
-      var p = parray.scan(func, m);
+      var p = jsarray.scanPar(func, m);
       return p;
     },
     function(r) {
@@ -263,27 +207,9 @@ function testScan(jsarray, func, cmpFunction) {
     });
 }
 
-// Similar to `compareAgainstArray`, but for the `scatter` method.
-// In this case, because scatter is so complex, we do not attempt
-// to compute the expected result and instead simply invoke
-// `cmpFunction(r)` with the result `r` of the scatter operation.
-function testScatter(opFunction, cmpFunction) {
-  var strategies = ["divide-scatter-version", "divide-output-range"];
-  for (var i in strategies) {
-    assertParallelExecSucceeds(
-      function(m) {
-        var m1 = {mode: m.mode,
-                  strategy: strategies[i]};
-        print(JSON.stringify(m1));
-        return opFunction(m1);
-      },
-      cmpFunction);
-  }
-}
-
 // Checks that `opFunction`, when run with each of the modes
 // in `modes`, returns the same value each time.
-function assertParallelArrayModesCommute(modes, opFunction) {
+function assertParallelModesCommute(modes, opFunction) {
   var expected = undefined;
   var acc = opFunction(modes[0]);
   assertParallelExecSucceeds(

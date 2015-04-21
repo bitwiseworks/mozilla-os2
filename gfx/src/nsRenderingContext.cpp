@@ -4,9 +4,23 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsRenderingContext.h"
-#include "nsBoundingMetrics.h"
-#include "nsRegion.h"
-#include <algorithm>
+#include <string.h>                     // for strlen
+#include <algorithm>                    // for min
+#include "gfxColor.h"                   // for gfxRGBA
+#include "gfxMatrix.h"                  // for gfxMatrix
+#include "gfxPoint.h"                   // for gfxPoint, gfxSize
+#include "gfxRect.h"                    // for gfxRect
+#include "gfxTypes.h"                   // for gfxFloat
+#include "mozilla/gfx/BasePoint.h"      // for BasePoint
+#include "mozilla/mozalloc.h"           // for operator delete[], etc
+#include "nsBoundingMetrics.h"          // for nsBoundingMetrics
+#include "nsCharTraits.h"               // for NS_IS_LOW_SURROGATE
+#include "nsDebug.h"                    // for NS_ERROR
+#include "nsPoint.h"                    // for nsPoint
+#include "nsRect.h"                     // for nsRect, nsIntRect
+#include "nsRegion.h"                   // for nsIntRegionRectIterator, etc
+
+class gfxASurface;
 
 // XXXTodo: rename FORM_TWIPS to FROM_APPUNITS
 #define FROM_TWIPS(_x)  ((gfxFloat)((_x)/(mP2A)))
@@ -18,7 +32,7 @@
 // size the cluster buffer array in FindSafeLength
 #define MAX_GFX_TEXT_BUF_SIZE 8000
 
-static int32_t FindSafeLength(const PRUnichar *aString, uint32_t aLength,
+static int32_t FindSafeLength(const char16_t *aString, uint32_t aLength,
                               uint32_t aMaxChunkLength)
 {
     if (aLength <= aMaxChunkLength)
@@ -67,6 +81,13 @@ nsRenderingContext::Init(nsDeviceContext* aContext,
 
     mThebes->SetLineWidth(1.0);
     mP2A = mDeviceContext->AppUnitsPerDevPixel();
+}
+
+void
+nsRenderingContext::Init(nsDeviceContext* aContext,
+                         DrawTarget *aDrawTarget)
+{
+    Init(aContext, new gfxContext(aDrawTarget));
 }
 
 //
@@ -433,7 +454,7 @@ nsRenderingContext::GetWidth(char aC)
 }
 
 nscoord
-nsRenderingContext::GetWidth(PRUnichar aC)
+nsRenderingContext::GetWidth(char16_t aC)
 {
     return GetWidth(&aC, 1);
 }
@@ -465,7 +486,7 @@ nsRenderingContext::GetWidth(const char* aString, uint32_t aLength)
 }
 
 nscoord
-nsRenderingContext::GetWidth(const PRUnichar *aString, uint32_t aLength)
+nsRenderingContext::GetWidth(const char16_t *aString, uint32_t aLength)
 {
     uint32_t maxChunkLength = GetMaxChunkLength();
     nscoord width = 0;
@@ -479,7 +500,7 @@ nsRenderingContext::GetWidth(const PRUnichar *aString, uint32_t aLength)
 }
 
 nsBoundingMetrics
-nsRenderingContext::GetBoundingMetrics(const PRUnichar* aString,
+nsRenderingContext::GetBoundingMetrics(const char16_t* aString,
                                        uint32_t aLength)
 {
     uint32_t maxChunkLength = GetMaxChunkLength();
@@ -528,7 +549,7 @@ nsRenderingContext::DrawString(const nsString& aString, nscoord aX, nscoord aY)
 }
 
 void
-nsRenderingContext::DrawString(const PRUnichar *aString, uint32_t aLength,
+nsRenderingContext::DrawString(const char16_t *aString, uint32_t aLength,
                                nscoord aX, nscoord aY)
 {
     uint32_t maxChunkLength = GetMaxChunkLength();

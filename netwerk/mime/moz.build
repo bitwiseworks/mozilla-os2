@@ -10,19 +10,18 @@ XPIDL_SOURCES += [
     'nsIMIMEService.idl',
 ]
 
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/netwerk/base/public',
-]
-
-MODULE = 'mimetype'
+XPIDL_MODULE = 'mimetype'
 
 EXPORTS += [
     'nsMimeTypes.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'nsMIMEHeaderParamImpl.cpp',
 ]
 
-LIBRARY_NAME = 'nkmime_s'
+FAIL_ON_WARNINGS = True
 
+MSVC_ENABLE_PGO = True
+
+FINAL_LIBRARY = 'necko'

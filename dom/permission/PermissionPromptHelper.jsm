@@ -34,8 +34,6 @@ this.EXPORTED_SYMBOLS = ["PermissionPromptHelper"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/PermissionsInstaller.jsm");
-Cu.import("resource://gre/modules/PermissionsTable.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
                                    "@mozilla.org/parentprocessmessagemanager;1",
@@ -45,8 +43,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "permissionPromptService",
                                    "@mozilla.org/permission-prompt-service;1",
                                    "nsIPermissionPromptService");
 
-let permissionManager = Cc["@mozilla.org/permissionmanager;1"].getService(Ci.nsIPermissionManager);
-let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].getService(Ci.nsIScriptSecurityManager);
 let appsService = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService);
 
 this.PermissionPromptHelper = {
@@ -66,10 +62,10 @@ this.PermissionPromptHelper = {
 
     let uri = Services.io.newURI(msg.origin, null, null);
     let principal =
-      secMan.getAppCodebasePrincipal(uri, msg.appID, msg.browserFlag);
+      Services.scriptSecurityManager.getAppCodebasePrincipal(uri, msg.appID, msg.browserFlag);
 
     let permValue =
-      permissionManager.testExactPermissionFromPrincipal(principal, access);
+      Services.perms.testExactPermissionFromPrincipal(principal, access);
 
     if (permValue == Ci.nsIPermissionManager.DENY_ACTION ||
         permValue == Ci.nsIPermissionManager.UNKNOWN_ACTION) {
@@ -78,15 +74,33 @@ this.PermissionPromptHelper = {
     }
 
     if (permValue == Ci.nsIPermissionManager.PROMPT_ACTION) {
-      // create a nsIContentPermissionRequest
-      let request = {
+
+      // create the options from permission request.
+      let options = Cc["@mozilla.org/array;1"].createInstance(Ci.nsIMutableArray);
+      if (msg.options) {
+        for (let option of options) {
+          options.appendElement(option);
+        }
+      }
+
+      // create an array with a nsIContentPermissionType element
+      let type = {
         type: msg.type,
         access: msg.access ? msg.access : "unused",
+        options: options,
+        QueryInterface: XPCOMUtils.generateQI([Ci.nsIContentPermissionType])
+      };
+      let typeArray = Cc["@mozilla.org/array;1"].createInstance(Ci.nsIMutableArray);
+      typeArray.appendElement(type, false);
+
+      // create a nsIContentPermissionRequest
+      let request = {
+        types: typeArray,
         principal: principal,
         QueryInterface: XPCOMUtils.generateQI([Ci.nsIContentPermissionRequest]),
         allow: aCallbacks.allow,
         cancel: aCallbacks.cancel,
-        window: Services.wm.getMostRecentWindow("navigator:browser")
+        window: Services.wm.getOuterWindowWithId(msg.windowID)
       };
 
       permissionPromptService.getPermission(request);
@@ -118,9 +132,10 @@ this.PermissionPromptHelper = {
                               { result: Ci.nsIPermissionManager.DENY_ACTION,
                                 requestID: msg.requestID });
         },
-        allow: function() {
+        allow: function(aChoice) {
           mm.sendAsyncMessage("PermissionPromptHelper:AskPermission:OK",
                               { result: Ci.nsIPermissionManager.ALLOW_ACTION,
+                                choice: aChoice,
                                 requestID: msg.requestID });
         }
       });

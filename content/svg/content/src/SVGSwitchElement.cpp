@@ -18,16 +18,16 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGSwitchElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGSwitchElement::WrapNode(JSContext *aCx)
 {
-  return SVGSwitchElementBinding::Wrap(aCx, aScope, this);
+  return SVGSwitchElementBinding::Wrap(aCx, this);
 }
 
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(SVGSwitchElement, SVGSwitchElementBase,
-                                     mActiveChild)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(SVGSwitchElement, SVGSwitchElementBase,
+                                   mActiveChild)
 
 NS_IMPL_ADDREF_INHERITED(SVGSwitchElement,SVGSwitchElementBase)
 NS_IMPL_RELEASE_INHERITED(SVGSwitchElement,SVGSwitchElementBase)
@@ -38,7 +38,7 @@ NS_INTERFACE_MAP_END_INHERITING(SVGSwitchElementBase)
 //----------------------------------------------------------------------
 // Implementation
 
-SVGSwitchElement::SVGSwitchElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+SVGSwitchElement::SVGSwitchElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : SVGSwitchElementBase(aNodeInfo)
 {
 }

@@ -15,6 +15,8 @@
 #include "GLXLibrary.h"
 #endif
 
+#include "nsSize.h"
+
 class gfxXlibSurface : public gfxASurface {
 public:
     // construct a wrapper around the specified drawable with dpy/visual.
@@ -39,6 +41,9 @@ public:
     static already_AddRefed<gfxXlibSurface>
     Create(Screen *screen, Visual *visual, const gfxIntSize& size,
            Drawable relatedDrawable = None);
+    static cairo_surface_t *
+    CreateCairoSurface(Screen *screen, Visual *visual, const gfxIntSize& size,
+                       Drawable relatedDrawable = None);
     static already_AddRefed<gfxXlibSurface>
     Create(Screen* screen, XRenderPictFormat *format, const gfxIntSize& size,
            Drawable relatedDrawable = None);
@@ -49,7 +54,7 @@ public:
     CreateSimilarSurface(gfxContentType aType, const gfxIntSize& aSize);
     virtual void Finish() MOZ_OVERRIDE;
 
-    virtual const gfxIntSize GetSize() const { return mSize; }
+    virtual const gfxIntSize GetSize() const;
 
     Display* XDisplay() { return mDisplay; }
     Screen* XScreen();
@@ -59,6 +64,7 @@ public:
     static int DepthOfVisual(const Screen* screen, const Visual* visual);
     static Visual* FindVisual(Screen* screen, gfxImageFormat format);
     static XRenderPictFormat *FindRenderFormat(Display *dpy, gfxImageFormat format);
+    static bool GetColormapAndVisual(cairo_surface_t* aXlibSurface, Colormap* colormap, Visual **visual);
 
     // take ownership of a passed-in Pixmap, calling XFreePixmap on it
     // when the gfxXlibSurface is destroyed.
@@ -74,7 +80,7 @@ public:
 
     // This surface is a wrapper around X pixmaps, which are stored in the X
     // server, not the main application.
-    virtual gfxASurface::MemoryLocation GetMemoryLocation() const;
+    virtual gfxMemoryLocation GetMemoryLocation() const;
 
 #if defined(GL_PROVIDER_GLX)
     GLXPixmap GetGLXPixmap();
@@ -99,9 +105,7 @@ protected:
     Display *mDisplay;
     Drawable mDrawable;
 
-    void DoSizeQuery();
-
-    gfxIntSize mSize;
+    const gfxIntSize DoSizeQuery();
 
 #if defined(GL_PROVIDER_GLX)
     GLXPixmap mGLXPixmap;

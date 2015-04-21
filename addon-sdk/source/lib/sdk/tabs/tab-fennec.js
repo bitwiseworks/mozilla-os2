@@ -13,6 +13,7 @@ const { activateTab, getTabTitle, setTabTitle, closeTab, getTabURL, getTabConten
 const { emit } = require('../event/core');
 const { getOwnerWindow: getPBOwnerWindow } = require('../private-browsing/window/utils');
 const { when: unload } = require('../system/unload');
+const { viewFor } = require('../view/core');
 const { EVENTS } = require('./events');
 
 const ERR_FENNEC_MSG = 'This method is not yet supported by Fennec';
@@ -34,6 +35,14 @@ const Tab = Class({
     let onReady = tabInternals.onReady = onTabReady.bind(this);
     tab.browser.addEventListener(EVENTS.ready.dom, onReady, false);
 
+    // TabPageShow
+    let onPageShow = tabInternals.onPageShow = onTabPageShow.bind(this);
+    tab.browser.addEventListener(EVENTS.pageshow.dom, onPageShow, false);
+
+    // TabLoad
+    let onLoad = tabInternals.onLoad = onTabLoad.bind(this);
+    tab.browser.addEventListener(EVENTS.load.dom, onLoad, true);
+
     // TabClose
     let onClose = tabInternals.onClose = onTabClose.bind(this);
     window.BrowserApp.deck.addEventListener(EVENTS.close.dom, onClose, false);
@@ -54,7 +63,9 @@ const Tab = Class({
    * Changing this property will loads page under under the specified location.
    * @type {String}
    */
-  get url() getTabURL(tabNS(this).tab),
+  get url() {
+    return tabNS(this).closed ? undefined : getTabURL(tabNS(this).tab);
+  },
   set url(url) setTabURL(tabNS(this).tab, url),
 
   /**
@@ -62,8 +73,16 @@ const Tab = Class({
    * @type {String}
    */
   get favicon() {
-    // TODO: provide the real favicon when it is available
-    console.error(ERR_FENNEC_MSG);
+    /*
+     * Synchronous favicon services were never supported on Fennec,
+     * and as of FF22, are now deprecated. When/if favicon services
+     * are supported for Fennec, this getter should reference
+     * `require('sdk/places/favicon').getFavicon`
+     */
+    console.error(
+      'tab.favicon is deprecated, and currently ' +
+      'favicon helpers are not yet supported by Fennec'
+    );
 
     // return 16x16 blank default
     return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAEklEQVQ4jWNgGAWjYBSMAggAAAQQAAF/TXiOAAAAAElFTkSuQmCC';
@@ -87,6 +106,8 @@ const Tab = Class({
    * @type {Number}
    */
   get index() {
+    if (tabNS(this).closed) return undefined;
+
     let tabs = tabNS(this).window.BrowserApp.tabs;
     let tab = tabNS(this).tab;
     for (var i = tabs.length; i >= 0; i--) {
@@ -143,8 +164,11 @@ const Tab = Class({
    * Close the tab
    */
   close: function close(callback) {
-    if (callback)
-      this.once(EVENTS.close.name, callback);
+    let tab = this;
+    this.once(EVENTS.close.name, function () {
+      tabNS(tab).closed = true;
+      if (callback) callback();
+    });
 
     closeTab(tabNS(this).tab);
   },
@@ -158,6 +182,10 @@ const Tab = Class({
 });
 exports.Tab = Tab;
 
+// Implement `viewFor` polymorphic function for the Tab
+// instances.
+viewFor.define(Tab, x => tabNS(x).tab);
+
 function cleanupTab(tab) {
   let tabInternals = tabNS(tab);
   if (!tabInternals.tab)
@@ -165,8 +193,12 @@ function cleanupTab(tab) {
 
   if (tabInternals.tab.browser) {
     tabInternals.tab.browser.removeEventListener(EVENTS.ready.dom, tabInternals.onReady, false);
+    tabInternals.tab.browser.removeEventListener(EVENTS.pageshow.dom, tabInternals.onPageShow, false);
+    tabInternals.tab.browser.removeEventListener(EVENTS.load.dom, tabInternals.onLoad, true);
   }
   tabInternals.onReady = null;
+  tabInternals.onPageShow = null;
+  tabInternals.onLoad = null;
   tabInternals.window.BrowserApp.deck.removeEventListener(EVENTS.close.dom, tabInternals.onClose, false);
   tabInternals.onClose = null;
   rawTabNS(tabInternals.tab).tab = null;
@@ -181,6 +213,21 @@ function onTabReady(event) {
   if (win === win.top) {
     emit(this, 'ready', this);
   }
+}
+
+function onTabLoad (event) {
+  let win = event.target.defaultView;
+
+  // ignore frames
+  if (win === win.top) {
+    emit(this, 'load', this);
+  }
+}
+
+function onTabPageShow(event) {
+  let win = event.target.defaultView;
+  if (win === win.top)
+    emit(this, 'pageshow', this, event.persisted);
 }
 
 // TabClose

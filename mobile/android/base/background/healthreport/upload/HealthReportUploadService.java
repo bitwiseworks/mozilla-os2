@@ -43,6 +43,12 @@ public class HealthReportUploadService extends BackgroundService {
   public void onHandleIntent(Intent intent) {
     Logger.setThreadLogTag(HealthReportConstants.GLOBAL_LOG_TAG);
 
+    // Intent can be null. Bug 1025937.
+    if (intent == null) {
+      Logger.debug(LOG_TAG, "Short-circuiting on null intent.");
+      return;
+    }
+
     if (HealthReportConstants.UPLOAD_FEATURE_DISABLED) {
       Logger.debug(LOG_TAG, "Health report upload feature is compile-time disabled; not handling upload intent.");
       return;

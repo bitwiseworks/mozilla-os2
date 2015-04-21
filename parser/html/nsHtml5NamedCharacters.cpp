@@ -21,24 +21,23 @@
  */
 
 #define nsHtml5NamedCharacters_cpp_
-#include "prtypes.h"
 #include "jArray.h"
 #include "nscore.h"
 #include "nsDebug.h"
+#include "mozilla/ArrayUtils.h"
 #include "prlog.h"
-#include "nsMemory.h"
 
 #include "nsHtml5NamedCharacters.h"
 
-const PRUnichar nsHtml5NamedCharacters::VALUES[][2] = {
+const char16_t nsHtml5NamedCharacters::VALUES[][2] = {
 #define NAMED_CHARACTER_REFERENCE(N, CHARS, LEN, FLAG, VALUE) \
 { VALUE },
 #include "nsHtml5NamedCharactersInclude.h"
 #undef NAMED_CHARACTER_REFERENCE
 {0, 0} };
 
-PRUnichar** nsHtml5NamedCharacters::WINDOWS_1252;
-static PRUnichar const WINDOWS_1252_DATA[] = {
+char16_t** nsHtml5NamedCharacters::WINDOWS_1252;
+static char16_t const WINDOWS_1252_DATA[] = {
   0x20AC,
   0x0081,
   0x201A,
@@ -101,7 +100,7 @@ NAME_##N##_END = NAME_##N##_START + LEN + FLAG,
 };
 
 /* check that the start positions will fit in 16 bits */
-PR_STATIC_ASSERT(NS_ARRAY_LENGTH(ALL_NAMES) < 0x10000);
+PR_STATIC_ASSERT(MOZ_ARRAY_LENGTH(ALL_NAMES) < 0x10000);
 
 const nsHtml5CharacterName nsHtml5NamedCharacters::NAMES[] = {
 #ifdef DEBUG
@@ -121,18 +120,18 @@ nsHtml5CharacterName::length() const
   return nameLen;
 }
 
-PRUnichar
+char16_t
 nsHtml5CharacterName::charAt(int32_t index) const
 {
-  return static_cast<PRUnichar> (ALL_NAMES[nameStart + index]);
+  return static_cast<char16_t> (ALL_NAMES[nameStart + index]);
 }
 
 void
 nsHtml5NamedCharacters::initializeStatics()
 {
-  WINDOWS_1252 = new PRUnichar*[32];
+  WINDOWS_1252 = new char16_t*[32];
   for (int32_t i = 0; i < 32; ++i) {
-    WINDOWS_1252[i] = (PRUnichar*)&(WINDOWS_1252_DATA[i]);
+    WINDOWS_1252[i] = (char16_t*)&(WINDOWS_1252_DATA[i]);
   }
 }
 

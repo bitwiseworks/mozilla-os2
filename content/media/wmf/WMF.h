@@ -24,13 +24,21 @@ which makes Windows Media Foundation unavailable.
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <mfobjects.h>
+#include <ks.h>
 #include <stdio.h>
 #include <mferror.h>
 #include <propvarutil.h>
 #include <wmcodecdsp.h>
-#include <initguid.h>
 #include <d3d9.h>
 #include <dxva2api.h>
+#include <wmcodecdsp.h>
+#include <codecapi.h>
+
+// Some SDK versions don't define the AAC decoder CLSID.
+#ifndef CLSID_CMSAACDecMFT
+extern "C" const CLSID CLSID_CMSAACDecMFT;
+#define WMF_MUST_DEFINE_AAC_MFT_CLSID
+#endif
 
 namespace mozilla {
 namespace wmf {
@@ -104,6 +112,13 @@ HRESULT MFGetService(IUnknown *punkObject,
 
 HRESULT DXVA2CreateDirect3DDeviceManager9(UINT *pResetToken,
                                           IDirect3DDeviceManager9 **ppDXVAManager);
+
+HRESULT MFCreateSample(IMFSample **ppIMFSample);
+
+HRESULT MFCreateAlignedMemoryBuffer(DWORD cbMaxLength,
+                                    DWORD fAlignmentFlags,
+                                    IMFMediaBuffer **ppBuffer);
+
 } // end namespace wmf
 } // end namespace mozilla
 

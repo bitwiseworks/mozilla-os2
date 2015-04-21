@@ -8,14 +8,17 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "test_callbacks.h"
+#include "webrtc/modules/video_coding/main/test/test_callbacks.h"
 
-#include <cmath>
+#include <math.h>
 
-#include "common_video/libyuv/include/webrtc_libyuv.h"
-#include "modules/video_coding/main/source/tick_time_base.h"
-#include "rtp_dump.h"
-#include "test_macros.h"
+#include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_header_parser.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_payload_registry.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_receiver.h"
+#include "webrtc/modules/utility/interface/rtp_dump.h"
+#include "webrtc/modules/video_coding/main/test/test_macros.h"
+#include "webrtc/system_wrappers/interface/clock.h"
 
 namespace webrtc {
 
@@ -33,7 +36,7 @@ VCMEncodeCompleteCallback::VCMEncodeCompleteCallback(FILE* encodedFile):
     _encodeComplete(false),
     _width(0),
     _height(0),
-    _codecType(kRTPVideoNoVideo)
+    _codecType(kRtpVideoNone)
 {
     //
 }
@@ -47,14 +50,14 @@ VCMEncodeCompleteCallback::RegisterTransportCallback(
 {
 }
 
-WebRtc_Word32
+int32_t
 VCMEncodeCompleteCallback::SendData(
         const FrameType frameType,
-        const WebRtc_UWord8  payloadType,
-        const WebRtc_UWord32 timeStamp,
+        const uint8_t  payloadType,
+        const uint32_t timeStamp,
         int64_t capture_time_ms,
-        const WebRtc_UWord8* payloadData,
-        const WebRtc_UWord32 payloadSize,
+        const uint8_t* payloadData,
+        const uint32_t payloadSize,
         const RTPFragmentationHeader& fragmentationHeader,
         const RTPVideoHeader* videoHdr)
 {
@@ -68,18 +71,16 @@ VCMEncodeCompleteCallback::SendData(
     rtpInfo.header.markerBit = true; // end of frame
     rtpInfo.type.Video.isFirstPacket = true;
     rtpInfo.type.Video.codec = _codecType;
-    rtpInfo.type.Video.height = (WebRtc_UWord16)_height;
-    rtpInfo.type.Video.width = (WebRtc_UWord16)_width;
+    rtpInfo.type.Video.height = (uint16_t)_height;
+    rtpInfo.type.Video.width = (uint16_t)_width;
     switch (_codecType)
     {
-    case webrtc::kRTPVideoVP8:
+    case webrtc::kRtpVideoVp8:
         rtpInfo.type.Video.codecHeader.VP8.InitRTPVideoHeaderVP8();
         rtpInfo.type.Video.codecHeader.VP8.nonReference =
             videoHdr->codecHeader.VP8.nonReference;
         rtpInfo.type.Video.codecHeader.VP8.pictureId =
             videoHdr->codecHeader.VP8.pictureId;
-        break;
-    case webrtc::kRTPVideoI420:
         break;
     default:
         assert(false);
@@ -141,14 +142,14 @@ VCMEncodeCompleteCallback::ResetByteCount()
 // passes the encoded frame via the RTP module to the decoder
 // Packetization callback implementation
 
-WebRtc_Word32
+int32_t
 VCMRTPEncodeCompleteCallback::SendData(
         const FrameType frameType,
-        const WebRtc_UWord8  payloadType,
-        const WebRtc_UWord32 timeStamp,
+        const uint8_t  payloadType,
+        const uint32_t timeStamp,
         int64_t capture_time_ms,
-        const WebRtc_UWord8* payloadData,
-        const WebRtc_UWord32 payloadSize,
+        const uint8_t* payloadData,
+        const uint32_t payloadSize,
         const RTPFragmentationHeader& fragmentationHeader,
         const RTPVideoHeader* videoHdr)
 {
@@ -187,7 +188,7 @@ VCMRTPEncodeCompleteCallback::EncodeComplete()
 
 // Decoded Frame Callback Implementation
 
-WebRtc_Word32
+int32_t
 VCMDecodeCompleteCallback::FrameToRender(I420VideoFrame& videoFrame)
 {
   if (PrintI420VideoFrame(videoFrame, _decodedFile) < 0) {
@@ -198,16 +199,18 @@ VCMDecodeCompleteCallback::FrameToRender(I420VideoFrame& videoFrame)
   return VCM_OK;
  }
 
-WebRtc_Word32
+int32_t
 VCMDecodeCompleteCallback::DecodedBytes()
 {
     return _decodedBytes;
 }
 
-RTPSendCompleteCallback::RTPSendCompleteCallback(TickTimeBase* clock,
+RTPSendCompleteCallback::RTPSendCompleteCallback(Clock* clock,
                                                  const char* filename):
     _clock(clock),
     _sendCount(0),
+    rtp_payload_registry_(NULL),
+    rtp_receiver_(NULL),
     _rtp(NULL),
     _lossPct(0),
     _burstLength(0),
@@ -249,7 +252,7 @@ RTPSendCompleteCallback::SendPacket(int channel, const void *data, int len)
 
     if (_rtpDump != NULL)
     {
-        if (_rtpDump->DumpPacket((const WebRtc_UWord8*)data, len) != 0)
+        if (_rtpDump->DumpPacket((const uint8_t*)data, len) != 0)
         {
             return -1;
         }
@@ -258,7 +261,7 @@ RTPSendCompleteCallback::SendPacket(int channel, const void *data, int len)
     bool transmitPacket = true;
     transmitPacket = PacketLoss();
 
-    WebRtc_UWord64 now = _clock->MillisecondTimestamp();
+    int64_t now = _clock->TimeInMilliseconds();
     // Insert outgoing packet into list
     if (transmitPacket)
     {
@@ -268,8 +271,8 @@ RTPSendCompleteCallback::SendPacket(int channel, const void *data, int len)
         // Simulate receive time = network delay + packet jitter
         // simulated as a Normal distribution random variable with
         // mean = networkDelay and variance = jitterVar
-        WebRtc_Word32
-        simulatedDelay = (WebRtc_Word32)NormalDist(_networkDelayMs,
+        int32_t
+        simulatedDelay = (int32_t)NormalDist(_networkDelayMs,
                                                    sqrt(_jitterVar));
         newPacket->receiveTime = now + simulatedDelay;
         _rtpPackets.push_back(newPacket);
@@ -282,7 +285,7 @@ RTPSendCompleteCallback::SendPacket(int channel, const void *data, int len)
     {
         // Take first packet in list
         packet = _rtpPackets.front();
-        WebRtc_Word64 timeToReceive = packet->receiveTime - now;
+        int64_t timeToReceive = packet->receiveTime - now;
         if (timeToReceive > 0)
         {
             // No available packets to send
@@ -292,12 +295,22 @@ RTPSendCompleteCallback::SendPacket(int channel, const void *data, int len)
         _rtpPackets.pop_front();
         assert(_rtp);  // We must have a configured RTP module for this test.
         // Send to receive side
-        if (_rtp->IncomingPacket((const WebRtc_UWord8*)packet->data,
-                                 packet->length) < 0)
+        RTPHeader header;
+        scoped_ptr<RtpHeaderParser> parser(RtpHeaderParser::Create());
+        if (!parser->Parse(packet->data, packet->length, &header)) {
+          delete packet;
+          return -1;
+        }
+        PayloadUnion payload_specific;
+        if (!rtp_payload_registry_->GetPayloadSpecifics(
+            header.payloadType, &payload_specific)) {
+          return -1;
+        }
+        if (!rtp_receiver_->IncomingRtpPacket(header, packet->data,
+                                              packet->length, payload_specific,
+                                              true))
         {
             delete packet;
-            packet = NULL;
-            // Will return an error after the first packet that goes wrong
             return -1;
         }
         delete packet;
@@ -397,24 +410,24 @@ RTPSendCompleteCallback::UnifomLoss(double lossPct)
     return randVal < lossPct/100;
 }
 
-WebRtc_Word32
-PacketRequester::ResendPackets(const WebRtc_UWord16* sequenceNumbers,
-                               WebRtc_UWord16 length)
+int32_t
+PacketRequester::ResendPackets(const uint16_t* sequenceNumbers,
+                               uint16_t length)
 {
     return _rtp.SendNACK(sequenceNumbers, length);
 }
 
-WebRtc_Word32
-SendStatsTest::SendStatistics(const WebRtc_UWord32 bitRate,
-                              const WebRtc_UWord32 frameRate)
+int32_t
+SendStatsTest::SendStatistics(const uint32_t bitRate,
+                              const uint32_t frameRate)
 {
-    TEST(frameRate <= _frameRate);
-    TEST(bitRate > 0 && bitRate < 100000);
+    TEST(frameRate <= _framerate);
+    TEST(bitRate > _bitrate / 2 && bitRate < 3 * _bitrate / 2);
     printf("VCM 1 sec: Bit rate: %u\tFrame rate: %u\n", bitRate, frameRate);
     return 0;
 }
 
-WebRtc_Word32 KeyFrameReqTest::RequestKeyFrame() {
+int32_t KeyFrameReqTest::RequestKeyFrame() {
   printf("Key frame requested\n");
   return 0;
 }
@@ -433,13 +446,13 @@ VideoProtectionCallback::~VideoProtectionCallback()
     //
 }
 
-WebRtc_Word32
+int32_t
 VideoProtectionCallback::ProtectionRequest(
     const FecProtectionParams* delta_fec_params,
     const FecProtectionParams* key_fec_params,
-    WebRtc_UWord32* sent_video_rate_bps,
-    WebRtc_UWord32* sent_nack_rate_bps,
-    WebRtc_UWord32* sent_fec_rate_bps)
+    uint32_t* sent_video_rate_bps,
+    uint32_t* sent_nack_rate_bps,
+    uint32_t* sent_fec_rate_bps)
 {
     key_fec_params_ = *key_fec_params;
     delta_fec_params_ = *delta_fec_params;

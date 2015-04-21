@@ -5,8 +5,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
-#include "tests.h"
+#include "jsapi-tests/tests.h"
 
 struct ScriptObjectFixture : public JSAPITest {
     static const int code_size;
@@ -27,7 +26,7 @@ struct ScriptObjectFixture : public JSAPITest {
         JS_GC(rt);
 
         /* After a garbage collection, the script should still work. */
-        jsval result;
+        JS::RootedValue result(cx);
         CHECK(JS_ExecuteScript(cx, global, script, &result));
 
         return true;
@@ -41,47 +40,54 @@ jschar ScriptObjectFixture::uc_code[ScriptObjectFixture::code_size];
 
 BEGIN_FIXTURE_TEST(ScriptObjectFixture, bug438633_CompileScript)
 {
+    JS::CompileOptions options(cx);
+    options.setFileAndLine(__FILE__, __LINE__);
     return tryScript(global, JS_CompileScript(cx, global, code, code_size,
-                                              __FILE__, __LINE__));
+                                              options));
 }
 END_FIXTURE_TEST(ScriptObjectFixture, bug438633_CompileScript)
 
 BEGIN_FIXTURE_TEST(ScriptObjectFixture, bug438633_CompileScript_empty)
 {
-    return tryScript(global, JS_CompileScript(cx, global, "", 0,
-                                              __FILE__, __LINE__));
+    JS::CompileOptions options(cx);
+    options.setFileAndLine(__FILE__, __LINE__);
+    return tryScript(global, JS_CompileScript(cx, global, "", 0, options));
 }
 END_FIXTURE_TEST(ScriptObjectFixture, bug438633_CompileScript_empty)
 
 BEGIN_FIXTURE_TEST(ScriptObjectFixture, bug438633_CompileScriptForPrincipals)
 {
-    return tryScript(global, JS_CompileScriptForPrincipals(cx, global, NULL,
-                                                           code, code_size,
-                                                           __FILE__, __LINE__));
+    JS::CompileOptions options(cx);
+    options.setFileAndLine(__FILE__, __LINE__);
+    return tryScript(global, JS_CompileScript(cx, global, code, code_size,
+                                              options));
 }
 END_FIXTURE_TEST(ScriptObjectFixture, bug438633_CompileScriptForPrincipals)
 
 BEGIN_FIXTURE_TEST(ScriptObjectFixture, bug438633_JS_CompileUCScript)
 {
-    return tryScript(global, JS_CompileUCScript(cx, global,
-                                                uc_code, code_size,
-                                                __FILE__, __LINE__));
+    JS::CompileOptions options(cx);
+    options.setFileAndLine(__FILE__, __LINE__);
+    return tryScript(global, JS_CompileUCScript(cx, global, uc_code, code_size,
+                                                options));
 }
 END_FIXTURE_TEST(ScriptObjectFixture, bug438633_JS_CompileUCScript)
 
 BEGIN_FIXTURE_TEST(ScriptObjectFixture, bug438633_JS_CompileUCScript_empty)
 {
-    return tryScript(global, JS_CompileUCScript(cx, global,
-                                                uc_code, 0,
-                                                __FILE__, __LINE__));
+    JS::CompileOptions options(cx);
+    options.setFileAndLine(__FILE__, __LINE__);
+    return tryScript(global, JS_CompileUCScript(cx, global, uc_code, 0,
+                                                options));
 }
 END_FIXTURE_TEST(ScriptObjectFixture, bug438633_JS_CompileUCScript_empty)
 
 BEGIN_FIXTURE_TEST(ScriptObjectFixture, bug438633_JS_CompileUCScriptForPrincipals)
 {
-    return tryScript(global, JS_CompileUCScriptForPrincipals(cx, global, NULL,
-                                                             uc_code, code_size,
-                                                             __FILE__, __LINE__));
+    JS::CompileOptions options(cx);
+    options.setFileAndLine(__FILE__, __LINE__);
+    return tryScript(global, JS_CompileUCScript(cx, global, uc_code, code_size,
+                                                options));
 }
 END_FIXTURE_TEST(ScriptObjectFixture, bug438633_JS_CompileUCScriptForPrincipals)
 
@@ -145,8 +151,7 @@ BEGIN_FIXTURE_TEST(ScriptObjectFixture, bug438633_JS_CompileFileHandleForPrincip
     CHECK(fputs(code, script_stream) != EOF);
     CHECK(fseek(script_stream, 0, SEEK_SET) != EOF);
     JS::CompileOptions options(cx);
-    options.setFileAndLine("temporary file", 1)
-           .setPrincipals(NULL);
+    options.setFileAndLine("temporary file", 1);
     return tryScript(global, JS::Compile(cx, global, options, script_stream));
 }
 END_FIXTURE_TEST(ScriptObjectFixture, bug438633_JS_CompileFileHandleForPrincipals)

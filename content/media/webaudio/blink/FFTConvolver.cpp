@@ -45,6 +45,21 @@ FFTConvolver::FFTConvolver(size_t fftSize)
   PodZero(m_lastOverlapBuffer.Elements(), fftSize / 2);
 }
 
+size_t FFTConvolver::sizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+{
+    size_t amount = 0;
+    amount += m_frame.SizeOfExcludingThis(aMallocSizeOf);
+    amount += m_inputBuffer.SizeOfExcludingThis(aMallocSizeOf);
+    amount += m_outputBuffer.SizeOfExcludingThis(aMallocSizeOf);
+    amount += m_lastOverlapBuffer.SizeOfExcludingThis(aMallocSizeOf);
+    return amount;
+}
+
+size_t FFTConvolver::sizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+{
+  return aMallocSizeOf(this) + sizeOfExcludingThis(aMallocSizeOf);
+}
+
 void FFTConvolver::process(FFTBlock* fftKernel, const float* sourceP, float* destP, size_t framesToProcess)
 {
     size_t halfSize = fftSize() / 2;
@@ -88,7 +103,7 @@ void FFTConvolver::process(FFTBlock* fftKernel, const float* sourceP, float* des
             // The input buffer is now filled (get frequency-domain version)
             m_frame.PerformFFT(m_inputBuffer.Elements());
             m_frame.Multiply(*fftKernel);
-            m_frame.PerformInverseFFT(m_outputBuffer.Elements());
+            m_frame.GetInverseWithoutScaling(m_outputBuffer.Elements());
 
             // Overlap-add 1st half from previous time
             AudioBufferAddWithScale(m_lastOverlapBuffer.Elements(), 1.0f,

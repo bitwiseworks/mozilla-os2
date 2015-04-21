@@ -4,14 +4,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-include('../shared.mozbuild')
-
-MODULE = 'accessibility'
-
 EXPORTS += [
     'AccEvent.h',
-    'nsAccessNode.h',
-    'nsAccessibilityService.h',
+    'nsAccessibilityService.h'
 ]
 
 EXPORTS.mozilla.a11y += [
@@ -19,6 +14,7 @@ EXPORTS.mozilla.a11y += [
     'DocManager.h',
     'FocusManager.h',
     'Platform.h',
+    'RelationType.h',
     'Role.h',
     'SelectionManager.h',
     'States.h',
@@ -29,13 +25,14 @@ if CONFIG['MOZ_DEBUG']:
         'Logging.h',
     ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'AccCollector.cpp',
     'AccEvent.cpp',
     'AccGroupInfo.cpp',
     'AccIterator.cpp',
     'ARIAMap.cpp',
     'ARIAStateMap.cpp',
+    'Asserts.cpp',
     'DocManager.cpp',
     'EventQueue.cpp',
     'Filters.cpp',
@@ -43,23 +40,53 @@ CPP_SOURCES += [
     'NotificationController.cpp',
     'nsAccessibilityService.cpp',
     'nsAccessiblePivot.cpp',
-    'nsAccessNode.cpp',
     'nsAccUtils.cpp',
     'nsCoreUtils.cpp',
     'nsEventShell.cpp',
     'nsTextEquivUtils.cpp',
-    'RoleAsserts.cpp',
     'SelectionManager.cpp',
     'StyleInfo.cpp',
     'TextAttrs.cpp',
+    'TextRange.cpp',
     'TextUpdater.cpp',
     'TreeWalker.cpp',
 ]
 
-if a11y_log:
-    CPP_SOURCES += [
+if CONFIG['A11Y_LOG']:
+    UNIFIED_SOURCES += [
         'Logging.cpp',
     ]
 
-LIBRARY_NAME = 'accessibility_base_s'
+LOCAL_INCLUDES += [
+    '../generic',
+    '../html',
+    '../xpcom',
+    '../xul',
+    '/dom/xbl',
+    '/ipc/chromium/src',
+    '/layout/generic',
+    '/layout/style',
+    '/layout/svg',
+    '/layout/xul',
+    '/layout/xul/tree/',
+]
 
+if CONFIG['MOZ_ENABLE_GTK']:
+    LOCAL_INCLUDES += [
+        '../atk',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    LOCAL_INCLUDES += [
+        '../windows/ia2',
+        '../windows/msaa',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    LOCAL_INCLUDES += [
+        '../mac',
+    ]
+else:
+    LOCAL_INCLUDES += [
+        '../other',
+    ]
+
+FINAL_LIBRARY = 'xul'

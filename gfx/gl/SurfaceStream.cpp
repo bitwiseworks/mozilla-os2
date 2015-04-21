@@ -7,6 +7,7 @@
 
 #include "gfxPoint.h"
 #include "SharedSurface.h"
+#include "SharedSurfaceGL.h"
 #include "SurfaceFactory.h"
 #include "GeckoProfiler.h"
 
@@ -31,25 +32,49 @@ SurfaceStream::ChooseGLStreamType(SurfaceStream::OMTC omtc,
 }
 
 SurfaceStream*
-SurfaceStream::CreateForType(SurfaceStreamType type, SurfaceStream* prevStream)
+SurfaceStream::CreateForType(SurfaceStreamType type, mozilla::gl::GLContext* glContext, SurfaceStream* prevStream)
 {
+    SurfaceStream* result = nullptr;
+
     switch (type) {
         case SurfaceStreamType::SingleBuffer:
-            return new SurfaceStream_SingleBuffer(prevStream);
+            result = new SurfaceStream_SingleBuffer(prevStream);
+            break;
         case SurfaceStreamType::TripleBuffer_Copy:
-            return new SurfaceStream_TripleBuffer_Copy(prevStream);
+            result = new SurfaceStream_TripleBuffer_Copy(prevStream);
+            break;
         case SurfaceStreamType::TripleBuffer_Async:
-            return new SurfaceStream_TripleBuffer_Async(prevStream);
+            result = new SurfaceStream_TripleBuffer_Async(prevStream);
+            break;
         case SurfaceStreamType::TripleBuffer:
-            return new SurfaceStream_TripleBuffer(prevStream);
+            result = new SurfaceStream_TripleBuffer(prevStream);
+            break;
         default:
-            MOZ_NOT_REACHED("Invalid Type.");
-            return nullptr;
+            MOZ_CRASH("Invalid Type.");
     }
+
+    result->mGLContext = glContext;
+    return result;
+}
+
+bool
+SurfaceStream_TripleBuffer::CopySurfaceToProducer(SharedSurface* src, SurfaceFactory* factory)
+{
+    if (!mProducer) {
+        New(factory, src->Size(), mProducer);
+        if (!mProducer) {
+            return false;
+        }
+    }
+
+    MOZ_ASSERT(src->Size() == mProducer->Size(), "Size mismatch");
+
+    SharedSurface::Copy(src, mProducer, factory);
+    return true;
 }
 
 void
-SurfaceStream::New(SurfaceFactory* factory, const gfxIntSize& size,
+SurfaceStream::New(SurfaceFactory* factory, const gfx::IntSize& size,
                    SharedSurface*& surf)
 {
     MOZ_ASSERT(!surf);
@@ -162,7 +187,7 @@ SurfaceStream::SwapConsumer()
 }
 
 SharedSurface*
-SurfaceStream::Resize(SurfaceFactory* factory, const gfxIntSize& size)
+SurfaceStream::Resize(SurfaceFactory* factory, const gfx::IntSize& size)
 {
     MonitorAutoLock lock(mMonitor);
 
@@ -212,7 +237,7 @@ SurfaceStream_SingleBuffer::SurrenderSurfaces(SharedSurface*& producer,
 
 SharedSurface*
 SurfaceStream_SingleBuffer::SwapProducer(SurfaceFactory* factory,
-                                         const gfxIntSize& size)
+                                         const gfx::IntSize& size)
 {
     MonitorAutoLock lock(mMonitor);
     if (mConsumer) {
@@ -305,7 +330,7 @@ SurfaceStream_TripleBuffer_Copy::SurrenderSurfaces(SharedSurface*& producer,
 
 SharedSurface*
 SurfaceStream_TripleBuffer_Copy::SwapProducer(SurfaceFactory* factory,
-                                              const gfxIntSize& size)
+                                              const gfx::IntSize& size)
 {
     MonitorAutoLock lock(mMonitor);
 
@@ -399,7 +424,7 @@ SurfaceStream_TripleBuffer::SurrenderSurfaces(SharedSurface*& producer,
 
 SharedSurface*
 SurfaceStream_TripleBuffer::SwapProducer(SurfaceFactory* factory,
-                                         const gfxIntSize& size)
+                                         const gfx::IntSize& size)
 {
     PROFILER_LABEL("SurfaceStream_TripleBuffer", "SwapProducer");
 
@@ -451,8 +476,11 @@ SurfaceStream_TripleBuffer_Async::WaitForCompositor()
     PROFILER_LABEL("SurfaceStream_TripleBuffer_Async", "WaitForCompositor");
 
     // We are assumed to be locked
-    while (mStaging)
-        mMonitor.Wait();
+    while (mStaging) {
+        if (!NS_SUCCEEDED(mMonitor.Wait(PR_MillisecondsToInterval(100)))) {
+            return false;
+        }
+    }
 
     return true;
 }

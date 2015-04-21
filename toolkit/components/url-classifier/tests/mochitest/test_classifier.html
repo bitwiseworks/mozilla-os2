@@ -6,7 +6,6 @@
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 
-<body onload="doUpdate(testUpdate);">
 <p id="display"></p>
 <div id="content" style="display: none">
 </div>
@@ -14,9 +13,8 @@
 
 <script class="testbody" type="text/javascript">
 
-netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-var Cc = Components.classes;
-var Ci = Components.interfaces;
+var Cc = SpecialPowers.Cc;
+var Ci = SpecialPowers.Ci;
 
 // Add some URLs to the malware database.
 var testData = "malware.example.com/";
@@ -55,14 +53,17 @@ function doUpdate(update) {
     }
   };
 
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-
   dbService.beginUpdate(listener, "test-malware-simple", "");
   dbService.beginStream("", "");
   dbService.updateStream(update);
   dbService.finishStream();
   dbService.finishUpdate();
 }
+
+SpecialPowers.pushPrefEnv(
+  {"set" : [["urlclassifier.malware_table", "test-malware-simple"],
+            ["urlclassifier.phish_table", "test-phish-simple"]]},
+  function() { doUpdate(testUpdate); });
 
 // Expected finish() call is in "classifierFrame.html".
 SimpleTest.waitForExplicitFinish();

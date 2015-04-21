@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "timecard.h"
 #include "cc_call_feature.h"
 #include "CCProvider.h"
 #include "sessionConstants.h"
@@ -106,7 +107,8 @@ cc_return_t cc_invokeFeatureSDPMode(cc_call_handle_t call_handle,
                                     uint16_t level,
                                     cc_media_constraints_t *constraints,
                                     string_t data,
-                                    string_t data1) {
+                                    string_t data1,
+                                    Timecard *tc) {
     session_feature_t callFeature;
     unsigned int session_id = 0;
     callFeature.session_id = (SESSIONTYPE_CALLCONTROL << CC_SID_TYPE_SHIFT) + call_handle;
@@ -117,6 +119,7 @@ cc_return_t cc_invokeFeatureSDPMode(cc_call_handle_t call_handle,
     callFeature.featData.ccData.track_id = track_id;
     callFeature.featData.ccData.level = level;
     callFeature.featData.ccData.constraints = constraints;
+    callFeature.featData.ccData.timecard = tc;
 
     CCAPP_DEBUG(DEB_F_PREFIX"cc_invokeFeatureSDPMode:sid=%d, line=%d, cid=%d, fid=%d, data=%s",
                         DEB_F_PREFIX_ARGS("cc_call_feature", "cc_invokeFeatureSDPMode"),
@@ -145,6 +148,10 @@ cc_return_t cc_invokeFeatureSDPMode(cc_call_handle_t call_handle,
     case CC_FEATURE_ADDICECANDIDATE:
     	callFeature.featData.ccData.info = strlib_malloc(data, strlen(data));
         callFeature.featData.ccData.info1 = strlib_malloc(data1, strlen(data1));
+    	break;
+    case CC_FEATURE_FOUNDICECANDIDATE:
+    	callFeature.featData.ccData.info = strlib_malloc(data, strlen(data));
+        callFeature.featData.ccData.info1 = NULL;
     	break;
 
     default:
@@ -285,58 +292,68 @@ cc_return_t CC_CallFeature_dial(cc_call_handle_t call_handle, cc_sdp_direction_t
 }
 
 cc_return_t CC_CallFeature_CreateOffer(cc_call_handle_t call_handle,
-                                       cc_media_constraints_t *constraints) {
+                                       cc_media_constraints_t *constraints,
+                                       Timecard *tc) {
     CCAPP_DEBUG(DEB_L_C_F_PREFIX, DEB_L_C_F_PREFIX_ARGS(SIP_CC_PROV, GET_CALL_ID(call_handle),
                 GET_LINE_ID(call_handle), __FUNCTION__));
 
     return cc_invokeFeatureSDPMode(call_handle, CC_FEATURE_CREATEOFFER, JSEP_NO_ACTION,
-                                   0, 0, NO_STREAM, 0, constraints, NULL, NULL);
+                                   0, 0, NO_STREAM, 0, constraints, NULL, NULL, tc);
 }
 
 cc_return_t CC_CallFeature_CreateAnswer(cc_call_handle_t call_handle,
-                                        cc_media_constraints_t *constraints) {
+                                        cc_media_constraints_t *constraints,
+                                        Timecard *tc) {
     CCAPP_DEBUG(DEB_L_C_F_PREFIX, DEB_L_C_F_PREFIX_ARGS(SIP_CC_PROV, GET_CALL_ID(call_handle),
                 GET_LINE_ID(call_handle), __FUNCTION__));
 
     return cc_invokeFeatureSDPMode(call_handle, CC_FEATURE_CREATEANSWER, JSEP_NO_ACTION,
-                                   0, 0, NO_STREAM, 0, constraints, NULL, NULL);
+                                   0, 0, NO_STREAM, 0, constraints, NULL, NULL, tc);
 }
 
-cc_return_t CC_CallFeature_SetLocalDescription(cc_call_handle_t call_handle, cc_jsep_action_t action, string_t sdp) {
+cc_return_t CC_CallFeature_SetLocalDescription(cc_call_handle_t call_handle,
+                                               cc_jsep_action_t action,
+                                               string_t sdp,
+                                               Timecard *tc) {
     cc_media_constraints_t *constraints = NULL;
     CCAPP_DEBUG(DEB_L_C_F_PREFIX, DEB_L_C_F_PREFIX_ARGS(SIP_CC_PROV, GET_CALL_ID(call_handle),
             GET_LINE_ID(call_handle), __FUNCTION__));
 
     return cc_invokeFeatureSDPMode(call_handle, CC_FEATURE_SETLOCALDESC, action,
-                                   0, 0, NO_STREAM, 0, constraints, sdp, NULL);
+                                   0, 0, NO_STREAM, 0, constraints, sdp, NULL, tc);
 }
 
-cc_return_t CC_CallFeature_SetRemoteDescription(cc_call_handle_t call_handle, cc_jsep_action_t action, string_t sdp) {
+cc_return_t CC_CallFeature_SetRemoteDescription(cc_call_handle_t call_handle,
+                                                cc_jsep_action_t action,
+                                                string_t sdp,
+                                                Timecard *tc) {
     cc_media_constraints_t *constraints = NULL;
     CCAPP_DEBUG(DEB_L_C_F_PREFIX, DEB_L_C_F_PREFIX_ARGS(SIP_CC_PROV, GET_CALL_ID(call_handle),
             GET_LINE_ID(call_handle), __FUNCTION__));
 
     return cc_invokeFeatureSDPMode(call_handle, CC_FEATURE_SETREMOTEDESC, action,
-                                   0, 0, NO_STREAM, 0, constraints, sdp, NULL);
+                                   0, 0, NO_STREAM, 0, constraints, sdp, NULL, tc);
 }
 
-cc_return_t CC_CallFeature_SetPeerConnection(cc_call_handle_t call_handle, cc_peerconnection_t pc) {
+cc_return_t CC_CallFeature_SetPeerConnection(cc_call_handle_t call_handle,cc_peerconnection_t pc) {
     cc_media_constraints_t *constraints = NULL;
     CCAPP_DEBUG(DEB_L_C_F_PREFIX, DEB_L_C_F_PREFIX_ARGS(SIP_CC_PROV, GET_CALL_ID(call_handle),
                 GET_LINE_ID(call_handle), __FUNCTION__));
 
     return cc_invokeFeatureSDPMode(call_handle, CC_FEATURE_SETPEERCONNECTION, JSEP_NO_ACTION,
-                                   0, 0, NO_STREAM, 0, constraints, pc, NULL);
+                                   0, 0, NO_STREAM, 0, constraints, pc, NULL, NULL);
 }
 
-cc_return_t CC_CallFeature_AddStream(cc_call_handle_t call_handle, cc_media_stream_id_t stream_id,
-                                            cc_media_track_id_t track_id, cc_media_type_t media_type) {
-    cc_media_constraints_t *constraints = NULL;
+cc_return_t CC_CallFeature_AddStream(cc_call_handle_t call_handle,
+                                     cc_media_stream_id_t stream_id,
+                                     cc_media_track_id_t track_id,
+                                     cc_media_type_t media_type,
+                                     cc_media_constraints_t *constraints) {
     CCAPP_DEBUG(DEB_L_C_F_PREFIX, DEB_L_C_F_PREFIX_ARGS(SIP_CC_PROV, GET_CALL_ID(call_handle),
             GET_LINE_ID(call_handle), __FUNCTION__));
 
     return cc_invokeFeatureSDPMode(call_handle, CC_FEATURE_ADDSTREAM, JSEP_NO_ACTION,
-                                   stream_id, track_id, media_type, 0, constraints, NULL, NULL);
+                                   stream_id, track_id, media_type, 0, constraints, NULL, NULL, NULL);
 }
 
 cc_return_t CC_CallFeature_RemoveStream(cc_call_handle_t call_handle, cc_media_stream_id_t stream_id,
@@ -347,16 +364,33 @@ cc_return_t CC_CallFeature_RemoveStream(cc_call_handle_t call_handle, cc_media_s
                 GET_LINE_ID(call_handle), __FUNCTION__));
 
     return cc_invokeFeatureSDPMode(call_handle, CC_FEATURE_REMOVESTREAM, JSEP_NO_ACTION,
-                                   stream_id, track_id, media_type, 0, constraints, NULL, NULL);
+                                   stream_id, track_id, media_type, 0, constraints, NULL, NULL, NULL);
 }
 
-cc_return_t CC_CallFeature_AddICECandidate(cc_call_handle_t call_handle, const char* candidate, const char *mid, cc_level_t level) {
+cc_return_t CC_CallFeature_AddICECandidate(cc_call_handle_t call_handle,
+                                           const char* candidate,
+                                           const char *mid,
+                                           cc_level_t level,
+                                           Timecard *tc) {
     cc_media_constraints_t *constraints = NULL;
     CCAPP_DEBUG(DEB_L_C_F_PREFIX, DEB_L_C_F_PREFIX_ARGS(SIP_CC_PROV, GET_CALL_ID(call_handle),
             GET_LINE_ID(call_handle), __FUNCTION__));
 
     return cc_invokeFeatureSDPMode(call_handle, CC_FEATURE_ADDICECANDIDATE, JSEP_NO_ACTION,
-                                   0, 0, NO_STREAM, (uint16_t)level, constraints, candidate, mid);
+                                   0, 0, NO_STREAM, (uint16_t)level, constraints, candidate, mid, tc);
+}
+
+cc_return_t CC_CallFeature_FoundICECandidate(cc_call_handle_t call_handle,
+					     const char* candidate,
+					     const char *mid,
+					     cc_level_t level,
+					     Timecard *tc) {
+    cc_media_constraints_t *constraints = NULL;
+    CCAPP_DEBUG(DEB_L_C_F_PREFIX, DEB_L_C_F_PREFIX_ARGS(SIP_CC_PROV, GET_CALL_ID(call_handle),
+            GET_LINE_ID(call_handle), __FUNCTION__));
+
+    return cc_invokeFeatureSDPMode(call_handle, CC_FEATURE_FOUNDICECANDIDATE, JSEP_NO_ACTION,
+                                   0, 0, NO_STREAM, (uint16_t)level, constraints, candidate, mid, tc);
 }
 
 /**

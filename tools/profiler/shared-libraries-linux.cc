@@ -11,23 +11,9 @@
 #include <string.h>
 #include <limits.h>
 #include <unistd.h>
+#include <fstream>
 #include "platform.h"
 #include "shared-libraries.h"
-
-#ifndef __GLIBC__
-/* a crapy version of getline, because it's not included in bionic */
-static ssize_t getline(char **lineptr, size_t *n, FILE *stream)
-{
- char *ret;
- if (!*lineptr) {
-   *lineptr = (char*)malloc(4096);
- }
- ret = fgets(*lineptr, 4096, stream);
- if (!ret)
-   return 0;
- return strlen(*lineptr);
-}
-#endif
 
 #if !defined(MOZ_WIDGET_GONK)
 // TODO fix me with proper include
@@ -91,11 +77,10 @@ SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf()
   pid_t pid = getpid();
   char path[PATH_MAX];
   snprintf(path, PATH_MAX, "/proc/%d/maps", pid);
-  FILE *maps = fopen(path, "r");
-  char *line = NULL;
+  std::ifstream maps(path);
+  std::string line;
   int count = 0;
-  size_t line_size = 0;
-  while (maps && getline (&line, &line_size, maps) > 0) {
+  while (std::getline(maps, line)) {
     int ret;
     //XXX: needs input sanitizing
     unsigned long start;
@@ -103,7 +88,7 @@ SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf()
     char perm[6] = "";
     unsigned long offset;
     char name[PATH_MAX] = "";
-    ret = sscanf(line,
+    ret = sscanf(line.c_str(),
                  "%lx-%lx %6s %lx %*s %*x %" PATH_MAX_STRING(PATH_MAX) "s\n",
                  &start, &end, perm, &offset, name);
     if (!strchr(perm, 'x')) {
@@ -119,6 +104,13 @@ SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf()
     // no associated phdrs
     if (strcmp(name, "/dev/ashmem/dalvik-jit-code-cache") != 0)
       continue;
+#else
+    if (strcmp(perm, "r-xp") != 0) {
+      // Ignore entries that are writable and/or shared.
+      // At least one graphics driver uses short-lived "rwxs" mappings
+      // (see bug 926734 comment 5), so just checking for 'x' isn't enough.
+      continue;
+    }
 #endif
     SharedLibrary shlib(start, end, offset, "", name);
     info.AddSharedLibrary(shlib);
@@ -128,6 +120,5 @@ SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf()
     }
     count++;
   }
-  free(line);
   return info;
 }

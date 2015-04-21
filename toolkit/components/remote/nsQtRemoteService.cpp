@@ -4,7 +4,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#include <QWidget>
+#include <QWindow>
 #include "nsQtRemoteService.h"
 
 #include "mozilla/ModuleUtils.h"
@@ -17,13 +17,14 @@
 /**
   Helper class which is used to receive notification about property changes
 */
-class MozQRemoteEventHandlerWidget: public QWidget {
+class MozQRemoteEventHandlerWidget: public QWindow {
 public:
   /**
     Constructor
     @param aRemoteService remote service, which is notified about atom change
   */
   MozQRemoteEventHandlerWidget(nsQtRemoteService &aRemoteService);
+  virtual ~MozQRemoteEventHandlerWidget() {}
 
 protected:
   /**
@@ -53,9 +54,9 @@ MozQRemoteEventHandlerWidget::x11Event(XEvent *aEvt)
   return false;
 }
 
-NS_IMPL_ISUPPORTS2(nsQtRemoteService,
-                   nsIRemoteService,
-                   nsIObserver)
+NS_IMPL_ISUPPORTS(nsQtRemoteService,
+                  nsIRemoteService,
+                  nsIObserver)
 
 nsQtRemoteService::nsQtRemoteService():
 mServerWindow(0)
@@ -65,9 +66,6 @@ mServerWindow(0)
 NS_IMETHODIMP
 nsQtRemoteService::Startup(const char* aAppName, const char* aProfileName)
 {
-#if (MOZ_PLATFORM_MAEMO == 5)
-  return NS_ERROR_NOT_IMPLEMENTED;
-#endif
   if (mServerWindow) return NS_ERROR_ALREADY_INITIALIZED;
   NS_ASSERTION(aAppName, "Don't pass a null appname!");
 
@@ -122,13 +120,13 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsQtRemoteService)
 NS_DEFINE_NAMED_CID(NS_REMOTESERVICE_CID);
 
 static const mozilla::Module::CIDEntry kRemoteCIDs[] = {
-  { &kNS_REMOTESERVICE_CID, false, NULL, nsQtRemoteServiceConstructor },
-  { NULL }
+  { &kNS_REMOTESERVICE_CID, false, nullptr, nsQtRemoteServiceConstructor },
+  { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kRemoteContracts[] = {
   { "@mozilla.org/toolkit/remote-service;1", &kNS_REMOTESERVICE_CID },
-  { NULL }
+  { nullptr }
 };
 
 static const mozilla::Module kRemoteModule = {

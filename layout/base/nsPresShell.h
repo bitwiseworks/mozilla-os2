@@ -30,12 +30,12 @@
 #include "nsAutoPtr.h"
 #include "nsIWidget.h"
 #include "nsStyleSet.h"
-#include "nsPresArena.h"
 #include "nsFrameSelection.h"
-#include "nsGUIEvent.h"
 #include "nsContentUtils.h" // For AddScriptBlocker().
 #include "nsRefreshDriver.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/EventForwards.h"
+#include "mozilla/MemoryReporting.h"
 
 class nsRange;
 class nsIDragService;
@@ -76,7 +76,7 @@ public:
   virtual NS_HIDDEN_(nsresult) SetPreferenceStyleRules(bool aForceReflow) MOZ_OVERRIDE;
 
   NS_IMETHOD GetSelection(SelectionType aType, nsISelection** aSelection);
-  virtual mozilla::Selection* GetCurrentSelection(SelectionType aType) MOZ_OVERRIDE;
+  virtual mozilla::dom::Selection* GetCurrentSelection(SelectionType aType) MOZ_OVERRIDE;
 
   NS_IMETHOD SetDisplaySelection(int16_t aToggle) MOZ_OVERRIDE;
   NS_IMETHOD GetDisplaySelection(int16_t *aToggle) MOZ_OVERRIDE;
@@ -113,7 +113,7 @@ public:
   virtual NS_HIDDEN_(void) CancelReflowCallback(nsIReflowCallback* aCallback) MOZ_OVERRIDE;
 
   virtual NS_HIDDEN_(void) ClearFrameRefs(nsIFrame* aFrame) MOZ_OVERRIDE;
-  virtual NS_HIDDEN_(already_AddRefed<nsRenderingContext>) GetReferenceRenderingContext();
+  virtual NS_HIDDEN_(already_AddRefed<nsRenderingContext>) CreateReferenceRenderingContext();
   virtual NS_HIDDEN_(nsresult) GoToAnchor(const nsAString& aAnchorName, bool aScroll) MOZ_OVERRIDE;
   virtual NS_HIDDEN_(nsresult) ScrollToAnchor() MOZ_OVERRIDE;
 
@@ -143,11 +143,14 @@ public:
   virtual nsresult AddOverrideStyleSheet(nsIStyleSheet *aSheet) MOZ_OVERRIDE;
   virtual nsresult RemoveOverrideStyleSheet(nsIStyleSheet *aSheet) MOZ_OVERRIDE;
 
-  virtual NS_HIDDEN_(nsresult) HandleEventWithTarget(nsEvent* aEvent, nsIFrame* aFrame,
-                                                     nsIContent* aContent,
-                                                     nsEventStatus* aStatus) MOZ_OVERRIDE;
+  virtual NS_HIDDEN_(nsresult) HandleEventWithTarget(
+                                 mozilla::WidgetEvent* aEvent,
+                                 nsIFrame* aFrame,
+                                 nsIContent* aContent,
+                                 nsEventStatus* aStatus) MOZ_OVERRIDE;
   virtual NS_HIDDEN_(nsIFrame*) GetEventTargetFrame() MOZ_OVERRIDE;
-  virtual NS_HIDDEN_(already_AddRefed<nsIContent>) GetEventTargetContent(nsEvent* aEvent) MOZ_OVERRIDE;
+  virtual NS_HIDDEN_(already_AddRefed<nsIContent>) GetEventTargetContent(
+                                                     mozilla::WidgetEvent* aEvent) MOZ_OVERRIDE;
 
 
   virtual nsresult ReconstructFrames(void) MOZ_OVERRIDE;
@@ -159,14 +162,16 @@ public:
                                               nscolor aBackgroundColor,
                                               gfxContext* aThebesContext) MOZ_OVERRIDE;
 
-  virtual already_AddRefed<gfxASurface> RenderNode(nsIDOMNode* aNode,
-                                                   nsIntRegion* aRegion,
-                                                   nsIntPoint& aPoint,
-                                                   nsIntRect* aScreenRect) MOZ_OVERRIDE;
+  virtual mozilla::TemporaryRef<SourceSurface>
+  RenderNode(nsIDOMNode* aNode,
+             nsIntRegion* aRegion,
+             nsIntPoint& aPoint,
+             nsIntRect* aScreenRect) MOZ_OVERRIDE;
 
-  virtual already_AddRefed<gfxASurface> RenderSelection(nsISelection* aSelection,
-                                                        nsIntPoint& aPoint,
-                                                        nsIntRect* aScreenRect) MOZ_OVERRIDE;
+  virtual mozilla::TemporaryRef<SourceSurface>
+  RenderSelection(nsISelection* aSelection,
+                  nsIntPoint& aPoint,
+                  nsIntRect* aScreenRect) MOZ_OVERRIDE;
 
   virtual already_AddRefed<nsPIDOMWindow> GetRootWindow() MOZ_OVERRIDE;
 
@@ -174,21 +179,21 @@ public:
 
   virtual void SetIgnoreViewportScrolling(bool aIgnore) MOZ_OVERRIDE;
 
-  virtual void SetDisplayPort(const nsRect& aDisplayPort);
-
   virtual nsresult SetResolution(float aXResolution, float aYResolution) MOZ_OVERRIDE;
+  virtual gfxSize GetCumulativeResolution() MOZ_OVERRIDE;
 
   //nsIViewObserver interface
 
   virtual void Paint(nsView* aViewToPaint, const nsRegion& aDirtyRegion,
                      uint32_t aFlags) MOZ_OVERRIDE;
-  virtual nsresult HandleEvent(nsIFrame*       aFrame,
-                               nsGUIEvent*     aEvent,
-                               bool            aDontRetargetEvents,
-                               nsEventStatus*  aEventStatus) MOZ_OVERRIDE;
-  virtual NS_HIDDEN_(nsresult) HandleDOMEventWithTarget(nsIContent* aTargetContent,
-                                                        nsEvent* aEvent,
-                                                        nsEventStatus* aStatus) MOZ_OVERRIDE;
+  virtual nsresult HandleEvent(nsIFrame* aFrame,
+                               mozilla::WidgetGUIEvent* aEvent,
+                               bool aDontRetargetEvents,
+                               nsEventStatus* aEventStatus) MOZ_OVERRIDE;
+  virtual NS_HIDDEN_(nsresult) HandleDOMEventWithTarget(
+                                 nsIContent* aTargetContent,
+                                 mozilla::WidgetEvent* aEvent,
+                                 nsEventStatus* aStatus) MOZ_OVERRIDE;
   virtual NS_HIDDEN_(nsresult) HandleDOMEventWithTarget(nsIContent* aTargetContent,
                                                         nsIDOMEvent* aEvent,
                                                         nsEventStatus* aStatus) MOZ_OVERRIDE;
@@ -196,8 +201,9 @@ public:
   virtual void WillPaint() MOZ_OVERRIDE;
   virtual void WillPaintWindow() MOZ_OVERRIDE;
   virtual void DidPaintWindow() MOZ_OVERRIDE;
-  virtual void ScheduleViewManagerFlush() MOZ_OVERRIDE;
-  virtual void DispatchSynthMouseMove(nsGUIEvent *aEvent, bool aFlushOnHoverChange) MOZ_OVERRIDE;
+  virtual void ScheduleViewManagerFlush(PaintType aType = PAINT_DEFAULT) MOZ_OVERRIDE;
+  virtual void DispatchSynthMouseMove(mozilla::WidgetGUIEvent* aEvent,
+                                      bool aFlushOnHoverChange) MOZ_OVERRIDE;
   virtual void ClearMouseCaptureOnView(nsView* aView) MOZ_OVERRIDE;
   virtual bool IsVisible() MOZ_OVERRIDE;
 
@@ -313,16 +319,17 @@ public:
       IsLayoutFlushObserver(this);
   }
 
-  void SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                           nsArenaMemoryStats *aArenaObjectsSize,
-                           size_t *aPresShellSize,
-                           size_t *aStyleSetsSize,
-                           size_t *aTextRunsSize,
-                           size_t *aPresContextSize) MOZ_OVERRIDE;
-  size_t SizeOfTextRuns(nsMallocSizeOfFun aMallocSizeOf) const;
+  virtual void LoadComplete() MOZ_OVERRIDE;
+
+  void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                              nsArenaMemoryStats *aArenaObjectsSize,
+                              size_t *aPresShellSize,
+                              size_t *aStyleSetsSize,
+                              size_t *aTextRunsSize,
+                              size_t *aPresContextSize) MOZ_OVERRIDE;
+  size_t SizeOfTextRuns(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   virtual void AddInvalidateHiddenPresShellObserver(nsRefreshDriver *aDriver) MOZ_OVERRIDE;
-
 
   // This data is stored as a content property (nsGkAtoms::scrolling) on
   // mContentToScrollTo when we have a pending ScrollIntoView.
@@ -337,6 +344,14 @@ public:
   virtual void RebuildImageVisibility(const nsDisplayList& aList) MOZ_OVERRIDE;
 
   virtual void EnsureImageInVisibleList(nsIImageLoadingContent* aImage) MOZ_OVERRIDE;
+
+  virtual void RemoveImageFromVisibleList(nsIImageLoadingContent* aImage) MOZ_OVERRIDE;
+
+  virtual bool AssumeAllImagesVisible() MOZ_OVERRIDE;
+
+  virtual void RestyleShadowRoot(mozilla::dom::ShadowRoot* aShadowRoot);
+
+  void SetNextPaintCompressed() { mNextPaintCompressed = true; }
 
 protected:
   virtual ~PresShell();
@@ -353,7 +368,7 @@ protected:
   nsresult DidCauseReflow();
   friend class nsAutoCauseReflowNotifier;
 
-  void DispatchTouchEvent(nsEvent *aEvent,
+  void DispatchTouchEvent(mozilla::WidgetEvent* aEvent,
                           nsEventStatus* aStatus,
                           nsPresShellEventCB* aEventCB,
                           bool aTouchIsNew);
@@ -407,7 +422,7 @@ protected:
   friend struct RenderingState;
 
   struct RenderingState {
-    RenderingState(PresShell* aPresShell) 
+    RenderingState(PresShell* aPresShell)
       : mXResolution(aPresShell->mXResolution)
       , mYResolution(aPresShell->mYResolution)
       , mRenderFlags(aPresShell->mRenderFlags)
@@ -489,7 +504,7 @@ protected:
    * aScreenRect - [out] set to the area of the screen the painted area should
    *               be displayed at
    */
-  already_AddRefed<gfxASurface>
+  mozilla::TemporaryRef<SourceSurface>
   PaintRangePaintInfo(nsTArray<nsAutoPtr<RangePaintInfo> >* aItems,
                       nsISelection* aSelection,
                       nsIntRegion* aRegion,
@@ -524,7 +539,9 @@ protected:
     }
   }
 
-  nsresult HandleRetargetedEvent(nsEvent* aEvent, nsEventStatus* aStatus, nsIContent* aTarget)
+  nsresult HandleRetargetedEvent(mozilla::WidgetEvent* aEvent,
+                                 nsEventStatus* aStatus,
+                                 nsIContent* aTarget)
   {
     PushCurrentEventInfo(nullptr, nullptr);
     mCurrentEventContent = aTarget;
@@ -536,96 +553,56 @@ protected:
     return rv;
   }
 
-  class nsDelayedEvent
+  class DelayedEvent
   {
   public:
-    virtual ~nsDelayedEvent() {};
-    virtual void Dispatch(PresShell* aShell) {}
+    virtual ~DelayedEvent() { }
+    virtual void Dispatch() { }
   };
 
-  class nsDelayedInputEvent : public nsDelayedEvent
+  class DelayedInputEvent : public DelayedEvent
   {
   public:
-    virtual void Dispatch(PresShell* aShell)
-    {
-      if (mEvent && mEvent->widget) {
-        nsCOMPtr<nsIWidget> w = mEvent->widget;
-        nsEventStatus status;
-        w->DispatchEvent(mEvent, status);
-      }
-    }
+    virtual void Dispatch() MOZ_OVERRIDE;
 
   protected:
-    void Init(nsInputEvent* aEvent)
-    {
-      mEvent->time = aEvent->time;
-      mEvent->refPoint = aEvent->refPoint;
-      mEvent->modifiers = aEvent->modifiers;
-    }
+    DelayedInputEvent();
+    virtual ~DelayedInputEvent();
 
-    nsDelayedInputEvent()
-    : nsDelayedEvent(), mEvent(nullptr) {}
-
-    nsInputEvent* mEvent;
+    mozilla::WidgetInputEvent* mEvent;
   };
 
-  class nsDelayedMouseEvent : public nsDelayedInputEvent
+  class DelayedMouseEvent : public DelayedInputEvent
   {
   public:
-    nsDelayedMouseEvent(nsMouseEvent* aEvent) : nsDelayedInputEvent()
-    {
-      mEvent = new nsMouseEvent(aEvent->mFlags.mIsTrusted,
-                                aEvent->message,
-                                aEvent->widget,
-                                aEvent->reason,
-                                aEvent->context);
-      Init(aEvent);
-      static_cast<nsMouseEvent*>(mEvent)->clickCount = aEvent->clickCount;
-    }
-
-    virtual ~nsDelayedMouseEvent()
-    {
-      delete static_cast<nsMouseEvent*>(mEvent);
-    }
+    DelayedMouseEvent(mozilla::WidgetMouseEvent* aEvent);
   };
 
-  class nsDelayedKeyEvent : public nsDelayedInputEvent
+  class DelayedKeyEvent : public DelayedInputEvent
   {
   public:
-    nsDelayedKeyEvent(nsKeyEvent* aEvent) : nsDelayedInputEvent()
-    {
-      mEvent = new nsKeyEvent(aEvent->mFlags.mIsTrusted,
-                              aEvent->message,
-                              aEvent->widget);
-      Init(aEvent);
-      static_cast<nsKeyEvent*>(mEvent)->keyCode = aEvent->keyCode;
-      static_cast<nsKeyEvent*>(mEvent)->charCode = aEvent->charCode;
-      static_cast<nsKeyEvent*>(mEvent)->alternativeCharCodes =
-        aEvent->alternativeCharCodes;
-      static_cast<nsKeyEvent*>(mEvent)->isChar = aEvent->isChar;
-    }
-
-    virtual ~nsDelayedKeyEvent()
-    {
-      delete static_cast<nsKeyEvent*>(mEvent);
-    }
+    DelayedKeyEvent(mozilla::WidgetKeyboardEvent* aEvent);
   };
 
   // Check if aEvent is a mouse event and record the mouse location for later
   // synth mouse moves.
-  void RecordMouseLocation(nsGUIEvent* aEvent);
+  void RecordMouseLocation(mozilla::WidgetGUIEvent* aEvent);
   class nsSynthMouseMoveEvent MOZ_FINAL : public nsARefreshObserver {
   public:
     nsSynthMouseMoveEvent(PresShell* aPresShell, bool aFromScroll)
       : mPresShell(aPresShell), mFromScroll(aFromScroll) {
       NS_ASSERTION(mPresShell, "null parameter");
     }
+
+  private:
+  // Private destructor, to discourage deletion outside of Release():
     ~nsSynthMouseMoveEvent() {
       Revoke();
     }
 
+  public:
     NS_INLINE_DECL_REFCOUNTING(nsSynthMouseMoveEvent)
-    
+
     void Revoke() {
       if (mPresShell) {
         mPresShell->GetPresContext()->RefreshDriver()->
@@ -652,16 +629,17 @@ protected:
   nsIDocument* GetTouchEventTargetDocument();
 #endif
   bool InZombieDocument(nsIContent *aContent);
-  already_AddRefed<nsIPresShell> GetParentPresShell();
+  already_AddRefed<nsIPresShell> GetParentPresShellForEventHandling();
   nsIContent* GetCurrentEventContent();
   nsIFrame* GetCurrentEventFrame();
-  nsresult RetargetEventToParent(nsGUIEvent* aEvent,
-                                 nsEventStatus*  aEventStatus);
+  nsresult RetargetEventToParent(mozilla::WidgetGUIEvent* aEvent,
+                                 nsEventStatus* aEventStatus);
   void PushCurrentEventInfo(nsIFrame* aFrame, nsIContent* aContent);
   void PopCurrentEventInfo();
-  nsresult HandleEventInternal(nsEvent* aEvent, nsEventStatus *aStatus);
-  nsresult HandlePositionedEvent(nsIFrame*      aTargetFrame,
-                                 nsGUIEvent*    aEvent,
+  nsresult HandleEventInternal(mozilla::WidgetEvent* aEvent,
+                               nsEventStatus* aStatus);
+  nsresult HandlePositionedEvent(nsIFrame* aTargetFrame,
+                                 mozilla::WidgetGUIEvent* aEvent,
                                  nsEventStatus* aEventStatus);
   // This returns the focused DOM window under our top level window.
   //  I.e., when we are deactive, this returns the *last* focused DOM window.
@@ -682,20 +660,19 @@ protected:
    * Returns true if the context menu event should fire and false if it should
    * not.
    */
-  bool AdjustContextMenuKeyEvent(nsMouseEvent* aEvent);
+  bool AdjustContextMenuKeyEvent(mozilla::WidgetMouseEvent* aEvent);
 
-  // 
+  //
   bool PrepareToUseCaretPosition(nsIWidget* aEventWidget, nsIntPoint& aTargetPt);
 
   // Get the selected item and coordinates in device pixels relative to root
   // document's root view for element, first ensuring the element is onscreen
   void GetCurrentItemAndPositionForElement(nsIDOMElement *aCurrentEl,
                                            nsIContent **aTargetToUse,
-                                           nsIntPoint& aTargetPt,
+                                           mozilla::LayoutDeviceIntPoint& aTargetPt,
                                            nsIWidget *aRootWidget);
 
   void FireResizeEvent();
-  void FireBeforeResizeEvent();
   static void AsyncResizeEventCallback(nsITimer* aTimer, void* aPresShell);
 
   virtual void SynthesizeMouseMove(bool aFromScroll) MOZ_OVERRIDE;
@@ -719,7 +696,11 @@ protected:
   virtual void ThemeChanged() MOZ_OVERRIDE { mPresContext->ThemeChanged(); }
   virtual void BackingScaleFactorChanged() MOZ_OVERRIDE { mPresContext->UIResolutionChanged(); }
 
+  virtual void PausePainting() MOZ_OVERRIDE;
+  virtual void ResumePainting() MOZ_OVERRIDE;
+
   void UpdateImageVisibility();
+  void UpdateActivePointerState(mozilla::WidgetGUIEvent* aEvent);
 
   nsRevocableEventPtr<nsRunnableMethod<PresShell> > mUpdateImageVisibilityEvent;
 
@@ -727,8 +708,10 @@ protected:
   static void ClearImageVisibilityVisited(nsView* aView, bool aClear);
   static void MarkImagesInListVisible(const nsDisplayList& aList);
 
+  void EvictTouches();
+
   // A list of images that are visible or almost visible.
-  nsTArray< nsCOMPtr<nsIImageLoadingContent > > mVisibleImages;
+  nsTHashtable< nsRefPtrHashKey<nsIImageLoadingContent> > mVisibleImages;
 
 #ifdef DEBUG
   // The reflow root under which we're currently reflowing.  Null when
@@ -752,7 +735,7 @@ protected:
   nsPoint                   mMouseLocation;
 
   // mStyleSet owns it but we maintain a ref, may be null
-  nsRefPtr<nsCSSStyleSheet> mPrefStyleSheet; 
+  nsRefPtr<nsCSSStyleSheet> mPrefStyleSheet;
 
   // Set of frames that we should mark with NS_FRAME_HAS_DIRTY_CHILDREN after
   // we finish reflowing mCurrentReflowRoot.
@@ -761,7 +744,7 @@ protected:
   // Reflow roots that need to be reflowed.
   nsTArray<nsIFrame*>       mDirtyRoots;
 
-  nsTArray<nsAutoPtr<nsDelayedEvent> > mDelayedEvents;
+  nsTArray<nsAutoPtr<DelayedEvent> > mDelayedEvents;
   nsRevocableEventPtr<nsRunnableMethod<PresShell> > mResizeEvent;
   nsCOMPtr<nsITimer>        mAsyncResizeEventTimer;
 private:
@@ -788,8 +771,12 @@ protected:
   // moving/sizing loop is running, see bug 491700 for details.
   nsCOMPtr<nsITimer>        mReflowContinueTimer;
 
+  nsCOMPtr<nsITimer>        mDelayedPaintTimer;
+
   // The `performance.now()` value when we last started to process reflows.
   DOMHighResTimeStamp       mLastReflowStart;
+
+  mozilla::TimeStamp        mLoadBegin;  // used to time loads
 
   // Information needed to properly handle scrolling content into view if the
   // pre-scroll reflow flush can be interrupted.  mContentToScrollTo is
@@ -804,7 +791,7 @@ protected:
   // middle of frame construction and the like... it really shouldn't be
   // needed, one hopes, but it is for now.
   uint16_t                  mChangeNestCount;
-  
+
   bool                      mDocumentLoading : 1;
   bool                      mIgnoreFrameDestruction : 1;
   bool                      mHaveShutDown : 1;
@@ -825,6 +812,8 @@ protected:
   bool                      mInResize : 1;
 
   bool                      mImageVisibilityVisited : 1;
+
+  bool                      mNextPaintCompressed : 1;
 
   static bool               sDisableNonTestMouseEvents;
 };

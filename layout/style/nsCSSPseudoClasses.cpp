@@ -5,11 +5,12 @@
 
 /* atom list for CSS pseudo-classes */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsCSSPseudoClasses.h"
 #include "nsStaticAtom.h"
 #include "mozilla/Preferences.h"
+#include "nsString.h"
 
 using namespace mozilla;
 
@@ -20,13 +21,13 @@ using namespace mozilla;
 #undef CSS_PSEUDO_CLASS
 
 #define CSS_PSEUDO_CLASS(name_, value_, pref_)  \
-  NS_STATIC_ATOM_BUFFER(name_##_buffer, value_)
+  NS_STATIC_ATOM_BUFFER(name_##_pseudo_class_buffer, value_)
 #include "nsCSSPseudoClassList.h"
 #undef CSS_PSEUDO_CLASS
 
 static const nsStaticAtom CSSPseudoClasses_info[] = {
 #define CSS_PSEUDO_CLASS(name_, value_, pref_)            \
-  NS_STATIC_ATOM(name_##_buffer, &sPseudoClass_##name_),
+  NS_STATIC_ATOM(name_##_pseudo_class_buffer, &sPseudoClass_##name_),
 #include "nsCSSPseudoClassList.h"
 #undef CSS_PSEUDO_CLASS
 };
@@ -88,4 +89,13 @@ nsCSSPseudoClasses::GetPseudoType(nsIAtom* aAtom)
   }
 
   return nsCSSPseudoClasses::ePseudoClass_NotPseudoClass;
+}
+
+/* static */ bool
+nsCSSPseudoClasses::IsUserActionPseudoClass(Type aType)
+{
+  // See http://dev.w3.org/csswg/selectors4/#useraction-pseudos
+  return aType == ePseudoClass_hover ||
+         aType == ePseudoClass_active ||
+         aType == ePseudoClass_focus;
 }

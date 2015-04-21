@@ -1,3 +1,4 @@
+/* -*- js-indent-level: 4 -*- */
 /*
  * e10s event dispatcher from content->chrome
  *
@@ -16,12 +17,15 @@ function contentDispatchEvent(type, data, sync) {
     data = {};
   }
 
-  var element = document.createEvent("datacontainerevent");
-  element.initEvent("contentEvent", true, false);
-  element.setData("sync", sync);
-  element.setData("type", type);
-  element.setData("data", JSON.stringify(data));
-  document.dispatchEvent(element);
+  var event = new CustomEvent("contentEvent", {
+    bubbles: true,
+    detail: {
+      "sync": sync,
+      "type": type,
+      "data": JSON.stringify(data)
+    }
+  });
+  document.dispatchEvent(event);
 }
 
 function contentAsyncEvent(type, data) {
@@ -84,6 +88,12 @@ TestRunner._expectedMaxAsserts = 0;
 TestRunner.timeout = 5 * 60 * 1000; // 5 minutes.
 TestRunner.maxTimeouts = 4; // halt testing after too many timeouts
 TestRunner.runSlower = false;
+TestRunner.dumpOutputDirectory = "";
+TestRunner.dumpAboutMemoryAfterTest = false;
+TestRunner.dumpDMDAfterTest = false;
+TestRunner.quiet = false;
+TestRunner.slowestTestTime = 0;
+TestRunner.slowestTestURL = "";
 
 TestRunner._expectingProcessCrash = false;
 
@@ -210,6 +220,16 @@ TestRunner.error = function(msg) {
         TestRunner.logger.error(msg);
     } else {
         dump(msg + "\n");
+    }
+
+    if (TestRunner.runUntilFailure) {
+      TestRunner._haltTests = true;
+    }
+
+    if (TestRunner.debugOnFailure) {
+      // You've hit this line because you requested to break into the
+      // debugger upon a testcase failure on your test run.
+      debugger;
     }
 };
 
@@ -345,9 +365,10 @@ TestRunner.runNextTest = function() {
         SpecialPowers.unregisterProcessCrashObservers();
 
         TestRunner.log("TEST-START | Shutdown"); // used by automation.py
-        TestRunner.log("Passed: " + $("pass-count").innerHTML);
-        TestRunner.log("Failed: " + $("fail-count").innerHTML);
-        TestRunner.log("Todo:   " + $("todo-count").innerHTML);
+        TestRunner.log("Passed:  " + $("pass-count").innerHTML);
+        TestRunner.log("Failed:  " + $("fail-count").innerHTML);
+        TestRunner.log("Todo:    " + $("todo-count").innerHTML);
+        TestRunner.log("Slowest: " + TestRunner.slowestTestTime + 'ms - ' + TestRunner.slowestTestURL);
         // If we are looping, don't send this cause it closes the log file
         if (TestRunner.repeat == 0) {
           TestRunner.log("SimpleTest FINISHED");
@@ -357,10 +378,7 @@ TestRunner.runNextTest = function() {
              TestRunner.onComplete();
          }
 
-        var failCount = parseInt($("fail-count").innerHTML);
-        var stopLooping = failCount > 0 && TestRunner.runUntilFailure;
-
-        if (TestRunner._currentLoop <= TestRunner.repeat && !stopLooping) {
+        if (TestRunner._currentLoop <= TestRunner.repeat && !TestRunner._haltTests) {
           TestRunner._currentLoop++;
           TestRunner.resetTests(TestRunner._urls);
           TestRunner._loopIsRestarting = true;
@@ -399,6 +417,12 @@ TestRunner.testFinished = function(tests) {
     TestRunner._lastTestFinished = TestRunner._currentTest;
     TestRunner._loopIsRestarting = false;
 
+    MemoryStats.dump(TestRunner.log, TestRunner._currentTest,
+                     TestRunner.currentTestURL,
+                     TestRunner.dumpOutputDirectory,
+                     TestRunner.dumpAboutMemoryAfterTest,
+                     TestRunner.dumpDMDAfterTest);
+
     function cleanUpCrashDumpFiles() {
         if (!SpecialPowers.removeExpectedCrashDumpFiles(TestRunner._expectingProcessCrash)) {
             TestRunner.error("TEST-UNEXPECTED-FAIL | " +
@@ -436,6 +460,10 @@ TestRunner.testFinished = function(tests) {
         TestRunner.log("TEST-END | " +
                        TestRunner.currentTestURL +
                        " | finished in " + runtime + "ms");
+        if (TestRunner.slowestTestTime < runtime && TestRunner._timeoutFactor == 1) {
+          TestRunner.slowestTestTime = runtime;
+          TestRunner.slowestTestURL = TestRunner.currentTestURL;
+        }
 
         TestRunner.updateUI(tests);
 
@@ -450,11 +478,15 @@ TestRunner.testFinished = function(tests) {
 
     SpecialPowers.executeAfterFlushingMessageQueue(function() {
         cleanUpCrashDumpFiles();
+        SpecialPowers.flushAllAppsLaunchable();
         SpecialPowers.flushPermissions(function () { SpecialPowers.flushPrefEnv(runNextTest); });
     });
 };
 
 TestRunner.testUnloaded = function() {
+    // If we're in a debug build, check assertion counts.  This code is
+    // similar to the code in Tester_nextTest in browser-test.js used
+    // for browser-chrome mochitests.
     if (SpecialPowers.isDebugBuild) {
         var newAssertionCount = SpecialPowers.assertionCount();
         var numAsserts = newAssertionCount - TestRunner._lastAssertionCount;

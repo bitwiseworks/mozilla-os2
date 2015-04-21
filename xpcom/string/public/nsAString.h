@@ -3,25 +3,13 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+// IWYU pragma: private, include "nsString.h"
 
 #ifndef nsAString_h___
 #define nsAString_h___
 
-#ifndef nsStringFwd_h___
 #include "nsStringFwd.h"
-#endif
-
-#ifndef nsStringIterator_h___
 #include "nsStringIterator.h"
-#endif
-
-// If some platform(s) can't handle our template that matches literal strings,
-// then we'll disable it on those platforms.
-#ifndef NS_DISABLE_LITERAL_TEMPLATE
-#  if (defined(__SUNPRO_CC) && (__SUNPRO_CC < 0x560)) || (defined(__HP_aCC) && (__HP_aCC <= 012100))
-#    define NS_DISABLE_LITERAL_TEMPLATE
-#  endif
-#endif /* !NS_DISABLE_LITERAL_TEMPLATE */
 
 #include <string.h>
 #include <stdarg.h>

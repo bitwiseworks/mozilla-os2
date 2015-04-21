@@ -4,17 +4,16 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'ipc'
-
 EXPORTS.mozilla.ipc += [
-    'DBusThread.h',
     'DBusUtils.h',
     'RawDBusConnection.h',
 ]
 
-CPP_SOURCES += [
-    'DBusThread.cpp',
+SOURCES += [
     'DBusUtils.cpp',
     'RawDBusConnection.cpp',
 ]
 
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'

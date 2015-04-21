@@ -43,9 +43,9 @@ gfxOS2Platform::~gfxOS2Platform()
 
 already_AddRefed<gfxASurface>
 gfxOS2Platform::CreateOffscreenSurface(const gfxIntSize& aSize,
-                                       gfxASurface::gfxContentType contentType)
+                                       gfxContentType contentType)
 {
-    gfxASurface::gfxImageFormat format =
+    gfxImageFormat format =
         OptimalFormatForContent(contentType);
     int stride =
         cairo_format_stride_for_width(static_cast<cairo_format_t>(format),

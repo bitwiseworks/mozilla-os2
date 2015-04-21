@@ -4,14 +4,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/net/CookieServiceChild.h"
-#include "mozilla/dom/TabChild.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/net/NeckoChild.h"
 #include "nsIURI.h"
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
-#include "nsITabChild.h"
 #include "nsNetUtil.h"
+#include "SerializedLoadContext.h"
 
 using namespace mozilla::ipc;
 
@@ -21,7 +20,7 @@ namespace net {
 // Behavior pref constants
 static const int32_t BEHAVIOR_ACCEPT = 0;
 static const int32_t BEHAVIOR_REJECTFOREIGN = 1;
-static const int32_t BEHAVIOR_REJECT = 2;
+// static const int32_t BEHAVIOR_REJECT = 2;
 static const int32_t BEHAVIOR_LIMITFOREIGN = 3;
 
 // Pref string constants
@@ -41,10 +40,10 @@ CookieServiceChild::GetSingleton()
   return gCookieService;
 }
 
-NS_IMPL_ISUPPORTS3(CookieServiceChild,
-                   nsICookieService,
-                   nsIObserver,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(CookieServiceChild,
+                  nsICookieService,
+                  nsIObserver,
+                  nsISupportsWeakReference)
 
 CookieServiceChild::CookieServiceChild()
   : mCookieBehavior(BEHAVIOR_ACCEPT)
@@ -108,7 +107,7 @@ CookieServiceChild::GetCookieStringInternal(nsIURI *aHostURI,
   NS_ENSURE_ARG(aHostURI);
   NS_ENSURE_ARG_POINTER(aCookieString);
 
-  *aCookieString = NULL;
+  *aCookieString = nullptr;
 
   // Determine whether the request is foreign. Failure is acceptable.
   bool isForeign = true;
@@ -118,22 +117,10 @@ CookieServiceChild::GetCookieStringInternal(nsIURI *aHostURI,
   URIParams uriParams;
   SerializeURI(aHostURI, uriParams);
 
-  nsCOMPtr<nsITabChild> iTabChild;
-  mozilla::dom::TabChild* tabChild = nullptr;
-  if (aChannel) {
-    NS_QueryNotificationCallbacks(aChannel, iTabChild);
-    if (iTabChild) {
-      tabChild = static_cast<mozilla::dom::TabChild*>(iTabChild.get());
-    }
-    if (MissingRequiredTabChild(tabChild, "cookie")) {
-      return NS_ERROR_ILLEGAL_VALUE;
-    }
-  }
-
   // Synchronously call the parent.
   nsAutoCString result;
   SendGetCookieString(uriParams, !!isForeign, aFromHttp,
-                      IPC::SerializedLoadContext(aChannel), tabChild, &result);
+                      IPC::SerializedLoadContext(aChannel), &result);
   if (!result.IsEmpty())
     *aCookieString = ToNewCString(result);
 
@@ -163,28 +150,16 @@ CookieServiceChild::SetCookieStringInternal(nsIURI *aHostURI,
   URIParams uriParams;
   SerializeURI(aHostURI, uriParams);
 
-  nsCOMPtr<nsITabChild> iTabChild;
-  mozilla::dom::TabChild* tabChild = nullptr;
-  if (aChannel) {
-    NS_QueryNotificationCallbacks(aChannel, iTabChild);
-    if (iTabChild) {
-      tabChild = static_cast<mozilla::dom::TabChild*>(iTabChild.get());
-    }
-    if (MissingRequiredTabChild(tabChild, "cookie")) {
-      return NS_ERROR_ILLEGAL_VALUE;
-    }
-  }
-
   // Synchronously call the parent.
   SendSetCookieString(uriParams, !!isForeign, cookieString, serverTime,
-                      aFromHttp, IPC::SerializedLoadContext(aChannel), tabChild);
+                      aFromHttp, IPC::SerializedLoadContext(aChannel));
   return NS_OK;
 }
 
 NS_IMETHODIMP
 CookieServiceChild::Observe(nsISupports     *aSubject,
                             const char      *aTopic,
-                            const PRUnichar *aData)
+                            const char16_t *aData)
 {
   NS_ASSERTION(strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0,
                "not a pref change topic!");

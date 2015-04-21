@@ -18,7 +18,7 @@
 #include "nsIContent.h"
 #include "nsIDocument.h"
 #include "nsIDocumentEncoder.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsTextFragment.h"
 #include "nsString.h"
 #include "prprf.h"
@@ -31,8 +31,6 @@
 #include "nsParserConstants.h"
 
 using namespace mozilla::dom;
-
-static const char kMozStr[] = "moz";
 
 #define kXMLNS "xmlns"
 
@@ -73,7 +71,7 @@ nsXMLContentSerializer::~nsXMLContentSerializer()
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsXMLContentSerializer, nsIContentSerializer)
+NS_IMPL_ISUPPORTS(nsXMLContentSerializer, nsIContentSerializer)
 
 NS_IMETHODIMP 
 nsXMLContentSerializer::Init(uint32_t aFlags, uint32_t aWrapColumn,
@@ -140,7 +138,8 @@ nsXMLContentSerializer::AppendTextData(nsIContent* aNode,
     return NS_ERROR_FAILURE;
   }
 
-  int32_t endoffset = (aEndOffset == -1) ? frag->GetLength() : aEndOffset;
+  int32_t fragLength = frag->GetLength();
+  int32_t endoffset = (aEndOffset == -1) ? fragLength : std::min(aEndOffset, fragLength);
   int32_t length = endoffset - aStartOffset;
 
   NS_ASSERTION(aStartOffset >= 0, "Negative start offset for text fragment!");
@@ -153,7 +152,7 @@ nsXMLContentSerializer::AppendTextData(nsIContent* aNode,
   }
     
   if (frag->Is2b()) {
-    const PRUnichar *strStart = frag->Get2b() + aStartOffset;
+    const char16_t *strStart = frag->Get2b() + aStartOffset;
     if (aTranslateEntities) {
       AppendAndTranslateEntities(Substring(strStart, strStart + length), aStr);
     }
@@ -278,7 +277,7 @@ nsXMLContentSerializer::AppendProcessingInstruction(nsIContent* aPI,
   }
 
   if (!data.IsEmpty()) {
-    AppendToString(PRUnichar(' '), aStr);
+    AppendToString(char16_t(' '), aStr);
     AppendToStringConvertLF(data, aStr);
   }
   AppendToString(NS_LITERAL_STRING("?>"), aStr);
@@ -302,12 +301,16 @@ nsXMLContentSerializer::AppendComment(nsIContent* aComment,
   rv = comment->GetData(data);
   if (NS_FAILED(rv)) return NS_ERROR_FAILURE;
 
-  if (aStartOffset || (aEndOffset != -1)) {
-    int32_t length = (aEndOffset == -1) ? data.Length() : aEndOffset;
+  int32_t dataLength = data.Length();
+  if (aStartOffset || (aEndOffset != -1 && aEndOffset < dataLength)) {
+    int32_t length =
+      (aEndOffset == -1) ? dataLength : std::min(aEndOffset, dataLength);
     length -= aStartOffset;
 
     nsAutoString frag;
-    data.Mid(frag, aStartOffset, length);
+    if (length > 0) {
+      data.Mid(frag, aStartOffset, length);
+    }
     data.Assign(frag);
   }
 
@@ -364,26 +367,26 @@ nsXMLContentSerializer::AppendDoctype(nsIContent* aDocType,
   AppendToString(NS_LITERAL_STRING("<!DOCTYPE "), aStr);
   AppendToString(name, aStr);
 
-  PRUnichar quote;
+  char16_t quote;
   if (!publicId.IsEmpty()) {
     AppendToString(NS_LITERAL_STRING(" PUBLIC "), aStr);
-    if (publicId.FindChar(PRUnichar('"')) == -1) {
-      quote = PRUnichar('"');
+    if (publicId.FindChar(char16_t('"')) == -1) {
+      quote = char16_t('"');
     }
     else {
-      quote = PRUnichar('\'');
+      quote = char16_t('\'');
     }
     AppendToString(quote, aStr);
     AppendToString(publicId, aStr);
     AppendToString(quote, aStr);
 
     if (!systemId.IsEmpty()) {
-      AppendToString(PRUnichar(' '), aStr);
-      if (systemId.FindChar(PRUnichar('"')) == -1) {
-        quote = PRUnichar('"');
+      AppendToString(char16_t(' '), aStr);
+      if (systemId.FindChar(char16_t('"')) == -1) {
+        quote = char16_t('"');
       }
       else {
-        quote = PRUnichar('\'');
+        quote = char16_t('\'');
       }
       AppendToString(quote, aStr);
       AppendToString(systemId, aStr);
@@ -391,11 +394,11 @@ nsXMLContentSerializer::AppendDoctype(nsIContent* aDocType,
     }
   }
   else if (!systemId.IsEmpty()) {
-    if (systemId.FindChar(PRUnichar('"')) == -1) {
-      quote = PRUnichar('"');
+    if (systemId.FindChar(char16_t('"')) == -1) {
+      quote = char16_t('"');
     }
     else {
-      quote = PRUnichar('\'');
+      quote = char16_t('\'');
     }
     AppendToString(NS_LITERAL_STRING(" SYSTEM "), aStr);
     AppendToString(quote, aStr);
@@ -406,7 +409,7 @@ nsXMLContentSerializer::AppendDoctype(nsIContent* aDocType,
   if (!internalSubset.IsEmpty()) {
     AppendToString(NS_LITERAL_STRING(" ["), aStr);
     AppendToString(internalSubset, aStr);
-    AppendToString(PRUnichar(']'), aStr);
+    AppendToString(char16_t(']'), aStr);
   }
     
   AppendToString(kGreaterThan, aStr);
@@ -616,10 +619,10 @@ nsXMLContentSerializer::SerializeAttr(const nsAString& aPrefix,
   bool rawAppend = mDoRaw && aDoEscapeEntities;
   nsAString& attrString = (rawAppend) ? aStr : attrString_;
 
-  attrString.Append(PRUnichar(' '));
+  attrString.Append(char16_t(' '));
   if (!aPrefix.IsEmpty()) {
     attrString.Append(aPrefix);
-    attrString.Append(PRUnichar(':'));
+    attrString.Append(char16_t(':'));
   }
   attrString.Append(aName);
 
@@ -632,7 +635,7 @@ nsXMLContentSerializer::SerializeAttr(const nsAString& aPrefix,
     AppendAndTranslateEntities(aValue, attrString);
     mInAttribute = false;
 
-    attrString.Append(PRUnichar('"'));
+    attrString.Append(char16_t('"'));
     if (rawAppend) {
       return;
     }
@@ -652,15 +655,15 @@ nsXMLContentSerializer::SerializeAttr(const nsAString& aPrefix,
     aValue.BeginReading(iCurr);
     aValue.EndReading(iEnd);
     for ( ; iCurr != iEnd; iCurr.advance(uiSize) ) {
-      const PRUnichar * buf = iCurr.get();
+      const char16_t * buf = iCurr.get();
       uiSize = iCurr.size_forward();
       for ( i = 0; i < uiSize; i++, buf++ ) {
-        if ( *buf == PRUnichar('\'') )
+        if ( *buf == char16_t('\'') )
         {
           bIncludesSingle = true;
           if ( bIncludesDouble ) break;
         }
-        else if ( *buf == PRUnichar('"') )
+        else if ( *buf == char16_t('"') )
         {
           bIncludesDouble = true;
           if ( bIncludesSingle ) break;
@@ -676,9 +679,9 @@ nsXMLContentSerializer::SerializeAttr(const nsAString& aPrefix,
     //    FALSE               TRUE                "               FALSE
     //    TRUE                FALSE               '               FALSE
     //    TRUE                TRUE                "               TRUE
-    PRUnichar cDelimiter = 
-        (bIncludesDouble && !bIncludesSingle) ? PRUnichar('\'') : PRUnichar('"');
-    attrString.Append(PRUnichar('='));
+    char16_t cDelimiter = 
+        (bIncludesDouble && !bIncludesSingle) ? char16_t('\'') : char16_t('"');
+    attrString.Append(char16_t('='));
     attrString.Append(cDelimiter);
     nsAutoString sValue(aValue);
     sValue.ReplaceSubstring(NS_LITERAL_STRING("&"),
@@ -906,12 +909,12 @@ nsXMLContentSerializer::AppendElementStart(Element* aElement,
       AppendIndentation(aStr);
     }
     else if (mAddSpace) {
-      AppendToString(PRUnichar(' '), aStr);
+      AppendToString(char16_t(' '), aStr);
       mAddSpace = false;
     }
   }
   else if (mAddSpace) {
-    AppendToString(PRUnichar(' '), aStr);
+    AppendToString(char16_t(' '), aStr);
     mAddSpace = false;
   }
   else {
@@ -1017,12 +1020,12 @@ nsXMLContentSerializer::AppendElementEnd(Element* aElement,
       AppendIndentation(aStr);
     }
     else if (mAddSpace) {
-      AppendToString(PRUnichar(' '), aStr);
+      AppendToString(char16_t(' '), aStr);
       mAddSpace = false;
     }
   }
   else if (mAddSpace) {
-    AppendToString(PRUnichar(' '), aStr);
+    AppendToString(char16_t(' '), aStr);
     mAddSpace = false;
   }
 
@@ -1109,7 +1112,7 @@ nsXMLContentSerializer::CheckElementEnd(nsIContent * aContent,
 }
 
 void 
-nsXMLContentSerializer::AppendToString(const PRUnichar aChar,
+nsXMLContentSerializer::AppendToString(const char16_t aChar,
                                        nsAString& aOutputStr)
 {
   if (mBodyOnly && !mInBody) {
@@ -1156,12 +1159,12 @@ void
 nsXMLContentSerializer::AppendAndTranslateEntities(const nsAString& aStr,
                                                    nsAString& aOutputStr)
 {
-  nsReadingIterator<PRUnichar> done_reading;
+  nsReadingIterator<char16_t> done_reading;
   aStr.EndReading(done_reading);
 
   // for each chunk of |aString|...
   uint32_t advanceLength = 0;
-  nsReadingIterator<PRUnichar> iter;
+  nsReadingIterator<char16_t> iter;
 
   const char **entityTable = mInAttribute ? kAttrEntities : kEntities;
 
@@ -1169,16 +1172,16 @@ nsXMLContentSerializer::AppendAndTranslateEntities(const nsAString& aStr,
        iter != done_reading;
        iter.advance(int32_t(advanceLength))) {
     uint32_t fragmentLength = iter.size_forward();
-    const PRUnichar* c = iter.get();
-    const PRUnichar* fragmentStart = c;
-    const PRUnichar* fragmentEnd = c + fragmentLength;
+    const char16_t* c = iter.get();
+    const char16_t* fragmentStart = c;
+    const char16_t* fragmentEnd = c + fragmentLength;
     const char* entityText = nullptr;
 
     advanceLength = 0;
     // for each character in this chunk, check if it
     // needs to be replaced
     for (; c < fragmentEnd; c++, advanceLength++) {
-      PRUnichar val = *c;
+      char16_t val = *c;
       if ((val <= kGTVal) && (entityTable[val][0] != 0)) {
         entityText = entityTable[val];
         break;
@@ -1474,7 +1477,7 @@ nsXMLContentSerializer::AppendWrapped_NonWhitespaceSequence(
         AppendIndentation(aOutputStr);
       }
       else if (mAddSpace) {
-        aOutputStr.Append(PRUnichar(' '));
+        aOutputStr.Append(char16_t(' '));
         mAddSpace = false;
       }
 
@@ -1529,7 +1532,7 @@ nsXMLContentSerializer::AppendWrapped_NonWhitespaceSequence(
             AppendIndentation(aOutputStr);
           }
           else if (mAddSpace) {
-            aOutputStr.Append(PRUnichar(' '));
+            aOutputStr.Append(char16_t(' '));
             mAddSpace = false;
           }
           aOutputStr.Append(aSequenceStart, wrapPosition);
@@ -1558,7 +1561,7 @@ nsXMLContentSerializer::AppendWrapped_NonWhitespaceSequence(
           } while (aPos < aEnd);
 
           if (mAddSpace) {
-            aOutputStr.Append(PRUnichar(' '));
+            aOutputStr.Append(char16_t(' '));
             mAddSpace = false;
           }
           aOutputStr.Append(aSequenceStart, aPos - aSequenceStart);

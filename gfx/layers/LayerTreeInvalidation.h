@@ -6,9 +6,10 @@
 #ifndef GFX_LAYER_TREE_INVALIDATION_H
 #define GFX_LAYER_TREE_INVALIDATION_H
 
-#include "nsRegion.h"
+#include "nsRegion.h"                   // for nsIntRegion
 
 class nsPresContext;
+struct nsIntPoint;
 
 namespace mozilla {
 namespace layers {
@@ -58,7 +59,8 @@ struct LayerProperties
    * @return Painted area changed by the layer tree changes.
    */
   virtual nsIntRegion ComputeDifferences(Layer* aRoot, 
-                                         NotifySubDocInvalidationFunc aCallback) = 0;
+                                         NotifySubDocInvalidationFunc aCallback,
+                                         bool* aGeometryChanged = nullptr) = 0;
   
   
   virtual void MoveBy(const nsIntPoint& aOffset) = 0;

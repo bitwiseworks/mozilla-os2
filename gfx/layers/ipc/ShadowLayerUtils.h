@@ -9,7 +9,8 @@
 #define IPC_ShadowLayerUtils_h
 
 #include "ipc/IPCMessageUtils.h"
-#include "GLContext.h"
+#include "GLContextTypes.h"
+#include "SurfaceTypes.h"
 #include "mozilla/WidgetUtils.h"
 
 #if defined(MOZ_ENABLE_D3D10_LAYER)
@@ -52,14 +53,14 @@ struct ParamTraits<mozilla::layers::SurfaceDescriptorX11> {
 #endif  // !defined(MOZ_HAVE_XSURFACEDESCRIPTORX11)
 
 template<>
-struct ParamTraits<mozilla::gl::GLContext::SharedTextureShareType>
+struct ParamTraits<mozilla::gl::SharedTextureShareType>
 {
-  typedef mozilla::gl::GLContext::SharedTextureShareType paramType;
+  typedef mozilla::gl::SharedTextureShareType paramType;
 
   static void Write(Message* msg, const paramType& param)
   {
-    MOZ_STATIC_ASSERT(sizeof(paramType) <= sizeof(int32_t),
-                      "TextureShareType assumes to be int32_t");
+    static_assert(sizeof(paramType) <= sizeof(int32_t),
+                  "TextureShareType assumes to be int32_t");
     WriteParam(msg, int32_t(param));
   }
 
@@ -85,9 +86,10 @@ struct ParamTraits<mozilla::layers::MagicGrallocBufferHandle> {
 
 template <>
 struct ParamTraits<mozilla::ScreenRotation>
-  : public EnumSerializer<mozilla::ScreenRotation,
-                          mozilla::ROTATION_0,
-                          mozilla::ROTATION_COUNT>
+  : public ContiguousEnumSerializer<
+             mozilla::ScreenRotation,
+             mozilla::ROTATION_0,
+             mozilla::ROTATION_COUNT>
 {};
 
 } // namespace IPC

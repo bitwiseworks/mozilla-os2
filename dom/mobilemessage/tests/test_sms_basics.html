@@ -12,24 +12,34 @@
 </div>
 <pre id="test">
 <script type="application/javascript">
+var defaultEnabled = ('mozMobileMessage' in frames[0].navigator);
 
 /** Test for WebSMS **/
 
 function checkSmsDisabled() {
-  ok('mozSms' in frames[0].navigator, "navigator.mozSms should exist");
-  is(frames[0].navigator.mozSms, null, "navigator.mozSms should return null");
+  ok(!('mozMobileMessage' in frames[0].navigator), "navigator.mozMobileMessage should not exist");
+  ok(frames[0].navigator.mozMobileMessage === undefined,
+     "navigator.mozMobileMessage should return undefined");
 }
 
 function checkSmsEnabled() {
   // Bug 784617: WebSms is disabled on all platforms except Android for the moment.
-  if (navigator.appVersion.indexOf("Android") == -1) {
+  if (navigator.appVersion.indexOf("Android") == -1 && SpecialPowers.Services.appinfo.name != "B2G") {
     checkSmsDisabled();
     return;
   }
 
-  ok('mozSms' in frames[0].navigator, "navigator.mozSms should exist");
-  ok(frames[0].navigator.mozSms, "navigator.mozSms returns an object");
-  ok(frames[0].navigator.mozSms instanceof MozSmsManager, "navigator.mozSms is an SmsManager object");
+  ok('mozMobileMessage' in frames[0].navigator, "navigator.mozMobileMessage should exist");
+  ok(frames[0].navigator.mozMobileMessage, "navigator.mozMobileMessage returns an object");
+  ok(frames[0].navigator.mozMobileMessage instanceof MozMobileMessageManager,
+     "navigator.mozMobileMessage is an MobileMessageManager object");
+}
+
+function checkSmsDisabledOrEnabled() {
+  if (!defaultEnabled)
+    checkSmsDisabled();
+  else
+    checkSmsEnabled();
 }
 
 function checkInterface(aInterface) {
@@ -38,61 +48,76 @@ function checkInterface(aInterface) {
 }
 
 function test() {
-  var gSmsEnabled = SpecialPowers.getBoolPref("dom.sms.enabled");
-
-  checkInterface("SmsManager");
-  checkInterface("NavigatorSms");
   checkInterface("SmsMessage");
   checkInterface("SmsEvent");
   checkInterface("SmsFilter");
 
   // If sms is disabled and permission is removed, sms is disabled.
-  SpecialPowers.setBoolPref("dom.sms.enabled", false);
-  SpecialPowers.removePermission("sms", document);
-  checkSmsDisabled();
+  SpecialPowers.pushPrefEnv({"set": [["dom.sms.enabled", false]]}, function() {
+    SpecialPowers.pushPermissions([{'type': 'sms', 'remove': true, 'context': document}], test2);
+  });
+}
+
+function test2() {
+  checkSmsDisabledOrEnabled();
 
   // If sms is enabled and permission is removed, sms is disabled.
-  SpecialPowers.setBoolPref("dom.sms.enabled", true);
-  SpecialPowers.removePermission("sms", document);
-  checkSmsDisabled();
+  SpecialPowers.pushPrefEnv({"set": [["dom.sms.enabled", true]]}, function() {
+    SpecialPowers.pushPermissions([{'type': 'sms', 'remove': true, 'context': document}], test3);
+  });
+}
+
+function test3() {
+  checkSmsDisabledOrEnabled();
 
   // If sms is disabled and permission is granted, sms is disabled.
-  SpecialPowers.setBoolPref("dom.sms.enabled", false);
-  SpecialPowers.addPermission("sms", true, document);
-  checkSmsDisabled();
+  SpecialPowers.pushPrefEnv({"set": [["dom.sms.enabled", false]]}, function() {
+    SpecialPowers.pushPermissions([{'type': 'sms', 'allow': true, 'context': document}], test4);
+  });
+}
+
+function test4() {
+  checkSmsDisabledOrEnabled();
 
   // If sms is enabled and permission is granted, sms is enabled.
-  SpecialPowers.setBoolPref("dom.sms.enabled", true);
-  SpecialPowers.addPermission("sms", true, document);
-  checkSmsEnabled();
+  SpecialPowers.pushPrefEnv({"set": [["dom.sms.enabled", true]]}, function() {
+    SpecialPowers.pushPermissions([{'type': 'sms', 'allow': true, 'context': document}], test5);
+  });
+}
+
+function test5() {
+   checkSmsDisabledOrEnabled();
 
   // Now, if sms are disabled with the pref, they will still be enabled.
   // The page has to be reloaded.
-  SpecialPowers.setBoolPref("dom.sms.enabled", false);
-  checkSmsEnabled();
+  SpecialPowers.pushPrefEnv({"set": [["dom.sms.enabled", false]]}, test6);
+}
+
+function test6() {
+  checkSmsDisabledOrEnabled();
 
   var iframeElt = document.getElementsByTagName('iframe')[0];
   iframeElt.addEventListener("load", function() {
     iframeElt.removeEventListener("load", arguments.callee);
     checkSmsEnabled();
 
-    // Disabling sms takes effect on reload.
-    SpecialPowers.setBoolPref("dom.sms.enabled", false);
     iframeElt.addEventListener("load", function() {
       iframeElt.removeEventListener("load", arguments.callee);
 
       checkSmsDisabled();
 
-      // Cleanup and quit.
-      SpecialPowers.setBoolPref("dom.sms.enabled", gSmsEnabled);
-      SpecialPowers.removePermission("sms", document);
       SimpleTest.finish();
     });
-    frames[0].location.reload();
+
+    // Disabling sms takes effect on reload.
+    SpecialPowers.pushPrefEnv({"set": [["dom.sms.enabled", false]]}, function() {
+      frames[0].location.reload();
+    });
   });
 
-  SpecialPowers.setBoolPref("dom.sms.enabled", true);
-  frames[0].location.reload();
+  SpecialPowers.pushPrefEnv({"set": [["dom.sms.enabled", true]]}, function() {
+    frames[0].location.reload();
+  });
 }
 
 SimpleTest.waitForExplicitFinish();

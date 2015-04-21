@@ -19,17 +19,23 @@ class DrawTargetD2D;
 class SourceSurfaceD2DTarget : public SourceSurface
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SourceSurfaceD2DTarget)
   SourceSurfaceD2DTarget(DrawTargetD2D* aDrawTarget, ID3D10Texture2D* aTexture,
                          SurfaceFormat aFormat);
   ~SourceSurfaceD2DTarget();
 
-  virtual SurfaceType GetType() const { return SURFACE_D2D1_DRAWTARGET; }
+  virtual SurfaceType GetType() const { return SurfaceType::D2D1_DRAWTARGET; }
   virtual IntSize GetSize() const;
   virtual SurfaceFormat GetFormat() const;
   virtual TemporaryRef<DataSourceSurface> GetDataSurface();
+  virtual void *GetNativeSurface(NativeSurfaceType aType);
+
+  DrawTargetD2D* GetDT() { return mDrawTarget; }
+  ID2D1Bitmap *GetBitmap(ID2D1RenderTarget *aRT);
 
 private:
   friend class DrawTargetD2D;
+
   ID3D10ShaderResourceView *GetSRView();
 
   // This function is called by the draw target this texture belongs to when
@@ -40,8 +46,6 @@ private:
   // This will mark the surface as no longer depending on its drawtarget,
   // this may happen on destruction or copying.
   void MarkIndependent();
-
-  ID2D1Bitmap *GetBitmap(ID2D1RenderTarget *aRT);
 
   RefPtr<ID3D10ShaderResourceView> mSRView;
   RefPtr<ID2D1Bitmap> mBitmap;
@@ -58,14 +62,17 @@ private:
 class DataSourceSurfaceD2DTarget : public DataSourceSurface
 {
 public:
-  DataSourceSurfaceD2DTarget();
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceD2DTarget)
+  DataSourceSurfaceD2DTarget(SurfaceFormat aFormat);
   ~DataSourceSurfaceD2DTarget();
 
-  virtual SurfaceType GetType() const { return SURFACE_DATA; }
+  virtual SurfaceType GetType() const { return SurfaceType::DATA; }
   virtual IntSize GetSize() const;
   virtual SurfaceFormat GetFormat() const;
   virtual uint8_t *GetData();
   virtual int32_t Stride();
+  virtual bool Map(MapType, MappedSurface *aMappedSurface);
+  virtual void Unmap();
 
 private:
   friend class SourceSurfaceD2DTarget;

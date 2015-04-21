@@ -6,12 +6,11 @@
 
 #include "nsNetAddr.h"
 #include "nsString.h"
-#include "prnetdb.h"
 #include "mozilla/net/DNS.h"
 
 using namespace mozilla::net;
 
-NS_IMPL_ISUPPORTS1(nsNetAddr, nsINetAddr)
+NS_IMPL_ISUPPORTS(nsNetAddr, nsINetAddr)
 
 /* Makes a copy of |addr| */
 nsNetAddr::nsNetAddr(NetAddr* addr)
@@ -149,6 +148,11 @@ NS_IMETHODIMP nsNetAddr::GetIsV4Mapped(bool *aIsV4Mapped)
     return NS_ERROR_UNEXPECTED;
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsNetAddr::GetNetAddr(NetAddr *aResult) {
+  memcpy(aResult, &mAddr, sizeof(mAddr));
   return NS_OK;
 }
 

@@ -23,8 +23,8 @@ this.FileUtils = {
   MODE_APPEND   : 0x10,
   MODE_TRUNCATE : 0x20,
 
-  PERMS_FILE      : 0644,
-  PERMS_DIRECTORY : 0755,
+  PERMS_FILE      : 0o644,
+  PERMS_DIRECTORY : 0o755,
 
   /**
    * Gets a file at the specified hierarchy under a nsIDirectoryService key.
@@ -60,12 +60,19 @@ this.FileUtils = {
    * @return  nsIFile object for the location specified.
    */
   getDir: function FileUtils_getDir(key, pathArray, shouldCreate, followLinks) {
-    var dir = gDirService.get(key, Ci.nsILocalFile);
+    var dir = gDirService.get(key, Ci.nsIFile);
     for (var i = 0; i < pathArray.length; ++i) {
       dir.append(pathArray[i]);
-      if (shouldCreate && !dir.exists())
-        dir.create(Ci.nsILocalFile.DIRECTORY_TYPE, this.PERMS_DIRECTORY);
     }
+
+    if (shouldCreate) {
+      try {
+        dir.create(Ci.nsIFile.DIRECTORY_TYPE, this.PERMS_DIRECTORY);
+      } catch (ex if ex.result == Cr.NS_ERROR_FILE_ALREADY_EXISTS) {
+        // Ignore the exception due to a directory that already exists.
+      }
+    }
+
     if (!followLinks)
       dir.followLinks = false;
     return dir;
@@ -83,6 +90,24 @@ this.FileUtils = {
    */
   openFileOutputStream: function FileUtils_openFileOutputStream(file, modeFlags) {
     var fos = Cc["@mozilla.org/network/file-output-stream;1"].
+              createInstance(Ci.nsIFileOutputStream);
+    return this._initFileOutputStream(fos, file, modeFlags);
+  },
+
+  /**
+   * Opens an atomic file output stream for writing.
+   * @param   file
+   *          The file to write to.
+   * @param   modeFlags
+   *          (optional) File open flags. Can be undefined.
+   * @returns nsIFileOutputStream to write to.
+   * @note The stream is initialized with the DEFER_OPEN behavior flag.
+   *       See nsIFileOutputStream.
+   *       OpeanAtomicFileOutputStream is generally better than openSafeFileOutputStream
+   *       baecause flushing is not needed in most of the issues.
+   */
+  openAtomicFileOutputStream: function FileUtils_openAtomicFileOutputStream(file, modeFlags) {
+    var fos = Cc["@mozilla.org/network/atomic-file-output-stream;1"].
               createInstance(Ci.nsIFileOutputStream);
     return this._initFileOutputStream(fos, file, modeFlags);
   },
@@ -108,6 +133,23 @@ this.FileUtils = {
       modeFlags = this.MODE_WRONLY | this.MODE_CREATE | this.MODE_TRUNCATE;
     fos.init(file, modeFlags, this.PERMS_FILE, fos.DEFER_OPEN);
     return fos;
+  },
+
+  /**
+   * Closes an atomic file output stream.
+   * @param   stream
+   *          The stream to close.
+   */
+  closeAtomicFileOutputStream: function FileUtils_closeAtomicFileOutputStream(stream) {
+    if (stream instanceof Ci.nsISafeOutputStream) {
+      try {
+        stream.finish();
+        return;
+      }
+      catch (e) {
+      }
+    }
+    stream.close();
   },
 
   /**

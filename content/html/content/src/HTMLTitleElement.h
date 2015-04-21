@@ -16,28 +16,19 @@ class ErrorResult;
 
 namespace dom {
 
-class HTMLTitleElement : public nsGenericHTMLElement,
-                         public nsIDOMHTMLTitleElement,
-                         public nsStubMutationObserver
+class HTMLTitleElement MOZ_FINAL : public nsGenericHTMLElement,
+                                   public nsIDOMHTMLTitleElement,
+                                   public nsStubMutationObserver
 {
 public:
   using Element::GetText;
   using Element::SetText;
 
-  HTMLTitleElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  HTMLTitleElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
   virtual ~HTMLTitleElement();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLTitleElement
   NS_DECL_NSIDOMHTMLTITLEELEMENT
@@ -66,11 +57,9 @@ public:
 
   virtual void DoneAddingChildren(bool aHaveNotified) MOZ_OVERRIDE;
 
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
-
 protected:
 
-  virtual JSObject* WrapNode(JSContext* cx, JS::Handle<JSObject*> scope)
+  virtual JSObject* WrapNode(JSContext* cx)
     MOZ_OVERRIDE MOZ_FINAL;
 
 private:

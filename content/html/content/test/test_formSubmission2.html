@@ -152,10 +152,7 @@ function clickImage(aTarget, aX, aY)
   aTarget.style.left = "0";
   aTarget.offsetTop;
 
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-  var wu = aTarget.ownerDocument.defaultView
-    .QueryInterface(Components.interfaces.nsIInterfaceRequestor)
-    .getInterface(Components.interfaces.nsIDOMWindowUtils);
+  var wu = SpecialPowers.getDOMWindowUtils(aTarget.ownerDocument.defaultView);
 
   wu.sendMouseEvent('mousedown',  aX, aY, 0, 1, 0);
   wu.sendMouseEvent('mouseup',  aX, aY, 0, 0, 0);
@@ -185,7 +182,7 @@ function runTest() {
     else {
       clickImage(elem, 10, 7);
     }
-    yield;
+    yield undefined;
 
     var submission = JSON.parse(iframe.contentDocument.documentElement.textContent);
     checkSubmission(submission, expectedSub[i]);
@@ -204,7 +201,7 @@ function runTest() {
     else {
       clickImage(elem, 10, 7);
     }
-    yield;
+    yield undefined;
 
     is(elem.disabled, true, "didn't disable");
     elem.disabled = false;
@@ -215,7 +212,7 @@ function runTest() {
   }
 
   SimpleTest.finish();
-  yield;
+  yield undefined;
 }
 
 </script>

@@ -20,14 +20,14 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=452161
 
   <script type="application/javascript">
 
-    function addTestEditable(aID, aTestRun, aTrailChar)
+    function addTestEditable(aID, aTestRun)
     {
       var et = new editableTextTest(aID);
 
       //////////////////////////////////////////////////////////////////////////
       // setTextContents
       et.scheduleTest(et.setTextContents, "hello");
-      et.scheduleTest(et.setTextContents, "olleh", aTrailChar); // due to some reason this reports '\n' in the end
+      et.scheduleTest(et.setTextContents, "olleh");
       et.scheduleTest(et.setTextContents, "");
 
       //////////////////////////////////////////////////////////////////////////
@@ -70,7 +70,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=452161
       var testRun = new editableTextTestRun();
 
       addTestEditable("input", testRun);
-      addTestEditable("div", testRun, '\n');
+      addTestEditable("div", testRun);
       addTestEditable(getNode("frame").contentDocument, testRun, '\n');
 
       testRun.run(); // Will call SimpleTest.finish();
@@ -80,9 +80,10 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=452161
     {
       // Prepare tested elements.
 
-      // Design mode on/off trigger document accessible subtree recreation.
+      // Design mode on/off triggers an editable state change event on
+      // the document accessible.
       var frame = getNode("frame");
-      waitForEvent(EVENT_REORDER, frame.contentDocument, runTest);
+      waitForEvent(EVENT_STATE_CHANGE, frame.contentDocument, runTest);
       frame.contentDocument.designMode = "on";
     }
 

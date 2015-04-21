@@ -38,7 +38,7 @@ nsDataObjCollection::~nsDataObjCollection()
 // IUnknown interface methods - see iunknown.h for documentation
 STDMETHODIMP nsDataObjCollection::QueryInterface(REFIID riid, void** ppv)
 {
-  *ppv=NULL;
+  *ppv=nullptr;
 
   if ( (IID_IUnknown == riid) || (IID_IDataObject  == riid) ) {
     *ppv = static_cast<IDataObject*>(this); 
@@ -232,9 +232,9 @@ HRESULT nsDataObjCollection::GetFile(LPFORMATETC pFE, LPSTGMEDIUM pSTM)
   HGLOBAL hGlobalMemory;
   HRESULT hr;
   // Make enough space for the header and the trailing null
-  uint32_t buffersize = sizeof(DROPFILES) + sizeof(PRUnichar);
+  uint32_t buffersize = sizeof(DROPFILES) + sizeof(char16_t);
   uint32_t alloclen = 0;
-  PRUnichar* realbuffer;
+  char16_t* realbuffer;
   nsAutoString filename;
   
   hGlobalMemory = GlobalAlloc(GHND, buffersize);
@@ -251,19 +251,19 @@ HRESULT nsDataObjCollection::GetFile(LPFORMATETC pFE, LPSTGMEDIUM pSTM)
       }
     }
     // Now we need to pull out the filename
-    PRUnichar* buffer = (PRUnichar*)GlobalLock(workingmedium.hGlobal);
-    if (buffer == NULL)
+    char16_t* buffer = (char16_t*)GlobalLock(workingmedium.hGlobal);
+    if (buffer == nullptr)
       return E_FAIL;
-    buffer += sizeof(DROPFILES)/sizeof(PRUnichar);
+    buffer += sizeof(DROPFILES)/sizeof(char16_t);
     filename = buffer;
     GlobalUnlock(workingmedium.hGlobal);
     ReleaseStgMedium(&workingmedium);
     // Now put the filename into our buffer
-    alloclen = (filename.Length() + 1) * sizeof(PRUnichar);
+    alloclen = (filename.Length() + 1) * sizeof(char16_t);
     hGlobalMemory = ::GlobalReAlloc(hGlobalMemory, buffersize + alloclen, GHND);
-    if (hGlobalMemory == NULL)
+    if (hGlobalMemory == nullptr)
       return E_FAIL;
-    realbuffer = (PRUnichar*)((char*)GlobalLock(hGlobalMemory) + buffersize);
+    realbuffer = (char16_t*)((char*)GlobalLock(hGlobalMemory) + buffersize);
     if (!realbuffer)
       return E_FAIL;
     realbuffer--; // Overwrite the preceding null
@@ -285,7 +285,7 @@ HRESULT nsDataObjCollection::GetFile(LPFORMATETC pFE, LPSTGMEDIUM pSTM)
   GlobalUnlock(hGlobalMemory);
   // Finally fill out the STGMEDIUM struct
   pSTM->tymed = TYMED_HGLOBAL;
-  pSTM->pUnkForRelease = NULL; // Caller gets to free the data
+  pSTM->pUnkForRelease = nullptr; // Caller gets to free the data
   pSTM->hGlobal = hGlobalMemory;
   return S_OK;
 }
@@ -316,7 +316,7 @@ HRESULT nsDataObjCollection::GetText(LPFORMATETC pFE, LPSTGMEDIUM pSTM)
       }
       // Now we need to pull out the text
       char* buffer = (char*)GlobalLock(workingmedium.hGlobal);
-      if (buffer == NULL)
+      if (buffer == nullptr)
         return E_FAIL;
       text = buffer;
       GlobalUnlock(workingmedium.hGlobal);
@@ -325,7 +325,7 @@ HRESULT nsDataObjCollection::GetText(LPFORMATETC pFE, LPSTGMEDIUM pSTM)
       alloclen = text.Length();
       hGlobalMemory = ::GlobalReAlloc(hGlobalMemory, buffersize + alloclen,
                                       GHND);
-      if (hGlobalMemory == NULL)
+      if (hGlobalMemory == nullptr)
         return E_FAIL;
       buffer = ((char*)GlobalLock(hGlobalMemory) + buffersize);
       if (!buffer)
@@ -336,12 +336,12 @@ HRESULT nsDataObjCollection::GetText(LPFORMATETC pFE, LPSTGMEDIUM pSTM)
       buffersize += alloclen;
     }
     pSTM->tymed = TYMED_HGLOBAL;
-    pSTM->pUnkForRelease = NULL; // Caller gets to free the data
+    pSTM->pUnkForRelease = nullptr; // Caller gets to free the data
     pSTM->hGlobal = hGlobalMemory;
     return S_OK;
   }
   if (pFE->cfFormat == CF_UNICODETEXT) {
-    buffersize = sizeof(PRUnichar);
+    buffersize = sizeof(char16_t);
     nsAutoString text;
     for (uint32_t i = 0; i < mDataObjects.Length(); ++i) {
       nsDataObj* dataObj = mDataObjects.ElementAt(i);
@@ -355,19 +355,19 @@ HRESULT nsDataObjCollection::GetText(LPFORMATETC pFE, LPSTGMEDIUM pSTM)
         }
       }
       // Now we need to pull out the text
-      PRUnichar* buffer = (PRUnichar*)GlobalLock(workingmedium.hGlobal);
-      if (buffer == NULL)
+      char16_t* buffer = (char16_t*)GlobalLock(workingmedium.hGlobal);
+      if (buffer == nullptr)
         return E_FAIL;
       text = buffer;
       GlobalUnlock(workingmedium.hGlobal);
       ReleaseStgMedium(&workingmedium);
       // Now put the text into our buffer
-      alloclen = text.Length() * sizeof(PRUnichar);
+      alloclen = text.Length() * sizeof(char16_t);
       hGlobalMemory = ::GlobalReAlloc(hGlobalMemory, buffersize + alloclen,
                                       GHND);
-      if (hGlobalMemory == NULL)
+      if (hGlobalMemory == nullptr)
         return E_FAIL;
-      buffer = (PRUnichar*)((char*)GlobalLock(hGlobalMemory) + buffersize);
+      buffer = (char16_t*)((char*)GlobalLock(hGlobalMemory) + buffersize);
       if (!buffer)
         return E_FAIL;
       buffer--; // Overwrite the preceding null
@@ -376,7 +376,7 @@ HRESULT nsDataObjCollection::GetText(LPFORMATETC pFE, LPSTGMEDIUM pSTM)
       buffersize += alloclen;
     }
     pSTM->tymed = TYMED_HGLOBAL;
-    pSTM->pUnkForRelease = NULL; // Caller gets to free the data
+    pSTM->pUnkForRelease = nullptr; // Caller gets to free the data
     pSTM->hGlobal = hGlobalMemory;
     return S_OK;
   }
@@ -410,10 +410,10 @@ HRESULT nsDataObjCollection::GetFileDescriptors(LPFORMATETC pFE,
     // Now we need to pull out the filedescriptor
     FILEDESCRIPTOR* buffer =
      (FILEDESCRIPTOR*)((char*)GlobalLock(workingmedium.hGlobal) + sizeof(UINT));
-    if (buffer == NULL)
+    if (buffer == nullptr)
       return E_FAIL;
     hGlobalMemory = ::GlobalReAlloc(hGlobalMemory, buffersize + alloclen, GHND);
-    if (hGlobalMemory == NULL)
+    if (hGlobalMemory == nullptr)
       return E_FAIL;
     FILEGROUPDESCRIPTOR* realbuffer =
                                 (FILEGROUPDESCRIPTOR*)GlobalLock(hGlobalMemory);
@@ -428,7 +428,7 @@ HRESULT nsDataObjCollection::GetFileDescriptors(LPFORMATETC pFE,
     buffersize += alloclen;
   }
   pSTM->tymed = TYMED_HGLOBAL;
-  pSTM->pUnkForRelease = NULL; // Caller gets to free the data
+  pSTM->pUnkForRelease = nullptr; // Caller gets to free the data
   pSTM->hGlobal = hGlobalMemory;
   return S_OK;
 }

@@ -15,8 +15,10 @@ var FindHelperUI = {
     close: "cmd_findClose"
   },
 
+  _finder: null,
   _open: false,
   _status: null,
+  _searchString: "",
 
   /*
    * Properties
@@ -42,46 +44,23 @@ var FindHelperUI = {
   },
 
   init: function findHelperInit() {
-    this._textbox = document.getElementById("find-helper-textbox");
-    this._container = Elements.contentNavigator;
+    this._textbox = document.getElementById("findbar-textbox");
+    this._container = Elements.findbar;
 
     this._cmdPrevious = document.getElementById(this.commands.previous);
     this._cmdNext = document.getElementById(this.commands.next);
 
-    this._textbox.addEventListener('keydown', this);
-
-    // Listen for find assistant messages from content
-    messageManager.addMessageListener("FindAssist:Show", this);
-    messageManager.addMessageListener("FindAssist:Hide", this);
+    this._textbox.addEventListener("keydown", this);
 
     // Listen for events where form assistant should be closed
     Elements.tabList.addEventListener("TabSelect", this, true);
     Elements.browsers.addEventListener("URLChanged", this, true);
-    window.addEventListener("MozContextUIShow", this, true);
-    window.addEventListener("MozContextUIExpand", this, true);
-  },
-
-  receiveMessage: function findHelperReceiveMessage(aMessage) {
-    let json = aMessage.json;
-    switch(aMessage.name) {
-      case "FindAssist:Show":
-        ContextUI.dismiss();
-        this.status = json.result;
-        if (json.rect)
-          this._zoom(Rect.fromRect(json.rect));
-        break;
-
-      case "FindAssist:Hide":
-        if (this._container.getAttribute("type") == this.type)
-          this.hide();
-        break;
-    }
+    window.addEventListener("MozAppbarShowing", this);
+    window.addEventListener("MozFlyoutPanelShowing", this, false);
   },
 
   handleEvent: function findHelperHandleEvent(aEvent) {
     switch (aEvent.type) {
-      case "MozContextUIShow":
-      case "MozContextUIExpand":
       case "TabSelect":
         this.hide();
         break;
@@ -93,18 +72,31 @@ var FindHelperUI = {
 
       case "keydown":
         if (aEvent.keyCode == Ci.nsIDOMKeyEvent.DOM_VK_RETURN) {
-	  if (aEvent.shiftKey) {
-	    this.goToPrevious();
-	  } else {
-	    this.goToNext();
-	  }
+          let backwardsSearch = aEvent.shiftKey;
+          this.searchAgain(this._searchString, backwardsSearch);
         }
+        break;
+
+      case "MozAppbarShowing":
+      case "MozFlyoutPanelShowing":
+        if (aEvent.target != this._container) {
+          this.hide();
+        }
+        break;
     }
   },
 
   show: function findHelperShow() {
-    if (this._open)
+    if (BrowserUI.isStartTabVisible) {
       return;
+    }
+    if (this._open) {
+      setTimeout(() => {
+        this._textbox.select();
+        this._textbox.focus();
+      }, 0);
+      return;
+    }
 
     // Hide any menus
     ContextUI.dismiss();
@@ -112,15 +104,14 @@ var FindHelperUI = {
     // Shutdown selection related ui
     SelectionHelperUI.closeEditSession();
 
-    this.search(this._textbox.value);
-    this._textbox.select();
-    this._textbox.focus();
-    this._open = true;
-
     let findbar = this._container;
     setTimeout(() => {
-      Elements.browsers.setAttribute("findbar", true);
       findbar.show();
+      this.search(this._textbox.value);
+      this._textbox.select();
+      this._textbox.focus();
+
+      this._open = true;
     }, 0);
 
     // Prevent the view to scroll automatically while searching
@@ -131,63 +122,106 @@ var FindHelperUI = {
     if (!this._open)
       return;
 
+    ContentAreaObserver.shiftBrowserDeck(0);
+
     let onTransitionEnd = () => {
       this._container.removeEventListener("transitionend", onTransitionEnd, true);
       this._textbox.value = "";
       this.status = null;
-      this._textbox.blur();
       this._open = false;
-
+      if (this._finder) {
+        this._finder.removeResultListener(this);
+        this._finder = null
+      }
       // Restore the scroll synchronisation
       Browser.selectedBrowser.scrollSync = true;
     };
 
+    this._textbox.blur();
     this._container.addEventListener("transitionend", onTransitionEnd, true);
     this._container.dismiss();
-    Elements.browsers.removeAttribute("findbar");
-  },
-
-  goToPrevious: function findHelperGoToPrevious() {
-    Browser.selectedBrowser.messageManager.sendAsyncMessage("FindAssist:Previous", { });
-  },
-
-  goToNext: function findHelperGoToNext() {
-    Browser.selectedBrowser.messageManager.sendAsyncMessage("FindAssist:Next", { });
   },
 
   search: function findHelperSearch(aValue) {
-    this.updateCommands(aValue);
-
-    Browser.selectedBrowser.messageManager.sendAsyncMessage("FindAssist:Find", { searchString: aValue });
+    if (!this._finder) {
+      this._finder = Browser.selectedBrowser.finder;
+      this._finder.addResultListener(this);
+    }
+    this._searchString = aValue;
+    if (aValue != "") {
+      this._finder.fastFind(aValue, false, false);
+    } else {
+      this.updateCommands();
+    }
   },
 
-  updateCommands: function findHelperUpdateCommands(aValue) {
-    let disabled = (this._status == Ci.nsITypeAheadFind.FIND_NOTFOUND) || (aValue == "");
+  searchAgain: function findHelperSearchAgain(aValue, aFindBackwards) {
+    // This can happen if the user taps next/previous after re-opening the search bar
+    if (!this._finder) {
+      this.search(aValue);
+      return;
+    }
+
+    this._finder.findAgain(aFindBackwards, false, false);
+  },
+
+  goToPrevious: function findHelperGoToPrevious() {
+    this.searchAgain(this._searchString, true);
+  },
+
+  goToNext: function findHelperGoToNext() {
+    this.searchAgain(this._searchString, false);
+  },
+
+  onFindResult: function(aData) {
+    this._status = aData.result;
+    if (aData.rect) {
+      this._zoom(aData.rect, Browser.selectedBrowser.contentDocumentHeight);
+    }
+    this.updateCommands();
+  },
+
+  updateCommands: function findHelperUpdateCommands() {
+    let disabled = (this._status == Ci.nsITypeAheadFind.FIND_NOTFOUND) || (this._searchString == "");
     this._cmdPrevious.setAttribute("disabled", disabled);
     this._cmdNext.setAttribute("disabled", disabled);
   },
 
-  _zoom: function _findHelperZoom(aElementRect) {
-    let autozoomEnabled = Services.prefs.getBoolPref("findhelper.autozoom");
-    if (!aElementRect || !autozoomEnabled)
-      return;
+  _zoom: function _findHelperZoom(aElementRect, aContentHeight) {
+    // The rect we get here is the content rect including scroll offset
+    // in the page.
 
-    if (Browser.selectedTab.allowZoom) {
-      let zoomLevel = Browser._getZoomLevelForRect(aElementRect);
-
-      // Clamp the zoom level relatively to the default zoom level of the page
-      let defaultZoomLevel = Browser.selectedTab.getDefaultZoomLevel();
-      zoomLevel = Util.clamp(zoomLevel, (defaultZoomLevel * kBrowserFindZoomLevelMin),
-                                        (defaultZoomLevel * kBrowserFindZoomLevelMax));
-      zoomLevel = Browser.selectedTab.clampZoomLevel(zoomLevel);
-
-      let zoomRect = Browser._getZoomRectForPoint(aElementRect.center().x, aElementRect.y, zoomLevel);
-      AnimatedZoom.animateTo(zoomRect);
-    } else {
-      // Even if zooming is disabled we could need to reposition the view in
-      // order to keep the element on-screen
-      let zoomRect = Browser._getZoomRectForPoint(aElementRect.center().x, aElementRect.y, getBrowser().scale);
-      AnimatedZoom.animateTo(zoomRect);
+    // If the text falls below the find bar and keyboard shift content up.
+    let browserShift = 0;
+    // aElementRect.y is the top left origin of the selection rect.
+    if ((aElementRect.y + aElementRect.height) >
+        (aContentHeight - this._container.boxObject.height)) {
+      browserShift += this._container.boxObject.height;
     }
+    browserShift += Services.metro.keyboardHeight;
+
+    // If the rect top of the selection is above the view, don't shift content
+    // (or if it's already shifted, shift it back down).
+    if (aElementRect.y < browserShift) {
+      browserShift = 0;
+    }
+
+    // Shift the deck so that the selection is within the visible view.
+    ContentAreaObserver.shiftBrowserDeck(browserShift);
+
+    // Adjust for keyboad display and position the text selection rect in
+    // the middle of the viewable area.
+    let xPos = aElementRect.x;
+    let yPos = aElementRect.y;
+    let scrollAdjust = ((ContentAreaObserver.height - Services.metro.keyboardHeight) * .5) +
+      Services.metro.keyboardHeight;
+    yPos -= scrollAdjust;
+    if (yPos < 0) {
+      yPos = 0;
+    }
+
+    // TODO zoom via apzc, right now all we support is scroll
+    // positioning.
+    Browser.selectedBrowser.contentWindow.scrollTo(xPos, yPos);
   }
 };

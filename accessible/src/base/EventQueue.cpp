@@ -6,8 +6,13 @@
 #include "EventQueue.h"
 
 #include "Accessible-inl.h"
-#include "DocAccessible-inl.h"
 #include "nsEventShell.h"
+#include "DocAccessible.h"
+#include "nsAccessibilityService.h"
+#include "nsTextEquivUtils.h"
+#ifdef A11Y_LOG
+#include "Logging.h"
+#endif
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -32,6 +37,38 @@ EventQueue::PushEvent(AccEvent* aEvent)
 
   // Filter events.
   CoalesceEvents();
+
+  // Fire name change event on parent given that this event hasn't been
+  // coalesced, the parent's name was calculated from its subtree, and the
+  // subtree was changed.
+  Accessible* target = aEvent->mAccessible;
+  if (aEvent->mEventRule != AccEvent::eDoNotEmit &&
+      target->HasNameDependentParent() &&
+      (aEvent->mEventType == nsIAccessibleEvent::EVENT_NAME_CHANGE ||
+       aEvent->mEventType == nsIAccessibleEvent::EVENT_TEXT_REMOVED ||
+       aEvent->mEventType == nsIAccessibleEvent::EVENT_TEXT_INSERTED ||
+       aEvent->mEventType == nsIAccessibleEvent::EVENT_SHOW ||
+       aEvent->mEventType == nsIAccessibleEvent::EVENT_HIDE)) {
+    // Only continue traversing up the tree if it's possible that the parent
+    // accessible's name can depend on this accessible's name.
+    Accessible* parent = target->Parent();
+    while (parent &&
+           nsTextEquivUtils::HasNameRule(parent, eNameFromSubtreeIfReqRule)) {
+      // Test possible name dependent parent.
+      if (nsTextEquivUtils::HasNameRule(parent, eNameFromSubtreeRule)) {
+        nsAutoString name;
+        ENameValueFlag nameFlag = parent->Name(name);
+        // If name is obtained from subtree, fire name change event.
+        if (nameFlag == eNameFromSubtree) {
+          nsRefPtr<AccEvent> nameChangeEvent =
+            new AccEvent(nsIAccessibleEvent::EVENT_NAME_CHANGE, parent);
+          PushEvent(nameChangeEvent);
+        }
+        break;
+      }
+      parent = parent->Parent();
+    }
+  }
 
   // Associate text change with hide event if it wasn't stolen from hiding
   // siblings during coalescence.
@@ -148,6 +185,26 @@ EventQueue::CoalesceEvents()
       break; // eCoalesceStateChange
     }
 
+    case AccEvent::eCoalesceTextSelChange:
+    {
+      // Coalesce older event by newer event for the same selection or target.
+      // Events for same selection may have different targets and vice versa one
+      // target may be pointed by different selections (for latter see
+      // bug 927159).
+      for (uint32_t index = tail - 1; index < tail; index--) {
+        AccEvent* thisEvent = mEvents[index];
+        if (thisEvent->mEventRule != AccEvent::eDoNotEmit &&
+            thisEvent->mEventType == tailEvent->mEventType) {
+          AccTextSelChangeEvent* thisTSCEvent = downcast_accEvent(thisEvent);
+          AccTextSelChangeEvent* tailTSCEvent = downcast_accEvent(tailEvent);
+          if (thisTSCEvent->mSel == tailTSCEvent->mSel ||
+              thisEvent->mAccessible == tailEvent->mAccessible)
+            thisEvent->mEventRule = AccEvent::eDoNotEmit;
+        }
+
+      }
+    } break; // eCoalesceTextSelChange
+
     case AccEvent::eRemoveDupes:
     {
       // Check for repeat events, coalesce newly appended event by more older
@@ -202,9 +259,7 @@ EventQueue::CoalesceReorderEvents(AccEvent* aTailEvent)
 
     // If tailEvent contains thisEvent
     // then
-    //   if show of tailEvent contains a grand parent of thisEvent
-    //   then assert
-    //   else if hide of tailEvent contains a grand parent of thisEvent
+    //   if show or hide of tailEvent contains a grand parent of thisEvent
     //   then ignore thisEvent and its show and hide events
     //   otherwise ignore thisEvent but not its show and hide events
     Accessible* thisParent = thisEvent->mAccessible;
@@ -213,9 +268,12 @@ EventQueue::CoalesceReorderEvents(AccEvent* aTailEvent)
         AccReorderEvent* tailReorder = downcast_accEvent(aTailEvent);
         uint32_t eventType = tailReorder->IsShowHideEventTarget(thisParent);
 
-        if (eventType == nsIAccessibleEvent::EVENT_SHOW) {
-           NS_ERROR("Accessible tree was created after it was modified! Huh?");
-        } else if (eventType == nsIAccessibleEvent::EVENT_HIDE) {
+        // Sometimes InvalidateChildren() and
+        // DocAccessible::CacheChildrenInSubtree() can conspire to reparent an
+        // accessible in this case no need for mutation events.  Se bug 883708
+        // for details.
+        if (eventType == nsIAccessibleEvent::EVENT_SHOW ||
+            eventType == nsIAccessibleEvent::EVENT_HIDE) {
           AccReorderEvent* thisReorder = downcast_accEvent(thisEvent);
           thisReorder->DoNotEmitAll();
         } else {
@@ -303,7 +361,7 @@ EventQueue::CoalesceSelChangeEvents(AccSelChangeEvent* aTailEvent,
         aTailEvent->mSelChangeType == AccSelChangeEvent::eSelectionRemove) {
       aTailEvent->mEventRule = AccEvent::eDoNotEmit;
       aThisEvent->mEventType = nsIAccessibleEvent::EVENT_SELECTION;
-      aThisEvent->mPackedEvent = aThisEvent;
+      aThisEvent->mPackedEvent = aTailEvent;
       return;
     }
   }
@@ -454,22 +512,32 @@ EventQueue::ProcessEventQueue()
       }
 
       // Dispatch caret moved and text selection change events.
-      if (event->mEventType == nsIAccessibleEvent::EVENT_TEXT_CARET_MOVED) {
-        AccCaretMoveEvent* caretMoveEvent = downcast_accEvent(event);
-        HyperTextAccessible* hyperText = target->AsHyperText();
-        if (hyperText &&
-            NS_SUCCEEDED(hyperText->GetCaretOffset(&caretMoveEvent->mCaretOffset))) {
-
-          nsEventShell::FireEvent(caretMoveEvent);
-
-          // There's a selection so fire selection change as well.
-          int32_t selectionCount;
-          hyperText->GetSelectionCount(&selectionCount);
-          if (selectionCount)
-            nsEventShell::FireEvent(nsIAccessibleEvent::EVENT_TEXT_SELECTION_CHANGED,
-                                    hyperText);
-        }
+      if (event->mEventType == nsIAccessibleEvent::EVENT_TEXT_SELECTION_CHANGED) {
+        SelectionMgr()->ProcessTextSelChangeEvent(event);
         continue;
+      }
+
+      // Fire selected state change events in support to selection events.
+      if (event->mEventType == nsIAccessibleEvent::EVENT_SELECTION_ADD) {
+        nsEventShell::FireEvent(event->mAccessible, states::SELECTED,
+                                true, event->mIsFromUserInput);
+
+      } else if (event->mEventType == nsIAccessibleEvent::EVENT_SELECTION_REMOVE) {
+        nsEventShell::FireEvent(event->mAccessible, states::SELECTED,
+                                false, event->mIsFromUserInput);
+
+      } else if (event->mEventType == nsIAccessibleEvent::EVENT_SELECTION) {
+        AccSelChangeEvent* selChangeEvent = downcast_accEvent(event);
+        nsEventShell::FireEvent(event->mAccessible, states::SELECTED,
+                                (selChangeEvent->mSelChangeType == AccSelChangeEvent::eSelectionAdd),
+                                event->mIsFromUserInput);
+
+        if (selChangeEvent->mPackedEvent) {
+          nsEventShell::FireEvent(selChangeEvent->mPackedEvent->mAccessible,
+                                  states::SELECTED,
+                                  (selChangeEvent->mPackedEvent->mSelChangeType == AccSelChangeEvent::eSelectionAdd),
+                                  selChangeEvent->mPackedEvent->mIsFromUserInput);
+        }
       }
 
       nsEventShell::FireEvent(event);

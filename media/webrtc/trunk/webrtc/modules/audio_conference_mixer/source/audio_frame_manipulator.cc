@@ -8,9 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "audio_frame_manipulator.h"
-#include "module_common_types.h"
-#include "typedefs.h"
+#include "webrtc/modules/audio_conference_mixer/source/audio_frame_manipulator.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/typedefs.h"
 
 namespace {
 // Linear ramping over 80 samples.
@@ -36,7 +36,7 @@ const float rampArray[] = {0.0000f, 0.0127f, 0.0253f, 0.0380f,
                            0.9114f, 0.9241f, 0.9367f, 0.9494f,
                            0.9620f, 0.9747f, 0.9873f, 1.0000f};
 const int rampSize = sizeof(rampArray)/sizeof(rampArray[0]);
-} // namespace
+}  // namespace
 
 namespace webrtc {
 void CalculateEnergy(AudioFrame& audioFrame)
@@ -60,8 +60,8 @@ void RampIn(AudioFrame& audioFrame)
     assert(rampSize <= audioFrame.samples_per_channel_);
     for(int i = 0; i < rampSize; i++)
     {
-        audioFrame.data_[i] = static_cast<WebRtc_Word16>
-            (rampArray[i] * audioFrame.data_[i]);
+        audioFrame.data_[i] = static_cast<int16_t>(rampArray[i] *
+                                                   audioFrame.data_[i]);
     }
 }
 
@@ -71,11 +71,11 @@ void RampOut(AudioFrame& audioFrame)
     for(int i = 0; i < rampSize; i++)
     {
         const int rampPos = rampSize - 1 - i;
-        audioFrame.data_[i] = static_cast<WebRtc_Word16>
-            (rampArray[rampPos] * audioFrame.data_[i]);
+        audioFrame.data_[i] = static_cast<int16_t>(rampArray[rampPos] *
+                                                   audioFrame.data_[i]);
     }
     memset(&audioFrame.data_[rampSize], 0,
            (audioFrame.samples_per_channel_ - rampSize) *
            sizeof(audioFrame.data_[0]));
 }
-} // namespace webrtc
+}  // namespace webrtc

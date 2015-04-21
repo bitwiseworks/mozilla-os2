@@ -6,26 +6,32 @@
 #ifndef nsHttpPipeline_h__
 #define nsHttpPipeline_h__
 
-#include "nsHttp.h"
 #include "nsAHttpConnection.h"
 #include "nsAHttpTransaction.h"
-#include "nsIInputStream.h"
-#include "nsIOutputStream.h"
 #include "nsTArray.h"
 #include "nsCOMPtr.h"
+
+class nsIInputStream;
+class nsIOutputStream;
+
+namespace mozilla { namespace net {
 
 class nsHttpPipeline : public nsAHttpConnection
                      , public nsAHttpTransaction
                      , public nsAHttpSegmentReader
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSAHTTPCONNECTION(mConnection)
     NS_DECL_NSAHTTPTRANSACTION
     NS_DECL_NSAHTTPSEGMENTREADER
 
     nsHttpPipeline();
     virtual ~nsHttpPipeline();
+
+  bool ResponseTimeoutEnabled() const MOZ_OVERRIDE MOZ_FINAL {
+    return true;
+  }
 
 private:
     nsresult FillSendBuf();
@@ -91,5 +97,7 @@ private:
     uint64_t  mSendingToProgress;
     bool      mSuppressSendEvents;
 };
+
+}} // namespace mozilla::net
 
 #endif // nsHttpPipeline_h__

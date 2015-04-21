@@ -11,6 +11,7 @@ interface MozRDFCompositeDataSource;
 interface MozRDFResource;
 interface MozXULTemplateBuilder;
 
+[Func="IsChromeOrXBL"]
 interface XULElement : Element {
   [SetterThrows]
   attribute DOMString className;
@@ -127,6 +128,6 @@ interface MozFrameLoaderOwner {
 };
 
 XULElement implements GlobalEventHandlers;
-XULElement implements NodeEventHandlers;
 XULElement implements TouchEventHandlers;
 XULElement implements MozFrameLoaderOwner;
+XULElement implements OnErrorEventHandlerForNodes;

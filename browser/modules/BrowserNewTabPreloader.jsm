@@ -35,6 +35,8 @@ const TOPIC_TIMER_CALLBACK = "timer-callback";
 const TOPIC_DELAYED_STARTUP = "browser-delayed-startup-finished";
 const TOPIC_XUL_WINDOW_CLOSED = "xul-window-destroyed";
 
+const FRAME_SCRIPT_URL = "chrome://browser/content/newtab/preloaderContent.js";
+
 function createTimer(obj, delay) {
   let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
   timer.init(obj, delay, Ci.nsITimer.TYPE_ONE_SHOT);
@@ -61,6 +63,7 @@ this.BrowserNewTabPreloader = {
   },
 
   newTab: function Preloader_newTab(aTab) {
+    let swapped = false;
     let win = aTab.ownerDocument.defaultView;
     if (win.gBrowser) {
       let utils = win.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -69,11 +72,17 @@ this.BrowserNewTabPreloader = {
       let {width, height} = utils.getBoundsWithoutFlushing(win.gBrowser);
       let hiddenBrowser = HiddenBrowsers.get(width, height)
       if (hiddenBrowser) {
-        return hiddenBrowser.swapWithNewTab(aTab);
+        swapped = hiddenBrowser.swapWithNewTab(aTab);
       }
+
+      // aTab's browser is now visible and is therefore allowed to make
+      // background captures.
+      let msgMan = aTab.linkedBrowser.messageManager;
+      msgMan.loadFrameScript(FRAME_SCRIPT_URL, false);
+      msgMan.sendAsyncMessage("BrowserNewTabPreloader:allowBackgroundCaptures");
     }
 
-    return false;
+    return swapped;
   }
 };
 
@@ -290,22 +299,13 @@ let HiddenBrowsers = {
 
 function HiddenBrowser(width, height) {
   this.resize(width, height);
-
-  HostFrame.get().then(aFrame => {
-    let doc = aFrame.document;
-    this._browser = doc.createElementNS(XUL_NS, "browser");
-    this._browser.setAttribute("type", "content");
-    this._browser.setAttribute("src", NEWTAB_URL);
-    this._applySize();
-    doc.getElementById("win").appendChild(this._browser);
-  });
+  this._createBrowser();
 }
 
 HiddenBrowser.prototype = {
   _width: null,
   _height: null,
   _timer: null,
-  _needsFrameScripts: true,
 
   get isPreloaded() {
     return this._browser &&
@@ -329,18 +329,13 @@ HiddenBrowser.prototype = {
     // Swap docShells.
     tabbrowser.swapNewTabWithBrowser(aTab, this._browser);
 
-    // Load all default frame scripts.
-    if (this._needsFrameScripts) {
-      this._needsFrameScripts = false;
+    // Load all default frame scripts attached to the target window.
+    let mm = aTab.linkedBrowser.messageManager;
+    let scripts = win.messageManager.getDelayedFrameScripts();
+    Array.forEach(scripts, ([script, runGlobal]) => mm.loadFrameScript(script, true, runGlobal));
 
-      let mm = aTab.linkedBrowser.messageManager;
-      mm.loadFrameScript("chrome://browser/content/content.js", true);
-      mm.loadFrameScript("chrome://browser/content/content-sessionStore.js", true);
-
-      if ("TabView" in win) {
-        mm.loadFrameScript("chrome://browser/content/tabview-content.js", true);
-      }
-    }
+    // Remove the browser, it will be recreated by a timer.
+    this._removeBrowser();
 
     // Start a timer that will kick off preloading the next newtab page.
     this._timer = createTimer(this, PRELOADER_INTERVAL_MS);
@@ -353,13 +348,18 @@ HiddenBrowser.prototype = {
     this._timer = null;
 
     // Start pre-loading the new tab page.
-    this._browser.loadURI(NEWTAB_URL);
+    this._createBrowser();
   },
 
   resize: function (width, height) {
     this._width = width;
     this._height = height;
     this._applySize();
+  },
+
+  destroy: function () {
+    this._removeBrowser();
+    this._timer = clearTimer(this._timer);
   },
 
   _applySize: function () {
@@ -369,13 +369,22 @@ HiddenBrowser.prototype = {
     }
   },
 
-  destroy: function () {
+  _createBrowser: function () {
+    HostFrame.get().then(aFrame => {
+      let doc = aFrame.document;
+      this._browser = doc.createElementNS(XUL_NS, "browser");
+      this._browser.setAttribute("type", "content");
+      this._browser.setAttribute("src", NEWTAB_URL);
+      this._applySize();
+      doc.getElementById("win").appendChild(this._browser);
+    });
+  },
+
+  _removeBrowser: function () {
     if (this._browser) {
       this._browser.remove();
       this._browser = null;
     }
-
-    this._timer = clearTimer(this._timer);
   }
 };
 

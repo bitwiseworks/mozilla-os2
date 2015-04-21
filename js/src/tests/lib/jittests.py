@@ -7,11 +7,12 @@
 # jit_test.py -- Python harness for JavaScript trace tests.
 
 from __future__ import print_function
-import os, sys, tempfile, traceback, time
+import os, posixpath, sys, tempfile, traceback, time
 import subprocess
 from subprocess import Popen, PIPE
 from threading import Thread
 import signal
+import StringIO
 
 try:
     from multiprocessing import Process, Manager, cpu_count
@@ -24,8 +25,11 @@ from results import TestOutput
 
 TESTS_LIB_DIR = os.path.dirname(os.path.abspath(__file__))
 JS_DIR = os.path.dirname(os.path.dirname(TESTS_LIB_DIR))
+TOP_SRC_DIR = os.path.dirname(os.path.dirname(JS_DIR))
 TEST_DIR = os.path.join(JS_DIR, 'jit-test', 'tests')
 LIB_DIR = os.path.join(JS_DIR, 'jit-test', 'lib') + os.path.sep
+JS_CACHE_DIR = os.path.join(JS_DIR, 'jit-test', '.js-cache')
+JS_TESTS_DIR = posixpath.join(JS_DIR, 'tests')
 
 # Backported from Python 3.1 posixpath.py
 def _relpath(path, start=None):
@@ -68,7 +72,14 @@ class Test:
     del valgrinds
 
     def __init__(self, path):
-        self.path = path       # path to test file
+        # Absolute path of the test file.
+        self.path = path
+
+        # Path relative to the top mozilla/ directory.
+        self.relpath_top = os.path.relpath(path, TOP_SRC_DIR)
+
+        # Path relative to mozilla/js/src/jit-test/tests/.
+        self.relpath_tests = os.path.relpath(path, TEST_DIR)
 
         self.jitflags = []     # jit flags to enable
         self.slow = False      # True means the test is slow-running
@@ -90,6 +101,7 @@ class Test:
         return t
 
     COOKIE = '|jit-test|'
+    CacheDir = JS_CACHE_DIR
 
     @classmethod
     def from_file(cls, path, options):
@@ -130,20 +142,14 @@ class Test:
                         test.valgrind = options.valgrind
                     elif name == 'tz-pacific':
                         test.tz_pacific = True
-                    elif name == 'mjitalways':
-                        test.jitflags.append('--always-mjit')
                     elif name == 'debug':
                         test.jitflags.append('--debugjit')
-                    elif name == 'mjit':
-                        test.jitflags.append('--jm')
-                    elif name == 'no-jm':
-                        test.jitflags.append('--no-jm')
                     elif name == 'ion-eager':
                         test.jitflags.append('--ion-eager')
-                    elif name == 'no-ion':
-                        test.jitflags.append('--no-ion')
                     elif name == 'dump-bytecode':
                         test.jitflags.append('--dump-bytecode')
+                    elif name.startswith('--'): # // |jit-test| --ion-gvn=off; --no-sse4
+                        test.jitflags.append(name)
                     else:
                         print('warning: unrecognized |jit-test| attribute %s' % part)
 
@@ -152,15 +158,30 @@ class Test:
 
         return test
 
-    def command(self, prefix):
-        scriptdir_var = os.path.dirname(self.path);
+    def command(self, prefix, libdir, remote_prefix=None):
+        path = self.path
+        if remote_prefix:
+            path = self.path.replace(TEST_DIR, remote_prefix)
+
+        scriptdir_var = os.path.dirname(path);
         if not scriptdir_var.endswith('/'):
             scriptdir_var += '/'
-        expr = ("const platform=%r; const libdir=%r; const scriptdir=%r"
-                % (sys.platform, LIB_DIR, scriptdir_var))
+
+        # Platforms where subprocess immediately invokes exec do not care
+        # whether we use double or single quotes. On windows and when using
+        # a remote device, however, we have to be careful to use the quote
+        # style that is the opposite of what the exec wrapper uses.
+        # This uses %r to get single quotes on windows and special cases
+        # the remote device.
+        fmt = 'const platform=%r; const libdir=%r; const scriptdir=%r'
+        if remote_prefix:
+            fmt = 'const platform="%s"; const libdir="%s"; const scriptdir="%s"'
+        expr = fmt % (sys.platform, libdir, scriptdir_var)
+
         # We may have specified '-a' or '-d' twice: once via --jitflags, once
         # via the "|jit-test|" line.  Remove dups because they are toggles.
-        cmd = prefix + list(set(self.jitflags)) + ['-e', expr, '-f', self.path]
+        cmd = prefix + ['--js-cache', Test.CacheDir]
+        cmd += list(set(self.jitflags)) + ['-e', expr, '-f', path]
         if self.valgrind:
             cmd = self.VALGRIND_CMD + cmd
         return cmd
@@ -268,7 +289,7 @@ def run_cmd_avoid_stdio(cmdline, env, timeout):
     return read_and_unlink(stdoutPath), read_and_unlink(stderrPath), code
 
 def run_test(test, prefix, options):
-    cmd = test.command(prefix)
+    cmd = test.command(prefix, LIB_DIR)
     if options.show_cmd:
         print(subprocess.list2cmdline(cmd))
 
@@ -281,10 +302,56 @@ def run_test(test, prefix, options):
     if test.tz_pacific:
         env['TZ'] = 'PST8PDT'
 
+    # Ensure interpreter directory is in shared library path.
+    pathvar = ''
+    if sys.platform.startswith('linux'):
+        pathvar = 'LD_LIBRARY_PATH'
+    elif sys.platform.startswith('darwin'):
+        pathvar = 'DYLD_LIBRARY_PATH'
+    elif sys.platform.startswith('win'):
+        pathvar = 'PATH'
+    if pathvar:
+        bin_dir = os.path.dirname(cmd[0])
+        if pathvar in env:
+            env[pathvar] = '%s%s%s' % (bin_dir, os.pathsep, env[pathvar])
+        else:
+            env[pathvar] = bin_dir
+
     out, err, code, timed_out = run(cmd, env, options.timeout)
     return TestOutput(test, cmd, out, err, code, None, timed_out)
 
-def check_output(out, err, rc, test):
+def run_test_remote(test, device, prefix, options):
+    cmd = test.command(prefix, posixpath.join(options.remote_test_root, 'lib/'), posixpath.join(options.remote_test_root, 'tests'))
+    if options.show_cmd:
+        print(subprocess.list2cmdline(cmd))
+
+    env = {}
+    if test.tz_pacific:
+        env['TZ'] = 'PST8PDT'
+
+    env['LD_LIBRARY_PATH'] = options.remote_test_root
+
+    buf = StringIO.StringIO()
+    returncode = device.shell(cmd, buf, env=env, cwd=options.remote_test_root,
+                              timeout=int(options.timeout))
+
+    out = buf.getvalue()
+    # We can't distinguish between stdout and stderr so we pass
+    # the same buffer to both.
+    return TestOutput(test, cmd, out, out, returncode, None, False)
+
+def check_output(out, err, rc, timed_out, test):
+    if timed_out:
+        # The shell sometimes hangs on shutdown on Windows 7 and Windows
+        # Server 2008. See bug 970063 comment 7 for a description of the
+        # problem. Until bug 956899 is fixed, ignore timeouts on these
+        # platforms (versions 6.0 and 6.1).
+        if sys.platform == 'win32':
+            ver = sys.getwindowsversion()
+            if ver.major == 6 and ver.minor <= 1:
+                return True
+        return False
+
     if test.expect_error:
         # The shell exits with code 3 on uncaught exceptions.
         # Sometimes 0 is returned on Windows for unknown reasons.
@@ -307,26 +374,47 @@ def check_output(out, err, rc, test):
             return False
 
     if rc != test.expect_status:
+        # Tests which expect a timeout check for exit code 6.
+        # Sometimes 0 is returned on Windows for unknown reasons.
+        # See bug 899697.
+        if sys.platform in ['win32', 'cygwin'] and rc == 0:
+            return True
+
         # Allow a non-zero exit code if we want to allow OOM, but only if we
         # actually got OOM.
         return test.allow_oom and 'out of memory' in err and 'Assertion failure' not in err
 
     return True
 
-def print_tinderbox(label, test, message=None):
+def print_tinderbox(ok, res):
     # Output test failures in a TBPL parsable format, eg:
-    # TEST-PASS | /foo/bar/baz.js | --no-jm
-    # TEST-UNEXPECTED-FAIL | /foo/bar/baz.js | --no-ion: Assertion failure: ...
+    # TEST-RESULT | filename.js | Failure description (code N, args "--foobar")
+    #
+    # Example:
+    # TEST-PASS | foo/bar/baz.js | (code 0, args "--ion-eager")
+    # TEST-UNEXPECTED-FAIL | foo/bar/baz.js | TypeError: or something (code -9, args "--no-ion")
+    # INFO exit-status     : 3
+    # INFO timed-out       : False
+    # INFO stdout          > foo
+    # INFO stdout          > bar
+    # INFO stdout          > baz
+    # INFO stderr         2> TypeError: or something
     # TEST-UNEXPECTED-FAIL | jit_test.py: Test execution interrupted by user
-    if (test != None):
-        jitflags = " ".join(test.jitflags)
-        result = "%s | %s | %s" % (label, test.path, jitflags)
-    else:
-        result = "%s | jit_test.py" % label
+    result = "TEST-PASS" if ok else "TEST-UNEXPECTED-FAIL"
+    message = "Success" if ok else res.describe_failure()
+    jitflags = " ".join(res.test.jitflags)
+    print("{} | {} | {} (code {}, args \"{}\")".format(
+          result, res.test.relpath_top, message, res.rc, jitflags))
 
-    if message:
-        result += ": " + message
-    print(result)
+    # For failed tests, print as much information as we have, to aid debugging.
+    if ok:
+        return
+    print("INFO exit-status     : {}".format(res.rc))
+    print("INFO timed-out       : {}".format(res.timed_out))
+    for line in res.out.splitlines():
+        print("INFO stdout          > " + line.strip())
+    for line in res.err.splitlines():
+        print("INFO stderr         2> " + line.strip())
 
 def wrap_parallel_run_test(test, prefix, resultQueue, options):
     # Ignore SIGINT in the child
@@ -350,10 +438,11 @@ def run_tests_parallel(tests, prefix, options):
 
     # This queue will contain the return value of the function
     # processing the test results.
+    total_tests = len(tests) * options.repeat
     result_process_return_queue = queue_manager.Queue()
     result_process = Process(target=process_test_results_parallel,
                              args=(async_test_result_queue, result_process_return_queue,
-                                   notify_queue, len(tests), options))
+                                   notify_queue, total_tests, options))
     result_process.start()
 
     # Ensure that a SIGTERM is handled the same way as SIGINT
@@ -375,15 +464,16 @@ def run_tests_parallel(tests, prefix, options):
     try:
         testcnt = 0
         # Initially start as many jobs as allowed to run parallel
-        for i in range(min(options.max_jobs,len(tests))):
+        for i in range(min(options.max_jobs,total_tests)):
             notify_queue.put(True)
 
         # For every item in the notify queue, start one new worker.
         # Every completed worker adds a new item to this queue.
         while notify_queue.get():
-            if (testcnt < len(tests)):
+            if (testcnt < total_tests):
                 # Start one new worker
-                worker_process = Process(target=wrap_parallel_run_test, args=(tests[testcnt], prefix, async_test_result_queue, options))
+                test = tests[testcnt % len(tests)]
+                worker_process = Process(target=wrap_parallel_run_test, args=(test, prefix, async_test_result_queue, options))
                 worker_processes.append(worker_process)
                 worker_process.start()
                 testcnt += 1
@@ -437,7 +527,7 @@ def process_test_results_parallel(async_test_result_queue, return_queue, notify_
     ok = process_test_results(gen, num_tests, options)
     return_queue.put(ok)
 
-def print_test_summary(failures, complete, doing, options):
+def print_test_summary(num_tests, failures, complete, doing, options):
     if failures:
         if options.write_failures:
             try:
@@ -474,11 +564,16 @@ def print_test_summary(failures, complete, doing, options):
         for res in failures:
             if res.timed_out:
                 show_test(res)
-
-        return False
     else:
         print('PASSED ALL' + ('' if complete else ' (partial run -- interrupted by user %s)' % doing))
-        return True
+
+    if options.tinderbox:
+        num_failures = len(failures) if failures else 0
+        print('Result summary:')
+        print('Passed: %d' % (num_tests - num_failures))
+        print('Failed: %d' % num_failures)
+
+    return not failures
 
 def process_test_results(results, num_tests, options):
     pb = NullProgressBar()
@@ -497,7 +592,6 @@ def process_test_results(results, num_tests, options):
     doing = 'before starting'
     try:
         for i, res in enumerate(results):
-
             if options.show_output:
                 sys.stdout.write(res.out)
                 sys.stdout.write(res.err)
@@ -505,25 +599,18 @@ def process_test_results(results, num_tests, options):
             if res.test.valgrind:
                 sys.stdout.write(res.err)
 
-            ok = check_output(res.out, res.err, res.rc, res.test)
-            doing = 'after %s' % res.test.path
+            ok = check_output(res.out, res.err, res.rc, res.timed_out, res.test)
+            doing = 'after %s' % res.test.relpath_tests
             if not ok:
                 failures.append(res)
-                pb.message("FAIL - %s" % res.test.path)
-            if res.timed_out:
-                timeouts += 1
+                if res.timed_out:
+                    pb.message("TIMEOUT - %s" % res.test.relpath_tests)
+                    timeouts += 1
+                else:
+                    pb.message("FAIL - %s" % res.test.relpath_tests)
 
             if options.tinderbox:
-                if ok:
-                    print_tinderbox("TEST-PASS", res.test);
-                else:
-                    lines = [ _ for _ in res.out.split('\n') + res.err.split('\n')
-                              if _ != '' ]
-                    if len(lines) >= 1:
-                        msg = lines[-1]
-                    else:
-                        msg = ''
-                    print_tinderbox("TEST-UNEXPECTED-FAIL", res.test, msg);
+                print_tinderbox(ok, res)
 
             n = i + 1
             pb.update(n, {
@@ -534,18 +621,80 @@ def process_test_results(results, num_tests, options):
             )
         complete = True
     except KeyboardInterrupt:
-        print_tinderbox("TEST-UNEXPECTED-FAIL", None, "Test execution interrupted by user");
+        print("TEST-UNEXPECTED-FAIL | jit_test.py" +
+              " : Test execution interrupted by user")
 
     pb.finish(True)
-    return print_test_summary(failures, complete, doing, options)
+    return print_test_summary(num_tests, failures, complete, doing, options)
 
 def get_serial_results(tests, prefix, options):
-    for test in tests:
-        yield run_test(test, prefix, options)
+    for i in xrange(0, options.repeat):
+        for test in tests:
+            yield run_test(test, prefix, options)
 
 def run_tests(tests, prefix, options):
     gen = get_serial_results(tests, prefix, options)
-    ok = process_test_results(gen, len(tests), options)
+    ok = process_test_results(gen, len(tests) * options.repeat, options)
+    return ok
+
+def get_remote_results(tests, device, prefix, options):
+    for i in xrange(0, options.repeat):
+        for test in tests:
+            yield run_test_remote(test, device, prefix, options)
+
+def push_libs(options, device):
+    # This saves considerable time in pushing unnecessary libraries
+    # to the device but needs to be updated if the dependencies change.
+    required_libs = ['libnss3.so', 'libmozglue.so']
+
+    for file in os.listdir(options.local_lib):
+        if file in required_libs:
+            remote_file = posixpath.join(options.remote_test_root, file)
+            device.pushFile(os.path.join(options.local_lib, file), remote_file)
+
+def push_progs(options, device, progs):
+    for local_file in progs:
+        remote_file = posixpath.join(options.remote_test_root, os.path.basename(local_file))
+        device.pushFile(local_file, remote_file)
+
+def run_tests_remote(tests, prefix, options):
+    # Setup device with everything needed to run our tests.
+    from mozdevice import devicemanager, devicemanagerADB, devicemanagerSUT
+
+    if options.device_transport == 'adb':
+        if options.device_ip:
+            dm = devicemanagerADB.DeviceManagerADB(options.device_ip, options.device_port, deviceSerial=options.device_serial, packageName=None, deviceRoot=options.remote_test_root)
+        else:
+            dm = devicemanagerADB.DeviceManagerADB(deviceSerial=options.device_serial, packageName=None, deviceRoot=options.remote_test_root)
+    else:
+        dm = devicemanagerSUT.DeviceManagerSUT(options.device_ip, options.device_port, deviceRoot=options.remote_test_root)
+        if options.device_ip == None:
+            print('Error: you must provide a device IP to connect to via the --device option')
+            sys.exit(1)
+
+    # Update the test root to point to our test directory.
+    jit_tests_dir = posixpath.join(options.remote_test_root, 'jit-tests')
+    options.remote_test_root = posixpath.join(jit_tests_dir, 'jit-tests')
+
+    # Push js shell and libraries.
+    if dm.dirExists(jit_tests_dir):
+        dm.removeDir(jit_tests_dir)
+    dm.mkDirs(options.remote_test_root)
+    push_libs(options, dm)
+    push_progs(options, dm, [prefix[0]])
+    dm.chmodDir(options.remote_test_root)
+
+    Test.CacheDir = posixpath.join(options.remote_test_root, '.js-cache')
+    dm.mkDir(Test.CacheDir)
+
+    dm.pushDir(JS_TESTS_DIR, posixpath.join(jit_tests_dir, 'tests'), timeout=600)
+
+    dm.pushDir(os.path.dirname(TEST_DIR), options.remote_test_root, timeout=600)
+    prefix[0] = os.path.join(options.remote_test_root, 'js')
+
+    # Run all tests.
+    gen = get_remote_results(tests, dm, prefix, options)
+    ok = process_test_results(gen, len(tests) * options.repeat, options)
     return ok
 
 def parse_jitflags(options):

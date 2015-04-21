@@ -9,12 +9,13 @@ function test() {
   initNetMonitor(SIMPLE_SJS).then(([aTab, aDebuggee, aMonitor]) => {
     info("Starting test... ");
 
-    let { document, L10N, SourceEditor, NetMonitorView } = aMonitor.panelWin;
+    let { document, L10N, Editor, NetMonitorView } = aMonitor.panelWin;
     let { RequestsMenu, NetworkDetails } = NetMonitorView;
-
+    let TAB_UPDATED = aMonitor.panelWin.EVENTS.TAB_UPDATED;
     RequestsMenu.lazyUpdate = false;
 
-    waitForNetworkEvents(aMonitor, 1).then(() => {
+    Task.spawn(function () {
+      yield waitForNetworkEvents(aMonitor, 1);
       is(RequestsMenu.selectedItem, null,
         "There shouldn't be any selected item in the requests menu.");
       is(RequestsMenu.itemCount, 1,
@@ -32,15 +33,14 @@ function test() {
       is(NetMonitorView.detailsPaneHidden, false,
         "The details pane should not be hidden after toggle button was pressed.");
 
+      yield waitFor(aMonitor.panelWin, TAB_UPDATED)
       testHeadersTab();
       testCookiesTab();
       testParamsTab();
-      testResponseTab()
-        .then(() => {
-          testTimingsTab();
-          return teardown(aMonitor);
-        })
-        .then(finish);
+      yield testResponseTab();
+      testTimingsTab();
+      yield teardown(aMonitor);
+      finish();
     });
 
     function testHeadersTab() {
@@ -172,29 +172,32 @@ function test() {
       EventUtils.sendMouseEvent({ type: "mousedown" },
         document.querySelectorAll("#details-pane tab")[3]);
 
-      let tab = document.querySelectorAll("#details-pane tab")[3];
-      let tabpanel = document.querySelectorAll("#details-pane tabpanel")[3];
+      return Task.spawn(function () {
+        yield waitFor(aMonitor.panelWin, TAB_UPDATED);
 
-      is(tab.getAttribute("selected"), "true",
-        "The response tab in the network details pane should be selected.");
+        let tab = document.querySelectorAll("#details-pane tab")[3];
+        let tabpanel = document.querySelectorAll("#details-pane tabpanel")[3];
 
-      is(tabpanel.querySelector("#response-content-info-header")
-        .hasAttribute("hidden"), true,
-        "The response info header should be hidden.");
-      is(tabpanel.querySelector("#response-content-json-box")
-        .hasAttribute("hidden"), true,
-        "The response content json box should be hidden.");
-      is(tabpanel.querySelector("#response-content-textarea-box")
-        .hasAttribute("hidden"), false,
-        "The response content textarea box should not be hidden.");
-      is(tabpanel.querySelector("#response-content-image-box")
-        .hasAttribute("hidden"), true,
-        "The response content image box should be hidden.");
+        is(tab.getAttribute("selected"), "true",
+          "The response tab in the network details pane should be selected.");
 
-      return NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
+        is(tabpanel.querySelector("#response-content-info-header")
+          .hasAttribute("hidden"), true,
+          "The response info header should be hidden.");
+        is(tabpanel.querySelector("#response-content-json-box")
+          .hasAttribute("hidden"), true,
+          "The response content json box should be hidden.");
+        is(tabpanel.querySelector("#response-content-textarea-box")
+          .hasAttribute("hidden"), false,
+          "The response content textarea box should not be hidden.");
+        is(tabpanel.querySelector("#response-content-image-box")
+          .hasAttribute("hidden"), true,
+          "The response content image box should be hidden.");
+
+        let aEditor = yield NetMonitorView.editor("#response-content-textarea");
         is(aEditor.getText(), "Hello world!",
           "The text shown in the source editor is incorrect.");
-        is(aEditor.getMode(), SourceEditor.MODES.TEXT,
+        is(aEditor.getMode(), Editor.modes.text,
           "The mode active in the source editor is incorrect.");
       });
     }

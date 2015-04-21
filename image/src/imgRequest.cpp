@@ -12,14 +12,11 @@
 #include "imgStatusTracker.h"
 #include "ImageFactory.h"
 #include "Image.h"
-
-#include "imgILoader.h"
-
-#include "netCore.h"
+#include "RasterImage.h"
 
 #include "nsIChannel.h"
 #include "nsICachingChannel.h"
-#include "nsILoadGroup.h"
+#include "nsIThreadRetargetableRequest.h"
 #include "nsIInputStream.h"
 #include "nsIMultiPartChannel.h"
 #include "nsIHttpChannel.h"
@@ -27,22 +24,17 @@
 #include "nsIApplicationCacheChannel.h"
 #include "nsMimeTypes.h"
 
-#include "nsIComponentManager.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIServiceManager.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIScriptSecurityManager.h"
+#include "nsContentUtils.h"
 
-#include "nsICacheVisitor.h"
+#include "nsICacheEntry.h"
 
-#include "nsString.h"
-#include "nsXPIDLString.h"
 #include "plstr.h" // PL_strcasestr(...)
 #include "nsNetUtil.h"
 #include "nsIProtocolHandler.h"
-
-#include "DiscardTracker.h"
-#include "nsAsyncRedirectVerifyHelper.h"
+#include "imgIRequest.h"
 
 using namespace mozilla;
 using namespace mozilla::image;
@@ -58,11 +50,12 @@ GetImgLog()
 }
 #endif
 
-NS_IMPL_ISUPPORTS5(imgRequest,
-                   nsIStreamListener, nsIRequestObserver,
-                   nsIChannelEventSink,
-                   nsIInterfaceRequestor,
-                   nsIAsyncVerifyRedirectCallback)
+NS_IMPL_ISUPPORTS(imgRequest,
+                  nsIStreamListener, nsIRequestObserver,
+                  nsIThreadRetargetableStreamListener,
+                  nsIChannelEventSink,
+                  nsIInterfaceRequestor,
+                  nsIAsyncVerifyRedirectCallback)
 
 imgRequest::imgRequest(imgLoader* aLoader)
  : mLoader(aLoader)
@@ -96,6 +89,8 @@ nsresult imgRequest::Init(nsIURI *aURI,
                           nsIPrincipal* aLoadingPrincipal,
                           int32_t aCORSMode)
 {
+  MOZ_ASSERT(NS_IsMainThread(), "Cannot use nsIURI off main thread!");
+
   LOG_FUNC(GetImgLog(), "imgRequest::Init");
 
   NS_ABORT_IF_FALSE(!mImage, "Multiple calls to init");
@@ -106,7 +101,8 @@ nsresult imgRequest::Init(nsIURI *aURI,
 
   mProperties = do_CreateInstance("@mozilla.org/properties;1");
 
-  mURI = aURI;
+  // Use ImageURL to ensure access to URI data off main thread.
+  mURI = new ImageURL(aURI);
   mCurrentURI = aCurrentURI;
   mRequest = aRequest;
   mChannel = aChannel;
@@ -129,7 +125,7 @@ nsresult imgRequest::Init(nsIURI *aURI,
   return NS_OK;
 }
 
-imgStatusTracker&
+already_AddRefed<imgStatusTracker>
 imgRequest::GetStatusTracker()
 {
   if (mImage && mGotData) {
@@ -139,7 +135,9 @@ imgRequest::GetStatusTracker()
   } else {
     NS_ABORT_IF_FALSE(mStatusTracker,
                       "Should have mStatusTracker until we create mImage");
-    return *mStatusTracker;
+    nsRefPtr<imgStatusTracker> statusTracker = mStatusTracker;
+    MOZ_ASSERT(statusTracker);
+    return statusTracker.forget();
   }
 }
 
@@ -167,12 +165,13 @@ void imgRequest::AddProxy(imgRequestProxy *proxy)
 
   // If we're empty before adding, we have to tell the loader we now have
   // proxies.
-  if (GetStatusTracker().ConsumerCount() == 0) {
+  nsRefPtr<imgStatusTracker> statusTracker = GetStatusTracker();
+  if (statusTracker->ConsumerCount() == 0) {
     NS_ABORT_IF_FALSE(mURI, "Trying to SetHasProxies without key uri.");
     mLoader->SetHasProxies(mURI);
   }
 
-  GetStatusTracker().AddConsumer(proxy);
+  statusTracker->AddConsumer(proxy);
 }
 
 nsresult imgRequest::RemoveProxy(imgRequestProxy *proxy, nsresult aStatus)
@@ -188,11 +187,11 @@ nsresult imgRequest::RemoveProxy(imgRequestProxy *proxy, nsresult aStatus)
   // below, because Cancel() may result in OnStopRequest being called back
   // before Cancel() returns, leaving the image in a different state then the
   // one it was in at this point.
-  imgStatusTracker& statusTracker = GetStatusTracker();
-  if (!statusTracker.RemoveConsumer(proxy, aStatus))
+  nsRefPtr<imgStatusTracker> statusTracker = GetStatusTracker();
+  if (!statusTracker->RemoveConsumer(proxy, aStatus))
     return NS_OK;
 
-  if (statusTracker.ConsumerCount() == 0) {
+  if (statusTracker->ConsumerCount() == 0) {
     // If we have no observers, there's nothing holding us alive. If we haven't
     // been cancelled and thus removed from the cache, tell the image loader so
     // we can be evicted from the cache.
@@ -214,7 +213,7 @@ nsresult imgRequest::RemoveProxy(imgRequestProxy *proxy, nsresult aStatus)
        This way, if a proxy is destroyed without calling cancel on it, it won't leak
        and won't leave a bad pointer in the observer list.
      */
-    if (statusTracker.IsLoading() && NS_FAILED(aStatus)) {
+    if (statusTracker->IsLoading() && NS_FAILED(aStatus)) {
       LOG_MSG(GetImgLog(), "imgRequest::RemoveProxy", "load in progress.  canceling");
 
       this->Cancel(NS_BINDING_ABORTED);
@@ -247,26 +246,63 @@ void imgRequest::CancelAndAbort(nsresult aStatus)
   }
 }
 
+class imgRequestMainThreadCancel : public nsRunnable
+{
+public:
+  imgRequestMainThreadCancel(imgRequest *aImgRequest, nsresult aStatus)
+    : mImgRequest(aImgRequest)
+    , mStatus(aStatus)
+  {
+    MOZ_ASSERT(!NS_IsMainThread(), "Create me off main thread only!");
+    MOZ_ASSERT(aImgRequest);
+  }
+
+  NS_IMETHOD Run()
+  {
+    MOZ_ASSERT(NS_IsMainThread(), "I should be running on the main thread!");
+    mImgRequest->ContinueCancel(mStatus);
+    return NS_OK;
+  } 
+private:
+  nsRefPtr<imgRequest> mImgRequest;
+  nsresult mStatus;
+};
+
 void imgRequest::Cancel(nsresult aStatus)
 {
   /* The Cancel() method here should only be called by this class. */
 
   LOG_SCOPE(GetImgLog(), "imgRequest::Cancel");
 
-  imgStatusTracker& statusTracker = GetStatusTracker();
+  nsRefPtr<imgStatusTracker> statusTracker = GetStatusTracker();
 
-  statusTracker.MaybeUnblockOnload();
+  statusTracker->MaybeUnblockOnload();
 
-  statusTracker.RecordCancel();
+  statusTracker->RecordCancel();
+
+  if (NS_IsMainThread()) {
+    ContinueCancel(aStatus);
+  } else {
+    NS_DispatchToMainThread(new imgRequestMainThreadCancel(this, aStatus));
+  }
+}
+
+void imgRequest::ContinueCancel(nsresult aStatus)
+{
+  MOZ_ASSERT(NS_IsMainThread());
 
   RemoveFromCache();
 
-  if (mRequest && statusTracker.IsLoading())
-    mRequest->Cancel(aStatus);
+  nsRefPtr<imgStatusTracker> statusTracker = GetStatusTracker();
+  if (mRequest && statusTracker->IsLoading()) {
+     mRequest->Cancel(aStatus);
+  }
 }
 
-nsresult imgRequest::GetURI(nsIURI **aURI)
+nsresult imgRequest::GetURI(ImageURL **aURI)
 {
+  MOZ_ASSERT(aURI);
+
   LOG_FUNC(GetImgLog(), "imgRequest::GetURI");
 
   if (mURI) {
@@ -321,7 +357,8 @@ void imgRequest::AdjustPriority(imgRequestProxy *proxy, int32_t delta)
   // concern though is that image loads remain lower priority than other pieces
   // of content such as link clicks, CSS, and JS.
   //
-  if (!GetStatusTracker().FirstConsumerIs(proxy))
+  nsRefPtr<imgStatusTracker> statusTracker = GetStatusTracker();
+  if (!statusTracker->FirstConsumerIs(proxy))
     return;
 
   nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(mChannel);
@@ -350,7 +387,7 @@ void imgRequest::SetCacheValidation(imgCacheEntry* aCacheEntry, nsIRequest* aReq
       nsCOMPtr<nsISupports> cacheToken;
       cacheChannel->GetCacheToken(getter_AddRefs(cacheToken));
       if (cacheToken) {
-        nsCOMPtr<nsICacheEntryInfo> entryDesc(do_QueryInterface(cacheToken));
+        nsCOMPtr<nsICacheEntry> entryDesc(do_QueryInterface(cacheToken));
         if (entryDesc) {
           uint32_t expiration;
           /* get the expiration time from the caching channel's token */
@@ -515,9 +552,10 @@ NS_IMETHODIMP imgRequest::OnStartRequest(nsIRequest *aRequest, nsISupports *ctxt
 
   // Figure out if we're multipart
   nsCOMPtr<nsIMultiPartChannel> mpchan(do_QueryInterface(aRequest));
+  nsRefPtr<imgStatusTracker> statusTracker = GetStatusTracker();
   if (mpchan) {
     mIsMultiPartChannel = true;
-    GetStatusTracker().SetIsMultipart();
+    statusTracker->SetIsMultipart();
   }
 
   // If we're not multipart, we shouldn't have an image yet
@@ -552,7 +590,9 @@ NS_IMETHODIMP imgRequest::OnStartRequest(nsIRequest *aRequest, nsISupports *ctxt
     mRequest = chan;
   }
 
-  GetStatusTracker().OnStartRequest();
+  // Note: refreshing statusTracker in case OnNewSourceData changed it.
+  statusTracker = GetStatusTracker();
+  statusTracker->OnStartRequest();
 
   nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
   if (channel)
@@ -561,8 +601,7 @@ NS_IMETHODIMP imgRequest::OnStartRequest(nsIRequest *aRequest, nsISupports *ctxt
   /* Get our principal */
   nsCOMPtr<nsIChannel> chan(do_QueryInterface(aRequest));
   if (chan) {
-    nsCOMPtr<nsIScriptSecurityManager> secMan =
-      do_GetService("@mozilla.org/scriptsecuritymanager;1");
+    nsCOMPtr<nsIScriptSecurityManager> secMan = nsContentUtils::GetSecurityManager();
     if (secMan) {
       nsresult rv = secMan->GetChannelPrincipal(chan,
                                                 getter_AddRefs(mPrincipal));
@@ -577,8 +616,28 @@ NS_IMETHODIMP imgRequest::OnStartRequest(nsIRequest *aRequest, nsISupports *ctxt
   mApplicationCache = GetApplicationCache(aRequest);
 
   // Shouldn't we be dead already if this gets hit?  Probably multipart/x-mixed-replace...
-  if (GetStatusTracker().ConsumerCount() == 0) {
+  if (statusTracker->ConsumerCount() == 0) {
     this->Cancel(NS_IMAGELIB_ERROR_FAILURE);
+  }
+
+  // Try to retarget OnDataAvailable to a decode thread.
+  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aRequest);
+  nsCOMPtr<nsIThreadRetargetableRequest> retargetable =
+    do_QueryInterface(aRequest);
+  if (httpChannel && retargetable &&
+      ImageFactory::CanRetargetOnDataAvailable(mURI, mIsMultiPartChannel)) {
+    nsAutoCString mimeType;
+    nsresult rv = httpChannel->GetContentType(mimeType);
+    if (NS_SUCCEEDED(rv) && !mimeType.EqualsLiteral(IMAGE_SVG_XML)) {
+      // Image object not created until OnDataAvailable, so forward to static
+      // DecodePool directly.
+      nsCOMPtr<nsIEventTarget> target = RasterImage::GetEventTarget();
+      rv = retargetable->RetargetDeliveryTo(target);
+    }
+    PR_LOG(GetImgLog(), PR_LOG_WARNING,
+           ("[this=%p] imgRequest::OnStartRequest -- "
+            "RetargetDeliveryTo rv %d=%s\n",
+            this, rv, NS_SUCCEEDED(rv) ? "succeeded" : "failed"));
   }
 
   return NS_OK;
@@ -638,8 +697,8 @@ NS_IMETHODIMP imgRequest::OnStopRequest(nsIRequest *aRequest, nsISupports *ctxt,
   if (!mImage) {
     // We have to fire imgStatusTracker::OnStopRequest ourselves because there's
     // no image capable of doing so.
-    imgStatusTracker& statusTracker = GetStatusTracker();
-    statusTracker.OnStopRequest(lastPart, status);
+    nsRefPtr<imgStatusTracker> statusTracker = GetStatusTracker();
+    statusTracker->OnStopRequest(lastPart, status);
   }
 
   mTimedChannel = nullptr;
@@ -654,6 +713,15 @@ struct mimetype_closure
 /* prototype for these defined below */
 static NS_METHOD sniff_mimetype_callback(nsIInputStream* in, void* closure, const char* fromRawSegment,
                                          uint32_t toOffset, uint32_t count, uint32_t *writeCount);
+
+/** nsThreadRetargetableStreamListener methods **/
+NS_IMETHODIMP
+imgRequest::CheckListenerChain()
+{
+  // TODO Might need more checking here.
+  NS_ASSERTION(NS_IsMainThread(), "Should be on the main thread!");
+  return NS_OK;
+}
 
 /** nsIStreamListener methods **/
 
@@ -673,6 +741,11 @@ imgRequest::OnDataAvailable(nsIRequest *aRequest, nsISupports *ctxt,
     LOG_SCOPE(GetImgLog(), "imgRequest::OnDataAvailable |First time through... finding mimetype|");
 
     mGotData = true;
+
+    // Store and reset this for the invariant that it's always false after
+    // calls to OnDataAvailable (see bug 907575)
+    bool resniffMimeType = mResniffMimeType;
+    mResniffMimeType = false;
 
     mimetype_closure closure;
     nsAutoCString newType;
@@ -706,17 +779,6 @@ imgRequest::OnDataAvailable(nsIRequest *aRequest, nsISupports *ctxt,
       LOG_MSG(GetImgLog(), "imgRequest::OnDataAvailable", "Got content type from the channel");
     }
 
-#ifdef MOZ_WBMP
-#ifdef MOZ_WIDGET_GONK
-    // Only support WBMP in privileged app and certified app, do not support in browser app.
-    if (newType.EqualsLiteral(IMAGE_WBMP) &&
-        (!mLoadingPrincipal || mLoadingPrincipal->GetAppStatus() < nsIPrincipal::APP_STATUS_PRIVILEGED)) {
-      this->Cancel(NS_ERROR_FAILURE);
-      return NS_BINDING_ABORTED;
-    }
-#endif
-#endif
-
     // If we're a regular image and this is the first call to OnDataAvailable,
     // this will always be true. If we've resniffed our MIME type (i.e. we're a
     // multipart/x-mixed-replace image), we have to be able to switch our image
@@ -729,37 +791,22 @@ imgRequest::OnDataAvailable(nsIRequest *aRequest, nsISupports *ctxt,
       // If we've resniffed our MIME type and it changed, we need to create a
       // new status tracker to give to the image, because we don't have one of
       // our own any more.
-      if (mResniffMimeType) {
+      if (resniffMimeType) {
         NS_ABORT_IF_FALSE(mIsMultiPartChannel, "Resniffing a non-multipart image");
 
-        imgStatusTracker* freshTracker = new imgStatusTracker(nullptr);
-        freshTracker->AdoptConsumers(&GetStatusTracker());
-        mStatusTracker = freshTracker;
-
-        mResniffMimeType = false;
+        nsRefPtr<imgStatusTracker> freshTracker = new imgStatusTracker(nullptr);
+        nsRefPtr<imgStatusTracker> oldStatusTracker = GetStatusTracker();
+        freshTracker->AdoptConsumers(oldStatusTracker);
+        mStatusTracker = freshTracker.forget();
       }
 
-      /* set our mimetype as a property */
-      nsCOMPtr<nsISupportsCString> contentType(do_CreateInstance("@mozilla.org/supports-cstring;1"));
-      if (contentType) {
-        contentType->SetData(mContentType);
-        mProperties->Set("type", contentType);
-      }
-
-      /* set our content disposition as a property */
-      nsAutoCString disposition;
-      if (chan) {
-        chan->GetContentDispositionHeader(disposition);
-      }
-      if (!disposition.IsEmpty()) {
-        nsCOMPtr<nsISupportsCString> contentDisposition(do_CreateInstance("@mozilla.org/supports-cstring;1"));
-        if (contentDisposition) {
-          contentDisposition->SetData(disposition);
-          mProperties->Set("content-disposition", contentDisposition);
-        }
-      }
+      SetProperties(chan);
 
       LOG_MSG_WITH_PARAM(GetImgLog(), "imgRequest::OnDataAvailable", "content type", mContentType.get());
+
+      // XXX If server lied about mimetype and it's SVG, we may need to copy
+      // the data and dispatch back to the main thread, AND tell the channel to
+      // dispatch there in the future.
 
       // Now we can create a new image to hold the data. If we don't have a decoder
       // for this mimetype we'll find out about it here.
@@ -772,7 +819,8 @@ imgRequest::OnDataAvailable(nsIRequest *aRequest, nsISupports *ctxt,
 
       // Notify listeners that we have an image.
       // XXX(seth): The name of this notification method is pretty misleading.
-      GetStatusTracker().OnDataAvailable();
+      nsRefPtr<imgStatusTracker> statusTracker = GetStatusTracker();
+      statusTracker->OnDataAvailable();
 
       if (mImage->HasError() && !mIsMultiPartChannel) { // Probably bad mimetype
         // We allow multipart images to fail to initialize without cancelling the
@@ -782,7 +830,7 @@ imgRequest::OnDataAvailable(nsIRequest *aRequest, nsISupports *ctxt,
         return NS_BINDING_ABORTED;
       }
 
-      NS_ABORT_IF_FALSE(!!GetStatusTracker().GetImage(), "Status tracker should have an image!");
+      NS_ABORT_IF_FALSE(statusTracker->HasImage(), "Status tracker should have an image!");
       NS_ABORT_IF_FALSE(mImage, "imgRequest should have an image!");
 
       if (mDecodeRequested)
@@ -802,6 +850,58 @@ imgRequest::OnDataAvailable(nsIRequest *aRequest, nsISupports *ctxt,
   }
 
   return NS_OK;
+}
+
+class SetPropertiesEvent : public nsRunnable
+{
+public:
+  SetPropertiesEvent(imgRequest* aImgRequest, nsIChannel* aChan)
+    : mImgRequest(aImgRequest)
+    , mChan(aChan)
+  {
+    MOZ_ASSERT(!NS_IsMainThread(), "Should be created off the main thread");
+    MOZ_ASSERT(aImgRequest, "aImgRequest cannot be null");
+  }
+  NS_IMETHOD Run()
+  {
+    MOZ_ASSERT(NS_IsMainThread(), "Should run on the main thread only");
+    MOZ_ASSERT(mImgRequest, "mImgRequest cannot be null");
+    mImgRequest->SetProperties(mChan);
+    return NS_OK;
+  }
+private:
+  nsRefPtr<imgRequest> mImgRequest;
+  nsCOMPtr<nsIChannel> mChan;
+};
+
+void
+imgRequest::SetProperties(nsIChannel* aChan)
+{
+  // Force execution on main thread since some property objects are non
+  // threadsafe.
+  if (!NS_IsMainThread()) {
+    NS_DispatchToMainThread(new SetPropertiesEvent(this, aChan));
+    return;
+  }
+  /* set our mimetype as a property */
+  nsCOMPtr<nsISupportsCString> contentType(do_CreateInstance("@mozilla.org/supports-cstring;1"));
+  if (contentType) {
+    contentType->SetData(mContentType);
+    mProperties->Set("type", contentType);
+  }
+
+  /* set our content disposition as a property */
+  nsAutoCString disposition;
+  if (aChan) {
+    aChan->GetContentDispositionHeader(disposition);
+  }
+  if (!disposition.IsEmpty()) {
+    nsCOMPtr<nsISupportsCString> contentDisposition(do_CreateInstance("@mozilla.org/supports-cstring;1"));
+    if (contentDisposition) {
+      contentDisposition->SetData(disposition);
+      mProperties->Set("content-disposition", contentDisposition);
+    }
+  }
 }
 
 static NS_METHOD sniff_mimetype_callback(nsIInputStream* in,

@@ -4,8 +4,8 @@
 
 #include "TimeManager.h"
 
+#include "mozilla/dom/Date.h"
 #include "mozilla/dom/MozTimeManagerBinding.h"
-#include "nsContentUtils.h"
 #include "nsITimeService.h"
 #include "nsServiceManagerUtils.h"
 
@@ -24,9 +24,9 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(TimeManager)
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(TimeManager, mWindow)
 
 JSObject*
-TimeManager::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+TimeManager::WrapObject(JSContext* aCx)
 {
-  return MozTimeManagerBinding::Wrap(aCx, aScope, this);
+  return MozTimeManagerBinding::Wrap(aCx, this);
 }
 
 void

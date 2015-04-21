@@ -7,7 +7,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 do_get_profile();
 
-Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
+Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -60,6 +60,22 @@ function getDummyDatabase(name, extraOptions={}) {
   throw new Task.Result(c);
 }
 
+function getDummyTempDatabase(name, extraOptions={}) {
+  const TABLES = {
+    dirs: "id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT",
+    files: "id INTEGER PRIMARY KEY AUTOINCREMENT, dir_id INTEGER, path TEXT",
+  };
+
+  let c = yield getConnection(name, extraOptions);
+  c._initialStatementCount = 0;
+
+  for (let [k, v] in Iterator(TABLES)) {
+    yield c.execute("CREATE TEMP TABLE " + k + "(" + v + ")");
+    c._initialStatementCount++;
+  }
+
+  throw new Task.Result(c);
+}
 
 function run_test() {
   Cu.import("resource://testing-common/services-common/logging.js");
@@ -87,6 +103,34 @@ add_task(function test_get_dummy_database() {
   yield db.close();
 });
 
+add_task(function test_schema_version() {
+  let db = yield getDummyDatabase("schema_version");
+
+  let version = yield db.getSchemaVersion();
+  do_check_eq(version, 0);
+
+  db.setSchemaVersion(14);
+  version = yield db.getSchemaVersion();
+  do_check_eq(version, 14);
+
+  for (let v of [0.5, "foobar", NaN]) {
+    let success;
+    try {
+      yield db.setSchemaVersion(v);
+      do_print("Schema version " + v + " should have been rejected");
+      success = false;
+    } catch (ex if ex.message.startsWith("Schema version must be an integer.")) {
+      success = true;
+    }
+    do_check_true(success);
+
+    version = yield db.getSchemaVersion();
+    do_check_eq(version, 14);
+  }
+
+  yield db.close();
+});
+
 add_task(function test_simple_insert() {
   let c = yield getDummyDatabase("simple_insert");
 
@@ -109,8 +153,10 @@ add_task(function test_simple_bound_object() {
   let result = yield c.execute("INSERT INTO dirs VALUES (:id, :path)",
                                {id: 1, path: "foo"});
   do_check_eq(result.length, 0);
-  do_check_eq(c.lastInsertRowID, 1);
-  do_check_eq(c.affectedRows, 1);
+  result = yield c.execute("SELECT id, path FROM dirs");
+  do_check_eq(result.length, 1);
+  do_check_eq(result[0].getResultByName("id"), 1);
+  do_check_eq(result[0].getResultByName("path"), "foo");
   yield c.close();
 });
 
@@ -166,6 +212,27 @@ add_task(function test_index_exists() {
   let c = yield getDummyDatabase("index_exists");
 
   do_check_false(yield c.indexExists("does_not_exist"));
+
+  yield c.execute("CREATE INDEX my_index ON dirs (path)");
+  do_check_true(yield c.indexExists("my_index"));
+
+  yield c.close();
+});
+
+add_task(function test_temp_table_exists() {
+  let c = yield getDummyTempDatabase("temp_table_exists");
+
+  do_check_false(yield c.tableExists("temp_does_not_exist"));
+  do_check_true(yield c.tableExists("dirs"));
+  do_check_true(yield c.tableExists("files"));
+
+  yield c.close();
+});
+
+add_task(function test_temp_index_exists() {
+  let c = yield getDummyTempDatabase("temp_index_exists");
+
+  do_check_false(yield c.indexExists("temp_does_not_exist"));
 
   yield c.execute("CREATE INDEX my_index ON dirs (path)");
   do_check_true(yield c.indexExists("my_index"));
@@ -766,3 +833,76 @@ add_task(function test_direct() {
   yield deferred.promise;
 });
 
+/**
+ * Test Sqlite.cloneStorageConnection.
+ */
+add_task(function* test_cloneStorageConnection() {
+  let file = new FileUtils.File(OS.Path.join(OS.Constants.Path.profileDir,
+                                             "test_cloneStorageConnection.sqlite"));
+  let c = yield new Promise((success, failure) => {
+    Services.storage.openAsyncDatabase(file, null, (status, db) => {
+      if (Components.isSuccessCode(status)) {
+        success(db.QueryInterface(Ci.mozIStorageAsyncConnection));
+      } else {
+        failure(new Error(status));
+      }
+    });
+  });
+
+  let clone = yield Sqlite.cloneStorageConnection({ connection: c, readOnly: true });
+  // Just check that it works.
+  yield clone.execute("SELECT 1");
+
+  let clone2 = yield Sqlite.cloneStorageConnection({ connection: c, readOnly: false });
+  // Just check that it works.
+  yield clone2.execute("CREATE TABLE test (id INTEGER PRIMARY KEY)");
+
+  // Closing order should not matter.
+  yield c.asyncClose();
+  yield clone2.close();
+  yield clone.close();
+});
+
+/**
+ * Test Sqlite.cloneStorageConnection invalid argument.
+ */
+add_task(function* test_cloneStorageConnection() {
+  try {
+    let clone = yield Sqlite.cloneStorageConnection({ connection: null });
+    do_throw(new Error("Should throw on invalid connection"));
+  } catch (ex if ex.name == "TypeError") {}
+});
+
+/**
+ * Test clone() method.
+ */
+add_task(function* test_clone() {
+  let c = yield getDummyDatabase("clone");
+
+  let clone = yield c.clone();
+  // Just check that it works.
+  yield clone.execute("SELECT 1");
+  // Closing order should not matter.
+  yield c.close();
+  yield clone.close();
+});
+
+/**
+ * Test clone(readOnly) method.
+ */
+add_task(function* test_readOnly_clone() {
+  let path = OS.Path.join(OS.Constants.Path.profileDir, "test_readOnly_clone.sqlite");
+  let c = yield Sqlite.openConnection({path: path, sharedMemoryCache: false});
+
+  let clone = yield c.clone(true);
+  // Just check that it works.
+  yield clone.execute("SELECT 1");
+  // But should not be able to write.
+  try {
+    yield clone.execute("CREATE TABLE test (id INTEGER PRIMARY KEY)");
+    do_throw(new Error("Should not be able to write to a read-only clone."));
+  } catch (ex) {}
+  // Closing order should not matter.
+  yield c.close();
+  yield clone.close();
+});

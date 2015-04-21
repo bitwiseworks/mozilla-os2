@@ -9,44 +9,42 @@
 #include "nsSVGFilters.h"
 #include "nsSVGNumber2.h"
 
-class nsSVGFELightingElement;
-
 nsresult NS_NewSVGFESpotLightElement(nsIContent **aResult,
-                                     already_AddRefed<nsINodeInfo> aNodeInfo);
+                                     already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
 
-typedef SVGFEUnstyledElement SVGFESpotLightElementBase;
+typedef SVGFELightElement SVGFESpotLightElementBase;
 
 class SVGFESpotLightElement : public SVGFESpotLightElementBase
 {
   friend nsresult (::NS_NewSVGFESpotLightElement(nsIContent **aResult,
-                                                 already_AddRefed<nsINodeInfo> aNodeInfo));
+                                                 already_AddRefed<nsINodeInfo>&& aNodeInfo));
   friend class ::nsSVGFELightingElement;
 protected:
-  SVGFESpotLightElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  SVGFESpotLightElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : SVGFESpotLightElementBase(aNodeInfo)
   {
   }
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
 public:
+  virtual AttributeMap ComputeLightAttributes(nsSVGFilterInstance* aInstance) MOZ_OVERRIDE;
   virtual bool AttributeAffectsRendering(
           int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   // WebIDL
-  already_AddRefed<nsIDOMSVGAnimatedNumber> X();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> Y();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> Z();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> PointsAtX();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> PointsAtY();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> PointsAtZ();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> SpecularExponent();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> LimitingConeAngle();
+  already_AddRefed<SVGAnimatedNumber> X();
+  already_AddRefed<SVGAnimatedNumber> Y();
+  already_AddRefed<SVGAnimatedNumber> Z();
+  already_AddRefed<SVGAnimatedNumber> PointsAtX();
+  already_AddRefed<SVGAnimatedNumber> PointsAtY();
+  already_AddRefed<SVGAnimatedNumber> PointsAtZ();
+  already_AddRefed<SVGAnimatedNumber> SpecularExponent();
+  already_AddRefed<SVGAnimatedNumber> LimitingConeAngle();
 
 protected:
   virtual NumberAttributesInfo GetNumberInfo() MOZ_OVERRIDE;

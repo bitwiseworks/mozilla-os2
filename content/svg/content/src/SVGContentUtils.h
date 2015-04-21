@@ -10,12 +10,18 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
-#include "gfxMatrix.h"
+#include "mozilla/gfx/Matrix.h"
+#include "mozilla/RangedPtr.h"
+#include "nsError.h"
+#include "nsStringFwd.h"
+#include "gfx2DGlue.h"
 
 class nsIContent;
 class nsIDocument;
 class nsIFrame;
+class nsPresContext;
 class nsStyleContext;
+class nsStyleCoord;
 class nsSVGElement;
 
 namespace mozilla {
@@ -25,6 +31,10 @@ namespace dom {
 class Element;
 class SVGSVGElement;
 } // namespace dom
+
+namespace gfx {
+class Matrix;
+} // namespace gfx
 } // namespace mozilla
 
 inline bool
@@ -35,10 +45,10 @@ IsSVGWhitespace(char aChar)
 }
 
 inline bool
-IsSVGWhitespace(PRUnichar aChar)
+IsSVGWhitespace(char16_t aChar)
 {
-  return aChar == PRUnichar('\x20') || aChar == PRUnichar('\x9') ||
-         aChar == PRUnichar('\xD')  || aChar == PRUnichar('\xA');
+  return aChar == char16_t('\x20') || aChar == char16_t('\x9') ||
+         aChar == char16_t('\xD')  || aChar == char16_t('\xA');
 }
 
 /**
@@ -92,10 +102,10 @@ public:
    */
   static nsresult ReportToConsole(nsIDocument* doc,
                                   const char* aWarning,
-                                  const PRUnichar **aParams,
+                                  const char16_t **aParams,
                                   uint32_t aParamsLength);
 
-  static gfxMatrix GetCTM(nsSVGElement *aElement, bool aScreenCTM);
+  static mozilla::gfx::Matrix GetCTM(nsSVGElement *aElement, bool aScreenCTM);
 
   /**
    * Check if this is one of the SVG elements that SVG 1.1 Full says
@@ -120,18 +130,127 @@ public:
 
   /* Generate a viewbox to viewport tranformation matrix */
 
-  static gfxMatrix
+  static mozilla::gfx::Matrix
   GetViewBoxTransform(float aViewportWidth, float aViewportHeight,
                       float aViewboxX, float aViewboxY,
                       float aViewboxWidth, float aViewboxHeight,
                       const SVGAnimatedPreserveAspectRatio &aPreserveAspectRatio);
 
-  static gfxMatrix
+  static mozilla::gfx::Matrix
   GetViewBoxTransform(float aViewportWidth, float aViewportHeight,
                       float aViewboxX, float aViewboxY,
                       float aViewboxWidth, float aViewboxHeight,
                       const SVGPreserveAspectRatio &aPreserveAspectRatio);
 
+  static mozilla::RangedPtr<const char16_t>
+  GetStartRangedPtr(const nsAString& aString);
+
+  static mozilla::RangedPtr<const char16_t>
+  GetEndRangedPtr(const nsAString& aString);
+
+  /**
+   * True if 'aCh' is a decimal digit.
+   */
+  static inline bool IsDigit(char16_t aCh)
+  {
+    return aCh >= '0' && aCh <= '9';
+  }
+
+ /**
+  * Assuming that 'aCh' is a decimal digit, return its numeric value.
+  */
+  static inline uint32_t DecimalDigitValue(char16_t aCh)
+  {
+    MOZ_ASSERT(IsDigit(aCh), "Digit expected");
+    return aCh - '0';
+  }
+
+  /**
+   * Parses the sign (+ or -) of a number and moves aIter to the next
+   * character if a sign is found.
+   * @param aSignMultiplier [outparam] -1 if the sign is negative otherwise 1
+   * @return false if we hit the end of the string (i.e. if aIter is initially
+   *         at aEnd, or if we reach aEnd right after the sign character).
+   */
+  static inline bool
+  ParseOptionalSign(mozilla::RangedPtr<const char16_t>& aIter,
+                    const mozilla::RangedPtr<const char16_t>& aEnd,
+                    int32_t& aSignMultiplier)
+  {
+    if (aIter == aEnd) {
+      return false;
+    }
+    aSignMultiplier = *aIter == '-' ? -1 : 1;
+
+    mozilla::RangedPtr<const char16_t> iter(aIter);
+
+    if (*iter == '-' || *iter == '+') {
+      ++iter;
+      if (iter == aEnd) {
+        return false;
+      }
+    }
+    aIter = iter;
+    return true;
+  }
+
+  /**
+   * Parse a number of the form:
+   * number ::= integer ([Ee] integer)? | [+-]? [0-9]* "." [0-9]+ ([Ee] integer)?
+   * Parsing fails if the number cannot be represented by a floatType.
+   * If parsing succeeds, aIter is updated so that it points to the character
+   * after the end of the number, otherwise it is left unchanged
+   */
+  template<class floatType>
+  static bool
+  ParseNumber(mozilla::RangedPtr<const char16_t>& aIter,
+              const mozilla::RangedPtr<const char16_t>& aEnd,
+              floatType& aValue);
+
+  /**
+   * Parse a number of the form:
+   * number ::= integer ([Ee] integer)? | [+-]? [0-9]* "." [0-9]+ ([Ee] integer)?
+   * Parsing fails if there is anything left over after the number,
+   * or the number cannot be represented by a floatType.
+   */
+  template<class floatType>
+  static bool
+  ParseNumber(const nsAString& aString, floatType& aValue);
+
+  /**
+   * Parse an integer of the form:
+   * integer ::= [+-]? [0-9]+
+   * The returned number is clamped to an int32_t if outside that range.
+   * If parsing succeeds, aIter is updated so that it points to the character
+   * after the end of the number, otherwise it is left unchanged
+   */
+  static bool ParseInteger(mozilla::RangedPtr<const char16_t>& aIter,
+                           const mozilla::RangedPtr<const char16_t>& aEnd,
+                           int32_t& aValue);
+
+  /**
+   * Parse an integer of the form:
+   * integer ::= [+-]? [0-9]+
+   * The returned number is clamped to an int32_t if outside that range.
+   * Parsing fails if there is anything left over after the number.
+   */
+  static bool ParseInteger(const nsAString& aString, int32_t& aValue);
+
+  /**
+   * Converts an nsStyleCoord into a userspace value.  Handles units
+   * Factor (straight userspace), Coord (dimensioned), and Percent (of
+   * aContent's SVG viewport)
+   */
+  static float CoordToFloat(nsPresContext *aPresContext,
+                            nsSVGElement *aContent,
+                            const nsStyleCoord &aCoord);
+  /**
+   * Parse the SVG path string
+   * Returns a path
+   * string formatted as an SVG path
+   */
+  static mozilla::RefPtr<mozilla::gfx::Path>
+  GetPath(const nsAString& aPathString);
 };
 
 #endif

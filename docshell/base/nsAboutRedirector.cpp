@@ -6,11 +6,10 @@
 
 #include "nsAboutRedirector.h"
 #include "nsNetUtil.h"
-#include "plstr.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsAboutProtocolUtils.h"
+#include "mozilla/ArrayUtils.h"
 
-NS_IMPL_ISUPPORTS1(nsAboutRedirector, nsIAboutModule)
+NS_IMPL_ISUPPORTS(nsAboutRedirector, nsIAboutModule)
 
 struct RedirEntry {
     const char* id;
@@ -51,9 +50,9 @@ static RedirEntry kRedirMap[] = {
       nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
       nsIAboutModule::ALLOW_SCRIPT |
       nsIAboutModule::HIDE_FROM_ABOUTABOUT },
-    // aboutMemory.xhtml implements about:compartments
-    { "compartments", "chrome://global/content/aboutMemory.xhtml",
-      nsIAboutModule::ALLOW_SCRIPT },
+    { "compartments", "chrome://global/content/aboutCompartments.xhtml",
+      nsIAboutModule::ALLOW_SCRIPT |
+      nsIAboutModule::HIDE_FROM_ABOUTABOUT },
     { "memory", "chrome://global/content/aboutMemory.xhtml",
       nsIAboutModule::ALLOW_SCRIPT },
     { "addons", "chrome://mozapps/content/extensions/extensions.xul",
@@ -64,9 +63,18 @@ static RedirEntry kRedirMap[] = {
     { "support", "chrome://global/content/aboutSupport.xhtml",
       nsIAboutModule::ALLOW_SCRIPT },
     { "telemetry", "chrome://global/content/aboutTelemetry.xhtml",
-      nsIAboutModule::ALLOW_SCRIPT }
+      nsIAboutModule::ALLOW_SCRIPT },
+    { "networking", "chrome://global/content/aboutNetworking.xhtml",
+       nsIAboutModule::ALLOW_SCRIPT },
+    { "webrtc", "chrome://global/content/aboutWebrtc.xhtml",
+       nsIAboutModule::ALLOW_SCRIPT },
+    // about:srcdoc is unresolvable by specification.  It is included here
+    // because the security manager would disallow srcdoc iframes otherwise.
+    { "srcdoc", "about:blank",
+      nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+      nsIAboutModule::HIDE_FROM_ABOUTABOUT }
 };
-static const int kRedirTotal = NS_ARRAY_LENGTH(kRedirMap);
+static const int kRedirTotal = mozilla::ArrayLength(kRedirMap);
 
 NS_IMETHODIMP
 nsAboutRedirector::NewChannel(nsIURI *aURI, nsIChannel **result)

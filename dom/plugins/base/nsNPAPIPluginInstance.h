@@ -10,16 +10,17 @@
 #include "nsTArray.h"
 #include "nsPIDOMWindow.h"
 #include "nsITimer.h"
-#include "nsIPluginTagInfo.h"
+#include "nsIPluginInstanceOwner.h"
 #include "nsIURI.h"
 #include "nsIChannel.h"
 #include "nsInterfaceHashtable.h"
 #include "nsHashKeys.h"
 #include <prinrval.h>
+#include "js/TypeDecls.h"
 #ifdef MOZ_WIDGET_ANDROID
 #include "nsAutoPtr.h"
 #include "nsIRunnable.h"
-#include "GLContext.h"
+#include "GLContextTypes.h"
 #include "nsSurfaceTexture.h"
 #include "AndroidBridge.h"
 #include <map>
@@ -29,8 +30,6 @@ class SharedPluginTexture;
 
 #include "mozilla/TimeStamp.h"
 #include "mozilla/PluginLibrary.h"
-
-class JSObject;
 
 class nsPluginStreamListenerPeer; // browser-initiated stream class
 class nsNPAPIPluginStreamListener; // plugin-initiated stream class
@@ -81,7 +80,7 @@ private:
   typedef mozilla::PluginLibrary PluginLibrary;
 
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   nsresult Initialize(nsNPAPIPlugin *aPlugin, nsPluginInstanceOwner* aOwner, const char* aMIMEType);
   nsresult Start();
@@ -118,9 +117,6 @@ public:
   nsPluginInstanceOwner* GetOwner();
   void SetOwner(nsPluginInstanceOwner *aOwner);
   nsresult ShowStatus(const char* message);
-#if defined(MOZ_WIDGET_QT) && (MOZ_PLATFORM_MAEMO == 6)
-  nsresult HandleGUIEvent(const nsGUIEvent& anEvent, bool* handled);
-#endif
 
   nsNPAPIPlugin* GetPlugin();
 
@@ -169,7 +165,7 @@ public:
   void SetWakeLock(bool aLock);
 
   mozilla::gl::GLContext* GLContext();
-  
+
   // For ANPOpenGL
   class TextureInfo {
   public:
@@ -330,7 +326,7 @@ protected:
 
   friend class PluginEventRunnable;
 
-  nsTArray<nsCOMPtr<PluginEventRunnable>> mPostedEvents;
+  nsTArray<nsRefPtr<PluginEventRunnable>> mPostedEvents;
   void PopPostedEvent(PluginEventRunnable* r);
   void OnSurfaceTextureFrameAvailable();
 

@@ -3,6 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef nsAutoConfig_h
+#define nsAutoConfig_h
+
 #include "nsIAutoConfig.h"
 #include "nsITimer.h"
 #include "nsIFile.h"
@@ -21,7 +24,7 @@ class nsAutoConfig : public nsIAutoConfig,
 {
     public:
 
-        NS_DECL_ISUPPORTS
+        NS_DECL_THREADSAFE_ISUPPORTS
         NS_DECL_NSIAUTOCONFIG
         NS_DECL_NSIREQUESTOBSERVER
         NS_DECL_NSISTREAMLISTENER
@@ -46,3 +49,5 @@ class nsAutoConfig : public nsIAutoConfig,
         nsCOMPtr<nsITimer> mTimer;
         nsCString mConfigURL;
 };
+
+#endif

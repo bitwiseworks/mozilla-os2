@@ -4,41 +4,35 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["Social", "OpenGraphBuilder"];
+this.EXPORTED_SYMBOLS = ["Social", "CreateSocialStatusWidget",
+                         "CreateSocialMarkWidget", "OpenGraphBuilder",
+                         "DynamicResizeWatcher", "sizeSocialPanelToContent"];
 
 const Ci = Components.interfaces;
 const Cc = Components.classes;
 const Cu = Components.utils;
 
+// The minimum sizes for the auto-resize panel code.
+const PANEL_MIN_HEIGHT = 100;
+const PANEL_MIN_WIDTH = 330;
+
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "CustomizableUI",
+  "resource:///modules/CustomizableUI.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "SocialService",
   "resource://gre/modules/SocialService.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-  "resource://gre/modules/commonjs/sdk/core/promise.js");
+  "resource://gre/modules/Promise.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "unescapeService",
                                    "@mozilla.org/feed-unescapehtml;1",
                                    "nsIScriptableUnescapeHTML");
-
-// Add a pref observer for the enabled state
-function prefObserver(subject, topic, data) {
-  let enable = Services.prefs.getBoolPref("social.enabled");
-  if (enable && !Social.provider) {
-    Social.provider = Social.defaultProvider;
-  } else if (!enable && Social.provider) {
-    Social.provider = null;
-  }
-}
-
-Services.prefs.addObserver("social.enabled", prefObserver, false);
-Services.obs.addObserver(function xpcomShutdown() {
-  Services.obs.removeObserver(xpcomShutdown, "xpcom-shutdown");
-  Services.prefs.removeObserver("social.enabled", prefObserver);
-}, "xpcom-shutdown", false);
 
 function promiseSetAnnotation(aURI, providerList) {
   let deferred = Promise.defer();
@@ -83,166 +77,82 @@ function promiseGetAnnotation(aURI) {
 this.Social = {
   initialized: false,
   lastEventReceived: 0,
-  providers: null,
+  providers: [],
   _disabledForSafeMode: false,
-
-  get _currentProviderPref() {
-    try {
-      return Services.prefs.getComplexValue("social.provider.current",
-                                            Ci.nsISupportsString).data;
-    } catch (ex) {}
-    return null;
-  },
-  set _currentProviderPref(val) {
-    let string = Cc["@mozilla.org/supports-string;1"].
-                 createInstance(Ci.nsISupportsString);
-    string.data = val;
-    Services.prefs.setComplexValue("social.provider.current",
-                                   Ci.nsISupportsString, string);
-  },
-
-  _provider: null,
-  get provider() {
-    return this._provider;
-  },
-  set provider(val) {
-    this._setProvider(val);
-  },
-
-  // Sets the current provider and enables it. Also disables the
-  // previously set provider, and notifies observers of the change.
-  _setProvider: function (provider) {
-    if (this._provider == provider)
-      return;
-
-    // Disable the previous provider, if any, since we want only one provider to
-    // be enabled at once.
-    if (this._provider) {
-      this._provider.enabled = false;
-      this.closeChatWindows();
-    }
-
-    this._provider = provider;
-
-    if (this._provider) {
-      this._provider.enabled = true;
-      this._currentProviderPref = this._provider.origin;
-    }
-    let enabled = !!provider;
-    if (enabled != SocialService.enabled) {
-      SocialService.enabled = enabled;
-      Services.prefs.setBoolPref("social.enabled", enabled);
-    }
-
-    let origin = this._provider && this._provider.origin;
-    Services.obs.notifyObservers(null, "social:provider-set", origin);
-  },
-
-  get defaultProvider() {
-    if (this.providers.length == 0)
-      return null;
-    let provider = this._getProviderFromOrigin(this._currentProviderPref);
-    return provider || this.providers[0];
-  },
 
   init: function Social_init() {
     this._disabledForSafeMode = Services.appinfo.inSafeMode && this.enabled;
+    let deferred = Promise.defer();
 
     if (this.initialized) {
-      return;
+      deferred.resolve(true);
+      return deferred.promise;
     }
     this.initialized = true;
-
-    // Retrieve the current set of providers, and set the current provider.
-    SocialService.getOrderedProviderList(function (providers) {
-      this._updateProviderCache(providers);
-    }.bind(this));
+    // if SocialService.hasEnabledProviders, retreive the providers so the
+    // front-end can generate UI
+    if (SocialService.hasEnabledProviders) {
+      // Retrieve the current set of providers, and set the current provider.
+      SocialService.getOrderedProviderList(function (providers) {
+        Social._updateProviderCache(providers);
+        Social._updateWorkerState(SocialService.enabled);
+        deferred.resolve(false);
+      });
+    } else {
+      deferred.resolve(false);
+    }
 
     // Register an observer for changes to the provider list
-    SocialService.registerProviderListener(function providerListener(topic, data) {
-      // An engine change caused by adding/removing a provider should notify
-      if (topic == "provider-added" || topic == "provider-removed") {
-        this._updateProviderCache(data);
-        Services.obs.notifyObservers(null, "social:providers-changed", null);
+    SocialService.registerProviderListener(function providerListener(topic, origin, providers) {
+      // An engine change caused by adding/removing a provider should notify.
+      // any providers we receive are enabled in the AddonsManager
+      if (topic == "provider-installed" || topic == "provider-uninstalled") {
+        // installed/uninstalled do not send the providers param
+        Services.obs.notifyObservers(null, "social:" + topic, origin);
+        return;
+      }
+      if (topic == "provider-enabled") {
+        Social._updateProviderCache(providers);
+        Social._updateWorkerState(true);
+        Services.obs.notifyObservers(null, "social:" + topic, origin);
+        return;
+      }
+      if (topic == "provider-disabled") {
+        // a provider was removed from the list of providers, that does not
+        // affect worker state for other providers
+        Social._updateProviderCache(providers);
+        Social._updateWorkerState(providers.length > 0);
+        Services.obs.notifyObservers(null, "social:" + topic, origin);
         return;
       }
       if (topic == "provider-update") {
-        // a provider has self-updated its manifest, we need to update our
-        // cache and possibly reload if it was the current provider.
-        let provider = data;
-        SocialService.getOrderedProviderList(function(providers) {
-          Social._updateProviderCache(providers);
-          Services.obs.notifyObservers(null, "social:providers-changed", null);
-          // if we need a reload, do it now
-          if (provider.enabled) {
-            Social.enabled = false;
-            Services.tm.mainThread.dispatch(function() {
-              Social.enabled = true;
-            }, Components.interfaces.nsIThread.DISPATCH_NORMAL);
-          }
-        });
+        // a provider has self-updated its manifest, we need to update our cache
+        // and reload the provider.
+        Social._updateProviderCache(providers);
+        let provider = Social._getProviderFromOrigin(origin);
+        provider.reload();
       }
-    }.bind(this));
+    });
+    return deferred.promise;
+  },
+
+  _updateWorkerState: function(enable) {
+    [p.enabled = enable for (p of Social.providers) if (p.enabled != enable)];
   },
 
   // Called to update our cache of providers and set the current provider
   _updateProviderCache: function (providers) {
     this.providers = providers;
-
-    // If social is currently disabled there's nothing else to do other than
-    // to notify about the lack of a provider.
-    if (!SocialService.enabled) {
-      Services.obs.notifyObservers(null, "social:provider-set", null);
-      return;
-    }
-    // Otherwise set the provider.
-    this._setProvider(this.defaultProvider);
+    Services.obs.notifyObservers(null, "social:providers-changed", null);
   },
 
-  set enabled(val) {
-    // Setting .enabled is just a shortcut for setting the provider to either
-    // the default provider or null...
-    if (val) {
-      if (!this.provider)
-        this.provider = this.defaultProvider;
-    } else {
-      this.provider = null;
-    }
-  },
   get enabled() {
-    return this.provider != null;
-  },
-
-  closeChatWindows: function() {
-    // close all windows of type Social:Chat
-    let windows = Services.wm.getEnumerator("Social:Chat");
-    while (windows.hasMoreElements()) {
-      let win = windows.getNext();
-      win.close();
-    }
-  },
-
-  toggle: function Social_toggle() {
-    this.enabled = this._disabledForSafeMode ? false : !this.enabled;
-    this._disabledForSafeMode = false;
-  },
-
-  toggleSidebar: function SocialSidebar_toggle() {
-    let prefValue = Services.prefs.getBoolPref("social.sidebar.open");
-    Services.prefs.setBoolPref("social.sidebar.open", !prefValue);
+    return !this._disabledForSafeMode && this.providers.length > 0;
   },
 
   toggleNotifications: function SocialNotifications_toggle() {
     let prefValue = Services.prefs.getBoolPref("social.toast-notifications.enabled");
     Services.prefs.setBoolPref("social.toast-notifications.enabled", !prefValue);
-  },
-
-  haveLoggedInUser: function () {
-    return !!(this.provider && this.provider.profile && this.provider.profile.userName);
-  },
-
-  setProviderByOrigin: function (origin) {
-    this.provider = this._getProviderFromOrigin(origin);
   },
 
   _getProviderFromOrigin: function (origin) {
@@ -252,6 +162,10 @@ this.Social = {
       }
     }
     return null;
+  },
+
+  getManifestByOrigin: function(origin) {
+    return SocialService.getManifestByOrigin(origin);
   },
 
   installProvider: function(doc, data, installCallback) {
@@ -266,69 +180,29 @@ this.Social = {
   activateFromOrigin: function (origin, callback) {
     // For now only "builtin" providers can be activated.  It's OK if the
     // provider has already been activated - we still get called back with it.
-    SocialService.addBuiltinProvider(origin, function(provider) {
-      if (provider) {
-        // No need to activate again if we're already active
-        if (provider == this.provider)
-          return;
-        this.provider = provider;
-      }
-      if (callback)
-        callback(provider);
-    }.bind(this));
-  },
-
-  deactivateFromOrigin: function (origin, oldOrigin) {
-    // if we have the old provider, always set that before trying removal
-    let provider = this._getProviderFromOrigin(origin);
-    let oldProvider = this._getProviderFromOrigin(oldOrigin);
-    if (!oldProvider && this.providers.length)
-      oldProvider = this.providers[0];
-    this.provider = oldProvider;
-    if (provider)
-      SocialService.removeProvider(origin);
+    SocialService.addBuiltinProvider(origin, callback);
   },
 
   // Page Marking functionality
-  _getMarkablePageUrl: function Social_getMarkablePageUrl(aURI) {
-    let uri = aURI.clone();
-    try {
-      // Setting userPass on about:config throws.
-      uri.userPass = "";
-    } catch (e) {}
-    return uri.spec;
-  },
-
-  isURIMarked: function(aURI, aCallback) {
+  isURIMarked: function(origin, aURI, aCallback) {
     promiseGetAnnotation(aURI).then(function(val) {
       if (val) {
         let providerList = JSON.parse(val);
-        val = providerList.indexOf(this.provider.origin) >= 0;
+        val = providerList.indexOf(origin) >= 0;
       }
       aCallback(!!val);
-    }.bind(this));
+    }).then(null, Cu.reportError);
   },
 
-  markURI: function(aURI, aCallback) {
-    // this should not be called if this.provider or the port is null
-    if (!this.provider) {
-      Cu.reportError("Can't mark a page when no provider is current");
-      return;
-    }
-    let port = this.provider.getWorkerPort();
-    if (!port) {
-      Cu.reportError("Can't mark page as no provider port is available");
-      return;
-    }
-
+  markURI: function(origin, aURI, aCallback) {
     // update or set our annotation
     promiseGetAnnotation(aURI).then(function(val) {
 
       let providerList = val ? JSON.parse(val) : [];
-      let marked = providerList.indexOf(this.provider.origin) >= 0;
+      let marked = providerList.indexOf(origin) >= 0;
       if (marked)
         return;
-      providerList.push(this.provider.origin);
+      providerList.push(origin);
       // we allow marking links in a page that may not have been visited yet.
       // make sure there is a history entry for the uri, then annotate it.
       let place = {
@@ -342,52 +216,30 @@ this.Social = {
         handleError: function () Cu.reportError("couldn't update history for socialmark annotation"),
         handleResult: function () {},
         handleCompletion: function () {
-          promiseSetAnnotation(aURI, providerList).then();
-          // post to the provider
-          let url = this._getMarkablePageUrl(aURI);
-          port.postMessage({
-            topic: "social.page-mark",
-            data: { url: url, 'marked': true }
-          });
-          port.close();
-          if (aCallback)
-            schedule(function() { aCallback(true); } );
-        }.bind(this)
+          promiseSetAnnotation(aURI, providerList).then(function() {
+            if (aCallback)
+              schedule(function() { aCallback(true); } );
+          }).then(null, Cu.reportError);
+        }
       });
-    }.bind(this));
+    }).then(null, Cu.reportError);
   },
-  
-  unmarkURI: function(aURI, aCallback) {
-    // this should not be called if this.provider or the port is null
-    if (!this.provider) {
-      Cu.reportError("Can't mark a page when no provider is current");
-      return;
-    }
-    let port = this.provider.getWorkerPort();
-    if (!port) {
-      Cu.reportError("Can't mark page as no provider port is available");
-      return;
-    }
 
+  unmarkURI: function(origin, aURI, aCallback) {
+    // this should not be called if this.provider or the port is null
     // set our annotation
     promiseGetAnnotation(aURI).then(function(val) {
       let providerList = val ? JSON.parse(val) : [];
-      let marked = providerList.indexOf(this.provider.origin) >= 0;
+      let marked = providerList.indexOf(origin) >= 0;
       if (marked) {
         // remove the annotation
-        providerList.splice(providerList.indexOf(this.provider.origin), 1);
-        promiseSetAnnotation(aURI, providerList).then();
+        providerList.splice(providerList.indexOf(origin), 1);
+        promiseSetAnnotation(aURI, providerList).then(function() {
+          if (aCallback)
+            schedule(function() { aCallback(false); } );
+        }).then(null, Cu.reportError);
       }
-      // post to the provider regardless
-      let url = this._getMarkablePageUrl(aURI);
-      port.postMessage({
-        topic: "social.page-mark",
-        data: { url: url, 'marked': false }
-      });
-      port.close();
-      if (aCallback)
-        schedule(function() { aCallback(false); } );
-    }.bind(this));
+    }).then(null, Cu.reportError);
   },
 
   setErrorListener: function(iframe, errorHandler) {
@@ -401,6 +253,73 @@ function schedule(callback) {
   Services.tm.mainThread.dispatch(callback, Ci.nsIThread.DISPATCH_NORMAL);
 }
 
+function CreateSocialStatusWidget(aId, aProvider) {
+  if (!aProvider.statusURL)
+    return;
+  let widget = CustomizableUI.getWidget(aId);
+  // The widget is only null if we've created then destroyed the widget.
+  // Once we've actually called createWidget the provider will be set to
+  // PROVIDER_API.
+  if (widget && widget.provider == CustomizableUI.PROVIDER_API)
+    return;
+
+  CustomizableUI.createWidget({
+    id: aId,
+    type: 'custom',
+    removable: true,
+    defaultArea: CustomizableUI.AREA_NAVBAR,
+    onBuild: function(aDocument) {
+      let node = aDocument.createElement('toolbarbutton');
+      node.id = this.id;
+      node.setAttribute('class', 'toolbarbutton-1 chromeclass-toolbar-additional social-status-button');
+      node.setAttribute('type', "badged");
+      node.style.listStyleImage = "url(" + (aProvider.icon32URL || aProvider.iconURL) + ")";
+      node.setAttribute("origin", aProvider.origin);
+      node.setAttribute("label", aProvider.name);
+      node.setAttribute("tooltiptext", aProvider.name);
+      node.setAttribute("oncommand", "SocialStatus.showPopup(this);");
+
+      if (PrivateBrowsingUtils.isWindowPrivate(aDocument.defaultView))
+        node.setAttribute("disabled", "true");
+
+      return node;
+    }
+  });
+};
+
+function CreateSocialMarkWidget(aId, aProvider) {
+  if (!aProvider.markURL)
+    return;
+  let widget = CustomizableUI.getWidget(aId);
+  // The widget is only null if we've created then destroyed the widget.
+  // Once we've actually called createWidget the provider will be set to
+  // PROVIDER_API.
+  if (widget && widget.provider == CustomizableUI.PROVIDER_API)
+    return;
+
+  CustomizableUI.createWidget({
+    id: aId,
+    type: 'custom',
+    removable: true,
+    defaultArea: CustomizableUI.AREA_NAVBAR,
+    onBuild: function(aDocument) {
+      let node = aDocument.createElement('toolbarbutton');
+      node.id = this.id;
+      node.setAttribute('class', 'toolbarbutton-1 chromeclass-toolbar-additional social-mark-button');
+      node.setAttribute('type', "socialmark");
+      node.style.listStyleImage = "url(" + (aProvider.unmarkedIcon || aProvider.icon32URL || aProvider.iconURL) + ")";
+      node.setAttribute("origin", aProvider.origin);
+      node.setAttribute("oncommand", "this.markCurrentPage();");
+
+      let window = aDocument.defaultView;
+      let menuLabel = window.gNavigatorBundle.getFormattedString("social.markpageMenu.label", [aProvider.name]);
+      node.setAttribute("label", menuLabel);
+      node.setAttribute("tooltiptext", menuLabel);
+
+      return node;
+    }
+  });
+};
 
 // Error handling class used to listen for network errors in the social frames
 // and replace them with a social-specific error page
@@ -444,17 +363,19 @@ SocialErrorListener.prototype = {
     // so avoid doing that more than once
     if (failure && aStatus != Components.results.NS_BINDING_ABORTED) {
       aRequest.cancel(Components.results.NS_BINDING_ABORTED);
-      Social.provider.errorState = "content-error";
+      let provider = Social._getProviderFromOrigin(this.iframe.getAttribute("origin"));
+      provider.errorState = "content-error";
       this.setErrorMessage(aWebProgress.QueryInterface(Ci.nsIDocShell)
                               .chromeEventHandler);
     }
   },
 
   onLocationChange: function SPL_onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {
-    let failure = aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE;
-    if (failure && Social.provider.errorState != "frameworker-error") {
+    if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE) {
       aRequest.cancel(Components.results.NS_BINDING_ABORTED);
-      Social.provider.errorState = "content-error";
+      let provider = Social._getProviderFromOrigin(this.iframe.getAttribute("origin"));
+      if (!provider.errorState)
+        provider.errorState = "content-error";
       schedule(function() {
         this.setErrorMessage(aWebProgress.QueryInterface(Ci.nsIDocShell)
                               .chromeEventHandler);
@@ -468,7 +389,108 @@ SocialErrorListener.prototype = {
 };
 
 
+function sizeSocialPanelToContent(panel, iframe) {
+  let doc = iframe.contentDocument;
+  if (!doc || !doc.body) {
+    return;
+  }
+  // We need an element to use for sizing our panel.  See if the body defines
+  // an id for that element, otherwise use the body itself.
+  let body = doc.body;
+  let bodyId = body.getAttribute("contentid");
+  if (bodyId) {
+    body = doc.getElementById(bodyId) || doc.body;
+  }
+  // offsetHeight/Width don't include margins, so account for that.
+  let cs = doc.defaultView.getComputedStyle(body);
+  let width = PANEL_MIN_WIDTH;
+  let height = PANEL_MIN_HEIGHT;
+  // if the panel is preloaded prior to being shown, cs will be null.  in that
+  // case use the minimum size for the panel until it is shown.
+  if (cs) {
+    let computedHeight = parseInt(cs.marginTop) + body.offsetHeight + parseInt(cs.marginBottom);
+    height = Math.max(computedHeight, height);
+    let computedWidth = parseInt(cs.marginLeft) + body.offsetWidth + parseInt(cs.marginRight);
+    width = Math.max(computedWidth, width);
+  }
+  iframe.style.width = width + "px";
+  iframe.style.height = height + "px";
+  // since we do not use panel.sizeTo, we need to adjust the arrow ourselves
+  if (panel.state == "open")
+    panel.adjustArrowPosition();
+}
+
+function DynamicResizeWatcher() {
+  this._mutationObserver = null;
+}
+
+DynamicResizeWatcher.prototype = {
+  start: function DynamicResizeWatcher_start(panel, iframe) {
+    this.stop(); // just in case...
+    let doc = iframe.contentDocument;
+    this._mutationObserver = new iframe.contentWindow.MutationObserver(function(mutations) {
+      sizeSocialPanelToContent(panel, iframe);
+    });
+    // Observe anything that causes the size to change.
+    let config = {attributes: true, characterData: true, childList: true, subtree: true};
+    this._mutationObserver.observe(doc, config);
+    // and since this may be setup after the load event has fired we do an
+    // initial resize now.
+    sizeSocialPanelToContent(panel, iframe);
+  },
+  stop: function DynamicResizeWatcher_stop() {
+    if (this._mutationObserver) {
+      try {
+        this._mutationObserver.disconnect();
+      } catch (ex) {
+        // may get "TypeError: can't access dead object" which seems strange,
+        // but doesn't seem to indicate a real problem, so ignore it...
+      }
+      this._mutationObserver = null;
+    }
+  }
+}
+
+
 this.OpenGraphBuilder = {
+  generateEndpointURL: function(URLTemplate, pageData) {
+    // support for existing oexchange style endpoints by supporting their
+    // querystring arguments. parse the query string template and do
+    // replacements where necessary the query names may be different than ours,
+    // so we could see u=%{url} or url=%{url}
+    let [endpointURL, queryString] = URLTemplate.split("?");
+    let query = {};
+    if (queryString) {
+      queryString.split('&').forEach(function (val) {
+        let [name, value] = val.split('=');
+        let p = /%\{(.+)\}/.exec(value);
+        if (!p) {
+          // preserve non-template query vars
+          query[name] = value;
+        } else if (pageData[p[1]]) {
+          query[name] = pageData[p[1]];
+        } else if (p[1] == "body") {
+          // build a body for emailers
+          let body = "";
+          if (pageData.title)
+            body += pageData.title + "\n\n";
+          if (pageData.description)
+            body += pageData.description + "\n\n";
+          if (pageData.text)
+            body += pageData.text + "\n\n";
+          body += pageData.url;
+          query["body"] = body;
+        }
+      });
+    }
+    var str = [];
+    for (let p in query)
+       str.push(p + "=" + encodeURIComponent(query[p]));
+    if (str.length)
+      endpointURL = endpointURL + "?" + str.join("&");
+    return endpointURL;
+  },
+
   getData: function(browser) {
     let res = {
       url: this._validateURL(browser, browser.currentURI.spec),

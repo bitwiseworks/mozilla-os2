@@ -12,8 +12,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=
   <script type="application/javascript;version=1.8" src="inspector-helpers.js"></script>
   <script type="application/javascript;version=1.8">
 Components.utils.import("resource://gre/modules/devtools/Loader.jsm");
+const {Promise: promise} = Components.utils.import("resource://gre/modules/Promise.jsm", {});
 
-const Promise = devtools.require("sdk/core/promise");
 const inspector = devtools.require("devtools/server/actors/inspector");
 
 window.onload = function() {
@@ -70,6 +70,25 @@ addTest(function testOuterHTML() {
     return longstring.string();
   }).then(outerHTML => {
     ok(outerHTML === gInspectee.documentElement.outerHTML, "outerHTML should match");
+  }).then(runNextTest));
+});
+
+addTest(function testSetOuterHTMLNode() {
+  let newHTML = "<p id=\"edit-html-done\">after edit</p>";
+  promiseDone(gWalker.querySelector(gWalker.rootNode, "#edit-html").then(node => {
+    return gWalker.setOuterHTML(node, newHTML);
+  }).then(() => {
+    return gWalker.querySelector(gWalker.rootNode, "#edit-html-done");
+  }).then(node => {
+    return gWalker.outerHTML(node);
+  }).then(longstring => {
+    return longstring.string();
+  }).then(outerHTML => {
+    is(outerHTML, newHTML, "outerHTML has been updated");
+  }).then(() => {
+    return gWalker.querySelector(gWalker.rootNode, "#edit-html");
+  }).then(node => {
+    ok(!node, "The node with the old ID cannot be selected anymore");
   }).then(runNextTest));
 });
 
@@ -305,7 +324,7 @@ addTest(function testReleaseWalker() {
 
   promiseDone(gWalker.release().then(() => {
     let promises = [checkMissing(gClient, id) for (id of checkActorIDs)];
-    return Promise.all(promises)
+    return promise.all(promises)
   }).then(runNextTest));
 });
 

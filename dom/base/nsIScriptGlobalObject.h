@@ -8,13 +8,18 @@
 #define nsIScriptGlobalObject_h__
 
 #include "nsISupports.h"
-#include "nsEvent.h"
 #include "nsIGlobalObject.h"
+#include "js/TypeDecls.h"
+#include "mozilla/EventForwards.h"
 
 class nsIScriptContext;
-class nsScriptErrorEvent;
 class nsIScriptGlobalObject;
-class JSObject;
+
+namespace mozilla {
+namespace dom {
+struct ErrorEventInit;
+} // namespace dom
+} // namespace mozilla
 
 // A helper function for nsIScriptGlobalObject implementations to use
 // when handling a script error.  Generally called by the global when a context
@@ -23,13 +28,13 @@ class JSObject;
 // aStatus will be filled in with the status.
 bool
 NS_HandleScriptError(nsIScriptGlobalObject *aScriptGlobal,
-                     nsScriptErrorEvent *aErrorEvent,
+                     const mozilla::dom::ErrorEventInit &aErrorEvent,
                      nsEventStatus *aStatus);
 
 
 #define NS_ISCRIPTGLOBALOBJECT_IID \
-{ 0xde24b30a, 0x12c6, 0x4e5f, \
-  { 0xa8, 0x5e, 0x90, 0xcd, 0xfb, 0x6c, 0x54, 0x51 } }
+{ 0x876f83bd, 0x6314, 0x460a, \
+  { 0xa0, 0x45, 0x1c, 0x8f, 0x46, 0x2f, 0xb8, 0xe1 } }
 
 /**
  * The global object which keeps a script context for each supported script
@@ -63,29 +68,16 @@ public:
   }
 
   /**
-   * Called when the global script for a language is finalized, typically as
-   * part of its GC process.  By the time this call is made, the
-   * nsIScriptContext for the language has probably already been removed.
-   * After this call, the passed object is dead - which should generally be the
-   * same object the global is using for a global for that language.
-   */
-  virtual void OnFinalize(JSObject* aObject) = 0;
-
-  /**
-   * Called to enable/disable scripts.
-   */
-  virtual void SetScriptsEnabled(bool aEnabled, bool aFireTimeouts) = 0;
-
-  /**
    * Handle a script error.  Generally called by a script context.
    */
-  virtual nsresult HandleScriptError(nsScriptErrorEvent *aErrorEvent,
-                                     nsEventStatus *aEventStatus) {
-    NS_ENSURE_STATE(NS_HandleScriptError(this, aErrorEvent, aEventStatus));
+  virtual nsresult HandleScriptError(
+                     const mozilla::dom::ErrorEventInit &aErrorEventInit,
+                     nsEventStatus *aEventStatus) {
+    NS_ENSURE_STATE(NS_HandleScriptError(this, aErrorEventInit, aEventStatus));
     return NS_OK;
   }
 
-  virtual bool IsBlackForCC() { return false; }
+  virtual bool IsBlackForCC(bool aTracingNeeded = true) { return false; }
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIScriptGlobalObject,

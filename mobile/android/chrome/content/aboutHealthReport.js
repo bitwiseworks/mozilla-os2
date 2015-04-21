@@ -9,6 +9,7 @@
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/Messaging.jsm");
 Cu.import("resource://gre/modules/SharedPreferences.jsm");
 
 // Name of Android SharedPreference controlling whether to upload
@@ -23,12 +24,6 @@ const WRAPPER_VERSION = 1;
 
 const EVENT_HEALTH_REQUEST = "HealthReport:Request";
 const EVENT_HEALTH_RESPONSE = "HealthReport:Response";
-
-function sendMessageToJava(message) {
-  return Cc["@mozilla.org/android/bridge;1"]
-    .getService(Ci.nsIAndroidBridge)
-    .handleGeckoMessage(JSON.stringify(message));
-}
 
 // about:healthreport prefs are stored in Firefox's default Android
 // SharedPreferences.
@@ -127,7 +122,7 @@ let healthReportWrapper = {
     console.log("AboutHealthReport: showing settings.");
     sendMessageToJava({
       type: "Settings:Show",
-      resource: "preferences_datareporting",
+      resource: "preferences_vendor",
     });
   },
 
@@ -193,3 +188,6 @@ let healthReportWrapper = {
     healthReportWrapper.reportFailure(healthReportWrapper.ERROR_PAYLOAD_FAILED);
   },
 };
+
+window.addEventListener("load", healthReportWrapper.init.bind(healthReportWrapper), false);
+window.addEventListener("unload", healthReportWrapper.uninit.bind(healthReportWrapper), false);

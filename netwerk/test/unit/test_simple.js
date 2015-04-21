@@ -3,10 +3,6 @@
 //
 
 // Note: sets Cc and Ci variables
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
 
 Cu.import("resource://testing-common/httpd.js");
 
@@ -26,7 +22,7 @@ function run_test() {
 function setup_test() {
   if (dbg) { print("============== setup_test: in"); }
   httpserver.registerPathHandler(testpath, serverHandler);
-  httpserver.start(4444);
+  httpserver.start(-1);
   var channel = setupChannel(testpath);
   // ChannelListener defined in head_channels.js
   channel.asyncOpen(new ChannelListener(checkRequest, channel), null);
@@ -36,7 +32,8 @@ function setup_test() {
 function setupChannel(path) {
   var ios = Cc["@mozilla.org/network/io-service;1"].
                        getService(Ci.nsIIOService);
-  var chan = ios.newChannel("http://localhost:4444" + path, "", null);
+  var chan = ios.newChannel("http://localhost:" +
+                            httpserver.identity.primaryPort + path, "", null);
   chan.QueryInterface(Ci.nsIHttpChannel);
   chan.requestMethod = "GET";
   return chan;

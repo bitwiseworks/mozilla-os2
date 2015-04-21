@@ -8,9 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "after_streaming_fixture.h"
-#include "modules/audio_device/include/audio_device.h"
-#include "voe_test_defines.h"
+#include "webrtc/modules/audio_device/include/audio_device.h"
+#include "webrtc/voice_engine/test/auto_test/fixtures/after_streaming_fixture.h"
 
 class HardwareTest : public AfterStreamingFixture {
 };
@@ -69,21 +68,9 @@ TEST_F(HardwareTest, GetCpuLoadReturnsErrorOnNonWindowsPlatform) {
 }
 #endif
 
-#if !defined(WEBRTC_MAC) && !defined(WEBRTC_ANDROID)
-TEST_F(HardwareTest, GetSystemCpuLoadWorksExceptOnMacAndAndroid) {
-#ifdef _WIN32
-  // This method needs some warm-up time on Windows. We sleep a good amount
-  // of time instead of retrying to make the test simpler.
-  Sleep(2000);
-#endif
-  int load = -1;
-  EXPECT_EQ(0, voe_hardware_->GetSystemCPULoad(load));
-  EXPECT_GE(load, 0);
-  TEST_LOG("System CPU load = %d%%\n", load);
-}
-#endif
-
-TEST_F(HardwareTest, BuiltInWasapiAECWorksForAudioWindowsCoreAudioLayer) {
+// Flakily hangs on Windows: code.google.com/p/webrtc/issues/detail?id=2179.
+TEST_F(HardwareTest,
+       DISABLED_ON_WIN(BuiltInWasapiAECWorksForAudioWindowsCoreAudioLayer)) {
 #ifdef WEBRTC_IOS
   // Ensure the sound device is reset on iPhone.
   EXPECT_EQ(0, voe_hardware_->ResetAudioDevice());

@@ -33,8 +33,8 @@ ApplicationAccessible::ApplicationAccessible() :
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports
 
-NS_IMPL_ISUPPORTS_INHERITED1(ApplicationAccessible, Accessible,
-                             nsIAccessibleApplication)
+NS_IMPL_ISUPPORTS_INHERITED(ApplicationAccessible, Accessible,
+                            nsIAccessibleApplication)
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIAccessible
@@ -82,7 +82,7 @@ ApplicationAccessible::Name(nsString& aName)
     return eNameOK;
 
   nsXPIDLString appName;
-  rv = bundle->GetStringFromName(NS_LITERAL_STRING("brandShortName").get(),
+  rv = bundle->GetStringFromName(MOZ_UTF16("brandShortName"),
                                  getter_Copies(appName));
   if (NS_FAILED(rv) || appName.IsEmpty()) {
     NS_WARNING("brandShortName not found, using default app name");
@@ -141,7 +141,7 @@ ApplicationAccessible::FocusedChild()
 }
 
 Relation
-ApplicationAccessible::RelationByType(uint32_t aRelationType)
+ApplicationAccessible::RelationByType(RelationType aRelationType)
 {
   return Relation();
 }
@@ -265,17 +265,13 @@ ApplicationAccessible::GetPlatformVersion(nsAString& aVersion)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// nsAccessNode public methods
+// Accessible public methods
 
 void
 ApplicationAccessible::Shutdown()
 {
   mAppInfo = nullptr;
 }
-
-
-////////////////////////////////////////////////////////////////////////////////
-// Accessible public methods
 
 void
 ApplicationAccessible::ApplyARIAState(uint64_t* aState) const

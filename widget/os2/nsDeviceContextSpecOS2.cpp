@@ -76,7 +76,7 @@ static int16_t  AdjustFormatAndExtension(int16_t aFormat,
                                          nsAString& aFileName);
 static nsresult GetFileNameForPrintSettings(nsIPrintSettings* aPS,
                                             nsAString& aFileName);
-static char *   GetACPString(const PRUnichar* aStr);
+static char *   GetACPString(const char16_t* aStr);
 static void     SetDevModeFromSettings(ULONG printer,
                                        nsIPrintSettings* aPrintSettings);
 
@@ -533,7 +533,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::GetSurfaceForPrinter(gfxASurface **surface
   else {
     char* filePath = nullptr;
     if (mDestination == printToFile) {
-      PRUnichar* fileName;
+      char16_t* fileName;
 
       mPrintSettings->GetToFileName(&fileName);
       filePath = GetACPString(fileName);
@@ -644,7 +644,7 @@ nsresult nsDeviceContextSpecOS2::CreateStreamForFormat(int16_t aFormat,
 // similar to UnicodeToCodepage() in nsDragService.cpp.
 
 static
-char* GetACPString(const PRUnichar* aStr)
+char* GetACPString(const char16_t* aStr)
 {
    nsString str(aStr);
    if (str.Length() == 0) {
@@ -660,8 +660,8 @@ char* GetACPString(const PRUnichar* aStr)
 
 //---------------------------------------------------------------------------
 
-NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(PRUnichar* aTitle,
-                                                    PRUnichar* aPrintToFileName,
+NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(char16_t* aTitle,
+                                                    char16_t* aPrintToFileName,
                                                     int32_t aStartPage,
                                                     int32_t aEndPage)
 {
@@ -721,7 +721,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::EndDocument()
   mPages = 0;
 
   if (outputFormat != nsIPrintSettings::kOutputFormatNative) {
-    mPrintSettings->SetToFileName(NULL);
+    mPrintSettings->SetToFileName(nullptr);
     nsCOMPtr<nsIPrintSettingsService> pss =
       do_GetService("@mozilla.org/gfx/printsettings-service;1");
     if (pss)
@@ -941,7 +941,7 @@ NS_IMETHODIMP nsPrinterEnumeratorOS2::GetPrinterNameList(
 }
 
 NS_IMETHODIMP nsPrinterEnumeratorOS2::GetDefaultPrinterName(
-                                          PRUnichar * *aDefaultPrinterName)
+                                          char16_t * *aDefaultPrinterName)
 {
   NS_ENSURE_ARG_POINTER(aDefaultPrinterName);
 
@@ -956,7 +956,7 @@ NS_IMETHODIMP nsPrinterEnumeratorOS2::GetDefaultPrinterName(
 }
 
 NS_IMETHODIMP nsPrinterEnumeratorOS2::InitPrintSettingsFromPrinter(
-                                          const PRUnichar *aPrinterName,
+                                          const char16_t *aPrinterName,
                                           nsIPrintSettings *aPrintSettings)
 {
   NS_ENSURE_ARG_POINTER(aPrinterName);
@@ -976,7 +976,7 @@ NS_IMETHODIMP nsPrinterEnumeratorOS2::InitPrintSettingsFromPrinter(
 }
 
 NS_IMETHODIMP nsPrinterEnumeratorOS2::DisplayPropertiesDlg(
-                                          const PRUnichar *aPrinterName,
+                                          const char16_t *aPrinterName,
                                           nsIPrintSettings *aPrintSettings)
 {
   int32_t index = sPrinterList.GetPrinterIndex(aPrinterName);

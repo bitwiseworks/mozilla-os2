@@ -571,6 +571,28 @@ sip_config_local_supported_codecs_get (rtp_ptype aSupportedCodecs[],
     return count;
 }
 
+uint32_t
+config_get_video_max_fs(const rtp_ptype codec)
+{
+  uint32_t max_fs;
+
+  if(vcmGetVideoMaxFs(codec, (int32_t *) &max_fs) == 0) {
+    return max_fs;
+  }
+  return 0;
+}
+
+uint32_t
+config_get_video_max_fr(const rtp_ptype codec)
+{
+  uint32_t max_fr;
+
+  if(vcmGetVideoMaxFr(codec, (int32_t *) &max_fr) == 0) {
+    return max_fr;
+  }
+  return 0;
+}
+
 /*
  * sip_config_local_supported_codecs_get()
  *
@@ -592,10 +614,6 @@ sip_config_video_supported_codecs_get (rtp_ptype aSupportedCodecs[],
         //codec_mask = vcmGetVideoCodecList(DSP_ENCODEONLY);
         codec_mask = vcmGetVideoCodecList(VCM_DSP_IGNORE);
     }
-    if ( codec_mask & VCM_CODEC_RESOURCE_VP8) {
-      aSupportedCodecs[count] = RTP_VP8;
-      count++;
-    }
     if ( codec_mask & VCM_CODEC_RESOURCE_H264) {
       /*
        * include payload type for packetization mode 1 only if ucm sis version
@@ -611,6 +629,10 @@ sip_config_video_supported_codecs_get (rtp_ptype aSupportedCodecs[],
           }
       }
       aSupportedCodecs[count] = RTP_H264_P0;
+      count++;
+    }
+    if ( codec_mask & VCM_CODEC_RESOURCE_VP8) {
+      aSupportedCodecs[count] = RTP_VP8;
       count++;
     }
     if ( codec_mask & VCM_CODEC_RESOURCE_H263) {

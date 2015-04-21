@@ -9,13 +9,8 @@
 
 #include "Accessible-inl.h"
 #include "AccIterator.h"
-#include "nsAccessibilityService.h"
-#include "nsAccUtils.h"
-#include "nsStyleStructInlines.h"
-
+#include "nsCoreUtils.h"
 #include "nsIDOMXULLabeledControlEl.h"
-
-#include "nsArrayUtils.h"
 
 using namespace mozilla::a11y;
 
@@ -45,7 +40,7 @@ nsTextEquivUtils::GetNameFromSubtree(Accessible* aAccessible,
       nsAutoString name;
       AppendFromAccessibleChildren(aAccessible, &name);
       name.CompressWhitespace();
-      if (!IsWhitespaceString(name))
+      if (!nsCoreUtils::IsWhitespaceString(name))
         aName = name;
     }
   }
@@ -53,19 +48,6 @@ nsTextEquivUtils::GetNameFromSubtree(Accessible* aAccessible,
   sInitiatorAcc = nullptr;
 
   return NS_OK;
-}
-
-void
-nsTextEquivUtils::GetTextEquivFromSubtree(Accessible* aAccessible,
-                                          nsString& aTextEquiv)
-{
-  aTextEquiv.Truncate();
-
-  uint32_t nameRule = GetRoleRule(aAccessible->Role());
-  if (nameRule & eNameFromSubtreeIfReqRule) {
-    AppendFromAccessibleChildren(aAccessible, &aTextEquiv);
-    aTextEquiv.CompressWhitespace();
-  }
 }
 
 nsresult
@@ -136,7 +118,7 @@ nsTextEquivUtils::AppendTextEquivFromTextContent(nsIContent *aContent,
   if (aContent->IsNodeOfType(nsINode::eTEXT)) {
     bool isHTMLBlock = false;
 
-    nsIContent *parentContent = aContent->GetParent();
+    nsIContent *parentContent = aContent->GetFlattenedTreeParent();
     if (parentContent) {
       nsIFrame *frame = parentContent->GetPrimaryFrame();
       if (frame) {
@@ -148,7 +130,7 @@ nsTextEquivUtils::AppendTextEquivFromTextContent(nsIContent *aContent,
             display->mDisplay == NS_STYLE_DISPLAY_TABLE_CELL) {
           isHTMLBlock = true;
           if (!aString->IsEmpty()) {
-            aString->Append(PRUnichar(' '));
+            aString->Append(char16_t(' '));
           }
         }
       }
@@ -164,7 +146,7 @@ nsTextEquivUtils::AppendTextEquivFromTextContent(nsIContent *aContent,
         aContent->AppendTextTo(*aString);
       }
       if (isHTMLBlock && !aString->IsEmpty()) {
-        aString->Append(PRUnichar(' '));
+        aString->Append(char16_t(' '));
       }
     }
     
@@ -351,39 +333,18 @@ nsTextEquivUtils::AppendString(nsAString *aString,
     return false;
 
   // Insert spaces to insure that words from controls aren't jammed together.
-  if (!aString->IsEmpty() && !IsWhitespace(aString->Last()))
-    aString->Append(PRUnichar(' '));
+  if (!aString->IsEmpty() && !nsCoreUtils::IsWhitespace(aString->Last()))
+    aString->Append(char16_t(' '));
 
   aString->Append(aTextEquivalent);
 
-  if (!IsWhitespace(aString->Last()))
-    aString->Append(PRUnichar(' '));
+  if (!nsCoreUtils::IsWhitespace(aString->Last()))
+    aString->Append(char16_t(' '));
 
   return true;
 }
 
-bool
-nsTextEquivUtils::IsWhitespaceString(const nsSubstring& aString)
-{
-  nsSubstring::const_char_iterator iterBegin, iterEnd;
-
-  aString.BeginReading(iterBegin);
-  aString.EndReading(iterEnd);
-
-  while (iterBegin != iterEnd && IsWhitespace(*iterBegin))
-    ++iterBegin;
-
-  return iterBegin == iterEnd;
-}
-
-bool
-nsTextEquivUtils::IsWhitespace(PRUnichar aChar)
-{
-  return aChar == ' ' || aChar == '\n' ||
-    aChar == '\r' || aChar == '\t' || aChar == 0xa0;
-}
-
-uint32_t 
+uint32_t
 nsTextEquivUtils::GetRoleRule(role aRole)
 {
 #define ROLE(geckoRole, stringRole, atkRole, \
@@ -394,9 +355,8 @@ nsTextEquivUtils::GetRoleRule(role aRole)
   switch (aRole) {
 #include "RoleMap.h"
     default:
-      MOZ_NOT_REACHED("Unknown role.");
+      MOZ_CRASH("Unknown role.");
   }
 
 #undef ROLE
 }
-

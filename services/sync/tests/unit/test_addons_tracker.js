@@ -27,7 +27,7 @@ const addon1ID = "addon1@tests.mozilla.org";
 
 function cleanup_and_advance() {
   Svc.Obs.notify("weave:engine:stop-tracking");
-  tracker.observe(null, "weave:engine:stop-tracking");
+  tracker.stopTracking();
 
   tracker.resetScore();
   tracker.clearChangedIDs();
@@ -43,9 +43,9 @@ function cleanup_and_advance() {
 
 function run_test() {
   initTestLogging("Trace");
-  Log4Moz.repository.getLogger("Sync.Engine.Addons").level = Log4Moz.Level.Trace;
-  Log4Moz.repository.getLogger("Sync.AddonsReconciler").level =
-    Log4Moz.Level.Trace;
+  Log.repository.getLogger("Sync.Engine.Addons").level = Log.Level.Trace;
+  Log.repository.getLogger("Sync.AddonsReconciler").level =
+    Log.Level.Trace;
 
   cleanup_and_advance();
 }

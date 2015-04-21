@@ -8,9 +8,12 @@
 
 #include "mozilla/RangedPtr.h"
 
+#include <ctype.h>
+
 #include "jsarray.h"
 #include "jscompartment.h"
 #include "jsnum.h"
+#include "jsprf.h"
 
 #include "vm/StringBuffer.h"
 
@@ -55,10 +58,42 @@ JSONParser::trace(JSTracer *trc)
 }
 
 void
+JSONParser::getTextPosition(uint32_t *column, uint32_t *line)
+{
+    ConstTwoByteChars ptr = begin;
+    uint32_t col = 1;
+    uint32_t row = 1;
+    for (; ptr < current; ptr++) {
+        if (*ptr == '\n' || *ptr == '\r') {
+            ++row;
+            col = 1;
+            // \r\n is treated as a single newline.
+            if (ptr + 1 < current && *ptr == '\r' && *(ptr + 1) == '\n')
+                ++ptr;
+        } else {
+            ++col;
+        }
+    }
+    *column = col;
+    *line = row;
+}
+
+void
 JSONParser::error(const char *msg)
 {
-    if (errorHandling == RaiseError)
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_JSON_BAD_PARSE, msg);
+    if (errorHandling == RaiseError) {
+        uint32_t column = 1, line = 1;
+        getTextPosition(&column, &line);
+
+        const size_t MaxWidth = sizeof("4294967295");
+        char columnNumber[MaxWidth];
+        JS_snprintf(columnNumber, sizeof columnNumber, "%lu", column);
+        char lineNumber[MaxWidth];
+        JS_snprintf(lineNumber, sizeof lineNumber, "%lu", line);
+
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_JSON_BAD_PARSE,
+                             msg, lineNumber, columnNumber);
+    }
 }
 
 bool
@@ -94,7 +129,7 @@ JSONParser::readString()
             size_t length = current - start;
             current++;
             JSFlatString *str = (ST == JSONParser::PropertyName)
-                                ? AtomizeChars<CanGC>(cx, start.get(), length)
+                                ? AtomizeChars(cx, start.get(), length)
                                 : js_NewStringCopyN<CanGC>(cx, start.get(), length);
             if (!str)
                 return token(OOM);
@@ -134,6 +169,7 @@ JSONParser::readString()
         }
 
         if (c != '\\') {
+            --current;
             error("bad character in string literal");
             return token(Error);
         }
@@ -152,25 +188,37 @@ JSONParser::readString()
           case 't':  c = '\t'; break;
 
           case 'u':
-            if (end - current < 4) {
+            if (end - current < 4 ||
+                !(JS7_ISHEX(current[0]) &&
+                  JS7_ISHEX(current[1]) &&
+                  JS7_ISHEX(current[2]) &&
+                  JS7_ISHEX(current[3])))
+            {
+                // Point to the first non-hexadecimal character (which may be
+                // missing).
+                if (current == end || !JS7_ISHEX(current[0]))
+                    ; // already at correct location
+                else if (current + 1 == end || !JS7_ISHEX(current[1]))
+                    current += 1;
+                else if (current + 2 == end || !JS7_ISHEX(current[2]))
+                    current += 2;
+                else if (current + 3 == end || !JS7_ISHEX(current[3]))
+                    current += 3;
+                else
+                    MOZ_ASSUME_UNREACHABLE("logic error determining first erroneous character");
+
                 error("bad Unicode escape");
                 return token(Error);
             }
-            if (JS7_ISHEX(current[0]) &&
-                JS7_ISHEX(current[1]) &&
-                JS7_ISHEX(current[2]) &&
-                JS7_ISHEX(current[3]))
-            {
-                c = (JS7_UNHEX(current[0]) << 12)
-                  | (JS7_UNHEX(current[1]) << 8)
-                  | (JS7_UNHEX(current[2]) << 4)
-                  | (JS7_UNHEX(current[3]));
-                current += 4;
-                break;
-            }
-            /* FALL THROUGH */
+            c = (JS7_UNHEX(current[0]) << 12)
+              | (JS7_UNHEX(current[1]) << 8)
+              | (JS7_UNHEX(current[2]) << 4)
+              | (JS7_UNHEX(current[3]));
+            current += 4;
+            break;
 
           default:
+            current--;
             error("bad escaped character");
             return token(Error);
         }
@@ -524,9 +572,9 @@ JSONParser::createFinishedObject(PropertyVector &properties)
      * Look for an existing cached type and shape for objects with this set of
      * properties.
      */
-    if (cx->typeInferenceEnabled()) {
+    {
         JSObject *obj = cx->compartment()->types.newTypedObject(cx, properties.begin(),
-                                                              properties.length());
+                                                                properties.length());
         if (obj)
             return obj;
     }
@@ -536,9 +584,9 @@ JSONParser::createFinishedObject(PropertyVector &properties)
      * shape in manually.
      */
     gc::AllocKind allocKind = gc::GetGCObjectKind(properties.length());
-    RootedObject obj(cx, NewBuiltinClassInstance(cx, &ObjectClass, allocKind));
+    RootedObject obj(cx, NewBuiltinClassInstance(cx, &JSObject::class_, allocKind));
     if (!obj)
-        return NULL;
+        return nullptr;
 
     RootedId propid(cx);
     RootedValue value(cx);
@@ -546,11 +594,9 @@ JSONParser::createFinishedObject(PropertyVector &properties)
     for (size_t i = 0; i < properties.length(); i++) {
         propid = properties[i].id;
         value = properties[i].value;
-        if (!DefineNativeProperty(cx, obj, propid, value,
-                                  JS_PropertyStub, JS_StrictPropertyStub, JSPROP_ENUMERATE,
-                                  0, 0))
-        {
-            return NULL;
+        if (!DefineNativeProperty(cx, obj, propid, value, JS_PropertyStub, JS_StrictPropertyStub,
+                                  JSPROP_ENUMERATE)) {
+            return nullptr;
         }
     }
 
@@ -559,8 +605,7 @@ JSONParser::createFinishedObject(PropertyVector &properties)
      * properties, and update the initializer type object cache with this
      * object's final shape.
      */
-    if (cx->typeInferenceEnabled())
-        cx->compartment()->types.fixObjectType(cx, obj);
+    cx->compartment()->types.fixObjectType(cx, obj);
 
     return obj;
 }
@@ -591,8 +636,7 @@ JSONParser::finishArray(MutableHandleValue vp, ElementVector &elements)
         return false;
 
     /* Try to assign a new type to the array according to its elements. */
-    if (cx->typeInferenceEnabled())
-        cx->compartment()->types.fixArrayType(cx, obj);
+    cx->compartment()->types.fixArrayType(cx, obj);
 
     vp.setObject(*obj);
     if (!freeElements.append(&elements))
@@ -738,6 +782,9 @@ JSONParser::parse(MutableHandleValue vp)
               case ObjectClose:
               case Colon:
               case Comma:
+                // Move the current pointer backwards so that the position
+                // reported in the error message is correct.
+                --current;
                 error("unexpected character");
                 return errorReturn();
 

@@ -19,7 +19,7 @@
 #include "mozilla/Telemetry.h"
 #include "nsISecurityUITelemetry.h"
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsSecurityWarningDialogs, nsISecurityWarningDialogs)
+NS_IMPL_ISUPPORTS(nsSecurityWarningDialogs, nsISecurityWarningDialogs)
 
 #define STRING_BUNDLE_URL    "chrome://pipnss/locale/security.properties"
 
@@ -55,7 +55,7 @@ nsSecurityWarningDialogs::ConfirmPostToInsecureFromSecure(nsIInterfaceRequestor 
 
   // The Telemetry clickthrough constant is 1 more than the constant for the dialog.
   rv = ConfirmDialog(ctx, nullptr, // No preference for this one - it's too important
-                     NS_LITERAL_STRING("PostToInsecureFromSecureMessage").get(),
+                     MOZ_UTF16("PostToInsecureFromSecureMessage"),
                      nullptr,
                      nsISecurityUITelemetry::WARNING_CONFIRM_POST_TO_INSECURE_FROM_SECURE,
                      _result);
@@ -65,8 +65,8 @@ nsSecurityWarningDialogs::ConfirmPostToInsecureFromSecure(nsIInterfaceRequestor 
 
 nsresult
 nsSecurityWarningDialogs::ConfirmDialog(nsIInterfaceRequestor *ctx, const char *prefName,
-                            const PRUnichar *messageName, 
-                            const PRUnichar *showAgainName, 
+                            const char16_t *messageName, 
+                            const char16_t *showAgainName, 
                             const uint32_t aBucket,
                             bool* _result)
 {
@@ -106,7 +106,7 @@ nsSecurityWarningDialogs::ConfirmDialog(nsIInterfaceRequestor *ctx, const char *
   // Get messages strings from localization file
   nsXPIDLString windowTitle, message, alertMe, cont;
 
-  mStringBundle->GetStringFromName(NS_LITERAL_STRING("Title").get(),
+  mStringBundle->GetStringFromName(MOZ_UTF16("Title"),
                                    getter_Copies(windowTitle));
   mStringBundle->GetStringFromName(messageName,
                                    getter_Copies(message));
@@ -114,13 +114,13 @@ nsSecurityWarningDialogs::ConfirmDialog(nsIInterfaceRequestor *ctx, const char *
     mStringBundle->GetStringFromName(showAgainName,
                                      getter_Copies(alertMe));
   }
-  mStringBundle->GetStringFromName(NS_LITERAL_STRING("Continue").get(),
+  mStringBundle->GetStringFromName(MOZ_UTF16("Continue"),
                                    getter_Copies(cont));
   // alertMe is allowed to be null
   if (!windowTitle || !message || !cont) return NS_ERROR_FAILURE;
       
   // Replace # characters with newlines to lay out the dialog.
-  PRUnichar* msgchars = message.BeginWriting();
+  char16_t* msgchars = message.BeginWriting();
   
   uint32_t i = 0;
   for (i = 0; msgchars[i] != '\0'; i++) {

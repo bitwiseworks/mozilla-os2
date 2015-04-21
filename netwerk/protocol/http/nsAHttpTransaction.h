@@ -8,16 +8,19 @@
 #include "nsISupports.h"
 #include "nsTArray.h"
 
-class nsAHttpConnection;
-class nsAHttpSegmentReader;
-class nsAHttpSegmentWriter;
 class nsIInterfaceRequestor;
 class nsIEventTarget;
 class nsITransport;
-class nsHttpRequestHead;
-class nsHttpPipeline;
-class nsHttpTransaction;
 class nsILoadGroupConnectionInfo;
+
+namespace mozilla { namespace net {
+
+class nsAHttpConnection;
+class nsAHttpSegmentReader;
+class nsAHttpSegmentWriter;
+class nsHttpTransaction;
+class nsHttpPipeline;
+class nsHttpRequestHead;
 
 //----------------------------------------------------------------------------
 // Abstract base class for a HTTP transaction:
@@ -49,6 +52,9 @@ public:
     virtual bool     IsDone() = 0;
     virtual nsresult Status() = 0;
     virtual uint32_t Caps() = 0;
+
+    // called to notify that a requested DNS cache entry was refreshed.
+    virtual void     SetDNSWasRefreshed() = 0;
 
     // called to find out how much request data is available for writing.
     virtual uint64_t Available() = 0;
@@ -121,6 +127,10 @@ public:
     // return the load group connection information associated with the transaction
     virtual nsILoadGroupConnectionInfo *LoadGroupConnectionInfo() { return nullptr; }
 
+    // The base definition of these is done in nsHttpTransaction.cpp
+    virtual bool ResponseTimeoutEnabled() const;
+    virtual PRIntervalTime ResponseTimeout();
+
     // Every transaction is classified into one of the types below. When using
     // HTTP pipelines, only transactions with the same type appear on the same
     // pipeline.
@@ -154,6 +164,7 @@ public:
     bool     IsDone(); \
     nsresult Status(); \
     uint32_t Caps();   \
+    void     SetDNSWasRefreshed(); \
     uint64_t Available(); \
     nsresult ReadSegments(nsAHttpSegmentReader *, uint32_t, uint32_t *); \
     nsresult WriteSegments(nsAHttpSegmentWriter *, uint32_t, uint32_t *); \
@@ -213,5 +224,7 @@ public:
 
 #define NS_DECL_NSAHTTPSEGMENTWRITER \
     nsresult OnWriteSegment(char *, uint32_t, uint32_t *);
+
+}} // namespace mozilla::net
 
 #endif // nsAHttpTransaction_h__

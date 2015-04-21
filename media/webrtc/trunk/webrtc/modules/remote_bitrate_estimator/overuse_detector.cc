@@ -14,10 +14,10 @@
 #include <windows.h>
 #endif
 
-#include "modules/remote_bitrate_estimator/overuse_detector.h"
-#include "modules/remote_bitrate_estimator/remote_rate_control.h"
-#include "modules/rtp_rtcp/source/rtp_utility.h"
-#include "system_wrappers/interface/trace.h"
+#include "webrtc/modules/remote_bitrate_estimator/overuse_detector.h"
+#include "webrtc/modules/remote_bitrate_estimator/remote_rate_control.h"
+#include "webrtc/modules/rtp_rtcp/source/rtp_utility.h"
+#include "webrtc/system_wrappers/interface/trace.h"
 
 #ifdef WEBRTC_BWE_MATLAB
 extern MatlabEngine eng;  // global variable defined elsewhere
@@ -43,7 +43,8 @@ OveruseDetector::OveruseDetector(const OverUseDetectorOptions& options)
       prev_offset_(0.0),
       time_over_using_(-1),
       over_use_counter_(0),
-      hypothesis_(kBwNormal)
+      hypothesis_(kBwNormal),
+      time_of_last_received_packet_(-1)
 #ifdef WEBRTC_BWE_MATLAB
       , plots_()
 #endif
@@ -80,6 +81,7 @@ void OveruseDetector::Update(uint16_t packet_size,
                              int64_t timestamp_ms,
                              uint32_t timestamp,
                              const int64_t now_ms) {
+  time_of_last_received_packet_ = now_ms;
 #ifdef WEBRTC_BWE_MATLAB
   // Create plots
   const int64_t startTimeMs = nowMS;
@@ -164,6 +166,10 @@ void OveruseDetector::SetRateControlRegion(RateControlRegion region) {
       break;
     }
   }
+}
+
+int64_t OveruseDetector::time_of_last_received_packet() const {
+  return time_of_last_received_packet_;
 }
 
 void OveruseDetector::SwitchTimeBase() {

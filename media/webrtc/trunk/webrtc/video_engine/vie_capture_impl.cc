@@ -8,27 +8,31 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "video_engine/vie_capture_impl.h"
+#include "webrtc/video_engine/vie_capture_impl.h"
 
-#include "system_wrappers/interface/trace.h"
-#include "video_engine/include/vie_errors.h"
-#include "video_engine/vie_capturer.h"
-#include "video_engine/vie_channel.h"
-#include "video_engine/vie_channel_manager.h"
-#include "video_engine/vie_defines.h"
-#include "video_engine/vie_encoder.h"
-#include "video_engine/vie_impl.h"
-#include "video_engine/vie_input_manager.h"
-#include "video_engine/vie_shared_data.h"
+#include <map>
+
+#include "webrtc/system_wrappers/interface/trace.h"
+#include "webrtc/video_engine/include/vie_errors.h"
+#include "webrtc/video_engine/vie_capturer.h"
+#include "webrtc/video_engine/vie_channel.h"
+#include "webrtc/video_engine/vie_channel_manager.h"
+#include "webrtc/video_engine/vie_defines.h"
+#include "webrtc/video_engine/vie_encoder.h"
+#include "webrtc/video_engine/vie_impl.h"
+#include "webrtc/video_engine/vie_input_manager.h"
+#include "webrtc/video_engine/vie_shared_data.h"
 
 namespace webrtc {
+
+class CpuOveruseObserver;
 
 ViECapture* ViECapture::GetInterface(VideoEngine* video_engine) {
 #ifdef WEBRTC_VIDEO_ENGINE_CAPTURE_API
   if (!video_engine) {
     return NULL;
   }
-  VideoEngineImpl* vie_impl = reinterpret_cast<VideoEngineImpl*>(video_engine);
+  VideoEngineImpl* vie_impl = static_cast<VideoEngineImpl*>(video_engine);
   ViECaptureImpl* vie_capture_impl = vie_impl;
   // Increase ref count.
   (*vie_capture_impl)++;
@@ -44,7 +48,7 @@ int ViECaptureImpl::Release() {
   // Decrease ref count
   (*this)--;
 
-  WebRtc_Word32 ref_count = GetCount();
+  int32_t ref_count = GetCount();
   if (ref_count < 0) {
     WEBRTC_TRACE(kTraceWarning, kTraceVideo, shared_data_->instance_id(),
                  "ViECapture release too many times");
@@ -70,13 +74,6 @@ ViECaptureImpl::~ViECaptureImpl() {
 int ViECaptureImpl::NumberOfCaptureDevices() {
   WEBRTC_TRACE(kTraceApiCall, kTraceVideo, ViEId(shared_data_->instance_id()),
                "%s", __FUNCTION__);
-  if (!shared_data_->Initialized()) {
-    shared_data_->SetLastError(kViENotInitialized);
-    WEBRTC_TRACE(kTraceError, kTraceVideo, ViEId(shared_data_->instance_id()),
-                 "%s - ViE instance %d not initialized", __FUNCTION__,
-                 shared_data_->instance_id());
-    return -1;
-  }
   return  shared_data_->input_manager()->NumberOfCaptureDevices();
 }
 
@@ -88,13 +85,6 @@ int ViECaptureImpl::GetCaptureDevice(unsigned int list_number,
                                      unsigned int unique_idUTF8Length) {
   WEBRTC_TRACE(kTraceApiCall, kTraceVideo, ViEId(shared_data_->instance_id()),
                "%s(list_number: %d)", __FUNCTION__, list_number);
-  if (!shared_data_->Initialized()) {
-    shared_data_->SetLastError(kViENotInitialized);
-    WEBRTC_TRACE(kTraceError, kTraceVideo, ViEId(shared_data_->instance_id()),
-                 "%s - ViE instance %d not initialized", __FUNCTION__,
-                 shared_data_->instance_id());
-    return -1;
-  }
   return shared_data_->input_manager()->GetDeviceName(
       list_number,
       device_nameUTF8, device_nameUTF8Length,
@@ -107,17 +97,10 @@ int ViECaptureImpl::AllocateCaptureDevice(
   int& capture_id) {
   WEBRTC_TRACE(kTraceApiCall, kTraceVideo, ViEId(shared_data_->instance_id()),
                "%s(unique_idUTF8: %s)", __FUNCTION__, unique_idUTF8);
-  if (!shared_data_->Initialized()) {
-    shared_data_->SetLastError(kViENotInitialized);
-    WEBRTC_TRACE(kTraceError, kTraceVideo, ViEId(shared_data_->instance_id()),
-                 "%s - ViE instance %d not initialized", __FUNCTION__,
-                 shared_data_->instance_id());
-    return -1;
-  }
-  const WebRtc_Word32 result =
+  const int32_t result =
       shared_data_->input_manager()->CreateCaptureDevice(
           unique_idUTF8,
-          static_cast<const WebRtc_UWord32>(unique_idUTF8Length),
+          static_cast<const uint32_t>(unique_idUTF8Length),
           capture_id);
   if (result != 0) {
     shared_data_->SetLastError(result);
@@ -130,15 +113,7 @@ int ViECaptureImpl::AllocateExternalCaptureDevice(
   int& capture_id, ViEExternalCapture*& external_capture) {
   WEBRTC_TRACE(kTraceApiCall, kTraceVideo, ViEId(shared_data_->instance_id()),
                "%s", __FUNCTION__);
-
-  if (!shared_data_->Initialized()) {
-    shared_data_->SetLastError(kViENotInitialized);
-    WEBRTC_TRACE(kTraceError, kTraceVideo, ViEId(shared_data_->instance_id()),
-                 "%s - ViE instance %d not initialized", __FUNCTION__,
-                 shared_data_->instance_id());
-    return -1;
-  }
-  const WebRtc_Word32 result =
+  const int32_t result =
       shared_data_->input_manager()->CreateExternalCaptureDevice(
           external_capture, capture_id);
 
@@ -153,17 +128,8 @@ int ViECaptureImpl::AllocateCaptureDevice(
     VideoCaptureModule& capture_module, int& capture_id) {  // NOLINT
   WEBRTC_TRACE(kTraceApiCall, kTraceVideo, ViEId(shared_data_->instance_id()),
                "%s", __FUNCTION__);
-
-  if (!shared_data_->Initialized()) {
-    shared_data_->SetLastError(kViENotInitialized);
-    WEBRTC_TRACE(kTraceError, kTraceVideo, ViEId(shared_data_->instance_id()),
-                 "%s - ViE instance %d not initialized", __FUNCTION__,
-                 shared_data_->instance_id());
-    return -1;
-  }
-  const WebRtc_Word32 result =
-      shared_data_->input_manager()->CreateCaptureDevice(&capture_module,
-                                                         capture_id);
+  int32_t result = shared_data_->input_manager()->CreateCaptureDevice(
+      &capture_module, capture_id);
   if (result != 0) {
     shared_data_->SetLastError(result);
     return -1;
@@ -235,21 +201,14 @@ int ViECaptureImpl::ConnectCaptureDevice(const int capture_id,
     shared_data_->SetLastError(kViECaptureDeviceAlreadyConnected);
     return -1;
   }
-  VideoCodec codec;
-  bool use_hardware_encoder = false;
-  if (vie_encoder->GetEncoder(&codec) == 0) {
-    // Try to provide the encoder with pre-encoded frames if possible.
-    if (vie_capture->PreEncodeToViEEncoder(codec, *vie_encoder,
-                                           video_channel) == 0) {
-      use_hardware_encoder = true;
-    }
-  }
-  // If we don't use the camera as hardware encoder, we register the vie_encoder
-  // for callbacks.
-  if (!use_hardware_encoder &&
-      vie_capture->RegisterFrameCallback(video_channel, vie_encoder) != 0) {
+  if (vie_capture->RegisterFrameCallback(video_channel, vie_encoder) != 0) {
     shared_data_->SetLastError(kViECaptureDeviceUnknownError);
     return -1;
+  }
+  std::map<int, CpuOveruseObserver*>::iterator it =
+      shared_data_->overuse_observers()->find(video_channel);
+  if (it != shared_data_->overuse_observers()->end()) {
+    vie_capture->RegisterCpuOveruseObserver(it->second);
   }
   return 0;
 }
@@ -291,6 +250,9 @@ int ViECaptureImpl::DisconnectCaptureDevice(const int video_channel) {
     return -1;
   }
 
+  ViECapturer* vie_capture = is.Capture(frame_provider->Id());
+  assert(vie_capture);
+  vie_capture->RegisterCpuOveruseObserver(NULL);
   if (frame_provider->DeregisterFrameCallback(vie_encoder) != 0) {
     shared_data_->SetLastError(kViECaptureDeviceUnknownError);
     return -1;
@@ -430,14 +392,6 @@ int ViECaptureImpl::NumberOfCapabilities(
                shared_data_->instance_id());
   return -1;
 #endif
-
-  if (!shared_data_->Initialized()) {
-    shared_data_->SetLastError(kViENotInitialized);
-    WEBRTC_TRACE(kTraceError, kTraceVideo, ViEId(shared_data_->instance_id()),
-                 "%s - ViE instance %d not initialized", __FUNCTION__,
-                 shared_data_->instance_id());
-    return -1;
-  }
   return shared_data_->input_manager()->NumberOfCaptureCapabilities(
       unique_idUTF8);
 }
@@ -461,13 +415,6 @@ int ViECaptureImpl::GetCaptureCapability(const char* unique_idUTF8,
                shared_data_->instance_id());
   return -1;
 #endif
-  if (!shared_data_->Initialized()) {
-    shared_data_->SetLastError(kViENotInitialized);
-    WEBRTC_TRACE(kTraceError, kTraceVideo, ViEId(shared_data_->instance_id()),
-                 "%s - ViE instance %d not initialized", __FUNCTION__,
-                 shared_data_->instance_id());
-    return -1;
-  }
   if (shared_data_->input_manager()->GetCaptureCapability(
           unique_idUTF8, capability_number, capability) != 0) {
     shared_data_->SetLastError(kViECaptureDeviceUnknownError);
@@ -507,14 +454,6 @@ int ViECaptureImpl::GetOrientation(const char* unique_idUTF8,
                                    RotateCapturedFrame& orientation) {
   WEBRTC_TRACE(kTraceApiCall, kTraceVideo, ViEId(shared_data_->instance_id()),
                "%s (capture_device_name: %s)", __FUNCTION__, unique_idUTF8);
-
-  if (!shared_data_->Initialized()) {
-    shared_data_->SetLastError(kViENotInitialized);
-    WEBRTC_TRACE(kTraceError, kTraceVideo, ViEId(shared_data_->instance_id()),
-                 "%s - ViE instance %d not initialized", __FUNCTION__,
-                 shared_data_->instance_id());
-    return -1;
-  }
   if (shared_data_->input_manager()->GetOrientation(
       unique_idUTF8,
       orientation) != 0) {

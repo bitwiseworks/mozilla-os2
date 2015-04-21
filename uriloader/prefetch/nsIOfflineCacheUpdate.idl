@@ -9,7 +9,6 @@ interface nsIURI;
 interface nsIDOMWindow;
 interface nsIDOMNode;
 interface nsIDOMDocument;
-interface nsIDOMLoadStatus;
 interface nsIOfflineCacheUpdate;
 interface nsIPrincipal;
 interface nsIPrefBranch;
@@ -54,10 +53,6 @@ interface nsIOfflineCacheUpdateObserver : nsISupports {
  * resources.
  *
  * It can be used to perform partial or complete updates.
- *
- * Each update object maintains a list of nsIDOMLoadStatus items for the
- * resources it is updating.  The list of these items will be available
- * after the object is scheduled.
  *
  * One update object will be updating at a time.  The active object will
  * load its items one by one, sending itemCompleted() to any registered
@@ -197,7 +192,7 @@ interface nsIOfflineCacheUpdate : nsISupports {
   readonly attribute uint64_t byteProgress;
 };
 
-[scriptable, uuid(cf362a31-4166-4994-8443-b68704ecdcc0)]
+[scriptable, uuid(0668910d-d14f-4cee-8db5-25faebc360ab)]
 interface nsIOfflineCacheUpdateService : nsISupports {
     /**
      * Constants for the offline-app permission.
@@ -228,15 +223,6 @@ interface nsIOfflineCacheUpdateService : nsISupports {
                                          in nsIDOMWindow aWindow);
 
     /**
-     * Schedule a cache update for a given offline manifest and let the data
-     * be stored to a custom profile directory.  There is no coalescing of
-     * manifests by manifest URL.
-     */
-    nsIOfflineCacheUpdate scheduleCustomProfileUpdate(in nsIURI aManifestURI,
-                                                      in nsIURI aDocumentURI,
-                                                      in nsIFile aProfileDir);
-
-    /**
      * Schedule a cache update for a given offline manifest using app cache
      * bound to the given appID+inBrowser flag.  If an existing update is
      * scheduled or running, that update will be returned. Otherwise a new
@@ -245,7 +231,8 @@ interface nsIOfflineCacheUpdateService : nsISupports {
     nsIOfflineCacheUpdate scheduleAppUpdate(in nsIURI aManifestURI,
                                             in nsIURI aDocumentURI,
                                             in unsigned long aAppID,
-                                            in boolean aInBrowser);
+                                            in boolean aInBrowser,
+                                            in nsIFile aProfileDir);
 
     /**
      * Schedule a cache update for a manifest when the document finishes
@@ -296,4 +283,11 @@ interface nsIOfflineCacheUpdateService : nsISupports {
      */
     boolean offlineAppAllowedForURI(in nsIURI aURI,
                                     in nsIPrefBranch aPrefBranch);
+
+    /**
+     * Sets the "offline-app" permission for the principal.
+     * In the single process model calls directly on permission manager.
+     * In the multi process model dispatches to the parent process.
+     */
+    void allowOfflineApp(in nsIDOMWindow aWindow, in nsIPrincipal aPrincipal);
 };

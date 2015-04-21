@@ -64,5 +64,32 @@ class ExpressionParserTest(unittest.TestCase):
         self.assertTrue(parse("true && (true || false)"))
         self.assertTrue(parse("(true && false) || (true && (true || false))"))
 
+
+    def test_comments(self):
+        # comments in expressions work accidentally, via an implementation
+        # detail - the '#' character doesn't match any of the regular
+        # expressions we specify as tokens, and thus are ignored.
+        # However, having explicit tests for them means that should the
+        # implementation ever change, comments continue to work, even if that
+        # means a new implementation must handle them explicitly.
+        self.assertTrue(parse("true == true # it does!"))
+        self.assertTrue(parse("false == false # it does"))
+        self.assertTrue(parse("false != true # it doesnt"))
+        self.assertTrue(parse('"string with #" == "string with #" # really, it does'))
+        self.assertTrue(parse('"string with #" != "string with # but not the same" # no match!'))
+
+    def test_not(self):
+        """
+        Test the ! operator.
+        """
+        self.assertTrue(parse("!false"))
+        self.assertTrue(parse("!(false)"))
+        self.assertFalse(parse("!true"))
+        self.assertFalse(parse("!(true)"))
+        self.assertTrue(parse("!true || true)"))
+        self.assertTrue(parse("true || !true)"))
+        self.assertFalse(parse("!true && true"))
+        self.assertFalse(parse("true && !true"))
+
 if __name__ == '__main__':
     unittest.main()

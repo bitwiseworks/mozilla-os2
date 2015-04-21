@@ -37,34 +37,30 @@ var SelectHelper = {
     }
 
     p.show((function(data) {
-      let selected = data.button;
-      if (selected == -1)
-          return;
+      let selected = data.list;
 
-      let changed = false;
       if (aElement instanceof Ci.nsIDOMXULMenuListElement) {
-        aElement.selectedIndex = selected;
-      } else if (aElement instanceof HTMLSelectElement) {
-        if (!Array.isArray(selected)) {
-          let temp = [];
-          for (let i = 0; i <= list.length; i++) {
-            temp[i] = (i == selected);
-          }
-          selected = temp;
+        if (aElement.selectedIndex != selected[0]) {
+          aElement.selectedIndex = selected[0];
+          this.fireOnCommand(aElement);
         }
-
+      } else if (aElement instanceof HTMLSelectElement) {
+        let changed = false;
         let i = 0;
         this.forOptions(aElement, function(aNode) {
-          if (aNode.selected != selected[i]) {
+          if (aNode.selected && selected.indexOf(i) == -1) {
             changed = true;
-            aNode.selected = selected[i];
+            aNode.selected = false;
+          } else if (!aNode.selected && selected.indexOf(i) != -1) {
+            changed = true;
+            aNode.selected = true;
           }
-          i++
+          i++;
         });
-      }
 
-      if (changed)
-        this.fireOnChange(aElement);
+        if (changed)
+          this.fireOnChange(aElement);
+      }
     }).bind(this));
   },
 
@@ -123,6 +119,16 @@ var SelectHelper = {
   fireOnChange: function(aElement) {
     let evt = aElement.ownerDocument.createEvent("Events");
     evt.initEvent("change", true, true, aElement.defaultView, 0,
+                  false, false,
+                  false, false, null);
+    setTimeout(function() {
+      aElement.dispatchEvent(evt);
+    }, 0);
+  },
+
+  fireOnCommand: function(aElement) {
+    let evt = aElement.ownerDocument.createEvent("XULCommandEvent");
+    evt.initCommandEvent("command", true, true, aElement.defaultView, 0,
                   false, false,
                   false, false, null);
     setTimeout(function() {

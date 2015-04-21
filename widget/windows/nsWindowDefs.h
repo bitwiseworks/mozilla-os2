@@ -33,10 +33,13 @@
 #define MOZ_WM_HSCROLL                    (WM_APP+0x0313)
 #define MOZ_WM_MOUSEWHEEL_FIRST           MOZ_WM_MOUSEVWHEEL
 #define MOZ_WM_MOUSEWHEEL_LAST            MOZ_WM_HSCROLL
+// If a popup window is being activated, we try to reactivate the previous
+// window with this message.
+#define MOZ_WM_REACTIVATE                 (WM_APP+0x0314)
 
 // Internal message for ensuring the file picker is visible on multi monitor
 // systems, and when the screen resolution changes.
-#define MOZ_WM_ENSUREVISIBLE              (WM_APP + 14159)
+#define MOZ_WM_ENSUREVISIBLE              (WM_APP+0x374F)
 
 #ifndef SM_CXPADDEDBORDER
 #define SM_CXPADDEDBORDER                 92
@@ -220,6 +223,28 @@ struct TITLEBARINFOEX
     RECT rgrect[CCHILDREN_TITLEBAR + 1];
 };
 #endif
+
+namespace mozilla {
+namespace widget {
+
+struct MSGResult
+{
+  // Result for the message.
+  LRESULT& mResult;
+  // If mConsumed is true, the caller shouldn't call next wndproc.
+  bool mConsumed;
+
+  MSGResult(LRESULT* aResult = nullptr) :
+    mResult(aResult ? *aResult : mDefaultResult), mConsumed(false)
+  {
+  }
+
+private:
+  LRESULT mDefaultResult;
+};
+
+} // namespace widget
+} // namespace mozilla
 
 /**************************************************************
  *

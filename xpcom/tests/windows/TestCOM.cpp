@@ -48,9 +48,9 @@ private:
   }
 };
 
-NS_IMPL_QUERY_INTERFACE1(nsTestCom, nsITestCom)
+NS_IMPL_QUERY_INTERFACE(nsTestCom, nsITestCom)
 
-nsrefcnt nsTestCom::AddRef() 
+MozExternalRefCountType nsTestCom::AddRef()
 {
   nsrefcnt res = ++mRefCnt;
   NS_LOG_ADDREF(this, mRefCnt, "nsTestCom", sizeof(*this));
@@ -58,7 +58,7 @@ nsrefcnt nsTestCom::AddRef()
   return res;
 }
 
-nsrefcnt nsTestCom::Release() 
+MozExternalRefCountType nsTestCom::Release()
 {
   nsrefcnt res = --mRefCnt;
   NS_LOG_RELEASE(this, mRefCnt, "nsTestCom");
@@ -87,19 +87,19 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(nsTestComFactory, nsIFactory)
+NS_IMPL_ISUPPORTS(nsTestComFactory, nsIFactory)
 
 nsresult nsTestComFactory::CreateInstance(nsISupports *aOuter,
 					  const nsIID &aIID,
 					  void **aResult)
 {
-  if (aOuter != NULL) {
+  if (aOuter != nullptr) {
     return NS_ERROR_NO_AGGREGATION;
   }
 
   nsTestCom *t = new nsTestCom();
   
-  if (t == NULL) {
+  if (t == nullptr) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
   
@@ -128,7 +128,7 @@ int main(int argc, char *argv[])
   nsITestCom *iTestCom;
 
   iFactory->LockServer(TRUE);
-  iFactory->CreateInstance(NULL, IID_IUnknown, (void **) &iUnknown);
+  iFactory->CreateInstance(nullptr, IID_IUnknown, (void **) &iUnknown);
   iFactory->LockServer(FALSE);
 
   GUID testGUID = NS_ITEST_COM_IID;

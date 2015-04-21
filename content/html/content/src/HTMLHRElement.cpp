@@ -11,27 +11,17 @@ NS_IMPL_NS_NEW_HTML_ELEMENT(HR)
 namespace mozilla {
 namespace dom {
 
-HTMLHRElement::HTMLHRElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+HTMLHRElement::HTMLHRElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 HTMLHRElement::~HTMLHRElement()
 {
 }
 
-NS_IMPL_ADDREF_INHERITED(HTMLHRElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLHRElement, Element)
-
-// QueryInterface implementation for HTMLHRElement
-NS_INTERFACE_TABLE_HEAD(HTMLHRElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLHRElement,
-                                nsIDOMHTMLHRElement)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
-
+NS_IMPL_ISUPPORTS_INHERITED(HTMLHRElement, nsGenericHTMLElement,
+                            nsIDOMHTMLHRElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLHRElement)
 
@@ -42,19 +32,19 @@ NS_IMPL_STRING_ATTR(HTMLHRElement, Size, size)
 NS_IMPL_STRING_ATTR(HTMLHRElement, Width, width)
 NS_IMPL_STRING_ATTR(HTMLHRElement, Color, color)
 
-static const nsAttrValue::EnumTable kAlignTable[] = {
-  { "left", NS_STYLE_TEXT_ALIGN_LEFT },
-  { "right", NS_STYLE_TEXT_ALIGN_RIGHT },
-  { "center", NS_STYLE_TEXT_ALIGN_CENTER },
-  { 0 }
-};
-
 bool
 HTMLHRElement::ParseAttribute(int32_t aNamespaceID,
                               nsIAtom* aAttribute,
                               const nsAString& aValue,
                               nsAttrValue& aResult)
 {
+  static const nsAttrValue::EnumTable kAlignTable[] = {
+    { "left", NS_STYLE_TEXT_ALIGN_LEFT },
+    { "right", NS_STYLE_TEXT_ALIGN_RIGHT },
+    { "center", NS_STYLE_TEXT_ALIGN_CENTER },
+    { 0 }
+  };
+
   if (aNamespaceID == kNameSpaceID_None) {
     if (aAttribute == nsGkAtoms::width) {
       return aResult.ParseSpecialIntValue(aValue);
@@ -74,9 +64,9 @@ HTMLHRElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-static void
-MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                      nsRuleData* aData)
+void
+HTMLHRElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                     nsRuleData* aData)
 {
   bool noshade = false;
 
@@ -267,9 +257,9 @@ HTMLHRElement::GetAttributeMappingFunction() const
 }
 
 JSObject*
-HTMLHRElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLHRElement::WrapNode(JSContext* aCx)
 {
-  return HTMLHRElementBinding::Wrap(aCx, aScope, this);
+  return HTMLHRElementBinding::Wrap(aCx, this);
 }
 
 } // namespace mozilla

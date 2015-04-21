@@ -4,20 +4,13 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 'use strict';
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
-
-Cu.import('resource://gre/modules/XPCOMUtils.jsm');
-Cu.import('resource://gre/modules/Services.jsm');
-Cu.import('resource://testing-common/httpd.js');
-
 const kInterfaceName = 'wifi';
 
-XPCOMUtils.defineLazyServiceGetter(this, 'gCaptivePortalDetector',
-                                   '@mozilla.org/toolkit/captive-detector;1',
-                                   'nsICaptivePortalDetector');
-var server;
 var step = 0;
 var loginFinished = false;
+
+var gRedirectServer;
+var gRedirectServerURL;
 
 function xhr_handler(metadata, response) {
   if (loginFinished) {
@@ -27,7 +20,7 @@ function xhr_handler(metadata, response) {
     response.write('true');
   } else {
     response.setStatusLine(metadata.httpVersion, 303, "See Other");
-    response.setHeader("Location", "http://example.org/", false);
+    response.setHeader("Location", gRedirectServerURL, false);
     response.setHeader("Content-Type", "text/html", false);
   }
 }
@@ -37,7 +30,7 @@ function fakeUIResponse() {
     if (topic === 'captive-portal-login') {
       let xhr = Cc['@mozilla.org/xmlextras/xmlhttprequest;1']
                   .createInstance(Ci.nsIXMLHttpRequest);
-      xhr.open('GET', kServerURL + kCanonicalSitePath, true);
+      xhr.open('GET', gServerURL + kCanonicalSitePath, true);
       xhr.send();
       loginFinished = true;
       do_check_eq(++step, 2);
@@ -57,7 +50,9 @@ function test_portal_found() {
     complete: function complete(success) {
       do_check_eq(++step, 3);
       do_check_true(success);
-      server.stop(do_test_finished);
+      gServer.stop(function () {
+        gRedirectServer.stop(do_test_finished);
+      });
     },
   };
 
@@ -65,6 +60,12 @@ function test_portal_found() {
 }
 
 function run_test() {
+  gRedirectServer = new HttpServer();
+  gRedirectServer.start(-1);
+  gRedirectServerURL = 'http://localhost:' + gRedirectServer.identity.primaryPort;
+
+  run_captivedetect_test(xhr_handler, fakeUIResponse, test_portal_found);
+
   server = new HttpServer();
   server.registerPathHandler(kCanonicalSitePath, xhr_handler);
   server.start(4444);

@@ -222,6 +222,19 @@
                                  [ 18, "ml_edivbr1", kTodo, kTodo, kOk ] ] ],
                              [ 19, 19, "", 19, 19 ] ]);
 
+      // a <a href="#">b</a>
+      // a *
+      testTextBeforeOffset("cntr_1", BOUNDARY_WORD_START,
+                           [ [ 0, 1, "", 0, 0 ],
+                             [ 2, 3, "a ", 0, 2 ] ]);
+
+      testTextAtOffset("cntr_1", BOUNDARY_WORD_START,
+                       [ [ 0, 1, "a ", 0, 2 ],
+                         [ 2, 3, kEmbedChar, 2, 3 ] ]);
+      testTextAfterOffset("cntr_1", BOUNDARY_WORD_START,
+                           [ [ 0, 1, kEmbedChar, 2, 3 ],
+                             [ 2, 3, "", 3, 3 ] ]);
+
       SimpleTest.finish();
     }
 
@@ -268,17 +281,18 @@
 
 two words
 </div>
-<div id="ml_divbr1">oneword<br/><br/>two words<br/></div>
+<div id="ml_divbr1">oneword<br/><br/>two words<br/><br/></div>
 <div id="ml_ediv1" contenteditable="true">oneword
 
 two words
 </div>
-<div id="ml_edivbr1" contenteditable="true">oneword<br/><br/>two words<br/></div>
+<div id="ml_edivbr1" contenteditable="true">oneword<br/><br/>two words<br/><br/></div>
 <textarea id="ml_t1" cols="300">oneword
 
 two words
 </textarea>
   </pre>
 
+  <div id="cntr_1">a <a href="#">b</a></div>
 </body>
 </html>

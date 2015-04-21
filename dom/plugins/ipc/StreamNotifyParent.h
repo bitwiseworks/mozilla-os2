@@ -17,7 +17,7 @@ class StreamNotifyParent : public PStreamNotifyParent
   friend class PluginInstanceParent;
 
   StreamNotifyParent()
-    : mDestructionFlag(NULL)
+    : mDestructionFlag(nullptr)
   { }
   ~StreamNotifyParent() {
     if (mDestructionFlag)
@@ -31,11 +31,11 @@ public:
     mDestructionFlag = flag;
   }
   void ClearDestructionFlag() {
-    mDestructionFlag = NULL;
+    mDestructionFlag = nullptr;
   }
 
 private:
-  bool RecvRedirectNotifyResponse(const bool& allow);
+  bool RecvRedirectNotifyResponse(const bool& allow) MOZ_OVERRIDE;
 
   bool* mDestructionFlag;
 };

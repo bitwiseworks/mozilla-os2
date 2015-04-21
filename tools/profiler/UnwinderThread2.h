@@ -9,6 +9,11 @@
 #include "GeckoProfilerImpl.h"
 #include "ProfileEntry.h"
 
+#include "PlatformMacros.h"
+#if defined(SPS_OS_android) || defined(SPS_OS_linux)
+# include "LulMain.h"
+#endif
+
 /* Top level exports of UnwinderThread.cpp. */
 
 // Abstract type.  A buffer which is used to transfer information between
@@ -40,7 +45,7 @@ void uwt__deinit();
 // Registers a sampler thread for profiling.  Threads must be
 // registered before calls to call utb__acquire_empty_buffer or
 // utb__release_full_buffer have any effect.  If stackTop is
-// NULL, the call is ignored.
+// nullptr, the call is ignored.
 void uwt__register_thread_for_profiling(void* stackTop);
 
 // Deregister a sampler thread for profiling.
@@ -48,7 +53,7 @@ void uwt__unregister_thread_for_profiling();
 
 // RUNS IN SIGHANDLER CONTEXT 
 // Called in the sampled thread (signal) context.  Get an empty buffer
-// into which ProfileEntries can be put.  It may return NULL if no
+// into which ProfileEntries can be put.  It may return nullptr if no
 // empty buffers can be found, which will be the case if the unwinder
 // thread(s) have fallen behind for some reason.  In this case the
 // sampled thread must simply give up and return from the signal
@@ -56,7 +61,7 @@ void uwt__unregister_thread_for_profiling();
 //
 // If the calling thread has not previously registered itself for
 // profiling via uwt__register_thread_for_profiling, this routine
-// returns NULL.
+// returns nullptr.
 UnwinderThreadBuffer* uwt__acquire_empty_buffer();
 
 // RUNS IN SIGHANDLER CONTEXT
@@ -64,12 +69,36 @@ UnwinderThreadBuffer* uwt__acquire_empty_buffer();
 // that the sampled thread has acquired, handing the contents to
 // the unwinder thread, and, if necessary, passing sufficient
 // information (stack top chunk, + registers) to also do a native
-// unwind.  If 'ucV' is NULL, no native unwind is done.  If non-NULL,
+// unwind.  If 'ucV' is nullptr, no native unwind is done.  If non-nullptr,
 // it is assumed to point to a ucontext_t* that holds the initial 
 // register state for the unwind.  The results of all of this are
 // dumped into |aProfile| (by the unwinder thread, not the calling thread).
 void uwt__release_full_buffer(ThreadProfile* aProfile,
                               UnwinderThreadBuffer* utb,
                               void* /* ucontext_t*, really */ ucV);
+
+struct LinkedUWTBuffer;
+
+// Get an empty buffer for synchronous unwinding.
+// This function is NOT signal-safe.
+LinkedUWTBuffer* utb__acquire_sync_buffer(void* stackTop);
+
+void utb__finish_sync_buffer(ThreadProfile* aProfile,
+                             UnwinderThreadBuffer* utb,
+                             void* /* ucontext_t*, really */ ucV);
+
+// Free an empty buffer that was previously allocated by
+// utb__acquire_sync_buffer.
+void utb__release_sync_buffer(LinkedUWTBuffer* utb);
+
+// This typedef must match uwt__release_full_buffer and uwt__finish_sync_buffer
+typedef void (*UTB_RELEASE_FUNC)(ThreadProfile*,UnwinderThreadBuffer*,void*);
+
+#if defined(SPS_OS_android) || defined(SPS_OS_linux)
+// Notify |aLUL| of the objects in the current process, so as to get
+// it to read unwind data for them.  This has to be externally visible
+// so it can be used in LUL unit tests, tools/profiler/tests/gtest/LulTest.cpp.
+void read_procmaps(lul::LUL* aLUL);
+#endif
 
 #endif /* ndef MOZ_UNWINDER_THREAD_2_H */

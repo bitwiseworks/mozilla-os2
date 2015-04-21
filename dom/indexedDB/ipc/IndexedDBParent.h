@@ -93,7 +93,7 @@ public:
   void
   NoteDyingActor()
   {
-    mActor = NULL;
+    mActor = nullptr;
   }
 
   NS_IMETHOD
@@ -194,10 +194,14 @@ public:
   bool
   CheckWritePermission(const nsAString& aDatabaseName);
 
+  mozilla::ipc::IProtocol*
+  CloneProtocol(Channel* aChannel,
+                mozilla::ipc::ProtocolCloneContext* aCtx) MOZ_OVERRIDE;
+
 protected:
   bool
   CheckPermissionInternal(const nsAString& aDatabaseName,
-                          const nsDependentCString& aPermission);
+                          const nsACString& aPermission);
 
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
@@ -205,25 +209,33 @@ protected:
   virtual bool
   RecvPIndexedDBDatabaseConstructor(PIndexedDBDatabaseParent* aActor,
                                     const nsString& aName,
-                                    const uint64_t& aVersion) MOZ_OVERRIDE;
+                                    const uint64_t& aVersion,
+                                    const PersistenceType& aPersistenceType)
+                                    MOZ_OVERRIDE;
 
   virtual bool
   RecvPIndexedDBDeleteDatabaseRequestConstructor(
                                   PIndexedDBDeleteDatabaseRequestParent* aActor,
-                                  const nsString& aName) MOZ_OVERRIDE;
+                                  const nsString& aName,
+                                  const PersistenceType& aPersistenceType)
+                                  MOZ_OVERRIDE;
 
   virtual PIndexedDBDatabaseParent*
-  AllocPIndexedDBDatabase(const nsString& aName, const uint64_t& aVersion)
-                          MOZ_OVERRIDE;
+  AllocPIndexedDBDatabaseParent(const nsString& aName, const uint64_t& aVersion,
+                                const PersistenceType& aPersistenceType)
+                                MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPIndexedDBDatabase(PIndexedDBDatabaseParent* aActor) MOZ_OVERRIDE;
+  DeallocPIndexedDBDatabaseParent(PIndexedDBDatabaseParent* aActor) MOZ_OVERRIDE;
 
   virtual PIndexedDBDeleteDatabaseRequestParent*
-  AllocPIndexedDBDeleteDatabaseRequest(const nsString& aName) MOZ_OVERRIDE;
+  AllocPIndexedDBDeleteDatabaseRequestParent(
+                                        const nsString& aName,
+                                        const PersistenceType& aPersistenceType)
+                                        MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPIndexedDBDeleteDatabaseRequest(
+  DeallocPIndexedDBDeleteDatabaseRequestParent(
                                   PIndexedDBDeleteDatabaseRequestParent* aActor)
                                   MOZ_OVERRIDE;
 };
@@ -287,11 +299,11 @@ protected:
                                        MOZ_OVERRIDE;
 
   virtual PIndexedDBTransactionParent*
-  AllocPIndexedDBTransaction(const TransactionParams& aParams) MOZ_OVERRIDE;
+  AllocPIndexedDBTransactionParent(const TransactionParams& aParams) MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPIndexedDBTransaction(PIndexedDBTransactionParent* aActor)
-                               MOZ_OVERRIDE;
+  DeallocPIndexedDBTransactionParent(PIndexedDBTransactionParent* aActor)
+                                     MOZ_OVERRIDE;
 };
 
 /*******************************************************************************
@@ -353,12 +365,12 @@ protected:
                                     MOZ_OVERRIDE;
 
   virtual PIndexedDBObjectStoreParent*
-  AllocPIndexedDBObjectStore(const ObjectStoreConstructorParams& aParams)
-                             MOZ_OVERRIDE;
+  AllocPIndexedDBObjectStoreParent(const ObjectStoreConstructorParams& aParams)
+                                   MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPIndexedDBObjectStore(PIndexedDBObjectStoreParent* aActor)
-                               MOZ_OVERRIDE;
+  DeallocPIndexedDBObjectStoreParent(PIndexedDBObjectStoreParent* aActor)
+                                     MOZ_OVERRIDE;
 };
 
 /*******************************************************************************
@@ -391,8 +403,8 @@ protected:
                                     MOZ_OVERRIDE;
 
   virtual PIndexedDBObjectStoreParent*
-  AllocPIndexedDBObjectStore(const ObjectStoreConstructorParams& aParams)
-                             MOZ_OVERRIDE;
+  AllocPIndexedDBObjectStoreParent(const ObjectStoreConstructorParams& aParams)
+                                   MOZ_OVERRIDE;
 };
 
 /*******************************************************************************
@@ -429,10 +441,10 @@ protected:
                                    MOZ_OVERRIDE;
 
   virtual PIndexedDBRequestParent*
-  AllocPIndexedDBRequest(const CursorRequestParams& aParams) MOZ_OVERRIDE;
+  AllocPIndexedDBRequestParent(const CursorRequestParams& aParams) MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPIndexedDBRequest(PIndexedDBRequestParent* aActor) MOZ_OVERRIDE;
+  DeallocPIndexedDBRequestParent(PIndexedDBRequestParent* aActor) MOZ_OVERRIDE;
 };
 
 /*******************************************************************************
@@ -513,23 +525,23 @@ protected:
                                  MOZ_OVERRIDE;
 
   virtual PIndexedDBRequestParent*
-  AllocPIndexedDBRequest(const ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
+  AllocPIndexedDBRequestParent(const ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPIndexedDBRequest(PIndexedDBRequestParent* aActor) MOZ_OVERRIDE;
+  DeallocPIndexedDBRequestParent(PIndexedDBRequestParent* aActor) MOZ_OVERRIDE;
 
   virtual PIndexedDBIndexParent*
-  AllocPIndexedDBIndex(const IndexConstructorParams& aParams) MOZ_OVERRIDE;
+  AllocPIndexedDBIndexParent(const IndexConstructorParams& aParams) MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPIndexedDBIndex(PIndexedDBIndexParent* aActor) MOZ_OVERRIDE;
+  DeallocPIndexedDBIndexParent(PIndexedDBIndexParent* aActor) MOZ_OVERRIDE;
 
   virtual PIndexedDBCursorParent*
-  AllocPIndexedDBCursor(const ObjectStoreCursorConstructorParams& aParams)
-                        MOZ_OVERRIDE;
+  AllocPIndexedDBCursorParent(const ObjectStoreCursorConstructorParams& aParams)
+                              MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPIndexedDBCursor(PIndexedDBCursorParent* aActor) MOZ_OVERRIDE;
+  DeallocPIndexedDBCursorParent(PIndexedDBCursorParent* aActor) MOZ_OVERRIDE;
 };
 
 /*******************************************************************************
@@ -630,17 +642,17 @@ protected:
                                    MOZ_OVERRIDE;
 
   virtual PIndexedDBRequestParent*
-  AllocPIndexedDBRequest(const IndexRequestParams& aParams) MOZ_OVERRIDE;
+  AllocPIndexedDBRequestParent(const IndexRequestParams& aParams) MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPIndexedDBRequest(PIndexedDBRequestParent* aActor) MOZ_OVERRIDE;
+  DeallocPIndexedDBRequestParent(PIndexedDBRequestParent* aActor) MOZ_OVERRIDE;
 
   virtual PIndexedDBCursorParent*
-  AllocPIndexedDBCursor(const IndexCursorConstructorParams& aParams)
-                        MOZ_OVERRIDE;
+  AllocPIndexedDBCursorParent(const IndexCursorConstructorParams& aParams)
+                              MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPIndexedDBCursor(PIndexedDBCursorParent* aActor) MOZ_OVERRIDE;
+  DeallocPIndexedDBCursorParent(PIndexedDBCursorParent* aActor) MOZ_OVERRIDE;
 };
 
 /*******************************************************************************
@@ -697,10 +709,12 @@ class IndexedDBObjectStoreRequestParent : public IndexedDBRequestParentBase
   typedef ipc::PutParams PutParams;
   typedef ipc::ClearParams ClearParams;
   typedef ipc::DeleteParams DeleteParams;
-  typedef ipc::FIXME_Bug_521898_objectstore::GetParams GetParams;
-  typedef ipc::FIXME_Bug_521898_objectstore::GetAllParams GetAllParams;
-  typedef ipc::FIXME_Bug_521898_objectstore::CountParams CountParams;
-  typedef ipc::FIXME_Bug_521898_objectstore::OpenCursorParams OpenCursorParams;
+  typedef ipc::GetParams GetParams;
+  typedef ipc::GetAllParams GetAllParams;
+  typedef ipc::GetAllKeysParams GetAllKeysParams;
+  typedef ipc::CountParams CountParams;
+  typedef ipc::OpenCursorParams OpenCursorParams;
+  typedef ipc::OpenKeyCursorParams OpenKeyCursorParams;
 
 public:
   IndexedDBObjectStoreRequestParent(IDBObjectStore* aObjectStore,
@@ -712,6 +726,9 @@ public:
 
   bool
   GetAll(const GetAllParams& aParams);
+
+  bool
+  GetAllKeys(const GetAllKeysParams& aParams);
 
   bool
   Add(const AddParams& aParams);
@@ -730,6 +747,9 @@ public:
 
   bool
   OpenCursor(const OpenCursorParams& aParams);
+
+  bool
+  OpenKeyCursor(const OpenKeyCursorParams& aParams);
 
 protected:
   void
@@ -758,10 +778,10 @@ class IndexedDBIndexRequestParent : public IndexedDBRequestParentBase
   typedef ipc::GetKeyParams GetKeyParams;
   typedef ipc::GetAllKeysParams GetAllKeysParams;
   typedef ipc::OpenKeyCursorParams OpenKeyCursorParams;
-  typedef ipc::FIXME_Bug_521898_index::GetParams GetParams;
-  typedef ipc::FIXME_Bug_521898_index::GetAllParams GetAllParams;
-  typedef ipc::FIXME_Bug_521898_index::CountParams CountParams;
-  typedef ipc::FIXME_Bug_521898_index::OpenCursorParams OpenCursorParams;
+  typedef ipc::GetParams GetParams;
+  typedef ipc::GetAllParams GetAllParams;
+  typedef ipc::CountParams CountParams;
+  typedef ipc::OpenCursorParams OpenCursorParams;
 
 public:
   IndexedDBIndexRequestParent(IDBIndex* aIndex, RequestType aRequestType);

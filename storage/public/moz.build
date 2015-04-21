@@ -6,6 +6,7 @@
 
 XPIDL_SOURCES += [
     'mozIStorageAggregateFunction.idl',
+    'mozIStorageAsyncConnection.idl',
     'mozIStorageAsyncStatement.idl',
     'mozIStorageBaseStatement.idl',
     'mozIStorageBindingParams.idl',
@@ -27,7 +28,7 @@ XPIDL_SOURCES += [
     'mozIStorageValueArray.idl',
 ]
 
-MODULE = 'storage'
+XPIDL_MODULE = 'storage'
 
 EXPORTS += [
     'mozStorageHelper.h',

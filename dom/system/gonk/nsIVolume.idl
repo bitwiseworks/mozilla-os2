@@ -5,7 +5,7 @@
 #include "nsISupports.idl"
 #include "nsIVolumeStat.idl"
 
-[scriptable, uuid(1134f267-7b81-42f2-b64a-6edb91286576)]
+[scriptable, uuid(13caa69c-8f1f-11e3-8e36-10bf48d707fb)]
 interface nsIVolume : nsISupports
 {
   // These MUST match the states from android's system/vold/Volume.h header
@@ -39,7 +39,7 @@ interface nsIVolume : nsISupports
   readonly attribute long mountGeneration;
 
   // While a volume is mounted, it can be locked, preventing it from being
-  // shared with the PC. To lock a volume, acquire an nsIDOMMozWakeLock
+  // shared with the PC. To lock a volume, acquire an MozWakeLock
   // using the name of this attribute. Note that mountLockName changes
   // every time the mountGeneration changes, so you'll need to reacquire
   // the wakelock every time the volume becomes mounted.
@@ -48,7 +48,41 @@ interface nsIVolume : nsISupports
   // Determines if a mountlock is currently being held against this volume.
   readonly attribute boolean isMountLocked;
 
+  // Determines if media is actually present or not. Note, that when an sdcard
+  // is ejected, it may go through several tranistory states before finally
+  // arriving at STATE_NOMEDIA. So isMediaPresent may be false even when the
+  // current state isn't STATE_NOMEDIA.
+  readonly attribute boolean isMediaPresent;
+
+  // Determines if the volume is currently being shared. This covers off
+  // more than just state == STATE_SHARED. isSharing will return true from the
+  // time that the volume leaves the mounted state, until it gets back to
+  // mounted, nomedia, or formatting states. This attribute is to allow
+  // device storage to suppress unwanted 'unavailable' status when
+  // transitioning from mounted to sharing and back again.
+  readonly attribute boolean isSharing;
+
+  // Determines if the volume is currently formatting. This sets true once 
+  // mFormatRequest == true and mState == STATE_MOUNTED, and sets false
+  // once the volume has been formatted and mounted again.
+  readonly attribute boolean isFormatting;
+
   nsIVolumeStat getStats();
+
+  // Formats the volume in IO thread, if the volume is ready to be formatted.
+  // Automounter will unmount it, format it and then mount it again.
+  void format();
+
+  // Mounts the volume in IO thread, if the volume is already unmounted.
+  // Automounter will mount it. Otherwise Automounter will skip this.
+  void mount();
+
+  // Unmounts the volume in IO thread, if the volume is already mounted.
+  // Automounter will unmount it. Otherwise Automounter will skip this.
+  void unmount();
+
+  // Whether this is a fake volume.
+  readonly attribute boolean isFake;
 };
 
 %{C++

@@ -14,6 +14,7 @@
 #include "nsAutoPtr.h"
 #include "nsThreadUtils.h"
 #include "nsXPCOMCIDInternal.h"
+#include "pratom.h"
 #include "prmon.h"
 #include "mozilla/Attributes.h"
 
@@ -87,7 +88,7 @@ private:
 class Factory MOZ_FINAL : public nsIFactory
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   Factory() : mFirstComponentCreated(false) { }
 
@@ -102,12 +103,12 @@ public:
   bool mFirstComponentCreated;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(Factory, nsIFactory)
+NS_IMPL_ISUPPORTS(Factory, nsIFactory)
 
 class Component1 MOZ_FINAL : public nsISupports
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   Component1() {
     // This is the real test - make sure that only one instance is ever created.
@@ -116,18 +117,17 @@ public:
   }
 };
 
-NS_IMPL_THREADSAFE_ADDREF(Component1)
-NS_IMPL_THREADSAFE_RELEASE(Component1)
+NS_IMPL_ADDREF(Component1)
+NS_IMPL_RELEASE(Component1)
 
 NS_INTERFACE_MAP_BEGIN(Component1)
-  NS_INTERFACE_MAP_ENTRY(Component1)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
 class Component2 MOZ_FINAL : public nsISupports
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   Component2() {
     // This is the real test - make sure that only one instance is ever created.
@@ -136,11 +136,10 @@ public:
   }
 };
 
-NS_IMPL_THREADSAFE_ADDREF(Component2)
-NS_IMPL_THREADSAFE_RELEASE(Component2)
+NS_IMPL_ADDREF(Component2)
+NS_IMPL_RELEASE(Component2)
 
 NS_INTERFACE_MAP_BEGIN(Component2)
-  NS_INTERFACE_MAP_ENTRY(Component2)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
@@ -230,14 +229,14 @@ CreateFactory(const mozilla::Module& module, const mozilla::Module::CIDEntry& en
 }
 
 static const mozilla::Module::CIDEntry kLocalCIDs[] = {
-    { &kFactoryCID1, false, CreateFactory, NULL },
-    { &kFactoryCID2, false, CreateFactory, NULL },
-    { NULL }
+    { &kFactoryCID1, false, CreateFactory, nullptr },
+    { &kFactoryCID2, false, CreateFactory, nullptr },
+    { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kLocalContracts[] = {
     { FACTORY_CONTRACTID, &kFactoryCID2 },
-    { NULL }
+    { nullptr }
 };
 
 static const mozilla::Module kLocalModule = {

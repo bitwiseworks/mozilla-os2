@@ -6,7 +6,6 @@
 
 #include "PluginIdentifierParent.h"
 
-#include "nsContentUtils.h"
 #include "nsNPAPIPlugin.h"
 #include "nsServiceManagerUtils.h"
 #include "PluginScriptableObjectUtils.h"
@@ -32,7 +31,7 @@ PluginIdentifierParent::RecvRetain()
 
   // The following is what nsNPAPIPlugin.cpp does. Gross, but the API doesn't
   // give you a NPP to play with.
-  JSString* str = JSID_TO_STRING(id);
+  JS::Rooted<JSString*> str(cx, JSID_TO_STRING(id));
   JSString* str2 = JS_InternJSString(cx, str);
   if (!str2) {
     return false;
@@ -51,7 +50,7 @@ PluginIdentifierParent::StackIdentifier::StackIdentifier
 
 PluginIdentifierParent::StackIdentifier::StackIdentifier
     (NPObject* aObject, NPIdentifier aIdentifier)
-  : mIdentifier(NULL)
+  : mIdentifier(nullptr)
 {
   PluginInstanceParent* inst = GetInstance(aObject);
   mIdentifier = inst->Module()->GetIdentifierForNPIdentifier(inst->GetNPP(), aIdentifier);

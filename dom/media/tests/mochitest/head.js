@@ -113,18 +113,35 @@ function getUserMedia(constraints, onSuccess, onError) {
  *        Test method to execute after initialization
  */
 function runTest(aCallback) {
-  SimpleTest.waitForExplicitFinish();
-  SpecialPowers.pushPrefEnv({'set': [
-    ['media.peerconnection.enabled', true],
-    ['media.navigator.permission.disabled', true]]
-  }, function () {
-    try {
-      aCallback();
-    }
-    catch (err) {
-      unexpectedCallbackAndFinish()(err);
-    }
-  });
+  if (window.SimpleTest) {
+    // Running as a Mochitest.
+    SimpleTest.waitForExplicitFinish();
+    SpecialPowers.pushPrefEnv({'set': [
+      ['dom.messageChannel.enabled', true],
+      ['media.peerconnection.enabled', true],
+      ['media.peerconnection.identity.enabled', true],
+      ['media.peerconnection.identity.timeout', 12000],
+      ['media.navigator.permission.disabled', true]]
+    }, function () {
+      try {
+        aCallback();
+      }
+      catch (err) {
+        generateErrorCallback()(err);
+      }
+    });
+  } else {
+    // Steeplechase, let it call the callback.
+    window.run_test = function(is_initiator) {
+      var options = {is_local: is_initiator,
+                     is_remote: !is_initiator};
+      aCallback(options);
+    };
+    // Also load the steeplechase test code.
+    var s = document.createElement("script");
+    s.src = "/test.js";
+    document.head.appendChild(s);
+  }
 }
 
 /**
@@ -197,7 +214,7 @@ function getBlobContent(blob, onSuccess) {
  *        An optional message to show if no object gets passed into the
  *        generated callback method.
  */
-function unexpectedCallbackAndFinish(message) {
+function generateErrorCallback(message) {
   var stack = new Error().stack.split("\n");
   stack.shift(); // Don't include this instantiation frame
 
@@ -206,9 +223,15 @@ function unexpectedCallbackAndFinish(message) {
    *        The object fired back from the callback
    */
   return function (aObj) {
-    if (aObj && aObj.name && aObj.message) {
-      ok(false, "Unexpected callback for '" + aObj.name + "' with message = '" +
-         aObj.message + "' at " + JSON.stringify(stack));
+    if (aObj) {
+      if (aObj.name && aObj.message) {
+        ok(false, "Unexpected callback for '" + aObj.name +
+           "' with message = '" + aObj.message + "' at " +
+           JSON.stringify(stack));
+      } else {
+        ok(false, "Unexpected callback with = '" + aObj +
+           "' at: " + JSON.stringify(stack));
+      }
     } else {
       ok(false, "Unexpected callback with message = '" + message +
          "' at: " + JSON.stringify(stack));

@@ -6,14 +6,21 @@
 #ifndef WEBGLEXTENSIONS_H_
 #define WEBGLEXTENSIONS_H_
 
+#include "jsapi.h"
+#include "mozilla/Attributes.h"
+#include "nsWrapperCache.h"
+#include "WebGLObjectModel.h"
+#include "WebGLTypes.h"
+
 namespace mozilla {
 
 class WebGLContext;
+class WebGLShader;
+class WebGLVertexArray;
 
 class WebGLExtensionBase
-    : public nsISupports
+    : public nsWrapperCache
     , public WebGLContextBoundObject
-    , public nsWrapperCache
 {
 public:
     WebGLExtensionBase(WebGLContext*);
@@ -23,18 +30,22 @@ public:
         return Context();
     }
 
-    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(WebGLExtensionBase)
+    void MarkLost();
+
+    NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLExtensionBase)
+    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLExtensionBase)
+
+protected:
+    bool mIsLost;
 };
 
 #define DECL_WEBGL_EXTENSION_GOOP                                           \
-    virtual JSObject* WrapObject(JSContext *cx,                             \
-                                 JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+    virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
 
 #define IMPL_WEBGL_EXTENSION_GOOP(WebGLExtensionType) \
     JSObject* \
-    WebGLExtensionType::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope) { \
-        return dom::WebGLExtensionType##Binding::Wrap(cx, scope, this); \
+    WebGLExtensionType::WrapObject(JSContext *cx) { \
+        return dom::WebGLExtensionType##Binding::Wrap(cx, this); \
     }
 
 class WebGLExtensionCompressedTextureATC
@@ -43,6 +54,16 @@ class WebGLExtensionCompressedTextureATC
 public:
     WebGLExtensionCompressedTextureATC(WebGLContext*);
     virtual ~WebGLExtensionCompressedTextureATC();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionCompressedTextureETC1
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionCompressedTextureETC1(WebGLContext*);
+    virtual ~WebGLExtensionCompressedTextureETC1();
 
     DECL_WEBGL_EXTENSION_GOOP
 };
@@ -77,6 +98,18 @@ public:
     DECL_WEBGL_EXTENSION_GOOP
 };
 
+class WebGLExtensionDebugShaders
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionDebugShaders(WebGLContext*);
+    virtual ~WebGLExtensionDebugShaders();
+
+    void GetTranslatedShaderSource(WebGLShader* shader, nsAString& retval);
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
 class WebGLExtensionDepthTexture
     : public WebGLExtensionBase
 {
@@ -97,6 +130,18 @@ public:
     DECL_WEBGL_EXTENSION_GOOP
 };
 
+class WebGLExtensionFragDepth
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionFragDepth(WebGLContext*);
+    virtual ~WebGLExtensionFragDepth();
+
+    static bool IsSupported(const WebGLContext* context);
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
 class WebGLExtensionLoseContext
     : public WebGLExtensionBase
 {
@@ -106,6 +151,18 @@ public:
 
     void LoseContext();
     void RestoreContext();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionSRGB
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionSRGB(WebGLContext*);
+    virtual ~WebGLExtensionSRGB();
+
+    static bool IsSupported(const WebGLContext* context);
 
     DECL_WEBGL_EXTENSION_GOOP
 };
@@ -150,6 +207,50 @@ public:
     DECL_WEBGL_EXTENSION_GOOP
 };
 
+class WebGLExtensionTextureHalfFloat
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionTextureHalfFloat(WebGLContext*);
+    virtual ~WebGLExtensionTextureHalfFloat();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionTextureHalfFloatLinear
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionTextureHalfFloatLinear(WebGLContext*);
+    virtual ~WebGLExtensionTextureHalfFloatLinear();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionColorBufferFloat
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionColorBufferFloat(WebGLContext*);
+    virtual ~WebGLExtensionColorBufferFloat();
+
+    static bool IsSupported(const WebGLContext*);
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionColorBufferHalfFloat
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionColorBufferHalfFloat(WebGLContext*);
+    virtual ~WebGLExtensionColorBufferHalfFloat();
+
+    static bool IsSupported(const WebGLContext*);
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
 class WebGLExtensionDrawBuffers
     : public WebGLExtensionBase
 {
@@ -165,9 +266,45 @@ public:
     static const size_t sMinDrawBuffers = 4;
     /*
      WEBGL_draw_buffers does not give a minal value for GL_MAX_DRAW_BUFFERS. But, we request
-     for GL_MAX_DRAW_BUFFERS = 4 at least to be able to use all requested color attachements.
+     for GL_MAX_DRAW_BUFFERS = 4 at least to be able to use all requested color attachments.
      See DrawBuffersWEBGL in WebGLExtensionDrawBuffers.cpp inner comments for more informations.
      */
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionVertexArray
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionVertexArray(WebGLContext*);
+    virtual ~WebGLExtensionVertexArray();
+
+    already_AddRefed<WebGLVertexArray> CreateVertexArrayOES();
+    void DeleteVertexArrayOES(WebGLVertexArray* array);
+    bool IsVertexArrayOES(WebGLVertexArray* array);
+    void BindVertexArrayOES(WebGLVertexArray* array);
+
+    static bool IsSupported(const WebGLContext* context);
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionInstancedArrays
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionInstancedArrays(WebGLContext* context);
+    virtual ~WebGLExtensionInstancedArrays();
+
+    void DrawArraysInstancedANGLE(GLenum mode, GLint first,
+                                  GLsizei count, GLsizei primcount);
+    void DrawElementsInstancedANGLE(GLenum mode, GLsizei count,
+                                    GLenum type, WebGLintptr offset,
+                                    GLsizei primcount);
+    void VertexAttribDivisorANGLE(GLuint index, GLuint divisor);
+
+    static bool IsSupported(const WebGLContext* context);
 
     DECL_WEBGL_EXTENSION_GOOP
 };

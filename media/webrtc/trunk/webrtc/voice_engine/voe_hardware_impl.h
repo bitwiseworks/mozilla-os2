@@ -11,13 +11,12 @@
 #ifndef WEBRTC_VOICE_ENGINE_VOE_HARDWARE_IMPL_H
 #define WEBRTC_VOICE_ENGINE_VOE_HARDWARE_IMPL_H
 
-#include "voe_hardware.h"
+#include "webrtc/voice_engine/include/voe_hardware.h"
 
-#include "shared_data.h"
+#include "webrtc/voice_engine/shared_data.h"
 
 namespace webrtc
 {
-class CpuWrapper;
 
 class VoEHardwareImpl: public VoEHardware
 {
@@ -50,8 +49,6 @@ public:
 
     virtual int GetCPULoad(int& loadPercent);
 
-    virtual int GetSystemCPULoad(int& loadPercent);
-
     virtual int ResetAudioDevice();
 
     virtual int AudioDeviceControl(unsigned int par1,
@@ -75,10 +72,9 @@ protected:
     virtual ~VoEHardwareImpl();
 
 private:
-    CpuWrapper* _cpu;
     voe::SharedData* _shared;
 };
 
-} // namespace webrtc
+}  // namespace webrtc
 
 #endif  // WEBRTC_VOICE_ENGINE_VOE_HARDWARE_IMPL_H

@@ -31,20 +31,71 @@ addLoadEvent(function() {
         foundNonZero = true;
         break;
       }
+      buf[j] = j;
     }
     ok(!foundNonZero, "Buffer " + i + " should be initialized to 0");
   }
+
+  // Now test copying the channel data out of a normal buffer
+  var copy = new Float32Array(100);
+  buffer.copyFromChannel(copy, 0, 1024);
+  for (var i = 0; i < copy.length; ++i) {
+    is(copy[i], 1024 + i, "Correct sample");
+  }
+
+  // Test copying the channel data out of a playing buffer
+  var srcNode = context.createBufferSource();
+  srcNode.buffer = buffer;
+  srcNode.start(0);
+  copy = new Float32Array(100);
+  buffer.copyFromChannel(copy, 0, 1024);
+  for (var i = 0; i < copy.length; ++i) {
+    is(copy[i], 1024 + i, "Correct sample");
+  }
+
+  // Test copying to the channel data
+  var newData = new Float32Array(200);
+  buffer.copyToChannel(newData, 0, 100);
+  var changedData = buffer.getChannelData(0);
+  for (var i = 0; i < changedData.length; ++i) {
+    if (i < 100 || i >= 300) {
+      is(changedData[i], i, "Untouched sample");
+    } else {
+      is(changedData[i], 0, "Correct sample");
+    }
+  }
+
+  // Now, neuter the array buffer
+  var worker = new Worker("audioBufferSourceNodeNeutered_worker.js");
+  var data = buffer.getChannelData(0).buffer;
+  worker.postMessage(data, [data]);
+  SpecialPowers.gc();
+
+  expectException(function() {
+    buffer.copyFromChannel(copy, 0, 1024);
+  }, DOMException.INDEX_SIZE_ERR);
+
+  expectException(function() {
+    buffer.copyToChannel(newData, 0, 100);
+  }, DOMException.INDEX_SIZE_ERR);
+
   expectException(function() {
     context.createBuffer(2, 2048, 7999);
-  }, DOMException.NOT_SUPPORTED_ERR);
+  }, DOMException.INDEX_SIZE_ERR);
   expectException(function() {
-    context.createBuffer(2, 2048, 96001);
-  }, DOMException.NOT_SUPPORTED_ERR);
+    context.createBuffer(2, 2048, 192001);
+  }, DOMException.INDEX_SIZE_ERR);
   context.createBuffer(2, 2048, 8000);  // no exception
-  context.createBuffer(2, 2048, 96000); // no exception
+  context.createBuffer(2, 2048, 192000); // no exception
+  context.createBuffer(32, 2048, 48000); // no exception
+  // Null length
   expectException(function() {
     context.createBuffer(2, 0, 48000);
-  }, DOMException.NOT_SUPPORTED_ERR);
+  }, DOMException.INDEX_SIZE_ERR);
+  // Null number of channels
+  expectException(function() {
+    context.createBuffer(0, 2048, 48000);
+  }, DOMException.INDEX_SIZE_ERR);
   SimpleTest.finish();
 });
 

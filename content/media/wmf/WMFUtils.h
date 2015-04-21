@@ -4,8 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef WMFUtils_h
+#define WMFUtils_h
+
 #include "WMF.h"
 #include "nsString.h"
+#include "nsRect.h"
+#include "VideoUtils.h"
 
 // Various utilities shared by WMF backend files.
 
@@ -64,4 +69,38 @@ HNsToUsecs(int64_t hNanoSecs) {
 HRESULT
 DoGetInterface(IUnknown* aUnknown, void** aInterface);
 
+HRESULT
+HNsToFrames(int64_t aHNs, uint32_t aRate, int64_t* aOutFrames);
+
+HRESULT
+FramesToUsecs(int64_t aSamples, uint32_t aRate, int64_t* aOutUsecs);
+
+HRESULT
+GetDefaultStride(IMFMediaType *aType, uint32_t* aOutStride);
+
+int32_t
+MFOffsetToInt32(const MFOffset& aOffset);
+
+// Gets the sub-region of the video frame that should be displayed.
+// See: http://msdn.microsoft.com/en-us/library/windows/desktop/bb530115(v=vs.85).aspx
+HRESULT
+GetPictureRegion(IMFMediaType* aMediaType, nsIntRect& aOutPictureRegion);
+
+// Returns the duration of a IMFSample in microseconds.
+// Returns -1 on failure.
+int64_t
+GetSampleDuration(IMFSample* aSample);
+
+// Returns the presentation time of a IMFSample in microseconds.
+// Returns -1 on failure.
+int64_t
+GetSampleTime(IMFSample* aSample);
+
+inline bool
+IsFlagSet(DWORD flags, DWORD pattern) {
+  return (flags & pattern) == pattern;
+}
+
 } // namespace mozilla
+
+#endif

@@ -2,10 +2,38 @@
 
 "use strict";
 
-var calleeGraph = {};
-var callerGraph = {};
-var gcFunctions = {};
-var suppressedFunctions = {};
+loadRelativeToScript('utility.js');
+
+// Functions come out of sixgill in the form "mangled|readable". The mangled
+// name is Truth. One mangled name might correspond to multiple readable names,
+// for multiple reasons, including (1) sixgill/gcc doesn't always qualify types
+// the same way or de-typedef the same amount; (2) sixgill's output treats
+// references and pointers the same, and so doesn't distinguish them, but C++
+// treats them as separate for overloading and linking; (3) (identical)
+// destructors sometimes have an int32 parameter, sometimes not.
+//
+// The readable names are useful because they're far more meaningful to the
+// user, and are what should show up in reports and questions to mrgiggles. At
+// least in most cases, it's fine to have the extra mangled name tacked onto
+// the beginning for these.
+//
+// The strategy used is to separate out the pieces whenever they are read in,
+// create a table mapping mangled names to (one of the) readable names, and
+// use the mangled names in all computation.
+//
+// Note that callgraph.txt uses a compressed representation -- each name is
+// mapped to an integer, and those integers are what is recorded in the edges.
+// But the integers depend on the full name, whereas the true edge should only
+// consider the mangled name. And some of the names encoded in callgraph.txt
+// are FieldCalls, not just function names.
+
+var readableNames = {}; // map from mangled name => list of readable names
+var mangledName = {}; // map from demangled names => mangled names. Could be eliminated.
+var calleeGraph = {}; // map from mangled => list of tuples of {'callee':mangled, 'suppressed':bool}
+var callerGraph = {}; // map from mangled => list of tuples of {'caller':mangled, 'suppressed':bool}
+var gcFunctions = {}; // map from mangled callee => reason
+var suppressedFunctions = {}; // set of mangled names (map from mangled name => true)
+var gcEdges = {};
 
 function addGCFunction(caller, reason)
 {
@@ -34,87 +62,132 @@ function addCallEdge(caller, callee, suppressed)
     callerGraph[callee].push({caller:caller, suppressed:suppressed});
 }
 
+// Map from identifier to full "mangled|readable" name. Or sometimes to a
+// Class.Field name.
 var functionNames = [""];
+
+// Map from identifier to mangled name (or to a Class.Field)
+var idToMangled = [""];
 
 function loadCallgraph(file)
 {
+    var suppressedFieldCalls = {};
+    var resolvedFunctions = {};
+
     var textLines = snarf(file).split('\n');
     for (var line of textLines) {
-	    var match;
-        if (match = /^\#(\d+) (.*)/.exec(line)) {
+        var match;
+        if (match = line.charAt(0) == "#" && /^\#(\d+) (.*)/.exec(line)) {
             assert(functionNames.length == match[1]);
             functionNames.push(match[2]);
+            var [ mangled, readable ] = splitFunction(match[2]);
+            if (mangled in readableNames)
+                readableNames[mangled].push(readable);
+            else
+                readableNames[mangled] = [ readable ];
+            mangledName[readable] = mangled;
+            idToMangled.push(mangled);
             continue;
         }
-	    var suppressed = false;
-	    if (/SUPPRESS_GC/.test(line)) {
+        var suppressed = false;
+        if (line.indexOf("SUPPRESS_GC") != -1) {
             match = /^(..)SUPPRESS_GC (.*)/.exec(line);
             line = match[1] + match[2];
             suppressed = true;
-	    }
-	    if (match = /^I (\d+) VARIABLE ([^\,]*)/.exec(line)) {
-            var caller = functionNames[match[1]];
+        }
+        var tag = line.charAt(0);
+        if (match = tag == 'I' && /^I (\d+) VARIABLE ([^\,]*)/.exec(line)) {
+            var mangledCaller = idToMangled[match[1]];
             var name = match[2];
-            if (!indirectCallCannotGC(caller, name) && !suppressed)
-		        addGCFunction(caller, "IndirectCall: " + name);
-	    } else if (match = /^F (\d+) CLASS (.*?) FIELD (.*)/.exec(line)) {
-            var caller = functionNames[match[1]];
+            if (!indirectCallCannotGC(functionNames[match[1]], name) && !suppressed)
+                addGCFunction(mangledCaller, "IndirectCall: " + name);
+        } else if (match = tag == 'F' && /^F (\d+) CLASS (.*?) FIELD (.*)/.exec(line)) {
+            var caller = idToMangled[match[1]];
             var csu = match[2];
             var fullfield = csu + "." + match[3];
-            if (!fieldCallCannotGC(csu, fullfield) && !suppressed)
-		        addGCFunction(caller, "FieldCall: " + fullfield);
-	    } else if (match = /^D (\d+) (\d+)/.exec(line)) {
-            var caller = functionNames[match[1]];
-            var callee = functionNames[match[2]];
+            if (suppressed)
+                suppressedFieldCalls[fullfield] = true;
+            else if (!fieldCallCannotGC(csu, fullfield))
+                addGCFunction(caller, "FieldCall: " + fullfield);
+        } else if (match = tag == 'D' && /^D (\d+) (\d+)/.exec(line)) {
+            var caller = idToMangled[match[1]];
+            var callee = idToMangled[match[2]];
             addCallEdge(caller, callee, suppressed);
-	    }
+        } else if (match = tag == 'R' && /^R (\d+) (\d+)/.exec(line)) {
+            var callerField = idToMangled[match[1]];
+            var callee = idToMangled[match[2]];
+            addCallEdge(callerField, callee, false);
+            resolvedFunctions[callerField] = true;
+        }
     }
 
+    // Initialize suppressedFunctions to the set of all functions, and the
+    // worklist to all toplevel callers.
     var worklist = [];
-    for (var name in callerGraph)
-	    suppressedFunctions[name] = true;
-    for (var name in calleeGraph) {
-	    if (!(name in callerGraph)) {
-            suppressedFunctions[name] = true;
-            worklist.push(name);
-	    }
-    }
-    while (worklist.length) {
-	    name = worklist.pop();
-	    if (shouldSuppressGC(name))
-            continue;
-	    if (!(name in suppressedFunctions))
-            continue;
-	    delete suppressedFunctions[name];
-	    if (!(name in calleeGraph))
-            continue;
-	    for (var entry of calleeGraph[name]) {
-            if (!entry.suppressed)
-		        worklist.push(entry.callee);
-	    }
+    for (var callee in callerGraph)
+        suppressedFunctions[callee] = true;
+    for (var caller in calleeGraph) {
+        if (!(caller in callerGraph)) {
+            suppressedFunctions[caller] = true;
+            worklist.push(caller);
+        }
     }
 
+    // Find all functions reachable via an unsuppressed call chain, and remove
+    // them from the suppressedFunctions set. Everything remaining is only
+    // reachable when GC is suppressed.
+    var top = worklist.length;
+    while (top > 0) {
+        name = worklist[--top];
+        if (!(name in suppressedFunctions))
+            continue;
+        delete suppressedFunctions[name];
+        if (!(name in calleeGraph))
+            continue;
+        for (var entry of calleeGraph[name]) {
+            if (!entry.suppressed)
+                worklist[top++] = entry.callee;
+        }
+    }
+
+    // Such functions are known to not GC.
     for (var name in gcFunctions) {
-	    if (name in suppressedFunctions)
+        if (name in suppressedFunctions)
             delete gcFunctions[name];
     }
 
-    var gcName = 'void js::GC(JSRuntime*, uint32, uint32)';
-    assert(gcName in callerGraph);
-    addGCFunction(gcName, "GC");
+    for (var name in suppressedFieldCalls) {
+        suppressedFunctions[name] = true;
+    }
 
+    for (var gcName of [ 'jsgc.cpp:void Collect(JSRuntime*, uint8, int64, uint32, uint32)',
+                         'void js::MinorGC(JSRuntime*, uint32)' ])
+    {
+        assert(gcName in mangledName);
+        addGCFunction(mangledName[gcName], "GC");
+    }
+
+    // Initialize the worklist to all known gcFunctions.
     var worklist = [];
     for (var name in gcFunctions)
-	    worklist.push(name);
+        worklist.push(name);
 
+    // Recursively find all callers and add them to the set of gcFunctions.
     while (worklist.length) {
-	    name = worklist.pop();
-	    assert(name in gcFunctions);
-	    if (!(name in callerGraph))
+        name = worklist.shift();
+        assert(name in gcFunctions);
+        if (!(name in callerGraph))
             continue;
-	    for (var entry of callerGraph[name]) {
+        for (var entry of callerGraph[name]) {
             if (!entry.suppressed && addGCFunction(entry.caller, name))
-		        worklist.push(entry.caller);
-	    }
+                worklist.push(entry.caller);
+        }
+    }
+
+    // Any field call that has been resolved to all possible callees can be
+    // trusted to not GC if all of those callees are known to not GC.
+    for (var name in resolvedFunctions) {
+        if (!(name in gcFunctions))
+            suppressedFunctions[name] = true;
     }
 }

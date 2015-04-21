@@ -10,17 +10,18 @@
 
 #include "mozilla/Monitor.h"
 #include "mozilla/TimeStamp.h"
+#include "nsIMemoryReporter.h"
 #include "nsIThread.h"
 #include "nsIRunnable.h"
+#include "Latency.h"
+#include "mozilla/WeakPtr.h"
 
 namespace mozilla {
 
-#ifdef PR_LOGGING
-extern PRLogModuleInfo* gMediaStreamGraphLog;
-#define LOG(type, msg) PR_LOG(gMediaStreamGraphLog, type, msg)
-#else
-#define LOG(type, msg)
-#endif
+template <typename T>
+class LinkedList;
+
+class AudioMixer;
 
 /**
  * Assume we can run an iteration of the MediaStreamGraph loop in this much time
@@ -68,11 +69,11 @@ struct StreamUpdate {
 
 /**
  * This represents a message passed from the main thread to the graph thread.
- * A ControlMessage always references a particular affected stream.
+ * A ControlMessage always has a weak reference a particular affected stream.
  */
 class ControlMessage {
 public:
-  ControlMessage(MediaStream* aStream) : mStream(aStream)
+  explicit ControlMessage(MediaStream* aStream) : mStream(aStream)
   {
     MOZ_COUNT_CTOR(ControlMessage);
   }
@@ -88,6 +89,7 @@ public:
   virtual void Run() = 0;
   // When we're shutting down the application, most messages are ignored but
   // some cleanup messages should still be processed (on the main thread).
+  // This must not add new control messages to the graph.
   virtual void RunDuringShutdown() {}
   MediaStream* GetStream() { return mStream; }
 
@@ -106,8 +108,12 @@ protected:
  * Currently we have one global instance per process, and one per each
  * OfflineAudioContext object.
  */
-class MediaStreamGraphImpl : public MediaStreamGraph {
+class MediaStreamGraphImpl : public MediaStreamGraph,
+                             public nsIMemoryReporter {
 public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIMEMORYREPORTER
+
   /**
    * Set aRealtime to true in order to create a MediaStreamGraph which provides
    * support for real-time audio and video.  Set it to false in order to create
@@ -115,13 +121,13 @@ public:
    * output.  Those objects currently only support audio, and are used to
    * implement OfflineAudioContext.  They do not support MediaStream inputs.
    */
-  explicit MediaStreamGraphImpl(bool aRealtime);
-  ~MediaStreamGraphImpl()
-  {
-    NS_ASSERTION(IsEmpty(),
-                 "All streams should have been destroyed by messages from the main thread");
-    LOG(PR_LOG_DEBUG, ("MediaStreamGraph %p destroyed", this));
-  }
+  explicit MediaStreamGraphImpl(bool aRealtime, TrackRate aSampleRate);
+
+  /**
+   * Unregisters memory reporting and deletes this instance. This should be
+   * called instead of calling the destructor directly.
+   */
+  void Destroy();
 
   // Main thread only.
   /**
@@ -158,6 +164,10 @@ public:
    */
   void ShutdownThreads();
 
+  /**
+   * Called before the thread runs.
+   */
+  void Init();
   // The following methods run on the graph thread (or possibly the main thread if
   // mLifecycleState > LIFECYCLE_RUNNING)
   /**
@@ -190,6 +200,17 @@ public:
    * mMonitor must be held.
    */
   void PrepareUpdatesToMainThreadState(bool aFinalUpdate);
+  /**
+   * Returns false if there is any stream that has finished but not yet finished
+   * playing out.
+   */
+  bool AllFinishedStreamsNotified();
+  /**
+   * If we are rendering in non-realtime mode, we don't want to send messages to
+   * the main thread at each iteration for performance reasons. We instead
+   * notify the main thread at the same rate
+   */
+  bool ShouldUpdateMainThread();
   // The following methods are the various stages of RunThread processing.
   /**
    * Compute a new current time for the graph and advance all on-graph-thread
@@ -215,7 +236,7 @@ public:
    * If aStream hasn't already been ordered, push it onto aStack and order
    * its children.
    */
-  void UpdateStreamOrderForStream(nsTArray<MediaStream*>* aStack,
+  void UpdateStreamOrderForStream(mozilla::LinkedList<MediaStream>* aStack,
                                   already_AddRefed<MediaStream> aStream);
   /**
    * Mark aStream and all its inputs (recursively) as consumed.
@@ -316,9 +337,9 @@ public:
                                    MediaStream* aStream);
   /**
    * Queue audio (mix of stream audio and silence for blocked intervals)
-   * to the audio output stream.
+   * to the audio output stream. Returns the number of frames played.
    */
-  void PlayAudio(MediaStream* aStream, GraphTime aFrom, GraphTime aTo);
+  TrackTicks PlayAudio(MediaStream* aStream, GraphTime aFrom, GraphTime aTo);
   /**
    * Set the correct current video frame for stream aStream.
    */
@@ -356,6 +377,23 @@ public:
    * Remove aPort from the graph and release it.
    */
   void DestroyPort(MediaInputPort* aPort);
+  /**
+   * Mark the media stream order as dirty.
+   */
+  void SetStreamOrderDirty()
+  {
+    mStreamOrderDirty = true;
+  }
+  /**
+   * Pause all AudioStreams being written to by MediaStreams
+   */
+  void PauseAllAudioOutputs();
+  /**
+   * Resume all AudioStreams being written to by MediaStreams
+   */
+  void ResumeAllAudioOutputs();
+
+  TrackRate AudioSampleRate() { return mSampleRate; }
 
   // Data members
 
@@ -370,6 +408,11 @@ public:
   // is not running and this state can be used from the main thread.
 
   nsTArray<nsRefPtr<MediaStream> > mStreams;
+  /**
+   * mOldStreams is used as temporary storage for streams when computing the
+   * order in which we compute them.
+   */
+  nsTArray<nsRefPtr<MediaStream> > mOldStreams;
   /**
    * The current graph time for the current iteration of the RunThread control
    * loop.
@@ -389,6 +432,10 @@ public:
    * The real timestamp of the latest run of UpdateCurrentTime.
    */
   TimeStamp mCurrentTimeStamp;
+  /**
+   * Date of the last time we updated the main thread with the graph state.
+   */
+  TimeStamp mLastMainThreadUpdate;
   /**
    * Which update batch we are currently processing.
    */
@@ -437,12 +484,13 @@ public:
    * creation after this point will create a new graph. An async event is
    * dispatched to Shutdown() the graph's threads and then delete the graph
    * object.
-   * 2) Forced shutdown at application shutdown. A flag is set, RunThread()
-   * detects the flag and exits, the next RunInStableState() detects the flag,
-   * and dispatches the async event to Shutdown() the graph's threads. However
-   * the graph object is not deleted. New messages for the graph are processed
-   * synchronously on the main thread if necessary. When the last stream is
-   * destroyed, the graph object is deleted.
+   * 2) Forced shutdown at application shutdown, or completion of a
+   * non-realtime graph. A flag is set, RunThread() detects the flag and
+   * exits, the next RunInStableState() detects the flag, and dispatches the
+   * async event to Shutdown() the graph's threads. However the graph object
+   * is not deleted. New messages for the graph are processed synchronously on
+   * the main thread if necessary. When the last stream is destroyed, the
+   * graph object is deleted.
    */
   enum LifecycleState {
     // The graph thread hasn't started yet.
@@ -460,8 +508,9 @@ public:
     // to shut down the graph thread(s).
     LIFECYCLE_WAITING_FOR_THREAD_SHUTDOWN,
     // Graph threads have shut down but we're waiting for remaining streams
-    // to be destroyed. Only happens during application shutdown since normally
-    // we'd only shut down a graph when it has no streams.
+    // to be destroyed. Only happens during application shutdown and on
+    // completed non-realtime graphs, since normally we'd only shut down a
+    // realtime graph when it has no streams.
     LIFECYCLE_WAITING_FOR_STREAM_DESTRUCTION
   };
   LifecycleState mLifecycleState;
@@ -482,9 +531,16 @@ public:
   };
   WaitState mWaitState;
   /**
-   * How many non-realtime ticks the graph should process.
+   * The graph should stop processing at or after this time.
    */
-  uint32_t mNonRealtimeTicksToProcess;
+  GraphTime mEndTime;
+
+  /**
+   * Sample rate at which this graph runs. For real time graphs, this is
+   * the rate of the audio mixer. For offline graphs, this is the rate specified
+   * at construction.
+   */
+  TrackRate mSampleRate;
   /**
    * True when another iteration of the control loop is required.
    */
@@ -498,13 +554,6 @@ public:
    * RunInStableState() and the event hasn't run yet.
    */
   bool mPostedRunInStableStateEvent;
-  /**
-   * True when the non-realtime graph thread is processing, as a result of
-   * a request from the main thread.  When processing is finished, we post
-   * a message to the main thread in order to set mNonRealtimeProcessing
-   * back to false.
-   */
-  bool mNonRealtimeIsRunning;
 
   // Main thread only
 
@@ -536,6 +585,53 @@ public:
    * value is only accessed on the main thread.
    */
   bool mNonRealtimeProcessing;
+  /**
+   * True when a change has happened which requires us to recompute the stream
+   * blocking order.
+   */
+  bool mStreamOrderDirty;
+  /**
+   * Hold a ref to the Latency logger
+   */
+  nsRefPtr<AsyncLatencyLogger> mLatencyLog;
+  /**
+   * If this is not null, all the audio output for the MSG will be mixed down.
+   */
+  nsAutoPtr<AudioMixer> mMixer;
+
+private:
+  virtual ~MediaStreamGraphImpl();
+
+  MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf)
+
+  /**
+   * Used to signal that a memory report has been requested.
+   */
+  Monitor mMemoryReportMonitor;
+  /**
+   * This class uses manual memory management, and all pointers to it are raw
+   * pointers. However, in order for it to implement nsIMemoryReporter, it needs
+   * to implement nsISupports and so be ref-counted. So it maintains a single
+   * nsRefPtr to itself, giving it a ref-count of 1 during its entire lifetime,
+   * and Destroy() nulls this self-reference in order to trigger self-deletion.
+   */
+  nsRefPtr<MediaStreamGraphImpl> mSelfRef;
+  /**
+   * Used to pass memory report information across threads.
+   */
+  nsTArray<AudioNodeSizes> mAudioStreamSizes;
+  /**
+   * Indicates that the MSG thread should gather data for a memory report.
+   */
+  bool mNeedsMemoryReport;
+
+#ifdef DEBUG
+  /**
+   * Used to assert when AppendMessage() runs ControlMessages synchronously.
+   */
+  bool mCanRunMessagesSynchronously;
+#endif
+
 };
 
 }

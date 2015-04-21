@@ -13,13 +13,17 @@
 
 #include "WinMouseScrollHandler.h"
 #include "nsWindow.h"
+#include "nsWindowDefs.h"
 #include "KeyboardLayout.h"
 #include "WinUtils.h"
 #include "nsGkAtoms.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDOMWheelEvent.h"
 
+#include "mozilla/MiscEvents.h"
+#include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/WindowsVersion.h"
 
 #include <psapi.h>
 
@@ -148,9 +152,30 @@ MouseScrollHandler::~MouseScrollHandler()
 
 /* static */
 bool
-MouseScrollHandler::ProcessMessage(nsWindow* aWindow, UINT msg,
+MouseScrollHandler::NeedsMessage(UINT aMsg)
+{
+  switch (aMsg) {
+    case WM_SETTINGCHANGE:
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL:
+    case WM_HSCROLL:
+    case WM_VSCROLL:
+    case MOZ_WM_MOUSEVWHEEL:
+    case MOZ_WM_MOUSEHWHEEL:
+    case MOZ_WM_HSCROLL:
+    case MOZ_WM_VSCROLL:
+    case WM_KEYDOWN:
+    case WM_KEYUP:
+      return true;
+  }
+  return false;
+}
+
+/* static */
+bool
+MouseScrollHandler::ProcessMessage(nsWindowBase* aWidget, UINT msg,
                                    WPARAM wParam, LPARAM lParam,
-                                   LRESULT *aRetValue, bool &aEatMessage)
+                                   MSGResult& aResult)
 {
   Device::Elantech::UpdateZoomUntil();
 
@@ -168,53 +193,53 @@ MouseScrollHandler::ProcessMessage(nsWindow* aWindow, UINT msg,
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL:
       GetInstance()->
-        ProcessNativeMouseWheelMessage(aWindow, msg, wParam, lParam);
+        ProcessNativeMouseWheelMessage(aWidget, msg, wParam, lParam);
       sInstance->mSynthesizingEvent->NotifyNativeMessageHandlingFinished();
       // We don't need to call next wndproc for WM_MOUSEWHEEL and
       // WM_MOUSEHWHEEL.  We should consume them always.  If the messages
       // would be handled by our window again, it caused making infinite
       // message loop.
-      aEatMessage = true;
-      *aRetValue = (msg != WM_MOUSEHWHEEL);
+      aResult.mConsumed = true;
+      aResult.mResult = (msg != WM_MOUSEHWHEEL);
       return true;
 
     case WM_HSCROLL:
     case WM_VSCROLL:
-      aEatMessage =
-        GetInstance()->ProcessNativeScrollMessage(aWindow, msg, wParam, lParam);
+      aResult.mConsumed =
+        GetInstance()->ProcessNativeScrollMessage(aWidget, msg, wParam, lParam);
       sInstance->mSynthesizingEvent->NotifyNativeMessageHandlingFinished();
-      *aRetValue = 0;
+      aResult.mResult = 0;
       return true;
 
     case MOZ_WM_MOUSEVWHEEL:
     case MOZ_WM_MOUSEHWHEEL:
-      GetInstance()->HandleMouseWheelMessage(aWindow, msg, wParam, lParam);
+      GetInstance()->HandleMouseWheelMessage(aWidget, msg, wParam, lParam);
       sInstance->mSynthesizingEvent->NotifyInternalMessageHandlingFinished();
       // Doesn't need to call next wndproc for internal wheel message.
-      aEatMessage = true;
+      aResult.mConsumed = true;
       return true;
 
     case MOZ_WM_HSCROLL:
     case MOZ_WM_VSCROLL:
       GetInstance()->
-        HandleScrollMessageAsMouseWheelMessage(aWindow, msg, wParam, lParam);
+        HandleScrollMessageAsMouseWheelMessage(aWidget, msg, wParam, lParam);
       sInstance->mSynthesizingEvent->NotifyInternalMessageHandlingFinished();
       // Doesn't need to call next wndproc for internal scroll message.
-      aEatMessage = true;
+      aResult.mConsumed = true;
       return true;
 
     case WM_KEYDOWN:
     case WM_KEYUP:
       PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
-        ("MouseScroll::ProcessMessage(): aWindow=%p, "
+        ("MouseScroll::ProcessMessage(): aWidget=%p, "
          "msg=%s(0x%04X), wParam=0x%02X, ::GetMessageTime()=%d",
-         aWindow, msg == WM_KEYDOWN ? "WM_KEYDOWN" :
+         aWidget, msg == WM_KEYDOWN ? "WM_KEYDOWN" :
                     msg == WM_KEYUP ? "WM_KEYUP" : "Unknown", msg, wParam,
          ::GetMessageTime()));
       LOG_KEYSTATE();
-      if (Device::Elantech::HandleKeyMessage(aWindow, msg, wParam)) {
-        *aRetValue = 0;
-        aEatMessage = true;
+      if (Device::Elantech::HandleKeyMessage(aWidget, msg, wParam)) {
+        aResult.mResult = 0;
+        aResult.mConsumed = true;
         return true;
       }
       return false;
@@ -226,7 +251,7 @@ MouseScrollHandler::ProcessMessage(nsWindow* aWindow, UINT msg,
 
 /* static */
 nsresult
-MouseScrollHandler::SynthesizeNativeMouseScrollEvent(nsWindow* aWindow,
+MouseScrollHandler::SynthesizeNativeMouseScrollEvent(nsWindowBase* aWidget,
                                                      const nsIntPoint& aPoint,
                                                      uint32_t aNativeMessage,
                                                      int32_t aDelta,
@@ -301,18 +326,20 @@ MouseScrollHandler::SynthesizeNativeMouseScrollEvent(nsWindow* aWindow,
 
 /* static */
 bool
-MouseScrollHandler::DispatchEvent(nsWindow* aWindow, nsGUIEvent& aEvent)
+MouseScrollHandler::DispatchEvent(nsWindowBase* aWidget,
+                                  WidgetGUIEvent& aEvent)
 {
-  return aWindow->DispatchWindowEvent(&aEvent);
+  // note, in metrofx, this will always return false for now
+  return aWidget->DispatchScrollEvent(&aEvent);
 }
 
 /* static */
 void
-MouseScrollHandler::InitEvent(nsWindow* aWindow,
-                              nsGUIEvent& aEvent,
+MouseScrollHandler::InitEvent(nsWindowBase* aWidget,
+                              WidgetGUIEvent& aEvent,
                               nsIntPoint* aPoint)
 {
-  NS_ENSURE_TRUE_VOID(aWindow);
+  NS_ENSURE_TRUE_VOID(aWidget);
   nsIntPoint point;
   if (aPoint) {
     point = *aPoint;
@@ -321,11 +348,11 @@ MouseScrollHandler::InitEvent(nsWindow* aWindow,
     POINT pt;
     pt.x = pts.x;
     pt.y = pts.y;
-    ::ScreenToClient(aWindow->GetWindowHandle(), &pt);
+    ::ScreenToClient(aWidget->GetWindowHandle(), &pt);
     point.x = pt.x;
     point.y = pt.y;
   }
-  aWindow->InitEvent(aEvent, &point);
+  aWidget->InitEvent(aEvent, &point);
 }
 
 /* static */
@@ -363,22 +390,22 @@ MouseScrollHandler::ComputeMessagePos(UINT aMessage,
 }
 
 void
-MouseScrollHandler::ProcessNativeMouseWheelMessage(nsWindow* aWindow,
+MouseScrollHandler::ProcessNativeMouseWheelMessage(nsWindowBase* aWidget,
                                                    UINT aMessage,
                                                    WPARAM aWParam,
                                                    LPARAM aLParam)
 {
   if (SynthesizingEvent::IsSynthesizing()) {
-    mSynthesizingEvent->NativeMessageReceived(aWindow, aMessage,
+    mSynthesizingEvent->NativeMessageReceived(aWidget, aMessage,
                                               aWParam, aLParam);
   }
 
   POINT point = ComputeMessagePos(aMessage, aWParam, aLParam);
 
   PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
-    ("MouseScroll::ProcessNativeMouseWheelMessage: aWindow=%p, "
+    ("MouseScroll::ProcessNativeMouseWheelMessage: aWidget=%p, "
      "aMessage=%s, wParam=0x%08X, lParam=0x%08X, point: { x=%d, y=%d }",
-     aWindow, aMessage == WM_MOUSEWHEEL ? "WM_MOUSEWHEEL" :
+     aWidget, aMessage == WM_MOUSEWHEEL ? "WM_MOUSEWHEEL" :
               aMessage == WM_MOUSEHWHEEL ? "WM_MOUSEHWHEEL" :
               aMessage == WM_VSCROLL ? "WM_VSCROLL" : "WM_HSCROLL",
      aWParam, aLParam, point.x, point.y));
@@ -411,14 +438,14 @@ MouseScrollHandler::ProcessNativeMouseWheelMessage(nsWindow* aWindow,
   // except plugin window (MozillaWindowClass), we should handle the message
   // on the window.
   if (WinUtils::IsOurProcessWindow(underCursorWnd)) {
-    nsWindow* destWindow = WinUtils::GetNSWindowPtr(underCursorWnd);
+    nsWindowBase* destWindow = WinUtils::GetNSWindowBasePtr(underCursorWnd);
     if (!destWindow) {
       PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
         ("MouseScroll::ProcessNativeMouseWheelMessage: "
          "Found window under the cursor isn't managed by nsWindow..."));
       HWND wnd = ::GetParent(underCursorWnd);
       for (; wnd; wnd = ::GetParent(wnd)) {
-        destWindow = WinUtils::GetNSWindowPtr(wnd);
+        destWindow = WinUtils::GetNSWindowBasePtr(wnd);
         if (destWindow) {
           break;
         }
@@ -438,8 +465,8 @@ MouseScrollHandler::ProcessNativeMouseWheelMessage(nsWindow* aWindow,
     // message on its parent window.  However, note that the DOM event may
     // cause accessing the plugin.  Therefore, we should unlock the plugin
     // process by using PostMessage().
-    if (destWindow->GetWindowType() == eWindowType_plugin) {
-      destWindow = destWindow->GetParentWindow(false);
+    if (destWindow->WindowType() == eWindowType_plugin) {
+      destWindow = destWindow->GetParentWindowBase(false);
       if (!destWindow) {
         PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
           ("MouseScroll::ProcessNativeMouseWheelMessage: "
@@ -477,9 +504,9 @@ MouseScrollHandler::ProcessNativeMouseWheelMessage(nsWindow* aWindow,
   // it on parent window.  However, note that the DOM event may cause accessing
   // the plugin.  Therefore, we should unlock the plugin process by using
   // PostMessage().
-  if (aWindow->GetWindowType() == eWindowType_plugin &&
-      aWindow->GetWindowHandle() == pluginWnd) {
-    nsWindow* destWindow = aWindow->GetParentWindow(false);
+  if (aWidget->WindowType() == eWindowType_plugin &&
+      aWidget->GetWindowHandle() == pluginWnd) {
+    nsWindowBase* destWindow = aWidget->GetParentWindowBase(false);
     if (!destWindow) {
       PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
         ("MouseScroll::ProcessNativeMouseWheelMessage: Our normal window which "
@@ -506,7 +533,7 @@ MouseScrollHandler::ProcessNativeMouseWheelMessage(nsWindow* aWindow,
 }
 
 bool
-MouseScrollHandler::ProcessNativeScrollMessage(nsWindow* aWindow,
+MouseScrollHandler::ProcessNativeScrollMessage(nsWindowBase* aWidget,
                                                UINT aMessage,
                                                WPARAM aWParam,
                                                LPARAM aLParam)
@@ -514,51 +541,58 @@ MouseScrollHandler::ProcessNativeScrollMessage(nsWindow* aWindow,
   if (aLParam || mUserPrefs.IsScrollMessageHandledAsWheelMessage()) {
     // Scroll message generated by Thinkpad Trackpoint Driver or similar
     // Treat as a mousewheel message and scroll appropriately
-    ProcessNativeMouseWheelMessage(aWindow, aMessage, aWParam, aLParam);
+    ProcessNativeMouseWheelMessage(aWidget, aMessage, aWParam, aLParam);
     // Always consume the scroll message if we try to emulate mouse wheel
     // action.
     return true;
   }
 
   if (SynthesizingEvent::IsSynthesizing()) {
-    mSynthesizingEvent->NativeMessageReceived(aWindow, aMessage,
+    mSynthesizingEvent->NativeMessageReceived(aWidget, aMessage,
                                               aWParam, aLParam);
   }
 
   PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
-    ("MouseScroll::ProcessNativeScrollMessage: aWindow=%p, "
+    ("MouseScroll::ProcessNativeScrollMessage: aWidget=%p, "
      "aMessage=%s, wParam=0x%08X, lParam=0x%08X",
-     aWindow, aMessage == WM_VSCROLL ? "WM_VSCROLL" : "WM_HSCROLL",
+     aWidget, aMessage == WM_VSCROLL ? "WM_VSCROLL" : "WM_HSCROLL",
      aWParam, aLParam));
 
   // Scroll message generated by external application
-  nsContentCommandEvent commandEvent(true, NS_CONTENT_COMMAND_SCROLL, aWindow);
+  WidgetContentCommandEvent commandEvent(true, NS_CONTENT_COMMAND_SCROLL,
+                                         aWidget);
 
   commandEvent.mScroll.mIsHorizontal = (aMessage == WM_HSCROLL);
 
   switch (LOWORD(aWParam)) {
     case SB_LINEUP:   // SB_LINELEFT
-      commandEvent.mScroll.mUnit = nsContentCommandEvent::eCmdScrollUnit_Line;
+      commandEvent.mScroll.mUnit =
+        WidgetContentCommandEvent::eCmdScrollUnit_Line;
       commandEvent.mScroll.mAmount = -1;
       break;
     case SB_LINEDOWN: // SB_LINERIGHT
-      commandEvent.mScroll.mUnit = nsContentCommandEvent::eCmdScrollUnit_Line;
+      commandEvent.mScroll.mUnit =
+        WidgetContentCommandEvent::eCmdScrollUnit_Line;
       commandEvent.mScroll.mAmount = 1;
       break;
     case SB_PAGEUP:   // SB_PAGELEFT
-      commandEvent.mScroll.mUnit = nsContentCommandEvent::eCmdScrollUnit_Page;
+      commandEvent.mScroll.mUnit =
+        WidgetContentCommandEvent::eCmdScrollUnit_Page;
       commandEvent.mScroll.mAmount = -1;
       break;
     case SB_PAGEDOWN: // SB_PAGERIGHT
-      commandEvent.mScroll.mUnit = nsContentCommandEvent::eCmdScrollUnit_Page;
+      commandEvent.mScroll.mUnit =
+        WidgetContentCommandEvent::eCmdScrollUnit_Page;
       commandEvent.mScroll.mAmount = 1;
       break;
     case SB_TOP:      // SB_LEFT
-      commandEvent.mScroll.mUnit = nsContentCommandEvent::eCmdScrollUnit_Whole;
+      commandEvent.mScroll.mUnit =
+        WidgetContentCommandEvent::eCmdScrollUnit_Whole;
       commandEvent.mScroll.mAmount = -1;
       break;
     case SB_BOTTOM:   // SB_RIGHT
-      commandEvent.mScroll.mUnit = nsContentCommandEvent::eCmdScrollUnit_Whole;
+      commandEvent.mScroll.mUnit =
+        WidgetContentCommandEvent::eCmdScrollUnit_Whole;
       commandEvent.mScroll.mAmount = 1;
       break;
     default:
@@ -566,12 +600,12 @@ MouseScrollHandler::ProcessNativeScrollMessage(nsWindow* aWindow,
   }
   // XXX If this is a plugin window, we should dispatch the event from
   //     parent window.
-  DispatchEvent(aWindow, commandEvent);
+  DispatchEvent(aWidget, commandEvent);
   return true;
 }
 
 void
-MouseScrollHandler::HandleMouseWheelMessage(nsWindow* aWindow,
+MouseScrollHandler::HandleMouseWheelMessage(nsWindowBase* aWidget,
                                             UINT aMessage,
                                             WPARAM aWParam,
                                             LPARAM aLParam)
@@ -582,14 +616,14 @@ MouseScrollHandler::HandleMouseWheelMessage(nsWindow* aWindow,
     "MOZ_WM_MOUSEVWHEEL or MOZ_WM_MOUSEHWHEEL");
 
   PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
-    ("MouseScroll::HandleMouseWheelMessage: aWindow=%p, "
+    ("MouseScroll::HandleMouseWheelMessage: aWidget=%p, "
      "aMessage=MOZ_WM_MOUSE%sWHEEL, aWParam=0x%08X, aLParam=0x%08X",
-     aWindow, aMessage == MOZ_WM_MOUSEVWHEEL ? "V" : "H",
+     aWidget, aMessage == MOZ_WM_MOUSEVWHEEL ? "V" : "H",
      aWParam, aLParam));
 
   mIsWaitingInternalMessage = false;
 
-  EventInfo eventInfo(aWindow, WinUtils::GetNativeMessage(aMessage),
+  EventInfo eventInfo(aWidget, WinUtils::GetNativeMessage(aMessage),
                       aWParam, aLParam);
   if (!eventInfo.CanDispatchWheelEvent()) {
     PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
@@ -610,15 +644,15 @@ MouseScrollHandler::HandleMouseWheelMessage(nsWindow* aWindow,
   ModifierKeyState modKeyState = GetModifierKeyState(aMessage);
 
   // Grab the widget, it might be destroyed by a DOM event handler.
-  nsRefPtr<nsWindow> kungFuDethGrip(aWindow);
+  nsRefPtr<nsWindowBase> kungFuDethGrip(aWidget);
 
-  WheelEvent wheelEvent(true, NS_WHEEL_WHEEL, aWindow);
-  if (mLastEventInfo.InitWheelEvent(aWindow, wheelEvent, modKeyState)) {
+  WidgetWheelEvent wheelEvent(true, NS_WHEEL_WHEEL, aWidget);
+  if (mLastEventInfo.InitWheelEvent(aWidget, wheelEvent, modKeyState)) {
     PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
       ("MouseScroll::HandleMouseWheelMessage: dispatching "
        "NS_WHEEL_WHEEL event"));
-    DispatchEvent(aWindow, wheelEvent);
-    if (aWindow->Destroyed()) {
+    DispatchEvent(aWidget, wheelEvent);
+    if (aWidget->Destroyed()) {
       PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
         ("MouseScroll::HandleMouseWheelMessage: The window was destroyed "
          "by NS_WHEEL_WHEEL event"));
@@ -636,7 +670,7 @@ MouseScrollHandler::HandleMouseWheelMessage(nsWindow* aWindow,
 }
 
 void
-MouseScrollHandler::HandleScrollMessageAsMouseWheelMessage(nsWindow* aWindow,
+MouseScrollHandler::HandleScrollMessageAsMouseWheelMessage(nsWindowBase* aWidget,
                                                            UINT aMessage,
                                                            WPARAM aWParam,
                                                            LPARAM aLParam)
@@ -650,7 +684,7 @@ MouseScrollHandler::HandleScrollMessageAsMouseWheelMessage(nsWindow* aWindow,
 
   ModifierKeyState modKeyState = GetModifierKeyState(aMessage);
 
-  WheelEvent wheelEvent(true, NS_WHEEL_WHEEL, aWindow);
+  WidgetWheelEvent wheelEvent(true, NS_WHEEL_WHEEL, aWidget);
   double& delta =
    (aMessage == MOZ_WM_VSCROLL) ? wheelEvent.deltaY : wheelEvent.deltaX;
   int32_t& lineOrPageDelta =
@@ -682,15 +716,15 @@ MouseScrollHandler::HandleScrollMessageAsMouseWheelMessage(nsWindow* aWindow,
   // XXX Current mouse position may not be same as when the original message
   //     is received.  We need to know the actual mouse cursor position when
   //     the original message was received.
-  InitEvent(aWindow, wheelEvent);
+  InitEvent(aWidget, wheelEvent);
 
   PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
-    ("MouseScroll::HandleScrollMessageAsMouseWheelMessage: aWindow=%p, "
+    ("MouseScroll::HandleScrollMessageAsMouseWheelMessage: aWidget=%p, "
      "aMessage=MOZ_WM_%sSCROLL, aWParam=0x%08X, aLParam=0x%08X, "
      "wheelEvent { refPoint: { x: %d, y: %d }, deltaX: %f, deltaY: %f, "
      "lineOrPageDeltaX: %d, lineOrPageDeltaY: %d, "
      "isShift: %s, isControl: %s, isAlt: %s, isMeta: %s }",
-     aWindow, (aMessage == MOZ_WM_VSCROLL) ? "V" : "H", aWParam, aLParam,
+     aWidget, (aMessage == MOZ_WM_VSCROLL) ? "V" : "H", aWParam, aLParam,
      wheelEvent.refPoint.x, wheelEvent.refPoint.y,
      wheelEvent.deltaX, wheelEvent.deltaY,
      wheelEvent.lineOrPageDeltaX, wheelEvent.lineOrPageDeltaY,
@@ -699,7 +733,7 @@ MouseScrollHandler::HandleScrollMessageAsMouseWheelMessage(nsWindow* aWindow,
      GetBoolName(wheelEvent.IsAlt()),
      GetBoolName(wheelEvent.IsMeta())));
 
-  DispatchEvent(aWindow, wheelEvent);
+  DispatchEvent(aWidget, wheelEvent);
 }
 
 /******************************************************************************
@@ -708,7 +742,7 @@ MouseScrollHandler::HandleScrollMessageAsMouseWheelMessage(nsWindow* aWindow,
  *
  ******************************************************************************/
 
-MouseScrollHandler::EventInfo::EventInfo(nsWindow* aWindow,
+MouseScrollHandler::EventInfo::EventInfo(nsWindowBase* aWidget,
                                          UINT aMessage,
                                          WPARAM aWParam, LPARAM aLParam)
 {
@@ -721,7 +755,7 @@ MouseScrollHandler::EventInfo::EventInfo(nsWindow* aWindow,
   mIsPage = MouseScrollHandler::sInstance->
               mSystemSettings.IsPageScroll(mIsVertical);
   mDelta = (short)HIWORD(aWParam);
-  mWnd = aWindow->GetWindowHandle();
+  mWnd = aWidget->GetWindowHandle();
   mTimeStamp = TimeStamp::Now();
 }
 
@@ -803,8 +837,8 @@ MouseScrollHandler::LastEventInfo::RoundDelta(double aDelta)
 
 bool
 MouseScrollHandler::LastEventInfo::InitWheelEvent(
-                                     nsWindow* aWindow,
-                                     WheelEvent& aWheelEvent,
+                                     nsWindowBase* aWidget,
+                                     WidgetWheelEvent& aWheelEvent,
                                      const ModifierKeyState& aModKeyState)
 {
   MOZ_ASSERT(aWheelEvent.message == NS_WHEEL_WHEEL);
@@ -812,7 +846,7 @@ MouseScrollHandler::LastEventInfo::InitWheelEvent(
   // XXX Why don't we use lParam value? We should use lParam value because
   //     our internal message is always posted by original message handler.
   //     So, GetMessagePos() may return different cursor position.
-  InitEvent(aWindow, aWheelEvent);
+  InitEvent(aWidget, aWheelEvent);
 
   aModKeyState.InitInputEvent(aWheelEvent);
 
@@ -840,12 +874,12 @@ MouseScrollHandler::LastEventInfo::InitWheelEvent(
     lineOrPageDelta * orienter * RoundDelta(nativeDeltaPerUnit);
 
   PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
-    ("MouseScroll::LastEventInfo::InitWheelEvent: aWindow=%p, "
+    ("MouseScroll::LastEventInfo::InitWheelEvent: aWidget=%p, "
      "aWheelEvent { refPoint: { x: %d, y: %d }, deltaX: %f, deltaY: %f, "
      "lineOrPageDeltaX: %d, lineOrPageDeltaY: %d, "
      "isShift: %s, isControl: %s, isAlt: %s, isMeta: %s }, "
      "mAccumulatedDelta: %d",
-     aWindow, aWheelEvent.refPoint.x, aWheelEvent.refPoint.y,
+     aWidget, aWheelEvent.refPoint.x, aWheelEvent.refPoint.y,
      aWheelEvent.deltaX, aWheelEvent.deltaY,
      aWheelEvent.lineOrPageDeltaX, aWheelEvent.lineOrPageDeltaY,
      GetBoolName(aWheelEvent.IsShift()),
@@ -915,7 +949,7 @@ MouseScrollHandler::SystemSettings::Init()
     PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
       ("MouseScroll::SystemSettings::Init(): ::SystemParametersInfo("
          "SPI_GETWHEELSCROLLCHARS) failed, %s",
-       WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION ?
+       IsVistaOrLater() ?
          "this is unexpected on Vista or later" :
          "but on XP or earlier, this is not a problem"));
     mScrollChars = 1;
@@ -1064,6 +1098,11 @@ MouseScrollHandler::Device::GetWorkaroundPref(const char* aPrefName,
 void
 MouseScrollHandler::Device::Init()
 {
+  // Not supported in metro mode.
+  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro) {
+    return;
+  }
+
   sFakeScrollableWindowNeeded =
     GetWorkaroundPref("ui.trackpoint_hack.enabled",
                       (TrackPoint::IsDriverInstalled() ||
@@ -1103,7 +1142,7 @@ MouseScrollHandler::Device::Elantech::Init()
 int32_t
 MouseScrollHandler::Device::Elantech::GetDriverMajorVersion()
 {
-  PRUnichar buf[40];
+  wchar_t buf[40];
   // The driver version is found in one of these two registry keys.
   bool foundKey =
     WinUtils::GetRegistryKey(HKEY_CURRENT_USER,
@@ -1124,9 +1163,9 @@ MouseScrollHandler::Device::Elantech::GetDriverMajorVersion()
 
   // Assume that the major version number can be found just after a space
   // or at the start of the string.
-  for (PRUnichar* p = buf; *p; p++) {
+  for (wchar_t* p = buf; *p; p++) {
     if (*p >= L'0' && *p <= L'9' && (p == buf || *(p - 1) == L' ')) {
-      return wcstol(p, NULL, 10);
+      return wcstol(p, nullptr, 10);
     }
   }
 
@@ -1140,7 +1179,7 @@ MouseScrollHandler::Device::Elantech::IsHelperWindow(HWND aWnd)
   // The helper window cannot be distinguished based on its window class, so we
   // need to check if it is owned by the helper process, ETDCtrl.exe.
 
-  const PRUnichar* filenameSuffix = L"\\etdctrl.exe";
+  const wchar_t* filenameSuffix = L"\\etdctrl.exe";
   const int filenameSuffixLength = 12;
 
   DWORD pid;
@@ -1152,7 +1191,7 @@ MouseScrollHandler::Device::Elantech::IsHelperWindow(HWND aWnd)
   }
 
   bool result = false;
-  PRUnichar path[256] = {L'\0'};
+  wchar_t path[256] = {L'\0'};
   if (::GetProcessImageFileNameW(hProcess, path, ArrayLength(path))) {
     int pathLength = lstrlenW(path);
     if (pathLength >= filenameSuffixLength) {
@@ -1169,7 +1208,7 @@ MouseScrollHandler::Device::Elantech::IsHelperWindow(HWND aWnd)
 
 /* static */
 bool
-MouseScrollHandler::Device::Elantech::HandleKeyMessage(nsWindow* aWindow,
+MouseScrollHandler::Device::Elantech::HandleKeyMessage(nsWindowBase* aWidget,
                                                        UINT aMsg,
                                                        WPARAM aWParam)
 {
@@ -1202,10 +1241,10 @@ MouseScrollHandler::Device::Elantech::HandleKeyMessage(nsWindow* aWindow,
          "%s command event",
          aWParam == VK_NEXT ? "Forward" : "Back"));
 
-      nsCommandEvent commandEvent(true, nsGkAtoms::onAppCommand,
-        (aWParam == VK_NEXT) ? nsGkAtoms::Forward : nsGkAtoms::Back, aWindow);
-      InitEvent(aWindow, commandEvent);
-      MouseScrollHandler::DispatchEvent(aWindow, commandEvent);
+      WidgetCommandEvent commandEvent(true, nsGkAtoms::onAppCommand,
+        (aWParam == VK_NEXT) ? nsGkAtoms::Forward : nsGkAtoms::Back, aWidget);
+      InitEvent(aWidget, commandEvent);
+      MouseScrollHandler::DispatchEvent(aWidget, commandEvent);
     }
 #ifdef PR_LOGGING
     else {
@@ -1350,7 +1389,7 @@ MouseScrollHandler::Device::UltraNav::IsObsoleteDriverInstalled()
     return false;
   }
 
-  PRUnichar buf[40];
+  wchar_t buf[40];
   bool foundKey =
     WinUtils::GetRegistryKey(HKEY_LOCAL_MACHINE,
                              L"Software\\Synaptics\\SynTP\\Install",
@@ -1363,11 +1402,11 @@ MouseScrollHandler::Device::UltraNav::IsObsoleteDriverInstalled()
     return false;
   }
 
-  int majorVersion = wcstol(buf, NULL, 10);
+  int majorVersion = wcstol(buf, nullptr, 10);
   int minorVersion = 0;
-  PRUnichar* p = wcschr(buf, L'.');
+  wchar_t* p = wcschr(buf, L'.');
   if (p) {
-    minorVersion = wcstol(p + 1, NULL, 10);
+    minorVersion = wcstol(p + 1, nullptr, 10);
   }
   PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
     ("MouseScroll::Device::UltraNav::IsObsoleteDriverInstalled(): "
@@ -1483,7 +1522,7 @@ MouseScrollHandler::SynthesizingEvent::Synthesize(const POINTS& aCursorPoint,
 }
 
 void
-MouseScrollHandler::SynthesizingEvent::NativeMessageReceived(nsWindow* aWindow,
+MouseScrollHandler::SynthesizingEvent::NativeMessageReceived(nsWindowBase* aWidget,
                                                              UINT aMessage,
                                                              WPARAM aWParam,
                                                              LPARAM aLParam)
@@ -1491,13 +1530,13 @@ MouseScrollHandler::SynthesizingEvent::NativeMessageReceived(nsWindow* aWindow,
   if (mStatus == SENDING_MESSAGE && mMessage == aMessage &&
       mWParam == aWParam && mLParam == aLParam) {
     mStatus = NATIVE_MESSAGE_RECEIVED;
-    if (aWindow && aWindow->GetWindowHandle() == mWnd) {
+    if (aWidget && aWidget->GetWindowHandle() == mWnd) {
       return;
     }
     // If the target window is not ours and received window is our plugin
     // window, it comes from child window of the plugin.
-    if (aWindow && aWindow->GetWindowType() == eWindowType_plugin &&
-        !WinUtils::GetNSWindowPtr(mWnd)) {
+    if (aWidget && aWidget->WindowType() == eWindowType_plugin &&
+        !WinUtils::GetNSWindowBasePtr(mWnd)) {
       return;
     }
     // Otherwise, the message may not be sent by us.
@@ -1505,9 +1544,9 @@ MouseScrollHandler::SynthesizingEvent::NativeMessageReceived(nsWindow* aWindow,
 
   PR_LOG(gMouseScrollLog, PR_LOG_ALWAYS,
     ("MouseScrollHandler::SynthesizingEvent::NativeMessageReceived(): "
-     "aWindow=%p, aWindow->GetWindowHandle()=0x%X, mWnd=0x%X, "
+     "aWidget=%p, aWidget->GetWindowHandle()=0x%X, mWnd=0x%X, "
      "aMessage=0x%04X, aWParam=0x%08X, aLParam=0x%08X, mStatus=%s",
-     aWindow, aWindow ? aWindow->GetWindowHandle() : 0, mWnd,
+     aWidget, aWidget ? aWidget->GetWindowHandle() : 0, mWnd,
      aMessage, aWParam, aLParam, GetStatusName()));
 
   // We failed to receive our sent message, we failed to do the job.

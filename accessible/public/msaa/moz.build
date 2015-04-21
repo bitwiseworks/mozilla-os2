@@ -4,16 +4,20 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'accessibility'
-
-EXPORTS += [
-    'ISimpleDOMDocument.h',
-    'ISimpleDOMDocument_i.c',
-    'ISimpleDOMNode.h',
-    'ISimpleDOMNode_i.c',
-    'ISimpleDOMText.h',
-    'ISimpleDOMText_i.c',
-]
-
 LIBRARY_NAME = 'AccessibleMarshal'
 
+GENERATED_SOURCES += [
+    'dlldata.c',
+    'ISimpleDOMDocument_i.c',
+    'ISimpleDOMDocument_p.c',
+    'ISimpleDOMNode_i.c',
+    'ISimpleDOMNode_p.c',
+    'ISimpleDOMText_i.c',
+    'ISimpleDOMText_p.c',
+]
+
+FORCE_SHARED_LIB = True
+
+DEFINES['REGISTER_PROXY_DLL'] = True
+
+DEFFILE = SRCDIR + '/AccessibleMarshal.def'

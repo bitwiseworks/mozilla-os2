@@ -4,13 +4,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource:///modules/MigrationUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "MigrationUtils",
+                                  "resource:///modules/MigrationUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "BookmarkJSONUtils",
                                   "resource://gre/modules/BookmarkJSONUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesBackups",
                                   "resource://gre/modules/PlacesBackups.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "DownloadUtils",
+                                  "resource://gre/modules/DownloadUtils.jsm");
 
 var PlacesOrganizer = {
   _places: null,
@@ -37,6 +40,50 @@ var PlacesOrganizer = {
       PlacesUtils.asContainer(this._places.selectedNode).containerOpen = true;
   },
 
+  /**
+   * Opens a given hierarchy in the left pane, stopping at the last reachable
+   * container.
+   *
+   * @param aHierarchy A single container or an array of containers, sorted from
+   *                   the outmost to the innermost in the hierarchy. Each
+   *                   container may be either an item id, a Places URI string,
+   *                   or a named query.
+   * @see PlacesUIUtils.leftPaneQueries for supported named queries.
+   */
+  selectLeftPaneContainerByHierarchy:
+  function PO_selectLeftPaneContainerByHierarchy(aHierarchy) {
+    if (!aHierarchy)
+      throw new Error("Invalid containers hierarchy");
+    let hierarchy = [].concat(aHierarchy);
+    let selectWasSuppressed = this._places.view.selection.selectEventsSuppressed;
+    if (!selectWasSuppressed)
+      this._places.view.selection.selectEventsSuppressed = true;
+    try {
+      for (let container of hierarchy) {
+        switch (typeof container) {
+          case "number":
+            this._places.selectItems([container], false);
+            break;
+          case "string":
+            if (container.substr(0, 6) == "place:")
+              this._places.selectPlaceURI(container);
+            else if (container in PlacesUIUtils.leftPaneQueries)
+              this.selectLeftPaneQuery(container);
+            else
+              throw new Error("Invalid container found: " + container);
+            break;
+          default:
+            throw new Error("Invalid container type found: " + container);
+            break;
+        }
+        PlacesUtils.asContainer(this._places.selectedNode).containerOpen = true;
+      }
+    } finally {
+      if (!selectWasSuppressed)
+        this._places.view.selection.selectEventsSuppressed = false;
+    }
+  },
+
   init: function PO_init() {
     ContentArea.init();
 
@@ -47,12 +94,13 @@ var PlacesOrganizer = {
     if (window.arguments && window.arguments[0])
       leftPaneSelection = window.arguments[0];
 
-    this.selectLeftPaneQuery(leftPaneSelection);
-    if (leftPaneSelection == "History") {
+    this.selectLeftPaneContainerByHierarchy(leftPaneSelection);
+    if (leftPaneSelection === "History") {
       let historyNode = this._places.selectedNode;
       if (historyNode.childCount > 0)
         this._places.selectNode(historyNode.getChild(0));
     }
+
     // clear the back-stack
     this._backHistory.splice(0, this._backHistory.length);
     document.getElementById("OrganizerCommand:Back").setAttribute("disabled", true);
@@ -74,13 +122,6 @@ var PlacesOrganizer = {
     for (var i=0; i < elements.length; i++) {
       document.getElementById(elements[i]).setAttribute("disabled", "true");
     }
-    
-    // 3. Disable the keyboard shortcut for the History menu back/forward
-    // in order to support those in the Library
-    var historyMenuBack = document.getElementById("historyMenuBack");
-    historyMenuBack.removeAttribute("key");
-    var historyMenuForward = document.getElementById("historyMenuForward");
-    historyMenuForward.removeAttribute("key");
 #endif
 
     // remove the "Properties" context-menu item, we've our own details pane
@@ -285,10 +326,13 @@ var PlacesOrganizer = {
   },
 
   openFlatContainer: function PO_openFlatContainerFlatContainer(aContainer) {
-    if (aContainer.itemId != -1)
-      this._places.selectItems([aContainer.itemId]);
-    else if (PlacesUtils.nodeIsQuery(aContainer))
+    if (aContainer.itemId != -1) {
+      PlacesUtils.asContainer(this._places.selectedNode).containerOpen = true;
+      this._places.selectItems([aContainer.itemId], false);
+    }
+    else if (PlacesUtils.nodeIsQuery(aContainer)) {
       this._places.selectPlaceURI(aContainer.uri);
+    }
   },
 
   /**
@@ -342,7 +386,7 @@ var PlacesOrganizer = {
     let fpCallback = function fpCallback_done(aResult) {
       if (aResult != Ci.nsIFilePicker.returnCancel) {
         Components.utils.import("resource://gre/modules/BookmarkHTMLUtils.jsm");
-        BookmarkHTMLUtils.exportToFile(fp.file)
+        BookmarkHTMLUtils.exportToFile(fp.file.path)
                          .then(null, Components.utils.reportError);
       }
     };
@@ -367,43 +411,64 @@ var PlacesOrganizer = {
     while (restorePopup.childNodes.length > 1)
       restorePopup.removeChild(restorePopup.firstChild);
 
-    let backupFiles = PlacesBackups.entries;
-    if (backupFiles.length == 0)
-      return;
+    Task.spawn(function() {
+      let backupFiles = yield PlacesBackups.getBackupFiles();
+      if (backupFiles.length == 0)
+        return;
 
-    // Populate menu with backups.
-    for (let i = 0; i < backupFiles.length; i++) {
-      let backupDate = PlacesBackups.getDateForFile(backupFiles[i]);
-      let m = restorePopup.insertBefore(document.createElement("menuitem"),
-                                        document.getElementById("restoreFromFile"));
-      m.setAttribute("label",
-                     dateSvc.FormatDate("",
-                                        Ci.nsIScriptableDateFormat.dateFormatLong,
-                                        backupDate.getFullYear(),
-                                        backupDate.getMonth() + 1,
-                                        backupDate.getDate()));
-      m.setAttribute("value", backupFiles[i].leafName);
-      m.setAttribute("oncommand",
-                     "PlacesOrganizer.onRestoreMenuItemClick(this);");
-    }
+      // Populate menu with backups.
+      for (let i = 0; i < backupFiles.length; i++) {
+        let fileSize = (yield OS.File.stat(backupFiles[i])).size;
+        let [size, unit] = DownloadUtils.convertByteUnits(fileSize);
+        let sizeString = PlacesUtils.getFormattedString("backupFileSizeText",
+                                                        [size, unit]);
+        let sizeInfo;
+        let bookmarkCount = PlacesBackups.getBookmarkCountForFile(backupFiles[i]);
+        if (bookmarkCount != null) {
+          sizeInfo = " (" + sizeString + " - " +
+                     PlacesUIUtils.getPluralString("detailsPane.itemsCountLabel",
+                                                   bookmarkCount,
+                                                   [bookmarkCount]) +
+                     ")";
+        } else {
+          sizeInfo = " (" + sizeString + ")";
+        }
 
-    // Add the restoreFromFile item.
-    restorePopup.insertBefore(document.createElement("menuseparator"),
-                              document.getElementById("restoreFromFile"));
+        let backupDate = PlacesBackups.getDateForFile(backupFiles[i]);
+        let m = restorePopup.insertBefore(document.createElement("menuitem"),
+                                          document.getElementById("restoreFromFile"));
+        m.setAttribute("label",
+                       dateSvc.FormatDate("",
+                                          Ci.nsIScriptableDateFormat.dateFormatLong,
+                                          backupDate.getFullYear(),
+                                          backupDate.getMonth() + 1,
+                                          backupDate.getDate()) +
+                                          sizeInfo);
+        m.setAttribute("value", OS.Path.basename(backupFiles[i]));
+        m.setAttribute("oncommand",
+                       "PlacesOrganizer.onRestoreMenuItemClick(this);");
+      }
+
+      // Add the restoreFromFile item.
+      restorePopup.insertBefore(document.createElement("menuseparator"),
+                                document.getElementById("restoreFromFile"));
+    });
   },
 
   /**
    * Called when a menuitem is selected from the restore menu.
    */
   onRestoreMenuItemClick: function PO_onRestoreMenuItemClick(aMenuItem) {
-    let backupName = aMenuItem.getAttribute("value");
-    let backupFiles = PlacesBackups.entries;
-    for (let i = 0; i < backupFiles.length; i++) {
-      if (backupFiles[i].leafName == backupName) {
-        this.restoreBookmarksFromFile(backupFiles[i]);
-        break;
+    Task.spawn(function() {
+      let backupName = aMenuItem.getAttribute("value");
+      let backupFilePaths = yield PlacesBackups.getBackupFiles();
+      for (let backupFilePath of backupFilePaths) {
+        if (OS.Path.basename(backupFilePath) == backupName) {
+          PlacesOrganizer.restoreBookmarksFromFile(backupFilePath);
+          break;
+        }
       }
-    }
+    });
   },
 
   /**
@@ -417,7 +482,7 @@ var PlacesOrganizer = {
     let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
     let fpCallback = function fpCallback_done(aResult) {
       if (aResult != Ci.nsIFilePicker.returnCancel) {
-        this.restoreBookmarksFromFile(fp.file);
+        this.restoreBookmarksFromFile(fp.file.path);
       }
     }.bind(this);
 
@@ -433,9 +498,9 @@ var PlacesOrganizer = {
   /**
    * Restores bookmarks from a JSON file.
    */
-  restoreBookmarksFromFile: function PO_restoreBookmarksFromFile(aFile) {
+  restoreBookmarksFromFile: function PO_restoreBookmarksFromFile(aFilePath) {
     // check file extension
-    if (!aFile.leafName.match(/\.json$/)) {
+    if (!aFilePath.endsWith("json")) {
       this._showErrorAlert(PlacesUIUtils.getString("bookmarksRestoreFormatError"));
       return;
     }
@@ -450,7 +515,7 @@ var PlacesOrganizer = {
 
     Task.spawn(function() {
       try {
-        yield BookmarkJSONUtils.importFromFile(aFile, true);
+        yield BookmarkJSONUtils.importFromFile(aFilePath, true);
       } catch(ex) {
         PlacesOrganizer._showErrorAlert(PlacesUIUtils.getString("bookmarksRestoreParseError"));
       }
@@ -478,7 +543,8 @@ var PlacesOrganizer = {
     let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
     let fpCallback = function fpCallback_done(aResult) {
       if (aResult != Ci.nsIFilePicker.returnCancel) {
-        BookmarkJSONUtils.exportToFile(fp.file);
+        // There is no OS.File version of the filepicker yet (Bug 937812).
+        PlacesBackups.saveBookmarksToJSONFile(fp.file.path);
       }
     };
 
@@ -1071,7 +1137,7 @@ var ViewMenu = {
    * Set up the content of the view menu.
    */
   populateSortMenu: function VM_populateSortMenu(event) {
-    this.fillWithColumns(event, "viewUnsorted", "directionSeparator", "radio", "view.sortBy.");
+    this.fillWithColumns(event, "viewUnsorted", "directionSeparator", "radio", "view.sortBy.1.");
 
     var sortColumn = this._getSortColumn();
     var viewSortAscending = document.getElementById("viewSortAscending");

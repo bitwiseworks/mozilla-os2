@@ -4,6 +4,8 @@
 SpecialPowers.addPermission("voicemail", true, document);
 
 let voicemail = window.navigator.mozVoicemail;
+let serviceId = 0;
+
 ok(voicemail instanceof MozVoicemail);
 is(voicemail.status, null);
 
@@ -42,51 +44,26 @@ function sendIndicatorPDU(pdu, listener, nextTest) {
 // See RadioInterfaceLayer.js / Bug #768441
 
 function isVoicemailStatus(status) {
-  is(voicemail.status.hasMessages, status.hasMessages);
-  is(voicemail.status.messageCount, status.messageCount);
-  is(voicemail.status.returnNumber, status.returnNumber);
-  is(voicemail.status.returnMessage, status.returnMessage);
+  is(voicemail.getStatus(), status);
+  is(voicemail.getStatus(serviceId), status);
+
+  is(voicemail.getStatus().hasMessages, status.hasMessages);
+  is(voicemail.getStatus().messageCount, status.messageCount);
+  is(voicemail.getStatus().returnNumber, status.returnNumber);
+  is(voicemail.getStatus().returnMessage, status.returnMessage);
 }
 
 const MWI_PDU_PREFIX = "0000";
 const MWI_PDU_UDH_PREFIX = "0040";
 const MWI_PID_DEFAULT = "00";
-const MWI_PID_RETURN_CALL_MSG = "5F";
-const MWI_DCS_DATA_MSG = "F0";
 const MWI_DCS_DISCARD_INACTIVE = "C0";
 const MWI_DCS_DISCARD_ACTIVE = "C8";
 const MWI_TIMESTAMP = "00000000000000";
 
-const MWI_LEVEL1_SENDER = "+15125551234";
-const MWI_LEVEL1_PDU_ADDRESS = PDUBuilder.buildAddress(MWI_LEVEL1_SENDER);
 const MWI_DEFAULT_BODY = "1 new voicemail";
 const MWI_UD_DEFAULT = PDUBuilder.buildUserData({
   body: MWI_DEFAULT_BODY
 });
-
-// Level 1 Message Waiting is just a return call message
-const MWI_LEVEL1_PDU =
-  MWI_PDU_PREFIX +
-  MWI_LEVEL1_PDU_ADDRESS +
-  MWI_PID_RETURN_CALL_MSG +
-  MWI_DCS_DATA_MSG +
-  MWI_TIMESTAMP +
-  MWI_UD_DEFAULT;
-
-function testLevel1Indicator() {
-
-  function onLevel1Indicator(event) {
-    let status = event.status;
-    ok(status instanceof MozVoicemailStatus);
-    is(status.hasMessages, true);
-    is(status.messageCount, status.MESSAGE_COUNT_UNKNOWN);
-    is(status.returnNumber, MWI_LEVEL1_SENDER);
-    is(status.returnMessage, MWI_DEFAULT_BODY);
-    isVoicemailStatus(status);
-  }
-
-  sendIndicatorPDU(MWI_LEVEL1_PDU, onLevel1Indicator, testLevel2DiscardActive);
-}
 
 const MWI_LEVEL2_SENDER = "+15125551235";
 const MWI_LEVEL2_PDU_ADDRESS = PDUBuilder.buildAddress(MWI_LEVEL2_SENDER);
@@ -102,9 +79,10 @@ function testLevel2DiscardActive() {
 
   function onLevel2Active(event) {
     let status = event.status;
-    ok(status instanceof MozVoicemailStatus);
+    // TODO: bug 905228 - MozVoicemailStatus is not defined.
+    //ok(status instanceof MozVoicemailStatus);
     is(status.hasMessages, true);
-    is(status.messageCount, status.MESSAGE_COUNT_UNKNOWN);
+    is(status.messageCount, -1);
     is(status.returnNumber, MWI_LEVEL2_SENDER);
     is(status.returnMessage, MWI_DEFAULT_BODY);
     isVoicemailStatus(status);
@@ -127,7 +105,8 @@ const MWI_LEVEL2_DISCARD_INACTIVE_PDU =
 function testLevel2DiscardInactive() {
   function onLevel2Inactive(event) {
     let status = event.status;
-    ok(status instanceof MozVoicemailStatus);
+    // TODO: bug 905228 - MozVoicemailStatus is not defined.
+    //ok(status instanceof MozVoicemailStatus);
     is(status.hasMessages, false);
     is(status.messageCount, 0);
     is(status.returnNumber, MWI_LEVEL2_SENDER);
@@ -171,7 +150,8 @@ function testLevel3DiscardActive() {
 
   function onLevel3Active(event) {
     let status = event.status;
-    ok(status instanceof MozVoicemailStatus);
+    // TODO: bug 905228 - MozVoicemailStatus is not defined.
+    //ok(status instanceof MozVoicemailStatus);
     is(status.hasMessages, true);
     is(status.messageCount, MWI_LEVEL3_ACTIVE_UDH_MSG_COUNT);
     is(status.returnNumber, MWI_LEVEL3_SENDER);
@@ -208,7 +188,8 @@ const MWI_LEVEL3_DISCARD_INACTIVE_PDU =
 function testLevel3DiscardInactive() {
   function onLevel3Inactive(event) {
     let status = event.status;
-    ok(status instanceof MozVoicemailStatus);
+    // TODO: bug 905228 - MozVoicemailStatus is not defined.
+    //ok(status instanceof MozVoicemailStatus);
     is(status.hasMessages, false);
     is(status.messageCount, 0);
     is(status.returnNumber, MWI_LEVEL3_SENDER);
@@ -224,4 +205,4 @@ function cleanUp() {
   finish();
 }
 
-testLevel1Indicator();
+testLevel2DiscardActive();

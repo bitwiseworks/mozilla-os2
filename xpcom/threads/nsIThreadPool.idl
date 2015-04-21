@@ -27,7 +27,7 @@ interface nsIThreadPoolListener : nsISupports
  * anonymous (unnamed) worker threads.  An event dispatched to the thread pool
  * will be run on the next available worker thread.
  */
-[scriptable, uuid(ba9a466b-8d4a-4b33-ae5c-6ed751068c90)]
+[scriptable, uuid(53675068-cb3a-40e5-a026-1be5a97c9b23)]
 interface nsIThreadPool : nsIEventTarget
 {
   /**
@@ -36,12 +36,14 @@ interface nsIThreadPool : nsIEventTarget
    * thread (usually the thread that created this thread pool).  When this
    * function returns, the thread pool and all of its threads will be shutdown,
    * and it will no longer be possible to dispatch tasks to the thread pool.
+   *
+   * As a side effect, events on the current thread will be processed.
    */
   void shutdown();
 
   /**
    * Get/set the maximum number of threads allowed at one time in this pool.
-   */ 
+   */
   attribute unsigned long threadLimit;
 
   /**
@@ -54,6 +56,12 @@ interface nsIThreadPool : nsIEventTarget
    * destroyed.
    */
   attribute unsigned long idleThreadTimeout;
+
+  /**
+   * Get/set the number of bytes reserved for the stack of all threads in
+   * the pool. By default this is nsIThreadManager::DEFAULT_STACK_SIZE.
+   */
+  attribute unsigned long threadStackSize;
 
   /**
    * An optional listener that will be notified when a thread is created or

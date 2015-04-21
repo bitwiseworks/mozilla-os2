@@ -3,8 +3,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// IWYU pragma: private, include "nsDependentSubstring.h"
+// IWYU pragma: private, include "nsString.h"
 
   /**
    * nsTDependentSubstring_CharT
@@ -45,6 +44,14 @@ class nsTDependentSubstring_CharT : public nsTSubstring_CharT
 
       nsTDependentSubstring_CharT( const char_type* start, const char_type* end )
         : substring_type(const_cast<char_type*>(start), uint32_t(end - start), F_NONE) {}
+
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      nsTDependentSubstring_CharT( char16ptr_t data, size_type length )
+        : nsTDependentSubstring_CharT(static_cast<const char16_t*>(data), length) {}
+
+      nsTDependentSubstring_CharT( char16ptr_t start, char16ptr_t end )
+        : nsTDependentSubstring_CharT(static_cast<const char16_t*>(start), static_cast<const char16_t*>(end)) {}
+#endif
 
       nsTDependentSubstring_CharT( const const_iterator& start, const const_iterator& end )
         : substring_type(const_cast<char_type*>(start.get()), uint32_t(end.get() - start.get()), F_NONE) {}

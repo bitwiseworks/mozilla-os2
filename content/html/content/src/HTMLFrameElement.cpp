@@ -5,7 +5,6 @@
 
 #include "mozilla/dom/HTMLFrameElement.h"
 #include "mozilla/dom/HTMLFrameElementBinding.h"
-#include "mozilla/Util.h"
 
 class nsIDOMDocument;
 
@@ -14,11 +13,10 @@ NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(Frame)
 namespace mozilla {
 namespace dom {
 
-HTMLFrameElement::HTMLFrameElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+HTMLFrameElement::HTMLFrameElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
                                    FromParser aFromParser)
   : nsGenericHTMLFrameElement(aNodeInfo, aFromParser)
 {
-  SetIsDOMBinding();
 }
 
 HTMLFrameElement::~HTMLFrameElement()
@@ -26,17 +24,8 @@ HTMLFrameElement::~HTMLFrameElement()
 }
 
 
-NS_IMPL_ADDREF_INHERITED(HTMLFrameElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLFrameElement, Element)
-
-
-// QueryInterface implementation for HTMLFrameElement
-NS_INTERFACE_TABLE_HEAD(HTMLFrameElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLFrameElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLFrameElement, nsIDOMHTMLFrameElement)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
-
+NS_IMPL_ISUPPORTS_INHERITED(HTMLFrameElement, nsGenericHTMLFrameElement,
+                            nsIDOMHTMLFrameElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLFrameElement)
 
@@ -91,35 +80,10 @@ HTMLFrameElement::ParseAttribute(int32_t aNamespaceID,
                                                    aValue, aResult);
 }
 
-static void
-MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                      nsRuleData* aData)
-{
-  nsGenericHTMLElement::MapScrollingAttributeInto(aAttributes, aData);
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
-}
-
-NS_IMETHODIMP_(bool)
-HTMLFrameElement::IsAttributeMapped(const nsIAtom* aAttribute) const
-{
-  static const MappedAttributeEntry* const map[] = {
-    sScrollingAttributeMap,
-    sCommonAttributeMap,
-  };
-  
-  return FindAttributeDependence(aAttribute, map);
-}
-
-nsMapRuleToAttributesFunc
-HTMLFrameElement::GetAttributeMappingFunction() const
-{
-  return &MapAttributesIntoRule;
-}
-
 JSObject*
-HTMLFrameElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLFrameElement::WrapNode(JSContext* aCx)
 {
-  return HTMLFrameElementBinding::Wrap(aCx, aScope, this);
+  return HTMLFrameElementBinding::Wrap(aCx, this);
 }
 
 } // namespace mozilla

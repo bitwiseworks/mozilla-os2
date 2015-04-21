@@ -193,9 +193,9 @@
 
       <method name="_canScrollToElement">
         <parameter name="element"/>
-        <body>
-          return !element.hidden;
-        </body>
+        <body><![CDATA[
+          return window.getComputedStyle(element).display != "none";
+        ]]></body>
       </method>
 
       <method name="ensureElementIsVisible">
@@ -221,6 +221,12 @@
             right: scrollPaddingRect.right - parseFloat(style.paddingRight),
             bottom: scrollPaddingRect.bottom - parseFloat(style.paddingBottom)
           };
+
+          // Provide an entry point for derived bindings to adjust these values.
+          if (this._adjustElementStartAndEnd) {
+            [elementStart, elementEnd] =
+              this._adjustElementStartAndEnd(element, elementStart, elementEnd);
+          }
 
           if (elementStart <= (vertical ? scrollContentRect.top : scrollContentRect.left)) {
             elementStart = vertical ? scrollPaddingRect.top : scrollPaddingRect.left;
@@ -352,8 +358,13 @@
 
       <method name="_getScrollableElements">
         <body><![CDATA[
-          var nodes = this.hasChildNodes() ?
-                        this.childNodes : document.getBindingParent(this).childNodes;
+          var nodes = this.childNodes;
+          if (nodes.length == 1 &&
+              nodes[0].localName == "children" &&
+              nodes[0].namespaceURI == "http://www.mozilla.org/xbl") {
+            nodes = document.getBindingParent(this).childNodes;
+          }
+
           return Array.filter(nodes, this._canScrollToElement, this);
         ]]></body>
       </method>

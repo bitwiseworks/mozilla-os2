@@ -9,3 +9,32 @@ EXTRA_COMPONENTS += [
     'nsSessionStore.js',
     'nsSessionStore.manifest',
 ]
+
+JS_MODULES_PATH = 'modules/sessionstore'
+
+EXTRA_JS_MODULES = [
+    'ContentRestore.jsm',
+    'DocShellCapabilities.jsm',
+    'FrameTree.jsm',
+    'GlobalState.jsm',
+    'PageStyle.jsm',
+    'PrivacyFilter.jsm',
+    'PrivacyLevel.jsm',
+    'RecentlyClosedTabsAndWindowsMenuUtils.jsm',
+    'SessionCookies.jsm',
+    'SessionFile.jsm',
+    'SessionHistory.jsm',
+    'SessionMigration.jsm',
+    'SessionStorage.jsm',
+    'SessionWorker.js',
+    'TabAttributes.jsm',
+    'TabState.jsm',
+    'TabStateCache.jsm',
+    'Utils.jsm',
+]
+
+EXTRA_PP_JS_MODULES += [
+    'SessionSaver.jsm',
+    'SessionStore.jsm',
+]
+

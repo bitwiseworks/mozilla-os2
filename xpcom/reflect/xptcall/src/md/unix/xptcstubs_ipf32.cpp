@@ -16,7 +16,7 @@
 
 /* Implement shared vtbl methods. */
 
-extern "C" nsresult
+extern "C" nsresult ATTRIBUTE_USED
 PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex,
   uint64_t* intargs, uint64_t* floatargs, uint64_t* restargs)
 {
@@ -24,7 +24,7 @@ PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex,
 #define PARAM_BUFFER_COUNT     16
 
   nsXPTCMiniVariant paramBuffer[PARAM_BUFFER_COUNT];
-  nsXPTCMiniVariant* dispatchParams = NULL;
+  nsXPTCMiniVariant* dispatchParams = nullptr;
   const nsXPTMethodInfo* info;
   nsresult result = NS_ERROR_FAILURE;
   uint64_t* iargs = intargs;

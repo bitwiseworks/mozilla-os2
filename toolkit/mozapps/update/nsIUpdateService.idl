@@ -231,6 +231,7 @@ interface nsIUpdate : nsISupports
    *   "pending-service"    The update is ready to be applied with the service.
    *   "applying"           The update is being applied.
    *   "applied"            The update is ready to be switched to.
+   *   "applied-os"         The update is OS update and to be installed.
    *   "applied-service"    The update is ready to be switched to with the service.
    *   "succeeded"          The update was successfully applied.
    *   "download-failed"    The update failed to be downloaded.
@@ -351,9 +352,15 @@ interface nsIUpdateChecker : nsISupports
  * background update checks and provides utilities for selecting and
  * downloading update patches.
  */
-[scriptable, uuid(814f185b-cac6-494b-8fd6-63cf7380d857)]
+[scriptable, uuid(9f9b51f5-340e-47ce-85ae-9eb077c6cd39)]
 interface nsIApplicationUpdateService : nsISupports
 {
+  /**
+   * Checks for available updates in the background using the listener provided
+   * by the application update service for background checks.
+   */
+  void checkForBackgroundUpdates();
+
   /**
    * The Update Checker used for background update checking.
    */
@@ -394,6 +401,14 @@ interface nsIApplicationUpdateService : nsISupports
   AString downloadUpdate(in nsIUpdate update, in boolean background);
 
   /**
+   * Apply the OS update which has been downloaded and staged as applied.
+   * @param   update 
+   *          The update has been downloaded and staged as applied.
+   * @throws  if the update object is not an OS update.
+   */
+  void applyOsUpdate(in nsIUpdate update);
+
+  /**
    * Get the Active Updates directory
    * @returns An nsIFile for the active updates directory.
    */
@@ -418,8 +433,10 @@ interface nsIApplicationUpdateService : nsISupports
 
   /**
    * Whether or not the Update Service can download and install updates.
-   * This is a function of whether or not the current user has access
-   * privileges to the install directory.
+   * On Windows, this is a function of whether or not the maintenance service
+   * is installed and enabled. On other systems, and as a fallback on Windows,
+   * this depends on whether the current user has write access to the install
+   * directory.
    */
   readonly attribute boolean canApplyUpdates;
 

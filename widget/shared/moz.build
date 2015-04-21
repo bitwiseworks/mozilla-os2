@@ -7,10 +7,14 @@
 if CONFIG['MOZ_X11']:
     PARALLEL_DIRS += ['x11']
 
-MODULE = 'widget'
-
-CPP_SOURCES += [
-    'WidgetUtils.cpp',
+UNIFIED_SOURCES += [
     'nsShmImage.cpp',
+    'SharedWidgetUtils.cpp',
+    'WidgetEventImpl.cpp',
 ]
 
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'xpwidgets_s'

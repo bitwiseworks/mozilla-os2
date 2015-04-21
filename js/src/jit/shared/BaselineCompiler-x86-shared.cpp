@@ -4,12 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "BaselineCompiler-x86-shared.h"
+#include "jit/shared/BaselineCompiler-x86-shared.h"
 
 using namespace js;
 using namespace js::jit;
 
-BaselineCompilerX86Shared::BaselineCompilerX86Shared(JSContext *cx, HandleScript script)
-  : BaselineCompilerShared(cx, script)
+BaselineCompilerX86Shared::BaselineCompilerX86Shared(JSContext *cx, TempAllocator &alloc, JSScript *script)
+  : BaselineCompilerShared(cx, alloc, script)
 {
 }

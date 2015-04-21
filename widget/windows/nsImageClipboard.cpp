@@ -3,9 +3,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
  
- 
-#include "nsITransferable.h"
 #include "nsImageClipboard.h"
+
+#include "gfxUtils.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/DataSurfaceHelpers.h"
+#include "mozilla/RefPtr.h"
+#include "nsITransferable.h"
 #include "nsGfxCIID.h"
 #include "nsMemory.h"
 #include "prmem.h"
@@ -14,6 +18,9 @@
 #include "nsComponentManagerUtils.h"
 
 #define BFH_LENGTH 14
+
+using namespace mozilla;
+using namespace mozilla::gfx;
 
 /* Things To Do 11/8/00
 
@@ -116,14 +123,25 @@ nsImageToClipboard::CreateFromImage ( imgIContainer* inImage, HANDLE* outBitmap 
     nsresult rv;
     *outBitmap = nullptr;
 
-    nsRefPtr<gfxASurface> surface;
-    inImage->GetFrame(imgIContainer::FRAME_CURRENT,
-                      imgIContainer::FLAG_SYNC_DECODE,
-                      getter_AddRefs(surface));
+    RefPtr<SourceSurface> surface =
+      inImage->GetFrame(imgIContainer::FRAME_CURRENT,
+                        imgIContainer::FLAG_SYNC_DECODE);
     NS_ENSURE_TRUE(surface, NS_ERROR_FAILURE);
 
-    nsRefPtr<gfxImageSurface> frame(surface->GetAsReadableARGB32ImageSurface());
-    NS_ENSURE_TRUE(frame, NS_ERROR_FAILURE);
+    MOZ_ASSERT(surface->GetFormat() == SurfaceFormat::B8G8R8A8 ||
+               surface->GetFormat() == SurfaceFormat::B8G8R8X8);
+
+    RefPtr<DataSourceSurface> dataSurface;
+    if (surface->GetFormat() == SurfaceFormat::B8G8R8A8) {
+      dataSurface = surface->GetDataSurface();
+    } else {
+      // XXXjwatt Bug 995923 - get rid of this copy and handle B8G8R8X8
+      // directly below once bug 995807 is fixed.
+      dataSurface = gfxUtils::
+        CopySurfaceToDataSourceSurfaceWithFormat(surface,
+                                                 SurfaceFormat::B8G8R8A8);
+    }
+    NS_ENSURE_TRUE(dataSurface, NS_ERROR_FAILURE);
 
     nsCOMPtr<imgIEncoder> encoder = do_CreateInstance("@mozilla.org/image/encoder;2?type=image/bmp", &rv);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -135,22 +153,33 @@ nsImageToClipboard::CreateFromImage ( imgIContainer* inImage, HANDLE* outBitmap 
     } else {
       options.AppendLiteral("version=3;bpp=");
     }
-    switch (frame->Format()) {
-    case gfxASurface::ImageFormatARGB32:
+    switch (dataSurface->GetFormat()) {
+    case SurfaceFormat::B8G8R8A8:
         format = imgIEncoder::INPUT_FORMAT_HOSTARGB;
         options.AppendInt(32);
         break;
-    case gfxASurface::ImageFormatRGB24:
+#if 0
+    // XXXjwatt Bug 995923 - fix |format| and reenable once bug 995807 is fixed.
+    case SurfaceFormat::B8G8R8X8:
         format = imgIEncoder::INPUT_FORMAT_RGB;
         options.AppendInt(24);
         break;
+#endif
     default:
+        NS_NOTREACHED("Unexpected surface format");
         return NS_ERROR_INVALID_ARG;  
     }
 
-    rv = encoder->InitFromData(frame->Data(), 0, frame->Width(),
-                               frame->Height(), frame->Stride(),
+    DataSourceSurface::MappedSurface map;
+    bool mappedOK = dataSurface->Map(DataSourceSurface::MapType::READ, &map);
+    NS_ENSURE_TRUE(mappedOK, NS_ERROR_FAILURE);
+
+    rv = encoder->InitFromData(map.mData, 0,
+                               dataSurface->GetSize().width,
+                               dataSurface->GetSize().height,
+                               map.mStride,
                                format, options);
+    dataSurface->Unmap();
     NS_ENSURE_SUCCESS(rv, rv);
 
     uint32_t size;

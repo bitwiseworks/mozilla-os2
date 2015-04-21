@@ -24,7 +24,11 @@
     <content>
       <xul:stringbundle src="chrome://browser/locale/search.properties"
                         anonid="searchbar-stringbundle"/>
-
+      <!--
+      There is a dependency between "maxrows" attribute and
+      "SuggestAutoComplete._historyLimit" (nsSearchSuggestions.js). Changing
+      one of them requires changing the other one.
+      -->
       <xul:textbox class="searchbar-textbox"
                    anonid="searchbar-textbox"
                    type="autocomplete"
@@ -38,6 +42,11 @@
                    showcommentcolumn="true"
                    tabscrolling="true"
                    xbl:inherits="disabled,disableautocomplete,searchengine,src,newlines">
+        <!--
+        Empty <box> to properly position the icon within the autocomplete
+        binding's anonymous children (the autocomplete binding positions <box>
+        children differently)
+        -->
         <xul:box>
           <xul:button class="searchbar-engine-button"
                       type="menu"
@@ -75,9 +84,13 @@
                          .getService(Components.interfaces.nsIObserverService);
         os.addObserver(this, "browser-search-engine-modified", false);
 
-        this._addedObserver = true;
+        this._initialized = true;
 
         this.searchService.init((function search_init_cb(aStatus) {
+          // Bail out if the binding's been destroyed
+          if (!this._initialized)
+            return;
+
           if (Components.isSuccessCode(aStatus)) {
             // Refresh the display (updating icon, etc)
             this.updateDisplay();
@@ -88,11 +101,12 @@
       ]]></constructor>
 
       <destructor><![CDATA[
-        if (this._addedObserver) {
+        if (this._initialized) {
+          this._initialized = false;
+
           var os = Components.classes["@mozilla.org/observer-service;1"]
                              .getService(Components.interfaces.nsIObserverService);
           os.removeObserver(this, "browser-search-engine-modified");
-          this._addedObserver = false;
         }
 
         // Make sure to break the cycle from _textbox to us. Otherwise we leak
@@ -478,8 +492,8 @@
           }
           
           // null parameter below specifies HTML response for search
-          var submission = this.currentEngine.getSubmission(aData);
-          BrowserSearch.recordSearchInHealthReport(this.currentEngine.name, "searchbar");
+          var submission = this.currentEngine.getSubmission(aData, null, "searchbar");
+          BrowserSearch.recordSearchInHealthReport(this.currentEngine, "searchbar");
           openUILinkIn(submission.uri.spec, aWhere, null, submission.postData);
         ]]></body>
       </method>
@@ -527,14 +541,14 @@
         var engine = this.currentEngine;
         var connector =
             Services.io.QueryInterface(Components.interfaces.nsISpeculativeConnect);
-        var searchURI = engine.getSubmission("dummy").uri;
+        var searchURI = engine.getSubmission("dummy", null, "searchbar").uri;
         let callbacks = window.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
                               .getInterface(Components.interfaces.nsIWebNavigation)
                               .QueryInterface(Components.interfaces.nsILoadContext);
         connector.speculativeConnect(searchURI, callbacks);
 
         if (engine.supportsResponseType(SUGGEST_TYPE)) {
-          var suggestURI = engine.getSubmission("dummy", SUGGEST_TYPE).uri;
+          var suggestURI = engine.getSubmission("dummy", SUGGEST_TYPE, "searchbar").uri;
           if (suggestURI.prePath != searchURI.prePath)
             connector.speculativeConnect(suggestURI, callbacks);
         }

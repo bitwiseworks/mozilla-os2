@@ -134,8 +134,8 @@ include = """
 #endif
 """
 
-jspubtd_include = """
-#include "jspubtd.h"
+jsvalue_include = """
+#include "js/Value.h"
 """
 
 infallible_includes = """
@@ -173,7 +173,7 @@ def print_header(idl, fd, filename):
         fd.write(include % {'basename': idl_basename(inc.filename)})
 
     if idl.needsJSTypes():
-        fd.write(jspubtd_include)
+        fd.write(jsvalue_include)
 
     # Include some extra files if any attributes are infallible.
     for iface in [p for p in idl.productions if p.kind == 'interface']:
@@ -267,7 +267,7 @@ protected:
 };
 
 /* Implementation file */
-NS_IMPL_ISUPPORTS1(%(implclass)s, %(name)s)
+NS_IMPL_ISUPPORTS(%(implclass)s, %(name)s)
 
 %(implclass)s::%(implclass)s()
 {

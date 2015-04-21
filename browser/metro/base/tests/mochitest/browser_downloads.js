@@ -47,7 +47,7 @@ function equalNumbers(){
 }
 
 function getPromisedDbResult(aStatement) {
-  let dbConnection = Downloads.manager.DBConnection;
+  let dbConnection = MetroDownloadsView.manager.DBConnection;
   let statement = ("string" == typeof aStatement) ?
         dbConnection.createAsyncStatement(
           aStatement
@@ -112,17 +112,14 @@ let gDownloadRowTemplate = {
 // Test Infrastructure
 
 function test() {
-  DownloadsPanelView._view.clearDownloads();
-  PanelUI.show("downloads-container");
   runTests();
 }
 
 /////////////////////////////////////
 // shared test setup
 function resetDownloads(){
-  var defd = Promise.defer();
-  // do the reset, resolve the defd when done
-    // TODO (sfoster) clear out downloads db, reset relevant state
+  // clear out existing and any pending downloads in the db
+  // returns a promise
 
   let promisedResult = getPromisedDbResult(
     "DELETE FROM moz_downloads"
@@ -132,7 +129,7 @@ function resetDownloads(){
     // Services.prefs.clearUserPref("browser.download.panel.shown");
 
     // Ensure that data is unloaded.
-    let dlMgr = Downloads.manager;
+    let dlMgr = MetroDownloadsView.manager;
     let dlsToRemove = [];
     // Clear all completed/cancelled downloads
     dlMgr.cleanUp();
@@ -190,7 +187,7 @@ function addDownloadRow(aDataRow) {
 
 function gen_addDownloadRows(aDataRows){
   if (!aDataRows.length) {
-    yield;
+    yield null;
   }
 
   try {
@@ -213,43 +210,11 @@ function gen_addDownloadRows(aDataRows){
 /////////////////////////////////////
 // Test implementations
 
-/**
- * Test that:
- *  view can represent all possible download states
- *  clearDownloads does in fact empty the view
- *  addDownload adds an item, to the right place
- *  removeDownload removes an item, leaving the view in the correct state
- */
-gTests.push({
-  desc: "UI sanity check",
-  run: function(){
-
-    ok(document.getElementById('downloads-list'), "Downloads panel grid is present");
-    ok(DownloadsPanelView, "Downloads panel object is present");
-
-    PanelUI.show('downloads-container');
-    ok(DownloadsPanelView.visible, "Downloads panel is visible after being shown");
-  }
-});
-
 gTests.push({
   desc: "zero downloads",
   run: function () {
-
     yield resetDownloads();
-
-    let downloadslist = document.getElementById("downloads-list");
-
-    // wait for the richgrid to announce its readiness
-    // .. fail a test if the timeout is exceeded
-    let isReady = waitForEvent(downloadslist, "DownloadsReady", 2000);
-    // tickle the view to cause it to refresh itself
-    DownloadsPanelView._view.getDownloads();
-
-    yield isReady;
-
-    let count = downloadslist.children.length;
-    is(count, 0, "Zero items in grid view with empty downloads db");
+    todo(false, "Test there are no visible notifications with an empty db.");
   }
 });
 
@@ -272,80 +237,35 @@ gTests.push({
       { endTime: 1180493839859232, state: nsIDM.DOWNLOAD_CANCELED },
       { endTime: 1180493839859231, state: nsIDM.DOWNLOAD_BLOCKED_PARENTAL },
       { endTime: 1180493839859230, state: nsIDM.DOWNLOAD_DIRTY },
-      { endTime: 1180493839859229, state: nsIDM.DOWNLOAD_BLOCKED_POLICY },
+      { endTime: 1180493839859229, state: nsIDM.DOWNLOAD_BLOCKED_POLICY }
     ];
 
     yield resetDownloads();
-    DownloadsPanelView._view.getDownloads();
-
-    // NB: beware display limits which might cause mismatch btw. rendered item and db rows
 
     try {
       // Populate the downloads database with the data required by this test.
       // we're going to add stuff to the downloads db.
       yield spawn( gen_addDownloadRows( DownloadData ) );
 
-      // Test item data and count.  This also tests the ordering of the display.
-      let downloadslist = document.getElementById("downloads-list");
-      // wait for the richgrid to announce its readiness
-      // .. fail a test if the timeout is exceeded
-      let isReady = waitForEvent(downloadslist, "DownloadsReady", 2000);
+      todo( false, "Check that MetroDownloadsView._progressNotificationInfo and MetroDownloadsView._downloadCount \
+        have the correct length (DownloadData.length) \
+        May also test that the correct notifications show up for various states.");
 
-      // tickle the view to cause it to refresh itself
-      DownloadsPanelView._view.getDownloads();
-
-      yield isReady;
-
-      if (!isReady || isReady instanceof Error){
-        ok(false, "DownloadsReady event never fired");
-      }
-
-      is(downloadslist.children.length, DownloadData.length,
-         "There is the correct number of richlistitems");
-
-      for (let i = 0; i < downloadslist.children.length; i++) {
-        let element = downloadslist.children[i];
-        let id = element.getAttribute("downloadId");
-        let dataItem = Downloads.manager.getDownload(id); // nsIDownload object
-
-        ok( equalStrings(
-              element.getAttribute("name"),
-              dataItem.displayName,
-              DownloadData[i].name
-            ), "Download names match up");
-
-        ok( equalNumbers(
-                element.getAttribute("state"),
-                dataItem.state,
-                DownloadData[i].state
-            ), "Download states match up");
-
-        ok( equalStrings(
-              element.getAttribute("target"),
-              dataItem.target.spec,
-              DownloadData[i].target
-            ), "Download targets match up");
-
-        if (DownloadData[i].source && dataItem.referrer){
-          ok( equalStrings(
-                dataItem.referrer.spec,
-                DownloadData[i].source
-              ), "Download sources match up");
-        }
-      }
+      todo(false, "Iterate through download objects in MetroDownloadsView._progressNotificationInfo \
+        and confirm that the downloads they refer to are the same as those in \
+        DownloadData.");
     } catch(e) {
       info("Show downloads, some error: " + e);
     }
     finally {
       // Clean up when the test finishes.
-      DownloadsPanelView._view.clearDownloads();
       yield resetDownloads();
     }
   }
 });
 
 /**
- * Make sure the downloads can be removed with the expected result on the panel and its listing
+ * Make sure the downloads can be removed with the expected result on the notifications
  */
 gTests.push({
   desc: "Remove downloads",
@@ -358,25 +278,10 @@ gTests.push({
     ];
 
     yield resetDownloads();
-    DownloadsPanelView._view.getDownloads();
 
     try {
       // Populate the downloads database with the data required by this test.
       yield spawn( gen_addDownloadRows( DownloadData ) );
-
-      // Test item data and count.  This also tests the ordering of the display.
-      let downloadslist = document.getElementById("downloads-list");
-      // wait for the richgrid to announce its readiness
-      // .. fail a test if the timeout is exceeded
-      let isReady = waitForEvent(downloadslist, "DownloadsReady", 2000);
-      // tickle the view to cause it to refresh itself
-      DownloadsPanelView._view.getDownloads();
-
-      yield isReady;
-
-      if (!isReady || isReady instanceof Error){
-        is(false, "DownloadsReady event never fired");
-      }
 
       let downloadRows = null,
           promisedDownloads;
@@ -394,15 +299,9 @@ gTests.push({
 
       is(downloadRows.length, 3, "Correct number of downloads in the db before removal");
 
-      // remove the first one
-      let itemNode = downloadslist.children[0];
-      let id = itemNode.getAttribute("downloadId");
-      // check the file exists
-      let download = Downloads.manager.getDownload( id );
-      let file = download.targetFile;
-      ok(file && file.exists());
+      todo(false, "Get some download from MetroDownloadsView._progressNotificationInfo, \
+        confirm that its file exists, then remove it.");
 
-      Downloads.manager.removeDownload( id );
       // remove is async(?), wait a bit
       yield waitForMs(0);
 
@@ -419,21 +318,72 @@ gTests.push({
       });
       yield promisedDownloads;
 
-      is(downloadRows.length, 2, "Correct number of downloads in the db after removal");
-
-      is(2, downloadslist.children.length,
-         "Removing a download updates the items list");
-      ok(file && file.exists(), "File still exists after download removal");
+      todo(false, "confirm that the removed download is no longer in the database \
+        and its file no longer exists.");
 
     } catch(e) {
       info("Remove downloads, some error: " + e);
     }
     finally {
       // Clean up when the test finishes.
-      DownloadsPanelView._view.clearDownloads();
       yield resetDownloads();
     }
   }
 });
 
+/**
+ * Make sure the cancelled/aborted downloads are handled correctly.
+ */
+gTests.push({
+  desc: "Cancel/Abort Downloads",
+  run: function(){
+    todo(false, "Ensure that a cancelled/aborted download is in the correct state \
+      including correct values for state variables (e.g. _downloadCount, _downloadsInProgress) \
+      and the existence of the downloaded file.");
+  }
+});
 
+/**
+ * Make sure download notifications are moved when we close tabs.
+ */
+gTests.push({
+  desc: "Download notifications in closed tabs",
+  setUp: function() {
+    // put up a couple notifications on the initial tab
+    let notificationBox = Browser.getNotificationBox();
+    notificationBox.appendNotification("not important", "low-priority-thing", "", notificationBox.PRIORITY_INFO_LOW, []);
+    notificationBox.appendNotification("so important", "high-priority-thing", "", notificationBox.PRIORITY_CRITICAL_HIGH, []);
+
+    // open a new tab where we'll conduct the test
+    yield addTab("about:mozilla");
+  },
+  run: function(){
+    let notificationBox = Browser.getNotificationBox();
+    let notn = MetroDownloadsView.showNotification("download-progress", "test message", [],
+           notificationBox.PRIORITY_WARNING_LOW);
+    Browser.closeTab(Browser.selectedTab);
+
+    yield waitForEvent(Elements.tabList, "TabRemove");
+
+    // expected behavior when a tab is closed while a download notification is showing:
+    // * the notification remains visible as long as a next tab/browser exists
+    // * normal rules about priority apply
+    // * notifications - including any pre-existing ones - display in expected order
+    let nextBox = Browser.getNotificationBox();
+    let currentNotification;
+
+    ok(nextBox.getNotificationWithValue("download-progress"), "notification was moved to next tab");
+
+    currentNotification = nextBox.currentNotification;
+    is(currentNotification.value, "high-priority-thing", "high priority notification is current");
+    currentNotification.close();
+
+    currentNotification = nextBox.currentNotification;
+    is(currentNotification.value, "download-progress", "download notification is next");
+    currentNotification.close();
+
+    currentNotification = nextBox.currentNotification;
+    is(currentNotification.value, "low-priority-thing", "low priority notification is next");
+    currentNotification.close();
+  }
+});

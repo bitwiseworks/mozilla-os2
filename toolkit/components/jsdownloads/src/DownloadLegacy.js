@@ -29,7 +29,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
                                   "resource://gre/modules/Downloads.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-                                  "resource://gre/modules/commonjs/sdk/core/promise.js");
+                                  "resource://gre/modules/Promise.jsm");
 
 ////////////////////////////////////////////////////////////////////////////////
 //// DownloadLegacyTransfer
@@ -83,13 +83,68 @@ DownloadLegacyTransfer.prototype = {
   onStateChange: function DLT_onStateChange(aWebProgress, aRequest, aStateFlags,
                                             aStatus)
   {
-    // Detect when the last file has been received, or the download failed.
-    if ((aStateFlags & Ci.nsIWebProgressListener.STATE_STOP) &&
+    if (!Components.isSuccessCode(aStatus)) {
+      this._componentFailed = true;
+    }
+
+    if ((aStateFlags & Ci.nsIWebProgressListener.STATE_START) &&
         (aStateFlags & Ci.nsIWebProgressListener.STATE_IS_NETWORK)) {
-      // Wait for the associated Download object to be available.
-      this._deferDownload.promise.then(function DLT_OSC_onDownload(aDownload) {
-        aDownload.saver.onTransferFinished(aRequest, aStatus);
+
+      // If the request's response has been blocked by Windows Parental Controls
+      // with an HTTP 450 error code, we must cancel the request synchronously.
+      let blockedByParentalControls = aRequest instanceof Ci.nsIHttpChannel &&
+                                      aRequest.responseStatus == 450;
+      if (blockedByParentalControls) {
+        aRequest.cancel(Cr.NS_BINDING_ABORTED);
+      }
+
+      // The main request has just started.  Wait for the associated Download
+      // object to be available before notifying.
+      this._deferDownload.promise.then(download => {
+        // If the request was blocked, now that we have the download object we
+        // should set a flag that can be retrieved later when handling the
+        // cancellation so that the proper error can be thrown.
+        if (blockedByParentalControls) {
+          download._blockedByParentalControls = true;
+        }
+
+        download.saver.onTransferStarted(
+                         aRequest,
+                         this._cancelable instanceof Ci.nsIHelperAppLauncher);
+
+        // To handle asynchronous cancellation properly, we should hook up the
+        // handler only after we have been notified that the main request
+        // started.  We will wait until the main request stopped before
+        // notifying that the download has been canceled.  Since the request has
+        // not completed yet, deferCanceled is guaranteed to be set.
+        return download.saver.deferCanceled.promise.then(() => {
+          // Only cancel if the object executing the download is still running.
+          if (this._cancelable && !this._componentFailed) {
+            this._cancelable.cancel(Cr.NS_ERROR_ABORT);
+            if (this._cancelable instanceof Ci.nsIWebBrowserPersist) {
+              // This component will not send the STATE_STOP notification.
+              download.saver.onTransferFinished(aRequest, Cr.NS_ERROR_ABORT);
+              this._cancelable = null;
+            }
+          }
+        });
       }).then(null, Cu.reportError);
+    } else if ((aStateFlags & Ci.nsIWebProgressListener.STATE_STOP) &&
+        (aStateFlags & Ci.nsIWebProgressListener.STATE_IS_NETWORK)) {
+      // The last file has been received, or the download failed.  Wait for the
+      // associated Download object to be available before notifying.
+      this._deferDownload.promise.then(download => {
+        // At this point, the hash has been set and we need to copy it to the
+        // DownloadSaver.
+        if (Components.isSuccessCode(aStatus)) {
+          download.saver.setSha256Hash(this._sha256Hash);
+          download.saver.setSignatureInfo(this._signatureInfo);
+        }
+        download.saver.onTransferFinished(aRequest, aStatus);
+      }).then(null, Cu.reportError);
+
+      // Release the reference to the component executing the download.
+      this._cancelable = null;
     }
   },
 
@@ -99,9 +154,9 @@ DownloadLegacyTransfer.prototype = {
                                                   aCurTotalProgress,
                                                   aMaxTotalProgress)
   {
-    return onProgressChange64(aWebProgress, aRequest, aCurSelfProgress,
-                              aMaxSelfProgress, aCurTotalProgress,
-                              aMaxTotalProgress);
+    this.onProgressChange64(aWebProgress, aRequest, aCurSelfProgress,
+                            aMaxSelfProgress, aCurTotalProgress,
+                            aMaxTotalProgress);
   },
 
   onLocationChange: function () { },
@@ -113,6 +168,8 @@ DownloadLegacyTransfer.prototype = {
     // change, but if no network request actually started, it is possible that
     // we only receive a status change with an error status code.
     if (!Components.isSuccessCode(aStatus)) {
+      this._componentFailed = true;
+
       // Wait for the associated Download object to be available.
       this._deferDownload.promise.then(function DLT_OSC_onDownload(aDownload) {
         aDownload.saver.onTransferFinished(aRequest, aStatus);
@@ -151,34 +208,58 @@ DownloadLegacyTransfer.prototype = {
   init: function DLT_init(aSource, aTarget, aDisplayName, aMIMEInfo, aStartTime,
                           aTempFile, aCancelable, aIsPrivate)
   {
+    this._cancelable = aCancelable;
+
+    let launchWhenSucceeded = false, contentType = null, launcherPath = null;
+
+    if (aMIMEInfo instanceof Ci.nsIMIMEInfo) {
+      launchWhenSucceeded =
+                aMIMEInfo.preferredAction != Ci.nsIMIMEInfo.saveToDisk;
+      contentType = aMIMEInfo.type;
+
+      let appHandler = aMIMEInfo.preferredApplicationHandler;
+      if (aMIMEInfo.preferredAction == Ci.nsIMIMEInfo.useHelperApp &&
+          appHandler instanceof Ci.nsILocalHandlerApp) {
+        launcherPath = appHandler.executable.path;
+      }
+    }
+
     // Create a new Download object associated to a DownloadLegacySaver, and
     // wait for it to be available.  This operation may cause the entire
     // download system to initialize before the object is created.
     Downloads.createDownload({
-      source: { uri: aSource, isPrivate: aIsPrivate },
-      target: { file: aTarget.QueryInterface(Ci.nsIFileURL).file },
-      saver: { type: "legacy" },
+      source: { url: aSource.spec, isPrivate: aIsPrivate },
+      target: { path: aTarget.QueryInterface(Ci.nsIFileURL).file.path,
+                partFilePath: aTempFile && aTempFile.path },
+      saver: "legacy",
+      launchWhenSucceeded: launchWhenSucceeded,
+      contentType: contentType,
+      launcherPath: launcherPath
     }).then(function DLT_I_onDownload(aDownload) {
-      // Now that the saver is available, hook up the cancellation handler.
-      aDownload.saver.deferCanceled.promise
-                     .then(function () aCancelable.cancel(Cr.NS_ERROR_ABORT))
-                     .then(null, Cu.reportError);
+      // Legacy components keep partial data when they use a ".part" file.
+      if (aTempFile) {
+        aDownload.tryToKeepPartialData = true;
+      }
 
-      // Start the download before allowing it to be controlled.
-      aDownload.start();
+      // Start the download before allowing it to be controlled.  Ignore errors.
+      aDownload.start().then(null, () => {});
 
       // Start processing all the other events received through nsITransfer.
       this._deferDownload.resolve(aDownload);
 
       // Add the download to the list, allowing it to be seen and canceled.
-      let list;
-      if (aIsPrivate) {
-        list = Downloads.getPrivateDownloadList();
-      } else {
-        list = Downloads.getPublicDownloadList();
-      }
-      return list.then(function (aList) aList.add(aDownload));
+      return Downloads.getList(Downloads.ALL).then(list => list.add(aDownload));
     }.bind(this)).then(null, Cu.reportError);
+  },
+
+  setSha256Hash: function (hash)
+  {
+    this._sha256Hash = hash;
+  },
+
+  setSignatureInfo: function (signatureInfo)
+  {
+    this._signatureInfo = signatureInfo;
   },
 
   //////////////////////////////////////////////////////////////////////////////
@@ -189,6 +270,29 @@ DownloadLegacyTransfer.prototype = {
    * object associated with this nsITransfer instance, when it is available.
    */
   _deferDownload: null,
+
+  /**
+   * Reference to the component that is executing the download.  This component
+   * allows cancellation through its nsICancelable interface.
+   */
+  _cancelable: null,
+
+  /**
+   * Indicates that the component that executes the download has notified a
+   * failure condition.  In this case, we should never use the component methods
+   * that cancel the download.
+   */
+  _componentFailed: false,
+
+  /**
+   * Save the SHA-256 hash in raw bytes of the downloaded file.
+   */
+  _sha256Hash: null,
+
+  /**
+   * Save the signature info in a serialized protobuf of the downloaded file.
+   */
+  _signatureInfo: null,
 };
 
 ////////////////////////////////////////////////////////////////////////////////

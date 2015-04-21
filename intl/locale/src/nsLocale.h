@@ -20,14 +20,13 @@
 #ifndef nsLocale_h__
 #define nsLocale_h__
 
-#include "nsString.h"
-#include "nsTArray.h"
+#include "nsStringFwd.h"
 #include "nsILocale.h"
 #include "plhash.h"
 
 class nsLocale : public nsILocale {
 	friend class nsLocaleService;
-	NS_DECL_ISUPPORTS
+	NS_DECL_THREADSAFE_ISUPPORTS
 
 public:
 	nsLocale(void);

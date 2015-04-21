@@ -5,23 +5,22 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 XPIDL_SOURCES += [
-    'nsISOCKSSocketInfo.idl',
-    'nsISSLSocketControl.idl',
     'nsISocketProvider.idl',
     'nsISocketProviderService.idl',
+    'nsISOCKSSocketInfo.idl',
+    'nsISSLSocketControl.idl',
     'nsITransportSecurityInfo.idl',
 ]
 
 XPIDL_MODULE = 'necko_socket'
 
-MODULE = 'necko'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
+    'nsSocketProviderService.cpp',
     'nsSOCKSIOLayer.cpp',
     'nsSOCKSSocketProvider.cpp',
-    'nsSocketProviderService.cpp',
     'nsUDPSocketProvider.cpp',
 ]
 
-LIBRARY_NAME = 'neckosocket_s'
+FAIL_ON_WARNINGS = True
 
+FINAL_LIBRARY = 'necko'

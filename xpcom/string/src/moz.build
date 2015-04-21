@@ -4,9 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'string'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsDependentString.cpp',
     'nsDependentSubstring.cpp',
     'nsPromiseFlatString.cpp',
@@ -21,9 +19,13 @@ CPP_SOURCES += [
 # Are we targeting x86 or x86-64?  If so, compile the SSE2 functions for
 # nsUTF8Utils.cpp.
 if CONFIG['INTEL_ARCHITECTURE']:
-    CPP_SOURCES += [
-        'nsUTF8UtilsSSE2.cpp',
-    ]
+    SOURCES += ['nsUTF8UtilsSSE2.cpp']
+    SOURCES['nsUTF8UtilsSSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
 
-LIBRARY_NAME = 'string_s'
+LOCAL_INCLUDES += [
+    '/mfbt/double-conversion',
+]
 
+MSVC_ENABLE_PGO = True
+
+FINAL_LIBRARY = 'xpcom_core'

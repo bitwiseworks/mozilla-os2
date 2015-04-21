@@ -11,7 +11,8 @@ function test()
   const TEST_URI = "data:text/html;charset=utf8,<p>hello world! bug 874061" +
                    "<button onclick='console.log(\"foobar bug 874061\");" +
                    "fooBazBaz.yummy()'>click</button>";
-  let ConsoleAPIStorage = Cu.import("resource://gre/modules/ConsoleAPIStorage.jsm", {}).ConsoleAPIStorage;
+  let ConsoleAPIStorage = Cc["@mozilla.org/consoleAPI-storage;1"]
+                            .getService(Ci.nsIConsoleAPIStorage);
   let privateWindow, privateBrowser, privateTab, privateContent;
   let hud, expectedMessages, nonPrivateMessage;
 
@@ -132,7 +133,7 @@ function test()
     info("testBrowserConsole()");
     closeConsole(privateTab, () => {
       info("web console closed");
-      privateWindow.HUDConsoleUI.toggleBrowserConsole().then(onBrowserConsoleOpen);
+      privateWindow.HUDService.toggleBrowserConsole().then(onBrowserConsoleOpen);
     });
   }
 
@@ -171,10 +172,10 @@ function test()
       checkNoPrivateMessages();
 
       info("close the browser console");
-      privateWindow.HUDConsoleUI.toggleBrowserConsole().then(() => {
+      privateWindow.HUDService.toggleBrowserConsole().then(() => {
         info("reopen the browser console");
         executeSoon(() =>
-          HUDConsoleUI.toggleBrowserConsole().then(onBrowserConsoleReopen));
+          HUDService.toggleBrowserConsole().then(onBrowserConsoleReopen));
       });
     });
     privateWindow.BrowserTryToCloseWindow();

@@ -4,16 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#pragma once
+#ifndef mozilla_dom_SpeechSynthesisUtterance_h
+#define mozilla_dom_SpeechSynthesisUtterance_h
 
+#include "mozilla/DOMEventTargetHelper.h"
 #include "nsCOMPtr.h"
-#include "nsDOMEventTargetHelper.h"
 #include "nsString.h"
+#include "js/TypeDecls.h"
 
-#include "EnableSpeechSynthesisCheck.h"
 #include "nsSpeechTask.h"
-
-struct JSContext;
 
 namespace mozilla {
 namespace dom {
@@ -22,25 +21,24 @@ class SpeechSynthesisVoice;
 class SpeechSynthesis;
 class nsSynthVoiceRegistry;
 
-class SpeechSynthesisUtterance MOZ_FINAL : public nsDOMEventTargetHelper,
-                                           public EnableSpeechSynthesisCheck
+class SpeechSynthesisUtterance MOZ_FINAL : public DOMEventTargetHelper
 {
   friend class SpeechSynthesis;
   friend class nsSpeechTask;
   friend class nsSynthVoiceRegistry;
 
 public:
-  SpeechSynthesisUtterance(const nsAString& aText);
+  SpeechSynthesisUtterance(nsPIDOMWindow* aOwnerWindow, const nsAString& aText);
   virtual ~SpeechSynthesisUtterance();
 
   NS_DECL_ISUPPORTS_INHERITED
-
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SpeechSynthesisUtterance,
+                                           DOMEventTargetHelper)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
 
   nsISupports* GetParentObject() const;
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   static
   already_AddRefed<SpeechSynthesisUtterance> Constructor(GlobalObject& aGlobal,
@@ -118,3 +116,5 @@ private:
 
 } // namespace dom
 } // namespace mozilla
+
+#endif

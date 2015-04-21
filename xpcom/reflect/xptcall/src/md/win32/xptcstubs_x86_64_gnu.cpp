@@ -16,7 +16,7 @@
 #  error xptcstubs_x86_64_gnu.cpp being used unexpectedly
 #endif
 
-extern "C" nsresult
+extern "C" nsresult __attribute__((__used__))
 PrepareAndDispatch(nsXPTCStubBase * self, uint32_t methodIndex,
                    uint64_t * args, uint64_t * gprData, double *fprData)
 {
@@ -28,8 +28,8 @@ PrepareAndDispatch(nsXPTCStubBase * self, uint32_t methodIndex,
 #define PARAM_FPR_COUNT   3
 
     nsXPTCMiniVariant paramBuffer[PARAM_BUFFER_COUNT];
-    nsXPTCMiniVariant* dispatchParams = NULL;
-    const nsXPTMethodInfo* info = NULL;
+    nsXPTCMiniVariant* dispatchParams = nullptr;
+    const nsXPTMethodInfo* info = nullptr;
     uint8_t paramCount;
     uint8_t i;
     nsresult result = NS_ERROR_FAILURE;

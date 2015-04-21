@@ -21,16 +21,8 @@ HTMLLIElement::~HTMLLIElement()
 {
 }
 
-NS_IMPL_ADDREF_INHERITED(HTMLLIElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLLIElement, Element)
-
-
-// QueryInterface implementation for nsHTMLLIElement
-NS_INTERFACE_TABLE_HEAD(HTMLLIElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLLIElement, nsIDOMHTMLLIElement)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
+NS_IMPL_ISUPPORTS_INHERITED(HTMLLIElement, nsGenericHTMLElement,
+                            nsIDOMHTMLLIElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLLIElement)
 
@@ -77,9 +69,9 @@ HTMLLIElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-static void
-MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                      nsRuleData* aData)
+void
+HTMLLIElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                     nsRuleData* aData)
 {
   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(List)) {
     nsCSSValue* listStyleType = aData->ValueForListStyleType();
@@ -117,9 +109,9 @@ HTMLLIElement::GetAttributeMappingFunction() const
 }
 
 JSObject*
-HTMLLIElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLLIElement::WrapNode(JSContext *aCx)
 {
-  return HTMLLIElementBinding::Wrap(aCx, aScope, this);
+  return HTMLLIElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

@@ -4,11 +4,6 @@
 // etc--see HttpBaseChannel::IsSafeMethod).  Since no prompting is possible
 // in xpcshell, we get an error for prompts, and the request fails.
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
-
 Cu.import("resource://testing-common/httpd.js");
 
 var sSame;
@@ -17,8 +12,12 @@ var sOther;
 const BUGID = "676059";
 const OTHERBUGID = "696849";
 
-const pSame = 4444;
-const pOther = 4445;
+XPCOMUtils.defineLazyGetter(this, "pSame", function() {
+  return sSame.identity.primaryPort;
+});
+XPCOMUtils.defineLazyGetter(this, "pOther", function() {
+  return sOther.identity.primaryPort;
+});
 
 function createXHR(async, method, path)
 {
@@ -63,12 +62,12 @@ function run_test() {
 
   // same-origin target
   sSame.registerPathHandler("/bug" + BUGID + "-target", echoMethod);
-  sSame.start(pSame);
+  sSame.start(-1);
 
   // cross-origin target
   sOther = new HttpServer();
   sOther.registerPathHandler("/bug" + OTHERBUGID + "-target", echoMethod);
-  sOther.start(pOther);
+  sOther.start(-1);
 
   // format: redirectType, methodToSend, redirectedMethod, finalStatus
   //   redirectType sets the URI the initial request goes to

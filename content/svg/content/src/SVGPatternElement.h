@@ -17,7 +17,7 @@
 class nsSVGPatternFrame;
 
 nsresult NS_NewSVGPatternElement(nsIContent **aResult,
-                                 already_AddRefed<nsINodeInfo> aNodeInfo);
+                                 already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
@@ -31,10 +31,9 @@ class SVGPatternElement MOZ_FINAL : public SVGPatternElementBase
 
 protected:
   friend nsresult (::NS_NewSVGPatternElement(nsIContent **aResult,
-                                             already_AddRefed<nsINodeInfo> aNodeInfo));
-  SVGPatternElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx,
-                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+                                             already_AddRefed<nsINodeInfo>&& aNodeInfo));
+  SVGPatternElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
 
 public:
   typedef mozilla::SVGAnimatedPreserveAspectRatio SVGAnimatedPreserveAspectRatio;
@@ -56,8 +55,8 @@ public:
   // WebIDL
   already_AddRefed<SVGAnimatedRect> ViewBox();
   already_AddRefed<DOMSVGAnimatedPreserveAspectRatio> PreserveAspectRatio();
-  already_AddRefed<nsIDOMSVGAnimatedEnumeration> PatternUnits();
-  already_AddRefed<nsIDOMSVGAnimatedEnumeration> PatternContentUnits();
+  already_AddRefed<SVGAnimatedEnumeration> PatternUnits();
+  already_AddRefed<SVGAnimatedEnumeration> PatternContentUnits();
   already_AddRefed<SVGAnimatedTransformList> PatternTransform();
   already_AddRefed<SVGAnimatedLength> X();
   already_AddRefed<SVGAnimatedLength> Y();

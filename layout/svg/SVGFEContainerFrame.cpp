@@ -25,26 +25,24 @@ protected:
   SVGFEContainerFrame(nsStyleContext* aContext)
     : SVGFEContainerFrameBase(aContext)
   {
-    AddStateBits(NS_FRAME_SVG_LAYOUT | NS_STATE_SVG_NONDISPLAY_CHILD);
+    AddStateBits(NS_FRAME_SVG_LAYOUT | NS_FRAME_IS_NONDISPLAY);
   }
 
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const
+  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
     return SVGFEContainerFrameBase::IsFrameOfType(
             aFlags & ~(nsIFrame::eSVG | nsIFrame::eSVGContainer));
   }
 
-#ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const
+#ifdef DEBUG_FRAME_DUMP
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
   {
     return MakeFrameName(NS_LITERAL_STRING("SVGFEContainer"), aResult);
   }
 #endif
-
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext);
 
 #ifdef DEBUG
   virtual void Init(nsIContent* aContent,
@@ -56,13 +54,13 @@ public:
    *
    * @see nsGkAtoms::svgFEContainerFrame
    */
-  virtual nsIAtom* GetType() const;
+  virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
-  NS_IMETHOD AttributeChanged(int32_t  aNameSpaceID,
-                              nsIAtom* aAttribute,
-                              int32_t  aModType);
+  virtual nsresult AttributeChanged(int32_t  aNameSpaceID,
+                                    nsIAtom* aAttribute,
+                                    int32_t  aModType) MOZ_OVERRIDE;
 
-  virtual bool UpdateOverflow() {
+  virtual bool UpdateOverflow() MOZ_OVERRIDE {
     // We don't maintain a visual overflow rect
     return false;
   }
@@ -75,13 +73,6 @@ NS_NewSVGFEContainerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(SVGFEContainerFrame)
-
-/* virtual */ void
-SVGFEContainerFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
-{
-  SVGFEContainerFrameBase::DidSetStyleContext(aOldStyleContext);
-  nsSVGEffects::InvalidateRenderingObservers(this);
-}
 
 #ifdef DEBUG
 void
@@ -103,7 +94,7 @@ SVGFEContainerFrame::GetType() const
   return nsGkAtoms::svgFEContainerFrame;
 }
 
-NS_IMETHODIMP
+nsresult
 SVGFEContainerFrame::AttributeChanged(int32_t  aNameSpaceID,
                                       nsIAtom* aAttribute,
                                       int32_t  aModType)

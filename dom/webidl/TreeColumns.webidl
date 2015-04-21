@@ -5,6 +5,7 @@
 interface MozTreeBoxObject;
 interface MozTreeColumn;
 
+[Func="IsChromeOrXBL"]
 interface TreeColumns {
   /**
    * The tree widget for these columns.
@@ -43,7 +44,7 @@ interface TreeColumns {
   /**
    * Parametric column getters.
    */
-  getter MozTreeColumn? getNamedColumn(DOMString id);
+  getter MozTreeColumn? getNamedColumn(DOMString name);
   getter MozTreeColumn? getColumnAt(unsigned long index);
 
   /**

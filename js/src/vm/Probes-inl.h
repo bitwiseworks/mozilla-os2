@@ -19,7 +19,7 @@ namespace js {
  */
 
 inline bool
-Probes::callTrackingActive(JSContext *cx)
+probes::CallTrackingActive(JSContext *cx)
 {
 #ifdef INCLUDE_MOZILLA_DTRACE
     if (JAVASCRIPT_FUNCTION_ENTRY_ENABLED() || JAVASCRIPT_FUNCTION_RETURN_ENABLED())
@@ -33,17 +33,16 @@ Probes::callTrackingActive(JSContext *cx)
 }
 
 inline bool
-Probes::wantNativeAddressInfo(JSContext *cx)
+probes::WantNativeAddressInfo(JSContext *cx)
 {
     return (cx->reportGranularity >= JITREPORT_GRANULARITY_FUNCTION &&
             JITGranularityRequested(cx) >= JITREPORT_GRANULARITY_FUNCTION);
 }
 
 inline bool
-Probes::enterScript(JSContext *cx, JSScript *script, JSFunction *maybeFun,
-                    StackFrame *fp)
+probes::EnterScript(JSContext *cx, JSScript *script, JSFunction *maybeFun,
+                    InterpreterFrame *fp)
 {
-    bool ok = true;
 #ifdef INCLUDE_MOZILLA_DTRACE
     if (JAVASCRIPT_FUNCTION_ENTRY_ENABLED())
         DTraceEnterJSFun(cx, maybeFun, script);
@@ -54,20 +53,18 @@ Probes::enterScript(JSContext *cx, JSScript *script, JSFunction *maybeFun,
 
     JSRuntime *rt = cx->runtime();
     if (rt->spsProfiler.enabled()) {
-        rt->spsProfiler.enter(cx, script, maybeFun);
+        if (!rt->spsProfiler.enter(script, maybeFun))
+            return false;
         JS_ASSERT_IF(!fp->isGeneratorFrame(), !fp->hasPushedSPSFrame());
         fp->setPushedSPSFrame();
     }
 
-    return ok;
+    return true;
 }
 
-inline bool
-Probes::exitScript(JSContext *cx, JSScript *script, JSFunction *maybeFun,
-                   AbstractFramePtr fp)
+inline void
+probes::ExitScript(JSContext *cx, JSScript *script, JSFunction *maybeFun, bool popSPSFrame)
 {
-    bool ok = true;
-
 #ifdef INCLUDE_MOZILLA_DTRACE
     if (JAVASCRIPT_FUNCTION_RETURN_ENABLED())
         DTraceExitJSFun(cx, maybeFun, script);
@@ -76,52 +73,38 @@ Probes::exitScript(JSContext *cx, JSScript *script, JSFunction *maybeFun,
     cx->doFunctionCallback(maybeFun, script, 0);
 #endif
 
-    JSRuntime *rt = cx->runtime();
-    /*
-     * Coming from IonMonkey, the fp might not be known (fp == NULL), but
-     * IonMonkey will only call exitScript() when absolutely necessary, so it is
-     * guaranteed that fp->hasPushedSPSFrame() would have been true
-     */
-    if ((!fp && rt->spsProfiler.enabled()) || (fp && fp.hasPushedSPSFrame()))
-        rt->spsProfiler.exit(cx, script, maybeFun);
-    return ok;
+    if (popSPSFrame)
+        cx->runtime()->spsProfiler.exit(script, maybeFun);
 }
 
 inline bool
-Probes::exitScript(JSContext *cx, JSScript *script, JSFunction *maybeFun,
-                   StackFrame *fp)
-{
-    return Probes::exitScript(cx, script, maybeFun, fp ? AbstractFramePtr(fp) : AbstractFramePtr());
-}
-
-inline bool
-Probes::startExecution(JSScript *script)
+probes::StartExecution(JSScript *script)
 {
     bool ok = true;
 
 #ifdef INCLUDE_MOZILLA_DTRACE
     if (JAVASCRIPT_EXECUTE_START_ENABLED())
         JAVASCRIPT_EXECUTE_START((script->filename() ? (char *)script->filename() : nullName),
-                                 script->lineno);
+                                 script->lineno());
 #endif
 
     return ok;
 }
 
 inline bool
-Probes::stopExecution(JSScript *script)
+probes::StopExecution(JSScript *script)
 {
     bool ok = true;
 
 #ifdef INCLUDE_MOZILLA_DTRACE
     if (JAVASCRIPT_EXECUTE_DONE_ENABLED())
         JAVASCRIPT_EXECUTE_DONE((script->filename() ? (char *)script->filename() : nullName),
-                                script->lineno);
+                                script->lineno());
 #endif
 
     return ok;
 }
 
 } /* namespace js */
- 
+
 #endif /* vm_Probes_inl_h */

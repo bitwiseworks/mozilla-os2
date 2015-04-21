@@ -9,17 +9,15 @@
 
 #include "mozilla/WeakPtr.h"
 #include "imgIRequest.h"
-#include "imgINotificationObserver.h"
 #include "nsISecurityInfoProvider.h"
 
-#include "nsIRequestObserver.h"
-#include "nsIChannel.h"
 #include "nsILoadGroup.h"
 #include "nsISupportsPriority.h"
 #include "nsITimedChannel.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsThreadUtils.h"
+#include "mozilla/TimeStamp.h"
 
 #include "imgRequest.h"
 
@@ -31,13 +29,16 @@
     {0x8f, 0x65, 0x9c, 0x46, 0x2e, 0xe2, 0xbc, 0x95} \
 }
 
+class imgINotificationObserver;
 class imgRequestNotifyRunnable;
 class imgStatusNotifyRunnable;
+class nsIntRect;
 class ProxyBehaviour;
 
 namespace mozilla {
 namespace image {
 class Image;
+class ImageURL;
 } // namespace image
 } // namespace mozilla
 
@@ -48,6 +49,8 @@ class imgRequestProxy : public imgIRequest,
                         public mozilla::SupportsWeakPtr<imgRequestProxy>
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(imgRequestProxy)
+  typedef mozilla::image::ImageURL ImageURL;
   NS_DECL_ISUPPORTS
   NS_DECL_IMGIREQUEST
   NS_DECL_NSIREQUEST
@@ -62,7 +65,7 @@ public:
   // (although not immediately after) doing so.
   nsresult Init(imgRequest* aOwner,
                 nsILoadGroup *aLoadGroup,
-                nsIURI* aURI,
+                ImageURL* aURI,
                 imgINotificationObserver *aObserver);
 
   nsresult ChangeOwner(imgRequest *aNewOwner); // this will change mOwner.  Do not call this if the previous
@@ -108,6 +111,8 @@ public:
 
   virtual nsresult Clone(imgINotificationObserver* aObserver, imgRequestProxy** aClone);
   nsresult GetStaticRequest(imgRequestProxy** aReturn);
+
+  nsresult GetURI(ImageURL **aURI);
 
 protected:
   friend class imgStatusTracker;
@@ -170,7 +175,7 @@ protected:
   // live either on mOwner or mImage, depending on whether
   //   (a) we have an mOwner at all
   //   (b) whether mOwner has instantiated its image yet
-  imgStatusTracker& GetStatusTracker() const;
+  already_AddRefed<imgStatusTracker> GetStatusTracker() const;
 
   nsITimedChannel* TimedChannel()
   {
@@ -179,7 +184,8 @@ protected:
     return GetOwner()->mTimedChannel;
   }
 
-  mozilla::image::Image* GetImage() const;
+  already_AddRefed<mozilla::image::Image> GetImage() const;
+  bool HasImage() const;
   imgRequest* GetOwner() const;
 
   nsresult PerformClone(imgINotificationObserver* aObserver,
@@ -197,7 +203,7 @@ private:
   friend imgRequestProxy* NewStaticProxy(imgRequestProxy* aThis);
 
   // The URI of our request.
-  nsCOMPtr<nsIURI> mURI;
+  nsRefPtr<ImageURL> mURI;
 
   // mListener is only promised to be a weak ref (see imgILoader.idl),
   // but we actually keep a strong ref to it until we've seen our

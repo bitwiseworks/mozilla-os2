@@ -73,7 +73,7 @@ static HWND hwndForDOMWindow( nsISupports * );
 
 static
 nsresult
-GetMostRecentWindow(const PRUnichar* aType, nsIDOMWindow** aWindow) {
+GetMostRecentWindow(const char16_t* aType, nsIDOMWindow** aWindow) {
     nsresult rv;
     nsCOMPtr<nsIWindowMediator> med( do_GetService( NS_WINDOWMEDIATOR_CONTRACTID, &rv ) );
     if ( NS_FAILED( rv ) )
@@ -397,16 +397,16 @@ char *GetCommandLine()
     * .exe and the second string is what followed on the command line.  Dorky,
     * but I guess it'll have to do.
     */
-   PTIB pTIB = NULL;
-   PPIB pPIB = NULL;
+   PTIB pTIB = nullptr;
+   PPIB pPIB = nullptr;
    APIRET rc = NO_ERROR;
-   char *pchParam = NULL;
+   char *pchParam = nullptr;
 
    rc = DosGetInfoBlocks( &pTIB, &pPIB );
    if( rc == NO_ERROR )
    {
       INT iLen = 0;
-      char *pchTemp = NULL;
+      char *pchTemp = nullptr;
       pchParam = pPIB->pib_pchcmd;
       strcpy( szCommandLine, pchParam );
       iLen = strlen( pchParam );
@@ -469,7 +469,7 @@ DDEMLFN ddemlfnTable[] =
    { (PFN *)&WinDdeReconnect            ,123 },
    { (PFN *)&WinDdeSetUserHandle        ,124 },
    { (PFN *)&WinDdeUninitialize         ,126 },
-   { (PFN *)NULL                           ,  0 }
+   { (PFN *)nullptr                     ,  0 }
 };
 
 /* SetupOS2ddeml makes sure that we can get pointers to all of the DDEML 
@@ -482,7 +482,7 @@ BOOL SetupOS2ddeml()
     HMODULE hmodDDEML = NULLHANDLE;
     APIRET rc = NO_ERROR;
 
-    rc = DosLoadModule( NULL, 0, "PMDDEML", &hmodDDEML );
+    rc = DosLoadModule( nullptr, 0, "PMDDEML", &hmodDDEML );
     if( rc == NO_ERROR )
     {
        int i;
@@ -490,7 +490,7 @@ BOOL SetupOS2ddeml()
        bRC = TRUE;
        for( i=0; ddemlfnTable[i].ord != 0; i++ )
        {
-          rc = DosQueryProcAddr( hmodDDEML, ddemlfnTable[i].ord, NULL,
+          rc = DosQueryProcAddr( hmodDDEML, ddemlfnTable[i].ord, nullptr,
                                  ddemlfnTable[i].fn );
           if( rc != NO_ERROR )
           {
@@ -580,15 +580,15 @@ struct MessageWindow {
         const char * pszClassName = className();
         mHandle = WinCreateWindow( HWND_OBJECT,
                                    pszClassName,
-                                   NULL,        // name
+                                   nullptr,     // name
                                    WS_DISABLED, // style
                                    0,0,     // x, y
                                    0,0,       // cx,cy
                                    HWND_DESKTOP,// owner
                                    HWND_BOTTOM,  // hwndbehind
                                    (USHORT)mMsgWindowAtom, // id
-                                   NULL,        // pCtlData
-                                   NULL );      // pres params
+                                   nullptr,     // pCtlData
+                                   nullptr );   // pres params
 
 #if MOZ_DEBUG_DDE
         printf( "Message window = 0x%08X\n", (int)mHandle );
@@ -609,7 +609,7 @@ struct MessageWindow {
             //  the same thread.
             BOOL desRes = WinDestroyWindow( mHandle );
             if ( FALSE != desRes ) {
-                mHandle = NULL;
+                mHandle = NULLHANDLE;
             }
             else {
                 retval = NS_ERROR_FAILURE;
@@ -632,27 +632,27 @@ struct MessageWindow {
     */
 
         COPYDATASTRUCT *pcds;
-        PVOID pvData = NULL;
+        PVOID pvData = nullptr;
 
         if (!cmd)
             return NS_ERROR_FAILURE;
 
         ULONG ulSize = sizeof(COPYDATASTRUCT)+strlen(cmd)+1+CCHMAXPATH;
 #ifdef MOZ_OS2_HIGH_MEMORY
-        APIRET rc = DosAllocSharedMem( &pvData, NULL, ulSize,
+        APIRET rc = DosAllocSharedMem( &pvData, nullptr, ulSize,
                                        PAG_COMMIT | PAG_READ | PAG_WRITE | OBJ_GETTABLE | OBJ_ANY);
         if (rc != NO_ERROR) { // Did the kernel handle OBJ_ANY?
             // Try again without OBJ_ANY and if the first failure was not caused
             // by OBJ_ANY then we will get the same failure, else we have taken
             // care of pre-FP13 systems where the kernel couldn't handle it.
-            rc = DosAllocSharedMem( &pvData, NULL, ulSize,
+            rc = DosAllocSharedMem( &pvData, nullptr, ulSize,
                                     PAG_COMMIT | PAG_READ | PAG_WRITE | OBJ_GETTABLE);
             if (rc != NO_ERROR) {
                 return NS_ERROR_OUT_OF_MEMORY;
             }
         }
 #else
-        if (DosAllocSharedMem( &pvData, NULL, ulSize,
+        if (DosAllocSharedMem( &pvData, nullptr, ulSize,
                                PAG_COMMIT | PAG_READ | PAG_WRITE | OBJ_GETTABLE | OBJ_ANY))
             return NS_ERROR_OUT_OF_MEMORY;
 #endif
@@ -922,7 +922,7 @@ nsNativeAppSupportOS2::Stop( bool *aResult ) {
 
 NS_IMETHODIMP
 nsNativeAppSupportOS2::Observe(nsISupports* aSubject, const char* aTopic,
-                               const PRUnichar* aData)
+                               const char16_t* aData)
 {
     if (strcmp(aTopic, "quit-application") == 0) {
         Quit();
@@ -1017,7 +1017,7 @@ static nsCString uTypeDesc( UINT uType ) {
 static nsCString hszValue( DWORD instance, HSZ hsz ) {
     // Extract string from HSZ.
     nsCString result("[");
-    DWORD len = WinDdeQueryString( hsz, NULL, NULL, CP_WINANSI );
+    DWORD len = WinDdeQueryString( hsz, nullptr, 0, CP_WINANSI );
     if ( len ) {
         char buffer[ 256 ];
         WinDdeQueryString( hsz, buffer, sizeof buffer, CP_WINANSI );
@@ -1040,7 +1040,7 @@ static void escapeQuotes( nsAString &aString ) {
            break;
        } else {
            // Insert back-slash ahead of the '"'.
-           aString.Insert( PRUnichar('\\'), offset );
+           aString.Insert( char16_t('\\'), offset );
            // Increment offset because we just inserted a slash
            offset++;
        }
@@ -1130,7 +1130,7 @@ nsNativeAppSupportOS2::HandleDDENotification( ULONG idInst,     // DDEML instanc
                     do {
                         // Get most recently used Nav window.
                         nsCOMPtr<nsIDOMWindow> navWin;
-                        GetMostRecentWindow( NS_LITERAL_STRING( "navigator:browser" ).get(),
+                        GetMostRecentWindow( MOZ_UTF16( "navigator:browser" ),
                                              getter_AddRefs( navWin ) );
                         if ( !navWin ) {
                             // There is not a window open
@@ -1357,7 +1357,7 @@ void nsNativeAppSupportOS2::ParseDDEArg( const char* args, int index, nsCString&
 
 // Utility to parse out argument from a DDE item string.
 void nsNativeAppSupportOS2::ParseDDEArg( HSZ args, int index, nsCString& aString) {
-    DWORD argLen = WinDdeQueryString( args, NULL, NULL, CP_WINANSI );
+    DWORD argLen = WinDdeQueryString( args, nullptr, 0, CP_WINANSI );
     // there wasn't any string, so return empty string
     if ( !argLen ) return;
     nsAutoCString temp;
@@ -1372,7 +1372,7 @@ void nsNativeAppSupportOS2::ParseDDEArg( HSZ args, int index, nsCString& aString
 
 void nsNativeAppSupportOS2::ActivateLastWindow() {
     nsCOMPtr<nsIDOMWindow> navWin;
-    GetMostRecentWindow( NS_LITERAL_STRING("navigator:browser").get(), getter_AddRefs( navWin ) );
+    GetMostRecentWindow( MOZ_UTF16("navigator:browser"), getter_AddRefs( navWin ) );
     if ( navWin )
         // Activate that window.
         activateWindow( navWin );
@@ -1627,7 +1627,7 @@ nsNativeAppSupportOS2::OpenBrowserWindow()
     // browser window.
 
     nsCOMPtr<nsIDOMWindow> navWin;
-    GetMostRecentWindow( NS_LITERAL_STRING( "navigator:browser" ).get(), getter_AddRefs( navWin ) );
+    GetMostRecentWindow( MOZ_UTF16( "navigator:browser" ), getter_AddRefs( navWin ) );
 
     // This isn't really a loop.  We just use "break" statements to fall
     // out to the OpenWindow call when things go awry.

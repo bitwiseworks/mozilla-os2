@@ -15,16 +15,17 @@
 #define __nsContentPolicyUtils_h__
 
 #include "nsIContentPolicy.h"
-#include "nsIServiceManager.h"
 #include "nsIContent.h"
 #include "nsIScriptSecurityManager.h"
-#include "nsIPrincipal.h"
+#include "nsIURI.h"
+#include "nsServiceManagerUtils.h"
 
 //XXXtw sadly, this makes consumers of nsContentPolicyUtils depend on widget
 #include "nsIDocument.h"
 #include "nsPIDOMWindow.h"
 
 class nsACString;
+class nsIPrincipal;
 
 #define NS_CONTENTPOLICY_CONTRACTID   "@mozilla.org/layout/content-policy;1"
 #define NS_CONTENTPOLICY_CATEGORY "content-policy"
@@ -108,6 +109,8 @@ NS_CP_ContentTypeName(uint32_t contentType)
     CASE_RETURN( TYPE_MEDIA             );
     CASE_RETURN( TYPE_WEBSOCKET         );
     CASE_RETURN( TYPE_CSP_REPORT        );
+    CASE_RETURN( TYPE_XSLT              );
+    CASE_RETURN( TYPE_BEACON            );
    default:
     return "<Unknown Type>";
   }

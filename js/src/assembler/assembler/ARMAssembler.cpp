@@ -32,7 +32,7 @@
 
 #if ENABLE_ASSEMBLER && WTF_CPU_ARM_TRADITIONAL
 
-#include "ARMAssembler.h"
+#include "assembler/assembler/ARMAssembler.h"
 
 namespace JSC {
 
@@ -428,7 +428,7 @@ void ARMAssembler::dataTransfer8(bool isLoad, RegisterID srcDst, RegisterID base
                 mem_reg_off(isLoad, true, 8, true, srcDst, base, ARMRegisters::S0);
             else
                 dtrb_ur(isLoad, srcDst, base, ARMRegisters::S0);
-                
+
         }
     }
 }

@@ -4,7 +4,7 @@
 _("Test that node reassignment responses are respected on all kinds of " +
   "requests.");
 
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-common/rest.js");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/service.js");
@@ -16,13 +16,15 @@ Cu.import("resource://testing-common/services/sync/utils.js");
 Service.engineManager.clear();
 
 function run_test() {
-  Log4Moz.repository.getLogger("Sync.AsyncResource").level = Log4Moz.Level.Trace;
-  Log4Moz.repository.getLogger("Sync.ErrorHandler").level  = Log4Moz.Level.Trace;
-  Log4Moz.repository.getLogger("Sync.Resource").level      = Log4Moz.Level.Trace;
-  Log4Moz.repository.getLogger("Sync.RESTRequest").level   = Log4Moz.Level.Trace;
-  Log4Moz.repository.getLogger("Sync.Service").level       = Log4Moz.Level.Trace;
-  Log4Moz.repository.getLogger("Sync.SyncScheduler").level = Log4Moz.Level.Trace;
+  Log.repository.getLogger("Sync.AsyncResource").level = Log.Level.Trace;
+  Log.repository.getLogger("Sync.ErrorHandler").level  = Log.Level.Trace;
+  Log.repository.getLogger("Sync.Resource").level      = Log.Level.Trace;
+  Log.repository.getLogger("Sync.RESTRequest").level   = Log.Level.Trace;
+  Log.repository.getLogger("Sync.Service").level       = Log.Level.Trace;
+  Log.repository.getLogger("Sync.SyncScheduler").level = Log.Level.Trace;
   initTestLogging();
+
+  ensureLegacyIdentityManager();
 
   Service.engineManager.register(RotaryEngine);
 
@@ -59,8 +61,8 @@ function handleReassign(handler, req, resp) {
 /**
  * A node assignment handler.
  */
-const newNodeBody = "http://localhost:8080/";
 function installNodeHandler(server, next) {
+  let newNodeBody = server.baseURI;
   function handleNodeRequest(req, resp) {
     _("Client made a request for a node reassignment.");
     resp.setStatusLine(req.httpVersion, 200, "OK");
@@ -74,15 +76,17 @@ function installNodeHandler(server, next) {
 }
 
 function prepareServer() {
-  setBasicCredentials("johndoe", "ilovejane", "abcdeabcdeabcdeabcdeabcdea");
-  Service.serverURL  = TEST_SERVER_URL;
-  Service.clusterURL = TEST_CLUSTER_URL;
-
-  do_check_eq(Service.userAPIURI, "http://localhost:8080/user/1.0/");
-  let server = new SyncServer();
-  server.registerUser("johndoe");
-  server.start();
-  return server;
+  let deferred = Promise.defer();
+  configureIdentity({username: "johndoe"}).then(() => {
+    let server = new SyncServer();
+    server.registerUser("johndoe");
+    server.start();
+    Service.serverURL = server.baseURI;
+    Service.clusterURL = server.baseURI;
+    do_check_eq(Service.userAPIURI, server.baseURI + "user/1.0/");
+    deferred.resolve(server);
+  });
+  return deferred.promise;
 }
 
 function getReassigned() {
@@ -104,6 +108,7 @@ function getReassigned() {
  */
 function syncAndExpectNodeReassignment(server, firstNotification, between,
                                        secondNotification, url) {
+  let deferred = Promise.defer();
   function onwards() {
     let nodeFetched = false;
     function onFirstSync() {
@@ -138,7 +143,7 @@ function syncAndExpectNodeReassignment(server, firstNotification, between,
         _("Second sync nextTick.");
         do_check_true(nodeFetched);
         Service.startOver();
-        server.stop(run_next_test);
+        server.stop(deferred.resolve);
       });
     }
 
@@ -152,11 +157,12 @@ function syncAndExpectNodeReassignment(server, firstNotification, between,
     do_check_eq(request.response.status, 401);
     Utils.nextTick(onwards);
   });
+  yield deferred.promise;
 }
 
-add_test(function test_momentary_401_engine() {
+add_task(function test_momentary_401_engine() {
   _("Test a failure for engine URLs that's resolved by reassignment.");
-  let server = prepareServer();
+  let server = yield prepareServer();
   let john   = server.user("johndoe");
 
   _("Enabling the Rotary engine.");
@@ -198,17 +204,17 @@ add_test(function test_momentary_401_engine() {
     Svc.Obs.add("weave:service:login:start", onLoginStart);
   }
 
-  syncAndExpectNodeReassignment(server,
-                                "weave:service:sync:finish",
-                                between,
-                                "weave:service:sync:finish",
-                                Service.storageURL + "rotary");
+  yield syncAndExpectNodeReassignment(server,
+                                      "weave:service:sync:finish",
+                                      between,
+                                      "weave:service:sync:finish",
+                                      Service.storageURL + "rotary");
 });
 
 // This test ends up being a failing fetch *after we're already logged in*.
-add_test(function test_momentary_401_info_collections() {
+add_task(function test_momentary_401_info_collections() {
   _("Test a failure for info/collections that's resolved by reassignment.");
-  let server = prepareServer();
+  let server = yield prepareServer();
 
   _("First sync to prepare server contents.");
   Service.sync();
@@ -222,17 +228,20 @@ add_test(function test_momentary_401_info_collections() {
     server.toplevelHandlers.info = oldHandler;
   }
 
-  syncAndExpectNodeReassignment(server,
-                                "weave:service:sync:error",
-                                undo,
-                                "weave:service:sync:finish",
-                                Service.infoURL);
+  yield syncAndExpectNodeReassignment(server,
+                                      "weave:service:sync:error",
+                                      undo,
+                                      "weave:service:sync:finish",
+                                      Service.infoURL);
 });
 
-add_test(function test_momentary_401_storage() {
+add_task(function test_momentary_401_storage_loggedin() {
   _("Test a failure for any storage URL, not just engine parts. " +
     "Resolved by reassignment.");
-  let server = prepareServer();
+  let server = yield prepareServer();
+
+  _("Performing initial sync to ensure we are logged in.")
+  Service.sync();
 
   // Return a 401 for all storage requests.
   let oldHandler = server.toplevelHandlers.storage;
@@ -243,18 +252,41 @@ add_test(function test_momentary_401_storage() {
     server.toplevelHandlers.storage = oldHandler;
   }
 
-  syncAndExpectNodeReassignment(server,
-                                "weave:service:login:error",
-                                undo,
-                                "weave:service:sync:finish",
-                                Service.storageURL + "meta/global");
+  do_check_true(Service.isLoggedIn, "already logged in");
+  yield syncAndExpectNodeReassignment(server,
+                                      "weave:service:sync:error",
+                                      undo,
+                                      "weave:service:sync:finish",
+                                      Service.storageURL + "meta/global");
 });
 
-add_test(function test_loop_avoidance_storage() {
+add_task(function test_momentary_401_storage_loggedout() {
+  _("Test a failure for any storage URL, not just engine parts. " +
+    "Resolved by reassignment.");
+  let server = yield prepareServer();
+
+  // Return a 401 for all storage requests.
+  let oldHandler = server.toplevelHandlers.storage;
+  server.toplevelHandlers.storage = handleReassign;
+
+  function undo() {
+    _("Undoing test changes.");
+    server.toplevelHandlers.storage = oldHandler;
+  }
+
+  do_check_false(Service.isLoggedIn, "not already logged in");
+  yield syncAndExpectNodeReassignment(server,
+                                      "weave:service:login:error",
+                                      undo,
+                                      "weave:service:sync:finish",
+                                      Service.storageURL + "meta/global");
+});
+
+add_task(function test_loop_avoidance_storage() {
   _("Test that a repeated failure doesn't result in a sync loop " +
     "if node reassignment cannot resolve the failure.");
 
-  let server = prepareServer();
+  let server = yield prepareServer();
 
   // Return a 401 for all storage requests.
   let oldHandler = server.toplevelHandlers.storage;
@@ -265,6 +297,7 @@ add_test(function test_loop_avoidance_storage() {
   let thirdNotification  = "weave:service:sync:finish";
 
   let nodeFetched = false;
+  let deferred = Promise.defer();
 
   // Track the time. We want to make sure the duration between the first and
   // second sync is small, and then that the duration between second and third
@@ -338,7 +371,7 @@ add_test(function test_loop_avoidance_storage() {
       do_check_false(getReassigned());
       do_check_true(nodeFetched);
       Service.startOver();
-      server.stop(run_next_test);
+      server.stop(deferred.resolve);
     });
   }
 
@@ -346,17 +379,19 @@ add_test(function test_loop_avoidance_storage() {
 
   now = Date.now();
   Service.sync();
+  yield deferred.promise;
 });
 
-add_test(function test_loop_avoidance_engine() {
+add_task(function test_loop_avoidance_engine() {
   _("Test that a repeated 401 in an engine doesn't result in a sync loop " +
     "if node reassignment cannot resolve the failure.");
-  let server = prepareServer();
+  let server = yield prepareServer();
   let john   = server.user("johndoe");
 
   _("Enabling the Rotary engine.");
   let engine = Service.engineManager.get("rotary");
   engine.enabled = true;
+  let deferred = Promise.defer();
 
   // We need the server to be correctly set up prior to experimenting. Do this
   // through a sync.
@@ -391,7 +426,7 @@ add_test(function test_loop_avoidance_engine() {
   function afterSuccessfulSync() {
     Svc.Obs.remove("weave:service:login:start", onLoginStart);
     Service.startOver();
-    server.stop(run_next_test);
+    server.stop(deferred.resolve);
   }
 
   let firstNotification  = "weave:service:sync:finish";
@@ -483,4 +518,5 @@ add_test(function test_loop_avoidance_engine() {
 
   now = Date.now();
   Service.sync();
+  yield deferred.promise;
 });

@@ -7,6 +7,7 @@
 TEST_DIRS += ['test']
 
 XPIDL_SOURCES += [
+    'nsIConsoleAPIStorage.idl',
     'nsIDOMDOMCursor.idl',
     'nsIDOMDOMRequest.idl',
     'nsIEntropyCollector.idl',
@@ -14,12 +15,7 @@ XPIDL_SOURCES += [
     'nsISiteSpecificUserAgent.idl',
 ]
 
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/dom/interfaces/base',
-    '-I$(topsrcdir)/dom/interfaces/events',
-]
-
-MODULE = 'dom'
+XPIDL_MODULE = 'dom'
 
 EXPORTS += [
     'Crypto.h',
@@ -28,23 +24,22 @@ EXPORTS += [
     'nsDOMClassInfoClasses.h',
     'nsDOMClassInfoID.h',
     'nsDOMJSUtils.h',
+    'nsDOMNavigationTiming.h',
     'nsDOMString.h',
     'nsFocusManager.h',
     'nsIDOMClassInfo.h',
     'nsIDOMScriptObjectFactory.h',
     'nsIGlobalObject.h',
-    'nsIJSEventListener.h',
     'nsIJSNativeInitializer.h',
     'nsIScriptContext.h',
     'nsIScriptExternalNameSet.h',
     'nsIScriptGlobalObject.h',
-    'nsIScriptGlobalObjectOwner.h',
     'nsIScriptNameSpaceManager.h',
     'nsIScriptObjectPrincipal.h',
-    'nsIScriptRuntime.h',
     'nsIScriptTimeoutHandler.h',
     'nsJSEnvironment.h',
     'nsJSUtils.h',
+    'nsPerformance.h',
     'nsPIDOMWindow.h',
     'nsPIWindowRoot.h',
     'nsStructuredCloneContainer.h',
@@ -55,40 +50,50 @@ EXPORTS += [
 
 EXPORTS.mozilla.dom += [
     'BarProps.h',
+    'Console.h',
     'DOMCursor.h',
     'DOMError.h',
+    'DOMException.h',
     'DOMRequest.h',
+    'MessageChannel.h',
+    'MessagePort.h',
+    'MessagePortList.h',
+    'Navigator.h',
+    'PerformanceEntry.h',
+    'PerformanceResourceTiming.h',
     'ScreenOrientation.h',
+    'ScriptSettings.h',
     'StructuredCloneTags.h',
     'URL.h',
+    'URLSearchParams.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'BarProps.cpp',
+    'CompositionStringSynthesizer.cpp',
+    'Console.cpp',
     'Crypto.cpp',
     'DOMCursor.cpp',
     'DOMError.cpp',
+    'DOMException.cpp',
     'DOMRequest.cpp',
+    'MessageChannel.cpp',
+    'MessagePortList.cpp',
     'Navigator.cpp',
-    'URL.cpp',
     'nsContentPermissionHelper.cpp',
     'nsDOMClassInfo.cpp',
-    'nsDOMException.cpp',
     'nsDOMNavigationTiming.cpp',
     'nsDOMScriptObjectFactory.cpp',
     'nsDOMWindowList.cpp',
-    'nsDOMWindowUtils.cpp',
     'nsFocusManager.cpp',
-    'nsGlobalWindow.cpp',
     'nsGlobalWindowCommands.cpp',
     'nsHistory.cpp',
-    'nsJSEnvironment.cpp',
+    'nsIGlobalObject.cpp',
     'nsJSTimeoutHandler.cpp',
     'nsJSUtils.cpp',
     'nsLocation.cpp',
     'nsMimeTypeArray.cpp',
     'nsPerformance.cpp',
-    'nsPluginArray.cpp',
     'nsQueryContentEventResult.cpp',
     'nsScreen.cpp',
     'nsScriptNameSpaceManager.cpp',
@@ -96,18 +101,83 @@ CPP_SOURCES += [
     'nsWindowMemoryReporter.cpp',
     'nsWindowRoot.cpp',
     'nsWrapperCache.cpp',
+    'PerformanceEntry.cpp',
+    'PerformanceResourceTiming.cpp',
+    'ScriptSettings.cpp',
+    'URL.cpp',
+    'URLSearchParams.cpp',
+    'WindowNamedPropertiesHandler.cpp',
+]
+
+# these files couldn't be in UNIFIED_SOURCES for now for reasons given below:
+SOURCES += [
+    # this file doesn't like windows.h
+    'MessagePort.cpp',
+    # this file doesn't like windows.h
+    'nsDOMWindowUtils.cpp',
+    # This file has a #error "Never include windows.h in this file!"
+    'nsGlobalWindow.cpp',
+    # This file forces NSPR logging.
+    'nsJSEnvironment.cpp',
+    # nsPluginArray.cpp includes npapi.h indirectly, and that includes a lot of system headers
+    'nsPluginArray.cpp',
 ]
 
 EXTRA_COMPONENTS += [
-    'ConsoleAPI.js',
     'ConsoleAPI.manifest',
+    'ConsoleAPIStorage.js',
     'SiteSpecificUserAgent.js',
     'SiteSpecificUserAgent.manifest',
 ]
 
 EXTRA_JS_MODULES += [
-    'ConsoleAPIStorage.jsm',
     'DOMRequestHelper.jsm',
     'IndexedDBHelper.jsm',
     'ObjectWrapper.jsm',
 ]
+
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+LOCAL_INCLUDES += [
+    '../battery',
+    '../bluetooth',
+    '../events',
+    '../media',
+    '../network/src',
+    '../src/geolocation',
+    '../src/storage',
+    '../time',
+    '../workers',
+    '../xbl',
+    '/content/base/src',
+    '/content/html/document/src',
+    '/content/xul/document/src',
+    '/layout/generic',
+    '/layout/style',
+    '/layout/xul',
+    '/widget/shared',
+]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+    LOCAL_INCLUDES += [
+        '../fmradio',
+        '../system/gonk',
+    ]
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'
+
+LOCAL_INCLUDES += [
+    '/js/xpconnect/src',
+    '/js/xpconnect/wrappers',
+]
+
+for var in ('MOZ_JSDEBUGGER', 'MOZ_B2G_RIL', 'MOZ_B2G_FM'):
+    if CONFIG[var]:
+        DEFINES[var] = True
+
+if CONFIG['MOZ_BUILD_APP'] in ['browser', 'mobile/android', 'xulrunner']:
+    DEFINES['HAVE_SIDEBAR'] = True

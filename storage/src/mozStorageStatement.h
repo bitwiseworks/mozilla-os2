@@ -32,7 +32,7 @@ class Statement MOZ_FINAL : public mozIStorageStatement
                           , public StorageBaseStatementInternal
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_MOZISTORAGESTATEMENT
   NS_DECL_MOZISTORAGEBASESTATEMENT
   NS_DECL_MOZISTORAGEBINDINGPARAMS
@@ -47,10 +47,13 @@ public:
    *
    * @param aDBConnection
    *        The Connection object this statement is associated with.
+   * @param aNativeConnection
+   *        The native Sqlite connection this statement is associated with.
    * @param aSQLStatement
    *        The SQL statement to prepare that this object will represent.
    */
   nsresult initialize(Connection *aDBConnection,
+                      sqlite3* aNativeConnection,
                       const nsACString &aSQLStatement);
 
 

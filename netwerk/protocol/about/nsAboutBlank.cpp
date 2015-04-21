@@ -4,12 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsAboutBlank.h"
-#include "nsIIOService.h"
-#include "nsIServiceManager.h"
 #include "nsStringStream.h"
 #include "nsNetUtil.h"
 
-NS_IMPL_ISUPPORTS1(nsAboutBlank, nsIAboutModule)
+NS_IMPL_ISUPPORTS(nsAboutBlank, nsIAboutModule)
 
 NS_IMETHODIMP
 nsAboutBlank::NewChannel(nsIURI *aURI, nsIChannel **result)

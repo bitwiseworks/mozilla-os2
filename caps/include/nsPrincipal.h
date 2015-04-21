@@ -8,7 +8,6 @@
 
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
-#include "nsVoidArray.h"
 #include "nsJSPrincipals.h"
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
@@ -18,7 +17,6 @@
 
 class nsIObjectInputStream;
 class nsIObjectOutputStream;
-class DomainPolicy; 
 
 class nsBasePrincipal : public nsJSPrincipals
 {
@@ -29,10 +27,8 @@ protected:
   virtual ~nsBasePrincipal();
 
 public:
-  NS_IMETHOD_(nsrefcnt) AddRef(void);
-  NS_IMETHOD_(nsrefcnt) Release(void);
-  NS_IMETHOD GetSecurityPolicy(void** aSecurityPolicy);
-  NS_IMETHOD SetSecurityPolicy(void* aSecurityPolicy);
+  NS_IMETHOD_(MozExternalRefCountType) AddRef(void);
+  NS_IMETHOD_(MozExternalRefCountType) Release(void);
   NS_IMETHOD GetCsp(nsIContentSecurityPolicy** aCsp);
   NS_IMETHOD SetCsp(nsIContentSecurityPolicy* aCsp);
 public:
@@ -45,8 +41,6 @@ protected:
   virtual void dumpImpl() = 0;
 #endif
 
-  DomainPolicy* mSecurityPolicy;
-
   nsCOMPtr<nsIContentSecurityPolicy> mCSP;
 };
 
@@ -56,16 +50,16 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSISERIALIZABLE
   NS_IMETHOD Equals(nsIPrincipal* other, bool* _retval);
-  NS_IMETHOD EqualsIgnoringDomain(nsIPrincipal* other, bool* _retval);
+  NS_IMETHOD EqualsConsideringDomain(nsIPrincipal* other, bool* _retval);
   NS_IMETHOD GetHashValue(uint32_t* aHashValue);
   NS_IMETHOD GetURI(nsIURI** aURI);
   NS_IMETHOD GetDomain(nsIURI** aDomain);
   NS_IMETHOD SetDomain(nsIURI* aDomain);
   NS_IMETHOD GetOrigin(char** aOrigin);
   NS_IMETHOD Subsumes(nsIPrincipal* other, bool* _retval);
-  NS_IMETHOD SubsumesIgnoringDomain(nsIPrincipal* other, bool* _retval);
+  NS_IMETHOD SubsumesConsideringDomain(nsIPrincipal* other, bool* _retval);
   NS_IMETHOD CheckMayLoad(nsIURI* uri, bool report, bool allowIfInheritsPrincipal);
-  NS_IMETHOD GetExtendedOrigin(nsACString& aExtendedOrigin);
+  NS_IMETHOD GetJarPrefix(nsACString& aJarPrefix);
   NS_IMETHOD GetAppStatus(uint16_t* aAppStatus);
   NS_IMETHOD GetAppId(uint32_t* aAppStatus);
   NS_IMETHOD GetIsInBrowserElement(bool* aIsInBrowserElement);
@@ -139,16 +133,16 @@ public:
   NS_DECL_NSIEXPANDEDPRINCIPAL
   NS_DECL_NSISERIALIZABLE
   NS_IMETHOD Equals(nsIPrincipal* other, bool* _retval);
-  NS_IMETHOD EqualsIgnoringDomain(nsIPrincipal* other, bool* _retval);
+  NS_IMETHOD EqualsConsideringDomain(nsIPrincipal* other, bool* _retval);
   NS_IMETHOD GetHashValue(uint32_t* aHashValue);
   NS_IMETHOD GetURI(nsIURI** aURI);
   NS_IMETHOD GetDomain(nsIURI** aDomain);
   NS_IMETHOD SetDomain(nsIURI* aDomain);
   NS_IMETHOD GetOrigin(char** aOrigin);
   NS_IMETHOD Subsumes(nsIPrincipal* other, bool* _retval);
-  NS_IMETHOD SubsumesIgnoringDomain(nsIPrincipal* other, bool* _retval);
+  NS_IMETHOD SubsumesConsideringDomain(nsIPrincipal* other, bool* _retval);
   NS_IMETHOD CheckMayLoad(nsIURI* uri, bool report, bool allowIfInheritsPrincipal);
-  NS_IMETHOD GetExtendedOrigin(nsACString& aExtendedOrigin);
+  NS_IMETHOD GetJarPrefix(nsACString& aJarPrefix);
   NS_IMETHOD GetAppStatus(uint16_t* aAppStatus);
   NS_IMETHOD GetAppId(uint32_t* aAppStatus);
   NS_IMETHOD GetIsInBrowserElement(bool* aIsInBrowserElement);

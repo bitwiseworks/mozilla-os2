@@ -9,8 +9,6 @@
 #include "Logging.h"
 #include "Elfxx.h"
 
-class Mappable;
-
 /**
  * Library Handle class for ELF libraries we don't let the system linker
  * handle.
@@ -38,6 +36,10 @@ public:
   virtual ~CustomElf();
   virtual void *GetSymbolPtr(const char *symbol) const;
   virtual bool Contains(void *addr) const;
+
+#ifdef __ARM_EABI__
+  virtual const void *FindExidx(int *pcount) const;
+#endif
 
 protected:
   virtual Mappable *GetMappable() const;
@@ -74,7 +76,12 @@ private:
    * Private constructor
    */
   CustomElf(Mappable *mappable, const char *path)
-  : LibHandle(path), mappable(mappable), init(0), fini(0), initialized(false)
+  : LibHandle(path)
+  , mappable(mappable)
+  , init(0)
+  , fini(0)
+  , initialized(false)
+  , has_text_relocs(false)
   { }
 
   /**
@@ -144,7 +151,7 @@ private:
       void (*func)(void);
     } f;
     f.ptr = ptr;
-    debug("%s: Calling function @%p", GetPath(), ptr);
+    DEBUG_LOG("%s: Calling function @%p", GetPath(), ptr);
     f.func();
   }
 
@@ -157,7 +164,7 @@ private:
   }
 
   /* Appropriated Mappable */
-  Mappable *mappable;
+  mozilla::RefPtr<Mappable> mappable;
 
   /* Base address where the library is loaded */
   MappedPtr base;
@@ -190,6 +197,13 @@ private:
   Array<void *> init_array, fini_array;
 
   bool initialized;
+
+  bool has_text_relocs;
+
+#ifdef __ARM_EABI__
+  /* ARM.exidx information used by FindExidx */
+  Array<uint32_t[2]> arm_exidx;
+#endif
 };
 
 #endif /* CustomElf_h */

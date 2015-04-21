@@ -4,10 +4,21 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'test_xulapp'
-
-CPP_SOURCES += [
-    'TestDllInterceptor.cpp',
-    'TestXREMakeCommandLineWin.cpp',
+SIMPLE_PROGRAMS = [
+    'TestDllInterceptor',
+    'TestXREMakeCommandLineWin',
 ]
 
+SOURCES += [
+    '%s.cpp' % s for s in SIMPLE_PROGRAMS
+]
+
+DEFINES['NS_NO_XPCOM'] = True
+
+LOCAL_INCLUDES += [
+    '/config',
+    '/toolkit/xre',
+]
+
+
+USE_STATIC_LIBS = True

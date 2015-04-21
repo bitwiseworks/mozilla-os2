@@ -1,13 +1,15 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jsapi.h"
 #include "nsCOMPtr.h"
 #include "mozIJSSubScriptLoader.h"
-#include "nsIScriptSecurityManager.h"
+
+class nsIPrincipal;
+class nsIURI;
+class LoadSubScriptOptions;
 
 #define MOZ_JSSUBSCRIPTLOADER_CID                                             \
 { /* 829814d6-1dd2-11b2-8e08-82fa0a339b00 */                                  \
@@ -31,10 +33,15 @@ public:
 
 private:
     nsresult ReadScript(nsIURI *uri, JSContext *cx, JSObject *target_obj,
-                        const nsAString& charset, const char *uriStr,
+                        const nsAString &charset, const char *uriStr,
                         nsIIOService *serv, nsIPrincipal *principal,
-                        bool reuseGlobal, JSScript **scriptp,
-                        JSFunction **functionp);
+                        bool reuseGlobal, JS::MutableHandleScript script,
+                        JS::MutableHandleFunction function);
+
+    nsresult DoLoadSubScriptWithOptions(const nsAString &url,
+                                        LoadSubScriptOptions  &options,
+                                        JSContext *cx,
+                                        JS::MutableHandle<JS::Value> retval);
 
     nsCOMPtr<nsIPrincipal> mSystemPrincipal;
 };

@@ -194,8 +194,14 @@
       <handler event="click" phase="capturing">
         <![CDATA[
         if (event.mozInputSource == Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH) {
-          SelectionHelperUI.attachEditSession(ChromeSelectionHandler,
-                                              event.clientX, event.clientY);
+          if (typeof SelectionHelperUI != 'undefined') {
+            SelectionHelperUI.attachEditSession(ChromeSelectionHandler,
+                event.clientX, event.clientY, this);
+          } else {
+            // If we don't have access to SelectionHelperUI then we are using this
+            // binding for browser content (e.g. about:config)
+            Services.obs.notifyObservers(event, "attach_edit_session_to_content", "");
+          }
         }
       ]]>
       </handler>
@@ -260,10 +266,6 @@
           if (selectionStart != selectionEnd) {
             json.types.push("cut");
             json.types.push("copy");
-            json.string = aTextbox.value.slice(selectionStart, selectionEnd);
-          } else if (aTextbox.value) {
-            json.types.push("copy-all");
-            json.string = aTextbox.value;
           }
 
           if (selectionStart > 0 || selectionEnd < aTextbox.textLength)
@@ -291,11 +293,67 @@
       <handler event="click" phase="capturing">
         <![CDATA[
           if (event.mozInputSource == Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH) {
-            SelectionHelperUI.attachEditSession(ChromeSelectionHandler,
-                                                event.clientX, event.clientY);
+            if (typeof SelectionHelperUI != 'undefined') {
+              SelectionHelperUI.attachEditSession(ChromeSelectionHandler,
+                  event.clientX, event.clientY, event.target);
+            } else {
+              // If we don't have access to SelectionHelperUI then we are using this
+              // binding for browser content (e.g. about:config)
+              Services.obs.notifyObservers(event, "attach_edit_session_to_content", "");
+            }
           }
         ]]>
       </handler>
     </handlers>
   </binding>
+
+  <binding id="line-wrap-label" extends="chrome://global/content/bindings/text.xml#text-label">
+    <implementation>
+      <constructor>
+        <![CDATA[
+          if (this.hasAttribute("value")) {
+            this.textContent = this.getAttribute("value");
+            this.removeAttribute("value");
+          }
+        ]]>
+      </constructor>
+      <property name="value">
+        <getter>
+          <![CDATA[
+            return this.textContent;
+          ]]>
+        </getter>
+        <setter>
+          <![CDATA[
+            return (this.textContent = val);
+          ]]>
+        </setter>
+      </property>
+    </implementation>
+  </binding>
+  <binding id="line-wrap-text-link" extends="chrome://global/content/bindings/text.xml#text-link">
+    <implementation>
+      <constructor>
+        <![CDATA[
+          if (this.hasAttribute("value")) {
+            this.textContent = this.getAttribute("value");
+            this.removeAttribute("value");
+          }
+        ]]>
+      </constructor>
+      <property name="value">
+        <getter>
+          <![CDATA[
+            return this.textContent;
+          ]]>
+        </getter>
+        <setter>
+          <![CDATA[
+            return (this.textContent = val);
+          ]]>
+        </setter>
+      </property>
+    </implementation>
+  </binding>
+
 </bindings>

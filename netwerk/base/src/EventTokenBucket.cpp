@@ -6,8 +6,13 @@
 
 #include "EventTokenBucket.h"
 
+#include "nsICancelable.h"
 #include "nsNetUtil.h"
 #include "nsSocketTransportService2.h"
+
+#ifdef DEBUG
+#include "MainThreadUtils.h"
+#endif
 
 #ifdef XP_WIN
 #include <windows.h>
@@ -26,7 +31,7 @@ namespace net {
 class TokenBucketCancelable : public nsICancelable
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSICANCELABLE
 
   TokenBucketCancelable(class ATokenBucketEvent *event);
@@ -38,7 +43,7 @@ private:
   ATokenBucketEvent *mEvent;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(TokenBucketCancelable, nsICancelable)
+NS_IMPL_ISUPPORTS(TokenBucketCancelable, nsICancelable)
 
 TokenBucketCancelable::TokenBucketCancelable(ATokenBucketEvent *event)
   : mEvent(event)
@@ -68,7 +73,7 @@ TokenBucketCancelable::Fire()
 // EventTokenBucket
 ////////////////////////////////////////////
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(EventTokenBucket, nsITimerCallback)
+NS_IMPL_ISUPPORTS(EventTokenBucket, nsITimerCallback)
 
 // by default 1hz with no burst
 EventTokenBucket::EventTokenBucket(uint32_t eventsPerSecond,
@@ -223,7 +228,7 @@ EventTokenBucket::SubmitEvent(ATokenBucketEvent *event, nsICancelable **cancelab
   if (mPaused || !TryImmediateDispatch(cancelEvent.get())) {
     // queue it
     SOCKET_LOG(("   queued\n"));
-    mEvents.Push(cancelEvent.forget().get());
+    mEvents.Push(cancelEvent.forget().take());
     UpdateTimer();
   }
   else {

@@ -7,7 +7,6 @@
 #include "Hal.h"
 #include "HalImpl.h"
 #include "HalSandbox.h"
-#include "mozilla/Util.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/Observer.h"
@@ -217,7 +216,7 @@ public:
   }
 
   void BroadcastInformation(const InfoType& aInfo) {
-    // It is possible for mObservers to be NULL here on some platforms,
+    // It is possible for mObservers to be nullptr here on some platforms,
     // because a call to BroadcastInformation gets queued up asynchronously
     // while RemoveObserver is running (and before the notifications are
     // disabled). The queued call can then get run after mObservers has
@@ -503,6 +502,13 @@ SetTimezone(const nsCString& aTimezoneSpec)
   PROXY_IF_SANDBOXED(SetTimezone(aTimezoneSpec));
 }
 
+int32_t
+GetTimezoneOffset()
+{
+  AssertMainThread();
+  RETURN_PROXY_IF_SANDBOXED(GetTimezoneOffset(), 0);
+}
+
 nsCString
 GetTimezone()
 {
@@ -744,14 +750,19 @@ SwitchState GetCurrentSwitchState(SwitchDevice aDevice)
   RETURN_PROXY_IF_SANDBOXED(GetCurrentSwitchState(aDevice), SWITCH_STATE_UNKNOWN);
 }
 
+void NotifySwitchStateFromInputDevice(SwitchDevice aDevice, SwitchState aState)
+{
+  PROXY_IF_SANDBOXED(NotifySwitchStateFromInputDevice(aDevice, aState));
+}
+
 typedef mozilla::ObserverList<SwitchEvent> SwitchObserverList;
 
-static SwitchObserverList *sSwitchObserverLists = NULL;
+static SwitchObserverList *sSwitchObserverLists = nullptr;
 
 static SwitchObserverList&
 GetSwitchObserverList(SwitchDevice aDevice) {
   MOZ_ASSERT(0 <= aDevice && aDevice < NUM_SWITCH_DEVICE); 
-  if (sSwitchObserverLists == NULL) {
+  if (sSwitchObserverLists == nullptr) {
     sSwitchObserverLists = new SwitchObserverList[NUM_SWITCH_DEVICE];
   }
   return sSwitchObserverLists[aDevice];
@@ -766,7 +777,7 @@ ReleaseObserversIfNeeded() {
 
   //The length of every list is 0, no observer in the list.
   delete [] sSwitchObserverLists;
-  sSwitchObserverLists = NULL;
+  sSwitchObserverLists = nullptr;
 }
 
 void
@@ -850,11 +861,14 @@ SetAlarm(int32_t aSeconds, int32_t aNanoseconds)
 void
 SetProcessPriority(int aPid,
                    ProcessPriority aPriority,
-                   ProcessCPUPriority aCPUPriority)
+                   ProcessCPUPriority aCPUPriority,
+                   uint32_t aBackgroundLRU)
 {
   // n.b. The sandboxed implementation crashes; SetProcessPriority works only
   // from the main process.
-  PROXY_IF_SANDBOXED(SetProcessPriority(aPid, aPriority, aCPUPriority));
+  MOZ_ASSERT(aBackgroundLRU == 0 || aPriority == PROCESS_PRIORITY_BACKGROUND);
+  PROXY_IF_SANDBOXED(SetProcessPriority(aPid, aPriority, aCPUPriority,
+                                        aBackgroundLRU));
 }
 
 // From HalTypes.h.
@@ -864,10 +878,14 @@ ProcessPriorityToString(ProcessPriority aPriority)
   switch (aPriority) {
   case PROCESS_PRIORITY_MASTER:
     return "MASTER";
+  case PROCESS_PRIORITY_PREALLOC:
+    return "PREALLOC";
   case PROCESS_PRIORITY_FOREGROUND_HIGH:
     return "FOREGROUND_HIGH";
   case PROCESS_PRIORITY_FOREGROUND:
     return "FOREGROUND";
+  case PROCESS_PRIORITY_FOREGROUND_KEYBOARD:
+    return "FOREGROUND_KEYBOARD";
   case PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE:
     return "BACKGROUND_PERCEIVABLE";
   case PROCESS_PRIORITY_BACKGROUND_HOMESCREEN:
@@ -900,6 +918,13 @@ ProcessPriorityToString(ProcessPriority aPriority,
     if (aCPUPriority == PROCESS_CPU_PRIORITY_LOW) {
       return "MASTER:CPU_LOW";
     }
+  case PROCESS_PRIORITY_PREALLOC:
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_NORMAL) {
+      return "PREALLOC:CPU_NORMAL";
+    }
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_LOW) {
+      return "PREALLOC:CPU_LOW";
+    }
   case PROCESS_PRIORITY_FOREGROUND_HIGH:
     if (aCPUPriority == PROCESS_CPU_PRIORITY_NORMAL) {
       return "FOREGROUND_HIGH:CPU_NORMAL";
@@ -913,6 +938,13 @@ ProcessPriorityToString(ProcessPriority aPriority,
     }
     if (aCPUPriority == PROCESS_CPU_PRIORITY_LOW) {
       return "FOREGROUND:CPU_LOW";
+    }
+  case PROCESS_PRIORITY_FOREGROUND_KEYBOARD:
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_NORMAL) {
+      return "FOREGROUND_KEYBOARD:CPU_NORMAL";
+    }
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_LOW) {
+      return "FOREGROUND_KEYBOARD:CPU_LOW";
     }
   case PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE:
     if (aCPUPriority == PROCESS_CPU_PRIORITY_NORMAL) {
@@ -1175,6 +1207,13 @@ StopDiskSpaceWatcher()
   AssertMainThread();
   PROXY_IF_SANDBOXED(StopDiskSpaceWatcher());
 }
+
+uint32_t
+GetTotalSystemMemory()
+{
+  return hal_impl::GetTotalSystemMemory();
+}
+
 
 } // namespace hal
 } // namespace mozilla

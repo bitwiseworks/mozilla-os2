@@ -34,25 +34,10 @@ this.SystemMessagePermissionsTable = {
   "bluetooth-dialer-command": {
     "telephony": []
   },
-  "bluetooth-requestconfirmation": {
-    "bluetooth": []
-  },
-  "bluetooth-requestpasskey": {
-    "bluetooth": []
-  },
-  "bluetooth-requestpincode": {
-    "bluetooth": []
-  },
-  "bluetooth-authorize": {
-    "bluetooth": []
-  },
   "bluetooth-cancel": {
     "bluetooth": []
   },
-  "bluetooth-pairedstatuschanged": {
-    "bluetooth": []
-  },
-  "bluetooth-hfp-status-changed": {
+  "bluetooth-hid-status-changed": {
     "bluetooth": []
   },
   "bluetooth-pairing-request": {
@@ -70,9 +55,15 @@ this.SystemMessagePermissionsTable = {
   "bluetooth-opp-transfer-start": {
     "bluetooth": []
   },
+  "connection": { },
+  "dummy-system-message": { }, // for system message testing framework
   "headset-button": { },
   "icc-stkcommand": {
     "settings": ["read", "write"]
+  },
+  "media-button": { },
+  "networkstats-alarm": {
+    "networkstats-manage": []
   },
   "notification": {
     "desktop-notification": []
@@ -82,6 +73,12 @@ this.SystemMessagePermissionsTable = {
   },
   "push-register": {
   	"push": []
+  },
+  "sms-delivery-success": {
+    "sms": []
+  },
+  "sms-read-success": {
+    "sms": []
   },
   "sms-received": {
     "sms": []
@@ -99,8 +96,27 @@ this.SystemMessagePermissionsTable = {
     "mobileconnection": []
   },
   "wappush-received": {
-    "sms": []
+    "wappush": []
   },
+  "cdma-info-rec-received": {
+    "mobileconnection": []
+  },
+  "nfc-manager-tech-discovered": {
+    "nfc-manager": []
+  },
+  "nfc-manager-tech-lost": {
+    "nfc-manager": []
+  },
+  "nfc-manager-send-file": {
+    "nfc-manager": []
+  },
+  "nfc-powerlevel-change": {
+    "settings": ["read", "write"]
+  },
+  "wifip2p-pairing-request": { },
+  "first-run-with-sim": {
+    "settings": ["read", "write"]
+  }
 };
 
 this.SystemMessagePermissionsChecker = {
@@ -233,18 +249,18 @@ this.SystemMessagePermissionsChecker = {
    * app's page at run-time based on the current app's permissions.
    * @param string aSysMsgName
    *        The system messsage name.
-   * @param string aPageURI
-   *        The app's page URI.
+   * @param string aPageURL
+   *        The app's page URL.
    * @param string aManifestURL
    *        The app's manifest URL.
    * @returns bool
    *        Is permitted or not.
    **/
   isSystemMessagePermittedToSend:
-    function isSystemMessagePermittedToSend(aSysMsgName, aPageURI, aManifestURL) {
+    function isSystemMessagePermittedToSend(aSysMsgName, aPageURL, aManifestURL) {
     debug("isSystemMessagePermittedToSend(): " +
           "aSysMsgName: " + aSysMsgName + ", " +
-          "aPageURI: " + aPageURI + ", " +
+          "aPageURL: " + aPageURL + ", " +
           "aManifestURL: " + aManifestURL);
 
     let permNames = this.getSystemMessagePermissions(aSysMsgName);
@@ -252,7 +268,7 @@ this.SystemMessagePermissionsChecker = {
       return false;
     }
 
-    let pageURI = Services.io.newURI(aPageURI, null, null);
+    let pageURI = Services.io.newURI(aPageURL, null, null);
     for (let permName in permNames) {
       let permNamesWithAccess = permNames[permName];
 

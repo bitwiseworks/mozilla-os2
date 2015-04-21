@@ -10,9 +10,7 @@
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "jsapi.h"
-#include "DictionaryHelpers.h"
 #include "CameraCommon.h"
-
 
 namespace mozilla {
 
@@ -173,30 +171,30 @@ public:
       return NS_ERROR_FAILURE;
     }
 
-    JSObject* o = JS_NewObject(aCx, nullptr, nullptr, nullptr);
+    JS::Rooted<JSObject*> o(aCx, JS_NewObject(aCx, nullptr, JS::NullPtr(), JS::NullPtr()));
     if (!o) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
 
-    JSString* s = JS_NewStringCopyZ(aCx, format);
-    JS::Value v = STRING_TO_JSVAL(s);
-    if (!JS_SetProperty(aCx, o, "format", &v)) {
+    JS::Rooted<JSString*> s(aCx, JS_NewStringCopyZ(aCx, format));
+    JS::Rooted<JS::Value> v(aCx, STRING_TO_JSVAL(s));
+    if (!JS_SetProperty(aCx, o, "format", v)) {
       return NS_ERROR_FAILURE;
     }
 
-    JSObject* video;
-    nsresult rv = mVideo.GetJsObject(aCx, &video);
+    JS::Rooted<JSObject*> video(aCx);
+    nsresult rv = mVideo.GetJsObject(aCx, video.address());
     NS_ENSURE_SUCCESS(rv, rv);
     v = OBJECT_TO_JSVAL(video);
-    if (!JS_SetProperty(aCx, o, "video", &v)) {
+    if (!JS_SetProperty(aCx, o, "video", v)) {
       return NS_ERROR_FAILURE;
     }
 
-    JSObject* audio;
-    rv = mAudio.GetJsObject(aCx, &audio);
+    JS::Rooted<JSObject*> audio(aCx);
+    rv = mAudio.GetJsObject(aCx, audio.address());
     NS_ENSURE_SUCCESS(rv, rv);
     v = OBJECT_TO_JSVAL(audio);
-    if (!JS_SetProperty(aCx, o, "audio", &v)) {
+    if (!JS_SetProperty(aCx, o, "audio", v)) {
       return NS_ERROR_FAILURE;
     }
 

@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CocoaFileUtils.h"
+#include "nsCocoaUtils.h"
 #include <Cocoa/Cocoa.h>
 #include "nsObjCExceptions.h"
 #include "nsDebug.h"
@@ -15,7 +16,8 @@ nsresult RevealFileInFinder(CFURLRef url)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  NS_ENSURE_ARG_POINTER(url);
+  if (NS_WARN_IF(!url))
+    return NS_ERROR_INVALID_ARG;
 
   NSAutoreleasePool* ap = [[NSAutoreleasePool alloc] init];
   BOOL success = [[NSWorkspace sharedWorkspace] selectFile:[(NSURL*)url path] inFileViewerRootedAtPath:@""];
@@ -30,7 +32,8 @@ nsresult OpenURL(CFURLRef url)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  NS_ENSURE_ARG_POINTER(url);
+  if (NS_WARN_IF(!url))
+    return NS_ERROR_INVALID_ARG;
 
   NSAutoreleasePool* ap = [[NSAutoreleasePool alloc] init];
   BOOL success = [[NSWorkspace sharedWorkspace] openURL:(NSURL*)url];
@@ -45,21 +48,28 @@ nsresult GetFileCreatorCode(CFURLRef url, OSType *creatorCode)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  NS_ENSURE_ARG_POINTER(url);
-  NS_ENSURE_ARG_POINTER(creatorCode);
+  if (NS_WARN_IF(!url) || NS_WARN_IF(!creatorCode))
+    return NS_ERROR_INVALID_ARG;
 
-  nsresult rv = NS_ERROR_FAILURE;
+  nsAutoreleasePool localPool;
 
-  NSAutoreleasePool* ap = [[NSAutoreleasePool alloc] init];
-  NSDictionary* dict = [[NSFileManager defaultManager] fileAttributesAtPath:[(NSURL*)url path] traverseLink:YES];
-  NSNumber* creatorNum = (NSNumber*)[dict objectForKey:NSFileHFSCreatorCode];
-  if (creatorNum) {
-    *creatorCode = [creatorNum unsignedLongValue];
-    rv = NS_OK;
+  NSString *resolvedPath = [[(NSURL*)url path] stringByResolvingSymlinksInPath];
+  if (!resolvedPath) {
+    return NS_ERROR_FAILURE;
   }
-  [ap release];
 
-  return rv;
+  NSDictionary* dict = [[NSFileManager defaultManager] attributesOfItemAtPath:resolvedPath error:nil];
+  if (!dict) {
+    return NS_ERROR_FAILURE;
+  }
+
+  NSNumber* creatorNum = (NSNumber*)[dict objectForKey:NSFileHFSCreatorCode];
+  if (!creatorNum) {
+    return NS_ERROR_FAILURE;
+  }
+
+  *creatorCode = [creatorNum unsignedLongValue];
+  return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
@@ -68,7 +78,8 @@ nsresult SetFileCreatorCode(CFURLRef url, OSType creatorCode)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  NS_ENSURE_ARG_POINTER(url);
+  if (NS_WARN_IF(!url))
+    return NS_ERROR_INVALID_ARG;
 
   NSAutoreleasePool* ap = [[NSAutoreleasePool alloc] init];
   NSDictionary* dict = [NSDictionary dictionaryWithObject:[NSNumber numberWithUnsignedLong:creatorCode] forKey:NSFileHFSCreatorCode];
@@ -83,21 +94,28 @@ nsresult GetFileTypeCode(CFURLRef url, OSType *typeCode)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  NS_ENSURE_ARG_POINTER(url);
-  NS_ENSURE_ARG_POINTER(typeCode);
+  if (NS_WARN_IF(!url) || NS_WARN_IF(!typeCode))
+    return NS_ERROR_INVALID_ARG;
 
-  nsresult rv = NS_ERROR_FAILURE;
+  nsAutoreleasePool localPool;
 
-  NSAutoreleasePool* ap = [[NSAutoreleasePool alloc] init];
-  NSDictionary* dict = [[NSFileManager defaultManager] fileAttributesAtPath:[(NSURL*)url path] traverseLink:YES];
-  NSNumber* typeNum = (NSNumber*)[dict objectForKey:NSFileHFSTypeCode];
-  if (typeNum) {
-    *typeCode = [typeNum unsignedLongValue];
-    rv = NS_OK;
+  NSString *resolvedPath = [[(NSURL*)url path] stringByResolvingSymlinksInPath];
+  if (!resolvedPath) {
+    return NS_ERROR_FAILURE;
   }
-  [ap release];
 
-  return rv;
+  NSDictionary* dict = [[NSFileManager defaultManager] attributesOfItemAtPath:resolvedPath error:nil];
+  if (!dict) {
+    return NS_ERROR_FAILURE;
+  }
+
+  NSNumber* typeNum = (NSNumber*)[dict objectForKey:NSFileHFSTypeCode];
+  if (!typeNum) {
+    return NS_ERROR_FAILURE;
+  }
+
+  *typeCode = [typeNum unsignedLongValue];
+  return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
@@ -106,7 +124,8 @@ nsresult SetFileTypeCode(CFURLRef url, OSType typeCode)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  NS_ENSURE_ARG_POINTER(url);
+  if (NS_WARN_IF(!url))
+    return NS_ERROR_INVALID_ARG;
 
   NSAutoreleasePool* ap = [[NSAutoreleasePool alloc] init];
   NSDictionary* dict = [NSDictionary dictionaryWithObject:[NSNumber numberWithUnsignedLong:typeCode] forKey:NSFileHFSTypeCode];

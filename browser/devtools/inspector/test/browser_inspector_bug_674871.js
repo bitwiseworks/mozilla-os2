@@ -7,6 +7,7 @@ function test()
 
   let doc;
   let iframeNode, iframeBodyNode;
+  let inspector;
 
   let iframeSrc = "<style>" +
                   "body {" +
@@ -45,56 +46,67 @@ function test()
     iframeBodyNode = iframeNode.contentDocument.querySelector("body");
     ok(iframeNode, "we have the iframe node");
     ok(iframeBodyNode, "we have the body node");
-    openInspector(runTests);
-  }
-
-  function runTests(inspector)
-  {
-    executeSoon(function() {
-      inspector.highlighter.once("highlighting", isTheIframeSelected);
-      moveMouseOver(iframeNode, 1, 1);
+    openInspector(aInspector => {
+      inspector = aInspector;
+      // Make sure the highlighter is shown so we can disable transitions
+      inspector.toolbox.highlighter.showBoxModel(getNodeFront(doc.body)).then(() => {
+        runTests();
+      });
     });
   }
 
-  function isTheIframeSelected()
+  function runTests()
   {
-    let inspector = getActiveInspector();
+    inspector.toolbox.highlighterUtils.startPicker().then(() => {
+      moveMouseOver(iframeNode, 1, 1, isTheIframeHighlighted);
+    });
+  }
 
-    is(inspector.selection.node, iframeNode, "selection matches node");
+  function isTheIframeHighlighted()
+  {
+    let {p1, p2, p3, p4} = getBoxModelStatus().border.points;
+    let {top, right, bottom, left} = iframeNode.getBoundingClientRect();
+
+    is(top, p1.y, "iframeRect.top === boxModelStatus.p1.y");
+    is(top, p2.y, "iframeRect.top === boxModelStatus.p2.y");
+    is(right, p2.x, "iframeRect.right === boxModelStatus.p2.x");
+    is(right, p3.x, "iframeRect.right === boxModelStatus.p3.x");
+    is(bottom, p3.y, "iframeRect.bottom === boxModelStatus.p3.y");
+    is(bottom, p4.y, "iframeRect.bottom === boxModelStatus.p4.y");
+    is(left, p1.x, "iframeRect.left === boxModelStatus.p1.x");
+    is(left, p4.x, "iframeRect.left === boxModelStatus.p4.x");
+
     iframeNode.style.marginBottom = doc.defaultView.innerHeight + "px";
     doc.defaultView.scrollBy(0, 40);
 
-    executeSoon(function() {
-      inspector.selection.once("new-node", isTheIframeContentSelected);
-      moveMouseOver(iframeNode, 40, 40);
+    moveMouseOver(iframeNode, 40, 40, isTheIframeContentHighlighted);
+  }
+
+  function isTheIframeContentHighlighted()
+  {
+    is(getHighlitNode(), iframeBodyNode, "highlighter shows the right node");
+
+    let outlineRect = getSimpleBorderRect();
+    is(outlineRect.height, 200, "highlighter height");
+
+    inspector.toolbox.highlighterUtils.stopPicker().then(() => {
+      let target = TargetFactory.forTab(gBrowser.selectedTab);
+      gDevTools.closeToolbox(target);
+      finishUp();
     });
   }
 
-  function isTheIframeContentSelected()
+  function finishUp()
   {
-    let inspector = getActiveInspector();
-    is(inspector.selection.node, iframeBodyNode, "selection matches node");
-    // 184 == 200 + 11(border) + 13(padding) - 40(scroll)
-    is(inspector.highlighter._highlightRect.height, 184,
-      "highlighter height");
-
-    let target = TargetFactory.forTab(gBrowser.selectedTab);
-    gDevTools.closeToolbox(target);
-    finishUp();
-  }
-
-  function finishUp() {
-    doc = iframeNode = iframeBodyNode = null;
+    doc = inspector = iframeNode = iframeBodyNode = null;
     gBrowser.removeCurrentTab();
     finish();
   }
 
-
-  function moveMouseOver(aElement, x, y)
+  function moveMouseOver(aElement, x, y, cb)
   {
+    inspector.toolbox.once("picker-node-hovered", cb);
     EventUtils.synthesizeMouse(aElement, x, y, {type: "mousemove"},
                                aElement.ownerDocument.defaultView);
   }
-
 }
-

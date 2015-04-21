@@ -1,10 +1,7 @@
-/* Copyright (c) 2007-2012 IETF Trust, CSIRO, Xiph.Org Foundation. All rights reserved.
+/* Copyright (c) 2007-2008 CSIRO
+   Copyright (c) 2007-2009 Xiph.Org Foundation
    Written by Jean-Marc Valin */
 /*
-
-   This file is extracted from RFC6716. Please see that RFC for additional
-   information.
-
    Redistribution and use in source and binary forms, with or without
    modification, are permitted provided that the following conditions
    are met:
@@ -15,11 +12,6 @@
    - Redistributions in binary form must reproduce the above copyright
    notice, this list of conditions and the following disclaimer in the
    documentation and/or other materials provided with the distribution.
-
-   - Neither the name of Internet Society, IETF or IETF Trust, nor the
-   names of specific contributors, may be used to endorse or promote
-   products derived from this software without specific prior written
-   permission.
 
    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
    ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -53,12 +45,12 @@
 
 void compute_pulse_cache(CELTMode *m, int LM);
 
-static inline int get_pulses(int i)
+static OPUS_INLINE int get_pulses(int i)
 {
    return i<8 ? i : (8 + (i&7)) << ((i>>3)-1);
 }
 
-static inline int bits2pulses(const CELTMode *m, int band, int LM, int bits)
+static OPUS_INLINE int bits2pulses(const CELTMode *m, int band, int LM, int bits)
 {
    int i;
    int lo, hi;
@@ -74,18 +66,18 @@ static inline int bits2pulses(const CELTMode *m, int band, int LM, int bits)
    {
       int mid = (lo+hi+1)>>1;
       /* OPT: Make sure this is implemented with a conditional move */
-      if (cache[mid] >= bits)
+      if ((int)cache[mid] >= bits)
          hi = mid;
       else
          lo = mid;
    }
-   if (bits- (lo == 0 ? -1 : cache[lo]) <= cache[hi]-bits)
+   if (bits- (lo == 0 ? -1 : (int)cache[lo]) <= (int)cache[hi]-bits)
       return lo;
    else
       return hi;
 }
 
-static inline int pulses2bits(const CELTMode *m, int band, int LM, int pulses)
+static OPUS_INLINE int pulses2bits(const CELTMode *m, int band, int LM, int pulses)
 {
    const unsigned char *cache;
 
@@ -104,6 +96,6 @@ static inline int pulses2bits(const CELTMode *m, int band, int LM, int pulses)
  @return Total number of bits allocated
 */
 int compute_allocation(const CELTMode *m, int start, int end, const int *offsets, const int *cap, int alloc_trim, int *intensity, int *dual_stero,
-      opus_int32 total, opus_int32 *balance, int *pulses, int *ebits, int *fine_priority, int C, int LM, ec_ctx *ec, int encode, int prev);
+      opus_int32 total, opus_int32 *balance, int *pulses, int *ebits, int *fine_priority, int C, int LM, ec_ctx *ec, int encode, int prev, int signalBandwidth);
 
 #endif

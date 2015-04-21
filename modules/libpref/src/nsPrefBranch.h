@@ -3,6 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef nsPrefBranch_h
+#define nsPrefBranch_h
+
 #include "nsCOMPtr.h"
 #include "nsIObserver.h"
 #include "nsIPrefBranch.h"
@@ -13,18 +16,22 @@
 #include "nsIRelativeFilePref.h"
 #include "nsIFile.h"
 #include "nsString.h"
-#include "nsVoidArray.h"
 #include "nsTArray.h"
 #include "nsWeakReference.h"
 #include "nsClassHashtable.h"
 #include "nsCRT.h"
-#include "prbit.h"
-#include "nsTraceRefcnt.h"
+#include "nsISupportsImpl.h"
 #include "mozilla/HashFunctions.h"
+#include "mozilla/MemoryReporting.h"
+
+namespace mozilla {
+class PreferenceServiceReporter;
+} // namespace mozilla;
 
 class nsPrefBranch;
 
 class PrefCallback : public PLDHashEntryHdr {
+  friend class mozilla::PreferenceServiceReporter;
 
   public:
     typedef PrefCallback* KeyType;
@@ -172,6 +179,7 @@ class nsPrefBranch : public nsIPrefBranchInternal,
                      public nsIObserver,
                      public nsSupportsWeakReference
 {
+  friend class mozilla::PreferenceServiceReporter;
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPREFBRANCH
@@ -185,15 +193,15 @@ public:
 
   nsresult RemoveObserverFromMap(const char *aDomain, nsISupports *aObserver);
 
-  static nsresult NotifyObserver(const char *newpref, void *data);
+  static void NotifyObserver(const char *newpref, void *data);
 
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf);
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
 protected:
   nsPrefBranch()    /* disallow use of this constructer */
     { }
 
-  nsresult   GetDefaultFromPropertiesFile(const char *aPrefName, PRUnichar **return_buf);
+  nsresult   GetDefaultFromPropertiesFile(const char *aPrefName, char16_t **return_buf);
   // As SetCharPref, but without any check on the length of |aValue|
   nsresult   SetCharPrefInternal(const char *aPrefName, const char *aValue);
   // Reject strings that are more than 1Mb, warn if strings are more than 16kb
@@ -233,9 +241,9 @@ public:
   nsresult Init();
 
 private:
-  NS_IMETHOD GetData(PRUnichar**);
-  NS_IMETHOD SetData(const PRUnichar* aData);
-  NS_IMETHOD SetDataWithLength(uint32_t aLength, const PRUnichar *aData);
+  NS_IMETHOD GetData(char16_t**);
+  NS_IMETHOD SetData(const char16_t* aData);
+  NS_IMETHOD SetDataWithLength(uint32_t aLength, const char16_t *aData);
 
   nsCOMPtr<nsISupportsString> mUnicodeString;
 };
@@ -254,3 +262,5 @@ private:
   nsCOMPtr<nsIFile> mFile;
   nsCString mRelativeToKey;
 };
+
+#endif

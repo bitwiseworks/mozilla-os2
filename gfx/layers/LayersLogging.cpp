@@ -6,6 +6,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "LayersLogging.h"
+#include <stdint.h>                     // for uint8_t
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxColor.h"                   // for gfxRGBA
+#include "mozilla/gfx/Matrix.h"         // for Matrix4x4, Matrix
+#include "nsDebug.h"                    // for NS_ERROR
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRect.h"                     // for nsIntRect
+#include "nsSize.h"                     // for nsIntSize
 
 using namespace mozilla::gfx;
 
@@ -22,17 +30,17 @@ AppendToString(nsACString& s, const void* p,
 }
 
 nsACString&
-AppendToString(nsACString& s, const gfxPattern::GraphicsFilter& f,
+AppendToString(nsACString& s, const GraphicsFilter& f,
                const char* pfx, const char* sfx)
 {
   s += pfx;
   switch (f) {
-  case gfxPattern::FILTER_FAST:      s += "fast"; break;
-  case gfxPattern::FILTER_GOOD:      s += "good"; break;
-  case gfxPattern::FILTER_BEST:      s += "best"; break;
-  case gfxPattern::FILTER_NEAREST:   s += "nearest"; break;
-  case gfxPattern::FILTER_BILINEAR:  s += "bilinear"; break;
-  case gfxPattern::FILTER_GAUSSIAN:  s += "gaussian"; break;
+  case GraphicsFilter::FILTER_FAST:      s += "fast"; break;
+  case GraphicsFilter::FILTER_GOOD:      s += "good"; break;
+  case GraphicsFilter::FILTER_BEST:      s += "best"; break;
+  case GraphicsFilter::FILTER_NEAREST:   s += "nearest"; break;
+  case GraphicsFilter::FILTER_BILINEAR:  s += "bilinear"; break;
+  case GraphicsFilter::FILTER_GAUSSIAN:  s += "gaussian"; break;
   default:
     NS_ERROR("unknown filter type");
     s += "???";
@@ -57,31 +65,6 @@ AppendToString(nsACString& s, const gfxRGBA& c,
   s += nsPrintfCString(
     "rgba(%d, %d, %d, %g)",
     uint8_t(c.r*255.0), uint8_t(c.g*255.0), uint8_t(c.b*255.0), c.a);
-  return s += sfx;
-}
-
-nsACString&
-AppendToString(nsACString& s, const gfx3DMatrix& m,
-               const char* pfx, const char* sfx)
-{
-  s += pfx;
-  if (m.IsIdentity())
-    s += "[ I ]";
-  else {
-    gfxMatrix matrix;
-    if (m.Is2D(&matrix)) {
-      s += nsPrintfCString(
-        "[ %g %g; %g %g; %g %g; ]",
-        matrix.xx, matrix.yx, matrix.xy, matrix.yy, matrix.x0, matrix.y0);
-    } else {
-      s += nsPrintfCString(
-        "[ %g %g %g %g; %g %g %g %g; %g %g %g %g; %g %g %g %g; ]",
-        m._11, m._12, m._13, m._14,
-        m._21, m._22, m._23, m._24,
-        m._31, m._32, m._33, m._34,
-        m._41, m._42, m._43, m._44);
-    }
-  }
   return s += sfx;
 }
 
@@ -135,9 +118,10 @@ AppendToString(nsACString& s, const FrameMetrics& m,
 {
   s += pfx;
   AppendToString(s, m.mViewport, "{ viewport=");
-  AppendToString(s, m.mScrollOffset, " viewportScroll=");
+  AppendToString(s, m.GetScrollOffset(), " viewportScroll=");
   AppendToString(s, m.mDisplayPort, " displayport=");
-  AppendToString(s, m.mScrollId, " scrollId=", " }");
+  AppendToString(s, m.mScrollableRect, " scrollableRect=");
+  AppendToString(s, m.GetScrollId(), " scrollId=", " }");
   return s += sfx;
 }
 
@@ -184,8 +168,9 @@ AppendToString(nsACString& s, const Filter filter,
   s += pfx;
 
   switch (filter) {
-    case FILTER_LINEAR: s += "FILTER_LINEAR"; break;
-    case FILTER_POINT: s += "FILTER_POINT"; break;
+    case Filter::GOOD: s += "Filter::GOOD"; break;
+    case Filter::LINEAR: s += "Filter::LINEAR"; break;
+    case Filter::POINT: s += "Filter::POINT"; break;
   }
   return s += sfx;
 }
@@ -210,12 +195,11 @@ AppendToString(nsACString& s, TextureFlags flags,
   } \
 }
     bool previous = false;
-    AppendFlag(UseNearestFilter);
-    AppendFlag(NeedsYFlip);
-    AppendFlag(ForceSingleTile);
-    AppendFlag(AllowRepeat);
-    AppendFlag(NewTile);
-    AppendFlag(HostRelease);
+    AppendFlag(TEXTURE_USE_NEAREST_FILTER);
+    AppendFlag(TEXTURE_NEEDS_Y_FLIP);
+    AppendFlag(TEXTURE_DISALLOW_BIGIMAGE);
+    AppendFlag(TEXTURE_ALLOW_REPEAT);
+    AppendFlag(TEXTURE_NEW_TILE);
 
 #undef AppendFlag
   }
@@ -228,14 +212,14 @@ AppendToString(nsACString& s, mozilla::gfx::SurfaceFormat format,
 {
   s += pfx;
   switch (format) {
-  case FORMAT_B8G8R8A8:  s += "FORMAT_B8G8R8A8"; break;
-  case FORMAT_B8G8R8X8:  s += "FORMAT_B8G8R8X8"; break;
-  case FORMAT_R8G8B8A8:  s += "FORMAT_R8G8B8A8"; break;
-  case FORMAT_R8G8B8X8:  s += "FORMAT_R8G8B8X8"; break;
-  case FORMAT_R5G6B5:    s += "FORMAT_R5G6B5"; break;
-  case FORMAT_A8:        s += "FORMAT_A8"; break;
-  case FORMAT_YUV:       s += "FORMAT_YUV"; break;
-  case FORMAT_UNKNOWN:   s += "FORMAT_UNKNOWN"; break;
+  case SurfaceFormat::B8G8R8A8:  s += "SurfaceFormat::B8G8R8A8"; break;
+  case SurfaceFormat::B8G8R8X8:  s += "SurfaceFormat::B8G8R8X8"; break;
+  case SurfaceFormat::R8G8B8A8:  s += "SurfaceFormat::R8G8B8A8"; break;
+  case SurfaceFormat::R8G8B8X8:  s += "SurfaceFormat::R8G8B8X8"; break;
+  case SurfaceFormat::R5G6B5:    s += "SurfaceFormat::R5G6B5"; break;
+  case SurfaceFormat::A8:        s += "SurfaceFormat::A8"; break;
+  case SurfaceFormat::YUV:       s += "SurfaceFormat::YUV"; break;
+  case SurfaceFormat::UNKNOWN:   s += "SurfaceFormat::UNKNOWN"; break;
   }
 
   return s += sfx;

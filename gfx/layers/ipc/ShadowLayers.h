@@ -8,55 +8,53 @@
 #ifndef mozilla_layers_ShadowLayers_h
 #define mozilla_layers_ShadowLayers_h 1
 
-#include "gfxASurface.h"
-#include "GLDefs.h"
-
-#include "ImageLayers.h"
-#include "mozilla/layers/Compositor.h"
-#include "mozilla/ipc/SharedMemory.h"
-#include "mozilla/WidgetUtils.h"
-#include "mozilla/layers/ISurfaceAllocator.h"
-#include "mozilla/dom/ScreenOrientation.h"
+#include <stddef.h>                     // for size_t
+#include <stdint.h>                     // for uint64_t
+#include "gfxTypes.h"
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/WidgetUtils.h"        // for ScreenRotation
+#include "mozilla/dom/ScreenOrientation.h"  // for ScreenOrientation
+#include "mozilla/ipc/SharedMemory.h"   // for SharedMemory, etc
 #include "mozilla/layers/CompositableForwarder.h"
-#include "mozilla/layers/CompositorTypes.h"
-
-class gfxSharedImageSurface;
+#include "mozilla/layers/CompositorTypes.h"  // for OpenMode, etc
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsTArrayForwardDeclare.h"     // for InfallibleTArray
+ 
+struct nsIntPoint;
+struct nsIntRect;
 
 namespace mozilla {
-
-namespace gl {
-class GLContext;
-class TextureImage;
-}
-
 namespace layers {
 
-class CompositableClient;
-class Edit;
+class ClientTiledLayerBuffer;
+class CanvasClient;
+class CanvasLayerComposite;
+class CanvasSurface;
+class ColorLayerComposite;
+class CompositableChild;
+class ContainerLayerComposite;
+class ContentClient;
+class ContentClientRemote;
 class EditReply;
+class ImageClient;
+class ImageLayerComposite;
+class Layer;
 class OptionalThebesBuffer;
 class PLayerChild;
 class PLayerTransactionChild;
 class PLayerTransactionParent;
-class ShadowableLayer;
-class ThebesLayerComposite;
-class ContainerLayerComposite;
-class ImageLayerComposite;
-class ColorLayerComposite;
-class CanvasLayerComposite;
+class LayerTransactionChild;
 class RefLayerComposite;
+class ShadowableLayer;
+class ShmemTextureClient;
 class SurfaceDescriptor;
+class TextureClient;
+class ThebesLayerComposite;
 class ThebesBuffer;
+class ThebesBufferData;
 class TiledLayerComposer;
 class Transaction;
-class SurfaceDescriptor;
-class CanvasSurface;
-class TextureClientShmem;
-class ContentClientRemote;
-class CompositableChild;
-class ImageClient;
-class CanvasClient;
-class ContentClient;
 
 
 /**
@@ -134,9 +132,8 @@ class ContentClient;
 
 class ShadowLayerForwarder : public CompositableForwarder
 {
-  friend class AutoOpenSurface;
-  friend class TextureClientShmem;
   friend class ContentClientIncremental;
+  friend class ClientLayerManager;
 
 public:
   virtual ~ShadowLayerForwarder();
@@ -147,20 +144,12 @@ public:
    */
   void Connect(CompositableClient* aCompositable);
 
-  virtual void CreatedSingleBuffer(CompositableClient* aCompositable,
-                                   const SurfaceDescriptor& aDescriptor,
-                                   const TextureInfo& aTextureInfo,
-                                   const SurfaceDescriptor* aDescriptorOnWhite = nullptr) MOZ_OVERRIDE;
+  virtual PTextureChild* CreateTexture(const SurfaceDescriptor& aSharedData,
+                                       TextureFlags aFlags) MOZ_OVERRIDE;
+
   virtual void CreatedIncrementalBuffer(CompositableClient* aCompositable,
                                         const TextureInfo& aTextureInfo,
                                         const nsIntRect& aBufferRect) MOZ_OVERRIDE;
-  virtual void CreatedDoubleBuffer(CompositableClient* aCompositable,
-                                   const SurfaceDescriptor& aFrontDescriptor,
-                                   const SurfaceDescriptor& aBackDescriptor,
-                                   const TextureInfo& aTextureInfo,
-                                   const SurfaceDescriptor* aFrontDescriptorOnWhite = nullptr,
-                                   const SurfaceDescriptor* aBackDescriptorOnWhite = nullptr) MOZ_OVERRIDE;
-  virtual void DestroyThebesBuffer(CompositableClient* aCompositable) MOZ_OVERRIDE;
 
   /**
    * Adds an edit in the layers transaction in order to attach
@@ -209,16 +198,6 @@ public:
   void CreatedRefLayer(ShadowableLayer* aRef);
 
   /**
-   * The specified layer is destroying its buffers.
-   * |aBackBufferToDestroy| is deallocated when this transaction is
-   * posted to the parent.  During the parent-side transaction, the
-   * shadow is told to destroy its front buffer.  This can happen when
-   * a new front/back buffer pair have been created because of a layer
-   * resize, e.g.
-   */
-  virtual void DestroyedThebesBuffer(const SurfaceDescriptor& aBackBufferToDestroy) MOZ_OVERRIDE;
-
-  /**
    * At least one attribute of |aMutant| has changed, and |aMutant|
    * needs to sync to its shadow layer.  This initial implementation
    * forwards all attributes when any is mutated.
@@ -228,17 +207,17 @@ public:
   void SetRoot(ShadowableLayer* aRoot);
   /**
    * Insert |aChild| after |aAfter| in |aContainer|.  |aAfter| can be
-   * NULL to indicated that |aChild| should be appended to the end of
+   * nullptr to indicated that |aChild| should be appended to the end of
    * |aContainer|'s child list.
    */
   void InsertAfter(ShadowableLayer* aContainer,
                    ShadowableLayer* aChild,
-                   ShadowableLayer* aAfter=NULL);
+                   ShadowableLayer* aAfter = nullptr);
   void RemoveChild(ShadowableLayer* aContainer,
                    ShadowableLayer* aChild);
   void RepositionChild(ShadowableLayer* aContainer,
                        ShadowableLayer* aChild,
-                       ShadowableLayer* aAfter=NULL);
+                       ShadowableLayer* aAfter = nullptr);
 
   /**
    * Set aMaskLayer as the mask on aLayer.
@@ -251,14 +230,10 @@ public:
                ShadowableLayer* aMaskLayer);
 
   /**
-   * Notify the compositor that a tiled layer buffer has changed
-   * that needs to be synced to the shadow retained copy. The tiled
-   * layer buffer will operate directly on the shadow retained buffer
-   * and is free to choose it's own internal representation (double buffering,
-   * copy on write, tiling).
+   * See CompositableForwarder::UseTiledLayerBuffer
    */
-  virtual void PaintedTiledLayerBuffer(CompositableClient* aCompositable,
-                                       BasicTiledLayerBuffer* aTiledLayerBuffer) MOZ_OVERRIDE;
+  virtual void UseTiledLayerBuffer(CompositableClient* aCompositable,
+                                   const SurfaceDescriptorTiles& aTileLayerDescriptor) MOZ_OVERRIDE;
 
   /**
    * Notify the compositor that a compositable will be updated asynchronously
@@ -267,20 +242,10 @@ public:
    */
   void AttachAsyncCompositable(PLayerTransactionChild* aLayer, uint64_t aID);
 
-  /**
-   * Communicate to the compositor that the texture identified by aLayer
-   * and aIdentifier has been updated to aImage.
-   */
-  virtual void UpdateTexture(CompositableClient* aCompositable,
-                             TextureIdentifier aTextureId,
-                             SurfaceDescriptor* aDescriptor) MOZ_OVERRIDE;
+  virtual void RemoveTextureFromCompositable(CompositableClient* aCompositable,
+                                             TextureClient* aTexture) MOZ_OVERRIDE;
 
-  /**
-   * Same as above, but performs an asynchronous layer transaction
-   */
-  virtual void UpdateTextureNoSwap(CompositableClient* aCompositable,
-                                   TextureIdentifier aTextureId,
-                                   SurfaceDescriptor* aDescriptor) MOZ_OVERRIDE;
+  virtual void RemoveTexture(TextureClient* aTexture) MOZ_OVERRIDE;
 
   /**
    * Communicate to the compositor that aRegion in the texture identified by aLayer
@@ -304,25 +269,41 @@ public:
                          const nsIntRect& aRect);
 
   /**
+   * See CompositableForwarder::UpdatedTexture
+   */
+  virtual void UpdatedTexture(CompositableClient* aCompositable,
+                              TextureClient* aTexture,
+                              nsIntRegion* aRegion) MOZ_OVERRIDE;
+
+  /**
+   * See CompositableForwarder::UseTexture
+   */
+  virtual void UseTexture(CompositableClient* aCompositable,
+                          TextureClient* aClient) MOZ_OVERRIDE;
+  virtual void UseComponentAlphaTextures(CompositableClient* aCompositable,
+                                         TextureClient* aClientOnBlack,
+                                         TextureClient* aClientOnWhite) MOZ_OVERRIDE;
+
+  /**
    * End the current transaction and forward it to LayerManagerComposite.
    * |aReplies| are directions from the LayerManagerComposite to the
    * caller of EndTransaction().
    */
-  bool EndTransaction(InfallibleTArray<EditReply>* aReplies);
+  bool EndTransaction(InfallibleTArray<EditReply>* aReplies,
+                      const nsIntRegion& aRegionToClear,
+                      bool aScheduleComposite,
+                      bool* aSent);
 
   /**
    * Set an actor through which layer updates will be pushed.
    */
-  void SetShadowManager(PLayerTransactionChild* aShadowManager)
-  {
-    mShadowManager = aShadowManager;
-  }
+  void SetShadowManager(PLayerTransactionChild* aShadowManager);
 
   /**
    * True if this is forwarding to a LayerManagerComposite.
    */
   bool HasShadowManager() const { return !!mShadowManager; }
-  PLayerTransactionChild* GetShadowManager() const { return mShadowManager; }
+  LayerTransactionChild* GetShadowManager() const { return mShadowManager.get(); }
 
   virtual void WindowOverlayChanged() { mWindowOverlayChanged = true; }
 
@@ -361,12 +342,15 @@ public:
 
   // ISurfaceAllocator
   virtual bool AllocUnsafeShmem(size_t aSize,
-                                ipc::SharedMemory::SharedMemoryType aType,
-                                ipc::Shmem* aShmem) MOZ_OVERRIDE;
+                                mozilla::ipc::SharedMemory::SharedMemoryType aType,
+                                mozilla::ipc::Shmem* aShmem) MOZ_OVERRIDE;
   virtual bool AllocShmem(size_t aSize,
-                          ipc::SharedMemory::SharedMemoryType aType,
-                          ipc::Shmem* aShmem) MOZ_OVERRIDE;
-  virtual void DeallocShmem(ipc::Shmem& aShmem) MOZ_OVERRIDE;
+                          mozilla::ipc::SharedMemory::SharedMemoryType aType,
+                          mozilla::ipc::Shmem* aShmem) MOZ_OVERRIDE;
+  virtual void DeallocShmem(mozilla::ipc::Shmem& aShmem) MOZ_OVERRIDE;
+
+  virtual bool IPCOpen() const MOZ_OVERRIDE;
+  virtual bool IsSameProcess() const MOZ_OVERRIDE;
 
   /**
    * Construct a shadow of |aLayer| on the "other side", at the
@@ -381,71 +365,32 @@ public:
 
   static void PlatformSyncBeforeUpdate();
 
-  static already_AddRefed<gfxASurface>
-  OpenDescriptor(OpenMode aMode, const SurfaceDescriptor& aSurface);
-
 protected:
   ShadowLayerForwarder();
 
-  PLayerTransactionChild* mShadowManager;
+#ifdef DEBUG
+  void CheckSurfaceDescriptor(const SurfaceDescriptor* aDescriptor) const;
+#else
+  void CheckSurfaceDescriptor(const SurfaceDescriptor* aDescriptor) const {}
+#endif
+
+  RefPtr<LayerTransactionChild> mShadowManager;
 
 #ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
   // from ISurfaceAllocator
-  virtual PGrallocBufferChild* AllocGrallocBuffer(const gfxIntSize& aSize,
+  virtual PGrallocBufferChild* AllocGrallocBuffer(const gfx::IntSize& aSize,
                                                   uint32_t aFormat,
                                                   uint32_t aUsage,
                                                   MaybeMagicGrallocBufferHandle* aHandle) MOZ_OVERRIDE;
+
+  virtual void DeallocGrallocBuffer(PGrallocBufferChild* aChild) MOZ_OVERRIDE;
 #endif
 
 private:
-  /**
-   * Try to query the content type efficiently, but at worst map the
-   * surface and return it in *aSurface.
-   */
-  static gfxContentType
-  GetDescriptorSurfaceContentType(const SurfaceDescriptor& aDescriptor,
-                                  OpenMode aMode,
-                                  gfxASurface** aSurface);
-  /**
-   * It can be expensive to open a descriptor just to query its
-   * content type.  If the platform impl can do this cheaply, it will
-   * set *aContent and return true.
-   */
-  static bool
-  PlatformGetDescriptorSurfaceContentType(const SurfaceDescriptor& aDescriptor,
-                                          OpenMode aMode,
-                                          gfxContentType* aContent,
-                                          gfxASurface** aSurface);
-  // (Same as above, but for surface size.)
-  static gfxIntSize
-  GetDescriptorSurfaceSize(const SurfaceDescriptor& aDescriptor,
-                           OpenMode aMode,
-                           gfxASurface** aSurface);
-  static bool
-  PlatformGetDescriptorSurfaceSize(const SurfaceDescriptor& aDescriptor,
-                                   OpenMode aMode,
-                                   gfxIntSize* aSize,
-                                   gfxASurface** aSurface);
-
-  static already_AddRefed<gfxASurface>
-  PlatformOpenDescriptor(OpenMode aMode, const SurfaceDescriptor& aDescriptor);
-
-  /**
-   * Make this descriptor unusable for gfxASurface clients. A
-   * private interface with AutoOpenSurface.
-   */
-  static void
-  CloseDescriptor(const SurfaceDescriptor& aDescriptor);
-
-  static bool
-  PlatformCloseDescriptor(const SurfaceDescriptor& aDescriptor);
-
-  bool PlatformDestroySharedSurface(SurfaceDescriptor* aSurface);
 
   Transaction* mTxn;
-
+  DiagnosticTypes mDiagnosticTypes;
   bool mIsFirstPaint;
-  bool mDrawColoredBorders;
   bool mWindowOverlayChanged;
 };
 
@@ -472,13 +417,13 @@ public:
 
   /**
    * Return the IPC handle to a Shadow*Layer referring to this if one
-   * exists, NULL if not.
+   * exists, nullptr if not.
    */
   PLayerChild* GetShadow() { return mShadow; }
 
   virtual CompositableClient* GetCompositableClient() { return nullptr; }
 protected:
-  ShadowableLayer() : mShadow(NULL) {}
+  ShadowableLayer() : mShadow(nullptr) {}
 
   PLayerChild* mShadow;
 };

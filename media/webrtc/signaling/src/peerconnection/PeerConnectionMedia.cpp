@@ -20,10 +20,11 @@
 #include "MediaStreamList.h"
 #include "nsIScriptGlobalObject.h"
 #include "mozilla/Preferences.h"
-#include "jsapi.h"
+#include "mozilla/dom/RTCStatsReportBinding.h"
 #endif
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 namespace sipcc {
 
@@ -114,6 +115,16 @@ void RemoteSourceStreamInfo::DetachMedia_m()
   mMediaStream = nullptr;
 }
 
+already_AddRefed<PeerConnectionImpl>
+PeerConnectionImpl::Constructor(const dom::GlobalObject& aGlobal, ErrorResult& rv)
+{
+  nsRefPtr<PeerConnectionImpl> pc = new PeerConnectionImpl(&aGlobal);
+
+  CSFLogDebug(logTag, "Created PeerConnection: %p", pc.get());
+
+  return pc.forget();
+}
+
 PeerConnectionImpl* PeerConnectionImpl::CreatePeerConnection()
 {
   PeerConnectionImpl *pc = new PeerConnectionImpl();
@@ -127,7 +138,7 @@ PeerConnectionImpl* PeerConnectionImpl::CreatePeerConnection()
 PeerConnectionMedia::PeerConnectionMedia(PeerConnectionImpl *parent)
     : mParent(parent),
       mLocalSourceStreamsLock("PeerConnectionMedia.mLocalSourceStreamsLock"),
-      mIceCtx(NULL),
+      mIceCtx(nullptr),
       mDNSResolver(new mozilla::NrIceResolver()),
       mMainThread(mParent->GetMainThread()),
       mSTSThread(mParent->GetSTSThread()) {}
@@ -137,7 +148,7 @@ nsresult PeerConnectionMedia::Init(const std::vector<NrIceStunServer>& stun_serv
 {
   // TODO(ekr@rtfm.com): need some way to set not offerer later
   // Looks like a bug in the NrIceCtx API.
-  mIceCtx = NrIceCtx::Create("PC:" + mParent->GetHandle(), true);
+  mIceCtx = NrIceCtx::Create("PC:" + mParent->GetName(), true);
   if(!mIceCtx) {
     CSFLogError(logTag, "%s: Failed to create Ice Context", __FUNCTION__);
     return NS_ERROR_FAILURE;
@@ -169,22 +180,22 @@ nsresult PeerConnectionMedia::Init(const std::vector<NrIceStunServer>& stun_serv
     CSFLogError(logTag, "%s: Failed to get dns resolver", __FUNCTION__);
     return rv;
   }
-  mIceCtx->SignalGatheringCompleted.connect(this,
-                                            &PeerConnectionMedia::IceGatheringCompleted);
-  mIceCtx->SignalCompleted.connect(this,
-                                   &PeerConnectionMedia::IceCompleted);
-  mIceCtx->SignalFailed.connect(this,
-                                &PeerConnectionMedia::IceFailed);
+  mIceCtx->SignalGatheringStateChange.connect(
+      this,
+      &PeerConnectionMedia::IceGatheringStateChange_s);
+  mIceCtx->SignalConnectionStateChange.connect(
+      this,
+      &PeerConnectionMedia::IceConnectionStateChange_s);
 
   // Create three streams to start with.
   // One each for audio, video and DataChannel
   // TODO: this will be re-visited
   RefPtr<NrIceMediaStream> audioStream =
-    mIceCtx->CreateStream((mParent->GetHandle()+"/stream1/audio").c_str(), 2);
+    mIceCtx->CreateStream((mParent->GetName()+": stream1/audio").c_str(), 2);
   RefPtr<NrIceMediaStream> videoStream =
-    mIceCtx->CreateStream((mParent->GetHandle()+"/stream2/video").c_str(), 2);
+    mIceCtx->CreateStream((mParent->GetName()+": stream2/video").c_str(), 2);
   RefPtr<NrIceMediaStream> dcStream =
-    mIceCtx->CreateStream((mParent->GetHandle()+"/stream3/data").c_str(), 2);
+    mIceCtx->CreateStream((mParent->GetName()+": stream3/data").c_str(), 2);
 
   if (!audioStream) {
     CSFLogError(logTag, "%s: audio stream is NULL", __FUNCTION__);
@@ -236,6 +247,11 @@ PeerConnectionMedia::AddStream(nsIDOMMediaStream* aMediaStream, uint32_t *stream
 
   // Adding tracks here based on nsDOMMediaStream expectation settings
   uint32_t hints = stream->GetHintContents();
+#ifdef MOZILLA_INTERNAL_API
+  if (!Preferences::GetBool("media.peerconnection.video.enabled", true)) {
+    hints &= ~(DOMMediaStream::HINT_CONTENTS_VIDEO);
+  }
+#endif
 
   if (!(hints & (DOMMediaStream::HINT_CONTENTS_AUDIO |
         DOMMediaStream::HINT_CONTENTS_VIDEO))) {
@@ -352,7 +368,7 @@ PeerConnectionMedia::ShutdownMediaTransport_s()
   disconnect_all();
   mTransportFlows.clear();
   mIceStreams.clear();
-  mIceCtx = NULL;
+  mIceCtx = nullptr;
 
   mMainThread->Dispatch(WrapRunnable(this, &PeerConnectionMedia::SelfDestruct_m),
                         NS_DISPATCH_NORMAL);
@@ -362,7 +378,7 @@ LocalSourceStreamInfo*
 PeerConnectionMedia::GetLocalStream(int aIndex)
 {
   if(aIndex < 0 || aIndex >= (int) mLocalSourceStreams.Length()) {
-    return NULL;
+    return nullptr;
   }
 
   MOZ_ASSERT(mLocalSourceStreams[aIndex]);
@@ -373,11 +389,83 @@ RemoteSourceStreamInfo*
 PeerConnectionMedia::GetRemoteStream(int aIndex)
 {
   if(aIndex < 0 || aIndex >= (int) mRemoteSourceStreams.Length()) {
-    return NULL;
+    return nullptr;
   }
 
   MOZ_ASSERT(mRemoteSourceStreams[aIndex]);
   return mRemoteSourceStreams[aIndex];
+}
+
+bool
+PeerConnectionMedia::SetUsingBundle_m(int level, bool decision)
+{
+  ASSERT_ON_THREAD(mMainThread);
+  for (size_t i = 0; i < mRemoteSourceStreams.Length(); ++i) {
+    if (mRemoteSourceStreams[i]->SetUsingBundle_m(level, decision)) {
+      // Found the MediaPipeline for |level|
+      return true;
+    }
+  }
+  CSFLogWarn(logTag, "Could not locate level %d to set bundle flag to %s",
+                     static_cast<int>(level),
+                     decision ? "true" : "false");
+  return false;
+}
+
+static void
+UpdateFilterFromRemoteDescription_s(
+  RefPtr<mozilla::MediaPipeline> receive,
+  RefPtr<mozilla::MediaPipeline> transmit,
+  nsAutoPtr<mozilla::MediaPipelineFilter> filter) {
+
+  // Update filter, and make a copy of the final version.
+  mozilla::MediaPipelineFilter *finalFilter(
+    receive->UpdateFilterFromRemoteDescription_s(filter));
+
+  if (finalFilter) {
+    filter = new mozilla::MediaPipelineFilter(*finalFilter);
+  }
+
+  // Set same filter on transmit pipeline too.
+  transmit->UpdateFilterFromRemoteDescription_s(filter);
+}
+
+bool
+PeerConnectionMedia::UpdateFilterFromRemoteDescription_m(
+    int level,
+    nsAutoPtr<mozilla::MediaPipelineFilter> filter)
+{
+  ASSERT_ON_THREAD(mMainThread);
+
+  RefPtr<mozilla::MediaPipeline> receive;
+  for (size_t i = 0; !receive && i < mRemoteSourceStreams.Length(); ++i) {
+    receive = mRemoteSourceStreams[i]->GetPipelineByLevel_m(level);
+  }
+
+  RefPtr<mozilla::MediaPipeline> transmit;
+  for (size_t i = 0; !transmit && i < mLocalSourceStreams.Length(); ++i) {
+    transmit = mLocalSourceStreams[i]->GetPipelineByLevel_m(level);
+  }
+
+  if (receive && transmit) {
+    // GetPipelineByLevel_m will return nullptr if shutdown is in progress;
+    // since shutdown is initiated in main, and involves a dispatch to STS
+    // before the pipelines are released, our dispatch to STS will complete
+    // before any release can happen due to a shutdown that hasn't started yet.
+    RUN_ON_THREAD(GetSTSThread(),
+                  WrapRunnableNM(
+                      &UpdateFilterFromRemoteDescription_s,
+                      receive,
+                      transmit,
+                      filter
+                  ),
+                  NS_DISPATCH_NORMAL);
+    return true;
+  } else {
+    CSFLogWarn(logTag, "Could not locate level %d to update filter",
+        static_cast<int>(level));
+  }
+  return false;
 }
 
 nsresult
@@ -415,24 +503,53 @@ PeerConnectionMedia::AddRemoteStreamHint(int aIndex, bool aIsVideo)
 
 
 void
-PeerConnectionMedia::IceGatheringCompleted(NrIceCtx *aCtx)
+PeerConnectionMedia::IceGatheringStateChange_s(NrIceCtx* ctx,
+                                               NrIceCtx::GatheringState state)
 {
-  MOZ_ASSERT(aCtx);
-  SignalIceGatheringCompleted(aCtx);
+  ASSERT_ON_THREAD(mSTSThread);
+  // ShutdownMediaTransport_s has not run yet because it unhooks this function
+  // from its signal, which means that SelfDestruct_m has not been dispatched
+  // yet either, so this PCMedia will still be around when this dispatch reaches
+  // main.
+  GetMainThread()->Dispatch(
+    WrapRunnable(this,
+                 &PeerConnectionMedia::IceGatheringStateChange_m,
+                 ctx,
+                 state),
+    NS_DISPATCH_NORMAL);
 }
 
 void
-PeerConnectionMedia::IceCompleted(NrIceCtx *aCtx)
+PeerConnectionMedia::IceConnectionStateChange_s(NrIceCtx* ctx,
+                                                NrIceCtx::ConnectionState state)
 {
-  MOZ_ASSERT(aCtx);
-  SignalIceCompleted(aCtx);
+  ASSERT_ON_THREAD(mSTSThread);
+  // ShutdownMediaTransport_s has not run yet because it unhooks this function
+  // from its signal, which means that SelfDestruct_m has not been dispatched
+  // yet either, so this PCMedia will still be around when this dispatch reaches
+  // main.
+  GetMainThread()->Dispatch(
+    WrapRunnable(this,
+                 &PeerConnectionMedia::IceConnectionStateChange_m,
+                 ctx,
+                 state),
+    NS_DISPATCH_NORMAL);
 }
 
 void
-PeerConnectionMedia::IceFailed(NrIceCtx *aCtx)
+PeerConnectionMedia::IceGatheringStateChange_m(NrIceCtx* ctx,
+                                               NrIceCtx::GatheringState state)
 {
-  MOZ_ASSERT(aCtx);
-  SignalIceFailed(aCtx);
+  ASSERT_ON_THREAD(mMainThread);
+  SignalIceGatheringStateChange(ctx, state);
+}
+
+void
+PeerConnectionMedia::IceConnectionStateChange_m(NrIceCtx* ctx,
+                                                NrIceCtx::ConnectionState state)
+{
+  ASSERT_ON_THREAD(mMainThread);
+  SignalIceConnectionStateChange(ctx, state);
 }
 
 void
@@ -442,7 +559,6 @@ PeerConnectionMedia::IceStreamReady(NrIceMediaStream *aStream)
 
   CSFLogDebug(logTag, "%s: %s", __FUNCTION__, aStream->name().c_str());
 }
-
 
 void
 LocalSourceStreamInfo::StorePipeline(int aTrack,
@@ -495,5 +611,41 @@ RemoteSourceStreamInfo::StorePipeline(int aTrack,
   mTypes[aTrack] = aIsVideo;
 }
 
+RefPtr<MediaPipeline> SourceStreamInfo::GetPipelineByLevel_m(int level) {
+  ASSERT_ON_THREAD(mParent->GetMainThread());
+
+  // Refuse to hand out references if we're tearing down.
+  // (Since teardown involves a dispatch to and from STS before MediaPipelines
+  // are released, it is safe to start other dispatches to and from STS with a
+  // RefPtr<MediaPipeline>, since that reference won't be the last one
+  // standing)
+  if (mMediaStream) {
+    for (auto p = mPipelines.begin(); p != mPipelines.end(); ++p) {
+      if (p->second->level() == level) {
+        return p->second;
+      }
+    }
+  }
+
+  return nullptr;
+}
+
+bool RemoteSourceStreamInfo::SetUsingBundle_m(int aLevel, bool decision) {
+  ASSERT_ON_THREAD(mParent->GetMainThread());
+
+  RefPtr<MediaPipeline> pipeline(GetPipelineByLevel_m(aLevel));
+
+  if (pipeline) {
+    RUN_ON_THREAD(mParent->GetSTSThread(),
+                  WrapRunnable(
+                      pipeline,
+                      &MediaPipeline::SetUsingBundle_s,
+                      decision
+                  ),
+                  NS_DISPATCH_NORMAL);
+    return true;
+  }
+  return false;
+}
 
 }  // namespace sipcc

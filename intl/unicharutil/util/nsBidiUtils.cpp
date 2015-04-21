@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "nsBidiUtils.h"
-#include "nsCharTraits.h"
-#include "nsUnicodeProperties.h"
 
 #define ARABIC_TO_HINDI_DIGIT_INCREMENT (START_HINDI_DIGITS - START_ARABIC_DIGITS)
 #define PERSIAN_TO_HINDI_DIGIT_INCREMENT (START_HINDI_DIGITS - START_FARSI_DIGITS)
@@ -29,7 +27,7 @@
     ((c) + (uint16_t)ARABIC_TO_PERSIAN_DIGIT_INCREMENT) : \
      (c)))
 
-PRUnichar HandleNumberInChar(PRUnichar aChar, bool aPrevCharArabic, uint32_t aNumFlag)
+char16_t HandleNumberInChar(char16_t aChar, bool aPrevCharArabic, uint32_t aNumFlag)
 {
   // IBMBIDI_NUMERAL_NOMINAL *
   // IBMBIDI_NUMERAL_REGULAR
@@ -63,7 +61,7 @@ PRUnichar HandleNumberInChar(PRUnichar aChar, bool aPrevCharArabic, uint32_t aNu
   }
 }
 
-nsresult HandleNumbers(PRUnichar* aBuffer, uint32_t aSize, uint32_t aNumFlag)
+nsresult HandleNumbers(char16_t* aBuffer, uint32_t aSize, uint32_t aNumFlag)
 {
   uint32_t i;
 
@@ -84,17 +82,6 @@ nsresult HandleNumbers(PRUnichar* aBuffer, uint32_t aSize, uint32_t aNumFlag)
   return NS_OK;
 }
 
-#define LRM_CHAR 0x200e
-#define LRE_CHAR 0x202a
-#define RLO_CHAR 0x202e
-bool IsBidiControl(uint32_t aChar)
-{
-  // This method is used when stripping Bidi control characters for
-  // display, so it will return TRUE for LRM, RLM, LRE, RLE, PDF, LRO and RLO
-  return ((LRE_CHAR <= aChar && aChar <= RLO_CHAR) ||
-          ((aChar)&0xfffffe)==LRM_CHAR);
-}
-
 bool HasRTLChars(const nsAString& aString)
 {
 // This is used to determine whether to enable bidi if a string has 
@@ -103,7 +90,7 @@ bool HasRTLChars(const nsAString& aString)
 // It's fine to enable bidi in rare cases where it actually isn't needed.
   int32_t length = aString.Length();
   for (int32_t i = 0; i < length; i++) {
-    PRUnichar ch = aString.CharAt(i);
+    char16_t ch = aString.CharAt(i);
     if (ch >= 0xD800 || IS_IN_BMP_RTL_BLOCK(ch)) {
       return true;
     }

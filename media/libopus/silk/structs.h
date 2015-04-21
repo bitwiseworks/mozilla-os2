@@ -1,9 +1,5 @@
 /***********************************************************************
-Copyright (c) 2006-2012 IETF Trust and Skype Limited. All rights reserved.
-
-This file is extracted from RFC6716. Please see that RFC for additional
-information.
-
+Copyright (c) 2006-2011, Skype Limited. All rights reserved.
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions
 are met:
@@ -16,7 +12,7 @@ documentation and/or other materials provided with the distribution.
 names of specific contributors, may be used to endorse or promote
 products derived from this software without specific prior written
 permission.
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS”
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
 ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
@@ -175,6 +171,7 @@ typedef struct {
     opus_int32                   pitchEstimationThreshold_Q16;      /* Threshold for pitch estimator                                    */
     opus_int                     LTPQuantLowComplexity;             /* Flag for low complexity LTP quantization                         */
     opus_int                     mu_LTP_Q9;                         /* Rate-distortion tradeoff in LTP quantization                     */
+    opus_int32                   sum_log_gain_Q7;					/* Cumulative max prediction gain									*/
     opus_int                     NLSF_MSVQ_Survivors;               /* Number of survivors in NLSF MSVQ                                 */
     opus_int                     first_frame_after_reset;           /* Flag for deactivating NLSF interpolation, pitch prediction       */
     opus_int                     controlled_since_last_payload;     /* Flag for ensuring codec_control only runs once per packet        */
@@ -194,6 +191,8 @@ typedef struct {
 
     SideInfoIndices              indices;
     opus_int8                    pulses[ MAX_FRAME_LENGTH ];
+
+    int                          arch;
 
     /* Input/output buffering */
     opus_int16                   inputBuf[ MAX_FRAME_LENGTH + 2 ];  /* Buffer containing input signal                                   */

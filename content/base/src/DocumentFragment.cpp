@@ -8,23 +8,25 @@
  */
 
 #include "mozilla/dom/DocumentFragment.h"
-#include "mozilla/dom/Element.h" // for DOMCI_NODE_DATA
-#include "nsINameSpaceManager.h"
+#include "mozilla/dom/Element.h" // for NS_IMPL_ELEMENT_CLONE
 #include "nsINodeInfo.h"
 #include "nsNodeInfoManager.h"
 #include "nsError.h"
 #include "nsGkAtoms.h"
 #include "nsDOMString.h"
-#include "nsContentUtils.h"
+#include "nsContentUtils.h" // for NS_INTERFACE_MAP_ENTRY_TEAROFF
 #include "mozilla/dom/DocumentFragmentBinding.h"
+#include "nsPIDOMWindow.h"
+#include "nsIDocument.h"
+#include "mozilla/IntegerPrintfMacros.h"
 
 namespace mozilla {
 namespace dom {
 
 JSObject*
-DocumentFragment::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+DocumentFragment::WrapNode(JSContext *aCx)
 {
-  return DocumentFragmentBinding::Wrap(aCx, aScope, this);
+  return DocumentFragmentBinding::Wrap(aCx, this);
 }
 
 bool
@@ -45,6 +47,20 @@ DocumentFragment::GetIDAttributeName() const
   return nullptr;
 }
 
+NS_IMETHODIMP
+DocumentFragment::QuerySelector(const nsAString& aSelector,
+                                nsIDOMElement **aReturn)
+{
+  return nsINode::QuerySelector(aSelector, aReturn);
+}
+
+NS_IMETHODIMP
+DocumentFragment::QuerySelectorAll(const nsAString& aSelector,
+                                   nsIDOMNodeList **aReturn)
+{
+  return nsINode::QuerySelectorAll(aSelector, aReturn);
+}
+
 #ifdef DEBUG
 void
 DocumentFragment::List(FILE* out, int32_t aIndent) const
@@ -57,7 +73,7 @@ DocumentFragment::List(FILE* out, int32_t aIndent) const
   fprintf(out, "DocumentFragment@%p", (void *)this);
 
   fprintf(out, " flags=[%08x]", static_cast<unsigned int>(GetFlags()));
-  fprintf(out, " refcount=%d<", mRefCnt.get());
+  fprintf(out, " refcount=%" PRIuPTR "<", mRefCnt.get());
 
   nsIContent* child = GetFirstChild();
   if (child) {
@@ -108,9 +124,10 @@ DocumentFragment::DumpContent(FILE* out, int32_t aIndent,
 #endif
 
 /* static */ already_AddRefed<DocumentFragment>
-DocumentFragment::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
+DocumentFragment::Constructor(const GlobalObject& aGlobal,
+                              ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.Get());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
   if (!window || !window->GetDoc()) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -131,12 +148,8 @@ NS_INTERFACE_MAP_BEGIN(DocumentFragment)
   NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsISupportsWeakReference,
                                  new nsNodeSupportsWeakRefTearoff(this))
-  NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMNodeSelector,
-                                 new nsNodeSelectorTearoff(this))
-  // nsNodeSH::PreCreate() depends on the identity pointer being the
-  // same as nsINode (which nsIContent inherits), so if you change the
-  // below line, make sure nsNodeSH::PreCreate() still does the right
-  // thing!
+  // DOM bindings depend on the identity pointer being the
+  // same as nsINode (which nsIContent inherits).
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIContent)
 NS_INTERFACE_MAP_END
 

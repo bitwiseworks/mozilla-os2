@@ -19,8 +19,9 @@
 this.EXPORTED_SYMBOLS = [
   "AddonsProvider",
   "AppInfoProvider",
-  "CrashDirectoryService",
+#ifdef MOZ_CRASHREPORTER
   "CrashesProvider",
+#endif
   "HealthReportProvider",
   "PlacesProvider",
   "SearchesProvider",
@@ -50,17 +51,18 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesDBUtils",
                                   "resource://gre/modules/PlacesDBUtils.jsm");
 
 
+const LAST_NUMERIC_FIELD = {type: Metrics.Storage.FIELD_LAST_NUMERIC};
 const LAST_TEXT_FIELD = {type: Metrics.Storage.FIELD_LAST_TEXT};
 const DAILY_DISCRETE_NUMERIC_FIELD = {type: Metrics.Storage.FIELD_DAILY_DISCRETE_NUMERIC};
 const DAILY_LAST_NUMERIC_FIELD = {type: Metrics.Storage.FIELD_DAILY_LAST_NUMERIC};
+const DAILY_LAST_TEXT_FIELD = {type: Metrics.Storage.FIELD_DAILY_LAST_TEXT};
 const DAILY_COUNTER_FIELD = {type: Metrics.Storage.FIELD_DAILY_COUNTER};
 
-// Preprocess to use the correct telemetry pref.
-#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
-const TELEMETRY_PREF = "toolkit.telemetry.enabledPreRelease";
-#else
 const TELEMETRY_PREF = "toolkit.telemetry.enabled";
-#endif
+
+function isTelemetryEnabled(prefs) {
+  return prefs.get(TELEMETRY_PREF, false);
+}
 
 /**
  * Represents basic application state.
@@ -356,7 +358,7 @@ AppInfoProvider.prototype = Object.freeze({
   },
 
   _recordIsTelemetryEnabled: function (m) {
-    let enabled = TELEMETRY_PREF && this._prefs.get(TELEMETRY_PREF, false);
+    let enabled = isTelemetryEnabled(this._prefs);
     this._log.debug("Recording telemetry enabled (" + TELEMETRY_PREF + "): " + enabled);
     yield m.setDailyLastNumeric("isTelemetryEnabled", enabled ? 1 : 0);
   },
@@ -415,7 +417,7 @@ SysInfoMeasurement.prototype = Object.freeze({
   __proto__: Metrics.Measurement.prototype,
 
   name: "sysinfo",
-  version: 1,
+  version: 2,
 
   fields: {
     cpuCount: {type: Metrics.Storage.FIELD_LAST_NUMERIC},
@@ -426,6 +428,7 @@ SysInfoMeasurement.prototype = Object.freeze({
     name: LAST_TEXT_FIELD,
     version: LAST_TEXT_FIELD,
     architecture: LAST_TEXT_FIELD,
+    isWow64: LAST_NUMERIC_FIELD,
   },
 });
 
@@ -452,6 +455,7 @@ SysInfoProvider.prototype = Object.freeze({
     name: "name",
     version: "version",
     arch: "architecture",
+    isWow64: "isWow64",
   },
 
   collectConstantData: function () {
@@ -485,9 +489,17 @@ SysInfoProvider.prototype = Object.freeze({
           method = "setLastNumeric";
         }
 
-        // Round memory to mebibytes.
-        if (k == "memsize") {
-          value = Math.round(value / 1048576);
+        switch (k) {
+          case "memsize":
+            // Round memory to mebibytes.
+            value = Math.round(value / 1048576);
+            break;
+          case "isWow64":
+            // Property is only present on Windows. hasKey() skipping from
+            // above ensures undefined or null doesn't creep in here.
+            value = value ? 1 : 0;
+            method = "setLastNumeric";
+            break;
         }
 
         yield m[method](v, value);
@@ -686,8 +698,8 @@ function ActiveAddonsMeasurement() {
 ActiveAddonsMeasurement.prototype = Object.freeze({
   __proto__: Metrics.Measurement.prototype,
 
-  name: "active",
-  version: 1,
+  name: "addons",
+  version: 2,
 
   fields: {
     addons: LAST_TEXT_FIELD,
@@ -695,12 +707,51 @@ ActiveAddonsMeasurement.prototype = Object.freeze({
 
   _serializeJSONSingular: function (data) {
     if (!data.has("addons")) {
-      this._log.warn("Don't have active addons info. Weird.");
+      this._log.warn("Don't have addons info. Weird.");
       return null;
     }
 
     // Exceptions are caught in the caller.
     let result = JSON.parse(data.get("addons")[1]);
+    result._v = this.version;
+    return result;
+  },
+});
+
+/**
+ * Stores the set of active plugins in storage.
+ *
+ * This stores the data in a JSON blob in a text field similar to the
+ * ActiveAddonsMeasurement.
+ */
+function ActivePluginsMeasurement() {
+  Metrics.Measurement.call(this);
+
+  this._serializers = {};
+  this._serializers[this.SERIALIZE_JSON] = {
+    singular: this._serializeJSONSingular.bind(this),
+    // We don't need a daily serializer because we have none of this data.
+  };
+}
+
+ActivePluginsMeasurement.prototype = Object.freeze({
+  __proto__: Metrics.Measurement.prototype,
+
+  name: "plugins",
+  version: 1,
+
+  fields: {
+    plugins: LAST_TEXT_FIELD,
+  },
+
+  _serializeJSONSingular: function (data) {
+    if (!data.has("plugins")) {
+      this._log.warn("Don't have plugins info. Weird.");
+      return null;
+    }
+
+    // Exceptions are caught in the caller.
+    let result = JSON.parse(data.get("plugins")[1]);
     result._v = this.version;
     return result;
   },
@@ -773,7 +824,6 @@ AddonsProvider.prototype = Object.freeze({
   // Add-on types for which full details are uploaded in the
   // ActiveAddonsMeasurement. All other types are ignored.
   FULL_DETAIL_TYPES: [
-    "plugin",
     "extension",
     "service",
   ],
@@ -782,6 +832,7 @@ AddonsProvider.prototype = Object.freeze({
 
   measurementTypes: [
     ActiveAddonsMeasurement,
+    ActivePluginsMeasurement,
     AddonCountsMeasurement1,
     AddonCountsMeasurement,
   ],
@@ -816,9 +867,11 @@ AddonsProvider.prototype = Object.freeze({
     AddonManager.getAllAddons(function onAllAddons(addons) {
       let data;
       let addonsField;
+      let pluginsField;
       try {
         data = this._createDataStructure(addons);
         addonsField = JSON.stringify(data.addons);
+        pluginsField = JSON.stringify(data.plugins);
       } catch (ex) {
         this._log.warn("Exception when populating add-ons data structure: " +
                        CommonUtils.exceptionStr(ex));
@@ -827,7 +880,8 @@ AddonsProvider.prototype = Object.freeze({
       }
 
       let now = new Date();
-      let active = this.getMeasurement("active", 1);
+      let addons = this.getMeasurement("addons", 2);
+      let plugins = this.getMeasurement("plugins", 1);
       let counts = this.getMeasurement(AddonCountsMeasurement.prototype.name,
                                        AddonCountsMeasurement.prototype.version);
 
@@ -843,8 +897,13 @@ AddonsProvider.prototype = Object.freeze({
           counts.setDailyLastNumeric(type, data.counts[type], now);
         }
 
-        return active.setLastText("addons", addonsField).then(
-          function onSuccess() { deferred.resolve(); },
+        return addons.setLastText("addons", addonsField).then(
+          function onSuccess() {
+            return plugins.setLastText("plugins", pluginsField).then(
+              function onSuccess() { deferred.resolve(); },
+              function onError(error) { deferred.reject(error); }
+            );
+          },
           function onError(error) { deferred.reject(error); }
         );
       }.bind(this));
@@ -853,21 +912,41 @@ AddonsProvider.prototype = Object.freeze({
     return deferred.promise;
   },
 
-  COPY_FIELDS: [
+  COPY_ADDON_FIELDS: [
     "userDisabled",
     "appDisabled",
+    "name",
     "version",
     "type",
     "scope",
+    "description",
     "foreignInstall",
     "hasBinaryComponents",
   ],
 
+  COPY_PLUGIN_FIELDS: [
+    "name",
+    "version",
+    "description",
+    "blocklisted",
+    "disabled",
+    "clicktoplay",
+  ],
+
   _createDataStructure: function (addons) {
-    let data = {addons: {}, counts: {}};
+    let data = {
+      addons: {},
+      plugins: {},
+      counts: {}
+    };
 
     for (let addon of addons) {
       let type = addon.type;
+
+      // We count plugins separately below.
+      if (addon.type == "plugin")
+        continue;
+
       data.counts[type] = (data.counts[type] || 0) + 1;
 
       if (this.FULL_DETAIL_TYPES.indexOf(addon.type) == -1) {
@@ -875,7 +954,7 @@ AddonsProvider.prototype = Object.freeze({
       }
 
       let obj = {};
-      for (let field of this.COPY_FIELDS) {
+      for (let field of this.COPY_ADDON_FIELDS) {
         obj[field] = addon[field];
       }
 
@@ -888,19 +967,40 @@ AddonsProvider.prototype = Object.freeze({
       }
 
       data.addons[addon.id] = obj;
-
     }
+
+    let pluginTags = Cc["@mozilla.org/plugin/host;1"].
+                       getService(Ci.nsIPluginHost).
+                       getPluginTags({});
+
+    for (let tag of pluginTags) {
+      let obj = {
+        mimeTypes: tag.getMimeTypes({}),
+      };
+
+      for (let field of this.COPY_PLUGIN_FIELDS) {
+        obj[field] = tag[field];
+      }
+
+      // Plugins need to have a filename and a name, so this can't be empty.
+      let id = tag.filename + ":" + tag.name + ":" + tag.version + ":"
+               + tag.description;
+      data.plugins[id] = obj;
+    }
+
+    data.counts["plugin"] = pluginTags.length;
 
     return data;
   },
 });
 
+#ifdef MOZ_CRASHREPORTER
 
-function DailyCrashesMeasurement() {
+function DailyCrashesMeasurement1() {
   Metrics.Measurement.call(this);
 }
 
-DailyCrashesMeasurement.prototype = Object.freeze({
+DailyCrashesMeasurement1.prototype = Object.freeze({
   __proto__: Metrics.Measurement.prototype,
 
   name: "crashes",
@@ -912,8 +1012,26 @@ DailyCrashesMeasurement.prototype = Object.freeze({
   },
 });
 
+function DailyCrashesMeasurement2() {
+  Metrics.Measurement.call(this);
+}
+
+DailyCrashesMeasurement2.prototype = Object.freeze({
+  __proto__: Metrics.Measurement.prototype,
+
+  name: "crashes",
+  version: 2,
+
+  fields: {
+    mainCrash: DAILY_LAST_NUMERIC_FIELD,
+  },
+});
+
 this.CrashesProvider = function () {
   Metrics.Provider.call(this);
+
+  // So we can unit test.
+  this._manager = Services.crashmanager;
 };
 
 CrashesProvider.prototype = Object.freeze({
@@ -921,161 +1039,41 @@ CrashesProvider.prototype = Object.freeze({
 
   name: "org.mozilla.crashes",
 
-  measurementTypes: [DailyCrashesMeasurement],
+  measurementTypes: [
+    DailyCrashesMeasurement1,
+    DailyCrashesMeasurement2,
+  ],
 
   pullOnly: true,
 
-  collectConstantData: function () {
+  collectDailyData: function () {
     return this.storage.enqueueTransaction(this._populateCrashCounts.bind(this));
   },
 
   _populateCrashCounts: function () {
-    let now = new Date();
-    let service = new CrashDirectoryService();
-
-    let pending = yield service.getPendingFiles();
-    let submitted = yield service.getSubmittedFiles();
-
-    function getAgeLimit() {
-      return 0;
-    }
-
-    let lastCheck = yield this.getState("lastCheck");
-    if (!lastCheck) {
-      lastCheck = getAgeLimit();
-    } else {
-      lastCheck = parseInt(lastCheck, 10);
-      if (Number.isNaN(lastCheck)) {
-        lastCheck = getAgeLimit();
-      }
-    }
-
-    let m = this.getMeasurement("crashes", 1);
-
-    // Aggregate counts locally to avoid excessive storage interaction.
-    let counts = {
-      pending: new Metrics.DailyValues(),
-      submitted: new Metrics.DailyValues(),
+    this._log.info("Grabbing crash counts from crash manager.");
+    let crashCounts = yield this._manager.getCrashCountsByDay();
+    let fields = {
+      "main-crash": "mainCrash",
     };
 
-    // FUTURE detect mtimes in the future and react more intelligently.
-    for (let filename in pending) {
-      let modified = pending[filename].modified;
+    let m = this.getMeasurement("crashes", 2);
 
-      if (modified.getTime() < lastCheck) {
-        continue;
+    for (let [day, types] of crashCounts) {
+      let date = Metrics.daysToDate(day);
+      for (let [type, count] of types) {
+        if (!(type in fields)) {
+          this._log.warn("Unknown crash type encountered: " + type);
+          continue;
+        }
+
+        yield m.setDailyLastNumeric(fields[type], count, date);
       }
-
-      counts.pending.appendValue(modified, 1);
     }
-
-    for (let filename in submitted) {
-      let modified = submitted[filename].modified;
-
-      if (modified.getTime() < lastCheck) {
-        continue;
-      }
-
-      counts.submitted.appendValue(modified, 1);
-    }
-
-    for (let [date, values] in counts.pending) {
-      yield m.incrementDailyCounter("pending", date, values.length);
-    }
-
-    for (let [date, values] in counts.submitted) {
-      yield m.incrementDailyCounter("submitted", date, values.length);
-    }
-
-    yield this.setState("lastCheck", "" + now.getTime());
   },
 });
 
-
-/**
- * Helper for interacting with the crashes directory.
- *
- * FUTURE Extract to JSM alongside crashreporter. Use in about:crashes.
- */
-this.CrashDirectoryService = function () {
-  let base = Cc["@mozilla.org/file/directory_service;1"]
-               .getService(Ci.nsIProperties)
-               .get("UAppData", Ci.nsIFile);
-
-  let cr = base.clone();
-  cr.append("Crash Reports");
-
-  let submitted = cr.clone();
-  submitted.append("submitted");
-
-  let pending = cr.clone();
-  pending.append("pending");
-
-  this._baseDir = base.path;
-  this._submittedDir = submitted.path;
-  this._pendingDir = pending.path;
-};
-
-CrashDirectoryService.prototype = Object.freeze({
-  RE_SUBMITTED_FILENAME: /^bp-.+\.txt$/,
-  RE_PENDING_FILENAME: /^.+\.dmp$/,
-
-  getPendingFiles: function () {
-    return this._getDirectoryEntries(this._pendingDir,
-                                     this.RE_PENDING_FILENAME);
-  },
-
-  getSubmittedFiles: function () {
-    return this._getDirectoryEntries(this._submittedDir,
-                                     this.RE_SUBMITTED_FILENAME);
-  },
-
-  _getDirectoryEntries: function (path, re) {
-    let files = {};
-
-    return Task.spawn(function iterateDirectory() {
-      // If the directory doesn't exist, exit immediately. Else, re-throw
-      // any errors.
-      try {
-        yield OS.File.stat(path);
-      } catch (ex if ex instanceof OS.File.Error) {
-        if (ex.becauseNoSuchFile) {
-          throw new Task.Result({});
-        }
-
-        throw ex;
-      }
-
-      let iterator = new OS.File.DirectoryIterator(path);
-
-      try {
-        while (true) {
-          let entry;
-          try {
-            entry = yield iterator.next();
-          } catch (ex if ex == StopIteration) {
-            break;
-          }
-
-          if (!entry.name.match(re)) {
-            continue;
-          }
-
-          let info = yield OS.File.stat(entry.path);
-          files[entry.name] = {
-            created: info.creationDate,
-            modified: info.lastModificationDate,
-            size: info.size,
-          };
-        }
-
-        throw new Task.Result(files);
-      } finally {
-        iterator.close();
-      }
-    });
-  },
-});
+#endif
 
 
 /**
@@ -1184,69 +1182,18 @@ SearchCountMeasurement1.prototype = Object.freeze({
  * We don't use the search engine name directly, because it is shared across
  * locales; e.g., eBay-de and eBay both share the name "eBay".
  */
-function SearchCountMeasurement2() {
-  this._fieldSpecs = null;
-  this._interestingEngines = null;   // Name -> ID. ("Amazon.com" -> "amazondotcom")
-
+function SearchCountMeasurementBase() {
+  this._fieldSpecs = {};
   Metrics.Measurement.call(this);
 }
 
-SearchCountMeasurement2.prototype = Object.freeze({
+SearchCountMeasurementBase.prototype = Object.freeze({
   __proto__: Metrics.Measurement.prototype,
 
-  name: "counts",
-  version: 2,
 
-  /**
-   * Default implementation; can be overridden by test helpers.
-   */
-  getDefaultEngines: function () {
-    return Services.search.getDefaultEngines();
-  },
-
-  _initialize: function () {
-    // Don't create all of these for every profile.
-    // There are 61 partner engines, translating to 244 fields.
-    // Instead, compute only those that are possible -- those for whom the
-    // provider is one of the default search engines.
-    // This set can grow over time, and change as users run different localized
-    // Firefox instances.
-    this._fieldSpecs = {};
-    this._interestingEngines = {};
-
-    for (let source of this.SOURCES) {
-      this._fieldSpecs["other." + source] = DAILY_COUNTER_FIELD;
-    }
-
-    let engines = this.getDefaultEngines();
-    for (let engine of engines) {
-      let id = engine.identifier;
-      if (!id || (this.PROVIDERS.indexOf(id) == -1)) {
-        continue;
-      }
-
-      this._interestingEngines[engine.name] = id;
-      let fieldPrefix = id + ".";
-      for (let source of this.SOURCES) {
-        this._fieldSpecs[fieldPrefix + source] = DAILY_COUNTER_FIELD;
-      }
-    }
-  },
-
-  // Our fields are dynamic, so we compute them into _fieldSpecs by looking at
-  // the current set of interesting engines.
+  // Our fields are dynamic.
   get fields() {
-    if (!this._fieldSpecs) {
-      this._initialize();
-    }
     return this._fieldSpecs;
-  },
-
-  get interestingEngines() {
-    if (!this._fieldSpecs) {
-      this._initialize();
-    }
-    return this._interestingEngines;
   },
 
   /**
@@ -1278,111 +1225,68 @@ SearchCountMeasurement2.prototype = Object.freeze({
     return Metrics.Storage.FIELD_DAILY_COUNTER;
   },
 
-  // You can compute the total list of fields by unifying the entire l10n repo
-  // set with the list of partners:
-  //
-  //   sort -u */*/searchplugins/list.txt | tr -d '^M' | uniq | grep -f partners.txt
-  //
-  // where partners.txt contains
-  //
-  //   amazon
-  //   aol
-  //   bing
-  //   eBay
-  //   google
-  //   mailru
-  //   mercadolibre
-  //   seznam
-  //   twitter
-  //   yahoo
-  //   yandex
-  //
-  // Please update this list as the set of partners changes.
-  //
-  PROVIDERS: [
-    "amazon-co-uk",
-    "amazon-de",
-    "amazon-en-GB",
-    "amazon-france",
-    "amazon-it",
-    "amazon-jp",
-    "amazondotcn",
-    "amazondotcom",
-    "amazondotcom-de",
-
-    "aol-en-GB",
-    "aol-web-search",
-
-    "bing",
-
-    "eBay",
-    "eBay-de",
-    "eBay-en-GB",
-    "eBay-es",
-    "eBay-fi",
-    "eBay-france",
-    "eBay-hu",
-    "eBay-in",
-    "eBay-it",
-
-    "google",
-    "google-jp",
-    "google-ku",
-    "google-maps-zh-TW",
-
-    "mailru",
-
-    "mercadolibre-ar",
-    "mercadolibre-cl",
-    "mercadolibre-mx",
-
-    "seznam-cz",
-
-    "twitter",
-    "twitter-de",
-    "twitter-ja",
-
-    "yahoo",
-    "yahoo-NO",
-    "yahoo-answer-zh-TW",
-    "yahoo-ar",
-    "yahoo-bid-zh-TW",
-    "yahoo-br",
-    "yahoo-ch",
-    "yahoo-cl",
-    "yahoo-de",
-    "yahoo-en-GB",
-    "yahoo-es",
-    "yahoo-fi",
-    "yahoo-france",
-    "yahoo-fy-NL",
-    "yahoo-id",
-    "yahoo-in",
-    "yahoo-it",
-    "yahoo-jp",
-    "yahoo-jp-auctions",
-    "yahoo-mx",
-    "yahoo-sv-SE",
-    "yahoo-zh-TW",
-
-    "yandex",
-    "yandex-ru",
-    "yandex-slovari",
-    "yandex-tr",
-    "yandex.by",
-    "yandex.ru-be",
-  ],
-
   SOURCES: [
     "abouthome",
     "contextmenu",
+    "newtab",
     "searchbar",
     "urlbar",
   ],
 });
 
+function SearchCountMeasurement2() {
+  SearchCountMeasurementBase.call(this);
+}
+
+SearchCountMeasurement2.prototype = Object.freeze({
+  __proto__: SearchCountMeasurementBase.prototype,
+  name: "counts",
+  version: 2,
+});
+
+function SearchCountMeasurement3() {
+  SearchCountMeasurementBase.call(this);
+}
+
+SearchCountMeasurement3.prototype = Object.freeze({
+  __proto__: SearchCountMeasurementBase.prototype,
+  name: "counts",
+  version: 3,
+
+  getEngines: function () {
+    return Services.search.getEngines();
+  },
+
+  getEngineID: function (engine) {
+    if (!engine) {
+      return "other";
+    }
+    if (engine.identifier) {
+      return engine.identifier;
+    }
+    return "other-" + engine.name;
+  },
+});
+
+function SearchEnginesMeasurement1() {
+  Metrics.Measurement.call(this);
+}
+
+SearchEnginesMeasurement1.prototype = Object.freeze({
+  __proto__: Metrics.Measurement.prototype,
+
+  name: "engines",
+  version: 1,
+
+  fields: {
+    default: DAILY_LAST_TEXT_FIELD,
+  },
+});
+
 this.SearchesProvider = function () {
   Metrics.Provider.call(this);
+
+  this._prefs = new Preferences({defaultBranch: null});
 };
 
 this.SearchesProvider.prototype = Object.freeze({
@@ -1392,6 +1296,8 @@ this.SearchesProvider.prototype = Object.freeze({
   measurementTypes: [
     SearchCountMeasurement1,
     SearchCountMeasurement2,
+    SearchCountMeasurement3,
+    SearchEnginesMeasurement1,
   ],
 
   /**
@@ -1406,12 +1312,41 @@ this.SearchesProvider.prototype = Object.freeze({
     return deferred.promise;
   },
 
+  collectDailyData: function () {
+    return this.storage.enqueueTransaction(function getDaily() {
+      // We currently only record this if Telemetry is enabled.
+      if (!isTelemetryEnabled(this._prefs)) {
+        return;
+      }
+
+      let m = this.getMeasurement(SearchEnginesMeasurement1.prototype.name,
+                                  SearchEnginesMeasurement1.prototype.version);
+
+      let engine;
+      try {
+        engine = Services.search.defaultEngine;
+      } catch (e) {}
+      let name;
+
+      if (!engine) {
+        name = "NONE";
+      } else if (engine.identifier) {
+        name = engine.identifier;
+      } else if (engine.name) {
+        name = "other-" + engine.name;
+      } else {
+        name = "UNDEFINED";
+      }
+
+      yield m.setDailyLastText("default", name);
+    }.bind(this));
+  },
+
   /**
    * Record that a search occurred.
    *
    * @param engine
-   *        (string) The search engine used. If the search engine is unknown,
-   *        the search will be attributed to "other".
+   *        (nsISearchEngine) The search engine used.
    * @param source
    *        (string) Where the search was initiated from. Must be one of the
    *        SearchCountMeasurement2.SOURCES values.
@@ -1420,17 +1355,30 @@ this.SearchesProvider.prototype = Object.freeze({
    *         The promise is resolved when the storage operation completes.
    */
   recordSearch: function (engine, source) {
-    let m = this.getMeasurement("counts", 2);
+    let m = this.getMeasurement("counts", 3);
 
     if (m.SOURCES.indexOf(source) == -1) {
       throw new Error("Unknown source for search: " + source);
     }
 
-    let id = m.interestingEngines[engine] || "other";
-    let field = id + "." + source;
-    return this.enqueueStorageOperation(function recordSearch() {
-      return m.incrementDailyCounter(field);
-    });
+    let field = m.getEngineID(engine) + "." + source;
+    if (this.storage.hasFieldFromMeasurement(m.id, field,
+                                             this.storage.FIELD_DAILY_COUNTER)) {
+      let fieldID = this.storage.fieldIDFromMeasurement(m.id, field);
+      return this.enqueueStorageOperation(function recordSearchKnownField() {
+        return this.storage.incrementDailyCounterFromFieldID(fieldID);
+      }.bind(this));
+    }
+
+    // Otherwise, we first need to create the field.
+    return this.enqueueStorageOperation(function recordFieldAndSearch() {
+      // This function has to return a promise.
+      return Task.spawn(function () {
+        let fieldID = yield this.storage.registerField(m.id, field,
+                                                       this.storage.FIELD_DAILY_COUNTER);
+        yield this.storage.incrementDailyCounterFromFieldID(fieldID);
+      }.bind(this));
+    }.bind(this));
   },
 });
 
@@ -1454,6 +1402,27 @@ HealthReportSubmissionMeasurement1.prototype = Object.freeze({
   },
 });
 
+function HealthReportSubmissionMeasurement2() {
+  Metrics.Measurement.call(this);
+}
+
+HealthReportSubmissionMeasurement2.prototype = Object.freeze({
+  __proto__: Metrics.Measurement.prototype,
+
+  name: "submissions",
+  version: 2,
+
+  fields: {
+    firstDocumentUploadAttempt: DAILY_COUNTER_FIELD,
+    continuationUploadAttempt: DAILY_COUNTER_FIELD,
+    uploadSuccess: DAILY_COUNTER_FIELD,
+    uploadTransportFailure: DAILY_COUNTER_FIELD,
+    uploadServerFailure: DAILY_COUNTER_FIELD,
+    uploadClientFailure: DAILY_COUNTER_FIELD,
+    uploadAlreadyInProgress: DAILY_COUNTER_FIELD,
+  },
+});
+
 this.HealthReportProvider = function () {
   Metrics.Provider.call(this);
 }
@@ -1463,10 +1432,13 @@ HealthReportProvider.prototype = Object.freeze({
 
   name: "org.mozilla.healthreport",
 
-  measurementTypes: [HealthReportSubmissionMeasurement1],
+  measurementTypes: [
+    HealthReportSubmissionMeasurement1,
+    HealthReportSubmissionMeasurement2,
+  ],
 
   recordEvent: function (event, date=new Date()) {
-    let m = this.getMeasurement("submissions", 1);
+    let m = this.getMeasurement("submissions", 2);
     return this.enqueueStorageOperation(function recordCounter() {
       return m.incrementDailyCounter(event, date);
     });

@@ -1,3 +1,4 @@
+
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -5,48 +6,57 @@
 
 #include "mozilla/dom/HTMLLinkElement.h"
 
+#include "mozilla/AsyncEventDispatcher.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/EventDispatcher.h"
+#include "mozilla/EventStates.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/HTMLLinkElementBinding.h"
-#include "base/compiler_specific.h"
+#include "nsContentUtils.h"
 #include "nsGenericHTMLElement.h"
-#include "nsILink.h"
 #include "nsGkAtoms.h"
-#include "nsStyleConsts.h"
+#include "nsDOMTokenList.h"
+#include "nsIDocument.h"
+#include "nsIDOMEvent.h"
 #include "nsIDOMStyleSheet.h"
 #include "nsIStyleSheet.h"
 #include "nsIStyleSheetLinkingElement.h"
-#include "nsReadableUtils.h"
-#include "nsUnicharUtils.h"
 #include "nsIURL.h"
 #include "nsNetUtil.h"
-#include "nsIDocument.h"
-#include "nsIDOMEvent.h"
-#include "nsContentUtils.h"
 #include "nsPIDOMWindow.h"
-#include "nsAsyncDOMEvent.h"
+#include "nsReadableUtils.h"
+#include "nsStyleConsts.h"
+#include "nsUnicharUtils.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Link)
 
 namespace mozilla {
 namespace dom {
 
-HTMLLinkElement::HTMLLinkElement(already_AddRefed<nsINodeInfo> aNodeInfo)
-  : nsGenericHTMLElement(aNodeInfo),
-    ALLOW_THIS_IN_INITIALIZER_LIST(Link(this))
+HTMLLinkElement::HTMLLinkElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  : nsGenericHTMLElement(aNodeInfo)
+  , Link(MOZ_THIS_IN_INITIALIZER_LIST())
 {
-  SetIsDOMBinding();
 }
 
 HTMLLinkElement::~HTMLLinkElement()
 {
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLLinkElement)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLLinkElement,
                                                   nsGenericHTMLElement)
   tmp->nsStyleLinkElement::Traverse(cb);
+  tmp->Link::Traverse(cb);
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRelList)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLLinkElement,
                                                 nsGenericHTMLElement)
   tmp->nsStyleLinkElement::Unlink();
+  tmp->Link::Unlink();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRelList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ADDREF_INHERITED(HTMLLinkElement, Element)
@@ -55,15 +65,11 @@ NS_IMPL_RELEASE_INHERITED(HTMLLinkElement, Element)
 
 // QueryInterface implementation for HTMLLinkElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLLinkElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED5(HTMLLinkElement,
-                                nsIDOMHTMLLinkElement,
-                                nsIDOMLinkStyle,
-                                nsILink,
-                                nsIStyleSheetLinkingElement,
-                                Link)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
+  NS_INTERFACE_TABLE_INHERITED(HTMLLinkElement,
+                               nsIDOMHTMLLinkElement,
+                               nsIStyleSheetLinkingElement,
+                               Link)
+NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 
 NS_IMPL_ELEMENT_CLONE(HTMLLinkElement)
@@ -133,8 +139,9 @@ HTMLLinkElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                                                  aBindingParent,
                                                  aCompileEventHandlers);
   NS_ENSURE_SUCCESS(rv, rv);
-  
-  if (aDocument) {
+
+  // Link must be inert in ShadowRoot.
+  if (aDocument && !GetContainingShadow()) {
     aDocument->RegisterPendingLinkUpdate(this);
   }
 
@@ -146,18 +153,16 @@ HTMLLinkElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   return rv;
 }
 
-NS_IMETHODIMP
+void
 HTMLLinkElement::LinkAdded()
 {
   CreateAndDispatchEvent(OwnerDoc(), NS_LITERAL_STRING("DOMLinkAdded"));
-  return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 HTMLLinkElement::LinkRemoved()
 {
   CreateAndDispatchEvent(OwnerDoc(), NS_LITERAL_STRING("DOMLinkRemoved"));
-  return NS_OK;
 }
 
 void
@@ -170,12 +175,19 @@ HTMLLinkElement::UnbindFromTree(bool aDeep, bool aNullParent)
   // Once we have XPCOMGC we shouldn't need to call UnbindFromTree during Unlink
   // and so this messy event dispatch can go away.
   nsCOMPtr<nsIDocument> oldDoc = GetCurrentDoc();
-  if (oldDoc) {
+
+  // Check for a ShadowRoot because link elements are inert in a
+  // ShadowRoot.
+  ShadowRoot* oldShadowRoot = GetBindingParent() ?
+    GetBindingParent()->GetShadowRoot() : nullptr;
+
+  if (oldDoc && !oldShadowRoot) {
     oldDoc->UnregisterPendingLinkUpdate(this);
   }
   CreateAndDispatchEvent(oldDoc, NS_LITERAL_STRING("DOMLinkRemoved"));
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
-  UpdateStyleSheetInternal(oldDoc);
+
+  UpdateStyleSheetInternal(oldDoc, oldShadowRoot);
 }
 
 bool
@@ -184,10 +196,16 @@ HTMLLinkElement::ParseAttribute(int32_t aNamespaceID,
                                 const nsAString& aValue,
                                 nsAttrValue& aResult)
 {
-  if (aNamespaceID == kNameSpaceID_None &&
-      aAttribute == nsGkAtoms::crossorigin) {
-    ParseCORSValue(aValue, aResult);
-    return true;
+  if (aNamespaceID == kNameSpaceID_None) {
+    if (aAttribute == nsGkAtoms::crossorigin) {
+      ParseCORSValue(aValue, aResult);
+      return true;
+    }
+
+    if (aAttribute == nsGkAtoms::sizes) {
+      aResult.ParseAtomArray(aValue);
+      return true;
+    }
   }
 
   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
@@ -216,11 +234,11 @@ HTMLLinkElement::CreateAndDispatchEvent(nsIDocument* aDoc,
                       strings, eIgnoreCase) != ATTR_VALUE_NO_MATCH)
     return;
 
-  nsRefPtr<nsAsyncDOMEvent> event = new nsAsyncDOMEvent(this, aEventName, true,
-                                                        true);
+  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
+    new AsyncEventDispatcher(this, aEventName, true, true);
   // Always run async in order to avoid running script when the content
   // sink isn't expecting it.
-  event->PostDOMEvent();
+  asyncDispatcher->PostDOMEvent();
 }
 
 nsresult
@@ -249,10 +267,10 @@ HTMLLinkElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     bool dropSheet = false;
     if (aName == nsGkAtoms::rel && GetSheet()) {
       uint32_t linkTypes = nsStyleLinkElement::ParseLinkTypes(aValue);
-      dropSheet = !(linkTypes & STYLESHEET);          
+      dropSheet = !(linkTypes & nsStyleLinkElement::eSTYLESHEET);
     }
     
-    UpdateStyleSheetInternal(nullptr,
+    UpdateStyleSheetInternal(nullptr, nullptr,
                              dropSheet ||
                              (aName == nsGkAtoms::title ||
                               aName == nsGkAtoms::media ||
@@ -276,7 +294,7 @@ HTMLLinkElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
        aAttribute == nsGkAtoms::title ||
        aAttribute == nsGkAtoms::media ||
        aAttribute == nsGkAtoms::type)) {
-    UpdateStyleSheetInternal(nullptr, true);
+    UpdateStyleSheetInternal(nullptr, nullptr, true);
   }
 
   // The ordering of the parent class's UnsetAttr call and Link::ResetLinkState
@@ -292,13 +310,13 @@ HTMLLinkElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
 }
 
 nsresult
-HTMLLinkElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+HTMLLinkElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
   return PreHandleEventForAnchors(aVisitor);
 }
 
 nsresult
-HTMLLinkElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
+HTMLLinkElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
 {
   return PostHandleEventForAnchors(aVisitor);
 }
@@ -318,6 +336,15 @@ HTMLLinkElement::GetLinkTarget(nsAString& aTarget)
   }
 }
 
+nsDOMTokenList* 
+HTMLLinkElement::RelList()
+{
+  if (!mRelList) {
+    mRelList = new nsDOMTokenList(this, nsGkAtoms::rel);
+  }
+  return mRelList;
+}
+
 already_AddRefed<nsIURI>
 HTMLLinkElement::GetHrefURI() const
 {
@@ -333,7 +360,8 @@ HTMLLinkElement::GetStyleSheetURL(bool* aIsInline)
   if (href.IsEmpty()) {
     return nullptr;
   }
-  return Link::GetURI();
+  nsCOMPtr<nsIURI> uri = Link::GetURI();
+  return uri.forget();
 }
 
 void
@@ -353,7 +381,7 @@ HTMLLinkElement::GetStyleSheetInfo(nsAString& aTitle,
   GetAttr(kNameSpaceID_None, nsGkAtoms::rel, rel);
   uint32_t linkTypes = nsStyleLinkElement::ParseLinkTypes(rel);
   // Is it a stylesheet link?
-  if (!(linkTypes & STYLESHEET)) {
+  if (!(linkTypes & nsStyleLinkElement::eSTYLESHEET)) {
     return;
   }
 
@@ -363,7 +391,7 @@ HTMLLinkElement::GetStyleSheetInfo(nsAString& aTitle,
   aTitle.Assign(title);
 
   // If alternate, does it have title?
-  if (linkTypes & ALTERNATE) {
+  if (linkTypes & nsStyleLinkElement::eALTERNATE) {
     if (aTitle.IsEmpty()) { // alternates must have title
       return;
     } else {
@@ -397,23 +425,23 @@ HTMLLinkElement::GetCORSMode() const
   return AttrValueToCORSMode(GetParsedAttr(nsGkAtoms::crossorigin)); 
 }
 
-nsEventStates
+EventStates
 HTMLLinkElement::IntrinsicState() const
 {
   return Link::LinkState() | nsGenericHTMLElement::IntrinsicState();
 }
 
 size_t
-HTMLLinkElement::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+HTMLLinkElement::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   return nsGenericHTMLElement::SizeOfExcludingThis(aMallocSizeOf) +
          Link::SizeOfExcludingThis(aMallocSizeOf);
 }
 
 JSObject*
-HTMLLinkElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+HTMLLinkElement::WrapNode(JSContext* aCx)
 {
-  return HTMLLinkElementBinding::Wrap(aCx, aScope, this);
+  return HTMLLinkElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

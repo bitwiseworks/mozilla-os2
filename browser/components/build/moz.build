@@ -4,15 +4,24 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'browsercomps'
-
 EXPORTS += [
     'nsBrowserCompsCID.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'nsModule.cpp',
 ]
 
 LIBRARY_NAME = 'browsercomps'
 
+IS_COMPONENT = True
+
+FORCE_SHARED_LIB = True
+
+LOCAL_INCLUDES += [
+    '../about',
+    '../dirprovider',
+    '../feeds/src',
+    '../migration/src',
+    '../shell/src',
+]

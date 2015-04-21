@@ -4,14 +4,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <limits>
-#include "mozilla/Hal.h"
 #include "BatteryManager.h"
-#include "nsIDOMClassInfo.h"
 #include "Constants.h"
-#include "nsDOMEvent.h"
+#include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/Hal.h"
 #include "mozilla/Preferences.h"
-#include "nsDOMEventTargetHelper.h"
 #include "mozilla/dom/BatteryManagerBinding.h"
+#include "nsIDOMClassInfo.h"
 
 /**
  * We have to use macros here because our leak analysis tool things we are
@@ -26,19 +25,17 @@ namespace mozilla {
 namespace dom {
 namespace battery {
 
-BatteryManager::BatteryManager()
-  : mLevel(kDefaultLevel)
+BatteryManager::BatteryManager(nsPIDOMWindow* aWindow)
+  : DOMEventTargetHelper(aWindow)
+  , mLevel(kDefaultLevel)
   , mCharging(kDefaultCharging)
   , mRemainingTime(kDefaultRemainingTime)
 {
-  SetIsDOMBinding();
 }
 
 void
-BatteryManager::Init(nsPIDOMWindow *aWindow)
+BatteryManager::Init()
 {
-  BindToOwner(aWindow);
-
   hal::RegisterBatteryObserver(this);
 
   hal::BatteryInformation batteryInfo;
@@ -54,9 +51,9 @@ BatteryManager::Shutdown()
 }
 
 JSObject*
-BatteryManager::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+BatteryManager::WrapObject(JSContext* aCx)
 {
-  return BatteryManagerBinding::Wrap(aCx, aScope, this);
+  return BatteryManagerBinding::Wrap(aCx, this);
 }
 
 double

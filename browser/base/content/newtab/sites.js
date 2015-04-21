@@ -128,13 +128,37 @@ Site.prototype = {
     link.setAttribute("title", tooltip);
     link.setAttribute("href", url);
     this._querySelector(".newtab-title").textContent = title;
+    this.node.setAttribute("type", this.link.type);
 
     if (this.isPinned())
       this._updateAttributes(true);
+    // Capture the page if the thumbnail is missing, which will cause page.js
+    // to be notified and call our refreshThumbnail() method.
+    this.captureIfMissing();
+    // but still display whatever thumbnail might be available now.
+    this.refreshThumbnail();
+  },
 
-    let thumbnailURL = PageThumbs.getThumbnailURL(this.url);
+  /**
+   * Captures the site's thumbnail in the background, but only if there's no
+   * existing thumbnail and the page allows background captures.
+   */
+  captureIfMissing: function Site_captureIfMissing() {
+    if (gPage.allowBackgroundCaptures && !this.link.imageURI) {
+      BackgroundPageThumbs.captureIfMissing(this.url);
+    }
+  },
+
+  /**
+   * Refreshes the thumbnail for the site.
+   */
+  refreshThumbnail: function Site_refreshThumbnail() {
     let thumbnail = this._querySelector(".newtab-thumbnail");
-    thumbnail.style.backgroundImage = "url(" + thumbnailURL + ")";
+    if (this.link.bgColor) {
+      thumbnail.style.backgroundColor = this.link.bgColor;
+    }
+    let uri = this.link.imageURI || PageThumbs.getThumbnailURL(this.url);
+    thumbnail.style.backgroundImage = "url(" + uri + ")";
   },
 
   /**
@@ -146,9 +170,14 @@ Site.prototype = {
     this._node.addEventListener("dragend", this, false);
     this._node.addEventListener("mouseover", this, false);
 
-    let controls = this.node.querySelectorAll(".newtab-control");
-    for (let i = 0; i < controls.length; i++)
-      controls[i].addEventListener("click", this, false);
+    // Specially treat the sponsored icon to prevent regular hover effects
+    let sponsored = this._querySelector(".newtab-control-sponsored");
+    sponsored.addEventListener("mouseover", () => {
+      this.cell.node.setAttribute("ignorehover", "true");
+    });
+    sponsored.addEventListener("mouseout", () => {
+      this.cell.node.removeAttribute("ignorehover");
+    });
   },
 
   /**
@@ -161,28 +190,68 @@ Site.prototype = {
   },
 
   /**
+   * Record interaction with site using telemetry.
+   */
+  _recordSiteClicked: function Site_recordSiteClicked(aIndex) {
+    if (Services.prefs.prefHasUserValue("browser.newtabpage.rows") ||
+        Services.prefs.prefHasUserValue("browser.newtabpage.columns") ||
+        aIndex > 8) {
+      // We only want to get indices for the default configuration, everything
+      // else goes in the same bucket.
+      aIndex = 9;
+    }
+    Services.telemetry.getHistogramById("NEWTAB_PAGE_SITE_CLICKED")
+                      .add(aIndex);
+
+    // Specially count clicks on directory tiles
+    let typeIndex = DirectoryLinksProvider.linkTypes.indexOf(this.link.type);
+    if (typeIndex != -1) {
+      Services.telemetry.getHistogramById("NEWTAB_PAGE_DIRECTORY_TYPE_CLICKED")
+                        .add(typeIndex);
+    }
+  },
+
+  /**
+   * Handles site click events.
+   */
+  onClick: function Site_onClick(aEvent) {
+    let {button, target} = aEvent;
+    if (target.classList.contains("newtab-link") ||
+        target.parentElement.classList.contains("newtab-link")) {
+      // Record for primary and middle clicks
+      if (button == 0 || button == 1) {
+        this._recordSiteClicked(this.cell.index);
+      }
+      return;
+    }
+
+    // Only handle primary clicks for the remaining targets
+    if (button != 0) {
+      return;
+    }
+
+    aEvent.preventDefault();
+    if (aEvent.target.classList.contains("newtab-control-block"))
+      this.block();
+    else if (target.classList.contains("newtab-control-sponsored"))
+      gPage.showSponsoredPanel(target);
+    else if (this.isPinned())
+      this.unpin();
+    else
+      this.pin();
+  },
+
+  /**
    * Handles all site events.
    */
   handleEvent: function Site_handleEvent(aEvent) {
     switch (aEvent.type) {
-      case "click":
-        aEvent.preventDefault();
-        if (aEvent.target.classList.contains("newtab-control-block"))
-          this.block();
-        else if (this.isPinned())
-          this.unpin();
-        else
-          this.pin();
-        break;
       case "mouseover":
         this._node.removeEventListener("mouseover", this, false);
         this._speculativeConnect();
         break;
       case "dragstart":
         gDrag.start(this, aEvent);
-        break;
-      case "drag":
-        gDrag.drag(this, aEvent);
         break;
       case "dragend":
         gDrag.end(this, aEvent);

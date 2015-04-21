@@ -18,10 +18,11 @@ class DataSourceSurfaceD2D;
 class SourceSurfaceD2D : public SourceSurface
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SourceSurfaceD2D)
   SourceSurfaceD2D();
   ~SourceSurfaceD2D();
 
-  virtual SurfaceType GetType() const { return SURFACE_D2D1_BITMAP; }
+  virtual SurfaceType GetType() const { return SurfaceType::D2D1_BITMAP; }
   virtual IntSize GetSize() const;
   virtual SurfaceFormat GetFormat() const;
   virtual bool IsValid() const;
@@ -55,6 +56,7 @@ private:
 class DataSourceSurfaceD2D : public DataSourceSurface
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceD2D)
   DataSourceSurfaceD2D(SourceSurfaceD2D* aSourceSurface);
   virtual ~DataSourceSurfaceD2D();
 
@@ -62,6 +64,8 @@ public:
   virtual int32_t Stride();
   virtual IntSize GetSize() const;
   virtual SurfaceFormat GetFormat() const;
+  virtual bool Map(MapType, MappedSurface *aMappedSurface);
+  virtual void Unmap();
 
   bool IsValid()
   {

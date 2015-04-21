@@ -26,16 +26,19 @@
 #include "nsRDFCID.h"
 #include "nsXULCommandDispatcher.h"
 #include "prlog.h"
-#include "nsGUIEvent.h"
 #include "nsContentUtils.h"
 #include "nsReadableUtils.h"
 #include "nsCRT.h"
 #include "nsError.h"
-#include "nsEventDispatcher.h"
 #include "nsDOMClassInfoID.h"
+#include "mozilla/BasicEvents.h"
+#include "mozilla/EventDispatcher.h"
+#include "mozilla/dom/Element.h"
+
+using namespace mozilla;
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo* gLog;
+static PRLogModuleInfo* gCommandLog;
 #endif
 
 ////////////////////////////////////////////////////////////////////////
@@ -45,8 +48,8 @@ nsXULCommandDispatcher::nsXULCommandDispatcher(nsIDocument* aDocument)
 {
 
 #ifdef PR_LOGGING
-  if (! gLog)
-    gLog = PR_NewLogModule("nsXULCommandDispatcher");
+  if (! gCommandLog)
+    gCommandLog = PR_NewLogModule("nsXULCommandDispatcher");
 #endif
 }
 
@@ -68,6 +71,8 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsXULCommandDispatcher)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsXULCommandDispatcher)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULCommandDispatcher)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULCommandDispatcher)
   tmp->Disconnect();
@@ -203,7 +208,8 @@ nsXULCommandDispatcher::SetFocusedWindow(nsIDOMWindow* aWindow)
   // end up focusing whatever is currently focused inside the frame. Since
   // setting the command dispatcher's focused window doesn't raise the window,
   // setting it to a top-level window doesn't need to do anything.
-  nsCOMPtr<nsIDOMElement> frameElement = window->GetFrameElementInternal();
+  nsCOMPtr<nsIDOMElement> frameElement =
+    do_QueryInterface(window->GetFrameElementInternal());
   if (frameElement)
     return fm->SetFocus(frameElement, 0);
 
@@ -268,13 +274,13 @@ nsXULCommandDispatcher::AddCommandUpdater(nsIDOMElement* aElement,
     if (updater->mElement == aElement) {
 
 #ifdef DEBUG
-      if (PR_LOG_TEST(gLog, PR_LOG_NOTICE)) {
+      if (PR_LOG_TEST(gCommandLog, PR_LOG_NOTICE)) {
         nsAutoCString eventsC, targetsC, aeventsC, atargetsC; 
         eventsC.AssignWithConversion(updater->mEvents);
         targetsC.AssignWithConversion(updater->mTargets);
         CopyUTF16toUTF8(aEvents, aeventsC);
         CopyUTF16toUTF8(aTargets, atargetsC);
-        PR_LOG(gLog, PR_LOG_NOTICE,
+        PR_LOG(gCommandLog, PR_LOG_NOTICE,
                ("xulcmd[%p] replace %p(events=%s targets=%s) with (events=%s targets=%s)",
                 this, aElement,
                 eventsC.get(),
@@ -296,12 +302,12 @@ nsXULCommandDispatcher::AddCommandUpdater(nsIDOMElement* aElement,
     updater = updater->mNext;
   }
 #ifdef DEBUG
-  if (PR_LOG_TEST(gLog, PR_LOG_NOTICE)) {
+  if (PR_LOG_TEST(gCommandLog, PR_LOG_NOTICE)) {
     nsAutoCString aeventsC, atargetsC; 
     CopyUTF16toUTF8(aEvents, aeventsC);
     CopyUTF16toUTF8(aTargets, atargetsC);
 
-    PR_LOG(gLog, PR_LOG_NOTICE,
+    PR_LOG(gCommandLog, PR_LOG_NOTICE,
            ("xulcmd[%p] add     %p(events=%s targets=%s)",
             this, aElement,
             aeventsC.get(),
@@ -331,11 +337,11 @@ nsXULCommandDispatcher::RemoveCommandUpdater(nsIDOMElement* aElement)
   while (updater) {
     if (updater->mElement == aElement) {
 #ifdef DEBUG
-      if (PR_LOG_TEST(gLog, PR_LOG_NOTICE)) {
+      if (PR_LOG_TEST(gCommandLog, PR_LOG_NOTICE)) {
         nsAutoCString eventsC, targetsC; 
         eventsC.AssignWithConversion(updater->mEvents);
         targetsC.AssignWithConversion(updater->mTargets);
-        PR_LOG(gLog, PR_LOG_NOTICE,
+        PR_LOG(gCommandLog, PR_LOG_NOTICE,
                ("xulcmd[%p] remove  %p(events=%s targets=%s)",
                 this, aElement,
                 eventsC.get(),
@@ -397,10 +403,10 @@ nsXULCommandDispatcher::UpdateCommands(const nsAString& aEventName)
       continue;
 
 #ifdef DEBUG
-    if (PR_LOG_TEST(gLog, PR_LOG_NOTICE)) {
+    if (PR_LOG_TEST(gCommandLog, PR_LOG_NOTICE)) {
       nsAutoCString aeventnameC; 
       CopyUTF16toUTF8(aEventName, aeventnameC);
-      PR_LOG(gLog, PR_LOG_NOTICE,
+      PR_LOG(gCommandLog, PR_LOG_NOTICE,
              ("xulcmd[%p] update %p event=%s",
               this, content,
               aeventnameC.get()));
@@ -415,9 +421,9 @@ nsXULCommandDispatcher::UpdateCommands(const nsAString& aEventName)
       // Handle the DOM event
       nsEventStatus status = nsEventStatus_eIgnore;
 
-      nsEvent event(true, NS_XUL_COMMAND_UPDATE);
+      WidgetEvent event(true, NS_XUL_COMMAND_UPDATE);
 
-      nsEventDispatcher::Dispatch(content, context, &event, nullptr, &status);
+      EventDispatcher::Dispatch(content, context, &event, nullptr, &status);
     }
   }
   return NS_OK;
@@ -437,14 +443,14 @@ nsXULCommandDispatcher::Matches(const nsString& aList,
   // okay, now make sure it's not a substring snafu; e.g., 'ur'
   // found inside of 'blur'.
   if (indx > 0) {
-    PRUnichar ch = aList[indx - 1];
-    if (! nsCRT::IsAsciiSpace(ch) && ch != PRUnichar(','))
+    char16_t ch = aList[indx - 1];
+    if (! nsCRT::IsAsciiSpace(ch) && ch != char16_t(','))
       return false;
   }
 
   if (indx + aElement.Length() < aList.Length()) {
-    PRUnichar ch = aList[indx + aElement.Length()];
-    if (! nsCRT::IsAsciiSpace(ch) && ch != PRUnichar(','))
+    char16_t ch = aList[indx + aElement.Length()];
+    if (! nsCRT::IsAsciiSpace(ch) && ch != char16_t(','))
       return false;
   }
 

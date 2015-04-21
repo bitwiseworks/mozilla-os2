@@ -91,27 +91,17 @@ PrincipalsEqual(nsIPrincipal* aObjectPrincipal, nsIPrincipal* aSubjectPrincipal)
     return false;
   }
 
-  bool equals;
-  nsresult rv = aSubjectPrincipal->EqualsIgnoringDomain(aObjectPrincipal, &equals);
-
-  NS_ASSERTION(NS_SUCCEEDED(rv) && equals,
-               "Trying to get DOM storage for wrong principal!");
-
-  if (NS_FAILED(rv) || !equals) {
-    return false;
-  }
-
-  return true;
+  return aSubjectPrincipal->Equals(aObjectPrincipal);
 }
 
-NS_IMPL_ISUPPORTS1(DOMStorageManager,
-                   nsIDOMStorageManager)
+NS_IMPL_ISUPPORTS(DOMStorageManager,
+                  nsIDOMStorageManager)
 
 DOMStorageManager::DOMStorageManager(nsPIDOMStorage::StorageType aType)
-  : mType(aType)
+  : mCaches(10)
+  , mType(aType)
   , mLowDiskSpace(false)
 {
-  mCaches.Init(10);
   DOMStorageObserver* observer = DOMStorageObserver::Self();
   NS_ASSERTION(observer, "No DOMStorageObserver, cannot observe private data delete notifications!");
 
@@ -146,18 +136,9 @@ CreateScopeKey(nsIPrincipal* aPrincipal,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (domainScope.IsEmpty()) {
-    // About pages have an empty host but a valid path.  Since they are handled
-    // internally by our own redirector, we can trust them and use path as key.
-    // if file:/// protocol, let's make the exact directory the domain
+    // For the file:/// protocol use the exact directory as domain.
     bool isScheme = false;
-    if ((NS_SUCCEEDED(uri->SchemeIs("about", &isScheme)) && isScheme) ||
-        (NS_SUCCEEDED(uri->SchemeIs("moz-safe-about", &isScheme)) && isScheme)) {
-      rv = uri->GetPath(domainScope);
-      NS_ENSURE_SUCCESS(rv, rv);
-      // While the host is always canonicalized to lowercase, the path is not,
-      // thus need to force the casing.
-      ToLowerCase(domainScope);
-    } else if (NS_SUCCEEDED(uri->SchemeIs("file", &isScheme)) && isScheme) {
+    if (NS_SUCCEEDED(uri->SchemeIs("file", &isScheme)) && isScheme) {
       nsCOMPtr<nsIURL> url = do_QueryInterface(uri, &rv);
       NS_ENSURE_SUCCESS(rv, rv);
       rv = url->GetDirectory(domainScope);
@@ -278,6 +259,28 @@ DOMStorageManager::GetCache(const nsACString& aScope) const
   return entry->cache();
 }
 
+already_AddRefed<DOMStorageUsage>
+DOMStorageManager::GetScopeUsage(const nsACString& aScope)
+{
+  nsRefPtr<DOMStorageUsage> usage;
+  if (mUsages.Get(aScope, &usage)) {
+    return usage.forget();
+  }
+
+  usage = new DOMStorageUsage(aScope);
+
+  if (mType == LocalStorage) {
+    DOMStorageDBBridge* db = DOMStorageCache::StartDatabase();
+    if (db) {
+      db->AsyncGetUsage(usage);
+    }
+  }
+
+  mUsages.Put(aScope, usage);
+
+  return usage.forget();
+}
+
 already_AddRefed<DOMStorageCache>
 DOMStorageManager::PutCache(const nsACString& aScope,
                             nsIPrincipal* aPrincipal)
@@ -292,7 +295,7 @@ DOMStorageManager::PutCache(const nsACString& aScope,
   case SessionStorage:
     // Lifetime handled by the manager, don't persist
     entry->HardRef();
-    cache->Init(nullptr, false, aPrincipal, quotaScope);
+    cache->Init(this, false, aPrincipal, quotaScope);
     break;
 
   case LocalStorage:
@@ -444,7 +447,9 @@ DOMStorageManager::CheckStorage(nsIPrincipal* aPrincipal,
 
   nsAutoCString scope;
   nsresult rv = CreateScopeKey(aPrincipal, scope);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
 
   DOMStorageCache* cache = GetCache(scope);
   if (cache != pstorage->GetCache()) {

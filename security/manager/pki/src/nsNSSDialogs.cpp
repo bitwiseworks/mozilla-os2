@@ -47,14 +47,14 @@ nsNSSDialogs::~nsNSSDialogs()
 {
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS8(nsNSSDialogs, nsITokenPasswordDialogs,
-                                            nsICertificateDialogs,
-                                            nsIClientAuthDialogs,
-                                            nsICertPickDialogs,
-                                            nsITokenDialogs,
-                                            nsIDOMCryptoDialogs,
-                                            nsIGeneratingKeypairInfoDialogs,
-                                            nsISSLCertErrorDialog)
+NS_IMPL_ISUPPORTS(nsNSSDialogs, nsITokenPasswordDialogs,
+                  nsICertificateDialogs,
+                  nsIClientAuthDialogs,
+                  nsICertPickDialogs,
+                  nsITokenDialogs,
+                  nsIDOMCryptoDialogs,
+                  nsIGeneratingKeypairInfoDialogs,
+                  nsISSLCertErrorDialog)
 
 nsresult
 nsNSSDialogs::Init()
@@ -72,7 +72,7 @@ nsNSSDialogs::Init()
 
 nsresult
 nsNSSDialogs::SetPassword(nsIInterfaceRequestor *ctx,
-                          const PRUnichar *tokenName, bool* _canceled)
+                          const char16_t *tokenName, bool* _canceled)
 {
   nsresult rv;
 
@@ -107,8 +107,8 @@ nsNSSDialogs::SetPassword(nsIInterfaceRequestor *ctx,
 
 nsresult
 nsNSSDialogs::GetPassword(nsIInterfaceRequestor *ctx,
-                          const PRUnichar *tokenName, 
-                          PRUnichar **_password,
+                          const char16_t *tokenName, 
+                          char16_t **_password,
                           bool* _canceled)
 {
   nsresult rv;
@@ -203,12 +203,12 @@ nsNSSDialogs::NotifyCACertExists(nsIInterfaceRequestor *ctx)
   nsCOMPtr<nsIDOMWindow> parent = do_GetInterface(ctx);
 
   nsAutoString title;
-  rv = mPIPStringBundle->GetStringFromName(NS_LITERAL_STRING("caCertExistsTitle").get(),
+  rv = mPIPStringBundle->GetStringFromName(MOZ_UTF16("caCertExistsTitle"),
                                            getter_Copies(title));
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsAutoString msg;
-  rv = mPIPStringBundle->GetStringFromName(NS_LITERAL_STRING("caCertExistsMessage").get(),
+  rv = mPIPStringBundle->GetStringFromName(MOZ_UTF16("caCertExistsMessage"),
                                            getter_Copies(msg));
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -219,7 +219,7 @@ nsNSSDialogs::NotifyCACertExists(nsIInterfaceRequestor *ctx)
 
 
 NS_IMETHODIMP
-nsNSSDialogs::ChooseCertificate(nsIInterfaceRequestor *ctx, const PRUnichar *cn, const PRUnichar *organization, const PRUnichar *issuer, const PRUnichar **certNickList, const PRUnichar **certDetailsList, uint32_t count, int32_t *selectedIndex, bool *canceled) 
+nsNSSDialogs::ChooseCertificate(nsIInterfaceRequestor *ctx, const char16_t *cn, const char16_t *organization, const char16_t *issuer, const char16_t **certNickList, const char16_t **certDetailsList, uint32_t count, int32_t *selectedIndex, bool *canceled) 
 {
   nsresult rv;
   uint32_t i;
@@ -286,8 +286,8 @@ nsNSSDialogs::ChooseCertificate(nsIInterfaceRequestor *ctx, const PRUnichar *cn,
 
 NS_IMETHODIMP
 nsNSSDialogs::PickCertificate(nsIInterfaceRequestor *ctx, 
-                              const PRUnichar **certNickList, 
-                              const PRUnichar **certDetailsList, 
+                              const char16_t **certNickList, 
+                              const char16_t **certDetailsList, 
                               uint32_t count, 
                               int32_t *selectedIndex, 
                               bool *canceled) 
@@ -364,7 +364,7 @@ nsNSSDialogs::SetPKCS12FilePassword(nsIInterfaceRequestor *ctx,
   *_retval = (status == 0) ? false : true;
   if (*_retval) {
     // retrieve the password
-    PRUnichar *pw;
+    char16_t *pw;
     rv = block->GetString(2, &pw);
     if (NS_SUCCEEDED(rv)) {
       _password = pw;
@@ -398,7 +398,7 @@ nsNSSDialogs::GetPKCS12FilePassword(nsIInterfaceRequestor *ctx,
   *_retval = (status == 0) ? false : true;
   if (*_retval) {
     // retrieve the password
-    PRUnichar *pw;
+    char16_t *pw;
     rv = block->GetString(2, &pw);
     if (NS_SUCCEEDED(rv)) {
       _password = pw;
@@ -449,7 +449,7 @@ nsNSSDialogs::DisplayGeneratingKeypairInfo(nsIInterfaceRequestor *aCtx, nsIKeyge
 }
 
 NS_IMETHODIMP
-nsNSSDialogs::ChooseToken(nsIInterfaceRequestor *aCtx, const PRUnichar **aTokenList, uint32_t aCount, PRUnichar **aTokenChosen, bool *aCanceled) {
+nsNSSDialogs::ChooseToken(nsIInterfaceRequestor *aCtx, const char16_t **aTokenList, uint32_t aCount, char16_t **aTokenChosen, bool *aCanceled) {
   nsresult rv;
   uint32_t i;
 

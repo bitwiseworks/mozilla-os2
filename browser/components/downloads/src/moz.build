@@ -9,3 +9,10 @@ EXTRA_COMPONENTS += [
     'DownloadsStartup.js',
     'DownloadsUI.js',
 ]
+
+EXTRA_JS_MODULES += [
+    'DownloadsCommon.jsm',
+    'DownloadsLogger.jsm',
+    'DownloadsTaskbar.jsm',
+]
+

@@ -4,14 +4,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsSVGViewBox.h"
-#include "prdtoa.h"
-#include "nsTextFormatter.h"
 #include "nsCharSeparatedTokenizer.h"
-#include "nsMathUtils.h"
 #include "nsSMILValue.h"
+#include "nsTextFormatter.h"
 #include "SVGContentUtils.h"
 #include "SVGViewBoxSMILType.h"
-#include "nsAttrValueInlines.h"
 
 #define NUM_VIEWBOX_COMPONENTS 4
 using namespace mozilla;
@@ -124,22 +121,14 @@ ToSVGViewBoxRect(const nsAString& aStr, nsSVGViewBoxRect *aViewBox)
   float vals[NUM_VIEWBOX_COMPONENTS];
   uint32_t i;
   for (i = 0; i < NUM_VIEWBOX_COMPONENTS && tokenizer.hasMoreTokens(); ++i) {
-    NS_ConvertUTF16toUTF8 utf8Token(tokenizer.nextToken());
-    const char *token = utf8Token.get();
-    if (*token == '\0') {
-      return NS_ERROR_DOM_SYNTAX_ERR; // empty string (e.g. two commas in a row)
-    }
-
-    char *end;
-    vals[i] = float(PR_strtod(token, &end));
-    if (*end != '\0' || !NS_finite(vals[i])) {
-      return NS_ERROR_DOM_SYNTAX_ERR; // parse error
+    if (!SVGContentUtils::ParseNumber(tokenizer.nextToken(), vals[i])) {
+      return NS_ERROR_DOM_SYNTAX_ERR;
     }
   }
 
   if (i != NUM_VIEWBOX_COMPONENTS ||              // Too few values.
       tokenizer.hasMoreTokens() ||                // Too many values.
-      tokenizer.lastTokenEndedWithSeparator()) {  // Trailing comma.
+      tokenizer.separatorAfterCurrentToken()) {   // Trailing comma.
     return NS_ERROR_DOM_SYNTAX_ERR;
   }
 
@@ -191,9 +180,9 @@ nsSVGViewBox::GetBaseValueString(nsAString& aValue) const
     aValue.AssignLiteral("none");
     return;
   }
-  PRUnichar buf[200];
-  nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-                            NS_LITERAL_STRING("%g %g %g %g").get(),
+  char16_t buf[200];
+  nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+                            MOZ_UTF16("%g %g %g %g"),
                             (double)mBaseVal.x, (double)mBaseVal.y,
                             (double)mBaseVal.width, (double)mBaseVal.height);
   aValue.Assign(buf);

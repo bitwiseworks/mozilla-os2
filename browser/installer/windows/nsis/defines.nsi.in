@@ -3,6 +3,23 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+# Defining FunnelcakeVersion will append the value of StubURLVersionAppend to
+# StubURLVersion, append the value of URLManualDownloadAppend to
+# URLManualDownload, and append the value of URLStubDownloadAppend to
+# URLStubDownload. The value of FunnelcakeVersion should not be defined when it
+# is not used and when it is defined its value should never be empty.
+# !define FunnelcakeVersion        "999"
+
+!ifdef FunnelcakeVersion
+!define URLManualDownloadAppend  "&f=${FunnelcakeVersion}"
+!define URLStubDownloadAppend    "-f${FunnelcakeVersion}"
+!define StubURLVersionAppend     "-${FunnelcakeVersion}"
+!else
+!define URLManualDownloadAppend  ""
+!define URLStubDownloadAppend    ""
+!define StubURLVersionAppend     ""
+!endif
+
 # These defines should match application.ini settings
 !define AppName               "Firefox"
 !define AppVersion            "@APP_VERSION@"
@@ -15,8 +32,7 @@
 !define AppRegName            "Firefox"
 
 !define BrandShortName        "@MOZ_APP_DISPLAYNAME@"
-!define PreReleaseSuffix      "@PRE_RELEASE_SUFFIX@"
-!define BrandFullName         "${BrandFullNameInternal}${PreReleaseSuffix}"
+!define BrandFullName         "${BrandFullNameInternal}"
 
 !define NO_UNINSTALL_SURVEY
 
@@ -43,15 +59,6 @@
 
 !define BaseURLStubPing "http://download-stats.mozilla.org/stub"
 
-# NO_INSTDIR_FROM_REG is defined for pre-releases which have a PreReleaseSuffix
-# (e.g. Alpha X, Beta X, etc.) to prevent finding a non-default installation
-# directory in the registry and using that as the default. This prevents
-# Beta releases built with official branding from finding an existing install
-# of an official release and defaulting to its installation directory.
-!if "@PRE_RELEASE_SUFFIX@" != ""
-!define NO_INSTDIR_FROM_REG
-!endif
-
 # ARCH is used when it is necessary to differentiate the x64 registry keys from
 # the x86 registry keys (e.g. the uninstall registry key).
 #ifdef HAVE_64BIT_OS
@@ -69,6 +76,10 @@
 
 #ifdef MOZ_METRO
 !define MOZ_METRO
+#endif
+
+#ifdef MOZ_CONTENT_SANDBOX
+!define MOZ_CONTENT_SANDBOX
 #endif
 
 # File details shared by both the installer and uninstaller

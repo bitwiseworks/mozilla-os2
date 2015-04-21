@@ -13,7 +13,7 @@
 #include "nsIMutationObserver.h"
 #include "nsIDocument.h"
 #include "nsIDOMUserDataHandler.h"
-#include "nsEventListenerManager.h"
+#include "mozilla/EventListenerManager.h"
 #include "nsIXPConnect.h"
 #include "pldhash.h"
 #include "nsIDOMAttr.h"
@@ -32,7 +32,9 @@
 #include "nsDOMMutationObserver.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
+#include "mozilla/dom/ShadowRoot.h"
 
+using namespace mozilla;
 using namespace mozilla::dom;
 using mozilla::AutoJSContext;
 
@@ -58,7 +60,12 @@ using mozilla::AutoJSContext;
         slots->mMutationObservers, nsIMutationObserver,           \
         func_, params_);                                          \
     }                                                             \
-    node = node->GetParentNode();                                 \
+    ShadowRoot* shadow = ShadowRoot::FromNode(node);              \
+    if (shadow) {                                                 \
+      node = shadow->GetPoolHost();                               \
+    } else {                                                      \
+      node = node->GetParentNode();                               \
+    }                                                             \
   } while (node);                                                 \
   if (needsEnterLeave) {                                          \
     nsDOMMutationObserver::LeaveMutationHandling();               \
@@ -230,8 +237,8 @@ nsNodeUtils::LastRelease(nsINode* aNode)
       aNode->HasFlag(NODE_HAS_LISTENERMANAGER)) {
 #ifdef DEBUG
     if (nsContentUtils::IsInitialized()) {
-      nsEventListenerManager* manager =
-        nsContentUtils::GetListenerManager(aNode, false);
+      EventListenerManager* manager =
+        nsContentUtils::GetExistingListenerManagerForNode(aNode);
       if (!manager) {
         NS_ERROR("Huh, our bit says we have a listener manager list, "
                  "but there's nothing in the hash!?!!");
@@ -247,10 +254,9 @@ nsNodeUtils::LastRelease(nsINode* aNode)
     nsIDocument* ownerDoc = aNode->OwnerDoc();
     Element* elem = aNode->AsElement();
     ownerDoc->ClearBoxObjectFor(elem);
-    
+
     NS_ASSERTION(aNode->HasFlag(NODE_FORCE_XBL_BINDINGS) ||
-                 !ownerDoc->BindingManager() ||
-                 !ownerDoc->BindingManager()->GetBinding(elem),
+                 !elem->GetXBLBinding(),
                  "Non-forced node has binding on destruction");
 
     // if NODE_FORCE_XBL_BINDINGS is set, the node might still have a binding
@@ -261,9 +267,9 @@ nsNodeUtils::LastRelease(nsINode* aNode)
     }
   }
 
-  nsContentUtils::ReleaseWrapper(aNode, aNode);
+  aNode->ReleaseWrapper(aNode);
 
-  delete aNode;
+  FragmentOrElement::RemoveBlackMarkedNode(aNode);
 }
 
 struct MOZ_STACK_CLASS nsHandlerData
@@ -483,20 +489,20 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
 
       nsPIDOMWindow* window = newDoc->GetInnerWindow();
       if (window) {
-        nsEventListenerManager* elm = aNode->GetListenerManager(false);
+        EventListenerManager* elm = aNode->GetExistingListenerManager();
         if (elm) {
           window->SetMutationListeners(elm->MutationListenerBits());
           if (elm->MayHavePaintEventListener()) {
             window->SetHasPaintEventListeners();
-          }
-          if (elm->MayHaveAudioAvailableEventListener()) {
-            window->SetHasAudioAvailableEventListeners();
           }
           if (elm->MayHaveTouchEventListener()) {
             window->SetHasTouchEventListeners();
           }
           if (elm->MayHaveMouseEnterLeaveEventListener()) {
             window->SetHasMouseEnterLeaveEventListeners();
+          }
+          if (elm->MayHavePointerEnterLeaveEventListener()) {
+            window->SetHasPointerEnterLeaveEventListeners();
           }
         }
       }
@@ -527,6 +533,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
       JS::Rooted<JSObject*> wrapper(cx);
       if ((wrapper = aNode->GetWrapper())) {
         if (IsDOMObject(wrapper)) {
+          JSAutoCompartment ac(cx, wrapper);
           rv = ReparentWrapper(cx, wrapper);
         } else {
           nsIXPConnect *xpc = nsContentUtils::XPConnect();

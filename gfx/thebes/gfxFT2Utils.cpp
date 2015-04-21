@@ -47,33 +47,35 @@ void
 gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
                              uint32_t* aSpaceGlyph)
 {
-    NS_PRECONDITION(aMetrics != NULL, "aMetrics must not be NULL");
-    NS_PRECONDITION(aSpaceGlyph != NULL, "aSpaceGlyph must not be NULL");
+    NS_PRECONDITION(aMetrics != nullptr, "aMetrics must not be NULL");
+    NS_PRECONDITION(aSpaceGlyph != nullptr, "aSpaceGlyph must not be NULL");
 
     if (MOZ_UNLIKELY(!mFace)) {
         // No face.  This unfortunate situation might happen if the font
         // file is (re)moved at the wrong time.
-        aMetrics->emHeight = mGfxFont->GetStyle()->size;
-        aMetrics->emAscent = 0.8 * aMetrics->emHeight;
-        aMetrics->emDescent = 0.2 * aMetrics->emHeight;
-        aMetrics->maxAscent = aMetrics->emAscent;
-        aMetrics->maxDescent = aMetrics->maxDescent;
-        aMetrics->maxHeight = aMetrics->emHeight;
+        const gfxFloat emHeight = mGfxFont->GetStyle()->size;
+        aMetrics->emHeight = emHeight;
+        aMetrics->maxAscent = aMetrics->emAscent = 0.8 * emHeight;
+        aMetrics->maxDescent = aMetrics->emDescent = 0.2 * emHeight;
+        aMetrics->maxHeight = emHeight;
         aMetrics->internalLeading = 0.0;
-        aMetrics->externalLeading = 0.2 * aMetrics->emHeight;
-        aSpaceGlyph = 0;
-        aMetrics->spaceWidth = 0.5 * aMetrics->emHeight;
-        aMetrics->maxAdvance = aMetrics->spaceWidth;
-        aMetrics->aveCharWidth = aMetrics->spaceWidth;
-        aMetrics->zeroOrAveCharWidth = aMetrics->spaceWidth;
-        aMetrics->xHeight = 0.5 * aMetrics->emHeight;
-        aMetrics->underlineSize = aMetrics->emHeight / 14.0;
-        aMetrics->underlineOffset = -aMetrics->underlineSize;
-        aMetrics->strikeoutOffset = 0.25 * aMetrics->emHeight;
-        aMetrics->strikeoutSize = aMetrics->underlineSize;
-        aMetrics->superscriptOffset = aMetrics->xHeight;
-        aMetrics->subscriptOffset = aMetrics->xHeight;
+        aMetrics->externalLeading = 0.2 * emHeight;
+        const gfxFloat spaceWidth = 0.5 * emHeight;
+        aMetrics->spaceWidth = spaceWidth;
+        aMetrics->maxAdvance = spaceWidth;
+        aMetrics->aveCharWidth = spaceWidth;
+        aMetrics->zeroOrAveCharWidth = spaceWidth;
+        const gfxFloat xHeight = 0.5 * emHeight;
+        aMetrics->xHeight = xHeight;
+        aMetrics->superscriptOffset = xHeight;
+        aMetrics->subscriptOffset = xHeight;
+        const gfxFloat underlineSize = emHeight / 14.0;
+        aMetrics->underlineSize = underlineSize;
+        aMetrics->underlineOffset = -underlineSize;
+        aMetrics->strikeoutOffset = 0.25 * emHeight;
+        aMetrics->strikeoutSize = underlineSize;
 
+        *aSpaceGlyph = 0;
         return;
     }
 
@@ -81,7 +83,8 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
 
     gfxFloat emHeight;
     // Scale for vertical design metric conversion: pixels per design unit.
-    gfxFloat yScale;
+    // If this remains at 0.0, we can't use metrics from OS/2 etc.
+    gfxFloat yScale = 0.0;
     if (FT_IS_SCALABLE(mFace)) {
         // Prefer FT_Size_Metrics::x_scale to x_ppem as x_ppem does not
         // have subpixel accuracy.
@@ -93,11 +96,17 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
         yScale = FLOAT_FROM_26_6(FLOAT_FROM_16_16(ftMetrics.y_scale));
         emHeight = mFace->units_per_EM * yScale;
     } else { // Not scalable.
-        // FT_Size_Metrics doc says x_scale is "only relevant for scalable
-        // font formats".
-        gfxFloat emUnit = mFace->units_per_EM;
         emHeight = ftMetrics.y_ppem;
-        yScale = emHeight / emUnit;
+        // FT_Face doc says units_per_EM and a bunch of following fields
+        // are "only relevant to scalable outlines". If it's an sfnt,
+        // we can get units_per_EM from the 'head' table instead; otherwise,
+        // we don't have a unitsPerEm value so we can't compute/use yScale.
+        const TT_Header* head =
+            static_cast<TT_Header*>(FT_Get_Sfnt_Table(mFace, ft_sfnt_head));
+        if (head) {
+            gfxFloat emUnit = head->Units_Per_EM;
+            yScale = emHeight / emUnit;
+        }
     }
 
     TT_OS2 *os2 =
@@ -108,21 +117,33 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
     aMetrics->maxAdvance = FLOAT_FROM_26_6(ftMetrics.max_advance);
 
     gfxFloat lineHeight;
-    if (os2 && os2->sTypoAscender) {
+    if (os2 && os2->sTypoAscender && yScale > 0.0) {
         aMetrics->emAscent = os2->sTypoAscender * yScale;
         aMetrics->emDescent = -os2->sTypoDescender * yScale;
         FT_Short typoHeight =
             os2->sTypoAscender - os2->sTypoDescender + os2->sTypoLineGap;
         lineHeight = typoHeight * yScale;
 
-        // maxAscent/maxDescent get used for frame heights, and some fonts
-        // don't have the HHEA table ascent/descent set (bug 279032).
-        // We use NS_round here to parallel the pixel-rounded values that
-        // freetype gives us for ftMetrics.ascender/descender.
-        aMetrics->maxAscent =
-            std::max(aMetrics->maxAscent, NS_round(aMetrics->emAscent));
-        aMetrics->maxDescent =
-            std::max(aMetrics->maxDescent, NS_round(aMetrics->emDescent));
+        // If the OS/2 fsSelection USE_TYPO_METRICS bit is set,
+        // or if this is an OpenType Math font,
+        // set maxAscent/Descent from the sTypo* fields instead of hhea.
+        const uint16_t kUseTypoMetricsMask = 1 << 7;
+        FT_ULong length = 0;
+        if ((os2->fsSelection & kUseTypoMetricsMask) ||
+            0 == FT_Load_Sfnt_Table(mFace, FT_MAKE_TAG('M','A','T','H'),
+                                    0, nullptr, &length)) {
+            aMetrics->maxAscent = NS_round(aMetrics->emAscent);
+            aMetrics->maxDescent = NS_round(aMetrics->emDescent);
+        } else {
+            // maxAscent/maxDescent get used for frame heights, and some fonts
+            // don't have the HHEA table ascent/descent set (bug 279032).
+            // We use NS_round here to parallel the pixel-rounded values that
+            // freetype gives us for ftMetrics.ascender/descender.
+            aMetrics->maxAscent =
+                std::max(aMetrics->maxAscent, NS_round(aMetrics->emAscent));
+            aMetrics->maxDescent =
+                std::max(aMetrics->maxDescent, NS_round(aMetrics->emDescent));
+        }
     } else {
         aMetrics->emAscent = aMetrics->maxAscent;
         aMetrics->emDescent = aMetrics->maxDescent;
@@ -150,7 +171,7 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
         aMetrics->xHeight = -extents.y_bearing;
         aMetrics->aveCharWidth = extents.x_advance;
     } else {
-        if (os2 && os2->sxHeight) {
+        if (os2 && os2->sxHeight && yScale > 0.0) {
             aMetrics->xHeight = os2->sxHeight * yScale;
         } else {
             // CSS 2.1, section 4.3.2 Lengths: "In the cases where it is
@@ -195,7 +216,7 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
     // Therefore get the underline position directly from the table
     // ourselves when this table exists.  Use FreeType's metrics for
     // other (including older PostScript) fonts.
-    if (mFace->underline_position && mFace->underline_thickness) {
+    if (mFace->underline_position && mFace->underline_thickness && yScale > 0.0) {
         aMetrics->underlineSize = mFace->underline_thickness * yScale;
         TT_Postscript *post = static_cast<TT_Postscript*>
             (FT_Get_Sfnt_Table(mFace, ft_sfnt_post));
@@ -211,7 +232,7 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
         aMetrics->underlineOffset = -aMetrics->underlineSize;
     }
 
-    if (os2 && os2->yStrikeoutSize && os2->yStrikeoutPosition) {
+    if (os2 && os2->yStrikeoutSize && os2->yStrikeoutPosition && yScale > 0.0) {
         aMetrics->strikeoutSize = os2->yStrikeoutSize * yScale;
         aMetrics->strikeoutOffset = os2->yStrikeoutPosition * yScale;
     } else { // No strikeout info.
@@ -323,7 +344,7 @@ gfxFT2LockedFace::GetUVSGlyph(uint32_t aCharCode, uint32_t aVariantSelector)
 uint32_t
 gfxFT2LockedFace::GetCharExtents(char aChar, cairo_text_extents_t* aExtents)
 {
-    NS_PRECONDITION(aExtents != NULL, "aExtents must not be NULL");
+    NS_PRECONDITION(aExtents != nullptr, "aExtents must not be NULL");
 
     if (!mFace)
         return 0;

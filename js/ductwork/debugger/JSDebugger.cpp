@@ -8,8 +8,8 @@
 #include "nsThreadUtils.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
-#include "jsdbgapi.h"
 #include "jswrapper.h"
+#include "js/OldDebugAPI.h"
 #include "mozilla/ModuleUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "nsMemory.h"
@@ -25,7 +25,7 @@ namespace jsdebugger {
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(JSDebugger)
 
-NS_IMPL_ISUPPORTS1(JSDebugger, IJSDebugger)
+NS_IMPL_ISUPPORTS(JSDebugger, IJSDebugger)
 
 JSDebugger::JSDebugger()
 {
@@ -36,7 +36,7 @@ JSDebugger::~JSDebugger()
 }
 
 NS_IMETHODIMP
-JSDebugger::AddClass(const JS::Value &global, JSContext* cx)
+JSDebugger::AddClass(JS::Handle<JS::Value> global, JSContext* cx)
 {
   nsresult rv;
   nsCOMPtr<nsIXPConnect> xpc = do_GetService(nsIXPConnect::GetCID(), &rv);
@@ -69,13 +69,13 @@ JSDebugger::AddClass(const JS::Value &global, JSContext* cx)
 NS_DEFINE_NAMED_CID(JSDEBUGGER_CID);
 
 static const mozilla::Module::CIDEntry kJSDebuggerCIDs[] = {
-  { &kJSDEBUGGER_CID, false, NULL, mozilla::jsdebugger::JSDebuggerConstructor },
-  { NULL }
+  { &kJSDEBUGGER_CID, false, nullptr, mozilla::jsdebugger::JSDebuggerConstructor },
+  { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kJSDebuggerContracts[] = {
   { JSDEBUGGER_CONTRACTID, &kJSDEBUGGER_CID },
-  { NULL }
+  { nullptr }
 };
 
 static const mozilla::Module kJSDebuggerModule = {

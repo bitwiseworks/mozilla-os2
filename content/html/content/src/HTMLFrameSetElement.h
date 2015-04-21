@@ -40,19 +40,19 @@ struct nsFramesetSpec {
 namespace mozilla {
 namespace dom {
 
-class BeforeUnloadEventHandlerNonNull;
+class OnBeforeUnloadEventHandlerNonNull;
 
-class HTMLFrameSetElement : public nsGenericHTMLElement,
-                            public nsIDOMHTMLFrameSetElement
+class HTMLFrameSetElement MOZ_FINAL : public nsGenericHTMLElement,
+                                      public nsIDOMHTMLFrameSetElement
 {
 public:
-  HTMLFrameSetElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  HTMLFrameSetElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : nsGenericHTMLElement(aNodeInfo),
       mNumRows(0),
       mNumCols(0),
       mCurrentRowColHint(NS_STYLE_HINT_REFLOW)
   {
-    SetIsDOMBinding();
+    SetHasWeirdParserInsertionMode();
   }
   virtual ~HTMLFrameSetElement();
 
@@ -60,15 +60,6 @@ public:
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLFrameSetElement
   NS_DECL_NSIDOMHTMLFRAMESETELEMENT
@@ -95,21 +86,17 @@ public:
   // Event listener stuff; we need to declare only the ones we need to
   // forward to window that don't come from nsIDOMHTMLFrameSetElement.
 #define EVENT(name_, id_, type_, struct_) /* nothing; handled by the superclass */
-#define FORWARDED_EVENT(name_, id_, type_, struct_)                     \
-  NS_IMETHOD GetOn##name_(JSContext *cx, JS::Value *vp);                \
-  NS_IMETHOD SetOn##name_(JSContext *cx, const JS::Value &v);
 #define WINDOW_EVENT_HELPER(name_, type_)                               \
   type_* GetOn##name_();                                                \
-  void SetOn##name_(type_* handler, ErrorResult& error);
+  void SetOn##name_(type_* handler);
 #define WINDOW_EVENT(name_, id_, type_, struct_)                        \
   WINDOW_EVENT_HELPER(name_, EventHandlerNonNull)
 #define BEFOREUNLOAD_EVENT(name_, id_, type_, struct_)                  \
-  WINDOW_EVENT_HELPER(name_, BeforeUnloadEventHandlerNonNull)
-#include "nsEventNameList.h"
+  WINDOW_EVENT_HELPER(name_, OnBeforeUnloadEventHandlerNonNull)
+#include "mozilla/EventNameList.h" // IWYU pragma: keep
 #undef BEFOREUNLOAD_EVENT
 #undef WINDOW_EVENT
 #undef WINDOW_EVENT_HELPER
-#undef FORWARDED_EVENT
 #undef EVENT
 
   // These override the SetAttr methods in nsGenericHTMLElement (need
@@ -149,11 +136,9 @@ public:
                                               int32_t aModType) const MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
 private:
   nsresult ParseRowCol(const nsAString& aValue,

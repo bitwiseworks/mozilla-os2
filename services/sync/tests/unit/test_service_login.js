@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/service.js");
 Cu.import("resource://services-sync/policies.js");
@@ -23,8 +23,8 @@ function login_handling(handler) {
 }
 
 function run_test() {
-  let logger = Log4Moz.repository.rootLogger;
-  Log4Moz.repository.rootLogger.addAppender(new Log4Moz.DumpAppender());
+  let logger = Log.repository.rootLogger;
+  Log.repository.rootLogger.addAppender(new Log.DumpAppender());
 
   run_next_test();
 }
@@ -43,9 +43,6 @@ add_test(function test_offline() {
 });
 
 function setup() {
-  Service.serverURL = TEST_SERVER_URL;
-  Service.clusterURL = TEST_CLUSTER_URL;
-
   let janeHelper = track_collections_helper();
   let janeU      = janeHelper.with_updated_collection;
   let janeColls  = janeHelper.collections;
@@ -53,7 +50,7 @@ function setup() {
   let johnU      = johnHelper.with_updated_collection;
   let johnColls  = johnHelper.collections;
 
-  return httpd_setup({
+  let server = httpd_setup({
     "/1.1/johndoe/info/collections": login_handling(johnHelper.handler),
     "/1.1/janedoe/info/collections": login_handling(janeHelper.handler),
 
@@ -65,6 +62,9 @@ function setup() {
     "/1.1/janedoe/storage/crypto/keys": janeU("crypto", new ServerWBO("keys").handler()),
     "/1.1/janedoe/storage/meta/global": janeU("meta",   new ServerWBO("global").handler())
   });
+
+  Service.serverURL = server.baseURI;
+  return server;
 }
 
 add_test(function test_login_logout() {
@@ -72,6 +72,7 @@ add_test(function test_login_logout() {
 
   try {
     _("Force the initial state.");
+    ensureLegacyIdentityManager();
     Service.status.service = STATUS_OK;
     do_check_eq(Service.status.service, STATUS_OK);
 

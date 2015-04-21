@@ -14,11 +14,11 @@
 #include "nsIDOMMutationEvent.h"
 #include "nsIURI.h"
 #include "nsNodeUtils.h"
-#include "xpcpublic.h"
 #include "nsWrapperCacheInlines.h"
+#include "nsIFrame.h"
+#include "ActiveLayerTracker.h"
 
-namespace css = mozilla::css;
-namespace dom = mozilla::dom;
+using namespace mozilla;
 
 nsDOMCSSAttributeDeclaration::nsDOMCSSAttributeDeclaration(dom::Element* aElement,
                                                            bool aIsSMILOverride)
@@ -43,10 +43,8 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsDOMCSSAttributeDeclaration, mElement)
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsDOMCSSAttributeDeclaration)
   if (tmp->mElement && Element::CanSkip(tmp->mElement, true)) {
     if (tmp->PreservingWrapper()) {
-      // Not relying on GetWrapper to unmark us gray because the
-      // side-effect thing is pretty weird.
-      JSObject* o = tmp->GetWrapperPreserveColor();
-      xpc_UnmarkGrayObject(o);
+      // This marks the wrapper black.
+      tmp->GetWrapper();
     }
     return true;
   }
@@ -171,4 +169,24 @@ nsDOMCSSAttributeDeclaration::GetParentRule(nsIDOMCSSRule **aParent)
 nsDOMCSSAttributeDeclaration::GetParentObject()
 {
   return mElement;
+}
+
+NS_IMETHODIMP
+nsDOMCSSAttributeDeclaration::SetPropertyValue(const nsCSSProperty aPropID,
+                                               const nsAString& aValue)
+{
+  // Scripted modifications to style.opacity or style.transform
+  // could immediately force us into the animated state if heuristics suggest
+  // this is scripted animation.
+  if (aPropID == eCSSProperty_opacity || aPropID == eCSSProperty_transform ||
+      aPropID == eCSSProperty_left || aPropID == eCSSProperty_top ||
+      aPropID == eCSSProperty_right || aPropID == eCSSProperty_bottom ||
+      aPropID == eCSSProperty_margin_left || aPropID == eCSSProperty_margin_top ||
+      aPropID == eCSSProperty_margin_right || aPropID == eCSSProperty_margin_bottom) {
+    nsIFrame* frame = mElement->GetPrimaryFrame();
+    if (frame) {
+      ActiveLayerTracker::NotifyInlineStyleRuleModified(frame, aPropID);
+    }
+  }
+  return nsDOMCSSDeclaration::SetPropertyValue(aPropID, aValue);
 }

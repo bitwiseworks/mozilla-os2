@@ -12,8 +12,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=
   <script type="application/javascript;version=1.8" src="inspector-helpers.js"></script>
   <script type="application/javascript;version=1.8">
 Components.utils.import("resource://gre/modules/devtools/Loader.jsm");
+const {Promise: promise} = Components.utils.import("resource://gre/modules/Promise.jsm", {});
 
-const Promise = devtools.require("sdk/core/promise");
 const inspector = devtools.require("devtools/server/actors/inspector");
 
 window.onload = function() {
@@ -31,7 +31,6 @@ function assertOwnership() {
 addTest(function setup() {
   let url = document.getElementById("inspectorContent").href;
   attachURL(url, function(err, client, tab, doc) {
-    gInspectee = doc;
     let {InspectorFront} = devtools.require("devtools/server/actors/inspector");
     let inspector = InspectorFront(client, tab);
     promiseDone(inspector.getWalker().then(walker => {

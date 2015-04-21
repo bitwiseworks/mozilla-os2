@@ -3,15 +3,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "SVGLength.h"
 #include "nsSVGElement.h"
 #include "mozilla/dom/SVGSVGElement.h"
-#include "nsString.h"
 #include "nsTextFormatter.h"
-#include "prdtoa.h"
-#include "nsMathUtils.h"
 #include "SVGContentUtils.h"
 #include <limits>
 #include <algorithm>
@@ -25,9 +22,9 @@ static uint16_t GetUnitTypeForString(const nsAString& unitStr);
 void
 SVGLength::GetValueAsString(nsAString &aValue) const
 {
-  PRUnichar buf[24];
-  nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-                            NS_LITERAL_STRING("%g").get(),
+  char16_t buf[24];
+  nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+                            MOZ_UTF16("%g"),
                             (double)mValue);
   aValue.Assign(buf);
 
@@ -37,40 +34,27 @@ SVGLength::GetValueAsString(nsAString &aValue) const
 }
 
 bool
-SVGLength::SetValueFromString(const nsAString &aValue)
+SVGLength::SetValueFromString(const nsAString &aString)
 {
-  float tmpValue;
-  uint16_t tmpUnit;
+  RangedPtr<const char16_t> iter =
+    SVGContentUtils::GetStartRangedPtr(aString);
+  const RangedPtr<const char16_t> end =
+    SVGContentUtils::GetEndRangedPtr(aString);
 
-  NS_ConvertUTF16toUTF8 value(aValue);
-  const char *str = value.get();
+  float value;
 
-  while (*str != '\0' && IsSVGWhitespace(*str)) {
-    ++str;
+  if (!SVGContentUtils::ParseNumber(iter, end, value)) {
+    return false;
   }
-  char *unit;
-  tmpValue = float(PR_strtod(str, &unit));
-  if (unit != str && NS_finite(tmpValue)) {
-    char *theRest = unit;
-    while (*theRest != '\0' && !IsSVGWhitespace(*theRest)) {
-      ++theRest;
-    }
-    tmpUnit = GetUnitTypeForString(
-                Substring(aValue, unit - str, theRest - unit));
-    if (tmpUnit == nsIDOMSVGLength::SVG_LENGTHTYPE_UNKNOWN) {
-      // SVGContentUtils::ReportToConsole
-      return false;
-    }
-    while (*theRest && IsSVGWhitespace(*theRest)) {
-      ++theRest;
-    }
-    if (!*theRest) {
-      mValue = tmpValue;
-      mUnit = tmpUnit;
-      return true;
-    }
+
+  const nsAString& units = Substring(iter.get(), end.get());
+  uint16_t unitType = GetUnitTypeForString(units);
+  if (!IsValidUnitType(unitType)) {
+    return false;
   }
-  return false;
+  mValue = value;
+  mUnit = uint8_t(unitType);
+  return true;
 }
 
 inline static bool

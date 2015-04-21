@@ -26,7 +26,7 @@ public:
   virtual void Shutdown();
   virtual a11y::role NativeRole();
   virtual uint64_t NativeState();
-  virtual Relation RelationByType(uint32_t aRelationType);
+  virtual Relation RelationByType(RelationType aType) MOZ_OVERRIDE;
 
   void UpdateLabelValue(const nsString& aValue);
 
@@ -79,7 +79,7 @@ public:
   virtual uint64_t NativeState();
 };
 
-class XULLinkAccessible : public HyperTextAccessibleWrap
+class XULLinkAccessible : public XULLabelAccessible
 {
 
 public:

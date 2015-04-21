@@ -74,7 +74,7 @@ public:
   char*      GetDriverName(ULONG printerNdx);
   BOOL       ShowProperties(ULONG printerNdx);
   nsAString* GetPrinterTitle(ULONG printerNdx);
-  int32_t    GetPrinterIndex(const PRUnichar* aPrinterName);
+  int32_t    GetPrinterIndex(const char16_t* aPrinterName);
 
 private:
   ULONG      mQueueCount;

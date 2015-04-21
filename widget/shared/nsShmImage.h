@@ -16,7 +16,8 @@
 #ifdef MOZ_HAVE_SHMIMAGE
 
 #include "nsIWidget.h"
-#include "gfxASurface.h"
+#include "gfxTypes.h"
+#include "nsAutoPtr.h"
 
 #include "mozilla/X11Util.h"
 #include <X11/Xlib.h>
@@ -30,7 +31,8 @@
 #endif
 
 class QRect;
-class QWidget;
+class QWindow;
+class gfxASurface;
 
 class nsShmImage {
     NS_INLINE_DECL_REFCOUNTING(nsShmImage)
@@ -38,7 +40,7 @@ class nsShmImage {
     typedef mozilla::ipc::SharedMemorySysV SharedMemorySysV;
 
 public:
-    typedef gfxASurface::gfxImageFormat Format;
+    typedef gfxImageFormat Format;
 
     static bool UseShm();
     static already_AddRefed<nsShmImage>
@@ -64,7 +66,7 @@ public:
 #elif (MOZ_WIDGET_GTK == 3)
     void Put(GdkWindow* aWindow, cairo_rectangle_list_t* aRects);
 #elif defined(MOZ_WIDGET_QT)
-    void Put(QWidget* aWindow, QRect& aRect);
+    void Put(QWindow* aWindow, QRect& aRect);
 #endif
 
     gfxIntSize Size() const { return mSize; }

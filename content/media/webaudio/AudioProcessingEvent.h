@@ -7,27 +7,25 @@
 #ifndef AudioProcessingEvent_h_
 #define AudioProcessingEvent_h_
 
-#include "nsDOMEvent.h"
 #include "AudioBuffer.h"
 #include "ScriptProcessorNode.h"
+#include "mozilla/dom/Event.h"
 
 namespace mozilla {
 namespace dom {
 
-class AudioProcessingEvent : public nsDOMEvent,
-                             public EnableWebAudioCheck
+class AudioProcessingEvent : public Event
 {
 public:
   AudioProcessingEvent(ScriptProcessorNode* aOwner,
-                       nsPresContext *aPresContext,
-                       nsEvent *aEvent);
+                       nsPresContext* aPresContext,
+                       WidgetEvent* aEvent);
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_FORWARD_TO_NSDOMEVENT
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioProcessingEvent, nsDOMEvent)
+  NS_FORWARD_TO_EVENT
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioProcessingEvent, Event)
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   void InitEvent(AudioBuffer* aInputBuffer,
                  uint32_t aNumberOfInputChannels,
@@ -44,18 +42,18 @@ public:
     return mPlaybackTime;
   }
 
-  AudioBuffer* InputBuffer()
+  AudioBuffer* GetInputBuffer(ErrorResult& aRv)
   {
     if (!mInputBuffer) {
-      LazilyCreateBuffer(mInputBuffer, mNumberOfInputChannels);
+      mInputBuffer = LazilyCreateBuffer(mNumberOfInputChannels, aRv);
     }
     return mInputBuffer;
   }
 
-  AudioBuffer* OutputBuffer()
+  AudioBuffer* GetOutputBuffer(ErrorResult& aRv)
   {
     if (!mOutputBuffer) {
-      LazilyCreateBuffer(mOutputBuffer, mNode->NumberOfOutputChannels());
+      mOutputBuffer = LazilyCreateBuffer(mNode->NumberOfOutputChannels(), aRv);
     }
     return mOutputBuffer;
   }
@@ -66,8 +64,8 @@ public:
   }
 
 private:
-  void LazilyCreateBuffer(nsRefPtr<AudioBuffer>& aBuffer,
-                          uint32_t aNumberOfChannels);
+  already_AddRefed<AudioBuffer>
+  LazilyCreateBuffer(uint32_t aNumberOfChannels, ErrorResult& rv);
 
 private:
   double mPlaybackTime;

@@ -38,12 +38,9 @@
 #include "nsIToolkitChromeRegistry.h"
 #include "nsIToolkitProfile.h"
 
-#if defined(OS_LINUX)
-#  define XP_LINUX
-#endif
-
 #ifdef XP_WIN
 #include <process.h>
+#include "mozilla/ipc/WindowsMessageLoop.h"
 #endif
 
 #include "nsAppDirectoryServiceDefs.h"
@@ -115,7 +112,7 @@ using mozilla::startup::sChildProcessType;
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 #ifdef XP_WIN
-static const PRUnichar kShellLibraryName[] =  L"shell32.dll";
+static const wchar_t kShellLibraryName[] =  L"shell32.dll";
 #endif
 
 nsresult
@@ -416,7 +413,7 @@ XRE_InitChildProcess(int aArgc,
   // on POSIX, |crashReporterArg| is "true" if crash reporting is
   // enabled, false otherwise
   if (0 != strcmp("false", crashReporterArg) && 
-      !XRE_SetRemoteExceptionHandler(NULL)) {
+      !XRE_SetRemoteExceptionHandler(nullptr)) {
     // Bug 684322 will add better visibility into this condition
     NS_WARNING("Could not setup crash reporting\n");
   }
@@ -429,7 +426,7 @@ XRE_InitChildProcess(int aArgc,
   gArgc = aArgc;
 
 #if defined(MOZ_WIDGET_GTK)
-  g_thread_init(NULL);
+  g_thread_init(nullptr);
 #endif
 
 #if defined(MOZ_WIDGET_QT)
@@ -438,11 +435,14 @@ XRE_InitChildProcess(int aArgc,
 
   if (PR_GetEnv("MOZ_DEBUG_CHILD_PROCESS")) {
 #ifdef OS_POSIX
-      printf("\n\nCHILDCHILDCHILDCHILD\n  debug me @%d\n\n", getpid());
+      printf("\n\nCHILDCHILDCHILDCHILD\n  debug me @ %d\n\n", getpid());
       sleep(30);
 #elif defined(OS_WIN)
-      printf("\n\nCHILDCHILDCHILDCHILD\n  debug me @%d\n\n", _getpid());
-      Sleep(30000);
+      // Windows has a decent JIT debugging story, so NS_DebugBreak does the
+      // right thing.
+      NS_DebugBreak(NS_DEBUG_BREAK,
+                    "Invoking NS_DebugBreak() to debug child process",
+                    nullptr, __FILE__, __LINE__);
 #endif
   }
 
@@ -511,6 +511,10 @@ XRE_InitChildProcess(int aArgc,
     MessageLoop uiMessageLoop(uiLoopType);
     {
       nsAutoPtr<ProcessChild> process;
+
+#ifdef XP_WIN
+      mozilla::ipc::windows::InitUIThread();
+#endif
 
       switch (aProcess) {
       case GeckoProcessType_Default:
@@ -759,7 +763,7 @@ ContentParent* gContentParent; //long-lived, manually refcounted
 TestShellParent* GetOrCreateTestShellParent()
 {
     if (!gContentParent) {
-        nsRefPtr<ContentParent> parent = ContentParent::GetNewOrUsed().get();
+        nsRefPtr<ContentParent> parent = ContentParent::GetNewOrUsed();
         parent.forget(&gContentParent);
     } else if (!gContentParent->IsAlive()) {
         return nullptr;

@@ -15,6 +15,7 @@
 
 #include "js/Value.h"
 #include "nscore.h"
+#include "nsStringGlue.h"
 #include "mozilla/Assertions.h"
 
 namespace mozilla {
@@ -29,13 +30,21 @@ enum ErrNum {
   Err_Limit
 };
 
+bool
+ThrowErrorMessage(JSContext* aCx, const ErrNum aErrorNumber, ...);
+
 } // namespace dom
 
 class ErrorResult {
 public:
   ErrorResult() {
     mResult = NS_OK;
+
 #ifdef DEBUG
+    // ErrorResult is extremely performance-sensitive code, where literally
+    // every machine instruction matters. Initialize mMessage only to suppress
+    // a debug-only warning from gcc 4.6.
+    mMessage = nullptr;
     mMightHaveUnreportedJSException = false;
 #endif
   }
@@ -66,11 +75,18 @@ public:
   // Facilities for throwing a preexisting JS exception value via this
   // ErrorResult.  The contract is that any code which might end up calling
   // ThrowJSException() must call MightThrowJSException() even if no exception
-  // is being thrown.  Code that would call ReportJSException or
+  // is being thrown.  Code that would call ReportJSException* or
   // StealJSException as needed must first call WouldReportJSException even if
   // this ErrorResult has not failed.
+  //
+  // The exn argument to ThrowJSException can be in any compartment.  It does
+  // not have to be in the compartment of cx.  If someone later uses it, they
+  // will wrap it into whatever compartment they're working in, as needed.
   void ThrowJSException(JSContext* cx, JS::Handle<JS::Value> exn);
   void ReportJSException(JSContext* cx);
+  // Used to implement throwing exceptions from the JS implementation of
+  // bindings to callers of the binding.
+  void ReportJSExceptionFromJSImplementation(JSContext* aCx);
   bool IsJSException() const { return ErrorCode() == NS_ERROR_DOM_JS_EXCEPTION; }
 
   void ThrowNotEnoughArgsError() { mResult = NS_ERROR_XPC_NOT_ENOUGH_ARGS; }
@@ -144,6 +160,32 @@ private:
   // reference, not by value.
   ErrorResult(const ErrorResult&) MOZ_DELETE;
 };
+
+/******************************************************************************
+ ** Macros for checking results
+ ******************************************************************************/
+
+#define ENSURE_SUCCESS(res, ret)                                          \
+  do {                                                                    \
+    if (res.Failed()) {                                                   \
+      nsCString msg;                                                      \
+      msg.AppendPrintf("ENSURE_SUCCESS(%s, %s) failed with "              \
+                       "result 0x%X", #res, #ret, res.ErrorCode());       \
+      NS_WARNING(msg.get());                                              \
+      return ret;                                                         \
+    }                                                                     \
+  } while(0)
+
+#define ENSURE_SUCCESS_VOID(res)                                          \
+  do {                                                                    \
+    if (res.Failed()) {                                                   \
+      nsCString msg;                                                      \
+      msg.AppendPrintf("ENSURE_SUCCESS_VOID(%s) failed with "             \
+                       "result 0x%X", #res, res.ErrorCode());             \
+      NS_WARNING(msg.get());                                              \
+      return;                                                             \
+    }                                                                     \
+  } while(0)
 
 } // namespace mozilla
 

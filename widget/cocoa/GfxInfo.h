@@ -53,7 +53,7 @@ public:
   NS_DECL_NSIGFXINFODEBUG
 #endif
 
-  virtual uint32_t OperatingSystemVersion() const { return mOSXVersion; }
+  virtual uint32_t OperatingSystemVersion() MOZ_OVERRIDE { return mOSXVersion; }
 
 protected:
 
@@ -68,9 +68,8 @@ private:
 
   void GetDeviceInfo();
   void AddCrashReportAnnotations();
-  nsString mRendererIDsString;
-  nsString mAdapterRAMString;
 
+  nsString mAdapterRAMString;
   nsString mDeviceID;
   nsString mDriverVersion;
   nsString mDriverDate;
@@ -78,8 +77,6 @@ private:
 
   nsString mAdapterVendorID;
   nsString mAdapterDeviceID;
-
-  uint32_t mRendererIDs[16];
 
   uint32_t mOSXVersion;
 };

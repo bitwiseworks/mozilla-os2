@@ -15,20 +15,14 @@
 #include "mozilla/layers/PGrallocBufferChild.h"
 #include "mozilla/layers/PGrallocBufferParent.h"
 
-// used only for hacky fix in gecko 23 for bug 862324
-// see bug 865908 about fixing this.
-#include "TextureHost.h"
-
 #define MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
 #define MOZ_HAVE_PLATFORM_SPECIFIC_LAYER_BUFFERS
-
-class gfxASurface;
 
 namespace mozilla {
 namespace layers {
 
 class MaybeMagicGrallocBufferHandle;
-class SurfaceDescriptorGralloc;
+class TextureHost;
 
 /**
  * This class exists to share the underlying GraphicBuffer resources
@@ -72,27 +66,27 @@ public:
   virtual ~GrallocBufferActor();
 
   static PGrallocBufferParent*
-  Create(const gfxIntSize& aSize, const uint32_t& aFormat, const uint32_t& aUsage,
+  Create(const gfx::IntSize& aSize,
+         const uint32_t& aFormat,
+         const uint32_t& aUsage,
          MaybeMagicGrallocBufferHandle* aOutHandle);
 
   static PGrallocBufferChild*
   Create();
 
-  static android::sp<GraphicBuffer>
-  GetFrom(const SurfaceDescriptorGralloc& aDescriptor);
-
   // used only for hacky fix in gecko 23 for bug 862324
   // see bug 865908 about fixing this.
   void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
 
-  // used only for hacky fix in gecko 23 for bug 862324
-  // see bug 865908 about fixing this.
-  void SetTextureHost(TextureHost* aTextureHost);
+  void AddTextureHost(TextureHost* aTextureHost);
+  void RemoveTextureHost();
+
+  android::GraphicBuffer* GetGraphicBuffer();
+
+  void InitFromHandle(const MagicGrallocBufferHandle& aHandle);
 
 private:
   GrallocBufferActor();
-
-  void InitFromHandle(const MagicGrallocBufferHandle& aHandle);
 
   android::sp<GraphicBuffer> mGraphicBuffer;
 
@@ -100,8 +94,7 @@ private:
   // BufferActor. This will be used for the memory reporter.
   size_t mAllocBytes;
 
-  // used only for hacky fix in gecko 23 for bug 862324
-  // see bug 865908 about fixing this.
+  // Used only for hacky fix for bug 966446.
   TextureHost* mTextureHost;
 
   friend class ISurfaceAllocator;

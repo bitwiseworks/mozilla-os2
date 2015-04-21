@@ -16,9 +16,9 @@ function test() {
     workerURL: "http://example.com/browser/toolkit/components/social/test/browser/worker_social.js"
   };
 
-  ensureSocialEnabled();
-
   SocialService.addProvider(manifest, function (p) {
+    // toolkit does not enable providers by default, that is handled in the
+    // browser, we need to enable it in our tests.
     p.enabled = true;
     provider = p;
     runTests(tests, undefined, undefined, function () {
@@ -85,21 +85,41 @@ let tests = {
     provider.workerAPI._port.postMessage({topic: "test-profile", data: sent});
   },
 
+  testNoCookies: function(next) {
+    // use a big, blunt stick to remove cookies.
+    Services.cookies.removeAll();
+    let port = provider.getWorkerPort();
+    port.onmessage = function onMessage(event) {
+      let {topic, data} = event.data;
+      if (topic == "test.cookies-get-response") {
+        is(data.length, 0, "got no cookies");
+        port.close();
+        next();
+      }
+    }
+    port.postMessage({topic: "test-initialization"});
+    port.postMessage({topic: "test.cookies-get"});
+  },
+
   testCookies: function(next) {
     let port = provider.getWorkerPort();
     port.onmessage = function onMessage(event) {
       let {topic, data} = event.data;
       if (topic == "test.cookies-get-response") {
-        is(data.length, 1, "got one cookie");
+        is(data.length, 2, "got 2 cookies");
         is(data[0].name, "cheez", "cookie has the correct name");
         is(data[0].value, "burger", "cookie has the correct value");
+        is(data[1].name, "moar", "cookie has the correct name");
+        is(data[1].value, "bacon", "cookie has the correct value");
         Services.cookies.remove('.example.com', '/', 'cheez', false);
+        Services.cookies.remove('.example.com', '/', 'moar', false);
         port.close();
         next();
       }
     }
     var MAX_EXPIRY = Math.pow(2, 62);
     Services.cookies.add('.example.com', '/', 'cheez', 'burger', false, false, true, MAX_EXPIRY);
+    Services.cookies.add('.example.com', '/', 'moar', 'bacon', false, false, true, MAX_EXPIRY);
     port.postMessage({topic: "test-initialization"});
     port.postMessage({topic: "test.cookies-get"});
   },
@@ -108,41 +128,37 @@ let tests = {
     let fw = {};
     Cu.import("resource://gre/modules/FrameWorker.jsm", fw);
 
-    // get a real handle to the worker so we can watch the unload event
-    // we watch for the unload of the worker to know it is infact being
-    // unloaded, after that if we get worker.connected we know that
-    // the worker was loaded again and ports reconnected
-    let reloading = false;
     let worker = fw.getFrameWorkerHandle(provider.workerURL, undefined, "testWorkerReload");
-    let frame =  worker._worker.frame;
-    let win = frame.contentWindow;
     let port = provider.getWorkerPort();
-    win.addEventListener("unload", function workerUnload(e) {
-      win.removeEventListener("unload", workerUnload);
-      ok(true, "worker unload event has fired");
-      is(port._pendingMessagesOutgoing.length, 0, "port has no pending outgoing message");
-    });
-    frame.addEventListener("DOMWindowCreated", function workerLoaded(e) {
-      frame.removeEventListener("DOMWindowCreated", workerLoaded);
-      // send a message which should end up pending
-      port.postMessage({topic: "test-pending-msg"});
-      ok(port._pendingMessagesOutgoing.length > 0, "port has pending outgoing message");
-    });
-    ok(port, "provider has a port");
+    // this observer will be fired when the worker reloads - it ensures the
+    // old port was closed and the new worker is functioning.
+    Services.obs.addObserver(function reloadObserver() {
+      Services.obs.removeObserver(reloadObserver, "social:provider-reload");
+      ok(port._closed, "old port was closed by the reload");
+      let newWorker = fw.getFrameWorkerHandle(provider.workerURL, undefined, "testWorkerReload - worker2");
+      let newPort = provider.getWorkerPort();
+      newPort.onmessage = function (e) {
+        let topic = e.data.topic;
+        switch (topic) {
+          case "test-initialization-complete":
+            // and we are done.
+            newPort.close();
+            next();
+            break;
+        }
+      }
+      newPort.postMessage({topic: "test-initialization"});
+    }, "social:provider-reload", false);
+
     port.onmessage = function (e) {
       let topic = e.data.topic;
       switch (topic) {
         case "test-initialization-complete":
-          // tell the worker to send the reload msg
+          // tell the worker to send the reload msg - that will trigger the
+          // frameworker to unload and for our content script's unload
+          // handler to post a "test-result" message.
           port.postMessage({topic: "test-reload-init"});
-          break;
-        case "test-pending-response":
-          // now we've been reloaded, check that we got the pending message
-          // and that our worker is still the same
-          let newWorker = fw.getFrameWorkerHandle(provider.workerURL, undefined, "testWorkerReload");
-          is(worker._worker, newWorker._worker, "worker is the same after reload");
-          ok(true, "worker reloaded and testPort was reconnected");
-          next();
+          // and the "social:provider-reload" observer should fire...
           break;
       }
     }

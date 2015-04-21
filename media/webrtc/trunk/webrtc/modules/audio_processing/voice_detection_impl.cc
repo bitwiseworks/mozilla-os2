@@ -8,15 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "voice_detection_impl.h"
+#include "webrtc/modules/audio_processing/voice_detection_impl.h"
 
-#include <cassert>
+#include <assert.h>
 
-#include "critical_section_wrapper.h"
-#include "webrtc_vad.h"
+#include "webrtc/common_audio/vad/include/webrtc_vad.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 
-#include "audio_processing_impl.h"
-#include "audio_buffer.h"
+#include "webrtc/modules/audio_processing/audio_buffer.h"
+#include "webrtc/modules/audio_processing/audio_processing_impl.h"
 
 namespace webrtc {
 
@@ -61,7 +61,7 @@ int VoiceDetectionImpl::ProcessCaptureAudio(AudioBuffer* audio) {
   }
   assert(audio->samples_per_split_channel() <= 160);
 
-  WebRtc_Word16* mixed_data = audio->low_pass_split_data(0);
+  int16_t* mixed_data = audio->low_pass_split_data(0);
   if (audio->num_channels() > 1) {
     audio->CopyAndMixLowPass(1);
     mixed_data = audio->mixed_low_pass_data(0);

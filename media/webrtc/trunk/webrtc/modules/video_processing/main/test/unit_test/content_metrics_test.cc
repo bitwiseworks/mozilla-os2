@@ -8,9 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "modules/video_processing/main/interface/video_processing.h"
-#include "modules/video_processing/main/source/content_analysis.h"
-#include "modules/video_processing/main/test/unit_test/unit_test.h"
+#include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
+#include "webrtc/modules/video_processing/main/interface/video_processing.h"
+#include "webrtc/modules/video_processing/main/source/content_analysis.h"
+#include "webrtc/modules/video_processing/main/test/unit_test/video_processing_unittest.h"
 
 namespace webrtc {
 
@@ -27,12 +28,10 @@ TEST_F(VideoProcessingModuleTest, ContentAnalysis)
     while (fread(video_buffer.get(), 1, _frame_length, _sourceFile)
            == _frame_length)
     {
-        _videoFrame.CreateFrame(_size_y, video_buffer.get(),
-                                _size_uv, video_buffer.get() + _size_y,
-                                _size_uv, video_buffer.get() + _size_y +
-                                _size_uv,
-                                _width, _height,
-                                _width, _half_width, _half_width);
+        // Using ConvertToI420 to add stride to the image.
+        EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
+                                   _width, _height,
+                                   0, kRotateNone, &_videoFrame));
         _cM_c   = _ca_c.ComputeContentMetrics(_videoFrame);
         _cM_SSE = _ca_sse.ComputeContentMetrics(_videoFrame);
 

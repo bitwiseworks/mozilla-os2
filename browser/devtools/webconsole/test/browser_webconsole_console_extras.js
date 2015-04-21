@@ -3,7 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Tests that the basic console.log()-style APIs and filtering work.
+// Test that window.console functions that are not implemented yet do not
+// output anything in the web console and they do not throw any exceptions.
+// See bug 614350.
 
 const TEST_URI = "http://example.com/browser/browser/devtools/webconsole/test/test-console-extras.html";
 
@@ -16,21 +18,22 @@ function test() {
 }
 
 function consoleOpened(hud) {
-  waitForSuccess({
-    name: "two nodes displayed",
-    validatorFn: function()
-    {
-      return hud.outputNode.querySelectorAll(".hud-msg-node").length == 2;
+  waitForMessages({
+    webconsole: hud,
+    messages: [{
+      text: "start",
+      category: CATEGORY_WEBDEV,
+      severity: SEVERITY_LOG,
     },
-    successFn: function()
     {
-      let nodes = hud.outputNode.querySelectorAll(".hud-msg-node");
-      ok(/start/.test(nodes[0].textContent), "start found");
-      ok(/end/.test(nodes[1].textContent), "end found - complete!");
-
-      finishTest();
-    },
-    failureFn: finishTest,
+      text: "end",
+      category: CATEGORY_WEBDEV,
+      severity: SEVERITY_LOG,
+    }],
+  }).then(() => {
+    let nodes = hud.outputNode.querySelectorAll(".message");
+    is(nodes.length, 2, "only two messages are displayed");
+    finishTest();
   });
 
   let button = content.document.querySelector("button");

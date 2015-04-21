@@ -5,6 +5,7 @@ let temp = {};
 
 const PROFILER_ENABLED = "devtools.profiler.enabled";
 const REMOTE_ENABLED = "devtools.debugger.remote-enabled";
+const SHOW_PLATFORM_DATA = "devtools.profiler.ui.show-platform-data";
 const PROFILE_IDLE = 0;
 const PROFILE_RUNNING = 1;
 const PROFILE_COMPLETED = 2;
@@ -18,18 +19,26 @@ let TargetFactory = temp.devtools.TargetFactory;
 Cu.import("resource://gre/modules/devtools/dbg-server.jsm", temp);
 let DebuggerServer = temp.DebuggerServer;
 
-Cu.import("resource:///modules/HUDService.jsm", temp);
-let HUDService = temp.HUDService;
-
 // Import the GCLI test helper
 let testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
 Services.scriptloader.loadSubScript(testDir + "../../../commandline/test/helpers.js", this);
+
+gDevTools.testing = true;
+SimpleTest.registerCleanupFunction(() => {
+  gDevTools.testing = false;
+});
 
 registerCleanupFunction(function () {
   helpers = null;
   Services.prefs.clearUserPref(PROFILER_ENABLED);
   Services.prefs.clearUserPref(REMOTE_ENABLED);
+  Services.prefs.clearUserPref(SHOW_PLATFORM_DATA);
   DebuggerServer.destroy();
+
+  // These tests use a lot of memory due to GL contexts, so force a GC to help
+  // fragmentation.
+  info("Forcing GC after profiler test.");
+  Cu.forceGC();
 });
 
 function getProfileInternals(uid) {

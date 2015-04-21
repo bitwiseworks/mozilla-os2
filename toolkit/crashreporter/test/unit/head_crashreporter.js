@@ -1,3 +1,9 @@
+Components.utils.import("resource://gre/modules/osfile.jsm");
+
+function getEventDir() {
+  return OS.Path.join(do_get_tempdir().path, "crash-events");
+}
+
 /*
  * Run an xpcshell subprocess and crash it.
  *
@@ -55,10 +61,25 @@ function do_crash(setup, callback, canReturnZero)
     args.push('-e', setup);
   }
   args.push('-f', tailfile.path);
+
+  let env = Components.classes["@mozilla.org/process/environment;1"]
+                              .getService(Components.interfaces.nsIEnvironment);
+
+  let crashD = do_get_tempdir();
+  crashD.append("crash-events");
+  if (!crashD.exists()) {
+    crashD.create(crashD.DIRECTORY_TYPE, 0700);
+  }
+
+  env.set("CRASHES_EVENTS_DIR", crashD.path);
+
   try {
       process.run(true, args, args.length);
   }
   catch(ex) {} // on Windows we exit with a -1 status when crashing.
+  finally {
+    env.set("CRASHES_EVENTS_DIR", "");
+  }
 
   if (!canReturnZero) {
     // should exit with an error (should have crashed)
@@ -72,7 +93,7 @@ function handleMinidump(callback)
 {
   // find minidump
   let minidump = null;
-  let en = do_get_cwd().directoryEntries;
+  let en = do_get_tempdir().directoryEntries;
   while (en.hasMoreElements()) {
     let f = en.getNext().QueryInterface(Components.interfaces.nsILocalFile);
     if (f.leafName.substr(-4) == ".dmp") {
@@ -116,7 +137,7 @@ function do_content_crash(setup, callback)
   let crashReporter =
       Components.classes["@mozilla.org/toolkit/crash-reporter;1"]
       .getService(Components.interfaces.nsICrashReporter);
-  crashReporter.minidumpPath = do_get_cwd();
+  crashReporter.minidumpPath = do_get_tempdir();
 
   let headfile = do_get_file("../unit/crasher_subprocess_head.js");
   let tailfile = do_get_file("../unit/crasher_subprocess_tail.js");
@@ -127,14 +148,14 @@ function do_content_crash(setup, callback)
   }
 
   let handleCrash = function() {
-    try {            
+    try {
       handleMinidump(callback);
     } catch (x) {
       do_report_unexpected_exception(x);
     }
     do_test_finished();
   };
-  
+
   sendCommand("load(\"" + headfile.path.replace(/\\/g, "/") + "\");", function()
     sendCommand(setup, function()
       sendCommand("load(\"" + tailfile.path.replace(/\\/g, "/") + "\");",

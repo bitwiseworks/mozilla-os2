@@ -14,8 +14,8 @@
 #include "typedefs.h"
 #include "jitter_buffer.h"
 #include "jitter_estimator.h"
-#include <cstdlib>
-#include <cmath>
+#include <stdlib.h>
+#include <math.h>
 
 double const pi = 4*std::atan(1.0);
 
@@ -28,7 +28,7 @@ public:
     {
         double r1 = (std::rand() + 1.0)/(RAND_MAX + 1.0); // gives equal distribution in (0, 1]
         double r2 = (std::rand() + 1.0)/(RAND_MAX + 1.0);
-        return _mu + _sigma * std::sqrt(-2*std::log(r1))*std::cos(2*pi*r2);
+        return _mu + _sigma * sqrt(-2*std::log(r1))*std::cos(2*pi*r2);
     }
 
     double GetAverage()
@@ -63,11 +63,11 @@ class FrameSample
 {
 public:
     FrameSample() {FrameSample(0, 0, 0, false, false);}
-    FrameSample(unsigned int ts, WebRtc_Word64 wallClk, unsigned int fs, bool _keyFrame, bool _resent):
+    FrameSample(unsigned int ts, int64_t wallClk, unsigned int fs, bool _keyFrame, bool _resent):
       timestamp90Khz(ts), wallClockMs(wallClk), frameSize(fs), keyFrame(_keyFrame), resent(_resent) {}
 
     unsigned int timestamp90Khz;
-    WebRtc_Word64 wallClockMs;
+    int64_t wallClockMs;
     unsigned int frameSize;
     bool keyFrame;
     bool resent;
@@ -94,7 +94,7 @@ private:
     //GaussDist _noResend;
     GaussDist _deltaFrameSize;
     unsigned int _prevTimestamp;
-    WebRtc_Word64 _prevWallClock;
+    int64_t _prevWallClock;
     unsigned int _nextDelay;
     double _keyFrameRate;
     unsigned int _counter;

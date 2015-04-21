@@ -5,12 +5,20 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DIRS += ['src']
-TEST_DIRS += ['test']
 
 XPIDL_SOURCES += [
     'nsISessionStartup.idl',
     'nsISessionStore.idl',
 ]
 
-MODULE = 'sessionstore'
+XPIDL_MODULE = 'sessionstore'
 
+XPCSHELL_TESTS_MANIFESTS += [
+    'test/unit/xpcshell.ini',
+]
+
+BROWSER_CHROME_MANIFESTS += [
+    'test/browser.ini',
+]
+
+JAR_MANIFESTS += ['jar.mn']

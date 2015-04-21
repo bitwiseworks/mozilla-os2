@@ -4,27 +4,34 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'mozgnome'
-
-CPP_SOURCES += [
+SOURCES += [
     'nsGnomeModule.cpp',
 ]
 
 if CONFIG['MOZ_ENABLE_GCONF']:
-    CPP_SOURCES += [
+    SOURCES += [
         'nsGConfService.cpp',
     ]
 
 if CONFIG['MOZ_ENABLE_GNOMEVFS']:
-    CPP_SOURCES += [
+    SOURCES += [
         'nsGnomeVFSService.cpp',
     ]
 
 if CONFIG['MOZ_ENABLE_GIO']:
-    CPP_SOURCES += [
+    SOURCES += [
         'nsGIOService.cpp',
         'nsGSettingsService.cpp',
     ]
 
 LIBRARY_NAME = 'mozgnome'
+
+FAIL_ON_WARNINGS = True
+IS_COMPONENT = True
+
+FORCE_SHARED_LIB = True
+
+LOCAL_INCLUDES += [
+    '/toolkit/components/build/',
+]
 

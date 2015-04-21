@@ -6,7 +6,7 @@
 /*=============================================================================
   Globals
 =============================================================================*/
-XPCOMUtils.defineLazyModuleGetter(this, "Promise", "resource://gre/modules/commonjs/sdk/core/promise.js");
+XPCOMUtils.defineLazyModuleGetter(this, "Promise", "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
 
 /*=============================================================================
@@ -19,19 +19,51 @@ const kDefaultWait = 2000;
 const kDefaultInterval = 50;
 
 /*=============================================================================
+  Load Helpers
+=============================================================================*/
+
+let splitPath = chromeRoot.split('/');
+if (!splitPath[splitPath.length-1]) {
+  splitPath.pop();
+}
+// ../mochitest to make sure we're looking for the libs on the right path
+// even for mochiperf tests.
+splitPath.pop();
+splitPath.push('mochitest');
+
+const mochitestPath = splitPath.join('/') + '/';
+
+[
+  "helpers/BookmarksHelper.js",
+  "helpers/HistoryHelper.js",
+  "helpers/ViewStateHelper.js"
+].forEach(function(lib) {
+  Services.scriptloader.loadSubScript(mochitestPath + lib, this);
+}, this);
+
+/*=============================================================================
   Metro ui helpers
 =============================================================================*/
 
 function isLandscapeMode()
 {
-  return (MetroUtils.snappedState == Ci.nsIWinMetroUtils.fullScreenLandscape);
+  return Elements.windowState.getAttribute("viewstate") == "landscape";
+}
+
+function setDevPixelEqualToPx()
+{
+  todo(false, "test depends on devPixelsPerPx set to 1.0 - see bugs 886624 and 859742");
+  SpecialPowers.setCharPref("layout.css.devPixelsPerPx", "1.0");
+  registerCleanupFunction(function () {
+    SpecialPowers.clearUserPref("layout.css.devPixelsPerPx");
+  });
 }
 
 function checkContextUIMenuItemCount(aCount)
 {
   let visibleCount = 0;
-  for (let idx = 0; idx < ContextMenuUI._commands.childNodes.length; idx++) {
-    if (!ContextMenuUI._commands.childNodes[idx].hidden)
+  for (let idx = 0; idx < ContextMenuUI.commands.childNodes.length; idx++) {
+    if (!ContextMenuUI.commands.childNodes[idx].hidden)
       visibleCount++;
   }
   is(visibleCount, aCount, "command list count");
@@ -40,8 +72,8 @@ function checkContextUIMenuItemCount(aCount)
 function checkContextUIMenuItemVisibility(aVisibleList)
 {
   let errors = 0;
-  for (let idx = 0; idx < ContextMenuUI._commands.childNodes.length; idx++) {
-    let item = ContextMenuUI._commands.childNodes[idx];
+  for (let idx = 0; idx < ContextMenuUI.commands.childNodes.length; idx++) {
+    let item = ContextMenuUI.commands.childNodes[idx];
     if (aVisibleList.indexOf(item.id) != -1 && item.hidden) {
       // item should be visible
       errors++;
@@ -82,37 +114,37 @@ function checkMonoclePositionRange(aMonocle, aMinX, aMaxX, aMinY, aMaxY)
 function showNotification()
 {
   return Task.spawn(function() {
-    try {
-      let strings = Strings.browser;
-      var buttons = [
-        {
-          isDefault: false,
-          label: strings.GetStringFromName("popupButtonAllowOnce2"),
-          accessKey: "",
-          callback: function() { }
-        },
-        {
-          label: strings.GetStringFromName("popupButtonAlwaysAllow3"),
-          accessKey: "",
-          callback: function() { }
-        },
-        {
-          label: strings.GetStringFromName("popupButtonNeverWarn3"),
-          accessKey: "",
-          callback: function() { }
-        }
-      ];
-      let notificationBox = Browser.getNotificationBox();
-      const priority = notificationBox.PRIORITY_WARNING_MEDIUM;
-      notificationBox.appendNotification("test notification", "popup-blocked",
-                                          "chrome://browser/skin/images/infobar-popup.png",
-                                          priority, buttons);
-      yield waitForEvent(notificationBox, "transitionend");
-      return;
-    } catch (ex) {
-      throw new Task.Result(ex);
-    }
+    let strings = Strings.browser;
+    var buttons = [
+      {
+        isDefault: false,
+        label: strings.GetStringFromName("popupButtonAllowOnce2"),
+        accessKey: "",
+        callback: function() { }
+      },
+      {
+        label: strings.GetStringFromName("popupButtonAlwaysAllow3"),
+        accessKey: "",
+        callback: function() { }
+      },
+      {
+        label: strings.GetStringFromName("popupButtonNeverWarn3"),
+        accessKey: "",
+        callback: function() { }
+      }
+    ];
+    let notificationBox = Browser.getNotificationBox();
+    const priority = notificationBox.PRIORITY_WARNING_MEDIUM;
+    let note = notificationBox.appendNotification("test notification", "popup-blocked",
+                                                  "chrome://browser/skin/images/infobar-popup.png",
+                                                  priority, buttons);
+    yield waitForEvent(notificationBox, "transitionend");
+    throw new Task.Result(note);
   });
+}
+
+function removeNotifications() {
+  Browser.getNotificationBox().removeAllNotifications(true);
 }
 
 function getSelection(aElement) {
@@ -138,7 +170,7 @@ function getSelection(aElement) {
 
   // browser
   return aElement.contentWindow.getSelection();
-};
+}
 
 function getTrimmedSelection(aElement) {
   let sel = getSelection(aElement);
@@ -158,27 +190,22 @@ function clearSelection(aTarget) {
   purgeEventQueue();
 }
 
-/*=============================================================================
-  Asynchronous Metro ui helpers
-=============================================================================*/
-
+// Hides the tab and context app bar if they are visible
 function hideContextUI()
 {
   purgeEventQueue();
 
   return Task.spawn(function() {
-    if (ContextUI.isExpanded) {
+    if (ContextUI.tabbarVisible) {
       let promise = waitForEvent(Elements.tray, "transitionend", null, Elements.tray);
-      if (ContextUI.dismiss())
-      {
-        info("ContextUI dismissed, waiting...");
+      if (ContextUI.dismiss()) {
         yield promise;
       }
     }
 
-    if (Elements.contextappbar.isShowing) {
+    if (ContextUI.contextAppbarVisible) {
       let promise = waitForEvent(Elements.contextappbar, "transitionend", null, Elements.contextappbar);
-      Elements.contextappbar.dismiss();
+      ContextUI.dismissContextAppbar();
       yield promise;
     }
   });
@@ -186,11 +213,22 @@ function hideContextUI()
 
 function showNavBar()
 {
-  let promise = waitForEvent(Elements.navbar, "transitionend");
-  if (!ContextUI.isVisible) {
+  if (!ContextUI.navbarVisible) {
+    let promise = waitForEvent(Elements.navbar, "transitionend");
     ContextUI.displayNavbar();
     return promise;
   }
+  return Promise.resolve(null);
+}
+
+function hideNavBar()
+{
+  if (ContextUI.navbarVisible) {
+    let promise = waitForEvent(Elements.navbar, "transitionend");
+    ContextUI.dismissNavbar();
+    return promise;
+  }
+  return Promise.resolve(null);
 }
 
 function fireAppBarDisplayEvent()
@@ -204,9 +242,38 @@ function fireAppBarDisplayEvent()
 }
 
 /*=============================================================================
-  Asynchronous test helpers
+  General test helpers
 =============================================================================*/
 let gOpenedTabs = [];
+
+function loadUriInActiveTab(aUri)
+{
+  return Task.spawn(function() {
+    let promise = waitForEvent(getBrowser(), "pageshow");
+    BrowserUI.goToURI(aUri);
+    yield waitForCondition(function () {
+      return getBrowser().currentURI.spec == aUri
+    }, "getBrowser().currentURI.spec == " + aUri);
+    yield promise;
+  });
+}
+
+function navForward() {
+  return Task.spawn(function() {
+    let promise = waitForEvent(getBrowser(), "pageshow");
+    EventUtils.synthesizeKey("VK_RIGHT", { altKey: true }, window);
+    yield promise;
+  });
+}
+
+function navBackViaNavButton() {
+  return Task.spawn(function() {
+    let promise = waitForEvent(getBrowser(), "pageshow");
+    let backButton = document.getElementById("overlay-back");
+    sendElementTap(window, backButton);
+    yield promise;
+  });
+}
 
 /**
  *  Loads a URL in a new tab asynchronously.
@@ -243,8 +310,14 @@ function addTab(aUrl) {
 function cleanUpOpenedTabs() {
   let tab;
   while(tab = gOpenedTabs.shift()) {
+    cleanupNotificationsForBrowser(tab.browser);
     Browser.closeTab(Browser.getTabFromChrome(tab.chromeTab), { forceClose: true })
   }
+}
+
+function cleanupNotificationsForBrowser(aBrowser) {
+  let notificationBox = Browser.getNotificationBox(aBrowser);
+  notificationBox && notificationBox.removeAllNotifications(true);
 }
 
 /**
@@ -272,11 +345,11 @@ function waitForEvent(aSubject, aEventName, aTimeoutMs, aTarget) {
   let timeoutMs = aTimeoutMs || kDefaultWait;
   let stack = new Error().stack;
   let timerID = setTimeout(function wfe_canceller() {
-    aSubject.removeEventListener(aEventName, onEvent);
+    aSubject.removeEventListener(aEventName, listener);
     eventDeferred.reject( new Error(aEventName+" event timeout at " + stack) );
   }, timeoutMs);
 
-  function onEvent(aEvent) {
+  var listener = function (aEvent) {
     if (aTarget && aTarget !== aEvent.target)
         return;
 
@@ -285,14 +358,29 @@ function waitForEvent(aSubject, aEventName, aTimeoutMs, aTarget) {
     eventDeferred.resolve(aEvent);
   }
 
-  function cleanup() {
+  function cleanup(aEventOrError) {
     // unhook listener in case of success or failure
-    aSubject.removeEventListener(aEventName, onEvent);
+    aSubject.removeEventListener(aEventName, listener);
+    return aEventOrError;
   }
-  eventDeferred.promise.then(cleanup, cleanup);
+  aSubject.addEventListener(aEventName, listener, false);
+  return eventDeferred.promise.then(cleanup, cleanup);
+}
 
-  aSubject.addEventListener(aEventName, onEvent, false);
-  return eventDeferred.promise;
+/**
+ * Wait for an nsIMessageManager IPC message.
+ */
+function waitForMessage(aName, aMessageManager) {
+  let deferred = Promise.defer();
+  let manager = aMessageManager || messageManager;
+  function listener(aMessage) {
+    deferred.resolve(aMessage);
+  }
+  manager.addMessageListener(aName, listener);
+  function cleanup(aEventOrError) {
+    manager.removeMessageListener(aName, listener);
+  }
+  return deferred.promise.then(cleanup, cleanup);
 }
 
 /**
@@ -341,11 +429,12 @@ function waitForCondition(aCondition, aTimeoutMs, aIntervalMs) {
   let timeoutMs = aTimeoutMs || kDefaultWait;
   let intervalMs = aIntervalMs || kDefaultInterval;
   let startTime = Date.now();
+  let stack = new Error().stack;
 
   function testCondition() {
     let now = Date.now();
     if((now - startTime) > timeoutMs) {
-      deferred.reject( new Error("Timed out waiting for condition to be true") );
+      deferred.reject( new Error("Timed out waiting for condition to be true at " + stack) );
       return;
     }
 
@@ -358,6 +447,50 @@ function waitForCondition(aCondition, aTimeoutMs, aIntervalMs) {
     }
 
     if (condition) {
+      deferred.resolve(true);
+    } else {
+      setTimeout(testCondition, intervalMs);
+    }
+  }
+
+  setTimeout(testCondition, 0);
+  return deferred.promise;
+}
+
+/**
+ * same as waitForCondition but with better test output.
+ *
+ * @param aCondition the callback that must return a truthy value
+ * @param aTestMsg test condition message printed when the test succeeds or
+ * fails. Defaults to the stringified version of aCondition.
+ * @param aTimeoutMs the number of miliseconds to wait before giving up
+ * @param aIntervalMs the number of miliseconds between calls to aCondition
+ * @returns a Promise that resolves to true, or to an Error
+ */
+function waitForCondition2(aCondition, aTestMsg, aTimeoutMs, aIntervalMs) {
+  let deferred = Promise.defer();
+  let msg = aTestMsg || aCondition;
+  let timeoutMs = aTimeoutMs || kDefaultWait;
+  let intervalMs = aIntervalMs || kDefaultInterval;
+  let startTime = Date.now();
+
+  function testCondition() {
+    let now = Date.now();
+    if((now - startTime) > timeoutMs) {
+      deferred.reject( new Error("Timed out waiting for " + msg) );
+      return;
+    }
+
+    let condition;
+    try {
+      condition = aCondition();
+    } catch (e) {
+      deferred.reject( new Error("Got exception while attempting to test '" + msg + "': " + e) );
+      return;
+    }
+
+    if (condition) {
+      ok(true, msg);
       deferred.resolve(true);
     } else {
       setTimeout(testCondition, intervalMs);
@@ -392,7 +525,7 @@ function waitForImageLoad(aWindow, aImageId) {
  * @param aTimeoutMs the number of miliseconds to wait before giving up
  * @returns a Promise that resolves to true, or to an Error
  */
-function waitForObserver(aObsEvent, aTimeoutMs) {
+function waitForObserver(aObsEvent, aTimeoutMs, aObsData) {
   try {
 
   let deferred = Promise.defer();
@@ -413,7 +546,8 @@ function waitForObserver(aObsEvent, aTimeoutMs) {
     },
 
     observe: function (aSubject, aTopic, aData) {
-      if (aTopic == aObsEvent) {
+      if (aTopic == aObsEvent &&
+        (!aObsData || (aObsData == aData))) {
         this.onEvent();
       }
     },
@@ -440,25 +574,30 @@ function waitForObserver(aObsEvent, aTimeoutMs) {
   }
 }
 
+
 /*=============================================================================
-  Native input synthesis helpers
-=============================================================================*/
-// Keyboard layouts for use with synthesizeNativeKey
-const usEnglish = 0x409;
-const arSpanish = 0x2C0A;
-
-// Modifiers for use with synthesizeNativeKey
-const leftShift = 0x100;
-const rightShift = 0x200;
-const leftControl = 0x400;
-const rightControl = 0x800;
-const leftAlt = 0x1000;
-const rightAlt = 0x2000;
-
-function synthesizeNativeKey(aKbLayout, aVKey, aModifiers) {
-  Browser.windowUtils.sendNativeKeyEvent(aKbLayout, aVKey, aModifiers, '', '');
+ * Input mode helpers - these helpers notify observers to metro_precise_input
+ * and metro_imprecise_input respectively, triggering the same behaviour as user touch or mouse input
+ *
+ * Usage: let promise = waitForObservers("metro_imprecise_input");
+ *        notifyImprecise();
+ *        yield promise; // you are now in imprecise mode
+ *===========================================================================*/
+function notifyPrecise()
+{
+  Services.obs.notifyObservers(null, "metro_precise_input", null);
 }
 
+function notifyImprecise()
+{
+  Services.obs.notifyObservers(null, "metro_imprecise_input", null);
+}
+
+/*=============================================================================
+ * Native input helpers - these helpers send input directly to the os
+ * generating os level input events that get processed by widget and
+ * apzc logic.
+ *===========================================================================*/
 function synthesizeNativeMouse(aElement, aOffsetX, aOffsetY, aMsg) {
   let x = aOffsetX;
   let y = aOffsetY;
@@ -524,6 +663,69 @@ function synthesizeNativeMouseMUp(aElement, aOffsetX, aOffsetY) {
                         0x0040);  // MOUSEEVENTF_MIDDLEUP
 }
 
+// WARNING: these calls can trigger the soft keyboard on tablets, but not
+// on test slaves (bug 947428).
+// WARNING: When testing the apzc, be careful of bug 933990. Events sent
+// shortly after loading a page may get ignored.
+
+function sendNativeLongTap(aElement, aX, aY) {
+  let coords = logicalCoordsForElement(aElement, aX, aY);
+  Browser.windowUtils.sendNativeTouchTap(coords.x, coords.y, true);
+}
+
+function sendNativeTap(aElement, aX, aY) {
+  let coords = logicalCoordsForElement(aElement, aX, aY);
+  Browser.windowUtils.sendNativeTouchTap(coords.x, coords.y, false);
+}
+
+function sendNativeDoubleTap(aElement, aX, aY) {
+  let coords = logicalCoordsForElement(aElement, aX, aY);
+  Browser.windowUtils.sendNativeTouchTap(coords.x, coords.y, false);
+  Browser.windowUtils.sendNativeTouchTap(coords.x, coords.y, false);
+}
+
+function clearNativeTouchSequence() {
+  Browser.windowUtils.clearNativeTouchSequence();
+}
+
+/*=============================================================================
+ * Synthesized event helpers - these helpers synthesize input events that get
+ * dispatched directly to the dom. As such widget and apzc logic is bypassed.
+ *===========================================================================*/
+
+/*
+ * logicalCoordsForElement - given coordinates relative to top-left of
+ * given element, returns logical coordinates for window. If a non-numeric
+ * X or Y value is given, a value for the center of the element in that
+ * dimension is used.
+ *
+ * @param aElement element coordinates are relative to.
+ * @param aX, aY relative coordinates.
+ */
+function logicalCoordsForElement (aElement, aX, aY) {
+  let coords = { x: null, y: null };
+  let rect = aElement.getBoundingClientRect();
+
+  coords.x = isNaN(aX) ? rect.left + (rect.width / 2) : rect.left + aX;
+  coords.y = isNaN(aY) ? rect.top + (rect.height / 2) : rect.top + aY;
+
+  return coords;
+}
+
+function sendContextMenuMouseClickToElement(aWindow, aElement, aX, aY) {
+  let utils = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                     .getInterface(Ci.nsIDOMWindowUtils);
+  let coords = logicalCoordsForElement(aElement, aX, aY);
+
+  utils.sendMouseEventToWindow("mousedown", coords.x, coords.y, 2, 1, 0);
+  utils.sendMouseEventToWindow("mouseup", coords.x, coords.y, 2, 1, 0);
+  utils.sendMouseEventToWindow("contextmenu", coords.x, coords.y, 2, 1, 0);
+}
+
+function sendMouseClick(aWindow, aX, aY) {
+  EventUtils.synthesizeMouseAtPoint(aX, aY, {}, aWindow);
+}
+
 /*
  * sendContextMenuClick - simulates a press-hold touch input event. Event
  * is delivered to the main window of the application through the top-level
@@ -539,6 +741,26 @@ function sendContextMenuClick(aX, aY) {
                       .getInterface(Components.interfaces.nsIDOMWindowUtils);
   utils.sendMouseEvent("contextmenu", aX, aY, 2, 1, 0, true,
                         1, Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH);
+}
+
+/*
+ * sendContextMenuClickToSelection - simulates a press-hold touch input event
+ * selected text in a window.
+ */
+function sendContextMenuClickToSelection(aWindow) {
+  let selection = aWindow.getSelection();
+  if (!selection || !selection.rangeCount) {
+    ok(false, "no selection to tap!");
+    return;
+  }
+  let range = selection.getRangeAt(0);
+  let rect = range.getBoundingClientRect();
+  let x = rect.left + (rect.width / 2);
+  let y = rect.top + (rect.height / 2);
+  let utils = aWindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                      .getInterface(Components.interfaces.nsIDOMWindowUtils);
+  utils.sendMouseEventToWindow("contextmenu", x, y, 2, 1, 0, true,
+                                1, Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH);
 }
 
 /*
@@ -559,8 +781,8 @@ function sendContextMenuClickToWindow(aWindow, aX, aY) {
 function sendContextMenuClickToElement(aWindow, aElement, aX, aY) {
   let utils = aWindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
                       .getInterface(Components.interfaces.nsIDOMWindowUtils);
-  let rect = aElement.getBoundingClientRect();
-  utils.sendMouseEventToWindow("contextmenu", rect.left + aX, rect.top + aY, 2, 1, 0, true,
+  let coords = logicalCoordsForElement(aElement, aX, aY);
+  utils.sendMouseEventToWindow("contextmenu", coords.x, coords.y, 2, 1, 0, true,
                                 1, Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH);
 }
 
@@ -587,8 +809,8 @@ function sendTap(aWindow, aX, aY) {
 }
 
 function sendElementTap(aWindow, aElement, aX, aY) {
-  let rect = aElement.getBoundingClientRect();
-  EventUtils.synthesizeMouseAtPoint(rect.left + aX, rect.top + aY, {
+  let coords = logicalCoordsForElement(aElement, aX, aY);
+  EventUtils.synthesizeMouseAtPoint(coords.x, coords.y, {
       clickCount: 1,
       inputSource: Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH
     }, aWindow);
@@ -615,13 +837,44 @@ TouchDragAndHold.prototype = {
   _numSteps: 50,
   _debug: false,
   _win: null,
+  _native: false,
+  _pointerId: 1,
+  _dui: Components.interfaces.nsIDOMWindowUtils,
+
+  set useNativeEvents(aValue) {
+    this._native = aValue;
+  },
+
+  set stepTimeout(aValue) {
+    this._timeoutStep = aValue;
+  },
+
+  set numSteps(aValue) {
+    this._numSteps = aValue;
+  },
+
+  set nativePointerId(aValue) {
+    this._pointerId = aValue;
+  },
 
   callback: function callback() {
     if (this._win == null)
       return;
+
+    if (this._debug) {
+      SelectionHelperUI.debugDisplayDebugPoint(this._currentPoint.xPos,
+        this._currentPoint.yPos, 5, "#FF0000", true);
+    }
+
     if (++this._step.steps >= this._numSteps) {
-      EventUtils.synthesizeTouchAtPoint(this._endPoint.xPos, this._endPoint.yPos,
-                                        { type: "touchmove" }, this._win);
+      if (this._native) {
+        this._utils.sendNativeTouchPoint(this._pointerId, this._dui.TOUCH_CONTACT,
+                                         this._endPoint.xPos, this._endPoint.yPos,
+                                         1, 90);
+      } else {
+        EventUtils.synthesizeTouchAtPoint(this._endPoint.xPos, this._endPoint.yPos,
+                                          { type: "touchmove" }, this._win);
+      }
       this._defer.resolve();
       return;
     }
@@ -630,8 +883,16 @@ TouchDragAndHold.prototype = {
     if (this._debug) {
       info("[" + this._step.steps + "] touchmove " + this._currentPoint.xPos + " x " + this._currentPoint.yPos);
     }
-    EventUtils.synthesizeTouchAtPoint(this._currentPoint.xPos, this._currentPoint.yPos,
-                                      { type: "touchmove" }, this._win);
+
+    if (this._native) {
+      this._utils.sendNativeTouchPoint(this._pointerId, this._dui.TOUCH_CONTACT,
+                                       this._currentPoint.xPos, this._currentPoint.yPos,
+                                       1, 90);
+    } else {
+      EventUtils.synthesizeTouchAtPoint(this._currentPoint.xPos, this._currentPoint.yPos,
+                                        { type: "touchmove" }, this._win);
+    }
+
     let self = this;
     setTimeout(function () { self.callback(); }, this._timeoutStep);
   },
@@ -639,13 +900,22 @@ TouchDragAndHold.prototype = {
   start: function start(aWindow, aStartX, aStartY, aEndX, aEndY) {
     this._defer = Promise.defer();
     this._win = aWindow;
+    this._utils = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                         .getInterface(Ci.nsIDOMWindowUtils);
     this._endPoint = { xPos: aEndX, yPos: aEndY };
     this._currentPoint = { xPos: aStartX, yPos: aStartY };
     this._step = { steps: 0, x: (aEndX - aStartX) / this._numSteps, y: (aEndY - aStartY) / this._numSteps };
     if (this._debug) {
       info("[0] touchstart " + aStartX + " x " + aStartY);
     }
-    EventUtils.synthesizeTouchAtPoint(aStartX, aStartY, { type: "touchstart" }, aWindow);
+    // flush layout, bug 914847
+    this._utils.elementFromPoint(aStartX, aStartY, false, true);
+    if (this._native) {
+      this._utils.sendNativeTouchPoint(this._pointerId, this._dui.TOUCH_CONTACT,
+                                       aStartX, aStartY, 1, 90);
+    } else {
+      EventUtils.synthesizeTouchAtPoint(aStartX, aStartY, { type: "touchstart" }, aWindow);
+    }
     let self = this;
     setTimeout(function () { self.callback(); }, this._timeoutStep);
     return this._defer.promise;
@@ -667,12 +937,19 @@ TouchDragAndHold.prototype = {
     return this._defer.promise;
   },
 
-  end: function start() {
+  end: function end() {
     if (this._debug) {
       info("[" + this._step.steps + "] touchend " + this._endPoint.xPos + " x " + this._endPoint.yPos);
+      SelectionHelperUI.debugClearDebugPoints();
     }
-    EventUtils.synthesizeTouchAtPoint(this._endPoint.xPos, this._endPoint.yPos,
-                                      { type: "touchend" }, this._win);
+    if (this._native) {
+      this._utils.sendNativeTouchPoint(this._pointerId, this._dui.TOUCH_REMOVE,
+                                       this._endPoint.xPos, this._endPoint.yPos,
+                                       1, 90);
+    } else {
+      EventUtils.synthesizeTouchAtPoint(this._endPoint.xPos, this._endPoint.yPos,
+                                        { type: "touchend" }, this._win);
+    }
     this._win = null;
   },
 };
@@ -681,8 +958,8 @@ TouchDragAndHold.prototype = {
   System utilities
 =============================================================================*/
 
- /*
- * emptyClipboard - clear the windows clipbaord.
+/*
+ * emptyClipboard - clear the windows clipboard.
  */
 function emptyClipboard() {
   Cc["@mozilla.org/widget/clipboard;1"].getService(Ci.nsIClipboard)
@@ -739,8 +1016,9 @@ function runTests() {
       let badTabs = [];
       Browser.tabs.forEach(function(item, index, array) {
         let location = item.browser.currentURI.spec;
-        if (index == 0 && location == "about:blank")
+        if (index == 0 && location == "about:blank" || location == "about:start") {
           return;
+        }
         ok(false, "Left over tab after test: '" + location + "'");
         badTabs.push(item);
       });
@@ -756,12 +1034,33 @@ function runTests() {
   });
 }
 
+// wrap a method with a spy that records how and how many times it gets called
+// the spy is returned; use spy.restore() to put the original back
+function spyOnMethod(aObj, aMethod) {
+  let origFunc = aObj[aMethod];
+  let spy = function() {
+    let callArguments = Array.slice(arguments);
+    spy.callCount++;
+    spy.calledWith = callArguments;
+    spy.argsForCall.push(callArguments);
+    return (spy.returnValue = origFunc.apply(aObj, arguments));
+  };
+  spy.callCount = 0;
+  spy.argsForCall = [];
+  spy.restore = function() {
+    return (aObj[aMethod] = origFunc);
+  };
+  return (aObj[aMethod] = spy);
+}
+
+// replace a method with a stub that records how and how many times it gets called
+// the stub is returned; use stub.restore() to put the original back
 function stubMethod(aObj, aMethod) {
   let origFunc = aObj[aMethod];
   let func = function() {
     func.calledWith = Array.slice(arguments);
     func.callCount++;
-  }
+  };
   func.callCount = 0;
   func.restore = function() {
     return (aObj[aMethod] = origFunc);

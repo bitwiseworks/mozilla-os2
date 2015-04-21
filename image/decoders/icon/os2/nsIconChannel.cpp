@@ -57,11 +57,11 @@ nsIconChannel::nsIconChannel()
 nsIconChannel::~nsIconChannel()
 {}
 
-NS_IMPL_THREADSAFE_ISUPPORTS4(nsIconChannel, 
-                              nsIChannel,
-                              nsIRequest,
-                              nsIRequestObserver,
-                              nsIStreamListener)
+NS_IMPL_ISUPPORTS(nsIconChannel, 
+                  nsIChannel,
+                  nsIRequest,
+                  nsIRequestObserver,
+                  nsIStreamListener)
 
 nsresult nsIconChannel::Init(nsIURI* uri)
 {
@@ -308,7 +308,7 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream **_retval,
     memset(pOutBuf, 0, cbOutBuf);
 
     // create a DC and PS
-    DEVOPENSTRUC dop = {NULL, "DISPLAY", NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+    DEVOPENSTRUC dop = {nullptr, "DISPLAY", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     hdc = DevOpenDC((HAB)0, OD_MEMORY, "*", 5L, (PDEVOPENDATA)&dop, NULLHANDLE);
     if (!hdc)
       break;

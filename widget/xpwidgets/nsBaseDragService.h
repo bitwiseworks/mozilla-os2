@@ -12,9 +12,10 @@
 #include "nsIDOMDocument.h"
 #include "nsIDOMDataTransfer.h"
 #include "nsCOMPtr.h"
+#include "nsRect.h"
 #include "nsPoint.h"
-
-#include "gfxImageSurface.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/dom/HTMLCanvasElement.h"
 
 // translucency level for drag images
 #define DRAG_TRANSLUCENCY 0.65
@@ -26,6 +27,12 @@ class nsPresContext;
 class nsIImageLoadingContent;
 class nsICanvasElementExternal;
 
+namespace mozilla {
+namespace gfx {
+class SourceSurface;
+}
+}
+
 /**
  * XP DragService wrapper base class
  */
@@ -35,6 +42,8 @@ class nsBaseDragService : public nsIDragService,
 {
 
 public:
+  typedef mozilla::gfx::SourceSurface SourceSurface;
+
   nsBaseDragService();
   virtual ~nsBaseDragService();
 
@@ -77,7 +86,7 @@ protected:
                     nsIScriptableRegion* aRegion,
                     int32_t aScreenX, int32_t aScreenY,
                     nsIntRect* aScreenDragRect,
-                    gfxASurface** aSurface,
+                    mozilla::RefPtr<SourceSurface>* aSurface,
                     nsPresContext **aPresContext);
 
   /**
@@ -86,10 +95,10 @@ protected:
    */
   nsresult DrawDragForImage(nsPresContext* aPresContext,
                             nsIImageLoadingContent* aImageLoader,
-                            nsICanvasElementExternal* aCanvas,
+                            mozilla::dom::HTMLCanvasElement* aCanvas,
                             int32_t aScreenX, int32_t aScreenY,
                             nsIntRect* aScreenDragRect,
-                            gfxASurface** aSurface);
+                            mozilla::RefPtr<SourceSurface>* aSurface);
 
   /**
    * Convert aScreenX and aScreenY from CSS pixels into unscaled device pixels.

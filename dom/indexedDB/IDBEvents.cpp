@@ -6,7 +6,6 @@
 
 #include "IDBEvents.h"
 
-#include "nsDOMException.h"
 #include "nsJSON.h"
 #include "nsThreadUtils.h"
 
@@ -57,7 +56,7 @@ mozilla::dom::indexedDB::CreateGenericEvent(mozilla::dom::EventTarget* aOwner,
 }
 
 // static
-already_AddRefed<nsDOMEvent>
+already_AddRefed<IDBVersionChangeEvent>
 IDBVersionChangeEvent::CreateInternal(mozilla::dom::EventTarget* aOwner,
                                       const nsAString& aType,
                                       uint64_t aOldVersion,
@@ -83,7 +82,7 @@ IDBVersionChangeEvent::CreateRunnableInternal(mozilla::dom::EventTarget* aTarget
                                               uint64_t aOldVersion,
                                               uint64_t aNewVersion)
 {
-  nsRefPtr<nsDOMEvent> event =
+  nsRefPtr<Event> event =
     CreateInternal(aTarget, aType, aOldVersion, aNewVersion);
   NS_ENSURE_TRUE(event, nullptr);
 
@@ -91,33 +90,9 @@ IDBVersionChangeEvent::CreateRunnableInternal(mozilla::dom::EventTarget* aTarget
   return runnable.forget();
 }
 
-NS_IMPL_ADDREF_INHERITED(IDBVersionChangeEvent, nsDOMEvent)
-NS_IMPL_RELEASE_INHERITED(IDBVersionChangeEvent, nsDOMEvent)
+NS_IMPL_ADDREF_INHERITED(IDBVersionChangeEvent, Event)
+NS_IMPL_RELEASE_INHERITED(IDBVersionChangeEvent, Event)
 
 NS_INTERFACE_MAP_BEGIN(IDBVersionChangeEvent)
-  NS_INTERFACE_MAP_ENTRY(nsIIDBVersionChangeEvent)
-NS_INTERFACE_MAP_END_INHERITING(nsDOMEvent)
-
-NS_IMETHODIMP
-IDBVersionChangeEvent::GetOldVersion(uint64_t* aOldVersion)
-{
-  NS_ENSURE_ARG_POINTER(aOldVersion);
-  *aOldVersion = mOldVersion;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-IDBVersionChangeEvent::GetNewVersion(JSContext* aCx,
-                                     JS::Value* aNewVersion)
-{
-  NS_ENSURE_ARG_POINTER(aNewVersion);
-
-  if (!mNewVersion) {
-    *aNewVersion = JSVAL_NULL;
-  }
-  else {
-    *aNewVersion = JS_NumberValue(double(mNewVersion));
-  }
-
-  return NS_OK;
-}
+  NS_INTERFACE_MAP_ENTRY(IDBVersionChangeEvent)
+NS_INTERFACE_MAP_END_INHERITING(Event)

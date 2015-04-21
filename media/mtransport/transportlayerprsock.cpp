@@ -31,7 +31,7 @@ nsresult TransportLayerPrsock::InitInternal() {
   stservice_ = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
 
   if (!NS_SUCCEEDED(rv)) {
-    MOZ_MTLOG(PR_LOG_ERROR, "Couldn't get socket transport service");
+    MOZ_MTLOG(ML_ERROR, "Couldn't get socket transport service");
     return rv;
   }
 
@@ -44,7 +44,7 @@ void TransportLayerPrsock::Import(PRFileDesc *fd, nsresult *result) {
     return;
   }
 
-  MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "Importing()");
+  MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "Importing()");
   fd_ = fd;
   handler_ = new SocketHandler(this, fd);
 
@@ -54,34 +54,34 @@ void TransportLayerPrsock::Import(PRFileDesc *fd, nsresult *result) {
     return;
   }
 
-  SetState(TS_OPEN);
+  TL_SET_STATE(TS_OPEN);
 
   *result = NS_OK;
 }
 
 int TransportLayerPrsock::SendPacket(const unsigned char *data, size_t len) {
-  MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "SendPacket(" << len << ")");
+  MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "SendPacket(" << len << ")");
   if (state_ != TS_OPEN) {
-    MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "Can't send packet on closed interface");
+    MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "Can't send packet on closed interface");
     return TE_INTERNAL;
   }
 
   int32_t status;
   status = PR_Write(fd_, data, len);
   if (status >= 0) {
-    MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "Wrote " << len << " bytes");
+    MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "Wrote " << len << " bytes");
     return status;
   }
 
   PRErrorCode err = PR_GetError();
   if (err == PR_WOULD_BLOCK_ERROR) {
-    MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "Write blocked");
+    MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "Write blocked");
     return TE_WOULDBLOCK;
   }
 
 
-  MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "Write error; channel closed");
-  SetState(TS_ERROR);
+  MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "Write error; channel closed");
+  TL_SET_STATE(TS_ERROR);
   return TE_ERROR;
 }
 
@@ -90,27 +90,27 @@ void TransportLayerPrsock::OnSocketReady(PRFileDesc *fd, int16_t outflags) {
     return;
   }
 
-  MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "OnSocketReady(flags=" << outflags << ")");
+  MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "OnSocketReady(flags=" << outflags << ")");
 
   unsigned char buf[1600];
   int32_t rv = PR_Read(fd, buf, sizeof(buf));
 
   if (rv > 0) {
     // Successful read
-    MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "Read " << rv << " bytes");
+    MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "Read " << rv << " bytes");
     SignalPacketReceived(this, buf, rv);
   } else if (rv == 0) {
-    MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "Read 0 bytes; channel closed");
-    SetState(TS_CLOSED);
+    MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "Read 0 bytes; channel closed");
+    TL_SET_STATE(TS_CLOSED);
   } else {
     PRErrorCode err = PR_GetError();
 
     if (err != PR_WOULD_BLOCK_ERROR) {
-      MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "Read error; channel closed");
-      SetState(TS_ERROR);
+      MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "Read error; channel closed");
+      TL_SET_STATE(TS_ERROR);
     }
   }
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS0(TransportLayerPrsock::SocketHandler)
+NS_IMPL_ISUPPORTS0(TransportLayerPrsock::SocketHandler)
 }  // close namespace

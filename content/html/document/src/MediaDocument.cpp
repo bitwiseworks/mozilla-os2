@@ -21,6 +21,7 @@
 #include "nsDocElementCreatedNotificationRunner.h"
 #include "mozilla/Services.h"
 #include "nsServiceManagerUtils.h"
+#include "nsIPrincipal.h"
 
 namespace mozilla {
 namespace dom {
@@ -35,9 +36,9 @@ MediaDocumentStreamListener::~MediaDocumentStreamListener()
 }
 
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(MediaDocumentStreamListener,
-                              nsIRequestObserver,
-                              nsIStreamListener)
+NS_IMPL_ISUPPORTS(MediaDocumentStreamListener,
+                  nsIRequestObserver,
+                  nsIStreamListener)
 
 
 void
@@ -150,12 +151,7 @@ MediaDocument::StartDocumentLoad(const char*         aCommand,
   // |UpdateTitleAndCharset| and the worst thing possible is a mangled 
   // filename in the titlebar and the file picker.
 
-  // When this document is opened in the window/tab of the referring 
-  // document (by a simple link-clicking), |prevDocCharacterSet| contains 
-  // the charset of the referring document. On the other hand, if the
-  // document is opened in a new window, it is |defaultCharacterSet| of |muCV| 
-  // where the charset of our interest is stored. In case of openining 
-  // in a new tab, we get the charset from the docShell. Note that we 
+  // Note that we
   // exclude UTF-8 as 'invalid' because UTF-8 is likely to be the charset 
   // of a chrome document that has nothing to do with the actual content 
   // whose charset we want to know. Even if "the actual content" is indeed 
@@ -168,27 +164,16 @@ MediaDocument::StartDocumentLoad(const char*         aCommand,
   NS_ENSURE_TRUE(docShell, NS_OK); 
 
   nsAutoCString charset;
+  int32_t source;
+  nsCOMPtr<nsIPrincipal> principal;
   // opening in a new tab
-  docShell->GetParentCharset(charset);
+  docShell->GetParentCharset(charset, &source, getter_AddRefs(principal));
 
-  if (charset.IsEmpty() || charset.Equals("UTF-8")) {
-    nsCOMPtr<nsIContentViewer> cv;
-    docShell->GetContentViewer(getter_AddRefs(cv));
-
-    // not being able to set the charset is not critical.
-    NS_ENSURE_TRUE(cv, NS_OK); 
-    nsCOMPtr<nsIMarkupDocumentViewer> muCV = do_QueryInterface(cv);
-    if (muCV) {
-      muCV->GetPrevDocCharacterSet(charset);   // opening in the same window/tab
-      if (charset.Equals("UTF-8") || charset.IsEmpty()) {
-        muCV->GetDefaultCharacterSet(charset); // opening in a new window
-      }
-    } 
-  }
-
-  if (!charset.IsEmpty() && !charset.Equals("UTF-8")) {
+  if (!charset.IsEmpty() &&
+      !charset.Equals("UTF-8") &&
+      NodePrincipal()->Equals(principal)) {
+    SetDocumentCharacterSetSource(source);
     SetDocumentCharacterSet(charset);
-    mCharacterSetSource = kCharsetFromUserDefault;
   }
 
   return NS_OK;
@@ -366,14 +351,14 @@ MediaDocument::UpdateTitleAndCharset(const nsACString& aTypeStr,
       heightStr.AppendInt(aHeight);
       // If we got a filename, display it
       if (!fileStr.IsEmpty()) {
-        const PRUnichar *formatStrings[4]  = {fileStr.get(), typeStr.get(), 
+        const char16_t *formatStrings[4]  = {fileStr.get(), typeStr.get(), 
           widthStr.get(), heightStr.get()};
         NS_ConvertASCIItoUTF16 fmtName(aFormatNames[eWithDimAndFile]);
         mStringBundle->FormatStringFromName(fmtName.get(), formatStrings, 4,
                                             getter_Copies(title));
       } 
       else {
-        const PRUnichar *formatStrings[3]  = {typeStr.get(), widthStr.get(), 
+        const char16_t *formatStrings[3]  = {typeStr.get(), widthStr.get(), 
           heightStr.get()};
         NS_ConvertASCIItoUTF16 fmtName(aFormatNames[eWithDim]);
         mStringBundle->FormatStringFromName(fmtName.get(), formatStrings, 3,
@@ -383,13 +368,13 @@ MediaDocument::UpdateTitleAndCharset(const nsACString& aTypeStr,
     else {
     // If we got a filename, display it
       if (!fileStr.IsEmpty()) {
-        const PRUnichar *formatStrings[2] = {fileStr.get(), typeStr.get()};
+        const char16_t *formatStrings[2] = {fileStr.get(), typeStr.get()};
         NS_ConvertASCIItoUTF16 fmtName(aFormatNames[eWithFile]);
         mStringBundle->FormatStringFromName(fmtName.get(), formatStrings, 2,
                                             getter_Copies(title));
       }
       else {
-        const PRUnichar *formatStrings[1] = {typeStr.get()};
+        const char16_t *formatStrings[1] = {typeStr.get()};
         NS_ConvertASCIItoUTF16 fmtName(aFormatNames[eWithNoInfo]);
         mStringBundle->FormatStringFromName(fmtName.get(), formatStrings, 1,
                                             getter_Copies(title));
@@ -404,7 +389,7 @@ MediaDocument::UpdateTitleAndCharset(const nsACString& aTypeStr,
   else {
     nsXPIDLString titleWithStatus;
     const nsPromiseFlatString& status = PromiseFlatString(aStatus);
-    const PRUnichar *formatStrings[2] = {title.get(), status.get()};
+    const char16_t *formatStrings[2] = {title.get(), status.get()};
     NS_NAMED_LITERAL_STRING(fmtName, "TitleWithStatus");
     mStringBundle->FormatStringFromName(fmtName.get(), formatStrings, 2,
                                         getter_Copies(titleWithStatus));

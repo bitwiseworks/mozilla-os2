@@ -61,7 +61,9 @@
     #define F_BSIZE f_bsize
 #endif
 
-#if defined(HAVE_STAT64) && defined(HAVE_LSTAT64)
+// stat64 and lstat64 are deprecated on OS X. Normal stat and lstat are
+// 64-bit by default on OS X 10.6+.
+#if defined(HAVE_STAT64) && defined(HAVE_LSTAT64) && !defined(XP_MACOSX)
     #if defined (AIX)
         #if defined STAT
             #undef STAT
@@ -91,7 +93,7 @@ public:
 
     static nsresult nsLocalFileConstructor(nsISupports* outer, const nsIID& aIID, void* *aInstancePtr);
 
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIFILE
     NS_DECL_NSILOCALFILE
 #ifdef MOZ_WIDGET_COCOA

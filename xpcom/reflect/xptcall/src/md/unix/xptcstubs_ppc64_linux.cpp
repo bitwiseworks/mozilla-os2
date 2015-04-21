@@ -32,7 +32,7 @@
 // The parameters are mapped into an array of type 'nsXPTCMiniVariant'
 // and then the method gets called.
 #include <stdio.h>
-extern "C" nsresult
+extern "C" nsresult ATTRIBUTE_USED
 PrepareAndDispatch(nsXPTCStubBase* self,
                    uint64_t methodIndex,
                    uint64_t* args,
@@ -40,7 +40,7 @@ PrepareAndDispatch(nsXPTCStubBase* self,
                    double *fprData)
 {
     nsXPTCMiniVariant paramBuffer[PARAM_BUFFER_COUNT];
-    nsXPTCMiniVariant* dispatchParams = NULL;
+    nsXPTCMiniVariant* dispatchParams = nullptr;
     const nsXPTMethodInfo* info;
     uint32_t paramCount;
     uint32_t i;
@@ -83,7 +83,9 @@ PrepareAndDispatch(nsXPTCStubBase* self,
                 dp->val.f = (float) fprData[i]; // in registers floats are passed as doubles
             else {
                 float *p = (float *)ap;
+#ifndef __LITTLE_ENDIAN__
                 p++;
+#endif
                 dp->val.f = *p;
             }
         } else { /* integer type or pointer */
@@ -153,6 +155,43 @@ PrepareAndDispatch(nsXPTCStubBase* self,
 // etc.
 // Use assembler directives to get the names right...
 
+#if _CALL_ELF == 2
+# define STUB_ENTRY(n)                                                  \
+__asm__ (                                                               \
+        ".section \".text\" \n\t"                                       \
+        ".align 2 \n\t"                                                 \
+        ".if "#n" < 10 \n\t"                                            \
+        ".globl _ZN14nsXPTCStubBase5Stub"#n"Ev \n\t"                    \
+        ".type  _ZN14nsXPTCStubBase5Stub"#n"Ev,@function \n\n"          \
+"_ZN14nsXPTCStubBase5Stub"#n"Ev: \n\t"                                  \
+        "0: addis 2,12,.TOC.-0b@ha \n\t"                                \
+        "addi     2,2,.TOC.-0b@l \n\t"                                  \
+        ".localentry _ZN14nsXPTCStubBase5Stub"#n"Ev,.-_ZN14nsXPTCStubBase5Stub"#n"Ev \n\t" \
+                                                                        \
+        ".elseif "#n" < 100 \n\t"                                       \
+        ".globl _ZN14nsXPTCStubBase6Stub"#n"Ev \n\t"                    \
+        ".type  _ZN14nsXPTCStubBase6Stub"#n"Ev,@function \n\n"          \
+"_ZN14nsXPTCStubBase6Stub"#n"Ev: \n\t"                                  \
+        "0: addis 2,12,.TOC.-0b@ha \n\t"                                \
+        "addi     2,2,.TOC.-0b@l \n\t"                                  \
+        ".localentry _ZN14nsXPTCStubBase6Stub"#n"Ev,.-_ZN14nsXPTCStubBase6Stub"#n"Ev \n\t" \
+                                                                        \
+        ".elseif "#n" < 1000 \n\t"                                      \
+        ".globl _ZN14nsXPTCStubBase7Stub"#n"Ev \n\t"                    \
+        ".type  _ZN14nsXPTCStubBase7Stub"#n"Ev,@function \n\n"          \
+"_ZN14nsXPTCStubBase7Stub"#n"Ev: \n\t"                                  \
+        "0: addis 2,12,.TOC.-0b@ha \n\t"                                \
+        "addi     2,2,.TOC.-0b@l \n\t"                                  \
+        ".localentry _ZN14nsXPTCStubBase7Stub"#n"Ev,.-_ZN14nsXPTCStubBase7Stub"#n"Ev \n\t" \
+                                                                        \
+        ".else  \n\t"                                                   \
+        ".err   \"stub number "#n" >= 1000 not yet supported\"\n"       \
+        ".endif \n\t"                                                   \
+                                                                        \
+        "li     11,"#n" \n\t"                                           \
+        "b      SharedStub \n"                                          \
+);
+#else
 # define STUB_ENTRY(n)                                                  \
 __asm__ (                                                               \
         ".section \".toc\",\"aw\" \n\t"                                 \
@@ -195,6 +234,7 @@ __asm__ (                                                               \
         "li     11,"#n" \n\t"                                           \
         "b      SharedStub \n"                                          \
 );
+#endif
 
 #define SENTINEL_ENTRY(n)                                               \
 nsresult nsXPTCStubBase::Sentinel##n()                                  \

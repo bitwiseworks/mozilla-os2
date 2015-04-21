@@ -15,17 +15,13 @@
 #include "nsISupportsUtils.h"           // for NS_ADDREF_THIS, NS_RELEASE
 #include "nsITransaction.h"             // for nsITransaction
 
-#ifdef DEBUG
-static bool gNoisy = false;
-#endif
-
 InsertTextTxn::InsertTextTxn()
   : EditTxn()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(InsertTextTxn, EditTxn,
-                                     mElement)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(InsertTextTxn, EditTxn,
+                                   mElement)
 
 NS_IMPL_ADDREF_INHERITED(InsertTextTxn, EditTxn)
 NS_IMPL_RELEASE_INHERITED(InsertTextTxn, EditTxn)
@@ -62,14 +58,6 @@ NS_IMETHODIMP InsertTextTxn::Init(nsIDOMCharacterData *aElement,
 
 NS_IMETHODIMP InsertTextTxn::DoTransaction(void)
 {
-#ifdef DEBUG
-  if (gNoisy)
-  {
-    printf("Do Insert Text element = %p\n",
-           static_cast<void*>(mElement.get()));
-  }
-#endif
-
   NS_ASSERTION(mElement && mEditor, "bad state");
   if (!mElement || !mEditor) { return NS_ERROR_NOT_INITIALIZED; }
 
@@ -98,14 +86,6 @@ NS_IMETHODIMP InsertTextTxn::DoTransaction(void)
 
 NS_IMETHODIMP InsertTextTxn::UndoTransaction(void)
 {
-#ifdef DEBUG
-  if (gNoisy)
-  {
-    printf("Undo Insert Text element = %p\n",
-           static_cast<void*>(mElement.get()));
-  }
-#endif
-
   NS_ASSERTION(mElement && mEditor, "bad state");
   if (!mElement || !mEditor) { return NS_ERROR_NOT_INITIALIZED; }
 
@@ -133,13 +113,6 @@ NS_IMETHODIMP InsertTextTxn::Merge(nsITransaction *aTransaction, bool *aDidMerge
         otherInsTxn->GetData(otherData);
         mStringToInsert += otherData;
         *aDidMerge = true;
-#ifdef DEBUG
-        if (gNoisy)
-        {
-          printf("InsertTextTxn assimilated %p\n",
-                 static_cast<void*>(aTransaction));
-        }
-#endif
       }
       NS_RELEASE(otherInsTxn);
     }

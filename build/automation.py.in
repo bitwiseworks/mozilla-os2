@@ -5,8 +5,8 @@
 
 from __future__ import with_statement
 import codecs
-from datetime import datetime, timedelta
 import itertools
+import json
 import logging
 import os
 import re
@@ -18,6 +18,7 @@ import sys
 import threading
 import tempfile
 import sqlite3
+from datetime import datetime, timedelta
 from string import Template
 
 SCRIPT_DIR = os.path.abspath(os.path.realpath(os.path.dirname(sys.argv[0])))
@@ -26,19 +27,24 @@ import automationutils
 
 # --------------------------------------------------------------
 # TODO: this is a hack for mozbase without virtualenv, remove with bug 849900
-#
-here = os.path.dirname(__file__)
+# These paths refer to relative locations to test.zip, not the OBJDIR or SRCDIR
+here = os.path.dirname(os.path.realpath(__file__))
 mozbase = os.path.realpath(os.path.join(os.path.dirname(here), 'mozbase'))
 
 if os.path.isdir(mozbase):
     for package in os.listdir(mozbase):
-        sys.path.append(os.path.join(mozbase, package))
+        package_path = os.path.join(mozbase, package)
+        if package_path not in sys.path:
+            sys.path.append(package_path)
 
 import mozcrash
+from mozprofile import Profile, Preferences
+from mozprofile.permissions import ServerLocations
 
 # ---------------------------------------------------------------
 
 _DEFAULT_PREFERENCE_FILE = os.path.join(SCRIPT_DIR, 'prefs_general.js')
+_DEFAULT_APPS_FILE = os.path.join(SCRIPT_DIR, 'webapps_mochitest.json')
 
 _DEFAULT_WEB_SERVER = "127.0.0.1"
 _DEFAULT_HTTP_PORT = 8888
@@ -211,8 +217,7 @@ class Automation(object):
                  universal_newlines=False,
                  startupinfo=None,
                  creationflags=0):
-      args = automationutils.wrapCommand(args)
-      print "args: %s" % args
+      _log.info("INFO | automation.py | Launching: %s", subprocess.list2cmdline(args))
       subprocess.Popen.__init__(self, args, bufsize, executable,
                                 stdin, stdout, stderr,
                                 preexec_fn, close_fds,
@@ -293,6 +298,9 @@ class Automation(object):
     return locations
 
   def setupPermissionsDatabase(self, profileDir, permissions):
+    # Included for reftest compatibility;
+    # see https://bugzilla.mozilla.org/show_bug.cgi?id=688667
+
     # Open database and create table
     permDB = sqlite3.connect(os.path.join(profileDir, "permissions.sqlite"))
     cursor = permDB.cursor();
@@ -320,319 +328,65 @@ class Automation(object):
     permDB.commit()
     cursor.close()
 
-  def setupTestApps(self, profileDir, apps):
-    webappJSONTemplate = Template(""""$id": {
-  "origin": "$origin",
-  "installOrigin": "$origin",
-  "receipt": null,
-  "installTime": 132333986000,
-  "manifestURL": "$manifestURL",
-  "localId": $localId,
-  "id": "$id",
-  "appStatus": $appStatus,
-  "csp": "$csp"
-}""")
-
-    manifestTemplate = Template("""{
-  "name": "$name",
-  "csp": "$csp",
-  "description": "$description",
-  "launch_path": "/",
-  "developer": {
-    "name": "Mozilla",
-    "url": "https://mozilla.org/"
-  },
-  "permissions": [
-  ],
-  "locales": {
-    "en-US": {
-      "name": "$name",
-      "description": "$description"
-    }
-  },
-  "default_locale": "en-US",
-  "icons": {
-  }
-}
-""")
-
-    # Create webapps/webapps.json
-    webappsDir = os.path.join(profileDir, "webapps")
-    if not os.access(webappsDir, os.F_OK):
-      os.mkdir(webappsDir)
-
-    lineRe = re.compile(r'(.*?)"(.*?)": (.*)')
-
-    webappsJSONFilename = os.path.join(webappsDir, "webapps.json")
-    webappsJSON = []
-    if os.access(webappsJSONFilename, os.F_OK):
-      # If there is an existing webapps.json file (which will be the case for
-      # b2g), we parse the data in the existing file before appending test
-      # test apps to it.
-      startId = 1
-      webappsJSONFile = open(webappsJSONFilename, "r")
-      contents = webappsJSONFile.read()
-
-      for app_content in contents.split('},'):
-        app = {}
-        # ghetto json parser needed due to lack of json/simplejson on test slaves
-        for line in app_content.split('\n'):
-          m = lineRe.match(line)
-          if m:
-            value = m.groups()[2]
-            # remove any trailing commas
-            if value[-1:] == ',':
-              value = value[:-1]
-            # set the app name from a line that looks like this:
-            # "name.gaiamobile.org": {
-            if value == '{':
-              app['id'] = m.groups()[1]
-            # parse string, None, bool and int types
-            elif value[0:1] == '"':
-              app[m.groups()[1]] = value[1:-1]
-            elif value == "null":
-              app[m.groups()[1]] = None
-            elif value == "true":
-              app[m.groups()[1]] = True
-            elif value == "false":
-              app[m.groups()[1]] = False
-            else:
-              app[m.groups()[1]] = int(value)
-        if app:
-          webappsJSON.append(app)
-
-      webappsJSONFile.close()
-
-    startId = 1
-    for app in webappsJSON:
-      if app['localId'] >= startId:
-        startId = app['localId'] + 1
-      if not app.get('csp'):
-        app['csp'] = ''
-      if not app.get('appStatus'):
-        app['appStatus'] = 3
-
-    for localId, app in enumerate(apps):
-      app['localId'] = localId + startId # localId must be from 1..N
-      if not app.get('id'):
-        app['id'] = app['name']
-      webappsJSON.append(app)
-
-    contents = []
-    for app in webappsJSON:
-      contents.append(webappJSONTemplate.substitute(app))
-    contents = '{\n' + ',\n'.join(contents) + '\n}\n'
-
-    webappsJSONFile = open(webappsJSONFilename, "w")
-    webappsJSONFile.write(contents)
-    webappsJSONFile.close()
-
-    # Create manifest file for each app.
-    for app in apps:
-      manifest = manifestTemplate.substitute(app)
-
-      manifestDir = os.path.join(webappsDir, app['name'])
-      os.mkdir(manifestDir)
-
-      manifestFile = open(os.path.join(manifestDir, "manifest.webapp"), "a")
-      manifestFile.write(manifest)
-      manifestFile.close()
-
   def initializeProfile(self, profileDir,
                               extraPrefs=None,
                               useServerLocations=False,
-                              initialProfile=None,
-                              prefsPath=_DEFAULT_PREFERENCE_FILE):
+                              prefsPath=_DEFAULT_PREFERENCE_FILE,
+                              appsPath=_DEFAULT_APPS_FILE,
+                              addons=None):
     " Sets up the standard testing profile."
 
     extraPrefs = extraPrefs or []
-    prefs = []
-    # Start with a clean slate.
-    shutil.rmtree(profileDir, True)
 
-    if initialProfile:
-      shutil.copytree(initialProfile, profileDir)
-    else:
-      os.mkdir(profileDir)
-
-    # Set up permissions database
-    locations = self.readLocations()
-    self.setupPermissionsDatabase(profileDir,
-      {'allowXULXBL':[(l.host, 'noxul' not in l.options) for l in locations]});
-
-    f = open(prefsPath, 'r')
-    part = f.read() % {"server" : "%s:%s" % (self.webServer, self.httpPort)}
-    f.close()
-    prefs.append(part)
-
+    # create the profile
+    prefs = {}
+    locations = None
     if useServerLocations:
-      # We need to proxy every server but the primary one.
-      origins = ["'%s://%s:%s'" % (l.scheme, l.host, l.port)
-                for l in filter(lambda l: "primary" not in l.options, locations)]
-      origins = ", ".join(origins)
-
-      pacURL = """data:text/plain,
-function FindProxyForURL(url, host)
-{
-  var origins = [%(origins)s];
-  var regex = new RegExp('^([a-z][-a-z0-9+.]*)' +
-                         '://' +
-                         '(?:[^/@]*@)?' +
-                         '(.*?)' +
-                         '(?::(\\\\\\\\d+))?/');
-  var matches = regex.exec(url);
-  if (!matches)
-    return 'DIRECT';
-  var isHttp = matches[1] == 'http';
-  var isHttps = matches[1] == 'https';
-  var isWebSocket = matches[1] == 'ws';
-  var isWebSocketSSL = matches[1] == 'wss';
-  if (!matches[3])
-  {
-    if (isHttp | isWebSocket) matches[3] = '80';
-    if (isHttps | isWebSocketSSL) matches[3] = '443';
-  }
-  if (isWebSocket)
-    matches[1] = 'http';
-  if (isWebSocketSSL)
-    matches[1] = 'https';
-
-  var origin = matches[1] + '://' + matches[2] + ':' + matches[3];
-  if (origins.indexOf(origin) < 0)
-    return 'DIRECT';
-  if (isHttp)
-    return 'PROXY %(remote)s:%(httpport)s';
-  if (isHttps || isWebSocket || isWebSocketSSL)
-    return 'PROXY %(remote)s:%(sslport)s';
-  return 'DIRECT';
-}""" % { "origins": origins,
-         "remote":  self.webServer,
-         "httpport":self.httpPort,
-         "sslport": self.sslPort }
-      pacURL = "".join(pacURL.splitlines())
-
-      part = """
-user_pref("network.proxy.type", 2);
-user_pref("network.proxy.autoconfig_url", "%(pacURL)s");
-
-user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless to others
-""" % {"pacURL": pacURL}
+        locations = ServerLocations()
+        locations.read(os.path.abspath('server-locations.txt'), True)
     else:
-      part = 'user_pref("network.proxy.type", 0);\n'
-    prefs.append(part)
+      prefs['network.proxy.type'] = 0
+
+    prefs.update(Preferences.read_prefs(prefsPath))
 
     for v in extraPrefs:
       thispref = v.split("=", 1)
       if len(thispref) < 2:
         print "Error: syntax error in --setpref=" + v
         sys.exit(1)
-      part = 'user_pref("%s", %s);\n' % (thispref[0], thispref[1])
-      prefs.append(part)
+      prefs[thispref[0]] = thispref[1]
 
-    # write the preferences
-    prefsFile = open(profileDir + "/" + "user.js", "a")
-    prefsFile.write("".join(prefs))
-    prefsFile.close()
 
-    apps = [
-      {
-        'name': 'http_example_org',
-        'csp': '',
-        'origin': 'http://example.org',
-        'manifestURL': 'http://example.org/manifest.webapp',
-        'description': 'http://example.org App',
-        'appStatus': _APP_STATUS_INSTALLED
-      },
-      {
-        'name': 'https_example_com',
-        'csp': '',
-        'origin': 'https://example.com',
-        'manifestURL': 'https://example.com/manifest.webapp',
-        'description': 'https://example.com App',
-        'appStatus': _APP_STATUS_INSTALLED
-      },
-      {
-        'name': 'http_test1_example_org',
-        'csp': '',
-        'origin': 'http://test1.example.org',
-        'manifestURL': 'http://test1.example.org/manifest.webapp',
-        'description': 'http://test1.example.org App',
-        'appStatus': _APP_STATUS_INSTALLED
-      },
-      {
-        'name': 'http_test1_example_org_8000',
-        'csp': '',
-        'origin': 'http://test1.example.org:8000',
-        'manifestURL': 'http://test1.example.org:8000/manifest.webapp',
-        'description': 'http://test1.example.org:8000 App',
-        'appStatus': _APP_STATUS_INSTALLED
-      },
-      {
-        'name': 'http_sub1_test1_example_org',
-        'csp': '',
-        'origin': 'http://sub1.test1.example.org',
-        'manifestURL': 'http://sub1.test1.example.org/manifest.webapp',
-        'description': 'http://sub1.test1.example.org App',
-        'appStatus': _APP_STATUS_INSTALLED
-      },
-      {
-        'name': 'https_example_com_privileged',
-        'csp': '',
-        'origin': 'https://example.com',
-        'manifestURL': 'https://example.com/manifest_priv.webapp',
-        'description': 'https://example.com Privileged App',
-        'appStatus': _APP_STATUS_PRIVILEGED
-      },
-      {
-        'name': 'https_example_com_certified',
-        'csp': '',
-        'origin': 'https://example.com',
-        'manifestURL': 'https://example.com/manifest_cert.webapp',
-        'description': 'https://example.com Certified App',
-        'appStatus': _APP_STATUS_CERTIFIED
-      },
-      {
-        'name': 'https_example_csp_certified',
-        'csp': "default-src *; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'",
-        'origin': 'https://example.com',
-        'manifestURL': 'https://example.com/manifest_csp_cert.webapp',
-        'description': 'https://example.com Certified App with manifest policy',
-        'appStatus': _APP_STATUS_CERTIFIED
-      },
-      {
-        'name': 'https_example_csp_installed',
-        'csp': "default-src *; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'",
-        'origin': 'https://example.com',
-        'manifestURL': 'https://example.com/manifest_csp_inst.webapp',
-        'description': 'https://example.com Installed App with manifest policy',
-        'appStatus': _APP_STATUS_INSTALLED
-      },
-      {
-        'name': 'https_example_csp_privileged',
-        'csp': "default-src *; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'",
-        'origin': 'https://example.com',
-        'manifestURL': 'https://example.com/manifest_csp_priv.webapp',
-        'description': 'https://example.com Privileged App with manifest policy',
-        'appStatus': _APP_STATUS_PRIVILEGED
-      },
-      {
-        'name': 'https_a_domain_certified',
-        'csp': "",
-        'origin': 'https://acertified.com',
-        'manifestURL': 'https://acertified.com/manifest.webapp',
-        'description': 'https://acertified.com Certified App',
-        'appStatus': _APP_STATUS_CERTIFIED
-      },
-      {
-        'name': 'https_a_domain_privileged',
-        'csp': "",
-        'origin': 'https://aprivileged.com',
-        'manifestURL': 'https://aprivileged.com/manifest.webapp',
-        'description': 'https://aprivileged.com Privileged App ',
-        'appStatus': _APP_STATUS_PRIVILEGED
-      },
-    ];
-    self.setupTestApps(profileDir, apps)
+    interpolation = {"server": "%s:%s" % (self.webServer, self.httpPort)}
+    prefs = json.loads(json.dumps(prefs) % interpolation)
+    for pref in prefs:
+        prefs[pref] = Preferences.cast(prefs[pref])
+
+    # load apps
+    apps = None
+    if appsPath and os.path.exists(appsPath):
+        with open(appsPath, 'r') as apps_file:
+            apps = json.load(apps_file)
+
+    proxy = {'remote': str(self.webServer),
+             'http': str(self.httpPort),
+             'https': str(self.sslPort),
+    # use SSL port for legacy compatibility; see
+    # - https://bugzilla.mozilla.org/show_bug.cgi?id=688667#c66
+    # - https://bugzilla.mozilla.org/show_bug.cgi?id=899221
+    #             'ws': str(self.webSocketPort)
+             'ws': str(self.sslPort)
+             }
+
+    # return profile object
+    profile = Profile(profile=profileDir,
+                      addons=addons,
+                      locations=locations,
+                      preferences=prefs,
+                      restore=False,
+                      apps=apps,
+                      proxy=proxy)
+    return profile
 
   def addCommonOptions(self, parser):
     "Adds command-line options which are common to mochitest and reftest."
@@ -641,11 +395,10 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
                       action = "append", type = "string",
                       default = [],
                       dest = "extraPrefs", metavar = "PREF=VALUE",
-                      help = "defines an extra user preference")  
+                      help = "defines an extra user preference")
 
   def fillCertificateDB(self, profileDir, certPath, utilityPath, xrePath):
     pwfilePath = os.path.join(profileDir, ".crtdbpw")
-  
     pwfile = open(pwfilePath, "w")
     pwfile.write("\n")
     pwfile.close()
@@ -695,6 +448,7 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
     pk12util = os.path.join(utilityPath, "pk12util" + self.BIN_SUFFIX)
 
     status = self.Process([certutil, "-N", "-d", profileDir, "-f", pwfilePath], env = env).wait()
+    automationutils.printstatus(status, "certutil")
     if status != 0:
       return status
 
@@ -706,67 +460,87 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
         trustBits = "CT,,"
         if root.endswith("-object"):
           trustBits = "CT,,CT"
-        self.Process([certutil, "-A", "-i", os.path.join(certPath, item),
+        status = self.Process([certutil, "-A", "-i", os.path.join(certPath, item),
                     "-d", profileDir, "-f", pwfilePath, "-n", root, "-t", trustBits],
                     env = env).wait()
+        automationutils.printstatus(status, "certutil")
       if ext == ".client":
-        self.Process([pk12util, "-i", os.path.join(certPath, item), "-w",
+        status = self.Process([pk12util, "-i", os.path.join(certPath, item), "-w",
                     pwfilePath, "-d", profileDir], 
                     env = env).wait()
+        automationutils.printstatus(status, "pk12util")
 
     os.unlink(pwfilePath)
     return 0
 
-  def environment(self, env = None, xrePath = None, crashreporter = True):
+  def environment(self, env=None, xrePath=None, crashreporter=True, debugger=False, dmdPath=None):
     if xrePath == None:
       xrePath = self.DIST_BIN
     if env == None:
       env = dict(os.environ)
 
     ldLibraryPath = os.path.abspath(os.path.join(SCRIPT_DIR, xrePath))
+    dmdLibrary = None
+    preloadEnvVar = None
     if self.UNIXISH or self.IS_MAC:
       envVar = "LD_LIBRARY_PATH"
+      preloadEnvVar = "LD_PRELOAD"
       if self.IS_MAC:
         envVar = "DYLD_LIBRARY_PATH"
+        dmdLibrary = "libdmd.dylib"
       else: # unixish
         env['MOZILLA_FIVE_HOME'] = xrePath
+        dmdLibrary = "libdmd.so"
       if envVar in env:
         ldLibraryPath = ldLibraryPath + ":" + env[envVar]
       env[envVar] = ldLibraryPath
     elif self.IS_WIN32:
-      env["PATH"] = env["PATH"] + ";" + ldLibraryPath
+      env["PATH"] = env["PATH"] + ";" + str(ldLibraryPath)
+      dmdLibrary = "dmd.dll"
+      preloadEnvVar = "MOZ_REPLACE_MALLOC_LIB"
 
-    if crashreporter:
+    if dmdPath and dmdLibrary and preloadEnvVar:
+      env['DMD'] = '1'
+      env[preloadEnvVar] = os.path.join(dmdPath, dmdLibrary)
+
+    if crashreporter and not debugger:
       env['MOZ_CRASHREPORTER_NO_REPORT'] = '1'
       env['MOZ_CRASHREPORTER'] = '1'
     else:
       env['MOZ_CRASHREPORTER_DISABLE'] = '1'
 
+    # Crash on non-local network connections.
+    env['MOZ_DISABLE_NONLOCAL_CONNECTIONS'] = '1'
+
     env['GNOME_DISABLE_CRASH_DIALOG'] = '1'
     env['XRE_NO_WINDOWS_CRASH_DIALOG'] = '1'
     env['NS_TRACE_MALLOC_DISABLE_STACKS'] = '1'
 
-    # Additional temporary logging while we try to debug some intermittent
-    # WebRTC conditions. This is necessary to troubleshoot bugs 841496,
-    # 841150, and 839677 (at least)
-    # Also (temporary) bug 870002 (mediastreamgraph)
-    if 'NSPR_LOG_MODULES' not in env:
-      env['NSPR_LOG_MODULES'] = 'signaling:5,mtransport:3'
-    env['R_LOG_LEVEL'] = '5'
-    env['R_LOG_DESTINATION'] = 'stderr'
-    env['R_LOG_VERBOSE'] = '1'
+    # Set WebRTC logging in case it is not set yet
+    env.setdefault('NSPR_LOG_MODULES', 'signaling:5,mtransport:3')
+    env.setdefault('R_LOG_LEVEL', '5')
+    env.setdefault('R_LOG_DESTINATION', 'stderr')
+    env.setdefault('R_LOG_VERBOSE', '1')
 
     # ASan specific environment stuff
     if self.IS_ASAN and (self.IS_LINUX or self.IS_MAC):
+      # Symbolizer support
+      llvmsym = os.path.join(xrePath, "llvm-symbolizer")
+      if os.path.isfile(llvmsym):
+        env["ASAN_SYMBOLIZER_PATH"] = llvmsym
+        self.log.info("INFO | automation.py | ASan using symbolizer at %s", llvmsym)
+
       try:
         totalMemory = int(os.popen("free").readlines()[1].split()[1])
 
-        # Only 2 GB RAM or less available? Use custom ASan options to reduce
+        # Only 4 GB RAM or less available? Use custom ASan options to reduce
         # the amount of resources required to do the tests. Standard options 
         # will otherwise lead to OOM conditions on the current test slaves.
-        if totalMemory <= 1024 * 1024 * 2:
+        if totalMemory <= 1024 * 1024 * 4:
           self.log.info("INFO | automation.py | ASan running in low-memory configuration")
-          env["ASAN_OPTIONS"] = "quarantine_size=50331648:redzone=64"
+          env["ASAN_OPTIONS"] = "quarantine_size=50331648:malloc_context_size=5"
+        else:
+          self.log.info("INFO | automation.py | ASan running in default memory configuration")
       except OSError,err:
         self.log.info("Failed determine available memory, disabling ASan low-memory configuration: %s", err.strerror)
       except:
@@ -774,36 +548,50 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
 
     return env
 
+  def killPid(self, pid):
+    try:
+      os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    except WindowsError:
+      self.log.info("Failed to kill process %d." % pid)
+
   if IS_WIN32:
     PeekNamedPipe = ctypes.windll.kernel32.PeekNamedPipe
     GetLastError = ctypes.windll.kernel32.GetLastError
 
     def readWithTimeout(self, f, timeout):
-      """Try to read a line of output from the file object |f|.
-      |f| must be a  pipe, like the |stdout| member of a subprocess.Popen
-      object created with stdout=PIPE. If no output
-      is received within |timeout| seconds, return a blank line.
-      Returns a tuple (line, did_timeout), where |did_timeout| is True
-      if the read timed out, and False otherwise."""
+      """
+      Try to read a line of output from the file object |f|. |f| must be a
+      pipe, like the |stdout| member of a subprocess.Popen object created
+      with stdout=PIPE. Returns a tuple (line, did_timeout), where |did_timeout|
+      is True if the read timed out, and False otherwise. If no output is
+      received within |timeout| seconds, returns a blank line.
+      """
+
       if timeout is None:
-        # shortcut to allow callers to pass in "None" for no timeout.
-        return (f.readline(), False)
+        timeout = 0
+
       x = msvcrt.get_osfhandle(f.fileno())
       l = ctypes.c_long()
       done = time.time() + timeout
-      while time.time() < done:
+
+      buffer = ""
+      while timeout == 0 or time.time() < done:
         if self.PeekNamedPipe(x, None, 0, None, ctypes.byref(l), None) == 0:
           err = self.GetLastError()
           if err == 38 or err == 109: # ERROR_HANDLE_EOF || ERROR_BROKEN_PIPE
             return ('', False)
           else:
             self.log.error("readWithTimeout got error: %d", err)
-        if l.value > 0:
-          # we're assuming that the output is line-buffered,
-          # which is not unreasonable
-          return (f.readline(), False)
+        # read a character at a time, checking for eol. Return once we get there.
+        index = 0
+        while index < l.value:
+          char = f.read(1)
+          buffer += char
+          if char == '\n':
+            return (buffer, False)
+          index = index + 1
         time.sleep(0.01)
-      return ('', True)
+      return (buffer, True)
 
     def isPidAlive(self, pid):
       STILL_ACTIVE = 259
@@ -815,14 +603,6 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
       ctypes.windll.kernel32.GetExitCodeProcess(pHandle, ctypes.byref(pExitCode))
       ctypes.windll.kernel32.CloseHandle(pHandle)
       return pExitCode.value == STILL_ACTIVE
-
-    def killPid(self, pid):
-      PROCESS_TERMINATE = 0x0001
-      pHandle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, 0, pid)
-      if not pHandle:
-        return
-      ctypes.windll.kernel32.TerminateProcess(pHandle, 1)
-      ctypes.windll.kernel32.CloseHandle(pHandle)
 
   else:
 
@@ -853,59 +633,14 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
           return False
         raise
 
-    def killPid(self, pid):
-      os.kill(pid, signal.SIGKILL)
-
   def dumpScreen(self, utilityPath):
     if self.haveDumpedScreen:
       self.log.info("Not taking screenshot here: see the one that was previously logged")
       return
 
     self.haveDumpedScreen = True;
+    automationutils.dumpScreen(utilityPath)
 
-    # Need to figure out what tool and whether it write to a file or stdout
-    if self.UNIXISH:
-      utility = [os.path.join(utilityPath, "screentopng")]
-      imgoutput = 'stdout'
-    elif self.IS_MAC:
-      utility = ['/usr/sbin/screencapture', '-C', '-x', '-t', 'png']
-      imgoutput = 'file'
-    elif self.IS_WIN32:
-      utility = [os.path.join(utilityPath, "screenshot.exe")]
-      imgoutput = 'file'
-
-    # Run the capture correctly for the type of capture
-    try:
-      if imgoutput == 'file':
-        tmpfd, imgfilename = tempfile.mkstemp(prefix='mozilla-test-fail_')
-        os.close(tmpfd)
-        dumper = self.Process(utility + [imgfilename])
-      elif imgoutput == 'stdout':
-        dumper = self.Process(utility, bufsize=-1,
-                              stdout=subprocess.PIPE, close_fds=True)
-    except OSError, err:
-      self.log.info("Failed to start %s for screenshot: %s",
-                    utility[0], err.strerror)
-      return
-
-    # Check whether the capture utility ran successfully
-    dumper_out, dumper_err = dumper.communicate()
-    if dumper.returncode != 0:
-      self.log.info("%s exited with code %d", utility, dumper.returncode)
-      return
-
-    try:
-      if imgoutput == 'stdout':
-        image = dumper_out
-      elif imgoutput == 'file':
-        with open(imgfilename, 'rb') as imgfile:
-          image = imgfile.read()
-    except IOError, err:
-        self.log.info("Failed to read image from %s", imgoutput)
-
-    import base64
-    encoded = base64.b64encode(image)
-    self.log.info("SCREENSHOT: data:image/png;base64,%s", encoded)
 
   def killAndGetStack(self, processPID, utilityPath, debuggerInfo):
     """Kill the process, preferrably in a way that gets us a stack trace.
@@ -917,16 +652,18 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
   def killAndGetStackNoScreenshot(self, processPID, utilityPath, debuggerInfo):
     """Kill the process, preferrably in a way that gets us a stack trace."""
     if self.CRASHREPORTER and not debuggerInfo:
-      if self.UNIXISH:
+      if not self.IS_WIN32:
         # ABRT will get picked up by Breakpad's signal handler
         os.kill(processPID, signal.SIGABRT)
         return
-      elif self.IS_WIN32:
+      else:
         # We should have a "crashinject" program in our utility path
         crashinject = os.path.normpath(os.path.join(utilityPath, "crashinject.exe"))
-        if os.path.exists(crashinject) and subprocess.Popen([crashinject, str(processPID)]).wait() == 0:
-          return
-      #TODO: kill the process such that it triggers Breakpad on OS X (bug 525296)
+        if os.path.exists(crashinject):
+          status = subprocess.Popen([crashinject, str(processPID)]).wait()
+          automationutils.printstatus(status, "crashinject")
+          if status == 0:
+            return
     self.log.info("Can't trigger Breakpad, just killing process")
     self.killPid(processPID)
 
@@ -962,6 +699,11 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
                                          stdout=subprocess.PIPE)
         logsource = stackFixerProcess.stdout
 
+      # With metro browser runs this script launches the metro test harness which launches the browser.
+      # The metro test harness hands back the real browser process id via log output which we need to
+      # pick up on and parse out. This variable tracks the real browser process id if we find it.
+      browserProcessId = -1
+
       (line, didTimeout) = self.readWithTimeout(logsource, timeout)
       while line != "" and not didTimeout:
         if stackFixerFunction:
@@ -973,22 +715,35 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
           self.dumpScreen(utilityPath)
 
         (line, didTimeout) = self.readWithTimeout(logsource, timeout)
+
+        if "METRO_BROWSER_PROCESS" in line:
+          index = line.find("=")
+          if index:
+            browserProcessId = line[index+1:].rstrip()
+            self.log.info("INFO | automation.py | metro browser sub process id detected: %s", browserProcessId)
+
         if not hitMaxTime and maxTime and datetime.now() - startTime > timedelta(seconds = maxTime):
           # Kill the application, but continue reading from stack fixer so as not to deadlock on stackFixerProcess.wait().
           hitMaxTime = True
           self.log.info("TEST-UNEXPECTED-FAIL | %s | application ran for longer than allowed maximum time of %d seconds", self.lastTestSeen, int(maxTime))
           self.killAndGetStack(proc.pid, utilityPath, debuggerInfo)
       if didTimeout:
+        if line:
+          self.log.info(line.rstrip().decode("UTF-8", "ignore"))
         self.log.info("TEST-UNEXPECTED-FAIL | %s | application timed out after %d seconds with no output", self.lastTestSeen, int(timeout))
-        self.killAndGetStack(proc.pid, utilityPath, debuggerInfo)
+        if browserProcessId == -1:
+          browserProcessId = proc.pid
+        self.killAndGetStack(browserProcessId, utilityPath, debuggerInfo)
 
     status = proc.wait()
+    automationutils.printstatus(status, "Main app process")
     if status == 0:
       self.lastTestSeen = "Main app process exited normally"
     if status != 0 and not didTimeout and not hitMaxTime:
       self.log.info("TEST-UNEXPECTED-FAIL | %s | Exited with code %d during test run", self.lastTestSeen, status)
     if stackFixerProcess is not None:
       fixerStatus = stackFixerProcess.wait()
+      automationutils.printstatus(status, "stackFixerProcess")
       if fixerStatus != 0 and not didTimeout and not hitMaxTime:
         self.log.info("TEST-UNEXPECTED-FAIL | automation.py | Stack fixer process exited with code %d during test run", fixerStatus)
     return status
@@ -1060,7 +815,8 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
              runSSLTunnel = False, utilityPath = None,
              xrePath = None, certPath = None,
              debuggerInfo = None, symbolsPath = None,
-             timeout = -1, maxTime = None, onLaunch = None):
+             timeout = -1, maxTime = None, onLaunch = None,
+             webapprtChrome = False, hide_subtests=None, screenshotOnFail=False):
     """
     Run the app, log the duration it took to execute, return the status code.
     Kills the app if it runs for longer than |maxTime| seconds, or outputs nothing for |timeout| seconds.

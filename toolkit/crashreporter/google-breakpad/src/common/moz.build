@@ -7,13 +7,8 @@
 if CONFIG['OS_ARCH'] in ('Darwin', 'Linux'):
     DIRS += ['dwarf']
 
-MODULE = 'breakpad_common'
-
-CSRCS += [
+UNIFIED_SOURCES += [
     'convert_UTF.c',
-]
-
-CPP_SOURCES += [
     'logging.cc',
     'module.cc',
     'pathname_stripper.cc',
@@ -22,21 +17,21 @@ CPP_SOURCES += [
 ]
 
 if CONFIG['OS_TARGET'] != 'WINNT':
-    CPP_SOURCES += [
-        'md5.cc',
-        'dwarf/bytereader.cc',
-        'dwarf_cfi_to_module.cc',
-        'dwarf/dwarf2reader.cc',
-        'dwarf_cu_to_module.cc',
-        'language.cc',
-        'dwarf/dwarf2diehandler.cc',
-        'dwarf_line_to_module.cc',
+    UNIFIED_SOURCES += [
         'arm_ex_reader.cc',
         'arm_ex_to_module.cc',
+        'dwarf/bytereader.cc',
+        'dwarf/dwarf2diehandler.cc',
+        'dwarf/dwarf2reader.cc',
+        'dwarf_cfi_to_module.cc',
+        'dwarf_cu_to_module.cc',
+        'dwarf_line_to_module.cc',
+        'language.cc',
+        'md5.cc',
     ]
 
 if CONFIG['OS_ARCH'] == 'Linux':
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'linux/dump_symbols.cc',
         'linux/elf_symbols_to_module.cc',
     ]
@@ -45,21 +40,55 @@ if CONFIG['OS_TARGET'] == 'Android':
     pass
 else:
     if CONFIG['OS_TARGET'] != 'WINNT':
-        CPP_SOURCES += [
-            'stabs_to_module.cc',
+        UNIFIED_SOURCES += [
             'stabs_reader.cc',
+            'stabs_to_module.cc',
         ]
 
 if CONFIG['OS_TARGET'] != 'WINNT' and CONFIG['MOZ_CRASHREPORTER']:
-    HOST_CSRCS += CSRCS
-
-if CONFIG['OS_TARGET'] != 'WINNT' and CONFIG['MOZ_CRASHREPORTER']:
+    HOST_SOURCES += [ 'convert_UTF.c' ]
     HOST_LIBRARY_NAME = 'host_breakpad_common_s'
+    HOST_SOURCES += [
+        'arm_ex_reader.cc',
+        'arm_ex_to_module.cc',
+        'dwarf_cfi_to_module.cc',
+        'dwarf_cu_to_module.cc',
+        'dwarf_line_to_module.cc',
+        'language.cc',
+        'logging.cc',
+        'md5.cc',
+        'module.cc',
+        'pathname_stripper.cc',
+        'stabs_reader.cc',
+        'stabs_to_module.cc',
+        'string_conversion.cc',
+        'unique_string.cc',
+    ]
 
 if CONFIG['OS_ARCH'] == 'Darwin':
-    CMMSRCS += [
+    UNIFIED_SOURCES += [
         'mac/dump_syms.mm',
     ]
 
+if CONFIG['OS_TARGET'] == 'Android':
+    # We don't support unifying assembly files.
+    SOURCES += [
+        'android/breakpad_getcontext.S',
+    ]
+
 LIBRARY_NAME = 'breakpad_common_s'
+
+MSVC_ENABLE_PGO = True
+
+FINAL_LIBRARY = 'xulapp_s'
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+    DEFINES['ELFSIZE'] = 32
+
+if CONFIG['OS_TARGET'] == 'Android':
+    DEFINES['NO_STABS_SUPPORT'] = True
+
+LOCAL_INCLUDES += [
+    '..',
+]
 

@@ -9,13 +9,15 @@
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FEMerge)
 
+using namespace mozilla::gfx;
+
 namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEMergeElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGFEMergeElement::WrapNode(JSContext *aCx)
 {
-  return SVGFEMergeElementBinding::Wrap(aCx, aScope, this);
+  return SVGFEMergeElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::StringInfo SVGFEMergeElement::sStringInfo[1] =
@@ -25,20 +27,13 @@ nsSVGElement::StringInfo SVGFEMergeElement::sStringInfo[1] =
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEMergeElement)
 
-nsresult
-SVGFEMergeElement::Filter(nsSVGFilterInstance *instance,
-                          const nsTArray<const Image*>& aSources,
-                          const Image* aTarget,
-                          const nsIntRect& rect)
+FilterPrimitiveDescription
+SVGFEMergeElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
+                                           const IntRect& aFilterSubregion,
+                                           const nsTArray<bool>& aInputsAreTainted,
+                                           nsTArray<RefPtr<SourceSurface>>& aInputImages)
 {
-  gfxContext ctx(aTarget->mImage);
-  ctx.Clip(aTarget->mFilterPrimitiveSubregion);
-
-  for (uint32_t i = 0; i < aSources.Length(); i++) {
-    ctx.SetSource(aSources[i]->mImage);
-    ctx.Paint();
-  }
-  return NS_OK;
+  return FilterPrimitiveDescription(PrimitiveType::Merge);
 }
 
 void

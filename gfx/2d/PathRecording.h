@@ -37,6 +37,7 @@ class DrawEventRecorderPrivate;
 class PathBuilderRecording : public PathBuilder
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(PathBuilderRecording)
   PathBuilderRecording(PathBuilder *aBuilder, FillRule aFillRule)
     : mPathBuilder(aBuilder), mFillRule(aFillRule)
   {
@@ -82,6 +83,7 @@ private:
 class PathRecording : public Path
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(PathRecording)
   PathRecording(Path *aPath, const std::vector<PathOp> aOps, FillRule aFillRule)
     : mPath(aPath), mPathOps(aOps), mFillRule(aFillRule)
   {
@@ -89,10 +91,10 @@ public:
 
   ~PathRecording();
 
-  virtual BackendType GetBackendType() const { return BACKEND_RECORDING; }
-  virtual TemporaryRef<PathBuilder> CopyToBuilder(FillRule aFillRule = FILL_WINDING) const;
+  virtual BackendType GetBackendType() const { return BackendType::RECORDING; }
+  virtual TemporaryRef<PathBuilder> CopyToBuilder(FillRule aFillRule = FillRule::FILL_WINDING) const;
   virtual TemporaryRef<PathBuilder> TransformedCopyToBuilder(const Matrix &aTransform,
-                                                             FillRule aFillRule = FILL_WINDING) const;
+                                                             FillRule aFillRule = FillRule::FILL_WINDING) const;
   virtual bool ContainsPoint(const Point &aPoint, const Matrix &aTransform) const
   { return mPath->ContainsPoint(aPoint, aTransform); }
   virtual bool StrokeContainsPoint(const StrokeOptions &aStrokeOptions,
@@ -106,7 +108,9 @@ public:
   virtual Rect GetStrokedBounds(const StrokeOptions &aStrokeOptions,
                                 const Matrix &aTransform = Matrix()) const
   { return mPath->GetStrokedBounds(aStrokeOptions, aTransform); }
-  
+
+  virtual void StreamToSink(PathSink *aSink) const { mPath->StreamToSink(aSink); }
+
   virtual FillRule GetFillRule() const { return mFillRule; }
 
   void StorePath(std::ostream &aStream) const;

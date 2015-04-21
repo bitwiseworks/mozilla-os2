@@ -15,10 +15,10 @@
 #ifndef WEBRTC_MODULES_VIDEO_CODING_TEST_MT_TEST_COMMON_H_
 #define WEBRTC_MODULES_VIDEO_CODING_TEST_MT_TEST_COMMON_H_
 
-#include "rtp_rtcp.h"
-#include "test_callbacks.h"
-#include "test_util.h"
-#include "video_coding.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
+#include "webrtc/modules/video_coding/main/interface/video_coding.h"
+#include "webrtc/modules/video_coding/main/test/test_callbacks.h"
+#include "webrtc/modules/video_coding/main/test/video_source.h"
 
 namespace webrtc {
 
@@ -38,8 +38,8 @@ public:
     webrtc::RtpRtcp&            _rtp;
     CmdArgs                     _args;
     FILE*                       _sourceFile;
-    WebRtc_Word32               _frameCnt;
-    WebRtc_Word32               _timestamp;
+    int32_t               _frameCnt;
+    int32_t               _timestamp;
 };
 
 // MT implementation of the RTPSendCompleteCallback (Transport)
@@ -47,7 +47,7 @@ class TransportCallback:public RTPSendCompleteCallback
 {
  public:
     // constructor input: (receive side) rtp module to send encoded data to
-    TransportCallback(TickTimeBase* clock, const char* filename = NULL);
+    TransportCallback(Clock* clock, const char* filename = NULL);
     virtual ~TransportCallback();
     // Add packets to list
     // Incorporate network conditions - delay and packet loss

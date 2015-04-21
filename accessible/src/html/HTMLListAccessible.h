@@ -46,18 +46,17 @@ public:
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
-  // nsAccessNode
-  virtual void Shutdown();
-
   // nsIAccessible
   NS_IMETHOD GetBounds(int32_t* aX, int32_t* aY,
                        int32_t* aWidth, int32_t* aHeight);
 
   // Accessible
+  virtual void Shutdown();
   virtual a11y::role NativeRole();
   virtual uint64_t NativeState();
 
-  // nsHTMLLIAccessible
+  // HTMLLIAccessible
+  HTMLListBulletAccessible* Bullet() const { return mBullet; }
   void UpdateBullet(bool aHasBullet);
 
 protected:
@@ -78,10 +77,8 @@ public:
   HTMLListBulletAccessible(nsIContent* aContent, DocAccessible* aDoc);
   virtual ~HTMLListBulletAccessible() { }
 
-  // nsAccessNode
-  virtual nsIFrame* GetFrame() const;
-
   // Accessible
+  virtual nsIFrame* GetFrame() const;
   virtual ENameValueFlag Name(nsString& aName);
   virtual a11y::role NativeRole();
   virtual uint64_t NativeState();

@@ -1,9 +1,15 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef __NSTARRAYHELPERS_H__
 #define __NSTARRAYHELPERS_H__
+
+#include "jsapi.h"
+#include "nsContentUtils.h"
+#include "nsTArray.h"
 
 template <class T>
 inline nsresult
@@ -13,26 +19,22 @@ nsTArrayToJSArray(JSContext* aCx, const nsTArray<T>& aSourceArray,
   MOZ_ASSERT(aCx);
 
   JS::Rooted<JSObject*> arrayObj(aCx,
-    JS_NewArrayObject(aCx, aSourceArray.Length(), nullptr));
+    JS_NewArrayObject(aCx, aSourceArray.Length()));
   if (!arrayObj) {
     NS_WARNING("JS_NewArrayObject failed!");
     return NS_ERROR_OUT_OF_MEMORY;
   }
-
-  JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
-  MOZ_ASSERT(global);
 
   for (uint32_t index = 0; index < aSourceArray.Length(); index++) {
     nsCOMPtr<nsISupports> obj;
     nsresult rv = aSourceArray[index]->QueryInterface(NS_GET_IID(nsISupports), getter_AddRefs(obj));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    JS::Rooted<JS::Value> wrappedVal(aCx);
-    rv = nsContentUtils::WrapNative(aCx, global, obj, wrappedVal.address(),
-                                    nullptr, true);
+    JS::RootedValue wrappedVal(aCx);
+    rv = nsContentUtils::WrapNative(aCx, obj, &wrappedVal);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (!JS_SetElement(aCx, arrayObj, index, wrappedVal.address())) {
+    if (!JS_SetElement(aCx, arrayObj, index, wrappedVal)) {
       NS_WARNING("JS_SetElement failed!");
       return NS_ERROR_FAILURE;
     }
@@ -56,24 +58,23 @@ nsTArrayToJSArray<nsString>(JSContext* aCx,
   MOZ_ASSERT(aCx);
 
   JS::Rooted<JSObject*> arrayObj(aCx,
-    JS_NewArrayObject(aCx, aSourceArray.Length(), nullptr));
+    JS_NewArrayObject(aCx, aSourceArray.Length()));
   if (!arrayObj) {
     NS_WARNING("JS_NewArrayObject failed!");
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
+  JS::Rooted<JSString*> s(aCx);
   for (uint32_t index = 0; index < aSourceArray.Length(); index++) {
-    JSString* s = JS_NewUCStringCopyN(aCx, aSourceArray[index].BeginReading(),
-                                      aSourceArray[index].Length());
+    s = JS_NewUCStringCopyN(aCx, aSourceArray[index].BeginReading(),
+                            aSourceArray[index].Length());
 
     if(!s) {
       NS_WARNING("Memory allocation error!");
       return NS_ERROR_OUT_OF_MEMORY;
     }
 
-    JS::Rooted<JS::Value> wrappedVal(aCx, STRING_TO_JSVAL(s));
-
-    if (!JS_SetElement(aCx, arrayObj, index, wrappedVal.address())) {
+    if (!JS_SetElement(aCx, arrayObj, index, s)) {
       NS_WARNING("JS_SetElement failed!");
       return NS_ERROR_FAILURE;
     }

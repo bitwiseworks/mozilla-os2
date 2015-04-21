@@ -5,8 +5,34 @@
 
 from __future__ import with_statement
 import glob, logging, os, platform, shutil, subprocess, sys, tempfile, urllib2, zipfile
+import base64
 import re
+import os
 from urlparse import urlparse
+from operator import itemgetter
+import signal
+
+try:
+  import mozinfo
+except ImportError:
+  # Stub out fake mozinfo since this is not importable on Android 4.0 Opt.
+  # This should be fixed; see
+  # https://bugzilla.mozilla.org/show_bug.cgi?id=650881
+  mozinfo = type('mozinfo', (), dict(info={}))()
+  mozinfo.isWin = mozinfo.isLinux = mozinfo.isUnix = mozinfo.isMac = False
+
+  # TODO! FILE: localautomation :/
+  # mapping from would-be mozinfo attr <-> sys.platform
+  mapping = {'isMac': ['mac', 'darwin'],
+             'isLinux': ['linux', 'linux2'],
+             'isWin': ['win32', 'win64'],
+             }
+  mapping = dict(sum([[(value, key) for value in values] for key, values in mapping.items()], []))
+  attr = mapping.get(sys.platform)
+  if attr:
+    setattr(mozinfo, attr, True)
+  if mozinfo.isLinux:
+    mozinfo.isUnix = True
 
 __all__ = [
   "ZipFileReader",
@@ -17,7 +43,12 @@ __all__ = [
   "getDebuggerInfo",
   "DEBUGGER_INFO",
   "replaceBackSlashes",
-  "wrapCommand",
+  'KeyValueParseError',
+  'parseKeyValue',
+  'systemMemory',
+  'environment',
+  'dumpScreen',
+  "ShutdownLeaks"
   ]
 
 # Map of debugging programs to information about them, like default arguments
@@ -34,21 +65,25 @@ DEBUGGER_INFO = {
     "interactive": True,
     "args": "-q --args"
   },
-  "cgdb": {
-    "interactive": True,
-    "args": "-q --args"
-  },
 
   "lldb": {
     "interactive": True,
-    "args": "--"
+    "args": "--",
+    "requiresEscapedArgs": True
   },
 
   # valgrind doesn't explain much about leaks unless you set the
-  # '--leak-check=full' flag.
+  # '--leak-check=full' flag. But there are a lot of objects that are
+  # semi-deliberately leaked, so we set '--show-possibly-lost=no' to avoid
+  # uninteresting output from those objects. We set '--smc-check==all-non-file'
+  # and '--vex-iropt-register-updates=allregs-at-mem-access' so that valgrind
+  # deals properly with JIT'd JavaScript code.  
   "valgrind": {
     "interactive": False,
-    "args": "--leak-check=full"
+    "args": " ".join(["--leak-check=full",
+                      "--show-possibly-lost=no",
+                      "--smc-check=all-non-file",
+                      "--vex-iropt-register-updates=allregs-at-mem-access"])
   }
 }
 
@@ -121,6 +156,43 @@ def isURL(thing):
   # We want to download URLs like http://... but not Windows paths like c:\...
   return len(urlparse(thing).scheme) >= 2
 
+# Python does not provide strsignal() even in the very latest 3.x.
+# This is a reasonable fake.
+def strsig(n):
+  # Signal numbers run 0 through NSIG-1; an array with NSIG members
+  # has exactly that many slots
+  _sigtbl = [None]*signal.NSIG
+  for k in dir(signal):
+    if k.startswith("SIG") and not k.startswith("SIG_") and k != "SIGCLD" and k != "SIGPOLL":
+      _sigtbl[getattr(signal, k)] = k
+  # Realtime signals mostly have no names
+  if hasattr(signal, "SIGRTMIN") and hasattr(signal, "SIGRTMAX"):
+    for r in range(signal.SIGRTMIN+1, signal.SIGRTMAX+1):
+      _sigtbl[r] = "SIGRTMIN+" + str(r - signal.SIGRTMIN)
+  # Fill in any remaining gaps
+  for i in range(signal.NSIG):
+    if _sigtbl[i] is None:
+      _sigtbl[i] = "unrecognized signal, number " + str(i)
+  if n < 0 or n >= signal.NSIG:
+    return "out-of-range signal, number "+str(n)
+  return _sigtbl[n]
+
+def printstatus(status, name = ""):
+  # 'status' is the exit status
+  if os.name != 'posix':
+    # Windows error codes are easier to look up if printed in hexadecimal
+    if status < 0:
+      status += 2**32
+    print "TEST-INFO | %s: exit status %x\n" % (name, status)
+  elif os.WIFEXITED(status):
+    print "TEST-INFO | %s: exit %d\n" % (name, os.WEXITSTATUS(status))
+  elif os.WIFSIGNALED(status):
+    # The python stdlib doesn't appear to have strsignal(), alas
+    print "TEST-INFO | {}: killed by {}".format(name,strsig(os.WTERMSIG(status)))
+  else:
+    # This is probably a can't-happen condition on Unix, but let's be defensive
+    print "TEST-INFO | %s: undecodable exit status %04x\n" % (name, status)
+
 def addCommonOptions(parser, defaults={}):
   parser.add_option("--xre-path",
                     action = "store", type = "string", dest = "xrePath",
@@ -185,7 +257,8 @@ def getDebuggerInfo(directory, debugger, debuggerArgs, debuggerInteractive = Fal
     debuggerInfo = {
       "path": debuggerPath,
       "interactive" : getDebuggerInfo("interactive", False),
-      "args": getDebuggerInfo("args", "").split()
+      "args": getDebuggerInfo("args", "").split(),
+      "requiresEscapedArgs": getDebuggerInfo("requiresEscapedArgs", False)
     }
 
     if debuggerArgs:
@@ -333,15 +406,259 @@ def processLeakLog(leakLogFile, leakThreshold = 0):
 def replaceBackSlashes(input):
   return input.replace('\\', '/')
 
-def wrapCommand(cmd):
+class KeyValueParseError(Exception):
+  """error when parsing strings of serialized key-values"""
+  def __init__(self, msg, errors=()):
+    self.errors = errors
+    Exception.__init__(self, msg)
+
+def parseKeyValue(strings, separator='=', context='key, value: '):
   """
-  If running on OS X 10.5 or older, wrap |cmd| so that it will
-  be executed as an i386 binary, in case it's a 32-bit/64-bit universal
-  binary.
+  parse string-serialized key-value pairs in the form of
+  `key = value`. Returns a list of 2-tuples.
+  Note that whitespace is not stripped.
   """
-  if platform.system() == "Darwin" and \
-     hasattr(platform, 'mac_ver') and \
-     platform.mac_ver()[0][:4] < '10.6':
-    return ["arch", "-arch", "i386"] + cmd
-  # otherwise just execute the command normally
-  return cmd
+
+  # syntax check
+  missing = [string for string in strings if separator not in string]
+  if missing:
+    raise KeyValueParseError("Error: syntax error in %s" % (context,
+                                                            ','.join(missing)),
+                                                            errors=missing)
+  return [string.split(separator, 1) for string in strings]
+
+def systemMemory():
+  """
+  Returns total system memory in kilobytes.
+  Works only on unix-like platforms where `free` is in the path.
+  """
+  return int(os.popen("free").readlines()[1].split()[1])
+
+def environment(xrePath, env=None, crashreporter=True, debugger=False, dmdPath=None):
+  """populate OS environment variables for mochitest"""
+
+  env = os.environ.copy() if env is None else env
+
+  assert os.path.isabs(xrePath)
+
+  ldLibraryPath = xrePath
+
+  envVar = None
+  dmdLibrary = None
+  preloadEnvVar = None
+  if mozinfo.isUnix:
+    envVar = "LD_LIBRARY_PATH"
+    env['MOZILLA_FIVE_HOME'] = xrePath
+    dmdLibrary = "libdmd.so"
+    preloadEnvVar = "LD_PRELOAD"
+  elif mozinfo.isMac:
+    envVar = "DYLD_LIBRARY_PATH"
+    dmdLibrary = "libdmd.dylib"
+    preloadEnvVar = "DYLD_INSERT_LIBRARIES"
+  elif mozinfo.isWin:
+    envVar = "PATH"
+    dmdLibrary = "dmd.dll"
+    preloadEnvVar = "MOZ_REPLACE_MALLOC_LIB"
+  if envVar:
+    envValue = ((env.get(envVar), str(ldLibraryPath))
+                if mozinfo.isWin
+                else (ldLibraryPath, dmdPath, env.get(envVar)))
+    env[envVar] = os.path.pathsep.join([path for path in envValue if path])
+
+  if dmdPath and dmdLibrary and preloadEnvVar:
+    env['DMD'] = '1'
+    env[preloadEnvVar] = os.path.join(dmdPath, dmdLibrary)
+
+  # crashreporter
+  env['GNOME_DISABLE_CRASH_DIALOG'] = '1'
+  env['XRE_NO_WINDOWS_CRASH_DIALOG'] = '1'
+  env['NS_TRACE_MALLOC_DISABLE_STACKS'] = '1'
+
+  if crashreporter and not debugger:
+    env['MOZ_CRASHREPORTER_NO_REPORT'] = '1'
+    env['MOZ_CRASHREPORTER'] = '1'
+  else:
+    env['MOZ_CRASHREPORTER_DISABLE'] = '1'
+
+  # Crash on non-local network connections.
+  env['MOZ_DISABLE_NONLOCAL_CONNECTIONS'] = '1'
+
+  # Set WebRTC logging in case it is not set yet
+  env.setdefault('NSPR_LOG_MODULES', 'signaling:5,mtransport:5,datachannel:5')
+  env.setdefault('R_LOG_LEVEL', '6')
+  env.setdefault('R_LOG_DESTINATION', 'stderr')
+  env.setdefault('R_LOG_VERBOSE', '1')
+
+  # ASan specific environment stuff
+  asan = bool(mozinfo.info.get("asan"))
+  if asan and (mozinfo.isLinux or mozinfo.isMac):
+    try:
+      # Symbolizer support
+      llvmsym = os.path.join(xrePath, "llvm-symbolizer")
+      if os.path.isfile(llvmsym):
+        env["ASAN_SYMBOLIZER_PATH"] = llvmsym
+        log.info("ASan using symbolizer at %s", llvmsym)
+
+      totalMemory = systemMemory()
+
+      # Only 4 GB RAM or less available? Use custom ASan options to reduce
+      # the amount of resources required to do the tests. Standard options
+      # will otherwise lead to OOM conditions on the current test slaves.
+      message = "INFO | runtests.py | ASan running in %s configuration"
+      if totalMemory <= 1024 * 1024 * 4:
+        message = message % 'low-memory'
+        env["ASAN_OPTIONS"] = "quarantine_size=50331648:malloc_context_size=5"
+      else:
+        message = message % 'default memory'
+    except OSError,err:
+      log.info("Failed determine available memory, disabling ASan low-memory configuration: %s", err.strerror)
+    except:
+      log.info("Failed determine available memory, disabling ASan low-memory configuration")
+    else:
+      log.info(message)
+
+  return env
+
+def dumpScreen(utilityPath):
+  """dumps a screenshot of the entire screen to a directory specified by
+  the MOZ_UPLOAD_DIR environment variable"""
+  import mozfile
+
+  # Need to figure out which OS-dependent tool to use
+  if mozinfo.isUnix:
+    utility = [os.path.join(utilityPath, "screentopng")]
+    utilityname = "screentopng"
+  elif mozinfo.isMac:
+    utility = ['/usr/sbin/screencapture', '-C', '-x', '-t', 'png']
+    utilityname = "screencapture"
+  elif mozinfo.isWin:
+    utility = [os.path.join(utilityPath, "screenshot.exe")]
+    utilityname = "screenshot"
+
+  # Get dir where to write the screenshot file
+  parent_dir = os.environ.get('MOZ_UPLOAD_DIR', None)
+  if not parent_dir:
+    log.info('Failed to retrieve MOZ_UPLOAD_DIR env var')
+    return
+
+  # Run the capture
+  try:
+    tmpfd, imgfilename = tempfile.mkstemp(prefix='mozilla-test-fail-screenshot_', suffix='.png', dir=parent_dir)
+    os.close(tmpfd)
+    returncode = subprocess.call(utility + [imgfilename])
+    printstatus(returncode, utilityname)
+  except OSError, err:
+    log.info("Failed to start %s for screenshot: %s",
+             utility[0], err.strerror)
+    return
+
+class ShutdownLeaks(object):
+  """
+  Parses the mochitest run log when running a debug build, assigns all leaked
+  DOM windows (that are still around after test suite shutdown, despite running
+  the GC) to the tests that created them and prints leak statistics.
+  """
+
+  def __init__(self, logger):
+    self.logger = logger
+    self.tests = []
+    self.leakedWindows = {}
+    self.leakedDocShells = set()
+    self.currentTest = None
+    self.seenShutdown = False
+
+  def log(self, line):
+    if line[2:11] == "DOMWINDOW":
+      self._logWindow(line)
+    elif line[2:10] == "DOCSHELL":
+      self._logDocShell(line)
+    elif line.startswith("TEST-START"):
+      fileName = line.split(" ")[-1].strip().replace("chrome://mochitests/content/browser/", "")
+      self.currentTest = {"fileName": fileName, "windows": set(), "docShells": set()}
+    elif line.startswith("INFO TEST-END"):
+      # don't track a test if no windows or docShells leaked
+      if self.currentTest and (self.currentTest["windows"] or self.currentTest["docShells"]):
+        self.tests.append(self.currentTest)
+      self.currentTest = None
+    elif line.startswith("INFO TEST-START | Shutdown"):
+      self.seenShutdown = True
+
+  def process(self):
+    for test in self._parseLeakingTests():
+      for url, count in self._zipLeakedWindows(test["leakedWindows"]):
+        self.logger("TEST-UNEXPECTED-FAIL | %s | leaked %d window(s) until shutdown [url = %s]", test["fileName"], count, url)
+
+      if test["leakedDocShells"]:
+        self.logger("TEST-UNEXPECTED-FAIL | %s | leaked %d docShell(s) until shutdown", test["fileName"], len(test["leakedDocShells"]))
+
+  def _logWindow(self, line):
+    created = line[:2] == "++"
+    pid = self._parseValue(line, "pid")
+    serial = self._parseValue(line, "serial")
+
+    # log line has invalid format
+    if not pid or not serial:
+      self.logger("TEST-UNEXPECTED-FAIL | ShutdownLeaks | failed to parse line <%s>", line)
+      return
+
+    key = pid + "." + serial
+
+    if self.currentTest:
+      windows = self.currentTest["windows"]
+      if created:
+        windows.add(key)
+      else:
+        windows.discard(key)
+    elif self.seenShutdown and not created:
+      self.leakedWindows[key] = self._parseValue(line, "url")
+
+  def _logDocShell(self, line):
+    created = line[:2] == "++"
+    pid = self._parseValue(line, "pid")
+    id = self._parseValue(line, "id")
+
+    # log line has invalid format
+    if not pid or not id:
+      self.logger("TEST-UNEXPECTED-FAIL | ShutdownLeaks | failed to parse line <%s>", line)
+      return
+
+    key = pid + "." + id
+
+    if self.currentTest:
+      docShells = self.currentTest["docShells"]
+      if created:
+        docShells.add(key)
+      else:
+        docShells.discard(key)
+    elif self.seenShutdown and not created:
+      self.leakedDocShells.add(key)
+
+  def _parseValue(self, line, name):
+    match = re.search("\[%s = (.+?)\]" % name, line)
+    if match:
+      return match.group(1)
+    return None
+
+  def _parseLeakingTests(self):
+    leakingTests = []
+
+    for test in self.tests:
+      test["leakedWindows"] = [self.leakedWindows[id] for id in test["windows"] if id in self.leakedWindows]
+      test["leakedDocShells"] = [id for id in test["docShells"] if id in self.leakedDocShells]
+      test["leakCount"] = len(test["leakedWindows"]) + len(test["leakedDocShells"])
+
+      if test["leakCount"]:
+        leakingTests.append(test)
+
+    return sorted(leakingTests, key=itemgetter("leakCount"), reverse=True)
+
+  def _zipLeakedWindows(self, leakedWindows):
+    counts = []
+    counted = set()
+
+    for url in leakedWindows:
+      if not url in counted:
+        counts.append((url, leakedWindows.count(url)))
+        counted.add(url)
+
+    return sorted(counts, key=itemgetter(1), reverse=True)

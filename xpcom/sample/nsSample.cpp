@@ -31,7 +31,7 @@ nsSampleImpl::~nsSampleImpl()
 }
 
 /**
- * NS_IMPL_ISUPPORTS1 expands to a simple implementation of the nsISupports
+ * NS_IMPL_ISUPPORTS expands to a simple implementation of the nsISupports
  * interface.  This includes a proper implementation of AddRef, Release,
  * and QueryInterface.  If this class supported more interfaces than just
  * nsISupports, 
@@ -44,8 +44,8 @@ nsSampleImpl::~nsSampleImpl()
  * The _CI variant adds support for nsIClassInfo, which permits introspection
  * and interface flattening.
  */
-NS_IMPL_CLASSINFO(nsSampleImpl, NULL, 0, NS_SAMPLE_CID)
-NS_IMPL_ISUPPORTS1_CI(nsSampleImpl, nsISample)
+NS_IMPL_CLASSINFO(nsSampleImpl, nullptr, 0, NS_SAMPLE_CID)
+NS_IMPL_ISUPPORTS_CI(nsSampleImpl, nsISample)
 /**
  * Notice that in the protoype for this function, the NS_IMETHOD macro was
  * used to declare the return type.  For the implementation, the return
@@ -126,13 +126,13 @@ nsSampleImpl::WriteValue(const char* aPrefix)
 
     // This next part illustrates the nsEmbedString:
     nsEmbedString foopy;
-    foopy.Append(PRUnichar('f'));
-    foopy.Append(PRUnichar('o'));
-    foopy.Append(PRUnichar('o'));
-    foopy.Append(PRUnichar('p'));
-    foopy.Append(PRUnichar('y'));
+    foopy.Append(char16_t('f'));
+    foopy.Append(char16_t('o'));
+    foopy.Append(char16_t('o'));
+    foopy.Append(char16_t('p'));
+    foopy.Append(char16_t('y'));
     
-    const PRUnichar* f = foopy.get();
+    const char16_t* f = foopy.get();
     uint32_t l = foopy.Length();
     printf("%c%c%c%c%c %d\n", char(f[0]), char(f[1]), char(f[2]), char(f[3]), char(f[4]), l);
     

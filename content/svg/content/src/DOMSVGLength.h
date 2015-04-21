@@ -14,6 +14,7 @@
 #include "nsTArray.h"
 #include "SVGLength.h"
 #include "mozilla/Attributes.h"
+#include "nsWrapperCache.h"
 
 class nsSVGElement;
 
@@ -28,6 +29,8 @@ class nsSVGElement;
 #define MOZ_SVG_LIST_INDEX_BIT_COUNT 22 // supports > 4 million list items
 
 namespace mozilla {
+
+class ErrorResult;
 
 /**
  * Class DOMSVGLength
@@ -56,6 +59,11 @@ namespace mozilla {
  * This means that these DOM tearoffs have space to store these values, even
  * though they're not used in the common case.
  *
+ * Objects of this type are also used to reflect the baseVal and animVal of
+ * a single, non-list SVGLength attribute. Getting and settings values of the
+ * DOMSVGLength in this case requires reading and writing to the corresponding
+ * nsSVGLength2 object.
+ *
  * This class also stores its current list index, attribute enum, and whether
  * it belongs to a baseVal or animVal list. This is so that objects of this
  * type can find their corresponding internal SVGLength.
@@ -66,12 +74,20 @@ namespace mozilla {
  * if-else as appropriate. The bug for doing that work is:
  * https://bugzilla.mozilla.org/show_bug.cgi?id=571734
  */
-class DOMSVGLength MOZ_FINAL : public nsIDOMSVGLength
+class DOMSVGLength MOZ_FINAL : public nsIDOMSVGLength,
+                               public nsWrapperCache
 {
+  friend class AutoChangeLengthNotifier;
+
+  /**
+   * Ctor for creating the object returned by nsSVGLength2::ToDOMBaseVal/ToDOMAnimVal
+   */
+  DOMSVGLength(nsSVGLength2* aVal, nsSVGElement* aSVGElement, bool aAnimVal);
+
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(MOZILLA_DOMSVGLENGTH_IID)
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS(DOMSVGLength)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DOMSVGLength)
   NS_DECL_NSIDOMSVGLENGTH
 
   /**
@@ -88,26 +104,17 @@ public:
    */
   DOMSVGLength();
 
-  ~DOMSVGLength() {
-    // Our mList's weak ref to us must be nulled out when we die. If GC has
-    // unlinked us using the cycle collector code, then that has already
-    // happened, and mList is null.
-    if (mList) {
-      mList->mItems[mListIndex] = nullptr;
-    }
-  }
+  ~DOMSVGLength();
+
+  static already_AddRefed<DOMSVGLength> GetTearOff(nsSVGLength2* aVal,
+                                                   nsSVGElement* aSVGElement,
+                                                   bool aAnimVal);
 
   /**
-   * Create an unowned copy of an owned length. The caller is responsible for
-   * the first AddRef().
+   * Create an unowned copy of a length that is owned or is reflecting a single
+   * attribute. The caller is responsible for the first AddRef().
    */
-  DOMSVGLength* Copy() {
-    NS_ASSERTION(mList, "unexpected caller");
-    DOMSVGLength *copy = new DOMSVGLength();
-    SVGLength &length = InternalItem();
-    copy->NewValueSpecifiedUnits(length.GetUnit(), length.GetValueInCurrentUnits());
-    return copy;
-  }
+  DOMSVGLength* Copy();
 
   bool IsInList() const {
     return !!mList;
@@ -119,6 +126,16 @@ public:
    */
   bool HasOwner() const {
     return !!mList;
+  }
+
+  /**
+   * Returns whether this length object is reflecting a single SVG element
+   * attribute.  This includes the baseVal or animVal of SVGRectElement.x, for
+   * example, but not an item in an SVGLengthList, such as those in the
+   * baseVal or animVal of SVGTextElement.x.
+   */
+  bool IsReflectingAttribute() const {
+    return mVal;
   }
 
   /**
@@ -154,9 +171,28 @@ public:
 
   SVGLength ToSVGLength();
 
+  // WebIDL
+  uint16_t UnitType();
+  float GetValue(ErrorResult& aRv);
+  void SetValue(float aValue, ErrorResult& aRv);
+  float ValueInSpecifiedUnits();
+  void SetValueInSpecifiedUnits(float aValue, ErrorResult& aRv);
+  // The XPCOM GetValueAsString is good
+  void SetValueAsString(const nsAString& aValue, ErrorResult& aRv);
+  void NewValueSpecifiedUnits(uint16_t aUnit, float aValue,
+                              ErrorResult& aRv);
+  void ConvertToSpecifiedUnits(uint16_t aUnit, ErrorResult& aRv);
+
+  nsISupports* GetParentObject() const {
+    auto svgElement = mList ? Element() : mSVGElement.get();
+    return static_cast<nsIDOMSVGElement*> (svgElement);
+  }
+
+  JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+
 private:
 
-  nsSVGElement* Element() {
+  nsSVGElement* Element() const {
     return mList->Element();
   }
 
@@ -199,6 +235,10 @@ private:
   // The following members are only used when we're not in a list:
   uint32_t mUnit:5; // can handle 31 units (the 10 SVG 1.1 units + rem, vw, vh, wm, calc + future additions)
   float mValue;
+
+  // The following members are only used when we have an nsSVGLength2
+  nsSVGLength2* mVal; // kept alive because it belongs to mSVGElement
+  nsRefPtr<nsSVGElement> mSVGElement;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(DOMSVGLength, MOZILLA_DOMSVGLENGTH_IID)

@@ -161,10 +161,6 @@ var ctrlTab = {
     delete this.previews;
     return this.previews = this.panel.getElementsByClassName("ctrlTab-preview");
   },
-  get recentlyUsedLimit () {
-    delete this.recentlyUsedLimit;
-    return this.recentlyUsedLimit = gPrefService.getIntPref("browser.ctrlTab.recentlyUsedLimit");
-  },
   get keys () {
     var keys = {};
     ["close", "find", "selectAll"].forEach(function (key) {
@@ -187,43 +183,14 @@ var ctrlTab = {
   get canvasHeight () Math.round(this.canvasWidth * tabPreviews.aspectRatio),
 
   get tabList () {
-    if (this._tabList)
-      return this._tabList;
-
-    // Using gBrowser.tabs instead of gBrowser.visibleTabs, as the latter
-    // exlcudes closing tabs, breaking the following loop in case the the
-    // selected tab is closing.
-    let list = Array.filter(gBrowser.tabs, function (tab) !tab.hidden);
-
-    // Rotate the list until the selected tab is first
-    while (!list[0].selected)
-      list.push(list.shift());
-
-    list = list.filter(function (tab) !tab.closing);
-
-    if (this.recentlyUsedLimit != 0) {
-      let recentlyUsedTabs = [];
-      for (let tab of this._recentlyUsedTabs) {
-        if (!tab.hidden && !tab.closing) {
-          recentlyUsedTabs.push(tab);
-          if (this.recentlyUsedLimit > 0 && recentlyUsedTabs.length >= this.recentlyUsedLimit)
-            break;
-        }
-      }
-      for (let i = recentlyUsedTabs.length - 1; i >= 0; i--) {
-        list.splice(list.indexOf(recentlyUsedTabs[i]), 1);
-        list.unshift(recentlyUsedTabs[i]);
-      }
-    }
-
-    return this._tabList = list;
+    return this._recentlyUsedTabs;
   },
 
   init: function ctrlTab_init() {
     if (!this._recentlyUsedTabs) {
       tabPreviews.init();
 
-      this._recentlyUsedTabs = [gBrowser.selectedTab];
+      this._initRecentlyUsedTabs();
       this._init(true);
     }
   },
@@ -345,6 +312,9 @@ var ctrlTab = {
   },
 
   attachTab: function ctrlTab_attachTab(aTab, aPos) {
+    if (aTab.closing)
+      return;
+
     if (aPos == 0)
       this._recentlyUsedTabs.unshift(aTab);
     else if (aPos)
@@ -352,6 +322,7 @@ var ctrlTab = {
     else
       this._recentlyUsedTabs.push(aTab);
   },
+
   detachTab: function ctrlTab_detachTab(aTab) {
     var i = this._recentlyUsedTabs.indexOf(aTab);
     if (i >= 0)
@@ -422,8 +393,6 @@ var ctrlTab = {
     Array.forEach(this.previews, function (preview) {
       this.updatePreview(preview, null);
     }, this);
-
-    this._tabList = null;
   },
 
   onKeyPress: function ctrlTab_onKeyPress(event) {
@@ -477,7 +446,6 @@ var ctrlTab = {
       return;
     }
 
-    this._tabList = null;
     this.updatePreviews();
 
     if (this.selected.hidden)
@@ -495,6 +463,9 @@ var ctrlTab = {
 
   handleEvent: function ctrlTab_handleEvent(event) {
     switch (event.type) {
+      case "SSWindowStateReady":
+        this._initRecentlyUsedTabs();
+        break;
       case "TabAttrModified":
         // tab attribute modified (e.g. label, crop, busy, image, selected)
         for (let i = this.previews.length - 1; i >= 0; i--) {
@@ -530,8 +501,16 @@ var ctrlTab = {
     }
   },
 
+  _initRecentlyUsedTabs: function () {
+    this._recentlyUsedTabs =
+      Array.filter(gBrowser.tabs, tab => !tab.closing)
+           .sort((tab1, tab2) => tab2.lastAccessed - tab1.lastAccessed);
+  },
+
   _init: function ctrlTab__init(enable) {
     var toggleEventListener = enable ? "addEventListener" : "removeEventListener";
+
+    window[toggleEventListener]("SSWindowStateReady", this, false);
 
     var tabContainer = gBrowser.tabContainer;
     tabContainer[toggleEventListener]("TabOpen", this, false);

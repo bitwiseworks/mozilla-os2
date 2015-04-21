@@ -8,24 +8,25 @@
 #define nsDOMDataChannel_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/DataChannelBinding.h"
 #include "mozilla/dom/TypedArray.h"
-#include "mozilla/net/DataChannel.h"
-#include "nsDOMEventTargetHelper.h"
+#include "mozilla/net/DataChannelListener.h"
 #include "nsIDOMDataChannel.h"
+#include "nsIInputStream.h"
 
-class nsDOMDataChannel : public nsDOMEventTargetHelper,
+
+namespace mozilla {
+class DataChannel;
+};
+
+class nsDOMDataChannel : public mozilla::DOMEventTargetHelper,
                          public nsIDOMDataChannel,
                          public mozilla::DataChannelListener
 {
 public:
-  nsDOMDataChannel(already_AddRefed<mozilla::DataChannel> aDataChannel)
-    : mDataChannel(aDataChannel)
-    , mBinaryType(DC_BINARY_TYPE_BLOB)
-  {
-    SetIsDOMBinding();
-  }
-
+  nsDOMDataChannel(already_AddRefed<mozilla::DataChannel>& aDataChannel,
+                   nsPIDOMWindow* aWindow);
   ~nsDOMDataChannel();
 
   nsresult Init(nsPIDOMWindow* aDOMWindow);
@@ -33,12 +34,12 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIDOMDATACHANNEL
 
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(mozilla::DOMEventTargetHelper)
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsDOMDataChannel,
-                                           nsDOMEventTargetHelper)
+                                           mozilla::DOMEventTargetHelper)
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+  virtual JSObject* WrapObject(JSContext* aCx)
     MOZ_OVERRIDE;
   nsPIDOMWindow* GetParentObject() const
   {
@@ -67,8 +68,9 @@ public:
   }
   void Send(const nsAString& aData, mozilla::ErrorResult& aRv);
   void Send(nsIDOMBlob* aData, mozilla::ErrorResult& aRv);
-  void Send(mozilla::dom::ArrayBuffer& aData, mozilla::ErrorResult& aRv);
-  void Send(mozilla::dom::ArrayBufferView& aData, mozilla::ErrorResult& aRv);
+  void Send(const mozilla::dom::ArrayBuffer& aData, mozilla::ErrorResult& aRv);
+  void Send(const mozilla::dom::ArrayBufferView& aData,
+            mozilla::ErrorResult& aRv);
 
   // Uses XPIDL GetProtocol.
   bool Ordered() const;

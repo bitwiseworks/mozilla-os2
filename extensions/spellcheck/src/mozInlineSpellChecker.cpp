@@ -58,14 +58,13 @@
 #include "nsThreadUtils.h"
 #include "nsUnicharUtils.h"
 #include "nsIContent.h"
-#include "nsEventListenerManager.h"
-#include "nsGUIEvent.h"
 #include "nsRange.h"
 #include "nsContentUtils.h"
 #include "nsEditor.h"
 #include "mozilla/Services.h"
 #include "nsIObserverService.h"
 #include "nsITextControlElement.h"
+#include "prtime.h" 
 
 using namespace mozilla::dom;
 
@@ -509,7 +508,7 @@ public:
 private:
   nsRefPtr<mozInlineSpellChecker> mSpellChecker;
 };
-NS_IMPL_ISUPPORTS1(InitEditorSpellCheckCallback, nsIEditorSpellCheckCallback)
+NS_IMPL_ISUPPORTS(InitEditorSpellCheckCallback, nsIEditorSpellCheckCallback)
 
 
 NS_INTERFACE_MAP_BEGIN(mozInlineSpellChecker)
@@ -524,10 +523,10 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(mozInlineSpellChecker)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(mozInlineSpellChecker)
 
-NS_IMPL_CYCLE_COLLECTION_3(mozInlineSpellChecker,
-                           mSpellCheck,
-                           mTreeWalker,
-                           mCurrentSelectionAnchorNode)
+NS_IMPL_CYCLE_COLLECTION(mozInlineSpellChecker,
+                         mSpellCheck,
+                         mTreeWalker,
+                         mCurrentSelectionAnchorNode)
 
 mozInlineSpellChecker::SpellCheckingState
   mozInlineSpellChecker::gCanEnableSpellChecking =
@@ -947,7 +946,8 @@ mozInlineSpellChecker::ReplaceWord(nsIDOMNode *aNode, int32_t aOffset,
     editor->DeleteSelection(nsIEditor::eNone, nsIEditor::eStrip);
 
     nsCOMPtr<nsIPlaintextEditor> textEditor(do_QueryReferent(mEditor));
-    textEditor->InsertText(newword);
+    if (textEditor)
+      textEditor->InsertText(newword);
 
     editor->EndTransaction();
   }
@@ -1009,7 +1009,7 @@ mozInlineSpellChecker::IgnoreWord(const nsAString &word)
 // mozInlineSpellChecker::IgnoreWords
 
 NS_IMETHODIMP
-mozInlineSpellChecker::IgnoreWords(const PRUnichar **aWordsToIgnore,
+mozInlineSpellChecker::IgnoreWords(const char16_t **aWordsToIgnore,
                                    uint32_t aCount)
 {
   NS_ENSURE_TRUE(mSpellCheck, NS_ERROR_NOT_INITIALIZED);
@@ -1182,7 +1182,7 @@ mozInlineSpellChecker::MakeSpellCheckRange(
     rv = range->SetEndAfter(aEndNode);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  *aRange = static_cast<nsRange*>(range.forget().get());
+  *aRange = static_cast<nsRange*>(range.forget().take());
   return NS_OK;
 }
 
@@ -1947,7 +1947,7 @@ nsresult mozInlineSpellChecker::MouseClick(nsIDOMEvent *aMouseEvent)
 
   // ignore any errors from HandleNavigationEvent as we don't want to prevent 
   // anyone else from seeing this event.
-  uint16_t button;
+  int16_t button;
   mouseEvent->GetButton(&button);
   HandleNavigationEvent(button != 0);
   return NS_OK;
@@ -2004,7 +2004,7 @@ private:
   nsRefPtr<mozInlineSpellChecker> mSpellChecker;
   uint32_t mDisabledAsyncToken;
 };
-NS_IMPL_ISUPPORTS1(UpdateCurrentDictionaryCallback, nsIEditorSpellCheckCallback)
+NS_IMPL_ISUPPORTS(UpdateCurrentDictionaryCallback, nsIEditorSpellCheckCallback)
 
 NS_IMETHODIMP mozInlineSpellChecker::UpdateCurrentDictionary()
 {

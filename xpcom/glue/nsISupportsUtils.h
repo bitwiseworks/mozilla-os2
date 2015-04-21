@@ -6,25 +6,12 @@
 #ifndef nsISupportsUtils_h__
 #define nsISupportsUtils_h__
 
-#ifndef nscore_h___
 #include "nscore.h"
-#endif
-
-#ifndef nsISupportsBase_h__
 #include "nsISupportsBase.h"
-#endif
-
-#ifndef nsError_h__
 #include "nsError.h"
-#endif
-
-#ifndef nsDebug_h___
 #include "nsDebug.h"
-#endif
-
-#ifndef nsISupportsImpl_h__
 #include "nsISupportsImpl.h"
-#endif
+#include "mozilla/TypeTraits.h"
 
 /**
  * Macro for adding a reference to an interface.
@@ -63,7 +50,7 @@ ns_if_addref( T expr )
 } /* extern "C++" */
 
 /**
- * Macro for adding a reference to an interface that checks for NULL.
+ * Macro for adding a reference to an interface that checks for nullptr.
  * @param _expr The interface pointer.
  */
 #define NS_IF_ADDREF(_expr) ns_if_addref(_expr)
@@ -82,10 +69,10 @@ ns_if_addref( T expr )
  * @param _ptr The interface pointer.
  */
 #define NS_RELEASE(_ptr)                                                      \
-  PR_BEGIN_MACRO                                                              \
+  do {                                                                        \
     (_ptr)->Release();                                                        \
     (_ptr) = 0;                                                               \
-  PR_END_MACRO
+  } while (0)
 
 /**
  * Macro for releasing a reference to this interface.
@@ -103,22 +90,22 @@ ns_if_addref( T expr )
  * @param _rc  The reference count.
  */
 #define NS_RELEASE2(_ptr, _rc)                                                \
-  PR_BEGIN_MACRO                                                              \
+  do {                                                                        \
     _rc = (_ptr)->Release();                                                  \
     if (0 == (_rc)) (_ptr) = 0;                                               \
-  PR_END_MACRO
+  } while (0)
 
 /**
- * Macro for releasing a reference to an interface that checks for NULL;
+ * Macro for releasing a reference to an interface that checks for nullptr;
  * @param _ptr The interface pointer.
  */
 #define NS_IF_RELEASE(_ptr)                                                   \
-  PR_BEGIN_MACRO                                                              \
+  do {                                                                        \
     if (_ptr) {                                                               \
       (_ptr)->Release();                                                      \
       (_ptr) = 0;                                                             \
     }                                                                         \
-  PR_END_MACRO
+  } while (0)
 
 /*
  * Often you have to cast an implementation pointer, e.g., |this|, to an
@@ -142,9 +129,15 @@ inline
 nsresult
 CallQueryInterface( T* aSource, DestinationType** aDestination )
 {
+    // We permit nsISupports-to-nsISupports here so that one can still obtain
+    // the canonical nsISupports pointer with CallQueryInterface.
+    static_assert(!mozilla::IsSame<T, DestinationType>::value ||
+                  mozilla::IsSame<DestinationType, nsISupports>::value,
+                  "don't use CallQueryInterface for compile-time-determinable casts");
+
     NS_PRECONDITION(aSource, "null parameter");
     NS_PRECONDITION(aDestination, "null parameter");
-    
+
     return aSource->QueryInterface(NS_GET_TEMPLATE_IID(DestinationType),
                                    reinterpret_cast<void**>(aDestination));
 }

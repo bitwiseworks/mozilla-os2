@@ -25,7 +25,7 @@
 
  */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsCOMPtr.h"
 #include "nsIContent.h"
@@ -34,12 +34,12 @@
 #include "nsIDOMXULCommandDispatcher.h"
 #include "nsIDOMXULDocument.h"
 #include "nsIRDFNode.h"
-#include "nsINameSpaceManager.h"
 #include "nsIRDFService.h"
 #include "nsIServiceManager.h"
 #include "nsIURL.h"
 #include "nsXULContentUtils.h"
 #include "nsLayoutCID.h"
+#include "nsNameSpaceManager.h"
 #include "nsNetUtil.h"
 #include "nsRDFCID.h"
 #include "nsString.h"
@@ -60,8 +60,6 @@
 #include "nsEscape.h"
 
 using namespace mozilla;
-
-static NS_DEFINE_CID(kRDFServiceCID,        NS_RDFSERVICE_CID);
 
 //------------------------------------------------------------------------
 
@@ -86,6 +84,7 @@ extern PRLogModuleInfo* gXULTemplateLog;
 nsresult
 nsXULContentUtils::Init()
 {
+    static NS_DEFINE_CID(kRDFServiceCID, NS_RDFSERVICE_CID);
     nsresult rv = CallGetService(kRDFServiceCID, &gRDF);
     if (NS_FAILED(rv)) {
         return rv;
@@ -194,7 +193,7 @@ nsXULContentUtils::GetElementResource(nsIContent* aElement, nsIRDFResource** aRe
     // to an RDF resource.
     nsresult rv;
 
-    PRUnichar buf[128];
+    char16_t buf[128];
     nsFixedString id(buf, ArrayLength(buf), 0);
 
     // Whoa.  Why the "id" attribute?  What if it's not even a XUL
@@ -234,7 +233,7 @@ nsXULContentUtils::GetTextForNode(nsIRDFNode* aNode, nsAString& aResult)
     // Literals are the most common, so try these first.
     nsCOMPtr<nsIRDFLiteral> literal = do_QueryInterface(aNode);
     if (literal) {
-        const PRUnichar* p;
+        const char16_t* p;
         rv = literal->GetValueConst(&p);
         if (NS_FAILED(rv)) return rv;
 
@@ -385,7 +384,7 @@ nsXULContentUtils::GetResource(int32_t aNameSpaceID, const nsAString& aAttribute
 
     nsresult rv;
 
-    PRUnichar buf[256];
+    char16_t buf[256];
     nsFixedString uri(buf, ArrayLength(buf), 0);
     if (aNameSpaceID != kNameSpaceID_Unknown && aNameSpaceID != kNameSpaceID_None) {
         rv = nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, uri);
@@ -394,7 +393,7 @@ nsXULContentUtils::GetResource(int32_t aNameSpaceID, const nsAString& aAttribute
 
     // XXX check to see if we need to insert a '/' or a '#'. Oy.
     if (!uri.IsEmpty()  && uri.Last() != '#' && uri.Last() != '/' && aAttribute.First() != '#')
-        uri.Append(PRUnichar('#'));
+        uri.Append(char16_t('#'));
 
     uri.Append(aAttribute);
 

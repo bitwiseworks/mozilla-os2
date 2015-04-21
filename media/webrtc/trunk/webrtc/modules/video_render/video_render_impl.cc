@@ -8,47 +8,44 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "video_render_impl.h"
-#include "engine_configurations.h"
-#include "critical_section_wrapper.h"
-#include "video_render_defines.h"
-#include "trace.h"
-#include "incoming_video_stream.h"
-#include "webrtc/modules/video_render/i_video_render.h"
+#include <assert.h>
 
-#include <cassert>
+#include "webrtc/engine_configurations.h"
+#include "webrtc/modules/video_render/i_video_render.h"
+#include "webrtc/modules/video_render/include/video_render_defines.h"
+#include "webrtc/modules/video_render/incoming_video_stream.h"
+#include "webrtc/modules/video_render/video_render_impl.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/trace.h"
 
 #ifdef WEBRTC_INCLUDE_INTERNAL_VIDEO_RENDER
 
 #if defined (_WIN32)
-#include "windows/video_render_windows_impl.h"
+#include "webrtc/modules/video_render/windows/video_render_windows_impl.h"
 #define STANDARD_RENDERING kRenderWindows
 
 // WEBRTC_IOS should go before WEBRTC_MAC because WEBRTC_MAC
 // gets defined if WEBRTC_IOS is defined
 #elif defined(WEBRTC_IOS)
-#if defined(IPHONE_GLES_RENDERING)
-#define STANDARD_RENDERING kRenderiPhone
-#include "iPhone/video_render_iphone_impl.h"
-#endif
-
+#define STANDARD_RENDERING kRenderiOS
+#include "ios/video_render_ios_impl.h"
 #elif defined(WEBRTC_MAC)
 #if defined(COCOA_RENDERING)
 #define STANDARD_RENDERING kRenderCocoa
-#include "mac/video_render_mac_cocoa_impl.h"
+#include "webrtc/modules/video_render/mac/video_render_mac_cocoa_impl.h"
 #elif defined(CARBON_RENDERING)
 #define STANDARD_RENDERING kRenderCarbon
-#include "mac/video_render_mac_carbon_impl.h"
+#include "webrtc/modules/video_render/mac/video_render_mac_carbon_impl.h"
 #endif
 
 #elif defined(WEBRTC_ANDROID)
-#include "android/video_render_android_impl.h"
-#include "android/video_render_android_surface_view.h"
-#include "android/video_render_android_native_opengl2.h"
-#define STANDARD_RENDERING	kRenderAndroid
+#include "webrtc/modules/video_render/android/video_render_android_impl.h"
+#include "webrtc/modules/video_render/android/video_render_android_native_opengl2.h"
+#include "webrtc/modules/video_render/android/video_render_android_surface_view.h"
+#define STANDARD_RENDERING kRenderAndroid
 
 #elif defined(WEBRTC_LINUX)
-#include "linux/video_render_linux_impl.h"
+#include "webrtc/modules/video_render/linux/video_render_linux_impl.h"
 #define STANDARD_RENDERING kRenderX11
 
 #else
@@ -58,7 +55,7 @@
 #endif  // WEBRTC_INCLUDE_INTERNAL_VIDEO_RENDER
 
 // For external rendering
-#include "external/video_render_external_impl.h"
+#include "webrtc/modules/video_render/external/video_render_external_impl.h"
 #ifndef STANDARD_RENDERING
 #define STANDARD_RENDERING kRenderExternal
 #endif  // STANDARD_RENDERING
@@ -66,7 +63,7 @@
 namespace webrtc {
 
 VideoRender*
-VideoRender::CreateVideoRender(const WebRtc_Word32 id,
+VideoRender::CreateVideoRender(const int32_t id,
                                void* window,
                                const bool fullscreen,
                                const VideoRenderType videoRenderType/*=kRenderDefault*/)
@@ -90,13 +87,12 @@ void VideoRender::DestroyVideoRender(
 }
 
 ModuleVideoRenderImpl::ModuleVideoRenderImpl(
-                                             const WebRtc_Word32 id,
+                                             const int32_t id,
                                              const VideoRenderType videoRenderType,
                                              void* window,
                                              const bool fullscreen) :
     _id(id), _moduleCrit(*CriticalSectionWrapper::CreateCriticalSection()),
-    _ptrWindow(window), _fullScreen(fullscreen), _ptrRenderer(NULL),
-    _streamRenderMap(*(new MapWrapper()))
+    _ptrWindow(window), _fullScreen(fullscreen), _ptrRenderer(NULL)
 {
 
     // Create platform specific renderer
@@ -117,9 +113,9 @@ ModuleVideoRenderImpl::ModuleVideoRenderImpl(
         break;
 
 #elif defined(WEBRTC_IOS)
-        case kRenderiPhone:
+        case kRenderiOS:
         {
-            VideoRenderIPhoneImpl* ptrRenderer = new VideoRenderIPhoneImpl(_id, videoRenderType, window, _fullScreen);
+            VideoRenderIosImpl* ptrRenderer = new VideoRenderIosImpl(_id, window, _fullScreen);
             if(ptrRenderer)
             {
                 _ptrRenderer = reinterpret_cast<IVideoRender*>(ptrRenderer);
@@ -220,21 +216,17 @@ ModuleVideoRenderImpl::~ModuleVideoRenderImpl()
 {
     delete &_moduleCrit;
 
-    while (_streamRenderMap.Size() > 0)
-    {
-        MapItem* item = _streamRenderMap.First();
-        IncomingVideoStream* ptrIncomingStream =
-                static_cast<IncomingVideoStream*> (item->GetItem());
-        assert(ptrIncomingStream != NULL);
-        delete ptrIncomingStream;
-        _streamRenderMap.Erase(item);
+    for (IncomingVideoStreamMap::iterator it = _streamRenderMap.begin();
+         it != _streamRenderMap.end();
+         ++it) {
+      delete it->second;
     }
-    delete &_streamRenderMap;
 
     // Delete platform specific renderer
     if (_ptrRenderer)
     {
         VideoRenderType videoRenderType = _ptrRenderer->RenderType();
+
         switch (videoRenderType)
         {
             case kRenderExternal:
@@ -256,6 +248,14 @@ ModuleVideoRenderImpl::~ModuleVideoRenderImpl()
                 delete ptrRenderer;
             }
             break;
+#elif defined(WEBRTC_IOS)
+            case kRenderiOS:
+            {
+              VideoRenderIosImpl* ptrRenderer = reinterpret_cast<VideoRenderIosImpl*> (_ptrRenderer);
+              _ptrRenderer = NULL;
+              delete ptrRenderer;
+            }
+            break;
 #elif defined(WEBRTC_MAC)
 
 #if defined(COCOA_RENDERING)
@@ -275,10 +275,6 @@ ModuleVideoRenderImpl::~ModuleVideoRenderImpl()
             }
             break;
 #endif
-
-#elif defined(WEBRTC_IOS)
-            case kRenderiPhone:
-            break;
 
 #elif defined(WEBRTC_ANDROID)
             case kRenderAndroid:
@@ -310,7 +306,7 @@ ModuleVideoRenderImpl::~ModuleVideoRenderImpl()
     }
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::ChangeUniqueId(const WebRtc_Word32 id)
+int32_t ModuleVideoRenderImpl::ChangeUniqueId(const int32_t id)
 {
 
     CriticalSectionScoped cs(&_moduleCrit);
@@ -325,12 +321,12 @@ WebRtc_Word32 ModuleVideoRenderImpl::ChangeUniqueId(const WebRtc_Word32 id)
     return 0;
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::TimeUntilNextProcess()
+int32_t ModuleVideoRenderImpl::TimeUntilNextProcess()
 {
     // Not used
     return 50;
 }
-WebRtc_Word32 ModuleVideoRenderImpl::Process()
+int32_t ModuleVideoRenderImpl::Process()
 {
     // Not used
     return 0;
@@ -343,7 +339,7 @@ ModuleVideoRenderImpl::Window()
     return _ptrWindow;
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::ChangeWindow(void* window)
+int32_t ModuleVideoRenderImpl::ChangeWindow(void* window)
 {
 
     CriticalSectionScoped cs(&_moduleCrit);
@@ -354,15 +350,14 @@ WebRtc_Word32 ModuleVideoRenderImpl::ChangeWindow(void* window)
     _ptrRenderer = NULL;
     delete _ptrRenderer;
 
-    VideoRenderIPhoneImpl* ptrRenderer;
-    ptrRenderer = new VideoRenderIPhoneImpl(_id, kRenderiPhone, window, _fullScreen);
+    VideoRenderIosImpl* ptrRenderer;
+    ptrRenderer = new VideoRenderIosImpl(_id, window, _fullScreen);
     if (!ptrRenderer)
     {
         return -1;
     }
     _ptrRenderer = reinterpret_cast<IVideoRender*>(ptrRenderer);
     return _ptrRenderer->ChangeWindow(window);
-
 #elif defined(WEBRTC_MAC)
 
     _ptrRenderer = NULL;
@@ -398,40 +393,33 @@ WebRtc_Word32 ModuleVideoRenderImpl::ChangeWindow(void* window)
 #endif
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::Id()
+int32_t ModuleVideoRenderImpl::Id()
 {
     CriticalSectionScoped cs(&_moduleCrit);
     return _id;
 }
 
-WebRtc_UWord32 ModuleVideoRenderImpl::GetIncomingFrameRate(
-                                                           const WebRtc_UWord32 streamId)
-{
-    CriticalSectionScoped cs(&_moduleCrit);
+uint32_t ModuleVideoRenderImpl::GetIncomingFrameRate(const uint32_t streamId) {
+  CriticalSectionScoped cs(&_moduleCrit);
 
-    MapItem* mapItem = _streamRenderMap.Find(streamId);
-    if (mapItem == NULL)
-    {
-        // This stream doesn't exist
-        WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id,
-                     "%s: stream doesn't exist", __FUNCTION__);
-        return 0;
-    }
-    IncomingVideoStream* incomingStream =
-            static_cast<IncomingVideoStream*> (mapItem->GetItem());
-    if (incomingStream == NULL)
-    {
-        // This should never happen
-        assert(false);
-        _streamRenderMap.Erase(mapItem);
-        return 0;
-    }
-    return incomingStream->IncomingRate();
+  IncomingVideoStreamMap::iterator it = _streamRenderMap.find(streamId);
+
+  if (it == _streamRenderMap.end()) {
+    // This stream doesn't exist
+    WEBRTC_TRACE(kTraceError,
+                 kTraceVideoRenderer,
+                 _id,
+                 "%s: stream doesn't exist",
+                 __FUNCTION__);
+    return 0;
+  }
+  assert(it->second != NULL);
+  return it->second->IncomingRate();
 }
 
 VideoRenderCallback*
-ModuleVideoRenderImpl::AddIncomingRenderStream(const WebRtc_UWord32 streamId,
-                                               const WebRtc_UWord32 zOrder,
+ModuleVideoRenderImpl::AddIncomingRenderStream(const uint32_t streamId,
+                                               const uint32_t zOrder,
                                                const float left,
                                                const float top,
                                                const float right,
@@ -446,8 +434,7 @@ ModuleVideoRenderImpl::AddIncomingRenderStream(const WebRtc_UWord32 streamId,
         return NULL;
     }
 
-    if (_streamRenderMap.Find(streamId) != NULL)
-    {
+    if (_streamRenderMap.find(streamId) != _streamRenderMap.end()) {
         // The stream already exists...
         WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id,
                      "%s: stream already exists", __FUNCTION__);
@@ -489,13 +476,13 @@ ModuleVideoRenderImpl::AddIncomingRenderStream(const WebRtc_UWord32 streamId,
             ptrIncomingStream->ModuleCallback();
 
     // Store the stream
-    _streamRenderMap.Insert(streamId, ptrIncomingStream);
+    _streamRenderMap[streamId] = ptrIncomingStream;
 
     return moduleCallback;
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::DeleteIncomingRenderStream(
-                                                                const WebRtc_UWord32 streamId)
+int32_t ModuleVideoRenderImpl::DeleteIncomingRenderStream(
+                                                                const uint32_t streamId)
 {
     CriticalSectionScoped cs(&_moduleCrit);
 
@@ -506,56 +493,52 @@ WebRtc_Word32 ModuleVideoRenderImpl::DeleteIncomingRenderStream(
         return -1;
     }
 
-    MapItem* mapItem = _streamRenderMap.Find(streamId);
-    if (!mapItem)
+    IncomingVideoStreamMap::iterator item = _streamRenderMap.find(streamId);
+    if (item == _streamRenderMap.end())
     {
         WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id,
                      "%s: stream doesn't exist", __FUNCTION__);
         return -1;
     }
 
-    IncomingVideoStream* ptrIncomingStream =
-            static_cast<IncomingVideoStream*> (mapItem->GetItem());
-    delete ptrIncomingStream;
-    ptrIncomingStream = NULL;
+    delete item->second;
+
     _ptrRenderer->DeleteIncomingRenderStream(streamId);
-    _streamRenderMap.Erase(mapItem);
+
+    _streamRenderMap.erase(item);
 
     return 0;
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::AddExternalRenderCallback(
-                                                               const WebRtc_UWord32 streamId,
-                                                               VideoRenderCallback* renderObject)
-{
+int32_t ModuleVideoRenderImpl::AddExternalRenderCallback(
+    const uint32_t streamId,
+    VideoRenderCallback* renderObject) {
     CriticalSectionScoped cs(&_moduleCrit);
 
-    MapItem* mapItem = _streamRenderMap.Find(streamId);
-    if (!mapItem)
+    IncomingVideoStreamMap::iterator item = _streamRenderMap.find(streamId);
+
+    if (item == _streamRenderMap.end())
     {
         WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id,
                      "%s: stream doesn't exist", __FUNCTION__);
         return -1;
     }
 
-    IncomingVideoStream* ptrIncomingStream =
-            static_cast<IncomingVideoStream*> (mapItem->GetItem());
-    if (!ptrIncomingStream) {
+    if (item->second == NULL) {
         WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id,
                      "%s: could not get stream", __FUNCTION__);
         return -1;
     }
-    return ptrIncomingStream->SetExternalCallback(renderObject);
+    return item->second->SetExternalCallback(renderObject);
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::GetIncomingRenderStreamProperties(
-                                                                       const WebRtc_UWord32 streamId,
-                                                                       WebRtc_UWord32& zOrder,
-                                                                       float& left,
-                                                                       float& top,
-                                                                       float& right,
-                                                                       float& bottom) const
-{
+int32_t ModuleVideoRenderImpl::GetIncomingRenderStreamProperties(
+    const uint32_t streamId,
+    uint32_t& zOrder,
+    float& left,
+    float& top,
+    float& right,
+    float& bottom) const {
     CriticalSectionScoped cs(&_moduleCrit);
 
     if (!_ptrRenderer)
@@ -570,34 +553,27 @@ WebRtc_Word32 ModuleVideoRenderImpl::GetIncomingRenderStreamProperties(
                                                            bottom);
 }
 
-WebRtc_UWord32 ModuleVideoRenderImpl::GetNumIncomingRenderStreams() const
+uint32_t ModuleVideoRenderImpl::GetNumIncomingRenderStreams() const
 {
     CriticalSectionScoped cs(&_moduleCrit);
 
-    return (WebRtc_UWord32) _streamRenderMap.Size();
+    return static_cast<uint32_t>(_streamRenderMap.size());
 }
 
 bool ModuleVideoRenderImpl::HasIncomingRenderStream(
-                                                    const WebRtc_UWord32 streamId) const
-{
-    CriticalSectionScoped cs(&_moduleCrit);
+    const uint32_t streamId) const {
+  CriticalSectionScoped cs(&_moduleCrit);
 
-    bool hasStream = false;
-    if (_streamRenderMap.Find(streamId) != NULL)
-    {
-        hasStream = true;
-    }
-    return hasStream;
+  return _streamRenderMap.find(streamId) != _streamRenderMap.end();
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::RegisterRawFrameCallback(
-                                                              const WebRtc_UWord32 streamId,
-                                                              VideoRenderCallback* callbackObj)
-{
-    return -1;
+int32_t ModuleVideoRenderImpl::RegisterRawFrameCallback(
+    const uint32_t streamId,
+    VideoRenderCallback* callbackObj) {
+  return -1;
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::StartRender(const WebRtc_UWord32 streamId)
+int32_t ModuleVideoRenderImpl::StartRender(const uint32_t streamId)
 {
     CriticalSectionScoped cs(&_moduleCrit);
 
@@ -609,15 +585,14 @@ WebRtc_Word32 ModuleVideoRenderImpl::StartRender(const WebRtc_UWord32 streamId)
     }
 
     // Start the stream
-    MapItem* item = _streamRenderMap.Find(streamId);
-    if (item == NULL)
+    IncomingVideoStreamMap::iterator item = _streamRenderMap.find(streamId);
+
+    if (item == _streamRenderMap.end())
     {
         return -1;
     }
 
-    IncomingVideoStream* incomingStream =
-            static_cast<IncomingVideoStream*> (item->GetItem());
-    if (incomingStream->Start() == -1)
+    if (item->second->Start() == -1)
     {
         return -1;
     }
@@ -630,7 +605,7 @@ WebRtc_Word32 ModuleVideoRenderImpl::StartRender(const WebRtc_UWord32 streamId)
     return 0;
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::StopRender(const WebRtc_UWord32 streamId)
+int32_t ModuleVideoRenderImpl::StopRender(const uint32_t streamId)
 {
     CriticalSectionScoped cs(&_moduleCrit);
 
@@ -642,15 +617,14 @@ WebRtc_Word32 ModuleVideoRenderImpl::StopRender(const WebRtc_UWord32 streamId)
     }
 
     // Stop the incoming stream
-    MapItem* item = _streamRenderMap.Find(streamId);
-    if (item == NULL)
+    IncomingVideoStreamMap::iterator item = _streamRenderMap.find(streamId);
+
+    if (item == _streamRenderMap.end())
     {
         return -1;
     }
 
-    IncomingVideoStream* incomingStream =
-            static_cast<IncomingVideoStream*> (item->GetItem());
-    if (incomingStream->Stop() == -1)
+    if (item->second->Stop() == -1)
     {
         return -1;
     }
@@ -658,25 +632,19 @@ WebRtc_Word32 ModuleVideoRenderImpl::StopRender(const WebRtc_UWord32 streamId)
     return 0;
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::ResetRender()
+int32_t ModuleVideoRenderImpl::ResetRender()
 {
     CriticalSectionScoped cs(&_moduleCrit);
 
-    WebRtc_Word32 error = 0;
-
-    // Loop through all incoming streams and stop them
-    MapItem* item = _streamRenderMap.First();
-    while (item)
-    {
-        IncomingVideoStream* incomingStream =
-                static_cast<IncomingVideoStream*> (item->GetItem());
-        if (incomingStream->Reset() == -1)
-        {
-            error = -1;
-        }
-        item = _streamRenderMap.Next(item);
+    int32_t ret = 0;
+    // Loop through all incoming streams and reset them
+    for (IncomingVideoStreamMap::iterator it = _streamRenderMap.begin();
+         it != _streamRenderMap.end();
+         ++it) {
+      if (it->second->Reset() == -1)
+        ret = -1;
     }
-    return error;
+    return ret;
 }
 
 RawVideoType ModuleVideoRenderImpl::PreferredVideoType() const
@@ -704,9 +672,9 @@ bool ModuleVideoRenderImpl::IsFullScreen()
     return _ptrRenderer->FullScreen();
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::GetScreenResolution(
-                                                         WebRtc_UWord32& screenWidth,
-                                                         WebRtc_UWord32& screenHeight) const
+int32_t ModuleVideoRenderImpl::GetScreenResolution(
+                                                         uint32_t& screenWidth,
+                                                         uint32_t& screenHeight) const
 {
     CriticalSectionScoped cs(&_moduleCrit);
 
@@ -719,8 +687,8 @@ WebRtc_Word32 ModuleVideoRenderImpl::GetScreenResolution(
     return _ptrRenderer->GetScreenResolution(screenWidth, screenHeight);
 }
 
-WebRtc_UWord32 ModuleVideoRenderImpl::RenderFrameRate(
-                                                      const WebRtc_UWord32 streamId)
+uint32_t ModuleVideoRenderImpl::RenderFrameRate(
+                                                      const uint32_t streamId)
 {
     CriticalSectionScoped cs(&_moduleCrit);
 
@@ -733,8 +701,8 @@ WebRtc_UWord32 ModuleVideoRenderImpl::RenderFrameRate(
     return _ptrRenderer->RenderFrameRate(streamId);
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::SetStreamCropping(
-                                                       const WebRtc_UWord32 streamId,
+int32_t ModuleVideoRenderImpl::SetStreamCropping(
+                                                       const uint32_t streamId,
                                                        const float left,
                                                        const float top,
                                                        const float right,
@@ -751,7 +719,7 @@ WebRtc_Word32 ModuleVideoRenderImpl::SetStreamCropping(
     return _ptrRenderer->SetStreamCropping(streamId, left, top, right, bottom);
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::SetTransparentBackground(const bool enable)
+int32_t ModuleVideoRenderImpl::SetTransparentBackground(const bool enable)
 {
     CriticalSectionScoped cs(&_moduleCrit);
 
@@ -764,18 +732,17 @@ WebRtc_Word32 ModuleVideoRenderImpl::SetTransparentBackground(const bool enable)
     return _ptrRenderer->SetTransparentBackground(enable);
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::FullScreenRender(void* window,
-                                                      const bool enable)
+int32_t ModuleVideoRenderImpl::FullScreenRender(void* window, const bool enable)
 {
     return -1;
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::SetText(
-                                             const WebRtc_UWord8 textId,
-                                             const WebRtc_UWord8* text,
-                                             const WebRtc_Word32 textLength,
-                                             const WebRtc_UWord32 textColorRef,
-                                             const WebRtc_UWord32 backgroundColorRef,
+int32_t ModuleVideoRenderImpl::SetText(
+                                             const uint8_t textId,
+                                             const uint8_t* text,
+                                             const int32_t textLength,
+                                             const uint32_t textColorRef,
+                                             const uint32_t backgroundColorRef,
                                              const float left, const float top,
                                              const float right,
                                              const float bottom)
@@ -792,13 +759,13 @@ WebRtc_Word32 ModuleVideoRenderImpl::SetText(
                                  backgroundColorRef, left, top, right, bottom);
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::SetBitmap(const void* bitMap,
-                                               const WebRtc_UWord8 pictureId,
-                                               const void* colorKey,
-                                               const float left,
-                                               const float top,
-                                               const float right,
-                                               const float bottom)
+int32_t ModuleVideoRenderImpl::SetBitmap(const void* bitMap,
+                                         const uint8_t pictureId,
+                                         const void* colorKey,
+                                         const float left,
+                                         const float top,
+                                         const float right,
+                                         const float bottom)
 {
     CriticalSectionScoped cs(&_moduleCrit);
 
@@ -812,8 +779,8 @@ WebRtc_Word32 ModuleVideoRenderImpl::SetBitmap(const void* bitMap,
                                    right, bottom);
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::GetLastRenderedFrame(
-    const WebRtc_UWord32 streamId,
+int32_t ModuleVideoRenderImpl::GetLastRenderedFrame(
+    const uint32_t streamId,
     I420VideoFrame &frame) const
 {
     CriticalSectionScoped cs(&_moduleCrit);
@@ -825,28 +792,22 @@ WebRtc_Word32 ModuleVideoRenderImpl::GetLastRenderedFrame(
         return -1;
     }
 
-    MapItem *item = _streamRenderMap.Find(streamId);
-    if (item == NULL)
+    IncomingVideoStreamMap::const_iterator item =
+        _streamRenderMap.find(streamId);
+    if (item == _streamRenderMap.end())
     {
         // This stream doesn't exist
         WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id,
                      "%s: stream doesn't exist", __FUNCTION__);
         return 0;
     }
-    IncomingVideoStream* incomingStream =
-            static_cast<IncomingVideoStream*> (item->GetItem());
-    if (incomingStream == NULL)
-    {
-        // This should never happen
-        assert(false);
-        _streamRenderMap.Erase(item);
-        return 0;
-    }
-    return incomingStream->GetLastRenderedFrame(frame);
+
+    assert(item->second != NULL);
+    return item->second->GetLastRenderedFrame(frame);
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::SetExpectedRenderDelay(
-    WebRtc_UWord32 stream_id, WebRtc_Word32 delay_ms) {
+int32_t ModuleVideoRenderImpl::SetExpectedRenderDelay(
+    uint32_t stream_id, int32_t delay_ms) {
   CriticalSectionScoped cs(&_moduleCrit);
 
   if (!_ptrRenderer) {
@@ -855,8 +816,9 @@ WebRtc_Word32 ModuleVideoRenderImpl::SetExpectedRenderDelay(
     return false;
   }
 
-  MapItem *item = _streamRenderMap.Find(stream_id);
-  if (item == NULL) {
+  IncomingVideoStreamMap::const_iterator item =
+      _streamRenderMap.find(stream_id);
+  if (item == _streamRenderMap.end()) {
     // This stream doesn't exist
     WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id,
                  "%s(%u, %d): stream doesn't exist", __FUNCTION__, stream_id,
@@ -864,20 +826,12 @@ WebRtc_Word32 ModuleVideoRenderImpl::SetExpectedRenderDelay(
     return -1;
   }
 
-  IncomingVideoStream* incoming_stream =
-      static_cast<IncomingVideoStream*> (item->GetItem());
-  if (incoming_stream == NULL) {
-      // This should never happen
-      assert(false);
-      _streamRenderMap.Erase(item);
-      return 0;
-  }
-
-  return incoming_stream->SetExpectedRenderDelay(delay_ms);
+  assert(item->second != NULL);
+  return item->second->SetExpectedRenderDelay(delay_ms);
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::ConfigureRenderer(
-                                                       const WebRtc_UWord32 streamId,
+int32_t ModuleVideoRenderImpl::ConfigureRenderer(
+                                                       const uint32_t streamId,
                                                        const unsigned int zOrder,
                                                        const float left,
                                                        const float top,
@@ -896,8 +850,8 @@ WebRtc_Word32 ModuleVideoRenderImpl::ConfigureRenderer(
                                            bottom);
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::SetStartImage(
-    const WebRtc_UWord32 streamId,
+int32_t ModuleVideoRenderImpl::SetStartImage(
+    const uint32_t streamId,
     const I420VideoFrame& videoFrame)
 {
     CriticalSectionScoped cs(&_moduleCrit);
@@ -909,31 +863,24 @@ WebRtc_Word32 ModuleVideoRenderImpl::SetStartImage(
         return -1;
     }
 
-    MapItem *item = _streamRenderMap.Find(streamId);
-    if (item == NULL)
+    IncomingVideoStreamMap::const_iterator item =
+        _streamRenderMap.find(streamId);
+    if (item == _streamRenderMap.end())
     {
         // This stream doesn't exist
         WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id,
                      "%s: stream doesn't exist", __FUNCTION__);
         return -1;
     }
-    IncomingVideoStream* incomingStream =
-            static_cast<IncomingVideoStream*> (item->GetItem());
-    if (incomingStream == NULL)
-    {
-        // This should never happen
-        assert(false);
-        _streamRenderMap.Erase(item);
-        return 0;
-    }
-    return incomingStream->SetStartImage(videoFrame);
+    assert (item->second != NULL);
+    return item->second->SetStartImage(videoFrame);
 
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::SetTimeoutImage(
-    const WebRtc_UWord32 streamId,
+int32_t ModuleVideoRenderImpl::SetTimeoutImage(
+    const uint32_t streamId,
     const I420VideoFrame& videoFrame,
-    const WebRtc_UWord32 timeout)
+    const uint32_t timeout)
 {
     CriticalSectionScoped cs(&_moduleCrit);
 
@@ -944,30 +891,23 @@ WebRtc_Word32 ModuleVideoRenderImpl::SetTimeoutImage(
         return -1;
     }
 
-    MapItem *item = _streamRenderMap.Find(streamId);
-    if (item == NULL)
+    IncomingVideoStreamMap::const_iterator item =
+        _streamRenderMap.find(streamId);
+    if (item == _streamRenderMap.end())
     {
         // This stream doesn't exist
         WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id,
                      "%s: stream doesn't exist", __FUNCTION__);
         return -1;
     }
-    IncomingVideoStream* incomingStream =
-            static_cast<IncomingVideoStream*> (item->GetItem());
-    if (incomingStream == NULL)
-    {
-        // This should never happen
-        assert(false);
-        _streamRenderMap.Erase(item);
-        return 0;
-    }
-    return incomingStream->SetTimeoutImage(videoFrame, timeout);
+    assert(item->second != NULL);
+    return item->second->SetTimeoutImage(videoFrame, timeout);
 }
 
-WebRtc_Word32 ModuleVideoRenderImpl::MirrorRenderStream(const int renderId,
-                                                        const bool enable,
-                                                        const bool mirrorXAxis,
-                                                        const bool mirrorYAxis)
+int32_t ModuleVideoRenderImpl::MirrorRenderStream(const int renderId,
+                                                  const bool enable,
+                                                  const bool mirrorXAxis,
+                                                  const bool mirrorYAxis)
 {
     CriticalSectionScoped cs(&_moduleCrit);
 
@@ -978,25 +918,18 @@ WebRtc_Word32 ModuleVideoRenderImpl::MirrorRenderStream(const int renderId,
         return -1;
     }
 
-    MapItem *item = _streamRenderMap.Find(renderId);
-    if (item == NULL)
+    IncomingVideoStreamMap::const_iterator item =
+        _streamRenderMap.find(renderId);
+    if (item == _streamRenderMap.end())
     {
         // This stream doesn't exist
         WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, _id,
                      "%s: stream doesn't exist", __FUNCTION__);
         return 0;
     }
-    IncomingVideoStream* incomingStream =
-            static_cast<IncomingVideoStream*> (item->GetItem());
-    if (incomingStream == NULL)
-    {
-        // This should never happen
-        assert(false);
-        _streamRenderMap.Erase(item);
-        return 0;
-    }
+    assert(item->second != NULL);
 
-    return incomingStream->EnableMirroring(enable, mirrorXAxis, mirrorYAxis);
+    return item->second->EnableMirroring(enable, mirrorXAxis, mirrorYAxis);
 }
 
-} //namespace webrtc
+}  // namespace webrtc

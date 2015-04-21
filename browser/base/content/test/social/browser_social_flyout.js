@@ -10,9 +10,10 @@ function test() {
     origin: "https://example.com",
     sidebarURL: "https://example.com/browser/browser/base/content/test/social/social_sidebar.html",
     workerURL: "https://example.com/browser/browser/base/content/test/social/social_worker.js",
-    iconURL: "https://example.com/browser/browser/base/content/test/moz.png"
+    iconURL: "https://example.com/browser/browser/base/content/test/general/moz.png"
   };
   runSocialTestWithProvider(manifest, function (finishcb) {
+    SocialSidebar.show();
     runSocialTests(tests, undefined, undefined, finishcb);
   });
 }
@@ -24,7 +25,7 @@ var tests = {
       panel.removeEventListener("popupshowing", onShowing);
       is(panel.firstChild.contentDocument.readyState, "complete", "panel is loaded prior to showing");
     });
-    let port = Social.provider.getWorkerPort();
+    let port = SocialSidebar.provider.getWorkerPort();
     ok(port, "provider has a port");
     port.onmessage = function (e) {
       let topic = e.data.topic;
@@ -53,7 +54,7 @@ var tests = {
 
   testResizeFlyout: function(next) {
     let panel = document.getElementById("social-flyout-panel");
-    let port = Social.provider.getWorkerPort();
+    let port = SocialSidebar.provider.getWorkerPort();
     ok(port, "provider has a port");
     port.onmessage = function (e) {
       let topic = e.data.topic;
@@ -101,10 +102,10 @@ var tests = {
     // note clearUserPref doesn't do what we expect, as the test harness itself
     // changes the pref value - so clearUserPref resets it to false rather than
     // the true setup by the test harness.
-    let oldAllowScriptsToClose = Services.prefs.getBoolPref(ALLOW_SCRIPTS_TO_CLOSE_PREF);    
+    let oldAllowScriptsToClose = Services.prefs.getBoolPref(ALLOW_SCRIPTS_TO_CLOSE_PREF);
     Services.prefs.setBoolPref(ALLOW_SCRIPTS_TO_CLOSE_PREF, false);
     let panel = document.getElementById("social-flyout-panel");
-    let port = Social.provider.getWorkerPort();
+    let port = SocialSidebar.provider.getWorkerPort();
     ok(port, "provider has a port");
     port.onmessage = function (e) {
       let topic = e.data.topic;
@@ -113,15 +114,17 @@ var tests = {
           port.postMessage({topic: "test-flyout-open"});
           break;
         case "got-flyout-visibility":
+          if (e.data.result != "shown")
+            return;
           let iframe = panel.firstChild;
           iframe.contentDocument.addEventListener("SocialTest-DoneCloseSelf", function _doneHandler() {
             iframe.contentDocument.removeEventListener("SocialTest-DoneCloseSelf", _doneHandler, false);
+            port.close();
             is(panel.state, "closed", "flyout should have closed itself");
             Services.prefs.setBoolPref(ALLOW_SCRIPTS_TO_CLOSE_PREF, oldAllowScriptsToClose);
             next();
           }, false);
           is(panel.state, "open", "flyout should be open");
-          port.close(); // so we don't get the -visibility message as it hides...
           SocialFlyout.dispatchPanelEvent("socialTest-CloseSelf");
           break;
       }
@@ -140,7 +143,7 @@ var tests = {
     }
 
     let panel = document.getElementById("social-flyout-panel");
-    let port = Social.provider.getWorkerPort();
+    let port = SocialSidebar.provider.getWorkerPort();
     ok(port, "provider has a port");
     port.onmessage = function (e) {
       let topic = e.data.topic;

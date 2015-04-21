@@ -6,10 +6,7 @@
 #ifndef GFX_HARFBUZZSHAPER_H
 #define GFX_HARFBUZZSHAPER_H
 
-#include "gfxTypes.h"
 #include "gfxFont.h"
-#include "nsDataHashtable.h"
-#include "nsPoint.h"
 
 #include "harfbuzz/hb.h"
 
@@ -27,8 +24,9 @@ public:
         gfxContext        *mContext;
     };
 
+    bool Initialize();
     virtual bool ShapeText(gfxContext      *aContext,
-                           const PRUnichar *aText,
+                           const char16_t *aText,
                            uint32_t         aOffset,
                            uint32_t         aLength,
                            int32_t          aScript,
@@ -45,6 +43,11 @@ public:
     hb_position_t GetGlyphHAdvance(gfxContext *aContext,
                                    hb_codepoint_t glyph) const;
 
+    // get harfbuzz horizontal advance in 16.16 fixed point format.
+    static hb_position_t
+    HBGetGlyphHAdvance(hb_font_t *font, void *font_data,
+                       hb_codepoint_t glyph, void *user_data);
+
     hb_position_t GetHKerning(uint16_t aFirstGlyph,
                               uint16_t aSecondGlyph) const;
 
@@ -53,7 +56,7 @@ protected:
                               gfxShapedText   *aShapedText,
                               uint32_t         aOffset,
                               uint32_t         aLength,
-                              const PRUnichar *aText,
+                              const char16_t *aText,
                               hb_buffer_t     *aBuffer);
 
     // retrieve glyph positions, applying advance adjustments and attachments

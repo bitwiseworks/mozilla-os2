@@ -3,12 +3,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'content'
-
 XPIDL_MODULE = 'dom_webspeechrecognition'
 
 XPIDL_SOURCES = [
-  'nsIDOMSpeechRecognitionError.idl',
   'nsIDOMSpeechRecognitionEvent.idl',
   'nsISpeechRecognitionService.idl'
 ]
@@ -16,7 +13,6 @@ XPIDL_SOURCES = [
 TEST_DIRS += ['test']
 
 EXPORTS.mozilla.dom += [
-    'FakeSpeechRecognitionService.h',
     'SpeechGrammar.h',
     'SpeechGrammarList.h',
     'SpeechRecognition.h',
@@ -24,11 +20,13 @@ EXPORTS.mozilla.dom += [
     'SpeechRecognitionResult.h',
     'SpeechRecognitionResultList.h',
     'SpeechStreamListener.h',
+    'test/FakeSpeechRecognitionService.h',
 ]
 
-CPP_SOURCES += [
-    'EnableWebSpeechRecognitionCheck.cpp',
-    'FakeSpeechRecognitionService.cpp',
+UNIFIED_SOURCES += [
+    'endpointer.cc',
+    'energy_endpointer.cc',
+    'energy_endpointer_params.cc',
     'SpeechGrammar.cpp',
     'SpeechGrammarList.cpp',
     'SpeechRecognition.cpp',
@@ -36,8 +34,13 @@ CPP_SOURCES += [
     'SpeechRecognitionResult.cpp',
     'SpeechRecognitionResultList.cpp',
     'SpeechStreamListener.cpp',
-    'endpointer.cc',
-    'energy_endpointer.cc',
-    'energy_endpointer_params.cc',
+    'test/FakeSpeechRecognitionService.cpp',
 ]
 
+LOCAL_INCLUDES += [
+    '/dom/base',
+]
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'

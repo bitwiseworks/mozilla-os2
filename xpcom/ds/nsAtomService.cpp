@@ -4,8 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsAtomService.h"
+#include "nsIAtom.h"
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsAtomService, nsIAtomService)
+NS_IMPL_ISUPPORTS(nsAtomService, nsIAtomService)
 
 nsAtomService::nsAtomService()
 {
@@ -14,7 +15,7 @@ nsAtomService::nsAtomService()
 nsresult
 nsAtomService::GetAtom(const nsAString& aString, nsIAtom ** aResult)
 {
-  *aResult = NS_NewAtom(aString).get();
+  *aResult = NS_NewAtom(aString).take();
 
   if (!*aResult)
     return NS_ERROR_OUT_OF_MEMORY;
@@ -36,7 +37,7 @@ nsAtomService::GetPermanentAtom(const nsAString& aString, nsIAtom ** aResult)
 NS_IMETHODIMP
 nsAtomService::GetAtomUTF8(const char *aValue, nsIAtom* *aResult)
 {
-    *aResult = NS_NewAtom(aValue).get();
+    *aResult = NS_NewAtom(aValue).take();
 
     if (!*aResult)
         return NS_ERROR_OUT_OF_MEMORY;

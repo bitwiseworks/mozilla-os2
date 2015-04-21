@@ -12,7 +12,7 @@ var AutofillMenuUI = {
 
   get _panel() { return document.getElementById("autofill-container"); },
   get _popup() { return document.getElementById("autofill-popup"); },
-  get _commands() { return this._popup.childNodes[0]; },
+  get commands() { return this._popup.childNodes[0]; },
 
   get _menuPopup() {
     if (!this.__menuPopup) {
@@ -32,8 +32,8 @@ var AutofillMenuUI = {
   },
 
   _emptyCommands: function _emptyCommands() {
-    while (this._commands.firstChild)
-      this._commands.removeChild(this._commands.firstChild);
+    while (this.commands.firstChild)
+      this.commands.removeChild(this.commands.firstChild);
   },
 
   _positionOptions: function _positionOptions() {
@@ -49,27 +49,39 @@ var AutofillMenuUI = {
   },
 
   show: function show(aAnchorRect, aSuggestionsList) {
+    this.commands.addEventListener("select", this, true);
+
     this._anchorRect = aAnchorRect;
     this._emptyCommands();
     for (let idx = 0; idx < aSuggestionsList.length; idx++) {
       let item = document.createElement("richlistitem");
       let label = document.createElement("label");
       label.setAttribute("value", aSuggestionsList[idx].label);
+      item.setAttribute("value", aSuggestionsList[idx].value);
       item.setAttribute("data", aSuggestionsList[idx].value);
       item.appendChild(label);
-      this._commands.appendChild(item);
+      this.commands.appendChild(item);
     }
-
     this._menuPopup.show(this._positionOptions());
   },
 
   selectByIndex: function mn_selectByIndex(aIndex) {
     this._menuPopup.hide();
-    FormHelperUI.doAutoComplete(this._commands.childNodes[aIndex].getAttribute("data"));
+    FormHelperUI.doAutoComplete(this.commands.childNodes[aIndex].getAttribute("data"));
   },
 
   hide: function hide () {
+    this.commands.removeEventListener("select", this, true);
+
     this._menuPopup.hide();
+  },
+
+  handleEvent: function (aEvent) {
+    switch (aEvent.type) {
+      case "select":
+        FormHelperUI.doAutoComplete(this.commands.value);
+        break;
+    }
   }
 };
 
@@ -85,7 +97,7 @@ var ContextMenuUI = {
 
   get _panel() { return document.getElementById("context-container"); },
   get _popup() { return document.getElementById("context-popup"); },
-  get _commands() { return this._popup.childNodes[0]; },
+  get commands() { return this._popup.childNodes[0]; },
 
   get _menuPopup() {
     if (!this.__menuPopup) {
@@ -153,12 +165,13 @@ var ContextMenuUI = {
          contentTypes.indexOf("selected-text") != -1))
       multipleMediaTypes = true;
 
-    for (let command of Array.slice(this._commands.childNodes)) {
+    for (let command of Array.slice(this.commands.childNodes)) {
       command.hidden = true;
+      command.selected = false;
     }
 
     let optionsAvailable = false;
-    for (let command of Array.slice(this._commands.childNodes)) {
+    for (let command of Array.slice(this.commands.childNodes)) {
       let types = command.getAttribute("type").split(",");
       let lowPriority = (command.hasAttribute("priority") &&
         command.getAttribute("priority") == "low");
@@ -206,6 +219,9 @@ var ContextMenuUI = {
   },
 
   hide: function hide () {
+    for (let command of this.commands.querySelectorAll("richlistitem[selected]")) {
+      command.removeAttribute("selected");
+    }
     this._menuPopup.hide();
     this._popupState = null;
   },
@@ -221,7 +237,7 @@ var MenuControlUI = {
 
   get _panel() { return document.getElementById("menucontrol-container"); },
   get _popup() { return document.getElementById("menucontrol-popup"); },
-  get _commands() { return this._popup.childNodes[0]; },
+  get commands() { return this._popup.childNodes[0]; },
 
   get _menuPopup() {
     if (!this.__menuPopup) {
@@ -240,8 +256,8 @@ var MenuControlUI = {
   },
 
   _emptyCommands: function _emptyCommands() {
-    while (this._commands.firstChild)
-      this._commands.removeChild(this._commands.firstChild);
+    while (this.commands.firstChild)
+      this.commands.removeChild(this.commands.firstChild);
   },
 
   _positionOptions: function _positionOptions() {
@@ -314,7 +330,7 @@ var MenuControlUI = {
       label.setAttribute("value", child.label);
       item.appendChild(label);
 
-      this._commands.appendChild(item);
+      this.commands.appendChild(item);
     }
 
     this._menuPopup.show(this._positionOptions());
@@ -342,64 +358,19 @@ function MenuPopup(aPanel, aPopup) {
   window.addEventListener('MozAppbarShowing', this, false);
 }
 MenuPopup.prototype = {
-  get _visible() { return !this._panel.hidden; },
-  get _commands() { return this._popup.childNodes[0]; },
+  get visible() { return !this._panel.hidden; },
+  get commands() { return this._popup.childNodes[0]; },
 
   show: function (aPositionOptions) {
-    if (this._visible)
-      return;
-
-    window.addEventListener("keypress", this, true);
-    window.addEventListener("mousedown", this, true);
-    Elements.stack.addEventListener("PopupChanged", this, false);
-    Elements.browsers.addEventListener("PanBegin", this, false);
-
-    this._panel.hidden = false;
-    this._position(aPositionOptions || {});
-
-    let self = this;
-    this._panel.addEventListener("transitionend", function () {
-      self._panel.removeEventListener("transitionend", arguments.callee);
-      self._panel.removeAttribute("showingfrom");
-
-      let event = document.createEvent("Events");
-      event.initEvent("popupshown", true, false);
-      document.dispatchEvent(event);
-    });
-
-    let popupFrom = !aPositionOptions.bottomAligned ? "above" : "below";
-    this._panel.setAttribute("showingfrom", popupFrom);
-
-    // Ensure the panel actually gets shifted before getting animated
-    setTimeout(function () {
-      self._panel.setAttribute("showing", "true");
-    }, 0);
+    if (!this.visible) {
+      this._animateShow(aPositionOptions);
+    }
   },
 
   hide: function () {
-    if (!this._visible)
-      return;
-
-    window.removeEventListener("keypress", this, true);
-    window.removeEventListener("mousedown", this, true);
-    Elements.stack.removeEventListener("PopupChanged", this, false);
-    Elements.browsers.removeEventListener("PanBegin", this, false);
-
-    let self = this;
-    this._panel.addEventListener("transitionend", function () {
-      self._panel.removeEventListener("transitionend", arguments.callee);
-      self._panel.removeAttribute("hiding");
-      self._panel.hidden = true;
-      self._popup.style.maxWidth = "none";
-      self._popup.style.maxHeight = "none";
-
-      let event = document.createEvent("Events");
-      event.initEvent("popuphidden", true, false);
-      document.dispatchEvent(event);
-    });
-
-    this._panel.setAttribute("hiding", "true");
-    setTimeout(()=>this._panel.removeAttribute("showing"), 0);
+    if (this.visible) {
+      this._animateHide();
+    }
   },
 
   _position: function _position(aPositionOptions) {
@@ -420,12 +391,6 @@ MenuPopup.prototype = {
     let halfWidth = width / 2;
     let screenWidth = ContentAreaObserver.width;
     let screenHeight = ContentAreaObserver.height;
-
-    // Add padding on the side of the menu per the user's hand preference
-    let leftHand = MetroUtils.handPreference == MetroUtils.handPreferenceLeft;
-    if (aSource && aSource == Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH) {
-      this._commands.setAttribute("left-hand", leftHand);
-    }
 
     if (aPositionOptions.rightAligned)
       aX -= width;
@@ -470,18 +435,120 @@ MenuPopup.prototype = {
     }
   },
 
+  _animateShow: function (aPositionOptions) {
+    let deferred = Promise.defer();
+
+    window.addEventListener("keypress", this, true);
+    window.addEventListener("mousedown", this, true);
+    window.addEventListener("touchstart", this, true);
+    window.addEventListener("scroll", this, true);
+    window.addEventListener("blur", this, true);
+    Elements.stack.addEventListener("PopupChanged", this, false);
+
+    this._panel.hidden = false;
+    let popupFrom = !aPositionOptions.bottomAligned ? "above" : "below";
+    this._panel.setAttribute("showingfrom", popupFrom);
+
+    // This triggers a reflow, which sets transitionability.
+    // All animation/transition setup must happen before here.
+    this._position(aPositionOptions || {});
+
+    let self = this;
+    this._panel.addEventListener("transitionend", function popupshown () {
+      self._panel.removeEventListener("transitionend", popupshown);
+      self._panel.removeAttribute("showingfrom");
+
+      self._dispatch("popupshown");
+      deferred.resolve();
+    });
+
+    this._panel.setAttribute("showing", "true");
+    return deferred.promise;
+  },
+
+  _animateHide: function () {
+    let deferred = Promise.defer();
+
+    window.removeEventListener("keypress", this, true);
+    window.removeEventListener("mousedown", this, true);
+    window.removeEventListener("touchstart", this, true);
+    window.removeEventListener("scroll", this, true);
+    window.removeEventListener("blur", this, true);
+    Elements.stack.removeEventListener("PopupChanged", this, false);
+
+    let self = this;
+    this._panel.addEventListener("transitionend", function popuphidden() {
+      self._panel.removeEventListener("transitionend", popuphidden);
+      self._panel.removeAttribute("hiding");
+      self._panel.hidden = true;
+      self._popup.style.maxWidth = "none";
+      self._popup.style.maxHeight = "none";
+
+      self._dispatch("popuphidden");
+      deferred.resolve();
+    });
+
+    this._panel.setAttribute("hiding", "true");
+    this._panel.removeAttribute("showing");
+    return deferred.promise;
+  },
+
+  _dispatch: function _dispatch(aName) {
+    let event = document.createEvent("Events");
+    event.initEvent(aName, true, false);
+    this._panel.dispatchEvent(event);
+  },
+
   handleEvent: function handleEvent(aEvent) {
     switch (aEvent.type) {
       case "keypress":
-        if (!this._wantTypeBehind) {
+        // this.commands is not holding focus and not processing key events.
+        // Proxying events so that they're handled properly.
+
+        // Avoid recursion
+        if (aEvent.mine)
+          break;
+
+        let ev = document.createEvent("KeyboardEvent");
+        ev.initKeyEvent(
+          "keypress",        //  in DOMString typeArg,
+          false,             //  in boolean canBubbleArg,
+          true,              //  in boolean cancelableArg,
+          null,              //  in nsIDOMAbstractView viewArg,  Specifies UIEvent.view. This value may be null.
+          aEvent.ctrlKey,    //  in boolean ctrlKeyArg,
+          aEvent.altKey,     //  in boolean altKeyArg,
+          aEvent.shiftKey,   //  in boolean shiftKeyArg,
+          aEvent.metaKey,    //  in boolean metaKeyArg,
+          aEvent.keyCode,    //  in unsigned long keyCodeArg,
+          aEvent.charCode);  //  in unsigned long charCodeArg);
+
+        ev.mine = true;
+
+        switch (aEvent.keyCode) {
+          case aEvent.DOM_VK_ESCAPE:
+            this.hide();
+            break;
+
+          case aEvent.DOM_VK_RETURN:
+            this.commands.currentItem.click();
+            break;
+        }
+
+        if (Util.isNavigationKey(aEvent.keyCode)) {
+          aEvent.stopPropagation();
+          aEvent.preventDefault();
+          this.commands.dispatchEvent(ev);
+        } else if (!this._wantTypeBehind) {
           // Hide the context menu so you can't type behind it.
           aEvent.stopPropagation();
           aEvent.preventDefault();
-          if (aEvent.keyCode != aEvent.DOM_VK_ESCAPE)
-            this.hide();
+          this.hide();
         }
         break;
+      case "blur":
       case "mousedown":
+      case "touchstart":
+      case "scroll":
         if (!this._popup.contains(aEvent.target)) {
           aEvent.stopPropagation();
           this.hide();
@@ -498,9 +565,6 @@ MenuPopup.prototype = {
         } else {
           this.hide();
         }
-        break;
-      case "PanBegin":
-        this.hide();
         break;
     }
   }

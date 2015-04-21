@@ -9,18 +9,22 @@ this.EXPORTED_SYMBOLS = [
 
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/engines.js");
-Cu.import("resource://services-sync/status.js");
 Cu.import("resource://services-sync/util.js");
+Cu.import("resource://gre/modules/FileUtils.jsm");
+Cu.import("resource://gre/modules/NetUtil.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Status",
+                                  "resource://services-sync/status.js");
 
 this.SyncScheduler = function SyncScheduler(service) {
   this.service = service;
   this.init();
 }
 SyncScheduler.prototype = {
-  _log: Log4Moz.repository.getLogger("Sync.SyncScheduler"),
+  _log: Log.repository.getLogger("Sync.SyncScheduler"),
 
   _fatalLoginStatus: [LOGIN_FAILED_NO_USERNAME,
                       LOGIN_FAILED_NO_PASSWORD,
@@ -36,10 +40,18 @@ SyncScheduler.prototype = {
   setDefaults: function setDefaults() {
     this._log.trace("Setting SyncScheduler policy values to defaults.");
 
-    this.singleDeviceInterval = Svc.Prefs.get("scheduler.singleDeviceInterval") * 1000;
+    let service = Cc["@mozilla.org/weave/service;1"]
+                    .getService(Ci.nsISupports)
+                    .wrappedJSObject;
+
+    let part = service.fxAccountsEnabled ? "fxa" : "sync11";
+    let prefSDInterval = "scheduler." + part + ".singleDeviceInterval";
+    this.singleDeviceInterval = Svc.Prefs.get(prefSDInterval) * 1000;
+
     this.idleInterval         = Svc.Prefs.get("scheduler.idleInterval")         * 1000;
     this.activeInterval       = Svc.Prefs.get("scheduler.activeInterval")       * 1000;
     this.immediateInterval    = Svc.Prefs.get("scheduler.immediateInterval")    * 1000;
+    this.eolInterval          = Svc.Prefs.get("scheduler.eolInterval")          * 1000;
 
     // A user is non-idle on startup by default.
     this.idle = false;
@@ -66,7 +78,7 @@ SyncScheduler.prototype = {
   set numClients(value) Svc.Prefs.set("numClients", value),
 
   init: function init() {
-    this._log.level = Log4Moz.Level[Svc.Prefs.get("log.logger.service.main")];
+    this._log.level = Log.Level[Svc.Prefs.get("log.logger.service.main")];
     this.setDefaults();
     Svc.Obs.add("weave:engine:score:updated", this);
     Svc.Obs.add("network:offline-status-changed", this);
@@ -82,6 +94,7 @@ SyncScheduler.prototype = {
     Svc.Obs.add("weave:engine:sync:applied", this);
     Svc.Obs.add("weave:service:setup-complete", this);
     Svc.Obs.add("weave:service:start-over", this);
+    Svc.Obs.add("FxA:hawk:backoff:interval", this);
 
     if (Status.checkSetup() == STATUS_OK) {
       Svc.Idle.addIdleObserver(this, Svc.Prefs.get("scheduler.idleTime"));
@@ -171,6 +184,7 @@ SyncScheduler.prototype = {
         this.nextSync = 0;
         this.handleSyncError();
         break;
+      case "FxA:hawk:backoff:interval":
       case "weave:service:backoff:interval":
         let requested_interval = subject * 1000;
         this._log.debug("Got backoff notification: " + requested_interval + "ms");
@@ -217,7 +231,7 @@ SyncScheduler.prototype = {
         // were just active.)
         this.adjustSyncInterval();
         break;
-      case "back":
+      case "active":
         this._log.trace("Received notification that we're back from idle.");
         this.idle = false;
         Utils.namedTimer(function onBack() {
@@ -238,11 +252,18 @@ SyncScheduler.prototype = {
   },
 
   adjustSyncInterval: function adjustSyncInterval() {
+    if (Status.eol) {
+      this._log.debug("Server status is EOL; using eolInterval.");
+      this.syncInterval = this.eolInterval;
+      return;
+    }
+
     if (this.numClients <= 1) {
       this._log.trace("Adjusting syncInterval to singleDeviceInterval.");
       this.syncInterval = this.singleDeviceInterval;
       return;
     }
+
     // Only MULTI_DEVICE clients will enter this if statement
     // since SINGLE_USER clients will be handled above.
     if (this.idle) {
@@ -474,11 +495,19 @@ this.ErrorHandler = function ErrorHandler(service) {
   this.init();
 }
 ErrorHandler.prototype = {
+  MINIMUM_ALERT_INTERVAL_MSEC: 604800000,   // One week.
 
   /**
    * Flag that turns on error reporting for all errors, incl. network errors.
    */
   dontIgnoreErrors: false,
+
+  /**
+   * Flag that indicates if we have already reported a prolonged failure.
+   * Once set, we don't report it again, meaning this error is only reported
+   * one per run.
+   */
+  didReportProlongedError: false,
 
   init: function init() {
     Svc.Obs.add("weave:engine:sync:applied", this);
@@ -491,25 +520,28 @@ ErrorHandler.prototype = {
   },
 
   initLogs: function initLogs() {
-    this._log = Log4Moz.repository.getLogger("Sync.ErrorHandler");
-    this._log.level = Log4Moz.Level[Svc.Prefs.get("log.logger.service.main")];
+    this._log = Log.repository.getLogger("Sync.ErrorHandler");
+    this._log.level = Log.Level[Svc.Prefs.get("log.logger.service.main")];
     this._cleaningUpFileLogs = false;
 
-    let root = Log4Moz.repository.getLogger("Sync");
-    root.level = Log4Moz.Level[Svc.Prefs.get("log.rootLogger")];
+    let root = Log.repository.getLogger("Sync");
+    root.level = Log.Level[Svc.Prefs.get("log.rootLogger")];
 
-    let formatter = new Log4Moz.BasicFormatter();
-    let capp = new Log4Moz.ConsoleAppender(formatter);
-    capp.level = Log4Moz.Level[Svc.Prefs.get("log.appender.console")];
+    let formatter = new Log.BasicFormatter();
+    let capp = new Log.ConsoleAppender(formatter);
+    capp.level = Log.Level[Svc.Prefs.get("log.appender.console")];
     root.addAppender(capp);
 
-    let dapp = new Log4Moz.DumpAppender(formatter);
-    dapp.level = Log4Moz.Level[Svc.Prefs.get("log.appender.dump")];
+    let dapp = new Log.DumpAppender(formatter);
+    dapp.level = Log.Level[Svc.Prefs.get("log.appender.dump")];
     root.addAppender(dapp);
 
-    let fapp = this._logAppender = new Log4Moz.StorageStreamAppender(formatter);
-    fapp.level = Log4Moz.Level[Svc.Prefs.get("log.appender.file.level")];
+    let fapp = this._logAppender = new Log.StorageStreamAppender(formatter);
+    fapp.level = Log.Level[Svc.Prefs.get("log.appender.file.level")];
     root.addAppender(fapp);
+
+    // Arrange for the FxA logs to also go to our file.
+    Log.repository.getLogger("FirefoxAccounts").addAppender(fapp);
   },
 
   observe: function observe(subject, topic, data) {
@@ -750,7 +782,13 @@ ErrorHandler.prototype = {
     if (lastSync && ((Date.now() - Date.parse(lastSync)) >
         Svc.Prefs.get("errorhandler.networkFailureReportTimeout") * 1000)) {
       Status.sync = PROLONGED_SYNC_FAILURE;
-      this._log.trace("shouldReportError: true (prolonged sync failure).");
+      if (this.didReportProlongedError) {
+        this._log.trace("shouldReportError: false (prolonged sync failure, but" +
+                        " we've already reported it).");
+        return false;
+      }
+      this._log.trace("shouldReportError: true (first prolonged sync failure).");
+      this.didReportProlongedError = true;
       return true;
     }
 
@@ -767,12 +805,97 @@ ErrorHandler.prototype = {
             [Status.login, Status.sync].indexOf(LOGIN_FAILED_NETWORK_ERROR) == -1);
   },
 
+  get currentAlertMode() {
+    return Svc.Prefs.get("errorhandler.alert.mode");
+  },
+
+  set currentAlertMode(str) {
+    return Svc.Prefs.set("errorhandler.alert.mode", str);
+  },
+
+  get earliestNextAlert() {
+    return Svc.Prefs.get("errorhandler.alert.earliestNext", 0) * 1000;
+  },
+
+  set earliestNextAlert(msec) {
+    return Svc.Prefs.set("errorhandler.alert.earliestNext", msec / 1000);
+  },
+
+  clearServerAlerts: function () {
+    // If we have any outstanding alerts, apparently they're no longer relevant.
+    Svc.Prefs.resetBranch("errorhandler.alert");
+  },
+
+  /**
+   * X-Weave-Alert headers can include a JSON object:
+   *
+   *   {
+   *    "code":    // One of "hard-eol", "soft-eol".
+   *    "url":     // For "Learn more" link.
+   *    "message": // Logged in Sync logs.
+   *   }
+   */
+  handleServerAlert: function (xwa) {
+    if (!xwa.code) {
+      this._log.warn("Got structured X-Weave-Alert, but no alert code.");
+      return;
+    }
+
+    switch (xwa.code) {
+      // Gently and occasionally notify the user that this service will be
+      // shutting down.
+      case "soft-eol":
+        // Fall through.
+
+      // Tell the user that this service has shut down, and drop our syncing
+      // frequency dramatically.
+      case "hard-eol":
+        // Note that both of these alerts should be subservient to future "sign
+        // in with your Firefox Account" storage alerts.
+        if ((this.currentAlertMode != xwa.code) ||
+            (this.earliestNextAlert < Date.now())) {
+          Utils.nextTick(function() {
+            Svc.Obs.notify("weave:eol", xwa);
+          }, this);
+          this._log.error("X-Weave-Alert: " + xwa.code + ": " + xwa.message);
+          this.earliestNextAlert = Date.now() + this.MINIMUM_ALERT_INTERVAL_MSEC;
+          this.currentAlertMode = xwa.code;
+        }
+        break;
+      default:
+        this._log.debug("Got unexpected X-Weave-Alert code: " + xwa.code);
+    }
+  },
+
   /**
    * Handle HTTP response results or exceptions and set the appropriate
    * Status.* bits.
+   *
+   * This method also looks for "side-channel" warnings.
    */
-  checkServerError: function checkServerError(resp) {
+  checkServerError: function (resp) {
     switch (resp.status) {
+      case 200:
+      case 404:
+      case 513:
+        let xwa = resp.headers['x-weave-alert'];
+
+        // Only process machine-readable alerts.
+        if (!xwa || !xwa.startsWith("{")) {
+          this.clearServerAlerts();
+          return;
+        }
+
+        try {
+          xwa = JSON.parse(xwa);
+        } catch (ex) {
+          this._log.warn("Malformed X-Weave-Alert from server: " + xwa);
+          return;
+        }
+
+        this.handleServerAlert(xwa);
+        break;
+
       case 400:
         if (resp == RESPONSE_OVER_QUOTA) {
           Status.sync = OVER_QUOTA;

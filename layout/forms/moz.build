@@ -6,8 +6,6 @@
 
 TEST_DIRS += ['test']
 
-MODULE = 'layout'
-
 EXPORTS += [
     'nsIComboboxControlFrame.h',
     'nsIFormControlFrame.h',
@@ -16,8 +14,9 @@ EXPORTS += [
     'nsITextControlFrame.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsButtonFrameRenderer.cpp',
+    'nsColorControlFrame.cpp',
     'nsComboboxControlFrame.cpp',
     'nsFieldSetFrame.cpp',
     'nsFileControlFrame.cpp',
@@ -30,11 +29,35 @@ CPP_SOURCES += [
     'nsLegendFrame.cpp',
     'nsListControlFrame.cpp',
     'nsMeterFrame.cpp',
+    'nsNumberControlFrame.cpp',
     'nsProgressFrame.cpp',
     'nsRangeFrame.cpp',
     'nsSelectsAreaFrame.cpp',
     'nsTextControlFrame.cpp',
 ]
 
-LIBRARY_NAME = 'gkforms_s'
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+FINAL_LIBRARY = 'gklayout'
+
+LOCAL_INCLUDES += [
+    '../../content/base/src',
+    '../../content/html/content/src',
+    '../../editor/libeditor/base',
+    '../../editor/libeditor/text',
+    '../../editor/txmgr/src',
+    '../base',
+    '../generic',
+    '../xul',
+]
+
+if CONFIG['ENABLE_INTL_API']:
+    # nsNumberControlFrame.cpp requires ICUUtils.h which in turn requires
+    # i18n/unum.h
+    LOCAL_INCLUDES += [
+        '../../intl/icu/source/common',
+        '../../intl/icu/source/i18n',
+    ]
 

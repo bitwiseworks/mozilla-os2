@@ -4,15 +4,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-#include "ipc/AutoOpenSurface.h"
 #include "mozilla/layers/PLayerTransaction.h"
 
-#include "gfxImageSurface.h"
 #include "gfxWindowsSurface.h"
 #include "gfxWindowsPlatform.h"
 #include "SurfaceStream.h"
 #include "SharedSurfaceGL.h"
-
+#include "GLContext.h"
 #include "CanvasLayerD3D9.h"
 
 using namespace mozilla::gfx;
@@ -20,6 +18,17 @@ using namespace mozilla::gl;
 
 namespace mozilla {
 namespace layers {
+
+CanvasLayerD3D9::CanvasLayerD3D9(LayerManagerD3D9 *aManager)
+  : CanvasLayer(aManager, nullptr)
+  , LayerD3D9(aManager)
+  , mDataIsPremultiplied(false)
+  , mNeedsYFlip(false)
+  , mHasAlpha(true)
+{
+    mImplData = static_cast<LayerD3D9*>(this);
+    aManager->deviceManager()->mLayersWithResources.AppendElement(this);
+}
 
 CanvasLayerD3D9::~CanvasLayerD3D9()
 {
@@ -31,17 +40,10 @@ CanvasLayerD3D9::~CanvasLayerD3D9()
 void
 CanvasLayerD3D9::Initialize(const Data& aData)
 {
-  NS_ASSERTION(mSurface == nullptr, "BasicCanvasLayer::Initialize called twice!");
+  NS_ASSERTION(mDrawTarget == nullptr, "BasicCanvasLayer::Initialize called twice!");
 
   if (aData.mDrawTarget) {
     mDrawTarget = aData.mDrawTarget;
-    mSurface = gfxPlatform::GetPlatform()->GetThebesSurfaceForDrawTarget(mDrawTarget);
-    mNeedsYFlip = false;
-    mDataIsPremultiplied = true;
-  } else if (aData.mSurface) {
-    mSurface = aData.mSurface;
-    NS_ASSERTION(aData.mGLContext == nullptr,
-                 "CanvasLayer can't have both surface and WebGLContext");
     mNeedsYFlip = false;
     mDataIsPremultiplied = true;
   } else if (aData.mGLContext) {
@@ -50,7 +52,7 @@ CanvasLayerD3D9::Initialize(const Data& aData)
     mDataIsPremultiplied = aData.mIsGLAlphaPremult;
     mNeedsYFlip = true;
   } else {
-    NS_ERROR("CanvasLayer created without mSurface, mGLContext or mDrawTarget?");
+    NS_ERROR("CanvasLayer created without mGLContext or mDrawTarget?");
   }
 
   mBounds.SetRect(0, 0, aData.mSize.width, aData.mSize.height);
@@ -74,89 +76,38 @@ CanvasLayerD3D9::UpdateSurface()
     }
   }
 
+  RefPtr<SourceSurface> surface;
+
   if (mGLContext) {
-    SharedSurface* surf = mGLContext->RequestFrame();
+    SharedSurface_GL* surf = mGLContext->RequestFrame();
     if (!surf)
         return;
 
     SharedSurface_Basic* shareSurf = SharedSurface_Basic::Cast(surf);
-
-    // WebGL reads entire surface.
-    LockTextureRectD3D9 textureLock(mTexture);
-    if (!textureLock.HasLock()) {
-      NS_WARNING("Failed to lock CanvasLayer texture.");
-      return;
-    }
-
-    D3DLOCKED_RECT rect = textureLock.GetLockRect();
-
-    gfxImageSurface* frameData = shareSurf->GetData();
-    // Scope for gfxContext, so it's destroyed early.
-    {
-      nsRefPtr<gfxImageSurface> mapSurf =
-          new gfxImageSurface((uint8_t*)rect.pBits,
-                              shareSurf->Size(),
-                              rect.Pitch,
-                              gfxASurface::ImageFormatARGB32);
-
-      gfxContext ctx(mapSurf);
-      ctx.SetOperator(gfxContext::OPERATOR_SOURCE);
-      ctx.SetSource(frameData);
-      ctx.Paint();
-
-      mapSurf->Flush();
-    }
+    surface = shareSurf->GetData();
   } else {
-    RECT r;
-    r.left = mBounds.x;
-    r.top = mBounds.y;
-    r.right = mBounds.XMost();
-    r.bottom = mBounds.YMost();
-
-    LockTextureRectD3D9 textureLock(mTexture);
-    if (!textureLock.HasLock()) {
-      NS_WARNING("Failed to lock CanvasLayer texture.");
-      return;
-    }
-
-    D3DLOCKED_RECT lockedRect = textureLock.GetLockRect();
-
-    nsRefPtr<gfxImageSurface> sourceSurface;
-
-    if (mSurface->GetType() == gfxASurface::SurfaceTypeWin32) {
-      sourceSurface = mSurface->GetAsImageSurface();
-    } else if (mSurface->GetType() == gfxASurface::SurfaceTypeImage) {
-      sourceSurface = static_cast<gfxImageSurface*>(mSurface.get());
-      if (sourceSurface->Format() != gfxASurface::ImageFormatARGB32 &&
-          sourceSurface->Format() != gfxASurface::ImageFormatRGB24)
-      {
-        return;
-      }
-    } else {
-      sourceSurface = new gfxImageSurface(gfxIntSize(mBounds.width, mBounds.height),
-                                          gfxASurface::ImageFormatARGB32);
-      nsRefPtr<gfxContext> ctx = new gfxContext(sourceSurface);
-      ctx->SetOperator(gfxContext::OPERATOR_SOURCE);
-      ctx->SetSource(mSurface);
-      ctx->Paint();
-    }
-
-    uint8_t *startBits = sourceSurface->Data();
-    uint32_t sourceStride = sourceSurface->Stride();
-
-    if (sourceSurface->Format() != gfxASurface::ImageFormatARGB32) {
-      mHasAlpha = false;
-    } else {
-      mHasAlpha = true;
-    }
-
-    for (int y = 0; y < mBounds.height; y++) {
-      memcpy((uint8_t*)lockedRect.pBits + lockedRect.Pitch * y,
-             startBits + sourceStride * y,
-             mBounds.width * 4);
-    }
-
+    surface = mDrawTarget->Snapshot();
   }
+
+  // WebGL reads entire surface.
+  LockTextureRectD3D9 textureLock(mTexture);
+  if (!textureLock.HasLock()) {
+    NS_WARNING("Failed to lock CanvasLayer texture.");
+    return;
+  }
+
+  D3DLOCKED_RECT rect = textureLock.GetLockRect();
+  IntSize boundsSize(mBounds.width, mBounds.height);
+  RefPtr<DrawTarget> rectDt = Factory::CreateDrawTargetForData(BackendType::CAIRO,
+                                                               (uint8_t*)rect.pBits,
+                                                               boundsSize,
+                                                               rect.Pitch,
+                                                               SurfaceFormat::B8G8R8A8);
+
+  Rect drawRect(0, 0, surface->GetSize().width, surface->GetSize().height);
+  rectDt->DrawSurface(surface, drawRect, drawRect,
+                      DrawSurfaceOptions(),  DrawOptions(1.0F, CompositionOp::OP_SOURCE));
+  rectDt->Flush();
 }
 
 Layer*
@@ -179,7 +130,7 @@ CanvasLayerD3D9::RenderLayer()
     return;
 
   /*
-   * We flip the Y axis here, note we can only do this because we are in 
+   * We flip the Y axis here, note we can only do this because we are in
    * CULL_NONE mode!
    */
 
@@ -199,7 +150,7 @@ CanvasLayerD3D9::RenderLayer()
     mD3DManager->SetShaderMode(DeviceManagerD3D9::RGBLAYER, GetMaskLayer());
   }
 
-  if (mFilter == gfxPattern::FILTER_NEAREST) {
+  if (mFilter == GraphicsFilter::FILTER_NEAREST) {
     device()->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
     device()->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
   }
@@ -213,7 +164,7 @@ CanvasLayerD3D9::RenderLayer()
     device()->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
     device()->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
   }
-  if (mFilter == gfxPattern::FILTER_NEAREST) {
+  if (mFilter == GraphicsFilter::FILTER_NEAREST) {
     device()->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
     device()->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
   }
@@ -242,13 +193,13 @@ CanvasLayerD3D9::CreateTexture()
   if (mD3DManager->deviceManager()->HasDynamicTextures()) {
     hr = device()->CreateTexture(mBounds.width, mBounds.height, 1, D3DUSAGE_DYNAMIC,
                                  D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
-                                 getter_AddRefs(mTexture), NULL);
+                                 getter_AddRefs(mTexture), nullptr);
   } else {
     // D3DPOOL_MANAGED is fine here since we require Dynamic Textures for D3D9Ex
     // devices.
     hr = device()->CreateTexture(mBounds.width, mBounds.height, 1, 0,
                                  D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
-                                 getter_AddRefs(mTexture), NULL);
+                                 getter_AddRefs(mTexture), nullptr);
   }
   if (FAILED(hr)) {
     mD3DManager->ReportFailure(NS_LITERAL_CSTRING("CanvasLayerD3D9::CreateTexture() failed"),

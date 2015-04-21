@@ -5,7 +5,7 @@
 const LIST_UPDATED_TOPIC     = "plugins-list-updated";
 
 // We need to use the same algorithm for generating IDs for plugins
-var { getIDHashForString } = Components.utils.import("resource://gre/modules/PluginProvider.jsm");
+var { getIDHashForString } = Components.utils.import("resource://gre/modules/addons/PluginProvider.jsm");
 
 function PluginTag(name, description) {
   this.name = name;
@@ -75,7 +75,7 @@ function run_test() {
 }
 
 function end_test() {
-  do_test_finished();
+  do_execute_soon(do_test_finished);
 }
 
 function sortAddons(addons) {

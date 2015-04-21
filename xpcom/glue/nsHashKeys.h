@@ -12,7 +12,7 @@
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "pldhash.h"
-#include NEW_H
+#include <new>
 
 #include "nsStringGlue.h"
 #include "nsCRTGlue.h"
@@ -22,6 +22,7 @@
 #include <string.h>
 
 #include "mozilla/HashFunctions.h"
+#include "mozilla/Move.h"
 
 namespace mozilla {
 
@@ -61,6 +62,7 @@ HashString(const nsACString& aStr)
  * nsCharPtrHashKey
  * nsUnicharPtrHashKey
  * nsHashableHashKey
+ * nsGenericHashKey
  */
 
 /**
@@ -309,6 +311,16 @@ private:
   nsRefPtr<T> mKey;
 };
 
+template <class T>
+inline void
+ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
+                            nsRefPtrHashKey<T>& aField,
+                            const char* aName,
+                            uint32_t aFlags = 0)
+{
+  CycleCollectionNoteChild(aCallback, aField.GetKey(), aName, aFlags);
+}
+
 /**
  * hashkey wrapper using T* KeyType
  *
@@ -341,7 +353,7 @@ class nsPtrHashKey : public PLDHashEntryHdr
 };
 
 /**
- * hashkey wrapper using T* KeyType that sets key to NULL upon
+ * hashkey wrapper using T* KeyType that sets key to nullptr upon
  * destruction. Relevant only in cases where a memory pointer-scanner
  * like valgrind might get confused about stale references.
  *
@@ -360,6 +372,37 @@ class nsClearingPtrHashKey : public nsPtrHashKey<T>
 
 typedef nsPtrHashKey<const void> nsVoidPtrHashKey; 
 typedef nsClearingPtrHashKey<const void> nsClearingVoidPtrHashKey;
+
+/**
+ * hashkey wrapper using a function pointer KeyType
+ *
+ * @see nsTHashtable::EntryType for specification
+ */
+template<class T>
+class nsFuncPtrHashKey : public PLDHashEntryHdr
+{
+ public:
+  typedef T &KeyType;
+  typedef const T *KeyTypePointer;
+
+  nsFuncPtrHashKey(const T *key) : mKey(*const_cast<T*>(key)) {}
+  nsFuncPtrHashKey(const nsFuncPtrHashKey<T> &toCopy) : mKey(toCopy.mKey) {}
+  ~nsFuncPtrHashKey() {}
+
+  KeyType GetKey() const { return const_cast<T&>(mKey); }
+
+  bool KeyEquals(KeyTypePointer key) const { return *key == mKey; }
+
+  static KeyTypePointer KeyToPointer(KeyType key) { return &key; }
+  static PLDHashNumber HashKey(KeyTypePointer key)
+  {
+    return NS_PTR_TO_INT32(*key) >> 2;
+  }
+  enum { ALLOW_MEMMOVE = true };
+
+ protected:
+  T mKey;
+};
 
 /**
  * hashkey wrapper using nsID KeyType
@@ -440,6 +483,13 @@ public:
 
   nsCharPtrHashKey(const char* aKey) : mKey(strdup(aKey)) { }
   nsCharPtrHashKey(const nsCharPtrHashKey& toCopy) : mKey(strdup(toCopy.mKey)) { }
+
+  nsCharPtrHashKey(nsCharPtrHashKey&& other)
+    : mKey(other.mKey)
+  {
+    other.mKey = nullptr;
+  }
+
   ~nsCharPtrHashKey() { if (mKey) free(const_cast<char *>(mKey)); }
 
   const char* GetKey() const { return mKey; }
@@ -458,21 +508,28 @@ private:
 };
 
 /**
- * hashkey wrapper for const PRUnichar*; at construction, this class duplicates
+ * hashkey wrapper for const char16_t*; at construction, this class duplicates
  * a string pointed to by the pointer so that it doesn't matter whether or not
  * the string lives longer than the hash table.
  */
 class nsUnicharPtrHashKey : public PLDHashEntryHdr
 {
 public:
-  typedef const PRUnichar* KeyType;
-  typedef const PRUnichar* KeyTypePointer;
+  typedef const char16_t* KeyType;
+  typedef const char16_t* KeyTypePointer;
 
-  nsUnicharPtrHashKey(const PRUnichar* aKey) : mKey(NS_strdup(aKey)) { }
+  nsUnicharPtrHashKey(const char16_t* aKey) : mKey(NS_strdup(aKey)) { }
   nsUnicharPtrHashKey(const nsUnicharPtrHashKey& toCopy) : mKey(NS_strdup(toCopy.mKey)) { }
-  ~nsUnicharPtrHashKey() { if (mKey) NS_Free(const_cast<PRUnichar *>(mKey)); }
 
-  const PRUnichar* GetKey() const { return mKey; }
+  nsUnicharPtrHashKey(nsUnicharPtrHashKey&& other)
+    : mKey(other.mKey)
+  {
+    other.mKey = nullptr;
+  }
+
+  ~nsUnicharPtrHashKey() { if (mKey) NS_Free(const_cast<char16_t *>(mKey)); }
+
+  const char16_t* GetKey() const { return mKey; }
   bool KeyEquals(KeyTypePointer aKey) const
   {
     return !NS_strcmp(mKey, aKey);
@@ -484,7 +541,7 @@ public:
   enum { ALLOW_MEMMOVE = true };
 
 private:
-  const PRUnichar* mKey;
+  const char16_t* mKey;
 };
 
 /**
@@ -527,6 +584,31 @@ public:
 
 private:
     nsCOMPtr<nsIHashable> mKey;
+};
+
+/**
+ * Hashtable key class to use with objects for which Hash() and operator==()
+ * are defined.
+ */
+template <typename T>
+class nsGenericHashKey : public PLDHashEntryHdr
+{
+public:
+  typedef const T& KeyType;
+  typedef const T* KeyTypePointer;
+
+  nsGenericHashKey(KeyTypePointer aKey) : mKey(*aKey) { }
+  nsGenericHashKey(const nsGenericHashKey<T>& aOther) : mKey(aOther.mKey) { }
+
+  KeyType GetKey() const { return mKey; }
+  bool KeyEquals(KeyTypePointer aKey) const { return *aKey == mKey; }
+
+  static KeyTypePointer KeyToPointer(KeyType aKey) { return &aKey; }
+  static PLDHashNumber HashKey(KeyTypePointer aKey) { return aKey->Hash(); }
+  enum { ALLOW_MEMMOVE = true };
+
+private:
+  T mKey;
 };
 
 #endif // nsTHashKeys_h__

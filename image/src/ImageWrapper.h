@@ -6,6 +6,7 @@
 #ifndef MOZILLA_IMAGELIB_IMAGEWRAPPER_H_
 #define MOZILLA_IMAGELIB_IMAGEWRAPPER_H_
 
+#include "mozilla/MemoryReporting.h"
 #include "Image.h"
 
 namespace mozilla {
@@ -25,12 +26,12 @@ public:
   // Inherited methods from Image.
   virtual nsresult Init(const char* aMimeType, uint32_t aFlags) MOZ_OVERRIDE;
 
-  virtual imgStatusTracker& GetStatusTracker() MOZ_OVERRIDE;
+  virtual already_AddRefed<imgStatusTracker> GetStatusTracker() MOZ_OVERRIDE;
   virtual nsIntRect FrameRect(uint32_t aWhichFrame) MOZ_OVERRIDE;
 
   virtual uint32_t SizeOfData() MOZ_OVERRIDE;
-  virtual size_t HeapSizeOfSourceWithComputedFallback(nsMallocSizeOfFun aMallocSizeOf) const MOZ_OVERRIDE;
-  virtual size_t HeapSizeOfDecodedWithComputedFallback(nsMallocSizeOfFun aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t HeapSizeOfSourceWithComputedFallback(mozilla::MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t HeapSizeOfDecodedWithComputedFallback(mozilla::MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
   virtual size_t NonHeapSizeOfDecoded() const MOZ_OVERRIDE;
   virtual size_t OutOfProcessSizeOfDecoded() const MOZ_OVERRIDE;
 
@@ -57,7 +58,7 @@ public:
   virtual bool HasError() MOZ_OVERRIDE;
   virtual void SetHasError() MOZ_OVERRIDE;
 
-  virtual nsIURI* GetURI() MOZ_OVERRIDE;
+  virtual ImageURL* GetURI() MOZ_OVERRIDE;
 
 protected:
   ImageWrapper(Image* aInnerImage)

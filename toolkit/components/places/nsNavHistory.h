@@ -21,7 +21,6 @@
 #include "nsCategoryCache.h"
 #include "nsNetCID.h"
 #include "nsToolkitCompsCID.h"
-#include "nsThreadUtils.h"
 #include "nsURIHashKey.h"
 #include "nsTHashtable.h"
 
@@ -76,7 +75,7 @@ class nsNavHistory MOZ_FINAL : public nsSupportsWeakReference
 public:
   nsNavHistory();
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSINAVHISTORYSERVICE
   NS_DECL_NSIBROWSERHISTORY
   NS_DECL_NSIOBSERVER
@@ -97,7 +96,7 @@ public:
   /**
    * Used by other components in the places directory such as the annotation
    * service to get a reference to this history object. Returns a pointer to
-   * the service if it exists. Otherwise creates one. Returns NULL on error.
+   * the service if it exists. Otherwise creates one. Returns nullptr on error.
    */
   static nsNavHistory* GetHistoryService()
   {
@@ -115,7 +114,7 @@ public:
    * const version of this history object.
    *
    * @return A pointer to a const version of the service if it exists,
-   *         NULL otherwise.
+   *         nullptr otherwise.
    */
   static const nsNavHistory* GetConstHistoryService()
   {
@@ -191,8 +190,8 @@ public:
   nsIStringBundle* GetBundle();
   nsIStringBundle* GetDateFormatBundle();
   nsICollation* GetCollation();
-  void GetStringFromName(const PRUnichar* aName, nsACString& aResult);
-  void GetAgeInDaysString(int32_t aInt, const PRUnichar *aName,
+  void GetStringFromName(const char16_t* aName, nsACString& aResult);
+  void GetAgeInDaysString(int32_t aInt, const char16_t *aName,
                           nsACString& aResult);
   void GetMonthName(int32_t aIndex, nsACString& aResult);
   void GetMonthYear(int32_t aMonth, int32_t aYear, nsACString& aResult);
@@ -217,6 +216,7 @@ public:
   static const int32_t kGetInfoIndex_ItemTags;
   static const int32_t kGetInfoIndex_Frecency;
   static const int32_t kGetInfoIndex_Hidden;
+  static const int32_t kGetInfoIndex_Guid;
 
   int64_t GetTagsFolder();
 
@@ -418,6 +418,29 @@ public:
                          const nsString& title,
                          const nsACString& aGUID);
 
+  /**
+   * Fires onFrecencyChanged event to nsINavHistoryService observers
+   */
+  void NotifyFrecencyChanged(nsIURI* aURI,
+                             int32_t aNewFrecency,
+                             const nsACString& aGUID,
+                             bool aHidden,
+                             PRTime aLastVisitDate);
+
+  /**
+   * Fires onManyFrecenciesChanged event to nsINavHistoryService observers
+   */
+  void NotifyManyFrecenciesChanged();
+
+  /**
+   * Posts a runnable to the main thread that calls NotifyFrecencyChanged.
+   */
+  void DispatchFrecencyChangedNotification(const nsACString& aSpec,
+                                           int32_t aNewFrecency,
+                                           const nsACString& aGUID,
+                                           bool aHidden,
+                                           PRTime aLastVisitDate) const;
+
   bool isBatching() {
     return mBatchLevel > 0;
   }
@@ -447,7 +470,7 @@ protected:
   /**
    * Loads all of the preferences that we use into member variables.
    *
-   * @note If mPrefBranch is NULL, this does nothing.
+   * @note If mPrefBranch is nullptr, this does nothing.
    */
   void LoadPrefs();
 

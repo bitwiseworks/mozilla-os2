@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
 #include "nsIconChannel.h"
+#include "mozilla/Endian.h"
 #include "nsIIconURI.h"
 #include "nsIServiceManager.h"
 #include "nsIInterfaceRequestor.h"
@@ -18,7 +18,6 @@
 #include "nsNetUtil.h"
 #include "nsIMIMEService.h"
 #include "nsCExternalHandlerService.h"
-#include "plstr.h"
 #include "nsILocalFileMac.h"
 #include "nsIFileURL.h"
 #include "nsTArray.h"
@@ -34,9 +33,9 @@ nsIconChannel::nsIconChannel()
 nsIconChannel::~nsIconChannel() 
 {}
 
-NS_IMPL_THREADSAFE_ISUPPORTS4(nsIconChannel, 
-                              nsIChannel, 
-                              nsIRequest,
+NS_IMPL_ISUPPORTS(nsIconChannel, 
+                  nsIChannel, 
+                  nsIRequest,
 			       nsIRequestObserver,
 			       nsIStreamListener)
 
@@ -275,8 +274,7 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval, bool nonBlocki
   // create our buffer
   int32_t bufferCapacity = 2 + [bitmapRep bytesPerPlane];
   nsAutoTArray<uint8_t, 3 + 16 * 16 * 5> iconBuffer; // initial size is for 16x16
-  if (!iconBuffer.SetLength(bufferCapacity))
-    return NS_ERROR_OUT_OF_MEMORY;
+  iconBuffer.SetLength(bufferCapacity);
 
   uint8_t* iconBufferPtr = iconBuffer.Elements();
 
@@ -296,7 +294,7 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval, bool nonBlocki
     // write data out to our buffer
     // non-cairo uses native image format, but the A channel is ignored.
     // cairo uses ARGB (highest to lowest bits)
-#if defined(IS_LITTLE_ENDIAN)
+#if MOZ_LITTLE_ENDIAN
     *iconBufferPtr++ = b;
     *iconBufferPtr++ = g;
     *iconBufferPtr++ = r;

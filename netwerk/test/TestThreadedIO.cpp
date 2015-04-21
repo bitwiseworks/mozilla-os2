@@ -93,7 +93,7 @@ TestListener::~TestListener() {
     printf( "TestListener dtor called on thread %d\n", mThreadNo );
 }
 
-NS_IMPL_ISUPPORTS2( TestListener, nsIStreamListener, nsIRequestObserver )
+NS_IMPL_ISUPPORTS( TestListener, nsIStreamListener, nsIRequestObserver )
 
 NS_IMETHODIMP
 TestListener::OnStartRequest( nsIChannel *aChannel, nsISupports *aContext ) {
@@ -114,7 +114,7 @@ NS_IMETHODIMP
 TestListener::OnStopRequest( nsIChannel *aChannel,
                              nsISupports *aContext,
                              nsresult aStatus,
-                             const PRUnichar *aMsg ) {
+                             const char16_t *aMsg ) {
     nsresult rv = NS_OK;
 
     printf( "TestListener::OnStopRequest called on thread %d\n", mThreadNo );
@@ -252,7 +252,7 @@ main( int argc, char* argv[] ) {
                                                       TestListener::IOThread,
                                                       argv[threadNo],
                                                       PR_PRIORITY_NORMAL,
-                                                      PR_LOCAL_THREAD,
+                                                      PR_GLOBAL_THREAD,
                                                       PR_JOINABLE_THREAD,
                                                       0 );
                 if ( ioThread ) {

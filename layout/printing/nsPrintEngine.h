@@ -24,7 +24,7 @@
 
 // Classes
 class nsPagePrintTimer;
-class nsIDocShellTreeNode;
+class nsIDocShell;
 class nsDeviceContext;
 class nsIDocument;
 class nsIDocumentViewerPrint;
@@ -61,7 +61,7 @@ public:
   NS_IMETHOD GetIsRangeSelection(bool *aIsRangeSelection);
   NS_IMETHOD GetIsFramesetFrameSelected(bool *aIsFramesetFrameSelected);
   NS_IMETHOD GetPrintPreviewNumPages(int32_t *aPrintPreviewNumPages);
-  NS_IMETHOD EnumerateDocumentNames(uint32_t* aCount, PRUnichar*** aResult);
+  NS_IMETHOD EnumerateDocumentNames(uint32_t* aCount, char16_t*** aResult);
   static nsresult GetGlobalPrintSettings(nsIPrintSettings** aPrintSettings);
   NS_IMETHOD GetDoingPrint(bool *aDoingPrint);
   NS_IMETHOD GetDoingPrintPreview(bool *aDoingPrintPreview);
@@ -71,7 +71,6 @@ public:
   // This enum tells indicates what the default should be for the title
   // if the title from the document is null
   enum eDocTitleDefault {
-    eDocTitleDefNone,
     eDocTitleDefBlank,
     eDocTitleDefURLDoc
   };
@@ -83,7 +82,7 @@ public:
   void DestroyPrintingData();
 
   nsresult Initialize(nsIDocumentViewerPrint* aDocViewerPrint, 
-                      nsIWeakReference*       aContainer,
+                      nsIDocShell*            aContainer,
                       nsIDocument*            aDocument,
                       float                   aScreenDPI,
                       FILE*                   aDebugFile);
@@ -117,7 +116,7 @@ public:
   bool     DonePrintingPages(nsPrintObject* aPO, nsresult aResult);
 
   //---------------------------------------------------------------------
-  void BuildDocTree(nsIDocShellTreeNode *      aParentNode,
+  void BuildDocTree(nsIDocShell *      aParentNode,
                     nsTArray<nsPrintObject*> * aDocList,
                     nsPrintObject *            aPO);
   nsresult ReflowDocList(nsPrintObject * aPO, bool aSetPixelScale);
@@ -135,9 +134,9 @@ public:
   static void CloseProgressDialog(nsIWebProgressListener* aWebProgressListener);
   void SetDocAndURLIntoProgress(nsPrintObject* aPO,
                                 nsIPrintProgressParams* aParams);
-  void ElipseLongString(PRUnichar *& aStr, const uint32_t aLen, bool aDoFront);
+  void EllipseLongString(nsAString& aStr, const uint32_t aLen, bool aDoFront);
   nsresult CheckForPrinters(nsIPrintSettings* aPrintSettings);
-  void CleanupDocTitleArray(PRUnichar**& aArray, int32_t& aCount);
+  void CleanupDocTitleArray(char16_t**& aArray, int32_t& aCount);
 
   bool IsThereARangeSelection(nsIDOMWindow * aDOMWin);
 
@@ -163,12 +162,12 @@ public:
   // Static Methods
   //---------------------------------------------------------------------
   static void GetDocumentTitleAndURL(nsIDocument* aDoc,
-                                     PRUnichar** aTitle,
-                                     PRUnichar** aURLStr);
-  void GetDisplayTitleAndURL(nsPrintObject*    aPO,
-                             PRUnichar**       aTitle,
-                             PRUnichar**       aURLStr,
-                             eDocTitleDefault  aDefType);
+                                     nsAString&   aTitle,
+                                     nsAString&   aURLStr);
+  void GetDisplayTitleAndURL(nsPrintObject*   aPO,
+                             nsAString&       aTitle,
+                             nsAString&       aURLStr,
+                             eDocTitleDefault aDefType);
   static void ShowPrintErrorDialog(nsresult printerror,
                                    bool aIsPrinting = true);
 

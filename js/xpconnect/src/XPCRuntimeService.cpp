@@ -1,14 +1,16 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "xpcprivate.h"
+#include "nsContentUtils.h"
+#include "BackstagePass.h"
+#include "nsIProgrammingLanguage.h"
+#include "nsDOMClassInfo.h"
+#include "nsIPrincipal.h"
 
 #include "mozilla/dom/workers/Workers.h"
-#include "nsIScriptSecurityManager.h"
-#include "nsContentUtils.h"
 
 using mozilla::dom::workers::ResolveWorkerClasses;
 
@@ -19,10 +21,10 @@ NS_INTERFACE_MAP_BEGIN(BackstagePass)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIXPCScriptable)
-NS_INTERFACE_MAP_END_THREADSAFE
+NS_INTERFACE_MAP_END
 
-NS_IMPL_THREADSAFE_ADDREF(BackstagePass)
-NS_IMPL_THREADSAFE_RELEASE(BackstagePass)
+NS_IMPL_ADDREF(BackstagePass)
+NS_IMPL_RELEASE(BackstagePass)
 
 // The nsIXPCScriptable map declaration that will generate stubs for us...
 #define XPC_MAP_CLASSNAME           BackstagePass
@@ -40,23 +42,21 @@ NS_IMPL_THREADSAFE_RELEASE(BackstagePass)
                             nsIXPCScriptable::DONT_REFLECT_INTERFACE_NAMES
 #include "xpc_map_end.h" /* This will #undef the above */
 
-/* bool newResolve (in nsIXPConnectWrappedNative wrapper, in JSContextPtr cx, in JSObjectPtr obj, in jsval id, in uint32_t flags, out JSObjectPtr objp); */
+/* bool newResolve (in nsIXPConnectWrappedNative wrapper, in JSContextPtr cx, in JSObjectPtr obj, in jsval id, out JSObjectPtr objp); */
 NS_IMETHODIMP
 BackstagePass::NewResolve(nsIXPConnectWrappedNative *wrapper,
                           JSContext * cx, JSObject * objArg,
-                          jsid idArg, uint32_t flags,
-                          JSObject * *objpArg, bool *_retval)
+                          jsid idArg, JSObject * *objpArg,
+                          bool *_retval)
 {
     JS::RootedObject obj(cx, objArg);
     JS::RootedId id(cx, idArg);
 
-    JSBool resolved;
+    bool resolved;
+    *objpArg = nullptr;
 
     *_retval = !!JS_ResolveStandardClass(cx, obj, id, &resolved);
-    if (!*_retval) {
-        *objpArg = nullptr;
-        return NS_OK;
-    }
+    NS_ENSURE_TRUE(*_retval, NS_ERROR_FAILURE);
 
     if (resolved) {
         *objpArg = obj;
@@ -64,8 +64,15 @@ BackstagePass::NewResolve(nsIXPConnectWrappedNative *wrapper,
     }
 
     JS::RootedObject objp(cx, *objpArg);
-    *_retval = !!ResolveWorkerClasses(cx, obj, id, flags, &objp);
-    *objpArg = objp;
+
+    *_retval = ResolveWorkerClasses(cx, obj, id, &objp);
+    NS_ENSURE_TRUE(*_retval, NS_ERROR_FAILURE);
+
+    if (objp) {
+        *objpArg = objp;
+        return NS_OK;
+    }
+
     return NS_OK;
 }
 
@@ -152,7 +159,7 @@ BackstagePass::GetImplementationLanguage(uint32_t *aImplementationLanguage)
 NS_IMETHODIMP
 BackstagePass::GetFlags(uint32_t *aFlags)
 {
-    *aFlags = nsIClassInfo::THREADSAFE;
+    *aFlags = nsIClassInfo::MAIN_THREAD_ONLY;
     return NS_OK;
 }
 

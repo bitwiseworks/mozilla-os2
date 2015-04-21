@@ -10,12 +10,11 @@ function ensureProvider(workerFunction, cb) {
   let manifest = {
     origin: TEST_PROVIDER_ORIGIN,
     name: "Example Provider",
-    workerURL: "data:application/javascript;charset=utf-8," + encodeURI("let run=" + workerFunction.toSource()) + ";run();"
+    workerURL: "http://example.com/browser/toolkit/components/social/test/browser/echo.sjs?"
+               + encodeURI("let run=" + workerFunction.toSource()) + ";run();"
   };
 
-  ensureSocialEnabled();
   SocialService.addProvider(manifest, function (p) {
-    p.enabled = true;
     cb(p);
   });
 }

@@ -8,7 +8,11 @@
 #include "HttpLog.h"
 
 #include "nsHttpHeaderArray.h"
-#include "nsHttp.h"
+#include "nsURLHelper.h"
+#include "nsIHttpHeaderVisitor.h"
+
+namespace mozilla {
+namespace net {
 
 //-----------------------------------------------------------------------------
 // nsHttpHeaderArray <public>
@@ -211,3 +215,6 @@ nsHttpHeaderArray::Clear()
 {
     mHeaders.Clear();
 }
+
+} // namespace mozilla::net
+} // namespace mozilla

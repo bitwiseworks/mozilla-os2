@@ -9,19 +9,11 @@
 
 #include "mozilla/Attributes.h"
 
-#ifndef nsSubstring_h___
 #include "nsSubstring.h"
-#endif
-
-#ifndef nsDependentSubstring_h___
 #include "nsDependentSubstring.h"
-#endif
-
-#ifndef nsReadableUtils_h___
 #include "nsReadableUtils.h"
-#endif
 
-#include NEW_H
+#include <new>
 
   // enable support for the obsolete string API if not explicitly disabled
 #ifndef MOZ_STRING_WITH_OBSOLETE_API
@@ -48,11 +40,14 @@
 #include "nsTString.h"
 #include "string-template-undef.h"
 
-MOZ_STATIC_ASSERT(sizeof(PRUnichar) == 2, "size of PRUnichar must be 2");
-MOZ_STATIC_ASSERT(sizeof(nsString::char_type) == 2,
-                  "size of nsString::char_type must be 2");
-MOZ_STATIC_ASSERT(sizeof(nsCString::char_type) == 1,
-                  "size of nsCString::char_type must be 1");
+static_assert(sizeof(char16_t) == 2, "size of char16_t must be 2");
+static_assert(sizeof(nsString::char_type) == 2,
+              "size of nsString::char_type must be 2");
+static_assert(nsString::char_type(-1) > nsString::char_type(0),
+              "nsString::char_type must be unsigned");
+static_assert(sizeof(nsCString::char_type) == 1,
+              "size of nsCString::char_type must be 1");
+
 
   /**
    * A helper class that converts a UTF-16 string to ASCII in a lossy manner
@@ -61,15 +56,24 @@ class NS_LossyConvertUTF16toASCII : public nsAutoCString
   {
     public:
       explicit
-      NS_LossyConvertUTF16toASCII( const PRUnichar* aString )
+      NS_LossyConvertUTF16toASCII( const char16_t* aString )
         {
           LossyAppendUTF16toASCII(aString, *this);
         }
 
-      NS_LossyConvertUTF16toASCII( const PRUnichar* aString, uint32_t aLength )
+      NS_LossyConvertUTF16toASCII( const char16_t* aString, uint32_t aLength )
         {
           LossyAppendUTF16toASCII(Substring(aString, aLength), *this);
         }
+
+#ifdef MOZ_USE_CHAR16_WRAPPER
+      explicit
+      NS_LossyConvertUTF16toASCII( char16ptr_t aString )
+        : NS_LossyConvertUTF16toASCII(static_cast<const char16_t*>(aString)) {}
+
+      NS_LossyConvertUTF16toASCII( char16ptr_t aString, uint32_t aLength )
+        : NS_LossyConvertUTF16toASCII(static_cast<const char16_t*>(aString), aLength) {}
+#endif
 
       explicit
       NS_LossyConvertUTF16toASCII( const nsAString& aString )
@@ -105,7 +109,7 @@ class NS_ConvertASCIItoUTF16 : public nsAutoString
 
     private:
         // NOT TO BE IMPLEMENTED
-      NS_ConvertASCIItoUTF16( PRUnichar );
+      NS_ConvertASCIItoUTF16( char16_t );
   };
 
 
@@ -116,15 +120,22 @@ class NS_ConvertUTF16toUTF8 : public nsAutoCString
   {
     public:
       explicit
-      NS_ConvertUTF16toUTF8( const PRUnichar* aString )
+      NS_ConvertUTF16toUTF8( const char16_t* aString )
         {
           AppendUTF16toUTF8(aString, *this);
         }
 
-      NS_ConvertUTF16toUTF8( const PRUnichar* aString, uint32_t aLength )
+      NS_ConvertUTF16toUTF8( const char16_t* aString, uint32_t aLength )
         {
           AppendUTF16toUTF8(Substring(aString, aLength), *this);
         }
+
+#ifdef MOZ_USE_CHAR16_WRAPPER
+      NS_ConvertUTF16toUTF8( char16ptr_t aString ) : NS_ConvertUTF16toUTF8(static_cast<const char16_t*>(aString)) {}
+
+      NS_ConvertUTF16toUTF8( char16ptr_t aString, uint32_t aLength )
+        : NS_ConvertUTF16toUTF8(static_cast<const char16_t*>(aString), aLength) {}
+#endif
 
       explicit
       NS_ConvertUTF16toUTF8( const nsAString& aString )
@@ -160,47 +171,45 @@ class NS_ConvertUTF8toUTF16 : public nsAutoString
 
     private:
         // NOT TO BE IMPLEMENTED
-      NS_ConvertUTF8toUTF16( PRUnichar );
+      NS_ConvertUTF8toUTF16( char16_t );
   };
 
+
+#ifdef MOZ_USE_CHAR16_WRAPPER
+
+inline char16_t*
+wwc(wchar_t *str)
+{
+    return reinterpret_cast<char16_t*>(str);
+}
+
+inline wchar_t*
+wwc(char16_t *str)
+{
+    return reinterpret_cast<wchar_t*>(str);
+}
+
+#else
+
+inline char16_t*
+wwc(char16_t *str)
+{
+    return str;
+}
+
+#endif
 
 // the following are included/declared for backwards compatibility
 typedef nsAutoString nsVoidableString;
 
-#ifndef nsDependentString_h___
 #include "nsDependentString.h"
-#endif
-
-#ifndef nsLiteralString_h___
 #include "nsLiteralString.h"
-#endif
-
-#ifndef nsPromiseFlatString_h___
 #include "nsPromiseFlatString.h"
-#endif
 
 // need to include these for backwards compatibility
 #include "nsMemory.h"
 #include <string.h>
 #include <stdio.h>
 #include "plhash.h"
-
-inline int32_t MinInt(int32_t x, int32_t y)
-  {
-    return XPCOM_MIN(x, y);
-  }
-
-inline int32_t MaxInt(int32_t x, int32_t y)
-  {
-    return XPCOM_MAX(x, y);
-  }
-
-/**
- * Deprecated: don't use |Recycle|, just call |nsMemory::Free| directly
- *
- * Return the given buffer to the heap manager. Calls allocator::Free()
- */
-inline void Recycle( char* aBuffer) { nsMemory::Free(aBuffer); }
-inline void Recycle( PRUnichar* aBuffer) { nsMemory::Free(aBuffer); }
 
 #endif // !defined(nsString_h___)

@@ -1,13 +1,14 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/keys.js");
 Cu.import("resource://services-sync/record.js");
 Cu.import("resource://services-sync/resource.js");
 Cu.import("resource://services-sync/service.js");
 Cu.import("resource://services-sync/util.js");
+Cu.import("resource://testing-common/services/sync/utils.js");
 
 let cryptoWrap;
 
@@ -30,13 +31,14 @@ function run_test() {
   let server;
   do_test_pending();
 
+  ensureLegacyIdentityManager();
   Service.identity.username = "john@example.com";
   Service.identity.syncKey = "a-abcde-abcde-abcde-abcde-abcde";
   let keyBundle = Service.identity.syncKeyBundle;
 
   try {
-    let log = Log4Moz.repository.getLogger("Test");
-    Log4Moz.repository.rootLogger.addAppender(new Log4Moz.DumpAppender());
+    let log = Log.repository.getLogger("Test");
+    Log.repository.rootLogger.addAppender(new Log.DumpAppender());
 
     log.info("Setting up server and authenticator");
 

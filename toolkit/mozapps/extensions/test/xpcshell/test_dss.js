@@ -4,6 +4,12 @@
 
 Components.utils.import("resource://gre/modules/NetUtil.jsm");
 
+// using a dynamic port in the addon metadata
+Components.utils.import("resource://testing-common/httpd.js");
+let gServer = new HttpServer();
+gServer.start(-1);
+gPort = gServer.identity.primaryPort;
+
 // This verifies that themes behave as expected
 
 const PREF_GENERAL_SKINS_SELECTEDSKIN = "general.skins.selectedSkin";
@@ -104,12 +110,12 @@ function run_test() {
     do_check_false(hasFlag(t2.permissions, AddonManager.PERM_CAN_DISABLE));
     do_check_true(hasFlag(t2.permissions, AddonManager.PERM_CAN_ENABLE));
 
-    run_test_1();
+    do_execute_soon(run_test_1);
   });
 }
 
 function end_test() {
-  do_test_finished();
+  do_execute_soon(do_test_finished);
 }
 
 // Checks enabling one theme disables the others
@@ -136,7 +142,7 @@ function run_test_1() {
     do_check_false(hasFlag(t1.permissions, AddonManager.PERM_CAN_DISABLE));
     do_check_true(hasFlag(t1.permissions, AddonManager.PERM_CAN_ENABLE));
 
-    check_test_1();
+    do_execute_soon(check_test_1);
   });
 }
 
@@ -163,7 +169,7 @@ function check_test_1() {
     do_check_false(hasFlag(t2.permissions, AddonManager.PERM_CAN_ENABLE));
     do_check_false(gLWThemeChanged);
 
-    run_test_2();
+    do_execute_soon(run_test_2);
   });
 }
 
@@ -191,7 +197,7 @@ function run_test_2() {
     do_check_false(isThemeInAddonsList(profileDir, "theme2@tests.mozilla.org"));
     do_check_false(gLWThemeChanged);
 
-    run_test_3();
+    do_execute_soon(run_test_3);
   });
 }
 
@@ -231,11 +237,11 @@ function run_test_3() {
     name: "Test LW Theme",
     description: "A test theme",
     author: "Mozilla",
-    homepageURL: "http://localhost:4444/data/index.html",
-    headerURL: "http://localhost:4444/data/header.png",
-    footerURL: "http://localhost:4444/data/footer.png",
-    previewURL: "http://localhost:4444/data/preview.png",
-    iconURL: "http://localhost:4444/data/icon.png"
+    homepageURL: "http://localhost:" + gPort + "/data/index.html",
+    headerURL: "http://localhost:" + gPort + "/data/header.png",
+    footerURL: "http://localhost:" + gPort + "/data/footer.png",
+    previewURL: "http://localhost:" + gPort + "/data/preview.png",
+    iconURL: "http://localhost:" + gPort + "/data/icon.png"
   };
 
   ensure_test_completed();
@@ -247,10 +253,10 @@ function run_test_3() {
     do_check_eq(p1.type, "theme");
     do_check_eq(p1.description, "A test theme");
     do_check_eq(p1.creator, "Mozilla");
-    do_check_eq(p1.homepageURL, "http://localhost:4444/data/index.html");
-    do_check_eq(p1.iconURL, "http://localhost:4444/data/icon.png");
+    do_check_eq(p1.homepageURL, "http://localhost:" + gPort + "/data/index.html");
+    do_check_eq(p1.iconURL, "http://localhost:" + gPort + "/data/icon.png");
     do_check_eq(p1.screenshots.length, 1);
-    do_check_eq(p1.screenshots[0], "http://localhost:4444/data/preview.png");
+    do_check_eq(p1.screenshots[0], "http://localhost:" + gPort + "/data/preview.png");
     do_check_false(p1.appDisabled);
     do_check_false(p1.userDisabled);
     do_check_true(p1.isCompatible);
@@ -280,7 +286,7 @@ function run_test_3() {
       do_check_true(gLWThemeChanged);
       gLWThemeChanged = false;
 
-      run_test_4();
+      do_execute_soon(run_test_4);
     });
   });
 }
@@ -308,11 +314,11 @@ function run_test_4() {
     name: "Test LW Theme",
     description: "A second test theme",
     author: "Mozilla",
-    homepageURL: "http://localhost:4444/data/index.html",
-    headerURL: "http://localhost:4444/data/header.png",
-    footerURL: "http://localhost:4444/data/footer.png",
-    previewURL: "http://localhost:4444/data/preview.png",
-    iconURL: "http://localhost:4444/data/icon.png"
+    homepageURL: "http://localhost:" + gPort + "/data/index.html",
+    headerURL: "http://localhost:" + gPort + "/data/header.png",
+    footerURL: "http://localhost:" + gPort + "/data/footer.png",
+    previewURL: "http://localhost:" + gPort + "/data/preview.png",
+    iconURL: "http://localhost:" + gPort + "/data/icon.png"
   };
 
   ensure_test_completed();
@@ -350,7 +356,7 @@ function run_test_4() {
       do_check_true(gLWThemeChanged);
       gLWThemeChanged = false;
 
-      run_test_5();
+      do_execute_soon(run_test_5);
     });
   });
 }
@@ -412,7 +418,7 @@ function run_test_5() {
     do_check_true(hasFlag(AddonManager.PERM_CAN_ENABLE, p2.permissions));
     do_check_true(gLWThemeChanged);
 
-    check_test_5();
+    do_execute_soon(check_test_5);
   });
 }
 
@@ -431,7 +437,7 @@ function check_test_5() {
     do_check_true(gLWThemeChanged);
     gLWThemeChanged = false;
 
-    run_test_6();
+    do_execute_soon(run_test_6);
   });
 }
 
@@ -489,7 +495,7 @@ function run_test_6() {
     do_check_false(hasFlag(AddonManager.PENDING_DISABLE, t2.pendingOperations));
     do_check_false(gLWThemeChanged);
 
-    check_test_6();
+    do_execute_soon(check_test_6);
   });
 }
 
@@ -508,7 +514,7 @@ function check_test_6() {
     do_check_true(gLWThemeChanged);
     gLWThemeChanged = false;
 
-    run_test_7();
+    do_execute_soon(run_test_7);
   });
 }
 
@@ -528,7 +534,7 @@ function run_test_7() {
     do_check_eq(LightweightThemeManager.usedThemes.length, 1);
     do_check_false(gLWThemeChanged);
 
-    run_test_8();
+    do_execute_soon(run_test_8);
   });
 }
 
@@ -557,7 +563,7 @@ function run_test_8() {
     do_check_true(gLWThemeChanged);
     gLWThemeChanged = false;
 
-    run_test_9();
+    do_execute_soon(run_test_9);
   });
 }
 
@@ -579,14 +585,14 @@ function run_test_9() {
       do_check_eq(newt1, null);
       do_check_false(gLWThemeChanged);
 
-      run_test_10();
+      do_execute_soon(run_test_10);
     });
   });
 }
 
 // Uninstalling a custom theme in use should require a restart
 function run_test_10() {
-  AddonManager.getAddonByID("theme2@tests.mozilla.org", function(oldt2) {
+  AddonManager.getAddonByID("theme2@tests.mozilla.org", callback_soon(function(oldt2) {
     prepare_test({
       "theme2@tests.mozilla.org": [
         ["onEnabling", false],
@@ -605,7 +611,8 @@ function run_test_10() {
     restartManager();
 
     AddonManager.getAddonsByIDs(["default@tests.mozilla.org",
-                                 "theme2@tests.mozilla.org"], function([d, t2]) {
+                                 "theme2@tests.mozilla.org"],
+                                 callback_soon(function([d, t2]) {
       do_check_true(t2.isActive);
       do_check_false(t2.userDisabled);
       do_check_false(t2.appDisabled);
@@ -631,9 +638,9 @@ function run_test_10() {
 
       restartManager();
 
-      run_test_11();
-    });
-  });
+      do_execute_soon(run_test_11);
+    }));
+  }));
 }
 
 // Installing a custom theme not in use should not require a restart
@@ -659,7 +666,7 @@ function run_test_11() {
     }, [
       "onInstallStarted",
       "onInstallEnded",
-    ], check_test_11);
+    ], callback_soon(check_test_11));
     install.install();
   });
 }
@@ -673,7 +680,7 @@ function check_test_11() {
     do_check_eq(t1.screenshots[0], previewSpec);
     do_check_false(gLWThemeChanged);
 
-    run_test_12();
+    do_execute_soon(run_test_12);
   });
 }
 
@@ -710,13 +717,13 @@ function check_test_12() {
     do_check_neq(t1, null);
     do_check_false(gLWThemeChanged);
 
-    run_test_13();
+    do_execute_soon(run_test_13);
   });
 }
 
 // Updating a custom theme in use should require a restart
 function run_test_13() {
-  AddonManager.getAddonByID("theme1@tests.mozilla.org", function(t1) {
+  AddonManager.getAddonByID("theme1@tests.mozilla.org", callback_soon(function(t1) {
     prepare_test({
       "theme1@tests.mozilla.org": [
         ["onEnabling", false],
@@ -752,10 +759,10 @@ function run_test_13() {
       }, [
         "onInstallStarted",
         "onInstallEnded",
-      ], check_test_13);
+      ], callback_soon(check_test_13));
       install.install();
     });
-  });
+  }));
 }
 
 function check_test_13() {
@@ -766,26 +773,26 @@ function check_test_13() {
     do_check_true(t1.isActive);
     do_check_false(gLWThemeChanged);
     t1.uninstall();
-    restartManager();
 
-    run_test_14();
+    do_execute_soon(run_test_14);
   });
 }
 
 // Switching from a lightweight theme to the default theme should not require
 // a restart
 function run_test_14() {
+  restartManager();
   LightweightThemeManager.currentTheme = {
     id: "1",
     version: "1",
     name: "Test LW Theme",
     description: "A test theme",
     author: "Mozilla",
-    homepageURL: "http://localhost:4444/data/index.html",
-    headerURL: "http://localhost:4444/data/header.png",
-    footerURL: "http://localhost:4444/data/footer.png",
-    previewURL: "http://localhost:4444/data/preview.png",
-    iconURL: "http://localhost:4444/data/icon.png"
+    homepageURL: "http://localhost:" + gPort + "/data/index.html",
+    headerURL: "http://localhost:" + gPort + "/data/header.png",
+    footerURL: "http://localhost:" + gPort + "/data/footer.png",
+    previewURL: "http://localhost:" + gPort + "/data/preview.png",
+    iconURL: "http://localhost:" + gPort + "/data/icon.png"
   };
 
   AddonManager.getAddonByID("default@tests.mozilla.org", function(d) {

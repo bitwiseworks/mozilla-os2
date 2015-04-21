@@ -15,12 +15,17 @@
 
   makePC = function (config, expect_success) {
       var exception = null;
+      var pc = null;
 
       try {
-          var pc = new mozRTCPeerConnection(config);
+          pc = new mozRTCPeerConnection(config);
       } catch (e) {
           exception = e;
       }
+      if (pc !== null) {
+        pc.close();
+      }
+      pc = null
 
       if (expect_success) {
           ok(!exception, "mozRTCPeerConnection(" +
@@ -31,13 +36,23 @@
       }
   }
 
+  // This is a test of the iceServers parsing code + readable errors
+
   runTest(function () {
-    var pc;
+    var pcs = null;
     var exception = null;
     var config;
 
-    try { pcs = new mozRTCPeerConnection(); } catch (e) { exception = e; }
+    try {
+      pcs = new mozRTCPeerConnection();
+    } catch (e) {
+      exception = e;
+    }
     ok(!exception, "mozRTCPeerConnection() succeeds");
+    if (pcs !== null) {
+      pcs.close();
+    }
+    pcs = null;
     exception = null;
 
     makePC(1, false);
@@ -48,16 +63,29 @@
 
     makePC({ iceServers: [{ url:"" }] }, false);
 
-    makePC({ iceServers: [{ url:"http:0.0.0.0" }] }, false);
-
     makePC({ iceServers: [
-                { url:"stun:0.0.0.0" },
-                { url:"stuns:x.net", foo:"" },
-                { url:"turn:[::192.9.5.5]:42", username:"p", credential:"p" },
-                { url:"turns:x.org:42?transport=udp", username:"p", credential:"p" }
+                { url:"stun:127.0.0.1" },
+                { url:"stuns:localhost", foo:"" },
+                { url:"turn:[::1]:3478", username:"p", credential:"p" },
+                { url:"turns:localhost:3478?transport=udp", username:"p", credential:"p" }
                 ]}, true);
 
+    makePC({ iceServers: [{ url:"turns:localhost:3478", username:"p" }] }, false);
+
+    makePC({ iceServers: [{ url:"turns:localhost:3478", credential:"p" }] }, false);
+
+    makePC({ iceServers: [{ url:"http:0.0.0.0" }] }, false);
+    try {
+        pcs = new mozRTCPeerConnection({ iceServers: [{ url:"http:0.0.0.0" }] });
+    } catch (e) {
+        ok(e.message.indexOf("http") > 0,
+           "mozRTCPeerConnection() constructor has readable exceptions");
+    }
+    if (pcs !== null) {
+      pcs.close();
+    }
     pcs = null;
+
     SimpleTest.finish();
   });
 </script>

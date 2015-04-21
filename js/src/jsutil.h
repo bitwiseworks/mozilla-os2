@@ -11,20 +11,26 @@
 #ifndef jsutil_h
 #define jsutil_h
 
-#include "mozilla/Attributes.h"
+#include "mozilla/Assertions.h"
 #include "mozilla/Compiler.h"
 #include "mozilla/GuardObjects.h"
 
+#include <limits.h>
+
 #include "js/Utility.h"
 
-#ifdef USE_ZLIB
-#include "zlib.h"
+#define JS_ALWAYS_TRUE(expr)      MOZ_ALWAYS_TRUE(expr)
+#define JS_ALWAYS_FALSE(expr)     MOZ_ALWAYS_FALSE(expr)
+
+#if defined(JS_DEBUG)
+# define JS_DIAGNOSTICS_ASSERT(expr) MOZ_ASSERT(expr)
+#elif defined(JS_CRASH_DIAGNOSTICS)
+# define JS_DIAGNOSTICS_ASSERT(expr) do { if (MOZ_UNLIKELY(!(expr))) MOZ_CRASH(); } while(0)
+#else
+# define JS_DIAGNOSTICS_ASSERT(expr) ((void) 0)
 #endif
 
-/* Forward declarations. */
-struct JSContext;
-
-static JS_ALWAYS_INLINE void *
+static MOZ_ALWAYS_INLINE void *
 js_memcpy(void *dst_, const void *src_, size_t len)
 {
     char *dst = (char *) dst_;
@@ -149,7 +155,7 @@ InitConst(const T &t)
 }
 
 template <class T, class U>
-JS_ALWAYS_INLINE T &
+MOZ_ALWAYS_INLINE T &
 ImplicitCast(U &u)
 {
     T &t = u;
@@ -198,7 +204,7 @@ AlignBytes(T bytes, U alignment)
     return bytes + ComputeByteAlignment(bytes, alignment);
 }
 
-JS_ALWAYS_INLINE static size_t
+static MOZ_ALWAYS_INLINE size_t
 UnsignedPtrDiff(const void *bigger, const void *smaller)
 {
     return size_t(bigger) - size_t(smaller);
@@ -208,16 +214,18 @@ UnsignedPtrDiff(const void *bigger, const void *smaller)
 
 /* A bit array is an array of bits represented by an array of words (size_t). */
 
+static const size_t BitArrayElementBits = sizeof(size_t) * CHAR_BIT;
+
 static inline unsigned
 NumWordsForBitArrayOfLength(size_t length)
 {
-    return (length + (JS_BITS_PER_WORD - 1)) / JS_BITS_PER_WORD;
+    return (length + (BitArrayElementBits - 1)) / BitArrayElementBits;
 }
 
 static inline unsigned
 BitArrayIndexToWordIndex(size_t length, size_t bitIndex)
 {
-    unsigned wordIndex = bitIndex / JS_BITS_PER_WORD;
+    unsigned wordIndex = bitIndex / BitArrayElementBits;
     JS_ASSERT(wordIndex < length);
     return wordIndex;
 }
@@ -225,7 +233,7 @@ BitArrayIndexToWordIndex(size_t length, size_t bitIndex)
 static inline size_t
 BitArrayIndexToWordMask(size_t i)
 {
-    return size_t(1) << (i % JS_BITS_PER_WORD);
+    return size_t(1) << (i % BitArrayElementBits);
 }
 
 static inline bool
@@ -264,52 +272,20 @@ ClearAllBitArrayElements(size_t *array, size_t length)
         array[i] = 0;
 }
 
-#ifdef USE_ZLIB
-class Compressor
-{
-    /* Number of bytes we should hand to zlib each compressMore() call. */
-    static const size_t CHUNKSIZE = 2048;
-    z_stream zs;
-    const unsigned char *inp;
-    size_t inplen;
-    size_t outbytes;
-
-  public:
-    enum Status {
-        MOREOUTPUT,
-        DONE,
-        CONTINUE,
-        OOM
-    };
-
-    Compressor(const unsigned char *inp, size_t inplen);
-    ~Compressor();
-    bool init();
-    void setOutput(unsigned char *out, size_t outlen);
-    size_t outWritten() const { return outbytes; }
-    /* Compress some of the input. Return true if it should be called again. */
-    Status compressMore();
-};
-
-/*
- * Decompress a string. The caller must know the length of the output and
- * allocate |out| to a string of that length.
- */
-bool DecompressString(const unsigned char *inp, size_t inplen,
-                      unsigned char *out, size_t outlen);
-#endif
-
 }  /* namespace js */
 
 /* Crash diagnostics */
 #ifdef DEBUG
 # define JS_CRASH_DIAGNOSTICS 1
 #endif
-#ifdef JS_CRASH_DIAGNOSTICS
+#if defined(JS_CRASH_DIAGNOSTICS) || defined(JS_GC_ZEAL)
 # define JS_POISON(p, val, size) memset((p), (val), (size))
 #else
 # define JS_POISON(p, val, size) ((void) 0)
 #endif
+
+/* Bug 984101: Disable labeled poisoning until we have poison checking. */
+#define JS_EXTRA_POISON(p, val, size) ((void) 0)
 
 /* Basic stats */
 #ifdef DEBUG
@@ -345,12 +321,13 @@ JS_DumpHistogram(JSBasicStats *bs, FILE *fp);
 
 /* A jsbitmap_t is a long integer that can be used for bitmaps. */
 typedef size_t jsbitmap;
-#define JS_TEST_BIT(_map,_bit)  ((_map)[(_bit)>>JS_BITS_PER_WORD_LOG2] &      \
-                                 ((jsbitmap)1<<((_bit)&(JS_BITS_PER_WORD-1))))
-#define JS_SET_BIT(_map,_bit)   ((_map)[(_bit)>>JS_BITS_PER_WORD_LOG2] |=     \
-                                 ((jsbitmap)1<<((_bit)&(JS_BITS_PER_WORD-1))))
-#define JS_CLEAR_BIT(_map,_bit) ((_map)[(_bit)>>JS_BITS_PER_WORD_LOG2] &=     \
-                                 ~((jsbitmap)1<<((_bit)&(JS_BITS_PER_WORD-1))))
+#define JS_BITMAP_NBITS (sizeof(jsbitmap) * CHAR_BIT)
+#define JS_TEST_BIT(_map,_bit)  ((_map)[(_bit)/JS_BITMAP_NBITS] &             \
+                                 (jsbitmap(1)<<((_bit)%JS_BITMAP_NBITS)))
+#define JS_SET_BIT(_map,_bit)   ((_map)[(_bit)/JS_BITMAP_NBITS] |=            \
+                                 (jsbitmap(1)<<((_bit)%JS_BITMAP_NBITS)))
+#define JS_CLEAR_BIT(_map,_bit) ((_map)[(_bit)/JS_BITMAP_NBITS] &=            \
+                                 ~(jsbitmap(1)<<((_bit)%JS_BITMAP_NBITS)))
 
 /* Wrapper for various macros to stop warnings coming from their expansions. */
 #if defined(__clang__)

@@ -9,12 +9,11 @@
 #include "nsIContent.h"
 #include "nsIFrame.h"
 #include "nsIPresShell.h"
+#include "nsNumberControlFrame.h"
 #include "nsPresContext.h"
-#include "nsEventStateManager.h"
 #include "nsString.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsIDOMHTMLInputElement.h"
-#include "nsIDOMHTMLProgressElement.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "nsThemeConstants.h"
 #include "nsIComponentManager.h"
@@ -24,17 +23,22 @@
 #include "nsMenuFrame.h"
 #include "nsRangeFrame.h"
 #include "nsCSSRendering.h"
+#include "mozilla/EventStates.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLBodyElement.h"
+#include "mozilla/dom/HTMLProgressElement.h"
 #include "nsIDocumentInlines.h"
 #include <algorithm>
+
+using namespace mozilla;
+using namespace mozilla::dom;
 
 nsNativeTheme::nsNativeTheme()
 : mAnimatedContentTimeout(UINT32_MAX)
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsNativeTheme, nsITimerCallback)
+NS_IMPL_ISUPPORTS(nsNativeTheme, nsITimerCallback)
 
 nsIPresShell *
 nsNativeTheme::GetPresShell(nsIFrame* aFrame)
@@ -48,11 +52,11 @@ nsNativeTheme::GetPresShell(nsIFrame* aFrame)
   return context ? context->GetPresShell() : nullptr;
 }
 
-nsEventStates
+EventStates
 nsNativeTheme::GetContentState(nsIFrame* aFrame, uint8_t aWidgetType)
 {
   if (!aFrame)
-    return nsEventStates();
+    return EventStates();
 
   bool isXULCheckboxRadio = 
     (aWidgetType == NS_THEME_CHECKBOX ||
@@ -62,16 +66,34 @@ nsNativeTheme::GetContentState(nsIFrame* aFrame, uint8_t aWidgetType)
     aFrame = aFrame->GetParent();
 
   if (!aFrame->GetContent())
-    return nsEventStates();
+    return EventStates();
 
   nsIPresShell *shell = GetPresShell(aFrame);
   if (!shell)
-    return nsEventStates();
+    return EventStates();
 
   nsIContent* frameContent = aFrame->GetContent();
-  nsEventStates flags;
+  EventStates flags;
   if (frameContent->IsElement()) {
     flags = frameContent->AsElement()->State();
+
+    // <input type=number> needs special handling since its nested native
+    // anonymous <input type=text> takes focus for it.
+    if (aWidgetType == NS_THEME_NUMBER_INPUT &&
+        frameContent->IsHTML(nsGkAtoms::input)) {
+      nsNumberControlFrame *numberControlFrame = do_QueryFrame(aFrame);
+      if (numberControlFrame && numberControlFrame->IsFocused()) {
+        flags |= NS_EVENT_STATE_FOCUS;
+      }
+    }
+
+    nsNumberControlFrame* numberControlFrame =
+      nsNumberControlFrame::GetNumberControlFrameForSpinButton(aFrame);
+    if (numberControlFrame &&
+        numberControlFrame->GetContent()->AsElement()->State().
+          HasState(NS_EVENT_STATE_DISABLED)) {
+      flags |= NS_EVENT_STATE_DISABLED;
+    }
   }
   
   if (isXULCheckboxRadio && aWidgetType == NS_THEME_RADIO) {
@@ -84,7 +106,8 @@ nsNativeTheme::GetContentState(nsIFrame* aFrame, uint8_t aWidgetType)
   // focus something in the window.
 #if defined(XP_MACOSX)
   // Mac always draws focus rings for textboxes and lists.
-  if (aWidgetType == NS_THEME_TEXTFIELD ||
+  if (aWidgetType == NS_THEME_NUMBER_INPUT ||
+      aWidgetType == NS_THEME_TEXTFIELD ||
       aWidgetType == NS_THEME_TEXTFIELD_MULTILINE ||
       aWidgetType == NS_THEME_SEARCHFIELD ||
       aWidgetType == NS_THEME_LISTBOX) {
@@ -150,14 +173,8 @@ nsNativeTheme::GetProgressValue(nsIFrame* aFrame)
 {
   // When we are using the HTML progress element,
   // we can get the value from the IDL property.
-  if (aFrame) {
-    nsCOMPtr<nsIDOMHTMLProgressElement> progress =
-      do_QueryInterface(aFrame->GetContent());
-    if (progress) {
-      double value;
-      progress->GetValue(&value);
-      return value;
-    }
+  if (aFrame && aFrame->GetContent()->IsHTML(nsGkAtoms::progress)) {
+    return static_cast<HTMLProgressElement*>(aFrame->GetContent())->Value();
   }
 
   return (double)nsNativeTheme::CheckIntAttr(aFrame, nsGkAtoms::value, 0);
@@ -169,14 +186,8 @@ nsNativeTheme::GetProgressMaxValue(nsIFrame* aFrame)
 {
   // When we are using the HTML progress element,
   // we can get the max from the IDL property.
-  if (aFrame) {
-    nsCOMPtr<nsIDOMHTMLProgressElement> progress =
-      do_QueryInterface(aFrame->GetContent());
-    if (progress) {
-      double max;
-      progress->GetMax(&max);
-      return max;
-    }
+  if (aFrame && aFrame->GetContent()->IsHTML(nsGkAtoms::progress)) {
+    return static_cast<HTMLProgressElement*>(aFrame->GetContent())->Max();
   }
 
   return (double)std::max(nsNativeTheme::CheckIntAttr(aFrame, nsGkAtoms::max, 100), 1);
@@ -222,7 +233,7 @@ nsNativeTheme::IsButtonTypeMenu(nsIFrame* aFrame)
 bool
 nsNativeTheme::IsPressedButton(nsIFrame* aFrame)
 {
-  nsEventStates eventState = GetContentState(aFrame, NS_THEME_TOOLBAR_BUTTON);
+  EventStates eventState = GetContentState(aFrame, NS_THEME_TOOLBAR_BUTTON);
   if (IsDisabled(aFrame, eventState))
     return false;
 
@@ -323,7 +334,17 @@ nsNativeTheme::IsWidgetStyled(nsPresContext* aPresContext, nsIFrame* aFrame,
     }
   }
 
-  return (aWidgetType == NS_THEME_BUTTON ||
+  if (aWidgetType == NS_THEME_SPINNER_UP_BUTTON ||
+      aWidgetType == NS_THEME_SPINNER_DOWN_BUTTON) {
+    nsNumberControlFrame* numberControlFrame =
+      nsNumberControlFrame::GetNumberControlFrameForSpinButton(aFrame);
+    if (numberControlFrame) {
+      return !numberControlFrame->ShouldUseNativeStyleForSpinner();
+    }
+  }
+
+  return (aWidgetType == NS_THEME_NUMBER_INPUT ||
+          aWidgetType == NS_THEME_BUTTON ||
           aWidgetType == NS_THEME_TEXTFIELD ||
           aWidgetType == NS_THEME_TEXTFIELD_MULTILINE ||
           aWidgetType == NS_THEME_LISTBOX ||
@@ -335,7 +356,7 @@ nsNativeTheme::IsWidgetStyled(nsPresContext* aPresContext, nsIFrame* aFrame,
 }
 
 bool
-nsNativeTheme::IsDisabled(nsIFrame* aFrame, nsEventStates aEventStates)
+nsNativeTheme::IsDisabled(nsIFrame* aFrame, EventStates aEventStates)
 {
   if (!aFrame) {
     return false;
@@ -514,7 +535,7 @@ nsNativeTheme::IsNextToSelectedTab(nsIFrame* aFrame, int32_t aOffset)
 // progressbar:
 bool
 nsNativeTheme::IsIndeterminateProgress(nsIFrame* aFrame,
-                                       nsEventStates aEventStates)
+                                       EventStates aEventStates)
 {
   if (!aFrame || !aFrame->GetContent())
     return false;
@@ -674,11 +695,15 @@ nsNativeTheme::IsRangeHorizontal(nsIFrame* aFrame)
 {
   nsIFrame* rangeFrame = aFrame;
   if (rangeFrame->GetType() != nsGkAtoms::rangeFrame) {
+    // If the thumb's frame is passed in, get its range parent:
     rangeFrame = aFrame->GetParent();
   }
-  MOZ_ASSERT(rangeFrame->GetType() == nsGkAtoms::rangeFrame);
-
-  return static_cast<nsRangeFrame*>(rangeFrame)->IsHorizontal();
+  if (rangeFrame->GetType() == nsGkAtoms::rangeFrame) {
+    return static_cast<nsRangeFrame*>(rangeFrame)->IsHorizontal();
+  }
+  // Not actually a range frame - just use the ratio of the frame's size to
+  // decide:
+  return aFrame->GetSize().width >= aFrame->GetSize().height;
 }
 
 static nsIFrame*

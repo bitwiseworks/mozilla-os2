@@ -7,6 +7,7 @@
 #include "nsGkAtoms.h"
 #include "nsIContent.h"
 #include "nsINodeInfo.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/FromParser.h"
 
 using namespace mozilla;
@@ -23,32 +24,32 @@ static PLHashTable* sTagAtomTable = nullptr;
 #define SVG_TAG(_tag, _classname) \
 nsresult \
 NS_NewSVG##_classname##Element(nsIContent** aResult, \
-                               already_AddRefed<nsINodeInfo> aNodeInfo); \
+                               already_AddRefed<nsINodeInfo>&& aNodeInfo); \
 \
 static inline nsresult \
 Create##_classname##Element(nsIContent** aResult, \
-                            already_AddRefed<nsINodeInfo> aNodeInfo, \
+                            already_AddRefed<nsINodeInfo>&& aNodeInfo, \
                             FromParser aFromParser) \
 { \
-  return NS_NewSVG##_classname##Element(aResult, aNodeInfo); \
+  return NS_NewSVG##_classname##Element(aResult, mozilla::Move(aNodeInfo)); \
 }
 
 #define SVG_FROM_PARSER_TAG(_tag, _classname) \
 nsresult \
 NS_NewSVG##_classname##Element(nsIContent** aResult, \
-                               already_AddRefed<nsINodeInfo> aNodeInfo, \
+                               already_AddRefed<nsINodeInfo>&& aNodeInfo, \
                                FromParser aFromParser);
 #include "SVGTagList.h"
 #undef SVG_TAG
 #undef SVG_FROM_PARSER_TAG
 
 nsresult
-NS_NewSVGElement(nsIContent** aResult,
-                 already_AddRefed<nsINodeInfo> aNodeInfo);
+NS_NewSVGElement(Element** aResult,
+                 already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 typedef nsresult
   (*contentCreatorCallback)(nsIContent** aResult,
-                            already_AddRefed<nsINodeInfo> aNodeInfo,
+                            already_AddRefed<nsINodeInfo>&& aNodeInfo,
                             FromParser aFromParser);
 
 static const contentCreatorCallback sContentCreatorCallbacks[] = {
@@ -102,15 +103,24 @@ SVGElementFactory::Shutdown()
   }
 }
 
+bool
+SVGElementFactory::Exists(nsIAtom *aTag)
+{
+  MOZ_ASSERT(sTagAtomTable, "no lookup table, needs SVGElementFactory::Init");
+  void* tag = PL_HashTableLookupConst(sTagAtomTable, aTag);
+  return tag != nullptr;
+}
+
 nsresult
-NS_NewSVGElement(nsIContent** aResult, already_AddRefed<nsINodeInfo> aNodeInfo,
+NS_NewSVGElement(Element** aResult, already_AddRefed<nsINodeInfo>&& aNodeInfo,
                  FromParser aFromParser)
 {
   NS_ASSERTION(sTagAtomTable, "no lookup table, needs SVGElementFactory::Init");
 
-  nsIAtom* name = aNodeInfo.get()->NameAtom();
+  nsCOMPtr<nsINodeInfo> ni = aNodeInfo;
+  nsIAtom* name = ni->NameAtom();
 
-  NS_ASSERTION(aNodeInfo.get()->NamespaceEquals(kNameSpaceID_SVG), 
+  NS_ASSERTION(ni->NamespaceEquals(kNameSpaceID_SVG),
                "Trying to create SVG elements that aren't in the SVG namespace");
 
   void* tag = PL_HashTableLookupConst(sTagAtomTable, name);
@@ -123,9 +133,12 @@ NS_NewSVGElement(nsIContent** aResult, already_AddRefed<nsINodeInfo> aNodeInfo,
 
     contentCreatorCallback cb = sContentCreatorCallbacks[index];
 
-    return cb(aResult, aNodeInfo, aFromParser);
+    nsCOMPtr<nsIContent> content;
+    nsresult rv = cb(getter_AddRefs(content), ni.forget(), aFromParser);
+    *aResult = content.forget().take()->AsElement();
+    return rv;
   }
 
   // if we don't know what to create, just create a standard svg element:
-  return NS_NewSVGElement(aResult, aNodeInfo);
+  return NS_NewSVGElement(aResult, ni.forget());
 }

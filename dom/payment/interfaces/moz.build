@@ -5,15 +5,10 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 XPIDL_SOURCES += [
-    'nsIDOMPaymentRequestInfo.idl',
     'nsINavigatorPayment.idl',
     'nsIPaymentFlowInfo.idl',
     'nsIPaymentUIGlue.idl',
 ]
 
 XPIDL_MODULE = 'dom_payment'
-
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/dom/interfaces/base',
-]
 

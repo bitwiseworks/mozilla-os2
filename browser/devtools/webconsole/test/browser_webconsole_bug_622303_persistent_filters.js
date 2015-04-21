@@ -4,11 +4,13 @@
 let prefs = {
   "net": [
     "network",
-    "networkinfo"
+    "netwarn",
+    "networkinfo",
   ],
   "css": [
     "csserror",
-    "cssparser"
+    "cssparser",
+    "csslog"
   ],
   "js": [
     "exception",

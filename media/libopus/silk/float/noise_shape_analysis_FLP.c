@@ -1,9 +1,5 @@
 /***********************************************************************
-Copyright (c) 2006-2012 IETF Trust and Skype Limited. All rights reserved.
-
-This file is extracted from RFC6716. Please see that RFC for additional
-information.
-
+Copyright (c) 2006-2011, Skype Limited. All rights reserved.
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions
 are met:
@@ -16,7 +12,7 @@ documentation and/or other materials provided with the distribution.
 names of specific contributors, may be used to endorse or promote
 products derived from this software without specific prior written
 permission.
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS”
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
 ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
@@ -40,7 +36,7 @@ POSSIBILITY OF SUCH DAMAGE.
 /* non-warped frequency scale. (So that it can be implemented with a minimum-phase monic filter.) */
 /* Note: A monic filter is one with the first coefficient equal to 1.0. In Silk we omit the first */
 /* coefficient in an array of coefficients, for monic filters.                                    */
-static inline silk_float warped_gain(
+static OPUS_INLINE silk_float warped_gain(
     const silk_float     *coefs,
     silk_float           lambda,
     opus_int             order
@@ -58,7 +54,7 @@ static inline silk_float warped_gain(
 
 /* Convert warped filter coefficients to monic pseudo-warped coefficients and limit maximum     */
 /* amplitude of monic warped coefficients by using bandwidth expansion on the true coefficients */
-static inline void warped_true2monic_coefs(
+static OPUS_INLINE void warped_true2monic_coefs(
     silk_float           *coefs_syn,
     silk_float           *coefs_ana,
     silk_float           lambda,
@@ -178,7 +174,7 @@ void silk_noise_shape_analysis_FLP(
     /*************************/
     /* Set quantizer offset */
     if( psEnc->sCmn.indices.signalType == TYPE_VOICED ) {
-        /* Initally set to 0; may be overruled in process_gains(..) */
+        /* Initially set to 0; may be overruled in process_gains(..) */
         psEnc->sCmn.indices.quantOffsetType = 0;
         psEncCtrl->sparseness = 0.0f;
     } else {

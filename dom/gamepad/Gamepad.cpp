@@ -5,7 +5,6 @@
 #include "Gamepad.h"
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
-#include "nsContentUtils.h"
 #include "nsVariant.h"
 #include "mozilla/dom/GamepadBinding.h"
 
@@ -18,10 +17,9 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(Gamepad)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Gamepad)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMGamepad)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(Gamepad, mParent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(Gamepad, mParent, mButtons)
 
 Gamepad::Gamepad(nsISupports* aParent,
                  const nsAString& aID, uint32_t aIndex,
@@ -31,10 +29,14 @@ Gamepad::Gamepad(nsISupports* aParent,
     mID(aID),
     mIndex(aIndex),
     mMapping(aMapping),
-    mConnected(true)
+    mConnected(true),
+    mButtons(aNumButtons),
+    mAxes(aNumAxes)
 {
   SetIsDOMBinding();
-  mButtons.InsertElementsAt(0, aNumButtons);
+  for (unsigned i = 0; i < aNumButtons; i++) {
+    mButtons.InsertElementAt(i, new GamepadButton(mParent));
+  }
   mAxes.InsertElementsAt(0, aNumAxes, 0.0f);
 }
 
@@ -54,77 +56,18 @@ void
 Gamepad::SetButton(uint32_t aButton, bool aPressed, double aValue)
 {
   MOZ_ASSERT(aButton < mButtons.Length());
-  mButtons[aButton].pressed = aPressed;
-  mButtons[aButton].value = aValue;
+  mButtons[aButton]->SetPressed(aPressed);
+  mButtons[aButton]->SetValue(aValue);
 }
 
 void
 Gamepad::SetAxis(uint32_t aAxis, double aValue)
 {
   MOZ_ASSERT(aAxis < mAxes.Length());
-  mAxes[aAxis] = aValue;
-}
-
-nsresult
-Gamepad::GetButtons(nsIVariant** aButtons)
-{
-  nsRefPtr<nsVariant> out = new nsVariant();
-  NS_ENSURE_STATE(out);
-
-  if (mButtons.Length() == 0) {
-    nsresult rv = out->SetAsEmptyArray();
-    NS_ENSURE_SUCCESS(rv, rv);
-  } else {
-    // Note: The resulting nsIVariant dupes both the array and its elements.
-    double* array = reinterpret_cast<double*>
-                      (NS_Alloc(mButtons.Length() * sizeof(double)));
-    NS_ENSURE_TRUE(array, NS_ERROR_OUT_OF_MEMORY);
-
-    for (uint32_t i = 0; i < mButtons.Length(); ++i) {
-      array[i] = mButtons[i].value;
-    }
-
-    nsresult rv = out->SetAsArray(nsIDataType::VTYPE_DOUBLE,
-                                  nullptr,
-                                  mButtons.Length(),
-                                  reinterpret_cast<void*>(array));
-    NS_Free(array);
-    NS_ENSURE_SUCCESS(rv, rv);
+  if (mAxes[aAxis] != aValue) {
+    mAxes[aAxis] = aValue;
+    GamepadBinding::ClearCachedAxesValue(this);
   }
-
-  *aButtons = out.forget().get();
-  return NS_OK;
-}
-
-nsresult
-Gamepad::GetAxes(nsIVariant** aAxes)
-{
-  nsRefPtr<nsVariant> out = new nsVariant();
-  NS_ENSURE_STATE(out);
-
-  if (mAxes.Length() == 0) {
-    nsresult rv = out->SetAsEmptyArray();
-    NS_ENSURE_SUCCESS(rv, rv);
-  } else {
-    // Note: The resulting nsIVariant dupes both the array and its elements.
-    double* array = reinterpret_cast<double*>
-                              (NS_Alloc(mAxes.Length() * sizeof(double)));
-    NS_ENSURE_TRUE(array, NS_ERROR_OUT_OF_MEMORY);
-
-    for (uint32_t i = 0; i < mAxes.Length(); ++i) {
-      array[i] = mAxes[i];
-    }
-
-    nsresult rv = out->SetAsArray(nsIDataType::VTYPE_DOUBLE,
-                                  nullptr,
-                                  mAxes.Length(),
-                                  reinterpret_cast<void*>(array));
-    NS_Free(array);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  *aAxes = out.forget().get();
-  return NS_OK;
 }
 
 void
@@ -137,10 +80,16 @@ Gamepad::SyncState(Gamepad* aOther)
 
   mConnected = aOther->mConnected;
   for (uint32_t i = 0; i < mButtons.Length(); ++i) {
-    mButtons[i] = aOther->mButtons[i];
+    mButtons[i]->SetPressed(aOther->mButtons[i]->Pressed());
+    mButtons[i]->SetValue(aOther->mButtons[i]->Value());
   }
+  bool changed = false;
   for (uint32_t i = 0; i < mAxes.Length(); ++i) {
+    changed = changed || (mAxes[i] != aOther->mAxes[i]);
     mAxes[i] = aOther->mAxes[i];
+  }
+  if (changed) {
+    GamepadBinding::ClearCachedAxesValue(this);
   }
 }
 
@@ -155,9 +104,9 @@ Gamepad::Clone(nsISupports* aParent)
 }
 
 /* virtual */ JSObject*
-Gamepad::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+Gamepad::WrapObject(JSContext* aCx)
 {
-  return GamepadBinding::Wrap(aCx, aScope, this);
+  return GamepadBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

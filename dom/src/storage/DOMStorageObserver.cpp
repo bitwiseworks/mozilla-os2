@@ -30,9 +30,9 @@ namespace dom {
 static const char kStartupTopic[] = "sessionstore-windows-restored";
 static const uint32_t kStartupDelay = 0;
 
-NS_IMPL_ISUPPORTS2(DOMStorageObserver,
-                   nsIObserver,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(DOMStorageObserver,
+                  nsIObserver,
+                  nsISupportsWeakReference)
 
 DOMStorageObserver* DOMStorageObserver::sSelf = nullptr;
 
@@ -121,7 +121,7 @@ DOMStorageObserver::Notify(const char* aTopic, const nsACString& aData)
 NS_IMETHODIMP
 DOMStorageObserver::Observe(nsISupports* aSubject,
                             const char* aTopic,
-                            const PRUnichar* aData)
+                            const char16_t* aData)
 {
   nsresult rv;
 

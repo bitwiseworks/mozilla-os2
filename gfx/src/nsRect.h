@@ -7,19 +7,22 @@
 #ifndef NSRECT_H
 #define NSRECT_H
 
-#include <stdio.h>
-#include "nsCoord.h"
-#include "nsPoint.h"
-#include "nsSize.h"
-#include "nsMargin.h"
-#include "gfxCore.h"
-#include "nsTraceRefcnt.h"
-#include "mozilla/gfx/BaseRect.h"
-#include "mozilla/Likely.h"
-#include <climits>
-#include <algorithm>
+#include <stdio.h>                      // for FILE
+#include <stdint.h>                     // for int32_t, int64_t
+#include <algorithm>                    // for min/max
+#include "nsDebug.h"                    // for NS_WARNING
+#include "gfxCore.h"                    // for NS_GFX
+#include "mozilla/Likely.h"             // for MOZ_UNLIKELY
+#include "mozilla/gfx/BaseRect.h"       // for BaseRect
+#include "nsCoord.h"                    // for nscoord, etc
+#include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
+#include "nsPoint.h"                    // for nsIntPoint, nsPoint
+#include "nsSize.h"                     // for nsIntSize, nsSize
+#include "nscore.h"                     // for NS_BUILD_REFCNT_LOGGING
 
 struct nsIntRect;
+struct nsMargin;
+struct nsIntMargin;
 
 struct NS_GFX nsRect :
   public mozilla::gfx::BaseRect<nscoord, nsRect, nsPoint, nsSize, nsMargin> {
@@ -51,58 +54,6 @@ struct NS_GFX nsRect :
     MOZ_COUNT_DTOR(nsRect);
   }
 #endif
-
-  // A version of Inflate that caps the values to the nscoord range.
-  // x & y is capped at the minimum value nscoord_MIN and
-  // width & height is capped at the maximum value nscoord_MAX.
-  void SaturatingInflate(const nsMargin& aMargin)
-  {
-#ifdef NS_COORD_IS_FLOAT
-    Inflate(aMargin);
-#else
-    int64_t nx = int64_t(x) - aMargin.left;
-    int64_t w = int64_t(width) + int64_t(aMargin.left) + aMargin.right;
-    if (MOZ_UNLIKELY(w > nscoord_MAX)) {
-      NS_WARNING("Overflowed nscoord_MAX in conversion to nscoord width");
-      int64_t xdiff = nx - nscoord_MIN / 2;
-      if (xdiff < 0) {
-        // Clamp huge negative x to nscoord_MIN / 2 and try again.
-        nx = nscoord_MIN / 2;
-        w += xdiff;
-      }
-      if (MOZ_UNLIKELY(w > nscoord_MAX)) {
-        w = nscoord_MAX;
-      }
-    }
-    width = nscoord(w);
-    if (MOZ_UNLIKELY(nx < nscoord_MIN)) {
-      NS_WARNING("Underflowed nscoord_MIN in conversion to nscoord x");
-      nx = nscoord_MIN;
-    }
-    x = nscoord(nx);
-
-    int64_t ny = int64_t(y) - aMargin.top;
-    int64_t h = int64_t(height) + int64_t(aMargin.top) + aMargin.bottom;
-    if (MOZ_UNLIKELY(h > nscoord_MAX)) {
-      NS_WARNING("Overflowed nscoord_MAX in conversion to nscoord height");
-      int64_t ydiff = ny - nscoord_MIN / 2;
-      if (ydiff < 0) {
-        // Clamp huge negative y to nscoord_MIN / 2 and try again.
-        ny = nscoord_MIN / 2;
-        h += ydiff;
-      }
-      if (MOZ_UNLIKELY(h > nscoord_MAX)) {
-        h = nscoord_MAX;
-      }
-    }
-    height = nscoord(h);
-    if (MOZ_UNLIKELY(ny < nscoord_MIN)) {
-      NS_WARNING("Underflowed nscoord_MIN in conversion to nscoord y");
-      ny = nscoord_MIN;
-    }
-    y = nscoord(ny);
-#endif
-  }
 
   // We have saturating versions of all the Union methods. These avoid
   // overflowing nscoord values in the 'width' and 'height' fields by
@@ -234,7 +185,7 @@ struct NS_GFX nsIntRect :
   // Returns a special nsIntRect that's used in some places to signify
   // "all available space".
   static const nsIntRect& GetMaxSizedIntRect() {
-    static const nsIntRect r(0, 0, INT_MAX, INT_MAX);
+    static const nsIntRect r(0, 0, INT32_MAX, INT32_MAX);
     return r;
   }
 

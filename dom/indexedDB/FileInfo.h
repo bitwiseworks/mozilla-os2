@@ -9,9 +9,6 @@
 
 #include "IndexedDatabase.h"
 
-#include "nsAtomicRefcnt.h"
-#include "nsThreadUtils.h"
-
 #include "FileManager.h"
 #include "IndexedDatabaseManager.h"
 
@@ -35,7 +32,7 @@ public:
   void AddRef()
   {
     if (IndexedDatabaseManager::IsClosed()) {
-      NS_AtomicIncrementRefcnt(mRefCnt);
+      ++mRefCnt;
     }
     else {
       UpdateReferences(mRefCnt, 1);
@@ -45,7 +42,7 @@ public:
   void Release()
   {
     if (IndexedDatabaseManager::IsClosed()) {
-      nsrefcnt count = NS_AtomicDecrementRefcnt(mRefCnt);
+      nsrefcnt count = --mRefCnt;
       if (count == 0) {
         mRefCnt = 1;
         delete this;
@@ -82,13 +79,13 @@ public:
   virtual int64_t Id() const = 0;
 
 private:
-  void UpdateReferences(nsAutoRefCnt& aRefCount, int32_t aDelta,
+  void UpdateReferences(ThreadSafeAutoRefCnt& aRefCount, int32_t aDelta,
                         bool aClear = false);
   void Cleanup();
 
-  nsAutoRefCnt mRefCnt;
-  nsAutoRefCnt mDBRefCnt;
-  nsAutoRefCnt mSliceRefCnt;
+  ThreadSafeAutoRefCnt mRefCnt;
+  ThreadSafeAutoRefCnt mDBRefCnt;
+  ThreadSafeAutoRefCnt mSliceRefCnt;
 
   nsRefPtr<FileManager> mFileManager;
 };

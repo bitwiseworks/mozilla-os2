@@ -11,8 +11,8 @@
 #ifndef WEBRTC_AUDIO_DEVICE_AUDIO_DEVICE_IMPL_H
 #define WEBRTC_AUDIO_DEVICE_AUDIO_DEVICE_IMPL_H
 
-#include "audio_device.h"
-#include "audio_device_buffer.h"
+#include "webrtc/modules/audio_device/audio_device_buffer.h"
+#include "webrtc/modules/audio_device/include/audio_device.h"
 
 namespace webrtc
 {
@@ -35,177 +35,177 @@ public:
         kPlatformIOS = 6
     };
 
-    WebRtc_Word32 CheckPlatform();
-    WebRtc_Word32 CreatePlatformSpecificObjects();
-    WebRtc_Word32 AttachAudioBuffer();
+    int32_t CheckPlatform();
+    int32_t CreatePlatformSpecificObjects();
+    int32_t AttachAudioBuffer();
 
-    AudioDeviceModuleImpl(const WebRtc_Word32 id, const AudioLayer audioLayer);
+    AudioDeviceModuleImpl(const int32_t id, const AudioLayer audioLayer);
     virtual ~AudioDeviceModuleImpl();
 
 public: // RefCountedModule
-    virtual WebRtc_Word32 ChangeUniqueId(const WebRtc_Word32 id);
-    virtual WebRtc_Word32 TimeUntilNextProcess();
-    virtual WebRtc_Word32 Process();
+    virtual int32_t ChangeUniqueId(const int32_t id) OVERRIDE;
+    virtual int32_t TimeUntilNextProcess() OVERRIDE;
+    virtual int32_t Process() OVERRIDE;
 
 public:
     // Factory methods (resource allocation/deallocation)
     static AudioDeviceModule* Create(
-        const WebRtc_Word32 id,
+        const int32_t id,
         const AudioLayer audioLayer = kPlatformDefaultAudio);
 
     // Retrieve the currently utilized audio layer
-    virtual WebRtc_Word32 ActiveAudioLayer(AudioLayer* audioLayer) const;
+    virtual int32_t ActiveAudioLayer(AudioLayer* audioLayer) const OVERRIDE;
 
     // Error handling
-    virtual ErrorCode LastError() const;
-    virtual WebRtc_Word32 RegisterEventObserver(
-        AudioDeviceObserver* eventCallback);
+    virtual ErrorCode LastError() const OVERRIDE;
+    virtual int32_t RegisterEventObserver(
+        AudioDeviceObserver* eventCallback) OVERRIDE;
 
     // Full-duplex transportation of PCM audio
-    virtual WebRtc_Word32 RegisterAudioCallback(
-        AudioTransport* audioCallback);
+    virtual int32_t RegisterAudioCallback(
+        AudioTransport* audioCallback) OVERRIDE;
 
     // Main initializaton and termination
-    virtual WebRtc_Word32 Init();
-    virtual WebRtc_Word32 Terminate();
-    virtual bool Initialized() const;
+    virtual int32_t Init() OVERRIDE;
+    virtual int32_t Terminate() OVERRIDE;
+    virtual bool Initialized() const OVERRIDE;
 
     // Device enumeration
-    virtual WebRtc_Word16 PlayoutDevices();
-    virtual WebRtc_Word16 RecordingDevices();
-    virtual WebRtc_Word32 PlayoutDeviceName(
-        WebRtc_UWord16 index,
+    virtual int16_t PlayoutDevices() OVERRIDE;
+    virtual int16_t RecordingDevices() OVERRIDE;
+    virtual int32_t PlayoutDeviceName(
+        uint16_t index,
         char name[kAdmMaxDeviceNameSize],
-        char guid[kAdmMaxGuidSize]);
-    virtual WebRtc_Word32 RecordingDeviceName(
-        WebRtc_UWord16 index,
+        char guid[kAdmMaxGuidSize]) OVERRIDE;
+    virtual int32_t RecordingDeviceName(
+        uint16_t index,
         char name[kAdmMaxDeviceNameSize],
-        char guid[kAdmMaxGuidSize]);
+        char guid[kAdmMaxGuidSize]) OVERRIDE;
 
     // Device selection
-    virtual WebRtc_Word32 SetPlayoutDevice(WebRtc_UWord16 index);
-    virtual WebRtc_Word32 SetPlayoutDevice(WindowsDeviceType device);
-    virtual WebRtc_Word32 SetRecordingDevice(WebRtc_UWord16 index);
-    virtual WebRtc_Word32 SetRecordingDevice(WindowsDeviceType device);
+    virtual int32_t SetPlayoutDevice(uint16_t index) OVERRIDE;
+    virtual int32_t SetPlayoutDevice(WindowsDeviceType device) OVERRIDE;
+    virtual int32_t SetRecordingDevice(uint16_t index) OVERRIDE;
+    virtual int32_t SetRecordingDevice(WindowsDeviceType device) OVERRIDE;
 
     // Audio transport initialization
-    virtual WebRtc_Word32 PlayoutIsAvailable(bool* available);
-    virtual WebRtc_Word32 InitPlayout();
-    virtual bool PlayoutIsInitialized() const;
-    virtual WebRtc_Word32 RecordingIsAvailable(bool* available);
-    virtual WebRtc_Word32 InitRecording();
-    virtual bool RecordingIsInitialized() const;
+    virtual int32_t PlayoutIsAvailable(bool* available) OVERRIDE;
+    virtual int32_t InitPlayout() OVERRIDE;
+    virtual bool PlayoutIsInitialized() const OVERRIDE;
+    virtual int32_t RecordingIsAvailable(bool* available) OVERRIDE;
+    virtual int32_t InitRecording() OVERRIDE;
+    virtual bool RecordingIsInitialized() const OVERRIDE;
 
     // Audio transport control
-    virtual WebRtc_Word32 StartPlayout();
-    virtual WebRtc_Word32 StopPlayout();
-    virtual bool Playing() const;
-    virtual WebRtc_Word32 StartRecording();
-    virtual WebRtc_Word32 StopRecording();
-    virtual bool Recording() const;
+    virtual int32_t StartPlayout() OVERRIDE;
+    virtual int32_t StopPlayout() OVERRIDE;
+    virtual bool Playing() const OVERRIDE;
+    virtual int32_t StartRecording() OVERRIDE;
+    virtual int32_t StopRecording() OVERRIDE;
+    virtual bool Recording() const OVERRIDE;
 
     // Microphone Automatic Gain Control (AGC)
-    virtual WebRtc_Word32 SetAGC(bool enable);
-    virtual bool AGC() const;
+    virtual int32_t SetAGC(bool enable) OVERRIDE;
+    virtual bool AGC() const OVERRIDE;
 
     // Volume control based on the Windows Wave API (Windows only)
-    virtual WebRtc_Word32 SetWaveOutVolume(WebRtc_UWord16 volumeLeft,
-                                           WebRtc_UWord16 volumeRight);
-    virtual WebRtc_Word32 WaveOutVolume(WebRtc_UWord16* volumeLeft,
-                                        WebRtc_UWord16* volumeRight) const;
+    virtual int32_t SetWaveOutVolume(uint16_t volumeLeft,
+                                     uint16_t volumeRight) OVERRIDE;
+    virtual int32_t WaveOutVolume(uint16_t* volumeLeft,
+                                  uint16_t* volumeRight) const OVERRIDE;
 
     // Audio mixer initialization
-    virtual WebRtc_Word32 SpeakerIsAvailable(bool* available);
-    virtual WebRtc_Word32 InitSpeaker();
-    virtual bool SpeakerIsInitialized() const;
-    virtual WebRtc_Word32 MicrophoneIsAvailable(bool* available);
-    virtual WebRtc_Word32 InitMicrophone();
-    virtual bool MicrophoneIsInitialized() const;
+    virtual int32_t SpeakerIsAvailable(bool* available) OVERRIDE;
+    virtual int32_t InitSpeaker() OVERRIDE;
+    virtual bool SpeakerIsInitialized() const OVERRIDE;
+    virtual int32_t MicrophoneIsAvailable(bool* available) OVERRIDE;
+    virtual int32_t InitMicrophone() OVERRIDE;
+    virtual bool MicrophoneIsInitialized() const OVERRIDE;
 
     // Speaker volume controls
-    virtual WebRtc_Word32 SpeakerVolumeIsAvailable(bool* available);
-    virtual WebRtc_Word32 SetSpeakerVolume(WebRtc_UWord32 volume);
-    virtual WebRtc_Word32 SpeakerVolume(WebRtc_UWord32* volume) const;
-    virtual WebRtc_Word32 MaxSpeakerVolume(WebRtc_UWord32* maxVolume) const;
-    virtual WebRtc_Word32 MinSpeakerVolume(WebRtc_UWord32* minVolume) const;
-    virtual WebRtc_Word32 SpeakerVolumeStepSize(
-        WebRtc_UWord16* stepSize) const;
+    virtual int32_t SpeakerVolumeIsAvailable(bool* available) OVERRIDE;
+    virtual int32_t SetSpeakerVolume(uint32_t volume) OVERRIDE;
+    virtual int32_t SpeakerVolume(uint32_t* volume) const OVERRIDE;
+    virtual int32_t MaxSpeakerVolume(uint32_t* maxVolume) const OVERRIDE;
+    virtual int32_t MinSpeakerVolume(uint32_t* minVolume) const OVERRIDE;
+    virtual int32_t SpeakerVolumeStepSize(
+        uint16_t* stepSize) const OVERRIDE;
 
     // Microphone volume controls
-    virtual WebRtc_Word32 MicrophoneVolumeIsAvailable(bool* available);
-    virtual WebRtc_Word32 SetMicrophoneVolume(WebRtc_UWord32 volume);
-    virtual WebRtc_Word32 MicrophoneVolume(WebRtc_UWord32* volume) const;
-    virtual WebRtc_Word32 MaxMicrophoneVolume(
-        WebRtc_UWord32* maxVolume) const;
-    virtual WebRtc_Word32 MinMicrophoneVolume(
-        WebRtc_UWord32* minVolume) const;
-    virtual WebRtc_Word32 MicrophoneVolumeStepSize(
-        WebRtc_UWord16* stepSize) const;
+    virtual int32_t MicrophoneVolumeIsAvailable(bool* available) OVERRIDE;
+    virtual int32_t SetMicrophoneVolume(uint32_t volume) OVERRIDE;
+    virtual int32_t MicrophoneVolume(uint32_t* volume) const OVERRIDE;
+    virtual int32_t MaxMicrophoneVolume(
+        uint32_t* maxVolume) const OVERRIDE;
+    virtual int32_t MinMicrophoneVolume(
+        uint32_t* minVolume) const OVERRIDE;
+    virtual int32_t MicrophoneVolumeStepSize(
+        uint16_t* stepSize) const OVERRIDE;
 
     // Speaker mute control
-    virtual WebRtc_Word32 SpeakerMuteIsAvailable(bool* available);
-    virtual WebRtc_Word32 SetSpeakerMute(bool enable);
-    virtual WebRtc_Word32 SpeakerMute(bool* enabled) const;
+    virtual int32_t SpeakerMuteIsAvailable(bool* available) OVERRIDE;
+    virtual int32_t SetSpeakerMute(bool enable) OVERRIDE;
+    virtual int32_t SpeakerMute(bool* enabled) const OVERRIDE;
 
     // Microphone mute control
-    virtual WebRtc_Word32 MicrophoneMuteIsAvailable(bool* available);
-    virtual WebRtc_Word32 SetMicrophoneMute(bool enable);
-    virtual WebRtc_Word32 MicrophoneMute(bool* enabled) const;
+    virtual int32_t MicrophoneMuteIsAvailable(bool* available) OVERRIDE;
+    virtual int32_t SetMicrophoneMute(bool enable) OVERRIDE;
+    virtual int32_t MicrophoneMute(bool* enabled) const OVERRIDE;
 
     // Microphone boost control
-    virtual WebRtc_Word32 MicrophoneBoostIsAvailable(bool* available);
-    virtual WebRtc_Word32 SetMicrophoneBoost(bool enable);
-    virtual WebRtc_Word32 MicrophoneBoost(bool* enabled) const;
+    virtual int32_t MicrophoneBoostIsAvailable(bool* available) OVERRIDE;
+    virtual int32_t SetMicrophoneBoost(bool enable) OVERRIDE;
+    virtual int32_t MicrophoneBoost(bool* enabled) const OVERRIDE;
 
     // Stereo support
-    virtual WebRtc_Word32 StereoPlayoutIsAvailable(bool* available) const;
-    virtual WebRtc_Word32 SetStereoPlayout(bool enable);
-    virtual WebRtc_Word32 StereoPlayout(bool* enabled) const;
-    virtual WebRtc_Word32 StereoRecordingIsAvailable(bool* available) const;
-    virtual WebRtc_Word32 SetStereoRecording(bool enable);
-    virtual WebRtc_Word32 StereoRecording(bool* enabled) const;
-    virtual WebRtc_Word32 SetRecordingChannel(const ChannelType channel);
-    virtual WebRtc_Word32 RecordingChannel(ChannelType* channel) const;
+    virtual int32_t StereoPlayoutIsAvailable(bool* available) const OVERRIDE;
+    virtual int32_t SetStereoPlayout(bool enable) OVERRIDE;
+    virtual int32_t StereoPlayout(bool* enabled) const OVERRIDE;
+    virtual int32_t StereoRecordingIsAvailable(bool* available) const OVERRIDE;
+    virtual int32_t SetStereoRecording(bool enable) OVERRIDE;
+    virtual int32_t StereoRecording(bool* enabled) const OVERRIDE;
+    virtual int32_t SetRecordingChannel(const ChannelType channel) OVERRIDE;
+    virtual int32_t RecordingChannel(ChannelType* channel) const OVERRIDE;
 
     // Delay information and control
-    virtual WebRtc_Word32 SetPlayoutBuffer(const BufferType type,
-                                           WebRtc_UWord16 sizeMS = 0);
-    virtual WebRtc_Word32 PlayoutBuffer(BufferType* type,
-                                        WebRtc_UWord16* sizeMS) const;
-    virtual WebRtc_Word32 PlayoutDelay(WebRtc_UWord16* delayMS) const;
-    virtual WebRtc_Word32 RecordingDelay(WebRtc_UWord16* delayMS) const;
+    virtual int32_t SetPlayoutBuffer(const BufferType type,
+                                           uint16_t sizeMS = 0) OVERRIDE;
+    virtual int32_t PlayoutBuffer(BufferType* type,
+                                        uint16_t* sizeMS) const OVERRIDE;
+    virtual int32_t PlayoutDelay(uint16_t* delayMS) const OVERRIDE;
+    virtual int32_t RecordingDelay(uint16_t* delayMS) const OVERRIDE;
 
     // CPU load
-    virtual WebRtc_Word32 CPULoad(WebRtc_UWord16* load) const;
+    virtual int32_t CPULoad(uint16_t* load) const OVERRIDE;
 
     // Recording of raw PCM data
-    virtual WebRtc_Word32 StartRawOutputFileRecording(
-        const char pcmFileNameUTF8[kAdmMaxFileNameSize]);
-    virtual WebRtc_Word32 StopRawOutputFileRecording();
-    virtual WebRtc_Word32 StartRawInputFileRecording(
-        const char pcmFileNameUTF8[kAdmMaxFileNameSize]);
-    virtual WebRtc_Word32 StopRawInputFileRecording();
+    virtual int32_t StartRawOutputFileRecording(
+        const char pcmFileNameUTF8[kAdmMaxFileNameSize]) OVERRIDE;
+    virtual int32_t StopRawOutputFileRecording() OVERRIDE;
+    virtual int32_t StartRawInputFileRecording(
+        const char pcmFileNameUTF8[kAdmMaxFileNameSize]) OVERRIDE;
+    virtual int32_t StopRawInputFileRecording() OVERRIDE;
 
     // Native sample rate controls (samples/sec)
-    virtual WebRtc_Word32 SetRecordingSampleRate(
-        const WebRtc_UWord32 samplesPerSec);
-    virtual WebRtc_Word32 RecordingSampleRate(
-        WebRtc_UWord32* samplesPerSec) const;
-    virtual WebRtc_Word32 SetPlayoutSampleRate(
-        const WebRtc_UWord32 samplesPerSec);
-    virtual WebRtc_Word32 PlayoutSampleRate(
-        WebRtc_UWord32* samplesPerSec) const;
+    virtual int32_t SetRecordingSampleRate(
+        const uint32_t samplesPerSec) OVERRIDE;
+    virtual int32_t RecordingSampleRate(
+        uint32_t* samplesPerSec) const OVERRIDE;
+    virtual int32_t SetPlayoutSampleRate(
+        const uint32_t samplesPerSec) OVERRIDE;
+    virtual int32_t PlayoutSampleRate(
+        uint32_t* samplesPerSec) const OVERRIDE;
 
     // Mobile device specific functions
-    virtual WebRtc_Word32 ResetAudioDevice();
-    virtual WebRtc_Word32 SetLoudspeakerStatus(bool enable);
-    virtual WebRtc_Word32 GetLoudspeakerStatus(bool* enabled) const;
+    virtual int32_t ResetAudioDevice() OVERRIDE;
+    virtual int32_t SetLoudspeakerStatus(bool enable) OVERRIDE;
+    virtual int32_t GetLoudspeakerStatus(bool* enabled) const OVERRIDE;
 
-    virtual int32_t EnableBuiltInAEC(bool enable);
-    virtual bool BuiltInAECIsEnabled() const;
+    virtual int32_t EnableBuiltInAEC(bool enable) OVERRIDE;
+    virtual bool BuiltInAECIsEnabled() const OVERRIDE;
 
 public:
-    WebRtc_Word32 Id() {return _id;}
+    int32_t Id() {return _id;}
 
 private:
     PlatformType Platform() const;
@@ -223,9 +223,9 @@ private:
 
     AudioDeviceBuffer           _audioDeviceBuffer;
 
-    WebRtc_Word32               _id;
+    int32_t               _id;
     AudioLayer                  _platformAudioLayer;
-    WebRtc_UWord32              _lastProcessTime;
+    uint32_t              _lastProcessTime;
     PlatformType                _platformType;
     bool                        _initialized;
     mutable ErrorCode           _lastError;

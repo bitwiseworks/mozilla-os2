@@ -52,6 +52,8 @@ TraverseCommandObservers(const char* aKey,
   return PL_DHASH_NEXT;
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsCommandManager)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsCommandManager)
   tmp->mObserversTable.Clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -81,7 +83,6 @@ nsCommandManager::Init(nsIDOMWindow *aWindow)
   
   NS_ASSERTION(aWindow, "Need non-null window here");
   mWindow = aWindow;      // weak ptr
-  mObserversTable.Init();
   return NS_OK;
 }
 
@@ -102,7 +103,7 @@ nsCommandManager::CommandStatusChanged(const char * aCommandName)
       // should we get the command state to pass here? This might be expensive.
       observer->Observe(NS_ISUPPORTS_CAST(nsICommandManager*, this),
                         aCommandName,
-                        NS_LITERAL_STRING("command_status_changed").get());
+                        MOZ_UTF16("command_status_changed"));
     }
   }
 

@@ -4,10 +4,33 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'xpcshell'
+FAIL_ON_WARNINGS = True
 
 PROGRAM = 'xpcshell'
 
-CPP_SOURCES += [
+SOURCES += [
     'xpcshell.cpp',
 ]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    SOURCES += [
+        'xpcshellMacUtils.mm',
+    ]
+
+DEFINES['JS_THREADSAFE'] = True
+
+if CONFIG['MOZ_SHARK']:
+    DEFINES['MOZ_SHARK'] = True
+if CONFIG['MOZ_CALLGRIND']:
+    DEFINES['MOZ_CALLGRIND'] = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+LOCAL_INCLUDES += [
+    '/toolkit/xre',
+]
+
+if CONFIG['_MSC_VER']:
+    # Always enter a Windows program through wmain, whether or not we're
+    # a console application.
+    WIN32_EXE_LDFLAGS += ['-ENTRY:wmainCRTStartup']

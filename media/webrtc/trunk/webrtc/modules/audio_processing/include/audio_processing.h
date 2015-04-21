@@ -13,8 +13,11 @@
 
 #include <stddef.h>  // size_t
 
+#include "webrtc/common.h"
 #include "webrtc/modules/interface/module.h"
 #include "webrtc/typedefs.h"
+
+struct AecCore;
 
 namespace webrtc {
 
@@ -102,8 +105,7 @@ class VoiceDetection;
 // apm->Initialize();
 //
 // // Close the application...
-// AudioProcessing::Destroy(apm);
-// apm = NULL;
+// delete apm;
 //
 class AudioProcessing : public Module {
  public:
@@ -115,11 +117,6 @@ class AudioProcessing : public Module {
   static AudioProcessing* Create(int id);
   virtual ~AudioProcessing() {}
 
-  // TODO(andrew): remove this method. We now allow users to delete instances
-  // directly, useful for scoped_ptr.
-  // Destroys a |apm| instance.
-  static void Destroy(AudioProcessing* apm);
-
   // Initializes internal states, while retaining all user settings. This
   // should be called before beginning to process a new audio stream. However,
   // it is not necessary to call before processing the first stream after
@@ -129,6 +126,10 @@ class AudioProcessing : public Module {
   // will trigger a full initialization if the settings are changed from their
   // existing values. Otherwise they are no-ops.
   virtual int Initialize() = 0;
+
+  // Pass down additional options which don't have explicit setters. This
+  // ensures the options are applied immediately.
+  virtual void SetExtraOptions(const Config& config) = 0;
 
   // Sets the sample |rate| in Hz for both the primary and reverse audio
   // streams. 8000, 16000 or 32000 Hz are permitted.
@@ -251,8 +252,8 @@ class AudioProcessing : public Module {
   };
 
   // Inherited from Module.
-  virtual WebRtc_Word32 TimeUntilNextProcess() { return -1; }
-  virtual WebRtc_Word32 Process() { return -1; }
+  virtual int32_t TimeUntilNextProcess() OVERRIDE;
+  virtual int32_t Process() OVERRIDE;
 };
 
 // The acoustic echo cancellation (AEC) component provides better performance
@@ -285,8 +286,8 @@ class EchoCancellation {
 
   // Sets the difference between the number of samples rendered and captured by
   // the audio devices since the last call to |ProcessStream()|. Must be called
-  // if and only if drift compensation is enabled, prior to |ProcessStream()|.
-  virtual int set_stream_drift_samples(int drift) = 0;
+  // if drift compensation is enabled, prior to |ProcessStream()|.
+  virtual void set_stream_drift_samples(int drift) = 0;
   virtual int stream_drift_samples() const = 0;
 
   enum SuppressionLevel {
@@ -341,6 +342,12 @@ class EchoCancellation {
   // deviation |std|. The values are averaged over the time period since the
   // last call to |GetDelayMetrics()|.
   virtual int GetDelayMetrics(int* median, int* std) = 0;
+
+  // Returns a pointer to the low level AEC component.  In case of multiple
+  // channels, the pointer to the first one is returned.  A NULL pointer is
+  // returned when the AEC component is disabled or has not been initialized
+  // successfully.
+  virtual struct AecCore* aec_core() const = 0;
 
  protected:
   virtual ~EchoCancellation() {}

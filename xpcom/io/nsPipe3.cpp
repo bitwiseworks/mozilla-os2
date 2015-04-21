@@ -14,11 +14,16 @@
 #include "nsCRT.h"
 #include "prlog.h"
 #include "nsIClassInfoImpl.h"
-#include "nsAtomicRefcnt.h"
 #include "nsAlgorithm.h"
+#include "nsMemory.h"
+#include "nsIAsyncInputStream.h"
+#include "nsIAsyncOutputStream.h"
 
 using namespace mozilla;
 
+#ifdef LOG
+#undef LOG
+#endif
 #if defined(PR_LOGGING)
 //
 // set NSPR_LOG_MODULES=nsPipe:5
@@ -128,7 +133,7 @@ private:
     nsPipe                        *mPipe;
 
     // separate refcnt so that we know when to close the consumer
-    nsrefcnt                       mReaderRefCnt;
+    mozilla::ThreadSafeAutoRefCnt  mReaderRefCnt;
     int64_t                        mLogicalOffset;
     bool                           mBlocking;
 
@@ -182,7 +187,7 @@ private:
     nsPipe                         *mPipe;
 
     // separate refcnt so that we know when to close the producer
-    nsrefcnt                        mWriterRefCnt;
+    mozilla::ThreadSafeAutoRefCnt   mWriterRefCnt;
     int64_t                         mLogicalOffset;
     bool                            mBlocking;
 
@@ -201,7 +206,7 @@ public:
     friend class nsPipeInputStream;
     friend class nsPipeOutputStream;
 
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIPIPE
 
     // nsPipe methods:
@@ -294,8 +299,8 @@ protected:
 //-----------------------------------------------------------------------------
 
 nsPipe::nsPipe()
-    : mInput(this)
-    , mOutput(this)
+    : mInput(MOZ_THIS_IN_INITIALIZER_LIST())
+    , mOutput(MOZ_THIS_IN_INITIALIZER_LIST())
     , mReentrantMonitor("nsPipe.mReentrantMonitor")
     , mReadCursor(nullptr)
     , mReadLimit(nullptr)
@@ -311,14 +316,13 @@ nsPipe::~nsPipe()
 {
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsPipe, nsIPipe)
+NS_IMPL_ISUPPORTS(nsPipe, nsIPipe)
 
 NS_IMETHODIMP
 nsPipe::Init(bool nonBlockingIn,
              bool nonBlockingOut,
              uint32_t segmentSize,
-             uint32_t segmentCount,
-             nsIMemory *segmentAlloc)
+             uint32_t segmentCount)
 {
     mInited = true;
 
@@ -332,7 +336,7 @@ nsPipe::Init(bool nonBlockingIn,
     if (segmentCount > maxCount)
         segmentCount = maxCount;
 
-    nsresult rv = mBuffer.Init(segmentSize, segmentSize * segmentCount, segmentAlloc);
+    nsresult rv = mBuffer.Init(segmentSize, segmentSize * segmentCount);
     if (NS_FAILED(rv))
         return rv;
 
@@ -351,7 +355,8 @@ nsPipe::GetInputStream(nsIAsyncInputStream **aInputStream)
 NS_IMETHODIMP
 nsPipe::GetOutputStream(nsIAsyncOutputStream **aOutputStream)
 {
-    NS_ENSURE_TRUE(mInited, NS_ERROR_NOT_INITIALIZED);
+    if (NS_WARN_IF(!mInited))
+	return NS_ERROR_NOT_INITIALIZED;
     NS_ADDREF(*aOutputStream = &mOutput);
     return NS_OK;
 }
@@ -599,18 +604,18 @@ nsPipeEvents::~nsPipeEvents()
 // nsPipeInputStream methods:
 //-----------------------------------------------------------------------------
 
-NS_IMPL_QUERY_INTERFACE5(nsPipeInputStream,
-                         nsIInputStream,
-                         nsIAsyncInputStream,
-                         nsISeekableStream,
-                         nsISearchableInputStream,
-                         nsIClassInfo)
+NS_IMPL_QUERY_INTERFACE(nsPipeInputStream,
+                        nsIInputStream,
+                        nsIAsyncInputStream,
+                        nsISeekableStream,
+                        nsISearchableInputStream,
+                        nsIClassInfo)
 
-NS_IMPL_CI_INTERFACE_GETTER4(nsPipeInputStream,
-                             nsIInputStream,
-                             nsIAsyncInputStream,
-                             nsISeekableStream,
-                             nsISearchableInputStream)
+NS_IMPL_CI_INTERFACE_GETTER(nsPipeInputStream,
+                            nsIInputStream,
+                            nsIAsyncInputStream,
+                            nsISeekableStream,
+                            nsISearchableInputStream)
 
 NS_IMPL_THREADSAFE_CI(nsPipeInputStream)
 
@@ -677,17 +682,17 @@ nsPipeInputStream::OnInputException(nsresult reason, nsPipeEvents &events)
     return result;
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsPipeInputStream::AddRef(void)
 {
-    NS_AtomicIncrementRefcnt(mReaderRefCnt);
+    ++mReaderRefCnt;
     return mPipe->AddRef();
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsPipeInputStream::Release(void)
 {
-    if (NS_AtomicDecrementRefcnt(mReaderRefCnt) == 0)
+    if (--mReaderRefCnt == 0)
         Close();
     return mPipe->Release();
 }
@@ -961,14 +966,14 @@ nsPipeInputStream::Search(const char *forString,
 // nsPipeOutputStream methods:
 //-----------------------------------------------------------------------------
 
-NS_IMPL_QUERY_INTERFACE3(nsPipeOutputStream,
-                         nsIOutputStream,
-                         nsIAsyncOutputStream,
-                         nsIClassInfo)
+NS_IMPL_QUERY_INTERFACE(nsPipeOutputStream,
+                        nsIOutputStream,
+                        nsIAsyncOutputStream,
+                        nsIClassInfo)
 
-NS_IMPL_CI_INTERFACE_GETTER2(nsPipeOutputStream,
-                             nsIOutputStream,
-                             nsIAsyncOutputStream)
+NS_IMPL_CI_INTERFACE_GETTER(nsPipeOutputStream,
+                            nsIOutputStream,
+                            nsIAsyncOutputStream)
 
 NS_IMPL_THREADSAFE_CI(nsPipeOutputStream)
 
@@ -1032,17 +1037,17 @@ nsPipeOutputStream::OnOutputException(nsresult reason, nsPipeEvents &events)
 }
 
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsPipeOutputStream::AddRef()
 {
-    NS_AtomicIncrementRefcnt(mWriterRefCnt);
+    ++mWriterRefCnt;
     return mPipe->AddRef();
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsPipeOutputStream::Release()
 {
-    if (NS_AtomicDecrementRefcnt(mWriterRefCnt) == 0)
+    if (--mWriterRefCnt == 0)
         Close();
     return mPipe->Release();
 }
@@ -1236,8 +1241,7 @@ NS_NewPipe(nsIInputStream **pipeIn,
            uint32_t segmentSize,
            uint32_t maxSize,
            bool nonBlockingInput,
-           bool nonBlockingOutput,
-           nsIMemory *segmentAlloc)
+           bool nonBlockingOutput)
 {
     if (segmentSize == 0)
         segmentSize = DEFAULT_SEGMENT_SIZE;
@@ -1252,7 +1256,7 @@ NS_NewPipe(nsIInputStream **pipeIn,
     nsIAsyncInputStream *in;
     nsIAsyncOutputStream *out;
     nsresult rv = NS_NewPipe2(&in, &out, nonBlockingInput, nonBlockingOutput,
-                              segmentSize, segmentCount, segmentAlloc);
+                              segmentSize, segmentCount);
     if (NS_FAILED(rv)) return rv;
 
     *pipeIn = in;
@@ -1266,8 +1270,7 @@ NS_NewPipe2(nsIAsyncInputStream **pipeIn,
             bool nonBlockingInput,
             bool nonBlockingOutput,
             uint32_t segmentSize,
-            uint32_t segmentCount,
-            nsIMemory *segmentAlloc)
+            uint32_t segmentCount)
 {
     nsresult rv;
 
@@ -1278,8 +1281,7 @@ NS_NewPipe2(nsIAsyncInputStream **pipeIn,
     rv = pipe->Init(nonBlockingInput,
                     nonBlockingOutput,
                     segmentSize,
-                    segmentCount,
-                    segmentAlloc);
+                    segmentCount);
     if (NS_FAILED(rv)) {
         NS_ADDREF(pipe);
         NS_RELEASE(pipe);

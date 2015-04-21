@@ -13,6 +13,7 @@
 #include "nsIStreamListener.h"
 #include "nsIX509CertDB.h"
 
+#include "mozilla/Casting.h"
 #include "mozilla/Services.h"
 
 #include "nsCRT.h"
@@ -22,7 +23,7 @@
 
 #include "prlog.h"
 
-#ifdef MOZ_LOGGING
+#ifdef PR_LOGGING
 extern PRLogModuleInfo* gPIPNSSLog;
 #endif
 
@@ -68,7 +69,7 @@ PSMContentDownloader::~PSMContentDownloader()
     nsMemory::Free(mByteData);
 }
 
-NS_IMPL_ISUPPORTS2(PSMContentDownloader, nsIStreamListener, nsIRequestObserver)
+NS_IMPL_ISUPPORTS(PSMContentDownloader, nsIStreamListener, nsIRequestObserver)
 
 const int32_t kDefaultCertAllocLength = 2048;
 
@@ -92,7 +93,7 @@ PSMContentDownloader::OnStartRequest(nsIRequest* request, nsISupports* context)
   
   mBufferOffset = 0;
   mBufferSize = 0;
-  mByteData = (char*) nsMemory::Alloc(contentLength);
+  mByteData = (char*) nsMemory::Alloc(SafeCast<size_t>(contentLength));
   if (!mByteData)
     return NS_ERROR_OUT_OF_MEMORY;
   
@@ -212,9 +213,9 @@ getPSMContentType(const char * aContentType)
 
 } // unnamed namespace
 
-NS_IMPL_ISUPPORTS2(PSMContentListener,
-                   nsIURIContentListener,
-                   nsISupportsWeakReference) 
+NS_IMPL_ISUPPORTS(PSMContentListener,
+                  nsIURIContentListener,
+                  nsISupportsWeakReference) 
 
 PSMContentListener::PSMContentListener()
 {

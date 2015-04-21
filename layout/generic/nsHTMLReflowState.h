@@ -10,7 +10,6 @@
 
 #include "nsMargin.h"
 #include "nsStyleCoord.h"
-#include "nsStyleStructInlines.h"
 #include "nsIFrame.h"
 #include "mozilla/Assertions.h"
 #include <algorithm>
@@ -20,16 +19,7 @@ class nsRenderingContext;
 class nsFloatManager;
 class nsLineLayout;
 class nsIPercentHeightObserver;
-
-struct nsStyleDisplay;
-struct nsStyleVisibility;
-struct nsStylePosition;
-struct nsStyleBorder;
-struct nsStyleMargin;
-struct nsStylePadding;
-struct nsStyleText;
 struct nsHypotheticalBox;
-
 
 /**
  * @return aValue clamped to [aMinValue, aMaxValue].
@@ -50,13 +40,6 @@ NS_CSS_MINMAX(NumericType aValue, NumericType aMinValue, NumericType aMaxValue)
     result = aMinValue;
   return result;
 }
-
-/**
- * Constant used to indicate an unconstrained size.
- *
- * @see #Reflow()
- */
-#define NS_UNCONSTRAINEDSIZE NS_MAXSIZE
 
 /**
  * CSS Frame type. Included as part of the reflow state.
@@ -111,23 +94,44 @@ typedef uint32_t  nsCSSFrameType;
   ((_ft) & ~(NS_CSS_FRAME_TYPE_REPLACED |                \
              NS_CSS_FRAME_TYPE_REPLACED_CONTAINS_BLOCK))
 
-#define NS_INTRINSICSIZE    NS_UNCONSTRAINEDSIZE
-#define NS_AUTOHEIGHT       NS_UNCONSTRAINEDSIZE
-#define NS_AUTOMARGIN       NS_UNCONSTRAINEDSIZE
-#define NS_AUTOOFFSET       NS_UNCONSTRAINEDSIZE
-// NOTE: there are assumptions all over that these have the same value, namely NS_UNCONSTRAINEDSIZE
-//       if any are changed to be a value other than NS_UNCONSTRAINEDSIZE
-//       at least update AdjustComputedHeight/Width and test ad nauseum
-
 // A base class of nsHTMLReflowState that computes only the padding,
 // border, and margin, since those values are needed more often.
 struct nsCSSOffsetState {
 public:
+  typedef mozilla::WritingMode WritingMode;
+  typedef mozilla::LogicalMargin LogicalMargin;
+
   // the frame being reflowed
   nsIFrame*           frame;
 
   // rendering context to use for measurement
   nsRenderingContext* rendContext;
+
+  const nsMargin& ComputedPhysicalMargin() const { return mComputedMargin; }
+  const nsMargin& ComputedPhysicalBorderPadding() const { return mComputedBorderPadding; }
+  const nsMargin& ComputedPhysicalPadding() const { return mComputedPadding; }
+
+  // We may need to eliminate the (few) users of these writable-reference accessors
+  // as part of migrating to logical coordinates.
+  nsMargin& ComputedPhysicalMargin() { return mComputedMargin; }
+  nsMargin& ComputedPhysicalBorderPadding() { return mComputedBorderPadding; }
+  nsMargin& ComputedPhysicalPadding() { return mComputedPadding; }
+
+  LogicalMargin ComputedLogicalMargin() const
+    { return LogicalMargin(mWritingMode, mComputedMargin); }
+  LogicalMargin ComputedLogicalBorderPadding() const
+    { return LogicalMargin(mWritingMode, mComputedBorderPadding); }
+  LogicalMargin ComputedLogicalPadding() const
+    { return LogicalMargin(mWritingMode, mComputedPadding); }
+
+  WritingMode GetWritingMode() const { return mWritingMode; }
+
+protected:
+  // cached copy of the frame's writing-mode, for logical coordinates
+  WritingMode      mWritingMode;
+
+  // These are PHYSICAL coordinates (for now).
+  // Will probably become logical in due course.
 
   // Computed margin values
   nsMargin         mComputedMargin;
@@ -138,27 +142,17 @@ public:
   // Computed padding values
   nsMargin         mComputedPadding;
 
+public:
   // Callers using this constructor must call InitOffsets on their own.
   nsCSSOffsetState(nsIFrame *aFrame, nsRenderingContext *aRenderingContext)
     : frame(aFrame)
     , rendContext(aRenderingContext)
+    , mWritingMode(aFrame->GetWritingMode())
   {
   }
 
-  // NOTE: If we ever want to use nsCSSOffsetState for a flex item or a grid
-  // item, we need to make it take the containing-block height as well as the
-  // width, since flex items and grid items resolve vertical percent margins
-  // and padding against the containing-block height, rather than its width.
   nsCSSOffsetState(nsIFrame *aFrame, nsRenderingContext *aRenderingContext,
-                   nscoord aContainingBlockWidth)
-    : frame(aFrame)
-    , rendContext(aRenderingContext)
-  {
-    MOZ_ASSERT(!aFrame->IsFlexItem(),
-               "We're about to resolve vertical percent margin & padding "
-               "values against CB width, which is incorrect for flex items");
-    InitOffsets(aContainingBlockWidth, aContainingBlockWidth, frame->GetType());
-  }
+                   nscoord aContainingBlockWidth);
 
 #ifdef DEBUG
   // Reflow trace methods.  Defined in nsFrame.cpp so they have access
@@ -251,28 +245,12 @@ struct nsHTMLReflowState : public nsCSSOffsetState {
   // pointer to the float manager associated with this area
   nsFloatManager* mFloatManager;
 
-  // LineLayout object (only for inline reflow; set to NULL otherwise)
+  // LineLayout object (only for inline reflow; set to nullptr otherwise)
   nsLineLayout*    mLineLayout;
 
   // The appropriate reflow state for the containing block (for
   // percentage widths, etc.) of this reflow state's frame.
   const nsHTMLReflowState *mCBReflowState;
-
-  // the available width in which to reflow the frame. The space
-  // represents the amount of room for the frame's margin, border,
-  // padding, and content area. The frame size you choose should fit
-  // within the available width.
-  nscoord              availableWidth;
-
-  // A value of NS_UNCONSTRAINEDSIZE for the available height means
-  // you can choose whatever size you want. In galley mode the
-  // available height is always NS_UNCONSTRAINEDSIZE, and only page
-  // mode or multi-column layout involves a constrained height. The
-  // element's the top border and padding, and content, must fit. If the
-  // element is complete after reflow then its bottom border, padding
-  // and margin (and similar for its complete ancestors) will need to
-  // fit in this height.
-  nscoord              availableHeight;
 
   // The type of frame, from css's perspective. This value is
   // initialized by the Init method below.
@@ -288,7 +266,92 @@ struct nsHTMLReflowState : public nsCSSOffsetState {
   // This takes on an arbitrary value the first time a block is reflowed
   nscoord mBlockDelta;
 
+  // Accessors for the private fields below. Forcing all callers to use these
+  // will allow us to introduce logical-coordinate versions and gradually
+  // change clients from physical to logical as needed; and potentially switch
+  // the internal fields from physical to logical coordinates in due course,
+  // while maintaining compatibility with not-yet-updated code.
+  nscoord AvailableWidth() const { return mAvailableWidth; }
+  nscoord AvailableHeight() const { return mAvailableHeight; }
+  nscoord ComputedWidth() const { return mComputedWidth; }
+  nscoord ComputedHeight() const { return mComputedHeight; }
+  nscoord ComputedMinWidth() const { return mComputedMinWidth; }
+  nscoord ComputedMaxWidth() const { return mComputedMaxWidth; }
+  nscoord ComputedMinHeight() const { return mComputedMinHeight; }
+  nscoord ComputedMaxHeight() const { return mComputedMaxHeight; }
+
+  nscoord& AvailableWidth() { return mAvailableWidth; }
+  nscoord& AvailableHeight() { return mAvailableHeight; }
+  nscoord& ComputedWidth() { return mComputedWidth; }
+  nscoord& ComputedHeight() { return mComputedHeight; }
+  nscoord& ComputedMinWidth() { return mComputedMinWidth; }
+  nscoord& ComputedMaxWidth() { return mComputedMaxWidth; }
+  nscoord& ComputedMinHeight() { return mComputedMinHeight; }
+  nscoord& ComputedMaxHeight() { return mComputedMaxHeight; }
+
+  // ISize and BSize are logical-coordinate dimensions:
+  // ISize is the size in the writing mode's inline direction (which equates to
+  // width in horizontal writing modes, height in vertical ones), and BSize is
+  // the size in the block-progression direction.
+  nscoord AvailableISize() const
+    { return mWritingMode.IsVertical() ? mAvailableHeight : mAvailableWidth; }
+  nscoord AvailableBSize() const
+    { return mWritingMode.IsVertical() ? mAvailableWidth : mAvailableHeight; }
+  nscoord ComputedISize() const
+    { return mWritingMode.IsVertical() ? mComputedHeight : mComputedWidth; }
+  nscoord ComputedBSize() const
+    { return mWritingMode.IsVertical() ? mComputedWidth : mComputedHeight; }
+  nscoord ComputedMinISize() const
+    { return mWritingMode.IsVertical() ? mComputedMinHeight : mComputedMinWidth; }
+  nscoord ComputedMaxISize() const
+    { return mWritingMode.IsVertical() ? mComputedMaxHeight : mComputedMaxWidth; }
+  nscoord ComputedMinBSize() const
+    { return mWritingMode.IsVertical() ? mComputedMinWidth : mComputedMinHeight; }
+  nscoord ComputedMaxBSize() const
+    { return mWritingMode.IsVertical() ? mComputedMaxWidth : mComputedMaxHeight; }
+
+  nscoord& AvailableISize()
+    { return mWritingMode.IsVertical() ? mAvailableHeight : mAvailableWidth; }
+  nscoord& AvailableBSize()
+    { return mWritingMode.IsVertical() ? mAvailableWidth : mAvailableHeight; }
+  nscoord& ComputedISize()
+    { return mWritingMode.IsVertical() ? mComputedHeight : mComputedWidth; }
+  nscoord& ComputedBSize()
+    { return mWritingMode.IsVertical() ? mComputedWidth : mComputedHeight; }
+  nscoord& ComputedMinISize()
+    { return mWritingMode.IsVertical() ? mComputedMinHeight : mComputedMinWidth; }
+  nscoord& ComputedMaxISize()
+    { return mWritingMode.IsVertical() ? mComputedMaxHeight : mComputedMaxWidth; }
+  nscoord& ComputedMinBSize()
+    { return mWritingMode.IsVertical() ? mComputedMinWidth : mComputedMinHeight; }
+  nscoord& ComputedMaxBSize()
+    { return mWritingMode.IsVertical() ? mComputedMaxWidth : mComputedMaxHeight; }
+
+  // XXX this will need to change when we make mComputedOffsets logical;
+  // we won't be able to return a reference for the physical offsets
+  const nsMargin& ComputedPhysicalOffsets() const { return mComputedOffsets; }
+  nsMargin& ComputedPhysicalOffsets() { return mComputedOffsets; }
+
+  LogicalMargin ComputedLogicalOffsets() const
+    { return LogicalMargin(mWritingMode, mComputedOffsets); }
+
 private:
+  // the available width in which to reflow the frame. The space
+  // represents the amount of room for the frame's margin, border,
+  // padding, and content area. The frame size you choose should fit
+  // within the available width.
+  nscoord              mAvailableWidth;
+
+  // A value of NS_UNCONSTRAINEDSIZE for the available height means
+  // you can choose whatever size you want. In galley mode the
+  // available height is always NS_UNCONSTRAINEDSIZE, and only page
+  // mode or multi-column layout involves a constrained height. The
+  // element's the top border and padding, and content, must fit. If the
+  // element is complete after reflow then its bottom border, padding
+  // and margin (and similar for its complete ancestors) will need to
+  // fit in this height.
+  nscoord              mAvailableHeight;
+
   // The computed width specifies the frame's content area width, and it does
   // not apply to inline non-replaced elements
   //
@@ -314,9 +377,8 @@ private:
   // means you use your intrinsic height as the computed height
   nscoord          mComputedHeight;
 
-public:
   // Computed values for 'left/top/right/bottom' offsets. Only applies to
-  // 'positioned' elements
+  // 'positioned' elements. These are PHYSICAL coordinates (for now).
   nsMargin         mComputedOffsets;
 
   // Computed values for 'min-width/max-width' and 'min-height/max-height'
@@ -325,6 +387,7 @@ public:
   nscoord          mComputedMinWidth, mComputedMaxWidth;
   nscoord          mComputedMinHeight, mComputedMaxHeight;
 
+public:
   // Cached pointers to the various style structs used during intialization
   const nsStyleDisplay*    mStyleDisplay;
   const nsStyleVisibility* mStyleVisibility;
@@ -334,13 +397,9 @@ public:
   const nsStylePadding*    mStylePadding;
   const nsStyleText*       mStyleText;
 
-  bool IsFloating() const {
-    return mStyleDisplay->IsFloating(frame);
-  }
+  bool IsFloating() const;
 
-  uint8_t GetDisplay() const {
-    return mStyleDisplay->GetDisplay(frame);
-  }
+  uint8_t GetDisplay() const;
 
   // a frame (e.g. nsTableCellFrame) which may need to generate a special 
   // reflow for percent height calculations 
@@ -403,30 +462,59 @@ public:
   // can use that and then override specific values if you want, or you can
   // call Init as desired...
 
-  // Initialize a <b>root</b> reflow state with a rendering context to
-  // use for measuring things.
+  /**
+   * Initialize a ROOT reflow state.
+   *
+   * @param aPresContext Must be equal to aFrame->PresContext().
+   * @param aFrame The frame for whose reflow state is being constructed.
+   * @param aRenderingContext The rendering context to be used for measurements.
+   * @param aAvailableSpace See comments for availableHeight and availableWidth
+   *        members.
+   * @param aFlags A set of flags used for additional boolean parameters (see
+   *        below).
+   */
   nsHTMLReflowState(nsPresContext*           aPresContext,
                     nsIFrame*                aFrame,
-                    nsRenderingContext*     aRenderingContext,
+                    nsRenderingContext*      aRenderingContext,
                     const nsSize&            aAvailableSpace,
                     uint32_t                 aFlags = 0);
 
-  // Initialize a reflow state for a child frames reflow. Some state
-  // is copied from the parent reflow state; the remaining state is
-  // computed. 
+  /**
+   * Initialize a reflow state for a child frame's reflow. Some parts of the
+   * state are copied from the parent's reflow state. The remainder is computed.
+   *
+   * @param aPresContext Must be equal to aFrame->PresContext().
+   * @param aParentReflowState A reference to an nsHTMLReflowState object that
+   *        is to be the parent of this object.
+   * @param aFrame The frame for whose reflow state is being constructed.
+   * @param aAvailableSpace See comments for availableHeight and availableWidth
+   *        members.
+   * @param aContainingBlockWidth An optional width, in app units, that is used
+   *        by absolute positioning code to override default containing block
+   *        width.
+   * @param aContainingBlockHeight An optional height, in app units, that is
+   *        used by absolute positioning code to override default containing
+   *        block height.
+   * @param aFlags A set of flags used for additional boolean parameters (see
+   *        below).
+   */
   nsHTMLReflowState(nsPresContext*           aPresContext,
                     const nsHTMLReflowState& aParentReflowState,
                     nsIFrame*                aFrame,
                     const nsSize&            aAvailableSpace,
-                    // These two are used by absolute positioning code
-                    // to override default containing block w & h:
                     nscoord                  aContainingBlockWidth = -1,
                     nscoord                  aContainingBlockHeight = -1,
-                    bool                     aInit = true);
+                    uint32_t                 aFlags = 0);
 
   // Values for |aFlags| passed to constructor
   enum {
-    DUMMY_PARENT_REFLOW_STATE = (1<<0)
+    // Indicates that the parent of this reflow state is "fake" (see
+    // mDummyParentReflowState in mFlags).
+    DUMMY_PARENT_REFLOW_STATE = (1<<0),
+
+    // Indicates that the calling function will initialize the reflow state, and
+    // that the constructor should not call Init().
+    CALLER_WILL_INIT = (1<<1)
   };
 
   // This method initializes various data members. It is automatically
@@ -460,7 +548,8 @@ public:
    *                           or 1.0 if during intrinsic size
    *                           calculation.
    */
-  static nscoord CalcLineHeight(nsStyleContext* aStyleContext,
+  static nscoord CalcLineHeight(nsIContent* aContent,
+                                nsStyleContext* aStyleContext,
                                 nscoord aBlockHeight,
                                 float aFontSizeInflation);
 
@@ -475,20 +564,33 @@ public:
    * size computed so far.
    */
   nscoord ApplyMinMaxWidth(nscoord aWidth) const {
-    if (NS_UNCONSTRAINEDSIZE != mComputedMaxWidth) {
-      aWidth = std::min(aWidth, mComputedMaxWidth);
+    if (NS_UNCONSTRAINEDSIZE != ComputedMaxWidth()) {
+      aWidth = std::min(aWidth, ComputedMaxWidth());
     }
-    return std::max(aWidth, mComputedMinWidth);
+    return std::max(aWidth, ComputedMinWidth());
   }
+
   /**
    * Apply the mComputed(Min/Max)Height constraints to the content
    * size computed so far.
+   *
+   * @param aHeight The height that we've computed an to which we want to apply
+   *        min/max constraints.
+   * @param aConsumed The amount of the computed height that was consumed by
+   *        our prev-in-flows.
    */
-  nscoord ApplyMinMaxHeight(nscoord aHeight) const {
-    if (NS_UNCONSTRAINEDSIZE != mComputedMaxHeight) {
-      aHeight = std::min(aHeight, mComputedMaxHeight);
+  nscoord ApplyMinMaxHeight(nscoord aHeight, nscoord aConsumed = 0) const {
+    aHeight += aConsumed;
+
+    if (NS_UNCONSTRAINEDSIZE != ComputedMaxHeight()) {
+      aHeight = std::min(aHeight, ComputedMaxHeight());
     }
-    return std::max(aHeight, mComputedMinHeight);
+
+    if (NS_UNCONSTRAINEDSIZE != ComputedMinHeight()) {
+      aHeight = std::max(aHeight, ComputedMinHeight());
+    }
+
+    return aHeight - aConsumed;
   }
 
   bool ShouldReflowAllKids() const {
@@ -504,11 +606,9 @@ public:
             (frame->GetStateBits() & NS_FRAME_CONTAINS_RELATIVE_HEIGHT));
   }
 
-  nscoord ComputedWidth() const { return mComputedWidth; }
   // This method doesn't apply min/max computed widths to the value passed in.
   void SetComputedWidth(nscoord aComputedWidth);
 
-  nscoord ComputedHeight() const { return mComputedHeight; }
   // This method doesn't apply min/max computed heights to the value passed in.
   void SetComputedHeight(nscoord aComputedHeight);
 
@@ -517,7 +617,7 @@ public:
     // state when reflowing fixed-pos kids.  In that case we actually don't
     // want to mess with the resize flags, because comparing the frame's rect
     // to the munged computed width is pointless.
-    mComputedHeight = aComputedHeight;
+    ComputedHeight() = aComputedHeight;
   }
 
   void SetTruncated(const nsHTMLReflowMetrics& aMetrics, nsReflowStatus* aStatus) const;
@@ -532,6 +632,15 @@ public:
                                      nscoord aContainingBlockWidth,
                                      nscoord aContainingBlockHeight,
                                      nsMargin& aComputedOffsets);
+
+  // If a relatively positioned element, adjust the position appropriately.
+  static void ApplyRelativePositioning(nsIFrame* aFrame,
+                                       const nsMargin& aComputedOffsets,
+                                       nsPoint* aPosition);
+
+  void ApplyRelativePositioning(nsPoint* aPosition) const {
+    ApplyRelativePositioning(frame, ComputedPhysicalOffsets(), aPosition);
+  }
 
 #ifdef DEBUG
   // Reflow trace methods.  Defined in nsFrame.cpp so they have access

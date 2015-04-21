@@ -8,16 +8,14 @@
 #ifndef nsStringFwd_h___
 #define nsStringFwd_h___
 
-#ifndef nscore_h___
 #include "nscore.h"
-#endif
 
 #ifndef MOZILLA_INTERNAL_API
 #error Internal string headers are not available from external-linkage code.
 #endif
 
   /**
-   * double-byte (PRUnichar) string types
+   * double-byte (char16_t) string types
    */
 
 class nsAString;

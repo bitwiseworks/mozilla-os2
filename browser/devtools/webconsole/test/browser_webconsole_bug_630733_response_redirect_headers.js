@@ -12,12 +12,6 @@ const TEST_URI = "http://example.com/browser/browser/devtools/webconsole/test/te
 let lastFinishedRequests = {};
 let webConsoleClient;
 
-function requestDoneCallback(aHttpRequest )
-{
-  let status = aHttpRequest.response.status;
-  lastFinishedRequests[status] = aHttpRequest;
-}
-
 function consoleOpened(hud)
 {
   webConsoleClient = hud.ui.webConsoleClient;
@@ -25,26 +19,24 @@ function consoleOpened(hud)
     ok(hud.ui._saveRequestAndResponseBodies,
       "The saveRequestAndResponseBodies property was successfully set.");
 
-    HUDService.lastFinishedRequestCallback = requestDoneCallback;
-    waitForSuccess(waitForResponses);
+    HUDService.lastFinishedRequest.callback = requestDoneCallback;
     content.location = TEST_URI;
   });
+}
 
-  let waitForResponses = {
-    name: "301 and 404 responses",
-    validatorFn: function()
-    {
-      return "301" in lastFinishedRequests &&
-             "404" in lastFinishedRequests;
-    },
-    successFn: getHeaders,
-    failureFn: finishTest,
-  };
+function requestDoneCallback(aHttpRequest)
+{
+  let status = aHttpRequest.response.status;
+  lastFinishedRequests[status] = aHttpRequest;
+  if ("301" in lastFinishedRequests &&
+      "404" in lastFinishedRequests) {
+    getHeaders();
+  }
 }
 
 function getHeaders()
 {
-  HUDService.lastFinishedRequestCallback = null;
+  HUDService.lastFinishedRequest.callback = null;
 
   ok("301" in lastFinishedRequests, "request 1: 301 Moved Permanently");
   ok("404" in lastFinishedRequests, "request 2: 404 Not found");

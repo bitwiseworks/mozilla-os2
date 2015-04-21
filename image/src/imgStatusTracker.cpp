@@ -11,225 +11,28 @@
 #include "imgDecoderObserver.h"
 #include "Image.h"
 #include "ImageLogging.h"
-#include "RasterImage.h"
+#include "nsNetUtil.h"
 #include "nsIObserverService.h"
-#include "RasterImage.h"
 
-#include "mozilla/Util.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Services.h"
 
 using namespace mozilla::image;
 using mozilla::WeakPtr;
 
-class imgStatusTrackerNotifyingObserver : public imgDecoderObserver
-{
-public:
-  imgStatusTrackerNotifyingObserver(imgStatusTracker* aTracker)
-  : mTracker(aTracker) {}
-
-  virtual ~imgStatusTrackerNotifyingObserver() {}
-
-  void SetTracker(imgStatusTracker* aTracker) {
-    mTracker = aTracker;
-  }
-
-  /** imgDecoderObserver methods **/
-
-  virtual void OnStartDecode()
-  {
-    LOG_SCOPE(GetImgLog(), "imgStatusTrackerNotifyingObserver::OnStartDecode");
-    NS_ABORT_IF_FALSE(mTracker->GetImage(),
-                      "OnStartDecode callback before we've created our image");
-
-    mTracker->RecordStartDecode();
-
-    imgStatusTracker::ProxyArray::ForwardIterator iter(mTracker->mConsumers);
-    while (iter.HasMore()) {
-      nsRefPtr<imgRequestProxy> proxy = iter.GetNext().get();
-      if (proxy) {
-        mTracker->SendStartDecode(proxy);
-      }
-    }
-
-    if (!mTracker->IsMultipart()) {
-      mTracker->RecordBlockOnload();
-
-      imgStatusTracker::ProxyArray::ForwardIterator iter(mTracker->mConsumers);
-      while (iter.HasMore()) {
-        nsRefPtr<imgRequestProxy> proxy = iter.GetNext().get();
-        if (proxy) {
-          mTracker->SendBlockOnload(proxy);
-        }
-      }
-    }
-  }
-
-  virtual void OnStartRequest()
-  {
-    NS_NOTREACHED("imgStatusTrackerNotifyingObserver(imgDecoderObserver)::OnStartRequest");
-  }
-
-  virtual void OnStartContainer()
-  {
-    LOG_SCOPE(GetImgLog(), "imgStatusTrackerNotifyingObserver::OnStartContainer");
-
-    NS_ABORT_IF_FALSE(mTracker->GetImage(),
-                      "OnStartContainer callback before we've created our image");
-    mTracker->RecordStartContainer(mTracker->GetImage());
-
-    imgStatusTracker::ProxyArray::ForwardIterator iter(mTracker->mConsumers);
-    while (iter.HasMore()) {
-      nsRefPtr<imgRequestProxy> proxy = iter.GetNext().get();
-      if (proxy) {
-        mTracker->SendStartContainer(proxy);
-      }
-    }
-  }
-
-  virtual void OnStartFrame()
-  {
-    LOG_SCOPE(GetImgLog(), "imgStatusTrackerNotifyingObserver::OnStartFrame");
-    NS_ABORT_IF_FALSE(mTracker->GetImage(),
-                      "OnStartFrame callback before we've created our image");
-
-    mTracker->RecordStartFrame();
-
-    // This is not observed below the imgStatusTracker level, so we don't need
-    // to SendStartFrame.
-  }
-
-  virtual void FrameChanged(const nsIntRect* dirtyRect)
-  {
-    LOG_SCOPE(GetImgLog(), "imgStatusTrackerNotifyingObserver::FrameChanged");
-    NS_ABORT_IF_FALSE(mTracker->GetImage(),
-                      "FrameChanged callback before we've created our image");
-
-    mTracker->RecordFrameChanged(dirtyRect);
-
-    imgStatusTracker::ProxyArray::ForwardIterator iter(mTracker->mConsumers);
-    while (iter.HasMore()) {
-      nsRefPtr<imgRequestProxy> proxy = iter.GetNext().get();
-      if (proxy) {
-        mTracker->SendFrameChanged(proxy, dirtyRect);
-      }
-    }
-  }
-
-  virtual void OnStopFrame()
-  {
-    LOG_SCOPE(GetImgLog(), "imgStatusTrackerNotifyingObserver::OnStopFrame");
-    NS_ABORT_IF_FALSE(mTracker->GetImage(),
-                      "OnStopFrame callback before we've created our image");
-
-    mTracker->RecordStopFrame();
-
-    imgStatusTracker::ProxyArray::ForwardIterator iter(mTracker->mConsumers);
-    while (iter.HasMore()) {
-      nsRefPtr<imgRequestProxy> proxy = iter.GetNext().get();
-      if (proxy) {
-        mTracker->SendStopFrame(proxy);
-      }
-    }
-
-    mTracker->MaybeUnblockOnload();
-  }
-
-  virtual void OnStopDecode(nsresult aStatus)
-  {
-    LOG_SCOPE(GetImgLog(), "imgStatusTrackerNotifyingObserver::OnStopDecode");
-    NS_ABORT_IF_FALSE(mTracker->GetImage(),
-                      "OnStopDecode callback before we've created our image");
-
-    bool preexistingError = mTracker->GetImageStatus() == imgIRequest::STATUS_ERROR;
-
-    mTracker->RecordStopDecode(aStatus);
-
-    imgStatusTracker::ProxyArray::ForwardIterator iter(mTracker->mConsumers);
-    while (iter.HasMore()) {
-      nsRefPtr<imgRequestProxy> proxy = iter.GetNext().get();
-      if (proxy) {
-        mTracker->SendStopDecode(proxy, aStatus);
-      }
-    }
-
-    // This is really hacky. We need to handle the case where we start decoding,
-    // block onload, but then hit an error before we get to our first frame.
-    mTracker->MaybeUnblockOnload();
-
-    if (NS_FAILED(aStatus) && !preexistingError) {
-      mTracker->FireFailureNotification();
-    }
-  }
-
-  virtual void OnStopRequest(bool aLastPart, nsresult aStatus)
-  {
-    NS_NOTREACHED("imgStatusTrackerNotifyingObserver(imgDecoderObserver)::OnStopRequest");
-  }
-
-  virtual void OnDiscard()
-  {
-    NS_ABORT_IF_FALSE(mTracker->GetImage(),
-                      "OnDiscard callback before we've created our image");
-
-    mTracker->RecordDiscard();
-
-    imgStatusTracker::ProxyArray::ForwardIterator iter(mTracker->mConsumers);
-    while (iter.HasMore()) {
-      nsRefPtr<imgRequestProxy> proxy = iter.GetNext().get();
-      if (proxy) {
-        mTracker->SendDiscard(proxy);
-      }
-    }
-  }
-
-  virtual void OnUnlockedDraw()
-  {
-    NS_ABORT_IF_FALSE(mTracker->GetImage(),
-                      "OnUnlockedDraw callback before we've created our image");
-    mTracker->RecordUnlockedDraw();
-
-    imgStatusTracker::ProxyArray::ForwardIterator iter(mTracker->mConsumers);
-    while (iter.HasMore()) {
-      nsRefPtr<imgRequestProxy> proxy = iter.GetNext().get();
-      if (proxy) {
-        mTracker->SendUnlockedDraw(proxy);
-      }
-    }
-  }
-
-  virtual void OnImageIsAnimated()
-  {
-    NS_ABORT_IF_FALSE(mTracker->GetImage(),
-                      "OnImageIsAnimated callback before we've created our image");
-    mTracker->RecordImageIsAnimated();
-
-    imgStatusTracker::ProxyArray::ForwardIterator iter(mTracker->mConsumers);
-    while (iter.HasMore()) {
-      nsRefPtr<imgRequestProxy> proxy = iter.GetNext().get();
-      if (proxy) {
-        mTracker->SendImageIsAnimated(iter.GetNext());
-      }
-    }
-  }
-
-  virtual void OnError()
-  {
-    mTracker->RecordError();
-  }
-
-private:
-  imgStatusTracker* mTracker;
-};
-
 class imgStatusTrackerObserver : public imgDecoderObserver
 {
 public:
   imgStatusTrackerObserver(imgStatusTracker* aTracker)
-  : mTracker(aTracker) {}
+  : mTracker(aTracker->asWeakPtr())
+  {
+    MOZ_ASSERT(aTracker);
+  }
 
-  void SetTracker(imgStatusTracker* aTracker) {
-    mTracker = aTracker;
+  void SetTracker(imgStatusTracker* aTracker)
+  {
+    MOZ_ASSERT(aTracker);
+    mTracker = aTracker->asWeakPtr();
   }
 
   /** imgDecoderObserver methods **/
@@ -237,9 +40,11 @@ public:
   virtual void OnStartDecode() MOZ_OVERRIDE
   {
     LOG_SCOPE(GetImgLog(), "imgStatusTrackerObserver::OnStartDecode");
-    mTracker->RecordStartDecode();
-    if (!mTracker->IsMultipart()) {
-      mTracker->RecordBlockOnload();
+    nsRefPtr<imgStatusTracker> tracker = mTracker.get();
+    if (!tracker) { return; }
+    tracker->RecordStartDecode();
+    if (!tracker->IsMultipart()) {
+      tracker->RecordBlockOnload();
     }
   }
 
@@ -251,75 +56,96 @@ public:
   virtual void OnStartContainer() MOZ_OVERRIDE
   {
     LOG_SCOPE(GetImgLog(), "imgStatusTrackerObserver::OnStartContainer");
-    mTracker->RecordStartContainer(mTracker->GetImage());
+    nsRefPtr<imgStatusTracker> tracker = mTracker.get();
+    if (!tracker) { return; }
+    nsRefPtr<Image> image = tracker->GetImage();;
+    tracker->RecordStartContainer(image);
   }
 
   virtual void OnStartFrame() MOZ_OVERRIDE
   {
     LOG_SCOPE(GetImgLog(), "imgStatusTrackerObserver::OnStartFrame");
-    mTracker->RecordStartFrame();
+    nsRefPtr<imgStatusTracker> tracker = mTracker.get();
+    if (!tracker) { return; }
+    tracker->RecordStartFrame();
   }
 
   virtual void FrameChanged(const nsIntRect* dirtyRect) MOZ_OVERRIDE
   {
     LOG_SCOPE(GetImgLog(), "imgStatusTrackerObserver::FrameChanged");
-    mTracker->RecordFrameChanged(dirtyRect);
+    nsRefPtr<imgStatusTracker> tracker = mTracker.get();
+    if (!tracker) { return; }
+    tracker->RecordFrameChanged(dirtyRect);
   }
 
   virtual void OnStopFrame() MOZ_OVERRIDE
   {
     LOG_SCOPE(GetImgLog(), "imgStatusTrackerObserver::OnStopFrame");
-    mTracker->RecordStopFrame();
-    mTracker->RecordUnblockOnload();
+    nsRefPtr<imgStatusTracker> tracker = mTracker.get();
+    if (!tracker) { return; }
+    tracker->RecordStopFrame();
+    tracker->RecordUnblockOnload();
   }
 
   virtual void OnStopDecode(nsresult aStatus) MOZ_OVERRIDE
   {
     LOG_SCOPE(GetImgLog(), "imgStatusTrackerObserver::OnStopDecode");
-    mTracker->RecordStopDecode(aStatus);
+    nsRefPtr<imgStatusTracker> tracker = mTracker.get();
+    if (!tracker) { return; }
+    tracker->RecordStopDecode(aStatus);
 
     // This is really hacky. We need to handle the case where we start decoding,
     // block onload, but then hit an error before we get to our first frame.
-    mTracker->RecordUnblockOnload();
+    tracker->RecordUnblockOnload();
   }
 
   virtual void OnStopRequest(bool aLastPart, nsresult aStatus) MOZ_OVERRIDE
   {
     LOG_SCOPE(GetImgLog(), "imgStatusTrackerObserver::OnStopRequest");
-    mTracker->RecordStopRequest(aLastPart, aStatus);
+    nsRefPtr<imgStatusTracker> tracker = mTracker.get();
+    if (!tracker) { return; }
+    tracker->RecordStopRequest(aLastPart, aStatus);
   }
 
   virtual void OnDiscard() MOZ_OVERRIDE
   {
     LOG_SCOPE(GetImgLog(), "imgStatusTrackerObserver::OnDiscard");
-    mTracker->RecordDiscard();
+    nsRefPtr<imgStatusTracker> tracker = mTracker.get();
+    if (!tracker) { return; }
+    tracker->RecordDiscard();
   }
 
   virtual void OnUnlockedDraw() MOZ_OVERRIDE
   {
     LOG_SCOPE(GetImgLog(), "imgStatusTrackerObserver::OnUnlockedDraw");
-    NS_ABORT_IF_FALSE(mTracker->GetImage(),
+    nsRefPtr<imgStatusTracker> tracker = mTracker.get();
+    if (!tracker) { return; }
+    NS_ABORT_IF_FALSE(tracker->HasImage(),
                       "OnUnlockedDraw callback before we've created our image");
-    mTracker->RecordUnlockedDraw();
+    tracker->RecordUnlockedDraw();
   }
 
   virtual void OnImageIsAnimated() MOZ_OVERRIDE
   {
     LOG_SCOPE(GetImgLog(), "imgStatusTrackerObserver::OnImageIsAnimated");
-    mTracker->RecordImageIsAnimated();
+    nsRefPtr<imgStatusTracker> tracker = mTracker.get();
+    if (!tracker) { return; }
+    tracker->RecordImageIsAnimated();
   }
 
   virtual void OnError() MOZ_OVERRIDE
   {
     LOG_SCOPE(GetImgLog(), "imgStatusTrackerObserver::OnError");
-    mTracker->RecordError();
+    nsRefPtr<imgStatusTracker> tracker = mTracker.get();
+    if (!tracker) { return; }
+    tracker->RecordError();
   }
 
 protected:
   virtual ~imgStatusTrackerObserver() {}
 
 private:
-  imgStatusTracker* mTracker;
+  WeakPtr<imgStatusTracker> mTracker;
 };
 
 // imgStatusTracker methods
@@ -357,12 +183,39 @@ imgStatusTracker::imgStatusTracker(const imgStatusTracker& aOther)
 imgStatusTracker::~imgStatusTracker()
 {}
 
+imgStatusTrackerInit::imgStatusTrackerInit(mozilla::image::Image* aImage,
+                                           imgStatusTracker* aTracker)
+{
+  MOZ_ASSERT(aImage);
+
+  if (aTracker) {
+    mTracker = aTracker;
+    mTracker->SetImage(aImage);
+  } else {
+    mTracker = new imgStatusTracker(aImage);
+  }
+  aImage->SetStatusTracker(mTracker);
+  MOZ_ASSERT(mTracker);
+}
+
+imgStatusTrackerInit::~imgStatusTrackerInit()
+{
+  mTracker->ResetImage();
+}
+
 void
 imgStatusTracker::SetImage(Image* aImage)
 {
   NS_ABORT_IF_FALSE(aImage, "Setting null image");
   NS_ABORT_IF_FALSE(!mImage, "Setting image when we already have one");
   mImage = aImage;
+}
+
+void
+imgStatusTracker::ResetImage()
+{
+  NS_ABORT_IF_FALSE(mImage, "Resetting image when it's already null!");
+  mImage = nullptr;
 }
 
 bool
@@ -384,14 +237,20 @@ imgStatusTracker::GetImageStatus() const
 class imgRequestNotifyRunnable : public nsRunnable
 {
   public:
-    imgRequestNotifyRunnable(imgStatusTracker* aTracker, imgRequestProxy* aRequestProxy)
+    imgRequestNotifyRunnable(imgStatusTracker* aTracker,
+                             imgRequestProxy* aRequestProxy)
       : mTracker(aTracker)
     {
+      MOZ_ASSERT(NS_IsMainThread(), "Should be created on the main thread");
+      MOZ_ASSERT(aRequestProxy, "aRequestProxy should not be null");
+      MOZ_ASSERT(aTracker, "aTracker should not be null");
       mProxies.AppendElement(aRequestProxy);
     }
 
     NS_IMETHOD Run()
     {
+      MOZ_ASSERT(NS_IsMainThread(), "Should be running on the main thread");
+      MOZ_ASSERT(mTracker, "mTracker should not be null");
       for (uint32_t i = 0; i < mProxies.Length(); ++i) {
         mProxies[i]->SetNotificationsDeferred(false);
         mTracker->SyncNotify(mProxies[i]);
@@ -421,9 +280,10 @@ class imgRequestNotifyRunnable : public nsRunnable
 void
 imgStatusTracker::Notify(imgRequestProxy* proxy)
 {
+  MOZ_ASSERT(NS_IsMainThread(), "imgRequestProxy is not threadsafe");
 #ifdef PR_LOGGING
-  if (GetImage() && GetImage()->GetURI()) {
-    nsCOMPtr<nsIURI> uri(GetImage()->GetURI());
+  if (mImage && mImage->GetURI()) {
+    nsRefPtr<ImageURL> uri(mImage->GetURI());
     nsAutoCString spec;
     uri->GetSpec(spec);
     LOG_FUNC_WITH_PARAM(GetImgLog(), "imgStatusTracker::Notify async", "uri", spec.get());
@@ -451,21 +311,27 @@ imgStatusTracker::Notify(imgRequestProxy* proxy)
 class imgStatusNotifyRunnable : public nsRunnable
 {
   public:
-    imgStatusNotifyRunnable(imgStatusTracker& status,
+    imgStatusNotifyRunnable(imgStatusTracker* statusTracker,
                             imgRequestProxy* requestproxy)
-      : mStatus(status), mImage(status.mImage), mProxy(requestproxy)
-    {}
+      : mStatusTracker(statusTracker), mProxy(requestproxy)
+    {
+      MOZ_ASSERT(NS_IsMainThread(), "Should be created on the main thread");
+      MOZ_ASSERT(requestproxy, "requestproxy cannot be null");
+      MOZ_ASSERT(statusTracker, "status should not be null");
+      mImage = statusTracker->GetImage();
+    }
 
     NS_IMETHOD Run()
     {
+      MOZ_ASSERT(NS_IsMainThread(), "Should be running on the main thread");
       mProxy->SetNotificationsDeferred(false);
 
-      mStatus.SyncNotify(mProxy);
+      mStatusTracker->SyncNotify(mProxy);
       return NS_OK;
     }
 
   private:
-    imgStatusTracker mStatus;
+    nsRefPtr<imgStatusTracker> mStatusTracker;
     // We have to hold on to a reference to the tracker's image, just in case
     // it goes away while we're in the event queue.
     nsRefPtr<Image> mImage;
@@ -475,8 +341,9 @@ class imgStatusNotifyRunnable : public nsRunnable
 void
 imgStatusTracker::NotifyCurrentState(imgRequestProxy* proxy)
 {
+  MOZ_ASSERT(NS_IsMainThread(), "imgRequestProxy is not threadsafe");
 #ifdef PR_LOGGING
-  nsCOMPtr<nsIURI> uri;
+  nsRefPtr<ImageURL> uri;
   proxy->GetURI(getter_AddRefs(uri));
   nsAutoCString spec;
   uri->GetSpec(spec);
@@ -486,7 +353,7 @@ imgStatusTracker::NotifyCurrentState(imgRequestProxy* proxy)
   proxy->SetNotificationsDeferred(true);
 
   // We don't keep track of
-  nsCOMPtr<nsIRunnable> ev = new imgStatusNotifyRunnable(*this, proxy);
+  nsCOMPtr<nsIRunnable> ev = new imgStatusNotifyRunnable(this, proxy);
   NS_DispatchToCurrentThread(ev);
 }
 
@@ -494,8 +361,8 @@ imgStatusTracker::NotifyCurrentState(imgRequestProxy* proxy)
   do { \
     ProxyArray::ForwardIterator iter(proxies); \
     while (iter.HasMore()) { \
-      nsRefPtr<imgRequestProxy> proxy = iter.GetNext().get();  \
-      if (proxy && !proxy->NotificationsDeferred()) {          \
+      nsRefPtr<imgRequestProxy> proxy = iter.GetNext().get(); \
+      if (proxy && !proxy->NotificationsDeferred()) { \
         proxy->func; \
       } \
     } \
@@ -506,6 +373,7 @@ imgStatusTracker::SyncNotifyState(ProxyArray& proxies,
                                   bool hasImage, uint32_t state,
                                   nsIntRect& dirtyRect, bool hadLastPart)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   // OnStartRequest
   if (state & stateRequestStarted)
     NOTIFY_IMAGE_OBSERVERS(OnStartRequest());
@@ -548,68 +416,97 @@ imgStatusTracker::SyncNotifyState(ProxyArray& proxies,
   }
 }
 
-imgStatusTracker::StatusDiff
-imgStatusTracker::CalculateAndApplyDifference(imgStatusTracker* other)
+ImageStatusDiff
+imgStatusTracker::Difference(imgStatusTracker* aOther) const
 {
-  LOG_SCOPE(GetImgLog(), "imgStatusTracker::SyncAndCalculateDifference");
+  MOZ_ASSERT(aOther, "aOther cannot be null");
+  ImageStatusDiff diff;
+  diff.diffState = ~mState & aOther->mState & ~stateRequestStarted;
+  diff.diffImageStatus = ~mImageStatus & aOther->mImageStatus;
+  diff.unblockedOnload = mState & stateBlockingOnload && !(aOther->mState & stateBlockingOnload);
+  diff.unsetDecodeStarted = mImageStatus & imgIRequest::STATUS_DECODE_STARTED
+                         && !(aOther->mImageStatus & imgIRequest::STATUS_DECODE_STARTED);
+  diff.foundError = (mImageStatus != imgIRequest::STATUS_ERROR)
+                 && (aOther->mImageStatus == imgIRequest::STATUS_ERROR);
 
-  // We must not modify or notify for the start-load state, which happens from Necko callbacks.
-  uint32_t loadState = mState & stateRequestStarted;
+  MOZ_ASSERT(!mIsMultipart || aOther->mIsMultipart, "mIsMultipart should be monotonic");
+  diff.foundIsMultipart = !mIsMultipart && aOther->mIsMultipart;
+  diff.foundLastPart = !mHadLastPart && aOther->mHadLastPart;
 
-  StatusDiff diff;
-  diff.mDiffState = ~mState & other->mState & ~stateRequestStarted;
-  diff.mUnblockedOnload = mState & stateBlockingOnload && !(other->mState & stateBlockingOnload);
-  diff.mFoundError = (mImageStatus != imgIRequest::STATUS_ERROR) && (other->mImageStatus == imgIRequest::STATUS_ERROR);
-
-  // Now that we've calculated the difference in state, synchronize our state
-  // with the other tracker.
-
-  // First, actually synchronize our state.
-  mState |= diff.mDiffState | loadState;
-  if (diff.mUnblockedOnload) {
-    mState &= ~stateBlockingOnload;
-  }
-
-  mIsMultipart = other->mIsMultipart;
-  mHadLastPart = other->mHadLastPart;
-  mImageStatus |= other->mImageStatus;
-  mHasBeenDecoded = mHasBeenDecoded || other->mHasBeenDecoded;
-
-  // The error state is sticky and overrides all other bits.
-  if (mImageStatus & imgIRequest::STATUS_ERROR) {
-    mImageStatus = imgIRequest::STATUS_ERROR;
-  } else {
-    // Unset the bits that can get unset as part of the decoding process.
-    if (!(other->mImageStatus & imgIRequest::STATUS_DECODE_STARTED)) {
-      mImageStatus &= ~imgIRequest::STATUS_DECODE_STARTED;
-    }
-  }
+  diff.gotDecoded = !mHasBeenDecoded && aOther->mHasBeenDecoded;
 
   // Only record partial invalidations if we haven't been decoded before.
   // When images are re-decoded after discarding, we don't want to display
   // partially decoded versions to the user.
-  bool doInvalidations  = !mHasBeenDecoded
-                       || mImageStatus & imgIRequest::STATUS_ERROR
-                       || mImageStatus & imgIRequest::STATUS_DECODE_COMPLETE;
+  const uint32_t combinedStatus = mImageStatus | aOther->mImageStatus;
+  const bool doInvalidations  = !(mHasBeenDecoded || aOther->mHasBeenDecoded)
+                             || combinedStatus & imgIRequest::STATUS_ERROR
+                             || combinedStatus & imgIRequest::STATUS_DECODE_COMPLETE;
 
-  // Record the invalid rectangles and reset them for another go.
+  // Record and reset the invalid rectangle.
+  // XXX(seth): We shouldn't be resetting anything here; see bug 910441.
   if (doInvalidations) {
-    diff.mInvalidRect = mInvalidRect.Union(other->mInvalidRect);
-    other->mInvalidRect.SetEmpty();
-    mInvalidRect.SetEmpty();
+    diff.invalidRect = aOther->mInvalidRect;
+    aOther->mInvalidRect.SetEmpty();
   }
 
   return diff;
 }
 
-void
-imgStatusTracker::SyncNotifyDifference(imgStatusTracker::StatusDiff diff)
+ImageStatusDiff
+imgStatusTracker::DecodeStateAsDifference() const
 {
+  ImageStatusDiff diff;
+  diff.diffState = mState & ~stateRequestStarted;
+
+  // All other ImageStatusDiff fields are intentionally left at their default
+  // values; we only want to notify decode state changes.
+
+  return diff;
+}
+
+void
+imgStatusTracker::ApplyDifference(const ImageStatusDiff& aDiff)
+{
+  LOG_SCOPE(GetImgLog(), "imgStatusTracker::ApplyDifference");
+
+  // We must not modify or notify for the start-load state, which happens from Necko callbacks.
+  uint32_t loadState = mState & stateRequestStarted;
+
+  // Synchronize our state.
+  mState |= aDiff.diffState | loadState;
+  if (aDiff.unblockedOnload)
+    mState &= ~stateBlockingOnload;
+
+  mIsMultipart = mIsMultipart || aDiff.foundIsMultipart;
+  mHadLastPart = mHadLastPart || aDiff.foundLastPart;
+  mHasBeenDecoded = mHasBeenDecoded || aDiff.gotDecoded;
+
+  // Update the image status. There are some subtle points which are handled below.
+  mImageStatus |= aDiff.diffImageStatus;
+
+  // Unset bits which can get unset as part of the decoding process.
+  if (aDiff.unsetDecodeStarted)
+    mImageStatus &= ~imgIRequest::STATUS_DECODE_STARTED;
+
+  // The error state is sticky and overrides all other bits.
+  if (mImageStatus & imgIRequest::STATUS_ERROR)
+    mImageStatus = imgIRequest::STATUS_ERROR;
+}
+
+void
+imgStatusTracker::SyncNotifyDifference(const ImageStatusDiff& diff)
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Use mConsumers on main thread only");
   LOG_SCOPE(GetImgLog(), "imgStatusTracker::SyncNotifyDifference");
 
-  SyncNotifyState(mConsumers, !!mImage, diff.mDiffState, diff.mInvalidRect, mHadLastPart);
+  nsIntRect invalidRect = mInvalidRect.Union(diff.invalidRect);
 
-  if (diff.mUnblockedOnload) {
+  SyncNotifyState(mConsumers, !!mImage, diff.diffState, invalidRect, mHadLastPart);
+
+  mInvalidRect.SetEmpty();
+
+  if (diff.unblockedOnload) {
     ProxyArray::ForwardIterator iter(mConsumers);
     while (iter.HasMore()) {
       // Hold on to a reference to this proxy, since notifying the state can
@@ -622,23 +519,26 @@ imgStatusTracker::SyncNotifyDifference(imgStatusTracker::StatusDiff diff)
     }
   }
 
-  if (diff.mFoundError) {
+  if (diff.foundError) {
     FireFailureNotification();
   }
 }
 
-imgStatusTracker*
+already_AddRefed<imgStatusTracker>
 imgStatusTracker::CloneForRecording()
 {
-  imgStatusTracker* clone = new imgStatusTracker(*this);
-  return clone;
+  // Grab a ref to this to ensure it isn't deleted.
+  nsRefPtr<imgStatusTracker> thisStatusTracker = this;
+  nsRefPtr<imgStatusTracker> clone = new imgStatusTracker(*thisStatusTracker);
+  return clone.forget();
 }
 
 void
 imgStatusTracker::SyncNotify(imgRequestProxy* proxy)
 {
+  MOZ_ASSERT(NS_IsMainThread(), "imgRequestProxy is not threadsafe");
 #ifdef PR_LOGGING
-  nsCOMPtr<nsIURI> uri;
+  nsRefPtr<ImageURL> uri;
   proxy->GetURI(getter_AddRefs(uri));
   nsAutoCString spec;
   uri->GetSpec(spec);
@@ -658,19 +558,11 @@ imgStatusTracker::SyncNotify(imgRequestProxy* proxy)
 }
 
 void
-imgStatusTracker::SyncNotifyDecodeState()
-{
-  LOG_SCOPE(GetImgLog(), "imgStatusTracker::SyncNotifyDecodeState");
-
-  SyncNotifyState(mConsumers, !!mImage, mState & ~stateRequestStarted, mInvalidRect, mHadLastPart);
-
-  mInvalidRect.SetEmpty();
-}
-
-void
 imgStatusTracker::EmulateRequestFinished(imgRequestProxy* aProxy,
                                          nsresult aStatus)
 {
+  MOZ_ASSERT(NS_IsMainThread(),
+             "SyncNotifyState and mConsumers are not threadsafe");
   nsCOMPtr<imgIRequest> kungFuDeathGrip(aProxy);
 
   // In certain cases the request might not have started yet.
@@ -691,6 +583,7 @@ imgStatusTracker::EmulateRequestFinished(imgRequestProxy* aProxy,
 void
 imgStatusTracker::AddConsumer(imgRequestProxy* aConsumer)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   mConsumers.AppendElementUnlessExists(aConsumer->asWeakPtr());
 }
 
@@ -698,6 +591,7 @@ imgStatusTracker::AddConsumer(imgRequestProxy* aConsumer)
 bool
 imgStatusTracker::RemoveConsumer(imgRequestProxy* aConsumer, nsresult aStatus)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   // Remove the proxy from the list.
   bool removed = mConsumers.RemoveElement(aConsumer);
 
@@ -768,6 +662,7 @@ imgStatusTracker::RecordStartDecode()
 void
 imgStatusTracker::SendStartDecode(imgRequestProxy* aProxy)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred())
     aProxy->OnStartDecode();
 }
@@ -786,6 +681,7 @@ imgStatusTracker::RecordStartContainer(imgIContainer* aContainer)
 void
 imgStatusTracker::SendStartContainer(imgRequestProxy* aProxy)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred())
     aProxy->OnStartContainer();
 }
@@ -809,6 +705,7 @@ imgStatusTracker::RecordStopFrame()
 void
 imgStatusTracker::SendStopFrame(imgRequestProxy* aProxy)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred())
     aProxy->OnStopFrame();
 }
@@ -834,6 +731,7 @@ void
 imgStatusTracker::SendStopDecode(imgRequestProxy* aProxy,
                                  nsresult aStatus)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred())
     aProxy->OnStopDecode();
 }
@@ -857,6 +755,7 @@ imgStatusTracker::RecordDiscard()
 void
 imgStatusTracker::SendDiscard(imgRequestProxy* aProxy)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred())
     aProxy->OnDiscard();
 }
@@ -880,6 +779,7 @@ imgStatusTracker::RecordImageIsAnimated()
 void
 imgStatusTracker::SendImageIsAnimated(imgRequestProxy* aProxy)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred())
     aProxy->OnImageIsAnimated();
 }
@@ -887,6 +787,7 @@ imgStatusTracker::SendImageIsAnimated(imgRequestProxy* aProxy)
 void
 imgStatusTracker::SendUnlockedDraw(imgRequestProxy* aProxy)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred())
     aProxy->OnUnlockedDraw();
 }
@@ -894,6 +795,7 @@ imgStatusTracker::SendUnlockedDraw(imgRequestProxy* aProxy)
 void
 imgStatusTracker::OnUnlockedDraw()
 {
+  MOZ_ASSERT(NS_IsMainThread());
   RecordUnlockedDraw();
   ProxyArray::ForwardIterator iter(mConsumers);
   while (iter.HasMore()) {
@@ -916,6 +818,7 @@ void
 imgStatusTracker::SendFrameChanged(imgRequestProxy* aProxy,
                                    const nsIntRect* aDirtyRect)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred())
     aProxy->OnFrameUpdate(aDirtyRect);
 }
@@ -944,6 +847,7 @@ imgStatusTracker::RecordStartRequest()
 void
 imgStatusTracker::SendStartRequest(imgRequestProxy* aProxy)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred())
     aProxy->OnStartRequest();
 }
@@ -951,6 +855,7 @@ imgStatusTracker::SendStartRequest(imgRequestProxy* aProxy)
 void
 imgStatusTracker::OnStartRequest()
 {
+  MOZ_ASSERT(NS_IsMainThread());
   RecordStartRequest();
   ProxyArray::ForwardIterator iter(mConsumers);
   while (iter.HasMore()) {
@@ -980,15 +885,48 @@ imgStatusTracker::SendStopRequest(imgRequestProxy* aProxy,
                                   bool aLastPart,
                                   nsresult aStatus)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred()) {
     aProxy->OnStopRequest(aLastPart);
   }
 }
 
+class OnStopRequestEvent : public nsRunnable
+{
+public:
+  OnStopRequestEvent(imgStatusTracker* aTracker,
+                     bool aLastPart,
+                     nsresult aStatus)
+    : mTracker(aTracker)
+    , mLastPart(aLastPart)
+    , mStatus(aStatus)
+  {
+    MOZ_ASSERT(!NS_IsMainThread(), "Should be created off the main thread");
+    MOZ_ASSERT(aTracker, "aTracker should not be null");
+  }
+
+  NS_IMETHOD Run()
+  {
+    MOZ_ASSERT(NS_IsMainThread(), "Should be running on the main thread");
+    MOZ_ASSERT(mTracker, "mTracker should not be null");
+    mTracker->OnStopRequest(mLastPart, mStatus);
+    return NS_OK;
+  }
+private:
+  nsRefPtr<imgStatusTracker> mTracker;
+  bool mLastPart;
+  nsresult mStatus;
+};
+
 void
 imgStatusTracker::OnStopRequest(bool aLastPart,
                                 nsresult aStatus)
 {
+  if (!NS_IsMainThread()) {
+    NS_DispatchToMainThread(
+      new OnStopRequestEvent(this, aLastPart, aStatus));
+    return;
+  }
   bool preexistingError = mImageStatus == imgIRequest::STATUS_ERROR;
 
   RecordStopRequest(aLastPart, aStatus);
@@ -1009,6 +947,7 @@ imgStatusTracker::OnStopRequest(bool aLastPart,
 void
 imgStatusTracker::OnDiscard()
 {
+  MOZ_ASSERT(NS_IsMainThread());
   RecordDiscard();
 
   /* notify the kids */
@@ -1024,6 +963,7 @@ imgStatusTracker::OnDiscard()
 void
 imgStatusTracker::FrameChanged(const nsIntRect* aDirtyRect)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   RecordFrameChanged(aDirtyRect);
 
   /* notify the kids */
@@ -1039,6 +979,7 @@ imgStatusTracker::FrameChanged(const nsIntRect* aDirtyRect)
 void
 imgStatusTracker::OnStopFrame()
 {
+  MOZ_ASSERT(NS_IsMainThread());
   RecordStopFrame();
 
   /* notify the kids */
@@ -1054,6 +995,14 @@ imgStatusTracker::OnStopFrame()
 void
 imgStatusTracker::OnDataAvailable()
 {
+  if (!NS_IsMainThread()) {
+    // Note: SetHasImage calls Image::Lock and Image::IncrementAnimationCounter
+    // so subsequent calls or dispatches which Unlock or Decrement~ should
+    // be issued after this to avoid race conditions.
+    NS_DispatchToMainThread(
+      NS_NewRunnableMethod(this, &imgStatusTracker::OnDataAvailable));
+    return;
+  }
   // Notify any imgRequestProxys that are observing us that we have an Image.
   ProxyArray::ForwardIterator iter(mConsumers);
   while (iter.HasMore()) {
@@ -1074,6 +1023,7 @@ imgStatusTracker::RecordBlockOnload()
 void
 imgStatusTracker::SendBlockOnload(imgRequestProxy* aProxy)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred()) {
     aProxy->BlockOnload();
   }
@@ -1088,6 +1038,7 @@ imgStatusTracker::RecordUnblockOnload()
 void
 imgStatusTracker::SendUnblockOnload(imgRequestProxy* aProxy)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aProxy->NotificationsDeferred()) {
     aProxy->UnblockOnload();
   }
@@ -1096,6 +1047,11 @@ imgStatusTracker::SendUnblockOnload(imgRequestProxy* aProxy)
 void
 imgStatusTracker::MaybeUnblockOnload()
 {
+  if (!NS_IsMainThread()) {
+    NS_DispatchToMainThread(
+      NS_NewRunnableMethod(this, &imgStatusTracker::MaybeUnblockOnload));
+    return;
+  }
   if (!(mState & stateBlockingOnload)) {
     return;
   }
@@ -1124,8 +1080,13 @@ imgStatusTracker::FireFailureNotification()
 
   // Some kind of problem has happened with image decoding.
   // Report the URI to net:failed-to-process-uri-conent observers.
-  if (GetImage()) {
-    nsCOMPtr<nsIURI> uri = GetImage()->GetURI();
+  if (mImage) {
+    // Should be on main thread, so ok to create a new nsIURI.
+    nsCOMPtr<nsIURI> uri;
+    {
+      nsRefPtr<ImageURL> threadsafeUriData = mImage->GetURI();
+      uri = threadsafeUriData ? threadsafeUriData->ToIURI() : nullptr;
+    }
     if (uri) {
       nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
       if (os) {

@@ -2,13 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH     = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir    = @srcdir@
-VPATH     = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 STANDALONE_MAKEFILE := 1
 
 include $(topsrcdir)/config/rules.mk
@@ -16,14 +9,6 @@ include $(topsrcdir)/config/rules.mk
 MOZ_PKG_REMOVALS = $(srcdir)/removed-files.in
 
 MOZ_PKG_MANIFEST_P = $(srcdir)/package-manifest.in
-
-MOZ_NONLOCALIZED_PKG_LIST = \
-	xpcom \
-	browser \
-	b2g \
-	$(NULL)
-
-MOZ_LOCALIZED_PKG_LIST = $(AB_CD) multilocale
 
 DEFINES += \
 	-DAB_CD=$(AB_CD) \
@@ -52,6 +37,13 @@ MOZ_PACKAGER_MINIFY=1
 
 include $(topsrcdir)/toolkit/mozapps/installer/packager.mk
 
+# Note that JS_BINARY can be defined in packager.mk, so this test must come after
+# including that file. MOZ_PACKAGER_MINIFY_JS is used in packager.mk, but since
+# recipe evaluation is deferred, we can set it here after the inclusion.
+ifneq (,$(JS_BINARY))
+MOZ_PACKAGER_MINIFY_JS=1
+endif
+
 ifeq (bundle, $(MOZ_FS_LAYOUT))
 BINPATH = $(_BINPATH)
 DEFINES += -DAPPNAME=$(_APPNAME)
@@ -65,17 +57,37 @@ ifneq (,$(filter WINNT Darwin Android,$(OS_TARGET)))
 DEFINES += -DMOZ_SHARED_MOZGLUE=1
 endif
 
+ifneq (,$(filter rtsp,$(NECKO_PROTOCOLS)))
+DEFINES += -DMOZ_RTSP
+endif
+
+ifdef GKMEDIAS_SHARED_LIBRARY
+DEFINES += -DGKMEDIAS_SHARED_LIBRARY
+endif
+
 ifdef MOZ_PKG_MANIFEST_P
 $(MOZ_PKG_MANIFEST): $(MOZ_PKG_MANIFEST_P) FORCE
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(DEFINES) $(ACDEFINES) $< > $@
+	$(call py_action,preprocessor,$(DEFINES) $(ACDEFINES) $< -o $@)
 ifdef MOZ_CHROME_MULTILOCALE
-	printf "\n[multilocale]\n" >> $@
+	printf '\n[multilocale]\n' >> $@
 	for LOCALE in $(MOZ_CHROME_MULTILOCALE) ;\
 	do \
-	  printf "$(BINPATH)/chrome/$$LOCALE$(JAREXT)\n" >> $@; \
-	  printf "$(BINPATH)/chrome/$$LOCALE.manifest\n" >> $@; \
+	  printf '$(BINPATH)/chrome/'"$$LOCALE"'$(JAREXT)\n' >> $@; \
+	  printf '$(BINPATH)/chrome/'"$$LOCALE"'.manifest\n' >> $@; \
 	done
 endif
 
 GARBAGE += $(MOZ_PKG_MANIFEST)
+endif
+
+ifdef FXOS_SIMULATOR
+.PHONY: simulator
+simulator: make-package
+	@echo 'Building simulator addon...'
+	$(PYTHON) $(topsrcdir)/b2g/simulator/build_xpi.py $(MOZ_PKG_PLATFORM)
+
+default:: simulator
+
+# Ensure copying Simulator xpi to ftp
+UPLOAD_EXTRA_FILES += fxos-simulator-*-*.xpi
 endif

@@ -5,7 +5,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsXRemoteService.h"
 #include "nsIObserverService.h"
@@ -68,7 +68,7 @@ static const char *XAtomNames[] = {
   MOZILLA_PROGRAM_PROP,
   MOZILLA_COMMANDLINE_PROP
 };
-static Atom XAtoms[NS_ARRAY_LENGTH(XAtomNames)];
+static Atom XAtoms[MOZ_ARRAY_LENGTH(XAtomNames)];
 
 Atom nsXRemoteService::sMozVersionAtom;
 Atom nsXRemoteService::sMozLockAtom;
@@ -165,7 +165,7 @@ nsXRemoteService::HandleCommandsFor(Window aWindowId)
 NS_IMETHODIMP
 nsXRemoteService::Observe(nsISupports* aSubject,
                           const char *aTopic,
-                          const PRUnichar *aData)
+                          const char16_t *aData)
 {
   // This can be xpcom-shutdown or quit-application, but it's the same either
   // way.
@@ -214,7 +214,7 @@ nsXRemoteService::HandleNewProperty(XID aWindowId, Display* aDisplay,
       return false;
 
     // cool, we got the property data.
-    const char *response = NULL;
+    const char *response = nullptr;
     if (aChangedAtom == sMozCommandAtom)
       response = HandleCommand(data, window, aEventTime);
     else if (aChangedAtom == sMozCommandLineAtom)

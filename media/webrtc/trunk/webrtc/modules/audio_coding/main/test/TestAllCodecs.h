@@ -11,6 +11,7 @@
 #ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TEST_ALL_CODECS_H_
 #define WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TEST_ALL_CODECS_H_
 
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "ACMTest.h"
 #include "Channel.h"
 #include "PCMFile.h"
@@ -35,7 +36,7 @@ class TestPack : public AudioPacketizationCallback {
   void reset_payload_size();
 
  private:
-  AudioCodingModule*  receiver_acm_;
+  AudioCodingModule* receiver_acm_;
   uint16_t sequence_number_;
   uint8_t payload_data_[60 * 32 * 2 * 2];
   uint32_t timestamp_diff_;
@@ -64,8 +65,8 @@ class TestAllCodecs : public ACMTest {
   void DisplaySendReceiveCodec();
 
   int test_mode_;
-  AudioCodingModule* acm_a_;
-  AudioCodingModule* acm_b_;
+  scoped_ptr<AudioCodingModule> acm_a_;
+  scoped_ptr<AudioCodingModule> acm_b_;
   TestPack* channel_a_to_b_;
   PCMFile infile_a_;
   PCMFile outfile_b_;

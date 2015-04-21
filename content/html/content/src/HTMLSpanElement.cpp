@@ -20,21 +20,12 @@ HTMLSpanElement::~HTMLSpanElement()
 {
 }
 
-NS_IMPL_ADDREF_INHERITED(HTMLSpanElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLSpanElement, Element)
-
-// QueryInterface implementation for HTMLSpanElement
-NS_INTERFACE_MAP_BEGIN(HTMLSpanElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-NS_ELEMENT_INTERFACE_MAP_END
-
-
 NS_IMPL_ELEMENT_CLONE(HTMLSpanElement)
 
 JSObject*
-HTMLSpanElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLSpanElement::WrapNode(JSContext *aCx)
 {
-  return HTMLSpanElementBinding::Wrap(aCx, aScope, this);
+  return HTMLSpanElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

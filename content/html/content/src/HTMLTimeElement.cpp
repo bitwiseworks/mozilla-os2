@@ -5,7 +5,6 @@
 
 #include "HTMLTimeElement.h"
 #include "mozilla/dom/HTMLTimeElementBinding.h"
-#include "nsContentUtils.h"
 #include "nsGenericHTMLElement.h"
 #include "nsVariant.h"
 #include "nsGkAtoms.h"
@@ -15,29 +14,21 @@ NS_IMPL_NS_NEW_HTML_ELEMENT(Time)
 namespace mozilla {
 namespace dom {
 
-HTMLTimeElement::HTMLTimeElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+HTMLTimeElement::HTMLTimeElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 HTMLTimeElement::~HTMLTimeElement()
 {
 }
 
-NS_IMPL_ADDREF_INHERITED(HTMLTimeElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLTimeElement, Element)
-
-NS_INTERFACE_MAP_BEGIN(HTMLTimeElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-NS_ELEMENT_INTERFACE_MAP_END
-
 NS_IMPL_ELEMENT_CLONE(HTMLTimeElement)
 
 JSObject*
-HTMLTimeElement::WrapNode(JSContext* cx, JS::Handle<JSObject*> scope)
+HTMLTimeElement::WrapNode(JSContext* cx)
 {
-  return HTMLTimeElementBinding::Wrap(cx, scope, this);
+  return HTMLTimeElementBinding::Wrap(cx, this);
 }
 
 void

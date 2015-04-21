@@ -11,6 +11,7 @@
 #include "gfxWindowsSurface.h"
 #include "gfxAlphaRecovery.h"
 #include "gfxPattern.h"
+#include "mozilla/gfx/2D.h"
 
 enum {
     RENDER_STATE_INIT,
@@ -58,10 +59,10 @@ gfxWindowsNativeDrawing::BeginNativeDrawing()
         // redirect rendering to our own HDC; in some cases,
         // we may be able to use the HDC from the surface directly.
         if (surf &&
-            ((surf->GetType() == gfxASurface::SurfaceTypeWin32 ||
-              surf->GetType() == gfxASurface::SurfaceTypeWin32Printing) &&
-              (surf->GetContentType() == gfxASurface::CONTENT_COLOR ||
-               (surf->GetContentType() == gfxASurface::CONTENT_COLOR_ALPHA &&
+            ((surf->GetType() == gfxSurfaceType::Win32 ||
+              surf->GetType() == gfxSurfaceType::Win32Printing) &&
+              (surf->GetContentType() == gfxContentType::COLOR ||
+               (surf->GetContentType() == gfxContentType::COLOR_ALPHA &&
                (mNativeDrawFlags & CAN_DRAW_TO_COLOR_ALPHA)))))
         {
             // grab the DC. This can fail if there is a complex clipping path,
@@ -146,7 +147,7 @@ gfxWindowsNativeDrawing::BeginNativeDrawing()
         SetViewportOrgEx(mDC,
                          mOrigViewportOrigin.x + (int)mDeviceOffset.x,
                          mOrigViewportOrigin.y + (int)mDeviceOffset.y,
-                         NULL);
+                         nullptr);
 
         return mDC;
     } else if (mRenderState == RENDER_STATE_ALPHA_RECOVERY_BLACK ||
@@ -182,19 +183,21 @@ gfxWindowsNativeDrawing::BeginNativeDrawing()
 bool
 gfxWindowsNativeDrawing::IsDoublePass()
 {
-    if (!mContext->IsCairo()) {
+    if (!mContext->IsCairo() &&
+        (mContext->GetDrawTarget()->GetType() != mozilla::gfx::BackendType::CAIRO ||
+         mContext->GetDrawTarget()->IsDualDrawTarget())) {
       return true;
     }
 
     nsRefPtr<gfxASurface> surf = mContext->CurrentSurface(&mDeviceOffset.x, &mDeviceOffset.y);
     if (!surf || surf->CairoStatus())
         return false;
-    if (surf->GetType() != gfxASurface::SurfaceTypeWin32 &&
-        surf->GetType() != gfxASurface::SurfaceTypeWin32Printing) {
+    if (surf->GetType() != gfxSurfaceType::Win32 &&
+        surf->GetType() != gfxSurfaceType::Win32Printing) {
 	return true;
     }
-    if ((surf->GetContentType() != gfxASurface::CONTENT_COLOR ||
-         (surf->GetContentType() == gfxASurface::CONTENT_COLOR_ALPHA &&
+    if ((surf->GetContentType() != gfxContentType::COLOR ||
+         (surf->GetContentType() == gfxContentType::COLOR_ALPHA &&
           !(mNativeDrawFlags & CAN_DRAW_TO_COLOR_ALPHA))))
         return true;
     return false;
@@ -227,7 +230,7 @@ gfxWindowsNativeDrawing::EndNativeDrawing()
 {
     if (mRenderState == RENDER_STATE_NATIVE_DRAWING) {
         // we drew directly to the HDC in the context; undo our changes
-        SetViewportOrgEx(mDC, mOrigViewportOrigin.x, mOrigViewportOrigin.y, NULL);
+        SetViewportOrgEx(mDC, mOrigViewportOrigin.x, mOrigViewportOrigin.y, nullptr);
 
         if (mTransformType != TRANSLATION_ONLY)
             SetWorldTransform(mDC, &mOldWorldTransform);
@@ -266,7 +269,7 @@ gfxWindowsNativeDrawing::PaintToContext()
         nsRefPtr<gfxImageSurface> alphaSurface =
             new gfxImageSurface(black->Data(), black->GetSize(),
                                 black->Stride(),
-                                gfxASurface::ImageFormatARGB32);
+                                gfxImageFormat::ARGB32);
 
         mContext->Save();
         mContext->Translate(mNativeRect.TopLeft());
@@ -280,7 +283,7 @@ gfxWindowsNativeDrawing::PaintToContext()
         pat->SetMatrix(m);
 
         if (mNativeDrawFlags & DO_NEAREST_NEIGHBOR_FILTERING)
-            pat->SetFilter(gfxPattern::FILTER_FAST);
+            pat->SetFilter(GraphicsFilter::FILTER_FAST);
 
         pat->SetExtend(gfxPattern::EXTEND_PAD);
         mContext->SetPattern(pat);

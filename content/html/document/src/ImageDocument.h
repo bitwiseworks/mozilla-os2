@@ -14,10 +14,10 @@
 namespace mozilla {
 namespace dom {
 
-class ImageDocument : public MediaDocument,
-                      public nsIImageDocument,
-                      public imgINotificationObserver,
-                      public nsIDOMEventListener
+class ImageDocument MOZ_FINAL : public MediaDocument,
+                                public nsIImageDocument,
+                                public imgINotificationObserver,
+                                public nsIDOMEventListener
 {
 public:
   ImageDocument();
@@ -53,7 +53,7 @@ public:
   void DefaultCheckOverflowing() { CheckOverflowing(mResizeImageByDefault); }
 
   // WebIDL API
-  virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+  virtual JSObject* WrapNode(JSContext* aCx)
     MOZ_OVERRIDE;
 
   bool ImageResizingEnabled() const
@@ -93,6 +93,8 @@ protected:
 
   void ResetZoomLevel();
   float GetZoomLevel();
+
+  void UpdateSizeFromLayout();
 
   enum eModeClasses {
     eNone,

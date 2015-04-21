@@ -3,16 +3,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/layers/PLayerTransactionParent.h"
-#include "BasicLayersImpl.h"
-#include "SharedTextureImage.h"
-#include "gfxUtils.h"
-#include "gfxSharedImageSurface.h"
-#include "mozilla/layers/ImageClient.h"
-#include "mozilla/layers/TextureClient.h"
-#ifdef MOZ_X11
-#include "gfxXlibSurface.h"
-#endif
+#include "BasicLayersImpl.h"            // for FillRectWithMask, etc
+#include "ImageContainer.h"             // for AutoLockImage, etc
+#include "ImageLayers.h"                // for ImageLayer
+#include "Layers.h"                     // for Layer (ptr only), etc
+#include "basic/BasicImplData.h"        // for BasicImplData
+#include "basic/BasicLayers.h"          // for BasicLayerManager
+#include "mozilla/mozalloc.h"           // for operator new
+#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsImpl.h"            // for gfxPattern::Release, etc
+#include "nsRect.h"                     // for nsIntRect
+#include "nsRegion.h"                   // for nsIntRegion
+#include "mozilla/gfx/Point.h"          // for IntSize
 
 using namespace mozilla::gfx;
 
@@ -22,7 +26,8 @@ namespace layers {
 class BasicImageLayer : public ImageLayer, public BasicImplData {
 public:
   BasicImageLayer(BasicLayerManager* aLayerManager) :
-    ImageLayer(aLayerManager, static_cast<BasicImplData*>(this)),
+    ImageLayer(aLayerManager,
+               static_cast<BasicImplData*>(MOZ_THIS_IN_INITIALIZER_LIST())),
     mSize(-1, -1)
   {
     MOZ_COUNT_CTOR(BasicImageLayer);
@@ -39,10 +44,11 @@ public:
     ImageLayer::SetVisibleRegion(aRegion);
   }
 
-  virtual void Paint(gfxContext* aContext, Layer* aMaskLayer);
+  virtual void Paint(DrawTarget* aDT,
+                     const gfx::Point& aDeviceOffset,
+                     Layer* aMaskLayer) MOZ_OVERRIDE;
 
-  virtual bool GetAsSurface(gfxASurface** aSurface,
-                            SurfaceDescriptor* aDescriptor);
+  virtual TemporaryRef<SourceSurface> GetAsSourceSurface() MOZ_OVERRIDE;
 
 protected:
   BasicLayerManager* BasicManager()
@@ -51,110 +57,87 @@ protected:
   }
 
   // only paints the image if aContext is non-null
-  already_AddRefed<gfxPattern>
-  GetAndPaintCurrentImage(gfxContext* aContext,
+  void
+  GetAndPaintCurrentImage(DrawTarget* aTarget,
                           float aOpacity,
-                          Layer* aMaskLayer);
+                          SourceSurface* aMaskSurface);
 
-  gfxIntSize mSize;
+  gfx::IntSize mSize;
 };
 
 void
-BasicImageLayer::Paint(gfxContext* aContext, Layer* aMaskLayer)
+BasicImageLayer::Paint(DrawTarget* aDT,
+                       const gfx::Point& aDeviceOffset,
+                       Layer* aMaskLayer)
 {
-  if (IsHidden())
+  if (IsHidden() || !mContainer) {
     return;
-  nsRefPtr<gfxPattern> dontcare =
-    GetAndPaintCurrentImage(aContext, GetEffectiveOpacity(), aMaskLayer);
-}
-
-already_AddRefed<gfxPattern>
-BasicImageLayer::GetAndPaintCurrentImage(gfxContext* aContext,
-                                         float aOpacity,
-                                         Layer* aMaskLayer)
-{
-  if (!mContainer)
-    return nullptr;
+  }
 
   mContainer->SetImageFactory(mManager->IsCompositingCheap() ? nullptr : BasicManager()->GetImageFactory());
 
-  nsRefPtr<gfxASurface> surface;
-  AutoLockImage autoLock(mContainer, getter_AddRefs(surface));
+  RefPtr<gfx::SourceSurface> surface;
+  AutoLockImage autoLock(mContainer, &surface);
   Image *image = autoLock.GetImage();
-  gfxIntSize size = mSize = autoLock.GetSize();
+  gfx::IntSize size = mSize = autoLock.GetSize();
 
-  if (!surface || surface->CairoStatus()) {
-    return nullptr;
+  if (!surface || !surface->IsValid()) {
+    return;
   }
 
-  nsRefPtr<gfxPattern> pat = new gfxPattern(surface);
-  if (!pat) {
-    return nullptr;
+  FillRectWithMask(aDT, aDeviceOffset, Rect(0, 0, size.width, size.height), 
+                   surface, ToFilter(mFilter),
+                   DrawOptions(GetEffectiveOpacity(), GetEffectiveOperator(this)),
+                   aMaskLayer);
+
+  GetContainer()->NotifyPaintedImage(image);
+}
+
+void
+BasicImageLayer::GetAndPaintCurrentImage(DrawTarget* aTarget,
+                                         float aOpacity,
+                                         SourceSurface* aMaskSurface)
+{
+  if (!mContainer) {
+    return;
   }
 
-  pat->SetFilter(mFilter);
+  mContainer->SetImageFactory(mManager->IsCompositingCheap() ?
+                              nullptr :
+                              BasicManager()->GetImageFactory());
+  IntSize size;
+  Image* image = nullptr;
+  RefPtr<SourceSurface> surf =
+    mContainer->LockCurrentAsSourceSurface(&size, &image);
 
-  // The visible region can extend outside the image, so just draw
-  // within the image bounds.
-  if (aContext) {
-    AutoSetOperator setOperator(aContext, GetOperator());
-    PaintContext(pat,
-                 nsIntRegion(nsIntRect(0, 0, size.width, size.height)),
-                 aOpacity, aContext, aMaskLayer);
+  if (!surf) {
+    return;
+  }
+
+  if (aTarget) {
+    // The visible region can extend outside the image, so just draw
+    // within the image bounds.
+    SurfacePattern pat(surf, ExtendMode::CLAMP, Matrix(), ToFilter(mFilter));
+    CompositionOp op = GetEffectiveOperator(this);
+    DrawOptions opts(aOpacity, op);
+
+    aTarget->MaskSurface(pat, aMaskSurface, Point(0, 0), opts);
 
     GetContainer()->NotifyPaintedImage(image);
   }
 
-  return pat.forget();
+  mContainer->UnlockCurrentImage();
 }
 
-void
-PaintContext(gfxPattern* aPattern,
-             const nsIntRegion& aVisible,
-             float aOpacity,
-             gfxContext* aContext,
-             Layer* aMaskLayer)
-{
-  // Set PAD mode so that when the video is being scaled, we do not sample
-  // outside the bounds of the video image.
-  gfxPattern::GraphicsExtend extend = gfxPattern::EXTEND_PAD;
-
-#ifdef MOZ_X11
-  // PAD is slow with cairo and old X11 servers, so prefer speed over
-  // correctness and use NONE.
-  if (aContext->IsCairo()) {
-    nsRefPtr<gfxASurface> target = aContext->CurrentSurface();
-    if (target->GetType() == gfxASurface::SurfaceTypeXlib &&
-        static_cast<gfxXlibSurface*>(target.get())->IsPadSlow()) {
-      extend = gfxPattern::EXTEND_NONE;
-    }
-  }
-#endif
-
-  aContext->NewPath();
-  // No need to snap here; our transform has already taken care of it.
-  // XXX true for arbitrary regions?  Don't care yet though
-  gfxUtils::PathFromRegion(aContext, aVisible);
-  aPattern->SetExtend(extend);
-  aContext->SetPattern(aPattern);
-  FillWithMask(aContext, aOpacity, aMaskLayer);
-
-  // Reset extend mode for callers that need to reuse the pattern
-  aPattern->SetExtend(extend);
-}
-
-bool
-BasicImageLayer::GetAsSurface(gfxASurface** aSurface,
-                              SurfaceDescriptor* aDescriptor)
+TemporaryRef<SourceSurface>
+BasicImageLayer::GetAsSourceSurface()
 {
   if (!mContainer) {
-    return false;
+    return nullptr;
   }
 
-  gfxIntSize dontCare;
-  nsRefPtr<gfxASurface> surface = mContainer->GetCurrentAsSurface(&dontCare);
-  *aSurface = surface.forget().get();
-  return true;
+  gfx::IntSize dontCare;
+  return mContainer->GetCurrentAsSourceSurface(&dontCare);
 }
 
 already_AddRefed<ImageLayer>

@@ -12,7 +12,6 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "FileUtils.h"
 
@@ -66,7 +65,7 @@ TEST(ReadSysFile, Nonexistent) {
   bool ret;
   int errno_saved;
 
-  ret = ReadSysFile("/nonexistent", NULL, 0);
+  ret = ReadSysFile("/nonexistent", nullptr, 0);
   errno_saved = errno;
 
   ASSERT_FALSE(ret);

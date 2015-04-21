@@ -35,13 +35,13 @@ protected:
 
   nsHashtable&  mHashTable;
   int32_t       mIndex;
-  char **       mGroupNames;        // array of pointers to PRUnichar* in the hash table
+  char **       mGroupNames;        // array of pointers to char16_t* in the hash table
   bool          mInitted;
   
 };
 
 /* Implementation file */
-NS_IMPL_ISUPPORTS1(nsGroupsEnumerator, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS(nsGroupsEnumerator, nsISimpleEnumerator)
 
 nsGroupsEnumerator::nsGroupsEnumerator(nsHashtable& inHashTable)
 : mHashTable(inHashTable)
@@ -159,7 +159,7 @@ nsNamedGroupEnumerator::~nsNamedGroupEnumerator()
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsNamedGroupEnumerator, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS(nsNamedGroupEnumerator, nsISimpleEnumerator)
 
 /* boolean hasMoreElements (); */
 NS_IMETHODIMP
@@ -185,7 +185,7 @@ nsNamedGroupEnumerator::GetNext(nsISupports **_retval)
   if (mIndex >= int32_t(mGroupArray->Length()))
     return NS_ERROR_FAILURE;
     
-  PRUnichar   *thisGroupName = (PRUnichar*)mGroupArray->ElementAt(mIndex);
+  char16_t   *thisGroupName = (char16_t*)mGroupArray->ElementAt(mIndex);
   NS_ASSERTION(thisGroupName, "Bad Element in mGroupArray");
   
   nsresult rv;
@@ -202,7 +202,7 @@ nsNamedGroupEnumerator::GetNext(nsISupports **_retval)
 
 
 /* Implementation file */
-NS_IMPL_ISUPPORTS1(nsControllerCommandGroup, nsIControllerCommandGroup)
+NS_IMPL_ISUPPORTS(nsControllerCommandGroup, nsIControllerCommandGroup)
 
 nsControllerCommandGroup::nsControllerCommandGroup()
 {
@@ -236,7 +236,7 @@ nsControllerCommandGroup::AddCommandToGroup(const char * aCommand, const char *a
     mGroupsHash.Put(&groupKey, (void *)commandList);
   }
   // add the command to the list. Note that we're not checking for duplicates here
-  char* commandString = NS_strdup(aCommand); // we store allocated PRUnichar* in the array
+  char* commandString = NS_strdup(aCommand); // we store allocated char16_t* in the array
   if (!commandString) return NS_ERROR_OUT_OF_MEMORY;
   
 #ifdef DEBUG

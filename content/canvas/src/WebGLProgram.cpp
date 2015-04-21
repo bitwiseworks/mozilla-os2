@@ -7,7 +7,7 @@
 #include "WebGLShader.h"
 #include "WebGLProgram.h"
 #include "mozilla/dom/WebGLRenderingContextBinding.h"
-#include "nsContentUtils.h"
+#include "GLContext.h"
 
 using namespace mozilla;
 
@@ -45,8 +45,8 @@ static bool SplitLastSquareBracket(nsACString& string, nsCString& bracketPart)
 }
 
 JSObject*
-WebGLProgram::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope) {
-    return dom::WebGLProgramBinding::Wrap(cx, scope, this);
+WebGLProgram::WrapObject(JSContext *cx) {
+    return dom::WebGLProgramBinding::Wrap(cx, this);
 }
 
 WebGLProgram::WebGLProgram(WebGLContext *context)
@@ -136,7 +136,6 @@ WebGLProgram::MapIdentifier(const nsACString& name, nsCString *mappedName) {
     if (!mIdentifierMap) {
         // if the identifier map doesn't exist yet, build it now
         mIdentifierMap = new CStringMap;
-        mIdentifierMap->Init();
         for (size_t i = 0; i < mAttachedShaders.Length(); i++) {
             for (size_t j = 0; j < mAttachedShaders[i]->mAttributes.Length(); j++) {
                 const WebGLMappedIdentifier& attrib = mAttachedShaders[i]->mAttributes[j];
@@ -182,7 +181,6 @@ WebGLProgram::ReverseMapIdentifier(const nsACString& name, nsCString *reverseMap
     if (!mIdentifierReverseMap) {
         // if the identifier reverse map doesn't exist yet, build it now
         mIdentifierReverseMap = new CStringMap;
-        mIdentifierReverseMap->Init();
         for (size_t i = 0; i < mAttachedShaders.Length(); i++) {
             for (size_t j = 0; j < mAttachedShaders[i]->mAttributes.Length(); j++) {
                 const WebGLMappedIdentifier& attrib = mAttachedShaders[i]->mAttributes[j];
@@ -236,20 +234,10 @@ WebGLProgram::GetUniformInfoForMappedIdentifier(const nsACString& name) {
     mUniformInfoMap->Get(mutableName, &info);
     // we don't check if that Get failed, as if it did, it left info with default values
 
-    // if there is a bracket and it's not [0], then we're not an array, we're just an entry in an array
-    if (hadBracketPart && !bracketPart.EqualsLiteral("[0]")) {
-        info.isArray = false;
-        info.arraySize = 1;
-    }
     return info;
 }
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(WebGLProgram, mAttachedShaders)
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(WebGLProgram)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(WebGLProgram)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(WebGLProgram)
-  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
+NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(WebGLProgram, AddRef)
+NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(WebGLProgram, Release)

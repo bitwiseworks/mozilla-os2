@@ -8,31 +8,35 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <android/log.h>
 #include <stdio.h>
 #include <string.h>
-#include <android/log.h>
 
-#include "org_webrtc_videoengineapp_vie_android_java_api.h"
+#include "webrtc/video_engine/test/android/jni/org_webrtc_videoengineapp_vie_android_java_api.h"
 
-#include "voe_base.h"
-#include "voe_codec.h"
-#include "voe_file.h"
-#include "voe_network.h"
-#include "voe_audio_processing.h"
-#include "voe_volume_control.h"
-#include "voe_hardware.h"
-#include "voe_rtp_rtcp.h"
+#include "webrtc/voice_engine/include/voe_audio_processing.h"
+#include "webrtc/voice_engine/include/voe_base.h"
+#include "webrtc/voice_engine/include/voe_codec.h"
+#include "webrtc/voice_engine/include/voe_file.h"
+#include "webrtc/voice_engine/include/voe_hardware.h"
+#include "webrtc/voice_engine/include/voe_network.h"
+#include "webrtc/voice_engine/include/voe_rtp_rtcp.h"
+#include "webrtc/voice_engine/include/voe_volume_control.h"
 
-#include "vie_base.h"
-#include "vie_codec.h"
-#include "vie_capture.h"
-#include "vie_external_codec.h"
-#include "vie_network.h"
-#include "vie_render.h"
-#include "vie_rtp_rtcp.h"
+#include "webrtc/video_engine/include/vie_base.h"
+#include "webrtc/video_engine/include/vie_capture.h"
+#include "webrtc/video_engine/include/vie_codec.h"
+#include "webrtc/video_engine/include/vie_external_codec.h"
+#include "webrtc/video_engine/include/vie_network.h"
+#include "webrtc/video_engine/include/vie_render.h"
+#include "webrtc/video_engine/include/vie_rtp_rtcp.h"
 
-#include "common_types.h"
-#include "android_media_codec_decoder.h"
+#include "webrtc/common_types.h"
+#include "webrtc/video_engine/test/android/jni/android_media_codec_decoder.h"
+
+#include "webrtc/modules/video_coding/main/interface/video_coding_defines.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/test/channel_transport/include/channel_transport.h"
 
 #define WEBRTC_LOG_TAG "*WEBRTCN*"
 #define VALIDATE_BASE_POINTER                                           \
@@ -106,7 +110,9 @@ typedef struct
   VoEVolumeControl* volume;
   VoEHardware* hardware;
   VoERTP_RTCP* rtp;
+
   JavaVM* jvm;
+  scoped_ptr<test::VoiceChannelTransport> transport;
 } VoiceEngineData;
 
 class AndroidVideoRenderCallback;
@@ -121,8 +127,9 @@ typedef struct
   ViERender* render;
   ViECapture* capture;
   ViEExternalCodec* externalCodec;
-  VideoCallbackAndroid* callback;
 
+  VideoCallbackAndroid* callback;
+  scoped_ptr<test::VideoChannelTransport> transport;
 } VideoEngineData;
 
 // Global variables
@@ -186,6 +193,19 @@ class VideoCallbackAndroid: public ViEDecoderObserver,
     virtual void IncomingCodecChanged(const int videoChannel,
                                       const webrtc::VideoCodec& videoCodec)
     {
+        JNIEnv* threadEnv = NULL;
+        int ret = webrtcGlobalVM->AttachCurrentThread(&threadEnv, NULL);
+        // Get the JNI env for this thread
+        if ((ret < 0) || !threadEnv)
+        {
+            __android_log_print(ANDROID_LOG_DEBUG, WEBRTC_LOG_TAG,
+                                "Could not attach thread to JVM (%d, %p)", ret,
+                                threadEnv);
+            return;
+        }
+        threadEnv->CallIntMethod(_callbackObj, _incomingResolutionId,
+                                 videoCodec.width, videoCodec.height);
+        webrtcGlobalVM->DetachCurrentThread();
     }
     ;
 
@@ -211,6 +231,7 @@ public:
   jobject _callbackObj;
   jclass _callbackCls;
   jmethodID _callbackId;
+  jmethodID _incomingResolutionId;
   int _frameRateO, _bitRateO;
   VideoCallbackAndroid(VideoEngineData& vieData, JNIEnv * env,
                        jobject callback) :
@@ -219,6 +240,8 @@ public:
     _callbackCls = _env->GetObjectClass(_callbackObj);
     _callbackId
         = _env->GetMethodID(_callbackCls, "updateStats", "(IIIII)I");
+    _incomingResolutionId
+        = _env->GetMethodID(_callbackCls, "newIncomingResolution", "(II)I");
     if (_callbackId == NULL) {
       __android_log_print(ANDROID_LOG_ERROR, WEBRTC_LOG_TAG,
                           "Failed to get jid");
@@ -281,14 +304,14 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_GetVideo
 
   __android_log_write(ANDROID_LOG_DEBUG, WEBRTC_LOG_TAG, "GetVideoEngine");
 
-  VideoEngine::SetAndroidObjects(webrtcGlobalVM, context);
-
   // Check if already got
   if (vieData.vie) {
-    __android_log_write(ANDROID_LOG_ERROR, WEBRTC_LOG_TAG,
+    __android_log_write(ANDROID_LOG_INFO, WEBRTC_LOG_TAG,
                         "ViE already got");
-    return -1;
+    return 0;
   }
+
+  VideoEngine::SetAndroidObjects(webrtcGlobalVM, context);
 
   // Create
   vieData.vie = VideoEngine::Create();
@@ -376,7 +399,7 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_Init(
 
             __android_log_write(ANDROID_LOG_DEBUG, WEBRTC_LOG_TAG,
                                 "SetTraceFilter");
-            if (0 != vieData.vie->SetTraceFilter(webrtc::kTraceDefault))
+            if (0 != vieData.vie->SetTraceFilter(webrtc::kTraceError))
             {
                 __android_log_write(ANDROID_LOG_WARN, WEBRTC_LOG_TAG,
                                     "Could not set trace filter");
@@ -589,7 +612,8 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_CreateCh
     if (voiceChannel >= 0) {
       vieData.base->ConnectAudioChannel(channel, voiceChannel);
     }
-
+    vieData.transport.reset(new test::VideoChannelTransport(vieData.netw,
+                                                            channel));
     return channel;
   }
   else {
@@ -610,13 +634,10 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_SetLocal
 {
   __android_log_write(ANDROID_LOG_DEBUG, WEBRTC_LOG_TAG, "SetLocalReceiver");
 
-  if (vieData.vie) {
-    int ret = vieData.netw->SetLocalReceiver(channel, port);
-    return ret;
+  if (vieData.transport.get()) {
+    return vieData.transport->SetLocalReceiver(port);
   }
-  else {
-    return -1;
-  }
+  return -1;
 }
 
 /*
@@ -646,7 +667,10 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_SetSendD
                       "SetSendDestination: channel=%d, port=%d, ip=%s\n",
                       channel, port, ip);
 
-  return vieData.netw->SetSendDestination(channel, ip, port);
+  if (vieData.transport.get()) {
+    return vieData.transport->SetSendDestination(ip, port);
+  }
+  return -1;
 }
 
 
@@ -676,10 +700,10 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_SetRecei
       ANDROID_LOG_DEBUG,
       WEBRTC_LOG_TAG,
       "SetReceiveCodec %s, pltype=%d, bitRate=%d, maxBitRate=%d,"
-      " width=%d, height=%d, frameRate=%d, codecSpecific=%d \n",
+      " width=%d, height=%d, frameRate=%d \n",
       codec.plName, codec.plType, codec.startBitrate,
       codec.maxBitrate, codec.width, codec.height,
-      codec.maxFramerate, codec.codecSpecific);
+      codec.maxFramerate);
   int ret = vieData.codec->SetReceiveCodec(channel, codec);
   __android_log_print(ANDROID_LOG_DEBUG, WEBRTC_LOG_TAG,
                       "SetReceiveCodec return %d", ret);
@@ -752,7 +776,6 @@ JNIEXPORT jobjectArray JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_
   }
 
   jobjectArray ret;
-  int i;
   int num = vieData.codec->NumberOfCodecs();
   char info[32];
 
@@ -990,7 +1013,6 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_SetExter
       ANDROID_LOG_DEBUG, WEBRTC_LOG_TAG, "SetExternalMediaCodecDecoder");
 
   jclass cls = env->FindClass("org/webrtc/videoengine/ViEMediaCodecDecoder");
-  env->NewGlobalRef(cls);
 
   AndroidMediaCodecDecoder* mediaCodecDecoder =
       new AndroidMediaCodecDecoder(webrtcGlobalVM, glSurface, cls);
@@ -998,7 +1020,7 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_SetExter
   // TODO(dwkang): Check the ownership of decoder object and release it
   //               if needed.
   return vieData.externalCodec->RegisterExternalReceiveCodec(
-      channel, 120, mediaCodecDecoder, true);
+      channel, VCM_VP8_PAYLOAD_TYPE, mediaCodecDecoder, true);
 }
 
 /*
@@ -1264,7 +1286,8 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_VoE_1Cre
   }
 
   jint channel = voeData.base->CreateChannel();
-
+  voeData.transport.reset(new test::VoiceChannelTransport(voeData.netw,
+                                                          channel));
   return channel;
 }
 
@@ -1279,7 +1302,23 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_VoE_1Del
     jint channel)
 {
   VALIDATE_BASE_POINTER;
+  voeData.transport.reset(NULL);
   return voeData.base->DeleteChannel(channel);
+}
+
+/*
+ * Class:     org_webrtc_videoengineapp_ViEAndroidJavaAPI
+ * Method:    ViE_DeleteChannel
+ * Signature: (I)I
+ */
+JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_ViE_1DeleteChannel(
+    JNIEnv *,
+    jobject,
+    jint channel)
+{
+  VALIDATE_BASE_POINTER;
+  vieData.transport.reset(NULL);
+  return vieData.base->DeleteChannel(channel);
 }
 
 /*
@@ -1295,7 +1334,10 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_VoE_1Set
 {
   __android_log_write(ANDROID_LOG_DEBUG, WEBRTC_LOG_TAG, "SetLocalReceiver");
   VALIDATE_BASE_POINTER;
-  return voeData.base->SetLocalReceiver(channel, port);
+  if (voeData.transport.get()) {
+    return voeData.transport->SetLocalReceiver(port);
+  }
+  return -1;
 }
 
 /*
@@ -1319,9 +1361,13 @@ JNIEXPORT jint JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_VoE_1Set
                         "Could not get UTF string");
     return -1;
   }
-  jint retVal = voeData.base->SetSendDestination(channel, port, ipaddrNative);
+  if (voeData.transport.get()) {
+    jint retVal = voeData.transport->SetSendDestination(ipaddrNative, port);
+    env->ReleaseStringUTFChars(ipaddr, ipaddrNative);
+    return retVal;
+  }
   env->ReleaseStringUTFChars(ipaddr, ipaddrNative);
-  return retVal;
+  return -1;
 }
 
 /*
@@ -1581,7 +1627,9 @@ JNIEXPORT jobjectArray JNICALL Java_org_webrtc_videoengineapp_ViEAndroidJavaAPI_
                            codecToList.plname, codecToList.pltype,
                            codecToList.plfreq, codecToList.pacsize,
                            codecToList.channels, codecToList.rate);
-    assert(written >= 0 && written < sizeof(info));
+    if (written < 0 || written >= static_cast<int>(sizeof(info))) {
+      assert(false);
+    }
     __android_log_print(ANDROID_LOG_DEBUG, WEBRTC_LOG_TAG,
                         "VoiceEgnine Codec[%d] %s", i, info);
     env->SetObjectArrayElement(ret, i, env->NewStringUTF( info ));

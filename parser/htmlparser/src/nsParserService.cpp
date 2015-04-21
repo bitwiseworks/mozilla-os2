@@ -20,7 +20,7 @@ nsParserService::~nsParserService()
 {
 }
 
-NS_IMPL_ISUPPORTS1(nsParserService, nsIParserService)
+NS_IMPL_ISUPPORTS(nsParserService, nsIParserService)
 
 int32_t
 nsParserService::HTMLAtomTagToId(nsIAtom* aAtom) const
@@ -40,7 +40,7 @@ nsParserService::HTMLStringTagToId(const nsAString& aTag) const
   return nsHTMLTags::LookupTag(aTag);
 }
 
-const PRUnichar*
+const char16_t*
 nsParserService::HTMLIdToStringTag(int32_t aId) const
 {
   return nsHTMLTags::GetStringValue((nsHTMLTag)aId);

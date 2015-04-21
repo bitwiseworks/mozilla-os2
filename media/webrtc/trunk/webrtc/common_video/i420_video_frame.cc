@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "common_video/interface/i420_video_frame.h"
+#include "webrtc/common_video/interface/i420_video_frame.h"
 
 #include <algorithm>  // swap
 
@@ -142,6 +142,8 @@ void I420VideoFrame::ResetSize() {
   v_plane_.ResetSize();
 }
 
+void* I420VideoFrame::native_handle() const { return NULL; }
+
 int I420VideoFrame::CheckDimensions(int width, int height,
                                     int stride_y, int stride_u, int stride_v) {
   int half_width = (width + 1) / 2;
@@ -178,6 +180,5 @@ Plane* I420VideoFrame::GetPlane(PlaneType type) {
   }
   return NULL;
 }
-
 
 }  // namespace webrtc

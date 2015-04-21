@@ -11,7 +11,7 @@
 #ifndef WEBRTC_MODULES_AUDIO_PROCESSING_NS_MAIN_SOURCE_NS_CORE_H_
 #define WEBRTC_MODULES_AUDIO_PROCESSING_NS_MAIN_SOURCE_NS_CORE_H_
 
-#include "defines.h"
+#include "webrtc/modules/audio_processing/ns/defines.h"
 
 typedef struct NSParaExtract_t_ {
 
@@ -50,7 +50,7 @@ typedef struct NSParaExtract_t_ {
 
 typedef struct NSinst_t_ {
 
-  WebRtc_UWord32  fs;
+  uint32_t        fs;
   int             blockLen;
   int             blockLen10ms;
   int             windShift;
@@ -80,7 +80,7 @@ typedef struct NSinst_t_ {
   float           wfft[W_LENGTH];
 
   // parameters for new method: some not needed, will reduce/cleanup later
-  WebRtc_Word32   blockInd;                           //frame index counter
+  int32_t         blockInd;                           //frame index counter
   int             modelUpdatePars[4];                 //parameters for updating or estimating
   // thresholds/weights for prior model
   float           priorModelPars[7];                  //parameters for prior model
@@ -127,7 +127,7 @@ extern "C" {
  * Return value         :  0 - Ok
  *                        -1 - Error
  */
-int WebRtcNs_InitCore(NSinst_t* inst, WebRtc_UWord32 fs);
+int WebRtcNs_InitCore(NSinst_t* inst, uint32_t fs);
 
 /****************************************************************************
  * WebRtcNs_set_policy_core(...)

@@ -4,6 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "gfxImageSurface.h"
+#include "gfxPlatform.h"
+#include "gfxUtils.h"
 #include "nsCocoaUtils.h"
 #include "nsChildView.h"
 #include "nsMenuBarX.h"
@@ -16,11 +18,24 @@
 #include "nsIServiceManager.h"
 #include "nsMenuUtilsX.h"
 #include "nsToolkit.h"
-#include "nsGUIEvent.h"
+#include "nsCRT.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/MiscEvents.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/TextEvents.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
+
+using mozilla::gfx::BackendType;
+using mozilla::gfx::DataSourceSurface;
+using mozilla::gfx::DrawTarget;
+using mozilla::gfx::Factory;
+using mozilla::gfx::IntPoint;
+using mozilla::gfx::IntRect;
+using mozilla::gfx::IntSize;
+using mozilla::gfx::SurfaceFormat;
+using mozilla::gfx::SourceSurface;
 
 static float
 MenuBarScreenHeight()
@@ -256,31 +271,60 @@ void nsCocoaUtils::CleanUpAfterNativeAppModalDialog()
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-nsresult nsCocoaUtils::CreateCGImageFromSurface(gfxImageSurface *aFrame, CGImageRef *aResult)
+void data_ss_release_callback(void *aDataSourceSurface,
+                              const void *data,
+                              size_t size)
 {
+  if (aDataSourceSurface) {
+    static_cast<DataSourceSurface*>(aDataSourceSurface)->Unmap();
+    static_cast<DataSourceSurface*>(aDataSourceSurface)->Release();
+  }
+}
 
-  int32_t width = aFrame->Width();
-  int32_t stride = aFrame->Stride();
-  int32_t height = aFrame->Height();
-  if ((stride % 4 != 0) || (height < 1) || (width < 1)) {
+nsresult nsCocoaUtils::CreateCGImageFromSurface(SourceSurface* aSurface,
+                                                CGImageRef* aResult)
+{
+  RefPtr<DataSourceSurface> dataSurface;
+
+  if (aSurface->GetFormat() ==  SurfaceFormat::B8G8R8A8) {
+    dataSurface = aSurface->GetDataSurface();
+  } else {
+    // CGImageCreate only supports 16- and 32-bit bit-depth
+    // Convert format to SurfaceFormat::B8G8R8A8
+    dataSurface = gfxUtils::
+      CopySurfaceToDataSourceSurfaceWithFormat(aSurface,
+                                               SurfaceFormat::B8G8R8A8);
+  }
+
+  NS_ENSURE_TRUE(dataSurface, NS_ERROR_FAILURE);
+
+  int32_t width = dataSurface->GetSize().width;
+  int32_t height = dataSurface->GetSize().height;
+  if (height < 1 || width < 1) {
     return NS_ERROR_FAILURE;
   }
+
+  DataSourceSurface::MappedSurface map;
+  if (!dataSurface->Map(DataSourceSurface::MapType::READ, &map)) {
+    return NS_ERROR_FAILURE;
+  }
+  // The Unmap() call happens in data_ss_release_callback
 
   // Create a CGImageRef with the bits from the image, taking into account
   // the alpha ordering and endianness of the machine so we don't have to
   // touch the bits ourselves.
-  CGDataProviderRef dataProvider = ::CGDataProviderCreateWithData(NULL,
-                                                                  aFrame->Data(),
-                                                                  stride * height,
-                                                                  NULL);
+  CGDataProviderRef dataProvider = ::CGDataProviderCreateWithData(dataSurface.forget().drop(),
+                                                                  map.mData,
+                                                                  map.mStride * height,
+                                                                  data_ss_release_callback);
   CGColorSpaceRef colorSpace = ::CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB);
   *aResult = ::CGImageCreate(width,
                              height,
                              8,
                              32,
-                             stride,
+                             map.mStride,
                              colorSpace,
-                             kCGBitmapByteOrder32Host | kCGImageAlphaFirst,
+                             kCGBitmapByteOrder32Host | kCGImageAlphaPremultipliedFirst,
                              dataProvider,
                              NULL,
                              0,
@@ -294,38 +338,97 @@ nsresult nsCocoaUtils::CreateNSImageFromCGImage(CGImageRef aInputImage, NSImage 
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
+  // Be very careful when creating the NSImage that the backing NSImageRep is
+  // exactly 1:1 with the input image. On a retina display, both [NSImage
+  // lockFocus] and [NSImage initWithCGImage:size:] will create an image with a
+  // 2x backing NSImageRep. This prevents NSCursor from recognizing a retina
+  // cursor, which only occurs if pixelsWide and pixelsHigh are exactly 2x the
+  // size of the NSImage.
+  //
+  // For example, if a 32x32 SVG cursor is rendered on a retina display, then
+  // aInputImage will be 64x64. The resulting NSImage will be scaled back down
+  // to 32x32 so it stays the correct size on the screen by changing its size
+  // (resizing a NSImage only scales the image and doesn't resample the data).
+  // If aInputImage is converted using [NSImage initWithCGImage:size:] then the
+  // bitmap will be 128x128 and NSCursor won't recognize a retina cursor, since
+  // it will expect a 64x64 bitmap.
+
   int32_t width = ::CGImageGetWidth(aInputImage);
   int32_t height = ::CGImageGetHeight(aInputImage);
   NSRect imageRect = ::NSMakeRect(0.0, 0.0, width, height);
 
-  // Create a new image to receive the Quartz image data.
-  *aResult = [[NSImage alloc] initWithSize:imageRect.size];
+  NSBitmapImageRep *offscreenRep = [[NSBitmapImageRep alloc]
+    initWithBitmapDataPlanes:NULL
+    pixelsWide:width
+    pixelsHigh:height
+    bitsPerSample:8
+    samplesPerPixel:4
+    hasAlpha:YES
+    isPlanar:NO
+    colorSpaceName:NSDeviceRGBColorSpace
+    bitmapFormat:NSAlphaFirstBitmapFormat
+    bytesPerRow:0
+    bitsPerPixel:0];
 
-  [*aResult lockFocus];
+  NSGraphicsContext *context = [NSGraphicsContext graphicsContextWithBitmapImageRep:offscreenRep];
+  [NSGraphicsContext saveGraphicsState];
+  [NSGraphicsContext setCurrentContext:context];
 
   // Get the Quartz context and draw.
   CGContextRef imageContext = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
   ::CGContextDrawImage(imageContext, *(CGRect*)&imageRect, aInputImage);
 
-  [*aResult unlockFocus];
+  [NSGraphicsContext restoreGraphicsState];
+
+  *aResult = [[NSImage alloc] initWithSize:NSMakeSize(width, height)];
+  [*aResult addRepresentation:offscreenRep];
+  [offscreenRep release];
   return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
-nsresult nsCocoaUtils::CreateNSImageFromImageContainer(imgIContainer *aImage, uint32_t aWhichFrame, NSImage **aResult)
+nsresult nsCocoaUtils::CreateNSImageFromImageContainer(imgIContainer *aImage, uint32_t aWhichFrame, NSImage **aResult, CGFloat scaleFactor)
 {
-  nsRefPtr<gfxASurface> surface;
-  aImage->GetFrame(aWhichFrame,
-                   imgIContainer::FLAG_SYNC_DECODE,
-                   getter_AddRefs(surface));
+  RefPtr<SourceSurface> surface;
+  int32_t width = 0, height = 0;
+  aImage->GetWidth(&width);
+  aImage->GetHeight(&height);
+
+  // Render a vector image at the correct resolution on a retina display
+  if (aImage->GetType() == imgIContainer::TYPE_VECTOR && scaleFactor != 1.0f) {
+    int scaledWidth = (int)ceilf(width * scaleFactor);
+    int scaledHeight = (int)ceilf(height * scaleFactor);
+
+    RefPtr<DrawTarget> drawTarget = gfxPlatform::GetPlatform()->
+      CreateOffscreenContentDrawTarget(IntSize(scaledWidth, scaledHeight),
+                                       SurfaceFormat::B8G8R8A8);
+    if (!drawTarget) {
+      NS_ERROR("Failed to create DrawTarget");
+      return NS_ERROR_FAILURE;
+    }
+
+    nsRefPtr<gfxContext> context = new gfxContext(drawTarget);
+    if (!context) {
+      NS_ERROR("Failed to create gfxContext");
+      return NS_ERROR_FAILURE;
+    }
+
+    aImage->Draw(context, GraphicsFilter::FILTER_NEAREST, gfxMatrix(),
+      gfxRect(0.0f, 0.0f, scaledWidth, scaledHeight),
+      nsIntRect(0, 0, width, height),
+      nsIntSize(scaledWidth, scaledHeight),
+      nullptr, aWhichFrame, imgIContainer::FLAG_SYNC_DECODE);
+
+    surface = drawTarget->Snapshot();
+  } else {
+    surface = aImage->GetFrame(aWhichFrame, imgIContainer::FLAG_SYNC_DECODE);
+  }
+
   NS_ENSURE_TRUE(surface, NS_ERROR_FAILURE);
 
-  nsRefPtr<gfxImageSurface> frame(surface->GetAsReadableARGB32ImageSurface());
-  NS_ENSURE_TRUE(frame, NS_ERROR_FAILURE);
-
   CGImageRef imageRef = NULL;
-  nsresult rv = nsCocoaUtils::CreateCGImageFromSurface(frame, &imageRef);
+  nsresult rv = nsCocoaUtils::CreateCGImageFromSurface(surface, &imageRef);
   if (NS_FAILED(rv) || !imageRef) {
     return NS_ERROR_FAILURE;
   }
@@ -335,6 +438,11 @@ nsresult nsCocoaUtils::CreateNSImageFromImageContainer(imgIContainer *aImage, ui
     return NS_ERROR_FAILURE;
   }
   ::CGImageRelease(imageRef);
+
+  // Ensure the image will be rendered the correct size on a retina display
+  NSSize size = NSMakeSize(width, height);
+  [*aResult setSize:size];
+  [[[*aResult representations] objectAtIndex:0] setSize:size];
   return NS_OK;
 }
 
@@ -350,7 +458,7 @@ nsCocoaUtils::GetStringForNSString(const NSString *aSrc, nsAString& aDist)
   }
 
   aDist.SetLength([aSrc length]);
-  [aSrc getCharacters: aDist.BeginWriting()];
+  [aSrc getCharacters: reinterpret_cast<unichar*>(aDist.BeginWriting())];
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -359,7 +467,10 @@ nsCocoaUtils::GetStringForNSString(const NSString *aSrc, nsAString& aDist)
 NSString*
 nsCocoaUtils::ToNSString(const nsAString& aString)
 {
-  return [NSString stringWithCharacters:aString.BeginReading()
+  if (aString.IsEmpty()) {
+    return [NSString string];
+  }
+  return [NSString stringWithCharacters:reinterpret_cast<const unichar*>(aString.BeginReading())
                                  length:aString.Length()];
 }
 
@@ -416,7 +527,7 @@ nsCocoaUtils::InitNPCocoaEvent(NPCocoaEvent* aNPCocoaEvent)
 
 // static
 void
-nsCocoaUtils::InitPluginEvent(nsPluginEvent &aPluginEvent,
+nsCocoaUtils::InitPluginEvent(WidgetPluginEvent &aPluginEvent,
                               NPCocoaEvent &aCocoaEvent)
 {
   aPluginEvent.time = PR_IntervalNow();
@@ -426,7 +537,7 @@ nsCocoaUtils::InitPluginEvent(nsPluginEvent &aPluginEvent,
 
 // static
 void
-nsCocoaUtils::InitInputEvent(nsInputEvent &aInputEvent,
+nsCocoaUtils::InitInputEvent(WidgetInputEvent& aInputEvent,
                              NSEvent* aNativeEvent)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
@@ -442,7 +553,7 @@ nsCocoaUtils::InitInputEvent(nsInputEvent &aInputEvent,
 
 // static
 void
-nsCocoaUtils::InitInputEvent(nsInputEvent &aInputEvent,
+nsCocoaUtils::InitInputEvent(WidgetInputEvent& aInputEvent,
                              NSUInteger aModifiers)
 {
   aInputEvent.modifiers = 0;
@@ -570,4 +681,232 @@ nsCocoaUtils::HiDPIEnabled()
   }
 
   return sHiDPIEnabled;
+}
+
+void
+nsCocoaUtils::GetCommandsFromKeyEvent(NSEvent* aEvent,
+                                      nsTArray<KeyBindingsCommand>& aCommands)
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  MOZ_ASSERT(aEvent);
+
+  static NativeKeyBindingsRecorder* sNativeKeyBindingsRecorder;
+  if (!sNativeKeyBindingsRecorder) {
+    sNativeKeyBindingsRecorder = [NativeKeyBindingsRecorder new];
+  }
+
+  [sNativeKeyBindingsRecorder startRecording:aCommands];
+
+  // This will trigger 0 - N calls to doCommandBySelector: and insertText:
+  [sNativeKeyBindingsRecorder
+    interpretKeyEvents:[NSArray arrayWithObject:aEvent]];
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+@implementation NativeKeyBindingsRecorder
+
+- (void)startRecording:(nsTArray<KeyBindingsCommand>&)aCommands
+{
+  mCommands = &aCommands;
+  mCommands->Clear();
+}
+
+- (void)doCommandBySelector:(SEL)aSelector
+{
+  KeyBindingsCommand command = {
+    aSelector,
+    nil
+  };
+
+  mCommands->AppendElement(command);
+}
+
+- (void)insertText:(id)aString
+{
+  KeyBindingsCommand command = {
+    @selector(insertText:),
+    aString
+  };
+
+  mCommands->AppendElement(command);
+}
+
+@end // NativeKeyBindingsRecorder
+
+struct KeyConversionData
+{
+  const char* str;
+  size_t strLength;
+  uint32_t geckoKeyCode;
+  uint32_t charCode;
+};
+
+static const KeyConversionData gKeyConversions[] = {
+
+#define KEYCODE_ENTRY(aStr, aCode) \
+  {#aStr, sizeof(#aStr) - 1, NS_##aStr, aCode}
+
+// Some keycodes may have different name in nsIDOMKeyEvent from its key name.
+#define KEYCODE_ENTRY2(aStr, aNSName, aCode) \
+  {#aStr, sizeof(#aStr) - 1, NS_##aNSName, aCode}
+
+  KEYCODE_ENTRY(VK_CANCEL, 0x001B),
+  KEYCODE_ENTRY(VK_DELETE, NSDeleteFunctionKey),
+  KEYCODE_ENTRY(VK_BACK, NSBackspaceCharacter),
+  KEYCODE_ENTRY2(VK_BACK_SPACE, VK_BACK, NSBackspaceCharacter),
+  KEYCODE_ENTRY(VK_TAB, NSTabCharacter),
+  KEYCODE_ENTRY(VK_CLEAR, NSClearLineFunctionKey),
+  KEYCODE_ENTRY(VK_RETURN, NSEnterCharacter),
+  KEYCODE_ENTRY(VK_SHIFT, 0),
+  KEYCODE_ENTRY(VK_CONTROL, 0),
+  KEYCODE_ENTRY(VK_ALT, 0),
+  KEYCODE_ENTRY(VK_PAUSE, NSPauseFunctionKey),
+  KEYCODE_ENTRY(VK_CAPS_LOCK, 0),
+  KEYCODE_ENTRY(VK_ESCAPE, 0),
+  KEYCODE_ENTRY(VK_SPACE, ' '),
+  KEYCODE_ENTRY(VK_PAGE_UP, NSPageUpFunctionKey),
+  KEYCODE_ENTRY(VK_PAGE_DOWN, NSPageDownFunctionKey),
+  KEYCODE_ENTRY(VK_END, NSEndFunctionKey),
+  KEYCODE_ENTRY(VK_HOME, NSHomeFunctionKey),
+  KEYCODE_ENTRY(VK_LEFT, NSLeftArrowFunctionKey),
+  KEYCODE_ENTRY(VK_UP, NSUpArrowFunctionKey),
+  KEYCODE_ENTRY(VK_RIGHT, NSRightArrowFunctionKey),
+  KEYCODE_ENTRY(VK_DOWN, NSDownArrowFunctionKey),
+  KEYCODE_ENTRY(VK_PRINTSCREEN, NSPrintScreenFunctionKey),
+  KEYCODE_ENTRY(VK_INSERT, NSInsertFunctionKey),
+  KEYCODE_ENTRY(VK_HELP, NSHelpFunctionKey),
+  KEYCODE_ENTRY(VK_0, '0'),
+  KEYCODE_ENTRY(VK_1, '1'),
+  KEYCODE_ENTRY(VK_2, '2'),
+  KEYCODE_ENTRY(VK_3, '3'),
+  KEYCODE_ENTRY(VK_4, '4'),
+  KEYCODE_ENTRY(VK_5, '5'),
+  KEYCODE_ENTRY(VK_6, '6'),
+  KEYCODE_ENTRY(VK_7, '7'),
+  KEYCODE_ENTRY(VK_8, '8'),
+  KEYCODE_ENTRY(VK_9, '9'),
+  KEYCODE_ENTRY(VK_SEMICOLON, ':'),
+  KEYCODE_ENTRY(VK_EQUALS, '='),
+  KEYCODE_ENTRY(VK_A, 'A'),
+  KEYCODE_ENTRY(VK_B, 'B'),
+  KEYCODE_ENTRY(VK_C, 'C'),
+  KEYCODE_ENTRY(VK_D, 'D'),
+  KEYCODE_ENTRY(VK_E, 'E'),
+  KEYCODE_ENTRY(VK_F, 'F'),
+  KEYCODE_ENTRY(VK_G, 'G'),
+  KEYCODE_ENTRY(VK_H, 'H'),
+  KEYCODE_ENTRY(VK_I, 'I'),
+  KEYCODE_ENTRY(VK_J, 'J'),
+  KEYCODE_ENTRY(VK_K, 'K'),
+  KEYCODE_ENTRY(VK_L, 'L'),
+  KEYCODE_ENTRY(VK_M, 'M'),
+  KEYCODE_ENTRY(VK_N, 'N'),
+  KEYCODE_ENTRY(VK_O, 'O'),
+  KEYCODE_ENTRY(VK_P, 'P'),
+  KEYCODE_ENTRY(VK_Q, 'Q'),
+  KEYCODE_ENTRY(VK_R, 'R'),
+  KEYCODE_ENTRY(VK_S, 'S'),
+  KEYCODE_ENTRY(VK_T, 'T'),
+  KEYCODE_ENTRY(VK_U, 'U'),
+  KEYCODE_ENTRY(VK_V, 'V'),
+  KEYCODE_ENTRY(VK_W, 'W'),
+  KEYCODE_ENTRY(VK_X, 'X'),
+  KEYCODE_ENTRY(VK_Y, 'Y'),
+  KEYCODE_ENTRY(VK_Z, 'Z'),
+  KEYCODE_ENTRY(VK_CONTEXT_MENU, NSMenuFunctionKey),
+  KEYCODE_ENTRY(VK_NUMPAD0, '0'),
+  KEYCODE_ENTRY(VK_NUMPAD1, '1'),
+  KEYCODE_ENTRY(VK_NUMPAD2, '2'),
+  KEYCODE_ENTRY(VK_NUMPAD3, '3'),
+  KEYCODE_ENTRY(VK_NUMPAD4, '4'),
+  KEYCODE_ENTRY(VK_NUMPAD5, '5'),
+  KEYCODE_ENTRY(VK_NUMPAD6, '6'),
+  KEYCODE_ENTRY(VK_NUMPAD7, '7'),
+  KEYCODE_ENTRY(VK_NUMPAD8, '8'),
+  KEYCODE_ENTRY(VK_NUMPAD9, '9'),
+  KEYCODE_ENTRY(VK_MULTIPLY, '*'),
+  KEYCODE_ENTRY(VK_ADD, '+'),
+  KEYCODE_ENTRY(VK_SEPARATOR, 0),
+  KEYCODE_ENTRY(VK_SUBTRACT, '-'),
+  KEYCODE_ENTRY(VK_DECIMAL, '.'),
+  KEYCODE_ENTRY(VK_DIVIDE, '/'),
+  KEYCODE_ENTRY(VK_F1, NSF1FunctionKey),
+  KEYCODE_ENTRY(VK_F2, NSF2FunctionKey),
+  KEYCODE_ENTRY(VK_F3, NSF3FunctionKey),
+  KEYCODE_ENTRY(VK_F4, NSF4FunctionKey),
+  KEYCODE_ENTRY(VK_F5, NSF5FunctionKey),
+  KEYCODE_ENTRY(VK_F6, NSF6FunctionKey),
+  KEYCODE_ENTRY(VK_F7, NSF7FunctionKey),
+  KEYCODE_ENTRY(VK_F8, NSF8FunctionKey),
+  KEYCODE_ENTRY(VK_F9, NSF9FunctionKey),
+  KEYCODE_ENTRY(VK_F10, NSF10FunctionKey),
+  KEYCODE_ENTRY(VK_F11, NSF11FunctionKey),
+  KEYCODE_ENTRY(VK_F12, NSF12FunctionKey),
+  KEYCODE_ENTRY(VK_F13, NSF13FunctionKey),
+  KEYCODE_ENTRY(VK_F14, NSF14FunctionKey),
+  KEYCODE_ENTRY(VK_F15, NSF15FunctionKey),
+  KEYCODE_ENTRY(VK_F16, NSF16FunctionKey),
+  KEYCODE_ENTRY(VK_F17, NSF17FunctionKey),
+  KEYCODE_ENTRY(VK_F18, NSF18FunctionKey),
+  KEYCODE_ENTRY(VK_F19, NSF19FunctionKey),
+  KEYCODE_ENTRY(VK_F20, NSF20FunctionKey),
+  KEYCODE_ENTRY(VK_F21, NSF21FunctionKey),
+  KEYCODE_ENTRY(VK_F22, NSF22FunctionKey),
+  KEYCODE_ENTRY(VK_F23, NSF23FunctionKey),
+  KEYCODE_ENTRY(VK_F24, NSF24FunctionKey),
+  KEYCODE_ENTRY(VK_NUM_LOCK, NSClearLineFunctionKey),
+  KEYCODE_ENTRY(VK_SCROLL_LOCK, NSScrollLockFunctionKey),
+  KEYCODE_ENTRY(VK_COMMA, ','),
+  KEYCODE_ENTRY(VK_PERIOD, '.'),
+  KEYCODE_ENTRY(VK_SLASH, '/'),
+  KEYCODE_ENTRY(VK_BACK_QUOTE, '`'),
+  KEYCODE_ENTRY(VK_OPEN_BRACKET, '['),
+  KEYCODE_ENTRY(VK_BACK_SLASH, '\\'),
+  KEYCODE_ENTRY(VK_CLOSE_BRACKET, ']'),
+  KEYCODE_ENTRY(VK_QUOTE, '\'')
+
+#undef KEYCODE_ENTRY
+
+};
+
+uint32_t
+nsCocoaUtils::ConvertGeckoNameToMacCharCode(const nsAString& aKeyCodeName)
+{
+  if (aKeyCodeName.IsEmpty()) {
+    return 0;
+  }
+
+  nsAutoCString keyCodeName;
+  keyCodeName.AssignWithConversion(aKeyCodeName);
+  // We want case-insensitive comparison with data stored as uppercase.
+  ToUpperCase(keyCodeName);
+
+  uint32_t keyCodeNameLength = keyCodeName.Length();
+  const char* keyCodeNameStr = keyCodeName.get();
+  for (uint16_t i = 0; i < ArrayLength(gKeyConversions); ++i) {
+    if (keyCodeNameLength == gKeyConversions[i].strLength &&
+        nsCRT::strcmp(gKeyConversions[i].str, keyCodeNameStr) == 0) {
+      return gKeyConversions[i].charCode;
+    }
+  }
+
+  return 0;
+}
+
+uint32_t
+nsCocoaUtils::ConvertGeckoKeyCodeToMacCharCode(uint32_t aKeyCode)
+{
+  if (!aKeyCode) {
+    return 0;
+  }
+
+  for (uint16_t i = 0; i < ArrayLength(gKeyConversions); ++i) {
+    if (gKeyConversions[i].geckoKeyCode == aKeyCode) {
+      return gKeyConversions[i].charCode;
+    }
+  }
+
+  return 0;
 }

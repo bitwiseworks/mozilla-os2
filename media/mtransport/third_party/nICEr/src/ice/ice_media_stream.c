@@ -39,6 +39,7 @@ static char *RCSSTRING __UNUSED__="$Id: ice_media_stream.c,v 1.2 2008/04/28 17:5
 #include <nr_api.h>
 #include <r_assoc.h>
 #include <async_timer.h>
+#include "ice_util.h"
 #include "ice_ctx.h"
 
 static char *nr_ice_media_stream_states[]={"INVALID",
@@ -109,6 +110,10 @@ int nr_ice_media_stream_destroy(nr_ice_media_stream **streamp)
 
     RFREE(stream->ufrag);
     RFREE(stream->pwd);
+    RFREE(stream->r2l_user);
+    RFREE(stream->l2r_user);
+    r_data_zfree(&stream->r2l_pass);
+    r_data_zfree(&stream->l2r_pass);
 
     if(stream->timer)
       NR_async_timer_cancel(stream->timer);
@@ -135,14 +140,13 @@ int nr_ice_media_stream_initialize(nr_ice_ctx *ctx, nr_ice_media_stream *stream)
     return(_status);
   }
 
-#define MAX_ATTRIBUTE_SIZE 256
-
 int nr_ice_media_stream_get_attributes(nr_ice_media_stream *stream, char ***attrsp, int *attrctp)
   {
     int attrct=0;
     nr_ice_component *comp;
     char **attrs=0;
     int index=0;
+    nr_ice_candidate *cand;
     int r,_status;
 
     *attrctp=0;
@@ -150,16 +154,21 @@ int nr_ice_media_stream_get_attributes(nr_ice_media_stream *stream, char ***attr
     /* First find out how many attributes we need */
     comp=STAILQ_FIRST(&stream->components);
     while(comp){
-      if(r=nr_ice_component_prune_candidates(stream->ctx,comp))
-        ABORT(r);
+      if (comp->state != NR_ICE_COMPONENT_DISABLED) {
+        cand = TAILQ_FIRST(&comp->candidates);
+        while(cand){
+          if (cand->state == NR_ICE_CAND_STATE_INITIALIZED) {
+            ++attrct;
+          }
 
-      attrct+=comp->candidate_ct;
-
+          cand = TAILQ_NEXT(cand, entry_comp);
+        }
+      }
       comp=STAILQ_NEXT(comp,entry);
     }
 
     if(attrct < 1){
-      r_log(LOG_ICE,LOG_WARNING,"ICE-STREAM(%s): Failed to find any components for stream",stream->label);
+      r_log(LOG_ICE,LOG_ERR,"ICE-STREAM(%s): Failed to find any components for stream",stream->label);
       ABORT(R_FAILED);
     }
 
@@ -167,7 +176,7 @@ int nr_ice_media_stream_get_attributes(nr_ice_media_stream *stream, char ***attr
     if(!(attrs=RCALLOC(sizeof(char *)*attrct)))
       ABORT(R_NO_MEMORY);
     for(index=0;index<attrct;index++){
-      if(!(attrs[index]=RMALLOC(MAX_ATTRIBUTE_SIZE)))
+      if(!(attrs[index]=RMALLOC(NR_ICE_MAX_ATTRIBUTE_SIZE)))
         ABORT(R_NO_MEMORY);
     }
 
@@ -175,18 +184,25 @@ int nr_ice_media_stream_get_attributes(nr_ice_media_stream *stream, char ***attr
     /* Now format the attributes */
     comp=STAILQ_FIRST(&stream->components);
     while(comp){
-      nr_ice_candidate *cand;
+      if (comp->state != NR_ICE_COMPONENT_DISABLED) {
+        nr_ice_candidate *cand;
 
-      cand=TAILQ_FIRST(&comp->candidates);
-      while(cand){
-        assert(index < attrct);
+        cand=TAILQ_FIRST(&comp->candidates);
+        while(cand){
+          if (cand->state == NR_ICE_CAND_STATE_INITIALIZED) {
+            assert(index < attrct);
 
-        if(r=nr_ice_format_candidate_attribute(cand, attrs[index],MAX_ATTRIBUTE_SIZE))
-          ABORT(r);
+            if (index >= attrct)
+              ABORT(R_INTERNAL);
 
-        index++;
+            if(r=nr_ice_format_candidate_attribute(cand, attrs[index],NR_ICE_MAX_ATTRIBUTE_SIZE))
+              ABORT(r);
 
-        cand=TAILQ_NEXT(cand,entry_comp);
+            index++;
+          }
+
+          cand=TAILQ_NEXT(cand,entry_comp);
+        }
       }
       comp=STAILQ_NEXT(comp,entry);
     }
@@ -234,15 +250,17 @@ int nr_ice_media_stream_get_default_candidate(nr_ice_media_stream *stream, int c
     */
     cand=TAILQ_FIRST(&comp->candidates);
     while(cand){
-      if (!best_cand) {
-        best_cand = cand;
-      }
-      else {
-        if (best_cand->type < cand->type) {
+      if (cand->state == NR_ICE_CAND_STATE_INITIALIZED) {
+        if (!best_cand) {
           best_cand = cand;
-        } else if (best_cand->type == cand->type) {
-          if (best_cand->priority < cand->priority)
+        }
+        else {
+          if (best_cand->type < cand->type) {
             best_cand = cand;
+          } else if (best_cand->type == cand->type) {
+            if (best_cand->priority < cand->priority)
+              best_cand = cand;
+          }
         }
       }
 
@@ -269,20 +287,50 @@ int nr_ice_media_stream_pair_candidates(nr_ice_peer_ctx *pctx,nr_ice_media_strea
     pcomp=STAILQ_FIRST(&pstream->components);
     lcomp=STAILQ_FIRST(&lstream->components);
     while(pcomp){
-      if(r=nr_ice_component_pair_candidates(pctx,lcomp,pcomp))
-        ABORT(r);
+      if ((lcomp->state != NR_ICE_COMPONENT_DISABLED) &&
+          (pcomp->state != NR_ICE_COMPONENT_DISABLED)) {
+        if(r=nr_ice_component_pair_candidates(pctx,lcomp,pcomp))
+          ABORT(r);
+      }
 
       lcomp=STAILQ_NEXT(lcomp,entry);
       pcomp=STAILQ_NEXT(pcomp,entry);
     };
 
     if (pstream->ice_state == NR_ICE_MEDIA_STREAM_UNPAIRED) {
-      r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s): unfreezing stream %s",pstream->pctx->label,pstream->label);
-      pstream->ice_state = NR_ICE_MEDIA_STREAM_CHECKS_FROZEN;
+      nr_ice_media_stream_set_state(pstream, NR_ICE_MEDIA_STREAM_CHECKS_FROZEN);
     }
 
     _status=0;
   abort:
+    return(_status);
+  }
+
+int nr_ice_media_stream_service_pre_answer_requests(nr_ice_peer_ctx *pctx, nr_ice_media_stream *lstream, nr_ice_media_stream *pstream, int *serviced)
+  {
+    nr_ice_component *pcomp;
+    int r,_status;
+    char *user = 0;
+
+    if (serviced)
+      *serviced = 0;
+
+    pcomp=STAILQ_FIRST(&pstream->components);
+    while(pcomp){
+      int serviced_inner=0;
+
+      /* Flush all the pre-answer requests */
+      if(r=nr_ice_component_service_pre_answer_requests(pctx, pcomp, pstream->r2l_user, &serviced_inner))
+        ABORT(r);
+      if (serviced)
+        *serviced += serviced_inner;
+
+      pcomp=STAILQ_NEXT(pcomp,entry);
+    }
+
+    _status=0;
+   abort:
+    RFREE(user);
     return(_status);
   }
 
@@ -300,7 +348,7 @@ static void nr_ice_media_stream_check_timer_cb(NR_SOCKET s, int h, void *cb_arg)
     timer_val=stream->pctx->ctx->Ta*stream->pctx->active_streams;
 
     if (stream->ice_state == NR_ICE_MEDIA_STREAM_CHECKS_COMPLETED) {
-      r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s): bogus state for stream %s",stream->pctx->label,stream->label);
+      r_log(LOG_ICE,LOG_ERR,"ICE-PEER(%s): (bug) bogus state for stream %s",stream->pctx->label,stream->label);
     }
     assert(stream->ice_state != NR_ICE_MEDIA_STREAM_CHECKS_COMPLETED);
 
@@ -334,7 +382,7 @@ static void nr_ice_media_stream_check_timer_cb(NR_SOCKET s, int h, void *cb_arg)
       NR_ASYNC_TIMER_SET(timer_val,nr_ice_media_stream_check_timer_cb,cb_arg,&stream->timer);
     }
     else {
-      r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s): no pairs for %s",stream->pctx->label,stream->label);
+      r_log(LOG_ICE,LOG_WARNING,"ICE-PEER(%s): no pairs for %s",stream->pctx->label,stream->label);
     }
 
     _status=0;
@@ -346,10 +394,21 @@ static void nr_ice_media_stream_check_timer_cb(NR_SOCKET s, int h, void *cb_arg)
 /* Start checks for this media stream (aka check list) */
 int nr_ice_media_stream_start_checks(nr_ice_peer_ctx *pctx, nr_ice_media_stream *stream)
   {
-    nr_ice_media_stream_set_state(stream,NR_ICE_MEDIA_STREAM_CHECKS_ACTIVE);
-    nr_ice_media_stream_check_timer_cb(0,0,stream);
+    int r,_status;
+    if (stream->ice_state > NR_ICE_MEDIA_STREAM_CHECKS_ACTIVE)
+      ABORT(R_INTERNAL);
 
-    return(0);
+    if(r=nr_ice_media_stream_set_state(stream,NR_ICE_MEDIA_STREAM_CHECKS_ACTIVE))
+      ABORT(r);
+
+    if (!stream->timer) {
+      r_log(LOG_ICE,LOG_INFO,"ICE-PEER(%s)/ICE-STREAM(%s): Starting check timer for stream.",pctx->label,stream->label);
+      nr_ice_media_stream_check_timer_cb(0,0,stream);
+    }
+
+    _status=0;
+  abort:
+    return(_status);
   }
 
 /* Start checks for this media stream (aka check list) S 5.7 */
@@ -535,7 +594,9 @@ int nr_ice_media_stream_component_nominated(nr_ice_media_stream *stream,nr_ice_c
 
     comp=STAILQ_FIRST(&stream->components);
     while(comp){
-      if(!comp->nominated)
+      if((comp->state != NR_ICE_COMPONENT_DISABLED) &&
+         (comp->local_component->state != NR_ICE_COMPONENT_DISABLED) &&
+         !comp->nominated)
         break;
 
       comp=STAILQ_NEXT(comp,entry);
@@ -546,7 +607,7 @@ int nr_ice_media_stream_component_nominated(nr_ice_media_stream *stream,nr_ice_c
       goto done;
 
     /* All done... */
-    r_log(LOG_ICE,LOG_INFO,"ICE-PEER(%s)/ICE-STREAM(%s): all components have nominated candidate pairs",stream->pctx->label,stream->label);
+    r_log(LOG_ICE,LOG_INFO,"ICE-PEER(%s)/ICE-STREAM(%s): all active components have nominated candidate pairs",stream->pctx->label,stream->label);
     nr_ice_media_stream_set_state(stream,NR_ICE_MEDIA_STREAM_CHECKS_COMPLETED);
 
     /* Cancel our timer */
@@ -665,7 +726,6 @@ int nr_ice_media_stream_find_component(nr_ice_media_stream *str, int comp_id, nr
     return(_status);
   }
 
-
 int nr_ice_media_stream_send(nr_ice_peer_ctx *pctx, nr_ice_media_stream *str, int component, UCHAR *data, int len)
   {
     int r,_status;
@@ -677,7 +737,7 @@ int nr_ice_media_stream_send(nr_ice_peer_ctx *pctx, nr_ice_media_stream *str, in
 
     /* Do we have an active pair yet? We should... */
     if(!comp->active)
-      ABORT(R_BAD_ARGS);
+      ABORT(R_NOT_FOUND);
 
     /* OK, write to that pair, which means:
        1. Use the socket on our local side.
@@ -685,7 +745,7 @@ int nr_ice_media_stream_send(nr_ice_peer_ctx *pctx, nr_ice_media_stream *str, in
     */
     comp->keepalive_needed=0; /* Suppress keepalives */
     if(r=nr_socket_sendto(comp->active->local->osock,data,len,0,
-      &comp->active->remote->addr))
+                          &comp->active->remote->addr))
       ABORT(r);
 
     _status=0;
@@ -693,6 +753,30 @@ int nr_ice_media_stream_send(nr_ice_peer_ctx *pctx, nr_ice_media_stream *str, in
     return(_status);
   }
 
+/* Returns R_REJECTED if the component is unpaired or has been disabled. */
+int nr_ice_media_stream_get_active(nr_ice_peer_ctx *pctx, nr_ice_media_stream *str, int component, nr_ice_candidate **local, nr_ice_candidate **remote)
+  {
+    int r,_status;
+    nr_ice_component *comp;
+
+    /* First find the peer component */
+    if(r=nr_ice_peer_ctx_find_component(pctx, str, component, &comp))
+      ABORT(r);
+
+    if (comp->state == NR_ICE_COMPONENT_UNPAIRED ||
+        comp->state == NR_ICE_COMPONENT_DISABLED)
+      ABORT(R_REJECTED);
+
+    if(!comp->active)
+      ABORT(R_NOT_FOUND);
+
+    if (local) *local = comp->active->local;
+    if (remote) *remote = comp->active->remote;
+
+    _status=0;
+  abort:
+    return(_status);
+  }
 
 int nr_ice_media_stream_addrs(nr_ice_peer_ctx *pctx, nr_ice_media_stream *str, int component, nr_transport_addr *local, nr_transport_addr *remote)
   {
@@ -745,5 +829,44 @@ int nr_ice_media_stream_finalize(nr_ice_media_stream *lstr,nr_ice_media_stream *
     }
 
     return(0);
+  }
+
+int nr_ice_media_stream_pair_new_trickle_candidate(nr_ice_peer_ctx *pctx, nr_ice_media_stream *pstream, nr_ice_candidate *cand)
+  {
+    int r,_status;
+    nr_ice_component *comp;
+
+    if ((r=nr_ice_media_stream_find_component(pstream, cand->component_id, &comp)))
+      ABORT(R_NOT_FOUND);
+
+    if (r=nr_ice_component_pair_candidate(pctx, comp, cand, 1))
+      ABORT(r);
+
+    _status=0;
+ abort:
+    return(_status);
+  }
+
+int nr_ice_media_stream_disable_component(nr_ice_media_stream *stream, int component_id)
+  {
+    int r,_status;
+    nr_ice_component *comp;
+
+    if (stream->ice_state != NR_ICE_MEDIA_STREAM_UNPAIRED)
+      ABORT(R_FAILED);
+
+    if ((r=nr_ice_media_stream_find_component(stream, component_id, &comp)))
+      ABORT(r);
+
+    /* Can only disable before pairing */
+    if (comp->state != NR_ICE_COMPONENT_UNPAIRED &&
+        comp->state != NR_ICE_COMPONENT_DISABLED)
+      ABORT(R_FAILED);
+
+    comp->state = NR_ICE_COMPONENT_DISABLED;
+
+    _status=0;
+ abort:
+    return(_status);
   }
 

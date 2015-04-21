@@ -65,6 +65,13 @@ public:
     MOZ_ASSERT(mOffset <= mLength);
     return NS_OK;
   }
+  virtual nsresult ReadAt(int64_t aOffset, char* aBuffer,
+                          uint32_t aCount, uint32_t* aBytes)
+  {
+    nsresult rv = Seek(nsISeekableStream::NS_SEEK_SET, aOffset);
+    if (NS_FAILED(rv)) return rv;
+    return Read(aBuffer, aCount, aBytes);
+  }
   virtual nsresult Seek(int32_t aWhence, int64_t aOffset)
   {
     MOZ_ASSERT(aOffset <= UINT32_MAX);
@@ -122,14 +129,6 @@ public:
     return NS_ERROR_FAILURE;
   }
 
-#ifdef MOZ_DASH
-  virtual nsresult OpenByteRange(nsIStreamListener** aStreamListener,
-                                 MediaByteRange const &aByteRange)
-  {
-    return NS_ERROR_FAILURE;
-  }
-#endif
-
   virtual nsresult GetCachedRanges(nsTArray<MediaByteRange>& aRanges)
   {
     aRanges.AppendElement(MediaByteRange(0, mLength));
@@ -141,6 +140,24 @@ public:
   virtual const nsCString& GetContentType() const MOZ_OVERRIDE
   {
     return mContentType;
+  }
+
+  virtual size_t SizeOfExcludingThis(
+                        MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    // Not owned:
+    // - mBuffer
+    // - mPrincipal
+    size_t size = MediaResource::SizeOfExcludingThis(aMallocSizeOf);
+    size += mContentType.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+
+    return size;
+  }
+
+  virtual size_t SizeOfIncludingThis(
+                        MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
 private:

@@ -42,14 +42,13 @@ public:
               const ArchiveReaderOptions& aOptions, ErrorResult& aError);
 
   ArchiveReader(nsIDOMBlob* aBlob, nsPIDOMWindow* aWindow,
-                const nsString& aEncoding);
+                const nsACString& aEncoding);
 
   nsIDOMWindow* GetParentObject() const
   {
     return mWindow;
   }
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   already_AddRefed<ArchiveRequest> GetFilenames();
   already_AddRefed<ArchiveRequest> GetFile(const nsAString& filename);
@@ -57,8 +56,6 @@ public:
 
   nsresult GetInputStream(nsIInputStream** aInputStream);
   nsresult GetSize(uint64_t* aSize);
-
-  static bool PrefEnabled();
 
 public: // for the ArchiveRequest:
   nsresult RegisterRequest(ArchiveRequest* aRequest);
@@ -81,7 +78,7 @@ protected:
   nsCOMPtr<nsIDOMBlob> mBlob;
 
   // The window is needed by the requests
-  nsCOMPtr<nsIDOMWindow> mWindow;
+  nsCOMPtr<nsPIDOMWindow> mWindow;
 
   // Are we ready to return data?
   enum {
@@ -107,7 +104,7 @@ protected:
     nsresult status;
   } mData;
 
-  nsString mEncoding;
+  nsCString mEncoding;
 };
 
 END_FILE_NAMESPACE

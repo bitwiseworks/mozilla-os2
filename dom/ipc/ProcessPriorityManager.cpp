@@ -7,6 +7,7 @@
 #include "ProcessPriorityManager.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/Hal.h"
 #include "mozilla/Preferences.h"
@@ -15,25 +16,15 @@
 #include "AudioChannelService.h"
 #include "prlog.h"
 #include "nsPrintfCString.h"
-#include "nsWeakPtr.h"
 #include "nsXULAppAPI.h"
 #include "nsIFrameLoader.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "nsITimer.h"
-#include "nsIObserver.h"
 #include "nsIObserverService.h"
-#include "nsIDocument.h"
-#include "nsIDOMEventListener.h"
-#include "nsIDOMWindow.h"
-#include "nsIDOMEvent.h"
-#include "nsIDOMDocument.h"
-#include "nsPIDOMWindow.h"
 #include "StaticPtr.h"
 #include "nsIMozBrowserFrame.h"
 #include "nsIObserver.h"
 #include "nsITimer.h"
-#include "nsPrintfCString.h"
-#include "prlog.h"
+#include "nsIPropertyBag2.h"
+#include "nsComponentManagerUtils.h"
 
 #ifdef XP_WIN
 #include <process.h>
@@ -111,8 +102,9 @@ class ParticularProcessPriorityManager;
  * can call StaticInit, but it won't do anything, and GetSingleton() will
  * return null.)
  *
- * ProcessPriorityManager::CurrentProcessIsForeground(), which can be called in
- * any process, is handled separately, by the ProcessPriorityManagerChild
+ * ProcessPriorityManager::CurrentProcessIsForeground() and
+ * ProcessPriorityManager::AnyProcessHasHighPriority() which can be called in
+ * any process, are handled separately, by the ProcessPriorityManagerChild
  * class.
  */
 class ProcessPriorityManagerImpl MOZ_FINAL
@@ -135,7 +127,8 @@ public:
    * This function implements ProcessPriorityManager::SetProcessPriority.
    */
   void SetProcessPriority(ContentParent* aContentParent,
-                          ProcessPriority aPriority);
+                          ProcessPriority aPriority,
+                          uint32_t aBackgroundLRU = 0);
 
   /**
    * If a magic testing-only pref is set, notify the observer service on the
@@ -152,6 +145,11 @@ public:
     ParticularProcessPriorityManager* aParticularManager);
 
   /**
+   * Does one of the child processes have priority FOREGROUND_HIGH?
+   */
+  bool ChildProcessHasHighPriority();
+
+  /**
    * This must be called by a ParticularProcessPriorityManager when it changes
    * its priority.
    */
@@ -164,7 +162,7 @@ private:
   static bool sInitialized;
   static StaticRefPtr<ProcessPriorityManagerImpl> sSingleton;
 
-  static int PrefChangedCallback(const char* aPref, void* aClosure);
+  static void PrefChangedCallback(const char* aPref, void* aClosure);
 
   ProcessPriorityManagerImpl();
   ~ProcessPriorityManagerImpl() {}
@@ -199,6 +197,7 @@ public:
   NS_DECL_NSIOBSERVER
 
   bool CurrentProcessIsForeground();
+  bool CurrentProcessIsHighPriority();
 
 private:
   static StaticRefPtr<ProcessPriorityManagerChild> sSingleton;
@@ -235,6 +234,7 @@ public:
 
   int32_t Pid() const;
   uint64_t ChildID() const;
+  bool IsPreallocated() const;
 
   /**
    * Used in logging, this method returns the ContentParent's name followed by
@@ -258,7 +258,7 @@ public:
 
   ProcessPriority CurrentPriority();
   ProcessPriority ComputePriority();
-  ProcessCPUPriority ComputeCPUPriority();
+  ProcessCPUPriority ComputeCPUPriority(ProcessPriority aPriority);
 
   void ScheduleResetPriority(const char* aTimeoutPref);
   void ResetPriority();
@@ -269,10 +269,12 @@ public:
    * This overload is equivalent to SetPriorityNow(aPriority,
    * ComputeCPUPriority()).
    */
-  void SetPriorityNow(ProcessPriority aPriority);
+  void SetPriorityNow(ProcessPriority aPriority,
+                      uint32_t aBackgroundLRU = 0);
 
   void SetPriorityNow(ProcessPriority aPriority,
-                      ProcessCPUPriority aCPUPriority);
+                      ProcessCPUPriority aCPUPriority,
+                      uint32_t aBackgroundLRU = 0);
 
   void ShutDown();
 
@@ -300,20 +302,59 @@ private:
   nsCOMPtr<nsITimer> mResetPriorityTimer;
 };
 
+class BackgroundProcessLRUPool MOZ_FINAL
+{
+public:
+  static BackgroundProcessLRUPool* Singleton();
+
+  /**
+   * Used to remove a ContentParent from background LRU pool when
+   * it is destroyed or its priority changed from BACKGROUND to others.
+   */
+  void RemoveFromBackgroundLRUPool(ContentParent* aContentParent);
+
+  /**
+   * Used to add a ContentParent into background LRU pool when
+   * its priority changed to BACKGROUND from others.
+   */
+  void AddIntoBackgroundLRUPool(ContentParent* aContentParent);
+
+private:
+  static StaticAutoPtr<BackgroundProcessLRUPool> sSingleton;
+
+  int32_t mLRUPoolLevels;
+  int32_t mLRUPoolSize;
+  int32_t mLRUPoolAvailableIndex;
+  nsTArray<ContentParent*> mLRUPool;
+
+  uint32_t CalculateLRULevel(uint32_t aBackgroundLRUPoolIndex);
+
+  nsresult UpdateAvailableIndexInLRUPool(
+      ContentParent* aContentParent,
+      int32_t aTargetIndex = -1);
+
+  void ShiftLRUPool();
+
+  void EnsureLRUPool();
+
+  BackgroundProcessLRUPool();
+  DISALLOW_EVIL_CONSTRUCTORS(BackgroundProcessLRUPool);
+
+};
+
 /* static */ bool ProcessPriorityManagerImpl::sInitialized = false;
 /* static */ bool ProcessPriorityManagerImpl::sPrefListenersRegistered = false;
 /* static */ StaticRefPtr<ProcessPriorityManagerImpl>
   ProcessPriorityManagerImpl::sSingleton;
 
-NS_IMPL_ISUPPORTS1(ProcessPriorityManagerImpl,
-                   nsIObserver);
+NS_IMPL_ISUPPORTS(ProcessPriorityManagerImpl,
+                  nsIObserver);
 
-/* static */ int
+/* static */ void
 ProcessPriorityManagerImpl::PrefChangedCallback(const char* aPref,
                                                 void* aClosure)
 {
   StaticInit();
-  return 0;
 }
 
 /* static */ bool
@@ -372,8 +413,6 @@ ProcessPriorityManagerImpl::GetSingleton()
 ProcessPriorityManagerImpl::ProcessPriorityManagerImpl()
 {
   MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
-  mParticularManagers.Init();
-  mHighPriorityChildIDs.Init();
 }
 
 void
@@ -398,7 +437,7 @@ NS_IMETHODIMP
 ProcessPriorityManagerImpl::Observe(
   nsISupports* aSubject,
   const char* aTopic,
-  const PRUnichar* aData)
+  const char16_t* aData)
 {
   nsDependentCString topic(aTopic);
   if (topic.EqualsLiteral("ipc:content-created")) {
@@ -432,12 +471,13 @@ ProcessPriorityManagerImpl::GetParticularProcessPriorityManager(
 
 void
 ProcessPriorityManagerImpl::SetProcessPriority(ContentParent* aContentParent,
-                                               ProcessPriority aPriority)
+                                               ProcessPriority aPriority,
+                                               uint32_t aBackgroundLRU)
 {
   MOZ_ASSERT(aContentParent);
   nsRefPtr<ParticularProcessPriorityManager> pppm =
     GetParticularProcessPriorityManager(aContentParent);
-  pppm->SetPriorityNow(aPriority);
+  pppm->SetPriorityNow(aPriority, aBackgroundLRU);
 }
 
 void
@@ -507,6 +547,12 @@ ProcessPriorityManagerImpl::OtherProcessHasHighPriority(
   return mHighPriorityChildIDs.Count() > 0;
 }
 
+bool
+ProcessPriorityManagerImpl::ChildProcessHasHighPriority( void )
+{
+  return mHighPriorityChildIDs.Count() > 0;
+}
+
 void
 ProcessPriorityManagerImpl::NotifyProcessPriorityChanged(
   ParticularProcessPriorityManager* aParticularManager,
@@ -541,10 +587,10 @@ ProcessPriorityManagerImpl::NotifyProcessPriorityChanged(
   }
 }
 
-NS_IMPL_ISUPPORTS3(ParticularProcessPriorityManager,
-                   nsIObserver,
-                   nsITimerCallback,
-                   nsISupportsWeakReference);
+NS_IMPL_ISUPPORTS(ParticularProcessPriorityManager,
+                  nsIObserver,
+                  nsITimerCallback,
+                  nsISupportsWeakReference);
 
 ParticularProcessPriorityManager::ParticularProcessPriorityManager(
   ContentParent* aContentParent)
@@ -567,7 +613,7 @@ ParticularProcessPriorityManager::Init()
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
   if (os) {
     os->AddObserver(this, "audio-channel-process-changed", /* ownsWeak */ true);
-    os->AddObserver(this, "remote-browser-frame-shown", /* ownsWeak */ true);
+    os->AddObserver(this, "remote-browser-shown", /* ownsWeak */ true);
     os->AddObserver(this, "ipc:browser-destroyed", /* ownsWeak */ true);
     os->AddObserver(this, "frameloader-visible-changed", /* ownsWeak */ true);
   }
@@ -628,7 +674,7 @@ ParticularProcessPriorityManager::Notify(const WakeLockInformation& aInfo)
 NS_IMETHODIMP
 ParticularProcessPriorityManager::Observe(nsISupports* aSubject,
                                           const char* aTopic,
-                                          const PRUnichar* aData)
+                                          const char16_t* aData)
 {
   if (!mContentParent) {
     // We've been shut down.
@@ -639,7 +685,7 @@ ParticularProcessPriorityManager::Observe(nsISupports* aSubject,
 
   if (topic.EqualsLiteral("audio-channel-process-changed")) {
     OnAudioChannelProcessChanged(aSubject);
-  } else if (topic.EqualsLiteral("remote-browser-frame-shown")) {
+  } else if (topic.EqualsLiteral("remote-browser-shown")) {
     OnRemoteBrowserFrameShown(aSubject);
   } else if (topic.EqualsLiteral("ipc:browser-destroyed")) {
     OnTabParentDestroyed(aSubject);
@@ -666,6 +712,12 @@ int32_t
 ParticularProcessPriorityManager::Pid() const
 {
   return mContentParent ? mContentParent->Pid() : -1;
+}
+
+bool
+ParticularProcessPriorityManager::IsPreallocated() const
+{
+  return mContentParent ? mContentParent->IsPreallocated() : false;
 }
 
 const nsAutoCString&
@@ -705,6 +757,13 @@ ParticularProcessPriorityManager::OnRemoteBrowserFrameShown(nsISupports* aSubjec
 {
   nsCOMPtr<nsIFrameLoader> fl = do_QueryInterface(aSubject);
   NS_ENSURE_TRUE_VOID(fl);
+
+  // Ignore notifications that aren't from a BrowserOrApp
+  bool isBrowserOrApp;
+  fl->GetOwnerIsBrowserOrAppFrame(&isBrowserOrApp);
+  if (!isBrowserOrApp) {
+    return;
+  }
 
   nsCOMPtr<nsITabParent> tp;
   fl->GetTabParent(getter_AddRefs(tp));
@@ -768,7 +827,16 @@ ParticularProcessPriorityManager::ResetPriority()
   ProcessPriority processPriority = ComputePriority();
   if (mPriority == PROCESS_PRIORITY_UNKNOWN ||
       mPriority > processPriority) {
-    ScheduleResetPriority("backgroundGracePeriodMS");
+    // Apps set at a perceivable background priority are often playing media.
+    // Most media will have short gaps while changing tracks between songs,
+    // switching videos, etc.  Give these apps a longer grace period so they
+    // can get their next track started, if there is one, before getting
+    // downgraded.
+    if (mPriority == PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE) {
+      ScheduleResetPriority("backgroundPerceivableGracePeriodMS");
+    } else {
+      ScheduleResetPriority("backgroundGracePeriodMS");
+    }
     return;
   }
 
@@ -829,8 +897,7 @@ ParticularProcessPriorityManager::IsExpectingSystemMessage()
     mContentParent->ManagedPBrowserParent();
   for (uint32_t i = 0; i < browsers.Length(); i++) {
     TabParent* tp = static_cast<TabParent*>(browsers[i]);
-    nsCOMPtr<nsIDOMElement> ownerElement = tp->GetOwnerElement();
-    nsCOMPtr<nsIMozBrowserFrame> bf = do_QueryInterface(ownerElement);
+    nsCOMPtr<nsIMozBrowserFrame> bf = do_QueryInterface(tp->GetOwnerElement());
     if (!bf) {
       continue;
     }
@@ -868,7 +935,9 @@ ParticularProcessPriorityManager::ComputePriority()
   }
 
   if (isVisible) {
-    return PROCESS_PRIORITY_FOREGROUND;
+    return HasAppType("keyboard") ?
+      PROCESS_PRIORITY_FOREGROUND_KEYBOARD :
+      PROCESS_PRIORITY_FOREGROUND;
   }
 
   if ((mHoldsCPUWakeLock || mHoldsHighPriorityWakeLock) &&
@@ -887,9 +956,13 @@ ParticularProcessPriorityManager::ComputePriority()
 }
 
 ProcessCPUPriority
-ParticularProcessPriorityManager::ComputeCPUPriority()
+ParticularProcessPriorityManager::ComputeCPUPriority(ProcessPriority aPriority)
 {
-  if (mPriority >= PROCESS_PRIORITY_FOREGROUND_HIGH) {
+  if (aPriority == PROCESS_PRIORITY_PREALLOC) {
+    return PROCESS_CPU_PRIORITY_LOW;
+  }
+
+  if (aPriority >= PROCESS_PRIORITY_FOREGROUND_HIGH) {
     return PROCESS_CPU_PRIORITY_NORMAL;
   }
 
@@ -906,18 +979,40 @@ ParticularProcessPriorityManager::ResetCPUPriorityNow()
 }
 
 void
-ParticularProcessPriorityManager::SetPriorityNow(ProcessPriority aPriority)
+ParticularProcessPriorityManager::SetPriorityNow(ProcessPriority aPriority,
+                                                 uint32_t aBackgroundLRU)
 {
-  SetPriorityNow(aPriority, ComputeCPUPriority());
+  SetPriorityNow(aPriority, ComputeCPUPriority(aPriority), aBackgroundLRU);
 }
 
 void
 ParticularProcessPriorityManager::SetPriorityNow(ProcessPriority aPriority,
-                                                 ProcessCPUPriority aCPUPriority)
+                                                 ProcessCPUPriority aCPUPriority,
+                                                 uint32_t aBackgroundLRU)
 {
   if (aPriority == PROCESS_PRIORITY_UNKNOWN) {
     MOZ_ASSERT(false);
     return;
+  }
+
+#ifdef MOZ_NUWA_PROCESS
+  // Do not attempt to change the priority of the Nuwa process
+  if (mContentParent->IsNuwaProcess()) {
+    return;
+  }
+#endif
+
+  if (aBackgroundLRU > 0 &&
+      aPriority == PROCESS_PRIORITY_BACKGROUND &&
+      mPriority == PROCESS_PRIORITY_BACKGROUND) {
+    hal::SetProcessPriority(Pid(), mPriority, mCPUPriority, aBackgroundLRU);
+
+    nsPrintfCString ProcessPriorityWithBackgroundLRU("%s:%d",
+      ProcessPriorityToString(mPriority, mCPUPriority),
+      aBackgroundLRU);
+
+    FireTestOnlyObserverNotification("process-priority-with-background-LRU-set",
+      ProcessPriorityWithBackgroundLRU.get());
   }
 
   if (!mContentParent ||
@@ -934,6 +1029,18 @@ ParticularProcessPriorityManager::SetPriorityNow(ProcessPriority aPriority,
     return;
   }
 
+  if (aPriority == PROCESS_PRIORITY_BACKGROUND &&
+      mPriority != PROCESS_PRIORITY_BACKGROUND &&
+      !IsPreallocated()) {
+    ProcessPriorityManager::AddIntoBackgroundLRUPool(mContentParent);
+  }
+
+  if (aPriority != PROCESS_PRIORITY_BACKGROUND &&
+      mPriority == PROCESS_PRIORITY_BACKGROUND &&
+      !IsPreallocated()) {
+    ProcessPriorityManager::RemoveFromBackgroundLRUPool(mContentParent);
+  }
+
   LOGP("Changing priority from %s to %s.",
        ProcessPriorityToString(mPriority, mCPUPriority),
        ProcessPriorityToString(aPriority, aCPUPriority));
@@ -948,10 +1055,8 @@ ParticularProcessPriorityManager::SetPriorityNow(ProcessPriority aPriority,
     unused << mContentParent->SendNotifyProcessPriorityChanged(mPriority);
   }
 
-  if (aPriority >= PROCESS_PRIORITY_FOREGROUND) {
-    unused << mContentParent->SendCancelMinimizeMemoryUsage();
-  } else {
-    unused << mContentParent->SendMinimizeMemoryUsage();
+  if (aPriority < PROCESS_PRIORITY_FOREGROUND) {
+    unused << mContentParent->SendFlushMemory(NS_LITERAL_STRING("low-memory"));
   }
 
   FireTestOnlyObserverNotification("process-priority-set",
@@ -973,6 +1078,10 @@ ParticularProcessPriorityManager::ShutDown()
   if (mResetPriorityTimer) {
     mResetPriorityTimer->Cancel();
     mResetPriorityTimer = nullptr;
+  }
+
+  if (mPriority == PROCESS_PRIORITY_BACKGROUND && !IsPreallocated()) {
+    ProcessPriorityManager::RemoveFromBackgroundLRUPool(mContentParent);
   }
 
   mContentParent = nullptr;
@@ -1045,6 +1154,7 @@ ProcessPriorityManagerChild::StaticInit()
 {
   if (!sSingleton) {
     sSingleton = new ProcessPriorityManagerChild();
+    sSingleton->Init();
     ClearOnShutdown(&sSingleton);
   }
 }
@@ -1056,8 +1166,8 @@ ProcessPriorityManagerChild::Singleton()
   return sSingleton;
 }
 
-NS_IMPL_ISUPPORTS1(ProcessPriorityManagerChild,
-                   nsIObserver)
+NS_IMPL_ISUPPORTS(ProcessPriorityManagerChild,
+                  nsIObserver)
 
 ProcessPriorityManagerChild::ProcessPriorityManagerChild()
 {
@@ -1084,7 +1194,7 @@ NS_IMETHODIMP
 ProcessPriorityManagerChild::Observe(
   nsISupports* aSubject,
   const char* aTopic,
-  const PRUnichar* aData)
+  const char16_t* aData)
 {
   MOZ_ASSERT(!strcmp(aTopic, "ipc:process-priority-changed"));
 
@@ -1105,6 +1215,188 @@ ProcessPriorityManagerChild::CurrentProcessIsForeground()
 {
   return mCachedPriority == PROCESS_PRIORITY_UNKNOWN ||
          mCachedPriority >= PROCESS_PRIORITY_FOREGROUND;
+}
+
+bool
+ProcessPriorityManagerChild::CurrentProcessIsHighPriority()
+{
+  return mCachedPriority == PROCESS_PRIORITY_UNKNOWN ||
+         mCachedPriority >= PROCESS_PRIORITY_FOREGROUND_HIGH;
+}
+
+/* static */ StaticAutoPtr<BackgroundProcessLRUPool>
+BackgroundProcessLRUPool::sSingleton;
+
+/* static */ BackgroundProcessLRUPool*
+BackgroundProcessLRUPool::Singleton()
+{
+  if (!sSingleton) {
+    sSingleton = new BackgroundProcessLRUPool();
+    ClearOnShutdown(&sSingleton);
+  }
+  return sSingleton;
+}
+
+BackgroundProcessLRUPool::BackgroundProcessLRUPool()
+{
+  EnsureLRUPool();
+}
+
+uint32_t
+BackgroundProcessLRUPool::CalculateLRULevel(uint32_t aBackgroundLRUPoolIndex)
+{
+  // Set LRU level of each background process and maintain LRU buffer as below:
+
+  // Priority background  : LRU0
+  // Priority background+1: LRU1, LRU2
+  // Priority background+2: LRU3, LRU4, LRU5, LRU6
+  // Priority background+3: LRU7, LRU8, LRU9, LRU10, LRU11, LRU12, LRU13, LRU14
+  // ...
+  // Priority background+L-1: 2^(number of background LRU pool levels - 1)
+  // (End of buffer)
+
+  return (uint32_t)(log((float)aBackgroundLRUPoolIndex) / log(2.0));
+}
+
+void
+BackgroundProcessLRUPool::EnsureLRUPool()
+{
+  // We set mBackgroundLRUPoolLevels according to our pref.
+  // This value is used to set background process LRU pool
+  if (!NS_SUCCEEDED(Preferences::GetInt(
+        "dom.ipc.processPriorityManager.backgroundLRUPoolLevels",
+        &mLRUPoolLevels))) {
+    mLRUPoolLevels = 1;
+  }
+
+  if (mLRUPoolLevels <= 0) {
+    MOZ_CRASH();
+  }
+
+  // GonkHal defines OOM_ADJUST_MAX is 15 and b2g.js defines
+  // PROCESS_PRIORITY_BACKGROUND's oom_score_adj is 667 and oom_adj is 10.
+  // This means we can only have at most (15 -10 + 1) = 6 background LRU levels.
+  // See bug 822325 comment 49
+  MOZ_ASSERT(mLRUPoolLevels <= 6);
+
+  // LRU pool size = 2 ^ (number of background LRU pool levels) - 1
+  mLRUPoolSize = (1 << mLRUPoolLevels) - 1;
+
+  mLRUPoolAvailableIndex = 0;
+
+  LOG("Making background LRU pool with size(%d)", mLRUPoolSize);
+
+  mLRUPool.InsertElementsAt(0, mLRUPoolSize, (ContentParent*)nullptr);
+}
+
+void
+BackgroundProcessLRUPool::RemoveFromBackgroundLRUPool(
+    ContentParent* aContentParent)
+{
+  for (int32_t i = 0; i < mLRUPoolSize; i++) {
+    if (mLRUPool[i]) {
+      if (mLRUPool[i]->ChildID() == aContentParent->ChildID()) {
+
+        mLRUPool[i] = nullptr;
+        LOG("Remove ChildID(%llu) from LRU pool", aContentParent->ChildID());
+
+        // After we remove this ContentParent from LRU pool, we still need to
+        // update the available index if the index of removed one is less than
+        // the available index we already have.
+        UpdateAvailableIndexInLRUPool(aContentParent, i);
+        break;
+      }
+    }
+  }
+}
+
+nsresult
+BackgroundProcessLRUPool::UpdateAvailableIndexInLRUPool(
+    ContentParent* aContentParent,
+    int32_t aTargetIndex)
+{
+  // If we specify which index we want to assign to mLRUPoolAvailableIndex,
+  // We have to make sure the index in LRUPool doesn't point to any
+  // ContentParent.
+  if (aTargetIndex >= 0 && aTargetIndex < mLRUPoolSize &&
+      aTargetIndex < mLRUPoolAvailableIndex &&
+      !mLRUPool[aTargetIndex]) {
+    mLRUPoolAvailableIndex = aTargetIndex;
+    return NS_OK;
+  }
+
+  // When we didn't specify any legal aTargetIndex, then we just check
+  // whether current mLRUPoolAvailableIndex points to any ContentParent or not.
+  if (mLRUPoolAvailableIndex >= 0 && mLRUPoolAvailableIndex < mLRUPoolSize &&
+      !(mLRUPool[mLRUPoolAvailableIndex])) {
+    return NS_OK;
+  }
+
+  // Both above way failed. So now we have to find proper value
+  // for mLRUPoolAvailableIndex.
+  // We are looking for an available index. We only shift process with
+  // LRU less than the available index should have, so we stop update
+  // mLRUPoolAvailableIndex from the for loop once we got a candidate.
+  mLRUPoolAvailableIndex = -1;
+
+  for (int32_t i = 0; i < mLRUPoolSize; i++) {
+    if (mLRUPool[i]) {
+      if (mLRUPool[i]->ChildID() == aContentParent->ChildID()) {
+        LOG("ChildID(%llu) already in LRU pool", aContentParent->ChildID());
+        MOZ_ASSERT(false);
+        return NS_ERROR_UNEXPECTED;
+      }
+      continue;
+    } else {
+      if (mLRUPoolAvailableIndex == -1) {
+        mLRUPoolAvailableIndex = i;
+      }
+    }
+  }
+
+  // If the LRUPool is already full, mLRUPoolAvailableIndex is still -1 after
+  // above loop finished. We should set mLRUPoolAvailableIndex
+  // to mLRUPoolSize - 1 in this case. Here uses the mod operator to do it:
+  // New mLRUPoolAvailableIndex either equals old mLRUPoolAvailableIndex, or
+  // mLRUPoolSize - 1 if old mLRUPoolAvailableIndex is -1.
+  mLRUPoolAvailableIndex =
+    (mLRUPoolAvailableIndex + mLRUPoolSize) % mLRUPoolSize;
+
+  return NS_OK;
+}
+
+void
+BackgroundProcessLRUPool::ShiftLRUPool()
+{
+  for (int32_t i = mLRUPoolAvailableIndex; i > 0; i--) {
+    mLRUPool[i] = mLRUPool[i - 1];
+    // Check whether i+1 is power of Two.
+    // If so, then it crossed a LRU group boundary and
+    // we need to assign its new process priority LRU.
+    if (!((i + 1) & i)) {
+      ProcessPriorityManagerImpl::GetSingleton()->SetProcessPriority(
+        mLRUPool[i], PROCESS_PRIORITY_BACKGROUND, CalculateLRULevel(i + 1));
+    }
+  }
+}
+
+void
+BackgroundProcessLRUPool::AddIntoBackgroundLRUPool(
+    ContentParent* aContentParent)
+{
+  // We have to make sure that we have correct available index in LRU pool
+  if (!NS_SUCCEEDED(
+      UpdateAvailableIndexInLRUPool(aContentParent))) {
+    return;
+  }
+
+  // Shift the list in the pool, so we have room at index 0 for the newly added
+  // ContentParent
+  ShiftLRUPool();
+
+  mLRUPool[0] = aContentParent;
+
+  LOG("Add ChildID(%llu) into LRU pool", aContentParent->ChildID());
 }
 
 } // anonymous namespace
@@ -1131,11 +1423,50 @@ ProcessPriorityManager::SetProcessPriority(ContentParent* aContentParent,
   }
 }
 
+/* static */ void
+ProcessPriorityManager::RemoveFromBackgroundLRUPool(
+    ContentParent* aContentParent)
+{
+  MOZ_ASSERT(aContentParent);
+
+  BackgroundProcessLRUPool* singleton =
+    BackgroundProcessLRUPool::Singleton();
+  if (singleton) {
+    singleton->RemoveFromBackgroundLRUPool(aContentParent);
+  }
+}
+
+/* static */ void
+ProcessPriorityManager::AddIntoBackgroundLRUPool(ContentParent* aContentParent)
+{
+  MOZ_ASSERT(aContentParent);
+
+  BackgroundProcessLRUPool* singleton =
+    BackgroundProcessLRUPool::Singleton();
+  if (singleton) {
+    singleton->AddIntoBackgroundLRUPool(aContentParent);
+  }
+}
+
 /* static */ bool
 ProcessPriorityManager::CurrentProcessIsForeground()
 {
   return ProcessPriorityManagerChild::Singleton()->
     CurrentProcessIsForeground();
+}
+
+/* static */ bool
+ProcessPriorityManager::AnyProcessHasHighPriority()
+{
+  ProcessPriorityManagerImpl* singleton =
+    ProcessPriorityManagerImpl::GetSingleton();
+
+  if (singleton) {
+    return singleton->ChildProcessHasHighPriority();
+  } else {
+    return ProcessPriorityManagerChild::Singleton()->
+      CurrentProcessIsHighPriority();
+  }
 }
 
 } // namespace mozilla

@@ -4,8 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'accessibility'
-
 EXPORTS += [
     'IUnknownImpl.h',
 ]
@@ -16,28 +14,48 @@ EXPORTS.mozilla.a11y += [
     'HyperTextAccessibleWrap.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'AccessibleWrap.cpp',
     'ApplicationAccessibleWrap.cpp',
     'ARIAGridAccessibleWrap.cpp',
+    'Compatibility.cpp',
     'DocAccessibleWrap.cpp',
+    'EnumVariant.cpp',
     'HTMLTableAccessibleWrap.cpp',
     'HTMLWin32ObjectAccessible.cpp',
     'HyperTextAccessibleWrap.cpp',
     'ImageAccessibleWrap.cpp',
     'IUnknownImpl.cpp',
     'nsWinUtils.cpp',
-    'Compatibility.cpp',
-    'EnumVariant.cpp',
     'Platform.cpp',
-    'ServiceProvider.cpp',
     'RootAccessibleWrap.cpp',
     'TextLeafAccessibleWrap.cpp',
 ]
 
+# This file cannot be built in unified mode because it includes ISimpleDOMNode_i.c.
+SOURCES += [
+    'ServiceProvider.cpp',
+]
+
 if CONFIG['MOZ_XUL']:
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'XULListboxAccessibleWrap.cpp',
         'XULMenuAccessibleWrap.cpp',
         'XULTreeGridAccessibleWrap.cpp',
     ]
+
+LOCAL_INCLUDES += [
+    '../../../../content/base/src',
+    '../../base',
+    '../../generic',
+    '../../html',
+    '../../xpcom',
+    '../../xul',
+    '../ia2',
+    '../sdn',
+    '../uia',
+]
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'

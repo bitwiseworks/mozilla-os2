@@ -11,16 +11,36 @@
 <!DOCTYPE window [
   <!ENTITY % newTabDTD SYSTEM "chrome://browser/locale/newTab.dtd">
   %newTabDTD;
+  <!ENTITY % searchBarDTD SYSTEM "chrome://browser/locale/searchbar.dtd">
+  %searchBarDTD;
 ]>
 
 <xul:window id="newtab-window" xmlns="http://www.w3.org/1999/xhtml"
             xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
             title="&newtab.pageTitle;">
 
+  <xul:panel id="sponsored-panel" orient="vertical" type="arrow">
+    <xul:description id="sponsored-panel-release-descr">&newtab.sponsored.release.message;</xul:description>
+    <xul:description id="sponsored-panel-trial-descr">&newtab.sponsored.trial.message;</xul:description>
+    <xul:label class="text-link"
+               href="https://support.mozilla.org/kb/how-do-sponsored-tiles-work"
+               value="&newtab.panel.link.text;" />
+  </xul:panel>
+
+  <xul:panel id="newtab-search-panel" orient="vertical" type="arrow"
+             noautohide="true">
+    <xul:hbox id="newtab-search-manage" class="newtab-search-panel-engine">
+      <xul:label>&cmd_engineManager.label;</xul:label>
+    </xul:hbox>
+  </xul:panel>
+
   <div id="newtab-scrollbox">
 
     <div id="newtab-vertical-margin">
-      <div id="newtab-margin-top">
+
+      <div id="newtab-margin-top"/>
+
+      <div id="newtab-margin-undo-container">
         <div id="newtab-undo-container" undo-disabled="true">
           <xul:label id="newtab-undo-label"
                      value="&newtab.undo.removedLabel;" />
@@ -31,8 +51,23 @@
                       label="&newtab.undo.restoreButton;"
                       class="newtab-undo-button" />
           <xul:toolbarbutton id="newtab-undo-close-button" tabindex="-1"
+                             class="close-icon tabbable"
                              tooltiptext="&newtab.undo.closeTooltip;" />
         </div>
+      </div>
+
+      <div id="newtab-search-container">
+        <div class="newtab-side-margin"/>
+
+        <form id="newtab-search-form" name="searchForm">
+          <div id="newtab-search-logo"/>
+          <input type="text" name="q" value="" id="newtab-search-text"
+                 maxlength="256" dir="auto"/>
+          <input id="newtab-search-submit" type="submit"
+                 value="&searchEndCap.label;"/>
+        </form>
+
+        <div class="newtab-side-margin"/>
       </div>
 
       <div id="newtab-horizontal-margin">
@@ -45,6 +80,7 @@
       </div>
 
       <div id="newtab-margin-bottom"/>
+
     </div>
     <input id="newtab-toggle" type="button"/>
   </div>

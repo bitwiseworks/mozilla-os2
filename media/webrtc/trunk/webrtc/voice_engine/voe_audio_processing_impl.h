@@ -11,9 +11,9 @@
 #ifndef WEBRTC_VOICE_ENGINE_VOE_AUDIO_PROCESSING_IMPL_H
 #define WEBRTC_VOICE_ENGINE_VOE_AUDIO_PROCESSING_IMPL_H
 
-#include "voe_audio_processing.h"
+#include "webrtc/voice_engine/include/voe_audio_processing.h"
 
-#include "shared_data.h"
+#include "webrtc/voice_engine/shared_data.h"
 
 namespace webrtc {
 
@@ -27,7 +27,7 @@ class VoEAudioProcessingImpl : public VoEAudioProcessing {
 
   virtual int GetAgcStatus(bool& enabled, AgcModes& mode);
 
-  virtual int SetAgcConfig(const AgcConfig config);
+  virtual int SetAgcConfig(AgcConfig config);
 
   virtual int GetAgcConfig(AgcConfig& config);
 
@@ -43,7 +43,7 @@ class VoEAudioProcessingImpl : public VoEAudioProcessing {
 
   virtual int GetRxAgcStatus(int channel, bool& enabled, AgcModes& mode);
 
-  virtual int SetRxAgcConfig(int channel, const AgcConfig config);
+  virtual int SetRxAgcConfig(int channel, AgcConfig config);
 
   virtual int GetRxAgcConfig(int channel, AgcConfig& config);
 
@@ -107,7 +107,6 @@ class VoEAudioProcessingImpl : public VoEAudioProcessing {
   voe::SharedData* _shared;
 };
 
-}  //  namespace webrtc
+}  // namespace webrtc
 
 #endif  // WEBRTC_VOICE_ENGINE_VOE_AUDIO_PROCESSING_IMPL_H
-

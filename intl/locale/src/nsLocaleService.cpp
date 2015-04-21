@@ -19,6 +19,7 @@
 #include "nsCRT.h"
 #include "prprf.h"
 #include "nsTArray.h"
+#include "nsString.h"
 
 #include <ctype.h>
 
@@ -77,7 +78,7 @@ public:
 	//
 	// nsISupports
 	//
-	NS_DECL_ISUPPORTS
+	NS_DECL_THREADSAFE_ISUPPORTS
 
 	//
 	// nsILocaleService
@@ -176,7 +177,7 @@ nsLocaleService::nsLocaleService(void)
 
         nsRefPtr<nsLocale> resultLocale(new nsLocale());
 
-        LocaleObject locale_object = NULL;
+        LocaleObject locale_object = nullptr;
         int result = UniCreateLocaleObject(UNI_UCS_STRING_POINTER,
                                            (UniChar *)L"", &locale_object);
         if (result != ULS_SUCCESS) {
@@ -224,20 +225,18 @@ nsLocaleService::nsLocaleService(void)
 
     nsAutoTArray<UniChar, 32> buffer;
     int size = ::CFStringGetLength(userLocaleStr);
-    if (buffer.SetLength(size + 1))
-    {
-        CFRange range = ::CFRangeMake(0, size);
-        ::CFStringGetCharacters(userLocaleStr, range, buffer.Elements());
-        buffer[size] = 0;
+    buffer.SetLength(size + 1);
+    CFRange range = ::CFRangeMake(0, size);
+    ::CFStringGetCharacters(userLocaleStr, range, buffer.Elements());
+    buffer[size] = 0;
 
-        // Convert the locale string to the format that Mozilla expects
-        nsAutoString xpLocale(buffer.Elements());
-        xpLocale.ReplaceChar('_', '-');
+    // Convert the locale string to the format that Mozilla expects
+    nsAutoString xpLocale(reinterpret_cast<char16_t*>(buffer.Elements()));
+    xpLocale.ReplaceChar('_', '-');
 
-        nsresult rv = NewLocale(xpLocale, getter_AddRefs(mSystemLocale));
-        if (NS_SUCCEEDED(rv)) {
-            mApplicationLocale = mSystemLocale;
-        }
+    nsresult rv = NewLocale(xpLocale, getter_AddRefs(mSystemLocale));
+    if (NS_SUCCEEDED(rv)) {
+        mApplicationLocale = mSystemLocale;
     }
 
     ::CFRelease(userLocaleStr);
@@ -251,7 +250,7 @@ nsLocaleService::~nsLocaleService(void)
 {
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsLocaleService, nsILocaleService)
+NS_IMPL_ISUPPORTS(nsLocaleService, nsILocaleService)
 
 NS_IMETHODIMP
 nsLocaleService::NewLocale(const nsAString &aLocale, nsILocale **_retval)

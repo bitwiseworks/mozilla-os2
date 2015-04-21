@@ -11,6 +11,7 @@ const GSM_SMS_STRICT_7BIT_CHARMAP = {
   "\u00c0": "\u0041", // "À" => "A"
   "\u00c1": "\u0041", // "Á" => "A"
   "\u00c2": "\u0041", // "Â" => "A"
+  "\u00c3": "\u0041", // "Ã" => "A"
   "\u00c4": "\u00c4", // "Ä" => "Ä", already in default alphabet
   "\u00c5": "\u00c5", // "Å" => "Å", already in default alphabet
   "\u00c6": "\u00c6", // "Æ" => "Æ", already in default alphabet
@@ -27,6 +28,7 @@ const GSM_SMS_STRICT_7BIT_CHARMAP = {
   "\u00d2": "\u004f", // "Ò" => "O"
   "\u00d3": "\u004f", // "Ó" => "O"
   "\u00d4": "\u004f", // "Ô" => "O"
+  "\u00d5": "\u004f", // "Õ" => "O"
   "\u00d6": "\u00d6", // "Ö" => "Ö", already in default alphabet
   "\u00d9": "\u0055", // "Ù" => "U"
   "\u00da": "\u0055", // "Ú" => "U"
@@ -36,6 +38,7 @@ const GSM_SMS_STRICT_7BIT_CHARMAP = {
   "\u00e0": "\u00e0", // "à" => "à", already in default alphabet
   "\u00e1": "\u0061", // "á" => "a"
   "\u00e2": "\u0061", // "â" => "a"
+  "\u00e3": "\u0061", // "ã" => "a"
   "\u00e4": "\u00e4", // "ä" => "ä", already in default alphabet
   "\u00e5": "\u00e5", // "å" => "å", already in default alphabet
   "\u00e6": "\u00e6", // "æ" => "æ", already in default alphabet
@@ -52,6 +55,7 @@ const GSM_SMS_STRICT_7BIT_CHARMAP = {
   "\u00f2": "\u00f2", // "ò" => "ò", already in default alphabet
   "\u00f3": "\u006f", // "ó" => "o"
   "\u00f4": "\u006f", // "ô" => "o"
+  "\u00f5": "\u006f", // "õ" => "o"
   "\u00f6": "\u00f6", // "ö" => "ö", already in default alphabet
   "\u00f8": "\u00f8", // "ø" => "ø", already in default alphabet
   "\u00f9": "\u00f9", // "ù" => "ù", already in default alphabet
@@ -72,6 +76,8 @@ const GSM_SMS_STRICT_7BIT_CHARMAP = {
   "\u0113": "\u0065", // "ē" => "e"
   "\u0118": "\u0045", // "Ę" => "E"
   "\u0119": "\u0065", // "ę" => "e"
+  "\u0128": "\u0049", // "Ĩ" => "I"
+  "\u0129": "\u0069", // "ĩ" => "i"
   "\u012a": "\u0049", // "Ī" => "I"
   "\u012b": "\u0069", // "ī" => "i"
   "\u012e": "\u0049", // "Į" => "I"
@@ -91,6 +97,8 @@ const GSM_SMS_STRICT_7BIT_CHARMAP = {
   "\u0160": "\u0053", // "Š" => "S"
   "\u0161": "\u0073", // "š" => "s"
   "\u0165": "\u0074", // "ť" => "t"
+  "\u0168": "\u0055", // "Ū" => "U"
+  "\u0169": "\u0075", // "ū" => "u"
   "\u016a": "\u0055", // "Ū" => "U"
   "\u016b": "\u0075", // "ū" => "u"
   "\u0178": "\u0059", // "Ÿ" => "Y"
@@ -102,6 +110,12 @@ const GSM_SMS_STRICT_7BIT_CHARMAP = {
   "\u017e": "\u007a", // "ž" => "z"
   "\u025b": "\u0045", // "ɛ" => "E"
   "\u0398": "\u0398", // "Θ" => "Θ", already in default alphabet
+  "\u1e7c": "\u0056", // "Ṽ" => "V"
+  "\u1e7d": "\u0076", // "ṽ" => "v"
+  "\u1ebc": "\u0045", // "Ẽ" => "E"
+  "\u1ebd": "\u0065", // "ẽ" => "e"
+  "\u1ef8": "\u0059", // "Ỹ" => "Y"
+  "\u1ef9": "\u0079", // "ỹ" => "y"
   "\u20a4": "\u00a3", // "₤" => "£"
   "\u20ac": "\u20ac", // "€" => "€", already in default alphabet
 };
@@ -113,8 +127,9 @@ const SELF = "5554";
 SpecialPowers.setBoolPref("dom.sms.enabled", true);
 SpecialPowers.addPermission("sms", true, document);
 
-let sms = window.navigator.mozSms;
-ok(sms instanceof MozSmsManager);
+let manager = window.navigator.mozMobileMessage;
+ok(manager instanceof MozMobileMessageManager,
+   "manager is instance of " + manager.constructor);
 
 let tasks = {
   // List of test fuctions. Each of them should call |tasks.next()| when
@@ -122,11 +137,11 @@ let tasks = {
   _tasks: [],
   _nextTaskIndex: 0,
 
-  push: function push(func) {
+  push: function(func) {
     this._tasks.push(func);
   },
 
-  next: function next() {
+  next: function() {
     let index = this._nextTaskIndex++;
     let task = this._tasks[index];
     try {
@@ -140,11 +155,11 @@ let tasks = {
     }
   },
 
-  finish: function finish() {
+  finish: function() {
     this._tasks[this._tasks.length - 1]();
   },
 
-  run: function run() {
+  run: function() {
     this.next();
   }
 };
@@ -164,7 +179,7 @@ function testStrict7BitEncodingHelper(sent, received) {
     }
   }
 
-  sms.addEventListener("received", function onReceived(event) {
+  manager.addEventListener("received", function onReceived(event) {
     event.target.removeEventListener("received", onReceived);
 
     let message = event.message;
@@ -173,7 +188,7 @@ function testStrict7BitEncodingHelper(sent, received) {
     done(1);
   });
 
-  let request = sms.send(SELF, sent);
+  let request = manager.send(SELF, sent);
   request.addEventListener("success", function onRequestSuccess(event) {
     let message = event.target.result;
     is(message.body, sent, "sent message.body");
@@ -198,7 +213,7 @@ function testBug877141() {
   testStrict7BitEncodingHelper(sent, sent);
 }
 
-tasks.push(function () {
+tasks.push(function() {
   log("Testing with dom.sms.strict7BitEncoding enabled");
   SpecialPowers.setBoolPref("dom.sms.strict7BitEncoding", true);
   tasks.next();
@@ -206,7 +221,7 @@ tasks.push(function () {
 
 
 // Test for combined string.
-tasks.push(function () {
+tasks.push(function() {
   let sent = "", received = "";
   for (let c in GSM_SMS_STRICT_7BIT_CHARMAP) {
     sent += c;
@@ -217,7 +232,7 @@ tasks.push(function () {
 
 // When strict7BitEncoding is enabled, we should replace characters that
 // can't be encoded with GSM 7-Bit alphabets with '*'.
-tasks.push(function () {
+tasks.push(function() {
   // "Happy New Year" in Chinese.
   let sent = "\u65b0\u5e74\u5feb\u6a02", received = "****";
   testStrict7BitEncodingHelper(sent, received);
@@ -225,14 +240,14 @@ tasks.push(function () {
 
 tasks.push(testBug877141);
 
-tasks.push(function () {
+tasks.push(function() {
   log("Testing with dom.sms.strict7BitEncoding disabled");
   SpecialPowers.setBoolPref("dom.sms.strict7BitEncoding", false);
   tasks.next();
 });
 
 // Test for combined string.
-tasks.push(function () {
+tasks.push(function() {
   let sent = "";
   for (let c in GSM_SMS_STRICT_7BIT_CHARMAP) {
     sent += c;
@@ -240,7 +255,7 @@ tasks.push(function () {
   testStrict7BitEncodingHelper(sent, sent);
 });
 
-tasks.push(function () {
+tasks.push(function() {
   // "Happy New Year" in Chinese.
   let sent = "\u65b0\u5e74\u5feb\u6a02";
   testStrict7BitEncodingHelper(sent, sent);

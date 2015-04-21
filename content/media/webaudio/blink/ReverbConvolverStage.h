@@ -29,8 +29,12 @@
 #ifndef ReverbConvolverStage_h
 #define ReverbConvolverStage_h
 
+#include "DirectConvolver.h"
+#include "FFTConvolver.h"
+
 #include "nsTArray.h"
 #include "mozilla/FFTBlock.h"
+#include "mozilla/MemoryReporting.h"
 
 namespace WebCore {
 
@@ -38,8 +42,6 @@ using mozilla::FFTBlock;
 
 class ReverbAccumulationBuffer;
 class ReverbConvolver;
-class FFTConvolver;
-class DirectConvolver;
 
 // A ReverbConvolverStage represents the convolution associated with a sub-section of a large impulse response.
 // It incorporates a delay line to account for the offset of the sub-section within the larger impulse response.
@@ -58,6 +60,8 @@ public:
 
     // Useful for background processing
     int inputReadIndex() const { return m_inputReadIndex; }
+
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
 private:
     nsAutoPtr<FFTBlock> m_fftKernel;

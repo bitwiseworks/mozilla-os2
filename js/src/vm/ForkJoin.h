@@ -7,9 +7,12 @@
 #ifndef vm_ForkJoin_h
 #define vm_ForkJoin_h
 
+#include "mozilla/ThreadLocal.h"
+
 #include "jscntxt.h"
-#include "vm/ThreadPool.h"
-#include "jsgc.h"
+
+#include "gc/GCInternals.h"
+
 #include "jit/Ion.h"
 
 ///////////////////////////////////////////////////////////////////////////
@@ -27,40 +30,50 @@
 // to enable parallel execution.  At the top-level, it consists of a native
 // function (exposed as the ForkJoin intrinsic) that is used like so:
 //
-//     ForkJoin(func, feedback)
+//     ForkJoin(func, sliceStart, sliceEnd, mode)
 //
-// The intention of this statement is to start N copies of |func()|
-// running in parallel.  Each copy will then do 1/Nth of the total
-// work.  Here N is number of workers in the threadpool (see
-// ThreadPool.h---by default, N is the number of cores on the
-// computer).
+// The intention of this statement is to start some some number (usually the
+// number of hardware threads) of copies of |func()| running in parallel. Each
+// copy will then do a portion of the total work, depending on
+// workstealing-based load balancing.
 //
-// Typically, each of the N slices will execute from a different
-// worker thread, but that is not something you should rely upon---if
-// we implement work-stealing, for example, then it could be that a
-// single worker thread winds up handling multiple slices.
+// Typically, each of the N slices runs in a different worker thread, but that
+// is not something you should rely upon---if work-stealing is enabled it
+// could be that a single worker thread winds up handling multiple slices.
 //
-// The second argument, |feedback|, is an optional callback that will
-// receiver information about how execution proceeded.  This is
-// intended for use in unit testing but also for providing feedback to
-// users.  Note that gathering the data to provide to |feedback| is
-// not free and so execution will run somewhat slower if |feedback| is
-// provided.
+// The second and third arguments, |sliceStart| and |sliceEnd|, are the slice
+// boundaries. These numbers must each fit inside an uint16_t.
+//
+// The fourth argument, |mode|, is an internal mode integer giving finer
+// control over the behavior of ForkJoin. See the |ForkJoinMode| enum.
 //
 // func() should expect the following arguments:
 //
-//     func(id, n, warmup)
+//     func(workerId, sliceStart, sliceEnd)
 //
-// Here, |id| is the slice id. |n| is the total number of slices.  The
-// parameter |warmup| is true for a *warmup or recovery phase*.
-// Warmup phases are discussed below in more detail, but the general
-// idea is that if |warmup| is true, |func| should only do a fixed
-// amount of work.  If |warmup| is false, |func| should try to do all
-// remaining work is assigned.
+// The |workerId| parameter is the id of the worker executing the function. It
+// is 0 in sequential mode.
 //
-// Note that we implicitly assume that |func| is tracking how much
-// work it has accomplished thus far; some techniques for doing this
-// are discussed in |ParallelArray.js|.
+// The |sliceStart| and |sliceEnd| parameters are the current bounds that that
+// the worker is handling. In parallel execution, these parameters are not
+// used. In sequential execution, they tell the worker what slices should be
+// processed. During the warm up phase, sliceEnd == sliceStart + 1.
+//
+// |func| can keep asking for more work from the scheduler by calling the
+// intrinsic |GetForkJoinSlice(sliceStart, sliceEnd, id)|. When there are no
+// more slices to hand out, ThreadPool::MAX_SLICE_ID is returned as a sentinel
+// value. By exposing this function as an intrinsic, we reduce the number of
+// JS-C++ boundary crossings incurred by workstealing, which may have many
+// slices.
+//
+// In sequential execution, |func| should return the maximum computed slice id
+// S for which all slices with id < S have already been processed. This is so
+// ThreadPool can track the leftmost completed slice id to maintain
+// determinism. Slices which have been completed in sequential execution
+// cannot be re-run in parallel execution.
+//
+// In parallel execution, |func| MUST PROCESS ALL SLICES BEFORE RETURNING!
+// Not doing so is an error and is protected by debug asserts in ThreadPool.
 //
 // Warmups and Sequential Fallbacks
 // --------------------------------
@@ -98,7 +111,7 @@
 //   get interesting.  In that case, the semantics of parallel
 //   execution guarantee us that no visible side effects have occurred
 //   (unless they were performed with the intrinsic
-//   |UnsafeSetElement()|, which can only be used in self-hosted
+//   |UnsafePutElements()|, which can only be used in self-hosted
 //   code).  We therefore reinvoke |func()| but with warmup set to
 //   true.  The idea here is that often parallel bailouts result from
 //   a failed type guard or other similar assumption, so rerunning the
@@ -112,18 +125,12 @@
 //   parallelization and just invoke |func()| N times in a row (once
 //   for each worker) but with |warmup| set to false.
 //
-// Operation callback:
+// Interrupts:
 //
-// During parallel execution, |slice.check()| must be periodically
-// invoked to check for the operation callback. This is automatically
-// done by the ion-generated code. If the operation callback is
-// necessary, |slice.check()| will arrange a rendezvous---that is, as
-// each active worker invokes |check()|, it will come to a halt until
-// everyone is blocked (Stop The World).  At this point, we perform
-// the callback on the main thread, and then resume execution.  If a
-// worker thread terminates before calling |check()|, that's fine too.
-// We assume that you do not do unbounded work without invoking
-// |check()|.
+// During parallel execution, |cx.check()| must be periodically invoked to
+// check for interrupts. This is automatically done by the Ion-generated
+// code. If an interrupt has been requested |cx.check()| aborts parallel
+// execution.
 //
 // Transitive compilation:
 //
@@ -148,7 +155,7 @@
 // Bailout tracing and recording:
 //
 // When a bailout occurs, we record a bit of state so that we can
-// recover with grace. Each |ForkJoinSlice| has a pointer to a
+// recover with grace. Each |ForkJoinContext| has a pointer to a
 // |ParallelBailoutRecord| pre-allocated for this purpose. This
 // structure is used to record the cause of the bailout, the JSScript
 // which was executing, as well as the location in the source where
@@ -167,13 +174,13 @@
 //
 // To deal with this, the forkjoin code creates a distinct |Allocator|
 // object for each slice.  You can access the appropriate object via
-// the |ForkJoinSlice| object that is provided to the callbacks.  Once
+// the |ForkJoinContext| object that is provided to the callbacks.  Once
 // the execution is complete, all the objects found in these distinct
 // |Allocator| is merged back into the main compartment lists and
 // things proceed normally.
 //
 // In Ion-generated code, we will do allocation through the
-// |Allocator| found in |ForkJoinSlice| (which is obtained via TLS).
+// |Allocator| found in |ForkJoinContext| (which is obtained via TLS).
 // Also, no write barriers are emitted.  Conceptually, we should never
 // need a write barrier because we only permit writes to objects that
 // are newly allocated, and such objects are always black (to use
@@ -185,6 +192,17 @@
 // we must block until inc. GC has completed and also to permit GC
 // during parallel exeution. But we're not there yet.
 //
+// Load balancing (work stealing):
+//
+// The ForkJoin job is dynamically divided into a fixed number of slices,
+// and is submitted for parallel execution in the pool. When the number
+// of slices is big enough (typically greater than the number of workers
+// in the pool) -and the workload is unbalanced- each worker thread
+// will perform load balancing through work stealing. The number
+// of slices is computed by the self-hosted function |ComputeNumSlices|
+// and can be used to know how many slices will be executed by the
+// runtime for an array of the given size.
+//
 // Current Limitations:
 //
 // - The API does not support recursive or nested use.  That is, the
@@ -192,40 +210,38 @@
 //   |ForkJoin()|. Instead, use the intrinsic |InParallelSection()| to
 //   check for recursive use and execute a sequential fallback.
 //
-// - No load balancing is performed between worker threads.  That means that
-//   the fork-join system is best suited for problems that can be slice into
-//   uniform bits.
-//
 ///////////////////////////////////////////////////////////////////////////
 
 namespace js {
 
-struct ForkJoinSlice;
+class ForkJoinActivation : public Activation
+{
+    uint8_t *prevIonTop_;
+
+    // We ensure that incremental GC be finished before we enter into a fork
+    // join section, but the runtime/zone might still be marked as needing
+    // barriers due to being in the middle of verifying barriers. Pause
+    // verification during the fork join section.
+    gc::AutoStopVerifyingBarriers av_;
+
+  public:
+    ForkJoinActivation(JSContext *cx);
+    ~ForkJoinActivation();
+};
+
+class ForkJoinContext;
 
 bool ForkJoin(JSContext *cx, CallArgs &args);
 
-// Returns the number of slices that a fork-join op will have when
-// executed.
-uint32_t ForkJoinSlices(JSContext *cx);
-
-#ifdef DEBUG
 struct IonLIRTraceData {
-    uint32_t bblock;
-    uint32_t lir;
+    uint32_t blockIndex;
+    uint32_t lirIndex;
     uint32_t execModeInt;
     const char *lirOpName;
     const char *mirOpName;
     JSScript *script;
     jsbytecode *pc;
 };
-#endif
-
-// Parallel operations in general can have one of three states.  They may
-// succeed, fail, or "bail", where bail indicates that the code encountered an
-// unexpected condition and should be re-run sequentially.
-// Different subcategories of the "bail" state are encoded as variants of
-// TP_RETRY_*.
-enum ParallelResult { TP_SUCCESS, TP_RETRY_SEQUENTIALLY, TP_RETRY_AFTER_GC, TP_FATAL };
 
 ///////////////////////////////////////////////////////////////////////////
 // Bailout tracking
@@ -233,17 +249,17 @@ enum ParallelResult { TP_SUCCESS, TP_RETRY_SEQUENTIALLY, TP_RETRY_AFTER_GC, TP_F
 enum ParallelBailoutCause {
     ParallelBailoutNone,
 
-    // compiler returned Method_Skipped
+    // Compiler returned Method_Skipped
     ParallelBailoutCompilationSkipped,
 
-    // compiler returned Method_CantCompile
+    // Compiler returned Method_CantCompile
     ParallelBailoutCompilationFailure,
 
-    // the periodic interrupt failed, which can mean that either
+    // The periodic interrupt failed, which can mean that either
     // another thread canceled, the user interrupted us, etc
     ParallelBailoutInterrupt,
 
-    // an IC update failed
+    // An IC update failed
     ParallelBailoutFailedIC,
 
     // Heap busy flag was set during interrupt
@@ -256,8 +272,8 @@ enum ParallelBailoutCause {
     ParallelBailoutOverRecursed,
     ParallelBailoutOutOfMemory,
     ParallelBailoutUnsupported,
+    ParallelBailoutUnsupportedVM,
     ParallelBailoutUnsupportedStringComparison,
-    ParallelBailoutUnsupportedSparseArray,
     ParallelBailoutRequestedGC,
     ParallelBailoutRequestedZoneGC,
 };
@@ -281,35 +297,60 @@ struct ParallelBailoutRecord {
     void init(JSContext *cx);
     void reset(JSContext *cx);
     void setCause(ParallelBailoutCause cause,
-                  JSScript *outermostScript,   // inliner (if applicable)
-                  JSScript *currentScript,     // inlinee (if applicable)
-                  jsbytecode *currentPc);
+                  JSScript *outermostScript = nullptr,   // inliner (if applicable)
+                  JSScript *currentScript = nullptr,     // inlinee (if applicable)
+                  jsbytecode *currentPc = nullptr);
+    void updateCause(ParallelBailoutCause cause,
+                     JSScript *outermostScript,
+                     JSScript *currentScript,
+                     jsbytecode *currentPc);
     void addTrace(JSScript *script,
                   jsbytecode *pc);
 };
 
 struct ForkJoinShared;
 
-struct ForkJoinSlice : ThreadSafeContext
+class ForkJoinContext : public ThreadSafeContext
 {
   public:
-    // Which slice should you process? Ranges from 0 to |numSlices|.
-    const uint32_t sliceId;
-
-    // How many slices are there in total?
-    const uint32_t numSlices;
-
     // Bailout record used to record the reason this thread stopped executing
     ParallelBailoutRecord *const bailoutRecord;
 
 #ifdef DEBUG
     // Records the last instr. to execute on this thread.
     IonLIRTraceData traceData;
+
+    // The maximum worker id.
+    uint32_t maxWorkerId;
 #endif
 
-    ForkJoinSlice(PerThreadData *perThreadData, uint32_t sliceId, uint32_t numSlices,
-                  Allocator *allocator, ForkJoinShared *shared,
-                  ParallelBailoutRecord *bailoutRecord);
+    // When we run a par operation like mapPar, we create an out pointer
+    // into a specific region of the destination buffer. Even though the
+    // destination buffer is not thread-local, it is permissible to write into
+    // it via the handles provided. These two fields identify the memory
+    // region where writes are allowed so that the write guards can test for
+    // it.
+    //
+    // Note: we only permit writes into the *specific region* that the user
+    // is supposed to write. Normally, they only have access to this region
+    // anyhow. But due to sequential fallback it is possible for handles into
+    // other regions to escape into global variables in the sequential
+    // execution and then get accessed by later parallel sections. Thus we
+    // must be careful and ensure that the write is going through a handle
+    // into the correct *region* of the buffer.
+    uint8_t *targetRegionStart;
+    uint8_t *targetRegionEnd;
+
+    ForkJoinContext(PerThreadData *perThreadData, ThreadPoolWorker *worker,
+                    Allocator *allocator, ForkJoinShared *shared,
+                    ParallelBailoutRecord *bailoutRecord);
+
+    // Get the worker id. The main thread by convention has the id of the max
+    // worker thread id + 1.
+    uint32_t workerId() const { return worker_->id(); }
+
+    // Get a slice of work for the worker associated with the context.
+    bool getSlice(uint16_t *sliceId) { return worker_->getSlice(this, sliceId); }
 
     // True if this is the main thread, false if it is one of the parallel workers.
     bool isMainThread() const;
@@ -325,6 +366,18 @@ struct ForkJoinSlice : ThreadSafeContext
     void requestGC(JS::gcreason::Reason reason);
     void requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason);
 
+    // Set the fatal flag for the next abort. Used to distinguish retry or
+    // fatal aborts from VM functions.
+    bool setPendingAbortFatal(ParallelBailoutCause cause);
+
+    // Reports an unsupported operation, returning false if we are reporting
+    // an error. Otherwise drop the warning on the floor.
+    bool reportError(ParallelBailoutCause cause, unsigned report) {
+        if (report & JSREPORT_ERROR)
+            return setPendingAbortFatal(cause);
+        return true;
+    }
+
     // During the parallel phase, this method should be invoked
     // periodically, for example on every backedge, similar to the
     // interrupt check.  If it returns false, then the parallel phase
@@ -332,7 +385,7 @@ struct ForkJoinSlice : ThreadSafeContext
     // also rendesvous to perform GC or do other similar things.
     //
     // This function is guaranteed to have no effect if both
-    // runtime()->interrupt is zero.  Ion-generated code takes
+    // runtime()->interruptPar is zero.  Ion-generated code takes
     // advantage of this by inlining the checks on those flags before
     // actually calling this function.  If this function ends up
     // getting called a lot from outside ion code, we can refactor
@@ -344,29 +397,36 @@ struct ForkJoinSlice : ThreadSafeContext
     JSRuntime *runtime();
 
     // Acquire and release the JSContext from the runtime.
-    JSContext *acquireContext();
-    void releaseContext();
-    bool hasAcquiredContext() const;
+    JSContext *acquireJSContext();
+    void releaseJSContext();
+    bool hasAcquiredJSContext() const;
 
     // Check the current state of parallel execution.
-    static inline ForkJoinSlice *Current();
+    static inline ForkJoinContext *current();
 
     // Initializes the thread-local state.
-    static bool InitializeTLS();
+    static bool initialize();
+
+    // Used in inlining GetForkJoinSlice.
+    static size_t offsetOfWorker() {
+        return offsetof(ForkJoinContext, worker_);
+    }
 
   private:
-    friend class AutoRendezvous;
-    friend class AutoSetForkJoinSlice;
+    friend class AutoSetForkJoinContext;
 
-#if defined(JS_THREADSAFE) && defined(JS_ION)
-    // Initialized by InitializeTLS()
-    static unsigned ThreadPrivateIndex;
-    static bool TLSInitialized;
-#endif
+    // Initialized by initialize()
+    static mozilla::ThreadLocal<ForkJoinContext*> tlsForkJoinContext;
 
-    ForkJoinShared *const shared;
+    ForkJoinShared *const shared_;
 
-    bool acquiredContext_;
+    ThreadPoolWorker *worker_;
+
+    bool acquiredJSContext_;
+
+    // ForkJoinContext is allocated on the stack. It would be dangerous to GC
+    // with it live because of the GC pointer fields stored in the context.
+    JS::AutoAssertNoGC nogc_;
 };
 
 // Locks a JSContext for its scope. Be very careful, because locking a
@@ -381,47 +441,48 @@ struct ForkJoinSlice : ThreadSafeContext
 class LockedJSContext
 {
 #if defined(JS_THREADSAFE) && defined(JS_ION)
-    ForkJoinSlice *slice_;
+    ForkJoinContext *cx_;
 #endif
-    JSContext *cx_;
+    JSContext *jscx_;
 
   public:
-    LockedJSContext(ForkJoinSlice *slice)
+    LockedJSContext(ForkJoinContext *cx)
 #if defined(JS_THREADSAFE) && defined(JS_ION)
-      : slice_(slice),
-        cx_(slice->acquireContext())
+      : cx_(cx),
+        jscx_(cx->acquireJSContext())
 #else
-      : cx_(NULL)
+      : jscx_(nullptr)
 #endif
     { }
 
     ~LockedJSContext() {
 #if defined(JS_THREADSAFE) && defined(JS_ION)
-        slice_->releaseContext();
+        cx_->releaseJSContext();
 #endif
     }
 
-    operator JSContext *() { return cx_; }
-    JSContext *operator->() { return cx_; }
+    operator JSContext *() { return jscx_; }
+    JSContext *operator->() { return jscx_; }
 };
 
-static inline bool
-InParallelSection()
-{
-#ifdef JS_THREADSAFE
-    ForkJoinSlice *current = ForkJoinSlice::Current();
-    return current != NULL;
-#else
-    return false;
-#endif
-}
-
-bool InSequentialOrExclusiveParallelSection();
+bool InExclusiveParallelSection();
 
 bool ParallelTestsShouldPass(JSContext *cx);
 
+void RequestInterruptForForkJoin(JSRuntime *rt, JSRuntime::InterruptMode mode);
+
+bool intrinsic_SetForkJoinTargetRegion(JSContext *cx, unsigned argc, Value *vp);
+extern const JSJitInfo intrinsic_SetForkJoinTargetRegionInfo;
+
+bool intrinsic_ClearThreadLocalArenas(JSContext *cx, unsigned argc, Value *vp);
+extern const JSJitInfo intrinsic_ClearThreadLocalArenasInfo;
+
 ///////////////////////////////////////////////////////////////////////////
 // Debug Spew
+
+namespace jit {
+    class MDefinition;
+}
 
 namespace parallel {
 
@@ -457,8 +518,7 @@ ExecutionStatus SpewEndOp(ExecutionStatus status);
 void SpewBeginCompile(HandleScript script);
 jit::MethodStatus SpewEndCompile(jit::MethodStatus status);
 void SpewMIR(jit::MDefinition *mir, const char *fmt, ...);
-void SpewBailoutIR(uint32_t bblockId, uint32_t lirId,
-                   const char *lir, const char *mir, JSScript *script, jsbytecode *pc);
+void SpewBailoutIR(IonLIRTraceData *data);
 
 #else
 
@@ -473,23 +533,27 @@ static inline void SpewBeginCompile(HandleScript script) { }
 static inline jit::MethodStatus SpewEndCompile(jit::MethodStatus status) { return status; }
 static inline void SpewMIR(jit::MDefinition *mir, const char *fmt, ...) { }
 #endif
-static inline void SpewBailoutIR(uint32_t bblockId, uint32_t lirId,
-                                 const char *lir, const char *mir,
-                                 JSScript *script, jsbytecode *pc) { }
+static inline void SpewBailoutIR(IonLIRTraceData *data) { }
 
 #endif // DEBUG && JS_THREADSAFE && JS_ION
 
 } // namespace parallel
 } // namespace js
 
-/* static */ inline js::ForkJoinSlice *
-js::ForkJoinSlice::Current()
+/* static */ inline js::ForkJoinContext *
+js::ForkJoinContext::current()
 {
-#if defined(JS_THREADSAFE) && defined(JS_ION)
-    return (ForkJoinSlice*) PR_GetThreadPrivate(ThreadPrivateIndex);
-#else
-    return NULL;
-#endif
+    return tlsForkJoinContext.get();
 }
+
+namespace js {
+
+static inline bool
+InParallelSection()
+{
+    return ForkJoinContext::current() != nullptr;
+}
+
+} // namespace js
 
 #endif /* vm_ForkJoin_h */

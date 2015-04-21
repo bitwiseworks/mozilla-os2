@@ -7,30 +7,32 @@
 #define nsHttpTransaction_h__
 
 #include "nsHttp.h"
-#include "nsHttpHeaderArray.h"
 #include "nsAHttpTransaction.h"
 #include "nsAHttpConnection.h"
 #include "EventTokenBucket.h"
 #include "nsCOMPtr.h"
-
-#include "nsIPipe.h"
-#include "nsIInputStream.h"
+#include "nsThreadUtils.h"
 #include "nsILoadGroup.h"
-#include "nsIOutputStream.h"
 #include "nsIInterfaceRequestor.h"
-#include "nsISocketTransportService.h"
-#include "nsITransport.h"
-#include "nsIEventTarget.h"
 #include "TimingStruct.h"
+
+#ifdef MOZ_WIDGET_GONK
+#include "nsINetworkManager.h"
+#include "nsProxyRelease.h"
+#endif
 
 //-----------------------------------------------------------------------------
 
-class nsHttpTransaction;
+class nsIHttpActivityObserver;
+class nsIEventTarget;
+class nsIInputStream;
+class nsIOutputStream;
+
+namespace mozilla { namespace net {
+
+class nsHttpChunkedDecoder;
 class nsHttpRequestHead;
 class nsHttpResponseHead;
-class nsHttpChunkedDecoder;
-class nsIHttpActivityObserver;
-class UpdateSecurityCallbacks;
 
 //-----------------------------------------------------------------------------
 // nsHttpTransaction represents a single HTTP transaction.  It is thread-safe,
@@ -38,12 +40,12 @@ class UpdateSecurityCallbacks;
 //-----------------------------------------------------------------------------
 
 class nsHttpTransaction : public nsAHttpTransaction
-                        , public mozilla::net::ATokenBucketEvent
+                        , public ATokenBucketEvent
                         , public nsIInputStreamCallback
                         , public nsIOutputStreamCallback
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSAHTTPTRANSACTION
     NS_DECL_NSIINPUTSTREAMCALLBACK
     NS_DECL_NSIOUTPUTSTREAMCALLBACK
@@ -96,6 +98,10 @@ public:
     // will drop any reference to the response headers after this call.
     nsHttpResponseHead *TakeResponseHead();
 
+    // Provides a thread safe reference of the connection
+    // nsHttpTransaction::Connection should only be used on the socket thread
+    already_AddRefed<nsAHttpConnection> GetConnectionReference();
+
     // Called to find out if the transaction generated a complete response.
     bool ResponseIsComplete() { return mResponseIsComplete; }
 
@@ -111,8 +117,8 @@ public:
     void PrintDiagnostics(nsCString &log);
 
     // Sets mPendingTime to the current time stamp or to a null time stamp (if now is false)
-    void SetPendingTime(bool now = true) { mPendingTime = now ? mozilla::TimeStamp::Now() : mozilla::TimeStamp(); }
-    const mozilla::TimeStamp GetPendingTime() { return mPendingTime; }
+    void SetPendingTime(bool now = true) { mPendingTime = now ? TimeStamp::Now() : TimeStamp(); }
+    const TimeStamp GetPendingTime() { return mPendingTime; }
     bool UsesPipelining() const { return mCaps & NS_HTTP_ALLOW_PIPELINING; }
 
     // overload of nsAHttpTransaction::LoadGroupConnectionInfo()
@@ -145,6 +151,8 @@ private:
 
     bool TimingEnabled() const { return mCaps & NS_HTTP_TIMING_ENABLED; }
 
+    bool ResponseTimeoutEnabled() const MOZ_FINAL;
+
 private:
     class UpdateSecurityCallbacks : public nsRunnable
     {
@@ -164,7 +172,7 @@ private:
         nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
     };
 
-    mozilla::Mutex mCallbacksLock;
+    Mutex mLock;
 
     nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
     nsCOMPtr<nsITransportEventSink> mTransportSink;
@@ -211,6 +219,12 @@ private:
 
     uint16_t                        mRestartCount;        // the number of times this transaction has been restarted
     uint32_t                        mCaps;
+    // mCapsToClear holds flags that should be cleared in mCaps, e.g. unset
+    // NS_HTTP_REFRESH_DNS when DNS refresh request has completed to avoid
+    // redundant requests on the network. To deal with raciness, only unsetting
+    // bitfields should be allowed: 'lost races' will thus err on the
+    // conservative side, e.g. by going ahead with a 2nd DNS refresh.
+    uint32_t                        mCapsToClear;
     enum Classifier                 mClassification;
     int32_t                         mPipelinePosition;
     int64_t                         mMaxPipelineObjectSize;
@@ -235,6 +249,7 @@ private:
     bool                            mHttpResponseMatched;
     bool                            mPreserveStream;
     bool                            mDispatchedAsBlocking;
+    bool                            mResponseTimeoutEnabled;
 
     // mClosed           := transaction has been explicitly closed
     // mTransactionDone  := transaction ran to completion or was interrupted
@@ -249,7 +264,7 @@ private:
     bool                            mResponseHeadTaken;
 
     // The time when the transaction was submitted to the Connection Manager
-    mozilla::TimeStamp              mPendingTime;
+    TimeStamp                       mPendingTime;
 
     class RestartVerifier
     {
@@ -338,6 +353,28 @@ private:
     bool mPassedRatePacing;
     bool mSynchronousRatePaceRequest;
     nsCOMPtr<nsICancelable> mTokenBucketCancel;
+
+// These members are used for network per-app metering (bug 746073)
+// Currently, they are only available on gonk.
+    uint64_t                           mCountRecv;
+    uint64_t                           mCountSent;
+    uint32_t                           mAppId;
+#ifdef MOZ_WIDGET_GONK
+    nsMainThreadPtrHandle<nsINetworkInterface> mActiveNetwork;
+#endif
+    nsresult                           SaveNetworkStats(bool);
+    void                               CountRecvBytes(uint64_t recvBytes)
+    {
+        mCountRecv += recvBytes;
+        SaveNetworkStats(false);
+    }
+    void                               CountSentBytes(uint64_t sentBytes)
+    {
+        mCountSent += sentBytes;
+        SaveNetworkStats(false);
+    }
 };
+
+}} // namespace mozilla::net
 
 #endif // nsHttpTransaction_h__

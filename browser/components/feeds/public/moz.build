@@ -6,9 +6,8 @@
 
 XPIDL_SOURCES += [
     'nsIFeedResultService.idl',
-    'nsIFeedWriter.idl',
     'nsIWebContentConverterRegistrar.idl',
 ]
 
-MODULE = 'browser-feeds'
+XPIDL_MODULE = 'browser-feeds'
 

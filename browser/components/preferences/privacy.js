@@ -180,8 +180,13 @@ var gPrivacyPane = {
       // select the remember forms history option
       document.getElementById("browser.formfill.enable").value = true;
 
+#ifdef RELEASE_BUILD
       // select the accept cookies option
       document.getElementById("network.cookie.cookieBehavior").value = 0;
+#else
+      // select the limit cookies option
+      document.getElementById("network.cookie.cookieBehavior").value = 3;
+#endif
       // select the cookie lifetime policy option
       document.getElementById("network.cookie.lifetimePolicy").value = 0;
 
@@ -244,7 +249,7 @@ var gPrivacyPane = {
   },
 
   _lastMode: null,
-  _lasCheckState: null,
+  _lastCheckState: null,
   updateAutostart: function PPP_updateAutostart() {
       let mode = document.getElementById("historyMode");
       let autoStart = document.getElementById("privateBrowsingAutoStart");
@@ -296,6 +301,7 @@ var gPrivacyPane = {
       } else {
         autoStart.removeAttribute('checked');
       }
+      pref.value = autoStart.hasAttribute('checked');
       mode.selectedIndex = this._lastMode;
       mode.doCommand();
 
@@ -401,13 +407,21 @@ var gPrivacyPane = {
     var accept = document.getElementById("acceptCookies");
     var acceptThirdPartyMenu = document.getElementById("acceptThirdPartyMenu");
 
+#ifdef RELEASE_BUILD
     // if we're enabling cookies, automatically select 'accept third party always'
     if (accept.checked)
       acceptThirdPartyMenu.selectedIndex = 0;
 
     return accept.checked ? 0 : 2;
+#else
+    // if we're enabling cookies, automatically select 'accept third party from visited'
+    if (accept.checked)
+      acceptThirdPartyMenu.selectedIndex = 1;
+
+    return accept.checked ? 3 : 2;
+#endif
   },
-  
+
   /**
    * Converts between network.cookie.cookieBehavior and the third-party cookie UI
    */

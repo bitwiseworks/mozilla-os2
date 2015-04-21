@@ -1,6 +1,8 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef xpcObjectHelper_h
 #define xpcObjectHelper_h
@@ -13,11 +15,10 @@
 #endif
 
 #include "mozilla/Attributes.h"
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIClassInfo.h"
-#include "nsINode.h"
 #include "nsISupports.h"
 #include "nsIXPCScriptable.h"
 #include "nsWrapperCache.h"
@@ -25,17 +26,16 @@
 class xpcObjectHelper
 {
 public:
-    xpcObjectHelper(nsISupports *aObject, nsWrapperCache *aCache = NULL)
-      : mCanonical(NULL)
+    xpcObjectHelper(nsISupports *aObject, nsWrapperCache *aCache = nullptr)
+      : mCanonical(nullptr)
       , mObject(aObject)
       , mCache(aCache)
-      , mIsNode(false)
     {
         if (!mCache) {
             if (aObject)
                 CallQueryInterface(aObject, &mCache);
             else
-                mCache = NULL;
+                mCache = nullptr;
         }
     }
 
@@ -55,11 +55,11 @@ public:
 
     already_AddRefed<nsISupports> forgetCanonical()
     {
-        NS_ASSERTION(mCanonical, "Huh, no canonical to forget?");
+        MOZ_ASSERT(mCanonical, "Huh, no canonical to forget?");
 
         if (!mCanonicalStrong)
             mCanonicalStrong = mCanonical;
-        mCanonical = NULL;
+        mCanonical = nullptr;
         return mCanonicalStrong.forget();
     }
 
@@ -74,15 +74,7 @@ public:
     nsXPCClassInfo *GetXPCClassInfo()
     {
         if (!mXPCClassInfo) {
-            if (mIsNode) {
-                mXPCClassInfo =
-                    static_cast<nsINode*>(GetCanonical())->GetClassInfo();
-#ifdef DEBUG
-                AssertGetClassInfoResult();
-#endif
-            } else {
-                CallQueryInterface(mObject, getter_AddRefs(mXPCClassInfo));
-            }
+            CallQueryInterface(mObject, getter_AddRefs(mXPCClassInfo));
         }
         return mXPCClassInfo;
     }
@@ -118,11 +110,10 @@ public:
 
 protected:
     xpcObjectHelper(nsISupports *aObject, nsISupports *aCanonical,
-                    nsWrapperCache *aCache, bool aIsNode)
+                    nsWrapperCache *aCache)
       : mCanonical(aCanonical)
       , mObject(aObject)
       , mCache(aCache)
-      , mIsNode(aIsNode)
     {
         if (!mCache && aObject)
             CallQueryInterface(aObject, &mCache);
@@ -134,15 +125,10 @@ protected:
 private:
     xpcObjectHelper(xpcObjectHelper& aOther) MOZ_DELETE;
 
-#ifdef DEBUG
-    void AssertGetClassInfoResult();
-#endif
-
     nsISupports*             mObject;
     nsWrapperCache*          mCache;
     nsCOMPtr<nsIClassInfo>   mClassInfo;
     nsRefPtr<nsXPCClassInfo> mXPCClassInfo;
-    bool                     mIsNode;
 };
 
 #endif

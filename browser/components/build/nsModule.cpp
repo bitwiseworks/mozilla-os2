@@ -61,20 +61,20 @@ NS_DEFINE_NAMED_CID(NS_SHELLSERVICE_CID);
 #endif
 
 static const mozilla::Module::CIDEntry kBrowserCIDs[] = {
-    { &kNS_BROWSERDIRECTORYPROVIDER_CID, false, NULL, DirectoryProviderConstructor },
+    { &kNS_BROWSERDIRECTORYPROVIDER_CID, false, nullptr, DirectoryProviderConstructor },
 #if defined(XP_WIN)
-    { &kNS_SHELLSERVICE_CID, false, NULL, nsWindowsShellServiceConstructor },
+    { &kNS_SHELLSERVICE_CID, false, nullptr, nsWindowsShellServiceConstructor },
 #elif defined(MOZ_WIDGET_GTK)
-    { &kNS_SHELLSERVICE_CID, false, NULL, nsGNOMEShellServiceConstructor },
+    { &kNS_SHELLSERVICE_CID, false, nullptr, nsGNOMEShellServiceConstructor },
 #endif
-    { &kNS_FEEDSNIFFER_CID, false, NULL, nsFeedSnifferConstructor },
-    { &kNS_BROWSER_ABOUT_REDIRECTOR_CID, false, NULL, AboutRedirector::Create },
+    { &kNS_FEEDSNIFFER_CID, false, nullptr, nsFeedSnifferConstructor },
+    { &kNS_BROWSER_ABOUT_REDIRECTOR_CID, false, nullptr, AboutRedirector::Create },
 #if defined(XP_WIN)
-    { &kNS_WINIEHISTORYENUMERATOR_CID, false, NULL, nsIEHistoryEnumeratorConstructor },
+    { &kNS_WINIEHISTORYENUMERATOR_CID, false, nullptr, nsIEHistoryEnumeratorConstructor },
 #elif defined(XP_MACOSX)
-    { &kNS_SHELLSERVICE_CID, false, NULL, nsMacShellServiceConstructor },
+    { &kNS_SHELLSERVICE_CID, false, nullptr, nsMacShellServiceConstructor },
 #endif
-    { NULL }
+    { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kBrowserContracts[] = {
@@ -90,11 +90,13 @@ static const mozilla::Module::ContractIDEntry kBrowserContracts[] = {
 #endif
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "certerror", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "socialerror", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
+    { NS_ABOUT_MODULE_CONTRACTID_PREFIX "tabcrashed", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "feeds", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "privatebrowsing", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "rights", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "robots", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "sessionrestore", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
+    { NS_ABOUT_MODULE_CONTRACTID_PREFIX "welcomeback", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
 #ifdef MOZ_SERVICES_SYNC
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "sync-tabs", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "sync-progress", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
@@ -104,21 +106,24 @@ static const mozilla::Module::ContractIDEntry kBrowserContracts[] = {
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "permissions", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "preferences", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "downloads", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
+    { NS_ABOUT_MODULE_CONTRACTID_PREFIX "accounts", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
 #ifdef MOZ_SERVICES_HEALTHREPORT
     { NS_ABOUT_MODULE_CONTRACTID_PREFIX "healthreport", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
 #endif
+    { NS_ABOUT_MODULE_CONTRACTID_PREFIX "app-manager", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
+    { NS_ABOUT_MODULE_CONTRACTID_PREFIX "customizing", &kNS_BROWSER_ABOUT_REDIRECTOR_CID },
 #if defined(XP_WIN)
     { NS_IEHISTORYENUMERATOR_CONTRACTID, &kNS_WINIEHISTORYENUMERATOR_CID },
 #elif defined(XP_MACOSX)
     { NS_SHELLSERVICE_CONTRACTID, &kNS_SHELLSERVICE_CID },
 #endif
-    { NULL }
+    { nullptr }
 };
 
 static const mozilla::Module::CategoryEntry kBrowserCategories[] = {
     { XPCOM_DIRECTORY_PROVIDER_CATEGORY, "browser-directory-provider", NS_BROWSERDIRECTORYPROVIDER_CONTRACTID },
     { NS_CONTENT_SNIFFER_CATEGORY, "Feed Sniffer", NS_FEEDSNIFFER_CONTRACTID },
-    { NULL }
+    { nullptr }
 };
 
 static const mozilla::Module kBrowserModule = {

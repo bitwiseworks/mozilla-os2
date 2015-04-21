@@ -12,7 +12,6 @@ import org.mozilla.gecko.background.common.log.Logger;
 import android.app.AlarmManager;
 import android.app.IntentService;
 import android.app.PendingIntent;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.net.ConnectivityManager;
@@ -41,6 +40,7 @@ public abstract class BackgroundService extends IntentService {
    * Returns true if the OS will allow us to perform background
    * data operations. This logic varies by OS version.
    */
+  @SuppressWarnings("deprecation")
   protected boolean backgroundDataIsEnabled() {
     ConnectivityManager connectivity = (ConnectivityManager) this.getSystemService(Context.CONNECTIVITY_SERVICE);
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
@@ -51,11 +51,6 @@ public abstract class BackgroundService extends IntentService {
       return false;
     }
     return networkInfo.isAvailable();
-  }
-
-  protected static PendingIntent createPendingIntent(Context context, Class<? extends BroadcastReceiver> broadcastReceiverClass) {
-    final Intent service = new Intent(context, broadcastReceiverClass);
-    return PendingIntent.getBroadcast(context, 0, service, PendingIntent.FLAG_CANCEL_CURRENT);
   }
 
   protected AlarmManager getAlarmManager() {
@@ -79,6 +74,8 @@ public abstract class BackgroundService extends IntentService {
   protected void cancelAlarm(PendingIntent pendingIntent) {
     final AlarmManager alarm = getAlarmManager();
     alarm.cancel(pendingIntent);
+    // For testing - allows us to see if the intent, and thus the alarm, has been cancelled.
+    pendingIntent.cancel();
   }
 
   /**

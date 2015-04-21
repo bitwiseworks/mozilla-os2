@@ -11,8 +11,8 @@
 #ifndef WEBRTC_MODULES_VIDEO_CODING_CODEC_TIMER_H_
 #define WEBRTC_MODULES_VIDEO_CODING_CODEC_TIMER_H_
 
-#include "typedefs.h"
-#include "module_common_types.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/typedefs.h"
 
 namespace webrtc
 {
@@ -26,8 +26,8 @@ class VCMShortMaxSample
 public:
     VCMShortMaxSample() : shortMax(0), timeMs(-1) {};
 
-    WebRtc_Word32     shortMax;
-    WebRtc_Word64     timeMs;
+    int32_t     shortMax;
+    int64_t     timeMs;
 };
 
 class VCMCodecTimer
@@ -36,26 +36,26 @@ public:
     VCMCodecTimer();
 
     // Updates and returns the max filtered decode time.
-    WebRtc_Word32 StopTimer(WebRtc_Word64 startTimeMs, WebRtc_Word64 nowMs);
+    int32_t StopTimer(int64_t startTimeMs, int64_t nowMs);
 
     // Empty the list of timers.
     void Reset();
 
     // Get the required decode time in ms.
-    WebRtc_Word32 RequiredDecodeTimeMs(FrameType frameType) const;
+    int32_t RequiredDecodeTimeMs(FrameType frameType) const;
 
 private:
-    void UpdateMaxHistory(WebRtc_Word32 decodeTime, WebRtc_Word64 now);
-    void MaxFilter(WebRtc_Word32 newTime, WebRtc_Word64 nowMs);
-    void ProcessHistory(WebRtc_Word64 nowMs);
+    void UpdateMaxHistory(int32_t decodeTime, int64_t now);
+    void MaxFilter(int32_t newTime, int64_t nowMs);
+    void ProcessHistory(int64_t nowMs);
 
-    WebRtc_Word32                     _filteredMax;
+    int32_t                     _filteredMax;
     bool                              _firstDecodeTime;
-    WebRtc_Word32                     _shortMax;
+    int32_t                     _shortMax;
     VCMShortMaxSample                 _history[MAX_HISTORY_SIZE];
 
 };
 
-} // namespace webrtc
+}  // namespace webrtc
 
 #endif // WEBRTC_MODULES_VIDEO_CODING_CODEC_TIMER_H_

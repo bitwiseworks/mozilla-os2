@@ -3,12 +3,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
 USE_RCS_MK := 1
 include $(topsrcdir)/config/makefiles/makeutils.mk
 
@@ -30,47 +24,18 @@ endif
 APP_BUILDID := $(shell cat $(DEPTH)/config/buildid)
 APP_INI_DEPS += $(DEPTH)/config/buildid
 
-DEFINES += -DGRE_MILESTONE=$(GRE_MILESTONE) -DAPP_BUILDID=$(APP_BUILDID)
+DEFINES += -DAPP_BUILDID=$(APP_BUILDID)
 
-DEFINES += -DMOZ_APP_VERSION="$(MOZ_APP_VERSION)"
 APP_INI_DEPS += $(DEPTH)/config/autoconf.mk
 
-MOZ_SOURCE_STAMP := $(firstword $(shell cd $(topsrcdir)/$(MOZ_BUILD_APP)/.. && hg parent --template="{node|short}\n" 2>/dev/null))
+MOZ_SOURCE_STAMP := $(firstword $(shell cd $(topsrcdir)/$(MOZ_BUILD_APP)/.. && hg parent --template='{node|short}\n' 2>/dev/null))
 ifdef MOZ_SOURCE_STAMP
-DEFINES += -DMOZ_SOURCE_STAMP="$(MOZ_SOURCE_STAMP)"
+DEFINES += -DMOZ_SOURCE_STAMP='$(MOZ_SOURCE_STAMP)'
 endif
 
 source_repo ?= $(call getSourceRepo,$(topsrcdir)/$(MOZ_BUILD_APP)/..)
 ifneq (,$(source_repo))
-  DEFINES += -DMOZ_SOURCE_REPO="$(source_repo)"
-endif
-
-DEFINES += \
-  -DMOZ_APP_BASENAME="$(MOZ_APP_BASENAME)" \
-  -DMOZ_APP_VENDOR="$(MOZ_APP_VENDOR)" \
-  -DMOZ_APP_ID="$(MOZ_APP_ID)" \
-  -DMAR_CHANNEL_ID="$(MAR_CHANNEL_ID)" \
-  -DACCEPTED_MAR_CHANNEL_IDS="$(ACCEPTED_MAR_CHANNEL_IDS)" \
-  $(NULL)
-
-ifeq ($(MOZ_BUILD_APP),browser)
-DEFINES += -DMOZ_BUILD_APP_IS_BROWSER
-endif
-
-ifdef MOZ_APP_PROFILE
-DEFINES += -DMOZ_APP_PROFILE="$(MOZ_APP_PROFILE)"
-endif
-
-ifdef MOZILLA_OFFICIAL
-DEFINES += -DMOZILLA_OFFICIAL
-endif
-
-ifdef MOZ_PROFILE_MIGRATOR
-DEFINES += -DMOZ_PROFILE_MIGRATOR
-endif
-
-ifdef MOZ_EXTENSION_MANAGER
-DEFINES += -DMOZ_EXTENSION_MANAGER
+  DEFINES += -DMOZ_SOURCE_REPO='$(source_repo)'
 endif
 
 endif
@@ -79,8 +44,25 @@ endif
 # by GDB when we debug executables there.
 # NOTE: Keep .gdbinit in the topsrcdir for people who run gdb from the topsrcdir.
 GDBINIT_FILES := $(topsrcdir)/.gdbinit
+GDBINIT_OBJDIR_FILES = $(topsrcdir)/.gdbinit
 GDBINIT_DEST = $(FINAL_TARGET)
-INSTALL_TARGETS += GDBINIT
+
+# needs to be absolute to be distinct from $(topsrcdir)/.gdbinit
+GDBINIT_OBJDIR_DEST = $(abspath $(DEPTH))
+INSTALL_TARGETS += GDBINIT GDBINIT_OBJDIR
+
+# Put a .lldbinit in the bin directory and the objdir, to be picked up
+# automatically by LLDB when we debug executables using either of those two
+# directories as the current working directory.  The .lldbinit file will
+# load $(topsrcdir)/.lldbinit, which is where the actual debugging commands are.
+LLDBINIT_OBJDIR := .lldbinit.in
+LLDBINIT_OBJDIR_PATH = $(DEPTH)
+LLDBINIT_OBJDIR_FLAGS += -Dtopsrcdir=$(abspath $(topsrcdir))
+PP_TARGETS += LLDBINIT_OBJDIR
+
+LLDBINIT_FINAL_TARGET_FILES := $(DEPTH)/.lldbinit
+LLDBINIT_FINAL_TARGET_DEST = $(FINAL_TARGET)
+INSTALL_TARGETS += LLDBINIT_FINAL_TARGET
 
 include $(topsrcdir)/config/rules.mk
 
@@ -112,7 +94,7 @@ _LEAKTEST_FILES =    \
 		$(NULL)
 
 leaktest.py: leaktest.py.in
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $^ > $@
+	$(call py_action,preprocessor,$^ -o $@)
 	chmod +x $@
 GARBAGE += leaktest.py
 
@@ -120,8 +102,6 @@ ifdef MOZ_APP_BASENAME
 $(FINAL_TARGET)/application.ini: $(APP_INI_DEPS)
 
 ifdef MOZ_APP_STATIC_INI
-DEFINES += -DMOZ_APP_STATIC_INI
-
 application.ini.h: appini_header.py $(FINAL_TARGET)/application.ini
 	$(PYTHON) $^ > $@
 export:: application.ini.h

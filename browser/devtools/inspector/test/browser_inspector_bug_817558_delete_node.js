@@ -27,19 +27,22 @@ function test()
   {
     inspector = aInspector;
     inspector.selection.setNode(node);
+    inspector.once("inspector-updated", () => {
+      let parentNode = node.parentNode;
+      parentNode.removeChild(node);
 
-    let parentNode = node.parentNode;
-    parentNode.removeChild(node);
+      let tmp = {};
+      Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm", tmp);
+      let lh = new tmp.LayoutHelpers(window.content);
+      ok(!lh.isNodeConnected(node), "Node considered as disconnected.");
 
-    let tmp = {};
-    Cu.import("resource:///modules/devtools/LayoutHelpers.jsm", tmp);
-    ok(!tmp.LayoutHelpers.isNodeConnected(node), "Node considered as disconnected.");
-    executeSoon(function() {
-      is(inspector.selection.node, parentNode, "parent of selection got selected");
-
-      finishUp();
+      // Wait for the inspector to process the mutation
+      inspector.once("inspector-updated", () => {
+        is(inspector.selection.node, parentNode, "parent of selection got selected");
+        finishUp();
+      });
     });
-  }
+  };
 
   function finishUp() {
     node = null;

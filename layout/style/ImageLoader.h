@@ -5,6 +5,9 @@
 // A class that handles style system image loads (other image loads are handled
 // by the nodes in the content tree).
 
+#ifndef mozilla_css_ImageLoader_h___
+#define mozilla_css_ImageLoader_h___
+
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
 #include "nsCSSValue.h"
@@ -32,10 +35,6 @@ public:
     mInClone(false)
   {
     MOZ_ASSERT(mDocument);
-
-    mRequestToFrameMap.Init();
-    mFrameToRequestMap.Init();
-    mImages.Init();
   }
 
   NS_DECL_ISUPPORTS
@@ -117,3 +116,5 @@ private:
 
 } // namespace css
 } // namespace mozilla
+
+#endif /* mozilla_css_ImageLoader_h___ */

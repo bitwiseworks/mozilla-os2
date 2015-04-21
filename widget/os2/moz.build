@@ -4,9 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'widget'
-
-CPP_SOURCES += [
+SOURCES += [
     'nsAppShell.cpp',
     'nsBidiKeyboard.cpp',
     'nsClipboard.cpp',
@@ -29,3 +27,21 @@ CPP_SOURCES += [
 
 LIBRARY_NAME = 'wdgtos2'
 
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'
+
+LOCAL_INCLUDES += [
+    '../shared',
+    '../xpwidgets',
+    '/layout/generic',
+    '/layout/xul',
+    '/toolkit/xre',
+    '/xpcom/base',
+]
+
+DEFINES['USE_OS2_TOOLKIT_HEADERS'] = True
+
+DEFINES['MOZ_APP_DISPLAYNAME'] = CONFIG['MOZ_APP_DISPLAYNAME']
+
+RESFILE = 'widget.res'

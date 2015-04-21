@@ -19,27 +19,19 @@ interface SVGElement : Element {
   [PutForwards=cssText, Constant]
   readonly attribute CSSStyleDeclaration style;
 
-  // The CSSValue interface has been deprecated by the CSS WG.
-  // http://lists.w3.org/Archives/Public/www-style/2003Oct/0347.html
-  // CSSValue? getPresentationAttribute(DOMString name);
-
   /*[SetterThrows]
   attribute DOMString xmllang;
   [SetterThrows]
   attribute DOMString xmlspace;*/
 
-  [Throws]
   readonly attribute SVGSVGElement? ownerSVGElement;
   readonly attribute SVGElement? viewportElement;
 
-  [SetterThrows]
            attribute EventHandler oncopy;
-  [SetterThrows]
            attribute EventHandler oncut;
-  [SetterThrows]
            attribute EventHandler onpaste;
 };
 
 SVGElement implements GlobalEventHandlers;
-SVGElement implements NodeEventHandlers;
 SVGElement implements TouchEventHandlers;
+SVGElement implements OnErrorEventHandlerForNodes;

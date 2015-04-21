@@ -38,6 +38,16 @@ enum DeliveryStatus {
   eDeliveryStatus_EndGuard
 };
 
+// For MmsMessageData.readStatus.
+enum ReadStatus {
+  eReadStatus_NotApplicable = 0,
+  eReadStatus_Success,
+  eReadStatus_Pending,
+  eReadStatus_Error,
+  // This state should stay at the end.
+  eReadStatus_EndGuard
+};
+
 // For {Mms,Sms}FilterData.read.
 enum ReadState {
   eReadState_Unknown = -1,
@@ -77,9 +87,10 @@ namespace IPC {
  */
 template <>
 struct ParamTraits<mozilla::dom::mobilemessage::DeliveryState>
-  : public EnumSerializer<mozilla::dom::mobilemessage::DeliveryState,
-                          mozilla::dom::mobilemessage::eDeliveryState_Sent,
-                          mozilla::dom::mobilemessage::eDeliveryState_EndGuard>
+  : public ContiguousEnumSerializer<
+             mozilla::dom::mobilemessage::DeliveryState,
+             mozilla::dom::mobilemessage::eDeliveryState_Sent,
+             mozilla::dom::mobilemessage::eDeliveryState_EndGuard>
 {};
 
 /**
@@ -87,9 +98,21 @@ struct ParamTraits<mozilla::dom::mobilemessage::DeliveryState>
  */
 template <>
 struct ParamTraits<mozilla::dom::mobilemessage::DeliveryStatus>
-  : public EnumSerializer<mozilla::dom::mobilemessage::DeliveryStatus,
-                          mozilla::dom::mobilemessage::eDeliveryStatus_NotApplicable,
-                          mozilla::dom::mobilemessage::eDeliveryStatus_EndGuard>
+  : public ContiguousEnumSerializer<
+             mozilla::dom::mobilemessage::DeliveryStatus,
+             mozilla::dom::mobilemessage::eDeliveryStatus_NotApplicable,
+             mozilla::dom::mobilemessage::eDeliveryStatus_EndGuard>
+{};
+
+/**
+ * Read status serializer.
+ */
+template <>
+struct ParamTraits<mozilla::dom::mobilemessage::ReadStatus>
+  : public ContiguousEnumSerializer<
+             mozilla::dom::mobilemessage::ReadStatus,
+             mozilla::dom::mobilemessage::eReadStatus_NotApplicable,
+             mozilla::dom::mobilemessage::eReadStatus_EndGuard>
 {};
 
 /**
@@ -97,9 +120,10 @@ struct ParamTraits<mozilla::dom::mobilemessage::DeliveryStatus>
  */
 template <>
 struct ParamTraits<mozilla::dom::mobilemessage::ReadState>
-  : public EnumSerializer<mozilla::dom::mobilemessage::ReadState,
-                          mozilla::dom::mobilemessage::eReadState_Unknown,
-                          mozilla::dom::mobilemessage::eReadState_EndGuard>
+  : public ContiguousEnumSerializer<
+             mozilla::dom::mobilemessage::ReadState,
+             mozilla::dom::mobilemessage::eReadState_Unknown,
+             mozilla::dom::mobilemessage::eReadState_EndGuard>
 {};
 
 /**
@@ -107,9 +131,10 @@ struct ParamTraits<mozilla::dom::mobilemessage::ReadState>
  */
 template <>
 struct ParamTraits<mozilla::dom::mobilemessage::MessageClass>
-  : public EnumSerializer<mozilla::dom::mobilemessage::MessageClass,
-                          mozilla::dom::mobilemessage::eMessageClass_Normal,
-                          mozilla::dom::mobilemessage::eMessageClass_EndGuard>
+  : public ContiguousEnumSerializer<
+             mozilla::dom::mobilemessage::MessageClass,
+             mozilla::dom::mobilemessage::eMessageClass_Normal,
+             mozilla::dom::mobilemessage::eMessageClass_EndGuard>
 {};
 
 /**
@@ -117,9 +142,10 @@ struct ParamTraits<mozilla::dom::mobilemessage::MessageClass>
  */
 template <>
 struct ParamTraits<mozilla::dom::mobilemessage::MessageType>
-  : public EnumSerializer<mozilla::dom::mobilemessage::MessageType,
-                          mozilla::dom::mobilemessage::eMessageType_SMS,
-                          mozilla::dom::mobilemessage::eMessageType_EndGuard>
+  : public ContiguousEnumSerializer<
+             mozilla::dom::mobilemessage::MessageType,
+             mozilla::dom::mobilemessage::eMessageType_SMS,
+             mozilla::dom::mobilemessage::eMessageType_EndGuard>
 {};
 
 } // namespace IPC

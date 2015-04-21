@@ -6,6 +6,7 @@
 #include "MediaPluginReader.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/TimeRanges.h"
+#include "mozilla/gfx/Point.h"
 #include "MediaResource.h"
 #include "VideoUtils.h"
 #include "MediaPluginDecoder.h"
@@ -13,21 +14,24 @@
 #include "MediaDecoderStateMachine.h"
 #include "ImageContainer.h"
 #include "AbstractMediaDecoder.h"
+#include "gfx2DGlue.h"
 
 namespace mozilla {
 
+using namespace mozilla::gfx;
+
 typedef mozilla::layers::Image Image;
+typedef mozilla::layers::PlanarYCbCrImage PlanarYCbCrImage;
 
 MediaPluginReader::MediaPluginReader(AbstractMediaDecoder *aDecoder,
                                      const nsACString& aContentType) :
   MediaDecoderReader(aDecoder),
   mType(aContentType),
-  mPlugin(NULL),
+  mPlugin(nullptr),
   mHasAudio(false),
   mHasVideo(false),
   mVideoSeekTimeUs(-1),
-  mAudioSeekTimeUs(-1),
-  mLastVideoFrame(NULL)
+  mAudioSeekTimeUs(-1)
 {
 }
 
@@ -41,8 +45,8 @@ nsresult MediaPluginReader::Init(MediaDecoderReader* aCloneDonor)
   return NS_OK;
 }
 
-nsresult MediaPluginReader::ReadMetadata(VideoInfo* aInfo,
-                                           MetadataTags** aTags)
+nsresult MediaPluginReader::ReadMetadata(MediaInfo* aInfo,
+                                         MetadataTags** aTags)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
 
@@ -70,13 +74,13 @@ nsresult MediaPluginReader::ReadMetadata(VideoInfo* aInfo,
     // that our video frame creation code doesn't overflow.
     nsIntSize displaySize(width, height);
     nsIntSize frameSize(width, height);
-    if (!VideoInfo::ValidateVideoRegion(frameSize, pictureRect, displaySize)) {
+    if (!IsValidVideoRegion(frameSize, pictureRect, displaySize)) {
       return NS_ERROR_FAILURE;
     }
 
     // Video track's frame sizes will not overflow. Activate the video track.
-    mHasVideo = mInfo.mHasVideo = true;
-    mInfo.mDisplay = displaySize;
+    mHasVideo = mInfo.mVideo.mHasVideo = true;
+    mInfo.mVideo.mDisplay = displaySize;
     mPicture = pictureRect;
     mInitialFrame = frameSize;
     VideoFrameContainer* container = mDecoder->GetVideoFrameContainer();
@@ -90,9 +94,9 @@ nsresult MediaPluginReader::ReadMetadata(VideoInfo* aInfo,
   if (mPlugin->HasAudio(mPlugin)) {
     int32_t numChannels, sampleRate;
     mPlugin->GetAudioParameters(mPlugin, &numChannels, &sampleRate);
-    mHasAudio = mInfo.mHasAudio = true;
-    mInfo.mAudioChannels = numChannels;
-    mInfo.mAudioRate = sampleRate;
+    mHasAudio = mInfo.mAudio.mHasAudio = true;
+    mInfo.mAudio.mChannels = numChannels;
+    mInfo.mAudio.mRate = sampleRate;
   }
 
  *aInfo = mInfo;
@@ -104,19 +108,18 @@ nsresult MediaPluginReader::ReadMetadata(VideoInfo* aInfo,
 nsresult MediaPluginReader::ResetDecode()
 {
   if (mLastVideoFrame) {
-    delete mLastVideoFrame;
-    mLastVideoFrame = NULL;
+    mLastVideoFrame = nullptr;
   }
   if (mPlugin) {
     GetMediaPluginHost()->DestroyDecoder(mPlugin);
-    mPlugin = NULL;
+    mPlugin = nullptr;
   }
 
   return NS_OK;
 }
 
 bool MediaPluginReader::DecodeVideoFrame(bool &aKeyframeSkip,
-                                           int64_t aTimeThreshold)
+                                         int64_t aTimeThreshold)
 {
   // Record number of frames decoded and parsed. Automatically update the
   // stats counters using the AutoNotifyDecoded stack-based class.
@@ -125,8 +128,7 @@ bool MediaPluginReader::DecodeVideoFrame(bool &aKeyframeSkip,
 
   // Throw away the currently buffered frame if we are seeking.
   if (mLastVideoFrame && mVideoSeekTimeUs != -1) {
-    delete mLastVideoFrame;
-    mLastVideoFrame = NULL;
+    mLastVideoFrame = nullptr;
   }
 
   ImageBufferCallback bufferCallback(mDecoder->GetImageContainer());
@@ -142,13 +144,11 @@ bool MediaPluginReader::DecodeVideoFrame(bool &aKeyframeSkip,
       if (mLastVideoFrame) {
         int64_t durationUs;
         mPlugin->GetDuration(mPlugin, &durationUs);
-        mLastVideoFrame->mEndTime = (durationUs > mLastVideoFrame->mTime)
-                                  ? durationUs
-                                  : mLastVideoFrame->mTime;
-        mVideoQueue.Push(mLastVideoFrame);
-        mLastVideoFrame = NULL;
+        durationUs = std::max<int64_t>(durationUs - mLastVideoFrame->mTime, 0);
+        mVideoQueue.Push(VideoData::ShallowCopyUpdateDuration(mLastVideoFrame,
+                                                              durationUs));
+        mLastVideoFrame = nullptr;
       }
-      mVideoQueue.Finish();
       return false;
     }
     mVideoSeekTimeUs = -1;
@@ -171,11 +171,11 @@ bool MediaPluginReader::DecodeVideoFrame(bool &aKeyframeSkip,
 
     currentImage = bufferCallback.GetImage();
     int64_t pos = mDecoder->GetResource()->Tell();
-    nsIntRect picture = mPicture;
- 
-    VideoData *v;
+    IntRect picture = ToIntRect(mPicture);
+
+    nsAutoPtr<VideoData> v;
     if (currentImage) {
-      gfxIntSize frameSize = currentImage->GetSize();
+      gfx::IntSize frameSize = currentImage->GetSize();
       if (frameSize.width != mInitialFrame.width ||
           frameSize.height != mInitialFrame.height) {
         // Frame size is different from what the container reports. This is legal,
@@ -187,11 +187,11 @@ bool MediaPluginReader::DecodeVideoFrame(bool &aKeyframeSkip,
         picture.height = (frameSize.height * mPicture.height) / mInitialFrame.height;
       }
 
-      v = VideoData::CreateFromImage(mInfo,
+      v = VideoData::CreateFromImage(mInfo.mVideo,
                                      mDecoder->GetImageContainer(),
                                      pos,
                                      frame.mTimeUs,
-                                     frame.mTimeUs+1, // We don't know the end time.
+                                     1, // We don't know the duration yet.
                                      currentImage,
                                      frame.mKeyFrame,
                                      -1,
@@ -233,11 +233,11 @@ bool MediaPluginReader::DecodeVideoFrame(bool &aKeyframeSkip,
       }
 
       // This is the approximate byte position in the stream.
-      v = VideoData::Create(mInfo,
+      v = VideoData::Create(mInfo.mVideo,
                             mDecoder->GetImageContainer(),
                             pos,
                             frame.mTimeUs,
-                            frame.mTimeUs+1, // We don't know the end time.
+                            1, // We don't know the duration yet.
                             b,
                             frame.mKeyFrame,
                             -1,
@@ -260,18 +260,21 @@ bool MediaPluginReader::DecodeVideoFrame(bool &aKeyframeSkip,
       continue;
     }
 
-    mLastVideoFrame->mEndTime = v->mTime;
+    // Calculate the duration as the timestamp of the current frame minus the
+    // timestamp of the previous frame. We can then return the previously
+    // decoded frame, and it will have a valid timestamp.
+    int64_t duration = v->mTime - mLastVideoFrame->mTime;
+    mLastVideoFrame = VideoData::ShallowCopyUpdateDuration(mLastVideoFrame, duration);
 
     // We have the start time of the next frame, so we can push the previous
     // frame into the queue, except if the end time is below the threshold,
     // in which case it wouldn't be displayed anyway.
-    if (mLastVideoFrame->mEndTime < aTimeThreshold) {
-      delete mLastVideoFrame;
-      mLastVideoFrame = NULL;
+    if (mLastVideoFrame->GetEndTime() < aTimeThreshold) {
+      mLastVideoFrame = nullptr;
       continue;
     }
 
-    mVideoQueue.Push(mLastVideoFrame);
+    mVideoQueue.Push(mLastVideoFrame.forget());
 
     // Buffer the current frame we just decoded.
     mLastVideoFrame = v;
@@ -290,59 +293,39 @@ bool MediaPluginReader::DecodeAudioData()
   int64_t pos = mDecoder->GetResource()->Tell();
 
   // Read next frame
-  MPAPI::AudioFrame frame;
-  if (!mPlugin->ReadAudio(mPlugin, &frame, mAudioSeekTimeUs)) {
-    mAudioQueue.Finish();
+  MPAPI::AudioFrame source;
+  if (!mPlugin->ReadAudio(mPlugin, &source, mAudioSeekTimeUs)) {
     return false;
   }
   mAudioSeekTimeUs = -1;
 
   // Ignore empty buffers which stagefright media read will sporadically return
-  if (frame.mSize == 0)
+  if (source.mSize == 0)
     return true;
 
-  nsAutoArrayPtr<AudioDataValue> buffer(new AudioDataValue[frame.mSize/2] );
-  memcpy(buffer.get(), frame.mData, frame.mSize);
+  uint32_t frames = source.mSize / (source.mAudioChannels *
+                                    sizeof(AudioDataValue));
 
-  uint32_t frames = frame.mSize / (2 * frame.mAudioChannels);
-  CheckedInt64 duration = FramesToUsecs(frames, frame.mAudioSampleRate);
-  if (!duration.isValid()) {
-    return false;
-  }
-
-  mAudioQueue.Push(new AudioData(pos,
-                                 frame.mTimeUs,
-                                 duration.value(),
-                                 frames,
-                                 buffer.forget(),
-                                 frame.mAudioChannels));
-  return true;
+  typedef AudioCompactor::NativeCopy MPCopy;
+  return mAudioCompactor.Push(pos,
+                              source.mTimeUs,
+                              source.mAudioSampleRate,
+                              frames,
+                              source.mAudioChannels,
+                              MPCopy(static_cast<uint8_t *>(source.mData),
+                                     source.mSize,
+                                     source.mAudioChannels));
 }
 
 nsresult MediaPluginReader::Seek(int64_t aTarget, int64_t aStartTime, int64_t aEndTime, int64_t aCurrentTime)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
 
-  mVideoQueue.Erase();
-  mAudioQueue.Erase();
+  mVideoQueue.Reset();
+  mAudioQueue.Reset();
 
   mAudioSeekTimeUs = mVideoSeekTimeUs = aTarget;
 
-  return DecodeToTarget(aTarget);
-}
-
-nsresult MediaPluginReader::GetBuffered(mozilla::dom::TimeRanges* aBuffered, int64_t aStartTime)
-{
-  if (!mPlugin)
-    return NS_OK;
-
-  MediaResource* stream = mDecoder->GetResource();
-
-  int64_t durationUs = 0;
-  mPlugin->GetDuration(mPlugin, &durationUs);
-
-  GetEstimatedBufferedTimeRanges(stream, durationUs, aBuffered);
-  
   return NS_OK;
 }
 
@@ -353,26 +336,75 @@ MediaPluginReader::ImageBufferCallback::ImageBufferCallback(mozilla::layers::Ima
 
 void *
 MediaPluginReader::ImageBufferCallback::operator()(size_t aWidth, size_t aHeight,
-                                                     MPAPI::ColorFormat aColorFormat)
+                                                   MPAPI::ColorFormat aColorFormat)
 {
   if (!mImageContainer) {
     NS_WARNING("No image container to construct an image");
     return nullptr;
   }
 
-  nsRefPtr<mozilla::layers::SharedRGBImage> rgbImage;
+  nsRefPtr<Image> image;
   switch(aColorFormat) {
     case MPAPI::RGB565:
-      rgbImage = mozilla::layers::SharedRGBImage::Create(mImageContainer,
-                                                         nsIntSize(aWidth, aHeight),
-                                                         gfxASurface::ImageFormatRGB16_565);
-      mImage = rgbImage;
-      return rgbImage->GetBuffer();
-    case MPAPI::YCbCr:
+      image = mozilla::layers::CreateSharedRGBImage(mImageContainer,
+                                                    nsIntSize(aWidth, aHeight),
+                                                    gfxImageFormat::RGB16_565);
+      if (!image) {
+        NS_WARNING("Could not create rgb image");
+        return nullptr;
+      }
+
+      mImage = image;
+      return image->AsSharedImage()->GetBuffer();
+    case MPAPI::I420:
+      return CreateI420Image(aWidth, aHeight);
     default:
       NS_NOTREACHED("Color format not supported");
       return nullptr;
   }
+}
+
+uint8_t *
+MediaPluginReader::ImageBufferCallback::CreateI420Image(size_t aWidth,
+                                                        size_t aHeight)
+{
+  mImage = mImageContainer->CreateImage(ImageFormat::PLANAR_YCBCR);
+  PlanarYCbCrImage *yuvImage = static_cast<PlanarYCbCrImage *>(mImage.get());
+
+  if (!yuvImage) {
+    NS_WARNING("Could not create I420 image");
+    return nullptr;
+  }
+
+  size_t frameSize = aWidth * aHeight;
+
+  // Allocate enough for one full resolution Y plane
+  // and two quarter resolution Cb/Cr planes.
+  uint8_t *buffer = yuvImage->AllocateAndGetNewBuffer(frameSize * 3 / 2);
+
+  mozilla::layers::PlanarYCbCrData frameDesc;
+
+  frameDesc.mYChannel = buffer;
+  frameDesc.mCbChannel = buffer + frameSize;
+  frameDesc.mCrChannel = buffer + frameSize * 5 / 4;
+
+  frameDesc.mYSize = IntSize(aWidth, aHeight);
+  frameDesc.mCbCrSize = IntSize(aWidth / 2, aHeight / 2);
+
+  frameDesc.mYStride = aWidth;
+  frameDesc.mCbCrStride = aWidth / 2;
+
+  frameDesc.mYSkip = 0;
+  frameDesc.mCbSkip = 0;
+  frameDesc.mCrSkip = 0;
+
+  frameDesc.mPicX = 0;
+  frameDesc.mPicY = 0;
+  frameDesc.mPicSize = IntSize(aWidth, aHeight);
+
+  yuvImage->SetDataNoCopy(frameDesc);
+
+  return buffer;
 }
 
 already_AddRefed<Image>

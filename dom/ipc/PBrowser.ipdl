@@ -6,68 +6,83 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PBlob;
+include protocol PColorPicker;
 include protocol PContent;
-include protocol PContentDialog;
 include protocol PDocumentRenderer;
 include protocol PContentPermissionRequest;
+include protocol PFilePicker;
 include protocol PRenderFrame;
 include protocol POfflineCacheUpdate;
 include protocol PIndexedDB;
 include DOMTypes;
+include JavaScriptTypes;
 include URIParams;
+include PContentPermission;
 
-include "gfxMatrix.h";
-include "FrameMetrics.h";
-include "IPC/nsGUIEventIPC.h";
-include "mozilla/dom/TabMessageUtils.h";
-include "mozilla/dom/ScreenOrientation.h";
-include "mozilla/dom/PermissionMessageUtils.h";
-include "mozilla/layout/RenderFrameUtils.h";
-include "mozilla/layers/CompositorTypes.h";
 
-using IPC::Principal;
-using gfxMatrix;
-using gfxRect;
-using gfxSize;
-using mozilla::layers::FrameMetrics;
-using mozilla::layout::ScrollingBehavior;
-using mozilla::void_t;
-using mozilla::WindowsHandle;
-using nscolor;
-using nsCompositionEvent;
-using nsIMEUpdatePreference;
-using nsIntPoint;
-using nsIntRect;
-using nsIntSize;
-using nsKeyEvent;
-using nsMouseEvent;
-using nsMouseScrollEvent;
-using mozilla::widget::WheelEvent;
-using nsQueryContentEvent;
-using nsRect;
-using nsSelectionEvent;
-using nsTextEvent;
-using nsTouchEvent;
-using RemoteDOMEvent;
-using mozilla::dom::ScreenOrientation;
-using mozilla::layers::TextureFactoryIdentifier;
-using mozilla::CSSIntPoint;
+using class IPC::Principal from "mozilla/dom/PermissionMessageUtils.h";
+using struct mozilla::gfx::Matrix from "mozilla/gfx/Matrix.h";
+using struct gfxSize from "gfxPoint.h";
+using CSSRect from "Units.h";
+using struct mozilla::layers::FrameMetrics from "FrameMetrics.h";
+using struct mozilla::layers::ScrollableLayerGuid from "FrameMetrics.h";
+using struct mozilla::layers::ZoomConstraints from "FrameMetrics.h";
+using FrameMetrics::ViewID from "FrameMetrics.h";
+using mozilla::layout::ScrollingBehavior from "mozilla/layout/RenderFrameUtils.h";
+using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
+using mozilla::WindowsHandle from "ipc/IPCMessageUtils.h";
+using nscolor from "nsColor.h";
+using class mozilla::WidgetCompositionEvent from "ipc/nsGUIEventIPC.h";
+using struct nsIMEUpdatePreference from "nsIWidget.h";
+using struct nsIntPoint from "nsPoint.h";
+using struct nsIntRect from "nsRect.h";
+using struct nsIntSize from "nsSize.h";
+using class mozilla::WidgetKeyboardEvent from "ipc/nsGUIEventIPC.h";
+using class mozilla::WidgetMouseEvent from "ipc/nsGUIEventIPC.h";
+using class mozilla::WidgetWheelEvent from "ipc/nsGUIEventIPC.h";
+using struct nsRect from "nsRect.h";
+using class mozilla::WidgetSelectionEvent from "ipc/nsGUIEventIPC.h";
+using class mozilla::WidgetTextEvent from "ipc/nsGUIEventIPC.h";
+using class mozilla::WidgetTouchEvent from "ipc/nsGUIEventIPC.h";
+using struct mozilla::dom::RemoteDOMEvent from "mozilla/dom/TabMessageUtils.h";
+using mozilla::dom::ScreenOrientation from "mozilla/dom/ScreenOrientation.h";
+using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
+using mozilla::CSSPoint from "Units.h";
+using mozilla::CSSToScreenScale from "Units.h";
+using mozilla::CommandInt from "mozilla/EventForwards.h";
+using mozilla::layers::GeckoContentController::APZStateChange from "mozilla/layers/GeckoContentController.h";
+
 namespace mozilla {
 namespace dom {
 
-rpc protocol PBrowser
+struct NativeKeyBinding
+{
+  CommandInt[] singleLineCommands;
+  CommandInt[] multiLineCommands;
+  CommandInt[] richTextCommands;
+};
+
+union MaybeNativeKeyBinding
+{
+  NativeKeyBinding;
+  void_t;
+};
+
+intr protocol PBrowser
 {
     manager PContent;
 
-    manages PContentDialog;
+    manages PColorPicker;
     manages PDocumentRenderer;
     manages PContentPermissionRequest;
+    manages PFilePicker;
     manages PRenderFrame;
     manages POfflineCacheUpdate;
     manages PIndexedDB;
 
 both:
-    AsyncMessage(nsString aMessage, ClonedMessageData aData);
+    AsyncMessage(nsString aMessage, ClonedMessageData aData, CpowEntry[] aCpows,
+                 Principal aPrincipal);
 
 parent:
     /**
@@ -78,9 +93,14 @@ parent:
 
     Event(RemoteDOMEvent aEvent);
 
-    rpc CreateWindow() returns (PBrowser window);
+    intr CreateWindow() returns (PBrowser window);
 
-    sync SyncMessage(nsString aMessage, ClonedMessageData aData)
+    sync SyncMessage(nsString aMessage, ClonedMessageData aData,
+                     CpowEntry[] aCpows, Principal aPrincipal)
+      returns (nsString[] retval);
+
+    rpc RpcMessage(nsString aMessage, ClonedMessageData aData,
+                   CpowEntry[] aCpows, Principal aPrincipal)
       returns (nsString[] retval);
 
     /**
@@ -123,11 +143,22 @@ parent:
      *  offset       Starting offset of the change
      *  end          Ending offset of the range deleted
      *  newEnd       New ending offset after insertion
+     *  causedByComposition true if the change is caused by composition
      *
      *  for insertion, offset == end
      *  for deletion, offset == newEnd
      */
-    NotifyIMETextChange(uint32_t offset, uint32_t end, uint32_t newEnd);
+    NotifyIMETextChange(uint32_t offset, uint32_t end, uint32_t newEnd,
+                        bool causedByComposition);
+
+    /**
+     * Notifies chrome that there is a IME compostion rect updated
+     *
+     *  offset       The starting offset of this rect
+     *  rect         The rect of first character of selected IME composition
+     *  caretRect    The rect of IME caret
+     */
+    NotifyIMESelectedCompositionRect(uint32_t offset, nsIntRect rect, nsIntRect caretRect);
 
     /**
      * Notifies chrome that there has been a change in selection
@@ -136,12 +167,13 @@ parent:
      *  seqno        Current seqno value on the content side
      *  anchor       Offset where the selection started
      *  focus        Offset where the caret is
+     *  causedByComposition true if the change is caused by composition
      */
-    NotifyIMESelection(uint32_t seqno, uint32_t anchor, uint32_t focus);
+    NotifyIMESelection(uint32_t seqno, uint32_t anchor, uint32_t focus,
+                       bool causedByComposition);
 
     /**
      * Notifies chrome to refresh its text cache 
-     * Only called when NotifyIMEFocus returns PR_TRUE for mWantHints
      *
      *  text         The entire content of the text field
      */
@@ -160,6 +192,12 @@ parent:
      */
     sync EndIMEComposition(bool cancel) returns (nsString composition);
 
+    /**
+     * Request that the parent process move focus to the browser's frame. If
+     * canRaise is true, the window can be raised if it is inactive.
+     */
+    RequestFocus(bool canRaise);
+
     sync GetInputContext() returns (int32_t IMEEnabled, int32_t IMEOpen,
                                     intptr_t NativeIMEContext);
 
@@ -170,6 +208,8 @@ parent:
                     nsString actionHint,
                     int32_t cause,
                     int32_t focusChange);
+
+    sync IsParentWindowMainWidgetVisible() returns (bool visible);
 
     /**
      * Gets the DPI of the screen corresponding to this browser.
@@ -190,13 +230,30 @@ parent:
     SetBackgroundColor(nscolor color);
 
     /**
+     * Used to set the current text of the status tooltip.
+     * Nowadays this is mainly used for link locations on hover.
+     */
+    SetStatus(uint32_t type, nsString status);
+
+    /**
+     * Show/hide a tooltip when the mouse hovers over an element in the content
+     * document.
+     */
+    ShowTooltip(uint32_t x, uint32_t y, nsString tooltip);
+    HideTooltip();
+
+    /**
+     * Create an asynchronous color picker on the parent side,
+     * but don't open it yet.
+     */
+    PColorPicker(nsString title, nsString initialColor);
+
+    /**
      * Initiates an asynchronous request for permission for the
      * provided principal.
      *
-     * @param aType
-     *   The type of permission to request.
-     * @param aAccess
-     *   Access type. "read" for example.
+     * @param aRequests
+     *   The array of permissions to request.
      * @param aPrincipal
      *   The principal of the request.
      *
@@ -204,18 +261,20 @@ parent:
      *       principals that can live in the content process should
      *       provided.
      */
-    PContentPermissionRequest(nsCString aType, nsCString aAccess, Principal principal);
+    PContentPermissionRequest(PermissionRequest[] aRequests, Principal aPrincipal);
 
-    PContentDialog(uint32_t aType, nsCString aName, nsCString aFeatures,
-                   int32_t[] aIntParams, nsString[] aStringParams);
+    PFilePicker(nsString aTitle, int16_t aMode);
 
     /**
      * Create a layout frame (encapsulating a remote layer tree) for
      * the page that is currently loaded in the <browser>.
      */
-    sync PRenderFrame()
+    sync PRenderFrame();
+
+    sync InitRenderFrame(PRenderFrame aFrame)
         returns (ScrollingBehavior scrolling,
-                 TextureFactoryIdentifier textureFactoryIdentifier, uint64_t layersId);
+                 TextureFactoryIdentifier textureFactoryIdentifier, uint64_t layersId,
+                 bool success);
 
     /** 
      * Starts an offline application cache update.
@@ -242,7 +301,14 @@ parent:
     POfflineCacheUpdate(URIParams manifestURI, URIParams documentURI,
                         bool stickDocument);
 
-    sync PIndexedDB(nsCString asciiOrigin)
+    /**
+     * Sets "offline-app" permission for the principal.  Called when we hit
+     * a web app with the manifest attribute in <html> and
+     * offline-apps.allow_by_default is set to true.
+     */
+    SetOfflinePermission(Principal principal);
+
+    sync PIndexedDB(nsCString group, nsCString asciiOrigin)
         returns (bool allowed);
 
     /**
@@ -264,7 +330,7 @@ parent:
      * Instructs the TabParent to forward a request to zoom to a rect given in
      * CSS pixels. This rect is relative to the document.
      */
-    ZoomToRect(gfxRect aRect);
+    ZoomToRect(uint32_t aPresShellId, ViewID aViewId, CSSRect aRect);
 
     /**
      * We know for sure that content has either preventDefaulted or not
@@ -273,15 +339,22 @@ parent:
      * batched and only processed for panning and zooming if content does not
      * preventDefault.
      */
-    ContentReceivedTouch(bool aPreventDefault);
+    ContentReceivedTouch(ScrollableLayerGuid aGuid, bool aPreventDefault);
 
     /**
-     * Updates any zoom constraints on the parent and anything tied to it. This
-     * is useful for control logic that resides outside of the remote browser.
+     * Updates the zoom constraints for a scrollable frame in this tab.
+     * The zoom controller code lives on the parent side and so this allows it to
+     * have up-to-date zoom constraints.
      */
-    UpdateZoomConstraints(bool aAllowZoom, float aMinZoom, float aMaxZoom);
+    UpdateZoomConstraints(uint32_t aPresShellId, ViewID aViewId, bool aIsRoot,
+                          ZoomConstraints aConstraints);
 
     __delete__();
+
+    ReplyKeyEvent(WidgetKeyboardEvent event);
+
+    sync RequestNativeKeyBindings(WidgetKeyboardEvent event)
+        returns (MaybeNativeKeyBinding bindings);
 
 child:
     /**
@@ -301,28 +374,50 @@ child:
 
     UpdateDimensions(nsRect rect, nsIntSize size, ScreenOrientation orientation) compress;
 
-    UpdateFrame(FrameMetrics frame) compress;
+    UpdateFrame(FrameMetrics frame);
+
+    /**
+     * Acknowledge the receipt of a scroll offset update from the content
+     * process. This is used to manage concurrent scroll updates from many
+     * sources.
+     */
+    AcknowledgeScrollUpdate(ViewID aScrollId, uint32_t aScrollGeneration);
 
     /**
      * Requests handling of a double tap. |point| is in CSS pixels, relative to
      * the scroll offset. This message is expected to round-trip back to
      * ZoomToRect() with a rect indicating where we should zoom to.
      */
-    HandleDoubleTap(CSSIntPoint point);
+    HandleDoubleTap(CSSPoint point, ScrollableLayerGuid aGuid);
 
     /**
      * Requests handling of a single tap. |point| is in CSS pixels, relative to
      * the scroll offset. This message is expected to send a "mousedown" and
      * "mouseup" series of events at this point.
      */
-    HandleSingleTap(CSSIntPoint point);
+    HandleSingleTap(CSSPoint point, ScrollableLayerGuid aGuid);
 
     /**
      * Requests handling of a long tap. |point| is in CSS pixels, relative to
      * the scroll offset. This message is expected to send a "contextmenu"
      * events at this point.
      */
-    HandleLongTap(CSSIntPoint point);
+    HandleLongTap(CSSPoint point, ScrollableLayerGuid aGuid);
+
+    /**
+     * Requests handling of releasing a long tap. |aPoint| is in CSS pixels,
+     * relative to the current scroll offset. In the case the "contextmenu"
+     * event generated by the preceding HandleLongTap call was not handled,
+     * this message is expected to generate a "mousedown" and "mouseup"
+     * series of events
+     */
+    HandleLongTapUp(CSSPoint point, ScrollableLayerGuid aGuid);
+
+    /**
+     * Notifies the child about various APZ state changes.
+     * See GeckoContentController::NotifyAPZStateChange() for details.
+     */
+    NotifyAPZStateChange(ViewID aViewId, APZStateChange aChange, int aArg);
 
     /**
      * Sending an activate message moves focus to the child.
@@ -342,13 +437,13 @@ child:
                int32_t aModifiers,
                bool aIgnoreRootScrollFrame);
 
-    RealMouseEvent(nsMouseEvent event);
-    RealKeyEvent(nsKeyEvent event);
-    MouseWheelEvent(WheelEvent event);
-    RealTouchEvent(nsTouchEvent event);
+    RealMouseEvent(WidgetMouseEvent event);
+    RealKeyEvent(WidgetKeyboardEvent event, MaybeNativeKeyBinding keyBinding);
+    MouseWheelEvent(WidgetWheelEvent event);
+    RealTouchEvent(WidgetTouchEvent aEvent, ScrollableLayerGuid aGuid);
     // We use a separate message for touchmove events only to apply
     // compression to them.
-    RealTouchMoveEvent(nsTouchEvent event) compress;
+    RealTouchMoveEvent(WidgetTouchEvent aEvent, ScrollableLayerGuid aGuid) compress;
 
     /**
      * @see nsIDOMWindowUtils sendKeyEvent.
@@ -359,18 +454,18 @@ child:
              int32_t aModifiers,
              bool aPreventDefault);
 
-    CompositionEvent(nsCompositionEvent event);
+    CompositionEvent(WidgetCompositionEvent event);
 
-    TextEvent(nsTextEvent event);
+    TextEvent(WidgetTextEvent event);
 
-    SelectionEvent(nsSelectionEvent event);
+    SelectionEvent(WidgetSelectionEvent event);
 
     /**
      * Activate event forwarding from client to parent.
      */
     ActivateFrameEvent(nsString aType, bool capture);
 
-    LoadRemoteScript(nsString aURL);
+    LoadRemoteScript(nsString aURL, bool aRunInGlobalScope);
 
     /**
      * Create a asynchronous request to render whatever document is
@@ -385,7 +480,7 @@ child:
      * and if true, |flushLayout| will do just that before rendering
      * the document.  The rendered image will be of size |renderSize|.
      */
-    PDocumentRenderer(nsRect documentRect, gfxMatrix transform,
+    PDocumentRenderer(nsRect documentRect, Matrix transform,
                       nsString bgcolor,
                       uint32_t renderFlags, bool flushLayout,
                       nsIntSize renderSize);
@@ -397,6 +492,18 @@ child:
      * parent.
      */
     Destroy();
+
+
+    /**
+     * Tell the child side if it has to update it's touchable region
+     * to the parent.
+     */
+    SetUpdateHitRegion(bool aEnabled);
+
+    /**
+     * Tell the child to update its docShell's active state.
+     */
+    SetIsDocShellActive(bool aIsActive);
 
 /*
  * FIXME: write protocol!

@@ -6,8 +6,6 @@
 
 #include "SpeechGrammar.h"
 
-#include "nsContentUtils.h"
-
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/SpeechGrammarBinding.h"
 
@@ -33,9 +31,10 @@ SpeechGrammar::~SpeechGrammar()
 }
 
 SpeechGrammar*
-SpeechGrammar::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
+SpeechGrammar::Constructor(const GlobalObject& aGlobal,
+                           ErrorResult& aRv)
 {
-  return new SpeechGrammar(aGlobal.Get());
+  return new SpeechGrammar(aGlobal.GetAsSupports());
 }
 
 nsISupports*
@@ -45,9 +44,9 @@ SpeechGrammar::GetParentObject() const
 }
 
 JSObject*
-SpeechGrammar::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+SpeechGrammar::WrapObject(JSContext* aCx)
 {
-  return SpeechGrammarBinding::Wrap(aCx, aScope, this);
+  return SpeechGrammarBinding::Wrap(aCx, this);
 }
 
 void

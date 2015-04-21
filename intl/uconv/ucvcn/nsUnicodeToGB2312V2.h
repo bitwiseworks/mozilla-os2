@@ -7,7 +7,7 @@
 #define nsUnicodeToGB2312V2_h___
 
 #include "nsUCSupport.h"
-#include "gbku.h"
+#include "nsGBKConvUtil.h"
 
 //----------------------------------------------------------------------
 // Class nsUnicodeToGB2312V2 [declaration]
@@ -29,7 +29,7 @@ public:
 
 protected:
 
-  NS_IMETHOD ConvertNoBuff(const PRUnichar * aSrc, 
+  NS_IMETHOD ConvertNoBuff(const char16_t * aSrc, 
                             int32_t * aSrcLength, 
                             char * aDest, 
                             int32_t * aDestLength);
@@ -37,7 +37,7 @@ protected:
   //--------------------------------------------------------------------
   // Subclassing of nsEncoderSupport class [declaration]
 
-  NS_IMETHOD ConvertNoBuffNoErr(const PRUnichar * aSrc, int32_t * aSrcLength, 
+  NS_IMETHOD ConvertNoBuffNoErr(const char16_t * aSrc, int32_t * aSrcLength, 
                                 char * aDest, int32_t * aDestLength)
   {
     return NS_OK;

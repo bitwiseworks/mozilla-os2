@@ -3,16 +3,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "SVGAnimatedPreserveAspectRatio.h"
-#include "nsWhitespaceTokenizer.h"
+#include "mozilla/dom/SVGAnimatedPreserveAspectRatioBinding.h"
 #include "nsSMILValue.h"
 #include "nsSVGAttrTearoffTable.h"
+#include "nsWhitespaceTokenizer.h"
 #include "SMILEnumType.h"
-#include "nsAttrValueInlines.h"
-#include "mozilla/dom/SVGAnimatedPreserveAspectRatioBinding.h"
-#include "nsContentUtils.h"
+#include "SVGContentUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -30,9 +29,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGAnimatedPreserveAspectRatio)
 NS_INTERFACE_MAP_END
 
 JSObject*
-DOMSVGAnimatedPreserveAspectRatio::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+DOMSVGAnimatedPreserveAspectRatio::WrapObject(JSContext* aCx)
 {
-  return SVGAnimatedPreserveAspectRatioBinding::Wrap(aCx, aScope, this);
+  return SVGAnimatedPreserveAspectRatioBinding::Wrap(aCx, this);
 }
 
 /* Implementation */
@@ -136,12 +135,9 @@ static nsresult
 ToPreserveAspectRatio(const nsAString &aString,
                       SVGPreserveAspectRatio *aValue)
 {
-  if (aString.IsEmpty() || NS_IsAsciiWhitespace(aString[0])) {
-    return NS_ERROR_DOM_SYNTAX_ERR;
-  }
-
-  nsWhitespaceTokenizer tokenizer(aString);
-  if (!tokenizer.hasMoreTokens()) {
+  nsWhitespaceTokenizerTemplate<IsSVGWhitespace> tokenizer(aString);
+  if (tokenizer.whitespaceBeforeFirstToken() ||
+      !tokenizer.hasMoreTokens()) {
     return NS_ERROR_DOM_SYNTAX_ERR;
   }
   const nsAString &token = tokenizer.nextToken();
@@ -173,7 +169,7 @@ ToPreserveAspectRatio(const nsAString &aString,
     val.SetMeetOrSlice(SVG_MEETORSLICE_MEET);
   }
 
-  if (tokenizer.hasMoreTokens()) {
+  if (tokenizer.whitespaceAfterCurrentToken()) {
     return NS_ERROR_DOM_SYNTAX_ERR;
   }
 

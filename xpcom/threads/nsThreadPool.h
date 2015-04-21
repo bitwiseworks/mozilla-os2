@@ -20,7 +20,7 @@ class nsThreadPool MOZ_FINAL : public nsIThreadPool,
                                public nsIRunnable
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIEVENTTARGET
   NS_DECL_NSITHREADPOOL
   NS_DECL_NSIRUNNABLE
@@ -39,6 +39,7 @@ private:
   uint32_t              mIdleThreadLimit;
   uint32_t              mIdleThreadTimeout;
   uint32_t              mIdleCount;
+  uint32_t              mStackSize;
   nsCOMPtr<nsIThreadPoolListener> mListener;
   bool                  mShutdown;
   nsCString             mName;

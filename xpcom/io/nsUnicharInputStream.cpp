@@ -5,12 +5,12 @@
 
 #include "nsUnicharInputStream.h"
 #include "nsIInputStream.h"
-#include "nsIByteBuffer.h"
-#include "nsIUnicharBuffer.h"
 #include "nsIServiceManager.h"
 #include "nsString.h"
+#include "nsTArray.h"
 #include "nsAutoPtr.h"
 #include "nsCRT.h"
+#include "nsStreamUtils.h"
 #include "nsUTF8Utils.h"
 #include "mozilla/Attributes.h"
 #include <fcntl.h>
@@ -39,7 +39,7 @@ private:
 };
 
 NS_IMETHODIMP
-StringUnicharInputStream::Read(PRUnichar* aBuf,
+StringUnicharInputStream::Read(char16_t* aBuf,
                                uint32_t aCount,
                                uint32_t *aReadCount)
 {
@@ -49,12 +49,12 @@ StringUnicharInputStream::Read(PRUnichar* aBuf,
   }
   nsAString::const_iterator iter;
   mString.BeginReading(iter);
-  const PRUnichar* us = iter.get();
+  const char16_t* us = iter.get();
   uint32_t amount = mLen - mPos;
   if (amount > aCount) {
     amount = aCount;
   }
-  memcpy(aBuf, us + mPos, sizeof(PRUnichar) * amount);
+  memcpy(aBuf, us + mPos, sizeof(char16_t) * amount);
   mPos += amount;
   *aReadCount = amount;
   return NS_OK;
@@ -117,7 +117,7 @@ nsresult StringUnicharInputStream::Close()
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(StringUnicharInputStream, nsIUnicharInputStream)
+NS_IMPL_ISUPPORTS(StringUnicharInputStream, nsIUnicharInputStream)
 
 //----------------------------------------------------------------------
 
@@ -138,8 +138,8 @@ protected:
   static void CountValidUTF8Bytes(const char *aBuf, uint32_t aMaxBytes, uint32_t& aValidUTF8bytes, uint32_t& aValidUTF16CodeUnits);
 
   nsCOMPtr<nsIInputStream> mInput;
-  nsCOMPtr<nsIByteBuffer> mByteData;
-  nsCOMPtr<nsIUnicharBuffer> mUnicharData;
+  FallibleTArray<char> mByteData;
+  FallibleTArray<char16_t> mUnicharData;
   
   uint32_t mByteDataOffset;
   uint32_t mUnicharDataOffset;
@@ -156,19 +156,16 @@ UTF8InputStream::UTF8InputStream() :
 nsresult 
 UTF8InputStream::Init(nsIInputStream* aStream)
 {
-  nsresult rv = NS_NewByteBuffer(getter_AddRefs(mByteData), nullptr,
-                                 STRING_BUFFER_SIZE);
-  if (NS_FAILED(rv)) return rv;
-  rv = NS_NewUnicharBuffer(getter_AddRefs(mUnicharData), nullptr,
-                           STRING_BUFFER_SIZE);
-  if (NS_FAILED(rv)) return rv;
-
+  if (!mByteData.SetCapacity(STRING_BUFFER_SIZE) ||
+      !mUnicharData.SetCapacity(STRING_BUFFER_SIZE)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
   mInput = aStream;
 
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(UTF8InputStream,nsIUnicharInputStream)
+NS_IMPL_ISUPPORTS(UTF8InputStream,nsIUnicharInputStream)
 
 UTF8InputStream::~UTF8InputStream()
 {
@@ -178,13 +175,12 @@ UTF8InputStream::~UTF8InputStream()
 nsresult UTF8InputStream::Close()
 {
   mInput = nullptr;
-  mByteData = nullptr;
-  mUnicharData = nullptr;
-
+  mByteData.Clear();
+  mUnicharData.Clear();
   return NS_OK;
 }
 
-nsresult UTF8InputStream::Read(PRUnichar* aBuf,
+nsresult UTF8InputStream::Read(char16_t* aBuf,
                                uint32_t aCount,
                                uint32_t *aReadCount)
 {
@@ -203,8 +199,8 @@ nsresult UTF8InputStream::Read(PRUnichar* aBuf,
   if (readCount > aCount) {
     readCount = aCount;
   }
-  memcpy(aBuf, mUnicharData->GetBuffer() + mUnicharDataOffset,
-         readCount * sizeof(PRUnichar));
+  memcpy(aBuf, mUnicharData.Elements() + mUnicharDataOffset,
+         readCount * sizeof(char16_t));
   mUnicharDataOffset += readCount;
   *aReadCount = readCount;
   return NS_OK;
@@ -236,7 +232,7 @@ UTF8InputStream::ReadSegments(nsWriteUnicharSegmentFun aWriter,
 
   while (bytesToWrite) {
     rv = aWriter(this, aClosure,
-                 mUnicharData->GetBuffer() + mUnicharDataOffset,
+                 mUnicharData.Elements() + mUnicharDataOffset,
                  totalBytesWritten, bytesToWrite, &bytesWritten);
 
     if (NS_FAILED(rv)) {
@@ -273,15 +269,13 @@ UTF8InputStream::ReadString(uint32_t aCount, nsAString& aString,
   if (readCount > aCount) {
     readCount = aCount;
   }
-  const PRUnichar* buf = reinterpret_cast<const PRUnichar*>(mUnicharData->GetBuffer() +
-                                             mUnicharDataOffset);
+  const char16_t* buf = mUnicharData.Elements() + mUnicharDataOffset;
   aString.Assign(buf, readCount);
 
   mUnicharDataOffset += readCount;
   *aReadCount = readCount;
   return NS_OK;
 }
-
 
 int32_t UTF8InputStream::Fill(nsresult * aErrorCode)
 {
@@ -291,11 +285,12 @@ int32_t UTF8InputStream::Fill(nsresult * aErrorCode)
     return -1;
   }
 
-  NS_ASSERTION(mByteData->GetLength() >= mByteDataOffset, "unsigned madness");
-  uint32_t remainder = mByteData->GetLength() - mByteDataOffset;
+  NS_ASSERTION(mByteData.Length() >= mByteDataOffset, "unsigned madness");
+  uint32_t remainder = mByteData.Length() - mByteDataOffset;
   mByteDataOffset = remainder;
-  int32_t nb = mByteData->Fill(aErrorCode, mInput, remainder);
-  if (nb <= 0) {
+  uint32_t nb;
+  *aErrorCode = NS_FillArray(mByteData, mInput, remainder, &nb);
+  if (nb == 0) {
     // Because we assume a many to one conversion, the lingering data
     // in the byte buffer must be a partial conversion
     // fragment. Because we know that we have received no more new
@@ -303,23 +298,23 @@ int32_t UTF8InputStream::Fill(nsresult * aErrorCode)
     // it.
     return nb;
   }
-  NS_ASSERTION(remainder + nb == mByteData->GetLength(), "bad nb");
+  NS_ASSERTION(remainder + nb == mByteData.Length(), "bad nb");
 
   // Now convert as much of the byte buffer to unicode as possible
   uint32_t srcLen, dstLen;
-  CountValidUTF8Bytes(mByteData->GetBuffer(),remainder + nb, srcLen, dstLen);
+  CountValidUTF8Bytes(mByteData.Elements(),remainder + nb, srcLen, dstLen);
 
   // the number of UCS2 characters should always be <= the number of
   // UTF8 chars
   NS_ASSERTION( (remainder+nb >= srcLen), "cannot be longer than out buffer");
-  NS_ASSERTION(int32_t(dstLen) <= mUnicharData->GetBufferSize(),
+  NS_ASSERTION(dstLen <= mUnicharData.Capacity(),
                "Ouch. I would overflow my buffer if I wasn't so careful.");
-  if (int32_t(dstLen) > mUnicharData->GetBufferSize()) return 0;
+  if (dstLen > mUnicharData.Capacity()) return 0;
   
-  ConvertUTF8toUTF16 converter(mUnicharData->GetBuffer());
+  ConvertUTF8toUTF16 converter(mUnicharData.Elements());
   
-  nsASingleFragmentCString::const_char_iterator start = mByteData->GetBuffer();
-  nsASingleFragmentCString::const_char_iterator end = mByteData->GetBuffer() + srcLen;
+  nsASingleFragmentCString::const_char_iterator start = mByteData.Elements();
+  nsASingleFragmentCString::const_char_iterator end = mByteData.Elements() + srcLen;
             
   copy_string(start, end, converter);
   if (converter.Length() != dstLen) {
@@ -374,12 +369,12 @@ UTF8InputStream::CountValidUTF8Bytes(const char* aBuffer, uint32_t aMaxBytes, ui
   aValidUTF16CodeUnits = utf16length;
 }
 
-NS_IMPL_QUERY_INTERFACE2(nsSimpleUnicharStreamFactory,
-                         nsIFactory,
-                         nsISimpleUnicharStreamFactory)
+NS_IMPL_QUERY_INTERFACE(nsSimpleUnicharStreamFactory,
+                        nsIFactory,
+                        nsISimpleUnicharStreamFactory)
 
-NS_IMETHODIMP_(nsrefcnt) nsSimpleUnicharStreamFactory::AddRef() { return 2; }
-NS_IMETHODIMP_(nsrefcnt) nsSimpleUnicharStreamFactory::Release() { return 1; }
+NS_IMETHODIMP_(MozExternalRefCountType) nsSimpleUnicharStreamFactory::AddRef() { return 2; }
+NS_IMETHODIMP_(MozExternalRefCountType) nsSimpleUnicharStreamFactory::Release() { return 1; }
 
 NS_IMETHODIMP
 nsSimpleUnicharStreamFactory::CreateInstance(nsISupports* aOuter, REFNSIID aIID,

@@ -61,7 +61,7 @@ function needHomepageOverride() {
   if (savedmstone == "ignore")
     return "none";
 
-#expand    let ourmstone = "__MOZ_APP_VERSION__";
+  let ourmstone = Services.appinfo.platformVersion;
 
   if (ourmstone != savedmstone) {
     Services.prefs.setCharPref("browser.startup.homepage_override.mstone", ourmstone);
@@ -73,7 +73,7 @@ function needHomepageOverride() {
 }
 
 function getHomePage() {
-  let url = "about:start";
+  let url = "about:newtab";
   try {
     url = Services.prefs.getComplexValue("browser.startup.homepage", Ci.nsIPrefLocalizedString).data;
   } catch (e) { }
@@ -270,8 +270,6 @@ BrowserCLH.prototype = {
         var updateService = Cc["@mozilla.org/updates/update-service;1"].getService(Ci.nsIApplicationUpdateService);
         var updateTimerCallback = updateService.QueryInterface(Ci.nsITimerCallback);
         updateTimerCallback.notify(null);
-      } else if (alertFlag.length >= 9 && alertFlag.substr(0, 9) == "download:") {
-        showPanelWhenReady(browserWin, "downloads-container");
       }
     }
   },

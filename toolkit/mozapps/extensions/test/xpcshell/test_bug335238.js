@@ -79,10 +79,10 @@ var ADDONS = [
 
 // This is a replacement for the blocklist service
 var BlocklistService = {
-  getAddonBlocklistState: function(aId, aVersion, aAppVersion, aToolkitVersion) {
-    if (aId == "bug335238_3@tests.mozilla.org")
+  getAddonBlocklistState: function(aAddon, aAppVersion, aToolkitVersion) {
+    if (aAddon.id == "bug335238_3@tests.mozilla.org")
       return Ci.nsIBlocklistService.STATE_SOFTBLOCKED;
-    if (aId == "bug335238_4@tests.mozilla.org")
+    if (aAddon.id == "bug335238_4@tests.mozilla.org")
       return Ci.nsIBlocklistService.STATE_BLOCKED;
     return Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
   },
@@ -91,8 +91,8 @@ var BlocklistService = {
     return Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
   },
 
-  isAddonBlocklisted: function(aId, aVersion, aAppVersion, aToolkitVersion) {
-    return this.getAddonBlocklistState(aId, aVersion, aAppVersion, aToolkitVersion) ==
+  isAddonBlocklisted: function(aAddon, aAppVersion, aToolkitVersion) {
+    return this.getAddonBlocklistState(aAddon, aAppVersion, aToolkitVersion) ==
            Ci.nsIBlocklistService.STATE_BLOCKED;
   },
 
@@ -165,7 +165,8 @@ function run_test() {
   installAllFiles([do_get_addon(a.addon) for each (a in ADDONS)], function() {
 
     restartManager();
-    AddonManager.getAddonByID(ADDONS[1].id, function(addon) {
+    AddonManager.getAddonByID(ADDONS[1].id, callback_soon(function(addon) {
+      do_check_true(!(!addon));
       addon.userDisabled = true;
       restartManager();
 
@@ -175,6 +176,6 @@ function run_test() {
           item.findUpdates(updateListener, AddonManager.UPDATE_WHEN_USER_REQUESTED);
         });
       });
-    });
+    }));
   });
 }

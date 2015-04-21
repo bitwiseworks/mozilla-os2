@@ -4,10 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/IonMacroAssembler.h"
 #include "gc/Marking.h"
-
-#include "jsscriptinlines.h"
+#include "jit/JitCompartment.h"
+#if defined(JS_CODEGEN_X86)
+# include "jit/x86/MacroAssembler-x86.h"
+#elif defined(JS_CODEGEN_X64)
+# include "jit/x64/MacroAssembler-x64.h"
+#else
+# error "Wrong architecture. Only x86 and x64 should build this file!"
+#endif
 
 using namespace js;
 using namespace js::jit;
@@ -61,7 +66,7 @@ TraceDataRelocations(JSTracer *trc, uint8_t *buffer, CompactBufferReader &reader
 
 
 void
-AssemblerX86Shared::TraceDataRelocations(JSTracer *trc, IonCode *code, CompactBufferReader &reader)
+AssemblerX86Shared::TraceDataRelocations(JSTracer *trc, JitCode *code, CompactBufferReader &reader)
 {
     ::TraceDataRelocations(trc, code->raw(), reader);
 }
@@ -71,10 +76,10 @@ AssemblerX86Shared::trace(JSTracer *trc)
 {
     for (size_t i = 0; i < jumps_.length(); i++) {
         RelativePatch &rp = jumps_[i];
-        if (rp.kind == Relocation::IONCODE) {
-            IonCode *code = IonCode::FromExecutable((uint8_t *)rp.target);
-            MarkIonCodeUnbarriered(trc, &code, "masmrel32");
-            JS_ASSERT(code == IonCode::FromExecutable((uint8_t *)rp.target));
+        if (rp.kind == Relocation::JITCODE) {
+            JitCode *code = JitCode::FromExecutable((uint8_t *)rp.target);
+            MarkJitCodeUnbarriered(trc, &code, "masmrel32");
+            JS_ASSERT(code == JitCode::FromExecutable((uint8_t *)rp.target));
         }
     }
     if (dataRelocations_.length()) {
@@ -123,26 +128,6 @@ AssemblerX86Shared::InvertCondition(Condition cond)
       case BelowOrEqual:
         return Above;
       default:
-        JS_NOT_REACHED("unexpected condition");
-        return Equal;
+        MOZ_ASSUME_UNREACHABLE("unexpected condition");
     }
-}
-
-void
-AutoFlushCache::update(uintptr_t newStart, size_t len)
-{
-}
-
-void
-AutoFlushCache::flushAnyway()
-{
-}
-
-AutoFlushCache::~AutoFlushCache()
-{
-    if (!runtime_)
-        return;
-
-    if (runtime_->flusher() == this)
-        runtime_->setFlusher(NULL);
 }

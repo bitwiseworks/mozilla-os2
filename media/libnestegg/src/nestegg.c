@@ -49,6 +49,7 @@
 #define ID_BLOCK                0xa1
 #define ID_BLOCK_DURATION       0x9b
 #define ID_REFERENCE_BLOCK      0xfb
+#define ID_DISCARD_PADDING      0x75a2
 
 /* Tracks Elements */
 #define ID_TRACKS               0x1654ae6b
@@ -63,6 +64,9 @@
 #define ID_LANGUAGE             0x22b59c
 #define ID_CODEC_ID             0x86
 #define ID_CODEC_PRIVATE        0x63a2
+#define ID_CODEC_DELAY          0x56aa
+#define ID_SEEK_PREROLL         0x56bb
+#define ID_DEFAULT_DURATION     0x23e383
 
 /* Video Elements */
 #define ID_VIDEO                0xe0
@@ -128,7 +132,9 @@ enum ebml_type_enum {
 
 /* Track IDs */
 #define TRACK_ID_VP8            "V_VP8"
+#define TRACK_ID_VP9            "V_VP9"
 #define TRACK_ID_VORBIS         "A_VORBIS"
+#define TRACK_ID_OPUS           "A_OPUS"
 
 enum vint_mask {
   MASK_NONE,
@@ -192,6 +198,7 @@ struct info {
 struct block_group {
   struct ebml_type duration;
   struct ebml_type reference_block;
+  struct ebml_type discard_padding;
 };
 
 struct cluster {
@@ -228,6 +235,9 @@ struct track_entry {
   struct ebml_type language;
   struct ebml_type codec_id;
   struct ebml_type codec_private;
+  struct ebml_type codec_delay;
+  struct ebml_type seek_preroll;
+  struct ebml_type default_duration;
   struct video video;
   struct audio audio;
 };
@@ -302,7 +312,9 @@ struct nestegg {
 struct nestegg_packet {
   uint64_t track;
   uint64_t timecode;
+  uint64_t duration;
   struct frame * frame;
+  int64_t discard_padding;
 };
 
 /* Element Descriptor */
@@ -366,6 +378,7 @@ static struct ebml_element_desc ne_block_group_elements[] = {
   E_SUSPEND(ID_BLOCK, TYPE_BINARY),
   E_FIELD(ID_BLOCK_DURATION, TYPE_UINT, struct block_group, duration),
   E_FIELD(ID_REFERENCE_BLOCK, TYPE_INT, struct block_group, reference_block),
+  E_FIELD(ID_DISCARD_PADDING, TYPE_INT, struct block_group, discard_padding),
   E_LAST
 };
 
@@ -407,6 +420,9 @@ static struct ebml_element_desc ne_track_entry_elements[] = {
   E_FIELD(ID_LANGUAGE, TYPE_STRING, struct track_entry, language),
   E_FIELD(ID_CODEC_ID, TYPE_STRING, struct track_entry, codec_id),
   E_FIELD(ID_CODEC_PRIVATE, TYPE_BINARY, struct track_entry, codec_private),
+  E_FIELD(ID_CODEC_DELAY, TYPE_UINT, struct track_entry, codec_delay),
+  E_FIELD(ID_SEEK_PREROLL, TYPE_UINT, struct track_entry, seek_preroll),
+  E_FIELD(ID_DEFAULT_DURATION, TYPE_UINT, struct track_entry, default_duration),
   E_SINGLE_MASTER(ID_VIDEO, TYPE_MASTER, struct track_entry, video),
   E_SINGLE_MASTER(ID_AUDIO, TYPE_MASTER, struct track_entry, audio),
   E_LAST
@@ -460,12 +476,7 @@ static struct ebml_element_desc ne_top_level_elements[] = {
 static struct pool_ctx *
 ne_pool_init(void)
 {
-  struct pool_ctx * pool;
-
-  pool = h_malloc(sizeof(*pool));
-  if (!pool)
-    abort();
-  return pool;
+  return h_malloc(sizeof(struct pool_ctx));
 }
 
 static void
@@ -481,7 +492,7 @@ ne_pool_alloc(size_t size, struct pool_ctx * pool)
 
   p = h_malloc(size);
   if (!p)
-    abort();
+    return NULL;
   hattach(p, pool);
   memset(p, 0, size);
   return p;
@@ -490,12 +501,7 @@ ne_pool_alloc(size_t size, struct pool_ctx * pool)
 static void *
 ne_alloc(size_t size)
 {
-  void * p;
-
-  p = calloc(1, size);
-  if (!p)
-    abort();
-  return p;
+  return calloc(1, size);
 }
 
 static int
@@ -686,6 +692,8 @@ ne_read_string(nestegg * ctx, char ** val, uint64_t length)
   if (length == 0 || length > LIMIT_STRING)
     return -1;
   str = ne_pool_alloc(length + 1, ctx->alloc_pool);
+  if (!str)
+    return -1;
   r = ne_io_read(ctx->io, (unsigned char *) str, length);
   if (r != 1)
     return r;
@@ -700,6 +708,8 @@ ne_read_binary(nestegg * ctx, struct ebml_binary * val, uint64_t length)
   if (length == 0 || length > LIMIT_BINARY)
     return -1;
   val->data = ne_pool_alloc(length, ctx->alloc_pool);
+  if (!val->data)
+    return -1;
   val->length = length;
   return ne_io_read(ctx->io, val->data, length);
 }
@@ -781,16 +791,19 @@ ne_find_element(uint64_t id, struct ebml_element_desc * elements)
   return NULL;
 }
 
-static void
+static int
 ne_ctx_push(nestegg * ctx, struct ebml_element_desc * ancestor, void * data)
 {
   struct list_node * item;
 
   item = ne_alloc(sizeof(*item));
+  if (!item)
+    return -1;
   item->previous = ctx->ancestor;
   item->node = ancestor;
   item->data = data;
   ctx->ancestor = item;
+  return 0;
 }
 
 static void
@@ -876,7 +889,7 @@ ne_read_element(nestegg * ctx, uint64_t * id, uint64_t * size)
   return 1;
 }
 
-static void
+static int
 ne_read_master(nestegg * ctx, struct ebml_element_desc * desc)
 {
   struct ebml_list * list;
@@ -890,8 +903,12 @@ ne_read_master(nestegg * ctx, struct ebml_element_desc * desc)
   list = (struct ebml_list *) (ctx->ancestor->data + desc->offset);
 
   node = ne_pool_alloc(sizeof(*node), ctx->alloc_pool);
+  if (!node)
+    return -1;
   node->id = desc->id;
   node->data = ne_pool_alloc(desc->size, ctx->alloc_pool);
+  if (!node->data)
+    return -1;
 
   oldtail = list->tail;
   if (oldtail)
@@ -902,10 +919,13 @@ ne_read_master(nestegg * ctx, struct ebml_element_desc * desc)
 
   ctx->log(ctx, NESTEGG_LOG_DEBUG, " -> using data %p", node->data);
 
-  ne_ctx_push(ctx, desc->children, node->data);
+  if (ne_ctx_push(ctx, desc->children, node->data) < 0)
+    return -1;
+
+  return 0;
 }
 
-static void
+static int
 ne_read_single_master(nestegg * ctx, struct ebml_element_desc * desc)
 {
   assert(desc->type == TYPE_MASTER && !(desc->flags & DESC_FLAG_MULTI));
@@ -915,7 +935,7 @@ ne_read_single_master(nestegg * ctx, struct ebml_element_desc * desc)
   ctx->log(ctx, NESTEGG_LOG_DEBUG, " -> using data %p (%u)",
            ctx->ancestor->data + desc->offset, desc->offset);
 
-  ne_ctx_push(ctx, desc->children, ctx->ancestor->data + desc->offset);
+  return ne_ctx_push(ctx, desc->children, ctx->ancestor->data + desc->offset);
 }
 
 static int
@@ -956,6 +976,7 @@ ne_read_simple(nestegg * ctx, struct ebml_element_desc * desc, size_t length)
   case TYPE_MASTER:
   case TYPE_UNKNOWN:
     assert(0);
+    r = 0;
     break;
   }
 
@@ -1011,10 +1032,13 @@ ne_parse(nestegg * ctx, struct ebml_element_desc * top_level, int64_t max_offset
       }
 
       if (element->type == TYPE_MASTER) {
-        if (element->flags & DESC_FLAG_MULTI)
-          ne_read_master(ctx, element);
-        else
-          ne_read_single_master(ctx, element);
+        if (element->flags & DESC_FLAG_MULTI) {
+          if (ne_read_master(ctx, element) < 0)
+            break;
+        } else {
+          if (ne_read_single_master(ctx, element) < 0)
+            break;
+        }
         continue;
       } else {
         r = ne_read_simple(ctx, element, size);
@@ -1328,6 +1352,8 @@ ne_read_block(nestegg * ctx, uint64_t block_id, uint64_t block_size, nestegg_pac
     return -1;
 
   pkt = ne_alloc(sizeof(*pkt));
+  if (!pkt)
+    return -1;
   pkt->track = track;
   pkt->timecode = abs_timecode * tc_scale * track_scale;
 
@@ -1341,7 +1367,16 @@ ne_read_block(nestegg * ctx, uint64_t block_id, uint64_t block_size, nestegg_pac
       return -1;
     }
     f = ne_alloc(sizeof(*f));
+    if (!f) {
+      nestegg_free_packet(pkt);
+      return -1;
+    }
     f->data = ne_alloc(frame_sizes[i]);
+    if (!f->data) {
+      free(f);
+      nestegg_free_packet(pkt);
+      return -1;
+    }
     f->length = frame_sizes[i];
     r = ne_io_read(ctx->io, f->data, frame_sizes[i]);
     if (r != 1) {
@@ -1362,6 +1397,63 @@ ne_read_block(nestegg * ctx, uint64_t block_id, uint64_t block_size, nestegg_pac
 
   return 1;
 }
+
+static int
+ne_read_block_duration(nestegg * ctx, nestegg_packet * pkt)
+{
+  int r;
+  uint64_t id, size;
+  struct ebml_element_desc * element;
+  struct ebml_type * storage;
+
+  r = ne_peek_element(ctx, &id, &size);
+  if (r != 1)
+    return r;
+
+  if (id != ID_BLOCK_DURATION)
+    return 1;
+
+  element = ne_find_element(id, ctx->ancestor->node);
+  if (!element)
+    return 1;
+
+  r = ne_read_simple(ctx, element, size);
+  if (r != 1)
+    return r;
+  storage = (struct ebml_type *) (ctx->ancestor->data + element->offset);
+  pkt->duration = storage->v.i * ne_get_timecode_scale(ctx);
+
+  return 1;
+}
+
+static int
+ne_read_discard_padding(nestegg * ctx, nestegg_packet * pkt)
+{
+  int r;
+  uint64_t id, size;
+  struct ebml_element_desc * element;
+  struct ebml_type * storage;
+
+  r = ne_peek_element(ctx, &id, &size);
+  if (r != 1)
+    return r;
+
+  if (id != ID_DISCARD_PADDING)
+    return 1;
+
+  element = ne_find_element(id, ctx->ancestor->node);
+  if (!element)
+    return 1;
+
+  r = ne_read_simple(ctx, element, size);
+  if (r != 1)
+    return r;
+  storage = (struct ebml_type *) (ctx->ancestor->data + element->offset);
+  pkt->discard_padding = storage->v.i;
+
+  return 1;
+}
+
 
 static uint64_t
 ne_buf_read_id(unsigned char const * p, size_t length)
@@ -1422,9 +1514,8 @@ ne_find_cue_position_for_track(nestegg * ctx, struct ebml_list_node * node, unsi
     if (ne_map_track_number_to_index(ctx, track_number, &t) != 0)
       return NULL;
 
-    if (t == track) {
+    if (t == track)
       return pos;
-    }
 
     node = node->next;
   }
@@ -1510,9 +1601,12 @@ ne_init_cue_points(nestegg * ctx, int64_t max_offset)
       return -1;
 
     ctx->ancestor = NULL;
-    ne_ctx_push(ctx, ne_top_level_elements, ctx);
-    ne_ctx_push(ctx, ne_segment_elements, &ctx->segment);
-    ne_ctx_push(ctx, ne_cues_elements, &ctx->segment.cues);
+    if (ne_ctx_push(ctx, ne_top_level_elements, ctx) < 0)
+      return -1;
+    if (ne_ctx_push(ctx, ne_segment_elements, &ctx->segment) < 0)
+      return -1;
+    if (ne_ctx_push(ctx, ne_cues_elements, &ctx->segment.cues) < 0)
+      return -1;
     /* parser will run until end of cues element. */
     ctx->log(ctx, NESTEGG_LOG_DEBUG, "seek: parsing cue elements");
     r = ne_parse(ctx, ne_cues_elements, max_offset);
@@ -1550,9 +1644,9 @@ ne_buffer_read(void * buffer, size_t length, void * user_data)
   int rv = 1;
   size_t available = sb->length - sb->offset;
 
-  if (available < length) {
+  if (available < length)
     return 0;
-  }
+
   memcpy(buffer, sb->buffer + sb->offset, length);
   sb->offset += length;
 
@@ -1577,9 +1671,8 @@ ne_buffer_seek(int64_t offset, int whence, void * user_data)
       break;
   }
 
-  if (o < 0 || o > (int64_t) sb->length) {
+  if (o < 0 || o > (int64_t) sb->length)
     return -1;
-  }
 
   sb->offset = o;
   return 0;
@@ -1604,10 +1697,20 @@ ne_match_webm(nestegg_io io, int64_t max_offset)
     return -1;
 
   ctx = ne_alloc(sizeof(*ctx));
+  if (!ctx)
+    return -1;
 
   ctx->io = ne_alloc(sizeof(*ctx->io));
+  if (!ctx->io) {
+    nestegg_destroy(ctx);
+    return -1;
+  }
   *ctx->io = io;
   ctx->alloc_pool = ne_pool_init();
+  if (!ctx->alloc_pool) {
+    nestegg_destroy(ctx);
+    return -1;
+  }
   ctx->log = ne_null_log_callback;
 
   r = ne_peek_element(ctx, &id, NULL);
@@ -1652,11 +1755,21 @@ nestegg_init(nestegg ** context, nestegg_io io, nestegg_log callback, int64_t ma
     return -1;
 
   ctx = ne_alloc(sizeof(*ctx));
+  if (!ctx)
+    return -1;
 
   ctx->io = ne_alloc(sizeof(*ctx->io));
+  if (!ctx->io) {
+    nestegg_destroy(ctx);
+    return -1;
+  }
   *ctx->io = io;
   ctx->log = callback;
   ctx->alloc_pool = ne_pool_init();
+  if (!ctx->alloc_pool) {
+    nestegg_destroy(ctx);
+    return -1;
+  }
 
   if (!ctx->log)
     ctx->log = ne_null_log_callback;
@@ -1837,6 +1950,9 @@ nestegg_offset_seek(nestegg * ctx, uint64_t offset)
 {
   int r;
 
+  if (offset > INT64_MAX)
+    return -1;
+
   /* Seek and set up parser state for segment-level element (Cluster). */
   r = ne_io_seek(ctx->io, offset, NESTEGG_SEEK_SET);
   if (r != 0)
@@ -1848,6 +1964,11 @@ nestegg_offset_seek(nestegg * ctx, uint64_t offset)
 
   ne_ctx_push(ctx, ne_top_level_elements, ctx);
   ne_ctx_push(ctx, ne_segment_elements, &ctx->segment);
+
+  ctx->log(ctx, NESTEGG_LOG_DEBUG, "seek: parsing cluster elements");
+  r = ne_parse(ctx, NULL, -1);
+  if (r != 1)
+    return -1;
 
   return 0;
 }
@@ -1884,10 +2005,6 @@ nestegg_track_seek(nestegg * ctx, unsigned int track, uint64_t tstamp)
 
   /* Seek and set up parser state for segment-level element (Cluster). */
   r = nestegg_offset_seek(ctx, ctx->segment_offset + seek_pos);
-  ctx->log(ctx, NESTEGG_LOG_DEBUG, "seek: parsing cluster elements");
-  r = ne_parse(ctx, NULL, -1);
-  if (r != 1)
-    return -1;
 
   if (!ne_is_suspend_element(ctx->last_id))
     return -1;
@@ -1933,8 +2050,14 @@ nestegg_track_codec_id(nestegg * ctx, unsigned int track)
   if (strcmp(codec_id, TRACK_ID_VP8) == 0)
     return NESTEGG_CODEC_VP8;
 
+  if (strcmp(codec_id, TRACK_ID_VP9) == 0)
+    return NESTEGG_CODEC_VP9;
+
   if (strcmp(codec_id, TRACK_ID_VORBIS) == 0)
     return NESTEGG_CODEC_VORBIS;
+
+  if (strcmp(codec_id, TRACK_ID_OPUS) == 0)
+    return NESTEGG_CODEC_OPUS;
 
   return -1;
 }
@@ -1988,34 +2111,40 @@ nestegg_track_codec_data(nestegg * ctx, unsigned int track, unsigned int item,
   if (!entry)
     return -1;
 
-  if (nestegg_track_codec_id(ctx, track) != NESTEGG_CODEC_VORBIS)
+  if (nestegg_track_codec_id(ctx, track) != NESTEGG_CODEC_VORBIS
+    && nestegg_track_codec_id(ctx, track) != NESTEGG_CODEC_OPUS)
     return -1;
 
   if (ne_get_binary(entry->codec_private, &codec_private) != 0)
     return -1;
 
-  p = codec_private.data;
-  count = *p++ + 1;
+  if (nestegg_track_codec_id(ctx, track) == NESTEGG_CODEC_VORBIS) {
+      p = codec_private.data;
+      count = *p++ + 1;
 
-  if (count > 3)
-    return -1;
+      if (count > 3)
+        return -1;
 
-  i = 0;
-  total = 0;
-  while (--count) {
-    sizes[i] = ne_xiph_lace_value(&p);
-    total += sizes[i];
-    i += 1;
+      i = 0;
+      total = 0;
+      while (--count) {
+        sizes[i] = ne_xiph_lace_value(&p);
+        total += sizes[i];
+        i += 1;
+      }
+      sizes[i] = codec_private.length - total - (p - codec_private.data);
+
+      for (i = 0; i < item; ++i) {
+        if (sizes[i] > LIMIT_FRAME)
+          return -1;
+        p += sizes[i];
+      }
+      *data = p;
+      *length = sizes[item];
+  } else {
+    *data = codec_private.data;
+    *length = codec_private.length;
   }
-  sizes[i] = codec_private.length - total - (p - codec_private.data);
-
-  for (i = 0; i < item; ++i) {
-    if (sizes[i] > LIMIT_FRAME)
-      return -1;
-    p += sizes[i];
-  }
-  *data = p;
-  *length = sizes[item];
 
   return 0;
 }
@@ -2104,6 +2233,32 @@ nestegg_track_audio_params(nestegg * ctx, unsigned int track,
   ne_get_uint(entry->audio.bit_depth, &value);
   params->depth = value;
 
+  value = 0;
+  ne_get_uint(entry->codec_delay, &value);
+  params->codec_delay = value;
+
+  value = 0;
+  ne_get_uint(entry->seek_preroll, &value);
+  params->seek_preroll = value;
+
+  return 0;
+}
+
+int
+nestegg_track_default_duration(nestegg * ctx, unsigned int track,
+                               uint64_t * duration)
+{
+  struct track_entry * entry;
+  uint64_t value;
+
+  entry = ne_find_track_entry(ctx, track);
+  if (!entry)
+    return -1;
+
+  if (ne_get_uint(entry->default_duration, &value) != 0)
+    return -1;
+  *duration = value;
+
   return 0;
 }
 
@@ -2129,6 +2284,17 @@ nestegg_read_packet(nestegg * ctx, nestegg_packet ** pkt)
       /* The only DESC_FLAG_SUSPEND fields are Blocks and SimpleBlocks, which we
          handle directly. */
       r = ne_read_block(ctx, id, size, pkt);
+      if (r != 1)
+        return r;
+
+      r = ne_read_block_duration(ctx, *pkt);
+      if (r != 1)
+        return r;
+
+      r = ne_read_discard_padding(ctx, *pkt);
+      if (r != 1)
+        return r;
+
       return r;
     }
 
@@ -2166,6 +2332,20 @@ int
 nestegg_packet_tstamp(nestegg_packet * pkt, uint64_t * tstamp)
 {
   *tstamp = pkt->timecode;
+  return 0;
+}
+
+int
+nestegg_packet_duration(nestegg_packet * pkt, uint64_t * duration)
+{
+  *duration = pkt->duration;
+  return 0;
+}
+
+int
+nestegg_packet_discard_padding(nestegg_packet * pkt, int64_t * discard_padding)
+{
+  *discard_padding = pkt->discard_padding;
   return 0;
 }
 
@@ -2231,3 +2411,8 @@ nestegg_sniff(unsigned char const * buffer, size_t length)
   return ne_match_webm(io, length);
 }
 
+void
+nestegg_set_halloc_func(void * (* realloc_func)(void *, size_t))
+{
+  halloc_allocator = realloc_func;
+}

@@ -6,7 +6,10 @@
 #ifndef MOZILLA_LAYERS_COMPOSITORTYPES_H
 #define MOZILLA_LAYERS_COMPOSITORTYPES_H
 
-#include "LayersTypes.h"
+#include <stdint.h>                     // for uint32_t
+#include <sys/types.h>                  // for int32_t
+#include "LayersTypes.h"                // for LayersBackend, etc
+#include "nsXULAppAPI.h"                // for GeckoProcessType, etc
 
 namespace mozilla {
 namespace layers {
@@ -19,42 +22,119 @@ const SurfaceDescriptorType SURFACEDESCRIPTOR_UNKNOWN = 0;
  * side to host side when textures and compositables are created. Usually set
  * by the compositableCient, they may be modified by either the compositable or
  * texture clients.
+ *
+ * XXX - switch to all caps constant names which seems to be the standard in gecko
  */
 typedef uint32_t TextureFlags;
 // Use nearest-neighbour texture filtering (as opposed to linear filtering).
-const TextureFlags UseNearestFilter   = 0x1;
+const TextureFlags TEXTURE_USE_NEAREST_FILTER = 1 << 0;
 // The texture should be flipped around the y-axis when composited.
-const TextureFlags NeedsYFlip         = 0x2;
+const TextureFlags TEXTURE_NEEDS_Y_FLIP       = 1 << 1;
 // Force the texture to be represented using a single tile (note that this means
 // tiled textures, not tiled layers).
-const TextureFlags ForceSingleTile    = 0x4;
+const TextureFlags TEXTURE_DISALLOW_BIGIMAGE  = 1 << 2;
 // Allow using 'repeat' mode for wrapping.
-const TextureFlags AllowRepeat        = 0x8;
+const TextureFlags TEXTURE_ALLOW_REPEAT       = 1 << 3;
 // The texture represents a tile which is newly created.
-const TextureFlags NewTile            = 0x10;
-// The host is responsible for tidying up any shared resources.
-const TextureFlags HostRelease        = 0x20;
+const TextureFlags TEXTURE_NEW_TILE           = 1 << 4;
 // The texture is part of a component-alpha pair
-const TextureFlags ComponentAlpha     = 0x40;
-// The shared resources are owned by client
-const TextureFlags OwnByClient        = 0x80;
+const TextureFlags TEXTURE_COMPONENT_ALPHA    = 1 << 5;
+// The buffer will be treated as if the RB bytes are swapped.
+// This is useful for rendering using Cairo/Thebes, because there is no
+// BGRX Android pixel format, and so we have to do byte swapping.
+//
+// For example, if the GraphicBuffer has an Android pixel format of
+// PIXEL_FORMAT_RGBA_8888 and isRBSwapped is true, when it is sampled
+// (for example, with GL), a BGRA shader should be used.
+const TextureFlags TEXTURE_RB_SWAPPED         = 1 << 6;
 
+const TextureFlags TEXTURE_FRONT              = 1 << 12;
+// A texture host on white for component alpha
+const TextureFlags TEXTURE_ON_WHITE           = 1 << 13;
+ // A texture host on black for component alpha
+const TextureFlags TEXTURE_ON_BLACK           = 1 << 14;
+// A texture host that supports tiling
+const TextureFlags TEXTURE_TILE               = 1 << 15;
+// A texture should be recycled when no longer in used
+const TextureFlags TEXTURE_RECYCLE            = 1 << 16;
+// Texture contents should be initialized
+// from the previous texture.
+const TextureFlags TEXTURE_COPY_PREVIOUS      = 1 << 24;
+// Who is responsible for deallocating the shared data.
+// if TEXTURE_DEALLOCATE_CLIENT is set, the shared data is deallocated on the
+// client side and requires some extra synchronizaion to ensure race-free
+// deallocation.
+// The default behaviour is to deallocate on the host side.
+const TextureFlags TEXTURE_DEALLOCATE_CLIENT  = 1 << 25;
+// After being shared ith the compositor side, an immutable texture is never
+// modified, it can only be read. It is safe to not Lock/Unlock immutable
+// textures.
+const TextureFlags TEXTURE_IMMUTABLE          = 1 << 27;
+// The contents of the texture must be uploaded or copied immediately
+// during the transaction, because the producer may want to write
+// to it again.
+const TextureFlags TEXTURE_IMMEDIATE_UPLOAD   = 1 << 28;
+// The texture is going to be used as part of a double
+// buffered pair, and so we can guarantee that the producer/consumer
+// won't be racing to access its contents.
+const TextureFlags TEXTURE_DOUBLE_BUFFERED    = 1 << 29;
+// We've previously tried a texture and it didn't work for some reason. If there
+// is a fallback available, try that.
+const TextureFlags TEXTURE_ALLOC_FALLBACK     = 1 << 31;
+
+// the default flags
+const TextureFlags TEXTURE_FLAGS_DEFAULT = TEXTURE_FRONT;
+
+static inline bool
+TextureRequiresLocking(TextureFlags aFlags)
+{
+  // If we're not double buffered, or uploading
+  // within a transaction, then we need to support
+  // locking correctly.
+  return !(aFlags & (TEXTURE_IMMEDIATE_UPLOAD |
+                     TEXTURE_DOUBLE_BUFFERED |
+                     TEXTURE_IMMUTABLE));
+}
 
 /**
- * The kind of memory held by the texture client/host pair. This will
- * determine how the texture client is drawn into and how the memory
- * is shared between client and host.
+ * The type of debug diagnostic to enable.
  */
-enum TextureClientType
+typedef uint32_t DiagnosticTypes;
+const DiagnosticTypes DIAGNOSTIC_NONE             = 0;
+const DiagnosticTypes DIAGNOSTIC_TILE_BORDERS     = 1 << 0;
+const DiagnosticTypes DIAGNOSTIC_LAYER_BORDERS    = 1 << 1;
+const DiagnosticTypes DIAGNOSTIC_BIGIMAGE_BORDERS = 1 << 2;
+const DiagnosticTypes DIAGNOSTIC_FLASH_BORDERS    = 1 << 3;
+
+#define DIAGNOSTIC_FLASH_COUNTER_MAX 100
+
+/**
+ * Information about the object that is being diagnosed.
+ */
+typedef uint32_t DiagnosticFlags;
+const DiagnosticFlags DIAGNOSTIC_IMAGE      = 1 << 0;
+const DiagnosticFlags DIAGNOSTIC_CONTENT    = 1 << 1;
+const DiagnosticFlags DIAGNOSTIC_CANVAS     = 1 << 2;
+const DiagnosticFlags DIAGNOSTIC_COLOR      = 1 << 3;
+const DiagnosticFlags DIAGNOSTIC_CONTAINER  = 1 << 4;
+const DiagnosticFlags DIAGNOSTIC_TILE       = 1 << 5;
+const DiagnosticFlags DIAGNOSTIC_BIGIMAGE   = 1 << 6;
+const DiagnosticFlags DIAGNOSTIC_COMPONENT_ALPHA = 1 << 7;
+const DiagnosticFlags DIAGNOSTIC_REGION_RECT = 1 << 8;
+
+/**
+ * See gfx/layers/Effects.h
+ */
+enum EffectTypes
 {
-  TEXTURE_CONTENT,            // dynamically drawn content
-  TEXTURE_SHMEM,              // shared memory
-  TEXTURE_YCBCR,              // YCbCr in a shmem
-  TEXTURE_SHARED_GL,          // GLContext::SharedTextureHandle
-  TEXTURE_SHARED_GL_EXTERNAL, // GLContext::SharedTextureHandle, the ownership of
-                              // the SurfaceDescriptor passed to the texture
-                              // remains with whoever passed it.
-  TEXTURE_STREAM_GL           // WebGL streaming buffer
+  EFFECT_MASK,
+  EFFECT_MAX_SECONDARY, // sentinel for the count of secondary effect types
+  EFFECT_RGB,
+  EFFECT_YCBCR,
+  EFFECT_COMPONENT_ALPHA,
+  EFFECT_SOLID_COLOR,
+  EFFECT_RENDER_TARGET,
+  EFFECT_MAX  //sentinel for the count of all effect types
 };
 
 /**
@@ -63,21 +143,26 @@ enum TextureClientType
 enum CompositableType
 {
   BUFFER_UNKNOWN,
+  // the deprecated compositable types
   BUFFER_IMAGE_SINGLE,    // image/canvas with a single texture, single buffered
-  BUFFER_IMAGE_BUFFERED,  // image/canvas, double buffered
+  BUFFER_IMAGE_BUFFERED,  // canvas, double buffered
   BUFFER_BRIDGE,          // image bridge protocol
-  BUFFER_CONTENT,         // thebes layer interface, single buffering
-  BUFFER_CONTENT_DIRECT,  // thebes layer interface, double buffering
   BUFFER_CONTENT_INC,     // thebes layer interface, only sends incremental
                           // updates to a texture on the compositor side.
+  // somewhere in the middle
   BUFFER_TILED,           // tiled thebes layer
+  BUFFER_SIMPLE_TILED,
+  // the new compositable types
+  COMPOSITABLE_IMAGE,     // image with single buffering
+  COMPOSITABLE_CONTENT_SINGLE,  // thebes layer interface, single buffering
+  COMPOSITABLE_CONTENT_DOUBLE,  // thebes layer interface, double buffering
   BUFFER_COUNT
 };
 
 /**
  * How the texture host is used for composition,
  */
-enum TextureHostFlags
+enum DeprecatedTextureHostFlags
 {
   TEXTURE_HOST_DEFAULT = 0,       // The default texture host for the given
                                   // SurfaceDescriptor
@@ -94,15 +179,18 @@ enum TextureHostFlags
 struct TextureFactoryIdentifier
 {
   LayersBackend mParentBackend;
+  GeckoProcessType mParentProcessId;
   int32_t mMaxTextureSize;
   bool mSupportsTextureBlitting;
   bool mSupportsPartialUploads;
 
-  TextureFactoryIdentifier(LayersBackend aLayersBackend = LAYERS_NONE,
+  TextureFactoryIdentifier(LayersBackend aLayersBackend = LayersBackend::LAYERS_NONE,
+                           GeckoProcessType aParentProcessId = GeckoProcessType_Default,
                            int32_t aMaxTextureSize = 0,
                            bool aSupportsTextureBlitting = false,
                            bool aSupportsPartialUploads = false)
     : mParentBackend(aLayersBackend)
+    , mParentProcessId(aParentProcessId)
     , mMaxTextureSize(aMaxTextureSize)
     , mSupportsTextureBlitting(aSupportsTextureBlitting)
     , mSupportsPartialUploads(aSupportsPartialUploads)
@@ -112,6 +200,8 @@ struct TextureFactoryIdentifier
 /**
  * Identify a texture to a compositable. Many textures can have the same id, but
  * the id is unique for any texture owned by a particular compositable.
+ * XXX - This is now redundant with TextureFlags. it ill be removed along with
+ * deprecated texture classes.
  */
 typedef uint32_t TextureIdentifier;
 const TextureIdentifier TextureFront = 1;
@@ -122,29 +212,32 @@ const TextureIdentifier TextureOnWhiteBack = 4;
 /**
  * Information required by the compositor from the content-side for creating or
  * using compositables and textures.
+ * XXX - TextureInfo is a bad name: this information is useful for the compositable,
+ * not the Texture. And ith new Textures, only the compositable type is really
+ * useful. This may (should) be removed in the near future.
  */
 struct TextureInfo
 {
   CompositableType mCompositableType;
-  uint32_t mTextureHostFlags;
+  uint32_t mDeprecatedTextureHostFlags;
   uint32_t mTextureFlags;
 
   TextureInfo()
     : mCompositableType(BUFFER_UNKNOWN)
-    , mTextureHostFlags(0)
+    , mDeprecatedTextureHostFlags(0)
     , mTextureFlags(0)
   {}
 
   TextureInfo(CompositableType aType)
     : mCompositableType(aType)
-    , mTextureHostFlags(0)
+    , mDeprecatedTextureHostFlags(0)
     , mTextureFlags(0)
   {}
 
   bool operator==(const TextureInfo& aOther) const
   {
     return mCompositableType == aOther.mCompositableType &&
-           mTextureHostFlags == aOther.mTextureHostFlags &&
+           mDeprecatedTextureHostFlags == aOther.mDeprecatedTextureHostFlags &&
            mTextureFlags == aOther.mTextureFlags;
   }
 };
@@ -154,9 +247,20 @@ struct TextureInfo
  *
  * See ShadowLayerForwarder::OpenDescriptor for example.
  */
-enum OpenMode {
-  OPEN_READ_ONLY,
-  OPEN_READ_WRITE
+typedef uint32_t OpenMode;
+const OpenMode OPEN_READ        = 0x1;
+const OpenMode OPEN_WRITE       = 0x2;
+const OpenMode OPEN_READ_WRITE  = OPEN_READ|OPEN_WRITE;
+const OpenMode OPEN_READ_ONLY   = OPEN_READ;
+const OpenMode OPEN_WRITE_ONLY  = OPEN_WRITE;
+
+// The kinds of mask texture a shader can support
+// We rely on the items in this enum being sequential
+enum MaskType {
+  MaskNone = 0,   // no mask layer
+  Mask2d,         // mask layer for layers with 2D transforms
+  Mask3d,         // mask layer for layers with 3D transforms
+  NumMaskTypes
 };
 
 } // namespace layers

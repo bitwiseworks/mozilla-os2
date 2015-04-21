@@ -1,0 +1,109 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+.errors,
+.breakpoints {
+  width: 16px;
+}
+
+.error, .breakpoint, .debugLocation, .breakpoint-debugLocation {
+  display: inline-block;
+  margin-left: 5px;
+  width: 12px;
+  height: 12px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+.error {
+  background-image: url("chrome://browser/skin/devtools/editor-error.png");
+  opacity: 0.75;
+}
+
+.breakpoint {
+  background-image: url("chrome://browser/skin/devtools/editor-breakpoint.png");
+}
+
+.debugLocation {
+  background-image: url("chrome://browser/skin/devtools/editor-debug-location.png");
+}
+
+.breakpoint.debugLocation {
+  background-image:
+    url("chrome://browser/skin/devtools/editor-debug-location.png"),
+    url("chrome://browser/skin/devtools/editor-breakpoint.png");
+}
+
+.CodeMirror {
+  cursor: text;
+}
+
+.CodeMirror-gutters {
+  cursor: default;
+}
+
+/* This is to avoid the fake horizontal scrollbar div of codemirror to go 0
+height when floating scrollbars are active. Make sure that this value is equal
+to the maximum of `min-height` specific to the `scrollbar[orient="horizontal"]`
+selector in floating-scrollbar-light.css across all platforms. */
+.CodeMirror-hscrollbar {
+  min-height: 10px;
+}
+
+/* This is to avoid the fake vertical scrollbar div of codemirror to go 0
+width when floating scrollbars are active. Make sure that this value is equal
+to the maximum of `min-width` specific to the `scrollbar[orient="vertical"]`
+selector in floating-scrollbar-light.css across all platforms. */
+.CodeMirror-vscrollbar {
+  min-width: 10px;
+}
+
+.cm-trailingspace {
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAAB/qH1jAAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAB3RJTUUH3QUXCToH00Y1UgAAACFJREFUCNdjPMDBUc/AwNDAAAFMTAwMDA0OP34wQgX/AQBYgwYEx4f9lQAAAABJRU5ErkJggg==");
+  opacity: 0.75;
+  background-position: left bottom;
+  background-repeat: repeat-x;
+}
+
+/* CodeMirror dialogs styling */
+
+.CodeMirror-dialog {
+  padding: 4px 3px;
+}
+
+.CodeMirror-dialog,
+.CodeMirror-dialog input {
+  font: message-box;
+}
+
+/* Fold addon */
+
+.CodeMirror-foldmarker {
+  color: blue;
+  text-shadow: #b9f 1px 1px 2px, #b9f -1px -1px 2px, #b9f 1px -1px 2px, #b9f -1px 1px 2px;
+  font-family: sans-serif;
+  line-height: .3;
+  cursor: pointer;
+}
+
+.CodeMirror-foldgutter {
+  width: 16px; /* Same as breakpoints gutter above */
+}
+
+.CodeMirror-foldgutter-open,
+.CodeMirror-foldgutter-folded {
+  color: #555;
+  cursor: pointer;
+}
+
+.CodeMirror-foldgutter-open:after {
+  font-size: 120%;
+  content: "\25BE";
+}
+
+.CodeMirror-foldgutter-folded:after {
+  font-size: 120%;
+  content: "\25B8";
+}

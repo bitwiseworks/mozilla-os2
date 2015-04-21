@@ -11,9 +11,9 @@
 #include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
 #include "nsAppStartupNotifier.h"
+#include "nsISimpleEnumerator.h"
 
-
-NS_IMPL_ISUPPORTS1(nsAppStartupNotifier, nsIObserver)
+NS_IMPL_ISUPPORTS(nsAppStartupNotifier, nsIObserver)
 
 nsAppStartupNotifier::nsAppStartupNotifier()
 {
@@ -23,7 +23,7 @@ nsAppStartupNotifier::~nsAppStartupNotifier()
 {
 }
 
-NS_IMETHODIMP nsAppStartupNotifier::Observe(nsISupports *aSubject, const char *aTopic, const PRUnichar *someData)
+NS_IMETHODIMP nsAppStartupNotifier::Observe(nsISupports *aSubject, const char *aTopic, const char16_t *someData)
 {
     NS_ENSURE_ARG(aTopic);
     nsresult rv;

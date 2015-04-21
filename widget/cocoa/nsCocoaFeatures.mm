@@ -3,22 +3,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#define MAC_OS_X_VERSION_MASK     0x0000FFFF // Not supported
-#define MAC_OS_X_VERSION_10_4_HEX 0x00001040 // Not supported
-#define MAC_OS_X_VERSION_10_5_HEX 0x00001050
-#define MAC_OS_X_VERSION_10_6_HEX 0x00001060
-#define MAC_OS_X_VERSION_10_7_HEX 0x00001070
-#define MAC_OS_X_VERSION_10_8_HEX 0x00001080
+#define MAC_OS_X_VERSION_MASK      0x0000FFFF
+#define MAC_OS_X_VERSION_10_6_HEX  0x00001060
+#define MAC_OS_X_VERSION_10_7_HEX  0x00001070
+#define MAC_OS_X_VERSION_10_8_HEX  0x00001080
+#define MAC_OS_X_VERSION_10_9_HEX  0x00001090
+#define MAC_OS_X_VERSION_10_10_HEX 0x000010A0
 
 // This API will not work for OS X 10.10, see Gestalt.h.
 
 #include "nsCocoaFeatures.h"
+#include "nsCocoaUtils.h"
 #include "nsDebug.h"
 #include "nsObjCExceptions.h"
 
 #import <Cocoa/Cocoa.h>
 
 int32_t nsCocoaFeatures::mOSXVersion = 0;
+int32_t nsCocoaFeatures::mOSXVersionMajor = 0;
+int32_t nsCocoaFeatures::mOSXVersionMinor = 0;
+int32_t nsCocoaFeatures::mOSXVersionBugFix = 0;
 
 static int intAtStringIndex(NSArray *array, int index)
 {
@@ -44,29 +48,74 @@ static void GetSystemVersion(int &major, int &minor, int &bugfix)
     }
 }
 
+/*static*/ void
+nsCocoaFeatures::InitializeVersionNumbers()
+{
+    NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+    // Provide an autorelease pool to avoid leaking Cocoa objects,
+    // as this gets called before the main autorelease pool is in place.
+    nsAutoreleasePool localPool;
+
+    int major, minor, bugfix;
+    GetSystemVersion(major, minor, bugfix);
+
+    mOSXVersionMajor = major;
+    mOSXVersionMinor = minor;
+    mOSXVersionBugFix = bugfix;
+
+    if (major < 10) {
+        NS_ERROR("Couldn't determine OS X version, assuming 10.6");
+        mOSXVersion = MAC_OS_X_VERSION_10_6_HEX;
+        mOSXVersionMajor = 10;
+        mOSXVersionMinor = 6;
+        mOSXVersionBugFix = 0;
+    } else if (minor < 6) {
+        NS_ERROR("OS X version too old, assuming 10.6");
+        mOSXVersion = MAC_OS_X_VERSION_10_6_HEX;
+        mOSXVersionMinor = 6;
+        mOSXVersionBugFix = 0;
+    } else {
+        mOSXVersion = 0x1000 + (minor << 4);
+    }
+
+    NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
 /* static */ int32_t
 nsCocoaFeatures::OSXVersion()
 {
-    NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
-    
     if (!mOSXVersion) {
-        int major, minor, bugfix;
-        GetSystemVersion(major, minor, bugfix);
-        if (major != 10) {
-            NS_ERROR("Couldn't determine OS X version, assuming 10.6");
-            mOSXVersion = MAC_OS_X_VERSION_10_6_HEX;
-        }
-        else if (minor < 6) {
-            NS_ERROR("OS X version too old, assuming 10.6");
-            mOSXVersion = MAC_OS_X_VERSION_10_6_HEX;
-        }
-        else {
-            mOSXVersion = 0x1000 + (minor << 4);
-        }
+        InitializeVersionNumbers();
     }
     return mOSXVersion;
-    
-    NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(0);
+}
+
+/* static */ int32_t
+nsCocoaFeatures::OSXVersionMajor()
+{
+    if (!mOSXVersion) {
+        InitializeVersionNumbers();
+    }
+    return mOSXVersionMajor;
+}
+
+/* static */ int32_t
+nsCocoaFeatures::OSXVersionMinor()
+{
+    if (!mOSXVersion) {
+        InitializeVersionNumbers();
+    }
+    return mOSXVersionMinor;
+}
+
+/* static */ int32_t
+nsCocoaFeatures::OSXVersionBugFix()
+{
+    if (!mOSXVersion) {
+        InitializeVersionNumbers();
+    }
+    return mOSXVersionBugFix;
 }
 
 /* static */ bool
@@ -87,4 +136,16 @@ nsCocoaFeatures::OnLionOrLater()
 nsCocoaFeatures::OnMountainLionOrLater()
 {
     return (OSXVersion() >= MAC_OS_X_VERSION_10_8_HEX);
+}
+
+/* static */ bool
+nsCocoaFeatures::OnMavericksOrLater()
+{
+    return (OSXVersion() >= MAC_OS_X_VERSION_10_9_HEX);
+}
+
+/* static */ bool
+nsCocoaFeatures::OnYosemiteOrLater()
+{
+    return (OSXVersion() >= MAC_OS_X_VERSION_10_10_HEX);
 }

@@ -15,17 +15,10 @@ function test()
 {
   waitForExplicitFinish();
 
-  addTabAndOpenStyleEditor(function(panel) {
+  addTabAndOpenStyleEditors(2, function(panel) {
     gContentWin = gBrowser.selectedTab.linkedBrowser.contentWindow.wrappedJSObject;
     gUI = panel.UI;
-
-    let count = 0;
-    gUI.on("editor-added", function editorAdded(event, editor) {
-      if (++count == 2) {
-        gUI.off("editor-added", editorAdded);
-        gUI.editors[0].getSourceEditor().then(runTests);
-      }
-    })
+    gUI.editors[0].getSourceEditor().then(runTests);
   });
 
   content.location = TESTCASE_URI;
@@ -41,6 +34,7 @@ function runTests()
 
       gUI.on("editor-added", function editorAdded(event, editor) {
         if (++count == 2) {
+          info("all editors added after reload");
           gUI.off("editor-added", editorAdded);
           gUI.editors[1].getSourceEditor().then(testRemembered);
         }
@@ -54,9 +48,9 @@ function testRemembered()
 {
   is(gUI.selectedEditor, gUI.editors[1], "second editor is selected");
 
-  let {line, col} = gUI.selectedEditor.sourceEditor.getCaretPosition();
+  let {line, ch} = gUI.selectedEditor.sourceEditor.getCursor();
   is(line, LINE_NO, "correct line selected");
-  is(col, COL_NO, "correct column selected");
+  is(ch, COL_NO, "correct column selected");
 
   testNewPage();
 }
@@ -67,6 +61,7 @@ function testNewPage()
   gUI.on("editor-added", function editorAdded(event, editor) {
     info("editor added here")
     if (++count == 2) {
+      info("all editors added after navigating page");
       gUI.off("editor-added", editorAdded);
       gUI.editors[0].getSourceEditor().then(testNotRemembered);
     }
@@ -80,9 +75,9 @@ function testNotRemembered()
 {
   is(gUI.selectedEditor, gUI.editors[0], "first editor is selected");
 
-  let {line, col} = gUI.selectedEditor.sourceEditor.getCaretPosition();
+  let {line, ch} = gUI.selectedEditor.sourceEditor.getCursor();
   is(line, 0, "first line is selected");
-  is(col, 0, "first column is selected");
+  is(ch, 0, "first column is selected");
 
   gUI = null;
   finish();

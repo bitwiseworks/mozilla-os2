@@ -18,6 +18,8 @@
 #include "GfxInfoCollector.h"
 #include "nsIGfxInfoDebug.h"
 #include "mozilla/Mutex.h"
+#include "js/Value.h"
+#include "mozilla/Attributes.h"
 
 namespace mozilla {
 namespace widget {  
@@ -33,7 +35,7 @@ public:
   GfxInfoBase();
   virtual ~GfxInfoBase();
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIOBSERVER
 
   // We only declare a subset of the nsIGfxInfo interface. It's up to derived
@@ -49,7 +51,7 @@ public:
 
   NS_IMETHOD GetFailures(uint32_t *failureCount, char ***failures);
   NS_IMETHOD_(void) LogFailure(const nsACString &failure);
-  NS_IMETHOD GetInfo(JSContext*, jsval*);
+  NS_IMETHOD GetInfo(JSContext*, JS::MutableHandle<JS::Value>);
 
   // Initialization function. If you override this, you must call this class's
   // version of Init first.
@@ -69,11 +71,11 @@ public:
   static nsTArray<GfxDriverInfo>* mDriverInfo;
   static bool mDriverInfoObserverInitialized;
 
-  virtual nsString Model() const { return EmptyString(); }
-  virtual nsString Hardware() const { return EmptyString(); }
-  virtual nsString Product() const { return EmptyString(); }
-  virtual nsString Manufacturer() const { return EmptyString(); }
-  virtual uint32_t OperatingSystemVersion() const { return 0; }
+  virtual nsString Model() { return EmptyString(); }
+  virtual nsString Hardware() { return EmptyString(); }
+  virtual nsString Product() { return EmptyString(); }
+  virtual nsString Manufacturer() { return EmptyString(); }
+  virtual uint32_t OperatingSystemVersion() { return 0; }
 
 protected:
 

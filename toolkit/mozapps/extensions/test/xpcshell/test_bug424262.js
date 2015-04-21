@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
-Components.utils.import("resource://gre/modules/AddonRepository.jsm");
+Components.utils.import("resource://gre/modules/addons/AddonRepository.jsm");
 
-const PREF_GETADDONS_GETRECOMMENDED      = "extensions.getAddons.recommended.url";
+const PREF_GETADDONS_GETRECOMMENDED = "extensions.getAddons.recommended.url";
 
 Components.utils.import("resource://testing-common/httpd.js");
 var server;
@@ -45,11 +45,13 @@ function run_test()
   startupManager();
 
   server = new HttpServer();
-  server.registerDirectory("/", do_get_file("data"));
-  server.start(4444);
+  server.start(-1);
+  gPort = server.identity.primaryPort;
+  mapFile("/data/test_bug424262.xml", server);
 
   // Point the addons repository to the test server
-  Services.prefs.setCharPref(PREF_GETADDONS_GETRECOMMENDED, "http://localhost:4444/test_bug424262.xml");
+  Services.prefs.setCharPref(PREF_GETADDONS_GETRECOMMENDED, "http://localhost:" +
+                             gPort + "/data/test_bug424262.xml");
 
   do_check_neq(AddonRepository, null);
 

@@ -13,14 +13,14 @@ let manifest = { // builtin provider
   origin: "https://example.com",
   sidebarURL: "https://example.com/browser/browser/base/content/test/social/social_sidebar.html",
   workerURL: "https://example.com/browser/browser/base/content/test/social/social_worker.js",
-  iconURL: "https://example.com/browser/browser/base/content/test/moz.png"
+  iconURL: "https://example.com/browser/browser/base/content/test/general/moz.png"
 };
 let manifest2 = { // used for testing install
   name: "provider 2",
   origin: "https://test1.example.com",
   sidebarURL: "https://test1.example.com/browser/browser/base/content/test/social/social_sidebar.html",
   workerURL: "https://test1.example.com/browser/browser/base/content/test/social/social_worker.js",
-  iconURL: "https://test1.example.com/browser/browser/base/content/test/moz.png",
+  iconURL: "https://test1.example.com/browser/browser/base/content/test/general/moz.png",
   version: 1
 };
 
@@ -50,9 +50,10 @@ function installListener(next, aManifest) {
   let expectEvent = "onInstalling";
   let prefname = getManifestPrefname(aManifest);
   // wait for the actual removal to call next
-  SocialService.registerProviderListener(function providerListener(topic, data) {
-    if (topic == "provider-removed") {
+  SocialService.registerProviderListener(function providerListener(topic, origin, providers) {
+    if (topic == "provider-disabled") {
       SocialService.unregisterProviderListener(providerListener);
+      is(origin, aManifest.origin, "provider disabled");
       executeSoon(next);
     }
   });
@@ -208,6 +209,12 @@ var tests = {
   testBuiltinInstallWithoutManifest: function(next) {
     // send installProvider null for the manifest
     AddonManager.addAddonListener(installListener(next, manifest));
+    let panel = document.getElementById("servicesInstall-notification");
+    PopupNotifications.panel.addEventListener("popupshown", function onpopupshown() {
+      PopupNotifications.panel.removeEventListener("popupshown", onpopupshown);
+      info("servicesInstall-notification panel opened");
+      panel.button.click();
+    });
 
     let prefname = getManifestPrefname(manifest);
     let activationURL = manifest.origin + "/browser/browser/base/content/test/social/social_activate.html"
@@ -228,6 +235,12 @@ var tests = {
   testBuiltinInstall: function(next) {
     // send installProvider a json object for the manifest
     AddonManager.addAddonListener(installListener(next, manifest));
+    let panel = document.getElementById("servicesInstall-notification");
+    PopupNotifications.panel.addEventListener("popupshown", function onpopupshown() {
+      PopupNotifications.panel.removeEventListener("popupshown", onpopupshown);
+      info("servicesInstall-notification panel opened");
+      panel.button.click();
+    });
 
     let prefname = getManifestPrefname(manifest);
     let activationURL = manifest.origin + "/browser/browser/base/content/test/social/social_activate.html"
@@ -247,6 +260,12 @@ var tests = {
   },
   testWhitelistInstall: function(next) {
     AddonManager.addAddonListener(installListener(next, manifest2));
+    let panel = document.getElementById("servicesInstall-notification");
+    PopupNotifications.panel.addEventListener("popupshown", function onpopupshown() {
+      PopupNotifications.panel.removeEventListener("popupshown", onpopupshown);
+      info("servicesInstall-notification panel opened");
+      panel.button.click();
+    });
 
     let activationURL = manifest2.origin + "/browser/browser/base/content/test/social/social_activate.html"
     addTab(activationURL, function(tab) {
@@ -265,6 +284,12 @@ var tests = {
   },
   testDirectoryInstall: function(next) {
     AddonManager.addAddonListener(installListener(next, manifest2));
+    let panel = document.getElementById("servicesInstall-notification");
+    PopupNotifications.panel.addEventListener("popupshown", function onpopupshown() {
+      PopupNotifications.panel.removeEventListener("popupshown", onpopupshown);
+      info("servicesInstall-notification panel opened");
+      panel.button.click();
+    });
 
     let activationURL = manifest2.origin + "/browser/browser/base/content/test/social/social_activate.html"
     addTab(activationURL, function(tab) {
@@ -285,6 +310,13 @@ var tests = {
     // add the provider, change the pref, add it again. The provider at that
     // point should be upgraded
     let activationURL = manifest2.origin + "/browser/browser/base/content/test/social/social_activate.html"
+    let panel = document.getElementById("servicesInstall-notification");
+    PopupNotifications.panel.addEventListener("popupshown", function onpopupshown() {
+      PopupNotifications.panel.removeEventListener("popupshown", onpopupshown);
+      info("servicesInstall-notification panel opened");
+      panel.button.click();
+    });
+
     addTab(activationURL, function(tab) {
       let doc = tab.linkedBrowser.contentDocument;
       let installFrom = doc.nodePrincipal.origin;
@@ -292,33 +324,24 @@ var tests = {
       Social.installProvider(doc, manifest2, function(addonManifest) {
         SocialService.addBuiltinProvider(addonManifest.origin, function(provider) {
           is(provider.manifest.version, 1, "manifest version is 1");
-          Social.enabled = true;
 
           // watch for the provider-update and test the new version
-          SocialService.registerProviderListener(function providerListener(topic, data) {
+          SocialService.registerProviderListener(function providerListener(topic, origin, providers) {
             if (topic != "provider-update")
               return;
+            is(origin, addonManifest.origin, "provider updated")
             SocialService.unregisterProviderListener(providerListener);
             Services.prefs.clearUserPref("social.whitelist");
-            let provider = Social._getProviderFromOrigin(addonManifest.origin);
+            let provider = Social._getProviderFromOrigin(origin);
             is(provider.manifest.version, 2, "manifest version is 2");
-            Social.uninstallProvider(addonManifest.origin, function() {
+            Social.uninstallProvider(origin, function() {
               gBrowser.removeTab(tab);
               next();
             });
           });
 
           let port = provider.getWorkerPort();
-          port.onmessage = function (e) {
-            let topic = e.data.topic;
-            switch (topic) {
-              case "got-sidebar-message":
-                ok(true, "got the sidebar message from provider 1");
-                port.postMessage({topic: "worker.update", data: true});
-                break;
-            }
-          };
-          port.postMessage({topic: "test-init"});
+          port.postMessage({topic: "worker.update", data: true});
 
         });
       });

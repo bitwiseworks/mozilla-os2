@@ -31,7 +31,7 @@ public:
   virtual a11y::role NativeRole();
   virtual uint64_t NativeState();
   virtual uint64_t NativeInteractiveState() const;
-  virtual Relation RelationByType(uint32_t aType);
+  virtual Relation RelationByType(RelationType aType) MOZ_OVERRIDE;
 
   // ActionAccessible
   virtual uint8_t ActionCount();
@@ -75,10 +75,7 @@ public:
 
 
 /**
- * A tabpanel object, child elements of xul:tabpanels element. Note,the object
- * is created from nsAccessibilityService::GetAccessibleForDeckChildren()
- * method and we do not use nsIAccessibleProvider interface here because
- * all children of xul:tabpanels element acts as xul:tabpanel element.
+ * A tabpanel object, child elements of xul:tabpanels element.
  *
  * XXX: we need to move the class logic into generic class since
  * for example we do not create instance of this class for XUL textbox used as
@@ -91,7 +88,7 @@ public:
 
   // Accessible
   virtual a11y::role NativeRole();
-  virtual Relation RelationByType(uint32_t aType);
+  virtual Relation RelationByType(RelationType aType) MOZ_OVERRIDE;
 };
 
 } // namespace a11y

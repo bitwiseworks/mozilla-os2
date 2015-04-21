@@ -139,7 +139,7 @@ struct GLContextSymbols
     PFNGLGETQUERYOBJECTUIVPROC fGetQueryObjectuiv;
     typedef void (GLAPIENTRY * PFNGLTEXPARAMETERIPROC) (GLenum target, GLenum pname, GLint param);
     PFNGLTEXPARAMETERIPROC fTexParameteri;
-    typedef void (GLAPIENTRY * PFNGLTEXPARAMETERIVPROC) (GLenum target, GLenum pname, GLint* param);
+    typedef void (GLAPIENTRY * PFNGLTEXPARAMETERIVPROC) (GLenum target, GLenum pname, const GLint* param);
     PFNGLTEXPARAMETERIVPROC fTexParameteriv;
     typedef void (GLAPIENTRY * PFNGLTEXPARAMETERFPROC) (GLenum target, GLenum pname, GLfloat param);
     PFNGLTEXPARAMETERFPROC fTexParameterf;
@@ -149,9 +149,9 @@ struct GLContextSymbols
     PFNGLGETTEXIMAGEPROC fGetTexImage;
     typedef void (GLAPIENTRY * PFNGLGETTEXLEVELPARAMETERIVPROC) (GLenum target, GLint level, GLenum pname, GLint *params);
     PFNGLGETTEXLEVELPARAMETERIVPROC fGetTexLevelParameteriv;
-    typedef void (GLAPIENTRY * PFNGLGETTEXPARAMETERFVPROC) (GLenum target, GLenum pname, const GLfloat *params);
+    typedef void (GLAPIENTRY * PFNGLGETTEXPARAMETERFVPROC) (GLenum target, GLenum pname, GLfloat *params);
     PFNGLGETTEXPARAMETERFVPROC fGetTexParameterfv;
-    typedef void (GLAPIENTRY * PFNGLGETTEXPARAMETERIVPROC) (GLenum target, GLenum pname, const GLint *params);
+    typedef void (GLAPIENTRY * PFNGLGETTEXPARAMETERIVPROC) (GLenum target, GLenum pname, GLint *params);
     PFNGLGETTEXPARAMETERIVPROC fGetTexParameteriv;
     typedef void (GLAPIENTRY * PFNGLGETUNIFORMFVPROC) (GLuint program, GLint location, GLfloat* params);
     PFNGLGETUNIFORMFVPROC fGetUniformfv;
@@ -173,6 +173,8 @@ struct GLContextSymbols
     PFNGLISENABLEDPROC fIsEnabled;
     typedef realGLboolean (GLAPIENTRY * PFNGLISPROGRAMPROC) (GLuint program);
     PFNGLISPROGRAMPROC fIsProgram;
+    typedef realGLboolean (GLAPIENTRY * PFNGLISQUERYPROC) (GLuint id);
+    PFNGLISQUERYPROC fIsQuery;
     typedef realGLboolean (GLAPIENTRY * PFNGLISSHADERPROC) (GLuint shader);
     PFNGLISSHADERPROC fIsShader;
     typedef realGLboolean (GLAPIENTRY * PFNGLISTEXTUREPROC) (GLuint texture);
@@ -209,6 +211,8 @@ struct GLContextSymbols
     PFNGLTEXIMAGE2DPROC fTexImage2D;
     typedef void (GLAPIENTRY * PFNGLTEXSUBIMAGE2DPROC) (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void* pixels);
     PFNGLTEXSUBIMAGE2DPROC fTexSubImage2D;
+    typedef void (GLAPIENTRY * PFNGLTEXTURERANGEAPPLEPROC) (GLenum target, GLsizei length, GLvoid *pointer);
+    PFNGLTEXTURERANGEAPPLEPROC fTextureRangeAPPLE;
     typedef void (GLAPIENTRY * PFNGLUNIFORM1FPROC) (GLint location, GLfloat v0);
     PFNGLUNIFORM1FPROC fUniform1f;
     typedef void (GLAPIENTRY * PFNGLUNIFORM1FVPROC) (GLint location, GLsizei count, const GLfloat* value);
@@ -309,6 +313,31 @@ struct GLContextSymbols
     typedef void (GLAPIENTRY * PFNGLRENDERBUFFERSTORAGE) (GLenum target, GLenum internalFormat, GLsizei width, GLsizei height);
     PFNGLRENDERBUFFERSTORAGE fRenderbufferStorage;
 
+        // These functions are only used by Skia/GL in desktop mode.
+        // Other parts of Gecko should avoid using these
+        typedef void (GLAPIENTRY * PFNGLCLIENTACTIVETEXTURE) (GLenum texture);
+        PFNGLCLIENTACTIVETEXTURE fClientActiveTexture;
+        typedef void (GLAPIENTRY * PFNDISABLECLIENTSTATE) (GLenum capability);
+        PFNDISABLECLIENTSTATE fDisableClientState;
+        typedef void (GLAPIENTRY * PFNENABLECLIENTSTATE) (GLenum capability);
+        PFNENABLECLIENTSTATE fEnableClientState;
+        typedef void (GLAPIENTRY * PFNLOADIDENTITY) (void);
+        PFNLOADIDENTITY fLoadIdentity;
+        typedef void (GLAPIENTRY * PFNLOADMATRIXD) (const GLdouble* matrix);
+        PFNLOADMATRIXD fLoadMatrixd;
+        typedef void (GLAPIENTRY * PFNLOADMATRIXF) (const GLfloat* matrix);
+        PFNLOADMATRIXF fLoadMatrixf;
+        typedef void (GLAPIENTRY * PFNMATRIXMODE) (GLenum mode);
+        PFNMATRIXMODE fMatrixMode;
+        typedef void (GLAPIENTRY * PFNTEXGENI) (GLenum coord, GLenum pname, GLint param);
+        PFNTEXGENI fTexGeni;
+        typedef void (GLAPIENTRY * PFNTEXGENF) (GLenum coord, GLenum pname, GLfloat param);
+        PFNTEXGENF fTexGenf;
+        typedef void (GLAPIENTRY * PFNTEXGENFV) (GLenum coord, GLenum pname, const GLfloat* param);
+        PFNTEXGENFV fTexGenfv;
+        typedef void (GLAPIENTRY * PFNVERTEXPOINTER) (GLint size, GLenum type, GLsizei stride, const GLvoid* pointer);
+        PFNVERTEXPOINTER fVertexPointer;
+
     typedef void (GLAPIENTRY * PFNGLBLITFRAMEBUFFER) (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
     PFNGLBLITFRAMEBUFFER fBlitFramebuffer;
     typedef void (GLAPIENTRY * PFNGLRENDERBUFFERSTORAGEMULTISAMPLE) (GLenum target, GLsizei samples, GLenum internalFormat, GLsizei width, GLsizei height);
@@ -407,6 +436,67 @@ struct GLContextSymbols
     PFNGLEGLIMAGETARGETTEXTURE2D fEGLImageTargetTexture2D;
     typedef void (GLAPIENTRY * PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGE)(GLenum target, GLeglImage image);
     PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGE fEGLImageTargetRenderbufferStorage;
+
+    // ARB_draw_instanced
+    typedef void (GLAPIENTRY * PFNGLDRAWARRAYSINSTANCED) (GLenum mode, GLint first, GLsizei count, GLsizei primcount);
+    PFNGLDRAWARRAYSINSTANCED fDrawArraysInstanced;
+    typedef void (GLAPIENTRY * PFNGLDRAWELEMENTSINSTANCED) (GLenum mode, GLsizei count, GLenum type, const GLvoid* indices, GLsizei primcount);
+    PFNGLDRAWELEMENTSINSTANCED fDrawElementsInstanced;
+
+    // ARB_instanced_array
+    typedef void (GLAPIENTRY * PFNGLVERTEXATTRIBDIVISOR) (GLuint index, GLuint divisor);
+    PFNGLVERTEXATTRIBDIVISOR fVertexAttribDivisor;
+
+    // EXT_transform_feedback / OpenGL (ES) 3.0
+    typedef void (GLAPIENTRY * PFNGLBINDBUFFERBASE) (GLenum target, GLuint index, GLuint buffer);
+    PFNGLBINDBUFFERBASE fBindBufferBase;
+    typedef void (GLAPIENTRY * PFNGLBINDBUFFERRANGE) (GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size);
+    PFNGLBINDBUFFERRANGE fBindBufferRange;
+
+    typedef void (GLAPIENTRY * PFNGLBEGINTRANSFORMFEEDBACK) (GLenum primitiveMode);
+    PFNGLBEGINTRANSFORMFEEDBACK fBeginTransformFeedback;
+    typedef void (GLAPIENTRY * PFNGLENDTRANSFORMFEEDBACK) (void);
+    PFNGLENDTRANSFORMFEEDBACK fEndTransformFeedback;
+
+    typedef void (GLAPIENTRY * PFNGLTRANSFORMFEEDBACKVARYINGS) (GLuint program, GLsizei count, const GLchar* const* varyings, GLenum bufferMode);
+    PFNGLTRANSFORMFEEDBACKVARYINGS fTransformFeedbackVaryings;
+    typedef void (GLAPIENTRY * PFNGLGETTRANSFORMFEEDBACKVARYING) (GLuint program, GLuint index, GLsizei bufSize, GLsizei* length, GLsizei* size, GLenum* type, GLchar* name);
+    PFNGLGETTRANSFORMFEEDBACKVARYING fGetTransformFeedbackVarying;
+
+    typedef void (GLAPIENTRY * PFNGLGETINTEGERI_V) (GLenum param, GLuint index, GLint* values);
+    PFNGLGETINTEGERI_V fGetIntegeri_v;
+
+    // EXT_transform_feedback only
+    typedef void (GLAPIENTRY * PFNGLBINDBUFFEROFFSET) (GLenum target, GLuint index, GLuint buffer, GLintptr offset);
+    PFNGLBINDBUFFEROFFSET fBindBufferOffset;
+
+    // KHR_debug
+    typedef void (GLAPIENTRY * PFNGLDEBUGMESSAGECONTROL) (GLenum source, GLenum type, GLenum severity, GLsizei count, const GLuint* ids, realGLboolean enabled);
+    PFNGLDEBUGMESSAGECONTROL fDebugMessageControl;
+    typedef void (GLAPIENTRY * PFNGLDEBUGMESSAGEINSERT) (GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* buf);
+    PFNGLDEBUGMESSAGEINSERT fDebugMessageInsert;
+    typedef void (GLAPIENTRY * PFNGLDEBUGMESSAGECALLBACK) (GLDEBUGPROC callback, const GLvoid* userParam);
+    PFNGLDEBUGMESSAGECALLBACK fDebugMessageCallback;
+    typedef GLuint (GLAPIENTRY * PFNGLDEBUGMESSAGELOG) (GLuint count, GLsizei bufsize, GLenum* sources, GLenum* types, GLuint* ids, GLenum* severities, GLsizei* lengths, GLchar* messageLog);
+    PFNGLDEBUGMESSAGELOG fGetDebugMessageLog;
+    typedef void (GLAPIENTRY * PFNGLGETPOINTERV) (GLenum pname, GLvoid** params);
+    PFNGLGETPOINTERV fGetPointerv;
+    typedef void (GLAPIENTRY * PFNGLPUSHDEBUGGROUP) (GLenum source, GLuint id, GLsizei length, const GLchar* message);
+    PFNGLPUSHDEBUGGROUP fPushDebugGroup;
+    typedef void (GLAPIENTRY * PFNGLPOPDEBUGGROUP) (void);
+    PFNGLPOPDEBUGGROUP fPopDebugGroup;
+    typedef void (GLAPIENTRY * PFNGLOBJECTLABEL) (GLenum identifier, GLuint name, GLsizei length, const GLchar* label);
+    PFNGLOBJECTLABEL fObjectLabel;
+    typedef void (GLAPIENTRY * PFNGLGETOBJECTLABEL) (GLenum identifier, GLuint name, GLsizei bufSize, GLsizei* length, GLchar* label);
+    PFNGLGETOBJECTLABEL fGetObjectLabel;
+    typedef void (GLAPIENTRY * PFNGLOBJECTPTRLABEL) (const GLvoid* ptr, GLsizei length, const GLchar* label);
+    PFNGLOBJECTPTRLABEL fObjectPtrLabel;
+    typedef void (GLAPIENTRY * PFNGLGETOBJECTPTRLABEL) (const GLvoid* ptr, GLsizei bufSize, GLsizei* length, GLchar* label);
+    PFNGLGETOBJECTPTRLABEL fGetObjectPtrLabel;
+
+    // draw_range_elements
+    typedef void (GLAPIENTRY * PFNGLDRAWRANGEELEMENTS) (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid* indices);
+    PFNGLDRAWRANGEELEMENTS fDrawRangeElements;
 };
 
 }

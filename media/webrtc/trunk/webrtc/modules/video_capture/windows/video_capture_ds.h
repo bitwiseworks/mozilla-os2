@@ -11,10 +11,8 @@
 #ifndef WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_VIDEO_CAPTURE_DS_H_
 #define WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_VIDEO_CAPTURE_DS_H_
 
-#include "../video_capture_impl.h"
-#include <tchar.h>
-
-#include "device_info_ds.h"
+#include "webrtc/modules/video_capture/video_capture_impl.h"
+#include "webrtc/modules/video_capture/windows/device_info_ds.h"
 
 #define CAPTURE_FILTER_NAME L"VideoCaptureFilter"
 #define SINK_FILTER_NAME L"SinkFilter"
@@ -29,19 +27,18 @@ class CaptureSinkFilter;
 class VideoCaptureDS: public VideoCaptureImpl
 {
 public:
-    VideoCaptureDS(const WebRtc_Word32 id);
+    VideoCaptureDS(const int32_t id);
 
-    virtual WebRtc_Word32 Init(const WebRtc_Word32 id,
-                               const char* deviceUniqueIdUTF8);
+    virtual int32_t Init(const int32_t id, const char* deviceUniqueIdUTF8);
 
     /*************************************************************************
      *
      *   Start/Stop
      *
      *************************************************************************/
-    virtual WebRtc_Word32
+    virtual int32_t
         StartCapture(const VideoCaptureCapability& capability);
-    virtual WebRtc_Word32 StopCapture();
+    virtual int32_t StopCapture();
 
     /**************************************************************************
      *
@@ -50,16 +47,16 @@ public:
      **************************************************************************/
 
     virtual bool CaptureStarted();
-    virtual WebRtc_Word32 CaptureSettings(VideoCaptureCapability& settings);
+    virtual int32_t CaptureSettings(VideoCaptureCapability& settings);
 
 protected:
     virtual ~VideoCaptureDS();
 
     // Help functions
 
-    WebRtc_Word32
+    int32_t
         SetCameraOutput(const VideoCaptureCapability& requestedCapability);
-    WebRtc_Word32 DisconnectGraph();
+    int32_t DisconnectGraph();
     HRESULT VideoCaptureDS::ConnectDVCamera();
 
     DeviceInfoDS _dsInfo;
@@ -77,6 +74,6 @@ protected:
     IPin* _outputDvPin;
 
 };
-} // namespace videocapturemodule
-} //namespace webrtc
+}  // namespace videocapturemodule
+}  // namespace webrtc
 #endif // WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_VIDEO_CAPTURE_DS_H_

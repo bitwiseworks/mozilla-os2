@@ -14,7 +14,7 @@ class nsSVGElement;
 namespace mozilla {
 namespace dom {
 
-class SVGDocument : public XMLDocument
+class SVGDocument MOZ_FINAL : public XMLDocument
 {
 public:
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
@@ -24,8 +24,7 @@ public:
   nsSVGElement* GetRootElement(ErrorResult& aRv);
 
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 };
 
 } // namespace dom

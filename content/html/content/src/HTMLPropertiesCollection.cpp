@@ -13,12 +13,12 @@
 #include "nsAttrValue.h"
 #include "nsWrapperCacheInlines.h"
 #include "mozilla/dom/HTMLPropertiesCollectionBinding.h"
-
-DOMCI_DATA(HTMLPropertiesCollection, mozilla::dom::HTMLPropertiesCollection)
-DOMCI_DATA(PropertyNodeList, mozilla::dom::PropertyNodeList)
+#include "jsapi.h"
 
 namespace mozilla {
 namespace dom {
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLPropertiesCollection)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(HTMLPropertiesCollection)
   // SetDocument(nullptr) ensures that we remove ourselves as a mutation observer
@@ -51,7 +51,6 @@ HTMLPropertiesCollection::HTMLPropertiesCollection(nsGenericHTMLElement* aRoot)
   if (mDoc) {
     mDoc->AddMutationObserver(this);
   }
-  mNamedItemEntries.Init();
 }
 
 HTMLPropertiesCollection::~HTMLPropertiesCollection()
@@ -63,10 +62,10 @@ HTMLPropertiesCollection::~HTMLPropertiesCollection()
 
 NS_INTERFACE_TABLE_HEAD(HTMLPropertiesCollection)
     NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-    NS_INTERFACE_TABLE3(HTMLPropertiesCollection,
-                        nsIDOMHTMLCollection,
-                        nsIHTMLCollection,
-                        nsIMutationObserver)
+    NS_INTERFACE_TABLE(HTMLPropertiesCollection,
+                       nsIDOMHTMLCollection,
+                       nsIHTMLCollection,
+                       nsIMutationObserver)
     NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(HTMLPropertiesCollection)
 NS_INTERFACE_MAP_END
 
@@ -95,9 +94,9 @@ HTMLPropertiesCollection::SetDocument(nsIDocument* aDocument) {
 }
 
 JSObject*
-HTMLPropertiesCollection::WrapObject(JSContext* cx, JS::Handle<JSObject*> scope)
+HTMLPropertiesCollection::WrapObject(JSContext* cx)
 {
-  return HTMLPropertiesCollectionBinding::Wrap(cx, scope, this);
+  return HTMLPropertiesCollectionBinding::Wrap(cx, this);
 }
 
 NS_IMETHODIMP
@@ -126,16 +125,6 @@ HTMLPropertiesCollection::NamedItem(const nsAString& aName,
 {
   *aResult = nullptr;
   return NS_OK;
-}
-
-JSObject*
-HTMLPropertiesCollection::NamedItem(JSContext* cx, const nsAString& name,
-                                    mozilla::ErrorResult& error)
-{
-  // HTMLPropertiesCollection.namedItem and the named getter call the NamedItem
-  // that returns a PropertyNodeList, calling HTMLCollection.namedItem doesn't
-  // make sense so this returns null.
-  return nullptr;
 }
 
 Element*
@@ -201,19 +190,6 @@ HTMLPropertiesCollection::ContentRemoved(nsIDocument *aDocument,
   mIsDirty = true;
 }
 
-class TreeOrderComparator {
-  public:
-    bool Equals(const nsGenericHTMLElement* aElem1,
-                const nsGenericHTMLElement* aElem2) const {
-      return aElem1 == aElem2;
-    }
-    bool LessThan(const nsGenericHTMLElement* aElem1,
-                  const nsGenericHTMLElement* aElem2) const {
-      return nsContentUtils::PositionIsBefore(const_cast<nsGenericHTMLElement*>(aElem1),
-                                              const_cast<nsGenericHTMLElement*>(aElem2));
-    }
-};
-
 static PLDHashOperator
 MarkDirty(const nsAString& aKey, PropertyNodeList* aEntry, void* aData)
 {
@@ -247,7 +223,6 @@ HTMLPropertiesCollection::EnsureFresh()
     const nsAttrValue* attr = mProperties.ElementAt(i)->GetParsedAttr(nsGkAtoms::itemprop); 
     for (uint32_t i = 0; i < attr->GetAtomCount(); i++) {
       nsDependentAtomString propName(attr->AtomAt(i));
-      // ContainsInternal must not call EnsureFresh
       bool contains = mNames->ContainsInternal(propName);
       if (!contains) {
         mNames->Add(propName);
@@ -322,7 +297,7 @@ HTMLPropertiesCollection::CrawlSubtree(Element* aElement)
 }
 
 void
-HTMLPropertiesCollection::GetSupportedNames(nsTArray<nsString>& aNames)
+HTMLPropertiesCollection::GetSupportedNames(unsigned, nsTArray<nsString>& aNames)
 {
   EnsureFresh();
   mNames->CopyList(aNames);
@@ -403,10 +378,12 @@ PropertyNodeList::GetParentObject()
 }
 
 JSObject*
-PropertyNodeList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+PropertyNodeList::WrapObject(JSContext *cx)
 {
-  return PropertyNodeListBinding::Wrap(cx, scope, this);
+  return PropertyNodeListBinding::Wrap(cx, this);
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(PropertyNodeList)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(PropertyNodeList)
   // SetDocument(nullptr) ensures that we remove ourselves as a mutation observer
@@ -432,10 +409,10 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(PropertyNodeList)
 
 NS_INTERFACE_TABLE_HEAD(PropertyNodeList)
     NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-    NS_INTERFACE_TABLE3(PropertyNodeList,
-                        nsIDOMNodeList,
-                        nsINodeList,
-                        nsIMutationObserver)
+    NS_INTERFACE_TABLE(PropertyNodeList,
+                       nsIDOMNodeList,
+                       nsINodeList,
+                       nsIMutationObserver)
     NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(PropertyNodeList)
 NS_INTERFACE_MAP_END
 
@@ -445,11 +422,12 @@ PropertyNodeList::GetValues(JSContext* aCx, nsTArray<JS::Value >& aResult,
 {
   EnsureFresh();
 
-  JS::RootedObject wrapper(aCx, GetWrapper());
+  JS::Rooted<JSObject*> wrapper(aCx, GetWrapper());
   JSAutoCompartment ac(aCx, wrapper);
   uint32_t length = mElements.Length();
   for (uint32_t i = 0; i < length; ++i) {
-    JS::Value v = mElements.ElementAt(i)->GetItemValue(aCx, wrapper, aError);
+    JS::Rooted<JS::Value> v(aCx);
+    mElements.ElementAt(i)->GetItemValue(aCx, wrapper, &v, aError);
     if (aError.Failed()) {
       return;
     }
@@ -514,49 +492,30 @@ PropertyNodeList::EnsureFresh()
 }
 
 PropertyStringList::PropertyStringList(HTMLPropertiesCollection* aCollection)
-  : nsDOMStringList()
+  : DOMStringList()
   , mCollection(aCollection)
 { }
 
-NS_IMPL_CYCLE_COLLECTION_1(PropertyStringList, mCollection)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(PropertyStringList, DOMStringList,
+                                   mCollection)
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(PropertyStringList)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(PropertyStringList)
+NS_IMPL_ADDREF_INHERITED(PropertyStringList, DOMStringList)
+NS_IMPL_RELEASE_INHERITED(PropertyStringList, DOMStringList)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(PropertyStringList)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMDOMStringList)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(DOMStringList)
-NS_INTERFACE_MAP_END
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(PropertyStringList)
+NS_INTERFACE_MAP_END_INHERITING(DOMStringList)
 
-NS_IMETHODIMP
-PropertyStringList::Item(uint32_t aIndex, nsAString& aResult)
+void
+PropertyStringList::EnsureFresh()
 {
   mCollection->EnsureFresh();
-  return nsDOMStringList::Item(aIndex, aResult);
-}
-
-NS_IMETHODIMP
-PropertyStringList::GetLength(uint32_t* aLength)
-{
-  mCollection->EnsureFresh();
-  return nsDOMStringList::GetLength(aLength);
-}
-
-NS_IMETHODIMP
-PropertyStringList::Contains(const nsAString& aString, bool* aResult)
-{
-  mCollection->EnsureFresh();
-  return nsDOMStringList::Contains(aString, aResult);
 }
 
 bool
 PropertyStringList::ContainsInternal(const nsAString& aString)
 {
   // This method should not call EnsureFresh, otherwise we may become stuck in an infinite loop.
-  bool result;
-  nsDOMStringList::Contains(aString, &result);
-  return result;
+  return mNames.Contains(aString);
 }
 
 } // namespace dom

@@ -3,8 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /*
- * This file is used for both about:memory and about:compartments.
- *
  * The version used for mobile is located at
  * mobile/android/themes/core/aboutMemory.css.
  * Desktop-specific stuff is at the bottom of this file.
@@ -64,11 +62,22 @@ div.non-verbose pre.entries {
 h1 {
   padding: 0;
   margin: 0;
+  display: inline;  /* allow subsequent text to the right of the heading */
 }
 
 h2 {
   background: #ddd;
   padding-left: .1em;
+}
+
+h3 {
+  display: inline;  /* allow subsequent text to the right of the heading */
+}
+
+a.upDownArrow {
+  font-size: 130%;
+  text-decoration: none;
+  -moz-user-select: none;  /* no need to include this when cutting+pasting */
 }
 
 .accuracyWarning {

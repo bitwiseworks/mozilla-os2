@@ -60,8 +60,6 @@ D3D9DXVA2Manager::GetDXVADeviceManager()
   return mDeviceManager;
 }
 
-typedef HRESULT (WINAPI*Direct3DCreate9Func)(UINT SDKVersion, IDirect3D9Ex**);
-
 HRESULT
 D3D9DXVA2Manager::Init()
 {
@@ -70,8 +68,8 @@ D3D9DXVA2Manager::Init()
   // Create D3D9Ex.
   HMODULE d3d9lib = LoadLibraryW(L"d3d9.dll");
   NS_ENSURE_TRUE(d3d9lib, E_FAIL);
-  Direct3DCreate9Func d3d9Create =
-    (Direct3DCreate9Func)GetProcAddress(d3d9lib, "Direct3DCreate9Ex");
+  decltype(Direct3DCreate9Ex)* d3d9Create =
+    (decltype(Direct3DCreate9Ex)*) GetProcAddress(d3d9lib, "Direct3DCreate9Ex");
   nsRefPtr<IDirect3D9Ex> d3d9Ex;
   HRESULT hr = d3d9Create(D3D_SDK_VERSION, getter_AddRefs(d3d9Ex));
   if (!d3d9Ex) {
@@ -106,7 +104,7 @@ D3D9DXVA2Manager::Init()
                               D3DCREATE_MULTITHREADED |
                               D3DCREATE_MIXED_VERTEXPROCESSING,
                               &params,
-                              NULL,
+                              nullptr,
                               getter_AddRefs(device));
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
@@ -154,10 +152,9 @@ D3D9DXVA2Manager::CopyToImage(IMFSample* aSample,
                          getter_AddRefs(surface));
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
-  ImageFormat format = D3D9_RGB32_TEXTURE;
-  nsRefPtr<Image> image = aImageContainer->CreateImage(&format, 1);
+  nsRefPtr<Image> image = aImageContainer->CreateImage(ImageFormat::D3D9_RGB32_TEXTURE);
   NS_ENSURE_TRUE(image, E_FAIL);
-  NS_ASSERTION(image->GetFormat() == D3D9_RGB32_TEXTURE,
+  NS_ASSERTION(image->GetFormat() == ImageFormat::D3D9_RGB32_TEXTURE,
                "Wrong format?");
 
   D3D9SurfaceImage* videoImage = static_cast<D3D9SurfaceImage*>(image.get());

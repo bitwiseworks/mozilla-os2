@@ -6,6 +6,7 @@
 #ifndef mozilla_dom_HTMLFormElement_h
 #define mozilla_dom_HTMLFormElement_h
 
+#include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
 #include "nsIForm.h"
@@ -18,55 +19,40 @@
 #include "nsIWeakReferenceUtils.h"
 #include "nsThreadUtils.h"
 #include "nsInterfaceHashtable.h"
+#include "nsRefPtrHashtable.h"
 #include "nsDataHashtable.h"
-#include "nsAsyncDOMEvent.h"
-
-// Including 'windows.h' will #define GetClassInfo to something else.
-#ifdef XP_WIN
-#ifdef GetClassInfo
-#undef GetClassInfo
-#endif
-#endif
+#include "jsfriendapi.h" // For js::ExpandoAndGeneration
 
 class nsIMutableArray;
 class nsIURI;
 
 namespace mozilla {
+class EventChainPostVisitor;
+class EventChainPreVisitor;
 namespace dom {
+class HTMLFormControlsCollection;
 class HTMLImageElement;
-}
-}
 
-namespace mozilla {
-namespace dom {
-
-class nsFormControlList;
-
-class HTMLFormElement : public nsGenericHTMLElement,
-                        public nsIDOMHTMLFormElement,
-                        public nsIWebProgressListener,
-                        public nsIForm,
-                        public nsIRadioGroupContainer
+class HTMLFormElement MOZ_FINAL : public nsGenericHTMLElement,
+                                  public nsIDOMHTMLFormElement,
+                                  public nsIWebProgressListener,
+                                  public nsIForm,
+                                  public nsIRadioGroupContainer
 {
-  friend class nsFormControlList;
+  friend class HTMLFormControlsCollection;
 
 public:
-  HTMLFormElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  HTMLFormElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
   virtual ~HTMLFormElement();
 
   nsresult Init();
 
+  enum {
+    FORM_CONTROL_LIST_HASHTABLE_SIZE = 16
+  };
+
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLFormElement
   NS_DECL_NSIDOMHTMLFORMELEMENT
@@ -82,12 +68,12 @@ public:
 
   // nsIRadioGroupContainer
   void SetCurrentRadioButton(const nsAString& aName,
-                             nsIDOMHTMLInputElement* aRadio) MOZ_OVERRIDE;
-  nsIDOMHTMLInputElement* GetCurrentRadioButton(const nsAString& aName) MOZ_OVERRIDE;
+                             HTMLInputElement* aRadio) MOZ_OVERRIDE;
+  HTMLInputElement* GetCurrentRadioButton(const nsAString& aName) MOZ_OVERRIDE;
   NS_IMETHOD GetNextRadioButton(const nsAString& aName,
                                 const bool aPrevious,
-                                nsIDOMHTMLInputElement*  aFocusedRadio,
-                                nsIDOMHTMLInputElement** aRadioOut) MOZ_OVERRIDE;
+                                HTMLInputElement* aFocusedRadio,
+                                HTMLInputElement** aRadioOut) MOZ_OVERRIDE;
   NS_IMETHOD WalkRadioGroup(const nsAString& aName, nsIRadioVisitor* aVisitor,
                             bool aFlushContent) MOZ_OVERRIDE;
   void AddToRadioGroup(const nsAString& aName, nsIFormControl* aRadio) MOZ_OVERRIDE;
@@ -98,16 +84,18 @@ public:
   virtual bool GetValueMissingState(const nsAString& aName) const MOZ_OVERRIDE;
   virtual void SetValueMissingState(const nsAString& aName, bool aValue) MOZ_OVERRIDE;
 
-  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  virtual EventStates IntrinsicState() const MOZ_OVERRIDE;
 
   // nsIContent
   virtual bool ParseAttribute(int32_t aNamespaceID,
                                 nsIAtom* aAttribute,
                                 const nsAString& aValue,
                                 nsAttrValue& aResult) MOZ_OVERRIDE;
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
-  virtual nsresult WillHandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
-  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult WillHandleEvent(
+                     EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PostHandleEvent(
+                     EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
 
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
@@ -232,11 +220,12 @@ public:
                                  const nsAString& aName);
 
    /**
-    * Return whether there is one and only one input text control.
+    * Returns true if implicit submission of this form is disabled. For more
+    * on implicit submission see:
     *
-    * @return Whether there is exactly one input text control.
+    * http://www.whatwg.org/specs/web-apps/current-work/multipage/association-of-controls-and-forms.html#implicit-submission
     */
-  bool HasSingleTextControl() const;
+  bool ImplicitSubmissionIsDisabled() const;
 
   /**
    * Check whether a given nsIFormControl is the default submit
@@ -288,10 +277,6 @@ public:
    * @note This method might disappear with bug 592124, hopefuly.
    */
   bool CheckValidFormSubmission();
-
-  virtual nsXPCClassInfo* GetClassInfo() MOZ_OVERRIDE;
-
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
   /**
    * Walk over the form elements and call SubmitNamesValues() on them to get
@@ -410,33 +395,43 @@ public:
   already_AddRefed<nsISupports>
   NamedGetter(const nsAString& aName, bool &aFound);
 
-  void GetSupportedNames(nsTArray<nsString >& aRetval);
+  bool NameIsEnumerable(const nsAString& aName);
+
+  void GetSupportedNames(unsigned, nsTArray<nsString >& aRetval);
+
+  static int32_t
+  CompareFormControlPosition(Element* aElement1, Element* aElement2,
+                             const nsIContent* aForm);
+#ifdef DEBUG
+  static void
+  AssertDocumentOrder(const nsTArray<nsGenericHTMLFormElement*>& aControls,
+                      nsIContent* aForm);
+#endif
 
   js::ExpandoAndGeneration mExpandoAndGeneration;
 
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
 
   void PostPasswordEvent();
-  void EventHandled() { mFormPasswordEvent = nullptr; }
+  void EventHandled() { mFormPasswordEventDispatcher = nullptr; }
 
-  class FormPasswordEvent : public nsAsyncDOMEvent
+  class FormPasswordEventDispatcher MOZ_FINAL : public AsyncEventDispatcher
   {
   public:
-    FormPasswordEvent(HTMLFormElement* aEventNode,
-                      const nsAString& aEventType)
-      : nsAsyncDOMEvent(aEventNode, aEventType, true, true)
+    FormPasswordEventDispatcher(HTMLFormElement* aEventNode,
+                                const nsAString& aEventType)
+      : AsyncEventDispatcher(aEventNode, aEventType, true, true)
     {}
 
     NS_IMETHOD Run() MOZ_OVERRIDE
     {
       static_cast<HTMLFormElement*>(mEventNode.get())->EventHandled();
-      return nsAsyncDOMEvent::Run();
+      return AsyncEventDispatcher::Run();
     }
   };
 
-  nsRefPtr<FormPasswordEvent> mFormPasswordEvent;
+  nsRefPtr<FormPasswordEventDispatcher> mFormPasswordEventDispatcher;
 
   class RemoveElementRunnable;
   friend class RemoveElementRunnable;
@@ -456,7 +451,7 @@ protected:
     nsRefPtr<HTMLFormElement> mForm;
   };
 
-  nsresult DoSubmitOrReset(nsEvent* aEvent,
+  nsresult DoSubmitOrReset(WidgetEvent* aEvent,
                            int32_t aMessage);
   nsresult DoReset();
 
@@ -474,7 +469,7 @@ protected:
    * @param aPresContext the presentation context
    * @param aEvent the DOM event that was passed to us for the submit
    */
-  nsresult DoSubmit(nsEvent* aEvent);
+  nsresult DoSubmit(WidgetEvent* aEvent);
 
   /**
    * Prepare the submission object (called by DoSubmit)
@@ -483,7 +478,7 @@ protected:
    * @param aEvent the DOM event that was passed to us for the submit
    */
   nsresult BuildSubmission(nsFormSubmission** aFormSubmission,
-                           nsEvent* aEvent);
+                           WidgetEvent* aEvent);
   /**
    * Perform the submission (called by DoSubmit and FlushPendingSubmission)
    *
@@ -556,9 +551,9 @@ protected:
   // Data members
   //
   /** The list of controls (form.elements as well as stuff not in elements) */
-  nsRefPtr<nsFormControlList> mControls;
+  nsRefPtr<HTMLFormControlsCollection> mControls;
   /** The currently selected radio button of each group */
-  nsInterfaceHashtable<nsStringCaseInsensitiveHashKey,nsIDOMHTMLInputElement> mSelectedRadioButtons;
+  nsRefPtrHashtable<nsStringCaseInsensitiveHashKey, HTMLInputElement> mSelectedRadioButtons;
   /** The number of required radio button of each group */
   nsDataHashtable<nsStringCaseInsensitiveHashKey,uint32_t> mRequiredRadioButtonCounts;
   /** The value missing state of each group */

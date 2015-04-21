@@ -29,6 +29,7 @@
 
 .fullscreenButton,
 .playButton,
+.castingButton,
 .muteButton {
   -moz-appearance: none;
   min-height: 42px;
@@ -54,12 +55,16 @@
  * is hidden by videocontrols.xml, and that alters the position of the
  * play button.  This workaround moves it back to center.
  */
-.controlBar.audio .playButton {
+.controlBar.audio-only .playButton {
   transform: translateX(28px);
 }
 
 .playButton[paused="true"] {
   background: url("chrome://browser/skin/images/play-hdpi.png") no-repeat center;
+}
+
+.castingButton {
+  display: none;
 }
 
 .muteButton {

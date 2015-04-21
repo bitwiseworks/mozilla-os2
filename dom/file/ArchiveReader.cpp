@@ -9,41 +9,46 @@
 #include "ArchiveEvent.h"
 #include "ArchiveZipEvent.h"
 
-#include "nsContentUtils.h"
-#include "nsLayoutStatics.h"
-
 #include "nsIURI.h"
 #include "nsNetUtil.h"
 
 #include "mozilla/dom/ArchiveReaderBinding.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/EncodingUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 USING_FILE_NAMESPACE
 
 /* static */ already_AddRefed<ArchiveReader>
-ArchiveReader::Constructor(const GlobalObject& aGlobal, nsIDOMBlob* aBlob,
+ArchiveReader::Constructor(const GlobalObject& aGlobal,
+                           nsIDOMBlob* aBlob,
                            const ArchiveReaderOptions& aOptions,
                            ErrorResult& aError)
 {
   MOZ_ASSERT(aBlob);
-  MOZ_ASSERT(PrefEnabled());
 
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.Get());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
   if (!window) {
     aError.Throw(NS_ERROR_UNEXPECTED);
     return nullptr;
   }
 
+  nsAutoCString encoding;
+  if (!EncodingUtils::FindEncodingForLabel(aOptions.mEncoding, encoding) ||
+      encoding.EqualsLiteral("replacement")) {
+    aError.ThrowTypeError(MSG_ENCODING_NOT_SUPPORTED, &aOptions.mEncoding);
+    return nullptr;
+  }
+
   nsRefPtr<ArchiveReader> reader =
-    new ArchiveReader(aBlob, window, aOptions.mEncoding);
+    new ArchiveReader(aBlob, window, encoding);
   return reader.forget();
 }
 
 ArchiveReader::ArchiveReader(nsIDOMBlob* aBlob, nsPIDOMWindow* aWindow,
-                             const nsString& aEncoding)
+                             const nsACString& aEncoding)
   : mBlob(aBlob)
   , mWindow(aWindow)
   , mStatus(NOT_STARTED)
@@ -52,25 +57,17 @@ ArchiveReader::ArchiveReader(nsIDOMBlob* aBlob, nsPIDOMWindow* aWindow,
   MOZ_ASSERT(aBlob);
   MOZ_ASSERT(aWindow);
 
-  nsLayoutStatics::AddRef();
   SetIsDOMBinding();
 }
 
 ArchiveReader::~ArchiveReader()
 {
-  nsLayoutStatics::Release();
 }
 
 /* virtual */ JSObject*
-ArchiveReader::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ArchiveReader::WrapObject(JSContext* aCx)
 {
-  return ArchiveReaderBinding::Wrap(aCx, aScope, this);
-}
-
-/* static */ bool
-ArchiveReader::PrefEnabled()
-{
-  return Preferences::GetBool("dom.archivereader.enabled", true);
+  return ArchiveReaderBinding::Wrap(aCx, this);
 }
 
 nsresult

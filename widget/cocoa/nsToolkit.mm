@@ -49,7 +49,6 @@ nsToolkit::nsToolkit()
 {
   MOZ_COUNT_CTOR(nsToolkit);
   RegisterForSleepWakeNotifcations();
-  RegisterForAllProcessMouseEvents();
 }
 
 nsToolkit::~nsToolkit()
@@ -185,7 +184,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy proxy, CGEventType type, CGEv
   // so would break the corresponding context menu).
   if (NSPointInRect(screenLocation, [ctxMenuWindow frame]))
     return event;
-  rollupListener->Rollup(0, nullptr);
+  rollupListener->Rollup(0, nullptr, nullptr);
   return event;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(NULL);
@@ -290,10 +289,7 @@ nsToolkit* nsToolkit::GetToolkit()
 // Since the Method type becomes an opaque type as of Objective-C 2.0, we'll
 // have to switch to using accessor methods like method_exchangeImplementations()
 // when we build 64-bit binaries that use Objective-C 2.0 (on and for Leopard
-// and above).  But these accessor methods aren't available in Objective-C 1
-// (or on Tiger).  So we need to access Method's members directly for (Tiger-
-// capable) binaries (32-bit or 64-bit) that use Objective-C 1 (as long as we
-// keep supporting Tiger).
+// and above).
 //
 // Be aware that, if aClass doesn't have an orgMethod selector but one of its
 // superclasses does, the method substitution will (in effect) take place in
@@ -321,13 +317,7 @@ nsresult nsToolkit::SwizzleMethods(Class aClass, SEL orgMethod, SEL posedMethod,
   if (!original || !posed)
     return NS_ERROR_FAILURE;
 
-#ifdef __LP64__
   method_exchangeImplementations(original, posed);
-#else
-  IMP aMethodImp = original->method_imp;
-  original->method_imp = posed->method_imp;
-  posed->method_imp = aMethodImp;
-#endif
 
   return NS_OK;
 

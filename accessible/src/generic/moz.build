@@ -4,18 +4,16 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'accessibility'
-
 EXPORTS.mozilla.a11y += [
     'Accessible.h',
     'DocAccessible.h',
     'HyperTextAccessible.h',
 ]
 
-CPP_SOURCES += [
-    'ARIAGridAccessible.cpp',
+UNIFIED_SOURCES += [
     'Accessible.cpp',
     'ApplicationAccessible.cpp',
+    'ARIAGridAccessible.cpp',
     'BaseAccessibles.cpp',
     'DocAccessible.cpp',
     'FormControlAccessible.cpp',
@@ -27,5 +25,31 @@ CPP_SOURCES += [
     'TextLeafAccessible.cpp',
 ]
 
-LIBRARY_NAME = 'accessibility_generic_s'
+LOCAL_INCLUDES += [
+    '../../../layout/generic',
+    '../../../layout/xul',
+    '../base',
+    '../html',
+    '../xpcom',
+    '../xul',
+]
 
+if CONFIG['MOZ_ENABLE_GTK']:
+    LOCAL_INCLUDES += [
+        '../atk',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    LOCAL_INCLUDES += [
+        '../windows/ia2',
+        '../windows/msaa',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    LOCAL_INCLUDES += [
+        '../mac',
+    ]
+else:
+    LOCAL_INCLUDES += [
+        '../other',
+    ]
+
+FINAL_LIBRARY = 'xul'

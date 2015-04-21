@@ -5,6 +5,7 @@
 
 package org.mozilla.gecko.gfx;
 
+import org.mozilla.gecko.mozglue.generatorannotations.WrapElementForJNI;
 import org.mozilla.gecko.util.FloatUtils;
 
 import android.graphics.RectF;
@@ -18,13 +19,16 @@ import android.graphics.RectF;
  * subsection of that with compositor scaling.
  */
 public final class DisplayPortMetrics {
+    @WrapElementForJNI
     public final float resolution;
+    @WrapElementForJNI
     private final RectF mPosition;
 
     public DisplayPortMetrics() {
         this(0, 0, 0, 0, 1);
     }
 
+    @WrapElementForJNI
     public DisplayPortMetrics(float left, float top, float right, float bottom, float resolution) {
         this.resolution = resolution;
         mPosition = new RectF(left, top, right, bottom);
@@ -56,7 +60,7 @@ public final class DisplayPortMetrics {
     }
 
     public String toJSON() {
-        StringBuffer sb = new StringBuffer(256);
+        StringBuilder sb = new StringBuilder(256);
         sb.append("{ \"left\": ").append(mPosition.left)
           .append(", \"top\": ").append(mPosition.top)
           .append(", \"right\": ").append(mPosition.right)

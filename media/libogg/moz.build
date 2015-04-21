@@ -4,7 +4,21 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DIRS += ['include', 'src']
+EXPORTS.ogg += [
+    'include/ogg/config_types.h',
+    'include/ogg/ogg.h',
+    'include/ogg/os_types.h',
+]
 
-MODULE = 'ogg'
+UNIFIED_SOURCES += [
+    'src/ogg_alloc.c',
+    'src/ogg_bitwise.c',
+    'src/ogg_framing.c',
+]
 
+MSVC_ENABLE_PGO = True
+
+if CONFIG['GKMEDIAS_SHARED_LIBRARY']:
+    NO_VISIBILITY_FLAGS = True
+
+FINAL_LIBRARY = 'gkmedias'

@@ -6,8 +6,13 @@
 #ifndef mozilla_imagelib_DiscardTracker_h_
 #define mozilla_imagelib_DiscardTracker_h_
 
+#include "mozilla/Atomics.h"
 #include "mozilla/LinkedList.h"
+#include "mozilla/Mutex.h"
 #include "mozilla/TimeStamp.h"
+#include "prlock.h"
+#include "nsThreadUtils.h"
+#include "nsAutoPtr.h"
 
 class nsITimer;
 
@@ -77,18 +82,26 @@ class DiscardTracker
     static void DiscardAll();
 
     /**
-     * Inform the discard tracker that we've allocated or deallocated some
-     * memory for a decoded image.  We use this to determine when we've
-     * allocated too much memory and should discard some images.  This function
-     * can be called from any thread and is thread-safe.
+     * Inform the discard tracker that we are going to allocate some memory
+     * for a decoded image. We use this to determine when we've allocated
+     * too much memory and should discard some images.  This function can be
+     * called from any thread and is thread-safe. If this function succeeds, the
+     * caller is now responsible for ensuring that InformDeallocation is called.
      */
-    static void InformAllocation(int64_t bytes);
+    static bool TryAllocation(uint64_t aBytes);
+
+    /**
+     * Inform the discard tracker that we've deallocated some memory for a
+     * decoded image. This function can be called from any thread and is
+     * thread-safe.
+     */
+    static void InformDeallocation(uint64_t aBytes);
 
   private:
     /**
      * This is called when the discard timer fires; it calls into DiscardNow().
      */
-    friend int DiscardTimeoutChangedCallback(const char* aPref, void *aClosure);
+    friend void DiscardTimeoutChangedCallback(const char* aPref, void *aClosure);
 
     /**
      * When run, this runnable sets sDiscardRunnablePending to false and calls
@@ -110,12 +123,15 @@ class DiscardTracker
     static nsCOMPtr<nsITimer> sTimer;
     static bool sInitialized;
     static bool sTimerOn;
-    static int32_t sDiscardRunnablePending;
-    static int64_t sCurrentDecodedImageBytes;
+    static mozilla::Atomic<bool> sDiscardRunnablePending;
+    static uint64_t sCurrentDecodedImageBytes;
     static uint32_t sMinDiscardTimeoutMs;
     static uint32_t sMaxDecodedImageKB;
+    static uint32_t sHardLimitDecodedImageKB;
     // Lock for safegarding the 64-bit sCurrentDecodedImageBytes
     static PRLock *sAllocationLock;
+    static mozilla::Mutex* sNodeListMutex;
+    static Atomic<bool> sShutdown;
 };
 
 } // namespace image

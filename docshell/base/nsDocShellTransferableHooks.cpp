@@ -2,12 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsCOMPtr.h"
-#include "nsCOMArray.h"
 #include "nsDocShellTransferableHooks.h"
 #include "nsIClipboardDragDropHooks.h"
 #include "nsIClipboardDragDropHookList.h"
-#include "nsISimpleEnumerator.h"
 #include "nsArrayEnumerator.h"
 
 nsTransferableHookData::nsTransferableHookData()
@@ -23,7 +20,7 @@ nsTransferableHookData::~nsTransferableHookData()
 // nsIClipboardDragDropHookList
 //*****************************************************************************
 
-NS_IMPL_ISUPPORTS1(nsTransferableHookData, nsIClipboardDragDropHookList)
+NS_IMPL_ISUPPORTS(nsTransferableHookData, nsIClipboardDragDropHookList)
 
 NS_IMETHODIMP
 nsTransferableHookData::AddClipboardDragDropHooks(

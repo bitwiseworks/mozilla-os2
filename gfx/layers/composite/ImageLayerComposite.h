@@ -6,17 +6,24 @@
 #ifndef GFX_ImageLayerComposite_H
 #define GFX_ImageLayerComposite_H
 
-#include "mozilla/layers/PLayerTransaction.h"
-#include "mozilla/layers/ShadowLayers.h"
+#include "GLTextureImage.h"             // for TextureImage
+#include "ImageLayers.h"                // for ImageLayer
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/layers/LayerManagerComposite.h"  // for LayerComposite, etc
+#include "mozilla/layers/LayersTypes.h"  // for LayerRenderState, etc
+#include "nsISupportsImpl.h"            // for TextureImage::AddRef, etc
+#include "nscore.h"                     // for nsACString
 
-#include "mozilla/layers/LayerManagerComposite.h"
-#include "ImageLayers.h"
-#include "mozilla/Mutex.h"
+struct nsIntPoint;
+struct nsIntRect;
 
 namespace mozilla {
 namespace layers {
 
+class CompositableHost;
 class ImageHost;
+class Layer;
 
 class ImageLayerComposite : public ImageLayer,
                             public LayerComposite
@@ -32,14 +39,13 @@ public:
 
   virtual void Disconnect() MOZ_OVERRIDE;
 
-  virtual void SetCompositableHost(CompositableHost* aHost) MOZ_OVERRIDE;
+  virtual bool SetCompositableHost(CompositableHost* aHost) MOZ_OVERRIDE;
 
   virtual Layer* GetLayer() MOZ_OVERRIDE;
 
-  virtual void RenderLayer(const nsIntPoint& aOffset,
-                           const nsIntRect& aClipRect);
+  virtual void RenderLayer(const nsIntRect& aClipRect);
 
-  virtual void ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface) MOZ_OVERRIDE;
+  virtual void ComputeEffectiveTransforms(const mozilla::gfx::Matrix4x4& aTransformToSurface) MOZ_OVERRIDE;
 
   virtual void CleanupResources() MOZ_OVERRIDE;
 
@@ -47,15 +53,13 @@ public:
 
   virtual LayerComposite* AsLayerComposite() MOZ_OVERRIDE { return this; }
 
-#ifdef MOZ_LAYERS_HAVE_LOG
   virtual const char* Name() const { return "ImageLayerComposite"; }
 
 protected:
   virtual nsACString& PrintInfo(nsACString& aTo, const char* aPrefix) MOZ_OVERRIDE;
-#endif
 
 private:
-  RefPtr<ImageHost> mImageHost;
+  RefPtr<CompositableHost> mImageHost;
 };
 
 } /* layers */

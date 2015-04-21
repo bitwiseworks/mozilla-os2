@@ -11,9 +11,6 @@
 #include "mozilla/StartupTimeline.h"
 #include "nsTArray.h"
 #include "nsStringGlue.h"
-#if defined(MOZ_ENABLE_PROFILER_SPS)
-#include "shared-libraries.h"
-#endif
 
 namespace base {
   class Histogram;
@@ -41,6 +38,17 @@ void Init();
  * @param sample - value to record.
  */
 void Accumulate(ID id, uint32_t sample);
+
+/**
+ * Adds a sample to a histogram defined in TelemetryHistograms.h.
+ * This function is here to support telemetry measurements from Java,
+ * where we have only names and not numeric IDs.  You should almost
+ * certainly be using the by-enum-id version instead of this one.
+ *
+ * @param name - histogram name
+ * @param sample - value to record
+ */
+void Accumulate(const char* name, uint32_t sample);
 
 /**
  * Adds time delta in milliseconds to a histogram defined in TelemetryHistograms.h
@@ -148,6 +156,31 @@ void RecordSlowSQLStatement(const nsACString &statement,
                             uint32_t delay);
 
 /**
+ * Initialize I/O Reporting
+ * Initially this only records I/O for files in the binary directory.
+ *
+ * @param aXreDir - XRE directory
+ */
+void InitIOReporting(nsIFile* aXreDir);
+
+/**
+ * Set the profile directory. Once called, files in the profile directory will
+ * be included in I/O reporting. We can't use the directory
+ * service to obtain this information because it isn't running yet.
+ */
+void SetProfileDir(nsIFile* aProfD);
+
+/**
+ * Called to inform Telemetry that startup has completed.
+ */
+void LeavingStartupStage();
+
+/**
+ * Called to inform Telemetry that shutdown is commencing.
+ */
+void EnteringShutdownStage();
+
+/**
  * Thresholds for a statement to be considered slow, in milliseconds
  */
 const uint32_t kSlowSQLThresholdForMainThread = 50;
@@ -158,14 +191,31 @@ class ProcessedStack;
 /**
  * Record the main thread's call stack after it hangs.
  *
- * @param duration - Approximate duration of main thread hang in seconds
- * @param callStack - Array of PCs from the hung call stack
- * @param moduleMap - Array of info about modules in memory (for symbolication)
+ * @param aDuration - Approximate duration of main thread hang, in seconds
+ * @param aStack - Array of PCs from the hung call stack
+ * @param aSystemUptime - System uptime at the time of the hang, in minutes
+ * @param aFirefoxUptime - Firefox uptime at the time of the hang, in minutes
  */
 #if defined(MOZ_ENABLE_PROFILER_SPS)
-void RecordChromeHang(uint32_t duration,
-                      ProcessedStack &aStack);
+void RecordChromeHang(uint32_t aDuration,
+                      ProcessedStack &aStack,
+                      int32_t aSystemUptime,
+                      int32_t aFirefoxUptime);
 #endif
+
+class ThreadHangStats;
+
+/**
+ * Move a ThreadHangStats to Telemetry storage. Normally Telemetry queries
+ * for active ThreadHangStats through BackgroundHangMonitor, but once a
+ * thread exits, the thread's copy of ThreadHangStats needs to be moved to
+ * inside Telemetry using this function.
+ *
+ * @param aStats ThreadHangStats to save; the data inside aStats
+ *               will be moved and aStats should be treated as
+ *               invalid after this function returns
+ */
+void RecordThreadHangStats(ThreadHangStats& aStats);
 
 /**
  * Record a failed attempt at locking the user's profile.

@@ -7,7 +7,6 @@
 #define nsHostResolver_h__
 
 #include "nscore.h"
-#include "nsAtomicRefcnt.h"
 #include "prclist.h"
 #include "prnetdb.h"
 #include "pldhash.h"
@@ -80,12 +79,14 @@ public:
 
     mozilla::TimeStamp expiration;
 
-    bool HasResult() const { return addr_info || addr || negative; }
+    bool HasUsableResult(uint16_t queryFlags) const;
 
     // hold addr_info_lock when calling the blacklist functions
     bool   Blacklisted(mozilla::net::NetAddr *query);
     void   ResetBlacklist();
     void   ReportUnusable(mozilla::net::NetAddr *addr);
+
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
 private:
     friend class nsHostResolver;
@@ -94,10 +95,11 @@ private:
 
     bool    resolving; /* true if this record is being resolved, which means
                         * that it is either on the pending queue or owned by
-                        * one of the worker threads. */ 
-    
+                        * one of the worker threads. */
+
     bool    onQueue;  /* true if pending and on the queue (not yet given to getaddrinfo())*/
     bool    usingAnyThread; /* true if off queue and contributing to mActiveAnyThreadCount */
+    bool    mDoomed; /* explicitly expired */
 
     // a list of addresses associated with this record that have been reported
     // as unusable. the list is kept as a set of strings to make it independent
@@ -149,6 +151,8 @@ public:
      *        nsIDNSListener object associated with the original request
      */
     virtual bool EqualsAsyncListener(nsIDNSListener *aListener) = 0;
+
+    virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf) const = 0;
 };
 
 /**
@@ -169,8 +173,8 @@ public:
      * creates an addref'd instance of a nsHostResolver object.
      */
     static nsresult Create(uint32_t         maxCacheEntries,  // zero disables cache
-                           uint32_t         maxCacheLifetime, // minutes
-                           uint32_t         lifetimeGracePeriod, // minutes
+                           uint32_t         maxCacheLifetime, // seconds
+                           uint32_t         lifetimeGracePeriod, // seconds
                            nsHostResolver **resolver);
     
     /**
@@ -232,8 +236,10 @@ public:
         RES_OFFLINE       = 1 << 6
     };
 
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
+
 private:
-    nsHostResolver(uint32_t maxCacheEntries = 50, uint32_t maxCacheLifetime = 1,
+    nsHostResolver(uint32_t maxCacheEntries = 50, uint32_t maxCacheLifetime = 60,
                    uint32_t lifetimeGracePeriod = 0);
    ~nsHostResolver();
 
@@ -244,6 +250,12 @@ private:
     void     DeQueue(PRCList &aQ, nsHostRecord **aResult);
     void     ClearPendingQueue(PRCList *aPendingQueue);
     nsresult ConditionallyCreateThread(nsHostRecord *rec);
+
+    /**
+     * Starts a new lookup in the background for entries that are in the grace
+     * period with a failed connect or all cached entries are negative.
+     */
+    nsresult ConditionallyRefreshRecord(nsHostRecord *rec, const char *host);
     
     static void  MoveQueue(nsHostRecord *aRec, PRCList &aDestQ);
     
@@ -260,9 +272,9 @@ private:
     };
 
     uint32_t      mMaxCacheEntries;
-    mozilla::TimeDuration mMaxCacheLifetime;
-    uint32_t      mGracePeriod;
-    Mutex         mLock;
+    mozilla::TimeDuration mMaxCacheLifetime; // granularity seconds
+    mozilla::TimeDuration mGracePeriod; // granularity seconds
+    mutable Mutex mLock;    // mutable so SizeOfIncludingThis can be const
     CondVar       mIdleThreadCV;
     uint32_t      mNumIdleThreads;
     uint32_t      mThreadCount;

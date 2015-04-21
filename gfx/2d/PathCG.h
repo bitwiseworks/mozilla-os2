@@ -17,6 +17,7 @@ class PathCG;
 class PathBuilderCG : public PathBuilder
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(PathBuilderCG)
   // absorbs a reference of aPath
   PathBuilderCG(CGMutablePathRef aPath, FillRule aFillRule)
     : mFillRule(aFillRule)
@@ -48,6 +49,7 @@ public:
 
 private:
   friend class PathCG;
+  friend class ScaledFontMac;
 
   void EnsureActive(const Point &aPoint);
 
@@ -60,6 +62,7 @@ private:
 class PathCG : public Path
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(PathCG)
   PathCG(CGMutablePathRef aPath, FillRule aFillRule)
     : mPath(aPath)
     , mFillRule(aFillRule)
@@ -68,13 +71,13 @@ public:
   }
   virtual ~PathCG() { CGPathRelease(mPath); }
 
-  // Paths will always return BACKEND_COREGRAPHICS, but note that they
-  // are compatible with BACKEND_COREGRAPHICS_ACCELERATED backend.
-  virtual BackendType GetBackendType() const { return BACKEND_COREGRAPHICS; }
+  // Paths will always return BackendType::COREGRAPHICS, but note that they
+  // are compatible with BackendType::COREGRAPHICS_ACCELERATED backend.
+  virtual BackendType GetBackendType() const { return BackendType::COREGRAPHICS; }
 
-  virtual TemporaryRef<PathBuilder> CopyToBuilder(FillRule aFillRule = FILL_WINDING) const;
+  virtual TemporaryRef<PathBuilder> CopyToBuilder(FillRule aFillRule = FillRule::FILL_WINDING) const;
   virtual TemporaryRef<PathBuilder> TransformedCopyToBuilder(const Matrix &aTransform,
-                                                             FillRule aFillRule = FILL_WINDING) const;
+                                                             FillRule aFillRule = FillRule::FILL_WINDING) const;
 
   virtual bool ContainsPoint(const Point &aPoint, const Matrix &aTransform) const;
   virtual bool StrokeContainsPoint(const StrokeOptions &aStrokeOptions,
@@ -84,6 +87,8 @@ public:
   virtual Rect GetStrokedBounds(const StrokeOptions &aStrokeOptions,
                                 const Matrix &aTransform = Matrix()) const;
 
+  virtual void StreamToSink(PathSink *aSink) const;
+
   virtual FillRule GetFillRule() const { return mFillRule; }
 
   CGMutablePathRef GetPath() const { return mPath; }
@@ -92,7 +97,6 @@ private:
   friend class DrawTargetCG;
 
   CGMutablePathRef mPath;
-  bool mEndedActive;
   Point mEndPoint;
   FillRule mFillRule;
 };

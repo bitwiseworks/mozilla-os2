@@ -8,15 +8,17 @@
 #define ProxyAutoConfig_h__
 
 #include "nsString.h"
-#include "jsapi.h"
-#include "prio.h"
-#include "nsITimer.h"
-#include "nsAutoPtr.h"
-#include "mozilla/net/DNS.h"
+#include "nsCOMPtr.h"
+
+class nsITimer;
+namespace JS {
+class CallArgs;
+}
 
 namespace mozilla { namespace net {
 
 class JSRuntimeWrapper;
+union NetAddr;
 
 // The ProxyAutoConfig class is meant to be created and run on a
 // non main thread. It synchronously resolves PAC files by blocking that
@@ -24,20 +26,14 @@ class JSRuntimeWrapper;
 
 class ProxyAutoConfig  {
 public:
-  ProxyAutoConfig()
-    : mJSRuntime(nullptr)
-    , mJSNeedsSetup(false)
-    , mShutdown(false)
-  {
-    MOZ_COUNT_CTOR(ProxyAutoConfig);
-  }
+  ProxyAutoConfig();
   ~ProxyAutoConfig();
 
   nsresult Init(const nsCString &aPACURI,
                 const nsCString &aPACScript);
   void     Shutdown();
   void     GC();
-  bool     MyIPAddress(JS::Value *vp);
+  bool     MyIPAddress(const JS::CallArgs &aArgs);
   bool     ResolveAddress(const nsCString &aHostName,
                           NetAddr *aNetAddr, unsigned int aTimeout);
 
@@ -87,7 +83,7 @@ private:
 
   bool SrcAddress(const NetAddr *remoteAddress, nsCString &localAddress);
   bool MyIPAddressTryHost(const nsCString &hostName, unsigned int timeout,
-                          JS::Value *vp);
+                          const JS::CallArgs &aArgs, bool* aResult);
 
   JSRuntimeWrapper *mJSRuntime;
   bool              mJSNeedsSetup;

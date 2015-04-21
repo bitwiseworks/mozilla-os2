@@ -8,12 +8,9 @@
 #define vm_Xdr_h
 
 #include "mozilla/Endian.h"
+#include "mozilla/TypeTraits.h"
 
-#include "jsapi.h"
-#include "jsprvtd.h"
-#include "jsnum.h"
-
-#include "vm/NumericConversions.h"
+#include "jsatom.h"
 
 namespace js {
 
@@ -26,12 +23,12 @@ namespace js {
  * and saved versions. If deserialization fails, the data should be
  * invalidated if possible.
  */
-static const uint32_t XDR_BYTECODE_VERSION = uint32_t(0xb973c0de - 148);
+static const uint32_t XDR_BYTECODE_VERSION = uint32_t(0xb973c0de - 172);
 
 class XDRBuffer {
   public:
     XDRBuffer(JSContext *cx)
-      : context(cx), base(NULL), cursor(NULL), limit(NULL) { }
+      : context(cx), base(nullptr), cursor(nullptr), limit(nullptr) { }
 
     JSContext *cx() const {
         return context;
@@ -67,7 +64,7 @@ class XDRBuffer {
     uint8_t *write(size_t n) {
         if (n > size_t(limit - cursor)) {
             if (!grow(n))
-                return NULL;
+                return nullptr;
         }
         uint8_t *ptr = cursor;
         cursor += n;
@@ -98,16 +95,19 @@ class XDRState {
     XDRBuffer buf;
 
   protected:
-    JSPrincipals *principals;
-    JSPrincipals *originPrincipals;
+    JSPrincipals *originPrincipals_;
 
     XDRState(JSContext *cx)
-      : buf(cx), principals(NULL), originPrincipals(NULL) {
+      : buf(cx), originPrincipals_(nullptr) {
     }
 
   public:
     JSContext *cx() const {
         return buf.cx();
+    }
+
+    JSPrincipals *originPrincipals() const {
+        return originPrincipals_;
     }
 
     bool codeUint8(uint8_t *n) {
@@ -161,6 +161,24 @@ class XDRState {
         return true;
     }
 
+    /*
+     * Use SFINAE to refuse any specialization which is not an enum.  Uses of
+     * this function do not have to specialize the type of the enumerated field
+     * as C++ will extract the parameterized from the argument list.
+     */
+    template <typename T>
+    bool codeEnum32(T *val, typename mozilla::EnableIf<mozilla::IsEnum<T>::value, T>::Type * = NULL)
+    {
+        uint32_t tmp;
+        if (mode == XDR_ENCODE)
+            tmp = *val;
+        if (!codeUint32(&tmp))
+            return false;
+        if (mode == XDR_DECODE)
+            *val = T(tmp);
+        return true;
+    }
+
     bool codeDouble(double *dp) {
         union DoublePun {
             double d;
@@ -210,8 +228,7 @@ class XDRState {
 
     bool codeFunction(JS::MutableHandleObject objp);
     bool codeScript(MutableHandleScript scriptp);
-
-    void initScriptPrincipals(JSScript *script);
+    bool codeConstValue(MutableHandleValue vp);
 };
 
 class XDREncoder : public XDRState<XDR_ENCODE> {
@@ -230,7 +247,7 @@ class XDREncoder : public XDRState<XDR_ENCODE> {
 
     void *forgetData(uint32_t *lengthp) {
         void *data = buf.getData(lengthp);
-        buf.setData(NULL, 0);
+        buf.setData(nullptr, 0);
         return data;
     }
 };
@@ -238,7 +255,7 @@ class XDREncoder : public XDRState<XDR_ENCODE> {
 class XDRDecoder : public XDRState<XDR_DECODE> {
   public:
     XDRDecoder(JSContext *cx, const void *data, uint32_t length,
-               JSPrincipals *principals, JSPrincipals *originPrincipals);
+               JSPrincipals *originPrincipals);
 
 };
 

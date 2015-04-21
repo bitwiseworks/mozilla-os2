@@ -11,8 +11,8 @@
 #ifndef WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_LINUX_DEVICE_INFO_LINUX_H_
 #define WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_LINUX_DEVICE_INFO_LINUX_H_
 
-#include "../video_capture_impl.h"
-#include "../device_info_impl.h"
+#include "webrtc/modules/video_capture/device_info_impl.h"
+#include "webrtc/modules/video_capture/video_capture_impl.h"
 
 namespace webrtc
 {
@@ -21,33 +21,33 @@ namespace videocapturemodule
 class DeviceInfoLinux: public DeviceInfoImpl
 {
 public:
-    DeviceInfoLinux(const WebRtc_Word32 id);
+    DeviceInfoLinux(const int32_t id);
     virtual ~DeviceInfoLinux();
-    virtual WebRtc_UWord32 NumberOfDevices();
-    virtual WebRtc_Word32 GetDeviceName(
-        WebRtc_UWord32 deviceNumber,
+    virtual uint32_t NumberOfDevices();
+    virtual int32_t GetDeviceName(
+        uint32_t deviceNumber,
         char* deviceNameUTF8,
-        WebRtc_UWord32 deviceNameLength,
+        uint32_t deviceNameLength,
         char* deviceUniqueIdUTF8,
-        WebRtc_UWord32 deviceUniqueIdUTF8Length,
+        uint32_t deviceUniqueIdUTF8Length,
         char* productUniqueIdUTF8=0,
-        WebRtc_UWord32 productUniqueIdUTF8Length=0);
+        uint32_t productUniqueIdUTF8Length=0);
     /*
     * Fills the membervariable _captureCapabilities with capabilites for the given device name.
     */
-    virtual WebRtc_Word32 CreateCapabilityMap (const char* deviceUniqueIdUTF8);
-    virtual WebRtc_Word32 DisplayCaptureSettingsDialogBox(
+    virtual int32_t CreateCapabilityMap (const char* deviceUniqueIdUTF8);
+    virtual int32_t DisplayCaptureSettingsDialogBox(
         const char* /*deviceUniqueIdUTF8*/,
         const char* /*dialogTitleUTF8*/,
         void* /*parentWindow*/,
-        WebRtc_UWord32 /*positionX*/,
-        WebRtc_UWord32 /*positionY*/) { return -1;}
-    WebRtc_Word32 FillCapabilityMap(int fd);
-    WebRtc_Word32 Init();
+        uint32_t /*positionX*/,
+        uint32_t /*positionY*/) { return -1;}
+    int32_t FillCapabilityMap(int fd);
+    int32_t Init();
 private:
 
     bool IsDeviceNameMatches(const char* name, const char* deviceUniqueIdUTF8);
 };
-} // namespace videocapturemodule
-} // namespace webrtc
+}  // namespace videocapturemodule
+}  // namespace webrtc
 #endif // WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_LINUX_DEVICE_INFO_LINUX_H_

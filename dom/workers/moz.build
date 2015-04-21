@@ -6,53 +6,62 @@
 
 TEST_DIRS += ['test']
 
-MODULE = 'dom'
-
 # Public stuff.
+EXPORTS.mozilla.dom += [
+    'WorkerPrivate.h',
+    'WorkerRunnable.h',
+    'WorkerScope.h',
+]
+
 EXPORTS.mozilla.dom.workers += [
     'Workers.h',
 ]
 
 # Stuff needed for the bindings, not really public though.
 EXPORTS.mozilla.dom.workers.bindings += [
-    'DOMBindingBase.h',
-    'EventListenerManager.h',
-    'EventTarget.h',
     'FileReaderSync.h',
-    'TextDecoder.h',
-    'TextEncoder.h',
+    'Location.h',
+    'MessagePort.h',
+    'Navigator.h',
+    'SharedWorker.h',
     'URL.h',
     'WorkerFeature.h',
     'XMLHttpRequest.h',
-    'XMLHttpRequestEventTarget.h',
     'XMLHttpRequestUpload.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'ChromeWorkerScope.cpp',
-    'DOMBindingBase.cpp',
-    'EventListenerManager.cpp',
-    'EventTarget.cpp',
-    'Events.cpp',
-    'Exceptions.cpp',
     'File.cpp',
     'FileReaderSync.cpp',
-    'ImageData.cpp',
     'Location.cpp',
+    'MessagePort.cpp',
     'Navigator.cpp',
     'Principal.cpp',
+    'RegisterBindings.cpp',
     'RuntimeService.cpp',
     'ScriptLoader.cpp',
-    'TextDecoder.cpp',
-    'TextEncoder.cpp',
+    'SharedWorker.cpp',
     'URL.cpp',
-    'Worker.cpp',
     'WorkerPrivate.cpp',
+    'WorkerRunnable.cpp',
     'WorkerScope.cpp',
     'XMLHttpRequest.cpp',
-    'XMLHttpRequestEventTarget.cpp',
     'XMLHttpRequestUpload.cpp',
 ]
 
-LIBRARY_NAME = 'domworkers_s'
+FAIL_ON_WARNINGS = True
 
+MSVC_ENABLE_PGO = True
+
+LOCAL_INCLUDES += [
+    '../base',
+    '../system',
+    '/content/base/src',
+    '/xpcom/build',
+    '/xpcom/threads',
+]
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'

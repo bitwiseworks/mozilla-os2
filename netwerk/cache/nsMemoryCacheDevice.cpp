@@ -10,9 +10,9 @@
 #include "nsICacheService.h"
 #include "nsICacheVisitor.h"
 #include "nsIStorageStream.h"
-#include "nsIMemoryReporter.h"
 #include "nsCRT.h"
 #include "nsReadableUtils.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/Telemetry.h"
 #include <algorithm>
 
@@ -28,25 +28,6 @@
 
 const char *gMemoryDeviceID      = "memory";
 
-class NetworkMemoryCacheReporter MOZ_FINAL :
-    public mozilla::MemoryReporterBase
-{
-public:
-    NetworkMemoryCacheReporter(nsMemoryCacheDevice* aDevice)
-      : MemoryReporterBase(
-            "explicit/network/memory-cache",
-            KIND_HEAP,
-            UNITS_BYTES,
-            "Memory used by the network memory cache.")
-      , mDevice(aDevice)
-    {}
-
-private:
-    int64_t Amount() { return mDevice->TotalSize(); }
-
-    nsMemoryCacheDevice* mDevice;
-};
-
 
 nsMemoryCacheDevice::nsMemoryCacheDevice()
     : mInitialized(false),
@@ -56,20 +37,15 @@ nsMemoryCacheDevice::nsMemoryCacheDevice()
       mInactiveSize(0),
       mEntryCount(0),
       mMaxEntryCount(0),
-      mMaxEntrySize(-1), // -1 means "no limit"
-      mReporter(nullptr)
+      mMaxEntrySize(-1)  // -1 means "no limit"
 {
     for (int i=0; i<kQueueCount; ++i)
         PR_INIT_CLIST(&mEvictionList[i]);
-
-    mReporter = new NetworkMemoryCacheReporter(this);
-    NS_RegisterMemoryReporter(mReporter);
 }
 
 
 nsMemoryCacheDevice::~nsMemoryCacheDevice()
 {
-    NS_UnregisterMemoryReporter(mReporter);
     Shutdown();
 }
 
@@ -429,7 +405,7 @@ nsMemoryCacheDevice::EvictionList(nsCacheEntry * entry, int32_t  deltaSize)
     int32_t  size       = deltaSize + (int32_t)entry->DataSize();
     int32_t  fetchCount = std::max(1, entry->FetchCount());
 
-    return std::min(PR_FloorLog2(size / fetchCount), kQueueCount - 1);
+    return std::min((int)mozilla::FloorLog2(size / fetchCount), kQueueCount - 1);
 }
 
 
@@ -528,7 +504,7 @@ nsMemoryCacheDevice::EvictEntries(const char * clientID)
 nsresult
 nsMemoryCacheDevice::EvictPrivateEntries()
 {
-    return DoEvictEntries(&IsEntryPrivate, NULL);
+    return DoEvictEntries(&IsEntryPrivate, nullptr);
 }
 
 
@@ -587,7 +563,7 @@ nsMemoryCacheDevice::CheckEntryCount()
  *****************************************************************************/
 
 
-NS_IMPL_ISUPPORTS1(nsMemoryCacheDeviceInfo, nsICacheDeviceInfo)
+NS_IMPL_ISUPPORTS(nsMemoryCacheDeviceInfo, nsICacheDeviceInfo)
 
 
 NS_IMETHODIMP

@@ -8,15 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "../video_capture_impl.h"
-#include "ref_count.h"
+#include "webrtc/modules/video_capture/video_capture_impl.h"
+#include "webrtc/system_wrappers/interface/ref_count.h"
 
 namespace webrtc {
 
 namespace videocapturemodule {
 
 VideoCaptureModule* VideoCaptureImpl::Create(
-    const WebRtc_Word32 id,
+    const int32_t id,
     const char* deviceUniqueIdUTF8) {
   RefCountImpl<VideoCaptureImpl>* implementation =
       new RefCountImpl<VideoCaptureImpl>(id);

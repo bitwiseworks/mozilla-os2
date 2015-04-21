@@ -26,11 +26,6 @@ const PERMISSIONPROMPTSERVICE_CONTRACTID = "@mozilla.org/permission-prompt-servi
 const PERMISSIONPROMPTSERVICE_CID = Components.ID("{e5f953b3-a6ca-444e-a88d-cdc81383741c}");
 const permissionPromptService = Ci.nsIPermissionPromptService;
 
-XPCOMUtils.defineLazyServiceGetter(this,
-                                   "PermSettings",
-                                   "@mozilla.org/permissionSettings;1",
-                                   "nsIDOMPermissionSettings");
-
 var permissionManager = Cc["@mozilla.org/permissionmanager;1"].getService(Ci.nsIPermissionManager);
 var secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].getService(Ci.nsIScriptSecurityManager);
 
@@ -68,8 +63,16 @@ PermissionPromptService.prototype = {
                       + "2nd argument must be type 'nsIContentPermissionRequest'");
     }
 
-    let type = aRequest.access !== "unused" ? aRequest.type + "-" + aRequest.access
-                                            : aRequest.type;
+    // Only allow exactly one permission request here.
+    let types = aRequest.types.QueryInterface(Ci.nsIArray);
+    if (types.length != 1) {
+      aRequest.cancel();
+      return;
+    }
+    let reqType = types.queryElementAt(0, Ci.nsIContentPermissionType);
+
+    let type = reqType.access !== "unused" ? reqType.type + "-" + reqType.access
+                                           : reqType.type;
     let perm =
       permissionManager.testExactPermissionFromPrincipal(aRequest.principal, type);
 

@@ -31,6 +31,7 @@ class MessageLoopIdleTask
   , public SupportsWeakPtr<MessageLoopIdleTask>
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(MessageLoopIdleTask)
   MessageLoopIdleTask(nsIRunnable* aTask, uint32_t aEnsureRunsAfterMS);
   virtual ~MessageLoopIdleTask() {}
   virtual void Run();
@@ -87,7 +88,8 @@ nsresult
 MessageLoopIdleTask::Init(uint32_t aEnsureRunsAfterMS)
 {
   mTimer = do_CreateInstance("@mozilla.org/timer;1");
-  NS_ENSURE_STATE(mTimer);
+  if (NS_WARN_IF(!mTimer))
+    return NS_ERROR_UNEXPECTED;
 
   nsRefPtr<MessageLoopTimerCallback> callback =
     new MessageLoopTimerCallback(this);
@@ -132,11 +134,11 @@ MessageLoopTimerCallback::Notify(nsITimer* aTimer)
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(MessageLoopTimerCallback, nsITimerCallback)
+NS_IMPL_ISUPPORTS(MessageLoopTimerCallback, nsITimerCallback)
 
 } // anonymous namespace
 
-NS_IMPL_ISUPPORTS1(nsMessageLoop, nsIMessageLoop)
+NS_IMPL_ISUPPORTS(nsMessageLoop, nsIMessageLoop)
 
 NS_IMETHODIMP
 nsMessageLoop::PostIdleTask(nsIRunnable* aTask, uint32_t aEnsureRunsAfterMS)
@@ -153,7 +155,8 @@ nsMessageLoopConstructor(nsISupports* aOuter,
                          const nsIID& aIID,
                          void** aInstancePtr)
 {
-  NS_ENSURE_FALSE(aOuter, NS_ERROR_NO_AGGREGATION);
+  if (NS_WARN_IF(aOuter))
+    return NS_ERROR_NO_AGGREGATION;
   nsISupports* messageLoop = new nsMessageLoop();
   return messageLoop->QueryInterface(aIID, aInstancePtr);
 }

@@ -15,9 +15,8 @@
 #include "nsIDocument.h"
 #include "nsINode.h"
 #include "nsIDOMWindow.h"
-#include "nsIDOMDocument.h"
 
-NS_IMPL_ISUPPORTS1(nsDataDocumentContentPolicy, nsIContentPolicy)
+NS_IMPL_ISUPPORTS(nsDataDocumentContentPolicy, nsIContentPolicy)
 
 // Helper method for ShouldLoad()
 // Checks a URI for the given flags.  Returns true if the URI has the flags,
@@ -50,11 +49,9 @@ nsDataDocumentContentPolicy::ShouldLoad(uint32_t aContentType,
   if (node) {
     doc = node->OwnerDoc();
   } else {
-    nsCOMPtr<nsIDOMWindow> window = do_QueryInterface(aRequestingContext);
+    nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aRequestingContext);
     if (window) {
-      nsCOMPtr<nsIDOMDocument> domDoc;
-      window->GetDocument(getter_AddRefs(domDoc));
-      doc = do_QueryInterface(domDoc);
+      doc = window->GetDoc();
     }
   }
 
@@ -122,7 +119,8 @@ nsDataDocumentContentPolicy::ShouldLoad(uint32_t aContentType,
   if (aContentType == nsIContentPolicy::TYPE_OBJECT ||
       aContentType == nsIContentPolicy::TYPE_DOCUMENT ||
       aContentType == nsIContentPolicy::TYPE_SUBDOCUMENT ||
-      aContentType == nsIContentPolicy::TYPE_SCRIPT) {
+      aContentType == nsIContentPolicy::TYPE_SCRIPT ||
+      aContentType == nsIContentPolicy::TYPE_XSLT) {
     *aDecision = nsIContentPolicy::REJECT_TYPE;
   }
 

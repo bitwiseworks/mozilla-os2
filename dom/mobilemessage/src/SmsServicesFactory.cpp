@@ -5,11 +5,12 @@
 
 #include "SmsServicesFactory.h"
 #include "nsXULAppAPI.h"
-#include "SmsService.h"
-#include "SmsIPCService.h"
-#ifndef MOZ_B2G_RIL
-#include "MobileMessageDatabaseService.h"
-#include "MmsService.h"
+#include "ipc/SmsIPCService.h"
+#ifdef MOZ_WIDGET_ANDROID
+#include "android/MobileMessageDatabaseService.h"
+#include "android/SmsService.h"
+#elif defined(MOZ_WIDGET_GONK) && defined(MOZ_B2G_RIL)
+#include "gonk/SmsService.h"
 #endif
 #include "nsServiceManagerUtils.h"
 
@@ -28,7 +29,11 @@ SmsServicesFactory::CreateSmsService()
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     smsService = new SmsIPCService();
   } else {
+#ifdef MOZ_WIDGET_ANDROID
     smsService = new SmsService();
+#elif defined(MOZ_WIDGET_GONK) && defined(MOZ_B2G_RIL)
+    smsService = new SmsService();
+#endif
   }
 
   return smsService.forget();
@@ -41,10 +46,10 @@ SmsServicesFactory::CreateMobileMessageDatabaseService()
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     mobileMessageDBService = new SmsIPCService();
   } else {
-#ifdef MOZ_B2G_RIL
-    mobileMessageDBService = do_GetService(RIL_MOBILE_MESSAGE_DATABASE_SERVICE_CONTRACTID);
-#else
+#ifdef MOZ_WIDGET_ANDROID
     mobileMessageDBService = new MobileMessageDatabaseService();
+#elif defined(MOZ_WIDGET_GONK) && defined(MOZ_B2G_RIL)
+    mobileMessageDBService = do_GetService(RIL_MOBILE_MESSAGE_DATABASE_SERVICE_CONTRACTID);
 #endif
   }
 
@@ -59,10 +64,8 @@ SmsServicesFactory::CreateMmsService()
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     mmsService = new SmsIPCService();
   } else {
-#ifdef MOZ_B2G_RIL
+#if defined(MOZ_WIDGET_GONK) && defined(MOZ_B2G_RIL)
     mmsService = do_CreateInstance(RIL_MMSSERVICE_CONTRACTID);
-#else
-    mmsService = new MmsService();
 #endif
   }
 

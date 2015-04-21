@@ -5,35 +5,72 @@
 #ifndef mozilla_dom_notification_h__
 #define mozilla_dom_notification_h__
 
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/NotificationBinding.h"
 
-#include "nsDOMEventTargetHelper.h"
 #include "nsIObserver.h"
+
+#include "nsCycleCollectionParticipant.h"
+
+class nsIPrincipal;
 
 namespace mozilla {
 namespace dom {
 
-class NotificationObserver;
 
-class Notification : public nsDOMEventTargetHelper
+class NotificationObserver;
+class Promise;
+
+class Notification : public DOMEventTargetHelper
 {
   friend class NotificationTask;
   friend class NotificationPermissionRequest;
   friend class NotificationObserver;
+  friend class NotificationStorageCallback;
+
 public:
   IMPL_EVENT_HANDLER(click)
   IMPL_EVENT_HANDLER(show)
   IMPL_EVENT_HANDLER(error)
   IMPL_EVENT_HANDLER(close)
 
-  Notification(const nsAString& aTitle, const nsAString& aBody,
-               NotificationDirection aDir, const nsAString& aLang,
-               const nsAString& aTag, const nsAString& aIconUrl);
-
   static already_AddRefed<Notification> Constructor(const GlobalObject& aGlobal,
                                                     const nsAString& aTitle,
                                                     const NotificationOptions& aOption,
                                                     ErrorResult& aRv);
+  void GetID(nsAString& aRetval) {
+    aRetval = mID;
+  }
+
+  void GetTitle(nsAString& aRetval)
+  {
+    aRetval = mTitle;
+  }
+
+  NotificationDirection Dir()
+  {
+    return mDir;
+  }
+
+  void GetLang(nsAString& aRetval)
+  {
+    aRetval = mLang;
+  }
+
+  void GetBody(nsAString& aRetval)
+  {
+    aRetval = mBody;
+  }
+
+  void GetTag(nsAString& aRetval)
+  {
+    aRetval = mTag;
+  }
+
+  void GetIcon(nsAString& aRetval)
+  {
+    aRetval = mIconUrl;
+  }
 
   static void RequestPermission(const GlobalObject& aGlobal,
                                 const Optional<OwningNonNull<NotificationPermissionCallback> >& aCallback,
@@ -42,20 +79,31 @@ public:
   static NotificationPermission GetPermission(const GlobalObject& aGlobal,
                                               ErrorResult& aRv);
 
-  void Close();
+  static already_AddRefed<Promise> Get(const GlobalObject& aGlobal,
+                                       const GetNotificationOptions& aFilter,
+                                       ErrorResult& aRv);
 
-  static bool PrefEnabled();
+  void Close();
 
   nsPIDOMWindow* GetParentObject()
   {
     return GetOwner();
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 protected:
-  nsresult ShowInternal();
-  nsresult CloseInternal();
+  Notification(const nsAString& aID, const nsAString& aTitle, const nsAString& aBody,
+               NotificationDirection aDir, const nsAString& aLang,
+               const nsAString& aTag, const nsAString& aIconUrl,
+	       nsPIDOMWindow* aWindow);
+
+  static already_AddRefed<Notification> CreateInternal(nsPIDOMWindow* aWindow,
+                                                       const nsAString& aID,
+                                                       const nsAString& aTitle,
+                                                       const NotificationOptions& aOptions);
+
+  void ShowInternal();
+  void CloseInternal();
 
   static NotificationPermission GetPermissionInternal(nsISupports* aGlobal,
                                                       ErrorResult& rv);
@@ -72,8 +120,22 @@ protected:
     }
   }
 
+  static const NotificationDirection StringToDirection(const nsAString& aDirection)
+  {
+    if (aDirection.EqualsLiteral("ltr")) {
+      return NotificationDirection::Ltr;
+    }
+    if (aDirection.EqualsLiteral("rtl")) {
+      return NotificationDirection::Rtl;
+    }
+    return NotificationDirection::Auto;
+  }
+
+  static nsresult GetOrigin(nsPIDOMWindow* aWindow, nsString& aOrigin);
+
   nsresult GetAlertName(nsString& aAlertName);
 
+  nsString mID;
   nsString mTitle;
   nsString mBody;
   NotificationDirection mDir;
@@ -84,6 +146,9 @@ protected:
   bool mIsClosed;
 
   static uint32_t sCount;
+
+private:
+  nsIPrincipal* GetPrincipal();
 };
 
 } // namespace dom

@@ -8,21 +8,21 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "ref_count.h"
-#include "video_capture_ds.h"
-#include "video_capture_mf.h"
+#include "webrtc/modules/video_capture/windows/video_capture_ds.h"
+#include "webrtc/modules/video_capture/windows/video_capture_mf.h"
+#include "webrtc/system_wrappers/interface/ref_count.h"
 
 namespace webrtc {
 namespace videocapturemodule {
 
 // static
 VideoCaptureModule::DeviceInfo* VideoCaptureImpl::CreateDeviceInfo(
-    const WebRtc_Word32 id) {
+    const int32_t id) {
   // TODO(tommi): Use the Media Foundation version on Vista and up.
   return DeviceInfoDS::Create(id);
 }
 
-VideoCaptureModule* VideoCaptureImpl::Create(const WebRtc_Word32 id,
+VideoCaptureModule* VideoCaptureImpl::Create(const int32_t id,
                                              const char* device_id) {
   if (device_id == NULL)
     return NULL;

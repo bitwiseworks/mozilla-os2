@@ -12,8 +12,8 @@
           <xul:image class="chat-status-icon" xbl:inherits="src=image"/>
           <xul:label class="chat-title" flex="1" xbl:inherits="value=label" crop="center"/>
         </xul:hbox>
-        <xul:toolbarbutton id="notification-icon" class="notification-anchor-icon chat-toolbarbutton"
-                   oncommand="document.getBindingParent(this).showNotifications(); event.stopPropagation();"/>
+        <xul:toolbarbutton anonid="notification-icon" class="notification-anchor-icon chat-toolbarbutton"
+                           oncommand="document.getBindingParent(this).showNotifications(); event.stopPropagation();"/>
         <xul:toolbarbutton anonid="minimize" class="chat-minimize-button chat-toolbarbutton"
                            oncommand="document.getBindingParent(this).toggle();"/>
         <xul:toolbarbutton anonid="swap" class="chat-swap-button chat-toolbarbutton"
@@ -32,9 +32,11 @@
       <constructor><![CDATA[
         let Social = Components.utils.import("resource:///modules/Social.jsm", {}).Social;
         this.content.__defineGetter__("popupnotificationanchor",
-                                      () => document.getAnonymousElementByAttribute(this, "id", "notification-icon"));
+                                      () => document.getAnonymousElementByAttribute(this, "anonid", "notification-icon"));
         Social.setErrorListener(this.content, function(aBrowser) {
-          aBrowser.webNavigation.loadURI("about:socialerror?mode=compactInfo", null, null, null, null);
+          aBrowser.webNavigation.loadURI("about:socialerror?mode=compactInfo&origin=" +
+                                 encodeURIComponent(aBrowser.getAttribute("origin")),
+                                 null, null, null, null);
         });
         if (!this.chatbar) {
           document.getAnonymousElementByAttribute(this, "anonid", "minimize").hidden = true;
@@ -143,6 +145,7 @@
         <parameter name="aTarget"/>
         <body><![CDATA[
           aTarget.setAttribute('label', this.contentDocument.title);
+          aTarget.src = this.src;
           aTarget.content.setAttribute("origin", this.content.getAttribute("origin"));
           aTarget.content.popupnotificationanchor.className = this.content.popupnotificationanchor.className;
           this.content.socialErrorListener.remove();
@@ -150,7 +153,9 @@
           this.content.swapDocShells(aTarget.content);
           Social.setErrorListener(this.content, function(aBrowser) {}); // 'this' will be destroyed soon.
           Social.setErrorListener(aTarget.content, function(aBrowser) {
-            aBrowser.webNavigation.loadURI("about:socialerror?mode=compactInfo", null, null, null, null);
+            aBrowser.webNavigation.loadURI("about:socialerror?mode=compactInfo&origin=" +
+                                 encodeURIComponent(aBrowser.getAttribute("origin")),
+                                 null, null, null, null);
           });
         ]]></body>
       </method>
@@ -192,7 +197,16 @@
           let win = findChromeWindowForChats();
           let chatbar = win.SocialChatBar.chatbar;
           chatbar.openChat(provider, "about:blank", win => {
-            this.swapDocShells(chatbar.selectedChat);
+            let cb = chatbar.selectedChat;
+            this.swapDocShells(cb);
+
+            // chatboxForURL is a map of URL -> chatbox used to avoid opening
+            // duplicate chat windows. Ensure reattached chat windows aren't
+            // registered with about:blank as their URL, otherwise reattaching
+            // more than one chat window isn't possible.
+            chatbar.chatboxForURL.delete("about:blank");
+            chatbar.chatboxForURL.set(this.src, Cu.getWeakReference(cb));
+
             chatbar.focus();
             this.close();
           });
@@ -227,7 +241,8 @@
         if (link.rel.indexOf("icon") < 0)
           return;
 
-        let uri = DOMLinkHandler.getLinkIconURI(link);
+        let ContentLinkHandler = Cu.import("resource:///modules/ContentLinkHandler.jsm", {}).ContentLinkHandler;
+        let uri = ContentLinkHandler.getLinkIconURI(link);
         if (!uri)
           return;
 
@@ -503,7 +518,7 @@
             this.menuitemMap.delete(aChatbox);
             this.menupopup.removeChild(menuitem);
           }
-          this.chatboxForURL.delete(aChatbox.getAttribute('src'));
+          this.chatboxForURL.delete(aChatbox.src);
         ]]></body>
       </method>
 
@@ -620,7 +635,7 @@
       <method name="handleEvent">
         <parameter name="aEvent"/>
         <body><![CDATA[
-          if (aEvent.type == "resize" && aEvent.eventPhase == aEvent.BUBBLING_PHASE) {
+          if (aEvent.type == "resize") {
             this.resize();
           }
         ]]></body>
@@ -643,7 +658,8 @@
           for (let name in aOptions)
             options += "," + name + "=" + aOptions[name];
 
-          let otherWin = window.openDialog("chrome://browser/content/chatWindow.xul", null, "chrome,all" + options);
+          let otherWin = window.openDialog("chrome://browser/content/chatWindow.xul",
+                                           "_blank", "chrome,all,dialog=no" + options);
 
           otherWin.addEventListener("load", function _chatLoad(event) {
             if (event.target != otherWin.document)
@@ -666,10 +682,10 @@
         this.nub.removeAttribute("activity");
       ]]></handler>
       <handler event="load"><![CDATA[
-        window.addEventListener("resize", this);
+        window.addEventListener("resize", this, true);
       ]]></handler>
       <handler event="unload"><![CDATA[
-        window.removeEventListener("resize", this);
+        window.removeEventListener("resize", this, true);
       ]]></handler>
 
       <handler event="dragstart"><![CDATA[

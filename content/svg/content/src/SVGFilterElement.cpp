@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsGkAtoms.h"
 #include "nsCOMPtr.h"
@@ -17,9 +17,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFilterElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGFilterElement::WrapNode(JSContext *aCx)
 {
-  return SVGFilterElementBinding::Wrap(aCx, aScope, this);
+  return SVGFilterElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::LengthInfo SVGFilterElement::sLengthInfo[4] =
@@ -28,11 +28,6 @@ nsSVGElement::LengthInfo SVGFilterElement::sLengthInfo[4] =
   { &nsGkAtoms::y, -10, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
   { &nsGkAtoms::width, 120, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
   { &nsGkAtoms::height, 120, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
-};
-
-nsSVGElement::IntegerPairInfo SVGFilterElement::sIntegerPairInfo[1] =
-{
-  { &nsGkAtoms::filterRes, 0 }
 };
 
 nsSVGElement::EnumInfo SVGFilterElement::sEnumInfo[2] =
@@ -55,7 +50,7 @@ nsSVGElement::StringInfo SVGFilterElement::sStringInfo[1] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGFilterElement::SVGFilterElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+SVGFilterElement::SVGFilterElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : SVGFilterElementBase(aNodeInfo)
 {
 }
@@ -93,36 +88,16 @@ SVGFilterElement::Height()
   return mLengthAttributes[ATTR_HEIGHT].ToDOMAnimatedLength(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+already_AddRefed<SVGAnimatedEnumeration>
 SVGFilterElement::FilterUnits()
 {
   return mEnumAttributes[FILTERUNITS].ToDOMAnimatedEnum(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+already_AddRefed<SVGAnimatedEnumeration>
 SVGFilterElement::PrimitiveUnits()
 {
   return mEnumAttributes[PRIMITIVEUNITS].ToDOMAnimatedEnum(this);
-}
-
-already_AddRefed<nsIDOMSVGAnimatedInteger>
-SVGFilterElement::FilterResX()
-{
-  return mIntegerPairAttributes[FILTERRES].ToDOMAnimatedInteger(nsSVGIntegerPair::eFirst,
-                                                                this);
-}
-
-already_AddRefed<nsIDOMSVGAnimatedInteger>
-SVGFilterElement::FilterResY()
-{
-  return mIntegerPairAttributes[FILTERRES].ToDOMAnimatedInteger(nsSVGIntegerPair::eSecond,
-                                                                this);
-}
-
-void
-SVGFilterElement::SetFilterRes(uint32_t filterResX, uint32_t filterResY)
-{
-  mIntegerPairAttributes[FILTERRES].SetBaseValues(filterResX, filterResY, this);
 }
 
 already_AddRefed<SVGAnimatedString>
@@ -160,7 +135,7 @@ SVGFilterElement::Invalidate()
     nsTObserverArray<nsIMutationObserver*>::ForwardIterator iter(*observers);
     while (iter.HasMore()) {
       nsCOMPtr<nsIMutationObserver> obs(iter.GetNext());
-      nsCOMPtr<nsISVGFilterProperty> filter = do_QueryInterface(obs);
+      nsCOMPtr<nsISVGFilterReference> filter = do_QueryInterface(obs);
       if (filter)
         filter->Invalidate();
     }
@@ -184,13 +159,6 @@ SVGFilterElement::GetLengthInfo()
 {
   return LengthAttributesInfo(mLengthAttributes, sLengthInfo,
                               ArrayLength(sLengthInfo));
-}
-
-nsSVGElement::IntegerPairAttributesInfo
-SVGFilterElement::GetIntegerPairInfo()
-{
-  return IntegerPairAttributesInfo(mIntegerPairAttributes, sIntegerPairInfo,
-                                   ArrayLength(sIntegerPairInfo));
 }
 
 nsSVGElement::EnumAttributesInfo

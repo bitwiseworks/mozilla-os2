@@ -10,7 +10,7 @@
 [Pref="media.webvtt.enabled"]
 interface HTMLTrackElement : HTMLElement {
   [SetterThrows, Pure]
-  attribute TextTrackKind kind;
+  attribute DOMString kind;
   [SetterThrows, Pure]
   attribute DOMString src;
   [SetterThrows, Pure]
@@ -26,5 +26,5 @@ interface HTMLTrackElement : HTMLElement {
   const unsigned short ERROR = 3;
   readonly attribute unsigned short readyState;
 
-  readonly attribute TextTrack track;
+  readonly attribute TextTrack? track;
 };

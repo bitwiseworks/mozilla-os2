@@ -10,10 +10,10 @@
   'targets': [
     {
       'target_name': 'NetEq',
-      'type': '<(library)',
+      'type': 'static_library',
       'dependencies': [
         'CNG',
-        '<(webrtc_root)/common_audio/common_audio.gyp:signal_processing',
+        '<(webrtc_root)/common_audio/common_audio.gyp:common_audio',
       ],
       'defines': [
         'NETEQ_VOICEENGINE_CODECS', # TODO: Should create a Chrome define which
@@ -89,15 +89,29 @@
       'targets': [
         {
           'target_name': 'neteq_unittests',
-          'type': 'executable',
+          'type': '<(gtest_target_type)',
           'dependencies': [
             'NetEq',
             'NetEqTestTools',
+            'neteq_unittest_tools',
             '<(DEPTH)/testing/gtest.gyp:gtest',
             '<(webrtc_root)/test/test.gyp:test_support_main',
           ],
           'sources': [
             'webrtc_neteq_unittest.cc',
+          ],
+          # Disable warnings to enable Win64 build, issue 1323.
+          'msvs_disabled_warnings': [
+            4267,  # size_t to int truncation.
+          ],
+          'conditions': [
+            # TODO(henrike): remove build_with_chromium==1 when the bots are
+            # using Chromium's buildbots.
+            ['build_with_chromium==1 and OS=="android" and gtest_target_type=="shared_library"', {
+              'dependencies': [
+                '<(DEPTH)/testing/android/native_test.gyp:native_test_native_code',
+              ],
+            }],
           ],
         }, # neteq_unittests
         {
@@ -137,114 +151,30 @@
           'sources': [
             'test/NetEqRTPplay.cc',
           ],
+          # Disable warnings to enable Win64 build, issue 1323.
+          'msvs_disabled_warnings': [
+            4267,  # size_t to int truncation.
+          ],
         },
-       {
-          'target_name': 'RTPencode',
+
+        {
+          'target_name': 'neteq3_speed_test',
           'type': 'executable',
           'dependencies': [
-            'NetEqTestTools',# Test helpers
-            'G711',
-            'G722',
+            'NetEq',
             'PCM16B',
-            'iLBC',
-            'iSAC',
-            'CNG',
-            '<(webrtc_root)/common_audio/common_audio.gyp:vad',
-          ],
-          'defines': [
-            # TODO: Make codec selection conditional on definitions in target NetEq
-            'CODEC_ILBC',
-            'CODEC_PCM16B',
-            'CODEC_G711',
-            'CODEC_G722',
-            'CODEC_ISAC',
-            'CODEC_PCM16B_WB',
-            'CODEC_ISAC_SWB',
-            'CODEC_ISAC_FB',
-            'CODEC_PCM16B_32KHZ',
-            'CODEC_CNGCODEC8',
-            'CODEC_CNGCODEC16',
-            'CODEC_CNGCODEC32',
-            'CODEC_ATEVENT_DECODE',
-            'CODEC_RED',
-          ],
-          'include_dirs': [
-            'interface',
-            'test',
+            'neteq_unittest_tools',
+            '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
           ],
           'sources': [
-            'test/RTPencode.cc',
+            'test/neteq_speed_test.cc',
           ],
         },
-        {
-          'target_name': 'RTPjitter',
-          'type': 'executable',
-          'dependencies': [
-            '<(DEPTH)/testing/gtest.gyp:gtest',
-          ],
-          'sources': [
-            'test/RTPjitter.cc',
-          ],
-        },
-        {
-          'target_name': 'RTPanalyze',
-          'type': 'executable',
-          'dependencies': [
-            'NetEqTestTools',
-            '<(DEPTH)/testing/gtest.gyp:gtest',
-          ],
-          'sources': [
-            'test/RTPanalyze.cc',
-          ],
-        },
-        {
-          'target_name': 'RTPchange',
-          'type': 'executable',
-          'dependencies': [
-            'NetEqTestTools',
-            '<(DEPTH)/testing/gtest.gyp:gtest',
-          ],
-          'sources': [
-           'test/RTPchange.cc',
-          ],
-        },
-        {
-          'target_name': 'RTPtimeshift',
-          'type': 'executable',
-          'dependencies': [
-           'NetEqTestTools',
-            '<(DEPTH)/testing/gtest.gyp:gtest',
-          ],
-          'sources': [
-            'test/RTPtimeshift.cc',
-          ],
-        },
-        {
-          'target_name': 'RTPcat',
-          'type': 'executable',
-          'dependencies': [
-            'NetEqTestTools',
-            '<(DEPTH)/testing/gtest.gyp:gtest',
-          ],
-          'sources': [
-            'test/RTPcat.cc',
-          ],
-        },
-        {
-          'target_name': 'rtp_to_text',
-          'type': 'executable',
-          'dependencies': [
-            'NetEqTestTools',
-            '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
-          ],
-          'sources': [
-            'test/rtp_to_text.cc',
-          ],
-        },
+
         {
          'target_name': 'NetEqTestTools',
           # Collection of useful functions used in other tests
-          'type': '<(library)',
+          'type': 'static_library',
           'variables': {
             # Expects RTP packets without payloads when enabled.
             'neteq_dummy_rtp%': 0,
@@ -295,8 +225,45 @@
             'test/NETEQTEST_RTPpacket.cc',
             'test/NETEQTEST_RTPpacket.h',
           ],
+          # Disable warnings to enable Win64 build, issue 1323.
+          'msvs_disabled_warnings': [
+            4267,  # size_t to int truncation.
+          ],
         },
       ], # targets
+      'conditions': [
+        # TODO(henrike): remove build_with_chromium==1 when the bots are using
+        # Chromium's buildbots.
+        ['build_with_chromium==1 and OS=="android" and gtest_target_type=="shared_library"', {
+          'targets': [
+            {
+              'target_name': 'neteq_unittests_apk_target',
+              'type': 'none',
+              'dependencies': [
+                '<(apk_tests_path):neteq_unittests_apk',
+              ],
+            },
+          ],
+        }],
+        ['test_isolation_mode != "noop"', {
+          'targets': [
+            {
+              'target_name': 'neteq_unittests_run',
+              'type': 'none',
+              'dependencies': [
+                '<(import_isolate_path):import_isolate_gypi',
+                'neteq_unittests',
+              ],
+              'includes': [
+                'neteq_unittests.isolate',
+              ],
+              'sources': [
+                'neteq_unittests.isolate',
+              ],
+            },
+          ],
+        }],
+      ],
     }], # include_tests
   ], # conditions
 }

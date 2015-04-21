@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCertPicker.h"
+#include "pkix/pkixtypes.h"
 #include "nsMemory.h"
 #include "nsCOMPtr.h"
 #include "nsXPIDLString.h"
@@ -20,7 +21,7 @@
 
 using namespace mozilla;
 
-NS_IMPL_ISUPPORTS1(nsCertPicker, nsIUserCertPicker)
+NS_IMPL_ISUPPORTS(nsCertPicker, nsIUserCertPicker)
 
 nsCertPicker::nsCertPicker()
 {
@@ -31,7 +32,7 @@ nsCertPicker::~nsCertPicker()
 }
 
 NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx, 
-                                        const PRUnichar *selectedNickname, 
+                                        const char16_t *selectedNickname, 
                                         int32_t certUsage, 
                                         bool allowInvalid, 
                                         bool allowDuplicateNicknames, 
@@ -41,21 +42,22 @@ NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx,
   nsNSSShutDownPreventionLock locker;
   int32_t selectedIndex = -1;
   bool selectionFound = false;
-  PRUnichar **certNicknameList = nullptr;
-  PRUnichar **certDetailsList = nullptr;
+  char16_t **certNicknameList = nullptr;
+  char16_t **certDetailsList = nullptr;
   CERTCertListNode* node = nullptr;
   nsresult rv = NS_OK;
 
   {
     // Iterate over all certs. This assures that user is logged in to all hardware tokens.
     nsCOMPtr<nsIInterfaceRequestor> ctx = new PipUIContext();
-    ScopedCERTCertList allcerts(PK11_ListCerts(PK11CertListUnique, ctx));
+    mozilla::pkix::ScopedCERTCertList allcerts(
+      PK11_ListCerts(PK11CertListUnique, ctx));
   }
 
   /* find all user certs that are valid and for SSL */
   /* note that we are allowing expired certs in this list */
 
-  ScopedCERTCertList certList( 
+  mozilla::pkix::ScopedCERTCertList certList(
     CERT_FindUserCertsByUsage(CERT_GetDefaultCertDB(), 
                               (SECCertUsage)certUsage,
                               !allowDuplicateNicknames,
@@ -65,13 +67,13 @@ NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  ScopedCERTCertNicknames nicknames(getNSSCertNicknamesFromCertList(certList));
+  ScopedCERTCertNicknames nicknames(getNSSCertNicknamesFromCertList(certList.get()));
   if (!nicknames) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  certNicknameList = (PRUnichar **)nsMemory::Alloc(sizeof(PRUnichar *) * nicknames->numnicknames);
-  certDetailsList = (PRUnichar **)nsMemory::Alloc(sizeof(PRUnichar *) * nicknames->numnicknames);
+  certNicknameList = (char16_t **)nsMemory::Alloc(sizeof(char16_t *) * nicknames->numnicknames);
+  certDetailsList = (char16_t **)nsMemory::Alloc(sizeof(char16_t *) * nicknames->numnicknames);
 
   if (!certNicknameList || !certDetailsList) {
     nsMemory::Free(certNicknameList);
@@ -81,8 +83,9 @@ NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx,
 
   int32_t CertsToUse;
 
-  for (CertsToUse = 0, node = CERT_LIST_HEAD(certList);
-       !CERT_LIST_END(node, certList) && CertsToUse < nicknames->numnicknames;
+  for (CertsToUse = 0, node = CERT_LIST_HEAD(certList.get());
+       !CERT_LIST_END(node, certList.get()) &&
+         CertsToUse < nicknames->numnicknames;
        node = CERT_LIST_NEXT(node)
       )
   {
@@ -135,7 +138,7 @@ NS_IMETHODIMP nsCertPicker::PickByUsage(nsIInterfaceRequestor *ctx,
       else {
         /* Throw up the cert picker dialog and get back the index of the selected cert */
         rv = dialogs->PickCertificate(ctx,
-          (const PRUnichar**)certNicknameList, (const PRUnichar**)certDetailsList,
+          (const char16_t**)certNicknameList, (const char16_t**)certDetailsList,
           CertsToUse, &selectedIndex, canceled);
       }
 

@@ -42,6 +42,16 @@
         'include/video_render_defines.h',
         'incoming_video_stream.cc',
         'incoming_video_stream.h',
+        'ios/open_gles20.h',
+        'ios/open_gles20.mm',
+        'ios/video_render_ios_channel.h',
+        'ios/video_render_ios_channel.mm',
+        'ios/video_render_ios_gles20.h',
+        'ios/video_render_ios_gles20.mm',
+        'ios/video_render_ios_impl.h',
+        'ios/video_render_ios_impl.mm',
+        'ios/video_render_ios_view.h',
+        'ios/video_render_ios_view.mm',
         'linux/video_render_linux_impl.cc',
         'linux/video_render_linux_impl.h',
         'linux/video_x11_channel.cc',
@@ -88,6 +98,21 @@
             'android/video_render_opengles20.cc',
           ],
         }],
+        ['OS!="ios" or include_internal_video_render==0', {
+          'sources!': [
+            # iOS
+            'ios/open_gles20.h',
+            'ios/open_gles20.mm',
+            'ios/video_render_ios_channel.h',
+            'ios/video_render_ios_channel.mm',
+            'ios/video_render_ios_gles20.h',
+            'ios/video_render_ios_gles20.mm',
+            'ios/video_render_ios_impl.h',
+            'ios/video_render_ios_impl.mm',
+            'ios/video_render_ios_view.h',
+            'ios/video_render_ios_view.mm',
+          ],
+        }],
         ['OS!="linux" or include_internal_video_render==0', {
           'sources!': [
             'linux/video_render_linux_impl.h',
@@ -114,10 +139,42 @@
             'mac/cocoa_full_screen_window.mm',
           ],
         }],
+        ['OS=="ios"', {
+          'all_dependent_settings': {
+            'xcode_settings': {
+              'OTHER_LDFLAGS': [
+                '-framework OpenGLES',
+                '-framework QuartzCore',
+                '-framework UIKit',
+              ],
+            },
+          },
+        }],
         ['OS=="mac"', {
           'direct_dependent_settings': {
             'include_dirs': ['mac',],
           },
+        }],
+        ['OS=="win" and include_internal_video_render==1', {
+          'variables': {
+            # 'directx_sdk_path' will be overridden in the condition block
+            # below, but it must not be declared as empty here since gyp
+            # will check if the first character is '/' for some reason.
+            # If it's empty, we'll get an out-of-bounds error.
+            'directx_sdk_path': 'will_be_overridden',
+            'directx_sdk_default_path': '<(DEPTH)/third_party/directxsdk/files',
+            'conditions': [
+              ['"<!(python <(DEPTH)/build/dir_exists.py <(directx_sdk_default_path))"=="True"', {
+                'directx_sdk_path': '<(DEPTH)/third_party/directxsdk/files',
+              }, {
+                'directx_sdk_path': '$(DXSDK_DIR)',
+              }],
+            ],
+          },
+
+          'include_dirs': [
+            '<(directx_sdk_path)/Include',
+          ],
         }],
         ['OS!="win" or include_internal_video_render==0', {
           'sources!': [
@@ -139,7 +196,7 @@
     ['include_tests==1', {
       'targets': [
         {
-          'target_name': 'video_render_module_test',
+          'target_name': 'video_render_tests',
           'type': 'executable',
           'dependencies': [
             'video_render_module',
@@ -179,6 +236,26 @@
           ] # conditions
         }, # video_render_module_test
       ], # targets
+      'conditions': [
+        ['test_isolation_mode != "noop"', {
+          'targets': [
+            {
+              'target_name': 'video_render_tests_run',
+              'type': 'none',
+              'dependencies': [
+                '<(import_isolate_path):import_isolate_gypi',
+                'video_render_tests',
+              ],
+              'includes': [
+                'video_render_tests.isolate',
+              ],
+              'sources': [
+                'video_render_tests.isolate',
+              ],
+            },
+          ],
+        }],
+      ],
     }], # include_tests==0
   ], # conditions
 }

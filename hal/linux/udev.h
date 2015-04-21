@@ -12,6 +12,8 @@
 
 #include <dlfcn.h>
 
+#include "mozilla/ArrayUtils.h"
+
 namespace mozilla {
 
 struct udev;
@@ -22,10 +24,33 @@ struct udev_monitor;
 
 class udev_lib {
  public:
-  udev_lib() : lib(dlopen("libudev.so.0", RTLD_LAZY | RTLD_GLOBAL)),
-               udev(NULL) {
-    if (lib && LoadSymbols())
+  udev_lib() : lib(nullptr),
+               udev(nullptr) {
+    // Be careful about ABI compat! 0 -> 1 didn't change any
+    // symbols this code relies on, per:
+    // https://lists.fedoraproject.org/pipermail/devel/2012-June/168227.html
+    const char* lib_names[] = {"libudev.so.0", "libudev.so.1"};
+    // Check whether a library is already loaded so we don't load two
+    // conflicting libs.
+    for (unsigned i = 0; i < ArrayLength(lib_names); i++) {
+      lib = dlopen(lib_names[i], RTLD_NOLOAD | RTLD_LAZY | RTLD_GLOBAL);
+      if (lib) {
+        break;
+      }
+    }
+    // If nothing loads the first time through, it means no version of libudev
+    // was already loaded.
+    if (!lib) {
+      for (unsigned i = 0; i < ArrayLength(lib_names); i++) {
+        lib = dlopen(lib_names[i], RTLD_LAZY | RTLD_GLOBAL);
+        if (lib) {
+          break;
+        }
+      }
+    }
+    if (lib && LoadSymbols()) {
       udev = udev_new();
+    }
   }
 
   ~udev_lib() {

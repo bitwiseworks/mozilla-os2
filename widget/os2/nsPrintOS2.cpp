@@ -376,7 +376,7 @@ nsAString* os2Printers::GetPrinterTitle(ULONG printerNdx)
   return mPQBuf[printerNdx]->PrinterTitle();
 }
 
-int32_t os2Printers::GetPrinterIndex(const PRUnichar* aPrinterName)
+int32_t os2Printers::GetPrinterIndex(const char16_t* aPrinterName)
 {
   ULONG index;
 

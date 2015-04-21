@@ -18,9 +18,9 @@ namespace videocapturemodule
 
 struct DelayValue
 {
-    WebRtc_Word32 width;
-    WebRtc_Word32 height;
-    WebRtc_Word32 delay;
+    int32_t width;
+    int32_t height;
+    int32_t delay;
 };
 
 enum { NoOfDelayValues = 40 };
@@ -31,6 +31,6 @@ struct DelayValues
     DelayValue delayValues[NoOfDelayValues];
 };
 
-} //namespace videocapturemodule
-} //namespace webrtc
+}  // namespace videocapturemodule
+}  // namespace webrtc
 #endif // WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_VIDEO_CAPTURE_DELAY_H_

@@ -21,6 +21,10 @@
 class nsScriptLoadRequest;
 class nsIURI;
 
+namespace JS {
+  class SourceBufferHolder;
+}
+
 //////////////////////////////////////////////////////////////
 // Script loader implementation
 //////////////////////////////////////////////////////////////
@@ -65,7 +69,7 @@ public:
   {
     mObservers.RemoveObject(aObserver);
   }
-  
+
   /**
    * Process a script element. This will include both loading the 
    * source of the element if it is not inline and evaluating
@@ -140,12 +144,17 @@ public:
    *                     attribute). May be the empty string.
    * @param aDocument    Document which the data is loaded for. Must not be
    *                     null.
-   * @param aString      [out] Data as converted to unicode
+   * @param aBufOut      [out] jschar array allocated by ConvertToUTF16 and
+   *                     containing data converted to unicode.  Caller must
+   *                     js_free() this data when no longer needed.
+   * @param aLengthOut   [out] Length of array returned in aBufOut in number
+   *                     of jschars.
    */
   static nsresult ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
                                  uint32_t aLength,
                                  const nsAString& aHintCharset,
-                                 nsIDocument* aDocument, nsString& aString);
+                                 nsIDocument* aDocument,
+                                 jschar*& aBufOut, size_t& aLengthOut);
 
   /**
    * Processes any pending requests that are ready for processing.
@@ -207,6 +216,13 @@ public:
                           const nsAString &aCrossOrigin,
                           bool aScriptFromHead);
 
+  /**
+   * Process a request that was deferred so that the script could be compiled
+   * off thread.
+   */
+  nsresult ProcessOffThreadRequest(nsScriptLoadRequest *aRequest,
+                                   void **aOffThreadToken);
+
 private:
   /**
    * Unblocks the creator parser of the parser-blocking scripts.
@@ -261,20 +277,31 @@ private:
   bool AddPendingChildLoader(nsScriptLoader* aChild) {
     return mPendingChildLoaders.AppendElement(aChild) != nullptr;
   }
-  
-  nsresult ProcessRequest(nsScriptLoadRequest* aRequest);
+
+  nsresult AttemptAsyncScriptParse(nsScriptLoadRequest* aRequest);
+  nsresult ProcessRequest(nsScriptLoadRequest* aRequest,
+                          void **aOffThreadToken = nullptr);
   void FireScriptAvailable(nsresult aResult,
                            nsScriptLoadRequest* aRequest);
   void FireScriptEvaluated(nsresult aResult,
                            nsScriptLoadRequest* aRequest);
   nsresult EvaluateScript(nsScriptLoadRequest* aRequest,
-                          const nsAFlatString& aScript);
+                          JS::SourceBufferHolder& aSrcBuf,
+                          void **aOffThreadToken);
+
+  already_AddRefed<nsIScriptGlobalObject> GetScriptGlobalObject();
+  void FillCompileOptionsForRequest(nsScriptLoadRequest *aRequest,
+                                    JS::Handle<JSObject *> aScopeChain,
+                                    JS::CompileOptions *aOptions);
 
   nsresult PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
                                 nsIStreamLoader* aLoader,
                                 nsresult aStatus,
                                 uint32_t aStringLen,
                                 const uint8_t* aString);
+
+  void AddDeferRequest(nsScriptLoadRequest* aRequest);
+  bool MaybeRemovedDeferRequests();
 
   nsIDocument* mDocument;                   // [WEAK]
   nsCOMArray<nsIScriptLoaderObserver> mObservers;
@@ -310,6 +337,7 @@ private:
   bool mEnabled;
   bool mDeferEnabled;
   bool mDocumentParsingDone;
+  bool mBlockingDOMContentLoaded;
 };
 
 class nsAutoScriptLoaderDisabler
@@ -323,14 +351,14 @@ public:
       mLoader->SetEnabled(false);
     }
   }
-  
+
   ~nsAutoScriptLoaderDisabler()
   {
     if (mWasEnabled) {
       mLoader->SetEnabled(true);
     }
   }
-  
+
   bool mWasEnabled;
   nsRefPtr<nsScriptLoader> mLoader;
 };

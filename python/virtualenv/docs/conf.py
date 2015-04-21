@@ -11,10 +11,13 @@
 # All configuration values have a default value; values that are commented out
 # serve to show the default value.
 
+import os
 import sys
 
+on_rtd = os.environ.get('READTHEDOCS', None) == 'True'
+
 # If your extensions are in another directory, add it here.
-#sys.path.append('some/directory')
+sys.path.insert(0, os.path.abspath(os.pardir))
 
 # General configuration
 # ---------------------
@@ -28,14 +31,14 @@ extensions = ['sphinx.ext.autodoc']
 #templates_path = ['_templates']
 
 # The suffix of source filenames.
-source_suffix = '.txt'
+source_suffix = '.rst'
 
 # The master toctree document.
 master_doc = 'index'
 
 # General substitutions.
 project = 'virtualenv'
-copyright = '2007-2012, Ian Bicking, The Open Planning Project, The virtualenv developers'
+copyright = '2007-2014, Ian Bicking, The Open Planning Project, PyPA'
 
 # The default replacements for |version| and |release|, also used in various
 # other places throughout the built documents.
@@ -80,8 +83,14 @@ pygments_style = 'sphinx'
 # given in html_static_path.
 #html_style = 'default.css'
 
-html_theme = 'nature'
-html_theme_path = ['_theme']
+if os.environ.get('DOCS_LOCAL'):
+    import sphinx_rtd_theme
+    html_theme = "sphinx_rtd_theme"
+    html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+else:
+    # on RTD
+    html_theme = 'default'
+
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

@@ -5,176 +5,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsStyleConsts.h"
-#include "nsPoint.h"
-#include "nsRect.h"
-#include "nsViewManager.h"
-#include "nsFrameManager.h"
-#include "nsStyleContext.h"
-#include "nsGkAtoms.h"
-#include "nsCSSAnonBoxes.h"
-#include "nsTransform2D.h"
-#include "nsIContent.h"
-#include "nsIScrollableFrame.h"
-#include "imgIRequest.h"
-#include "imgIContainer.h"
-#include "nsCSSRendering.h"
 #include "nsCSSColorUtils.h"
-#include "nsITheme.h"
-#include "nsThemeConstants.h"
-#include "nsIServiceManager.h"
-#include "nsLayoutUtils.h"
-#include "nsINameSpaceManager.h"
-#include "nsBlockFrame.h"
 #include "GeckoProfiler.h"
 #include "nsExpirationTracker.h"
 #include "RoundedRect.h"
-
+#include "nsClassHashtable.h"
+#include "nsStyleStruct.h"
 #include "gfxContext.h"
-
 #include "nsCSSRenderingBorders.h"
-
 #include "mozilla/gfx/2D.h"
 #include "gfx2DGlue.h"
+#include "gfxGradientCache.h"
 #include <algorithm>
 
 using namespace mozilla;
 using namespace mozilla::gfx;
-
-struct BorderGradientCacheKey : public PLDHashEntryHdr {
-  typedef const BorderGradientCacheKey& KeyType;
-  typedef const BorderGradientCacheKey* KeyTypePointer;
-
-  enum { ALLOW_MEMMOVE = true };
-
-  const uint32_t mColor1;
-  const uint32_t mColor2;
-  const BackendType mBackendType;
-
-  BorderGradientCacheKey(const Color& aColor1, const Color& aColor2,
-                         BackendType aBackendType)
-    : mColor1(aColor1.ToABGR()), mColor2(aColor2.ToABGR())
-    , mBackendType(aBackendType)
-  { }
-
-  BorderGradientCacheKey(const BorderGradientCacheKey* aOther)
-    : mColor1(aOther->mColor1), mColor2(aOther->mColor2)
-    , mBackendType(aOther->mBackendType)
-  { }
-
-  static PLDHashNumber
-  HashKey(const KeyTypePointer aKey)
-  {
-    PLDHashNumber hash = 0;
-    hash = AddToHash(hash, aKey->mColor1);
-    hash = AddToHash(hash, aKey->mColor2);
-    hash = AddToHash(hash, aKey->mBackendType);
-    return hash;
-  }
-
-  bool KeyEquals(KeyTypePointer aKey) const
-  {
-    return (aKey->mColor1 == mColor1) &&
-           (aKey->mColor2 == mColor2) &&
-           (aKey->mBackendType == mBackendType);
-  }
-  static KeyTypePointer KeyToPointer(KeyType aKey)
-  {
-    return &aKey;
-  }
-};
-
-/**
- * This class is what is cached. It need to be allocated in an object separated
- * to the cache entry to be able to be tracked by the nsExpirationTracker.
- * */
-struct BorderGradientCacheData {
-  BorderGradientCacheData(GradientStops* aStops, const BorderGradientCacheKey& aKey)
-    : mStops(aStops), mKey(aKey)
-  {}
-
-  BorderGradientCacheData(const BorderGradientCacheData& aOther)
-    : mStops(aOther.mStops),
-      mKey(aOther.mKey)
-  { }
-
-  nsExpirationState *GetExpirationState() {
-    return &mExpirationState;
-  }
-
-  nsExpirationState mExpirationState;
-  RefPtr<GradientStops> mStops;
-  BorderGradientCacheKey mKey;
-};
-
-/**
- * This class implements a cache with no maximum size, that retains the
- * gradient stops used to draw border corners.
- *
- * The key is formed by the two gradient stops, they're always both located
- * at an offset of 0.5. So they can generously be reused. The key also includes
- * the backend type a certain gradient was created for.
- *
- * An entry stays in the cache as long as it is used often.
- *
- * This code was pretty bluntly stolen and modified from nsCSSRendering.
- */
-class BorderGradientCache MOZ_FINAL : public nsExpirationTracker<BorderGradientCacheData,4>
-{
-  public:
-    BorderGradientCache()
-      : nsExpirationTracker<BorderGradientCacheData, 4>(GENERATION_MS)
-    {
-      mHashEntries.Init();
-      mTimerPeriod = GENERATION_MS;
-    }
-
-    virtual void NotifyExpired(BorderGradientCacheData* aObject)
-    {
-      // This will free the gfxPattern.
-      RemoveObject(aObject);
-      mHashEntries.Remove(aObject->mKey);
-    }
-
-    BorderGradientCacheData* Lookup(const Color& aColor1, const Color& aColor2,
-                                    BackendType aBackendType)
-    {
-      BorderGradientCacheData* gradient =
-        mHashEntries.Get(BorderGradientCacheKey(aColor1, aColor2, aBackendType));
-
-      if (gradient) {
-        MarkUsed(gradient);
-      }
-
-      return gradient;
-    }
-
-    // Returns true if we successfully register the gradient in the cache, false
-    // otherwise.
-    bool RegisterEntry(BorderGradientCacheData* aValue)
-    {
-      nsresult rv = AddObject(aValue);
-      if (NS_FAILED(rv)) {
-        // We are OOM, and we cannot track this object. We don't want stall
-        // entries in the hash table (since the expiration tracker is responsible
-        // for removing the cache entries), so we avoid putting that entry in the
-        // table, which is a good things considering we are short on memory
-        // anyway, we probably don't want to retain things.
-        return false;
-      }
-      mHashEntries.Put(aValue->mKey, aValue);
-      return true;
-    }
-
-  protected:
-    uint32_t mTimerPeriod;
-    static const uint32_t GENERATION_MS = 4000;
-    /**
-     * FIXME use nsTHashtable to avoid duplicating the BorderGradientCacheKey.
-     * This is analogous to the issue for the generic gradient cache:
-     * https://bugzilla.mozilla.org/show_bug.cgi?id=785794
-     */
-    nsClassHashtable<BorderGradientCacheKey, BorderGradientCacheData> mHashEntries;
-};
 
 /**
  * nsCSSRendering::PaintBorder
@@ -267,8 +112,6 @@ typedef enum {
   CORNER_DOT
 } CornerStyle;
 
-static BorderGradientCache* gBorderGradientCache = nullptr;
-
 nsCSSBorderRenderer::nsCSSBorderRenderer(int32_t aAppUnitsPerPixel,
                                          gfxContext* aDestContext,
                                          gfxRect& aOuterRect,
@@ -291,7 +134,7 @@ nsCSSBorderRenderer::nsCSSBorderRenderer(int32_t aAppUnitsPerPixel,
     mBackgroundColor(aBackgroundColor)
 {
   if (!mCompositeColors) {
-    static nsBorderColors * const noColors[4] = { NULL };
+    static nsBorderColors * const noColors[4] = { nullptr };
     mCompositeColors = &noColors[0];
   }
 
@@ -307,18 +150,6 @@ nsCSSBorderRenderer::nsCSSBorderRenderer(int32_t aAppUnitsPerPixel,
   mOneUnitBorder = CheckFourFloatsEqual(mBorderWidths, 1.0);
   mNoBorderRadius = AllCornersZeroSize(mBorderRadii);
   mAvoidStroke = false;
-}
-
-void
-nsCSSBorderRenderer::Init()
-{
-  gBorderGradientCache = new BorderGradientCache();
-}
-
-void
-nsCSSBorderRenderer::Shutdown()
-{
-  delete gBorderGradientCache;
 }
 
 /* static */ void
@@ -897,7 +728,7 @@ nsCSSBorderRenderer::DrawBorderSides(int aSides)
     return;
   }
 
-  uint8_t borderRenderStyle;
+  uint8_t borderRenderStyle = NS_STYLE_BORDER_STYLE_NONE;
   nscolor borderRenderColor;
   const nsBorderColors *compositeColors = nullptr;
 
@@ -1242,8 +1073,8 @@ nsCSSBorderRenderer::CreateCornerGradient(mozilla::css::Corner aCorner,
   float gradientOffset;
   
   if (mContext->IsCairo() &&
-      (mContext->OriginalSurface()->GetType() == gfxASurface::SurfaceTypeD2D ||
-       mContext->OriginalSurface()->GetType() == gfxASurface::SurfaceTypeQuartz))
+      (mContext->OriginalSurface()->GetType() == gfxSurfaceType::D2D ||
+       mContext->OriginalSurface()->GetType() == gfxSurfaceType::Quartz))
   {
     // On quarz this doesn't do exactly the right thing, but it does do what
     // most other browsers do and doing the 'right' thing seems to be
@@ -1300,44 +1131,29 @@ nsCSSBorderRenderer::CreateCornerGradient(mozilla::css::Corner aCorner,
   Color firstColor = ToColor(aFirstColor);
   Color secondColor = ToColor(aSecondColor);
 
-  BorderGradientCacheData *data =
-    gBorderGradientCache->Lookup(firstColor, secondColor, aDT->GetType());
-
-  if (!data) {
+  nsTArray<gfx::GradientStop> rawStops(2);
+  rawStops.SetLength(2);
+  // This is only guaranteed to give correct (and in some cases more correct)
+  // rendering with the Direct2D Azure and Quartz Cairo backends. For other
+  // cairo backends it could create un-antialiased border corner transitions
+  // since that at least used to be pixman's behaviour for hard stops.
+  rawStops[0].color = firstColor;
+  rawStops[0].offset = 0.5;
+  rawStops[1].color = secondColor;
+  rawStops[1].offset = 0.5;
+  RefPtr<GradientStops> gs =
+    gfxGradientCache::GetGradientStops(aDT, rawStops, ExtendMode::CLAMP);
+  if (!gs) {
     // Having two corners, both with reversed color stops is pretty common
     // for certain border types. Let's optimize it!
-    data = gBorderGradientCache->Lookup(secondColor, firstColor, aDT->GetType());
-
-    if (data) {
-      Point tmp = aPoint1;
-      aPoint1 = aPoint2;
-      aPoint2 = tmp;
-    }
+    rawStops[0].color = secondColor;
+    rawStops[1].color = firstColor;
+    Point tmp = aPoint1;
+    aPoint1 = aPoint2;
+    aPoint2 = tmp;
+    gs = gfxGradientCache::GetOrCreateGradientStops(aDT, rawStops, ExtendMode::CLAMP);
   }
-
-  RefPtr<GradientStops> stops;
-  if (data) {
-    stops = data->mStops;
-  } else {
-    GradientStop rawStops[2];
-    // This is only guaranteed to give correct (and in some cases more correct)
-    // rendering with the Direct2D Azure and Quartz Cairo backends. For other
-    // cairo backends it could create un-antialiased border corner transitions
-    // since that at least used to be pixman's behaviour for hard stops.
-    rawStops[0].color = firstColor;
-    rawStops[0].offset = 0.5;
-    rawStops[1].color = secondColor;
-    rawStops[1].offset = 0.5;
-    stops = aDT->CreateGradientStops(rawStops, 2);
-
-    data = new BorderGradientCacheData(stops, BorderGradientCacheKey(firstColor, secondColor, aDT->GetType()));
-
-    if (!gBorderGradientCache->RegisterEntry(data)) {
-      delete data;
-    }
-  }
-
-  return stops;
+  return gs;
 }
 
 typedef struct { gfxFloat a, b; } twoFloats;
@@ -1547,7 +1363,7 @@ nsCSSBorderRenderer::DrawNoCompositeColorSolidBorderAzure()
                                mBorderWidths[2] / 2.0, mBorderWidths[3] / 2.0));
 
   ColorPattern colorPat(Color(0, 0, 0, 0));
-  LinearGradientPattern gradPat(Point(), Point(), NULL);
+  LinearGradientPattern gradPat(Point(), Point(), nullptr);
 
   NS_FOR_CSS_CORNERS(i) {
       // the corner index -- either 1 2 3 0 (cw) or 0 3 2 1 (ccw)
@@ -1597,6 +1413,8 @@ nsCSSBorderRenderer::DrawNoCompositeColorSolidBorderAzure()
     builder->LineTo(strokeEnd);
     RefPtr<Path> path = builder->Finish();
     dt->Stroke(path, ColorPattern(Color::FromABGR(mBorderColors[i])), StrokeOptions(mBorderWidths[i]));
+    builder = nullptr;
+    path = nullptr;
 
     Pattern *pattern;
 
@@ -1753,7 +1571,7 @@ nsCSSBorderRenderer::DrawBorders()
   bool brBordersSame = AreBorderSideFinalStylesSame(SIDE_BIT_BOTTOM | SIDE_BIT_RIGHT);
   bool allBordersSame = AreBorderSideFinalStylesSame(SIDE_BITS_ALL);
   if (allBordersSame &&
-      ((mCompositeColors[0] == NULL &&
+      ((mCompositeColors[0] == nullptr &&
        (mBorderStyles[0] == NS_STYLE_BORDER_STYLE_NONE ||
         mBorderStyles[0] == NS_STYLE_BORDER_STYLE_HIDDEN ||
         mBorderColors[0] == NS_RGBA(0,0,0,0))) ||
@@ -1808,7 +1626,7 @@ nsCSSBorderRenderer::DrawBorders()
   // drawing paths, when none of these can be used we move on to the generalized
   // border drawing code.
   if (allBordersSame &&
-      mCompositeColors[0] == NULL &&
+      mCompositeColors[0] == nullptr &&
       allBordersSameWidth &&
       mBorderStyles[0] == NS_STYLE_BORDER_STYLE_SOLID &&
       mNoBorderRadius &&
@@ -1825,7 +1643,7 @@ nsCSSBorderRenderer::DrawBorders()
   }
 
   if (allBordersSame &&
-      mCompositeColors[0] == NULL &&
+      mCompositeColors[0] == nullptr &&
       allBordersSameWidth &&
       mBorderStyles[0] == NS_STYLE_BORDER_STYLE_DOTTED &&
       mBorderWidths[0] < 3 &&
@@ -1849,7 +1667,7 @@ nsCSSBorderRenderer::DrawBorders()
 
   
   if (allBordersSame &&
-      mCompositeColors[0] == NULL &&
+      mCompositeColors[0] == nullptr &&
       mBorderStyles[0] == NS_STYLE_BORDER_STYLE_SOLID &&
       !mAvoidStroke &&
       !mNoBorderRadius)
@@ -1886,7 +1704,7 @@ nsCSSBorderRenderer::DrawBorders()
   // Doing this is slightly faster and shouldn't be a problem visually.
   if (allBordersSolid &&
       allBordersSameWidth &&
-      mCompositeColors[0] == NULL &&
+      mCompositeColors[0] == nullptr &&
       mBorderWidths[0] == 1 &&
       mNoBorderRadius &&
       !mAvoidStroke)
@@ -1989,8 +1807,8 @@ nsCSSBorderRenderer::DrawBorders()
       const int sides[2] = { corner, PREV_SIDE(corner) };
       int sideBits = (1 << sides[0]) | (1 << sides[1]);
 
-      bool simpleCornerStyle = mCompositeColors[sides[0]] == NULL &&
-                                 mCompositeColors[sides[1]] == NULL &&
+      bool simpleCornerStyle = mCompositeColors[sides[0]] == nullptr &&
+                                 mCompositeColors[sides[1]] == nullptr &&
                                  AreBorderSideFinalStylesSame(sideBits);
 
       // If we don't have anything complex going on in this corner,

@@ -10,7 +10,7 @@
 #include "nsIObjectOutputStream.h"
 #include "nsNetUtil.h"
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsSimpleNestedURI, nsSimpleURI, nsINestedURI)
+NS_IMPL_ISUPPORTS_INHERITED(nsSimpleNestedURI, nsSimpleURI, nsINestedURI)
 
 nsSimpleNestedURI::nsSimpleNestedURI(nsIURI* innerURI)
     : mInnerURI(innerURI)
@@ -29,7 +29,11 @@ nsSimpleNestedURI::Read(nsIObjectInputStream* aStream)
 
     NS_ASSERTION(!mMutable, "How did that happen?");
 
-    rv = aStream->ReadObject(true, getter_AddRefs(mInnerURI));
+    nsCOMPtr<nsISupports> supports;
+    rv = aStream->ReadObject(true, getter_AddRefs(supports));
+    if (NS_FAILED(rv)) return rv;
+
+    mInnerURI = do_QueryInterface(supports, &rv);
     if (NS_FAILED(rv)) return rv;
 
     NS_TryToSetImmutable(mInnerURI);

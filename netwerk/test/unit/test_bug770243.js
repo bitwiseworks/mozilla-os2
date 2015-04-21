@@ -7,20 +7,16 @@
  5. 407 followed by 304
 */
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
-
 Cu.import("resource://testing-common/httpd.js");
 
 var httpserv;
- 
+
 function addCreds(scheme, host)
 {
   var authMgr = Components.classes['@mozilla.org/network/http-auth-manager;1']
                           .getService(Ci.nsIHttpAuthManager);
-  authMgr.setAuthIdentity(scheme, host, 4444, "basic", "secret", "/", "", "user", "pass");
+  authMgr.setAuthIdentity(scheme, host, httpserv.identity.primaryPort,
+                          "basic", "secret", "/", "", "user", "pass");
 }
 
 function clearCreds()
@@ -33,7 +29,8 @@ function clearCreds()
 function makeChan() {
   var ios = Cc["@mozilla.org/network/io-service;1"]
                       .getService(Ci.nsIIOService);
-  var chan = ios.newChannel("http://localhost:4444/", null, null)
+  var chan = ios.newChannel("http://localhost:" +
+                            httpserv.identity.primaryPort + "/", null, null)
                 .QueryInterface(Ci.nsIHttpChannel);
   return chan;
 }
@@ -70,7 +67,7 @@ var handlers = [
     response.bodyOutputStream.write(body, body.length);
     clearCreds();
   },
-  
+
   // Test 3
   function(metadata, response) {
     do_check_eq(metadata.hasHeader("Authorization"), false);
@@ -86,7 +83,7 @@ var handlers = [
     response.setHeader("ETag", '"two"', false);
     clearCreds();
   },
-  
+
   // Test 4
   function(metadata, response) {
     do_check_eq(metadata.hasHeader("Authorization"), false);
@@ -105,8 +102,8 @@ var handlers = [
     var body = "Response body 3";
     response.bodyOutputStream.write(body, body.length);
     clearCreds();
-  }, 
-  
+  },
+
   // Test 5
   function(metadata, response) {
     do_check_eq(metadata.hasHeader("Proxy-Authorization"), false);
@@ -125,9 +122,9 @@ var handlers = [
   }
 ];
 
-function handler(metadata, response) 
+function handler(metadata, response)
 {
-  handlers.shift()(metadata, response); 
+  handlers.shift()(metadata, response);
 }
 
 // Array of tests to run, self-driven
@@ -157,7 +154,7 @@ var tests = [
       sync_and_run_next_test();
     }, null, CL_NOT_FROM_CACHE), null);
   },
-  
+
   // Test 3: 401 and 304
   function() {
     var ch = makeChan();
@@ -166,7 +163,7 @@ var tests = [
       sync_and_run_next_test();
     }, null, CL_FROM_CACHE), null);
   },
-  
+
   // Test 4: 407 and 200 + new content
   function() {
     var ch = makeChan();
@@ -175,7 +172,7 @@ var tests = [
       sync_and_run_next_test();
     }, null, CL_NOT_FROM_CACHE), null);
   },
-  
+
   // Test 5: 407 and 304
   function() {
     var ch = makeChan();
@@ -194,15 +191,15 @@ var tests = [
 function run_test()
 {
   do_get_profile();
-  
+
   httpserv = new HttpServer();
   httpserv.registerPathHandler("/", handler);
-  httpserv.start(4444);
+  httpserv.start(-1);
 
   const prefs = Cc["@mozilla.org/preferences-service;1"]
                          .getService(Ci.nsIPrefBranch);
   prefs.setCharPref("network.proxy.http", "localhost");
-  prefs.setIntPref("network.proxy.http_port", 4444);
+  prefs.setIntPref("network.proxy.http_port", httpserv.identity.primaryPort);
   prefs.setCharPref("network.proxy.no_proxies_on", "");
   prefs.setIntPref("network.proxy.type", 1);
 

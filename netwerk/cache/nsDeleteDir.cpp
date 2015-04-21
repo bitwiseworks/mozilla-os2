@@ -14,6 +14,7 @@
 #include "nsThreadUtils.h"
 #include "nsISupportsPriority.h"
 #include "nsCacheUtils.h"
+#include "prtime.h"
 #include <time.h>
 
 using namespace mozilla;
@@ -101,7 +102,7 @@ nsDeleteDir::Shutdown(bool finishDeleting)
       }
 
       rv = gInstance->mCondVar.Wait();
-      thread->Shutdown();
+      nsShutdownThread::BlockingShutdown(thread);
     }
   }
 

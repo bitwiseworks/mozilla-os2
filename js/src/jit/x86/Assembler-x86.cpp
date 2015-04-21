@@ -4,7 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Assembler-x86.h"
+#include "jit/x86/Assembler-x86.h"
+
 #include "gc/Marking.h"
 
 using namespace js;
@@ -24,11 +25,12 @@ ABIArgGenerator::next(MIRType type)
       case MIRType_Pointer:
         stackOffset_ += sizeof(uint32_t);
         break;
+      case MIRType_Float32: // Float32 moves are actually double moves
       case MIRType_Double:
         stackOffset_ += sizeof(uint64_t);
         break;
       default:
-        JS_NOT_REACHED("Unexpected argument type");
+        MOZ_ASSUME_UNREACHABLE("Unexpected argument type");
     }
     return current_;
 }
@@ -70,20 +72,20 @@ class RelocationIterator
     }
 };
 
-static inline IonCode *
+static inline JitCode *
 CodeFromJump(uint8_t *jump)
 {
     uint8_t *target = (uint8_t *)JSC::X86Assembler::getRel32Target(jump);
-    return IonCode::FromExecutable(target);
+    return JitCode::FromExecutable(target);
 }
 
 void
-Assembler::TraceJumpRelocations(JSTracer *trc, IonCode *code, CompactBufferReader &reader)
+Assembler::TraceJumpRelocations(JSTracer *trc, JitCode *code, CompactBufferReader &reader)
 {
     RelocationIterator iter(reader);
     while (iter.read()) {
-        IonCode *child = CodeFromJump(code->raw() + iter.offset());
-        MarkIonCodeUnbarriered(trc, &child, "rel32");
+        JitCode *child = CodeFromJump(code->raw() + iter.offset());
+        MarkJitCodeUnbarriered(trc, &child, "rel32");
         JS_ASSERT(child == CodeFromJump(code->raw() + iter.offset()));
     }
 }

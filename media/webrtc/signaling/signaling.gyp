@@ -41,6 +41,7 @@
         './src/callcontrol',
         './src/common',
         './src/common/browser_logging',
+        './src/common/time_profiling',
         './src/media',
         './src/media-conduit',
         './src/mediapipeline',
@@ -52,18 +53,20 @@
         '../../../ipc/chromium/src',
         '../../../ipc/chromium/src/base/third_party/nspr',
         '../../../xpcom/base',
-        '$(DEPTH)/dist/include',
         '../../../dom/base',
         '../../../content/media',
         '../../../media/mtransport',
+        '../trunk',
         '../trunk/webrtc',
         '../trunk/webrtc/video_engine/include',
         '../trunk/webrtc/voice_engine/include',
         '../trunk/webrtc/modules/interface',
         '../trunk/webrtc/peerconnection',
+        '../../libyuv/include',
         '../../../netwerk/srtp/src/include',
         '../../../netwerk/srtp/src/crypto/include',
         '../../../ipc/chromium/src',
+        '../../mtransport/third_party/nrappkit/src/util/libekr',
       ],
 
       #
@@ -91,9 +94,13 @@
         './src/common/NullDeleter.h',
         './src/common/Wrapper.h',
         './src/common/NullTransport.h',
+        './src/common/YuvStamper.cpp',
         # Browser Logging
         './src/common/browser_logging/CSFLog.cpp',
         './src/common/browser_logging/CSFLog.h',
+        # Browser Logging
+        './src/common/time_profiling/timecard.c',
+        './src/common/time_profiling/timecard.h',
         # Call Control
         './src/callcontrol/CC_CallTypes.cpp',
         './src/callcontrol/CallControlManager.cpp',
@@ -151,6 +158,8 @@
         # Media pipeline
         './src/mediapipeline/MediaPipeline.h',
         './src/mediapipeline/MediaPipeline.cpp',
+        './src/mediapipeline/MediaPipelineFilter.h',
+        './src/mediapipeline/MediaPipelineFilter.cpp',
         './src/mediapipeline/SrtpFlow.h',
         './src/mediapipeline/SrtpFlow.cpp',
       ],
@@ -167,8 +176,8 @@
         'WEBRTC_RELATIVE_PATH',
       	'HAVE_WEBRTC_VIDEO',
         'HAVE_WEBRTC_VOICE',
+        'HAVE_STDINT_H=1',
         'HAVE_STDLIB_H=1',
-        'INTEGER_TYPES_H="\\"mozilla/StandardInteger.h\\""',
         'HAVE_UINT8_T=1',
         'HAVE_UINT16_T=1',
         'HAVE_UINT32_T=1',
@@ -178,15 +187,40 @@
       'cflags_mozilla': [
         '$(NSPR_CFLAGS)',
         '$(NSS_CFLAGS)',
+        '$(MOZ_PIXMAN_CFLAGS)',
       ],
 
       #
       # Conditionals
       #
       'conditions': [
+        ['moz_webrtc_omx==1', {
+          'sources': [
+            './src/media-conduit/WebrtcOMXH264VideoCodec.cpp',
+            './src/media-conduit/OMXVideoCodec.cpp',
+          ],
+          'include_dirs': [
+            '../../../content/media/omx',
+            '../../../gfx/layers/client',
+          ],
+          'cflags_mozilla': [
+            '-I$(ANDROID_SOURCE)/frameworks/av/include/media/stagefright',
+            '-I$(ANDROID_SOURCE)/frameworks/av/include',
+            '-I$(ANDROID_SOURCE)/frameworks/native/include/media/openmax',
+            '-I$(ANDROID_SOURCE)/frameworks/native/include',
+            '-I$(ANDROID_SOURCE)/frameworks/native/opengl/include',
+          ],
+          'defines' : [
+            'MOZ_WEBRTC_OMX'
+          ],
+        }],
         ['build_for_test==0', {
           'defines' : [
             'MOZILLA_INTERNAL_API'
+          ],
+          'sources': [
+            './src/peerconnection/WebrtcGlobalInformation.cpp',
+            './src/peerconnection/WebrtcGlobalInformation.h',
           ],
         }],
         ['build_for_test!=0', {
@@ -195,7 +229,8 @@
           ],
           'defines' : [
             'NO_CHROMIUM_LOGGING',
-            'USE_FAKE_MEDIA_STREAMS'
+            'USE_FAKE_MEDIA_STREAMS',
+            'USE_FAKE_PCOBSERVER'
           ],
         }],
         ['(OS=="linux") or (OS=="android")', {
@@ -221,8 +256,20 @@
             'WIN32',
             'GIPS_VER=3480',
             'SIPCC_BUILD',
-            'HAVE_WINSOCK2_H',
-            'CPR_STDINT_INCLUDE=\\"mozilla/StandardInteger.h\\"'
+            'HAVE_WINSOCK2_H'
+          ],
+
+          'cflags_mozilla': [
+          ],
+        }],
+        ['os_bsd==1', {
+          'include_dirs': [
+          ],
+          'defines': [
+            # avoiding pointless ifdef churn
+            'SIP_OS_OSX',
+            'OSX',
+            'SECLIB_OPENSSL',
           ],
 
           'cflags_mozilla': [
@@ -255,6 +302,7 @@
       #
       'include_dirs': [
         './src/common/browser_logging',
+        './src/common/time_profiling',
         './src/sipcc/include',
         './src/sipcc/core/includes',
         './src/sipcc/cpr/include',
@@ -268,9 +316,9 @@
         '../../../dom/base',
         '../trunk/third_party/libsrtp/srtp/include',
         '../trunk/third_party/libsrtp/srtp/crypto/include',
-        '$(DEPTH)/dist/include',
         # Danger: this is to include config.h. This could be bad.
         '../trunk/third_party/libsrtp/config',
+        '../../../netwerk/sctp/datachannel',
       ],
 
       #
@@ -539,6 +587,7 @@
         './src/sipcc/cpr/include/cpr_time.h',
         './src/sipcc/cpr/include/cpr_timers.h',
         './src/sipcc/cpr/include/cpr_types.h',
+        './src/sipcc/cpr/common/cpr_ipc.c',
         './src/sipcc/cpr/common/cpr_string.c',
         # INCLUDE
         './src/sipcc/include/cc_blf.h',
@@ -570,6 +619,7 @@
         './src/sipcc/include/ccapi_service.h',
         './src/sipcc/include/ccapi_types.h',
         './src/sipcc/include/ccsdp.h',
+        './src/sipcc/include/ccsdp_rtcp_fb.h',
         './src/sipcc/include/config_api.h',
         './src/sipcc/include/dns_util.h',
         './src/sipcc/include/plat_api.h',
@@ -639,7 +689,6 @@
             # CPR
             './src/sipcc/cpr/android/cpr_android_errno.c',
             './src/sipcc/cpr/android/cpr_android_init.c',
-            './src/sipcc/cpr/android/cpr_android_ipc.c',
             './src/sipcc/cpr/android/cpr_android_socket.c',
             './src/sipcc/cpr/android/cpr_android_stdio.c',
             './src/sipcc/cpr/android/cpr_android_string.c',
@@ -651,7 +700,6 @@
             './src/sipcc/cpr/android/cpr_android_assert.h',
             './src/sipcc/cpr/android/cpr_android_errno.h',
             './src/sipcc/cpr/android/cpr_android_in.h',
-            './src/sipcc/cpr/android/cpr_darwin_ipc.h',
             './src/sipcc/cpr/android/cpr_android_private.h',
             './src/sipcc/cpr/android/cpr_android_rand.h',
             './src/sipcc/cpr/android/cpr_android_socket.h',
@@ -675,7 +723,6 @@
             # CPR
             './src/sipcc/cpr/linux/cpr_linux_errno.c',
             './src/sipcc/cpr/linux/cpr_linux_init.c',
-            './src/sipcc/cpr/linux/cpr_linux_ipc.c',
             './src/sipcc/cpr/linux/cpr_linux_socket.c',
             './src/sipcc/cpr/linux/cpr_linux_stdio.c',
             './src/sipcc/cpr/linux/cpr_linux_string.c',
@@ -687,7 +734,6 @@
             './src/sipcc/cpr/linux/cpr_linux_assert.h',
             './src/sipcc/cpr/linux/cpr_linux_errno.h',
             './src/sipcc/cpr/linux/cpr_linux_in.h',
-            './src/sipcc/cpr/linux/cpr_linux_ipc.h',
             './src/sipcc/cpr/linux/cpr_linux_private.h',
             './src/sipcc/cpr/linux/cpr_linux_rand.h',
             './src/sipcc/cpr/linux/cpr_linux_socket.h',
@@ -725,8 +771,6 @@
             './src/sipcc/cpr/win32/cpr_win_errno.h',
             './src/sipcc/cpr/win32/cpr_win_in.h',
             './src/sipcc/cpr/win32/cpr_win_init.c',
-            './src/sipcc/cpr/win32/cpr_win_ipc.c',
-            './src/sipcc/cpr/win32/cpr_win_ipc.h',
             './src/sipcc/cpr/win32/cpr_win_locks.c',
             './src/sipcc/cpr/win32/cpr_win_locks.h',
             './src/sipcc/cpr/win32/cpr_win_rand.c',
@@ -760,7 +804,7 @@
           ],
 
         }],
-        ['OS=="mac"', {
+        ['OS=="mac" or os_bsd==1', {
 
           'include_dirs': [
           ],
@@ -781,8 +825,6 @@
             './src/sipcc/cpr/darwin/cpr_darwin_errno.h',
             './src/sipcc/cpr/darwin/cpr_darwin_in.h',
             './src/sipcc/cpr/darwin/cpr_darwin_init.c',
-            './src/sipcc/cpr/darwin/cpr_darwin_ipc.c',
-            './src/sipcc/cpr/darwin/cpr_darwin_ipc.h',
             './src/sipcc/cpr/darwin/cpr_darwin_private.h',
             './src/sipcc/cpr/darwin/cpr_darwin_rand.h',
             './src/sipcc/cpr/darwin/cpr_darwin_socket.c',
@@ -801,19 +843,34 @@
           ],
 
 
-          'defines' : [
-            'SIP_OS_OSX',
-            '_POSIX_SOURCE',
-            'CPR_MEMORY_LITTLE_ENDIAN',
-            'NO_SOCKET_POLLING',
-            'USE_TIMER_SELECT_BASED',
-            'FULL_BUILD',
-            'STUBBED_OUT',
-            'USE_PRINTF',
-            '_DARWIN_C_SOURCE',
-            'NO_NSPR_10_SUPPORT',
+          'conditions': [
+            ['OS=="mac"', {
+              'defines' : [
+                'SIP_OS_OSX',
+                '_POSIX_SOURCE',
+                'CPR_MEMORY_LITTLE_ENDIAN',
+                'NO_SOCKET_POLLING',
+                'USE_TIMER_SELECT_BASED',
+                'FULL_BUILD',
+                'STUBBED_OUT',
+                'USE_PRINTF',
+                '_DARWIN_C_SOURCE',
+                'NO_NSPR_10_SUPPORT',
+              ],
+            }],
+            ['os_bsd==1', {
+              'defines' : [
+                'SIP_OS_OSX',
+                'CPR_MEMORY_LITTLE_ENDIAN',
+                'NO_SOCKET_POLLING',
+                'USE_TIMER_SELECT_BASED',
+                'FULL_BUILD',
+                'STUBBED_OUT',
+                'USE_PRINTF',
+                'NO_NSPR_10_SUPPORT',
+              ],
+            }],
           ],
-
           'cflags_mozilla': [
           ],
         }],

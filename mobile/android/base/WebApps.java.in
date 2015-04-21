@@ -6,8 +6,12 @@
 #filter substitution
 package @ANDROID_PACKAGE_NAME@;
 
+/**
+ * Declare a predefined number of Webapp<num> classes to the Webapps class.
+ * These are used so that each web app can launch in its own process. Keep this
+ * number in sync with the number of web apps handled in WebappAllocator.
+ */
 public final class WebApps {
-
-#include @OBJDIR@/WebAppsFragments.java
-
+#define FRAGMENT WebappsFragment.java.frag
+#include WebappFragmentRepeater.inc
 }

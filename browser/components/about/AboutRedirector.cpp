@@ -8,11 +8,12 @@
 #include "AboutRedirector.h"
 #include "nsNetUtil.h"
 #include "nsIScriptSecurityManager.h"
+#include "mozilla/ArrayUtils.h"
 
 namespace mozilla {
 namespace browser {
 
-NS_IMPL_ISUPPORTS1(AboutRedirector, nsIAboutModule)
+NS_IMPL_ISUPPORTS(AboutRedirector, nsIAboutModule)
 
 struct RedirEntry {
   const char* id;
@@ -44,6 +45,10 @@ static RedirEntry kRedirMap[] = {
   { "socialerror", "chrome://browser/content/aboutSocialError.xhtml",
     nsIAboutModule::ALLOW_SCRIPT |
     nsIAboutModule::HIDE_FROM_ABOUTABOUT },
+  { "tabcrashed", "chrome://browser/content/aboutTabCrashed.xhtml",
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+    nsIAboutModule::ALLOW_SCRIPT |
+    nsIAboutModule::HIDE_FROM_ABOUTABOUT },
   { "feeds", "chrome://browser/content/feeds/subscribe.xhtml",
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
     nsIAboutModule::ALLOW_SCRIPT |
@@ -62,6 +67,8 @@ static RedirEntry kRedirMap[] = {
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
     nsIAboutModule::ALLOW_SCRIPT },
   { "sessionrestore", "chrome://browser/content/aboutSessionRestore.xhtml",
+    nsIAboutModule::ALLOW_SCRIPT },
+  { "welcomeback", "chrome://browser/content/aboutWelcomeBack.xhtml",
     nsIAboutModule::ALLOW_SCRIPT },
 #ifdef MOZ_SERVICES_SYNC
   { "sync-progress", "chrome://browser/content/sync/progress.xhtml",
@@ -84,8 +91,14 @@ static RedirEntry kRedirMap[] = {
   { "healthreport", "chrome://browser/content/abouthealthreport/abouthealth.xhtml",
     nsIAboutModule::ALLOW_SCRIPT },
 #endif
+  { "accounts", "chrome://browser/content/aboutaccounts/aboutaccounts.xhtml",
+    nsIAboutModule::ALLOW_SCRIPT },
+  { "app-manager", "chrome://browser/content/devtools/app-manager/index.xul",
+    nsIAboutModule::ALLOW_SCRIPT },
+  { "customizing", "chrome://browser/content/customizableui/aboutCustomizing.xul",
+    nsIAboutModule::ALLOW_SCRIPT },
 };
-static const int kRedirTotal = NS_ARRAY_LENGTH(kRedirMap);
+static const int kRedirTotal = ArrayLength(kRedirMap);
 
 static nsAutoCString
 GetAboutModuleName(nsIURI *aURI)

@@ -9,6 +9,7 @@
 #include "nsCRT.h"
 #include "nsNetUtil.h"
 #include "nsIObserverService.h"
+#include "nsILoadContextInfo.h"
 
 using namespace mozilla;
 
@@ -18,7 +19,7 @@ static NS_DEFINE_CID(kCacheServiceCID, NS_CACHESERVICE_CID);
 // nsApplicationCacheService
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS1(nsApplicationCacheService, nsIApplicationCacheService)
+NS_IMPL_ISUPPORTS(nsApplicationCacheService, nsIApplicationCacheService)
 
 nsApplicationCacheService::nsApplicationCacheService()
 {
@@ -28,7 +29,7 @@ nsApplicationCacheService::nsApplicationCacheService()
 
 NS_IMETHODIMP
 nsApplicationCacheService::BuildGroupID(nsIURI *aManifestURL,
-                                        nsILoadContext *aLoadContext,
+                                        nsILoadContextInfo *aLoadContextInfo,
                                         nsACString &_result)
 {
     nsresult rv;
@@ -36,12 +37,9 @@ nsApplicationCacheService::BuildGroupID(nsIURI *aManifestURL,
     uint32_t appId = NECKO_NO_APP_ID;
     bool isInBrowserElement = false;
 
-    if (aLoadContext) {
-        rv = aLoadContext->GetAppId(&appId);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        rv = aLoadContext->GetIsInBrowserElement(&isInBrowserElement);
-        NS_ENSURE_SUCCESS(rv, rv);
+    if (aLoadContextInfo) {
+        appId = aLoadContextInfo->AppId();
+        isInBrowserElement = aLoadContextInfo->IsInBrowserElement();
     }
 
     rv = nsOfflineCacheDevice::BuildApplicationCacheGroupID(
@@ -134,7 +132,7 @@ nsApplicationCacheService::DeactivateGroup(const nsACString &group)
 
 NS_IMETHODIMP
 nsApplicationCacheService::ChooseApplicationCache(const nsACString &key,
-                                                  nsILoadContext *aLoadContext,
+                                                  nsILoadContextInfo *aLoadContextInfo,
                                                   nsIApplicationCache **out)
 {
     if (!mCacheService)
@@ -144,7 +142,7 @@ nsApplicationCacheService::ChooseApplicationCache(const nsACString &key,
     nsresult rv = mCacheService->GetOfflineDevice(getter_AddRefs(device));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    return device->ChooseApplicationCache(key, aLoadContext, out);
+    return device->ChooseApplicationCache(key, aLoadContextInfo, out);
 }
 
 NS_IMETHODIMP
@@ -211,7 +209,7 @@ public:
 
     // nsIObserver implementation.
     NS_IMETHODIMP
-    Observe(nsISupports *aSubject, const char *aTopic, const PRUnichar *aData)
+    Observe(nsISupports *aSubject, const char *aTopic, const char16_t *aData)
     {
         MOZ_ASSERT(!nsCRT::strcmp(aTopic, TOPIC_WEB_APP_CLEAR_DATA));
 
@@ -229,7 +227,7 @@ public:
     }
 };
 
-NS_IMPL_ISUPPORTS1(AppCacheClearDataObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(AppCacheClearDataObserver, nsIObserver)
 
 } // anonymous namespace
 

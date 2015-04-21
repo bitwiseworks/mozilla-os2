@@ -1,4 +1,11 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 #include "ChromeObjectWrapper.h"
+#include "jsapi.h"
 
 using namespace JS;
 
@@ -30,12 +37,12 @@ AllowedByBase(JSContext *cx, HandleObject wrapper, HandleId id,
 }
 
 static bool
-PropIsFromStandardPrototype(JSContext *cx, JSPropertyDescriptor *desc)
+PropIsFromStandardPrototype(JSContext *cx, JS::MutableHandle<JSPropertyDescriptor> desc)
 {
-    MOZ_ASSERT(desc->obj);
-    RootedObject unwrapped(cx, js::UncheckedUnwrap(desc->obj));
+    MOZ_ASSERT(desc.object());
+    RootedObject unwrapped(cx, js::UncheckedUnwrap(desc.object()));
     JSAutoCompartment ac(cx, unwrapped);
-    return JS_IdentifyClassPrototype(cx, unwrapped) != JSProto_Null;
+    return IdentifyStandardPrototype(unwrapped) != JSProto_Null;
 }
 
 // Note that we're past the policy enforcement stage, here, so we can query
@@ -51,53 +58,52 @@ PropIsFromStandardPrototype(JSContext *cx, HandleObject wrapper,
     Rooted<JSPropertyDescriptor> desc(cx);
     ChromeObjectWrapper *handler = &ChromeObjectWrapper::singleton;
     if (!handler->ChromeObjectWrapperBase::getPropertyDescriptor(cx, wrapper, id,
-                                                                 desc.address(), 0) ||
+                                                                 &desc) ||
         !desc.object())
     {
         return false;
     }
-    return PropIsFromStandardPrototype(cx, desc.address());
+    return PropIsFromStandardPrototype(cx, &desc);
 }
 
 bool
 ChromeObjectWrapper::getPropertyDescriptor(JSContext *cx,
                                            HandleObject wrapper,
                                            HandleId id,
-                                           js::PropertyDescriptor *desc,
-                                           unsigned flags)
+                                           JS::MutableHandle<JSPropertyDescriptor> desc)
 {
-    assertEnteredPolicy(cx, wrapper, id);
+    assertEnteredPolicy(cx, wrapper, id, GET | SET);
     // First, try a lookup on the base wrapper if permitted.
-    desc->obj = NULL;
+    desc.object().set(nullptr);
     if (AllowedByBase(cx, wrapper, id, Wrapper::GET) &&
         !ChromeObjectWrapperBase::getPropertyDescriptor(cx, wrapper, id,
-                                                        desc, flags)) {
+                                                        desc)) {
         return false;
     }
 
     // If the property is something that can be found on a standard prototype,
     // prefer the one we'll get via the prototype chain in the content
     // compartment.
-    if (desc->obj && PropIsFromStandardPrototype(cx, desc))
-        desc->obj = NULL;
+    if (desc.object() && PropIsFromStandardPrototype(cx, desc))
+        desc.object().set(nullptr);
 
     // If we found something or have no proto, we're done.
     RootedObject wrapperProto(cx);
-    if (!JS_GetPrototype(cx, wrapper, wrapperProto.address()))
+    if (!JS_GetPrototype(cx, wrapper, &wrapperProto))
       return false;
-    if (desc->obj || !wrapperProto)
+    if (desc.object() || !wrapperProto)
         return true;
 
     // If not, try doing the lookup on the prototype.
     MOZ_ASSERT(js::IsObjectInContextCompartment(wrapper, cx));
-    return JS_GetPropertyDescriptorById(cx, wrapperProto, id, 0, desc);
+    return JS_GetPropertyDescriptorById(cx, wrapperProto, id, desc);
 }
 
 bool
 ChromeObjectWrapper::has(JSContext *cx, HandleObject wrapper,
                          HandleId id, bool *bp)
 {
-    assertEnteredPolicy(cx, wrapper, id);
+    assertEnteredPolicy(cx, wrapper, id, GET);
     // Try the lookup on the base wrapper if permitted.
     if (AllowedByBase(cx, wrapper, id, js::Wrapper::GET) &&
         !ChromeObjectWrapperBase::has(cx, wrapper, id, bp))
@@ -107,7 +113,7 @@ ChromeObjectWrapper::has(JSContext *cx, HandleObject wrapper,
 
     // If we found something or have no prototype, we're done.
     RootedObject wrapperProto(cx);
-    if (!JS_GetPrototype(cx, wrapper, wrapperProto.address()))
+    if (!JS_GetPrototype(cx, wrapper, &wrapperProto))
         return false;
     if (*bp || !wrapperProto)
         return true;
@@ -115,7 +121,7 @@ ChromeObjectWrapper::has(JSContext *cx, HandleObject wrapper,
     // Try the prototype if that failed.
     MOZ_ASSERT(js::IsObjectInContextCompartment(wrapper, cx));
     Rooted<JSPropertyDescriptor> desc(cx);
-    if (!JS_GetPropertyDescriptorById(cx, wrapperProto, id, 0, desc.address()))
+    if (!JS_GetPropertyDescriptorById(cx, wrapperProto, id, &desc))
         return false;
     *bp = !!desc.object();
     return true;
@@ -126,9 +132,8 @@ ChromeObjectWrapper::get(JSContext *cx, HandleObject wrapper,
                          HandleObject receiver, HandleId id,
                          MutableHandleValue vp)
 {
-    assertEnteredPolicy(cx, wrapper, id);
+    assertEnteredPolicy(cx, wrapper, id, GET);
     vp.setUndefined();
-    JSPropertyDescriptor desc;
     // Only call through to the get trap on the underlying object if we're
     // allowed to see the property, and if what we'll find is not on a standard
     // prototype.
@@ -145,7 +150,7 @@ ChromeObjectWrapper::get(JSContext *cx, HandleObject wrapper,
 
     // If we have no proto, we're done.
     RootedObject wrapperProto(cx);
-    if (!JS_GetPrototype(cx, wrapper, wrapperProto.address()))
+    if (!JS_GetPrototype(cx, wrapper, &wrapperProto))
         return false;
     if (!wrapperProto)
         return true;
@@ -177,13 +182,13 @@ ChromeObjectWrapper::enter(JSContext *cx, HandleObject wrapper,
         return true;
     // COWs fail silently for GETs, and that also happens to be the only case
     // where we might want to redirect the lookup to the home prototype chain.
-    *bp = (act == Wrapper::GET);
+    *bp = act == Wrapper::GET || act == Wrapper::ENUMERATE;
     if (!*bp || id == JSID_VOID)
         return false;
 
     // Note that PropIsFromStandardPrototype needs to invoke getPropertyDescriptor
     // before we've fully entered the policy. Waive our policy.
-    js::AutoWaivePolicy policy(cx, wrapper, id);
+    js::AutoWaivePolicy policy(cx, wrapper, id, act);
     return PropIsFromStandardPrototype(cx, wrapper, id);
 }
 

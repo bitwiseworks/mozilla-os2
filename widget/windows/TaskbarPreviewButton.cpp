@@ -16,7 +16,7 @@
 namespace mozilla {
 namespace widget {
 
-NS_IMPL_ISUPPORTS2(TaskbarPreviewButton, nsITaskbarPreviewButton, nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(TaskbarPreviewButton, nsITaskbarPreviewButton, nsISupportsWeakReference)
 
 TaskbarPreviewButton::TaskbarPreviewButton(TaskbarWindowPreview* preview, uint32_t index)
   : mPreview(preview), mIndex(index)
@@ -95,7 +95,7 @@ TaskbarPreviewButton::GetImage(imgIContainer **img) {
   if (mImage)
     NS_ADDREF(*img = mImage);
   else
-    *img = NULL;
+    *img = nullptr;
   return NS_OK;
 }
 
@@ -110,7 +110,7 @@ TaskbarPreviewButton::SetImage(imgIContainer *img) {
                                  &Button().hIcon);
     NS_ENSURE_SUCCESS(rv, rv);
   } else {
-    Button().hIcon = NULL;
+    Button().hIcon = nullptr;
   }
   return Update();
 }

@@ -8,12 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "modules/video_coding/main/source/decoding_state.h"
+#include "webrtc/modules/video_coding/main/source/decoding_state.h"
 
-#include "modules/video_coding/main/source/frame_buffer.h"
-#include "modules/video_coding/main/source/jitter_buffer_common.h"
-#include "modules/video_coding/main/source/packet.h"
-#include "modules/interface/module_common_types.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/modules/video_coding/main/source/frame_buffer.h"
+#include "webrtc/modules/video_coding/main/source/jitter_buffer_common.h"
+#include "webrtc/modules/video_coding/main/source/packet.h"
 
 namespace webrtc {
 
@@ -24,7 +24,7 @@ VCMDecodingState::VCMDecodingState()
       temporal_id_(kNoTemporalIdx),
       tl0_pic_id_(kNoTl0PicIdx),
       full_sync_(true),
-      init_(true) {}
+      in_initial_state_(true) {}
 
 VCMDecodingState::~VCMDecodingState() {}
 
@@ -36,7 +36,7 @@ void VCMDecodingState::Reset() {
   temporal_id_ = kNoTemporalIdx;
   tl0_pic_id_ = kNoTl0PicIdx;
   full_sync_ = true;
-  init_ = true;
+  in_initial_state_ = true;
 }
 
 uint32_t VCMDecodingState::time_stamp() const {
@@ -49,18 +49,16 @@ uint16_t VCMDecodingState::sequence_num() const {
 
 bool VCMDecodingState::IsOldFrame(const VCMFrameBuffer* frame) const {
   assert(frame != NULL);
-  if (init_)
+  if (in_initial_state_)
     return false;
-  return (LatestTimestamp(time_stamp_, frame->TimeStamp(), NULL)
-          == time_stamp_);
+  return !IsNewerTimestamp(frame->TimeStamp(), time_stamp_);
 }
 
 bool VCMDecodingState::IsOldPacket(const VCMPacket* packet) const {
   assert(packet != NULL);
-  if (init_)
+  if (in_initial_state_)
     return false;
-  return (LatestTimestamp(time_stamp_, packet->timestamp, NULL)
-           == time_stamp_);
+  return !IsNewerTimestamp(packet->timestamp, time_stamp_);
 }
 
 void VCMDecodingState::SetState(const VCMFrameBuffer* frame) {
@@ -71,34 +69,34 @@ void VCMDecodingState::SetState(const VCMFrameBuffer* frame) {
   picture_id_ = frame->PictureId();
   temporal_id_ = frame->TemporalId();
   tl0_pic_id_ = frame->Tl0PicId();
-  init_ = false;
+  in_initial_state_ = false;
 }
 
-void VCMDecodingState::SetStateOneBack(const VCMFrameBuffer* frame) {
-  assert(frame != NULL && frame->GetHighSeqNum() >= 0);
-  sequence_num_ = static_cast<uint16_t>(frame->GetHighSeqNum()) - 1u;
-  time_stamp_ = frame->TimeStamp() - 1u;
-  temporal_id_ = frame->TemporalId();
-  if (frame->PictureId() != kNoPictureId) {
-    if (frame->PictureId() == 0)
-      picture_id_ = 0x7FFF;
-    else
-      picture_id_ =  frame->PictureId() - 1;
-  }
-  if (frame->Tl0PicId() != kNoTl0PicIdx) {
-    if (frame->Tl0PicId() == 0)
-      tl0_pic_id_ = 0x00FF;
-    else
-      tl0_pic_id_ = frame->Tl0PicId() - 1;
-  }
-  init_ = false;
+void VCMDecodingState::CopyFrom(const VCMDecodingState& state) {
+  sequence_num_ = state.sequence_num_;
+  time_stamp_ = state.time_stamp_;
+  picture_id_ = state.picture_id_;
+  temporal_id_ = state.temporal_id_;
+  tl0_pic_id_ = state.tl0_pic_id_;
+  full_sync_ = state.full_sync_;
+  in_initial_state_ = state.in_initial_state_;
 }
 
-void VCMDecodingState::UpdateEmptyFrame(const VCMFrameBuffer* frame) {
-  if (ContinuousFrame(frame) && frame->GetState() == kStateEmpty) {
-    time_stamp_ = frame->TimeStamp();
+bool VCMDecodingState::UpdateEmptyFrame(const VCMFrameBuffer* frame) {
+  bool empty_packet = frame->GetHighSeqNum() == frame->GetLowSeqNum();
+  if (in_initial_state_ && empty_packet) {
+    // Drop empty packets as long as we are in the initial state.
+    return true;
+  }
+  if ((empty_packet && ContinuousSeqNum(frame->GetHighSeqNum())) ||
+      ContinuousFrame(frame)) {
+    // Continuous empty packets or continuous frames can be dropped if we
+    // advance the sequence number.
     sequence_num_ = frame->GetHighSeqNum();
+    time_stamp_ = frame->TimeStamp();
+    return true;
   }
+  return false;
 }
 
 void VCMDecodingState::UpdateOldPacket(const VCMPacket* packet) {
@@ -106,7 +104,7 @@ void VCMDecodingState::UpdateOldPacket(const VCMPacket* packet) {
   if (packet->timestamp == time_stamp_) {
     // Late packet belonging to the last decoded frame - make sure we update the
     // last decoded sequence number.
-    sequence_num_ = LatestSequenceNumber(packet->seqNum, sequence_num_, NULL);
+    sequence_num_ = LatestSequenceNumber(packet->seqNum, sequence_num_);
   }
 }
 
@@ -114,8 +112,8 @@ void VCMDecodingState::SetSeqNum(uint16_t new_seq_num) {
   sequence_num_ = new_seq_num;
 }
 
-bool VCMDecodingState::init() const {
-  return init_;
+bool VCMDecodingState::in_initial_state() const {
+  return in_initial_state_;
 }
 
 bool VCMDecodingState::full_sync() const {
@@ -123,7 +121,7 @@ bool VCMDecodingState::full_sync() const {
 }
 
 void VCMDecodingState::UpdateSyncState(const VCMFrameBuffer* frame) {
-  if (init_)
+  if (in_initial_state_)
     return;
   if (frame->TemporalId() == kNoTemporalIdx ||
       frame->Tl0PicId() == kNoTl0PicIdx) {
@@ -151,8 +149,14 @@ bool VCMDecodingState::ContinuousFrame(const VCMFrameBuffer* frame) const {
   // Return true when in initial state.
   // Note that when a method is not applicable it will return false.
   assert(frame != NULL);
-  if (init_)
+  // A key frame is always considered continuous as it doesn't refer to any
+  // frames and therefore won't introduce any errors even if prior frames are
+  // missing.
+  if (frame->FrameType() == kVideoFrameKey)
     return true;
+  // When in the initial state we always require a key frame to start decoding.
+  if (in_initial_state_)
+    return false;
 
   if (!ContinuousLayer(frame->TemporalId(), frame->Tl0PicId())) {
     // Base layers are not continuous or temporal layers are inactive.

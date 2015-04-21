@@ -28,8 +28,6 @@ using namespace mozilla;
 //
 
 
-static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
-
 // self linking and removing double linked entry
 // adopts the thread it is passed.
 class SmartCardThreadEntry {
@@ -129,7 +127,7 @@ SmartCardMonitoringThread::Start()
 {
   if (!mThread) {
     mThread = PR_CreateThread(PR_SYSTEM_THREAD, LaunchExecute, this,
-                              PR_PRIORITY_NORMAL, PR_LOCAL_THREAD,
+                              PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
                               PR_JOINABLE_THREAD, 0);
   }
   return mThread ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
@@ -187,13 +185,13 @@ SmartCardMonitoringThread::SetTokenName(CK_SLOT_ID slotid,
         memcpy(entry,&series,sizeof(uint32_t));
         memcpy(&entry[sizeof(uint32_t)],tokenName,len);
 
-        PL_HashTableAdd(mHash,(void *)slotid, entry); /* adopt */
+        PL_HashTableAdd(mHash,(void *)(uintptr_t)slotid, entry); /* adopt */
         return;
       }
     } 
     else {
       // if tokenName was not provided, remove the old one (implicit delete)
-      PL_HashTableRemove(mHash,(void *)slotid);
+      PL_HashTableRemove(mHash,(void *)(uintptr_t)slotid);
     }
   }
 }
@@ -206,7 +204,7 @@ SmartCardMonitoringThread::GetTokenName(CK_SLOT_ID slotid)
   const char *entry;
 
   if (mHash) {
-    entry = (const char *)PL_HashTableLookupConst(mHash,(void *)slotid);
+    entry = (const char *)PL_HashTableLookupConst(mHash,(void *)(uintptr_t)slotid);
     if (entry) {
       tokenName = &entry[sizeof(uint32_t)];
     }
@@ -222,7 +220,7 @@ SmartCardMonitoringThread::GetTokenSeries(CK_SLOT_ID slotid)
   const char *entry;
 
   if (mHash) {
-    entry = (const char *)PL_HashTableLookupConst(mHash,(void *)slotid);
+    entry = (const char *)PL_HashTableLookupConst(mHash,(void *)(uintptr_t)slotid);
     if (entry) {
       memcpy(&series,entry,sizeof(uint32_t));
     }
@@ -237,6 +235,8 @@ nsresult
 SmartCardMonitoringThread::SendEvent(const nsAString &eventType,
                                      const char *tokenName)
 {
+  static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+
   nsresult rv;
   nsCOMPtr<nsINSSComponent> 
                     nssComponent(do_GetService(kNSSComponentCID, &rv));

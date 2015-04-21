@@ -11,7 +11,7 @@
 #ifndef WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_SINK_FILTER_DS_H_
 #define WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_SINK_FILTER_DS_H_
 
-#include "video_capture_defines.h"
+#include "webrtc/modules/video_capture/include/video_capture_defines.h"
 #include "BaseInputPin.h"
 #include "BaseFilter.h"
 #include "MediaType.h"
@@ -30,18 +30,18 @@ class CaptureSinkFilter;
 class CaptureInputPin: public mozilla::media::BaseInputPin
 {
 public:
-    WebRtc_Word32 _moduleId;
+    int32_t _moduleId;
 
     VideoCaptureCapability _requestedCapability;
     VideoCaptureCapability _resultingCapability;
     HANDLE _threadHandle;
 
-    CaptureInputPin ( WebRtc_Word32 moduleId,
-                      IN TCHAR* szName,
-                      IN CaptureSinkFilter* pFilter,
-                      IN mozilla::CriticalSection * pLock,
-                      OUT HRESULT * pHr,
-                      IN LPCWSTR pszName);
+    CaptureInputPin(int32_t moduleId,
+                    IN TCHAR* szName,
+                    IN CaptureSinkFilter* pFilter,
+                    IN mozilla::CriticalSection * pLock,
+                    OUT HRESULT * pHr,
+                    IN LPCWSTR pszName);
     virtual ~CaptureInputPin();
 
     HRESULT GetMediaType (IN int iPos, OUT mozilla::media::MediaType * pmt);
@@ -54,17 +54,17 @@ class CaptureSinkFilter: public mozilla::media::BaseFilter
 {
 
 public:
-    CaptureSinkFilter (IN TCHAR * tszName,
-                   IN LPUNKNOWN punk,
-                   OUT HRESULT * phr,
-                   VideoCaptureExternal& captureObserver,
-                   WebRtc_Word32 moduleId);
+    CaptureSinkFilter(IN TCHAR * tszName,
+                      IN LPUNKNOWN punk,
+                      OUT HRESULT * phr,
+                      VideoCaptureExternal& captureObserver,
+                      int32_t moduleId);
     virtual ~CaptureSinkFilter();
 
     //  --------------------------------------------------------------------
     //  class methods
 
-    void ProcessCapturedFrame(unsigned char* pBuffer, WebRtc_Word32 length,
+    void ProcessCapturedFrame(unsigned char* pBuffer, int32_t length,
                               const VideoCaptureCapability& frameInfo);
     //  explicit receiver lock aquisition and release
     void LockReceive()  { m_crtRecv.Enter();}
@@ -114,9 +114,9 @@ private:
     mozilla::CriticalSection m_crtRecv;  //  receiver lock; always acquire before filter lock
     CaptureInputPin * m_pInput;
     VideoCaptureExternal& _captureObserver;
-    WebRtc_Word32 _moduleId;
+    int32_t _moduleId;
     unsigned long mRefCnt;
 };
-} // namespace videocapturemodule
-} // namespace webrtc
+}  // namespace videocapturemodule
+}  // namespace webrtc
 #endif // WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_WINDOWS_SINK_FILTER_DS_H_

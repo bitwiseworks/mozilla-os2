@@ -4,15 +4,12 @@
 
 #include "AccIterator.h"
 
-#include "nsAccessibilityService.h"
 #include "AccGroupInfo.h"
-#include "Accessible-inl.h"
 #ifdef MOZ_XUL
 #include "XULTreeAccessible.h"
 #endif
 
 #include "mozilla/dom/Element.h"
-#include "nsBindingManager.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -300,7 +297,7 @@ IDRefsIterator::GetElem(const nsDependentSubstring& aID)
   // In case of bound element check its anonymous subtree.
   if (!mContent->IsInAnonymousSubtree()) {
     dom::Element* refElm = mContent->OwnerDoc()->GetElementById(aID);
-    if (refElm || !mContent->OwnerDoc()->BindingManager()->GetBinding(mContent))
+    if (refElm || !mContent->GetXBLBinding())
       return refElm;
   }
 
@@ -318,7 +315,7 @@ IDRefsIterator::GetElem(const nsDependentSubstring& aID)
   }
 
   // Check inside the binding of the element.
-  if (mContent->OwnerDoc()->BindingManager()->GetBinding(mContent)) {
+  if (mContent->GetXBLBinding()) {
     return mContent->OwnerDoc()->
       GetAnonymousElementByAttribute(mContent, nsGkAtoms::anonid, aID);
   }

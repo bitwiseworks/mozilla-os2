@@ -5,21 +5,19 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
  /**
-  * Check for correct functionality of PlacesUtils.archiveBookmarksFile
+  * Check for correct functionality of bookmarks backups
   */
 
-const PREFIX = "bookmarks-";
-// The localized prefix must be "bigger" and associated to older backups.
-const LOCALIZED_PREFIX = "segnalibri-";
-const SUFFIX = ".json";
 const NUMBER_OF_BACKUPS = 10;
 
 function run_test() {
-  do_test_pending();
+  run_next_test();
+}
 
+add_task(function () {
   // Generate random dates.
-  var dateObj = new Date();
-  var dates = [];
+  let dateObj = new Date();
+  let dates = [];
   while (dates.length < NUMBER_OF_BACKUPS) {
     // Use last year to ensure today's backup is the newest.
     let randomDate = new Date(dateObj.getFullYear() - 1,
@@ -33,59 +31,61 @@ function run_test() {
   dates.sort();
 
   // Get and cleanup the backups folder.
-  var bookmarksBackupDir = PlacesBackups.folder;
+  let backupFolderPath = yield PlacesBackups.getBackupFolder();
+  let bookmarksBackupDir = new FileUtils.File(backupFolderPath);
 
   // Fake backups are created backwards to ensure we won't consider file
   // creation time.
   // Create fake backups for the newest dates.
   for (let i = dates.length - 1; i >= 0; i--) {
-    let backupFilename;
-    if (i > Math.floor(dates.length/2))
-      backupFilename = PREFIX + dates[i] + SUFFIX;
-    else
-      backupFilename = LOCALIZED_PREFIX + dates[i] + SUFFIX;
-    dump("creating: " + backupFilename + "\n");
+    let backupFilename = PlacesBackups.getFilenameForDate(new Date(dates[i]));
     let backupFile = bookmarksBackupDir.clone();
     backupFile.append(backupFilename);
-    backupFile.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0666);
-    do_check_true(backupFile.exists());
-  }
- 
-  // Replace PlacesUtils getFormattedString so that it will return the localized
-  // string we want.
-  PlacesUtils.getFormattedString = function (aKey, aValue) {
-    return LOCALIZED_PREFIX + aValue;
+    backupFile.create(Ci.nsIFile.NORMAL_FILE_TYPE, parseInt("0666", 8));
+    do_log_info("Creating fake backup " + backupFile.leafName);
+    if (!backupFile.exists())
+      do_throw("Unable to create fake backup " + backupFile.leafName);
   }
 
-  Task.spawn(function() {
-    yield PlacesBackups.create(Math.floor(dates.length/2));
-    // Add today's backup.
-    dates.push(dateObj.toLocaleFormat("%Y-%m-%d"));
+  yield PlacesBackups.create(NUMBER_OF_BACKUPS);
+  // Add today's backup.
+  dates.push(dateObj.toLocaleFormat("%Y-%m-%d"));
 
-    // Check backups.
-    for (var i = 0; i < dates.length; i++) {
-      let backupFilename;
-      let shouldExist;
-      if (i > Math.floor(dates.length/2)) {
-        backupFilename = PREFIX + dates[i] + SUFFIX;
-        shouldExist = true;
+  // Check backups.  We have 11 dates but we the max number is 10 so the
+  // oldest backup should have been removed.
+  for (let i = 0; i < dates.length; i++) {
+    let backupFilename;
+    let shouldExist;
+    let backupFile;
+    if (i > 0) {
+      let files = bookmarksBackupDir.directoryEntries;
+      while (files.hasMoreElements()) {
+        let entry = files.getNext().QueryInterface(Ci.nsIFile);
+        if (PlacesBackups.filenamesRegex.test(entry.leafName)) {
+          backupFilename = entry.leafName;
+          backupFile = entry;
+          break;
+        }
       }
-      else {
-        backupFilename = LOCALIZED_PREFIX + dates[i] + SUFFIX;
-        shouldExist = false;
-      }
-      var backupFile = bookmarksBackupDir.clone();
-      backupFile.append(backupFilename);
-      if (backupFile.exists() != shouldExist)
-        do_throw("Backup should " + (shouldExist ? "" : "not") + " exist: " + backupFilename);
+      shouldExist = true;
     }
+    else {
+      backupFilename = PlacesBackups.getFilenameForDate(new Date(dates[i]));
+      backupFile = bookmarksBackupDir.clone();
+      backupFile.append(backupFilename);
+      shouldExist = false;
+    }
+    if (backupFile.exists() != shouldExist)
+      do_throw("Backup should " + (shouldExist ? "" : "not") + " exist: " + backupFilename);
+  }
 
-    // Cleanup backups folder.
-    bookmarksBackupDir.remove(true);
-    do_check_false(bookmarksBackupDir.exists());
-    // Recreate the folder.
-    PlacesBackups.folder;
-
-    do_test_finished();
-  });
-}
+  // Cleanup backups folder.
+  // XXX: Can't use bookmarksBackupDir.remove(true) because file lock happens
+  // on WIN XP.
+  let files = bookmarksBackupDir.directoryEntries;
+  while (files.hasMoreElements()) {
+    let entry = files.getNext().QueryInterface(Ci.nsIFile);
+    entry.remove(false);
+  }
+  do_check_false(bookmarksBackupDir.directoryEntries.hasMoreElements());
+});

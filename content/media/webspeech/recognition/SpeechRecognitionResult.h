@@ -4,27 +4,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#pragma once
+#ifndef mozilla_dom_SpeechRecognitionResult_h
+#define mozilla_dom_SpeechRecognitionResult_h
 
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
+#include "js/TypeDecls.h"
 
 #include "mozilla/Attributes.h"
 
-#include "EnableWebSpeechRecognitionCheck.h"
 #include "SpeechRecognitionAlternative.h"
-
-struct JSContext;
 
 namespace mozilla {
 namespace dom {
 
 class SpeechRecognitionResult MOZ_FINAL : public nsISupports,
-                                          public nsWrapperCache,
-                                          public EnableWebSpeechRecognitionCheck
+                                          public nsWrapperCache
 {
 public:
   SpeechRecognitionResult(SpeechRecognition* aParent);
@@ -35,8 +33,7 @@ public:
 
   nsISupports* GetParentObject() const;
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   uint32_t Length() const;
 
@@ -53,3 +50,5 @@ private:
 
 } // namespace dom
 } // namespace mozilla
+
+#endif

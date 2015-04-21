@@ -6,7 +6,15 @@
 
 
 Components.utils.import("resource://testing-common/httpd.js");
-var testserver;
+// Create and configure the HTTP server.
+var testserver = new HttpServer();
+testserver.start(-1);
+gPort = testserver.identity.primaryPort;
+
+// register files with server
+testserver.registerDirectory("/addons/", do_get_file("addons"));
+mapFile("/data/test_corrupt.rdf", testserver);
+
 
 // The test extension uses an insecure update url.
 Services.prefs.setBoolPref(PREF_EM_CHECK_UPDATE_SECURITY, false);
@@ -41,7 +49,7 @@ var addon3 = {
   id: "addon3@tests.mozilla.org",
   version: "1.0",
   name: "Test 3",
-  updateURL: "http://localhost:4444/data/test_corrupt.rdf",
+  updateURL: "http://localhost:" + gPort + "/data/test_corrupt.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -54,7 +62,7 @@ var addon4 = {
   id: "addon4@tests.mozilla.org",
   version: "1.0",
   name: "Test 4",
-  updateURL: "http://localhost:4444/data/test_corrupt.rdf",
+  updateURL: "http://localhost:" + gPort + "/data/test_corrupt.rdf",
   targetApplications: [{
     id: "xpcshell@tests.mozilla.org",
     minVersion: "1",
@@ -143,12 +151,6 @@ function run_test() {
   writeInstallRDFForExtension(theme1, profileDir);
   writeInstallRDFForExtension(theme2, profileDir);
 
-  // Create and configure the HTTP server.
-  testserver = new HttpServer();
-  testserver.registerDirectory("/addons/", do_get_file("addons"));
-  testserver.registerDirectory("/data/", do_get_file("data"));
-  testserver.start(4444);
-
   // Startup the profile and setup the initial state
   startupManager();
 
@@ -167,9 +169,7 @@ function run_test() {
       onUpdateFinished: function() {
         a4.findUpdates({
           onUpdateFinished: function() {
-            restartManager();
-
-            run_test_1();
+            do_execute_soon(run_test_1);
           }
         }, AddonManager.UPDATE_WHEN_PERIODIC_UPDATE);
       }
@@ -182,6 +182,8 @@ function end_test() {
 }
 
 function run_test_1() {
+  restartManager();
+
   AddonManager.getAddonsByIDs(["addon1@tests.mozilla.org",
                                "addon2@tests.mozilla.org",
                                "addon3@tests.mozilla.org",
@@ -190,9 +192,8 @@ function run_test_1() {
                                "addon6@tests.mozilla.org",
                                "addon7@tests.mozilla.org",
                                "theme1@tests.mozilla.org",
-                               "theme2@tests.mozilla.org"], function([a1, a2, a3,
-                                                                      a4, a5, a6,
-                                                                      a7, t1, t2]) {
+                               "theme2@tests.mozilla.org"],
+                               callback_soon(function([a1, a2, a3, a4, a5, a6, a7, t1, t2]) {
     do_check_neq(a1, null);
     do_check_true(a1.isActive);
     do_check_false(a1.userDisabled);
@@ -251,10 +252,8 @@ function run_test_1() {
     // serves this purpose). On startup the add-ons manager won't rebuild
     // because there is a file there still.
     shutdownManager();
-    var dbfile = gProfD.clone();
-    dbfile.append("extensions.sqlite");
-    dbfile.remove(true);
-    dbfile.create(AM_Ci.nsIFile.DIRECTORY_TYPE, 0755);
+    gExtensionsJSON.remove(true);
+    gExtensionsJSON.create(AM_Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
     startupManager(false);
 
     // Accessing the add-ons should open and recover the database
@@ -266,9 +265,8 @@ function run_test_1() {
                                  "addon6@tests.mozilla.org",
                                  "addon7@tests.mozilla.org",
                                  "theme1@tests.mozilla.org",
-                                 "theme2@tests.mozilla.org"], function([a1, a2, a3,
-                                                                        a4, a5, a6,
-                                                                        a7, t1, t2]) {
+                                 "theme2@tests.mozilla.org"],
+                                 callback_soon(function([a1, a2, a3, a4, a5, a6, a7, t1, t2]) {
       // Should be correctly recovered
       do_check_neq(a1, null);
       do_check_true(a1.isActive);
@@ -341,9 +339,8 @@ function run_test_1() {
                                    "addon6@tests.mozilla.org",
                                    "addon7@tests.mozilla.org",
                                    "theme1@tests.mozilla.org",
-                                   "theme2@tests.mozilla.org"], function([a1, a2, a3,
-                                                                          a4, a5, a6,
-                                                                          a7, t1, t2]) {
+                                   "theme2@tests.mozilla.org"],
+                                   callback_soon(function([a1, a2, a3, a4, a5, a6, a7, t1, t2]) {
         do_check_neq(a1, null);
         do_check_true(a1.isActive);
         do_check_false(a1.userDisabled);
@@ -399,7 +396,7 @@ function run_test_1() {
         do_check_eq(t2.pendingOperations, AddonManager.PENDING_NONE);
 
         end_test();
-      });
-    });
-  });
+      }));
+    }));
+  }));
 }

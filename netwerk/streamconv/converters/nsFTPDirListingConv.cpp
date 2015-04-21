@@ -7,19 +7,14 @@
 #include "nsMemory.h"
 #include "plstr.h"
 #include "prlog.h"
-#include "nsIServiceManager.h"
-#include "nsXPIDLString.h"
-#include "nsReadableUtils.h"
 #include "nsCOMPtr.h"
 #include "nsEscape.h"
-#include "nsNetUtil.h"
 #include "nsStringStream.h"
-#include "nsIComponentManager.h"
-#include "nsDateTimeFormatCID.h"
 #include "nsIStreamListener.h"
 #include "nsCRT.h"
-#include "nsMimeTypes.h"
 #include "nsAutoPtr.h"
+#include "nsIChannel.h"
+#include "nsIURI.h"
 
 #include "ParseFTPList.h"
 #include <algorithm>
@@ -41,10 +36,10 @@ PRLogModuleInfo* gFTPDirListConvLog = nullptr;
 #endif /* PR_LOGGING */
 
 // nsISupports implementation
-NS_IMPL_ISUPPORTS3(nsFTPDirListingConv,
-                   nsIStreamConverter,
-                   nsIStreamListener, 
-                   nsIRequestObserver)
+NS_IMPL_ISUPPORTS(nsFTPDirListingConv,
+                  nsIStreamConverter,
+                  nsIStreamListener, 
+                  nsIRequestObserver)
 
 
 // nsIStreamConverter implementation

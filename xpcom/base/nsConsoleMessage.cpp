@@ -8,10 +8,9 @@
  */
 
 #include "nsConsoleMessage.h"
-#include "nsReadableUtils.h"
 #include "jsapi.h"
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsConsoleMessage, nsIConsoleMessage)
+NS_IMPL_ISUPPORTS(nsConsoleMessage, nsIConsoleMessage)
 
 nsConsoleMessage::nsConsoleMessage()
     :  mTimeStamp(0),
@@ -19,14 +18,14 @@ nsConsoleMessage::nsConsoleMessage()
 {
 }
 
-nsConsoleMessage::nsConsoleMessage(const PRUnichar *message)
+nsConsoleMessage::nsConsoleMessage(const char16_t *message)
 {
   mTimeStamp = JS_Now() / 1000;
   mMessage.Assign(message);
 }
 
 NS_IMETHODIMP
-nsConsoleMessage::GetMessageMoz(PRUnichar **result)
+nsConsoleMessage::GetMessageMoz(char16_t **result)
 {
   *result = ToNewUnicode(mMessage);
 

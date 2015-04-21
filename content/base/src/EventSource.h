@@ -14,7 +14,7 @@
 #define mozilla_dom_EventSource_h
 
 #include "mozilla/Attributes.h"
-#include "nsDOMEventTargetHelper.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "nsIObserver.h"
 #include "nsIStreamListener.h"
 #include "nsIChannelEventSink.h"
@@ -24,13 +24,6 @@
 #include "nsWeakReference.h"
 #include "nsDeque.h"
 #include "nsIUnicodeDecoder.h"
-
-#define NS_EVENTSOURCE_CID                          \
- { /* 755e2d2d-a836-4539-83f4-16b51156341f */       \
-  0x755e2d2d, 0xa836, 0x4539,                       \
- {0x83, 0xf4, 0x16, 0xb5, 0x11, 0x56, 0x34, 0x1f} }
-
-#define NS_EVENTSOURCE_CONTRACTID "@mozilla.org/eventsource;1"
 
 class nsPIDOMWindow;
 
@@ -43,7 +36,7 @@ namespace dom {
 class AsyncVerifyRedirectCallbackFwr;
 struct EventSourceInit;
 
-class EventSource : public nsDOMEventTargetHelper
+class EventSource : public DOMEventTargetHelper
                   , public nsIObserver
                   , public nsIStreamListener
                   , public nsIChannelEventSink
@@ -53,11 +46,11 @@ class EventSource : public nsDOMEventTargetHelper
 friend class AsyncVerifyRedirectCallbackFwr;
 
 public:
-  EventSource();
+  EventSource(nsPIDOMWindow* aOwnerWindow);
   virtual ~EventSource();
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_INHERITED(EventSource,
-                                                                   nsDOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_INHERITED(
+    EventSource, DOMEventTargetHelper)
 
   NS_DECL_NSIOBSERVER
   NS_DECL_NSISTREAMLISTENER
@@ -66,8 +59,7 @@ public:
   NS_DECL_NSIINTERFACEREQUESTOR
 
   // nsWrapperCache
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   // WebIDL
   nsPIDOMWindow*
@@ -105,7 +97,7 @@ public:
   void Close();
 
   // Determine if preferences allow EventSource
-  static bool PrefEnabled();
+  static bool PrefEnabled(JSContext* aCx = nullptr, JSObject* aGlobal = nullptr);
 
   virtual void DisconnectFromOwner() MOZ_OVERRIDE;
 
@@ -133,8 +125,8 @@ protected:
   static void TimerCallback(nsITimer *aTimer, void *aClosure);
 
   nsresult PrintErrorOnConsole(const char       *aBundleURI,
-                               const PRUnichar  *aError,
-                               const PRUnichar **aFormatStrings,
+                               const char16_t  *aError,
+                               const char16_t **aFormatStrings,
                                uint32_t          aFormatStringsLen);
   nsresult ConsoleError();
 
@@ -148,7 +140,7 @@ protected:
   nsresult ClearFields();
   nsresult ResetEvent();
   nsresult DispatchCurrentMessageEvent();
-  nsresult ParseCharacter(PRUnichar aChr);
+  nsresult ParseCharacter(char16_t aChr);
   bool CheckCanRequestSrc(nsIURI* aSrc = nullptr);  // if null, it tests mSrc
   nsresult CheckHealthOfRequestCallback(nsIRequest *aRequestCallback);
   nsresult OnRedirectVerifyCallback(nsresult result);

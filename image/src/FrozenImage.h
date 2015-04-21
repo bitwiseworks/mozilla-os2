@@ -7,6 +7,8 @@
 #define MOZILLA_IMAGELIB_FROZENIMAGE_H_
 
 #include "ImageWrapper.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/RefPtr.h"
 
 namespace mozilla {
 namespace image {
@@ -24,6 +26,8 @@ namespace image {
  */
 class FrozenImage : public ImageWrapper
 {
+  typedef mozilla::gfx::SourceSurface SourceSurface;
+
 public:
   NS_DECL_ISUPPORTS
 
@@ -34,14 +38,13 @@ public:
   virtual void DecrementAnimationConsumers() MOZ_OVERRIDE;
 
   NS_IMETHOD GetAnimated(bool* aAnimated) MOZ_OVERRIDE;
-  NS_IMETHOD GetFrame(uint32_t aWhichFrame,
-                      uint32_t aFlags,
-                      gfxASurface** _retval) MOZ_OVERRIDE;
+  NS_IMETHOD_(TemporaryRef<SourceSurface>)
+    GetFrame(uint32_t aWhichFrame, uint32_t aFlags) MOZ_OVERRIDE;
   NS_IMETHOD_(bool) FrameIsOpaque(uint32_t aWhichFrame) MOZ_OVERRIDE;
   NS_IMETHOD GetImageContainer(layers::LayerManager* aManager,
                                layers::ImageContainer** _retval) MOZ_OVERRIDE;
   NS_IMETHOD Draw(gfxContext* aContext,
-                  gfxPattern::GraphicsFilter aFilter,
+                  GraphicsFilter aFilter,
                   const gfxMatrix& aUserSpaceToImageSpace,
                   const gfxRect& aFill,
                   const nsIntRect& aSubimage,

@@ -8,8 +8,10 @@
 #include "DOMStorageManager.h"
 
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/unused.h"
 #include "nsIDiskSpaceWatcher.h"
+#include "nsThreadUtils.h"
 
 namespace mozilla {
 namespace dom {
@@ -18,9 +20,9 @@ namespace dom {
 // Child
 // ----------------------------------------------------------------------------
 
-NS_IMPL_THREADSAFE_ADDREF(DOMStorageDBChild)
+NS_IMPL_ADDREF(DOMStorageDBChild)
 
-NS_IMETHODIMP_(nsrefcnt) DOMStorageDBChild::Release(void)
+NS_IMETHODIMP_(MozExternalRefCountType) DOMStorageDBChild::Release(void)
 {
   NS_PRECONDITION(0 != mRefCnt, "dup release");
   nsrefcnt count = --mRefCnt;
@@ -58,7 +60,6 @@ DOMStorageDBChild::DOMStorageDBChild(DOMLocalStorageManager* aManager)
   , mStatus(NS_OK)
   , mIPCOpen(false)
 {
-  mLoadingCaches.Init();
 }
 
 DOMStorageDBChild::~DOMStorageDBChild()
@@ -68,11 +69,11 @@ DOMStorageDBChild::~DOMStorageDBChild()
 nsTHashtable<nsCStringHashKey>&
 DOMStorageDBChild::ScopesHavingData()
 {
-  if (!mScopesHavingData.IsInitialized()) {
-    mScopesHavingData.Init();
+  if (!mScopesHavingData) {
+    mScopesHavingData = new nsTHashtable<nsCStringHashKey>;
   }
 
-  return mScopesHavingData;
+  return *mScopesHavingData;
 }
 
 nsresult
@@ -201,8 +202,7 @@ DOMStorageDBChild::ShouldPreloadScope(const nsACString& aScope)
   // Return true if we didn't receive the aScope list yet.
   // I tend to rather preserve a bit of early-after-start performance
   // then a bit of memory here.
-  return !mScopesHavingData.IsInitialized() ||
-         mScopesHavingData.Contains(aScope);
+  return !mScopesHavingData || mScopesHavingData->Contains(aScope);
 }
 
 bool
@@ -253,12 +253,7 @@ DOMStorageDBChild::RecvLoadDone(const nsCString& aScope, const nsresult& aRv)
 bool
 DOMStorageDBChild::RecvLoadUsage(const nsCString& aScope, const int64_t& aUsage)
 {
-  DOMStorageDBBridge* db = DOMStorageCache::GetDatabase();
-  if (!db) {
-    return false;
-  }
-
-  DOMStorageUsageBridge* scopeUsage = db->GetScopeUsage(aScope);
+  nsRefPtr<DOMStorageUsageBridge> scopeUsage = mManager->GetScopeUsage(aScope);
   scopeUsage->LoadUsage(aUsage);
   return true;
 }
@@ -274,8 +269,8 @@ DOMStorageDBChild::RecvError(const nsresult& aRv)
 // Parent
 // ----------------------------------------------------------------------------
 
-NS_IMPL_THREADSAFE_ADDREF(DOMStorageDBParent)
-NS_IMPL_THREADSAFE_RELEASE(DOMStorageDBParent)
+NS_IMPL_ADDREF(DOMStorageDBParent)
+NS_IMPL_RELEASE(DOMStorageDBParent)
 
 void
 DOMStorageDBParent::AddIPDLReference()
@@ -365,6 +360,18 @@ DOMStorageDBParent::~DOMStorageDBParent()
   }
 }
 
+mozilla::ipc::IProtocol*
+DOMStorageDBParent::CloneProtocol(Channel* aChannel,
+                                  mozilla::ipc::ProtocolCloneContext* aCtx)
+{
+  ContentParent* contentParent = aCtx->GetContentParent();
+  nsAutoPtr<PStorageParent> actor(contentParent->AllocPStorageParent());
+  if (!actor || !contentParent->RecvPStorageConstructor(actor)) {
+    return nullptr;
+  }
+  return actor.forget();
+}
+
 DOMStorageDBParent::CacheParentBridge*
 DOMStorageDBParent::NewCache(const nsACString& aScope)
 {
@@ -392,7 +399,7 @@ DOMStorageDBParent::RecvAsyncGetUsage(const nsCString& aScope)
   }
 
   // The object releases it self in LoadUsage method
-  UsageParentBridge* usage = new UsageParentBridge(this, aScope);
+  nsRefPtr<UsageParentBridge> usage = new UsageParentBridge(this, aScope);
   db->AsyncGetUsage(usage);
   return true;
 }
@@ -721,7 +728,6 @@ DOMStorageDBParent::UsageParentBridge::LoadUsage(const int64_t aUsage)
 {
   nsRefPtr<UsageRunnable> r = new UsageRunnable(mParent, mScope, aUsage);
   NS_DispatchToMainThread(r);
-  delete this;
 }
 
 } // ::dom

@@ -8,16 +8,11 @@
 #ifndef mozilla_net_HttpChannelCallbackWrapper_h
 #define mozilla_net_HttpChannelCallbackWrapper_h
 
-#include "nsHttp.h"
-#include "mozilla/net/NeckoCommon.h"
-#include "PHttpChannelParams.h"
-#include "nsIParentChannel.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIChannelEventSink.h"
 #include "nsIRedirectResultListener.h"
-#include "nsIProgressEventSink.h"
 
-class nsICacheEntryDescriptor;
+class nsIParentChannel;
 
 namespace mozilla {
 namespace net {
@@ -40,9 +35,22 @@ public:
   HttpChannelParentListener(HttpChannelParent* aInitialChannel);
   virtual ~HttpChannelParentListener();
 
+  // For channel diversion from child to parent.
+  nsresult DivertTo(nsIStreamListener *aListener);
+  nsresult SuspendForDiversion();
+
 private:
-  nsCOMPtr<nsIParentChannel> mActiveChannel;
+  // Private partner function to SuspendForDiversion.
+  nsresult ResumeForDiversion();
+
+  // Can be the original HttpChannelParent that created this object (normal
+  // case), a different {HTTP|FTP}ChannelParent that we've been redirected to,
+  // or some other listener that we have been diverted to via
+  // nsIDivertableChannel.
+  nsCOMPtr<nsIStreamListener> mNextListener;
   uint32_t mRedirectChannelId;
+  // When set, no OnStart/OnData/OnStop calls should be received.
+  bool mSuspendedForDiversion;
 };
 
 } // namespace net

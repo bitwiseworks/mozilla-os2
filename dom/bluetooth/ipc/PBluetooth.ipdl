@@ -12,7 +12,7 @@ include BluetoothTypes;
 
 include "mozilla/dom/bluetooth/ipc/BluetoothMessageUtils.h";
 
-using mozilla::dom::bluetooth::BluetoothObjectType;
+using mozilla::dom::bluetooth::BluetoothObjectType from "mozilla/dom/bluetooth/BluetoothCommon.h";
 
 namespace mozilla {
 namespace dom {
@@ -78,34 +78,27 @@ struct DenyPairingConfirmationRequest
   nsString path;
 };
 
-struct ConfirmAuthorizationRequest
-{
-  nsString path;
-};
-
-struct DenyAuthorizationRequest
-{
-  nsString path;
-};
-
 struct PairedDevicePropertiesRequest
 {
   nsString[] addresses;
 };
+
 struct ConnectedDevicePropertiesRequest
 {
-  uint16_t profileId;
+  uint16_t serviceUuid;
 };
 
 struct ConnectRequest
 {
   nsString address;
-  uint16_t profileId;
+  uint32_t cod;
+  uint16_t serviceUuid;
 };
 
 struct DisconnectRequest
 {
-  uint16_t profileId;
+  nsString address;
+  uint16_t serviceUuid;
 };
 
 struct SendFileRequest
@@ -141,6 +134,35 @@ struct IsScoConnectedRequest
 {
 };
 
+struct AnswerWaitingCallRequest
+{
+};
+
+struct IgnoreWaitingCallRequest
+{
+};
+
+struct ToggleCallsRequest
+{
+};
+
+struct SendMetaDataRequest
+{
+  nsString title;
+  nsString artist;
+  nsString album;
+  int64_t mediaNumber;
+  int64_t totalMediaCount;
+  int64_t duration;
+};
+
+struct SendPlayStatusRequest
+{
+  int64_t duration;
+  int64_t position;
+  nsString playStatus;
+};
+
 union Request
 {
   DefaultAdapterPathRequest;
@@ -154,8 +176,6 @@ union Request
   SetPasskeyRequest;
   ConfirmPairingConfirmationRequest;
   DenyPairingConfirmationRequest;
-  ConfirmAuthorizationRequest;
-  DenyAuthorizationRequest;
   ConnectedDevicePropertiesRequest;
   PairedDevicePropertiesRequest;
   ConnectRequest;
@@ -167,6 +187,11 @@ union Request
   ConnectScoRequest;
   DisconnectScoRequest;
   IsScoConnectedRequest;
+  AnswerWaitingCallRequest;
+  IgnoreWaitingCallRequest;
+  ToggleCallsRequest;
+  SendMetaDataRequest;
+  SendPlayStatusRequest;
 };
 
 protocol PBluetooth

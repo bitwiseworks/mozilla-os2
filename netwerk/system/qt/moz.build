@@ -4,13 +4,19 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'necko'
-
-CPP_SOURCES += [
-    'moc_nsQtNetworkManager.cpp',
+SOURCES += [
     'nsQtNetworkLinkService.cpp',
     'nsQtNetworkManager.cpp',
 ]
 
-LIBRARY_NAME = 'neckosystem_s'
+GENERATED_SOURCES += [
+    'moc_nsQtNetworkManager.cpp',
+]
+
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'necko'
+LOCAL_INCLUDES += [
+    '../../base/src',
+]
 

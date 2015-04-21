@@ -5,29 +5,25 @@
 
 /* This parsing code originally lived in xpfe/components/directory/ - bbaetz */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "prprf.h"
 
 #include "nsDirIndexParser.h"
-#include "nsReadableUtils.h"
-#include "nsDirIndex.h"
 #include "nsEscape.h"
-#include "nsIServiceManager.h"
 #include "nsIInputStream.h"
-#include "nsIChannel.h"
-#include "nsIURI.h"
 #include "nsCRT.h"
-#include "nsIPrefService.h"
-#include "nsIPrefBranch.h"
-#include "nsIPrefLocalizedString.h"
+#include "mozilla/dom/FallbackEncoding.h"
+#include "nsITextToSubURI.h"
+#include "nsIDirIndex.h"
+#include "nsServiceManagerUtils.h"
 
 using namespace mozilla;
 
-NS_IMPL_ISUPPORTS3(nsDirIndexParser,
-                   nsIRequestObserver,
-                   nsIStreamListener,
-                   nsIDirIndexParser)
+NS_IMPL_ISUPPORTS(nsDirIndexParser,
+                  nsIRequestObserver,
+                  nsIStreamListener,
+                  nsIDirIndexParser)
 
 nsDirIndexParser::nsDirIndexParser() {
 }
@@ -37,24 +33,7 @@ nsDirIndexParser::Init() {
   mLineStart = 0;
   mHasDescription = false;
   mFormat = nullptr;
-
-  // get default charset to be used for directory listings (fallback to
-  // ISO-8859-1 if pref is unavailable).
-  NS_NAMED_LITERAL_CSTRING(kFallbackEncoding, "ISO-8859-1");
-  nsXPIDLString defCharset;
-  nsCOMPtr<nsIPrefBranch> prefs(do_GetService(NS_PREFSERVICE_CONTRACTID));
-  if (prefs) {
-    nsCOMPtr<nsIPrefLocalizedString> prefVal;
-    prefs->GetComplexValue("intl.charset.default",
-                           NS_GET_IID(nsIPrefLocalizedString),
-                           getter_AddRefs(prefVal));
-    if (prefVal)
-      prefVal->ToString(getter_Copies(defCharset));
-  }
-  if (!defCharset.IsEmpty())
-    LossyCopyUTF16toASCII(defCharset, mEncoding); // charset labels are always ASCII
-  else
-    mEncoding.Assign(kFallbackEncoding);
+  mozilla::dom::FallbackEncoding::FromLocale(mEncoding);
  
   nsresult rv;
   // XXX not threadsafe
@@ -152,7 +131,7 @@ nsDirIndexParser::ParseFormat(const char* aFormatStr) {
   const char* pos = aFormatStr;
   unsigned int num = 0;
   do {
-    while (*pos && nsCRT::IsAsciiSpace(PRUnichar(*pos)))
+    while (*pos && nsCRT::IsAsciiSpace(char16_t(*pos)))
       ++pos;
     
     ++num;
@@ -164,21 +143,21 @@ nsDirIndexParser::ParseFormat(const char* aFormatStr) {
     if (! *pos)
       break;
 
-    while (*pos && !nsCRT::IsAsciiSpace(PRUnichar(*pos)))
+    while (*pos && !nsCRT::IsAsciiSpace(char16_t(*pos)))
       ++pos;
 
   } while (*pos);
 
   delete[] mFormat;
   mFormat = new int[num+1];
-  // Prevent NULL Deref - Bug 443299 
+  // Prevent nullptr Deref - Bug 443299 
   if (mFormat == nullptr)
     return NS_ERROR_OUT_OF_MEMORY;
   mFormat[num] = -1;
   
   int formatNum=0;
   do {
-    while (*aFormatStr && nsCRT::IsAsciiSpace(PRUnichar(*aFormatStr)))
+    while (*aFormatStr && nsCRT::IsAsciiSpace(char16_t(*aFormatStr)))
       ++aFormatStr;
     
     if (! *aFormatStr)
@@ -186,7 +165,7 @@ nsDirIndexParser::ParseFormat(const char* aFormatStr) {
 
     nsAutoCString name;
     int32_t     len = 0;
-    while (aFormatStr[len] && !nsCRT::IsAsciiSpace(PRUnichar(aFormatStr[len])))
+    while (aFormatStr[len] && !nsCRT::IsAsciiSpace(char16_t(aFormatStr[len])))
       ++len;
     name.SetCapacity(len + 1);
     name.Append(aFormatStr, len);
@@ -267,7 +246,7 @@ nsDirIndexParser::ParseData(nsIDirIndex *aIdx, char* aDataStr) {
       nsAutoString entryuri;
       
       if (gTextToSubURI) {
-        PRUnichar   *result = nullptr;
+        char16_t   *result = nullptr;
         if (NS_SUCCEEDED(rv = gTextToSubURI->UnEscapeAndConvert(mEncoding.get(), filename.get(),
                                                                 &result)) && (result)) {
           if (*result) {
@@ -383,7 +362,7 @@ nsDirIndexParser::ProcessData(nsIRequest *aRequest, nsISupports *aCtxt) {
     
     int32_t             eol = mBuf.FindCharInSet("\n\r", mLineStart);
     if (eol < 0)        break;
-    mBuf.SetCharAt(PRUnichar('\0'), eol);
+    mBuf.SetCharAt(char16_t('\0'), eol);
     
     const char  *line = mBuf.get() + mLineStart;
     

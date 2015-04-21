@@ -14,6 +14,7 @@ MOZ_THUMB_INTERWORK=toolchain-default
 MOZ_FPU=toolchain-default
 MOZ_FLOAT_ABI=toolchain-default
 MOZ_SOFT_FLOAT=toolchain-default
+MOZ_ALIGN=toolchain-default
 
 MOZ_ARG_WITH_STRING(arch,
 [  --with-arch=[[type|toolchain-default]]
@@ -32,20 +33,11 @@ if test -z "$MOZ_ARCH"; then
         MOZ_ARCH=armv7-a
         MOZ_FPU=vfp
         MOZ_FLOAT_ABI=softfp
+        MOZ_ALIGN=no
         ;;
     arm-Darwin)
         MOZ_ARCH=toolchain-default
         MOZ_THUMB=yes
-        ;;
-    arm-*)
-        if test -n "$MOZ_PLATFORM_MAEMO"; then
-            MOZ_THUMB=no
-            MOZ_ARCH=armv7-a
-            MOZ_FLOAT_ABI=softfp
-        fi
-        if test "$MOZ_PLATFORM_MAEMO" = 6; then
-            MOZ_THUMB=yes
-        fi
         ;;
     esac
 fi
@@ -169,8 +161,28 @@ no)
     ;;
 esac
 
+case "$MOZ_ALIGN" in
+no)
+    align_flag="-mno-unaligned-access"
+    ;;
+yes)
+    align_flag="-munaligned-access"
+    ;;
+*)
+    align_flag=""
+    ;;
+esac
+
+if test -n "$align_flag"; then
+  _SAVE_CFLAGS="$CFLAGS"
+  CFLAGS="$CFLAGS $align_flag"
+  AC_MSG_CHECKING(whether alignment flag ($align_flag) is supported)
+  AC_TRY_COMPILE([],[],,align_flag="")
+  CFLAGS="$_SAVE_CFLAGS"
+fi
+
 dnl Use echo to avoid accumulating space characters
-all_flags=`echo $arch_flag $thumb_flag $thumb_interwork_flag $fpu_flag $float_abi_flag $soft_float_flag`
+all_flags=`echo $arch_flag $thumb_flag $thumb_interwork_flag $fpu_flag $float_abi_flag $soft_float_flag $align_flag`
 if test -n "$all_flags"; then
     _SAVE_CFLAGS="$CFLAGS"
     CFLAGS="$all_flags"
@@ -204,7 +216,7 @@ if test "$CPU_ARCH" = "arm"; then
 
   AC_MSG_CHECKING(ARM version support in compiler)
   dnl Determine the target ARM architecture (5 for ARMv5, v5T, v5E, etc.; 6 for ARMv6, v6K, etc.)
-  ARM_ARCH=`${CC-cc} ${CFLAGS} -dM -E - < /dev/null | sed -n 's/.*__ARM_ARCH_\([[0-9]]*\).*/\1/p'`
+  ARM_ARCH=`${CC-cc} ${CFLAGS} -dM -E - < /dev/null | sed -n 's/.*__ARM_ARCH_\([[0-9]][[0-9]]*\).*/\1/p'`
   AC_MSG_RESULT("$ARM_ARCH")
 
   AC_MSG_CHECKING(for ARM NEON support in compiler)
@@ -222,8 +234,9 @@ if test "$CPU_ARCH" = "arm"; then
       dnl This matches media/webrtc/trunk/webrtc/build/common.gypi.
       if test -n "$ARM_ARCH"; then
           if test "$ARM_ARCH" -lt 7; then
-              BUILD_ARM_NEON=0
+              BUILD_ARM_NEON=
           else
+              AC_DEFINE(BUILD_ARM_NEON)
               BUILD_ARM_NEON=1
           fi
       fi
@@ -234,6 +247,7 @@ fi # CPU_ARCH = arm
 AC_SUBST(HAVE_ARM_SIMD)
 AC_SUBST(HAVE_ARM_NEON)
 AC_SUBST(BUILD_ARM_NEON)
+AC_SUBST(ARM_ARCH)
 
 if test -n "$MOZ_ARCH"; then
   NSPR_CONFIGURE_ARGS="$NSPR_CONFIGURE_ARGS --with-arch=$MOZ_ARCH"

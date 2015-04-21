@@ -4,14 +4,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include LayersSurfaces;
-include LayerTransaction;
+include LayersMessages;
 include protocol PGrallocBuffer;
 include protocol PCompositable;
+include protocol PTexture;
+include ProtocolTypes;
 
-include "mozilla/layers/CompositorTypes.h";
+include "mozilla/GfxMessageUtils.h";
 
-using ImageHandle;
-using mozilla::layers::TextureInfo;
+using struct mozilla::layers::TextureInfo from "mozilla/layers/CompositorTypes.h";
 
 namespace mozilla {
 namespace layers {
@@ -21,10 +22,11 @@ namespace layers {
  * frames directly to the compositor thread/process without relying on the main thread
  * which might be too busy dealing with content script.
  */
-/*FIXME: sync*/ rpc protocol PImageBridge
+intr protocol PImageBridge
 {
   manages PCompositable;
   manages PGrallocBuffer;
+  manages PTexture;
 
 parent:
 
@@ -36,19 +38,23 @@ parent:
   // buffer directly. The format is a enum defined in
   // system/graphics.h and the usage is the GraphicBuffer usage
   // flag. See GraphicBuffer.h and gralloc.h.
-  sync PGrallocBuffer(gfxIntSize size, uint32_t format, uint32_t usage)
+  sync PGrallocBuffer(IntSize size, uint32_t format, uint32_t usage)
     returns (MaybeMagicGrallocBufferHandle handle);
 
-  // First step of the destruction sequence. This puts all the ImageContainerParents
-  // in a state in which they can't send asynchronous messages to their child
-  // counterpart so as to not race with the upcomming __delete__ message.
-  // In the child side, the __delete__ messages are not sent right after Stop,
-  // they are scheduled in the ImageBridgeChild's message queue in order to ensure
-  // that all the messages from the parent side have been received and processed
-  // before sending __delete__.
+  // First step of the destruction sequence. This puts ImageBridge
+  // in a state in which it can't send asynchronous messages
+  // so as to not race with the upcomming Stop message and destruction.
+  // In the child side, the Stop message is not sent right after WillStop,
+  // it is scheduled in the ImageBridgeChild's message queue in order to ensure
+  // that all of the messages from the parent side have been received and processed
+  // before sending Stop, and that after Stop returns, there is no message in
+  // flight on any side and we can safely destroy the channel and threads.
+  sync WillStop();
+  // Second step
   sync Stop();
 
   sync PCompositable(TextureInfo aInfo) returns (uint64_t id);
+  async PTexture(SurfaceDescriptor aSharedData, uint32_t aTextureFlags);
 };
 
 

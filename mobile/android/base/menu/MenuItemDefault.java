@@ -26,6 +26,7 @@ public class MenuItemDefault extends TextView
     private boolean mCheckable = false;
     private boolean mChecked = false;
     private boolean mHasSubMenu = false;
+    private boolean mShowIcon = false;
 
     public MenuItemDefault(Context context) {
         this(context, null);
@@ -47,7 +48,7 @@ public class MenuItemDefault extends TextView
         int stateIconSize = res.getDimensionPixelSize(R.dimen.menu_item_state_icon);
         Rect stateIconBounds = new Rect(0, 0, stateIconSize, stateIconSize);
 
-        mState = res.getDrawable(R.drawable.menu_item_state);
+        mState = res.getDrawable(R.drawable.menu_item_state).mutate();
         mState.setBounds(stateIconBounds);
 
         if (sIconBounds == null) {
@@ -85,6 +86,10 @@ public class MenuItemDefault extends TextView
         setSubMenuIndicator(item.hasSubMenu());
     }
 
+    private void refreshIcon() {
+        setCompoundDrawables(mShowIcon ? mIcon : null, null, mState, null);
+    }
+
     void setIcon(Drawable icon) {
         mIcon = icon;
 
@@ -93,16 +98,11 @@ public class MenuItemDefault extends TextView
             mIcon.setAlpha(isEnabled() ? 255 : 99);
         }
 
-        setCompoundDrawables(mIcon, null, mState, null);
+        refreshIcon();
     }
 
     void setIcon(int icon) {
-        Drawable drawable = null;
-
-        if (icon != 0)
-            drawable = getResources().getDrawable(icon);
-         
-        setIcon(drawable);
+        setIcon((icon == 0) ? null : getResources().getDrawable(icon));
     }
 
     void setTitle(CharSequence title) {
@@ -134,7 +134,15 @@ public class MenuItemDefault extends TextView
         }
     }
 
-    private void setSubMenuIndicator(boolean hasSubMenu) {
+    @Override
+    public void setShowIcon(boolean show) {
+        if (mShowIcon != show) {
+            mShowIcon = show;
+            refreshIcon();
+        }
+    }
+
+    void setSubMenuIndicator(boolean hasSubMenu) {
         if (mHasSubMenu != hasSubMenu) {
             mHasSubMenu = hasSubMenu;
             refreshDrawableState();

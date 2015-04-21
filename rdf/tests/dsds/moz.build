@@ -4,12 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'rdf'
-
-CPP_SOURCES += [
-    'nsRDFDataSourceDS.cpp',
-    'nsRDFDataSourceFactory.cpp',
+RESOURCE_FILES.samples.rdf += [
+    'DataSourceViewer.css',
+    'DataSourceViewer.xul',
 ]
-
-LIBRARY_NAME = 'rdfdsds'
-

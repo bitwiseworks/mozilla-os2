@@ -10,6 +10,10 @@
 #include "base/basictypes.h"
 #include "base/pickle.h"
 
+#ifdef MOZ_TASK_TRACER
+#include "GeckoTaskTracer.h"
+#endif
+
 #ifndef NDEBUG
 #define IPC_MESSAGE_LOG_ENABLED
 #endif
@@ -87,6 +91,16 @@ class Message : public Pickle {
   }
 
   // True if this is a synchronous message.
+  bool is_interrupt() const {
+    return (header()->flags & INTERRUPT_BIT) != 0;
+  }
+
+  // True if this is an urgent message.
+  bool is_urgent() const {
+    return (header()->flags & URGENT_BIT) != 0;
+  }
+
+  // True if this is an RPC message.
   bool is_rpc() const {
     return (header()->flags & RPC_BIT) != 0;
   }
@@ -148,22 +162,30 @@ class Message : public Pickle {
     header()->routing = new_id;
   }
 
-  uint32_t rpc_remote_stack_depth_guess() const {
-    return header()->rpc_remote_stack_depth_guess;
+  int32_t transaction_id() const {
+    return header()->txid;
   }
 
-  void set_rpc_remote_stack_depth_guess(uint32_t depth) {
-    DCHECK(is_rpc());
-    header()->rpc_remote_stack_depth_guess = depth;
+  void set_transaction_id(int32_t txid) {
+    header()->txid = txid;
   }
 
-  uint32_t rpc_local_stack_depth() const {
-    return header()->rpc_local_stack_depth;
+  uint32_t interrupt_remote_stack_depth_guess() const {
+    return header()->interrupt_remote_stack_depth_guess;
   }
 
-  void set_rpc_local_stack_depth(uint32_t depth) {
-    DCHECK(is_rpc());
-    header()->rpc_local_stack_depth = depth;
+  void set_interrupt_remote_stack_depth_guess(uint32_t depth) {
+    DCHECK(is_interrupt());
+    header()->interrupt_remote_stack_depth_guess = depth;
+  }
+
+  uint32_t interrupt_local_stack_depth() const {
+    return header()->interrupt_local_stack_depth;
+  }
+
+  void set_interrupt_local_stack_depth(uint32_t depth) {
+    DCHECK(is_interrupt());
+    header()->interrupt_local_stack_depth = depth;
   }
 
   int32_t seqno() const {
@@ -266,6 +288,14 @@ class Message : public Pickle {
     header()->flags |= SYNC_BIT;
   }
 
+  void set_interrupt() {
+    header()->flags |= INTERRUPT_BIT;
+  }
+
+  void set_urgent() {
+    header()->flags |= URGENT_BIT;
+  }
+
   void set_rpc() {
     header()->flags |= RPC_BIT;
   }
@@ -283,11 +313,12 @@ class Message : public Pickle {
     UNBLOCK_BIT     = 0x0020,
     PUMPING_MSGS_BIT= 0x0040,
     HAS_SENT_TIME_BIT = 0x0080,
-    RPC_BIT         = 0x0100,
-    COMPRESS_BIT    = 0x0200
+    INTERRUPT_BIT   = 0x0100,
+    COMPRESS_BIT    = 0x0200,
+    URGENT_BIT      = 0x0400,
+    RPC_BIT         = 0x0800
   };
 
-#pragma pack(push, 2)
   struct Header : Pickle::Header {
     int32_t routing;  // ID of the view that this message is destined for
     msgid_t type;   // specifies the user-defined message type
@@ -298,14 +329,23 @@ class Message : public Pickle {
     uint32_t cookie;  // cookie to ACK that the descriptors have been read.
 # endif
 #endif
-    // For RPC messages, a guess at what the *other* side's stack depth is.
-    uint32_t rpc_remote_stack_depth_guess;
+    union {
+      // For Interrupt messages, a guess at what the *other* side's stack depth is.
+      uint32_t interrupt_remote_stack_depth_guess;
+
+      // For RPC and Urgent messages, a transaction ID for message ordering.
+      int32_t txid;
+    };
     // The actual local stack depth.
-    uint32_t rpc_local_stack_depth;
+    uint32_t interrupt_local_stack_depth;
     // Sequence number
     int32_t seqno;
+#ifdef MOZ_TASK_TRACER
+    uint64_t source_event_id;
+    uint64_t parent_task_id;
+    mozilla::tasktracer::SourceEventType source_event_type;
+#endif
   };
-#pragma pack(pop)
 
   Header* header() {
     return headerT<Header>();

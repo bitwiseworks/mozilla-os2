@@ -8,6 +8,7 @@
 
 #include "mozilla/Attributes.h"
 #include "gfxMatrix.h"
+#include "mozilla/gfx/2D.h"
 #include "nsSVGPaintServerFrame.h"
 
 class gfxASurface;
@@ -15,6 +16,7 @@ class gfxContext;
 class nsIFrame;
 class nsSVGElement;
 class nsSVGLength2;
+class nsSVGPathGeometryFrame;
 class nsSVGViewBox;
 
 namespace mozilla {
@@ -50,14 +52,13 @@ public:
   typedef mozilla::SVGAnimatedPreserveAspectRatio SVGAnimatedPreserveAspectRatio;
 
   // nsSVGContainerFrame methods:
-  virtual gfxMatrix GetCanvasTM(uint32_t aFor) MOZ_OVERRIDE;
+  virtual gfxMatrix GetCanvasTM(uint32_t aFor,
+                                nsIFrame* aTransformRoot = nullptr) MOZ_OVERRIDE;
 
   // nsIFrame interface:
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
-
-  NS_IMETHOD AttributeChanged(int32_t         aNameSpaceID,
-                              nsIAtom*        aAttribute,
-                              int32_t         aModType) MOZ_OVERRIDE;
+  virtual nsresult AttributeChanged(int32_t         aNameSpaceID,
+                                    nsIAtom*        aAttribute,
+                                    int32_t         aModType) MOZ_OVERRIDE;
 
 #ifdef DEBUG
   virtual void Init(nsIContent*      aContent,
@@ -72,8 +73,8 @@ public:
    */
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
-#ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
+#ifdef DEBUG_FRAME_DUMP
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
   {
     return MakeFrameName(NS_LITERAL_STRING("SVGPattern"), aResult);
   }
@@ -118,20 +119,20 @@ protected:
   nsIFrame*  GetPatternFirstChild();
   gfxRect    GetPatternRect(uint16_t aPatternUnits,
                             const gfxRect &bbox,
-                            const gfxMatrix &callerCTM,
+                            const Matrix &callerCTM,
                             nsIFrame *aTarget);
   gfxMatrix  ConstructCTM(const nsSVGViewBox& aViewBox,
                           uint16_t aPatternContentUnits,
                           uint16_t aPatternUnits,
                           const gfxRect &callerBBox,
-                          const gfxMatrix &callerCTM,
+                          const Matrix &callerCTM,
                           nsIFrame *aTarget);
 
 private:
   // this is a *temporary* reference to the frame of the element currently
   // referencing our pattern.  This must be temporary because different
   // referencing frames will all reference this one frame
-  nsSVGGeometryFrame               *mSource;
+  nsSVGPathGeometryFrame           *mSource;
   nsAutoPtr<gfxMatrix>              mCTM;
 
 protected:

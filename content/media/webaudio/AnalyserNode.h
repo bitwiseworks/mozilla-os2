@@ -22,12 +22,12 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
-  void GetFloatFrequencyData(Float32Array& aArray);
-  void GetByteFrequencyData(Uint8Array& aArray);
-  void GetByteTimeDomainData(Uint8Array& aArray);
+  void GetFloatFrequencyData(const Float32Array& aArray);
+  void GetByteFrequencyData(const Uint8Array& aArray);
+  void GetFloatTimeDomainData(const Float32Array& aArray);
+  void GetByteTimeDomainData(const Uint8Array& aArray);
   uint32_t FftSize() const
   {
     return mAnalysisBlock.FFTSize();
@@ -52,6 +52,14 @@ public:
     return mSmoothingTimeConstant;
   }
   void SetSmoothingTimeConstant(double aValue, ErrorResult& aRv);
+
+  virtual const char* NodeType() const
+  {
+    return "AnalyserNode";
+  }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
 
 private:
   friend class AnalyserNodeEngine;

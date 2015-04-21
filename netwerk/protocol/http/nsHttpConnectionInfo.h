@@ -10,11 +10,7 @@
 #include "nsHttp.h"
 #include "nsProxyInfo.h"
 #include "nsCOMPtr.h"
-#include "nsDependentString.h"
-#include "nsString.h"
-#include "plstr.h"
-#include "nsCRT.h"
-#include "nsIProtocolProxyService.h"
+#include "nsStringFwd.h"
 
 extern PRLogModuleInfo *gHttpLog;
 
@@ -22,32 +18,19 @@ extern PRLogModuleInfo *gHttpLog;
 // nsHttpConnectionInfo - holds the properties of a connection
 //-----------------------------------------------------------------------------
 
+namespace mozilla { namespace net {
+
 class nsHttpConnectionInfo
 {
 public:
     nsHttpConnectionInfo(const nsACString &host, int32_t port,
+                         const nsACString &username,
                          nsProxyInfo* proxyInfo,
                          bool usingSSL=false);
 
-   ~nsHttpConnectionInfo()
+    virtual ~nsHttpConnectionInfo()
     {
         PR_LOG(gHttpLog, 4, ("Destroying nsHttpConnectionInfo @%x\n", this));
-    }
-
-    nsrefcnt AddRef()
-    {
-        nsrefcnt n = NS_AtomicIncrementRefcnt(mRef);
-        NS_LOG_ADDREF(this, n, "nsHttpConnectionInfo", sizeof(*this));
-        return n;
-    }
-
-    nsrefcnt Release()
-    {
-        nsrefcnt n = NS_AtomicDecrementRefcnt(mRef);
-        NS_LOG_RELEASE(this, n, "nsHttpConnectionInfo");
-        if (n == 0)
-            delete this;
-        return n;
     }
 
     const nsAFlatCString &HashKey() const { return mHashKey; }
@@ -80,6 +63,7 @@ public:
 
     const char   *Host() const           { return mHost.get(); }
     int32_t       Port() const           { return mPort; }
+    const char   *Username() const       { return mUsername.get(); }
     nsProxyInfo  *ProxyInfo()            { return mProxyInfo; }
     bool          UsingHttpProxy() const { return mUsingHttpProxy; }
     bool          UsingSSL() const       { return mUsingSSL; }
@@ -96,15 +80,23 @@ public:
     // Returns true for any kind of proxy (http, socks, etc..)
     bool UsingProxy();
 
+    // Returns true when mHost is an RFC1918 literal.
+    bool HostIsLocalIPLiteral() const;
+
 private:
-    nsrefcnt               mRef;
     nsCString              mHashKey;
     nsCString              mHost;
     int32_t                mPort;
+    nsCString              mUsername;
     nsCOMPtr<nsProxyInfo>  mProxyInfo;
     bool                   mUsingHttpProxy;
     bool                   mUsingSSL;
     bool                   mUsingConnect;  // if will use CONNECT with http proxy
+
+// for nsRefPtr
+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsHttpConnectionInfo)
 };
+
+}} // namespace mozilla::net
 
 #endif // nsHttpConnectionInfo_h__

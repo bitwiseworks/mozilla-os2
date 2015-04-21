@@ -6,16 +6,19 @@ package org.mozilla.gecko.sync;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+import org.json.simple.JSONArray;
 import org.json.simple.parser.ParseException;
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.sync.MetaGlobalException.MetaGlobalMalformedSyncIDException;
 import org.mozilla.gecko.sync.MetaGlobalException.MetaGlobalMalformedVersionException;
 import org.mozilla.gecko.sync.delegates.MetaGlobalDelegate;
+import org.mozilla.gecko.sync.net.AuthHeaderProvider;
 import org.mozilla.gecko.sync.net.SyncStorageRecordRequest;
 import org.mozilla.gecko.sync.net.SyncStorageRequestDelegate;
 import org.mozilla.gecko.sync.net.SyncStorageResponse;
@@ -23,10 +26,10 @@ import org.mozilla.gecko.sync.net.SyncStorageResponse;
 public class MetaGlobal implements SyncStorageRequestDelegate {
   private static final String LOG_TAG = "MetaGlobal";
   protected String metaURL;
-  protected String credentials;
 
   // Fields.
   protected ExtendedJSONObject  engines;
+  protected JSONArray           declined;
   protected Long                storageVersion;
   protected String              syncID;
 
@@ -40,10 +43,11 @@ public class MetaGlobal implements SyncStorageRequestDelegate {
 
   // A little hack so we can use the same delegate implementation for upload and download.
   private boolean isUploading;
+  protected final AuthHeaderProvider authHeaderProvider;
 
-  public MetaGlobal(String metaURL, String credentials) {
-    this.metaURL     = metaURL;
-    this.credentials = credentials;
+  public MetaGlobal(String metaURL, AuthHeaderProvider authHeaderProvider) {
+    this.metaURL = metaURL;
+    this.authHeaderProvider = authHeaderProvider;
   }
 
   public void fetch(MetaGlobalDelegate delegate) {
@@ -76,6 +80,7 @@ public class MetaGlobal implements SyncStorageRequestDelegate {
     json.put("storageVersion", storageVersion);
     json.put("engines", engines);
     json.put("syncID", syncID);
+    json.put("declined", declined);
     return json;
   }
 
@@ -92,11 +97,18 @@ public class MetaGlobal implements SyncStorageRequestDelegate {
     return record;
   }
 
-  public void setFromRecord(CryptoRecord record) throws IllegalStateException, IOException, ParseException, NonObjectJSONException {
+  public void setFromRecord(CryptoRecord record) throws IllegalStateException, IOException, ParseException, NonObjectJSONException, NonArrayJSONException {
+    if (record == null) {
+      throw new IllegalArgumentException("Cannot set meta/global from null record");
+    }
     Logger.debug(LOG_TAG, "meta/global is " + record.payload.toJSONString());
     this.storageVersion = (Long) record.payload.get("storageVersion");
     this.syncID = (String) record.payload.get("syncID");
+
     setEngines(record.payload.getObject("engines"));
+
+    // Accepts null -- declined can be missing.
+    setDeclinedEngineNames(record.payload.getArray("declined"));
   }
 
   public Long getStorageVersion() {
@@ -109,6 +121,59 @@ public class MetaGlobal implements SyncStorageRequestDelegate {
 
   public ExtendedJSONObject getEngines() {
     return engines;
+  }
+
+  @SuppressWarnings("unchecked")
+  public void declineEngine(String engine) {
+    if (this.declined == null) {
+      JSONArray replacement = new JSONArray();
+      replacement.add(engine);
+      setDeclinedEngineNames(replacement);
+      return;
+    }
+
+    this.declined.add(engine);
+  }
+
+  @SuppressWarnings("unchecked")
+  public void declineEngineNames(Collection<String> additional) {
+    if (this.declined == null) {
+      JSONArray replacement = new JSONArray();
+      replacement.addAll(additional);
+      setDeclinedEngineNames(replacement);
+      return;
+    }
+
+    for (String engine : additional) {
+      if (!this.declined.contains(engine)) {
+        this.declined.add(engine);
+      }
+    }
+  }
+
+  public void setDeclinedEngineNames(JSONArray declined) {
+    if (declined == null) {
+      this.declined = new JSONArray();
+      return;
+    }
+    this.declined = declined;
+  }
+
+  /**
+   * Return the set of engines that we support (given as an argument)
+   * but the user hasn't explicitly declined on another device.
+   *
+   * Can return the input if the user hasn't declined any engines.
+   */
+  public Set<String> getNonDeclinedEngineNames(Set<String> supported) {
+    if (this.declined == null ||
+        this.declined.isEmpty()) {
+      return supported;
+    }
+
+    final Set<String> result = new HashSet<String>(supported);
+    result.removeAll(this.declined);
+    return result;
   }
 
   public void setEngines(ExtendedJSONObject engines) {
@@ -192,6 +257,14 @@ public class MetaGlobal implements SyncStorageRequestDelegate {
     return new HashSet<String>(engines.keySet());
   }
 
+  @SuppressWarnings("unchecked")
+  public Set<String> getDeclinedEngineNames() {
+    if (declined == null) {
+      return null;
+    }
+    return new HashSet<String>(declined);
+  }
+
   /**
    * Returns if the server settings and local settings match.
    * Throws a specific MetaGlobalException if that's not the case.
@@ -244,7 +317,12 @@ public class MetaGlobal implements SyncStorageRequestDelegate {
 
   // SyncStorageRequestDelegate methods for fetching.
   public String credentials() {
-    return this.credentials;
+    return null;
+  }
+
+  @Override
+  public AuthHeaderProvider getAuthHeaderProvider() {
+    return authHeaderProvider;
   }
 
   public String ifUnmodifiedSince() {

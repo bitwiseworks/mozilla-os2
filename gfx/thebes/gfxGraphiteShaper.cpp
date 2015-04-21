@@ -3,26 +3,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsString.h"
-#include "nsBidiUtils.h"
-#include "nsMathUtils.h"
-
-#include "gfxTypes.h"
-
-#include "gfxContext.h"
-#include "gfxPlatform.h"
 #include "gfxGraphiteShaper.h"
-#include "gfxFontUtils.h"
+#include "nsString.h"
+#include "gfxContext.h"
 
 #include "graphite2/Font.h"
 #include "graphite2/Segment.h"
 
 #include "harfbuzz/hb.h"
-
-#include "cairo.h"
-
-#include "nsUnicodeRange.h"
-#include "nsCRT.h"
 
 #define FloatToFixed(f) (65536 * (f))
 #define FixedToFloat(f) ((f) * (1.0 / 65536.0))
@@ -95,7 +83,7 @@ AddFeature(const uint32_t& aTag, uint32_t& aValue, void *aUserArg)
 
 bool
 gfxGraphiteShaper::ShapeText(gfxContext      *aContext,
-                             const PRUnichar *aText,
+                             const char16_t *aText,
                              uint32_t         aOffset,
                              uint32_t         aLength,
                              int32_t          aScript,
@@ -195,7 +183,7 @@ gfxGraphiteShaper::SetGlyphsFromSegment(gfxContext      *aContext,
                                         gfxShapedText   *aShapedText,
                                         uint32_t         aOffset,
                                         uint32_t         aLength,
-                                        const PRUnichar *aText,
+                                        const char16_t *aText,
                                         gr_segment      *aSegment)
 {
     int32_t dev2appUnits = aShapedText->GetAppUnitsPerDevUnit();
@@ -204,10 +192,10 @@ gfxGraphiteShaper::SetGlyphsFromSegment(gfxContext      *aContext,
     uint32_t glyphCount = gr_seg_n_slots(aSegment);
 
     // identify clusters; graphite may have reordered/expanded/ligated glyphs.
-    nsAutoTArray<Cluster,SMALL_GLYPH_RUN> clusters;
-    nsAutoTArray<uint16_t,SMALL_GLYPH_RUN> gids;
-    nsAutoTArray<float,SMALL_GLYPH_RUN> xLocs;
-    nsAutoTArray<float,SMALL_GLYPH_RUN> yLocs;
+    AutoFallibleTArray<Cluster,SMALL_GLYPH_RUN> clusters;
+    AutoFallibleTArray<uint16_t,SMALL_GLYPH_RUN> gids;
+    AutoFallibleTArray<float,SMALL_GLYPH_RUN> xLocs;
+    AutoFallibleTArray<float,SMALL_GLYPH_RUN> yLocs;
 
     if (!clusters.SetLength(aLength) ||
         !gids.SetLength(glyphCount) ||
@@ -348,10 +336,12 @@ gfxGraphiteShaper::SetGlyphsFromSegment(gfxContext      *aContext,
     return NS_OK;
 }
 
+#undef SMALL_GLYPH_RUN
+
 // for language tag validation - include list of tags from the IANA registry
 #include "gfxLanguageTagList.cpp"
 
-nsTHashtable<nsUint32HashKey> gfxGraphiteShaper::sLanguageTags;
+nsTHashtable<nsUint32HashKey> *gfxGraphiteShaper::sLanguageTags;
 
 /*static*/ uint32_t
 gfxGraphiteShaper::GetGraphiteTagForLang(const nsCString& aLang)
@@ -386,16 +376,16 @@ gfxGraphiteShaper::GetGraphiteTagForLang(const nsCString& aLang)
         return 0;
     }
 
-    if (!sLanguageTags.IsInitialized()) {
+    if (!sLanguageTags) {
         // store the registered IANA tags in a hash for convenient validation
-        sLanguageTags.Init(ArrayLength(sLanguageTagList));
+        sLanguageTags = new nsTHashtable<nsUint32HashKey>(ArrayLength(sLanguageTagList));
         for (const uint32_t *tag = sLanguageTagList; *tag != 0; ++tag) {
-            sLanguageTags.PutEntry(*tag);
+            sLanguageTags->PutEntry(*tag);
         }
     }
 
     // only accept tags known in the IANA registry
-    if (sLanguageTags.GetEntry(grLang)) {
+    if (sLanguageTags->GetEntry(grLang)) {
         return grLang;
     }
 
@@ -406,8 +396,10 @@ gfxGraphiteShaper::GetGraphiteTagForLang(const nsCString& aLang)
 gfxGraphiteShaper::Shutdown()
 {
 #ifdef NS_FREE_PERMANENT_DATA
-    if (sLanguageTags.IsInitialized()) {
-        sLanguageTags.Clear();
+    if (sLanguageTags) {
+        sLanguageTags->Clear();
+        delete sLanguageTags;
+        sLanguageTags = nullptr;
     }
 #endif
 }

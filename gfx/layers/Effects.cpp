@@ -4,12 +4,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Effects.h"
-#include "LayersLogging.h"
-#include "nsPrintfCString.h"
+#include "LayersLogging.h"              // for AppendToString
+#include "nsAString.h"
+#include "nsPrintfCString.h"            // for nsPrintfCString
+#include "nsString.h"                   // for nsAutoCString
 
 using namespace mozilla::layers;
 
-#ifdef MOZ_LAYERS_HAVE_LOG
 void
 TexturedEffect::PrintInfo(nsACString& aTo, const char* aPrefix)
 {
@@ -37,14 +38,6 @@ EffectMask::PrintInfo(nsACString& aTo, const char* aPrefix)
   if (mIs3D) {
     aTo += " [is-3d]";
   }
-
-  if (mMaskTexture) {
-    nsAutoCString prefix(aPrefix);
-    prefix += "  ";
-
-    aTo += "\n";
-    mMaskTexture->PrintInfo(aTo, prefix.get());
-  }
 }
 
 void
@@ -61,4 +54,3 @@ EffectSolidColor::PrintInfo(nsACString& aTo, const char* aPrefix)
   aTo += nsPrintfCString("EffectSolidColor (0x%p) [color=%x]", this, mColor.ToABGR());
 }
 
-#endif // MOZ_LAYERS_HAVE_LOG

@@ -15,6 +15,7 @@
 #include "nsTHashtable.h"
 #include "nsWeakReference.h"
 #include "mozilla/Attributes.h"
+#include "prtime.h"
 
 class nsNavBookmarks;
 class nsIOutputStream;
@@ -183,6 +184,7 @@ public:
                                  const nsACString& aTitle,
                                  bool aIsBookmarkFolder,
                                  int32_t* aIndex,
+                                 const nsACString& aGUID,
                                  int64_t* aNewFolder);
 
   /**
@@ -367,7 +369,6 @@ private:
   static const int32_t kGetChildrenIndex_Position;
   static const int32_t kGetChildrenIndex_Type;
   static const int32_t kGetChildrenIndex_PlaceID;
-  static const int32_t kGetChildrenIndex_FolderTitle;
   static const int32_t kGetChildrenIndex_Guid;
 
   class RemoveFolderTransaction MOZ_FINAL : public nsITransaction {
@@ -396,7 +397,7 @@ private:
       NS_ENSURE_TRUE(bookmarks, NS_ERROR_OUT_OF_MEMORY);
       int64_t newFolder;
       return bookmarks->CreateContainerWithID(mID, mParent, mTitle, true,
-                                              &mIndex, &newFolder); 
+                                              &mIndex, EmptyCString(), &newFolder);
     }
 
     NS_IMETHOD RedoTransaction() {
@@ -407,7 +408,7 @@ private:
       *aResult = false;
       return NS_OK;
     }
-    
+
     NS_IMETHOD Merge(nsITransaction* aTransaction, bool* aResult) {
       *aResult = false;
       return NS_OK;
@@ -434,6 +435,7 @@ private:
    */
   nsresult EnsureKeywordsHash();
   nsDataHashtable<nsTrimInt64HashKey, nsString> mBookmarkToKeywordHash;
+  bool mBookmarkToKeywordHashInitialized;
 
   /**
    * This function must be called every time a bookmark is removed.

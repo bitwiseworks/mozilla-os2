@@ -6,13 +6,21 @@
 
 PROGRAM = 'gdb-tests'
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'gdb-tests.cpp',
-    'test-JSObject.cpp',
-    'test-JSString.cpp',
-    'test-Root.cpp',
-    'test-jsid.cpp',
-    'test-jsval.cpp',
-    'test-prettyprinters.cpp',
-    'typedef-printers.cpp',
+    'tests/test-jsid.cpp',
+    'tests/test-JSObject.cpp',
+    'tests/test-JSString.cpp',
+    'tests/test-jsval.cpp',
+    'tests/test-prettyprinters.cpp',
+    'tests/test-Root.cpp',
+    'tests/typedef-printers.cpp',
 ]
+
+# Building against js_static requires that we declare mfbt sybols "exported"
+# on its behalf.
+for var in ('EXPORT_JS_API', 'IMPL_MFBT'):
+    DEFINES[var] = True
+
+LOCAL_INCLUDES += ['..']
+GENERATED_INCLUDES += ['..']

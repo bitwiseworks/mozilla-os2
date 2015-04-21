@@ -10,7 +10,6 @@
 #include "nsCOMPtr.h"
 #include "nsSVGAttrTearoffTable.h"
 #include "mozilla/dom/SVGAnimatedLengthListBinding.h"
-#include "nsContentUtils.h"
 
 // See the architecture comment in this file's header.
 
@@ -27,18 +26,13 @@ SVGAnimatedLengthListTearoffTable()
 
 NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(DOMSVGAnimatedLengthList, mElement)
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMSVGAnimatedLengthList)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMSVGAnimatedLengthList)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGAnimatedLengthList)
-  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
+NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(DOMSVGAnimatedLengthList, AddRef)
+NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(DOMSVGAnimatedLengthList, Release)
 
 JSObject*
-DOMSVGAnimatedLengthList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+DOMSVGAnimatedLengthList::WrapObject(JSContext* aCx)
 {
-  return dom::SVGAnimatedLengthListBinding::Wrap(aCx, aScope, this);
+  return dom::SVGAnimatedLengthListBinding::Wrap(aCx, this);
 }
 
 already_AddRefed<DOMSVGLengthList>

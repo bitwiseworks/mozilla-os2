@@ -9,7 +9,7 @@
  * same-origin with anything but themselves.
  */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsNullPrincipal.h"
 #include "nsNullPrincipalURI.h"
@@ -21,33 +21,35 @@
 #include "nsNetCID.h"
 #include "nsError.h"
 #include "nsIScriptSecurityManager.h"
+#include "nsPrincipal.h"
 #include "nsScriptSecurityManager.h"
+#include "pratom.h"
 
 using namespace mozilla;
 
 NS_IMPL_CLASSINFO(nsNullPrincipal, nullptr, nsIClassInfo::MAIN_THREAD_ONLY,
                   NS_NULLPRINCIPAL_CID)
-NS_IMPL_QUERY_INTERFACE2_CI(nsNullPrincipal,
+NS_IMPL_QUERY_INTERFACE_CI(nsNullPrincipal,
+                           nsIPrincipal,
+                           nsISerializable)
+NS_IMPL_CI_INTERFACE_GETTER(nsNullPrincipal,
                             nsIPrincipal,
                             nsISerializable)
-NS_IMPL_CI_INTERFACE_GETTER2(nsNullPrincipal,
-                             nsIPrincipal,
-                             nsISerializable)
 
-NS_IMETHODIMP_(nsrefcnt) 
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsNullPrincipal::AddRef()
 {
   NS_PRECONDITION(int32_t(refcount) >= 0, "illegal refcnt");
-  nsrefcnt count = PR_ATOMIC_INCREMENT(&refcount);
+  nsrefcnt count = ++refcount;
   NS_LOG_ADDREF(this, count, "nsNullPrincipal", sizeof(*this));
   return count;
 }
 
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsNullPrincipal::Release()
 {
   NS_PRECONDITION(0 != refcount, "dup release");
-  nsrefcnt count = PR_ATOMIC_DECREMENT(&refcount);
+  nsrefcnt count = --refcount;
   NS_LOG_RELEASE(this, count, "nsNullPrincipal");
   if (count == 0) {
     delete this;
@@ -133,7 +135,7 @@ nsNullPrincipal::Equals(nsIPrincipal *aOther, bool *aResult)
 }
 
 NS_IMETHODIMP
-nsNullPrincipal::EqualsIgnoringDomain(nsIPrincipal *aOther, bool *aResult)
+nsNullPrincipal::EqualsConsideringDomain(nsIPrincipal *aOther, bool *aResult)
 {
   return Equals(aOther, aResult);
 }
@@ -142,23 +144,6 @@ NS_IMETHODIMP
 nsNullPrincipal::GetHashValue(uint32_t *aResult)
 {
   *aResult = (NS_PTR_TO_INT32(this) >> 2);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNullPrincipal::GetSecurityPolicy(void** aSecurityPolicy)
-{
-  // We don't actually do security policy caching.  And it's not like anyone
-  // can set a security policy for us anyway.
-  *aSecurityPolicy = nullptr;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNullPrincipal::SetSecurityPolicy(void* aSecurityPolicy)
-{
-  // We don't actually do security policy caching.  And it's not like anyone
-  // can set a security policy for us anyway.
   return NS_OK;
 }
 
@@ -171,16 +156,20 @@ nsNullPrincipal::GetURI(nsIURI** aURI)
 NS_IMETHODIMP
 nsNullPrincipal::GetCsp(nsIContentSecurityPolicy** aCsp)
 {
-  // CSP on a null principal makes no sense
-  *aCsp = nullptr;
+  NS_IF_ADDREF(*aCsp = mCSP);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsNullPrincipal::SetCsp(nsIContentSecurityPolicy* aCsp)
 {
-  // CSP on a null principal makes no sense
-  return NS_ERROR_NOT_AVAILABLE;
+  // If CSP was already set, it should not be destroyed!  Instead, it should
+  // get set anew when a new principal is created.
+  if (mCSP)
+    return NS_ERROR_ALREADY_INITIALIZED;
+
+  mCSP = aCsp;
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -223,7 +212,7 @@ nsNullPrincipal::Subsumes(nsIPrincipal *aOther, bool *aResult)
 }
 
 NS_IMETHODIMP
-nsNullPrincipal::SubsumesIgnoringDomain(nsIPrincipal *aOther, bool *aResult)
+nsNullPrincipal::SubsumesConsideringDomain(nsIPrincipal *aOther, bool *aResult)
 {
   return Subsumes(aOther, aResult);
 }
@@ -258,9 +247,10 @@ nsNullPrincipal::CheckMayLoad(nsIURI* aURI, bool aReport, bool aAllowIfInheritsP
 }
 
 NS_IMETHODIMP
-nsNullPrincipal::GetExtendedOrigin(nsACString& aExtendedOrigin)
+nsNullPrincipal::GetJarPrefix(nsACString& aJarPrefix)
 {
-  return GetOrigin(getter_Copies(aExtendedOrigin));
+  aJarPrefix.Truncate();
+  return NS_OK;
 }
 
 NS_IMETHODIMP

@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "mozilla/dom/HTMLStyleElement.h"
 #include "mozilla/dom/HTMLStyleElementBinding.h"
-#include "nsIDOMLinkStyle.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsIDOMStyleSheet.h"
@@ -21,21 +20,23 @@ NS_IMPL_NS_NEW_HTML_ELEMENT(Style)
 namespace mozilla {
 namespace dom {
 
-HTMLStyleElement::HTMLStyleElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+HTMLStyleElement::HTMLStyleElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
 {
   AddMutationObserver(this);
-  SetIsDOMBinding();
 }
 
 HTMLStyleElement::~HTMLStyleElement()
 {
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLStyleElement)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLStyleElement,
                                                   nsGenericHTMLElement)
   tmp->nsStyleLinkElement::Traverse(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLStyleElement,
                                                 nsGenericHTMLElement)
   tmp->nsStyleLinkElement::Unlink();
@@ -47,14 +48,11 @@ NS_IMPL_RELEASE_INHERITED(HTMLStyleElement, Element)
 
 // QueryInterface implementation for HTMLStyleElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLStyleElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED4(HTMLStyleElement,
-                                nsIDOMHTMLStyleElement,
-                                nsIDOMLinkStyle,
-                                nsIStyleSheetLinkingElement,
-                                nsIMutationObserver)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
+  NS_INTERFACE_TABLE_INHERITED(HTMLStyleElement,
+                               nsIDOMHTMLStyleElement,
+                               nsIStyleSheetLinkingElement,
+                               nsIMutationObserver)
+NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLStyleElement)
 
@@ -135,7 +133,7 @@ void
 HTMLStyleElement::ContentChanged(nsIContent* aContent)
 {
   if (nsContentUtils::IsInSameAnonymousTree(this, aContent)) {
-    UpdateStyleSheetInternal(nullptr);
+    UpdateStyleSheetInternal(nullptr, nullptr);
   }
 }
 
@@ -159,9 +157,9 @@ void
 HTMLStyleElement::UnbindFromTree(bool aDeep, bool aNullParent)
 {
   nsCOMPtr<nsIDocument> oldDoc = GetCurrentDoc();
-
+  ShadowRoot* oldShadow = GetContainingShadow();
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
-  UpdateStyleSheetInternal(oldDoc);
+  UpdateStyleSheetInternal(oldDoc, oldShadow);
 }
 
 nsresult
@@ -175,7 +173,7 @@ HTMLStyleElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     if (aName == nsGkAtoms::title ||
         aName == nsGkAtoms::media ||
         aName == nsGkAtoms::type) {
-      UpdateStyleSheetInternal(nullptr, true);
+      UpdateStyleSheetInternal(nullptr, nullptr, true);
     } else if (aName == nsGkAtoms::scoped) {
       UpdateStyleSheetScopedness(true);
     }
@@ -194,7 +192,7 @@ HTMLStyleElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
     if (aAttribute == nsGkAtoms::title ||
         aAttribute == nsGkAtoms::media ||
         aAttribute == nsGkAtoms::type) {
-      UpdateStyleSheetInternal(nullptr, true);
+      UpdateStyleSheetInternal(nullptr, nullptr, true);
     } else if (aAttribute == nsGkAtoms::scoped) {
       UpdateStyleSheetScopedness(false);
     }
@@ -203,10 +201,13 @@ HTMLStyleElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
   return rv;
 }
 
-void
-HTMLStyleElement::GetInnerHTML(nsAString& aInnerHTML, ErrorResult& aError)
+NS_IMETHODIMP
+HTMLStyleElement::GetInnerHTML(nsAString& aInnerHTML)
 {
-  nsContentUtils::GetNodeTextContent(this, false, aInnerHTML);
+  if (!nsContentUtils::GetNodeTextContent(this, false, aInnerHTML)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  return NS_OK;
 }
 
 void
@@ -219,7 +220,7 @@ HTMLStyleElement::SetInnerHTML(const nsAString& aInnerHTML,
 
   SetEnableUpdates(true);
 
-  UpdateStyleSheetInternal(nullptr);
+  UpdateStyleSheetInternal(nullptr, nullptr);
 }
 
 already_AddRefed<nsIURI>
@@ -268,9 +269,9 @@ HTMLStyleElement::GetStyleSheetInfo(nsAString& aTitle,
 }
 
 JSObject*
-HTMLStyleElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLStyleElement::WrapNode(JSContext *aCx)
 {
-  return HTMLStyleElementBinding::Wrap(aCx, aScope, this);
+  return HTMLStyleElementBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

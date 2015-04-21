@@ -6,7 +6,7 @@
 #include "Base64.h"
 
 #include "nsIInputStream.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 
 #include "plbase64.h"
 
@@ -163,7 +163,8 @@ EncodeInputStream(nsIInputStream *aInputStream,
 
   if (!aCount) {
     rv = aInputStream->Available(&count64);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_WARN_IF(NS_FAILED(rv)))
+      return rv;
     // if count64 is over 4GB, it will be failed at the below condition,
     // then will return NS_ERROR_OUT_OF_MEMORY
     aCount = (uint32_t)count64;
@@ -208,7 +209,10 @@ EncodeInputStream(nsIInputStream *aInputStream,
   if (state.charsOnStack)
     Encode(state.c, state.charsOnStack, state.buffer);
 
-  *aDest.EndWriting() = '\0';
+  if (aDest.Length())
+    // May belong to an nsCString with an unallocated buffer, so only null
+    // terminate if there is a need to.
+    *aDest.EndWriting() = '\0';
 
   return NS_OK;
 }

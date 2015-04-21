@@ -13,7 +13,7 @@ function test() {
     // is going to be requested and displayed in the source editor.
     requestLongerTimeout(2);
 
-    let { document, SourceEditor, NetMonitorView } = aMonitor.panelWin;
+    let { document, Editor, NetMonitorView } = aMonitor.panelWin;
     let { RequestsMenu } = NetMonitorView;
 
     RequestsMenu.lazyUpdate = false;
@@ -25,11 +25,11 @@ function test() {
           statusText: "OK"
         });
 
-      aMonitor.panelWin.once("NetMonitor:ResponseBodyAvailable", () => {
+      aMonitor.panelWin.once(aMonitor.panelWin.EVENTS.RESPONSE_BODY_DISPLAYED, () => {
         NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
           ok(aEditor.getText().match(/^<p>/),
             "The text shown in the source editor is incorrect.");
-          is(aEditor.getMode(), SourceEditor.MODES.TEXT,
+          is(aEditor.getMode(), Editor.modes.text,
             "The mode active in the source editor is incorrect.");
 
           teardown(aMonitor).then(finish);
@@ -44,4 +44,8 @@ function test() {
 
     aDebuggee.performRequests(1, CONTENT_TYPE_SJS + "?fmt=html-long");
   });
+
+  // This test uses a lot of memory, so force a GC to help fragmentation.
+  info("Forcing GC after netmonitor test.");
+  Cu.forceGC();
 }

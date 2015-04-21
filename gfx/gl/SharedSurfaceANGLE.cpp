@@ -5,7 +5,7 @@
 
 #include "SharedSurfaceANGLE.h"
 
-#include "GLContext.h"
+#include "GLContextEGL.h"
 
 using namespace mozilla::gfx;
 
@@ -17,7 +17,7 @@ SurfaceFactory_ANGLEShareHandle::Create(GLContext* gl,
                                         ID3D10Device1* d3d,
                                         const SurfaceCaps& caps)
 {
-    GLLibraryEGL* egl = gl->GetLibraryEGL();
+    GLLibraryEGL* egl = &sEGLLibrary;
     if (!egl)
         return nullptr;
 
@@ -45,7 +45,7 @@ SharedSurface_ANGLEShareHandle::~SharedSurface_ANGLEShareHandle()
 void
 SharedSurface_ANGLEShareHandle::LockProdImpl()
 {
-    mGL->MakeCurrent_EGLSurface(mPBuffer);
+    GLContextEGL::Cast(mGL)->SetEGLSurfaceOverride(mPBuffer);
 }
 
 void
@@ -176,7 +176,7 @@ ChooseConfig(GLContext* gl,
 static EGLSurface CreatePBufferSurface(GLLibraryEGL* egl,
                                        EGLDisplay display,
                                        EGLConfig config,
-                                       const gfxIntSize& size)
+                                       const gfx::IntSize& size)
 {
     EGLint attribs[] = {
         LOCAL_EGL_WIDTH, size.width,
@@ -192,9 +192,9 @@ static EGLSurface CreatePBufferSurface(GLLibraryEGL* egl,
 SharedSurface_ANGLEShareHandle*
 SharedSurface_ANGLEShareHandle::Create(GLContext* gl, ID3D10Device1* d3d,
                                        EGLContext context, EGLConfig config,
-                                       const gfxIntSize& size, bool hasAlpha)
+                                       const gfx::IntSize& size, bool hasAlpha)
 {
-    GLLibraryEGL* egl = gl->GetLibraryEGL();
+    GLLibraryEGL* egl = &sEGLLibrary;
     MOZ_ASSERT(egl);
     MOZ_ASSERT(egl->IsExtensionSupported(
                GLLibraryEGL::ANGLE_surface_d3d_texture_2d_share_handle));
@@ -271,7 +271,7 @@ SurfaceFactory_ANGLEShareHandle::SurfaceFactory_ANGLEShareHandle(GLContext* gl,
     , mConsD3D(d3d)
 {
     mConfig = ChooseConfig(mProdGL, mEGL, mReadCaps);
-    mContext = mProdGL->GetEGLContext();
+    mContext = GLContextEGL::Cast(mProdGL)->GetEGLContext();
     MOZ_ASSERT(mConfig && mContext);
 }
 

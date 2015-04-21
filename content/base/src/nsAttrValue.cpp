@@ -15,6 +15,7 @@
 #include "nsAttrValueInlines.h"
 #include "nsIAtom.h"
 #include "nsUnicharUtils.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/css/StyleRule.h"
 #include "mozilla/css/Declaration.h"
 #include "nsContentUtils.h"
@@ -23,6 +24,8 @@
 #include "nsHTMLCSSStyleSheet.h"
 #include "nsCSSParser.h"
 #include "nsStyledElement.h"
+#include "nsIURI.h"
+#include "nsIDocument.h"
 #include <algorithm>
 
 using namespace mozilla;
@@ -47,7 +50,7 @@ MiscContainer::GetString(nsAString& aString) const
       return false;
     }
 
-    buffer->ToString(buffer->StorageSize() / sizeof(PRUnichar) - 1, aString);
+    buffer->ToString(buffer->StorageSize() / sizeof(char16_t) - 1, aString);
     return true;
   }
 
@@ -307,8 +310,7 @@ nsAttrValue::SetTo(const nsAttrValue& aOther)
     }
     case eCSSStyleRule:
     {
-      MOZ_NOT_REACHED("These should be refcounted!");
-      break;
+      MOZ_CRASH("These should be refcounted!");
     }
     case eURL:
     {
@@ -373,7 +375,7 @@ void
 nsAttrValue::SetTo(const nsAString& aValue)
 {
   ResetIfSet();
-  nsStringBuffer* buf = GetStringBuffer(aValue).get();
+  nsStringBuffer* buf = GetStringBuffer(aValue).take();
   if (buf) {
     SetPtrValueAndType(buf, eStringBase);
   }
@@ -588,7 +590,7 @@ nsAttrValue::ToString(nsAString& aResult) const
     {
       nsStringBuffer* str = static_cast<nsStringBuffer*>(GetPtr());
       if (str) {
-        str->ToString(str->StorageSize()/sizeof(PRUnichar) - 1, aResult);
+        str->ToString(str->StorageSize()/sizeof(char16_t) - 1, aResult);
       }
       else {
         aResult.Truncate();
@@ -838,8 +840,8 @@ nsAttrValue::HashValue() const
     {
       nsStringBuffer* str = static_cast<nsStringBuffer*>(GetPtr());
       if (str) {
-        uint32_t len = str->StorageSize()/sizeof(PRUnichar) - 1;
-        return HashString(static_cast<PRUnichar*>(str->Data()), len);
+        uint32_t len = str->StorageSize()/sizeof(char16_t) - 1;
+        return HashString(static_cast<char16_t*>(str->Data()), len);
       }
 
       return 0;
@@ -1062,8 +1064,8 @@ nsAttrValue::Equals(const nsAString& aValue,
     {
       nsStringBuffer* str = static_cast<nsStringBuffer*>(GetPtr());
       if (str) {
-        nsDependentString dep(static_cast<PRUnichar*>(str->Data()),
-                              str->StorageSize()/sizeof(PRUnichar) - 1);
+        nsDependentString dep(static_cast<char16_t*>(str->Data()),
+                              str->StorageSize()/sizeof(char16_t) - 1);
         return aCaseSensitive == eCaseMatters ? aValue.Equals(dep) :
           nsContentUtils::EqualsIgnoreASCIICase(aValue, dep);
       }
@@ -1101,8 +1103,8 @@ nsAttrValue::Equals(nsIAtom* aValue, nsCaseTreatment aCaseSensitive) const
     {
       nsStringBuffer* str = static_cast<nsStringBuffer*>(GetPtr());
       if (str) {
-        nsDependentString dep(static_cast<PRUnichar*>(str->Data()),
-                              str->StorageSize()/sizeof(PRUnichar) - 1);
+        nsDependentString dep(static_cast<char16_t*>(str->Data()),
+                              str->StorageSize()/sizeof(char16_t) - 1);
         return aValue->Equals(dep);
       }
       return aValue == nsGkAtoms::_empty;
@@ -1230,7 +1232,7 @@ nsAttrValue::ParseAtom(const nsAString& aValue)
 
   nsCOMPtr<nsIAtom> atom = NS_NewAtom(aValue);
   if (atom) {
-    SetPtrValueAndType(atom.forget().get(), eAtomBase);
+    SetPtrValueAndType(atom.forget().take(), eAtomBase);
   }
 }
 
@@ -1526,7 +1528,7 @@ nsAttrValue::ParsePositiveIntValue(const nsAString& aString)
 void
 nsAttrValue::SetColorValue(nscolor aColor, const nsAString& aString)
 {
-  nsStringBuffer* buf = GetStringBuffer(aString).get();
+  nsStringBuffer* buf = GetStringBuffer(aString).take();
   if (!buf) {
     return;
   }
@@ -1714,10 +1716,10 @@ nsAttrValue::SetMiscAtomOrString(const nsAString* aValue)
       nsCOMPtr<nsIAtom> atom = NS_NewAtom(*aValue);
       if (atom) {
         cont->mStringBits =
-          reinterpret_cast<uintptr_t>(atom.forget().get()) | eAtomBase;
+          reinterpret_cast<uintptr_t>(atom.forget().take()) | eAtomBase;
       }
     } else {
-      nsStringBuffer* buf = GetStringBuffer(*aValue).get();
+      nsStringBuffer* buf = GetStringBuffer(*aValue).take();
       if (buf) {
         cont->mStringBits = reinterpret_cast<uintptr_t>(buf) | eStringBase;
       }
@@ -1862,17 +1864,17 @@ nsAttrValue::GetStringBuffer(const nsAString& aValue) const
   }
 
   nsRefPtr<nsStringBuffer> buf = nsStringBuffer::FromString(aValue);
-  if (buf && (buf->StorageSize()/sizeof(PRUnichar) - 1) == len) {
+  if (buf && (buf->StorageSize()/sizeof(char16_t) - 1) == len) {
     return buf.forget();
   }
 
-  buf = nsStringBuffer::Alloc((len + 1) * sizeof(PRUnichar));
+  buf = nsStringBuffer::Alloc((len + 1) * sizeof(char16_t));
   if (!buf) {
     return nullptr;
   }
-  PRUnichar *data = static_cast<PRUnichar*>(buf->Data());
+  char16_t *data = static_cast<char16_t*>(buf->Data());
   CopyUnicodeTo(aValue, 0, data, len);
-  data[len] = PRUnichar(0);
+  data[len] = char16_t(0);
   return buf.forget();
 }
 
@@ -1902,10 +1904,10 @@ nsAttrValue::StringToInteger(const nsAString& aValue, bool* aStrict,
   }
 
   bool negate = false;
-  if (*iter == PRUnichar('-')) {
+  if (*iter == char16_t('-')) {
     negate = true;
     ++iter;
-  } else if (*iter == PRUnichar('+')) {
+  } else if (*iter == char16_t('+')) {
     *aStrict = false;
     ++iter;
   }
@@ -1913,8 +1915,8 @@ nsAttrValue::StringToInteger(const nsAString& aValue, bool* aStrict,
   int32_t value = 0;
   int32_t pValue = 0; // Previous value, used to check integer overflow
   while (iter != end) {
-    if (*iter >= PRUnichar('0') && *iter <= PRUnichar('9')) {
-      value = (value * 10) + (*iter - PRUnichar('0'));
+    if (*iter >= char16_t('0') && *iter <= char16_t('9')) {
+      value = (value * 10) + (*iter - char16_t('0'));
       ++iter;
       // Checking for integer overflow.
       if (pValue > value) {
@@ -1925,7 +1927,7 @@ nsAttrValue::StringToInteger(const nsAString& aValue, bool* aStrict,
         pValue = value;
         *aErrorCode = NS_OK;
       }
-    } else if (aCanBePercent && *iter == PRUnichar('%')) {
+    } else if (aCanBePercent && *iter == char16_t('%')) {
       ++iter;
       *aIsPercent = true;
       if (iter != end) {
@@ -1949,7 +1951,7 @@ nsAttrValue::StringToInteger(const nsAString& aValue, bool* aStrict,
 }
 
 size_t
-nsAttrValue::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsAttrValue::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = 0;
 

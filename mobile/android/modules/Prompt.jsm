@@ -1,4 +1,5 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: js; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict"
@@ -7,16 +8,22 @@ let Cc = Components.classes;
 let Ci = Components.interfaces;
 
 Components.utils.import("resource://gre/modules/Services.jsm");
+Components.utils.import("resource://gre/modules/Messaging.jsm");
 
 this.EXPORTED_SYMBOLS = ["Prompt"];
 
 function log(msg) {
-  //Services.console.logStringMessage(msg);
+  Services.console.logStringMessage(msg);
 }
 
 function Prompt(aOptions) {
   this.window = "window" in aOptions ? aOptions.window : null;
-  this.msg = { type: "Prompt:Show", async: true };
+  this.msg = { async: true };
+
+  if (aOptions.priority === 1)
+    this.msg.type = "Prompt:ShowTop"
+  else
+    this.msg.type = "Prompt:Show"
 
   if ("title" in aOptions && aOptions.title != null)
     this.msg.title = aOptions.title;
@@ -27,12 +34,21 @@ function Prompt(aOptions) {
   if ("buttons" in aOptions && aOptions.buttons != null)
     this.msg.buttons = aOptions.buttons;
 
-  let idService = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator); 
-  this.guid = idService.generateUUID().toString();
-  this.msg.guid = this.guid;
+  if ("hint" in aOptions && aOptions.hint != null)
+    this.msg.hint = aOptions.hint;
+
+  let idService = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
 }
 
 Prompt.prototype = {
+  setHint: function(aHint) {
+    if (!aHint)
+      delete this.msg.hint;
+    else
+      this.msg.hint = aHint;
+    return this;
+  },
+
   addButton: function(aOptions) {
     if (!this.msg.buttons)
       this.msg.buttons = [];
@@ -73,6 +89,16 @@ Prompt.prototype = {
     });
   },
 
+  addNumber: function(aOptions) {
+    return this._addInput({
+      type: "number",
+      value: aOptions.value,
+      hint: aOptions.hint,
+      autofocus: aOptions.autofocus,
+      id: aOptions.id
+    });
+  },
+
   addPassword: function(aOptions) {
     return this._addInput({
       type: "password",
@@ -86,6 +112,14 @@ Prompt.prototype = {
   addDatePicker: function(aOptions) {
     return this._addInput({
       type: aOptions.type || "date",
+      value: aOptions.value,
+      id: aOptions.id
+    });
+  },
+
+  addColorPicker: function(aOptions) {
+    return this._addInput({
+      type: "color",
       value: aOptions.value,
       id: aOptions.id
     });
@@ -107,27 +141,33 @@ Prompt.prototype = {
     });
   },
 
+  addIconGrid: function(aOptions) {
+    return this._addInput({
+      type: "icongrid",
+      items: aOptions.items,
+      id: aOptions.id
+    });
+  },
+
+  addTabs: function(aOptions) {
+    return this._addInput({
+      type: "tabs",
+      items: aOptions.items,
+      id: aOptions.id
+    });
+  },
+
   show: function(callback) {
     this.callback = callback;
     log("Sending message");
-    Services.obs.addObserver(this, "Prompt:Reply", false);
     this._innerShow();
   },
 
   _innerShow: function() {
-    this.bridge.handleGeckoMessage(JSON.stringify(this.msg));
-  },
-
-  observe: function(aSubject, aTopic, aData) {
-    log("observe " + aData);
-    let data = JSON.parse(aData);
-    if (data.guid != this.guid)
-      return;
-
-    Services.obs.removeObserver(this, "Prompt:Reply", false);
-
-    if (this.callback)
-      this.callback(data);
+    sendMessageToJava(this.msg, (data) => {
+      if (this.callback)
+        this.callback(data);
+    });
   },
 
   _setListItems: function(aItems) {
@@ -139,15 +179,17 @@ Prompt.prototype = {
 
       obj.label = item.label;
 
+      if (item.icon)
+        obj.icon = item.icon;
+
       if (item.disabled)
         obj.disabled = true;
 
-      if (item.selected || hasSelected || this.msg.multiple) {
-        if (!this.msg.selected) {
-          this.msg.selected = new Array(this.msg.listitems.length);
-          hasSelected = true;
+      if (item.selected) {
+        if (!this.msg.choiceMode) {
+          this.msg.choiceMode = "single";
         }
-        this.msg.selected[this.msg.listitems.length] = item.selected;
+        obj.selected = item.selected;
       }
 
       if (item.header)
@@ -158,6 +200,12 @@ Prompt.prototype = {
 
       if (item.child)
         obj.inGroup = true;
+
+      if (item.showAsActions)
+        obj.showAsActions = item.showAsActions;
+
+      if (item.icon)
+        obj.icon = item.icon;
 
       this.msg.listitems.push(obj);
 
@@ -170,12 +218,8 @@ Prompt.prototype = {
   },
 
   setMultiChoiceItems: function(aItems) {
-    this.msg.multiple = true;
+    this.msg.choiceMode = "multiple";
     return this._setListItems(aItems);
-  },
-
-  get bridge() {
-    return Cc["@mozilla.org/android/bridge;1"].getService(Ci.nsIAndroidBridge);
   },
 
 }

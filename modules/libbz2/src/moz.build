@@ -4,8 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'libbz2'
-
 EXPORTS += [
     'bzlib.h',
 ]
@@ -21,8 +19,28 @@ csrcs = [
     'randtable.c',
 ]
 
-HOST_CSRCS += csrcs
+HOST_SOURCES += csrcs
 HOST_LIBRARY_NAME = 'hostbz2'
 
 LIBRARY_NAME = 'bz2'
 
+UNIFIED_SOURCES += [
+    'blocksort.c',
+    'bzlib.c',
+    'compress.c',
+    'crctable.c',
+    'decompress.c',
+    'huffman.c',
+    'randtable.c',
+]
+
+FORCE_STATIC_LIB = True
+
+# This is defined by the bzip2-1.0.3 Makefile.  It appears to be used to
+# configure GLIBC to support large files.  This isn't something we care about
+# at this stage, since we're only interested in the streaming API, but we
+# define it here anyways for consistency.
+DEFINES['_FILE_OFFSET_BITS'] = 64
+
+if CONFIG['OS_ARCH'] == 'WINNT':
+    USE_STATIC_LIBS = True

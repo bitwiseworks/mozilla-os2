@@ -21,7 +21,6 @@
 #include "nsIScrollPositionListener.h"
 #include "nsITimer.h"
 #include "nsIWeakReference.h"
-#include "nsIDocShellTreeNode.h"
 
 class nsAccessiblePivot;
 
@@ -71,14 +70,13 @@ public:
   // nsIDocumentObserver
   NS_DECL_NSIDOCUMENTOBSERVER
 
-  // nsAccessNode
+  // Accessible
   virtual void Init();
   virtual void Shutdown();
   virtual nsIFrame* GetFrame() const;
   virtual nsINode* GetNode() const { return mDocumentNode; }
   nsIDocument* DocumentNode() const { return mDocumentNode; }
 
-  // Accessible
   virtual mozilla::a11y::ENameValueFlag Name(nsString& aName);
   virtual void Description(nsString& aDescription);
   virtual Accessible* FocusedChild();
@@ -214,6 +212,15 @@ public:
   Accessible* GetAccessible(nsINode* aNode) const;
 
   /**
+   * Return an accessible for the given node even if the node is not in
+   * document's node map cache (like HTML area element).
+   *
+   * XXX: it should be really merged with GetAccessible().
+   */
+  Accessible* GetAccessibleEvenIfNotInMap(nsINode* aNode) const;
+  Accessible* GetAccessibleEvenIfNotInMapOrContainer(nsINode* aNode) const;
+
+  /**
    * Return whether the given DOM node has an accessible or not.
    */
   bool HasAccessible(nsINode* aNode) const
@@ -222,7 +229,7 @@ public:
   /**
    * Return the cached accessible by the given unique ID within this document.
    *
-   * @note   the unique ID matches with the uniqueID() of nsAccessNode
+   * @note   the unique ID matches with the uniqueID() of Accessible
    *
    * @param  aUniqueID  [in] the unique ID used to cache the node.
    */
@@ -242,15 +249,20 @@ public:
    * Return an accessible for the given DOM node or container accessible if
    * the node is not accessible.
    */
-  Accessible* GetAccessibleOrContainer(nsINode* aNode);
+  Accessible* GetAccessibleOrContainer(nsINode* aNode) const;
 
   /**
    * Return a container accessible for the given DOM node.
    */
-  Accessible* GetContainerAccessible(nsINode* aNode)
+  Accessible* GetContainerAccessible(nsINode* aNode) const
   {
     return aNode ? GetAccessibleOrContainer(aNode->GetParentNode()) : nullptr;
   }
+
+  /**
+   * Return an accessible for the given node or its first accessible descendant.
+   */
+  Accessible* GetAccessibleOrDescendant(nsINode* aNode) const;
 
   /**
    * Return true if the given ID is referred by relation attribute.
@@ -269,7 +281,7 @@ public:
    * @param  aRoleMapEntry  [in] the role map entry role the ARIA role or nullptr
    *                          if none
    */
-  bool BindToDocument(Accessible* aAccessible, nsRoleMapEntry* aRoleMapEntry);
+  void BindToDocument(Accessible* aAccessible, nsRoleMapEntry* aRoleMapEntry);
 
   /**
    * Remove from document and shutdown the given accessible.
@@ -444,8 +456,13 @@ protected:
 
   /**
    * Create accessible tree.
+   *
+   * @param aRoot       [in] a root of subtree to create
+   * @param aFocusedAcc [in, optional] a focused accessible under created
+   *                      subtree if any
    */
-  void CacheChildrenInSubtree(Accessible* aRoot);
+  void CacheChildrenInSubtree(Accessible* aRoot,
+                              Accessible** aFocusedAcc = nullptr);
 
   /**
    * Remove accessibles in subtree from node to accessible map.
@@ -524,10 +541,16 @@ protected:
   nsCOMPtr<nsIContent> mAnchorJumpElm;
 
   /**
-   * Keep the ARIA attribute old value that is initialized by
-   * AttributeWillChange and used by AttributeChanged notifications.
+   * A generic state (see items below) before the attribute value was changed.
+   * @see AttributeWillChange and AttributeChanged notifications.
    */
-  nsIAtom* mARIAAttrOldValue;
+  union {
+    // ARIA attribute value
+    nsIAtom* mARIAAttrOldValue;
+
+    // True if the accessible state bit was on
+    bool mStateBitWasOn;
+  };
 
   nsTArray<nsRefPtr<DocAccessible> > mChildDocuments;
 

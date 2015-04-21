@@ -7,7 +7,6 @@
 #define nsWebShellWindow_h__
 
 #include "mozilla/Mutex.h"
-#include "nsEvent.h"
 #include "nsIWebProgressListener.h"
 #include "nsITimer.h"
 #include "nsCOMPtr.h"
@@ -16,6 +15,8 @@
 
 /* Forward declarations.... */
 class nsIURI;
+
+struct nsWidgetInitData;
 
 namespace mozilla {
 class WebShellWindowTimerCallback;

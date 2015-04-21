@@ -170,7 +170,7 @@ nsHttpNegotiateAuth::ChallengeReceived(nsIHttpAuthenticableChannel *authChannel,
     return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(nsHttpNegotiateAuth, nsIHttpAuthenticator)
+NS_IMPL_ISUPPORTS(nsHttpNegotiateAuth, nsIHttpAuthenticator)
    
 //
 // GenerateCredentials
@@ -182,9 +182,9 @@ NS_IMETHODIMP
 nsHttpNegotiateAuth::GenerateCredentials(nsIHttpAuthenticableChannel *authChannel,
                                          const char *challenge,
                                          bool isProxyAuth,
-                                         const PRUnichar *domain,
-                                         const PRUnichar *username,
-                                         const PRUnichar *password,
+                                         const char16_t *domain,
+                                         const char16_t *username,
+                                         const char16_t *password,
                                          nsISupports **sessionState,
                                          nsISupports **continuationState,
                                          uint32_t *flags,

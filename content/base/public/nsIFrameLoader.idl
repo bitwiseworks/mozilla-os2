@@ -14,6 +14,7 @@ interface nsIMessageSender;
 interface nsIVariant;
 interface nsIDOMElement;
 interface nsITabParent;
+interface nsILoadContext;
 
 typedef unsigned long long nsContentViewId;
 
@@ -111,7 +112,7 @@ interface nsIContentViewManager : nsISupports
   readonly attribute nsIContentView rootContentView;
 };
 
-[scriptable, builtinclass, uuid(e4333e51-f2fa-4fdd-becd-75d000703355)]
+[scriptable, builtinclass, uuid(a5cefcc8-551b-4901-83f3-7436b09ecaba)]
 interface nsIFrameLoader : nsISupports
 {
   /**
@@ -124,6 +125,13 @@ interface nsIFrameLoader : nsISupports
    * returns null.
    */
   readonly attribute nsITabParent tabParent;
+
+  /**
+   * Get an nsILoadContext for the top-level docshell. For remote
+   * frames, a shim is returned that contains private browsing and app
+   * information.
+   */
+  readonly attribute nsILoadContext loadContext;
 
   /**
    * Start loading the frame. This method figures out what to load
@@ -197,8 +205,6 @@ interface nsIFrameLoader : nsISupports
                                 in long aModifiers,
                                 [optional] in boolean aPreventDefault);
 
-  attribute boolean delayRemoteDialogs;
-
   /** 
    * The default rendering mode is synchronous scrolling.  In this
    * mode, it's an error to try to set a target viewport.
@@ -219,7 +225,7 @@ interface nsIFrameLoader : nsISupports
 
   /**
    * The default event mode automatically forwards the events
-   * handled in nsEventStateManager::HandleCrossProcessEvent to
+   * handled in EventStateManager::HandleCrossProcessEvent to
    * the child content process when these events are targeted to
    * the remote browser element.
    *
@@ -257,6 +263,13 @@ interface nsIFrameLoader : nsISupports
    */
   readonly attribute nsIDOMElement ownerElement;
 
+
+  /**
+   * Cached childID of the ContentParent owning the TabParent in this frame
+   * loader. This can be used to obtain the childID after the TabParent died.
+   */
+  readonly attribute unsigned long long childID;
+
   /**
    * Get or set this frame loader's visibility.
    *
@@ -265,6 +278,11 @@ interface nsIFrameLoader : nsISupports
    * have a notion of visibility in the parent process when frames are OOP.
    */
   [infallible] attribute boolean visible;
+
+  /**
+   * Find out whether the owner content really is a browser or app frame
+   */
+  readonly attribute boolean ownerIsBrowserOrAppFrame;
 };
 
 %{C++

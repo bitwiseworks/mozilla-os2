@@ -1,8 +1,3 @@
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
-
 Cu.import("resource://testing-common/httpd.js");
 
 var httpserv = null;
@@ -37,6 +32,7 @@ var listener = {
   },
 
   onStopRequest: function (request, ctx, status) {
+    do_check_eq(status, Cr.NS_OK);
     do_check_eq(buffer, "0123456789");
     do_check_eq(observers_called, results[test_nr]);
     test_nr++;
@@ -50,7 +46,7 @@ function run_test() {
   httpserv.registerPathHandler("/bug482601/partial", bug482601_partial);
   httpserv.registerPathHandler("/bug482601/cached", bug482601_cached);
   httpserv.registerPathHandler("/bug482601/only_from_cache", bug482601_only_from_cache);
-  httpserv.start(4444);
+  httpserv.start(-1);
 
   var obs = Cc["@mozilla.org/observer-service;1"].getService();
   obs = obs.QueryInterface(Ci.nsIObserverService);
@@ -107,15 +103,15 @@ function storeCache(aCacheEntry, aResponseHeads, aContent) {
 function test_nocache() {
   observers_called = "";
 
-  var chan = makeChan("http://localhost:4444/bug482601/nocache");
+  var chan = makeChan("http://localhost:" + httpserv.identity.primaryPort +
+                      "/bug482601/nocache");
   chan.asyncOpen(listener, null);
 }
 
 function test_partial() {
-   asyncOpenCacheEntry("http://localhost:4444/bug482601/partial",
-                       "HTTP",
-                       Ci.nsICache.STORE_ANYWHERE,
-                       Ci.nsICache.ACCESS_READ_WRITE,
+   asyncOpenCacheEntry("http://localhost:" + httpserv.identity.primaryPort +
+                       "/bug482601/partial",
+                       "disk", Ci.nsICacheStorage.OPEN_NORMALLY, null,
                        test_partial2);
 }
 
@@ -133,15 +129,15 @@ function test_partial2(status, entry) {
 
   observers_called = "";
 
-  var chan = makeChan("http://localhost:4444/bug482601/partial");
+  var chan = makeChan("http://localhost:" + httpserv.identity.primaryPort +
+                      "/bug482601/partial");
   chan.asyncOpen(listener, null);
 }
 
 function test_cached() {
-   asyncOpenCacheEntry("http://localhost:4444/bug482601/cached",
-                       "HTTP",
-                       Ci.nsICache.STORE_ANYWHERE,
-                       Ci.nsICache.ACCESS_READ_WRITE,
+   asyncOpenCacheEntry("http://localhost:" + httpserv.identity.primaryPort +
+                       "/bug482601/cached",
+                       "disk", Ci.nsICacheStorage.OPEN_NORMALLY, null,
                        test_cached2);
 }
 
@@ -159,16 +155,16 @@ function test_cached2(status, entry) {
 
   observers_called = "";
 
-  var chan = makeChan("http://localhost:4444/bug482601/cached");
+  var chan = makeChan("http://localhost:" + httpserv.identity.primaryPort +
+                      "/bug482601/cached");
   chan.loadFlags = Ci.nsIRequest.VALIDATE_ALWAYS;
   chan.asyncOpen(listener, null);
 }
 
 function test_only_from_cache() {
-   asyncOpenCacheEntry("http://localhost:4444/bug482601/only_from_cache",
-                       "HTTP",
-                       Ci.nsICache.STORE_ANYWHERE,
-                       Ci.nsICache.ACCESS_READ_WRITE,
+   asyncOpenCacheEntry("http://localhost:" + httpserv.identity.primaryPort +
+                       "/bug482601/only_from_cache",
+                       "disk", Ci.nsICacheStorage.OPEN_NORMALLY, null,
                        test_only_from_cache2);
 }
 
@@ -186,7 +182,8 @@ function test_only_from_cache2(status, entry) {
 
   observers_called = "";
 
-  var chan = makeChan("http://localhost:4444/bug482601/only_from_cache");
+  var chan = makeChan("http://localhost:" + httpserv.identity.primaryPort +
+                      "/bug482601/only_from_cache");
   chan.loadFlags = Ci.nsICachingChannel.LOAD_ONLY_FROM_CACHE;
   chan.asyncOpen(listener, null);
 }

@@ -6,7 +6,17 @@
 
 PROGRAM = 'CommandExecuteHandler'
 
-CPP_SOURCES += [
+SOURCES += [
     'CEHHelper.cpp',
     'CommandExecuteHandler.cpp',
 ]
+
+# We want this exe in dist/bin
+DIST_SUBDIR = ''
+
+for var in ('UNICODE', '_UNICODE', 'NS_NO_XPCOM'):
+    DEFINES[var] = True
+
+NO_PGO = True
+
+RCINCLUDE = 'CommandExecuteHandler.rc'

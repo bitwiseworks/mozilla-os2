@@ -13,7 +13,8 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-var gEnabled = false, gDebug = false; // these mirror signon.* prefs
+// These mirror signon.* prefs.
+var gEnabled, gDebug, gAutofillForms, gStoreWhenAutocompleteOff;
 
 function log(...pieces) {
     function generateLogMessage(args) {
@@ -70,6 +71,8 @@ var observer = {
     onPrefChange : function() {
         gDebug = Services.prefs.getBoolPref("signon.debug");
         gEnabled = Services.prefs.getBoolPref("signon.rememberSignons");
+        gAutofillForms = Services.prefs.getBoolPref("signon.autofillForms");
+        gStoreWhenAutocompleteOff = Services.prefs.getBoolPref("signon.storeWhenAutocompleteOff");
     },
 };
 
@@ -91,20 +94,58 @@ var LoginManagerContent = {
         return this.__formFillService;
     },
 
-    onContentLoaded : function (event) {
+
+    onFormPassword: function (event) {
       if (!event.isTrusted)
           return;
 
       if (!gEnabled)
           return;
 
-      let domDoc = event.target;
+      let form = event.target;
+      let doc = form.ownerDocument;
 
-      // Only process things which might have HTML forms.
-      if (!(domDoc instanceof Ci.nsIDOMHTMLDocument))
+      log("onFormPassword for", doc.documentURI);
+
+      // If there are no logins for this site, bail out now.
+      let formOrigin = LoginUtils._getPasswordOrigin(doc.documentURI);
+      if (!Services.logins.countLogins(formOrigin, "", null))
           return;
 
-      this._fillDocument(domDoc);
+      // If we're currently displaying a master password prompt, defer
+      // processing this form until the user handles the prompt.
+      if (Services.logins.uiBusy) {
+        log("deferring onFormPassword for", doc.documentURI);
+        let self = this;
+        let observer = {
+            QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver, Ci.nsISupportsWeakReference]),
+
+            observe: function (subject, topic, data) {
+                log("Got deferred onFormPassword notification:", topic);
+                // Only run observer once.
+                Services.obs.removeObserver(this, "passwordmgr-crypto-login");
+                Services.obs.removeObserver(this, "passwordmgr-crypto-loginCanceled");
+                if (topic == "passwordmgr-crypto-loginCanceled")
+                    return;
+                self.onFormPassword(event);
+            },
+            handleEvent : function (event) {
+                // Not expected to be called
+            }
+        };
+        // Trickyness follows: We want an observer, but don't want it to
+        // cause leaks. So add the observer with a weak reference, and use
+        // a dummy event listener (a strong reference) to keep it alive
+        // until the form is destroyed.
+        Services.obs.addObserver(observer, "passwordmgr-crypto-login", true);
+        Services.obs.addObserver(observer, "passwordmgr-crypto-loginCanceled", true);
+        form.addEventListener("mozCleverClosureHack", observer);
+        return;
+      }
+
+      let autofillForm = gAutofillForms && !PrivateBrowsingUtils.isWindowPrivate(doc.defaultView);
+
+      this._fillForm(form, autofillForm, false, false, null);
     },
 
 
@@ -320,7 +361,7 @@ var LoginManagerContent = {
         if (element && element.hasAttribute("autocomplete") &&
             element.getAttribute("autocomplete").toLowerCase() == "off")
             return true;
-
+        
         return false;
     },
 
@@ -363,6 +404,14 @@ var LoginManagerContent = {
             return;
         }
 
+        // Somewhat gross hack - we don't want to show the "remember password"
+        // notification on about:accounts for Firefox.
+        let topWin = win.top;
+        if (/^about:accounts($|\?)/i.test(topWin.document.documentURI)) {
+            log("(form submission ignored -- about:accounts)");
+            return;
+        }
+
         var formSubmitURL = LoginUtils._getActionOrigin(form)
         if (!Services.logins.getLoginSavingEnabled(hostname)) {
             log("(form submission ignored -- saving is disabled for:", hostname, ")");
@@ -380,12 +429,13 @@ var LoginManagerContent = {
 
         // Check for autocomplete=off attribute. We don't use it to prevent
         // autofilling (for existing logins), but won't save logins when it's
-        // present.
+        // present and the storeWhenAutocompleteOff pref is false.
         // XXX spin out a bug that we don't update timeLastUsed in this case?
-        if (this._isAutocompleteDisabled(form) ||
-            this._isAutocompleteDisabled(usernameField) ||
-            this._isAutocompleteDisabled(newPasswordField) ||
-            this._isAutocompleteDisabled(oldPasswordField)) {
+        if ((this._isAutocompleteDisabled(form) ||
+             this._isAutocompleteDisabled(usernameField) ||
+             this._isAutocompleteDisabled(newPasswordField) ||
+             this._isAutocompleteDisabled(oldPasswordField)) &&
+            !gStoreWhenAutocompleteOff) {
                 log("(form submission ignored -- autocomplete=off found)");
                 return;
         }
@@ -488,92 +538,6 @@ var LoginManagerContent = {
 
 
     /*
-     * _fillDocument
-     *
-     * Called when a page has loaded. For each form in the document,
-     * we check to see if it can be filled with a stored login.
-     */
-    _fillDocument : function (doc) {
-        var forms = doc.forms;
-        if (!forms || forms.length == 0)
-            return;
-
-        var formOrigin = LoginUtils._getPasswordOrigin(doc.documentURI);
-
-        // If there are no logins for this site, bail out now.
-        if (!Services.logins.countLogins(formOrigin, "", null))
-            return;
-
-        // If we're currently displaying a master password prompt, defer
-        // processing this document until the user handles the prompt.
-        if (Services.logins.uiBusy) {
-            log("deferring fillDoc for", doc.documentURI);
-            let self = this;
-            let observer = {
-                QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver, Ci.nsISupportsWeakReference]),
-
-                observe: function (subject, topic, data) {
-                    log("Got deferred fillDoc notification:", topic);
-                    // Only run observer once.
-                    Services.obs.removeObserver(this, "passwordmgr-crypto-login");
-                    Services.obs.removeObserver(this, "passwordmgr-crypto-loginCanceled");
-                    if (topic == "passwordmgr-crypto-loginCanceled")
-                        return;
-                    self._fillDocument(doc);
-                },
-                handleEvent : function (event) {
-                    // Not expected to be called
-                }
-            };
-            // Trickyness follows: We want an observer, but don't want it to
-            // cause leaks. So add the observer with a weak reference, and use
-            // a dummy event listener (a strong reference) to keep it alive
-            // until the document is destroyed.
-            Services.obs.addObserver(observer, "passwordmgr-crypto-login", true);
-            Services.obs.addObserver(observer, "passwordmgr-crypto-loginCanceled", true);
-            doc.addEventListener("mozCleverClosureHack", observer);
-            return;
-        }
-
-        log("fillDocument processing", forms.length, "forms on", doc.documentURI);
-
-        var autofillForm = !PrivateBrowsingUtils.isWindowPrivate(doc.defaultView) &&
-                           Services.prefs.getBoolPref("signon.autofillForms");
-        var previousActionOrigin = null;
-        var foundLogins = null;
-
-        // Limit the number of forms we try to fill. If there are too many
-        // forms, just fill some at the beginning and end of the page.
-        const MAX_FORMS = 40; // assumed to be an even number
-        var skip_from = -1, skip_to = -1;
-        if (forms.length > MAX_FORMS) {
-            log("fillDocument limiting number of forms filled to", MAX_FORMS);
-            let chunk_size = MAX_FORMS / 2;
-            skip_from = chunk_size;
-            skip_to   = forms.length - chunk_size;
-        }
-
-        for (var i = 0; i < forms.length; i++) {
-            // Skip some in the middle of the document if there were too many.
-            if (i == skip_from)
-              i = skip_to;
-
-            var form = forms[i];
-
-            // Only the actionOrigin might be changing, so if it's the same
-            // as the last form on the page we can reuse the same logins.
-            var actionOrigin = LoginUtils._getActionOrigin(form);
-            if (actionOrigin != previousActionOrigin) {
-                foundLogins = null;
-                previousActionOrigin = actionOrigin;
-            }
-            log("_fillDocument processing form[", i, "]");
-            foundLogins = this._fillForm(form, autofillForm, false, false, foundLogins)[1];
-        } // foreach form
-    },
-
-
-    /*
      * _fillform
      *
      * Fill the form with login information if we can find it. This will find
@@ -598,11 +562,9 @@ var LoginManagerContent = {
         if (passwordField == null)
             return [false, foundLogins];
 
-        // If the fields are disabled or read-only, there's nothing to do.
-        if (passwordField.disabled || passwordField.readOnly ||
-            usernameField && (usernameField.disabled ||
-                              usernameField.readOnly)) {
-            log("not filling form, login fields disabled");
+        // If the password field is disabled or read-only, there's nothing to do.
+        if (passwordField.disabled || passwordField.readOnly) {
+            log("not filling form, password field disabled or read-only");
             return [false, foundLogins];
         }
 
@@ -682,8 +644,8 @@ var LoginManagerContent = {
         // should be firing notifications if and only if we can fill the form.
         var selectedLogin = null;
 
-        if (usernameField && usernameField.value) {
-            // If username was specified in the form, only fill in the
+        if (usernameField && (usernameField.value || usernameField.disabled || usernameField.readOnly)) {
+            // If username was specified in the field, it's disabled or it's readOnly, only fill in the
             // password if we find a matching login.
             var username = usernameField.value.toLowerCase();
 
@@ -718,7 +680,8 @@ var LoginManagerContent = {
         var didFillForm = false;
         if (selectedLogin && autofillForm && !isFormDisabled) {
             // Fill the form
-            if (usernameField)
+            // Don't modify the username field if it's disabled or readOnly so we preserve its case.
+            if (usernameField && !(usernameField.disabled || usernameField.readOnly))
                 usernameField.value = selectedLogin.username;
             passwordField.value = selectedLogin.password;
             didFillForm = true;

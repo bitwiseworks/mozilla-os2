@@ -30,6 +30,9 @@
 #define NS_FONT_STRETCH_EXTRA_EXPANDED  3
 #define NS_FONT_STRETCH_ULTRA_EXPANDED  4
 
+#define NS_FONT_SMOOTHING_AUTO          0
+#define NS_FONT_SMOOTHING_GRAYSCALE     1
+
 #define NS_FONT_KERNING_AUTO                        0
 #define NS_FONT_KERNING_NONE                        1
 #define NS_FONT_KERNING_NORMAL                      2
@@ -116,6 +119,7 @@ enum {
     NS_FONT_VARIANT_EAST_ASIAN_PROP_WIDTH )
 
 enum {
+    eFeatureLigatures_none,
     eFeatureLigatures_common,
     eFeatureLigatures_no_common,
     eFeatureLigatures_discretionary,
@@ -128,6 +132,7 @@ enum {
     eFeatureLigatures_numFeatures
 };
 
+#define NS_FONT_VARIANT_LIGATURES_NONE              (1 << eFeatureLigatures_none)
 #define NS_FONT_VARIANT_LIGATURES_COMMON            (1 << eFeatureLigatures_common)
 #define NS_FONT_VARIANT_LIGATURES_NO_COMMON         (1 << eFeatureLigatures_no_common)
 #define NS_FONT_VARIANT_LIGATURES_DISCRETIONARY     (1 << eFeatureLigatures_discretionary)

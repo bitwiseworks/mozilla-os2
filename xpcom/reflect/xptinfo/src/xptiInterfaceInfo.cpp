@@ -7,7 +7,6 @@
 
 #include "xptiprivate.h"
 #include "mozilla/XPTInterfaceInfoManager.h"
-#include "nsAtomicRefcnt.h"
 
 using namespace mozilla;
 
@@ -60,8 +59,8 @@ xptiInterfaceEntry::xptiInterfaceEntry(const char* name,
     , mMethodBaseIndex(0)
     , mConstantBaseIndex(0)
     , mTypelib(aTypelib)
-    , mParent(NULL)
-    , mInfo(NULL)
+    , mParent(nullptr)
+    , mInfo(nullptr)
     , mFlags(0)
 {
     memcpy(mName, name, nameLength);
@@ -192,7 +191,7 @@ xptiInterfaceEntry::GetMethodInfo(uint16_t index, const nsXPTMethodInfo** info)
                 mDescriptor->num_methods)
     {
         NS_ERROR("bad param");
-        *info = NULL;
+        *info = nullptr;
         return NS_ERROR_INVALID_ARG;
     }
 
@@ -246,7 +245,7 @@ xptiInterfaceEntry::GetConstant(uint16_t index, const nsXPTConstant** constant)
                 mDescriptor->num_constants)
     {
         NS_PRECONDITION(0, "bad param");
-        *constant = NULL;
+        *constant = nullptr;
         return NS_ERROR_INVALID_ARG;
     }
 
@@ -315,7 +314,7 @@ xptiInterfaceEntry::GetInfoForParam(uint16_t methodIndex,
     if(NS_FAILED(rv))
         return rv;
 
-    *info = entry->InterfaceInfo().get();
+    *info = entry->InterfaceInfo().take();
 
     return NS_OK;
 }
@@ -571,13 +570,13 @@ xptiInterfaceInfo::BuildParent()
                  !mParent &&
                  mEntry->Parent(),
                 "bad BuildParent call");
-    mParent = mEntry->Parent()->InterfaceInfo().get();
+    mParent = mEntry->Parent()->InterfaceInfo().take();
     return true;
 }
 
 /***************************************************************************/
 
-NS_IMPL_QUERY_INTERFACE1(xptiInterfaceInfo, nsIInterfaceInfo)
+NS_IMPL_QUERY_INTERFACE(xptiInterfaceInfo, nsIInterfaceInfo)
 
 xptiInterfaceInfo::xptiInterfaceInfo(xptiInterfaceEntry* entry)
     : mEntry(entry), mParent(nullptr)
@@ -592,19 +591,19 @@ xptiInterfaceInfo::~xptiInterfaceInfo()
     NS_ASSERTION(!mEntry, "bad state in dtor");
 }
 
-nsrefcnt
+MozExternalRefCountType
 xptiInterfaceInfo::AddRef(void)
 {
-    nsrefcnt cnt = NS_AtomicIncrementRefcnt(mRefCnt);
+    nsrefcnt cnt = ++mRefCnt;
     NS_LOG_ADDREF(this, cnt, "xptiInterfaceInfo", sizeof(*this));
     return cnt;
 }
 
-nsrefcnt
+MozExternalRefCountType
 xptiInterfaceInfo::Release(void)
 {
     xptiInterfaceEntry* entry = mEntry;
-    nsrefcnt cnt = NS_AtomicDecrementRefcnt(mRefCnt);
+    nsrefcnt cnt = --mRefCnt;
     NS_LOG_RELEASE(this, cnt, "xptiInterfaceInfo");
     if(!cnt)
     {

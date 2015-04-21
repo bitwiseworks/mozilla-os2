@@ -5,11 +5,13 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 XPIDL_SOURCES += [
-    'nsIDialogCreator.idl',
     'nsIWindowCreator.idl',
     'nsIWindowCreator2.idl',
     'nsIWindowProvider.idl',
 ]
 
-MODULE = 'embed_base'
+XPIDL_MODULE = 'embed_base'
 
+EXPORTS += [
+    'nsEmbedCID.h',
+]

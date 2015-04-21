@@ -7,11 +7,9 @@
 if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'cocoa':
     TEST_DIRS += ['tests']
 
-MODULE = 'dom'
-
 EXPORTS += [
-    'PCOMContentPermissionRequestChild.h',
     'nsICachedFileDescriptorListener.h',
+    'PCOMContentPermissionRequestChild.h',
 ]
 
 EXPORTS.mozilla.dom.ipc += [
@@ -25,6 +23,9 @@ EXPORTS.mozilla.dom += [
     'ContentProcess.h',
     'CrashReporterChild.h',
     'CrashReporterParent.h',
+    'FileDescriptorSetChild.h',
+    'FileDescriptorSetParent.h',
+    'FilePickerParent.h',
     'PermissionMessageUtils.h',
     'StructuredCloneUtils.h',
     'TabChild.h',
@@ -39,21 +40,100 @@ EXPORTS.mozilla += [
     'ProcessPriorityManager.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'AppProcessChecker.cpp',
-    'Blob.cpp',
-    'ContentProcess.cpp',
+    'ColorPickerParent.cpp',
     'ContentParent.cpp',
-    'ContentChild.cpp',
+    'ContentProcess.cpp',
     'CrashReporterParent.cpp',
-    'CrashReporterChild.cpp',
+    'FileDescriptorSetChild.cpp',
+    'FileDescriptorSetParent.cpp',
+    'FilePickerParent.cpp',
     'PermissionMessageUtils.cpp',
     'PreallocatedProcessManager.cpp',
     'ProcessPriorityManager.cpp',
     'StructuredCloneUtils.cpp',
-    'TabParent.cpp',
     'TabChild.cpp',
     'TabContext.cpp',
     'TabMessageUtils.cpp',
+    'TabParent.cpp',
 ]
+
+# Blob.cpp cannot be compiled in unified mode because it triggers a fatal gcc warning.
+# ContentChild.cpp cannot be compiled in unified mode because it forces NSPR logging.
+# CrashReporterChild.cpp cannot be compiled in unified mode because of name clashes
+# in OS X headers.
+SOURCES += [
+    'Blob.cpp',
+    'ContentChild.cpp',
+    'CrashReporterChild.cpp',
+]
+
+IPDL_SOURCES += [
+    'DOMTypes.ipdlh',
+    'PBlob.ipdl',
+    'PBlobStream.ipdl',
+    'PBrowser.ipdl',
+    'PColorPicker.ipdl',
+    'PContent.ipdl',
+    'PContentPermission.ipdlh',
+    'PContentPermissionRequest.ipdl',
+    'PCrashReporter.ipdl',
+    'PDocumentRenderer.ipdl',
+    'PFileDescriptorSet.ipdl',
+    'PFilePicker.ipdl',
+    'PMemoryReportRequest.ipdl',
+    'PTabContext.ipdlh',
+]
+
+FAIL_ON_WARNINGS = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'
+LOCAL_INCLUDES += [
+    '../src/base',
+    '../src/geolocation',
+    '../src/storage',
+    '/chrome/src',
+    '/content/base/src',
+    '/content/media/webspeech/synth/ipc',
+    '/docshell/base',
+    '/dom/base',
+    '/dom/bluetooth',
+    '/dom/bluetooth/ipc',
+    '/dom/devicestorage',
+    '/dom/filesystem',
+    '/dom/fmradio/ipc',
+    '/dom/indexedDB',
+    '/dom/indexedDB/ipc',
+    '/dom/mobilemessage/src/ipc',
+    '/extensions/cookie',
+    '/hal/sandbox',
+    '/js/ipc',
+    '/layout/base',
+    '/netwerk/base/src',
+    '/toolkit/xre',
+    '/uriloader/exthandler',
+    '/widget/xpwidgets',
+    '/xpcom/base',
+    '/xpcom/threads',
+]
+
+DEFINES['BIN_SUFFIX'] = '"%s"' % CONFIG['BIN_SUFFIX']
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gtk2', 'gonk', 'qt'):
+    DEFINES['MOZ_ENABLE_FREETYPE'] = True
+
+for var in ('MOZ_PERMISSIONS', 'MOZ_CHILD_PERMISSIONS'):
+    if CONFIG[var]:
+        DEFINES[var] = True
+
+if CONFIG['ENABLE_TESTS']:
+    DEFINES['ENABLE_TESTS'] = 1
+    LOCAL_INCLUDES += [
+      'ipc/glue',
+    ]
+
+JAR_MANIFESTS += ['jar.mn']
 

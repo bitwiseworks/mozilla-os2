@@ -283,9 +283,9 @@ typedef bool (*NPConstructFunctionPtr)(NPObject *npobj,
     NPObject instance after the invalidate callback has been
     called will result in undefined behavior, even if the native code
     is still retaining those NPObject instances.  (The runtime
-    will typically return immediately, with 0 or NULL, from an attempt
-    to dispatch to a NPObject, but this behavior should not be
-    depended upon.)
+    will typically return immediately, with 0 or NULL, from an
+    attempt to dispatch to a NPObject, but this behavior should not
+    be depended upon.)
 
     The NPEnumerationFunctionPtr function may pass an array of
     NPIdentifiers back to the caller. The callee allocs the memory of

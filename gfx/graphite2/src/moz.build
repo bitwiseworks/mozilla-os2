@@ -4,8 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'graphite2'
-
 # This should contain all of the _PUBLIC_HEADERS from files.mk
 EXPORTS.graphite2 += [
     '../include/graphite2/Font.h',
@@ -15,24 +13,16 @@ EXPORTS.graphite2 += [
 ]
 
 if CONFIG['GNU_CC']:
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'direct_machine.cpp'
     ]
 else:
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'call_machine.cpp'
     ]
 
 # This should contain all of the _SOURCES from files.mk, except *_machine.cpp
-CPP_SOURCES += [
-    'gr_char_info.cpp',
-    'gr_face.cpp',
-    'gr_features.cpp',
-    'gr_font.cpp',
-    'gr_logging.cpp',
-    'gr_segment.cpp',
-    'gr_slot.cpp',
-    'json.cpp',
+UNIFIED_SOURCES += [
     'Bidi.cpp',
     'CachedFace.cpp',
     'CmapCache.cpp',
@@ -43,6 +33,14 @@ CPP_SOURCES += [
     'Font.cpp',
     'GlyphCache.cpp',
     'GlyphFace.cpp',
+    'gr_char_info.cpp',
+    'gr_face.cpp',
+    'gr_features.cpp',
+    'gr_font.cpp',
+    'gr_logging.cpp',
+    'gr_segment.cpp',
+    'gr_slot.cpp',
+    'json.cpp',
     'Justifier.cpp',
     'NameTable.cpp',
     'Pass.cpp',
@@ -57,5 +55,25 @@ CPP_SOURCES += [
     'UtfCodec.cpp',
 ]
 
-LIBRARY_NAME = 'mozgraphite2'
+MSVC_ENABLE_PGO = True
 
+if CONFIG['GKMEDIAS_SHARED_LIBRARY']:
+    NO_VISIBILITY_FLAGS = True
+    DEFINES['GRAPHITE2_EXPORTING'] = True
+else:
+    # tell graphite2 not to export symbols, we'll be linking it directly with
+    # thebes
+    DEFINES['GRAPHITE2_STATIC'] = True
+
+FINAL_LIBRARY = 'gkmedias'
+
+DEFINES['PACKAGE_VERSION'] = '"moz"'
+DEFINES['PACKAGE_BUGREPORT'] = '"http://bugzilla.mozilla.org/"'
+
+# disable features we don't need in the graphite2 code, to reduce code size
+for var in ('GRAPHITE2_NFILEFACE', 'GRAPHITE2_NTRACING', 'GRAPHITE2_NSEGCACHE'):
+    DEFINES[var] = True
+
+# provide a custom header that overrides malloc() and friends,
+# to ensure safe OOM handling
+DEFINES['GRAPHITE2_CUSTOM_HEADER'] = '"MozGrMalloc.h"'

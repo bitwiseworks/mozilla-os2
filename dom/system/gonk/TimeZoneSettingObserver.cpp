@@ -21,6 +21,7 @@
 #include "xpcpublic.h"
 #include "nsContentUtils.h"
 #include "nsCxPusher.h"
+#include "nsPrintfCString.h"
 
 #undef LOG
 #define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Time Zone Setting" , ## args)
@@ -51,7 +52,7 @@ public:
 
   TimeZoneSettingCb() {}
 
-  NS_IMETHOD Handle(const nsAString &aName, const JS::Value &aResult) {
+  NS_IMETHOD Handle(const nsAString &aName, JS::Handle<JS::Value> aResult) {
 
     JSContext *cx = nsContentUtils::GetCurrentJSContext();
     NS_ENSURE_TRUE(cx, NS_OK);
@@ -61,10 +62,24 @@ public:
     // to make settings consistent with system. This usually happens
     // at the very first boot. After that, settings must have a value.
     if (aResult.isNull()) {
-      // Get the current system timezone and convert it to a JS string.
-      nsCString curTimezone = hal::GetTimezone();
-      NS_ConvertUTF8toUTF16 utf16Str(curTimezone);
-      JSString *jsStr = JS_NewUCStringCopyN(cx, utf16Str.get(), utf16Str.Length());
+      // Get the current system time zone offset. Note that we need to
+      // convert the value to a UTC representation in the format of
+      // "UTC{+,-}hh:mm", so that the Gaia end can know how to interpret.
+      // E.g., -480 is "UTC+08:00"; 630 is "UTC-10:30".
+      int32_t timeZoneOffset = hal::GetTimezoneOffset();
+      nsPrintfCString curTimeZone("UTC%+03d:%02d",
+                                  -timeZoneOffset / 60,
+                                  abs(timeZoneOffset) % 60);
+
+      // Convert it to a JS string.
+      NS_ConvertUTF8toUTF16 utf16Str(curTimeZone);
+
+      JS::Rooted<JSString*> jsStr(cx, JS_NewUCStringCopyN(cx,
+                                                          utf16Str.get(),
+                                                          utf16Str.Length()));
+      if (!jsStr) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
 
       // Set the settings based on the current system timezone.
       nsCOMPtr<nsISettingsServiceLock> lock;
@@ -74,8 +89,9 @@ public:
         ERR("Failed to get settingsLock service!");
         return NS_OK;
       }
-      settingsService->CreateLock(getter_AddRefs(lock));
-      lock->Set(TIME_TIMEZONE, STRING_TO_JSVAL(jsStr), nullptr, nullptr);
+      settingsService->CreateLock(nullptr, getter_AddRefs(lock));
+      JS::Rooted<JS::Value> value(cx, JS::StringValue(jsStr));
+      lock->Set(TIME_TIMEZONE, value, nullptr, nullptr);
       return NS_OK;
     }
 
@@ -93,7 +109,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(TimeZoneSettingCb, nsISettingsServiceCallback)
+NS_IMPL_ISUPPORTS(TimeZoneSettingCb, nsISettingsServiceCallback)
 
 TimeZoneSettingObserver::TimeZoneSettingObserver()
 {
@@ -119,7 +135,7 @@ TimeZoneSettingObserver::TimeZoneSettingObserver()
     ERR("Failed to get settingsLock service!");
     return;
   }
-  settingsService->CreateLock(getter_AddRefs(lock));
+  settingsService->CreateLock(nullptr, getter_AddRefs(lock));
   nsCOMPtr<nsISettingsServiceCallback> callback = new TimeZoneSettingCb();
   lock->Get(TIME_TIMEZONE, callback);
 }
@@ -127,12 +143,25 @@ TimeZoneSettingObserver::TimeZoneSettingObserver()
 nsresult TimeZoneSettingObserver::SetTimeZone(const JS::Value &aValue, JSContext *aContext)
 {
   // Convert the JS value to a nsCString type.
+  // The value should be a JS string like "America/Chicago" or "UTC-05:00".
   nsDependentJSString valueStr;
   if (!valueStr.init(aContext, aValue.toString())) {
     ERR("Failed to convert JS value to nsCString");
     return NS_ERROR_FAILURE;
   }
   NS_ConvertUTF16toUTF8 newTimezone(valueStr);
+
+  // Hal expects opposite sign from general notations,
+  // so we need to flip it.
+  if (newTimezone.Find(NS_LITERAL_CSTRING("UTC+")) == 0) {
+    if (!newTimezone.SetCharAt('-', 3)) {
+      return NS_ERROR_FAILURE;
+    }
+  } else if (newTimezone.Find(NS_LITERAL_CSTRING("UTC-")) == 0) {
+    if (!newTimezone.SetCharAt('+', 3)) {
+      return NS_ERROR_FAILURE;
+    }
+  }
 
   // Set the timezone only when the system timezone is not identical.
   nsCString curTimezone = hal::GetTimezone();
@@ -151,12 +180,12 @@ TimeZoneSettingObserver::~TimeZoneSettingObserver()
   }
 }
 
-NS_IMPL_ISUPPORTS1(TimeZoneSettingObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(TimeZoneSettingObserver, nsIObserver)
 
 NS_IMETHODIMP
 TimeZoneSettingObserver::Observe(nsISupports *aSubject,
                      const char *aTopic,
-                     const PRUnichar *aData)
+                     const char16_t *aData)
 {
   if (strcmp(aTopic, MOZSETTINGS_CHANGED) != 0) {
     return NS_OK;
@@ -166,7 +195,8 @@ TimeZoneSettingObserver::Observe(nsISupports *aSubject,
   // so we need to carefully check if we have the one we're interested in.
   //
   // The string that we're interested in will be a JSON string that looks like:
-  // {"key":"time.timezone","value":"America/Chicago"}
+  // {"key":"time.timezone","value":"America/Chicago"} or
+  // {"key":"time.timezone","value":"UTC-05:00"}
 
   AutoSafeJSContext cx;
 
@@ -179,21 +209,21 @@ TimeZoneSettingObserver::Observe(nsISupports *aSubject,
   }
 
   // Get the key, which should be the JS string "time.timezone".
-  JSObject &obj(val.toObject());
-  JS::Value key;
-  if (!JS_GetProperty(cx, &obj, "key", &key) ||
+  JS::Rooted<JSObject*> obj(cx, &val.toObject());
+  JS::Rooted<JS::Value> key(cx);
+  if (!JS_GetProperty(cx, obj, "key", &key) ||
       !key.isString()) {
     return NS_OK;
   }
-  JSBool match;
+  bool match;
   if (!JS_StringEqualsAscii(cx, key.toString(), TIME_TIMEZONE, &match) ||
-      match != JS_TRUE) {
+      !match) {
     return NS_OK;
   }
 
   // Get the value, which should be a JS string like "America/Chicago".
-  JS::Value value;
-  if (!JS_GetProperty(cx, &obj, "value", &value) ||
+  JS::Rooted<JS::Value> value(cx);
+  if (!JS_GetProperty(cx, obj, "value", &value) ||
       !value.isString()) {
     return NS_OK;
   }

@@ -6,15 +6,13 @@
 #ifndef GFX_RECT_H
 #define GFX_RECT_H
 
-#include "nsAlgorithm.h"
 #include "gfxTypes.h"
 #include "gfxPoint.h"
-#include "gfxCore.h"
 #include "nsDebug.h"
+#include "nsRect.h"
 #include "mozilla/gfx/BaseMargin.h"
 #include "mozilla/gfx/BaseRect.h"
 #include "mozilla/Assertions.h"
-#include "nsRect.h"
 
 struct gfxMargin : public mozilla::gfx::BaseMargin<gfxFloat, gfxMargin> {
   typedef mozilla::gfx::BaseMargin<gfxFloat, gfxMargin> Super;
@@ -96,7 +94,7 @@ struct gfxRect :
             case NS_SIDE_BOTTOM: return BottomRight();
             case NS_SIDE_LEFT: return BottomLeft();
         }
-        MOZ_NOT_REACHED("Incomplet switch");
+        MOZ_CRASH("Incomplete switch");
     }
 
     gfxPoint CWCorner(mozilla::css::Side side) const {
@@ -106,7 +104,7 @@ struct gfxRect :
             case NS_SIDE_BOTTOM: return BottomLeft();
             case NS_SIDE_LEFT: return TopLeft();
         }
-        MOZ_NOT_REACHED("Incomplet switch");
+        MOZ_CRASH("Incomplete switch");
     }
 
     /* Conditions this border to Cairo's max coordinate space.
@@ -171,6 +169,12 @@ struct gfxCornerSizes {
 
     gfxSize& operator[] (mozilla::css::Corner index) {
         return sizes[index];
+    }
+
+    void Scale(gfxFloat aXScale, gfxFloat aYScale)
+    {
+        for (int i = 0; i < NS_NUM_CORNERS; i++)
+            sizes[i].Scale(aXScale, aYScale);
     }
 
     const gfxSize TopLeft() const { return sizes[NS_CORNER_TOP_LEFT]; }

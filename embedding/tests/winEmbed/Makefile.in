@@ -27,48 +27,11 @@
 #
 # ***** END LICENSE BLOCK *****
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-XPI_NAME	= winembed
-
-RESFILE		= winEmbed.res
-
 LIBS = \
-	$(DEPTH)/profile/dirserviceprovider/standalone/$(LIB_PREFIX)profdirserviceprovidersa_s.$(LIB_SUFFIX) \
+	$(DEPTH)/profile/dirserviceprovider/src/$(LIB_PREFIX)profdirserviceprovidersa_s.$(LIB_SUFFIX) \
 	$(XPCOM_STANDALONE_GLUE_LDOPTS) \
 	$(NULL)
 
-LOCAL_INCLUDES	= -I$(srcdir)
-
-DEFINES += -DXPCOM_GLUE
-STL_FLAGS=
-
 OS_LIBS		+= $(call EXPAND_LIBNAME,ole32 comdlg32 shell32 version)
 
-include $(topsrcdir)/config/config.mk
-
 include $(topsrcdir)/config/rules.mk
-
-#
-# Control the default heap size.
-# This is the heap returned by GetProcessHeap().
-# As we use the CRT heap, the default size is too large and wastes VM.
-#
-# The default heap size is 1MB on Win32.
-# The heap will grow if need be.
-#
-# Set it to 256k.  See bug 127069.
-#
-ifndef GNU_CC
-LDFLAGS += /HEAP:0x40000
-endif
-
-# Get rid of console window
-ifdef GNU_CC
-LDFLAGS += -mwindows
-endif

@@ -22,8 +22,6 @@
 
 using namespace mozilla;
  
-static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
-
 /* Object Identifier constants */
 #define CONST_OID static const unsigned char
 #define MICROSOFT_OID 0x2b, 0x6, 0x1, 0x4, 0x1, 0x82, 0x37
@@ -615,7 +613,7 @@ GetOIDText(SECItem *oid, nsINSSComponent *nssComponent, nsAString &text)
     if (NS_FAILED(rv))
       return rv;
 
-    const PRUnichar *params[1] = {text2.get()};
+    const char16_t *params[1] = {text2.get()};
     rv = nssComponent->PIPBundleFormatStringFromName("CertDumpDefOID",
                                                      params, 1, text);
   }
@@ -648,7 +646,7 @@ ProcessRawBytes(nsINSSComponent *nssComponent, SECItem *data,
     bytelen.AppendInt(data->len);
     bitlen.AppendInt(data->len*8);
   
-    const PRUnichar *params[2] = {bytelen.get(), bitlen.get()};
+    const char16_t *params[2] = {bytelen.get(), bitlen.get()};
     nsresult rv = nssComponent->PIPBundleFormatStringFromName("CertDumpRawBytesHeader",
                                                               params, 2, text);
     if (NS_FAILED(rv))
@@ -813,7 +811,7 @@ ProcessBasicConstraints(SECItem  *extData,
       nssComponent->GetPIPNSSBundleString("CertDumpPathLenUnlimited", depth);
     else
       depth.AppendInt(value.pathLenConstraint);
-    const PRUnichar *params[1] = {depth.get()};
+    const char16_t *params[1] = {depth.get()};
     rv2 = nssComponent->PIPBundleFormatStringFromName("CertDumpPathLen",
                                                       params, 1, local);
     if (NS_FAILED(rv2))
@@ -883,7 +881,7 @@ ProcessRDN(CERTRDN* rdn, nsAString &finalString, nsINSSComponent *nssComponent)
   nsString avavalue;
   nsString type;
   nsAutoString temp;
-  const PRUnichar *params[2];
+  const char16_t *params[2];
 
   avas = rdn->avas;
   while ((ava = *avas++) != 0) {
@@ -925,7 +923,7 @@ ProcessRDN(CERTRDN* rdn, nsAString &finalString, nsINSSComponent *nssComponent)
 }
 
 static nsresult
-ProcessName(CERTName *name, nsINSSComponent *nssComponent, PRUnichar **value)
+ProcessName(CERTName *name, nsINSSComponent *nssComponent, char16_t **value)
 {
   CERTRDN** rdns;
   CERTRDN** rdn;
@@ -942,8 +940,8 @@ ProcessName(CERTName *name, nsINSSComponent *nssComponent, PRUnichar **value)
   lastRdn = rdns;
   while (*lastRdn) lastRdn++;
   // The above whille loop will put us at the last member
-  // of the array which is a NULL pointer.  So let's back
-  // up one spot so that we have the last non-NULL entry in 
+  // of the array which is a nullptr pointer.  So let's back
+  // up one spot so that we have the last non-nullptr entry in 
   // the array in preparation for traversing the 
   // RDN's (Relative Distinguished Name) in reverse oder.
   lastRdn--;
@@ -1754,7 +1752,7 @@ ProcessSECAlgorithmID(SECAlgorithmID *algID,
 }
 
 static nsresult
-ProcessTime(PRTime dispTime, const PRUnichar *displayName, 
+ProcessTime(PRTime dispTime, const char16_t *displayName, 
             nsIASN1Sequence *parentSequence)
 {
   nsresult rv;
@@ -1833,7 +1831,7 @@ ProcessSubjectPublicKeyInfo(CERTSubjectPublicKeyInfo *spki,
                          false);
          ProcessRawBytes(nssComponent, &key->u.rsa.publicExponent, data2,
                          false);
-         const PRUnichar *params[4] = {length1.get(), data1.get(), 
+         const char16_t *params[4] = {length1.get(), data1.get(), 
                                        length2.get(), data2.get()};
          nssComponent->PIPBundleFormatStringFromName("CertDumpRSATemplate",
                                                      params, 4, text);
@@ -1856,7 +1854,7 @@ ProcessSubjectPublicKeyInfo(CERTSubjectPublicKeyInfo *spki,
           int i_pv = DER_GetInteger(&ecpk.publicValue);
           s_pv.AppendInt(i_pv);
         }
-        const PRUnichar *params[] = {s_fsl.get(), s_bpol.get(), s_pv.get()};
+        const char16_t *params[] = {s_fsl.get(), s_bpol.get(), s_pv.get()};
         nssComponent->PIPBundleFormatStringFromName("CertDumpECTemplate",
                                                     params, 3, text);
         break;
@@ -2090,7 +2088,7 @@ nsNSSCertificate::CreateTBSCertificateASN1Struct(nsIASN1Sequence **retSequence,
   if (mCert->extensions) {
     SECOidTag ev_oid_tag = SEC_OID_UNKNOWN;
 
-#ifndef NSS_NO_LIBPKIX
+#ifndef MOZ_NO_EV_CERTS
     bool validEV;
     rv = hasValidEVOidTag(ev_oid_tag, validEV);
     if (NS_FAILED(rv))
@@ -2110,22 +2108,24 @@ nsNSSCertificate::CreateTBSCertificateASN1Struct(nsIASN1Sequence **retSequence,
 }
 
 nsresult
-nsNSSCertificate::CreateASN1Struct()
+nsNSSCertificate::CreateASN1Struct(nsIASN1Object** aRetVal)
 {
+  static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
     return NS_ERROR_NOT_AVAILABLE;
 
   nsCOMPtr<nsIASN1Sequence> sequence = new nsNSSASN1Sequence();
 
-  mASN1Structure = sequence; 
-
   nsCOMPtr<nsIMutableArray> asn1Objects;
   sequence->GetASN1Objects(getter_AddRefs(asn1Objects));
   nsXPIDLCString title;
   GetWindowTitle(getter_Copies(title));
   
-  mASN1Structure->SetDisplayName(NS_ConvertUTF8toUTF16(title));
+  sequence->SetDisplayName(NS_ConvertUTF8toUTF16(title));
+  sequence.forget(aRetVal);
+
   // This sequence will be contain the tbsCertificate, signatureAlgorithm,
   // and signatureValue.
   nsresult rv;
@@ -2188,6 +2188,8 @@ getCertType(CERTCertificate *cert)
 CERTCertNicknames *
 getNSSCertNicknamesFromCertList(CERTCertList *certList)
 {
+  static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+
   nsresult rv;
 
   nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));

@@ -34,8 +34,6 @@ skip-if(B2G) == background-image-rect-1svg.html  lime100x100-ref.html # bug 7734
 == border-image-simple-2.html       lime100x100-ref.html
 
 # Test for canvas "drawImage" method
-# NOTE: The canvas reftests that involve scaling currently fail with fuzziness
-# on various edges, as noted below. These will be fixed in followup bugs.
 == canvas-drawImage-simple-1a.html lime100x100-ref.html
 == canvas-drawImage-simple-1b.html lime100x100-ref.html
 
@@ -43,11 +41,12 @@ skip-if(B2G) == canvas-drawImage-scale-1a.html lime100x100-ref.html
 skip-if(B2G) == canvas-drawImage-scale-1b.html lime100x100-ref.html
 skip-if(B2G) == canvas-drawImage-scale-1c.html lime100x100-ref.html
 
-fails == canvas-drawImage-scale-2a.html canvas-drawImage-scale-2-ref.html # XXX all edges fuzzy
-fails == canvas-drawImage-scale-2b.html canvas-drawImage-scale-2-ref.html # XXX all edges fuzzy
+# Fuzzyness and fails for scaling should be fixed by bug 941467
+fuzzy(1,2) fails-if(Android&&AndroidVersion<15&&AndroidVersion!=10) == canvas-drawImage-scale-2a.html canvas-drawImage-scale-2-ref.html
+fails == canvas-drawImage-scale-2b.html canvas-drawImage-scale-2-ref.html
 
 skip-if(B2G) == canvas-drawImage-slice-1a.html lime100x100-ref.html
-fails-if(!azureQuartz) == canvas-drawImage-slice-1b.html lime100x100-ref.html # XXX all edges fuzzy
+== canvas-drawImage-slice-1b.html lime100x100-ref.html
 
 == canvas-drawImage-origin-clean-1.html lime100x100-ref.html
 
@@ -66,7 +65,7 @@ random == img-and-image-1.html img-and-image-1-ref.svg # bug 645267
 
 # More complex <img> tests
 == img-blobURI-1.html lime100x100-ref.html
-random-if(/^Windows\x20NT\x205\.1/.test(http.oscpu)) == img-blobURI-2.html lime100x100-ref.html
+random == img-blobURI-2.html lime100x100-ref.html
 == img-content-outside-viewBox-1.html img-content-outside-viewBox-1-ref.html
 == img-display-none-1.html about:blank
 == img-dyn-1.html img-dyn-1-ref.html
@@ -164,3 +163,60 @@ HTTP == svg-stylesheet-external-1.html blue100x100.svg
 # but the test case would be much simpler. This should be switched
 # over to use media fragments once bug 790640 lands.
 skip-if(B2G) fuzzy(2,1) == svg-border-image-repaint-1.html svg-border-image-repaint-1-ref.html
+
+# Tests for image-orientation with a viewbox and an intrinsic size:
+== image-orientation-viewbox-and-size.html?0        image-orientation-ref.html?0
+== image-orientation-viewbox-and-size.html?90       image-orientation-ref.html?90
+== image-orientation-viewbox-and-size.html?180      image-orientation-ref.html?180
+== image-orientation-viewbox-and-size.html?270      image-orientation-ref.html?270
+== image-orientation-viewbox-and-size.html?0&flip   image-orientation-ref.html?0&flip
+== image-orientation-viewbox-and-size.html?90&flip  image-orientation-ref.html?90&flip
+== image-orientation-viewbox-and-size.html?180&flip image-orientation-ref.html?180&flip
+== image-orientation-viewbox-and-size.html?270&flip image-orientation-ref.html?270&flip
+
+# Tests for image-orientation with a viewbox and no intrinsic size:
+== image-orientation-viewbox-no-size.html?0        image-orientation-ref.html?0
+== image-orientation-viewbox-no-size.html?90       image-orientation-ref.html?90
+== image-orientation-viewbox-no-size.html?180      image-orientation-ref.html?180
+== image-orientation-viewbox-no-size.html?270      image-orientation-ref.html?270
+== image-orientation-viewbox-no-size.html?0&flip   image-orientation-ref.html?0&flip
+== image-orientation-viewbox-no-size.html?90&flip  image-orientation-ref.html?90&flip
+== image-orientation-viewbox-no-size.html?180&flip image-orientation-ref.html?180&flip
+== image-orientation-viewbox-no-size.html?270&flip image-orientation-ref.html?270&flip
+
+# Tests for image-orientation with no viewbox and an intrinsic size:
+== image-orientation-no-viewbox-and-size.html?0        image-orientation-ref.html?0
+== image-orientation-no-viewbox-and-size.html?90       image-orientation-ref.html?90
+== image-orientation-no-viewbox-and-size.html?180      image-orientation-ref.html?180
+== image-orientation-no-viewbox-and-size.html?270      image-orientation-ref.html?270
+== image-orientation-no-viewbox-and-size.html?0&flip   image-orientation-ref.html?0&flip
+== image-orientation-no-viewbox-and-size.html?90&flip  image-orientation-ref.html?90&flip
+== image-orientation-no-viewbox-and-size.html?180&flip image-orientation-ref.html?180&flip
+== image-orientation-no-viewbox-and-size.html?270&flip image-orientation-ref.html?270&flip
+
+# Tests for image-orientation with no viewbox and no intrinsic size:
+== image-orientation-no-viewbox-no-size.html?0        image-orientation-ref.html?0
+== image-orientation-no-viewbox-no-size.html?90       image-orientation-ref.html?90
+== image-orientation-no-viewbox-no-size.html?180      image-orientation-ref.html?180
+== image-orientation-no-viewbox-no-size.html?270      image-orientation-ref.html?270
+== image-orientation-no-viewbox-no-size.html?0&flip   image-orientation-ref.html?0&flip
+== image-orientation-no-viewbox-no-size.html?90&flip  image-orientation-ref.html?90&flip
+== image-orientation-no-viewbox-no-size.html?180&flip image-orientation-ref.html?180&flip
+== image-orientation-no-viewbox-no-size.html?270&flip image-orientation-ref.html?270&flip
+
+# Test that 'image-orientation: from-image' has no effect, since SVGs don't have EXIF data.
+== image-orientation-viewbox-and-size.html?from-image  image-orientation-ref.html?0
+== image-orientation-viewbox-no-size.html?from-image   image-orientation-ref.html?0
+
+# Sanity checks for the image-orientation tests. Ensures that the various
+# combinations of rotations and flips actually look different from each other.
+!= image-orientation-ref.html?0    image-orientation-ref.html?90
+!= image-orientation-ref.html?0    image-orientation-ref.html?180
+!= image-orientation-ref.html?0    image-orientation-ref.html?270
+!= image-orientation-ref.html?90   image-orientation-ref.html?180
+!= image-orientation-ref.html?90   image-orientation-ref.html?270
+!= image-orientation-ref.html?180  image-orientation-ref.html?270
+!= image-orientation-ref.html?0    image-orientation-ref.html?0&flip
+!= image-orientation-ref.html?90   image-orientation-ref.html?90&flip
+!= image-orientation-ref.html?180  image-orientation-ref.html?180&flip
+!= image-orientation-ref.html?270  image-orientation-ref.html?270&flip

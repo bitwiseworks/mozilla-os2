@@ -4,6 +4,8 @@
 
 #include "nsISupports.idl"
 
+interface nsIDocShell;
+interface nsIDocument;
 interface nsIDOMDocument;
 interface nsISHEntry;
 interface nsIPrintSettings;
@@ -11,7 +13,6 @@ interface nsIPrintSettings;
 
 %{ C++
 class nsIWidget;
-class nsIDocument;
 struct nsIntRect;
 class nsIPresShell;
 class nsPresContext;
@@ -20,23 +21,22 @@ class nsDOMNavigationTiming;
 %}
 
 [ptr] native nsIWidgetPtr(nsIWidget);
-[ptr] native nsIDocumentPtr(nsIDocument);
 [ref] native nsIntRectRef(nsIntRect);
 [ptr] native nsIPresShellPtr(nsIPresShell);
 [ptr] native nsPresContextPtr(nsPresContext);
 [ptr] native nsViewPtr(nsView);
 [ptr] native nsDOMNavigationTimingPtr(nsDOMNavigationTiming);
 
-[scriptable, builtinclass, uuid(b9d92b8b-5623-4079-ae11-36bb341f322e)]
+[scriptable, builtinclass, uuid(0cb321bd-5b38-4586-8fcd-d43b366886fb)]
 interface nsIContentViewer : nsISupports
 {
 
   [noscript] void init(in nsIWidgetPtr aParentWidget,
                        [const] in nsIntRectRef aBounds);
 
-  attribute nsISupports container;
+  attribute nsIDocShell container;
 
-  void loadStart(in nsISupports aDoc);
+  [noscript,notxpcom,nostdcall] void loadStart(in nsIDocument aDoc);
   void loadComplete(in nsresult aStatus);
 
   /**
@@ -48,6 +48,25 @@ interface nsIContentViewer : nsISupports
    *        ignored.
    */
   boolean permitUnload([optional] in boolean aCallerClosesWindow);
+
+  /**
+   * Exposes whether we're blocked in a call to permitUnload.
+   */
+  readonly attribute boolean inPermitUnload;
+
+  /**
+   * As above, but this passes around the aShouldPrompt argument to keep
+   * track of whether the user has responded to a prompt.
+   * Used internally by the scriptable version to ensure we only prompt once.
+   */
+  [noscript,nostdcall] boolean permitUnloadInternal(in boolean aCallerClosesWindow,
+                                                    inout boolean aShouldPrompt);
+
+  /**
+   * Exposes whether we're in the process of firing the beforeunload event.
+   * In this case, the corresponding docshell will not allow navigation.
+   */
+  readonly attribute boolean beforeUnloadFiring;
 
   /**
    * Works in tandem with permitUnload, if the caller decides not to close the
@@ -92,7 +111,7 @@ interface nsIContentViewer : nsISupports
   /**
    * Returns DOMDocument as nsIDocument and without addrefing.
    */
-  [noscript,notxpcom] nsIDocumentPtr getDocument();
+  [noscript,notxpcom] nsIDocument getDocument();
 
   [noscript] void getBounds(in nsIntRectRef aBounds);
   [noscript] void setBounds([const] in nsIntRectRef aBounds);
@@ -163,7 +182,7 @@ interface nsIContentViewer : nsISupports
   [noscript] readonly attribute nsIPresShellPtr presShell;
   [noscript] readonly attribute nsPresContextPtr presContext;
   // aDocument must not be null.
-  [noscript] void setDocumentInternal(in nsIDocumentPtr aDocument,
+  [noscript] void setDocumentInternal(in nsIDocument aDocument,
                                       in boolean aForceReuseInnerWindow);
   /**
    * Find the view to use as the container view for MakeWindow. Returns

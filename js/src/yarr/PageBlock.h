@@ -30,9 +30,8 @@
 #ifndef yarr_PageBlock_h
 #define yarr_PageBlock_h
 
-#include "mozilla/StandardInteger.h"
-
 #include <stddef.h>
+#include <stdint.h>
 
 namespace WTF {
 
@@ -46,7 +45,7 @@ public:
     PageBlock();
     PageBlock(const PageBlock&);
     PageBlock(void*, size_t);
-    
+
     void* base() const { return m_base; }
     size_t size() const { return m_size; }
 

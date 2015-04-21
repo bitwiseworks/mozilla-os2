@@ -7,7 +7,7 @@ Components.utils.import("resource://gre/modules/Services.jsm");
 // restartManager() mucks with XPIProvider.jsm importing, so we hack around.
 this.__defineGetter__("XPIProvider", function () {
   let scope = {};
-  return Components.utils.import("resource://gre/modules/XPIProvider.jsm", scope)
+  return Components.utils.import("resource://gre/modules/addons/XPIProvider.jsm", scope)
                    .XPIProvider;
 });
 
@@ -26,6 +26,9 @@ add_test(function test_getter_and_setter() {
   // Our test add-on requires a restart.
   let listener = {
     onInstallEnded: function onInstallEnded() {
+     AddonManager.removeInstallListener(listener);
+     // never restart directly inside an onInstallEnded handler!
+     do_execute_soon(function getter_setter_install_ended() {
       restartManager();
 
       AddonManager.getAddonByID(addonId, function(addon) {
@@ -46,10 +49,9 @@ add_test(function test_getter_and_setter() {
           do_check_eq(newGUID, newAddon.syncGUID);
         });
 
-        AddonManager.removeInstallListener(listener);
-
         run_next_test();
       });
+     });
     }
   };
 
@@ -80,10 +82,11 @@ add_test(function test_error_on_duplicate_syncguid_insert() {
       installCount++;
 
       if (installCount == installNames.length) {
-        AddonManager.removeInstallListener(listener);
+       AddonManager.removeInstallListener(listener);
+       do_execute_soon(function duplicate_syncguid_install_ended() {
         restartManager();
 
-        AddonManager.getAddonsByIDs(installIDs, function(addons) {
+        AddonManager.getAddonsByIDs(installIDs, callback_soon(function(addons) {
           let initialGUID = addons[1].syncGUID;
 
           try {
@@ -91,8 +94,7 @@ add_test(function test_error_on_duplicate_syncguid_insert() {
             do_throw("Should not get here.");
           }
           catch (e) {
-            do_check_eq(e.result,
-                        Components.results.NS_ERROR_STORAGE_CONSTRAINT);
+            do_check_true(e.message.startsWith("Addon sync GUID conflict"));
             restartManager();
 
             AddonManager.getAddonByID(installIDs[1], function(addon) {
@@ -100,7 +102,8 @@ add_test(function test_error_on_duplicate_syncguid_insert() {
               run_next_test();
             });
           }
-        });
+        }));
+       });
       }
     }
   };

@@ -20,7 +20,7 @@ this.EXPORTED_SYMBOLS = [
 
 Cu.import("resource://testing-common/httpd.js");
 Cu.import("resource://services-common/async.js");
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-common/utils.js");
 
 const STORAGE_HTTP_LOGGER = "Services.Common.Test.Server";
@@ -74,7 +74,7 @@ this.ServerBSO = function ServerBSO(id, payload, modified) {
     throw new Error("BSO ID is invalid: " + id);
   }
 
-  this._log = Log4Moz.repository.getLogger(STORAGE_HTTP_LOGGER);
+  this._log = Log.repository.getLogger(STORAGE_HTTP_LOGGER);
 
   this.id = id;
   if (!payload) {
@@ -111,7 +111,7 @@ ServerBSO.prototype = {
     return obj;
   },
 
-  delete: function delete() {
+  delete: function delete_() {
     this.deleted = true;
 
     delete this.payload;
@@ -287,7 +287,7 @@ this.StorageServerCollection =
   CommonUtils.ensureMillisecondsTimestamp(timestamp);
   this._timestamp = timestamp;
 
-  this._log = Log4Moz.repository.getLogger(STORAGE_HTTP_LOGGER);
+  this._log = Log.repository.getLogger(STORAGE_HTTP_LOGGER);
 }
 StorageServerCollection.prototype = {
   BATCH_MAX_COUNT: 100,         // # of records.
@@ -571,7 +571,7 @@ StorageServerCollection.prototype = {
     return {success: success, failed: failed};
   },
 
-  delete: function delete(options) {
+  delete: function delete_(options) {
     options = options || {};
 
     // Protocol 2.0 only allows the "ids" query string argument.
@@ -872,7 +872,7 @@ this.StorageServer = function StorageServer(callback) {
   this.started      = false;
   this.users        = {};
   this.requestCount = 0;
-  this._log         = Log4Moz.repository.getLogger(STORAGE_HTTP_LOGGER);
+  this._log         = Log.repository.getLogger(STORAGE_HTTP_LOGGER);
 
   // Install our own default handler. This allows us to mess around with the
   // whole URL space.
@@ -882,7 +882,6 @@ this.StorageServer = function StorageServer(callback) {
 StorageServer.prototype = {
   DEFAULT_QUOTA: 1024 * 1024, // # bytes.
 
-  port:   8080,
   server: null,    // HttpServer.
   users:  null,    // Map of username => {collections, password}.
 
@@ -898,8 +897,8 @@ StorageServer.prototype = {
    * Start the StorageServer's underlying HTTP server.
    *
    * @param port
-   *        The numeric port on which to start. A falsy value implies the
-   *        default (8080).
+   *        The numeric port on which to start. A falsy value implies to
+   *        select any available port.
    * @param cb
    *        A callback function (of no arguments) which is invoked after
    *        startup.
@@ -909,11 +908,14 @@ StorageServer.prototype = {
       this._log.warn("Warning: server already started on " + this.port);
       return;
     }
-    if (port) {
-      this.port = port;
+    if (!port) {
+      port = -1;
     }
+    this.port = port;
+
     try {
       this.server.start(this.port);
+      this.port = this.server.identity.primaryPort;
       this.started = true;
       if (cb) {
         cb();
@@ -932,10 +934,10 @@ StorageServer.prototype = {
    * Start the server synchronously.
    *
    * @param port
-   *        The numeric port on which to start. A falsy value implies the
-   *        default (8080).
+   *        The numeric port on which to start. The default is to choose
+   *        any available port.
    */
-  startSynchronous: function startSynchronous(port) {
+  startSynchronous: function startSynchronous(port=-1) {
     let cb = Async.makeSpinningCallback();
     this.start(port, cb);
     cb.wait();

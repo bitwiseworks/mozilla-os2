@@ -11,19 +11,18 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/ErrorResult.h"
 #include "nsWrapperCache.h"
+#include "nsSVGElement.h"
 
-class nsSVGElement;
 class nsSVGViewBox;
 
 namespace mozilla {
 namespace dom {
 
-class SVGAnimatedRect MOZ_FINAL : public nsISupports,
-                                  public nsWrapperCache
+class SVGAnimatedRect MOZ_FINAL : public nsWrapperCache
 {
 public:
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(SVGAnimatedRect)
+  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(SVGAnimatedRect)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(SVGAnimatedRect)
 
   SVGAnimatedRect(nsSVGViewBox* aVal, nsSVGElement* aSVGElement);
 
@@ -34,8 +33,7 @@ public:
     return mSVGElement;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   already_AddRefed<SVGIRect> GetBaseVal();
 

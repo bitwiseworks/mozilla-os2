@@ -5,6 +5,7 @@
 
 #include "MetroApp.h"
 #include "MetroWidget.h"
+#include "mozilla/IOInterposer.h"
 #include "mozilla/widget/AudioSession.h"
 #include "nsIRunnable.h"
 #include "MetroUtils.h"
@@ -12,6 +13,7 @@
 #include "nsICommandLineRunner.h"
 #include "FrameworkView.h"
 #include "nsAppDirectoryServiceDefs.h"
+#include "GeckoProfiler.h"
 #include <shellapi.h>
 
 using namespace ABI::Windows::ApplicationModel;
@@ -21,11 +23,14 @@ using namespace ABI::Windows::System;
 using namespace ABI::Windows::Foundation;
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
+using namespace mozilla::widget;
 
 // Metro specific XRE methods we call from here on an
 // appropriate thread.
 extern nsresult XRE_metroStartup(bool runXREMain);
 extern void XRE_metroShutdown();
+
+static const char* gGeckoThreadName = "GeckoMain";
 
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* gWindowsLog;
@@ -38,6 +43,7 @@ namespace winrt {
 ComPtr<FrameworkView> sFrameworkView;
 ComPtr<MetroApp> sMetroApp;
 ComPtr<ICoreApplication> sCoreApp;
+bool MetroApp::sGeckoShuttingDown = false;
 
 ////////////////////////////////////////////////////
 // IFrameworkViewSource impl.
@@ -46,12 +52,17 @@ ComPtr<ICoreApplication> sCoreApp;
 HRESULT
 MetroApp::CreateView(ABI::Windows::ApplicationModel::Core::IFrameworkView **aViewProvider)
 {
-  // This entry point is called on the metro main thread, but the thread won't be
-  // recognized as such until after Initialize is called below. XPCOM has not gone
-  // through startup at this point.
+  // This entry point is called on the metro main thread, but the thread won't
+  // be recognized as such until after Run() is called below. XPCOM has not
+  // gone through startup at this point.
+
+  // Note that we create the view which creates our native window for us. The
+  // gecko widget gets created by gecko, and the two get hooked up later in
+  // MetroWidget::Create().
 
   LogFunction();
 
+  sFrameworkView = Make<FrameworkView>(this);
   sFrameworkView.Get()->AddRef();
   *aViewProvider = sFrameworkView.Get();
   return !sFrameworkView ? E_FAIL : S_OK;
@@ -60,28 +71,19 @@ MetroApp::CreateView(ABI::Windows::ApplicationModel::Core::IFrameworkView **aVie
 ////////////////////////////////////////////////////
 // MetroApp impl.
 
-// called after FrameworkView::Run() drops into the event dispatch loop
 void
-MetroApp::Initialize()
+MetroApp::Run()
 {
-  HRESULT hr;
   LogThread();
 
-  static bool xpcomInit;
-  if (!xpcomInit) {
-    xpcomInit = true;
-    Log("XPCOM startup initialization began");
-    nsresult rv = XRE_metroStartup(true);
-    Log("XPCOM startup initialization complete");
-    if (NS_FAILED(rv)) {
-      Log("XPCOM startup initialization failed, bailing. rv=%X", rv);
-      CoreExit();
-      return;
-    }
-  }
+  // Name this thread for debugging and register it with the profiler
+  // and IOInterposer as the main gecko thread.
+  char aLocal;
+  PR_SetCurrentThreadName(gGeckoThreadName);
+  profiler_register_thread(gGeckoThreadName, &aLocal);
+  IOInterposer::RegisterCurrentThread(true);
 
-  sFrameworkView->SetupContracts();
-
+  HRESULT hr;
   hr = sCoreApp->add_Suspending(Callback<__FIEventHandler_1_Windows__CApplicationModel__CSuspendingEventArgs_t>(
     this, &MetroApp::OnSuspending).Get(), &mSuspendEvent);
   AssertHRESULT(hr);
@@ -90,17 +92,21 @@ MetroApp::Initialize()
     this, &MetroApp::OnResuming).Get(), &mResumeEvent);
   AssertHRESULT(hr);
 
-  mozilla::widget::StartAudioSession();
+  WinUtils::Log("Calling XRE_metroStartup.");
+  nsresult rv = XRE_metroStartup(true);
+  WinUtils::Log("Exiting XRE_metroStartup.");
+  if (NS_FAILED(rv)) {
+    WinUtils::Log("XPCOM startup initialization failed, bailing. rv=%X", rv);
+    CoreExit();
+  }
 }
 
 // Free all xpcom related resources before calling the xre shutdown call.
 // Must be called on the metro main thread. Currently called from appshell.
 void
-MetroApp::ShutdownXPCOM()
+MetroApp::Shutdown()
 {
   LogThread();
-
-  mozilla::widget::StopAudioSession();
 
   if (sCoreApp) {
     sCoreApp->remove_Suspending(mSuspendEvent);
@@ -108,17 +114,23 @@ MetroApp::ShutdownXPCOM()
   }
 
   if (sFrameworkView) {
-    sFrameworkView->ShutdownXPCOM();
+    sFrameworkView->Shutdown();
   }
+
+  MetroApp::sGeckoShuttingDown = true;
 
   // Shut down xpcom
   XRE_metroShutdown();
+
+  // Unhook this thread from the profiler
+  profiler_unregister_thread();
 }
 
 // Request a shutdown of the application
 void
 MetroApp::CoreExit()
 {
+  LogFunction();
   HRESULT hr;
   ComPtr<ICoreApplicationExit> coreExit;
   HStringReference className(RuntimeClass_Windows_ApplicationModel_Core_CoreApplication);
@@ -127,6 +139,31 @@ MetroApp::CoreExit()
   if (SUCCEEDED(hr)) {
     coreExit->Exit();
   }
+}
+
+void
+MetroApp::ActivateBaseView()
+{
+  if (sFrameworkView) {
+    sFrameworkView->ActivateView();
+  }
+}
+
+/*
+ * TBD: when we support multiple widgets, we'll need a way to sync up the view
+ * created in CreateView with the widget gecko creates. Currently we only have
+ * one view (sFrameworkView) and one main widget.
+ */
+void
+MetroApp::SetWidget(MetroWidget* aPtr)
+{
+  LogThread();
+
+  NS_ASSERTION(aPtr, "setting null base widget?");
+
+  // Both of these calls AddRef the ptr we pass in
+  aPtr->SetView(sFrameworkView.Get());
+  sFrameworkView->SetWidget(aPtr);
 }
 
 ////////////////////////////////////////////////////
@@ -152,21 +189,9 @@ HRESULT
 MetroApp::OnAsyncTileCreated(ABI::Windows::Foundation::IAsyncOperation<bool>* aOperation,
                              AsyncStatus aStatus)
 {
-  Log("Async operation status: %d", aStatus);
+  WinUtils::Log("Async operation status: %d", aStatus);
+  MetroUtils::FireObserver("metro_on_async_tile_created");
   return S_OK;
-}
-
-// static
-void
-MetroApp::SetBaseWidget(MetroWidget* aPtr)
-{
-  LogThread();
-
-  NS_ASSERTION(aPtr, "setting null base widget?");
-
-  // Both of these calls AddRef the ptr we pass in
-  aPtr->SetView(sFrameworkView.Get());
-  sFrameworkView->SetWidget(aPtr);
 }
 
 // static
@@ -216,12 +241,6 @@ XRE_MetroCoreApplicationRun()
 
   using namespace mozilla::widget::winrt;
 
-#ifdef PR_LOGGING
-  if (!gWindowsLog) {
-    gWindowsLog = PR_NewLogModule("nsWindow");
-  }
-#endif
-
   sMetroApp = Make<MetroApp>();
 
   HStringReference className(RuntimeClass_Windows_ApplicationModel_Core_CoreApplication);
@@ -251,11 +270,9 @@ XRE_MetroCoreApplicationRun()
     return false;
   }
 
-  sFrameworkView = Make<FrameworkView>(sMetroApp.Get());
   hr = sCoreApp->Run(sMetroApp.Get());
-  sFrameworkView = nullptr;
 
-  Log("Exiting CoreApplication::Run");
+  WinUtils::Log("Exiting CoreApplication::Run");
 
   sCoreApp = nullptr;
   sMetroApp = nullptr;

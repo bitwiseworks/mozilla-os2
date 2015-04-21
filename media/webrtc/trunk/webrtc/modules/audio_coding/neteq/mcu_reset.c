@@ -32,7 +32,10 @@ int WebRtcNetEQ_McuReset(MCUInst_t *inst)
     inst->main_inst = NULL;
     inst->one_desc = 0;
     inst->BufferStat_inst.Automode_inst.extraDelayMs = 0;
+    inst->BufferStat_inst.Automode_inst.minimum_delay_ms = 0;
+    inst->BufferStat_inst.Automode_inst.maximum_delay_ms = 10000;
     inst->NetEqPlayoutMode = kPlayoutOn;
+    inst->av_sync = 0;
 
     WebRtcNetEQ_DbReset(&inst->codec_DB_inst);
     memset(&inst->PayloadSplit_inst, 0, sizeof(SplitInfo_t));

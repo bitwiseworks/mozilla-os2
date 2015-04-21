@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -17,32 +16,42 @@ namespace ipc {
 
 static Atomic<size_t> gShmemAllocated;
 static Atomic<size_t> gShmemMapped;
-static size_t GetShmemAllocated() { return gShmemAllocated; }
-static size_t GetShmemMapped() { return gShmemMapped; }
 
-NS_THREADSAFE_MEMORY_REPORTER_IMPLEMENT(ShmemAllocated,
-  "shmem-allocated",
-  KIND_OTHER,
-  UNITS_BYTES,
-  GetShmemAllocated,
-  "Memory shared with other processes that is accessible (but not "
-  "necessarily mapped).")
+class ShmemReporter MOZ_FINAL : public nsIMemoryReporter
+{
+public:
+  NS_DECL_THREADSAFE_ISUPPORTS
 
-NS_THREADSAFE_MEMORY_REPORTER_IMPLEMENT(ShmemMapped,
-  "shmem-mapped",
-  KIND_OTHER,
-  UNITS_BYTES,
-  GetShmemMapped,
-  "Memory shared with other processes that is mapped into the address space.")
+  NS_IMETHOD
+  CollectReports(nsIHandleReportCallback* aHandleReport, nsISupports* aData)
+  {
+    nsresult rv;
+    rv = MOZ_COLLECT_REPORT(
+      "shmem-allocated", KIND_OTHER, UNITS_BYTES, gShmemAllocated,
+      "Memory shared with other processes that is accessible (but not "
+      "necessarily mapped).");
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = MOZ_COLLECT_REPORT(
+      "shmem-mapped", KIND_OTHER, UNITS_BYTES, gShmemMapped,
+      "Memory shared with other processes that is mapped into the address "
+      "space.");
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    return NS_OK;
+  }
+};
+
+NS_IMPL_ISUPPORTS(ShmemReporter, nsIMemoryReporter)
 
 SharedMemory::SharedMemory()
   : mAllocSize(0)
   , mMappedSize(0)
 {
-  static Atomic<uint32_t> registered;
-  if (registered.compareExchange(0, 1)) {
-    NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(ShmemAllocated));
-    NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(ShmemMapped));
+  MOZ_COUNT_CTOR(SharedMemory);
+  static Atomic<bool> registered;
+  if (registered.compareExchange(false, true)) {
+    RegisterStrongMemoryReporter(new ShmemReporter());
   }
 }
 

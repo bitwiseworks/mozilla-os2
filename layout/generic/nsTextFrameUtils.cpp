@@ -5,24 +5,14 @@
 
 #include "nsTextFrameUtils.h"
 
-#include "nsContentUtils.h"
-#include "nsIWordBreaker.h"
-#include "gfxFont.h"
 #include "nsUnicharUtils.h"
 #include "nsBidiUtils.h"
 #include "nsIContent.h"
 #include "nsStyleStruct.h"
+#include "nsTextFragment.h"
 #include <algorithm>
 
-// XXX TODO implement transform of backslash to yen that nsTextTransform does
-// when requested by PresContext->LanguageSpecificTransformType(). Do it with
-// a new factory type that just munges the input stream. But first, check
-// that we really still need this, it's only enabled via a hidden pref
-// which defaults false...
-
-#define UNICODE_ZWSP 0x200B
-  
-static bool IsDiscardable(PRUnichar ch, uint32_t* aFlags)
+static bool IsDiscardable(char16_t ch, uint32_t* aFlags)
 {
   // Unlike IS_DISCARDABLE, we don't discard \r. \r will be ignored by gfxTextRun
   // and discarding it would force us to copy text in many cases of preformatted
@@ -31,11 +21,7 @@ static bool IsDiscardable(PRUnichar ch, uint32_t* aFlags)
     *aFlags |= nsTextFrameUtils::TEXT_HAS_SHY;
     return true;
   }
-  if ((ch & 0xFF00) != 0x2000) {
-    // Not a Bidi control character
-    return false;
-  }
-  return IS_BIDI_CONTROL_CHAR(ch);
+  return IsBidiControl(ch);
 }
 
 static bool IsDiscardable(uint8_t ch, uint32_t* aFlags)
@@ -47,16 +33,16 @@ static bool IsDiscardable(uint8_t ch, uint32_t* aFlags)
   return false;
 }
 
-PRUnichar*
-nsTextFrameUtils::TransformText(const PRUnichar* aText, uint32_t aLength,
-                                PRUnichar* aOutput,
+char16_t*
+nsTextFrameUtils::TransformText(const char16_t* aText, uint32_t aLength,
+                                char16_t* aOutput,
                                 CompressionMode aCompression,
                                 uint8_t* aIncomingFlags,
-                                gfxSkipCharsBuilder* aSkipChars,
+                                gfxSkipChars* aSkipChars,
                                 uint32_t* aAnalysisFlags)
 {
   uint32_t flags = 0;
-  PRUnichar* outputStart = aOutput;
+  char16_t* outputStart = aOutput;
 
   bool lastCharArabic = false;
 
@@ -65,7 +51,7 @@ nsTextFrameUtils::TransformText(const PRUnichar* aText, uint32_t aLength,
     // Skip discardables.
     uint32_t i;
     for (i = 0; i < aLength; ++i) {
-      PRUnichar ch = *aText++;
+      char16_t ch = *aText++;
       if (IsDiscardable(ch, &flags) ||
           (ch == '\n' && aCompression == DISCARD_NEWLINE)) {
         aSkipChars->SkipChar();
@@ -89,7 +75,7 @@ nsTextFrameUtils::TransformText(const PRUnichar* aText, uint32_t aLength,
     bool inWhitespace = (*aIncomingFlags & INCOMING_WHITESPACE) != 0;
     uint32_t i;
     for (i = 0; i < aLength; ++i) {
-      PRUnichar ch = *aText++;
+      char16_t ch = *aText++;
       bool nowInWhitespace;
       if (ch == ' ' &&
           (i + 1 >= aLength ||
@@ -154,7 +140,7 @@ nsTextFrameUtils::TransformText(const uint8_t* aText, uint32_t aLength,
                                 uint8_t* aOutput,
                                 CompressionMode aCompression,
                                 uint8_t* aIncomingFlags,
-                                gfxSkipCharsBuilder* aSkipChars,
+                                gfxSkipChars* aSkipChars,
                                 uint32_t* aAnalysisFlags)
 {
   uint32_t flags = 0;
@@ -235,7 +221,7 @@ nsTextFrameUtils::ComputeApproximateLengthWithWhitespaceCompression(
     bool is2b = frag->Is2b();
     union {
       const char *s1b;
-      const PRUnichar *s2b;
+      const char16_t *s2b;
     } u;
     if (is2b) {
       u.s2b = frag->Get2b();
@@ -247,7 +233,7 @@ nsTextFrameUtils::ComputeApproximateLengthWithWhitespaceCompression(
                         // exactly right
     len = 0;
     for (uint32_t i = 0, i_end = frag->GetLength(); i < i_end; ++i) {
-      PRUnichar c = is2b ? u.s2b[i] : u.s1b[i];
+      char16_t c = is2b ? u.s2b[i] : u.s1b[i];
       if (c == ' ' || c == '\n' || c == '\t' || c == '\r') {
         if (!prevWS) {
           ++len;

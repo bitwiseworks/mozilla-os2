@@ -6,10 +6,22 @@
 
 EXPORTS.mozilla.dom += [
     'Gamepad.h',
+    'GamepadButton.h',
     'GamepadService.h',
     ]
 
-CPP_SOURCES = [
+UNIFIED_SOURCES = [
     'Gamepad.cpp',
+    'GamepadButton.cpp',
     'GamepadService.cpp',
     ]
+
+FAIL_ON_WARNINGS = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'
+LOCAL_INCLUDES += [
+    '/dom/base',
+]
+

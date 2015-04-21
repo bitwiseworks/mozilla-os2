@@ -10,8 +10,6 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'necko_ftp'
 
-MODULE = 'necko'
-
 EXPORTS += [
     'ftpCore.h',
 ]
@@ -21,7 +19,7 @@ EXPORTS.mozilla.net += [
     'FTPChannelParent.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'FTPChannelChild.cpp',
     'FTPChannelParent.cpp',
     'nsFTPChannel.cpp',
@@ -30,3 +28,18 @@ CPP_SOURCES += [
     'nsFtpProtocolHandler.cpp',
 ]
 
+IPDL_SOURCES += [
+    'PFTPChannel.ipdl',
+]
+
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'necko'
+
+LOCAL_INCLUDES += [
+    '../../base/src',
+]

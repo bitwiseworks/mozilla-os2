@@ -4,18 +4,27 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'dmd'
-
 EXPORTS += [
     'DMD.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
+    '../../../mfbt/HashFunctions.cpp',
+    '../../../xpcom/base/nsStackWalk.cpp',
     'DMD.cpp',
-    'HashFunctions.cpp',
-    'nsStackWalk.cpp',
 ]
 
-CSRCS += [
-    'strcpy.c',
+SOURCES += [
+    '../../../nsprpub/lib/libc/src/strcpy.c',
 ]
+
+LIBRARY_NAME = 'dmd'
+
+FORCE_SHARED_LIB = True
+
+DEFINES['MOZ_NO_MOZALLOC'] = True
+
+if CONFIG['MOZ_OPTIMIZE']:
+    DEFINES['MOZ_OPTIMIZE'] = True
+
+DISABLE_STL_WRAPPING = True

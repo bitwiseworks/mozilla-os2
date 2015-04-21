@@ -8,17 +8,18 @@
 #include "SVGPoint.h"
 #include "nsSVGElement.h"
 #include "nsError.h"
-#include "nsContentUtils.h" // NS_ENSURE_FINITE
 #include "mozilla/dom/SVGPointBinding.h"
 
 // See the architecture comment in DOMSVGPointList.h.
 
 using namespace mozilla;
 
-// We could use NS_IMPL_CYCLE_COLLECTION_1, except that in Unlink() we need to
+// We could use NS_IMPL_CYCLE_COLLECTION(, except that in Unlink() we need to
 // clear our list's weak ref to us to be safe. (The other option would be to
 // not unlink and rely on the breaking of the other edges in the cycle, as
 // NS_SVG_VAL_IMPL_CYCLE_COLLECTION does.)
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsISVGPoint)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsISVGPoint)
   // We may not belong to a list, so we must null check tmp->mList.
   if (tmp->mList) {

@@ -10,7 +10,6 @@ const Cu = Components.utils;
 const Cr = Components.results;
 
 const kMainKey = "Software\\Microsoft\\Internet Explorer\\Main";
-const kRegMultiSz = 7;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -21,6 +20,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ctypes",
                                   "resource://gre/modules/ctypes.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "WindowsRegistry",
+                                  "resource://gre/modules/WindowsRegistry.jsm");
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Helpers.
@@ -126,45 +127,6 @@ function hostIsIPAddress(aHost) {
   return false;
 }
 
-/**
- * Safely reads a value from the registry.
- *
- * @param aRoot
- *        The root registry to use.
- * @param aPath
- *        The registry path to the key.
- * @param aKey
- *        The key name.
- * @return The key value or undefined if it doesn't exist.  If the key is
- *         a REG_MULTI_SZ, an array is returned.
- */
-function readRegKey(aRoot, aPath, aKey) {
-  let registry = Cc["@mozilla.org/windows-registry-key;1"].
-                 createInstance(Ci.nsIWindowsRegKey);
-  try {
-    registry.open(aRoot, aPath, Ci.nsIWindowsRegKey.ACCESS_READ);
-    if (registry.hasValue(aKey)) {
-      let type = registry.getValueType(aKey);
-      switch (type) {
-        case kRegMultiSz:
-          // nsIWindowsRegKey doesn't support REG_MULTI_SZ type out of the box.
-          let str = registry.readStringValue(aKey);
-          return [v for each (v in str.split("\0")) if (v)];
-        case Ci.nsIWindowsRegKey.TYPE_STRING:
-          return registry.readStringValue(aKey);
-        case Ci.nsIWindowsRegKey.TYPE_INT:
-          return registry.readIntValue(aKey);
-        default:
-          throw new Error("Unsupported registry value.");
-      }
-    }
-  } catch (ex) {
-  } finally {
-    registry.close();
-  }
-  return undefined;
-};
-
 ////////////////////////////////////////////////////////////////////////////////
 //// Resources
 
@@ -192,9 +154,9 @@ Bookmarks.prototype = {
       // Retrieve the name of IE's favorites subfolder that holds the bookmarks
       // in the toolbar. This was previously stored in the registry and changed
       // in IE7 to always be called "Links".
-      let folderName = readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-                                  "Software\\Microsoft\\Internet Explorer\\Toolbar",
-                                  "LinksFolderName");
+      let folderName = WindowsRegistry.readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
+                                                  "Software\\Microsoft\\Internet Explorer\\Toolbar",
+                                                  "LinksFolderName");
       this.__toolbarFolderName = folderName || "Links";
     }
     return this.__toolbarFolderName;
@@ -224,47 +186,52 @@ Bookmarks.prototype = {
     let entries = aSourceFolder.directoryEntries;
     while (entries.hasMoreElements()) {
       let entry = entries.getNext().QueryInterface(Ci.nsIFile);
-
-      // Make sure that entry.path == entry.target to not follow .lnk folder
-      // shortcuts which could lead to infinite cycles.
-      if (entry.isDirectory() && entry.path == entry.target) {
-        let destFolderId;
-        if (entry.leafName == this._toolbarFolderName &&
-            entry.parent.equals(this._favoritesFolder)) {
-          // Import to the bookmarks toolbar.
-          destFolderId = PlacesUtils.toolbarFolderId;
-          if (!MigrationUtils.isStartupMigration) {
+      try {
+        // Make sure that entry.path == entry.target to not follow .lnk folder
+        // shortcuts which could lead to infinite cycles.
+        // Don't use isSymlink(), since it would throw for invalid
+        // lnk files pointing to URLs or to unresolvable paths.
+        if (entry.path == entry.target && entry.isDirectory()) {
+          let destFolderId;
+          if (entry.leafName == this._toolbarFolderName &&
+              entry.parent.equals(this._favoritesFolder)) {
+            // Import to the bookmarks toolbar.
+            destFolderId = PlacesUtils.toolbarFolderId;
+            if (!MigrationUtils.isStartupMigration) {
+              destFolderId =
+                MigrationUtils.createImportedBookmarksFolder("IE", destFolderId);
+            }
+          }
+          else {
+            // Import to a new folder.
             destFolderId =
-              MigrationUtils.createImportedBookmarksFolder("IE", destFolderId);
+              PlacesUtils.bookmarks.createFolder(aDestFolderId, entry.leafName,
+                                                 PlacesUtils.bookmarks.DEFAULT_INDEX);
+          }
+
+          if (entry.isReadable()) {
+            // Recursively import the folder.
+            this._migrateFolder(entry, destFolderId);
           }
         }
         else {
-          // Import to a new folder.
-          destFolderId =
-            PlacesUtils.bookmarks.createFolder(aDestFolderId, entry.leafName,
-                                               PlacesUtils.bookmarks.DEFAULT_INDEX);
-        }
+          // Strip the .url extension, to both check this is a valid link file,
+          // and get the associated title.
+          let matches = entry.leafName.match(/(.+)\.url$/i);
+          if (matches) {
+            let fileHandler = Cc["@mozilla.org/network/protocol;1?name=file"].
+                              getService(Ci.nsIFileProtocolHandler);
+            let uri = fileHandler.readURLFile(entry);
+            let title = matches[1];
 
-        if (entry.isReadable()) {
-          // Recursively import the folder.
-          this._migrateFolder(entry, destFolderId);
+            PlacesUtils.bookmarks.insertBookmark(aDestFolderId,
+                                                 uri,
+                                                 PlacesUtils.bookmarks.DEFAULT_INDEX,
+                                                 title);
+          }
         }
-      }
-      else {
-        // Strip the .url extension, to both check this is a valid link file,
-        // and get the associated title.
-        let matches = entry.leafName.match(/(.+)\.url$/i);
-        if (matches) {
-          let fileHandler = Cc["@mozilla.org/network/protocol;1?name=file"].
-                            getService(Ci.nsIFileProtocolHandler);
-          let uri = fileHandler.readURLFile(entry);
-          let title = matches[1];
-
-          PlacesUtils.bookmarks.insertBookmark(aDestFolderId,
-                                               uri,
-                                               PlacesUtils.bookmarks.DEFAULT_INDEX,
-                                               title);
-        }
+      } catch (ex) {
+        Components.utils.reportError("Unable to import IE favorite (" + entry.leafName + "): " + ex);
       }
     }
   }
@@ -411,7 +378,7 @@ Cookies.prototype = {
           } catch (ex) {}
         });
 
-        yield;
+        yield undefined;
       }
 
       CtypesHelpers.finalize();
@@ -600,8 +567,8 @@ Settings.prototype = {
    *        Conversion function from the Registry format to the pref format.
    */
   _set: function S__set(aPath, aKey, aPref, aTransformFn) {
-    let value = readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-                           aPath, aKey);
+    let value = WindowsRegistry.readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
+                                           aPath, aKey);
     // Don't import settings that have never been flipped.
     if (value === undefined)
       return;
@@ -646,10 +613,10 @@ IEProfileMigrator.prototype.getResources = function IE_getResources() {
 
 Object.defineProperty(IEProfileMigrator.prototype, "sourceHomePageURL", {
   get: function IE_get_sourceHomePageURL() {
-    let defaultStartPage = readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
-                                      kMainKey, "Default_Page_URL");
-    let startPage = readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-                               kMainKey, "Start Page");
+    let defaultStartPage = WindowsRegistry.readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+                                                      kMainKey, "Default_Page_URL");
+    let startPage = WindowsRegistry.readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
+                                               kMainKey, "Start Page");
     // If the user didn't customize the Start Page, he is still on the default
     // page, that may be considered the equivalent of our about:home.  There's
     // no reason to retain it, since it is heavily targeted to IE.
@@ -659,8 +626,8 @@ Object.defineProperty(IEProfileMigrator.prototype, "sourceHomePageURL", {
     // are in addition to the Start Page, and no empty entries are possible,
     // thus a Start Page is always defined if any of these exists, though it
     // may be the default one.
-    let secondaryPages = readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-                                    kMainKey, "Secondary Start Pages");
+    let secondaryPages = WindowsRegistry.readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
+                                                    kMainKey, "Secondary Start Pages");
     if (secondaryPages) {
       if (homepage)
         secondaryPages.unshift(homepage);

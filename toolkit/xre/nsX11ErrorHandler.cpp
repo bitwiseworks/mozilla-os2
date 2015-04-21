@@ -36,7 +36,7 @@ X11Error(Display *display, XErrorEvent *event) {
     // temporary Display to request extension information.  This assumes on
     // the DISPLAY environment variable has been set and matches what was used
     // to open |display|.
-    Display *tmpDisplay = XOpenDisplay(NULL);
+    Display *tmpDisplay = XOpenDisplay(nullptr);
     if (tmpDisplay) {
       int nExts;
       char** extNames = XListExtensions(tmpDisplay, &nExts);
@@ -58,7 +58,7 @@ X11Error(Display *display, XErrorEvent *event) {
       }
       XCloseDisplay(tmpDisplay);
 
-#ifdef MOZ_WIDGET_GTK2
+#if (MOZ_WIDGET_GTK == 2)
       // GDK2 calls XCloseDevice the devices that it opened on startup, but
       // the XI protocol no longer ensures that the devices will still exist.
       // If they have been removed, then a BadDevice error results.  Ignore

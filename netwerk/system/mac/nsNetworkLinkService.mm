@@ -13,9 +13,9 @@
 #import <Cocoa/Cocoa.h>
 #import <netinet/in.h>
 
-NS_IMPL_ISUPPORTS2(nsNetworkLinkService,
-                   nsINetworkLinkService,
-                   nsIObserver)
+NS_IMPL_ISUPPORTS(nsNetworkLinkService,
+                  nsINetworkLinkService,
+                  nsIObserver)
 
 nsNetworkLinkService::nsNetworkLinkService()
     : mLinkUp(true)
@@ -56,7 +56,7 @@ nsNetworkLinkService::GetLinkType(uint32_t *aLinkType)
 NS_IMETHODIMP
 nsNetworkLinkService::Observe(nsISupports *subject,
                               const char *topic,
-                              const PRUnichar *data)
+                              const char16_t *data)
 {
     if (!strcmp(topic, "xpcom-shutdown")) {
         Shutdown();

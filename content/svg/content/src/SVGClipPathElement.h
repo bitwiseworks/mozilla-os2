@@ -12,7 +12,7 @@
 class nsSVGClipPathFrame;
 
 nsresult NS_NewSVGClipPathElement(nsIContent **aResult,
-                                  already_AddRefed<nsINodeInfo> aNodeInfo);
+                                  already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
@@ -25,16 +25,15 @@ class SVGClipPathElement MOZ_FINAL : public SVGClipPathElementBase
 
 protected:
   friend nsresult (::NS_NewSVGClipPathElement(nsIContent **aResult,
-                                              already_AddRefed<nsINodeInfo> aNodeInfo));
-  SVGClipPathElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx,
-                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+                                              already_AddRefed<nsINodeInfo>&& aNodeInfo));
+  SVGClipPathElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
 
 public:
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   // WebIDL
-  already_AddRefed<nsIDOMSVGAnimatedEnumeration> ClipPathUnits();
+  already_AddRefed<SVGAnimatedEnumeration> ClipPathUnits();
 
 protected:
 

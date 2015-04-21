@@ -30,11 +30,10 @@ this.EXPORTED_SYMBOLS = [
  *
  * Cu.import("resource://gre/modules/Task.jsm");
  *
- * Task.spawn(function () {
+ * Task.spawn(function* () {
  *
- *   // This is our task.  It is a generator function because it contains the
- *   // "yield" operator at least once.  Let's create a promise object, wait on
- *   // it and capture its resolution value.
+ *   // This is our task. Let's create a promise object, wait on it and capture
+ *   // its resolution value.
  *   let myPromise = getPromiseResolvedOnTimeoutWithValue(1000, "Value");
  *   let result = yield myPromise;
  *
@@ -45,15 +44,12 @@ this.EXPORTED_SYMBOLS = [
  *     result += yield getPromiseResolvedOnTimeoutWithValue(50, "!");
  *   }
  *
- *   // Optionally, a value can be returned using this special exception
- *   // (because "return" cannot communicate a result in generator functions).
- *   throw new Task.Result("Resolution result for the task: " + result);
- *
+ *   return "Resolution result for the task: " + result;
  * }).then(function (result) {
  *
  *   // result == "Resolution result for the task: Value!!!"
  *
- *   // The result is undefined if no special Task.Result exception was thrown.
+ *   // The result is undefined if no value was returned.
  *
  * }, function (exception) {
  *
@@ -95,7 +91,22 @@ const Ci = Components.interfaces;
 const Cu = Components.utils;
 const Cr = Components.results;
 
-Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
+Cu.import("resource://gre/modules/Promise.jsm");
+
+// The following error types are considered programmer errors, which should be
+// reported (possibly redundantly) so as to let programmers fix their code.
+const ERRORS_TO_REPORT = ["EvalError", "RangeError", "ReferenceError", "TypeError"];
+
+/**
+ * Detect whether a value is a generator.
+ *
+ * @param aValue
+ *        The value to identify.
+ * @return A boolean indicating whether the value is a generator.
+ */
+function isGenerator(aValue) {
+  return Object.prototype.toString.call(aValue) == "[object Generator]";
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Task
@@ -125,23 +136,59 @@ this.Task = {
    *         called when the task terminates.
    */
   spawn: function Task_spawn(aTask) {
-    if (aTask && typeof(aTask) == "function") {
-      // Let's call into the function ourselves.
-      aTask = aTask();
-    }
-
-    if (aTask && typeof(aTask.send) == "function") {
-      // This is an iterator resulting from calling a generator function.
-      return new TaskImpl(aTask).deferred.promise;
-    }
-
-    // Just propagate the given value to the caller as a resolved promise.
-    return Promise.resolve(aTask);
+    return createAsyncFunction(aTask).call(undefined);
   },
 
   /**
-   * Constructs a special exception that, when thrown inside a generator
-   * function, allows the associated task to be resolved with a specific value.
+   * Create and return an 'async function' that starts a new task.
+   *
+   * This is similar to 'spawn' except that it doesn't immediately start
+   * the task, it binds the task to the async function's 'this' object and
+   * arguments, and it requires the task to be a function.
+   *
+   * It simplifies the common pattern of implementing a method via a task,
+   * like this simple object with a 'greet' method that has a 'name' parameter
+   * and spawns a task to send a greeting and return its reply:
+   *
+   * let greeter = {
+   *   message: "Hello, NAME!",
+   *   greet: function(name) {
+   *     return Task.spawn((function* () {
+   *       return yield sendGreeting(this.message.replace(/NAME/, name));
+   *     }).bind(this);
+   *   })
+   * };
+   *
+   * With Task.async, the method can be declared succinctly:
+   *
+   * let greeter = {
+   *   message: "Hello, NAME!",
+   *   greet: Task.async(function* (name) {
+   *     return yield sendGreeting(this.message.replace(/NAME/, name));
+   *   })
+   * };
+   *
+   * While maintaining identical semantics:
+   *
+   * greeter.greet("Mitchell").then((reply) => { ... }); // behaves the same
+   *
+   * @param aTask
+   *        The task function to start.
+   *
+   * @return A function that starts the task function and returns its promise.
+   */
+  async: function Task_async(aTask) {
+    if (typeof(aTask) != "function") {
+      throw new TypeError("aTask argument must be a function");
+    }
+
+    return createAsyncFunction(aTask);
+  },
+
+  /**
+   * Constructs a special exception that, when thrown inside a legacy generator
+   * function (non-star generator), allows the associated task to be resolved
+   * with a specific value.
    *
    * Example: throw new Task.Result("Value");
    */
@@ -149,6 +196,42 @@ this.Task = {
     this.value = aValue;
   }
 };
+
+function createAsyncFunction(aTask) {
+  let asyncFunction = function () {
+    let result = aTask;
+    if (aTask && typeof(aTask) == "function") {
+      if (aTask.isAsyncFunction) {
+        throw new TypeError(
+          "Cannot use an async function in place of a promise. " +
+          "You should either invoke the async function first " +
+          "or use 'Task.spawn' instead of 'Task.async' to start " +
+          "the Task and return its promise.");
+      }
+
+      try {
+        // Let's call into the function ourselves.
+        result = aTask.apply(this, arguments);
+      } catch (ex if ex instanceof Task.Result) {
+        return Promise.resolve(ex.value);
+      } catch (ex) {
+        return Promise.reject(ex);
+      }
+    }
+
+    if (isGenerator(result)) {
+      // This is an iterator resulting from calling a generator function.
+      return new TaskImpl(result).deferred.promise;
+    }
+
+    // Just propagate the given value to the caller as a resolved promise.
+    return Promise.resolve(result);
+  };
+
+  asyncFunction.isAsyncFunction = true;
+
+  return asyncFunction;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //// TaskImpl
@@ -160,6 +243,7 @@ this.Task = {
 function TaskImpl(iterator) {
   this.deferred = Promise.defer();
   this._iterator = iterator;
+  this._isStarGenerator = !("send" in iterator);
   this._run(true);
 }
 
@@ -176,6 +260,11 @@ TaskImpl.prototype = {
   _iterator: null,
 
   /**
+   * Whether this Task is using a star generator.
+   */
+  _isStarGenerator: false,
+
+  /**
    * Main execution routine, that calls into the generator function.
    *
    * @param aSendResolved
@@ -188,39 +277,92 @@ TaskImpl.prototype = {
    *        Resolution result or rejection exception, if any.
    */
   _run: function TaskImpl_run(aSendResolved, aSendValue) {
-    try {
-      let yielded = aSendResolved ? this._iterator.send(aSendValue)
-                                  : this._iterator.throw(aSendValue);
+    if (this._isStarGenerator) {
+      try {
+        let result = aSendResolved ? this._iterator.next(aSendValue)
+                                   : this._iterator.throw(aSendValue);
 
-      // If our task yielded an iterator resulting from calling another
-      // generator function, automatically spawn a task from it, effectively
-      // turning it into a promise that is fulfilled on task completion.
-      if (yielded && typeof(yielded.send) == "function") {
-        yielded = Task.spawn(yielded);
+        if (result.done) {
+          // The generator function returned.
+          this.deferred.resolve(result.value);
+        } else {
+          // The generator function yielded.
+          this._handleResultValue(result.value);
+        }
+      } catch (ex) {
+        // The generator function failed with an uncaught exception.
+        this._handleException(ex);
       }
-
-      if (yielded && typeof(yielded.then) == "function") {
-        // We have a promise object now. When fulfilled, call again into this
-        // function to continue the task, with either a resolution or rejection
-        // condition.
-        yielded.then(this._run.bind(this, true),
-                     this._run.bind(this, false));
-      } else {
-        // If our task yielded a value that is not a promise, just continue and
-        // pass it directly as the result of the yield statement.
-        this._run(true, yielded);
+    } else {
+      try {
+        let yielded = aSendResolved ? this._iterator.send(aSendValue)
+                                    : this._iterator.throw(aSendValue);
+        this._handleResultValue(yielded);
+      } catch (ex if ex instanceof Task.Result) {
+        // The generator function threw the special exception that allows it to
+        // return a specific value on resolution.
+        this.deferred.resolve(ex.value);
+      } catch (ex if ex instanceof StopIteration) {
+        // The generator function terminated with no specific result.
+        this.deferred.resolve();
+      } catch (ex) {
+        // The generator function failed with an uncaught exception.
+        this._handleException(ex);
       }
-
-    } catch (ex if ex instanceof Task.Result) {
-      // The generator function threw the special exception that allows it to
-      // return a specific value on resolution.
-      this.deferred.resolve(ex.value);
-    } catch (ex if ex instanceof StopIteration) {
-      // The generator function terminated with no specific result.
-      this.deferred.resolve();
-    } catch (ex) {
-      // The generator function failed with an uncaught exception.
-      this.deferred.reject(ex);
     }
+  },
+
+  /**
+   * Handle a value yielded by a generator.
+   *
+   * @param aValue
+   *        The yielded value to handle.
+   */
+  _handleResultValue: function TaskImpl_handleResultValue(aValue) {
+    // If our task yielded an iterator resulting from calling another
+    // generator function, automatically spawn a task from it, effectively
+    // turning it into a promise that is fulfilled on task completion.
+    if (isGenerator(aValue)) {
+      aValue = Task.spawn(aValue);
+    }
+
+    if (aValue && typeof(aValue.then) == "function") {
+      // We have a promise object now. When fulfilled, call again into this
+      // function to continue the task, with either a resolution or rejection
+      // condition.
+      aValue.then(this._run.bind(this, true),
+                  this._run.bind(this, false));
+    } else {
+      // If our task yielded a value that is not a promise, just continue and
+      // pass it directly as the result of the yield statement.
+      this._run(true, aValue);
+    }
+  },
+
+  /**
+   * Handle an uncaught exception thrown from a generator.
+   *
+   * @param aException
+   *        The uncaught exception to handle.
+   */
+  _handleException: function TaskImpl_handleException(aException) {
+    if (aException && typeof aException == "object" && "name" in aException &&
+        ERRORS_TO_REPORT.indexOf(aException.name) != -1) {
+
+      // We suspect that the exception is a programmer error, so we now
+      // display it using dump().  Note that we do not use Cu.reportError as
+      // we assume that this is a programming error, so we do not want end
+      // users to see it. Also, if the programmer handles errors correctly,
+      // they will either treat the error or log them somewhere.
+
+      let stack = ("stack" in aException) ? aException.stack : "not available";
+      dump("*************************\n");
+      dump("A coding exception was thrown and uncaught in a Task.\n\n");
+      dump("Full message: " + aException + "\n");
+      dump("Full stack: " + stack + "\n");
+      dump("*************************\n");
+    }
+
+    this.deferred.reject(aException);
   }
 };

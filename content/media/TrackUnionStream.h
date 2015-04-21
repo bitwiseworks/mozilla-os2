@@ -12,9 +12,9 @@
 namespace mozilla {
 
 #ifdef PR_LOGGING
-#define LOG(type, msg) PR_LOG(gMediaStreamGraphLog, type, msg)
+#define STREAM_LOG(type, msg) PR_LOG(gMediaStreamGraphLog, type, msg)
 #else
-#define LOG(type, msg)
+#define STREAM_LOG(type, msg)
 #endif
 
 /**
@@ -29,7 +29,7 @@ public:
     mFilterCallback(nullptr),
     mMaxTrackID(0) {}
 
-  virtual void RemoveInput(MediaInputPort* aPort)
+  virtual void RemoveInput(MediaInputPort* aPort) MOZ_OVERRIDE
   {
     for (int32_t i = mTrackMap.Length() - 1; i >= 0; --i) {
       if (mTrackMap[i].mInputPort == aPort) {
@@ -39,8 +39,11 @@ public:
     }
     ProcessedMediaStream::RemoveInput(aPort);
   }
-  virtual void ProduceOutput(GraphTime aFrom, GraphTime aTo)
+  virtual void ProcessInput(GraphTime aFrom, GraphTime aTo, uint32_t aFlags) MOZ_OVERRIDE
   {
+    if (IsFinishedOnGraphThread()) {
+      return;
+    }
     nsAutoTArray<bool,8> mappedTracksFinished;
     nsAutoTArray<bool,8> mappedTracksWithMatchingInputTracks;
     for (uint32_t i = 0; i < mTrackMap.Length(); ++i) {
@@ -52,6 +55,9 @@ public:
     for (uint32_t i = 0; i < mInputs.Length(); ++i) {
       MediaStream* stream = mInputs[i]->GetSource();
       if (!stream->IsFinishedOnGraphThread()) {
+        // XXX we really should check whether 'stream' has finished within time aTo,
+        // not just that it's finishing when all its queued data eventually runs
+        // out.
         allFinished = false;
       }
       if (!stream->HasCurrentData()) {
@@ -95,13 +101,14 @@ public:
         mTrackMap.RemoveElementAt(i);
       }
     }
-    if (allFinished && mAutofinish) {
+    if (allFinished && mAutofinish && (aFlags & ALLOW_FINISH)) {
       // All streams have finished and won't add any more tracks, and
       // all our tracks have actually finished and been removed from our map,
       // so we're finished now.
       FinishOnGraphThread();
+    } else {
+      mBuffer.AdvanceKnownTracksTime(GraphTimeToStreamTime(aTo));
     }
-    mBuffer.AdvanceKnownTracksTime(GraphTimeToStreamTime(aTo));
     if (allHaveCurrentData) {
       // We can make progress if we're not blocked
       mHasCurrentData = true;
@@ -115,11 +122,33 @@ public:
     mFilterCallback = aCallback;
   }
 
+  // Forward SetTrackEnabled(output_track_id, enabled) to the Source MediaStream,
+  // translating the output track ID into the correct ID in the source.
+  virtual void ForwardTrackEnabled(TrackID aOutputID, bool aEnabled) MOZ_OVERRIDE {
+    for (int32_t i = mTrackMap.Length() - 1; i >= 0; --i) {
+      if (mTrackMap[i].mOutputTrackID == aOutputID) {
+        mTrackMap[i].mInputPort->GetSource()->
+          SetTrackEnabled(mTrackMap[i].mInputTrackID, aEnabled);
+      }
+    }
+  }
+
 protected:
   TrackIDFilterCallback mFilterCallback;
 
   // Only non-ended tracks are allowed to persist in this map.
   struct TrackMapEntry {
+    // mEndOfConsumedInputTicks is the end of the input ticks that we've consumed.
+    // 0 if we haven't consumed any yet.
+    TrackTicks mEndOfConsumedInputTicks;
+    // mEndOfLastInputIntervalInInputStream is the timestamp for the end of the
+    // previous interval which was unblocked for both the input and output
+    // stream, in the input stream's timeline, or -1 if there wasn't one.
+    StreamTime mEndOfLastInputIntervalInInputStream;
+    // mEndOfLastInputIntervalInOutputStream is the timestamp for the end of the
+    // previous interval which was unblocked for both the input and output
+    // stream, in the output stream's timeline, or -1 if there wasn't one.
+    StreamTime mEndOfLastInputIntervalInOutputStream;
     MediaInputPort* mInputPort;
     // We keep track IDs instead of track pointers because
     // tracks can be removed without us being notified (e.g.
@@ -156,11 +185,14 @@ protected:
     segment->AppendNullData(outputStart);
     StreamBuffer::Track* track =
       &mBuffer.AddTrack(id, rate, outputStart, segment.forget());
-    LOG(PR_LOG_DEBUG, ("TrackUnionStream %p adding track %d for input stream %p track %d, start ticks %lld",
-                       this, id, aPort->GetSource(), aTrack->GetID(),
-                       (long long)outputStart));
+    STREAM_LOG(PR_LOG_DEBUG, ("TrackUnionStream %p adding track %d for input stream %p track %d, start ticks %lld",
+                              this, id, aPort->GetSource(), aTrack->GetID(),
+                              (long long)outputStart));
 
     TrackMapEntry* map = mTrackMap.AppendElement();
+    map->mEndOfConsumedInputTicks = 0;
+    map->mEndOfLastInputIntervalInInputStream = -1;
+    map->mEndOfLastInputIntervalInOutputStream = -1;
     map->mInputPort = aPort;
     map->mInputTrackID = aTrack->GetID();
     map->mOutputTrackID = track->GetID();
@@ -201,6 +233,15 @@ protected:
     for (GraphTime t = aFrom; t < aTo; t = next) {
       MediaInputPort::InputInterval interval = map->mInputPort->GetNextInputInterval(t);
       interval.mEnd = std::min(interval.mEnd, aTo);
+      StreamTime inputEnd = source->GraphTimeToStreamTime(interval.mEnd);
+      TrackTicks inputTrackEndPoint = TRACK_TICKS_MAX;
+
+      if (aInputTrack->IsEnded() &&
+          aInputTrack->GetEndTimeRoundDown() <= inputEnd) {
+        inputTrackEndPoint = aInputTrack->GetEnd();
+        *aOutputTrackFinished = true;
+      }
+
       if (interval.mStart >= interval.mEnd)
         break;
       next = interval.mEnd;
@@ -208,30 +249,18 @@ protected:
       // Ticks >= startTicks and < endTicks are in the interval
       StreamTime outputEnd = GraphTimeToStreamTime(interval.mEnd);
       TrackTicks startTicks = outputTrack->GetEnd();
-#ifdef DEBUG
       StreamTime outputStart = GraphTimeToStreamTime(interval.mStart);
-#endif
-      NS_ASSERTION(startTicks == TimeToTicksRoundUp(rate, outputStart),
-                   "Samples missing");
+      NS_WARN_IF_FALSE(startTicks == TimeToTicksRoundUp(rate, outputStart),
+                       "Samples missing");
       TrackTicks endTicks = TimeToTicksRoundUp(rate, outputEnd);
       TrackTicks ticks = endTicks - startTicks;
-      // StreamTime inputStart = source->GraphTimeToStreamTime(interval.mStart);
-      StreamTime inputEnd = source->GraphTimeToStreamTime(interval.mEnd);
-      TrackTicks inputTrackEndPoint = TRACK_TICKS_MAX;
-
-      if (aInputTrack->IsEnded()) {
-        TrackTicks inputEndTicks = aInputTrack->TimeToTicksRoundDown(inputEnd);
-        if (aInputTrack->GetEnd() <= inputEndTicks) {
-          inputTrackEndPoint = aInputTrack->GetEnd();
-          *aOutputTrackFinished = true;
-        }
-      }
+      StreamTime inputStart = source->GraphTimeToStreamTime(interval.mStart);
 
       if (interval.mInputIsBlocked) {
         // Maybe the input track ended?
         segment->AppendNullData(ticks);
-        LOG(PR_LOG_DEBUG+1, ("TrackUnionStream %p appending %lld ticks of null data to track %d",
-            this, (long long)ticks, outputTrack->GetID()));
+        STREAM_LOG(PR_LOG_DEBUG+1, ("TrackUnionStream %p appending %lld ticks of null data to track %d",
+                   this, (long long)ticks, outputTrack->GetID()));
       } else {
         // Figuring out which samples to use from the input stream is tricky
         // because its start time and our start time may differ by a fraction
@@ -239,15 +268,69 @@ protected:
         // that 'ticks' samples are gathered, even though a tick boundary may
         // occur between outputStart and outputEnd but not between inputStart
         // and inputEnd.
-        // We'll take the latest samples we can.
-        TrackTicks inputEndTicks = TimeToTicksRoundUp(rate, inputEnd);
-        TrackTicks inputStartTicks = inputEndTicks - ticks;
-        segment->AppendSlice(*aInputTrack->GetSegment(),
-                             std::min(inputTrackEndPoint, inputStartTicks),
-                             std::min(inputTrackEndPoint, inputEndTicks));
-        LOG(PR_LOG_DEBUG+1, ("TrackUnionStream %p appending %lld ticks of input data to track %d",
-            this, (long long)(std::min(inputTrackEndPoint, inputEndTicks) - std::min(inputTrackEndPoint, inputStartTicks)),
-            outputTrack->GetID()));
+        // These are the properties we need to ensure:
+        // 1) Exactly 'ticks' ticks of output are produced, i.e.
+        // inputEndTicks - inputStartTicks = ticks.
+        // 2) inputEndTicks <= aInputTrack->GetSegment()->GetDuration().
+        // 3) In any sequence of intervals where neither stream is blocked,
+        // the content of the input track we use is a contiguous sequence of
+        // ticks with no gaps or overlaps.
+        if (map->mEndOfLastInputIntervalInInputStream != inputStart ||
+            map->mEndOfLastInputIntervalInOutputStream != outputStart) {
+          // Start of a new series of intervals where neither stream is blocked.
+          map->mEndOfConsumedInputTicks = TimeToTicksRoundDown(rate, inputStart) - 1;
+        }
+        TrackTicks inputStartTicks = map->mEndOfConsumedInputTicks;
+        TrackTicks inputEndTicks = inputStartTicks + ticks;
+        map->mEndOfConsumedInputTicks = inputEndTicks;
+        map->mEndOfLastInputIntervalInInputStream = inputEnd;
+        map->mEndOfLastInputIntervalInOutputStream = outputEnd;
+        // Now we prove that the above properties hold:
+        // Property #1: trivial by construction.
+        // Property #3: trivial by construction. Between every two
+        // intervals where both streams are not blocked, the above if condition
+        // is false and mEndOfConsumedInputTicks advances exactly to match
+        // the ticks that were consumed.
+        // Property #2:
+        // Let originalOutputStart be the value of outputStart and originalInputStart
+        // be the value of inputStart when the body of the "if" block was last
+        // executed.
+        // Let allTicks be the sum of the values of 'ticks' computed since then.
+        // The interval [originalInputStart/rate, inputEnd/rate) is the
+        // same length as the interval [originalOutputStart/rate, outputEnd/rate),
+        // so the latter interval can have at most one more integer in it. Thus
+        // TimeToTicksRoundUp(rate, outputEnd) - TimeToTicksRoundUp(rate, originalOutputStart)
+        //   <= TimeToTicksRoundDown(rate, inputEnd) - TimeToTicksRoundDown(rate, originalInputStart) + 1
+        // Then
+        // inputEndTicks = TimeToTicksRoundDown(rate, originalInputStart) - 1 + allTicks
+        //   = TimeToTicksRoundDown(rate, originalInputStart) - 1 + TimeToTicksRoundUp(rate, outputEnd) - TimeToTicksRoundUp(rate, originalOutputStart)
+        //   <= TimeToTicksRoundDown(rate, originalInputStart) - 1 + TimeToTicksRoundDown(rate, inputEnd) - TimeToTicksRoundDown(rate, originalInputStart) + 1
+        //   = TimeToTicksRoundDown(rate, inputEnd)
+        //   <= inputEnd/rate
+        // (now using the fact that inputEnd <= track->GetEndTimeRoundDown() for a non-ended track)
+        //   <= TicksToTimeRoundDown(rate, aInputTrack->GetSegment()->GetDuration())/rate
+        //   <= rate*aInputTrack->GetSegment()->GetDuration()/rate
+        //   = aInputTrack->GetSegment()->GetDuration()
+        // as required.
+
+        if (inputStartTicks < 0) {
+          // Data before the start of the track is just null.
+          // We have to add a small amount of delay to ensure that there is
+          // always a sample available if we see an interval that contains a
+          // tick boundary on the output stream's timeline but does not contain
+          // a tick boundary on the input stream's timeline. 1 tick delay is
+          // necessary and sufficient.
+          segment->AppendNullData(-inputStartTicks);
+          inputStartTicks = 0;
+        }
+        if (inputEndTicks > inputStartTicks) {
+          segment->AppendSlice(*aInputTrack->GetSegment(),
+                               std::min(inputTrackEndPoint, inputStartTicks),
+                               std::min(inputTrackEndPoint, inputEndTicks));
+        }
+        STREAM_LOG(PR_LOG_DEBUG+1, ("TrackUnionStream %p appending %lld ticks of input data to track %d",
+                   this, (long long)(std::min(inputTrackEndPoint, inputEndTicks) - std::min(inputTrackEndPoint, inputStartTicks)),
+                   outputTrack->GetID()));
       }
       ApplyTrackDisabling(outputTrack->GetID(), segment);
       for (uint32_t j = 0; j < mListeners.Length(); ++j) {

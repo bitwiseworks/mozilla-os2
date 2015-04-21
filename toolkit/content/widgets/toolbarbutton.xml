@@ -9,7 +9,7 @@
    xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
    xmlns:xbl="http://www.mozilla.org/xbl">
 
-  <binding id="toolbarbutton" display="xul:button"
+  <binding id="toolbarbutton" display="xul:button" role="xul:toolbarbutton"
            extends="chrome://global/content/bindings/button.xml#button-base">
     <resources>
       <stylesheet src="chrome://global/skin/toolbarbutton.css"/>
@@ -19,16 +19,10 @@
       <children includes="observes|template|menupopup|panel|tooltip"/>
       <xul:image class="toolbarbutton-icon" xbl:inherits="validate,src=image,label"/>
       <xul:label class="toolbarbutton-text" crop="right" flex="1"
-                 xbl:inherits="value=label,accesskey,crop"/>
+                 xbl:inherits="value=label,accesskey,crop,wrap"/>
+      <xul:label class="toolbarbutton-multiline-text" flex="1"
+                 xbl:inherits="xbl:text=label,accesskey,wrap"/>
     </content>
-    
-    <implementation implements="nsIAccessibleProvider">
-      <property name="accessibleType" readonly="true">
-        <getter>
-          return Components.interfaces.nsIAccessibleProvider.XULToolbarButton;
-        </getter>
-      </property>
-    </implementation>
   </binding>
 
   <binding id="menu" display="xul:menu" 
@@ -37,8 +31,11 @@
       <children includes="observes|template|menupopup|panel|tooltip"/>
       <xul:image class="toolbarbutton-icon" xbl:inherits="validate,src=image,label,type"/>
       <xul:label class="toolbarbutton-text" crop="right" flex="1"
-                 xbl:inherits="value=label,accesskey,crop,dragover-top"/>
-      <xul:dropmarker type="menu" class="toolbarbutton-menu-dropmarker" xbl:inherits="disabled,label"/>
+                 xbl:inherits="value=label,accesskey,crop,dragover-top,wrap"/>
+      <xul:label class="toolbarbutton-multiline-text" flex="1"
+                 xbl:inherits="xbl:text=label,accesskey,wrap"/>
+      <xul:dropmarker anonid="dropmarker" type="menu"
+                      class="toolbarbutton-menu-dropmarker" xbl:inherits="disabled,label"/>
     </content>
   </binding>
   
@@ -50,9 +47,12 @@
         <xul:vbox flex="1" align="center">
           <xul:image class="toolbarbutton-icon" xbl:inherits="validate,src=image,label"/>
           <xul:label class="toolbarbutton-text" crop="right" flex="1"
-                    xbl:inherits="value=label,accesskey,crop,dragover-top"/>
+                     xbl:inherits="value=label,accesskey,crop,dragover-top,wrap"/>
+          <xul:label class="toolbarbutton-multiline-text" flex="1"
+                     xbl:inherits="xbl:text=label,accesskey,wrap"/>
         </xul:vbox>
-        <xul:dropmarker type="menu" class="toolbarbutton-menu-dropmarker" xbl:inherits="disabled,label"/>
+        <xul:dropmarker anonid="dropmarker" type="menu"
+                        class="toolbarbutton-menu-dropmarker" xbl:inherits="disabled,label"/>
       </xul:hbox>
     </content>
   </binding>
@@ -67,10 +67,10 @@
       <children includes="observes|template|menupopup|panel|tooltip"/>
       <xul:toolbarbutton class="box-inherit toolbarbutton-menubutton-button"
                          anonid="button" flex="1" allowevents="true"
-                         xbl:inherits="disabled,crop,image,label,accesskey,command,
-                                       align,dir,pack,orient"/>
+                         xbl:inherits="disabled,crop,image,label,accesskey,command,wrap,
+                                       align,dir,pack,orient,tooltiptext=buttontooltiptext"/>
       <xul:dropmarker type="menu-button" class="toolbarbutton-menubutton-dropmarker"
-                      xbl:inherits="align,dir,pack,orient,disabled,label,open"/>
+                      anonid="dropmarker" xbl:inherits="align,dir,pack,orient,disabled,label,open"/>
     </content>
   </binding>
 
@@ -80,5 +80,4 @@
       <xul:image class="toolbarbutton-icon" xbl:inherits="src=image"/>
     </content>
   </binding>
-    
 </bindings>

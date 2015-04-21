@@ -26,27 +26,33 @@ var exceptionTests = [
   // Each test here verifies that a caller is required to have all
   // three arguments in order to call mozGetUserMedia
   { params: undefined,
-    error: Cr.NS_ERROR_XPC_NOT_ENOUGH_ARGS,
+    error: "Not enough arguments to Navigator.mozGetUserMedia.",
     message: "no arguments specified" },
   { params: [{video: true, fake: true}],
-    error: Cr.NS_ERROR_XPC_NOT_ENOUGH_ARGS,
+    error: "Not enough arguments to Navigator.mozGetUserMedia.",
     message: "one argument specified" },
   { params: [{video: true, fake: true}, unexpectedCall],
-    error: Cr.NS_ERROR_XPC_NOT_ENOUGH_ARGS,
+    error: "Not enough arguments to Navigator.mozGetUserMedia.",
     message: "two arguments specified" },
 
   // Each test here verifies that providing an incorret object
   // type to any mozGetUserMedia parameter should throw
   // the correct exception specified
   { params: [1, unexpectedCall, unexpectedCall],
-    error: Cr.NS_ERROR_XPC_BAD_CONVERT_JS,
+    error: "Argument 1 of Navigator.mozGetUserMedia can't be converted to a dictionary.",
     message: "wrong object type as first parameter" },
   { params: [{video: true, fake: true}, 1, unexpectedCall],
-    error: Cr.NS_ERROR_XPC_BAD_CONVERT_JS,
+    error: "Argument 2 of Navigator.mozGetUserMedia is not an object.",
     message: "wrong object type as second parameter" },
   { params: [{video: true, fake: true}, unexpectedCall, 1],
-    error: Cr.NS_ERROR_XPC_BAD_CONVERT_JS,
-    message: "wrong object type as third parameter" }
+    error: "Argument 3 of Navigator.mozGetUserMedia is not an object.",
+    message: "wrong object type as third parameter" },
+
+  // Each test here verifies constraint syntax as defined in webidl
+  { params: [{ fake: true, video: { advanced: [{ facingMode:'foo' }] } },
+             unexpectedCall, unexpectedCall],
+    error: "'facingMode' member of MediaTrackConstraintSet 'foo' is not a valid value for enumeration VideoFacingModeEnum.",
+    message: "invalid facingMode enum value" }
 ];
 
 /**
@@ -71,7 +77,10 @@ runTest(function () {
     try {
       navigator.mozGetUserMedia.apply(navigator, test.params);
     } catch (e) {
-      exception = (e.result === test.error);
+      exception = (e.message === test.error);
+      if(!exception) {
+        info(e.message);
+      }
     }
     ok(exception, "Exception for " + test.message);
   });

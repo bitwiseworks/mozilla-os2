@@ -16,27 +16,18 @@ class nsIDOMDocument;
 namespace mozilla {
 namespace dom {
 
-class HTMLFrameElement : public nsGenericHTMLFrameElement,
-                         public nsIDOMHTMLFrameElement
+class HTMLFrameElement MOZ_FINAL : public nsGenericHTMLFrameElement,
+                                   public nsIDOMHTMLFrameElement
 {
 public:
   using nsGenericHTMLFrameElement::SwapFrameLoaders;
 
-  HTMLFrameElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+  HTMLFrameElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
                    FromParser aFromParser = NOT_FROM_PARSER);
   virtual ~HTMLFrameElement();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLFrameElement
   NS_DECL_NSIDOMHTMLFRAMEELEMENT
@@ -46,10 +37,7 @@ public:
                               nsIAtom* aAttribute,
                               const nsAString& aValue,
                               nsAttrValue& aResult) MOZ_OVERRIDE;
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
-  nsMapRuleToAttributesFunc GetAttributeMappingFunction() const MOZ_OVERRIDE;
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
   // WebIDL API
   // The XPCOM GetFrameBorder is OK for us
@@ -107,8 +95,11 @@ public:
   using nsGenericHTMLFrameElement::GetContentWindow;
 
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
+
+private:
+  static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                    nsRuleData* aData);
 };
 
 } // namespace dom

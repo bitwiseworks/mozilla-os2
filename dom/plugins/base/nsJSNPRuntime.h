@@ -7,7 +7,6 @@
 #define nsJSNPRuntime_h_
 
 #include "nscore.h"
-#include "jsapi.h"
 #include "npapi.h"
 #include "npruntime.h"
 #include "pldhash.h"
@@ -26,17 +25,25 @@ public:
   {
   }
 
-  JSObject *mJSObj;
+  bool operator==(const nsJSObjWrapperKey& other) const {
+    return mJSObj == other.mJSObj && mNpp == other.mNpp;
+  }
+  bool operator!=(const nsJSObjWrapperKey& other) const {
+    return !(*this == other);
+  }
 
+  JSObject * mJSObj;
   const NPP mNpp;
 };
 
-extern JSClass sNPObjectJSWrapperClass;
+extern const JSClass sNPObjectJSWrapperClass;
 
-class nsJSObjWrapper : public NPObject,
-                       public nsJSObjWrapperKey
+class nsJSObjWrapper : public NPObject
 {
 public:
+  JS::PersistentRooted<JSObject *> mJSObj;
+  const NPP mNpp;
+
   static NPObject *GetNewOrUsed(NPP npp, JSContext *cx,
                                 JS::Handle<JSObject*> obj);
 

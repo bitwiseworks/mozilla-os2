@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <limits.h>
 #include <ctype.h>
 
 #include "prprf.h"
@@ -16,7 +15,6 @@
 #include "nsFtpConnectionThread.h"
 #include "nsFtpControlConnection.h"
 #include "nsFtpProtocolHandler.h"
-#include "ftpCore.h"
 #include "netCore.h"
 #include "nsCRT.h"
 #include "nsEscape.h"
@@ -32,9 +30,21 @@
 #include "nsIPrefBranch.h"
 #include "nsIStringBundle.h"
 #include "nsAuthInformationHolder.h"
-#include "nsICharsetConverterManager.h"
 #include "nsIProtocolProxyService.h"
 #include "nsICancelable.h"
+#include "nsICacheEntryDescriptor.h"
+#include "nsIOutputStream.h"
+#include "nsIPrompt.h"
+#include "nsIProtocolHandler.h"
+#include "nsIProxyInfo.h"
+#include "nsIRunnable.h"
+#include "nsISocketTransportService.h"
+#include "nsIURI.h"
+#include "nsICacheSession.h"
+
+#ifdef MOZ_WIDGET_GONK
+#include "NetStatistics.h"
+#endif
 
 #if defined(PR_LOGGING)
 extern PRLogModuleInfo* gFTPLog;
@@ -54,13 +64,13 @@ removeParamsFromPath(nsCString& path)
   }
 }
 
-NS_IMPL_ISUPPORTS_INHERITED5(nsFtpState,
-                             nsBaseContentStream,
-                             nsIInputStreamCallback, 
-                             nsITransportEventSink,
-                             nsICacheListener,
-                             nsIRequestObserver,
-                             nsIProtocolProxyCallback)
+NS_IMPL_ISUPPORTS_INHERITED(nsFtpState,
+                            nsBaseContentStream,
+                            nsIInputStreamCallback, 
+                            nsITransportEventSink,
+                            nsICacheListener,
+                            nsIRequestObserver,
+                            nsIProtocolProxyCallback)
 
 nsFtpState::nsFtpState()
     : nsBaseContentStream(true)
@@ -82,6 +92,7 @@ nsFtpState::nsFtpState()
     , mPort(21)
     , mAddressChecked(false)
     , mServerIsIPv6(false)
+    , mUseUTF8(false)
     , mControlStatus(NS_OK)
     , mDeferredCallbackPending(false)
 {
@@ -266,7 +277,12 @@ nsFtpState::EstablishControlConnection()
             mServerType = mControlConnection->mServerType;           
             mPassword   = mControlConnection->mPassword;
             mPwd        = mControlConnection->mPwd;
+            mUseUTF8    = mControlConnection->mUseUTF8;
             mTryingCachedControl = true;
+
+            // we have to set charset to connection if server supports utf-8
+            if (mUseUTF8)
+                mChannel->SetContentCharset(NS_LITERAL_CSTRING("UTF-8"));
             
             // we're already connected to this server, skip login.
             mState = FTP_S_PASV;
@@ -636,7 +652,43 @@ nsFtpState::Process()
                 mInternalError = NS_ERROR_FTP_PWD;
 
             break;
-            
+
+// FEAT for RFC2640 support
+          case FTP_S_FEAT:
+            rv = S_feat();
+
+            if (NS_FAILED(rv))
+                mInternalError = rv;
+
+            MoveToNextState(FTP_R_FEAT);
+            break;
+
+          case FTP_R_FEAT:
+            mState = R_feat();
+
+            // Don't want to overwrite a more explicit status code
+            if (FTP_ERROR == mState && NS_SUCCEEDED(mInternalError))
+                mInternalError = NS_ERROR_FAILURE;
+            break;
+
+// OPTS for some non-RFC2640-compliant servers support
+          case FTP_S_OPTS:
+            rv = S_opts();
+
+            if (NS_FAILED(rv))
+                mInternalError = rv;
+
+            MoveToNextState(FTP_R_OPTS);
+            break;
+
+          case FTP_R_OPTS:
+            mState = R_opts();
+
+            // Don't want to overwrite a more explicit status code
+            if (FTP_ERROR == mState && NS_SUCCEEDED(mInternalError))
+                mInternalError = NS_ERROR_FAILURE;
+            break;
+
           default:
             ;
             
@@ -890,8 +942,8 @@ nsFtpState::R_syst() {
             if (NS_FAILED(rv))
                 return FTP_ERROR;
             
-            PRUnichar* ucs2Response = ToNewUnicode(mResponseMsg);
-            const PRUnichar *formatStrings[1] = { ucs2Response };
+            char16_t* ucs2Response = ToNewUnicode(mResponseMsg);
+            const char16_t *formatStrings[1] = { ucs2Response };
             NS_NAMED_LITERAL_STRING(name, "UnsupportedFTPServer");
 
             nsXPIDLString formattedString;
@@ -913,7 +965,7 @@ nsFtpState::R_syst() {
             return FTP_ERROR;
         }
         
-        return FTP_S_PWD;
+        return FTP_S_FEAT;
     }
 
     if (mResponseCode/100 == 5) {   
@@ -921,7 +973,7 @@ nsFtpState::R_syst() {
         // No clue.  We will just hope it is UNIX type server.
         mServerType = FTP_UNIX_TYPE;
 
-        return FTP_S_PWD;
+        return FTP_S_FEAT;
     }
     return FTP_ERROR;
 }
@@ -1124,6 +1176,10 @@ nsFtpState::S_list() {
         nsAutoCString serverType;
         serverType.AppendInt(mServerType);
         mCacheEntry->SetMetaDataElement("servertype", serverType.get());
+
+        nsAutoCString useUTF8;
+        useUTF8.AppendInt(mUseUTF8);
+        mCacheEntry->SetMetaDataElement("useUTF8", useUTF8.get());
 
         // open cache entry for writing, and configure it to receive data.
         if (NS_FAILED(InstallCacheListener())) {
@@ -1541,16 +1597,49 @@ nsFtpState::R_pasv() {
     return FTP_S_SIZE;
 }
 
+nsresult
+nsFtpState::S_feat() {
+    return SendFTPCommand(NS_LITERAL_CSTRING("FEAT" CRLF));
+}
+
+FTP_STATE
+nsFtpState::R_feat() {
+    if (mResponseCode/100 == 2) {
+        if (mResponseMsg.Find(NS_LITERAL_CSTRING(CRLF " UTF8" CRLF), true) > -1) {
+            // This FTP server supports UTF-8 encoding
+            mChannel->SetContentCharset(NS_LITERAL_CSTRING("UTF-8"));
+            mUseUTF8 = true;
+            return FTP_S_OPTS;
+        }
+    }
+
+    mUseUTF8 = false;
+    return FTP_S_PWD;
+}
+
+nsresult
+nsFtpState::S_opts() {
+     // This command is for compatibility of old FTP spec (IETF Draft)
+    return SendFTPCommand(NS_LITERAL_CSTRING("OPTS UTF8 ON" CRLF));
+}
+
+FTP_STATE
+nsFtpState::R_opts() {
+    // Ignore error code because "OPTS UTF8 ON" is for compatibility of
+    // FTP server using IETF draft
+    return FTP_S_PWD;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // nsIRequest methods:
 
 static inline
-uint32_t NowInSeconds()
+uint32_t GetFtpTime()
 {
     return uint32_t(PR_Now() / PR_USEC_PER_SEC);
 }
 
-uint32_t nsFtpState::mSessionStartTime = NowInSeconds();
+uint32_t nsFtpState::mSessionStartTime = GetFtpTime();
 
 /* Is this cache entry valid to use for reading?
  * Since we make up an expiration time for ftp, use the following rules:
@@ -1609,7 +1698,7 @@ nsFtpState::CanReadCacheEntry()
     if (NS_FAILED(rv))
         return false;
 
-    return (NowInSeconds() <= time);
+    return (GetFtpTime() <= time);
 }
 
 nsresult
@@ -1677,9 +1766,19 @@ nsFtpState::Init(nsFtpChannel *channel)
 
     mChannel = channel; // a straight ref ptr to the channel
 
+    // initialize counter for network metering
+    mCountRecv = 0;
+
+#ifdef MOZ_WIDGET_GONK
+    nsCOMPtr<nsINetworkInterface> activeNetwork;
+    GetActiveNetworkInterface(activeNetwork);
+    mActiveNetwork =
+        new nsMainThreadPtrHolder<nsINetworkInterface>(activeNetwork);
+#endif
+
     mKeepRunning = true;
     mSuppliedEntityID = channel->EntityID();
-  
+
     if (channel->UploadStream())
         mAction = PUT;
 
@@ -1724,12 +1823,6 @@ nsFtpState::Init(nsFtpChannel *channel)
         // now unescape it... %xx reduced inline to resulting character
         int32_t len = NS_UnescapeURL(fwdPtr);
         mPath.Assign(fwdPtr, len);
-        if (IsUTF8(mPath)) {
-    	    nsAutoCString originCharset;
-    	    rv = mChannel->URI()->GetOriginCharset(originCharset);
-    	    if (NS_SUCCEEDED(rv) && !originCharset.EqualsLiteral("UTF-8"))
-    	        ConvertUTF8PathToCharset(originCharset);
-        }
 
 #ifdef DEBUG
         if (mPath.FindCharInSet(CRLF) >= 0)
@@ -1833,6 +1926,7 @@ nsFtpState::KillControlConnection()
         mControlConnection->mServerType = mServerType;           
         mControlConnection->mPassword = mPassword;
         mControlConnection->mPwd = mPwd;
+        mControlConnection->mUseUTF8 = mUseUTF8;
         
         nsresult rv = NS_OK;
         // Don't cache controlconnection if anonymous (bug #473371)
@@ -1851,7 +1945,7 @@ nsFtpState::KillControlConnection()
 class nsFtpAsyncAlert : public nsRunnable
 {
 public:
-    nsFtpAsyncAlert(nsIPrompt *aPrompter, nsACString& aResponseMsg)
+    nsFtpAsyncAlert(nsIPrompt *aPrompter, nsString aResponseMsg)
         : mPrompter(aPrompter)
         , mResponseMsg(aResponseMsg)
     {
@@ -1864,15 +1958,15 @@ public:
     NS_IMETHOD Run()
     {
         if (mPrompter) {
-            mPrompter->Alert(nullptr, NS_ConvertASCIItoUTF16(mResponseMsg).get());
+            mPrompter->Alert(nullptr, mResponseMsg.get());
         }
         return NS_OK;
     }
 private:
     nsCOMPtr<nsIPrompt> mPrompter;
-    nsCString mResponseMsg;
+    nsString mResponseMsg;
 };
-    
+
 
 nsresult
 nsFtpState::StopProcessing()
@@ -1896,8 +1990,14 @@ nsFtpState::StopProcessing()
         nsCOMPtr<nsIPrompt> prompter;
         mChannel->GetCallback(prompter);
         if (prompter) {
-            nsCOMPtr<nsIRunnable> alertEvent =
-                new nsFtpAsyncAlert(prompter, mResponseMsg);
+            nsCOMPtr<nsIRunnable> alertEvent;
+            if (mUseUTF8) {
+                alertEvent = new nsFtpAsyncAlert(prompter,
+                    NS_ConvertUTF8toUTF16(mResponseMsg));
+            } else {
+                alertEvent = new nsFtpAsyncAlert(prompter,
+                    NS_ConvertASCIItoUTF16(mResponseMsg));
+            }
             NS_DispatchToMainThread(alertEvent, NS_DISPATCH_NORMAL);
         }
     }
@@ -2169,11 +2269,57 @@ nsFtpState::ReadSegments(nsWriteSegmentFun writer, void *closure,
 
     if (mDataStream) {
         nsWriteSegmentThunk thunk = { this, writer, closure };
-        return mDataStream->ReadSegments(NS_WriteSegmentThunk, &thunk, count,
-                                         result);
+        nsresult rv;
+        rv = mDataStream->ReadSegments(NS_WriteSegmentThunk, &thunk, count,
+                                       result);
+        if (NS_SUCCEEDED(rv)) {
+            CountRecvBytes(*result);
+        }
+        return rv;
     }
 
     return nsBaseContentStream::ReadSegments(writer, closure, count, result);
+}
+
+nsresult
+nsFtpState::SaveNetworkStats(bool enforce)
+{
+#ifdef MOZ_WIDGET_GONK
+    // Obtain app id
+    uint32_t appId;
+    bool isInBrowser;
+    NS_GetAppInfo(mChannel, &appId, &isInBrowser);
+
+    // Check if active network and appid are valid.
+    if (!mActiveNetwork || appId == NECKO_NO_APP_ID) {
+        return NS_OK;
+    }
+
+    if (mCountRecv <= 0) {
+        // There is no traffic, no need to save.
+        return NS_OK;
+    }
+
+    // If |enforce| is false, the traffic amount is saved
+    // only when the total amount exceeds the predefined
+    // threshold.
+    if (!enforce && mCountRecv < NETWORK_STATS_THRESHOLD) {
+        return NS_OK;
+    }
+
+    // Create the event to save the network statistics.
+    // the event is then dispathed to the main thread.
+    nsRefPtr<nsRunnable> event =
+        new SaveNetworkStatsEvent(appId, mActiveNetwork, mCountRecv, 0, false);
+    NS_DispatchToMainThread(event);
+
+    // Reset the counters after saving.
+    mCountRecv = 0;
+
+    return NS_OK;
+#else
+    return NS_ERROR_NOT_IMPLEMENTED;
+#endif
 }
 
 NS_IMETHODIMP
@@ -2195,6 +2341,9 @@ nsFtpState::CloseWithStatus(nsresult status)
     }
 
     if (mDataTransport) {
+        // Save the network stats before data transport is closing.
+        SaveNetworkStats(true);
+
         // Shutdown the data transport.
         mDataTransport->Close(NS_ERROR_ABORT);
         mDataTransport = nullptr;
@@ -2309,6 +2458,12 @@ nsFtpState::ReadCacheEntry()
     nsAutoCString serverNum(serverType.get());
     nsresult err;
     mServerType = serverNum.ToInteger(&err);
+
+    nsXPIDLCString charset;
+    mCacheEntry->GetMetaDataElement("useUTF8", getter_Copies(charset));
+    const char *useUTF8 = charset.get();
+    if (useUTF8 && atoi(useUTF8) == 1)
+        mChannel->SetContentCharset(NS_LITERAL_CSTRING("UTF-8"));
     
     mChannel->PushStreamConverter("text/ftp-dir",
                                   APPLICATION_HTTP_INDEX_FORMAT);
@@ -2382,59 +2537,4 @@ nsFtpState::CheckCache()
     nsresult rv = session->AsyncOpenCacheEntry(key, accessReq, this, false);
     return NS_SUCCEEDED(rv);
 
-}
-
-nsresult
-nsFtpState::ConvertUTF8PathToCharset(const nsACString &aCharset)
-{
-    nsresult rv;
-    NS_ASSERTION(IsUTF8(mPath), "mPath isn't UTF8 string!");
-    NS_ConvertUTF8toUTF16 ucsPath(mPath);
-    nsAutoCString result;
-
-    nsCOMPtr<nsICharsetConverterManager> charsetMgr(
-        do_GetService("@mozilla.org/charset-converter-manager;1", &rv));
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    nsCOMPtr<nsIUnicodeEncoder> encoder;
-    rv = charsetMgr->GetUnicodeEncoder(PromiseFlatCString(aCharset).get(),
-                                       getter_AddRefs(encoder));
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    int32_t len = ucsPath.Length();
-    int32_t maxlen;
-
-    rv = encoder->GetMaxLength(ucsPath.get(), len, &maxlen);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    char buf[256], *p = buf;
-    if (uint32_t(maxlen) > sizeof(buf) - 1) {
-        p = (char *) malloc(maxlen + 1);
-        if (!p)
-            return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    rv = encoder->Convert(ucsPath.get(), &len, p, &maxlen);
-    if (NS_FAILED(rv))
-        goto end;
-    if (rv == NS_ERROR_UENC_NOMAPPING) {
-        NS_WARNING("unicode conversion failed");
-        rv = NS_ERROR_UNEXPECTED;
-        goto end;
-    }
-    p[maxlen] = 0;
-    result.Assign(p);
-
-    len = sizeof(buf) - 1;
-    rv = encoder->Finish(buf, &len);
-    if (NS_FAILED(rv))
-        goto end;
-    buf[len] = 0;
-    result.Append(buf);
-    mPath = result;
-
-end:
-    if (p != buf)
-        free(p);
-    return rv;
 }

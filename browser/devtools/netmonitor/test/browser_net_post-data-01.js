@@ -9,7 +9,7 @@ function test() {
   initNetMonitor(POST_DATA_URL).then(([aTab, aDebuggee, aMonitor]) => {
     info("Starting test... ");
 
-    let { document, L10N, SourceEditor, NetMonitorView } = aMonitor.panelWin;
+    let { document, L10N, Editor, NetMonitorView } = aMonitor.panelWin;
     let { RequestsMenu, NetworkDetails } = NetMonitorView;
 
     RequestsMenu.lazyUpdate = false;
@@ -40,14 +40,14 @@ function test() {
       EventUtils.sendMouseEvent({ type: "mousedown" },
         document.querySelectorAll("#details-pane tab")[2]);
 
-      testParamsTab("urlencoded")
-        .then(() => {
-          RequestsMenu.selectedIndex = 1;
-          return testParamsTab("multipart");
-        })
-        .then(() => {
-          return teardown(aMonitor);
-        })
+      let TAB_UPDATED = aMonitor.panelWin.EVENTS.TAB_UPDATED;
+      waitFor(aMonitor.panelWin, TAB_UPDATED).then(() =>
+        testParamsTab("urlencoded")
+      ).then(() => {
+        RequestsMenu.selectedIndex = 1;
+        return waitFor(aMonitor.panelWin, TAB_UPDATED);
+      }).then(() => testParamsTab("multipart"))
+        .then(() => teardown(aMonitor))
         .then(finish);
 
       function testParamsTab(aType) {
@@ -114,7 +114,7 @@ function test() {
           is(postScope.querySelectorAll(".variables-view-variable .value")[1].getAttribute("value"),
             "\"123\"", "The second post param value was incorrect.");
 
-          return Promise.resolve();
+          return promise.resolve();
         }
         else {
           checkVisibility("params textarea");
@@ -141,7 +141,7 @@ function test() {
               "The text shown in the source editor is incorrect (3.2).");
             ok(aEditor.getText().contains("Extra data"),
               "The text shown in the source editor is incorrect (4.2).");
-            is(aEditor.getMode(), SourceEditor.MODES.TEXT,
+            is(aEditor.getMode(), Editor.modes.text,
               "The mode active in the source editor is incorrect.");
           });
         }

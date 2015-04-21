@@ -8,10 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "modules/video_coding/codecs/test/packet_manipulator.h"
+#include "webrtc/modules/video_coding/codecs/test/packet_manipulator.h"
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
 
 namespace webrtc {
 namespace test {
@@ -45,7 +45,7 @@ int PacketManipulatorImpl::ManipulatePackets(
   packet_reader_->InitializeReading(encoded_image->_buffer,
                                     encoded_image->_length,
                                     config_.packet_size_in_bytes);
-  WebRtc_UWord8* packet = NULL;
+  uint8_t* packet = NULL;
   int nbr_bytes_to_read;
   // keep track of if we've lost any packets, since then we shall loose
   // the remains of the current frame:

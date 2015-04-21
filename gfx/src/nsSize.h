@@ -8,11 +8,13 @@
 
 #include "nsCoord.h"
 #include "mozilla/gfx/BaseSize.h"
+#include "mozilla/gfx/Point.h"
 
 // Maximum allowable size
 #define NS_MAXSIZE nscoord_MAX
 
 struct nsIntSize;
+typedef nsIntSize gfxIntSize;
 
 struct nsSize : public mozilla::gfx::BaseSize<nscoord, nsSize> {
   typedef mozilla::gfx::BaseSize<nscoord, nsSize> Super;
@@ -35,6 +37,10 @@ struct nsIntSize : public mozilla::gfx::BaseSize<int32_t, nsIntSize> {
   nsIntSize(int32_t aWidth, int32_t aHeight) : Super(aWidth, aHeight) {}
 
   inline nsSize ToAppUnits(nscoord aAppUnitsPerPixel) const;
+  mozilla::gfx::IntSize ToIntSize() const
+  {
+    return mozilla::gfx::IntSize(width, height);
+  };
 };
 
 inline nsIntSize

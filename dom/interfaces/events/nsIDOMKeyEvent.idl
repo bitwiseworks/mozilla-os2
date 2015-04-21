@@ -5,7 +5,7 @@
 
 #include "nsIDOMUIEvent.idl"
 
-[scriptable, builtinclass, uuid(91a3d7f2-223b-4e09-a566-634e7ee0a31d)]
+[scriptable, builtinclass, uuid(d2b3e35f-8627-4732-a92d-cda54c8f8054)]
 interface nsIDOMKeyEvent : nsIDOMUIEvent
 {
   const unsigned long DOM_VK_CANCEL         = 0x03;
@@ -14,7 +14,9 @@ interface nsIDOMKeyEvent : nsIDOMUIEvent
   const unsigned long DOM_VK_TAB            = 0x09;
   const unsigned long DOM_VK_CLEAR          = 0x0C;
   const unsigned long DOM_VK_RETURN         = 0x0D;
-  const unsigned long DOM_VK_ENTER          = 0x0E;
+  // DOM_VK_ENTER has been never used for representing native key events.
+  // Therefore, it's removed for preventing developers being confused.
+  // const unsigned long DOM_VK_ENTER          = 0x0E;
   const unsigned long DOM_VK_SHIFT          = 0x10;
   const unsigned long DOM_VK_CONTROL        = 0x11;
   const unsigned long DOM_VK_ALT            = 0x12;
@@ -252,6 +254,7 @@ interface nsIDOMKeyEvent : nsIDOMUIEvent
   const unsigned long DOM_KEY_LOCATION_JOYSTICK = 0x05;
 
   readonly attribute unsigned long location;
+  readonly attribute boolean       repeat;
 
   readonly attribute DOMString key;
 };

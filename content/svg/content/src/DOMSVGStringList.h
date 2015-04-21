@@ -46,6 +46,8 @@ class SVGStringList;
 class DOMSVGStringList MOZ_FINAL : public nsISupports
                                  , public nsWrapperCache
 {
+  friend class AutoChangeStringListNotifier;
+
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DOMSVGStringList)
@@ -54,8 +56,7 @@ public:
   {
     return mElement;
   }
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   uint32_t NumberOfItems() const;
   uint32_t Length() const;

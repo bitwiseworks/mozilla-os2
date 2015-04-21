@@ -165,6 +165,10 @@ function getFileListing(basePath, testPath, dir, srvScope)
   chromeDir.appendRelativePath(dir);
   basePath += '/' + dir;
 
+  if (testPath == "false" || testPath == false) {
+    testPath = "";
+  }
+
   var ioSvc = Components.classes["@mozilla.org/network/io-service;1"].
               getService(Components.interfaces.nsIIOService);
   var testsDirURI = ioSvc.newFileURI(chromeDir);
@@ -181,12 +185,12 @@ function getFileListing(basePath, testPath, dir, srvScope)
       return null;
 
     if (testsDir.isFile()) {
-      if (fileNameRegexp.test(testsDir.leafName))
+      if (fileNameRegexp.test(testsDir.leafName)) {
         var singlePath = basePath + '/' + testPath;
         var links = {};
         links[singlePath] = true;
         return links;
-
+      }
       // We were passed a file that's not a test...
       return null;
     }
@@ -283,7 +287,9 @@ function extractJarToTmp(jar) {
     var targetDir = buildRelativePath(dirs.getNext(), tmpdir, filepath);
     // parseInt is used because octal escape sequences cause deprecation warnings
     // in strict mode (which is turned on in debug builds)
-    targetDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, parseInt("0777", 8));
+    if (!targetDir.exists()) {
+      targetDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, parseInt("0777", 8));
+    }
   }
 
   //now do the files
@@ -296,6 +302,41 @@ function extractJarToTmp(jar) {
     }
   }
   return tmpdir;
+}
+
+/*
+ * Take a relative path from the current mochitest file
+ * and returns the absolute path for the given test data file.
+ */
+function getTestFilePath(path) {
+  if (path[0] == "/") {
+    throw new Error("getTestFilePath only accepts relative path");
+  }
+  // Get the chrome/jar uri for the current mochitest file
+  // gTestPath being defined by the test harness in browser-chrome tests
+  // or window is being used for mochitest-browser
+  var baseURI = typeof(gTestPath) == "string" ? gTestPath : window.location.href;
+  var parentURI = getResolvedURI(getRootDirectory(baseURI));
+  var file;
+  if (parentURI.JARFile) {
+    // If it's a jar/zip, we have to extract it first
+    file = extractJarToTmp(parentURI);
+  } else {
+    // Otherwise, we can directly cast it to a file URI
+    var fileHandler = Components.classes["@mozilla.org/network/protocol;1?name=file"].
+                      getService(Components.interfaces.nsIFileProtocolHandler);
+    file = fileHandler.getFileFromURLSpec(parentURI.spec);
+  }
+  // Then walk by the given relative path
+  path.split("/")
+      .forEach(function (p) {
+        if (p == "..") {
+          file = file.parent;
+        } else if (p != ".") {
+          file.append(p);
+        }
+      });
+  return file.path;
 }
 
 /*
@@ -322,11 +363,13 @@ function buildRelativePath(jarentryname, destdir, basepath)
   return targetFile;
 }
 
-function readConfig() {
+function readConfig(filename) {
+  filename = filename || "testConfig.js";
+
   var fileLocator = Components.classes["@mozilla.org/file/directory_service;1"].
                     getService(Components.interfaces.nsIProperties);
   var configFile = fileLocator.get("ProfD", Components.interfaces.nsIFile);
-  configFile.append("testConfig.js");
+  configFile.append(filename);
 
   if (!configFile.exists())
     return {};
@@ -340,14 +383,33 @@ function readConfig() {
   return JSON.parse(str);
 }
 
-function getTestList() {
-  var params = {};
+function registerTests() {
+  var testsURI = Components.classes["@mozilla.org/file/directory_service;1"].
+                 getService(Components.interfaces.nsIProperties).
+                 get("ProfD", Components.interfaces.nsILocalFile);
+  testsURI.append("tests.manifest");
+  var ioSvc = Components.classes["@mozilla.org/network/io-service;1"].
+              getService(Components.interfaces.nsIIOService);
+  var manifestFile = ioSvc.newFileURI(testsURI).
+                     QueryInterface(Components.interfaces.nsIFileURL).file;
+
+  Components.manager.QueryInterface(Components.interfaces.nsIComponentRegistrar).
+                     autoRegister(manifestFile);
+}
+
+function getTestList(params, callback) {
+  registerTests();
+
+  var baseurl = 'chrome://mochitests/content';
   if (window.parseQueryString) {
     params = parseQueryString(location.search.substring(1), true);
   }
+  if (!params.baseurl) {
+    params.baseurl = baseurl;
+  }
 
   var config = readConfig();
-  for (p in params) {
+  for (var p in params) {
     if (params[p] == 1) {
       config[p] = true;
     } else if (params[p] == 0) {
@@ -357,32 +419,23 @@ function getTestList() {
     }
   }
   params = config;
+  if (params.manifestFile) {
+    getTestManifest("http://mochi.test:8888/" + params.manifestFile, params, callback);
+    return;
+  }
 
-  var baseurl = 'chrome://mochitests/content';
-  var testsURI = Components.classes["@mozilla.org/file/directory_service;1"]
-                      .getService(Components.interfaces.nsIProperties)
-                      .get("ProfD", Components.interfaces.nsILocalFile);
-  testsURI.append("tests.manifest");
-  var ioSvc = Components.classes["@mozilla.org/network/io-service;1"].
-              getService(Components.interfaces.nsIIOService);
-  var manifestFile = ioSvc.newFileURI(testsURI)
-                  .QueryInterface(Components.interfaces.nsIFileURL).file;
-
-  Components.manager.QueryInterface(Components.interfaces.nsIComponentRegistrar).
-    autoRegister(manifestFile);
-
+  var links = {};
   // load server.js in so we can share template functions
   var scriptLoader = Cc["@mozilla.org/moz/jssubscript-loader;1"].
                        getService(Ci.mozIJSSubScriptLoader);
   var srvScope = {};
   scriptLoader.loadSubScript('chrome://mochikit/content/server.js',
                              srvScope);
-  var links;
 
   if (getResolvedURI(baseurl).JARFile) {
     links = getMochitestJarListing(baseurl, params.testPath, params.testRoot);
   } else {
     links = getFileListing(baseurl, params.testPath, params.testRoot, srvScope);
   }
-  return links;
+  callback(links);
 }

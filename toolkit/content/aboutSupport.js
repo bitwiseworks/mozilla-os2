@@ -4,16 +4,26 @@
 
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
-Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/Troubleshoot.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/Troubleshoot.jsm");
+Cu.import("resource://gre/modules/ResetProfile.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
+                                  "resource://gre/modules/PluralForm.jsm");
 
 window.addEventListener("load", function onload(event) {
+  try {
   window.removeEventListener("load", onload, false);
   Troubleshoot.snapshot(function (snapshot) {
     for (let prop in snapshotFormatters)
       snapshotFormatters[prop](snapshot[prop]);
   });
   populateResetBox();
+  setupEventListeners();
+  } catch (e) {
+    Cu.reportError("stack of load error for about:support: " + e + ": " + e.stack);
+  }
 }, false);
 
 // Each property in this object corresponds to a property in Troubleshoot.jsm's
@@ -31,6 +41,73 @@ let snapshotFormatters = {
     $("version-box").textContent = version;
   },
 
+#ifdef MOZ_CRASHREPORTER
+  crashes: function crashes(data) {
+    let strings = stringBundle();
+    let daysRange = Troubleshoot.kMaxCrashAge / (24 * 60 * 60 * 1000);
+    $("crashes-title").textContent =
+      PluralForm.get(daysRange, strings.GetStringFromName("crashesTitle"))
+                .replace("#1", daysRange);
+    let reportURL;
+    try {
+      reportURL = Services.prefs.getCharPref("breakpad.reportURL");
+      // Ignore any non http/https urls
+      if (!/^https?:/i.test(reportURL))
+        reportURL = null;
+    }
+    catch (e) { }
+    if (!reportURL) {
+      $("crashes-noConfig").style.display = "block";
+      $("crashes-noConfig").classList.remove("no-copy");
+      return;
+    }
+    else {
+      $("crashes-allReports").style.display = "block";
+      $("crashes-allReports").classList.remove("no-copy");
+    }
+
+    if (data.pending > 0) {
+      $("crashes-allReportsWithPending").textContent =
+        PluralForm.get(data.pending, strings.GetStringFromName("pendingReports"))
+                  .replace("#1", data.pending);
+    }
+
+    let dateNow = new Date();
+    $.append($("crashes-tbody"), data.submitted.map(function (crash) {
+      let date = new Date(crash.date);
+      let timePassed = dateNow - date;
+      let formattedDate;
+      if (timePassed >= 24 * 60 * 60 * 1000)
+      {
+        let daysPassed = Math.round(timePassed / (24 * 60 * 60 * 1000));
+        let daysPassedString = strings.GetStringFromName("crashesTimeDays");
+        formattedDate = PluralForm.get(daysPassed, daysPassedString)
+                                  .replace("#1", daysPassed);
+      }
+      else if (timePassed >= 60 * 60 * 1000)
+      {
+        let hoursPassed = Math.round(timePassed / (60 * 60 * 1000));
+        let hoursPassedString = strings.GetStringFromName("crashesTimeHours");
+        formattedDate = PluralForm.get(hoursPassed, hoursPassedString)
+                                  .replace("#1", hoursPassed);
+      }
+      else
+      {
+        let minutesPassed = Math.max(Math.round(timePassed / (60 * 1000)), 1);
+        let minutesPassedString = strings.GetStringFromName("crashesTimeMinutes");
+        formattedDate = PluralForm.get(minutesPassed, minutesPassedString)
+                                  .replace("#1", minutesPassed);
+      }
+      return $.new("tr", [
+        $.new("td", [
+          $.new("a", crash.id, null, {href : reportURL + crash.id})
+        ]),
+        $.new("td", formattedDate)
+      ]);
+    }));
+  },
+#endif
+
   extensions: function extensions(data) {
     $.append($("extensions-tbody"), data.map(function (extension) {
       return $.new("tr", [
@@ -38,6 +115,21 @@ let snapshotFormatters = {
         $.new("td", extension.version),
         $.new("td", extension.isActive),
         $.new("td", extension.id),
+      ]);
+    }));
+  },
+
+  experiments: function experiments(data) {
+    $.append($("experiments-tbody"), data.map(function (experiment) {
+      return $.new("tr", [
+        $.new("td", experiment.name),
+        $.new("td", experiment.id),
+        $.new("td", experiment.description),
+        $.new("td", experiment.active),
+        $.new("td", experiment.endDate),
+        $.new("td", [
+          $.new("a", experiment.detailURL, null, {href : experiment.detailURL,})
+        ]),
       ]);
     }));
   },
@@ -211,10 +303,14 @@ let snapshotFormatters = {
 
 let $ = document.getElementById.bind(document);
 
-$.new = function $_new(tag, textContentOrChildren, className) {
+$.new = function $_new(tag, textContentOrChildren, className, attributes) {
   let elt = document.createElement(tag);
   if (className)
     elt.className = className;
+  if (attributes) {
+    for (let attrName in attributes)
+      elt.setAttribute(attrName, attributes[attrName]);
+  }
   if (Array.isArray(textContentOrChildren))
     this.append(elt, textContentOrChildren);
   else
@@ -264,9 +360,7 @@ function copyRawDataToClipboard(button) {
         message: stringBundle().GetStringFromName("rawDataCopied"),
         duration: "short"
       };
-      Cc["@mozilla.org/android/bridge;1"].
-        getService(Ci.nsIAndroidBridge).
-        handleGeckoMessage(JSON.stringify(message));
+      Services.androidBridge.handleGeckoMessage(message);
 #endif
     });
   }
@@ -320,9 +414,7 @@ function copyContentsToClipboard() {
     message: stringBundle().GetStringFromName("textCopied"),
     duration: "short"
   };
-  Cc["@mozilla.org/android/bridge;1"].
-    getService(Ci.nsIAndroidBridge).
-    handleGeckoMessage(JSON.stringify(message));
+  Services.androidBridge.handleGeckoMessage(message);
 #endif
 }
 
@@ -506,41 +598,32 @@ function openProfileDirectory() {
   new nsLocalFile(profileDir).reveal();
 }
 
-function showUpdateHistory() {
-  var prompter = Cc["@mozilla.org/updates/update-prompt;1"]
-                   .createInstance(Ci.nsIUpdatePrompt);
-  prompter.showUpdateHistory(window);
-}
-
 /**
  * Profile reset is only supported for the default profile if the appropriate migrator exists.
  */
 function populateResetBox() {
-  if (resetSupported())
+  if (ResetProfile.resetSupported())
     $("reset-box").style.visibility = "visible";
 }
 
 /**
- * Restart the application to reset the profile.
+ * Set up event listeners for buttons.
  */
-function resetProfileAndRestart() {
-  let branding = Services.strings.createBundle("chrome://branding/locale/brand.properties");
-  let brandShortName = branding.GetStringFromName("brandShortName");
-
-  // Prompt the user to confirm.
-  let retVals = {
-    reset: false,
-  };
-  window.openDialog("chrome://global/content/resetProfile.xul", null,
-                    "chrome,modal,centerscreen,titlebar,dialog=yes", retVals);
-  if (!retVals.reset)
-    return;
-
-  // Set the reset profile environment variable.
-  let env = Cc["@mozilla.org/process/environment;1"]
-              .getService(Ci.nsIEnvironment);
-  env.set("MOZ_RESET_PROFILE_RESTART", "1");
-
-  let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"].getService(Ci.nsIAppStartup);
-  appStartup.quit(Ci.nsIAppStartup.eForceQuit | Ci.nsIAppStartup.eRestart);
+function setupEventListeners(){
+  $("show-update-history-button").addEventListener("click", function (event) {
+    var prompter = Cc["@mozilla.org/updates/update-prompt;1"].createInstance(Ci.nsIUpdatePrompt);
+      prompter.showUpdateHistory(window);
+  });
+  $("reset-box-button").addEventListener("click", function (event){
+    ResetProfile.openConfirmationDialog(window);
+  });
+  $("copy-raw-data-to-clipboard").addEventListener("click", function (event){
+    copyRawDataToClipboard(this);
+  });
+  $("copy-to-clipboard").addEventListener("click", function (event){
+    copyContentsToClipboard();
+  });
+  $("profile-dir-button").addEventListener("click", function (event){
+    openProfileDirectory();
+  });
 }

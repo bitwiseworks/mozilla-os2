@@ -66,12 +66,14 @@
 #include "nsString.h"
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
+#include "nsIMemoryReporter.h"
 #include "nsIObserver.h"
 #include "nsIUnicodeEncoder.h"
 #include "nsIUnicodeDecoder.h"
 #include "nsInterfaceHashtable.h"
 #include "nsWeakReference.h"
 #include "nsCycleCollectionParticipant.h"
+#include "mozHunspellAllocator.h"
 
 #define MOZ_HUNSPELL_CONTRACTID "@mozilla.org/spellchecker/engine;1"
 #define MOZ_HUNSPELL_CID         \
@@ -79,11 +81,10 @@
 { 0x56c778e4, 0x1bee, 0x45f3, \
   { 0xa6, 0x89, 0x88, 0x66, 0x92, 0xa9, 0x7f, 0xe7 } }
 
-class nsIMemoryReporter;
-
 class mozHunspell : public mozISpellCheckingEngine,
-                   public nsIObserver,
-                   public nsSupportsWeakReference
+                    public nsIObserver,
+                    public nsSupportsWeakReference,
+                    public nsIMemoryReporter
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -91,7 +92,7 @@ public:
   NS_DECL_NSIOBSERVER
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(mozHunspell, mozISpellCheckingEngine)
 
-  mozHunspell() : mHunspell(nullptr), mHunspellReporter(nullptr) { }
+  mozHunspell();
   virtual ~mozHunspell();
 
   nsresult Init();
@@ -99,13 +100,21 @@ public:
   void LoadDictionaryList();
 
   // helper method for converting a word to the charset of the dictionary
-  nsresult ConvertCharset(const PRUnichar* aStr, char ** aDst);
+  nsresult ConvertCharset(const char16_t* aStr, char ** aDst);
+
+  NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
+                            nsISupports* aData)
+  {
+    return MOZ_COLLECT_REPORT(
+      "explicit/spell-check", KIND_HEAP, UNITS_BYTES, HunspellAllocator::MemoryAllocated(),
+      "Memory used by the spell-checking engine.");
+  }
 
 protected:
- 
+
   nsCOMPtr<mozIPersonalDictionary> mPersonalDictionary;
-  nsCOMPtr<nsIUnicodeEncoder>      mEncoder; 
-  nsCOMPtr<nsIUnicodeDecoder>      mDecoder; 
+  nsCOMPtr<nsIUnicodeEncoder>      mEncoder;
+  nsCOMPtr<nsIUnicodeDecoder>      mDecoder;
 
   // Hashtable matches dictionary name to .aff file
   nsInterfaceHashtable<nsStringHashKey, nsIFile> mDictionaries;
@@ -117,8 +126,6 @@ protected:
   nsCOMArray<nsIFile> mDynamicDirectories;
 
   Hunspell  *mHunspell;
-
-  nsIMemoryReporter* mHunspellReporter;
 };
 
 #endif

@@ -9,8 +9,9 @@ this.EXPORTED_SYMBOLS = ["IdentityManager"];
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://services-sync/constants.js");
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-sync/util.js");
 
 // Lazy import to prevent unnecessary load on startup.
@@ -21,7 +22,8 @@ for (let symbol of ["BulkKeyBundle", "SyncKeyBundle"]) {
 }
 
 /**
- * Manages identity and authentication for Sync.
+ * Manages "legacy" identity and authentication for Sync.
+ * See browserid_identity for the Firefox Accounts based identity manager.
  *
  * The following entities are managed:
  *
@@ -57,8 +59,8 @@ for (let symbol of ["BulkKeyBundle", "SyncKeyBundle"]) {
  * and any other function that involves the built-in functionality.
  */
 this.IdentityManager = function IdentityManager() {
-  this._log = Log4Moz.repository.getLogger("Sync.Identity");
-  this._log.Level = Log4Moz.Level[Svc.Prefs.get("log.logger.identity")];
+  this._log = Log.repository.getLogger("Sync.Identity");
+  this._log.Level = Log.Level[Svc.Prefs.get("log.logger.identity")];
 
   this._basicPassword = null;
   this._basicPasswordAllowLookup = true;
@@ -80,6 +82,45 @@ IdentityManager.prototype = {
   _syncKeySet: false,
 
   _syncKeyBundle: null,
+
+  /**
+   * Initialize the identity provider.  Returns a promise that is resolved
+   * when initialization is complete and the provider can be queried for
+   * its state
+   */
+  initialize: function() {
+    // Nothing to do for this identity provider.
+    return Promise.resolve();
+  },
+
+  finalize: function() {
+    // Nothing to do for this identity provider.
+    return Promise.resolve();
+  },
+
+  /**
+   * Called whenever Service.logout() is called.
+   */
+  logout: function() {
+    // nothing to do for this identity provider.
+  },
+
+  /**
+   * Ensure the user is logged in.  Returns a promise that resolves when
+   * the user is logged in, or is rejected if the login attempt has failed.
+   */
+  ensureLoggedIn: function() {
+    // nothing to do for this identity provider
+    return Promise.resolve();
+  },
+
+  /**
+   * Indicates if the identity manager is still initializing
+   */
+  get readyToAuthenticate() {
+    // We initialize in a fully sync manner, so we are always finished.
+    return true;
+  },
 
   get account() {
     return Svc.Prefs.get("account", this.username);
@@ -133,7 +174,21 @@ IdentityManager.prototype = {
     // If we change the username, we interpret this as a major change event
     // and wipe out the credentials.
     this._log.info("Username changed. Removing stored credentials.");
+    this.resetCredentials();
+  },
+
+  /**
+   * Resets/Drops all credentials we hold for the current user.
+   */
+  resetCredentials: function() {
     this.basicPassword = null;
+    this.resetSyncKey();
+  },
+
+  /**
+   * Resets/Drops the sync key we hold for the current user.
+   */
+  resetSyncKey: function() {
     this.syncKey = null;
     // syncKeyBundle cleared as a result of setting syncKey.
   },
@@ -414,9 +469,11 @@ IdentityManager.prototype = {
    * Deletes Sync credentials from the password manager.
    */
   deleteSyncCredentials: function deleteSyncCredentials() {
-    let logins = Services.logins.findLogins({}, PWDMGR_HOST, "", "");
-    for each (let login in logins) {
-      Services.logins.removeLogin(login);
+    for (let host of Utils.getSyncCredentialsHosts()) {
+      let logins = Services.logins.findLogins({}, host, "", "");
+      for each (let login in logins) {
+        Services.logins.removeLogin(login);
+      }
     }
 
     // Wait until after store is updated in case it fails.
@@ -491,5 +548,15 @@ IdentityManager.prototype = {
   onRESTRequestBasic: function onRESTRequestBasic(request) {
     let up = this.username + ":" + this.basicPassword;
     request.setHeader("authorization", "Basic " + btoa(up));
-  }
+  },
+
+  createClusterManager: function(service) {
+    Cu.import("resource://services-sync/stages/cluster.js");
+    return new ClusterManager(service);
+  },
+
+  offerSyncOptions: function () {
+    // Do nothing for Sync 1.1.
+    return {accepted: true};
+  },
 };

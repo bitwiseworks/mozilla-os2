@@ -205,21 +205,22 @@
   */
 
 #include "mozilla/dom/DirectionalityUtils.h"
+
 #include "nsINode.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/dom/Element.h"
 #include "nsIDOMHTMLDocument.h"
 #include "nsUnicodeProperties.h"
 #include "nsTextFragment.h"
 #include "nsAttrValue.h"
-#include "nsContentUtils.h"
 #include "nsTextNode.h"
 #include "nsCheapSets.h"
 
 namespace mozilla {
 
-typedef mozilla::dom::Element Element;
+using mozilla::dom::Element;
 
 /**
  * Returns true if aElement is one of the elements whose text content should not
@@ -302,11 +303,11 @@ inline static bool NodeAffectsDirAutoAncestor(nsINode* aTextNode)
  * @return the directionality of the string
  */
 static Directionality
-GetDirectionFromText(const PRUnichar* aText, const uint32_t aLength,
+GetDirectionFromText(const char16_t* aText, const uint32_t aLength,
                      uint32_t* aFirstStrong = nullptr)
 {
-  const PRUnichar* start = aText;
-  const PRUnichar* end = aText + aLength;
+  const char16_t* start = aText;
+  const char16_t* end = aText + aLength;
 
   while (start < end) {
     uint32_t current = start - aText;
@@ -319,12 +320,15 @@ GetDirectionFromText(const PRUnichar* aText, const uint32_t aLength,
       current++;
     }
 
-    Directionality dir = GetDirectionFromChar(ch);
-    if (dir != eDir_NotSet) {
-      if (aFirstStrong) {
-        *aFirstStrong = current;
+    // Just ignore lone surrogates
+    if (!IS_SURROGATE(ch)) {
+      Directionality dir = GetDirectionFromChar(ch);
+      if (dir != eDir_NotSet) {
+        if (aFirstStrong) {
+          *aFirstStrong = current;
+        }
+        return dir;
       }
-      return dir;
     }
   }
 
@@ -541,7 +545,7 @@ public:
 
   void EnsureMapIsClear(nsINode* aTextNode)
   {
-    uint32_t clearedEntries =
+    DebugOnly<uint32_t> clearedEntries =
       mElements.EnumerateEntries(ClearEntry, aTextNode);
     MOZ_ASSERT(clearedEntries == 0, "Map should be empty already");
   }

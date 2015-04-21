@@ -16,15 +16,17 @@
 
 #include <string.h>
 
-#include "../source/event.h"
-#include "media_opt_test.h"
-#include "mt_test_common.h"
-#include "receiver_tests.h" // shared RTP state and receive side threads
-#include "rtp_rtcp.h"
-#include "test_macros.h"
-#include "test_util.h" // send side callback
-#include "thread_wrapper.h"
-#include "video_coding.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_payload_registry.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_receiver.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
+#include "webrtc/modules/video_coding/main/interface/video_coding.h"
+#include "webrtc/modules/video_coding/main/test/media_opt_test.h"
+#include "webrtc/modules/video_coding/main/test/mt_test_common.h"
+#include "webrtc/modules/video_coding/main/test/receiver_tests.h"
+#include "webrtc/modules/video_coding/main/test/test_macros.h"
+#include "webrtc/modules/video_coding/main/test/test_util.h"
+#include "webrtc/system_wrappers/interface/thread_wrapper.h"
+#include "webrtc/test/testsupport/fileutils.h"
 
 using namespace webrtc;
 
@@ -35,11 +37,11 @@ MainSenderThread(void* obj)
     EventWrapper& waitEvent = *EventWrapper::Create();
     // preparing a frame for encoding
     I420VideoFrame sourceFrame;
-    WebRtc_Word32 width = state->_args.width;
-    WebRtc_Word32 height = state->_args.height;
+    int32_t width = state->_args.width;
+    int32_t height = state->_args.height;
     float frameRate = state->_args.frameRate;
-    WebRtc_Word32 lengthSourceFrame  = 3*width*height/2;
-    WebRtc_UWord8* tmpBuffer = new WebRtc_UWord8[lengthSourceFrame];
+    int32_t lengthSourceFrame  = 3*width*height/2;
+    uint8_t* tmpBuffer = new uint8_t[lengthSourceFrame];
 
     if (state->_sourceFile == NULL)
     {
@@ -66,10 +68,10 @@ MainSenderThread(void* obj)
                                 size_uv, tmpBuffer + size_y + size_uv,
                                 width, height,
                                 width, half_width, half_width);
-        state->_timestamp += (WebRtc_UWord32)(9e4 / frameRate);
+        state->_timestamp += (uint32_t)(9e4 / frameRate);
         sourceFrame.set_timestamp(state->_timestamp);
 
-        WebRtc_Word32 ret = state->_vcm.AddVideoFrame(sourceFrame);
+        int32_t ret = state->_vcm.AddVideoFrame(sourceFrame);
         if (ret < 0)
         {
             printf("Add Frame error: %d\n", ret);
@@ -90,7 +92,7 @@ bool
 IntSenderThread(void* obj)
 {
     SendSharedState* state = static_cast<SendSharedState*>(obj);
-    state->_vcm.SetChannelParameters(1000,30,0);
+    state->_vcm.SetChannelParameters(1000000,30,0);
 
     return true;
 }
@@ -106,28 +108,28 @@ int MTRxTxTest(CmdArgs& args)
     else
         outname = args.outputFile;
 
-    WebRtc_UWord16  width = args.width;
-    WebRtc_UWord16  height = args.height;
+    uint16_t  width = args.width;
+    uint16_t  height = args.height;
 
     float         frameRate = args.frameRate;
     float         bitRate = args.bitRate;
-    WebRtc_Word32   numberOfCores = 1;
+    int32_t   numberOfCores = 1;
 
     // error resilience/network
     // Nack support is currently not implemented in this test.
     bool          nackEnabled = false;
     bool          fecEnabled = false;
-    WebRtc_UWord8   rttMS = 20;
+    uint8_t   rttMS = 20;
     float         lossRate = 0.0*255; // no packet loss
-    WebRtc_UWord32  renderDelayMs = 0;
-    WebRtc_UWord32  minPlayoutDelayMs = 0;
+    uint32_t  renderDelayMs = 0;
+    uint32_t  minPlayoutDelayMs = 0;
 
     /* TEST SET-UP */
 
     // Set up trace
     Trace::CreateTrace();
     Trace::SetTraceFile((test::OutputPath() + "MTRxTxTestTrace.txt").c_str());
-    Trace::SetLevelFilter(webrtc::kTraceAll);
+    Trace::set_level_filter(webrtc::kTraceAll);
 
     FILE* sourceFile;
     FILE* decodedFile;
@@ -143,39 +145,55 @@ int MTRxTxTest(CmdArgs& args)
         printf("Cannot read file %s.\n", outname.c_str());
         return -1;
     }
-    TickTimeBase clock;
-    VideoCodingModule* vcm = VideoCodingModule::Create(1, &clock);
+    VideoCodingModule* vcm = VideoCodingModule::Create(1);
     RtpDataCallback dataCallback(vcm);
 
     RTPSendCompleteCallback* outgoingTransport =
-        new RTPSendCompleteCallback(&clock, "dump.rtp");
+        new RTPSendCompleteCallback(Clock::GetRealTimeClock(), "dump.rtp");
 
     RtpRtcp::Configuration configuration;
     configuration.id = 1;
     configuration.audio = false;
-    configuration.incoming_data = &dataCallback;
     configuration.outgoing_transport = outgoingTransport;
     RtpRtcp* rtp = RtpRtcp::CreateRtpRtcp(configuration);
+    scoped_ptr<RTPPayloadRegistry> registry(new RTPPayloadRegistry(
+        -1, RTPPayloadStrategy::CreateStrategy(false)));
+    scoped_ptr<RtpReceiver> rtp_receiver(
+        RtpReceiver::CreateVideoReceiver(-1, Clock::GetRealTimeClock(),
+                                         &dataCallback, NULL, registry.get()));
 
     // registering codecs for the RTP module
-    VideoCodec videoCodec;
-    strncpy(videoCodec.plName, "ULPFEC", 32);
-    videoCodec.plType = VCM_ULPFEC_PAYLOAD_TYPE;
-    TEST(rtp->RegisterReceivePayload(videoCodec) == 0);
+    VideoCodec video_codec;
+    strncpy(video_codec.plName, "ULPFEC", 32);
+    video_codec.plType = VCM_ULPFEC_PAYLOAD_TYPE;
+    TEST(rtp_receiver->RegisterReceivePayload(video_codec.plName,
+                                              video_codec.plType,
+                                              90000,
+                                              0,
+                                              video_codec.maxBitrate) == 0);
 
-    strncpy(videoCodec.plName, "RED", 32);
-    videoCodec.plType = VCM_RED_PAYLOAD_TYPE;
-    TEST(rtp->RegisterReceivePayload(videoCodec) == 0);
+    strncpy(video_codec.plName, "RED", 32);
+    video_codec.plType = VCM_RED_PAYLOAD_TYPE;
+    TEST(rtp_receiver->RegisterReceivePayload(video_codec.plName,
+                                              video_codec.plType,
+                                              90000,
+                                              0,
+                                              video_codec.maxBitrate) == 0);
 
-    strncpy(videoCodec.plName, args.codecName.c_str(), 32);
-    videoCodec.plType = VCM_VP8_PAYLOAD_TYPE;
-    videoCodec.maxBitrate = 10000;
-    videoCodec.codecType = args.codecType;
-    TEST(rtp->RegisterReceivePayload(videoCodec) == 0);
-    TEST(rtp->RegisterSendPayload(videoCodec) == 0);
+    strncpy(video_codec.plName, args.codecName.c_str(), 32);
+    video_codec.plType = VCM_VP8_PAYLOAD_TYPE;
+    video_codec.maxBitrate = 10000;
+    video_codec.codecType = args.codecType;
+    TEST(rtp_receiver->RegisterReceivePayload(video_codec.plName,
+                                              video_codec.plType,
+                                              90000,
+                                              0,
+                                              video_codec.maxBitrate) == 0);
+    TEST(rtp->RegisterSendPayload(video_codec) == 0);
 
     // inform RTP Module of error resilience features
-    TEST(rtp->SetGenericFECStatus(fecEnabled, VCM_RED_PAYLOAD_TYPE, VCM_ULPFEC_PAYLOAD_TYPE) == 0);
+    TEST(rtp->SetGenericFECStatus(fecEnabled, VCM_RED_PAYLOAD_TYPE,
+                                  VCM_ULPFEC_PAYLOAD_TYPE) == 0);
 
     //VCM
     if (vcm->InitializeReceiver() < 0)
@@ -189,7 +207,7 @@ int MTRxTxTest(CmdArgs& args)
     // registering codecs for the VCM module
     VideoCodec sendCodec;
     vcm->InitializeSender();
-    WebRtc_Word32 numberOfCodecs = vcm->NumberOfCodecs();
+    int32_t numberOfCodecs = vcm->NumberOfCodecs();
     if (numberOfCodecs < 1)
     {
         return -1;
@@ -205,7 +223,7 @@ int MTRxTxTest(CmdArgs& args)
     sendCodec.startBitrate = (int) bitRate;
     sendCodec.height = height;
     sendCodec.width = width;
-    sendCodec.maxFramerate = (WebRtc_UWord8)frameRate;
+    sendCodec.maxFramerate = (uint8_t)frameRate;
     vcm->RegisterSendCodec(&sendCodec, numberOfCores, 1440);
     vcm->RegisterReceiveCodec(&sendCodec, numberOfCores); // same settings for encode and decode
 
@@ -239,10 +257,10 @@ int MTRxTxTest(CmdArgs& args)
     FecProtectionParams delta_params = protectionCallback.DeltaFecParameters();
     FecProtectionParams key_params = protectionCallback.KeyFecParameters();
     rtp->SetFecParameters(&delta_params, &key_params);
-    rtp->SetNACKStatus(nackEnabled ? kNackRtcp : kNackOff);
+    rtp_receiver->SetNACKStatus(nackEnabled ? kNackRtcp : kNackOff);
 
-    vcm->SetChannelParameters((WebRtc_UWord32) bitRate,
-                              (WebRtc_UWord8) lossRate, rttMS);
+    vcm->SetChannelParameters(static_cast<uint32_t>(1000 * bitRate),
+                              (uint8_t) lossRate, rttMS);
 
     SharedRTPState mtState(*vcm, *rtp); // receive side
     SendSharedState mtSendState(*vcm, *rtp, args); // send side
@@ -361,4 +379,3 @@ int MTRxTxTest(CmdArgs& args)
     return 0;
 
 }
-

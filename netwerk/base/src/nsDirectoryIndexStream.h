@@ -8,12 +8,11 @@
 
 #include "mozilla/Attributes.h"
 
-#include "nsIFile.h"
 #include "nsString.h"
 #include "nsIInputStream.h"
-#include "nsCOMPtr.h"
 #include "nsCOMArray.h"
-#include "nsITextToSubURI.h"
+
+class nsIFile;
 
 class nsDirectoryIndexStream MOZ_FINAL : public nsIInputStream
 {
@@ -40,7 +39,7 @@ public:
     Create(nsIFile* aDir, nsIInputStream** aStreamResult);
 
     // nsISupportsInterface
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
 
     // nsIInputStream interface
     NS_DECL_NSIINPUTSTREAM

@@ -5,9 +5,17 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DIRS += ['src']
-TEST_DIRS += ['tests']
 
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/browser/components/',
+XPCSHELL_TESTS_MANIFESTS += [
+    'tests/unit/xpcshell.ini',
 ]
 
+MOCHITEST_CHROME_MANIFESTS += [
+    'tests/chrome/chrome.ini'
+]
+
+BROWSER_CHROME_MANIFESTS += [
+    'tests/browser/browser.ini',
+]
+
+JAR_MANIFESTS += ['jar.mn']

@@ -37,17 +37,13 @@
 #include "nsError.h"
 #include "nsFocusManager.h"
 #include "mozilla/Services.h"
+#include "mozilla/dom/Element.h"
+#include "nsISimpleEnumerator.h"
 
 #if DEBUG
 #include "nsIWebNavigation.h"
 #include "nsXPIDLString.h"
 #endif
-
-#if defined(XP_MACOSX) && !defined(__LP64__)
-#include "nsAutoPtr.h"
-#include <Carbon/Carbon.h>
-#endif
-
 
 //*****************************************************************************
 // nsWebBrowserFind
@@ -67,7 +63,7 @@ nsWebBrowserFind::~nsWebBrowserFind()
 {
 }
 
-NS_IMPL_ISUPPORTS2(nsWebBrowserFind, nsIWebBrowserFind, nsIWebBrowserFindInFrames)
+NS_IMPL_ISUPPORTS(nsWebBrowserFind, nsIWebBrowserFind, nsIWebBrowserFindInFrames)
 
 
 /* boolean findNext (); */
@@ -239,44 +235,16 @@ NS_IMETHODIMP nsWebBrowserFind::FindNext(bool *outDidFind)
 
 
 /* attribute wstring searchString; */
-NS_IMETHODIMP nsWebBrowserFind::GetSearchString(PRUnichar * *aSearchString)
+NS_IMETHODIMP nsWebBrowserFind::GetSearchString(char16_t * *aSearchString)
 {
     NS_ENSURE_ARG_POINTER(aSearchString);
-#if defined(XP_MACOSX) && !defined(__LP64__)
-    OSStatus err;
-    ScrapRef scrap;
-    err = ::GetScrapByName(kScrapFindScrap, kScrapGetNamedScrap, &scrap);
-    if (err == noErr) {
-        Size byteCount;
-        err = ::GetScrapFlavorSize(scrap, kScrapFlavorTypeUnicode, &byteCount);
-        if (err == noErr) {
-            NS_ASSERTION(byteCount%2 == 0, "byteCount not a multiple of 2");
-            nsAutoArrayPtr<PRUnichar> buffer(new PRUnichar[byteCount/2 + 1]);
-            NS_ENSURE_TRUE(buffer, NS_ERROR_OUT_OF_MEMORY);
-            err = ::GetScrapFlavorData(scrap, kScrapFlavorTypeUnicode, &byteCount, buffer.get());
-            if (err == noErr) {
-                buffer[byteCount/2] = PRUnichar('\0');
-                mSearchString.Assign(buffer);
-            }
-        }
-    }    
-#endif
     *aSearchString = ToNewUnicode(mSearchString);
     return NS_OK;
 }
 
-NS_IMETHODIMP nsWebBrowserFind::SetSearchString(const PRUnichar * aSearchString)
+NS_IMETHODIMP nsWebBrowserFind::SetSearchString(const char16_t * aSearchString)
 {
     mSearchString.Assign(aSearchString);
-#if defined(XP_MACOSX) && !defined(__LP64__)
-    OSStatus err;
-    ScrapRef scrap;
-    err = ::GetScrapByName(kScrapFindScrap, kScrapClearNamedScrap, &scrap);
-    if (err == noErr) {
-        ::PutScrapFlavor(scrap, kScrapFlavorTypeUnicode, kScrapFlavorMaskNone,
-        (mSearchString.Length()*2), aSearchString);
-    }
-#endif
     return NS_OK;
 }
 
@@ -851,7 +819,8 @@ nsresult nsWebBrowserFind::OnFind(nsIDOMWindow *aFoundWindow)
       nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(aFoundWindow));
       NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
 
-      nsCOMPtr<nsIDOMElement> frameElement = window->GetFrameElementInternal();
+      nsCOMPtr<nsIDOMElement> frameElement =
+        do_QueryInterface(window->GetFrameElementInternal());
       if (frameElement)
         fm->SetFocus(frameElement, 0);
 

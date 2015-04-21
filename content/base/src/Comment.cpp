@@ -8,9 +8,9 @@
  */
 
 #include "nsCOMPtr.h"
-#include "mozilla/dom/Element.h" // DOMCI_NODE_DATA
 #include "mozilla/dom/Comment.h"
 #include "mozilla/dom/CommentBinding.h"
+#include "mozilla/IntegerPrintfMacros.h"
 
 using namespace mozilla;
 using namespace dom;
@@ -22,8 +22,8 @@ Comment::~Comment()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED3(Comment, nsGenericDOMDataNode, nsIDOMNode,
-                             nsIDOMCharacterData, nsIDOMComment)
+NS_IMPL_ISUPPORTS_INHERITED(Comment, nsGenericDOMDataNode, nsIDOMNode,
+                            nsIDOMCharacterData, nsIDOMComment)
 
 bool
 Comment::IsNodeOfType(uint32_t aFlags) const
@@ -50,7 +50,7 @@ Comment::List(FILE* out, int32_t aIndent) const
   int32_t indx;
   for (indx = aIndent; --indx >= 0; ) fputs("  ", out);
 
-  fprintf(out, "Comment@%p refcount=%d<!--", (void*)this, mRefCnt.get());
+  fprintf(out, "Comment@%p refcount=%" PRIuPTR "<!--", (void*)this, mRefCnt.get());
 
   nsAutoString tmp;
   ToCString(tmp, 0, mText.GetLength());
@@ -61,10 +61,10 @@ Comment::List(FILE* out, int32_t aIndent) const
 #endif
 
 /* static */ already_AddRefed<Comment>
-Comment::Constructor(const GlobalObject& aGlobal, const nsAString& aData,
-                     ErrorResult& aRv)
+Comment::Constructor(const GlobalObject& aGlobal,
+                     const nsAString& aData, ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.Get());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
   if (!window || !window->GetDoc()) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -74,9 +74,9 @@ Comment::Constructor(const GlobalObject& aGlobal, const nsAString& aData,
 }
 
 JSObject*
-Comment::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+Comment::WrapNode(JSContext *aCx)
 {
-  return CommentBinding::Wrap(aCx, aScope, this);
+  return CommentBinding::Wrap(aCx, this);
 }
 
 } // namespace dom

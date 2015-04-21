@@ -7,8 +7,8 @@
 #include "nsSVGPaintServerFrame.h"
 
 // Keep others in (case-insensitive) order:
+#include "gfxContext.h"
 #include "nsSVGElement.h"
-#include "nsSVGGeometryFrame.h"
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGPaintServerFrame)
 
@@ -23,6 +23,10 @@ nsSVGPaintServerFrame::SetupPaintServer(gfxContext *aContext,
                           aOpacity);
   if (!pattern)
     return false;
+
+  if (!aContext->IsCairo()) {
+    pattern->CacheColorStops(aContext->GetDrawTarget());
+  }
 
   aContext->SetPattern(pattern);
   return true;

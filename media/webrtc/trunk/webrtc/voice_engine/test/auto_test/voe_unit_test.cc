@@ -10,21 +10,23 @@
 
 #include "webrtc/voice_engine/test/auto_test/voe_unit_test.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <cassert>
 #if defined(_WIN32)
 #include <conio.h>
 #endif
 
-#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 #include "webrtc/system_wrappers/interface/sleep.h"
+#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 #include "webrtc/test/testsupport/fileutils.h"
-#include "webrtc/voice_engine/voice_engine_defines.h"
 #include "webrtc/voice_engine/test/auto_test/fakes/fake_media_process.h"
+#include "webrtc/voice_engine/test/auto_test/voe_test_defines.h"
+#include "webrtc/voice_engine/voice_engine_defines.h"
 
 using namespace webrtc;
+using namespace test;
 
 namespace voetest {
 
@@ -208,8 +210,8 @@ int VoEUnitTest::DoTest() {
         // Should not be possible
         printf("Invalid selection! (Test code error)\n");
         assert(false);
-    } // switch
-  } // while
+    }  // switch
+  }  // while
 
   return ret;
 }
@@ -248,13 +250,17 @@ int VoEUnitTest::StartMedia(int channel, int rtpPort, bool listen, bool playout,
                             bool send, bool fileAsMic, bool localFile) {
   VoEBase* base = _mgr.BasePtr();
   VoEFile* file = _mgr.FilePtr();
+  VoENetwork* voe_network = _mgr.NetworkPtr();
 
   _listening[channel] = false;
   _playing[channel] = false;
   _sending[channel] = false;
+  voice_channel_transports_[channel].reset(
+      new VoiceChannelTransport(voe_network, channel));
 
-  CHECK(base->SetLocalReceiver(channel, rtpPort));
-  CHECK(base->SetSendDestination(channel, rtpPort, "127.0.0.1"));
+  CHECK(voice_channel_transports_[channel]->SetLocalReceiver(rtpPort));
+  CHECK(voice_channel_transports_[channel]->SetSendDestination("127.0.0.1",
+                                                               rtpPort));
   if (listen) {
     _listening[channel] = true;
     CHECK(base->StartReceive(channel));
@@ -1077,4 +1083,4 @@ int VoEUnitTest::MixerTest() {
   return 0;
 }
 
-} // namespace voetest
+}  // namespace voetest

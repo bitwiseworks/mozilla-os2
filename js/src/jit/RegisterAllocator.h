@@ -8,18 +8,18 @@
 #define jit_RegisterAllocator_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/MathAlgorithms.h"
 
-#include "Ion.h"
-#include "MIR.h"
-#include "MIRGraph.h"
-#include "InlineList.h"
-#include "LIR.h"
-#include "Lowering.h"
+#include "jit/LIR.h"
+#include "jit/MIRGenerator.h"
+#include "jit/MIRGraph.h"
 
 // Generic structures and functions for use by register allocators.
 
 namespace js {
 namespace jit {
+
+class LIRGenerator;
 
 // Structure for running a liveness analysis on a finished register allocation.
 // This analysis can be used for two purposes:
@@ -31,7 +31,7 @@ namespace jit {
 //   streamline the process of prototyping new allocators.
 struct AllocationIntegrityState
 {
-    AllocationIntegrityState(LIRGraph &graph)
+    explicit AllocationIntegrityState(const LIRGraph &graph)
       : graph(graph)
     {}
 
@@ -47,7 +47,7 @@ struct AllocationIntegrityState
 
   private:
 
-    LIRGraph &graph;
+    const LIRGraph &graph;
 
     // For all instructions and phis in the graph, keep track of the virtual
     // registers for all inputs and outputs of the nodes. These are overwritten
@@ -65,9 +65,9 @@ struct AllocationIntegrityState
 
         InstructionInfo(const InstructionInfo &o)
         {
-            inputs.append(o.inputs);
-            temps.append(o.temps);
-            outputs.append(o.outputs);
+            inputs.appendAll(o.inputs);
+            temps.appendAll(o.temps);
+            outputs.appendAll(o.outputs);
         }
     };
     Vector<InstructionInfo, 0, SystemAllocPolicy> instructions;
@@ -76,7 +76,7 @@ struct AllocationIntegrityState
         Vector<InstructionInfo, 5, SystemAllocPolicy> phis;
         BlockInfo() {}
         BlockInfo(const BlockInfo &o) {
-            phis.append(o.phis);
+            phis.appendAll(o.phis);
         }
     };
     Vector<BlockInfo, 0, SystemAllocPolicy> blocks;
@@ -98,8 +98,8 @@ struct AllocationIntegrityState
         typedef IntegrityItem Lookup;
         static HashNumber hash(const IntegrityItem &item) {
             HashNumber hash = item.alloc.hash();
-            hash = JS_ROTATE_LEFT32(hash, 4) ^ item.vreg;
-            hash = JS_ROTATE_LEFT32(hash, 4) ^ HashNumber(item.block->mir()->id());
+            hash = mozilla::RotateLeft(hash, 4) ^ item.vreg;
+            hash = mozilla::RotateLeft(hash, 4) ^ HashNumber(item.block->mir()->id());
             return hash;
         }
         static bool match(const IntegrityItem &one, const IntegrityItem &two) {
@@ -255,7 +255,7 @@ class InstructionDataMap
 
   public:
     InstructionDataMap()
-      : insData_(NULL),
+      : insData_(nullptr),
         numIns_(0)
     { }
 
@@ -285,6 +285,9 @@ class InstructionDataMap
 // Common superclass for register allocators.
 class RegisterAllocator
 {
+    void operator=(const RegisterAllocator &) MOZ_DELETE;
+    RegisterAllocator(const RegisterAllocator &) MOZ_DELETE;
+
   protected:
     // Context
     MIRGenerator *mir;
@@ -297,19 +300,18 @@ class RegisterAllocator
     // Computed data
     InstructionDataMap insData;
 
-  public:
     RegisterAllocator(MIRGenerator *mir, LIRGenerator *lir, LIRGraph &graph)
       : mir(mir),
         lir(lir),
         graph(graph),
         allRegisters_(RegisterSet::All())
     {
-        if (FramePointer != InvalidReg && lir->mir()->instrumentedProfiling())
+        if (FramePointer != InvalidReg && mir->instrumentedProfiling())
             allRegisters_.take(AnyRegister(FramePointer));
-#if defined(JS_CPU_X64)
+#if defined(JS_CODEGEN_X64)
         if (mir->compilingAsmJS())
             allRegisters_.take(AnyRegister(HeapReg));
-#elif defined(JS_CPU_ARM)
+#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS)
         if (mir->compilingAsmJS()) {
             allRegisters_.take(AnyRegister(HeapReg));
             allRegisters_.take(AnyRegister(GlobalReg));
@@ -318,19 +320,24 @@ class RegisterAllocator
 #endif
     }
 
-  protected:
     bool init();
 
-    CodePosition outputOf(uint32_t pos) const {
+    TempAllocator &alloc() const {
+        return mir->alloc();
+    }
+
+    static CodePosition outputOf(uint32_t pos) {
         return CodePosition(pos, CodePosition::OUTPUT);
     }
-    CodePosition outputOf(const LInstruction *ins) const {
+    static CodePosition outputOf(const LInstruction *ins) {
         return CodePosition(ins->id(), CodePosition::OUTPUT);
     }
-    CodePosition inputOf(uint32_t pos) const {
+    static CodePosition inputOf(uint32_t pos) {
         return CodePosition(pos, CodePosition::INPUT);
     }
-    CodePosition inputOf(const LInstruction *ins) const {
+    static CodePosition inputOf(const LInstruction *ins) {
+        // Phi nodes "use" their inputs before the beginning of the block.
+        JS_ASSERT(!ins->isPhi());
         return CodePosition(ins->id(), CodePosition::INPUT);
     }
 
@@ -344,17 +351,29 @@ class RegisterAllocator
         return getMoveGroupAfter(pos.ins());
     }
 
-    size_t findFirstNonCallSafepoint(CodePosition from) const
-    {
-        size_t i = 0;
-        for (; i < graph.numNonCallSafepoints(); i++) {
-            const LInstruction *ins = graph.getNonCallSafepoint(i);
-            if (from <= inputOf(ins))
+    CodePosition minimalDefEnd(LInstruction *ins) {
+        // Compute the shortest interval that captures vregs defined by ins.
+        // Watch for instructions that are followed by an OSI point and/or Nop.
+        // If moves are introduced between the instruction and the OSI point then
+        // safepoint information for the instruction may be incorrect.
+        while (true) {
+            LInstruction *next = insData[outputOf(ins).next()].ins();
+            if (!next->isNop() && !next->isOsiPoint())
                 break;
+            ins = next;
         }
-        return i;
+
+        return outputOf(ins);
     }
 };
+
+static inline AnyRegister
+GetFixedRegister(const LDefinition *def, const LUse *use)
+{
+    return def->isFloatReg()
+           ? AnyRegister(FloatRegister::FromCode(use->registerCode()))
+           : AnyRegister(Register::FromCode(use->registerCode()));
+}
 
 } // namespace jit
 } // namespace js

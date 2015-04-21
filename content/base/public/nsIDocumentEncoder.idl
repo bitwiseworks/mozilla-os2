@@ -18,7 +18,7 @@ class nsIDocument;
 [ptr] native nsINodePtr(nsINode);
 [ptr] native nsIDocumentPtr(nsIDocument);
 
-[scriptable, uuid(82adaeca-63ee-44eb-830a-e1678bb8745e)]
+[scriptable, uuid(3d9371d8-a2ad-403e-8b0e-8885ad3562e3)]
 interface nsIDocumentEncoderNodeFixup : nsISupports
 {
   /**
@@ -35,7 +35,7 @@ interface nsIDocumentEncoderNodeFixup : nsISupports
   nsIDOMNode fixupNode(in nsIDOMNode aNode, out boolean aSerializeCloneKids);
 };
 
-[scriptable, uuid(7222bdf1-c2b9-41f1-a40a-a3d65283a95b)]
+[scriptable, uuid(1158bd7e-a08b-4ff6-9417-6f99144cfccc)]
 interface nsIDocumentEncoder : nsISupports
 {
   // Output methods flag bits. There are a frightening number of these,
@@ -217,6 +217,17 @@ interface nsIDocumentEncoder : nsISupports
   const unsigned long OutputIgnoreMozDirty = (1 << 22);
 
   /**
+   * Output the content of non-text elements as the placehodler character
+   * U+FFFC (OBJECT REPLACEMENT CHARACTER, only for serializing to plaintext).
+   */
+  const unsigned long OutputNonTextContentAsPlaceholder = (1 << 23);
+
+  /**
+   * Don't Strip ending spaces from a line (only for serializing to plaintext).
+   */
+  const unsigned long OutputDontRemoveLineEndingSpaces = (1 << 24);
+
+  /**
    * Initialize with a pointer to the document and the mime type.
    * @param aDocument Document to encode.
    * @param aMimeType MimeType to use. May also be set by SetMimeType.
@@ -317,6 +328,21 @@ interface nsIDocumentEncoder : nsISupports
    */
   AString encodeToStringWithContext( out AString aContextString,
                                      out AString aInfoString);
+
+  /**
+   * Encode the document into a string of limited size.
+   * @param aMaxLength After aMaxLength characters, the encoder will stop
+   *                   encoding new data.
+   *                   Only values > 0 will be considered.
+   *                   The returned string may be slightly larger than
+   *                   aMaxLength because some serializers (eg. HTML)
+   *                   may need to close some tags after they stop
+   *                   encoding new data, or finish a line (72 columns
+   *                   by default for the plain text serializer).
+   *
+   * @return The document encoded into a string.
+   */
+  AString encodeToStringWithMaxLength(in unsigned long aMaxLength);
 
   /**
    * Set the fixup object associated with node persistence.

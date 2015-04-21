@@ -26,13 +26,13 @@
  * Please edit MetaScanner.java instead and regenerate.
  */
 
-#ifndef nsHtml5MetaScanner_h__
-#define nsHtml5MetaScanner_h__
+#ifndef nsHtml5MetaScanner_h
+#define nsHtml5MetaScanner_h
 
 #include "nsIAtom.h"
 #include "nsHtml5AtomTable.h"
 #include "nsString.h"
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsIContent.h"
 #include "nsTraceRefcnt.h"
 #include "jArray.h"
@@ -42,6 +42,7 @@
 #include "nsHtml5ByteReadable.h"
 #include "nsIUnicodeDecoder.h"
 #include "nsHtml5Macros.h"
+#include "nsIContentHandle.h"
 
 class nsHtml5StreamParser;
 
@@ -58,10 +59,10 @@ class nsHtml5Portability;
 class nsHtml5MetaScanner
 {
   private:
-    static staticJArray<PRUnichar,int32_t> CHARSET;
-    static staticJArray<PRUnichar,int32_t> CONTENT;
-    static staticJArray<PRUnichar,int32_t> HTTP_EQUIV;
-    static staticJArray<PRUnichar,int32_t> CONTENT_TYPE;
+    static staticJArray<char16_t,int32_t> CHARSET;
+    static staticJArray<char16_t,int32_t> CONTENT;
+    static staticJArray<char16_t,int32_t> HTTP_EQUIV;
+    static staticJArray<char16_t,int32_t> CONTENT_TYPE;
   protected:
     nsHtml5ByteReadable* readable;
   private:
@@ -74,7 +75,7 @@ class nsHtml5MetaScanner
     int32_t stateSave;
   private:
     int32_t strBufLen;
-    autoJArray<PRUnichar,int32_t> strBuf;
+    autoJArray<char16_t,int32_t> strBuf;
     nsString* content;
     nsString* charset;
     int32_t httpEquivState;

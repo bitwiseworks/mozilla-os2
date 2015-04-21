@@ -46,7 +46,6 @@
            type="arrow"
            orient="vertical"
            level="top"
-           consumeoutsideclicks="true"
            onpopupshown="DownloadsPanel.onPopupShown(event);"
            onpopuphidden="DownloadsPanel.onPopupHidden(event);">
       <!-- The following popup menu should be a child of the panel element,
@@ -105,6 +104,10 @@
                    onmouseout="DownloadsView.onDownloadMouseOut(event);"
                    oncontextmenu="DownloadsView.onDownloadContextMenu(event);"
                    ondragstart="DownloadsView.onDownloadDragStart(event);"/>
+      <description id="emptyDownloads"
+                   mousethrough="always">
+         &downloadsPanelEmpty.label;
+      </description>
 
       <vbox id="downloadsFooter">
         <hbox id="downloadsSummary"

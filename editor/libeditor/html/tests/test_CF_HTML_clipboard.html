@@ -22,13 +22,12 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=572642
 /** Test for Bug 572642 **/
 
 function copyCF_HTML(cfhtml, success, failure) {
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-  const Cc = Components.classes;
-  const Ci = Components.interfaces;
+  const Cc = SpecialPowers.Cc;
+  const Ci = SpecialPowers.Ci;
   const CF_HTML = "application/x-moz-nativehtml";
 
   function getLoadContext() {
-    return window.QueryInterface(Ci.nsIInterfaceRequestor)
+    return SpecialPowers.wrap(window).QueryInterface(Ci.nsIInterfaceRequestor)
                  .getInterface(Ci.nsIWebNavigation)
                  .QueryInterface(Ci.nsILoadContext);
   }
@@ -44,7 +43,6 @@ function copyCF_HTML(cfhtml, success, failure) {
       return;
     }
 
-    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
     var flavors = [CF_HTML];
     if (!cb.hasDataMatchingFlavors(flavors, flavors.length, cb.kGlobalClipboard)) {
       setTimeout(function() copyCF_HTML_worker(success, failure), 100);
@@ -56,10 +54,10 @@ function copyCF_HTML(cfhtml, success, failure) {
     trans.init(getLoadContext());
     trans.addDataFlavor(CF_HTML);
     cb.getData(trans, cb.kGlobalClipboard);
-    var data = {};
+    var data = SpecialPowers.createBlankObject();
     try {
       trans.getTransferData(CF_HTML, data, {});
-      data = data.value.QueryInterface(Ci.nsISupportsCString).data;
+      data = SpecialPowers.wrap(data).value.QueryInterface(Ci.nsISupportsCString).data;
     } catch (e) {
       setTimeout(function() copyCF_HTML_worker(success, failure), 100);
       return;

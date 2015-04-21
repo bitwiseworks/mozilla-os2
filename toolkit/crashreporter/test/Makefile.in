@@ -3,48 +3,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-relativesrcdir  = @relativesrcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-NO_DIST_INSTALL = 1
-
-FORCE_SHARED_LIB = 1
-
-VPATH += \
-  $(srcdir)/../google-breakpad/src/processor/ \
-  $(srcdir)/../google-breakpad/src/common/ \
-  $(topsrcdir)/build/ \
-  $(NULL)
-
-LOCAL_INCLUDES += \
-  -I$(XPIDL_GEN_DIR) \
-  -I$(srcdir)/../google-breakpad/src/ \
-  $(NULL)
 EXTRA_DSO_LDOPTS += $(LIBS_DIR) $(MOZ_COMPONENT_LIBS) $(XPCOM_GLUE_LDOPTS)
 
-EXTRA_JS_MODULES = CrashTestUtils.jsm
+UNIT_FILES = $(SHARED_LIBRARY) $(EXTRA_JS_MODULES)
+UNIT_DEST = $(DEPTH)/_tests/xpcshell/$(relativesrcdir)/unit/
+INSTALL_TARGETS += UNIT
 
-MOCHITEST_BROWSER_FILES = \
-  browser/head.js \
-  browser/crashreport.sjs \
-  browser/browser_aboutCrashes.js \
-  browser/browser_bug471404.js \
-  browser/browser_aboutCrashesResubmit.js \
-  $(NULL)
-
-include $(topsrcdir)/config/rules.mk
-
-DEFINES += -DSHARED_LIBRARY=$(SHARED_LIBRARY) -DNOMINMAX
-
-libs::  $(MOCHITEST_BROWSER_FILES)
-	$(INSTALL) $(foreach f,$^,"$f") $(DEPTH)/_tests/testing/mochitest/browser/$(relativesrcdir)/browser
-
-libs:: $(SHARED_LIBRARY) $(EXTRA_JS_MODULES)
-	$(INSTALL) $^ $(DEPTH)/_tests/xpcshell/$(relativesrcdir)/unit/
-	$(INSTALL) $^ $(DEPTH)/_tests/xpcshell/$(relativesrcdir)/unit_ipc/
-
+UNIT_IPC_FILES = $(UNIT_FILES)
+UNIT_IPC_DEST = $(DEPTH)/_tests/xpcshell/$(relativesrcdir)/unit_ipc/
+INSTALL_TARGETS += UNIT_IPC

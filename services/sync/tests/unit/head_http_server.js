@@ -1,7 +1,7 @@
 const Cm = Components.manager;
 
 // Shared logging for all HTTP server functions.
-Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://gre/modules/Log.jsm");
 const SYNC_HTTP_LOGGER = "Sync.Test.Server";
 const SYNC_API_VERSION = "1.1";
 
@@ -163,7 +163,7 @@ function ServerCollection(wbos, acceptNew, timestamp) {
    * has a modified time.
    */
   this.timestamp = timestamp || new_timestamp();
-  this._log = Log4Moz.repository.getLogger(SYNC_HTTP_LOGGER);
+  this._log = Log.repository.getLogger(SYNC_HTTP_LOGGER);
 }
 ServerCollection.prototype = {
 
@@ -527,7 +527,7 @@ function SyncServer(callback) {
   this.server   = new HttpServer();
   this.started  = false;
   this.users    = {};
-  this._log     = Log4Moz.repository.getLogger(SYNC_HTTP_LOGGER);
+  this._log     = Log.repository.getLogger(SYNC_HTTP_LOGGER);
 
   // Install our own default handler. This allows us to mess around with the
   // whole URL space.
@@ -535,7 +535,6 @@ function SyncServer(callback) {
   handler._handleDefault = this.handleDefault.bind(this, handler);
 }
 SyncServer.prototype = {
-  port:   8080,
   server: null,    // HttpServer.
   users:  null,    // Map of username => {collections, password}.
 
@@ -544,7 +543,7 @@ SyncServer.prototype = {
    *
    * @param port
    *        The numeric port on which to start. A falsy value implies the
-   *        default (8080).
+   *        default, a randomly chosen port.
    * @param cb
    *        A callback function (of no arguments) which is invoked after
    *        startup.
@@ -554,23 +553,25 @@ SyncServer.prototype = {
       this._log.warn("Warning: server already started on " + this.port);
       return;
     }
-    if (port) {
-      this.port = port;
-    }
     try {
-      this.server.start(this.port);
+      this.server.start(port);
+      let i = this.server.identity;
+      this.port = i.primaryPort;
+      this.baseURI = i.primaryScheme + "://" + i.primaryHost + ":" +
+                     i.primaryPort + "/";
       this.started = true;
       if (cb) {
         cb();
       }
     } catch (ex) {
       _("==========================================");
-      _("Got exception starting Sync HTTP server on port " + this.port);
+      _("Got exception starting Sync HTTP server.");
       _("Error: " + Utils.exceptionStr(ex));
-      _("Is there a process already listening on port " + this.port + "?");
+      _("Is there a process already listening on port " + port + "?");
       _("==========================================");
       do_throw(ex);
     }
+
   },
 
   /**
@@ -805,7 +806,12 @@ SyncServer.prototype = {
     }
 
     let [all, version, username, first, rest] = parts;
-    if (version != SYNC_API_VERSION) {
+    // Doing a float compare of the version allows for us to pretend there was
+    // a node-reassignment - eg, we could re-assign from "1.1/user/" to
+    // "1.10/user" - this server will then still accept requests with the new
+    // URL while any code in sync itself which compares URLs will see a
+    // different URL.
+    if (parseFloat(version) != parseFloat(SYNC_API_VERSION)) {
       this._log.debug("SyncServer: Unknown version.");
       throw HTTP_404;
     }
@@ -851,7 +857,7 @@ SyncServer.prototype = {
         // TODO: verify if this is spec-compliant.
         if (req.method != "DELETE") {
           respond(405, "Method Not Allowed", "[]", {"Allow": "DELETE"});
-          return;
+          return undefined;
         }
 
         // Delete all collections and track the timestamp for the response.
@@ -859,7 +865,7 @@ SyncServer.prototype = {
 
         // Return timestamp and OK for deletion.
         respond(200, "OK", JSON.stringify(timestamp));
-        return;
+        return undefined;
       }
 
       let match = this.storageRE.exec(rest);
@@ -874,11 +880,11 @@ SyncServer.prototype = {
           if (!coll) {
             if (wboID) {
               respond(404, "Not found", "Not found");
-              return;
+              return undefined;
             }
             // *cries inside*: Bug 687299.
             respond(200, "OK", "[]");
-            return;
+            return undefined;
           }
           if (!wboID) {
             return coll.collectionHandler(req, resp);
@@ -886,7 +892,7 @@ SyncServer.prototype = {
           let wbo = coll.wbo(wboID);
           if (!wbo) {
             respond(404, "Not found", "Not found");
-            return;
+            return undefined;
           }
           return wbo.handler()(req, resp);
 
@@ -894,7 +900,7 @@ SyncServer.prototype = {
         case "DELETE":
           if (!coll) {
             respond(200, "OK", "{}");
-            return;
+            return undefined;
           }
           if (wboID) {
             let wbo = coll.wbo(wboID);
@@ -903,7 +909,7 @@ SyncServer.prototype = {
               this.callback.onItemDeleted(username, collection, wboID);
             }
             respond(200, "OK", "{}");
-            return;
+            return undefined;
           }
           coll.collectionHandler(req, resp);
 
@@ -934,7 +940,7 @@ SyncServer.prototype = {
           for (let i = 0; i < deleted.length; ++i) {
             this.callback.onItemDeleted(username, collection, deleted[i]);
           }
-          return;
+          return undefined;
         case "POST":
         case "PUT":
           if (!coll) {

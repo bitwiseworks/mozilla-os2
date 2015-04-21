@@ -8,9 +8,10 @@
 #define nsTArray_h__
 
 #include "nsTArrayForwardDeclare.h"
+#include "mozilla/Alignment.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/TypeTraits.h"
-#include "mozilla/Util.h"
 
 #include <string.h>
 
@@ -19,13 +20,16 @@
 #include "nscore.h"
 #include "nsQuickSort.h"
 #include "nsDebug.h"
-#include "nsTraceRefcnt.h"
-#include NEW_H
+#include "nsISupportsImpl.h"
+#include <new>
 
 namespace JS {
 template <class T>
 class Heap;
 } /* namespace JS */
+
+class nsRegion;
+class nsIntRegion;
 
 //
 // nsTArray is a resizable array class, like std::vector.
@@ -62,7 +66,7 @@ class Heap;
 //   T MAY define operator== for searching.
 //
 // (Note that the memmove requirement may be relaxed for certain types - see
-// nsTArray_CopyElements below.)
+// nsTArray_CopyChooser below.)
 //
 // For methods taking a Comparator instance, the Comparator must be a class
 // defining the following methods:
@@ -190,7 +194,7 @@ struct nsTArrayFallibleAllocator : nsTArrayFallibleAllocatorBase
     moz_free(ptr);
   }
 
-  static void SizeTooBig() {
+  static void SizeTooBig(size_t) {
   }
 };
 
@@ -208,8 +212,8 @@ struct nsTArrayInfallibleAllocator : nsTArrayInfallibleAllocatorBase
     moz_free(ptr);
   }
 
-  static void SizeTooBig() {
-    mozalloc_abort("Trying to allocate an infallible array that's too big");
+  static void SizeTooBig(size_t size) {
+    NS_ABORT_OOM(size);
   }
 };
 
@@ -230,7 +234,7 @@ struct nsTArrayFallibleAllocator : nsTArrayFallibleAllocatorBase
     free(ptr);
   }
 
-  static void SizeTooBig() {
+  static void SizeTooBig(size_t) {
   }
 };
 
@@ -239,7 +243,7 @@ struct nsTArrayInfallibleAllocator : nsTArrayInfallibleAllocatorBase
   static void* Malloc(size_t size) {
     void* ptr = malloc(size);
     if (MOZ_UNLIKELY(!ptr)) {
-      HandleOOM();
+      NS_ABORT_OOM(size);
     }
     return ptr;
   }
@@ -247,7 +251,7 @@ struct nsTArrayInfallibleAllocator : nsTArrayInfallibleAllocatorBase
   static void* Realloc(void* ptr, size_t size) {
     void* newptr = realloc(ptr, size);
     if (MOZ_UNLIKELY(!ptr && size)) {
-      HandleOOM();
+      NS_ABORT_OOM(size);
     }
     return newptr;
   }
@@ -256,15 +260,8 @@ struct nsTArrayInfallibleAllocator : nsTArrayInfallibleAllocatorBase
     free(ptr);
   }
 
-  static void SizeTooBig() {
-    HandleOOM();
-  }
-
-private:
-  static void HandleOOM() {
-    fputs("Out of memory allocating nsTArray buffer.\n", stderr);
-    MOZ_CRASH();
-    MOZ_NOT_REACHED();
+  static void SizeTooBig(size_t size) {
+    NS_ABORT_OOM(size);
   }
 };
 
@@ -527,6 +524,11 @@ public:
   // Invoke the copy-constructor in place.
   template<class A>
   static inline void Construct(E *e, const A &arg) {
+    typedef typename mozilla::RemoveCV<E>::Type E_NoCV;
+    typedef typename mozilla::RemoveCV<A>::Type A_NoCV;
+    static_assert(!mozilla::IsSame<E_NoCV*, A_NoCV>::value,
+                  "For safety, we disallow constructing nsTArray<E> elements "
+                  "from E* pointers. See bug 960591.");
     new (static_cast<void *>(e)) E(arg);
   }
   // Invoke the destructor in place.
@@ -573,7 +575,7 @@ struct AssignRangeAlgorithm<true, true> {
 
 //
 // Normally elements are copied with memcpy and memmove, but for some element
-// types that is problematic.  The nsTArray_CopyElements template class can be
+// types that is problematic.  The nsTArray_CopyChooser template class can be
 // specialized to ensure that copying calls constructors and destructors
 // instead, as is done below for JS::Heap<E> elements.
 //
@@ -658,14 +660,28 @@ struct nsTArray_CopyWithConstructors
 // The default behaviour is to use memcpy/memmove for everything.
 //
 template <class E>
-struct nsTArray_CopyElements : public nsTArray_CopyWithMemutils {};
+struct nsTArray_CopyChooser {
+  typedef nsTArray_CopyWithMemutils Type;
+};
 
 //
-// JS::Heap<E> elements require constructors/destructors to be called and so is
+// Some classes require constructors/destructors to be called, so they are
 // specialized here.
 //
 template <class E>
-struct nsTArray_CopyElements<JS::Heap<E> > : public nsTArray_CopyWithConstructors<E> {};
+struct nsTArray_CopyChooser<JS::Heap<E> > {
+  typedef nsTArray_CopyWithConstructors<JS::Heap<E> > Type;
+};
+
+template<>
+struct nsTArray_CopyChooser<nsRegion> {
+  typedef nsTArray_CopyWithConstructors<nsRegion> Type;
+};
+
+template<>
+struct nsTArray_CopyChooser<nsIntRegion> {
+  typedef nsTArray_CopyWithConstructors<nsIntRegion> Type;
+};
 
 //
 // Base class for nsTArray_Impl that is templated on element type and derived
@@ -691,8 +707,8 @@ struct nsTArray_TypedBase<JS::Heap<E>, Derived>
  : public nsTArray_SafeElementAtHelper<JS::Heap<E>, Derived>
 {
   operator const nsTArray<E>& () {
-    MOZ_STATIC_ASSERT(sizeof(E) == sizeof(JS::Heap<E>),
-                      "JS::Heap<E> must be binary compatible with E.");
+    static_assert(sizeof(E) == sizeof(JS::Heap<E>),
+                  "JS::Heap<E> must be binary compatible with E.");
     Derived* self = static_cast<Derived*>(this);
     return *reinterpret_cast<nsTArray<E> *>(self);
   }
@@ -717,11 +733,11 @@ struct nsTArray_TypedBase<JS::Heap<E>, Derived>
 // TArrays can be cast to |const nsTArray&|.
 //
 template<class E, class Alloc>
-class nsTArray_Impl : public nsTArray_base<Alloc, nsTArray_CopyElements<E> >,
+class nsTArray_Impl : public nsTArray_base<Alloc, typename nsTArray_CopyChooser<E>::Type>,
                       public nsTArray_TypedBase<E, nsTArray_Impl<E, Alloc> >
 {
 public:
-  typedef nsTArray_CopyElements<E>                   copy_type;
+  typedef typename nsTArray_CopyChooser<E>::Type     copy_type;
   typedef nsTArray_base<Alloc, copy_type>            base_type;
   typedef typename base_type::size_type              size_type;
   typedef typename base_type::index_type             index_type;
@@ -829,7 +845,7 @@ public:
 
   // @return The amount of memory used by this nsTArray_Impl, excluding
   // sizeof(*this).
-  size_t SizeOfExcludingThis(nsMallocSizeOfFun mallocSizeOf) const {
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
     if (this->UsesAutoArrayBuffer() || Hdr() == EmptyHdr())
       return 0;
     return mallocSizeOf(this->Hdr());
@@ -837,7 +853,7 @@ public:
 
   // @return The amount of memory used by this nsTArray_Impl, including
   // sizeof(*this).
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf) const {
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
     return mallocSizeOf(this) + SizeOfExcludingThis(mallocSizeOf);
   }
 
@@ -1042,6 +1058,40 @@ public:
   //
   // Mutation methods
   //
+  // This method call the destructor on each element of the array, empties it,
+  // but does not shrink the array's capacity.
+  // See also SetLengthAndRetainStorage.
+  // Make sure to call Compact() if needed to avoid keeping a huge array
+  // around.
+  void ClearAndRetainStorage() {
+    if (base_type::mHdr == EmptyHdr()) {
+      return;
+    }
+
+    DestructRange(0, Length());
+    base_type::mHdr->mLength = 0;
+  }
+
+  // This method modifies the length of the array, but unlike SetLength
+  // it doesn't deallocate/reallocate the current internal storage.
+  // The new length MUST be shorter than or equal to the current capacity.
+  // If the new length is larger than the existing length of the array,
+  // then new elements will be constructed using elem_type's default
+  // constructor.  If shorter, elements will be destructed and removed.
+  // See also ClearAndRetainStorage.
+  // @param newLen  The desired length of this array.
+  void SetLengthAndRetainStorage(size_type newLen) {
+    MOZ_ASSERT(newLen <= base_type::Capacity());
+    size_type oldLen = Length();
+    if (newLen > oldLen) {
+      InsertElementsAt(oldLen, newLen - oldLen);
+      return;
+    }
+    if (newLen < oldLen) {
+      DestructRange(newLen, oldLen - newLen);
+      base_type::mHdr->mLength = newLen;
+    }
+  }
 
   // This method replaces a range of elements in this array.
   // @param start     The starting index of the elements to replace.
@@ -1338,14 +1388,14 @@ public:
   // @return        True if the operation succeeded; false otherwise.
   // See also TruncateLength if the new length is guaranteed to be
   // smaller than the old.
-  bool SetLength(size_type newLen) {
+  typename Alloc::ResultType SetLength(size_type newLen) {
     size_type oldLen = Length();
     if (newLen > oldLen) {
-      return InsertElementsAt(oldLen, newLen - oldLen) != nullptr;
+      return Alloc::ConvertBoolToResultType(InsertElementsAt(oldLen, newLen - oldLen) != nullptr);
     }
 
     TruncateLength(newLen);
-    return true;
+    return Alloc::ConvertBoolToResultType(true);
   }
 
   // This method modifies the length of the array, but may only be
@@ -1594,8 +1644,8 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
                             uint32_t aFlags = 0)
 {
   aFlags |= CycleCollectionEdgeNameArrayFlag;
-  size_t length = aField.Length();
-  for (size_t i = 0; i < length; ++i) {
+  uint32_t length = aField.Length();
+  for (uint32_t i = 0; i < length; ++i) {
     ImplCycleCollectionTraverse(aCallback, aField[i], aName, aFlags);
   }
 }
@@ -1667,9 +1717,9 @@ protected:
   // implicit copy-constructors.  If we don't have this method, those
   // copy-constructors will call nsAutoArrayBase's implicit copy-constructor,
   // which won't call Init() and set up the auto buffer!
-  nsAutoArrayBase(const TArrayBase &aOther) {
+  nsAutoArrayBase(const self_type &aOther) {
     Init();
-    AppendElements(aOther);
+    this->AppendElements(aOther);
   }
 
 private:
@@ -1679,9 +1729,9 @@ private:
   friend class nsTArray_base;
 
   void Init() {
-    MOZ_STATIC_ASSERT(MOZ_ALIGNOF(elem_type) <= 8,
-                      "can't handle alignments greater than 8, "
-                      "see nsTArray_base::UsesAutoArrayBuffer()");
+    static_assert(MOZ_ALIGNOF(elem_type) <= 8,
+                  "can't handle alignments greater than 8, "
+                  "see nsTArray_base::UsesAutoArrayBuffer()");
     // Temporary work around for VS2012 RC compiler crash
     Header** phdr = base_type::PtrToHdr();
     *phdr = reinterpret_cast<Header*>(&mAutoBuf);
@@ -1769,10 +1819,10 @@ public:
 // 64-bit system, where the compiler inserts 4 bytes of padding at the end of
 // the auto array to make its size a multiple of alignof(void*) == 8 bytes.
 
-MOZ_STATIC_ASSERT(sizeof(nsAutoTArray<uint32_t, 2>) ==
-                  sizeof(void*) + sizeof(nsTArrayHeader) + sizeof(uint32_t) * 2,
-                  "nsAutoTArray shouldn't contain any extra padding, "
-                  "see the comment");
+static_assert(sizeof(nsAutoTArray<uint32_t, 2>) ==
+              sizeof(void*) + sizeof(nsTArrayHeader) + sizeof(uint32_t) * 2,
+              "nsAutoTArray shouldn't contain any extra padding, "
+              "see the comment");
 
 // Definitions of nsTArray_Impl methods
 #include "nsTArray-inl.h"

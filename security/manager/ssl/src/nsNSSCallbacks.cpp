@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsNSSCallbacks.h"
-
+#include "pkix/pkixtypes.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 #include "nsNSSComponent.h"
@@ -13,32 +13,42 @@
 #include "nsIWebProgressListener.h"
 #include "nsProtectedAuthThread.h"
 #include "nsITokenDialogs.h"
-#include "nsNSSShutDown.h"
 #include "nsIUploadChannel.h"
-#include "nsThreadUtils.h"
 #include "nsIPrompt.h"
 #include "nsProxyRelease.h"
 #include "PSMRunnable.h"
-#include "ScopedNSSTypes.h"
-#include "nsIConsoleService.h"
+#include "nsContentUtils.h"
 #include "nsIHttpChannelInternal.h"
-#include "nsCRT.h"
+#include "nsISupportsPriority.h"
 #include "nsNetUtil.h"
 #include "SharedSSLState.h"
-
 #include "ssl.h"
 #include "sslproto.h"
-#include "ocsp.h"
-#include "nssb64.h"
 
 using namespace mozilla;
 using namespace mozilla::psm;
 
-static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
-
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* gPIPNSSLog;
 #endif
+
+static void AccumulateCipherSuite(Telemetry::ID probe,
+                                  const SSLChannelInfo& channelInfo);
+
+namespace {
+
+// Bits in bit mask for SSL_REASONS_FOR_NOT_FALSE_STARTING telemetry probe
+// These bits are numbered so that the least subtle issues have higher values.
+// This should make it easier for us to interpret the results.
+const uint32_t NPN_NOT_NEGOTIATED = 64;
+const uint32_t KEA_NOT_FORWARD_SECRET = 32;
+const uint32_t KEA_NOT_SAME_AS_EXPECTED = 16;
+const uint32_t KEA_NOT_ALLOWED = 8;
+const uint32_t POSSIBLE_VERSION_DOWNGRADE = 4;
+const uint32_t POSSIBLE_CIPHER_SUITE_DOWNGRADE = 2;
+const uint32_t KEA_NOT_SUPPORTED = 1;
+
+}
 
 class nsHTTPDownloadEvent : public nsRunnable {
 public:
@@ -49,7 +59,7 @@ public:
 
   nsNSSHttpRequestSession *mRequestSession;
   
-  nsCOMPtr<nsHTTPListener> mListener;
+  nsRefPtr<nsHTTPListener> mListener;
   bool mResponsibleForDoneSignal;
   TimeStamp mStartTime;
 };
@@ -81,6 +91,13 @@ nsHTTPDownloadEvent::Run()
   nsCOMPtr<nsIChannel> chan;
   ios->NewChannel(mRequestSession->mURL, nullptr, nullptr, getter_AddRefs(chan));
   NS_ENSURE_STATE(chan);
+
+  // Security operations scheduled through normal HTTP channels are given
+  // high priority to accommodate real time OCSP transactions. Background CRL
+  // fetches happen through a different path (CRLDownloadEvent).
+  nsCOMPtr<nsISupportsPriority> priorityChannel = do_QueryInterface(chan);
+  if (priorityChannel)
+    priorityChannel->AdjustPriority(nsISupportsPriority::PRIORITY_HIGHEST);
 
   chan->SetLoadFlags(nsIRequest::LOAD_ANONYMOUS);
 
@@ -150,7 +167,7 @@ nsHTTPDownloadEvent::Run()
 }
 
 struct nsCancelHTTPDownloadEvent : nsRunnable {
-  nsCOMPtr<nsHTTPListener> mListener;
+  nsRefPtr<nsHTTPListener> mListener;
 
   NS_IMETHOD Run() {
     mListener->FreeLoadGroup(true);
@@ -255,6 +272,30 @@ SECStatus nsNSSHttpRequestSession::trySendAndReceiveFcn(PRPollDesc **pPollDesc,
   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
          ("nsNSSHttpRequestSession::trySendAndReceiveFcn to %s\n", mURL.get()));
 
+  bool onSTSThread;
+  nsresult nrv;
+  nsCOMPtr<nsIEventTarget> sts
+    = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &nrv);
+  if (NS_FAILED(nrv)) {
+    NS_ERROR("Could not get STS service");
+    PR_SetError(PR_INVALID_STATE_ERROR, 0);
+    return SECFailure;
+  }
+
+  nrv = sts->IsOnCurrentThread(&onSTSThread);
+  if (NS_FAILED(nrv)) {
+    NS_ERROR("IsOnCurrentThread failed");
+    PR_SetError(PR_INVALID_STATE_ERROR, 0);
+    return SECFailure;
+  }
+
+  if (onSTSThread) {
+    NS_ERROR("nsNSSHttpRequestSession::trySendAndReceiveFcn called on socket "
+             "thread; this will not work.");
+    PR_SetError(PR_INVALID_STATE_ERROR, 0);
+    return SECFailure;
+  }
+
   const int max_retries = 2;
   int retry_count = 0;
   bool retryable_error = false;
@@ -304,13 +345,13 @@ SECStatus nsNSSHttpRequestSession::trySendAndReceiveFcn(PRPollDesc **pPollDesc,
 void
 nsNSSHttpRequestSession::AddRef()
 {
-  NS_AtomicIncrementRefcnt(mRefCount);
+  ++mRefCount;
 }
 
 void
 nsNSSHttpRequestSession::Release()
 {
-  int32_t newRefCount = NS_AtomicDecrementRefcnt(mRefCount);
+  int32_t newRefCount = --mRefCount;
   if (!newRefCount) {
     delete this;
   }
@@ -569,13 +610,17 @@ nsHTTPListener::~nsHTTPListener()
   if (mResponsibleForDoneSignal)
     send_done_signal();
 
+  if (mResultData) {
+    NS_Free(const_cast<uint8_t *>(mResultData));
+  }
+
   if (mLoader) {
     nsCOMPtr<nsIThread> mainThread(do_GetMainThread());
     NS_ProxyRelease(mainThread, mLoader);
   }
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsHTTPListener, nsIStreamLoaderObserver)
+NS_IMPL_ISUPPORTS(nsHTTPListener, nsIStreamLoaderObserver)
 
 void
 nsHTTPListener::FreeLoadGroup(bool aCancelLoad)
@@ -637,7 +682,8 @@ nsHTTPListener::OnStreamComplete(nsIStreamLoader* aLoader,
       mHttpRequestSucceeded = false;
 
     mResultLen = stringLen;
-    mResultData = string; // reference. Make sure loader lives as long as this
+    mResultData = string; // take ownership of allocation
+    aStatus = NS_SUCCESS_ADOPTED_DATA;
 
     unsigned int rcode;
     rv = hchan->GetResponseStatus(&rcode);
@@ -747,9 +793,11 @@ private:
 
 void PK11PasswordPromptRunnable::RunOnTargetThread()
 {
+  static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+
   nsNSSShutDownPreventionLock locker;
   nsresult rv = NS_OK;
-  PRUnichar *password = nullptr;
+  char16_t *password = nullptr;
   bool value = false;
   nsCOMPtr<nsIPrompt> prompt;
 
@@ -783,13 +831,13 @@ void PK11PasswordPromptRunnable::RunOnTargetThread()
   if (NS_FAILED(rv))
     return; 
 
-  const PRUnichar* formatStrings[1] = { 
+  const char16_t* formatStrings[1] = { 
     ToNewUnicode(NS_ConvertUTF8toUTF16(PK11_GetTokenName(mSlot)))
   };
   rv = nssComponent->PIPBundleFormatStringFromName("CertPassPrompt",
                                       formatStrings, 1,
                                       promptString);
-  nsMemory::Free(const_cast<PRUnichar*>(formatStrings[0]));
+  nsMemory::Free(const_cast<char16_t*>(formatStrings[0]));
 
   if (NS_FAILED(rv))
     return;
@@ -824,67 +872,329 @@ PK11PasswordPrompt(PK11SlotInfo* slot, PRBool retry, void* arg)
   return runnable->mResult;
 }
 
+// call with shutdown prevention lock held
+static void
+PreliminaryHandshakeDone(PRFileDesc* fd)
+{
+  nsNSSSocketInfo* infoObject = (nsNSSSocketInfo*) fd->higher->secret;
+  if (!infoObject)
+    return;
+
+  if (infoObject->IsPreliminaryHandshakeDone())
+    return;
+
+  infoObject->SetPreliminaryHandshakeDone();
+
+  SSLChannelInfo channelInfo;
+  if (SSL_GetChannelInfo(fd, &channelInfo, sizeof(channelInfo)) == SECSuccess) {
+    infoObject->SetSSLVersionUsed(channelInfo.protocolVersion);
+  }
+
+  // Get the NPN value.
+  SSLNextProtoState state;
+  unsigned char npnbuf[256];
+  unsigned int npnlen;
+
+  if (SSL_GetNextProto(fd, &state, npnbuf, &npnlen, 256) == SECSuccess) {
+    if (state == SSL_NEXT_PROTO_NEGOTIATED ||
+        state == SSL_NEXT_PROTO_SELECTED) {
+      infoObject->SetNegotiatedNPN(reinterpret_cast<char *>(npnbuf), npnlen);
+    }
+    else {
+      infoObject->SetNegotiatedNPN(nullptr, 0);
+    }
+    mozilla::Telemetry::Accumulate(Telemetry::SSL_NPN_TYPE, state);
+  }
+  else {
+    infoObject->SetNegotiatedNPN(nullptr, 0);
+  }
+}
+
+SECStatus
+CanFalseStartCallback(PRFileDesc* fd, void* client_data, PRBool *canFalseStart)
+{
+  *canFalseStart = false;
+
+  nsNSSShutDownPreventionLock locker;
+
+  nsNSSSocketInfo* infoObject = (nsNSSSocketInfo*) fd->higher->secret;
+  if (!infoObject) {
+    PR_SetError(PR_INVALID_STATE_ERROR, 0);
+    return SECFailure;
+  }
+
+  infoObject->SetFalseStartCallbackCalled();
+
+  if (infoObject->isAlreadyShutDown()) {
+    MOZ_CRASH("SSL socket used after NSS shut down");
+    PR_SetError(PR_INVALID_STATE_ERROR, 0);
+    return SECFailure;
+  }
+
+  PreliminaryHandshakeDone(fd);
+
+  uint32_t reasonsForNotFalseStarting = 0;
+
+  SSLChannelInfo channelInfo;
+  if (SSL_GetChannelInfo(fd, &channelInfo, sizeof(channelInfo)) != SECSuccess) {
+    return SECSuccess;
+  }
+
+  SSLCipherSuiteInfo cipherInfo;
+  if (SSL_GetCipherSuiteInfo(channelInfo.cipherSuite, &cipherInfo,
+                             sizeof (cipherInfo)) != SECSuccess) {
+    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("CanFalseStartCallback [%p] failed - "
+                                      " KEA %d\n", fd,
+                                      static_cast<int32_t>(cipherInfo.keaType)));
+    return SECSuccess;
+  }
+
+  nsSSLIOLayerHelpers& helpers = infoObject->SharedState().IOLayerHelpers();
+
+  // Prevent version downgrade attacks from TLS 1.x to SSL 3.0.
+  // TODO(bug 861310): If we negotiate less than our highest-supported version,
+  // then check that a previously-completed handshake negotiated that version;
+  // eventually, require that the highest-supported version of TLS is used.
+  if (channelInfo.protocolVersion < SSL_LIBRARY_VERSION_TLS_1_0) {
+    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("CanFalseStartCallback [%p] failed - "
+                                      "SSL Version must be >= TLS1 %x\n", fd,
+                                      static_cast<int32_t>(channelInfo.protocolVersion)));
+    reasonsForNotFalseStarting |= POSSIBLE_VERSION_DOWNGRADE;
+  }
+
+  // never do false start without one of these key exchange algorithms
+  if (cipherInfo.keaType != ssl_kea_rsa &&
+      cipherInfo.keaType != ssl_kea_dh &&
+      cipherInfo.keaType != ssl_kea_ecdh) {
+    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("CanFalseStartCallback [%p] failed - "
+                                      "unsupported KEA %d\n", fd,
+                                      static_cast<int32_t>(cipherInfo.keaType)));
+    reasonsForNotFalseStarting |= KEA_NOT_SUPPORTED;
+  }
+
+  // XXX: This assumes that all TLS_DH_* and TLS_ECDH_* cipher suites
+  // are disabled.
+  if (cipherInfo.keaType != ssl_kea_ecdh &&
+      cipherInfo.keaType != ssl_kea_dh) {
+    if (helpers.mFalseStartRequireForwardSecrecy) {
+      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+             ("CanFalseStartCallback [%p] failed - KEA used is %d, but "
+              "require-forward-secrecy configured.\n", fd,
+              static_cast<int32_t>(cipherInfo.keaType)));
+      reasonsForNotFalseStarting |= KEA_NOT_FORWARD_SECRET;
+    } else if (cipherInfo.keaType == ssl_kea_rsa) {
+      // Make sure we've seen the same kea from this host in the past, to limit
+      // the potential for downgrade attacks.
+      int16_t expected = infoObject->GetKEAExpected();
+      if (cipherInfo.keaType != expected) {
+        PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+               ("CanFalseStartCallback [%p] failed - "
+                "KEA used is %d, expected %d\n", fd,
+                static_cast<int32_t>(cipherInfo.keaType),
+                static_cast<int32_t>(expected)));
+        reasonsForNotFalseStarting |= KEA_NOT_SAME_AS_EXPECTED;
+      }
+    } else {
+      reasonsForNotFalseStarting |= KEA_NOT_ALLOWED;
+    }
+  }
+
+  // Prevent downgrade attacks on the symmetric cipher. We accept downgrades
+  // from 256-bit keys to 128-bit keys and we treat AES and Camellia as being
+  // equally secure. We consider every message authentication mechanism that we
+  // support *for these ciphers* to be equally-secure. We assume that for CBC
+  // mode, that the server has implemented all the same mitigations for
+  // published attacks that we have, or that those attacks are not relevant in
+  // the decision to false start.
+  if (cipherInfo.symCipher != ssl_calg_aes_gcm && 
+      cipherInfo.symCipher != ssl_calg_aes &&
+      cipherInfo.symCipher != ssl_calg_camellia) {
+    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+           ("CanFalseStartCallback [%p] failed - Symmetric cipher used, %d, "
+            "is not supported with False Start.\n", fd,
+            static_cast<int32_t>(cipherInfo.symCipher)));
+    reasonsForNotFalseStarting |= POSSIBLE_CIPHER_SUITE_DOWNGRADE;
+  }
+
+  // XXX: An attacker can choose which protocols are advertised in the
+  // NPN extension. TODO(Bug 861311): We should restrict the ability
+  // of an attacker leverage this capability by restricting false start
+  // to the same protocol we previously saw for the server, after the
+  // first successful connection to the server.
+
+  // Enforce NPN to do false start if policy requires it. Do this as an
+  // indicator if server compatibility.
+  if (helpers.mFalseStartRequireNPN) {
+    nsAutoCString negotiatedNPN;
+    if (NS_FAILED(infoObject->GetNegotiatedNPN(negotiatedNPN)) ||
+        !negotiatedNPN.Length()) {
+      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("CanFalseStartCallback [%p] failed - "
+                                        "NPN cannot be verified\n", fd));
+      reasonsForNotFalseStarting |= NPN_NOT_NEGOTIATED;
+    }
+  }
+
+  Telemetry::Accumulate(Telemetry::SSL_REASONS_FOR_NOT_FALSE_STARTING,
+                        reasonsForNotFalseStarting);
+
+  if (reasonsForNotFalseStarting == 0) {
+    *canFalseStart = PR_TRUE;
+    infoObject->SetFalseStarted();
+    infoObject->NoteTimeUntilReady();
+    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("CanFalseStartCallback [%p] ok\n", fd));
+  }
+
+  return SECSuccess;
+}
+
+static void
+AccumulateNonECCKeySize(Telemetry::ID probe, uint32_t bits)
+{
+  unsigned int value = bits <   512 ?  1 : bits ==   512 ?  2
+                     : bits <   768 ?  3 : bits ==   768 ?  4
+                     : bits <  1024 ?  5 : bits ==  1024 ?  6
+                     : bits <  1280 ?  7 : bits ==  1280 ?  8
+                     : bits <  1536 ?  9 : bits ==  1536 ? 10
+                     : bits <  2048 ? 11 : bits ==  2048 ? 12
+                     : bits <  3072 ? 13 : bits ==  3072 ? 14
+                     : bits <  4096 ? 15 : bits ==  4096 ? 16
+                     : bits <  8192 ? 17 : bits ==  8192 ? 18
+                     : bits < 16384 ? 19 : bits == 16384 ? 20
+                     : 0;
+  Telemetry::Accumulate(probe, value);
+}
+
+// XXX: This attempts to map a bit count to an ECC named curve identifier. In
+// the vast majority of situations, we only have the Suite B curves available.
+// In that case, this mapping works fine. If we were to have more curves
+// available, the mapping would be ambiguous since there could be multiple
+// named curves for a given size (e.g. secp256k1 vs. secp256r1). We punt on
+// that for now. See also NSS bug 323674.
+static void
+AccumulateECCCurve(Telemetry::ID probe, uint32_t bits)
+{
+  unsigned int value = bits == 256 ? 23 // P-256
+                     : bits == 384 ? 24 // P-384
+                     : bits == 521 ? 25 // P-521
+                     : 0; // Unknown
+  Telemetry::Accumulate(probe, value);
+}
+
+static void
+AccumulateCipherSuite(Telemetry::ID probe, const SSLChannelInfo& channelInfo)
+{
+  uint32_t value;
+  switch (channelInfo.cipherSuite) {
+    // ECDHE key exchange
+    case TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: value = 1; break;
+    case TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256: value = 2; break;
+    case TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA: value = 3; break;
+    case TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA: value = 4; break;
+    case TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA: value = 5; break;
+    case TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA: value = 6; break;
+    case TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA: value = 7; break;
+    case TLS_ECDHE_RSA_WITH_RC4_128_SHA: value = 8; break;
+    case TLS_ECDHE_ECDSA_WITH_RC4_128_SHA: value = 9; break;
+    case TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA: value = 10; break;
+    // DHE key exchange
+    case TLS_DHE_RSA_WITH_AES_128_CBC_SHA: value = 21; break;
+    case TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA: value = 22; break;
+    case TLS_DHE_RSA_WITH_AES_256_CBC_SHA: value = 23; break;
+    case TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA: value = 24; break;
+    case TLS_DHE_RSA_WITH_3DES_EDE_CBC_SHA: value = 25; break;
+    case TLS_DHE_DSS_WITH_AES_128_CBC_SHA: value = 26; break;
+    case TLS_DHE_DSS_WITH_CAMELLIA_128_CBC_SHA: value = 27; break;
+    case TLS_DHE_DSS_WITH_AES_256_CBC_SHA: value = 28; break;
+    case TLS_DHE_DSS_WITH_CAMELLIA_256_CBC_SHA: value = 29; break;
+    case TLS_DHE_DSS_WITH_3DES_EDE_CBC_SHA: value = 30; break;
+    // ECDH key exchange
+    case TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA: value = 41; break;
+    case TLS_ECDH_RSA_WITH_AES_128_CBC_SHA: value = 42; break;
+    case TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA: value = 43; break;
+    case TLS_ECDH_RSA_WITH_AES_256_CBC_SHA: value = 44; break;
+    case TLS_ECDH_ECDSA_WITH_3DES_EDE_CBC_SHA: value = 45; break;
+    case TLS_ECDH_RSA_WITH_3DES_EDE_CBC_SHA: value = 46; break;
+    case TLS_ECDH_ECDSA_WITH_RC4_128_SHA: value = 47; break;
+    case TLS_ECDH_RSA_WITH_RC4_128_SHA: value = 48; break;
+    // RSA key exchange
+    case TLS_RSA_WITH_AES_128_CBC_SHA: value = 61; break;
+    case TLS_RSA_WITH_CAMELLIA_128_CBC_SHA: value = 62; break;
+    case TLS_RSA_WITH_AES_256_CBC_SHA: value = 63; break;
+    case TLS_RSA_WITH_CAMELLIA_256_CBC_SHA: value = 64; break;
+    case SSL_RSA_FIPS_WITH_3DES_EDE_CBC_SHA: value = 65; break;
+    case TLS_RSA_WITH_3DES_EDE_CBC_SHA: value = 66; break;
+    case TLS_RSA_WITH_SEED_CBC_SHA: value = 67; break;
+    case TLS_RSA_WITH_RC4_128_SHA: value = 68; break;
+    case TLS_RSA_WITH_RC4_128_MD5: value = 69; break;
+    // unknown
+    default:
+      value = 0;
+      break;
+  }
+  MOZ_ASSERT(value != 0);
+  Telemetry::Accumulate(probe, value);
+}
+
 void HandshakeCallback(PRFileDesc* fd, void* client_data) {
   nsNSSShutDownPreventionLock locker;
-  int32_t sslStatus;
-  char* cipherName = nullptr;
-  int32_t keyLength;
-  int32_t encryptBits;
+  SECStatus rv;
 
   nsNSSSocketInfo* infoObject = (nsNSSSocketInfo*) fd->higher->secret;
 
-  // certificate validation sets FirstServerHelloReceived, so if that flag
-  // is absent at handshake time we have a resumed session.
-  bool isResumedSession = !(infoObject->GetFirstServerHelloReceived());
+  // Do the bookkeeping that needs to be done after the
+  // server's ServerHello...ServerHelloDone have been processed, but that doesn't
+  // need the handshake to be completed.
+  PreliminaryHandshakeDone(fd);
 
-  // This is the first callback on resumption handshakes
-  infoObject->SetFirstServerHelloReceived();
+  nsSSLIOLayerHelpers& ioLayerHelpers
+    = infoObject->SharedState().IOLayerHelpers();
 
-  // If the handshake completed, then we know the site is TLS tolerant (if this
-  // was a TLS connection).
-  nsSSLIOLayerHelpers& ioLayerHelpers = infoObject->SharedState().IOLayerHelpers();
-  ioLayerHelpers.rememberTolerantSite(infoObject);
+  SSLVersionRange versions(infoObject->GetTLSVersionRange());
 
-  if (SECSuccess != SSL_SecurityStatus(fd, &sslStatus, &cipherName, &keyLength,
-                                       &encryptBits, nullptr, nullptr)) {
-    return;
-  }
+  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+         ("[%p] HandshakeCallback: succeeded using TLS version range (0x%04x,0x%04x)\n",
+          fd, static_cast<unsigned int>(versions.min),
+              static_cast<unsigned int>(versions.max)));
 
-  int32_t secStatus;
-  if (sslStatus == SSL_SECURITY_STATUS_OFF)
-    secStatus = nsIWebProgressListener::STATE_IS_BROKEN;
-  else
-    secStatus = nsIWebProgressListener::STATE_IS_SECURE
-              | nsIWebProgressListener::STATE_SECURE_HIGH;
+  // If the handshake completed, then we know the site is TLS tolerant
+  ioLayerHelpers.rememberTolerantAtVersion(infoObject->GetHostName(),
+                                           infoObject->GetPort(),
+                                           versions.max);
 
   PRBool siteSupportsSafeRenego;
-  if (SSL_HandshakeNegotiatedExtension(fd, ssl_renegotiation_info_xtn, &siteSupportsSafeRenego) != SECSuccess
-      || !siteSupportsSafeRenego) {
-
-    bool wantWarning = (ioLayerHelpers.getWarnLevelMissingRFC5746() > 0);
-
-    nsCOMPtr<nsIConsoleService> console;
-    if (infoObject && wantWarning) {
-      console = do_GetService(NS_CONSOLESERVICE_CONTRACTID);
-      if (console) {
-        nsXPIDLCString hostName;
-        infoObject->GetHostName(getter_Copies(hostName));
-
-        nsAutoString msg;
-        msg.Append(NS_ConvertASCIItoUTF16(hostName));
-        msg.Append(NS_LITERAL_STRING(" : server does not support RFC 5746, see CVE-2009-3555"));
-
-        console->LogStringMessage(msg.get());
-      }
-    }
-    if (ioLayerHelpers.treatUnsafeNegotiationAsBroken()) {
-      secStatus = nsIWebProgressListener::STATE_IS_BROKEN;
-    }
+  rv = SSL_HandshakeNegotiatedExtension(fd, ssl_renegotiation_info_xtn,
+                                        &siteSupportsSafeRenego);
+  MOZ_ASSERT(rv == SECSuccess);
+  if (rv != SECSuccess) {
+    siteSupportsSafeRenego = false;
   }
 
-  ScopedCERTCertificate serverCert(SSL_PeerCertificate(fd));
+  if (siteSupportsSafeRenego ||
+      !ioLayerHelpers.treatUnsafeNegotiationAsBroken()) {
+    infoObject->SetSecurityState(nsIWebProgressListener::STATE_IS_SECURE |
+                                 nsIWebProgressListener::STATE_SECURE_HIGH);
+  } else {
+    infoObject->SetSecurityState(nsIWebProgressListener::STATE_IS_BROKEN);
+  }
 
-  infoObject->SetSecurityState(secStatus);
+  // XXX Bug 883674: We shouldn't be formatting messages here in PSM; instead,
+  // we should set a flag on the channel that higher (UI) level code can check
+  // to log the warning. In particular, these warnings should go to the web
+  // console instead of to the error console. Also, the warning is not
+  // localized.
+  if (!siteSupportsSafeRenego &&
+      ioLayerHelpers.getWarnLevelMissingRFC5746() > 0) {
+    nsXPIDLCString hostName;
+    infoObject->GetHostName(getter_Copies(hostName));
+
+    nsAutoString msg;
+    msg.Append(NS_ConvertASCIItoUTF16(hostName));
+    msg.Append(NS_LITERAL_STRING(" : server does not support RFC 5746, see CVE-2009-3555"));
+
+    nsContentUtils::LogSimpleConsoleError(msg, "SSL");
+  }
+
+  mozilla::pkix::ScopedCERTCertificate serverCert(SSL_PeerCertificate(fd));
 
   /* Set the SSL Status information */
   RefPtr<nsSSLStatus> status(infoObject->SSLStatus());
@@ -896,7 +1206,7 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
   RememberCertErrorsTable::GetInstance().LookupCertErrorBits(infoObject,
                                                              status);
 
-  RefPtr<nsNSSCertificate> nssc(nsNSSCertificate::Create(serverCert));
+  RefPtr<nsNSSCertificate> nssc(nsNSSCertificate::Create(serverCert.get()));
   nsCOMPtr<nsIX509Cert> prevcert;
   infoObject->GetPreviousCert(getter_AddRefs(prevcert));
 
@@ -925,222 +1235,89 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
     }
   }
 
-  status->mHaveKeyLengthAndCipher = true;
-  status->mKeyLength = keyLength;
-  status->mSecretKeyLength = encryptBits;
-  status->mCipherName.Assign(cipherName);
-
-  // Get the NPN value.
-  SSLNextProtoState state;
-  unsigned char npnbuf[256];
-  unsigned int npnlen;
-    
-  if (SSL_GetNextProto(fd, &state, npnbuf, &npnlen, 256) == SECSuccess) {
-    if (state == SSL_NEXT_PROTO_NEGOTIATED)
-      infoObject->SetNegotiatedNPN(reinterpret_cast<char *>(npnbuf), npnlen);
-    else
-      infoObject->SetNegotiatedNPN(nullptr, 0);
-    mozilla::Telemetry::Accumulate(Telemetry::SSL_NPN_TYPE, state);
-  }
-  else
-    infoObject->SetNegotiatedNPN(nullptr, 0);
-
   SSLChannelInfo channelInfo;
-  if (SSL_GetChannelInfo(fd, &channelInfo, sizeof(channelInfo)) == SECSuccess) {
+  rv = SSL_GetChannelInfo(fd, &channelInfo, sizeof(channelInfo));
+  MOZ_ASSERT(rv == SECSuccess);
+  if (rv == SECSuccess) {
     // Get the protocol version for telemetry
     // 0=ssl3, 1=tls1, 2=tls1.1, 3=tls1.2
     unsigned int versionEnum = channelInfo.protocolVersion & 0xFF;
     Telemetry::Accumulate(Telemetry::SSL_HANDSHAKE_VERSION, versionEnum);
+    AccumulateCipherSuite(
+      infoObject->IsFullHandshake() ? Telemetry::SSL_CIPHER_SUITE_FULL
+                                    : Telemetry::SSL_CIPHER_SUITE_RESUMED,
+      channelInfo);
 
     SSLCipherSuiteInfo cipherInfo;
-    if (SSL_GetCipherSuiteInfo(channelInfo.cipherSuite, &cipherInfo,
-                                sizeof (cipherInfo)) == SECSuccess) {
+    rv = SSL_GetCipherSuiteInfo(channelInfo.cipherSuite, &cipherInfo,
+                                sizeof cipherInfo);
+    MOZ_ASSERT(rv == SECSuccess);
+    if (rv == SECSuccess) {
+      status->mHaveKeyLengthAndCipher = true;
+      status->mKeyLength = cipherInfo.symKeyBits;
+      status->mSecretKeyLength = cipherInfo.effectiveKeyBits;
+      status->mCipherName.Assign(cipherInfo.cipherSuiteName);
+
       // keyExchange null=0, rsa=1, dh=2, fortezza=3, ecdh=4
-      Telemetry::Accumulate(Telemetry::SSL_KEY_EXCHANGE_ALGORITHM,
-                            cipherInfo.keaType);
-    }
-      
-  }
-  infoObject->SetHandshakeCompleted(isResumedSession);
+      Telemetry::Accumulate(
+        infoObject->IsFullHandshake()
+          ? Telemetry::SSL_KEY_EXCHANGE_ALGORITHM_FULL
+          : Telemetry::SSL_KEY_EXCHANGE_ALGORITHM_RESUMED,
+        cipherInfo.keaType);
+      infoObject->SetKEAUsed(cipherInfo.keaType);
 
-  PORT_Free(cipherName);
-}
+      if (infoObject->IsFullHandshake()) {
+        switch (cipherInfo.keaType) {
+          case ssl_kea_rsa:
+            AccumulateNonECCKeySize(Telemetry::SSL_KEA_RSA_KEY_SIZE_FULL,
+                                    channelInfo.keaKeyBits);
+            break;
+          case ssl_kea_dh:
+            AccumulateNonECCKeySize(Telemetry::SSL_KEA_DHE_KEY_SIZE_FULL,
+                                    channelInfo.keaKeyBits);
+            break;
+          case ssl_kea_ecdh:
+            AccumulateECCCurve(Telemetry::SSL_KEA_ECDHE_CURVE_FULL,
+                               channelInfo.keaKeyBits);
+            break;
+          default:
+            MOZ_CRASH("impossible KEA");
+            break;
+        }
 
-struct OCSPDefaultResponders {
-    const char *issuerName_string;
-    CERTName *issuerName;
-    const char *issuerKeyID_base64;
-    SECItem *issuerKeyID;
-    const char *ocspUrl;
-};
+        Telemetry::Accumulate(Telemetry::SSL_AUTH_ALGORITHM_FULL,
+                              cipherInfo.authAlgorithm);
 
-static struct OCSPDefaultResponders myDefaultOCSPResponders[] = {
-  /* COMODO */
-  {
-    "CN=AddTrust External CA Root,OU=AddTrust External TTP Network,O=AddTrust AB,C=SE",
-    nullptr, "rb2YejS0Jvf6xCZU7wO94CTLVBo=", nullptr,
-    "http://ocsp.comodoca.com"
-  },
-  {
-    "CN=COMODO Certification Authority,O=COMODO CA Limited,L=Salford,ST=Greater Manchester,C=GB",
-    nullptr, "C1jli8ZMFTekQKkwqSG+RzZaVv8=", nullptr,
-    "http://ocsp.comodoca.com"
-  },
-  {
-    "CN=COMODO EV SGC CA,O=COMODO CA Limited,L=Salford,ST=Greater Manchester,C=GB",
-    nullptr, "f/ZMNigUrs0eN6/eWvJbw6CsK/4=", nullptr,
-    "http://ocsp.comodoca.com"
-  },
-  {
-    "CN=COMODO EV SSL CA,O=COMODO CA Limited,L=Salford,ST=Greater Manchester,C=GB",
-    nullptr, "aRZJ7LZ1ZFrpAyNgL1RipTRcPuI=", nullptr,
-    "http://ocsp.comodoca.com"
-  },
-  {
-    "CN=UTN - DATACorp SGC,OU=http://www.usertrust.com,O=The USERTRUST Network,L=Salt Lake City,ST=UT,C=US",
-    nullptr, "UzLRs89/+uDxoF2FTpLSnkUdtE8=", nullptr,
-    "http://ocsp.usertrust.com"
-  },
-  {
-    "CN=UTN-USERFirst-Hardware,OU=http://www.usertrust.com,O=The USERTRUST Network,L=Salt Lake City,ST=UT,C=US",
-    nullptr, "oXJfJhsomEOVXQc31YWWnUvSw0U=", nullptr,
-    "http://ocsp.usertrust.com"
-  },
-  /* Network Solutions */
-  {
-    "CN=Network Solutions Certificate Authority,O=Network Solutions L.L.C.,C=US",
-    nullptr, "ITDJ+wDXTpjah6oq0KcusUAxp0w=", nullptr,
-    "http://ocsp.netsolssl.com"
-  },
-  {
-    "CN=Network Solutions EV SSL CA,O=Network Solutions L.L.C.,C=US",
-    nullptr, "tk6FnYQfGx3UUolOB5Yt+d7xj8w=", nullptr,
-    "http://ocsp.netsolssl.com"
-  },
-  /* GlobalSign */
-  {
-    "CN=GlobalSign Root CA,OU=Root CA,O=GlobalSign nv-sa,C=BE",
-    nullptr, "YHtmGkUNl8qJUC99BM00qP/8/Us=", nullptr,
-    "http://ocsp.globalsign.com/ExtendedSSLCACross"
-  },
-  {
-    "CN=GlobalSign,O=GlobalSign,OU=GlobalSign Root CA - R2",
-    nullptr, "m+IHV2ccHsBqBt5ZtJot39wZhi4=", nullptr,
-    "http://ocsp.globalsign.com/ExtendedSSLCA"
-  },
-  {
-    "CN=GlobalSign Extended Validation CA,O=GlobalSign,OU=Extended Validation CA",
-    nullptr, "NLH5yYxrNUTMCGkK7uOjuVy/FuA=", nullptr,
-    "http://ocsp.globalsign.com/ExtendedSSL"
-  },
-  /* Trustwave */
-  {
-    "CN=SecureTrust CA,O=SecureTrust Corporation,C=US",
-    nullptr, "QjK2FvoE/f5dS3rD/fdMQB1aQ68=", nullptr,
-    "http://ocsp.trustwave.com"
-  }
-};
+        // RSA key exchange doesn't use a signature for auth.
+        if (cipherInfo.keaType != ssl_kea_rsa) {
+          switch (cipherInfo.authAlgorithm) {
+            case ssl_auth_rsa:
+              AccumulateNonECCKeySize(Telemetry::SSL_AUTH_RSA_KEY_SIZE_FULL,
+                                      channelInfo.authKeyBits);
+              break;
+            case ssl_auth_dsa:
+              AccumulateNonECCKeySize(Telemetry::SSL_AUTH_DSA_KEY_SIZE_FULL,
+                                      channelInfo.authKeyBits);
+              break;
+            case ssl_auth_ecdsa:
+              AccumulateECCCurve(Telemetry::SSL_AUTH_ECDSA_CURVE_FULL,
+                                 channelInfo.authKeyBits);
+              break;
+            default:
+              MOZ_CRASH("impossible auth algorithm");
+              break;
+          }
+        }
+      }
 
-static const unsigned int numResponders =
-    (sizeof myDefaultOCSPResponders) / (sizeof myDefaultOCSPResponders[0]);
-
-static CERT_StringFromCertFcn oldOCSPAIAInfoCallback = nullptr;
-
-/*
- * See if we have a hard-coded default responder for this certificate's
- * issuer (unless this certificate is a root certificate).
- *
- * The result needs to be freed (PORT_Free) when no longer in use.
- */
-char* MyAlternateOCSPAIAInfoCallback(CERTCertificate *cert) {
-  if (cert && !cert->isRoot) {
-    unsigned int i;
-    for (i=0; i < numResponders; i++) {
-      if (!(myDefaultOCSPResponders[i].issuerName));
-      else if (!(myDefaultOCSPResponders[i].issuerKeyID));
-      else if (!(cert->authKeyID));
-      else if (CERT_CompareName(myDefaultOCSPResponders[i].issuerName,
-                                &(cert->issuer)) != SECEqual);
-      else if (SECITEM_CompareItem(myDefaultOCSPResponders[i].issuerKeyID,
-                                   &(cert->authKeyID->keyID)) != SECEqual);
-      else        // Issuer Name and Key Identifier match, so use this OCSP URL.
-        return PORT_Strdup(myDefaultOCSPResponders[i].ocspUrl);
+      Telemetry::Accumulate(
+          infoObject->IsFullHandshake()
+            ? Telemetry::SSL_SYMMETRIC_CIPHER_FULL
+            : Telemetry::SSL_SYMMETRIC_CIPHER_RESUMED,
+          cipherInfo.symCipher);
     }
   }
 
-  // If we've not found a hard-coded default responder, chain to the old
-  // callback function (if there is one).
-  if (oldOCSPAIAInfoCallback)
-    return (*oldOCSPAIAInfoCallback)(cert);
-
-  return nullptr;
-}
-
-void cleanUpMyDefaultOCSPResponders() {
-  unsigned int i;
-
-  for (i=0; i < numResponders; i++) {
-    if (myDefaultOCSPResponders[i].issuerName) {
-      CERT_DestroyName(myDefaultOCSPResponders[i].issuerName);
-      myDefaultOCSPResponders[i].issuerName = nullptr;
-    }
-    if (myDefaultOCSPResponders[i].issuerKeyID) {
-      SECITEM_FreeItem(myDefaultOCSPResponders[i].issuerKeyID, true);
-      myDefaultOCSPResponders[i].issuerKeyID = nullptr;
-    }
-  }
-}
-
-SECStatus RegisterMyOCSPAIAInfoCallback() {
-  // Prevent multiple registrations.
-  if (myDefaultOCSPResponders[0].issuerName)
-    return SECSuccess;                 // Already registered ok.
-
-  // Populate various fields in the myDefaultOCSPResponders[] array.
-  SECStatus rv = SECFailure;
-  unsigned int i;
-  for (i=0; i < numResponders; i++) {
-    // Create a CERTName structure from the issuer name string.
-    myDefaultOCSPResponders[i].issuerName = CERT_AsciiToName(
-      const_cast<char*>(myDefaultOCSPResponders[i].issuerName_string));
-    if (!(myDefaultOCSPResponders[i].issuerName))
-      goto loser;
-    // Create a SECItem from the Base64 authority key identifier keyID.
-    myDefaultOCSPResponders[i].issuerKeyID = NSSBase64_DecodeBuffer(nullptr,
-          nullptr, myDefaultOCSPResponders[i].issuerKeyID_base64,
-          (uint32_t)PORT_Strlen(myDefaultOCSPResponders[i].issuerKeyID_base64));
-    if (!(myDefaultOCSPResponders[i].issuerKeyID))
-      goto loser;
-  }
-
-  // Register our alternate OCSP Responder URL lookup function.
-  rv = CERT_RegisterAlternateOCSPAIAInfoCallBack(MyAlternateOCSPAIAInfoCallback,
-                                                 &oldOCSPAIAInfoCallback);
-  if (rv != SECSuccess)
-    goto loser;
-
-  return SECSuccess;
-
-loser:
-  cleanUpMyDefaultOCSPResponders();
-  return rv;
-}
-
-SECStatus UnregisterMyOCSPAIAInfoCallback() {
-  SECStatus rv;
-
-  // Only allow unregistration if we're already registered.
-  if (!(myDefaultOCSPResponders[0].issuerName))
-    return SECFailure;
-
-  // Unregister our alternate OCSP Responder URL lookup function.
-  rv = CERT_RegisterAlternateOCSPAIAInfoCallBack(oldOCSPAIAInfoCallback,
-                                                 nullptr);
-  if (rv != SECSuccess)
-    return rv;
-
-  // Tidy up.
-  oldOCSPAIAInfoCallback = nullptr;
-  cleanUpMyDefaultOCSPResponders();
-  return SECSuccess;
+  infoObject->NoteTimeUntilReady();
+  infoObject->SetHandshakeCompleted();
 }

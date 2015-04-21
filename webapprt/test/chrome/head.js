@@ -6,8 +6,11 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 // Some of the code we want to provide to chrome mochitests is in another file
 // so we can share it with the mochitest shim window, thus we need to load it.
-Services.scriptloader.loadSubScript("chrome://webapprt/content/mochitest.js",
-                                    this);
+Services.scriptloader
+        .loadSubScript("chrome://webapprt/content/mochitest-shared.js", this);
+
+const MANIFEST_URL_BASE = Services.io.newURI(
+  "http://test/webapprtChrome/webapprt/test/chrome/", null, null);
 
 /**
  * Load the webapp in the app browser.
@@ -20,12 +23,22 @@ Services.scriptloader.loadSubScript("chrome://webapprt/content/mochitest.js",
  *        The callback to call once the webapp is loaded.
  */
 function loadWebapp(manifest, parameters, onLoad) {
-  becomeWebapp(manifest, parameters, function onBecome() {
+  let url = Services.io.newURI(manifest, null, MANIFEST_URL_BASE);
+
+  becomeWebapp(url.spec, parameters, function onBecome() {
     function onLoadApp() {
-      gAppBrowser.removeEventListener("load", onLoadApp, true);
+      gAppBrowser.removeEventListener("DOMContentLoaded", onLoadApp, true);
       onLoad();
     }
-    gAppBrowser.addEventListener("load", onLoadApp, true);
-    gAppBrowser.setAttribute("src", WebappRT.launchURI.spec);
+    gAppBrowser.addEventListener("DOMContentLoaded", onLoadApp, true);
+    gAppBrowser.setAttribute("src", WebappRT.launchURI);
+  });
+
+  registerCleanupFunction(function() {
+    // We load DOMApplicationRegistry into a local scope to avoid appearing
+    // to leak it.
+    let scope = {};
+    Cu.import("resource://gre/modules/Webapps.jsm", scope);
+    scope.DOMApplicationRegistry.uninstall(url.spec);
   });
 }

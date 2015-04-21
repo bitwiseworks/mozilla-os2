@@ -8,11 +8,21 @@ XPIDL_SOURCES += [
     'IPeerConnection.idl',
 ]
 
-MODULE = 'peerconnection'
+XPIDL_MODULE = 'peerconnection'
 
-CPP_SOURCES += [
+SOURCES += [
     'MediaModule.cpp',
 ]
 
-LIBRARY_NAME = 'peerconnection'
+LOCAL_INCLUDES += [
+    '/ipc/chromium/src',
+    '/media/mtransport',
+    '/media/webrtc/signaling/include',
+    '/media/webrtc/signaling/src/common/time_profiling',
+    '/media/webrtc/signaling/src/media-conduit',
+    '/media/webrtc/signaling/src/mediapipeline',
+    '/media/webrtc/signaling/src/peerconnection',
+    '/media/webrtc/signaling/src/sipcc/include',
+]
 
+FINAL_LIBRARY = 'xul'

@@ -7,7 +7,6 @@
 #define nsMathMLmfencedFrame_h
 
 #include "mozilla/Attributes.h"
-#include "nsCOMPtr.h"
 #include "nsMathMLContainerFrame.h"
 
 //
@@ -29,11 +28,11 @@ public:
   NS_IMETHOD
   InheritAutomaticData(nsIFrame* aParent) MOZ_OVERRIDE;
 
-  NS_IMETHOD
+  virtual nsresult
   SetInitialChildList(ChildListID     aListID,
                       nsFrameList&    aChildList) MOZ_OVERRIDE;
 
-  NS_IMETHOD
+  virtual nsresult
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,
@@ -43,10 +42,11 @@ public:
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  virtual nscoord
-  GetIntrinsicWidth(nsRenderingContext* aRenderingContext) MOZ_OVERRIDE;
+  virtual void
+  GetIntrinsicWidthMetrics(nsRenderingContext* aRenderingContext,
+                           nsHTMLReflowMetrics& aDesiredSize) MOZ_OVERRIDE;
 
-  NS_IMETHOD
+  virtual nsresult
   AttributeChanged(int32_t         aNameSpaceID,
                    nsIAtom*        aAttribute,
                    int32_t         aModType) MOZ_OVERRIDE;
@@ -79,6 +79,17 @@ public:
             nscoord            aDesiredSize,
             nsBoundingMetrics& bm,
             nscoord&           dx);
+
+  virtual bool
+  IsMrowLike() MOZ_OVERRIDE
+  {
+    // Always treated as an mrow with > 1 child as
+    // <mfenced> <mo>%</mo> </mfenced>
+    // renders equivalently to
+    // <mrow> <mo> ( </mo> <mo>%</mo> <mo> ) </mo> </mrow>
+    // This also holds with multiple children.  (MathML3 3.3.8.1)
+    return true;
+  }
 
 protected:
   nsMathMLmfencedFrame(nsStyleContext* aContext) : nsMathMLContainerFrame(aContext) {}

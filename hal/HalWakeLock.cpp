@@ -12,7 +12,7 @@
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
 #include "nsIPropertyBag2.h"
-#include "nsObserverService.h"
+#include "nsIObserverService.h"
 
 using namespace mozilla;
 using namespace mozilla::hal;
@@ -102,10 +102,10 @@ public:
   NS_DECL_NSIOBSERVER
 };
 
-NS_IMPL_ISUPPORTS1(ClearHashtableOnShutdown, nsIObserver)
+NS_IMPL_ISUPPORTS(ClearHashtableOnShutdown, nsIObserver)
 
 NS_IMETHODIMP
-ClearHashtableOnShutdown::Observe(nsISupports* aSubject, const char* aTopic, const PRUnichar* data)
+ClearHashtableOnShutdown::Observe(nsISupports* aSubject, const char* aTopic, const char16_t* data)
 {
   MOZ_ASSERT(!strcmp(aTopic, "xpcom-shutdown"));
 
@@ -121,10 +121,10 @@ public:
   NS_DECL_NSIOBSERVER
 };
 
-NS_IMPL_ISUPPORTS1(CleanupOnContentShutdown, nsIObserver)
+NS_IMPL_ISUPPORTS(CleanupOnContentShutdown, nsIObserver)
 
 NS_IMETHODIMP
-CleanupOnContentShutdown::Observe(nsISupports* aSubject, const char* aTopic, const PRUnichar* data)
+CleanupOnContentShutdown::Observe(nsISupports* aSubject, const char* aTopic, const char16_t* data)
 {
   MOZ_ASSERT(!strcmp(aTopic, "ipc:content-shutdown"));
 
@@ -153,7 +153,6 @@ void
 Init()
 {
   sLockTable = new LockTable();
-  sLockTable->Init();
   sInitialized = true;
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -218,7 +217,6 @@ ModifyWakeLock(const nsAString& aTopic,
   LockCount totalCount;
   if (!table) {
     table = new ProcessLockTable();
-    table->Init();
     sLockTable->Put(aTopic, table);
   } else {
     table->Get(aProcessID, &processCount);
@@ -256,7 +254,7 @@ ModifyWakeLock(const nsAString& aTopic,
        processWasLocked != (processCount.numLocks > 0))) {
 
     WakeLockInformation info;
-    GetWakeLockInfo(aTopic, &info);
+    hal::GetWakeLockInfo(aTopic, &info);
     NotifyWakeLockChange(info);
   }
 }

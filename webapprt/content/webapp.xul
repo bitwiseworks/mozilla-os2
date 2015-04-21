@@ -17,6 +17,7 @@
         id="default"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
         width="1024" height="768"
+        fullscreenbutton="true"
         persist="screenX screenY width height sizemode"
         >
 
@@ -45,7 +46,7 @@
   <key id="key_delete" keycode="VK_DELETE" command="cmd_delete"/>
   <key id="key_selectAll" key="&selectAllCmd.key;" modifiers="accel"/>
   <key id="key_quitApplication"
-       key="&quitApplicationCmdMac.key;"
+       key="&quitApplicationCmdUnix.key;"
        command="cmd_quitApplication"
        modifiers="accel"/>
   <key id="key_hideThisAppCmdMac"
@@ -154,6 +155,14 @@
     </menu>
   </menubar>
 
-  <browser type="content-primary" id="content" flex="1"/>
+  <browser type="content-primary" id="content" flex="1" context="contentAreaContextMenu" tooltip="contentAreaTooltip" />
+
+  <popupset>
+    <menupopup id="contentAreaContextMenu" pagemenu="start"
+               onpopupshowing="return showContextMenu(event, this)"
+               onpopuphiding="hideContextMenu(event, this)">
+    </menupopup>
+    <tooltip id="contentAreaTooltip" page="true" />
+  </popupset>
 
 </window>

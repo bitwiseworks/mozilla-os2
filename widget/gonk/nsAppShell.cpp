@@ -15,7 +15,9 @@
  * limitations under the License.
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 
 #include <dirent.h>
 #include <errno.h>
@@ -27,23 +29,31 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <utils/BitSet.h>
 
 #include "base/basictypes.h"
+#include "GonkPermission.h"
 #include "nscore.h"
 #ifdef MOZ_OMX_DECODER
 #include "MediaResourceManagerService.h"
 #endif
+#include "mozilla/TouchEvents.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/Hal.h"
+#include "mozilla/MouseEvents.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Services.h"
+#include "mozilla/TextEvents.h"
+#if ANDROID_VERSION >= 18
+#include "nativewindow/FakeSurfaceComposer.h"
+#endif
 #include "nsAppShell.h"
 #include "mozilla/dom/Touch.h"
 #include "nsGkAtoms.h"
-#include "nsGUIEvent.h"
 #include "nsIObserverService.h"
 #include "nsIScreen.h"
 #include "nsScreenManagerGonk.h"
+#include "nsThreadUtils.h"
 #include "nsWindow.h"
 #include "OrientationObserver.h"
 #include "GonkMemoryPressureMonitoring.h"
@@ -52,6 +62,11 @@
 #include "libui/EventHub.h"
 #include "libui/InputReader.h"
 #include "libui/InputDispatcher.h"
+#include "cutils/properties.h"
+
+#ifdef MOZ_NUWA_PROCESS
+#include "ipc/Nuwa.h"
+#endif
 
 #include "GeckoProfiler.h"
 
@@ -75,11 +90,23 @@ using namespace mozilla::services;
 using namespace mozilla::widget;
 
 bool gDrawRequest = false;
-static nsAppShell *gAppShell = NULL;
+static nsAppShell *gAppShell = nullptr;
 static int epollfd = 0;
 static int signalfds[2] = {0};
+static bool sDevInputAudioJack;
+static int32_t sHeadphoneState;
+static int32_t sMicrophoneState;
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsAppShell, nsBaseAppShell, nsIObserver)
+// Amount of time in MS before an input is considered expired.
+static const uint64_t kInputExpirationThresholdMs = 1000;
+
+NS_IMPL_ISUPPORTS_INHERITED(nsAppShell, nsBaseAppShell, nsIObserver)
+
+static uint64_t
+nanosecsToMillisecs(nsecs_t nsecs)
+{
+    return nsecs / 1000000;
+}
 
 namespace mozilla {
 
@@ -119,6 +146,7 @@ struct UserInputData {
     int32_t action;
     int32_t flags;
     int32_t metaState;
+    int32_t deviceId;
     union {
         struct {
             int32_t keyCode;
@@ -129,21 +157,58 @@ struct UserInputData {
             ::Touch touches[MAX_POINTERS];
         } motion;
     };
+
+    Modifiers DOMModifiers() const;
 };
 
-static void
-sendMouseEvent(uint32_t msg, uint64_t timeMs, int x, int y, bool forwardToChildren)
+Modifiers
+UserInputData::DOMModifiers() const
 {
-    nsMouseEvent event(true, msg, NULL,
-                       nsMouseEvent::eReal, nsMouseEvent::eNormal);
+    Modifiers result = 0;
+    if (metaState & (AMETA_ALT_ON | AMETA_ALT_LEFT_ON | AMETA_ALT_RIGHT_ON)) {
+        result |= MODIFIER_ALT;
+    }
+    if (metaState & (AMETA_SHIFT_ON |
+                     AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_RIGHT_ON)) {
+        result |= MODIFIER_SHIFT;
+    }
+    if (metaState & AMETA_FUNCTION_ON) {
+        result |= MODIFIER_FN;
+    }
+    if (metaState & (AMETA_CTRL_ON |
+                     AMETA_CTRL_LEFT_ON | AMETA_CTRL_RIGHT_ON)) {
+        result |= MODIFIER_CONTROL;
+    }
+    if (metaState & (AMETA_META_ON |
+                     AMETA_META_LEFT_ON | AMETA_META_RIGHT_ON)) {
+        result |= MODIFIER_META;
+    }
+    if (metaState & AMETA_CAPS_LOCK_ON) {
+        result |= MODIFIER_CAPSLOCK;
+    }
+    if (metaState & AMETA_NUM_LOCK_ON) {
+        result |= MODIFIER_NUMLOCK;
+    }
+    if (metaState & AMETA_SCROLL_LOCK_ON) {
+        result |= MODIFIER_SCROLLLOCK;
+    }
+    return result;
+}
 
-    event.refPoint.x = x;
-    event.refPoint.y = y;
-    event.time = timeMs;
-    event.button = nsMouseEvent::eLeftButton;
+static void
+sendMouseEvent(uint32_t msg, UserInputData& data, bool forwardToChildren)
+{
+    WidgetMouseEvent event(true, msg, nullptr,
+                           WidgetMouseEvent::eReal, WidgetMouseEvent::eNormal);
+
+    event.refPoint.x = data.motion.touches[0].coords.getX();
+    event.refPoint.y = data.motion.touches[0].coords.getY();
+    event.time = data.timeMs;
+    event.button = WidgetMouseEvent::eLeftButton;
     event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
     if (msg != NS_MOUSE_MOVE)
         event.clickCount = 1;
+    event.modifiers = data.DOMModifiers();
 
     event.mFlags.mNoCrossProcessBoundaryForwarding = !forwardToChildren;
 
@@ -151,12 +216,12 @@ sendMouseEvent(uint32_t msg, uint64_t timeMs, int x, int y, bool forwardToChildr
 }
 
 static void
-addDOMTouch(UserInputData& data, nsTouchEvent& event, int i)
+addDOMTouch(UserInputData& data, WidgetTouchEvent& event, int i)
 {
     const ::Touch& touch = data.motion.touches[i];
     event.touches.AppendElement(
         new dom::Touch(touch.id,
-                       nsIntPoint(touch.coords.getX(), touch.coords.getY()),
+                       nsIntPoint(floor(touch.coords.getX() + 0.5), floor(touch.coords.getY() + 0.5)),
                        nsIntPoint(touch.coords.getAxisValue(AMOTION_EVENT_AXIS_SIZE),
                                   touch.coords.getAxisValue(AMOTION_EVENT_AXIS_SIZE)),
                        0,
@@ -185,11 +250,15 @@ sendTouchEvent(UserInputData& data, bool* captured)
     case AMOTION_EVENT_ACTION_CANCEL:
         msg = NS_TOUCH_CANCEL;
         break;
+    default:
+        msg = NS_EVENT_NULL;
+        break;
     }
 
-    nsTouchEvent event(true, msg, NULL);
+    WidgetTouchEvent event(true, msg, nullptr);
 
     event.time = data.timeMs;
+    event.modifiers = data.DOMModifiers();
 
     int32_t i;
     if (msg == NS_TOUCH_END) {
@@ -204,50 +273,188 @@ sendTouchEvent(UserInputData& data, bool* captured)
     return nsWindow::DispatchInputEvent(event, captured);
 }
 
-static nsEventStatus
-sendKeyEventWithMsg(uint32_t keyCode,
-                    KeyNameIndex keyNameIndex,
-                    uint32_t msg,
-                    uint64_t timeMs,
-                    const EventFlags& flags)
+class MOZ_STACK_CLASS KeyEventDispatcher
 {
-    nsKeyEvent event(true, msg, NULL);
-    event.keyCode = keyCode;
-    event.mKeyNameIndex = keyNameIndex;
+public:
+    KeyEventDispatcher(const UserInputData& aData,
+                       KeyCharacterMap* aKeyCharMap);
+    void Dispatch();
+
+private:
+    const UserInputData& mData;
+    sp<KeyCharacterMap> mKeyCharMap;
+
+    char16_t mChar;
+    char16_t mUnmodifiedChar;
+
+    uint32_t mDOMKeyCode;
+    KeyNameIndex mDOMKeyNameIndex;
+    char16_t mDOMPrintableKeyValue;
+
+    bool IsKeyPress() const
+    {
+        return mData.action == AKEY_EVENT_ACTION_DOWN;
+    }
+    bool IsRepeat() const
+    {
+        return IsKeyPress() && (mData.flags & AKEY_EVENT_FLAG_LONG_PRESS);
+    }
+
+    char16_t PrintableKeyValue() const;
+
+    int32_t UnmodifiedMetaState() const
+    {
+        return mData.metaState &
+            ~(AMETA_ALT_ON | AMETA_ALT_LEFT_ON | AMETA_ALT_RIGHT_ON |
+              AMETA_CTRL_ON | AMETA_CTRL_LEFT_ON | AMETA_CTRL_RIGHT_ON |
+              AMETA_META_ON | AMETA_META_LEFT_ON | AMETA_META_RIGHT_ON);
+    }
+
+    static bool IsControlChar(char16_t aChar)
+    {
+        return (aChar < ' ' || aChar == 0x7F);
+    }
+
+    void DispatchKeyDownEvent();
+    void DispatchKeyUpEvent();
+    nsEventStatus DispatchKeyEventInternal(uint32_t aEventMessage);
+};
+
+KeyEventDispatcher::KeyEventDispatcher(const UserInputData& aData,
+                                       KeyCharacterMap* aKeyCharMap) :
+    mData(aData), mKeyCharMap(aKeyCharMap), mChar(0), mUnmodifiedChar(0),
+    mDOMPrintableKeyValue(0)
+{
+    // XXX Printable key's keyCode value should be computed with actual
+    //     input character.
+    mDOMKeyCode = (mData.key.keyCode < (ssize_t)ArrayLength(kKeyMapping)) ?
+        kKeyMapping[mData.key.keyCode] : 0;
+    mDOMKeyNameIndex = GetKeyNameIndex(mData.key.keyCode);
+
+    if (!mKeyCharMap.get()) {
+        return;
+    }
+
+    mChar = mKeyCharMap->getCharacter(mData.key.keyCode, mData.metaState);
+    if (IsControlChar(mChar)) {
+        mChar = 0;
+    }
+    int32_t unmodifiedMetaState = UnmodifiedMetaState();
+    if (mData.metaState == unmodifiedMetaState) {
+        mUnmodifiedChar = mChar;
+    } else {
+        mUnmodifiedChar = mKeyCharMap->getCharacter(mData.key.keyCode,
+                                                    unmodifiedMetaState);
+        if (IsControlChar(mUnmodifiedChar)) {
+            mUnmodifiedChar = 0;
+        }
+    }
+
+    mDOMPrintableKeyValue = PrintableKeyValue();
+}
+
+char16_t
+KeyEventDispatcher::PrintableKeyValue() const
+{
+    if (mDOMKeyNameIndex != KEY_NAME_INDEX_USE_STRING) {
+        return 0;
+    }
+    return mChar ? mChar : mUnmodifiedChar;
+}
+
+nsEventStatus
+KeyEventDispatcher::DispatchKeyEventInternal(uint32_t aEventMessage)
+{
+    WidgetKeyboardEvent event(true, aEventMessage, nullptr);
+    if (aEventMessage == NS_KEY_PRESS) {
+        // XXX If the charCode is not a printable character, the charCode
+        //     should be computed without Ctrl/Alt/Meta modifiers.
+        event.charCode = static_cast<uint32_t>(mChar);
+    }
+    if (!event.charCode) {
+        event.keyCode = mDOMKeyCode;
+    }
+    event.isChar = !!event.charCode;
+    event.mIsRepeat = IsRepeat();
+    event.mKeyNameIndex = mDOMKeyNameIndex;
+    if (mDOMPrintableKeyValue) {
+        event.mKeyValue = mDOMPrintableKeyValue;
+    }
+    event.modifiers = mData.DOMModifiers();
     event.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_MOBILE;
-    event.time = timeMs;
-    event.mFlags.Union(flags);
+    event.time = mData.timeMs;
     return nsWindow::DispatchInputEvent(event);
 }
 
-static void
-sendKeyEvent(uint32_t keyCode, KeyNameIndex keyNameIndex, bool down,
-             uint64_t timeMs)
+void
+KeyEventDispatcher::Dispatch()
 {
-    EventFlags extraFlags;
-    nsEventStatus status =
-        sendKeyEventWithMsg(keyCode, keyNameIndex,
-                            down ? NS_KEY_DOWN : NS_KEY_UP, timeMs, extraFlags);
-    if (down) {
-        extraFlags.mDefaultPrevented =
-            (status == nsEventStatus_eConsumeNoDefault);
-        sendKeyEventWithMsg(keyCode, keyNameIndex, NS_KEY_PRESS, timeMs,
-                            extraFlags);
+    // XXX Even if unknown key is pressed, DOM key event should be
+    //     dispatched since Gecko for the other platforms are implemented
+    //     as so.
+    if (!mDOMKeyCode && mDOMKeyNameIndex == KEY_NAME_INDEX_Unidentified) {
+        VERBOSE_LOG("Got unknown key event code. "
+                    "type 0x%04x code 0x%04x value %d",
+                    mData.action, mData.key.keyCode, IsKeyPress());
+        return;
+    }
+
+    if (IsKeyPress()) {
+        DispatchKeyDownEvent();
+    } else {
+        DispatchKeyUpEvent();
     }
 }
 
-static void
-maybeSendKeyEvent(int keyCode, bool pressed, uint64_t timeMs)
+void
+KeyEventDispatcher::DispatchKeyDownEvent()
 {
-    uint32_t DOMKeyCode =
-        (keyCode < ArrayLength(kKeyMapping)) ? kKeyMapping[keyCode] : 0;
-    KeyNameIndex DOMKeyNameIndex = GetKeyNameIndex(keyCode);
-    if (DOMKeyCode || DOMKeyNameIndex != KEY_NAME_INDEX_Unidentified) {
-        sendKeyEvent(DOMKeyCode, DOMKeyNameIndex, pressed, timeMs);
-    } else {
-        VERBOSE_LOG("Got unknown key event code. type 0x%04x code 0x%04x value %d",
-                    keyCode, pressed);
+    nsEventStatus status = DispatchKeyEventInternal(NS_KEY_DOWN);
+    if (status != nsEventStatus_eConsumeNoDefault) {
+        DispatchKeyEventInternal(NS_KEY_PRESS);
     }
+}
+
+void
+KeyEventDispatcher::DispatchKeyUpEvent()
+{
+    DispatchKeyEventInternal(NS_KEY_UP);
+}
+
+class SwitchEventRunnable : public nsRunnable {
+public:
+    SwitchEventRunnable(hal::SwitchEvent& aEvent) : mEvent(aEvent)
+    {}
+
+    NS_IMETHOD Run()
+    {
+        hal::NotifySwitchStateFromInputDevice(mEvent.device(),
+          mEvent.status());
+        return NS_OK;
+    }
+private:
+    hal::SwitchEvent mEvent;
+};
+
+static void
+updateHeadphoneSwitch()
+{
+    hal::SwitchEvent event;
+
+    switch (sHeadphoneState) {
+    case AKEY_STATE_UP:
+        event.status() = hal::SWITCH_STATE_OFF;
+        break;
+    case AKEY_STATE_DOWN:
+        event.status() = sMicrophoneState == AKEY_STATE_DOWN ?
+            hal::SWITCH_STATE_HEADSET : hal::SWITCH_STATE_HEADPHONE;
+        break;
+    default:
+        return;
+    }
+
+    event.device() = hal::SWITCH_HEADPHONES;
+    NS_DispatchToMainThread(new SwitchEventRunnable(event));
 }
 
 class GeckoPointerController : public PointerControllerInterface {
@@ -284,19 +491,13 @@ GeckoPointerController::getBounds(float* outMinX,
                                   float* outMaxX,
                                   float* outMaxY) const
 {
-    int32_t width, height, orientation;
+    DisplayViewport viewport;
 
-    mConfig->getDisplayInfo(0, false, &width, &height, &orientation);
+    mConfig->getDisplayInfo(false, &viewport);
 
     *outMinX = *outMinY = 0;
-    if (orientation == DISPLAY_ORIENTATION_90 ||
-        orientation == DISPLAY_ORIENTATION_270) {
-        *outMaxX = height;
-        *outMaxY = width;
-    } else {
-        *outMaxX = width;
-        *outMaxY = height;
-    }
+    *outMaxX = viewport.logicalRight;
+    *outMaxY = viewport.logicalBottom;
     return true;
 }
 
@@ -347,6 +548,16 @@ deviceId)
     {
         return new GeckoPointerController(&mConfig);
     };
+    virtual void notifyInputDevicesChanged(const android::Vector<InputDeviceInfo>& inputDevices) {};
+    virtual sp<KeyCharacterMap> getKeyboardLayoutOverlay(const String8& inputDeviceDescriptor)
+    {
+        return nullptr;
+    };
+    virtual String8 getDeviceAlias(const InputDeviceIdentifier& identifier)
+    {
+        return String8::empty();
+    };
+
     void setDisplayInfo();
 
 protected:
@@ -355,8 +566,13 @@ protected:
 
 class GeckoInputDispatcher : public InputDispatcherInterface {
 public:
-    GeckoInputDispatcher()
+    GeckoInputDispatcher(sp<EventHub> &aEventHub)
         : mQueueLock("GeckoInputDispatcher::mQueueMutex")
+        , mEventHub(aEventHub)
+        , mTouchDownCount(0)
+        , mKeyDownCount(0)
+        , mTouchEventsFiltered(false)
+        , mKeyEventsFiltered(false)
     {}
 
     virtual void dump(String8& dump);
@@ -377,7 +593,7 @@ public:
             int32_t injectorPid, int32_t injectorUid, int32_t syncMode, int32_t timeoutMillis,
             uint32_t policyFlags);
 
-    virtual void setInputWindows(const Vector<sp<InputWindowHandle> >& inputWindowHandles);
+    virtual void setInputWindows(const android::Vector<sp<InputWindowHandle> >& inputWindowHandles);
     virtual void setFocusedApplication(const sp<InputApplicationHandle>& inputApplicationHandle);
 
     virtual void setInputDispatchMode(bool enabled, bool frozen);
@@ -400,26 +616,46 @@ private:
     // popped and dispatched on the main thread.
     mozilla::Mutex mQueueLock;
     std::queue<UserInputData> mEventQueue;
+    sp<EventHub> mEventHub;
+
+    int mTouchDownCount;
+    int mKeyDownCount;
+    bool mTouchEventsFiltered;
+    bool mKeyEventsFiltered;
+    BitSet32 mTouchDown;
 };
 
 // GeckoInputReaderPolicy
 void
 GeckoInputReaderPolicy::setDisplayInfo()
 {
-    MOZ_STATIC_ASSERT(nsIScreen::ROTATION_0_DEG ==
-                      DISPLAY_ORIENTATION_0,
-                      "Orientation enums not matched!");
-    MOZ_STATIC_ASSERT(nsIScreen::ROTATION_90_DEG ==
-                      DISPLAY_ORIENTATION_90,
-                      "Orientation enums not matched!");
-    MOZ_STATIC_ASSERT(nsIScreen::ROTATION_180_DEG ==
-                      DISPLAY_ORIENTATION_180,
-                      "Orientation enums not matched!");
-    MOZ_STATIC_ASSERT(nsIScreen::ROTATION_270_DEG ==
-                      DISPLAY_ORIENTATION_270,
-                      "Orientation enums not matched!");
+    static_assert(nsIScreen::ROTATION_0_DEG ==
+                  DISPLAY_ORIENTATION_0,
+                  "Orientation enums not matched!");
+    static_assert(nsIScreen::ROTATION_90_DEG ==
+                  DISPLAY_ORIENTATION_90,
+                  "Orientation enums not matched!");
+    static_assert(nsIScreen::ROTATION_180_DEG ==
+                  DISPLAY_ORIENTATION_180,
+                  "Orientation enums not matched!");
+    static_assert(nsIScreen::ROTATION_270_DEG ==
+                  DISPLAY_ORIENTATION_270,
+                  "Orientation enums not matched!");
 
-    mConfig.setDisplayInfo(0, false, gScreenBounds.width, gScreenBounds.height, nsScreenGonk::GetRotation());
+    DisplayViewport viewport;
+    viewport.displayId = 0;
+    viewport.orientation = nsScreenGonk::GetRotation();
+    viewport.physicalRight = viewport.deviceWidth = gScreenBounds.width;
+    viewport.physicalBottom = viewport.deviceHeight = gScreenBounds.height;
+    if (viewport.orientation == DISPLAY_ORIENTATION_90 ||
+        viewport.orientation == DISPLAY_ORIENTATION_270) {
+        viewport.logicalRight = gScreenBounds.height;
+        viewport.logicalBottom = gScreenBounds.width;
+    } else {
+        viewport.logicalRight = gScreenBounds.width;
+        viewport.logicalBottom = gScreenBounds.height;
+    }
+    mConfig.setDisplayInfo(false, viewport);
 }
 
 void GeckoInputReaderPolicy::getReaderConfiguration(InputReaderConfiguration* outConfig)
@@ -432,6 +668,14 @@ void GeckoInputReaderPolicy::getReaderConfiguration(InputReaderConfiguration* ou
 void
 GeckoInputDispatcher::dump(String8& dump)
 {
+}
+
+static bool
+isExpired(const UserInputData& data)
+{
+    uint64_t timeNowMs =
+        nanosecsToMillisecs(systemTime(SYSTEM_TIME_MONOTONIC));
+    return (timeNowMs - data.timeMs) > kInputExpirationThresholdMs;
 }
 
 void
@@ -450,9 +694,45 @@ GeckoInputDispatcher::dispatchOnce()
 
     switch (data.type) {
     case UserInputData::MOTION_DATA: {
+        if (!mTouchDownCount) {
+            // No pending events, the filter state can be updated.
+            mTouchEventsFiltered = isExpired(data);
+        }
+
+        int32_t action = data.action & AMOTION_EVENT_ACTION_MASK;
+        int32_t index = data.action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK;
+        index >>= AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
+        switch (action) {
+        case AMOTION_EVENT_ACTION_DOWN:
+        case AMOTION_EVENT_ACTION_POINTER_DOWN:
+            if (!mTouchDown.hasBit(index)) {
+                mTouchDown.markBit(index);
+                mTouchDownCount++;
+            }
+            break;
+        case AMOTION_EVENT_ACTION_MOVE:
+        case AMOTION_EVENT_ACTION_HOVER_MOVE:
+            // No need to update the count on move.
+            break;
+        case AMOTION_EVENT_ACTION_UP:
+        case AMOTION_EVENT_ACTION_POINTER_UP:
+        case AMOTION_EVENT_ACTION_OUTSIDE:
+        case AMOTION_EVENT_ACTION_CANCEL:
+            if (mTouchDown.hasBit(index)) {
+                mTouchDown.clearBit(index);
+                mTouchDownCount--;
+            }
+            break;
+        default:
+            break;
+        }
+
+        if (mTouchEventsFiltered) {
+            return;
+        }
+
         nsEventStatus status = nsEventStatus_eIgnore;
-        if ((data.action & AMOTION_EVENT_ACTION_MASK) !=
-            AMOTION_EVENT_ACTION_HOVER_MOVE) {
+        if (action != AMOTION_EVENT_ACTION_HOVER_MOVE) {
             bool captured;
             status = sendTouchEvent(data, &captured);
             if (captured) {
@@ -461,7 +741,7 @@ GeckoInputDispatcher::dispatchOnce()
         }
 
         uint32_t msg;
-        switch (data.action & AMOTION_EVENT_ACTION_MASK) {
+        switch (action) {
         case AMOTION_EVENT_ACTION_DOWN:
             msg = NS_MOUSE_BUTTON_DOWN;
             break;
@@ -476,32 +756,38 @@ GeckoInputDispatcher::dispatchOnce()
         case AMOTION_EVENT_ACTION_UP:
             msg = NS_MOUSE_BUTTON_UP;
             break;
+        default:
+            msg = NS_EVENT_NULL;
+            break;
         }
-        sendMouseEvent(msg,
-                       data.timeMs,
-                       data.motion.touches[0].coords.getX(),
-                       data.motion.touches[0].coords.getY(),
-                       status != nsEventStatus_eConsumeNoDefault);
+        if (msg != NS_EVENT_NULL) {
+            sendMouseEvent(msg, data, 
+                           status != nsEventStatus_eConsumeNoDefault);
+        }
         break;
     }
-    case UserInputData::KEY_DATA:
-        maybeSendKeyEvent(data.key.keyCode,
-                          data.action == AKEY_EVENT_ACTION_DOWN,
-                          data.timeMs);
+    case UserInputData::KEY_DATA: {
+        if (!mKeyDownCount) {
+            // No pending events, the filter state can be updated.
+            mKeyEventsFiltered = isExpired(data);
+        }
+
+        mKeyDownCount += (data.action == AKEY_EVENT_ACTION_DOWN) ? 1 : -1;
+        if (mKeyEventsFiltered) {
+            return;
+        }
+
+        sp<KeyCharacterMap> kcm = mEventHub->getKeyCharacterMap(data.deviceId);
+        KeyEventDispatcher dispatcher(data, kcm.get());
+        dispatcher.Dispatch();
         break;
+    }
     }
 }
-
 
 void
 GeckoInputDispatcher::notifyConfigurationChanged(const NotifyConfigurationChangedArgs*)
 {
-}
-
-static uint64_t
-nanosecsToMillisecs(nsecs_t nsecs)
-{
-    return nsecs / 1000000;
 }
 
 void
@@ -513,6 +799,7 @@ GeckoInputDispatcher::notifyKey(const NotifyKeyArgs* args)
     data.action = args->action;
     data.flags = args->flags;
     data.metaState = args->metaState;
+    data.deviceId = args->deviceId;
     data.key.keyCode = args->keyCode;
     data.key.scanCode = args->scanCode;
     {
@@ -532,6 +819,7 @@ GeckoInputDispatcher::notifyMotion(const NotifyMotionArgs* args)
     data.action = args->action;
     data.flags = args->flags;
     data.metaState = args->metaState;
+    data.deviceId = args->deviceId;
     MOZ_ASSERT(args->pointerCount <= MAX_POINTERS);
     data.motion.touchCount = args->pointerCount;
     for (uint32_t i = 0; i < args->pointerCount; ++i) {
@@ -558,6 +846,25 @@ GeckoInputDispatcher::notifyMotion(const NotifyMotionArgs* args)
 
 void GeckoInputDispatcher::notifySwitch(const NotifySwitchArgs* args)
 {
+    if (!sDevInputAudioJack)
+        return;
+
+    bool needSwitchUpdate = false;
+
+    if (args->switchMask & (1 << SW_HEADPHONE_INSERT)) {
+        sHeadphoneState = (args->switchValues & (1 << SW_HEADPHONE_INSERT)) ?
+                          AKEY_STATE_DOWN : AKEY_STATE_UP;
+        needSwitchUpdate = true;
+    }
+
+    if (args->switchMask & (1 << SW_MICROPHONE_INSERT)) {
+        sMicrophoneState = (args->switchValues & (1 << SW_MICROPHONE_INSERT)) ?
+                           AKEY_STATE_DOWN : AKEY_STATE_UP;
+        needSwitchUpdate = true;
+    }
+
+    if (needSwitchUpdate)
+        updateHeadphoneSwitch();
 }
 
 void GeckoInputDispatcher::notifyDeviceReset(const NotifyDeviceResetArgs* args)
@@ -573,7 +880,7 @@ int32_t GeckoInputDispatcher::injectInputEvent(
 }
 
 void
-GeckoInputDispatcher::setInputWindows(const Vector<sp<InputWindowHandle> >& inputWindowHandles)
+GeckoInputDispatcher::setInputWindows(const android::Vector<sp<InputWindowHandle> >& inputWindowHandles)
 {
 }
 
@@ -602,8 +909,8 @@ GeckoInputDispatcher::unregisterInputChannel(const sp<InputChannel>& inputChanne
 
 nsAppShell::nsAppShell()
     : mNativeCallbackRequest(false)
-    , mHandlers()
     , mEnableDraw(false)
+    , mHandlers()
 {
     gAppShell = this;
 }
@@ -622,7 +929,7 @@ nsAppShell::~nsAppShell()
         if (result)
             LOG("Could not stop reader thread - %d", result);
     }
-    gAppShell = NULL;
+    gAppShell = nullptr;
 }
 
 nsresult
@@ -642,15 +949,30 @@ nsAppShell::Init()
 
     InitGonkMemoryPressureMonitoring();
 
-#ifdef MOZ_OMX_DECODER
     if (XRE_GetProcessType() == GeckoProcessType_Default) {
-      android::MediaResourceManagerService::instantiate();
-    }
+#ifdef MOZ_OMX_DECODER
+        android::MediaResourceManagerService::instantiate();
 #endif
+#if ANDROID_VERSION >= 18 && (defined(MOZ_OMX_DECODER) || defined(MOZ_B2G_CAMERA))
+        android::FakeSurfaceComposer::instantiate();
+#endif
+        GonkPermissionService::instantiate();
+
+        // Causes the kernel timezone to be set, which in turn causes the
+        // timestamps on SD cards to have the local time rather than UTC time.
+        hal::SetTimezone(hal::GetTimezone());
+    }
+
     nsCOMPtr<nsIObserverService> obsServ = GetObserverService();
     if (obsServ) {
         obsServ->AddObserver(this, "browser-ui-startup-complete", false);
+        obsServ->AddObserver(this, "network-connection-state-changed", false);
     }
+
+#ifdef MOZ_NUWA_PROCESS
+    // Make sure main thread was woken up after Nuwa fork.
+    NuwaAddConstructor((void (*)(void *))&NotifyEvent, nullptr);
+#endif
 
     // Delay initializing input devices until the screen has been
     // initialized (and we know the resolution).
@@ -660,15 +982,26 @@ nsAppShell::Init()
 NS_IMETHODIMP
 nsAppShell::Observe(nsISupports* aSubject,
                     const char* aTopic,
-                    const PRUnichar* aData)
+                    const char16_t* aData)
 {
-    if (strcmp(aTopic, "browser-ui-startup-complete")) {
-        return nsBaseAppShell::Observe(aSubject, aTopic, aData);
+    if (!strcmp(aTopic, "network-connection-state-changed")) {
+        NS_ConvertUTF16toUTF8 type(aData);
+        if (!type.IsEmpty()) {
+            hal::NotifyNetworkChange(hal::NetworkInformation(atoi(type.get()), 0, 0));
+        }
+        return NS_OK;
+    } else if (!strcmp(aTopic, "browser-ui-startup-complete")) {
+        if (sDevInputAudioJack) {
+            sHeadphoneState  = mReader->getSwitchState(-1, AINPUT_SOURCE_SWITCH, SW_HEADPHONE_INSERT);
+            sMicrophoneState = mReader->getSwitchState(-1, AINPUT_SOURCE_SWITCH, SW_MICROPHONE_INSERT);
+            updateHeadphoneSwitch();
+        }
+        mEnableDraw = true;
+        NotifyEvent();
+        return NS_OK;
     }
 
-    mEnableDraw = true;
-    NotifyEvent();
-    return NS_OK;
+    return nsBaseAppShell::Observe(aSubject, aTopic, aData);
 }
 
 NS_IMETHODIMP
@@ -678,6 +1011,7 @@ nsAppShell::Exit()
     nsCOMPtr<nsIObserverService> obsServ = GetObserverService();
     if (obsServ) {
         obsServ->RemoveObserver(this, "browser-ui-startup-complete");
+        obsServ->RemoveObserver(this, "network-connection-state-changed");
     }
     return nsBaseAppShell::Exit();
 }
@@ -685,10 +1019,16 @@ nsAppShell::Exit()
 void
 nsAppShell::InitInputDevices()
 {
+    char value[PROPERTY_VALUE_MAX];
+    property_get("ro.moz.devinputjack", value, "0");
+    sDevInputAudioJack = !strcmp(value, "1");
+    sHeadphoneState = AKEY_STATE_UNKNOWN;
+    sMicrophoneState = AKEY_STATE_UNKNOWN;
+
     mEventHub = new EventHub();
     mReaderPolicy = new GeckoInputReaderPolicy();
     mReaderPolicy->setDisplayInfo();
-    mDispatcher = new GeckoInputDispatcher();
+    mDispatcher = new GeckoInputDispatcher(mEventHub);
 
     mReader = new InputReader(mEventHub, mReaderPolicy, mDispatcher);
     mReaderThread = new InputReaderThread(mReader);

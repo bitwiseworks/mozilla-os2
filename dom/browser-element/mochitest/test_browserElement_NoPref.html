@@ -23,7 +23,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=710231
 SimpleTest.waitForExplicitFinish();
 
 function runTest() {
-  browserElementTestHelpers.setEnabledPref(false);
 
   var iframe = document.createElement('iframe');
   SpecialPowers.wrap(iframe).mozbrowser = true;
@@ -41,7 +40,8 @@ function runTest() {
   iframe.src = browserElementTestHelpers.emptyPage1;
 }
 
-addEventListener('load', function() { SimpleTest.executeSoon(runTest); });
+browserElementTestHelpers.setEnabledPref(false);
+addEventListener('testready', runTest);
 
 </script>
 

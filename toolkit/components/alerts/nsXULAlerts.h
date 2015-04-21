@@ -12,14 +12,11 @@
 #include "nsIDOMWindow.h"
 #include "nsIObserver.h"
 
-using namespace mozilla;
-
 class nsXULAlerts {
   friend class nsXULAlertObserver;
 public:
   nsXULAlerts()
   {
-    mNamedWindows.Init();
   }
 
   virtual ~nsXULAlerts() {}

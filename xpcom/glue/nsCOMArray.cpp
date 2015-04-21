@@ -4,6 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCOMArray.h"
+
+#include "mozilla/MemoryReporting.h"
+
 #include "nsCOMPtr.h"
 
 // This specialization is private to nsCOMArray.
@@ -54,7 +57,8 @@ int32_t
 nsCOMArray_base::IndexOfObject(nsISupports* aObject) const
 {
     nsCOMPtr<nsISupports> supports = do_QueryInterface(aObject);
-    NS_ENSURE_TRUE(supports, -1);
+    if (NS_WARN_IF(!supports))
+        return -1;
 
     uint32_t i, count;
     int32_t retval = -1;
@@ -258,13 +262,14 @@ nsCOMArray_base::SetCount(int32_t aNewCount)
     int32_t count = mArray.Length();
     if (count > aNewCount)
         RemoveObjectsAt(aNewCount, mArray.Length() - aNewCount);
-    return mArray.SetLength(aNewCount);
+    mArray.SetLength(aNewCount);
+    return true;
 }
 
 size_t
 nsCOMArray_base::SizeOfExcludingThis(
                    nsBaseArraySizeOfElementIncludingThisFunc aSizeOfElementIncludingThis,
-                   nsMallocSizeOfFun aMallocSizeOf, void* aData) const
+                   mozilla::MallocSizeOf aMallocSizeOf, void* aData) const
 {
     size_t n = mArray.SizeOfExcludingThis(aMallocSizeOf);
 
@@ -273,4 +278,30 @@ nsCOMArray_base::SizeOfExcludingThis(
             n += aSizeOfElementIncludingThis(mArray[index], aMallocSizeOf, aData);
 
     return n;
+}
+
+
+void
+nsCOMArray_base::Adopt(nsISupports** aElements, uint32_t aSize)
+{
+    Clear();
+    mArray.AppendElements(aElements, aSize);
+
+    // Free the allocated array as well.
+    NS_Free(aElements);
+}
+
+uint32_t
+nsCOMArray_base::Forget(nsISupports*** elements)
+{
+    uint32_t length = Length();
+    size_t array_size = sizeof(nsISupports*) * length;
+    nsISupports** array = static_cast<nsISupports**>(NS_Alloc(array_size));
+    memmove(array, Elements(), array_size);
+    *elements = array;
+    // Don't Release the contained pointers; the caller of the method will
+    // do this eventually.
+    mArray.Clear();
+
+    return length;
 }

@@ -6,14 +6,15 @@
 #ifndef _nsCrypto_h_
 #define _nsCrypto_h_
 
+#include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/ErrorResult.h"
 #ifndef MOZ_DISABLE_CRYPTOLEGACY
+#include "mozilla/dom/NonRefcountedDOMObject.h"
 #include "Crypto.h"
 #include "nsCOMPtr.h"
-#include "nsIDOMCRMFObject.h"
 #include "nsIDOMCryptoLegacy.h"
 #include "nsIRunnable.h"
 #include "nsString.h"
-#include "jsapi.h"
 #include "nsIPrincipal.h"
 
 #define NS_CRYPTO_CID \
@@ -23,24 +24,27 @@
 class nsIPSMComponent;
 class nsIDOMScriptObjectFactory;
 
+namespace mozilla {
+namespace dom {
 
-class nsCRMFObject : public nsIDOMCRMFObject
+class CRMFObject : public NonRefcountedDOMObject
 {
 public:
-  nsCRMFObject();
-  virtual ~nsCRMFObject();
-
-  NS_DECL_NSIDOMCRMFOBJECT
-  NS_DECL_ISUPPORTS
-
-  nsresult init();
+  CRMFObject();
+  virtual ~CRMFObject();
 
   nsresult SetCRMFRequest(char *inRequest);
-private:
 
+  JSObject* WrapObject(JSContext *aCx, bool* aTookOwnership);
+
+  void GetRequest(nsAString& aRequest);
+
+private:
   nsString mBase64Request;
 };
 
+}
+}
 
 class nsCrypto: public mozilla::dom::Crypto
 {
@@ -53,6 +57,36 @@ public:
   // If legacy DOM crypto is enabled this is the class that actually
   // implements the legacy methods.
   NS_DECL_NSIDOMCRYPTO
+
+  virtual bool EnableSmartCardEvents() MOZ_OVERRIDE;
+  virtual void SetEnableSmartCardEvents(bool aEnable,
+                                        mozilla::ErrorResult& aRv) MOZ_OVERRIDE;
+
+  virtual void GetVersion(nsString& aVersion) MOZ_OVERRIDE;
+
+  virtual mozilla::dom::CRMFObject*
+  GenerateCRMFRequest(JSContext* aContext,
+                      const nsCString& aReqDN,
+                      const nsCString& aRegToken,
+                      const nsCString& aAuthenticator,
+                      const nsCString& aEaCert,
+                      const nsCString& aJsCallback,
+                      const mozilla::dom::Sequence<JS::Value>& aArgs,
+                      mozilla::ErrorResult& aRv) MOZ_OVERRIDE;
+
+  virtual void ImportUserCertificates(const nsAString& aNickname,
+                                      const nsAString& aCmmfResponse,
+                                      bool aDoForcedBackup,
+                                      nsAString& aReturn,
+                                      mozilla::ErrorResult& aRv) MOZ_OVERRIDE;
+
+  virtual void SignText(JSContext* aContext,
+                        const nsAString& aStringToSign,
+                        const nsAString& aCaOption,
+                        const mozilla::dom::Sequence<nsCString>& aArgs,
+                        nsAString& aReturn) MOZ_OVERRIDE;
+
+  virtual void Logout(mozilla::ErrorResult& aRv) MOZ_OVERRIDE;
 
 private:
   static already_AddRefed<nsIPrincipal> GetScriptPrincipal(JSContext *cx);

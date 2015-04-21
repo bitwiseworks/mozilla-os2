@@ -15,6 +15,9 @@
 
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
 
+  <script type="application/javascript;version=1.8"
+          src="chrome://browser/content/devtools/theme-switching.js"/>
+
   <script type="application/javascript"
           src="chrome://global/content/viewSourceUtils.js"/>
 
@@ -33,6 +36,10 @@
   <popupset id="inspectorPopupSet">
     <!-- Used by the Markup Panel, the Highlighter and the Breadcrumbs -->
     <menupopup id="inspector-node-popup">
+      <menuitem id="node-menu-edithtml"
+        label="&inspectorHTMLEdit.label;"
+        accesskey="&inspectorHTMLEdit.accesskey;"
+        oncommand="inspector.editHTML()"/>
       <menuitem id="node-menu-copyinner"
         label="&inspectorHTMLCopyInner.label;"
         accesskey="&inspectorHTMLCopyInner.accesskey;"
@@ -45,6 +52,9 @@
         label="&inspectorCopyUniqueSelector.label;"
         accesskey="&inspectorCopyUniqueSelector.accesskey;"
         oncommand="inspector.copyUniqueSelector()"/>
+      <menuitem id="node-menu-copyimagedatauri"
+        label="&inspectorCopyImageDataUri.label;"
+        oncommand="inspector.copyImageDataUri()"/>
       <menuseparator/>
       <menuitem id="node-menu-delete"
         label="&inspectorHTMLDelete.label;"
@@ -63,16 +73,11 @@
     </menupopup>
   </popupset>
 
-  <box flex="1" class="devtools-responsive-container">
+  <box flex="1" class="devtools-responsive-container theme-body">
     <vbox flex="1">
       <toolbar id="inspector-toolbar"
         class="devtools-toolbar"
         nowindowdrag="true">
-        <toolbarbutton id="inspector-inspect-toolbutton"
-          tooltiptext="&inspector.selectButton.tooltip;"
-          class="devtools-toolbarbutton"
-          hidden="true"
-          oncommand="inspector.highlighter.unlockAndFocus()"/>
         <arrowscrollbox id="inspector-breadcrumbs"
           class="breadcrumbs-widget-container"
           flex="1" orient="horizontal"

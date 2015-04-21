@@ -4,17 +4,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'necko'
+FAIL_ON_WARNINGS = True
 
-CPP_SOURCES += [
+SOURCES += [
     'nsStreamConverterService.cpp',
 ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    if CONFIG['OS_TEST'] != 'x86_64':
-        CPP_SOURCES += [
-            'nsAppleFileDecoder.cpp',
-        ]
+MSVC_ENABLE_PGO = True
 
-LIBRARY_NAME = 'nkconv_s'
-
+FINAL_LIBRARY = 'necko'

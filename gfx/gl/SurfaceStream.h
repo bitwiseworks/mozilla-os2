@@ -10,18 +10,25 @@
 #include <set>
 #include "mozilla/Monitor.h"
 #include "mozilla/Attributes.h"
-#include "gfxPoint.h"
+#include "mozilla/gfx/Point.h"
+#include "mozilla/GenericRefCounted.h"
 #include "SurfaceTypes.h"
 
 namespace mozilla {
+
+namespace gl {
+class GLContext;
+}
+
 namespace gfx {
 class SharedSurface;
 class SurfaceFactory;
 
 // Owned by: ScreenBuffer
-class SurfaceStream
+class SurfaceStream : public GenericAtomicRefCounted
 {
 public:
+    MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SurfaceStream)
     typedef enum {
         MainThread,
         OffMainThread
@@ -31,6 +38,7 @@ public:
                                                 bool preserveBuffer);
 
     static SurfaceStream* CreateForType(SurfaceStreamType type,
+                                        mozilla::gl::GLContext* glContext,
                                         SurfaceStream* prevStream = nullptr);
 
     SurfaceStreamHandle GetShareHandle() {
@@ -42,6 +50,10 @@ public:
     }
 
     const SurfaceStreamType mType;
+
+    mozilla::gl::GLContext* GLContext() const { return mGLContext; }
+
+
 protected:
     // |mProd| is owned by us, but can be ripped away when
     // creating a new GLStream from this one.
@@ -50,6 +62,10 @@ protected:
     std::stack<SharedSurface*> mScraps;
     mutable Monitor mMonitor;
     bool mIsAlive;
+
+    // Do not use this. It exists solely so we can ref it in CanvasClientWebGL::Update()
+    // before sent up to the compositor. You have been warned (Bug 894405)
+    mozilla::gl::GLContext* mGLContext;
 
     // |previous| can be null, indicating this is the first one.
     // Otherwise, we pull in |mProd| from |previous| an our initial surface.
@@ -77,7 +93,7 @@ protected:
         from = nullptr;
     }
 
-    void New(SurfaceFactory* factory, const gfxIntSize& size,
+    void New(SurfaceFactory* factory, const gfx::IntSize& size,
              SharedSurface*& surf);
     void Delete(SharedSurface*& surf);
     void Recycle(SurfaceFactory* factory, SharedSurface*& surf);
@@ -105,9 +121,11 @@ public:
      * One common failure is asking for a too-large |size|.
      */
     virtual SharedSurface* SwapProducer(SurfaceFactory* factory,
-                                        const gfxIntSize& size) = 0;
+                                        const gfx::IntSize& size) = 0;
 
-    virtual SharedSurface* Resize(SurfaceFactory* factory, const gfxIntSize& size);
+    virtual SharedSurface* Resize(SurfaceFactory* factory, const gfx::IntSize& size);
+
+    virtual bool CopySurfaceToProducer(SharedSurface* src, SurfaceFactory* factory) { MOZ_ASSERT(0); return false; }
 
 protected:
     // SwapCons will return the same surface more than once,
@@ -128,6 +146,7 @@ protected:
     SharedSurface* mConsumer; // Only present after resize-swap.
 
 public:
+    MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SurfaceStream_SingleBuffer)
     SurfaceStream_SingleBuffer(SurfaceStream* prevStream);
     virtual ~SurfaceStream_SingleBuffer();
 
@@ -136,7 +155,7 @@ public:
      * SwapCons being called in Render.
      */
     virtual SharedSurface* SwapProducer(SurfaceFactory* factory,
-                                        const gfxIntSize& size);
+                                        const gfx::IntSize& size);
 
     virtual SharedSurface* SwapConsumer_NoWait();
 
@@ -152,11 +171,12 @@ protected:
     SharedSurface* mConsumer;
 
 public:
+    MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SurfaceStream_TripleBuffer_Copy)
     SurfaceStream_TripleBuffer_Copy(SurfaceStream* prevStream);
     virtual ~SurfaceStream_TripleBuffer_Copy();
 
     virtual SharedSurface* SwapProducer(SurfaceFactory* factory,
-                                        const gfxIntSize& size);
+                                        const gfx::IntSize& size);
 
     virtual SharedSurface* SwapConsumer_NoWait();
 
@@ -178,8 +198,10 @@ protected:
     SurfaceStream_TripleBuffer(SurfaceStreamType type, SurfaceStream* prevStream);
 
 public:
+    MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SurfaceStream_TripleBuffer)
     SurfaceStream_TripleBuffer(SurfaceStream* prevStream);
     virtual ~SurfaceStream_TripleBuffer();
+    virtual bool CopySurfaceToProducer(SharedSurface* src, SurfaceFactory* factory);
 
 private:
     // Common constructor code.
@@ -188,7 +210,7 @@ private:
 public:
     // Done writing to prod, swap prod and staging
     virtual SharedSurface* SwapProducer(SurfaceFactory* factory,
-                                        const gfxIntSize& size);
+                                        const gfx::IntSize& size);
 
     virtual SharedSurface* SwapConsumer_NoWait();
 
@@ -199,7 +221,7 @@ class SurfaceStream_TripleBuffer_Async
     : public SurfaceStream_TripleBuffer
 {
 protected:
-    virtual bool WaitForCompositor();
+    virtual bool WaitForCompositor() MOZ_OVERRIDE;
 
 public:
     SurfaceStream_TripleBuffer_Async(SurfaceStream* prevStream);

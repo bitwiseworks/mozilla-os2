@@ -12,13 +12,14 @@
  * The core AEC algorithm, SSE2 version of speed-critical functions.
  */
 
-#include "aec_core.h"
+#include "webrtc/modules/audio_processing/aec/aec_core.h"
 
 #include <emmintrin.h>
 #include <math.h>
 #include <string.h>  // memset
 
-#include "aec_rdft.h"
+#include "webrtc/modules/audio_processing/aec/aec_core_internal.h"
+#include "webrtc/modules/audio_processing/aec/aec_rdft.h"
 
 __inline static float MulRe(float aRe, float aIm, float bRe, float bIm)
 {
@@ -30,16 +31,17 @@ __inline static float MulIm(float aRe, float aIm, float bRe, float bIm)
   return aRe * bIm + aIm * bRe;
 }
 
-static void FilterFarSSE2(aec_t *aec, float yf[2][PART_LEN1])
+static void FilterFarSSE2(AecCore* aec, float yf[2][PART_LEN1])
 {
   int i;
-  for (i = 0; i < NR_PART; i++) {
+  const int num_partitions = aec->num_partitions;
+  for (i = 0; i < num_partitions; i++) {
     int j;
     int xPos = (i + aec->xfBufBlockPos) * PART_LEN1;
     int pos = i * PART_LEN1;
     // Check for wrap
-    if (i + aec->xfBufBlockPos >= NR_PART) {
-      xPos -= NR_PART*(PART_LEN1);
+    if (i + aec->xfBufBlockPos >= num_partitions) {
+      xPos -= num_partitions*(PART_LEN1);
     }
 
     // vectorized code (four at once)
@@ -71,11 +73,14 @@ static void FilterFarSSE2(aec_t *aec, float yf[2][PART_LEN1])
   }
 }
 
-static void ScaleErrorSignalSSE2(aec_t *aec, float ef[2][PART_LEN1])
+static void ScaleErrorSignalSSE2(AecCore* aec, float ef[2][PART_LEN1])
 {
   const __m128 k1e_10f = _mm_set1_ps(1e-10f);
-  const __m128 kThresh = _mm_set1_ps(aec->errThresh);
-  const __m128 kMu = _mm_set1_ps(aec->mu);
+  const __m128 kMu = aec->extended_filter_enabled ?
+      _mm_set1_ps(kExtendedMu) : _mm_set1_ps(aec->normal_mu);
+  const __m128 kThresh = aec->extended_filter_enabled ?
+      _mm_set1_ps(kExtendedErrorThreshold) :
+      _mm_set1_ps(aec->normal_error_threshold);
 
   int i;
   // vectorized code (four at once)
@@ -109,32 +114,39 @@ static void ScaleErrorSignalSSE2(aec_t *aec, float ef[2][PART_LEN1])
     _mm_storeu_ps(&ef[1][i], ef_im);
   }
   // scalar code for the remaining items.
-  for (; i < (PART_LEN1); i++) {
-    float absEf;
-    ef[0][i] /= (aec->xPow[i] + 1e-10f);
-    ef[1][i] /= (aec->xPow[i] + 1e-10f);
-    absEf = sqrtf(ef[0][i] * ef[0][i] + ef[1][i] * ef[1][i]);
+  {
+    const float mu = aec->extended_filter_enabled ?
+        kExtendedMu : aec->normal_mu;
+    const float error_threshold = aec->extended_filter_enabled ?
+        kExtendedErrorThreshold : aec->normal_error_threshold;
+    for (; i < (PART_LEN1); i++) {
+    float abs_ef;
+      ef[0][i] /= (aec->xPow[i] + 1e-10f);
+      ef[1][i] /= (aec->xPow[i] + 1e-10f);
+      abs_ef = sqrtf(ef[0][i] * ef[0][i] + ef[1][i] * ef[1][i]);
 
-    if (absEf > aec->errThresh) {
-      absEf = aec->errThresh / (absEf + 1e-10f);
-      ef[0][i] *= absEf;
-      ef[1][i] *= absEf;
+      if (abs_ef > error_threshold) {
+        abs_ef = error_threshold / (abs_ef + 1e-10f);
+        ef[0][i] *= abs_ef;
+        ef[1][i] *= abs_ef;
+      }
+
+      // Stepsize factor
+      ef[0][i] *= mu;
+      ef[1][i] *= mu;
     }
-
-    // Stepsize factor
-    ef[0][i] *= aec->mu;
-    ef[1][i] *= aec->mu;
   }
 }
 
-static void FilterAdaptationSSE2(aec_t *aec, float *fft, float ef[2][PART_LEN1]) {
+static void FilterAdaptationSSE2(AecCore* aec, float *fft, float ef[2][PART_LEN1]) {
   int i, j;
-  for (i = 0; i < NR_PART; i++) {
+  const int num_partitions = aec->num_partitions;
+  for (i = 0; i < num_partitions; i++) {
     int xPos = (i + aec->xfBufBlockPos)*(PART_LEN1);
     int pos = i * PART_LEN1;
     // Check for wrap
-    if (i + aec->xfBufBlockPos >= NR_PART) {
-      xPos -= NR_PART * PART_LEN1;
+    if (i + aec->xfBufBlockPos >= num_partitions) {
+      xPos -= num_partitions * PART_LEN1;
     }
 
     // Process the whole array...
@@ -340,7 +352,7 @@ static __m128 mm_pow_ps(__m128 a, __m128 b)
 extern const float WebRtcAec_weightCurve[65];
 extern const float WebRtcAec_overDriveCurve[65];
 
-static void OverdriveAndSuppressSSE2(aec_t *aec, float hNl[PART_LEN1],
+static void OverdriveAndSuppressSSE2(AecCore* aec, float hNl[PART_LEN1],
                                      const float hNlFb,
                                      float efw[2][PART_LEN1]) {
   int i;

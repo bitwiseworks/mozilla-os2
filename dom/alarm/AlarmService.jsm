@@ -36,8 +36,6 @@ XPCOMUtils.defineLazyGetter(this, "powerManagerService", function() {
   return Cc["@mozilla.org/power/powermanagerservice;1"].getService(Ci.nsIPowerManagerService);
 });
 
-let myGlobal = this;
-
 /**
  * AlarmService provides an API to schedule alarms using the device's RTC.
  *
@@ -73,11 +71,8 @@ this.AlarmService = {
     }.bind(this));
 
     // Set the indexeddb database.
-    let idbManager = Cc["@mozilla.org/dom/indexeddb/manager;1"]
-                     .getService(Ci.nsIIndexedDatabaseManager);
-    idbManager.initWindowless(myGlobal);
-    this._db = new AlarmDB(myGlobal);
-    this._db.init(myGlobal);
+    this._db = new AlarmDB();
+    this._db.init();
 
     // Variable to save alarms waiting to be set.
     this._alarmQueue = [];
@@ -331,16 +326,23 @@ this.AlarmService = {
   },
 
   _getAlarmTime: function _getAlarmTime(aAlarm) {
-    let alarmTime = (new Date(aAlarm.date)).getTime();
+    // Avoid casting a Date object to a Date again to
+    // preserve milliseconds. See bug 810973.
+    let alarmTime;
+    if (aAlarm.date instanceof Date) {
+      alarmTime = aAlarm.date.getTime();
+    } else {
+      alarmTime = (new Date(aAlarm.date)).getTime();
+    }
 
     // For an alarm specified with "ignoreTimezone", it must be fired respect
     // to the user's timezone.  Supposing an alarm was set at 7:00pm at Tokyo,
     // it must be gone off at 7:00pm respect to Paris' local time when the user
     // is located at Paris.  We can adjust the alarm UTC time by calculating
     // the difference of the orginal timezone and the current timezone.
-    if (aAlarm.ignoreTimezone)
+    if (aAlarm.ignoreTimezone) {
        alarmTime += (this._currentTimezoneOffset - aAlarm.timezoneOffset) * 60000;
-
+    }
     return alarmTime;
   },
 
@@ -510,6 +512,11 @@ this.AlarmService = {
           aSubject.QueryInterface(Ci.mozIApplicationClearPrivateDataParams);
         if (!params) {
           debug("Error! Fail to remove alarms for an uninstalled app.");
+          return;
+        }
+
+        // Only remove alarms for apps.
+        if (params.browserOnly) {
           return;
         }
 

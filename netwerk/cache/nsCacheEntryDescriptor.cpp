@@ -64,15 +64,15 @@ public:
     }
 
 private:
-    nsCOMPtr<nsCacheEntryDescriptor> mDescriptor;
+    nsRefPtr<nsCacheEntryDescriptor> mDescriptor;
     nsICacheListener                *mListener;
     nsCOMPtr<nsIThread>              mThread;
 };
 
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsCacheEntryDescriptor,
-                              nsICacheEntryDescriptor,
-                              nsICacheEntryInfo)
+NS_IMPL_ISUPPORTS(nsCacheEntryDescriptor,
+                  nsICacheEntryDescriptor,
+                  nsICacheEntryInfo)
 
 nsCacheEntryDescriptor::nsCacheEntryDescriptor(nsCacheEntry * entry,
                                                nsCacheAccessMode accessGranted)
@@ -654,8 +654,8 @@ nsCacheEntryDescriptor::VisitMetaData(nsICacheMetaDataVisitor * visitor)
  *                      open while referenced.
  ******************************************************************************/
 
-NS_IMPL_THREADSAFE_ADDREF(nsCacheEntryDescriptor::nsInputStreamWrapper)
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMPL_ADDREF(nsCacheEntryDescriptor::nsInputStreamWrapper)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsCacheEntryDescriptor::nsInputStreamWrapper::Release()
 {
     // Holding a reference to descriptor ensures that cache service won't go
@@ -672,7 +672,7 @@ nsCacheEntryDescriptor::nsInputStreamWrapper::Release()
 
     nsrefcnt count;
     NS_PRECONDITION(0 != mRefCnt, "dup release");
-    count = NS_AtomicDecrementRefcnt(mRefCnt);
+    count = --mRefCnt;
     NS_LOG_RELEASE(this, count, "nsCacheEntryDescriptor::nsInputStreamWrapper");
 
     if (0 == count) {
@@ -846,8 +846,8 @@ nsInputStreamWrapper::IsNonBlocking(bool *result)
  * nsDecompressInputStreamWrapper - an input stream wrapper that decompresses
  ******************************************************************************/
 
-NS_IMPL_THREADSAFE_ADDREF(nsCacheEntryDescriptor::nsDecompressInputStreamWrapper)
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMPL_ADDREF(nsCacheEntryDescriptor::nsDecompressInputStreamWrapper)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsCacheEntryDescriptor::nsDecompressInputStreamWrapper::Release()
 {
     // Holding a reference to descriptor ensures that cache service won't go
@@ -865,7 +865,7 @@ nsCacheEntryDescriptor::nsDecompressInputStreamWrapper::Release()
 
     nsrefcnt count;
     NS_PRECONDITION(0 != mRefCnt, "dup release");
-    count = NS_AtomicDecrementRefcnt(mRefCnt);
+    count = --mRefCnt;
     NS_LOG_RELEASE(this, count,
                    "nsCacheEntryDescriptor::nsDecompressInputStreamWrapper");
 
@@ -1036,8 +1036,8 @@ nsDecompressInputStreamWrapper::EndZstream()
  *                       - also keeps the cache entry open while referenced.
  ******************************************************************************/
 
-NS_IMPL_THREADSAFE_ADDREF(nsCacheEntryDescriptor::nsOutputStreamWrapper)
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMPL_ADDREF(nsCacheEntryDescriptor::nsOutputStreamWrapper)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsCacheEntryDescriptor::nsOutputStreamWrapper::Release()
 {
     // Holding a reference to descriptor ensures that cache service won't go
@@ -1054,7 +1054,7 @@ nsCacheEntryDescriptor::nsOutputStreamWrapper::Release()
 
     nsrefcnt count;
     NS_PRECONDITION(0 != mRefCnt, "dup release");
-    count = NS_AtomicDecrementRefcnt(mRefCnt);
+    count = --mRefCnt;
     NS_LOG_RELEASE(this, count,
                    "nsCacheEntryDescriptor::nsOutputStreamWrapper");
 
@@ -1123,7 +1123,7 @@ nsOutputStreamWrapper::LazyInit()
     // If anything above failed, clean up internal state and get out of here
     // (see bug #654926)...
     if (NS_FAILED(rv)) {
-        nsCacheService::ReleaseObject_Locked(stream.forget().get());
+        nsCacheService::ReleaseObject_Locked(stream.forget().take());
         mDescriptor->mOutputWrapper = nullptr;
         nsCacheService::ReleaseObject_Locked(mDescriptor);
         mDescriptor = nullptr;
@@ -1266,8 +1266,8 @@ nsOutputStreamWrapper::IsNonBlocking(bool *result)
  *   data before it is written
  ******************************************************************************/
 
-NS_IMPL_THREADSAFE_ADDREF(nsCacheEntryDescriptor::nsCompressOutputStreamWrapper)
-NS_IMETHODIMP_(nsrefcnt)
+NS_IMPL_ADDREF(nsCacheEntryDescriptor::nsCompressOutputStreamWrapper)
+NS_IMETHODIMP_(MozExternalRefCountType)
 nsCacheEntryDescriptor::nsCompressOutputStreamWrapper::Release()
 {
     // Holding a reference to descriptor ensures that cache service won't go
@@ -1284,7 +1284,7 @@ nsCacheEntryDescriptor::nsCompressOutputStreamWrapper::Release()
 
     nsrefcnt count;
     NS_PRECONDITION(0 != mRefCnt, "dup release");
-    count = NS_AtomicDecrementRefcnt(mRefCnt);
+    count = --mRefCnt;
     NS_LOG_RELEASE(this, count,
                    "nsCacheEntryDescriptor::nsCompressOutputStreamWrapper");
 

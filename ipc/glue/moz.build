@@ -4,52 +4,64 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'ipc'
-
 EXPORTS += [
+    'nsIIPCBackgroundChildCreateCallback.h',
     'nsIIPCSerializableInputStream.h',
     'nsIIPCSerializableURI.h',
 ]
 
 EXPORTS.mozilla.ipc += [
-    'AsyncChannel.h',
+    'BackgroundChild.h',
+    'BackgroundParent.h',
     'BrowserProcessSubThread.h',
     'CrossProcessMutex.h',
     'FileDescriptor.h',
     'FileDescriptorUtils.h',
     'GeckoChildProcessHost.h',
-    'IOThreadChild.h',
     'InputStreamUtils.h',
+    'IOThreadChild.h',
+    'MessageChannel.h',
+    'MessageLink.h',
     'ProcessChild.h',
     'ProtocolUtils.h',
-    'RPCChannel.h',
     'ScopedXREEmbed.h',
     'SharedMemory.h',
     'SharedMemoryBasic.h',
     'SharedMemorySysV.h',
     'Shmem.h',
-    'SyncChannel.h',
     'Transport.h',
     'URIUtils.h',
+    'WindowsMessageLoop.h',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     EXPORTS.mozilla.ipc += [
         'Transport_win.h',
     ]
-    CPP_SOURCES += [
+    SOURCES += [
         'SharedMemory_windows.cpp',
         'Transport_win.cpp',
         'WindowsMessageLoop.cpp',
-        'CrossProcessMutex_windows.cpp',
     ]
 else:
     EXPORTS.mozilla.ipc += [
         'Transport_posix.h',
     ]
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'SharedMemory_posix.cpp',
         'Transport_posix.cpp',
+    ]
+
+if CONFIG['OS_ARCH'] == 'WINNT':
+    SOURCES += [
+        'CrossProcessMutex_windows.cpp',
+    ]
+elif CONFIG['OS_ARCH'] == 'Linux':
+    UNIFIED_SOURCES += [
+        'CrossProcessMutex_posix.cpp',
+    ]
+else:
+    UNIFIED_SOURCES += [
         'CrossProcessMutex_unimplemented.cpp',
     ]
 
@@ -58,18 +70,22 @@ else:
 # impl.
 if CONFIG['OS_TARGET'] == 'Android':
     EXPORTS.mozilla.ipc += ['SharedMemoryBasic_android.h']
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'SharedMemoryBasic_android.cpp',
     ]
 else:
     EXPORTS.mozilla.ipc += ['SharedMemoryBasic_chromium.h']
 
 if CONFIG['OS_ARCH'] == 'Linux':
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'ProcessUtils_linux.cpp',
     ]
+elif CONFIG['OS_ARCH'] in ('DragonFly', 'FreeBSD', 'NetBSD', 'OpenBSD'):
+    UNIFIED_SOURCES += [
+        'ProcessUtils_bsd.cpp'
+    ]
 else:
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'ProcessUtils_none.cpp',
     ]
 
@@ -77,22 +93,61 @@ EXPORTS.ipc += [
     'IPCMessageUtils.h',
 ]
 
-CPP_SOURCES += [
-    'AsyncChannel.cpp',
+UNIFIED_SOURCES += [
+    'BackgroundImpl.cpp',
     'BrowserProcessSubThread.cpp',
     'FileDescriptor.cpp',
     'FileDescriptorUtils.cpp',
-    'GeckoChildProcessHost.cpp',
     'InputStreamUtils.cpp',
+    'MessageChannel.cpp',
+    'MessageLink.cpp',
     'MessagePump.cpp',
     'ProcessChild.cpp',
     'ProtocolUtils.cpp',
-    'RPCChannel.cpp',
     'ScopedXREEmbed.cpp',
     'SharedMemory.cpp',
     'Shmem.cpp',
     'StringUtil.cpp',
-    'SyncChannel.cpp',
+]
+
+# GeckoChildProcessHost.cpp cannot be built in unified mode because it uses plarena.h.
+# URIUtils.cpp cannot be built in unified mode because of name clashes on strdup.
+SOURCES += [
+    'BackgroundChildImpl.cpp',
+    'BackgroundParentImpl.cpp',
+    'GeckoChildProcessHost.cpp',
     'URIUtils.cpp',
 ]
 
+LOCAL_INCLUDES += [
+    '/xpcom/build',
+]
+
+IPDL_SOURCES = [
+    'InputStreamParams.ipdlh',
+    'PBackground.ipdl',
+    'PBackgroundTest.ipdl',
+    'ProtocolTypes.ipdlh',
+    'URIParams.ipdlh',
+]
+
+
+LOCAL_INCLUDES += [
+    '/xpcom/threads',
+]
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'
+
+for var in ('MOZ_CHILD_PROCESS_NAME', 'MOZ_CHILD_PROCESS_BUNDLE'):
+    DEFINES[var] = '"%s"' % CONFIG[var]
+
+LOCAL_INCLUDES += [
+    '/toolkit/crashreporter',
+]
+
+if CONFIG['MOZ_CONTENT_SANDBOX'] and CONFIG['OS_ARCH'] == 'WINNT':
+    LOCAL_INCLUDES += [
+        '/security/sandbox/win/src/sandboxbroker',
+    ]

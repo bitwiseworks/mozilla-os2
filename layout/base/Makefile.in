@@ -3,57 +3,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-LIBRARY_NAME	= gkbase_s
-MSVC_ENABLE_PGO := 1
-LIBXUL_LIBRARY	= 1
-FAIL_ON_WARNINGS = 1
-
-FORCE_STATIC_LIB = 1
-
 include $(topsrcdir)/config/rules.mk
 
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
-
-LOCAL_INCLUDES += \
-		-I$(srcdir) \
-		-I$(srcdir)/../style \
-		-I$(srcdir)/../generic \
-		-I$(srcdir)/../forms \
-		-I$(srcdir)/../tables \
-		-I$(srcdir)/../printing \
-		-I$(srcdir)/../xul/base/src \
-		-I$(srcdir)/../xul/tree/ \
-		-I$(srcdir)/../../content/base/src \
-		-I$(srcdir)/../../content/events/src \
-		-I$(srcdir)/../../content/xbl/src \
-		-I$(srcdir)/../../view/src \
-		-I$(srcdir)/../../dom/base \
-		-I$(srcdir)/../../content/html/content/src \
-		-I$(srcdir)/../../content/svg/content/src \
-		-I$(topsrcdir)/xpcom/ds \
-		-I$(srcdir)/../svg \
-		-I$(srcdir)/../mathml \
-		$(NULL)
-
-CXXFLAGS += $(MOZ_CAIRO_CFLAGS) $(MOZ_PIXMAN_CFLAGS)
-
-DEFINES += -D_IMPL_NS_LAYOUT
-DEFINES += -DHB_DONT_DEFINE_STDINT
-
-ifndef MOZ_XUL
-nsIBoxObject.idl: %: $(topsrcdir)/layout/xul/base/public/%
-	$(INSTALL) $^ .
-nsPIBoxObject.h: %: $(topsrcdir)/layout/xul/base/public/%
-	$(INSTALL) $^ .
-nsBoxObject.cpp: %: $(topsrcdir)/layout/xul/base/src/%
-	$(INSTALL) $^ .
-
-GARBAGE    += nsIBoxObject.idl nsPIBoxObject.h nsBoxObject.cpp
-endif
+CXXFLAGS += $(MOZ_CAIRO_CFLAGS)

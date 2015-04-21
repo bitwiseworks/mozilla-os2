@@ -19,8 +19,12 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "PageThumbs",
   "resource://gre/modules/PageThumbs.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
-  "resource://gre/modules/FileUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "BinarySearch",
+  "resource://gre/modules/BinarySearch.jsm");
+
+XPCOMUtils.defineLazyGetter(this, "Timer", () => {
+  return Cu.import("resource://gre/modules/Timer.jsm", {});
+});
 
 XPCOMUtils.defineLazyGetter(this, "gPrincipal", function () {
   let uri = Services.io.newURI("about:newtab", null, null);
@@ -47,11 +51,17 @@ const PREF_NEWTAB_ROWS = "browser.newtabpage.rows";
 // The preference that tells the number of columns of the newtab grid.
 const PREF_NEWTAB_COLUMNS = "browser.newtabpage.columns";
 
-// The maximum number of results we want to retrieve from history.
+// The maximum number of results PlacesProvider retrieves from history.
 const HISTORY_RESULTS_LIMIT = 100;
+
+// The maximum number of links Links.getLinks will return.
+const LINKS_GET_LINKS_LIMIT = 100;
 
 // The gather telemetry topic.
 const TOPIC_GATHER_TELEMETRY = "gather-telemetry";
+
+// The amount of time we wait while coalescing updates for hidden pages.
+const SCHEDULE_UPDATE_TIMEOUT_MS = 1000;
 
 /**
  * Calculate the MD5 hash for a string.
@@ -79,7 +89,9 @@ function LinksStorage() {
     if (this._storedVersion < this._version) {
       // This is either an upgrade, or version information is missing.
       if (this._storedVersion < 1) {
-        this._migrateToV1();
+        // Version 1 moved data from DOM Storage to prefs.  Since migrating from
+        // version 0 is no more supported, we just reportError a dataloss later.
+        throw new Error("Unsupported newTab storage version");
       }
       // Add further migration steps here.
     }
@@ -117,7 +129,13 @@ LinksStorage.prototype = {
         this.__storedVersion =
           Services.prefs.getIntPref("browser.newtabpage.storageVersion");
       } catch (ex) {
-        this.__storedVersion = 0;
+        // The storage version is unknown, so either:
+        // - it's a new profile
+        // - it's a profile where versioning information got lost
+        // In this case we still run through all of the valid migrations,
+        // starting from 1, as if it was a downgrade.  As previously stated the
+        // migrations should already support running on an updated store.
+        this.__storedVersion = 1;
       }
     }
     return this.__storedVersion;
@@ -126,44 +144,6 @@ LinksStorage.prototype = {
     Services.prefs.setIntPref("browser.newtabpage.storageVersion", aValue);
     this.__storedVersion = aValue;
     return aValue;
-  },
-
-  /**
-   * V1 changes storage from chromeappsstore.sqlite to prefs.
-   */
-  _migrateToV1: function Storage__migrateToV1() {
-    // Import data from the old chromeappsstore.sqlite file, if exists.
-    let file = FileUtils.getFile("ProfD", ["chromeappsstore.sqlite"]);
-    if (!file.exists())
-      return;
-    let db = Services.storage.openUnsharedDatabase(file);
-    let stmt = db.createStatement(
-      "SELECT key, value FROM webappsstore2 WHERE scope = 'batwen.:about'");
-    try {
-      while (stmt.executeStep()) {
-        let key = stmt.row.key;
-        let value = JSON.parse(stmt.row.value);
-        switch (key) {
-          case "pinnedLinks":
-            this.set(key, value);
-            break;
-          case "blockedLinks":
-            // Convert urls to hashes.
-            let hashes = {};
-            for (let url in value) {
-              hashes[toHash(url)] = 1;
-            }
-            this.set(key, hashes);
-            break;
-          default:
-            // Ignore unknown keys.
-            break;
-        }
-      }
-    } finally {
-      stmt.finalize();
-      db.close();
-    }
   },
 
   /**
@@ -277,35 +257,56 @@ let AllPages = {
   /**
    * Updates all currently active pages but the given one.
    * @param aExceptPage The page to exclude from updating.
+   * @param aHiddenPagesOnly If true, only pages hidden in the preloader are
+   *                         updated.
    */
-  update: function AllPages_update(aExceptPage) {
+  update: function AllPages_update(aExceptPage, aHiddenPagesOnly=false) {
     this._pages.forEach(function (aPage) {
       if (aExceptPage != aPage)
-        aPage.update();
+        aPage.update(aHiddenPagesOnly);
     });
   },
 
   /**
-   * Implements the nsIObserver interface to get notified when the preference
-   * value changes.
+   * Many individual link changes may happen in a small amount of time over
+   * multiple turns of the event loop.  This method coalesces updates by waiting
+   * a small amount of time before updating hidden pages.
    */
-  observe: function AllPages_observe() {
-    // Clear the cached value.
-    this._enabled = null;
+  scheduleUpdateForHiddenPages: function AllPages_scheduleUpdateForHiddenPages() {
+    if (!this._scheduleUpdateTimeout) {
+      this._scheduleUpdateTimeout = Timer.setTimeout(() => {
+        delete this._scheduleUpdateTimeout;
+        this.update(null, true);
+      }, SCHEDULE_UPDATE_TIMEOUT_MS);
+    }
+  },
 
-    let args = Array.slice(arguments);
+  get updateScheduledForHiddenPages() {
+    return !!this._scheduleUpdateTimeout;
+  },
 
+  /**
+   * Implements the nsIObserver interface to get notified when the preference
+   * value changes or when a new copy of a page thumbnail is available.
+   */
+  observe: function AllPages_observe(aSubject, aTopic, aData) {
+    if (aTopic == "nsPref:changed") {
+      // Clear the cached value.
+      this._enabled = null;
+    }
+    // and all notifications get forwarded to each page.
     this._pages.forEach(function (aPage) {
-      aPage.observe.apply(aPage, args);
+      aPage.observe(aSubject, aTopic, aData);
     }, this);
   },
 
   /**
-   * Adds a preference observer and turns itself into a no-op after the first
-   * invokation.
+   * Adds a preference and new thumbnail observer and turns itself into a
+   * no-op after the first invokation.
    */
   _addObserver: function AllPages_addObserver() {
     Services.prefs.addObserver(PREF_NEWTAB_ENABLED, this, true);
+    Services.obs.addObserver(this, "page-thumbnail:create", true);
     this._addObserver = function () {};
   },
 
@@ -537,12 +538,24 @@ let BlockedLinks = {
  */
 let PlacesProvider = {
   /**
+   * Set this to change the maximum number of links the provider will provide.
+   */
+  maxNumLinks: HISTORY_RESULTS_LIMIT,
+
+  /**
+   * Must be called before the provider is used.
+   */
+  init: function PlacesProvider_init() {
+    PlacesUtils.history.addObserver(this, true);
+  },
+
+  /**
    * Gets the current set of links delivered by this provider.
    * @param aCallback The function that the array of links is passed to.
    */
   getLinks: function PlacesProvider_getLinks(aCallback) {
     let options = PlacesUtils.history.getNewQueryOptions();
-    options.maxResults = HISTORY_RESULTS_LIMIT;
+    options.maxResults = this.maxNumLinks;
 
     // Sort by frecency, descending.
     options.sortingMode = Ci.nsINavHistoryQueryOptions.SORT_BY_FRECENCY_DESCENDING
@@ -557,7 +570,17 @@ let PlacesProvider = {
           let url = row.getResultByIndex(1);
           if (LinkChecker.checkLoadURI(url)) {
             let title = row.getResultByIndex(2);
-            links.push({url: url, title: title});
+            let frecency = row.getResultByIndex(12);
+            let lastVisitDate = row.getResultByIndex(5);
+            links.push({
+              url: url,
+              title: title,
+              frecency: frecency,
+              lastVisitDate: lastVisitDate,
+              bgColor: "transparent",
+              type: "history",
+              imageURI: null,
+            });
           }
         }
       },
@@ -568,6 +591,26 @@ let PlacesProvider = {
       },
 
       handleCompletion: function (aReason) {
+        // The Places query breaks ties in frecency by place ID descending, but
+        // that's different from how Links.compareLinks breaks ties, because
+        // compareLinks doesn't have access to place IDs.  It's very important
+        // that the initial list of links is sorted in the same order imposed by
+        // compareLinks, because Links uses compareLinks to perform binary
+        // searches on the list.  So, ensure the list is so ordered.
+        let i = 1;
+        let outOfOrder = [];
+        while (i < links.length) {
+          if (Links.compareLinks(links[i - 1], links[i]) > 0)
+            outOfOrder.push(links.splice(i, 1)[0]);
+          else
+            i++;
+        }
+        for (let link of outOfOrder) {
+          i = BinarySearch.insertionIndexOf(links, link,
+                                            Links.compareLinks.bind(Links));
+          links.splice(i, 0, link);
+        }
+
         aCallback(links);
       }
     };
@@ -576,28 +619,116 @@ let PlacesProvider = {
     let query = PlacesUtils.history.getNewQuery();
     let db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase);
     db.asyncExecuteLegacyQueries([query], 1, options, callback);
-  }
+  },
+
+  /**
+   * Registers an object that will be notified when the provider's links change.
+   * @param aObserver An object with the following optional properties:
+   *        * onLinkChanged: A function that's called when a single link
+   *          changes.  It's passed the provider and the link object.  Only the
+   *          link's `url` property is guaranteed to be present.  If its `title`
+   *          property is present, then its title has changed, and the
+   *          property's value is the new title.  If any sort properties are
+   *          present, then its position within the provider's list of links may
+   *          have changed, and the properties' values are the new sort-related
+   *          values.  Note that this link may not necessarily have been present
+   *          in the lists returned from any previous calls to getLinks.
+   *        * onManyLinksChanged: A function that's called when many links
+   *          change at once.  It's passed the provider.  You should call
+   *          getLinks to get the provider's new list of links.
+   */
+  addObserver: function PlacesProvider_addObserver(aObserver) {
+    this._observers.push(aObserver);
+  },
+
+  _observers: [],
+
+  /**
+   * Called by the history service.
+   */
+  onFrecencyChanged: function PlacesProvider_onFrecencyChanged(aURI, aNewFrecency, aGUID, aHidden, aLastVisitDate) {
+    // The implementation of the query in getLinks excludes hidden and
+    // unvisited pages, so it's important to exclude them here, too.
+    if (!aHidden && aLastVisitDate) {
+      this._callObservers("onLinkChanged", {
+        url: aURI.spec,
+        frecency: aNewFrecency,
+        lastVisitDate: aLastVisitDate,
+      });
+    }
+  },
+
+  /**
+   * Called by the history service.
+   */
+  onManyFrecenciesChanged: function PlacesProvider_onManyFrecenciesChanged() {
+    this._callObservers("onManyLinksChanged");
+  },
+
+  /**
+   * Called by the history service.
+   */
+  onTitleChanged: function PlacesProvider_onTitleChanged(aURI, aNewTitle, aGUID) {
+    this._callObservers("onLinkChanged", {
+      url: aURI.spec,
+      title: aNewTitle
+    });
+  },
+
+  _callObservers: function PlacesProvider__callObservers(aMethodName, aArg) {
+    for (let obs of this._observers) {
+      if (obs[aMethodName]) {
+        try {
+          obs[aMethodName](this, aArg);
+        } catch (err) {
+          Cu.reportError(err);
+        }
+      }
+    }
+  },
+
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsINavHistoryObserver,
+                                         Ci.nsISupportsWeakReference]),
 };
 
 /**
  * Singleton that provides access to all links contained in the grid (including
- * the ones that don't fit on the grid). A link is a plain object with title
- * and url properties.
+ * the ones that don't fit on the grid). A link is a plain object that looks
+ * like this:
  *
- * Example:
- *
- * {url: "http://www.mozilla.org/", title: "Mozilla"}
+ * {
+ *   url: "http://www.mozilla.org/",
+ *   title: "Mozilla",
+ *   frecency: 1337,
+ *   lastVisitDate: 1394678824766431,
+ * }
  */
 let Links = {
   /**
-   * The links cache.
+   * The maximum number of links returned by getLinks.
    */
-  _links: null,
+  maxNumLinks: LINKS_GET_LINKS_LIMIT,
 
   /**
-   * The default provider for links.
+   * The link providers.
    */
-  _provider: PlacesProvider,
+  _providers: new Set(),
+
+  /**
+   * A mapping from each provider to an object { sortedLinks, linkMap }.
+   * sortedLinks is the cached, sorted array of links for the provider.  linkMap
+   * is a Map from link URLs to link objects.
+   */
+  _providerLinks: new Map(),
+
+  /**
+   * The properties of link objects used to sort them.
+   */
+  _sortProperties: [
+    "frecency",
+    "lastVisitDate",
+    "url",
+  ],
 
   /**
    * List of callbacks waiting for the cache to be populated.
@@ -605,7 +736,26 @@ let Links = {
   _populateCallbacks: [],
 
   /**
-   * Populates the cache with fresh links from the current provider.
+   * Adds a link provider.
+   * @param aProvider The link provider.
+   */
+  addProvider: function Links_addProvider(aProvider) {
+    this._providers.add(aProvider);
+    aProvider.addObserver(this);
+  },
+
+  /**
+   * Removes a link provider.
+   * @param aProvider The link provider.
+   */
+  removeProvider: function Links_removeProvider(aProvider) {
+    if (!this._providers.delete(aProvider))
+      throw new Error("Unknown provider");
+    this._providerLinks.delete(aProvider);
+  },
+
+  /**
+   * Populates the cache with fresh links from the providers.
    * @param aCallback The callback to call when finished (optional).
    * @param aForce When true, populates the cache even when it's already filled.
    */
@@ -633,16 +783,15 @@ let Links = {
       }
     }
 
-    if (this._links && !aForce) {
-      executeCallbacks();
-    } else {
-      this._provider.getLinks(function (aLinks) {
-        this._links = aLinks;
-        executeCallbacks();
-      }.bind(this));
-
-      this._addObserver();
+    let numProvidersRemaining = this._providers.size;
+    for (let provider of this._providers) {
+      this._populateProviderCache(provider, () => {
+        if (--numProvidersRemaining == 0)
+          executeCallbacks();
+      }, aForce);
     }
+
+    this._addObserver();
   },
 
   /**
@@ -651,9 +800,10 @@ let Links = {
    */
   getLinks: function Links_getLinks() {
     let pinnedLinks = Array.slice(PinnedLinks.links);
+    let links = this._getMergedProviderLinks();
 
     // Filter blocked and pinned links.
-    let links = this._links.filter(function (link) {
+    links = links.filter(function (link) {
       return !BlockedLinks.isBlocked(link) && !PinnedLinks.isPinned(link);
     });
 
@@ -673,7 +823,183 @@ let Links = {
    * Resets the links cache.
    */
   resetCache: function Links_resetCache() {
-    this._links = null;
+    this._providerLinks.clear();
+  },
+
+  /**
+   * Compares two links.
+   * @param aLink1 The first link.
+   * @param aLink2 The second link.
+   * @return A negative number if aLink1 is ordered before aLink2, zero if
+   *         aLink1 and aLink2 have the same ordering, or a positive number if
+   *         aLink1 is ordered after aLink2.
+   */
+  compareLinks: function Links_compareLinks(aLink1, aLink2) {
+    for (let prop of this._sortProperties) {
+      if (!(prop in aLink1) || !(prop in aLink2))
+        throw new Error("Comparable link missing required property: " + prop);
+    }
+    return aLink2.frecency - aLink1.frecency ||
+           aLink2.lastVisitDate - aLink1.lastVisitDate ||
+           aLink1.url.localeCompare(aLink2.url);
+  },
+
+  /**
+   * Calls getLinks on the given provider and populates our cache for it.
+   * @param aProvider The provider whose cache will be populated.
+   * @param aCallback The callback to call when finished.
+   * @param aForce When true, populates the provider's cache even when it's
+   *               already filled.
+   */
+  _populateProviderCache: function Links_populateProviderCache(aProvider, aCallback, aForce) {
+    if (this._providerLinks.has(aProvider) && !aForce) {
+      aCallback();
+    } else {
+      aProvider.getLinks(links => {
+        // Filter out null and undefined links so we don't have to deal with
+        // them in getLinks when merging links from providers.
+        links = links.filter((link) => !!link);
+        this._providerLinks.set(aProvider, {
+          sortedLinks: links,
+          linkMap: links.reduce((map, link) => {
+            map.set(link.url, link);
+            return map;
+          }, new Map()),
+        });
+        aCallback();
+      });
+    }
+  },
+
+  /**
+   * Merges the cached lists of links from all providers whose lists are cached.
+   * @return The merged list.
+   */
+  _getMergedProviderLinks: function Links__getMergedProviderLinks() {
+    // Build a list containing a copy of each provider's sortedLinks list.
+    let linkLists = [];
+    for (let links of this._providerLinks.values()) {
+      linkLists.push(links.sortedLinks.slice());
+    }
+
+    function getNextLink() {
+      let minLinks = null;
+      for (let links of linkLists) {
+        if (links.length &&
+            (!minLinks || Links.compareLinks(links[0], minLinks[0]) < 0))
+          minLinks = links;
+      }
+      return minLinks ? minLinks.shift() : null;
+    }
+
+    let finalLinks = [];
+    for (let nextLink = getNextLink();
+         nextLink && finalLinks.length < this.maxNumLinks;
+         nextLink = getNextLink()) {
+      finalLinks.push(nextLink);
+    }
+
+    return finalLinks;
+  },
+
+  /**
+   * Called by a provider to notify us when a single link changes.
+   * @param aProvider The provider whose link changed.
+   * @param aLink The link that changed.  If the link is new, it must have all
+   *              of the _sortProperties.  Otherwise, it may have as few or as
+   *              many as is convenient.
+   */
+  onLinkChanged: function Links_onLinkChanged(aProvider, aLink) {
+    if (!("url" in aLink))
+      throw new Error("Changed links must have a url property");
+
+    let links = this._providerLinks.get(aProvider);
+    if (!links)
+      // This is not an error, it just means that between the time the provider
+      // was added and the future time we call getLinks on it, it notified us of
+      // a change.
+      return;
+
+    let { sortedLinks, linkMap } = links;
+    let existingLink = linkMap.get(aLink.url);
+    let insertionLink = null;
+    let updatePages = false;
+
+    if (existingLink) {
+      // Update our copy's position in O(lg n) by first removing it from its
+      // list.  It's important to do this before modifying its properties.
+      if (this._sortProperties.some(prop => prop in aLink)) {
+        let idx = this._indexOf(sortedLinks, existingLink);
+        if (idx < 0) {
+          throw new Error("Link should be in _sortedLinks if in _linkMap");
+        }
+        sortedLinks.splice(idx, 1);
+        // Update our copy's properties.
+        for (let prop of this._sortProperties) {
+          if (prop in aLink) {
+            existingLink[prop] = aLink[prop];
+          }
+        }
+        // Finally, reinsert our copy below.
+        insertionLink = existingLink;
+      }
+      // Update our copy's title in O(1).
+      if ("title" in aLink && aLink.title != existingLink.title) {
+        existingLink.title = aLink.title;
+        updatePages = true;
+      }
+    }
+    else if (this._sortProperties.every(prop => prop in aLink)) {
+      // Before doing the O(lg n) insertion below, do an O(1) check for the
+      // common case where the new link is too low-ranked to be in the list.
+      if (sortedLinks.length && sortedLinks.length == aProvider.maxNumLinks) {
+        let lastLink = sortedLinks[sortedLinks.length - 1];
+        if (this.compareLinks(lastLink, aLink) < 0) {
+          return;
+        }
+      }
+      // Copy the link object so that changes later made to it by the caller
+      // don't affect our copy.
+      insertionLink = {};
+      for (let prop in aLink) {
+        insertionLink[prop] = aLink[prop];
+      }
+      linkMap.set(aLink.url, insertionLink);
+    }
+
+    if (insertionLink) {
+      let idx = this._insertionIndexOf(sortedLinks, insertionLink);
+      sortedLinks.splice(idx, 0, insertionLink);
+      if (sortedLinks.length > aProvider.maxNumLinks) {
+        let lastLink = sortedLinks.pop();
+        linkMap.delete(lastLink.url);
+      }
+      updatePages = true;
+    }
+
+    if (updatePages)
+      AllPages.scheduleUpdateForHiddenPages();
+  },
+
+  /**
+   * Called by a provider to notify us when many links change.
+   */
+  onManyLinksChanged: function Links_onManyLinksChanged(aProvider) {
+    this._populateProviderCache(aProvider, () => {
+      AllPages.scheduleUpdateForHiddenPages();
+    }, true);
+  },
+
+  _indexOf: function Links__indexOf(aArray, aLink) {
+    return this._binsearch(aArray, aLink, "indexOf");
+  },
+
+  _insertionIndexOf: function Links__insertionIndexOf(aArray, aLink) {
+    return this._binsearch(aArray, aLink, "insertionIndexOf");
+  },
+
+  _binsearch: function Links__binsearch(aArray, aLink, aMethod) {
+    return BinarySearch[aMethod](aArray, aLink, this.compareLinks.bind(this));
   },
 
   /**
@@ -686,7 +1012,7 @@ let Links = {
     if (AllPages.length && AllPages.enabled)
       this.populateCache(function () { AllPages.update() }, true);
     else
-      this._links = null;
+      this.resetCache();
   },
 
   /**
@@ -806,11 +1132,20 @@ this.NewTabUtils = {
   _initialized: false,
 
   init: function NewTabUtils_init() {
+    if (this.initWithoutProviders()) {
+      PlacesProvider.init();
+      Links.addProvider(PlacesProvider);
+    }
+  },
+
+  initWithoutProviders: function NewTabUtils_initWithoutProviders() {
     if (!this._initialized) {
       this._initialized = true;
       ExpirationFilter.init();
       Telemetry.init();
+      return true;
     }
+    return false;
   },
 
   /**

@@ -4,14 +4,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'harfbuzz'
-
 EXPORTS.harfbuzz += [
     'hb-blob.h',
     'hb-buffer.h',
     'hb-common.h',
+    'hb-deprecated.h',
+    'hb-face.h',
     'hb-font.h',
     'hb-ot-layout.h',
+    'hb-ot-shape.h',
     'hb-ot-tag.h',
     'hb-ot.h',
     'hb-set.h',
@@ -22,32 +23,46 @@ EXPORTS.harfbuzz += [
     'hb.h',
 ]
 
-CPP_SOURCES += [
-    'hb-blob.cc',
+SOURCES += [
+    'hb-blob.cc', # error: use of undeclared identifier 'snprintf' (FreeBSD)
+    'hb-common.cc', # error: use of undeclared identifier 'strdup'
+    'hb-ot-shape-complex-hangul.cc', # error: redefinition of enumerator 'NONE'
+    'hb-ot-shape-complex-indic.cc', # error: redefinition of enumerator 'INIT'
+    'hb-ot-shape-complex-sea.cc', # error: redefinition of 'basic_features'
+    'hb-ot-shape.cc', # error: functions that differ only in their return type cannot be overloaded
+    'hb-shape-plan.cc', # error: redefinition of 'hb_ot_shaper_face_data_ensure'
+]
+
+UNIFIED_SOURCES += [
     'hb-buffer.cc',
-    'hb-common.cc',
+    'hb-face.cc',
     'hb-fallback-shape.cc',
     'hb-font.cc',
     'hb-ot-layout.cc',
     'hb-ot-map.cc',
     'hb-ot-shape-complex-arabic.cc',
     'hb-ot-shape-complex-default.cc',
+    'hb-ot-shape-complex-hebrew.cc',
     'hb-ot-shape-complex-indic-table.cc',
-    'hb-ot-shape-complex-indic.cc',
     'hb-ot-shape-complex-myanmar.cc',
-    'hb-ot-shape-complex-sea.cc',
     'hb-ot-shape-complex-thai.cc',
+    'hb-ot-shape-complex-tibetan.cc',
     'hb-ot-shape-fallback.cc',
     'hb-ot-shape-normalize.cc',
-    'hb-ot-shape.cc',
     'hb-ot-tag.cc',
     'hb-set.cc',
-    'hb-shape-plan.cc',
     'hb-shape.cc',
     'hb-shaper.cc',
     'hb-unicode.cc',
     'hb-warning.cc',
 ]
 
-LIBRARY_NAME = 'mozharfbuzz'
+MSVC_ENABLE_PGO = True
 
+FINAL_LIBRARY = 'gkmedias'
+
+DEFINES['PACKAGE_VERSION'] = '"moz"'
+DEFINES['PACKAGE_BUGREPORT'] = '"http://bugzilla.mozilla.org/"'
+DEFINES['HAVE_OT'] = 1
+DEFINES['HB_NO_MT'] = True
+DEFINES['HB_NO_UNICODE_FUNCS'] = True

@@ -6,17 +6,23 @@
 #ifndef __nsWhitespaceTokenizer_h
 #define __nsWhitespaceTokenizer_h
 
+#include "mozilla/RangedPtr.h"
 #include "nsDependentSubstring.h"
+#include "nsCRT.h"
 
-class nsWhitespaceTokenizer
+template<bool IsWhitespace(char16_t) = NS_IsAsciiWhitespace>
+class nsWhitespaceTokenizerTemplate
 {
 public:
-    nsWhitespaceTokenizer(const nsSubstring& aSource)
+    nsWhitespaceTokenizerTemplate(const nsSubstring& aSource)
+        : mIter(aSource.Data(), aSource.Length()),
+          mEnd(aSource.Data() + aSource.Length(), aSource.Data(),
+               aSource.Length()),
+          mWhitespaceBeforeFirstToken(false),
+          mWhitespaceAfterCurrentToken(false)
     {
-        aSource.BeginReading(mIter);
-        aSource.EndReading(mEnd);
-
-        while (mIter != mEnd && isWhitespace(*mIter)) {
+        while (mIter < mEnd && IsWhitespace(*mIter)) {
+            mWhitespaceBeforeFirstToken = true;
             ++mIter;
         }
     }
@@ -24,9 +30,26 @@ public:
     /**
      * Checks if any more tokens are available.
      */
-    bool hasMoreTokens()
+    bool hasMoreTokens() const
     {
-        return mIter != mEnd;
+        return mIter < mEnd;
+    }
+
+    /*
+     * Returns true if there is whitespace prior to the first token.
+     */
+    bool whitespaceBeforeFirstToken() const
+    {
+        return mWhitespaceBeforeFirstToken;
+    }
+
+    /*
+     * Returns true if there is any whitespace after the current token.
+     * This is always true unless we're reading the last token.
+     */
+    bool whitespaceAfterCurrentToken() const
+    {
+        return mWhitespaceAfterCurrentToken;
     }
 
     /**
@@ -34,37 +57,48 @@ public:
      */
     const nsDependentSubstring nextToken()
     {
-        nsSubstring::const_char_iterator begin = mIter;
-        while (mIter != mEnd && !isWhitespace(*mIter)) {
+        const mozilla::RangedPtr<const char16_t> tokenStart = mIter;
+        while (mIter < mEnd && !IsWhitespace(*mIter)) {
             ++mIter;
         }
-        nsSubstring::const_char_iterator end = mIter;
-        while (mIter != mEnd && isWhitespace(*mIter)) {
+        const mozilla::RangedPtr<const char16_t> tokenEnd = mIter;
+        mWhitespaceAfterCurrentToken = false;
+        while (mIter < mEnd && IsWhitespace(*mIter)) {
+            mWhitespaceAfterCurrentToken = true;
             ++mIter;
         }
-        return Substring(begin, end);
+        return Substring(tokenStart.get(), tokenEnd.get());
     }
 
 private:
-    nsSubstring::const_char_iterator mIter, mEnd;
+    mozilla::RangedPtr<const char16_t> mIter;
+    const mozilla::RangedPtr<const char16_t> mEnd;
+    bool mWhitespaceBeforeFirstToken;
+    bool mWhitespaceAfterCurrentToken;
+};
 
-    bool isWhitespace(PRUnichar aChar)
+class nsWhitespaceTokenizer: public nsWhitespaceTokenizerTemplate<>
+{
+public:
+    nsWhitespaceTokenizer(const nsSubstring& aSource)
+      : nsWhitespaceTokenizerTemplate<>(aSource)
     {
-        return aChar <= ' ' &&
-               (aChar == ' ' || aChar == '\n' ||
-                aChar == '\r'|| aChar == '\t');
     }
 };
 
-class nsCWhitespaceTokenizer
+template<bool IsWhitespace(char16_t) = NS_IsAsciiWhitespace>
+class nsCWhitespaceTokenizerTemplate
 {
 public:
-    nsCWhitespaceTokenizer(const nsCSubstring& aSource)
+    nsCWhitespaceTokenizerTemplate(const nsCSubstring& aSource)
+        : mIter(aSource.Data(), aSource.Length()),
+          mEnd(aSource.Data() + aSource.Length(), aSource.Data(),
+               aSource.Length()),
+          mWhitespaceBeforeFirstToken(false),
+          mWhitespaceAfterCurrentToken(false)
     {
-        aSource.BeginReading(mIter);
-        aSource.EndReading(mEnd);
-
-        while (mIter != mEnd && isWhitespace(*mIter)) {
+        while (mIter < mEnd && IsWhitespace(*mIter)) {
+            mWhitespaceBeforeFirstToken = true;
             ++mIter;
         }
     }
@@ -72,9 +106,26 @@ public:
     /**
      * Checks if any more tokens are available.
      */
-    bool hasMoreTokens()
+    bool hasMoreTokens() const
     {
-        return mIter != mEnd;
+        return mIter < mEnd;
+    }
+
+    /*
+     * Returns true if there is whitespace prior to the first token.
+     */
+    bool whitespaceBeforeFirstToken() const
+    {
+        return mWhitespaceBeforeFirstToken;
+    }
+
+    /*
+     * Returns true if there is any whitespace after the current token.
+     * This is always true unless we're reading the last token.
+     */
+    bool whitespaceAfterCurrentToken() const
+    {
+        return mWhitespaceAfterCurrentToken;
     }
 
     /**
@@ -82,25 +133,32 @@ public:
      */
     const nsDependentCSubstring nextToken()
     {
-        nsCSubstring::const_char_iterator begin = mIter;
-        while (mIter != mEnd && !isWhitespace(*mIter)) {
+        const mozilla::RangedPtr<const char> tokenStart = mIter;
+        while (mIter < mEnd && !IsWhitespace(*mIter)) {
             ++mIter;
         }
-        nsCSubstring::const_char_iterator end = mIter;
-        while (mIter != mEnd && isWhitespace(*mIter)) {
+        const mozilla::RangedPtr<const char> tokenEnd = mIter;
+        mWhitespaceAfterCurrentToken = false;
+        while (mIter < mEnd && IsWhitespace(*mIter)) {
+            mWhitespaceAfterCurrentToken = true;
             ++mIter;
         }
-        return Substring(begin, end);
+        return Substring(tokenStart.get(), tokenEnd.get());
     }
 
 private:
-    nsCSubstring::const_char_iterator mIter, mEnd;
+    mozilla::RangedPtr<const char> mIter;
+    const mozilla::RangedPtr<const char> mEnd;
+    bool mWhitespaceBeforeFirstToken;
+    bool mWhitespaceAfterCurrentToken;
+};
 
-    bool isWhitespace(char aChar)
+class nsCWhitespaceTokenizer: public nsCWhitespaceTokenizerTemplate<>
+{
+public:
+    nsCWhitespaceTokenizer(const nsCSubstring& aSource)
+      : nsCWhitespaceTokenizerTemplate<>(aSource)
     {
-        return aChar <= ' ' &&
-               (aChar == ' ' || aChar == '\n' ||
-                aChar == '\r'|| aChar == '\t');
     }
 };
 

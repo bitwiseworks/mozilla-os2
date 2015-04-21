@@ -2,16 +2,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import json
 import math
+import re
 
-# For compatibility with Python 2.6
-try:
-    from collections import OrderedDict
-except ImportError:
-    from simplejson import OrderedDict
-    import simplejson as json
-else:
-    import json
+from collections import OrderedDict
 
 def table_dispatch(kind, table, body):
     """Call body with table[kind] if it exists.  Raise an error otherwise."""
@@ -60,7 +55,7 @@ def exponential_buckets(dmin, dmax, n_buckets):
         ret_array[bucket_index] = current
     return ret_array
 
-always_allowed_keys = ['kind', 'description', 'cpp_guard']
+always_allowed_keys = ['kind', 'description', 'cpp_guard', 'expires_in_version']
 
 class Histogram:
     """A class for representing a histogram definition."""
@@ -81,6 +76,7 @@ symbol that should guard C/C++ definitions associated with the histogram."""
         self._kind = definition['kind']
         self._cpp_guard = definition.get('cpp_guard')
         self._extended_statistics_ok = definition.get('extended_statistics_ok', False)
+        self._expiration = definition.get('expires_in_version')
         self.compute_bucket_parameters(definition)
         table = { 'boolean': 'BOOLEAN',
                   'flag': 'FLAG',
@@ -102,6 +98,10 @@ symbol that should guard C/C++ definitions associated with the histogram."""
         """Return the kind of the histogram.
 Will be one of 'boolean', 'flag', 'enumerated', 'linear', or 'exponential'."""
         return self._kind
+
+    def expiration(self):
+        """Return the expiration version of the histogram."""
+        return self._expiration
 
     def nsITelemetry_kind(self):
         """Return the nsITelemetry constant corresponding to the kind of
@@ -167,6 +167,22 @@ is enabled."""
             }
         table_dispatch(definition['kind'], table,
                        lambda allowed_keys: Histogram.check_keys(name, definition, allowed_keys))
+
+        Histogram.check_expiration(name, definition)
+
+    @staticmethod
+    def check_expiration(name, definition):
+        expiration = definition.get('expires_in_version')
+
+        if not expiration:
+            return
+
+        if re.match(r'^[1-9][0-9]*$', expiration):
+            expiration = expiration + ".0a1"
+        elif re.match(r'^[1-9][0-9]*\.0$', expiration):
+            expiration = expiration + "a1"
+
+        definition['expires_in_version'] = expiration
 
     @staticmethod
     def check_keys(name, definition, allowed_keys):

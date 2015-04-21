@@ -8,7 +8,6 @@
 #include "mozilla/dom/ChannelMergerNodeBinding.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
-#include "mozilla/PodOperations.h"
 
 namespace mozilla {
 namespace dom {
@@ -24,10 +23,10 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
   }
 
-  virtual void ProduceAudioBlocksOnPorts(AudioNodeStream* aStream,
-                                         const OutputChunks& aInput,
-                                         OutputChunks& aOutput,
-                                         bool* aFinished) MOZ_OVERRIDE
+  virtual void ProcessBlocksOnPorts(AudioNodeStream* aStream,
+                                    const OutputChunks& aInput,
+                                    OutputChunks& aOutput,
+                                    bool* aFinished) MOZ_OVERRIDE
   {
     MOZ_ASSERT(aInput.Length() >= 1, "Should have one or more input ports");
 
@@ -40,19 +39,29 @@ public:
       aOutput[0].SetNull(WEBAUDIO_BLOCK_SIZE);
       return;
     }
+    channelCount = std::min(channelCount, WebAudioUtils::MaxChannelCount);
     AllocateAudioBlock(channelCount, &aOutput[0]);
 
     // Append each channel in each input to the output
     uint32_t channelIndex = 0;
-    for (uint16_t i = 0; i < InputCount(); ++i) {
+    for (uint16_t i = 0; true; ++i) {
+      MOZ_ASSERT(i < InputCount());
       for (uint32_t j = 0; j < aInput[i].mChannelData.Length(); ++j) {
         AudioBlockCopyChannelWithScale(
             static_cast<const float*>(aInput[i].mChannelData[j]),
             aInput[i].mVolume,
             static_cast<float*>(const_cast<void*>(aOutput[0].mChannelData[channelIndex])));
         ++channelIndex;
+        if (channelIndex >= channelCount) {
+          return;
+        }
       }
     }
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 };
 
@@ -69,9 +78,9 @@ ChannelMergerNode::ChannelMergerNode(AudioContext* aContext,
 }
 
 JSObject*
-ChannelMergerNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ChannelMergerNode::WrapObject(JSContext* aCx)
 {
-  return ChannelMergerNodeBinding::Wrap(aCx, aScope, this);
+  return ChannelMergerNodeBinding::Wrap(aCx, this);
 }
 
 }

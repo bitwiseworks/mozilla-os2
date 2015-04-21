@@ -11,14 +11,15 @@
 #ifndef mozilla_css_Declaration_h
 #define mozilla_css_Declaration_h
 
-#include "mozilla/Attributes.h"
-
 // This header is in EXPORTS because it's used in several places in content/,
 // but it's not really a public interface.
-#ifndef _IMPL_NS_LAYOUT
-#error "This file should only be included within the layout library"
+#ifndef MOZILLA_INTERNAL_API
+#error "This file should only be included within libxul"
 #endif
 
+#include "mozilla/Attributes.h"
+#include "mozilla/MemoryReporting.h"
+#include "CSSVariableDeclarations.h"
 #include "nsCSSDataBlock.h"
 #include "nsCSSProperty.h"
 #include "nsCSSProps.h"
@@ -62,10 +63,62 @@ public:
   bool HasProperty(nsCSSProperty aProperty) const;
 
   void GetValue(nsCSSProperty aProperty, nsAString& aValue) const;
+  void GetAuthoredValue(nsCSSProperty aProperty, nsAString& aValue) const;
 
-  bool HasImportantData() const { return mImportantData != nullptr; }
+  bool HasImportantData() const {
+    return mImportantData || mImportantVariables;
+  }
   bool GetValueIsImportant(nsCSSProperty aProperty) const;
   bool GetValueIsImportant(const nsAString& aProperty) const;
+
+  /**
+   * Adds a custom property declaration to this object.
+   *
+   * @param aName The variable name (i.e., without the "--" prefix).
+   * @param aType The type of value the variable has.
+   * @param aValue The value of the variable, if aType is
+   *   CSSVariableDeclarations::eTokenStream.
+   * @param aIsImportant Whether the declaration is !important.
+   * @param aOverrideImportant When aIsImportant is false, whether an
+   *   existing !important declaration will be overridden.
+   */
+  void AddVariableDeclaration(const nsAString& aName,
+                              CSSVariableDeclarations::Type aType,
+                              const nsString& aValue,
+                              bool aIsImportant,
+                              bool aOverrideImportant);
+
+  /**
+   * Removes a custom property declaration from this object.
+   *
+   * @param aName The variable name (i.e., without the "--" prefix).
+   */
+  void RemoveVariableDeclaration(const nsAString& aName);
+
+  /**
+   * Returns whether a custom property declaration for a variable with
+   * a given name exists on this object.
+   *
+   * @param aName The variable name (i.e., without the "--" prefix).
+   */
+  bool HasVariableDeclaration(const nsAString& aName) const;
+
+  /**
+   * Gets the string value for a custom property declaration of a variable
+   * with a given name.
+   *
+   * @param aName The variable name (i.e., without the "--" prefix).
+   * @param aValue Out parameter into which the variable's value will be
+   *   stored.  If the value is 'initial' or 'inherit', that exact string
+   *   will be stored in aValue.
+   */
+  void GetVariableDeclaration(const nsAString& aName, nsAString& aValue) const;
+
+  /**
+   * Returns whether the custom property declaration for a variable with
+   * the given name was !important.
+   */
+  bool GetVariableValueIsImportant(const nsAString& aName) const;
 
   uint32_t Count() const {
     return mOrder.Length();
@@ -119,11 +172,20 @@ public:
   void MapNormalRuleInfoInto(nsRuleData *aRuleData) const {
     NS_ABORT_IF_FALSE(mData, "called while expanded");
     mData->MapRuleInfoInto(aRuleData);
+    if (mVariables) {
+      mVariables->MapRuleInfoInto(aRuleData);
+    }
   }
   void MapImportantRuleInfoInto(nsRuleData *aRuleData) const {
     NS_ABORT_IF_FALSE(mData, "called while expanded");
-    NS_ABORT_IF_FALSE(mImportantData, "must have important data");
-    mImportantData->MapRuleInfoInto(aRuleData);
+    NS_ABORT_IF_FALSE(mImportantData || mImportantVariables,
+                      "must have important data or variables");
+    if (mImportantData) {
+      mImportantData->MapRuleInfoInto(aRuleData);
+    }
+    if (mImportantVariables) {
+      mImportantVariables->MapRuleInfoInto(aRuleData);
+    }
   }
 
   /**
@@ -203,7 +265,10 @@ public:
     AssertMutable();
     mData = nullptr;
     mImportantData = nullptr;
+    mVariables = nullptr;
+    mImportantVariables = nullptr;
     mOrder.Clear();
+    mVariableOrder.Clear();
   }
 
 #ifdef DEBUG
@@ -214,23 +279,63 @@ private:
   Declaration& operator=(const Declaration& aCopy) MOZ_DELETE;
   bool operator==(const Declaration& aCopy) const MOZ_DELETE;
 
+  void GetValue(nsCSSProperty aProperty, nsAString& aValue,
+                nsCSSValue::Serialization aValueSerialization) const;
+
   static void AppendImportanceToString(bool aIsImportant, nsAString& aString);
   // return whether there was a value in |aValue| (i.e., it had a non-null unit)
   bool AppendValueToString(nsCSSProperty aProperty, nsAString& aResult) const;
+  bool AppendValueToString(nsCSSProperty aProperty, nsAString& aResult,
+                           nsCSSValue::Serialization aValueSerialization) const;
   // Helper for ToString with strange semantics regarding aValue.
   void AppendPropertyAndValueToString(nsCSSProperty aProperty,
                                       nsAutoString& aValue,
                                       nsAString& aResult) const;
+  // helper for ToString that serializes a custom property declaration for
+  // a variable with the specified name
+  void AppendVariableAndValueToString(const nsAString& aName,
+                                      nsAString& aResult) const;
 
 public:
-  nsCSSProperty OrderValueAt(uint32_t aValue) const {
-    return nsCSSProperty(mOrder.ElementAt(aValue));
+  /**
+   * Returns the property at the given index in the ordered list of
+   * declarations.  For custom properties, eCSSPropertyExtra_variable
+   * is returned.
+   */
+  nsCSSProperty GetPropertyAt(uint32_t aIndex) const {
+    uint32_t value = mOrder[aIndex];
+    if (value >= eCSSProperty_COUNT) {
+      return eCSSPropertyExtra_variable;
+    }
+    return nsCSSProperty(value);
   }
 
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  /**
+   * Gets the name of the custom property at the given index in the ordered
+   * list of declarations.
+   */
+  void GetCustomPropertyNameAt(uint32_t aIndex, nsAString& aResult) const {
+    MOZ_ASSERT(mOrder[aIndex] >= eCSSProperty_COUNT);
+    uint32_t variableIndex = mOrder[aIndex] - eCSSProperty_COUNT;
+    aResult.Truncate();
+    aResult.AppendLiteral("--");
+    aResult.Append(mVariableOrder[variableIndex]);
+  }
+
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
 private:
-  nsAutoTArray<uint16_t, 8> mOrder;
+  // The order of properties in this declaration.  Longhand properties are
+  // represented by their nsCSSProperty value, and each custom property (--*)
+  // is represented by a value that begins at eCSSProperty_COUNT.
+  //
+  // Subtracting eCSSProperty_COUNT from those values that represent custom
+  // properties results in an index into mVariableOrder, which identifies the
+  // specific variable the custom property declaration is for.
+  nsAutoTArray<uint32_t, 8> mOrder;
+
+  // variable names of custom properties found in mOrder
+  nsTArray<nsString> mVariableOrder;
 
   // never null, except while expanded, or before the first call to
   // InitializeEmpty or CompressFrom.
@@ -238,6 +343,12 @@ private:
 
   // may be null
   nsAutoPtr<nsCSSCompressedDataBlock> mImportantData;
+
+  // may be null
+  nsAutoPtr<CSSVariableDeclarations> mVariables;
+
+  // may be null
+  nsAutoPtr<CSSVariableDeclarations> mImportantVariables;
 
   // set by style rules when |RuleMatched| is called;
   // also by ToString (hence the 'mutable').

@@ -27,7 +27,6 @@
 #include "nsViewManager.h"
 #include "nsIAtom.h"
 #include "nsGkAtoms.h"
-#include "nsIDOMWindow.h"
 #include "nsNetCID.h"
 #include "nsIOfflineCacheUpdate.h"
 #include "nsIApplicationCache.h"
@@ -35,7 +34,6 @@
 #include "nsIApplicationCacheChannel.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsICookieService.h"
-#include "nsIPrompt.h"
 #include "nsContentUtils.h"
 #include "nsNodeInfoManager.h"
 #include "nsIAppShell.h"
@@ -65,6 +63,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsContentSink)
   NS_INTERFACE_MAP_ENTRY(nsITimerCallback)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDocumentObserver)
 NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsContentSink)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsContentSink)
   if (tmp->mDocument) {
@@ -288,8 +288,7 @@ nsContentSink::ProcessHeaderData(nsIAtom* aHeader, const nsAString& aValue,
   if (aHeader == nsGkAtoms::setcookie) {
     // Note: Necko already handles cookies set via the channel.  We can't just
     // call SetCookie on the channel because we want to do some security checks
-    // here and want to use the prompt associated to our current window, not
-    // the window where the channel was dispatched.
+    // here.
     nsCOMPtr<nsICookieService> cookieServ =
       do_GetService(NS_COOKIESERVICE_CONTRACTID, &rv);
     if (NS_FAILED(rv)) {
@@ -307,19 +306,13 @@ nsContentSink::ProcessHeaderData(nsIAtom* aHeader, const nsAString& aValue,
     rv = mDocument->NodePrincipal()->GetURI(getter_AddRefs(codebaseURI));
     NS_ENSURE_TRUE(codebaseURI, rv);
 
-    nsCOMPtr<nsIPrompt> prompt;
-    nsCOMPtr<nsIDOMWindow> window = do_QueryInterface(mDocument->GetWindow());
-    if (window) {
-      window->GetPrompter(getter_AddRefs(prompt));
-    }
-
     nsCOMPtr<nsIChannel> channel;
     if (mParser) {
       mParser->GetChannel(getter_AddRefs(channel));
     }
 
     rv = cookieServ->SetCookieString(codebaseURI,
-                                     prompt,
+                                     nullptr,
                                      NS_ConvertUTF16toUTF8(aValue).get(),
                                      channel);
     if (NS_FAILED(rv)) {
@@ -411,8 +404,8 @@ nsContentSink::Decode5987Format(nsAString& aEncoded) {
 
   nsAutoCString asciiValue;
 
-  const PRUnichar* encstart = aEncoded.BeginReading();
-  const PRUnichar* encend = aEncoded.EndReading();
+  const char16_t* encstart = aEncoded.BeginReading();
+  const char16_t* encend = aEncoded.EndReading();
 
   // create a plain ASCII string, aborting if we can't do that
   // converted form is always shorter than input
@@ -459,10 +452,10 @@ nsContentSink::ProcessLinkHeader(const nsAString& aLinkData)
   // put an extra null at the end
   stringList.Append(kNullCh);
 
-  PRUnichar* start = stringList.BeginWriting();
-  PRUnichar* end   = start;
-  PRUnichar* last  = start;
-  PRUnichar  endCh;
+  char16_t* start = stringList.BeginWriting();
+  char16_t* end   = start;
+  char16_t* last  = start;
+  char16_t  endCh;
 
   while (*start != kNullCh) {
     // skip leading space
@@ -477,19 +470,19 @@ nsContentSink::ProcessLinkHeader(const nsAString& aLinkData)
     
     // look for semicolon or comma
     while (*end != kNullCh && *end != kSemicolon && *end != kComma) {
-      PRUnichar ch = *end;
+      char16_t ch = *end;
 
       if (ch == kQuote || ch == kLessThan) {
         // quoted string
 
-        PRUnichar quote = ch;
+        char16_t quote = ch;
         if (quote == kLessThan) {
           quote = kGreaterThan;
         }
         
         wasQuotedString = (ch == kQuote);
         
-        PRUnichar* closeQuote = (end + 1);
+        char16_t* closeQuote = (end + 1);
 
         // seek closing quote
         while (*closeQuote != kNullCh && quote != *closeQuote) {
@@ -547,7 +540,7 @@ nsContentSink::ProcessLinkHeader(const nsAString& aLinkData)
           href.StripWhitespace();
         }
       } else {
-        PRUnichar* equals = start;
+        char16_t* equals = start;
         seenParameters = true;
 
         while ((*equals != kNullCh) && (*equals != kEqual)) {
@@ -559,7 +552,7 @@ nsContentSink::ProcessLinkHeader(const nsAString& aLinkData)
           nsAutoString  attr(start);
           attr.StripWhitespace();
 
-          PRUnichar* value = ++equals;
+          char16_t* value = ++equals;
           while (nsCRT::IsAsciiSpace(*value)) {
             value++;
           }
@@ -571,8 +564,8 @@ nsContentSink::ProcessLinkHeader(const nsAString& aLinkData)
 
           if (wasQuotedString) {
             // unescape in-place
-            PRUnichar* unescaped = value;
-            PRUnichar *src = value;
+            char16_t* unescaped = value;
+            char16_t *src = value;
             
             while (*src != kNullCh) {
               if (*src == kBackSlash && *(src + 1) != kNullCh) {
@@ -682,22 +675,22 @@ nsContentSink::ProcessLink(const nsSubstring& aAnchor, const nsSubstring& aHref,
     return NS_OK;
   }
   
-  bool hasPrefetch = linkTypes & PREFETCH;
+  bool hasPrefetch = linkTypes & nsStyleLinkElement::ePREFETCH;
   // prefetch href if relation is "next" or "prefetch"
-  if (hasPrefetch || (linkTypes & NEXT)) {
+  if (hasPrefetch || (linkTypes & nsStyleLinkElement::eNEXT)) {
     PrefetchHref(aHref, mDocument, hasPrefetch);
   }
 
-  if (!aHref.IsEmpty() && (linkTypes & DNS_PREFETCH)) {
+  if (!aHref.IsEmpty() && (linkTypes & nsStyleLinkElement::eDNS_PREFETCH)) {
     PrefetchDNS(aHref);
   }
 
   // is it a stylesheet link?
-  if (!(linkTypes & STYLESHEET)) {
+  if (!(linkTypes & nsStyleLinkElement::eSTYLESHEET)) {
     return NS_OK;
   }
 
-  bool isAlternate = linkTypes & ALTERNATE;
+  bool isAlternate = linkTypes & nsStyleLinkElement::eALTERNATE;
   return ProcessStyleLink(nullptr, aHref, isAlternate, aTitle, aType,
                           aMedia);
 }
@@ -1059,8 +1052,11 @@ nsContentSink::ProcessOfflineManifest(const nsAString& aManifestSpec)
       action = CACHE_SELECTION_RESELECT_WITHOUT_MANIFEST;
     }
     else {
-      // Only continue if the document has permission to use offline APIs.
-      if (!nsContentUtils::OfflineAppAllowed(mDocument->NodePrincipal())) {
+      // Only continue if the document has permission to use offline APIs or
+      // when preferences indicate to permit it automatically.
+      if (!nsContentUtils::OfflineAppAllowed(mDocument->NodePrincipal()) &&
+          !nsContentUtils::MaybeAllowOfflineAppByDefault(mDocument->NodePrincipal(), mDocument->GetWindow()) &&
+          !nsContentUtils::OfflineAppAllowed(mDocument->NodePrincipal())) {
         return;
       }
 
@@ -1215,20 +1211,6 @@ nsContentSink::Notify(nsITimer *timer)
     return NS_OK;
   }
   
-#ifdef MOZ_DEBUG
-  {
-    PRTime now = PR_Now();
-
-    int64_t interval = GetNotificationInterval();
-    delay = int32_t(now - mLastNotificationTime - interval) / PR_USEC_PER_MSEC;
-
-    mBackoffCount--;
-    SINK_TRACE(gContentSinkLogModuleInfo, SINK_TRACE_REFLOW,
-               ("nsContentSink::Notify: reflow on a timer: %d milliseconds "
-                "late, backoff count: %d", delay, mBackoffCount));
-  }
-#endif
-
   if (WaitForPendingSheets()) {
     mDeferredFlushTags = true;
   } else {
@@ -1257,10 +1239,9 @@ nsContentSink::IsTimeToNotify()
   }
 
   PRTime now = PR_Now();
-  int64_t interval, diff;
 
-  LL_I2L(interval, GetNotificationInterval());
-  diff = now - mLastNotificationTime;
+  int64_t interval = GetNotificationInterval();
+  int64_t diff = now - mLastNotificationTime;
 
   if (diff > interval) {
     mBackoffCount--;
@@ -1501,7 +1482,7 @@ nsContentSink::IsScriptExecutingImpl()
 nsresult
 nsContentSink::WillParseImpl(void)
 {
-  if (mRunsToCompletion) {
+  if (mRunsToCompletion || !mDocument) {
     return NS_OK;
   }
 

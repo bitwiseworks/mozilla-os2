@@ -22,11 +22,13 @@ function test()
     hud = aHud;
     ok(hud, "Web Console opened");
 
-    content.console.log("foobarz1");
+    info("dump some spew into the console for scrolling");
+    for (let i = 0; i < 100; i++)
+      content.console.log("foobarz" + i);
     waitForMessages({
       webconsole: hud,
       messages: [{
-        text: "foobarz1",
+        text: "foobarz99",
         category: CATEGORY_WEBDEV,
         severity: SEVERITY_LOG,
       }],
@@ -35,9 +37,17 @@ function test()
 
   function onConsoleMessage()
   {
+    let currentPosition = hud.outputNode.parentNode.scrollTop;
+    EventUtils.synthesizeKey("VK_PAGE_UP", {});
+    isnot(hud.outputNode.parentNode.scrollTop, currentPosition, "scroll position changed after page up");
+
+    currentPosition = hud.outputNode.parentNode.scrollTop;
+    EventUtils.synthesizeKey("VK_PAGE_DOWN", {});
+    ok(hud.outputNode.parentNode.scrollTop > currentPosition, "scroll position now at bottom");
+
     hud.jsterm.once("messages-cleared", onClear);
-    info("try ctrl-k to clear output");
-    EventUtils.synthesizeKey("K", { accelKey: true });
+    info("try ctrl-l to clear output");
+    EventUtils.synthesizeKey("l", { ctrlKey: true });
   }
 
   function onClear()
@@ -54,15 +64,18 @@ function test()
        "filter input is focused");
 
     if (Services.appinfo.OS == "Darwin") {
+      ok(hud.ui.getFilterState("network"), "network category is enabled");
       EventUtils.synthesizeKey("t", { ctrlKey: true });
+      ok(!hud.ui.getFilterState("network"), "accesskey for Network works");
+      EventUtils.synthesizeKey("t", { ctrlKey: true });
+      ok(hud.ui.getFilterState("network"), "accesskey for Network works (again)");
     }
     else {
       EventUtils.synthesizeKey("N", { altKey: true });
+      let net = hud.ui.document.querySelector("toolbarbutton[category=net]");
+      is(hud.ui.document.activeElement, net,
+         "accesskey for Network category focuses the Net button");
     }
-
-    let net = hud.ui.document.querySelector("toolbarbutton[category=net]");
-    is(hud.ui.document.activeElement, net,
-       "accesskey for Network category focuses the Net button");
 
     finishTest();
   }

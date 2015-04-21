@@ -6,20 +6,24 @@
 
 
 const PREF_GETADDONS_CACHE_ENABLED = "extensions.getAddons.cache.enabled";
-const PREF_GETADDONS_BYIDS         = "extensions.getAddons.getWithPerformance.url";
 
-const PORT            = 4444;
+Components.utils.import("resource://testing-common/httpd.js");
+var gServer = new HttpServer();
+gServer.start(-1);
+gPort = gServer.identity.primaryPort;
+
+const PORT            = gPort;
 const BASE_URL        = "http://localhost:" + PORT;
 const DEFAULT_URL     = "about:blank";
 const REQ_URL         = "/data.xml";
 
+// register static file and mark it for interpolation
+mapUrlToFile(REQ_URL, do_get_file("data/test_compatoverrides.xml"), gServer);
+
 Services.prefs.setBoolPref(PREF_EM_STRICT_COMPATIBILITY, false);
 Services.prefs.setBoolPref(PREF_GETADDONS_CACHE_ENABLED, true);
-Services.prefs.setCharPref(PREF_GETADDONS_BYIDS,
+Services.prefs.setCharPref(PREF_GETADDONS_BYIDS_PERFORMANCE,
                            BASE_URL + REQ_URL);
-
-Components.utils.import("resource://testing-common/httpd.js");
-var gServer;
 
 
 // Not hosted, no overrides
@@ -58,7 +62,7 @@ var addon3 = {
   }]
 };
 
-// Hosted, matching override, wouldn't be compatible if strict chekcing is enabled
+// Hosted, matching override, wouldn't be compatible if strict checking is enabled
 var addon4 = {
   id: "addon4@tests.mozilla.org",
   version: "1.0",
@@ -157,7 +161,7 @@ function trigger_background_update(aCallback) {
   Services.obs.addObserver({
     observe: function(aSubject, aTopic, aData) {
       Services.obs.removeObserver(this, "addons-background-update-complete");
-      aCallback();
+      do_execute_soon(aCallback);
     }
   }, "addons-background-update-complete", false);
 
@@ -178,10 +182,6 @@ function run_test() {
   writeInstallRDFForExtension(addon8, profileDir);
   writeInstallRDFForExtension(addon9, profileDir);
   writeInstallRDFForExtension(addon10, profileDir);
-
-  gServer = new HttpServer();
-  gServer.registerFile(REQ_URL, do_get_file("data/test_compatoverrides.xml"));
-  gServer.start(PORT);
 
   startupManager();
 
@@ -261,15 +261,17 @@ function check_compat_status(aCallback) {
     do_check_true(a10.isCompatible);
     do_check_false(a10.appDisabled);
 
-    aCallback();
+    do_execute_soon(aCallback);
   });
 }
 
 function run_test_1() {
+  do_print("Run test 1");
   check_compat_status(run_test_2);
 }
 
 function run_test_2() {
+  do_print("Run test 2");
   restartManager();
   check_compat_status(end_test);  
 }

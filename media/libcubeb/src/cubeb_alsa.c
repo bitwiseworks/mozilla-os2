@@ -570,7 +570,6 @@ init_local_config_with_workaround(char const * pcm_name)
   return NULL;
 }
 
-
 static int
 alsa_locked_pcm_open(snd_pcm_t ** pcm, snd_pcm_stream_t stream, snd_config_t * local_config)
 {
@@ -929,6 +928,57 @@ alsa_get_max_channel_count(cubeb * ctx, uint32_t * max_channels)
   return CUBEB_OK;
 }
 
+static int
+alsa_get_preferred_sample_rate(cubeb * ctx, uint32_t * rate) {
+  int rv, dir;
+  snd_pcm_t * pcm;
+  snd_pcm_hw_params_t * hw_params;
+
+  snd_pcm_hw_params_alloca(&hw_params);
+
+  /* get a pcm, disabling resampling, so we get a rate the
+   * hardware/dmix/pulse/etc. supports. */
+  rv = snd_pcm_open(&pcm, "", SND_PCM_STREAM_PLAYBACK | SND_PCM_NO_AUTO_RESAMPLE, 0);
+  if (rv < 0) {
+    return CUBEB_ERROR;
+  }
+
+  rv = snd_pcm_hw_params_any(pcm, hw_params);
+  if (rv < 0) {
+    snd_pcm_close(pcm);
+    return CUBEB_ERROR;
+  }
+
+  rv = snd_pcm_hw_params_get_rate(hw_params, rate, &dir);
+  if (rv >= 0) {
+    /* There is a default rate: use it. */
+    snd_pcm_close(pcm);
+    return CUBEB_OK;
+  }
+
+  /* Use a common rate, alsa may adjust it based on hw/etc. capabilities. */
+  *rate = 44100;
+
+  rv = snd_pcm_hw_params_set_rate_near(pcm, hw_params, rate, NULL);
+  if (rv < 0) {
+    snd_pcm_close(pcm);
+    return CUBEB_ERROR;
+  }
+
+  snd_pcm_close(pcm);
+
+  return CUBEB_OK;
+}
+
+static int
+alsa_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * latency_ms)
+{
+  /* This is found to be an acceptable minimum, even on a super low-end
+  * machine. */
+  *latency_ms = 40;
+
+  return CUBEB_OK;
+}
 
 static int
 alsa_stream_start(cubeb_stream * stm)
@@ -1009,14 +1059,32 @@ alsa_stream_get_position(cubeb_stream * stm, uint64_t * position)
   return CUBEB_OK;
 }
 
+int
+alsa_stream_get_latency(cubeb_stream * stm, uint32_t * latency)
+{
+  snd_pcm_sframes_t delay;
+  /* This function returns the delay in frames until a frame written using
+     snd_pcm_writei is sent to the DAC. The DAC delay should be < 1ms anyways. */
+  if (snd_pcm_delay(stm->pcm, &delay)) {
+    return CUBEB_ERROR;
+  }
+
+  *latency = delay;
+
+  return CUBEB_OK;
+}
+
 static struct cubeb_ops const alsa_ops = {
   .init = alsa_init,
   .get_backend_id = alsa_get_backend_id,
   .get_max_channel_count = alsa_get_max_channel_count,
+  .get_min_latency = alsa_get_min_latency,
+  .get_preferred_sample_rate = alsa_get_preferred_sample_rate,
   .destroy = alsa_destroy,
   .stream_init = alsa_stream_init,
   .stream_destroy = alsa_stream_destroy,
   .stream_start = alsa_stream_start,
   .stream_stop = alsa_stream_stop,
-  .stream_get_position = alsa_stream_get_position
+  .stream_get_position = alsa_stream_get_position,
+  .stream_get_latency = alsa_stream_get_latency
 };

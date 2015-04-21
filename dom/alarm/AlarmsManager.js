@@ -17,7 +17,6 @@ const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
-Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 
 const ALARMSMANAGER_CONTRACTID = "@mozilla.org/alarmsManager;1";
 const ALARMSMANAGER_CID        = Components.ID("{fea1e884-9b05-11e1-9b64-87a7016c3860}");
@@ -35,7 +34,10 @@ AlarmsManager.prototype = {
 
   classID : ALARMSMANAGER_CID,
 
-  QueryInterface : XPCOMUtils.generateQI([nsIDOMMozAlarmsManager, Ci.nsIDOMGlobalPropertyInitializer]),
+  QueryInterface : XPCOMUtils.generateQI([nsIDOMMozAlarmsManager,
+                                          Ci.nsIDOMGlobalPropertyInitializer,
+                                          Ci.nsISupportsWeakReference,
+                                          Ci.nsIObserver]),
 
   classInfo : XPCOMUtils.generateCI({ classID: ALARMSMANAGER_CID,
                                       contractID: ALARMSMANAGER_CONTRACTID,
@@ -51,6 +53,10 @@ AlarmsManager.prototype = {
       throw Components.results.NS_ERROR_FAILURE;
     }
 
+    if (!aDate) {
+      throw Components.results.NS_ERROR_INVALID_ARG;
+    }
+
     let isIgnoreTimezone = true;
     switch (aRespectTimezone) {
       case "honorTimezone":
@@ -62,17 +68,23 @@ AlarmsManager.prototype = {
         break;
 
       default:
-        throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+        throw Components.results.NS_ERROR_INVALID_ARG;
         break;
     }
 
+    // Run JSON.stringify() in the sand box with the principal of the calling
+    // web page to ensure no cross-origin object is involved. A "Permission
+    // Denied" error will be thrown in case of privilege violation.
+    let sandbox = new Cu.Sandbox(this._window.document.nodePrincipal);
+    sandbox.data = aData;
+    let data = Cu.evalInSandbox("JSON.stringify(data)", sandbox);
     let request = this.createRequest();
     this._cpmm.sendAsyncMessage(
-      "AlarmsManager:Add", 
+      "AlarmsManager:Add",
       { requestId: this.getRequestId(request),
         date: aDate,
         ignoreTimezone: isIgnoreTimezone,
-        data: aData,
+        data: JSON.parse(data),
         pageURL: this._pageURL,
         manifestURL: this._manifestURL }
     );
@@ -82,8 +94,8 @@ AlarmsManager.prototype = {
   remove: function remove(aId) {
     debug("remove()");
 
-    return this._cpmm.sendSyncMessage(
-      "AlarmsManager:Remove", 
+    this._cpmm.sendAsyncMessage(
+      "AlarmsManager:Remove",
       { id: aId, manifestURL: this._manifestURL }
     );
   },
@@ -93,7 +105,7 @@ AlarmsManager.prototype = {
 
     let request = this.createRequest();
     this._cpmm.sendAsyncMessage(
-      "AlarmsManager:GetAll", 
+      "AlarmsManager:GetAll",
       { requestId: this.getRequestId(request), manifestURL: this._manifestURL }
     );
     return request;
@@ -122,12 +134,12 @@ AlarmsManager.prototype = {
           let alarm = { "id":              aAlarm.id,
                         "date":            aAlarm.date,
                         "respectTimezone": aAlarm.ignoreTimezone ?
-                                             "ignoreTimezone" : "honorTimezone", 
+                                             "ignoreTimezone" : "honorTimezone",
                         "data":            aAlarm.data };
           alarms.push(alarm);
         });
         Services.DOMRequest.fireSuccess(request,
-                                        ObjectWrapper.wrap(alarms, this._window));
+                                        Cu.cloneInto(alarms, this._window));
         break;
 
       case "AlarmsManager:Add:Return:KO":
@@ -150,20 +162,32 @@ AlarmsManager.prototype = {
     debug("init()");
 
     // Set navigator.mozAlarms to null.
-    if (!Services.prefs.getBoolPref("dom.mozAlarms.enabled"))
+    if (!Services.prefs.getBoolPref("dom.mozAlarms.enabled")) {
       return null;
+    }
 
     // Only pages with perm set can use the alarms.
     let principal = aWindow.document.nodePrincipal;
-    let perm = Services.perms.testExactPermissionFromPrincipal(principal, "alarms");
-    if (perm != Ci.nsIPermissionManager.ALLOW_ACTION)
+    let perm =
+      Services.perms.testExactPermissionFromPrincipal(principal, "alarms");
+    if (perm != Ci.nsIPermissionManager.ALLOW_ACTION) {
       return null;
+    }
 
-    this._cpmm = Cc["@mozilla.org/childprocessmessagemanager;1"].getService(Ci.nsISyncMessageSender);
+    // SystemPrincipal documents do not have any origin.
+    // Reject them for now.
+    if (!principal.URI) {
+      return null;
+    }
+
+    this._cpmm = Cc["@mozilla.org/childprocessmessagemanager;1"]
+                   .getService(Ci.nsISyncMessageSender);
 
     // Add the valid messages to be listened.
-    this.initHelper(aWindow, ["AlarmsManager:Add:Return:OK", "AlarmsManager:Add:Return:KO", 
-                              "AlarmsManager:GetAll:Return:OK", "AlarmsManager:GetAll:Return:KO"]);
+    this.initDOMRequestHelper(aWindow, ["AlarmsManager:Add:Return:OK",
+                                        "AlarmsManager:Add:Return:KO",
+                                        "AlarmsManager:GetAll:Return:OK",
+                                        "AlarmsManager:GetAll:Return:KO"]);
 
     // Get the manifest URL if this is an installed app
     let appsService = Cc["@mozilla.org/AppsService;1"]

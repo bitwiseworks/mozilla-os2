@@ -16,41 +16,8 @@
 
 namespace android {
 
-int waitBeforeAdding(const android::String16& serviceName)
-{
-  android::sp<android::IServiceManager> sm = android::defaultServiceManager();
-  for ( int i = 0 ; i < 5; i++ ) {
-    if ( sm->checkService ( serviceName ) != NULL ) {
-      sleep(1);
-    }
-    else {
-      //good to go;
-      return 0;
-    }
-  }
-  // time out failure
- return -1;
-}
-
-// Wait until service manager is started
-void
-waitServiceManager()
-{
-  android::sp<android::IServiceManager> sm;
-  do {
-    sm = android::defaultServiceManager();
-    if (sm.get()) {
-      break;
-    }
-    usleep(50000); // 0.05 s
-  } while(true);
-}
-
 /* static */
 void MediaResourceManagerService::instantiate() {
-  waitServiceManager();
-  waitBeforeAdding( android::String16("media.resource_manager") );
-
   defaultServiceManager()->addService(
             String16("media.resource_manager"), new MediaResourceManagerService());
 }
@@ -79,6 +46,7 @@ MediaResourceManagerService::~MediaResourceManagerService()
 void MediaResourceManagerService::binderDied(const wp<IBinder>& who)
 {
   if (who != NULL) {
+    Mutex::Autolock autoLock(mLock);
     sp<IBinder> binder = who.promote();
     if (binder != NULL) {
       cancelClientLocked(binder);
@@ -159,16 +127,16 @@ void MediaResourceManagerService::cancelClientLocked(const sp<IBinder>& binder)
   // Clear the request from request queue.
   Fifo::iterator it(mVideoCodecRequestQueue.begin());
   while (it != mVideoCodecRequestQueue.end()) {
-    if (*it == binder) {
-      it = mVideoCodecRequestQueue.erase(it);
-      continue;
+    if ((*it).get() == binder.get()) {
+      mVideoCodecRequestQueue.erase(it);
+      break;
     }
     it++;
   }
 
   // Clear the client from the resource
   for (int i=0 ; i<mVideoDecoderCount ; i++) {
-    if (mVideoDecoderSlots[i].mClient == binder) {
+    if (mVideoDecoderSlots[i].mClient.get() == binder.get()) {
       mVideoDecoderSlots[i].mClient = NULL;
     }
   }

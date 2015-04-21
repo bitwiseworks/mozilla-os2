@@ -19,32 +19,44 @@
   }
 
   function switchTheme(newTheme, oldTheme) {
-    let winUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIDOMWindowUtils);
-
-    if (oldTheme && newTheme != oldTheme) {
-      let oldThemeUrl = Services.io.newURI(
-        DEVTOOLS_SKIN_URL + oldTheme + "-theme.css", null, null);
-      try {
-        winUtils.removeSheet(oldThemeUrl, window.AUTHOR_SHEET);
-      } catch(ex) {}
+    if (newTheme === oldTheme) {
+      return;
     }
 
-    let newThemeUrl = Services.io.newURI(
-      DEVTOOLS_SKIN_URL + newTheme + "-theme.css", null, null);
-    winUtils.loadSheet(newThemeUrl, window.AUTHOR_SHEET);
+    if (oldTheme && newTheme != oldTheme) {
+      StylesheetUtils.removeSheet(
+        window,
+        DEVTOOLS_SKIN_URL + oldTheme + "-theme.css",
+        "author"
+      );
+    }
+
+    StylesheetUtils.loadSheet(
+      window,
+      DEVTOOLS_SKIN_URL + newTheme + "-theme.css",
+      "author"
+    );
 
     // Floating scrollbars à la osx
-    if (Services.appinfo.OS != "Darwin") {
+    let hiddenDOMWindow = Cc["@mozilla.org/appshell/appShellService;1"]
+                 .getService(Ci.nsIAppShellService)
+                 .hiddenDOMWindow;
+    if (!hiddenDOMWindow.matchMedia("(-moz-overlay-scrollbars)").matches) {
       let scrollbarsUrl = Services.io.newURI(
         DEVTOOLS_SKIN_URL + "floating-scrollbars-light.css", null, null);
 
       if (newTheme == "dark") {
-        winUtils.loadSheet(scrollbarsUrl, window.AGENT_SHEET);
+        StylesheetUtils.loadSheet(
+          window,
+          scrollbarsUrl,
+          "agent"
+        );
       } else if (oldTheme == "dark") {
-        try {
-          winUtils.removeSheet(scrollbarsUrl, window.AGENT_SHEET);
-        } catch(ex) {}
+        StylesheetUtils.removeSheet(
+          window,
+          scrollbarsUrl,
+          "agent"
+        );
       }
       forceStyle();
     }
@@ -63,6 +75,8 @@
 
   Cu.import("resource://gre/modules/Services.jsm");
   Cu.import("resource:///modules/devtools/gDevTools.jsm");
+  const {devtools} = Components.utils.import("resource://gre/modules/devtools/Loader.jsm", {});
+  const StylesheetUtils = devtools.require("sdk/stylesheet/utils");
 
   let theme = Services.prefs.getCharPref("devtools.theme");
   switchTheme(theme);

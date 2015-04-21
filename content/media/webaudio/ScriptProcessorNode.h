@@ -11,13 +11,9 @@
 #include "nsAutoPtr.h"
 
 namespace mozilla {
-
-class AudioNodeStream;
-
 namespace dom {
 
 class AudioContext;
-class ScriptProcessorNodeEngine;
 class SharedBuffers;
 
 class ScriptProcessorNode : public AudioNode
@@ -30,19 +26,17 @@ public:
   virtual ~ScriptProcessorNode();
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ScriptProcessorNode, AudioNode)
 
   IMPL_EVENT_HANDLER(audioprocess)
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   virtual void Connect(AudioNode& aDestination, uint32_t aOutput,
                        uint32_t aInput, ErrorResult& aRv) MOZ_OVERRIDE
   {
     AudioNode::Connect(aDestination, aOutput, aInput, aRv);
     if (!aRv.Failed()) {
-      mPlayingRef.Take(this);
+      MarkActive();
     }
   }
 
@@ -51,16 +45,31 @@ public:
   {
     AudioNode::Connect(aDestination, aOutput, aRv);
     if (!aRv.Failed()) {
-      mPlayingRef.Take(this);
+      MarkActive();
     }
   }
 
   virtual void Disconnect(uint32_t aOutput, ErrorResult& aRv) MOZ_OVERRIDE
   {
     AudioNode::Disconnect(aOutput, aRv);
-    if (!aRv.Failed()) {
-      mPlayingRef.Drop(this);
+    if (!aRv.Failed() && OutputNodes().IsEmpty() && OutputParams().IsEmpty()) {
+      MarkInactive();
     }
+  }
+
+  virtual void SetChannelCount(uint32_t aChannelCount, ErrorResult& aRv) MOZ_OVERRIDE
+  {
+    if (aChannelCount != ChannelCount()) {
+      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    }
+    return;
+  }
+  virtual void SetChannelCountModeValue(ChannelCountMode aMode, ErrorResult& aRv) MOZ_OVERRIDE
+  {
+    if (aMode != ChannelCountMode::Explicit) {
+      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    }
+    return;
   }
 
   uint32_t BufferSize() const
@@ -78,18 +87,20 @@ public:
     return mNumberOfOutputChannels;
   }
 
-  using nsDOMEventTargetHelper::DispatchTrustedEvent;
+  using DOMEventTargetHelper::DispatchTrustedEvent;
 
-  void Stop()
+  virtual const char* NodeType() const
   {
-    mPlayingRef.ForceDrop(this);
+    return "ScriptProcessorNode";
   }
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
 
 private:
   nsAutoPtr<SharedBuffers> mSharedBuffers;
   const uint32_t mBufferSize;
   const uint32_t mNumberOfOutputChannels;
-  SelfCountedReference<ScriptProcessorNode> mPlayingRef; // a reference to self while planing
 };
 
 }

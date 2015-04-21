@@ -8,6 +8,9 @@ let Ci = Components.interfaces;
 let Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/FormData.jsm");
+Cu.import("resource://gre/modules/ScrollPosition.jsm");
+Cu.import("resource://gre/modules/Timer.jsm", this);
 
 let WebProgressListener = {
   _lastLocation: null,
@@ -295,7 +298,7 @@ let WebNavigation =  {
         matchingEntry = {shEntry: shEntry, childDocIdents: childDocIdents};
         aDocIdentMap[aEntry.docIdentifier] = matchingEntry;
       } else {
-        shEntry.adoptBFCacheEntry(matchingEntry);
+        shEntry.adoptBFCacheEntry(matchingEntry.shEntry);
         childDocIdents = matchingEntry.childDocIdents;
       }
     }
@@ -344,6 +347,12 @@ let WebNavigation =  {
     let history = docShell.QueryInterface(Ci.nsIWebNavigation).sessionHistory;
     for (let i = 0; i < history.count; i++) {
       let entry = this._serializeHistoryEntry(history.getEntryAtIndex(i, false));
+
+      // If someone directly navigates to one of these URLs and they switch to Desktop,
+      // we need to make the page load-able.
+      if (entry.url == "about:home" || entry.url == "about:start") {
+        entry.url = "about:newtab";
+      }
       entries.push(entry);
     }
     let index = history.index + 1;
@@ -435,6 +444,11 @@ WebNavigation.init();
 
 
 let DOMEvents =  {
+  _timeout: null,
+  _sessionEvents: new Set(),
+  _sessionEventMap: {"SessionStore:collectFormdata" : FormData.collect,
+                     "SessionStore:collectScrollPosition" : ScrollPosition.collect},
+
   init: function() {
     addEventListener("DOMContentLoaded", this, false);
     addEventListener("DOMTitleChanged", this, false);
@@ -445,6 +459,22 @@ let DOMEvents =  {
     addEventListener("DOMPopupBlocked", this, false);
     addEventListener("pageshow", this, false);
     addEventListener("pagehide", this, false);
+
+    addEventListener("input", this, true);
+    addEventListener("change", this, true);
+    addEventListener("scroll", this, true);
+    addMessageListener("SessionStore:restoreSessionTabData", this);
+  },
+
+  receiveMessage: function(message) {
+    switch (message.name) {
+      case "SessionStore:restoreSessionTabData":
+        if (message.json.formdata)
+          FormData.restore(content, message.json.formdata);
+        if (message.json.scroll)
+          ScrollPosition.restore(content, message.json.scroll.scroll);
+        break;
+    }
   },
 
   handleEvent: function(aEvent) {
@@ -541,6 +571,31 @@ let DOMEvents =  {
           }
         }
         break;
+      case "input":
+      case "change":
+        this._sessionEvents.add("SessionStore:collectFormdata");
+        this._sendUpdates();
+        break;
+      case "scroll":
+        this._sessionEvents.add("SessionStore:collectScrollPosition");
+        this._sendUpdates();
+        break;
+    }
+  },
+
+  _sendUpdates: function() {
+    if (!this._timeout) {
+      // Wait a little before sending the message to batch multiple changes.
+      this._timeout = setTimeout(function() {
+        for (let eventType of this._sessionEvents) {
+          sendAsyncMessage(eventType, {
+            data: this._sessionEventMap[eventType](content)
+          });
+        }
+        this._sessionEvents.clear();
+        clearTimeout(this._timeout);
+        this._timeout = null;
+      }.bind(this), 1000);
     }
   }
 };
@@ -548,13 +603,12 @@ let DOMEvents =  {
 DOMEvents.init();
 
 let ContentScroll =  {
+  // The most recent offset set by APZC for the root scroll frame
   _scrollOffset: { x: 0, y: 0 },
 
   init: function() {
-    addMessageListener("Content:SetCacheViewport", this);
     addMessageListener("Content:SetWindowSize", this);
 
-    addEventListener("scroll", this, false);
     addEventListener("pagehide", this, false);
     addEventListener("MozScrolledAreaChanged", this, false);
   },
@@ -572,74 +626,13 @@ let ContentScroll =  {
     return { x: aElement.scrollLeft, y: aElement.scrollTop };
   },
 
-  setScrollOffsetForElement: function(aElement, aLeft, aTop) {
-    if (aElement.parentNode == aElement.ownerDocument) {
-      aElement.ownerDocument.defaultView.scrollTo(aLeft, aTop);
-    } else {
-      aElement.scrollLeft = aLeft;
-      aElement.scrollTop = aTop;
-    }
-  },
-
   receiveMessage: function(aMessage) {
     let json = aMessage.json;
     switch (aMessage.name) {
-      case "Content:SetCacheViewport": {
-        // Set resolution for root view
-        let rootCwu = content.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
-        if (json.id == 1) {
-          rootCwu.setResolution(json.scale, json.scale);
-          if (!WebProgressListener._firstPaint)
-            break;
-        }
-
-        let displayport = new Rect(json.x, json.y, json.w, json.h);
-        if (displayport.isEmpty())
-          break;
-
-        // Map ID to element
-        let element = null;
-        try {
-          element = rootCwu.findElementWithViewId(json.id);
-        } catch(e) {
-          // This could give NS_ERROR_NOT_AVAILABLE. In that case, the
-          // presshell is not available because the page is reloading.
-        }
-
-        if (!element)
-          break;
-
-        let binding = element.ownerDocument.getBindingParent(element);
-        if (binding instanceof Ci.nsIDOMHTMLInputElement && binding.mozIsTextField(false))
-          break;
-
-        // Set the scroll offset for this element if specified
-        if (json.scrollX >= 0 && json.scrollY >= 0) {
-          this.setScrollOffsetForElement(element, json.scrollX, json.scrollY)
-          if (json.id == 1)
-            this._scrollOffset = this.getScrollOffset(content);
-        }
-
-        // Set displayport. We want to set this after setting the scroll offset, because
-        // it is calculated based on the scroll offset.
-        let scrollOffset = this.getScrollOffsetForElement(element);
-        let x = displayport.x - scrollOffset.x;
-        let y = displayport.y - scrollOffset.y;
-
-        if (json.id == 1) {
-          x = Math.round(x * json.scale) / json.scale;
-          y = Math.round(y * json.scale) / json.scale;
-        }
-
-        let win = element.ownerDocument.defaultView;
-        let winCwu = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
-        winCwu.setDisplayPortForElement(x, y, displayport.width, displayport.height, element);
-        break;
-      }
-
       case "Content:SetWindowSize": {
         let cwu = content.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
         cwu.setCSSViewport(json.width, json.height);
+        sendAsyncMessage("Content:SetWindowSize:Complete", {});
         break;
       }
     }
@@ -650,15 +643,6 @@ let ContentScroll =  {
       case "pagehide":
         this._scrollOffset = { x: 0, y: 0 };
         break;
-
-      case "scroll": {
-        let doc = aEvent.target;
-        if (doc != content.document)
-          break;
-
-        this.sendScroll();
-        break;
-      }
 
       case "MozScrolledAreaChanged": {
         let doc = aEvent.originalTarget;
@@ -681,17 +665,9 @@ let ContentScroll =  {
         break;
       }
     }
-  },
-
-  sendScroll: function sendScroll() {
-    let scrollOffset = this.getScrollOffset(content);
-    if (this._scrollOffset.x == scrollOffset.x && this._scrollOffset.y == scrollOffset.y)
-      return;
-
-    this._scrollOffset = scrollOffset;
-    sendAsyncMessage("scroll", scrollOffset);
   }
 };
+this.ContentScroll = ContentScroll;
 
 ContentScroll.init();
 
@@ -709,7 +685,7 @@ let ContentActive =  {
         let cwu = content.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
         if (json.keepviewport)
           break;
-        cwu.setDisplayPortForElement(0, 0, 0, 0, content.document.documentElement);
+        cwu.setDisplayPortForElement(0, 0, 0, 0, content.document.documentElement, 0);
         break;
 
       case "Content:Activate":

@@ -24,8 +24,13 @@
     var Ci = Components.interfaces;
     var Cr = Components.results;
 
+    Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+    Components.utils.import("resource://gre/modules/Task.jsm");
     Components.utils.import("resource://gre/modules/PlacesUtils.jsm");
-    Components.utils.import("resource:///modules/PlacesUIUtils.jsm");
+    XPCOMUtils.defineLazyModuleGetter(window,
+      "PlacesUIUtils", "resource:///modules/PlacesUIUtils.jsm");
+    XPCOMUtils.defineLazyModuleGetter(window,
+      "PlacesTransactions", "resource://gre/modules/PlacesTransactions.jsm");
   ]]></script>
   <script type="application/javascript"
           src="chrome://browser/content/places/controller.js"/>
@@ -54,8 +59,6 @@
 
     <command id="placesCmd_new:bookmark"
              oncommand="goDoPlacesCommand('placesCmd_new:bookmark');"/>
-    <command id="placesCmd_new:livemark"
-             oncommand="goDoPlacesCommand('placesCmd_new:livemark');"/>
     <command id="placesCmd_new:folder"
              oncommand="goDoPlacesCommand('placesCmd_new:folder');"/>
     <command id="placesCmd_new:separator"
@@ -197,18 +200,18 @@
               hideifprivatebrowsing="true"
               forcehideselection="bookmark"/>
     <menuseparator id="placesContext_deleteSeparator"/>
-    <menuitem id="placesContext_reload"
-              command="placesCmd_reload"
-              label="&cmd.reloadLivebookmark.label;"
-              accesskey="&cmd.reloadLivebookmark.accesskey;"
-              closemenu="single"
-              selection="livemark/feedURI"/>
     <menuitem id="placesContext_sortBy:name"
               command="placesCmd_sortBy:name"
               label="&cmd.sortby_name.label;"
               accesskey="&cmd.context_sortby_name.accesskey;"
               closemenu="single"
               selection="folder"/>
+    <menuitem id="placesContext_reload"
+              command="placesCmd_reload"
+              label="&cmd.reloadLivebookmark.label;"
+              accesskey="&cmd.reloadLivebookmark.accesskey;"
+              closemenu="single"
+              selection="livemark/feedURI"/>
     <menuseparator id="placesContext_sortSeparator"/>
     <menuitem id="placesContext_show:info"
               command="placesCmd_show:info"

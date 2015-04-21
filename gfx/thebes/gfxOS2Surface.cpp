@@ -19,7 +19,7 @@
  **********************************************************************/
 
 gfxOS2Surface::gfxOS2Surface(const gfxIntSize& aSize,
-                             gfxASurface::gfxImageFormat aFormat)
+                             gfxImageFormat aFormat)
     : mWnd(0),  mDC(0), mPS(0), mSize(aSize), mSurfType(os2Image)
 {
     if (!CheckSurfaceSize(aSize))

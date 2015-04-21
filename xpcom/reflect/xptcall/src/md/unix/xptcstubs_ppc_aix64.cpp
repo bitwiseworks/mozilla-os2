@@ -15,7 +15,7 @@
         The args pointer has been set to the start of the parameters BEYOND the ones
         arriving in registers
 */
-extern "C" nsresult
+extern "C" nsresult ATTRIBUTE_USED
 PrepareAndDispatch(nsXPTCStubBase* self, uint64_t methodIndex, uint64_t* args, uint64_t *gprData, double *fprData)
 {
 
@@ -23,8 +23,8 @@ PrepareAndDispatch(nsXPTCStubBase* self, uint64_t methodIndex, uint64_t* args, u
 #define PARAM_GPR_COUNT         7  
 
     nsXPTCMiniVariant paramBuffer[PARAM_BUFFER_COUNT];
-    nsXPTCMiniVariant* dispatchParams = NULL;
-    const nsXPTMethodInfo* info = NULL;
+    nsXPTCMiniVariant* dispatchParams = nullptr;
+    const nsXPTMethodInfo* info = nullptr;
     uint8_t paramCount;
     uint8_t i;
     nsresult result = NS_ERROR_FAILURE;

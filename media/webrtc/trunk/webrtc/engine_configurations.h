@@ -11,17 +11,11 @@
 #ifndef WEBRTC_ENGINE_CONFIGURATIONS_H_
 #define WEBRTC_ENGINE_CONFIGURATIONS_H_
 
+#include "webrtc/typedefs.h"
+
 // ============================================================================
 //                              Voice and Video
 // ============================================================================
-
-// Don't link in socket support in Chrome
-#ifdef WEBRTC_CHROMIUM_BUILD
-#define WEBRTC_EXTERNAL_TRANSPORT
-#endif
-
-// Optional to enable stand-alone
-// #define WEBRTC_EXTERNAL_TRANSPORT
 
 // ----------------------------------------------------------------------------
 //  [Voice] Codec settings
@@ -40,12 +34,16 @@
 // (which are mandatory and don't have any defines).
 #define WEBRTC_CODEC_AVT
 
-// iLBC, G.722, PCM16B and Redundancy coding are excluded from Chromium and
-// Mozilla builds.
+// PCM16 is useful for testing and incurs only a small binary size cost.
+#ifndef WEBRTC_CODEC_PCM16
+#define WEBRTC_CODEC_PCM16
+#endif
+
+// iLBC, G.722, and Redundancy coding are excluded from Chromium and Mozilla
+// builds to reduce binary size.
 #if !defined(WEBRTC_CHROMIUM_BUILD) && !defined(WEBRTC_MOZILLA_BUILD)
 #define WEBRTC_CODEC_ILBC
 #define WEBRTC_CODEC_G722
-#define WEBRTC_CODEC_PCM16
 #define WEBRTC_CODEC_RED
 #endif  // !WEBRTC_CHROMIUM_BUILD && !WEBRTC_MOZILLA_BUILD
 
@@ -69,7 +67,7 @@
 #define WEBRTC_VOICE_ENGINE_NR                  // Near-end NS
 #define WEBRTC_VOE_EXTERNAL_REC_AND_PLAYOUT
 
-#ifndef WEBRTC_CHROMIUM_BUILD
+#if !defined(WEBRTC_ANDROID) && !defined(WEBRTC_IOS)
 #define WEBRTC_VOICE_ENGINE_TYPING_DETECTION    // Typing detection
 #endif
 
@@ -84,7 +82,6 @@
 #define WEBRTC_VOICE_ENGINE_FILE_API
 #define WEBRTC_VOICE_ENGINE_HARDWARE_API
 #define WEBRTC_VOICE_ENGINE_NETEQ_STATS_API
-#define WEBRTC_VOICE_ENGINE_NETWORK_API
 #define WEBRTC_VOICE_ENGINE_RTP_RTCP_API
 #define WEBRTC_VOICE_ENGINE_VIDEO_SYNC_API
 #define WEBRTC_VOICE_ENGINE_VOLUME_CONTROL_API
@@ -109,7 +106,6 @@
 #define WEBRTC_VIDEO_ENGINE_CODEC_API
 #define WEBRTC_VIDEO_ENGINE_ENCRYPTION_API
 #define WEBRTC_VIDEO_ENGINE_IMAGE_PROCESS_API
-#define WEBRTC_VIDEO_ENGINE_NETWORK_API
 #define WEBRTC_VIDEO_ENGINE_RENDER_API
 #define WEBRTC_VIDEO_ENGINE_RTP_RTCP_API
 #define WEBRTC_VIDEO_ENGINE_EXTERNAL_CODEC_API
@@ -152,7 +148,5 @@
 
 // #define WEBRTC_CODEC_G729
 // #define WEBRTC_DTMF_DETECTION
-// #define WEBRTC_SRTP
-// #define WEBRTC_SRTP_ALLOW_ROC_ITERATION
 
 #endif  // WEBRTC_ENGINE_CONFIGURATIONS_H_

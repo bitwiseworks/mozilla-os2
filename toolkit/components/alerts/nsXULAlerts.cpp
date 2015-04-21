@@ -13,13 +13,15 @@
 #include "nsPIDOMWindow.h"
 #include "nsIWindowWatcher.h"
 
+using namespace mozilla;
+
 #define ALERT_CHROME_URL "chrome://global/content/alerts/alert.xul"
 
-NS_IMPL_ISUPPORTS1(nsXULAlertObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(nsXULAlertObserver, nsIObserver)
 
 NS_IMETHODIMP
 nsXULAlertObserver::Observe(nsISupports* aSubject, const char* aTopic,
-                            const PRUnichar* aData)
+                            const char16_t* aData)
 {
   if (!strcmp("alertfinished", aTopic)) {
     nsIDOMWindow* currentAlert = mXULAlerts->mNamedWindows.GetWeak(mAlertName);

@@ -9,7 +9,7 @@ user_pref("browser.ui.layout.tablet", 0); // force tablet UI off
 user_pref("dom.allow_scripts_to_close_windows", true);
 user_pref("dom.disable_open_during_load", false);
 user_pref("dom.experimental_forms", true); // on for testing
-user_pref("dom.experimental_forms_range", true); // on for testing
+user_pref("dom.forms.number", true); // on for testing
 user_pref("dom.forms.color", true); // on for testing
 user_pref("dom.max_script_run_time", 0); // no slow script dialogs
 user_pref("hangmonitor.timeout", 0); // no hang monitor
@@ -27,9 +27,10 @@ user_pref("devtools.errorconsole.enabled", true);
 user_pref("devtools.debugger.remote-port", 6023);
 user_pref("layout.debug.enable_data_xbl", true);
 user_pref("browser.EULA.override", true);
-user_pref("javascript.options.jit_hardening", true);
 user_pref("gfx.color_management.force_srgb", true);
 user_pref("network.manage-offline-status", false);
+// Disable speculative connections so they aren't reported as leaking when they're hanging around.
+user_pref("network.http.speculative-parallel-limit", 0);
 user_pref("dom.min_background_timeout_value", 1000);
 user_pref("test.mousescroll", true);
 user_pref("security.default_personal_cert", "Select Automatically"); // Need to client auth test be w/o any dialogs
@@ -50,6 +51,14 @@ user_pref("toolkit.telemetry.notifiedOptOut", 999);
 user_pref("font.size.inflation.emPerLine", 0);
 user_pref("font.size.inflation.minTwips", 0);
 
+// AddonManager tests require that the experiments provider be present.
+user_pref("experiments.supported", true);
+user_pref("experiments.logging.level", "Trace");
+user_pref("experiments.logging.dump", true);
+// Point the manifest at something local so we don't risk it hitting production
+// data and installing experiments that may vary over time.
+user_pref("experiments.manifest.uri", "http://%(server)s/experiments-dummy/manifest");
+
 // Only load extensions from the application and user profile
 // AddonManager.SCOPE_PROFILE + AddonManager.SCOPE_APPLICATION
 user_pref("extensions.enabledScopes", 5);
@@ -57,10 +66,13 @@ user_pref("extensions.enabledScopes", 5);
 user_pref("extensions.getAddons.cache.enabled", false);
 // Disable intalling any distribution add-ons
 user_pref("extensions.installDistroAddons", false);
+// XPI extensions are required for test harnesses to load
+user_pref("extensions.defaultProviders.enabled", true);
 
 user_pref("geo.wifi.uri", "http://%(server)s/tests/dom/tests/mochitest/geolocation/network_geolocation.sjs");
-user_pref("geo.wifi.testing", true);
-user_pref("geo.ignore.location_filter", true);
+user_pref("geo.wifi.timeToWaitBeforeSending", 200);
+user_pref("geo.wifi.scan", false);
+user_pref("geo.wifi.logging.enabled", true);
 
 user_pref("camino.warn_when_closing", false); // Camino-only, harmless to others
 
@@ -68,7 +80,6 @@ user_pref("camino.warn_when_closing", false); // Camino-only, harmless to others
 user_pref("urlclassifier.updateinterval", 172800);
 // Point the url-classifier to the local testing server for fast failures
 user_pref("browser.safebrowsing.gethashURL", "http://%(server)s/safebrowsing-dummy/gethash");
-user_pref("browser.safebrowsing.keyURL", "http://%(server)s/safebrowsing-dummy/newkey");
 user_pref("browser.safebrowsing.updateURL", "http://%(server)s/safebrowsing-dummy/update");
 // Point update checks to the local testing server for fast failures
 user_pref("extensions.update.url", "http://%(server)s/extensions-dummy/updateURL");
@@ -111,9 +122,13 @@ user_pref("datareporting.policy.dataSubmissionPolicyBypassAcceptance", true);
 // Point Firefox Health Report at a local server. We don't care if it actually
 // works. It just can't hit the default production endpoint.
 user_pref("datareporting.healthreport.documentServerURI", "http://%(server)s/healthreport/");
+user_pref("datareporting.healthreport.about.reportUrl", "http://%(server)s/abouthealthreport/");
 
 // Make sure CSS error reporting is enabled for tests
 user_pref("layout.css.report_errors", true);
+
+// Enable CSS Grid for testing
+user_pref("layout.css.grid.enabled", true);
 
 // Enable mozContacts
 user_pref("dom.mozContacts.enabled", true);
@@ -122,7 +137,6 @@ user_pref("dom.global-constructor.disable.mozContact", false);
 
 // Enable mozSettings
 user_pref("dom.mozSettings.enabled", true);
-user_pref("dom.navigator-property.disable.mozSettings", false);
 
 // Make sure the disk cache doesn't get auto disabled
 user_pref("network.http.bypass-cachelock-threshold", 200000);
@@ -131,16 +145,66 @@ user_pref("network.http.bypass-cachelock-threshold", 200000);
 user_pref("dom.gamepad.enabled", true);
 user_pref("dom.gamepad.non_standard_events.enabled", true);
 
-// Enable Web Audio
-user_pref("media.webaudio.enabled", true);
-
 // Enable Web Audio legacy APIs
-user_pref("media.webaudio.legacy.AudioBufferSourceNode", true);
-user_pref("media.webaudio.legacy.AudioContext", true);
-user_pref("media.webaudio.legacy.AudioParam", true);
 user_pref("media.webaudio.legacy.BiquadFilterNode", true);
 user_pref("media.webaudio.legacy.PannerNode", true);
 user_pref("media.webaudio.legacy.OscillatorNode", true);
 
+// Always use network provider for geolocation tests
+// so we bypass the OSX dialog raised by the corelocation provider
+user_pref("geo.provider.testing", true);
+
+// Background thumbnails in particular cause grief, and disabling thumbnails
+// in general can't hurt - we re-enable them when tests need them.
+user_pref("browser.pagethumbnails.capturing_disabled", true);
+
+// Indicate that the download panel has been shown once so that whichever
+// download test runs first doesn't show the popup inconsistently.
+user_pref("browser.download.panel.shown", true);
+
+// prefs for firefox metro.
+// Disable first-tun tab
+user_pref("browser.firstrun.count", 0);
+
+// Tell the PBackground infrastructure to run a test at startup.
+user_pref("pbackground.testing", true);
+
+// Enable webapps testing mode, which bypasses native installation.
+user_pref("browser.webapps.testing", true);
+
+// Disable android snippets
+user_pref("browser.snippets.enabled", false);
+user_pref("browser.snippets.syncPromo.enabled", false);
+
+// Disable useragent updates.
+user_pref("general.useragent.updates.enabled", false);
+
+// Disable webapp updates.  Yes, it is supposed to be an integer.
+user_pref("browser.webapps.checkForUpdates", 0);
+
+// Do not turn HTTP cache v2 for our infra tests (some tests are failing)
+user_pref("browser.cache.use_new_backend_temp", false);
+
+// Don't connect to Yahoo! for RSS feed tests.
+// en-US only uses .types.0.uri, but set all of them just to be sure.
+user_pref('browser.contentHandlers.types.0.uri', 'http://test1.example.org/rss?url=%%s')
+user_pref('browser.contentHandlers.types.1.uri', 'http://test1.example.org/rss?url=%%s')
+user_pref('browser.contentHandlers.types.2.uri', 'http://test1.example.org/rss?url=%%s')
+user_pref('browser.contentHandlers.types.3.uri', 'http://test1.example.org/rss?url=%%s')
+user_pref('browser.contentHandlers.types.4.uri', 'http://test1.example.org/rss?url=%%s')
+user_pref('browser.contentHandlers.types.5.uri', 'http://test1.example.org/rss?url=%%s')
+
 // We want to collect telemetry, but we don't want to send in the results.
 user_pref('toolkit.telemetry.server', 'https://%(server)s/telemetry-dummy/');
+
+// We don't want to hit the real Firefox Accounts server for tests.  We don't
+// actually need a functioning FxA server, so just set it to something that
+// resolves and accepts requests, even if they all fail.
+user_pref('identity.fxaccounts.auth.uri', 'https://%(server)s/fxa-dummy/');
+
+// Make sure we don't try to load snippets from the network.
+user_pref("browser.aboutHomeSnippets.updateUrl", "nonexistent://test");
+
+// Ensure UITour won't hit the network
+user_pref("browser.uitour.pinnedTabUrl", "http://%(server)s/uitour-dummy/pinnedTab");
+user_pref("browser.uitour.url", "http://%(server)s/uitour-dummy/tour");

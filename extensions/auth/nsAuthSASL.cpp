@@ -23,14 +23,14 @@ void nsAuthSASL::Reset()
 }
 
 /* Limitations apply to this class's thread safety. See the header file */
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsAuthSASL, nsIAuthModule)
+NS_IMPL_ISUPPORTS(nsAuthSASL, nsIAuthModule)
 
 NS_IMETHODIMP
 nsAuthSASL::Init(const char *serviceName,
                  uint32_t    serviceFlags,
-                 const PRUnichar *domain,
-                 const PRUnichar *username,
-                 const PRUnichar *password)
+                 const char16_t *domain,
+                 const char16_t *username,
+                 const char16_t *password)
 {
     nsresult rv;
     

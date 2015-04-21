@@ -7,13 +7,10 @@
 #ifndef jit_PerfSpewer_h
 #define jit_PerfSpewer_h
 
-#include <stdio.h>
-
-#include "jsscript.h"
-#include "IonMacroAssembler.h"
-#include "js/RootingAPI.h"
-
-class JSScript;
+#ifdef JS_ION_PERF
+# include <stdio.h>
+# include "jit/IonMacroAssembler.h"
+#endif
 
 namespace js {
 namespace jit {
@@ -35,42 +32,70 @@ static inline bool PerfFuncEnabled() { return false; }
 static inline bool PerfEnabled() { return false; }
 #endif
 
+#ifdef JS_ION_PERF
+
+struct Record {
+    const char *filename;
+    unsigned lineNumber;
+    unsigned columnNumber;
+    uint32_t id;
+    Label start, end;
+    size_t startOffset, endOffset;
+
+    Record(const char *filename,
+           unsigned lineNumber,
+           unsigned columnNumber,
+           uint32_t id)
+      : filename(filename), lineNumber(lineNumber),
+        columnNumber(columnNumber), id(id),
+        startOffset(0u), endOffset(0u)
+    {}
+};
+
+typedef Vector<Record, 1, SystemAllocPolicy> BasicBlocksVector;
+
 class PerfSpewer
 {
-  private:
+  protected:
     static uint32_t nextFunctionIndex;
 
-    struct Record {
-        const char *filename;
-        unsigned lineNumber;
-        unsigned columnNumber;
-        uint32_t id;
-        Label start, end;
+  public:
+    Label endInlineCode;
 
-        Record(const char *filename,
-               unsigned lineNumber,
-               unsigned columnNumber,
-               uint32_t id)
-          : filename(filename), lineNumber(lineNumber),
-            columnNumber(columnNumber), id(id)
-        {}
-    };
-
-    FILE *fp_;
-    Vector<Record, 1, SystemAllocPolicy> basicBlocks_;
+  protected:
+    BasicBlocksVector basicBlocks_;
 
   public:
-    PerfSpewer();
-    ~PerfSpewer();
-
-    bool init(const char *path);
-
-    bool startBasicBlock(MBasicBlock *blk, MacroAssembler &masm);
+    virtual bool startBasicBlock(MBasicBlock *blk, MacroAssembler &masm);
     bool endBasicBlock(MacroAssembler &masm);
-    void writeProfile(JSScript *script,
-                      IonCode *code,
-                      MacroAssembler &masm);
+    bool noteEndInlineCode(MacroAssembler &masm);
+
+    void writeProfile(JSScript *script, JitCode *code, MacroAssembler &masm);
 };
+
+void writePerfSpewerBaselineProfile(JSScript *script, JitCode *code);
+void writePerfSpewerJitCodeProfile(JitCode *code, const char *msg);
+
+class AsmJSPerfSpewer : public PerfSpewer
+{
+  public:
+    bool startBasicBlock(MBasicBlock *blk, MacroAssembler &masm);
+
+    void noteBlocksOffsets();
+    BasicBlocksVector &basicBlocks() { return basicBlocks_; }
+};
+
+void writePerfSpewerAsmJSFunctionMap(uintptr_t base, uintptr_t size, const char *filename,
+                                     unsigned lineno, unsigned colIndex, const char *funcName);
+
+void writePerfSpewerAsmJSBlocksMap(uintptr_t baseAddress, size_t funcStartOffset,
+                                   size_t funcStartOOLOffset, size_t funcSize,
+                                   const char *filename, const char *funcName,
+                                   const BasicBlocksVector &basicBlocks);
+
+void writePerfSpewerAsmJSEntriesAndExits(uintptr_t base, size_t size);
+
+#endif // JS_ION_PERF
 
 } // namespace jit
 } // namespace js

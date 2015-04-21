@@ -12,13 +12,13 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/HashFunctions.h"
 #include "nsCRT.h"
-#include "prbit.h"
-
-using namespace mozilla;
 
 #if defined(PR_LOGGING)
 PRLogModuleInfo *gHttpLog = nullptr;
 #endif
+
+namespace mozilla {
+namespace net {
 
 // define storage for all atoms
 #define HTTP_ATOM(_name, _value) nsHttpAtom nsHttp::_name = { _value };
@@ -32,8 +32,6 @@ enum {
     NUM_HTTP_ATOMS
 };
 #undef HTTP_ATOM
-
-using namespace mozilla;
 
 // we keep a linked list of atoms allocated on the heap for easy clean up when
 // the atom table is destroyed.  The structure and value string are allocated
@@ -110,8 +108,9 @@ nsHttp::CreateAtomTable()
     // The capacity for this table is initialized to a value greater than the
     // number of known atoms (NUM_HTTP_ATOMS) because we expect to encounter a
     // few random headers right off the bat.
-    if (!PL_DHashTableInit(&sAtomTable, &ops, nullptr, sizeof(PLDHashEntryStub),
-                           NUM_HTTP_ATOMS + 10)) {
+    if (!PL_DHashTableInit(&sAtomTable, &ops, nullptr,
+                           sizeof(PLDHashEntryStub),
+                           NUM_HTTP_ATOMS + 10, fallible_t())) {
         sAtomTable.ops = nullptr;
         return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -296,32 +295,5 @@ nsHttp::IsPermanentRedirect(uint32_t httpStatus)
   return httpStatus == 301 || httpStatus == 308;
 }
 
-bool
-nsHttp::ShouldRewriteRedirectToGET(uint32_t httpStatus, nsHttpAtom method)
-{
-  // for 301 and 302, only rewrite POST
-  if (httpStatus == 301 || httpStatus == 302)
-    return method == nsHttp::Post;
-
-  // rewrite for 303 unless it was HEAD
-  if (httpStatus == 303)
-    return method != nsHttp::Head;
-
-  // otherwise, such as for 307, do not rewrite
-  return false;
-}
-
-bool
-nsHttp::IsSafeMethod(nsHttpAtom method)
-{
-  // This code will need to be extended for new safe methods, otherwise
-  // they'll default to "not safe".
-  return method == nsHttp::Get ||
-         method == nsHttp::Head ||
-         method == nsHttp::Options ||
-         method == nsHttp::Propfind ||
-         method == nsHttp::Report ||
-         method == nsHttp::Search ||
-         method == nsHttp::Trace;
-}
-
+} // namespace mozilla::net
+} // namespace mozilla

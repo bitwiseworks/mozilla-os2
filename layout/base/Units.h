@@ -10,7 +10,9 @@
 #include "mozilla/gfx/Point.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/gfx/ScaleFactor.h"
-#include "nsDeviceContext.h"
+#include "nsRect.h"
+#include "nsMargin.h"
+#include "mozilla/AppUnits.h"
 
 namespace mozilla {
 
@@ -25,6 +27,8 @@ typedef gfx::SizeTyped<CSSPixel> CSSSize;
 typedef gfx::IntSizeTyped<CSSPixel> CSSIntSize;
 typedef gfx::RectTyped<CSSPixel> CSSRect;
 typedef gfx::IntRectTyped<CSSPixel> CSSIntRect;
+typedef gfx::MarginTyped<CSSPixel> CSSMargin;
+typedef gfx::IntMarginTyped<CSSPixel> CSSIntMargin;
 
 typedef gfx::PointTyped<LayoutDevicePixel> LayoutDevicePoint;
 typedef gfx::IntPointTyped<LayoutDevicePixel> LayoutDeviceIntPoint;
@@ -32,6 +36,8 @@ typedef gfx::SizeTyped<LayoutDevicePixel> LayoutDeviceSize;
 typedef gfx::IntSizeTyped<LayoutDevicePixel> LayoutDeviceIntSize;
 typedef gfx::RectTyped<LayoutDevicePixel> LayoutDeviceRect;
 typedef gfx::IntRectTyped<LayoutDevicePixel> LayoutDeviceIntRect;
+typedef gfx::MarginTyped<LayoutDevicePixel> LayoutDeviceMargin;
+typedef gfx::IntMarginTyped<LayoutDevicePixel> LayoutDeviceIntMargin;
 
 typedef gfx::PointTyped<LayerPixel> LayerPoint;
 typedef gfx::IntPointTyped<LayerPixel> LayerIntPoint;
@@ -39,6 +45,8 @@ typedef gfx::SizeTyped<LayerPixel> LayerSize;
 typedef gfx::IntSizeTyped<LayerPixel> LayerIntSize;
 typedef gfx::RectTyped<LayerPixel> LayerRect;
 typedef gfx::IntRectTyped<LayerPixel> LayerIntRect;
+typedef gfx::MarginTyped<LayerPixel> LayerMargin;
+typedef gfx::IntMarginTyped<LayerPixel> LayerIntMargin;
 
 typedef gfx::PointTyped<ScreenPixel> ScreenPoint;
 typedef gfx::IntPointTyped<ScreenPixel> ScreenIntPoint;
@@ -46,6 +54,8 @@ typedef gfx::SizeTyped<ScreenPixel> ScreenSize;
 typedef gfx::IntSizeTyped<ScreenPixel> ScreenIntSize;
 typedef gfx::RectTyped<ScreenPixel> ScreenRect;
 typedef gfx::IntRectTyped<ScreenPixel> ScreenIntRect;
+typedef gfx::MarginTyped<ScreenPixel> ScreenMargin;
+typedef gfx::IntMarginTyped<ScreenPixel> ScreenIntMargin;
 
 typedef gfx::ScaleFactor<CSSPixel, LayoutDevicePixel> CSSToLayoutDeviceScale;
 typedef gfx::ScaleFactor<LayoutDevicePixel, CSSPixel> LayoutDeviceToCSSScale;
@@ -59,7 +69,6 @@ typedef gfx::ScaleFactor<LayoutDevicePixel, ScreenPixel> LayoutDeviceToScreenSca
 typedef gfx::ScaleFactor<ScreenPixel, LayoutDevicePixel> ScreenToLayoutDeviceScale;
 typedef gfx::ScaleFactor<LayerPixel, ScreenPixel> LayerToScreenScale;
 typedef gfx::ScaleFactor<ScreenPixel, LayerPixel> ScreenToLayerScale;
-typedef gfx::ScaleFactor<ScreenPixel, ScreenPixel> ScreenToScreenScale;
 
 /*
  * The pixels that content authors use to specify sizes in.
@@ -69,58 +78,106 @@ struct CSSPixel {
   // Conversions from app units
 
   static CSSPoint FromAppUnits(const nsPoint& aPoint) {
-    return CSSPoint(NSAppUnitsToFloatPixels(aPoint.x, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                    NSAppUnitsToFloatPixels(aPoint.y, float(nsDeviceContext::AppUnitsPerCSSPixel())));
+    return CSSPoint(NSAppUnitsToFloatPixels(aPoint.x, float(AppUnitsPerCSSPixel())),
+                    NSAppUnitsToFloatPixels(aPoint.y, float(AppUnitsPerCSSPixel())));
   }
 
   static CSSRect FromAppUnits(const nsRect& aRect) {
-    return CSSRect(NSAppUnitsToFloatPixels(aRect.x, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                   NSAppUnitsToFloatPixels(aRect.y, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                   NSAppUnitsToFloatPixels(aRect.width, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                   NSAppUnitsToFloatPixels(aRect.height, float(nsDeviceContext::AppUnitsPerCSSPixel())));
+    return CSSRect(NSAppUnitsToFloatPixels(aRect.x, float(AppUnitsPerCSSPixel())),
+                   NSAppUnitsToFloatPixels(aRect.y, float(AppUnitsPerCSSPixel())),
+                   NSAppUnitsToFloatPixels(aRect.width, float(AppUnitsPerCSSPixel())),
+                   NSAppUnitsToFloatPixels(aRect.height, float(AppUnitsPerCSSPixel())));
+  }
+
+  static CSSMargin FromAppUnits(const nsMargin& aMargin) {
+    return CSSMargin(NSAppUnitsToFloatPixels(aMargin.top, float(AppUnitsPerCSSPixel())),
+                     NSAppUnitsToFloatPixels(aMargin.right, float(AppUnitsPerCSSPixel())),
+                     NSAppUnitsToFloatPixels(aMargin.bottom, float(AppUnitsPerCSSPixel())),
+                     NSAppUnitsToFloatPixels(aMargin.left, float(AppUnitsPerCSSPixel())));
   }
 
   static CSSIntPoint FromAppUnitsRounded(const nsPoint& aPoint) {
-    return CSSIntPoint(NSAppUnitsToIntPixels(aPoint.x, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                       NSAppUnitsToIntPixels(aPoint.y, float(nsDeviceContext::AppUnitsPerCSSPixel())));
+    return CSSIntPoint(NSAppUnitsToIntPixels(aPoint.x, float(AppUnitsPerCSSPixel())),
+                       NSAppUnitsToIntPixels(aPoint.y, float(AppUnitsPerCSSPixel())));
+  }
+
+  static CSSIntSize FromAppUnitsRounded(const nsSize& aSize)
+  {
+    return CSSIntSize(NSAppUnitsToIntPixels(aSize.width, float(AppUnitsPerCSSPixel())),
+                      NSAppUnitsToIntPixels(aSize.height, float(AppUnitsPerCSSPixel())));
   }
 
   static CSSIntRect FromAppUnitsRounded(const nsRect& aRect) {
-    return CSSIntRect(NSAppUnitsToIntPixels(aRect.x, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                      NSAppUnitsToIntPixels(aRect.y, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                      NSAppUnitsToIntPixels(aRect.width, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                      NSAppUnitsToIntPixels(aRect.height, float(nsDeviceContext::AppUnitsPerCSSPixel())));
+    return CSSIntRect(NSAppUnitsToIntPixels(aRect.x, float(AppUnitsPerCSSPixel())),
+                      NSAppUnitsToIntPixels(aRect.y, float(AppUnitsPerCSSPixel())),
+                      NSAppUnitsToIntPixels(aRect.width, float(AppUnitsPerCSSPixel())),
+                      NSAppUnitsToIntPixels(aRect.height, float(AppUnitsPerCSSPixel())));
   }
 
   // Conversions to app units
 
   static nsPoint ToAppUnits(const CSSPoint& aPoint) {
-    return nsPoint(NSFloatPixelsToAppUnits(aPoint.x, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                   NSFloatPixelsToAppUnits(aPoint.y, float(nsDeviceContext::AppUnitsPerCSSPixel())));
+    return nsPoint(NSToCoordRoundWithClamp(aPoint.x * float(AppUnitsPerCSSPixel())),
+                   NSToCoordRoundWithClamp(aPoint.y * float(AppUnitsPerCSSPixel())));
   }
 
   static nsPoint ToAppUnits(const CSSIntPoint& aPoint) {
-    return nsPoint(NSIntPixelsToAppUnits(aPoint.x, nsDeviceContext::AppUnitsPerCSSPixel()),
-                   NSIntPixelsToAppUnits(aPoint.y, nsDeviceContext::AppUnitsPerCSSPixel()));
+    return nsPoint(NSToCoordRoundWithClamp(float(aPoint.x) * float(AppUnitsPerCSSPixel())),
+                   NSToCoordRoundWithClamp(float(aPoint.y) * float(AppUnitsPerCSSPixel())));
   }
 
   static nsRect ToAppUnits(const CSSRect& aRect) {
-    return nsRect(NSFloatPixelsToAppUnits(aRect.x, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                  NSFloatPixelsToAppUnits(aRect.y, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                  NSFloatPixelsToAppUnits(aRect.width, float(nsDeviceContext::AppUnitsPerCSSPixel())),
-                  NSFloatPixelsToAppUnits(aRect.height, float(nsDeviceContext::AppUnitsPerCSSPixel())));
+    return nsRect(NSToCoordRoundWithClamp(aRect.x * float(AppUnitsPerCSSPixel())),
+                  NSToCoordRoundWithClamp(aRect.y * float(AppUnitsPerCSSPixel())),
+                  NSToCoordRoundWithClamp(aRect.width * float(AppUnitsPerCSSPixel())),
+                  NSToCoordRoundWithClamp(aRect.height * float(AppUnitsPerCSSPixel())));
   }
 };
 
 /*
  * The pixels that are referred to as "device pixels" in layout code. In
  * general this is obtained by converting a value in app units value by the
- * nsDeviceContext::AppUnitsPerDevPixel() value. The size of these pixels
+ * AppUnitsPerDevPixel() value. The size of these pixels
  * are affected by:
  * 1) the "full zoom" (see nsPresContext::SetFullZoom)
  * 2) the "widget scale" (see nsIWidget::GetDefaultScale)
  */
 struct LayoutDevicePixel {
+  static LayoutDeviceIntPoint FromUntyped(const nsIntPoint& aPoint) {
+    return LayoutDeviceIntPoint(aPoint.x, aPoint.y);
+  }
+
+  static nsIntPoint ToUntyped(const LayoutDeviceIntPoint& aPoint) {
+    return nsIntPoint(aPoint.x, aPoint.y);
+  }
+
+  static LayoutDeviceIntRect FromUntyped(const nsIntRect& aRect) {
+    return LayoutDeviceIntRect(aRect.x, aRect.y, aRect.width, aRect.height);
+  }
+
+  static nsIntRect ToUntyped(const LayoutDeviceIntRect& aRect) {
+    return nsIntRect(aRect.x, aRect.y, aRect.width, aRect.height);
+  }
+
+  static LayoutDeviceRect FromAppUnits(const nsRect& aRect, nscoord aAppUnitsPerDevPixel) {
+    return LayoutDeviceRect(NSAppUnitsToFloatPixels(aRect.x, float(aAppUnitsPerDevPixel)),
+                            NSAppUnitsToFloatPixels(aRect.y, float(aAppUnitsPerDevPixel)),
+                            NSAppUnitsToFloatPixels(aRect.width, float(aAppUnitsPerDevPixel)),
+                            NSAppUnitsToFloatPixels(aRect.height, float(aAppUnitsPerDevPixel)));
+  }
+
+  static LayoutDeviceIntPoint FromAppUnitsRounded(const nsPoint& aPoint, nscoord aAppUnitsPerDevPixel) {
+    return LayoutDeviceIntPoint(NSAppUnitsToIntPixels(aPoint.x, aAppUnitsPerDevPixel),
+                                NSAppUnitsToIntPixels(aPoint.y, aAppUnitsPerDevPixel));
+  }
+
+  static LayoutDeviceIntPoint FromAppUnitsToNearest(const nsPoint& aPoint, nscoord aAppUnitsPerDevPixel) {
+    return FromUntyped(aPoint.ToNearestPixels(aAppUnitsPerDevPixel));
+  }
+
+  static LayoutDeviceIntRect FromAppUnitsToNearest(const nsRect& aRect, nscoord aAppUnitsPerDevPixel) {
+    return FromUntyped(aRect.ToNearestPixels(aAppUnitsPerDevPixel));
+  }
 };
 
 /*
@@ -146,7 +203,7 @@ struct LayerPixel {
 struct ScreenPixel {
 };
 
-// Operators to apply ScaleFactors directly to Points and Rects
+// Operators to apply ScaleFactors directly to Points, Rects, Sizes and Margins
 
 template<class src, class dst>
 gfx::PointTyped<dst> operator*(const gfx::PointTyped<src>& aPoint, const gfx::ScaleFactor<src, dst>& aScale) {
@@ -192,6 +249,46 @@ gfx::RectTyped<dst> operator/(const gfx::IntRectTyped<src>& aRect, const gfx::Sc
                              float(aRect.height) / aScale.scale);
 }
 
-};
+template<class src, class dst>
+gfx::SizeTyped<dst> operator*(const gfx::SizeTyped<src>& aSize, const gfx::ScaleFactor<src, dst>& aScale) {
+  return gfx::SizeTyped<dst>(aSize.width * aScale.scale,
+                             aSize.height * aScale.scale);
+}
+
+template<class src, class dst>
+gfx::SizeTyped<dst> operator/(const gfx::SizeTyped<src>& aSize, const gfx::ScaleFactor<dst, src>& aScale) {
+  return gfx::SizeTyped<dst>(aSize.width / aScale.scale,
+                              aSize.height / aScale.scale);
+}
+
+template<class src, class dst>
+gfx::SizeTyped<dst> operator*(const gfx::IntSizeTyped<src>& aSize, const gfx::ScaleFactor<src, dst>& aScale) {
+  return gfx::SizeTyped<dst>(float(aSize.width) * aScale.scale,
+                             float(aSize.height) * aScale.scale);
+}
+
+template<class src, class dst>
+gfx::SizeTyped<dst> operator/(const gfx::IntSizeTyped<src>& aSize, const gfx::ScaleFactor<dst, src>& aScale) {
+  return gfx::SizeTyped<dst>(float(aSize.width) / aScale.scale,
+                             float(aSize.height) / aScale.scale);
+}
+
+template<class src, class dst>
+gfx::MarginTyped<dst> operator*(const gfx::MarginTyped<src>& aMargin, const gfx::ScaleFactor<src, dst>& aScale) {
+  return gfx::MarginTyped<dst>(aMargin.top * aScale.scale,
+                               aMargin.right * aScale.scale,
+                               aMargin.bottom * aScale.scale,
+                               aMargin.left * aScale.scale);
+}
+
+template<class src, class dst>
+gfx::MarginTyped<dst> operator/(const gfx::MarginTyped<src>& aMargin, const gfx::ScaleFactor<dst, src>& aScale) {
+  return gfx::MarginTyped<dst>(aMargin.top / aScale.scale,
+                               aMargin.right / aScale.scale,
+                               aMargin.bottom / aScale.scale,
+                               aMargin.left / aScale.scale);
+}
+
+}
 
 #endif

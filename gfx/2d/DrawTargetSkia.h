@@ -3,7 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#pragma once
+#ifndef _MOZILLA_GFX_SOURCESURFACESKIA_H
+#define _MOZILLA_GFX_SOURCESURFACESKIA_H
 
 #ifdef USE_SKIA_GPU
 #include "skia/GrContext.h"
@@ -26,10 +27,11 @@ class SourceSurfaceSkia;
 class DrawTargetSkia : public DrawTarget
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DrawTargetSkia)
   DrawTargetSkia();
   virtual ~DrawTargetSkia();
 
-  virtual BackendType GetType() const { return BACKEND_SKIA; }
+  virtual BackendType GetType() const { return BackendType::SKIA; }
   virtual TemporaryRef<SourceSurface> Snapshot();
   virtual IntSize GetSize() { return mSize; }
   virtual void Flush();
@@ -38,6 +40,10 @@ public:
                            const Rect &aSource,
                            const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
                            const DrawOptions &aOptions = DrawOptions());
+  virtual void DrawFilter(FilterNode *aNode,
+                          const Rect &aSourceRect,
+                          const Point &aDestPoint,
+                          const DrawOptions &aOptions = DrawOptions());
   virtual void DrawSurfaceWithShadow(SourceSurface *aSurface,
                                      const Point &aDest,
                                      const Color &aColor,
@@ -78,7 +84,7 @@ public:
   virtual void MaskSurface(const Pattern &aSource,
                            SourceSurface *aMask,
                            Point aOffset,
-                           const DrawOptions &aOptions = DrawOptions()) { MOZ_ASSERT(0); };
+                           const DrawOptions &aOptions = DrawOptions());
   virtual void PushClip(const Path *aPath);
   virtual void PushClipRect(const Rect& aRect);
   virtual void PopClip();
@@ -91,16 +97,21 @@ public:
     CreateSourceSurfaceFromNativeSurface(const NativeSurface &aSurface) const;
   virtual TemporaryRef<DrawTarget>
     CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const;
-  virtual TemporaryRef<PathBuilder> CreatePathBuilder(FillRule aFillRule = FILL_WINDING) const;
-  virtual TemporaryRef<GradientStops> CreateGradientStops(GradientStop *aStops, uint32_t aNumStops, ExtendMode aExtendMode = EXTEND_CLAMP) const;
+  virtual TemporaryRef<PathBuilder> CreatePathBuilder(FillRule aFillRule = FillRule::FILL_WINDING) const;
+  virtual TemporaryRef<GradientStops> CreateGradientStops(GradientStop *aStops, uint32_t aNumStops, ExtendMode aExtendMode = ExtendMode::CLAMP) const;
+  virtual TemporaryRef<FilterNode> CreateFilter(FilterType aType);
   virtual void SetTransform(const Matrix &aTransform);
+  virtual void *GetNativeSurface(NativeSurfaceType aType);
 
   bool Init(const IntSize &aSize, SurfaceFormat aFormat);
   void Init(unsigned char* aData, const IntSize &aSize, int32_t aStride, SurfaceFormat aFormat);
+
 #ifdef USE_SKIA_GPU
-  void InitWithFBO(unsigned int aFBOID, GrContext* aGrContext, const IntSize &aSize, SurfaceFormat aFormat);
+  bool InitWithGrContext(GrContext* aGrContext,
+                         const IntSize &aSize,
+                         SurfaceFormat aFormat) MOZ_OVERRIDE;
 #endif
-  
+
   operator std::string() const {
     std::stringstream stream;
     stream << "DrawTargetSkia(" << this << ")";
@@ -109,15 +120,23 @@ public:
 
 private:
   friend class SourceSurfaceSkia;
-  void AppendSnapshot(SourceSurfaceSkia* aSnapshot);
-  void RemoveSnapshot(SourceSurfaceSkia* aSnapshot);
+  void SnapshotDestroyed();
 
   void MarkChanged();
 
+  SkRect SkRectCoveringWholeSurface() const;
+
+#ifdef USE_SKIA_GPU
+  SkRefPtr<GrContext> mGrContext;
+  uint32_t mTexture;
+#endif
+
   IntSize mSize;
   SkRefPtr<SkCanvas> mCanvas;
-  std::vector<SourceSurfaceSkia*> mSnapshots;
+  SourceSurfaceSkia* mSnapshot;
 };
 
 }
 }
+
+#endif // _MOZILLA_GFX_SOURCESURFACESKIA_H

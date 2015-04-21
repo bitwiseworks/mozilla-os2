@@ -4,25 +4,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Probes-inl.h"
+#include "vm/Probes-inl.h"
 
 #include "jscntxt.h"
 
 #ifdef INCLUDE_MOZILLA_DTRACE
-#include "jsscriptinlines.h" 
+#include "jsscriptinlines.h"
 #endif
 
 #define TYPEOF(cx,v)    (JSVAL_IS_NULL(v) ? JSTYPE_NULL : JS_TypeOfValue(cx,v))
 
 using namespace js;
 
-const char Probes::nullName[] = "(null)";
-const char Probes::anonymousName[] = "(anonymous)";
+const char probes::nullName[] = "(null)";
+const char probes::anonymousName[] = "(anonymous)";
 
-bool Probes::ProfilingActive = true;
+bool probes::ProfilingActive = true;
 
-Probes::JITReportGranularity
-Probes::JITGranularityRequested(JSContext *cx)
+probes::JITReportGranularity
+probes::JITGranularityRequested(JSContext *cx)
 {
     if (cx->runtime()->spsProfiler.enabled())
         return JITREPORT_GRANULARITY_LINE;
@@ -31,7 +31,7 @@ Probes::JITGranularityRequested(JSContext *cx)
 
 /* ICs are unregistered in a batch */
 void
-Probes::discardExecutableRegion(void *start, size_t size)
+probes::DiscardExecutableRegion(void *start, size_t size)
 {
     /*
      * Not needed for SPS because ICs are disposed of when the normal JITChunk
@@ -44,9 +44,9 @@ static const char *
 ScriptFilename(const JSScript *script)
 {
     if (!script)
-        return Probes::nullName;
+        return probes::nullName;
     if (!script->filename())
-        return Probes::anonymousName;
+        return probes::anonymousName;
     return script->filename();
 }
 
@@ -54,10 +54,10 @@ static const char *
 FunctionName(JSContext *cx, JSFunction *fun, JSAutoByteString* bytes)
 {
     if (!fun)
-        return Probes::nullName;
+        return probes::nullName;
     if (!fun->displayAtom())
-        return Probes::anonymousName;
-    return bytes->encodeLatin1(cx, fun->displayAtom()) ? bytes->ptr() : Probes::nullName;
+        return probes::anonymousName;
+    return bytes->encodeLatin1(cx, fun->displayAtom()) ? bytes->ptr() : probes::nullName;
 }
 
 /*
@@ -68,18 +68,18 @@ FunctionName(JSContext *cx, JSFunction *fun, JSAutoByteString* bytes)
  * a number of usually unused lines of code would cause.
  */
 void
-Probes::DTraceEnterJSFun(JSContext *cx, JSFunction *fun, JSScript *script)
+probes::DTraceEnterJSFun(JSContext *cx, JSFunction *fun, JSScript *script)
 {
     JSAutoByteString funNameBytes;
-    JAVASCRIPT_FUNCTION_ENTRY(ScriptFilename(script), Probes::nullName,
+    JAVASCRIPT_FUNCTION_ENTRY(ScriptFilename(script), probes::nullName,
                               FunctionName(cx, fun, &funNameBytes));
 }
 
 void
-Probes::DTraceExitJSFun(JSContext *cx, JSFunction *fun, JSScript *script)
+probes::DTraceExitJSFun(JSContext *cx, JSFunction *fun, JSScript *script)
 {
     JSAutoByteString funNameBytes;
-    JAVASCRIPT_FUNCTION_RETURN(ScriptFilename(script), Probes::nullName,
+    JAVASCRIPT_FUNCTION_RETURN(ScriptFilename(script), probes::nullName,
                                FunctionName(cx, fun, &funNameBytes));
 }
 #endif

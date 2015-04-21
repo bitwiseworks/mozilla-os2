@@ -16,19 +16,17 @@
 /**
  * Abstract class to handle mmap()ing from various kind of entities, such as
  * plain files or Zip entries. The virtual members are meant to act as the
- * equivalent system functions, with a few differences:
- * - mapped memory is always MAP_PRIVATE, even though a given implementation
- *   may use something different internally.
- * - memory after length and up to the end of the corresponding page is nulled
- *   out.
+ * equivalent system functions, except mapped memory is always MAP_PRIVATE,
+ * even though a given implementation may use something different internally.
  */
-class Mappable
+class Mappable: public mozilla::RefCounted<Mappable>
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(Mappable)
   virtual ~Mappable() { }
 
-  virtual void *mmap(const void *addr, size_t length, int prot, int flags,
-                     off_t offset) = 0;
+  virtual MemoryRange mmap(const void *addr, size_t length, int prot, int flags,
+                           off_t offset) = 0;
 
   enum Kind {
     MAPPABLE_FILE,
@@ -92,7 +90,7 @@ public:
   static Mappable *Create(const char *path);
 
   /* Inherited from Mappable */
-  virtual void *mmap(const void *addr, size_t length, int prot, int flags, off_t offset);
+  virtual MemoryRange mmap(const void *addr, size_t length, int prot, int flags, off_t offset);
   virtual void finalize();
   virtual size_t GetLength() const;
 
@@ -119,6 +117,9 @@ public:
    * argument is used to create the cache file in the cache directory.
    */
   static Mappable *Create(const char *name, Zip *zip, Zip::Stream *stream);
+
+  /* Override finalize from MappableFile */
+  virtual void finalize() {}
 
   virtual Kind GetKind() const { return MAPPABLE_EXTRACT_FILE; };
 private:
@@ -167,7 +168,7 @@ public:
   static Mappable *Create(const char *name, Zip *zip, Zip::Stream *stream);
 
   /* Inherited from Mappable */
-  virtual void *mmap(const void *addr, size_t length, int prot, int flags, off_t offset);
+  virtual MemoryRange mmap(const void *addr, size_t length, int prot, int flags, off_t offset);
   virtual void finalize();
   virtual size_t GetLength() const;
 
@@ -204,7 +205,7 @@ public:
                                          Zip::Stream *stream);
 
   /* Inherited from Mappable */
-  virtual void *mmap(const void *addr, size_t length, int prot, int flags, off_t offset);
+  virtual MemoryRange mmap(const void *addr, size_t length, int prot, int flags, off_t offset);
   virtual void munmap(void *addr, size_t length);
   virtual void finalize();
   virtual bool ensure(const void *addr);

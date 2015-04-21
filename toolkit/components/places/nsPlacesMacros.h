@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "prtypes.h"
 #include "nsIConsoleService.h"
 #include "nsIScriptError.h"
 
@@ -16,7 +15,8 @@
 #define NOTIFY_OBSERVERS(canFire, cache, array, type, method)                  \
   PR_BEGIN_MACRO                                                               \
   if (canFire) {                                                               \
-    const nsCOMArray<type> &entries = cache.GetEntries();                      \
+    nsCOMArray<type> entries;                                                  \
+    cache.GetEntries(entries);                                                 \
     for (int32_t idx = 0; idx < entries.Count(); ++idx)                        \
         entries[idx]->method;                                                  \
     ENUMERATE_WEAKARRAY(array, type, method)                                   \

@@ -28,8 +28,10 @@ import org.json.simple.JSONArray;
 import org.mozilla.apache.commons.codec.binary.Base32;
 import org.mozilla.apache.commons.codec.binary.Base64;
 import org.mozilla.gecko.background.common.log.Logger;
+import org.mozilla.gecko.background.nativecode.NativeCrypto;
 import org.mozilla.gecko.sync.setup.Constants;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
@@ -82,26 +84,28 @@ public class Utils {
   /**
    * Helper to convert a byte array to a hex-encoded string
    */
-  public static String byte2hex(byte[] b) {
-    // StringBuffer should be used instead.
-    String hs = "";
+  public static String byte2Hex(final byte[] b) {
+    return byte2Hex(b, 2 * b.length);
+  }
+
+  public static String byte2Hex(final byte[] b, int hexLength) {
+    final StringBuilder hs = new StringBuilder(Math.max(2*b.length, hexLength));
     String stmp;
 
-    for (int n = 0; n < b.length; n++) {
-      stmp = java.lang.Integer.toHexString(b[n] & 0XFF);
-
-      if (stmp.length() == 1) {
-        hs = hs + "0" + stmp;
-      } else {
-        hs = hs + stmp;
-      }
-
-      if (n < b.length - 1) {
-        hs = hs + "";
-      }
+    for (int n = 0; n < hexLength - 2*b.length; n++) {
+      hs.append("0");
     }
 
-    return hs;
+    for (int n = 0; n < b.length; n++) {
+      stmp = Integer.toHexString(b[n] & 0XFF);
+
+      if (stmp.length() == 1) {
+        hs.append("0");
+      }
+      hs.append(stmp);
+    }
+
+    return hs.toString();
   }
 
   public static byte[] concatAll(byte[] first, byte[]... rest) {
@@ -137,10 +141,22 @@ public class Utils {
     return Base64.decodeBase64(base64.getBytes("UTF-8"));
   }
 
+  @SuppressLint("DefaultLocale")
   public static byte[] decodeFriendlyBase32(String base32) {
     Base32 converter = new Base32();
     final String translated = base32.replace('8', 'l').replace('9', 'o');
     return converter.decode(translated.toUpperCase());
+  }
+
+  public static byte[] hex2Byte(String str, int byteLength) {
+    byte[] second = hex2Byte(str);
+    if (second.length >= byteLength) {
+      return second;
+    }
+    // New Java arrays are zeroed:
+    // http://docs.oracle.com/javase/specs/jls/se7/html/jls-4.html#jls-4.12.5
+    byte[] first = new byte[byteLength - second.length];
+    return Utils.concatAll(first, second);
   }
 
   public static byte[] hex2Byte(String str) {
@@ -178,17 +194,35 @@ public class Utils {
     // Truncates towards 0.
     return (long)(decimal * 1000);
   }
+
   public static long decimalSecondsToMilliseconds(Long decimal) {
     return decimal * 1000;
   }
+
   public static long decimalSecondsToMilliseconds(Integer decimal) {
     return (long)(decimal * 1000);
   }
 
+  public static byte[] sha256(byte[] in)
+      throws NoSuchAlgorithmException {
+    MessageDigest sha1 = MessageDigest.getInstance("SHA-256");
+    return sha1.digest(in);
+  }
+
   protected static byte[] sha1(final String utf8)
       throws NoSuchAlgorithmException, UnsupportedEncodingException {
-    MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
-    return sha1.digest(utf8.getBytes("UTF-8"));
+    final byte[] bytes = utf8.getBytes("UTF-8");
+    try {
+      return NativeCrypto.sha1(bytes);
+    } catch (final LinkageError e) {
+      // This will throw UnsatisifiedLinkError (missing mozglue) the first time it is called, and
+      // ClassNotDefFoundError, for the uninitialized NativeCrypto class, each subsequent time this
+      // is called; LinkageError is their common ancestor.
+      Logger.warn(LOG_TAG, "Got throwable stretching password using native sha1 implementation; " +
+          "ignoring and using Java implementation.", e);
+      final MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
+      return sha1.digest(utf8.getBytes("UTF-8"));
+    }
   }
 
   protected static String sha1Base32(final String utf8)
@@ -295,6 +329,7 @@ public class Utils {
    * Takes a URI, extracting URI components.
    * @param scheme the URI scheme on which to match.
    */
+  @SuppressWarnings("deprecation")
   public static Map<String, String> extractURIComponents(String scheme, String uri) {
     if (uri.indexOf(scheme) != 0) {
       throw new IllegalArgumentException("URI scheme does not match: " + scheme);
@@ -326,7 +361,7 @@ public class Utils {
   }
 
   // Because TextUtils.join is not stubbed.
-  public static String toDelimitedString(String delimiter, Collection<String> items) {
+  public static String toDelimitedString(String delimiter, Collection<? extends Object> items) {
     if (items == null || items.size() == 0) {
       return "";
     }
@@ -334,8 +369,8 @@ public class Utils {
     StringBuilder sb = new StringBuilder();
     int i = 0;
     int c = items.size();
-    for (String string : items) {
-      sb.append(string);
+    for (Object object : items) {
+      sb.append(object.toString());
       if (++i < c) {
         sb.append(delimiter);
       }
@@ -343,7 +378,7 @@ public class Utils {
     return sb.toString();
   }
 
-  public static String toCommaSeparatedString(Collection<String> items) {
+  public static String toCommaSeparatedString(Collection<? extends Object> items) {
     return toDelimitedString(", ", items);
   }
 
@@ -527,5 +562,56 @@ public class Utils {
    */
   public static String obfuscateEmail(final String in) {
     return in.replaceAll("[^@\\.]", "X");
+  }
+
+  public static String nodeWeaveURL(String serverURL, String username) {
+    String userPart = username + "/node/weave";
+    if (serverURL == null) {
+      return SyncConstants.DEFAULT_AUTH_SERVER + "user/1.0/" + userPart;
+    }
+    if (!serverURL.endsWith("/")) {
+      serverURL = serverURL + "/";
+    }
+    return serverURL + "user/1.0/" + userPart;
+  }
+
+  public static void throwIfNull(Object... objects) {
+    for (Object object : objects) {
+      if (object == null) {
+        throw new IllegalArgumentException("object must not be null");
+      }
+    }
+  }
+
+  /**
+   * Gecko uses locale codes like "es-ES", whereas a Java {@link Locale}
+   * stringifies as "es_ES".
+   *
+   * This method approximates the Java 7 method <code>Locale#toLanguageTag()</code>.
+   * <p>
+   * <b>Warning:</b> all consumers of this method will need to be audited when
+   * we have active locale switching.
+   *
+   * @return a locale string suitable for passing to Gecko.
+   */
+  public static String getLanguageTag(final Locale locale) {
+    // If this were Java 7:
+    // return locale.toLanguageTag();
+
+    String language = locale.getLanguage();  // Can, but should never be, an empty string.
+    // Modernize certain language codes.
+    if (language.equals("iw")) {
+      language = "he";
+    } else if (language.equals("in")) {
+      language = "id";
+    } else if (language.equals("ji")) {
+      language = "yi";
+    }
+
+    String country = locale.getCountry();    // Can be an empty string.
+    if (country.equals("")) {
+      return language;
+    }
+    return language + "-" + country;
   }
 }

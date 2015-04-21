@@ -15,7 +15,6 @@
 #include "mozilla/RefPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIEventTarget.h"
-#include "nsThreadUtils.h"
 
 #include "m_cpp_utils.h"
 
@@ -62,20 +61,7 @@ class TransportLayer : public sigslot::has_slots<> {
 
   // Dispatch a call onto our thread (or run on the same thread if
   // thread is not set). This is always synchronous.
-  nsresult RunOnThread(nsIRunnable *event) {
-    if (target_) {
-      nsIThread *thr;
-
-      DebugOnly<nsresult> rv = NS_GetCurrentThread(&thr);
-      MOZ_ASSERT(NS_SUCCEEDED(rv));
-
-      if (target_ != thr) {
-        return target_->Dispatch(event, NS_DISPATCH_SYNC);
-      }
-    }
-
-    return event->Run();
-  }
+  nsresult RunOnThread(nsIRunnable *event);
 
   // Get the state
   State state() const { return state_; }
@@ -104,7 +90,7 @@ class TransportLayer : public sigslot::has_slots<> {
 
  protected:
   virtual void WasInserted() {}
-  virtual void SetState(State state);
+  virtual void SetState(State state, const char *file, unsigned line);
   // Check if we are on the right thread
   void CheckThread() {
     NS_ABORT_IF_FALSE(CheckThreadInt(), "Wrong thread");
@@ -133,6 +119,7 @@ class TransportLayer : public sigslot::has_slots<> {
 };
 
 #define LAYER_INFO "Flow[" << flow_id() << "(none)" << "]; Layer[" << id() << "]: "
+#define TL_SET_STATE(x) SetState((x), __FILE__, __LINE__)
 
 }  // close namespace
 #endif

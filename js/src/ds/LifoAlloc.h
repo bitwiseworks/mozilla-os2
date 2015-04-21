@@ -8,8 +8,11 @@
 #define ds_LifoAlloc_h
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryChecking.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/TemplateLib.h"
 #include "mozilla/TypeTraits.h"
 
 // This data structure supports stacky LIFO allocation (mark/release and
@@ -25,13 +28,13 @@ namespace detail {
 
 static const size_t LIFO_ALLOC_ALIGN = 8;
 
-JS_ALWAYS_INLINE
+MOZ_ALWAYS_INLINE
 char *
 AlignPtr(void *orig)
 {
-    MOZ_STATIC_ASSERT(tl::FloorLog2<LIFO_ALLOC_ALIGN>::result ==
-                      tl::CeilingLog2<LIFO_ALLOC_ALIGN>::result,
-                      "LIFO_ALLOC_ALIGN must be a power of two");
+    static_assert(mozilla::tl::FloorLog2<LIFO_ALLOC_ALIGN>::value ==
+                  mozilla::tl::CeilingLog2<LIFO_ALLOC_ALIGN>::value,
+                  "LIFO_ALLOC_ALIGN must be a power of two");
 
     char *result = (char *) ((uintptr_t(orig) + (LIFO_ALLOC_ALIGN - 1)) & (~LIFO_ALLOC_ALIGN + 1));
     JS_ASSERT(uintptr_t(result) % LIFO_ALLOC_ALIGN == 0);
@@ -49,12 +52,10 @@ class BumpChunk
     char *headerBase() { return reinterpret_cast<char *>(this); }
     char *bumpBase() const { return limit - bumpSpaceSize; }
 
-    BumpChunk *thisDuringConstruction() { return this; }
-
     explicit BumpChunk(size_t bumpSpaceSize)
-      : bump(reinterpret_cast<char *>(thisDuringConstruction()) + sizeof(BumpChunk)),
+      : bump(reinterpret_cast<char *>(MOZ_THIS_IN_INITIALIZER_LIST()) + sizeof(BumpChunk)),
         limit(bump + bumpSpaceSize),
-        next_(NULL), bumpSpaceSize(bumpSpaceSize)
+        next_(nullptr), bumpSpaceSize(bumpSpaceSize)
     {
         JS_ASSERT(bump == AlignPtr(bump));
     }
@@ -89,7 +90,10 @@ class BumpChunk
 
     size_t used() const { return bump - bumpBase(); }
 
-    size_t sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf) {
+    void *start() const { return bumpBase(); }
+    void *end() const { return limit; }
+
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) {
         return mallocSizeOf(this);
     }
 
@@ -120,27 +124,21 @@ class BumpChunk
     }
 
     // Try to perform an allocation of size |n|, return null if not possible.
-    JS_ALWAYS_INLINE
+    MOZ_ALWAYS_INLINE
     void *tryAlloc(size_t n) {
         char *aligned = AlignPtr(bump);
         char *newBump = aligned + n;
 
         if (newBump > limit)
-            return NULL;
+            return nullptr;
 
         // Check for overflow.
-        if (JS_UNLIKELY(newBump < bump))
-            return NULL;
+        if (MOZ_UNLIKELY(newBump < bump))
+            return nullptr;
 
         JS_ASSERT(canAlloc(n)); // Ensure consistency between "can" and "try".
         setBump(newBump);
         return aligned;
-    }
-
-    void *allocInfallible(size_t n) {
-        void *result = tryAlloc(n);
-        JS_ASSERT(result);
-        return result;
     }
 
     static BumpChunk *new_(size_t chunkSize);
@@ -176,20 +174,33 @@ class LifoAlloc
     BumpChunk *getOrCreateChunk(size_t n);
 
     void reset(size_t defaultChunkSize) {
-        JS_ASSERT(RoundUpPow2(defaultChunkSize) == defaultChunkSize);
-        first = latest = last = NULL;
+        JS_ASSERT(mozilla::RoundUpPow2(defaultChunkSize) == defaultChunkSize);
+        first = latest = last = nullptr;
         defaultChunkSize_ = defaultChunkSize;
         markCount = 0;
         curSize_ = 0;
     }
 
-    void append(BumpChunk *start, BumpChunk *end) {
+    // Append unused chunks to the end of this LifoAlloc.
+    void appendUnused(BumpChunk *start, BumpChunk *end) {
         JS_ASSERT(start && end);
         if (last)
             last->setNext(start);
         else
             first = latest = start;
         last = end;
+    }
+
+    // Append used chunks to the end of this LifoAlloc. We act as if all the
+    // chunks in |this| are used, even if they're not, so memory may be wasted.
+    void appendUsed(BumpChunk *otherFirst, BumpChunk *otherLatest, BumpChunk *otherLast) {
+        JS_ASSERT(otherFirst && otherLatest && otherLast);
+        if (last)
+            last->setNext(otherFirst);
+        else
+            first = otherFirst;
+        latest = otherLatest;
+        last = otherLast;
     }
 
     void incrementCurSize(size_t size) {
@@ -241,7 +252,7 @@ class LifoAlloc
             freeAll();
     }
 
-    JS_ALWAYS_INLINE
+    MOZ_ALWAYS_INLINE
     void *alloc(size_t n) {
         JS_OOM_POSSIBLY_FAIL();
 
@@ -250,27 +261,18 @@ class LifoAlloc
             return result;
 
         if (!getOrCreateChunk(n))
-            return NULL;
+            return nullptr;
 
-        return latest->allocInfallible(n);
-    }
-
-    JS_ALWAYS_INLINE
-    void *allocInfallible(size_t n) {
-        void *result;
-        if (latest && (result = latest->tryAlloc(n)))
-            return result;
-
-        mozilla::DebugOnly<BumpChunk *> chunk = getOrCreateChunk(n);
-        JS_ASSERT(chunk);
-
-        return latest->allocInfallible(n);
+        // Since we just created a large enough chunk, this can't fail.
+        result = latest->tryAlloc(n);
+        MOZ_ASSERT(result);
+        return result;
     }
 
     // Ensures that enough space exists to satisfy N bytes worth of
     // allocation requests, not necessarily contiguous. Note that this does
     // not guarantee a successful single allocation of N bytes.
-    JS_ALWAYS_INLINE
+    MOZ_ALWAYS_INLINE
     bool ensureUnusedApproximate(size_t n) {
         size_t total = 0;
         for (BumpChunk *chunk = latest; chunk; chunk = chunk->next()) {
@@ -296,8 +298,8 @@ class LifoAlloc
     // The caller is responsible for initialization.
     template <typename T>
     T *newArrayUninitialized(size_t count) {
-        if (count & tl::MulOverflowMask<sizeof(T)>::result)
-            return NULL;
+        if (count & mozilla::tl::MulOverflowMask<sizeof(T)>::value)
+            return nullptr;
         return static_cast<T *>(alloc(sizeof(T) * count));
     }
 
@@ -307,7 +309,7 @@ class LifoAlloc
         friend class LifoAlloc;
         Mark(BumpChunk *chunk, void *markInChunk) : chunk(chunk), markInChunk(markInChunk) {}
       public:
-        Mark() : chunk(NULL), markInChunk(NULL) {}
+        Mark() : chunk(nullptr), markInChunk(nullptr) {}
     };
 
     Mark mark() {
@@ -345,8 +347,21 @@ class LifoAlloc
         return accum;
     }
 
+    // Return true if the LifoAlloc does not currently contain any allocations.
+    bool isEmpty() const {
+        return !latest || !latest->used();
+    }
+
+    // Return the number of bytes remaining to allocate in the current chunk.
+    // e.g. How many bytes we can allocate before needing a new block.
+    size_t availableInCurrentChunk() const {
+        if (!latest)
+            return 0;
+        return latest->unused();
+    }
+
     // Get the total size of the arena chunks (including unused space).
-    size_t sizeOfExcludingThis(JSMallocSizeOfFun mallocSizeOf) const {
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
         size_t n = 0;
         for (BumpChunk *chunk = first; chunk; chunk = chunk->next())
             n += chunk->sizeOfIncludingThis(mallocSizeOf);
@@ -354,7 +369,7 @@ class LifoAlloc
     }
 
     // Like sizeOfExcludingThis(), but includes the size of the LifoAlloc itself.
-    size_t sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf) const {
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
         return mallocSizeOf(this) + sizeOfExcludingThis(mallocSizeOf);
     }
 
@@ -364,12 +379,82 @@ class LifoAlloc
 
     // Doesn't perform construction; useful for lazily-initialized POD types.
     template <typename T>
-    JS_ALWAYS_INLINE
+    MOZ_ALWAYS_INLINE
     T *newPod() {
         return static_cast<T *>(alloc(sizeof(T)));
     }
 
-    JS_DECLARE_NEW_METHODS(new_, alloc, JS_ALWAYS_INLINE)
+    JS_DECLARE_NEW_METHODS(new_, alloc, MOZ_ALWAYS_INLINE)
+
+    // A mutable enumeration of the allocated data.
+    class Enum
+    {
+        friend class LifoAlloc;
+        friend class detail::BumpChunk;
+
+        LifoAlloc *alloc_;  // The LifoAlloc being traversed.
+        BumpChunk *chunk_;  // The current chunk.
+        char *position_;    // The current position (must be within chunk_).
+
+        // If there is not enough room in the remaining block for |size|,
+        // advance to the next block and update the position.
+        void ensureSpaceAndAlignment(size_t size) {
+            JS_ASSERT(!empty());
+            char *aligned = detail::AlignPtr(position_);
+            if (aligned + size > chunk_->end()) {
+                chunk_ = chunk_->next();
+                position_ = static_cast<char *>(chunk_->start());
+            } else {
+                position_ = aligned;
+            }
+            JS_ASSERT(uintptr_t(position_) + size <= uintptr_t(chunk_->end()));
+        }
+
+      public:
+        Enum(LifoAlloc &alloc)
+          : alloc_(&alloc),
+            chunk_(alloc.first),
+            position_(static_cast<char *>(alloc.first ? alloc.first->start() : nullptr))
+        {}
+
+        // Return true if there are no more bytes to enumerate.
+        bool empty() {
+            return !chunk_ || (chunk_ == alloc_->latest && position_ >= chunk_->mark());
+        }
+
+        // Move the read position forward by the size of one T.
+        template <typename T>
+        void popFront() {
+            popFront(sizeof(T));
+        }
+
+        // Move the read position forward by |size| bytes.
+        void popFront(size_t size) {
+            ensureSpaceAndAlignment(size);
+            position_ = position_ + size;
+        }
+
+        // Update the bytes at the current position with a new value.
+        template <typename T>
+        void updateFront(const T &t) {
+            ensureSpaceAndAlignment(sizeof(T));
+            memmove(position_, &t, sizeof(T));
+        }
+
+        // Return a pointer to the item at the current position. This
+        // returns a pointer to the inline storage, not a copy.
+        template <typename T>
+        T *get(size_t size = sizeof(T)) {
+            ensureSpaceAndAlignment(size);
+            return reinterpret_cast<T *>(position_);
+        }
+
+        // Return a Mark at the current position of the Enum.
+        Mark mark() {
+            alloc_->markCount++;
+            return Mark(chunk_, position_);
+        }
+    };
 };
 
 class LifoAllocScope
@@ -402,6 +487,36 @@ class LifoAllocScope
         JS_ASSERT(shouldRelease);
         lifoAlloc->release(mark);
         shouldRelease = false;
+    }
+};
+
+class LifoAllocPolicy
+{
+    LifoAlloc &alloc_;
+
+  public:
+    LifoAllocPolicy(LifoAlloc &alloc)
+      : alloc_(alloc)
+    {}
+    void *malloc_(size_t bytes) {
+        return alloc_.alloc(bytes);
+    }
+    void *calloc_(size_t bytes) {
+        void *p = malloc_(bytes);
+        if (p)
+            memset(p, 0, bytes);
+        return p;
+    }
+    void *realloc_(void *p, size_t oldBytes, size_t bytes) {
+        void *n = malloc_(bytes);
+        if (!n)
+            return n;
+        memcpy(n, p, Min(oldBytes, bytes));
+        return n;
+    }
+    void free_(void *p) {
+    }
+    void reportAllocOverflow() const {
     }
 };
 

@@ -239,7 +239,6 @@ description {
 
 .text-link {
   color: -moz-nativehyperlinktext;
-  border: 1px solid transparent;
   cursor: pointer;
 }
 
@@ -248,7 +247,7 @@ description {
 }
   
 .text-link:-moz-focusring {
-  border: 1px dotted -moz-DialogText;
+  box-shadow: @focusRingShadow@;
 }
 
 .toolbar-focustarget {
@@ -335,4 +334,39 @@ notification > button > .button-box > .button-text {
 
 .popup-internal-box > autorepeatbutton[disabled="true"] {
   visibility: collapse;
+}
+
+/* :::::: Close button icons ::::: */
+
+.close-icon {
+  list-style-image: url("chrome://global/skin/icons/close.png");
+  -moz-image-region: rect(0, 16px, 16px, 0);
+}
+
+.close-icon:hover {
+  -moz-image-region: rect(0, 32px, 16px, 16px);
+}
+
+.close-icon:hover:active {
+  -moz-image-region: rect(0, 48px, 16px, 32px);
+}
+
+@media (min-resolution: 2dppx) {
+  .close-icon > .button-icon,
+  .close-icon > .toolbarbutton-icon {
+    width: 16px;
+  }
+
+  .close-icon {
+    list-style-image: url("chrome://global/skin/icons/close@2x.png");
+    -moz-image-region: rect(0, 32px, 32px, 0);
+  }
+
+  .close-icon:hover {
+    -moz-image-region: rect(0, 64px, 32px, 32px);
+  }
+
+  .close-icon:hover:active {
+    -moz-image-region: rect(0, 96px, 32px, 64px);
+  }
 }

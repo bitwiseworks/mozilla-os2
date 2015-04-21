@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -8,8 +8,8 @@ const {Cu} = require("chrome");
 
 Cu.import("resource://gre/modules/Services.jsm");
 
-var Promise = require("sdk/core/promise");
-var EventEmitter = require("devtools/shared/event-emitter");
+var {Promise: promise} = require("resource://gre/modules/Promise.jsm");
+var EventEmitter = require("devtools/toolkit/event-emitter");
 var Telemetry = require("devtools/shared/telemetry");
 
 const XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
@@ -148,6 +148,11 @@ ToolSidebar.prototype = {
    */
   handleEvent: function ToolSidebar_eventHandler(event) {
     if (event.type == "select") {
+      if (this._currentTool == this.getCurrentTabID()) {
+        // Tool hasn't changed.
+        return;
+      }
+
       let previousTool = this._currentTool;
       this._currentTool = this.getCurrentTabID();
       if (previousTool) {
@@ -207,7 +212,7 @@ ToolSidebar.prototype = {
    */
   destroy: function ToolSidebar_destroy() {
     if (this._destroyed) {
-      return Promise.resolve(null);
+      return promise.resolve(null);
     }
     this._destroyed = true;
 
@@ -232,6 +237,6 @@ ToolSidebar.prototype = {
     this._panelDoc = null;
     this._toolPanel = null;
 
-    return Promise.resolve(null);
+    return promise.resolve(null);
   },
 }

@@ -8,24 +8,23 @@
 #define jit_arm_Architecture_arm_h
 
 #include <limits.h>
+#include <stdint.h>
+
+#include "js/Utility.h"
+
 // gcc appears to use __ARM_PCS_VFP to denote that the target is a hard-float target.
-#ifdef __ARM_PCS_VFP
-#define JS_CPU_ARM_HARDFP
+#if defined(__ARM_PCS_VFP)
+#define JS_CODEGEN_ARM_HARDFP
 #endif
+
 namespace js {
 namespace jit {
-
-static const uint32_t STACK_SLOT_SIZE       = 4;
-static const uint32_t DOUBLE_STACK_ALIGNMENT = 2;
 
 // In bytes: slots needed for potential memory->memory move spills.
 //   +8 for cycles
 //   +4 for gpr spills
 //   +8 for double spills
 static const uint32_t ION_FRAME_SLACK_SIZE   = 20;
-
-// An offset that is illegal for a local variable's stack allocation.
-static const int32_t INVALID_STACK_SLOT      = -1;
 
 // These offsets are specific to nunboxing, and capture offsets into the
 // components of a js::Value.
@@ -47,7 +46,7 @@ static const uint32_t BAILOUT_TABLE_ENTRY_SIZE    = 4;
 class Registers
 {
   public:
-    typedef enum {
+    enum RegisterID {
         r0 = 0,
         r1,
         r2,
@@ -71,7 +70,7 @@ class Registers
         r15,
         pc = r15,
         invalid_reg
-    } RegisterID;
+    };
     typedef RegisterID Code;
 
     static const char *GetName(Code code) {
@@ -79,6 +78,12 @@ class Registers
                                               "r8", "r9", "r10", "r11", "r12", "sp", "r14", "pc"};
         return Names[code];
     }
+    static const char *GetName(uint32_t i) {
+        MOZ_ASSERT(i < Total);
+        return GetName(Code(i));
+    }
+
+    static Code FromName(const char *name);
 
     static const Code StackPointer = sp;
     static const Code Invalid = invalid_reg;
@@ -143,12 +148,11 @@ typedef uint16_t PackedRegisterMask;
 class FloatRegisters
 {
   public:
-    typedef enum {
+    enum FPRegisterID {
         d0,
         d1,
         d2,
         d3,
-        SD0 = d3,
         d4,
         d5,
         d6,
@@ -177,7 +181,7 @@ class FloatRegisters
         d29,
         d30,
         invalid_freg
-    } FPRegisterID;
+    };
     typedef FPRegisterID Code;
 
     static const char *GetName(Code code) {
@@ -185,6 +189,12 @@ class FloatRegisters
                                               "d8", "d9", "d10", "d11", "d12", "d13", "d14", "d15"};
         return Names[code];
     }
+    static const char *GetName(uint32_t i) {
+        JS_ASSERT(i < Total);
+        return GetName(Code(i));
+    }
+
+    static Code FromName(const char *name);
 
     static const Code Invalid = invalid_freg;
 
@@ -193,13 +203,22 @@ class FloatRegisters
 
     static const uint32_t AllMask = (1 << Total) - 1;
 
-    static const uint32_t VolatileMask = AllMask;
-    static const uint32_t NonVolatileMask = 0;
+    // d15 is the ScratchFloatReg.
+    static const uint32_t NonVolatileMask =
+        (1 << d8) |
+        (1 << d9) |
+        (1 << d10) |
+        (1 << d11) |
+        (1 << d12) |
+        (1 << d13) |
+        (1 << d14);
+
+    static const uint32_t VolatileMask = AllMask & ~NonVolatileMask;
 
     static const uint32_t WrapperMask = VolatileMask;
 
-    // d1 is the ARM scratch float register.
-    static const uint32_t NonAllocatableMask = (1 << d1) | (1 << invalid_freg);
+    // d15 is the ARM scratch float register.
+    static const uint32_t NonAllocatableMask = (1 << d15) | (1 << invalid_freg);
 
     // Registers that can be allocated without being saved, generally.
     static const uint32_t TempMask = VolatileMask & ~NonAllocatableMask;
@@ -207,10 +226,27 @@ class FloatRegisters
     static const uint32_t AllocatableMask = AllMask & ~NonAllocatableMask;
 };
 
+uint32_t GetARMFlags();
 bool hasMOVWT();
 bool hasVFPv3();
 bool hasVFP();
 bool has16DP();
+bool hasIDIV();
+
+// If the simulator is used then the ABI choice is dynamic.  Otherwise the ABI is static
+// and useHardFpABI is inlined so that unused branches can be optimized away.
+#if defined(JS_ARM_SIMULATOR)
+bool useHardFpABI();
+#else
+static inline bool useHardFpABI()
+{
+#if defined(JS_CODEGEN_ARM_HARDFP)
+    return true;
+#else
+    return false;
+#endif
+}
+#endif
 
 } // namespace jit
 } // namespace js

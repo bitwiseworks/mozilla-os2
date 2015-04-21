@@ -66,13 +66,13 @@ function test_resumeDownload_empty_queue()
 function test_addDownload_normal()
 {
   print("*** DOWNLOAD MANAGER TEST - Testing normal download adding");
-  addDownload();
+  addDownload(httpserv);
 }
 
 function test_addDownload_cancel()
 {
   print("*** DOWNLOAD MANAGER TEST - Testing download cancel");
-  var dl = addDownload();
+  var dl = addDownload(httpserv);
 
   dm.cancelDownload(dl.id);
 
@@ -96,9 +96,13 @@ var tests = [test_get_download_empty_queue, test_connection,
 var httpserv = null;
 function run_test()
 {
+  if (oldDownloadManagerDisabled()) {
+    return;
+  }
+
   httpserv = new HttpServer();
   httpserv.registerDirectory("/", do_get_cwd());
-  httpserv.start(4444);
+  httpserv.start(-1);
 
   // our download listener
   var listener = {

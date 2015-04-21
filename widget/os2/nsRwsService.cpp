@@ -61,7 +61,7 @@
 static nsresult IsDescendedFrom(uint32_t wpsFilePtr, const char *pszClassname);
 static nsresult CreateFileForExtension(const char *aFileExt, nsACString& aPath);
 static nsresult DeleteFileForExtension(const char *aPath);
-static void     AssignNLSString(const PRUnichar *aKey, nsAString& _retval);
+static void     AssignNLSString(const char16_t *aKey, nsAString& _retval);
 static nsresult AssignTitleString(const char *aTitle, nsAString& result);
 
 //------------------------------------------------------------------------
@@ -94,7 +94,7 @@ typedef struct _ExtInfo
   uint32_t   icon;
   uint32_t   mini;
   uint32_t   handler;
-  PRUnichar *title;
+  char16_t *title;
 } ExtInfo;
 
 #define kGrowBy         8
@@ -631,7 +631,7 @@ nsRwsService::RwsConvert(uint32_t type, uint32_t value, nsAString& result)
 
 NS_IMETHODIMP
 nsRwsService::Observe(nsISupports *aSubject, const char *aTopic,
-                      const PRUnichar *aSomeData)
+                      const char16_t *aSomeData)
 {
   if (strcmp(aTopic, "quit-application") == 0) {
     uint32_t rc = sRwsClientTerminate();
@@ -726,7 +726,7 @@ static nsresult DeleteFileForExtension(const char *aPath)
 // returns a localized string from unknownContentType.properties;
 // if there's a failure, returns "WPS Default"
 
-static void AssignNLSString(const PRUnichar *aKey, nsAString& result)
+static void AssignNLSString(const char16_t *aKey, nsAString& result)
 {
   nsresult      rv = NS_ERROR_FAILURE;
   nsXPIDLString title;
@@ -772,8 +772,8 @@ static nsresult AssignTitleString(const char *aTitle, nsAString& result)
                                       buffer, bufLength)))
     return NS_ERROR_FAILURE;
 
-  PRUnichar *pSrc;
-  PRUnichar *pDst;
+  char16_t  *pSrc;
+  char16_t  *pDst;
   bool       fSkip;
 
   // remove line breaks, leading whitespace, & extra embedded whitespace
@@ -1106,7 +1106,7 @@ static nsresult nsRwsServiceInit(nsRwsService **aClass)
 
   // get the list of registered WPS classes
   ULONG  cbClass;
-  if (!WinEnumObjectClasses(NULL, &cbClass))
+  if (!WinEnumObjectClasses(nullptr, &cbClass))
     return NS_ERROR_NOT_AVAILABLE;
 
   char *pBuf = (char*)NS_Alloc(cbClass + CCHMAXPATH);
@@ -1211,7 +1211,7 @@ NS_IMETHODIMP nsRwsServiceConstructor(nsISupports *aOuter, REFNSIID aIID,
 {
   nsresult rv;
   nsRwsService *inst;
-  *aResult = NULL;
+  *aResult = nullptr;
 
   if (aOuter) {
     rv = NS_ERROR_NO_AGGREGATION;

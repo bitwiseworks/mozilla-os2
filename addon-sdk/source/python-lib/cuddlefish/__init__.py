@@ -26,14 +26,12 @@ usage = """
 %prog [options] command [command-specific options]
 
 Supported Commands:
-  docs       - view web-based documentation
   init       - create a sample addon in an empty directory
   test       - run tests
   run        - run program
   xpi        - generate an xpi
 
 Internal Commands:
-  sdocs      - export static documentation
   testcfx    - test the cfx tool
   testex     - test all example code
   testpkgs   - test all installed packages
@@ -98,8 +96,8 @@ parser_groups = (
                                          "match FILENAME and optionally "
                                          "match TESTNAME, both regexps"),
                                    metavar="FILENAME[:TESTNAME]",
-                                   default=None,
-                                   cmds=['test', 'testex', 'testpkgs',
+                                   default='',
+                                   cmds=['test', 'testex', 'testaddons', 'testpkgs',
                                          'testall'])),
         (("-g", "--use-config",), dict(dest="config",
                                        help="use named config from local.json",
@@ -172,7 +170,7 @@ parser_groups = (
         (("", "--strip-sdk",), dict(dest="bundle_sdk",
                                     help=("Do not ship SDK modules in the xpi"),
                                     action="store_false",
-                                    default=True,
+                                    default=False,
                                     cmds=['run', 'test', 'testex', 'testpkgs',
                                           'testall', 'xpi'])),
         (("", "--force-use-bundled-sdk",), dict(dest="force_use_bundled_sdk",
@@ -223,17 +221,20 @@ parser_groups = (
                                   metavar=None,
                                   default=False,
                                   cmds=['test', 'testex', 'testpkgs'])),
-        (("", "--override-version",), dict(dest="override_version",
-                                  help="Pass in a version string to use in generated docs",
-                                  metavar=None,
-                                  default=False,
-                                  cmds=['sdocs'])),
         (("", "--check-memory",), dict(dest="check_memory",
                                        help="attempts to detect leaked compartments after a test run",
                                        action="store_true",
                                        default=False,
                                        cmds=['test', 'testpkgs', 'testaddons',
                                              'testall'])),
+        (("", "--output-file",), dict(dest="output_file",
+                                      help="Where to put the finished .xpi",
+                                      default=None,
+                                      cmds=['xpi'])),
+        (("", "--manifest-overload",), dict(dest="manifest_overload",
+                                      help="JSON file to overload package.json properties",
+                                      default=None,
+                                      cmds=['xpi'])),
         ]
      ),
 
@@ -245,12 +246,6 @@ parser_groups = (
                                  default=None,
                                  cmds=['test', 'run', 'testex', 'testpkgs',
                                        'testall'])),
-        (("", "--baseurl",), dict(dest="baseurl",
-                                 help=("root of static docs tree: "
-                                       "for example: 'http://me.com/the_docs/'"),
-                                 metavar=None,
-                                 default='',
-                                 cmds=['sdocs'])),
         (("", "--test-runner-pkg",), dict(dest="test_runner_pkg",
                                           help=("name of package "
                                                 "containing test runner "
@@ -426,6 +421,9 @@ def test_all_testaddons(env_root, defaults):
     addons.sort()
     fail = False
     for dirname in addons:
+        if (not defaults['filter'].split(":")[0] in dirname):
+            continue
+
         print >>sys.stderr, "Testing %s..." % dirname
         sys.stderr.flush()
         try:
@@ -450,6 +448,9 @@ def test_all_examples(env_root, defaults):
     examples.sort()
     fail = False
     for dirname in examples:
+        if (not defaults['filter'].split(":")[0] in dirname):
+            continue
+
         print >>sys.stderr, "Testing %s..." % dirname
         sys.stderr.flush()
         try:
@@ -542,29 +543,25 @@ def initializer(env_root, args, out=sys.stdout, err=sys.stderr):
     if existing:
         print >>err, 'This command must be run in an empty directory.'
         return {"result":1}
-    for d in ['lib','data','test','doc']:
+    for d in ['lib','data','test']:
         os.mkdir(os.path.join(path,d))
         print >>out, '*', d, 'directory created'
-    open(os.path.join(path,'README.md'),'w').write('')
-    print >>out, '* README.md written'
     jid = create_jid()
     print >>out, '* generated jID automatically:', jid
     open(os.path.join(path,'package.json'),'w').write(PACKAGE_JSON % {'name':addon.lower(),
-                                                   'fullName':addon,
+                                                   'title':addon,
                                                    'id':jid })
     print >>out, '* package.json written'
     open(os.path.join(path,'test','test-main.js'),'w').write(TEST_MAIN_JS)
     print >>out, '* test/test-main.js written'
     open(os.path.join(path,'lib','main.js'),'w').write('')
     print >>out, '* lib/main.js written'
-    open(os.path.join(path,'doc','main.md'),'w').write('')
-    print >>out, '* doc/main.md written'
     if len(args) == 1:
         print >>out, '\nYour sample add-on is now ready.'
         print >>out, 'Do "cfx test" to test it and "cfx run" to try it.  Have fun!'
     else:
         print >>out, '\nYour sample add-on is now ready in the \'' + args[1] +  '\' directory.'
-        print >>out, 'Change to that directory, then do "cfx test" to test it, \nand "cfx run" to try it.  Have fun!' 
+        print >>out, 'Change to that directory, then do "cfx test" to test it, \nand "cfx run" to try it.  Have fun!'
     return {"result":0, "jid":jid}
 
 def buildJID(target_cfg):
@@ -593,7 +590,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     (options, args) = parse_args(**parser_kwargs)
 
     config_args = get_config_args(options.config, env_root);
-    
+
     # reparse configs with arguments from local.json
     if config_args:
         parser_kwargs['arguments'] += config_args
@@ -622,23 +619,6 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
             return
         test_cfx(env_root, options.verbose)
         return
-    elif command == "docs":
-        from cuddlefish.docs import generate
-        if len(args) > 1:
-            docs_home = generate.generate_named_file(env_root, filename_and_path=args[1])
-        else:
-            docs_home = generate.generate_local_docs(env_root)
-            webbrowser.open(docs_home)
-        return
-    elif command == "sdocs":
-        from cuddlefish.docs import generate
-        filename=""
-        if options.override_version:
-            filename = generate.generate_static_docs(env_root, override_version=options.override_version)
-        else:
-            filename = generate.generate_static_docs(env_root)
-        print >>stdout, "Wrote %s." % filename
-        return
     elif command not in ["xpi", "test", "run"]:
         print >>sys.stderr, "Unknown command: %s" % command
         print >>sys.stderr, "Try using '--help' for assistance."
@@ -661,6 +641,10 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
 
         target_cfg_json = os.path.join(options.pkgdir, 'package.json')
         target_cfg = packaging.get_config_in_dir(options.pkgdir)
+
+    if options.manifest_overload:
+        for k, v in packaging.load_json_file(options.manifest_overload).items():
+            target_cfg[k] = v
 
     # At this point, we're either building an XPI or running Jetpack code in
     # a Mozilla application (which includes running tests).
@@ -824,6 +808,8 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
 
     if options.templatedir:
         app_extension_dir = os.path.abspath(options.templatedir)
+    elif os.path.exists(os.path.join(options.pkgdir, "app-extension")):
+      app_extension_dir = os.path.join(options.pkgdir, "app-extension")
     else:
         mydir = os.path.dirname(os.path.abspath(__file__))
         app_extension_dir = os.path.join(mydir, "../../app-extension")
@@ -835,12 +821,12 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     harness_options['manifest'] = manifest.get_harness_options_manifest(False)
 
     # Gives an hint to tell if sdk modules are bundled or not
-    harness_options['is-sdk-bundled'] = options.bundle_sdk
+    harness_options['is-sdk-bundled'] = options.bundle_sdk or options.no_strip_xpi
 
     if options.force_use_bundled_sdk:
-        if not options.bundle_sdk:
-            print >>sys.stderr, ("--force-use-bundled-sdk and --strip-sdk "
-                                 "can't be used at the same time.")
+        if not harness_options['is-sdk-bundled']:
+            print >>sys.stderr, ("--force-use-bundled-sdk "
+                                 "can't be used if sdk isn't bundled.")
             sys.exit(1)
         if options.overload_modules:
             print >>sys.stderr, ("--force-use-bundled-sdk and --overload-modules "
@@ -892,7 +878,11 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
             key,value = kv.split("=", 1)
             extra_harness_options[key] = value
         # Generate xpi filepath
-        xpi_path = XPI_FILENAME % target_cfg.name
+        if options.output_file:
+          xpi_path = options.output_file
+        else:
+          xpi_path = XPI_FILENAME % target_cfg.name
+
         print >>stdout, "Exporting extension to %s." % xpi_path
         build_xpi(template_root_dir=app_extension_dir,
                   manifest=manifest_rdf,

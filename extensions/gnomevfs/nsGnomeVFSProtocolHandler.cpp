@@ -221,14 +221,14 @@ ProxiedAuthCallback(gconstpointer in,
   nsString message;
   if (!realm.IsEmpty())
   {
-    const PRUnichar *strings[] = { realm.get(), dispHost.get() };
-    bundle->FormatStringFromName(NS_LITERAL_STRING("EnterUserPasswordForRealm").get(),
+    const char16_t *strings[] = { realm.get(), dispHost.get() };
+    bundle->FormatStringFromName(MOZ_UTF16("EnterUserPasswordForRealm"),
                                  strings, 2, getter_Copies(message));
   }
   else
   {
-    const PRUnichar *strings[] = { dispHost.get() };
-    bundle->FormatStringFromName(NS_LITERAL_STRING("EnterUserPasswordFor").get(),
+    const char16_t *strings[] = { dispHost.get() };
+    bundle->FormatStringFromName(MOZ_UTF16("EnterUserPasswordFor"),
                                  strings, 1, getter_Copies(message));
   }
   if (message.IsEmpty())
@@ -237,7 +237,7 @@ ProxiedAuthCallback(gconstpointer in,
   // Prompt the user...
   nsresult rv;
   bool retval = false;
-  PRUnichar *user = nullptr, *pass = nullptr;
+  char16_t *user = nullptr, *pass = nullptr;
 
   rv = prompt->PromptUsernameAndPassword(nullptr, message.get(),
                                          key.get(),
@@ -314,7 +314,7 @@ FileInfoComparator(gconstpointer a, gconstpointer b)
 class nsGnomeVFSInputStream MOZ_FINAL : public nsIInputStream
 {
   public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIINPUTSTREAM
 
     nsGnomeVFSInputStream(const nsCString &uriSpec)
@@ -631,7 +631,7 @@ nsGnomeVFSInputStream::SetContentTypeOfChannel(const char *contentType)
   return rv;
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsGnomeVFSInputStream, nsIInputStream)
+NS_IMPL_ISUPPORTS(nsGnomeVFSInputStream, nsIInputStream)
 
 NS_IMETHODIMP
 nsGnomeVFSInputStream::Close()
@@ -755,7 +755,7 @@ class nsGnomeVFSProtocolHandler MOZ_FINAL : public nsIProtocolHandler
     nsCString mSupportedProtocols;
 };
 
-NS_IMPL_ISUPPORTS2(nsGnomeVFSProtocolHandler, nsIProtocolHandler, nsIObserver)
+NS_IMPL_ISUPPORTS(nsGnomeVFSProtocolHandler, nsIProtocolHandler, nsIObserver)
 
 nsresult
 nsGnomeVFSProtocolHandler::Init()
@@ -939,7 +939,7 @@ nsGnomeVFSProtocolHandler::AllowPort(int32_t aPort,
 NS_IMETHODIMP
 nsGnomeVFSProtocolHandler::Observe(nsISupports *aSubject,
                                    const char *aTopic,
-                                   const PRUnichar *aData)
+                                   const char16_t *aData)
 {
   if (strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0) {
     nsCOMPtr<nsIPrefBranch> prefs = do_QueryInterface(aSubject);

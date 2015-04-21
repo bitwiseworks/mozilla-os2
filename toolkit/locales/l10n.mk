@@ -34,8 +34,6 @@ run_for_effects := $(shell if test ! -d $(DIST); then $(NSINSTALL) -D $(DIST); f
 
 AB = $(firstword $(subst -, ,$(AB_CD)))
 
-core_abspath = $(if $(findstring :,$(1)),$(1),$(if $(filter /%,$(1)),$(1),$(CURDIR)/$(1)))
-
 # These are defaulted to be compatible with the files the wget-en-US target
 # pulls. You may override them if you provide your own files. You _must_
 # override them when MOZ_PKG_PRETTYNAMES is defined - the defaults will not
@@ -51,9 +49,9 @@ DEFINES += \
 	-DMOZ_LANGPACK_EID=$(MOZ_LANGPACK_EID) \
 	-DMOZ_APP_VERSION=$(MOZ_APP_VERSION) \
 	-DMOZ_APP_MAXVERSION=$(MOZ_APP_MAXVERSION) \
-	-DLOCALE_SRCDIR=$(call core_abspath,$(LOCALE_SRCDIR)) \
-	-DPKG_BASENAME="$(PKG_BASENAME)" \
-	-DPKG_INST_BASENAME="$(PKG_INST_BASENAME)" \
+	-DLOCALE_SRCDIR=$(abspath $(LOCALE_SRCDIR)) \
+	-DPKG_BASENAME='$(PKG_BASENAME)' \
+	-DPKG_INST_BASENAME='$(PKG_INST_BASENAME)' \
 	$(NULL)
 
 
@@ -104,7 +102,7 @@ MAKE_COMPLETE_MAR =
 endif
 endif
 endif
-repackage-zip: UNPACKAGE="$(ZIP_IN)"
+repackage-zip: UNPACKAGE='$(ZIP_IN)'
 repackage-zip: ALREADY_SZIPPED=1
 repackage-zip:  libs-$(AB_CD)
 # call a hook for apps to put their uninstall helper.exe into the package
@@ -126,8 +124,8 @@ endif
 ifdef MAKE_COMPLETE_MAR
 	$(MAKE) -C $(MOZDEPTH)/tools/update-packaging full-update AB_CD=$(AB_CD) \
 	  MOZ_PKG_PRETTYNAMES=$(MOZ_PKG_PRETTYNAMES) \
-	  PACKAGE_BASE_DIR="$(_ABS_DIST)/l10n-stage" \
-	  DIST="$(_ABS_DIST)"
+	  PACKAGE_BASE_DIR='$(_ABS_DIST)/l10n-stage' \
+	  DIST='$(_ABS_DIST)'
 endif
 # packaging done, undo l10n stuff
 ifneq (en,$(AB))
@@ -136,11 +134,11 @@ ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
 endif
 endif
 	$(NSINSTALL) -D $(DIST)/$(PKG_PATH)
-	mv -f "$(DIST)/l10n-stage/$(PACKAGE)" "$(ZIP_OUT)"
-	if test -f "$(DIST)/l10n-stage/$(PACKAGE).asc"; then mv -f "$(DIST)/l10n-stage/$(PACKAGE).asc" "$(ZIP_OUT).asc"; fi
+	mv -f '$(DIST)/l10n-stage/$(PACKAGE)' '$(ZIP_OUT)'
+	if test -f '$(DIST)/l10n-stage/$(PACKAGE).asc'; then mv -f '$(DIST)/l10n-stage/$(PACKAGE).asc' '$(ZIP_OUT).asc'; fi
 
 repackage-zip-%: $(STAGEDIST)
-	@$(MAKE) repackage-zip AB_CD=$* ZIP_IN="$(ZIP_IN)"
+	@$(MAKE) repackage-zip AB_CD=$* ZIP_IN='$(ZIP_IN)'
 
 APP_DEFINES = $(firstword $(wildcard $(LOCALE_SRCDIR)/defines.inc) \
                           $(srcdir)/en-US/defines.inc)
@@ -158,10 +156,10 @@ langpack-%: LANGPACK_FILE=$(_ABS_DIST)/$(PKG_LANGPACK_PATH)$(PKG_LANGPACK_BASENA
 langpack-%: AB_CD=$*
 langpack-%: XPI_NAME=locale-$*
 langpack-%: libs-%
-	@echo "Making langpack $(LANGPACK_FILE)"
+	@echo 'Making langpack $(LANGPACK_FILE)'
 	$(NSINSTALL) -D $(DIST)/$(PKG_LANGPACK_PATH)
-	$(PYTHON) $(MOZILLA_DIR)/config/Preprocessor.py $(DEFINES) $(ACDEFINES) \
-	  -I$(TK_DEFINES) -I$(APP_DEFINES) $(srcdir)/generic/install.rdf > $(DIST)/xpi-stage/$(XPI_NAME)/install.rdf
+	$(call py_action,preprocessor,$(DEFINES) $(ACDEFINES) \
+	  -I$(TK_DEFINES) -I$(APP_DEFINES) $(srcdir)/generic/install.rdf -o $(DIST)/xpi-stage/$(XPI_NAME)/install.rdf)
 	cd $(DIST)/xpi-stage/locale-$(AB_CD) && \
 	  $(ZIP) -r9D $(LANGPACK_FILE) install.rdf $(PKG_ZIP_DIRS) chrome.manifest
 
@@ -178,13 +176,13 @@ ifndef WGET
 	$(error Wget not installed)
 endif
 	$(NSINSTALL) -D $(_ABS_DIST)/$(PKG_PATH)
-	(cd $(_ABS_DIST)/$(PKG_PATH) && $(WGET) --no-cache -nv -N  "$(EN_US_BINARY_URL)/$(PACKAGE)")
-	@echo "Downloaded $(EN_US_BINARY_URL)/$(PACKAGE) to $(_ABS_DIST)/$(PKG_PATH)/$(PACKAGE)"
+	(cd $(_ABS_DIST)/$(PKG_PATH) && $(WGET) --no-cache -nv -N  '$(EN_US_BINARY_URL)/$(PACKAGE)')
+	@echo 'Downloaded $(EN_US_BINARY_URL)/$(PACKAGE) to $(_ABS_DIST)/$(PKG_PATH)/$(PACKAGE)'
 ifdef RETRIEVE_WINDOWS_INSTALLER
 ifeq ($(OS_ARCH), WINNT)
 	$(NSINSTALL) -D $(_ABS_DIST)/$(PKG_INST_PATH)
-	(cd $(_ABS_DIST)/$(PKG_INST_PATH) && $(WGET) --no-cache -nv -N "$(EN_US_BINARY_URL)/$(PKG_PATH)$(PKG_INST_BASENAME).exe")
-	@echo "Downloaded $(EN_US_BINARY_URL)/$(PKG_PATH)$(PKG_INST_BASENAME).exe to $(_ABS_DIST)/$(PKG_INST_PATH)$(PKG_INST_BASENAME).exe"
+	(cd $(_ABS_DIST)/$(PKG_INST_PATH) && $(WGET) --no-cache -nv -N '$(EN_US_BINARY_URL)/$(PKG_PATH)$(PKG_INST_BASENAME).exe')
+	@echo 'Downloaded $(EN_US_BINARY_URL)/$(PKG_PATH)$(PKG_INST_BASENAME).exe to $(_ABS_DIST)/$(PKG_INST_PATH)$(PKG_INST_BASENAME).exe'
 endif
 endif
 

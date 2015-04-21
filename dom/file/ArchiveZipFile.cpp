@@ -49,7 +49,7 @@ public:
     Close();
   }
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIINPUTSTREAM
   NS_DECL_NSISEEKABLESTREAM
 
@@ -82,9 +82,9 @@ private: // data
   } mData;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(ArchiveInputStream,
-                              nsIInputStream,
-                              nsISeekableStream)
+NS_IMPL_ISUPPORTS(ArchiveInputStream,
+                  nsIInputStream,
+                  nsISeekableStream)
 
 nsresult
 ArchiveInputStream::Init()
@@ -396,8 +396,8 @@ ArchiveZipFile::CreateSlice(uint64_t aStart,
   return t.forget();
 }
 
-NS_IMPL_CYCLE_COLLECTION_1(ArchiveZipFile,
-                           mArchiveReader)
+NS_IMPL_CYCLE_COLLECTION(ArchiveZipFile,
+                         mArchiveReader)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ArchiveZipFile)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMFile)
@@ -407,5 +407,5 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ArchiveZipFile)
   NS_INTERFACE_MAP_ENTRY(nsIMutable)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMFileCC)
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(ArchiveZipFile)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(ArchiveZipFile)
+NS_IMPL_ADDREF_INHERITED(ArchiveZipFile, nsDOMFileCC)
+NS_IMPL_RELEASE_INHERITED(ArchiveZipFile, nsDOMFileCC)

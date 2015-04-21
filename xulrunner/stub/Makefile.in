@@ -2,25 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH     = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir    = @srcdir@
-VPATH     = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-# Statically link against the RTL on windows
-USE_STATIC_LIBS = 1
 # Don't create a dependency on mozglue
 MOZ_GLUE_LDFLAGS =
-
-LOCAL_INCLUDES = \
-  -I$(topsrcdir)/xpcom/build \
-  -I$(topsrcdir)/xpcom/base \
-  $(NULL)
-
-DEFINES  += -DXPCOM_GLUE
-STL_FLAGS=
 
 LIBS = \
   $(XPCOM_STANDALONE_STATICRUNTIME_GLUE_LDOPTS) \
@@ -33,16 +16,6 @@ LIBS            += \
 		$(NULL)
 endif
 
-ifeq ($(OS_ARCH),WINNT)
-RCINCLUDE = xulrunner-stub.rc
-ifndef GNU_CC
-RCFLAGS += -DMOZ_XULRUNNER -I$(srcdir)
-else
-RCFLAGS += -DMOZ_XULRUNNER --include-dir $(srcdir)
-endif
-LOCAL_INCLUDES += -I$(topsrcdir)/toolkit/xre
-endif
-
 ifndef MOZ_WINCONSOLE
 ifdef MOZ_DEBUG
 MOZ_WINCONSOLE = 1
@@ -52,20 +25,6 @@ endif
 endif
 
 include $(topsrcdir)/config/config.mk
-
-ifdef _MSC_VER
-WIN32_EXE_LDFLAGS += -ENTRY:wmainCRTStartup
-endif
-
-ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
-
-FRAMEWORK_NAME = XUL
-FRAMEWORK_VERSION = $(MOZILLA_VERSION)
-
-FINAL_TARGET = \
-   $(DIST)/$(FRAMEWORK_NAME).framework/Versions/$(FRAMEWORK_VERSION)
-
-endif
 
 include $(topsrcdir)/config/rules.mk
 

@@ -7,7 +7,6 @@
 #define nsMathMLmpaddedFrame_h___
 
 #include "mozilla/Attributes.h"
-#include "nsCOMPtr.h"
 #include "nsMathMLContainerFrame.h"
 
 //
@@ -28,7 +27,7 @@ public:
     return TransmitAutomaticDataForMrowLikeElement();
   }
 
-  NS_IMETHOD
+  virtual nsresult
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,
@@ -38,6 +37,12 @@ public:
   Place(nsRenderingContext& aRenderingContext,
         bool                 aPlaceOrigin,
         nsHTMLReflowMetrics& aDesiredSize) MOZ_OVERRIDE;
+
+  bool
+  IsMrowLike() MOZ_OVERRIDE {
+    return mFrames.FirstChild() != mFrames.LastChild() ||
+           !mFrames.FirstChild();
+  }
 
 protected:
   nsMathMLmpaddedFrame(nsStyleContext* aContext) : nsMathMLContainerFrame(aContext) {}
@@ -80,7 +85,7 @@ private:
   UpdateValue(int32_t                  aSign,
               int32_t                  aPseudoUnit,
               const nsCSSValue&        aCSSValue,
-              const nsBoundingMetrics& aBoundingMetrics,
+              const nsHTMLReflowMetrics& aDesiredSize,
               nscoord&                 aValueToUpdate) const;
 };
 

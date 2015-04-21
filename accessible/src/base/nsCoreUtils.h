@@ -6,16 +6,15 @@
 #ifndef nsCoreUtils_h_
 #define nsCoreUtils_h_
 
-
 #include "nsIContent.h"
-#include "nsIBoxObject.h"
+#include "nsIDocument.h"
 #include "nsIPresShell.h"
 
-#include "nsIDOMDOMStringList.h"
 #include "nsPoint.h"
 #include "nsTArray.h"
 
 class nsRange;
+class nsIBoxObject;
 class nsIFrame;
 class nsIDocShell;
 class nsITreeColumn;
@@ -50,18 +49,7 @@ public:
   /**
    * Send mouse event to the given element.
    *
-   * @param  aEventType  [in] an event type (see nsGUIEvent.h for constants)
-   * @param  aPresShell  [in] the presshell for the given element
-   * @param  aContent    [in] the element
-   */
-  static bool DispatchMouseEvent(uint32_t aEventType,
-                                   nsIPresShell *aPresShell,
-                                   nsIContent *aContent);
-
-  /**
-   * Send mouse event to the given element.
-   *
-   * @param aEventType   [in] an event type (see nsGUIEvent.h for constants)
+   * @param aEventType   [in] an event type (see BasicEvents.h for constants)
    * @param aX           [in] x coordinate in dev pixels
    * @param aY           [in] y coordinate in dev pixels
    * @param aContent     [in] the element
@@ -71,12 +59,26 @@ public:
    */
   static void DispatchMouseEvent(uint32_t aEventType, int32_t aX, int32_t aY,
                                  nsIContent *aContent, nsIFrame *aFrame,
-                                 nsIPresShell *aPresShell,
-                                 nsIWidget *aRootWidget);
+                                 nsIPresShell *aPresShell, nsIWidget *aRootWidget);
+
+  /**
+   * Send a touch event with a single touch point to the given element.
+   *
+   * @param aEventType   [in] an event type (see BasicEvents.h for constants)
+   * @param aX           [in] x coordinate in dev pixels
+   * @param aY           [in] y coordinate in dev pixels
+   * @param aContent     [in] the element
+   * @param aFrame       [in] frame of the element
+   * @param aPresShell   [in] the presshell for the element
+   * @param aRootWidget  [in] the root widget of the element
+   */
+  static void DispatchTouchEvent(uint32_t aEventType, int32_t aX, int32_t aY,
+                                 nsIContent* aContent, nsIFrame* aFrame,
+                                 nsIPresShell* aPresShell, nsIWidget* aRootWidget);
 
   /**
    * Return an accesskey registered on the given element by
-   * nsEventStateManager or 0 if there is no registered accesskey.
+   * EventStateManager or 0 if there is no registered accesskey.
    *
    * @param aContent - the given element.
    */
@@ -294,27 +296,21 @@ public:
       aContent->HasAttr(kNameSpaceID_None, nsGkAtoms::scope);
   }
 
-};
+  /**
+   * Returns true if the given string is empty or contains whitespace symbols
+   * only. In contrast to nsWhitespaceTokenizer class it takes into account
+   * non-breaking space (0xa0).
+   */
+  static bool IsWhitespaceString(const nsSubstring& aString);
 
-
-/**
- * nsIDOMDOMStringList implementation.
- */
-class nsAccessibleDOMStringList : public nsIDOMDOMStringList
-{
-public:
-  nsAccessibleDOMStringList() {}
-  virtual ~nsAccessibleDOMStringList() {}
-
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSIDOMDOMSTRINGLIST
-
-  bool Add(const nsAString& aName) {
-    return mNames.AppendElement(aName) != nullptr;
+  /**
+   * Returns true if the given character is whitespace symbol.
+   */
+  static bool IsWhitespace(char16_t aChar)
+  {
+    return aChar == ' ' || aChar == '\n' ||
+      aChar == '\r' || aChar == '\t' || aChar == 0xa0;
   }
-
-private:
-  nsTArray<nsString> mNames;
 };
 
 #endif

@@ -1,39 +1,24 @@
+/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 #include "GLManager.h"
-#include "LayerManagerOGL.h"
-#include "CompositorOGL.h"
+#include "CompositorOGL.h"              // for CompositorOGL
+#include "GLContext.h"                  // for GLContext
+#include "mozilla/Assertions.h"         // for MOZ_CRASH
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/layers/Compositor.h"  // for Compositor
 #include "mozilla/layers/LayerManagerComposite.h"
-#include "GLContext.h"
+#include "mozilla/layers/LayersTypes.h"
+#include "mozilla/mozalloc.h"           // for operator new, etc
+#include "nsAutoPtr.h"                  // for nsRefPtr
 
 using namespace mozilla::gl;
 
 namespace mozilla {
 namespace layers {
-
-class GLManagerLayerManager : public GLManager
-{
-public:
-  GLManagerLayerManager(LayerManagerOGL* aManager)
-    : mImpl(aManager)
-  {}
-
-  virtual GLContext* gl() const MOZ_OVERRIDE
-  {
-    return mImpl->gl();
-  }
-
-  virtual ShaderProgramOGL* GetProgram(ShaderProgramType aType) MOZ_OVERRIDE
-  {
-    return mImpl->GetProgram(aType);
-  }
-
-  virtual void BindAndDrawQuad(ShaderProgramOGL *aProg) MOZ_OVERRIDE
-  {
-    mImpl->BindAndDrawQuad(aProg);
-  }
-
-private:
-  nsRefPtr<LayerManagerOGL> mImpl;
-};
 
 class GLManagerCompositor : public GLManager
 {
@@ -47,9 +32,15 @@ public:
     return mImpl->gl();
   }
 
-  virtual ShaderProgramOGL* GetProgram(gl::ShaderProgramType aType) MOZ_OVERRIDE
+  virtual ShaderProgramOGL* GetProgram(GLenum aTarget, gfx::SurfaceFormat aFormat) MOZ_OVERRIDE
   {
-    return mImpl->GetProgram(aType);
+    ShaderConfigOGL config = ShaderConfigFromTargetAndFormat(aTarget, aFormat);
+    return mImpl->GetShaderProgramFor(config);
+  }
+
+  virtual const gfx::Matrix4x4& GetProjMatrix() const MOZ_OVERRIDE
+  {
+    return mImpl->GetProjMatrix();
   }
 
   virtual void BindAndDrawQuad(ShaderProgramOGL *aProg) MOZ_OVERRIDE
@@ -62,23 +53,13 @@ private:
 };
 
 /* static */ GLManager*
-GLManager::CreateGLManager(LayerManager* aManager)
+GLManager::CreateGLManager(LayerManagerComposite* aManager)
 {
-  if (!aManager) {
-    return nullptr;
-  } else if (aManager->GetBackendType() == LAYERS_OPENGL) {
-    return new GLManagerLayerManager(static_cast<LayerManagerOGL*>(aManager));
+  if (aManager &&
+      Compositor::GetBackend() == LayersBackend::LAYERS_OPENGL) {
+    return new GLManagerCompositor(static_cast<CompositorOGL*>(
+      aManager->GetCompositor()));
   }
-  if (aManager->GetBackendType() == LAYERS_NONE) {
-    if (Compositor::GetBackend() == LAYERS_OPENGL) {
-      return new GLManagerCompositor(static_cast<CompositorOGL*>(
-        static_cast<LayerManagerComposite*>(aManager)->GetCompositor()));
-    } else {
-      return nullptr;
-    }
-  }
-
-  MOZ_NOT_REACHED("Cannot create GLManager for non-GL layer manager");
   return nullptr;
 }
 

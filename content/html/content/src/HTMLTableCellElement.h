@@ -16,28 +16,19 @@ namespace dom {
 
 class HTMLTableElement;
 
-class HTMLTableCellElement : public nsGenericHTMLElement,
-                             public nsIDOMHTMLTableCellElement
+class HTMLTableCellElement MOZ_FINAL : public nsGenericHTMLElement,
+                                       public nsIDOMHTMLTableCellElement
 {
 public:
-  HTMLTableCellElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  HTMLTableCellElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     : nsGenericHTMLElement(aNodeInfo)
   {
-    SetIsDOMBinding();
+    SetHasWeirdParserInsertionMode();
   }
   virtual ~HTMLTableCellElement();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLTableCellElement
   NS_DECL_NSIDOMHTMLTABLECELLELEMENT
@@ -165,14 +156,16 @@ public:
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx,
-                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
 
   HTMLTableElement* GetTable() const;
 
   HTMLTableRowElement* GetRow() const;
+
+private:
+  static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                    nsRuleData* aData);
 };
 
 } // namespace dom

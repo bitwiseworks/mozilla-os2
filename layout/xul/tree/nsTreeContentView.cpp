@@ -3,15 +3,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsINameSpaceManager.h"
+#include "nsNameSpaceManager.h"
 #include "nsGkAtoms.h"
 #include "nsIBoxObject.h"
 #include "nsTreeUtils.h"
 #include "nsTreeContentView.h"
-#include "nsChildIterator.h"
+#include "ChildIterator.h"
 #include "nsDOMClassInfoID.h"
 #include "nsError.h"
-#include "nsEventStates.h"
 #include "nsINodeInfo.h"
 #include "nsIXULSortService.h"
 #include "nsContentUtils.h"
@@ -19,7 +18,7 @@
 #include "mozilla/dom/Element.h"
 #include "nsServiceManagerUtils.h"
 
-namespace dom = mozilla::dom;
+using namespace mozilla;
 
 #define NS_ENSURE_NATIVE_COLUMN(_col)                                \
   nsRefPtr<nsTreeColumn> col = nsTreeBodyFrame::GetColumnImpl(_col); \
@@ -111,11 +110,11 @@ NS_NewTreeContentView(nsITreeView** aResult)
   return NS_OK;
 }
 
-NS_IMPL_CYCLE_COLLECTION_4(nsTreeContentView,
-                           mBoxObject,
-                           mSelection,
-                           mRoot,
-                           mBody)
+NS_IMPL_CYCLE_COLLECTION(nsTreeContentView,
+                         mBoxObject,
+                         mSelection,
+                         mRoot,
+                         mBody)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsTreeContentView)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsTreeContentView)
@@ -674,19 +673,19 @@ nsTreeContentView::SetCellText(int32_t aRow, nsITreeColumn* aCol, const nsAStrin
 }
 
 NS_IMETHODIMP
-nsTreeContentView::PerformAction(const PRUnichar* aAction)
+nsTreeContentView::PerformAction(const char16_t* aAction)
 {
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsTreeContentView::PerformActionOnRow(const PRUnichar* aAction, int32_t aRow)
+nsTreeContentView::PerformActionOnRow(const char16_t* aAction, int32_t aRow)
 {
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsTreeContentView::PerformActionOnCell(const PRUnichar* aAction, int32_t aRow, nsITreeColumn* aCol)
+nsTreeContentView::PerformActionOnCell(const char16_t* aAction, int32_t aRow, nsITreeColumn* aCol)
 {
   return NS_OK;
 }
@@ -1046,9 +1045,8 @@ nsTreeContentView::Serialize(nsIContent* aContent, int32_t aParentIndex,
   if (!aContent->IsXUL())
     return;
 
-  ChildIterator iter, last;
-  for (ChildIterator::Init(aContent, &iter, &last); iter != last; ++iter) {
-    nsIContent* content = *iter;
+  dom::FlattenedChildIterator iter(aContent);
+  for (nsIContent* content = iter.GetNextChild(); content; content = iter.GetNextChild()) {
     nsIAtom *tag = content->Tag();
     int32_t count = aRows.Length();
 
@@ -1367,10 +1365,8 @@ nsTreeContentView::GetCell(nsIContent* aContainer, nsITreeColumn* aCol)
   // index in a row. "ref" attribute has higher priority.
   nsIContent* result = nullptr;
   int32_t j = 0;
-  ChildIterator iter, last;
-  for (ChildIterator::Init(aContainer, &iter, &last); iter != last; ++iter) {
-    nsIContent* cell = *iter;
-
+  dom::FlattenedChildIterator iter(aContainer);
+  for (nsIContent* cell = iter.GetNextChild(); cell; cell = iter.GetNextChild()) {
     if (cell->Tag() == nsGkAtoms::treecell) {
       if (colAtom && cell->AttrValueIs(kNameSpaceID_None, nsGkAtoms::ref,
                                        colAtom, eCaseMatters)) {

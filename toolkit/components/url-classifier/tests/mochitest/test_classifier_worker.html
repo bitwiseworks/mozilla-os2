@@ -6,7 +6,6 @@
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 
-<body onload="doUpdate(testUpdate);">
 <p id="display"></p>
 <div id="content" style="display: none">
 </div>
@@ -14,9 +13,8 @@
 
 <script class="testbody" type="text/javascript">
 
-netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-var Cc = Components.classes;
-var Ci = Components.interfaces;
+var Cc = SpecialPowers.Cc;
+var Ci = SpecialPowers.Ci;
 
 // Add some URLs to the malware database.
 var testData = "example.com/tests/toolkit/components/url-classifier/tests/mochitest/evilWorker.js";
@@ -56,8 +54,6 @@ function doUpdate(update) {
     }
   };
 
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-
   dbService.beginUpdate(listener, "test-malware-simple", "");
   dbService.beginStream("", "");
   dbService.updateStream(update);
@@ -75,6 +71,11 @@ function onmessage(event)
 
   is(pieces[0], "success", pieces[1]);
 }
+
+SpecialPowers.pushPrefEnv(
+  {"set" : [["urlclassifier.malware_table", "test-malware-simple"],
+            ["urlclassifier.phish_table", "test-phish-simple"]]},
+  function() { doUpdate(testUpdate); });
 
 window.addEventListener("message", onmessage, false);
 

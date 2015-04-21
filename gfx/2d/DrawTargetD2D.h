@@ -37,16 +37,17 @@ struct PrivateD3D10DataD2D
   RefPtr<ID3D10Effect> mEffect;
   RefPtr<ID3D10InputLayout> mInputLayout;
   RefPtr<ID3D10Buffer> mVB;
-  RefPtr<ID3D10BlendState> mBlendStates[OP_COUNT];
+  RefPtr<ID3D10BlendState> mBlendStates[size_t(CompositionOp::OP_COUNT)];
 };
 
 class DrawTargetD2D : public DrawTarget
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DrawTargetD2D)
   DrawTargetD2D();
   virtual ~DrawTargetD2D();
 
-  virtual BackendType GetType() const { return BACKEND_DIRECT2D; }
+  virtual BackendType GetType() const { return BackendType::DIRECT2D; }
   virtual TemporaryRef<SourceSurface> Snapshot();
   virtual IntSize GetSize() { return mSize; }
 
@@ -56,6 +57,10 @@ public:
                            const Rect &aSource,
                            const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
                            const DrawOptions &aOptions = DrawOptions());
+  virtual void DrawFilter(FilterNode *aNode,
+                          const Rect &aSourceRect,
+                          const Point &aDestPoint,
+                          const DrawOptions &aOptions = DrawOptions());
   virtual void DrawSurfaceWithShadow(SourceSurface *aSurface,
                                      const Point &aDest,
                                      const Color &aColor,
@@ -116,12 +121,14 @@ public:
   virtual TemporaryRef<DrawTarget>
     CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const;
 
-  virtual TemporaryRef<PathBuilder> CreatePathBuilder(FillRule aFillRule = FILL_WINDING) const;
+  virtual TemporaryRef<PathBuilder> CreatePathBuilder(FillRule aFillRule = FillRule::FILL_WINDING) const;
 
   virtual TemporaryRef<GradientStops>
     CreateGradientStops(GradientStop *aStops,
                         uint32_t aNumStops,
-                        ExtendMode aExtendMode = EXTEND_CLAMP) const;
+                        ExtendMode aExtendMode = ExtendMode::CLAMP) const;
+
+  virtual TemporaryRef<FilterNode> CreateFilter(FilterType aType);
 
   virtual void *GetNativeSurface(NativeSurfaceType aType);
 
@@ -132,9 +139,14 @@ public:
   TemporaryRef<ID2D1Layer> GetCachedLayer();
   void PopCachedLayer(ID2D1RenderTarget *aRT);
 
+#ifdef USE_D2D1_1
+  TemporaryRef<ID2D1Image> GetImageForSurface(SourceSurface *aSurface);
+#endif
+
   static ID2D1Factory *factory();
   static void CleanupD2D();
   static IDWriteFactory *GetDWriteFactory();
+  ID2D1RenderTarget *GetRT() { return mRT; }
 
   operator std::string() const {
     std::stringstream stream;
@@ -147,8 +159,8 @@ public:
 
 private:
   TemporaryRef<ID2D1Bitmap>
-  DrawTargetD2D::GetBitmapForSurface(SourceSurface *aSurface,
-                                     Rect &aSource);
+  GetBitmapForSurface(SourceSurface *aSurface,
+                      Rect &aSource);
   friend class AutoSaveRestoreClippedOut;
   friend class SourceSurfaceD2DTarget;
 
@@ -198,6 +210,8 @@ private:
   // bounds to correctly reflect the total clip. This is in device space.
   TemporaryRef<ID2D1Geometry> GetClippedGeometry(IntRect *aClipBounds);
 
+  bool GetDeviceSpaceClipRect(D2D1_RECT_F& aClipRect, bool& aIsPixelAligned);
+
   TemporaryRef<ID2D1Brush> CreateBrushForPattern(const Pattern &aPattern, Float aAlpha = 1.0f);
 
   TemporaryRef<ID3D10Texture2D> CreateGradientTexture(const GradientStopsD2D *aStops);
@@ -207,7 +221,7 @@ private:
   void SetupStateForRendering();
 
   // Set the scissor rect to a certain IntRects, resets the scissor rect to
-  // surface bounds when NULL is specified.
+  // surface bounds when nullptr is specified.
   void SetScissorToRect(IntRect *aRect);
 
   void PushD2DLayer(ID2D1RenderTarget *aRT, ID2D1Geometry *aGeometry, ID2D1Layer *aLayer, const D2D1_MATRIX_3X2_F &aTransform);
@@ -242,7 +256,7 @@ private:
     RefPtr<ID2D1Layer> mLayer;
     D2D1_RECT_F mBounds;
     union {
-      // If mPath is non-NULL, the mTransform member will be used, otherwise
+      // If mPath is non-nullptr, the mTransform member will be used, otherwise
       // the mIsPixelAligned member is valid.
       D2D1_MATRIX_3X2_F mTransform;
       bool mIsPixelAligned;

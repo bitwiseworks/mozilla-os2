@@ -12,7 +12,6 @@
 #include "nsSVGAttrTearoffTable.h"
 #include "SVGPathSegUtils.h"
 #include "mozilla/dom/SVGPathSegListBinding.h"
-#include "nsContentUtils.h"
 
 // See the comment in this file's header.
 
@@ -26,6 +25,8 @@ SVGPathSegListTearoffTable()
     sSVGPathSegListTearoffTable;
   return sSVGPathSegListTearoffTable;
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(DOMSVGPathSegList)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGPathSegList)
   // No unlinking of mElement, we'd need to null out the value pointer (the
@@ -48,6 +49,36 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGPathSegList)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
+
+//----------------------------------------------------------------------
+// Helper class: AutoChangePathSegListNotifier
+// Stack-based helper class to pair calls to WillChangePathSegList and
+// DidChangePathSegList.
+class MOZ_STACK_CLASS AutoChangePathSegListNotifier
+{
+public:
+  AutoChangePathSegListNotifier(DOMSVGPathSegList* aPathSegList MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    : mPathSegList(aPathSegList)
+  {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    MOZ_ASSERT(mPathSegList, "Expecting non-null pathSegList");
+    mEmptyOrOldValue =
+      mPathSegList->Element()->WillChangePathSegList();
+  }
+
+  ~AutoChangePathSegListNotifier()
+  {
+    mPathSegList->Element()->DidChangePathSegList(mEmptyOrOldValue);
+    if (mPathSegList->AttrIsAnimating()) {
+      mPathSegList->Element()->AnimationNeedsResample();
+    }
+  }
+
+private:
+  DOMSVGPathSegList* const mPathSegList;
+  nsAttrValue        mEmptyOrOldValue;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
 
 /* static */ already_AddRefed<DOMSVGPathSegList>
 DOMSVGPathSegList::GetDOMWrapper(void *aList,
@@ -80,9 +111,9 @@ DOMSVGPathSegList::~DOMSVGPathSegList()
 }
 
 JSObject*
-DOMSVGPathSegList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+DOMSVGPathSegList::WrapObject(JSContext *cx)
 {
-  return mozilla::dom::SVGPathSegListBinding::Wrap(cx, scope, this);
+  return mozilla::dom::SVGPathSegListBinding::Wrap(cx, this);
 }
 
 void
@@ -237,7 +268,7 @@ DOMSVGPathSegList::Clear(ErrorResult& aError)
   }
 
   if (LengthNoFlush() > 0) {
-    nsAttrValue emptyOrOldValue = Element()->WillChangePathSegList();
+    AutoChangePathSegListNotifier notifier(this);
     // DOM list items that are to be removed must be removed before we change
     // the internal list, otherwise they wouldn't be able to copy their
     // internal counterparts' values!
@@ -254,10 +285,6 @@ DOMSVGPathSegList::Clear(ErrorResult& aError)
     }
 
     InternalList().Clear();
-    Element()->DidChangePathSegList(emptyOrOldValue);
-    if (AttrIsAnimating()) {
-      Element()->AnimationNeedsResample();
-    }
   }
 }
 
@@ -287,7 +314,18 @@ DOMSVGPathSegList::Initialize(DOMSVGPathSeg& aNewItem, ErrorResult& aError)
   return InsertItemBefore(*domItem, 0, aError);
 }
 
-DOMSVGPathSeg*
+already_AddRefed<DOMSVGPathSeg>
+DOMSVGPathSegList::GetItem(uint32_t index, ErrorResult& error)
+{
+  bool found;
+  nsRefPtr<DOMSVGPathSeg> item = IndexedGetter(index, found, error);
+  if (!found) {
+    error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+  }
+  return item.forget();
+}
+
+already_AddRefed<DOMSVGPathSeg>
 DOMSVGPathSegList::IndexedGetter(uint32_t aIndex, bool& aFound,
                                  ErrorResult& aError)
 {
@@ -296,8 +334,7 @@ DOMSVGPathSegList::IndexedGetter(uint32_t aIndex, bool& aFound,
   }
   aFound = aIndex < LengthNoFlush();
   if (aFound) {
-    EnsureItemAt(aIndex);
-    return ItemAt(aIndex);
+    return GetItemAt(aIndex);
   }
   return nullptr;
 }
@@ -338,7 +375,7 @@ DOMSVGPathSegList::InsertItemBefore(DOMSVGPathSeg& aNewItem,
     return nullptr;
   }
 
-  nsAttrValue emptyOrOldValue = Element()->WillChangePathSegList();
+  AutoChangePathSegListNotifier notifier(this);
   // Now that we know we're inserting, keep animVal list in sync as necessary.
   MaybeInsertNullInAnimValListAt(aIndex, internalIndex, argCount);
 
@@ -346,6 +383,7 @@ DOMSVGPathSegList::InsertItemBefore(DOMSVGPathSeg& aNewItem,
   domItem->ToSVGPathSegEncodedData(segAsRaw);
 
   InternalList().mData.InsertElementsAt(internalIndex, segAsRaw, 1 + argCount);
+  InternalList().mCachedPath = nullptr;
   mItems.InsertElementAt(aIndex, ItemProxy(domItem.get(), internalIndex));
 
   // This MUST come after the insertion into InternalList(), or else under the
@@ -355,10 +393,6 @@ DOMSVGPathSegList::InsertItemBefore(DOMSVGPathSeg& aNewItem,
 
   UpdateListIndicesFromIndex(aIndex + 1, argCount + 1);
 
-  Element()->DidChangePathSegList(emptyOrOldValue);
-  if (AttrIsAnimating()) {
-    Element()->AnimationNeedsResample();
-  }
   return domItem.forget();
 }
 
@@ -382,7 +416,7 @@ DOMSVGPathSegList::ReplaceItem(DOMSVGPathSeg& aNewItem,
     domItem = domItem->Clone(); // must do this before changing anything!
   }
 
-  nsAttrValue emptyOrOldValue = Element()->WillChangePathSegList();
+  AutoChangePathSegListNotifier notifier(this);
   if (ItemAt(aIndex)) {
     // Notify any existing DOM item of removal *before* modifying the lists so
     // that the DOM item can copy the *old* value at its index:
@@ -406,6 +440,7 @@ DOMSVGPathSegList::ReplaceItem(DOMSVGPathSeg& aNewItem,
   bool ok = !!InternalList().mData.ReplaceElementsAt(
                   internalIndex, 1 + oldArgCount,
                   segAsRaw, 1 + newArgCount);
+  InternalList().mCachedPath = nullptr;
   if (!ok) {
     aError.Throw(NS_ERROR_OUT_OF_MEMORY);
     return nullptr;
@@ -423,10 +458,6 @@ DOMSVGPathSegList::ReplaceItem(DOMSVGPathSeg& aNewItem,
     }
   }
 
-  Element()->DidChangePathSegList(emptyOrOldValue);
-  if (AttrIsAnimating()) {
-    Element()->AnimationNeedsResample();
-  }
   return domItem.forget();
 }
 
@@ -443,14 +474,13 @@ DOMSVGPathSegList::RemoveItem(uint32_t aIndex,
     aError.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
     return nullptr;
   }
-  // We have to return the removed item, so make sure it exists:
-  EnsureItemAt(aIndex);
+  // We have to return the removed item, so get it, creating it if necessary:
+  nsRefPtr<DOMSVGPathSeg> result = GetItemAt(aIndex);
 
-  nsAttrValue emptyOrOldValue = Element()->WillChangePathSegList();
+  AutoChangePathSegListNotifier notifier(this);
   // Notify the DOM item of removal *before* modifying the lists so that the
   // DOM item can copy its *old* value:
   ItemAt(aIndex)->RemovingFromList();
-  nsRefPtr<DOMSVGPathSeg> result = ItemAt(aIndex);
 
   uint32_t internalIndex = mItems[aIndex].mInternalDataIndex;
   uint32_t segType = SVGPathSegUtils::DecodeType(InternalList().mData[internalIndex]);
@@ -465,23 +495,24 @@ DOMSVGPathSegList::RemoveItem(uint32_t aIndex,
   MaybeRemoveItemFromAnimValListAt(aIndex, argCount);
 
   InternalList().mData.RemoveElementsAt(internalIndex, 1 + argCount);
+  InternalList().mCachedPath = nullptr;
   mItems.RemoveElementAt(aIndex);
 
   UpdateListIndicesFromIndex(aIndex, -(argCount + 1));
 
-  Element()->DidChangePathSegList(emptyOrOldValue);
-  if (AttrIsAnimating()) {
-    Element()->AnimationNeedsResample();
-  }
   return result.forget();
 }
 
-void
-DOMSVGPathSegList::EnsureItemAt(uint32_t aIndex)
+already_AddRefed<DOMSVGPathSeg>
+DOMSVGPathSegList::GetItemAt(uint32_t aIndex)
 {
+  MOZ_ASSERT(aIndex < mItems.Length());
+
   if (!ItemAt(aIndex)) {
     ItemAt(aIndex) = DOMSVGPathSeg::CreateFor(this, aIndex, IsAnimValList());
   }
+  nsRefPtr<DOMSVGPathSeg> result = ItemAt(aIndex);
+  return result.forget();
 }
 
 void

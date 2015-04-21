@@ -30,7 +30,7 @@
     if ((macroExpr) == -1) { \
     (macroInstPtr)->ErrorCode = - (NETEQ_OTHER_ERROR); \
     } else { \
-    (macroInstPtr)->ErrorCode = -((WebRtc_Word16) (macroExpr)); \
+    (macroInstPtr)->ErrorCode = -((int16_t) (macroExpr)); \
     } \
     return(-1); \
     } }
@@ -280,7 +280,7 @@ int WebRtcNetEQ_GetErrorName(int errorCode, char *errorName, int maxStrLen)
 /* Assign functions (create not allowed in order to avoid malloc in lib) */
 int WebRtcNetEQ_AssignSize(int *sizeinbytes)
 {
-    *sizeinbytes = (sizeof(MainInst_t) * 2) / sizeof(WebRtc_Word16);
+    *sizeinbytes = (sizeof(MainInst_t) * 2) / sizeof(int16_t);
     return (0);
 }
 
@@ -294,8 +294,8 @@ int WebRtcNetEQ_Assign(void **inst, void *NETEQ_inst_Addr)
     WebRtcSpl_Init();
 
     /* Clear memory */
-    WebRtcSpl_MemSetW16((WebRtc_Word16*) NetEqMainInst, 0,
-        (sizeof(MainInst_t) / sizeof(WebRtc_Word16)));
+    WebRtcSpl_MemSetW16((int16_t*) NetEqMainInst, 0,
+        (sizeof(MainInst_t) / sizeof(int16_t)));
     ok = WebRtcNetEQ_McuReset(&NetEqMainInst->MCUinst);
     if (ok != 0)
     {
@@ -307,7 +307,8 @@ int WebRtcNetEQ_Assign(void **inst, void *NETEQ_inst_Addr)
 
 int WebRtcNetEQ_GetRecommendedBufferSize(void *inst, const enum WebRtcNetEQDecoder *codec,
                                          int noOfCodecs, enum WebRtcNetEQNetworkType nwType,
-                                         int *MaxNoOfPackets, int *sizeinbytes)
+                                         int *MaxNoOfPackets, int *sizeinbytes,
+                                         int* per_packet_overhead_bytes)
 {
     int ok = 0;
     int multiplier;
@@ -315,7 +316,9 @@ int WebRtcNetEQ_GetRecommendedBufferSize(void *inst, const enum WebRtcNetEQDecod
     if (NetEqMainInst == NULL) return (-1);
     *MaxNoOfPackets = 0;
     *sizeinbytes = 0;
-    ok = WebRtcNetEQ_GetDefaultCodecSettings(codec, noOfCodecs, sizeinbytes, MaxNoOfPackets);
+    ok = WebRtcNetEQ_GetDefaultCodecSettings(codec, noOfCodecs, sizeinbytes,
+                                             MaxNoOfPackets,
+                                             per_packet_overhead_bytes);
     if (ok != 0)
     {
         NetEqMainInst->ErrorCode = -ok;
@@ -339,7 +342,7 @@ int WebRtcNetEQ_GetRecommendedBufferSize(void *inst, const enum WebRtcNetEQDecod
     }
     else if (nwType == kTCPXLargeJitter)
     {
-        multiplier = 20;
+        multiplier = 12;
     }
     else
     {
@@ -358,7 +361,7 @@ int WebRtcNetEQ_AssignBuffer(void *inst, int MaxNoOfPackets, void *NETEQ_Buffer_
     MainInst_t *NetEqMainInst = (MainInst_t*) inst;
     if (NetEqMainInst == NULL) return (-1);
     ok = WebRtcNetEQ_PacketBufferInit(&NetEqMainInst->MCUinst.PacketBuffer_inst,
-        MaxNoOfPackets, (WebRtc_Word16*) NETEQ_Buffer_Addr, (sizeinbytes >> 1));
+        MaxNoOfPackets, (int16_t*) NETEQ_Buffer_Addr, (sizeinbytes >> 1));
     if (ok != 0)
     {
         NetEqMainInst->ErrorCode = -ok;
@@ -387,7 +390,7 @@ int WebRtcNetEQ_AssignBuffer(void *inst, int MaxNoOfPackets, void *NETEQ_Buffer_
  *						  -1 - Error
  */
 
-int WebRtcNetEQ_Init(void *inst, WebRtc_UWord16 fs)
+int WebRtcNetEQ_Init(void *inst, uint16_t fs)
 {
     int ok = 0;
 
@@ -434,8 +437,14 @@ int WebRtcNetEQ_Init(void *inst, WebRtc_UWord16 fs)
     NetEqMainInst->MCUinst.first_packet = 1;
     NetEqMainInst->MCUinst.one_desc = 0;
     NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.extraDelayMs = 0;
+    NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.minimum_delay_ms = 0;
+    NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.maximum_delay_ms =
+        10000;
     NetEqMainInst->MCUinst.NoOfExpandCalls = 0;
     NetEqMainInst->MCUinst.fs = fs;
+
+    /* Not in AV-sync by default. */
+    NetEqMainInst->MCUinst.av_sync = 0;
 
 #ifdef NETEQ_ATEVENT_DECODE
     /* init DTMF decoder */
@@ -447,8 +456,8 @@ int WebRtcNetEQ_Init(void *inst, WebRtc_UWord16 fs)
     WebRtcNetEQ_RTCPInit(&(NetEqMainInst->MCUinst.RTCP_inst), 0);
 
     /* set BufferStat struct to zero */
-    WebRtcSpl_MemSetW16((WebRtc_Word16*) &(NetEqMainInst->MCUinst.BufferStat_inst), 0,
-        sizeof(BufstatsInst_t) / sizeof(WebRtc_Word16));
+    WebRtcSpl_MemSetW16((int16_t*) &(NetEqMainInst->MCUinst.BufferStat_inst), 0,
+        sizeof(BufstatsInst_t) / sizeof(int16_t));
 
     /* reset automode */
     WebRtcNetEQ_ResetAutomode(&(NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst),
@@ -460,6 +469,10 @@ int WebRtcNetEQ_Init(void *inst, WebRtc_UWord16 fs)
     /* set master/slave info to undecided */
     NetEqMainInst->masterSlave = 0;
 #endif
+
+    /* Set to an invalid value. */
+    NetEqMainInst->MCUinst.decoded_packet_sequence_number = -1;
+    NetEqMainInst->MCUinst.decoded_packet_timestamp = 0;
 
     return (ok);
 }
@@ -510,17 +523,50 @@ int WebRtcNetEQ_SetAVTPlayout(void *inst, int PlayoutAVTon)
 #endif
 }
 
-int WebRtcNetEQ_SetExtraDelay(void *inst, int DelayInMs)
-{
-    MainInst_t *NetEqMainInst = (MainInst_t*) inst;
-    if (NetEqMainInst == NULL) return (-1);
-    if ((DelayInMs < 0) || (DelayInMs > 1000))
-    {
-        NetEqMainInst->ErrorCode = -FAULTY_DELAYVALUE;
-        return (-1);
-    }
-    NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.extraDelayMs = DelayInMs;
-    return (0);
+int WebRtcNetEQ_SetExtraDelay(void *inst, int DelayInMs) {
+  MainInst_t *NetEqMainInst = (MainInst_t*) inst;
+  if (NetEqMainInst == NULL) return (-1);
+  if ((DelayInMs < 0) || (DelayInMs > 10000)) {
+    NetEqMainInst->ErrorCode = -FAULTY_DELAYVALUE;
+    return (-1);
+  }
+  NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.extraDelayMs = DelayInMs;
+  return (0);
+}
+
+int WebRtcNetEQ_SetMinimumDelay(void *inst, int minimum_delay_ms) {
+  MainInst_t *NetEqMainInst = (MainInst_t*) inst;
+  if (NetEqMainInst == NULL)  return -1;
+  if (minimum_delay_ms < 0 || minimum_delay_ms > 10000) {
+    NetEqMainInst->ErrorCode = -FAULTY_DELAYVALUE;
+    return -1;
+  }
+  if ((NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.maximum_delay_ms >
+      0) && (minimum_delay_ms >
+      NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.maximum_delay_ms)) {
+    NetEqMainInst->ErrorCode = -FAULTY_DELAYVALUE;
+    return -1;
+  }
+  NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.minimum_delay_ms =
+      minimum_delay_ms;
+  return 0;
+}
+
+int WebRtcNetEQ_SetMaximumDelay(void *inst, int maximum_delay_ms) {
+  MainInst_t *NetEqMainInst = (MainInst_t*) inst;
+  if (NetEqMainInst == NULL)  return -1;
+  if (maximum_delay_ms < 0 || maximum_delay_ms > 10000) {
+      NetEqMainInst->ErrorCode = -FAULTY_DELAYVALUE;
+      return -1;
+  }
+  if (maximum_delay_ms <
+      NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.minimum_delay_ms) {
+    NetEqMainInst->ErrorCode = -FAULTY_DELAYVALUE;
+    return -1;
+  }
+  NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.maximum_delay_ms =
+      maximum_delay_ms;
+  return 0;
 }
 
 int WebRtcNetEQ_SetPlayoutMode(void *inst, enum WebRtcNetEQPlayoutMode playoutMode)
@@ -604,8 +650,8 @@ int WebRtcNetEQ_CodecDbReset(void *inst)
     return (0);
 }
 
-int WebRtcNetEQ_CodecDbGetSizeInfo(void *inst, WebRtc_Word16 *UsedEntries,
-                                   WebRtc_Word16 *MaxEntries)
+int WebRtcNetEQ_CodecDbGetSizeInfo(void *inst, int16_t *UsedEntries,
+                                   int16_t *MaxEntries)
 {
     MainInst_t *NetEqMainInst = (MainInst_t*) inst;
     if (NetEqMainInst == NULL) return (-1);
@@ -614,7 +660,7 @@ int WebRtcNetEQ_CodecDbGetSizeInfo(void *inst, WebRtc_Word16 *UsedEntries,
     return (0);
 }
 
-int WebRtcNetEQ_CodecDbGetCodecInfo(void *inst, WebRtc_Word16 Entry,
+int WebRtcNetEQ_CodecDbGetCodecInfo(void *inst, int16_t Entry,
                                     enum WebRtcNetEQDecoder *codec)
 {
     int i;
@@ -665,7 +711,7 @@ int WebRtcNetEQ_CodecDbRemove(void *inst, enum WebRtcNetEQDecoder codec)
     if (NetEqMainInst == NULL) return (-1);
 
     /* check if currently used codec is being removed */
-    if (NetEqMainInst->MCUinst.current_Codec == (WebRtc_Word16) codec)
+    if (NetEqMainInst->MCUinst.current_Codec == (int16_t) codec)
     {
         /* set function pointers to NULL to prevent RecOut from using the codec */
         NetEqMainInst->DSPinst.codec_ptr_inst.funcDecode = NULL;
@@ -692,8 +738,8 @@ int WebRtcNetEQ_CodecDbRemove(void *inst, enum WebRtcNetEQDecoder codec)
  * Real-time functions
  */
 
-int WebRtcNetEQ_RecIn(void *inst, WebRtc_Word16 *p_w16datagramstart, WebRtc_Word16 w16_RTPlen,
-                      WebRtc_UWord32 uw32_timeRec)
+int WebRtcNetEQ_RecIn(void *inst, int16_t *p_w16datagramstart, int16_t w16_RTPlen,
+                      uint32_t uw32_timeRec)
 {
     int ok = 0;
     RTPPacket_t RTPpacket;
@@ -742,8 +788,8 @@ int WebRtcNetEQ_RecIn(void *inst, WebRtc_Word16 *p_w16datagramstart, WebRtc_Word
  *                            -1 - Error
  */
 int WebRtcNetEQ_RecInRTPStruct(void *inst, WebRtcNetEQ_RTPInfo *rtpInfo,
-                               const WebRtc_UWord8 *payloadPtr, WebRtc_Word16 payloadLenBytes,
-                               WebRtc_UWord32 uw32_timeRec)
+                               const uint8_t *payloadPtr, int16_t payloadLenBytes,
+                               uint32_t uw32_timeRec)
 {
     int ok = 0;
     RTPPacket_t RTPpacket;
@@ -766,7 +812,7 @@ int WebRtcNetEQ_RecInRTPStruct(void *inst, WebRtcNetEQ_RTPInfo *rtpInfo,
     RTPpacket.seqNumber = rtpInfo->sequenceNumber;
     RTPpacket.timeStamp = rtpInfo->timeStamp;
     RTPpacket.ssrc = rtpInfo->SSRC;
-    RTPpacket.payload = (const WebRtc_Word16*) payloadPtr;
+    RTPpacket.payload = (const int16_t*) payloadPtr;
     RTPpacket.payloadLen = payloadLenBytes;
     RTPpacket.starts_byte1 = 0;
 
@@ -779,7 +825,7 @@ int WebRtcNetEQ_RecInRTPStruct(void *inst, WebRtcNetEQ_RTPInfo *rtpInfo,
     return (ok);
 }
 
-int WebRtcNetEQ_RecOut(void *inst, WebRtc_Word16 *pw16_outData, WebRtc_Word16 *pw16_len)
+int WebRtcNetEQ_RecOut(void *inst, int16_t *pw16_outData, int16_t *pw16_len)
 {
     int ok = 0;
     MainInst_t *NetEqMainInst = (MainInst_t*) inst;
@@ -803,7 +849,7 @@ int WebRtcNetEQ_RecOut(void *inst, WebRtc_Word16 *pw16_outData, WebRtc_Word16 *p
 #endif
 
     ok = WebRtcNetEQ_RecOutInternal(&NetEqMainInst->DSPinst, pw16_outData,
-        pw16_len, 0 /* not BGN only */);
+        pw16_len, 0 /* not BGN only */, NetEqMainInst->MCUinst.av_sync);
     if (ok != 0)
     {
         NetEqMainInst->ErrorCode = -ok;
@@ -833,9 +879,9 @@ int WebRtcNetEQ_RecOut(void *inst, WebRtc_Word16 *pw16_outData, WebRtc_Word16 *p
  *						  -1 - Error
  */
 
-int WebRtcNetEQ_RecOutMasterSlave(void *inst, WebRtc_Word16 *pw16_outData,
-                                  WebRtc_Word16 *pw16_len, void *msInfo,
-                                  WebRtc_Word16 isMaster)
+int WebRtcNetEQ_RecOutMasterSlave(void *inst, int16_t *pw16_outData,
+                                  int16_t *pw16_len, void *msInfo,
+                                  int16_t isMaster)
 {
 #ifndef NETEQ_STEREO
     /* Stereo not supported */
@@ -884,7 +930,7 @@ int WebRtcNetEQ_RecOutMasterSlave(void *inst, WebRtc_Word16 *pw16_outData,
     }
 
     ok  = WebRtcNetEQ_RecOutInternal(&NetEqMainInst->DSPinst, pw16_outData,
-        pw16_len, 0 /* not BGN only */);
+        pw16_len, 0 /* not BGN only */, NetEqMainInst->MCUinst.av_sync);
     if (ok != 0)
     {
         NetEqMainInst->ErrorCode = -ok;
@@ -911,8 +957,8 @@ int WebRtcNetEQ_GetMasterSlaveInfoSize()
 }
 
 /* Special RecOut that does not do any decoding. */
-int WebRtcNetEQ_RecOutNoDecode(void *inst, WebRtc_Word16 *pw16_outData,
-                               WebRtc_Word16 *pw16_len)
+int WebRtcNetEQ_RecOutNoDecode(void *inst, int16_t *pw16_outData,
+                               int16_t *pw16_len)
 {
     int ok = 0;
     MainInst_t *NetEqMainInst = (MainInst_t*) inst;
@@ -955,7 +1001,7 @@ int WebRtcNetEQ_RecOutNoDecode(void *inst, WebRtc_Word16 *pw16_outData,
 #endif
 
     ok = WebRtcNetEQ_RecOutInternal(&NetEqMainInst->DSPinst, pw16_outData,
-        pw16_len, 1 /* BGN only */);
+        pw16_len, 1 /* BGN only */, NetEqMainInst->MCUinst.av_sync);
     if (ok != 0)
     {
         NetEqMainInst->ErrorCode = -ok;
@@ -996,7 +1042,7 @@ int WebRtcNetEQ_GetRTCPStatsNoReset(void *inst, WebRtcNetEQ_RTCPStat *RTCP_inst)
     return (ok);
 }
 
-int WebRtcNetEQ_GetSpeechTimeStamp(void *inst, WebRtc_UWord32 *timestamp)
+int WebRtcNetEQ_GetSpeechTimeStamp(void *inst, uint32_t *timestamp)
 {
     MainInst_t *NetEqMainInst = (MainInst_t*) inst;
     if (NetEqMainInst == NULL) return (-1);
@@ -1098,18 +1144,18 @@ int WebRtcNetEQ_GetSpeechOutputType(void *inst, enum WebRtcNetEQOutputType *outp
 #define WEBRTC_NETEQ_CONCEALMENTFLAG_SUPRESS    0x04
 #define WEBRTC_NETEQ_CONCEALMENTFLAG_CNGACTIVE  0x80
 
-int WebRtcNetEQ_VQmonRecOutStatistics(void *inst, WebRtc_UWord16 *validVoiceDurationMs,
-                                      WebRtc_UWord16 *concealedVoiceDurationMs,
-                                      WebRtc_UWord8 *concealedVoiceFlags)
+int WebRtcNetEQ_VQmonRecOutStatistics(void *inst, uint16_t *validVoiceDurationMs,
+                                      uint16_t *concealedVoiceDurationMs,
+                                      uint8_t *concealedVoiceFlags)
 {
     MainInst_t *NetEqMainInst = (MainInst_t*) inst;
-    WebRtc_Word16 fs_mult;
-    WebRtc_Word16 ms_lost;
+    int16_t fs_mult;
+    int16_t ms_lost;
     if (NetEqMainInst == NULL) return (-1);
     fs_mult = WebRtcSpl_DivW32W16ResW16(NetEqMainInst->MCUinst.fs, 8000);
 
     ms_lost = WebRtcSpl_DivW32W16ResW16(
-        (WebRtc_Word32) NetEqMainInst->DSPinst.w16_concealedTS, (WebRtc_Word16) (8 * fs_mult));
+        (int32_t) NetEqMainInst->DSPinst.w16_concealedTS, (int16_t) (8 * fs_mult));
     if (ms_lost > NetEqMainInst->DSPinst.millisecondsPerCall) ms_lost
         = NetEqMainInst->DSPinst.millisecondsPerCall;
 
@@ -1128,8 +1174,8 @@ int WebRtcNetEQ_VQmonRecOutStatistics(void *inst, WebRtc_UWord16 *validVoiceDura
     return (0);
 }
 
-int WebRtcNetEQ_VQmonGetConfiguration(void *inst, WebRtc_UWord16 *absMaxDelayMs,
-                                      WebRtc_UWord8 *adaptationRate)
+int WebRtcNetEQ_VQmonGetConfiguration(void *inst, uint16_t *absMaxDelayMs,
+                                      uint8_t *adaptationRate)
 {
     /* Dummy check the inst, just to avoid compiler warnings. */
     if (inst == NULL)
@@ -1143,13 +1189,13 @@ int WebRtcNetEQ_VQmonGetConfiguration(void *inst, WebRtc_UWord16 *absMaxDelayMs,
     return (0);
 }
 
-int WebRtcNetEQ_VQmonGetRxStatistics(void *inst, WebRtc_UWord16 *avgDelayMs,
-                                     WebRtc_UWord16 *maxDelayMs)
+int WebRtcNetEQ_VQmonGetRxStatistics(void *inst, uint16_t *avgDelayMs,
+                                     uint16_t *maxDelayMs)
 {
     MainInst_t *NetEqMainInst = (MainInst_t*) inst;
     if (NetEqMainInst == NULL) return (-1);
-    *avgDelayMs = (WebRtc_UWord16) (NetEqMainInst->MCUinst.BufferStat_inst.avgDelayMsQ8 >> 8);
-    *maxDelayMs = (WebRtc_UWord16) NetEqMainInst->MCUinst.BufferStat_inst.maxDelayMs;
+    *avgDelayMs = (uint16_t) (NetEqMainInst->MCUinst.BufferStat_inst.avgDelayMsQ8 >> 8);
+    *maxDelayMs = (uint16_t) NetEqMainInst->MCUinst.BufferStat_inst.maxDelayMs;
     return (0);
 }
 
@@ -1163,8 +1209,8 @@ int WebRtcNetEQ_GetNetworkStatistics(void *inst, WebRtcNetEQ_NetworkStatistics *
 
 {
 
-    WebRtc_UWord16 tempU16;
-    WebRtc_UWord32 tempU32, tempU32_2;
+    uint16_t tempU16;
+    uint32_t tempU32, tempU32_2;
     int numShift;
     MainInst_t *NetEqMainInst = (MainInst_t*) inst;
 
@@ -1179,21 +1225,22 @@ int WebRtcNetEQ_GetNetworkStatistics(void *inst, WebRtcNetEQ_NetworkStatistics *
 
     if (NetEqMainInst->MCUinst.fs != 0)
     {
-        WebRtc_Word32 temp32;
+        int32_t temp32;
         /* Query packet buffer for number of samples. */
         temp32 = WebRtcNetEQ_PacketBufferGetSize(
             &NetEqMainInst->MCUinst.PacketBuffer_inst,
-            &NetEqMainInst->MCUinst.codec_DB_inst);
+            &NetEqMainInst->MCUinst.codec_DB_inst,
+            NetEqMainInst->MCUinst.av_sync);
 
         /* Divide by sample rate.
          * Calculate temp32 * 1000 / fs to get result in ms. */
-        stats->currentBufferSize = (WebRtc_UWord16)
+        stats->currentBufferSize = (uint16_t)
             WebRtcSpl_DivU32U16(temp32 * 1000, NetEqMainInst->MCUinst.fs);
 
         /* Add number of samples yet to play in sync buffer. */
-        temp32 = (WebRtc_Word32) (NetEqMainInst->DSPinst.endPosition -
+        temp32 = (int32_t) (NetEqMainInst->DSPinst.endPosition -
             NetEqMainInst->DSPinst.curPosition);
-        stats->currentBufferSize += (WebRtc_UWord16)
+        stats->currentBufferSize += (uint16_t)
             WebRtcSpl_DivU32U16(temp32 * 1000, NetEqMainInst->MCUinst.fs);
     }
     else
@@ -1206,15 +1253,15 @@ int WebRtcNetEQ_GetNetworkStatistics(void *inst, WebRtcNetEQ_NetworkStatistics *
     /* Get optimal buffer size */
     /***************************/
 
-    if (NetEqMainInst->MCUinst.fs != 0 && NetEqMainInst->MCUinst.fs <= WEBRTC_SPL_WORD16_MAX)
+    if (NetEqMainInst->MCUinst.fs != 0)
     {
         /* preferredBufferSize = Bopt * packSizeSamples / (fs/1000) */
         stats->preferredBufferSize
-            = (WebRtc_UWord16) WEBRTC_SPL_MUL_16_16(
-                (WebRtc_Word16) ((NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.optBufLevel) >> 8), /* optimal buffer level in packets shifted to Q0 */
+            = (uint16_t) WEBRTC_SPL_MUL_16_16(
+                (int16_t) ((NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.optBufLevel) >> 8), /* optimal buffer level in packets shifted to Q0 */
                 WebRtcSpl_DivW32W16ResW16(
-                    (WebRtc_Word32) NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.packetSpeechLenSamp, /* samples per packet */
-                    WebRtcSpl_DivW32W16ResW16( (WebRtc_Word32) NetEqMainInst->MCUinst.fs, (WebRtc_Word16) 1000 ) /* samples per ms */
+                    (int32_t) NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst.packetSpeechLenSamp, /* samples per packet */
+                    WebRtcSpl_DivW32W16ResW16( (int32_t) NetEqMainInst->MCUinst.fs, (int16_t) 1000 ) /* samples per ms */
                 ) );
 
         /* add extra delay */
@@ -1278,13 +1325,13 @@ int WebRtcNetEQ_GetNetworkStatistics(void *inst, WebRtcNetEQ_NetworkStatistics *
                 tempU32 >>= 1; /* right-shift 1 step */
                 numShift--; /* compensate in numerator */
             }
-            tempU16 = (WebRtc_UWord16) tempU32;
+            tempU16 = (uint16_t) tempU32;
 
             /* do the shift of numerator */
             tempU32
-                = WEBRTC_SPL_SHIFT_W32( (WebRtc_UWord32) NetEqMainInst->MCUinst.lostTS, numShift);
+                = WEBRTC_SPL_SHIFT_W32( (uint32_t) NetEqMainInst->MCUinst.lostTS, numShift);
 
-            stats->currentPacketLossRate = (WebRtc_UWord16) WebRtcSpl_DivU32U16(tempU32,
+            stats->currentPacketLossRate = (uint16_t) WebRtcSpl_DivU32U16(tempU32,
                 tempU16);
         }
     }
@@ -1304,7 +1351,7 @@ int WebRtcNetEQ_GetNetworkStatistics(void *inst, WebRtcNetEQ_NetworkStatistics *
 
     /* number of discarded samples */
     tempU32_2
-        = WEBRTC_SPL_MUL_16_U16( (WebRtc_Word16) NetEqMainInst->MCUinst.PacketBuffer_inst.packSizeSamples,
+        = WEBRTC_SPL_MUL_16_U16( (int16_t) NetEqMainInst->MCUinst.PacketBuffer_inst.packSizeSamples,
             NetEqMainInst->MCUinst.PacketBuffer_inst.discardedPackets);
 
     if (tempU32_2 == 0)
@@ -1341,12 +1388,12 @@ int WebRtcNetEQ_GetNetworkStatistics(void *inst, WebRtcNetEQ_NetworkStatistics *
                 tempU32 >>= 1; /* right-shift 1 step */
                 numShift--; /* compensate in numerator */
             }
-            tempU16 = (WebRtc_UWord16) tempU32;
+            tempU16 = (uint16_t) tempU32;
 
             /* do the shift of numerator */
             tempU32 = WEBRTC_SPL_SHIFT_W32( tempU32_2, numShift);
 
-            stats->currentDiscardRate = (WebRtc_UWord16) WebRtcSpl_DivU32U16(tempU32, tempU16);
+            stats->currentDiscardRate = (uint16_t) WebRtcSpl_DivU32U16(tempU32, tempU16);
         }
     }
     else
@@ -1397,13 +1444,13 @@ int WebRtcNetEQ_GetNetworkStatistics(void *inst, WebRtcNetEQ_NetworkStatistics *
                 tempU32 >>= 1; /* right-shift 1 step */
                 numShift--; /* compensate in numerator */
             }
-            tempU16 = (WebRtc_UWord16) tempU32;
+            tempU16 = (uint16_t) tempU32;
 
             /* do the shift of numerator */
             tempU32
                 = WEBRTC_SPL_SHIFT_W32( NetEqMainInst->DSPinst.statInst.accelerateLength, numShift);
 
-            stats->currentAccelerateRate = (WebRtc_UWord16) WebRtcSpl_DivU32U16(tempU32,
+            stats->currentAccelerateRate = (uint16_t) WebRtcSpl_DivU32U16(tempU32,
                 tempU16);
         }
     }
@@ -1451,13 +1498,13 @@ int WebRtcNetEQ_GetNetworkStatistics(void *inst, WebRtcNetEQ_NetworkStatistics *
                 tempU32 >>= 1; /* right-shift 1 step */
                 numShift--; /* compensate in numerator */
             }
-            tempU16 = (WebRtc_UWord16) tempU32;
+            tempU16 = (uint16_t) tempU32;
 
             /* do the shift of numerator */
             tempU32
                 = WEBRTC_SPL_SHIFT_W32( NetEqMainInst->DSPinst.statInst.expandLength, numShift);
 
-            stats->currentExpandRate = (WebRtc_UWord16) WebRtcSpl_DivU32U16(tempU32, tempU16);
+            stats->currentExpandRate = (uint16_t) WebRtcSpl_DivU32U16(tempU32, tempU16);
         }
     }
     else
@@ -1504,13 +1551,13 @@ int WebRtcNetEQ_GetNetworkStatistics(void *inst, WebRtcNetEQ_NetworkStatistics *
                 tempU32 >>= 1; /* right-shift 1 step */
                 numShift--; /* compensate in numerator */
             }
-            tempU16 = (WebRtc_UWord16) tempU32;
+            tempU16 = (uint16_t) tempU32;
 
             /* do the shift of numerator */
             tempU32
                 = WEBRTC_SPL_SHIFT_W32( NetEqMainInst->DSPinst.statInst.preemptiveLength, numShift);
 
-            stats->currentPreemptiveRate = (WebRtc_UWord16) WebRtcSpl_DivU32U16(tempU32,
+            stats->currentPreemptiveRate = (uint16_t) WebRtcSpl_DivU32U16(tempU32,
                 tempU16);
         }
     }
@@ -1640,4 +1687,83 @@ int WebRtcNetEQ_SetVADMode(void *inst, int mode)
     return (-1);
 #endif /* NETEQ_VAD */
 
+}
+
+void WebRtcNetEQ_GetProcessingActivity(void *inst,
+                                       WebRtcNetEQ_ProcessingActivity *stats) {
+  MainInst_t *NetEqMainInst = (MainInst_t*) inst;
+
+  stats->accelerate_bgn_samples =
+      NetEqMainInst->DSPinst.activity_stats.accelerate_bgn_samples;
+  stats->accelerate_normal_samples =
+      NetEqMainInst->DSPinst.activity_stats.accelarate_normal_samples;
+
+  stats->expand_bgn_sampels =
+      NetEqMainInst->DSPinst.activity_stats.expand_bgn_samples;
+  stats->expand_normal_samples =
+      NetEqMainInst->DSPinst.activity_stats.expand_normal_samples;
+
+  stats->preemptive_expand_bgn_samples =
+      NetEqMainInst->DSPinst.activity_stats.preemptive_expand_bgn_samples;
+  stats->preemptive_expand_normal_samples =
+      NetEqMainInst->DSPinst.activity_stats.preemptive_expand_normal_samples;
+
+  stats->merge_expand_bgn_samples =
+      NetEqMainInst->DSPinst.activity_stats.merge_expand_bgn_samples;
+  stats->merge_expand_normal_samples =
+      NetEqMainInst->DSPinst.activity_stats.merge_expand_normal_samples;
+
+  WebRtcNetEQ_ClearActivityStats(&NetEqMainInst->DSPinst);
+}
+
+void WebRtcNetEQ_EnableAVSync(void* inst, int enable) {
+  MainInst_t *NetEqMainInst = (MainInst_t*) inst;
+  NetEqMainInst->MCUinst.av_sync = (enable != 0) ? 1 : 0;
+}
+
+int WebRtcNetEQ_RecInSyncRTP(void* inst, WebRtcNetEQ_RTPInfo* rtp_info,
+                             uint32_t receive_timestamp) {
+  MainInst_t *NetEqMainInst = (MainInst_t*) inst;
+  if (NetEqMainInst->MCUinst.av_sync == 0)
+    return -1;
+  if (WebRtcNetEQ_RecInRTPStruct(inst, rtp_info, kSyncPayload,
+                                 SYNC_PAYLOAD_LEN_BYTES,
+                                 receive_timestamp) < 0) {
+    return -1;
+  }
+  return SYNC_PAYLOAD_LEN_BYTES;
+}
+
+int WebRtcNetEQ_GetRequiredDelayMs(const void* inst) {
+  const MainInst_t* NetEqMainInst = (MainInst_t*)inst;
+  const AutomodeInst_t* auto_mode = (NetEqMainInst == NULL) ? NULL :
+      &NetEqMainInst->MCUinst.BufferStat_inst.Automode_inst;
+
+  /* Instance sanity */
+  if (NetEqMainInst == NULL || auto_mode == NULL)
+    return 0;
+
+  if (NetEqMainInst->MCUinst.fs == 0)
+    return 0;  // Sampling rate not initialized.
+
+  /* |required_delay_q8| has the unit of packets in Q8 domain, therefore,
+   * the corresponding delay is
+   * required_delay_ms = (1000 * required_delay_q8 * samples_per_packet /
+   *     sample_rate_hz) / 256;
+   */
+  return (auto_mode->required_delay_q8 *
+      ((auto_mode->packetSpeechLenSamp * 1000) / NetEqMainInst->MCUinst.fs) +
+      128) >> 8;
+}
+
+int WebRtcNetEQ_DecodedRtpInfo(const void* inst,
+                               int* sequence_number,
+                               uint32_t* timestamp) {
+  const MainInst_t *NetEqMainInst = (inst == NULL) ? NULL :
+      (const MainInst_t*) inst;
+  if (NetEqMainInst->MCUinst.decoded_packet_sequence_number < 0)
+    return -1;
+  *sequence_number = NetEqMainInst->MCUinst.decoded_packet_sequence_number;
+  *timestamp = NetEqMainInst->MCUinst.decoded_packet_timestamp;
+  return 0;
 }

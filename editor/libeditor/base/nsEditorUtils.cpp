@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "nsCOMArray.h"
 #include "nsComponentManagerUtils.h"
 #include "nsEditorUtils.h"
@@ -24,6 +24,7 @@ class nsIDOMRange;
 class nsISupports;
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 /******************************************************************************
  * nsAutoSelectionReset
@@ -189,8 +190,7 @@ nsEditorHookUtils::GetHookEnumeratorFromDocument(nsIDOMDocument *aDoc,
   nsCOMPtr<nsIDocument> doc = do_QueryInterface(aDoc);
   NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsISupports> container = doc->GetContainer();
-  nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(container);
+  nsCOMPtr<nsIDocShell> docShell = doc->GetDocShell();
   nsCOMPtr<nsIClipboardDragDropHookList> hookObj = do_GetInterface(docShell);
   NS_ENSURE_TRUE(hookObj, NS_ERROR_FAILURE);
 

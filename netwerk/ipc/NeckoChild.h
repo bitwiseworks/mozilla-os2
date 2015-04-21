@@ -27,29 +27,49 @@ public:
 
 protected:
   virtual PHttpChannelChild*
-    AllocPHttpChannel(PBrowserChild*, const SerializedLoadContext&,
-                      const HttpChannelCreationArgs& aOpenArgs);
-  virtual bool DeallocPHttpChannel(PHttpChannelChild*);
-  virtual PCookieServiceChild* AllocPCookieService();
-  virtual bool DeallocPCookieService(PCookieServiceChild*);
-  virtual PWyciwygChannelChild* AllocPWyciwygChannel();
-  virtual bool DeallocPWyciwygChannel(PWyciwygChannelChild*);
+    AllocPHttpChannelChild(PBrowserChild*, const SerializedLoadContext&,
+                           const HttpChannelCreationArgs& aOpenArgs) MOZ_OVERRIDE;
+  virtual bool DeallocPHttpChannelChild(PHttpChannelChild*) MOZ_OVERRIDE;
+  virtual PCookieServiceChild* AllocPCookieServiceChild() MOZ_OVERRIDE;
+  virtual bool DeallocPCookieServiceChild(PCookieServiceChild*) MOZ_OVERRIDE;
+  virtual PWyciwygChannelChild* AllocPWyciwygChannelChild() MOZ_OVERRIDE;
+  virtual bool DeallocPWyciwygChannelChild(PWyciwygChannelChild*) MOZ_OVERRIDE;
   virtual PFTPChannelChild*
-    AllocPFTPChannel(PBrowserChild* aBrowser,
-                     const SerializedLoadContext& aSerialized,
-                     const FTPChannelCreationArgs& aOpenArgs);
-  virtual bool DeallocPFTPChannel(PFTPChannelChild*);
-  virtual PWebSocketChild* AllocPWebSocket(PBrowserChild*, const SerializedLoadContext&);
-  virtual bool DeallocPWebSocket(PWebSocketChild*);
-  virtual PTCPSocketChild* AllocPTCPSocket(const nsString& aHost,
-                                           const uint16_t& aPort,
-                                           const bool& useSSL,
-                                           const nsString& aBinaryType,
-                                           PBrowserChild* aBrowser);
-  virtual bool DeallocPTCPSocket(PTCPSocketChild*);
-  virtual PRemoteOpenFileChild* AllocPRemoteOpenFile(const URIParams&,
-                                                     PBrowserChild*);
-  virtual bool DeallocPRemoteOpenFile(PRemoteOpenFileChild*);
+    AllocPFTPChannelChild(PBrowserChild* aBrowser,
+                          const SerializedLoadContext& aSerialized,
+                          const FTPChannelCreationArgs& aOpenArgs) MOZ_OVERRIDE;
+  virtual bool DeallocPFTPChannelChild(PFTPChannelChild*) MOZ_OVERRIDE;
+  virtual PWebSocketChild*
+    AllocPWebSocketChild(PBrowserChild*, const SerializedLoadContext&) MOZ_OVERRIDE;
+  virtual bool DeallocPWebSocketChild(PWebSocketChild*) MOZ_OVERRIDE;
+  virtual PTCPSocketChild* AllocPTCPSocketChild() MOZ_OVERRIDE;
+  virtual bool DeallocPTCPSocketChild(PTCPSocketChild*) MOZ_OVERRIDE;
+  virtual PTCPServerSocketChild*
+    AllocPTCPServerSocketChild(const uint16_t& aLocalPort,
+                               const uint16_t& aBacklog,
+                               const nsString& aBinaryType) MOZ_OVERRIDE;
+  virtual bool DeallocPTCPServerSocketChild(PTCPServerSocketChild*) MOZ_OVERRIDE;
+  virtual PUDPSocketChild* AllocPUDPSocketChild(const nsCString& aHost,
+                                                const uint16_t& aPort,
+                                                const nsCString& aFilter) MOZ_OVERRIDE;
+  virtual bool DeallocPUDPSocketChild(PUDPSocketChild*) MOZ_OVERRIDE;
+  virtual PDNSRequestChild* AllocPDNSRequestChild(const nsCString& aHost,
+                                                  const uint32_t& aFlags) MOZ_OVERRIDE;
+  virtual bool DeallocPDNSRequestChild(PDNSRequestChild*) MOZ_OVERRIDE;
+  virtual PRemoteOpenFileChild*
+    AllocPRemoteOpenFileChild(const URIParams&,
+                              const OptionalURIParams&) MOZ_OVERRIDE;
+  virtual bool DeallocPRemoteOpenFileChild(PRemoteOpenFileChild*) MOZ_OVERRIDE;
+  virtual PRtspControllerChild* AllocPRtspControllerChild() MOZ_OVERRIDE;
+  virtual bool DeallocPRtspControllerChild(PRtspControllerChild*) MOZ_OVERRIDE;
+  virtual PRtspChannelChild*
+    AllocPRtspChannelChild(const RtspChannelConnectArgs& aArgs)
+                           MOZ_OVERRIDE;
+  virtual bool DeallocPRtspChannelChild(PRtspChannelChild*) MOZ_OVERRIDE;
+  virtual PChannelDiverterChild*
+  AllocPChannelDiverterChild(const ChannelDiverterArgs& channel) MOZ_OVERRIDE;
+  virtual bool
+  DeallocPChannelDiverterChild(PChannelDiverterChild* actor) MOZ_OVERRIDE;
 };
 
 /**

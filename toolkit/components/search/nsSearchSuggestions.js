@@ -187,6 +187,14 @@ SuggestAutoComplete.prototype = {
   _formHistoryTimer: null,
 
   /**
+   * Maximum number of history items displayed. This is capped at 7
+   * because the primary consumer (Firefox search bar) displays 10 rows
+   * by default, and so we want to leave some space for suggestions
+   * to be visible.
+   */
+  _historyLimit: 7,
+
+  /**
    * This clears all the per-request state.
    */
   _reset: function SAC_reset() {
@@ -307,7 +315,13 @@ SuggestAutoComplete.prototype = {
 
     this._clearServerErrors();
 
-    var serverResults = JSON.parse(responseText);
+    try {
+      var serverResults = JSON.parse(responseText);
+    } catch(ex) {
+      Components.utils.reportError("Failed to parse JSON from " + this._suggestURI.spec + ": " + ex);
+      return;
+    }
+
     var searchString = serverResults[0] || "";
     var results = serverResults[1] || [];
 
@@ -319,7 +333,8 @@ SuggestAutoComplete.prototype = {
     if (this._includeFormHistory && this._formHistoryResult &&
         (this._formHistoryResult.searchResult ==
          Ci.nsIAutoCompleteResult.RESULT_SUCCESS)) {
-      for (var i = 0; i < this._formHistoryResult.matchCount; ++i) {
+      var maxHistoryItems = Math.min(this._formHistoryResult.matchCount, this._historyLimit);
+      for (var i = 0; i < maxHistoryItems; ++i) {
         var term = this._formHistoryResult.getValueAt(i);
 
         // we don't want things to appear in both history and suggestions

@@ -13,13 +13,20 @@ class WebGLBuffer;
 struct WebGLVertexAttribData {
     // note that these initial values are what GL initializes vertex attribs to
     WebGLVertexAttribData()
-        : buf(0), stride(0), size(4), byteOffset(0),
-          type(LOCAL_GL_FLOAT), enabled(false), normalized(false)
+        : buf(0)
+        , stride(0)
+        , size(4)
+        , divisor(0) // OpenGL ES 3.0 specs paragraphe 6.2 p240
+        , byteOffset(0)
+        , type(LOCAL_GL_FLOAT)
+        , enabled(false)
+        , normalized(false)
     { }
 
     WebGLRefPtr<WebGLBuffer> buf;
-    WebGLuint stride;
-    WebGLuint size;
+    GLuint stride;
+    GLuint size;
+    GLuint divisor;
     GLuint byteOffset;
     GLenum type;
     bool enabled;
@@ -68,8 +75,7 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
                             const char* aName,
                             uint32_t aFlags = 0)
 {
-  CycleCollectionNoteEdgeName(aCallback, aName, aFlags);
-  aCallback.NoteXPCOMChild(aField.buf);
+  CycleCollectionNoteChild(aCallback, aField.buf.get(), aName, aFlags);
 }
 
 #endif

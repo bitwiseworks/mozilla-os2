@@ -29,7 +29,7 @@ private:
   GnomeVFSMimeApplication *mApp;
 };
 
-NS_IMPL_ISUPPORTS1(nsGnomeVFSMimeApp, nsIGnomeVFSMimeApp)
+NS_IMPL_ISUPPORTS(nsGnomeVFSMimeApp, nsIGnomeVFSMimeApp)
 
 NS_IMETHODIMP
 nsGnomeVFSMimeApp::GetId(nsACString& aId)
@@ -99,7 +99,7 @@ public:
   uint32_t            mIndex;
 };
 
-NS_IMPL_ISUPPORTS1(UTF8StringEnumerator, nsIUTF8StringEnumerator)
+NS_IMPL_ISUPPORTS(UTF8StringEnumerator, nsIUTF8StringEnumerator)
 
 NS_IMETHODIMP
 UTF8StringEnumerator::HasMore(bool *aResult)
@@ -150,7 +150,7 @@ nsGnomeVFSService::Init()
   return gnome_vfs_init() ? NS_OK : NS_ERROR_FAILURE;
 }
 
-NS_IMPL_ISUPPORTS1(nsGnomeVFSService, nsIGnomeVFSService)
+NS_IMPL_ISUPPORTS(nsGnomeVFSService, nsIGnomeVFSService)
 
 NS_IMETHODIMP
 nsGnomeVFSService::GetMimeTypeFromExtension(const nsACString &aExtension,
@@ -204,7 +204,7 @@ nsGnomeVFSService::ShowURI(nsIURI *aURI)
   nsAutoCString spec;
   aURI->GetSpec(spec);
 
-  if (gnome_vfs_url_show_with_env(spec.get(), NULL) == GNOME_VFS_OK)
+  if (gnome_vfs_url_show_with_env(spec.get(), nullptr) == GNOME_VFS_OK)
     return NS_OK;
 
   return NS_ERROR_FAILURE;
@@ -216,7 +216,7 @@ nsGnomeVFSService::ShowURIForInput(const nsACString &aUri)
   char* spec = gnome_vfs_make_uri_from_input(PromiseFlatCString(aUri).get());
   nsresult rv = NS_ERROR_FAILURE;
 
-  if (gnome_vfs_url_show_with_env(spec, NULL) == GNOME_VFS_OK)
+  if (gnome_vfs_url_show_with_env(spec, nullptr) == GNOME_VFS_OK)
     rv = NS_OK;
 
   g_free(spec);

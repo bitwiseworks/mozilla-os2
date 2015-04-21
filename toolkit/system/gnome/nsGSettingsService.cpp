@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsGSettingsService.h"
 #include "nsStringAPI.h"
@@ -84,7 +84,7 @@ public:
   NS_DECL_NSIGSETTINGSCOLLECTION
 
   nsGSettingsCollection(GSettings* aSettings) : mSettings(aSettings),
-                                                mKeys(NULL) {}
+                                                mKeys(nullptr) {}
   ~nsGSettingsCollection();
 
 private:
@@ -108,7 +108,7 @@ nsGSettingsCollection::KeyExists(const nsACString& aKey)
   if (!mKeys)
     mKeys = g_settings_list_keys(mSettings);
 
-  for (uint32_t i = 0; mKeys[i] != NULL; i++) {
+  for (uint32_t i = 0; mKeys[i] != nullptr; i++) {
     if (aKey.Equals(mKeys[i]))
       return true;
   }
@@ -133,7 +133,7 @@ nsGSettingsCollection::SetValue(const nsACString& aKey,
                               aValue);
 }
 
-NS_IMPL_ISUPPORTS1(nsGSettingsCollection, nsIGSettingsCollection)
+NS_IMPL_ISUPPORTS(nsGSettingsCollection, nsIGSettingsCollection)
 
 NS_IMETHODIMP
 nsGSettingsCollection::SetString(const nsACString& aKey,
@@ -190,7 +190,7 @@ nsGSettingsCollection::GetString(const nsACString& aKey,
     return NS_ERROR_FAILURE;
   }
 
-  aResult.Assign(g_variant_get_string(value, NULL));
+  aResult.Assign(g_variant_get_string(value, nullptr));
   g_variant_unref(value);
 
   return NS_OK;
@@ -269,7 +269,7 @@ nsGSettingsCollection::GetStringList(const nsACString& aKey, nsIArray** aResult)
     return NS_ERROR_FAILURE;
   }
 
-  const gchar ** gs_strings = g_variant_get_strv(value, NULL);
+  const gchar ** gs_strings = g_variant_get_strv(value, nullptr);
   if (!gs_strings) {
     // empty array
     NS_ADDREF(*aResult = items);
@@ -278,7 +278,7 @@ nsGSettingsCollection::GetStringList(const nsACString& aKey, nsIArray** aResult)
   }
 
   const gchar** p_gs_strings = gs_strings;
-  while (*p_gs_strings != NULL)
+  while (*p_gs_strings != nullptr)
   {
     nsCOMPtr<nsISupportsCString> obj(do_CreateInstance(NS_SUPPORTS_CSTRING_CONTRACTID));
     if (obj) {
@@ -319,7 +319,7 @@ nsGSettingsService::Init()
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(nsGSettingsService, nsIGSettingsService)
+NS_IMPL_ISUPPORTS(nsGSettingsService, nsIGSettingsService)
 
 nsGSettingsService::~nsGSettingsService()
 {
@@ -337,7 +337,7 @@ nsGSettingsService::GetCollectionForSchema(const nsACString& schema,
 
   const char * const *schemas = g_settings_list_schemas();
 
-  for (uint32_t i = 0; schemas[i] != NULL; i++) {
+  for (uint32_t i = 0; schemas[i] != nullptr; i++) {
     if (schema.Equals(schemas[i])) {
       GSettings *settings = g_settings_new(PromiseFlatCString(schema).get());
       nsGSettingsCollection *mozGSettings = new nsGSettingsCollection(settings);

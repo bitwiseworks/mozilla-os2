@@ -11,6 +11,11 @@ const CONTEXT_MENU_ID = "#menu_openURL";
 let HUD = null, outputNode = null, contextMenu = null;
 
 function test() {
+  let original = Services.prefs.getBoolPref("devtools.webconsole.filter.networkinfo");
+  Services.prefs.setBoolPref("devtools.webconsole.filter.networkinfo", true);
+  registerCleanupFunction(() => {
+    Services.prefs.setBoolPref("devtools.webconsole.filter.networkinfo", original);
+  });
   addTab(TEST_URI);
   browser.addEventListener("load", function onLoad() {
     browser.removeEventListener("load", onLoad, true);
@@ -53,6 +58,7 @@ function onConsoleMessage(aResults) {
   let isDisabled = !controller || !controller.isCommandEnabled(COMMAND_NAME);
   ok(isDisabled, COMMAND_NAME + " should be disabled.");
 
+  outputNode.selectedItem.scrollIntoView();
   waitForContextMenu(contextMenu, outputNode.selectedItem, () => {
     let isHidden = contextMenu.querySelector(CONTEXT_MENU_ID).hidden;
     ok(isHidden, CONTEXT_MENU_ID + " should be hidden.");
@@ -77,7 +83,9 @@ function testOnNetActivity() {
 
 function onNetworkMessage(aResults) {
   outputNode.focus();
-  outputNode.selectedItem = [...aResults[0].matched][0];
+  let msg = [...aResults[0].matched][0];
+  ok(msg, "network message");
+  HUD.ui.output.selectMessage(msg);
 
   let currentTab = gBrowser.selectedTab;
   let newTab = null;
@@ -92,7 +100,7 @@ function onNetworkMessage(aResults) {
     newTab.linkedBrowser.removeEventListener("load", onTabLoaded, true);
     gBrowser.removeTab(newTab);
     gBrowser.selectedTab = currentTab;
-    executeSoon(testOnNetActivity_contextmenu);
+    executeSoon(testOnNetActivity_contextmenu.bind(null, msg));
   }
 
   // Check if the command is enabled for a network message.
@@ -106,13 +114,12 @@ function onNetworkMessage(aResults) {
   goDoCommand(COMMAND_NAME);
 }
 
-function testOnNetActivity_contextmenu() {
-  let target = outputNode.querySelector(".webconsole-msg-network");
-
+function testOnNetActivity_contextmenu(msg) {
   outputNode.focus();
-  outputNode.selectedItem = target;
+  HUD.ui.output.selectMessage(msg);
 
-  waitForContextMenu(contextMenu, target, () => {
+  msg.scrollIntoView();
+  waitForContextMenu(contextMenu, msg, () => {
     let isShown = !contextMenu.querySelector(CONTEXT_MENU_ID).hidden;
     ok(isShown, CONTEXT_MENU_ID + " should be shown.");
   }, finishTest);

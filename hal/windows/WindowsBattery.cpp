@@ -8,9 +8,10 @@
 #include "nsITimer.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/battery/Constants.h"
+#include "nsComponentManagerUtils.h"
 
 #include <windows.h>
-#include "nsWindowsHelpers.h"
+#include "mozilla/WindowsVersion.h"
 
 using namespace mozilla::dom::battery;
 
@@ -20,10 +21,8 @@ namespace hal_impl {
 static nsCOMPtr<nsITimer> sUpdateTimer;
 
 /* Power Event API is Vista or later */
-typedef HPOWERNOTIFY (WINAPI *REGISTERPOWERSETTINGNOTIFICATION) (HANDLE, LPCGUID, DWORD);
-typedef BOOL (WINAPI *UNREGISTERPOWERSETTINGNOTIFICATION) (HPOWERNOTIFY);
-static REGISTERPOWERSETTINGNOTIFICATION sRegisterPowerSettingNotification = nullptr;
-static UNREGISTERPOWERSETTINGNOTIFICATION sUnregisterPowerSettingNotification = nullptr;
+static decltype(RegisterPowerSettingNotification)* sRegisterPowerSettingNotification = nullptr;
+static decltype(UnregisterPowerSettingNotification)* sUnregisterPowerSettingNotification = nullptr;
 static HPOWERNOTIFY sPowerHandle = nullptr;
 static HPOWERNOTIFY sCapacityHandle = nullptr;
 static HWND sHWnd = nullptr;
@@ -69,10 +68,10 @@ EnableBatteryNotifications()
     // Use this API if available.
     HMODULE hUser32 = GetModuleHandleW(L"USER32.DLL");
     if (!sRegisterPowerSettingNotification)
-      sRegisterPowerSettingNotification = (REGISTERPOWERSETTINGNOTIFICATION)
+      sRegisterPowerSettingNotification = (decltype(RegisterPowerSettingNotification)*)
         GetProcAddress(hUser32, "RegisterPowerSettingNotification");
     if (!sUnregisterPowerSettingNotification)
-      sUnregisterPowerSettingNotification = (UNREGISTERPOWERSETTINGNOTIFICATION)
+      sUnregisterPowerSettingNotification = (decltype(UnregisterPowerSettingNotification)*)
         GetProcAddress(hUser32, "UnregisterPowerSettingNotification");
 
     if (!sRegisterPowerSettingNotification ||

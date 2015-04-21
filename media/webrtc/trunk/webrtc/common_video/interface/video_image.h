@@ -11,8 +11,8 @@
 #ifndef COMMON_VIDEO_INTERFACE_VIDEO_IMAGE_H
 #define COMMON_VIDEO_INTERFACE_VIDEO_IMAGE_H
 
-#include "typedefs.h"
 #include <stdlib.h>
+#include "webrtc/typedefs.h"
 
 namespace webrtc
 {
@@ -40,9 +40,9 @@ public:
           _size(0),
           _completeFrame(false) {}
 
-    EncodedImage(WebRtc_UWord8* buffer,
-                 WebRtc_UWord32 length,
-                 WebRtc_UWord32 size)
+    EncodedImage(uint8_t* buffer,
+                 uint32_t length,
+                 uint32_t size)
         : _encodedWidth(0),
           _encodedHeight(0),
           _timeStamp(0),
@@ -53,17 +53,17 @@ public:
           _size(size),
           _completeFrame(false) {}
 
-    WebRtc_UWord32              _encodedWidth;
-    WebRtc_UWord32              _encodedHeight;
-    WebRtc_UWord32              _timeStamp;
-    int64_t                     capture_time_ms_;
+    uint32_t                    _encodedWidth;
+    uint32_t                    _encodedHeight;
+    uint32_t                    _timeStamp;
+    int64_t                      capture_time_ms_;
     VideoFrameType              _frameType;
-    WebRtc_UWord8*              _buffer;
-    WebRtc_UWord32              _length;
-    WebRtc_UWord32              _size;
+    uint8_t*                    _buffer;
+    uint32_t                    _length;
+    uint32_t                    _size;
     bool                        _completeFrame;
 };
 
-} // namespace webrtc
+}  // namespace webrtc
 
 #endif // COMMON_VIDEO_INTERFACE_VIDEO_IMAGE_H

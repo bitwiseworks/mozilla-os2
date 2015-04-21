@@ -2,30 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-DEFFILE = $(win_srcdir)/AccessibleMarshal.def
-
-include $(DEPTH)/config/autoconf.mk
-
-DEFINES += -DREGISTER_PROXY_DLL
-
 GARBAGE += $(MIDL_GENERATED_FILES) done_gen dlldata.c
-
-FORCE_SHARED_LIB = 1
-
-CSRCS	= \
-	dlldata.c \
-	ISimpleDOMNode_p.c \
-	ISimpleDOMNode_i.c \
-	ISimpleDOMDocument_p.c \
-	ISimpleDOMDocument_i.c \
-	ISimpleDOMText_p.c \
-	ISimpleDOMText_i.c \
-	$(NULL)
 
 MIDL_GENERATED_FILES = \
 	ISimpleDOMNode.h \
@@ -38,8 +15,6 @@ MIDL_GENERATED_FILES = \
 	ISimpleDOMText_p.c \
 	ISimpleDOMText_i.c \
 	$(NULL)
-
-SRCDIR_CSRCS	= $(addprefix $(srcdir)/,$(CSRCS))
 
 OS_LIBS = $(call EXPAND_LIBNAME,kernel32 rpcns4 rpcrt4 oleaut32)
 
@@ -62,5 +37,16 @@ register::
 
 EMBED_MANIFEST_AT = 2
 
-include $(topsrcdir)/config/rules.mk
+midl_exports := \
+    ISimpleDOMDocument.h \
+    ISimpleDOMDocument_i.c \
+    ISimpleDOMNode.h \
+    ISimpleDOMNode_i.c \
+    ISimpleDOMText.h \
+    ISimpleDOMText_i.c \
+    $(NULL)
 
+INSTALL_TARGETS += midl_exports
+midl_exports_FILES := $(midl_exports)
+midl_exports_DEST = $(DIST)/include
+midl_exports_TARGET := export

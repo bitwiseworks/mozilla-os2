@@ -9,22 +9,20 @@
 #include "gfxQuartzSurface.h"
 #include "gfxQuartzImageSurface.h"
 #include "mozilla/gfx/2D.h"
-#include "mozilla/gfx/QuartzSupport.h"
 
 #include "gfxMacPlatformFontList.h"
 #include "gfxMacFont.h"
 #include "gfxCoreTextShaper.h"
 #include "gfxUserFontSet.h"
 
-#include "nsCRT.h"
 #include "nsTArray.h"
-#include "nsUnicodeRange.h"
-
 #include "mozilla/Preferences.h"
-
 #include "qcms.h"
+#include "gfx2DGlue.h"
 
 #include <dlfcn.h>
+
+#include "nsCocoaFeatures.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -42,10 +40,16 @@ DisableFontActivation()
 {
     // get the main bundle identifier
     CFBundleRef mainBundle = ::CFBundleGetMainBundle();
-    CFStringRef mainBundleID = NULL;
+    CFStringRef mainBundleID = nullptr;
 
     if (mainBundle) {
         mainBundleID = ::CFBundleGetIdentifier(mainBundle);
+    }
+
+    // bug 969388 and bug 922590 - mainBundlID as null is sometimes problematic
+    if (!mainBundleID) {
+        NS_WARNING("missing bundle ID, packaging set up incorrectly");
+        return;
     }
 
     // if possible, fetch CTFontManagerSetAutoActivationSetting
@@ -64,15 +68,15 @@ DisableFontActivation()
 
 gfxPlatformMac::gfxPlatformMac()
 {
-    mOSXVersion = 0;
-    OSXVersion();
-
     DisableFontActivation();
     mFontAntiAliasingThreshold = ReadAntiAliasingThreshold();
 
-    uint32_t canvasMask = (1 << BACKEND_CAIRO) | (1 << BACKEND_SKIA) | (1 << BACKEND_COREGRAPHICS);
-    uint32_t contentMask = 0;
-    InitBackendPrefs(canvasMask, contentMask);
+    uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO) |
+                          BackendTypeBit(BackendType::SKIA) |
+                          BackendTypeBit(BackendType::COREGRAPHICS);
+    uint32_t contentMask = BackendTypeBit(BackendType::COREGRAPHICS);
+    InitBackendPrefs(canvasMask, BackendType::COREGRAPHICS,
+                     contentMask, BackendType::COREGRAPHICS);
 }
 
 gfxPlatformMac::~gfxPlatformMac()
@@ -92,19 +96,21 @@ gfxPlatformMac::CreatePlatformFontList()
 }
 
 already_AddRefed<gfxASurface>
-gfxPlatformMac::CreateOffscreenSurface(const gfxIntSize& size,
-                                       gfxASurface::gfxContentType contentType)
+gfxPlatformMac::CreateOffscreenSurface(const IntSize& size,
+                                       gfxContentType contentType)
 {
     nsRefPtr<gfxASurface> newSurface =
-      new gfxQuartzSurface(size, OptimalFormatForContent(contentType));
+      new gfxQuartzSurface(ThebesIntSize(size),
+                           OptimalFormatForContent(contentType));
     return newSurface.forget();
 }
 
 already_AddRefed<gfxASurface>
 gfxPlatformMac::CreateOffscreenImageSurface(const gfxIntSize& aSize,
-                                            gfxASurface::gfxContentType aContentType)
+                                            gfxContentType aContentType)
 {
-    nsRefPtr<gfxASurface> surface = CreateOffscreenSurface(aSize, aContentType);
+    nsRefPtr<gfxASurface> surface =
+        CreateOffscreenSurface(aSize.ToIntSize(), aContentType);
 #ifdef DEBUG
     nsRefPtr<gfxImageSurface> imageSurface = surface->GetAsImageSurface();
     NS_ASSERTION(imageSurface, "Surface cannot be converted to a gfxImageSurface");
@@ -115,7 +121,7 @@ gfxPlatformMac::CreateOffscreenImageSurface(const gfxIntSize& aSize,
 
 already_AddRefed<gfxASurface>
 gfxPlatformMac::OptimizeImage(gfxImageSurface *aSurface,
-                              gfxASurface::gfxImageFormat format)
+                              gfxImageFormat format)
 {
     const gfxIntSize& surfaceSize = aSurface->GetSize();
     nsRefPtr<gfxImageSurface> isurf = aSurface;
@@ -129,8 +135,7 @@ gfxPlatformMac::OptimizeImage(gfxImageSurface *aSurface,
         }
     }
 
-    nsRefPtr<gfxASurface> ret = new gfxQuartzImageSurface(isurf);
-    return ret.forget();
+    return nullptr;
 }
 
 TemporaryRef<ScaledFont>
@@ -234,15 +239,30 @@ gfxPlatformMac::UpdateFontList()
 
 static const char kFontArialUnicodeMS[] = "Arial Unicode MS";
 static const char kFontAppleBraille[] = "Apple Braille";
+static const char kFontAppleColorEmoji[] = "Apple Color Emoji";
 static const char kFontAppleSymbols[] = "Apple Symbols";
-static const char kFontAppleMyungjo[] = "AppleMyungjo";
+static const char kFontDevanagariSangamMN[] = "Devanagari Sangam MN";
+static const char kFontEuphemiaUCAS[] = "Euphemia UCAS";
 static const char kFontGeneva[] = "Geneva";
 static const char kFontGeezaPro[] = "Geeza Pro";
+static const char kFontGujaratiSangamMN[] = "Gujarati Sangam MN";
+static const char kFontGurmukhiMN[] = "Gurmukhi MN";
 static const char kFontHiraginoKakuGothic[] = "Hiragino Kaku Gothic ProN";
+static const char kFontHiraginoSansGB[] = "Hiragino Sans GB";
+static const char kFontKefa[] = "Kefa";
+static const char kFontKhmerMN[] = "Khmer MN";
+static const char kFontLaoMN[] = "Lao MN";
 static const char kFontLucidaGrande[] = "Lucida Grande";
 static const char kFontMenlo[] = "Menlo";
+static const char kFontMicrosoftTaiLe[] = "Microsoft Tai Le";
+static const char kFontMingLiUExtB[] = "MingLiU-ExtB";
+static const char kFontMyanmarMN[] = "Myanmar MN";
 static const char kFontPlantagenetCherokee[] = "Plantagenet Cherokee";
+static const char kFontSimSunExtB[] = "SimSun-ExtB";
+static const char kFontSongtiSC[] = "Songti SC";
 static const char kFontSTHeiti[] = "STHeiti";
+static const char kFontSTIXGeneral[] = "STIXGeneral";
+static const char kFontTamilMN[] = "Tamil MN";
 
 void
 gfxPlatformMac::GetCommonFallbackFonts(const uint32_t aCh,
@@ -253,9 +273,19 @@ gfxPlatformMac::GetCommonFallbackFonts(const uint32_t aCh,
 
     if (!IS_IN_BMP(aCh)) {
         uint32_t p = aCh >> 16;
+        uint32_t b = aCh >> 8;
         if (p == 1) {
-            aFontList.AppendElement(kFontAppleSymbols);
-            aFontList.AppendElement(kFontGeneva);
+            if (b >= 0x1f0 && b < 0x1f7) {
+                aFontList.AppendElement(kFontAppleColorEmoji);
+            } else {
+                aFontList.AppendElement(kFontAppleSymbols);
+                aFontList.AppendElement(kFontSTIXGeneral);
+                aFontList.AppendElement(kFontGeneva);
+            }
+        } else if (p == 2) {
+            // OSX installations with MS Office may have these fonts
+            aFontList.AppendElement(kFontMingLiUExtB);
+            aFontList.AppendElement(kFontSimSunExtB);
         }
     } else {
         uint32_t b = (aCh >> 8) & 0xff;
@@ -268,14 +298,43 @@ gfxPlatformMac::GetCommonFallbackFonts(const uint32_t aCh,
         case 0x07:
             aFontList.AppendElement(kFontGeezaPro);
             break;
+        case 0x09:
+            aFontList.AppendElement(kFontDevanagariSangamMN);
+            break;
+        case 0x0a:
+            aFontList.AppendElement(kFontGurmukhiMN);
+            aFontList.AppendElement(kFontGujaratiSangamMN);
+            break;
+        case 0x0b:
+            aFontList.AppendElement(kFontTamilMN);
+            break;
+        case 0x0e:
+            aFontList.AppendElement(kFontLaoMN);
+            break;
+        case 0x0f:
+            aFontList.AppendElement(kFontSongtiSC);
+            break;
         case 0x10:
             aFontList.AppendElement(kFontMenlo);
+            aFontList.AppendElement(kFontMyanmarMN);
             break;
         case 0x13:  // Cherokee
             aFontList.AppendElement(kFontPlantagenetCherokee);
+            aFontList.AppendElement(kFontKefa);
             break;
-        case 0x18:  // Mongolian
+        case 0x14:  // Unified Canadian Aboriginal Syllabics
+        case 0x15:
+        case 0x16:
+            aFontList.AppendElement(kFontEuphemiaUCAS);
+            aFontList.AppendElement(kFontGeneva);
+            break;
+        case 0x18:  // Mongolian, UCAS
             aFontList.AppendElement(kFontSTHeiti);
+            aFontList.AppendElement(kFontEuphemiaUCAS);
+            break;
+        case 0x19:  // Khmer
+            aFontList.AppendElement(kFontKhmerMN);
+            aFontList.AppendElement(kFontMicrosoftTaiLe);
             break;
         case 0x1d:
         case 0x1e:
@@ -295,15 +354,23 @@ gfxPlatformMac::GetCommonFallbackFonts(const uint32_t aCh,
         case 0x2e:
             aFontList.AppendElement(kFontAppleSymbols);
             aFontList.AppendElement(kFontMenlo);
+            aFontList.AppendElement(kFontSTIXGeneral);
             aFontList.AppendElement(kFontGeneva);
             aFontList.AppendElement(kFontHiraginoKakuGothic);
+            aFontList.AppendElement(kFontAppleColorEmoji);
             break;
         case 0x2c:
+            aFontList.AppendElement(kFontGeneva);
+            break;
         case 0x2d:
+            aFontList.AppendElement(kFontKefa);
             aFontList.AppendElement(kFontGeneva);
             break;
         case 0x28:  // Braille
             aFontList.AppendElement(kFontAppleBraille);
+            break;
+        case 0x31:
+            aFontList.AppendElement(kFontHiraginoSansGB);
             break;
         case 0x4d:
             aFontList.AppendElement(kFontAppleSymbols);
@@ -320,6 +387,9 @@ gfxPlatformMac::GetCommonFallbackFonts(const uint32_t aCh,
             aFontList.AppendElement(kFontGeneva);
             aFontList.AppendElement(kFontAppleSymbols);
             break;
+        case 0xab:
+            aFontList.AppendElement(kFontKefa);
+            break;
         case 0xfc:
         case 0xff:
             aFontList.AppendElement(kFontAppleSymbols);
@@ -331,22 +401,6 @@ gfxPlatformMac::GetCommonFallbackFonts(const uint32_t aCh,
 
     // Arial Unicode MS has lots of glyphs for obscure, use it as a last resort
     aFontList.AppendElement(kFontArialUnicodeMS);
-}
-
-
-int32_t 
-gfxPlatformMac::OSXVersion()
-{
-    if (!mOSXVersion) {
-        // minor version is not accurate, use gestaltSystemVersionMajor, gestaltSystemVersionMinor, gestaltSystemVersionBugFix for these
-        OSErr err = ::Gestalt(gestaltSystemVersion, reinterpret_cast<SInt32*>(&mOSXVersion));
-        if (err != noErr) {
-            //This should probably be changed when our minimum version changes
-            NS_ERROR("Couldn't determine OS X version, assuming 10.4");
-            mOSXVersion = MAC_OS_X_VERSION_10_4_HEX;
-        }
-    }
-    return mOSXVersion;
 }
 
 uint32_t
@@ -375,41 +429,20 @@ gfxPlatformMac::ReadAntiAliasingThreshold()
 }
 
 already_AddRefed<gfxASurface>
-gfxPlatformMac::CreateThebesSurfaceAliasForDrawTarget_hack(mozilla::gfx::DrawTarget *aTarget)
-{
-  if (aTarget->GetType() == BACKEND_COREGRAPHICS) {
-    CGContextRef cg = static_cast<CGContextRef>(aTarget->GetNativeSurface(NATIVE_SURFACE_CGCONTEXT));
-    unsigned char* data = (unsigned char*)CGBitmapContextGetData(cg);
-    size_t bpp = CGBitmapContextGetBitsPerPixel(cg);
-    size_t stride = CGBitmapContextGetBytesPerRow(cg);
-    gfxIntSize size(aTarget->GetSize().width, aTarget->GetSize().height);
-    nsRefPtr<gfxImageSurface> imageSurface = new gfxImageSurface(data, size, stride, bpp == 2
-                                                                                     ? gfxASurface::ImageFormatRGB16_565
-                                                                                     : gfxASurface::ImageFormatARGB32);
-    // Here we should return a gfxQuartzImageSurface but quartz will assumes that image surfaces
-    // don't change which wont create a proper alias to the draw target, therefore we have to
-    // return a plain image surface.
-    return imageSurface.forget();
-  } else {
-    return GetThebesSurfaceForDrawTarget(aTarget);
-  }
-}
-
-already_AddRefed<gfxASurface>
 gfxPlatformMac::GetThebesSurfaceForDrawTarget(DrawTarget *aTarget)
 {
-  if (aTarget->GetType() == BACKEND_COREGRAPHICS_ACCELERATED) {
+  if (aTarget->GetType() == BackendType::COREGRAPHICS_ACCELERATED) {
     RefPtr<SourceSurface> source = aTarget->Snapshot();
     RefPtr<DataSourceSurface> sourceData = source->GetDataSurface();
     unsigned char* data = sourceData->GetData();
     nsRefPtr<gfxImageSurface> surf = new gfxImageSurface(data, ThebesIntSize(sourceData->GetSize()), sourceData->Stride(),
-                                                         gfxImageSurface::ImageFormatARGB32);
+                                                         gfxImageFormat::ARGB32);
     // We could fix this by telling gfxImageSurface it owns data.
-    nsRefPtr<gfxImageSurface> cpy = new gfxImageSurface(ThebesIntSize(sourceData->GetSize()), gfxImageSurface::ImageFormatARGB32);
+    nsRefPtr<gfxImageSurface> cpy = new gfxImageSurface(ThebesIntSize(sourceData->GetSize()), gfxImageFormat::ARGB32);
     cpy->CopyFrom(surf);
     return cpy.forget();
-  } else if (aTarget->GetType() == BACKEND_COREGRAPHICS) {
-    CGContextRef cg = static_cast<CGContextRef>(aTarget->GetNativeSurface(NATIVE_SURFACE_CGCONTEXT));
+  } else if (aTarget->GetType() == BackendType::COREGRAPHICS) {
+    CGContextRef cg = static_cast<CGContextRef>(aTarget->GetNativeSurface(NativeSurfaceType::CGCONTEXT));
 
     //XXX: it would be nice to have an implicit conversion from IntSize to gfxIntSize
     IntSize intSize = aTarget->GetSize();
@@ -428,98 +461,48 @@ bool
 gfxPlatformMac::UseAcceleratedCanvas()
 {
   // Lion or later is required
-  return OSXVersion() >= 0x1070 && Preferences::GetBool("gfx.canvas.azure.accelerated", false);
+  return nsCocoaFeatures::OnLionOrLater() && Preferences::GetBool("gfx.canvas.azure.accelerated", false);
 }
 
 bool
 gfxPlatformMac::SupportsOffMainThreadCompositing()
 {
-  // 10.6.X has crashes on tinderbox with OMTC, so disable it
-  // for now.
-  if (OSXVersion() >= 0x1070) {
-    return true;
-  }
-  return GetPrefLayersOffMainThreadCompositionForceEnabled();
+  return true;
 }
 
-qcms_profile *
-gfxPlatformMac::GetPlatformCMSOutputProfile()
+void
+gfxPlatformMac::GetPlatformCMSOutputProfile(void* &mem, size_t &size)
 {
-    qcms_profile *profile = nullptr;
-    CMProfileRef cmProfile;
-    CMProfileLocation *location;
-    UInt32 locationSize;
+    mem = nullptr;
+    size = 0;
 
-    /* There a number of different ways that we could try to get a color
-       profile to use.  On 10.5 all of these methods seem to give the same
-       results. On 10.6, the results are different and the following method,
-       using CGMainDisplayID() seems to best match what we are looking for.
-       Currently, both Google Chrome and Qt4 use a similar method.
+    CGColorSpaceRef cspace = ::CGDisplayCopyColorSpace(::CGMainDisplayID());
+    if (!cspace) {
+        cspace = ::CGColorSpaceCreateDeviceRGB();
+    }
+    if (!cspace) {
+        return;
+    }
 
-       CMTypes.h describes CMDisplayIDType:
-       "Data type for ColorSync DisplayID reference
-        On 8 & 9 this is a AVIDType
-	On X this is a CGSDisplayID"
+    CFDataRef iccp = ::CGColorSpaceCopyICCProfile(cspace);
 
-       CGMainDisplayID gives us a CGDirectDisplayID which presumeably
-       corresponds directly to a CGSDisplayID */
-    CGDirectDisplayID displayID = CGMainDisplayID();
+    ::CFRelease(cspace);
 
-    CMError err = CMGetProfileByAVID(static_cast<CMDisplayIDType>(displayID), &cmProfile);
-    if (err != noErr)
-        return nullptr;
+    if (!iccp) {
+        return;
+    }
 
-    // get the size of location
-    err = NCMGetProfileLocation(cmProfile, NULL, &locationSize);
-    if (err != noErr)
-        return nullptr;
-
-    // allocate enough room for location
-    location = static_cast<CMProfileLocation*>(malloc(locationSize));
-    if (!location)
-        goto fail_close;
-
-    err = NCMGetProfileLocation(cmProfile, location, &locationSize);
-    if (err != noErr)
-        goto fail_location;
-
-    switch (location->locType) {
-#ifndef __LP64__
-    case cmFileBasedProfile: {
-        FSRef fsRef;
-        if (!FSpMakeFSRef(&location->u.fileLoc.spec, &fsRef)) {
-            char path[512];
-            if (!FSRefMakePath(&fsRef, reinterpret_cast<UInt8*>(path), sizeof(path))) {
-                profile = qcms_profile_from_path(path);
-#ifdef DEBUG_tor
-                if (profile)
-                    fprintf(stderr,
-                            "ICM profile read from %s fileLoc successfully\n", path);
-#endif
-            }
+    // copy to external buffer
+    size = static_cast<size_t>(::CFDataGetLength(iccp));
+    if (size > 0) {
+        void *data = malloc(size);
+        if (data) {
+            memcpy(data, ::CFDataGetBytePtr(iccp), size);
+            mem = data;
+        } else {
+            size = 0;
         }
-        break;
-    }
-#endif
-    case cmPathBasedProfile:
-        profile = qcms_profile_from_path(location->u.pathLoc.path);
-#ifdef DEBUG_tor
-        if (profile)
-            fprintf(stderr,
-                    "ICM profile read from %s pathLoc successfully\n",
-                    device.u.pathLoc.path);
-#endif
-        break;
-    default:
-#ifdef DEBUG_tor
-        fprintf(stderr, "Unhandled ColorSync profile location\n");
-#endif
-        break;
     }
 
-fail_location:
-    free(location);
-fail_close:
-    CMCloseProfile(cmProfile);
-    return profile;
+    ::CFRelease(iccp);
 }

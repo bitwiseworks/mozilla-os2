@@ -33,10 +33,10 @@ public:
                        const nsAString& aDeclaration,
                        ErrorResult& aRv);
 
-  static bool PrefEnabled()
-  {
-    return Preferences::GetBool("layout.css.supports-rule.enabled");
-  }
+  static void Escape(const GlobalObject& aGlobal,
+                     const nsAString& aIdent,
+                     nsAString& aReturn,
+                     ErrorResult& aRv);
 };
 
 } // namespace dom

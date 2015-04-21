@@ -8,19 +8,19 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <cassert>
+#include <assert.h>
 #include <stdio.h>
 
-#include "statistics.h"
+#include "webrtc/voice_engine/statistics.h"
 
-#include "trace.h"
-#include "critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/trace.h"
 
 namespace webrtc {
 
 namespace voe {
 
-Statistics::Statistics(const WebRtc_UWord32 instanceId) :
+Statistics::Statistics(uint32_t instanceId) :
     _critPtr(CriticalSectionWrapper::CreateCriticalSection()),
     _instanceId(instanceId),
     _lastError(0),
@@ -37,13 +37,13 @@ Statistics::~Statistics()
     }
 }
 
-WebRtc_Word32 Statistics::SetInitialized()
+int32_t Statistics::SetInitialized()
 {
     _isInitialized = true;
     return 0;
 }
 
-WebRtc_Word32 Statistics::SetUnInitialized()
+int32_t Statistics::SetUnInitialized()
 {
     _isInitialized = false;
     return 0;
@@ -54,15 +54,15 @@ bool Statistics::Initialized() const
     return _isInitialized;
 }
 
-WebRtc_Word32 Statistics::SetLastError(const WebRtc_Word32 error) const
+int32_t Statistics::SetLastError(int32_t error) const
 {
     CriticalSectionScoped cs(_critPtr);
     _lastError = error;
     return 0;
 }
 
-WebRtc_Word32 Statistics::SetLastError(const WebRtc_Word32 error,
-                                       const TraceLevel level) const
+int32_t Statistics::SetLastError(int32_t error,
+                                 TraceLevel level) const
 {
     CriticalSectionScoped cs(_critPtr);
     _lastError = error;
@@ -72,9 +72,9 @@ WebRtc_Word32 Statistics::SetLastError(const WebRtc_Word32 error,
     return 0;
 }
 
-WebRtc_Word32 Statistics::SetLastError(
-    const WebRtc_Word32 error,
-    const TraceLevel level, const char* msg) const
+int32_t Statistics::SetLastError(
+    int32_t error,
+    TraceLevel level, const char* msg) const
 {
     CriticalSectionScoped cs(_critPtr);
     char traceMessage[KTraceMaxMessageSize];
@@ -86,7 +86,7 @@ WebRtc_Word32 Statistics::SetLastError(
     return 0;
 }
 
-WebRtc_Word32 Statistics::LastError() const
+int32_t Statistics::LastError() const
 {
     CriticalSectionScoped cs(_critPtr);
     WEBRTC_TRACE(kTraceStateInfo, kTraceVoice, VoEId(_instanceId,-1),
@@ -94,6 +94,6 @@ WebRtc_Word32 Statistics::LastError() const
     return _lastError;
 }
 
-}  //  namespace voe
+}  // namespace voe
 
-}  //  namespace webrtc
+}  // namespace webrtc

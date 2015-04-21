@@ -17,28 +17,13 @@
 static const CLSID CLSID_WinParentalControls = {0xE77CC89B,0x7401,0x4C04,{0x8C,0xED,0x14,0x9D,0xB3,0x5A,0xDD,0x04}};
 static const IID IID_IWinParentalControls  = {0x28B4D88B,0xE072,0x49E6,{0x80,0x4D,0x26,0xED,0xBE,0x21,0xA7,0xB9}};
 
-NS_IMPL_ISUPPORTS1(nsParentalControlsServiceWin, nsIParentalControlsService)
+NS_IMPL_ISUPPORTS(nsParentalControlsServiceWin, nsIParentalControlsService)
 
-static HINSTANCE gAdvAPIDLLInst = NULL;
+static HINSTANCE gAdvAPIDLLInst = nullptr;
 
-typedef ULONG (STDMETHODCALLTYPE *MyEventWrite)(
-  REGHANDLE RegHandle,
-  PCEVENT_DESCRIPTOR EventDescriptor,
-  ULONG UserDataCount,
-  PEVENT_DATA_DESCRIPTOR UserData);
-
-typedef ULONG (STDMETHODCALLTYPE *MyEventRegister)(
-  LPCGUID ProviderId,
-  PENABLECALLBACK EnableCallback,
-  PVOID CallbackContext,
-  PREGHANDLE RegHandle);
-
-typedef ULONG (STDMETHODCALLTYPE *MyEventUnregister)(
-  REGHANDLE RegHandle);
-
-MyEventWrite gEventWrite = NULL;
-MyEventRegister gEventRegister = NULL;
-MyEventUnregister gEventUnregister = NULL;
+decltype(EventWrite)* gEventWrite = nullptr;
+decltype(EventRegister)* gEventRegister = nullptr;
+decltype(EventUnregister)* gEventUnregister = nullptr;
 
 nsParentalControlsServiceWin::nsParentalControlsServiceWin() :
   mEnabled(false)
@@ -46,14 +31,14 @@ nsParentalControlsServiceWin::nsParentalControlsServiceWin() :
 , mPC(nullptr)
 {
   HRESULT hr;
-  CoInitialize(NULL);
-  hr = CoCreateInstance(CLSID_WinParentalControls, NULL, CLSCTX_INPROC,
+  CoInitialize(nullptr);
+  hr = CoCreateInstance(CLSID_WinParentalControls, nullptr, CLSCTX_INPROC,
                         IID_IWinParentalControls, (void**)&mPC);
   if (FAILED(hr))
     return;
 
   nsRefPtr<IWPCSettings> wpcs;
-  if (FAILED(mPC->GetUserSettings(NULL, getter_AddRefs(wpcs)))) {
+  if (FAILED(mPC->GetUserSettings(nullptr, getter_AddRefs(wpcs)))) {
     // Not available on this os or not enabled for this user account or we're running as admin
     mPC->Release();
     mPC = nullptr;
@@ -67,9 +52,9 @@ nsParentalControlsServiceWin::nsParentalControlsServiceWin() :
     gAdvAPIDLLInst = ::LoadLibrary("Advapi32.dll");
     if(gAdvAPIDLLInst)
     {
-      gEventWrite = (MyEventWrite) GetProcAddress(gAdvAPIDLLInst, "EventWrite");
-      gEventRegister = (MyEventRegister) GetProcAddress(gAdvAPIDLLInst, "EventRegister");
-      gEventUnregister = (MyEventUnregister) GetProcAddress(gAdvAPIDLLInst, "EventUnregister");
+      gEventWrite = (decltype(EventWrite)*) GetProcAddress(gAdvAPIDLLInst, "EventWrite");
+      gEventRegister = (decltype(EventRegister)*) GetProcAddress(gAdvAPIDLLInst, "EventRegister");
+      gEventUnregister = (decltype(EventUnregister)*) GetProcAddress(gAdvAPIDLLInst, "EventUnregister");
     }
     mEnabled = true;
   }
@@ -109,7 +94,7 @@ nsParentalControlsServiceWin::GetBlockFileDownloadsEnabled(bool *aResult)
     return NS_ERROR_NOT_AVAILABLE;
 
   nsRefPtr<IWPCWebSettings> wpcws;
-  if (SUCCEEDED(mPC->GetWebSettings(NULL, getter_AddRefs(wpcws)))) {
+  if (SUCCEEDED(mPC->GetWebSettings(nullptr, getter_AddRefs(wpcws)))) {
     DWORD settings = 0;
     wpcws->GetSettings(&settings);
     if (settings == WPCFLAG_WEB_SETTING_DOWNLOADSBLOCKED)
@@ -129,7 +114,7 @@ nsParentalControlsServiceWin::GetLoggingEnabled(bool *aResult)
 
   // Check the general purpose logging flag
   nsRefPtr<IWPCSettings> wpcs;
-  if (SUCCEEDED(mPC->GetUserSettings(NULL, getter_AddRefs(wpcs)))) {
+  if (SUCCEEDED(mPC->GetUserSettings(nullptr, getter_AddRefs(wpcs)))) {
     BOOL enabled = FALSE;
     wpcs->IsLoggingRequired(&enabled);
     if (enabled)
@@ -158,7 +143,7 @@ nsParentalControlsServiceWin::Log(int16_t aEntryType, bool blocked, nsIURI *aSou
   if (!mProvider) {
     if (!gEventRegister)
       return NS_ERROR_NOT_AVAILABLE;
-    if (gEventRegister(&WPCPROV, NULL, NULL, &mProvider) != ERROR_SUCCESS)
+    if (gEventRegister(&WPCPROV, nullptr, nullptr, &mProvider) != ERROR_SUCCESS)
       return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -202,9 +187,9 @@ nsParentalControlsServiceWin::RequestURIOverride(nsIURI *aTarget, nsIInterfaceRe
 
   BOOL ret;
   nsRefPtr<IWPCWebSettings> wpcws;
-  if (SUCCEEDED(mPC->GetWebSettings(NULL, getter_AddRefs(wpcws)))) {
+  if (SUCCEEDED(mPC->GetWebSettings(nullptr, getter_AddRefs(wpcws)))) {
     wpcws->RequestURLOverride(hWnd, NS_ConvertUTF8toUTF16(spec).get(),
-                              0, NULL, &ret);
+                              0, nullptr, &ret);
     *_retval = ret;
   }
 
@@ -282,7 +267,7 @@ nsParentalControlsServiceWin::RequestURIOverrides(nsIArray *aTargets, nsIInterfa
 
   BOOL ret; 
   nsRefPtr<IWPCWebSettings> wpcws;
-  if (SUCCEEDED(mPC->GetWebSettings(NULL, getter_AddRefs(wpcws)))) {
+  if (SUCCEEDED(mPC->GetWebSettings(nullptr, getter_AddRefs(wpcws)))) {
     wpcws->RequestURLOverride(hWnd, NS_ConvertUTF8toUTF16(rootSpec).get(),
                              uriIdx, (LPCWSTR*)arrUrls.get(), &ret);
    *_retval = ret;

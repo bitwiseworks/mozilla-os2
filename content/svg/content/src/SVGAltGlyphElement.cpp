@@ -12,9 +12,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGAltGlyphElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+SVGAltGlyphElement::WrapNode(JSContext *aCx)
 {
-  return SVGAltGlyphElementBinding::Wrap(aCx, aScope, this);
+  return SVGAltGlyphElementBinding::Wrap(aCx, this);
 }
 
 nsSVGElement::StringInfo SVGAltGlyphElement::sStringInfo[1] =
@@ -26,9 +26,23 @@ nsSVGElement::StringInfo SVGAltGlyphElement::sStringInfo[1] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGAltGlyphElement::SVGAltGlyphElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+SVGAltGlyphElement::SVGAltGlyphElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
   : SVGAltGlyphElementBase(aNodeInfo)
 {
+}
+
+nsSVGElement::EnumAttributesInfo
+SVGAltGlyphElement::GetEnumInfo()
+{
+  return EnumAttributesInfo(mEnumAttributes, sEnumInfo,
+                            ArrayLength(sEnumInfo));
+}
+
+nsSVGElement::LengthAttributesInfo
+SVGAltGlyphElement::GetLengthInfo()
+{
+  return LengthAttributesInfo(mLengthAttributes, sLengthInfo,
+                              ArrayLength(sLengthInfo));
 }
 
 //----------------------------------------------------------------------

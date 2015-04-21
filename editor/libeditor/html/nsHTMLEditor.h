@@ -106,7 +106,7 @@ public:
   virtual already_AddRefed<nsIContent> GetFocusedContent();
   virtual already_AddRefed<nsIContent> GetFocusedContentForIME();
   virtual bool IsActiveInDOMWindow();
-  virtual already_AddRefed<nsIDOMEventTarget> GetDOMEventTarget();
+  virtual already_AddRefed<mozilla::dom::EventTarget> GetDOMEventTarget();
   virtual mozilla::dom::Element* GetEditorRoot() MOZ_OVERRIDE;
   virtual already_AddRefed<nsIContent> FindSelectionRoot(nsINode *aNode);
   virtual bool IsAcceptableInputEvent(nsIDOMEvent* aEvent);
@@ -249,7 +249,9 @@ public:
   nsresult EndUpdateViewBatch();
 
   /** prepare the editor for use */
-  NS_IMETHOD Init(nsIDOMDocument *aDoc, nsIContent *aRoot, nsISelectionController *aSelCon, uint32_t aFlags);
+  NS_IMETHOD Init(nsIDOMDocument *aDoc, nsIContent *aRoot,
+                  nsISelectionController *aSelCon, uint32_t aFlags,
+                  const nsAString& aValue);
   NS_IMETHOD PreDestroy(bool aDestroyingFrames);
 
   /** Internal, static version */
@@ -546,14 +548,14 @@ protected:
                                     nsIDOMNode *aDestinationNode,
                                     int32_t aDestinationOffset,
                                     bool aDoDeleteSelection);
-  nsresult InsertFromDataTransfer(nsIDOMDataTransfer *aDataTransfer,
+  nsresult InsertFromDataTransfer(mozilla::dom::DataTransfer *aDataTransfer,
                                   int32_t aIndex,
                                   nsIDOMDocument *aSourceDoc,
                                   nsIDOMNode *aDestinationNode,
                                   int32_t aDestOffset,
                                   bool aDoDeleteSelection);
   bool HavePrivateHTMLFlavor( nsIClipboard *clipboard );
-  nsresult   ParseCFHTML(nsCString & aCfhtml, PRUnichar **aStuffToPaste, PRUnichar **aCfcontext);
+  nsresult   ParseCFHTML(nsCString & aCfhtml, char16_t **aStuffToPaste, char16_t **aCfcontext);
   nsresult   DoContentFilterCallback(const nsAString &aFlavor,
                                      nsIDOMDocument *aSourceDoc,
                                      bool aWillDeleteSelection,
@@ -726,6 +728,9 @@ protected:
   // if it's coming from a transferable object), in which case aTrustedInput should
   // be set to false, otherwise, the caller should set it to true, which means that
   // the HTML will be inserted in the DOM verbatim.
+  //
+  // aClearStyle should be set to false if you want the paste to be affected by
+  // local style (e.g., for the insertHTML command).
   nsresult DoInsertHTMLWithContext(const nsAString& aInputString,
                                    const nsAString& aContextStr,
                                    const nsAString& aInfoStr,
@@ -734,7 +739,8 @@ protected:
                                    nsIDOMNode* aDestNode,
                                    int32_t aDestOffset,
                                    bool aDeleteSelection,
-                                   bool aTrustedInput);
+                                   bool aTrustedInput,
+                                   bool aClearStyle = true);
 
   nsresult ClearStyle(nsCOMPtr<nsIDOMNode>* aNode, int32_t* aOffset,
                       nsIAtom* aProperty, const nsAString* aAttribute);
@@ -946,7 +952,10 @@ private:
                                        nsIAtom* aProperty,
                                        const nsAString* aAttribute,
                                        const nsAString* aValue);
-
+  typedef enum { eInserted, eAppended } InsertedOrAppended;
+  void DoContentInserted(nsIDocument* aDocument, nsIContent* aContainer,
+                         nsIContent* aChild, int32_t aIndexInContainer,
+                         InsertedOrAppended aInsertedOrAppended);
 };
 #endif //nsHTMLEditor_h__
 

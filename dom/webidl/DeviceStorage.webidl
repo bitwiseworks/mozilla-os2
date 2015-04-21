@@ -8,7 +8,6 @@ dictionary DeviceStorageEnumerationParameters {
 };
 
 interface DeviceStorage : EventTarget {
-  [SetterThrows]
   attribute EventHandler onchange;
 
   [Throws]
@@ -40,6 +39,14 @@ interface DeviceStorage : EventTarget {
   DOMRequest usedSpace();
   [Throws]
   DOMRequest available();
+  [Throws]
+  DOMRequest storageStatus();
+  [Throws]
+  DOMRequest format();
+  [Throws]
+  DOMRequest mount();
+  [Throws]
+  DOMRequest unmount();
 
   // Note that the storageName is just a name (like sdcard), and doesn't
   // include any path information.
@@ -48,4 +55,7 @@ interface DeviceStorage : EventTarget {
   // Determines if this storage area is the one which will be used by default
   // for storing new files.
   readonly attribute boolean default;
+
+  [NewObject]
+  Promise getRoot();
 };

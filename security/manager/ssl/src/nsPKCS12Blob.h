@@ -7,6 +7,7 @@
 #define _NS_PKCS12BLOB_H_
 
 #include "nsCOMPtr.h"
+#include "nsString.h"
 #include "nsIFile.h"
 #include "nsIPK11TokenDB.h"
 #include "nsNSSHelper.h"
@@ -38,10 +39,6 @@ public:
   nsresult ImportFromFile(nsIFile *file);
 
   // PKCS#12 Export
-#if 0
-  //nsresult LoadCerts(const PRUnichar **certNames, int numCerts);
-  nsresult LoadCerts(nsIX509Cert **certs, int numCerts);
-#endif
   nsresult ExportToFile(nsIFile *file, nsIX509Cert **certs, int numCerts);
 
 private:
@@ -54,7 +51,7 @@ private:
   nsresult getPKCS12FilePassword(SECItem *);
   nsresult newPKCS12FilePassword(SECItem *);
   nsresult inputToDecoder(SEC_PKCS12DecoderContext *, nsIFile *);
-  void unicodeToItem(const PRUnichar *, SECItem *);
+  void unicodeToItem(const char16_t *, SECItem *);
   void handleError(int myerr = 0);
 
   // RetryReason and ImportMode are used when importing a PKCS12 file.
@@ -64,7 +61,7 @@ private:
   // - When the user entered a zero length password.
   //   An empty password should be represented as an empty
   //   string (a SECItem that contains a single terminating
-  //   NULL UTF16 character), but some applications use a
+  //   null UTF16 character), but some applications use a
   //   zero length SECItem.
   //   We try both variations, zero length item and empty string,
   //   without giving a user prompt when trying the different empty password flavors.

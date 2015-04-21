@@ -4,10 +4,12 @@
 
 #include "nsISupports.idl"
 
+interface nsIWifiTetheringCallback;
+
 /**
  * Information about networks that is exposed to network manager API consumers.
  */
-[scriptable, uuid(d70b9d95-87d5-4ce9-aff7-4323dac79b07)]
+[scriptable, uuid(cb62ae03-6bda-43ff-9560-916d60203d33)]
 interface nsINetworkInterface : nsISupports
 {
   const long NETWORK_STATE_UNKNOWN = -1;
@@ -24,10 +26,14 @@ interface nsINetworkInterface : nsISupports
    */
   readonly attribute long state;
 
+  const long NETWORK_TYPE_UNKNOWN     = -1;
   const long NETWORK_TYPE_WIFI        = 0;
   const long NETWORK_TYPE_MOBILE      = 1;
   const long NETWORK_TYPE_MOBILE_MMS  = 2;
   const long NETWORK_TYPE_MOBILE_SUPL = 3;
+  const long NETWORK_TYPE_WIFI_P2P    = 4;
+  const long NETWORK_TYPE_MOBILE_IMS  = 5;
+  const long NETWORK_TYPE_MOBILE_DUN  = 6;
 
   /**
    * Network type. One of the NETWORK_TYPE_* constants.
@@ -40,78 +46,58 @@ interface nsINetworkInterface : nsISupports
   readonly attribute DOMString name;
 
   /**
-   * Indicates whether DHCP should be run when the interface connects.
-   */
-  readonly attribute boolean dhcp;
-
-  /**
-   * IP Address
-   */
-  readonly attribute DOMString ip;
-
-  /**
-   * Netmask
-   */
-  readonly attribute DOMString netmask;
-
-  /**
-   * Broadcast
-   */
-  readonly attribute DOMString broadcast;
-
-  /**
-   * Default gateway
-   */
-  readonly attribute DOMString gateway;
-
-  /**
-   * Primary DNS address
-   */
-  readonly attribute DOMString dns1;
-
-  /**
-   * Secondary DNS address
-   */
-  readonly attribute DOMString dns2;
-
-  /**
    * The host name of the http proxy server.
    */
   readonly attribute DOMString httpProxyHost;
 
   /*
-   * The port number of the http proxy server. 
+   * The port number of the http proxy server.
    */
   readonly attribute long httpProxyPort;
 
-};
-
-[scriptable, function, uuid(91824160-fb25-11e1-a21f-0800200c9a66)]
-interface nsIWifiTetheringCallback : nsISupports
-{
   /**
-   * Callback function used to report status to WifiManager.
+   * Get the list of ip addresses and prefix lengths, ip address could be IPv4
+   * or IPv6, typically 1 IPv4 or 1 IPv6 or one of each.
    *
-   * @param error
-   *        An error message if the operation wasn't successful,
-   *        or `null` if it was.
+   * @param ips
+   *        The list of ip addresses retrieved.
+   * @param prefixLengths
+   *        The list of prefix lengths retrieved.
+   *
+   * @returns the length of the lists.
    */
-  void wifiTetheringEnabledChange(in jsval error);
-};
+  void getAddresses([array, size_is(count)] out wstring ips,
+                    [array, size_is(count)] out unsigned long prefixLengths,
+                    [retval] out unsigned long count);
 
-[scriptable, function, uuid(e079aa2a-ec0a-4bbd-b1a4-d81a9faae464)]
-interface nsINetworkStatsCallback : nsISupports
-{
-  void networkStatsAvailable(in boolean success,
-                             in unsigned long rxBytes,
-                             in unsigned long txBytes,
-                             in jsval date);
+  /**
+   * Get the list of gateways, could be IPv4 or IPv6, typically 1 IPv4 or 1
+   * IPv6 or one of each.
+   *
+   * @param count
+   *        The length of the list of gateways
+   *
+   * @returns the list of gateways.
+   */
+  void getGateways([optional] out unsigned long count,
+                   [array, size_is(count), retval] out wstring gateways);
+
+  /**
+   * Get the list of dnses, could be IPv4 or IPv6.
+   *
+   * @param count
+   *        The length of the list of dnses.
+   *
+   * @returns the list of dnses.
+   */
+  void getDnses([optional] out unsigned long count,
+                [array, size_is(count), retval] out wstring dnses);
 };
 
 /**
  * Manage network interfaces.
  */
-[scriptable, uuid(f39a0fb6-2752-47d2-943e-a0cdd3e43494)]
+[scriptable, uuid(3ea50550-4b3c-11e3-8f96-0800200c9a66)]
 interface nsINetworkManager : nsISupports
 {
   /**
@@ -195,17 +181,4 @@ interface nsINetworkManager : nsISupports
                         in nsINetworkInterface networkInterface,
                         in jsval config,
                         in nsIWifiTetheringCallback callback);
-
-  /**
-   * Retrieve network interface stats.
-   *
-   * @param networkName
-   *        Select the Network interface to request estats.
-   *
-   * @param callback
-   *        Callback to notify result and provide stats, connectionType
-   *        and the date when stats are retrieved
-   */
-  void getNetworkInterfaceStats(in DOMString networkName, in nsINetworkStatsCallback callback);
-
 };

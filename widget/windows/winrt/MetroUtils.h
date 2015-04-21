@@ -9,22 +9,13 @@
 #include "nsThreadUtils.h"
 #include "nsString.h"
 #include "nsPoint.h"
-#include "nsRect.h"
+#include "WinUtils.h"
 
 #include "mozwrlbase.h"
 
 #include <stdio.h>
 #include <windows.foundation.h>
 #include <windows.ui.viewmanagement.h>
-
-void Log(const char *fmt, ...);
-void LogW(const wchar_t *fmt, ...);
-
-#define LogFunction() Log(__FUNCTION__)
-#define LogThread() Log("%s: IsMainThread:%d ThreadId:%X", __FUNCTION__, NS_IsMainThread(), GetCurrentThreadId())
-#define LogThis() Log("[%X] %s", this, __FUNCTION__)
-#define LogException(e) Log("%s Exception:%s", __FUNCTION__, e->ToString()->Data())
-#define LogHRESULT(hr) Log("%s hr=%X", __FUNCTION__, hr)
 
 // HRESULT checkers, these warn on failure in debug builds
 #ifdef DEBUG
@@ -49,6 +40,7 @@ void LogW(const wchar_t *fmt, ...);
 
 class nsIBrowserDOMWindow;
 class nsIDOMWindow;
+struct nsIntRect;
 
 namespace mozilla {
 namespace widget {
@@ -81,14 +73,16 @@ class MetroUtils
 public:
   // Functions to convert between logical pixels as used by most Windows APIs
   // and physical (device) pixels.
-  // See MSDN documentation about DIPs (device independent pixels) for details.
-  static int32_t LogToPhys(FLOAT aValue);
+  static double LogToPhysFactor();
+  static double PhysToLogFactor();
   static nsIntPoint LogToPhys(const Point& aPt);
   static nsIntRect LogToPhys(const Rect& aRect);
-  static FLOAT PhysToLog(int32_t aValue);
   static Point PhysToLog(const nsIntPoint& aPt);
 
-  static nsresult FireObserver(const char* aMessage, const PRUnichar* aData = nullptr);
+  // Resolution scale factor
+  static double ScaleFactor();
+
+  static nsresult FireObserver(const char* aMessage, const char16_t* aData = nullptr);
 
   static HRESULT CreateUri(HSTRING aUriStr, Microsoft::WRL::ComPtr<IUriRuntimeClass>& aUriOut);
   static HRESULT CreateUri(HString& aHString, Microsoft::WRL::ComPtr<IUriRuntimeClass>& aUriOut);
@@ -98,5 +92,5 @@ public:
 
 private:
   static nsresult GetBrowserDOMWindow(nsCOMPtr<nsIBrowserDOMWindow> &aBWin);
-  static nsresult GetMostRecentWindow(const PRUnichar* aType, nsIDOMWindow** aWindow);
+  static nsresult GetMostRecentWindow(const char16_t* aType, nsIDOMWindow** aWindow);
 };

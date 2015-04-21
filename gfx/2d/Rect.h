@@ -11,28 +11,55 @@
 #include "Point.h"
 #include "Tools.h"
 
+#include <cmath>
+
 namespace mozilla {
 namespace gfx {
 
-struct Margin :
-  public BaseMargin<Float, Margin> {
-  typedef BaseMargin<Float, Margin> Super;
+template<class units>
+struct IntMarginTyped:
+    public BaseMargin<int32_t, IntMarginTyped<units> >,
+    public units {
+    typedef BaseMargin<int32_t, IntMarginTyped<units> > Super;
 
-  // Constructors
-  Margin() : Super(0, 0, 0, 0) {}
-  Margin(const Margin& aMargin) : Super(aMargin) {}
-  Margin(Float aTop, Float aRight, Float aBottom, Float aLeft)
-    : Super(aTop, aRight, aBottom, aLeft) {}
+    IntMarginTyped() : Super() {}
+    IntMarginTyped(int32_t aTop, int32_t aRight, int32_t aBottom, int32_t aLeft) :
+        Super(aTop, aRight, aBottom, aLeft) {}
 };
+typedef IntMarginTyped<UnknownUnits> IntMargin;
+
+template<class units>
+struct MarginTyped:
+    public BaseMargin<Float, MarginTyped<units> >,
+    public units {
+    typedef BaseMargin<Float, MarginTyped<units> > Super;
+
+    MarginTyped() : Super() {}
+    MarginTyped(Float aTop, Float aRight, Float aBottom, Float aLeft) :
+        Super(aTop, aRight, aBottom, aLeft) {}
+    explicit MarginTyped(const IntMarginTyped<units>& aMargin) :
+        Super(float(aMargin.top), float(aMargin.right),
+              float(aMargin.bottom), float(aMargin.left)) {}
+};
+typedef MarginTyped<UnknownUnits> Margin;
+
+template<class units>
+IntMarginTyped<units> RoundedToInt(const MarginTyped<units>& aMargin)
+{
+  return IntMarginTyped<units>(int32_t(floorf(aMargin.top + 0.5f)),
+                               int32_t(floorf(aMargin.right + 0.5f)),
+                               int32_t(floorf(aMargin.bottom + 0.5f)),
+                               int32_t(floorf(aMargin.left + 0.5f)));
+}
 
 template<class units>
 struct IntRectTyped :
-    public BaseRect<int32_t, IntRectTyped<units>, IntPointTyped<units>, IntSizeTyped<units>, Margin>,
+    public BaseRect<int32_t, IntRectTyped<units>, IntPointTyped<units>, IntSizeTyped<units>, IntMarginTyped<units> >,
     public units {
-    typedef BaseRect<int32_t, IntRectTyped<units>, IntPointTyped<units>, IntSizeTyped<units>, Margin> Super;
+    typedef BaseRect<int32_t, IntRectTyped<units>, IntPointTyped<units>, IntSizeTyped<units>, IntMarginTyped<units> > Super;
 
     IntRectTyped() : Super() {}
-    IntRectTyped(IntPointTyped<units> aPos, IntSizeTyped<units> aSize) :
+    IntRectTyped(const IntPointTyped<units>& aPos, const IntSizeTyped<units>& aSize) :
         Super(aPos, aSize) {}
     IntRectTyped(int32_t _x, int32_t _y, int32_t _width, int32_t _height) :
         Super(_x, _y, _width, _height) {}
@@ -57,12 +84,12 @@ typedef IntRectTyped<UnknownUnits> IntRect;
 
 template<class units>
 struct RectTyped :
-    public BaseRect<Float, RectTyped<units>, PointTyped<units>, SizeTyped<units>, Margin>,
+    public BaseRect<Float, RectTyped<units>, PointTyped<units>, SizeTyped<units>, MarginTyped<units> >,
     public units {
-    typedef BaseRect<Float, RectTyped<units>, PointTyped<units>, SizeTyped<units>, Margin> Super;
+    typedef BaseRect<Float, RectTyped<units>, PointTyped<units>, SizeTyped<units>, MarginTyped<units> > Super;
 
     RectTyped() : Super() {}
-    RectTyped(PointTyped<units> aPos, SizeTyped<units> aSize) :
+    RectTyped(const PointTyped<units>& aPos, const SizeTyped<units>& aSize) :
         Super(aPos, aSize) {}
     RectTyped(Float _x, Float _y, Float _width, Float _height) :
         Super(_x, _y, _width, _height) {}
@@ -70,7 +97,7 @@ struct RectTyped :
         Super(float(rect.x), float(rect.y),
               float(rect.width), float(rect.height)) {}
 
-    GFX2D_API void NudgeToIntegers()
+    void NudgeToIntegers()
     {
       NudgeToInteger(&(this->x));
       NudgeToInteger(&(this->y));
@@ -97,16 +124,22 @@ struct RectTyped :
     RectTyped<UnknownUnits> ToUnknownRect() const {
         return RectTyped<UnknownUnits>(this->x, this->y, this->width, this->height);
     }
+
+    // This is here only to keep IPDL-generated code happy. DO NOT USE.
+    bool operator==(const RectTyped<units>& aRect) const
+    {
+      return RectTyped<units>::IsEqualEdges(aRect);
+    }
 };
 typedef RectTyped<UnknownUnits> Rect;
 
 template<class units>
 IntRectTyped<units> RoundedToInt(const RectTyped<units>& aRect)
 {
-  return IntRectTyped<units>(NS_lround(aRect.x),
-                             NS_lround(aRect.y),
-                             NS_lround(aRect.width),
-                             NS_lround(aRect.height));
+  return IntRectTyped<units>(int32_t(floorf(aRect.x + 0.5f)),
+                             int32_t(floorf(aRect.y + 0.5f)),
+                             int32_t(floorf(aRect.width + 0.5f)),
+                             int32_t(floorf(aRect.height + 0.5f)));
 }
 
 template<class units>
@@ -114,6 +147,17 @@ IntRectTyped<units> RoundedIn(const RectTyped<units>& aRect)
 {
   RectTyped<units> copy(aRect);
   copy.RoundIn();
+  return IntRectTyped<units>(int32_t(copy.x),
+                             int32_t(copy.y),
+                             int32_t(copy.width),
+                             int32_t(copy.height));
+}
+
+template<class units>
+IntRectTyped<units> RoundedOut(const RectTyped<units>& aRect)
+{
+  RectTyped<units> copy(aRect);
+  copy.RoundOut();
   return IntRectTyped<units>(int32_t(copy.x),
                              int32_t(copy.y),
                              int32_t(copy.width),

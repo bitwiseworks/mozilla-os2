@@ -11,14 +11,19 @@
 
 /* Typography & General Styling -------------------------------------------- */
 
+::-moz-selection {
+  color: white;
+  background-color: @metro_orange@;
+}
+
 :root {
   font-family: "Segoe UI", sans-serif !important;
   font-size: @font_normal@;
 }
 
 .text-link {
+  color: @metro_orange@;
   text-decoration: none;
-  color: #1167bd;
 }
 
 textbox,
@@ -78,14 +83,14 @@ button:not([disabled]):hover {
 
 /* Default button colors */
 
-.button-default,
+button[default],
 .notification-button-default {
   background: linear-gradient(to bottom, hsl(35, 100%, 50%), hsl(30, 100%, 50%));
   border-color: hsl(30, 100%, 48%);
   color: white;
 }
 
-.button-default:not([disabled]):hover,
+button[default]:not([disabled]):hover,
 .notification-button-default:not([disabled]):hover {
   background: linear-gradient(to bottom, hsl(25, 100%, 47%), hsl(25, 100%, 45%));
   border-color: hsl(25, 100%, 43%);
@@ -97,7 +102,7 @@ button:not([disabled]):hover {
 /* Note: these need enough specificity to override all the :hover rules above. */
 button:not([disabled]):hover:active,
 button:not([disabled])[checked="true"],
-.button-default:not([disabled])[checked="true"],
+button[default]:not([disabled])[checked="true"],
 .notification-button-default:not([disabled])[checked="true"] {
   background: linear-gradient(to bottom, hsl(210, 5%, 28%), hsl(210, 5%, 25%));
   border-color: hsl(216, 4%, 27%);
@@ -116,11 +121,6 @@ button[disabled] {
 
 textbox[isempty="true"] {
   color: @field_mid_foreground_color@;
-}
-
-.link {
-  color: blue;
-  text-decoration: underline;
 }
 
 spinbuttons {
@@ -190,6 +190,7 @@ menulist {
 
 .menu-popup > richlistbox > scrollbox {
   width: 100%;
+  overflow-x: hidden !important;
 }
 
 .menu-popup richlistitem {
@@ -198,24 +199,53 @@ menulist {
   min-width: @touch_action_minwidth@; /* keep the button from being too narrow */
   border: 0 none;
   -moz-box-align: center;
+  font-weight: 600;
+}
+.menu-popup > richlistbox > richlistitem {
+  -moz-padding-end: 50px;
+}
+/* Additional styles applied to popups for form <select> elements. */
+#select-container {
+  padding: 0;
+  position: absolute;
+  background-color: transparent;
 }
 
-.menu-popup richlistitem:not([disabled]):hover {
-  background-color: #dedad0;
-  color: black;
+#select-commands {
+  -moz-appearance: none;
+  background-color: white;
+  border: #000 solid @metro_border_thick@;
+  display: -moz-box;
+  -moz-user-focus: ignore;
+  -moz-box-align: stretch;
+  width: 100%;
 }
 
-.menu-popup richlistitem:not([disabled]):active {
-  background-color: @selected_color@ !important;
-  color: black;
+/* ensure click events are dispatched targetting the select option not the label */
+#select-commands > .option-command > label {
+  pointer-events: none;
 }
 
-.menu-popup > richlistbox[left-hand="true"] > richlistitem {
-  padding-left: 50px;
+/* listcell element doesn't have flex="1" so we need to force it */
+.option-command > listcell {
+  -moz-box-flex: 1 !important;
 }
 
-.menu-popup > richlistbox[left-hand="false"] > richlistitem {
-  padding-right: 50px;
+.option-command {
+  min-height: @touch_button_small@;
+  min-width: @touch_action_minwidth@; /* keep the button from being too narrow */
+  border: 0 none;
+}
+
+.option-command.optgroup {
+  font-weight: bold;
+  font-style: italic;
+  pointer-events: none;
+}
+
+.select-popup > richlistbox > scrollbox {
+  width: 100%;
+  overflow-x: hidden !important;
 }
 
 /* Toolbar Button --------------------------------------------------------- */
@@ -356,13 +386,14 @@ richlistitem description.normal-bold {
   font-weight: bold;
 }
 
-richlistitem[selected] {
-  color: black;
-  background-color: white;
+richlistitem[selected],
+richlistitem:not([disabled]):not([selected]):active {
+  background-color: @metro_orange@;
+  color: #fff;
 }
 
-richlistitem:hover:active:not([selected]) {
-  background-color: #8db8d8;
+richlistitem:not([disabled]):not([selected]):hover {
+  background-color: #ccc;
 }
 
 richlistitem.section-header,
@@ -395,8 +426,27 @@ notification {
   min-height: 64px;
 }
 
+notificationbox[count="0"] .notification-layer,
+notificationbox[count="1"] .notification-layer,
+notificationbox[count="2"] .notification-layer[anonid="layer2"] {
+  visibility: collapse;
+}
+
+notificationbox[count="2"] .notification-layer[anonid="layer1"],
+notificationbox[count="3"] .notification-layer[anonid="layer1"],
+notificationbox[count="3"] .notification-layer[anonid="layer2"] {
+  visibility: visible;
+}
+
+.notification-layer {
+  border: @metro_border_thin@ solid @field_disabled_foreground_color@;
+  border-bottom: none;
+  height:5px
+}
+
 .notification-inner {
   border-style: none;
+  border: @metro_border_thin@ solid @field_disabled_foreground_color@;
 }
 
 .notification-button {
@@ -446,273 +496,431 @@ notification {
   -moz-box-flex: 9999;
 }
 
-
-/* Rich Grid ---------------------------------------------------------------- */
-
-richgrid {
-  display: -moz-box;
-  -moz-box-sizing: border-box;
+/* ensure the notification children pick up snapped-view box property overrides */
+.notification-button.box-inherit {
+  -moz-margin-start: inherit;
+  -moz-margin-end: inherit;
+  width: inherit;
+  display: inherit;
+  overflow: inherit;
 }
 
-richgrid .meta-grid {
-  display: block;
-}
+@media (max-width: 330px) {
+  /* notifications need layout tweaks in narrow viewport
+   */
+  .notification-button {
+      display: block;
+      width: calc(100% - 40px);
+      overflow: visible;
+      -moz-margin-start: 40px;
+      -moz-margin-end: 0;
+  }
 
-richgriditem {
-  padding: @metro_spacing_small@;
-}
-
-richgriditem .richgrid-item-content {
-  border: @metro_border_thin@ solid @tile_border_color@;
-  box-shadow: 0 0 @metro_spacing_snormal@ rgba(0, 0, 0, 0.1);
-  -moz-box-sizing: border-box;
-  padding: 10px 8px 6px 8px;
-  position: relative;
-}
-.richgrid-item-content {
-  background: #fff;
-}
-
-richgriditem[selected] .richgrid-item-content::after {
-    content: "";
-    pointer-events: none;
+  .notification-inner {
     display: block;
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    background-image: url(chrome://browser/skin/images/tile-selected-check-hdpi.png);
-    background-origin: border-box;
-    background-position: right 0 top 0;
-    background-repeat: no-repeat;
-    /* scale the image whatever the dppx */
-    background-size: 35px 35px;
-    border: @metro_border_xthick@ solid @selected_color@;
+    padding: @metro_spacing_xnormal@;
+  }
+  .notification-inner > [anonid="details"] {
+    display: inline-block;
+    width: calc(100% - 48px);
+  }
+
+  .notification-inner > .messageCloseButton {
+    display: inline-block;
+    vertical-align: top;
+    -moz-margin-start: 8px;
+    -moz-margin-end: 0;
+  }
+  .notification-inner > [anonid="details"] > .messageImage {
+    display: inline;
+    vertical-align: top;
+    -moz-margin-start: 0;
+    -moz-margin-end: 8px;
+  }
+  .notification-inner > [anonid="details"] > .messageText {
+    display: inline-block;
+    width: calc(100% - 40px);
+    overflow: visible;
+  }
+
 }
 
-richgriditem[crosssliding] {
-  z-index: 1;
+/* Prompts ----------------------------------------------------------------- */
+
+.mainContainer {
+  padding: 5vh 10vw;
 }
 
-/* ease the return to original position when cross-sliding */
-richgriditem:not([crosssliding]) {
-  transition: transform ease-out 0.2s;
-}
-
-richgriditem .richgrid-icon-container {
-  padding-bottom: 2px;
-}
-
-richgriditem .richgrid-icon-box {
-  padding: 4px;
-  background: #fff;
-  opacity: 1.0;
-}
-
-
-/* tile pinned-state indication */
-richgriditem[pinned] .richgrid-item-content::before {
-  pointer-events:none;
-  content: "";
-  display: block;
-  position: absolute;
-  width: 35px;
-  height: 35px;
-  right: 0;
-  left: auto;
-  top: 0;
-  background-image: url(chrome://browser/skin/images/pinned-hdpi.png);
-  background-position: center;
-  background-repeat: no-repeat;
-  /* scale the image whatever the dppx */
-  background-size: 70px 70px;
-}
-
-/* Selected _and_ pinned tiles*/
-richgriditem[selected][pinned] .richgrid-item-content::before {
-  background-position: right -@metro_border_xthick@ top -@metro_border_xthick@;
-  width: 70px;
-  height: 70px;
-}
-
-richgriditem[pinned]:-moz-locale-dir(rtl) .richgrid-item-content::before {
-  left: 0;
-  right: auto;
-}
-
-richgriditem[customColor] {
-  color: #f1f1f1;
-}
-richgriditem[customImage] {
-  color: #1a1a1a;
-}
-
-
-richgriditem[customColor] .richgrid-icon-box {
-  opacity: 0.8;
-  background-color: #fff;
-}
-
-.richgrid-item-content[customImage] {
-  height: 160px;
-  width: 250px;
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  -moz-box-pack: end;
-  padding: 0px;
-}
-
-/* hide icon if there is an image background */
-.richgrid-icon-container[customImage] {
-  visibility: collapse;
-}
-
-.richgrid-item-desc {
-  width: @tile_width@;
-  font-size: @metro_font_normal@;
-  margin-left: 0px;
-  padding-left: 0px !important;
-}
-
-.richgrid-item-content[customImage] > .richgrid-item-desc {
-  background: hsla(0,2%,98%,.95);
-  /*margin-bottom: 0px;
-  margin-right: 0px;*/
-  margin: 0px;
-}
-
-richgriditem image {
-  width: 24px;
-  height: 24px;
-  list-style-image: url("chrome://browser/skin/images/identity-icons-generic.png");
-}
-
-/* Dialogs ----------------------------------------------------------------- */
-
-.modal-block,
-.perm-modal-block {
-  background-color: rgba(0,0,0,.6);
-  -moz-box-align: center;
-  -moz-box-pack: center;
-  -moz-box-orient: horizontal;
-}
-
-.dialog-dark,
-.panel-arrowcontent {
-  background: url("chrome://browser/skin/images/popup-bg-hdpi.png") left bottom repeat-x;
-  background-color: white;
-  border-radius: @border_radius_normal@;
-  box-shadow: black 0 @border_radius_tiny@ @border_radius_tiny@,
-              black 0 -@border_radius_tiny@ @border_radius_tiny@;
-  padding: @padding_normal@ 0; /* core spacing on top/bottom */
-}
-
-dialog {
-  -moz-box-orient: horizontal;
-  -moz-box-align: center;
-  -moz-box-pack: center;
-}
-
-dialog > .prompt-inner {
-  width: 600px;
-}
-
-.prompt-header > .prompt-message {
-  white-space: pre-wrap;
-}
-
-.prompt-header > .button-checkbox {
-  margin-left: @margin_large@;
-}
-
-.prompt-title {
-  padding-top: @metro_spacing_normal@;
-  text-align: start;
+.info\.title {
   font-size: @metro_font_large@;
+  border-bottom: 1px solid #C7C7C7;
+  padding-bottom: @metro_spacing_normal@;
+  width: 100%;
+  margin-left: 0;
+  margin-right: 0;
 }
 
-/* Authentication dialogs do not have a title */
-.prompt-title:empty {
-  display: none;
-}
-
-.prompt-message {
-  text-align: start;
+.info\.body {
   font-size: @metro_font_normal@;
+  padding-bottom: @metro_spacing_normal@;
+  height: 100%;
+  max-height: 30vh;
+  max-width: 55vw;
 }
 
-.prompt-buttons {
-  -moz-box-pack: end;
-  text-align: end;
-  padding: @metro_spacing_normal@ 0;
-}
-
-.prompt-edit {
-  margin: @margin_xnormal@;
-  font-size: @font_normal@;
-  text-align: start;
-}
-
-/* Arrowbox ---------------------------------------------------------------- */
-
-arrowbox {
-  -moz-appearance: none;
-  background: transparent;
+.buttonContainer {
+  background-color: transparent;
   border: none;
 }
 
-.arrowbox-dark .panel-arrowcontent {
-  color: white;
-  background: @panel_dark_color@;
+.buttonContainer > button {
+  min-width: @touch_action_minwidth@;
+  margin: 5px 0 5px @metro_spacing_xnormal@;
 }
 
-.arrowbox-dark .panel-arrowcontent {
-  border: @border_width_large@ solid white;
-  border-radius: @border_radius_normal@;
-  box-shadow: black 0 @shadow_width_small@ @shadow_width_small@;
+/* set all the things to display block to allow body to grow with content and
+  obey overflow auto. Except on authentication prompts because a grid is used to
+  align labels and textboxes. */
+tabmodalprompt:not([promptType="promptUserAndPass"]) .info\.body,
+tabmodalprompt:not([promptType="promptUserAndPass"]) .infoContainer,
+tabmodalprompt:not([promptType="promptUserAndPass"]) .topContainer,
+tabmodalprompt:not([promptType="promptUserAndPass"]) .topContainer > rows > row:not([hidden]),
+tabmodalprompt:not([promptType="promptUserAndPass"]) .topContainer > rows {
+  display: block;
 }
 
-.panel-arrow[side="top"] {
-  list-style-image: url("chrome://browser/skin/images/arrowbox-up.png");
-  margin-bottom: -@margin_normal@;
+tabmodalprompt:not([promptType="promptUserAndPass"]) .infoContainer {
+  overflow: auto;
 }
 
-.panel-arrow[side="bottom"] {
-  list-style-image: url("chrome://browser/skin/images/arrowbox-down.png");
-  margin-top: -@margin_normal@;
+.topContainer > rows > row > label {
+  margin-left: 0;
 }
 
-.panel-arrow[side="left"] {
-  list-style-image: url("chrome://browser/skin/images/arrowbox-horiz.png");
-  margin-right: -@margin_normal@;
-  transform: scaleX(-1);
+.topContainer > rows > row > checkbox {
+  -moz-margin-start: 0;
+  -moz-padding-start: 0;
 }
 
-.panel-arrow[side="right"] {
-  list-style-image: url("chrome://browser/skin/images/arrowbox-horiz.png");
-  margin-left: -@margin_normal@;
+.topContainer > rows > row > textbox {
+  font-size: @metro_font_normal@;
+  height: 40px;
+  margin: 5px 0;
+  width: 100%;
+}
+
+.topContainer > rows > row > textbox[focused] {
+  border-color: @metro_orange@ !important;
+}
+
+#stack[keyboardVisible] tabmodalprompt > spacer {
+  min-height: 20px;
+  max-height: 20px;
+}
+
+#stack[keyboardVisible] tabmodalprompt .info\.body {
+  max-height: 15vh;
+}
+
+@media (max-width: 600px) {
+  .mainContainer {
+    padding: 5vh 5vw;
+    width: 90vw;
+  }
+
+  .buttonContainer > button {
+    min-width: @touch_action_snapped_minwidth@;
+  }
 }
 
 /*.meta -------------------------------------------------------------------- */
 
 .meta {
   background-color: @panel_light_color@;
-  background-image: url("chrome://browser/skin/images/firefox-watermark.png");
-  background-repeat: no-repeat;
-  background-position: center center;
-  padding: @metro_spacing_normal@ @metro_spacing_xxnormal@;
-  overflow: auto;
-  max-width: 100%;
-  width: 100%;
+}
+
+/* needs to observe the viewstate */
+.meta-section-container {
+  padding: 45px 75px 0;
+  -moz-box-orient: horizontal;
+}
+
+.meta-section-container[viewstate="snapped"],
+.meta-section-container[viewstate="portrait"] {
+  -moz-box-orient: vertical;
+  -moz-box-flex: 1;
+}
+
+.meta-section-container[viewstate="snapped"] {
+  padding: 0;
 }
 
 .meta-section {
   margin: 0 @metro_spacing_large@;
 }
 
+.meta-section-container[viewstate="snapped"] > .meta-section {
+  margin: 0 @metro_spacing_xnormal@;
+}
+
 .meta-section-title {
+  margin: @metro_spacing_normal@ @tile_side_margin@;
   font-size: @metro_font_large@;
   font-weight: 100;
+  cursor: default;
+}
+
+.meta-section-title.wide-title {
+  font-size: @metro_font_xlarge@;
+  margin-bottom: calc(40px - @tile_side_margin@);
+}
+
+.meta-section:not([expanded]) > .meta-section-title.narrow-title:after {
+  content: ">";
+}
+
+.meta-section-container:not([viewstate="snapped"]) .meta-section-title.narrow-title,
+.meta-section-container[viewstate="snapped"] .meta-section-title.wide-title {
+  display: none;
+}
+
+.meta-section-container[viewstate="snapped"] .meta-section-title,
+.meta-section-container[viewstate="snapped"] richgrid {
+  margin-top: @metro_spacing_xnormal@;
+  padding: 0;
+}
+
+.meta-section > richgrid {
+  opacity: 1;
+  transform: translateX(0) translateY(0);
+  transition-duration: 367ms;
+  transition-delay: 500ms;
+  transition-timing-function: @metro_animation_easing@;
+}
+
+.meta-section:nth-child(2) > richgrid {
+  transition-delay: 600ms;
+}
+.meta-section:nth-child(3) > richgrid {
+  transition-delay: 700ms;
+}
+.meta-section:nth-child(4) > richgrid {
+  transition-delay: 800ms;
+}
+
+.meta-section > richgrid[fade] {
+  opacity: 0;
+  transform: translateX(150px) translateY(25px);
+}
+
+#start-container[viewstate="snapped"] .meta-section > richgrid {
+  transition-property: none;
+}
+
+/* Autocomplete ----------------------------------------------------------------- */
+
+#urlbar-autocomplete-scroll:not([autocomplete]) {
+  transform: translateY(calc(3 * @grid_row_height@ + 64px));
+  visibility: collapse;
+}
+
+#urlbar-autocomplete-scroll[autocomplete] {
+  height: calc(3 * @grid_row_height@ + 64px);
+  max-height: calc(3 * @grid_row_height@ + 64px);
+  transform: translateY(0);
+  transition-timing-function: @metro_animation_easing@;
+  transition-property: transform;
+  transition-duration: @metro_animation_duration@;
+  transition-delay: 0s;
+  visibility: visible;
+}
+
+#urlbar-autocomplete-scroll:not([autocomplete]) > .meta-section-container > .meta-section {
+  opacity: 0;
+}
+
+#urlbar-autocomplete > .meta-section {
+  opacity: 1;
+  transition-property: opacity;
+  transition-timing-function: @metro_animation_easing@;
+  transition-duration: @metro_animation_duration@;
+  transition-delay: 0s;
+  visibility: visible;
+}
+
+#urlbar-autocomplete[nomatch] > .meta-section[anonid="results-container"] {
+  opacity: 0;
+  visibility: collapse;
+}
+
+#urlbar-autocomplete richgriditem:not([value]) {
+  visibility: collapse;
+}
+
+/* App bars ----------------------------------------------------------------- */
+
+appbar {
+  display: block;
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  transform: translateY(100%);
+  transition: transform @metro_animation_duration@ @metro_animation_easing@;
+  font-size: 0;
+  visibility: hidden;
+}
+
+appbar[hiding],
+appbar[visible] {
+  visibility: visible;
+}
+
+appbar[visible] {
+  transform: none;
+}
+
+#stack[keyboardVisible] > appbar {
+  /* Slow the bottom up transition since it's impossible to match the system's
+     soft keyboard movement. */
+  transition: transform @metro_animation_duration@ @metro_animation_easing@,
+              bottom @appbar_keyboard_slideup_duration@ @appbar_keyboard_slideup_easing@ @appbar_keyboard_slideup_delay@;
+}
+
+
+appbar toolbar {
+  -moz-appearance: none;
+  -moz-box-align: center;
+  border: 0;
+  width: 100%;
+  min-height: @toolbar_height@;
+  font-size: 1rem;
+}
+
+appbar toolbar toolbarbutton {
+  border: 0;
+  margin: 0 @toolbar_horizontal_spacing@;
+  padding: 0;
+  /* Don't inherit background-color from toolbarbutton[checked="true"] */
+  background-color: transparent;
+}
+
+appbar toolbar toolbarbutton[disabled] {
+  visibility: collapse;
+}
+
+appbar toolbar[labelled] {
+  min-height: @labelled_toolbar_height@;
+}
+
+appbar toolbar[labelled] toolbarbutton {
+  -moz-box-orient: vertical;
+}
+
+appbar toolbar[labelled] toolbarbutton > .toolbarbutton-text {
+  display: block;
+  padding-top: @metro_spacing_small@;
+  font-size: 0.75rem;
+}
+
+/* Sprites */
+
+.appbar-primary .toolbarbutton-icon,
+.appbar-secondary .toolbarbutton-icon {
+  width: 40px;
+  height: 40px;
+}
+
+/* Primary sprite format: one button per sprite.
+
+   States from left to right:
+   normal, hover, active/toggled, toggled+hover, toggled+active. */
+
+.appbar-primary {
+  -moz-image-region: rect(0 40px 40px 0);
+}
+
+.appbar-primary:not([checked]):hover:not(:active):not([disabled]) {
+  -moz-image-region: rect(0 80px 40px 40px);
+}
+
+.appbar-primary:not([checked]):active:not([disabled]),
+.appbar-primary[checked] {
+  -moz-image-region: rect(0 120px 40px 80px);
+}
+
+.appbar-primary[checked]:hover:not(:active):not([disabled]) {
+  -moz-image-region: rect(0 160px 40px 120px);
+}
+
+.appbar-primary[checked]:active:not([disabled]) {
+  -moz-image-region: rect(0 200px 40px 160px);
+}
+
+@media (min-resolution: @min_res_140pc@) {
+  .appbar-primary {
+    -moz-image-region: rect(0 56px 56px 0);
+  }
+
+  .appbar-primary:not([checked]):hover:not(:active):not([disabled]) {
+    -moz-image-region: rect(0 112px 56px 56px);
+  }
+
+  .appbar-primary:not([checked]):active:not([disabled]),
+  .appbar-primary[checked] {
+    -moz-image-region: rect(0 168px 56px 112px);
+  }
+
+  .appbar-primary[checked]:hover:not(:active):not([disabled]) {
+    -moz-image-region: rect(0 224px 56px 168px);
+  }
+
+  .appbar-primary[checked]:active:not([disabled]) {
+    -moz-image-region: rect(0 280px 56px 224px);
+  }
+}
+
+@media (min-resolution: @min_res_180pc@) {
+  .appbar-primary {
+    -moz-image-region: rect(0 72px 72px 0);
+  }
+
+  .appbar-primary:not([checked]):hover:not(:active):not([disabled]) {
+    -moz-image-region: rect(0 144px 72px 72px);
+  }
+
+  .appbar-primary:not([checked]):active:not([disabled]),
+  .appbar-primary[checked] {
+    -moz-image-region: rect(0 216px 72px 144px);
+  }
+
+  .appbar-primary[checked]:hover:not(:active):not([disabled]) {
+    -moz-image-region: rect(0 288px 72px 216px);
+  }
+
+  .appbar-primary[checked]:active:not([disabled]) {
+    -moz-image-region: rect(0 360px 72px 288px);
+  }
+}
+
+/* Secondary sprite format: one sprite for everything */
+
+.appbar-secondary {
+  list-style-image: url(chrome://browser/skin/images/appbar-icons.png);
+}
+
+/* Flyout panels (sidebars) ------------------------------------------------- */
+
+.flyout-narrow {
+  width: 346px;
+}
+
+/* Some elements don't resize to fit their container properly for some reason.
+ * Setting max-width on the element or a child fixes it. */
+.flyout-narrow .flyoutpanel-hack {
+  max-width: calc(346px - 2 * 40px);
+}
+
+.console-row-code {
+   padding-top: 2px;
+   font-size: small;
 }

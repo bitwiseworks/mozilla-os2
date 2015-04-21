@@ -8,19 +8,19 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <ctime>
+#include <time.h>
 
-#include "gtest/gtest.h"
 #include "gflags/gflags.h"
-#include "test/libtest/include/bit_flip_encryption.h"
-#include "test/libtest/include/random_encryption.h"
-#include "video_engine/test/auto_test/automated/two_windows_fixture.h"
-#include "video_engine/test/auto_test/interface/vie_window_creator.h"
-#include "video_engine/test/auto_test/interface/vie_autotest_window_manager_interface.h"
-#include "video_engine/test/auto_test/primitives/general_primitives.h"
-#include "video_engine/test/libvietest/include/tb_capture_device.h"
-#include "video_engine/test/libvietest/include/tb_interfaces.h"
-#include "video_engine/test/libvietest/include/tb_video_channel.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/test/libtest/include/bit_flip_encryption.h"
+#include "webrtc/test/libtest/include/random_encryption.h"
+#include "webrtc/video_engine/test/auto_test/automated/two_windows_fixture.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_autotest_window_manager_interface.h"
+#include "webrtc/video_engine/test/auto_test/interface/vie_window_creator.h"
+#include "webrtc/video_engine/test/auto_test/primitives/general_primitives.h"
+#include "webrtc/video_engine/test/libvietest/include/tb_capture_device.h"
+#include "webrtc/video_engine/test/libvietest/include/tb_interfaces.h"
+#include "webrtc/video_engine/test/libvietest/include/tb_video_channel.h"
 
 namespace {
 
@@ -28,7 +28,7 @@ DEFINE_int32(rtp_fuzz_test_rand_seed, 0, "The rand seed to use for "
     "the RTP fuzz test. Defaults to time(). 0 cannot be specified.");
 
 class ViERtpFuzzTest : public TwoWindowsFixture {
- protected:
+protected:
   TbVideoChannel* video_channel_;
   TbInterfaces* video_engine_;
   TbCaptureDevice* capture_device_;
@@ -65,7 +65,7 @@ class ViERtpFuzzTest : public TwoWindowsFixture {
     if (FLAGS_rtp_fuzz_test_rand_seed != 0) {
       return FLAGS_rtp_fuzz_test_rand_seed;
     }
-    return std::time(NULL);
+    return time(NULL);
   }
 
   // Pass in a number [0, 1] which will be the bit flip probability per byte.

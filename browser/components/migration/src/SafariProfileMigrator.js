@@ -212,10 +212,17 @@ History.prototype = {
         for (let entry of entries) {
           if (entry.has("lastVisitedDate")) {
             let visitDate = this._parseCocoaDate(entry.get("lastVisitedDate"));
-            places.push({ uri: NetUtil.newURI(entry.get("")),
-                          title: entry.get("title"),
-                          visits: [{ transitionType: transType,
-                                     visitDate: visitDate }] });
+            try {
+              places.push({ uri: NetUtil.newURI(entry.get("")),
+                            title: entry.get("title"),
+                            visits: [{ transitionType: transType,
+                                       visitDate: visitDate }] });
+            }
+            catch(ex) {
+              // Safari's History file may contain malformed URIs which
+              // will be ignored.
+              Cu.reportError(ex)
+            }
           }
         }
         if (places.length > 0) {
@@ -297,7 +304,7 @@ MainPreferencesPropertyList.prototype = {
     binaryStream.setInputStream(inputStream);
     let bytes = binaryStream.readByteArray(inputStream.available());
     this._dict = PropertyListUtils._readFromArrayBufferSync(
-      Uint8Array(bytes).buffer);
+      new Uint8Array(bytes).buffer);
     return this._dict;
   }
 };
@@ -334,29 +341,6 @@ Preferences.prototype = {
         // Allowed, originating site only   --        3
         this._set("WebKitDisplayImagesKey", "permissions.default.image",
                   function(webkitVal) webkitVal ? 1 : 2);
-
-        // Default charset migration
-        this._set("WebKitDefaultTextEncodingName", "intl.charset.default",
-          function(webkitCharset) {
-            // We don't support x-mac-korean (see bug 713516), but it mostly matches
-            // EUC-KR.
-            if (webkitCharset == "x-mac-korean")
-              return "EUC-KR";
-
-            // getCharsetAlias throws if an invalid value is passed in.
-            try {
-              return Cc["@mozilla.org/charset-converter-manager;1"].
-                     getService(Ci.nsICharsetConverterManager).
-                     getCharsetAlias(webkitCharset);
-            }
-            catch(ex) {
-              Cu.reportError("Could not convert webkit charset '" + webkitCharset +
-                             "' to a supported charset");
-            }
-            // Don't set the preference if we could not get the corresponding
-            // charset.
-            return undefined;
-          });
 
 #ifdef XP_WIN
         // Cookie-accept policy.

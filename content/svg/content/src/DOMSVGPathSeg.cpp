@@ -3,23 +3,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
-
 #include "DOMSVGPathSeg.h"
 #include "DOMSVGPathSegList.h"
 #include "SVGAnimatedPathSegList.h"
 #include "nsSVGElement.h"
 #include "nsError.h"
-#include "nsContentUtils.h"
 
 // See the architecture comment in DOMSVGPathSegList.h.
 
-using namespace mozilla;
+namespace mozilla {
 
-// We could use NS_IMPL_CYCLE_COLLECTION_1, except that in Unlink() we need to
+// We could use NS_IMPL_CYCLE_COLLECTION(, except that in Unlink() we need to
 // clear our list's weak ref to us to be safe. (The other option would be to
 // not unlink and rely on the breaking of the other edges in the cycle, as
 // NS_SVG_VAL_IMPL_CYCLE_COLLECTION does.)
+NS_IMPL_CYCLE_COLLECTION_CLASS(DOMSVGPathSeg)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGPathSeg)
   // We may not belong to a list, so we must null check tmp->mList.
   if (tmp->mList) {
@@ -38,14 +37,40 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(DOMSVGPathSeg)
 NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMSVGPathSeg)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMSVGPathSeg)
+NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(DOMSVGPathSeg, AddRef)
+NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(DOMSVGPathSeg, Release)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGPathSeg)
-  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
+//----------------------------------------------------------------------
+// Helper class: AutoChangePathSegNotifier
+// Stack-based helper class to pair calls to WillChangePathSegList
+// and DidChangePathSegList.
+class MOZ_STACK_CLASS AutoChangePathSegNotifier
+{
+public:
+  AutoChangePathSegNotifier(DOMSVGPathSeg* aPathSeg MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    : mPathSeg(aPathSeg)
+  {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    MOZ_ASSERT(mPathSeg, "Expecting non-null pathSeg");
+    MOZ_ASSERT(mPathSeg->HasOwner(),
+               "Expecting list to have an owner for notification");
+    mEmptyOrOldValue =
+      mPathSeg->Element()->WillChangePathSegList();
+  }
 
+  ~AutoChangePathSegNotifier()
+  {
+    mPathSeg->Element()->DidChangePathSegList(mEmptyOrOldValue);
+    if (mPathSeg->mList->AttrIsAnimating()) {
+      mPathSeg->Element()->AnimationNeedsResample();
+    }
+  }
+
+private:
+  DOMSVGPathSeg* const mPathSeg;
+  nsAttrValue    mEmptyOrOldValue;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
 
 DOMSVGPathSeg::DOMSVGPathSeg(DOMSVGPathSegList *aList,
                              uint32_t aListIndex,
@@ -153,13 +178,9 @@ DOMSVGPathSeg::IndexIsValid()
       if (InternalItem()[1+index] == float(a##propName)) {                    \
         return;                                                               \
       }                                                                       \
-      NS_ABORT_IF_FALSE(IsInList(), "Will/DidChangePathSegList() is wrong");  \
-      nsAttrValue emptyOrOldValue = Element()->WillChangePathSegList();       \
+      AutoChangePathSegNotifier notifier(this);                               \
       InternalItem()[1+index] = float(a##propName);                           \
-      Element()->DidChangePathSegList(emptyOrOldValue);                       \
-      if (mList->AttrIsAnimating()) {                                         \
-        Element()->AnimationNeedsResample();                                  \
-      }                                                                       \
+      InvalidateCachedList();                                                 \
     } else {                                                                  \
       mArgs[index] = float(a##propName);                                      \
     }                                                                         \
@@ -363,3 +384,4 @@ DOMSVGPathSeg::CreateFor(DOMSVGPathSegList *aList,
   }
 }
 
+} // namespace mozilla

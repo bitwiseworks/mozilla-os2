@@ -16,6 +16,7 @@
 #include "nsString.h"
 #include "nsAutoPtr.h"
 #include "nsHashKeys.h"
+#include "nsIMemoryReporter.h"
 #include "nsTHashtable.h"
 #include "mozIStorageStatement.h"
 #include "mozIStorageAsyncStatement.h"
@@ -24,6 +25,8 @@
 #include "mozIStorageRow.h"
 #include "mozIStorageCompletionCallback.h"
 #include "mozIStorageStatementCallback.h"
+
+#include "mozilla/MemoryReporting.h"
 
 class nsICookiePermission;
 class nsIEffectiveTLDService;
@@ -63,13 +66,13 @@ public:
     , mInBrowserElement(inBrowser)
   {}
 
-  nsCookieKey(const KeyTypePointer other)
+  nsCookieKey(KeyTypePointer other)
     : mBaseDomain(other->mBaseDomain)
     , mAppId(other->mAppId)
     , mInBrowserElement(other->mInBrowserElement)
   {}
 
-  nsCookieKey(const KeyType other)
+  nsCookieKey(KeyType other)
     : mBaseDomain(other.mBaseDomain)
     , mAppId(other.mAppId)
     , mInBrowserElement(other.mInBrowserElement)
@@ -100,6 +103,8 @@ public:
     temp.Append(aKey->mInBrowserElement ? 1 : 0);
     return mozilla::HashString(temp);
   }
+
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   enum { ALLOW_MEMMOVE = true };
 
@@ -133,6 +138,8 @@ class nsCookieEntry : public nsCookieKey
 
     inline ArrayType& GetCookies() { return mCookies; }
 
+    size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+
   private:
     ArrayType mCookies;
 };
@@ -142,18 +149,28 @@ struct CookieDomainTuple
 {
   nsCookieKey key;
   nsRefPtr<nsCookie> cookie;
+
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 };
 
 // encapsulates in-memory and on-disk DB states, so we can
 // conveniently switch state when entering or exiting private browsing.
-struct DBState
+struct DBState MOZ_FINAL
 {
   DBState() : cookieCount(0), cookieOldestTime(INT64_MAX), corruptFlag(OK)
   {
-    hostTable.Init();
   }
 
+private:
+  // Private destructor, to discourage deletion outside of Release():
+  ~DBState()
+  {
+  }
+
+public:
   NS_INLINE_DECL_REFCOUNTING(DBState)
+
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   // State of the database connection.
   enum CorruptFlag {
@@ -225,14 +242,18 @@ class nsCookieService : public nsICookieService
                       , public nsICookieManager2
                       , public nsIObserver
                       , public nsSupportsWeakReference
+                      , public nsIMemoryReporter
 {
+  private:
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+
   public:
-    // nsISupports
     NS_DECL_ISUPPORTS
     NS_DECL_NSIOBSERVER
     NS_DECL_NSICOOKIESERVICE
     NS_DECL_NSICOOKIEMANAGER
     NS_DECL_NSICOOKIEMANAGER2
+    NS_DECL_NSIMEMORYREPORTER
 
     nsCookieService();
     virtual ~nsCookieService();
@@ -253,7 +274,8 @@ class nsCookieService : public nsICookieService
     OpenDBResult                  TryInitDB(bool aDeleteExistingDB);
     nsresult                      CreateTable();
     void                          CloseDBStates();
-    void                          CloseDefaultDBConnection();
+    void                          CleanupCachedStatements();
+    void                          CleanupDefaultDBConnection();
     void                          HandleDBClosed(DBState* aDBState);
     void                          HandleCorruptDB(DBState* aDBState);
     void                          RebuildCorruptDB(DBState* aDBState);
@@ -272,7 +294,7 @@ class nsCookieService : public nsICookieService
   void                            SetCookieStringInternal(nsIURI *aHostURI, bool aIsForeign, nsDependentCString &aCookieHeader, const nsCString &aServerTime, bool aFromHttp, uint32_t aAppId, bool aInBrowserElement, bool aIsPrivate, nsIChannel* aChannel);
     bool                          SetCookieInternal(nsIURI *aHostURI, const nsCookieKey& aKey, bool aRequireHostMatch, CookieStatus aStatus, nsDependentCString &aCookieHeader, int64_t aServerTime, bool aFromHttp, nsIChannel* aChannel);
     void                          AddInternal(const nsCookieKey& aKey, nsCookie *aCookie, int64_t aCurrentTimeInUsec, nsIURI *aHostURI, const char *aCookieHeader, bool aFromHttp);
-    void                          RemoveCookieFromList(const nsListIter &aIter, mozIStorageBindingParamsArray *aParamsArray = NULL);
+    void                          RemoveCookieFromList(const nsListIter &aIter, mozIStorageBindingParamsArray *aParamsArray = nullptr);
     void                          AddCookieToList(const nsCookieKey& aKey, nsCookie *aCookie, DBState *aDBState, mozIStorageBindingParamsArray *aParamsArray, bool aWriteToDB = true);
     void                          UpdateCookieInList(nsCookie *aCookie, int64_t aLastAccessed, mozIStorageBindingParamsArray *aParamsArray);
     static bool                   GetTokenValue(nsASingleFragmentCString::const_char_iterator &aIter, nsASingleFragmentCString::const_char_iterator &aEndIter, nsDependentCSubstring &aTokenString, nsDependentCSubstring &aTokenValue, bool &aEqualsFound);
@@ -288,7 +310,7 @@ class nsCookieService : public nsICookieService
     static void                   FindStaleCookie(nsCookieEntry *aEntry, int64_t aCurrentTime, nsListIter &aIter);
     void                          NotifyRejected(nsIURI *aHostURI);
     void                          NotifyThirdParty(nsIURI *aHostURI, bool aAccepted, nsIChannel *aChannel);
-    void                          NotifyChanged(nsISupports *aSubject, const PRUnichar *aData);
+    void                          NotifyChanged(nsISupports *aSubject, const char16_t *aData);
     void                          NotifyPurged(nsICookie2* aCookie);
     already_AddRefed<nsIArray>    CreatePurgeList(nsICookie2* aCookie);
 

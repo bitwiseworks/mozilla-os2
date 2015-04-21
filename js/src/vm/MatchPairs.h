@@ -7,7 +7,10 @@
 #ifndef vm_MatchPairs_h
 #define vm_MatchPairs_h
 
+#include "jsalloc.h"
+
 #include "ds/LifoAlloc.h"
+#include "js/Vector.h"
 
 /*
  * RegExp match results are succinctly represented by pairs of integer
@@ -59,7 +62,7 @@ class MatchPairs
   protected:
     /* Not used directly: use ScopedMatchPairs or VectorMatchPairs. */
     MatchPairs()
-      : pairCount_(0), pairs_(NULL)
+      : pairCount_(0), pairs_(nullptr)
     { }
 
   protected:
@@ -72,10 +75,20 @@ class MatchPairs
 
     bool initArray(size_t pairCount);
     bool initArrayFrom(MatchPairs &copyFrom);
-    void forgetArray() { pairs_ = NULL; }
+    void forgetArray() { pairs_ = nullptr; }
 
     void displace(size_t disp);
-    inline void checkAgainst(size_t length);
+    void checkAgainst(size_t inputLength) {
+#ifdef DEBUG
+        for (size_t i = 0; i < pairCount_; i++) {
+            const MatchPair &p = pair(i);
+            JS_ASSERT(p.check());
+            if (p.isUndefined())
+                continue;
+            JS_ASSERT(size_t(p.limit) <= inputLength);
+        }
+#endif
+    }
 
   public:
     /* Querying functions in the style of RegExpStatics. */

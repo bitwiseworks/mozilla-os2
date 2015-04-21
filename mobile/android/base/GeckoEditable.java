@@ -7,7 +7,11 @@ package org.mozilla.gecko;
 
 import org.mozilla.gecko.gfx.InputConnectionHandler;
 import org.mozilla.gecko.gfx.LayerView;
+import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.ThreadUtils;
+import org.mozilla.gecko.util.ThreadUtils.AssertBehavior;
+
+import org.json.JSONObject;
 
 import android.os.Build;
 import android.os.Handler;
@@ -48,11 +52,12 @@ interface GeckoEditableClient {
    and also for the IC thread to listen to the Editable */
 interface GeckoEditableListener {
     // IME notification type for notifyIME(), corresponding to NotificationToIME enum in Gecko
+    final int NOTIFY_IME_OPEN_VKB = -2;
     final int NOTIFY_IME_REPLY_EVENT = -1;
     final int NOTIFY_IME_OF_FOCUS = 1;
     final int NOTIFY_IME_OF_BLUR = 2;
-    final int NOTIFY_IME_TO_COMMIT_COMPOSITION = 4;
-    final int NOTIFY_IME_TO_CANCEL_COMPOSITION = 5;
+    final int NOTIFY_IME_TO_COMMIT_COMPOSITION = 7;
+    final int NOTIFY_IME_TO_CANCEL_COMPOSITION = 8;
     // IME enabled state for notifyIMEContext()
     final int IME_STATE_DISABLED = 0;
     final int IME_STATE_ENABLED = 1;
@@ -73,7 +78,7 @@ interface GeckoEditableListener {
 */
 final class GeckoEditable
         implements InvocationHandler, Editable,
-                   GeckoEditableClient, GeckoEditableListener {
+                   GeckoEditableClient, GeckoEditableListener, GeckoEventListener {
 
     private static final boolean DEBUG = false;
     private static final String LOGTAG = "GeckoEditable";
@@ -98,7 +103,9 @@ final class GeckoEditable
     private int mIcUpdateSeqno;
     private int mLastIcUpdateSeqno;
     private boolean mUpdateGecko;
-    private boolean mFocused;
+    private boolean mFocused; // Used by IC thread
+    private boolean mGeckoFocused; // Used by Gecko thread
+    private volatile boolean mSuppressCompositions;
     private volatile boolean mSuppressKeyUp;
 
     /* An action that alters the Editable
@@ -360,7 +367,7 @@ final class GeckoEditable
     }
 
     private void assertOnIcThread() {
-        ThreadUtils.assertOnThread(mIcRunHandler.getLooper().getThread());
+        ThreadUtils.assertOnThread(mIcRunHandler.getLooper().getThread(), AssertBehavior.THROW);
     }
 
     private void geckoPostToIc(Runnable runnable) {
@@ -394,7 +401,10 @@ final class GeckoEditable
 
     private void icUpdateGecko(boolean force) {
 
-        if (!force && mIcUpdateSeqno == mLastIcUpdateSeqno) {
+        // Skip if receiving a repeated request, or
+        // if suppressing compositions during text selection.
+        if ((!force && mIcUpdateSeqno == mLastIcUpdateSeqno) ||
+            mSuppressCompositions) {
             if (DEBUG) {
                 Log.d(LOGTAG, "icUpdateGecko() skipped");
             }
@@ -531,18 +541,8 @@ final class GeckoEditable
     @Override
     public void sendEvent(final GeckoEvent event) {
         if (DEBUG) {
+            assertOnIcThread();
             Log.d(LOGTAG, "sendEvent(" + event + ")");
-        }
-        if (!onIcThread()) {
-            // Events may get dispatched to the main thread;
-            // reroute to our IC thread instead
-            mIcRunHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    sendEvent(event);
-                }
-            });
-            return;
         }
         /*
            We are actually sending two events to Gecko here,
@@ -758,6 +758,22 @@ final class GeckoEditable
                 mListener.notifyIME(type);
             }
         });
+
+        // Register/unregister Gecko-side text selection listeners
+        // and update the mGeckoFocused flag.
+        if (type == NOTIFY_IME_OF_BLUR && mGeckoFocused) {
+            // Check for focus here because Gecko may send us a blur before a focus in some
+            // cases, and we don't want to unregister an event that was not registered.
+            mGeckoFocused = false;
+            mSuppressCompositions = false;
+            GeckoAppShell.getEventDispatcher().
+                unregisterEventListener("TextSelection:DraggingHandle", this);
+        } else if (type == NOTIFY_IME_OF_FOCUS) {
+            mGeckoFocused = true;
+            mSuppressCompositions = false;
+            GeckoAppShell.getEventDispatcher().
+                registerEventListener("TextSelection:DraggingHandle", this);
+        }
     }
 
     @Override
@@ -844,8 +860,12 @@ final class GeckoEditable
         if (DEBUG) {
             // GeckoEditableListener methods should all be called from the Gecko thread
             ThreadUtils.assertOnGeckoThread();
-            Log.d(LOGTAG, "onTextChange(\"" + text + "\", " + start + ", " +
-                          unboundedOldEnd + ", " + unboundedNewEnd + ")");
+            StringBuilder sb = new StringBuilder("onTextChange(");
+            debugAppend(sb, text);
+            sb.append(", ").append(start).append(", ")
+                .append(unboundedOldEnd).append(", ")
+                .append(unboundedNewEnd).append(")");
+            Log.d(LOGTAG, sb.toString());
         }
         if (start < 0 || start > unboundedOldEnd) {
             throw new IllegalArgumentException("invalid text notification range: " +
@@ -1202,6 +1222,17 @@ final class GeckoEditable
     @Override
     public String toString() {
         throw new UnsupportedOperationException("method must be called through mProxy");
+    }
+
+    // GeckoEventListener implementation
+
+    @Override
+    public void handleMessage(String event, JSONObject message) {
+        if (!"TextSelection:DraggingHandle".equals(event)) {
+            return;
+        }
+
+        mSuppressCompositions = message.optBoolean("dragging", false);
     }
 }
 

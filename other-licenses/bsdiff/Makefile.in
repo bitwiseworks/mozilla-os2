@@ -22,16 +22,8 @@
 #
 # ***** END LICENSE BLOCK *****
 
-DEPTH     = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir    = @srcdir@
-VPATH     = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 # This program is output to dist/host/bin because it is only needed by the
 # build system and is not intended to be included in Mozilla distributions.
-HOST_PROGRAM = mbsdiff$(BIN_SUFFIX)
 
 ifdef MOZ_NATIVE_BZ2
 HOST_LIBS += $(MOZ_BZ2_LIBS)
@@ -43,8 +35,6 @@ ifeq ($(HOST_OS_ARCH),WINNT)
 HOST_EXTRA_LIBS += $(call EXPAND_LIBNAME,Ws2_32)
 endif
 
-LOCAL_INCLUDES += -I$(topsrcdir)/toolkit/mozapps/update/updater
-
 include $(topsrcdir)/config/rules.mk
 
-HOST_CXXFLAGS += $(MOZ_BZ2_CFLAGS)</textarea>
+HOST_CXXFLAGS += $(MOZ_BZ2_CFLAGS)

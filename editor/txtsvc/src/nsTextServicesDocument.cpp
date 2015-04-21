@@ -122,14 +122,14 @@ NS_INTERFACE_MAP_BEGIN(nsTextServicesDocument)
   NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsTextServicesDocument)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_7(nsTextServicesDocument,
-                           mDOMDocument,
-                           mSelCon,
-                           mIterator,
-                           mPrevTextBlock,
-                           mNextTextBlock,
-                           mExtent,
-                           mTxtSvcFilter)
+NS_IMPL_CYCLE_COLLECTION(nsTextServicesDocument,
+                         mDOMDocument,
+                         mSelCon,
+                         mIterator,
+                         mPrevTextBlock,
+                         mNextTextBlock,
+                         mExtent,
+                         mTxtSvcFilter)
 
 NS_IMETHODIMP
 nsTextServicesDocument::InitWithEditor(nsIEditor *aEditor)
@@ -3639,7 +3639,7 @@ nsTextServicesDocument::FindWordBounds(nsTArray<OffsetEntry*> *aOffsetTable,
   // Now we use the word breaker to find the beginning and end
   // of the word from our calculated string offset.
 
-  const PRUnichar *str = aBlockStr->get();
+  const char16_t *str = aBlockStr->get();
   uint32_t strLen = aBlockStr->Length();
 
   nsIWordBreaker* wordBreaker = nsContentUtils::WordBreaker();

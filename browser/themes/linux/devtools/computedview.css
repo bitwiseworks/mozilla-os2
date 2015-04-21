@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 * {
-  -moz-box-sizing: border-box;
+  box-sizing: border-box;
 }
 
 :root {
@@ -41,15 +41,16 @@ body {
 }
 
 .property-name {
-  width: 50%;
+  /* -12px is so the expander triangle isn't pushed up above the property */
+  width: calc(100% - 12px);
   overflow-x: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  outline: 0;
 }
 
 .property-value {
-  width: 50%;
-  max-width: 100%;
+  width: 100%;
   overflow-x: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -58,6 +59,7 @@ body {
   background-size: 5px 8px;
   background-position: 2px center;
   padding-left: 10px;
+  outline: 0;
 }
 
 .other-property-value {
@@ -73,7 +75,8 @@ body {
     width: 200px;
   }
   .property-value {
-    width: auto;
+    /* -212px is accounting for the 200px property-name and the 12px triangle */
+    width: calc(100% - 212px);
   }
 }
 
@@ -85,10 +88,6 @@ body {
 .expander {
   visibility: hidden;
   margin-left: -12px!important;
-}
-
-.expander[open] {
-  margin-left: -17px!important;
 }
 
 .expandable {
@@ -148,4 +147,13 @@ body {
   padding: 0 3px;
   cursor: pointer;
   float: right;
+}
+
+.computedview-colorswatch {
+  display: inline-block;
+  border-radius: 50%;
+  width: 1em;
+  height: 1em;
+  vertical-align: text-top;
+  -moz-margin-end: 5px;
 }

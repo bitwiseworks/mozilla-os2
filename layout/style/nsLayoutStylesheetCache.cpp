@@ -1,4 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6,37 +7,29 @@
 #include "nsLayoutStylesheetCache.h"
 
 #include "nsAppDirectoryServiceDefs.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/css/Loader.h"
 #include "nsIFile.h"
-#include "nsIMemoryReporter.h"
 #include "nsNetUtil.h"
 #include "nsIObserverService.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIXULRuntime.h"
 #include "nsCSSStyleSheet.h"
 
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(LayoutStyleSheetCacheMallocSizeOf)
+using namespace mozilla;
 
-static int64_t
-GetStylesheetCacheSize()
-{
-  return nsLayoutStylesheetCache::SizeOfIncludingThis(
-           LayoutStyleSheetCacheMallocSizeOf);
-}
+static bool sNumberControlEnabled;
 
-NS_MEMORY_REPORTER_IMPLEMENT(StyleSheetCache,
-  "explicit/layout/style-sheet-cache",
-  KIND_HEAP,
-  nsIMemoryReporter::UNITS_BYTES,
-  GetStylesheetCacheSize,
-  "Memory used for some built-in style sheets.")
+#define NUMBER_CONTROL_PREF "dom.forms.number"
 
-NS_IMPL_ISUPPORTS1(nsLayoutStylesheetCache, nsIObserver)
+NS_IMPL_ISUPPORTS(
+  nsLayoutStylesheetCache, nsIObserver, nsIMemoryReporter)
 
 nsresult
 nsLayoutStylesheetCache::Observe(nsISupports* aSubject,
                             const char* aTopic,
-                            const PRUnichar* aData)
+                            const char16_t* aData)
 {
   if (!strcmp(aTopic, "profile-before-change")) {
     mUserContentSheet = nullptr;
@@ -49,6 +42,7 @@ nsLayoutStylesheetCache::Observe(nsISupports* aSubject,
            strcmp(aTopic, "chrome-flush-caches") == 0) {
     mScrollbarsSheet = nullptr;
     mFormsSheet = nullptr;
+    mNumberControlSheet = nullptr;
   }
   else {
     NS_NOTREACHED("Unexpected observer topic.");
@@ -97,6 +91,31 @@ nsLayoutStylesheetCache::FormsSheet()
   }
 
   return gStyleCache->mFormsSheet;
+}
+
+nsCSSStyleSheet*
+nsLayoutStylesheetCache::NumberControlSheet()
+{
+  EnsureGlobal();
+  if (!gStyleCache)
+    return nullptr;
+
+  if (!sNumberControlEnabled) {
+    return nullptr;
+  }
+
+  if (!gStyleCache->mNumberControlSheet) {
+    nsCOMPtr<nsIURI> sheetURI;
+    NS_NewURI(getter_AddRefs(sheetURI),
+              NS_LITERAL_CSTRING("resource://gre-resources/number-control.css"));
+
+    if (sheetURI)
+      LoadSheet(sheetURI, gStyleCache->mNumberControlSheet, false);
+
+    NS_ASSERTION(gStyleCache->mNumberControlSheet, "Could not load number-control.css");
+  }
+
+  return gStyleCache->mNumberControlSheet;
 }
 
 nsCSSStyleSheet*
@@ -156,19 +175,21 @@ nsLayoutStylesheetCache::Shutdown()
   NS_IF_RELEASE(gStyleCache);
 }
 
-size_t
-nsLayoutStylesheetCache::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf)
-{
-  if (!nsLayoutStylesheetCache::gStyleCache) {
-    return 0;
-  }
+MOZ_DEFINE_MALLOC_SIZE_OF(LayoutStylesheetCacheMallocSizeOf)
 
-  return nsLayoutStylesheetCache::gStyleCache->
-      SizeOfIncludingThisHelper(aMallocSizeOf);
+NS_IMETHODIMP
+nsLayoutStylesheetCache::CollectReports(nsIHandleReportCallback* aHandleReport,
+                                        nsISupports* aData)
+{
+  return MOZ_COLLECT_REPORT(
+    "explicit/layout/style-sheet-cache", KIND_HEAP, UNITS_BYTES,
+    SizeOfIncludingThis(LayoutStylesheetCacheMallocSizeOf),
+    "Memory used for some built-in style sheets.");
 }
 
+
 size_t
-nsLayoutStylesheetCache::SizeOfIncludingThisHelper(nsMallocSizeOfFun aMallocSizeOf) const
+nsLayoutStylesheetCache::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
 
@@ -176,6 +197,7 @@ nsLayoutStylesheetCache::SizeOfIncludingThisHelper(nsMallocSizeOfFun aMallocSize
 
   MEASURE(mScrollbarsSheet);
   MEASURE(mFormsSheet);
+  MEASURE(mNumberControlSheet);
   MEASURE(mUserContentSheet);
   MEASURE(mUserChromeSheet);
   MEASURE(mUASheet);
@@ -224,15 +246,18 @@ nsLayoutStylesheetCache::nsLayoutStylesheetCache()
     LoadSheet(uri, mFullScreenOverrideSheet, true);
   }
   NS_ASSERTION(mFullScreenOverrideSheet, "Could not load full-screen-override.css");
-
-  mReporter = new NS_MEMORY_REPORTER_NAME(StyleSheetCache);
-  (void)::NS_RegisterMemoryReporter(mReporter);
 }
 
 nsLayoutStylesheetCache::~nsLayoutStylesheetCache()
 {
-  (void)::NS_UnregisterMemoryReporter(mReporter);
-  mReporter = nullptr;
+  mozilla::UnregisterWeakMemoryReporter(this);
+  gStyleCache = nullptr;
+}
+
+void
+nsLayoutStylesheetCache::InitMemoryReporter()
+{
+  mozilla::RegisterWeakMemoryReporter(this);
 }
 
 void
@@ -244,6 +269,11 @@ nsLayoutStylesheetCache::EnsureGlobal()
   if (!gStyleCache) return;
 
   NS_ADDREF(gStyleCache);
+
+  gStyleCache->InitMemoryReporter();
+
+  Preferences::AddBoolVarCache(&sNumberControlEnabled, NUMBER_CONTROL_PREF,
+                               true);
 }
 
 void
@@ -300,7 +330,7 @@ nsLayoutStylesheetCache::LoadSheet(nsIURI* aURI,
     return;
   }
 
-  if (!gCSSLoader) { 
+  if (!gCSSLoader) {
     gCSSLoader = new mozilla::css::Loader();
     NS_IF_ADDREF(gCSSLoader);
   }

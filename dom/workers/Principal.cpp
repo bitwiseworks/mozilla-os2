@@ -9,21 +9,20 @@
 
 BEGIN_WORKERS_NAMESPACE
 
-namespace {
-
-JSPrincipals gPrincipal = {
-  1
-#ifdef DEBUG
-  , kJSPrincipalsDebugToken
-#endif
-};
-
-} // anonymous namespace
-
 JSPrincipals*
 GetWorkerPrincipal()
 {
-  return &gPrincipal;
+  static Atomic<bool> sInitialized(false);
+  static JSPrincipals sPrincipal;
+
+  bool isInitialized = sInitialized.exchange(true);
+  if (!isInitialized) {
+    sPrincipal.refcount = 1;
+#ifdef DEBUG
+    sPrincipal.debugToken = kJSPrincipalsDebugToken;
+#endif
+  }
+  return &sPrincipal;
 }
 
 END_WORKERS_NAMESPACE

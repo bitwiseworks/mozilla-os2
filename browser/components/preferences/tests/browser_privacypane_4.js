@@ -12,12 +12,20 @@ function test() {
     rootDir = "file://" + tmpdir.path + '/';
   }
   loader.loadSubScript(rootDir + "privacypane_tests_perwindow.js", this);
+  let runtime = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime);
 
-  run_test_subset([
+  run_test_subset(Array.concat([
     test_custom_retention("acceptCookies", "remember"),
-    test_custom_retention("acceptCookies", "custom"),
+    test_custom_retention("acceptCookies", "custom")
+    ],
+    (runtime.isReleaseBuild ? [
     test_custom_retention("acceptThirdPartyMenu", "remember", "visited"),
-    test_custom_retention("acceptThirdPartyMenu", "custom", "always"),
+    test_custom_retention("acceptThirdPartyMenu", "custom", "always")
+    ]
+    : [
+    test_custom_retention("acceptThirdPartyMenu", "remember", "always"),
+    test_custom_retention("acceptThirdPartyMenu", "custom", "visited")
+    ]), [
     test_custom_retention("keepCookiesUntil", "remember", 1),
     test_custom_retention("keepCookiesUntil", "custom", 2),
     test_custom_retention("keepCookiesUntil", "custom", 0),
@@ -27,5 +35,5 @@ function test() {
 
     // reset all preferences to their default values once we're done
     reset_preferences
-  ]);
+  ]));
 }

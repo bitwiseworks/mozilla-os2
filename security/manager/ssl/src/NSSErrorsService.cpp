@@ -15,7 +15,7 @@
 namespace mozilla {
 namespace psm {
 
-NS_IMPL_ISUPPORTS1(NSSErrorsService, nsINSSErrorsService)
+NS_IMPL_ISUPPORTS(NSSErrorsService, nsINSSErrorsService)
 
 nsresult
 NSSErrorsService::Init()
@@ -95,17 +95,18 @@ NSSErrorsService::GetErrorClass(nsresult aXPCOMErrorCode, uint32_t *aErrorClass)
 
   switch (aNSPRCode)
   {
+    // Overridable errors.
     case SEC_ERROR_UNKNOWN_ISSUER:
-    case SEC_ERROR_CA_CERT_INVALID:
     case SEC_ERROR_UNTRUSTED_ISSUER:
     case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
     case SEC_ERROR_UNTRUSTED_CERT:
-    case SEC_ERROR_INADEQUATE_KEY_USAGE:
     case SSL_ERROR_BAD_CERT_DOMAIN:
     case SEC_ERROR_EXPIRED_CERTIFICATE:
     case SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED:
+    case SEC_ERROR_CA_CERT_INVALID:
       *aErrorClass = ERROR_CLASS_BAD_CERT;
       break;
+    // Non-overridable errors.
     default:
       *aErrorClass = ERROR_CLASS_SSL_PROTOCOL;
       break;

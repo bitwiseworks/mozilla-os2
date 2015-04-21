@@ -5,20 +5,21 @@
 
 #include "InputData.h"
 
-#include "nsGUIEvent.h"
 #include "mozilla/dom/Touch.h"
 #include "nsDebug.h"
 #include "nsThreadUtils.h"
+#include "mozilla/MouseEvents.h"
+#include "mozilla/TouchEvents.h"
 
 namespace mozilla {
 
 using namespace dom;
 
-MultiTouchInput::MultiTouchInput(const nsTouchEvent& aTouchEvent)
-  : InputData(MULTITOUCH_INPUT, aTouchEvent.time)
+MultiTouchInput::MultiTouchInput(const WidgetTouchEvent& aTouchEvent)
+  : InputData(MULTITOUCH_INPUT, aTouchEvent.time, aTouchEvent.modifiers)
 {
   NS_ABORT_IF_FALSE(NS_IsMainThread(),
-                    "Can only copy from nsTouchEvent on main thread");
+                    "Can only copy from WidgetTouchEvent on main thread");
 
   switch (aTouchEvent.message) {
     case NS_TOUCH_START:
@@ -45,16 +46,14 @@ MultiTouchInput::MultiTouchInput(const nsTouchEvent& aTouchEvent)
   }
 
   for (size_t i = 0; i < aTouchEvent.touches.Length(); i++) {
-    Touch* domTouch = static_cast<Touch*>(aTouchEvent.touches[i].get());
+    const Touch* domTouch = aTouchEvent.touches[i];
 
     // Extract data from weird interfaces.
-    int32_t identifier, radiusX, radiusY;
-    float rotationAngle, force;
-    domTouch->GetIdentifier(&identifier);
-    domTouch->GetRadiusX(&radiusX);
-    domTouch->GetRadiusY(&radiusY);
-    domTouch->GetRotationAngle(&rotationAngle);
-    domTouch->GetForce(&force);
+    int32_t identifier = domTouch->Identifier();
+    int32_t radiusX = domTouch->RadiusX();
+    int32_t radiusY = domTouch->RadiusY();
+    float rotationAngle = domTouch->RotationAngle();
+    float force = domTouch->Force();
 
     SingleTouchData data(identifier,
                          ScreenIntPoint::FromUnknownPoint(
@@ -68,17 +67,17 @@ MultiTouchInput::MultiTouchInput(const nsTouchEvent& aTouchEvent)
   }
 }
 
-// This conversion from nsMouseEvent to MultiTouchInput is needed because on
+// This conversion from WidgetMouseEvent to MultiTouchInput is needed because on
 // the B2G emulator we can only receive mouse events, but we need to be able
 // to pan correctly. To do this, we convert the events into a format that the
 // panning code can handle. This code is very limited and only supports
 // SingleTouchData. It also sends garbage for the identifier, radius, force
 // and rotation angle.
-MultiTouchInput::MultiTouchInput(const nsMouseEvent& aMouseEvent)
-  : InputData(MULTITOUCH_INPUT, aMouseEvent.time)
+MultiTouchInput::MultiTouchInput(const WidgetMouseEvent& aMouseEvent)
+  : InputData(MULTITOUCH_INPUT, aMouseEvent.time, aMouseEvent.modifiers)
 {
   NS_ABORT_IF_FALSE(NS_IsMainThread(),
-                    "Can only copy from nsMouseEvent on main thread");
+                    "Can only copy from WidgetMouseEvent on main thread");
   switch (aMouseEvent.message) {
   case NS_MOUSE_BUTTON_DOWN:
     mType = MULTITOUCH_START;

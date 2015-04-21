@@ -10,10 +10,14 @@ if CONFIG['MOZ_ZIPWRITER']:
 TEST_TOOL_DIRS += ['test']
 
 XPIDL_SOURCES += [
-    '$(MODULES_LIBJAR_LXPIDLSRCS)',
+    'nsIJARChannel.idl',
+    'nsIJARProtocolHandler.idl',
+    'nsIJARURI.idl',
+    'nsIZipReader.idl',
 ]
 
-MODULE = 'jar'
+XPIDL_MODULE = 'jar'
+LIBRARY_NAME	= 'jar'
 
 EXPORTS += [
     'nsJARURI.h',
@@ -21,7 +25,24 @@ EXPORTS += [
     'zipstruct.h',
 ]
 
-CPP_SOURCES += [
-    '$(MODULES_LIBJAR_LCPPSRCS)',
+UNIFIED_SOURCES += [
+    'nsJARProtocolHandler.cpp',
+    'nsJARURI.cpp',
 ]
 
+# These files cannot be built in unified mode because they rely on plarena.h.
+SOURCES += [
+    'nsJAR.cpp',
+    'nsJARChannel.cpp',
+    'nsJARFactory.cpp',
+    'nsJARInputStream.cpp',
+    'nsZipArchive.cpp',
+]
+
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'

@@ -15,7 +15,7 @@ interface nsIDOMMozNamedAttrMap;
  * http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#interface-element
  */
 
-[scriptable, uuid(43d985da-b7ee-4d1f-a26f-348ccd9506f3)]
+[scriptable, uuid(989422ef-120d-4d29-8a56-6aa2505a8b02)]
 interface nsIDOMElement : nsIDOMNode
 {
   readonly attribute DOMString        tagName;
@@ -79,12 +79,6 @@ interface nsIDOMElement : nsIDOMNode
 
   [binaryname(MozRemove)]
   void remove();
-
-
-  // HTML
-  [implicit_jscontext] attribute jsval onmouseenter;
-  [implicit_jscontext] attribute jsval onmouseleave;
-
 
   // CSSOM View
   /**
@@ -212,4 +206,12 @@ interface nsIDOMElement : nsIDOMNode
    * @see <http://dvcs.w3.org/hg/pointerlock/raw-file/default/index.html>
    */
   void mozRequestPointerLock();
+
+  /**
+   * Return nodes that match a given CSS selector.
+   *
+   * @see <http://dev.w3.org/2006/webapi/selectors-api/>
+   */
+  nsIDOMElement querySelector([Null(Stringify)] in DOMString selectors);
+  nsIDOMNodeList querySelectorAll([Null(Stringify)] in DOMString selectors);
 };

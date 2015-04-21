@@ -132,7 +132,7 @@ void TestSpecExample()
   is(timeline.GetValueAtTime(0.5), (0.15f * powf(0.75f / 0.15f, 0.5f)), "Correct value");
   is(timeline.GetValueAtTime(0.55), (0.15f * powf(0.75f / 0.15f, 0.15f / 0.2f)), "Correct value");
   is(timeline.GetValueAtTime(0.6), 0.75f, "Correct value");
-  is(timeline.GetValueAtTime(0.65), (0.75f * powf(0.05 / 0.75f, 0.5f)), "Correct value");
+  is(timeline.GetValueAtTime(0.65), (0.75f * powf(0.05f / 0.75f, 0.5f)), "Correct value");
   is(timeline.GetValueAtTime(0.7), -1.0f, "Correct value");
   is(timeline.GetValueAtTime(0.9), 0.0f, "Correct value");
   is(timeline.GetValueAtTime(1.0), 1.0f, "Correct value");
@@ -140,7 +140,7 @@ void TestSpecExample()
 
 void TestInvalidEvents()
 {
-  MOZ_STATIC_ASSERT(numeric_limits<float>::has_quiet_NaN, "Platform must have a quiet NaN");
+  static_assert(numeric_limits<float>::has_quiet_NaN, "Platform must have a quiet NaN");
   const float NaN = numeric_limits<float>::quiet_NaN();
   const float Infinity = numeric_limits<float>::infinity();
   Timeline timeline(10.0f);
@@ -314,6 +314,15 @@ void TestAfterLastTargetValueEventWithValueSet()
 
   timeline.SetValue(50.f);
   timeline.SetTargetAtTime(20.0f, 1.0, 5.0, rv);
+
+  // When using SetTargetValueAtTime, Timeline become stateful: the value for
+  // time t may depend on the time t-1, so we can't just query the value at a
+  // time and get the right value. We have to call GetValueAtTime for the
+  // previous times.
+  for (double i = 0.0; i < 9.99; i+=0.01) {
+    timeline.GetValueAtTime(i);
+  }
+
   is(timeline.GetValueAtTime(10.), (20.f + (50.f - 20.f) * expf(-9.0f / 5.0f)), "Return the value after SetValue and the last SetTarget event based on the curve");
 }
 

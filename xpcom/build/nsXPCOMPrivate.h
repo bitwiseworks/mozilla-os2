@@ -15,6 +15,7 @@
 class nsStringContainer;
 class nsCStringContainer;
 class nsIComponentLoader;
+class nsPurpleBufferEntry;
 
 /**
  * During this shutdown notification all threads which run XPCOM code must
@@ -39,16 +40,15 @@ typedef nsresult   (* NewLocalFileFunc)(const nsAString &path, bool followLinks,
 typedef nsresult   (* NewNativeLocalFileFunc)(const nsACString &path, bool followLinks, nsIFile* *result);
 
 typedef nsresult   (* GetDebugFunc)(nsIDebug* *result);
-typedef nsresult   (* GetTraceRefcntFunc)(nsITraceRefcnt* *result);
 
 typedef nsresult   (* StringContainerInitFunc)(nsStringContainer&);
-typedef nsresult   (* StringContainerInit2Func)(nsStringContainer&, const PRUnichar *, uint32_t, uint32_t);
+typedef nsresult   (* StringContainerInit2Func)(nsStringContainer&, const char16_t *, uint32_t, uint32_t);
 typedef void       (* StringContainerFinishFunc)(nsStringContainer&);
-typedef uint32_t   (* StringGetDataFunc)(const nsAString&, const PRUnichar**, bool*);
-typedef uint32_t   (* StringGetMutableDataFunc)(nsAString&, uint32_t, PRUnichar**);
-typedef PRUnichar* (* StringCloneDataFunc)(const nsAString&);
-typedef nsresult   (* StringSetDataFunc)(nsAString&, const PRUnichar*, uint32_t);
-typedef nsresult   (* StringSetDataRangeFunc)(nsAString&, uint32_t, uint32_t, const PRUnichar*, uint32_t);
+typedef uint32_t   (* StringGetDataFunc)(const nsAString&, const char16_t**, bool*);
+typedef uint32_t   (* StringGetMutableDataFunc)(nsAString&, uint32_t, char16_t**);
+typedef char16_t* (* StringCloneDataFunc)(const nsAString&);
+typedef nsresult   (* StringSetDataFunc)(nsAString&, const char16_t*, uint32_t);
+typedef nsresult   (* StringSetDataRangeFunc)(nsAString&, uint32_t, uint32_t, const char16_t*, uint32_t);
 typedef nsresult   (* StringCopyFunc)(nsAString &, const nsAString &);
 typedef void       (* StringSetIsVoidFunc)(nsAString &, const bool);
 typedef bool       (* StringGetIsVoidFunc)(const nsAString &);
@@ -89,7 +89,7 @@ typedef bool       (* CycleCollectorFunc)(nsISupports*);
 typedef nsPurpleBufferEntry*
                    (* CycleCollectorSuspect2Func)(void*, nsCycleCollectionParticipant*);
 typedef bool       (* CycleCollectorForget2Func)(nsPurpleBufferEntry*);
-
+typedef void       (* CycleCollectorSuspect3Func)(void*, nsCycleCollectionParticipant*,nsCycleCollectingAutoRefCnt*,bool*);
 // PRIVATE AND DEPRECATED
 typedef NS_CALLBACK(XPCOMExitRoutine)(void);
 
@@ -114,7 +114,7 @@ typedef struct XPCOMFunctions{
 
     // Added for Mozilla 1.5
     GetDebugFunc getDebug;
-    GetTraceRefcntFunc getTraceRefcnt;
+    void* getTraceRefcnt;
 
     // Added for Mozilla 1.7
     StringContainerInitFunc stringContainerInit;
@@ -157,7 +157,7 @@ typedef struct XPCOMFunctions{
     GetXPTCallStubFunc getXPTCallStubFunc;
     DestroyXPTCallStubFunc destroyXPTCallStubFunc;
     InvokeByIndexFunc invokeByIndexFunc;
-    CycleCollectorFunc cycleSuspectFunc; // obsolete: use cycleSuspect2Func
+    CycleCollectorFunc cycleSuspectFunc; // obsolete: use cycleSuspect3Func
     CycleCollectorFunc cycleForgetFunc; // obsolete
     StringSetIsVoidFunc stringSetIsVoid;
     StringGetIsVoidFunc stringGetIsVoid;
@@ -165,8 +165,10 @@ typedef struct XPCOMFunctions{
     CStringGetIsVoidFunc cstringGetIsVoid;
 
     // Added for Mozilla 1.9.1
-    CycleCollectorSuspect2Func cycleSuspect2Func;
+    CycleCollectorSuspect2Func cycleSuspect2Func; // obsolete: use cycleSuspect3Func
     CycleCollectorForget2Func cycleForget2Func; // obsolete
+
+    CycleCollectorSuspect3Func cycleSuspect3Func;
 
 } XPCOMFunctions;
 
@@ -190,6 +192,8 @@ namespace mozilla {
  */
 nsresult
 ShutdownXPCOM(nsIServiceManager* servMgr);
+
+void SetICUMemoryFunctions();
 
 /**
  * C++ namespaced version of NS_LogTerm.
@@ -270,6 +274,7 @@ void LogTerm();
 #endif
 
 extern bool gXPCOMShuttingDown;
+extern bool gXPCOMThreadsShutDown;
 
 namespace mozilla {
 namespace services {

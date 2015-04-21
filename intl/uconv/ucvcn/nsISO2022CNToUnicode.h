@@ -5,8 +5,8 @@
 #ifndef nsISO2022CNToUnicode_h__
 #define nsISO2022CNToUnicode_h__
 #include "nsCOMPtr.h"
-#include "nsISupports.h"
 #include "nsUCSupport.h"
+#include "mozilla/Telemetry.h"
 
 #define MBYTE       0x8e
 #undef PMASK
@@ -24,12 +24,16 @@ public:
   nsISO2022CNToUnicode() : 
         mState(eState_ASCII), 
         mPlaneID(0),
-        mRunLength(0) { }
+        mRunLength(0)
+  {
+    mozilla::Telemetry::Accumulate(
+      mozilla::Telemetry::DECODER_INSTANTIATED_ISO2022CN, true);
+  }
 
   virtual ~nsISO2022CNToUnicode() {}
 
   NS_IMETHOD Convert(const char *aSrc, int32_t * aSrcLength,
-     PRUnichar * aDest, int32_t * aDestLength) ;
+     char16_t * aDest, int32_t * aDestLength) ;
 
   NS_IMETHOD GetMaxLength(const char * aSrc, int32_t aSrcLength,
      int32_t * aDestLength)
@@ -95,9 +99,9 @@ private:
   nsCOMPtr<nsIUnicodeDecoder> mEUCTW_Decoder;
 
   NS_IMETHOD GB2312_To_Unicode(unsigned char *aSrc, int32_t aSrcLength,
-     PRUnichar * aDest, int32_t * aDestLength) ;
+     char16_t * aDest, int32_t * aDestLength) ;
 
   NS_IMETHOD EUCTW_To_Unicode(unsigned char *aSrc, int32_t aSrcLength,
-     PRUnichar * aDest, int32_t * aDestLength) ;
+     char16_t * aDest, int32_t * aDestLength) ;
 };
 #endif // nsISO2022CNToUnicode_h__

@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsHtml5Speculation_h__
-#define nsHtml5Speculation_h__
+#ifndef nsHtml5Speculation_h
+#define nsHtml5Speculation_h
 
 #include "nsHtml5OwningUTF16Buffer.h"
 #include "nsAHtml5TreeBuilderState.h"
@@ -23,19 +23,23 @@ class nsHtml5Speculation MOZ_FINAL : public nsAHtml5TreeOpSink
     
     ~nsHtml5Speculation();
 
-    nsHtml5OwningUTF16Buffer* GetBuffer() {
+    nsHtml5OwningUTF16Buffer* GetBuffer()
+    {
       return mBuffer;
     }
     
-    int32_t GetStart() {
+    int32_t GetStart()
+    {
       return mStart;
     }
 
-    int32_t GetStartLineNumber() {
+    int32_t GetStartLineNumber()
+    {
       return mStartLineNumber;
     }
     
-    nsAHtml5TreeBuilderState* GetSnapshot() {
+    nsAHtml5TreeBuilderState* GetSnapshot()
+    {
       return mSnapshot;
     }
 
@@ -68,4 +72,4 @@ class nsHtml5Speculation MOZ_FINAL : public nsAHtml5TreeOpSink
     nsTArray<nsHtml5TreeOperation>      mOpQueue;
 };
 
-#endif // nsHtml5Speculation_h__
+#endif // nsHtml5Speculation_h

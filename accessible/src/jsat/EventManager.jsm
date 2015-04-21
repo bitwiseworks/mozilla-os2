@@ -7,6 +7,8 @@
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
+const TEXT_NODE = 3;
+
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 XPCOMUtils.defineLazyModuleGetter(this, 'Services',
   'resource://gre/modules/Services.jsm');
@@ -18,6 +20,12 @@ XPCOMUtils.defineLazyModuleGetter(this, 'Presentation',
   'resource://gre/modules/accessibility/Presentation.jsm');
 XPCOMUtils.defineLazyModuleGetter(this, 'TraversalRules',
   'resource://gre/modules/accessibility/TraversalRules.jsm');
+XPCOMUtils.defineLazyModuleGetter(this, 'Roles',
+  'resource://gre/modules/accessibility/Constants.jsm');
+XPCOMUtils.defineLazyModuleGetter(this, 'Events',
+  'resource://gre/modules/accessibility/Constants.jsm');
+XPCOMUtils.defineLazyModuleGetter(this, 'States',
+  'resource://gre/modules/accessibility/Constants.jsm');
 
 this.EXPORTED_SYMBOLS = ['EventManager'];
 
@@ -40,7 +48,7 @@ this.EventManager.prototype = {
   start: function start() {
     try {
       if (!this._started) {
-        Logger.info('EventManager.start', Utils.MozBuildApp);
+        Logger.debug('EventManager.start');
 
         this._started = true;
 
@@ -49,16 +57,14 @@ this.EventManager.prototype = {
         this.webProgress.addProgressListener(this,
           (Ci.nsIWebProgress.NOTIFY_STATE_ALL |
            Ci.nsIWebProgress.NOTIFY_LOCATION));
+        this.addEventListener('wheel', this, true);
         this.addEventListener('scroll', this, true);
         this.addEventListener('resize', this, true);
-        // XXX: Ideally this would be an a11y event. Bug #742280.
-        this.addEventListener('DOMActivate', this, true);
       }
       this.present(Presentation.tabStateChanged(null, 'newtab'));
 
     } catch (x) {
-      Logger.error('Failed to start EventManager');
-      Logger.logException(x);
+      Logger.logException(x, 'Failed to start EventManager');
     }
   },
 
@@ -68,14 +74,13 @@ this.EventManager.prototype = {
     if (!this._started) {
       return;
     }
-    Logger.info('EventManager.stop', Utils.MozBuildApp);
+    Logger.debug('EventManager.stop');
     AccessibilityEventObserver.removeListener(this);
     try {
       this.webProgress.removeProgressListener(this);
+      this.removeEventListener('wheel', this, true);
       this.removeEventListener('scroll', this, true);
       this.removeEventListener('resize', this, true);
-      // XXX: Ideally this would be an a11y event. Bug #742280.
-      this.removeEventListener('DOMActivate', this, true);
     } catch (x) {
       // contentScope is dead.
     } finally {
@@ -84,21 +89,20 @@ this.EventManager.prototype = {
   },
 
   handleEvent: function handleEvent(aEvent) {
+    Logger.debug(() => {
+      return ['DOMEvent', aEvent.type];
+    });
+
     try {
       switch (aEvent.type) {
-      case 'DOMActivate':
+      case 'wheel':
       {
-        let activatedAcc =
-          Utils.AccRetrieval.getAccessibleFor(aEvent.originalTarget);
-        let [state, extState] = Utils.getStates(activatedAcc);
-
-        // Checkable objects will have a state changed event that we will use
-        // instead of this hackish DOMActivate. We will also know the true
-        // action that was taken.
-        if (state & Ci.nsIAccessibleStates.STATE_CHECKABLE)
-          return;
-
-        this.present(Presentation.actionInvoked(activatedAcc, 'click'));
+        let attempts = 0;
+        let delta = aEvent.deltaX || aEvent.deltaY;
+        this.contentScope.contentControl.autoMove(
+         null,
+         { moveMethod: delta > 0 ? 'moveNext' : 'movePrevious',
+           onScreenOnly: true, noOpIfOnScreen: true, delay: 500 });
         break;
       }
       case 'scroll':
@@ -117,62 +121,72 @@ this.EventManager.prototype = {
       }
       }
     } catch (x) {
-      Logger.error('Error handling DOM event');
-      Logger.logException(x);
+      Logger.logException(x, 'Error handling DOM event');
     }
   },
 
   handleAccEvent: function handleAccEvent(aEvent) {
-    if (Logger.logLevel >= Logger.DEBUG)
-      Logger.debug('A11yEvent', Logger.eventToString(aEvent),
-                   Logger.accessibleToString(aEvent.accessible));
+    Logger.debug(() => {
+      return ['A11yEvent', Logger.eventToString(aEvent),
+              Logger.accessibleToString(aEvent.accessible)];
+    });
 
     // Don't bother with non-content events in firefox.
     if (Utils.MozBuildApp == 'browser' &&
-        aEvent.eventType != Ci.nsIAccessibleEvent.EVENT_VIRTUALCURSOR_CHANGED &&
-        aEvent.accessibleDocument != Utils.CurrentContentDoc) {
+        aEvent.eventType != Events.VIRTUALCURSOR_CHANGED &&
+        // XXX Bug 442005 results in DocAccessible::getDocType returning
+        // NS_ERROR_FAILURE. Checking for aEvent.accessibleDocument.docType ==
+        // 'window' does not currently work.
+        (aEvent.accessibleDocument.DOMDocument.doctype &&
+         aEvent.accessibleDocument.DOMDocument.doctype.name === 'window')) {
       return;
     }
 
     switch (aEvent.eventType) {
-      case Ci.nsIAccessibleEvent.EVENT_VIRTUALCURSOR_CHANGED:
+      case Events.VIRTUALCURSOR_CHANGED:
       {
         let pivot = aEvent.accessible.
           QueryInterface(Ci.nsIAccessibleDocument).virtualCursor;
         let position = pivot.position;
-        if (position.role == Ci.nsIAccessibleRole.ROLE_INTERNAL_FRAME)
+        if (position && position.role == Roles.INTERNAL_FRAME)
           break;
         let event = aEvent.
           QueryInterface(Ci.nsIAccessibleVirtualCursorChangeEvent);
         let reason = event.reason;
+        let oldAccessible = event.oldAccessible;
 
-        if (this.editState.editing)
+        if (this.editState.editing) {
           aEvent.accessibleDocument.takeFocus();
-
+        }
         this.present(
-          Presentation.pivotChanged(position, event.oldAccessible, reason));
+          Presentation.pivotChanged(position, oldAccessible, reason,
+                                    pivot.startOffset, pivot.endOffset));
 
         break;
       }
-      case Ci.nsIAccessibleEvent.EVENT_STATE_CHANGE:
+      case Events.STATE_CHANGE:
       {
         let event = aEvent.QueryInterface(Ci.nsIAccessibleStateChangeEvent);
-        if (event.state == Ci.nsIAccessibleStates.STATE_CHECKED &&
-            !(event.isExtraState)) {
+        let state = Utils.getState(event);
+        if (state.contains(States.CHECKED)) {
           this.present(
             Presentation.
               actionInvoked(aEvent.accessible,
                             event.isEnabled ? 'check' : 'uncheck'));
+        } else if (state.contains(States.SELECTED)) {
+          this.present(
+            Presentation.
+              actionInvoked(aEvent.accessible,
+                            event.isEnabled ? 'select' : 'unselect'));
         }
         break;
       }
-      case Ci.nsIAccessibleEvent.EVENT_SCROLLING_START:
+      case Events.SCROLLING_START:
       {
-        let vc = Utils.getVirtualCursor(aEvent.accessibleDocument);
-        vc.moveNext(TraversalRules.Simple, aEvent.accessible, true);
+        this.contentScope.contentControl.autoMove(aEvent.accessible);
         break;
       }
-      case Ci.nsIAccessibleEvent.EVENT_TEXT_CARET_MOVED:
+      case Events.TEXT_CARET_MOVED:
       {
         let acc = aEvent.accessible;
         let characterCount = acc.
@@ -181,10 +195,10 @@ this.EventManager.prototype = {
           QueryInterface(Ci.nsIAccessibleCaretMoveEvent).caretOffset;
 
         // Update editing state, both for presenter and other things
-        let [,extState] = Utils.getStates(acc);
+        let state = Utils.getState(acc);
         let editState = {
-          editing: !!(extState & Ci.nsIAccessibleStates.EXT_STATE_EDITABLE),
-          multiline: !!(extState & Ci.nsIAccessibleStates.EXT_STATE_MULTI_LINE),
+          editing: state.contains(States.EDITABLE),
+          multiline: state.contains(States.MULTI_LINE),
           atStart: caretOffset == 0,
           atEnd: caretOffset == characterCount
         };
@@ -202,46 +216,215 @@ this.EventManager.prototype = {
             editState.atStart != this.editState.atStart)
           this.sendMsgFunc("AccessFu:Input", editState);
 
+        this.present(Presentation.textSelectionChanged(acc.getText(0,-1),
+                     caretOffset, caretOffset, 0, 0, aEvent.isFromUserInput));
+
         this.editState = editState;
         break;
       }
-      case Ci.nsIAccessibleEvent.EVENT_TEXT_INSERTED:
-      case Ci.nsIAccessibleEvent.EVENT_TEXT_REMOVED:
+      case Events.SHOW:
       {
-        if (aEvent.isFromUserInput) {
-          // XXX support live regions as well.
-          let event = aEvent.QueryInterface(Ci.nsIAccessibleTextChangeEvent);
-          let isInserted = event.isInserted;
-          let txtIface = aEvent.accessible.QueryInterface(Ci.nsIAccessibleText);
-
-          let text = '';
-          try {
-            text = txtIface.
-              getText(0, Ci.nsIAccessibleText.TEXT_OFFSET_END_OF_TEXT);
-          } catch (x) {
-            // XXX we might have gotten an exception with of a
-            // zero-length text. If we did, ignore it (bug #749810).
-            if (txtIface.characterCount)
-              throw x;
+        let {liveRegion, isPolite} = this._handleLiveRegion(aEvent,
+          ['additions', 'all']);
+        // Only handle show if it is a relevant live region.
+        if (!liveRegion) {
+          break;
+        }
+        // Show for text is handled by the EVENT_TEXT_INSERTED handler.
+        if (aEvent.accessible.role === Roles.TEXT_LEAF) {
+          break;
+        }
+        this._dequeueLiveEvent(Events.HIDE, liveRegion);
+        this.present(Presentation.liveRegion(liveRegion, isPolite, false));
+        break;
+      }
+      case Events.HIDE:
+      {
+        let evt = aEvent.QueryInterface(Ci.nsIAccessibleHideEvent);
+        let {liveRegion, isPolite} = this._handleLiveRegion(
+          evt, ['removals', 'all']);
+        if (liveRegion) {
+          // Hide for text is handled by the EVENT_TEXT_REMOVED handler.
+          if (aEvent.accessible.role === Roles.TEXT_LEAF) {
+            break;
           }
-          this.present(Presentation.textChanged(
-                         isInserted, event.start, event.length,
-                         text, event.modifiedText));
+          this._queueLiveEvent(Events.HIDE, liveRegion, isPolite);
+        } else {
+          let vc = Utils.getVirtualCursor(this.contentScope.content.document);
+          if (vc.position &&
+            (Utils.getState(vc.position).contains(States.DEFUNCT) ||
+              Utils.isInSubtree(vc.position, aEvent.accessible))) {
+            this.contentScope.contentControl.autoMove(
+              evt.targetPrevSibling || evt.targetParent,
+              { moveToFocused: true, delay: 500 });
+          }
         }
         break;
       }
-      case Ci.nsIAccessibleEvent.EVENT_FOCUS:
+      case Events.TEXT_INSERTED:
+      case Events.TEXT_REMOVED:
+      {
+        let {liveRegion, isPolite} = this._handleLiveRegion(aEvent,
+          ['text', 'all']);
+        if (aEvent.isFromUserInput || liveRegion) {
+          // Handle all text mutations coming from the user or if they happen
+          // on a live region.
+          this._handleText(aEvent, liveRegion, isPolite);
+        }
+        break;
+      }
+      case Events.FOCUS:
       {
         // Put vc where the focus is at
         let acc = aEvent.accessible;
         let doc = aEvent.accessibleDocument;
-        if (acc.role != Ci.nsIAccessibleRole.ROLE_DOCUMENT &&
-            doc.role != Ci.nsIAccessibleRole.ROLE_CHROME_WINDOW) {
-          let vc = Utils.getVirtualCursor(doc);
-          vc.moveNext(TraversalRules.Simple, acc, true);
+        if (acc.role != Roles.DOCUMENT && doc.role != Roles.CHROME_WINDOW) {
+         this.contentScope.contentControl.autoMove(acc);
+       }
+       break;
+      }
+      case Events.DOCUMENT_LOAD_COMPLETE:
+      {
+        if (aEvent.accessible === aEvent.accessibleDocument) {
+          break;
         }
+        this.contentScope.contentControl.autoMove(
+          aEvent.accessible, { delay: 500 });
         break;
       }
+      case Events.VALUE_CHANGE:
+      {
+        let position = this.contentScope.contentControl.vc.position;
+        let target = aEvent.accessible;
+        if (position === target ||
+            Utils.getEmbeddedControl(position) === target) {
+          this.present(Presentation.valueChanged(target));
+        }
+      }
+    }
+  },
+
+  _handleText: function _handleText(aEvent, aLiveRegion, aIsPolite) {
+    let event = aEvent.QueryInterface(Ci.nsIAccessibleTextChangeEvent);
+    let isInserted = event.isInserted;
+    let txtIface = aEvent.accessible.QueryInterface(Ci.nsIAccessibleText);
+
+    let text = '';
+    try {
+      text = txtIface.getText(0, Ci.nsIAccessibleText.TEXT_OFFSET_END_OF_TEXT);
+    } catch (x) {
+      // XXX we might have gotten an exception with of a
+      // zero-length text. If we did, ignore it (bug #749810).
+      if (txtIface.characterCount) {
+        throw x;
+      }
+    }
+    // If there are embedded objects in the text, ignore them.
+    // Assuming changes to the descendants would already be handled by the
+    // show/hide event.
+    let modifiedText = event.modifiedText.replace(/\uFFFC/g, '').trim();
+    if (!modifiedText) {
+      return;
+    }
+    if (aLiveRegion) {
+      if (aEvent.eventType === Events.TEXT_REMOVED) {
+        this._queueLiveEvent(Events.TEXT_REMOVED, aLiveRegion, aIsPolite,
+          modifiedText);
+      } else {
+        this._dequeueLiveEvent(Events.TEXT_REMOVED, aLiveRegion);
+        this.present(Presentation.liveRegion(aLiveRegion, aIsPolite, false,
+          modifiedText));
+      }
+    } else {
+      this.present(Presentation.textChanged(isInserted, event.start,
+        event.length, text, modifiedText));
+    }
+  },
+
+  _handleLiveRegion: function _handleLiveRegion(aEvent, aRelevant) {
+    if (aEvent.isFromUserInput) {
+      return {};
+    }
+    let parseLiveAttrs = function parseLiveAttrs(aAccessible) {
+      let attrs = Utils.getAttributes(aAccessible);
+      if (attrs['container-live']) {
+        return {
+          live: attrs['container-live'],
+          relevant: attrs['container-relevant'] || 'additions text',
+          busy: attrs['container-busy'],
+          atomic: attrs['container-atomic'],
+          memberOf: attrs['member-of']
+        };
+      }
+      return null;
+    };
+    // XXX live attributes are not set for hidden accessibles yet. Need to
+    // climb up the tree to check for them.
+    let getLiveAttributes = function getLiveAttributes(aEvent) {
+      let liveAttrs = parseLiveAttrs(aEvent.accessible);
+      if (liveAttrs) {
+        return liveAttrs;
+      }
+      let parent = aEvent.targetParent;
+      while (parent) {
+        liveAttrs = parseLiveAttrs(parent);
+        if (liveAttrs) {
+          return liveAttrs;
+        }
+        parent = parent.parent
+      }
+      return {};
+    };
+    let {live, relevant, busy, atomic, memberOf} = getLiveAttributes(aEvent);
+    // If container-live is not present or is set to |off| ignore the event.
+    if (!live || live === 'off') {
+      return {};
+    }
+    // XXX: support busy and atomic.
+
+    // Determine if the type of the mutation is relevant. Default is additions
+    // and text.
+    let isRelevant = Utils.matchAttributeValue(relevant, aRelevant);
+    if (!isRelevant) {
+      return {};
+    }
+    return {
+      liveRegion: aEvent.accessible,
+      isPolite: live === 'polite'
+    };
+  },
+
+  _dequeueLiveEvent: function _dequeueLiveEvent(aEventType, aLiveRegion) {
+    let domNode = aLiveRegion.DOMNode;
+    if (this._liveEventQueue && this._liveEventQueue.has(domNode)) {
+      let queue = this._liveEventQueue.get(domNode);
+      let nextEvent = queue[0];
+      if (nextEvent.eventType === aEventType) {
+        Utils.win.clearTimeout(nextEvent.timeoutID);
+        queue.shift();
+        if (queue.length === 0) {
+          this._liveEventQueue.delete(domNode)
+        }
+      }
+    }
+  },
+
+  _queueLiveEvent: function _queueLiveEvent(aEventType, aLiveRegion, aIsPolite, aModifiedText) {
+    if (!this._liveEventQueue) {
+      this._liveEventQueue = new WeakMap();
+    }
+    let eventHandler = {
+      eventType: aEventType,
+      timeoutID: Utils.win.setTimeout(this.present.bind(this),
+        20, // Wait for a possible EVENT_SHOW or EVENT_TEXT_INSERTED event.
+        Presentation.liveRegion(aLiveRegion, aIsPolite, true, aModifiedText))
+    };
+
+    let domNode = aLiveRegion.DOMNode;
+    if (this._liveEventQueue.has(domNode)) {
+      this._liveEventQueue.get(domNode).push(eventHandler);
+    } else {
+      this._liveEventQueue.set(domNode, [eventHandler]);
     }
   },
 
@@ -421,8 +604,7 @@ const AccessibilityEventObserver = {
     try {
       eventManager.handleAccEvent(event);
     } catch (x) {
-      Logger.error('Error handing accessible event');
-      Logger.logException(x);
+      Logger.logException(x, 'Error handing accessible event');
     } finally {
       return;
     }

@@ -26,10 +26,10 @@ using namespace mozilla;
 PRLogModuleInfo *gWifiMonitorLog;
 #endif
 
-NS_IMPL_ISUPPORTS3(nsWifiMonitor,
-                   nsIWifiMonitor,
-                   nsIObserver,
-                   nsIWifiScanResultsReady)
+NS_IMPL_ISUPPORTS(nsWifiMonitor,
+                  nsIWifiMonitor,
+                  nsIObserver,
+                  nsIWifiScanResultsReady)
 
 nsWifiMonitor::nsWifiMonitor()
 {
@@ -90,7 +90,7 @@ nsWifiMonitor::StopWatching(nsIWifiListener *aListener)
 
 NS_IMETHODIMP
 nsWifiMonitor::Observe(nsISupports *subject, const char *topic,
-                       const PRUnichar *data)
+                       const char16_t *data)
 {
   if (!strcmp(topic, "timer-callback")) {
     LOG(("timer callback\n"));

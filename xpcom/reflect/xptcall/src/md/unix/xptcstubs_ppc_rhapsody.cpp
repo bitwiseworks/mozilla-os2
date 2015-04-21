@@ -35,7 +35,7 @@
  * http://developer.apple.com/documentation/DeveloperTools/Conceptual/
  *  MachORuntime/PowerPCConventions/chapter_3_section_1.html */
 
-extern "C" nsresult
+extern "C" nsresult ATTRIBUTE_USED
 PrepareAndDispatch(
   nsXPTCStubBase *self,
   uint32_t        methodIndex,
@@ -47,7 +47,7 @@ PrepareAndDispatch(
 #define PARAM_GPR_COUNT     7
 
   nsXPTCMiniVariant      paramBuffer[PARAM_BUFFER_COUNT];
-  nsXPTCMiniVariant     *dispatchParams = NULL;
+  nsXPTCMiniVariant     *dispatchParams = nullptr;
   const nsXPTMethodInfo *methodInfo;
   uint8_t                paramCount;
   uint8_t                i;

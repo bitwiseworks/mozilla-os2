@@ -79,21 +79,14 @@
  *    at all.  Thus, it is not used here.
  */
 
-// MAP_ANON(YMOUS) is not in any standard, and the C99 PRI* macros are
-// not in C++98.  Add defines as necessary.
-#define __STDC_FORMAT_MACROS
+#include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/NullPtr.h"
+
+// MAP_ANON(YMOUS) is not in any standard.  Add defines as necessary.
 #define _GNU_SOURCE 1
 #define _DARWIN_C_SOURCE 1
 
 #include <stddef.h>
-
-#ifndef _WIN32
-#include <inttypes.h>
-#else
-#define PRIxPTR "Ix"
-typedef unsigned int uint32_t;
-// MSVC defines uintptr_t in <crtdefs.h> which is brought in implicitly
-#endif
 
 #include <errno.h>
 #include <stdio.h>
@@ -168,6 +161,9 @@ typedef unsigned int uint32_t;
 #elif defined __s390__
 #define RETURN_INSTR 0x07fe0000 /* br %r14 */
 
+#elif defined __aarch64__
+#define RETURN_INSTR 0xd65f03c0 /* ret */
+
 #elif defined __ia64
 struct ia64_instr { uint32_t i[4]; };
 static const ia64_instr _return_instr =
@@ -195,8 +191,8 @@ StrW32Error(DWORD errcode)
   FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |
                  FORMAT_MESSAGE_FROM_SYSTEM |
                  FORMAT_MESSAGE_IGNORE_INSERTS,
-                 NULL, errcode, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                 (LPSTR) &errmsg, 0, NULL);
+                 nullptr, errcode, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                 (LPSTR)&errmsg, 0, nullptr);
 
   // FormatMessage puts an unwanted newline at the end of the string
   size_t n = strlen(errmsg)-1;

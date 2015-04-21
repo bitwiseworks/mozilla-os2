@@ -10,7 +10,7 @@
 #include "nsSVGString.h"
 
 nsresult NS_NewSVGAltGlyphElement(nsIContent **aResult,
-                                  already_AddRefed<nsINodeInfo> aNodeInfo);
+                                  already_AddRefed<nsINodeInfo>&& aNodeInfo);
 
 namespace mozilla {
 namespace dom {
@@ -21,10 +21,9 @@ class SVGAltGlyphElement MOZ_FINAL : public SVGAltGlyphElementBase
 {
 protected:
   friend nsresult (::NS_NewSVGAltGlyphElement(nsIContent **aResult,
-                                              already_AddRefed<nsINodeInfo> aNodeInfo));
-  SVGAltGlyphElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx,
-                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+                                              already_AddRefed<nsINodeInfo>&& aNodeInfo));
+  SVGAltGlyphElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  virtual JSObject* WrapNode(JSContext *cx) MOZ_OVERRIDE;
 
 public:
   // nsIContent interface
@@ -42,12 +41,21 @@ public:
 protected:
 
   // nsSVGElement overrides
+  virtual EnumAttributesInfo GetEnumInfo() MOZ_OVERRIDE;
+  virtual LengthAttributesInfo GetLengthInfo() MOZ_OVERRIDE;
   virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
 
   enum { HREF };
   nsSVGString mStringAttributes[1];
   static StringInfo sStringInfo[1];
 
+  nsSVGEnum mEnumAttributes[1];
+  virtual nsSVGEnum* EnumAttributes() MOZ_OVERRIDE
+    { return mEnumAttributes; }
+
+  nsSVGLength2 mLengthAttributes[1];
+  virtual nsSVGLength2* LengthAttributes() MOZ_OVERRIDE
+    { return mLengthAttributes; }
 };
 
 } // namespace dom

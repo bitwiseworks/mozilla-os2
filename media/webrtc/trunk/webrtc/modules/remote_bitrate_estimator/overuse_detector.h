@@ -12,17 +12,19 @@
 
 #include <list>
 
-#include "modules/interface/module_common_types.h"
-#include "modules/remote_bitrate_estimator/include/bwe_defines.h"
-#include "typedefs.h"  // NOLINT(build/include)
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/modules/remote_bitrate_estimator/include/bwe_defines.h"
+#include "webrtc/typedefs.h"
 
 #ifdef WEBRTC_BWE_MATLAB
-#include "../test/BWEStandAlone/MatlabPlot.h"
+#include "webrtc/modules/rtp_rtcp/test/BWEStandAlone/MatlabPlot.h"
 #endif
 
 namespace webrtc {
 enum RateControlRegion;
 
+// This class is assumed to be protected by the owner if used by multiple
+// threads.
 class OveruseDetector {
  public:
   explicit OveruseDetector(const OverUseDetectorOptions& options);
@@ -34,6 +36,7 @@ class OveruseDetector {
   BandwidthUsage State() const;
   double NoiseVar() const;
   void SetRateControlRegion(RateControlRegion region);
+  int64_t time_of_last_received_packet() const;
 
  private:
   struct FrameSample {
@@ -100,6 +103,7 @@ class OveruseDetector {
   double time_over_using_;
   uint16_t over_use_counter_;
   BandwidthUsage hypothesis_;
+  int64_t time_of_last_received_packet_;
 #ifdef WEBRTC_BWE_MATLAB
   DebugPlots plots_;
 #endif

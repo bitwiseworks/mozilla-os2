@@ -11,11 +11,12 @@
 #include "nsIObserver.h"
 #include "nsNSSShutDown.h"
 #include "PSMRunnable.h"
+#include "mozilla/DebugOnly.h"
 
 using namespace mozilla;
 using namespace mozilla::psm;
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsKeygenThread, nsIKeygenThread)
+NS_IMPL_ISUPPORTS(nsKeygenThread, nsIKeygenThread)
 
 
 nsKeygenThread::nsKeygenThread()
@@ -141,7 +142,7 @@ nsresult nsKeygenThread::StartKeyGeneration(nsIObserver* aObserver)
     iAmRunning = true;
 
     threadHandle = PR_CreateThread(PR_USER_THREAD, nsKeygenThreadRunner, static_cast<void*>(this), 
-      PR_PRIORITY_NORMAL, PR_LOCAL_THREAD, PR_JOINABLE_THREAD, 0);
+      PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0);
 
     // bool thread_started_ok = (threadHandle != nullptr);
     // we might want to return "thread started ok" to caller in the future
@@ -235,7 +236,7 @@ void nsKeygenThread::Run(void)
   }
 
   if (notifyObserver) {
-    nsresult rv = NS_DispatchToMainThread(notifyObserver);
+    DebugOnly<nsresult> rv = NS_DispatchToMainThread(notifyObserver);
     NS_ASSERTION(NS_SUCCEEDED(rv),
 		 "failed to dispatch keygen thread observer to main thread");
   }

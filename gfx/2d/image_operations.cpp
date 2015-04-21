@@ -35,7 +35,6 @@
 
 #include "image_operations.h"
 
-#include "nsAlgorithm.h"
 #include "base/stack_container.h"
 #include "convolver.h"
 #include "skia/SkColorPriv.h"
@@ -471,7 +470,7 @@ SkBitmap ImageOperations::ResizeSubpixel(const SkBitmap& source,
     src_row += h * row_words;
     dst_row += result.rowBytes() / 4;
   }
-  result.setIsOpaque(img.isOpaque());
+  result.setAlphaType(img.alphaType());
   return result;
 #else
   return SkBitmap();
@@ -535,7 +534,7 @@ SkBitmap ImageOperations::ResizeBasic(const SkBitmap& source,
                  /* sse = */ false);
 
   // Preserve the "opaque" flag for use as an optimization later.
-  result.setIsOpaque(source.isOpaque());
+  result.setAlphaType(source.alphaType());
 
   return result;
 }

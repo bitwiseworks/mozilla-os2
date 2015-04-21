@@ -171,13 +171,14 @@ public:
   void SetStyleIfVisited(already_AddRefed<nsStyleContext> aStyleIfVisited)
   {
     NS_ABORT_IF_FALSE(!IsStyleIfVisited(), "this context is not visited data");
-    NS_ABORT_IF_FALSE(aStyleIfVisited.get()->IsStyleIfVisited(),
-                      "other context is visited data");
-    NS_ABORT_IF_FALSE(!aStyleIfVisited.get()->GetStyleIfVisited(),
-                      "other context does not have visited data");
     NS_ASSERTION(!mStyleIfVisited, "should only be set once");
+
     mStyleIfVisited = aStyleIfVisited;
 
+    NS_ABORT_IF_FALSE(mStyleIfVisited->IsStyleIfVisited(),
+                      "other context is visited data");
+    NS_ABORT_IF_FALSE(!mStyleIfVisited->GetStyleIfVisited(),
+                      "other context does not have visited data");
     NS_ASSERTION(GetStyleIfVisited()->GetPseudo() == GetPseudo(),
                  "pseudo tag mismatch");
     if (GetParent() && GetParent()->GetStyleIfVisited()) {
@@ -211,7 +212,7 @@ public:
   #undef STYLE_STRUCT_INHERITED
 
   nsRuleNode* RuleNode() { return mRuleNode; }
-  void AddStyleBit(const uint32_t& aBit) { mBits |= aBit; }
+  void AddStyleBit(const uint64_t& aBit) { mBits |= aBit; }
 
   /*
    * Mark this style context's rule node (and its ancestors) to prevent
@@ -274,7 +275,7 @@ public:
    * requested.)
    *
    * This method returns a change hint (see nsChangeHint.h).  All change
-   * hints apply to the frame and its later continuations or special
+   * hints apply to the frame and its later continuations or ib-split
    * siblings.  Most (all of those except the "NotHandledForDescendants"
    * hints) also apply to all descendants.  The caller must pass in any
    * non-inherited hints that resulted from the parent style context's
@@ -340,6 +341,7 @@ public:
 
 #ifdef DEBUG
   void List(FILE* out, int32_t aIndent);
+  static void AssertStyleStructMaxDifferenceValid();
 #endif
 
 protected:
@@ -430,7 +432,7 @@ protected:
   // sometimes allocate the mCachedResetData.
   nsResetStyleData*       mCachedResetData; // Cached reset style data.
   nsInheritedStyleData    mCachedInheritedData; // Cached inherited style data
-  uint32_t                mBits; // Which structs are inherited from the
+  uint64_t                mBits; // Which structs are inherited from the
                                  // parent context or owned by mRuleNode.
   uint32_t                mRefCnt;
 };

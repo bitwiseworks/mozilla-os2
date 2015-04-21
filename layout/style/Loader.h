@@ -20,6 +20,7 @@
 #include "nsURIHashKey.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/CORSMode.h"
+#include "mozilla/MemoryReporting.h"
 
 class nsIAtom;
 class nsICSSLoaderObserver;
@@ -99,6 +100,8 @@ public:
     return nsURIHashKey::HashKey(aKey->mKey);
   }
 
+  nsIURI* GetURI() const { return nsURIHashKey::GetKey(); }
+
   enum { ALLOW_MEMMOVE = true };
 
 protected:
@@ -128,8 +131,12 @@ class Loader MOZ_FINAL {
 public:
   Loader();
   Loader(nsIDocument*);
+
+ private:
+  // Private destructor, to discourage deletion outside of Release():
   ~Loader();
 
+ public:
   NS_INLINE_DECL_REFCOUNTING(Loader)
 
   void DropDocumentReference(); // notification that doc is going away
@@ -368,10 +375,19 @@ public:
   void UnlinkCachedSheets();
 
   // Measure our size.
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+
+  // Marks all the sheets at the given URI obsolete, and removes them from the
+  // cache.
+  nsresult ObsoleteSheet(nsIURI* aURI);
 
 private:
   friend class SheetLoadData;
+
+  static PLDHashOperator
+  RemoveEntriesWithURI(URIPrincipalAndCORSModeHashKey* aKey,
+                       nsRefPtr<nsCSSStyleSheet> &aSheet,
+                       void* aUserData);
 
   // Note: null aSourcePrincipal indicates that the content policy and
   // CheckLoadURI checks should be skipped.
@@ -398,12 +414,12 @@ private:
   // Pass in either a media string or the nsMediaList from the
   // CSSParser.  Don't pass both.
   // This method will set the sheet's enabled state based on isAlternate
-  nsresult PrepareSheet(nsCSSStyleSheet* aSheet,
-                        const nsAString& aTitle,
-                        const nsAString& aMediaString,
-                        nsMediaList* aMediaList,
-                        mozilla::dom::Element* aScopeElement,
-                        bool isAlternate);
+  void PrepareSheet(nsCSSStyleSheet* aSheet,
+                    const nsAString& aTitle,
+                    const nsAString& aMediaString,
+                    nsMediaList* aMediaList,
+                    dom::Element* aScopeElement,
+                    bool isAlternate);
 
   nsresult InsertSheetInDoc(nsCSSStyleSheet* aSheet,
                             nsIContent* aLinkingContent,
@@ -463,12 +479,15 @@ private:
   void DoSheetComplete(SheetLoadData* aLoadData, nsresult aStatus,
                        LoadDataArray& aDatasToNotify);
 
-  nsRefPtrHashtable<URIPrincipalAndCORSModeHashKey, nsCSSStyleSheet>
-                    mCompleteSheets;
-  nsDataHashtable<URIPrincipalAndCORSModeHashKey, SheetLoadData*>
-                    mLoadingDatas; // weak refs
-  nsDataHashtable<URIPrincipalAndCORSModeHashKey, SheetLoadData*>
-                    mPendingDatas; // weak refs
+  struct Sheets {
+    nsRefPtrHashtable<URIPrincipalAndCORSModeHashKey, nsCSSStyleSheet>
+                      mCompleteSheets;
+    nsDataHashtable<URIPrincipalAndCORSModeHashKey, SheetLoadData*>
+                      mLoadingDatas; // weak refs
+    nsDataHashtable<URIPrincipalAndCORSModeHashKey, SheetLoadData*>
+                      mPendingDatas; // weak refs
+  };
+  nsAutoPtr<Sheets> mSheets;
 
   // We're not likely to have many levels of @import...  But likely to have
   // some.  Allocate some storage, what the hell.

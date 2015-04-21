@@ -9,10 +9,11 @@
 #include "nsAutoPtr.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
-#include "nsITimer.h"
 #include "nsIWidget.h"
 #include "nsWindowBase.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/TextRange.h"
+#include "mozilla/WindowsVersion.h"
 
 #include <msctf.h>
 #include <textstor.h>
@@ -32,22 +33,24 @@ struct ITfDocumentMgr;
 struct ITfDisplayAttributeMgr;
 struct ITfCategoryMgr;
 class nsWindow;
-class nsTextEvent;
 #ifdef MOZ_METRO
 class MetroWidget;
 #endif
 
-// It doesn't work well when we notify TSF of text change
-// during a mutation observer call because things get broken.
-// So we post a message and notify TSF when we get it later.
-#define WM_USER_TSF_TEXTCHANGE  (WM_USER + 0x100)
+namespace mozilla {
+namespace widget {
+struct MSGResult;
+} // namespace widget
+} // namespace mozilla
 
 /*
  * Text Services Framework text store
  */
 
 class nsTextStore MOZ_FINAL : public ITextStoreACP,
-                              public ITfContextOwnerCompositionSink
+                              public ITfContextOwnerCompositionSink,
+                              public ITfActiveLanguageProfileNotifySink,
+                              public ITfInputProcessorProfileActivationSink
 {
 public: /*IUnknown*/
   STDMETHODIMP_(ULONG)  AddRef(void);
@@ -92,7 +95,16 @@ public: /*ITfContextOwnerCompositionSink*/
   STDMETHODIMP OnUpdateComposition(ITfCompositionView*, ITfRange*);
   STDMETHODIMP OnEndComposition(ITfCompositionView*);
 
+public: /*ITfActiveLanguageProfileNotifySink*/
+  STDMETHODIMP OnActivated(REFCLSID clsid, REFGUID guidProfile,
+                           BOOL fActivated);
+
+public: /*ITfInputProcessorProfileActivationSink*/
+  STDMETHODIMP OnActivated(DWORD, LANGID, REFCLSID, REFGUID, REFGUID,
+                           HKL, DWORD);
+
 protected:
+  typedef mozilla::widget::IMENotification IMENotification;
   typedef mozilla::widget::IMEState IMEState;
   typedef mozilla::widget::InputContext InputContext;
   typedef mozilla::widget::InputContextAction InputContextAction;
@@ -102,6 +114,10 @@ public:
   static void     Terminate(void);
 
   static bool     ProcessRawKeyMessage(const MSG& aMsg);
+  static void     ProcessMessage(nsWindowBase* aWindow, UINT aMessage,
+                                 WPARAM& aWParam, LPARAM& aLParam,
+                                 mozilla::widget::MSGResult& aResult);
+
 
   static void     SetIMEOpenState(bool);
   static bool     GetIMEOpenState(void);
@@ -119,26 +135,22 @@ public:
   static nsresult OnFocusChange(bool aGotFocus,
                                 nsWindowBase* aFocusedWidget,
                                 IMEState::Enabled aIMEEnabled);
-  static nsresult OnTextChange(uint32_t aStart,
-                               uint32_t aOldEnd,
-                               uint32_t aNewEnd)
+  static nsresult OnTextChange(const IMENotification& aIMENotification)
   {
     NS_ENSURE_TRUE(sTsfTextStore, NS_ERROR_NOT_AVAILABLE);
-    return sTsfTextStore->OnTextChangeInternal(aStart, aOldEnd, aNewEnd);
-  }
-
-  static void     OnTextChangeMsg(void)
-  {
-    NS_ENSURE_TRUE_VOID(sTsfTextStore);
-    // Notify TSF text change
-    // (see comments on WM_USER_TSF_TEXTCHANGE in nsTextStore.h)
-    sTsfTextStore->OnTextChangeMsgInternal();
+    return sTsfTextStore->OnTextChangeInternal(aIMENotification);
   }
 
   static nsresult OnSelectionChange(void)
   {
     NS_ENSURE_TRUE(sTsfTextStore, NS_ERROR_NOT_AVAILABLE);
     return sTsfTextStore->OnSelectionChangeInternal();
+  }
+
+  static nsresult OnLayoutChange()
+  {
+    NS_ENSURE_TRUE(sTsfTextStore, NS_ERROR_NOT_AVAILABLE);
+    return sTsfTextStore->OnLayoutChangeInternal();
   }
 
   static nsIMEUpdatePreference GetIMEUpdatePreference();
@@ -190,6 +202,19 @@ public:
     return (IsComposing() && sTsfTextStore->mWidget == aWidget);
   }
 
+  static bool     IsIMM_IME()
+  {
+    if (!sTsfTextStore || !sTsfTextStore->EnsureInitActiveTIPKeyboard()) {
+      return IsIMM_IME(::GetKeyboardLayout(0));
+    }
+    return sTsfTextStore->mIsIMM_IME;
+  }
+
+  static bool     IsIMM_IME(HKL aHKL)
+  {
+     return (::ImmGetIMEFileNameW(aHKL, nullptr, 0) > 0);
+  }
+
 #ifdef DEBUG
   // Returns true when keyboard layout has IME (TIP).
   static bool     CurrentKeyboardLayoutHasIME();
@@ -199,8 +224,15 @@ protected:
   nsTextStore();
   ~nsTextStore();
 
+  bool Init(ITfThreadMgr* aThreadMgr);
+
   static void MarkContextAsKeyboardDisabled(ITfContext* aContext);
   static void MarkContextAsEmpty(ITfContext* aContext);
+
+  static bool IsTIPCategoryKeyboard(REFCLSID aTextService, LANGID aLangID,
+                                    REFGUID aProfile);
+  static void GetTIPDescription(REFCLSID aTextService, LANGID aLangID,
+                                REFGUID aProfile, nsAString& aDescription);
 
   bool     Create(nsWindowBase* aWidget);
   bool     Destroy(void);
@@ -216,6 +248,10 @@ protected:
   bool     IsReadLocked() const { return IsReadLock(mLock); }
   bool     IsReadWriteLocked() const { return IsReadWriteLock(mLock); }
 
+  // This is called immediately after a call of OnLockGranted() of mSink.
+  // Note that mLock isn't cleared yet when this is called.
+  void     DidLockGranted();
+
   bool     GetScreenExtInternal(RECT &aScreenExt);
   // If aDispatchTextEvent is true, this method will dispatch text event if
   // this is called during IME composing.  aDispatchTextEvent should be true
@@ -226,8 +262,7 @@ protected:
   bool     InsertTextAtSelectionInternal(const nsAString &aInsertStr,
                                          TS_TEXTCHANGE* aTextChange);
   void     CommitCompositionInternal(bool);
-  nsresult OnTextChangeInternal(uint32_t, uint32_t, uint32_t);
-  void     OnTextChangeMsgInternal(void);
+  nsresult OnTextChangeInternal(const IMENotification& aIMENotification);
   nsresult OnSelectionChangeInternal(void);
   HRESULT  GetDisplayAttribute(ITfProperty* aProperty,
                                ITfRange* aRange,
@@ -246,11 +281,17 @@ protected:
   // and clear it.
   void     FlushPendingActions();
 
-  nsresult OnLayoutChange();
+  nsresult OnLayoutChangeInternal();
   HRESULT  ProcessScopeRequest(DWORD dwFlags,
                                ULONG cFilterAttrs,
                                const TS_ATTRID *paFilterAttrs);
   void     SetInputScope(const nsString& aHTMLInputType);
+
+  // Creates native caret over our caret.  This method only works on desktop
+  // application.  Otherwise, this does nothing.
+  void     CreateNativeCaret();
+
+  bool     EnsureInitActiveTIPKeyboard();
 
   // Holds the pointer to our current win32 or metro widget
   nsRefPtr<nsWindowBase>       mWidget;
@@ -258,6 +299,10 @@ protected:
   nsRefPtr<ITfDocumentMgr>     mDocumentMgr;
   // Edit cookie associated with the current editing context
   DWORD                        mEditCookie;
+  // Cookie of installing ITfInputProcessorProfileActivationSink
+  DWORD                        mIPProfileCookie;
+  // Cookie of installing ITfActiveLanguageProfileNotifySink
+  DWORD                        mLangProfileCookie;
   // Editing context at the bottom of mDocumentMgr's context stack
   nsRefPtr<ITfContext>         mContext;
   // Currently installed notification sink
@@ -268,13 +313,14 @@ protected:
   DWORD                        mLock;
   // 0 if no lock is queued, otherwise TS_LF_* indicating the queue lock
   DWORD                        mLockQueued;
-  // Cumulative text change offsets since the last notification
-  TS_TEXTCHANGE                mTextChange;
+  // Active TIP keyboard's description.  If active language profile isn't TIP,
+  // i.e., IMM-IME or just a keyboard layout, this is empty.
+  nsString                     mActiveTIPKeyboardDescription;
 
   class Composition MOZ_FINAL
   {
   public:
-    // NULL if no composition is active, otherwise the current composition
+    // nullptr if no composition is active, otherwise the current composition
     nsRefPtr<ITfCompositionView> mView;
 
     // Current copy of the active composition string. Only mString is
@@ -309,17 +355,6 @@ protected:
                LONG aCompositionStartOffset,
                const nsAString& aCompositionString);
     void End();
-
-    void StartLayoutChangeTimer(nsTextStore* aTextStore);
-    void EnsureLayoutChangeTimerStopped();
-
-  private:
-    // Timer for calling ITextStoreACPSink::OnLayoutChange(). This is only used
-    // during composing.
-    nsCOMPtr<nsITimer> mLayoutChangeTimer;
-
-    static void TimerCallback(nsITimer* aTimer, void *aClosure);
-    static uint32_t GetLayoutChangeIntervalTime();
   };
   // While the document is locked, we cannot dispatch any events which cause
   // DOM events since the DOM events' handlers may modify the locked document.
@@ -466,7 +501,7 @@ protected:
     // For compositionupdate and compositionend
     nsString mData;
     // For compositionupdate
-    nsTArray<nsTextRange> mRanges;
+    nsRefPtr<mozilla::TextRangeArray> mRanges;
     // For selectionset
     bool mSelectionReversed;
   };
@@ -486,9 +521,7 @@ protected:
     }
     PendingAction* newAction = mPendingActions.AppendElement();
     newAction->mType = PendingAction::COMPOSITION_UPDATE;
-    // We think that 4 ranges (3 clauses and caret position) are enough for
-    // most cases.
-    newAction->mRanges.SetCapacity(4);
+    newAction->mRanges = new mozilla::TextRangeArray();
     return newAction;
   }
 
@@ -545,7 +578,6 @@ protected:
       mText = aText;
       mMinTextModifiedOffset = NOT_MODIFIED;
       mInitialized = true;
-      mNotifyTSFOfLayoutChange = false;
     }
 
     const nsDependentSubstring GetSelectedText() const;
@@ -578,16 +610,6 @@ protected:
       return mInitialized && (mMinTextModifiedOffset != NOT_MODIFIED);
     }
 
-    void NeedsToNotifyTSFOfLayoutChange()
-    {
-      mNotifyTSFOfLayoutChange = true;
-    }
-
-    bool NeedToNotifyTSFOfLayoutChange() const
-    {
-      return mInitialized && mNotifyTSFOfLayoutChange;
-    }
-
     nsTextStore::Composition& Composition() { return mComposition; }
     nsTextStore::Selection& Selection() { return mSelection; }
 
@@ -604,7 +626,6 @@ protected:
     uint32_t mMinTextModifiedOffset;
 
     bool mInitialized;
-    bool mNotifyTSFOfLayoutChange;
   };
   // mContent caches "current content" of the document ONLY while the document
   // is locked.  I.e., the content is cleared at unlocking the document since
@@ -628,9 +649,22 @@ protected:
   // selection change is caused by a call of On*Composition() without document
   // lock since RequestLock() tries to flush the pending actions again (which
   // are flushing).  Therefore, OnSelectionChangeInternal() sets this true
-  // during recoding actions and then, FlushPendingActions() will call
-  // mSink->OnSelectionChange().
-  bool                         mNotifySelectionChange;
+  // during recoding actions and then, RequestLock() will call
+  // mSink->OnSelectionChange() after mLock becomes 0.
+  bool                         mPendingOnSelectionChange;
+  // If GetTextExt() or GetACPFromPoint() is called and the layout hasn't been
+  // calculated yet, these methods return TS_E_NOLAYOUT.  Then, RequestLock()
+  // will call mSink->OnLayoutChange() and
+  // ITfContextOwnerServices::OnLayoutChange() after the layout is fixed and
+  // the document is unlocked.
+  bool                         mPendingOnLayoutChange;
+  // While there is native caret, this is true.  Otherwise, false.
+  bool                         mNativeCaretIsCreated;
+
+  // True if current IME is implemented with IMM.
+  bool                         mIsIMM_IME;
+  // True if OnActivated() is already called
+  bool                         mOnActivatedCalled;
 
   // TSF thread manager object for the current application
   static ITfThreadMgr*  sTsfThreadMgr;
@@ -653,6 +687,11 @@ protected:
   // For IME (keyboard) disabled state:
   static ITfDocumentMgr* sTsfDisabledDocumentMgr;
   static ITfContext* sTsfDisabledContext;
+
+  static ITfInputProcessorProfiles* sInputProcessorProfiles;
+
+  // Enables/Disables hack for specific TIP.
+  static bool sCreateNativeCaretForATOK;
 
   // Message the Tablet Input Panel uses to flush text during blurring.
   // See comments in Destroy

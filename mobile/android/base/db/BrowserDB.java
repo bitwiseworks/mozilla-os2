@@ -5,21 +5,20 @@
 
 package org.mozilla.gecko.db;
 
-import org.mozilla.gecko.db.BrowserContract.Bookmarks;
-import org.mozilla.gecko.db.BrowserContract.ExpirePriority;
-
-import android.content.ContentResolver;
-import android.database.ContentObserver;
-import android.database.Cursor;
-import android.database.CursorWrapper;
-import android.graphics.Bitmap;
-import android.graphics.drawable.BitmapDrawable;
-import android.util.SparseArray;
-
 import java.util.List;
 
+import org.mozilla.gecko.db.BrowserContract.ExpirePriority;
+import org.mozilla.gecko.favicons.decoders.LoadFaviconResult;
+import org.mozilla.gecko.mozglue.RobocopTarget;
+
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.database.ContentObserver;
+import android.database.Cursor;
+import android.graphics.drawable.BitmapDrawable;
+
 public class BrowserDB {
-    public static String ABOUT_PAGES_URL_FILTER = "about:%";
+    private static boolean sAreContentProvidersEnabled = true;
 
     public static interface URLColumns {
         public static String URL = "url";
@@ -36,10 +35,11 @@ public class BrowserDB {
     public interface BrowserDBIface {
         public void invalidateCachedState();
 
+        @RobocopTarget
         public Cursor filter(ContentResolver cr, CharSequence constraint, int limit);
 
-        // This should onlyl return frecent sites, BrowserDB.getTopSites will do the
-        // work to combine that list with the pinned sites list
+        // This should only return frecent sites. BrowserDB.getTopSites will do the
+        // work to combine that list with the pinned sites list.
         public Cursor getTopSites(ContentResolver cr, int limit);
 
         public void updateVisitedHistory(ContentResolver cr, String uri);
@@ -49,6 +49,7 @@ public class BrowserDB {
         public void updateHistoryEntry(ContentResolver cr, String uri, String title,
                                        long date, int visits);
 
+        @RobocopTarget
         public Cursor getAllVisitedHistory(ContentResolver cr);
 
         public Cursor getRecentHistory(ContentResolver cr, int limit);
@@ -57,48 +58,64 @@ public class BrowserDB {
 
         public void removeHistoryEntry(ContentResolver cr, int id);
 
+        @RobocopTarget
         public void removeHistoryEntry(ContentResolver cr, String url);
 
         public void clearHistory(ContentResolver cr);
 
+        @RobocopTarget
         public Cursor getBookmarksInFolder(ContentResolver cr, long folderId);
+
+        public Cursor getReadingList(ContentResolver cr);
 
         public boolean isVisited(ContentResolver cr, String uri);
 
         public int getReadingListCount(ContentResolver cr);
 
+        @RobocopTarget
         public boolean isBookmark(ContentResolver cr, String uri);
 
         public boolean isReadingListItem(ContentResolver cr, String uri);
 
+        /**
+         * Return a combination of fields about the provided URI
+         * in a single hit on the DB.
+         */
+        public int getItemFlags(ContentResolver cr, String uri);
+
         public String getUrlForKeyword(ContentResolver cr, String keyword);
 
+        @RobocopTarget
         public void addBookmark(ContentResolver cr, String title, String uri);
 
         public void removeBookmark(ContentResolver cr, int id);
 
+        @RobocopTarget
         public void removeBookmarksWithURL(ContentResolver cr, String uri);
 
+        @RobocopTarget
         public void updateBookmark(ContentResolver cr, int id, String uri, String title, String keyword);
 
-        public void addReadingListItem(ContentResolver cr, String title, String uri);
+        public void addReadingListItem(ContentResolver cr, ContentValues values);
 
         public void removeReadingListItemWithURL(ContentResolver cr, String uri);
 
-        public Bitmap getFaviconForUrl(ContentResolver cr, String uri);
+        public void removeReadingListItem(ContentResolver cr, int id);
 
-        public Cursor getFaviconsForUrls(ContentResolver cr, List<String> urls);
+        public LoadFaviconResult getFaviconForUrl(ContentResolver cr, String uri);
 
         public String getFaviconUrlForHistoryUrl(ContentResolver cr, String url);
 
-        public void updateFaviconForUrl(ContentResolver cr, String pageUri, Bitmap favicon, String faviconUri);
+        public void updateFaviconForUrl(ContentResolver cr, String pageUri, byte[] encodedFavicon, String faviconUri);
 
         public void updateThumbnailForUrl(ContentResolver cr, String uri, BitmapDrawable thumbnail);
 
+        @RobocopTarget
         public byte[] getThumbnailForUrl(ContentResolver cr, String uri);
 
         public Cursor getThumbnailsForUrls(ContentResolver cr, List<String> urls);
 
+        @RobocopTarget
         public void removeThumbnails(ContentResolver cr);
 
         public void registerBookmarkObserver(ContentResolver cr, ContentObserver observer);
@@ -115,6 +132,7 @@ public class BrowserDB {
 
         public Cursor getPinnedSites(ContentResolver cr, int limit);
 
+        @RobocopTarget
         public Cursor getBookmarkForUrl(ContentResolver cr, String url);
     }
 
@@ -131,33 +149,41 @@ public class BrowserDB {
         sDb.invalidateCachedState();
     }
 
+    @RobocopTarget
     public static Cursor filter(ContentResolver cr, CharSequence constraint, int limit) {
         return sDb.filter(cr, constraint, limit);
     }
 
-    public static Cursor getTopSites(ContentResolver cr, int limit) {
-        // Note this is not a single query anymore, but actually returns a mixture of two queries, one for topSites
-        // and one for pinned sites
-        Cursor topSites = sDb.getTopSites(cr, limit);
-        Cursor pinnedSites = sDb.getPinnedSites(cr, limit);
-        return new TopSitesCursorWrapper(pinnedSites, topSites, limit);
+    public static Cursor getTopSites(ContentResolver cr, int minLimit, int maxLimit) {
+        // Note this is not a single query anymore, but actually returns a mixture
+        // of two queries, one for topSites and one for pinned sites.
+        Cursor pinnedSites = sDb.getPinnedSites(cr, minLimit);
+        Cursor topSites = sDb.getTopSites(cr, maxLimit - pinnedSites.getCount());
+        return new TopSitesCursorWrapper(pinnedSites, topSites, minLimit);
     }
 
     public static void updateVisitedHistory(ContentResolver cr, String uri) {
-        sDb.updateVisitedHistory(cr, uri);
+        if (sAreContentProvidersEnabled) {
+            sDb.updateVisitedHistory(cr, uri);
+        }
     }
 
     public static void updateHistoryTitle(ContentResolver cr, String uri, String title) {
-        sDb.updateHistoryTitle(cr, uri, title);
+        if (sAreContentProvidersEnabled) {
+            sDb.updateHistoryTitle(cr, uri, title);
+        }
     }
 
     public static void updateHistoryEntry(ContentResolver cr, String uri, String title,
                                           long date, int visits) {
-        sDb.updateHistoryEntry(cr, uri, title, date, visits);
+        if (sAreContentProvidersEnabled) {
+            sDb.updateHistoryEntry(cr, uri, title, date, visits);
+        }
     }
 
+    @RobocopTarget
     public static Cursor getAllVisitedHistory(ContentResolver cr) {
-        return sDb.getAllVisitedHistory(cr);
+        return (sAreContentProvidersEnabled ? sDb.getAllVisitedHistory(cr) : null);
     }
 
     public static Cursor getRecentHistory(ContentResolver cr, int limit) {
@@ -177,16 +203,24 @@ public class BrowserDB {
         sDb.removeHistoryEntry(cr, id);
     }
 
+    @RobocopTarget
     public static void removeHistoryEntry(ContentResolver cr, String url) {
         sDb.removeHistoryEntry(cr, url);
     }
 
+    @RobocopTarget
     public static void clearHistory(ContentResolver cr) {
         sDb.clearHistory(cr);
     }
 
+    @RobocopTarget
     public static Cursor getBookmarksInFolder(ContentResolver cr, long folderId) {
         return sDb.getBookmarksInFolder(cr, folderId);
+    }
+
+    @RobocopTarget
+    public static Cursor getReadingList(ContentResolver cr) {
+        return sDb.getReadingList(cr);
     }
 
     public static String getUrlForKeyword(ContentResolver cr, String keyword) {
@@ -201,12 +235,20 @@ public class BrowserDB {
         return sDb.getReadingListCount(cr);
     }
 
+    @RobocopTarget
     public static boolean isBookmark(ContentResolver cr, String uri) {
-        return sDb.isBookmark(cr, uri);
+        return (sAreContentProvidersEnabled && sDb.isBookmark(cr, uri));
     }
 
     public static boolean isReadingListItem(ContentResolver cr, String uri) {
-        return sDb.isReadingListItem(cr, uri);
+        return (sAreContentProvidersEnabled && sDb.isReadingListItem(cr, uri));
+    }
+
+    public static int getItemFlags(ContentResolver cr, String uri) {
+        if (!sAreContentProvidersEnabled) {
+            return 0;
+        }
+        return sDb.getItemFlags(cr, uri);
     }
 
     public static void addBookmark(ContentResolver cr, String title, String uri) {
@@ -217,42 +259,45 @@ public class BrowserDB {
         sDb.removeBookmark(cr, id);
     }
 
+    @RobocopTarget
     public static void removeBookmarksWithURL(ContentResolver cr, String uri) {
         sDb.removeBookmarksWithURL(cr, uri);
     }
 
+    @RobocopTarget
     public static void updateBookmark(ContentResolver cr, int id, String uri, String title, String keyword) {
         sDb.updateBookmark(cr, id, uri, title, keyword);
     }
 
-    public static void addReadingListItem(ContentResolver cr, String title, String uri) {
-        sDb.addReadingListItem(cr, title, uri);
+    public static void addReadingListItem(ContentResolver cr, ContentValues values) {
+        sDb.addReadingListItem(cr, values);
     }
 
     public static void removeReadingListItemWithURL(ContentResolver cr, String uri) {
         sDb.removeReadingListItemWithURL(cr, uri);
     }
 
-    public static Bitmap getFaviconForUrl(ContentResolver cr, String uri) {
-        return sDb.getFaviconForUrl(cr, uri);
+    public static void removeReadingListItem(ContentResolver cr, int id) {
+        sDb.removeReadingListItem(cr, id);
     }
 
-    public static Cursor getFaviconsForUrls(ContentResolver cr, List<String> urls) {
-        return sDb.getFaviconsForUrls(cr, urls);
+    public static LoadFaviconResult getFaviconForFaviconUrl(ContentResolver cr, String faviconURL) {
+        return sDb.getFaviconForUrl(cr, faviconURL);
     }
 
     public static String getFaviconUrlForHistoryUrl(ContentResolver cr, String url) {
         return sDb.getFaviconUrlForHistoryUrl(cr, url);
     }
 
-    public static void updateFaviconForUrl(ContentResolver cr, String pageUri, Bitmap favicon, String faviconUri) {
-        sDb.updateFaviconForUrl(cr, pageUri, favicon, faviconUri);
+    public static void updateFaviconForUrl(ContentResolver cr, String pageUri, byte[] encodedFavicon, String faviconUri) {
+        sDb.updateFaviconForUrl(cr, pageUri, encodedFavicon, faviconUri);
     }
 
     public static void updateThumbnailForUrl(ContentResolver cr, String uri, BitmapDrawable thumbnail) {
         sDb.updateThumbnailForUrl(cr, uri, thumbnail);
     }
 
+    @RobocopTarget
     public static byte[] getThumbnailForUrl(ContentResolver cr, String uri) {
         return sDb.getThumbnailForUrl(cr, uri);
     }
@@ -261,6 +306,7 @@ public class BrowserDB {
         return sDb.getThumbnailsForUrls(cr, urls);
     }
 
+    @RobocopTarget
     public static void removeThumbnails(ContentResolver cr) {
         sDb.removeThumbnails(cr);
     }
@@ -297,160 +343,16 @@ public class BrowserDB {
         return sDb.getPinnedSites(cr, limit);
     }
 
+    @RobocopTarget
     public static Cursor getBookmarkForUrl(ContentResolver cr, String url) {
         return sDb.getBookmarkForUrl(cr, url);
     }
 
-    public static class PinnedSite {
-        public String title = "";
-        public String url = "";
-
-        public PinnedSite(String aTitle, String aUrl) {
-            title = aTitle;
-            url = aUrl;
-        }
+    public static boolean areContentProvidersDisabled() {
+        return sAreContentProvidersEnabled;
     }
 
-    /* Cursor wrapper that forces top sites to contain at least
-     * mNumberOfTopSites entries. For rows outside the wrapped cursor
-     * will return empty strings and zero.
-     */
-    public static class TopSitesCursorWrapper extends CursorWrapper {
-        int mIndex = -1; // Current position of the cursor
-        Cursor mCursor = null;
-        int mSize = 0;
-        private SparseArray<PinnedSite> mPinnedSites = null;
-
-        public TopSitesCursorWrapper(Cursor pinnedCursor, Cursor normalCursor, int size) {
-            super(normalCursor);
-
-            setPinnedSites(pinnedCursor);
-            mCursor = normalCursor;
-            mSize = size;
-        }
-
-        public void setPinnedSites(Cursor c) {
-            mPinnedSites = new SparseArray<PinnedSite>();
-            if (c != null && c.getCount() > 0) {
-                c.moveToPosition(0);
-                do {
-                    int pos = c.getInt(c.getColumnIndex(Bookmarks.POSITION));
-                    String url = c.getString(c.getColumnIndex(URLColumns.URL));
-                    String title = c.getString(c.getColumnIndex(URLColumns.TITLE));
-                    mPinnedSites.put(pos, new PinnedSite(title, url));
-                } while (c.moveToNext());
-            }
-            if (c != null && !c.isClosed()) {
-                c.close();
-            }
-        }
-
-        public boolean hasPinnedSites() {
-            return mPinnedSites != null && mPinnedSites.size() > 0;
-        }
-
-        public PinnedSite getPinnedSite(int position) {
-            if (!hasPinnedSites()) {
-                return null;
-            }
-            return mPinnedSites.get(position);
-        }
-
-        public boolean isPinned() {
-            return mPinnedSites.get(mIndex) != null;
-        }
-
-        private int getPinnedBefore(int position) {
-            int numFound = 0;
-            if (!hasPinnedSites()) {
-                return numFound;
-            }
-
-            for (int i = 0; i < position; i++) {
-                if (mPinnedSites.get(i) != null) {
-                    numFound++;
-                }
-            }
-
-            return numFound;
-        }
-
-        @Override
-        public int getPosition() { return mIndex; }
-        @Override
-        public int getCount() { return mSize; }
-        @Override
-        public boolean isAfterLast() { return mIndex >= mSize; }
-        @Override
-        public boolean isBeforeFirst() { return mIndex < 0; }
-        @Override
-        public boolean isLast() { return mIndex == mSize - 1; }
-        @Override
-        public boolean moveToNext() { return moveToPosition(mIndex + 1); }
-        @Override
-        public boolean moveToPrevious() { return moveToPosition(mIndex - 1); }
-
-        @Override
-        public boolean moveToPosition(int position) {
-            mIndex = position;
-
-            // move the real cursor as  if we were stepping through it to this position
-            // be careful not to move it to far, and to account for any pinned sites
-            int before = getPinnedBefore(position);
-            int p2 = position - before;
-            if (p2 >= -1 && p2 <= mCursor.getCount()) {
-                super.moveToPosition(p2);
-            }
-
-            return !(isBeforeFirst() || isAfterLast());
-        }
-
-        @Override
-        public long getLong(int columnIndex) {
-            if (hasPinnedSites()) {
-                PinnedSite site = getPinnedSite(mIndex);
-                if (site != null) {
-                    return 0;
-                }
-            }
-
-            if (!super.isBeforeFirst() && !super.isAfterLast())
-                return super.getLong(columnIndex);
-            return 0;
-        }
-
-        @Override
-        public String getString(int columnIndex) {
-            if (hasPinnedSites()) {
-                PinnedSite site = getPinnedSite(mIndex);
-                if (site != null) {
-                    if (columnIndex == mCursor.getColumnIndex(URLColumns.URL)) {
-                        return site.url;
-                    } else if (columnIndex == mCursor.getColumnIndex(URLColumns.TITLE)) {
-                        return site.title;
-                    }
-                    return "";
-                }
-            }
-
-            if (!super.isBeforeFirst() && !super.isAfterLast())
-                return super.getString(columnIndex);
-            return "";
-        }
-
-        @Override
-        public boolean move(int offset) {
-            return moveToPosition(mIndex + offset);
-        }
-
-        @Override
-        public boolean moveToFirst() {
-            return moveToPosition(0);
-        }
-
-        @Override
-        public boolean moveToLast() {
-            return moveToPosition(mSize-1);
-        }
+    public static void setEnableContentProviders(boolean enableContentProviders) {
+        sAreContentProvidersEnabled = enableContentProviders;
     }
 }

@@ -4,11 +4,20 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'jsperf'
-
-CPP_SOURCES += [
+SOURCES += [
     'PerfMeasurement.cpp',
 ]
 
-LIBRARY_NAME = 'jsperf'
+EXTRA_JS_MODULES += [
+    'PerfMeasurement.jsm',
+]
 
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'xul'
+
+LOCAL_INCLUDES += [
+    '/js/xpconnect/loader',
+]
+
+MOCHITEST_CHROME_MANIFESTS += ['chrome.ini']

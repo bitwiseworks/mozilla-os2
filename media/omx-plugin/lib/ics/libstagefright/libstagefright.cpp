@@ -62,6 +62,12 @@ MetaData::findInt32(uint32_t key, int32_t *value)
 }
 
 MOZ_EXPORT bool
+MetaData::setInt32(uint32_t, int32_t)
+{
+  return false;
+}
+
+MOZ_EXPORT bool
 MetaData::findInt64(uint32_t key, int64_t *value)
 {
   return false;
@@ -93,6 +99,12 @@ MOZ_EXPORT MediaSource::ReadOptions::ReadOptions()
 MOZ_EXPORT void
 MediaSource::ReadOptions::setSeekTo(int64_t time_us, SeekMode mode)
 {
+}
+
+MOZ_EXPORT sp<DataSource> DataSource::CreateFromURI(
+          const char *uri,
+          const KeyedVector<String8, String8> *headers) {
+  return 0;
 }
 
 MOZ_EXPORT bool
@@ -149,21 +161,6 @@ MOZ_EXPORT void OMXClient::disconnect()
 {
 }
 
-class __attribute__ ((visibility ("default"))) UnknownDataSource : public DataSource {
-public:
-UnknownDataSource();
-
-virtual status_t initCheck() const { return 0; }
-virtual ssize_t readAt(off64_t offset, void *data, size_t size) { return 0; }
-virtual status_t getSize(off64_t *size) { return 0; }
-
-virtual ~UnknownDataSource() { }
-};
-
-UnknownDataSource foo;
-
-MOZ_EXPORT UnknownDataSource::UnknownDataSource() { }
-
 MOZ_EXPORT
 ColorConverter::ColorConverter(OMX_COLOR_FORMATTYPE, OMX_COLOR_FORMATTYPE) { }
 
@@ -185,4 +182,12 @@ ColorConverter::convert(const void *srcBits,
 {
   return 0;
 }
+
+MOZ_EXPORT status_t QueryCodecs(const sp<IOMX> &omx,
+                                const char *mimeType, bool queryDecoders,
+                                Vector<CodecCapabilities> *results)
+{
+  return 0;
+}
+
 }

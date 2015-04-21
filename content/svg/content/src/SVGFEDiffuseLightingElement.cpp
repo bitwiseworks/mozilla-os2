@@ -6,16 +6,19 @@
 #include "mozilla/dom/SVGFEDiffuseLightingElement.h"
 #include "mozilla/dom/SVGFEDiffuseLightingElementBinding.h"
 #include "nsSVGUtils.h"
+#include "nsSVGFilterInstance.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FEDiffuseLighting)
+
+using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEDiffuseLightingElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+SVGFEDiffuseLightingElement::WrapNode(JSContext* aCx)
 {
-  return SVGFEDiffuseLightingElementBinding::Wrap(aCx, aScope, this);
+  return SVGFEDiffuseLightingElementBinding::Wrap(aCx, this);
 }
 
 //----------------------------------------------------------------------
@@ -31,30 +34,43 @@ SVGFEDiffuseLightingElement::In1()
   return mStringAttributes[IN1].ToDOMAnimatedString(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedNumber>
+already_AddRefed<SVGAnimatedNumber>
 SVGFEDiffuseLightingElement::SurfaceScale()
 {
   return mNumberAttributes[SURFACE_SCALE].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedNumber>
+already_AddRefed<SVGAnimatedNumber>
 SVGFEDiffuseLightingElement::DiffuseConstant()
 {
   return mNumberAttributes[DIFFUSE_CONSTANT].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedNumber>
+already_AddRefed<SVGAnimatedNumber>
 SVGFEDiffuseLightingElement::KernelUnitLengthX()
 {
   return mNumberPairAttributes[KERNEL_UNIT_LENGTH].ToDOMAnimatedNumber(
     nsSVGNumberPair::eFirst, this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedNumber>
+already_AddRefed<SVGAnimatedNumber>
 SVGFEDiffuseLightingElement::KernelUnitLengthY()
 {
   return mNumberPairAttributes[KERNEL_UNIT_LENGTH].ToDOMAnimatedNumber(
     nsSVGNumberPair::eSecond, this);
+}
+
+FilterPrimitiveDescription
+SVGFEDiffuseLightingElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
+                                                     const IntRect& aFilterSubregion,
+                                                     const nsTArray<bool>& aInputsAreTainted,
+                                                     nsTArray<RefPtr<SourceSurface>>& aInputImages)
+{
+  float diffuseConstant = mNumberAttributes[DIFFUSE_CONSTANT].GetAnimValue();
+
+  FilterPrimitiveDescription descr(PrimitiveType::DiffuseLighting);
+  descr.Attributes().Set(eDiffuseLightingDiffuseConstant, diffuseConstant);
+  return AddLightingAttributes(descr, aInstance);
 }
 
 bool
@@ -64,27 +80,6 @@ SVGFEDiffuseLightingElement::AttributeAffectsRendering(int32_t aNameSpaceID,
   return SVGFEDiffuseLightingElementBase::AttributeAffectsRendering(aNameSpaceID, aAttribute) ||
          (aNameSpaceID == kNameSpaceID_None &&
           aAttribute == nsGkAtoms::diffuseConstant);
-}
-
-//----------------------------------------------------------------------
-// nsSVGElement methods
-
-void
-SVGFEDiffuseLightingElement::LightPixel(const float *N, const float *L,
-                                        nscolor color, uint8_t *targetData)
-{
-  float diffuseNL =
-    mNumberAttributes[DIFFUSE_CONSTANT].GetAnimValue() * DOT(N, L);
-
-  if (diffuseNL < 0) diffuseNL = 0;
-
-  targetData[GFX_ARGB32_OFFSET_B] =
-    std::min(uint32_t(diffuseNL * NS_GET_B(color)), 255U);
-  targetData[GFX_ARGB32_OFFSET_G] =
-    std::min(uint32_t(diffuseNL * NS_GET_G(color)), 255U);
-  targetData[GFX_ARGB32_OFFSET_R] =
-    std::min(uint32_t(diffuseNL * NS_GET_R(color)), 255U);
-  targetData[GFX_ARGB32_OFFSET_A] = 255;
 }
 
 } // namespace dom

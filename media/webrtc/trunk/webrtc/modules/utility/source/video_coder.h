@@ -13,50 +13,47 @@
 
 #ifdef WEBRTC_MODULE_UTILITY_VIDEO
 
-#include "engine_configurations.h"
-#include "video_coding.h"
+#include "webrtc/engine_configurations.h"
+#include "webrtc/modules/video_coding/main/interface/video_coding.h"
 
 namespace webrtc {
 class VideoCoder : public VCMPacketizationCallback, public VCMReceiveCallback
 {
 public:
-    VideoCoder(WebRtc_UWord32 instanceID);
+    VideoCoder(uint32_t instanceID);
     ~VideoCoder();
 
-    WebRtc_Word32 ResetDecoder();
-
-    WebRtc_Word32 SetEncodeCodec(VideoCodec& videoCodecInst,
-                                 WebRtc_UWord32 numberOfCores,
-                                 WebRtc_UWord32 maxPayloadSize);
+    int32_t SetEncodeCodec(VideoCodec& videoCodecInst,
+                           uint32_t numberOfCores,
+                           uint32_t maxPayloadSize);
 
 
     // Select the codec that should be used for decoding. videoCodecInst.plType
     // will be set to the codec's default payload type.
-    WebRtc_Word32 SetDecodeCodec(VideoCodec& videoCodecInst,
-                                 WebRtc_Word32 numberOfCores);
+    int32_t SetDecodeCodec(VideoCodec& videoCodecInst, int32_t numberOfCores);
 
-    WebRtc_Word32 Decode(I420VideoFrame& decodedVideo,
-                         const EncodedVideoData& encodedData);
+    int32_t Decode(I420VideoFrame& decodedVideo,
+                   const EncodedVideoData& encodedData);
 
-    WebRtc_Word32 Encode(const I420VideoFrame& videoFrame,
-                         EncodedVideoData& videoEncodedData);
+    int32_t Encode(const I420VideoFrame& videoFrame,
+                   EncodedVideoData& videoEncodedData);
 
-    WebRtc_Word8 DefaultPayloadType(const char* plName);
+    int8_t DefaultPayloadType(const char* plName);
 
 private:
     // VCMReceiveCallback function.
     // Note: called by VideoCodingModule when decoding finished.
-    WebRtc_Word32 FrameToRender(I420VideoFrame& videoFrame);
+    int32_t FrameToRender(I420VideoFrame& videoFrame);
 
     // VCMPacketizationCallback function.
     // Note: called by VideoCodingModule when encoding finished.
-    WebRtc_Word32 SendData(
+    int32_t SendData(
         FrameType /*frameType*/,
-        WebRtc_UWord8 /*payloadType*/,
-        WebRtc_UWord32 /*timeStamp*/,
+        uint8_t /*payloadType*/,
+        uint32_t /*timeStamp*/,
         int64_t capture_time_ms,
-        const WebRtc_UWord8* payloadData,
-        WebRtc_UWord32 payloadSize,
+        const uint8_t* payloadData,
+        uint32_t payloadSize,
         const RTPFragmentationHeader& /* fragmentationHeader*/,
         const RTPVideoHeader* rtpTypeHdr);
 
@@ -64,6 +61,6 @@ private:
     I420VideoFrame* _decodedVideo;
     EncodedVideoData* _videoEncodedData;
 };
-} // namespace webrtc
+}  // namespace webrtc
 #endif // WEBRTC_MODULE_UTILITY_VIDEO
 #endif // WEBRTC_MODULES_UTILITY_SOURCE_VIDEO_CODER_H_

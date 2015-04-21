@@ -6,6 +6,9 @@
 
 #include "nsWrapperCacheInlines.h"
 
+#include "jsproxy.h"
+#include "mozilla/dom/DOMJSProxyHandler.h"
+#include "mozilla/HoldDropJSObjects.h"
 #include "nsCycleCollectionTraversalCallback.h"
 #include "nsCycleCollector.h"
 
@@ -16,7 +19,23 @@ using namespace mozilla::dom;
 nsWrapperCache::HoldJSObjects(void* aScriptObjectHolder,
                               nsScriptObjectTracer* aTracer)
 {
-  cyclecollector::AddJSHolder(aScriptObjectHolder, aTracer);
+  cyclecollector::HoldJSObjectsImpl(aScriptObjectHolder, aTracer);
+}
+
+void
+nsWrapperCache::ReleaseWrapper(void* aScriptObjectHolder)
+{
+  if (PreservingWrapper()) {
+    // PreserveWrapper puts new DOM bindings in the JS holders hash, but they
+    // can also be in the DOM expando hash, so we need to try to remove them
+    // from both here.
+    JSObject* obj = GetWrapperPreserveColor();
+    if (IsDOMBinding() && obj && js::IsProxy(obj)) {
+      DOMProxyHandler::GetAndClearExpandoObject(obj);
+    }
+    SetPreservingWrapper(false);
+    cyclecollector::DropJSObjectsImpl(aScriptObjectHolder);
+  }
 }
 
 #ifdef DEBUG
@@ -36,7 +55,8 @@ public:
   {
   }
   NS_IMETHOD_(void) DescribeGCedNode(bool aIsMarked,
-                                     const char* aObjName)
+                                     const char* aObjName,
+                                     uint64_t aCompartmentAddress)
   {
   }
 

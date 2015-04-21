@@ -7,8 +7,8 @@
 #include <ras.h>
 #include <wininet.h>
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/Util.h"
 #include "nsISystemProxySettings.h"
 #include "nsIServiceManager.h"
 #include "mozilla/ModuleUtils.h"
@@ -20,7 +20,7 @@
 class nsWindowsSystemProxySettings MOZ_FINAL : public nsISystemProxySettings
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSISYSTEMPROXYSETTINGS
 
     nsWindowsSystemProxySettings() {};
@@ -33,7 +33,7 @@ private:
     bool PatternMatch(const nsACString& aHost, const nsACString& aOverride);
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsWindowsSystemProxySettings, nsISystemProxySettings)
+NS_IMPL_ISUPPORTS(nsWindowsSystemProxySettings, nsISystemProxySettings)
 
 NS_IMETHODIMP
 nsWindowsSystemProxySettings::GetMainThreadOnly(bool *aMainThreadOnly)
@@ -82,13 +82,13 @@ static nsresult ReadInternetOption(uint32_t aOption, uint32_t& aFlags,
     INTERNET_PER_CONN_OPTION_LISTW list;
     list.dwSize = sizeof(INTERNET_PER_CONN_OPTION_LISTW);
     list.pszConnection = connFlags & INTERNET_CONNECTION_MODEM ?
-                         connName : NULL;
+                         connName : nullptr;
     list.dwOptionCount = mozilla::ArrayLength(options);
     list.dwOptionError = 0;
     list.pOptions = options;
 
     unsigned long size = sizeof(INTERNET_PER_CONN_OPTION_LISTW);
-    if (!InternetQueryOptionW(NULL, INTERNET_OPTION_PER_CONNECTION_OPTION,
+    if (!InternetQueryOptionW(nullptr, INTERNET_OPTION_PER_CONNECTION_OPTION,
                               &list, &size)) {
         if (GetLastError() != ERROR_INVALID_PARAMETER) {
             return NS_ERROR_FAILURE;
@@ -96,7 +96,8 @@ static nsresult ReadInternetOption(uint32_t aOption, uint32_t& aFlags,
         options[0].dwOption = INTERNET_PER_CONN_FLAGS;
         size = sizeof(INTERNET_PER_CONN_OPTION_LISTW);
         MOZ_SEH_TRY {
-            if (!InternetQueryOptionW(NULL, INTERNET_OPTION_PER_CONNECTION_OPTION,
+            if (!InternetQueryOptionW(nullptr,
+                                      INTERNET_OPTION_PER_CONNECTION_OPTION,
                                       &list, &size)) {
                 return NS_ERROR_FAILURE;
             }
@@ -303,13 +304,13 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsWindowsSystemProxySettings, Init)
 NS_DEFINE_NAMED_CID(NS_WINDOWSSYSTEMPROXYSERVICE_CID);
 
 static const mozilla::Module::CIDEntry kSysProxyCIDs[] = {
-    { &kNS_WINDOWSSYSTEMPROXYSERVICE_CID, false, NULL, nsWindowsSystemProxySettingsConstructor },
-    { NULL }
+    { &kNS_WINDOWSSYSTEMPROXYSERVICE_CID, false, nullptr, nsWindowsSystemProxySettingsConstructor },
+    { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kSysProxyContracts[] = {
     { NS_SYSTEMPROXYSETTINGS_CONTRACTID, &kNS_WINDOWSSYSTEMPROXYSERVICE_CID },
-    { NULL }
+    { nullptr }
 };
 
 static const mozilla::Module kSysProxyModule = {

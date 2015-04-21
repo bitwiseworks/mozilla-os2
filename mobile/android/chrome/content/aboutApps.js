@@ -12,6 +12,12 @@ Cu.import("resource://gre/modules/Services.jsm")
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/AppsUtils.jsm");
 
+#ifdef MOZ_ANDROID_SYNTHAPKS
+XPCOMUtils.defineLazyModuleGetter(this, "WebappManager", "resource://gre/modules/WebappManager.jsm");
+#endif
+
+const DEFAULT_ICON = "chrome://browser/skin/images/default-app-icon.png";
+
 let gStrings = Services.strings.createBundle("chrome://browser/locale/aboutApps.properties");
 
 XPCOMUtils.defineLazyGetter(window, "gChromeWin", function()
@@ -23,25 +29,36 @@ XPCOMUtils.defineLazyGetter(window, "gChromeWin", function()
     .getInterface(Ci.nsIDOMWindow)
     .QueryInterface(Ci.nsIDOMChromeWindow));
 
+document.addEventListener("DOMContentLoaded", onLoad, false);
+
 var AppsUI = {
   uninstall: null,
   shortcut: null
 };
 
-function openLink(aElement) {
+function openLink(aEvent) {
   try {
     let formatter = Cc["@mozilla.org/toolkit/URLFormatterService;1"].getService(Ci.nsIURLFormatter);
-    let url = formatter.formatURLPref(aElement.getAttribute("pref"));
+    let url = formatter.formatURLPref(aEvent.currentTarget.getAttribute("pref"));
     let BrowserApp = gChromeWin.BrowserApp;
     BrowserApp.addTab(url, { selected: true, parentId: BrowserApp.selectedTab.id });
   } catch (ex) {}
 }
 
+#ifdef MOZ_ANDROID_SYNTHAPKS
+function checkForUpdates(aEvent) {
+  WebappManager.checkForUpdates(true);
+}
+#endif
+
+#ifndef MOZ_ANDROID_SYNTHAPKS
 var ContextMenus = {
   target: null,
 
   init: function() {
-    document.addEventListener("contextmenu", ContextMenus, false);
+    document.addEventListener("contextmenu", this, false);
+    document.getElementById("addToHomescreenLabel").addEventListener("click", this.addToHomescreen, false);
+    document.getElementById("uninstallLabel").addEventListener("click", this.uninstall, false);
   },
 
   handleEvent: function(event) {
@@ -54,8 +71,7 @@ var ContextMenus = {
 
   addToHomescreen: function() {
     let manifest = this.target.manifest;
-    let origin = Services.io.newURI(this.target.app.origin, null, null);
-    gChromeWin.WebappsUI.createShortcut(manifest.name, manifest.fullLaunchPath(), gChromeWin.WebappsUI.getBiggestIcon(manifest.icons, origin), "webapp");
+    gChromeWin.WebappsUI.createShortcut(manifest.name, manifest.fullLaunchPath(), manifest.biggestIconURL || DEFAULT_ICON, "webapp");
     this.target = null;
   },
 
@@ -73,20 +89,25 @@ var ContextMenus = {
     this.target = null;
   }
 }
+#endif
 
 function onLoad(aEvent) {
-  try {
-    let formatter = Cc["@mozilla.org/toolkit/URLFormatterService;1"].getService(Ci.nsIURLFormatter);
-    let link = document.getElementById("marketplaceURL");
-    let url = formatter.formatURLPref(link.getAttribute("pref"));
-    link.setAttribute("href", url);
-  } catch (e) {}
+  let elmts = document.querySelectorAll("[pref]");
+  for (let i = 0; i < elmts.length; i++) {
+    elmts[i].addEventListener("click",  openLink,  false);
+  }
+
+#ifdef MOZ_ANDROID_SYNTHAPKS
+  document.getElementById("update-item").addEventListener("click", checkForUpdates, false);
+#endif
 
   navigator.mozApps.mgmt.oninstall = onInstall;
   navigator.mozApps.mgmt.onuninstall = onUninstall;
   updateList();
 
+#ifndef MOZ_ANDROID_SYNTHAPKS
   ContextMenus.init();
+#endif
 }
 
 function updateList() {
@@ -99,8 +120,8 @@ function updateList() {
   request.onsuccess = function() {
     for (let i = 0; i < request.result.length; i++)
       addApplication(request.result[i]);
-    if (!request.result.length)
-      document.getElementById("noapps").className = "";
+    if (request.result.length)
+      document.getElementById("main-container").classList.remove("hidden");
   }
 }
 
@@ -110,14 +131,22 @@ function addApplication(aApp) {
 
   let container = document.createElement("div");
   container.className = "app list-item";
+#ifndef MOZ_ANDROID_SYNTHAPKS
   container.setAttribute("contextmenu", "appmenu");
+#endif
   container.setAttribute("id", "app-" + aApp.origin);
   container.setAttribute("mozApp", aApp.origin);
   container.setAttribute("title", manifest.name);
 
   let img = document.createElement("img");
-  let origin = Services.io.newURI(aApp.origin, null, null);
-  img.src = gChromeWin.WebappsUI.getBiggestIcon(manifest.icons, origin);
+  img.src = manifest.biggestIconURL || DEFAULT_ICON;
+  img.onerror = function() {
+    // If the image failed to load, and it was not our default icon, attempt to
+    // use our default as a fallback.
+    if (img.src != DEFAULT_ICON) {
+      img.src = DEFAULT_ICON;
+    }
+  }
   img.setAttribute("title", manifest.name);
 
   let title = document.createElement("div");
@@ -140,7 +169,7 @@ function onInstall(aEvent) {
     return;
 
   addApplication(aEvent.application);
-  document.getElementById("noapps").className = "hidden";
+  document.getElementById("main-container").classList.remove("hidden");
 }
 
 function onUninstall(aEvent) {
@@ -149,6 +178,7 @@ function onUninstall(aEvent) {
     let parent = node.parentNode;
     parent.removeChild(node);
     if (!parent.firstChild)
-      document.getElementById("noapps").className = "";
+      document.getElementById("main-container").classList.add("hidden");
   }
 }
+

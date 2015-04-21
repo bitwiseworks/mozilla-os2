@@ -8,11 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "packet_loss_test.h"
-#include "video_source.h"
-#include <sstream>
-#include <cassert>
+#include <assert.h>
 #include <string.h>
+
+#include <sstream>
+
+#include "webrtc/modules/video_coding/codecs/test_framework/packet_loss_test.h"
+#include "webrtc/modules/video_coding/codecs/test_framework/video_source.h"
 
 using namespace webrtc;
 
@@ -96,7 +98,7 @@ PacketLossTest::Decoded(const I420VideoFrame& decodedImage)
     {
         if (_lastFrame) delete [] _lastFrame;
 
-        _lastFrame = new WebRtc_UWord8[length];
+        _lastFrame = new uint8_t[length];
     }
     // TODO(mikhal): Can't the last frame be a I420VideoFrame?
     ExtractBuffer(decodedImage, length, _lastFrame);
@@ -154,11 +156,11 @@ void
 PacketLossTest::CodecSpecific_InitBitrate()
 {
     assert(_bitRate > 0);
-    WebRtc_UWord32 simulatedBitRate;
+    uint32_t simulatedBitRate;
     if (_lossProbability != _lossRate)
     {
         // Simulating NACK
-        simulatedBitRate = WebRtc_UWord32(_bitRate / (1 + _lossRate));
+        simulatedBitRate = uint32_t(_bitRate / (1 + _lossRate));
     }
     else
     {
@@ -167,7 +169,7 @@ PacketLossTest::CodecSpecific_InitBitrate()
     int rtt = 0;
     if (_inst.maxFramerate > 0)
       rtt = _rttFrames * (1000 / _inst.maxFramerate);
-    _encoder->SetChannelParameters((WebRtc_UWord32)(_lossProbability * 255.0),
+    _encoder->SetChannelParameters((uint32_t)(_lossProbability * 255.0),
                                                     rtt);
     _encoder->SetRates(simulatedBitRate, _inst.maxFramerate);
 }

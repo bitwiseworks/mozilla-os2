@@ -6,11 +6,6 @@ const originalState = ss.getBrowserState();
 /** Private Browsing Test for Bug 819510 **/
 function test() {
   waitForExplicitFinish();
-
-  registerCleanupFunction(function() {
-    ss.setBrowserState(originalState);
-  });
-
   runNextTest();
 }
 
@@ -33,7 +28,13 @@ function runNextTest() {
     let currentTest = tests.shift();
     waitForBrowserState(testState, currentTest);
   } else {
-    finish();
+    Services.obs.addObserver(
+      function observe(aSubject, aTopic, aData) {
+        Services.obs.removeObserver(observe, aTopic);
+        finish();
+      },
+      "sessionstore-browser-state-restored", false);
+    ss.setBrowserState(originalState);
   }
 }
 
@@ -114,25 +115,27 @@ function test_3() {
               is(curState.selectedWindow, 4, "Last window opened is the one selected");
 
               waitForWindowClose(normalWindow, function() {
-                // Load another tab before checking the written state so that
+                // Pin and unpin a tab before checking the written state so that
                 // the list of restoring windows gets cleared. Otherwise the
                 // window we just closed would be marked as not closed.
-                waitForTabLoad(aWindow, "http://www.example.com/", function() {
-                  forceWriteState(function(state) {
-                    is(state.windows.length, 2,
-                       "sessionstore state: 2 windows in data being written to disk");
-                    is(state.selectedWindow, 2,
-                       "Selected window is updated to match one of the saved windows");
-                    state.windows.forEach(function(win) {
-                      is(!win.isPrivate, true, "Saved window is not private");
-                    });
-                    is(state._closedWindows.length, 1,
-                       "sessionstore state: 1 closed window in data being written to disk");
-                    state._closedWindows.forEach(function(win) {
-                      is(!win.isPrivate, true, "Closed window is not private");
-                    });
-                    runNextTest();
+                let tab = aWindow.gBrowser.tabs[0];
+                aWindow.gBrowser.pinTab(tab);
+                aWindow.gBrowser.unpinTab(tab);
+
+                forceWriteState(function(state) {
+                  is(state.windows.length, 2,
+                     "sessionstore state: 2 windows in data being written to disk");
+                  is(state.selectedWindow, 2,
+                     "Selected window is updated to match one of the saved windows");
+                  state.windows.forEach(function(win) {
+                    is(!win.isPrivate, true, "Saved window is not private");
                   });
+                  is(state._closedWindows.length, 1,
+                     "sessionstore state: 1 closed window in data being written to disk");
+                  state._closedWindows.forEach(function(win) {
+                    is(!win.isPrivate, true, "Closed window is not private");
+                  });
+                  runNextTest();
                 });
               });
             });
@@ -161,29 +164,20 @@ function waitForWindowClose(aWin, aCallback) {
 }
 
 function forceWriteState(aCallback) {
-  Services.obs.addObserver(function observe(aSubject, aTopic, aData) {
-    if (aTopic == "sessionstore-state-write") {
-      Services.obs.removeObserver(observe, aTopic);
-      Services.prefs.clearUserPref("browser.sessionstore.interval");
-      aSubject.QueryInterface(Ci.nsISupportsString);
-      aCallback(JSON.parse(aSubject.data));
-    }
-  }, "sessionstore-state-write", false);
-  Services.prefs.setIntPref("browser.sessionstore.interval", 0);
+  return promiseSaveFileContents().then(function(data) {
+    aCallback(JSON.parse(data));
+  });
 }
 
 function testOnWindow(aIsPrivate, aCallback) {
-  let win = OpenBrowserWindow({private: aIsPrivate});
-  win.addEventListener("load", function onLoad() {
-    win.removeEventListener("load", onLoad, false);
-    executeSoon(function() { aCallback(win); });
-  }, false);
+  whenNewWindowLoaded({private: aIsPrivate}, aCallback);
 }
 
 function waitForTabLoad(aWin, aURL, aCallback) {
-  aWin.gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
-    aWin.gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
+  let browser = aWin.gBrowser.selectedBrowser;
+  whenBrowserLoaded(browser, function () {
+    SyncHandlers.get(browser).flush();
     executeSoon(aCallback);
-  }, true);
-  aWin.gBrowser.selectedBrowser.loadURI(aURL);
+  });
+  browser.loadURI(aURL);
 }

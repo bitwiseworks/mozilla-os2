@@ -1,9 +1,5 @@
 /***********************************************************************
-Copyright (c) 2006-2012 IETF Trust and Skype Limited. All rights reserved.
-
-This file is extracted from RFC6716. Please see that RFC for additional
-information.
-
+Copyright (c) 2006-2011, Skype Limited. All rights reserved.
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions
 are met:
@@ -16,7 +12,7 @@ documentation and/or other materials provided with the distribution.
 names of specific contributors, may be used to endorse or promote
 products derived from this software without specific prior written
 permission.
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS”
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
 ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
@@ -48,13 +44,13 @@ extern "C"
 #define FIND_PITCH_WHITE_NOISE_FRACTION                 1e-3f
 
 /* Bandwidth expansion for whitening filter in pitch analysis */
-#define FIND_PITCH_BANDWITH_EXPANSION                   0.99f
+#define FIND_PITCH_BANDWIDTH_EXPANSION                  0.99f
 
 /*********************/
 /* Linear prediction */
 /*********************/
 
-/* LPC analysis defines: regularization and bandwidth expansion */
+/* LPC analysis regularization */
 #define FIND_LPC_COND_FAC                               1e-5f
 
 /* LTP analysis defines */
@@ -66,6 +62,9 @@ extern "C"
 #define MU_LTP_QUANT_NB                                 0.03f
 #define MU_LTP_QUANT_MB                                 0.025f
 #define MU_LTP_QUANT_WB                                 0.02f
+
+/* Max cumulative LTP gain */
+#define MAX_SUM_LOG_GAIN_DB								250.0f
 
 /***********************/
 /* High pass filtering */

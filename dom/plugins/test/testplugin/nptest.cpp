@@ -1,11 +1,11 @@
 /* ***** BEGIN LICENSE BLOCK *****
- * 
+ *
  * Copyright (c) 2008, Mozilla Corporation
  * All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * * Redistributions of source code must retain the above copyright notice, this
  *   list of conditions and the following disclaimer.
  * * Redistributions in binary form must reproduce the above copyright notice,
@@ -14,7 +14,7 @@
  * * Neither the name of the Mozilla Corporation nor the names of its
  *   contributors may be used to endorse or promote products derived from this
  *   software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
  * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -25,11 +25,11 @@
  * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * 
+ *
  * Contributor(s):
  *   Dave Townsend <dtownsend@oxymoronical.com>
  *   Josh Aas <josh@mozilla.com>
- * 
+ *
  * ***** END LICENSE BLOCK ***** */
 
 #include "nptest.h"
@@ -52,6 +52,7 @@
 #include <float.h>
 #include <windows.h>
 #define getpid _getpid
+#define strcasecmp _stricmp
 #elif defined(XP_OS2)
 #include <process.h>
 #include <float.h>
@@ -83,7 +84,7 @@ int gCrashCount = 0;
 
 static void Crash()
 {
-  int *pi = NULL;
+  int *pi = nullptr;
   *pi = 55; // Crash dereferencing null pointer
   ++gCrashCount;
 }
@@ -99,7 +100,7 @@ IntentionalCrash()
 // static data
 //
 
-static NPNetscapeFuncs* sBrowserFuncs = NULL;
+static NPNetscapeFuncs* sBrowserFuncs = nullptr;
 static NPClass sNPClass;
 
 void
@@ -144,6 +145,7 @@ static bool setPluginWantsAllStreams(NPObject* npobj, const NPVariant* args, uin
 static bool crashPlugin(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool crashOnDestroy(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool getObjectValue(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
+static bool getJavaCodebase(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool checkObjectValue(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool enableFPExceptions(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool setCookie(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
@@ -152,6 +154,7 @@ static bool getAuthInfo(NPObject* npobj, const NPVariant* args, uint32_t argCoun
 static bool asyncCallbackTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool checkGCRace(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool hangPlugin(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
+static bool stallPlugin(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool getClipboardText(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool callOnDestroy(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
 static bool reinitWidget(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result);
@@ -207,6 +210,7 @@ static const NPUTF8* sPluginMethodIdentifierNames[] = {
   "crash",
   "crashOnDestroy",
   "getObjectValue",
+  "getJavaCodebase",
   "checkObjectValue",
   "enableFPExceptions",
   "setCookie",
@@ -215,6 +219,7 @@ static const NPUTF8* sPluginMethodIdentifierNames[] = {
   "asyncCallbackTest",
   "checkGCRace",
   "hang",
+  "stall",
   "getClipboardText",
   "callOnDestroy",
   "reinitWidget",
@@ -271,6 +276,7 @@ static const ScriptableFunction sPluginMethodFunctions[] = {
   crashPlugin,
   crashOnDestroy,
   getObjectValue,
+  getJavaCodebase,
   checkObjectValue,
   enableFPExceptions,
   setCookie,
@@ -279,6 +285,7 @@ static const ScriptableFunction sPluginMethodFunctions[] = {
   asyncCallbackTest,
   checkGCRace,
   hangPlugin,
+  stallPlugin,
   getClipboardText,
   callOnDestroy,
   reinitWidget,
@@ -324,12 +331,12 @@ struct URLNotifyData
 
 static URLNotifyData kNotifyData = {
   "static-cookie",
-  NULL,
-  NULL,
-  NULL,
+  nullptr,
+  nullptr,
+  nullptr,
   false,
   0,
-  NULL
+  nullptr
 };
 
 static const char* SUCCESS_STRING = "pass";
@@ -390,11 +397,11 @@ static void initializeIdentifiers()
     NPN_GetStringIdentifiers(sPluginPropertyIdentifierNames,
         ARRAY_LENGTH(sPluginPropertyIdentifierNames), sPluginPropertyIdentifiers);
 
-    sIdentifiersInitialized = true;    
+    sIdentifiersInitialized = true;
 
-    // Check whether NULL is handled in NPN_GetStringIdentifiers
+    // Check whether nullptr is handled in NPN_GetStringIdentifiers
     NPIdentifier IDList[2];
-    static char const *const kIDNames[2] = { NULL, "setCookie" };
+    static char const *const kIDNames[2] = { nullptr, "setCookie" };
     NPN_GetStringIdentifiers(const_cast<const NPUTF8**>(kIDNames), 2, IDList);
   }
 }
@@ -414,7 +421,7 @@ static void addRange(InstanceData* instanceData, const char* range)
   char rangestr[16];
   strncpy(rangestr, range, sizeof(rangestr));
   const char* str1 = strtok(rangestr, ",");
-  const char* str2 = str1 ? strtok(NULL, ",") : NULL;
+  const char* str2 = str1 ? strtok(nullptr, ",") : nullptr;
   if (str1 && str2) {
     TestRange* byterange = new TestRange;
     byterange->offset = atoi(str1);
@@ -432,7 +439,7 @@ static void sendBufferToFrame(NPP instance)
   if (!instanceData->npnNewStream) outbuf = "data:text/html,";
   const char* buf = reinterpret_cast<char *>(instanceData->streamBuf);
   int32_t bufsize = instanceData->streamBufSize;
-  if (instanceData->streamMode == NP_ASFILE || 
+  if (instanceData->streamMode == NP_ASFILE ||
       instanceData->streamMode == NP_ASFILEONLY) {
     buf = reinterpret_cast<char *>(instanceData->fileBuf);
     bufsize = instanceData->fileBufSize;
@@ -446,24 +453,24 @@ static void sendBufferToFrame(NPP instance)
   else {
     outbuf.append("Error: no data in buffer");
   }
-  
+
   if (instanceData->npnNewStream &&
       instanceData->err.str().length() == 0) {
     char typeHTML[] = "text/html";
     NPStream* stream;
     printf("calling NPN_NewStream...");
-    NPError err = NPN_NewStream(instance, typeHTML, 
+    NPError err = NPN_NewStream(instance, typeHTML,
         instanceData->frame.c_str(), &stream);
     printf("return value %d\n", err);
     if (err != NPERR_NO_ERROR) {
       instanceData->err << "NPN_NewStream returned " << err;
       return;
     }
-    
+
     int32_t bytesToWrite = outbuf.length();
     int32_t bytesWritten = 0;
     while ((bytesToWrite - bytesWritten) > 0) {
-      int32_t numBytes = (bytesToWrite - bytesWritten) < 
+      int32_t numBytes = (bytesToWrite - bytesWritten) <
           instanceData->streamChunkSize ?
           bytesToWrite - bytesWritten : instanceData->streamChunkSize;
       int32_t written = NPN_Write(instance, stream,
@@ -504,7 +511,7 @@ static void sendBufferToFrame(NPP instance)
       }
     }
 
-    NPError err = NPN_GetURL(instance, outbuf.c_str(), 
+    NPError err = NPN_GetURL(instance, outbuf.c_str(),
                              instanceData->frame.c_str());
     if (err != NPERR_NO_ERROR) {
       instanceData->err << "NPN_GetURL returned " << err;
@@ -524,14 +531,14 @@ static void XPSleep(unsigned int seconds)
 TestFunction
 getFuncFromString(const char* funcname)
 {
-  FunctionTable funcTable[] = 
+  FunctionTable funcTable[] =
     {
       { FUNCTION_NPP_NEWSTREAM, "npp_newstream" },
       { FUNCTION_NPP_WRITEREADY, "npp_writeready" },
       { FUNCTION_NPP_WRITE, "npp_write" },
       { FUNCTION_NPP_DESTROYSTREAM, "npp_destroystream" },
       { FUNCTION_NPP_WRITE_RPC, "npp_write_rpc" },
-      { FUNCTION_NONE, NULL }
+      { FUNCTION_NONE, nullptr }
     };
   int32_t i = 0;
   while(funcTable[i].funcName) {
@@ -587,7 +594,7 @@ drawAsyncBitmapColor(InstanceData* instanceData)
     *pixelData = premultiplied;
   }
 
-  NPN_SetCurrentAsyncSurface(npp, instanceData->backBuffer, NULL);
+  NPN_SetCurrentAsyncSurface(npp, instanceData->backBuffer, nullptr);
   NPAsyncSurface *oldFront = instanceData->frontBuffer;
   instanceData->frontBuffer = instanceData->backBuffer;
   instanceData->backBuffer = oldFront;
@@ -777,7 +784,7 @@ NPError OSCALL NP_Shutdown()
 NPError
 NPP_New(NPMIMEType pluginType, NPP instance, uint16_t mode, int16_t argc, char* argn[], char* argv[], NPSavedData* saved)
 {
-  // Make sure our pdata field is NULL at this point. If it isn't, that
+  // Make sure our pdata field is nullptr at this point. If it isn't, that
   // probably means the browser gave us uninitialized memory.
   if (instance->pdata) {
     printf("NPP_New called with non-NULL NPP->pdata pointer!\n");
@@ -801,15 +808,16 @@ NPP_New(NPMIMEType pluginType, NPP instance, uint16_t mode, int16_t argc, char* 
   instanceData->testFunction = FUNCTION_NONE;
   instanceData->functionToFail = FUNCTION_NONE;
   instanceData->failureCode = 0;
-  instanceData->callOnDestroy = NULL;
+  instanceData->callOnDestroy = nullptr;
   instanceData->streamChunkSize = 1024;
-  instanceData->streamBuf = NULL;
+  instanceData->streamBuf = nullptr;
   instanceData->streamBufSize = 0;
-  instanceData->fileBuf = NULL;
+  instanceData->fileBuf = nullptr;
   instanceData->fileBufSize = 0;
   instanceData->throwOnNextInvoke = false;
   instanceData->runScriptOnPaint = false;
-  instanceData->testrange = NULL;
+  instanceData->dontTouchElement = false;
+  instanceData->testrange = nullptr;
   instanceData->hasWidget = false;
   instanceData->npnNewStream = false;
   instanceData->invalidateDuringPaint = false;
@@ -827,8 +835,8 @@ NPP_New(NPMIMEType pluginType, NPP instance, uint16_t mode, int16_t argc, char* 
   instanceData->closeStream = false;
   instanceData->wantsAllStreams = false;
   instanceData->asyncDrawing = AD_NONE;
-  instanceData->frontBuffer = NULL;
-  instanceData->backBuffer = NULL;
+  instanceData->frontBuffer = nullptr;
+  instanceData->backBuffer = nullptr;
   instanceData->mouseUpEventCount = 0;
   instanceData->bugMode = -1;
   instance->pdata = instanceData;
@@ -857,7 +865,7 @@ NPP_New(NPMIMEType pluginType, NPP instance, uint16_t mode, int16_t argc, char* 
   for (int i = 0; i < argc; i++) {
     if (strcmp(argn[i], "drawmode") == 0) {
       if (strcmp(argv[i], "solid") == 0)
-        scriptableObject->drawMode = DM_SOLID_COLOR;    
+        scriptableObject->drawMode = DM_SOLID_COLOR;
     }
     else if (strcmp(argn[i], "color") == 0) {
       scriptableObject->drawColor = parseHexColor(argv[i], strlen(argv[i]));
@@ -950,6 +958,10 @@ NPP_New(NPMIMEType pluginType, NPP instance, uint16_t mode, int16_t argc, char* 
     if (strcmp(argn[i], "paintscript") == 0) {
       instanceData->runScriptOnPaint = true;
     }
+
+    if (strcmp(argn[i], "donttouchelement") == 0) {
+      instanceData->dontTouchElement = true;
+    }
     // "cleanupwidget" is only used with nptest_gtk, defaulting to true.  It
     // indicates whether the plugin should destroy its window in response to
     // NPP_Destroy (or let the platform destroy the widget when the parent
@@ -963,6 +975,11 @@ NPP_New(NPMIMEType pluginType, NPP instance, uint16_t mode, int16_t argc, char* 
     }
     if (strcmp(argn[i], "bugmode") == 0) {
       instanceData->bugMode = atoi(argv[i]);
+    }
+    // Try to emulate java's codebase handling: Use the last seen codebase
+    // value, regardless of whether it is in attributes or params.
+    if (strcasecmp(argn[i], "codebase") == 0) {
+      instanceData->javaCodebase = argv[i];
     }
   }
 
@@ -1020,37 +1037,40 @@ NPP_New(NPMIMEType pluginType, NPP instance, uint16_t mode, int16_t argc, char* 
 
   NPVariant variantTrue;
   BOOLEAN_TO_NPVARIANT(true, variantTrue);
+  NPObject* o = nullptr;
 
-  // Set a property on NPNVPluginElementNPObject
-  NPObject* o = NULL;
-  err = NPN_GetValue(instance, NPNVPluginElementNPObject, &o);
-  if (err == NPERR_NO_ERROR) {
-    NPN_SetProperty(instance, o,
-                    NPN_GetStringIdentifier("pluginFoundElement"), &variantTrue);
-    NPN_ReleaseObject(o);
-    o = NULL;
+  // Set a property on NPNVPluginElementNPObject, unless the consumer explicitly
+  // opted out of this behavior.
+  if (!instanceData->dontTouchElement) {
+    err = NPN_GetValue(instance, NPNVPluginElementNPObject, &o);
+    if (err == NPERR_NO_ERROR) {
+      NPN_SetProperty(instance, o,
+                      NPN_GetStringIdentifier("pluginFoundElement"), &variantTrue);
+      NPN_ReleaseObject(o);
+      o = nullptr;
+    }
   }
-  
+
   // Set a property on NPNVWindowNPObject
   err = NPN_GetValue(instance, NPNVWindowNPObject, &o);
   if (err == NPERR_NO_ERROR) {
     NPN_SetProperty(instance, o,
                     NPN_GetStringIdentifier("pluginFoundWindow"), &variantTrue);
     NPN_ReleaseObject(o);
-    o = NULL;
+    o = nullptr;
   }
 
   ++sInstanceCount;
 
   if (instanceData->testFunction == FUNCTION_NPP_GETURL) {
-    NPError err = NPN_GetURL(instance, instanceData->testUrl.c_str(), NULL);
+    NPError err = NPN_GetURL(instance, instanceData->testUrl.c_str(), nullptr);
     if (err != NPERR_NO_ERROR) {
       instanceData->err << "NPN_GetURL returned " << err;
     }
   }
   else if (instanceData->testFunction == FUNCTION_NPP_GETURLNOTIFY) {
-    NPError err = NPN_GetURLNotify(instance, instanceData->testUrl.c_str(), 
-                                   NULL, static_cast<void*>(&kNotifyData));
+    NPError err = NPN_GetURLNotify(instance, instanceData->testUrl.c_str(),
+                                   nullptr, static_cast<void*>(&kNotifyData));
     if (err != NPERR_NO_ERROR) {
       instanceData->err << "NPN_GetURLNotify returned " << err;
     }
@@ -1074,7 +1094,7 @@ NPP_Destroy(NPP instance, NPSavedData** save)
 
   if (instanceData->callOnDestroy) {
     NPVariant result;
-    NPN_InvokeDefault(instance, instanceData->callOnDestroy, NULL, 0, &result);
+    NPN_InvokeDefault(instance, instanceData->callOnDestroy, nullptr, 0, &result);
     NPN_ReleaseVariantValue(&result);
     NPN_ReleaseObject(instanceData->callOnDestroy);
   }
@@ -1088,14 +1108,14 @@ NPP_Destroy(NPP instance, NPSavedData** save)
 
   TestRange* currentrange = instanceData->testrange;
   TestRange* nextrange;
-  while (currentrange != NULL) {
+  while (currentrange != nullptr) {
     nextrange = reinterpret_cast<TestRange*>(currentrange->next);
     delete currentrange;
     currentrange = nextrange;
   }
 
   if (instanceData->frontBuffer) {
-    NPN_SetCurrentAsyncSurface(instance, NULL, NULL);
+    NPN_SetCurrentAsyncSurface(instance, nullptr, nullptr);
     NPN_FinalizeAsyncSurface(instance, instanceData->frontBuffer);
     NPN_MemFree(instanceData->frontBuffer);
   }
@@ -1161,8 +1181,8 @@ NPP_SetWindow(NPP instance, NPWindow* window)
 
     memcpy(instanceData->backBuffer, instanceData->frontBuffer, sizeof(NPAsyncSurface));
 
-    NPN_InitAsyncSurface(instance, &size, NPImageFormatBGRA32, NULL, instanceData->frontBuffer);
-    NPN_InitAsyncSurface(instance, &size, NPImageFormatBGRA32, NULL, instanceData->backBuffer);
+    NPN_InitAsyncSurface(instance, &size, NPImageFormatBGRA32, nullptr, instanceData->frontBuffer);
+    NPN_InitAsyncSurface(instance, &size, NPImageFormatBGRA32, nullptr, instanceData->backBuffer);
 
     drawAsyncBitmapColor(instanceData);
   }
@@ -1174,7 +1194,7 @@ NPP_NewStream(NPP instance, NPMIMEType type, NPStream* stream, NPBool seekable, 
 {
   printf("NPP_NewStream\n");
   InstanceData* instanceData = (InstanceData*)(instance->pdata);
-  
+
   if (instanceData->functionToFail == FUNCTION_NPP_NEWSTREAM &&
       instanceData->failureCode) {
     instanceData->err << SUCCESS_STRING;
@@ -1253,20 +1273,20 @@ NPP_DestroyStream(NPP instance, NPStream* stream, NPReason reason)
       return NPERR_GENERIC_ERROR;
     }
 
-    if (strcmp(reinterpret_cast<char *>(instanceData->fileBuf), 
+    if (strcmp(reinterpret_cast<char *>(instanceData->fileBuf),
                reinterpret_cast<char *>(instanceData->streamBuf))) {
       instanceData->err <<
         "Error: data passed to NPP_Write and NPP_StreamAsFile differed";
     }
   }
-  if (instanceData->frame.length() > 0 && 
+  if (instanceData->frame.length() > 0 &&
       instanceData->testFunction != FUNCTION_NPP_GETURLNOTIFY &&
       instanceData->testFunction != FUNCTION_NPP_POSTURL) {
     sendBufferToFrame(instance);
   }
   if (instanceData->testFunction == FUNCTION_NPP_POSTURL) {
-    NPError err = NPN_PostURL(instance, instanceData->testUrl.c_str(), 
-      instanceData->postMode == POSTMODE_FRAME ? instanceData->frame.c_str() : NULL, 
+    NPError err = NPN_PostURL(instance, instanceData->testUrl.c_str(),
+      instanceData->postMode == POSTMODE_FRAME ? instanceData->frame.c_str() : nullptr,
       instanceData->streamBufSize,
       reinterpret_cast<char *>(instanceData->streamBuf), false);
     if (err != NPERR_NO_ERROR)
@@ -1284,7 +1304,7 @@ NPP_WriteReady(NPP instance, NPStream* stream)
   if (instanceData->functionToFail == FUNCTION_NPP_NEWSTREAM) {
     instanceData->err << "NPP_WriteReady called";
   }
-  
+
   // temporarily disabled per bug 519870
   //if (instanceData->writeReadyCount == 1) {
   //  return 0;
@@ -1307,14 +1327,14 @@ NPP_Write(NPP instance, NPStream* stream, int32_t offset, int32_t len, void* buf
 
   if (instanceData->functionToFail == FUNCTION_NPP_WRITE_RPC) {
     // Make an RPC call and pretend to consume the data
-    NPObject* windowObject = NULL;
+    NPObject* windowObject = nullptr;
     NPN_GetValue(instance, NPNVWindowNPObject, &windowObject);
     if (windowObject)
       NPN_ReleaseObject(windowObject);
 
     return len;
   }
-  
+
   if (instanceData->functionToFail == FUNCTION_NPP_NEWSTREAM) {
     instanceData->err << "NPP_Write called";
   }
@@ -1344,20 +1364,20 @@ NPP_Write(NPP instance, NPStream* stream, int32_t offset, int32_t len, void* buf
 
   if (instanceData->closeStream) {
     instanceData->closeStream = false;
-    if (instanceData->testrange != NULL) {
+    if (instanceData->testrange != nullptr) {
       NPN_RequestRead(stream, instanceData->testrange);
     }
     NPN_DestroyStream(instance, stream, NPRES_USER_BREAK);
   }
   else if (instanceData->streamMode == NP_SEEK &&
-      stream->end != 0 && 
+      stream->end != 0 &&
       stream->end == ((uint32_t)instanceData->streamBufSize + len)) {
     // If the complete stream has been written, and we're doing a seek test,
     // then call NPN_RequestRead.
     // prevent recursion
     instanceData->streamMode = NP_NORMAL;
 
-    if (instanceData->testrange != NULL) {
+    if (instanceData->testrange != nullptr) {
       NPError err = NPN_RequestRead(stream, instanceData->testrange);
       if (err != NPERR_NO_ERROR) {
         instanceData->err << "NPN_RequestRead returned error %d" << err;
@@ -1369,7 +1389,7 @@ NPP_Write(NPP instance, NPStream* stream, int32_t offset, int32_t len, void* buf
   char* streamBuf = reinterpret_cast<char *>(instanceData->streamBuf);
   if (offset + len <= instanceData->streamBufSize) {
     if (memcmp(buffer, streamBuf + offset, len)) {
-      instanceData->err << 
+      instanceData->err <<
           "Error: data written from NPN_RequestRead doesn't match";
     }
     else {
@@ -1377,7 +1397,7 @@ NPP_Write(NPP instance, NPStream* stream, int32_t offset, int32_t len, void* buf
     }
     TestRange* range = instanceData->testrange;
     bool stillwaiting = false;
-    while(range != NULL) {
+    while(range != nullptr) {
       if (offset == range->offset &&
         (uint32_t)len == range->length) {
         range->waiting = false;
@@ -1398,8 +1418,8 @@ NPP_Write(NPP instance, NPStream* stream, int32_t offset, int32_t len, void* buf
       streamBuf = reinterpret_cast<char *>(instanceData->streamBuf);
     }
     else {
-      instanceData->streamBuf = 
-        realloc(reinterpret_cast<char *>(instanceData->streamBuf), 
+      instanceData->streamBuf =
+        realloc(reinterpret_cast<char *>(instanceData->streamBuf),
         instanceData->streamBufSize + len + 1);
       streamBuf = reinterpret_cast<char *>(instanceData->streamBuf);
     }
@@ -1602,10 +1622,10 @@ NPP_GetSitesWithData()
 
   // Allocate the maximum possible size the list could be.
   result = static_cast<char**>(NPN_MemAlloc((length + 1) * sizeof(char*)));
-  result[length] = NULL;
+  result[length] = nullptr;
 
   if (length == 0) {
-    // Represent the no site data case as an array of length 1 with a NULL
+    // Represent the no site data case as an array of length 1 with a nullptr
     // entry.
     return result;
   }
@@ -1636,7 +1656,7 @@ NPP_GetSitesWithData()
       memcpy(result[i], site.c_str(), site.length() + 1);
     }
   }
-  result[sites.size()] = NULL;
+  result[sites.size()] = nullptr;
 
   return result;
 }
@@ -1809,14 +1829,14 @@ NPN_RequestRead(NPStream* stream, NPByteRange* rangeList)
 }
 
 NPError
-NPN_PostURLNotify(NPP instance, const char* url, 
-                  const char* target, uint32_t len, 
+NPN_PostURLNotify(NPP instance, const char* url,
+                  const char* target, uint32_t len,
                   const char* buf, NPBool file, void* notifyData)
 {
   return sBrowserFuncs->posturlnotify(instance, url, target, len, buf, file, notifyData);
 }
 
-NPError 
+NPError
 NPN_PostURL(NPP instance, const char *url,
                     const char *target, uint32_t len,
                     const char *buf, NPBool file)
@@ -1831,8 +1851,8 @@ NPN_DestroyStream(NPP instance, NPStream* stream, NPError reason)
 }
 
 NPError
-NPN_NewStream(NPP instance, 
-              NPMIMEType  type, 
+NPN_NewStream(NPP instance,
+              NPMIMEType  type,
               const char* target,
               NPStream**  stream)
 {
@@ -1854,7 +1874,7 @@ NPN_Enumerate(NPP instance,
               NPIdentifier **identifiers,
               uint32_t *identifierCount)
 {
-  return sBrowserFuncs->enumerate(instance, npobj, identifiers, 
+  return sBrowserFuncs->enumerate(instance, npobj, identifiers,
       identifierCount);
 }
 
@@ -1951,7 +1971,7 @@ scriptableAllocate(NPP npp, NPClass* aClass)
 {
   TestNPObject* object = (TestNPObject*)NPN_MemAlloc(sizeof(TestNPObject));
   if (!object)
-    return NULL;
+    return nullptr;
   memset(object, 0, sizeof(TestNPObject));
   return object;
 }
@@ -1985,7 +2005,7 @@ scriptableInvoke(NPObject* npobj, NPIdentifier name, const NPVariant* args, uint
   if (id->throwOnNextInvoke) {
     id->throwOnNextInvoke = false;
     if (argCount == 0) {
-      NPN_SetException(npobj, NULL);
+      NPN_SetException(npobj, nullptr);
     }
     else {
       for (uint32_t i = 0; i < argCount; i++) {
@@ -1995,7 +2015,7 @@ scriptableInvoke(NPObject* npobj, NPIdentifier name, const NPVariant* args, uint
     }
     return false;
   }
-  
+
   for (int i = 0; i < int(ARRAY_LENGTH(sPluginMethodIdentifiers)); i++) {
     if (name == sPluginMethodIdentifiers[i])
       return sPluginMethodFunctions[i](npobj, args, argCount, result);
@@ -2011,7 +2031,7 @@ scriptableInvokeDefault(NPObject* npobj, const NPVariant* args, uint32_t argCoun
   if (id->throwOnNextInvoke) {
     id->throwOnNextInvoke = false;
     if (argCount == 0) {
-      NPN_SetException(npobj, NULL);
+      NPN_SetException(npobj, nullptr);
     }
     else {
       for (uint32_t i = 0; i < argCount; i++) {
@@ -2044,7 +2064,9 @@ scriptableInvokeDefault(NPObject* npobj, const NPVariant* args, uint32_t argCoun
         value << ";other";
     }
   }
-  STRINGZ_TO_NPVARIANT(NPN_StrDup(value.str().c_str()), *result);
+
+  char *outval = NPN_StrDup(value.str().c_str());
+  STRINGZ_TO_NPVARIANT(outval, *result);
   return true;
 }
 
@@ -2052,16 +2074,21 @@ bool
 scriptableHasProperty(NPObject* npobj, NPIdentifier name)
 {
   if (NPN_IdentifierIsString(name)) {
-    if (NPN_GetStringIdentifier(NPN_UTF8FromIdentifier(name)) != name)
+    NPUTF8 *asUTF8 = NPN_UTF8FromIdentifier(name);
+    if (NPN_GetStringIdentifier(asUTF8) != name) {
       Crash();
+    }
+    NPN_MemFree(asUTF8);
   }
   else {
-    if (NPN_GetIntIdentifier(NPN_IntFromIdentifier(name)) != name)
+    if (NPN_GetIntIdentifier(NPN_IntFromIdentifier(name)) != name) {
       Crash();
+    }
   }
   for (int i = 0; i < int(ARRAY_LENGTH(sPluginPropertyIdentifiers)); i++) {
-    if (name == sPluginPropertyIdentifiers[i])
+    if (name == sPluginPropertyIdentifiers[i]) {
       return true;
+    }
   }
   return false;
 }
@@ -2137,7 +2164,7 @@ compareVariants(NPP instance, const NPVariant* var1, const NPVariant* var2)
         " expected " << var2->type;
     return false;
   }
-  
+
   switch (var1->type) {
     case NPVariantType_Int32: {
         int32_t result = NPVARIANT_TO_INT32(*var1);
@@ -2180,8 +2207,8 @@ compareVariants(NPP instance, const NPVariant* var1, const NPVariant* var2)
         const NPString* expected = &NPVARIANT_TO_STRING(*var2);
         if (strcmp(result->UTF8Characters, expected->UTF8Characters) ||
             strlen(result->UTF8Characters) != strlen(expected->UTF8Characters)) {
-          id->err << "Variant values don't match; got " << 
-              result->UTF8Characters << " expected " << 
+          id->err << "Variant values don't match; got " <<
+              result->UTF8Characters << " expected " <<
               expected->UTF8Characters;
           success = false;
         }
@@ -2217,7 +2244,7 @@ compareVariants(NPP instance, const NPVariant* var1, const NPVariant* var2)
                 success = false;
               }
               else {
-                success = compareVariants(instance, &resultVariant, 
+                success = compareVariants(instance, &resultVariant,
                     &expectedVariant);
                 NPN_ReleaseVariantValue(&expectedVariant);
               }
@@ -2231,7 +2258,7 @@ compareVariants(NPP instance, const NPVariant* var1, const NPVariant* var2)
       id->err << "Unknown variant type";
       success = false;
   }
-  
+
   return success;
 }
 
@@ -2242,7 +2269,7 @@ throwExceptionNextInvoke(NPObject* npobj, const NPVariant* args, uint32_t argCou
   InstanceData* id = static_cast<InstanceData*>(npp->pdata);
   id->throwOnNextInvoke = true;
   BOOLEAN_TO_NPVARIANT(true, *result);
-  return true;  
+  return true;
 }
 
 static bool
@@ -2250,7 +2277,7 @@ npnInvokeDefaultTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, 
 {
   bool success = false;
   NPP npp = static_cast<TestNPObject*>(npobj)->npp;
- 
+
   NPObject* windowObject;
   NPN_GetValue(npp, NPNVWindowNPObject, &windowObject);
   if (!windowObject)
@@ -2265,9 +2292,9 @@ npnInvokeDefaultTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, 
       &objectVariant)) {
     if (NPVARIANT_IS_OBJECT(objectVariant)) {
       NPObject* selfObject = NPVARIANT_TO_OBJECT(objectVariant);
-      if (selfObject != NULL) {
+      if (selfObject != nullptr) {
         NPVariant resultVariant;
-        if (NPN_InvokeDefault(npp, selfObject, argCount > 1 ? &args[1] : NULL, 
+        if (NPN_InvokeDefault(npp, selfObject, argCount > 1 ? &args[1] : nullptr,
             argCount - 1, &resultVariant)) {
           *result = resultVariant;
           success = true;
@@ -2293,18 +2320,18 @@ npnInvokeTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVaria
   NPIdentifier function = variantToIdentifier(args[0]);
   if (!function)
     return false;
-  
+
   NPObject* windowObject;
   NPN_GetValue(npp, NPNVWindowNPObject, &windowObject);
   if (!windowObject)
     return false;
-  
+
   NPVariant invokeResult;
   bool invokeReturn = NPN_Invoke(npp, windowObject, function,
-      argCount > 2 ? &args[2] : NULL, argCount - 2, &invokeResult);
-      
+      argCount > 2 ? &args[2] : nullptr, argCount - 2, &invokeResult);
+
   bool compareResult = compareVariants(npp, &invokeResult, &args[1]);
-      
+
   NPN_ReleaseObject(windowObject);
   NPN_ReleaseVariantValue(&invokeResult);
   BOOLEAN_TO_NPVARIANT(invokeReturn && compareResult, *result);
@@ -2316,10 +2343,10 @@ npnEvaluateTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVar
 {
   bool success = false;
   NPP npp = static_cast<TestNPObject*>(npobj)->npp;
-  
+
   if (argCount != 1)
     return false;
-  
+
   if (!NPVARIANT_IS_STRING(args[0]))
     return false;
 
@@ -2327,9 +2354,9 @@ npnEvaluateTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVar
   NPN_GetValue(npp, NPNVWindowNPObject, &windowObject);
   if (!windowObject)
     return false;
-  
+
   success = NPN_Evaluate(npp, windowObject, (NPString*)&NPVARIANT_TO_STRING(args[0]), result);
-  
+
   NPN_ReleaseObject(windowObject);
   return success;
 }
@@ -2576,10 +2603,13 @@ getError(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* r
 
   NPP npp = static_cast<TestNPObject*>(npobj)->npp;
   InstanceData* id = static_cast<InstanceData*>(npp->pdata);
-  if (id->err.str().length() == 0)
-    STRINGZ_TO_NPVARIANT(NPN_StrDup(SUCCESS_STRING), *result);
-  else
-    STRINGZ_TO_NPVARIANT(NPN_StrDup(id->err.str().c_str()), *result);
+  if (id->err.str().length() == 0) {
+    char *outval = NPN_StrDup(SUCCESS_STRING);
+    STRINGZ_TO_NPVARIANT(outval, *result);
+  } else {
+    char *outval = NPN_StrDup(id->err.str().c_str());
+    STRINGZ_TO_NPVARIANT(outval, *result);
+  }
   return true;
 }
 
@@ -2659,7 +2689,7 @@ convertPointY(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVaria
 
   double resultX, resultY;
   NPN_ConvertPoint(npp, sourceX, sourceY, (NPCoordinateSpace)sourceSpace, &resultX, &resultY, (NPCoordinateSpace)destSpace);
-  
+
   DOUBLE_TO_NPVARIANT(resultY, *result);
   return true;
 }
@@ -2681,7 +2711,7 @@ streamTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant*
     return false;
   bool doPost = NPVARIANT_TO_BOOLEAN(args[1]);
 
-  NPString postData = { NULL, 0 };
+  NPString postData = { nullptr, 0 };
   if (NPVARIANT_IS_STRING(args[2])) {
     postData = NPVARIANT_TO_STRING(args[2]);
   }
@@ -2691,7 +2721,7 @@ streamTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant*
     }
   }
 
-  NPObject* writeCallback = NULL;
+  NPObject* writeCallback = nullptr;
   if (NPVARIANT_IS_OBJECT(args[3])) {
     writeCallback = NPVARIANT_TO_OBJECT(args[3]);
   }
@@ -2701,7 +2731,7 @@ streamTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant*
     }
   }
 
-  NPObject* notifyCallback = NULL;
+  NPObject* notifyCallback = nullptr;
   if (NPVARIANT_IS_OBJECT(args[4])) {
     notifyCallback = NPVARIANT_TO_OBJECT(args[4]);
   }
@@ -2711,7 +2741,7 @@ streamTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant*
     }
   }
 
-  NPObject* redirectCallback = NULL;
+  NPObject* redirectCallback = nullptr;
   if (NPVARIANT_IS_OBJECT(args[5])) {
     redirectCallback = NPVARIANT_TO_OBJECT(args[5]);
   }
@@ -2731,7 +2761,7 @@ streamTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant*
   ndata->notifyCallback = notifyCallback;
   ndata->redirectCallback = redirectCallback;
   ndata->size = 0;
-  ndata->data = NULL;
+  ndata->data = nullptr;
   ndata->allowRedirects = allowRedirects;
 
   /* null-terminate "url" */
@@ -2741,12 +2771,12 @@ streamTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant*
 
   NPError err;
   if (doPost) {
-    err = NPN_PostURLNotify(npp, urlstr, NULL,
+    err = NPN_PostURLNotify(npp, urlstr, nullptr,
                             postData.UTF8Length, postData.UTF8Characters,
                             false, ndata);
   }
   else {
-    err = NPN_GetURLNotify(npp, urlstr, NULL, ndata);
+    err = NPN_GetURLNotify(npp, urlstr, nullptr, ndata);
   }
 
   free(urlstr);
@@ -2862,7 +2892,7 @@ void notifyDidPaint(InstanceData* instanceData)
   }
 
   if (instanceData->runScriptOnPaint) {
-    NPObject* o = NULL;
+    NPObject* o = nullptr;
     NPN_GetValue(instanceData->npp, NPNVPluginElementNPObject, &o);
     if (o) {
       NPVariant param;
@@ -2891,8 +2921,22 @@ void notifyDidPaint(InstanceData* instanceData)
 
 static const NPClass kTestSharedNPClass = {
   NP_CLASS_STRUCT_VERSION,
-  // Everything else is NULL
+  // Everything else is nullptr
 };
+
+static bool getJavaCodebase(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result)
+{
+  if (argCount != 0) {
+    return false;
+  }
+
+  NPP npp = static_cast<TestNPObject*>(npobj)->npp;
+  InstanceData* id = static_cast<InstanceData*>(npp->pdata);
+
+  char *outval = NPN_StrDup(id->javaCodebase.c_str());
+  STRINGZ_TO_NPVARIANT(outval, *result);
+  return true;
+}
 
 static bool getObjectValue(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result)
 {
@@ -2940,13 +2984,13 @@ static bool enableFPExceptions(NPObject* npobj, const NPVariant* args, uint32_t 
 
 // caller is responsible for freeing return buffer
 static char* URLForInstanceWindow(NPP instance) {
-  char *outString = NULL;
-  
-  NPObject* windowObject = NULL;
+  char *outString = nullptr;
+
+  NPObject* windowObject = nullptr;
   NPError err = NPN_GetValue(instance, NPNVWindowNPObject, &windowObject);
   if (err != NPERR_NO_ERROR || !windowObject)
-    return NULL;
-  
+    return nullptr;
+
   NPIdentifier locationIdentifier = NPN_GetStringIdentifier("location");
   NPVariant locationVariant;
   if (NPN_GetProperty(instance, windowObject, locationIdentifier, &locationVariant)) {
@@ -2964,13 +3008,13 @@ static char* URLForInstanceWindow(NPP instance) {
           }
         }
         NPN_ReleaseVariantValue(&hrefVariant);
-      }      
+      }
     }
     NPN_ReleaseVariantValue(&locationVariant);
   }
-  
+
   NPN_ReleaseObject(windowObject);
-  
+
   return outString;
 }
 
@@ -2982,15 +3026,15 @@ setCookie(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* 
   if (!NPVARIANT_IS_STRING(args[0]))
     return false;
   const NPString* cookie = &NPVARIANT_TO_STRING(args[0]);
-  
+
   NPP npp = static_cast<TestNPObject*>(npobj)->npp;
-  
+
   char* url = URLForInstanceWindow(npp);
   if (!url)
     return false;
   NPError err = NPN_SetValueForURL(npp, NPNURLVCookie, url, cookie->UTF8Characters, cookie->UTF8Length);
   free(url);
-  
+
   return (err == NPERR_NO_ERROR);
 }
 
@@ -2999,19 +3043,19 @@ getCookie(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* 
 {
   if (argCount != 0)
     return false;
-  
+
   NPP npp = static_cast<TestNPObject*>(npobj)->npp;
-  
+
   char* url = URLForInstanceWindow(npp);
   if (!url)
     return false;
-  char* cookie = NULL;
+  char* cookie = nullptr;
   unsigned int length = 0;
   NPError err = NPN_GetValueForURL(npp, NPNURLVCookie, url, &cookie, &length);
   free(url);
   if (err != NPERR_NO_ERROR || !cookie)
     return false;
-  
+
   STRINGZ_TO_NPVARIANT(cookie, *result);
   return true;
 }
@@ -3035,21 +3079,21 @@ getAuthInfo(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant
   const NPString* scheme = &NPVARIANT_TO_STRING(args[3]);
   const NPString* realm = &NPVARIANT_TO_STRING(args[4]);
 
-  char* username = NULL;
-  char* password = NULL;
+  char* username = nullptr;
+  char* password = nullptr;
   uint32_t ulen = 0, plen = 0;
-  
-  NPError err = NPN_GetAuthenticationInfo(npp, 
-      protocol->UTF8Characters, 
-      host->UTF8Characters, 
-      port, 
-      scheme->UTF8Characters, 
+
+  NPError err = NPN_GetAuthenticationInfo(npp,
+      protocol->UTF8Characters,
+      host->UTF8Characters,
+      port,
+      scheme->UTF8Characters,
       realm->UTF8Characters,
-      &username, 
-      &ulen, 
-      &password, 
+      &username,
+      &ulen,
+      &password,
       &plen);
-  
+
   if (err != NPERR_NO_ERROR) {
     return false;
   }
@@ -3064,7 +3108,7 @@ getAuthInfo(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant
 
   NPN_MemFree(username);
   NPN_MemFree(password);
-  
+
   return true;
 }
 
@@ -3092,7 +3136,7 @@ static void timerCallback(NPP npp, uint32_t timerID)
   }
 
   NPN_ReleaseObject(windowObject);
-  
+
   if (event.timerIdSchedule > -1) {
     id->timerID[event.timerIdSchedule] = NPN_ScheduleTimer(npp, event.timerInterval, event.timerRepeat, timerCallback);
   }
@@ -3115,9 +3159,9 @@ timerTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* 
 
   id->timerTestResult = true;
   timerEvent event = timerEvents[currentTimerEventCount];
-    
+
   id->timerID[event.timerIdSchedule] = NPN_ScheduleTimer(npp, event.timerInterval, event.timerRepeat, timerCallback);
-  
+
   return id->timerID[event.timerIdSchedule] != 0;
 }
 
@@ -3135,7 +3179,7 @@ ThreadProc(void* cookie)
   id->asyncTestPhase = 1;
   NPN_PluginThreadAsyncCall(npp, asyncCallback, (void*)npobj);
 #if !defined(XP_WIN) && !defined(XP_OS2)
-  return NULL;
+  return nullptr;
 #endif
 }
 
@@ -3161,7 +3205,7 @@ asyncCallback(void* cookie)
         id->asyncCallbackResult = false;
 #endif
       break;
-    
+
     // async callback triggered from different thread
     default:
       NPObject* windowObject;
@@ -3187,11 +3231,11 @@ asyncCallbackTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPV
     return false;
   const NPString* argstr = &NPVARIANT_TO_STRING(args[0]);
   id->asyncTestScriptCallback = argstr->UTF8Characters;
-  
+
   id->asyncTestPhase = 0;
   id->asyncCallbackResult = true;
   NPN_PluginThreadAsyncCall(npp, asyncCallback, (void*)npobj);
-  
+
   return true;
 }
 
@@ -3214,18 +3258,18 @@ GCRaceInvokeDefault(NPObject* o, const NPVariant* args, uint32_t argCount,
 
 static const NPClass kGCRaceClass = {
   NP_CLASS_STRUCT_VERSION,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
+  nullptr,
+  nullptr,
+  nullptr,
+  nullptr,
   GCRaceInvoke,
   GCRaceInvokeDefault,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL
+  nullptr,
+  nullptr,
+  nullptr,
+  nullptr,
+  nullptr,
+  nullptr
 };
 
 struct GCRaceData
@@ -3277,7 +3321,7 @@ checkGCRace(NPObject* npobj, const NPVariant* args, uint32_t argCount,
     return false;
 
   NPP npp = static_cast<TestNPObject*>(npobj)->npp;
-  
+
   NPObject* localFunc =
     NPN_CreateObject(npp, const_cast<NPClass*>(&kGCRaceClass));
 
@@ -3300,9 +3344,9 @@ hangPlugin(NPObject* npobj, const NPVariant* args, uint32_t argCount,
     busyHang = NPVARIANT_TO_BOOLEAN(args[0]);
   }
 
-  if (busyHang) {    
-    const time_t start = std::time(NULL);
-    while ((std::time(NULL) - start) < 100000) {
+  if (busyHang) {
+    const time_t start = std::time(nullptr);
+    while ((std::time(nullptr) - start) < 100000) {
       volatile int dummy = 0;
       for (int i=0; i<1000; ++i) {
         dummy++;
@@ -3325,6 +3369,24 @@ hangPlugin(NPObject* npobj, const NPVariant* args, uint32_t argCount,
   // thus the hang detection/handling didn't work correctly.  The
   // test harness will succeed in calling this function, and the
   // test will fail.
+  return true;
+}
+
+bool
+stallPlugin(NPObject* npobj, const NPVariant* args, uint32_t argCount,
+           NPVariant* result)
+{
+  uint32_t stallTimeSeconds = 0;
+  if ((argCount == 1) && NPVARIANT_IS_INT32(args[0])) {
+    stallTimeSeconds = (uint32_t) NPVARIANT_TO_INT32(args[0]);
+  }
+
+#ifdef XP_WIN
+  Sleep(stallTimeSeconds * 1000U);
+#else
+  sleep(stallTimeSeconds);
+#endif
+
   return true;
 }
 
@@ -3568,18 +3630,18 @@ ReflectorGetProperty(NPObject* npobj, NPIdentifier name, NPVariant* result)
 
 static const NPClass kReflectorNPClass = {
   NP_CLASS_STRUCT_VERSION,
-  NULL,
-  NULL,
-  NULL,
+  nullptr,
+  nullptr,
+  nullptr,
   ReflectorHasMethod,
-  NULL,
-  NULL,
+  nullptr,
+  nullptr,
   ReflectorHasProperty,
   ReflectorGetProperty,
-  NULL,
-  NULL,
-  NULL,
-  NULL
+  nullptr,
+  nullptr,
+  nullptr,
+  nullptr
 };
 
 bool
@@ -3614,7 +3676,7 @@ bool getWindowPosition(NPObject* npobj, const NPVariant* args, uint32_t argCount
   NPP npp = static_cast<TestNPObject*>(npobj)->npp;
   InstanceData* id = static_cast<InstanceData*>(npp->pdata);
 
-  NPObject* window = NULL;
+  NPObject* window = nullptr;
   NPError err = NPN_GetValue(npp, NPNVWindowNPObject, &window);
   if (NPERR_NO_ERROR != err || !window)
     return false;
@@ -3653,7 +3715,7 @@ bool constructObject(NPObject* npobj, const NPVariant* args, uint32_t argCount, 
     return false;
 
   NPObject* ctor = NPVARIANT_TO_OBJECT(args[0]);
-  
+
   NPP npp = static_cast<TestNPObject*>(npobj)->npp;
 
   return NPN_Construct(npp, ctor, args + 1, argCount - 1, result);
@@ -3686,12 +3748,12 @@ bool setSitesWithData(NPObject* npobj, const NPVariant* args, uint32_t argCount,
     const char* flagsEnd = strchr(siteEnd + 1, ':');
     *((char*) flagsEnd) = '\0';
     *((char*) next) = '\0';
-    
+
     siteData data;
     data.site = string(iterator);
     data.flags = atoi(siteEnd + 1);
     data.age = atoi(flagsEnd + 1);
-    
+
     sSitesWithData->push_back(data);
 
     if (next == end)
@@ -3721,7 +3783,9 @@ bool getLastKeyText(NPObject* npobj, const NPVariant* args, uint32_t argCount,
 
   NPP npp = static_cast<TestNPObject*>(npobj)->npp;
   InstanceData* id = static_cast<InstanceData*>(npp->pdata);
-  STRINGZ_TO_NPVARIANT(NPN_StrDup(id->lastKeyText.c_str()), *result);
+
+  char *outval = NPN_StrDup(id->lastKeyText.c_str());
+  STRINGZ_TO_NPVARIANT(outval, *result);
   return true;
 }
 
@@ -3734,7 +3798,7 @@ bool getNPNVdocumentOrigin(NPObject* npobj, const NPVariant* args, uint32_t argC
 
   NPP npp = static_cast<TestNPObject*>(npobj)->npp;
 
-  char *origin = NULL;
+  char *origin = nullptr;
   NPError err = NPN_GetValue(npp, NPNVdocumentOrigin, &origin);
   if (err != NPERR_NO_ERROR) {
     return false;
@@ -3749,7 +3813,7 @@ bool getMouseUpEventCount(NPObject* npobj, const NPVariant* args, uint32_t argCo
   if (argCount != 0) {
     return false;
   }
-  
+
   NPP npp = static_cast<TestNPObject*>(npobj)->npp;
   InstanceData* id = static_cast<InstanceData*>(npp->pdata);
   INT32_TO_NPVARIANT(id->mouseUpEventCount, *result);

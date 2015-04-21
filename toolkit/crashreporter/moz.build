@@ -4,6 +4,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+SPHINX_TREES['crashreporter'] = 'docs'
+
 if CONFIG['OS_ARCH'] == 'WINNT':
     DIRS += [
     'google-breakpad/src/common',
@@ -50,25 +52,54 @@ DIRS += ['client']
 
 if CONFIG['MOZ_CRASHREPORTER_INJECTOR']:
     DIRS += ['injector']
-    CPP_SOURCES += [
-        'LoadLibraryRemote.cpp',
+    UNIFIED_SOURCES += [
         'InjectCrashReporter.cpp',
+        'LoadLibraryRemote.cpp',
     ]
 
 TEST_TOOL_DIRS += ['test']
-
-MODULE = 'crashreporter'
 
 EXPORTS += [
     'nsExceptionHandler.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsExceptionHandler.cpp',
 ]
 
-
 if CONFIG['OS_ARCH'] == 'Darwin':
-    CMMSRCS += [
+    UNIFIED_SOURCES += [
         'mac_utils.mm',
     ]
+
+EXTRA_JS_MODULES += [
+    'CrashReports.jsm',
+    'CrashSubmit.jsm',
+    'KeyValueParser.jsm',
+]
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xulapp_s'
+
+if CONFIG['OS_TARGET'] == 'Android':
+    DEFINES['ANDROID_PACKAGE_NAME'] = '"%s"' % CONFIG['ANDROID_PACKAGE_NAME']
+    # NDK5 workarounds
+    DEFINES['_STLP_CONST_CONSTRUCTOR_BUG'] = True
+    DEFINES['_STLP_NO_MEMBER_TEMPLATES'] = True
+
+if CONFIG['OS_ARCH'] == 'SunOS':
+    # there's no define for this normally
+    DEFINES['XP_SOLARIS'] = True
+
+DEFINES['UNICODE'] = True
+DEFINES['_UNICODE'] = True
+
+JAR_MANIFESTS += ['jar.mn']
+
+LOCAL_INCLUDES += [
+    'google-breakpad/src',
+]
+

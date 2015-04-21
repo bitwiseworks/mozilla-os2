@@ -8,13 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "processing_component.h"
+#include "webrtc/modules/audio_processing/processing_component.h"
 
-#include <cassert>
+#include <assert.h>
 
-#include "audio_processing_impl.h"
+#include "webrtc/modules/audio_processing/audio_processing_impl.h"
 
 namespace webrtc {
+
+ProcessingComponent::ProcessingComponent() {}
 
 ProcessingComponent::ProcessingComponent(const AudioProcessingImpl* apm)
   : apm_(apm),

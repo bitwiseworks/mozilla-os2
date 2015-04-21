@@ -3,16 +3,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <limits.h>
-
 #include "nsAboutCacheEntry.h"
 #include "nsICacheService.h"
 #include "nsICacheSession.h"
-#include "nsIStorageStream.h"
 #include "nsNetUtil.h"
-#include "nsAutoPtr.h"
 #include "prprf.h"
 #include "nsEscape.h"
+#include "nsIAsyncInputStream.h"
+#include "nsIAsyncOutputStream.h"
+#include "nsAboutProtocolUtils.h"
 #include <algorithm>
 
 #define HEXDUMP_MAX_ROWS 16
@@ -73,9 +72,9 @@ HexDump(uint32_t *state, const char *buf, int32_t n, nsCString &result)
 //-----------------------------------------------------------------------------
 // nsAboutCacheEntry::nsISupports
 
-NS_IMPL_ISUPPORTS2(nsAboutCacheEntry,
-                   nsIAboutModule,
-                   nsICacheMetaDataVisitor)
+NS_IMPL_ISUPPORTS(nsAboutCacheEntry,
+                  nsIAboutModule,
+                  nsICacheMetaDataVisitor)
 
 //-----------------------------------------------------------------------------
 // nsAboutCacheEntry::nsIAboutModule
@@ -139,7 +138,7 @@ nsAboutCacheEntry::GetContentStream(nsIURI *uri, nsIInputStream **result)
     rv = OpenCacheEntry(uri);
     if (NS_FAILED(rv)) return rv;
 
-    *result = inputStream.forget().get();
+    inputStream.forget(result);
     return NS_OK;
 }
 
@@ -174,21 +173,6 @@ nsAboutCacheEntry::OpenCacheEntry(nsIURI *uri)
 //-----------------------------------------------------------------------------
 // helper methods
 //-----------------------------------------------------------------------------
-
-static PRTime SecondsToPRTime(uint32_t t_sec)
-{
-    PRTime t_usec, usec_per_sec;
-    t_usec = t_sec;
-    usec_per_sec = PR_USEC_PER_SEC;
-    return t_usec *= usec_per_sec;
-}
-static void PrintTimeString(char *buf, uint32_t bufsize, uint32_t t_sec)
-{
-    PRExplodedTime et;
-    PRTime t_usec = SecondsToPRTime(t_sec);
-    PR_ExplodeTime(t_usec, PR_LocalTimeParameters, &et);
-    PR_FormatTime(buf, bufsize, "%Y-%m-%d %H:%M:%S", &et);
-}
 
 #define APPEND_ROW(label, value) \
     PR_BEGIN_MACRO \

@@ -5,15 +5,13 @@
 
 #include <Carbon/Carbon.h>
 #include "nsIPlatformCharset.h"
-#include "pratom.h"
 #include "nsCOMPtr.h"
 #include "nsIServiceManager.h"
-#include "nsLocaleCID.h"
 #include "nsReadableUtils.h"
 #include "nsPlatformCharset.h"
 #include "nsEncoderDecoderUtils.h"
 
-NS_IMPL_ISUPPORTS1(nsPlatformCharset, nsIPlatformCharset)
+NS_IMPL_ISUPPORTS(nsPlatformCharset, nsIPlatformCharset)
 
 nsPlatformCharset::nsPlatformCharset()
 {

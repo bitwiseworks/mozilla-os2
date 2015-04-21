@@ -1,5 +1,3 @@
-default-preferences pref(svg.text.css-frames.enabled,true)
-
 == simple.svg simple-ref.html
 == simple-2.svg simple.svg
 == simple-underline.svg simple-underline-ref.html
@@ -122,6 +120,16 @@ HTTP(../..) == simple-transform-rotate.svg simple-transform-rotate-ref.svg
 == textpath-after.svg textpath-after-ref.svg
 == textpath-after-anchor-end.svg textpath-after-anchor-end-ref.svg
 
+== textLength.svg textLength-ref.svg
+== textLength-2.svg textLength-2-ref.svg
+fuzzy-if(/^Windows\x20NT\x206\.[12]/.test(http.oscpu),4,15) == textLength-3.svg textLength-3-ref.svg
+== textLength-4.svg textLength-4-ref.svg
+== textLength-5.svg textLength-5-ref.svg
+== textLength-6.svg textLength-6-ref.svg
+
+# text-shadow
+== text-shadow.svg text-shadow-ref.svg
+
 # tests for ignoring various properties
 == ignore-border.svg ignore-prop-ref.svg
 == ignore-display.svg ignore-display-ref.svg
@@ -130,7 +138,6 @@ HTTP(../..) == simple-transform-rotate.svg simple-transform-rotate-ref.svg
 == ignore-position.svg ignore-position-ref.svg
 == ignore-margin.svg ignore-prop-ref.svg
 == ignore-padding.svg ignore-prop-ref.svg
-== ignore-text-shadow.svg ignore-prop-ref.svg
 == ignore-vertical-align.svg ignore-vertical-align-ref.svg
 == ignore-overflow-scroll.svg ignore-prop-ref.svg
 == ignore-text-align.svg ignore-prop-ref.svg
@@ -157,7 +164,8 @@ HTTP(../..) == simple-transform-rotate.svg simple-transform-rotate-ref.svg
 == dynamic-font-size-4.svg dynamic-font-size-4-ref.svg
 == dynamic-dominant-baseline.svg dynamic-dominant-baseline-ref.svg
 == dynamic-multiple-x.svg dynamic-multiple-x-ref.svg
-fuzzy-if(!d2d,14,2) == dynamic-non-scaling-stroke.svg dynamic-non-scaling-stroke-ref.svg
+fuzzy-if(!d2d,14,2) fuzzy-if(azureQuartz,1,6) == dynamic-non-scaling-stroke.svg dynamic-non-scaling-stroke-ref.svg #Bug 885316
+== dynamic-text-shadow.svg text-shadow-ref.svg
 
 # text and masks
 HTTP(../..) == mask-applied.svg mask-applied-ref.svg
@@ -176,6 +184,7 @@ fuzzy-if(cocoaWidget,1,6) == pattern-content.svg pattern-content-ref.svg
 HTTP(../..) == filter-applied.svg filter-applied-ref.svg
 
 # selection
+needs-focus == deselectAll.svg deselectAll-ref.svg
 needs-focus == selectSubString.svg selectSubString-ref.svg
 needs-focus == selectSubString-2.svg selectSubString-2-ref.svg
 needs-focus == selectSubString-3.svg selectSubString-3-ref.svg

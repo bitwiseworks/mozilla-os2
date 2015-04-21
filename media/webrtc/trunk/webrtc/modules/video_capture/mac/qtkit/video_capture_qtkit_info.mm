@@ -8,11 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "trace.h"
-#include "../../video_capture_config.h"
-#import "video_capture_qtkit_info_objc.h"
-
-#include "video_capture.h"
+#import "webrtc/modules/video_capture/mac/qtkit/video_capture_qtkit_info_objc.h"
+#include "webrtc/modules/video_capture/include/video_capture.h"
+#include "webrtc/modules/video_capture/video_capture_config.h"
+#include "webrtc/system_wrappers/interface/trace.h"
 
 class nsAutoreleasePool {
 public:
@@ -33,7 +32,7 @@ namespace webrtc
 namespace videocapturemodule
 {
 
-VideoCaptureMacQTKitInfo::VideoCaptureMacQTKitInfo(const WebRtc_Word32 id) :
+VideoCaptureMacQTKitInfo::VideoCaptureMacQTKitInfo(const int32_t id) :
     DeviceInfoImpl(id)
 {
     nsAutoreleasePool localPool;
@@ -46,27 +45,27 @@ VideoCaptureMacQTKitInfo::~VideoCaptureMacQTKitInfo()
     [_captureInfo release];
 }
 
-WebRtc_Word32 VideoCaptureMacQTKitInfo::Init()
+int32_t VideoCaptureMacQTKitInfo::Init()
 {
 
     return 0;
 }
 
-WebRtc_UWord32 VideoCaptureMacQTKitInfo::NumberOfDevices()
+uint32_t VideoCaptureMacQTKitInfo::NumberOfDevices()
 {
 
     nsAutoreleasePool localPool;
-    WebRtc_UWord32 captureDeviceCount =
+    uint32_t captureDeviceCount =
         [[_captureInfo getCaptureDeviceCount]intValue];
     return captureDeviceCount;
 
 }
 
-WebRtc_Word32 VideoCaptureMacQTKitInfo::GetDeviceName(
-    WebRtc_UWord32 deviceNumber, char* deviceNameUTF8,
-    WebRtc_UWord32 deviceNameLength, char* deviceUniqueIdUTF8,
-    WebRtc_UWord32 deviceUniqueIdUTF8Length, char* productUniqueIdUTF8,
-    WebRtc_UWord32 productUniqueIdUTF8Length)
+int32_t VideoCaptureMacQTKitInfo::GetDeviceName(
+    uint32_t deviceNumber, char* deviceNameUTF8,
+    uint32_t deviceNameLength, char* deviceUniqueIdUTF8,
+    uint32_t deviceUniqueIdUTF8Length, char* productUniqueIdUTF8,
+    uint32_t productUniqueIdUTF8Length)
 {
     nsAutoreleasePool localPool;
     int errNum = [[_captureInfo getDeviceNamesFromIndex:deviceNumber
@@ -78,7 +77,7 @@ WebRtc_Word32 VideoCaptureMacQTKitInfo::GetDeviceName(
     return errNum;
 }
 
-WebRtc_Word32 VideoCaptureMacQTKitInfo::NumberOfCapabilities(
+int32_t VideoCaptureMacQTKitInfo::NumberOfCapabilities(
     const char* deviceUniqueIdUTF8)
 {
     // Not implemented. Mac doesn't use discrete steps in capabilities, rather
@@ -90,9 +89,9 @@ WebRtc_Word32 VideoCaptureMacQTKitInfo::NumberOfCapabilities(
 }
 
 
-WebRtc_Word32 VideoCaptureMacQTKitInfo::GetCapability(
+int32_t VideoCaptureMacQTKitInfo::GetCapability(
     const char* deviceUniqueIdUTF8,
-    const WebRtc_UWord32 deviceCapabilityNumber,
+    const uint32_t deviceCapabilityNumber,
     VideoCaptureCapability& capability)
 {
     // Not implemented. Mac doesn't use discrete steps in capabilities, rather
@@ -104,7 +103,7 @@ WebRtc_Word32 VideoCaptureMacQTKitInfo::GetCapability(
 }
 
 
-WebRtc_Word32 VideoCaptureMacQTKitInfo::GetBestMatchedCapability(
+int32_t VideoCaptureMacQTKitInfo::GetBestMatchedCapability(
     const char*deviceUniqueIdUTF8,
     const VideoCaptureCapability& requested, VideoCaptureCapability& resulting)
 {
@@ -116,10 +115,10 @@ WebRtc_Word32 VideoCaptureMacQTKitInfo::GetBestMatchedCapability(
     return -1;
 }
 
-WebRtc_Word32 VideoCaptureMacQTKitInfo::DisplayCaptureSettingsDialogBox(
+int32_t VideoCaptureMacQTKitInfo::DisplayCaptureSettingsDialogBox(
     const char* deviceUniqueIdUTF8,
     const char* dialogTitleUTF8, void* parentWindow,
-    WebRtc_UWord32 positionX, WebRtc_UWord32 positionY)
+    uint32_t positionX, uint32_t positionY)
 {
 
     nsAutoreleasePool localPool;
@@ -130,7 +129,7 @@ WebRtc_Word32 VideoCaptureMacQTKitInfo::DisplayCaptureSettingsDialogBox(
              intValue];
 }
 
-WebRtc_Word32 VideoCaptureMacQTKitInfo::CreateCapabilityMap(
+int32_t VideoCaptureMacQTKitInfo::CreateCapabilityMap(
     const char* deviceUniqueIdUTF8)
 {
     // Not implemented. Mac doesn't use discrete steps in capabilities, rather

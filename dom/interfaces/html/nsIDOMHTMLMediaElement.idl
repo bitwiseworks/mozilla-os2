@@ -27,8 +27,8 @@ interface nsIDOMMediaStream;
 #endif
 %}
 
-[scriptable, uuid(21354ac9-7166-46a0-a3f0-a3135c3cc804)]
-interface nsIDOMHTMLMediaElement : nsIDOMHTMLElement
+[scriptable, uuid(1f9393e8-2df0-4072-87b9-c26999b09acc)]
+interface nsIDOMHTMLMediaElement : nsISupports
 {
   // error state
   readonly attribute nsIDOMMediaError error;
@@ -83,16 +83,6 @@ interface nsIDOMHTMLMediaElement : nsIDOMHTMLElement
   nsIDOMMediaStream mozCaptureStream();
   nsIDOMMediaStream mozCaptureStreamUntilEnded();
   readonly attribute boolean mozAudioCaptured;
-
-  // Mozilla extension: extra stream metadata information, used as part
-  // of MozAudioAvailable events and the mozWriteAudio() method.  The
-  // mozFrameBufferLength method allows for the size of the framebuffer
-  // used within MozAudioAvailable events to be changed.  The new size must
-  // be between 512 and 16384.  The default size, for a  media element with
-  // audio is (mozChannels * 1024).
-  readonly attribute unsigned long mozChannels;
-  readonly attribute unsigned long mozSampleRate;
-           attribute unsigned long mozFrameBufferLength;
 
   // Mozilla extension: return embedded metadata from the stream as a
   // JSObject with key:value pairs for each tag. This can be used by

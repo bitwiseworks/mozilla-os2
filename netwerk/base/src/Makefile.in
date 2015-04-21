@@ -4,48 +4,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-LIBRARY_NAME	= neckobase_s
-MSVC_ENABLE_PGO := 1
-LIBXUL_LIBRARY  = 1
-FAIL_ON_WARNINGS := 1
-
-LOCAL_INCLUDES	+= -I$(topsrcdir)/dom/base
-
-ifdef MOZ_PLATFORM_MAEMO
-ifdef MOZ_ENABLE_LIBCONIC
-	LOCAL_INCLUDES += -I$(srcdir)/../../system/maemo
-endif
 ifdef MOZ_ENABLE_QTNETWORK
-	LOCAL_INCLUDES += -I$(srcdir)/../../system/qt
 	OS_INCLUDES += $(MOZ_QT_CFLAGS)
 endif
-endif
 
-EXTRA_JS_MODULES = \
-		NetUtil.jsm \
-		$(NULL)
-
-# we don't want the shared lib, but we want to force the creation of a
-# static lib.
-FORCE_STATIC_LIB = 1
-
-include $(topsrcdir)/config/config.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
-
-ifeq ($(OS_TARGET),Android)
-# this works around a "branch out of range" error when compiling this file opt
-nsURLParsers.$(OBJ_SUFFIX): MOZ_OPTIMIZE_FLAGS=
-endif
-
-DEFINES += -DIMPL_NS_NET
 
 ifdef MOZ_ENABLE_LIBCONIC
 	OS_INCLUDES += $(GLIB_CFLAGS) $(LIBCONIC_CFLAGS)

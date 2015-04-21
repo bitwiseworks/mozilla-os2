@@ -8,16 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "testsupport/frame_writer.h"
+#include "webrtc/test/testsupport/frame_writer.h"
 
-#include "gtest/gtest.h"
-#include "testsupport/fileutils.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/test/testsupport/fileutils.h"
 
 namespace webrtc {
 namespace test {
 
 const std::string kOutputFilename = "temp_outputfile.tmp";
-const int kFrameLength = 1000;
+const size_t kFrameLength = 1000;
 
 class FrameWriterTest: public testing::Test {
  protected:
@@ -25,14 +25,14 @@ class FrameWriterTest: public testing::Test {
   virtual ~FrameWriterTest() {}
   void SetUp() {
     // Cleanup any previous output file.
-    std::remove(kOutputFilename.c_str());
+    remove(kOutputFilename.c_str());
     frame_writer_ = new FrameWriterImpl(kOutputFilename, kFrameLength);
     ASSERT_TRUE(frame_writer_->Init());
   }
   void TearDown() {
     delete frame_writer_;
     // Cleanup the temporary file.
-    std::remove(kOutputFilename.c_str());
+    remove(kOutputFilename.c_str());
   }
   FrameWriter* frame_writer_;
 };
@@ -44,18 +44,17 @@ TEST_F(FrameWriterTest, InitSuccess) {
 }
 
 TEST_F(FrameWriterTest, WriteFrame) {
-  WebRtc_UWord8 buffer[kFrameLength];
+  uint8_t buffer[kFrameLength];
   memset(buffer, 9, kFrameLength);  // Write lots of 9s to the buffer
   bool result = frame_writer_->WriteFrame(buffer);
   ASSERT_TRUE(result);  // success
   // Close the file and verify the size.
   frame_writer_->Close();
-  ASSERT_EQ(kFrameLength,
-            static_cast<int>(GetFileSize(kOutputFilename)));
+  ASSERT_EQ(kFrameLength, GetFileSize(kOutputFilename));
 }
 
 TEST_F(FrameWriterTest, WriteFrameUninitialized) {
-  WebRtc_UWord8 buffer[3];
+  uint8_t buffer[3];
   FrameWriterImpl frame_writer(kOutputFilename, kFrameLength);
   ASSERT_FALSE(frame_writer.WriteFrame(buffer));
 }

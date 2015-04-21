@@ -361,7 +361,7 @@ cairo_font_face_t *gfxOS2Font::CairoFontFace()
 
         // finally find a matching font
         FcResult fcRes;
-        FcPattern *fcMatch = FcFontMatch(NULL, fcPattern, &fcRes);
+        FcPattern *fcMatch = FcFontMatch(nullptr, fcPattern, &fcRes);
 
         // Most code that depends on FcFontMatch() assumes it won't fail,
         // then crashes when it does.  For now, at least, substitute the
@@ -375,7 +375,7 @@ cairo_font_face_t *gfxOS2Font::CairoFontFace()
 //#endif
             // FcPatternAddString() will free the existing FC_FAMILY string
             FcPatternAddString(fcPattern, FC_FAMILY, (FcChar8*)"SERIF");
-            fcMatch = FcFontMatch(NULL, fcPattern, &fcRes);
+            fcMatch = FcFontMatch(nullptr, fcPattern, &fcRes);
 //#ifdef DEBUG
             printf("Attempt to substitute default SERIF font %s\n",
                    fcMatch ? "succeeded" : "failed");
@@ -531,7 +531,7 @@ gfxOS2FontGroup::gfxOS2FontGroup(const nsAString& aFamilies,
     for (uint32_t i = 0; i < familyArray.Length(); i++) {
         nsRefPtr<gfxOS2Font> font = gfxOS2Font::GetOrMakeFont(familyArray[i], &mStyle);
         if (font) {
-            mFonts.AppendElement(FamilyFace(NULL, font));
+            mFonts.AppendElement(FamilyFace(nullptr, font));
         }
     }
 }
@@ -555,12 +555,12 @@ gfxFontGroup *gfxOS2FontGroup::Copy(const gfxFontStyle *aStyle)
  */
 static int32_t AppendDirectionalIndicatorUTF8(bool aIsRTL, nsACString& aString)
 {
-    static const PRUnichar overrides[2][2] = { { 0x202d, 0 }, { 0x202e, 0 }}; // LRO, RLO
+    static const char16_t overrides[2][2] = { { 0x202d, 0 }, { 0x202e, 0 }}; // LRO, RLO
     AppendUTF16toUTF8(overrides[aIsRTL], aString);
     return 3; // both overrides map to 3 bytes in UTF8
 }
 
-gfxTextRun *gfxOS2FontGroup::MakeTextRun(const PRUnichar* aString, uint32_t aLength,
+gfxTextRun *gfxOS2FontGroup::MakeTextRun(const char16_t* aString, uint32_t aLength,
                                          const Parameters* aParams, uint32_t aFlags)
 {
     if (aLength == 0) {
@@ -585,7 +585,7 @@ gfxTextRun *gfxOS2FontGroup::MakeTextRun(const PRUnichar* aString, uint32_t aLen
 
 #ifdef DEBUG_thebes_2
     NS_ConvertUTF8toUTF16 u16(utf8);
-    printf("gfxOS2FontGroup[%#x]::MakeTextRun(PRUnichar %s, %d, %#x, %d)\n",
+    printf("gfxOS2FontGroup[%#x]::MakeTextRun(char16_t %s, %d, %#x, %d)\n",
            (unsigned)this, NS_LossyConvertUTF16toASCII(u16).get(), aLength, (unsigned)aParams, aFlags);
 #endif
 
@@ -726,7 +726,7 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
             aTextRun->SetIsNewline(utf16Offset);
         } else if (ch == '\t') {
             aTextRun->SetIsTab(utf16Offset);
-        } else if (IsInvalidChar(PRUnichar(ch))) {
+        } else if (IsInvalidChar(char16_t(ch))) {
             // invalid chars are left as zero-width/invisible
         } else {
             // Try to get a glyph from all fonts available to us.
@@ -765,7 +765,7 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
                         gid = FT_Get_Char_Index(face, ch);
                         // likely to find more chars in this font, append it
                         // to the font list to find it quicker next time
-                        mFonts.AppendElement(FamilyFace(NULL, fontX));
+                        mFonts.AppendElement(FamilyFace(nullptr, fontX));
                         lastFont = FontListLength()-1;
                     }
                 }

@@ -8,13 +8,16 @@
 #include "nsXULAppAPI.h"
 #include "FrameworkView.h"
 #include "MetroApp.h"
+#include "ToastNotificationHandler.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/WindowsVersion.h"
 #include "nsIWindowsRegKey.h"
+#include "mozilla/widget/MetroD3DCheckHelper.h"
 
 #include <shldisp.h>
 #include <shellapi.h>
 #include <windows.ui.viewmanagement.h>
 #include <windows.ui.startscreen.h>
-#include <Wincrypt.h>
 
 using namespace ABI::Windows::Foundation;
 using namespace ABI::Windows::UI::StartScreen;
@@ -28,18 +31,14 @@ namespace widget {
 namespace winrt {
 extern ComPtr<MetroApp> sMetroApp;
 extern nsTArray<nsString>* sSettingsArray;
-extern ComPtr<FrameworkView> sFrameworkView;
 } } }
 
 namespace mozilla {
 namespace widget {
 
-static LPCWSTR sSyncEmailField = L"sync-e";
-static LPCWSTR sSyncPasswordField = L"sync-p";
-static LPCWSTR sSyncKeyField = L"sync-k";
-static LPCSTR sRegPath = "Software\\Mozilla\\Firefox";
+bool nsWinMetroUtils::sUpdatePending = false;
 
-NS_IMPL_ISUPPORTS1(nsWinMetroUtils, nsIWinMetroUtils)
+NS_IMPL_ISUPPORTS(nsWinMetroUtils, nsIWinMetroUtils)
 
 nsWinMetroUtils::nsWinMetroUtils()
 {
@@ -68,7 +67,7 @@ nsWinMetroUtils::PinTileAsync(const nsAString &aTileID,
                               const nsAString &aTileImage,
                               const nsAString &aSmallTileImage)
 {
-  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Desktop) {
+  if (XRE_GetWindowsEnvironment() != WindowsEnvironmentType_Metro) {
     NS_WARNING("PinTileAsync can't be called on the desktop.");
     return NS_ERROR_FAILURE;
   }
@@ -121,7 +120,7 @@ nsWinMetroUtils::PinTileAsync(const nsAString &aTileID,
 NS_IMETHODIMP
 nsWinMetroUtils::UnpinTileAsync(const nsAString &aTileID)
 {
-  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Desktop) {
+  if (XRE_GetWindowsEnvironment() != WindowsEnvironmentType_Metro) {
     NS_WARNING("UnpinTileAsync can't be called on the desktop.");
     return NS_ERROR_FAILURE;
   }
@@ -155,7 +154,7 @@ nsWinMetroUtils::UnpinTileAsync(const nsAString &aTileID)
 NS_IMETHODIMP
 nsWinMetroUtils::IsTilePinned(const nsAString &aTileID, bool *aIsPinned)
 {
-  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Desktop) {
+  if (XRE_GetWindowsEnvironment() != WindowsEnvironmentType_Metro) {
     NS_WARNING("IsTilePinned can't be called on the desktop.");
     return NS_ERROR_FAILURE;
   }
@@ -176,147 +175,6 @@ nsWinMetroUtils::IsTilePinned(const nsAString &aTileID, bool *aIsPinned)
 }
 
 /**
-  * Stores the sync info securely in Windows
-  *
-  * @param aEmail The sync account email
-  * @param aPassword The sync account password
-  * @param aKey The sync account key
-  */
-NS_IMETHODIMP
-nsWinMetroUtils::StoreSyncInfo(const nsAString &aEmail,
-                               const nsAString &aPassword,
-                               const nsAString &aKey)
-{
-  DATA_BLOB emailIn = {
-    (aEmail.Length() + 1) * 2,
-    (BYTE *)aEmail.BeginReading()},
-  passwordIn = {
-    (aPassword.Length() + 1) * 2,
-    (BYTE *)aPassword.BeginReading()},
-  keyIn = {
-    (aKey.Length() + 1) * 2,
-    (BYTE *)aKey.BeginReading()};
-  DATA_BLOB emailOut = { 0, nullptr }, passwordOut = {0, nullptr }, keyOut = { 0, nullptr };
-  bool succeeded = CryptProtectData(&emailIn, nullptr, nullptr, nullptr,
-                                    nullptr, 0, &emailOut) &&
-                   CryptProtectData(&passwordIn, nullptr, nullptr, nullptr,
-                                    nullptr, 0, &passwordOut) &&
-                   CryptProtectData(&keyIn, nullptr, nullptr, nullptr,
-                                    nullptr, 0, &keyOut);
-
-  if (succeeded) {
-    nsresult rv;
-    nsCOMPtr<nsIWindowsRegKey> regKey
-      (do_CreateInstance("@mozilla.org/windows-registry-key;1", &rv));
-    NS_ENSURE_SUCCESS(rv, rv);
-    regKey->Create(nsIWindowsRegKey::ROOT_KEY_CURRENT_USER,
-                  NS_ConvertUTF8toUTF16(sRegPath),
-                  nsIWindowsRegKey::ACCESS_SET_VALUE);
-
-    if (NS_FAILED(regKey->WriteBinaryValue(nsDependentString(sSyncEmailField),
-                                           nsAutoCString((const char *)emailOut.pbData,
-                                                         emailOut.cbData)))) {
-      succeeded = false;
-    }
-
-    if (succeeded &&
-        NS_FAILED(regKey->WriteBinaryValue(nsDependentString(sSyncPasswordField),
-                                           nsAutoCString((const char *)passwordOut.pbData,
-                                                         passwordOut.cbData)))) {
-      succeeded = false;
-    }
-
-    if (succeeded &&
-        NS_FAILED(regKey->WriteBinaryValue(nsDependentString(sSyncKeyField),
-                                           nsAutoCString((const char *)keyOut.pbData,
-                                                         keyOut.cbData)))) {
-      succeeded = false;
-    }
-    regKey->Close();
-  }
-
-  LocalFree(emailOut.pbData);
-  LocalFree(passwordOut.pbData);
-  LocalFree(keyOut.pbData);
-
-  return succeeded ? NS_OK : NS_ERROR_FAILURE;
-}
-
-/**
-  * Loads the sync info securely in Windows
-  *
-  * @param aEmail The sync account email
-  * @param aPassword The sync account password
-  * @param aKey The sync account key
-  */
-NS_IMETHODIMP
-nsWinMetroUtils::LoadSyncInfo(nsAString &aEmail, nsAString &aPassword,
-                              nsAString &aKey)
-{
-  nsresult rv;
-  nsCOMPtr<nsIWindowsRegKey> regKey
-    (do_CreateInstance("@mozilla.org/windows-registry-key;1", &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
-  regKey->Create(nsIWindowsRegKey::ROOT_KEY_CURRENT_USER,
-                 NS_ConvertUTF8toUTF16(sRegPath),
-                 nsIWindowsRegKey::ACCESS_QUERY_VALUE);
-
-  nsAutoCString email, password, key;
-  if (NS_FAILED(regKey->ReadBinaryValue(nsDependentString(sSyncEmailField), email)) ||
-      NS_FAILED(regKey->ReadBinaryValue(nsDependentString(sSyncPasswordField), password)) ||
-      NS_FAILED(regKey->ReadBinaryValue(nsDependentString(sSyncKeyField), key))) {
-    return NS_ERROR_FAILURE;
-  }
-  regKey->Close();
-
-  DATA_BLOB emailIn = { email.Length(), (BYTE*)email.BeginReading() },
-            passwordIn = { password.Length(), (BYTE*)password.BeginReading() },
-            keyIn = { key.Length(), (BYTE*)key.BeginReading() };
-  DATA_BLOB emailOut = { 0, nullptr }, passwordOut = { 0, nullptr }, keyOut = { 0, nullptr };
-  bool succeeded = CryptUnprotectData(&emailIn, nullptr, nullptr, nullptr,
-                                      nullptr, 0, &emailOut) &&
-                   CryptUnprotectData(&passwordIn, nullptr, nullptr, nullptr,
-                                      nullptr, 0, &passwordOut) &&
-                   CryptUnprotectData(&keyIn, nullptr, nullptr, nullptr,
-                                      nullptr, 0, &keyOut);
-  if (succeeded) {
-    aEmail = reinterpret_cast<wchar_t*>(emailOut.pbData);
-    aPassword = reinterpret_cast<wchar_t*>(passwordOut.pbData);
-    aKey = reinterpret_cast<wchar_t*>(keyOut.pbData);
-  }
-
-  LocalFree(emailOut.pbData);
-  LocalFree(passwordOut.pbData);
-  LocalFree(keyOut.pbData);
-
-  return succeeded ? NS_OK : NS_ERROR_FAILURE;
-}
-
-/**
-  * Clears the stored sync info if any.
-  */
-NS_IMETHODIMP
-nsWinMetroUtils::ClearSyncInfo()
-{
-  nsresult rv;
-  nsCOMPtr<nsIWindowsRegKey> regKey
-    (do_CreateInstance("@mozilla.org/windows-registry-key;1", &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
-  regKey->Create(nsIWindowsRegKey::ROOT_KEY_CURRENT_USER,
-                 NS_ConvertUTF8toUTF16(sRegPath),
-                 nsIWindowsRegKey::ACCESS_WRITE);
-  nsresult rv1 = regKey->RemoveValue(nsDependentString(sSyncEmailField));
-  nsresult rv2 = regKey->RemoveValue(nsDependentString(sSyncPasswordField));
-  nsresult rv3 = regKey->RemoveValue(nsDependentString(sSyncKeyField));
-  regKey->Close();
-
-  if (NS_FAILED(rv1) || NS_FAILED(rv2) || NS_FAILED(rv3)) {
-      return NS_ERROR_FAILURE;
-  }
-  return NS_OK;
-}
-
-/**
  * Launches the specified application with the specified arguments and
  * switches to Desktop mode if in metro mode.
 */
@@ -330,7 +188,7 @@ nsWinMetroUtils::LaunchInDesktop(const nsAString &aPath, const nsAString &aArgum
   // SEE_MASK_FLAG_LOG_USAGE is needed to change from immersive mode
   // to desktop.
   sinfo.fMask        = SEE_MASK_FLAG_LOG_USAGE;
-  sinfo.hwnd         = NULL;
+  sinfo.hwnd         = nullptr;
   sinfo.lpFile       = aPath.BeginReading();
   sinfo.lpParameters = aArguments.BeginReading();
   sinfo.lpVerb       = L"open";
@@ -339,40 +197,43 @@ nsWinMetroUtils::LaunchInDesktop(const nsAString &aPath, const nsAString &aArgum
   if (!ShellExecuteEx(&sinfo)) {
     return NS_ERROR_FAILURE;
   }
-
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsWinMetroUtils::GetSnappedState(int32_t *aSnappedState)
+nsWinMetroUtils::ShowNativeToast(const nsAString &aTitle,
+  const nsAString &aMessage, const nsAString &anImage,
+  const nsAString &aCookie, const nsAString& aAppId)
 {
-  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Desktop) {
-    NS_WARNING("GetSnappedState can't be called on the desktop.");
+  ToastNotificationHandler* notification_handler =
+      new ToastNotificationHandler;
+
+  HSTRING title = HStringReference(aTitle.BeginReading()).Get();
+  HSTRING msg = HStringReference(aMessage.BeginReading()).Get();
+
+  bool ret;
+  if (anImage.Length() > 0) {
+    HSTRING imagePath = HStringReference(anImage.BeginReading()).Get();
+    ret = notification_handler->DisplayNotification(title, msg, imagePath,
+                                                    aCookie,
+                                                    aAppId);
+  } else {
+    ret = notification_handler->DisplayTextNotification(title, msg, aCookie,
+                                                        aAppId);
+  }
+
+  if (!ret) {
+    delete notification_handler;
     return NS_ERROR_FAILURE;
   }
-  NS_ENSURE_ARG_POINTER(aSnappedState);
-  ApplicationViewState viewState;
-  AssertRetHRESULT(MetroUtils::GetViewState(viewState), NS_ERROR_UNEXPECTED);
-  *aSnappedState = (int32_t) viewState;
+
   return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWinMetroUtils::Unsnap()
-{
-  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Desktop) {
-    NS_WARNING("Unsnap can't be called on the desktop.");
-    return NS_ERROR_FAILURE;
-  }
-
-  HRESULT hr = MetroUtils::TryUnsnap();
-  return SUCCEEDED(hr) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
 nsWinMetroUtils::ShowSettingsFlyout()
 {
-  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Desktop) {
+  if (XRE_GetWindowsEnvironment() != WindowsEnvironmentType_Metro) {
     NS_WARNING("Settings flyout can't be shown on the desktop.");
     return NS_ERROR_FAILURE;
   }
@@ -390,69 +251,57 @@ nsWinMetroUtils::GetImmersive(bool *aImersive)
 }
 
 NS_IMETHODIMP
-nsWinMetroUtils::GetHandPreference(int32_t *aHandPreference)
+nsWinMetroUtils::GetActivationURI(nsAString &aActivationURI)
 {
-  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Desktop) {
-    *aHandPreference = nsIWinMetroUtils::handPreferenceRight;
-    return NS_OK;
+  if (XRE_GetWindowsEnvironment() != WindowsEnvironmentType_Metro) {
+    return NS_ERROR_FAILURE;
   }
-
-  ComPtr<IUISettings> uiSettings;
-  AssertRetHRESULT(ActivateGenericInstance(RuntimeClass_Windows_UI_ViewManagement_UISettings, uiSettings), NS_ERROR_UNEXPECTED);
-
-  HandPreference value;
-  uiSettings->get_HandPreference(&value);
-  if (value == HandPreference::HandPreference_LeftHanded)
-    *aHandPreference = nsIWinMetroUtils::handPreferenceLeft;
-  else
-    *aHandPreference = nsIWinMetroUtils::handPreferenceRight;
-
+  FrameworkView::GetActivationURI(aActivationURI);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsWinMetroUtils::GetActivationURI(nsAString &aActivationURI)
+nsWinMetroUtils::GetPreviousExecutionState(int32_t *out)
 {
-  if (!sFrameworkView) {
-    NS_WARNING("GetActivationURI used before view is created!");
-    return NS_OK;
+  if (XRE_GetWindowsEnvironment() != WindowsEnvironmentType_Metro) {
+    return NS_ERROR_FAILURE;
   }
-  sFrameworkView->GetActivationURI(aActivationURI);
+  *out = FrameworkView::GetPreviousExecutionState();
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsWinMetroUtils::GetKeyboardVisible(bool *aImersive)
 {
-  *aImersive = mozilla::widget::winrt::FrameworkView::IsKeyboardVisible();
+  *aImersive = FrameworkView::IsKeyboardVisible();
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsWinMetroUtils::GetKeyboardX(uint32_t *aX)
 {
-  *aX = (uint32_t)floor(mozilla::widget::winrt::FrameworkView::KeyboardVisibleRect().X);
+  *aX = static_cast<uint32_t>(floor(FrameworkView::KeyboardVisibleRect().X));
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsWinMetroUtils::GetKeyboardY(uint32_t *aY)
 {
-  *aY = (uint32_t)floor(mozilla::widget::winrt::FrameworkView::KeyboardVisibleRect().Y);
+  *aY = static_cast<uint32_t>(floor(FrameworkView::KeyboardVisibleRect().Y));
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsWinMetroUtils::GetKeyboardWidth(uint32_t *aWidth)
 {
-  *aWidth = (uint32_t)ceil(mozilla::widget::winrt::FrameworkView::KeyboardVisibleRect().Width);
+  *aWidth = static_cast<uint32_t>(ceil(FrameworkView::KeyboardVisibleRect().Width));
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsWinMetroUtils::GetKeyboardHeight(uint32_t *aHeight)
 {
-  *aHeight = (uint32_t)ceil(mozilla::widget::winrt::FrameworkView::KeyboardVisibleRect().Height);
+  *aHeight = static_cast<uint32_t>(ceil(FrameworkView::KeyboardVisibleRect().Height));
   return NS_OK;
 }
 
@@ -472,6 +321,80 @@ NS_IMETHODIMP
 nsWinMetroUtils::SwapMouseButton(bool aValue, bool *aOriginalValue)
 {
   *aOriginalValue = ::SwapMouseButton(aValue);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWinMetroUtils::GetUpdatePending(bool *aUpdatePending)
+{
+  *aUpdatePending = sUpdatePending;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWinMetroUtils::SetUpdatePending(bool aUpdatePending)
+{
+  sUpdatePending = aUpdatePending;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWinMetroUtils::GetForeground(bool* aForeground)
+{
+  *aForeground = (::GetActiveWindow() == ::GetForegroundWindow());
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWinMetroUtils::GetSupported(bool *aSupported)
+{
+  *aSupported = false;
+  if (!IsWin8OrLater()) {
+    return NS_OK;
+  }
+
+  // if last_used_feature_level_idx is set, we've previously created a
+  // d3d device that's compatible. See gfxEindowsPlatform for details.
+  if (Preferences::GetInt("gfx.direct3d.last_used_feature_level_idx", -1) != -1) {
+    *aSupported = true;
+    return NS_OK;
+  }
+
+  // if last_used_feature_level_idx isn't set, gfx hasn't attempted to create
+  // a device yet. This could be a case where d2d is pref'd off or blacklisted
+  // on desktop, or we tried to create a device and failed. This could also be
+  // a first run case where we haven't created an accelerated top level window
+  // yet.
+
+  NS_NAMED_LITERAL_STRING(metroRegValueName, "MetroD3DAvailable");
+  NS_NAMED_LITERAL_STRING(metroRegValuePath, "Software\\Mozilla\\Firefox");
+
+  // Check to see if the ceh launched us, it also does this check and caches
+  // a flag in the registry.
+  nsresult rv;
+  uint32_t value = 0;
+  nsCOMPtr<nsIWindowsRegKey> regKey =
+    do_CreateInstance("@mozilla.org/windows-registry-key;1", &rv);
+  if (NS_SUCCEEDED(rv)) {
+    rv = regKey->Open(nsIWindowsRegKey::ROOT_KEY_CURRENT_USER,
+                      metroRegValuePath,
+                      nsIWindowsRegKey::ACCESS_ALL);
+    if (NS_SUCCEEDED(rv)) {
+      rv = regKey->ReadIntValue(metroRegValueName, &value);
+      if (NS_SUCCEEDED(rv)) {
+        *aSupported = (bool)value;
+        return NS_OK;
+      }
+
+      // If all else fails, do the check here. This call is costly but
+      // we shouldn't hit this except in rare situations where the
+      // ceh never launched the browser that's running. 
+      value = D3DFeatureLevelCheck();
+      regKey->WriteIntValue(metroRegValueName, value);
+      *aSupported = (bool)value;
+      return NS_OK;
+    }
+  }
   return NS_OK;
 }
 

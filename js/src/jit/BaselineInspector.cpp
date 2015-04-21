@@ -4,11 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "BaselineIC.h"
-#include "BaselineInspector.h"
+#include "jit/BaselineInspector.h"
+
+#include "mozilla/DebugOnly.h"
+
+#include "jit/BaselineIC.h"
 
 using namespace js;
 using namespace js::jit;
+
+using mozilla::DebugOnly;
 
 bool
 SetElemICInspector::sawOOBDenseWrite() const
@@ -21,6 +26,12 @@ SetElemICInspector::sawOOBDenseWrite() const
         if (stub->isSetElem_DenseAdd())
             return true;
     }
+
+    // Check for a write hole bit on the SetElem_Fallback stub.
+    ICStub *stub = icEntry_->fallbackStub();
+    if (stub->isSetElem_Fallback())
+        return stub->toSetElem_Fallback()->hasArrayWriteHole();
+
     return false;
 }
 
@@ -55,7 +66,21 @@ SetElemICInspector::sawDenseWrite() const
 }
 
 bool
-BaselineInspector::maybeShapesForPropertyOp(jsbytecode *pc, Vector<Shape *> &shapes)
+SetElemICInspector::sawTypedArrayWrite() const
+{
+    if (!icEntry_)
+        return false;
+
+    // Check for a SetElem_TypedArray stub.
+    for (ICStub *stub = icEntry_->firstStub(); stub; stub = stub->next()) {
+        if (stub->isSetElem_TypedArray())
+            return true;
+    }
+    return false;
+}
+
+bool
+BaselineInspector::maybeShapesForPropertyOp(jsbytecode *pc, ShapeVector &shapes)
 {
     // Return a list of shapes seen by the baseline IC for the current op.
     // An empty list indicates no shapes are known, or there was an uncacheable
@@ -115,7 +140,7 @@ ICStub *
 BaselineInspector::monomorphicStub(jsbytecode *pc)
 {
     if (!hasBaselineScript())
-        return NULL;
+        return nullptr;
 
     const ICEntry &entry = icEntryFromPC(pc);
 
@@ -123,7 +148,7 @@ BaselineInspector::monomorphicStub(jsbytecode *pc)
     ICStub *next = stub->next();
 
     if (!next || !next->isFallback())
-        return NULL;
+        return nullptr;
 
     return stub;
 }
@@ -138,7 +163,7 @@ BaselineInspector::dimorphicStub(jsbytecode *pc, ICStub **pfirst, ICStub **pseco
 
     ICStub *stub = entry.firstStub();
     ICStub *next = stub->next();
-    ICStub *after = next ? next->next() : NULL;
+    ICStub *after = next ? next->next() : nullptr;
 
     if (!after || !after->isFallback())
         return false;
@@ -197,12 +222,24 @@ CanUseInt32Compare(ICStub::Kind kind)
 MCompare::CompareType
 BaselineInspector::expectedCompareType(jsbytecode *pc)
 {
-    ICStub *first = monomorphicStub(pc), *second = NULL;
+    ICStub *first = monomorphicStub(pc), *second = nullptr;
     if (!first && !dimorphicStub(pc, &first, &second))
         return MCompare::Compare_Unknown;
 
-    if (CanUseInt32Compare(first->kind()) && (!second || CanUseInt32Compare(second->kind())))
+    if (CanUseInt32Compare(first->kind()) && (!second || CanUseInt32Compare(second->kind()))) {
+        ICCompare_Int32WithBoolean *coerce =
+            first->isCompare_Int32WithBoolean()
+            ? first->toCompare_Int32WithBoolean()
+            : ((second && second->isCompare_Int32WithBoolean())
+               ? second->toCompare_Int32WithBoolean()
+               : nullptr);
+        if (coerce) {
+            return coerce->lhsIsInt32()
+                   ? MCompare::Compare_Int32MaybeCoerceRHS
+                   : MCompare::Compare_Int32MaybeCoerceLHS;
+        }
         return MCompare::Compare_Int32;
+    }
 
     if (CanUseDoubleCompare(first->kind()) && (!second || CanUseDoubleCompare(second->kind()))) {
         ICCompare_NumberWithUndefined *coerce =
@@ -210,7 +247,7 @@ BaselineInspector::expectedCompareType(jsbytecode *pc)
             ? first->toCompare_NumberWithUndefined()
             : (second && second->isCompare_NumberWithUndefined())
               ? second->toCompare_NumberWithUndefined()
-              : NULL;
+              : nullptr;
         if (coerce) {
             return coerce->lhsIsUndefined()
                    ? MCompare::Compare_DoubleMaybeCoerceLHS
@@ -227,7 +264,7 @@ TryToSpecializeBinaryArithOp(ICStub **stubs,
                              uint32_t nstubs,
                              MIRType *result)
 {
-    bool sawInt32 = false;
+    DebugOnly<bool> sawInt32 = false;
     bool sawDouble = false;
     bool sawOther = false;
 
@@ -267,8 +304,19 @@ TryToSpecializeBinaryArithOp(ICStub **stubs,
 MIRType
 BaselineInspector::expectedBinaryArithSpecialization(jsbytecode *pc)
 {
+    if (!hasBaselineScript())
+        return MIRType_None;
+
     MIRType result;
     ICStub *stubs[2];
+
+    const ICEntry &entry = icEntryFromPC(pc);
+    ICStub *stub = entry.fallbackStub();
+    if (stub->isBinaryArith_Fallback() &&
+        stub->toBinaryArith_Fallback()->hadUnoptimizableOperands())
+    {
+        return MIRType_None;
+    }
 
     stubs[0] = monomorphicStub(pc);
     if (stubs[0]) {
@@ -327,6 +375,20 @@ BaselineInspector::hasSeenAccessedGetter(jsbytecode *pc)
 }
 
 bool
+BaselineInspector::hasSeenNonStringIterNext(jsbytecode *pc)
+{
+    JS_ASSERT(JSOp(*pc) == JSOP_ITERNEXT);
+
+    if (!hasBaselineScript())
+        return false;
+
+    const ICEntry &entry = icEntryFromPC(pc);
+    ICStub *stub = entry.fallbackStub();
+
+    return stub->toIteratorNext_Fallback()->hasNonStringResult();
+}
+
+bool
 BaselineInspector::hasSeenDoubleResult(jsbytecode *pc)
 {
     if (!hasBaselineScript())
@@ -343,4 +405,109 @@ BaselineInspector::hasSeenDoubleResult(jsbytecode *pc)
         return stub->toBinaryArith_Fallback()->sawDoubleResult();
 
     return false;
+}
+
+JSObject *
+BaselineInspector::getTemplateObject(jsbytecode *pc)
+{
+    if (!hasBaselineScript())
+        return nullptr;
+
+    const ICEntry &entry = icEntryFromPC(pc);
+    for (ICStub *stub = entry.firstStub(); stub; stub = stub->next()) {
+        switch (stub->kind()) {
+          case ICStub::NewArray_Fallback:
+            return stub->toNewArray_Fallback()->templateObject();
+          case ICStub::NewObject_Fallback:
+            return stub->toNewObject_Fallback()->templateObject();
+          case ICStub::Rest_Fallback:
+            return stub->toRest_Fallback()->templateObject();
+          case ICStub::Call_Scripted:
+            if (JSObject *obj = stub->toCall_Scripted()->templateObject())
+                return obj;
+            break;
+          default:
+            break;
+        }
+    }
+
+    return nullptr;
+}
+
+JSObject *
+BaselineInspector::getTemplateObjectForNative(jsbytecode *pc, Native native)
+{
+    if (!hasBaselineScript())
+        return nullptr;
+
+    const ICEntry &entry = icEntryFromPC(pc);
+    for (ICStub *stub = entry.firstStub(); stub; stub = stub->next()) {
+        if (stub->isCall_Native() && stub->toCall_Native()->callee()->native() == native)
+            return stub->toCall_Native()->templateObject();
+    }
+
+    return nullptr;
+}
+
+DeclEnvObject *
+BaselineInspector::templateDeclEnvObject()
+{
+    if (!hasBaselineScript())
+        return nullptr;
+
+    JSObject *res = &templateCallObject()->as<ScopeObject>().enclosingScope();
+    JS_ASSERT(res);
+
+    return &res->as<DeclEnvObject>();
+}
+
+CallObject *
+BaselineInspector::templateCallObject()
+{
+    if (!hasBaselineScript())
+        return nullptr;
+
+    JSObject *res = baselineScript()->templateScope();
+    JS_ASSERT(res);
+
+    return &res->as<CallObject>();
+}
+
+JSObject *
+BaselineInspector::commonGetPropFunction(jsbytecode *pc, Shape **lastProperty, JSFunction **commonGetter)
+{
+    if (!hasBaselineScript())
+        return nullptr;
+
+    const ICEntry &entry = icEntryFromPC(pc);
+    for (ICStub *stub = entry.firstStub(); stub; stub = stub->next()) {
+        if (stub->isGetProp_CallScripted()  ||
+            stub->isGetProp_CallNative()    ||
+            stub->isGetProp_CallNativePrototype())
+        {
+            ICGetPropCallGetter *nstub = static_cast<ICGetPropCallGetter *>(stub);
+            *lastProperty = nstub->holderShape();
+            *commonGetter = nstub->getter();
+            return nstub->holder();
+        }
+    }
+    return nullptr;
+}
+
+JSObject *
+BaselineInspector::commonSetPropFunction(jsbytecode *pc, Shape **lastProperty, JSFunction **commonSetter)
+{
+    if (!hasBaselineScript())
+        return nullptr;
+
+    const ICEntry &entry = icEntryFromPC(pc);
+    for (ICStub *stub = entry.firstStub(); stub; stub = stub->next()) {
+        if (stub->isSetProp_CallScripted() || stub->isSetProp_CallNative()) {
+            ICSetPropCallSetter *nstub = static_cast<ICSetPropCallSetter *>(stub);
+            *lastProperty = nstub->holderShape();
+            *commonSetter = nstub->setter();
+            return nstub->holder();
+        }
+    }
+    return nullptr;
 }

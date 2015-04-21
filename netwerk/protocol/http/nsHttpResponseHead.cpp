@@ -9,10 +9,12 @@
 
 #include "nsHttpResponseHead.h"
 #include "nsPrintfCString.h"
-#include "prprf.h"
 #include "prtime.h"
-#include "nsCRT.h"
+#include "nsURLHelper.h"
 #include <algorithm>
+
+namespace mozilla {
+namespace net {
 
 //-----------------------------------------------------------------------------
 // nsHttpResponseHead <public>
@@ -53,7 +55,9 @@ nsHttpResponseHead::Flatten(nsACString &buf, bool pruneTransients)
         return;
 
     buf.AppendLiteral("HTTP/");
-    if (mVersion == NS_HTTP_VERSION_1_1)
+    if (mVersion == NS_HTTP_VERSION_2_0)
+        buf.AppendLiteral("2.0 ");
+    else if (mVersion == NS_HTTP_VERSION_1_1)
         buf.AppendLiteral("1.1 ");
     else
         buf.AppendLiteral("1.0 ");
@@ -131,6 +135,151 @@ nsHttpResponseHead::Parse(char *block)
 }
 
 void
+nsHttpResponseHead::AssignDefaultStatusText()
+{
+    LOG(("response status line needs default reason phrase\n"));
+
+    // if a http response doesn't contain a reason phrase, put one in based
+    // on the status code. The reason phrase is totally meaningless so its
+    // ok to have a default catch all here - but this makes debuggers and addons
+    // a little saner to use if we don't map things to "404 OK" or other nonsense.
+    // In particular, HTTP/2 does not use reason phrases at all so they need to
+    // always be injected.
+
+    switch (mStatus) {
+        // start with the most common
+    case 200:
+        mStatusText.AssignLiteral("OK");
+        break;
+    case 404:
+        mStatusText.AssignLiteral("Not Found");
+        break;
+    case 301:
+        mStatusText.AssignLiteral("Moved Permanently");
+        break;
+    case 304:
+        mStatusText.AssignLiteral("Not Modified");
+        break;
+    case 307:
+        mStatusText.AssignLiteral("Temporary Redirect");
+        break;
+    case 500:
+        mStatusText.AssignLiteral("Internal Server Error");
+        break;
+
+        // also well known
+    case 100:
+        mStatusText.AssignLiteral("Continue");
+        break;
+    case 101:
+        mStatusText.AssignLiteral("Switching Protocols");
+        break;
+    case 201:
+        mStatusText.AssignLiteral("Created");
+        break;
+    case 202:
+        mStatusText.AssignLiteral("Accepted");
+        break;
+    case 203:
+        mStatusText.AssignLiteral("Non Authoritative");
+        break;
+    case 204:
+        mStatusText.AssignLiteral("No Content");
+        break;
+    case 205:
+        mStatusText.AssignLiteral("Reset Content");
+        break;
+    case 206:
+        mStatusText.AssignLiteral("Partial Content");
+        break;
+    case 300:
+        mStatusText.AssignLiteral("Multiple Choices");
+        break;
+    case 302:
+        mStatusText.AssignLiteral("Found");
+        break;
+    case 303:
+        mStatusText.AssignLiteral("See Other");
+        break;
+    case 305:
+        mStatusText.AssignLiteral("Use Proxy");
+        break;
+    case 308:
+        mStatusText.AssignLiteral("Permanent Redirect");
+        break;
+    case 400:
+        mStatusText.AssignLiteral("Bad Request");
+        break;
+    case 401:
+        mStatusText.AssignLiteral("Unauthorized");
+        break;
+    case 402:
+        mStatusText.AssignLiteral("Payment Required");
+        break;
+    case 403:
+        mStatusText.AssignLiteral("Forbidden");
+        break;
+    case 405:
+        mStatusText.AssignLiteral("Method Not Allowed");
+        break;
+    case 406:
+        mStatusText.AssignLiteral("Not Acceptable");
+        break;
+    case 407:
+        mStatusText.AssignLiteral("Proxy Authentication Required");
+        break;
+    case 408:
+        mStatusText.AssignLiteral("Request Timeout");
+        break;
+    case 409:
+        mStatusText.AssignLiteral("Conflict");
+        break;
+    case 410:
+        mStatusText.AssignLiteral("Gone");
+        break;
+    case 411:
+        mStatusText.AssignLiteral("Length Required");
+        break;
+    case 412:
+        mStatusText.AssignLiteral("Precondition Failed");
+        break;
+    case 413:
+        mStatusText.AssignLiteral("Request Entity Too Large");
+        break;
+    case 414:
+        mStatusText.AssignLiteral("Request URI Too Long");
+        break;
+    case 415:
+        mStatusText.AssignLiteral("Unsupported Media Type");
+        break;
+    case 416:
+        mStatusText.AssignLiteral("Requested Range Not Satisfiable");
+        break;
+    case 417:
+        mStatusText.AssignLiteral("Expectation Failed");
+        break;
+    case 501:
+        mStatusText.AssignLiteral("Not Implemented");
+        break;
+    case 502:
+        mStatusText.AssignLiteral("Bad Gateway");
+        break;
+    case 503:
+        mStatusText.AssignLiteral("Service Unavailable");
+        break;
+    case 504:
+        mStatusText.AssignLiteral("Gateway Timeout");
+        break;
+    case 505:
+        mStatusText.AssignLiteral("HTTP Version Unsupported");
+        break;
+    default:
+        mStatusText.AssignLiteral("No Reason Phrase");
+        break;
+    }
+}
+
+void
 nsHttpResponseHead::ParseStatusLine(const char *line)
 {
     //
@@ -142,7 +291,7 @@ nsHttpResponseHead::ParseStatusLine(const char *line)
 
     if ((mVersion == NS_HTTP_VERSION_0_9) || !(line = PL_strchr(line, ' '))) {
         mStatus = 200;
-        mStatusText.AssignLiteral("OK");
+        AssignDefaultStatusText();
     }
     else {
         // Status-Code
@@ -154,8 +303,7 @@ nsHttpResponseHead::ParseStatusLine(const char *line)
 
         // Reason-Phrase is whatever is remaining of the line
         if (!(line = PL_strchr(line, ' '))) {
-            LOG(("mal-formed response status line; assuming statusText = 'OK'\n"));
-            mStatusText.AssignLiteral("OK");
+            AssignDefaultStatusText();
         }
         else
             mStatusText = nsDependentCString(++line);
@@ -511,14 +659,22 @@ nsHttpResponseHead::GetMaxAgeValue(uint32_t *result) const
     if (!val)
         return NS_ERROR_NOT_AVAILABLE;
 
-    const char *p = PL_strcasestr(val, "max-age=");
+    const char *p = nsHttp::FindToken(val, "max-age", HTTP_HEADER_VALUE_SEPS "=");
     if (!p)
         return NS_ERROR_NOT_AVAILABLE;
+    p += 7;
+    while (*p == ' ' || *p == '\t')
+        ++p;
+    if (*p != '=')
+        return NS_ERROR_NOT_AVAILABLE;
+    ++p;
+    while (*p == ' ' || *p == '\t')
+        ++p;
 
-    int maxAgeValue = atoi(p + 8);
+    int maxAgeValue = atoi(p);
     if (maxAgeValue < 0)
         maxAgeValue = 0;
-    *result = uint32_t(maxAgeValue);
+    *result = static_cast<uint32_t>(maxAgeValue);
     return NS_OK;
 }
 
@@ -612,7 +768,9 @@ nsHttpResponseHead::ParseVersion(const char *str)
     int major = atoi(str + 1);
     int minor = atoi(p);
 
-    if ((major > 1) || ((major == 1) && (minor >= 1)))
+    if ((major > 2) || ((major == 2) && (minor >= 0)))
+        mVersion = NS_HTTP_VERSION_2_0;
+    else if ((major == 1) && (minor >= 1))
         // at least HTTP/1.1
         mVersion = NS_HTTP_VERSION_1_1;
     else
@@ -657,3 +815,6 @@ nsHttpResponseHead::ParsePragma(const char *val)
     if (nsHttp::FindToken(val, "no-cache", HTTP_HEADER_VALUE_SEPS))
         mPragmaNoCache = true;
 }
+
+} // namespace mozilla::net
+} // namespace mozilla

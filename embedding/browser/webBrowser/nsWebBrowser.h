@@ -18,7 +18,6 @@
 #include "nsIBaseWindow.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
-#include "nsIDocShellTreeNode.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIScrollable.h"
@@ -68,9 +67,9 @@ public:
     nsIID mID;
 };
 
-//  {F1EAC761-87E9-11d3-AF80-00A024FFC08C} - 
+//  {cda5863a-aa9c-411e-be49-ea0d525ab4b5} - 
 #define NS_WEBBROWSER_CID \
-{0xf1eac761, 0x87e9, 0x11d3, { 0xaf, 0x80, 0x00, 0xa0, 0x24, 0xff, 0xc0, 0x8c }}
+{0xcda5863a, 0xaa9c, 0x411e, { 0xbe, 0x49, 0xea, 0x0d, 0x52, 0x5a, 0xb4, 0xb5 }}
 
 
 class nsWebBrowser : public nsIWebBrowser,
@@ -96,7 +95,6 @@ public:
 
     NS_DECL_NSIBASEWINDOW
     NS_DECL_NSIDOCSHELLTREEITEM
-    NS_DECL_NSIDOCSHELLTREENODE
     NS_DECL_NSIINTERFACEREQUESTOR
     NS_DECL_NSISCROLLABLE   
     NS_DECL_NSITEXTSCROLL

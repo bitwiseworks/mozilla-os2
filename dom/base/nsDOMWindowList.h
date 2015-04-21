@@ -6,12 +6,10 @@
 #define nsDOMWindowList_h___
 
 #include "nsCOMPtr.h"
-#include "nsISupports.h"
 #include "nsIDOMWindowCollection.h"
-#include "nsString.h"
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
+#include "nsIDocShell.h"
 
-class nsIDocShellTreeNode;
 class nsIDocShell;
 class nsIDOMWindow;
 
@@ -29,12 +27,21 @@ public:
 
   //local methods
   NS_IMETHOD SetDocShell(nsIDocShell* aDocShell);
+  already_AddRefed<nsIDocShellTreeItem> GetDocShellTreeItemAt(uint32_t aIndex)
+  {
+    EnsureFresh();
+    nsCOMPtr<nsIDocShellTreeItem> item;
+    if (mDocShellNode) {
+      mDocShellNode->GetChildAt(aIndex, getter_AddRefs(item));
+    }
+    return item.forget();
+  }
 
 protected:
   // Note: this function may flush and cause mDocShellNode to become null.
   void EnsureFresh();
 
-  nsIDocShellTreeNode* mDocShellNode; //Weak Reference
+  nsIDocShell* mDocShellNode; //Weak Reference
 };
 
 #endif // nsDOMWindowList_h___

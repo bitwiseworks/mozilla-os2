@@ -14,7 +14,7 @@ public:
     // constructor for an os2Image surface -
     // the surface is only used by Cairo and not by PM
     gfxOS2Surface(const gfxIntSize& aSize,
-                  gfxASurface::gfxImageFormat aFormat);
+                  gfxImageFormat aFormat);
 
     // constructor for an os2Window surface
     gfxOS2Surface(HWND aWnd);

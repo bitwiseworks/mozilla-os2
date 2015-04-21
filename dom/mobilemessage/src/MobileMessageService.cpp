@@ -7,13 +7,12 @@
 #include "MobileMessageThread.h"
 #include "MobileMessageService.h"
 #include "SmsSegmentInfo.h"
-#include "jsapi.h"
 
 namespace mozilla {
 namespace dom {
 namespace mobilemessage {
 
-NS_IMPL_ISUPPORTS1(MobileMessageService, nsIMobileMessageService)
+NS_IMPL_ISUPPORTS(MobileMessageService, nsIMobileMessageService)
 
 /* static */ StaticRefPtr<MobileMessageService> MobileMessageService::sSingleton;
 
@@ -32,19 +31,23 @@ MobileMessageService::GetInstance()
 NS_IMETHODIMP
 MobileMessageService::CreateSmsMessage(int32_t aId,
                                        uint64_t aThreadId,
+                                       const nsAString& aIccId,
                                        const nsAString& aDelivery,
                                        const nsAString& aDeliveryStatus,
                                        const nsAString& aSender,
                                        const nsAString& aReceiver,
                                        const nsAString& aBody,
                                        const nsAString& aMessageClass,
-                                       const JS::Value& aTimestamp,
-                                       const bool aRead,
+                                       uint64_t aTimestamp,
+                                       uint64_t aSentTimestamp,
+                                       uint64_t aDeliveryTimestamp,
+                                       bool aRead,
                                        JSContext* aCx,
                                        nsIDOMMozSmsMessage** aMessage)
 {
   return SmsMessage::Create(aId,
                             aThreadId,
+                            aIccId,
                             aDelivery,
                             aDeliveryStatus,
                             aSender,
@@ -52,39 +55,47 @@ MobileMessageService::CreateSmsMessage(int32_t aId,
                             aBody,
                             aMessageClass,
                             aTimestamp,
+                            aSentTimestamp,
+                            aDeliveryTimestamp,
                             aRead,
                             aCx,
                             aMessage);
 }
 
 NS_IMETHODIMP
-MobileMessageService::CreateMmsMessage(int32_t               aId,
-                                       uint64_t              aThreadId,
-                                       const nsAString&      aDelivery,
-                                       const JS::Value&      aDeliveryStatus,
-                                       const nsAString&      aSender,
-                                       const JS::Value&      aReceivers,
-                                       const JS::Value&      aTimestamp,
-                                       bool                  aRead,
-                                       const nsAString&      aSubject,
-                                       const nsAString&      aSmil,
-                                       const JS::Value&      aAttachments,
-                                       const JS::Value&      aExpiryDate,
-                                       JSContext*            aCx,
+MobileMessageService::CreateMmsMessage(int32_t aId,
+                                       uint64_t aThreadId,
+                                       const nsAString& aIccId,
+                                       const nsAString& aDelivery,
+                                       JS::Handle<JS::Value> aDeliveryInfo,
+                                       const nsAString& aSender,
+                                       JS::Handle<JS::Value> aReceivers,
+                                       uint64_t aTimestamp,
+                                       uint64_t aSentTimestamp,
+                                       bool aRead,
+                                       const nsAString& aSubject,
+                                       const nsAString& aSmil,
+                                       JS::Handle<JS::Value> aAttachments,
+                                       uint64_t aExpiryDate,
+                                       bool aReadReportRequested,
+                                       JSContext* aCx,
                                        nsIDOMMozMmsMessage** aMessage)
 {
   return MmsMessage::Create(aId,
                             aThreadId,
+                            aIccId,
                             aDelivery,
-                            aDeliveryStatus,
+                            aDeliveryInfo,
                             aSender,
                             aReceivers,
                             aTimestamp,
+                            aSentTimestamp,
                             aRead,
                             aSubject,
                             aSmil,
                             aAttachments,
                             aExpiryDate,
+                            aReadReportRequested,
                             aCx,
                             aMessage);
 }
@@ -103,8 +114,9 @@ MobileMessageService::CreateSmsSegmentInfo(int32_t aSegments,
 
 NS_IMETHODIMP
 MobileMessageService::CreateThread(uint64_t aId,
-                                   const JS::Value& aParticipants,
-                                   const JS::Value& aTimestamp,
+                                   JS::Handle<JS::Value> aParticipants,
+                                   uint64_t aTimestamp,
+                                   const nsAString& aLastMessageSubject,
                                    const nsAString& aBody,
                                    uint64_t aUnreadCount,
                                    const nsAString& aLastMessageType,
@@ -114,6 +126,7 @@ MobileMessageService::CreateThread(uint64_t aId,
   return MobileMessageThread::Create(aId,
                                      aParticipants,
                                      aTimestamp,
+                                     aLastMessageSubject,
                                      aBody,
                                      aUnreadCount,
                                      aLastMessageType,

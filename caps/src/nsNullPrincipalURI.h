@@ -16,6 +16,7 @@
 #include "nsAutoPtr.h"
 #include "nsString.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/MemoryReporting.h"
 
 // {51fcd543-3b52-41f7-b91b-6b54102236e6}
 #define NS_NULLPRINCIPALURI_IMPLEMENTATION_CID \
@@ -26,12 +27,12 @@ class nsNullPrincipalURI MOZ_FINAL : public nsIURI
                                    , public nsISizeOf
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIURI
 
   // nsISizeOf
-  virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
-  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   nsNullPrincipalURI(const nsCString &aSpec);
 

@@ -6,7 +6,6 @@
 #include "mozilla/dom/HTMLHeadingElement.h"
 #include "mozilla/dom/HTMLHeadingElementBinding.h"
 
-#include "mozilla/Util.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsMappedAttributes.h"
@@ -22,24 +21,15 @@ HTMLHeadingElement::~HTMLHeadingElement()
 {
 }
 
-NS_IMPL_ADDREF_INHERITED(HTMLHeadingElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLHeadingElement, Element)
-
-// QueryInterface implementation for HTMLHeadingElement
-NS_INTERFACE_TABLE_HEAD(HTMLHeadingElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLHeadingElement,
-                                nsIDOMHTMLHeadingElement)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
-
+NS_IMPL_ISUPPORTS_INHERITED(HTMLHeadingElement, nsGenericHTMLElement,
+                            nsIDOMHTMLHeadingElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLHeadingElement)
 
 JSObject*
-HTMLHeadingElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+HTMLHeadingElement::WrapNode(JSContext *aCx)
 {
-  return HTMLHeadingElementBinding::Wrap(aCx, aScope, this);
+  return HTMLHeadingElementBinding::Wrap(aCx, this);
 }
 
 NS_IMPL_STRING_ATTR(HTMLHeadingElement, Align, align)
@@ -59,8 +49,9 @@ HTMLHeadingElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-static void
-MapAttributesIntoRule(const nsMappedAttributes* aAttributes, nsRuleData* aData)
+void
+HTMLHeadingElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                          nsRuleData* aData)
 {
   nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aData);
   nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);

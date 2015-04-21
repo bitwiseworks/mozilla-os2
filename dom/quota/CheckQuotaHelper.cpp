@@ -21,8 +21,6 @@
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 
-#define PERMISSION_INDEXEDDB_UNLIMITED "indexedDB-unlimited"
-
 #define TOPIC_QUOTA_PROMPT "indexedDB-quota-prompt"
 #define TOPIC_QUOTA_RESPONSE "indexedDB-quota-response"
 #define TOPIC_QUOTA_CANCEL "indexedDB-quota-cancel"
@@ -120,9 +118,8 @@ CheckQuotaHelper::GetQuotaPermission(nsIPrincipal* aPrincipal)
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(aPrincipal, "Null principal!");
 
-  if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
-    return nsIPermissionManager::ALLOW_ACTION;
-  }
+  NS_ASSERTION(!nsContentUtils::IsSystemPrincipal(aPrincipal),
+               "Chrome windows shouldn't track quota!");
 
   nsCOMPtr<nsIPermissionManager> pm =
     do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
@@ -130,16 +127,16 @@ CheckQuotaHelper::GetQuotaPermission(nsIPrincipal* aPrincipal)
 
   uint32_t permission;
   nsresult rv = pm->TestPermissionFromPrincipal(aPrincipal,
-                                                PERMISSION_INDEXEDDB_UNLIMITED,
+                                                PERMISSION_STORAGE_UNLIMITED,
                                                 &permission);
   NS_ENSURE_SUCCESS(rv, nsIPermissionManager::DENY_ACTION);
 
   return permission;
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS3(CheckQuotaHelper, nsIRunnable,
-                                                nsIInterfaceRequestor,
-                                                nsIObserver)
+NS_IMPL_ISUPPORTS(CheckQuotaHelper, nsIRunnable,
+                  nsIInterfaceRequestor,
+                  nsIObserver)
 
 NS_IMETHODIMP
 CheckQuotaHelper::Run()
@@ -168,7 +165,7 @@ CheckQuotaHelper::Run()
         NS_ENSURE_STATE(permissionManager);
 
         rv = permissionManager->AddFromPrincipal(sop->GetPrincipal(),
-                                                 PERMISSION_INDEXEDDB_UNLIMITED,
+                                                 PERMISSION_STORAGE_UNLIMITED,
                                                  mPromptResult,
                                                  nsIPermissionManager::EXPIRE_NEVER, 0);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -200,7 +197,7 @@ CheckQuotaHelper::Run()
 
   NS_ASSERTION(mWaiting, "Huh?!");
 
-    // This should never be used again.
+  // This should never be used again.
   mWindow = nullptr;
 
   mWaiting = false;
@@ -230,7 +227,7 @@ CheckQuotaHelper::GetInterface(const nsIID& aIID,
 NS_IMETHODIMP
 CheckQuotaHelper::Observe(nsISupports* aSubject,
                           const char* aTopic,
-                          const PRUnichar* aData)
+                          const char16_t* aData)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 

@@ -17,16 +17,19 @@
 // Interfaces needed to include
 #include "nsIPrompt.h"
 #include "nsIAuthPrompt.h"
+#include "nsIBrowserDOMWindow.h"
 #include "nsIWebProgress.h"
+#include "nsIWidget.h"
 #include "nsIWindowMediator.h"
+#include "nsIDOMChromeWindow.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMXULElement.h"
 #include "nsIXULBrowserWindow.h"
+#include "mozilla/dom/Element.h"
 
-// CIDs
-static NS_DEFINE_CID(kWindowMediatorCID, NS_WINDOWMEDIATOR_CID);
+using namespace mozilla;
 
 //*****************************************************************************
 // nsChromeTreeOwner string literals
@@ -136,10 +139,12 @@ NS_IMETHODIMP nsChromeTreeOwner::GetInterface(const nsIID& aIID, void** aSink)
 // nsChromeTreeOwner::nsIDocShellTreeOwner
 //*****************************************************************************   
 
-NS_IMETHODIMP nsChromeTreeOwner::FindItemWithName(const PRUnichar* aName,
+NS_IMETHODIMP nsChromeTreeOwner::FindItemWithName(const char16_t* aName,
    nsIDocShellTreeItem* aRequestor, nsIDocShellTreeItem* aOriginalRequestor,
    nsIDocShellTreeItem** aFoundItem)
 {
+   NS_DEFINE_CID(kWindowMediatorCID, NS_WINDOWMEDIATOR_CID);
+
    NS_ENSURE_ARG_POINTER(aFoundItem);
 
    *aFoundItem = nullptr;
@@ -245,6 +250,25 @@ NS_IMETHODIMP nsChromeTreeOwner::GetPrimaryContentShell(nsIDocShellTreeItem** aS
    return mXULWindow->GetPrimaryContentShell(aShell);
 }
 
+NS_IMETHODIMP
+nsChromeTreeOwner::GetContentWindow(JSContext* aCx, JS::MutableHandle<JS::Value> aVal)
+{
+  NS_ENSURE_STATE(mXULWindow);
+
+  nsCOMPtr<nsIDOMWindow> domWin;
+  mXULWindow->GetWindowDOMWindow(getter_AddRefs(domWin));
+  nsCOMPtr<nsIDOMChromeWindow> chromeWin = do_QueryInterface(domWin);
+  if (!chromeWin)
+    return NS_OK;
+
+  nsCOMPtr<nsIBrowserDOMWindow> browserDOMWin;
+  chromeWin->GetBrowserDOMWindow(getter_AddRefs(browserDOMWin));
+  if (!browserDOMWin)
+    return NS_OK;
+
+  return browserDOMWin->GetContentWindow(aVal);
+}
+
 NS_IMETHODIMP nsChromeTreeOwner::SizeShellTo(nsIDocShellTreeItem* aShellItem,
    int32_t aCX, int32_t aCY)
 {
@@ -258,7 +282,7 @@ nsChromeTreeOwner::SetPersistence(bool aPersistPosition,
                                   bool aPersistSizeMode)
 {
   NS_ENSURE_STATE(mXULWindow);
-  nsCOMPtr<nsIDOMElement> docShellElement = mXULWindow->GetWindowDOMElement();
+  nsCOMPtr<dom::Element> docShellElement = mXULWindow->GetWindowDOMElement();
   if (!docShellElement)
     return NS_ERROR_FAILURE;
 
@@ -283,8 +307,10 @@ nsChromeTreeOwner::SetPersistence(bool aPersistPosition,
   FIND_PERSIST_STRING(gLiterals->kHeight,   aPersistSize);
   FIND_PERSIST_STRING(gLiterals->kSizemode, aPersistSizeMode);
 
-  if (saveString) 
-    docShellElement->SetAttribute(gLiterals->kPersist, persistString);
+  ErrorResult rv;
+  if (saveString) {
+    docShellElement->SetAttribute(gLiterals->kPersist, persistString, rv);
+  }
 
   return NS_OK;
 }
@@ -295,8 +321,8 @@ nsChromeTreeOwner::GetPersistence(bool* aPersistPosition,
                                   bool* aPersistSizeMode)
 {
   NS_ENSURE_STATE(mXULWindow);
-  nsCOMPtr<nsIDOMElement> docShellElement = mXULWindow->GetWindowDOMElement();
-  if (!docShellElement) 
+  nsCOMPtr<dom::Element> docShellElement = mXULWindow->GetWindowDOMElement();
+  if (!docShellElement)
     return NS_ERROR_FAILURE;
 
   nsAutoString persistString;
@@ -469,13 +495,13 @@ NS_IMETHODIMP nsChromeTreeOwner::SetFocus()
    return mXULWindow->SetFocus();
 }
 
-NS_IMETHODIMP nsChromeTreeOwner::GetTitle(PRUnichar** aTitle)
+NS_IMETHODIMP nsChromeTreeOwner::GetTitle(char16_t** aTitle)
 {
    NS_ENSURE_STATE(mXULWindow);
    return mXULWindow->GetTitle(aTitle);
 }
 
-NS_IMETHODIMP nsChromeTreeOwner::SetTitle(const PRUnichar* aTitle)
+NS_IMETHODIMP nsChromeTreeOwner::SetTitle(const char16_t* aTitle)
 {
    NS_ENSURE_STATE(mXULWindow);
    return mXULWindow->SetTitle(aTitle);
@@ -537,7 +563,7 @@ NS_IMETHODIMP
 nsChromeTreeOwner::OnStatusChange(nsIWebProgress* aWebProgress,
                                   nsIRequest* aRequest,
                                   nsresult aStatus,
-                                  const PRUnichar* aMessage)
+                                  const char16_t* aMessage)
 {
     return NS_OK;
 }

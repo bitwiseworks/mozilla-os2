@@ -10,12 +10,9 @@ function test()
 {
   waitForExplicitFinish();
 
-  addTabAndOpenStyleEditor(function(panel) {
-    gUI = panel.UI;
-    gUI.on("editor-added", function(event, editor) {
-      editor.getSourceEditor().then(function() {
-        testEditor(editor);
-      });
+  addTabAndCheckOnStyleEditorAdded(panel => gUI = panel.UI, editor => {
+    editor.getSourceEditor().then(function() {
+      testEditor(editor);
     });
   });
 
@@ -26,7 +23,7 @@ let editorTestedCount = 0;
 function testEditor(aEditor)
 {
   if (aEditor.styleSheet.styleSheetIndex == 0) {
-    let prettifiedSource = "body\{\r?\n\tbackground\:white;\r?\n\}\r?\n\r?\ndiv\{\r?\n\tfont\-size\:4em;\r?\n\tcolor\:red\r?\n\}\r?\n";
+    let prettifiedSource = "body\{\r?\n\tbackground\:white;\r?\n\}\r?\n\r?\ndiv\{\r?\n\tfont\-size\:4em;\r?\n\tcolor\:red\r?\n\}\r?\n\r?\nspan\{\r?\n\tcolor\:green;\r?\n\}\r?\n";
     let prettifiedSourceRE = new RegExp(prettifiedSource);
 
     ok(prettifiedSourceRE.test(aEditor.sourceEditor.getText()),

@@ -5,14 +5,18 @@
 import sys
 from setuptools import setup
 
-PACKAGE_NAME = "mozrunner"
-PACKAGE_VERSION = '5.15'
+PACKAGE_NAME = 'mozrunner'
+PACKAGE_VERSION = '5.36'
 
 desc = """Reliable start/stop/configuration of Mozilla Applications (Firefox, Thunderbird, etc.)"""
 
-deps = ['mozinfo >= 0.4',
-        'mozprocess >= 0.8',
-        'mozprofile >= 0.4',
+deps = ['mozcrash >= 0.11',
+        'mozdevice >= 0.30',
+        'mozfile >= 1.0',
+        'mozinfo >= 0.7',
+        'mozlog >= 1.5',
+        'mozprocess >= 0.17',
+        'mozprofile >= 0.18',
        ]
 
 # we only support python 2 right now
@@ -36,6 +40,9 @@ setup(name=PACKAGE_NAME,
       url='https://wiki.mozilla.org/Auto-tools/Projects/Mozbase',
       license='MPL 2.0',
       packages=['mozrunner'],
+      package_data={'mozrunner': [
+            'resources/metrotestharness.exe'
+      ]},
       zip_safe=False,
       install_requires = deps,
       entry_points="""

@@ -11,20 +11,18 @@
 #define nsFlexContainerFrame_h___
 
 #include "nsContainerFrame.h"
-#include "nsTArray.h"
-#include "mozilla/Types.h"
+
+namespace mozilla {
+template <class T> class LinkedList;
+}
 
 nsIFrame* NS_NewFlexContainerFrame(nsIPresShell* aPresShell,
                                    nsStyleContext* aContext);
 
 typedef nsContainerFrame nsFlexContainerFrameSuper;
 
-class FlexItem;
-class FlexboxAxisTracker;
-class MainAxisPositionTracker;
-class SingleLineCrossAxisPositionTracker;
-
 class nsFlexContainerFrame : public nsFlexContainerFrameSuper {
+public:
   NS_DECL_FRAMEARENA_HELPERS
   NS_DECL_QUERYFRAME_TARGET(nsFlexContainerFrame)
   NS_DECL_QUERYFRAME
@@ -33,16 +31,21 @@ class nsFlexContainerFrame : public nsFlexContainerFrameSuper {
   friend nsIFrame* NS_NewFlexContainerFrame(nsIPresShell* aPresShell,
                                             nsStyleContext* aContext);
 
-public:
+  // Forward-decls of helper classes
+  class FlexItem;
+  class FlexLine;
+  class FlexboxAxisTracker;
+  class StrutInfo;
+
   // nsIFrame overrides
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  NS_IMETHOD Reflow(nsPresContext*           aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*           aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
   virtual nscoord
     GetMinWidth(nsRenderingContext* aRenderingContext) MOZ_OVERRIDE;
@@ -50,20 +53,41 @@ public:
     GetPrefWidth(nsRenderingContext* aRenderingContext) MOZ_OVERRIDE;
 
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
-  virtual int GetSkipSides() const MOZ_OVERRIDE;
-#ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
-#endif // DEBUG
+#ifdef DEBUG_FRAME_DUMP
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+#endif
   // Flexbox-specific public methods
   bool IsHorizontal();
 
 protected:
   // Protected constructor & destructor
   nsFlexContainerFrame(nsStyleContext* aContext) :
-    nsFlexContainerFrameSuper(aContext),
-    mChildrenHaveBeenReordered(false)
+    nsFlexContainerFrameSuper(aContext)
   {}
   virtual ~nsFlexContainerFrame();
+
+  /*
+   * This method does the bulk of the flex layout, implementing the algorithm
+   * described at:
+   *   http://dev.w3.org/csswg/css-flexbox/#layout-algorithm
+   * (with a few initialization pieces happening in the caller, Reflow().
+   *
+   * Since this is a helper for Reflow(), this takes all the same parameters
+   * as Reflow(), plus a few more parameters that Reflow() sets up for us.
+   *
+   * (The logic behind the division of work between Reflow and DoFlexLayout is
+   * as follows: DoFlexLayout() begins at the step that we have to jump back
+   * to, if we find any visibility:collapse children, and Reflow() does
+   * everything before that point.)
+   */
+  nsresult DoFlexLayout(nsPresContext*           aPresContext,
+                        nsHTMLReflowMetrics&     aDesiredSize,
+                        const nsHTMLReflowState& aReflowState,
+                        nsReflowStatus&          aStatus,
+                        nscoord aContentBoxMainSize,
+                        nscoord aAvailableHeightForContent,
+                        nsTArray<StrutInfo>& aStruts,
+                        const FlexboxAxisTracker& aAxisTracker);
 
   /**
    * Checks whether our child-frame list "mFrames" is sorted, using the given
@@ -82,46 +106,50 @@ protected:
   void SanityCheckAnonymousFlexItems() const;
 #endif // DEBUG
 
+  // Returns a new FlexItem for the given child frame, allocated on the heap.
+  // Caller is responsible for managing the FlexItem's lifetime.
+  FlexItem* GenerateFlexItemForChild(nsPresContext* aPresContext,
+                                     nsIFrame* aChildFrame,
+                                     const nsHTMLReflowState& aParentReflowState,
+                                     const FlexboxAxisTracker& aAxisTracker);
 
-  // Returns nsresult because we might have to reflow aChildFrame (to get its
-  // vertical intrinsic size in a vertical flexbox), and if that reflow fails
-  // (returns a failure nsresult), we want to bail out.
-  nsresult AppendFlexItemForChild(nsPresContext* aPresContext,
-                                  nsIFrame* aChildFrame,
-                                  const nsHTMLReflowState& aParentReflowState,
-                                  const FlexboxAxisTracker& aAxisTracker,
-                                  nsTArray<FlexItem>& aFlexItems);
+  // Returns nsresult because we might have to reflow aFlexItem.Frame() (to
+  // get its vertical intrinsic size in a vertical flexbox), and if that
+  // reflow fails (returns a failure nsresult), we want to bail out.
+  nsresult ResolveFlexItemMaxContentSizing(nsPresContext* aPresContext,
+                                           FlexItem& aFlexItem,
+                                           const nsHTMLReflowState& aParentReflowState,
+                                           const FlexboxAxisTracker& aAxisTracker);
 
-  // Runs the "resolve the flexible lengths" algorithm, distributing
-  // |aFlexContainerMainSize| among the |aItems| and freezing them.
-  void ResolveFlexibleLengths(const FlexboxAxisTracker& aAxisTracker,
-                              nscoord aFlexContainerMainSize,
-                              nsTArray<FlexItem>& aItems);
-
-  nsresult GenerateFlexItems(nsPresContext* aPresContext,
+  // Creates FlexItems for all of our child frames, arranged in a list of
+  // FlexLines.  These are returned by reference in |aLines|. Our actual
+  // return value has to be |nsresult|, in case we have to reflow a child
+  // to establish its flex base size and that reflow fails.
+  nsresult GenerateFlexLines(nsPresContext* aPresContext,
                              const nsHTMLReflowState& aReflowState,
+                             nscoord aContentBoxMainSize,
+                             nscoord aAvailableHeightForContent,
+                             const nsTArray<StrutInfo>& aStruts,
                              const FlexboxAxisTracker& aAxisTracker,
-                             nsTArray<FlexItem>& aItems);
+                             mozilla::LinkedList<FlexLine>& aLines);
 
-  nscoord ComputeFlexContainerMainSize(const nsHTMLReflowState& aReflowState,
-                                       const FlexboxAxisTracker& aAxisTracker,
-                                       const nsTArray<FlexItem>& aFlexItems);
+  nscoord GetMainSizeFromReflowState(const nsHTMLReflowState& aReflowState,
+                                     const FlexboxAxisTracker& aAxisTracker);
 
-  void PositionItemInMainAxis(MainAxisPositionTracker& aMainAxisPosnTracker,
-                              FlexItem& aItem);
+  nscoord ComputeCrossSize(const nsHTMLReflowState& aReflowState,
+                           const FlexboxAxisTracker& aAxisTracker,
+                           nscoord aSumLineCrossSizes,
+                           nscoord aAvailableHeightForContent,
+                           bool* aIsDefinite,
+                           nsReflowStatus& aStatus);
 
   nsresult SizeItemInCrossAxis(nsPresContext* aPresContext,
                                const FlexboxAxisTracker& aAxisTracker,
                                nsHTMLReflowState& aChildReflowState,
                                FlexItem& aItem);
 
-  void PositionItemInCrossAxis(
-    nscoord aLineStartPosition,
-    SingleLineCrossAxisPositionTracker& aLineCrossAxisPosnTracker,
-    FlexItem& aItem);
-
-  bool    mChildrenHaveBeenReordered; // Have we ever had to reorder our kids
-                                      // to satisfy their 'order' values?
+  bool mChildrenHaveBeenReordered; // Have we ever had to reorder our kids
+                                   // to satisfy their 'order' values?
 };
 
 #endif /* nsFlexContainerFrame_h___ */

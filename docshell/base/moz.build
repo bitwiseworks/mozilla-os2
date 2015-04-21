@@ -15,7 +15,6 @@ XPIDL_SOURCES += [
     'nsIDocShell.idl',
     'nsIDocShellLoadInfo.idl',
     'nsIDocShellTreeItem.idl',
-    'nsIDocShellTreeNode.idl',
     'nsIDocShellTreeOwner.idl',
     'nsIDocumentLoaderFactory.idl',
     'nsIDownloadHistory.idl',
@@ -33,13 +32,14 @@ XPIDL_SOURCES += [
     'nsIWebPageDescriptor.idl',
 ]
 
-MODULE = 'docshell'
+XPIDL_MODULE = 'docshell'
 
 EXPORTS += [
-    'SerializedLoadContext.h',
     'nsDocShellLoadTypes.h',
     'nsILinkHandler.h',
+    'nsIScrollObserver.h',
     'nsIWebShellServices.h',
+    'SerializedLoadContext.h',
 ]
 
 EXPORTS.mozilla += [
@@ -47,18 +47,41 @@ EXPORTS.mozilla += [
     'LoadContext.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'LoadContext.cpp',
-    'SerializedLoadContext.cpp',
     'nsAboutRedirector.cpp',
-    'nsDSURIContentListener.cpp',
     'nsDefaultURIFixup.cpp',
-    'nsDocShell.cpp',
     'nsDocShellEditorData.cpp',
     'nsDocShellEnumerator.cpp',
     'nsDocShellLoadInfo.cpp',
     'nsDocShellTransferableHooks.cpp',
     'nsDownloadHistory.cpp',
+    'nsDSURIContentListener.cpp',
     'nsWebNavigationInfo.cpp',
+    'SerializedLoadContext.cpp',
 ]
 
+# nsDocShell.cpp cannot be built in unified mode because it forces NSPR logging.
+SOURCES += [
+    'nsDocShell.cpp',
+]
+
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'
+LOCAL_INCLUDES += [
+    '../shistory/src',
+    '/content/base/src',
+    '/dom/base',
+    '/layout/base',
+    '/layout/generic',
+    '/layout/xul',
+    '/netwerk/protocol/viewsource',
+]
+
+if CONFIG['MOZ_TOOLKIT_SEARCH']:
+    DEFINES['MOZ_TOOLKIT_SEARCH'] = True

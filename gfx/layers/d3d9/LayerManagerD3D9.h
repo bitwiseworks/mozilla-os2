@@ -22,36 +22,6 @@ namespace layers {
 class LayerD3D9;
 class ThebesLayerD3D9;
 
-/**
- * This structure is used to pass rectangles to our shader constant. We can use
- * this for passing rectangular areas to SetVertexShaderConstant. In the format
- * of a 4 component float(x,y,width,height). Our vertex shader can then use
- * this to construct rectangular positions from the 0,0-1,1 quad that we source
- * it with.
- */
-struct ShaderConstantRect
-{
-  float mX, mY, mWidth, mHeight;
-
-  // Provide all the commonly used argument types to prevent all the local
-  // casts in the code.
-  ShaderConstantRect(float aX, float aY, float aWidth, float aHeight)
-    : mX(aX), mY(aY), mWidth(aWidth), mHeight(aHeight)
-  { }
-
-  ShaderConstantRect(int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight)
-    : mX((float)aX), mY((float)aY)
-    , mWidth((float)aWidth), mHeight((float)aHeight)
-  { }
-
-  ShaderConstantRect(int32_t aX, int32_t aY, float aWidth, float aHeight)
-    : mX((float)aX), mY((float)aY), mWidth(aWidth), mHeight(aHeight)
-  { }
-
-  // For easy passing to SetVertexShaderConstantF.
-  operator float* () { return &mX; }
-};
-
 /*
  * This is the LayerManager used for Direct3D 9. For now this will render on
  * the main thread.
@@ -108,12 +78,12 @@ public:
 
   void SetRoot(Layer* aLayer);
 
-  virtual bool CanUseCanvasLayerForSize(const gfxIntSize &aSize)
+  virtual bool CanUseCanvasLayerForSize(const gfx::IntSize &aSize)
   {
     if (!mDeviceManager)
       return false;
     int32_t maxSize = mDeviceManager->GetMaxTextureSize();
-    return aSize <= gfxIntSize(maxSize, maxSize);
+    return aSize <= gfx::IntSize(maxSize, maxSize);
   }
 
   virtual int32_t GetMaxTextureSize() const
@@ -133,7 +103,7 @@ public:
 
   virtual already_AddRefed<ReadbackLayer> CreateReadbackLayer();
 
-  virtual LayersBackend GetBackendType() { return LAYERS_D3D9; }
+  virtual LayersBackend GetBackendType() { return LayersBackend::LAYERS_D3D9; }
   virtual void GetBackendName(nsAString& name) { name.AssignLiteral("Direct3D 9"); }
   bool DeviceWasRemoved() { return deviceManager()->DeviceWasRemoved(); }
 
@@ -152,16 +122,9 @@ public:
   /** 
    * Return pointer to the Nv3DVUtils instance. Re-direct to mDeviceManager.
    */ 
-  Nv3DVUtils *GetNv3DVUtils()  { return mDeviceManager ? mDeviceManager->GetNv3DVUtils() : NULL; } 
+  Nv3DVUtils *GetNv3DVUtils() { return mDeviceManager ? mDeviceManager->GetNv3DVUtils() : nullptr; } 
 
-  static void OnDeviceManagerDestroy(DeviceManagerD3D9 *aDeviceManager) {
-    if(aDeviceManager == mDefaultDeviceManager)
-      mDefaultDeviceManager = nullptr;
-  }
-
-#ifdef MOZ_LAYERS_HAVE_LOG
   virtual const char* Name() const { return "D3D9"; }
-#endif // MOZ_LAYERS_HAVE_LOG
 
   void ReportFailure(const nsACString &aMsg, HRESULT aCode);
 
@@ -169,9 +132,6 @@ public:
   void SetCompositingDisabled(bool aCompositingDisabled) { mCompositingDisabled = aCompositingDisabled; }
 
 private:
-  /* Default device manager instance */
-  static DeviceManagerD3D9 *mDefaultDeviceManager;
-
   /* Device manager instance for this layer manager */
   nsRefPtr<DeviceManagerD3D9> mDeviceManager;
 
@@ -182,7 +142,7 @@ private:
   nsIWidget *mWidget;
 
   /*
-   * Context target, NULL when drawing directly to our swap chain.
+   * Context target, nullptr when drawing directly to our swap chain.
    */
   nsRefPtr<gfxContext> mTarget;
 
@@ -257,7 +217,7 @@ public:
   void SetShaderTransformAndOpacity()
   {
     Layer* layer = GetLayer();
-    const gfx3DMatrix& transform = layer->GetEffectiveTransform();
+    const gfx::Matrix4x4& transform = layer->GetEffectiveTransform();
     device()->SetVertexShaderConstantF(CBmLayerTransform, &transform._11, 4);
 
     float opacity[4];
@@ -280,7 +240,7 @@ public:
    * If aSize is non-null and a texture is successfully returned, aSize will
    * contain the size of the texture.
    */
-  virtual already_AddRefed<IDirect3DTexture9> GetAsTexture(gfxIntSize* aSize)
+  virtual already_AddRefed<IDirect3DTexture9> GetAsTexture(gfx::IntSize* aSize)
   {
     return nullptr;
   }
@@ -298,7 +258,7 @@ public:
   LockTextureRectD3D9(IDirect3DTexture9* aTexture) 
     : mTexture(aTexture)
   {
-    mLockResult = mTexture->LockRect(0, &mR, NULL, 0);
+    mLockResult = mTexture->LockRect(0, &mR, nullptr, 0);
   }
 
   ~LockTextureRectD3D9()

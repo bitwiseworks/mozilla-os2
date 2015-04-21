@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
+#include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
@@ -22,7 +22,7 @@ using ::testing::Return;
 
 namespace webrtc {
 
-class MockStatsObserver : public StatsObserver {
+class MockStatsObserver : public CallStatsObserver {
  public:
   MockStatsObserver() {}
   virtual ~MockStatsObserver() {}

@@ -133,9 +133,9 @@ protected:
   volatile bool mCompleted;
 };
 
-NS_IMPL_ISUPPORTS2(AsyncStatementSpinner,
-                   mozIStorageStatementCallback,
-                   mozIStorageCompletionCallback)
+NS_IMPL_ISUPPORTS(AsyncStatementSpinner,
+                  mozIStorageStatementCallback,
+                  mozIStorageCompletionCallback)
 
 AsyncStatementSpinner::AsyncStatementSpinner()
 : completionReason(0)
@@ -178,7 +178,7 @@ AsyncStatementSpinner::HandleCompletion(uint16_t aReason)
 }
 
 NS_IMETHODIMP
-AsyncStatementSpinner::Complete()
+AsyncStatementSpinner::Complete(nsresult, nsISupports*)
 {
   mCompleted = true;
   return NS_OK;

@@ -13,16 +13,16 @@
 
 #include <set>
 
-#include "modules/remote_bitrate_estimator/include/remote_bitrate_estimator.h"
-#include "system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 
 class BitrateController;
 class CallStats;
+class Config;
 class EncoderStateFeedback;
-struct OverUseDetectorOptions;
 class ProcessThread;
+class RemoteBitrateEstimator;
 class ViEChannel;
 class ViEEncoder;
 class VieRemb;
@@ -32,8 +32,7 @@ class VieRemb;
 class ChannelGroup {
  public:
   ChannelGroup(ProcessThread* process_thread,
-               const OverUseDetectorOptions& options,
-               RemoteBitrateEstimator::EstimationMode mode);
+               const Config& config);
   ~ChannelGroup();
 
   void AddChannel(int channel_id);
@@ -41,11 +40,9 @@ class ChannelGroup {
   bool HasChannel(int channel_id);
   bool Empty();
 
-  bool SetChannelRembStatus(int channel_id,
-                            bool sender,
-                            bool receiver,
-                            ViEChannel* channel,
-                            ViEEncoder* encoder);
+  bool SetChannelRembStatus(int channel_id, bool sender, bool receiver,
+                            ViEChannel* channel);
+  void SetReceiveAbsoluteSendTimeStatus(bool enable);
 
   BitrateController* GetBitrateController();
   CallStats* GetCallStats();
@@ -62,7 +59,7 @@ class ChannelGroup {
   scoped_ptr<EncoderStateFeedback> encoder_state_feedback_;
   ChannelSet channels_;
 
-  // Regisered at construct time and assumed to outlive this class.
+  // Registered at construct time and assumed to outlive this class.
   ProcessThread* process_thread_;
 };
 

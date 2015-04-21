@@ -12,6 +12,7 @@
 
 #include "mozilla/LinkedList.h"
 #include "mozilla/CheckedInt.h"
+#include <map>
 
 namespace mozilla {
 
@@ -22,11 +23,10 @@ typedef nsDataHashtable<nsCStringHashKey, nsCString> CStringMap;
 typedef nsDataHashtable<nsCStringHashKey, WebGLUniformInfo> CStringToUniformInfoMap;
 
 class WebGLProgram MOZ_FINAL
-    : public nsISupports
+    : public nsWrapperCache
     , public WebGLRefCountedObject<WebGLProgram>
     , public LinkedListElement<WebGLProgram>
     , public WebGLContextBoundObject
-    , public nsWrapperCache
 {
 public:
     WebGLProgram(WebGLContext *context);
@@ -41,7 +41,7 @@ public:
         mAttachedShaders.Clear();
     }
 
-    WebGLuint GLName() { return mGLName; }
+    GLuint GLName() { return mGLName; }
     const nsTArray<WebGLRefPtr<WebGLShader> >& AttachedShaders() const { return mAttachedShaders; }
     bool LinkStatus() { return mLinkStatus; }
     uint32_t Generation() const { return mGeneration.value(); }
@@ -104,22 +104,24 @@ public:
         return Context();
     }
 
-    virtual JSObject* WrapObject(JSContext *cx,
-                                 JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+    virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
 
-    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(WebGLProgram)
+    NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLProgram)
+    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLProgram)
+
+    // public post-link data
+    std::map<GLint, nsCString> mActiveAttribMap;
 
 protected:
 
-    WebGLuint mGLName;
+    GLuint mGLName;
     bool mLinkStatus;
     // attached shaders of the program object
     nsTArray<WebGLRefPtr<WebGLShader> > mAttachedShaders;
     CheckedUint32 mGeneration;
 
     // post-link data
-    nsTArray<bool> mAttribsInUse;
+    FallibleTArray<bool> mAttribsInUse;
     nsAutoPtr<CStringMap> mIdentifierMap, mIdentifierReverseMap;
     nsAutoPtr<CStringToUniformInfoMap> mUniformInfoMap;
     int mAttribMaxNameLength;

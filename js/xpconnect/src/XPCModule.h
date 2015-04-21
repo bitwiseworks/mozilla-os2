@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -21,7 +21,6 @@
 #define MOZJSSUBSCRIPTLOADER_CONTRACTID "@mozilla.org/moz/jssubscript-loader;1"
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsJSID)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsXPCException)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIXPConnect,
                                          nsXPConnect::GetSingleton)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsScriptError)
@@ -37,19 +36,17 @@ NS_DEFINE_NAMED_CID(MOZJSCOMPONENTLOADER_CID);
 NS_DEFINE_NAMED_CID(MOZ_JSSUBSCRIPTLOADER_CID);
 
 #define XPCONNECT_CIDENTRIES                                                  \
-  { &kNS_JS_ID_CID, false, NULL,  nsJSIDConstructor },                        \
-  { &kNS_XPCONNECT_CID, false, NULL,  nsIXPConnectConstructor },              \
-  { &kNS_XPCEXCEPTION_CID, false, NULL, nsXPCExceptionConstructor },          \
-  { &kNS_SCRIPTERROR_CID, false, NULL, nsScriptErrorConstructor },            \
-  { &kMOZJSCOMPONENTLOADER_CID, false, NULL, mozJSComponentLoaderConstructor },\
-  { &kMOZ_JSSUBSCRIPTLOADER_CID, false, NULL, mozJSSubScriptLoaderConstructor },
+  { &kNS_JS_ID_CID, false, nullptr,  nsJSIDConstructor },                     \
+  { &kNS_XPCONNECT_CID, false, nullptr,  nsIXPConnectConstructor },           \
+  { &kNS_SCRIPTERROR_CID, false, nullptr, nsScriptErrorConstructor },         \
+  { &kMOZJSCOMPONENTLOADER_CID, false, nullptr, mozJSComponentLoaderConstructor },\
+  { &kMOZ_JSSUBSCRIPTLOADER_CID, false, nullptr, mozJSSubScriptLoaderConstructor },
 
 #define XPCONNECT_CONTRACTS                                                   \
   { XPC_ID_CONTRACTID, &kNS_JS_ID_CID },                                      \
   { XPC_XPCONNECT_CONTRACTID, &kNS_XPCONNECT_CID },                           \
   { XPC_CONTEXT_STACK_CONTRACTID, &kNS_XPCONNECT_CID },                       \
   { XPC_RUNTIME_CONTRACTID, &kNS_XPCONNECT_CID },                             \
-  { XPC_EXCEPTION_CONTRACTID, &kNS_XPCEXCEPTION_CID },                        \
   { NS_SCRIPTERROR_CONTRACTID, &kNS_SCRIPTERROR_CID },                        \
   { MOZJSCOMPONENTLOADER_CONTRACTID, &kMOZJSCOMPONENTLOADER_CID },            \
   { MOZJSSUBSCRIPTLOADER_CONTRACTID, &kMOZ_JSSUBSCRIPTLOADER_CID },

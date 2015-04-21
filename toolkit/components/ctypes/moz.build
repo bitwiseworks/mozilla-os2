@@ -6,11 +6,16 @@
 
 TEST_DIRS += ['tests']
 
-MODULE = 'jsctypes'
-
-CPP_SOURCES += [
+SOURCES += [
     'ctypes.cpp',
 ]
 
-LIBRARY_NAME = 'jsctypes'
+LOCAL_INCLUDES += [
+    '/js/xpconnect/loader',
+]
 
+EXTRA_JS_MODULES += [
+    'ctypes.jsm',
+]
+
+FINAL_LIBRARY = 'xul'

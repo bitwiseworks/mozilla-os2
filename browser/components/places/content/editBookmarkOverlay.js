@@ -147,17 +147,13 @@ var gEditItemOverlay = {
       else {
         this._uri = null;
         this._isLivemark = false;
-        PlacesUtils.livemarks.getLivemark(
-          {id: this._itemId },
-          (function (aStatus, aLivemark) {
-            if (Components.isSuccessCode(aStatus)) {
-              this._isLivemark = true;
-              this._initTextField("feedLocationField", aLivemark.feedURI.spec, true);
-              this._initTextField("siteLocationField", aLivemark.siteURI ? aLivemark.siteURI.spec : "", true);
-              this._showHideRows();
-            }
-          }).bind(this)
-        );
+        PlacesUtils.livemarks.getLivemark({id: this._itemId })
+          .then(aLivemark => {
+            this._isLivemark = true;
+            this._initTextField("feedLocationField", aLivemark.feedURI.spec, true);
+            this._initTextField("siteLocationField", aLivemark.siteURI ? aLivemark.siteURI.spec : "", true);
+            this._showHideRows();
+          }, () => undefined);
       }
 
       // folder picker
@@ -589,14 +585,10 @@ var gEditItemOverlay = {
 
   onLoadInSidebarCheckboxCommand:
   function EIO_onLoadInSidebarCheckboxCommand() {
-    var loadInSidebarChecked = this._element("loadInSidebarCheckbox").checked;
-    var annoObj = { name   : PlacesUIUtils.LOAD_IN_SIDEBAR_ANNO,
-                    type   : Ci.nsIAnnotationService.TYPE_INT32,
-                    flags  : 0,
-                    value  : loadInSidebarChecked,
-                    expires: Ci.nsIAnnotationService.EXPIRE_NEVER };
-    var txn = new PlacesSetItemAnnotationTransaction(this._itemId,
-                                                     annoObj);
+    let annoObj = { name : PlacesUIUtils.LOAD_IN_SIDEBAR_ANNO };
+    if (this._element("loadInSidebarCheckbox").checked)
+      annoObj.value = true;
+    let txn = new PlacesSetItemAnnotationTransaction(this._itemId, annoObj);
     PlacesUtils.transactionManager.doTransaction(txn);
   },
 
@@ -861,6 +853,8 @@ var gEditItemOverlay = {
     var txn = new PlacesCreateFolderTransaction(defaultLabel, ip.itemId, ip.index);
     PlacesUtils.transactionManager.doTransaction(txn);
     this._folderTree.focus();
+    this._folderTree.selectItems([ip.itemId]);
+    PlacesUtils.asContainer(this._folderTree.selectedNode).containerOpen = true;
     this._folderTree.selectItems([this._lastNewItem]);
     this._folderTree.startEditing(this._folderTree.view.selection.currentIndex,
                                   this._folderTree.columns.getFirstColumn());

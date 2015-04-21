@@ -10,7 +10,7 @@ let TiltUtils = devtools.require("devtools/tilt/tilt-utils");
 let {TiltVisualizer} = devtools.require("devtools/tilt/tilt-visualizer");
 
 let tempScope = {};
-Components.utils.import("resource:///modules/devtools/LayoutHelpers.jsm", tempScope);
+Components.utils.import("resource://gre/modules/devtools/LayoutHelpers.jsm", tempScope);
 let LayoutHelpers = tempScope.LayoutHelpers;
 
 
@@ -56,6 +56,10 @@ const NODE_REMOVED = Tilt.NOTIFICATIONS.NODE_REMOVED;
 
 const TILT_ENABLED = Services.prefs.getBoolPref("devtools.tilt.enabled");
 
+gDevTools.testing = true;
+SimpleTest.registerCleanupFunction(() => {
+  gDevTools.testing = false;
+});
 
 function isTiltEnabled() {
   info("Apparently, Tilt is" + (TILT_ENABLED ? "" : " not") + " enabled.");

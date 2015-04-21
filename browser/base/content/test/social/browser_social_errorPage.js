@@ -20,7 +20,7 @@ function goOffline() {
     BrowserOffline.toggleOfflineStatus();
   Services.prefs.setIntPref('network.proxy.type', 0);
   // LOAD_FLAGS_BYPASS_CACHE isn't good enough. So clear the cache.
-  Services.cache.evictEntries(Components.interfaces.nsICache.STORE_ANYWHERE);
+  Services.cache2.clear();
 }
 
 function goOnline(callback) {
@@ -42,7 +42,7 @@ function openPanel(url, panelCallback, loadCallback) {
 
 function openChat(url, panelCallback, loadCallback) {
   // open a chat window
-  SocialChatBar.openChat(Social.provider, url, panelCallback);
+  SocialChatBar.openChat(SocialSidebar.provider, url, panelCallback);
   SocialChatBar.chatbar.firstChild.addEventListener("DOMContentLoaded", function panelLoad() {
     SocialChatBar.chatbar.firstChild.removeEventListener("DOMContentLoaded", panelLoad, true);
     loadCallback();
@@ -74,16 +74,11 @@ let manifest = { // normal provider
   origin: "https://example.com",
   sidebarURL: "https://example.com/browser/browser/base/content/test/social/social_sidebar.html",
   workerURL: "https://example.com/browser/browser/base/content/test/social/social_worker.js",
-  iconURL: "https://example.com/browser/browser/base/content/test/moz.png"
+  iconURL: "https://example.com/browser/browser/base/content/test/general/moz.png"
 };
 
 function test() {
   waitForExplicitFinish();
-  // we don't want the sidebar to auto-load in these tests..
-  Services.prefs.setBoolPref("social.sidebar.open", false);
-  registerCleanupFunction(function() {
-    Services.prefs.clearUserPref("social.sidebar.open");
-  });
 
   runSocialTestWithProvider(manifest, function (finishcb) {
     runSocialTests(tests, undefined, goOnline, finishcb);
@@ -113,10 +108,10 @@ var tests = {
     });
     // we want the worker to be fully loaded before going offline, otherwise
     // it might fail due to going offline.
-    ensureWorkerLoaded(Social.provider, function() {
+    ensureWorkerLoaded(SocialSidebar.provider, function() {
       // go offline then attempt to load the sidebar - it should fail.
       goOffline();
-      Services.prefs.setBoolPref("social.sidebar.open", true);
+      SocialSidebar.show();
   });
   },
 

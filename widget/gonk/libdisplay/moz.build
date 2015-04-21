@@ -14,21 +14,44 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-MODULE = 'display'
-
-CPP_SOURCES += [
+SOURCES += [
     'BootAnimation.cpp',
 ]
 
-if CONFIG['ANDROID_VERSION'] == '17':
-    CPP_SOURCES += [
+if CONFIG['ANDROID_VERSION'] >= '18':
+    SOURCES += [
         'FramebufferSurface.cpp',
-        'GraphicBufferAlloc.cpp',
         'GonkDisplayJB.cpp',
     ]
+elif CONFIG['ANDROID_VERSION'] == '17':
+    SOURCES += [
+        'FramebufferSurface.cpp',
+        'GonkDisplayJB.cpp',
+        'GraphicBufferAlloc.cpp',
+    ]
 elif CONFIG['ANDROID_VERSION'] == '15':
-    CPP_SOURCES += [
+    SOURCES += [
         'GonkDisplayICS.cpp'
     ]
-else:
+elif CONFIG['ANDROID_VERSION'] and CONFIG['COMPILE_ENVIRONMENT']:
     error('Unsupported platform version: %s' % (CONFIG['ANDROID_VERSION']))
+
+LIBRARY_NAME = 'display'
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FORCE_STATIC_LIB = True
+
+DEFINES['XPCOM_GLUE'] = True
+
+DISABLE_STL_WRAPPING = True
+
+CXXFLAGS += [
+    '-I%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
+        'frameworks/native/include/gui',
+        'frameworks/native/opengl/include',
+        'hardware/libhardware/include',
+        'hardware/libhardware_legacy/include',
+        'system/core/libsuspend/include',
+    ]
+]

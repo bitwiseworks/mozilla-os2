@@ -6,11 +6,12 @@
 #ifndef GFX_MACFONT_H
 #define GFX_MACFONT_H
 
+#include "mozilla/MemoryReporting.h"
 #include "gfxFont.h"
-#include "gfxMacPlatformFontList.h"
-#include "mozilla/gfx/2D.h"
-
 #include "cairo.h"
+#include <ApplicationServices/ApplicationServices.h>
+
+class MacOSFontEntry;
 
 class gfxMacFont : public gfxFont
 {
@@ -42,10 +43,10 @@ public:
 
     virtual mozilla::TemporaryRef<mozilla::gfx::ScaledFont> GetScaledFont(mozilla::gfx::DrawTarget *aTarget);
 
-    virtual void SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                     FontCacheSizes*   aSizes) const;
-    virtual void SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                     FontCacheSizes*   aSizes) const;
+    virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontCacheSizes* aSizes) const;
+    virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontCacheSizes* aSizes) const;
 
     virtual FontType GetType() const { return FONT_TYPE_MAC; }
 
@@ -54,7 +55,7 @@ protected:
 
     // override to prefer CoreText shaping with fonts that depend on AAT
     virtual bool ShapeText(gfxContext      *aContext,
-                           const PRUnichar *aText,
+                           const char16_t *aText,
                            uint32_t         aOffset,
                            uint32_t         aLength,
                            int32_t          aScript,
@@ -66,7 +67,7 @@ protected:
 
     // Get width and glyph ID for a character; uses aConvFactor
     // to convert font units as returned by CG to actual dimensions
-    gfxFloat GetCharWidth(CFDataRef aCmap, PRUnichar aUniChar,
+    gfxFloat GetCharWidth(CFDataRef aCmap, char16_t aUniChar,
                           uint32_t *aGlyphID, gfxFloat aConvFactor);
 
     // a weak reference to the CoreGraphics font: this is owned by the

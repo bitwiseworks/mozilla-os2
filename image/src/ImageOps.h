@@ -8,14 +8,15 @@
 #define MOZILLA_IMAGELIB_IMAGEOPS_H_
 
 #include "nsCOMPtr.h"
-#include "nsRect.h"
 
 class imgIContainer;
+struct nsIntRect;
 
 namespace mozilla {
 namespace image {
 
 class Image;
+class Orientation;
 
 class ImageOps
 {
@@ -37,6 +38,16 @@ public:
    */
   static already_AddRefed<Image> Clip(Image* aImage, nsIntRect aClip);
   static already_AddRefed<imgIContainer> Clip(imgIContainer* aImage, nsIntRect aClip);
+
+  /**
+   * Creates a version of an existing image which is rotated and/or flipped to
+   * the specified orientation.
+   *
+   * @param aImage         The existing image.
+   * @param aOrientation   The desired orientation.
+   */
+  static already_AddRefed<Image> Orient(Image* aImage, Orientation aOrientation);
+  static already_AddRefed<imgIContainer> Orient(imgIContainer* aImage, Orientation aOrientation);
 
 private:
   // This is a static utility class, so disallow instantiation.

@@ -4,12 +4,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'necko'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsDataChannel.cpp',
     'nsDataHandler.cpp',
 ]
 
-LIBRARY_NAME = 'nkdata_s'
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'necko'
+LOCAL_INCLUDES += [
+    '../../base/src',
+]
 

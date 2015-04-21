@@ -28,6 +28,10 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=345267
 <script class="testbody" type="text/javascript">
 
 /** Test for Bug 345267 **/
+
+// Turn off Spatial Navigation to stop if from hijacking "left" keypress event.
+SpecialPowers.setBoolPref('snav.enabled', false);
+
 is($("d1").value, "abcde",
    "Displayed initial value should not be truncated by maxlength");
 is($("u1").value, "abcdef",
@@ -66,8 +70,7 @@ is($("target").value, "abcdefghijkl", "Should only delete one char");
 sendKey("back_space");
 is($("target").value, "abcdefghijk", "Should only delete one char again");
 (function () {
-  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
-  $("target").controllers.getControllerForCommand('cmd_undo')
+  SpecialPowers.wrap($("target")).controllers.getControllerForCommand('cmd_undo')
                          .doCommand('cmd_undo');
 })();
 is($("target").value, "abcdefghijklm",

@@ -11,16 +11,16 @@
 #ifndef WEBRTC_AUDIO_DEVICE_FUNC_TEST_MANAGER_H
 #define WEBRTC_AUDIO_DEVICE_FUNC_TEST_MANAGER_H
 
-#include "modules/audio_device/audio_device_utility.h"
+#include "webrtc/modules/audio_device/audio_device_utility.h"
 
 #include <string>
 
-#include "typedefs.h"
-#include "audio_device.h"
-#include "audio_device_test_defines.h"
-#include "file_wrapper.h"
-#include "list_wrapper.h"
-#include "resampler.h"
+#include "webrtc/common_audio/resampler/include/resampler.h"
+#include "webrtc/modules/audio_device/include/audio_device.h"
+#include "webrtc/modules/audio_device/test/audio_device_test_defines.h"
+#include "webrtc/system_wrappers/interface/file_wrapper.h"
+#include "webrtc/system_wrappers/interface/list_wrapper.h"
+#include "webrtc/typedefs.h"
 
 #if defined(WEBRTC_IOS) || defined(ANDROID)
 #define USE_SLEEP_AS_PAUSE
@@ -92,29 +92,41 @@ public:
 class AudioTransportImpl: public AudioTransport
 {
 public:
-    virtual WebRtc_Word32
+    virtual int32_t
         RecordedDataIsAvailable(const void* audioSamples,
-                                const WebRtc_UWord32 nSamples,
-                                const WebRtc_UWord8 nBytesPerSample,
-                                const WebRtc_UWord8 nChannels,
-                                const WebRtc_UWord32 samplesPerSec,
-                                const WebRtc_UWord32 totalDelayMS,
-                                const WebRtc_Word32 clockDrift,
-                                const WebRtc_UWord32 currentMicLevel,
-                                WebRtc_UWord32& newMicLevel);
+                                const uint32_t nSamples,
+                                const uint8_t nBytesPerSample,
+                                const uint8_t nChannels,
+                                const uint32_t samplesPerSec,
+                                const uint32_t totalDelayMS,
+                                const int32_t clockDrift,
+                                const uint32_t currentMicLevel,
+                                const bool keyPressed,
+                                uint32_t& newMicLevel);
 
-    virtual WebRtc_Word32 NeedMorePlayData(const WebRtc_UWord32 nSamples,
-                                           const WebRtc_UWord8 nBytesPerSample,
-                                           const WebRtc_UWord8 nChannels,
-                                           const WebRtc_UWord32 samplesPerSec,
-                                           void* audioSamples,
-                                           WebRtc_UWord32& nSamplesOut);
+    virtual int32_t NeedMorePlayData(const uint32_t nSamples,
+                                     const uint8_t nBytesPerSample,
+                                     const uint8_t nChannels,
+                                     const uint32_t samplesPerSec,
+                                     void* audioSamples,
+                                     uint32_t& nSamplesOut);
+
+    virtual int OnDataAvailable(const int voe_channels[],
+                                int number_of_voe_channels,
+                                const int16_t* audio_data,
+                                int sample_rate,
+                                int number_of_channels,
+                                int number_of_frames,
+                                int audio_delay_milliseconds,
+                                int current_volume,
+                                bool key_pressed,
+                                bool need_audio_processing);
 
     AudioTransportImpl(AudioDeviceModule* audioDevice);
     ~AudioTransportImpl();
 
 public:
-    WebRtc_Word32 SetFilePlayout(bool enable, const char* fileName = NULL);
+    int32_t SetFilePlayout(bool enable, const char* fileName = NULL);
     void SetFullDuplex(bool enable);
     void SetSpeakerVolume(bool enable)
     {
@@ -167,8 +179,8 @@ private:
 
     FileWrapper& _playFile;
 
-    WebRtc_UWord32 _recCount;
-    WebRtc_UWord32 _playCount;
+    uint32_t _recCount;
+    uint32_t _playCount;
 
     ListWrapper _audioList;
 
@@ -184,26 +196,26 @@ class FuncTestManager
 public:
     FuncTestManager();
     ~FuncTestManager();
-    WebRtc_Word32 Init();
-    WebRtc_Word32 Close();
-    WebRtc_Word32 DoTest(const TestType testType);
+    int32_t Init();
+    int32_t Close();
+    int32_t DoTest(const TestType testType);
 private:
-    WebRtc_Word32 TestAudioLayerSelection();
-    WebRtc_Word32 TestDeviceEnumeration();
-    WebRtc_Word32 TestDeviceSelection();
-    WebRtc_Word32 TestAudioTransport();
-    WebRtc_Word32 TestSpeakerVolume();
-    WebRtc_Word32 TestMicrophoneVolume();
-    WebRtc_Word32 TestSpeakerMute();
-    WebRtc_Word32 TestMicrophoneMute();
-    WebRtc_Word32 TestMicrophoneBoost();
-    WebRtc_Word32 TestLoopback();
-    WebRtc_Word32 TestDeviceRemoval();
-    WebRtc_Word32 TestExtra();
-    WebRtc_Word32 TestMicrophoneAGC();
-    WebRtc_Word32 SelectPlayoutDevice();
-    WebRtc_Word32 SelectRecordingDevice();
-    WebRtc_Word32 TestAdvancedMBAPI();
+    int32_t TestAudioLayerSelection();
+    int32_t TestDeviceEnumeration();
+    int32_t TestDeviceSelection();
+    int32_t TestAudioTransport();
+    int32_t TestSpeakerVolume();
+    int32_t TestMicrophoneVolume();
+    int32_t TestSpeakerMute();
+    int32_t TestMicrophoneMute();
+    int32_t TestMicrophoneBoost();
+    int32_t TestLoopback();
+    int32_t TestDeviceRemoval();
+    int32_t TestExtra();
+    int32_t TestMicrophoneAGC();
+    int32_t SelectPlayoutDevice();
+    int32_t SelectRecordingDevice();
+    int32_t TestAdvancedMBAPI();
 private:
     // Paths to where the resource files to be used for this test are located.
     std::string _playoutFile48;
@@ -217,6 +229,6 @@ private:
     AudioTransportImpl* _audioTransport;
 };
 
-} // namespace webrtc
+}  // namespace webrtc
 
 #endif  // #ifndef WEBRTC_AUDIO_DEVICE_FUNC_TEST_MANAGER_H

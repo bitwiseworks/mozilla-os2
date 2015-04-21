@@ -6,6 +6,13 @@
 
 PROGRAM = 'linktool'
 
-CPP_SOURCES += [
+SOURCES += [
     'linktool.cpp',
 ]
+
+DIST_SUBDIR = 'metro/install'
+
+for var in ('UNICODE', '_UNICODE'):
+    DEFINES[var] = True
+
+NO_PGO = True

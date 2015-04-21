@@ -3,10 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DiskSpaceWatcher.h"
+#include "nsIObserverService.h"
+#include "nsXULAppAPI.h"
 #include "mozilla/Hal.h"
 #include "mozilla/ModuleUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Services.h"
 
 #define NS_DISKSPACEWATCHER_CID \
   { 0xab218518, 0xf197, 0x4fb4, { 0x8b, 0x0f, 0x8b, 0xb3, 0x4d, 0xf2, 0x4b, 0xf4 } }
@@ -15,7 +18,7 @@ using namespace mozilla;
 
 StaticRefPtr<DiskSpaceWatcher> gDiskSpaceWatcher;
 
-NS_IMPL_ISUPPORTS2(DiskSpaceWatcher, nsIDiskSpaceWatcher, nsIObserver)
+NS_IMPL_ISUPPORTS(DiskSpaceWatcher, nsIDiskSpaceWatcher, nsIObserver)
 
 uint64_t DiskSpaceWatcher::sFreeSpace = 0;
 bool DiskSpaceWatcher::sIsDiskFull = false;
@@ -55,7 +58,7 @@ DiskSpaceWatcher::FactoryCreate()
 
 NS_IMETHODIMP
 DiskSpaceWatcher::Observe(nsISupports* aSubject, const char* aTopic,
-                          const PRUnichar* aData)
+                          const char16_t* aData)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -116,8 +119,8 @@ void DiskSpaceWatcher::UpdateState(bool aIsDiskFull, uint64_t aFreeSpace)
     return;
   }
 
-  const PRUnichar stateFull[] = { 'f', 'u', 'l', 'l', 0 };
-  const PRUnichar stateFree[] = { 'f', 'r', 'e', 'e', 0 };
+  const char16_t stateFull[] = { 'f', 'u', 'l', 'l', 0 };
+  const char16_t stateFree[] = { 'f', 'r', 'e', 'e', 0 };
 
   nsCOMPtr<nsISupports> subject;
   CallQueryInterface(gDiskSpaceWatcher.get(), getter_AddRefs(subject));
@@ -144,7 +147,9 @@ static const mozilla::Module::ContractIDEntry kDiskSpaceWatcherContracts[] = {
 };
 
 static const mozilla::Module::CategoryEntry kDiskSpaceWatcherCategories[] = {
+#ifdef MOZ_WIDGET_GONK
   { "profile-after-change", "Disk Space Watcher Service", DISKSPACEWATCHER_CONTRACTID },
+#endif
   { nullptr }
 };
 

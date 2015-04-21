@@ -5,12 +5,31 @@
 ; The registration ID of the COM server which is used for choosing wether
 ; to launch the Win8 metro browser or desktop browser.
 !define DELEGATE_EXECUTE_HANDLER_ID {5100FEC1-212B-4BF5-9BF8-3E650FD794A3}
+;
+; Defines for adjust token privs and for enumerating keys
+!ifndef TOKEN_QUERY
+  !define TOKEN_QUERY             0x0008
+!endif
+!ifndef TOKEN_ADJUST_PRIVILEGES
+  !define TOKEN_ADJUST_PRIVILEGES 0x0020
+!endif
+!ifndef SE_RESTORE_NAME
+  !define SE_RESTORE_NAME         SeRestorePrivilege
+!endif
+!ifndef SE_PRIVILEGE_ENABLED
+  !define SE_PRIVILEGE_ENABLED    0x00000002
+!endif
+!ifndef HKEY_USERS
+  !define HKEY_USERS              0x80000003
+!endif
 
 ; Does metro registration for the command execute handler
 Function RegisterCEH
 !ifdef MOZ_METRO
   ${If} ${AtLeastWin8}
-    ${CleanupMetroBrowserHandlerValues} ${DELEGATE_EXECUTE_HANDLER_ID}
+    ${CleanupMetroBrowserHandlerValues} ${DELEGATE_EXECUTE_HANDLER_ID} \
+                                        "FirefoxURL" \
+                                        "FirefoxHTML"
     ${AddMetroBrowserHandlerValues} ${DELEGATE_EXECUTE_HANDLER_ID} \
                                     "$INSTDIR\CommandExecuteHandler.exe" \
                                     $AppUserModelID \
@@ -214,6 +233,14 @@ FunctionEnd
     ${EndIf}
     Call RegisterCEH
   ${EndIf}
+!else
+  ; The metro browser is not enabled by the mozconfig.
+  ${If} ${AtLeastWin8}
+    ${RemoveDEHRegistration} ${DELEGATE_EXECUTE_HANDLER_ID} \
+                             $AppUserModelID \
+                             "FirefoxURL" \
+                             "FirefoxHTML"
+  ${EndIf}
 !endif
 !macroend
 !define PostUpdate "!insertmacro PostUpdate"
@@ -369,6 +396,15 @@ FunctionEnd
 !macroend
 !define ShowShortcuts "!insertmacro ShowShortcuts"
 
+!macro AddAssociationIfNoneExist FILE_TYPE
+  ClearErrors
+  EnumRegKey $7 HKCR "${FILE_TYPE}" 0
+  ${If} ${Errors}
+    WriteRegStr SHCTX "SOFTWARE\Classes\${FILE_TYPE}"  "" "FirefoxHTML"
+  ${EndIf}
+!macroend
+!define AddAssociationIfNoneExist "!insertmacro AddAssociationIfNoneExist"
+
 ; Adds the protocol and file handler registry entries for making Firefox the
 ; default handler (uses SHCTX).
 !macro SetHandlers
@@ -403,11 +439,12 @@ FunctionEnd
     WriteRegStr SHCTX "$0\.xhtml" "" "FirefoxHTML"
   ${EndIf}
 
-  ; Only add webm if it's not present
-  ${CheckIfRegistryKeyExists} "$0" ".webm" $7
-  ${If} $7 == "false"
-    WriteRegStr SHCTX "$0\.webm"  "" "FirefoxHTML"
-  ${EndIf}
+  ${AddAssociationIfNoneExist} ".pdf"
+  ${AddAssociationIfNoneExist} ".oga"
+  ${AddAssociationIfNoneExist} ".ogg"
+  ${AddAssociationIfNoneExist} ".ogv"
+  ${AddAssociationIfNoneExist} ".pdf"
+  ${AddAssociationIfNoneExist} ".webm"
 
   ; An empty string is used for the 5th param because FirefoxHTML is not a
   ; protocol handler
@@ -522,37 +559,67 @@ FunctionEnd
 
 ; Add Software\Mozilla\ registry entries (uses SHCTX).
 !macro SetAppKeys
+  ; Check if this is an ESR release and if so add registry values so it is
+  ; possible to determine that this is an ESR install (bug 726781).
+  ClearErrors
+  ${WordFind} "${UpdateChannel}" "esr" "E#" $3
+  ${If} ${Errors}
+    StrCpy $3 ""
+  ${Else}
+    StrCpy $3 " ESR"
+  ${EndIf}
+
   ${GetLongPath} "$INSTDIR" $8
-  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal}\${AppVersion} (${AB_CD})\Main"
+  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal}\${AppVersion}$3 (${ARCH} ${AB_CD})\Main"
   ${WriteRegStr2} $TmpVal "$0" "Install Directory" "$8" 0
   ${WriteRegStr2} $TmpVal "$0" "PathToExe" "$8\${FileMainEXE}" 0
 
-  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal}\${AppVersion} (${AB_CD})\Uninstall"
-  ${WriteRegStr2} $TmpVal "$0" "Description" "${BrandFullNameInternal} ${AppVersion} (${ARCH} ${AB_CD})" 0
+  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal}\${AppVersion}$3 (${ARCH} ${AB_CD})\Uninstall"
+  ${WriteRegStr2} $TmpVal "$0" "Description" "${BrandFullNameInternal} ${AppVersion}$3 (${ARCH} ${AB_CD})" 0
 
-  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal}\${AppVersion} (${AB_CD})"
-  ${WriteRegStr2} $TmpVal  "$0" "" "${AppVersion} (${AB_CD})" 0
+  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal}\${AppVersion}$3 (${ARCH} ${AB_CD})"
+  ${WriteRegStr2} $TmpVal  "$0" "" "${AppVersion}$3 (${ARCH} ${AB_CD})" 0
+  ${If} "$3" == ""
+    DeleteRegValue SHCTX "$0" "ESR"
+  ${Else}
+    ${WriteRegDWORD2} $TmpVal "$0" "ESR" 1 0
+  ${EndIf}
 
-  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal} ${AppVersion}\bin"
+  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal} ${AppVersion}$3\bin"
   ${WriteRegStr2} $TmpVal "$0" "PathToExe" "$8\${FileMainEXE}" 0
 
-  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal} ${AppVersion}\extensions"
+  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal} ${AppVersion}$3\extensions"
   ${WriteRegStr2} $TmpVal "$0" "Components" "$8\components" 0
   ${WriteRegStr2} $TmpVal "$0" "Plugins" "$8\plugins" 0
 
-  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal} ${AppVersion}"
+  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal} ${AppVersion}$3"
   ${WriteRegStr2} $TmpVal "$0" "GeckoVer" "${GREVersion}" 0
+  ${If} "$3" == ""
+    DeleteRegValue SHCTX "$0" "ESR"
+  ${Else}
+    ${WriteRegDWORD2} $TmpVal "$0" "ESR" 1 0
+  ${EndIf}
 
-  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal}"
+  StrCpy $0 "Software\Mozilla\${BrandFullNameInternal}$3"
   ${WriteRegStr2} $TmpVal "$0" "" "${GREVersion}" 0
-  ${WriteRegStr2} $TmpVal "$0" "CurrentVersion" "${AppVersion} (${AB_CD})" 0
+  ${WriteRegStr2} $TmpVal "$0" "CurrentVersion" "${AppVersion}$3 (${ARCH} ${AB_CD})" 0
 !macroend
 !define SetAppKeys "!insertmacro SetAppKeys"
 
 ; Add uninstall registry entries. This macro tests for write access to determine
 ; if the uninstall keys should be added to HKLM or HKCU.
 !macro SetUninstallKeys
-  StrCpy $0 "Software\Microsoft\Windows\CurrentVersion\Uninstall\${BrandFullNameInternal} ${AppVersion} (${ARCH} ${AB_CD})"
+  ; Check if this is an ESR release and if so add registry values so it is
+  ; possible to determine that this is an ESR install (bug 726781).
+  ClearErrors
+  ${WordFind} "${UpdateChannel}" "esr" "E#" $3
+  ${If} ${Errors}
+    StrCpy $3 ""
+  ${Else}
+    StrCpy $3 " ESR"
+  ${EndIf}
+
+  StrCpy $0 "Software\Microsoft\Windows\CurrentVersion\Uninstall\${BrandFullNameInternal} ${AppVersion}$3 (${ARCH} ${AB_CD})"
 
   StrCpy $2 ""
   ClearErrors
@@ -579,15 +646,24 @@ FunctionEnd
     ${GetLongPath} "$INSTDIR" $8
 
     ; Write the uninstall registry keys
-    ${WriteRegStr2} $1 "$0" "Comments" "${BrandFullNameInternal} ${AppVersion} (${ARCH} ${AB_CD})" 0
+    ${WriteRegStr2} $1 "$0" "Comments" "${BrandFullNameInternal} ${AppVersion}$3 (${ARCH} ${AB_CD})" 0
     ${WriteRegStr2} $1 "$0" "DisplayIcon" "$8\${FileMainEXE},0" 0
-    ${WriteRegStr2} $1 "$0" "DisplayName" "${BrandFullNameInternal} ${AppVersion} (${ARCH} ${AB_CD})" 0
+    ${WriteRegStr2} $1 "$0" "DisplayName" "${BrandFullNameInternal} ${AppVersion}$3 (${ARCH} ${AB_CD})" 0
     ${WriteRegStr2} $1 "$0" "DisplayVersion" "${AppVersion}" 0
+    ${WriteRegStr2} $1 "$0" "HelpLink" "${HelpLink}" 0
     ${WriteRegStr2} $1 "$0" "InstallLocation" "$8" 0
     ${WriteRegStr2} $1 "$0" "Publisher" "Mozilla" 0
     ${WriteRegStr2} $1 "$0" "UninstallString" "$\"$8\uninstall\helper.exe$\"" 0
-    ${WriteRegStr2} $1 "$0" "URLInfoAbout" "${URLInfoAbout}" 0
+    DeleteRegValue SHCTX "$0" "URLInfoAbout"
+; Don't add URLUpdateInfo which is the release notes url except for the release
+; and esr channels since nightly, aurora, and beta do not have release notes.
+; Note: URLUpdateInfo is only defined in the official branding.nsi.
+!ifdef URLUpdateInfo
+!ifndef BETA_UPDATE_CHANNEL
     ${WriteRegStr2} $1 "$0" "URLUpdateInfo" "${URLUpdateInfo}" 0
+!endif
+!endif
+    ${WriteRegStr2} $1 "$0" "URLInfoAbout" "${URLInfoAbout}" 0
     ${WriteRegDWORD2} $1 "$0" "NoModify" 1 0
     ${WriteRegDWORD2} $1 "$0" "NoRepair" 1 0
 
@@ -602,6 +678,40 @@ FunctionEnd
   ${EndIf}
 !macroend
 !define SetUninstallKeys "!insertmacro SetUninstallKeys"
+
+; Due to a bug when associating some file handlers, only SHCTX was checked for
+; some file types such as ".pdf". SHCTX is set to HKCU or HKLM depending on
+; whether the installer has write access to HKLM. The bug would happen when
+; HCKU was checked and didn't exist since programs aren't required to set the
+; HKCU Software\Classes keys when associating handlers. The fix uses the merged
+; view in HKCR to check for existance of an existing association. This macro
+; cleans affected installations by removing the HKLM and HKCU value if it is set
+; to FirefoxHTML when there is a value for PersistentHandler or by removing the
+; HKCU value when the HKLM value has a value other than an empty string.
+!macro FixBadFileAssociation FILE_TYPE
+  ; Only delete the default value in case the key has values for OpenWithList,
+  ; OpenWithProgids, PersistentHandler, etc.
+  ReadRegStr $0 HKCU "Software\Classes\${FILE_TYPE}" ""
+  ReadRegStr $1 HKLM "Software\Classes\${FILE_TYPE}" ""
+  ReadRegStr $2 HKCR "${FILE_TYPE}\PersistentHandler" ""
+  ${If} "$2" != ""
+    ; Since there is a persistent handler remove FirefoxHTML as the default
+    ; value from both HKCU and HKLM if it set to FirefoxHTML.
+    ${If} "$0" == "FirefoxHTML"
+      DeleteRegValue HKCU "Software\Classes\${FILE_TYPE}" ""
+    ${EndIf}
+    ${If} "$1" == "FirefoxHTML"
+      DeleteRegValue HKLM "Software\Classes\${FILE_TYPE}" ""
+    ${EndIf}
+  ${ElseIf} "$0" == "FirefoxHTML"
+    ; Since KHCU is set to FirefoxHTML remove FirefoxHTML as the default value
+    ; from HKCU if HKLM is set to a value other than an empty string.
+    ${If} "$1" != ""
+      DeleteRegValue HKCU "Software\Classes\${FILE_TYPE}" ""
+    ${EndIf}
+  ${EndIf}
+!macroend
+!define FixBadFileAssociation "!insertmacro FixBadFileAssociation"
 
 ; Add app specific handler registry entries under Software\Classes if they
 ; don't exist (does not use SHCTX).
@@ -629,6 +739,14 @@ FunctionEnd
     ${WriteRegStr2} $TmpVal "$1\.xhtml" "" "xhtmlfile" 0
     ${WriteRegStr2} $TmpVal "$1\.xhtml" "Content Type" "application/xhtml+xml" 0
   ${EndIf}
+
+  ; Remove possibly badly associated file types
+  ${FixBadFileAssociation} ".pdf"
+  ${FixBadFileAssociation} ".oga"
+  ${FixBadFileAssociation} ".ogg"
+  ${FixBadFileAssociation} ".ogv"
+  ${FixBadFileAssociation} ".pdf"
+  ${FixBadFileAssociation} ".webm"
 !macroend
 !define FixClassKeys "!insertmacro FixClassKeys"
 
@@ -724,11 +842,6 @@ FunctionEnd
   DeleteRegKey HKLM "Software\Classes\Firefox.URL"
   DeleteRegKey HKCU "Software\Classes\Firefox.URL"
 
-  ; Remove the app compatibility registry key
-  StrCpy $0 "Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
-  DeleteRegValue HKLM "$0" "$INSTDIR\${FileMainEXE}"
-  DeleteRegValue HKCU "$0" "$INSTDIR\${FileMainEXE}"
-
   ; Delete gopher from Capabilities\URLAssociations if it is present.
   ${StrFilter} "${FileMainEXE}" "+" "" "" $R9
   StrCpy $0 "Software\Clients\StartMenuInternet\$R9"
@@ -747,23 +860,23 @@ FunctionEnd
 !macroend
 !define RemoveDeprecatedKeys "!insertmacro RemoveDeprecatedKeys"
 
-!ifdef MOZ_METRO
 ; Resets Win8+ specific toast keys Windows sets. We call this on a
 ; fresh install and on uninstall.
-!macro ResetWin8PromptKeys
+!macro ResetWin8PromptKeys KEY PREFIX
   ${If} ${AtLeastWin8}
-    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.htm"
-    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.html"
-    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.xht"
-    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.xhtml"
-    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.shtml"
-    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxURL_ftp"
-    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxURL_http"
-    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxURL_https"
+    DeleteRegValue ${KEY} "${PREFIX}Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.htm"
+    DeleteRegValue ${KEY} "${PREFIX}Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.html"
+    DeleteRegValue ${KEY} "${PREFIX}Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.xht"
+    DeleteRegValue ${KEY} "${PREFIX}Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.xhtml"
+    DeleteRegValue ${KEY} "${PREFIX}Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.shtml"
+    DeleteRegValue ${KEY} "${PREFIX}Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxURL_ftp"
+    DeleteRegValue ${KEY} "${PREFIX}Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxURL_http"
+    DeleteRegValue ${KEY} "${PREFIX}Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxURL_https"
   ${EndIf}
 !macroend
 !define ResetWin8PromptKeys "!insertmacro ResetWin8PromptKeys"
 
+!ifdef MOZ_METRO
 ; Resets Win8+ Metro specific splash screen info. Relies
 ; on AppUserModelID.
 !macro ResetWin8MetroSplash
@@ -775,8 +888,162 @@ FunctionEnd
 !define ResetWin8MetroSplash "!insertmacro ResetWin8MetroSplash"
 !endif
 
+; Adds SE_RESTORE_NAME privs
+!macro AcquireSERestoreName
+  StrCpy $R1 0
+
+  System::Call "kernel32::GetCurrentProcess() i .R0"
+  System::Call "advapi32::OpenProcessToken(i R0, i ${TOKEN_QUERY}|${TOKEN_ADJUST_PRIVILEGES}, \
+                                          *i R1R1) i .R0"
+  ${If} $R0 != 0
+    System::Call "advapi32::LookupPrivilegeValue(t n, t '${SE_RESTORE_NAME}', *l .R2) i .R0"
+    ${If} $R0 != 0
+      System::Call "*(i 1, l R2, i ${SE_PRIVILEGE_ENABLED}) i .R0"
+      System::Call "advapi32::AdjustTokenPrivileges(i R1, i 0, i R0, i 0, i 0, i 0)"
+      System::Free $R0
+    ${EndIf}
+    System::Call "kernel32::CloseHandle(i R1)"
+  ${EndIf}
+!macroend
+!define AcquireSERestoreName "!insertmacro AcquireSERestoreName"
+!define un.AcquireSERestoreName "!insertmacro AcquireSERestoreName"
+
+; Mounts all user ntuser.dat files into the registry as a subkey of HKU
+!macro MountRegistryIntoHKU
+  ; $0 is used as an index for HKEY_USERS enumeration
+  StrCpy $0 0
+  ${Do}
+    EnumRegKey $1 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" $0
+    ${If} $1 == ""
+      ${Break}
+    ${EndIf}
+    ReadRegStr $2 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$1" "ProfileImagePath"
+    System::Call "advapi32::RegLoadKey(i ${HKEY_USERS}, t 'User-$0', t '$2\ntuser.dat')"
+    System::Call "advapi32::RegLoadKey(i ${HKEY_USERS}, t 'User-$0_Classes', t '$2\AppData\Local\Microsoft\Windows\UsrClass.dat')"
+    IntOp $0 $0 + 1
+  ${Loop}
+!macroend
+!define MountRegistryIntoHKU "!insertmacro MountRegistryIntoHKU"
+!define un.MountRegistryIntoHKU "!insertmacro MountRegistryIntoHKU"
+;
+; Unmounts all user ntuser.dat files into the registry as a subkey of HKU
+!macro UnmountRegistryIntoHKU
+  ; $0 is used as an index for HKEY_USERS enumeration
+  StrCpy $0 0
+  ${Do}
+    EnumRegKey $1 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" $0
+    ${If} $1 == ""
+      ${Break}
+    ${EndIf}
+    ReadRegStr $2 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$1" "ProfileImagePath"
+    System::Call "advapi32::RegUnLoadKey(i ${HKEY_USERS}, t 'User-$0')"
+    System::Call "advapi32::RegUnLoadKey(i ${HKEY_USERS}, t 'User-$0_Classes')"
+    IntOp $0 $0 + 1
+  ${Loop}
+!macroend
+!define UnmountRegistryIntoHKU "!insertmacro UnmountRegistryIntoHKU"
+!define un.UnmountRegistryIntoHKU "!insertmacro UnmountRegistryIntoHKU"
+
+; Unconditionally removes the delegate execute handler registration used to
+; launch the metro browser and misc. metro related registry values.
+!macro RemoveDEHRegistration DELEGATE_EXECUTE_HANDLER_ID \
+                             APP_USER_MODEL_ID \
+                             PROTOCOL_ACTIVATION_ID \
+                             FILE_ACTIVATION_ID
+  ${AcquireSERestoreName}
+  ${MountRegistryIntoHKU}
+
+  ; $0 is used as an index for HKEY_USERS enumeration
+  StrCpy $0 0
+
+  ${Do}
+    EnumRegKey $1 HKU "" $0
+    ${If} $1 == ""
+      ${Break}
+    ${EndIf}
+
+    ClearErrors
+    ${WordFind} "$1" "_Classes" "E#" $3
+    ${Unless} ${Errors}
+      ; remove the app user model id root registration. We don't need this
+      ; here anymore, we just use it for tray registrationdown in widget,
+      ; which we read out of the mozilla keys.
+      ${If} "${APP_USER_MODEL_ID}" != ""
+        ; The removal of this key intermittently fails, so do the best we can in cleanup
+        DeleteRegValue HKU "$1\${APP_USER_MODEL_ID}\.exe\shell\open\command" "DelegateExecute"
+        DeleteRegKey HKU "$1\${APP_USER_MODEL_ID}\.exe\shell\open"
+        DeleteRegKey HKU "$1\${APP_USER_MODEL_ID}\.exe\shell"
+        DeleteRegKey HKU "$1\${APP_USER_MODEL_ID}\.exe"
+        DeleteRegKey HKU "$1\\${APP_USER_MODEL_ID}"
+      ${EndIf}
+      ;
+      ; Remove delegate execute handler clsid registration
+      DeleteRegKey HKU "$1\CLSID\${DELEGATE_EXECUTE_HANDLER_ID}"
+
+      ; Remove protocol and file delegate execute handler id assoc
+      DeleteRegValue HKU "$1\${PROTOCOL_ACTIVATION_ID}" "AppUserModelID"
+      DeleteRegValue HKU "$1\${FILE_ACTIVATION_ID}" "AppUserModelID"
+
+      ; Remove delegate execute application registry keys
+      DeleteRegKey HKU "$1\${PROTOCOL_ACTIVATION_ID}\Application"
+      DeleteRegKey HKU "$1\${FILE_ACTIVATION_ID}\Application"
+
+      ; Remove misc. shell open info
+      DeleteRegValue HKU "$1\${PROTOCOL_ACTIVATION_ID}\shell\open" "CommandId"
+      DeleteRegValue HKU "$1\${FILE_ACTIVATION_ID}\shell\open" "CommandId"
+      DeleteRegValue HKU "$1\${PROTOCOL_ACTIVATION_ID}\shell\open\command" "DelegateExecute"
+      DeleteRegValue HKU "$1\${FILE_ACTIVATION_ID}\shell\open\command" "DelegateExecute"
+
+      ; remove metro browser splash image data
+      DeleteRegKey HKU "$1\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\DefaultBrowser_NOPUBLISHERID\SplashScreen\DefaultBrowser_NOPUBLISHERID!${APP_USER_MODEL_ID}"
+    ${Else}
+      ; misc. Metro keys
+      DeleteRegKey HKU "$1\Software\Mozilla\Firefox\Metro"
+      DeleteRegValue HKU "$1\Software\Mozilla\Firefox" "CEHDump"
+      DeleteRegValue HKU "$1\Software\Mozilla\Firefox" "MetroD3DAvailable"
+      DeleteRegValue HKU "$1\Software\Mozilla\Firefox" "MetroLastAHE"
+      ${ResetWin8PromptKeys} "HKU" "$1\"
+    ${EndIf}
+    IntOp $0 $0 + 1
+  ${Loop}
+  ${UnmountRegistryIntoHKU}
+
+  ; The removal of this key intermittently fails, so do the best we can in cleanup
+  ${If} "${APP_USER_MODEL_ID}" != ""
+    DeleteRegValue HKLM "Software\Classes\${APP_USER_MODEL_ID}\.exe\shell\open\command" "DelegateExecute"
+    DeleteRegKey HKLM "Software\Classes\${APP_USER_MODEL_ID}\.exe\shell\open"
+    DeleteRegKey HKLM "Software\Classes\${APP_USER_MODEL_ID}\.exe\shell"
+    DeleteRegKey HKLM "Software\Classes\${APP_USER_MODEL_ID}\.exe"
+    DeleteRegKey HKLM "Software\Classes\${APP_USER_MODEL_ID}"
+  ${EndIf}
+
+  ; Remove HKLM entries
+  DeleteRegKey HKLM "Software\Classes\CLSID\${DELEGATE_EXECUTE_HANDLER_ID}"
+  DeleteRegKey HKLM "Software\Classes\${PROTOCOL_ACTIVATION_ID}\Application"
+  DeleteRegKey HKLM "Software\Classes\${FILE_ACTIVATION_ID}\Application"
+  DeleteRegValue HKLM "Software\Classes\${PROTOCOL_ACTIVATION_ID}\shell\open\command" "DelegateExecute"
+  DeleteRegValue HKLM "Software\Classes\${FILE_ACTIVATION_ID}\shell\open\command" "DelegateExecute"
+  DeleteRegValue HKLM "Software\Classes\${PROTOCOL_ACTIVATION_ID}" "AppUserModelID"
+  DeleteRegValue HKLM "Software\Classes\${FILE_ACTIVATION_ID}" "AppUserModelID"
+  DeleteRegValue HKLM "Software\Classes\${PROTOCOL_ACTIVATION_ID}\shell\open" "CommandId"
+  DeleteRegValue HKLM "Software\Classes\${FILE_ACTIVATION_ID}\shell\open" "CommandId"
+
+  ClearErrors
+!macroend
+
+!define RemoveDEHRegistration "!insertmacro RemoveDEHRegistration"
+!define un.RemoveDEHRegistration "!insertmacro RemoveDEHRegistration"
+
 ; Removes various directories and files for reasons noted below.
 !macro RemoveDeprecatedFiles
+  ; Some users are ending up with unpacked chrome instead of omni.ja. This
+  ; causes Firefox to break badly after upgrading from Firefox 31, see bug
+  ; 1063052. Removing the chrome.manifest from the install directory causes
+  ; Firefox to use the updated omni.ja so it won't crash.
+  ${If} ${FileExists} "$INSTDIR\chrome.manifest"
+    Delete "$INSTDIR\chrome.manifest"
+  ${EndIf}
+
   ; Remove talkback if it is present (remove after bug 386760 is fixed)
   ${If} ${FileExists} "$INSTDIR\extensions\talkback@mozilla.org"
     RmDir /r /REBOOTOK "$INSTDIR\extensions\talkback@mozilla.org"
@@ -1268,6 +1535,9 @@ FunctionEnd
   Push "nspr4.dll"
   Push "nssdbm3.dll"
   Push "mozsqlite3.dll"
+!ifdef MOZ_CONTENT_SANDBOX
+  Push "sandboxbroker.dll"
+!endif
   Push "xpcom.dll"
   Push "crashreporter.exe"
   Push "updater.exe"
@@ -1424,4 +1694,4 @@ Function SetAsDefaultAppUser
 FunctionEnd
 !define SetAsDefaultAppUser "Call SetAsDefaultAppUser"
 
-!endif
+!endif ; NO_LOG

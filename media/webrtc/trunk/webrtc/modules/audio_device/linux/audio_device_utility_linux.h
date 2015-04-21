@@ -11,8 +11,8 @@
 #ifndef WEBRTC_AUDIO_DEVICE_AUDIO_DEVICE_UTILITY_LINUX_H
 #define WEBRTC_AUDIO_DEVICE_AUDIO_DEVICE_UTILITY_LINUX_H
 
-#include "audio_device_utility.h"
-#include "audio_device.h"
+#include "webrtc/modules/audio_device/audio_device_utility.h"
+#include "webrtc/modules/audio_device/include/audio_device.h"
 
 namespace webrtc
 {
@@ -21,16 +21,16 @@ class CriticalSectionWrapper;
 class AudioDeviceUtilityLinux: public AudioDeviceUtility
 {
 public:
-    AudioDeviceUtilityLinux(const WebRtc_Word32 id);
-    ~AudioDeviceUtilityLinux();
+    AudioDeviceUtilityLinux(const int32_t id);
+    virtual ~AudioDeviceUtilityLinux();
 
-    virtual WebRtc_Word32 Init();
+    virtual int32_t Init() OVERRIDE;
 
 private:
     CriticalSectionWrapper& _critSect;
-    WebRtc_Word32 _id;
+    int32_t _id;
 };
 
-} // namespace webrtc
+}  // namespace webrtc
 
 #endif  // MODULES_AUDIO_DEVICE_MAIN_SOURCE_LINUX_AUDIO_DEVICE_UTILITY_LINUX_H_

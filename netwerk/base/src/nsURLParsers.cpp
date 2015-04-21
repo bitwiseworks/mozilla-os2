@@ -9,11 +9,8 @@
 
 #include "nsURLParsers.h"
 #include "nsURLHelper.h"
-#include "nsIURI.h"
-#include "prtypes.h"
 #include "nsString.h"
 #include "nsCRT.h"
-#include "netCore.h"
 
 using namespace mozilla;
 
@@ -32,11 +29,8 @@ CountConsecutiveSlashes(const char *str, int32_t len)
 // nsBaseURLParser implementation
 //----------------------------------------------------------------------------
 
-// The URL parser service does not have any internal state; however, it can
-// be called from multiple threads, so we must use a threadsafe AddRef and
-// Release implementation.
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsAuthURLParser, nsIURLParser)
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsNoAuthURLParser, nsIURLParser)
+NS_IMPL_ISUPPORTS(nsAuthURLParser, nsIURLParser)
+NS_IMPL_ISUPPORTS(nsNoAuthURLParser, nsIURLParser)
 
 #define SET_RESULT(component, pos, len) \
     PR_BEGIN_MACRO \
@@ -153,12 +147,13 @@ nsBaseURLParser::ParseURL(const char *spec, int32_t specLen,
         // spec = <path-no-slashes-or-colon>
         //
         SET_RESULT(scheme, 0, -1);
-        if (authorityLen || pathLen)
+        if (authorityLen || pathLen) {
             ParseAfterScheme(spec, specLen,
                              authorityPos, authorityLen,
                              pathPos, pathLen);
             OFFSET_RESULT(authority, offset);
             OFFSET_RESULT(path, offset);
+        }
     }
     return NS_OK;
 }
@@ -585,7 +580,7 @@ nsAuthURLParser::ParseServerInfo(const char *serverinfo, int32_t serverinfoLen,
 
                 nsresult err;
                 *port = buf.ToInteger(&err);
-                if (NS_FAILED(err) || *port <= 0)
+                if (NS_FAILED(err) || *port < 0)
                     return NS_ERROR_MALFORMED_URI;
             }
         }

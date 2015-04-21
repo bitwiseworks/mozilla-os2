@@ -105,16 +105,25 @@ function docToTestOutput(doc) {
 }
 
 /**
+ * Creates a walker for a fragment that skips over the root node.
+ *
+ * @param an element
+ */
+function createFragmentWalker(elt) {
+  return elt.ownerDocument.createTreeWalker(elt, NodeFilter.SHOW_ALL,
+    function (node) {
+      return elt == node ? NodeFilter.FILTER_SKIP : NodeFilter.FILTER_ACCEPT;
+    });
+}
+
+/**
  * Transforms the descendants of an element to a string matching the format
  * in the test cases.
  *
  * @param an element
  */
 function fragmentToTestOutput(elt) {
-  var walker = elt.ownerDocument.createTreeWalker(elt, NodeFilter.SHOW_ALL, 
-    function (node) { return elt == node ? 
-                        NodeFilter.FILTER_SKIP : 
-                        NodeFilter.FILTER_ACCEPT; });
+  var walker = createFragmentWalker(elt);
   return addLevels(walker, "", "| ").slice(0,-1); // remove the last newline
 }
 
@@ -139,10 +148,6 @@ function addLevels(walker, buf, indent) {
             var attrs = walker.currentNode.attributes;
             for (var i = 0; i < attrs.length; ++i) {
               var localName = attrs[i].localName;
-              if (localName.indexOf("_moz-") == 0) {
-                // Skip bogus attributes added by the MathML implementation
-                continue;
-              }
               var name;
               var attrNs = attrs[i].namespaceURI;
               if (null == attrNs) {
@@ -184,6 +189,15 @@ function addLevels(walker, buf, indent) {
           break;
       }
       buf += "\n";
+      // In the case of template elements, children do not get inserted as
+      // children of the template element, instead they are inserted
+      // as children of the template content (which is a document fragment).
+      if (walker.currentNode instanceof HTMLTemplateElement) {
+        buf += indent + "  content\n";
+        // Walk through the template content.
+        var templateWalker = createFragmentWalker(walker.currentNode.content);
+        buf = addLevels(templateWalker, buf, indent + "    ");
+      }
       buf = addLevels(walker, buf, indent + "  ");
     } while(walker.nextSibling());
     walker.parentNode();

@@ -4,14 +4,10 @@
 
 from setuptools import setup
 
-PACKAGE_VERSION = '0.5'
+PACKAGE_VERSION = '0.7'
 
 # dependencies
-deps = ['mozfile >= 0.6']
-try:
-    import json
-except ImportError:
-    deps = ['simplejson']
+deps = ['mozfile >= 0.12']
 
 setup(name='mozinfo',
       version=PACKAGE_VERSION,
@@ -21,7 +17,7 @@ setup(name='mozinfo',
       keywords='mozilla',
       author='Mozilla Automation and Testing Team',
       author_email='tools@lists.mozilla.org',
-      url='https://wiki.mozilla.org/Auto-tools/Projects/MozBase',
+      url='https://wiki.mozilla.org/Auto-tools/Projects/Mozbase',
       license='MPL',
       packages=['mozinfo'],
       include_package_data=True,

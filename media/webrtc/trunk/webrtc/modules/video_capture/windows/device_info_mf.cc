@@ -8,42 +8,42 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "modules/video_capture/windows/device_info_mf.h"
+#include "webrtc/modules/video_capture/windows/device_info_mf.h"
 
 namespace webrtc {
 namespace videocapturemodule {
 
-DeviceInfoMF::DeviceInfoMF(const WebRtc_Word32 id) : DeviceInfoImpl(id) {
+DeviceInfoMF::DeviceInfoMF(const int32_t id) : DeviceInfoImpl(id) {
 }
 
 DeviceInfoMF::~DeviceInfoMF() {
 }
 
-WebRtc_Word32 DeviceInfoMF::Init() {
+int32_t DeviceInfoMF::Init() {
   return -1;
 }
 
-WebRtc_UWord32 DeviceInfoMF::NumberOfDevices() {
+uint32_t DeviceInfoMF::NumberOfDevices() {
   return 0;
 }
 
-WebRtc_Word32 DeviceInfoMF::GetDeviceName(
-    WebRtc_UWord32 deviceNumber,
+int32_t DeviceInfoMF::GetDeviceName(
+    uint32_t deviceNumber,
     char* deviceNameUTF8,
-    WebRtc_UWord32 deviceNameLength,
+    uint32_t deviceNameLength,
     char* deviceUniqueIdUTF8,
-    WebRtc_UWord32 deviceUniqueIdUTF8Length,
+    uint32_t deviceUniqueIdUTF8Length,
     char* productUniqueIdUTF8,
-    WebRtc_UWord32 productUniqueIdUTF8Length) {
+    uint32_t productUniqueIdUTF8Length) {
   return -1;
 }
 
-WebRtc_Word32 DeviceInfoMF::DisplayCaptureSettingsDialogBox(
+int32_t DeviceInfoMF::DisplayCaptureSettingsDialogBox(
     const char* deviceUniqueIdUTF8,
     const char* dialogTitleUTF8,
     void* parentWindow,
-    WebRtc_UWord32 positionX,
-    WebRtc_UWord32 positionY) {
+    uint32_t positionX,
+    uint32_t positionY) {
   return -1;
 }
 

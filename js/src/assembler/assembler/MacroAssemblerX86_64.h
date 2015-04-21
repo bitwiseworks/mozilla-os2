@@ -23,8 +23,8 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
- * 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
  * ***** END LICENSE BLOCK ***** */
 
 #ifndef assembler_assembler_MacroAssemblerX86_64_h
@@ -36,7 +36,7 @@
 
 #if ENABLE_ASSEMBLER && WTF_CPU_X86_64
 
-#include "MacroAssemblerX86Common.h"
+#include "assembler/assembler/MacroAssemblerX86Common.h"
 
 #define REPTACH_OFFSET_CALL_R11 3
 
@@ -67,13 +67,13 @@ public:
         move(ImmPtr(address.m_ptr), scratchRegister);
         add32(imm, Address(scratchRegister));
     }
-    
+
     void and32(Imm32 imm, AbsoluteAddress address)
     {
         move(ImmPtr(address.m_ptr), scratchRegister);
         and32(imm, Address(scratchRegister));
     }
-    
+
     void or32(TrustedImm32 imm, AbsoluteAddress address)
     {
         move(ImmPtr(address.m_ptr), scratchRegister);
@@ -191,7 +191,7 @@ public:
         move(ImmPtr(address.m_ptr), scratchRegister);
         addPtr(imm, Address(scratchRegister));
     }
-    
+
     void andPtr(RegisterID src, RegisterID dest)
     {
         m_assembler.andq_rr(src, dest);
@@ -255,12 +255,12 @@ public:
     {
         m_assembler.subq_rr(src, dest);
     }
-    
+
     void subPtr(Imm32 imm, RegisterID dest)
     {
         m_assembler.subq_ir(imm.m_value, dest);
     }
-    
+
     void subPtr(ImmPtr imm, RegisterID dest)
     {
         move(imm, scratchRegister);
@@ -337,7 +337,7 @@ public:
     {
         m_assembler.movq_rm(src, address.offset, address.base, address.index, address.scale);
     }
-    
+
     void storePtr(RegisterID src, void* address)
     {
         if (src == X86Registers::eax)
@@ -568,10 +568,10 @@ public:
         storePtr(ImmPtr(reinterpret_cast<void *>(imm.u.u64)), address);
     }
 
-    bool supportsFloatingPoint() const { return true; }
+    static bool supportsFloatingPoint() { return true; }
     // See comment on MacroAssemblerARMv7::supportsFloatingPointTruncate()
-    bool supportsFloatingPointTruncate() const { return true; }
-    bool supportsFloatingPointSqrt() const { return true; }
+    static bool supportsFloatingPointTruncate() { return true; }
+    static bool supportsFloatingPointSqrt() { return true; }
 
 private:
     friend class LinkBuffer;

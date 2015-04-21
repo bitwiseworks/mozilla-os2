@@ -12,3 +12,9 @@ EXTRA_JS_MODULES += [
     'Payment.jsm',
 ]
 
+EXTRA_COMPONENTS += [
+    'Payment.js',
+    'Payment.manifest',
+    'PaymentFlowInfo.js',
+]
+

@@ -9,12 +9,18 @@
 
 #include "mozilla/dom/quota/QuotaCommon.h"
 
+#include "PersistenceType.h"
+
 class nsIOfflineStorage;
 class nsIRunnable;
 
+#define IDB_DIRECTORY_NAME "idb"
+#define ASMJSCACHE_DIRECTORY_NAME "asmjs"
+
 BEGIN_QUOTA_NAMESPACE
 
-class UsageRunnable;
+class OriginOrPatternString;
+class UsageInfo;
 
 // An abstract interface for quota manager clients.
 // Each storage API must provide an implementation of this interface in order
@@ -22,16 +28,17 @@ class UsageRunnable;
 class Client
 {
 public:
-  NS_IMETHOD_(nsrefcnt)
+  NS_IMETHOD_(MozExternalRefCountType)
   AddRef() = 0;
 
-  NS_IMETHOD_(nsrefcnt)
+  NS_IMETHOD_(MozExternalRefCountType)
   Release() = 0;
 
   enum Type {
     IDB = 0,
     //LS,
     //APPCACHE,
+    ASMJS,
     TYPE_MAX
   };
 
@@ -43,7 +50,11 @@ public:
   {
     switch (aType) {
       case IDB:
-        aText.AssignLiteral("idb");
+        aText.AssignLiteral(IDB_DIRECTORY_NAME);
+        break;
+
+      case ASMJS:
+        aText.AssignLiteral(ASMJSCACHE_DIRECTORY_NAME);
         break;
 
       case TYPE_MAX:
@@ -58,8 +69,11 @@ public:
   static nsresult
   TypeFromText(const nsAString& aText, Type& aType)
   {
-    if (aText.EqualsLiteral("idb")) {
+    if (aText.EqualsLiteral(IDB_DIRECTORY_NAME)) {
       aType = IDB;
+    }
+    else if (aText.EqualsLiteral(ASMJSCACHE_DIRECTORY_NAME)) {
+      aType = ASMJS;
     }
     else {
       return NS_ERROR_FAILURE;
@@ -70,14 +84,20 @@ public:
 
   // Methods which are called on the IO thred.
   virtual nsresult
-  InitOrigin(const nsACString& aOrigin, UsageRunnable* aUsageRunnable) = 0;
+  InitOrigin(PersistenceType aPersistenceType,
+             const nsACString& aGroup,
+             const nsACString& aOrigin,
+             UsageInfo* aUsageInfo) = 0;
 
   virtual nsresult
-  GetUsageForOrigin(const nsACString& aOrigin,
-                    UsageRunnable* aUsageRunnable) = 0;
+  GetUsageForOrigin(PersistenceType aPersistenceType,
+                    const nsACString& aGroup,
+                    const nsACString& aOrigin,
+                    UsageInfo* aUsageInfo) = 0;
 
   virtual void
-  OnOriginClearCompleted(const nsACString& aPattern) = 0;
+  OnOriginClearCompleted(PersistenceType aPersistenceType,
+                         const OriginOrPatternString& aOriginOrPattern) = 0;
 
   virtual void
   ReleaseIOThreadObjects() = 0;

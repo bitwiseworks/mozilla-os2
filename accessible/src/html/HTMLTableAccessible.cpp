@@ -20,20 +20,20 @@
 
 #include "mozilla/dom/HTMLTableElement.h"
 #include "nsIDOMElement.h"
-#include "nsIDOMDocument.h"
 #include "nsIDOMRange.h"
 #include "nsISelectionPrivate.h"
-#include "nsINameSpaceManager.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMHTMLCollection.h"
 #include "nsIDocument.h"
 #include "nsIMutableArray.h"
+#include "nsIPersistentProperties2.h"
 #include "nsIPresShell.h"
 #include "nsITableCellLayout.h"
 #include "nsFrameSelection.h"
 #include "nsError.h"
 #include "nsArrayUtils.h"
 #include "nsComponentManagerUtils.h"
+#include "nsNameSpaceManager.h"
 #include "nsTableCellFrame.h"
 #include "nsTableOuterFrame.h"
 
@@ -48,14 +48,15 @@ HTMLTableCellAccessible::
   HTMLTableCellAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   HyperTextAccessibleWrap(aContent, aDoc), xpcAccessibleTableCell(this)
 {
+  mGenericTypes |= eTableCell;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // HTMLTableCellAccessible: nsISupports implementation
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLTableCellAccessible,
-                             HyperTextAccessible,
-                             nsIAccessibleTableCell)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLTableCellAccessible,
+                            HyperTextAccessible,
+                            nsIAccessibleTableCell)
 
 ////////////////////////////////////////////////////////////////////////////////
 // HTMLTableCellAccessible: Accessible implementation
@@ -314,6 +315,7 @@ HTMLTableHeaderCellAccessible::NativeRole()
 
   // Assume it's columnheader if there are headers in siblings, otherwise
   // rowheader.
+  // This should iterate the flattened tree
   nsIContent* parentContent = mContent->GetParent();
   if (!parentContent) {
     NS_ERROR("Deattached content on alive accessible?");
@@ -358,11 +360,11 @@ HTMLTableRowAccessible::NativeRole()
 // HTMLTableAccessible
 ////////////////////////////////////////////////////////////////////////////////
 
-NS_IMPL_ISUPPORTS_INHERITED1(HTMLTableAccessible, Accessible,
-                             nsIAccessibleTable)
+NS_IMPL_ISUPPORTS_INHERITED(HTMLTableAccessible, Accessible,
+                            nsIAccessibleTable)
 
 ////////////////////////////////////////////////////////////////////////////////
-//nsAccessNode
+// HTMLTableAccessible: Accessible
 
 void
 HTMLTableAccessible::Shutdown()
@@ -370,10 +372,6 @@ HTMLTableAccessible::Shutdown()
   mTable = nullptr;
   AccessibleWrap::Shutdown();
 }
-
-
-////////////////////////////////////////////////////////////////////////////////
-// HTMLTableAccessible: Accessible implementation
 
 void
 HTMLTableAccessible::CacheChildren()
@@ -448,10 +446,10 @@ HTMLTableAccessible::NativeAttributes()
 // HTMLTableAccessible: nsIAccessible implementation
 
 Relation
-HTMLTableAccessible::RelationByType(uint32_t aType)
+HTMLTableAccessible::RelationByType(RelationType aType)
 {
   Relation rel = AccessibleWrap::RelationByType(aType);
-  if (aType == nsIAccessibleRelation::RELATION_LABELLED_BY)
+  if (aType == RelationType::LABELLED_BY)
     rel.AppendTarget(Caption());
 
   return rel;
@@ -1115,10 +1113,10 @@ HTMLTableAccessible::IsProbablyLayoutTable()
 ////////////////////////////////////////////////////////////////////////////////
 
 Relation
-HTMLCaptionAccessible::RelationByType(uint32_t aType)
+HTMLCaptionAccessible::RelationByType(RelationType aType)
 {
   Relation rel = HyperTextAccessible::RelationByType(aType);
-  if (aType == nsIAccessibleRelation::RELATION_LABEL_FOR)
+  if (aType == RelationType::LABEL_FOR)
     rel.AppendTarget(Parent());
 
   return rel;

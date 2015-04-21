@@ -9,7 +9,6 @@
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsComputedDOMStyle.h"
-#include "nsContentUtils.h"
 #include "nsDebug.h"
 #include "nsEditProperty.h"
 #include "nsError.h"
@@ -44,6 +43,7 @@
 #include "nsStringFwd.h"
 #include "nsUnicharUtils.h"
 #include "nscore.h"
+#include "nsContentUtils.h" // for nsAutoScriptBlocker
 
 class nsIDOMEventListener;
 class nsISelection;
@@ -104,7 +104,7 @@ protected:
   nsINode* mObservedNode;
 };
 
-NS_IMPL_ISUPPORTS1(nsElementDeletionObserver, nsIMutationObserver)
+NS_IMPL_ISUPPORTS(nsElementDeletionObserver, nsIMutationObserver)
 NS_IMPL_NSIMUTATIONOBSERVER_CONTENT(nsElementDeletionObserver)
 
 void
@@ -171,7 +171,7 @@ nsHTMLEditor::CreateAnonymousElement(const nsAString & aTag, nsIDOMNode *  aPare
     nsAutoScriptBlocker scriptBlocker;
 
     // establish parenthood of the element
-    newContent->SetNativeAnonymous();
+    newContent->SetIsNativeAnonymousRoot();
     res = newContent->BindToTree(doc, parentContent, parentContent, true);
     if (NS_FAILED(res)) {
       newContent->UnbindFromTree();
@@ -236,7 +236,7 @@ nsHTMLEditor::DeleteRefToAnonymousNode(nsIDOMElement* aElement,
             docObserver->BeginUpdate(document, UPDATE_CONTENT_MODEL);
 
           // XXX This is wrong (bug 439258).  Once it's fixed, the NS_WARNING
-          // in nsCSSFrameConstructor::RestyleForRemove should be changed back
+          // in RestyleManager::RestyleForRemove should be changed back
           // to an assertion.
           docObserver->ContentRemoved(content->GetCurrentDoc(),
                                       aParentContent, content, -1,

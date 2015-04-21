@@ -55,7 +55,8 @@ int nr_stun_build_req_no_auth(nr_stun_client_stun_binding_request_params *params
 
 
 typedef struct nr_stun_client_stun_keepalive_params_ {
-#ifdef WIN32  // silly VC++ gives error if no members
+#if defined(WIN32) || defined(__clang__)
+    // VC++ and clang give error and warning respectively if no members
     int dummy;
 #endif
 } nr_stun_client_stun_keepalive_params;
@@ -79,6 +80,7 @@ typedef struct nr_stun_client_ice_use_candidate_params_ {
     char *username;
     Data password;
     UINT4 priority;
+    UINT8 tiebreaker;
 } nr_stun_client_ice_use_candidate_params;
 
 int nr_stun_build_use_candidate(nr_stun_client_ice_use_candidate_params *params, nr_stun_message **msg);

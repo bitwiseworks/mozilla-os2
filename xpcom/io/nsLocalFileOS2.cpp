@@ -359,7 +359,7 @@ class nsDirEnumerator : public nsISimpleEnumerator,
         nsCOMPtr<nsIFile>  mNext;
 };
 
-NS_IMPL_ISUPPORTS2(nsDirEnumerator, nsISimpleEnumerator, nsIDirectoryEnumerator)
+NS_IMPL_ISUPPORTS(nsDirEnumerator, nsISimpleEnumerator, nsIDirectoryEnumerator)
 
 //-----------------------------------------------------------------------------
 // nsDriveEnumerator
@@ -381,7 +381,7 @@ private:
     uint8_t     mLetter;
 };
 
-NS_IMPL_ISUPPORTS1(nsDriveEnumerator, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS(nsDriveEnumerator, nsISimpleEnumerator)
 
 nsDriveEnumerator::nsDriveEnumerator()
  : mDrives(0), mLetter(0)
@@ -556,8 +556,10 @@ nsLocalFile::nsLocalFile()
 nsresult
 nsLocalFile::nsLocalFileConstructor(nsISupports* outer, const nsIID& aIID, void* *aInstancePtr)
 {
-    NS_ENSURE_ARG_POINTER(aInstancePtr);
-    NS_ENSURE_NO_AGGREGATION(outer);
+    if (NS_WARN_IF(!aInstancePtr))
+        return NS_ERROR_INVALID_ARG;
+    if (NS_WARN_IF(outer))
+        return NS_ERROR_NO_AGGREGATION;
 
     nsLocalFile* inst = new nsLocalFile();
     if (inst == NULL)
@@ -577,11 +579,11 @@ nsLocalFile::nsLocalFileConstructor(nsISupports* outer, const nsIID& aIID, void*
 // nsLocalFile::nsISupports
 //-----------------------------------------------------------------------------
 
-NS_IMPL_THREADSAFE_ISUPPORTS4(nsLocalFile,
-                              nsILocalFile,
-                              nsIFile,
-                              nsILocalFileOS2,
-                              nsIHashable)
+NS_IMPL_ISUPPORTS(nsLocalFile,
+                  nsILocalFile,
+                  nsIFile,
+                  nsILocalFileOS2,
+                  nsIHashable)
 
 
 //-----------------------------------------------------------------------------
@@ -915,7 +917,7 @@ nsLocalFile::Normalize()
 
     // assign the root
     nsAutoString normal;
-    const PRUnichar * pathBuffer = path.get();  // simplify access to the buffer
+    const char16_t * pathBuffer = path.get();  // simplify access to the buffer
     normal.SetCapacity(path.Length()); // it won't ever grow longer
     normal.Assign(pathBuffer, rootIdx);
 
@@ -1096,7 +1098,8 @@ nsLocalFile::GetEA(const char *eaName, PFEA2LIST pfea2list)
 NS_IMETHODIMP
 nsLocalFile::GetFileTypes(nsIArray **_retval)
 {
-    NS_ENSURE_ARG(_retval);
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
     *_retval = 0;
 
     // fetch the .TYPE ea & prepare for enumeration
@@ -1390,8 +1393,8 @@ nsLocalFile::CopySingleFile(nsIFile *sourceFile, nsIFile *destParent,
             strcat(achProgram, """");
             achProgram[strlen(achProgram) + 1] = '\0';
             achProgram[7] = '\0';
-            DosExecPgm(NULL, 0,
-                       EXEC_SYNC, achProgram, (PSZ)NULL,
+            DosExecPgm(nullptr, 0,
+                       EXEC_SYNC, achProgram, (PSZ)nullptr,
                        &rescResults, achProgram);
             rc = 0; // Assume it worked
 
@@ -1707,7 +1710,8 @@ nsLocalFile::GetLastModifiedTime(PRTime *aLastModifiedTime)
     // Check we are correctly initialized.
     CHECK_mWorkingPath();
 
-    NS_ENSURE_ARG(aLastModifiedTime);
+    if (NS_WARN_IF(!aLastModifiedTime))
+        return NS_ERROR_INVALID_ARG;
 
     *aLastModifiedTime = 0;
     nsresult rv = Stat();
@@ -1791,7 +1795,8 @@ nsLocalFile::SetModDate(PRTime aLastModifiedTime)
 NS_IMETHODIMP
 nsLocalFile::GetPermissions(uint32_t *aPermissions)
 {
-    NS_ENSURE_ARG(aPermissions);
+    if (NS_WARN_IF(!aPermissions))
+        return NS_ERROR_INVALID_ARG;
 
     nsresult rv = Stat();
     if (NS_FAILED(rv))
@@ -1871,7 +1876,8 @@ nsLocalFile::GetFileSize(int64_t *aFileSize)
     // Check we are correctly initialized.
     CHECK_mWorkingPath();
 
-    NS_ENSURE_ARG(aFileSize);
+    if (NS_WARN_IF(!aFileSize))
+        return NS_ERROR_INVALID_ARG;
     *aFileSize = 0;
 
     nsresult rv = Stat();
@@ -1908,7 +1914,7 @@ nsLocalFile::SetFileSize(int64_t aFileSize)
                  FILE_NORMAL,
                  OPEN_ACTION_FAIL_IF_NEW | OPEN_ACTION_OPEN_IF_EXISTS,
                  OPEN_SHARE_DENYREADWRITE | OPEN_ACCESS_READWRITE,
-                 NULL);
+                 nullptr);
 
     if (rc != NO_ERROR)
     {
@@ -1936,7 +1942,8 @@ nsLocalFile::GetDiskSpaceAvailable(int64_t *aDiskSpaceAvailable)
     // Check we are correctly initialized.
     CHECK_mWorkingPath();
 
-    NS_ENSURE_ARG(aDiskSpaceAvailable);
+    if (NS_WARN_IF(!aDiskSpaceAvailable))
+        return NS_ERROR_INVALID_ARG;
     *aDiskSpaceAvailable = 0;
 
     nsresult rv = Stat();
@@ -1966,7 +1973,8 @@ nsLocalFile::GetParent(nsIFile * *aParent)
     // Check we are correctly initialized.
     CHECK_mWorkingPath();
 
-    NS_ENSURE_ARG_POINTER(aParent);
+    if (NS_WARN_IF(!aParent))
+        return NS_ERROR_INVALID_ARG;
 
     nsAutoCString parentPath(mWorkingPath);
 
@@ -2005,7 +2013,8 @@ nsLocalFile::Exists(bool *_retval)
     // Check we are correctly initialized.
     CHECK_mWorkingPath();
 
-    NS_ENSURE_ARG(_retval);
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
     *_retval = false;
 
     MakeDirty();
@@ -2021,7 +2030,8 @@ nsLocalFile::IsWritable(bool *_retval)
     // Check we are correctly initialized.
     CHECK_mWorkingPath();
 
-    NS_ENSURE_ARG(_retval);
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
     *_retval = false;
 
     nsresult rv = Stat();
@@ -2050,7 +2060,8 @@ nsLocalFile::IsReadable(bool *_retval)
     // Check we are correctly initialized.
     CHECK_mWorkingPath();
 
-    NS_ENSURE_ARG(_retval);
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
     *_retval = false;
 
     nsresult rv = Stat();
@@ -2068,7 +2079,8 @@ nsLocalFile::IsExecutable(bool *_retval)
     // Check we are correctly initialized.
     CHECK_mWorkingPath();
 
-    NS_ENSURE_ARG(_retval);
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
     *_retval = false;
 
     nsresult rv = Stat();
@@ -2122,7 +2134,8 @@ nsLocalFile::IsExecutable(bool *_retval)
 NS_IMETHODIMP
 nsLocalFile::IsDirectory(bool *_retval)
 {
-    NS_ENSURE_ARG(_retval);
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
     *_retval = false;
 
     nsresult rv = Stat();
@@ -2136,7 +2149,8 @@ nsLocalFile::IsDirectory(bool *_retval)
 NS_IMETHODIMP
 nsLocalFile::IsFile(bool *_retval)
 {
-    NS_ENSURE_ARG(_retval);
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
     *_retval = false;
 
     nsresult rv = Stat();
@@ -2150,7 +2164,8 @@ nsLocalFile::IsFile(bool *_retval)
 NS_IMETHODIMP
 nsLocalFile::IsHidden(bool *_retval)
 {
-    NS_ENSURE_ARG(_retval);
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
     *_retval = false;
 
     nsresult rv = Stat();
@@ -2181,7 +2196,8 @@ nsLocalFile::IsSymlink(bool *_retval)
     // Check we are correctly initialized.
     CHECK_mWorkingPath();
 
-    NS_ENSURE_ARG_POINTER(_retval);
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
 
     // No Symlinks on OS/2
     *_retval = false;
@@ -2191,7 +2207,8 @@ nsLocalFile::IsSymlink(bool *_retval)
 NS_IMETHODIMP
 nsLocalFile::IsSpecial(bool *_retval)
 {
-    NS_ENSURE_ARG(_retval);
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
 
     // when implemented, IsSpecial will be used for WPS objects
     *_retval = false;
@@ -2201,8 +2218,10 @@ nsLocalFile::IsSpecial(bool *_retval)
 NS_IMETHODIMP
 nsLocalFile::Equals(nsIFile *inFile, bool *_retval)
 {
-    NS_ENSURE_ARG(inFile);
-    NS_ENSURE_ARG(_retval);
+    if (NS_WARN_IF(!inFile))
+        return NS_ERROR_INVALID_ARG;
+    if (NS_WARN_IF(!_retval))
+        return NS_ERROR_INVALID_ARG;
 
     nsAutoCString inFilePath;
     inFile->GetNativePath(inFilePath);
@@ -2257,7 +2276,8 @@ nsLocalFile::GetNativeTarget(nsACString &_retval)
 NS_IMETHODIMP
 nsLocalFile::GetFollowLinks(bool *aFollowLinks)
 {
-    NS_ENSURE_ARG(aFollowLinks);
+    if (NS_WARN_IF(!aFollowLinks))
+        return NS_ERROR_INVALID_ARG;
     *aFollowLinks = false;
     return NS_OK;
 }
@@ -2271,7 +2291,8 @@ nsLocalFile::SetFollowLinks(bool aFollowLinks)
 NS_IMETHODIMP
 nsLocalFile::GetDirectoryEntries(nsISimpleEnumerator * *entries)
 {
-    NS_ENSURE_ARG(entries);
+    if (NS_WARN_IF(!entries))
+        return NS_ERROR_INVALID_ARG;
     nsresult rv;
     *entries = nullptr;
 

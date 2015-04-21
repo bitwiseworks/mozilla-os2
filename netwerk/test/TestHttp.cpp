@@ -34,9 +34,9 @@ public:
     virtual ~MyListener() {}
 };
 
-NS_IMPL_ISUPPORTS2(MyListener,
-                   nsIRequestObserver,
-                   nsIStreamListener)
+NS_IMPL_ISUPPORTS(MyListener,
+                  nsIRequestObserver,
+                  nsIStreamListener)
 
 NS_IMETHODIMP
 MyListener::OnStartRequest(nsIRequest *req, nsISupports *ctxt)
@@ -88,7 +88,7 @@ class MyNotifications : public nsIInterfaceRequestor
                       , public nsIProgressEventSink
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIINTERFACEREQUESTOR
     NS_DECL_NSIPROGRESSEVENTSINK
 
@@ -96,9 +96,9 @@ public:
     virtual ~MyNotifications() {}
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(MyNotifications,
-                              nsIInterfaceRequestor,
-                              nsIProgressEventSink)
+NS_IMPL_ISUPPORTS(MyNotifications,
+                  nsIInterfaceRequestor,
+                  nsIProgressEventSink)
 
 NS_IMETHODIMP
 MyNotifications::GetInterface(const nsIID &iid, void **result)
@@ -108,7 +108,7 @@ MyNotifications::GetInterface(const nsIID &iid, void **result)
 
 NS_IMETHODIMP
 MyNotifications::OnStatus(nsIRequest *req, nsISupports *ctx,
-                          nsresult status, const PRUnichar *statusText)
+                          nsresult status, const char16_t *statusText)
 {
     printf("status: %x\n", status);
     return NS_OK;

@@ -26,7 +26,7 @@
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * 
+ *
  * ***** END LICENSE BLOCK ***** */
 
 #ifndef assembler_assembler_MacroAssemblerARM_h
@@ -36,8 +36,8 @@
 
 #if ENABLE_ASSEMBLER && WTF_CPU_ARM_TRADITIONAL
 
-#include "ARMAssembler.h"
-#include "AbstractMacroAssembler.h"
+#include "assembler/assembler/ARMAssembler.h"
+#include "assembler/assembler/AbstractMacroAssembler.h"
 
 namespace JSC {
 
@@ -190,16 +190,16 @@ public:
     {
         m_assembler.movs_r(dest, m_assembler.asr(dest, imm.m_value & 0x1f));
     }
-    
+
     void urshift32(RegisterID shift_amount, RegisterID dest)
     {
         ARMWord w = ARMAssembler::getOp2(0x1f);
         ASSERT(w != ARMAssembler::INVALID_IMM);
         m_assembler.and_r(ARMRegisters::S0, shift_amount, w);
-        
+
         m_assembler.movs_r(dest, m_assembler.lsr_r(dest, ARMRegisters::S0));
     }
-    
+
     void urshift32(Imm32 imm, RegisterID dest)
     {
         m_assembler.movs_r(dest, m_assembler.lsr(dest, imm.m_value & 0x1f));
@@ -258,7 +258,7 @@ public:
     void load8SignExtend(ImplicitAddress address, RegisterID dest)
     {
         m_assembler.dataTransferN(true, true, 8, dest, address.base, address.offset);
-    } 
+    }
 
     void load8ZeroExtend(ImplicitAddress address, RegisterID dest)
     {
@@ -287,11 +287,11 @@ public:
     {
         load16(address, dest);
     }
-   
+
     void load16SignExtend(ImplicitAddress address, RegisterID dest)
     {
         m_assembler.dataTransferN(true, true, 16, dest, address.base, address.offset);
-    } 
+    }
 
     void load16ZeroExtend(ImplicitAddress address, RegisterID dest)
     {
@@ -360,7 +360,7 @@ public:
         m_assembler.add_r(ARMRegisters::S1, address.base, m_assembler.lsl(address.index, address.scale));
         load16(Address(ARMRegisters::S1, address.offset), dest);
     }
-    
+
     void load16(ImplicitAddress address, RegisterID dest)
     {
         if (address.offset >= 0)
@@ -478,7 +478,7 @@ public:
     void store16(TrustedImm32 imm, BaseIndex address)
     {
         if (imm.m_isPointer)
-            JS_ASSERT("What are you trying to do with 16 bits of a pointer?");
+            MOZ_ASSUME_UNREACHABLE("What are you trying to do with 16 bits of a pointer?");
         else
             move(imm, ARMRegisters::S1);
         store16(ARMRegisters::S1, address);
@@ -486,7 +486,7 @@ public:
     void store16(TrustedImm32 imm, ImplicitAddress address)
     {
         if (imm.m_isPointer)
-            JS_ASSERT("What are you trying to do with 16 bits of a pointer?");
+            MOZ_ASSUME_UNREACHABLE("What are you trying to do with 16 bits of a pointer?");
         else
             move(imm, ARMRegisters::S1);
         store16(ARMRegisters::S1, address);
@@ -502,7 +502,7 @@ public:
     {
         m_assembler.ldr_un_imm(ARMRegisters::S0, reinterpret_cast<ARMWord>(address));
         if (imm.m_isPointer)
-            JS_ASSERT("What are you trying to do with 16 bits of a pointer?");
+            MOZ_ASSUME_UNREACHABLE("What are you trying to do with 16 bits of a pointer?");
         else
             m_assembler.moveImm(imm.m_value, ARMRegisters::S1);
         m_assembler.mem_imm_off(false, false, 16, true, ARMRegisters::S1, ARMRegisters::S0, 0);
@@ -521,7 +521,7 @@ public:
     void store8(TrustedImm32 imm, BaseIndex address)
     {
         if (imm.m_isPointer)
-            JS_ASSERT("What are you trying to do with 8 bits of a pointer?");
+            MOZ_ASSUME_UNREACHABLE("What are you trying to do with 8 bits of a pointer?");
         else
             move(imm, ARMRegisters::S1);
         store8(ARMRegisters::S1, address);
@@ -530,7 +530,7 @@ public:
     void store8(TrustedImm32 imm, ImplicitAddress address)
     {
         if (imm.m_isPointer)
-            JS_ASSERT("What are you trying to do with 16 bits of a pointer?");
+            MOZ_ASSUME_UNREACHABLE("What are you trying to do with 16 bits of a pointer?");
         else
             move(imm, ARMRegisters::S1);
         store8(ARMRegisters::S1, address);
@@ -546,7 +546,7 @@ public:
     {
         m_assembler.ldr_un_imm(ARMRegisters::S0, reinterpret_cast<ARMWord>(address));
         if (imm.m_isPointer)
-            JS_ASSERT("What are you trying to do with 16 bits of a pointer?");
+            MOZ_ASSUME_UNREACHABLE("What are you trying to do with 16 bits of a pointer?");
         else
             m_assembler.moveImm(imm.m_value, ARMRegisters::S1);
         m_assembler.mem_imm_off(false, false, 8, true, ARMRegisters::S1, ARMRegisters::S0, 0);
@@ -1111,17 +1111,17 @@ public:
     }
 
     // Floating point operators
-    bool supportsFloatingPoint() const
+    static bool supportsFloatingPoint()
     {
         return s_isVFPPresent;
     }
 
-    bool supportsFloatingPointTruncate() const
+    static bool supportsFloatingPointTruncate()
     {
         return true;
     }
 
-    bool supportsFloatingPointSqrt() const
+    static bool supportsFloatingPointSqrt()
     {
         return s_isVFPPresent;
     }
@@ -1179,7 +1179,7 @@ public:
         m_assembler.vcvt(m_assembler.FloatReg32, m_assembler.FloatReg64, dest_s, dest);
         return label;
     }
- 
+
     void storeDouble(FPRegisterID src, ImplicitAddress address)
     {
         // Store a double at base+offset.

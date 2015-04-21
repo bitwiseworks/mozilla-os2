@@ -11,15 +11,7 @@ function test()
 {
   waitForExplicitFinish();
 
-  addTabAndOpenStyleEditor(function(panel) {
-    let UI = panel.UI;
-    UI.on("editor-added", function(event, editor) {
-      if (editor == UI.editors[1]) {
-        // wait until both editors are added
-        runTests(UI);
-      }
-    });
-  });
+  addTabAndOpenStyleEditors(2, panel => runTests(panel.UI));
 
   content.location = TESTCASE_URI;
 }
@@ -29,13 +21,14 @@ function runTests(aUI)
   is(aUI.editors.length, 2,
      "there is 2 stylesheets initially");
 
-  aUI.editors[0].getSourceEditor().then(function onEditorAttached(aEditor) {
+  aUI.editors[0].getSourceEditor().then(aEditor => {
     executeSoon(function () {
       waitForFocus(function () {
         // queue a resize to inverse aspect ratio
         // this will trigger a detach and reattach (to workaround bug 254144)
         let originalSourceEditor = aEditor.sourceEditor;
-        aEditor.sourceEditor.setCaretOffset(4); // to check the caret is preserved
+        let editor = aEditor.sourceEditor;
+        editor.setCursor(editor.getPosition(4)); // to check the caret is preserved
 
         gOriginalWidth = gPanelWindow.outerWidth;
         gOriginalHeight = gPanelWindow.outerHeight;
@@ -43,8 +36,9 @@ function runTests(aUI)
 
         executeSoon(function () {
           is(aEditor.sourceEditor, originalSourceEditor,
-             "the editor still references the same SourceEditor instance");
-          is(aEditor.sourceEditor.getCaretOffset(), 4,
+             "the editor still references the same Editor instance");
+          let editor = aEditor.sourceEditor;
+          is(editor.getOffset(editor.getCursor()), 4,
              "the caret position has been preserved");
 
           // queue a resize to original aspect ratio

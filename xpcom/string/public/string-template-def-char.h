@@ -3,7 +3,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
 // IWYU pragma: private, include "nsString.h"
 
 #define CharT                               char
@@ -18,6 +17,7 @@
 #define nsTDefaultStringComparator_CharT    nsDefaultCStringComparator
 #define nsTDependentString_CharT            nsDependentCString
 #define nsTDependentSubstring_CharT         nsDependentCSubstring
+#define nsTLiteralString_CharT              nsLiteralCString
 #define nsTXPIDLString_CharT                nsXPIDLCString
 #define nsTGetterCopies_CharT               nsCGetterCopies
 #define nsTAdoptingString_CharT             nsAdoptingCString

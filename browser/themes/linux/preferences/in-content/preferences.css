@@ -2,159 +2,77 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this file,
    - You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-@import url("chrome://global/skin/inContentUI.css");
+%include ../../../shared/incontentprefs/preferences.css
 
-@namespace html "http://www.w3.org/1999/xhtml";
-
-#preferences-home {
-  display: block;
-}
-
-#header {
-  margin-bottom: 18px;
-}
-
-.landingButton {
-  -moz-box-align: center;
-  -moz-box-orient: vertical;
-}
-
-.landingButton:hover {
-  cursor: pointer;
-}
-
-.landingButton-label {
-  margin-top: 4px;
-}
-
-.landingButton-icon {
-  display: block;
-  width: 32px;
-  height: 32px;
-  background-image: url("chrome://browser/skin/preferences/Options.png");
-  background-repeat: no-repeat;
-}
-
-.preference-icon {
-  display: block;
-  width: 32px;
-  height: 32px;
-  background-image: url("chrome://browser/skin/preferences/Options.png");
-  background-repeat: no-repeat;
-  margin: 0 20px;
-}
-
-.preference-icon[type="general"],
-.landingButton-icon[type="general"] {
-  background-position: 0 0;
-}
-
-.preference-icon[type="tabs"],
-.landingButton-icon[type="tabs"] {
-  background-position: -32px 0;
-}
-
-.preference-icon[type="content"],
-.landingButton-icon[type="content"] {
-  background-position: -64px 0;
-}
-
-.preference-icon[type="applications"],
-.landingButton-icon[type="applications"] {
-  background-position: -96px 0;
-}
-
-.preference-icon[type="privacy"],
-.landingButton-icon[type="privacy"] {
-  background-position: -128px 0;
-}
-
-.preference-icon[type="security"],
-.landingButton-icon[type="security"] {
-  background-position: -160px 0;
-}
-
-.preference-icon[type="advanced"],
-.landingButton-icon[type="advanced"] {
-  background-position: -192px 0;
-}
-
-.preference-icon[type="sync"],
-.landingButton-icon[type="sync"] {
-  background-image: url("chrome://browser/skin/preferences/Options-sync.png");
-}
-
-caption {
-  font-size: 20px;
-}
-
-.heading {
-  height: 50px;
-  background-color: rgba(192,199,210,0.7);
-  border-radius: 5px 5px 0 0;
-  margin-bottom: 15px;
-  -moz-box-align: center;
-}
-
-prefpane > .content-box {
-  overflow: auto;
-}
-
-/* Applications Pane Styles */
-
-#applications-content {
-  padding: 15px;
-}
-
-#handlersView {
+button > .button-box,
+menulist > .menulist-label-box {
   -moz-appearance: none;
-  border: 1px solid ThreeDShadow;
-  overflow-y: auto;
 }
 
-/* XXX This style is for bug 740213 and should be removed once that
-   bug has a solution. */
-description > html|a {
-  cursor: pointer;
+button[type="menu"] > .button-box > .button-menu-dropmarker {
+  -moz-appearance: none !important;
 }
 
-/* XXX Styles Below can be removed once bug 660726 lands */
-.nav-button {
-  min-width: 0;
+menulist:not([editable="true"]) > .menulist-dropmarker {
+  display: -moz-box;
+  margin-top: 6px;
+  margin-bottom: 6px;
 }
 
-#back-btn:-moz-locale-dir(ltr) {
-  list-style-image: url("moz-icon://stock/gtk-go-back-ltr?size=toolbar");
+checkbox {
+  -moz-binding: url("chrome://global/content/bindings/checkbox.xml#checkbox");
+  -moz-box-align: center;
 }
 
-#forward-btn:-moz-locale-dir(ltr) {
-  list-style-image: url("moz-icon://stock/gtk-go-forward-ltr?size=toolbar");
+checkbox:hover::before,
+checkbox[checked]::before {
+  -moz-margin-end: -19px;
+  -moz-margin-start: 4px;
+  background-repeat: no-repeat;
 }
 
-#back-btn:-moz-locale-dir(rtl) {
-  list-style-image: url("moz-icon://stock/gtk-go-back-rtl?size=toolbar");
+radio {
+  -moz-binding: url("chrome://global/content/bindings/radio.xml#radio");
+  -moz-box-align: center;
+  -moz-margin-start: 0;
 }
 
-#forward-btn:-moz-locale-dir(rtl) {
-  list-style-image: url("moz-icon://stock/gtk-go-forward-rtl?size=toolbar");
+.radio-label-box {
+  -moz-appearance: none;
 }
 
-#back-btn[disabled="true"]:-moz-locale-dir(ltr) {
-  list-style-image: url("moz-icon://stock/gtk-go-back-ltr?size=toolbar&state=disabled");
+radio:hover::before,
+radio[selected]::before {
+  -moz-margin-end: -17px;
+  -moz-margin-start: 6px;
 }
 
-#forward-btn[disabled="true"]:-moz-locale-dir(ltr) {
-  list-style-image: url("moz-icon://stock/gtk-go-forward-ltr?size=toolbar&state=disabled");
+.numberbox-input-box {
+  -moz-appearance: none;
+  border-width: 0;
 }
 
-#back-btn[disabled="true"]:-moz-locale-dir(rtl) {
-  list-style-image: url("moz-icon://stock/gtk-go-back-rtl?size=toolbar&state=disabled");
+spinbuttons {
+  -moz-appearance: none;
 }
 
-#forward-btn[disabled="true"]:-moz-locale-dir(rtl) {
-  list-style-image: url("moz-icon://stock/gtk-go-forward-rtl?size=toolbar&state=disabled");
+.actionsMenu {
+  font-family: "Clear Sans", sans-serif;
+  font-size: 1.25rem;
+  line-height: 22px;
 }
 
-.header-button .toolbarbutton-text {
-  display: none;
+.actionsMenu > .menulist-label-box > .menulist-icon {
+  margin-top: 1px;
+  -moz-margin-start: 1px;
+  -moz-margin-end: 6px;
+}
+
+.actionsMenu > .menulist-label-box > .menulist-label {
+  margin-top: 2px !important;
+}
+
+menulist.actionsMenu > .menulist-dropmarker {
+  margin-top: 11px;
+  margin-bottom: 11px;
 }

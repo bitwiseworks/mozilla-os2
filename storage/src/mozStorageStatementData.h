@@ -12,8 +12,7 @@
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "nsIEventTarget.h"
-#include "mozilla/Util.h"
-#include "nsThreadUtils.h"
+#include "MainThreadUtils.h"
 
 #include "mozStorageBindingParamsArray.h"
 #include "mozIStorageBaseStatement.h"
@@ -47,6 +46,14 @@ public:
   StatementData()
   {
   }
+  ~StatementData()
+  {
+    // We need to ensure that mParamsArray is released on the main thread,
+    // as the binding arguments may be XPConnect values, which are safe
+    // to release only on the main thread.
+    nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
+    (void)NS_ProxyRelease(mainThread, mParamsArray);
+  }
 
   /**
    * Return the sqlite statement, fetching it from the storage statement.  In
@@ -65,19 +72,10 @@ public:
   operator BindingParamsArray *() const { return mParamsArray; }
 
   /**
-   * Provide the ability to coerce back to a sqlite3 * connection for purposes 
-   * of getting an error message out of it.
-   */
-  operator sqlite3 *() const
-  {
-    return mStatementOwner->getOwner()->GetNativeConnection();
-  }
-
-  /**
    * NULLs out our sqlite3_stmt (it is held by the owner) after reseting it and
    * clear all bindings to it.  This is expected to occur on the async thread.
    */
-  inline void finalize()
+  inline void reset()
   {
     NS_PRECONDITION(mStatementOwner, "Must have a statement owner!");
 #ifdef DEBUG
@@ -85,7 +83,7 @@ public:
       nsCOMPtr<nsIEventTarget> asyncThread =
         mStatementOwner->getOwner()->getAsyncExecutionTarget();
       // It's possible that we are shutting down the async thread, and this
-      // method would return NULL as a result.
+      // method would return nullptr as a result.
       if (asyncThread) {
         bool onAsyncThread;
         NS_ASSERTION(NS_SUCCEEDED(asyncThread->IsOnCurrentThread(&onAsyncThread)) && onAsyncThread,
@@ -99,7 +97,7 @@ public:
     if (mStatement) {
       (void)::sqlite3_reset(mStatement);
       (void)::sqlite3_clear_bindings(mStatement);
-      mStatement = NULL;
+      mStatement = nullptr;
     }
   }
 

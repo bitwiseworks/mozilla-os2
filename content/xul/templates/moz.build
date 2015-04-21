@@ -5,7 +5,5 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 PARALLEL_DIRS += ['public', 'src']
-TEST_TOOL_DIRS += ['tests/chrome']
 
-MODULE = 'xultmpl'
-
+MOCHITEST_CHROME_MANIFESTS += ['tests/chrome/chrome.ini']

@@ -8,10 +8,16 @@
 #define NS_CSS_RENDERING_BORDERS_H
 
 #include "nsColor.h"
-#include "nsStyleStruct.h"
 
-#include "gfxContext.h"
-#include "mozilla/gfx/2D.h"
+class gfxContext;
+class gfxPattern;
+struct gfxRGBA;
+
+namespace mozilla {
+namespace gfx {
+class GradientStops;
+}
+}
 
 // define this to enable a bunch of debug dump info
 #undef DEBUG_NEW_BORDERS
@@ -47,7 +53,8 @@
  * borderRadii -- a gfxCornerSizes struct describing the w/h for each rounded corner.
  *    If the corner doesn't have a border radius, 0,0 should be given for it.
  * borderColors -- one nscolor per side
- * compositeColors -- a pointer to an array of composite color structs, or NULL if none
+ * compositeColors -- a pointer to an array of composite color structs, or
+ *    nullptr if none.
  *
  * skipSides -- a bit mask specifying which sides, if any, to skip
  * backgroundColor -- the background color of the element.
@@ -74,9 +81,6 @@ struct nsCSSBorderRenderer {
                       nsBorderColors* const* aCompositeColors,
                       int aSkipSides,
                       nscolor aBackgroundColor);
-
-  static void Init();
-  static void Shutdown();
 
   gfxCornerSizes mBorderCornerDimensions;
 
@@ -226,6 +230,8 @@ struct nsCSSBorderRenderer {
                                 gfxCornerSizes *aOuterRadiiRet);
 };
 
+namespace mozilla {
+
 #ifdef DEBUG_NEW_BORDERS
 #include <stdarg.h>
 
@@ -283,5 +289,7 @@ static inline void SN(const char *s = nullptr) {}
 static inline void SF(const char *fmt, ...) {}
 static inline void SX(gfxContext *ctx) {}
 #endif
+
+}
 
 #endif /* NS_CSS_RENDERING_BORDERS_H */

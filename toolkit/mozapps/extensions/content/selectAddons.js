@@ -7,7 +7,7 @@
 "use strict";
 
 Components.utils.import("resource://gre/modules/AddonManager.jsm");
-Components.utils.import("resource://gre/modules/AddonRepository.jsm");
+Components.utils.import("resource://gre/modules/addons/AddonRepository.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 
 const Cc = Components.classes;
@@ -98,21 +98,18 @@ var gChecking = {
       // individual addon updates.
       let ids = [addon.id for each (addon in aAddons)];
       AddonRepository.repopulateCache(ids, function gChecking_repopulateCache() {
-        AddonManagerPrivate.updateAddonRepositoryData(function gChecking_updateAddonRepositoryData() {
-
-          for (let addonItem of aAddons) {
-            // Ignore disabled themes
-            if (addonItem.type != "theme" || !addonItem.userDisabled) {
-              gAddons[addonItem.id] = {
-                addon: addonItem,
-                install: null,
-                wasActive: addonItem.isActive
-              }
+        for (let addonItem of aAddons) {
+          // Ignore disabled themes
+          if (addonItem.type != "theme" || !addonItem.userDisabled) {
+            gAddons[addonItem.id] = {
+              addon: addonItem,
+              install: null,
+              wasActive: addonItem.isActive
             }
-
-            addonItem.findUpdates(self, AddonManager.UPDATE_WHEN_NEW_APP_INSTALLED);
           }
-        });
+
+          addonItem.findUpdates(self, AddonManager.UPDATE_WHEN_NEW_APP_INSTALLED);
+        }
       });
     });
   },

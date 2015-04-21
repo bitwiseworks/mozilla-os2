@@ -9,6 +9,7 @@
 
 #include "mozilla/Assertions.h"
 #include "nsTArrayForwardDeclare.h"
+#include "mozilla/Move.h"
 
 namespace mozilla {
 namespace dom {
@@ -32,6 +33,22 @@ public:
     : mIsNull(false)
     , mValue(aValue)
   {}
+
+  explicit Nullable(Nullable<T>&& aOther)
+    : mIsNull(aOther.mIsNull)
+    , mValue(mozilla::Move(aOther.mValue))
+  {}
+
+  Nullable(const Nullable<T>& aOther)
+    : mIsNull(aOther.mIsNull)
+    , mValue(aOther.mValue)
+  {}
+
+  void operator=(const Nullable<T>& aOther)
+  {
+    mIsNull = aOther.mIsNull;
+    mValue = aOther.mValue;
+  }
 
   void SetValue(T aValue) {
     mValue = aValue;
@@ -62,6 +79,23 @@ public:
 
   bool IsNull() const {
     return mIsNull;
+  }
+
+  bool Equals(const Nullable<T>& aOtherNullable) const
+  {
+    return (mIsNull && aOtherNullable.mIsNull) ||
+           (!mIsNull && !aOtherNullable.mIsNull &&
+            mValue == aOtherNullable.mValue);
+  }
+
+  bool operator==(const Nullable<T>& aOtherNullable) const
+  {
+    return Equals(aOtherNullable);
+  }
+
+  bool operator!=(const Nullable<T>& aOtherNullable) const
+  {
+    return !Equals(aOtherNullable);
   }
 
   // Make it possible to use a const Nullable of an array type with other

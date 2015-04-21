@@ -33,11 +33,6 @@
 #include <stdlib.h>
 #if !defined (__Userspace_os_Windows)
 #include <stdint.h>
-#if !defined(__Userspace_os_FreeBSD)
-#if !defined(ANDROID)
-#include <sys/sysctl.h>
-#endif
-#endif
 #include <netinet/sctp_os_userspace.h>
 #endif
 #include <user_environment.h>
@@ -92,7 +87,7 @@ read_random_phony(void *buf, int count)
 	/* Fill buf[] with random(9) output */
 	for (i = 0; i < count; i+= (int)sizeof(uint32_t)) {
 		randval = random();
-		size = MIN(count - i, sizeof(uint32_t));
+		size = MIN(count - i, (int)sizeof(uint32_t));
 		memcpy(&((char *)buf)[i], &randval, (size_t)size);
 	}
 

@@ -9,9 +9,7 @@
 #include "nsIDOMValidityState.h"
 #include "nsIConstraintValidation.h"
 #include "nsWrapperCache.h"
-
-class JSObject;
-struct JSContext;
+#include "js/TypeDecls.h"
 
 namespace mozilla {
 namespace dom {
@@ -30,8 +28,7 @@ public:
     return mConstraintValidation;
   }
 
-  virtual JSObject* WrapObject(JSContext *aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *aCx) MOZ_OVERRIDE;
 
   // Web IDL methods
   bool ValueMissing() const
@@ -61,6 +58,10 @@ public:
   bool StepMismatch() const
   {
     return GetValidityState(nsIConstraintValidation::VALIDITY_STATE_STEP_MISMATCH);
+  }
+  bool BadInput() const
+  {
+    return GetValidityState(nsIConstraintValidation::VALIDITY_STATE_BAD_INPUT);
   }
   bool CustomError() const
   {

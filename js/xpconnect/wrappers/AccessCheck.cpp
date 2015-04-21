@@ -1,30 +1,25 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99 ft=cpp:
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-#include "mozilla/Util.h"
 
 #include "AccessCheck.h"
 
 #include "nsJSPrincipals.h"
-#include "nsIDocument.h"
-#include "nsIDOMWindow.h"
-#include "nsPIDOMWindow.h"
-#include "nsIDOMWindowCollection.h"
-#include "nsContentUtils.h"
-#include "nsJSUtils.h"
+#include "nsGlobalWindow.h"
 
 #include "XPCWrapper.h"
 #include "XrayWrapper.h"
-#include "FilteringWrapper.h"
 
 #include "jsfriendapi.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/WindowBinding.h"
+#include "nsIDOMWindowCollection.h"
+#include "nsJSUtils.h"
 
 using namespace mozilla;
+using namespace JS;
 using namespace js;
 
 namespace xpc {
@@ -47,18 +42,7 @@ AccessCheck::subsumes(JSCompartment *a, JSCompartment *b)
 {
     nsIPrincipal *aprin = GetCompartmentPrincipal(a);
     nsIPrincipal *bprin = GetCompartmentPrincipal(b);
-
-    // If either a or b doesn't have principals, we don't have enough
-    // information to tell. Seeing as how this is Gecko, we are default-unsafe
-    // in this case.
-    if (!aprin || !bprin)
-        return true;
-
-    bool subsumes;
-    nsresult rv = aprin->Subsumes(bprin, &subsumes);
-    NS_ENSURE_SUCCESS(rv, false);
-
-    return subsumes;
+    return aprin->Subsumes(bprin);
 }
 
 bool
@@ -67,21 +51,13 @@ AccessCheck::subsumes(JSObject *a, JSObject *b)
     return subsumes(js::GetObjectCompartment(a), js::GetObjectCompartment(b));
 }
 
-// Same as above, but ignoring document.domain.
+// Same as above, but considering document.domain.
 bool
-AccessCheck::subsumesIgnoringDomain(JSCompartment *a, JSCompartment *b)
+AccessCheck::subsumesConsideringDomain(JSCompartment *a, JSCompartment *b)
 {
     nsIPrincipal *aprin = GetCompartmentPrincipal(a);
     nsIPrincipal *bprin = GetCompartmentPrincipal(b);
-
-    if (!aprin || !bprin)
-        return false;
-
-    bool subsumes;
-    nsresult rv = aprin->SubsumesIgnoringDomain(bprin, &subsumes);
-    NS_ENSURE_SUCCESS(rv, false);
-
-    return subsumes;
+    return aprin->SubsumesConsideringDomain(bprin);
 }
 
 // Does the compartment of the wrapper subsumes the compartment of the wrappee?
@@ -152,16 +128,10 @@ IsPermitted(const char *name, JSFlatString *prop, bool set)
         NAME('L', "Location",
              PROP('h', W("href"))
              PROP('r', R("replace")))
-        NAME('W', "Window",
-             PROP('b', R("blur"))
-             PROP('c', R("close") R("closed"))
-             PROP('f', R("focus") R("frames"))
-             PROP('l', RW("location") R("length"))
-             PROP('o', R("opener"))
-             PROP('p', R("parent") R("postMessage"))
-             PROP('s', R("self"))
-             PROP('t', R("top"))
-             PROP('w', R("window")))
+        case 'W':
+            if (!strcmp(name, "Window"))
+                return dom::WindowBinding::IsPermitted(prop, propChars[0], set);
+            break;
     }
     return false;
 }
@@ -179,30 +149,22 @@ IsFrameId(JSContext *cx, JSObject *objArg, jsid idArg)
 
     obj = JS_ObjectToInnerObject(cx, obj);
     MOZ_ASSERT(!js::IsWrapper(obj));
-    XPCWrappedNative *wn = IS_WN_REFLECTOR(obj) ? XPCWrappedNative::Get(obj)
-                                                : nullptr;
-    if (!wn) {
-        return false;
-    }
-
-    nsCOMPtr<nsIDOMWindow> domwin(do_QueryWrappedNative(wn));
-    if (!domwin) {
+    nsGlobalWindow* win = WindowOrNull(obj);
+    if (!win) {
         return false;
     }
 
     nsCOMPtr<nsIDOMWindowCollection> col;
-    domwin->GetFrames(getter_AddRefs(col));
+    win->GetFrames(getter_AddRefs(col));
     if (!col) {
         return false;
     }
 
+    nsCOMPtr<nsIDOMWindow> domwin;
     if (JSID_IS_INT(id)) {
         col->Item(JSID_TO_INT(id), getter_AddRefs(domwin));
     } else if (JSID_IS_STRING(id)) {
-        nsAutoString str(JS_GetInternedStringChars(JSID_TO_STRING(id)));
-        col->NamedItem(str, getter_AddRefs(domwin));
-    } else {
-        return false;
+        col->NamedItem(nsDependentJSString(id), getter_AddRefs(domwin));
     }
 
     return domwin != nullptr;
@@ -228,17 +190,14 @@ AccessCheck::isCrossOriginAccessPermitted(JSContext *cx, JSObject *wrapperArg, j
     RootedObject wrapper(cx, wrapperArg);
     RootedObject obj(cx, Wrapper::wrappedObject(wrapper));
 
-    // Enumerate-like operations pass JSID_VOID to |enter|, since there isn't
-    // another sane value to pass. For XOWs, we generally want to deny such
-    // operations but fail silently (see CrossOriginAccessiblePropertiesOnly::
-    // deny). We could just fall through here and rely on the fact that none
-    // of the whitelisted properties below will match JSID_VOID, but EIBTI.
-    if (id == JSID_VOID)
+    // For XOWs, we generally want to deny enumerate-like operations, but fail
+    // silently (see CrossOriginAccessiblePropertiesOnly::deny).
+    if (act == Wrapper::ENUMERATE)
         return false;
 
     const char *name;
-    js::Class *clasp = js::GetObjectClass(obj);
-    NS_ASSERTION(Jsvalify(clasp) != &XrayUtils::HolderClass, "shouldn't have a holder here");
+    const js::Class *clasp = js::GetObjectClass(obj);
+    MOZ_ASSERT(!XrayUtils::IsXPCWNHolderClass(Jsvalify(clasp)), "shouldn't have a holder here");
     if (clasp->ext.innerObject)
         name = "Window";
     else
@@ -248,6 +207,9 @@ AccessCheck::isCrossOriginAccessPermitted(JSContext *cx, JSObject *wrapperArg, j
         if (IsPermitted(name, JSID_TO_FLAT_STRING(id), act == Wrapper::SET))
             return true;
     }
+
+    if (act != Wrapper::GET)
+        return false;
 
     // Check for frame IDs. If we're resolving named frames, make sure to only
     // resolve ones that don't shadow native properties. See bug 860494.
@@ -263,20 +225,6 @@ AccessCheck::isCrossOriginAccessPermitted(JSContext *cx, JSObject *wrapperArg, j
         return IsFrameId(cx, obj, id);
     }
     return false;
-}
-
-bool
-AccessCheck::needsSystemOnlyWrapper(JSObject *obj)
-{
-    JSObject* wrapper = obj;
-    if (dom::GetSameCompartmentWrapperForDOMBinding(wrapper))
-        return wrapper != obj;
-
-    if (!IS_WN_REFLECTOR(obj))
-        return false;
-
-    XPCWrappedNative *wn = XPCWrappedNative::Get(obj);
-    return wn->NeedsSOW();
 }
 
 enum Access { READ = (1<<0), WRITE = (1<<1), NO_ACCESS = 0 };
@@ -306,7 +254,7 @@ ExposedPropertiesOnly::check(JSContext *cx, JSObject *wrapperArg, jsid idArg, Wr
     // Unfortunately, |cx| can be in either compartment when we call ::check. :-(
     JSAutoCompartment ac(cx, wrappedObject);
 
-    JSBool found = false;
+    bool found = false;
     if (!JS_HasPropertyById(cx, wrappedObject, exposedPropsId, &found))
         return false;
 
@@ -327,7 +275,7 @@ ExposedPropertiesOnly::check(JSContext *cx, JSObject *wrapperArg, jsid idArg, Wr
         return true;
 
     RootedValue exposedProps(cx);
-    if (!JS_LookupPropertyById(cx, wrappedObject, exposedPropsId, exposedProps.address()))
+    if (!JS_LookupPropertyById(cx, wrappedObject, exposedPropsId, &exposedProps))
         return false;
 
     if (exposedProps.isNullOrUndefined())
@@ -348,7 +296,7 @@ ExposedPropertiesOnly::check(JSContext *cx, JSObject *wrapperArg, jsid idArg, Wr
     Access access = NO_ACCESS;
 
     Rooted<JSPropertyDescriptor> desc(cx);
-    if (!JS_GetPropertyDescriptorById(cx, hallpass, id, 0, desc.address())) {
+    if (!JS_GetPropertyDescriptorById(cx, hallpass, id, &desc)) {
         return false; // Error
     }
     if (!desc.object() || !desc.isEnumerable())
@@ -406,36 +354,7 @@ bool
 ExposedPropertiesOnly::allowNativeCall(JSContext *cx, JS::IsAcceptableThis test,
                                        JS::NativeImpl impl)
 {
-    return js::IsReadOnlyDateMethod(test, impl) || js::IsTypedArrayThisCheck(test);
-}
-
-bool
-ComponentsObjectPolicy::check(JSContext *cx, JSObject *wrapperArg, jsid idArg, Wrapper::Action act)
-{
-    RootedObject wrapper(cx, wrapperArg);
-    RootedId id(cx, idArg);
-    JSAutoCompartment ac(cx, wrapper);
-
-    if (JSID_IS_STRING(id) && act == Wrapper::GET) {
-        JSFlatString *flatId = JSID_TO_FLAT_STRING(id);
-        if (JS_FlatStringEqualsAscii(flatId, "isSuccessCode") ||
-            JS_FlatStringEqualsAscii(flatId, "lookupMethod") ||
-            JS_FlatStringEqualsAscii(flatId, "interfaces") ||
-            JS_FlatStringEqualsAscii(flatId, "interfacesByID") ||
-            JS_FlatStringEqualsAscii(flatId, "results"))
-        {
-            return true;
-        }
-    }
-
-    // We don't have any way to recompute same-compartment Components wrappers,
-    // so we need this dynamic check. This can go away when we expose Components
-    // as SpecialPowers.wrap(Components) during automation.
-    if (xpc::IsUniversalXPConnectEnabled(cx)) {
-        return true;
-    }
-
-    return false;
+    return js::IsTypedArrayThisCheck(test);
 }
 
 }

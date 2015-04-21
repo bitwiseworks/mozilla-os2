@@ -19,7 +19,7 @@ function test()
     ["i", "b1", false],
     ["v", "d1", true],
     ["VK_DOWN", "d2", true],
-    ["VK_ENTER", "d1", true],
+    ["VK_RETURN", "d1", true],
     [".", "d1", false],
     ["c", "d1", false],
     ["1", "d2", true],
@@ -52,7 +52,8 @@ function test()
     waitForFocus(setupTest, content);
   }, true);
 
-  content.location = "http://mochi.test:8888/browser/browser/devtools/inspector/test/browser_inspector_bug_650804_search.html";
+  content.location = "http://mochi.test:8888/browser/browser/devtools/" +
+                     "inspector/test/browser_inspector_bug_650804_search.html";
 
   function $(id) {
     if (id == null) return null;
@@ -68,6 +69,7 @@ function test()
   {
     inspector = aInspector;
     inspector.selection.setNode($("b1"));
+
     searchBox =
       inspector.panelWin.document.getElementById("inspector-searchbox");
 
@@ -95,15 +97,18 @@ function test()
     if (event.type == "keypress" && keypressStates.indexOf(state) == -1) {
       return;
     }
-    executeSoon(function() {
-      let [key, id, isValid] = keyStates[state];
-      info(inspector.selection.node.id + " is selected with text " +
-           inspector.searchBox.value);
-      is(inspector.selection.node, $(id),
-         "Correct node is selected for state " + state);
-      is(!searchBox.classList.contains("devtools-no-search-result"), isValid,
-         "Correct searchbox result state for state " + state);
-      checkStateAndMoveOn(state + 1);
+
+    inspector.searchSuggestions._lastQuery.then(() => {
+      executeSoon(() => {
+        let [key, id, isValid] = keyStates[state];
+        info(inspector.selection.node.id + " is selected with text " +
+             inspector.searchBox.value);
+        is(inspector.selection.node, $(id),
+           "Correct node is selected for state " + state);
+        is(!searchBox.classList.contains("devtools-no-search-result"), isValid,
+           "Correct searchbox result state for state " + state);
+        checkStateAndMoveOn(state + 1);
+      });
     });
   }
 

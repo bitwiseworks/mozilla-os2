@@ -7,38 +7,35 @@
 
 #include "nsIAccessibleTypes.h"
 
-#include "nsAccessNode.h"
-
 #include "nsIBaseWindow.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsIDOMHTMLDocument.h"
 #include "nsIDOMHTMLElement.h"
 #include "nsRange.h"
-#include "nsIDOMWindow.h"
+#include "nsIBoxObject.h"
 #include "nsIDOMXULElement.h"
 #include "nsIDocShell.h"
-#include "nsIContentViewer.h"
-#include "nsEventListenerManager.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsIScrollableFrame.h"
-#include "nsEventStateManager.h"
 #include "nsISelectionPrivate.h"
 #include "nsISelectionController.h"
-#include "nsPIDOMWindow.h"
-#include "nsGUIEvent.h"
+#include "mozilla/dom/TouchEvent.h"
+#include "mozilla/EventListenerManager.h"
+#include "mozilla/EventStateManager.h"
+#include "mozilla/MouseEvents.h"
+#include "mozilla/TouchEvents.h"
 #include "nsView.h"
-#include "nsLayoutUtils.h"
 #include "nsGkAtoms.h"
 
 #include "nsComponentManagerUtils.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "mozilla/dom/Element.h"
 
 #include "nsITreeBoxObject.h"
 #include "nsITreeColumns.h"
+#include "mozilla/dom/Element.h"
+
+using namespace mozilla;
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsCoreUtils
@@ -48,8 +45,8 @@ bool
 nsCoreUtils::HasClickListener(nsIContent *aContent)
 {
   NS_ENSURE_TRUE(aContent, false);
-  nsEventListenerManager* listenerManager =
-    aContent->GetListenerManager(false);
+  EventListenerManager* listenerManager =
+    aContent->GetExistingListenerManager();
 
   return listenerManager &&
     (listenerManager->HasListenersFor(nsGkAtoms::onclick) ||
@@ -72,8 +69,7 @@ nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
   if (!document)
     return;
 
-  nsIPresShell *presShell = nullptr;
-  presShell = document->GetShell();
+  nsCOMPtr<nsIPresShell> presShell = document->GetShell();
   if (!presShell)
     return;
 
@@ -99,20 +95,21 @@ nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
   tcBoxObj->GetY(&tcY);
 
   // Dispatch mouse events.
-  nsIFrame* tcFrame = tcContent->GetPrimaryFrame();
+  nsWeakFrame tcFrame = tcContent->GetPrimaryFrame();
   nsIFrame* rootFrame = presShell->GetRootFrame();
 
   nsPoint offset;
   nsIWidget *rootWidget =
     rootFrame->GetViewExternal()->GetNearestWidget(&offset);
 
-  nsPresContext* presContext = presShell->GetPresContext();
+  nsRefPtr<nsPresContext> presContext = presShell->GetPresContext();
 
   int32_t cnvdX = presContext->CSSPixelsToDevPixels(tcX + x + 1) +
     presContext->AppUnitsToDevPixels(offset.x);
   int32_t cnvdY = presContext->CSSPixelsToDevPixels(tcY + y + 1) +
     presContext->AppUnitsToDevPixels(offset.y);
 
+  // XUL is just desktop, so there is no real reason for senfing touch events.
   DispatchMouseEvent(NS_MOUSE_BUTTON_DOWN, cnvdX, cnvdY,
                      tcContent, tcFrame, presShell, rootWidget);
 
@@ -120,48 +117,42 @@ nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
                      tcContent, tcFrame, presShell, rootWidget);
 }
 
-bool
-nsCoreUtils::DispatchMouseEvent(uint32_t aEventType,
-                                nsIPresShell *aPresShell,
-                                nsIContent *aContent)
-{
-  nsIFrame *frame = aContent->GetPrimaryFrame();
-  if (!frame)
-    return false;
-
-  // Compute x and y coordinates.
-  nsPoint point;
-  nsCOMPtr<nsIWidget> widget = frame->GetNearestWidget(point);
-  if (!widget)
-    return false;
-
-  nsSize size = frame->GetSize();
-
-  nsPresContext* presContext = aPresShell->GetPresContext();
-
-  int32_t x = presContext->AppUnitsToDevPixels(point.x + size.width / 2);
-  int32_t y = presContext->AppUnitsToDevPixels(point.y + size.height / 2);
-
-  // Fire mouse event.
-  DispatchMouseEvent(aEventType, x, y, aContent, frame, aPresShell, widget);
-  return true;
-}
-
 void
 nsCoreUtils::DispatchMouseEvent(uint32_t aEventType, int32_t aX, int32_t aY,
                                 nsIContent *aContent, nsIFrame *aFrame,
                                 nsIPresShell *aPresShell, nsIWidget *aRootWidget)
 {
-  nsMouseEvent event(true, aEventType, aRootWidget,
-                     nsMouseEvent::eReal, nsMouseEvent::eNormal);
+  WidgetMouseEvent event(true, aEventType, aRootWidget,
+                         WidgetMouseEvent::eReal, WidgetMouseEvent::eNormal);
 
-  event.refPoint = nsIntPoint(aX, aY);
+  event.refPoint = LayoutDeviceIntPoint(aX, aY);
 
   event.clickCount = 1;
-  event.button = nsMouseEvent::eLeftButton;
+  event.button = WidgetMouseEvent::eLeftButton;
   event.time = PR_IntervalNow();
   event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
 
+  nsEventStatus status = nsEventStatus_eIgnore;
+  aPresShell->HandleEventWithTarget(&event, aFrame, aContent, &status);
+}
+
+void
+nsCoreUtils::DispatchTouchEvent(uint32_t aEventType, int32_t aX, int32_t aY,
+                                nsIContent* aContent, nsIFrame* aFrame,
+                                nsIPresShell* aPresShell, nsIWidget* aRootWidget)
+{
+  if (!dom::TouchEvent::PrefEnabled())
+    return;
+
+  WidgetTouchEvent event(true, aEventType, aRootWidget);
+
+  event.time = PR_IntervalNow();
+
+  // XXX: Touch has an identifier of -1 to hint that it is synthesized.
+  nsRefPtr<dom::Touch> t = new dom::Touch(-1, nsIntPoint(aX, aY),
+                                          nsIntPoint(1, 1), 0.0f, 1.0f);
+  t->SetTarget(aContent);
+  event.touches.AppendElement(t);
   nsEventStatus status = nsEventStatus_eIgnore;
   aPresShell->HandleEventWithTarget(&event, aFrame, aContent, &status);
 }
@@ -171,7 +162,7 @@ nsCoreUtils::GetAccessKeyFor(nsIContent* aContent)
 {
   // Accesskeys are registered by @accesskey attribute only. At first check
   // whether it is presented on the given element to avoid the slow
-  // nsEventStateManager::GetRegisteredAccessKey() method.
+  // EventStateManager::GetRegisteredAccessKey() method.
   if (!aContent->HasAttr(kNameSpaceID_None, nsGkAtoms::accesskey))
     return 0;
 
@@ -183,7 +174,7 @@ nsCoreUtils::GetAccessKeyFor(nsIContent* aContent)
   if (!presContext)
     return 0;
 
-  nsEventStateManager *esm = presContext->EventStateManager();
+  EventStateManager *esm = presContext->EventStateManager();
   if (!esm)
     return 0;
 
@@ -197,7 +188,7 @@ nsCoreUtils::GetDOMElementFor(nsIContent *aContent)
     return aContent;
 
   if (aContent->IsNodeOfType(nsINode::eTEXT))
-    return aContent->GetParent();
+    return aContent->GetFlattenedTreeParent();
 
   return nullptr;
 }
@@ -224,8 +215,8 @@ nsCoreUtils::GetRoleContent(nsINode *aNode)
 {
   nsCOMPtr<nsIContent> content(do_QueryInterface(aNode));
   if (!content) {
-    nsCOMPtr<nsIDOMDocument> domDoc(do_QueryInterface(aNode));
-    if (domDoc) {
+    nsCOMPtr<nsIDocument> doc(do_QueryInterface(aNode));
+    if (doc) {
       nsCOMPtr<nsIDOMHTMLDocument> htmlDoc(do_QueryInterface(aNode));
       if (htmlDoc) {
         nsCOMPtr<nsIDOMHTMLElement> bodyElement;
@@ -233,9 +224,7 @@ nsCoreUtils::GetRoleContent(nsINode *aNode)
         content = do_QueryInterface(bodyElement);
       }
       else {
-        nsCOMPtr<nsIDOMElement> docElement;
-        domDoc->GetDocumentElement(getter_AddRefs(docElement));
-        content = do_QueryInterface(docElement);
+        return doc->GetDocumentElement();
       }
     }
   }
@@ -402,17 +391,14 @@ nsCoreUtils::GetDocShellFor(nsINode *aNode)
   if (!aNode)
     return nullptr;
 
-  nsCOMPtr<nsISupports> container = aNode->OwnerDoc()->GetContainer();
-  nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(container);
+  nsCOMPtr<nsIDocShell> docShell = aNode->OwnerDoc()->GetDocShell();
   return docShell.forget();
 }
 
 bool
 nsCoreUtils::IsRootDocument(nsIDocument *aDocument)
 {
-  nsCOMPtr<nsISupports> container = aDocument->GetContainer();
-  nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem =
-    do_QueryInterface(container);
+  nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = aDocument->GetDocShell();
   NS_ASSERTION(docShellTreeItem, "No document shell for document!");
 
   nsCOMPtr<nsIDocShellTreeItem> parentTreeItem;
@@ -424,21 +410,16 @@ nsCoreUtils::IsRootDocument(nsIDocument *aDocument)
 bool
 nsCoreUtils::IsContentDocument(nsIDocument *aDocument)
 {
-  nsCOMPtr<nsISupports> container = aDocument->GetContainer();
-  nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem =
-    do_QueryInterface(container);
+  nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = aDocument->GetDocShell();
   NS_ASSERTION(docShellTreeItem, "No document shell tree item for document!");
 
-  int32_t contentType;
-  docShellTreeItem->GetItemType(&contentType);
-  return (contentType == nsIDocShellTreeItem::typeContent);
+  return (docShellTreeItem->ItemType() == nsIDocShellTreeItem::typeContent);
 }
 
 bool
 nsCoreUtils::IsTabDocument(nsIDocument* aDocumentNode)
 {
-  nsCOMPtr<nsISupports> container = aDocumentNode->GetContainer();
-  nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(container));
+  nsCOMPtr<nsIDocShellTreeItem> treeItem(aDocumentNode->GetDocShell());
 
   nsCOMPtr<nsIDocShellTreeItem> parentTreeItem;
   treeItem->GetParent(getter_AddRefs(parentTreeItem));
@@ -540,7 +521,7 @@ nsCoreUtils::GetTreeBoxObject(nsIContent *aContent)
           return treeBox.forget();
       }
     }
-    currentContent = currentContent->GetParent();
+    currentContent = currentContent->GetFlattenedTreeParent();
   }
 
   return nullptr;
@@ -654,37 +635,16 @@ nsCoreUtils::ScrollTo(nsIPresShell* aPresShell, nsIContent* aContent,
                                     nsIPresShell::SCROLL_OVERFLOW_HIDDEN);
 }
 
-
-////////////////////////////////////////////////////////////////////////////////
-// nsAccessibleDOMStringList
-////////////////////////////////////////////////////////////////////////////////
-
-NS_IMPL_ISUPPORTS1(nsAccessibleDOMStringList, nsIDOMDOMStringList)
-
-NS_IMETHODIMP
-nsAccessibleDOMStringList::Item(uint32_t aIndex, nsAString& aResult)
+bool
+nsCoreUtils::IsWhitespaceString(const nsSubstring& aString)
 {
-  if (aIndex >= mNames.Length())
-    SetDOMStringToNull(aResult);
-  else
-    aResult = mNames.ElementAt(aIndex);
+  nsSubstring::const_char_iterator iterBegin, iterEnd;
 
-  return NS_OK;
+  aString.BeginReading(iterBegin);
+  aString.EndReading(iterEnd);
+
+  while (iterBegin != iterEnd && IsWhitespace(*iterBegin))
+    ++iterBegin;
+
+  return iterBegin == iterEnd;
 }
-
-NS_IMETHODIMP
-nsAccessibleDOMStringList::GetLength(uint32_t* aLength)
-{
-  *aLength = mNames.Length();
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsAccessibleDOMStringList::Contains(const nsAString& aString, bool* aResult)
-{
-  *aResult = mNames.Contains(aString);
-
-  return NS_OK;
-}
-

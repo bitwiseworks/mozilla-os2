@@ -12,6 +12,13 @@
  * and create derivative works of this document.
  */
 
+enum SelectionMode {
+  "select",
+  "start",
+  "end",
+  "preserve",
+};
+
 interface nsIControllers;
 
 interface HTMLInputElement : HTMLElement {
@@ -33,6 +40,8 @@ interface HTMLInputElement : HTMLElement {
   readonly attribute HTMLFormElement? form;
   [Pure]
   readonly attribute FileList? files;
+  [Throws, Pref="dom.input.dirpicker"]
+  void openDirectoryPicker();
   [Pure, SetterThrows]
            attribute DOMString formAction;
   [Pure, SetterThrows]
@@ -112,8 +121,11 @@ interface HTMLInputElement : HTMLElement {
            attribute long selectionEnd;
   [Throws]
            attribute DOMString selectionDirection;
-  // Bug 850364 void setRangeText(DOMString replacement);
-  // Bug 850364 setRangeText(DOMString replacement, unsigned long start, unsigned long end, optional SelectionMode selectionMode);
+  [Throws]
+  void setRangeText(DOMString replacement);
+  [Throws]
+  void setRangeText(DOMString replacement, unsigned long start,
+    unsigned long end, optional SelectionMode selectionMode = "preserve");
 
   // also has obsolete members
 };
@@ -131,7 +143,7 @@ partial interface HTMLInputElement {
   [Throws]
   void setSelectionRange(long start, long end, optional DOMString direction);
 
-  [GetterThrows]
+  [GetterThrows, ChromeOnly]
   readonly attribute nsIControllers        controllers;
   [GetterThrows]
   readonly attribute long                  textLength;
@@ -141,6 +153,18 @@ partial interface HTMLInputElement {
 
   [ChromeOnly]
   void mozSetFileNameArray(sequence<DOMString> fileNames);
+
+  // Number controls (<input type=number>) have an anonymous text control
+  // (<input type=text>) in the anonymous shadow tree that they contain. On
+  // such an anonymous text control this property provides access to the
+  // number control that owns the text control. This is useful, for example,
+  // in code that looks at the currently focused element to make decisions
+  // about which IME to bring up. Such code needs to be able to check for any
+  // owning number control since it probably wants to bring up a number pad
+  // instead of the standard keyboard, even when the anonymous text control has
+  // focus.
+  [ChromeOnly]
+  readonly attribute HTMLInputElement? ownerNumberControl;
 
   boolean mozIsTextField(boolean aExcludePassword);
 };

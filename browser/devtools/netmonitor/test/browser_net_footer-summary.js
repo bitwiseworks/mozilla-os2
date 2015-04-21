@@ -7,6 +7,7 @@
  */
 
 function test() {
+  requestLongerTimeout(2);
   let { PluralForm } = Cu.import("resource://gre/modules/PluralForm.jsm", {});
 
   initNetMonitor(FILTERING_URL).then(([aTab, aDebuggee, aMonitor]) => {
@@ -80,7 +81,7 @@ function test() {
     })
 
     function testStatus() {
-      let summary = $("#request-menu-network-summary");
+      let summary = $("#requests-menu-network-summary-label");
       let value = summary.getAttribute("value");
       info("Current summary: " + value);
 
@@ -89,13 +90,7 @@ function test() {
       let totalRequestsCount = RequestsMenu.itemCount;
       info("Current requests: " + visibleRequestsCount + " of " + totalRequestsCount + ".");
 
-      if (!totalRequestsCount) {
-        is(value, "",
-          "The current summary text is incorrect, expected an empty string.");
-        return;
-      }
-
-      if (!visibleRequestsCount) {
+      if (!totalRequestsCount || !visibleRequestsCount) {
         is(value, L10N.getStr("networkMenu.empty"),
           "The current summary text is incorrect, expected an 'empty' label.");
         return;

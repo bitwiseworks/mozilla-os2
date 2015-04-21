@@ -3,9 +3,26 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
+Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
+                                  "resource://gre/modules/BrowserUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
+                                  "resource://gre/modules/Downloads.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "DownloadLastDir",
+                                  "resource://gre/modules/DownloadLastDir.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
+                                  "resource://gre/modules/FileUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "OS",
+                                  "resource://gre/modules/osfile.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Promise",
+                                  "resource://gre/modules/Promise.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+                                  "resource://gre/modules/Services.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
 var ContentAreaUtils = {
 
   // this is for backwards compatibility.
@@ -20,42 +37,9 @@ var ContentAreaUtils = {
   }
 }
 
-/**
- * urlSecurityCheck: JavaScript wrapper for checkLoadURIWithPrincipal
- * and checkLoadURIStrWithPrincipal.
- * If |aPrincipal| is not allowed to link to |aURL|, this function throws with
- * an error message.
- *
- * @param aURL
- *        The URL a page has linked to. This could be passed either as a string
- *        or as a nsIURI object.
- * @param aPrincipal
- *        The principal of the document from which aURL came.
- * @param aFlags
- *        Flags to be passed to checkLoadURIStr. If undefined,
- *        nsIScriptSecurityManager.STANDARD will be passed.
- */
 function urlSecurityCheck(aURL, aPrincipal, aFlags)
 {
-  var secMan = Services.scriptSecurityManager;
-  if (aFlags === undefined) {
-    aFlags = secMan.STANDARD;
-  }
-
-  try {
-    if (aURL instanceof Components.interfaces.nsIURI)
-      secMan.checkLoadURIWithPrincipal(aPrincipal, aURL, aFlags);
-    else
-      secMan.checkLoadURIStrWithPrincipal(aPrincipal, aURL, aFlags);
-  } catch (e) {
-    let principalStr = "";
-    try {
-      principalStr = " from " + aPrincipal.URI.spec;
-    }
-    catch(e2) { }
-
-    throw "Load of " + aURL + principalStr + " denied.";
-  }
+  return BrowserUtils.urlSecurityCheck(aURL, aPrincipal, aFlags);
 }
 
 /**
@@ -68,7 +52,6 @@ function isContentFrame(aFocusedWindow)
 
   return (aFocusedWindow.top == window.content);
 }
-
 
 // Clientele: (Make sure you don't break any of these)
 //  - File    ->  Save Page/Frame As...
@@ -311,15 +294,15 @@ function internalSave(aURL, aDocument, aDefaultFileName, aContentDisposition,
     // Find a URI to use for determining last-downloaded-to directory
     let relatedURI = aReferrer || sourceURI;
 
-    getTargetFile(fpParams, function(aDialogCancelled) {
-      if (aDialogCancelled)
+    promiseTargetFile(fpParams, aSkipPrompt, relatedURI).then(aDialogAccepted => {
+      if (!aDialogAccepted)
         return;
 
       saveAsType = fpParams.saveAsType;
       file = fpParams.file;
 
       continueSave();
-    }, aSkipPrompt, relatedURI);
+    }).then(null, Components.utils.reportError);
   }
 
   function continueSave() {
@@ -527,10 +510,6 @@ function initFileInfo(aFI, aURL, aURLCharset, aDocument,
  * @param aFpP
  *        A structure (see definition in internalSave(...) method)
  *        containing all the data used within this method.
- * @param aCallback
- *        A callback function that will be called once the function finishes.
- *        The first argument passed to the function will be a boolean that,
- *        when true, indicated that the user dismissed the file picker.
  * @param aSkipPrompt
  *        If true, attempt to save the file automatically to the user's default
  *        download directory, thus skipping the explicit prompt for a file name,
@@ -542,58 +521,59 @@ function initFileInfo(aFI, aURL, aURLCharset, aDocument,
  *        An nsIURI associated with the download. The last used
  *        directory of the picker is retrieved from/stored in the 
  *        Content Pref Service using this URI.
+ * @return Promise
+ * @resolve a boolean. When true, it indicates that the file picker dialog
+ *          is accepted.
  */
-function getTargetFile(aFpP, aCallback, /* optional */ aSkipPrompt, /* optional */ aRelatedURI)
+function promiseTargetFile(aFpP, /* optional */ aSkipPrompt, /* optional */ aRelatedURI)
 {
-  if (!getTargetFile.DownloadLastDir)
-    Components.utils.import("resource://gre/modules/DownloadLastDir.jsm", getTargetFile);
-  var gDownloadLastDir = new getTargetFile.DownloadLastDir(window);
+  return Task.spawn(function() {
+    let downloadLastDir = new DownloadLastDir(window);
+    let prefBranch = Services.prefs.getBranch("browser.download.");
+    let useDownloadDir = prefBranch.getBoolPref("useDownloadDir");
 
-  var prefs = Services.prefs.getBranch("browser.download.");
-  var useDownloadDir = prefs.getBoolPref("useDownloadDir");
-  const nsIFile = Components.interfaces.nsIFile;
+    if (!aSkipPrompt)
+      useDownloadDir = false;
 
-  if (!aSkipPrompt)
-    useDownloadDir = false;
+    // Default to the user's default downloads directory configured
+    // through download prefs.
+    let dirPath = yield Downloads.getPreferredDownloadsDirectory();
+    let dirExists = yield OS.File.exists(dirPath);
+    let dir = new FileUtils.File(dirPath);
 
-  // Default to the user's default downloads directory configured
-  // through download prefs.
-  var dir = Services.downloads.userDownloadsDirectory;
-  var dirExists = dir && dir.exists();
-
-  if (useDownloadDir && dirExists) {
-    dir.append(getNormalizedLeafName(aFpP.fileInfo.fileName,
-                                     aFpP.fileInfo.fileExt));
-    aFpP.file = uniqueFile(dir);
-    aCallback(false);
-    return;
-  }
-
-  // We must prompt for the file name explicitly.
-  // If we must prompt because we were asked to...
-  if (useDownloadDir) {
-    // Keep async behavior in both branches
-    Services.tm.mainThread.dispatch(function() {
-      displayPicker();
-    }, Components.interfaces.nsIThread.DISPATCH_NORMAL);
-  } else {
-    gDownloadLastDir.getFileAsync(aRelatedURI, function getFileAsyncCB(aFile) {
-      if (aFile && aFile.exists()) {
-        dir = aFile;
-        dirExists = true;
-      }
-      displayPicker();
-    });
-  }
-
-  function displayPicker() {
-    if (!dirExists) {
-      // Default to desktop.
-      dir = Services.dirsvc.get("Desk", nsIFile);
+    if (useDownloadDir && dirExists) {
+      dir.append(getNormalizedLeafName(aFpP.fileInfo.fileName,
+                                       aFpP.fileInfo.fileExt));
+      aFpP.file = uniqueFile(dir);
+      throw new Task.Result(true);
     }
 
-    var fp = makeFilePicker();
-    var titleKey = aFpP.fpTitleKey || "SaveLinkTitle";
+    // We must prompt for the file name explicitly.
+    // If we must prompt because we were asked to...
+    let deferred = Promise.defer();
+    if (useDownloadDir) {
+      // Keep async behavior in both branches
+      Services.tm.mainThread.dispatch(function() {
+        deferred.resolve(null);
+      }, Components.interfaces.nsIThread.DISPATCH_NORMAL);
+    } else {
+      downloadLastDir.getFileAsync(aRelatedURI, function getFileAsyncCB(aFile) {
+        deferred.resolve(aFile);
+      });
+    }
+    let file = yield deferred.promise;
+    if (file && (yield OS.File.exists(file.path))) {
+      dir = file;
+      dirExists = true;
+    }
+
+    if (!dirExists) {
+      // Default to desktop.
+      dir = Services.dirsvc.get("Desk", Components.interfaces.nsIFile);
+    }
+
+    let fp = makeFilePicker();
+    let titleKey = aFpP.fpTitleKey || "SaveLinkTitle";
     fp.init(window, ContentAreaUtils.stringBundle.GetStringFromName(titleKey),
             Components.interfaces.nsIFilePicker.modeSave);
 
@@ -608,31 +588,35 @@ function getTargetFile(aFpP, aCallback, /* optional */ aSkipPrompt, /* optional 
     // more than one filter in addition to "All Files".
     if (aFpP.saveMode != SAVEMODE_FILEONLY) {
       try {
-        fp.filterIndex = prefs.getIntPref("save_converter_index");
+        fp.filterIndex = prefBranch.getIntPref("save_converter_index");
       }
       catch (e) {
       }
     }
 
-    if (fp.show() == Components.interfaces.nsIFilePicker.returnCancel || !fp.file) {
-      aCallback(true);
-      return;
+    let deferComplete = Promise.defer();
+    fp.open(function(aResult) {
+      deferComplete.resolve(aResult);
+    });
+    let result = yield deferComplete.promise;
+    if (result == Components.interfaces.nsIFilePicker.returnCancel || !fp.file) {
+      throw new Task.Result(false);
     }
 
     if (aFpP.saveMode != SAVEMODE_FILEONLY)
-      prefs.setIntPref("save_converter_index", fp.filterIndex);
+      prefBranch.setIntPref("save_converter_index", fp.filterIndex);
 
     // Do not store the last save directory as a pref inside the private browsing mode
-    var directory = fp.file.parent.QueryInterface(nsIFile);
-    gDownloadLastDir.setFile(aRelatedURI, directory);
+    downloadLastDir.setFile(aRelatedURI, fp.file.parent);
 
     fp.file.leafName = validateFileName(fp.file.leafName);
 
     aFpP.saveAsType = fp.filterIndex;
     aFpP.file = fp.file;
     aFpP.fileURL = fp.fileURL;
-    aCallback(false);
-  }
+
+    throw new Task.Result(true);
+  });
 }
 
 // Since we're automatically downloading, we don't get the file picker's
@@ -662,6 +646,54 @@ function uniqueFile(aLocalFile)
   }
   return aLocalFile;
 }
+
+#ifdef MOZ_JSDOWNLOADS
+/**
+ * Download a URL using the new jsdownloads API.
+ *
+ * @param aURL
+ *        the url to download
+ * @param [optional] aFileName
+ *        the destination file name, if omitted will be obtained from the url.
+ * @param aInitiatingDocument
+ *        The document from which the download was initiated.
+ */
+function DownloadURL(aURL, aFileName, aInitiatingDocument) {
+  // For private browsing, try to get document out of the most recent browser
+  // window, or provide our own if there's no browser window.
+  let isPrivate = aInitiatingDocument.defaultView
+                                     .QueryInterface(Ci.nsIInterfaceRequestor)
+                                     .getInterface(Ci.nsIWebNavigation)
+                                     .QueryInterface(Ci.nsILoadContext)
+                                     .usePrivateBrowsing;
+
+  let fileInfo = new FileInfo(aFileName);
+  initFileInfo(fileInfo, aURL, null, null, null, null);
+
+  let filepickerParams = {
+    fileInfo: fileInfo,
+    saveMode: SAVEMODE_FILEONLY
+  };
+
+  Task.spawn(function* () {
+    let accepted = yield promiseTargetFile(filepickerParams, true, fileInfo.uri);
+    if (!accepted)
+      return;
+
+    let file = filepickerParams.file;
+    let download = yield Downloads.createDownload({
+      source: { url: aURL, isPrivate: isPrivate },
+      target: { path: file.path, partFilePath: file.path + ".part" }
+    });
+    download.tryToKeepPartialData = true;
+    download.start();
+
+    // Add the download to the list, allowing it to be managed.
+    let list = yield Downloads.getList(Downloads.ALL);
+    list.add(download);
+  }).then(null, Components.utils.reportError);
+}
+#endif
 
 // We have no DOM, and can only save the URL as is.
 const SAVEMODE_FILEONLY      = 0x00;
@@ -773,21 +805,14 @@ function makeWebBrowserPersist()
   return Components.classes[persistContractID].createInstance(persistIID);
 }
 
-/**
- * Constructs a new URI, using nsIIOService.
- * @param aURL The URI spec.
- * @param aOriginCharset The charset of the URI.
- * @param aBaseURI Base URI to resolve aURL, or null.
- * @return an nsIURI object based on aURL.
- */
 function makeURI(aURL, aOriginCharset, aBaseURI)
 {
-  return Services.io.newURI(aURL, aOriginCharset, aBaseURI);
+  return BrowserUtils.makeURI(aURL, aOriginCharset, aBaseURI);
 }
 
 function makeFileURI(aFile)
 {
-  return Services.io.newFileURI(aFile);
+  return BrowserUtils.makeFileURI(aFile);
 }
 
 function makeFilePicker()
@@ -933,8 +958,7 @@ function validateFileName(aFileName)
   }
   else if (navigator.appVersion.indexOf("Macintosh") != -1)
     re = /[\:\/]+/g;
-  else if (navigator.appVersion.indexOf("Android") != -1 ||
-           navigator.appVersion.indexOf("Maemo") != -1) {
+  else if (navigator.appVersion.indexOf("Android") != -1) {
     // On mobile devices, the filesystem may be very limited in what
     // it considers valid characters. To avoid errors, we sanitize
     // conservatively.
@@ -1090,10 +1114,7 @@ function openURL(aURL)
   else {
     var recentWindow = Services.wm.getMostRecentWindow("navigator:browser");
     if (recentWindow) {
-      var win = recentWindow.browserDOMWindow.openURI(uri, null,
-                                                      recentWindow.browserDOMWindow.OPEN_DEFAULTWINDOW,
-                                                      recentWindow.browserDOMWindow.OPEN_NEW);
-      win.focus();
+      recentWindow.openUILinkIn(uri.spec, "tab");
       return;
     }
 
@@ -1137,6 +1158,8 @@ function openURL(aURL)
     var channel = Services.io.newChannelFromURI(uri);
     var uriLoader = Components.classes["@mozilla.org/uriloader;1"]
                               .getService(Components.interfaces.nsIURILoader);
-    uriLoader.openURI(channel, true, uriListener);
+    uriLoader.openURI(channel,
+                      Components.interfaces.nsIURILoader.IS_CONTENT_PREFERRED,
+                      uriListener);
   }
 }

@@ -12,9 +12,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import android.util.Log;
+import android.util.SparseArray;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.ArrayList;
 
 /**
  * Helper class to get/set gecko prefs.
@@ -23,24 +23,22 @@ public final class PrefsHelper {
     private static final String LOGTAG = "GeckoPrefsHelper";
 
     private static boolean sRegistered = false;
-    private static final Map<Integer, PrefHandler> sCallbacks = new HashMap<Integer, PrefHandler>();
+    private static final SparseArray<PrefHandler> sCallbacks = new SparseArray<PrefHandler>();
     private static int sUniqueRequestId = 1;
 
     public static int getPref(String prefName, PrefHandler callback) {
-        JSONArray prefs = new JSONArray();
-        prefs.put(prefName);
-        return getPrefs(prefs, callback);
+        return getPrefsInternal(new String[] { prefName }, callback);
     }
 
     public static int getPrefs(String[] prefNames, PrefHandler callback) {
-        JSONArray prefs = new JSONArray();
-        for (String p : prefNames) {
-            prefs.put(p);
-        }
-        return getPrefs(prefs, callback);
+        return getPrefsInternal(prefNames, callback);
     }
 
-    public static int getPrefs(JSONArray prefNames, PrefHandler callback) {
+    public static int getPrefs(ArrayList<String> prefNames, PrefHandler callback) {
+        return getPrefsInternal(prefNames.toArray(new String[prefNames.size()]), callback);
+    }
+
+    private static int getPrefsInternal(String[] prefNames, PrefHandler callback) {
         int requestId;
         synchronized (PrefsHelper.class) {
             ensureRegistered();
@@ -50,25 +48,12 @@ public final class PrefsHelper {
         }
 
         GeckoEvent event;
-        try {
-            JSONObject message = new JSONObject();
-            message.put("requestId", Integer.toString(requestId));
-            message.put("preferences", prefNames);
-            event = GeckoEvent.createBroadcastEvent(callback.isObserver() ?
-                "Preferences:Observe" : "Preferences:Get", message.toString());
-            GeckoAppShell.sendEventToGecko(event);
-        } catch (Exception e) {
-            Log.e(LOGTAG, "Error while composing Preferences:" +
-                  (callback.isObserver() ? "Observe" : "Get") + " message", e);
-
-            // if we failed to send the message, drop our reference to the callback because
-            // otherwise it will leak since we will never get the response
-            synchronized (PrefsHelper.class) {
-                sCallbacks.remove(requestId);
-            }
-
-            return -1;
+        if (callback.isObserver()) {
+            event = GeckoEvent.createPreferencesObserveEvent(requestId, prefNames);
+        } else {
+            event = GeckoEvent.createPreferencesGetEvent(requestId, prefNames);
         }
+        GeckoAppShell.sendEventToGecko(event);
 
         return requestId;
     }
@@ -87,7 +72,7 @@ public final class PrefsHelper {
                             int requestId = message.getInt("requestId");
                             callback = sCallbacks.get(requestId);
                             if (callback != null && !callback.isObserver()) {
-                                sCallbacks.remove(requestId);
+                                sCallbacks.delete(requestId);
                             }
                         } catch (Exception e) {
                             callback = null;
@@ -158,7 +143,9 @@ public final class PrefsHelper {
         }
 
         synchronized (PrefsHelper.class) {
-            PrefHandler callback = sCallbacks.remove(requestId);
+            PrefHandler callback = sCallbacks.get(requestId);
+            sCallbacks.delete(requestId);
+
             if (callback == null) {
                 Log.e(LOGTAG, "Unknown request ID " + requestId);
                 return;

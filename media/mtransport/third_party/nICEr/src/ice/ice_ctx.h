@@ -43,6 +43,7 @@ extern "C" {
 #include "transport_addr.h"
 #include "nr_socket.h"
 #include "nr_resolver.h"
+#include "nr_interface_prioritizer.h"
 #include "stun_client_ctx.h"
 #include "stun_server_ctx.h"
 #include "turn_client_ctx.h"
@@ -64,6 +65,7 @@ typedef struct nr_ice_stun_server_ {
 
 typedef struct nr_ice_turn_server_ {
     nr_ice_stun_server    turn_server;
+    int                   transport;
     char                 *username;
     Data                 *password;
 } nr_ice_turn_server;
@@ -88,6 +90,9 @@ typedef struct nr_ice_ctx_ nr_ice_ctx;
 typedef struct nr_ice_peer_ctx_ nr_ice_peer_ctx;
 typedef struct nr_ice_candidate_ nr_ice_candidate;
 typedef struct nr_ice_cand_pair_ nr_ice_cand_pair;
+typedef void (*nr_ice_trickle_candidate_cb) (void *cb_arg,
+  nr_ice_ctx *ctx, nr_ice_media_stream *stream, int component_id,
+  nr_ice_candidate *candidate);
 
 #include "ice_socket.h"
 #include "ice_component.h"
@@ -122,8 +127,11 @@ struct nr_ice_ctx_ {
   int stun_server_ct;
   nr_ice_turn_server *turn_servers;           /* The list of turn servers */
   int turn_server_ct;
+  nr_local_addr *local_addrs;                 /* The list of available local addresses and corresponding interface information */
+  int local_addr_ct;
 
   nr_resolver *resolver;                      /* The resolver to use */
+  nr_interface_prioritizer *interface_prioritizer;  /* Priority decision logic */
 
   nr_ice_foundation_head foundations;
 
@@ -140,6 +148,9 @@ struct nr_ice_ctx_ {
 
   NR_async_cb done_cb;
   void *cb_arg;
+
+  nr_ice_trickle_candidate_cb trickle_cb;
+  void *trickle_cb_arg;
 };
 
 int nr_ice_ctx_create(char *label, UINT4 flags, nr_ice_ctx **ctxp);
@@ -161,6 +172,10 @@ int nr_ice_ctx_finalize(nr_ice_ctx *ctx, nr_ice_peer_ctx *pctx);
 int nr_ice_ctx_set_stun_servers(nr_ice_ctx *ctx,nr_ice_stun_server *servers, int ct);
 int nr_ice_ctx_set_turn_servers(nr_ice_ctx *ctx,nr_ice_turn_server *servers, int ct);
 int nr_ice_ctx_set_resolver(nr_ice_ctx *ctx, nr_resolver *resolver);
+int nr_ice_ctx_set_interface_prioritizer(nr_ice_ctx *ctx, nr_interface_prioritizer *prioritizer);
+int nr_ice_ctx_set_trickle_cb(nr_ice_ctx *ctx, nr_ice_trickle_candidate_cb cb, void *cb_arg);
+
+#define NR_ICE_MAX_ATTRIBUTE_SIZE 256
 
 extern int LOG_ICE;
 

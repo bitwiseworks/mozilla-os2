@@ -3,54 +3,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 INTERNAL_TOOLS = 1
 
-HOST_PROGRAM = elfhack
-NO_DIST_INSTALL = 1
-NO_PROFILE_GUIDED_OPTIMIZE = 1
-
-VPATH += $(topsrcdir)/build
-
-HOST_CPPSRCS = \
-  elf.cpp \
-  elfhack.cpp \
-  $(NULL)
-
 OS_CXXFLAGS := $(filter-out -fno-exceptions,$(OS_CXXFLAGS)) -fexceptions
-
-ifneq (,$(filter %86,$(TARGET_CPU)))
-CPU := x86
-else
-ifneq (,$(filter arm%,$(TARGET_CPU)))
-CPU := arm
-else
-CPU := $(TARGET_CPU)
-endif
-endif
-
-CSRCS := \
-  inject/$(CPU).c \
-  inject/$(CPU)-noinit.c \
-  test-ctors.c \
-  test-array.c \
-  $(NULL)
-
-ifndef CROSS_COMPILE
-CSRCS += dummy.c
-endif
 
 WRAP_LDFLAGS=
 
 include $(topsrcdir)/config/rules.mk
 
-test-array$(DLL_SUFFIX) test-ctors$(DLL_SUFFIX): %$(DLL_SUFFIX): %.$(OBJ_SUFFIX) elfhack $(filter inject/%,$(CSRCS:.c=.$(OBJ_SUFFIX)))
+test-array$(DLL_SUFFIX) test-ctors$(DLL_SUFFIX): %$(DLL_SUFFIX): %.$(OBJ_SUFFIX) elfhack
 	$(MKSHLIB) $(LDFLAGS) $< -nostartfiles
 	@echo ===
 	@echo === If you get failures below, please file a bug describing the error
@@ -62,7 +23,7 @@ test-array$(DLL_SUFFIX) test-ctors$(DLL_SUFFIX): %$(DLL_SUFFIX): %.$(OBJ_SUFFIX)
 	@rm -f $@.bak
 	$(CURDIR)/elfhack -b -f $@
 	# Fail if the backup file doesn't exist
-	[ -f "$@.bak" ]
+	[ -f '$@.bak' ]
 	# Fail if the new library doesn't contain less relocations
 	[ $$($(TOOLCHAIN_PREFIX)objdump -R $@.bak | wc -l) -gt $$(objdump -R $@ | wc -l) ]
 
@@ -73,9 +34,10 @@ test-ctors$(DLL_SUFFIX): DT_TYPE=INIT
 
 GARBAGE += test-array$(DLL_SUFFIX) test-ctors$(DLL_SUFFIX) test-array$(DLL_SUFFIX).bak test-ctors$(DLL_SUFFIX).bak
 
+ifndef CROSS_COMPILE
+ifdef COMPILE_ENVIRONMENT
 libs:: test-array$(DLL_SUFFIX) test-ctors$(DLL_SUFFIX)
 
-ifndef CROSS_COMPILE
 dummy: dummy.$(OBJ_SUFFIX)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
@@ -86,17 +48,4 @@ libs:: dummy
 
 GARBAGE += dummy
 endif
-
-inject:
-	$(NSINSTALL) -D $@
-
-inject/%.c: inject.c $(call mkdir_deps,inject)
-	cp $< $@
-
-GARBAGE_DIRS += inject
-
-inject/%.$(OBJ_SUFFIX): DEFINES += -DBITS=$(if $(HAVE_64BIT_OS),64,32)
-inject/%.$(OBJ_SUFFIX): CFLAGS := -O2 -fno-stack-protector $(filter -m% -I%,$(CFLAGS))
-inject/$(CPU)-noinit.$(OBJ_SUFFIX): DEFINES += -DNOINIT
-test.$(OBJ_SUFFIX): CFLAGS := -O0
-host_elf.$(OBJ_SUFFIX) host_elfhack.$(OBJ_SUFFIX): elfxx.h
+endif

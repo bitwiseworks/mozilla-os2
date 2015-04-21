@@ -46,6 +46,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "logging.h"
 #include "nsError.h"
+#include "mozilla/Scoped.h"
 
 // nICEr includes
 extern "C" {
@@ -72,6 +73,94 @@ namespace mozilla {
 
 MOZ_MTLOG_MODULE("mtransport")
 
+static bool ToNrIceAddr(nr_transport_addr &addr,
+                        NrIceAddr *out) {
+  int r;
+  char addrstring[INET6_ADDRSTRLEN + 1];
+
+  r = nr_transport_addr_get_addrstring(&addr, addrstring, sizeof(addrstring));
+  if (r)
+    return false;
+  out->host = addrstring;
+
+  int port;
+  r = nr_transport_addr_get_port(&addr, &port);
+  if (r)
+    return false;
+
+  out->port = port;
+
+  switch (addr.protocol) {
+    case IPPROTO_TCP:
+      out->transport = kNrIceTransportTcp;
+      break;
+    case IPPROTO_UDP:
+      out->transport = kNrIceTransportUdp;
+      break;
+    default:
+      MOZ_CRASH();
+      return false;
+  }
+
+  return true;
+}
+
+static bool ToNrIceCandidate(const nr_ice_candidate& candc,
+                             NrIceCandidate* out) {
+  MOZ_ASSERT(out);
+  int r;
+  // Const-cast because the internal nICEr code isn't const-correct.
+  nr_ice_candidate *cand = const_cast<nr_ice_candidate *>(&candc);
+
+  if (!ToNrIceAddr(cand->addr, &out->cand_addr))
+    return false;
+
+  if (cand->isock) {
+    nr_transport_addr addr;
+    r = nr_socket_getaddr(cand->isock->sock, &addr);
+    if (r)
+      return false;
+
+    if (!ToNrIceAddr(addr, &out->local_addr))
+      return false;
+  }
+
+  NrIceCandidate::Type type;
+
+  switch (cand->type) {
+    case HOST:
+      type = NrIceCandidate::ICE_HOST;
+      break;
+    case SERVER_REFLEXIVE:
+      type = NrIceCandidate::ICE_SERVER_REFLEXIVE;
+      break;
+    case PEER_REFLEXIVE:
+      type = NrIceCandidate::ICE_PEER_REFLEXIVE;
+      break;
+    case RELAYED:
+      type = NrIceCandidate::ICE_RELAYED;
+      break;
+    default:
+      return false;
+  }
+
+  out->type = type;
+  out->codeword = candc.codeword;
+  return true;
+}
+
+// Make an NrIceCandidate from the candidate |cand|.
+// This is not a member fxn because we want to hide the
+// defn of nr_ice_candidate but we pass by reference.
+static NrIceCandidate* MakeNrIceCandidate(const nr_ice_candidate& candc) {
+  ScopedDeletePtr<NrIceCandidate> out(new NrIceCandidate());
+
+  if (!ToNrIceCandidate(candc, out)) {
+    return nullptr;
+  }
+  return out.forget();
+}
+
 // NrIceMediaStream
 RefPtr<NrIceMediaStream>
 NrIceMediaStream::Create(NrIceCtx *ctx,
@@ -84,8 +173,8 @@ NrIceMediaStream::Create(NrIceCtx *ctx,
                                   const_cast<char *>(name.c_str()),
                                   components, &stream->stream_);
   if (r) {
-    MOZ_MTLOG(PR_LOG_ERROR, "Couldn't create ICE media stream for '"
-         << name << "'");
+    MOZ_MTLOG(ML_ERROR, "Couldn't create ICE media stream for '"
+              << name << "'");
     return nullptr;
   }
 
@@ -115,8 +204,8 @@ nsresult NrIceMediaStream::ParseAttributes(std::vector<std::string>&
                                                   &attributes_in[0] : nullptr,
                                                   attributes_in.size());
   if (r) {
-    MOZ_MTLOG(PR_LOG_ERROR, "Couldn't parse attributes for stream "
-         << name_ << "'");
+    MOZ_MTLOG(ML_ERROR, "Couldn't parse attributes for stream "
+              << name_ << "'");
     return NS_ERROR_FAILURE;
   }
 
@@ -127,7 +216,7 @@ nsresult NrIceMediaStream::ParseAttributes(std::vector<std::string>&
 nsresult NrIceMediaStream::ParseTrickleCandidate(const std::string& candidate) {
   int r;
 
-  MOZ_MTLOG(PR_LOG_DEBUG, "NrIceCtx(" << ctx_->name() << ")/STREAM(" <<
+  MOZ_MTLOG(ML_DEBUG, "NrIceCtx(" << ctx_->name() << ")/STREAM(" <<
             name() << ") : parsing trickle candidate " << candidate);
 
   r = nr_ice_peer_ctx_parse_trickle_candidate(ctx_->peer(),
@@ -137,12 +226,12 @@ nsresult NrIceMediaStream::ParseTrickleCandidate(const std::string& candidate) {
                                               );
   if (r) {
     if (r == R_ALREADY) {
-      MOZ_MTLOG(PR_LOG_ERROR, "Trickle candidates are redundant for stream '"
-         << name_ << "' because it is completed");
+      MOZ_MTLOG(ML_ERROR, "Trickle candidates are redundant for stream '"
+                << name_ << "' because it is completed");
 
     } else {
-      MOZ_MTLOG(PR_LOG_ERROR, "Couldn't parse trickle candidate for stream '"
-         << name_ << "'");
+      MOZ_MTLOG(ML_ERROR, "Couldn't parse trickle candidate for stream '"
+                << name_ << "'");
       return NS_ERROR_FAILURE;
     }
   }
@@ -150,25 +239,103 @@ nsresult NrIceMediaStream::ParseTrickleCandidate(const std::string& candidate) {
   return NS_OK;
 }
 
-
-void NrIceMediaStream::EmitAllCandidates() {
-  char **attrs = 0;
-  int attrct;
+// Returns NS_ERROR_NOT_AVAILABLE if component is unpaired or disabled.
+nsresult NrIceMediaStream::GetActivePair(int component,
+                                         NrIceCandidate **localp,
+                                         NrIceCandidate **remotep) {
   int r;
-  r = nr_ice_media_stream_get_attributes(stream_,
-                                         &attrs, &attrct);
-  if (r) {
-    MOZ_MTLOG(PR_LOG_ERROR, "Couldn't get ICE candidates for '"
-         << name_ << "'");
-    return;
+  nr_ice_candidate *local_int;
+  nr_ice_candidate *remote_int;
+
+  r = nr_ice_media_stream_get_active(ctx_->peer(),
+                                     stream_,
+                                     component,
+                                     &local_int, &remote_int);
+  // If result is R_REJECTED then component is unpaired or disabled.
+  if (r == R_REJECTED)
+    return NS_ERROR_NOT_AVAILABLE;
+
+  if (r)
+    return NS_ERROR_FAILURE;
+
+  ScopedDeletePtr<NrIceCandidate> local(
+      MakeNrIceCandidate(*local_int));
+  if (!local)
+    return NS_ERROR_FAILURE;
+
+  ScopedDeletePtr<NrIceCandidate> remote(
+      MakeNrIceCandidate(*remote_int));
+  if (!remote)
+    return NS_ERROR_FAILURE;
+
+  if (localp)
+    *localp = local.forget();
+  if (remotep)
+    *remotep = remote.forget();
+
+  return NS_OK;
+}
+
+
+nsresult NrIceMediaStream::GetCandidatePairs(std::vector<NrIceCandidatePair>*
+                                             out_pairs) const {
+  MOZ_ASSERT(out_pairs);
+
+  // Get the check_list on the peer stream (this is where the check_list
+  // actually lives, not in stream_)
+  nr_ice_media_stream* peer_stream;
+  int r = nr_ice_peer_ctx_find_pstream(ctx_->peer(), stream_, &peer_stream);
+  if (r != 0) {
+    return NS_ERROR_FAILURE;
   }
 
-  for (int i=0; i<attrct; i++) {
-    SignalCandidate(this, attrs[i]);
-    RFREE(attrs[i]);
+  nr_ice_cand_pair *p1;
+  out_pairs->clear();
+
+  TAILQ_FOREACH(p1, &peer_stream->check_list, entry) {
+    MOZ_ASSERT(p1);
+    MOZ_ASSERT(p1->local);
+    MOZ_ASSERT(p1->remote);
+    NrIceCandidatePair pair;
+
+    switch (p1->state) {
+      case NR_ICE_PAIR_STATE_FROZEN:
+        pair.state = NrIceCandidatePair::State::STATE_FROZEN;
+        break;
+      case NR_ICE_PAIR_STATE_WAITING:
+        pair.state = NrIceCandidatePair::State::STATE_WAITING;
+        break;
+      case NR_ICE_PAIR_STATE_IN_PROGRESS:
+        pair.state = NrIceCandidatePair::State::STATE_IN_PROGRESS;
+        break;
+      case NR_ICE_PAIR_STATE_FAILED:
+        pair.state = NrIceCandidatePair::State::STATE_FAILED;
+        break;
+      case NR_ICE_PAIR_STATE_SUCCEEDED:
+        pair.state = NrIceCandidatePair::State::STATE_SUCCEEDED;
+        break;
+      case NR_ICE_PAIR_STATE_CANCELLED:
+        pair.state = NrIceCandidatePair::State::STATE_CANCELLED;
+        break;
+      default:
+        MOZ_ASSERT(0);
+    }
+
+    pair.priority = p1->priority;
+    pair.nominated = p1->peer_nominated || p1->nominated;
+    pair.selected = p1->remote->component &&
+                    p1->remote->component->active == p1;
+    pair.codeword = p1->codeword;
+
+    if (!ToNrIceCandidate(*(p1->local), &pair.local) ||
+        !ToNrIceCandidate(*(p1->remote), &pair.remote)) {
+      return NS_ERROR_FAILURE;
+    }
+
+    out_pairs->push_back(pair);
   }
 
-  RFREE(attrs);
+  return NS_OK;
 }
 
 nsresult NrIceMediaStream::GetDefaultCandidate(int component,
@@ -180,23 +347,35 @@ nsresult NrIceMediaStream::GetDefaultCandidate(int component,
   r = nr_ice_media_stream_get_default_candidate(stream_,
                                                 component, &cand);
   if (r) {
-    MOZ_MTLOG(PR_LOG_ERROR, "Couldn't get default ICE candidate for '"
-         << name_ << "'");
-    return NS_ERROR_NOT_AVAILABLE;
+    if (ctx_->generating_trickle()) {
+      // Generate default trickle candidates.
+      // draft-ivov-mmusic-trickle-ice-01.txt says to use port 9
+      // but "::" instead of "0.0.0.0". Since we don't do any
+      // IPv6 we are ignoring that for now.
+      *addrp = "0.0.0.0";
+      *portp = 9;
+    }
+    else {
+      MOZ_MTLOG(ML_ERROR, "Couldn't get default ICE candidate for '"
+                << name_ << "'");
+
+      return NS_ERROR_NOT_AVAILABLE;
+    }
   }
+  else {
+    char addr[64];  // Enough for IPv6 with colons.
+    r = nr_transport_addr_get_addrstring(&cand->addr,addr,sizeof(addr));
+    if (r)
+      return NS_ERROR_FAILURE;
 
-  char addr[64];  // Enough for IPv6 with colons.
-  r = nr_transport_addr_get_addrstring(&cand->addr,addr,sizeof(addr));
-  if (r)
-    return NS_ERROR_FAILURE;
+    int port;
+    r=nr_transport_addr_get_port(&cand->addr,&port);
+    if (r)
+      return NS_ERROR_FAILURE;
 
-  int port;
-  r=nr_transport_addr_get_port(&cand->addr,&port);
-  if (r)
-    return NS_ERROR_FAILURE;
-
-  *addrp = addr;
-  *portp = port;
+    *addrp = addr;
+    *portp = port;
+  }
 
   return NS_OK;
 }
@@ -210,8 +389,8 @@ std::vector<std::string> NrIceMediaStream::GetCandidates() const {
   r = nr_ice_media_stream_get_attributes(stream_,
                                          &attrs, &attrct);
   if (r) {
-    MOZ_MTLOG(PR_LOG_ERROR, "Couldn't get ICE candidates for '"
-         << name_ << "'");
+    MOZ_MTLOG(ML_ERROR, "Couldn't get ICE candidates for '"
+              << name_ << "'");
     return ret;
   }
 
@@ -225,6 +404,64 @@ std::vector<std::string> NrIceMediaStream::GetCandidates() const {
   return ret;
 }
 
+static nsresult GetCandidatesFromStream(
+    nr_ice_media_stream *stream,
+    std::vector<NrIceCandidate> *candidates) {
+  MOZ_ASSERT(candidates);
+  nr_ice_component* comp=STAILQ_FIRST(&stream->components);
+  while(comp){
+    if (comp->state != NR_ICE_COMPONENT_DISABLED) {
+      nr_ice_candidate *cand = TAILQ_FIRST(&comp->candidates);
+      while(cand){
+        NrIceCandidate new_cand;
+        // This can fail if the candidate is server reflexive or relayed, and
+        // has not yet received a response (ie; it doesn't know its address
+        // yet). For the purposes of this code, this isn't a candidate we're
+        // interested in, since it is not fully baked yet.
+        if (ToNrIceCandidate(*cand, &new_cand)) {
+          candidates->push_back(new_cand);
+        }
+        cand=TAILQ_NEXT(cand,entry_comp);
+      }
+    }
+    comp=STAILQ_NEXT(comp,entry);
+  }
+
+  return NS_OK;
+}
+
+nsresult NrIceMediaStream::GetLocalCandidates(
+    std::vector<NrIceCandidate>* candidates) const {
+  return GetCandidatesFromStream(stream_, candidates);
+}
+
+nsresult NrIceMediaStream::GetRemoteCandidates(
+    std::vector<NrIceCandidate>* candidates) const {
+  nr_ice_media_stream* peer_stream;
+  int r = nr_ice_peer_ctx_find_pstream(ctx_->peer(), stream_, &peer_stream);
+  if (r != 0) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return GetCandidatesFromStream(peer_stream, candidates);
+}
+
+
+nsresult NrIceMediaStream::DisableComponent(int component_id) {
+  if (!stream_)
+    return NS_ERROR_FAILURE;
+
+  int r = nr_ice_media_stream_disable_component(stream_,
+                                                component_id);
+  if (r) {
+    MOZ_MTLOG(ML_ERROR, "Couldn't disable '" << name_ << "':" <<
+              component_id);
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
 nsresult NrIceMediaStream::SendPacket(int component_id,
                                       const unsigned char *data,
                                       size_t len) {
@@ -235,7 +472,7 @@ nsresult NrIceMediaStream::SendPacket(int component_id,
                                    component_id,
                                    const_cast<unsigned char *>(data), len);
   if (r) {
-    MOZ_MTLOG(PR_LOG_ERROR, "Couldn't send media on '" << name_ << "'");
+    MOZ_MTLOG(ML_ERROR, "Couldn't send media on '" << name_ << "'");
     if (r == R_WOULDBLOCK) {
       return NS_BASE_STREAM_WOULD_BLOCK;
     }
@@ -248,13 +485,20 @@ nsresult NrIceMediaStream::SendPacket(int component_id,
 
 
 void NrIceMediaStream::Ready() {
-  MOZ_MTLOG(PR_LOG_DEBUG, "Marking stream ready '" << name_ << "'");
-  state_ = ICE_OPEN;
-  SignalReady(this);
+  // This function is called whenever a stream becomes ready, but it
+  // gets fired multiple times when a stream gets nominated repeatedly.
+  if (state_ != ICE_OPEN) {
+    MOZ_MTLOG(ML_DEBUG, "Marking stream ready '" << name_ << "'");
+    state_ = ICE_OPEN;
+    SignalReady(this);
+  }
+  else {
+    MOZ_MTLOG(ML_DEBUG, "Stream ready callback fired again for '" << name_ << "'");
+  }
 }
 
 void NrIceMediaStream::Close() {
-  MOZ_MTLOG(PR_LOG_DEBUG, "Marking stream closed '" << name_ << "'");
+  MOZ_MTLOG(ML_DEBUG, "Marking stream closed '" << name_ << "'");
   state_ = ICE_CLOSED;
   stream_ = nullptr;
 }

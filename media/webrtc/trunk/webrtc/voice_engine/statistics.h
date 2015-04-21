@@ -11,10 +11,10 @@
 #ifndef WEBRTC_VOICE_ENGINE_STATISTICS_H
 #define WEBRTC_VOICE_ENGINE_STATISTICS_H
 
-#include "common_types.h"
-#include "typedefs.h"
-#include "voice_engine_defines.h"
-#include "voe_errors.h"
+#include "webrtc/common_types.h"
+#include "webrtc/typedefs.h"
+#include "webrtc/voice_engine/include/voe_errors.h"
+#include "webrtc/voice_engine/voice_engine_defines.h"
 
 namespace webrtc {
 class CriticalSectionWrapper;
@@ -26,29 +26,28 @@ class Statistics
  public:
     enum {KTraceMaxMessageSize = 256};
  public:
-    Statistics(const WebRtc_UWord32 instanceId);
+    Statistics(uint32_t instanceId);
     ~Statistics();
 
-    WebRtc_Word32 SetInitialized();
-    WebRtc_Word32 SetUnInitialized();
+    int32_t SetInitialized();
+    int32_t SetUnInitialized();
     bool Initialized() const;
-    WebRtc_Word32 SetLastError(const WebRtc_Word32 error) const;
-    WebRtc_Word32 SetLastError(const WebRtc_Word32 error,
-                               const TraceLevel level) const;
-    WebRtc_Word32 SetLastError(const WebRtc_Word32 error,
-                               const TraceLevel level,
-                               const char* msg) const;
-    WebRtc_Word32 LastError() const;
+    int32_t SetLastError(int32_t error) const;
+    int32_t SetLastError(int32_t error, TraceLevel level) const;
+    int32_t SetLastError(int32_t error,
+                         TraceLevel level,
+                         const char* msg) const;
+    int32_t LastError() const;
 
  private:
     CriticalSectionWrapper* _critPtr;
-    const WebRtc_UWord32 _instanceId;
-    mutable WebRtc_Word32 _lastError;
+    const uint32_t _instanceId;
+    mutable int32_t _lastError;
     bool _isInitialized;
 };
 
 }  // namespace voe
 
-}  //  namespace webrtc
+}  // namespace webrtc
 
 #endif // WEBRTC_VOICE_ENGINE_STATISTICS_H

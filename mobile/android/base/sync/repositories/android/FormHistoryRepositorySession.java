@@ -5,10 +5,12 @@
 package org.mozilla.gecko.sync.repositories.android;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Callable;
 
 import org.mozilla.gecko.background.common.log.Logger;
+import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.BrowserContract.DeletedFormHistory;
 import org.mozilla.gecko.db.BrowserContract.FormHistory;
 import org.mozilla.gecko.sync.repositories.InactiveSessionException;
@@ -74,7 +76,7 @@ public class FormHistoryRepositorySession extends
    */
   public static ContentProviderClient acquireContentProvider(final Context context)
       throws NoContentProviderException {
-    Uri uri = FormHistory.CONTENT_URI;
+    Uri uri = BrowserContract.FORM_HISTORY_AUTHORITY_URI;
     ContentProviderClient client = context.getContentResolver().acquireContentProviderClient(uri);
     if (client == null) {
       throw new NoContentProviderException(uri);
@@ -122,6 +124,7 @@ public class FormHistoryRepositorySession extends
   @Override
   public void guidsSince(final long timestamp, final RepositorySessionGuidsSinceDelegate delegate) {
     Runnable command = new Runnable() {
+      @Override
       public void run() {
         if (!isActive()) {
           delegate.onGuidsSinceFailed(new InactiveSessionException(null));
@@ -313,9 +316,9 @@ public class FormHistoryRepositorySession extends
       }
     };
 
-    ArrayList<Callable<Cursor>> callableCursors = new ArrayList<Callable<Cursor>>();
-    callableCursors.add(regularCallable);
-    callableCursors.add(deletedCallable);
+    @SuppressWarnings("unchecked")
+    List<Callable<Cursor>> callableCursors = Arrays.asList(regularCallable, deletedCallable);
+
     fetchHelper(delegate, sharedEnd, callableCursors);
   }
 
@@ -348,9 +351,9 @@ public class FormHistoryRepositorySession extends
       }
     };
 
-    ArrayList<Callable<Cursor>> callableCursors = new ArrayList<Callable<Cursor>>();
-    callableCursors.add(regularCallable);
-    callableCursors.add(deletedCallable);
+    @SuppressWarnings("unchecked")
+    List<Callable<Cursor>> callableCursors = Arrays.asList(regularCallable, deletedCallable);
+
     fetchHelper(delegate, sharedEnd, callableCursors);
   }
 
@@ -702,6 +705,7 @@ public class FormHistoryRepositorySession extends
   @Override
   public void wipe(final RepositorySessionWipeDelegate delegate) {
     Runnable command = new Runnable() {
+      @Override
       public void run() {
         if (!isActive()) {
           delegate.onWipeFailed(new InactiveSessionException(null));

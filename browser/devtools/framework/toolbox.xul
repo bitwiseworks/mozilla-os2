@@ -7,13 +7,13 @@
  %toolboxDTD;
 ]>
 <?xml-stylesheet href="chrome://browser/skin/" type="text/css"?>
-<?xml-stylesheet href="chrome://browser/content/devtools/framework/toolbox.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/devtools/common.css" type="text/css"?>
-<?xml-stylesheet href="chrome://browser/skin/devtools/toolbox.css" type="text/css"?>
 <?xul-overlay href="chrome://global/content/editMenuOverlay.xul"?>
 
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
 
+  <script type="application/javascript;version=1.8"
+          src="chrome://browser/content/devtools/theme-switching.js"/>
   <script type="application/javascript" src="chrome://global/content/globalOverlay.js"/>
 
   <commandset id="editMenuCommands"/>
@@ -23,6 +23,30 @@
          key="&toolboxOptionsButton.key;"
          oncommand="void(0);"
          modifiers="shift, accel"/>
+    <key id="toolbox-next-tool-key"
+         key="&toolboxNextTool.key;"
+         oncommand="void(0);"
+         modifiers="accel"/>
+    <key id="toolbox-previous-tool-key"
+         key="&toolboxPreviousTool.key;"
+         oncommand="void(0);"
+         modifiers="accel"/>
+    <key id="toolbox-zoom-in-key"
+         key="&toolboxZoomIn.key;"
+         oncommand="void(0);"
+         modifiers="accel"/>
+    <key id="toolbox-zoom-in-key2"
+         key="&toolboxZoomIn.key2;"
+         oncommand="void(0);"
+         modifiers="accel"/>
+    <key id="toolbox-zoom-out-key"
+         key="&toolboxZoomOut.key;"
+         oncommand="void(0);"
+         modifiers="accel"/>
+    <key id="toolbox-zoom-reset-key"
+         key="&toolboxZoomReset.key;"
+         oncommand="void(0);"
+         modifiers="accel"/>
   </keyset>
 
   <notificationbox id="toolbox-notificationbox" flex="1">
@@ -48,7 +72,10 @@
       </hbox>
 #endif
     </toolbar>
-    <deck id="toolbox-deck" flex="1">
-    </deck>
+    <vbox flex="1">
+      <deck id="toolbox-deck" flex="1" minheight="75" />
+      <splitter id="toolbox-console-splitter" class="devtools-horizontal-splitter" hidden="true" />
+      <box minheight="75" flex="1" id="toolbox-panel-webconsole" collapsed="true" />
+    </vbox>
   </notificationbox>
 </window>

@@ -9,16 +9,10 @@
 
 function startTest()
 {
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+  SpecialPowers.pushPermissions([{'type': 'cookie', 'allow': SpecialPowers.Ci.nsICookiePermission.ACCESS_SESSION, 'context': document}], test1);
+}
 
-  var io = Components.classes["@mozilla.org/network/io-service;1"]
-    .getService(Components.interfaces.nsIIOService);
-  var uri = io.newURI(window.location, "", null);
-  var cp = Components.classes["@mozilla.org/cookie/permission;1"]
-    .getService(Components.interfaces.nsICookiePermission);
-  cp.setAccess(uri, Components.interfaces.nsICookiePermission.ACCESS_SESSION);
-
-
+function test1() {
   // Initially check the localStorage is empty
   is(localStorage.length, 0, "The storage is empty [1]");
   is(localStorage.key(0), null, "key() should return null for out-of-bounds access");
@@ -196,9 +190,6 @@ function startTest()
   localStorage.removeItem("nonexisting"); // Just check there is no exception
   localStorage.removeItem("key1"); // Just check there is no exception
   localStorage.removeItem("key2"); // Just check there is no exception
-
-
-  cp.setAccess(uri, Components.interfaces.nsICookiePermission.ACCESS_DEFAULT);
 
   localStorage.clear();
   SimpleTest.finish();

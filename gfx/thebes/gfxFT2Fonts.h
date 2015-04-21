@@ -6,6 +6,7 @@
 #ifndef GFX_FT2FONTS_H
 #define GFX_FT2FONTS_H
 
+#include "mozilla/MemoryReporting.h"
 #include "cairo.h"
 #include "gfxTypes.h"
 #include "gfxFont.h"
@@ -23,8 +24,6 @@ public: // new functions
                const gfxFontStyle *aFontStyle,
                bool aNeedsBold);
     virtual ~gfxFT2Font ();
-
-    cairo_font_face_t *CairoFontFace();
 
     FT2FontEntry *GetFontEntry();
 
@@ -63,14 +62,18 @@ public: // new functions
         return &entry->mData;
     }
 
-    virtual void SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                     FontCacheSizes*   aSizes) const;
-    virtual void SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                     FontCacheSizes*   aSizes) const;
+    virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontCacheSizes* aSizes) const;
+    virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontCacheSizes* aSizes) const;
+
+#ifdef USE_SKIA
+    virtual mozilla::TemporaryRef<mozilla::gfx::GlyphRenderingOptions> GetGlyphRenderingOptions();
+#endif
 
 protected:
     virtual bool ShapeText(gfxContext      *aContext,
-                           const PRUnichar *aText,
+                           const char16_t *aText,
                            uint32_t         aOffset,
                            uint32_t         aLength,
                            int32_t          aScript,
@@ -79,7 +82,7 @@ protected:
 
     void FillGlyphDataForChar(uint32_t ch, CachedGlyphData *gd);
 
-    void AddRange(const PRUnichar *aText,
+    void AddRange(const char16_t *aText,
                   uint32_t         aOffset,
                   uint32_t         aLength,
                   gfxShapedText   *aShapedText);

@@ -4,6 +4,23 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'test_intl_uconv'
-
 XPCSHELL_TESTS_MANIFESTS += ['unit/xpcshell.ini']
+
+# Tests disabled because they dont work in libxul builds.
+#MOZILLA_INTERNAL_API = True
+#
+#CPP_SOURCES += [
+#    'TestUConv.cpp',
+#    'nsconv.cpp',
+#    'plattest.cpp',
+#]
+#
+#if CONFIG['OS_ARCH'] == 'WINNT':
+#    CPP_SOURCES += [
+#        'convperf.cpp',
+#    ]
+#
+#SIMPLE_PROGRAMS += [source.replace('.cpp', CONFIG['BIN_SUFFIX']), CPP_SOURCES]
+
+MOCHITEST_MANIFESTS += ['mochitest.ini']
+

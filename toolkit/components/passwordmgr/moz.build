@@ -4,19 +4,21 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['test']
+MOCHITEST_MANIFESTS += ['test/mochitest.ini']
+MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
+BROWSER_CHROME_MANIFESTS += ['test/browser/browser.ini']
+XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
 
 XPIDL_SOURCES += [
     'nsILoginInfo.idl',
     'nsILoginManager.idl',
     'nsILoginManagerCrypto.idl',
-    'nsILoginManagerIEMigrationHelper.idl',
     'nsILoginManagerPrompter.idl',
     'nsILoginManagerStorage.idl',
     'nsILoginMetaInfo.idl',
 ]
 
-MODULE = 'loginmgr'
+XPIDL_MODULE = 'loginmgr'
 
 EXTRA_COMPONENTS += [
     'crypto-SDR.js',
@@ -24,9 +26,15 @@ EXTRA_COMPONENTS += [
     'nsLoginManager.js',
     'nsLoginManagerPrompter.js',
     'passwordmgr.manifest',
-    'storage-Legacy.js',
 ]
 
 EXTRA_PP_COMPONENTS += [
     'storage-mozStorage.js',
 ]
+
+EXTRA_JS_MODULES += [
+    'InsecurePasswordUtils.jsm',
+    'LoginManagerContent.jsm',
+]
+
+JAR_MANIFESTS += ['jar.mn']

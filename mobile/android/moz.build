@@ -16,8 +16,13 @@ DIRS += [
     'themes/core',
     'app',
     'fonts',
+    'geckoview_library',
+    'extensions',
 ]
 
 if not CONFIG['LIBXUL_SDK']:
     PARALLEL_DIRS += ['../../xulrunner/tools/redit']
 
+TEST_DIRS += [
+    'tests',
+]

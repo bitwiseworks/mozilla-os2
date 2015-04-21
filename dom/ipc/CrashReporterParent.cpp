@@ -4,10 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "CrashReporterParent.h"
-
-#include "base/process_util.h"
-
+#include "mozilla/dom/ContentParent.h"
+#include "nsXULAppAPI.h"
 #include <time.h>
+
+#ifdef MOZ_CRASHREPORTER
+#include "nsExceptionHandler.h"
+#endif
 
 using namespace base;
 
@@ -30,15 +33,43 @@ CrashReporterParent::RecvAppendAppNotes(const nsCString& data)
     return true;
 }
 
+mozilla::ipc::IProtocol*
+CrashReporterParent::CloneProtocol(Channel* aChannel,
+                                   mozilla::ipc::ProtocolCloneContext* aCtx)
+{
+#ifdef MOZ_CRASHREPORTER
+    ContentParent* contentParent = aCtx->GetContentParent();
+    CrashReporter::ThreadId childThreadId = contentParent->Pid();
+    GeckoProcessType childProcessType =
+        contentParent->Process()->GetProcessType();
+
+    nsAutoPtr<PCrashReporterParent> actor(
+        contentParent->AllocPCrashReporterParent(childThreadId,
+                                                 childProcessType)
+    );
+    if (!actor ||
+        !contentParent->RecvPCrashReporterConstructor(actor,
+                                                      childThreadId,
+                                                      childThreadId)) {
+      return nullptr;
+    }
+
+    return actor.forget();
+#else
+    MOZ_CRASH("Not Implemented");
+    return nullptr;
+#endif
+}
+
 CrashReporterParent::CrashReporterParent()
-: mStartTime(time(NULL))
-, mInitialized(false)
+    :
+#ifdef MOZ_CRASHREPORTER
+      mNotes(4),
+#endif
+      mStartTime(::time(nullptr))
+    , mInitialized(false)
 {
     MOZ_COUNT_CTOR(CrashReporterParent);
-
-#ifdef MOZ_CRASHREPORTER
-    mNotes.Init(4);
-#endif
 }
 
 CrashReporterParent::~CrashReporterParent()

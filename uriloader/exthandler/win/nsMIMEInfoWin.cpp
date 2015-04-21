@@ -26,7 +26,7 @@
 #define RUNDLL32_EXE L"\\rundll32.exe"
 
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsMIMEInfoWin, nsMIMEInfoBase, nsIPropertyBag)
+NS_IMPL_ISUPPORTS_INHERITED(nsMIMEInfoWin, nsMIMEInfoBase, nsIPropertyBag)
 
 nsMIMEInfoWin::~nsMIMEInfoWin()
 {
@@ -97,11 +97,11 @@ nsMIMEInfoWin::LaunchWithFile(nsIFile* aFile)
         memset(&seinfo, 0, sizeof(seinfo));
         seinfo.cbSize = sizeof(SHELLEXECUTEINFOW);
         seinfo.fMask  = 0;
-        seinfo.hwnd   = NULL;
-        seinfo.lpVerb = NULL;
+        seinfo.hwnd   = nullptr;
+        seinfo.lpVerb = nullptr;
         seinfo.lpFile = rundll32Path;
         seinfo.lpParameters =  args.get();
-        seinfo.lpDirectory  = NULL;
+        seinfo.lpDirectory  = nullptr;
         seinfo.nShow  = SW_SHOWNORMAL;
         if (ShellExecuteExW(&seinfo))
           return NS_OK;
@@ -240,21 +240,22 @@ nsMIMEInfoWin::LoadUriInternal(nsIURI * aURL)
     rv = textToSubURI->UnEscapeNonAsciiURI(urlCharset, urlSpec, utf16Spec);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    static const PRUnichar cmdVerb[] = L"open";
+    static const wchar_t cmdVerb[] = L"open";
     SHELLEXECUTEINFOW sinfo;
     memset(&sinfo, 0, sizeof(sinfo));
     sinfo.cbSize   = sizeof(sinfo);
     sinfo.fMask    = SEE_MASK_FLAG_DDEWAIT |
       SEE_MASK_FLAG_NO_UI;
-    sinfo.hwnd     = NULL;
+    sinfo.hwnd     = nullptr;
     sinfo.lpVerb   = (LPWSTR)&cmdVerb;
     sinfo.nShow    = SW_SHOWNORMAL;
     
-    LPITEMIDLIST pidl = NULL;
+    LPITEMIDLIST pidl = nullptr;
     SFGAOF sfgao;
     
     // Bug 394974
-    if (SUCCEEDED(SHParseDisplayName(utf16Spec.get(),NULL, &pidl, 0, &sfgao))) {
+    if (SUCCEEDED(SHParseDisplayName(utf16Spec.get(), nullptr,
+                                     &pidl, 0, &sfgao))) {
       sinfo.lpIDList = pidl;
       sinfo.fMask |= SEE_MASK_INVOKEIDLIST;
     } else {
@@ -425,7 +426,7 @@ bool nsMIMEInfoWin::GetDllLaunchInfo(nsIFile * aDll,
     if (bufLength == 0) // Error
       return false;
 
-    nsAutoArrayPtr<PRUnichar> destination(new PRUnichar[bufLength]);
+    nsAutoArrayPtr<wchar_t> destination(new wchar_t[bufLength]);
     if (!destination)
       return false;
     if (!::ExpandEnvironmentStringsW(appFilesystemCommand.get(),
@@ -433,7 +434,7 @@ bool nsMIMEInfoWin::GetDllLaunchInfo(nsIFile * aDll,
                                      bufLength))
       return false;
 
-    appFilesystemCommand = destination;
+    appFilesystemCommand = static_cast<const wchar_t*>(destination);
 
     // C:\Windows\System32\rundll32.exe "C:\Program Files\Windows 
     // Photo Gallery\PhotoViewer.dll", ImageView_Fullscreen %1
@@ -513,7 +514,7 @@ void nsMIMEInfoWin::ProcessPath(nsCOMPtr<nsIMutableArray>& appList,
 
   // Don't include firefox.exe in the list
   WCHAR exe[MAX_PATH+1];
-  uint32_t len = GetModuleFileNameW(NULL, exe, MAX_PATH);
+  uint32_t len = GetModuleFileNameW(nullptr, exe, MAX_PATH);
   if (len < MAX_PATH && len != 0) {
     uint32_t index = lower.Find(exe);
     if (index != -1)
@@ -613,7 +614,7 @@ nsMIMEInfoWin::GetPossibleLocalHandlers(nsIArray **_retval)
 
   nsAutoString fileExtToUse;
   if (fileExt.First() != '.')
-    fileExtToUse = PRUnichar('.');
+    fileExtToUse = char16_t('.');
   fileExtToUse.Append(NS_ConvertUTF8toUTF16(fileExt));
 
   // Note, the order in which these occur has an effect on the 

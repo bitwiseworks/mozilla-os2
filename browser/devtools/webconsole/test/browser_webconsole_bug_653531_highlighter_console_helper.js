@@ -5,11 +5,12 @@
 
 // Tests that the $0 console helper works as intended.
 
-function createDocument()
-{
+let inspector, h1;
+
+function createDocument() {
   let doc = content.document;
   let div = doc.createElement("div");
-  let h1 = doc.createElement("h1");
+  h1 = doc.createElement("h1");
   let p1 = doc.createElement("p");
   let p2 = doc.createElement("p");
   let div2 = doc.createElement("div");
@@ -40,99 +41,58 @@ function createDocument()
   setupHighlighterTests();
 }
 
-function setupHighlighterTests()
-{
-  let h1 = content.document.querySelector("h1");
+function setupHighlighterTests() {
   ok(h1, "we have the header node");
-
   openInspector(runSelectionTests);
 }
 
-function runSelectionTests(aInspector)
-{
-  aInspector.highlighter.unlockAndFocus();
-  aInspector.highlighter.outline.setAttribute("disable-transitions", "true");
+function runSelectionTests(aInspector) {
+  inspector = aInspector;
 
-  executeSoon(function() {
-    aInspector.selection.once("new-node", performTestComparisons);
-    let h1 = content.document.querySelector("h1");
-    EventUtils.synthesizeMouse(h1, 2, 2, {type: "mousemove"}, content);
+  inspector.toolbox.highlighterUtils.startPicker();
+  inspector.toolbox.once("picker-started", () => {
+    info("Picker mode started, now clicking on H1 to select that node");
+    executeSoon(() => {
+      h1.scrollIntoView();
+      EventUtils.synthesizeMouseAtCenter(h1, {}, content);
+      inspector.toolbox.once("picker-stopped", () => {
+        info("Picker mode stopped, H1 selected, now switching to the console");
+        openConsole(gBrowser.selectedTab).then(performWebConsoleTests);
+      });
+    });
   });
 }
 
-function performTestComparisons()
-{
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  let inspector = gDevTools.getToolbox(target).getPanel("inspector");
-  inspector.highlighter.lock();
-
-  let isHighlighting =
-    !(inspector.highlighter.outline.getAttribute("hidden") == "true");
-
-  ok(isHighlighting, "inspector is highlighting");
-
-  let h1 = content.document.querySelector("h1");
-  is(inspector.selection.node, h1, "selection matches node");
-
-  openConsole(gBrowser.selectedTab, performWebConsoleTests);
-}
-
-function performWebConsoleTests(hud)
-{
+function performWebConsoleTests(hud) {
   let target = TargetFactory.forTab(gBrowser.selectedTab);
   let jsterm = hud.jsterm;
   outputNode = hud.outputNode;
 
   jsterm.clearOutput();
-  jsterm.execute("$0");
+  jsterm.execute("$0", onNodeOutput);
 
-  waitForSuccess({
-    name: "$0 output",
-    validatorFn: function()
-    {
-      return outputNode.querySelector(".webconsole-msg-output");
-    },
-    successFn: function()
-    {
-      let node = outputNode.querySelector(".webconsole-msg-output");
-      isnot(node.textContent.indexOf("[object HTMLHeadingElement"), -1,
-            "correct output for $0");
+  function onNodeOutput(node) {
+    isnot(node.textContent.indexOf("<h1>"), -1, "correct output for $0");
 
-      jsterm.clearOutput();
-      jsterm.execute("$0.textContent = 'bug653531'");
-      waitForSuccess(waitForNodeUpdate);
-    },
-    failureFn: finishUp,
-  });
+    jsterm.clearOutput();
+    jsterm.execute("$0.textContent = 'bug653531'", onNodeUpdate);
+  }
 
-  let waitForNodeUpdate = {
-    name: "$0.textContent update",
-    validatorFn: function()
-    {
-      return outputNode.querySelector(".webconsole-msg-output");
-    },
-    successFn: function()
-    {
-      let node = outputNode.querySelector(".webconsole-msg-output");
-      isnot(node.textContent.indexOf("bug653531"), -1,
-            "correct output for $0.textContent");
-      let inspector = gDevTools.getToolbox(target).getPanel("inspector");
-      is(inspector.selection.node.textContent, "bug653531",
-         "node successfully updated");
+  function onNodeUpdate(node) {
+    isnot(node.textContent.indexOf("bug653531"), -1,
+          "correct output for $0.textContent");
+    is(inspector.selection.node.textContent, "bug653531",
+       "node successfully updated");
 
-      executeSoon(finishUp);
-    },
-    failureFn: finishUp,
-  };
+    inspector = h1 = null;
+    gBrowser.removeCurrentTab();
+    finishTest();
+  }
 }
 
-function finishUp() {
-  finishTest();
-}
-
-function test()
-{
+function test() {
   waitForExplicitFinish();
+
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
     gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
@@ -141,4 +101,3 @@ function test()
 
   content.location = "data:text/html;charset=utf-8,test for highlighter helper in web console";
 }
-

@@ -7,9 +7,10 @@
 #include "nsEditor.h"
 #include "IMETextTxn.h"
 #include "nsGkAtoms.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 PlaceholderTxn::PlaceholderTxn() :  EditAggregateTxn(), 
                                     mAbsorb(true), 
@@ -21,6 +22,8 @@ PlaceholderTxn::PlaceholderTxn() :  EditAggregateTxn(),
                                     mEditor(nullptr)
 {
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(PlaceholderTxn)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(PlaceholderTxn,
                                                 EditAggregateTxn)

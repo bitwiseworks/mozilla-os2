@@ -14,7 +14,7 @@
 //
 //
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "prlink.h"
 #include "nsCOMPtr.h"
@@ -40,6 +40,9 @@ typedef KLStatus (*KLCacheHasValidTickets_type)(
 #endif
 
 #if defined(HAVE_RES_NINIT)
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <arpa/nameser.h>
 #include <resolv.h>
 #endif
 
@@ -119,6 +122,30 @@ gssInit()
             lib = PR_LoadLibrary("gssapi32");
             PR_FreeLibraryName(libName);
         }
+#elif defined(__OpenBSD__)
+        /* OpenBSD doesn't register inter-library dependencies in basesystem
+         * libs therefor we need to load all the libraries gssapi depends on,
+         * in the correct order and with LD_GLOBAL for GSSAPI auth to work
+         * fine.
+         */
+
+        const char *const verLibNames[] = {
+            "libasn1.so",
+            "libcrypto.so",
+            "libroken.so",
+            "libheimbase.so",
+            "libcom_err.so",
+            "libkrb5.so",
+            "libgssapi.so"
+        };
+
+        PRLibSpec libSpec;
+        for (size_t i = 0; i < ArrayLength(verLibNames); ++i) {
+            libSpec.type = PR_LibSpec_Pathname;
+            libSpec.value.pathname = verLibNames[i];
+            lib = PR_LoadLibraryWithFlags(libSpec, PR_LD_GLOBAL);
+        };
+
 #else
         
         const char *const libNames[] = {
@@ -130,8 +157,7 @@ gssInit()
         const char *const verLibNames[] = {
             "libgssapi_krb5.so.2", /* MIT - FC, Suse10, Debian */
             "libgssapi.so.4",      /* Heimdal - Suse10, MDK */
-            "libgssapi.so.1",      /* Heimdal - Suse9, CITI - FC, MDK, Suse10*/
-            "libgssapi.so"         /* OpenBSD */
+            "libgssapi.so.1"       /* Heimdal - Suse9, CITI - FC, MDK, Suse10*/
         };
 
         for (size_t i = 0; i < ArrayLength(verLibNames) && !lib; ++i) {
@@ -332,14 +358,14 @@ nsAuthGSSAPI::Shutdown()
 }
 
 /* Limitations apply to this class's thread safety. See the header file */
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsAuthGSSAPI, nsIAuthModule)
+NS_IMPL_ISUPPORTS(nsAuthGSSAPI, nsIAuthModule)
 
 NS_IMETHODIMP
 nsAuthGSSAPI::Init(const char *serviceName,
                    uint32_t    serviceFlags,
-                   const PRUnichar *domain,
-                   const PRUnichar *username,
-                   const PRUnichar *password)
+                   const char16_t *domain,
+                   const char16_t *username,
+                   const char16_t *password)
 {
     // we don't expect to be passed any user credentials
     NS_ASSERTION(!domain && !username && !password, "unexpected credentials");
@@ -358,8 +384,8 @@ nsAuthGSSAPI::Init(const char *serviceName,
     static bool sTelemetrySent = false;
     if (!sTelemetrySent) {
         mozilla::Telemetry::Accumulate(
-            mozilla::Telemetry::NTLM_MODULE_USED,
-            serviceFlags | nsIAuthModule::REQ_PROXY_AUTH
+            mozilla::Telemetry::NTLM_MODULE_USED_2,
+            serviceFlags & nsIAuthModule::REQ_PROXY_AUTH
                 ? NTLM_MODULE_KERBEROS_PROXY
                 : NTLM_MODULE_KERBEROS_DIRECT);
         sTelemetrySent = true;

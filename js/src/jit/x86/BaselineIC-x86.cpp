@@ -4,10 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/BaselineJIT.h"
-#include "jit/BaselineIC.h"
 #include "jit/BaselineCompiler.h"
 #include "jit/BaselineHelpers.h"
+#include "jit/BaselineIC.h"
+#include "jit/BaselineJIT.h"
 #include "jit/IonLinker.h"
 
 using namespace js;
@@ -30,7 +30,7 @@ ICCompare_Int32::Compiler::generateStubCode(MacroAssembler &masm)
     Assembler::Condition cond = JSOpToCondition(op, /* signed = */true);
     masm.cmpl(R0.payloadReg(), R1.payloadReg());
     masm.setCC(cond, R0.payloadReg());
-    masm.movzxbl(R0.payloadReg(), R0.payloadReg());
+    masm.movzbl(R0.payloadReg(), R0.payloadReg());
 
     // Box the result and return
     masm.tagValue(JSVAL_TYPE_BOOLEAN, R0.payloadReg(), R0);
@@ -87,11 +87,17 @@ ICBinaryArith_Int32::Compiler::generateStubCode(MacroAssembler &masm)
         masm.movl(scratchReg, R0.payloadReg());
         break;
       case JSOP_DIV:
+      {
         // Prevent division by 0.
         masm.branchTest32(Assembler::Zero, R1.payloadReg(), R1.payloadReg(), &failure);
 
         // Prevent negative 0 and -2147483648 / -1.
-        masm.branchTest32(Assembler::Zero, R0.payloadReg(), Imm32(0x7fffffff), &failure);
+        masm.branch32(Assembler::Equal, R0.payloadReg(), Imm32(INT32_MIN), &failure);
+
+        Label notZero;
+        masm.branch32(Assembler::NotEqual, R0.payloadReg(), Imm32(0), &notZero);
+        masm.branchTest32(Assembler::Signed, R1.payloadReg(), R1.payloadReg(), &failure);
+        masm.bind(&notZero);
 
         // For idiv we need eax.
         JS_ASSERT(R1.typeReg() == eax);
@@ -107,6 +113,7 @@ ICBinaryArith_Int32::Compiler::generateStubCode(MacroAssembler &masm)
 
         masm.movl(eax, R0.payloadReg());
         break;
+      }
       case JSOP_MOD:
       {
         // x % 0 always results in NaN.
@@ -184,8 +191,7 @@ ICBinaryArith_Int32::Compiler::generateStubCode(MacroAssembler &masm)
         }
         break;
       default:
-       JS_NOT_REACHED("Unhandled op for BinaryArith_Int32.  ");
-       return false;
+       MOZ_ASSUME_UNREACHABLE("Unhandled op for BinaryArith_Int32.  ");
     }
 
     // Return.
@@ -201,7 +207,7 @@ ICBinaryArith_Int32::Compiler::generateStubCode(MacroAssembler &masm)
         masm.j(Assembler::Signed, &failure);
 
         // Result is +0.
-        masm.xorl(R0.payloadReg(), R0.payloadReg());
+        masm.mov(ImmWord(0), R0.payloadReg());
         EmitReturnFromIC(masm);
         break;
       case JSOP_DIV:
@@ -246,8 +252,7 @@ ICUnaryArith_Int32::Compiler::generateStubCode(MacroAssembler &masm)
         masm.negl(R0.payloadReg());
         break;
       default:
-        JS_NOT_REACHED("Unexpected op");
-        return false;
+        MOZ_ASSUME_UNREACHABLE("Unexpected op");
     }
 
     EmitReturnFromIC(masm);

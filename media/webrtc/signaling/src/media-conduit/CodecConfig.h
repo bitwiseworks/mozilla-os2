@@ -7,9 +7,11 @@
 #define CODEC_CONFIG_H_
 
 #include <string>
-
+#include "ccsdp_rtcp_fb.h"
 
 namespace mozilla {
+
+class LoadManager;
 
 /**
  * Minimalistic Audio Codec Config Params
@@ -26,18 +28,22 @@ struct AudioCodecConfig
   int mPacSize;
   int mChannels;
   int mRate;
+  LoadManager* mLoadManager;
 
   /* Default constructor is not provided since as a consumer, we
    * can't decide the default configuration for the codec
    */
   explicit AudioCodecConfig(int type, std::string name,
                             int freq,int pacSize,
-                            int channels, int rate): mType(type),
+                            int channels, int rate,
+                            LoadManager* load_manager = nullptr)
+                                                   : mType(type),
                                                      mName(name),
                                                      mFreq(freq),
                                                      mPacSize(pacSize),
                                                      mChannels(channels),
-                                                     mRate(rate)
+                                                     mRate(rate),
+                                                     mLoadManager(load_manager)
 
   {
   }
@@ -56,14 +62,65 @@ struct VideoCodecConfig
    */
   int mType;
   std::string mName;
+  uint32_t mRtcpFbTypes;
+  unsigned int mMaxFrameSize;
+  unsigned int mMaxFrameRate;
+  LoadManager* mLoadManager;
 
-  /* When we have resolution negotiation information (RFC 6236)
-   * it will be stored here.
-   */
-
-  VideoCodecConfig(int type, std::string name): mType(type),
-                                                mName(name)
+  VideoCodecConfig(int type,
+                   std::string name,
+                   int rtcpFbTypes,
+                   LoadManager* load_manager = nullptr) :
+                                     mType(type),
+                                     mName(name),
+                                     mRtcpFbTypes(rtcpFbTypes),
+                                     mMaxFrameSize(0),
+                                     mMaxFrameRate(0),
+                                     mLoadManager(load_manager)
   {
+    // Replace codec name here because  WebRTC.org code has a whitelist of
+    // supported video codec in |webrtc::ViECodecImpl::CodecValid()| and will
+    // reject registration of those not in it.
+    // TODO: bug 995884 to support H.264 in WebRTC.org code.
+    if (mName == "H264_P0")
+      mName = "I420";
+  }
+
+  VideoCodecConfig(int type,
+                   std::string name,
+                   int rtcpFbTypes,
+                   unsigned int max_fs,
+                   unsigned int max_fr,
+                   LoadManager* load_manager = nullptr) :
+                                         mType(type),
+                                         mName(name),
+                                         mRtcpFbTypes(rtcpFbTypes),
+                                         mMaxFrameSize(max_fs),
+                                         mMaxFrameRate(max_fr),
+                                         mLoadManager(load_manager)
+  {
+    // Replace codec name here because  WebRTC.org code has a whitelist of
+    // supported video codec in |webrtc::ViECodecImpl::CodecValid()| and will
+    // reject registration of those not in it.
+    // TODO: bug 995884 to support H.264 in WebRTC.org code.
+    if (mName == "H264_P0")
+      mName = "I420";
+  }
+
+
+  bool RtcpFbIsSet(sdp_rtcp_fb_nack_type_e type) const
+  {
+    return mRtcpFbTypes & sdp_rtcp_fb_nack_to_bitmap(type);
+  }
+
+  bool RtcpFbIsSet(sdp_rtcp_fb_ack_type_e type) const
+  {
+    return mRtcpFbTypes & sdp_rtcp_fb_ack_to_bitmap(type);
+  }
+
+  bool RtcpFbIsSet(sdp_rtcp_fb_ccm_type_e type) const
+  {
+    return mRtcpFbTypes & sdp_rtcp_fb_ccm_to_bitmap(type);
   }
 
 };

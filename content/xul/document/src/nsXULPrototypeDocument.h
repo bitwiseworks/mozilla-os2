@@ -6,12 +6,12 @@
 #ifndef nsXULPrototypeDocument_h__
 #define nsXULPrototypeDocument_h__
 
+#include "js/TracingAPI.h"
 #include "mozilla/Attributes.h"
 #include "nsAutoPtr.h"
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
-#include "nsIScriptGlobalObjectOwner.h"
 #include "nsISerializable.h"
 #include "nsCycleCollectionParticipant.h"
 
@@ -21,8 +21,6 @@ class nsIURI;
 class nsNodeInfoManager;
 class nsXULPrototypeElement;
 class nsXULPrototypePI;
-class nsXULPDGlobalObject;
-struct JSTracer;
 
 namespace mozilla {
 namespace dom {
@@ -37,8 +35,7 @@ class XULDocument;
  * objects, from which the real DOM tree is built later in
  * XULDocument::ResumeWalk.
  */
-class nsXULPrototypeDocument : public nsIScriptGlobalObjectOwner,
-                               public nsISerializable
+class nsXULPrototypeDocument : public nsISerializable
 {
 public:
     static nsresult
@@ -114,16 +111,9 @@ public:
 
     nsNodeInfoManager *GetNodeInfoManager();
 
-    // nsIScriptGlobalObjectOwner methods
-    virtual nsIScriptGlobalObject* GetScriptGlobalObject() MOZ_OVERRIDE;
+    void MarkInCCGeneration(uint32_t aCCGeneration);
 
-    void MarkInCCGeneration(uint32_t aCCGeneration)
-    {
-        mCCGeneration = aCCGeneration;
-    }
-
-    NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsXULPrototypeDocument,
-                                             nsIScriptGlobalObjectOwner)
+    NS_DECL_CYCLE_COLLECTION_CLASS(nsXULPrototypeDocument)
 
     void TraceProtos(JSTracer* aTrc, uint32_t aGCNumber);
 
@@ -132,8 +122,6 @@ protected:
     nsRefPtr<nsXULPrototypeElement> mRoot;
     nsTArray<nsRefPtr<nsXULPrototypePI> > mProcessingInstructions;
     nsCOMArray<nsIURI> mStyleSheetReferences;
-
-    nsRefPtr<nsXULPDGlobalObject> mGlobalObject;
 
     bool mLoaded;
     nsTArray< nsRefPtr<mozilla::dom::XULDocument> > mPrototypeWaiters;
@@ -150,13 +138,7 @@ protected:
     friend NS_IMETHODIMP
     NS_NewXULPrototypeDocument(nsXULPrototypeDocument** aResult);
 
-    nsXULPDGlobalObject *NewXULPDGlobalObject();
-
-    static nsIPrincipal* gSystemPrincipal;
-    static nsXULPDGlobalObject* gSystemGlobal;
     static uint32_t gRefCnt;
-
-    friend class nsXULPDGlobalObject;
 };
 
 #endif // nsXULPrototypeDocument_h__

@@ -8,6 +8,14 @@
 </head>
 <body>
 Login Manager test: simple form with autocomplete off and notifying observers & normal form
+<script>
+const Cc = SpecialPowers.Cc;
+const Ci = SpecialPowers.Ci;
+
+commonInit();
+SimpleTest.waitForExplicitFinish();
+</script>
+
 <p id="display"></p>
 
 <div id="content" style="display: block">
@@ -20,7 +28,7 @@ Login Manager test: simple form with autocomplete off and notifying observers & 
     <button type="submit">Submit</button>
     <button type="reset"> Reset </button>
   </form>
-  
+
   <form id="form2" action="formtest.js">
     <p>This is form 2.</p>
     <input  type="text"       name="uname">
@@ -36,23 +44,12 @@ Login Manager test: simple form with autocomplete off and notifying observers & 
 <script class="testbody" type="text/javascript">
 
 /** Test for Login Manager: simple form with autocomplete off and notifying observers & normal form **/
-
-commonInit();
-netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
 var TestObserver = {
   receivedNotification1 : false,
   receivedNotification2 : false,
   data1 : "",
   data2 : "",
-  QueryInterface : XPCOMUtils.generateQI([Ci.nsIObserver, Ci.nsISupportsWeakReference]),
   observe : function (subject, topic, data) {
-    netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
     var pwmgr = Cc["@mozilla.org/login-manager;1"].
                 getService(Ci.nsILoginManager);
     if (topic == "passwordmgr-found-form") {
@@ -70,12 +67,9 @@ var TestObserver = {
 };
 
 // Add the observer
-var os = Cc["@mozilla.org/observer-service;1"].
-         getService(Ci.nsIObserverService);
-os.addObserver(TestObserver, "passwordmgr-found-form", false);
+SpecialPowers.addObserver(TestObserver, "passwordmgr-found-form", false);
 
 function startTest(){
-  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
   // Test that observer is notified & got correct data
   is(TestObserver.receivedNotification1, true, "Checking observer was notified");
   is(TestObserver.data1, "autocompleteOff", "Checking observer got correct data");
@@ -93,14 +87,16 @@ function startTest(){
   is($_(2, "pword").value, "testpass", "Checking for filled password 2");
 
   // Remove the observer
-  os.removeObserver(TestObserver, "passwordmgr-found-form");
+  try {
+    SpecialPowers.removeObserver(TestObserver, "passwordmgr-found-form");
+  } catch (e) {
+    ok(false, SpecialPowers.wrap(e));
+  }
 
   SimpleTest.finish();
 }
 
 window.onload = startTest;
-
-SimpleTest.waitForExplicitFinish();
 </script>
 </pre>
 </body>

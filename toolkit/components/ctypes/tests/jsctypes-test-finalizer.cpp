@@ -2,7 +2,6 @@
 
 #include "jsctypes-test.h"
 #include "jsctypes-test-finalizer.h"
-#include "jsapi.h"
 
 #if defined(XP_WIN)
 #define snprintf _snprintf
@@ -19,8 +18,8 @@
  * - 1: acquired
  * - < 0: error, resource has been released several times.
  */
-int *gFinalizerTestResources = NULL;
-char **gFinalizerTestNames = NULL;
+int *gFinalizerTestResources = nullptr;
+char **gFinalizerTestNames = nullptr;
 size_t gFinalizerTestSize;
 
 void
@@ -31,7 +30,7 @@ test_finalizer_start(size_t size)
   gFinalizerTestSize = size;
   for (size_t i = 0; i < size; ++i) {
     gFinalizerTestResources[i] = 0;
-    gFinalizerTestNames[i] = NULL;
+    gFinalizerTestNames[i] = nullptr;
   }
 }
 
@@ -64,7 +63,7 @@ void
 test_finalizer_rel_size_t(size_t i)
 {
   if (--gFinalizerTestResources[i] < 0) {
-    MOZ_NOT_REACHED("Assertion failed");
+    MOZ_CRASH("Assertion failed");
   }
 }
 
@@ -72,19 +71,19 @@ size_t
 test_finalizer_rel_size_t_return_size_t(size_t i)
 {
   if (-- gFinalizerTestResources[i] < 0) {
-    MOZ_NOT_REACHED("Assertion failed");
+    MOZ_CRASH("Assertion failed");
   }
   return i;
 }
 
-RECT
+myRECT
 test_finalizer_rel_size_t_return_struct_t(size_t i)
 {
   if (-- gFinalizerTestResources[i] < 0) {
-    MOZ_NOT_REACHED("Assertion failed");
+    MOZ_CRASH("Assertion failed");
   }
   const int32_t narrowed = (int32_t)i;
-  RECT result = { narrowed, narrowed, narrowed, narrowed };
+  myRECT result = { narrowed, narrowed, narrowed, narrowed };
   return result;
 }
 
@@ -109,7 +108,7 @@ void
 test_finalizer_rel_int32_t(int32_t i)
 {
   if (--gFinalizerTestResources[i] < 0) {
-    MOZ_NOT_REACHED("Assertion failed");
+    MOZ_CRASH("Assertion failed");
   }
 }
 
@@ -134,7 +133,7 @@ void
 test_finalizer_rel_int64_t(int64_t i)
 {
   if (-- gFinalizerTestResources[i] < 0) {
-    MOZ_NOT_REACHED("Assertion failed");
+    MOZ_CRASH("Assertion failed");
   }
 }
 
@@ -161,7 +160,7 @@ test_finalizer_rel_ptr_t(void *i)
   int *as_int = (int*)i;
   -- (*as_int);
   if (*as_int < 0) {
-    MOZ_NOT_REACHED("Assertion failed");
+    MOZ_CRASH("Assertion failed");
   }
 }
 
@@ -187,7 +186,7 @@ test_finalizer_rel_int32_ptr_t(int32_t *i)
 {
   -- (*i);
   if (*i < 0) {
-    MOZ_NOT_REACHED("Assertion failed");
+    MOZ_CRASH("Assertion failed");
   }
 }
 
@@ -197,22 +196,22 @@ test_finalizer_cmp_int32_ptr_t(int32_t *a, int32_t *b)
   return a==b;
 }
 
-// Resource type: NULL
+// Resource type: nullptr
 
 // Acquire resource i
 void*
 test_finalizer_acq_null_t(size_t i)
 {
   gFinalizerTestResources[0] = 1;//Always index 0
-  return NULL;
+  return nullptr;
 }
 
 // Release resource i
 void
 test_finalizer_rel_null_t(void *i)
 {
-  if (i != NULL) {
-    MOZ_NOT_REACHED("Assertion failed");
+  if (i != nullptr) {
+    MOZ_CRASH("Assertion failed");
   }
   gFinalizerTestResources[0] --;
 }
@@ -251,7 +250,7 @@ test_finalizer_rel_string_t(char *i)
 {
   int index = atoi(i);
   if (index < 0 || index >= (int)gFinalizerTestSize) {
-    MOZ_NOT_REACHED("Assertion failed");
+    MOZ_CRASH("Assertion failed");
   }
   gFinalizerTestResources[index] --;
 }
@@ -268,55 +267,55 @@ test_finalizer_cmp_string_t(char *a, char *b)
   return !strncmp(a, b, 10);
 }
 
-// Resource type: RECT
+// Resource type: myRECT
 
 // Acquire resource i
-RECT
+myRECT
 test_finalizer_acq_struct_t(int i)
 {
   gFinalizerTestResources[i] = 1;
-  RECT result = { i, i, i, i };
+  myRECT result = { i, i, i, i };
   return result;
 }
 
 // Release resource i
 void
-test_finalizer_rel_struct_t(RECT i)
+test_finalizer_rel_struct_t(myRECT i)
 {
   int index = i.top;
   if (index < 0 || index >= (int)gFinalizerTestSize) {
-    MOZ_NOT_REACHED("Assertion failed");
+    MOZ_CRASH("Assertion failed");
   }
   gFinalizerTestResources[index] --;
 }
 
 bool
-test_finalizer_struct_resource_is_acquired(RECT i)
+test_finalizer_struct_resource_is_acquired(myRECT i)
 {
   int index = i.top;
   if (index < 0 || index >= (int)gFinalizerTestSize) {
-    MOZ_NOT_REACHED("Assertion failed");
+    MOZ_CRASH("Assertion failed");
   }
   return gFinalizerTestResources[index] == 1;
 }
 
 bool
-test_finalizer_cmp_struct_t(RECT a, RECT b)
+test_finalizer_cmp_struct_t(myRECT a, myRECT b)
 {
   return a.top == b.top;
 }
 
-// Support for checking that we reject NULL finalizer
+// Support for checking that we reject nullptr finalizer
 afun* test_finalizer_rel_null_function()
 {
-  return NULL;
+  return nullptr;
 }
 
 void
 test_finalizer_rel_size_t_set_errno(size_t i)
 {
   if (-- gFinalizerTestResources[i] < 0) {
-    MOZ_NOT_REACHED("Assertion failed");
+    MOZ_CRASH("Assertion failed");
   }
   errno = 10;
 }

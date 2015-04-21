@@ -1,4 +1,5 @@
 #include "gdb-tests.h"
+#include "jsapi.h"
 
 FRAGMENT(jsid, simple) {
   JS::Rooted<JSString *> string(cx, JS_NewStringCopyZ(cx, "moon"));
@@ -6,7 +7,7 @@ FRAGMENT(jsid, simple) {
   JS::Rooted<jsid> string_id(cx, INTERNED_STRING_TO_JSID(cx, interned));
   jsid int_id = INT_TO_JSID(1729);
   jsid void_id = JSID_VOID;
-  JS::Rooted<jsid> object_id(cx, OBJECT_TO_JSID(JS_GetGlobalForScopeChain(cx)));
+  JS::Rooted<jsid> object_id(cx, OBJECT_TO_JSID(JS::CurrentGlobalOrNull(cx)));
 
   breakpoint();
 

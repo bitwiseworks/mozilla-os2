@@ -21,7 +21,7 @@
 #include "nsMappedAttributes.h"
 #include "nsGkAtoms.h"
 #include "nsPresContext.h"
-#include "nsEventStates.h"
+#include "mozilla/EventStates.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsStyleConsts.h"
@@ -30,14 +30,15 @@
 #include "nsError.h"
 #include "nsRuleProcessorData.h"
 #include "nsCSSRuleProcessor.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Element.h"
-#include "nsCSSFrameConstructor.h"
 #include "nsHashKeys.h"
+#include "RestyleManager.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
-NS_IMPL_ISUPPORTS1(nsHTMLStyleSheet::HTMLColorRule, nsIStyleRule)
+NS_IMPL_ISUPPORTS(nsHTMLStyleSheet::HTMLColorRule, nsIStyleRule)
 
 /* virtual */ void
 nsHTMLStyleSheet::HTMLColorRule::MapRuleInfoInto(nsRuleData* aRuleData)
@@ -60,7 +61,7 @@ nsHTMLStyleSheet::HTMLColorRule::List(FILE* out, int32_t aIndent) const
 #endif
 
  
-NS_IMPL_ISUPPORTS1(nsHTMLStyleSheet::GenericTableRule, nsIStyleRule)
+NS_IMPL_ISUPPORTS(nsHTMLStyleSheet::GenericTableRule, nsIStyleRule)
 
 #ifdef DEBUG
 /* virtual */ void
@@ -97,7 +98,7 @@ nsHTMLStyleSheet::TableQuirkColorRule::MapRuleInfoInto(nsRuleData* aRuleData)
 }
 
 
-NS_IMPL_ISUPPORTS1(nsHTMLStyleSheet::LangRule, nsIStyleRule)
+NS_IMPL_ISUPPORTS(nsHTMLStyleSheet::LangRule, nsIStyleRule)
 
 /* virtual */ void
 nsHTMLStyleSheet::LangRule::MapRuleInfoInto(nsRuleData* aRuleData)
@@ -157,7 +158,7 @@ MappedAttrTable_MatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
   return attributes->Equals(entry->mAttributes);
 }
 
-static PLDHashTableOps MappedAttrTable_Ops = {
+static const PLDHashTableOps MappedAttrTable_Ops = {
   PL_DHashAllocTable,
   PL_DHashFreeTable,
   MappedAttrTable_HashKey,
@@ -214,7 +215,7 @@ LangRuleTable_InitEntry(PLDHashTable *table, PLDHashEntryHdr *hdr,
   return true;
 }
 
-static PLDHashTableOps LangRuleTable_Ops = {
+static const PLDHashTableOps LangRuleTable_Ops = {
   PL_DHashAllocTable,
   PL_DHashFreeTable,
   LangRuleTable_HashKey,
@@ -245,7 +246,7 @@ nsHTMLStyleSheet::~nsHTMLStyleSheet()
     PL_DHashTableFinish(&mMappedAttrTable);
 }
 
-NS_IMPL_ISUPPORTS1(nsHTMLStyleSheet, nsIStyleRuleProcessor)
+NS_IMPL_ISUPPORTS(nsHTMLStyleSheet, nsIStyleRuleProcessor)
 
 /* virtual */ void
 nsHTMLStyleSheet::RulesMatching(ElementRuleProcessorData* aData)
@@ -257,7 +258,8 @@ nsHTMLStyleSheet::RulesMatching(ElementRuleProcessorData* aData)
     // if we have anchor colors, check if this is an anchor with an href
     if (tag == nsGkAtoms::a) {
       if (mLinkRule || mVisitedRule || mActiveRule) {
-        nsEventStates state = nsCSSRuleProcessor::GetContentStateForVisitedHandling(
+        EventStates state =
+          nsCSSRuleProcessor::GetContentStateForVisitedHandling(
                                   aData->mElement,
                                   aData->mTreeMatchContext,
                                   aData->mTreeMatchContext.VisitedHandling(),
@@ -322,6 +324,12 @@ nsHTMLStyleSheet::HasStateDependentStyle(StateRuleProcessorData* aData)
   return nsRestyleHint(0);
 }
 
+/* virtual */ nsRestyleHint
+nsHTMLStyleSheet::HasStateDependentStyle(PseudoElementStateRuleProcessorData* aData)
+{
+  return nsRestyleHint(0);
+}
+
 /* virtual */ bool
 nsHTMLStyleSheet::HasDocumentStateDependentStyle(StateRuleProcessorData* aData)
 {
@@ -372,13 +380,13 @@ nsHTMLStyleSheet::MediumFeaturesChanged(nsPresContext* aPresContext)
 }
 
 /* virtual */ size_t
-nsHTMLStyleSheet::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsHTMLStyleSheet::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return 0; // nsHTMLStyleSheets are charged to the DOM, not layout
 }
 
 /* virtual */ size_t
-nsHTMLStyleSheet::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsHTMLStyleSheet::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return 0; // nsHTMLStyleSheets are charged to the DOM, not layout
 }
@@ -440,7 +448,7 @@ nsHTMLStyleSheet::ImplLinkColorSetter(nsRefPtr<HTMLColorRule>& aRule, nscolor aC
   if (mDocument && mDocument->GetShell()) {
     Element* root = mDocument->GetRootElement();
     if (root) {
-      mDocument->GetShell()->FrameConstructor()->
+      mDocument->GetShell()->GetPresContext()->RestyleManager()->
         PostRestyleEvent(root, eRestyle_Subtree, NS_STYLE_HINT_NONE);
     }
   }
@@ -470,12 +478,8 @@ already_AddRefed<nsMappedAttributes>
 nsHTMLStyleSheet::UniqueMappedAttributes(nsMappedAttributes* aMapped)
 {
   if (!mMappedAttrTable.ops) {
-    bool res = PL_DHashTableInit(&mMappedAttrTable, &MappedAttrTable_Ops,
-                                   nullptr, sizeof(MappedAttrTableEntry), 16);
-    if (!res) {
-      mMappedAttrTable.ops = nullptr;
-      return nullptr;
-    }
+    PL_DHashTableInit(&mMappedAttrTable, &MappedAttrTable_Ops,
+                      nullptr, sizeof(MappedAttrTableEntry), 16);
   }
   MappedAttrTableEntry *entry = static_cast<MappedAttrTableEntry*>
                                            (PL_DHashTableOperate(&mMappedAttrTable, aMapped, PL_DHASH_ADD));
@@ -508,13 +512,8 @@ nsIStyleRule*
 nsHTMLStyleSheet::LangRuleFor(const nsString& aLanguage)
 {
   if (!mLangRuleTable.ops) {
-    bool res = PL_DHashTableInit(&mLangRuleTable, &LangRuleTable_Ops,
-                                 nullptr, sizeof(LangRuleTableEntry), 16);
-    if (!res) {
-      NS_ASSERTION(false, "out of memory");
-      mLangRuleTable.ops = nullptr;
-      return nullptr;
-    }
+    PL_DHashTableInit(&mLangRuleTable, &LangRuleTable_Ops,
+                      nullptr, sizeof(LangRuleTableEntry), 16);
   }
   LangRuleTableEntry *entry = static_cast<LangRuleTableEntry*>
     (PL_DHashTableOperate(&mLangRuleTable, &aLanguage, PL_DHASH_ADD));
@@ -527,7 +526,7 @@ nsHTMLStyleSheet::LangRuleFor(const nsString& aLanguage)
 
 static size_t
 SizeOfAttributesEntryExcludingThis(PLDHashEntryHdr* aEntry,
-                                   nsMallocSizeOfFun aMallocSizeOf,
+                                   MallocSizeOf aMallocSizeOf,
                                    void* aArg)
 {
   NS_PRECONDITION(aEntry, "The entry should not be null!");
@@ -538,7 +537,7 @@ SizeOfAttributesEntryExcludingThis(PLDHashEntryHdr* aEntry,
 }
 
 size_t
-nsHTMLStyleSheet::DOMSizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsHTMLStyleSheet::DOMSizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
 

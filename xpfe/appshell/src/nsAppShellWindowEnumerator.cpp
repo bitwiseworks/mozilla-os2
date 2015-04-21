@@ -22,22 +22,10 @@
 // static helper functions
 //
 
-static nsresult GetDOMWindow(nsIXULWindow* inWindow,
-                             nsCOMPtr<nsIDOMWindow> &outDOMWindow);
 static nsCOMPtr<nsIDOMNode> GetDOMNodeFromDocShell(nsIDocShell *aShell);
 static void GetAttribute(nsIXULWindow *inWindow, const nsAString &inAttribute,
                          nsAString &outValue);
 static void GetWindowType(nsIXULWindow* inWindow, nsString &outType);
-
-// fetch the nsIDOMWindow(Internal) from a XUL Window
-nsresult GetDOMWindow(nsIXULWindow *aWindow, nsCOMPtr<nsIDOMWindow> &aDOMWindow)
-{
-  nsCOMPtr<nsIDocShell> docShell;
-
-  aWindow->GetDocShell(getter_AddRefs(docShell));
-  aDOMWindow = do_GetInterface(docShell);
-  return aDOMWindow ? NS_OK : NS_ERROR_FAILURE;
-}
 
 nsCOMPtr<nsIDOMNode> GetDOMNodeFromDocShell(nsIDocShell *aShell)
 {
@@ -160,10 +148,10 @@ void nsWindowInfo::ReferenceSelf(bool inAge, bool inZ)
 // nsAppShellWindowEnumerator
 //
 
-NS_IMPL_ISUPPORTS1(nsAppShellWindowEnumerator, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS(nsAppShellWindowEnumerator, nsISimpleEnumerator)
 
 nsAppShellWindowEnumerator::nsAppShellWindowEnumerator(
-    const PRUnichar* aTypeString,
+    const char16_t* aTypeString,
     nsWindowMediator& aMediator) :
       mWindowMediator(&aMediator), mType(aTypeString), mCurrentPosition(nullptr)
 {
@@ -206,7 +194,7 @@ void nsAppShellWindowEnumerator::WindowRemoved(nsWindowInfo *inInfo)
 //
 
 nsASDOMWindowEnumerator::nsASDOMWindowEnumerator(
-    const PRUnichar* aTypeString,
+    const char16_t* aTypeString,
     nsWindowMediator& aMediator) :
       nsAppShellWindowEnumerator(aTypeString, aMediator)
 {
@@ -224,7 +212,7 @@ NS_IMETHODIMP nsASDOMWindowEnumerator::GetNext(nsISupports **retval)
   *retval = nullptr;
   while (mCurrentPosition) {
     nsCOMPtr<nsIDOMWindow> domWindow;
-    GetDOMWindow(mCurrentPosition->mWindow, domWindow);
+    nsWindowMediator::GetDOMWindow(mCurrentPosition->mWindow, domWindow);
     mCurrentPosition = FindNext();
     if (domWindow)
       return CallQueryInterface(domWindow, retval);
@@ -237,7 +225,7 @@ NS_IMETHODIMP nsASDOMWindowEnumerator::GetNext(nsISupports **retval)
 //
 
 nsASXULWindowEnumerator::nsASXULWindowEnumerator(
-    const PRUnichar* aTypeString,
+    const char16_t* aTypeString,
     nsWindowMediator& aMediator) :
       nsAppShellWindowEnumerator(aTypeString, aMediator)
 {
@@ -265,7 +253,7 @@ NS_IMETHODIMP nsASXULWindowEnumerator::GetNext(nsISupports **retval)
 //
 
 nsASDOMWindowEarlyToLateEnumerator::nsASDOMWindowEarlyToLateEnumerator(
-    const PRUnichar *aTypeString,
+    const char16_t *aTypeString,
     nsWindowMediator &aMediator) :
       nsASDOMWindowEnumerator(aTypeString, aMediator)
 {
@@ -304,7 +292,7 @@ nsWindowInfo *nsASDOMWindowEarlyToLateEnumerator::FindNext()
 //
 
 nsASXULWindowEarlyToLateEnumerator::nsASXULWindowEarlyToLateEnumerator(
-    const PRUnichar *aTypeString,
+    const char16_t *aTypeString,
     nsWindowMediator &aMediator) :
       nsASXULWindowEnumerator(aTypeString, aMediator)
 {
@@ -349,7 +337,7 @@ nsWindowInfo *nsASXULWindowEarlyToLateEnumerator::FindNext()
 //
 
 nsASDOMWindowFrontToBackEnumerator::nsASDOMWindowFrontToBackEnumerator(
-    const PRUnichar *aTypeString,
+    const char16_t *aTypeString,
     nsWindowMediator &aMediator) :
       nsASDOMWindowEnumerator(aTypeString, aMediator)
 {
@@ -388,7 +376,7 @@ nsWindowInfo *nsASDOMWindowFrontToBackEnumerator::FindNext()
 //
 
 nsASXULWindowFrontToBackEnumerator::nsASXULWindowFrontToBackEnumerator(
-    const PRUnichar *aTypeString,
+    const char16_t *aTypeString,
     nsWindowMediator &aMediator) :
       nsASXULWindowEnumerator(aTypeString, aMediator)
 {
@@ -427,7 +415,7 @@ nsWindowInfo *nsASXULWindowFrontToBackEnumerator::FindNext()
 //
 
 nsASDOMWindowBackToFrontEnumerator::nsASDOMWindowBackToFrontEnumerator(
-    const PRUnichar *aTypeString,
+    const char16_t *aTypeString,
     nsWindowMediator &aMediator) :
   nsASDOMWindowEnumerator(aTypeString, aMediator)
 {
@@ -469,7 +457,7 @@ nsWindowInfo *nsASDOMWindowBackToFrontEnumerator::FindNext()
 //
 
 nsASXULWindowBackToFrontEnumerator::nsASXULWindowBackToFrontEnumerator(
-    const PRUnichar *aTypeString,
+    const char16_t *aTypeString,
     nsWindowMediator &aMediator) :
       nsASXULWindowEnumerator(aTypeString, aMediator)
 {

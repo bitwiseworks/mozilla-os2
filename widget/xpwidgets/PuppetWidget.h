@@ -21,6 +21,7 @@
 #include "nsThreadUtils.h"
 #include "nsWeakReference.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/EventForwards.h"
 
 class gfxASurface;
 
@@ -31,6 +32,8 @@ class TabChild;
 }
 
 namespace widget {
+
+class AutoCacheNativeKeyCommands;
 
 class PuppetWidget : public nsBaseWidget, public nsSupportsWeakReference
 {
@@ -121,13 +124,21 @@ public:
   virtual nsIntPoint WidgetToScreenOffset()
   { return nsIntPoint(0, 0); }
 
-  void InitEvent(nsGUIEvent& event, nsIntPoint* aPoint = nullptr);
+  void InitEvent(WidgetGUIEvent& aEvent, nsIntPoint* aPoint = nullptr);
 
-  NS_IMETHOD DispatchEvent(nsGUIEvent* event, nsEventStatus& aStatus);
+  NS_IMETHOD DispatchEvent(WidgetGUIEvent* aEvent, nsEventStatus& aStatus);
 
   NS_IMETHOD CaptureRollupEvents(nsIRollupListener* aListener,
                                  bool aDoCapture)
   { return NS_ERROR_UNEXPECTED; }
+
+  NS_IMETHOD_(bool)
+  ExecuteNativeKeyBinding(NativeKeyBindingsType aType,
+                          const mozilla::WidgetKeyboardEvent& aEvent,
+                          DoCommandCallback aCallback,
+                          void* aCallbackData) MOZ_OVERRIDE;
+
+  friend class AutoCacheNativeKeyCommands;
 
   //
   // nsBaseWidget methods we override
@@ -144,18 +155,16 @@ public:
 
   virtual LayerManager*
   GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
-                  LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
+                  LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
                   LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                   bool* aAllowRetaining = nullptr);
   virtual gfxASurface*      GetThebesSurface();
 
-  NS_IMETHOD NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
+  NS_IMETHOD NotifyIME(const IMENotification& aIMENotification) MOZ_OVERRIDE;
   NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                     const InputContextAction& aAction);
   NS_IMETHOD_(InputContext) GetInputContext();
-  NS_IMETHOD NotifyIMEOfTextChange(uint32_t aOffset, uint32_t aEnd,
-                                   uint32_t aNewEnd) MOZ_OVERRIDE;
-  virtual nsIMEUpdatePreference GetIMEUpdatePreference();
+  virtual nsIMEUpdatePreference GetIMEUpdatePreference() MOZ_OVERRIDE;
 
   NS_IMETHOD SetCursor(nsCursor aCursor);
   NS_IMETHOD SetCursor(imgIContainer* aCursor,
@@ -182,7 +191,9 @@ private:
 
   nsresult IMEEndComposition(bool aCancel);
   nsresult NotifyIMEOfFocusChange(bool aFocus);
-  nsresult NotifyIMEOfSelectionChange();
+  nsresult NotifyIMEOfSelectionChange(const IMENotification& aIMENotification);
+  nsresult NotifyIMEOfUpdateComposition();
+  nsresult NotifyIMEOfTextChange(const IMENotification& aIMENotification);
 
   class PaintTask : public nsRunnable {
   public:
@@ -211,7 +222,7 @@ private:
   // retained-content-only transactions
   nsRefPtr<gfxASurface> mSurface;
   // IME
-  nsIMEUpdatePreference mIMEPreference;
+  nsIMEUpdatePreference mIMEPreferenceOfParent;
   bool mIMEComposing;
   // Latest seqno received through events
   uint32_t mIMELastReceivedSeqno;
@@ -225,6 +236,57 @@ private:
   // The DPI of the screen corresponding to this widget
   float mDPI;
   double mDefaultScale;
+
+  // Precomputed answers for ExecuteNativeKeyBinding
+  bool mNativeKeyCommandsValid;
+  InfallibleTArray<mozilla::CommandInt> mSingleLineCommands;
+  InfallibleTArray<mozilla::CommandInt> mMultiLineCommands;
+  InfallibleTArray<mozilla::CommandInt> mRichTextCommands;
+};
+
+struct AutoCacheNativeKeyCommands
+{
+  AutoCacheNativeKeyCommands(PuppetWidget* aWidget)
+    : mWidget(aWidget)
+  {
+    mSavedValid = mWidget->mNativeKeyCommandsValid;
+    mSavedSingleLine = mWidget->mSingleLineCommands;
+    mSavedMultiLine = mWidget->mMultiLineCommands;
+    mSavedRichText = mWidget->mRichTextCommands;
+  }
+
+  void Cache(const InfallibleTArray<mozilla::CommandInt>& aSingleLineCommands,
+             const InfallibleTArray<mozilla::CommandInt>& aMultiLineCommands,
+             const InfallibleTArray<mozilla::CommandInt>& aRichTextCommands)
+  {
+    mWidget->mNativeKeyCommandsValid = true;
+    mWidget->mSingleLineCommands = aSingleLineCommands;
+    mWidget->mMultiLineCommands = aMultiLineCommands;
+    mWidget->mRichTextCommands = aRichTextCommands;
+  }
+
+  void CacheNoCommands()
+  {
+    mWidget->mNativeKeyCommandsValid = true;
+    mWidget->mSingleLineCommands.Clear();
+    mWidget->mMultiLineCommands.Clear();
+    mWidget->mRichTextCommands.Clear();
+  }
+
+  ~AutoCacheNativeKeyCommands()
+  {
+    mWidget->mNativeKeyCommandsValid = mSavedValid;
+    mWidget->mSingleLineCommands = mSavedSingleLine;
+    mWidget->mMultiLineCommands = mSavedMultiLine;
+    mWidget->mRichTextCommands = mSavedRichText;
+  }
+
+private:
+  PuppetWidget* mWidget;
+  bool mSavedValid;
+  InfallibleTArray<mozilla::CommandInt> mSavedSingleLine;
+  InfallibleTArray<mozilla::CommandInt> mSavedMultiLine;
+  InfallibleTArray<mozilla::CommandInt> mSavedRichText;
 };
 
 class PuppetScreen : public nsBaseScreen

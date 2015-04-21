@@ -34,6 +34,14 @@ gfxWindowsSurface::gfxWindowsSurface(HDC dc, uint32_t flags) :
     InitWithDC(flags);
 }
 
+gfxWindowsSurface::gfxWindowsSurface(IDirect3DSurface9 *surface, uint32_t flags) :
+    mOwnsDC(false), mForPrinting(false), mDC(0), mWnd(nullptr)
+{
+    cairo_surface_t *surf = cairo_win32_surface_create_with_d3dsurface9(surface);
+    Init(surf);
+}
+
+
 void
 gfxWindowsSurface::MakeInvalid(gfxIntSize& size)
 {
@@ -47,17 +55,17 @@ gfxWindowsSurface::gfxWindowsSurface(const gfxIntSize& realSize, gfxImageFormat 
     if (!CheckSurfaceSize(size))
         MakeInvalid(size);
 
-    cairo_surface_t *surf = cairo_win32_surface_create_with_dib((cairo_format_t)imageFormat,
+    cairo_surface_t *surf = cairo_win32_surface_create_with_dib((cairo_format_t)(int)imageFormat,
                                                                 size.width, size.height);
 
     Init(surf);
 
-    RecordMemoryUsed(size.width * size.height * 4 + sizeof(gfxWindowsSurface));
-
-    if (CairoStatus() == 0)
+    if (CairoStatus() == CAIRO_STATUS_SUCCESS) {
         mDC = cairo_win32_surface_get_dc(CairoSurface());
-    else
+        RecordMemoryUsed(size.width * size.height * 4 + sizeof(gfxWindowsSurface));
+    } else {
         mDC = nullptr;
+    }
 }
 
 gfxWindowsSurface::gfxWindowsSurface(HDC dc, const gfxIntSize& realSize, gfxImageFormat imageFormat) :
@@ -67,14 +75,14 @@ gfxWindowsSurface::gfxWindowsSurface(HDC dc, const gfxIntSize& realSize, gfxImag
     if (!CheckSurfaceSize(size))
         MakeInvalid(size);
 
-    cairo_surface_t *surf = cairo_win32_surface_create_with_ddb(dc, (cairo_format_t)imageFormat,
+    cairo_surface_t *surf = cairo_win32_surface_create_with_ddb(dc, (cairo_format_t)(int)imageFormat,
                                                                 size.width, size.height);
 
     Init(surf);
 
     if (mSurfaceValid) {
         // DDBs will generally only use 3 bytes per pixel when RGB24
-        int bytesPerPixel = ((imageFormat == gfxASurface::ImageFormatRGB24) ? 3 : 4);
+        int bytesPerPixel = ((imageFormat == gfxImageFormat::RGB24) ? 3 : 4);
         RecordMemoryUsed(size.width * size.height * bytesPerPixel + sizeof(gfxWindowsSurface));
     }
 
@@ -117,21 +125,21 @@ gfxWindowsSurface::CreateSimilarSurface(gfxContentType aContent,
     }
 
     cairo_surface_t *surface;
-    if (GetContentType() == CONTENT_COLOR_ALPHA) {
+    if (!mForPrinting && GetContentType() == gfxContentType::COLOR_ALPHA) {
         // When creating a similar surface to a transparent surface, ensure
         // the new surface uses a DIB. cairo_surface_create_similar won't
-        // use  a DIB for a CONTENT_COLOR surface if this surface doesn't
+        // use  a DIB for a gfxContentType::COLOR surface if this surface doesn't
         // have a DIB (e.g. if we're a transparent window surface). But
         // we need a DIB to perform well if the new surface is composited into
-        // a surface that's the result of create_similar(CONTENT_COLOR_ALPHA)
+        // a surface that's the result of create_similar(gfxContentType::COLOR_ALPHA)
         // (e.g. a backbuffer for the window) --- that new surface *would*
         // have a DIB.
         surface =
-          cairo_win32_surface_create_with_dib(cairo_format_t(gfxPlatform::GetPlatform()->OptimalFormatForContent(aContent)),
+          cairo_win32_surface_create_with_dib((cairo_format_t)(int)gfxPlatform::GetPlatform()->OptimalFormatForContent(aContent),
                                               aSize.width, aSize.height);
     } else {
         surface =
-          cairo_surface_create_similar(mSurface, cairo_content_t(aContent),
+          cairo_surface_create_similar(mSurface, (cairo_content_t)(int)aContent,
                                        aSize.width, aSize.height);
     }
 
@@ -140,7 +148,7 @@ gfxWindowsSurface::CreateSimilarSurface(gfxContentType aContent,
         return nullptr;
     }
 
-    nsRefPtr<gfxASurface> result = Wrap(surface);
+    nsRefPtr<gfxASurface> result = Wrap(surface, aSize);
     cairo_surface_destroy(surface);
     return result.forget();
 }
@@ -161,6 +169,13 @@ gfxWindowsSurface::GetDCWithClip(gfxContext *ctx)
     return cairo_win32_get_dc_with_clip (ctx->GetCairo());
 }
 
+HDC
+gfxWindowsSurface::GetDC()
+{
+    return cairo_win32_surface_get_dc (CairoSurface());
+}
+
+
 already_AddRefed<gfxImageSurface>
 gfxWindowsSurface::GetAsImageSurface()
 {
@@ -178,32 +193,10 @@ gfxWindowsSurface::GetAsImageSurface()
     if (!isurf)
         return nullptr;
 
-	return gfxASurface::Wrap(isurf).downcast<gfxImageSurface>();
-}
+    nsRefPtr<gfxImageSurface> result = gfxASurface::Wrap(isurf).downcast<gfxImageSurface>();
+    result->SetOpaqueRect(GetOpaqueRect());
 
-already_AddRefed<gfxWindowsSurface>
-gfxWindowsSurface::OptimizeToDDB(HDC dc, const gfxIntSize& size, gfxImageFormat format)
-{
-    if (mForPrinting)
-        return nullptr;
-
-    if (format != ImageFormatRGB24)
-        return nullptr;
-
-    nsRefPtr<gfxWindowsSurface> wsurf = new gfxWindowsSurface(dc, size, format);
-    if (wsurf->CairoStatus() != 0)
-        return nullptr;
-
-    gfxContext tmpCtx(wsurf);
-    tmpCtx.SetOperator(gfxContext::OPERATOR_SOURCE);
-    tmpCtx.SetSource(this);
-    tmpCtx.Paint();
-
-    // we let the new DDB surfaces be converted back to dibsections if
-    // acquire_source_image is called on them
-    cairo_win32_surface_set_can_convert_to_dib(wsurf->CairoSurface(), TRUE);
-
-    return wsurf.forget().downcast<gfxWindowsSurface>();
+    return result.forget();
 }
 
 nsresult
@@ -224,7 +217,7 @@ gfxWindowsSurface::BeginPrinting(const nsAString& aTitle,
     docinfo.cbSize = sizeof(docinfo);
     docinfo.lpszDocName = titleStr.Length() > 0 ? titleStr.get() : L"Mozilla Document";
     docinfo.lpszOutput = docName.Length() > 0 ? docName.get() : nullptr;
-    docinfo.lpszDatatype = NULL;
+    docinfo.lpszDatatype = nullptr;
     docinfo.fwType = 0;
 
     ::StartDocW(mDC, &docinfo);
@@ -315,8 +308,8 @@ gfxWindowsSurface::GetSize() const
                       cairo_win32_surface_get_height(mSurface));
 }
 
-gfxASurface::MemoryLocation
+gfxMemoryLocation
 gfxWindowsSurface::GetMemoryLocation() const
 {
-    return MEMORY_IN_PROCESS_NONHEAP;
+    return gfxMemoryLocation::IN_PROCESS_NONHEAP;
 }

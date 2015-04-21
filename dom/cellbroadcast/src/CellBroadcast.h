@@ -6,18 +6,18 @@
 #ifndef mozilla_dom_CellBroadcast_h__
 #define mozilla_dom_CellBroadcast_h__
 
-#include "nsDOMEventTargetHelper.h"
-#include "nsIDOMMozCellBroadcast.h"
-#include "nsICellBroadcastProvider.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/ErrorResult.h"
+#include "nsICellBroadcastProvider.h"
+#include "js/TypeDecls.h"
 
 class nsPIDOMWindow;
 
 namespace mozilla {
 namespace dom {
 
-class CellBroadcast MOZ_FINAL : public nsDOMEventTargetHelper
-                              , public nsIDOMMozCellBroadcast
+class CellBroadcast MOZ_FINAL : public DOMEventTargetHelper
 {
   /**
    * Class CellBroadcast doesn't actually inherit nsICellBroadcastListener.
@@ -29,16 +29,26 @@ class CellBroadcast MOZ_FINAL : public nsDOMEventTargetHelper
   class Listener;
 
 public:
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIDOMMOZCELLBROADCAST
   NS_DECL_NSICELLBROADCASTLISTENER
 
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
+
+  static already_AddRefed<CellBroadcast>
+  Create(nsPIDOMWindow* aOwner, ErrorResult& aRv);
 
   CellBroadcast() MOZ_DELETE;
   CellBroadcast(nsPIDOMWindow *aWindow,
                 nsICellBroadcastProvider* aProvider);
+  // MOZ_FINAL suppresses -Werror,-Wdelete-non-virtual-dtor
   ~CellBroadcast();
+
+  nsPIDOMWindow*
+  GetParentObject() const { return GetOwner(); }
+
+  virtual JSObject*
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+
+  IMPL_EVENT_HANDLER(received)
 
 private:
   nsCOMPtr<nsICellBroadcastProvider> mProvider;
@@ -48,8 +58,4 @@ private:
 } // namespace dom
 } // namespace mozilla
 
-nsresult
-NS_NewCellBroadcast(nsPIDOMWindow* aWindow,
-                    nsIDOMMozCellBroadcast** aCellBroadcast);
-
-#endif // mozilla_dom_CellBroadcast_h__
+#endif /* mozilla_dom_CellBroadcast_h__ */

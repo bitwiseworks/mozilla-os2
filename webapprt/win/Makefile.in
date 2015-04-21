@@ -2,26 +2,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH     = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir    = @srcdir@
-VPATH     = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
-# Statically link against the CRT
-USE_STATIC_LIBS = 1
 # Don't create a dependency on mozglue, which is impossible (difficult?)
 # to dynamically link into our executable, as we copy it to arbitrary locations.
 MOZ_GLUE_LDFLAGS =
-
-LOCAL_INCLUDES += -I$(topsrcdir)/toolkit/xre
-LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/base
-LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/build
-LOCAL_INCLUDES += -I$(DEPTH)/build
-
-DEFINES += -DXPCOM_GLUE
-STL_FLAGS=
 
 LIBS = \
   $(XPCOM_STANDALONE_STATICRUNTIME_GLUE_LDOPTS) \
@@ -43,23 +26,7 @@ SFX_MODULE = $(topsrcdir)/other-licenses/7zstub/firefox/7zSD.sfx
 APP_VERSION := $(shell cat $(topsrcdir)/browser/config/version.txt)
 DEFINES += -DAPP_VERSION=$(APP_VERSION)
 
-ifdef _MSC_VER
-# Always enter a Windows program through wmain, whether or not we're
-# a console application.
-WIN32_EXE_LDFLAGS += -ENTRY:wmainCRTStartup
-endif
-
 OS_LIBS += $(call EXPAND_LIBNAME,shell32)
-
-RCINCLUDE = webapprt.rc
-ifndef GNU_CC
-RCFLAGS += -I$(srcdir)
-else
-RCFLAGS += --include-dir $(srcdir)
-endif
-ifdef DEBUG
-RCFLAGS += -DDEBUG
-endif
 
 # Uninstaller
 ifdef LOCALE_MERGEDIR
@@ -75,9 +42,9 @@ endif
 libs::
 	$(RM) -r $(CONFIG_DIR)
 	$(MKDIR) $(CONFIG_DIR)
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py -Fsubstitution \
+	$(call py_action,preprocessor,-Fsubstitution \
 		$(DEFINES) $(ACDEFINES) \
-		$(srcdir)/webapp-uninstaller.nsi.in > $(CONFIG_DIR)/webapp-uninstaller.nsi
+		$(srcdir)/webapp-uninstaller.nsi.in -o $(CONFIG_DIR)/webapp-uninstaller.nsi)
 	$(PYTHON) \
 		$(topsrcdir)/toolkit/mozapps/installer/windows/nsis/preprocess-locale.py \
 		--create-nlf-file $(topsrcdir) $(AB_CD) $(CONFIG_DIR)
@@ -98,16 +65,3 @@ GRE_BUILDID := $(shell cat $(DEPTH)/config/buildid)
 DEFINES += -DGRE_BUILDID=$(GRE_BUILDID)
 
 webapprt.$(OBJ_SUFFIX): $(DEPTH)/config/buildid
-
-# Control the default heap size.
-# This is the heap returned by GetProcessHeap().
-# As we use the CRT heap, the default size is too large and wastes VM.
-#
-# The default heap size is 1MB on Win32.
-# The heap will grow if need be.
-#
-# Set it to 256k.  See bug 127069.
-#
-ifndef GNU_CC
-LDFLAGS += /HEAP:0x40000
-endif

@@ -14,6 +14,7 @@
 #include "nsIAccessibleTypes.h"
 
 #include "nsString.h"
+#include "nsIURI.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -23,6 +24,9 @@ using namespace mozilla::a11y;
 STDMETHODIMP
 ia2AccessibleImage::QueryInterface(REFIID iid, void** ppv)
 {
+  if (!ppv)
+    return E_INVALIDARG;
+
   *ppv = nullptr;
 
   if (IID_IAccessibleImage == iid) {
@@ -40,6 +44,9 @@ STDMETHODIMP
 ia2AccessibleImage::get_description(BSTR* aDescription)
 {
   A11Y_TRYBLOCK_BEGIN
+
+  if (!aDescription)
+    return E_INVALIDARG;
 
   *aDescription = nullptr;
 
@@ -68,6 +75,9 @@ ia2AccessibleImage::get_imagePosition(enum IA2CoordinateType aCoordType,
 {
   A11Y_TRYBLOCK_BEGIN
 
+  if (!aX || !aY)
+    return E_INVALIDARG;
+
   *aX = 0;
   *aY = 0;
 
@@ -95,6 +105,9 @@ STDMETHODIMP
 ia2AccessibleImage::get_imageSize(long* aHeight, long* aWidth)
 {
   A11Y_TRYBLOCK_BEGIN
+
+  if (!aHeight || !aWidth)
+    return E_INVALIDARG;
 
   *aHeight = 0;
   *aWidth = 0;

@@ -20,7 +20,6 @@
  * Create a description or a SIP SDP (sip_info) with
  * appropriate values initialized
  */
-PMH_EXTERN boolean sip_sdp_init(void);
 PMH_EXTERN sdp_t *sipsdp_create(const char *peerconnection);
 PMH_EXTERN cc_sdp_t *sipsdp_info_create(void);
 PMH_EXTERN void sipsdp_src_dest_free(uint16_t flags, cc_sdp_t **sdp_info);
@@ -44,7 +43,8 @@ PMH_EXTERN void sipsdp_free(cc_sdp_t **sip_sdp);
  */
 #define SIPSDP_VERSION              0
 // RAMC_DEBUG #define SIPSDP_ORIGIN_USERNAME      "CiscoSystemsSIP-GW-UserAgent"
-#define SIPSDP_ORIGIN_USERNAME      "Mozilla-SIPUA-" MOZ_APP_UA_VERSION
+#define SIPSDP_ORIGIN_APPNAME       "Mozilla-SIPUA-"
+#define SIPSDP_ORIGIN_USERNAME      SIPSDP_ORIGIN_APPNAME MOZ_APP_UA_VERSION
 #define SIPSDP_SESSION_NAME         "SIP Call"
 
 /* Possible encoding names fo static payload types*/

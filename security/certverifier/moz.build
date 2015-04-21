@@ -1,0 +1,32 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+UNIFIED_SOURCES += [
+    'CertVerifier.cpp',
+    'NSSCertDBTrustDomain.cpp',
+    'OCSPCache.cpp',
+    'OCSPRequestor.cpp',
+]
+
+if not CONFIG['NSS_NO_EV_CERTS']:
+    UNIFIED_SOURCES += [
+        'ExtendedValidation.cpp',
+    ]
+
+LOCAL_INCLUDES += [
+    '../manager/ssl/src',
+    '../pkix/include',
+]
+
+DIRS += [
+    '../pkix',
+]
+
+FAIL_ON_WARNINGS = True
+
+LIBRARY_NAME = 'certverifier'
+
+FINAL_LIBRARY = 'xul'

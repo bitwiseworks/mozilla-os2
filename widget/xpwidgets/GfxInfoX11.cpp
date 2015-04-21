@@ -24,7 +24,7 @@ namespace mozilla {
 namespace widget {
 
 #ifdef DEBUG
-NS_IMPL_ISUPPORTS_INHERITED1(GfxInfo, GfxInfoBase, nsIGfxInfoDebug)
+NS_IMPL_ISUPPORTS_INHERITED(GfxInfo, GfxInfoBase, nsIGfxInfoDebug)
 #endif
 
 // these global variables will be set when firing the glxtest process
@@ -295,12 +295,6 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
     return NS_OK;
   }
 
-#ifdef MOZ_PLATFORM_MAEMO
-  *aStatus = nsIGfxInfo::FEATURE_NO_INFO;
-  // on Maemo, the glxtest probe doesn't build, and we don't really need GfxInfo anyway
-  return NS_OK;
-#endif
-
   // Don't evaluate any special cases if we're checking the downloaded blocklist.
   if (!aDriverInfo.Length()) {
     // Only check features relevant to Linux.
@@ -337,7 +331,12 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
           aSuggestedDriverVersion.AssignLiteral("Mesa 7.10.3");
         }
-        else if (mIsOldSwrast || mIsLlvmpipe) {
+        else if (mIsOldSwrast) {
+          *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
+        }
+        else if (mIsLlvmpipe && version(mMajorVersion, mMinorVersion) < version(9, 1)) {
+          // bug 791905, Mesa bug 57733, fixed in Mesa 9.1 according to
+          // https://bugs.freedesktop.org/show_bug.cgi?id=57733#c3
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
         }
         else if (aFeature == nsIGfxInfo::FEATURE_WEBGL_MSAA)

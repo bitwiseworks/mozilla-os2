@@ -15,6 +15,7 @@ class nsFormSubmission;
 namespace mozilla {
 namespace dom {
 class Element;
+class HTMLFieldSetElement;
 } // namespace dom
 } // namespace mozilla
 
@@ -31,9 +32,8 @@ enum FormControlsTypes {
   // are not overlapping with sub-types/masks.
 
   // Elements with different types, the value is used as a mask.
-  // Adding '_ELEMENT' because NS_FORM_INPUT is used for 'oninput' event.
   // When changing the order, adding or removing elements, be sure to update
-  // the PR_STATIC_ASSERT checks accordingly.
+  // the static_assert checks accordingly.
   NS_FORM_BUTTON_ELEMENT = 0x40, // 0b01000000
   NS_FORM_INPUT_ELEMENT  = 0x80  // 0b10000000
 };
@@ -68,9 +68,14 @@ enum InputElementTypes {
   eInputElementTypesMax
 };
 
-PR_STATIC_ASSERT((uint32_t)eFormControlsWithoutSubTypesMax < (uint32_t)NS_FORM_BUTTON_ELEMENT);
-PR_STATIC_ASSERT((uint32_t)eButtonElementTypesMax < (uint32_t)NS_FORM_INPUT_ELEMENT);
-PR_STATIC_ASSERT((uint32_t)eInputElementTypesMax  < 1<<8);
+static_assert(static_cast<uint32_t>(eFormControlsWithoutSubTypesMax) <
+              static_cast<uint32_t>(NS_FORM_BUTTON_ELEMENT),
+              "Too many FormControlsTypes without sub-types");
+static_assert(static_cast<uint32_t>(eButtonElementTypesMax) <
+              static_cast<uint32_t>(NS_FORM_INPUT_ELEMENT),
+              "Too many ButtonElementTypes");
+static_assert(static_cast<uint32_t>(eInputElementTypesMax) < 1<<8,
+              "Too many form control types");
 
 #define NS_IFORMCONTROL_IID   \
 { 0x4b89980c, 0x4dcd, 0x428f, \
@@ -86,6 +91,12 @@ class nsIFormControl : public nsISupports
 public:
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IFORMCONTROL_IID)
+
+  /**
+   * Get the fieldset for this form control.
+   * @return the fieldset
+   */
+  virtual mozilla::dom::HTMLFieldSetElement *GetFieldSet() = 0;
 
   /**
    * Get the form for this form control.
@@ -238,8 +249,6 @@ nsIFormControl::IsSingleLineTextControl(bool aExcludePassword, uint32_t aType)
          aType == NS_FORM_INPUT_SEARCH ||
          aType == NS_FORM_INPUT_TEL ||
          aType == NS_FORM_INPUT_URL ||
-         // TODO: this is temporary until bug 635240 is fixed.
-         aType == NS_FORM_INPUT_NUMBER ||
          // TODO: those are temporary until bug 773205 is fixed.
          aType == NS_FORM_INPUT_DATE ||
          aType == NS_FORM_INPUT_TIME ||

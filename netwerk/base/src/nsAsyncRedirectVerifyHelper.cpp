@@ -17,6 +17,7 @@
 #include "nsIHttpChannelInternal.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 
+#undef LOG
 #ifdef PR_LOGGING
 static PRLogModuleInfo *
 GetRedirectLog()
@@ -31,9 +32,9 @@ GetRedirectLog()
 #define LOG(args)
 #endif
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsAsyncRedirectVerifyHelper,
-                              nsIAsyncVerifyRedirectCallback,
-                              nsIRunnable)
+NS_IMPL_ISUPPORTS(nsAsyncRedirectVerifyHelper,
+                  nsIAsyncVerifyRedirectCallback,
+                  nsIRunnable)
 
 class nsAsyncVerifyRedirectCallbackEvent : public nsRunnable {
 public:

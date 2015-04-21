@@ -5,12 +5,9 @@
 
 #pragma once
 
-#include "nsGUIEvent.h"
-#include "MetroInput.h"
-#include "mozilla/TimeStamp.h"
 #include "MetroWidget.h"
+#include "MetroInput.h"
 #include "gfxWindowsPlatform.h"
-#include "gfxD2DSurface.h"
 #include "nsDataHashtable.h"
 
 #include "mozwrlbase.h"
@@ -80,20 +77,25 @@ public:
   STDMETHODIMP Run();
   STDMETHODIMP Uninitialize();
 
+  HRESULT ActivateView();
+
   // Public apis for MetroWidget
-  void ShutdownXPCOM();
-  bool Render();
-  bool Render(const nsIntRegion& aInvalidRegion);
   float GetDPI() { return mDPI; }
   ICoreWindow* GetCoreWindow() { return mWindow.Get(); }
   void SetWidget(MetroWidget* aWidget);
   MetroWidget* GetWidget() { return mWidget.Get(); }
   void GetBounds(nsIntRect &aRect);
-  void GetActivationURI(nsAString &aActivationURI) { aActivationURI = mActivationURI; }
   void SetCursor(ABI::Windows::UI::Core::CoreCursorType aCursorType, DWORD aCustomId = 0);
   void ClearCursor();
   bool IsEnabled() const;
   bool IsVisible() const;
+
+  // Activation apis for nsIWinMetroUtils
+  static int GetPreviousExecutionState() { return sPreviousExecutionState; }
+  static void GetActivationURI(nsAString &aActivationURI) {
+    unsigned int length;
+    aActivationURI = WindowsGetStringRawBuffer(sActivationURI, &length);
+  }
 
   // Soft keyboard info for nsIWinMetroUtils
   static bool IsKeyboardVisible() { return sKeyboardIsVisible; }
@@ -101,6 +103,7 @@ public:
 
   // MetroApp apis
   void SetupContracts();
+  void Shutdown();
 
   // MetroContracts settings panel enumerator entry
   void AddSetting(ISettingsPaneCommandsRequestedEventArgs* aArgs, uint32_t aId,
@@ -114,8 +117,6 @@ protected:
 
   HRESULT OnWindowSizeChanged(ICoreWindow* aSender,
                               IWindowSizeChangedEventArgs* aArgs);
-  HRESULT OnWindowClosed(ICoreWindow* aSender,
-                         ICoreWindowEventArgs* aArgs);
   HRESULT OnWindowActivated(ICoreWindow* aSender,
                             IWindowActivatedEventArgs* aArgs);
   HRESULT OnLogicalDpiChanged(IInspectable* aSender);
@@ -152,6 +153,7 @@ protected:
   void UpdateLogicalDPI();
   void FireViewStateObservers();
   void ProcessLaunchArguments();
+  void UpdateBounds();
 
   // Printing and preview
   void CreatePrintControl(IPrintDocumentPackageTarget* aDocPackageTarget, 
@@ -178,12 +180,9 @@ private:
   EventRegistrationToken mPrintManager;
 
 private:
-  nsRefPtr<gfxD2DSurface> mD2DWindowSurface;
   nsIntRect mWindowBounds; // in device-pixel coordinates
   float mDPI;
   bool mShuttingDown;
-  bool mPainting;
-  nsAutoString mActivationURI;
   nsAutoString mActivationCommandLine;
   Microsoft::WRL::ComPtr<IInspectable> mAutomationProvider;
   //Microsoft::WRL::ComPtr<ID2D1PrintControl> mD2DPrintControl;
@@ -192,14 +191,15 @@ private:
   //Microsoft::WRL::ComPtr<IWICImagingFactory2> mWicFactory;
   Microsoft::WRL::ComPtr<MetroApp> mMetroApp;
   Microsoft::WRL::ComPtr<ICoreWindow> mWindow;
-  Microsoft::WRL::ComPtr<ICoreDispatcher> mDispatcher;
   Microsoft::WRL::ComPtr<MetroWidget> mWidget;
   Microsoft::WRL::ComPtr<MetroInput> mMetroInput;
-  static bool sKeyboardIsVisible;
-  static Rect sKeyboardRect;
   bool mWinVisible;
   bool mWinActiveState;
-  ApplicationViewState mViewState;
+
+  static bool sKeyboardIsVisible;
+  static Rect sKeyboardRect;
+  static HSTRING sActivationURI;
+  static ABI::Windows::ApplicationModel::Activation::ApplicationExecutionState sPreviousExecutionState;
 };
 
 } } }

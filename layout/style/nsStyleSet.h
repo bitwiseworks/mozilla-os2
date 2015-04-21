@@ -13,6 +13,7 @@
 #define nsStyleSet_h_
 
 #include "mozilla/Attributes.h"
+#include "mozilla/MemoryReporting.h"
 
 #include "nsIStyleRuleProcessor.h"
 #include "nsCSSStyleSheet.h"
@@ -25,7 +26,6 @@
 #include "nsCSSPseudoElements.h"
 #include "gfxFontFeatures.h"
 
-class nsIURI;
 class nsCSSFontFaceRule;
 class nsCSSKeyframesRule;
 class nsCSSFontFeatureValuesRule;
@@ -33,6 +33,10 @@ class nsCSSPageRule;
 class nsRuleWalker;
 struct ElementDependentRuleProcessorData;
 struct TreeMatchContext;
+
+namespace mozilla {
+class EventStates;
+} // namespace mozilla
 
 class nsEmptyStyleRule MOZ_FINAL : public nsIStyleRule
 {
@@ -52,6 +56,15 @@ class nsInitialStyleRule MOZ_FINAL : public nsIStyleRule
 #endif
 };
 
+class nsDisableTextZoomStyleRule MOZ_FINAL : public nsIStyleRule
+{
+  NS_DECL_ISUPPORTS
+  virtual void MapRuleInfoInto(nsRuleData* aRuleData) MOZ_OVERRIDE;
+#ifdef DEBUG
+  virtual void List(FILE* out = stdout, int32_t aIndent = 0) const MOZ_OVERRIDE;
+#endif
+};
+
 // The style set object is created by the document viewer and ownership is
 // then handed off to the PresShell.  Only the PresShell should delete a
 // style set.
@@ -61,7 +74,7 @@ class nsStyleSet
  public:
   nsStyleSet();
 
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   void Init(nsPresContext *aPresContext);
 
@@ -120,11 +133,14 @@ class nsStyleSet
 
   // Get a style context for a pseudo-element.  aParentElement must be
   // non-null.  aPseudoID is the nsCSSPseudoElements::Type for the
-  // pseudo-element.
+  // pseudo-element.  aPseudoElement must be non-null if the pseudo-element
+  // type is one that allows user action pseudo-classes after it; otherwise,
+  // it is ignored.
   already_AddRefed<nsStyleContext>
   ResolvePseudoElementStyle(mozilla::dom::Element* aParentElement,
                             nsCSSPseudoElements::Type aType,
-                            nsStyleContext* aParentContext);
+                            nsStyleContext* aParentContext,
+                            mozilla::dom::Element* aPseudoElement);
 
   // This functions just like ResolvePseudoElementStyle except that it will
   // return nullptr if there are no explicit style rules for that
@@ -137,7 +153,8 @@ class nsStyleSet
   ProbePseudoElementStyle(mozilla::dom::Element* aParentElement,
                           nsCSSPseudoElements::Type aType,
                           nsStyleContext* aParentContext,
-                          TreeMatchContext& aTreeMatchContext);
+                          TreeMatchContext& aTreeMatchContext,
+                          mozilla::dom::Element* aPseudoElement = nullptr);
 
   // Get a style context for an anonymous box.  aPseudoTag is the
   // pseudo-tag to use and must be non-null.
@@ -201,13 +218,18 @@ class nsStyleSet
 
   // Test if style is dependent on a document state.
   bool HasDocumentStateDependentStyle(nsPresContext* aPresContext,
-                                        nsIContent*    aContent,
-                                        nsEventStates  aStateMask);
+                                      nsIContent*    aContent,
+                                      mozilla::EventStates aStateMask);
 
   // Test if style is dependent on content state
   nsRestyleHint HasStateDependentStyle(nsPresContext* aPresContext,
                                        mozilla::dom::Element* aElement,
-                                       nsEventStates aStateMask);
+                                       mozilla::EventStates aStateMask);
+  nsRestyleHint HasStateDependentStyle(nsPresContext* aPresContext,
+                                       mozilla::dom::Element* aElement,
+                                       nsCSSPseudoElements::Type aPseudoType,
+                                       mozilla::dom::Element* aPseudoElement,
+                                       mozilla::EventStates aStateMask);
 
   // Test if style is dependent on the presence of an attribute.
   nsRestyleHint HasAttributeDependentStyle(nsPresContext* aPresContext,
@@ -334,6 +356,9 @@ class nsStyleSet
   void WalkRestrictionRule(nsCSSPseudoElements::Type aPseudoType,
                            nsRuleWalker* aRuleWalker);
 
+  void WalkDisableTextZoomRule(mozilla::dom::Element* aElement,
+                               nsRuleWalker* aRuleWalker);
+
 #ifdef DEBUG
   // Just like AddImportantRules except it doesn't actually add anything; it
   // just asserts that there are no important rules between aCurrLevelNode and
@@ -433,6 +458,10 @@ class nsStyleSet
   // determining when context-sensitive values are in use.
   nsRefPtr<nsInitialStyleRule> mInitialStyleRule;
 
+  // Style rule that sets the internal -x-text-zoom property on
+  // <svg:text> elements to disable the effect of text zooming.
+  nsRefPtr<nsDisableTextZoomStyleRule> mDisableTextZoomStyleRule;
+
   // Old rule trees, which should only be non-empty between
   // BeginReconstruct and EndReconstruct, but in case of bugs that cause
   // style contexts to exist too long, may last longer.
@@ -442,7 +471,7 @@ class nsStyleSet
   nsRefPtr<gfxFontFeatureValueSet> mFontFeatureValuesLookup;
 };
 
-#ifdef _IMPL_NS_LAYOUT
+#ifdef MOZILLA_INTERNAL_API
 inline
 void nsRuleNode::AddRef()
 {

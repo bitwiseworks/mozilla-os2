@@ -4,9 +4,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'accessibility'
-
 EXPORTS += [
+    'ia2Accessible.h',
     'ia2AccessibleAction.h',
     'ia2AccessibleComponent.h',
     'ia2AccessibleEditableText.h',
@@ -16,7 +15,8 @@ EXPORTS += [
     'ia2AccessibleValue.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
+    'ia2Accessible.cpp',
     'ia2AccessibleAction.cpp',
     'ia2AccessibleComponent.cpp',
     'ia2AccessibleEditableText.cpp',
@@ -24,9 +24,24 @@ CPP_SOURCES += [
     'ia2AccessibleHypertext.cpp',
     'ia2AccessibleImage.cpp',
     'ia2AccessibleRelation.cpp',
-    'ia2AccessibleTable.cpp',
-    'ia2AccessibleTableCell.cpp',
     'ia2AccessibleText.cpp',
     'ia2AccessibleValue.cpp',
 ]
 
+# These files cannot be built in unified mode because they both include
+# AccessibleTable2_i.c.
+SOURCES += [
+    'ia2AccessibleTable.cpp',
+    'ia2AccessibleTableCell.cpp',
+]
+
+LOCAL_INCLUDES += [
+    '../../base',
+    '../../generic',
+    '../../html',
+    '../../xpcom',
+    '../../xul',
+    '../msaa',
+]
+
+FINAL_LIBRARY = 'xul'

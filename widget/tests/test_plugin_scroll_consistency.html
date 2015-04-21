@@ -7,6 +7,17 @@
           href="chrome://mochikit/content/tests/SimpleTest/test.css" />
 </head>
 <body onload="setTimeout(runTests, 0)">
+<script type="application/javascript">
+var pluginHost = SpecialPowers.Cc["@mozilla.org/plugin/host;1"]
+                        .getService(SpecialPowers.Ci.nsIPluginHost);
+var pluginTags = pluginHost.getPluginTags();
+for (var tag of pluginTags) {
+  if (tag.name == "Test Plug-in") {
+    tag.enabledState = SpecialPowers.Ci.nsIPluginTag.STATE_ENABLED;;
+  }
+}
+</script>
+
 <p id="display">
   <div style="overflow:hidden; height:100px;" id="scroll">
     <embed type="application/x-test" wmode="window" width="100" height="800" id="plugin"></object>
@@ -14,7 +25,7 @@
   </div>
 </p>
 <div id="content" style="display: none">
-  
+
 </div>
 <pre id="test">
 </pre>
@@ -29,10 +40,10 @@ function consistencyCheck(state) {
   ok(s == "", "Consistency check: " + state + ": " + s);
 }
 
-consistencyCheck("Initial state");
-
 function runTests()
 {
+  consistencyCheck("Initial state");
+
   var scroll = document.getElementById("scroll");
   scroll.scrollTop = 10;
   consistencyCheck("Scrolled down a bit");
@@ -41,7 +52,7 @@ function runTests()
     consistencyCheck("Before scrolling back to top");
     scroll.scrollTop = 0;
     consistencyCheck("Scrolled to top");
-  
+
     setTimeout(function() {
       consistencyCheck("After scrolling to top");
 

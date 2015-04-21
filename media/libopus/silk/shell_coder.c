@@ -1,9 +1,5 @@
 /***********************************************************************
-Copyright (c) 2006-2012 IETF Trust and Skype Limited. All rights reserved.
-
-This file is extracted from RFC6716. Please see that RFC for additional
-information.
-
+Copyright (c) 2006-2011, Skype Limited. All rights reserved.
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions
 are met:
@@ -16,7 +12,7 @@ documentation and/or other materials provided with the distribution.
 names of specific contributors, may be used to endorse or promote
 products derived from this software without specific prior written
 permission.
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS”
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
 ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
@@ -37,7 +33,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 /* shell coder; pulse-subframe length is hardcoded */
 
-static inline void combine_pulses(
+static OPUS_INLINE void combine_pulses(
     opus_int         *out,   /* O    combined pulses vector [len] */
     const opus_int   *in,    /* I    input vector       [2 * len] */
     const opus_int   len     /* I    number of OUTPUT samples     */
@@ -49,7 +45,7 @@ static inline void combine_pulses(
     }
 }
 
-static inline void encode_split(
+static OPUS_INLINE void encode_split(
     ec_enc                      *psRangeEnc,    /* I/O  compressor data structure                   */
     const opus_int              p_child1,       /* I    pulse amplitude of first child subframe     */
     const opus_int              p,              /* I    pulse amplitude of current subframe         */
@@ -61,7 +57,7 @@ static inline void encode_split(
     }
 }
 
-static inline void decode_split(
+static OPUS_INLINE void decode_split(
     opus_int                    *p_child1,      /* O    pulse amplitude of first child subframe     */
     opus_int                    *p_child2,      /* O    pulse amplitude of second child subframe    */
     ec_dec                      *psRangeDec,    /* I/O  Compressor data structure                   */

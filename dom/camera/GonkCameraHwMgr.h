@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 Mozilla Foundation
+ * Copyright (C) 2012-2014 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,15 +27,12 @@
 
 #include "GonkCameraListener.h"
 #include "GonkNativeWindow.h"
+#include "GonkCameraParameters.h"
 #include "mozilla/ReentrantMonitor.h"
-
-// config
-#define GIHM_TIMING_RECEIVEFRAME    0
-#define GIHM_TIMING_OVERALL         1
-
 
 namespace mozilla {
   class nsGonkCameraControl;
+  class GonkCameraParameters;
 }
 
 namespace android {
@@ -46,14 +43,14 @@ class GonkCameraHardware : public GonkNativeWindowNewFrameCallback
 protected:
   GonkCameraHardware(mozilla::nsGonkCameraControl* aTarget, uint32_t aCameraId, const sp<Camera>& aCamera);
   virtual ~GonkCameraHardware();
-  void Init();
+  virtual nsresult Init();
 
 public:
-  static  sp<GonkCameraHardware>  Connect(mozilla::nsGonkCameraControl* aTarget, uint32_t aCameraId);
-  void    Close();
+  static sp<GonkCameraHardware> Connect(mozilla::nsGonkCameraControl* aTarget, uint32_t aCameraId);
+  virtual void Close();
 
   // derived from GonkNativeWindowNewFrameCallback
-  virtual void    OnNewFrame() MOZ_OVERRIDE;
+  virtual void OnNewFrame() MOZ_OVERRIDE;
 
   // derived from CameraListener
   virtual void notify(int32_t aMsgType, int32_t ext1, int32_t ext2);
@@ -78,44 +75,36 @@ public:
     RAW_SENSOR_ORIENTATION,
     OFFSET_SENSOR_ORIENTATION
   };
-  int      GetSensorOrientation(uint32_t aType = OFFSET_SENSOR_ORIENTATION);
+  virtual int      GetSensorOrientation(uint32_t aType = RAW_SENSOR_ORIENTATION);
 
-  int      AutoFocus();
-  void     CancelAutoFocus();
-  int      TakePicture();
-  void     CancelTakePicture();
-  int      StartPreview();
-  void     StopPreview();
-  int      PushParameters(const CameraParameters& aParams);
-  void     PullParameters(CameraParameters& aParams);
-  int      StartRecording();
-  int      StopRecording();
-  int      SetListener(const sp<GonkCameraListener>& aListener);
-  void     ReleaseRecordingFrame(const sp<IMemory>& aFrame);
-  int      StoreMetaDataInBuffers(bool aEnabled);
+  virtual int      AutoFocus();
+  virtual int      CancelAutoFocus();
+  virtual int      StartFaceDetection();
+  virtual int      StopFaceDetection();
+  virtual int      TakePicture();
+  virtual void     CancelTakePicture();
+  virtual int      StartPreview();
+  virtual void     StopPreview();
+  virtual int      PushParameters(const mozilla::GonkCameraParameters& aParams);
+  virtual int      PushParameters(const CameraParameters& aParams);
+  virtual nsresult PullParameters(mozilla::GonkCameraParameters& aParams);
+  virtual void     PullParameters(CameraParameters& aParams);
+  virtual int      StartRecording();
+  virtual int      StopRecording();
+  virtual int      SetListener(const sp<GonkCameraListener>& aListener);
+  virtual void     ReleaseRecordingFrame(const sp<IMemory>& aFrame);
+  virtual int      StoreMetaDataInBuffers(bool aEnabled);
 
 protected:
-
   uint32_t                      mCameraId;
   bool                          mClosing;
-  mozilla::ReentrantMonitor     mMonitor;
   uint32_t                      mNumFrames;
   sp<Camera>                    mCamera;
   mozilla::nsGonkCameraControl* mTarget;
   sp<GonkNativeWindow>          mNativeWindow;
-#if GIHM_TIMING_OVERALL
-  struct timespec               mStart;
-  struct timespec               mAutoFocusStart;
-#endif
   sp<GonkCameraListener>        mListener;
-  bool                          mInitialized;
   int                           mRawSensorOrientation;
   int                           mSensorOrientation;
-
-  bool IsInitialized()
-  {
-    return mInitialized;
-  }
 
 private:
   GonkCameraHardware(const GonkCameraHardware&) MOZ_DELETE;

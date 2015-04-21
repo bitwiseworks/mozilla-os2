@@ -3,20 +3,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsCharsetAlias.h"
-#include "pratom.h"
 
 // for NS_ERROR_UCONV_NOCONV
-#include "nsEncoderDecoderUtils.h"
 #include "nsCharsetConverterManager.h"
 
-// for NS_IMPL_IDS only
-#include "nsIPlatformCharset.h"
-
-#include "nsReadableUtils.h"
-#include "nsUnicharUtils.h"
 #include "nsUConvPropertySearch.h"
 
 using namespace mozilla;

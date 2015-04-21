@@ -16,7 +16,7 @@
 #ifndef WEBRTC_MODULES_INTERFACE_VIDEO_PROCESSING_DEFINES_H
 #define WEBRTC_MODULES_INTERFACE_VIDEO_PROCESSING_DEFINES_H
 
-#include "typedefs.h"
+#include "webrtc/typedefs.h"
 
 namespace webrtc {
 
@@ -38,6 +38,6 @@ enum VideoFrameResampling
     kBox,                 // Box inteprolation
 };
 
-} //namespace
+}  // namespace
 
 #endif

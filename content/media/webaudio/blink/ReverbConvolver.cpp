@@ -27,6 +27,7 @@
  */
 
 #include "ReverbConvolver.h"
+#include "ReverbConvolverStage.h"
 
 using namespace mozilla;
 
@@ -124,7 +125,10 @@ ReverbConvolver::ReverbConvolver(const float* impulseResponseData, size_t impuls
     // Start up background thread
     // FIXME: would be better to up the thread priority here.  It doesn't need to be real-time, but higher than the default...
     if (this->useBackgroundThreads() && m_backgroundStages.Length() > 0) {
-        m_backgroundThread.Start();
+        if (!m_backgroundThread.Start()) {
+          NS_WARNING("Cannot start convolver thread.");
+          return;
+        }
         CancelableTask* task = NewRunnableMethod(this, &ReverbConvolver::backgroundThreadEntry);
         m_backgroundThread.message_loop()->PostTask(FROM_HERE, task);
     }
@@ -145,6 +149,35 @@ ReverbConvolver::~ReverbConvolver()
 
         m_backgroundThread.Stop();
     }
+}
+
+size_t ReverbConvolver::sizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+{
+    size_t amount = aMallocSizeOf(this);
+    amount += m_stages.SizeOfExcludingThis(aMallocSizeOf);
+    for (size_t i = 0; i < m_stages.Length(); i++) {
+        if (m_stages[i]) {
+            amount += m_stages[i]->sizeOfIncludingThis(aMallocSizeOf);
+        }
+    }
+
+    amount += m_backgroundStages.SizeOfExcludingThis(aMallocSizeOf);
+    for (size_t i = 0; i < m_backgroundStages.Length(); i++) {
+        if (m_backgroundStages[i]) {
+            amount += m_backgroundStages[i]->sizeOfIncludingThis(aMallocSizeOf);
+        }
+    }
+
+    // NB: The buffer sizes are static, so even though they might be accessed
+    //     in another thread it's safe to measure them.
+    amount += m_accumulationBuffer.sizeOfExcludingThis(aMallocSizeOf);
+    amount += m_inputBuffer.sizeOfExcludingThis(aMallocSizeOf);
+
+    // Possible future measurements:
+    // - m_backgroundThread
+    // - m_backgroundThreadLock
+    // - m_backgroundThreadCondition
+    return amount;
 }
 
 void ReverbConvolver::backgroundThreadEntry()

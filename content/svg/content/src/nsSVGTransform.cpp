@@ -6,11 +6,11 @@
 
 #include "nsError.h"
 #include "nsSVGTransform.h"
-#include "nsContentUtils.h"
+#include "nsContentUtils.h" // for NS_ENSURE_FINITE
 #include "nsTextFormatter.h"
 
 namespace {
-  const double radPerDegree = 2.0 * M_PI / 360.0;
+  const double kRadPerDegree = 2.0 * M_PI / 360.0;
 }
 
 namespace mozilla {
@@ -18,48 +18,48 @@ namespace mozilla {
 void
 nsSVGTransform::GetValueAsString(nsAString& aValue) const
 {
-  PRUnichar buf[256];
+  char16_t buf[256];
 
   switch (mType) {
     case SVG_TRANSFORM_TRANSLATE:
       // The spec say that if Y is not provided, it is assumed to be zero.
       if (mMatrix.y0 != 0)
-        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-            NS_LITERAL_STRING("translate(%g, %g)").get(),
+        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+            MOZ_UTF16("translate(%g, %g)"),
             mMatrix.x0, mMatrix.y0);
       else
-        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-            NS_LITERAL_STRING("translate(%g)").get(),
+        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+            MOZ_UTF16("translate(%g)"),
             mMatrix.x0);
       break;
     case SVG_TRANSFORM_ROTATE:
       if (mOriginX != 0.0f || mOriginY != 0.0f)
-        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-            NS_LITERAL_STRING("rotate(%g, %g, %g)").get(),
+        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+            MOZ_UTF16("rotate(%g, %g, %g)"),
             mAngle, mOriginX, mOriginY);
       else
-        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-            NS_LITERAL_STRING("rotate(%g)").get(), mAngle);
+        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+            MOZ_UTF16("rotate(%g)"), mAngle);
       break;
     case SVG_TRANSFORM_SCALE:
       if (mMatrix.xx != mMatrix.yy)
-        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-            NS_LITERAL_STRING("scale(%g, %g)").get(), mMatrix.xx, mMatrix.yy);
+        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+            MOZ_UTF16("scale(%g, %g)"), mMatrix.xx, mMatrix.yy);
       else
-        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-            NS_LITERAL_STRING("scale(%g)").get(), mMatrix.xx);
+        nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+            MOZ_UTF16("scale(%g)"), mMatrix.xx);
       break;
     case SVG_TRANSFORM_SKEWX:
-      nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-                                NS_LITERAL_STRING("skewX(%g)").get(), mAngle);
+      nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+                                MOZ_UTF16("skewX(%g)"), mAngle);
       break;
     case SVG_TRANSFORM_SKEWY:
-      nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-                                NS_LITERAL_STRING("skewY(%g)").get(), mAngle);
+      nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+                                MOZ_UTF16("skewY(%g)"), mAngle);
       break;
     case SVG_TRANSFORM_MATRIX:
-      nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
-          NS_LITERAL_STRING("matrix(%g, %g, %g, %g, %g, %g)").get(),
+      nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
+          MOZ_UTF16("matrix(%g, %g, %g, %g, %g, %g)"),
                             mMatrix.xx, mMatrix.yx,
                             mMatrix.xy, mMatrix.yy,
                             mMatrix.x0, mMatrix.y0);
@@ -115,7 +115,7 @@ nsSVGTransform::SetRotate(float aAngle, float aCx, float aCy)
   mType    = SVG_TRANSFORM_ROTATE;
   mMatrix.Reset();
   mMatrix.Translate(gfxPoint(aCx, aCy));
-  mMatrix.Rotate(aAngle*radPerDegree);
+  mMatrix.Rotate(aAngle*kRadPerDegree);
   mMatrix.Translate(gfxPoint(-aCx, -aCy));
   mAngle   = aAngle;
   mOriginX = aCx;
@@ -125,7 +125,7 @@ nsSVGTransform::SetRotate(float aAngle, float aCx, float aCy)
 nsresult
 nsSVGTransform::SetSkewX(float aAngle)
 {
-  double ta = tan(aAngle*radPerDegree);
+  double ta = tan(aAngle*kRadPerDegree);
   NS_ENSURE_FINITE(ta, NS_ERROR_RANGE_ERR);
 
   mType    = SVG_TRANSFORM_SKEWX;
@@ -140,7 +140,7 @@ nsSVGTransform::SetSkewX(float aAngle)
 nsresult
 nsSVGTransform::SetSkewY(float aAngle)
 {
-  double ta = tan(aAngle*radPerDegree);
+  double ta = tan(aAngle*kRadPerDegree);
   NS_ENSURE_FINITE(ta, NS_ERROR_RANGE_ERR);
 
   mType    = SVG_TRANSFORM_SKEWY;
@@ -166,7 +166,7 @@ SVGTransformSMILData::SVGTransformSMILData(const nsSVGTransform& aTransform)
 
   switch (mTransformType) {
     case SVG_TRANSFORM_MATRIX: {
-      const gfxMatrix& mx = aTransform.Matrix();
+      const gfxMatrix& mx = aTransform.GetMatrix();
       mParams[0] = static_cast<float>(mx.xx);
       mParams[1] = static_cast<float>(mx.yx);
       mParams[2] = static_cast<float>(mx.xy);
@@ -176,13 +176,13 @@ SVGTransformSMILData::SVGTransformSMILData(const nsSVGTransform& aTransform)
       break;
     }
     case SVG_TRANSFORM_TRANSLATE: {
-      const gfxMatrix& mx = aTransform.Matrix();
+      const gfxMatrix& mx = aTransform.GetMatrix();
       mParams[0] = static_cast<float>(mx.x0);
       mParams[1] = static_cast<float>(mx.y0);
       break;
     }
     case SVG_TRANSFORM_SCALE: {
-      const gfxMatrix& mx = aTransform.Matrix();
+      const gfxMatrix& mx = aTransform.GetMatrix();
       mParams[0] = static_cast<float>(mx.xx);
       mParams[1] = static_cast<float>(mx.yy);
       break;

@@ -73,8 +73,8 @@ load 645142.html
 load 611922-1.html
 == 645951-1.html 645951-1-ref.html
 load 665209-1.html
-asserts(2) load 671799-1.html
-asserts(2) load 671799-2.html
+load 671799-1.html
+load 671799-2.html
 load 690990-1.html
 load 696188-1.html
 load 700116.html
@@ -91,6 +91,18 @@ load 827591-1.html
 load 829817.html
 load 840898.html
 load 842134.html
+load 861489-1.html
 load 862113.html
 load 867487.html
 load 880862.html
+load 873222.html
+load 915440.html
+load 927734-1.html
+load 930270-1.html
+load 930270-2.html
+load 945048-1.html
+load 972199-1.html
+load 989965-1.html
+load 992333-1.html
+load large_border_image_width.html
+load border-image-visited-link.html

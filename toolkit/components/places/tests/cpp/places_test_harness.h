@@ -125,7 +125,7 @@ public:
 
   NS_IMETHOD Observe(nsISupports* aSubject,
                      const char* aTopic,
-                     const PRUnichar* aData)
+                     const char16_t* aData)
   {
     mTopicReceived = true;
     nsCOMPtr<nsIObserverService> observerService =
@@ -139,7 +139,7 @@ private:
   bool mTopicReceived;
   PRIntervalTime mStartTime;
 };
-NS_IMPL_ISUPPORTS1(
+NS_IMPL_ISUPPORTS(
   WaitForTopicSpinner,
   nsIObserver
 )
@@ -161,8 +161,8 @@ protected:
   volatile bool mCompleted;
 };
 
-NS_IMPL_ISUPPORTS1(AsyncStatementSpinner,
-                   mozIStorageStatementCallback)
+NS_IMPL_ISUPPORTS(AsyncStatementSpinner,
+                  mozIStorageStatementCallback)
 
 AsyncStatementSpinner::AsyncStatementSpinner()
 : completionReason(0)
@@ -387,7 +387,7 @@ public:
 
   NS_IMETHOD Observe(nsISupports* aSubject,
                      const char* aTopic,
-                     const PRUnichar* aData)
+                     const char16_t* aData)
   {
     nsCOMPtr<nsIObserverService> os =
       do_GetService(NS_OBSERVERSERVICE_CONTRACTID);
@@ -402,4 +402,4 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(WaitForConnectionClosed, nsIObserver)
+NS_IMPL_ISUPPORTS(WaitForConnectionClosed, nsIObserver)

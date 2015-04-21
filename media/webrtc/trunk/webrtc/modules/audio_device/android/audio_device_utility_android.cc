@@ -12,17 +12,16 @@
  *  Android audio device utility implementation
  */
 
-#include "audio_device_utility_android.h"
+#include "webrtc/modules/audio_device/android/audio_device_utility_android.h"
 
-#include "critical_section_wrapper.h"
-#include "trace.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/trace.h"
 
 namespace webrtc
 {
 
-AudioDeviceUtilityAndroid::AudioDeviceUtilityAndroid(const WebRtc_Word32 id) :
-    _critSect(*CriticalSectionWrapper::CreateCriticalSection()), _id(id),
-    _lastError(AudioDeviceModule::kAdmErrNone)
+AudioDeviceUtilityAndroid::AudioDeviceUtilityAndroid(const int32_t id) :
+    _critSect(*CriticalSectionWrapper::CreateCriticalSection()), _id(id)
 {
     WEBRTC_TRACE(kTraceMemory, kTraceAudioDevice, id,
                  "%s created", __FUNCTION__);
@@ -39,7 +38,7 @@ AudioDeviceUtilityAndroid::~AudioDeviceUtilityAndroid()
     delete &_critSect;
 }
 
-WebRtc_Word32 AudioDeviceUtilityAndroid::Init()
+int32_t AudioDeviceUtilityAndroid::Init()
 {
 
     WEBRTC_TRACE(kTraceStateInfo, kTraceAudioDevice, _id,
@@ -48,4 +47,4 @@ WebRtc_Word32 AudioDeviceUtilityAndroid::Init()
     return 0;
 }
 
-} // namespace webrtc
+}  // namespace webrtc

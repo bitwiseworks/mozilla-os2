@@ -31,16 +31,16 @@ public:
 
     virtual bool
     RecvNotifyStateEvent(const uint32_t& stateEvent,
-                         const uint64_t& byteProgress);
+                         const uint64_t& byteProgress) MOZ_OVERRIDE;
 
     virtual bool
     RecvAssociateDocuments(
             const nsCString& cacheGroupId,
-            const nsCString& cacheClientId);
+            const nsCString& cacheClientId) MOZ_OVERRIDE;
 
     virtual bool
-    RecvFinish(const bool& succeded,
-               const bool& isUpgrade);
+    RecvFinish(const bool& succeeded,
+               const bool& isUpgrade) MOZ_OVERRIDE;
 
     OfflineCacheUpdateChild(nsIDOMWindow* aWindow);
     ~OfflineCacheUpdateChild();
@@ -53,8 +53,6 @@ private:
     void GatherObservers(nsCOMArray<nsIOfflineCacheUpdateObserver> &aObservers);
     nsresult Finish();
 
-    void RefcountHitZero();
-
     enum {
         STATE_UNINITIALIZED,
         STATE_INITIALIZED,
@@ -66,7 +64,6 @@ private:
 
     bool mIsUpgrade;
     bool mSucceeded;
-    bool mIPCActivated;
 
     nsCString mUpdateDomain;
     nsCOMPtr<nsIURI> mManifestURI;

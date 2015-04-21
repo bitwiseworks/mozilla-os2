@@ -43,7 +43,6 @@
             observe: function(subject, topic, data) {
                 if (topic === "domwindowopened") {
                     this.windowsOpen++;
-                    ok(this.windowsOpen == 1, "Didn't open more then one dialog at a time");
                     this.windowsRegistered++;
                     return;
                 }
@@ -362,7 +361,7 @@
 
                 case 3:
                     dialog.cancelDialog();
-                    setTimeout(onFrameLoad(), 10); // there are no successful frames for test 3
+                    setTimeout(onFrameLoad, 10); // there are no successful frames for test 3
                     break;
 
                 case 4:
@@ -374,7 +373,7 @@
 
                 case 5:
                     dialog.cancelDialog();
-                    setTimeout(onFrameLoad(), 10); // there are no successful frames for test 5
+                    setTimeout(onFrameLoad, 10); // there are no successful frames for test 5
                     break;
 
                 case 6:

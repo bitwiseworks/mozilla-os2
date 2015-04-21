@@ -1,9 +1,5 @@
 /***********************************************************************
-Copyright (c) 2006-2012 IETF Trust and Skype Limited. All rights reserved.
-
-This file is extracted from RFC6716. Please see that RFC for additional
-information.
-
+Copyright (c) 2006-2011, Skype Limited. All rights reserved.
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions
 are met:
@@ -16,7 +12,7 @@ documentation and/or other materials provided with the distribution.
 names of specific contributors, may be used to endorse or promote
 products derived from this software without specific prior written
 permission.
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS”
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
 ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
@@ -159,7 +155,7 @@ void silk_NSQ_wrapper_FLP(
 
     /* Convert input to fix */
     for( i = 0; i < psEnc->sCmn.frame_length; i++ ) {
-        x_Q3[ i ] = silk_float2int( 8.0 * x[ i ] );
+        x_Q3[ i ] = silk_float2int( 8.0f * x[ i ] );
     }
 
     /* Call NSQ */
@@ -179,6 +175,7 @@ void silk_quant_LTP_gains_FLP(
     silk_float                      B[ MAX_NB_SUBFR * LTP_ORDER ],      /* I/O  (Un-)quantized LTP gains                    */
     opus_int8                       cbk_index[ MAX_NB_SUBFR ],          /* O    Codebook index                              */
     opus_int8                       *periodicity_index,                 /* O    Periodicity index                           */
+    opus_int32                      *sum_log_gain_Q7,                   /* I/O  Cumulative max prediction gain  */
     const silk_float                W[ MAX_NB_SUBFR * LTP_ORDER * LTP_ORDER ], /* I    Error weights                        */
     const opus_int                  mu_Q10,                             /* I    Mu value (R/D tradeoff)                     */
     const opus_int                  lowComplexity,                      /* I    Flag for low complexity                     */
@@ -196,7 +193,7 @@ void silk_quant_LTP_gains_FLP(
         W_Q18[ i ] = (opus_int32)silk_float2int( W[ i ] * 262144.0f );
     }
 
-    silk_quant_LTP_gains( B_Q14, cbk_index, periodicity_index, W_Q18, mu_Q10, lowComplexity, nb_subfr );
+    silk_quant_LTP_gains( B_Q14, cbk_index, periodicity_index, sum_log_gain_Q7, W_Q18, mu_Q10, lowComplexity, nb_subfr );
 
     for( i = 0; i < nb_subfr * LTP_ORDER; i++ ) {
         B[ i ] = (silk_float)B_Q14[ i ] * ( 1.0f / 16384.0f );

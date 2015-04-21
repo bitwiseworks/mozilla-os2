@@ -36,6 +36,7 @@ class SVGTransform;
 class DOMSVGTransformList MOZ_FINAL : public nsISupports,
                                       public nsWrapperCache
 {
+  friend class AutoChangeTransformListNotifier;
   friend class dom::SVGTransform;
 
 public:
@@ -65,8 +66,7 @@ public:
     }
   }
 
-  virtual JSObject* WrapObject(JSContext *cx,
-                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
 
   nsISupports* GetParentObject()
   {
@@ -87,6 +87,14 @@ public:
   /// Called to notify us to synchronize our length and detach excess items.
   void InternalListLengthWillChange(uint32_t aNewLength);
 
+  /**
+   * Returns true if our attribute is animating (in which case our animVal is
+   * not simply a mirror of our baseVal).
+   */
+  bool IsAnimating() const {
+    return mAList->IsAnimating();
+  }
+
   uint32_t NumberOfItems() const
   {
     if (IsAnimValList()) {
@@ -97,17 +105,10 @@ public:
   void Clear(ErrorResult& error);
   already_AddRefed<dom::SVGTransform> Initialize(dom::SVGTransform& newItem,
                                                  ErrorResult& error);
-  dom::SVGTransform* GetItem(uint32_t index, ErrorResult& error)
-  {
-    bool found;
-    dom::SVGTransform* item = IndexedGetter(index, found, error);
-    if (!found) {
-      error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-    }
-    return item;
-  }
-  dom::SVGTransform* IndexedGetter(uint32_t index, bool& found,
-                                   ErrorResult& error);
+  already_AddRefed<dom::SVGTransform> GetItem(uint32_t index,
+                                              ErrorResult& error);
+  already_AddRefed<dom::SVGTransform> IndexedGetter(uint32_t index, bool& found,
+                                                    ErrorResult& error);
   already_AddRefed<dom::SVGTransform> InsertItemBefore(dom::SVGTransform& newItem,
                                                        uint32_t index,
                                                        ErrorResult& error);
@@ -151,8 +152,8 @@ private:
    */
   SVGTransformList& InternalList() const;
 
-  /// Creates a SVGTransform for aIndex, if it doesn't already exist.
-  void EnsureItemAt(uint32_t aIndex);
+  /// Returns the SVGTransform at aIndex, creating it if necessary.
+  already_AddRefed<dom::SVGTransform> GetItemAt(uint32_t aIndex);
 
   void MaybeInsertNullInAnimValListAt(uint32_t aIndex);
   void MaybeRemoveItemFromAnimValListAt(uint32_t aIndex);

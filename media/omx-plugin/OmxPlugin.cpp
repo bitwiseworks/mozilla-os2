@@ -3,6 +3,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 #include <stagefright/ColorConverter.h>
 #include <stagefright/DataSource.h>
 #include <stagefright/MediaExtractor.h>
@@ -22,6 +23,9 @@
 
 #include "android/log.h"
 
+#define MAX_DECODER_NAME_LEN 256
+#define AVC_MIME_TYPE "video/avc"
+
 #if !defined(MOZ_ANDROID_FROYO)
 #define DEFAULT_STAGEFRIGHT_FLAGS OMXCodec::kClientNeedsFramebuffer
 #else
@@ -36,92 +40,19 @@
 #define MOZ_ANDROID_V2_X_X
 #endif
 
-using namespace MPAPI;
+#if !defined(MOZ_ANDROID_V2_X_X) && !defined(MOZ_ANDROID_HC)
+#define MOZ_ANDROID_V4_OR_ABOVE
+#endif
 
-namespace android {
+#if defined(MOZ_ANDROID_V4_OR_ABOVE)
+#include <I420ColorConverter.h>
+#endif
+
+using namespace MPAPI;
 
 #if !defined(MOZ_STAGEFRIGHT_OFF_T)
 #define MOZ_STAGEFRIGHT_OFF_T off64_t
 #endif
-
-// MediaStreamSource is a DataSource that reads from a MPAPI media stream.
-class MediaStreamSource : public DataSource {
-  PluginHost *mPluginHost;
-public:
-  MediaStreamSource(PluginHost *aPluginHost, Decoder *aDecoder);
-
-  virtual status_t initCheck() const;
-  virtual ssize_t readAt(MOZ_STAGEFRIGHT_OFF_T offset, void *data, size_t size);
-  virtual status_t getSize(MOZ_STAGEFRIGHT_OFF_T *size);
-  virtual uint32_t flags() {
-    return kWantsPrefetching;
-  }
-
-  virtual ~MediaStreamSource();
-
-private:
-  Decoder *mDecoder;
-
-  MediaStreamSource(const MediaStreamSource &);
-  MediaStreamSource &operator=(const MediaStreamSource &);
-
-#ifdef MOZ_ANDROID_HTC_WORKAROUND
-  // libstagefright on some Jellybean HTC devices (at least the Tegra 3 One X)
-  // calls this function and expects this magic number to be returned when
-  // sniffing audio stream formats.
-  // It is unclear what this is for or what it does.
-  virtual uint32_t MagicalHTCIncantation() { return 0x3f0; }
-#endif
-};
-
-MediaStreamSource::MediaStreamSource(PluginHost *aPluginHost, Decoder *aDecoder) :
-  mPluginHost(aPluginHost)
-{
-  mDecoder = aDecoder;
-}
-
-MediaStreamSource::~MediaStreamSource()
-{
-}
-
-status_t MediaStreamSource::initCheck() const
-{
-  return OK;
-}
-
-ssize_t MediaStreamSource::readAt(MOZ_STAGEFRIGHT_OFF_T offset, void *data, size_t size)
-{
-  char *ptr = reinterpret_cast<char *>(data);
-  size_t todo = size;
-  while (todo > 0) {
-    uint32_t bytesRead;
-    if (!mPluginHost->Read(mDecoder, ptr, offset, todo, &bytesRead)) {
-      return ERROR_IO;
-    }
-
-    if (bytesRead == 0) {
-      return size - todo;
-    }
-
-    offset += bytesRead;
-    todo -= bytesRead;
-    ptr += bytesRead;
-  }
-  return size;
-}
-
-status_t MediaStreamSource::getSize(MOZ_STAGEFRIGHT_OFF_T *size)
-{
-  uint64_t length = mPluginHost->GetLength(mDecoder);
-  if (length == static_cast<uint64_t>(-1))
-    return ERROR_UNSUPPORTED;
-
-  *size = length;
-
-  return OK;
-}
-
-}  // namespace android
 
 using namespace android;
 
@@ -134,9 +65,6 @@ const int OMX_TI_COLOR_FormatYUV420PackedSemiPlanar = 0x7F000100;
 class OmxDecoder {
   PluginHost *mPluginHost;
   Decoder *mDecoder;
-#ifndef MOZ_WIDGET_GONK
-  OMXClient mClient;
-#endif
   sp<MediaSource> mVideoTrack;
   sp<MediaSource> mVideoSource;
   sp<MediaSource> mAudioTrack;
@@ -148,6 +76,8 @@ class OmxDecoder {
   int32_t mVideoSliceHeight;
   int32_t mVideoCropLeft;
   int32_t mVideoCropTop;
+  int32_t mVideoCropRight;
+  int32_t mVideoCropBottom;
   int32_t mVideoRotation;
   int32_t mAudioChannels;
   int32_t mAudioSampleRate;
@@ -172,6 +102,7 @@ class OmxDecoder {
   void ToVideoFrame_YVU420PackedSemiPlanar32m4ka(VideoFrame *aFrame, int64_t aTimeUs, void *aData, size_t aSize, bool aKeyFrame);
   bool ToVideoFrame_RGB565(VideoFrame *aFrame, int64_t aTimeUs, void *aData, size_t aSize, bool aKeyFrame, BufferCallback *aBufferCallback);
   bool ToVideoFrame_ColorConverter(VideoFrame *aFrame, int64_t aTimeUs, void *aData, size_t aSize, bool aKeyFrame, BufferCallback *aBufferCallback);
+  bool ToVideoFrame_I420ColorConverter(VideoFrame *aFrame, int64_t aTimeUs, void *aData, size_t aSize, bool aKeyFrame, BufferCallback *aBufferCallback);
   bool ToVideoFrame(VideoFrame *aFrame, int64_t aTimeUs, void *aData, size_t aSize, bool aKeyFrame, BufferCallback *aBufferCallback);
   bool ToAudioFrame(AudioFrame *aFrame, int64_t aTimeUs, void *aData, size_t aDataOffset, size_t aSize,
                     int32_t aAudioChannels, int32_t aAudioSampleRate);
@@ -198,16 +129,49 @@ public:
   }
 
   bool HasVideo() {
-    return mVideoSource != NULL;
+    return mVideoSource != nullptr;
   }
 
   bool HasAudio() {
-    return mAudioSource != NULL;
+    return mAudioSource != nullptr;
   }
 
   bool ReadVideo(VideoFrame *aFrame, int64_t aSeekTimeUs, BufferCallback *aBufferCallback);
   bool ReadAudio(AudioFrame *aFrame, int64_t aSeekTimeUs);
 };
+
+#if !defined(MOZ_WIDGET_GONK)
+static class OmxClientInstance {
+public:
+  OmxClientInstance()
+    : mClient(new OMXClient())
+    , mStatus(mClient->connect())
+  {
+  }
+
+  status_t IsValid()
+  {
+    return mStatus == OK;
+  }
+
+  OMXClient *get()
+  {
+    return mClient;
+  }
+
+  ~OmxClientInstance()
+  {
+    if (mStatus == OK) {
+      mClient->disconnect();
+    }
+    delete mClient;
+  }
+
+private:
+  OMXClient *mClient;
+  status_t mStatus;
+} sClientInstance;
+#endif
 
 OmxDecoder::OmxDecoder(PluginHost *aPluginHost, Decoder *aDecoder) :
   mPluginHost(aPluginHost),
@@ -219,13 +183,15 @@ OmxDecoder::OmxDecoder(PluginHost *aPluginHost, Decoder *aDecoder) :
   mVideoSliceHeight(0),
   mVideoCropLeft(0),
   mVideoCropTop(0),
+  mVideoCropRight(0),
+  mVideoCropBottom(0),
   mVideoRotation(0),
   mAudioChannels(-1),
   mAudioSampleRate(-1),
   mDurationUs(-1),
-  mVideoBuffer(NULL),
-  mAudioBuffer(NULL),
-  mColorConverter(NULL),
+  mVideoBuffer(nullptr),
+  mAudioBuffer(nullptr),
+  mColorConverter(nullptr),
   mAudioMetadataRead(false)
 {
 }
@@ -248,9 +214,6 @@ OmxDecoder::~OmxDecoder()
     delete mColorConverter;
   }
 #endif
-#ifndef MOZ_WIDGET_GONK
-  mClient.disconnect();
-#endif
 }
 
 class AutoStopMediaSource {
@@ -265,14 +228,40 @@ public:
 };
 
 #ifdef MOZ_WIDGET_GONK
-static sp<IOMX> sOMX = NULL;
+static sp<IOMX> sOMX = nullptr;
 static sp<IOMX> GetOMX() {
-  if(sOMX.get() == NULL) {
+  if(sOMX.get() == nullptr) {
     sOMX = reinterpret_cast<IOMX*>(new OMX);
   }
   return sOMX;
 }
 #endif
+
+static uint32_t
+GetDefaultStagefrightFlags(PluginHost *aPluginHost)
+{
+  uint32_t flags = DEFAULT_STAGEFRIGHT_FLAGS;
+
+#if !defined(MOZ_ANDROID_FROYO)
+
+  char hardware[256] = "";
+  aPluginHost->GetSystemInfoString("hardware", hardware, sizeof(hardware));
+
+  if (!strcmp("qcom", hardware)) {
+    // Qualcomm's OMXCodec implementation interprets this flag to mean that we
+    // only want a thumbnail and therefore only need one frame. After the first
+    // frame it returns EOS.
+    // All other OMXCodec implementations seen so far interpret this flag
+    // sanely; some do not return full framebuffers unless this flag is passed.
+    flags &= ~OMXCodec::kClientNeedsFramebuffer;
+  }
+
+  LOG("Hardware %s; using default flags %#x\n", hardware, flags);
+
+#endif
+
+  return flags;
+}
 
 static uint32_t GetVideoCreationFlags(PluginHost* aPluginHost)
 {
@@ -300,52 +289,154 @@ static uint32_t GetVideoCreationFlags(PluginHost* aPluginHost)
 #endif
   }
 
-  flags |= DEFAULT_STAGEFRIGHT_FLAGS;
+  flags |= GetDefaultStagefrightFlags(aPluginHost);
 
   return static_cast<uint32_t>(flags);
 #endif
 }
+
+enum ColorFormatSupport {
+  ColorFormatNotSupported = 0,
+  ColorFormatSupportOK,
+  ColorFormatSupportPreferred,
+};
+
+static ColorFormatSupport
+IsColorFormatSupported(OMX_COLOR_FORMATTYPE aColorFormat)
+{
+  switch (static_cast<int>(aColorFormat)) {
+    case OMX_COLOR_FormatCbYCrY:
+    case OMX_COLOR_FormatYUV420Planar:
+    case OMX_COLOR_FormatYUV420SemiPlanar:
+    case OMX_QCOM_COLOR_FormatYVU420PackedSemiPlanar32m4ka:
+    case OMX_QCOM_COLOR_FormatYVU420SemiPlanar:
+    case OMX_TI_COLOR_FormatYUV420PackedSemiPlanar:
+      LOG("Colour format %#x supported natively.", aColorFormat);
+      // Prefer natively supported colour formats over formats that need another
+      // slow software conversion.
+      return ColorFormatSupportPreferred;
+    default:
+      break;
+  }
+
+  // These formats are okay if we can't find a better one; Android provides a
+  // software conversion to a sane colour format.
+#if !defined(MOZ_ANDROID_HC)
+  if (ColorConverter(aColorFormat, OMX_COLOR_Format16bitRGB565).isValid()) {
+    LOG("Colour format %#x supported by Android ColorConverter.", aColorFormat);
+    return ColorFormatSupportOK;
+  }
+#endif
+
+#if defined(MOZ_ANDROID_V4_OR_ABOVE)
+  I420ColorConverter yuvConverter;
+
+  if (yuvConverter.isLoaded() &&
+      yuvConverter.getDecoderOutputFormat() == aColorFormat) {
+    LOG("Colour format %#x supported by Android I420ColorConverter.", aColorFormat);
+    return ColorFormatSupportOK;
+  }
+#endif
+
+  return ColorFormatNotSupported;
+}
+
+#if defined(MOZ_ANDROID_KK)
+/**
+ * Look for a decoder that supports a colour format that we support.
+ */
+static bool
+FindPreferredDecoderAndColorFormat(const sp<IOMX>& aOmx,
+                                   char *aDecoderName,
+                                   size_t aDecoderLen,
+                                   OMX_COLOR_FORMATTYPE *aColorFormat)
+{
+  Vector<CodecCapabilities> codecs;
+
+  // Get all AVC decoder/colour format pairs that this device supports.
+  QueryCodecs(aOmx, AVC_MIME_TYPE, true /* queryDecoders */, &codecs);
+
+  // We assume that faster (hardware accelerated) decoders come first in the
+  // list, so we choose the first decoder with a colour format we can use.
+  for (uint32_t i = 0; i < codecs.size(); i++) {
+    const CodecCapabilities &caps = codecs[i];
+    const Vector<OMX_U32> &colors = caps.mColorFormats;
+
+    bool found = false;
+    for (uint32_t j = 0; j < colors.size(); j++) {
+      OMX_COLOR_FORMATTYPE color = (OMX_COLOR_FORMATTYPE)colors[j];
+
+      LOG("Decoder %s can output colour format %#x.\n",
+          caps.mComponentName.string(), color);
+
+      ColorFormatSupport supported = IsColorFormatSupported(color);
+
+      if (supported) {
+        strncpy(aDecoderName, caps.mComponentName.string(), aDecoderLen);
+        *aColorFormat = color;
+        found = true;
+      }
+
+      if (supported == ColorFormatSupportPreferred) {
+        // The colour format is natively supported -- that's as good as we're
+        // going to get.
+        break;
+      }
+    }
+
+    if (found) {
+      return true;
+    }
+  }
+
+  return false;
+}
+#endif
 
 static sp<MediaSource> CreateVideoSource(PluginHost* aPluginHost,
                                          const sp<IOMX>& aOmx,
                                          const sp<MediaSource>& aVideoTrack)
 {
   uint32_t flags = GetVideoCreationFlags(aPluginHost);
+
+  char decoderName[MAX_DECODER_NAME_LEN] = "";
+  sp<MetaData> videoFormat = aVideoTrack->getFormat();
+
+#if defined(MOZ_ANDROID_KK)
+  OMX_COLOR_FORMATTYPE colorFormat = (OMX_COLOR_FORMATTYPE)0;
+  if (FindPreferredDecoderAndColorFormat(aOmx,
+                                         decoderName, sizeof(decoderName),
+                                         &colorFormat)) {
+    // We found a colour format that we can handle. Tell OMXCodec to use it in
+    // case it isn't the default.
+    videoFormat->setInt32(kKeyColorFormat, colorFormat);
+
+    LOG("Found compatible decoder %s with colour format %#x.\n",
+        decoderName, colorFormat);
+  }
+#endif
+
   if (flags == DEFAULT_STAGEFRIGHT_FLAGS) {
     // Let Stagefright choose hardware or software decoder.
-    sp<MediaSource> videoSource = OMXCodec::Create(aOmx, aVideoTrack->getFormat(),
-                                                   false, aVideoTrack, NULL, flags);
-    if (videoSource == NULL)
-      return NULL;
+    sp<MediaSource> videoSource = OMXCodec::Create(aOmx, videoFormat,
+                                                   false, aVideoTrack,
+                                                   decoderName[0] ? decoderName : nullptr,
+                                                   flags);
+    if (videoSource == nullptr)
+      return nullptr;
 
     // Now that OMXCodec has parsed the video's AVCDecoderConfigurationRecord,
     // check whether we know how to decode this video.
     int32_t videoColorFormat;
     if (videoSource->getFormat()->findInt32(kKeyColorFormat, &videoColorFormat)) {
-      switch (videoColorFormat) {
-        // We know how to convert these color formats.
-        case OMX_COLOR_FormatCbYCrY:
-        case OMX_COLOR_FormatYUV420Planar:
-        case OMX_COLOR_FormatYUV420SemiPlanar:
-        case OMX_QCOM_COLOR_FormatYVU420PackedSemiPlanar32m4ka:
-        case OMX_QCOM_COLOR_FormatYVU420SemiPlanar:
-        case OMX_TI_COLOR_FormatYUV420PackedSemiPlanar:
-          // Use the decoder Stagefright chose for us!
-          return videoSource;
 
-        // Use software decoder for color formats we don't know how to convert.
-        default:
-#ifndef MOZ_ANDROID_HC
-          if (ColorConverter((OMX_COLOR_FORMATTYPE)videoColorFormat,
-                             OMX_COLOR_Format16bitRGB565).isValid()) {
-            return videoSource;
-          }
-#endif
-          // We need to implement a ToVideoFrame_*() color conversion
-          // function for this video color format.
-          LOG("Unknown video color format: %#x", videoColorFormat);
-          break;
+      if (IsColorFormatSupported((OMX_COLOR_FORMATTYPE)videoColorFormat)) {
+        return videoSource;
       }
+
+      // We need to implement a ToVideoFrame_*() color conversion
+      // function for this video color format.
+      LOG("Unknown video color format: %#x", videoColorFormat);
     } else {
       LOG("Video color format not found");
     }
@@ -362,29 +453,39 @@ static sp<MediaSource> CreateVideoSource(PluginHost* aPluginHost,
 
   MOZ_ASSERT(flags != DEFAULT_STAGEFRIGHT_FLAGS);
   return OMXCodec::Create(aOmx, aVideoTrack->getFormat(), false, aVideoTrack,
-                          NULL, flags);
+                          nullptr, flags);
 }
 
-bool OmxDecoder::Init() {
+bool OmxDecoder::Init()
+{
+#if defined(MOZ_WIDGET_ANDROID)
+  // OMXClient::connect() always returns OK and aborts fatally if
+  // it can't connect. We may need to implement the connect functionality
+  // ourselves if this proves to be an issue.
+  if (!sClientInstance.IsValid()) {
+    LOG("OMXClient failed to connect");
+    return false;
+  }
+#endif
+
   //register sniffers, if they are not registered in this process.
   DataSource::RegisterDefaultSniffers();
 
-  sp<DataSource> dataSource = new MediaStreamSource(mPluginHost, mDecoder);
-  if (dataSource->initCheck()) {
+  sp<DataSource> dataSource =
+    DataSource::CreateFromURI(static_cast<char*>(mDecoder->mResource));
+  if (!dataSource.get() || dataSource->initCheck()) {
     return false;
   }
 
-  mPluginHost->SetMetaDataReadMode(mDecoder);
-
   sp<MediaExtractor> extractor = MediaExtractor::Create(dataSource);
-  if (extractor == NULL) {
+  if (extractor == nullptr) {
     return false;
   }
 
   ssize_t audioTrackIndex = -1;
   ssize_t videoTrackIndex = -1;
-  const char *audioMime = NULL;
-  const char *videoMime = NULL;
+  const char *audioMime = nullptr;
+  const char *videoMime = nullptr;
 
   for (size_t i = 0; i < extractor->countTracks(); ++i) {
     sp<MetaData> meta = extractor->getTrackMetaData(i);
@@ -407,32 +508,24 @@ bool OmxDecoder::Init() {
     return false;
   }
 
-  mPluginHost->SetPlaybackReadMode(mDecoder);
-
   int64_t totalDurationUs = 0;
 
 #ifdef MOZ_WIDGET_GONK
   sp<IOMX> omx = GetOMX();
 #else
-  // OMXClient::connect() always returns OK and abort's fatally if
-  // it can't connect. We may need to implement the connect functionality
-  // ourselves if this proves to be an issue.
-  if (mClient.connect() != OK) {
-    LOG("OMXClient failed to connect");
-  }
-  sp<IOMX> omx = mClient.interface();
+  sp<IOMX> omx = sClientInstance.get()->interface();
 #endif
 
   sp<MediaSource> videoTrack;
   sp<MediaSource> videoSource;
-  if (videoTrackIndex != -1 && (videoTrack = extractor->getTrack(videoTrackIndex)) != NULL) {
+  if (videoTrackIndex != -1 && (videoTrack = extractor->getTrack(videoTrackIndex)) != nullptr) {
 #if defined(MOZ_ANDROID_FROYO)
     // Allow up to 720P video.
     sp<MetaData> meta = extractor->getTrackMetaData(videoTrackIndex);
     meta->setInt32(kKeyMaxInputSize, (1280 * 720 * 3) / 2);
 #endif
     videoSource = CreateVideoSource(mPluginHost, omx, videoTrack);
-    if (videoSource == NULL) {
+    if (videoSource == nullptr) {
       LOG("OMXCodec failed to initialize video decoder for \"%s\"", videoMime);
       return false;
     }
@@ -452,7 +545,7 @@ bool OmxDecoder::Init() {
 
   sp<MediaSource> audioTrack;
   sp<MediaSource> audioSource;
-  if (audioTrackIndex != -1 && (audioTrack = extractor->getTrack(audioTrackIndex)) != NULL)
+  if (audioTrackIndex != -1 && (audioTrack = extractor->getTrack(audioTrackIndex)) != nullptr)
   {
     if (!strcasecmp(audioMime, "audio/raw")) {
       audioSource = audioTrack;
@@ -463,7 +556,7 @@ bool OmxDecoder::Init() {
                                      audioTrack);
     }
 
-    if (audioSource == NULL) {
+    if (audioSource == nullptr) {
       LOG("OMXCodec failed to initialize audio decoder for \"%s\"", audioMime);
       return false;
     }
@@ -555,29 +648,28 @@ bool OmxDecoder::SetVideoFormat() {
     return false;
   }
 
-  int32_t cropRight, cropBottom;
   // Gingerbread does not support the kKeyCropRect key
 #if !defined(MOZ_ANDROID_V2_X_X)
   if (!format->findRect(kKeyCropRect, &mVideoCropLeft, &mVideoCropTop,
-                                      &cropRight, &cropBottom)) {
+                                      &mVideoCropRight, &mVideoCropBottom)) {
 #endif
     mVideoCropLeft = 0;
     mVideoCropTop = 0;
-    cropRight = mVideoStride - 1;
-    cropBottom = mVideoSliceHeight - 1;
+    mVideoCropRight = mVideoStride - 1;
+    mVideoCropBottom = mVideoSliceHeight - 1;
     LOG("crop rect not available, assuming no cropping");
 #if !defined(MOZ_ANDROID_V2_X_X)
   }
 #endif
 
-  if (mVideoCropLeft < 0 || mVideoCropLeft >= cropRight || cropRight >= mVideoStride ||
-      mVideoCropTop < 0 || mVideoCropTop >= cropBottom || cropBottom >= mVideoSliceHeight) {
-    LOG("invalid crop rect %d,%d-%d,%d", mVideoCropLeft, mVideoCropTop, cropRight, cropBottom);
+  if (mVideoCropLeft < 0 || mVideoCropLeft >= mVideoCropRight || mVideoCropRight >= mVideoStride ||
+      mVideoCropTop < 0 || mVideoCropTop >= mVideoCropBottom || mVideoCropBottom >= mVideoSliceHeight) {
+    LOG("invalid crop rect %d,%d-%d,%d", mVideoCropLeft, mVideoCropTop, mVideoCropRight, mVideoCropBottom);
     return false;
   }
 
-  mVideoWidth = cropRight - mVideoCropLeft + 1;
-  mVideoHeight = cropBottom - mVideoCropTop + 1;
+  mVideoWidth = mVideoCropRight - mVideoCropLeft + 1;
+  mVideoHeight = mVideoCropBottom - mVideoCropTop + 1;
   MOZ_ASSERT(mVideoWidth > 0 && mVideoWidth <= mVideoStride);
   MOZ_ASSERT(mVideoHeight > 0 && mVideoHeight <= mVideoSliceHeight);
 
@@ -598,7 +690,7 @@ bool OmxDecoder::SetVideoFormat() {
   LOG("width: %d height: %d component: %s format: %#x stride: %d sliceHeight: %d rotation: %d crop: %d,%d-%d,%d",
       mVideoWidth, mVideoHeight, componentName, mVideoColorFormat,
       mVideoStride, mVideoSliceHeight, mVideoRotation,
-      mVideoCropLeft, mVideoCropTop, cropRight, cropBottom);
+      mVideoCropLeft, mVideoCropTop, mVideoCropRight, mVideoCropBottom);
 
   return true;
 }
@@ -628,14 +720,14 @@ bool OmxDecoder::SetAudioFormat() {
 void OmxDecoder::ReleaseVideoBuffer() {
   if (mVideoBuffer) {
     mVideoBuffer->release();
-    mVideoBuffer = NULL;
+    mVideoBuffer = nullptr;
   }
 }
 
 void OmxDecoder::ReleaseAudioBuffer() {
   if (mAudioBuffer) {
     mAudioBuffer->release();
-    mAudioBuffer = NULL;
+    mAudioBuffer = nullptr;
   }
 }
 
@@ -667,7 +759,7 @@ void OmxDecoder::ToVideoFrame_YUV420SemiPlanar(VideoFrame *aFrame, int64_t aTime
   // to see if the video size patches the raw width and height. If so we can
   // use those figures instead.
 
-  if (aSize == mVideoWidth * mVideoHeight * 3 / 2) {
+  if (static_cast<int>(aSize) == mVideoWidth * mVideoHeight * 3 / 2) {
     videoStride = mVideoWidth;
     videoSliceHeight = mVideoHeight;
   }
@@ -765,6 +857,40 @@ bool OmxDecoder::ToVideoFrame_ColorConverter(VideoFrame *aFrame, int64_t aTimeUs
 #endif
 }
 
+bool OmxDecoder::ToVideoFrame_I420ColorConverter(VideoFrame *aFrame, int64_t aTimeUs, void *aData, size_t aSize, bool aKeyFrame, BufferCallback *aBufferCallback)
+{
+#if defined(MOZ_ANDROID_V4_OR_ABOVE)
+  I420ColorConverter yuvConverter;
+
+  if (!yuvConverter.isLoaded()) {
+    return false;
+  }
+
+  if (yuvConverter.getDecoderOutputFormat() != mVideoColorFormat) {
+    return false;
+  }
+
+  void *buffer = (*aBufferCallback)(mVideoWidth, mVideoHeight, MPAPI::I420);
+
+  ARect crop = { mVideoCropLeft, mVideoCropTop, mVideoCropRight, mVideoCropBottom };
+  int result = yuvConverter.convertDecoderOutputToI420(aData,
+                                                       mVideoWidth,
+                                                       mVideoHeight,
+                                                       crop,
+                                                       buffer);
+
+  // result is 0 on success, -1 otherwise.
+  if (result == OK) {
+    aFrame->mTimeUs = aTimeUs;
+    aFrame->mSize = mVideoWidth * mVideoHeight * 3 / 2;
+  }
+
+  return result == OK;
+#else
+  return false;
+#endif
+}
+
 bool OmxDecoder::ToVideoFrame(VideoFrame *aFrame, int64_t aTimeUs, void *aData, size_t aSize, bool aKeyFrame, BufferCallback *aBufferCallback) {
   switch (mVideoColorFormat) {
 // Froyo support is best handled with the android color conversion code. I
@@ -793,7 +919,8 @@ bool OmxDecoder::ToVideoFrame(VideoFrame *aFrame, int64_t aTimeUs, void *aData, 
     break;
 #endif
   default:
-    if (!ToVideoFrame_ColorConverter(aFrame, aTimeUs, aData, aSize, aKeyFrame, aBufferCallback)) {
+    if (!ToVideoFrame_ColorConverter(aFrame, aTimeUs, aData, aSize, aKeyFrame, aBufferCallback) &&
+        !ToVideoFrame_I420ColorConverter(aFrame, aTimeUs, aData, aSize, aKeyFrame, aBufferCallback)) {
       LOG("Unknown video color format: %#x", mVideoColorFormat);
       return false;
     }
@@ -806,6 +933,13 @@ bool OmxDecoder::ToAudioFrame(AudioFrame *aFrame, int64_t aTimeUs, void *aData, 
   aFrame->Set(aTimeUs, reinterpret_cast<char *>(aData) + aDataOffset, aSize, aAudioChannels, aAudioSampleRate);
   return true;
 }
+
+class ReadOptions : public MediaSource::ReadOptions
+{
+  // HTC have their own version of ReadOptions with extra fields. If we don't
+  // have this here, HTCOMXCodec will corrupt our stack.
+  uint32_t sadface[16];
+};
 
 bool OmxDecoder::ReadVideo(VideoFrame *aFrame, int64_t aSeekTimeUs,
                            BufferCallback *aBufferCallback)
@@ -820,7 +954,7 @@ bool OmxDecoder::ReadVideo(VideoFrame *aFrame, int64_t aSeekTimeUs,
   status_t err;
 
   if (aSeekTimeUs != -1) {
-    MediaSource::ReadOptions options;
+    ReadOptions options;
     options.setSeekTo(aSeekTimeUs);
     err = mVideoSource->read(&mVideoBuffer, &options);
   } else {
@@ -884,7 +1018,7 @@ bool OmxDecoder::ReadAudio(AudioFrame *aFrame, int64_t aSeekTimeUs)
   else {
     ReleaseAudioBuffer();
     if (aSeekTimeUs != -1) {
-      MediaSource::ReadOptions options;
+      ReadOptions options;
       options.setSeekTo(aSeekTimeUs);
       err = mAudioSource->read(&mAudioBuffer, &options);
     } else {
@@ -983,7 +1117,7 @@ static const char* const gCodecs[] = {
   "avc1.4D401E",  // H.264 Main Profile Level 3.0
   "avc1.4D401F",  // H.264 Main Profile Level 3.1
   "mp4a.40.2",    // AAC-LC
-  NULL
+  nullptr
 };
 
 static bool CanDecode(const char *aMimeChars, size_t aMimeLen, const char* const**aCodecs)
@@ -1024,7 +1158,7 @@ static bool CreateDecoder(PluginHost *aPluginHost, Decoder *aDecoder, const char
 } // namespace OmxPlugin
 
 // Export the manifest so MPAPI can find our entry points.
-Manifest MOZ_EXPORT MPAPI_MANIFEST {
+Manifest MOZ_EXPORT MPAPI_MANIFEST = {
   OmxPlugin::CanDecode,
   OmxPlugin::CreateDecoder
 };

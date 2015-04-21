@@ -10,15 +10,8 @@
    xmlns:html="http://www.w3.org/1999/xhtml">
 
   <!-- bound to <description>s -->
-  <binding id="text-base">
-    <implementation implements="nsIDOMXULDescriptionElement, nsIAccessibleProvider">
-      <property name="accessibleType" readonly="true">
-        <getter>
-          <![CDATA[
-            return Components.interfaces.nsIAccessibleProvider.XULText;
-          ]]>
-        </getter>
-      </property>
+  <binding id="text-base" role="xul:text">
+    <implementation implements="nsIDOMXULDescriptionElement">
       <property name="disabled" onset="if (val) this.setAttribute('disabled', 'true');
                                        else this.removeAttribute('disabled');
                                        return val;"
@@ -66,38 +59,14 @@
     <implementation implements="nsIDOMXULLabelElement">
       <constructor>
         <![CDATA[
-          try {
-            var prefs = Components.classes["@mozilla.org/preferences-service;1"].
-                                   getService(Components.interfaces.nsIPrefBranch);
-            this.mUnderlineAccesskey = (prefs.getIntPref("ui.key.menuAccessKey") != 0);
-
-            const nsIPrefLocalizedString =
-              Components.interfaces.nsIPrefLocalizedString;
-
-            const prefNameInsertSeparator =
-              "intl.menuitems.insertseparatorbeforeaccesskeys";
-            const prefNameAlwaysAppendAccessKey =
-              "intl.menuitems.alwaysappendaccesskeys";
-
-            var val = prefs.getComplexValue(prefNameInsertSeparator,
-                                            nsIPrefLocalizedString).data;
-            this.mInsertSeparator = (val == "true");
-
-            val = prefs.getComplexValue(prefNameAlwaysAppendAccessKey,
-                                        nsIPrefLocalizedString).data;
-            this.mAlwaysAppendAccessKey = (val == "true");
-          }
-          catch (e) { }
-          this.formatAccessKey();
+          this.formatAccessKey(true);
         ]]>
       </constructor>
 
       <method name="formatAccessKey">
+        <parameter name="firstTime"/>
         <body>
           <![CDATA[
-            if (!this.mUnderlineAccesskey)
-              return;
-
             var control = this.labeledControlElement;
             if (!control) {
               var bindingParent = document.getBindingParent(this);
@@ -108,6 +77,41 @@
             if (control) {
               control.labelElement = this;
             }
+
+            var accessKey = this.accessKey;
+            // No need to remove existing formatting the first time.
+            if (firstTime && !accessKey)
+              return;
+
+            if (this.mInsertSeparator === undefined) {
+              try {
+                var prefs = Components.classes["@mozilla.org/preferences-service;1"].
+                                       getService(Components.interfaces.nsIPrefBranch);
+                this.mUnderlineAccesskey = (prefs.getIntPref("ui.key.menuAccessKey") != 0);
+
+                const nsIPrefLocalizedString =
+                  Components.interfaces.nsIPrefLocalizedString;
+
+                const prefNameInsertSeparator =
+                  "intl.menuitems.insertseparatorbeforeaccesskeys";
+                const prefNameAlwaysAppendAccessKey =
+                  "intl.menuitems.alwaysappendaccesskeys";
+
+                var val = prefs.getComplexValue(prefNameInsertSeparator,
+                                                nsIPrefLocalizedString).data;
+                this.mInsertSeparator = (val == "true");
+
+                val = prefs.getComplexValue(prefNameAlwaysAppendAccessKey,
+                                            nsIPrefLocalizedString).data;
+                this.mAlwaysAppendAccessKey = (val == "true");
+              }
+              catch (e) {
+                this.mInsertSeparator = true;
+              }
+            }
+
+            if (!this.mUnderlineAccesskey)
+              return;
 
             var afterLabel = document.getAnonymousElementByAttribute(this, "anonid", "accessKeyParens");
             afterLabel.textContent = "";
@@ -123,7 +127,6 @@
               this.mergeElement(oldHiddenSpan);
             }
 
-            var accessKey = this.accessKey;
             var labelText = this.textContent;
             if (!accessKey || !labelText || !control) {
               return;
@@ -225,7 +228,7 @@
       <field name="mUnderlineAccesskey">
         !/Mac/.test(navigator.platform)
       </field>
-      <field name="mInsertSeparator">true</field>
+      <field name="mInsertSeparator"/>
       <field name="mAlwaysAppendAccessKey">false</field>
 
       <property name="accessKey">
@@ -252,7 +255,7 @@
             if (control) {
               control.setAttribute('accesskey', val);
             }
-            this.formatAccessKey();
+            this.formatAccessKey(false);
             return val;
           ]]>
         </setter>
@@ -269,7 +272,7 @@
               control.labelElement = null; // No longer pointed to be this label
             }
             this.setAttribute('control', val);
-            this.formatAccessKey();
+            this.formatAccessKey(false);
             return val;
           ]]>
         </setter>
@@ -286,15 +289,8 @@
     </handlers>
   </binding>
 
-  <binding id="text-link" extends="chrome://global/content/bindings/text.xml#text-label">
-    <implementation implements="nsIAccessibleProvider">
-      <property name="accessibleType" readonly="true">
-        <getter>
-          <![CDATA[
-            return Components.interfaces.nsIAccessibleProvider.XULLink;
-          ]]>
-        </getter>
-      </property>
+  <binding id="text-link" extends="chrome://global/content/bindings/text.xml#text-label" role="xul:link">
+    <implementation>
       <property name="href" onget="return this.getAttribute('href');"
                             onset="this.setAttribute('href', val); return val;" />
       <method name="open">
@@ -377,7 +373,6 @@
 
     <handlers>
       <handler event="click" phase="capturing" button="0" action="this.open(event)"/>
-      <handler event="keypress" preventdefault="true" keycode="VK_ENTER"  action="this.click()" />
       <handler event="keypress" preventdefault="true" keycode="VK_RETURN" action="this.click()" />
     </handlers>
   </binding>

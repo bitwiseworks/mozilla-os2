@@ -6,23 +6,35 @@
 
 XPIDL_SOURCES += [
     'nsIDOMMozWifiConnectionInfoEvent.idl',
+    'nsIDOMMozWifiP2pStatusChangeEvent.idl',
     'nsIDOMMozWifiStatusChangeEvent.idl',
     'nsIWifi.idl',
+    'nsIWifiService.idl',
 ]
 
 XPIDL_MODULE = 'dom_wifi'
 
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/dom/base',
-    '-I$(topsrcdir)/dom/interfaces/base',
-    '-I$(topsrcdir)/dom/interfaces/events',
-    '-I$(topsrcdir)/dom/system/gonk',
+EXTRA_COMPONENTS += [
+    'DOMWifiManager.js',
+    'DOMWifiManager.manifest',
+    'DOMWifiP2pManager.js',
+    'DOMWifiP2pManager.manifest',
+    'WifiWorker.js',
+    'WifiWorker.manifest',
 ]
-
-MODULE = 'dom'
 
 EXTRA_JS_MODULES += [
-    'libhardware_legacy.js',
-    'wifi_worker.js',
+    'StateMachine.jsm',
+    'WifiCommand.jsm',
+    'WifiNetUtil.jsm',
+    'WifiP2pManager.jsm',
+    'WifiP2pWorkerObserver.jsm',
 ]
 
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+    SOURCES = [
+        'WifiProxyService.cpp',
+        'WifiUtils.cpp',
+    ]
+
+FINAL_LIBRARY = 'xul'

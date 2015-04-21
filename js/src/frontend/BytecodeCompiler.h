@@ -7,7 +7,7 @@
 #ifndef frontend_BytecodeCompiler_h
 #define frontend_BytecodeCompiler_h
 
-#include "jsapi.h"
+#include "NamespaceImports.h"
 
 class JSLinearString;
 
@@ -15,23 +15,40 @@ namespace js {
 
 class AutoNameVector;
 class LazyScript;
-struct SourceCompressionToken;
+class LifoAlloc;
+struct SourceCompressionTask;
 
 namespace frontend {
 
 JSScript *
-CompileScript(JSContext *cx, HandleObject scopeChain, HandleScript evalCaller,
-              const CompileOptions &options, const jschar *chars, size_t length,
-              JSString *source_ = NULL, unsigned staticLevel = 0,
-              SourceCompressionToken *extraSct = NULL);
+CompileScript(ExclusiveContext *cx, LifoAlloc *alloc,
+              HandleObject scopeChain, HandleScript evalCaller,
+              const ReadOnlyCompileOptions &options, SourceBufferHolder &srcBuf,
+              JSString *source_ = nullptr, unsigned staticLevel = 0,
+              SourceCompressionTask *extraSct = nullptr);
 
 bool
-CompileLazyFunction(JSContext *cx, LazyScript *lazy, const jschar *chars, size_t length);
+CompileLazyFunction(JSContext *cx, Handle<LazyScript*> lazy, const jschar *chars, size_t length);
 
 bool
-CompileFunctionBody(JSContext *cx, MutableHandleFunction fun, CompileOptions options,
-                    const AutoNameVector &formals, const jschar *chars, size_t length,
-                    bool isAsmJSRecompile = false);
+CompileFunctionBody(JSContext *cx, MutableHandleFunction fun,
+                    const ReadOnlyCompileOptions &options,
+                    const AutoNameVector &formals, JS::SourceBufferHolder &srcBuf);
+bool
+CompileStarGeneratorBody(JSContext *cx, MutableHandleFunction fun,
+                         const ReadOnlyCompileOptions &options,
+                         const AutoNameVector &formals, JS::SourceBufferHolder &srcBuf);
+
+ScriptSourceObject *
+CreateScriptSourceObject(ExclusiveContext *cx, const ReadOnlyCompileOptions &options);
+
+/*
+ * This should be called while still on the main thread if compilation will
+ * occur on a worker thread.
+ */
+void
+MaybeCallSourceHandler(JSContext *cx, const ReadOnlyCompileOptions &options,
+                       JS::SourceBufferHolder &srcBuf);
 
 /*
  * True if str consists of an IdentifierStart character, followed by one or

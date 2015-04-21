@@ -27,6 +27,7 @@
 #include "nsIAssociatedContentSecurity.h"
 #include "nsIChildChannel.h"
 #include "nsIHttpChannelChild.h"
+#include "nsIDivertableChannel.h"
 #include "mozilla/net/DNS.h"
 
 namespace mozilla {
@@ -42,6 +43,7 @@ class HttpChannelChild : public PHttpChannelChild
                        , public nsIAssociatedContentSecurity
                        , public nsIChildChannel
                        , public nsIHttpChannelChild
+                       , public nsIDivertableChannel
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -53,6 +55,7 @@ public:
   NS_DECL_NSIASSOCIATEDCONTENTSECURITY
   NS_DECL_NSICHILDCHANNEL
   NS_DECL_NSIHTTPCHANNELCHILD
+  NS_DECL_NSIDIVERTABLECHANNEL
 
   HttpChannelChild();
   virtual ~HttpChannelChild();
@@ -84,14 +87,17 @@ public:
 
   // IPDL holds a reference while the PHttpChannel protocol is live (starting at
   // AsyncOpen, and ending at either OnStopRequest or any IPDL error, either of
-  // which call NeckoChild::DeallocPHttpChannel()).
+  // which call NeckoChild::DeallocPHttpChannelChild()).
   void AddIPDLReference();
   void ReleaseIPDLReference();
 
   bool IsSuspended();
 
+  void FlushedForDiversion();
+
 protected:
-  bool RecvOnStartRequest(const nsHttpResponseHead& responseHead,
+  bool RecvOnStartRequest(const nsresult& channelStatus,
+                          const nsHttpResponseHead& responseHead,
                           const bool& useResponseHead,
                           const nsHttpHeaderArray& requestHeaders,
                           const bool& isFromCache,
@@ -99,26 +105,30 @@ protected:
                           const uint32_t& cacheExpirationTime,
                           const nsCString& cachedCharset,
                           const nsCString& securityInfoSerialization,
-                          const mozilla::net::NetAddr& selfAddr,
-                          const mozilla::net::NetAddr& peerAddr);
-  bool RecvOnTransportAndData(const nsresult& status,
+                          const NetAddr& selfAddr,
+                          const NetAddr& peerAddr,
+                          const int16_t& redirectCount) MOZ_OVERRIDE;
+  bool RecvOnTransportAndData(const nsresult& channelStatus,
+                              const nsresult& status,
                               const uint64_t& progress,
                               const uint64_t& progressMax,
                               const nsCString& data,
                               const uint64_t& offset,
-                              const uint32_t& count);
+                              const uint32_t& count) MOZ_OVERRIDE;
   bool RecvOnStopRequest(const nsresult& statusCode);
-  bool RecvOnProgress(const uint64_t& progress, const uint64_t& progressMax);
-  bool RecvOnStatus(const nsresult& status);
-  bool RecvFailedAsyncOpen(const nsresult& status);
+  bool RecvOnProgress(const uint64_t& progress, const uint64_t& progressMax) MOZ_OVERRIDE;
+  bool RecvOnStatus(const nsresult& status) MOZ_OVERRIDE;
+  bool RecvFailedAsyncOpen(const nsresult& status) MOZ_OVERRIDE;
   bool RecvRedirect1Begin(const uint32_t& newChannel,
                           const URIParams& newURI,
                           const uint32_t& redirectFlags,
-                          const nsHttpResponseHead& responseHead);
-  bool RecvRedirect3Complete();
+                          const nsHttpResponseHead& responseHead) MOZ_OVERRIDE;
+  bool RecvRedirect3Complete() MOZ_OVERRIDE;
   bool RecvAssociateApplicationCache(const nsCString& groupID,
-                                     const nsCString& clientID);
-  bool RecvDeleteSelf();
+                                     const nsCString& clientID) MOZ_OVERRIDE;
+  bool RecvFlushedForDiversion() MOZ_OVERRIDE;
+  bool RecvDivertMessages() MOZ_OVERRIDE;
+  bool RecvDeleteSelf() MOZ_OVERRIDE;
 
   bool GetAssociatedContentSecurity(nsIAssociatedContentSecurity** res = nullptr);
   virtual void DoNotifyListenerCleanup();
@@ -140,12 +150,22 @@ private:
   bool mKeptAlive;            // IPC kept open, but only for security info
   nsRefPtr<ChannelEventQueue> mEventQ;
 
+  // Once set, OnData and possibly OnStop will be diverted to the parent.
+  bool mDivertingToParent;
+  // Once set, no OnStart/OnData/OnStop callbacks should be received from the
+  // parent channel, nor dequeued from the ChannelEventQueue.
+  bool mFlushedForDiversion;
+  // Set if SendSuspend is called. Determines if SendResume is needed when
+  // diverting callbacks to parent.
+  bool mSuspendSent;
+
   // true after successful AsyncOpen until OnStopRequest completes.
   bool RemoteChannelExists() { return mIPCOpen && !mKeptAlive; }
 
   void AssociateApplicationCache(const nsCString &groupID,
                                  const nsCString &clientID);
-  void OnStartRequest(const nsHttpResponseHead& responseHead,
+  void OnStartRequest(const nsresult& channelStatus,
+                      const nsHttpResponseHead& responseHead,
                       const bool& useResponseHead,
                       const nsHttpHeaderArray& requestHeaders,
                       const bool& isFromCache,
@@ -153,15 +173,16 @@ private:
                       const uint32_t& cacheExpirationTime,
                       const nsCString& cachedCharset,
                       const nsCString& securityInfoSerialization,
-                      const mozilla::net::NetAddr& selfAddr,
-                      const mozilla::net::NetAddr& peerAddr);
-  void OnTransportAndData(const nsresult& status,
+                      const NetAddr& selfAddr,
+                      const NetAddr& peerAddr);
+  void OnTransportAndData(const nsresult& channelStatus,
+                          const nsresult& status,
                           const uint64_t progress,
                           const uint64_t& progressMax,
                           const nsCString& data,
                           const uint64_t& offset,
                           const uint32_t& count);
-  void OnStopRequest(const nsresult& statusCode);
+  void OnStopRequest(const nsresult& channelStatus);
   void OnProgress(const uint64_t& progress, const uint64_t& progressMax);
   void OnStatus(const nsresult& status);
   void FailedAsyncOpen(const nsresult& status);

@@ -6,6 +6,9 @@
 
 #include "WebAudioUtils.h"
 #include "AudioNodeStream.h"
+#include "AudioParamTimeline.h"
+#include "blink/HRTFDatabaseLoader.h"
+#include "speex/speex_resampler.h"
 
 namespace mozilla {
 
@@ -20,34 +23,10 @@ struct ConvertTimeToTickHelper
   {
     ConvertTimeToTickHelper* This = static_cast<ConvertTimeToTickHelper*> (aClosure);
     MOZ_ASSERT(This->mSourceStream->SampleRate() == This->mDestinationStream->SampleRate());
-    return WebAudioUtils::ConvertDestinationStreamTimeToSourceStreamTime(
-        aTime, This->mSourceStream, This->mDestinationStream);
+    return This->mSourceStream->
+      TicksFromDestinationTime(This->mDestinationStream, aTime);
   }
 };
-
-TrackTicks
-WebAudioUtils::ConvertDestinationStreamTimeToSourceStreamTime(double aTime,
-                                                              AudioNodeStream* aSource,
-                                                              MediaStream* aDestination)
-{
-  StreamTime streamTime = std::max<MediaTime>(0, SecondsToMediaTime(aTime));
-  GraphTime graphTime = aDestination->StreamTimeToGraphTime(streamTime);
-  StreamTime thisStreamTime = aSource->GraphTimeToStreamTimeOptimistic(graphTime);
-  TrackTicks ticks = TimeToTicksRoundUp(aSource->SampleRate(), thisStreamTime);
-  return ticks;
-}
-
-double
-WebAudioUtils::StreamPositionToDestinationTime(TrackTicks aSourcePosition,
-                                               AudioNodeStream* aSource,
-                                               AudioNodeStream* aDestination)
-{
-  MOZ_ASSERT(aSource->SampleRate() == aDestination->SampleRate());
-  StreamTime sourceTime = TicksToTimeRoundDown(aSource->SampleRate(), aSourcePosition);
-  GraphTime graphTime = aSource->StreamTimeToGraphTime(sourceTime);
-  StreamTime destinationTime = aDestination->GraphTimeToStreamTimeOptimistic(graphTime);
-  return MediaTimeToSeconds(destinationTime);
-}
 
 void
 WebAudioUtils::ConvertAudioParamToTicks(AudioParamTimeline& aParam,
@@ -59,6 +38,72 @@ WebAudioUtils::ConvertAudioParamToTicks(AudioParamTimeline& aParam,
   ctth.mSourceStream = aSource;
   ctth.mDestinationStream = aDest;
   aParam.ConvertEventTimesToTicks(ConvertTimeToTickHelper::Convert, &ctth, aDest->SampleRate());
+}
+
+void
+WebAudioUtils::Shutdown()
+{
+  WebCore::HRTFDatabaseLoader::shutdown();
+}
+
+int
+WebAudioUtils::SpeexResamplerProcess(SpeexResamplerState* aResampler,
+                                     uint32_t aChannel,
+                                     const float* aIn, uint32_t* aInLen,
+                                     float* aOut, uint32_t* aOutLen)
+{
+#ifdef MOZ_SAMPLE_TYPE_S16
+  nsAutoTArray<AudioDataValue, WEBAUDIO_BLOCK_SIZE*4> tmp1;
+  nsAutoTArray<AudioDataValue, WEBAUDIO_BLOCK_SIZE*4> tmp2;
+  tmp1.SetLength(*aInLen);
+  tmp2.SetLength(*aOutLen);
+  ConvertAudioSamples(aIn, tmp1.Elements(), *aInLen);
+  int result = speex_resampler_process_int(aResampler, aChannel, tmp1.Elements(), aInLen, tmp2.Elements(), aOutLen);
+  ConvertAudioSamples(tmp2.Elements(), aOut, *aOutLen);
+  return result;
+#else
+  return speex_resampler_process_float(aResampler, aChannel, aIn, aInLen, aOut, aOutLen);
+#endif
+}
+
+int
+WebAudioUtils::SpeexResamplerProcess(SpeexResamplerState* aResampler,
+                                     uint32_t aChannel,
+                                     const int16_t* aIn, uint32_t* aInLen,
+                                     float* aOut, uint32_t* aOutLen)
+{
+  nsAutoTArray<AudioDataValue, WEBAUDIO_BLOCK_SIZE*4> tmp;
+#ifdef MOZ_SAMPLE_TYPE_S16
+  tmp.SetLength(*aOutLen);
+  int result = speex_resampler_process_int(aResampler, aChannel, aIn, aInLen, tmp.Elements(), aOutLen);
+  ConvertAudioSamples(tmp.Elements(), aOut, *aOutLen);
+  return result;
+#else
+  tmp.SetLength(*aInLen);
+  ConvertAudioSamples(aIn, tmp.Elements(), *aInLen);
+  int result = speex_resampler_process_float(aResampler, aChannel, tmp.Elements(), aInLen, aOut, aOutLen);
+  return result;
+#endif
+}
+
+int
+WebAudioUtils::SpeexResamplerProcess(SpeexResamplerState* aResampler,
+                                     uint32_t aChannel,
+                                     const int16_t* aIn, uint32_t* aInLen,
+                                     int16_t* aOut, uint32_t* aOutLen)
+{
+#ifdef MOZ_SAMPLE_TYPE_S16
+  return speex_resampler_process_int(aResampler, aChannel, aIn, aInLen, aOut, aOutLen);
+#else
+  nsAutoTArray<AudioDataValue, WEBAUDIO_BLOCK_SIZE*4> tmp1;
+  nsAutoTArray<AudioDataValue, WEBAUDIO_BLOCK_SIZE*4> tmp2;
+  tmp1.SetLength(*aInLen);
+  tmp2.SetLength(*aOutLen);
+  ConvertAudioSamples(aIn, tmp1.Elements(), *aInLen);
+  int result = speex_resampler_process_float(aResampler, aChannel, tmp1.Elements(), aInLen, tmp2.Elements(), aOutLen);
+  ConvertAudioSamples(tmp2.Elements(), aOut, *aOutLen);
+  return result;
+#endif
 }
 
 }

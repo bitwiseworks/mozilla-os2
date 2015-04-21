@@ -136,6 +136,48 @@ class ProcTest(unittest.TestCase):
                               p.proc.returncode,
                               p.didTimeout)
 
+    def test_commandline_no_args(self):
+        """Command line is reported correctly when no arguments are specified"""
+        p = processhandler.ProcessHandler(self.proclaunch, cwd=here)
+        self.assertEqual(p.commandline, self.proclaunch)
+
+    def test_commandline_overspecified(self):
+        """Command line raises an exception when the arguments are specified ambiguously"""
+        err = None
+        try:
+            p = processhandler.ProcessHandler([self.proclaunch, "process_normal_finish.ini"],
+                                              args=["1", "2", "3"],
+                                              cwd=here)
+        except TypeError, e:
+            err = e
+
+        self.assertTrue(err)
+
+    def test_commandline_from_list(self):
+        """Command line is reported correctly when command and arguments are specified in a list"""
+        p = processhandler.ProcessHandler([self.proclaunch, "process_normal_finish.ini"],
+                                          cwd=here)
+        self.assertEqual(p.commandline, self.proclaunch + ' process_normal_finish.ini')
+
+    def test_commandline_over_specified(self):
+        """Command line raises an exception when the arguments are specified ambiguously"""
+        err = None
+        try:
+            p = processhandler.ProcessHandler([self.proclaunch, "process_normal_finish.ini"],
+                                              args=["1", "2", "3"],
+                                              cwd=here)
+        except TypeError, e:
+            err = e
+
+        self.assertTrue(err)
+
+    def test_commandline_from_args(self):
+        """Command line is reported correctly when arguments are specified in a dedicated list"""
+        p = processhandler.ProcessHandler(self.proclaunch,
+                                          args=["1", "2", "3"],
+                                          cwd=here)
+        self.assertEqual(p.commandline, self.proclaunch + ' 1 2 3')
+
     def test_process_wait(self):
         """Process is started runs to completion while we wait indefinitely"""
 
@@ -159,6 +201,30 @@ class ProcTest(unittest.TestCase):
                                           cwd=here)
         p.run(timeout=10)
         p.wait()
+
+        detected, output = check_for_process(self.proclaunch)
+        self.determine_status(detected,
+                              output,
+                              p.proc.returncode,
+                              p.didTimeout,
+                              False,
+                              ['returncode', 'didtimeout'])
+
+    def test_process_timeout_no_kill(self):
+        """ Process is started, runs but we time out waiting on it
+            to complete. Process should not be killed.
+        """
+        p = None
+        def timeout_handler():
+            self.assertEqual(p.proc.poll(), None)
+            p.kill()
+        p = processhandler.ProcessHandler([self.proclaunch, "process_waittimeout.ini"],
+                                          cwd=here,
+                                          onTimeout=(timeout_handler,),
+                                          kill_on_timeout=False)
+        p.run(timeout=1)
+        p.wait()
+        self.assertTrue(p.didTimeout)
 
         detected, output = check_for_process(self.proclaunch)
         self.determine_status(detected,

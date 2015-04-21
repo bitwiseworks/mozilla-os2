@@ -4,7 +4,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ReadbackProcessor.h"
-#include "ReadbackLayer.h"
+#include <sys/types.h>                  // for int32_t
+#include "Layers.h"                     // for Layer, ThebesLayer, etc
+#include "ReadbackLayer.h"              // for ReadbackLayer, ReadbackSink
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxColor.h"                   // for gfxRGBA
+#include "gfxContext.h"                 // for gfxContext
+#include "gfxRect.h"                    // for gfxRect
+#include "mozilla/gfx/BasePoint.h"      // for BasePoint
+#include "mozilla/gfx/BaseRect.h"       // for BaseRect
+#include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoPtr
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsImpl.h"            // for gfxContext::Release, etc
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsSize.h"                     // for nsIntSize
 
 namespace mozilla {
 namespace layers {
@@ -31,19 +45,19 @@ ReadbackProcessor::BuildUpdates(ContainerLayer* aContainer)
 static Layer*
 FindBackgroundLayer(ReadbackLayer* aLayer, nsIntPoint* aOffset)
 {
-  gfxMatrix transform;
+  gfx::Matrix transform;
   if (!aLayer->GetTransform().Is2D(&transform) ||
       transform.HasNonIntegerTranslation())
     return nullptr;
-  nsIntPoint transformOffset(int32_t(transform.x0), int32_t(transform.y0));
+  nsIntPoint transformOffset(int32_t(transform._31), int32_t(transform._32));
 
   for (Layer* l = aLayer->GetPrevSibling(); l; l = l->GetPrevSibling()) {
-    gfxMatrix backgroundTransform;
+    gfx::Matrix backgroundTransform;
     if (!l->GetTransform().Is2D(&backgroundTransform) ||
-        backgroundTransform.HasNonIntegerTranslation())
+        gfx::ThebesMatrix(backgroundTransform).HasNonIntegerTranslation())
       return nullptr;
 
-    nsIntPoint backgroundOffset(int32_t(backgroundTransform.x0), int32_t(backgroundTransform.y0));
+    nsIntPoint backgroundOffset(int32_t(backgroundTransform._31), int32_t(backgroundTransform._32));
     nsIntRect rectInBackground(transformOffset - backgroundOffset, aLayer->GetSize());
     const nsIntRegion& visibleRegion = l->GetEffectiveVisibleRegion();
     if (!visibleRegion.Intersects(rectInBackground))

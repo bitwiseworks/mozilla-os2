@@ -8,81 +8,61 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "test/testsupport/fileutils.h"
-#include "voice_engine/test/auto_test/fixtures/after_streaming_fixture.h"
-#include "voice_engine/test/auto_test/voe_standard_test.h"
+#include "webrtc/system_wrappers/interface/atomic32.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/event_wrapper.h"
+#include "webrtc/test/testsupport/fileutils.h"
+#include "webrtc/voice_engine/test/auto_test/fixtures/after_streaming_fixture.h"
+#include "webrtc/voice_engine/test/auto_test/voe_standard_test.h"
 
 class TestRtpObserver : public webrtc::VoERTPObserver {
  public:
-  TestRtpObserver();
-  virtual ~TestRtpObserver();
-  virtual void OnIncomingCSRCChanged(const int channel,
-                                     const unsigned int CSRC,
-                                     const bool added);
-  virtual void OnIncomingSSRCChanged(const int channel,
-                                     const unsigned int SSRC);
-  void Reset();
+  TestRtpObserver()
+      : crit_(voetest::CriticalSectionWrapper::CreateCriticalSection()),
+        changed_ssrc_event_(voetest::EventWrapper::Create()) {}
+  virtual ~TestRtpObserver() {}
+  virtual void OnIncomingCSRCChanged(int channel,
+                                     unsigned int CSRC,
+                                     bool added) {}
+  virtual void OnIncomingSSRCChanged(int channel,
+                                     unsigned int SSRC);
+  void WaitForChangedSsrc() {
+    // 10 seconds should be enough.
+    EXPECT_EQ(voetest::kEventSignaled, changed_ssrc_event_->Wait(10*1000));
+    changed_ssrc_event_->Reset();
+  }
+  void SetIncomingSsrc(unsigned int ssrc) {
+    voetest::CriticalSectionScoped lock(crit_.get());
+    incoming_ssrc_ = ssrc;
+  }
  public:
-  unsigned int ssrc_[2];
-  unsigned int csrc_[2][2];  // Stores 2 CSRCs for each channel.
-  bool added_[2][2];
-  int size_[2];
+  voetest::scoped_ptr<voetest::CriticalSectionWrapper> crit_;
+  unsigned int incoming_ssrc_;
+  voetest::scoped_ptr<voetest::EventWrapper> changed_ssrc_event_;
 };
 
-TestRtpObserver::TestRtpObserver() {
-  Reset();
-}
-
-TestRtpObserver::~TestRtpObserver() {
-}
-
-void TestRtpObserver::Reset() {
-  for (int i = 0; i < 2; i++) {
-    ssrc_[i] = 0;
-    csrc_[i][0] = 0;
-    csrc_[i][1] = 0;
-    added_[i][0] = false;
-    added_[i][1] = false;
-    size_[i] = 0;
-  }
-}
-
-void TestRtpObserver::OnIncomingCSRCChanged(const int channel,
-                                            const unsigned int CSRC,
-                                            const bool added) {
-  char msg[128];
-  sprintf(msg, "=> OnIncomingCSRCChanged(channel=%d, CSRC=%u, added=%d)\n",
-          channel, CSRC, added);
-  TEST_LOG("%s", msg);
-
-  if (channel > 1)
-    return;  // Not enough memory.
-
-  csrc_[channel][size_[channel]] = CSRC;
-  added_[channel][size_[channel]] = added;
-
-  size_[channel]++;
-  if (size_[channel] == 2)
-    size_[channel] = 0;
-}
-
-void TestRtpObserver::OnIncomingSSRCChanged(const int channel,
-                                            const unsigned int SSRC) {
+void TestRtpObserver::OnIncomingSSRCChanged(int channel,
+                                            unsigned int SSRC) {
   char msg[128];
   sprintf(msg, "\n=> OnIncomingSSRCChanged(channel=%d, SSRC=%u)\n", channel,
           SSRC);
   TEST_LOG("%s", msg);
 
-  ssrc_[channel] = SSRC;
+  {
+    voetest::CriticalSectionScoped lock(crit_.get());
+    if (incoming_ssrc_ == SSRC)
+      changed_ssrc_event_->Set();
+  }
 }
 
 class RtcpAppHandler : public webrtc::VoERTCPObserver {
  public:
-  void OnApplicationDataReceived(const int channel,
-                                 const unsigned char sub_type,
-                                 const unsigned int name,
+  RtcpAppHandler() : length_in_bytes_(0), sub_type_(0), name_(0) {}
+  void OnApplicationDataReceived(int channel,
+                                 unsigned char sub_type,
+                                 unsigned int name,
                                  const unsigned char* data,
-                                 const unsigned short length_in_bytes);
+                                 unsigned short length_in_bytes);
   void Reset();
   ~RtcpAppHandler() {}
   unsigned short length_in_bytes_;
@@ -101,10 +81,10 @@ class RtpRtcpTest : public AfterStreamingFixture {
     second_channel_ = voe_base_->CreateChannel();
     EXPECT_GE(second_channel_, 0);
 
-    EXPECT_EQ(0, voe_base_->SetSendDestination(
-        second_channel_, 8002, "127.0.0.1"));
-    EXPECT_EQ(0, voe_base_->SetLocalReceiver(
-        second_channel_, 8002));
+    transport_ = new LoopBackTransport(voe_network_);
+    EXPECT_EQ(0, voe_network_->RegisterExternalTransport(second_channel_,
+                                                         *transport_));
+
     EXPECT_EQ(0, voe_base_->StartReceive(second_channel_));
     EXPECT_EQ(0, voe_base_->StartPlayout(second_channel_));
     EXPECT_EQ(0, voe_rtp_rtcp_->SetLocalSSRC(second_channel_, 5678));
@@ -115,16 +95,19 @@ class RtpRtcpTest : public AfterStreamingFixture {
   }
 
   void TearDown() {
+    EXPECT_EQ(0, voe_network_->DeRegisterExternalTransport(second_channel_));
     voe_base_->DeleteChannel(second_channel_);
+    delete transport_;
   }
 
   int second_channel_;
+  LoopBackTransport* transport_;
 };
 
 void RtcpAppHandler::OnApplicationDataReceived(
-    const int /*channel*/, const unsigned char sub_type,
-    const unsigned int name, const unsigned char* data,
-    const unsigned short length_in_bytes) {
+    const int /*channel*/, unsigned char sub_type,
+    unsigned int name, const unsigned char* data,
+    unsigned short length_in_bytes) {
   length_in_bytes_ = length_in_bytes;
   memcpy(data_, &data[0], length_in_bytes);
   sub_type_ = sub_type;
@@ -153,7 +136,8 @@ TEST_F(RtpRtcpTest, RemoteRtcpCnameHasPropagatedToRemoteSide) {
   EXPECT_STREQ(RTCP_CNAME, char_buffer);
 }
 
-TEST_F(RtpRtcpTest, SSRCPropagatesCorrectly) {
+// Flakily hangs on Linux. code.google.com/p/webrtc/issues/detail?id=2178.
+TEST_F(RtpRtcpTest, DISABLED_ON_LINUX(SSRCPropagatesCorrectly)) {
   unsigned int local_ssrc = 1234;
   EXPECT_EQ(0, voe_base_->StopSend(channel_));
   EXPECT_EQ(0, voe_rtp_rtcp_->SetLocalSSRC(channel_, local_ssrc));
@@ -187,7 +171,7 @@ TEST_F(RtpRtcpTest, RtcpApplicationDefinedPacketsCanBeSentAndReceived) {
   Sleep(1000);
 
   // Ensure we received the data in the callback.
-  EXPECT_EQ(data_length, rtcp_app_handler.length_in_bytes_);
+  ASSERT_EQ(data_length, rtcp_app_handler.length_in_bytes_);
   EXPECT_EQ(0, memcmp(data, rtcp_app_handler.data_, data_length));
   EXPECT_EQ(data_name, rtcp_app_handler.name_);
   EXPECT_EQ(data_subtype, rtcp_app_handler.sub_type_);
@@ -237,7 +221,7 @@ TEST_F(RtpRtcpTest, InsertExtraRTPPacketDealsWithInvalidArguments) {
             "Should reject: invalid size.";
 }
 
-TEST_F(RtpRtcpTest, CanTransmitExtraRtpPacketsWithoutError) {
+TEST_F(RtpRtcpTest, DISABLED_CanTransmitExtraRtpPacketsWithoutError) {
   const char payload_data[8] = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H' };
 
   for (int i = 0; i < 128; ++i) {
@@ -272,27 +256,23 @@ TEST_F(RtpRtcpTest, ObserverGetsNotifiedOnSsrcChange) {
   TestRtpObserver rtcp_observer;
   EXPECT_EQ(0, voe_rtp_rtcp_->RegisterRTPObserver(
       channel_, rtcp_observer));
-  rtcp_observer.Reset();
 
   unsigned int new_ssrc = 7777;
   EXPECT_EQ(0, voe_base_->StopSend(channel_));
+  rtcp_observer.SetIncomingSsrc(new_ssrc);
   EXPECT_EQ(0, voe_rtp_rtcp_->SetLocalSSRC(channel_, new_ssrc));
   EXPECT_EQ(0, voe_base_->StartSend(channel_));
 
-  Sleep(500);
-
-  // Verify we got the new SSRC.
-  EXPECT_EQ(new_ssrc, rtcp_observer.ssrc_[0]);
+  rtcp_observer.WaitForChangedSsrc();
 
   // Now try another SSRC.
   unsigned int newer_ssrc = 1717;
   EXPECT_EQ(0, voe_base_->StopSend(channel_));
+  rtcp_observer.SetIncomingSsrc(newer_ssrc);
   EXPECT_EQ(0, voe_rtp_rtcp_->SetLocalSSRC(channel_, newer_ssrc));
   EXPECT_EQ(0, voe_base_->StartSend(channel_));
 
-  Sleep(500);
-
-  EXPECT_EQ(newer_ssrc, rtcp_observer.ssrc_[0]);
+  rtcp_observer.WaitForChangedSsrc();
 
   EXPECT_EQ(0, voe_rtp_rtcp_->DeRegisterRTPObserver(channel_));
 }

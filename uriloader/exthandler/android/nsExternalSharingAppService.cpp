@@ -14,7 +14,7 @@
 
 using namespace mozilla;
 
-NS_IMPL_ISUPPORTS1(nsExternalSharingAppService, nsIExternalSharingAppService)
+NS_IMPL_ISUPPORTS(nsExternalSharingAppService, nsIExternalSharingAppService)
 
 nsExternalSharingAppService::nsExternalSharingAppService()
 {
@@ -31,12 +31,8 @@ nsExternalSharingAppService::ShareWithDefault(const nsAString & data,
 {
   NS_NAMED_LITERAL_STRING(sendAction, "android.intent.action.SEND");
   const nsString emptyString = EmptyString();
-  if (AndroidBridge::Bridge())
-    return AndroidBridge::Bridge()->
-      OpenUriExternal(NS_ConvertUTF16toUTF8(data), NS_ConvertUTF16toUTF8(mime),
-                      emptyString,emptyString, sendAction, title) ? NS_OK : NS_ERROR_FAILURE;
-
-  return NS_ERROR_FAILURE;
+  return mozilla::widget::android::GeckoAppShell::OpenUriExternal(data,
+           mime, emptyString,emptyString, sendAction, title) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -48,17 +44,16 @@ nsExternalSharingAppService::GetSharingApps(const nsAString & aMIMEType,
   NS_NAMED_LITERAL_STRING(sendAction, "android.intent.action.SEND");
   nsCOMPtr<nsIMutableArray> array = do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
-  NS_ConvertUTF16toUTF8 nMimeType(aMIMEType);
   if (!AndroidBridge::Bridge())
     return NS_OK;
-  AndroidBridge::Bridge()->GetHandlersForMimeType(nMimeType.get(), array,
+  AndroidBridge::Bridge()->GetHandlersForMimeType(aMIMEType, array,
                                                   nullptr, sendAction);
   array->GetLength(aLen);
   *aHandlers =
     static_cast<nsISharingHandlerApp**>(NS_Alloc(sizeof(nsISharingHandlerApp*)
                                                  * *aLen));
   for (uint32_t i = 0; i < *aLen; i++) {
-    rv = array->QueryElementAt(i, nsISharingHandlerApp::GetIID(),
+    rv = array->QueryElementAt(i, NS_GET_IID(nsISharingHandlerApp),
                                (void**)(*aHandlers + i));
     NS_ENSURE_SUCCESS(rv, rv);
   }

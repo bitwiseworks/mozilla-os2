@@ -9,9 +9,10 @@ XPIDL_SOURCES += [
     'nsIScriptableRegion.idl',
 ]
 
-MODULE = 'gfx'
+XPIDL_MODULE = 'gfx'
 
 EXPORTS += [
+    'FilterSupport.h',
     'gfxCore.h',
     'gfxCrashReporterUtils.h',
     'nsBoundingMetrics.h',
@@ -34,16 +35,20 @@ EXPORTS += [
     'nsTransform2D.h',
 ]
 
+EXPORTS.mozilla += [
+    'AppUnits.h',
+]
+
 if CONFIG['MOZ_X11']:
     EXPORTS.mozilla += ['X11Util.h']
-    CPP_SOURCES += [
+    SOURCES += [
         'X11Util.cpp',
     ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
+    'FilterSupport.cpp',
     'gfxCrashReporterUtils.cpp',
     'nsColor.cpp',
-    'nsDeviceContext.cpp',
     'nsFont.cpp',
     'nsFontMetrics.cpp',
     'nsRect.cpp',
@@ -55,5 +60,13 @@ CPP_SOURCES += [
     'nsTransform2D.cpp',
 ]
 
-LIBRARY_NAME = 'gkgfx'
+# nsDeviceContext.cpp cannot be built in unified mode because it pulls in OS X system headers.
+SOURCES += [
+    'nsDeviceContext.cpp',
+]
 
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+FINAL_LIBRARY = 'xul'

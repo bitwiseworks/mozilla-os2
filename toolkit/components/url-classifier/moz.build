@@ -15,20 +15,28 @@ XPIDL_SOURCES += [
     'nsIUrlListManager.idl',
 ]
 
-MODULE = 'url-classifier'
+XPIDL_MODULE = 'url-classifier'
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'ChunkSet.cpp',
     'Classifier.cpp',
-    'HashStore.cpp',
     'LookupCache.cpp',
-    'ProtocolParser.cpp',
     'nsCheckSummedOutputStream.cpp',
     'nsUrlClassifierDBService.cpp',
-    'nsUrlClassifierPrefixSet.cpp',
     'nsUrlClassifierProxies.cpp',
-    'nsUrlClassifierStreamUpdater.cpp',
     'nsUrlClassifierUtils.cpp',
+    'ProtocolParser.cpp',
+]
+
+# define conflicting LOG() macros
+SOURCES += [
+    'nsUrlClassifierPrefixSet.cpp',
+    'nsUrlClassifierStreamUpdater.cpp',
+]
+
+# contains variables that conflict with LookupCache.cpp
+SOURCES += [
+    'HashStore.cpp',
 ]
 
 EXTRA_COMPONENTS += [
@@ -42,5 +50,24 @@ EXTRA_PP_COMPONENTS += [
     'nsUrlClassifierListManager.js',
 ]
 
-LIBRARY_NAME = 'urlclassifier_s'
+EXTRA_JS_MODULES += [
+    'SafeBrowsing.jsm',
+]
+
+EXPORTS += [
+    'Entries.h',
+    'LookupCache.h',
+    'nsUrlClassifierPrefixSet.h',
+]
+
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+FINAL_LIBRARY = 'toolkitcomps'
+
+LOCAL_INCLUDES += [
+    '../build',
+    '/ipc/chromium/src',
+]
 

@@ -6,7 +6,6 @@
 #ifndef GFX_UNISCRIBESHAPER_H
 #define GFX_UNISCRIBESHAPER_H
 
-#include "prtypes.h"
 #include "gfxTypes.h"
 #include "gfxGDIFont.h"
 
@@ -19,7 +18,7 @@ class gfxUniscribeShaper : public gfxFontShaper
 public:
     gfxUniscribeShaper(gfxGDIFont *aFont)
         : gfxFontShaper(aFont)
-        , mScriptCache(NULL)
+        , mScriptCache(nullptr)
     {
         MOZ_COUNT_CTOR(gfxUniscribeShaper);
     }
@@ -30,7 +29,7 @@ public:
     }
 
     virtual bool ShapeText(gfxContext      *aContext,
-                           const PRUnichar *aText,
+                           const char16_t *aText,
                            uint32_t         aOffset,
                            uint32_t         aLength,
                            int32_t          aScript,

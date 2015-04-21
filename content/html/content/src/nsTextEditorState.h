@@ -12,7 +12,7 @@
 #include "nsITextControlElement.h"
 #include "nsITextControlFrame.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsIContent.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/WeakPtr.h"
 
 class nsTextInputListener;
@@ -120,6 +120,7 @@ class RestoreSelectionState;
 
 class nsTextEditorState : public mozilla::SupportsWeakPtr<nsTextEditorState> {
 public:
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(nsTextEditorState)
   explicit nsTextEditorState(nsITextControlElement* aOwningElement);
   ~nsTextEditorState();
 
@@ -142,12 +143,12 @@ public:
 
   nsresult CreatePlaceholderNode();
 
-  nsIContent* GetRootNode() {
+  mozilla::dom::Element* GetRootNode() {
     if (!mRootNode)
       CreateRootNode();
     return mRootNode;
   }
-  nsIContent* GetPlaceholderNode() {
+  mozilla::dom::Element* GetPlaceholderNode() {
     return mPlaceholderDiv;
   }
 
@@ -186,9 +187,6 @@ public:
    * @returns false if attr not defined
    */
   bool GetMaxLength(int32_t* aMaxLength);
-
-  /* called to free up native keybinding services */
-  static NS_HIDDEN_(void) ShutDown();
 
   void ClearValueCache() { mCachedValue.Truncate(); }
 
@@ -267,8 +265,8 @@ private:
   nsRefPtr<nsTextInputSelectionImpl> mSelCon;
   RestoreSelectionState* mRestoringSelection;
   nsCOMPtr<nsIEditor> mEditor;
-  nsCOMPtr<nsIContent> mRootNode;
-  nsCOMPtr<nsIContent> mPlaceholderDiv;
+  nsCOMPtr<mozilla::dom::Element> mRootNode;
+  nsCOMPtr<mozilla::dom::Element> mPlaceholderDiv;
   nsTextControlFrame* mBoundFrame;
   nsTextInputListener* mTextListener;
   nsAutoPtr<nsCString> mValue;

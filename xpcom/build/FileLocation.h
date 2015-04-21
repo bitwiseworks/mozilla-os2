@@ -9,7 +9,6 @@
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsIFile.h"
-#include "nsIURI.h"
 #include "FileUtils.h"
 
 class nsZipArchive;
@@ -31,58 +30,35 @@ public:
    * When the archive is in an archive, an nsZipArchive is stored instead
    * of a file path.
    */
-  FileLocation() { }
+  FileLocation();
+  ~FileLocation();
 
   /**
    * Constructor for plain files
    */
-  FileLocation(nsIFile *file)
-  {
-    Init(file);
-  }
+  FileLocation(nsIFile *file);
 
   /**
    * Constructors for path within an archive. The archive can be given either
    * as nsIFile or nsZipArchive.
    */
-  FileLocation(nsIFile *zip, const char *path)
-  {
-    Init(zip, path);
-  }
+  FileLocation(nsIFile *zip, const char *path);
 
-  FileLocation(nsZipArchive *zip, const char *path)
-  {
-    Init(zip, path);
-  }
+  FileLocation(nsZipArchive *zip, const char *path);
 
   /**
    * Creates a new file location relative to another one.
    */
-  FileLocation(const FileLocation &file, const char *path = NULL);
+  FileLocation(const FileLocation &file, const char *path = nullptr);
 
   /**
    * Initialization functions corresponding to constructors
    */
-  void Init(nsIFile *file)
-  {
-    mBaseZip = NULL;
-    mBaseFile = file;
-    mPath.Truncate();
-  }
+  void Init(nsIFile *file);
 
-  void Init(nsIFile *zip, const char *path)
-  {
-    mBaseZip = NULL;
-    mBaseFile = zip;
-    mPath = path;
-  }
+  void Init(nsIFile *zip, const char *path);
 
-  void Init(nsZipArchive *zip, const char *path)
-  {
-    mBaseZip = zip;
-    mBaseFile = NULL;
-    mPath = path;
-  }
+  void Init(nsZipArchive *zip, const char *path);
 
   /**
    * Returns an URI string corresponding to the file location
