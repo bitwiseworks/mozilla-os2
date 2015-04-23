@@ -9038,7 +9038,15 @@ dnl ICU Support
 dnl ========================================================
 
 if test "$MOZ_BUILD_APP" = "browser"; then
-    _INTL_API=yes
+    case "$host" in
+    *os2*)
+        # Not ported to OS/2 yet; disable for now (see #101)
+        _INTL_API=no
+        ;;
+    *)
+        _INTL_API=yes
+        ;;
+    esac
 else
     # Internationalization isn't built or exposed by default in non-desktop
     # builds.  Bugs to enable:
