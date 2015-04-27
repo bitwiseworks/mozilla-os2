@@ -20,7 +20,7 @@ EXTRA_JS_MODULES += [
     'osfile_win_back.jsm',
     'osfile_win_front.jsm',
     'ospath.jsm',
+    'ospath_os2.jsm',
     'ospath_unix.jsm',
     'ospath_win.jsm',
-    'ospath_os2.jsm',
 ]

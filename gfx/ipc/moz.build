@@ -26,7 +26,7 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
         'SharedDIBOS2.h',
         'SharedDIBSurface.h',
     ]
-    CPP_SOURCES += [
+    SOURCES += [
         'SharedDIBOS2.cpp',
         'SharedDIBSurface.cpp',
     ]

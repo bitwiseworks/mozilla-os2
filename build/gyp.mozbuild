@@ -82,6 +82,7 @@ flavors = {
     'FreeBSD': 'freebsd',
     'NetBSD': 'netbsd',
     'OpenBSD': 'openbsd',
+    'OS2': 'os2',
 }
 gyp_vars['OS'] = flavors[os]
 
