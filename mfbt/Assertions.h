@@ -197,7 +197,7 @@ __declspec(noreturn) __inline void MOZ_NoReturn() {}
 #  endif
 #elif defined(__OS2__) && defined(__GNUC__)
 #  ifdef __cplusplus
-#    define MOZ_CRASH() \
+#    define MOZ_REALLY_CRASH() \
        do { \
          __asm__ __volatile__ ("int3\n\t" \
                                "nop\n\t"); \

@@ -22,3 +22,4 @@ AUTOCFG_JS_EXPORTS += $(srcdir)/unix/platform.js
 endif
 endif
 endif
+endif

@@ -40,8 +40,8 @@
 #include <os2.h>
 
 #include <stdlib.h>
-#define THREAD_FUNCTION void
-#define THREAD_FUNCTION_RETURN void
+#define THREAD_FUNCTION void *
+#define THREAD_FUNCTION_RETURN void *
 #define THREAD_SPECIFIC_INDEX PULONG
 #define pthread_t TID
 #define pthread_attr_t ULONG
@@ -56,6 +56,7 @@
 #define pthread_getspecific(ts_key) ((void *)(*(ts_key)))
 #define pthread_setspecific(ts_key, value) (*(ts_key)=(ULONG)(value))
 #define pthread_self() _gettid()
+
 #else
 #ifdef __APPLE__
 #include <mach/mach_init.h>
@@ -75,7 +76,6 @@
 #define THREAD_FUNCTION_RETURN void *
 #define THREAD_SPECIFIC_INDEX pthread_key_t
 #define ts_key_create(ts_key, destructor) pthread_key_create (&(ts_key), destructor);
-#endif
 #endif
 
 /* Syncrhronization macros: Win32 and Pthreads */
