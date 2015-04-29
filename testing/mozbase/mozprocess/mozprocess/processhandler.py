@@ -19,7 +19,7 @@ MOZPROCESS_DEBUG = os.getenv("MOZPROCESS_DEBUG")
 
 # We dont use mozinfo because it is expensive to import, see bug 933558.
 isWin = os.name == "nt"
-isPosix = os.name == "posix" # includes MacOS X
+isPosix = os.name == "posix" or os.name == "os2" # includes MacOS X and OS/2
 
 if isWin:
     import ctypes, ctypes.wintypes, msvcrt
