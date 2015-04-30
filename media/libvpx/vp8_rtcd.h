@@ -40,7 +40,11 @@
 
 #elif defined(VPX_ARM_ASM)
 /* Android */
-#include "vp8_rtcd_armv7-android-gcc.h"
+#include "vp8_rtcd_x86-linux-gcc.h"
+
+#elif defined(__OS2__)
+/* OS/2 */
+#include "vp8_rtcd_x86-linux-gcc.h"
 
 #else
 /* Assume generic GNU/GCC configuration. */

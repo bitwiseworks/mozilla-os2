@@ -34,6 +34,10 @@
 /* Android */
 #include "vpx_rtcd_armv7-android-gcc.h"
 
+#elif defined(__OS2__)
+/* OS/2 */
+#include "vpx_rtcd_x86-linux-gcc.h"
+
 #else
 /* Assume generic GNU/GCC configuration. */
 #include "vpx_rtcd_generic-gnu.h"
