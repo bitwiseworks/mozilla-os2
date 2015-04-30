@@ -72,6 +72,31 @@ static void once(void (*func)(void))
 }
 
 
+#elif CONFIG_MULTITHREAD && defined(__OS2__) && defined(__KLIBC__)
+
+#include <sys/fmutex.h>
+
+static void once(void (*func)(void))
+{
+    static int done;
+    static _fmutex mutex = _FMUTEX_INITIALIZER_EX(0, 0);
+
+    /* If the initialization is complete, return early. */
+    if(done)
+        return;
+
+    _fmutex_request(&mutex, 0);
+
+    if (!done)
+    {
+        func();
+        done = 1;
+    }
+
+    _fmutex_release(&mutex);
+}
+
+
 #elif CONFIG_MULTITHREAD && HAVE_PTHREAD_H
 #include <pthread.h>
 static void once(void (*func)(void))
