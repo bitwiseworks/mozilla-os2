@@ -58,6 +58,9 @@ if CONFIG['MOZ_DEBUG']:
 
 if CONFIG['OS_TARGET'] == 'OS2' and CONFIG['MOZ_OS2_HIGH_MEMORY']:
     DEFINES['MOZ_OS2_HIGH_MEMORY'] = True
+    # HLL debug info format can't stand too big line numbers of sqlite3.c
+    # so that gas spits megabytes of warnings, shut it up.
+    CFLAGS += [ '-Wa,-W' ]
 
 if CONFIG['OS_TARGET'] == 'Android':
     # default to user readable only to fit Android security model
