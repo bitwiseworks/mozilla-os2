@@ -327,8 +327,8 @@ nsDeviceContext::SetDPI()
         }
 #endif
 #ifdef XP_OS2
-        case gfxSurfaceType::OS2:
-        case gfxSurfaceType::OS2Printing: {
+        case gfxSurfaceType::Os2:
+        case gfxSurfaceType::Os2Printing: {
             // Setting |dpi| to the screen res, then scaling up to the
             // printer's actual res results in widgets (such as buttons)
             // that are properly sized in the print output.  It also
@@ -720,8 +720,8 @@ nsDeviceContext::CalcPrintingSize()
 #endif
 
 #ifdef XP_OS2
-    case gfxSurfaceType::OS2:
-    case gfxSurfaceType::OS2Printing:
+    case gfxSurfaceType::Os2:
+    case gfxSurfaceType::Os2Printing:
         {
             inPoints = false;
             size = reinterpret_cast<gfxOS2Surface*>(mPrintingSurface.get())->GetSize();

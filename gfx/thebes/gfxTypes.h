@@ -70,7 +70,7 @@ MOZ_BEGIN_ENUM_CLASS(gfxSurfaceType)
   BeOS,
   DirectFB,        // unused, but needed for cairo parity
   SVG,
-  OS2,
+  Os2,
   Win32Printing,
   QuartzImage,
   Script,
@@ -84,7 +84,7 @@ MOZ_BEGIN_ENUM_CLASS(gfxSurfaceType)
   Skia,
   Subsurface,
   D2D,
-  OS2Printing
+  Os2Printing,
   Max
 MOZ_END_ENUM_CLASS(gfxSurfaceType)
 
