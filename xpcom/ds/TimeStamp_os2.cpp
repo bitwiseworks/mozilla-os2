@@ -15,6 +15,8 @@
 
 #include "mozilla/TimeStamp.h"
 #include "prlock.h"
+#include "prinrval.h"
+#include "nsDebug.h"
 
 namespace mozilla {
 
@@ -102,8 +104,6 @@ TimeStamp::Startup()
   gTicksPerMsDbl = gTicksPerSecDbl / 1000.0;
 
   gInitialized = true;
-  sFirstTimeStamp = TimeStamp::Now();
-  sProcessCreation = TimeStamp();
 
   return NS_OK;
 }
