@@ -34,6 +34,10 @@
 # include <sys/wait.h>
 # include <unistd.h>
 #endif
+#ifdef XP_OS2
+# include <sys/mman.h>
+# include <process.h>
+#endif
 
 #include "jsapi.h"
 #include "jsarray.h"
@@ -4092,6 +4096,8 @@ NestedShell(JSContext *cx, unsigned argc, jsval *vp)
     if (!EscapeForShell(argv))
         return false;
     status = _spawnv(_P_WAIT, sArgv[0], argv.get());
+#elif defined(XP_OS2)
+    status = spawnv(P_WAIT, sArgv[0], argv.get());
 #else
     pid_t pid = fork();
     switch (pid) {

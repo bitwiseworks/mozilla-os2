@@ -1074,7 +1074,7 @@ AsmJSFaultHandler(int signum, siginfo_t *info, void *context)
 }
 #endif
 
-#if !defined(XP_MACOSX)
+#if !defined(XP_MACOSX) && !defined(XP_OS2)
 static bool sHandlersInstalled = false;
 #endif
 

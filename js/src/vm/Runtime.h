@@ -35,7 +35,7 @@
 # include "gc/StoreBuffer.h"
 #endif
 #include "gc/Tracer.h"
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || defined(XP_OS2)
 # include "jit/AsmJSSignalHandlers.h"
 #endif
 #include "js/HashTable.h"

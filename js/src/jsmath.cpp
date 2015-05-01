@@ -8,6 +8,10 @@
  * JS math package.
  */
 
+#if defined(XP_OS2) && defined(__GNUC__)
+# define _GNU_SOURCE // for log2
+#endif
+
 #include "jsmath.h"
 
 #include "mozilla/Constants.h"

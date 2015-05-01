@@ -19,6 +19,7 @@ struct JSRuntime;
 # define INCL_DOSMEMMGR
 # include <os2.h>
 # undef ADDRESS // used as an identifier somewhere
+# include <string.h>
 #endif
 
 namespace js {
