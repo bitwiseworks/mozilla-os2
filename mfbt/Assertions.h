@@ -205,7 +205,7 @@ __declspec(noreturn) __inline void MOZ_NoReturn() {}
          ::abort(); \
        } while (0)
 #  else
-#    define MOZ_CRASH() \
+#    define MOZ_REALLY_CRASH() \
        do { \
          __asm__ __volatile__ ("int3\n\t" \
                                "nop\n\t"); \
