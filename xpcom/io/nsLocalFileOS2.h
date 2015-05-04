@@ -23,6 +23,7 @@
 #include "nsILocalFileOS2.h"
 #include "nsIHashable.h"
 #include "nsIClassInfoImpl.h"
+#include "prio.h"
 
 #define INCL_DOS
 #define INCL_DOSERRORS

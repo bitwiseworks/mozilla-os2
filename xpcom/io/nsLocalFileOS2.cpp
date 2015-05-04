@@ -15,12 +15,11 @@
 #include "nsISimpleEnumerator.h"
 #include "nsIDirectoryEnumerator.h"
 #include "nsIComponentManager.h"
-#include "prio.h"
+#include "prlink.h"
 
 #include "nsReadableUtils.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIMutableArray.h"
-#include "nsTraceRefcntImpl.h"
 #include "nsHashKeys.h"
 #include "mozilla/HashFunctions.h"
 
@@ -2000,11 +1999,11 @@ nsLocalFile::GetParent(nsIFile * *aParent)
     nsCOMPtr<nsIFile> localFile;
     nsresult rv = NS_NewNativeLocalFile(parentPath, false, getter_AddRefs(localFile));
 
-    if(NS_SUCCEEDED(rv) && localFile)
-    {
-        return CallQueryInterface(localFile, aParent);
-    }
-    return rv;
+    if (NS_FAILED(rv))
+        return rv;
+
+    localFile.forget(aParent);
+    return NS_OK;
 }
 
 NS_IMETHODIMP
