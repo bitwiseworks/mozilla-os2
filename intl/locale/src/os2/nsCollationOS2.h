@@ -7,8 +7,7 @@
 
 #include "nsICollation.h"
 #include "nsCollation.h"  // static library
-#include "nsCRT.h"
-
+#include "nsString.h"
 
 
 class nsCollationOS2 : public nsICollation {
