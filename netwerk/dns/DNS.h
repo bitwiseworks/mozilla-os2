@@ -110,6 +110,7 @@ union NetAddr {
     char path[108];                 /* null-terminated pathname */
 #else
     char path[104];                 /* null-terminated pathname */
+#endif
   } local;
 #endif
   // introduced to support nsTArray<NetAddr> (for DNSRequestParent.cpp)
