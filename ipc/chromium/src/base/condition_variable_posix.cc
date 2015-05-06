@@ -18,7 +18,7 @@ using base::TimeDelta;
 ConditionVariable::ConditionVariable(Lock* user_lock)
     : user_mutex_(user_lock->lock_impl()->os_lock()) {
   int rv = 0;
-#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID) && !defined(OS_OS2)
   pthread_condattr_t attrs;
   rv = pthread_condattr_init(&attrs);
   DCHECK_EQ(0, rv);
@@ -54,12 +54,21 @@ void ConditionVariable::TimedWait(const TimeDelta& max_time) {
       &condition_, user_mutex_, &relative_time);
 #else
   // The timeout argument to pthread_cond_timedwait is in absolute time.
+#if defined(OS_OS2)
+  struct timeval now;
+  gettimeofday(&now, NULL);
+#else
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
+#endif
 
   struct timespec absolute_time;
   absolute_time.tv_sec = now.tv_sec;
+#if defined(OS_OS2)
+  absolute_time.tv_nsec = now.tv_usec * Time::kNanosecondsPerMicrosecond;
+#else
   absolute_time.tv_nsec = now.tv_nsec;
+#endif
   absolute_time.tv_sec += relative_time.tv_sec;
   absolute_time.tv_nsec += relative_time.tv_nsec;
   absolute_time.tv_sec += absolute_time.tv_nsec / Time::kNanosecondsPerSecond;
