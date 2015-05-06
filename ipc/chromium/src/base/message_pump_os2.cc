@@ -198,7 +198,7 @@ ULONG MessagePumpForUI::SetTimer(HWND hwnd, MessagePumpForUI *that, int msec) {
 // static
 MessagePumpForUI *MessagePumpForUI::GetTimer(HWND hwnd, ULONG id) {
   AutoLock auto_lock(timer_ids_lock_);
-  TimerID tid = { hwnd, id };
+  TimerID tid = { hwnd, (USHORT)id };
   TimerIDMap::iterator it = timer_ids_.find(tid);
   if (it != timer_ids_.end())
     return it->second;
@@ -209,7 +209,7 @@ MessagePumpForUI *MessagePumpForUI::GetTimer(HWND hwnd, ULONG id) {
 void MessagePumpForUI::KillTimer(HWND hwnd, ULONG id) {
   AutoLock auto_lock(timer_ids_lock_);
   WinStopTimer(0, hwnd, id);
-  TimerID tid = { hwnd, id };
+  TimerID tid = { hwnd, (USHORT)id };
   timer_ids_.erase(tid);
 }
 

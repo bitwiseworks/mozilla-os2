@@ -45,7 +45,7 @@ TransportDIB* TransportDIB::Create(size_t size, uint32_t sequence_num) {
 TransportDIB* TransportDIB::Map(TransportDIB::Handle handle) {
   TransportDIB* dib = new TransportDIB(handle);
   if (!dib->shared_memory_.Map(0 /* map whole shared memory segment */)) {
-    LOG(ERROR) << "Failed to map transport DIB"
+    CHROMIUM_LOG(ERROR) << "Failed to map transport DIB"
                << " handle:" << handle;
     delete dib;
     return NULL;

@@ -297,6 +297,7 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   return false;
 }
 
+#ifndef OS_OS2
 namespace {
 
 int64_t TimeValToMicroseconds(const struct timeval& tv) {
@@ -304,6 +305,7 @@ int64_t TimeValToMicroseconds(const struct timeval& tv) {
 }
 
 }
+#endif
 
 int ProcessMetrics::GetCPUUsage() {
 #ifdef OS_OS2
@@ -390,8 +392,6 @@ int ProcessMetrics::GetCPUUsage() {
 
   return cpu;
 #endif
-}
-
 }
 
 }  // namespace base

@@ -67,10 +67,4 @@ bool NamedProcessIterator::IncludeEntry() {
   return filter_->Includes(entry_.pid, entry_.ppid);
 }
 
-bool ProcessMetrics::GetIOCounters(IoCounters* io_counters) const {
-  // @todo later
-  NOTIMPLEMENTED();
-  return false;
-}
-
 }  // namespace base
