@@ -19,6 +19,8 @@
 #include "nsIPlatformCharset.h"
 
 #include "mozilla/Preferences.h"
+#include "gfxFontConstants.h"
+
 #include <algorithm>
 
 using namespace mozilla;
@@ -518,8 +520,6 @@ gfxOS2FontGroup::gfxOS2FontGroup(const nsAString& aFamilies,
     nsString fontString;
     gfxPlatform::GetPlatform()->GetPrefFonts(nsGkAtoms::Unicode, fontString, false);
     ForEachFont(fontString, nsGkAtoms::Unicode, FontCallback, &familyArray);
-    gfxPlatform::GetPlatform()->GetPrefFonts(nsGkAtoms::x_user_def, fontString, false);
-    ForEachFont(fontString, nsGkAtoms::x_user_def, FontCallback, &familyArray);
 
     // Should append some default font if there are no available fonts.
     // Let's use Helv which should be available on any OS/2 system; if

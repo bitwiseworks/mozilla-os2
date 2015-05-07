@@ -15,7 +15,7 @@
 #include "nsServiceManagerUtils.h"
 
 #include "gfxFontconfigUtils.h"
-//#include <fontconfig/fontconfig.h>
+#include "gfx2DGlue.h"
 
 /**********************************************************************
  * class gfxOS2Platform
@@ -42,7 +42,7 @@ gfxOS2Platform::~gfxOS2Platform()
 }
 
 already_AddRefed<gfxASurface>
-gfxOS2Platform::CreateOffscreenSurface(const gfxIntSize& aSize,
+gfxOS2Platform::CreateOffscreenSurface(const IntSize & aSize,
                                        gfxContentType contentType)
 {
     gfxImageFormat format =
@@ -57,9 +57,9 @@ gfxOS2Platform::CreateOffscreenSurface(const gfxIntSize& aSize,
 
     nsRefPtr<gfxASurface> surf;
     if (stride * aSize.height <= 4096) {
-        surf = new gfxImageSurface(aSize, format);
+        surf = new gfxImageSurface(ThebesIntSize(aSize), format);
     } else {
-        surf = new gfxOS2Surface(aSize, format);
+        surf = new gfxOS2Surface(ThebesIntSize(aSize), format);
     }
 
     return surf.forget();
