@@ -1013,7 +1013,7 @@ nsJSObjWrapper::GetNewOrUsed(NPP npp, JSContext *cx, JS::Handle<JSObject*> obj)
     MOZ_ASSERT(p->value());
     // Found a live nsJSObjWrapper, return it.
 
-    return NPN_retainobject(entry->mJSObjWrapper);
+    return NPN_retainobject(p->value());
   }
 
   // No existing nsJSObjWrapper, create one.
@@ -1868,7 +1868,7 @@ nsJSNPRuntime::OnPluginDestroy(NPP npp)
           npobj->_class->invalidate(npobj);
         }
 
-        _releaseobject(npobj);
+        NPN_releaseobject(npobj);
 
         e.removeFront();
       }

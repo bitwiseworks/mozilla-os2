@@ -9,7 +9,6 @@
 #include "os2.h"
 
 #include "nsDebug.h"
-#include "nsGUIEvent.h"
 #include "nsPluginNativeWindow.h"
 #include "nsThreadUtils.h"
 #include "nsAutoPtr.h"
@@ -60,7 +59,7 @@ public:
   ULONG  GetMsg()    { return mMsg; };
   MPARAM GetWParam() { return mWParam; };
   MPARAM GetLParam() { return mLParam; };
-  bool InUse()     { return (mWnd!=nullptr); };
+  bool InUse()     { return (mWnd!=NULLHANDLE); };
   
   NS_DECL_NSIRUNNABLE
 
@@ -79,7 +78,7 @@ PluginWindowEvent::PluginWindowEvent()
 
 void PluginWindowEvent::Clear()
 {
-  mWnd    = nullptr;
+  mWnd    = NULLHANDLE;
   mMsg    = 0;
   mWParam = 0;
   mLParam = 0;
@@ -88,8 +87,8 @@ void PluginWindowEvent::Clear()
 void PluginWindowEvent::Init(const PluginWindowWeakRef &ref, HWND aWnd,
                              ULONG aMsg, MPARAM mp1, MPARAM mp2)
 {
-  NS_ASSERTION(aWnd != nullptr, "invalid plugin event value");
-  NS_ASSERTION(mWnd == nullptr, "event already in use");
+  NS_ASSERTION(aWnd != NULLHANDLE, "invalid plugin event value");
+  NS_ASSERTION(mWnd == NULLHANDLE, "event already in use");
   mPluginWindowRef = ref;
   mWnd    = aWnd;
   mMsg    = aMsg;
