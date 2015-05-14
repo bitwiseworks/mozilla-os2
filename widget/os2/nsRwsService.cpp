@@ -126,7 +126,7 @@ protected:
 //  nsIRwsService implementation
 //------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS2(nsRwsService, nsIRwsService, nsIObserver)
+NS_IMPL_ISUPPORTS(nsRwsService, nsIRwsService, nsIObserver)
 
 nsRwsService::nsRwsService()
 {
@@ -425,10 +425,8 @@ nsRwsService::HandlerFromPath(const char *aPath, uint32_t *aHandle,
 
     nsAutoChar16Buffer buffer;
     int32_t bufLength;
-    rv = MultiByteToWideChar(0, pszTitle, strlen(pszTitle),
-                             buffer, bufLength);
-    if (NS_FAILED(rv))
-      break;
+    MultiByteToWideChar(0, pszTitle, strlen(pszTitle),
+                       buffer, bufLength);
 
     nsAutoString classViewer;
     AssignNLSString(NS_LITERAL_STRING("classViewerOS2").get(), classViewer);
@@ -768,9 +766,7 @@ static nsresult AssignTitleString(const char *aTitle, nsAString& result)
   int32_t bufLength;
 
   // convert the title to Unicode
-  if (NS_FAILED(MultiByteToWideChar(0, aTitle, strlen(aTitle),
-                                      buffer, bufLength)))
-    return NS_ERROR_FAILURE;
+  MultiByteToWideChar(0, aTitle, strlen(aTitle), buffer, bufLength);
 
   char16_t  *pSrc;
   char16_t  *pDst;

@@ -42,6 +42,10 @@
 #include "nsPrintfCString.h"
 #include "mozilla/Preferences.h"
 
+#define QQ_(str) #str
+#define Q_(str) QQ_(str)
+#define MOZ_APP_DISPLAYNAME_STR Q_(MOZ_APP_DISPLAYNAME)
+
 using namespace mozilla;
 
 //---------------------------------------------------------------------------
@@ -77,6 +81,7 @@ static int16_t  AdjustFormatAndExtension(int16_t aFormat,
 static nsresult GetFileNameForPrintSettings(nsIPrintSettings* aPS,
                                             nsAString& aFileName);
 static char *   GetACPString(const char16_t* aStr);
+static char *   GetACPString(const nsAString& aStr);
 static void     SetDevModeFromSettings(ULONG printer,
                                        nsIPrintSettings* aPrintSettings);
 
@@ -159,7 +164,7 @@ nsDeviceContextSpecOS2::~nsDeviceContextSpecOS2()
     delete mQueue;
 }
 
-NS_IMPL_ISUPPORTS1(nsDeviceContextSpecOS2, nsIDeviceContextSpec)
+NS_IMPL_ISUPPORTS(nsDeviceContextSpecOS2, nsIDeviceContextSpec)
 
 //---------------------------------------------------------------------------
 
@@ -234,7 +239,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::Init(nsIWidget *aWidget,
   PR_ExplodeTime(PR_Now(), PR_LocalTimeParameters, &time);
   mDefaultName.Assign(
       nsPrintfCString("%s_%04d%02d%02d_%02d%02d%02d",
-                      MOZ_APP_DISPLAYNAME, time.tm_year, time.tm_month+1,
+                      MOZ_APP_DISPLAYNAME_STR, time.tm_year, time.tm_month+1,
                       time.tm_mday, time.tm_hour, time.tm_min, time.tm_sec));
 
   // Identify the print job's destination - it may get changed below.
@@ -658,9 +663,23 @@ char* GetACPString(const char16_t* aStr)
    return ToNewCString(nsDependentCString(buffer.Elements()));
 }
 
+static
+char* GetACPString(const nsAString& aStr)
+{
+   if (aStr.Length() == 0) {
+      return nullptr;
+   }
+
+   nsAutoCharBuffer buffer;
+   int32_t bufLength;
+   WideCharToMultiByte(0, aStr.BeginReading(), aStr.Length(),
+                       buffer, bufLength);
+   return ToNewCString(nsDependentCString(buffer.Elements()));
+}
+
 //---------------------------------------------------------------------------
 
-NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(char16_t* aTitle,
+NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(const nsAString& aTitle,
                                                     char16_t* aPrintToFileName,
                                                     int32_t aStartPage,
                                                     int32_t aEndPage)
@@ -669,13 +688,13 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(char16_t* aTitle,
 
 #ifdef debug_thebes_print
   printf("BeginDoc - tile= %s  file= %s  fromPg= %d  toPg= %d\n",
-         NS_LossyConvertUTF16toASCII(nsString(aTitle)).get(),
+         NS_LossyConvertUTF16toASCII(aTitle).get(),
          NS_LossyConvertUTF16toASCII(nsString(aPrintToFileName)).get(),
          aStartPage, aEndPage);
 #endif
 
   if (mSpoolerStream) {
-    if (aTitle) {
+    if (! aTitle.IsEmpty ()) {
       char *title = GetACPString(aTitle);
       nsresult rv = mSpoolerStream->BeginDocument(title);
       nsMemory::Free(title);
@@ -917,7 +936,7 @@ nsPrinterEnumeratorOS2::~nsPrinterEnumeratorOS2()
 DBGNX();
 }
 
-NS_IMPL_ISUPPORTS1(nsPrinterEnumeratorOS2, nsIPrinterEnumerator)
+NS_IMPL_ISUPPORTS(nsPrinterEnumeratorOS2, nsIPrinterEnumerator)
 
 NS_IMETHODIMP nsPrinterEnumeratorOS2::GetPrinterNameList(
                                       nsIStringEnumerator **aPrinterNameList)
@@ -996,7 +1015,7 @@ NS_IMETHODIMP nsPrinterEnumeratorOS2::DisplayPropertiesDlg(
 //  os2NullOutputStream implementation
 //---------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS1(os2NullOutputStream, nsIOutputStream)
+NS_IMPL_ISUPPORTS(os2NullOutputStream, nsIOutputStream)
 
 os2NullOutputStream::os2NullOutputStream()
 {
@@ -1058,7 +1077,7 @@ NS_IMETHODIMP os2NullOutputStream::IsNonBlocking(bool *_retval)
 //  os2SpoolerStream implementation
 //---------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS1(os2SpoolerStream, nsIOutputStream)
+NS_IMPL_ISUPPORTS(os2SpoolerStream, nsIOutputStream)
 
 os2SpoolerStream::os2SpoolerStream()
   : mSpl(0), mPages(0)

@@ -6,7 +6,7 @@
 
 #include "nsBidiKeyboard.h"
 
-NS_IMPL_ISUPPORTS1(nsBidiKeyboard, nsIBidiKeyboard)
+NS_IMPL_ISUPPORTS(nsBidiKeyboard, nsIBidiKeyboard)
 
 nsBidiKeyboard::nsBidiKeyboard() : nsIBidiKeyboard()
 {
@@ -20,12 +20,6 @@ NS_IMETHODIMP nsBidiKeyboard::IsLangRTL(bool *aIsRTL)
 {
   *aIsRTL = false;
   // XXX Insert platform specific code to determine keyboard direction
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP nsBidiKeyboard::SetLangFromBidiLevel(uint8_t aLevel)
-{
-  // XXX Insert platform specific code to set keyboard language
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

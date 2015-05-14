@@ -23,7 +23,7 @@ public:
   static already_AddRefed<nsIdleServiceOS2> GetInstance()
   {
     nsRefPtr<nsIdleServiceOS2> idleService =
-      static_cast<nsIdleServiceOS2*>(nsIdleService::GetInstance().get());
+      nsIdleService::GetInstance().downcast<nsIdleServiceOS2>();
     if (!idleService) {
       idleService = new nsIdleServiceOS2();
       NS_ADDREF(idleService);

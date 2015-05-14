@@ -27,11 +27,11 @@ private:
 typedef nsAutoTArray<char, CHAR_BUFFER_SIZE> nsAutoCharBuffer;
 typedef nsAutoTArray<char16_t, CHAR_BUFFER_SIZE> nsAutoChar16Buffer;
 
-nsresult WideCharToMultiByte(int aCodePage, const char16_t* aSrc,
-                             int32_t aSrcLength, nsAutoCharBuffer& aResult,
-                             int32_t& aResultLength);
-nsresult MultiByteToWideChar(int aCodePage, const char* aSrc,
-                             int32_t aSrcLength, nsAutoChar16Buffer& aResult,
-                             int32_t& aResultLength);
+void WideCharToMultiByte(int aCodePage, const char16_t* aSrc,
+                         int32_t aSrcLength, nsAutoCharBuffer& aResult,
+                         int32_t& aResultLength);
+void MultiByteToWideChar(int aCodePage, const char* aSrc,
+                         int32_t aSrcLength, nsAutoChar16Buffer& aResult,
+                         int32_t& aResultLength);
 
 #endif

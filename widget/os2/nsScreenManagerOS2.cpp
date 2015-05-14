@@ -22,7 +22,7 @@ nsScreenManagerOS2 :: ~nsScreenManagerOS2()
 
 
 // addref, release, QI
-NS_IMPL_ISUPPORTS1(nsScreenManagerOS2, nsIScreenManager)
+NS_IMPL_ISUPPORTS(nsScreenManagerOS2, nsIScreenManager)
 
 
 //

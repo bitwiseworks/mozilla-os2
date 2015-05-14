@@ -30,7 +30,7 @@ typedef struct _MyData
    ULONG    ulNumFilters;
 }MYDATA, *PMYDATA;
 
-NS_IMPL_ISUPPORTS1(nsFilePicker, nsIFilePicker)
+NS_IMPL_ISUPPORTS(nsFilePicker, nsIFilePicker)
 
 char nsFilePicker::mLastUsedDirectory[MAX_PATH+1] = { 0 };
 
@@ -468,12 +468,10 @@ NS_IMETHODIMP nsFilePicker::SetFilterIndex(int32_t aFilterIndex)
 
 //-------------------------------------------------------------------------
 void nsFilePicker::InitNative(nsIWidget *aParent,
-                              const nsAString& aTitle,
-                              int16_t aMode)
+                              const nsAString& aTitle)
 {
   mWnd = (HWND) ((aParent) ? aParent->GetNativeData(NS_NATIVE_WINDOW) : 0); 
   mTitle.Assign(aTitle);
-  mMode = aMode;
 }
 
 

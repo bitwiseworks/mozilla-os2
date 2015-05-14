@@ -49,7 +49,7 @@ nsAppShell::Init()
 
   if (!sMsgId) {
     sMsgId = WinAddAtom( WinQuerySystemAtomTable(), "nsAppShell:EventID");
-    WinRegisterClass((HAB)0, "nsAppShell:EventWindowClass", EventWindowProc, nullptr, 0);
+    WinRegisterClass((HAB)0, "nsAppShell:EventWindowClass", EventWindowProc, 0, 0);
   }
 
   mEventWnd = ::WinCreateWindow(HWND_DESKTOP,

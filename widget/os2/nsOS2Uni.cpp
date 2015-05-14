@@ -103,47 +103,54 @@ void OS2Uni::FreeUconvObjects()
 /**********************************************************
     WideCharToMultiByte
  **********************************************************/
-nsresult
+void
 WideCharToMultiByte(int aCodePage, const char16_t* aSrc,
                     int32_t aSrcLength, nsAutoCharBuffer& aResult,
                     int32_t& aResultLength)
 {
-  nsresult rv;
   nsISupports* sup = OS2Uni::GetUconvObject(aCodePage, eConv_Encoder);
   nsCOMPtr<nsIUnicodeEncoder> uco = do_QueryInterface(sup);
 
   if (NS_FAILED(uco->GetMaxLength(aSrc, aSrcLength, &aResultLength))) {
-    return NS_ERROR_UNEXPECTED;
+    NS_ABORT();
+    return;
   }
-  if (!aResult.SetLength(aResultLength + 1))
-    return NS_ERROR_OUT_OF_MEMORY;
+
+  aResult.SetLength(aResultLength + 1);
   char* str = aResult.Elements();
 
-  rv = uco->Convert(aSrc, &aSrcLength, str, &aResultLength);
+  if (NS_FAILED(uco->Convert(aSrc, &aSrcLength, str, &aResultLength)))
+  {
+    NS_ABORT();
+    return;
+  }
+
   aResult[aResultLength] = '\0';
-  return rv;
 }
 
 /**********************************************************
     MultiByteToWideChar
  **********************************************************/
-nsresult
+void
 MultiByteToWideChar(int aCodePage, const char* aSrc,
                     int32_t aSrcLength, nsAutoChar16Buffer& aResult,
                     int32_t& aResultLength)
 {
-  nsresult rv;
   nsISupports* sup = OS2Uni::GetUconvObject(aCodePage, eConv_Decoder);
   nsCOMPtr<nsIUnicodeDecoder> uco = do_QueryInterface(sup);
 
   if (NS_FAILED(uco->GetMaxLength(aSrc, aSrcLength, &aResultLength))) {
-    return NS_ERROR_UNEXPECTED;
+    NS_ABORT();
+    return;
   }
-  if (!aResult.SetLength(aResultLength + 1))
-    return NS_ERROR_OUT_OF_MEMORY;
+
+  aResult.SetLength(aResultLength + 1);
   char16_t* str = aResult.Elements();
 
-  rv = uco->Convert(aSrc, &aSrcLength, str, &aResultLength);
+  if (NS_FAILED(uco->Convert(aSrc, &aSrcLength, str, &aResultLength))) {
+    NS_ABORT();
+    return;
+  }
+
   aResult[aResultLength] = '\0';
-  return rv;
 }

@@ -34,8 +34,8 @@ public:
                   bool aIsPrintPreview);
 
   NS_IMETHOD GetSurfaceForPrinter(gfxASurface **nativeSurface);
-  NS_IMETHOD BeginDocument(char16_t* aTitle, char16_t* aPrintToFileName,
-                           PRInt32 aStartPage, PRInt32 aEndPage);
+  NS_IMETHOD BeginDocument(const nsAString& aTitle, char16_t* aPrintToFileName,
+                           int32_t aStartPage, int32_t aEndPage);
   NS_IMETHOD EndDocument();
   NS_IMETHOD BeginPage();
   NS_IMETHOD EndPage();

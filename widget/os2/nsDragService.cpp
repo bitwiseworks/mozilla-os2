@@ -20,8 +20,8 @@
 #include "wdgtos2rc.h"
 #include "nsILocalFileOS2.h"
 #include "nsIDocument.h"
-#include "nsGUIEvent.h"
 #include "nsISelection.h"
+#include "mozilla/BasicEvents.h"
 #include <algorithm>
 
 // --------------------------------------------------------------------------
@@ -106,7 +106,7 @@ nsDragService::~nsDragService()
   }
 }
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsDragService, nsBaseDragService, nsIDragSessionOS2)
+NS_IMPL_ISUPPORTS_INHERITED(nsDragService, nsBaseDragService, nsIDragSessionOS2)
 
 // --------------------------------------------------------------------------
 

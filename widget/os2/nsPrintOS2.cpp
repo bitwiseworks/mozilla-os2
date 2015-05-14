@@ -133,11 +133,8 @@ nsAString* os2PrintQ::PrinterTitle()
 
     nsAutoChar16Buffer uName;
     int32_t uNameLength = 123;
-    if (NS_FAILED(MultiByteToWideChar(0, cName.get(), cName.Length(), uName, uNameLength))) {
-      mPrinterTitle.Assign(NS_LITERAL_STRING("Error"));
-    } else {
-      mPrinterTitle.Assign(nsDependentString(uName.Elements()));
-    }
+    MultiByteToWideChar(0, cName.get(), cName.Length(), uName, uNameLength);
+    mPrinterTitle.Assign(nsDependentString(uName.Elements()));
 
     // store printer description in prefs for the print dialog
     nsresult rv;
