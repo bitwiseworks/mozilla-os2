@@ -515,8 +515,7 @@ gfxOS2FontGroup::gfxOS2FontGroup(const nsAString& aFamilies,
 
     // To be able to easily search for glyphs in other fonts, append a few good
     // replacement candidates to the list. The best ones are the Unicode fonts that
-    // are set up, and if the user was so clever to set up the User Defined fonts,
-    // then these are probable candidates, too.
+    // are set up.
     nsString fontString;
     gfxPlatform::GetPlatform()->GetPrefFonts(nsGkAtoms::Unicode, fontString, false);
     ForEachFont(fontString, nsGkAtoms::Unicode, FontCallback, &familyArray);
