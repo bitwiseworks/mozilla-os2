@@ -708,7 +708,8 @@ NS_IMETHODIMP nsWebBrowserPersist::OnStopRequest(
         nsCOMPtr<nsIURI> uriSource = data->mOriginalLocation;
         nsCOMPtr<nsIFile> localFile;
         GetLocalFileFromURI(data->mFile, getter_AddRefs(localFile));
-        mOutputMap.Remove(&key);
+        // This will automatically close the output stream
+        mOutputMap.Remove(keyPtr);
         if (localFile)
         {
             nsCOMPtr<nsILocalFileOS2> localFileOS2 = do_QueryInterface(localFile);
