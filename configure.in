@@ -1694,7 +1694,7 @@ Linux)
         MOZ_ENABLE_PROFILER_SPS=
     esac
     ;;
-WINNT|OS2|Darwin) ;;
+WINNT|Darwin) ;;
 *)
     MOZ_ENABLE_PROFILER_SPS=
     ;;
