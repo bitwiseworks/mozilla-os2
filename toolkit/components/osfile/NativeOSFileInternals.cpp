@@ -132,7 +132,7 @@ private:
 // Platform specific constants. As OS.File always uses OS-level
 // errors, we need to map a few high-level errors to OS-level
 // constants.
-#if defined(XP_UNIX)
+#if defined(XP_UNIX) || defined(XP_OS2)
 #define OS_ERROR_NOMEM ENOMEM
 #define OS_ERROR_INVAL EINVAL
 #define OS_ERROR_TOO_LARGE EFBIG
