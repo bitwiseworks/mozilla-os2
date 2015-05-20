@@ -617,3 +617,12 @@ PRStatus _MD_CloseFileMap(PRFileMap *fmap)
     return PR_SUCCESS;
 }
 
+PRStatus _MD_SyncMemMap(
+    PRFileDesc *fd,
+    void *addr,
+    PRUint32 len)
+{
+    /* Since modifying the mapped file is not supported ATM, sync is neither */
+    PR_SetError(PR_NOT_IMPLEMENTED_ERROR, 0);
+    return PR_FAILURE;
+}

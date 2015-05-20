@@ -444,6 +444,12 @@ extern PRStatus _MD_MemUnmap(void *addr, PRUint32 size);
 extern PRStatus _MD_CloseFileMap(struct PRFileMap *fmap);
 #define _MD_CLOSE_FILE_MAP _MD_CloseFileMap
 
+extern PRStatus _MD_SyncMemMap(
+    PRFileDesc *fd,
+    void *addr,
+    PRUint32 len);
+#define _MD_SYNC_MEM_MAP _MD_SyncMemMap
+
 /* Some stuff for setting up thread contexts */
 typedef ULONG DWORD, *PDWORD;
 
