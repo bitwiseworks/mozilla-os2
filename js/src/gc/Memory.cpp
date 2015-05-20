@@ -108,6 +108,20 @@ gc::GetPageFaultCount()
     return pmc.PageFaultCount;
 }
 
+void *
+gc::AllocateMappedContent(int fd, size_t offset, size_t length, size_t alignment)
+{
+    // TODO: Bug 988813 - Support memory mapped array buffer for Windows platform.
+    return nullptr;
+}
+
+// Deallocate mapped memory for object.
+void
+gc::DeallocateMappedContent(void *p, size_t length)
+{
+    // TODO: Bug 988813 - Support memory mapped array buffer for Windows platform.
+}
+
 #elif defined(XP_OS2)
 
 #define INCL_DOSMEMMGR
@@ -185,9 +199,68 @@ MapAlignedPagesRecursively(JSRuntime *rt, size_t size, size_t alignment, int& re
 }
 
 void *
+gc::MapAlignedPages(JSRuntime *rt, size_t size, size_t alignment)
+{
+    JS_ASSERT(size >= alignment);
+    JS_ASSERT(size % alignment == 0);
+    JS_ASSERT(size % rt->gcSystemPageSize == 0);
+    JS_ASSERT(alignment % rt->gcSystemAllocGranularity == 0);
+
+    int recursions = -1;
+
+    /*
+     * Make up to OS2_MAX_RECURSIONS attempts to get an aligned block
+     * of the right size by recursively allocating blocks of unaligned
+     * free memory until only an aligned allocation is possible.
+     */
+    void *p = MapAlignedPagesRecursively(rt, size, alignment, recursions);
+    if (p)
+        return p;
+
+    /*
+     * If memory is heavily fragmented, the recursive strategy may fail;
+     * instead, use the "expensive" strategy:  allocate twice as much
+     * as requested and return an aligned address within this block.
+     */
+    if (DosAllocMem(&p, 2 * size,
+                    OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE)) {
+        JS_ALWAYS_TRUE(DosAllocMem(&p, 2 * size,
+                                   PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
+    }
+
+    uintptr_t addr = reinterpret_cast<uintptr_t>(p);
+    addr = (addr + (alignment - 1)) & ~(alignment - 1);
+
+    return reinterpret_cast<void *>(addr);
+}
+
+bool
+gc::MarkPagesUnused(JSRuntime *rt, void *p, size_t size)
+{
+    if (!DecommitEnabled(rt))
+        return true;
+
+    JS_ASSERT(uintptr_t(p) % rt->gcSystemPageSize == 0);
+    return true;
+}
+
+bool
+gc::MarkPagesInUse(JSRuntime *rt, void *p, size_t size)
+{
+    JS_ASSERT(uintptr_t(p) % rt->gcSystemPageSize == 0);
+    return true;
+}
+
+size_t
+gc::GetPageFaultCount()
+{
+    return 0;
+}
+
+void *
 gc::AllocateMappedContent(int fd, size_t offset, size_t length, size_t alignment)
 {
-    // TODO: Bug 988813 - Support memory mapped array buffer for Windows platform.
+    // TODO: Similar to Bug 988813 - Support memory mapped array buffer for OS/2 platform.
     return nullptr;
 }
 
@@ -195,7 +268,7 @@ gc::AllocateMappedContent(int fd, size_t offset, size_t length, size_t alignment
 void
 gc::DeallocateMappedContent(void *p, size_t length)
 {
-    // TODO: Bug 988813 - Support memory mapped array buffer for Windows platform.
+    // TODO: Similar to Bug 988813 - Support memory mapped array buffer for OS/2 platform.
 }
 
 #elif defined(SOLARIS)
