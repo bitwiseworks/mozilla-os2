@@ -56,4 +56,4 @@ if CONFIG['OS_ARCH'] == 'OS2':
         '/xpcom/base',
     ]
     # This file is (only) included from subdirectories, and the file is here.
-    RESFILE = '../xulrunos2.rc'
+    RESFILE = '../xulrunos2.res'
