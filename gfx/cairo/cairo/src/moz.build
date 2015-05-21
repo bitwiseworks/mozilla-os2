@@ -64,18 +64,8 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
     SOURCES += [
         'cairo-os2-printing-surface.c',
         'cairo-os2-surface.c',
-        'cairo-system.c',
-    ]
-    SOURCES += [
-        'cairo-base85-stream.c',
-        'cairo-cff-subset.c',
-        'cairo-deflate-stream.c',
-        'cairo-pdf-operators.c',
-        'cairo-pdf-surface.c',
         'cairo-ps-surface.c',
-        'cairo-truetype-subset.c',
-        'cairo-type1-fallback.c',
-        'cairo-type3-glyph-surface.c',
+        'cairo-system.c',
     ]
     DEFINES['OS2_USE_PLATFORM_ALLOC'] = True
     DEFINES['OS2_DYNAMIC_DIVE'] = True
