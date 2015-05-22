@@ -1499,7 +1499,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aType,
                                         const nsACString& aFileExt,
                                         bool       *aFound) {
   *aFound = true;
-  nsRefPtr<nsMIMEInfoOS2> retval = GetFromType(PromiseFlatCString(aType)).get();
+  nsRefPtr<nsMIMEInfoOS2> retval = GetFromType(PromiseFlatCString(aType));
   bool hasDefault = false;
   if (retval)
     retval->GetHasDefaultHandler(&hasDefault);
@@ -1620,8 +1620,8 @@ nsOSHelperAppService::GetApplicationDescription(const nsACString& aScheme, nsASt
 // Check OS/2 INI for application and parameters for the protocol
 // return NS_OK, if application exists for protocol in INI and is not empty
 nsresult GetApplicationAndParametersFromINI(const nsACString& aProtocol,
-                                            char* app, ULONG appLength,
-                                            char* param, ULONG paramLength)
+                                            char* app, unsigned long appLength,
+                                            char* param, unsigned long paramLength)
 {
   /* initialize app to '\0' for later check */
   *app = '\0';
