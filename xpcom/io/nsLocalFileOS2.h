@@ -64,6 +64,12 @@ public:
     static void GlobalShutdown();
 
 private:
+    // CopySingleFile constants for |options| parameter:
+    enum CopyFileOption {
+      Move                    = 1u << 1,
+      Rename                  = 1u << 3
+    };
+
     nsLocalFile(const nsLocalFile& other);
     virtual ~nsLocalFile() {}
 
@@ -80,7 +86,7 @@ private:
     nsresult Stat();
 
     nsresult CopyMove(nsIFile *newParentDir, const nsACString &newName, bool move);
-    nsresult CopySingleFile(nsIFile *source, nsIFile* dest, const nsACString &newName, bool move);
+    nsresult CopySingleFile(nsIFile *source, nsIFile* dest, const nsACString &newName, uint32_t options);
 
     nsresult SetModDate(int64_t aLastModifiedTime);
     nsresult AppendNativeInternal(const nsAFlatCString &node, bool multipleComponents);

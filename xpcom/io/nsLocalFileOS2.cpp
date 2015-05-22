@@ -1329,10 +1329,12 @@ nsLocalFile::SetFileSource(const nsACString& aURI)
 
 nsresult
 nsLocalFile::CopySingleFile(nsIFile *sourceFile, nsIFile *destParent,
-                            const nsACString &newName, bool move)
+                            const nsACString &newName, uint32_t options)
 {
-    nsresult rv;
+    nsresult rv = NS_OK;
     nsAutoCString filePath;
+
+    bool move = options & (Move | Rename);
 
     nsAutoCString destPath;
     destParent->GetNativeTarget(destPath);
@@ -1362,6 +1364,10 @@ nsLocalFile::CopySingleFile(nsIFile *sourceFile, nsIFile *destParent,
 
     if (!move || rc == ERROR_NOT_SAME_DEVICE || rc == ERROR_ACCESS_DENIED)
     {
+        if ((options & Rename) && rc == ERROR_NOT_SAME_DEVICE) {
+            return NS_ERROR_FILE_ACCESS_DENIED;
+        }
+
         // will get an error if the destination and source files aren't on
         // the same drive.  "MoveFile()" on Windows will go ahead and move
         // the file without error, so we need to do the same   IBM-AKR
@@ -1401,7 +1407,7 @@ nsLocalFile::CopySingleFile(nsIFile *sourceFile, nsIFile *destParent,
 
         // moving the file is supposed to act like a rename, so delete the
         // original file if we got this far without error
-        if(move && (rc == NO_ERROR))
+        if (move && (rc == NO_ERROR))
             DosDelete( filePath.get());
 
     } // !move or ERROR
@@ -1469,7 +1475,7 @@ nsLocalFile::CopyMove(nsIFile *aParentDir, const nsACString &newName, bool move)
     {
         // when moving things, first try to just MoveFile it,
         // even if it is a directory
-        rv = CopySingleFile(this, newParentDir, newName, move);
+        rv = CopySingleFile(this, newParentDir, newName, move ? Move : 0);
         done = NS_SUCCEEDED(rv);
         // If we are moving a directory and that fails, fallback on directory
         // enumeration.  See bug 231300 for details.
@@ -1621,6 +1627,61 @@ NS_IMETHODIMP
 nsLocalFile::MoveToNative(nsIFile *newParentDir, const nsACString &newName)
 {
     return CopyMove(newParentDir, newName, true);
+}
+
+NS_IMETHODIMP
+nsLocalFile::RenameTo(nsIFile *newParentDir, const nsAString & newNameUnicode)
+{
+  nsAutoCString newName;
+  nsresult rv = NS_CopyUnicodeToNative(newNameUnicode, newName);
+  if (NS_FAILED(rv)) {
+      return rv;
+  }
+
+  nsCOMPtr<nsIFile> targetParentDir = newParentDir;
+  // check to see if this exists, otherwise return an error.
+  // we will check this by resolving.  If the user wants us
+  // to follow links, then we are talking about the target,
+  // hence we can use the |followSymlinks| parameter.
+  rv = Stat();
+  if (NS_FAILED(rv)) {
+      return rv;
+  }
+
+  if (!targetParentDir) {
+      // no parent was specified.  We must rename.
+      if (newName.IsEmpty()) {
+          return NS_ERROR_INVALID_ARG;
+      }
+      rv = GetParent(getter_AddRefs(targetParentDir));
+      if (NS_FAILED(rv)) {
+          return rv;
+      }
+  }
+
+  if (!targetParentDir) {
+      return NS_ERROR_FILE_DESTINATION_NOT_DIR;
+  }
+
+  // make sure it exists and is a directory.  Create it if not there.
+  bool exists;
+  targetParentDir->Exists(&exists);
+  if (!exists) {
+      rv = targetParentDir->Create(DIRECTORY_TYPE, 0644);
+      if (NS_FAILED(rv)) {
+          return rv;
+      }
+  } else {
+      bool isDir;
+      targetParentDir->IsDirectory(&isDir);
+      if (!isDir) {
+          return NS_ERROR_FILE_DESTINATION_NOT_DIR;
+      }
+  }
+
+  uint32_t options = Rename;
+  // Move single file, or move a directory
+  return CopySingleFile(this, targetParentDir, newName, options);
 }
 
 NS_IMETHODIMP
