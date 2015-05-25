@@ -10,7 +10,7 @@
 
 %include "third_party/x86inc/x86inc.asm"
 
-SECTION .text
+SECTION_TEXT
 
 ; int64_t vp9_block_error(int16_t *coeff, int16_t *dqcoeff, intptr_t block_size,
 ;                         int64_t *ssz)

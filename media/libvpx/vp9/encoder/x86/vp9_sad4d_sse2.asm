@@ -10,7 +10,7 @@
 
 %include "third_party/x86inc/x86inc.asm"
 
-SECTION .text
+SECTION_TEXT
 
 ; PROCESS_4x2x4 first, off_{first,second}_{src,ref}, advance_at_end
 %macro PROCESS_4x2x4 5-6 0

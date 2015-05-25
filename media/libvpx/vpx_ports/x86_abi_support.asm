@@ -378,6 +378,10 @@ section .text
 %endmacro
 %elifidn __OUTPUT_FORMAT__,aout
 %define SECTION_RODATA section .data
+%elifidn __OUTPUT_FORMAT__,obj
+; OMF needs special handling to ensure everything is in the same segment
+; and that the segment is 32 bit.
+%define SECTION_RODATA section .TEXT32 use32 class=CODE
 %else
 %define SECTION_RODATA section .rodata
 %endif
@@ -393,12 +397,11 @@ section .text
 %elifidn __OUTPUT_FORMAT__,elfx32
 section .note.GNU-stack noalloc noexec nowrite progbits
 section .text
-%endif
-
+%elifidn __OUTPUT_FORMAT__,obj
 ; OMF needs special handling to ensure everything is in the same segment
 ; and that the segment is 32 bit.
-%ifidn __OUTPUT_FORMAT__,obj
-%define SECTION_RODATA section .text
-section .text align=16 use32 class=CODE
-group CGROUP text
+section .TEXT32 align=16 use32 class=CODE
+group CGROUP TEXT32
+%else
+section .text
 %endif

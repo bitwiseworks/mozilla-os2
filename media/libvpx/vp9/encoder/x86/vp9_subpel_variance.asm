@@ -61,7 +61,7 @@ bilin_filter_m_ssse3: times  8 db 16,  0
                       times  8 db  2, 14
                       times  8 db  1, 15
 
-SECTION .text
+SECTION_TEXT
 
 ; int vp9_sub_pixel_varianceNxh(const uint8_t *src, ptrdiff_t src_stride,
 ;                               int x_offset, int y_offset,

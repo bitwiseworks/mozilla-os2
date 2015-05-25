@@ -16,7 +16,7 @@ pw_8:  times 8 dw 8
 pw_16: times 8 dw 16
 pw_32: times 8 dw 32
 
-SECTION .text
+SECTION_TEXT
 
 INIT_MMX sse
 cglobal dc_predictor_4x4, 4, 5, 2, dst, stride, above, left, goffset

@@ -31,7 +31,7 @@ sh_bfedcba9876543210: db 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 sh_b1233: db 1, 2, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 sh_b2333: db 2, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 
-SECTION .text
+SECTION_TEXT
 
 INIT_MMX ssse3
 cglobal h_predictor_4x4, 2, 4, 3, dst, stride, line, left

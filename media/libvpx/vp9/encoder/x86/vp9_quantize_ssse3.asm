@@ -13,7 +13,7 @@
 SECTION_RODATA
 pw_1: times 8 dw 1
 
-SECTION .text
+SECTION_TEXT
 
 %macro QUANTIZE_FN 2
 cglobal quantize_%1, 0, %2, 15, coeff, ncoeff, skip, zbin, round, quant, \
