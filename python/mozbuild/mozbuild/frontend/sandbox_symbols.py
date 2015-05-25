@@ -308,6 +308,19 @@ VARIABLES = {
         ``example/components/xpcomsample.lib`` on Windows.
         """, 'binaries'),
 
+    'SHORT_LIBNAME': (unicode, unicode,
+        """The short name of the dynamic library generated for a directory.
+
+        This is primarily needed on OS/2 which limits the DLL filename to the
+        8.3 format.
+
+        In ``example/components/moz.build``,::
+
+           SHORT_LIBNAME = 'xpcomsmp'
+
+        would generate ``example/components/xpcompsmp.dll`` on OS/2.
+        """, 'binaries'),
+
     'LIBS': (StrictOrderingOnAppendList, list,
         """Linker libraries and flags.
 

@@ -230,6 +230,7 @@ class TreeMetadataEmitter(LoggingMixin):
             'USE_STATIC_LIBS',
             'GENERATED_FILES',
             'HOST_LIBRARY_NAME',
+            'SHORT_LIBNAME',
             'IS_COMPONENT',
             'IS_GYP_DIR',
             'JS_MODULES_PATH',
