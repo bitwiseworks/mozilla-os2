@@ -11,6 +11,8 @@ EXPORTS += [
 
 LIBRARY_NAME = 'mozsqlite3'
 
+SHORT_LIBNAME = 'mozsqlt3'
+
 SOURCES += [
     'sqlite3.c',
 ]
