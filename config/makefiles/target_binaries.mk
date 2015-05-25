@@ -26,7 +26,6 @@ ifdef IS_COMPONENT
 ifdef DEBUG_SYMFILE
 	$(INSTALL) $(IFLAGS2) $(call DEBUG_SYMFILE,$(SHARED_LIBRARY)) $(FINAL_TARGET)/components
 endif
-	$(ELF_DYNSTR_GC) $(FINAL_TARGET)/components/$(SHARED_LIBRARY)
 ifndef NO_COMPONENTS_MANIFEST
 	$(call py_action,buildlist,$(FINAL_TARGET)/chrome.manifest 'manifest components/components.manifest')
 	$(call py_action,buildlist,$(FINAL_TARGET)/components/components.manifest 'binary-component $(SHARED_LIBRARY)')
