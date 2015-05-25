@@ -2357,8 +2357,6 @@ ia64*-hpux*)
     else
         MOZ_OPTIMIZE_LDFLAGS="-Zlinker /EXEPACK:2 -Zlinker /PACKCODE -Zlinker /PACKDATA"
     fi
-    DYNAMIC_XPCOM_LIBS='-L$(LIBXUL_DIST)/lib $(LIBXUL_DIST)/lib/xul.lib $(LIBXUL_DIST)/lib/xpcom_core.lib $(LIBXUL_DIST)/lib/mozalloc.lib'
-    LIBXUL_LIBS='-L$(LIBXUL_DIST)/lib $(LIBXUL_DIST)/lib/xul.lib $(LIBXUL_DIST)/lib/mozalloc.lib'
     TARGET_MD_ARCH=os2
     _PLATFORM_DEFAULT_TOOLKIT="cairo-os2"
     RC=rc.exe
@@ -2368,6 +2366,8 @@ ia64*-hpux*)
     ZIP="$ZIP -X"
     STRIP=lxlite
     STRIP_FLAGS="/yua /ydd /yxd /ynl /anp /b- /cs+ /d /i- /ml1 /mr2 /mf2 /r+ /u+ /x- /zs:0 /zx /zd"
+    XPCOM_FROZEN_LDOPTS='$(call EXPAND_LIBNAME_PATH,xul mozalloc,$(LIBXUL_DIST)/lib)'
+    MOZ_COMPONENT_NSPR_LIBS='$(NSPR_LIBS)'
 
     if test -n "$MOZ_OS2_HIGH_MEMORY"; then
         DSO_LDOPTS="$DSO_LDOPTS -Zhigh-mem"
