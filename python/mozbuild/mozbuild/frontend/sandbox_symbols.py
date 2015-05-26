@@ -318,7 +318,7 @@ VARIABLES = {
 
            SHORT_LIBNAME = 'xpcomsmp'
 
-        would generate ``example/components/xpcompsmp.dll`` on OS/2.
+        would generate ``example/components/xpcomsmp.dll`` on OS/2.
         """, 'binaries'),
 
     'LIBS': (StrictOrderingOnAppendList, list,
