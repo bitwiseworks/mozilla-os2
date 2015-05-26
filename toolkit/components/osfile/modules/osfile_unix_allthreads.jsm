@@ -41,7 +41,7 @@ let Const = SharedAll.Constants.libc;
 // Open libc
 let libc;
 let libc_func;
-if (OS.Constants.OS2) {
+if (SharedAll.Constants.OS2) {
   libc = new SharedAll.Library("libc",
                                "libc065.dll", "libc064.dll");
   libc_func = function libc_func(name) {
