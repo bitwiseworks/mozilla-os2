@@ -30,6 +30,7 @@
 
 #include "nsWindow.h"
 #include "os2FrameWindow.h"
+#include "gfxPlatform.h"
 #include "gfxContext.h"
 #include "gfxOS2Surface.h"
 #include "gfxUtils.h"
@@ -56,6 +57,7 @@
 #include "mozilla/MiscEvents.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Likely.h"
 #include <os2im.h>
 #include <algorithm>    // std::max
 using namespace mozilla;
@@ -2278,7 +2280,16 @@ do {
 
   // Create a Thebes context.
   nsIntRegion region;
-  nsRefPtr<gfxContext> thebesContext = new gfxContext(mThebesSurface);
+//  nsRefPtr<gfxContext> thebesContext = new gfxContext(mThebesSurface);
+  nsRefPtr<gfxContext> thebesContext;
+
+  NS_ASSERTION(gfxPlatform::GetPlatform()->SupportsAzureContentForType(BackendType::CAIRO),
+               "OS/2 only supports Cairo backend");
+  IntSize intSize(mThebesSurface->GetSize().width, mThebesSurface->GetSize().height);
+  thebesContext = new gfxContext(gfxPlatform::GetPlatform()->
+                                 CreateDrawTargetForSurface(mThebesSurface, intSize));
+  if (MOZ_UNLIKELY(!thebesContext->GetDrawTarget()))
+      NS_RUNTIMEABORT("Thebes layers require a DrawTarget context");
 
   // Decide whether to display the entire update rectangle or
   // just the individual rects that comprise the update region.
