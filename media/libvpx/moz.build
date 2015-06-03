@@ -95,8 +95,12 @@ if not CONFIG['_MSC_VER']:
                 SOURCES[f].flags += CONFIG['SSE2_FLAGS']
             if 'ssse3' in f:
                 SOURCES[f].flags += ['-mssse3']
+                if CONFIG['OS_TARGET'] == 'OS2':
+                    SOURCES[f].flags += ['-mstackrealign']
             if 'avx2' in f:
                 SOURCES[f].flags += ['-mavx2']
+                if CONFIG['OS_TARGET'] == 'OS2':
+                    SOURCES[f].flags += ['-mstackrealign']
 
 # Suppress warnings in third-party code.
 if CONFIG['GNU_CC']:
