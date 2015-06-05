@@ -17,6 +17,7 @@
 #include "nsIComponentManager.h"
 #include "prlink.h"
 
+#include "nsTraceRefcnt.h"
 #include "nsReadableUtils.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIMutableArray.h"
@@ -1700,13 +1701,13 @@ nsLocalFile::Load(PRLibrary * *_retval)
         return NS_ERROR_FILE_IS_DIRECTORY;
 
 #ifdef NS_BUILD_REFCNT_LOGGING
-    nsTraceRefcntImpl::SetActivityIsLegal(false);
+    nsTraceRefcnt::SetActivityIsLegal(false);
 #endif
 
     *_retval =  PR_LoadLibrary(mWorkingPath.get());
 
 #ifdef NS_BUILD_REFCNT_LOGGING
-    nsTraceRefcntImpl::SetActivityIsLegal(true);
+    nsTraceRefcnt::SetActivityIsLegal(true);
 #endif
 
     if (*_retval)

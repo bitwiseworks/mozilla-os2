@@ -2276,7 +2276,7 @@ PluginInstanceChild::PluginWindowProc(HWND hWnd,
                                       MPARAM mp1,
                                       MPARAM mp2)
 {
-    NS_ASSERTION(!mozilla::ipc::SyncChannel::IsPumpingMessages(),
+    NS_ASSERTION(!mozilla::ipc::MessageChannel::IsPumpingMessages(),
                  "Failed to prevent a nonqueued message from running!");
     PluginInstanceChild* self = reinterpret_cast<PluginInstanceChild*>(
         WinQueryWindowPtr(hWnd, WD_InstanceChild));
