@@ -20,17 +20,6 @@
 
 namespace mozilla {
 
-struct TimeStampInitialization
-{
-  TimeStampInitialization() {
-    TimeStamp::Startup();
-  }
-  ~TimeStampInitialization() {
-    TimeStamp::Shutdown();
-  }
-};
-
-static TimeStampInitialization initOnce;
 static bool gInitialized = false;
 
 // Variables for the high-res timer
