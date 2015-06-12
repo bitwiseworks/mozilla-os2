@@ -18,6 +18,24 @@ class gfxOS2FontEntry : public gfxFontEntry {
 public:
     gfxOS2FontEntry(const nsAString& aName) : gfxFontEntry(aName) {}
     ~gfxOS2FontEntry() {}
+
+    // no-op
+    gfxFont *CreateFontInstance(const gfxFontStyle *aFontStyle, bool aNeedsBold) {
+        return nullptr;
+    }
+
+    // no-op
+    nsresult CopyFontTable(uint32_t aTableTag,
+                           FallibleTArray<uint8_t>& aBuffer) {
+        return NS_ERROR_FAILURE;
+    }
+
+    // no-op
+    nsresult ReadCMAP(FontInfoData *aFontInfoData)
+    {
+        mCharacterMap = new gfxCharacterMap();
+        return NS_OK;
+    }
 };
 
 class gfxOS2Font : public gfxFont {
