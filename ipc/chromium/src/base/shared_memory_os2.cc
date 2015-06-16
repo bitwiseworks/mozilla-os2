@@ -155,7 +155,7 @@ bool SharedMemory::Unmap() {
     return false;
 
   APIRET arc = ::DosSetMem(base_, committed_,
-      PAG_DECOMMIT | (read_only_ ? PAG_READ : PAG_READ | PAG_WRITE));
+      PAG_DECOMMIT);
   if (arc != NO_ERROR)
     return false;
 
