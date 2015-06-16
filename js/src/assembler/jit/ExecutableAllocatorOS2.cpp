@@ -60,9 +60,9 @@ ExecutablePool::toggleAllCodeAsAccessible(bool accessible)
     size_t size = m_freePtr - begin;
 
     if (size) {
-        // N.B. DEP is not on automatically in Windows XP, so be sure to use
-        // PAGE_NOACCESS instead of PAGE_READWRITE when making inaccessible.
-        ULONG flags = accessible ? PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE : PAG_DECOMMIT;
+        ULONG flags = PAG_READ | PAG_WRITE | PAG_EXECUTE;
+        if (!accessible)
+            flags |= PAG_GUARD;
         if (DosSetMem(begin, size, flags))
             MOZ_CRASH();
     }

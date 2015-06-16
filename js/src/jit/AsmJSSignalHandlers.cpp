@@ -526,7 +526,7 @@ static bool
 HandleException(PEXCEPTIONREPORTRECORD pReport,
                 PCONTEXTRECORD pContext)
 {
-    if (pReport->ExceptionNum != XCPT_ACCESS_VIOLATION)
+    if (pReport->ExceptionNum != XCPT_GUARD_PAGE_VIOLATION)
         return false;
 
     uint8_t **ppc = ContextToPC(pContext);

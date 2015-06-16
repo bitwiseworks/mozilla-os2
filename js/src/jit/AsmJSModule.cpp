@@ -72,11 +72,19 @@ AllocateExecutableMemory(ExclusiveContext *cx, size_t totalBytes)
 {
     JS_ASSERT(totalBytes % AsmJSPageSize == 0);
 
-#ifdef XP_WIN
+#if defined(XP_WIN)
     void *p = VirtualAlloc(nullptr, totalBytes, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     if (!p) {
         js_ReportOutOfMemory(cx);
         return nullptr;
+    }
+#elif defined(XP_OS2)
+    void *p = nullptr;
+    if (DosAllocMem(&p, totalBytes, OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE)) {
+        if (DosAllocMem(&p, totalBytes, PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE)) {
+            js_ReportOutOfMemory(cx);
+            return nullptr;
+        }
     }
 #else  // assume Unix
     void *p = mmap(nullptr, totalBytes,
@@ -94,8 +102,10 @@ AllocateExecutableMemory(ExclusiveContext *cx, size_t totalBytes)
 static void
 DeallocateExecutableMemory(uint8_t *code, size_t totalBytes)
 {
-#ifdef XP_WIN
+#if defined(XP_WIN)
     JS_ALWAYS_TRUE(VirtualFree(code, 0, MEM_RELEASE));
+#elif defined(XP_OS2)
+    JS_ALWAYS_TRUE(DosFreeMem(code) == 0);
 #else
     JS_ALWAYS_TRUE(munmap(code, totalBytes) == 0);
 #endif
@@ -970,7 +980,7 @@ AsmJSModule::protectCode(JSRuntime *rt) const
     if (!VirtualProtect(codeBase(), functionBytes(), PAGE_NOACCESS, &oldProtect))
         MOZ_CRASH();
 #elif defined(XP_OS2)
-    if (DosSetMem(codeBase(), functionBytes(), PAG_DECOMMIT))
+    if (DosSetMem(codeBase(), functionBytes(), PAG_READ | PAG_WRITE | PAG_EXECUTE | PAG_GUARD))
         MOZ_CRASH();
 #else  // assume Unix
     if (mprotect(codeBase(), functionBytes(), PROT_NONE))
@@ -993,7 +1003,7 @@ AsmJSModule::unprotectCode(JSRuntime *rt) const
     if (!VirtualProtect(codeBase(), functionBytes(), PAGE_EXECUTE_READWRITE, &oldProtect))
         MOZ_CRASH();
 #elif defined(XP_OS2)
-    if (DosSetMem(codeBase(), functionBytes(), PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE))
+    if (DosSetMem(codeBase(), functionBytes(), PAG_READ | PAG_WRITE | PAG_EXECUTE))
         MOZ_CRASH();
 #else  // assume Unix
     if (mprotect(codeBase(), functionBytes(), PROT_READ | PROT_WRITE | PROT_EXEC))
