@@ -41,7 +41,9 @@ size_t ExecutableAllocator::determinePageSize()
 ExecutablePool::Allocation ExecutableAllocator::systemAlloc(size_t n)
 {
     void* allocation = NULL;
+#if defined(MOZ_OS2_HIGH_MEMORY)
     if (DosAllocMem(&allocation, n, OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE))
+#endif
         if (DosAllocMem(&allocation, n, PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE))
             MOZ_CRASH();
     ExecutablePool::Allocation alloc = { reinterpret_cast<char*>(allocation), n };

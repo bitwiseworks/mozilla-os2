@@ -48,7 +48,10 @@ static inline ULONG protection(bool writable, bool executable)
 void* OSAllocator::reserveUncommitted(size_t bytes, Usage, bool writable, bool executable)
 {
     void* result = NULL;
-    if (DosAllocMem(&result, bytes, OBJ_ANY | protection(writable, executable)) &&
+    if (
+#if defined(MOZ_OS2_HIGH_MEMORY)
+        DosAllocMem(&result, bytes, OBJ_ANY | protection(writable, executable)) &&
+#endif
         DosAllocMem(&result, bytes, protection(writable, executable)))
     {   CRASH();
     }
@@ -58,7 +61,10 @@ void* OSAllocator::reserveUncommitted(size_t bytes, Usage, bool writable, bool e
 void* OSAllocator::reserveAndCommit(size_t bytes, Usage, bool writable, bool executable)
 {
     void* result = NULL;
-    if (DosAllocMem(&result, bytes, OBJ_ANY | PAG_COMMIT | protection(writable, executable)) &&
+    if (
+#if defined(MOZ_OS2_HIGH_MEMORY)
+        DosAllocMem(&result, bytes, OBJ_ANY | PAG_COMMIT | protection(writable, executable)) &&
+#endif
         DosAllocMem(&result, bytes, PAG_COMMIT | protection(writable, executable)))
     {   CRASH();
     }

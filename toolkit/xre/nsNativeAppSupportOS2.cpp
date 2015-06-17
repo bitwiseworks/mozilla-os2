@@ -653,7 +653,7 @@ struct MessageWindow {
         }
 #else
         if (DosAllocSharedMem( &pvData, nullptr, ulSize,
-                               PAG_COMMIT | PAG_READ | PAG_WRITE | OBJ_GETTABLE | OBJ_ANY))
+                               PAG_COMMIT | PAG_READ | PAG_WRITE | OBJ_GETTABLE))
             return NS_ERROR_OUT_OF_MEMORY;
 #endif
 

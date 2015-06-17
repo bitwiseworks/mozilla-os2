@@ -1325,7 +1325,10 @@ static int dev_zero_fd = -1; /* Cached file descriptor for /dev/zero. */
 /* OS/2 MMAP via DosAllocMem */
 static void* os2mmap(size_t size) {
   void* ptr;
-  if (DosAllocMem(&ptr, size, OBJ_ANY|PAG_COMMIT|PAG_READ|PAG_WRITE) &&
+  if (
+#if defined(OS2_HIGH_MEMORY)
+      DosAllocMem(&ptr, size, OBJ_ANY|PAG_COMMIT|PAG_READ|PAG_WRITE) &&
+#endif
       DosAllocMem(&ptr, size, PAG_COMMIT|PAG_READ|PAG_WRITE))
     return MFAIL;
   return ptr;

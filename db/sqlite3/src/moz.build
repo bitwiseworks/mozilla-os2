@@ -58,8 +58,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
 if CONFIG['MOZ_DEBUG']:
     DEFINES['SQLITE_DEBUG'] = 1
 
-if CONFIG['OS_TARGET'] == 'OS2' and CONFIG['MOZ_OS2_HIGH_MEMORY']:
-    DEFINES['MOZ_OS2_HIGH_MEMORY'] = True
+if CONFIG['OS_TARGET'] == 'OS2':
     # HLL debug info format can't stand too big line numbers of sqlite3.c
     # so that gas spits megabytes of warnings, shut it up.
     CFLAGS += [ '-Wa,-W' ]

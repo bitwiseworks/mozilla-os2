@@ -145,8 +145,11 @@ NS_IMETHODIMP nsSound::OnStreamComplete(nsIStreamLoader *aLoader,
   // allocate a buffer to hold the ARGBUFFER struct and sound data;
   // try using high-memory - if that fails, try low-memory
   ARGBUFFER *   arg;
+#if defined(MOZ_OS2_HIGH_MEMORY)
   if (DosAllocMem((PPVOID)&arg, sizeof(ARGBUFFER) + dataLen,
-                  OBJ_ANY | PAG_READ | PAG_WRITE | PAG_COMMIT)) {
+                  OBJ_ANY | PAG_READ | PAG_WRITE | PAG_COMMIT))
+#endif
+  {
     if (DosAllocMem((PPVOID)&arg, sizeof(ARGBUFFER) + dataLen,
                     PAG_READ | PAG_WRITE | PAG_COMMIT)) {
       DBG_MSG("nsSound::OnStreamComplete:  DosAllocMem failed");

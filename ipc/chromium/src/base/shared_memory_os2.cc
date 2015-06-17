@@ -82,10 +82,18 @@ bool SharedMemory::Create(const std::string &name, bool read_only,
     name_.insert(0, "\\SHAREMEM\\");
 
   PVOID base;
-  APIRET arc = ::DosAllocSharedMem(&base,
+  APIRET arc;
+#if defined(MOZ_OS2_HIGH_MEMORY)
+  arc = ::DosAllocSharedMem(&base,
       name_.empty() ? NULL : name_.c_str(), size,
       (name_.empty() ? OBJ_GETTABLE | OBJ_GIVEABLE : 0) |
       (read_only_ ? PAG_READ : PAG_READ | PAG_WRITE) | OBJ_ANY /*himem*/);
+  if (arc != NO_ERROR && arc != ERROR_ALREADY_EXISTS)
+#endif
+    arc = ::DosAllocSharedMem(&base,
+        name_.empty() ? NULL : name_.c_str(), size,
+        (name_.empty() ? OBJ_GETTABLE | OBJ_GIVEABLE : 0) |
+        (read_only_ ? PAG_READ : PAG_READ | PAG_WRITE));
   if (arc == ERROR_ALREADY_EXISTS) {
     if (!open_existing)
       return false;

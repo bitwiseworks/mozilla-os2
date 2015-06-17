@@ -80,7 +80,10 @@ AllocateExecutableMemory(ExclusiveContext *cx, size_t totalBytes)
     }
 #elif defined(XP_OS2)
     void *p = nullptr;
-    if (DosAllocMem(&p, totalBytes, OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE)) {
+#if defined(MOZ_OS2_HIGH_MEMORY)
+    if (DosAllocMem(&p, totalBytes, OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE))
+#endif
+    {
         if (DosAllocMem(&p, totalBytes, PAG_COMMIT | PAG_READ | PAG_WRITE | PAG_EXECUTE)) {
             js_ReportOutOfMemory(cx);
             return nullptr;

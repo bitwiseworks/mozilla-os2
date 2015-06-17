@@ -31,6 +31,9 @@ if test -z "$BUILDING_JS" -o -n "$JS_STANDALONE"; then
     if test "$MOZ_DEBUG"; then
       ac_configure_args="$ac_configure_args --enable-debug"
     fi
+    if test -z "$MOZ_OS2_HIGH_MEMORY"; then
+      ac_configure_args="$ac_configure_args --disable-os2-high-mem"
+    fi
     if test "$DSO_PIC_CFLAGS"; then
       ac_configure_args="$ac_configure_args --with-pic"
     fi

@@ -464,6 +464,18 @@ esac
 AC_SUBST(toolexecdir)
 AC_SUBST(toolexeclibdir)
 
+case "$host" in
+  *os2*)
+    # Enable high-memory support on OS/2 by default.
+    enable_os2_high_mem=yes
+    AC_ARG_ENABLE(os2-high-mem,
+    [  --disable-os2-high-mem  Disable high-memory support on OS/2])
+    if test x"$enable_os2_high_mem" != x"no"; then
+      AC_DEFINE(OS2_HIGH_MEMORY, 1, [Define this if you want high-memory support on OS/2.])
+    fi
+    ;;
+esac
+
 if test "${multilib}" = "yes"; then
   multilib_arg="--enable-multilib"
 else

@@ -161,6 +161,9 @@
    */
 #undef USING_PURIFY
 
+/* Define this if you want high-memory support on OS/2. */  
+#undef OS2_HIGH_MEMORY
+
 /* Version number of package */
 #undef VERSION
 

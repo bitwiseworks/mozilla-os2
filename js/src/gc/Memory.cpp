@@ -164,8 +164,11 @@ MapAlignedPagesRecursively(JSRuntime *rt, size_t size, size_t alignment, int& re
         return nullptr;
 
     void *tmp;
+#if defined(MOZ_OS2_HIGH_MEMORY)
     if (DosAllocMem(&tmp, size,
-                    OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE)) {
+                    OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE))
+#endif
+    {
         JS_ALWAYS_TRUE(DosAllocMem(&tmp, size,
                                    PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
     }
@@ -185,8 +188,11 @@ MapAlignedPagesRecursively(JSRuntime *rt, size_t size, size_t alignment, int& re
                                    &cb, &flags);
     if (!rc && (flags & PAG_FREE) && cb >= filler) {
         UnmapPages(rt, tmp, 0);
+#if defined(MOZ_OS2_HIGH_MEMORY)
         if (DosAllocMem(&tmp, filler,
-                        OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE)) {
+                        OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE))
+#endif
+        {
             JS_ALWAYS_TRUE(DosAllocMem(&tmp, filler,
                                        PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
         }
@@ -222,8 +228,11 @@ gc::MapAlignedPages(JSRuntime *rt, size_t size, size_t alignment)
      * instead, use the "expensive" strategy:  allocate twice as much
      * as requested and return an aligned address within this block.
      */
+#if defined(MOZ_OS2_HIGH_MEMORY)
     if (DosAllocMem(&p, 2 * size,
-                    OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE)) {
+                    OBJ_ANY | PAG_COMMIT | PAG_READ | PAG_WRITE))
+#endif
+    {
         JS_ALWAYS_TRUE(DosAllocMem(&p, 2 * size,
                                    PAG_COMMIT | PAG_READ | PAG_WRITE) == 0);
     }
