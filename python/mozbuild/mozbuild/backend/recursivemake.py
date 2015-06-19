@@ -941,7 +941,12 @@ class RecursiveMakeBackend(CommonBackend):
                 dep_file = mozpath.join(dep_path, mozpath.basename(source) + '.pp')
                 self._install_manifests['dist_bin'].add_preprocess(source, dest, dep_file, marker='%', defines=obj.defines)
             else:
-                self._install_manifests['dist_bin'].add_symlink(source, dest)
+                # We need to copy on OS/2 since resource files may be read in FF using Dos* API
+                # (through NSPR) which doesn't understand kLIBC symlinks.
+                if os.name == 'os2':
+                    self._install_manifests['dist_bin'].add_copy(source, dest)
+                else:
+                    self._install_manifests['dist_bin'].add_symlink(source, dest)
 
             if not os.path.exists(source):
                 raise Exception('File listed in RESOURCE_FILES does not exist: %s' % source)
