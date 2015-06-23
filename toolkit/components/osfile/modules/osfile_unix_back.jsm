@@ -17,9 +17,14 @@
        return; // Avoid double initialization
      }
 
+     let SharedAll =
+       require("resource://gre/modules/osfile/osfile_shared_allthreads.jsm");
+     let SysAll =
+       require("resource://gre/modules/osfile/osfile_unix_allthreads.jsm");
      let LOG = SharedAll.LOG.bind(SharedAll, "Unix", "back");
      let libc = SysAll.libc;
      let libc_func = SysAll.libc_func;
+     let Const = SharedAll.Constants.libc;
 
      /**
       * Initialize the Unix module.
