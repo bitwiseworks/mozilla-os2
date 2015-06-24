@@ -168,9 +168,13 @@ _PR_MD_OPEN(const char *name, PRIntn osflags, int mode)
     else if(osflags & PR_RDWR)
         access |= OPEN_ACCESS_READWRITE;
 
+    /* How to interptet ERROR_OPEN_FAILED */
+    PRInt32 openFailedRc = ERROR_FILE_NOT_FOUND;
+
     if ( osflags & PR_CREATE_FILE && osflags & PR_EXCL )
     {
         flags = OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_FAIL_IF_EXISTS;
+        openFailedRc = ERROR_FILE_EXISTS;
     }
     else if (osflags & PR_CREATE_FILE)
     {
@@ -198,6 +202,8 @@ _PR_MD_OPEN(const char *name, PRIntn osflags, int mode)
                      flags,            /* Open flags                */
                      access,           /* Open mode and rights      */
                      0);               /* OS/2 Extended Attributes  */
+                if (rc == ERROR_OPEN_FAILED)
+                    rc = openFailedRc;
         }
         else
         {
@@ -209,6 +215,8 @@ _PR_MD_OPEN(const char *name, PRIntn osflags, int mode)
                      flags,            /* Open flags                */
                      access,           /* Open mode and rights      */
                      0);               /* OS/2 Extended Attributes  */
+                if (rc == ERROR_OPEN_FAILED)
+                    rc = openFailedRc;
         };
         if (rc == ERROR_TOO_MANY_OPEN_FILES) {
             ULONG CurMaxFH = 0;
