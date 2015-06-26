@@ -1121,8 +1121,11 @@ pref("dom.ipc.plugins.enabled.x86_64", true);
 #ifdef XP_OS2
 // Odin crashes MMPM in OOP mode, disable it for now
 pref("dom.ipc.plugins.enabled.npflos2.dll", false);
-#endif
+// And IPC is generally broken there (a fix is TBD), so disable it at all for now
+pref("dom.ipc.plugins.enabled", false);
+#else
 pref("dom.ipc.plugins.enabled", true);
+#endif
 #endif
 
 #if defined(NIGHTLY_BUILD)
