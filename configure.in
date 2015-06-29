@@ -5474,6 +5474,50 @@ if test -n "$MOZ_OMX_PLUGIN"; then
     fi
 fi
 
+dnl ========================================================
+dnl = libkai support
+dnl ========================================================
+
+if test "$OS_TARGET" = "OS2"; then
+  dnl Enable libkai support on OS/2 by default
+  MOZ_LIBKAI=1
+fi
+
+MOZ_LIBKAI_CFLAGS=
+MOZ_LIBKAI_LIBS=
+
+MOZ_ARG_DISABLE_BOOL(libkai,
+[  --disable-libkai        Disable support for libkai],
+    MOZ_LIBKAI=,
+    MOZ_LIBKAI=1)
+
+MOZ_ARG_WITH_STRING(libkai,
+[  --with-libkai=DIR       Location of libkai dir],
+    libkaidir=$withval)
+
+if test -n "$MOZ_LIBKAI"; then
+  AC_DEFINE(MOZ_LIBKAI)
+  if test -n "$libkaidir"; then
+    dnl Use -idirafter since $libkaidir may contain unidef.h from Uniaud
+    dnl which clashes with unidef.h from OS/2 Toolkit
+    MOZ_LIBKAI_CFLAGS="-idirafter $libkaidir"
+    MOZ_LIBKAI_LIBS="-L$libkaidir -lkai"
+  else
+    dnl Assume libkai is available in system directories
+    dnl TODO use pkg-config later
+    MOZ_LIBKAI_LIBS="-lkai"
+  fi
+else
+  if test -n "$libkaidir"; then
+    AC_MSG_ERROR([--with-libkai makes no sense with --disable-libkai])
+  fi
+fi
+
+AC_SUBST(MOZ_LIBKAI)
+AC_SUBST(MOZ_LIBKAI_CFLAGS)
+AC_SUBST(MOZ_LIBKAI_LIBS)
+
+dnl ========================================================
 dnl system libvpx Support
 dnl ========================================================
 MOZ_ARG_WITH_BOOL(system-libvpx,

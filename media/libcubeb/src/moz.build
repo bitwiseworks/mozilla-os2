@@ -24,6 +24,12 @@ if CONFIG['MOZ_PULSEAUDIO']:
     if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
         DEFINES['DISABLE_LIBPULSE_DLOPEN'] = True
 
+if CONFIG['MOZ_LIBKAI']:
+    SOURCES += [
+        'cubeb_kai.c',
+    ]
+    DEFINES['USE_KAI'] = True
+
 if CONFIG['OS_ARCH'] == 'OpenBSD':
     SOURCES += [
         'cubeb_sndio.c',
