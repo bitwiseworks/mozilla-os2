@@ -5498,10 +5498,8 @@ MOZ_ARG_WITH_STRING(libkai,
 if test -n "$MOZ_LIBKAI"; then
   AC_DEFINE(MOZ_LIBKAI)
   if test -n "$libkaidir"; then
-    dnl Use -idirafter since $libkaidir may contain unidef.h from Uniaud
-    dnl which clashes with unidef.h from OS/2 Toolkit
-    MOZ_LIBKAI_CFLAGS="-idirafter $libkaidir"
-    MOZ_LIBKAI_LIBS="-L$libkaidir -lkai"
+    MOZ_LIBKAI_CFLAGS="-I$libkaidir/include"
+    MOZ_LIBKAI_LIBS="-L$libkaidir/lib -lkai"
   else
     dnl Assume libkai is available in system directories
     dnl TODO use pkg-config later
