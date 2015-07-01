@@ -533,12 +533,21 @@ Main resources:
 * Mozilla for OS/2 Issue Tracker & Bug Reports
     https://github.com/bitwiseworks/mozilla-os2/issues
 
+Seamonkey and Thunderbird builds (not supported by bww bitwiseworks GmbH):
+
+* Comm-Central (SeaMonkey and Thunderbird) for OS/2
+    https://bitbucket.org/dryeo
+
 Additional information:
 
-* Official Releases (Firefox 10 and earlier versions)
+* Official Releases (Firefox 10.0.12 and earlier versions)
     http://www.mozilla.org/ports/os2/
 
-* Beta Versions (Firefox 10 and earlier versions)
+* Older Official and Experimental Releases (Upto Firefox 10.0.12ESR)
+    ftp://ftp.netlabs.org/pub/mozilla/
+    ftp://ftp.netlabs.org/incoming/mozilla/
+
+* Beta Versions (Firefox 10ESR and earlier versions)
     ftp://ftp.netlabs.org/incoming/mozilla/
 
 * General Information About the Mozilla Apps
