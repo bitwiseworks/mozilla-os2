@@ -81,7 +81,7 @@
                   label="&quitApplicationCmd.label;"
                   accesskey="&quitApplicationCmd.accesskey;"
 #endif
-#ifdef XP_UNIX
+#if defined(XP_UNIX) || defined(XP_OS2)
                   key="key_quitApplication"
 #endif
                   command="cmd_quitApplication"/>

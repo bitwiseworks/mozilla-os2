@@ -23,7 +23,7 @@
 <!ENTITY hideOtherAppsCmdMac.key            "H">
 <!ENTITY showAllAppsCmdMac.label            "Show All">
 
-<!-- LOCALIZATION NOTE(quitApplicationCmdUnix.key): This keyboard shortcut is used by both Linux and OSX -->
+<!-- LOCALIZATION NOTE(quitApplicationCmdUnix.key): This keyboard shortcut is used by Linux, OSX and OS/2 -->
 <!ENTITY quitApplicationCmdUnix.key          "Q">
 
 <!ENTITY editMenu.label                     "Edit">
