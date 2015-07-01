@@ -41,6 +41,8 @@
 
 *  Video
 
+*  Audio
+
 *  Troubleshooting
 
 *  Known Problems
@@ -97,24 +99,30 @@ If you don't have ArcView installed, you may download it from:
       If you use RPM/YUM, just run this command:
          yum install freetype fontconfig
 
-5. INSTALL 'pthr01.dll' and 'mmap.dll' into one of the directories
+5. INSTALL 'kai0.dll' into one of the directories
+      on your "LIBPATH". You can download RPMs with this file from:
+         http://rpm.netlabs.org/release/00/i386/i386/libkai-1.1.4-1.oc00.i386.rpm
+      If you use RPM/YUM, just run this command:
+         yum install libkai
+
+6. INSTALL 'pthr01.dll' and 'mmap.dll' into one of the directories
       on your "LIBPATH". You can download RPMs with these files from:
          http://rpm.netlabs.org/release/00/i386/i386/pthread-20140814-16.oc00.i386.rpm
          http://rpm.netlabs.org/release/00/i386/i386/mmap-0.5-1.oc00.i386.rpm
       If you use RPM/YUM, just run this command:
          yum install pthread mmap
 
-6. INSTALL 'gcc1.dll' and 'stdcpp6.dll' into one of the directories
+7. INSTALL 'gcc1.dll' and 'stdcpp6.dll' into one of the directories
       on your "LIBPATH". You can download RPMs with these files from:
          http://rpm.netlabs.org/release/00/i386/i386/libgcc1-4.9.2.1-3.oc00.i386.rpm
          http://rpm.netlabs.org/release/00/i386/i386/libstdc++6-4.9.2.1-3.oc00.i386.rpm
       If you use RPM/YUM, just run this command:
          yum install libgcc1 libstdc++6
 
-7. Optional: Use mozinst to create icons on desktop.
+8. Optional: Use mozinst to create icons on desktop.
       http://hobbes.nmsu.edu/h-search.php?key=mozinst
 
-8. Optional: you may want to install some of the items listed in the
+9. Optional: you may want to install some of the items listed in the
       "OS/2 Add-ons" section below to improve the app's performance.
 
 
@@ -394,6 +402,19 @@ supported if its "shadow buffer" option is enabled.
     "SET MOZ_ACCELERATED=1" to override automatic detection of how your
     video driver displays the pointer.  If it flickers when scrolling a
     page, you may want to try "SET MOZ_ACCELERATED=2".
+
+
+===============================================================================
+-- Audio ----------------------------------------------------------------------
+===============================================================================
+
+Starting from version 31, Firefox uses the K Audio Interface library (libkai)
+to play sounds in HTML5/JS content and in Firefox widgets. Currently, this
+library supports the standard OS/2 MMPM/DART sound subsystem as well as the
+UNIAUD driver directly. By default, libkai prefers UNIAUD to DART but it may
+be forced to use either of them using the KAI_AUTOMODE environment variable:
+- "SET KAI_AUTOMODE=UNIAUD" will activate UNIAUD mode.
+- "SET KAI_AUTOMODE=DART" will activate MMPM/DART mode.
 
 
 ===============================================================================
