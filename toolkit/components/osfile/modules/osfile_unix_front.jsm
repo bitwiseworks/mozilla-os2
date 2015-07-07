@@ -671,14 +671,13 @@
            } else {
              result = pump(source, dest, options);
            }
-         } catch (x) {
+         } finally {
            if (dest) {
              dest.close();
            }
            if (source) {
              source.close();
            }
-           throw x;
          }
        };
      } // End of definition of copy
