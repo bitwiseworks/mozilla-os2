@@ -51,6 +51,10 @@ static nsresult ConvertOS2Error(APIRET err)
         case ERROR_NOT_SAME_DEVICE:
             rv = NS_ERROR_FILE_ACCESS_DENIED;
             break;
+        case ERROR_SHARING_VIOLATION:
+        case ERROR_LOCK_VIOLATION:
+            rv = NS_ERROR_FILE_IS_LOCKED;
+            break;
         case ERROR_NOT_ENOUGH_MEMORY:
         case ERROR_INVALID_BLOCK:
         case ERROR_INVALID_HANDLE:
@@ -73,6 +77,9 @@ static nsresult ConvertOS2Error(APIRET err)
             break;
         case ERROR_FILENAME_EXCED_RANGE:
             rv = NS_ERROR_FILE_NAME_TOO_LONG;
+            break;
+        case ERROR_DIRECTORY:
+            rv = NS_ERROR_FILE_NOT_DIRECTORY;
             break;
         case 0:
             rv = NS_OK;
