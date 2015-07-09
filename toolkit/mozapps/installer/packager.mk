@@ -27,6 +27,18 @@ ifdef MOZ_SIGN_PREPARED_PACKAGE_CMD
 	$(MOZ_SIGN_PREPARED_PACKAGE_CMD) $(DEPTH)/installer-stage && true
 endif
 
+ifeq ($(OS_ARCH),OS2)
+package-symbols: # $(PACKAGE_BASE_DIR)/$(PACKAGE)
+	@echo gathering symbols
+	$(RM) "$(DIST)/$(STAGEPATH)$(SYMBOL_ARCHIVE_BASENAME).zip"
+	$(foreach f,\
+		$(shell cd $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR) && find -name "*.exe" -or -name "*.dll"),\
+		cp -pf $(DIST)/bin/$(call DEBUG_SYMFILE,$f) $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)/$(dir $f) &&)
+	@echo packing symbols
+	cd $(DIST)/$(STAGEPATH) && \
+		$(ZIP) -r9D "$(SYMBOL_ARCHIVE_BASENAME).zip" $(MOZ_PKG_DIR) -i "$(call DEBUG_SYMFILE,*)"
+endif
+
 # Override the value of OMNIJAR_NAME from config.status with the value
 # set earlier in this file.
 
