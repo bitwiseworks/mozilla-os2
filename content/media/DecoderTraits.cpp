@@ -411,6 +411,11 @@ DecoderTraits::CanHandleMediaType(const char* aMIMEType,
     result = CANPLAY_MAYBE;
   }
 #endif
+#ifdef MOZ_FMP4
+  if (MP4Decoder::GetSupportedCodecs(nsDependentCString(aMIMEType), &codecList)) {
+    result = CANPLAY_MAYBE;
+  }
+#endif
 #ifdef MOZ_WMF
   if (IsWMFSupportedType(nsDependentCString(aMIMEType))) {
     if (!aHaveRequestedCodecs) {

@@ -16,10 +16,10 @@ AV_FUNC(LIBAVCODEC, avcodec_get_edge_width)
 AV_FUNC(LIBAVCODEC, avcodec_get_frame_defaults)
 AV_FUNC(LIBAVCODEC, avcodec_open2)
 AV_FUNC(LIBAVCODEC, av_init_packet)
-AV_FUNC(LIBAVCODEC, av_dict_get)
 
 AV_FUNC(LIBAVFORMAT, av_register_all)
 
 AV_FUNC(LIBAVUTIL, av_image_fill_linesizes)
 AV_FUNC(LIBAVUTIL, av_image_fill_pointers)
 AV_FUNC(LIBAVUTIL, av_log_set_level)
+AV_FUNC(LIBAVUTIL, av_dict_get)
