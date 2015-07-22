@@ -2370,22 +2370,36 @@ ImplicitConvert(JSContext* cx,
       case TYPE_char:
       case TYPE_signed_char:
       case TYPE_unsigned_char: {
-        // Convert from UTF-16 to UTF-8.
-        size_t nbytes =
-          GetDeflatedUTF8StringLength(cx, sourceChars, sourceLength);
-        if (nbytes == (size_t) -1)
-          return false;
-
+        // Convert to platform native charset if the appropriate callback has been
+        // provided.
         char** charBuffer = static_cast<char**>(buffer);
-        *charBuffer = cx->pod_malloc<char>(nbytes + 1);
-        if (!*charBuffer) {
-          JS_ReportAllocationOverflow(cx);
+        JSObject* objCTypes = CType::GetGlobalCTypes(cx, targetType);
+        if (!objCTypes)
           return false;
-        }
+        JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
+        if (callbacks && callbacks->unicodeToNative) {
+          *charBuffer =
+            callbacks->unicodeToNative(cx, sourceChars, sourceLength);
+          if (!*charBuffer)
+            return false;
+        } else {
+          // Fallback: assume the platform native charset is UTF-8. This is true
+          // for Mac OS X, Android, and probably Linux.
+          size_t nbytes =
+            GetDeflatedUTF8StringLength(cx, sourceChars, sourceLength);
+          if (nbytes == (size_t) -1)
+            return false;
 
-        ASSERT_OK(DeflateStringToUTF8Buffer(cx, sourceChars, sourceLength,
-                    *charBuffer, &nbytes));
-        (*charBuffer)[nbytes] = 0;
+          *charBuffer = cx->pod_malloc<char>(nbytes + 1);
+          if (!*charBuffer) {
+            JS_ReportAllocationOverflow(cx);
+            return false;
+          }
+
+          ASSERT_OK(DeflateStringToUTF8Buffer(cx, sourceChars, sourceLength,
+                      *charBuffer, &nbytes));
+          (*charBuffer)[nbytes] = 0;
+        }
         *freePointer = true;
         break;
       }
@@ -2446,20 +2460,45 @@ ImplicitConvert(JSContext* cx,
       case TYPE_char:
       case TYPE_signed_char:
       case TYPE_unsigned_char: {
-        // Convert from UTF-16 to UTF-8.
-        size_t nbytes =
-          GetDeflatedUTF8StringLength(cx, sourceChars, sourceLength);
-        if (nbytes == (size_t) -1)
-          return false;
-
-        if (targetLength < nbytes) {
-          JS_ReportError(cx, "ArrayType has insufficient length");
-          return false;
-        }
-
+        // Convert to platform native charset if the appropriate callback has been
+        // provided.
         char* charBuffer = static_cast<char*>(buffer);
-        ASSERT_OK(DeflateStringToUTF8Buffer(cx, sourceChars, sourceLength,
-                    charBuffer, &nbytes));
+        size_t nbytes;
+        JSObject* objCTypes = CType::GetGlobalCTypes(cx, targetType);
+        if (!objCTypes)
+          return false;
+        JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
+        if (callbacks && callbacks->unicodeToNative) {
+          char *buf =
+            callbacks->unicodeToNative(cx, sourceChars, sourceLength);
+          if (!*buf)
+            return false;
+
+          nbytes = strlen(buf);
+          if (targetLength < nbytes) {
+            JS_free(cx, buf);
+            JS_ReportError(cx, "ArrayType has insufficient length");
+            return false;
+          }
+
+          memcpy (charBuffer, buf, nbytes);
+          JS_free(cx, buf);
+        } else {
+          // Fallback: assume the platform native charset is UTF-8. This is true
+          // for Mac OS X, Android, and probably Linux.
+          nbytes =
+            GetDeflatedUTF8StringLength(cx, sourceChars, sourceLength);
+          if (nbytes == (size_t) -1)
+            return false;
+
+          if (targetLength < nbytes) {
+            JS_ReportError(cx, "ArrayType has insufficient length");
+            return false;
+          }
+
+          ASSERT_OK(DeflateStringToUTF8Buffer(cx, sourceChars, sourceLength,
+                      charBuffer, &nbytes));
+        }
 
         if (targetLength > nbytes)
           charBuffer[nbytes] = 0;
@@ -4319,12 +4358,22 @@ ArrayType::ConstructData(JSContext* cx,
       case TYPE_char:
       case TYPE_signed_char:
       case TYPE_unsigned_char: {
-        // Determine the UTF-8 length.
-        length = GetDeflatedUTF8StringLength(cx, sourceChars, sourceLength);
-        if (length == (size_t) -1)
+        JSObject* objCTypes = CType::GetGlobalCTypes(cx, obj);
+        if (!objCTypes)
           return false;
+        JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
+        if (callbacks && callbacks->unicodeToNative) {
+          // Hard to say how many chars in the platform native charset is needed w/o converting
+          // the string, assume the maximum possible.
+          length = sourceLength + 1;
+        } else {
+          // Determine the UTF-8 length.
+          length = GetDeflatedUTF8StringLength(cx, sourceChars, sourceLength);
+          if (length == (size_t) -1)
+            return false;
 
-        ++length;
+          ++length;
+        }
         break;
       }
       case TYPE_jschar:
