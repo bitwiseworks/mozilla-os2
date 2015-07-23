@@ -4363,9 +4363,13 @@ ArrayType::ConstructData(JSContext* cx,
           return false;
         JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
         if (callbacks && callbacks->unicodeToNative) {
-          // Hard to say how many chars in the platform native charset is needed w/o converting
-          // the string, assume the maximum possible.
-          length = sourceLength + 1;
+          // We have to perform conversion to know how many chars are necessary.
+          char* buf =
+            callbacks->unicodeToNative(cx, sourceChars, sourceLength);
+          if (!buf)
+            return false;
+          length = strlen(buf) + 1;
+          JS_free(cx, buf);
         } else {
           // Determine the UTF-8 length.
           length = GetDeflatedUTF8StringLength(cx, sourceChars, sourceLength);
