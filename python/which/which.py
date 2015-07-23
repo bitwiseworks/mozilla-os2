@@ -103,7 +103,7 @@ def _getRegisteredExecutable(exeName):
     return registered
 
 def _samefile(fname1, fname2):
-    if sys.platform.startswith('win'):
+    if sys.platform.startswith('win') or os.name == 'os2':
         return ( os.path.normpath(os.path.normcase(fname1)) ==\
             os.path.normpath(os.path.normcase(fname2)) )
     else:
@@ -161,13 +161,13 @@ def whichgen(command, path=None, verbose=0, exts=None):
     if path is None:
         usingGivenPath = 0
         path = os.environ.get("PATH", "").split(os.pathsep)
-        if sys.platform.startswith("win"):
+        if sys.platform.startswith("win") or os.name == 'os2':
             path.insert(0, os.curdir)  # implied by Windows shell
     else:
         usingGivenPath = 1
 
     # Windows has the concept of a list of extensions (PATHEXT env var).
-    if sys.platform.startswith("win"):
+    if sys.platform.startswith("win") or os.name == 'os2':
         if exts is None:
             exts = os.environ.get("PATHEXT", "").split(os.pathsep)
             # If '.exe' is not in exts then obviously this is Win9x and
@@ -193,7 +193,7 @@ def whichgen(command, path=None, verbose=0, exts=None):
         for i in range(len(path)):
             dirName = path[i]
             # On windows the dirName *could* be quoted, drop the quotes
-            if sys.platform.startswith("win") and len(dirName) >= 2\
+            if (sys.platform.startswith("win") or os.name == 'os2') and len(dirName) >= 2\
                and dirName[0] == '"' and dirName[-1] == '"':
                 dirName = dirName[1:-1]
             for ext in ['']+exts:
@@ -202,7 +202,7 @@ def whichgen(command, path=None, verbose=0, exts=None):
                 if os.path.isfile(absName):
                     if usingGivenPath:
                         fromWhere = "from given path element %d" % i
-                    elif not sys.platform.startswith("win"):
+                    elif not (sys.platform.startswith("win") or os.name == 'os2'):
                         fromWhere = "from PATH element %d" % i
                     elif i == 0:
                         fromWhere = "from current directory"
