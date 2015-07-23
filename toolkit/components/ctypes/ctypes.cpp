@@ -23,27 +23,52 @@
 namespace mozilla {
 namespace ctypes {
 
+// copy of what's in dom/workers/ChromeWorkerScope.cpp
 static char*
-UnicodeToNative(JSContext *cx, const jschar *source, size_t slen)
+UnicodeToNative(JSContext* aCx, const jschar* aSource, size_t aSourceLen)
 {
+  nsDependentString unicode(aSource, aSourceLen);
+
   nsAutoCString native;
-  nsDependentString unicode(reinterpret_cast<const char16_t*>(source), slen);
-  nsresult rv = NS_CopyUnicodeToNative(unicode, native);
-  if (NS_FAILED(rv)) {
-    JS_ReportError(cx, "could not convert string to native charset");
+  if (NS_FAILED(NS_CopyUnicodeToNative(unicode, native))) {
+    JS_ReportError(aCx, "Could not convert string to native charset!");
     return nullptr;
   }
 
-  char* result = static_cast<char*>(JS_malloc(cx, native.Length() + 1));
-  if (!result)
+  char* result = static_cast<char*>(JS_malloc(aCx, native.Length() + 1));
+  if (!result) {
     return nullptr;
+  }
 
-  memcpy(result, native.get(), native.Length() + 1);
+  memcpy(result, native.get(), native.Length());
+  result[native.Length()] = 0;
+  return result;
+}
+
+// copy of what's in dom/workers/ChromeWorkerScope.cpp
+static jschar*
+NativeToUnicode(JSContext* aCx, const char* aSource, size_t aSourceLen)
+{
+  nsDependentCString native(aSource, aSourceLen);
+
+  nsAutoString unicode;
+  if (NS_FAILED(NS_CopyNativeToUnicode(native, unicode))) {
+    JS_ReportError(aCx, "Could not convert string to unicode charset!");
+    return nullptr;
+  }
+
+  jschar* result = static_cast<jschar*>(JS_malloc(aCx, (unicode.Length() + 1) * sizeof(jschar)));
+  if (!result) {
+    return nullptr;
+  }
+
+  memcpy(result, unicode.get(), unicode.Length() * sizeof(jschar));
+  result[unicode.Length()] = 0;
   return result;
 }
 
 static JSCTypesCallbacks sCallbacks = {
-  UnicodeToNative
+  UnicodeToNative, NativeToUnicode
 };
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(Module)

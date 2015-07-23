@@ -20,7 +20,8 @@ namespace {
 
 #ifdef BUILD_CTYPES
 
-char*
+// copy of what's in toolkit/components/ctypes/ctypes.cpp
+static char*
 UnicodeToNative(JSContext* aCx, const jschar* aSource, size_t aSourceLen)
 {
   nsDependentString unicode(aSource, aSourceLen);
@@ -38,6 +39,28 @@ UnicodeToNative(JSContext* aCx, const jschar* aSource, size_t aSourceLen)
 
   memcpy(result, native.get(), native.Length());
   result[native.Length()] = 0;
+  return result;
+}
+
+// copy of what's in toolkit/components/ctypes/ctypes.cpp
+static jschar*
+NativeToUnicode(JSContext* aCx, const char* aSource, size_t aSourceLen)
+{
+  nsDependentCString native(aSource, aSourceLen);
+
+  nsAutoString unicode;
+  if (NS_FAILED(NS_CopyNativeToUnicode(native, unicode))) {
+    JS_ReportError(aCx, "Could not convert string to unicode charset!");
+    return nullptr;
+  }
+
+  jschar* result = static_cast<jschar*>(JS_malloc(aCx, (unicode.Length() + 1) * sizeof(jschar)));
+  if (!result) {
+    return nullptr;
+  }
+
+  memcpy(result, unicode.get(), unicode.Length() * sizeof(jschar));
+  result[unicode.Length()] = 0;
   return result;
 }
 
@@ -60,7 +83,7 @@ DefineChromeWorkerFunctions(JSContext* aCx, JS::Handle<JSObject*> aGlobal)
     }
 
     static JSCTypesCallbacks callbacks = {
-      UnicodeToNative
+      UnicodeToNative, NativeToUnicode
     };
 
     JS_SetCTypesCallbacks(JSVAL_TO_OBJECT(ctypes), &callbacks);

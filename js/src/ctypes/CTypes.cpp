@@ -6640,14 +6640,29 @@ ReadStringCommon(JSContext* cx, InflateUTF8Method inflateUTF8, unsigned argc, js
   case TYPE_char:
   case TYPE_signed_char:
   case TYPE_unsigned_char: {
+    // Convert to platform native charset if the appropriate callback has been
+    // provided.
     char* bytes = static_cast<char*>(data);
     size_t length = strnlen(bytes, maxLength);
-
-    // Determine the length.
-    jschar* dst = inflateUTF8(cx, JS::UTF8Chars(bytes, length), &length).get();
-    if (!dst)
+    jschar* dst;
+    JSObject* objCTypes = CType::GetGlobalCTypes(cx, baseType);
+    if (!objCTypes)
       return false;
+    JSCTypesCallbacks* callbacks = GetCallbacks(objCTypes);
+    if (callbacks && callbacks->nativeToUnicode) {
+      dst = callbacks->nativeToUnicode(cx, bytes, length);
+      if (!*dst)
+        return false;
+      length = js_strlen(dst);
+    } else {
+      // Fallback: assume the platform native charset is UTF-8. This is true
+      // for Mac OS X, Android, and probably Linux.
 
+      // Determine the length.
+      dst = inflateUTF8(cx, JS::UTF8Chars(bytes, length), &length).get();
+      if (!dst)
+        return false;
+    }
     result = JS_NewUCString(cx, dst, length);
     break;
   }

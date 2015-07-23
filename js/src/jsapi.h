@@ -1909,12 +1909,21 @@ typedef char*
 (* JSCTypesUnicodeToNativeFun)(JSContext* cx, const jschar* source, size_t slen);
 
 /*
+ * Convert a platform native string 'source' of length 'slen' to the unicode
+ * charset, returning a null-terminated string allocated with JS_malloc. On
+ * failure, this function should report an error.
+ */
+typedef jschar*
+(* JSCTypesNativeToUnicodeFun)(JSContext* cx, const char* source, size_t slen);
+
+/*
  * Set of function pointers that ctypes can use for various internal functions.
  * See JS_SetCTypesCallbacks below. Providing nullptr for a function is safe,
  * and will result in the applicable ctypes functionality not being available.
  */
 struct JSCTypesCallbacks {
     JSCTypesUnicodeToNativeFun unicodeToNative;
+    JSCTypesNativeToUnicodeFun nativeToUnicode;
 };
 
 typedef struct JSCTypesCallbacks JSCTypesCallbacks;
