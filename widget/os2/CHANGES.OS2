@@ -5,6 +5,24 @@ in the Mozilla product series from release to release.
 CHANGES
 
 
+Firefox 31.8.0 Beta 5 (2015-07-24)
+
+   - Update Firefox to version 31.8.0 ESR.
+
+   - Put back all OS/2 code that was removed by the Mozilla team between
+     versions 24 and 31 to bring Firefox back to life.
+
+   - Review JavsScript support to fix infamous crashes under heavy JS usage and
+     greatly improve overal JS performance on OS/2.
+
+   - Enable audio in HTML5 content and in JS using libkai.
+
+   - Temporarily disable out-of-process mode for all plugins to fix 100% CPU
+     load.
+
+   - Make File->Quit shortcut (Ctrl+Q) work again.
+
+
 Firefox 24.8.1 Beta 4 (2015-03-10)
 
    - Clean up temporary files (mozilla-temp-XXX) in %TEMP% directory.
