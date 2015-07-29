@@ -107,7 +107,7 @@ If you don't have ArcView installed, you may download it from:
 
 6. INSTALL 'pthr01.dll' and 'mmap.dll' into one of the directories
       on your "LIBPATH". You can download RPMs with these files from:
-         http://rpm.netlabs.org/release/00/i386/i386/pthread-20140814-16.oc00.i386.rpm
+         http://rpm.netlabs.org/release/00/i386/i386/pthread-20150408-19.oc00.i386.rpm
          http://rpm.netlabs.org/release/00/i386/i386/mmap-0.5-1.oc00.i386.rpm
       If you use RPM/YUM, just run this command:
          yum install pthread mmap
