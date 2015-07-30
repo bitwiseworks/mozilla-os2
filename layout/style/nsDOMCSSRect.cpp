@@ -17,7 +17,6 @@ nsDOMCSSRect::nsDOMCSSRect(nsROCSSPrimitiveValue* aTop,
                            nsROCSSPrimitiveValue* aLeft)
   : mTop(aTop), mRight(aRight), mBottom(aBottom), mLeft(aLeft)
 {
-  SetIsDOMBinding();
 }
 
 nsDOMCSSRect::~nsDOMCSSRect(void)
@@ -33,7 +32,7 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMCSSRect)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMCSSRect)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_4(nsDOMCSSRect, mTop, mBottom, mLeft, mRight)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsDOMCSSRect, mTop, mBottom, mLeft, mRight)
  
 JSObject*
 nsDOMCSSRect::WrapObject(JSContext* cx)

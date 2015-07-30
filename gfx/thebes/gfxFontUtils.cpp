@@ -3,20 +3,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_LOGGING
-#define FORCE_PR_LOG /* Allow logging in the release build */
-#include "prlog.h"
-#endif
-
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/BinarySearch.h"
 
 #include "gfxFontUtils.h"
+#include "gfxColor.h"
 
 #include "nsServiceManagerUtils.h"
 
 #include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#include "mozilla/BinarySearch.h"
 
 #include "nsCOMPtr.h"
 #include "nsIUUIDGenerator.h"
@@ -39,6 +37,15 @@
 using namespace mozilla;
 
 #pragma pack(1)
+
+typedef struct {
+    AutoSwap_PRUint16 format;
+    AutoSwap_PRUint16 reserved;
+    AutoSwap_PRUint32 length;
+    AutoSwap_PRUint32 language;
+    AutoSwap_PRUint32 startCharCode;
+    AutoSwap_PRUint32 numChars;
+} Format10CmapHeader;
 
 typedef struct {
     AutoSwap_PRUint16 format;
@@ -86,6 +93,53 @@ gfxSparseBitSet::Dump(const char* aPrefix, eGfxLog aWhichLog) const
 }
 #endif
 
+nsresult
+gfxFontUtils::ReadCMAPTableFormat10(const uint8_t *aBuf, uint32_t aLength,
+                                    gfxSparseBitSet& aCharacterMap)
+{
+    // Ensure table is large enough that we can safely read the header
+    NS_ENSURE_TRUE(aLength >= sizeof(Format10CmapHeader),
+                    NS_ERROR_GFX_CMAP_MALFORMED);
+
+    // Sanity-check header fields
+    const Format10CmapHeader *cmap10 =
+        reinterpret_cast<const Format10CmapHeader*>(aBuf);
+    NS_ENSURE_TRUE(uint16_t(cmap10->format) == 10,
+                   NS_ERROR_GFX_CMAP_MALFORMED);
+    NS_ENSURE_TRUE(uint16_t(cmap10->reserved) == 0,
+                   NS_ERROR_GFX_CMAP_MALFORMED);
+
+    uint32_t tablelen = cmap10->length;
+    NS_ENSURE_TRUE(tablelen >= sizeof(Format10CmapHeader) &&
+                   tablelen <= aLength, NS_ERROR_GFX_CMAP_MALFORMED);
+
+    NS_ENSURE_TRUE(cmap10->language == 0, NS_ERROR_GFX_CMAP_MALFORMED);
+
+    uint32_t numChars = cmap10->numChars;
+    NS_ENSURE_TRUE(tablelen == sizeof(Format10CmapHeader) +
+                   numChars * sizeof(uint16_t), NS_ERROR_GFX_CMAP_MALFORMED);
+
+    uint32_t charCode = cmap10->startCharCode;
+    NS_ENSURE_TRUE(charCode <= CMAP_MAX_CODEPOINT &&
+                   charCode + numChars <= CMAP_MAX_CODEPOINT,
+                   NS_ERROR_GFX_CMAP_MALFORMED);
+
+    // glyphs[] array immediately follows the subtable header
+    const AutoSwap_PRUint16 *glyphs =
+        reinterpret_cast<const AutoSwap_PRUint16 *>(cmap10 + 1);
+
+    for (uint32_t i = 0; i < numChars; ++i) {
+        if (uint16_t(*glyphs) != 0) {
+            aCharacterMap.set(charCode);
+        }
+        ++charCode;
+        ++glyphs;
+    }
+
+    aCharacterMap.Compact();
+
+    return NS_OK;
+}
 
 nsresult
 gfxFontUtils::ReadCMAPTableFormat12(const uint8_t *aBuf, uint32_t aLength,
@@ -421,7 +475,8 @@ gfxFontUtils::FindPreferredSubtable(const uint8_t *aBuf, uint32_t aBufLength,
             keepFormat = format;
             *aTableOffset = offset;
             *aSymbolEncoding = false;
-        } else if (format == 12 && acceptableUCS4Encoding(platformID, encodingID, keepFormat)) {
+        } else if ((format == 10 || format == 12) &&
+                   acceptableUCS4Encoding(platformID, encodingID, keepFormat)) {
             keepFormat = format;
             *aTableOffset = offset;
             *aSymbolEncoding = false;
@@ -430,7 +485,7 @@ gfxFontUtils::FindPreferredSubtable(const uint8_t *aBuf, uint32_t aBufLength,
             }
         } else if (format == 14 && isUVSEncoding(platformID, encodingID) && aUVSTableOffset) {
             *aUVSTableOffset = offset;
-            if (keepFormat == 12) {
+            if (keepFormat == 10 || keepFormat == 12) {
                 break;
             }
         }
@@ -450,7 +505,8 @@ gfxFontUtils::ReadCMAP(const uint8_t *aBuf, uint32_t aBufLength,
     uint32_t format = FindPreferredSubtable(aBuf, aBufLength,
                                             &offset, &aUVSOffset, &symbol);
 
-    if (format == 4) {
+    switch (format) {
+    case 4:
         if (symbol) {
             aUnicodeFont = false;
             aSymbolFont = true;
@@ -460,13 +516,21 @@ gfxFontUtils::ReadCMAP(const uint8_t *aBuf, uint32_t aBufLength,
         }
         return ReadCMAPTableFormat4(aBuf + offset, aBufLength - offset,
                                     aCharacterMap);
-    }
 
-    if (format == 12) {
+    case 10:
+        aUnicodeFont = true;
+        aSymbolFont = false;
+        return ReadCMAPTableFormat10(aBuf + offset, aBufLength - offset,
+                                     aCharacterMap);
+
+    case 12:
         aUnicodeFont = true;
         aSymbolFont = false;
         return ReadCMAPTableFormat12(aBuf + offset, aBufLength - offset,
                                      aCharacterMap);
+
+    default:
+        break;
     }
 
     return NS_ERROR_FAILURE;
@@ -570,6 +634,26 @@ gfxFontUtils::MapCharToGlyphFormat4(const uint8_t *aBuf, char16_t aCh)
 }
 
 uint32_t
+gfxFontUtils::MapCharToGlyphFormat10(const uint8_t *aBuf, uint32_t aCh)
+{
+    const Format10CmapHeader *cmap10 =
+        reinterpret_cast<const Format10CmapHeader*>(aBuf);
+
+    uint32_t startChar = cmap10->startCharCode;
+    uint32_t numChars = cmap10->numChars;
+
+    if (aCh < startChar || aCh >= startChar + numChars) {
+        return 0;
+    }
+
+    const AutoSwap_PRUint16 *glyphs =
+        reinterpret_cast<const AutoSwap_PRUint16 *>(cmap10 + 1);
+
+    uint16_t glyph = glyphs[aCh - startChar];
+    return glyph;
+}
+
+uint32_t
 gfxFontUtils::MapCharToGlyphFormat12(const uint8_t *aBuf, uint32_t aCh)
 {
     const Format12CmapHeader *cmap12 =
@@ -617,49 +701,47 @@ gfxFontUtils::MapCharToGlyphFormat12(const uint8_t *aBuf, uint32_t aCh)
     return 0;
 }
 
+namespace {
+
+struct Format14CmapWrapper
+{
+    const Format14Cmap& mCmap14;
+    explicit Format14CmapWrapper(const Format14Cmap& cmap14) : mCmap14(cmap14) {}
+    uint32_t operator[](size_t index) const {
+        return mCmap14.varSelectorRecords[index].varSelector;
+    }
+};
+
+struct NonDefUVSTableWrapper
+{
+    const NonDefUVSTable& mTable;
+    explicit NonDefUVSTableWrapper(const NonDefUVSTable& table) : mTable(table) {}
+    uint32_t operator[](size_t index) const {
+        return mTable.uvsMappings[index].unicodeValue;
+    }
+};
+
+} // namespace
+
 uint16_t
 gfxFontUtils::MapUVSToGlyphFormat14(const uint8_t *aBuf, uint32_t aCh, uint32_t aVS)
 {
+    using mozilla::BinarySearch;
     const Format14Cmap *cmap14 = reinterpret_cast<const Format14Cmap*>(aBuf);
 
-    // binary search in varSelectorRecords
-    uint32_t min = 0;
-    uint32_t max = cmap14->numVarSelectorRecords;
-    uint32_t nonDefUVSOffset = 0;
-    while (min < max) {
-        uint32_t index = (min + max) >> 1;
-        uint32_t varSelector = cmap14->varSelectorRecords[index].varSelector;
-        if (aVS == varSelector) {
-            nonDefUVSOffset = cmap14->varSelectorRecords[index].nonDefaultUVSOffset;
-            break;
-        }
-        if (aVS < varSelector) {
-            max = index;
-        } else {
-            min = index + 1;
-        }
-    }
-    if (!nonDefUVSOffset) {
+    size_t index;
+    if (!BinarySearch(Format14CmapWrapper(*cmap14),
+                      0, cmap14->numVarSelectorRecords, aVS, &index)) {
         return 0;
     }
 
+    const uint32_t nonDefUVSOffset = cmap14->varSelectorRecords[index].nonDefaultUVSOffset;
     const NonDefUVSTable *table = reinterpret_cast<const NonDefUVSTable*>
                                       (aBuf + nonDefUVSOffset);
 
-    // binary search in uvsMappings
-    min = 0;
-    max = table->numUVSMappings;
-    while (min < max) {
-        uint32_t index = (min + max) >> 1;
-        uint32_t unicodeValue = table->uvsMappings[index].unicodeValue;
-        if (aCh == unicodeValue) {
-            return table->uvsMappings[index].glyphID;
-        }
-        if (aCh < unicodeValue) {
-            max = index;
-        } else {
-            min = index + 1;
-        }
+    if (BinarySearch(NonDefUVSTableWrapper(*table), 0, table->numUVSMappings,
+                     aCh, &index)) {
+        return table->uvsMappings[index].glyphID;
     }
 
     return 0;
@@ -679,6 +761,9 @@ gfxFontUtils::MapCharToGlyph(const uint8_t *aCmapBuf, uint32_t aBufLength,
     case 4:
         gid = aUnicode < UNICODE_BMP_LIMIT ?
             MapCharToGlyphFormat4(aCmapBuf + offset, char16_t(aUnicode)) : 0;
+        break;
+    case 10:
+        gid = MapCharToGlyphFormat10(aCmapBuf + offset, aUnicode);
         break;
     case 12:
         gid = MapCharToGlyphFormat12(aCmapBuf + offset, aUnicode);
@@ -702,6 +787,10 @@ gfxFontUtils::MapCharToGlyph(const uint8_t *aCmapBuf, uint32_t aBufLength,
                                                        char16_t(aUnicode));
                     }
                     break;
+                case 10:
+                    varGID = MapCharToGlyphFormat10(aCmapBuf + offset,
+                                                    aUnicode);
+                    break;
                 case 12:
                     varGID = MapCharToGlyphFormat12(aCmapBuf + offset,
                                                     aUnicode);
@@ -720,23 +809,16 @@ gfxFontUtils::MapCharToGlyph(const uint8_t *aCmapBuf, uint32_t aBufLength,
     return gid;
 }
 
-void gfxFontUtils::GetPrefsFontList(const char *aPrefName, nsTArray<nsString>& aFontList)
+void gfxFontUtils::ParseFontList(const nsAString& aFamilyList,
+                                 nsTArray<nsString>& aFontList)
 {
     const char16_t kComma = char16_t(',');
     
-    aFontList.Clear();
-    
-    // get the list of single-face font families
-    nsAdoptingString fontlistValue = Preferences::GetString(aPrefName);
-    if (!fontlistValue) {
-        return;
-    }
-
     // append each font name to the list
     nsAutoString fontname;
     const char16_t *p, *p_end;
-    fontlistValue.BeginReading(p);
-    fontlistValue.EndReading(p_end);
+    aFamilyList.BeginReading(p);
+    aFamilyList.EndReading(p_end);
 
      while (p < p_end) {
         const char16_t *nameStart = p;
@@ -751,7 +833,25 @@ void gfxFontUtils::GetPrefsFontList(const char *aPrefName, nsTArray<nsString>& a
         aFontList.AppendElement(fontname);
         ++p;
     }
+}
 
+void gfxFontUtils::AppendPrefsFontList(const char *aPrefName,
+                                       nsTArray<nsString>& aFontList)
+{
+    // get the list of single-face font families
+    nsAdoptingString fontlistValue = Preferences::GetString(aPrefName);
+    if (!fontlistValue) {
+        return;
+    }
+
+    ParseFontList(fontlistValue, aFontList);
+}
+
+void gfxFontUtils::GetPrefsFontList(const char *aPrefName,
+                                    nsTArray<nsString>& aFontList)
+{
+    aFontList.Clear();
+    AppendPrefsFontList(aPrefName, aFontList);
 }
 
 // produce a unique font name that is (1) a valid Postscript name and (2) less
@@ -785,7 +885,7 @@ nsresult gfxFontUtils::MakeUniqueUserFontName(nsAString& aName)
             *p = '-';
     }
 
-    aName.Assign(NS_LITERAL_STRING("uf"));
+    aName.AssignLiteral(MOZ_UTF16("uf"));
     aName.AppendASCII(guidB64);
     return NS_OK;
 }
@@ -849,6 +949,10 @@ gfxFontUtils::DetermineFontDataType(const uint8_t *aFontData, uint32_t aFontData
             reinterpret_cast<const AutoSwap_PRUint32*>(aFontData);
         if (uint32_t(*version) == TRUETYPE_TAG('w','O','F','F')) {
             return GFX_USERFONT_WOFF;
+        }
+        if (Preferences::GetBool(GFX_PREF_WOFF2_ENABLED) &&
+            uint32_t(*version) == TRUETYPE_TAG('w','O','F','2')) {
+            return GFX_USERFONT_WOFF2;
         }
     }
     
@@ -1066,7 +1170,7 @@ gfxFontUtils::GetFullNameFromTable(hb_blob_t *aNameTable,
                                              gfxFontUtils::NAME_ID_STYLE,
                                              styleName);
         if (NS_SUCCEEDED(rv) && !styleName.IsEmpty()) {
-            name.AppendLiteral(" ");
+            name.Append(' ');
             name.Append(styleName);
             aFullName = name;
         }
@@ -1203,15 +1307,15 @@ const gfxFontUtils::MacFontNameCharsetMapping gfxFontUtils::gMacFontNameCharsets
     { ENCODING_ID_MAC_DEVANAGARI,   ANY,                      "x-mac-devanagari"},
     { ENCODING_ID_MAC_GURMUKHI,     ANY,                      "x-mac-gurmukhi"  },
     { ENCODING_ID_MAC_GUJARATI,     ANY,                      "x-mac-gujarati"  },
-    { ENCODING_ID_MAC_SIMP_CHINESE, LANG_ID_MAC_SIMP_CHINESE, "GB2312"          },
-    { ENCODING_ID_MAC_SIMP_CHINESE, ANY,                      "GB2312"          }
+    { ENCODING_ID_MAC_SIMP_CHINESE, LANG_ID_MAC_SIMP_CHINESE, "gb18030"         },
+    { ENCODING_ID_MAC_SIMP_CHINESE, ANY,                      "gb18030"         }
 };
 
 const char* gfxFontUtils::gISOFontNameCharsets[] = 
 {
-    /* 0 */ "us-ascii"   ,
+    /* 0 */ "windows-1252", /* US-ASCII */
     /* 1 */ nullptr       , /* spec says "ISO 10646" but does not specify encoding form! */
-    /* 2 */ "ISO-8859-1"
+    /* 2 */ "windows-1252"  /* ISO-8859-1 */
 };
 
 const char* gfxFontUtils::gMSFontNameCharsets[] =
@@ -1222,11 +1326,28 @@ const char* gfxFontUtils::gMSFontNameCharsets[] =
     /* [3] ENCODING_ID_MICROSOFT_PRC */         nullptr      ,
     /* [4] ENCODING_ID_MICROSOFT_BIG5 */        "Big5"      ,
     /* [5] ENCODING_ID_MICROSOFT_WANSUNG */     nullptr      ,
-    /* [6] ENCODING_ID_MICROSOFT_JOHAB */       "x-johab"   ,
+    /* [6] ENCODING_ID_MICROSOFT_JOHAB */       nullptr      ,
     /* [7] reserved */                          nullptr      ,
     /* [8] reserved */                          nullptr      ,
     /* [9] reserved */                          nullptr      ,
     /*[10] ENCODING_ID_MICROSOFT_UNICODEFULL */ ""
+};
+
+struct MacCharsetMappingComparator
+{
+    typedef gfxFontUtils::MacFontNameCharsetMapping MacFontNameCharsetMapping;
+    const MacFontNameCharsetMapping& mSearchValue;
+    explicit MacCharsetMappingComparator(const MacFontNameCharsetMapping& aSearchValue)
+      : mSearchValue(aSearchValue) {}
+    int operator()(const MacFontNameCharsetMapping& aEntry) const {
+        if (mSearchValue < aEntry) {
+            return -1;
+        }
+        if (aEntry < mSearchValue) {
+            return 1;
+        }
+        return 0;
+    }
 };
 
 // Return the name of the charset we should use to decode a font name
@@ -1244,27 +1365,15 @@ gfxFontUtils::GetCharsetForFontName(uint16_t aPlatform, uint16_t aScript, uint16
 
     case PLATFORM_ID_MAC:
         {
-            uint32_t lo = 0, hi = ArrayLength(gMacFontNameCharsets);
             MacFontNameCharsetMapping searchValue = { aScript, aLanguage, nullptr };
             for (uint32_t i = 0; i < 2; ++i) {
-                // binary search; if not found, set language to ANY and try again
-                while (lo < hi) {
-                    uint32_t mid = (lo + hi) / 2;
-                    const MacFontNameCharsetMapping& entry = gMacFontNameCharsets[mid];
-                    if (entry < searchValue) {
-                        lo = mid + 1;
-                        continue;
-                    }
-                    if (searchValue < entry) {
-                        hi = mid;
-                        continue;
-                    }
-                    // found a match
-                    return entry.mCharsetName;
+                size_t idx;
+                if (BinarySearchIf(gMacFontNameCharsets, 0, ArrayLength(gMacFontNameCharsets),
+                                            MacCharsetMappingComparator(searchValue), &idx)) {
+                    return gMacFontNameCharsets[idx].mCharsetName;
                 }
 
-                // no match, so reset high bound for search and re-try
-                hi = ArrayLength(gMacFontNameCharsets);
+                // no match, so try again finding one in any language
                 searchValue.mLanguage = ANY;
             }
         }
@@ -1437,6 +1546,215 @@ gfxFontUtils::ReadNames(const char *aNameData, uint32_t aDataLen,
     }
 
     return NS_OK;
+}
+
+#pragma pack(1)
+
+struct COLRBaseGlyphRecord {
+    AutoSwap_PRUint16    glyphId;
+    AutoSwap_PRUint16    firstLayerIndex;
+    AutoSwap_PRUint16    numLayers;
+};
+
+struct COLRLayerRecord {
+    AutoSwap_PRUint16    glyphId;
+    AutoSwap_PRUint16    paletteEntryIndex;
+};
+
+struct CPALColorRecord {
+    uint8_t              blue;
+    uint8_t              green;
+    uint8_t              red;
+    uint8_t              alpha;
+};
+
+#pragma pack()
+
+bool
+gfxFontUtils::ValidateColorGlyphs(hb_blob_t* aCOLR, hb_blob_t* aCPAL)
+{
+    unsigned int colrLength;
+    const COLRHeader* colr =
+        reinterpret_cast<const COLRHeader*>(hb_blob_get_data(aCOLR, &colrLength));
+    unsigned int cpalLength;
+    const CPALHeaderVersion0* cpal =
+        reinterpret_cast<const CPALHeaderVersion0*>(hb_blob_get_data(aCPAL, &cpalLength));
+
+    if (!colr || !cpal || !colrLength || !cpalLength) {
+        return false;
+    }
+
+    if (uint16_t(colr->version) != 0 || uint16_t(cpal->version) != 0) {
+        // We only support version 0 headers.
+        return false;
+    }
+
+    const uint32_t offsetBaseGlyphRecord = colr->offsetBaseGlyphRecord;
+    const uint16_t numBaseGlyphRecord = colr->numBaseGlyphRecord;
+    const uint32_t offsetLayerRecord = colr->offsetLayerRecord;
+    const uint16_t numLayerRecords = colr->numLayerRecords;
+
+    const uint32_t offsetFirstColorRecord = cpal->offsetFirstColorRecord;
+    const uint16_t numColorRecords = cpal->numColorRecords;
+    const uint32_t numPaletteEntries = cpal->numPaletteEntries;
+
+    if (offsetBaseGlyphRecord >= colrLength) {
+        return false;
+    }
+
+    if (offsetLayerRecord >= colrLength) {
+        return false;
+    }
+
+    if (offsetFirstColorRecord >= cpalLength) {
+        return false;
+    }
+
+    if (!numPaletteEntries) {
+        return false;
+    }
+
+    if (sizeof(COLRBaseGlyphRecord) * numBaseGlyphRecord >
+            colrLength - offsetBaseGlyphRecord) {
+        // COLR base glyph record will be overflow
+        return false;
+    }
+
+    if (sizeof(COLRLayerRecord) * numLayerRecords >
+            colrLength - offsetLayerRecord) {
+        // COLR layer record will be overflow
+        return false;
+    }
+
+    if (sizeof(CPALColorRecord) * numColorRecords >
+            cpalLength - offsetFirstColorRecord) {
+        // CPAL color record will be overflow
+        return false;
+    }
+
+    if (numPaletteEntries * uint16_t(cpal->numPalettes) != numColorRecords ) {
+        // palette of CPAL color record will be overflow.
+        return false;
+    }
+
+    uint16_t lastGlyphId = 0;
+    const COLRBaseGlyphRecord* baseGlyph =
+        reinterpret_cast<const COLRBaseGlyphRecord*>(
+            reinterpret_cast<const uint8_t*>(colr) + offsetBaseGlyphRecord);
+
+    for (uint16_t i = 0; i < numBaseGlyphRecord; i++, baseGlyph++) {
+        const uint32_t firstLayerIndex = baseGlyph->firstLayerIndex;
+        const uint16_t numLayers = baseGlyph->numLayers;
+        const uint16_t glyphId = baseGlyph->glyphId;
+
+        if (lastGlyphId && lastGlyphId >= glyphId) {
+            // glyphId must be sorted
+            return false;
+        }
+        lastGlyphId = glyphId;
+
+        if (!numLayers) {
+            // no layer
+            return false;
+        }
+        if (firstLayerIndex + numLayers > numLayerRecords) {
+            // layer length of target glyph is overflow
+            return false;
+        }
+    }
+
+    const COLRLayerRecord* layer =
+        reinterpret_cast<const COLRLayerRecord*>(
+            reinterpret_cast<const uint8_t*>(colr) + offsetLayerRecord);
+
+    for (uint16_t i = 0; i < numLayerRecords; i++, layer++) {
+        if (uint16_t(layer->paletteEntryIndex) >= numPaletteEntries) {
+            // CPAL palette entry record is overflow
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static int
+CompareBaseGlyph(const void* key, const void* data)
+{
+    uint32_t glyphId = (uint32_t)(uintptr_t)key;
+    const COLRBaseGlyphRecord* baseGlyph =
+        reinterpret_cast<const COLRBaseGlyphRecord*>(data);
+    uint32_t baseGlyphId = uint16_t(baseGlyph->glyphId);
+
+    if (baseGlyphId == glyphId) {
+        return 0;
+    }
+
+    return baseGlyphId > glyphId ? -1 : 1;
+}
+
+static
+COLRBaseGlyphRecord*
+LookForBaseGlyphRecord(const COLRHeader* aCOLR, uint32_t aGlyphId)
+{
+    const uint8_t* baseGlyphRecords =
+        reinterpret_cast<const uint8_t*>(aCOLR) +
+        uint32_t(aCOLR->offsetBaseGlyphRecord);
+    // BaseGlyphRecord is sorted by glyphId
+    return reinterpret_cast<COLRBaseGlyphRecord*>(
+               bsearch((void*)(uintptr_t)aGlyphId,
+                       baseGlyphRecords,
+                       uint16_t(aCOLR->numBaseGlyphRecord),
+                       sizeof(COLRBaseGlyphRecord),
+                       CompareBaseGlyph));
+}
+
+bool
+gfxFontUtils::GetColorGlyphLayers(hb_blob_t* aCOLR,
+                                  hb_blob_t* aCPAL,
+                                  uint32_t aGlyphId,
+                                  nsTArray<uint16_t>& aGlyphs,
+                                  nsTArray<mozilla::gfx::Color>& aColors)
+{
+    unsigned int blobLength;
+    const COLRHeader* colr =
+        reinterpret_cast<const COLRHeader*>(hb_blob_get_data(aCOLR,
+                                                             &blobLength));
+    MOZ_ASSERT(colr, "Cannot get COLR raw data");
+    MOZ_ASSERT(blobLength, "Found COLR data, but length is 0");
+
+    COLRBaseGlyphRecord* baseGlyph = LookForBaseGlyphRecord(colr, aGlyphId);
+    if (!baseGlyph) {
+        return false;
+    }
+
+    const CPALHeaderVersion0* cpal =
+        reinterpret_cast<const CPALHeaderVersion0*>(
+            hb_blob_get_data(aCPAL, &blobLength));
+    MOZ_ASSERT(cpal, "Cannot get CPAL raw data");
+    MOZ_ASSERT(blobLength, "Found CPAL data, but length is 0");
+
+    const COLRLayerRecord* layer =
+        reinterpret_cast<const COLRLayerRecord*>(
+            reinterpret_cast<const uint8_t*>(colr) +
+            uint32_t(colr->offsetLayerRecord) +
+            sizeof(COLRLayerRecord) * uint16_t(baseGlyph->firstLayerIndex));
+    const uint16_t numLayers = baseGlyph->numLayers;
+    const uint32_t offsetFirstColorRecord = cpal->offsetFirstColorRecord;
+
+    for (uint16_t layerIndex = 0; layerIndex < numLayers; layerIndex++) {
+        aGlyphs.AppendElement(uint16_t(layer->glyphId));
+        const CPALColorRecord* color =
+            reinterpret_cast<const CPALColorRecord*>(
+                reinterpret_cast<const uint8_t*>(cpal) +
+                offsetFirstColorRecord +
+                sizeof(CPALColorRecord) * uint16_t(layer->paletteEntryIndex));
+        aColors.AppendElement(mozilla::gfx::Color(color->red / 255.0,
+                                                  color->green / 255.0,
+                                                  color->blue / 255.0,
+                                                  color->alpha / 255.0));
+        layer++;
+    }
+    return true;
 }
 
 #ifdef XP_WIN

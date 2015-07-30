@@ -1,10 +1,11 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "gfxMatrix.h"
 #include "gfx3DMatrix.h"
+#include "gfx2DGlue.h"
 #include "mozilla/gfx/Tools.h"
 #include <math.h>
 #include <algorithm>
@@ -162,12 +163,12 @@ gfx3DMatrix
 gfx3DMatrix::From2D(const gfxMatrix &aMatrix)
 {
   gfx3DMatrix matrix;
-  matrix._11 = (float)aMatrix.xx;
-  matrix._12 = (float)aMatrix.yx;
-  matrix._21 = (float)aMatrix.xy;
-  matrix._22 = (float)aMatrix.yy;
-  matrix._41 = (float)aMatrix.x0;
-  matrix._42 = (float)aMatrix.y0;
+  matrix._11 = (float)aMatrix._11;
+  matrix._12 = (float)aMatrix._12;
+  matrix._21 = (float)aMatrix._21;
+  matrix._22 = (float)aMatrix._22;
+  matrix._41 = (float)aMatrix._31;
+  matrix._42 = (float)aMatrix._32;
   return matrix;
 }
 
@@ -181,7 +182,7 @@ gfx3DMatrix::IsIdentity() const
 }
 
 void
-gfx3DMatrix::Translate(const gfxPoint3D& aPoint)
+gfx3DMatrix::Translate(const Point3D& aPoint)
 {
     _41 += aPoint.x * _11 + aPoint.y * _21 + aPoint.z * _31;
     _42 += aPoint.x * _12 + aPoint.y * _22 + aPoint.z * _32;
@@ -190,7 +191,7 @@ gfx3DMatrix::Translate(const gfxPoint3D& aPoint)
 }
 
 void
-gfx3DMatrix::TranslatePost(const gfxPoint3D& aPoint)
+gfx3DMatrix::TranslatePost(const Point3D& aPoint)
 {
     _11 += _14 * aPoint.x;
     _21 += _24 * aPoint.x;
@@ -226,21 +227,13 @@ gfx3DMatrix::ScalePost(float aX, float aY, float aZ)
 }
 
 void
-gfx3DMatrix::SkewXY(double aSkew)
+gfx3DMatrix::ChangeBasis(const Point3D& aOrigin)
 {
-    (*this)[1] += (*this)[0] * aSkew;
-}
+  // Translate to the origin before applying this matrix.
+  Translate(-aOrigin);
 
-void 
-gfx3DMatrix::SkewXZ(double aSkew)
-{
-    (*this)[2] += (*this)[0] * aSkew;
-}
-
-void
-gfx3DMatrix::SkewYZ(double aSkew)
-{
-    (*this)[2] += (*this)[1] * aSkew;
+  // Translate back into position after applying this matrix.
+  TranslatePost(aOrigin);
 }
 
 void
@@ -369,22 +362,22 @@ void
 gfx3DMatrix::PreMultiply(const gfxMatrix& aOther)
 {
   gfx3DMatrix temp;
-  temp._11 = aOther.xx * _11 + aOther.yx * _21;
-  temp._21 = aOther.xy * _11 + aOther.yy * _21;
+  temp._11 = aOther._11 * _11 + aOther._12 * _21;
+  temp._21 = aOther._21 * _11 + aOther._22 * _21;
   temp._31 = _31;
-  temp._41 = aOther.x0 * _11 + aOther.y0 * _21 + _41;
-  temp._12 = aOther.xx * _12 + aOther.yx * _22;
-  temp._22 = aOther.xy * _12 + aOther.yy * _22;
+  temp._41 = aOther._31 * _11 + aOther._32 * _21 + _41;
+  temp._12 = aOther._11 * _12 + aOther._12 * _22;
+  temp._22 = aOther._21 * _12 + aOther._22 * _22;
   temp._32 = _32;
-  temp._42 = aOther.x0 * _12 + aOther.y0 * _22 + _42;
-  temp._13 = aOther.xx * _13 + aOther.yx * _23;
-  temp._23 = aOther.xy * _13 + aOther.yy * _23;
+  temp._42 = aOther._31 * _12 + aOther._32 * _22 + _42;
+  temp._13 = aOther._11 * _13 + aOther._12 * _23;
+  temp._23 = aOther._21 * _13 + aOther._22 * _23;
   temp._33 = _33;
-  temp._43 = aOther.x0 * _13 + aOther.y0 * _23 + _43;
-  temp._14 = aOther.xx * _14 + aOther.yx * _24;
-  temp._24 = aOther.xy * _14 + aOther.yy * _24;
+  temp._43 = aOther._31 * _13 + aOther._32 * _23 + _43;
+  temp._14 = aOther._11 * _14 + aOther._12 * _24;
+  temp._24 = aOther._21 * _14 + aOther._22 * _24;
   temp._34 = _34;
-  temp._44 = aOther.x0 * _14 + aOther.y0 * _24 + _44;
+  temp._44 = aOther._31 * _14 + aOther._32 * _24 + _44;
 
   *this = temp;
 }
@@ -401,7 +394,7 @@ gfx3DMatrix::Translation(float aX, float aY, float aZ)
 }
 
 gfx3DMatrix
-gfx3DMatrix::Translation(const gfxPoint3D& aPoint)
+gfx3DMatrix::Translation(const Point3D& aPoint)
 {
   gfx3DMatrix matrix;
 
@@ -501,7 +494,7 @@ gfx3DMatrix::IsSingular() const
 gfx3DMatrix
 gfx3DMatrix::Inverse() const
 {
-  if (TransposedVector(3) == gfxPointH3D(0, 0, 0, 1)) {
+  if (_14 == 0 && _24 == 0 && _34 == 0 && _44 == 1) {
     /** 
      * When the matrix contains no perspective, the inverse
      * is the same as the 3x3 inverse of the rotation components
@@ -513,7 +506,7 @@ gfx3DMatrix::Inverse() const
      * the values.
      */
     gfx3DMatrix matrix3 = Inverse3x3();
-    matrix3.Translate(gfxPoint3D(-_41, -_42, -_43));
+    matrix3.Translate(Point3D(-_41, -_42, -_43));
     return matrix3;
  }
 
@@ -577,44 +570,26 @@ gfx3DMatrix::Inverse() const
   return temp;
 }
 
-gfx3DMatrix&
-gfx3DMatrix::Normalize()
-{
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
-            (*this)[i][j] /= (*this)[3][3];
-       }
-    }
-    return *this;
-}
-
-gfx3DMatrix&
-gfx3DMatrix::Transpose()
-{
-    *this = Transposed();
-    return *this;
-}
-
-gfx3DMatrix
-gfx3DMatrix::Transposed() const
-{
-    gfx3DMatrix temp;
-    for (int i = 0; i < 4; i++) {
-        temp[i] = TransposedVector(i);
-    }
-    return temp;
-}
-
 gfxPoint
 gfx3DMatrix::Transform(const gfxPoint& point) const
 {
-  gfxPoint3D vec3d(point.x, point.y, 0);
-  vec3d = Transform3D(vec3d);
-  return gfxPoint(vec3d.x, vec3d.y);
+  // Note: we don't use Transform3D here because passing point.x/y via
+  // a Point3D would lose precision and cause bugs, e.g. bug 1091709.
+  gfxFloat px = point.x;
+  gfxFloat py = point.y;
+
+  gfxFloat x = px * _11 + py * _21 + _41;
+  gfxFloat y = px * _12 + py * _22 + _42;
+  gfxFloat w = px * _14 + py * _24 + _44;
+
+  x /= w;
+  y /= w;
+
+  return gfxPoint(x, y);
 }
 
-gfxPoint3D
-gfx3DMatrix::Transform3D(const gfxPoint3D& point) const
+Point3D
+gfx3DMatrix::Transform3D(const Point3D& point) const
 {
   gfxFloat x = point.x * _11 + point.y * _21 + point.z * _31 + _41;
   gfxFloat y = point.x * _12 + point.y * _22 + point.z * _32 + _42;
@@ -625,29 +600,18 @@ gfx3DMatrix::Transform3D(const gfxPoint3D& point) const
   y /= w;
   z /= w;
 
-  return gfxPoint3D(x, y, z);
+  return Point3D(x, y, z);
 }
 
-gfxPointH3D
-gfx3DMatrix::Transform4D(const gfxPointH3D& aPoint) const
+Point4D
+gfx3DMatrix::Transform4D(const Point4D& aPoint) const
 {
     gfxFloat x = aPoint.x * _11 + aPoint.y * _21 + aPoint.z * _31 + aPoint.w * _41;
     gfxFloat y = aPoint.x * _12 + aPoint.y * _22 + aPoint.z * _32 + aPoint.w * _42;
     gfxFloat z = aPoint.x * _13 + aPoint.y * _23 + aPoint.z * _33 + aPoint.w * _43;
     gfxFloat w = aPoint.x * _14 + aPoint.y * _24 + aPoint.z * _34 + aPoint.w * _44;
 
-    return gfxPointH3D(x, y, z, w);
-}
-
-gfxPointH3D
-gfx3DMatrix::TransposeTransform4D(const gfxPointH3D& aPoint) const
-{
-    gfxFloat x = aPoint.x * _11 + aPoint.y * _12 + aPoint.z * _13 + aPoint.w * _14;
-    gfxFloat y = aPoint.x * _21 + aPoint.y * _22 + aPoint.z * _23 + aPoint.w * _24;
-    gfxFloat z = aPoint.x * _31 + aPoint.y * _32 + aPoint.z * _33 + aPoint.w * _34;
-    gfxFloat w = aPoint.x * _41 + aPoint.y * _42 + aPoint.z * _43 + aPoint.w * _44;
-
-    return gfxPointH3D(x, y, z, w);
+    return Point4D(x, y, z, w);
 }
 
 gfxRect
@@ -711,12 +675,12 @@ gfx3DMatrix::Is2D(gfxMatrix* aMatrix) const
     return false;
   }
   if (aMatrix) {
-    aMatrix->xx = _11;
-    aMatrix->yx = _12;
-    aMatrix->xy = _21;
-    aMatrix->yy = _22;
-    aMatrix->x0 = _41;
-    aMatrix->y0 = _42;
+    aMatrix->_11 = _11;
+    aMatrix->_12 = _12;
+    aMatrix->_21 = _21;
+    aMatrix->_22 = _22;
+    aMatrix->_31 = _41;
+    aMatrix->_32 = _42;
   }
   return true;
 }
@@ -730,12 +694,12 @@ gfx3DMatrix::CanDraw2D(gfxMatrix* aMatrix) const
     return false;
   }
   if (aMatrix) {
-    aMatrix->xx = _11;
-    aMatrix->yx = _12;
-    aMatrix->xy = _21;
-    aMatrix->yy = _22;
-    aMatrix->x0 = _41;
-    aMatrix->y0 = _42;
+    aMatrix->_11 = _11;
+    aMatrix->_12 = _12;
+    aMatrix->_21 = _21;
+    aMatrix->_22 = _22;
+    aMatrix->_31 = _41;
+    aMatrix->_32 = _42;
   }
   return true;
 }
@@ -753,100 +717,31 @@ gfx3DMatrix::ProjectTo2D()
   return *this;
 }
 
-gfxPoint gfx3DMatrix::ProjectPoint(const gfxPoint& aPoint) const
+Point4D gfx3DMatrix::ProjectPoint(const gfxPoint& aPoint) const
 {
-  // Define a ray of the form P + Ut where t is a real number
-  // w is assumed to always be 1 when transforming 3d points with our
-  // 4x4 matrix.
-  // p is our click point, q is another point on the same ray.
-  // 
-  // Note: since the transformation is a general projective transformation and is not
-  // necessarily affine, we can't just take a unit vector u, back-transform it, and use
-  // it as unit vector on the back-transformed ray. Instead, we really must take two points
-  // on the ray and back-transform them.
-  gfxPoint3D p(aPoint.x, aPoint.y, 0);
-  gfxPoint3D q(aPoint.x, aPoint.y, 1);
+  // Find a value for z that will transform to 0.
 
-  // Back transform the vectors (using w = 1) and normalize
-  // back into 3d vectors by dividing by the w component.
-  gfxPoint3D pback = Transform3D(p);
-  gfxPoint3D qback = Transform3D(q);
-  gfxPoint3D uback = qback - pback;
+  // The transformed value of z is computed as:
+  // z' = aPoint.x * _13 + aPoint.y * _23 + z * _33 + _43;
 
-  // Find the point where the back transformed line intersects z=0
-  // and find t.
-  
-  float t = -pback.z / uback.z;
+  // Solving for z when z' = 0 gives us:
+  float z = -(aPoint.x * _13 + aPoint.y * _23 + _43) / _33;
 
-  gfxPoint result(pback.x + t*uback.x, pback.y + t*uback.y);
-
-  return result;
+  // Compute the transformed point
+  return Transform4D(Point4D(aPoint.x, aPoint.y, z, 1));
 }
 
-gfxRect gfx3DMatrix::ProjectRectBounds(const gfxRect& aRect) const
-{
-  gfxPoint points[4];
-
-  points[0] = ProjectPoint(aRect.TopLeft());
-  points[1] = ProjectPoint(aRect.TopRight());
-  points[2] = ProjectPoint(aRect.BottomLeft());
-  points[3] = ProjectPoint(aRect.BottomRight());
-
-  gfxFloat min_x, max_x;
-  gfxFloat min_y, max_y;
-
-  min_x = max_x = points[0].x;
-  min_y = max_y = points[0].y;
-
-  for (int i=1; i<4; i++) {
-    min_x = min(points[i].x, min_x);
-    max_x = max(points[i].x, max_x);
-    min_y = min(points[i].y, min_y);
-    max_y = max(points[i].y, max_y);
-  }
-
-  return gfxRect(min_x, min_y, max_x - min_x, max_y - min_y);
-}
-
-gfxRect gfx3DMatrix::UntransformBounds(const gfxRect& aRect, const gfxRect& aChildBounds) const
-{
-  if (Is2D()) {
-    return Inverse().TransformBounds(aRect);
-  }
-  gfxRect bounds = TransformBounds(aChildBounds);
-
-  gfxRect rect = aRect.Intersect(bounds);
-
-  return Inverse().ProjectRectBounds(rect);
-}
-
-bool gfx3DMatrix::UntransformPoint(const gfxPoint& aPoint, const gfxRect& aChildBounds, gfxPoint* aOut) const
-{
-  if (Is2D()) {
-    *aOut = Inverse().Transform(aPoint);
-    return true;
-  }
-  gfxRect bounds = TransformBounds(aChildBounds);
-
-  if (!bounds.Contains(aPoint)) {
-    return false;
-  }
-
-  *aOut = Inverse().ProjectPoint(aPoint);
-  return true;
-}
-
-gfxPoint3D gfx3DMatrix::GetNormalVector() const
+Point3D gfx3DMatrix::GetNormalVector() const
 {
   // Define a plane in transformed space as the transformations
   // of 3 points on the z=0 screen plane.
-  gfxPoint3D a = Transform3D(gfxPoint3D(0, 0, 0));
-  gfxPoint3D b = Transform3D(gfxPoint3D(0, 1, 0));
-  gfxPoint3D c = Transform3D(gfxPoint3D(1, 0, 0));
+  Point3D a = Transform3D(Point3D(0, 0, 0));
+  Point3D b = Transform3D(Point3D(0, 1, 0));
+  Point3D c = Transform3D(Point3D(1, 0, 0));
 
   // Convert to two vectors on the surface of the plane.
-  gfxPoint3D ab = b - a;
-  gfxPoint3D ac = c - a;
+  Point3D ab = b - a;
+  Point3D ac = c - a;
 
   return ac.CrossProduct(ab);
 }
@@ -879,4 +774,25 @@ void gfx3DMatrix::NudgeToIntegers(void)
   NudgeToInteger(&_42);
   NudgeToInteger(&_43);
   NudgeToInteger(&_44);
+}
+
+void gfx3DMatrix::NudgeToIntegersFixedEpsilon(void)
+{
+  NudgeToInteger(&_11);
+  NudgeToInteger(&_12);
+  NudgeToInteger(&_13);
+  NudgeToInteger(&_14);
+  NudgeToInteger(&_21);
+  NudgeToInteger(&_22);
+  NudgeToInteger(&_23);
+  NudgeToInteger(&_24);
+  NudgeToInteger(&_31);
+  NudgeToInteger(&_32);
+  NudgeToInteger(&_33);
+  NudgeToInteger(&_34);
+  static const float error = 1e-5;
+  NudgeToInteger(&_41, error);
+  NudgeToInteger(&_42, error);
+  NudgeToInteger(&_43, error);
+  NudgeToInteger(&_44, error);
 }

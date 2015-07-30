@@ -7,7 +7,7 @@
 // Test all sorts of additions and updates of properties in the rule-view
 // FIXME: TO BE SPLIT IN *MANY* SMALLER TESTS
 
-let test = asyncTest(function*() {
+add_task(function*() {
   yield addTab("data:text/html;charset=utf-8,browser_ruleview_ui.js");
   let {toolbox, inspector, view} = yield openRuleView();
 
@@ -29,7 +29,7 @@ let test = asyncTest(function*() {
 
 function* testCreateNew(inspector, ruleView) {
   // Create a new property.
-  let elementRuleEditor = ruleView.element.children[0]._ruleEditor;
+  let elementRuleEditor = getRuleViewRuleEditor(ruleView, 0);
   let editor = yield focusEditableField(elementRuleEditor.closeBrace);
 
   is(inplaceEditor(elementRuleEditor.newPropSpan), editor,
@@ -62,7 +62,7 @@ function* testCreateNew(inspector, ruleView) {
 
   editor.input.value = "purple";
   let onBlur = once(editor.input, "blur");
-  editor.input.blur();
+  EventUtils.sendKey("return", ruleView.doc.defaultView);
   yield onBlur;
   yield elementRuleEditor.rule._applyingModifications;
 

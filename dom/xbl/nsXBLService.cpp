@@ -116,6 +116,14 @@ public:
     if (!doc)
       return;
 
+    // Destroy the frames for mBoundElement.
+    nsIContent* destroyedFramesFor = nullptr;
+    nsIPresShell* shell = doc->GetShell();
+    if (shell) {
+      shell->DestroyFramesFor(mBoundElement, &destroyedFramesFor);
+    }
+    MOZ_ASSERT(!mBoundElement->GetPrimaryFrame());
+
     // Get the binding.
     bool ready = false;
     nsXBLService::GetInstance()->BindingReady(mBoundElement, mBindingURI, &ready);
@@ -128,19 +136,22 @@ public:
     // notification of its parent.  (We can know about both if the
     // binding loads were triggered from the DOM rather than frame
     // construction.)  So we have to check both whether the element
-    // has a primary frame and whether it's in the undisplayed map
+    // has a primary frame and whether it's in the frame manager maps
     // before sending a ContentInserted notification, or bad things
     // will happen.
-    nsIPresShell *shell = doc->GetShell();
+    MOZ_ASSERT(shell == doc->GetShell());
     if (shell) {
       nsIFrame* childFrame = mBoundElement->GetPrimaryFrame();
       if (!childFrame) {
-        // Check to see if it's in the undisplayed content map.
-        nsStyleContext* sc =
-          shell->FrameManager()->GetUndisplayedContent(mBoundElement);
-
+        // Check to see if it's in the undisplayed content map...
+        nsFrameManager* fm = shell->FrameManager();
+        nsStyleContext* sc = fm->GetUndisplayedContent(mBoundElement);
         if (!sc) {
-          shell->RecreateFramesFor(mBoundElement);
+          // or in the display:contents map.
+          sc = fm->GetDisplayContentsStyleFor(mBoundElement);
+        }
+        if (!sc) {
+          shell->CreateFramesFor(destroyedFramesFor);
         }
       }
     }
@@ -156,7 +167,7 @@ public:
 // nsXBLStreamListener, a helper class used for
 // asynchronous parsing of URLs
 /* Header file */
-class nsXBLStreamListener MOZ_FINAL : public nsIStreamListener,
+class nsXBLStreamListener final : public nsIStreamListener,
                                       public nsIDOMEventListener
 {
 public:
@@ -168,12 +179,13 @@ public:
   nsXBLStreamListener(nsIDocument* aBoundDocument,
                       nsIXMLContentSink* aSink,
                       nsIDocument* aBindingDocument);
-  ~nsXBLStreamListener();
 
   void AddRequest(nsXBLBindingRequest* aRequest) { mBindingRequests.AppendElement(aRequest); }
   bool HasRequest(nsIURI* aURI, nsIContent* aBoundElement);
 
 private:
+  ~nsXBLStreamListener();
+
   nsCOMPtr<nsIStreamListener> mInner;
   nsAutoTArray<nsXBLBindingRequest*, 8> mBindingRequests;
 
@@ -643,6 +655,53 @@ nsXBLService::GetBinding(nsIContent* aBoundElement, nsIURI* aURI,
                     aResult, uris);
 }
 
+static bool
+MayBindToContent(nsXBLPrototypeBinding* aProtoBinding, nsIContent* aBoundElement,
+                 nsIURI* aURI)
+{
+  // If this binding explicitly allows untrusted content, we're done.
+  if (aProtoBinding->BindToUntrustedContent()) {
+    return true;
+  }
+
+  // We let XUL content and content in XUL documents through, since XUL is
+  // restricted anyway and we want to minimize remote XUL breakage.
+  if (aBoundElement->IsXUL() || aBoundElement->OwnerDoc()->IsXUL()) {
+    return true;
+  }
+
+  // Similarly, we make an exception for anonymous content (which
+  // lives in the XBL scope), because it's already protected from content,
+  // and tends to use a lot of bindings that we wouldn't otherwise need to
+  // whitelist.
+  if (aBoundElement->IsInAnonymousSubtree()) {
+    return true;
+  }
+
+  // Allow if the bound content subsumes the binding.
+  nsCOMPtr<nsIDocument> bindingDoc = aProtoBinding->XBLDocumentInfo()->GetDocument();
+  NS_ENSURE_TRUE(bindingDoc, false);
+  if (aBoundElement->NodePrincipal()->Subsumes(bindingDoc->NodePrincipal())) {
+    return true;
+  }
+
+  // One last special case: we need to watch out for in-document data: URI
+  // bindings from remote-XUL-whitelisted domains (especially tests), because
+  // they end up with a null principal (rather than inheriting the document's
+  // principal), which causes them to fail the check above.
+  if (nsContentUtils::AllowXULXBLForPrincipal(aBoundElement->NodePrincipal())) {
+    bool isDataURI = false;
+    nsresult rv = aURI->SchemeIs("data", &isDataURI);
+    NS_ENSURE_SUCCESS(rv, false);
+    if (isDataURI) {
+      return true;
+    }
+  }
+
+  // Disallow.
+  return false;
+}
+
 nsresult
 nsXBLService::GetBinding(nsIContent* aBoundElement, nsIURI* aURI,
                          bool aPeekOnly, nsIPrincipal* aOriginPrincipal,
@@ -690,12 +749,25 @@ nsXBLService::GetBinding(nsIContent* aBoundElement, nsIURI* aURI,
     return NS_ERROR_FAILURE;
   }
 
-  NS_ENSURE_TRUE(aDontExtendURIs.AppendElement(protoBinding->BindingURI()),
-                 NS_ERROR_OUT_OF_MEMORY);
+  // If the binding isn't whitelisted, refuse to apply it to content that
+  // doesn't subsume it (modulo a few exceptions).
+  if (!MayBindToContent(protoBinding, aBoundElement, aURI)) {
+#ifdef DEBUG
+    nsAutoCString uriSpec;
+    aURI->GetSpec(uriSpec);
+    nsAutoCString message("Permission denied to apply binding ");
+    message += uriSpec;
+    message += " to unprivileged content. Set bindToUntrustedContent=true on "
+               "the binding to override this restriction.";
+    NS_WARNING(message.get());
+#endif
+   return NS_ERROR_FAILURE;
+  }
+
+  aDontExtendURIs.AppendElement(protoBinding->BindingURI());
   nsCOMPtr<nsIURI> altBindingURI = protoBinding->AlternateBindingURI();
   if (altBindingURI) {
-    NS_ENSURE_TRUE(aDontExtendURIs.AppendElement(altBindingURI),
-                   NS_ERROR_OUT_OF_MEMORY);
+    aDontExtendURIs.AppendElement(altBindingURI);
   }
 
   // Our prototype binding must have all its resources loaded.
@@ -757,7 +829,6 @@ nsXBLService::GetBinding(nsIContent* aBoundElement, nsIURI* aURI,
   if (!aPeekOnly) {
     // Make a new binding
     nsXBLBinding *newBinding = new nsXBLBinding(protoBinding);
-    NS_ENSURE_TRUE(newBinding, NS_ERROR_OUT_OF_MEMORY);
 
     if (baseBinding) {
       if (!baseProto) {
@@ -875,7 +946,7 @@ nsXBLService::LoadBindingDocumentInfo(nsIContent* aBoundElement,
       }
     }
 
-    nsINodeInfo *ni = nullptr;
+    NodeInfo *ni = nullptr;
     if (aBoundElement)
       ni = aBoundElement->NodeInfo();
 
@@ -931,7 +1002,8 @@ nsXBLService::LoadBindingDocumentInfo(nsIContent* aBoundElement,
 
       nsCOMPtr<nsIDocument> document;
       FetchBindingDocument(aBoundElement, aBoundDocument, documentURI,
-                           aBindingURI, aForceSyncLoad, getter_AddRefs(document));
+                           aBindingURI, aOriginPrincipal, aForceSyncLoad,
+                           getter_AddRefs(document));
 
       if (document) {
         nsBindingManager *xblDocBindingManager = document->BindingManager();
@@ -968,7 +1040,8 @@ nsXBLService::LoadBindingDocumentInfo(nsIContent* aBoundElement,
 nsresult
 nsXBLService::FetchBindingDocument(nsIContent* aBoundElement, nsIDocument* aBoundDocument,
                                    nsIURI* aDocumentURI, nsIURI* aBindingURI,
-                                   bool aForceSyncLoad, nsIDocument** aResult)
+                                   nsIPrincipal* aOriginPrincipal, bool aForceSyncLoad,
+                                   nsIDocument** aResult)
 {
   nsresult rv = NS_OK;
   // Initialize our out pointer to nullptr
@@ -995,12 +1068,36 @@ nsXBLService::FetchBindingDocument(nsIContent* aBoundElement, nsIDocument* aBoun
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Open channel
+  // Note: There are some cases where aOriginPrincipal and aBoundDocument are purposely
+  // set to null (to bypass security checks) when calling LoadBindingDocumentInfo() which calls
+  // FetchBindingDocument().  LoadInfo will end up with no principal or node in those cases,
+  // so we use systemPrincipal.  This achieves the same result of bypassing security checks,
+  // but it gives the wrong information to potential future consumers of loadInfo.
   nsCOMPtr<nsIChannel> channel;
-  rv = NS_NewChannel(getter_AddRefs(channel), aDocumentURI, nullptr, loadGroup);
+
+  if (aOriginPrincipal) {
+    // if there is an originPrincipal we should also have aBoundDocument
+    NS_ASSERTION(aBoundDocument, "can not create a channel without aBoundDocument");
+    rv = NS_NewChannelWithTriggeringPrincipal(getter_AddRefs(channel),
+                                              aDocumentURI,
+                                              aBoundDocument,
+                                              aOriginPrincipal,
+                                              nsILoadInfo::SEC_NORMAL,
+                                              nsIContentPolicy::TYPE_OTHER,
+                                              loadGroup);
+  }
+  else {
+    rv = NS_NewChannel(getter_AddRefs(channel),
+                       aDocumentURI,
+                       nsContentUtils::GetSystemPrincipal(),
+                       nsILoadInfo::SEC_NORMAL,
+                       nsIContentPolicy::TYPE_OTHER,
+                       loadGroup);
+  }
+
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIInterfaceRequestor> sameOriginChecker = nsContentUtils::GetSameOriginChecker();
-  NS_ENSURE_TRUE(sameOriginChecker, NS_ERROR_OUT_OF_MEMORY);
+  nsCOMPtr<nsIInterfaceRequestor> sameOriginChecker = nsContentUtils::SameOriginChecker();
 
   channel->SetNotificationCallbacks(sameOriginChecker);
 
@@ -1008,7 +1105,6 @@ nsXBLService::FetchBindingDocument(nsIContent* aBoundElement, nsIDocument* aBoun
     // We can be asynchronous
     nsXBLStreamListener* xblListener =
       new nsXBLStreamListener(aBoundDocument, xblSink, doc);
-    NS_ENSURE_TRUE(xblListener,NS_ERROR_OUT_OF_MEMORY);
 
     // Add ourselves to the list of loading docs.
     nsBindingManager *bindingManager;

@@ -4,13 +4,17 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-UNIFIED_SOURCES += [
-    'lib/pkixbind.cpp',
+SOURCES += [
     'lib/pkixbuild.cpp',
+    'lib/pkixcert.cpp',
     'lib/pkixcheck.cpp',
     'lib/pkixder.cpp',
-    'lib/pkixkey.cpp',
+    'lib/pkixnames.cpp',
+    'lib/pkixnss.cpp',
     'lib/pkixocsp.cpp',
+    'lib/pkixresult.cpp',
+    'lib/pkixtime.cpp',
+    'lib/pkixverify.cpp',
 ]
 
 LOCAL_INCLUDES += [
@@ -22,8 +26,8 @@ TEST_DIRS += [
     'test/lib',
 ]
 
-FAIL_ON_WARNINGS = True
+include('warnings.mozbuild')
 
-LIBRARY_NAME = 'mozillapkix'
+Library('mozillapkix')
 
 FINAL_LIBRARY = 'xul'

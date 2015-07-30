@@ -1,12 +1,9 @@
-// -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 "use strict";
-
-// XXX: The isDebugBuild tests you see are here because the test EV root is
-// only enabled for EV in debug builds, as a security measure. An ugly hack.
 
 do_get_profile(); // must be called before getting nsIX509CertDB
 const certdb = Cc["@mozilla.org/security/x509certdb;1"]
@@ -29,7 +26,7 @@ let certList = [
   // Testing a root that looks like EV but is not EV enabled
   'int-non-ev-root',
   'non-ev-root',
-]
+];
 
 function load_ca(ca_name) {
   var ca_filename = ca_name + ".der";
@@ -80,25 +77,13 @@ function run_test() {
   // setup and start ocsp responder
   Services.prefs.setCharPref("network.dns.localDomains",
                              'www.example.com, crl.example.com');
-  add_tests_in_mode(true);
-  add_tests_in_mode(false);
-  run_next_test();
-}
-
-function add_tests_in_mode(useMozillaPKIX)
-{
-  add_test(function () {
-    Services.prefs.setBoolPref("security.use_mozillapkix_verification",
-                               useMozillaPKIX);
-    run_next_test();
-  });
 
   add_test(function () {
     clearOCSPCache();
     let ocspResponder = start_ocsp_responder(
-                          isDebugBuild ? ["int-ev-valid", "ev-valid"]
-                                       : ["ev-valid"]);
-    check_ee_for_ev("ev-valid", isDebugBuild);
+                          gEVExpected ? ["int-ev-valid", "ev-valid"]
+                                      : ["ev-valid"]);
+    check_ee_for_ev("ev-valid", gEVExpected);
     ocspResponder.stop(run_next_test);
   });
 
@@ -107,9 +92,9 @@ function add_tests_in_mode(useMozillaPKIX)
     clearOCSPCache();
 
     let ocspResponder = start_ocsp_responder(
-                          isDebugBuild ? ["int-ev-valid-anypolicy-int", "ev-valid-anypolicy-int"]
-                                       : ["ev-valid-anypolicy-int"]);
-    check_ee_for_ev("ev-valid-anypolicy-int", isDebugBuild);
+                          gEVExpected ? ["int-ev-valid-anypolicy-int", "ev-valid-anypolicy-int"]
+                                      : ["ev-valid-anypolicy-int"]);
+    check_ee_for_ev("ev-valid-anypolicy-int", gEVExpected);
     ocspResponder.stop(run_next_test);
   });
 
@@ -122,10 +107,8 @@ function add_tests_in_mode(useMozillaPKIX)
 
   add_test(function() {
     clearOCSPCache();
-    // libpkix will attempt to validate the intermediate, which does have an
-    // OCSP URL.
-    let ocspResponder = isDebugBuild ? start_ocsp_responder(["int-ev-valid"])
-                                     : failingOCSPResponder();
+    let ocspResponder = gEVExpected ? start_ocsp_responder(["int-ev-valid"])
+                                    : failingOCSPResponder();
     check_ee_for_ev("no-ocsp-url-cert", false);
     ocspResponder.stop(run_next_test);
   });
@@ -138,9 +121,7 @@ function add_tests_in_mode(useMozillaPKIX)
 
     clearOCSPCache();
     let ocspResponder = failingOCSPResponder();
-    check_cert_err("ev-valid",
-                   useMozillaPKIX ? SEC_ERROR_UNKNOWN_ISSUER
-                                  : SEC_ERROR_UNTRUSTED_ISSUER);
+    check_cert_err("ev-valid",SEC_ERROR_UNKNOWN_ISSUER);
     ocspResponder.stop(run_next_test);
   });
 
@@ -155,31 +136,22 @@ function add_tests_in_mode(useMozillaPKIX)
 
     clearOCSPCache();
     let ocspResponder = start_ocsp_responder(
-                          isDebugBuild ? ["int-ev-valid", "ev-valid"]
-                                       : ["ev-valid"]);
-    check_ee_for_ev("ev-valid", isDebugBuild);
+                          gEVExpected ? ["int-ev-valid", "ev-valid"]
+                                      : ["ev-valid"]);
+    check_ee_for_ev("ev-valid", gEVExpected);
     ocspResponder.stop(run_next_test);
   });
 
   add_test(function () {
-    check_no_ocsp_requests("ev-valid",
-      useMozillaPKIX ? SEC_ERROR_POLICY_VALIDATION_FAILED
-                     : (isDebugBuild ? SEC_ERROR_REVOKED_CERTIFICATE
-                                     : SEC_ERROR_EXTENSION_NOT_FOUND));
+    check_no_ocsp_requests("ev-valid", SEC_ERROR_POLICY_VALIDATION_FAILED);
   });
 
   add_test(function () {
-    check_no_ocsp_requests("non-ev-root",
-      useMozillaPKIX ? SEC_ERROR_POLICY_VALIDATION_FAILED
-                     : (isDebugBuild ? SEC_ERROR_UNTRUSTED_ISSUER
-                                     : SEC_ERROR_EXTENSION_NOT_FOUND));
+    check_no_ocsp_requests("non-ev-root", SEC_ERROR_POLICY_VALIDATION_FAILED);
   });
 
   add_test(function () {
-    check_no_ocsp_requests("no-ocsp-url-cert",
-      useMozillaPKIX ? SEC_ERROR_POLICY_VALIDATION_FAILED
-                     : (isDebugBuild ? SEC_ERROR_REVOKED_CERTIFICATE
-                                     : SEC_ERROR_EXTENSION_NOT_FOUND));
+    check_no_ocsp_requests("no-ocsp-url-cert", SEC_ERROR_POLICY_VALIDATION_FAILED);
   });
 
 
@@ -187,9 +159,9 @@ function add_tests_in_mode(useMozillaPKIX)
   add_test(function () {
     clearOCSPCache();
     let ocspResponder = start_ocsp_responder(
-                          isDebugBuild ? ["int-ev-valid", "ev-valid"]
-                                       : ["ev-valid"]);
-    check_ee_for_ev("ev-valid", isDebugBuild);
+                          gEVExpected ? ["int-ev-valid", "ev-valid"]
+                                      : ["ev-valid"]);
+    check_ee_for_ev("ev-valid", gEVExpected);
     ocspResponder.stop(function () {
       // without net it must be able to EV verify
       let failingOcspResponder = failingOCSPResponder();
@@ -201,11 +173,9 @@ function add_tests_in_mode(useMozillaPKIX)
 
       let error = certdb.verifyCertNow(cert, certificateUsageSSLServer,
                                        flags, verifiedChain, hasEVPolicy);
-      do_check_eq(hasEVPolicy.value, isDebugBuild);
+      do_check_eq(hasEVPolicy.value, gEVExpected);
       do_check_eq(error,
-                  isDebugBuild ? 0
-                               : (useMozillaPKIX ? SEC_ERROR_POLICY_VALIDATION_FAILED
-                                                 : SEC_ERROR_EXTENSION_NOT_FOUND));
+                  gEVExpected ? 0 : SEC_ERROR_POLICY_VALIDATION_FAILED);
       failingOcspResponder.stop(run_next_test);
     });
   });
@@ -215,12 +185,12 @@ function add_tests_in_mode(useMozillaPKIX)
     clearOCSPCache();
     let ocspResponder = startOCSPResponder(SERVER_PORT, "www.example.com", [],
                           "test_ev_certs",
-                          isDebugBuild ? ["int-ev-valid", "ev-valid"]
-                                       : ["ev-valid"],
+                          gEVExpected ? ["int-ev-valid", "ev-valid"]
+                                      : ["ev-valid"],
                           [], [],
-                          isDebugBuild ? ["longvalidityalmostold", "good"]
-                                       : ["good"]);
-    check_ee_for_ev("ev-valid", isDebugBuild);
+                          gEVExpected ? ["longvalidityalmostold", "good"]
+                                      : ["good"]);
+    check_ee_for_ev("ev-valid", gEVExpected);
     ocspResponder.stop(run_next_test);
   });
 
@@ -235,17 +205,13 @@ function add_tests_in_mode(useMozillaPKIX)
     let debugCertNickArray = ["int-ev-valid", "ev-valid", "ev-valid"];
     let debugResponseArray = ["good", "longvalidityalmostold",
                               "longvalidityalmostold"];
-    if (!useMozillaPKIX) {
-      debugCertNickArray = ["int-ev-valid", "ev-valid"];
-      debugResponseArray = ["good", "longvalidityalmostold"];
-    }
     let ocspResponder = startOCSPResponder(SERVER_PORT, "www.example.com", [],
                           "test_ev_certs",
-                          isDebugBuild ? debugCertNickArray : ["ev-valid"],
+                          gEVExpected ? debugCertNickArray : ["ev-valid"],
                           [], [],
-                          isDebugBuild ? debugResponseArray
-                                       : ["longvalidityalmostold"]);
-    check_ee_for_ev("ev-valid", !useMozillaPKIX && isDebugBuild);
+                          gEVExpected ? debugResponseArray
+                                      : ["longvalidityalmostold"]);
+    check_ee_for_ev("ev-valid", false);
     ocspResponder.stop(run_next_test);
   });
 
@@ -256,19 +222,17 @@ function add_tests_in_mode(useMozillaPKIX)
     let debugCertNickArray = ["int-ev-valid", "ev-valid", "ev-valid"];
     let debugResponseArray = ["good", "ancientstillvalid",
                               "ancientstillvalid"];
-    if (!useMozillaPKIX) {
-      debugCertNickArray = ["int-ev-valid", "ev-valid"];
-      debugResponseArray = ["good", "ancientstillvalid"];
-    }
     let ocspResponder = startOCSPResponder(SERVER_PORT, "www.example.com", [],
                           "test_ev_certs",
-                          isDebugBuild ? debugCertNickArray : ["ev-valid"],
+                          gEVExpected ? debugCertNickArray : ["ev-valid"],
                           [], [],
-                          isDebugBuild ? debugResponseArray
-                                       : ["ancientstillvalid"]);
-    check_ee_for_ev("ev-valid", !useMozillaPKIX && isDebugBuild);
+                          gEVExpected ? debugResponseArray
+                                      : ["ancientstillvalid"]);
+    check_ee_for_ev("ev-valid", false);
     ocspResponder.stop(run_next_test);
   });
+
+  run_next_test();
 }
 
 // bug 950240: add FLAG_MUST_BE_EV to CertVerifier::VerifyCert

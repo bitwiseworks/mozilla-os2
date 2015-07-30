@@ -6,6 +6,7 @@ const TAB_STATE_NEEDS_RESTORE = 1;
 const TAB_STATE_RESTORING = 2;
 
 const ROOT = getRootDirectory(gTestPath);
+const HTTPROOT = ROOT.replace("chrome://mochitests/content/", "http://example.com/");
 const FRAME_SCRIPTS = [
   ROOT + "content.js",
   ROOT + "content-forms.js"
@@ -18,30 +19,20 @@ for (let script of FRAME_SCRIPTS) {
   mm.loadFrameScript(script, true);
 }
 
-mm.addMessageListener("SessionStore:setupSyncHandler", onSetupSyncHandler);
-
-/**
- * This keeps track of all SyncHandlers passed to chrome from frame scripts.
- * We need this to let tests communicate with frame scripts and cause (a)sync
- * flushes.
- */
-let SyncHandlers = new WeakMap();
-function onSetupSyncHandler(msg) {
-  SyncHandlers.set(msg.target, msg.objects.handler);
-}
-
 registerCleanupFunction(() => {
   for (let script of FRAME_SCRIPTS) {
     mm.removeDelayedFrameScript(script, true);
   }
-  mm.removeMessageListener("SessionStore:setupSyncHandler", onSetupSyncHandler);
 });
 
 let tmp = {};
 Cu.import("resource://gre/modules/Promise.jsm", tmp);
+Cu.import("resource://gre/modules/Task.jsm", tmp);
 Cu.import("resource:///modules/sessionstore/SessionStore.jsm", tmp);
 Cu.import("resource:///modules/sessionstore/SessionSaver.jsm", tmp);
-let {Promise, SessionStore, SessionSaver} = tmp;
+Cu.import("resource:///modules/sessionstore/SessionFile.jsm", tmp);
+Cu.import("resource:///modules/sessionstore/TabState.jsm", tmp);
+let {Promise, Task, SessionStore, SessionSaver, SessionFile, TabState} = tmp;
 
 let ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
 
@@ -71,7 +62,7 @@ function provideWindow(aCallback, aURL, aFeatures) {
     });
   }
 
-  let win = openDialog(getBrowserURL(), "", aFeatures || "chrome,all,dialog=no", aURL);
+  let win = openDialog(getBrowserURL(), "", aFeatures || "chrome,all,dialog=no", aURL || "about:blank");
   whenWindowLoaded(win, function onWindowLoaded(aWin) {
     if (!aURL) {
       info("Loaded a blank window.");
@@ -88,6 +79,12 @@ function provideWindow(aCallback, aURL, aFeatures) {
 
 // This assumes that tests will at least have some state/entries
 function waitForBrowserState(aState, aSetStateCallback) {
+  if (typeof aState == "string") {
+    aState = JSON.parse(aState);
+  }
+  if (typeof aState != "object") {
+    throw new TypeError("Argument must be an object or a JSON representation of an object");
+  }
   let windows = [window];
   let tabsRestored = 0;
   let expectedTabsRestored = 0;
@@ -172,46 +169,39 @@ function waitForBrowserState(aState, aSetStateCallback) {
   ss.setBrowserState(JSON.stringify(aState));
 }
 
-// Doesn't assume that the tab needs to be closed in a cleanup function.
-// If that's the case, the test author should handle that in the test.
-function waitForTabState(aTab, aState, aCallback) {
-  let listening = true;
+function promiseBrowserState(aState) {
+  return new Promise(resolve => waitForBrowserState(aState, resolve));
+}
 
-  function onSSTabRestored() {
-    aTab.removeEventListener("SSTabRestored", onSSTabRestored, false);
-    listening = false;
-    aCallback();
+function promiseTabState(tab, state) {
+  if (typeof(state) != "string") {
+    state = JSON.stringify(state);
   }
 
-  aTab.addEventListener("SSTabRestored", onSSTabRestored, false);
-
-  registerCleanupFunction(function() {
-    if (listening) {
-      aTab.removeEventListener("SSTabRestored", onSSTabRestored, false);
-    }
-  });
-  ss.setTabState(aTab, JSON.stringify(aState));
+  let promise = promiseTabRestored(tab);
+  ss.setTabState(tab, state);
+  return promise;
 }
 
 /**
  * Wait for a content -> chrome message.
  */
 function promiseContentMessage(browser, name) {
-  let deferred = Promise.defer();
   let mm = browser.messageManager;
 
-  function removeListener() {
-    mm.removeMessageListener(name, listener);
-  }
+  return new Promise(resolve => {
+    function removeListener() {
+      mm.removeMessageListener(name, listener);
+    }
 
-  function listener(msg) {
-    removeListener();
-    deferred.resolve(msg.data);
-  }
+    function listener(msg) {
+      removeListener();
+      resolve(msg.data);
+    }
 
-  mm.addMessageListener(name, listener);
-  registerCleanupFunction(removeListener);
-  return deferred.promise;
+    mm.addMessageListener(name, listener);
+    registerCleanupFunction(removeListener);
+  });
 }
 
 function waitForTopic(aTopic, aTimeout, aCallback) {
@@ -259,49 +249,49 @@ function waitForSaveState(aCallback) {
   return waitForTopic("sessionstore-state-write-complete", timeout, aCallback);
 }
 function promiseSaveState() {
-  let deferred = Promise.defer();
-  waitForSaveState(isSuccessful => {
-    if (isSuccessful) {
-      deferred.resolve();
-    } else {
-      deferred.reject(new Error("timeout"));
-    }});
-  return deferred.promise;
+  return new Promise(resolve => {
+    waitForSaveState(isSuccessful => {
+      if (!isSuccessful) {
+        throw new Error("timeout");
+      }
+
+      resolve();
+    });
+  });
 }
 function forceSaveState() {
   return SessionSaver.run();
 }
 
-function promiseSaveFileContents() {
+function promiseRecoveryFileContents() {
   let promise = forceSaveState();
   return promise.then(function() {
-    return OS.File.read(OS.Path.join(OS.Constants.Path.profileDir, "sessionstore.js"), { encoding: "utf-8" });
+    return OS.File.read(SessionFile.Paths.recovery, { encoding: "utf-8" });
   });
 }
 
-function whenBrowserLoaded(aBrowser, aCallback = next, ignoreSubFrames = true) {
-  aBrowser.addEventListener("load", function onLoad(event) {
-    if (!ignoreSubFrames || event.target == aBrowser.contentDocument) {
-      aBrowser.removeEventListener("load", onLoad, true);
-      executeSoon(aCallback);
+let promiseForEachSessionRestoreFile = Task.async(function*(cb) {
+  for (let key of SessionFile.Paths.loadOrder) {
+    let data = "";
+    try {
+      data = yield OS.File.read(SessionFile.Paths[key], { encoding: "utf-8" });
+    } catch (ex if ex instanceof OS.File.Error
+	     && ex.becauseNoSuchFile) {
+      // Ignore missing files
     }
-  }, true);
-}
+    cb(data, key);
+  }
+});
+
 function promiseBrowserLoaded(aBrowser, ignoreSubFrames = true) {
-  let deferred = Promise.defer();
-  whenBrowserLoaded(aBrowser, deferred.resolve, ignoreSubFrames);
-  return deferred.promise;
-}
-function whenBrowserUnloaded(aBrowser, aContainer, aCallback = next) {
-  aBrowser.addEventListener("unload", function onUnload() {
-    aBrowser.removeEventListener("unload", onUnload, true);
-    executeSoon(aCallback);
-  }, true);
-}
-function promiseBrowserUnloaded(aBrowser, aContainer) {
-  let deferred = Promise.defer();
-  whenBrowserUnloaded(aBrowser, aContainer, deferred.resolve);
-  return deferred.promise;
+  return new Promise(resolve => {
+    aBrowser.messageManager.addMessageListener("ss-test:loadEvent", function onLoad(msg) {
+      if (!ignoreSubFrames || !msg.data.subframe) {
+        aBrowser.messageManager.removeMessageListener("ss-test:loadEvent", onLoad);
+        resolve();
+      }
+    });
+  });
 }
 
 function whenWindowLoaded(aWindow, aCallback = next) {
@@ -313,18 +303,7 @@ function whenWindowLoaded(aWindow, aCallback = next) {
   }, false);
 }
 function promiseWindowLoaded(aWindow) {
-  let deferred = Promise.defer();
-  whenWindowLoaded(aWindow, deferred.resolve);
-  return deferred.promise;
-}
-
-function whenTabRestored(aTab, aCallback = next) {
-  aTab.addEventListener("SSTabRestored", function onRestored(aEvent) {
-    aTab.removeEventListener("SSTabRestored", onRestored, true);
-    executeSoon(function executeWhenTabRestored() {
-      aCallback();
-    });
-  }, true);
+  return new Promise(resolve => whenWindowLoaded(aWindow, resolve));
 }
 
 var gUniqueCounter = 0;
@@ -421,13 +400,22 @@ registerCleanupFunction(function () {
   gProgressListener.unsetCallback();
 });
 
-// Close everything but our primary window. We can't use waitForFocus()
-// because apparently it's buggy. See bug 599253.
-function closeAllButPrimaryWindow() {
+// Close all but our primary window.
+function promiseAllButPrimaryWindowClosed() {
+  let windows = [];
   for (let win in BrowserWindowIterator()) {
     if (win != window) {
-      win.close();
+      windows.push(win);
     }
+  }
+
+  return Promise.all(windows.map(promiseWindowClosed));
+}
+
+// Forget all closed windows.
+function forgetClosedWindows() {
+  while (ss.getClosedWindowCount() > 0) {
+    ss.forgetClosedWindow(0);
   }
 }
 
@@ -440,14 +428,20 @@ function closeAllButPrimaryWindow() {
  * expected (e.g. reading a big session state from disk).
  */
 function whenNewWindowLoaded(aOptions, aCallback) {
-  let win = OpenBrowserWindow(aOptions);
+  let features = "";
+  let url = "about:blank";
+
+  if (aOptions && aOptions.private || false) {
+    features = ",private";
+    url = "about:privatebrowsing";
+  }
+
+  let win = openDialog(getBrowserURL(), "", "chrome,all,dialog=no" + features, url);
   whenDelayedStartupFinished(win, () => aCallback(win));
   return win;
 }
 function promiseNewWindowLoaded(aOptions) {
-  let deferred = Promise.defer();
-  whenNewWindowLoaded(aOptions, deferred.resolve);
-  return deferred.promise;
+  return new Promise(resolve => whenNewWindowLoaded(aOptions, resolve));
 }
 
 /**
@@ -455,16 +449,26 @@ function promiseNewWindowLoaded(aOptions) {
  * a window and wait until we received the "domwindowclosed" notification for it.
  */
 function promiseWindowClosed(win) {
-  let deferred = Promise.defer();
-
-  Services.obs.addObserver(function obs(subject, topic) {
-    if (subject == win) {
-      Services.obs.removeObserver(obs, topic);
-      deferred.resolve();
-    }
-  }, "domwindowclosed", false);
+  let promise = new Promise(resolve => {
+    Services.obs.addObserver(function obs(subject, topic) {
+      if (subject == win) {
+        Services.obs.removeObserver(obs, topic);
+        resolve();
+      }
+    }, "domwindowclosed", false);
+  });
 
   win.close();
+  return promise;
+}
+
+function runInContent(browser, func, arg, callback = null) {
+  let deferred = Promise.defer();
+
+  let mm = browser.messageManager;
+  mm.sendAsyncMessage("ss-test:run", {code: func.toSource()}, {arg: arg});
+  mm.addMessageListener("ss-test:runFinished", ({data}) => deferred.resolve(data));
+
   return deferred.promise;
 }
 
@@ -481,66 +485,21 @@ function whenDelayedStartupFinished(aWindow, aCallback) {
     }
   }, "browser-delayed-startup-finished", false);
 }
+function promiseDelayedStartupFinished(aWindow) {
+  return new Promise(resolve => whenDelayedStartupFinished(aWindow, resolve));
+}
 
-/**
- * The test runner that controls the execution flow of our tests.
- */
-let TestRunner = {
-  _iter: null,
-
-  /**
-   * Holds the browser state from before we started so
-   * that we can restore it after all tests ran.
-   */
-  backupState: {},
-
-  /**
-   * Starts the test runner.
-   */
-  run: function () {
-    waitForExplicitFinish();
-
-    SessionStore.promiseInitialized.then(() => {
-      this.backupState = JSON.parse(ss.getBrowserState());
-      this._iter = runTests();
-      this.next();
-    });
-  },
-
-  /**
-   * Runs the next available test or finishes if there's no test left.
-   */
-  next: function () {
-    try {
-      TestRunner._iter.next();
-    } catch (e if e instanceof StopIteration) {
-      TestRunner.finish();
-    }
-  },
-
-  /**
-   * Finishes all tests and cleans up.
-   */
-  finish: function () {
-    closeAllButPrimaryWindow();
-    gBrowser.selectedTab = gBrowser.tabs[0];
-    waitForBrowserState(this.backupState, finish);
-  }
-};
-
-function next() {
-  TestRunner.next();
+function promiseEvent(element, eventType, isCapturing = false) {
+  return new Promise(resolve => {
+    element.addEventListener(eventType, function listener(event) {
+      element.removeEventListener(eventType, listener, isCapturing);
+      resolve(event);
+    }, isCapturing);
+  });
 }
 
 function promiseTabRestored(tab) {
-  let deferred = Promise.defer();
-
-  tab.addEventListener("SSTabRestored", function onRestored() {
-    tab.removeEventListener("SSTabRestored", onRestored);
-    deferred.resolve();
-  });
-
-  return deferred.promise;
+  return promiseEvent(tab, "SSTabRestored");
 }
 
 function sendMessage(browser, name, data = {}) {

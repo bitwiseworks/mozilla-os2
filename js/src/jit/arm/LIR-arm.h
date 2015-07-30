@@ -144,10 +144,10 @@ class LDivI : public LBinaryMath<1>
 // takes two arguments (dividend in r0, divisor in r1). The LInstruction gets
 // encoded such that the divisor and dividend are passed in their apropriate
 // registers and end their life at the start of the instruction by the use of
-// useFixedAtStart.  The result is returned in r0 and the other three registers
-// that can be trashed are marked as temps.  For the time being, the link
+// useFixedAtStart. The result is returned in r0 and the other three registers
+// that can be trashed are marked as temps. For the time being, the link
 // register is not marked as trashed because we never allocate to the link
-// register.  The FP registers are not trashed.
+// register. The FP registers are not trashed.
 class LSoftDivI : public LBinaryMath<3>
 {
   public:
@@ -304,7 +304,7 @@ class LPowHalfD : public LInstructionHelper<1, 1, 0>
     }
 };
 
-// Takes a tableswitch with an integer to decide
+// Takes a tableswitch with an integer to decide.
 class LTableSwitch : public LInstructionHelper<0, 1, 1>
 {
   public:
@@ -332,7 +332,7 @@ class LTableSwitch : public LInstructionHelper<0, 1, 1>
     }
 };
 
-// Takes a tableswitch with an integer to decide
+// Takes a tableswitch with an integer to decide.
 class LTableSwitchV : public LInstructionHelper<0, BOX_PIECES, 2>
 {
   public:
@@ -380,27 +380,21 @@ class LGuardShape : public LInstructionHelper<0, 1, 1>
     }
 };
 
-class LGuardObjectType : public LInstructionHelper<0, 1, 1>
+class LGuardObjectGroup : public LInstructionHelper<0, 1, 1>
 {
   public:
-    LIR_HEADER(GuardObjectType);
+    LIR_HEADER(GuardObjectGroup);
 
-    LGuardObjectType(const LAllocation& in, const LDefinition& temp) {
+    LGuardObjectGroup(const LAllocation& in, const LDefinition& temp) {
         setOperand(0, in);
         setTemp(0, temp);
     }
-    const MGuardObjectType* mir() const {
-        return mir_->toGuardObjectType();
+    const MGuardObjectGroup* mir() const {
+        return mir_->toGuardObjectGroup();
     }
     const LDefinition* tempInt() {
         return getTemp(0);
     }
-};
-
-class LInterruptCheck : public LInstructionHelper<0, 0, 0>
-{
-  public:
-    LIR_HEADER(InterruptCheck);
 };
 
 class LMulI : public LBinaryMath<0>
@@ -433,8 +427,6 @@ class LUMod : public LBinaryMath<0>
     }
 };
 
-// This class performs a simple x86 'div', yielding either a quotient or remainder depending on
-// whether this instruction is defined to output eax (quotient) or edx (remainder).
 class LSoftUDivOrMod : public LBinaryMath<3>
 {
   public:
@@ -447,6 +439,10 @@ class LSoftUDivOrMod : public LBinaryMath<3>
         setTemp(0, temp1);
         setTemp(1, temp2);
         setTemp(2, temp3);
+    }
+
+    MInstruction* mir() {
+        return mir_->toInstruction();
     }
 };
 

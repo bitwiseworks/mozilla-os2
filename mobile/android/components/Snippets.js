@@ -200,6 +200,7 @@ function updateBanner(messages) {
     let id = Home.banner.add({
       text: message.text,
       icon: message.icon,
+      weight: message.weight,
       onclick: function() {
         let parentId = gChromeWin.BrowserApp.selectedTab.id;
         gChromeWin.BrowserApp.addTab(message.url, { parentId: parentId });
@@ -376,6 +377,30 @@ function loadSyncPromoBanner() {
   );
 }
 
+function loadHomePanelsBanner() {
+  let stringBundle = Services.strings.createBundle("chrome://browser/locale/aboutHome.properties");
+  let text = stringBundle.GetStringFromName("banner.firstrunHomepage.text");
+
+  let id = Home.banner.add({
+    text: text,
+    icon: "drawable://homepage_banner_firstrun",
+    onclick: function() {
+      // Remove the message, so that it won't show again for the rest of the app lifetime.
+      Home.banner.remove(id);
+      // User has interacted with this snippet so don't show it again.
+      Services.prefs.setBoolPref("browser.snippets.firstrunHomepage.enabled", false);
+
+      UITelemetry.addEvent("action.1", "banner", null, "firstrun-homepage");
+    },
+    ondismiss: function() {
+      Home.banner.remove(id);
+      Services.prefs.setBoolPref("browser.snippets.firstrunHomepage.enabled", false);
+
+      UITelemetry.addEvent("cancel.1", "banner", null, "firstrun-homepage");
+    }
+  });
+}
+
 function Snippets() {}
 
 Snippets.prototype = {
@@ -384,11 +409,12 @@ Snippets.prototype = {
 
   observe: function(subject, topic, data) {
     switch(topic) {
-      case "profile-after-change":
-        Services.obs.addObserver(this, "browser-delayed-startup-finished", false);
-        break;
       case "browser-delayed-startup-finished":
-        Services.obs.removeObserver(this, "browser-delayed-startup-finished", false);
+        // Add snippets to be cycled through.
+        if (Services.prefs.getBoolPref("browser.snippets.firstrunHomepage.enabled")) {
+          loadHomePanelsBanner();
+        }
+
         if (Services.prefs.getBoolPref("browser.snippets.syncPromo.enabled")) {
           loadSyncPromoBanner();
         }

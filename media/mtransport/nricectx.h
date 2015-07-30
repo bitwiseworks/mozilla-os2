@@ -50,6 +50,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef nricectx_h__
 #define nricectx_h__
 
+#include <string>
 #include <vector>
 
 #include "sigslot.h"
@@ -58,6 +59,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "mozilla/RefPtr.h"
 #include "mozilla/Scoped.h"
+#include "mozilla/TimeStamp.h"
 #include "nsAutoPtr.h"
 #include "nsIEventTarget.h"
 #include "nsITimer.h"
@@ -74,10 +76,16 @@ typedef struct nr_ice_cand_pair_ nr_ice_cand_pair;
 typedef struct nr_ice_stun_server_ nr_ice_stun_server;
 typedef struct nr_ice_turn_server_ nr_ice_turn_server;
 typedef struct nr_resolver_ nr_resolver;
+typedef struct nr_proxy_tunnel_config_ nr_proxy_tunnel_config;
 
 typedef void* NR_SOCKET;
 
 namespace mozilla {
+
+// Timestamps set whenever a packet is dropped due to global rate limiting
+// (see nr_socket_prsock.cpp)
+TimeStamp nr_socket_short_term_violation_time();
+TimeStamp nr_socket_long_term_violation_time();
 
 class NrIceMediaStream;
 
@@ -86,7 +94,7 @@ extern const char kNrIceTransportTcp[];
 
 class NrIceStunServer {
  public:
-  NrIceStunServer(const PRNetAddr& addr) : has_addr_(true) {
+  explicit NrIceStunServer(const PRNetAddr& addr) : has_addr_(true) {
     memcpy(&addr_, &addr, sizeof(addr));
   }
 
@@ -164,6 +172,25 @@ class NrIceTurnServer : public NrIceStunServer {
   std::string transport_;
 };
 
+class NrIceProxyServer {
+ public:
+  NrIceProxyServer() :
+    host_(), port_(0) {
+  }
+
+  NrIceProxyServer(const std::string& host, uint16_t port) :
+    host_(host), port_(port) {
+  }
+
+  const std::string& host() const { return host_; }
+  uint16_t port() const { return port_; }
+
+ private:
+  std::string host_;
+  uint16_t port_;
+};
+
+
 class NrIceCtx {
  public:
   enum ConnectionState { ICE_CTX_INIT,
@@ -183,8 +210,12 @@ class NrIceCtx {
 
   static RefPtr<NrIceCtx> Create(const std::string& name,
                                  bool offerer,
-                                 bool set_interface_priorities = true);
-  virtual ~NrIceCtx();
+                                 bool set_interface_priorities = true,
+                                 bool allow_loopback = false);
+
+  // Deinitialize all ICE global state. Used only for testing.
+  static void internal_DeinitializeGlobal();
+
 
   nr_ice_ctx *ctx() { return ctx_; }
   nr_ice_peer_ctx *peer() { return peer_; }
@@ -194,13 +225,18 @@ class NrIceCtx {
 
   // Create a media stream
   RefPtr<NrIceMediaStream> CreateStream(const std::string& name,
-                                                 int components);
+                                        int components);
 
   RefPtr<NrIceMediaStream> GetStream(size_t index) {
     if (index < streams_.size()) {
       return streams_[index];
     }
     return nullptr;
+  }
+
+  void RemoveStream(size_t index)
+  {
+    streams_[index] = nullptr;
   }
 
   // Some might be null
@@ -211,6 +247,10 @@ class NrIceCtx {
 
   // The name of the ctx
   const std::string& name() const { return name_; }
+
+  // Get ufrag and password.
+  std::string ufrag() const;
+  std::string pwd() const;
 
   // Current state
   ConnectionState connection_state() const {
@@ -231,6 +271,8 @@ class NrIceCtx {
   // Set whether we are controlling or not.
   nsresult SetControlling(Controlling controlling);
 
+  Controlling GetControlling();
+
   // Set the STUN servers. Must be called before StartGathering
   // (if at all).
   nsresult SetStunServers(const std::vector<NrIceStunServer>& stun_servers);
@@ -242,6 +284,10 @@ class NrIceCtx {
   // Provide the resolution provider. Must be called before
   // StartGathering.
   nsresult SetResolver(nr_resolver *resolver);
+
+  // Provide the proxy address. Must be called before
+  // StartGathering.
+  nsresult SetProxyServer(const NrIceProxyServer& proxy_server);
 
   // Start ICE gathering
   nsresult StartGathering();
@@ -285,10 +331,12 @@ class NrIceCtx {
     (void)offerer_;
   }
 
+  virtual ~NrIceCtx();
+
   DISALLOW_COPY_ASSIGN(NrIceCtx);
 
   // Callbacks for nICEr
-  static void initialized_cb(NR_SOCKET s, int h, void *arg);  // ICE initialized
+  static void gather_cb(NR_SOCKET s, int h, void *arg);  // ICE gather complete
 
   // Handler implementation
   static int select_pair(void *obj,nr_ice_media_stream *stream,
@@ -296,6 +344,7 @@ class NrIceCtx {
                          int potential_ct);
   static int stream_ready(void *obj, nr_ice_media_stream *stream);
   static int stream_failed(void *obj, nr_ice_media_stream *stream);
+  static int ice_checking(void *obj, nr_ice_peer_ctx *pctx);
   static int ice_completed(void *obj, nr_ice_peer_ctx *pctx);
   static int msg_recvd(void *obj, nr_ice_peer_ctx *pctx,
                        nr_ice_media_stream *stream, int component_id,

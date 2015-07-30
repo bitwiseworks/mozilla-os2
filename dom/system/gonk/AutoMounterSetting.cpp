@@ -9,9 +9,9 @@
 #include "jsapi.h"
 #include "mozilla/Services.h"
 #include "nsCOMPtr.h"
+#include "nsContentUtils.h"
 #include "nsDebug.h"
 #include "nsIObserverService.h"
-#include "nsCxPusher.h"
 #include "nsISettingsService.h"
 #include "nsJSUtils.h"
 #include "nsPrintfCString.h"
@@ -19,9 +19,13 @@
 #include "nsString.h"
 #include "nsThreadUtils.h"
 #include "xpcpublic.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/SettingChangeNotificationBinding.h"
 
 #undef LOG
+#undef ERR
 #define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "AutoMounterSetting" , ## args)
 #define ERR(args...)  __android_log_print(ANDROID_LOG_ERROR, "AutoMounterSetting" , ## args)
 
@@ -31,10 +35,12 @@
 #define UMS_VOLUME_ENABLED_SUFFIX ".enabled"
 #define MOZSETTINGS_CHANGED       "mozsettings-changed"
 
+using namespace mozilla::dom;
+
 namespace mozilla {
 namespace system {
 
-class SettingsServiceCallback MOZ_FINAL : public nsISettingsServiceCallback
+class SettingsServiceCallback final : public nsISettingsServiceCallback
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -43,8 +49,8 @@ public:
 
   NS_IMETHOD Handle(const nsAString& aName, JS::Handle<JS::Value> aResult)
   {
-    if (JSVAL_IS_INT(aResult)) {
-      int32_t mode = JSVAL_TO_INT(aResult);
+    if (aResult.isInt32()) {
+      int32_t mode = aResult.toInt32();
       SetAutoMounterMode(mode);
     }
     return NS_OK;
@@ -59,7 +65,7 @@ public:
 
 NS_IMPL_ISUPPORTS(SettingsServiceCallback, nsISettingsServiceCallback)
 
-class CheckVolumeSettingsCallback MOZ_FINAL : public nsISettingsServiceCallback
+class CheckVolumeSettingsCallback final : public nsISettingsServiceCallback
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -69,8 +75,8 @@ public:
 
   NS_IMETHOD Handle(const nsAString& aName, JS::Handle<JS::Value> aResult)
   {
-    if (JSVAL_IS_BOOLEAN(aResult)) {
-      bool isSharingEnabled = JSVAL_TO_BOOLEAN(aResult);
+    if (aResult.isBoolean()) {
+      bool isSharingEnabled = aResult.toBoolean();
       SetAutoMounterSharingMode(mVolumeName, isSharingEnabled);
     }
     return NS_OK;
@@ -119,8 +125,7 @@ AutoMounterSetting::AutoMounterSetting()
   nsCOMPtr<nsISettingsServiceLock> lock;
   settingsService->CreateLock(nullptr, getter_AddRefs(lock));
   nsCOMPtr<nsISettingsServiceCallback> callback = new SettingsServiceCallback();
-  mozilla::AutoSafeJSContext cx;
-  JS::Rooted<JS::Value> value(cx);
+  JS::Rooted<JS::Value> value(nsContentUtils::RootingCx());
   value.setInt32(AUTOMOUNTER_DISABLE);
   lock->Set(UMS_MODE, value, callback, nullptr);
   value.setInt32(mStatus);
@@ -235,52 +240,32 @@ AutoMounterSetting::Observe(nsISupports* aSubject,
   // The string that we're interested in will be a JSON string that looks like:
   //  {"key":"ums.autoMount","value":true}
 
-  mozilla::AutoSafeJSContext cx;
-  nsDependentString dataStr(aData);
-  JS::Rooted<JS::Value> val(cx);
-  if (!JS_ParseJSON(cx, dataStr.get(), dataStr.Length(), &val) ||
-      !val.isObject()) {
-    return NS_OK;
-  }
-  JS::Rooted<JSObject*> obj(cx, &val.toObject());
-  JS::Rooted<JS::Value> key(cx);
-  if (!JS_GetProperty(cx, obj, "key", &key) ||
-      !key.isString()) {
-    return NS_OK;
-  }
-
-  JSString *jsKey = JS::ToString(cx, key);
-  nsDependentJSString keyStr;
-  if (!keyStr.init(cx, jsKey)) {
-    return NS_OK;
-  }
-
-  JS::Rooted<JS::Value> value(cx);
-  if (!JS_GetProperty(cx, obj, "value", &value)) {
+  RootedDictionary<SettingChangeNotification> setting(nsContentUtils::RootingCxForThread());
+  if (!WrappedJSToDictionary(aSubject, setting)) {
     return NS_OK;
   }
 
   // Check for ums.mode changes
-  if (keyStr.EqualsLiteral(UMS_MODE)) {
-    if (!value.isInt32()) {
+  if (setting.mKey.EqualsASCII(UMS_MODE)) {
+    if (!setting.mValue.isInt32()) {
       return NS_OK;
     }
-    int32_t mode = value.toInt32();
+    int32_t mode = setting.mValue.toInt32();
     SetAutoMounterMode(mode);
     return NS_OK;
   }
 
   // Check for ums.volume.NAME.enabled
-  if (StringBeginsWith(keyStr, NS_LITERAL_STRING(UMS_VOLUME_ENABLED_PREFIX)) &&
-      StringEndsWith(keyStr, NS_LITERAL_STRING(UMS_VOLUME_ENABLED_SUFFIX))) {
-    if (!value.isBoolean()) {
+  if (StringBeginsWith(setting.mKey, NS_LITERAL_STRING(UMS_VOLUME_ENABLED_PREFIX)) &&
+      StringEndsWith(setting.mKey, NS_LITERAL_STRING(UMS_VOLUME_ENABLED_SUFFIX))) {
+    if (!setting.mValue.isBoolean()) {
       return NS_OK;
     }
     const size_t prefixLen = sizeof(UMS_VOLUME_ENABLED_PREFIX) - 1;
     const size_t suffixLen = sizeof(UMS_VOLUME_ENABLED_SUFFIX) - 1;
     nsDependentSubstring volumeName =
-      Substring(keyStr, prefixLen, keyStr.Length() - prefixLen - suffixLen);
-    bool isSharingEnabled = value.toBoolean();
+      Substring(setting.mKey, prefixLen, setting.mKey.Length() - prefixLen - suffixLen);
+    bool isSharingEnabled = setting.mValue.toBoolean();
     SetAutoMounterSharingMode(NS_LossyConvertUTF16toASCII(volumeName), isSharingEnabled);
     return NS_OK;
   }

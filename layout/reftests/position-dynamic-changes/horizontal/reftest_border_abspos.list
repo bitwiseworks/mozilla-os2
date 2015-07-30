@@ -1,5 +1,4 @@
 # Please see the comment at the beginning of reftest.list
-
 == leftN-widthA-rightA.html?border_abspos leftN-widthA-rightA-ref.html?border_abspos
 == leftN-widthA-rightA-2.html?border_abspos leftN-widthA-rightA-2-ref.html?border_abspos
 == leftN-widthA-rightN.html?border_abspos leftN-widthA-rightN-ref.html?border_abspos

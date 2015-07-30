@@ -1,5 +1,6 @@
-../mozbase/manifestdestiny
+../mozbase/manifestparser
 ../mozbase/mozcrash
+../mozbase/mozdebug
 ../mozbase/mozdevice
 ../mozbase/mozfile
 ../mozbase/mozhttpd

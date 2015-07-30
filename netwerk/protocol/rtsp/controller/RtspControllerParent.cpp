@@ -16,7 +16,6 @@
 #include "prlog.h"
 
 #include <sys/types.h>
-#include <sys/socket.h>
 
 PRLogModuleInfo* gRtspLog;
 #undef LOG
@@ -57,7 +56,6 @@ RtspControllerParent::Destroy()
 NS_IMPL_ADDREF(RtspControllerParent)
 NS_IMPL_RELEASE_WITH_DESTROY(RtspControllerParent, Destroy())
 NS_IMPL_QUERY_INTERFACE(RtspControllerParent,
-                        nsIInterfaceRequestor,
                         nsIStreamingProtocolListener)
 
 RtspControllerParent::RtspControllerParent()
@@ -166,6 +164,17 @@ RtspControllerParent::RecvStop()
 
   nsresult rv = mController->Stop();
   NS_ENSURE_SUCCESS(rv, true);
+  return true;
+}
+
+bool
+RtspControllerParent::RecvPlaybackEnded()
+{
+  LOG(("RtspControllerParent::RecvPlaybackEnded()"));
+  NS_ENSURE_TRUE(mController, true);
+
+  nsresult rv = mController->PlaybackEnded();
+  SEND_DISCONNECT_IF_ERROR(rv)
   return true;
 }
 
@@ -290,13 +299,6 @@ RtspControllerParent::OnDisconnected(uint8_t index,
     mController = nullptr;
   }
   return NS_OK;
-}
-
-NS_IMETHODIMP
-RtspControllerParent::GetInterface(const nsIID & iid, void **result)
-{
-  LOG(("RtspControllerParent::GetInterface()"));
-  return QueryInterface(iid, result);
 }
 
 } // namespace net

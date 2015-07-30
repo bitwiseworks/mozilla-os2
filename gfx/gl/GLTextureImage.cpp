@@ -9,6 +9,7 @@
 #include "gfxPlatform.h"
 #include "gfxUtils.h"
 #include "gfx2DGlue.h"
+#include "mozilla/gfx/2D.h"
 #include "ScopedGLHelpers.h"
 #include "GLUploadHelpers.h"
 
@@ -16,6 +17,8 @@
 #ifdef XP_MACOSX
 #include "TextureImageCGL.h"
 #endif
+
+using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace gl {
@@ -60,17 +63,6 @@ TileGenFunc(GLContext* gl,
     }
 }
 
-already_AddRefed<TextureImage>
-TextureImage::Create(GLContext* gl,
-                     const nsIntSize& size,
-                     TextureImage::ContentType contentType,
-                     GLenum wrapMode,
-                     TextureImage::Flags flags)
-{
-    return Create(gl, size.ToIntSize(), contentType, wrapMode, flags);
-}
-
-// Moz2D equivalent...
 already_AddRefed<TextureImage>
 TextureImage::Create(GLContext* gl,
                      const gfx::IntSize& size,
@@ -240,14 +232,27 @@ BasicTextureImage::Resize(const gfx::IntSize& aSize)
 
     mGLContext->fBindTexture(LOCAL_GL_TEXTURE_2D, mTexture);
 
+    // This matches the logic in UploadImageDataToTexture so that
+    // we avoid mixing formats.
+    GLenum format;
+    GLenum type;
+    if (mGLContext->GetPreferredARGB32Format() == LOCAL_GL_BGRA) {
+        MOZ_ASSERT(!mGLContext->IsGLES());
+        format = LOCAL_GL_BGRA;
+        type = LOCAL_GL_UNSIGNED_INT_8_8_8_8_REV;
+    } else {
+        format = LOCAL_GL_RGBA;
+        type = LOCAL_GL_UNSIGNED_BYTE;
+    }
+
     mGLContext->fTexImage2D(LOCAL_GL_TEXTURE_2D,
                             0,
                             LOCAL_GL_RGBA,
                             aSize.width,
                             aSize.height,
                             0,
-                            LOCAL_GL_RGBA,
-                            LOCAL_GL_UNSIGNED_BYTE,
+                            format,
+                            type,
                             nullptr);
 
     mTextureState = Allocated;
@@ -362,7 +367,7 @@ TiledTextureImage::DirectUpdate(gfx::DataSourceSurface* aSurf, const nsIntRegion
 
     bool result = true;
     int oldCurrentImage = mCurrentImage;
-    BeginTileIteration();
+    BeginBigImageIteration();
     do {
         nsIntRect tileRect = ThebesIntRect(GetSrcTileRect());
         int xPos = tileRect.x;
@@ -514,10 +519,6 @@ TiledTextureImage::EndUpdate()
 
     RefPtr<gfx::SourceSurface> updateSnapshot = mUpdateDrawTarget->Snapshot();
     RefPtr<gfx::DataSourceSurface> updateData = updateSnapshot->GetDataSurface();
-    nsRefPtr<gfxASurface> updateSurface = new gfxImageSurface(updateData->GetData(),
-                                                              gfx::ThebesIntSize(updateData->GetSize()),
-                                                              updateData->Stride(),
-                                                              gfx::SurfaceFormatToImageFormat(updateData->GetFormat()));
 
     // upload tiles from temp surface
     for (unsigned i = 0; i < mImages.Length(); i++) {
@@ -533,11 +534,18 @@ TiledTextureImage::EndUpdate()
         subregion.MoveBy(-xPos, -yPos); // Tile-local space
         // copy tile from temp target
         gfx::DrawTarget* drawTarget = mImages[i]->BeginUpdate(subregion);
-        nsRefPtr<gfxContext> ctx = new gfxContext(drawTarget);
-        gfxUtils::ClipToRegion(ctx, subregion);
-        ctx->SetOperator(gfxContext::OPERATOR_SOURCE);
-        ctx->SetSource(updateSurface, gfxPoint(-xPos, -yPos));
-        ctx->Paint();
+        MOZ_ASSERT(drawTarget->GetBackendType() == BackendType::CAIRO,
+                   "updateSnapshot should not have been converted to data");
+        gfxUtils::ClipToRegion(drawTarget, subregion);
+        Size size(updateData->GetSize().width,
+                  updateData->GetSize().height);
+        drawTarget->DrawSurface(updateData,
+                                Rect(Point(-xPos, -yPos), size),
+                                Rect(Point(0, 0), size),
+                                DrawSurfaceOptions(),
+                                DrawOptions(1.0, CompositionOp::OP_SOURCE,
+                                            AntialiasMode::NONE));
+        drawTarget->PopClip();
         mImages[i]->EndUpdate();
     }
 
@@ -547,7 +555,7 @@ TiledTextureImage::EndUpdate()
     mTextureState = Valid;
 }
 
-void TiledTextureImage::BeginTileIteration()
+void TiledTextureImage::BeginBigImageIteration()
 {
     mCurrentImage = 0;
 }
@@ -567,7 +575,7 @@ bool TiledTextureImage::NextTile()
     return false;
 }
 
-void TiledTextureImage::SetIterationCallback(TileIterationCallback aCallback,
+void TiledTextureImage::SetIterationCallback(BigImageIterationCallback aCallback,
                                              void* aCallbackData)
 {
     mIterationCallback = aCallback;
@@ -589,9 +597,9 @@ gfx::IntRect TiledTextureImage::GetTileRect()
 gfx::IntRect TiledTextureImage::GetSrcTileRect()
 {
     gfx::IntRect rect = GetTileRect();
-    unsigned int srcY = mFlags & NeedsYFlip
-                        ? mSize.height - rect.height - rect.y
-                        : rect.y;
+    const bool needsYFlip = mFlags & OriginBottomLeft;
+    unsigned int srcY = needsYFlip ? mSize.height - rect.height - rect.y
+                                   : rect.y;
     return gfx::IntRect(rect.x, srcY, rect.width, rect.height);
 }
 

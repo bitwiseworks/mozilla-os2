@@ -9,10 +9,6 @@
 
 #ifdef JS_POSIX_NSPR
 
-#ifndef JS_THREADSAFE
-#error "This file must not be included in non-threadsafe mode"
-#endif
-
 #include <pthread.h>
 #include <stdint.h>
 
@@ -131,6 +127,9 @@ PR_NotifyAllCondVar(PRCondVar* cvar);
 
 uint32_t
 PR_MillisecondsToInterval(uint32_t milli);
+
+uint32_t
+PR_MicrosecondsToInterval(uint32_t micro);
 
 uint32_t
 PR_TicksPerSecond();

@@ -7,7 +7,9 @@
 DIRS += ['internal']
 
 EXPORTS += [
+    'GreekCasing.h',
     'ICUUtils.h',
+    'IrishCasing.h',
     'nsBidiUtils.h',
     'nsSpecialCasingData.h',
     'nsUnicharUtils.h',
@@ -19,15 +21,22 @@ include('objs.mozbuild')
 
 UNIFIED_SOURCES += intl_unicharutil_util_cppsrcs
 
-LIBRARY_NAME = 'unicharutil_external_s'
+Library('unicharutil_external_s')
 
 FORCE_STATIC_LIB = True
 
-LOCAL_INCLUDES += [
-    '../src',
-]
+SDK_LIBRARY = True
 
 USE_STATIC_LIBS = True
 
 if CONFIG['_MSC_VER']:
     DEFINES['_USE_ANSI_CPP'] = True
+    # Don't include directives about which CRT to use
+    CFLAGS += ['-Zl']
+    CXXFLAGS += ['-Zl']
+
+if CONFIG['ENABLE_INTL_API']:
+    CXXFLAGS += CONFIG['MOZ_ICU_CFLAGS']
+
+if CONFIG['GNU_CXX']:
+    FAIL_ON_WARNINGS = True

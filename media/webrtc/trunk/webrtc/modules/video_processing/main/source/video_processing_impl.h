@@ -16,73 +16,65 @@
 #include "webrtc/modules/video_processing/main/source/brightness_detection.h"
 #include "webrtc/modules/video_processing/main/source/color_enhancement.h"
 #include "webrtc/modules/video_processing/main/source/deflickering.h"
-#include "webrtc/modules/video_processing/main/source/denoising.h"
 #include "webrtc/modules/video_processing/main/source/frame_preprocessor.h"
 
 namespace webrtc {
 class CriticalSectionWrapper;
 
-class VideoProcessingModuleImpl : public VideoProcessingModule
-{
-public:
+class VideoProcessingModuleImpl : public VideoProcessingModule {
+ public:
+  VideoProcessingModuleImpl(int32_t id);
 
-    VideoProcessingModuleImpl(int32_t id);
+  virtual ~VideoProcessingModuleImpl();
 
-    virtual ~VideoProcessingModuleImpl();
+  int32_t Id() const;
 
-    int32_t Id() const;
+  virtual int32_t ChangeUniqueId(const int32_t id) OVERRIDE;
 
-    virtual int32_t ChangeUniqueId(const int32_t id);
+  virtual void Reset() OVERRIDE;
 
-    virtual void Reset();
+  virtual int32_t Deflickering(I420VideoFrame* frame,
+                               FrameStats* stats) OVERRIDE;
 
-    virtual int32_t Deflickering(I420VideoFrame* frame, FrameStats* stats);
+  virtual int32_t BrightnessDetection(const I420VideoFrame& frame,
+                                      const FrameStats& stats) OVERRIDE;
 
-    virtual int32_t Denoising(I420VideoFrame* frame);
+  // Frame pre-processor functions
 
-    virtual int32_t BrightnessDetection(const I420VideoFrame& frame,
-                                        const FrameStats& stats);
+  // Enable temporal decimation
+  virtual void EnableTemporalDecimation(bool enable) OVERRIDE;
 
-    //Frame pre-processor functions
+  virtual void SetInputFrameResampleMode(
+      VideoFrameResampling resampling_mode) OVERRIDE;
 
-    //Enable temporal decimation
-    virtual void EnableTemporalDecimation(bool enable);
+  // Enable content analysis
+  virtual void EnableContentAnalysis(bool enable) OVERRIDE;
 
-    virtual void SetInputFrameResampleMode(VideoFrameResampling resamplingMode);
-
-    //Enable content analysis
-    virtual void EnableContentAnalysis(bool enable);
-
-    //Set max frame rate
-    virtual int32_t SetMaxFrameRate(uint32_t maxFrameRate);
-
-    // Set Target Resolution: frame rate and dimension
-    virtual int32_t SetTargetResolution(uint32_t width,
-                                        uint32_t height,
-                                        uint32_t frameRate);
+  // Set Target Resolution: frame rate and dimension
+  virtual int32_t SetTargetResolution(uint32_t width,
+                                      uint32_t height,
+                                      uint32_t frame_rate) OVERRIDE;
 
 
-    // Get decimated values: frame rate/dimension
-    virtual uint32_t DecimatedFrameRate();
-    virtual uint32_t DecimatedWidth() const;
-    virtual uint32_t DecimatedHeight() const;
+  // Get decimated values: frame rate/dimension
+  virtual uint32_t Decimatedframe_rate() OVERRIDE;
+  virtual uint32_t DecimatedWidth() const OVERRIDE;
+  virtual uint32_t DecimatedHeight() const OVERRIDE;
 
-    // Preprocess:
-    // Pre-process incoming frame: Sample when needed and compute content
-    // metrics when enabled.
-    // If no resampling takes place - processedFrame is set to NULL.
-    virtual int32_t PreprocessFrame(const I420VideoFrame& frame,
-                                    I420VideoFrame** processedFrame);
-    virtual VideoContentMetrics* ContentMetrics() const;
+  // Preprocess:
+  // Pre-process incoming frame: Sample when needed and compute content
+  // metrics when enabled.
+  // If no resampling takes place - processed_frame is set to NULL.
+  virtual int32_t PreprocessFrame(const I420VideoFrame& frame,
+                                  I420VideoFrame** processed_frame) OVERRIDE;
+  virtual VideoContentMetrics* ContentMetrics() const OVERRIDE;
 
-private:
-    int32_t              _id;
-    CriticalSectionWrapper&    _mutex;
-
-    VPMDeflickering            _deflickering;
-    VPMDenoising               _denoising;
-    VPMBrightnessDetection     _brightnessDetection;
-    VPMFramePreprocessor       _framePreProcessor;
+ private:
+  int32_t  id_;
+  CriticalSectionWrapper& mutex_;
+  VPMDeflickering deflickering_;
+  VPMBrightnessDetection brightness_detection_;
+  VPMFramePreprocessor  frame_pre_processor_;
 };
 
 }  // namespace

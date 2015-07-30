@@ -4,12 +4,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "X11TextureSourceBasic.h"
-#include "mozilla/layers/BasicCompositor.h"
 #include "gfxXlibSurface.h"
 #include "gfx2DGlue.h"
 
-using namespace mozilla;
-using namespace mozilla::layers;
+namespace mozilla {
+namespace layers {
+
 using namespace mozilla::gfx;
 
 X11TextureSourceBasic::X11TextureSourceBasic(BasicCompositor* aCompositor, gfxXlibSurface* aSurface)
@@ -66,4 +66,7 @@ X11TextureSourceBasic::ContentTypeToSurfaceFormat(gfxContentType aType)
     default:
       return SurfaceFormat::UNKNOWN;
   }
+}
+
+}
 }

@@ -18,6 +18,7 @@
 
 #define A_SESSION_DESCRIPTION_H_
 
+#include "mozilla/Types.h"
 #include <sys/types.h>
 
 #include <media/stagefright/foundation/ABase.h>
@@ -27,7 +28,7 @@
 
 namespace android {
 
-struct AString;
+struct MOZ_EXPORT AString;
 
 struct ASessionDescription : public RefBase {
     ASessionDescription();
@@ -40,7 +41,7 @@ struct ASessionDescription : public RefBase {
     size_t countTracks() const;
     void getFormat(size_t index, AString *value) const;
 
-    void getFormatType(
+    bool getFormatType(
             size_t index, unsigned long *PT,
             AString *desc, AString *params) const;
 
@@ -50,7 +51,7 @@ struct ASessionDescription : public RefBase {
 
     bool getDurationUs(int64_t *durationUs) const;
 
-    static void ParseFormatDesc(
+    static bool ParseFormatDesc(
             const char *desc, int32_t *timescale, int32_t *numChannels);
 
     bool findAttribute(size_t index, const char *key, AString *value) const;

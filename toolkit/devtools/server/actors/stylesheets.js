@@ -24,8 +24,9 @@ loader.lazyGetter(this, "CssLogic", () => require("devtools/styleinspector/css-l
 let TRANSITION_CLASS = "moz-styleeditor-transitioning";
 let TRANSITION_DURATION_MS = 500;
 let TRANSITION_BUFFER_MS = 1000;
-let TRANSITION_RULE = "\
-:root.moz-styleeditor-transitioning, :root.moz-styleeditor-transitioning * {\
+let TRANSITION_RULE_SELECTOR =
+".moz-styleeditor-transitioning:root, .moz-styleeditor-transitioning:root *";
+let TRANSITION_RULE = TRANSITION_RULE_SELECTOR + " {\
 transition-duration: " + TRANSITION_DURATION_MS + "ms !important; \
 transition-delay: 0ms !important;\
 transition-timing-function: ease-out !important;\
@@ -34,16 +35,6 @@ transition-property: all !important;\
 
 let LOAD_ERROR = "error-load";
 
-exports.register = function(handle) {
-  handle.addTabActor(StyleSheetsActor, "styleSheetsActor");
-  handle.addGlobalActor(StyleSheetsActor, "styleSheetsActor");
-};
-
-exports.unregister = function(handle) {
-  handle.removeTabActor(StyleSheetsActor);
-  handle.removeGlobalActor(StyleSheetsActor);
-};
-
 types.addActorType("stylesheet");
 types.addActorType("originalsource");
 
@@ -51,7 +42,7 @@ types.addActorType("originalsource");
  * Creates a StyleSheetsActor. StyleSheetsActor provides remote access to the
  * stylesheets of a document.
  */
-let StyleSheetsActor = protocol.ActorClass({
+let StyleSheetsActor = exports.StyleSheetsActor = protocol.ActorClass({
   typeName: "stylesheets",
 
   /**
@@ -73,17 +64,6 @@ let StyleSheetsActor = protocol.ActorClass({
     protocol.Actor.prototype.initialize.call(this, null);
 
     this.parentActor = tabActor;
-
-    // keep a map of sheets-to-actors so we don't create two actors for one sheet
-    this._sheets = new Map();
-  },
-
-  /**
-   * Destroy the current StyleSheetsActor instance.
-   */
-  destroy: function()
-  {
-    this._sheets.clear();
   },
 
   /**
@@ -119,7 +99,7 @@ let StyleSheetsActor = protocol.ActorClass({
    *         Promise that resolves with an array of StyleSheetActors
    */
   _addAllStyleSheets: function() {
-    return Task.spawn(function() {
+    return Task.spawn(function*() {
       let documents = [this.document];
       let actors = [];
 
@@ -136,7 +116,7 @@ let StyleSheetsActor = protocol.ActorClass({
           }
         }
       }
-      throw new Task.Result(actors);
+      return actors;
     }.bind(this));
   },
 
@@ -152,17 +132,17 @@ let StyleSheetsActor = protocol.ActorClass({
    */
   _addStyleSheets: function(styleSheets)
   {
-    return Task.spawn(function() {
+    return Task.spawn(function*() {
       let actors = [];
       for (let i = 0; i < styleSheets.length; i++) {
-        let actor = this._createStyleSheetActor(styleSheets[i]);
+        let actor = this.parentActor.createStyleSheetActor(styleSheets[i]);
         actors.push(actor);
 
         // Get all sheets, including imported ones
         let imports = yield this._getImported(actor);
         actors = actors.concat(imports);
       }
-      throw new Task.Result(actors);
+      return actors;
     }.bind(this));
   },
 
@@ -175,7 +155,7 @@ let StyleSheetsActor = protocol.ActorClass({
    *         A promise that resolves with an array of StyleSheetActors
    */
   _getImported: function(styleSheet) {
-    return Task.spawn(function() {
+    return Task.spawn(function*() {
       let rules = yield styleSheet.getCSSRules();
       let imported = [];
 
@@ -187,7 +167,7 @@ let StyleSheetsActor = protocol.ActorClass({
           if (!rule.styleSheet) {
             continue;
           }
-          let actor = this._createStyleSheetActor(rule.styleSheet);
+          let actor = this.parentActor.createStyleSheetActor(rule.styleSheet);
           imported.push(actor);
 
           // recurse imports in this stylesheet as well
@@ -200,40 +180,10 @@ let StyleSheetsActor = protocol.ActorClass({
         }
       }
 
-      throw new Task.Result(imported);
+      return imported;
     }.bind(this));
   },
 
-  /**
-   * Create a new actor for a style sheet, if it hasn't already been created.
-   *
-   * @param  {DOMStyleSheet} styleSheet
-   *         The style sheet to create an actor for.
-   * @return {StyleSheetActor}
-   *         The actor for this style sheet
-   */
-  _createStyleSheetActor: function(styleSheet)
-  {
-    if (this._sheets.has(styleSheet)) {
-      return this._sheets.get(styleSheet);
-    }
-    let actor = new StyleSheetActor(styleSheet, this);
-
-    this.manage(actor);
-    this._sheets.set(styleSheet, actor);
-
-    return actor;
-  },
-
-  /**
-   * Clear all the current stylesheet actors in map.
-   */
-  _clearStyleSheetActors: function() {
-    for (let actor in this._sheets) {
-      this.unmanage(this._sheets[actor]);
-    }
-    this._sheets.clear();
-  },
 
   /**
    * Create a new style sheet in the document with the given text.
@@ -254,7 +204,7 @@ let StyleSheetsActor = protocol.ActorClass({
     }
     parent.appendChild(style);
 
-    let actor = this._createStyleSheetActor(style.sheet);
+    let actor = this.parentActor.createStyleSheetActor(style.sheet);
     return actor;
   }, {
     request: { text: Arg(0, "string") },
@@ -269,9 +219,117 @@ let StyleSheetsFront = protocol.FrontClass(StyleSheetsActor, {
   initialize: function(client, tabForm) {
     protocol.Front.prototype.initialize.call(this, client);
     this.actorID = tabForm.styleSheetsActor;
-
-    client.addActorPool(this);
     this.manage(this);
+  }
+});
+
+/**
+ * A MediaRuleActor lives on the server and provides access to properties
+ * of a DOM @media rule and emits events when it changes.
+ */
+let MediaRuleActor = protocol.ActorClass({
+  typeName: "mediarule",
+
+  events: {
+    "matches-change" : {
+      type: "matchesChange",
+      matches: Arg(0, "boolean"),
+    }
+  },
+
+  get window() this.parentActor.window,
+
+  get document() this.window.document,
+
+  get matches() {
+    return this.mql ? this.mql.matches : null;
+  },
+
+  initialize: function(aMediaRule, aParentActor) {
+    protocol.Actor.prototype.initialize.call(this, null);
+
+    this.rawRule = aMediaRule;
+    this.parentActor = aParentActor;
+    this.conn = this.parentActor.conn;
+
+    this._matchesChange = this._matchesChange.bind(this);
+
+    this.line = DOMUtils.getRuleLine(aMediaRule);
+    this.column = DOMUtils.getRuleColumn(aMediaRule);
+
+    try {
+      this.mql = this.window.matchMedia(aMediaRule.media.mediaText);
+    } catch(e) {
+    }
+
+    if (this.mql) {
+      this.mql.addListener(this._matchesChange);
+    }
+  },
+
+  destroy: function()
+  {
+    if (this.mql) {
+      this.mql.removeListener(this._matchesChange);
+    }
+
+    protocol.Actor.prototype.destroy.call(this);
+  },
+
+  form: function(detail) {
+    if (detail === "actorid") {
+      return this.actorID;
+    }
+
+    let form = {
+      actor: this.actorID,  // actorID is set when this is added to a pool
+      mediaText: this.rawRule.media.mediaText,
+      conditionText: this.rawRule.conditionText,
+      matches: this.matches,
+      line: this.line,
+      column: this.column,
+      parentStyleSheet: this.parentActor.actorID
+    };
+
+    return form;
+  },
+
+  _matchesChange: function() {
+    events.emit(this, "matches-change", this.matches);
+  }
+});
+
+/**
+ * Cooresponding client-side front for a MediaRuleActor.
+ */
+let MediaRuleFront = protocol.FrontClass(MediaRuleActor, {
+  initialize: function(client, form) {
+    protocol.Front.prototype.initialize.call(this, client, form);
+
+    this._onMatchesChange = this._onMatchesChange.bind(this);
+    events.on(this, "matches-change", this._onMatchesChange);
+  },
+
+  _onMatchesChange: function(matches) {
+    this._form.matches = matches;
+  },
+
+  form: function(form, detail) {
+    if (detail === "actorid") {
+      this.actorID = form;
+      return;
+    }
+    this.actorID = form.actor;
+    this._form = form;
+  },
+
+  get mediaText() this._form.mediaText,
+  get conditionText() this._form.conditionText,
+  get matches() this._form.matches,
+  get line() this._form.line || -1,
+  get column() this._form.column || -1,
+  get parentStyleSheet() {
+    return this.conn.getActor(this._form.parentStyleSheet);
   }
 });
 
@@ -289,6 +347,10 @@ let StyleSheetActor = protocol.ActorClass({
     },
     "style-applied" : {
       type: "styleApplied"
+    },
+    "media-rules-changed" : {
+      type: "mediaRulesChanged",
+      rules: Arg(0, "array:mediarule")
     }
   },
 
@@ -308,6 +370,8 @@ let StyleSheetActor = protocol.ActorClass({
    * Document of target.
    */
   get document() this.window.document,
+
+  get ownerNode() this.rawSheet.ownerNode,
 
   /**
    * URL of underlying stylesheet.
@@ -367,8 +431,7 @@ let StyleSheetActor = protocol.ActorClass({
       return promise.resolve(rules);
     }
 
-    let ownerNode = this.rawSheet.ownerNode;
-    if (!ownerNode) {
+    if (!this.ownerNode) {
       return promise.resolve([]);
     }
 
@@ -378,13 +441,13 @@ let StyleSheetActor = protocol.ActorClass({
 
     let deferred = promise.defer();
 
-    let onSheetLoaded = function(event) {
-      ownerNode.removeEventListener("load", onSheetLoaded, false);
+    let onSheetLoaded = (event) => {
+      this.ownerNode.removeEventListener("load", onSheetLoaded, false);
 
       deferred.resolve(this.rawSheet.cssRules);
-    }.bind(this);
+    };
 
-    ownerNode.addEventListener("load", onSheetLoaded, false);
+    this.ownerNode.addEventListener("load", onSheetLoaded, false);
 
     // cache so we don't add many listeners if this is called multiple times.
     this._cssRules = deferred.promise;
@@ -405,13 +468,12 @@ let StyleSheetActor = protocol.ActorClass({
     }
 
     let docHref;
-    let ownerNode = this.rawSheet.ownerNode;
-    if (ownerNode) {
-      if (ownerNode instanceof Ci.nsIDOMHTMLDocument) {
-        docHref = ownerNode.location.href;
+    if (this.ownerNode) {
+      if (this.ownerNode instanceof Ci.nsIDOMHTMLDocument) {
+        docHref = this.ownerNode.location.href;
       }
-      else if (ownerNode.ownerDocument && ownerNode.ownerDocument.location) {
-        docHref = ownerNode.ownerDocument.location.href;
+      else if (this.ownerNode.ownerDocument && this.ownerNode.ownerDocument.location) {
+        docHref = this.ownerNode.ownerDocument.location.href;
       }
     }
 
@@ -490,13 +552,14 @@ let StyleSheetActor = protocol.ActorClass({
 
     if (!this.href) {
       // this is an inline <style> sheet
-      let content = this.rawSheet.ownerNode.textContent;
+      let content = this.ownerNode.textContent;
       this.text = content;
       return promise.resolve(content);
     }
 
     let options = {
       window: this.window,
+      loadFromCache: true,
       charset: this._getCSSCharset()
     };
 
@@ -646,6 +709,7 @@ let StyleSheetActor = protocol.ActorClass({
         return sourceMap.originalPositionFor({ line: line, column: column });
       }
       return {
+        fromSourceMap: false,
         source: this.href,
         line: line,
         column: column
@@ -662,6 +726,41 @@ let StyleSheetActor = protocol.ActorClass({
       column: "number"
     }))
   }),
+
+  /**
+   * Protocol method to get the media rules for the stylesheet.
+   */
+  getMediaRules: method(function() {
+    return this._getMediaRules();
+  }, {
+    request: {},
+    response: {
+      mediaRules: RetVal("nullable:array:mediarule")
+    }
+  }),
+
+  /**
+   * Get all the @media rules in this stylesheet.
+   *
+   * @return {promise}
+   *         A promise that resolves with an array of MediaRuleActors.
+   */
+  _getMediaRules: function() {
+    return this.getCSSRules().then((rules) => {
+      let mediaRules = [];
+      for (let i = 0; i < rules.length; i++) {
+        let rule = rules[i];
+        if (rule.type != Ci.nsIDOMCSSRule.MEDIA_RULE) {
+          continue;
+        }
+        let actor = new MediaRuleActor(rule, this);
+        this.manage(actor);
+
+        mediaRules.push(actor);
+      }
+      return mediaRules;
+    });
+  },
 
   /**
    * Get the charset of the stylesheet according to the character set rules
@@ -733,8 +832,12 @@ let StyleSheetActor = protocol.ActorClass({
       this._insertTransistionRule();
     }
     else {
-      this._notifyStyleApplied();
+      events.emit(this, "style-applied");
     }
+
+    this._getMediaRules().then((rules) => {
+      events.emit(this, "media-rules-changed", rules);
+    });
   }, {
     request: {
       text: Arg(0, "string"),
@@ -747,20 +850,16 @@ let StyleSheetActor = protocol.ActorClass({
    * to remove the rule after a certain time.
    */
   _insertTransistionRule: function() {
-    // Insert the global transition rule
-    // Use a ref count to make sure we do not add it multiple times.. and remove
-    // it only when all pending StyleSheets-generated transitions ended.
-    if (this._transitionRefCount == 0) {
-      this.rawSheet.insertRule(TRANSITION_RULE, this.rawSheet.cssRules.length);
-      this.document.documentElement.classList.add(TRANSITION_CLASS);
-    }
+    this.document.documentElement.classList.add(TRANSITION_CLASS);
 
-    this._transitionRefCount++;
+    // We always add the rule since we've just reset all the rules
+    this.rawSheet.insertRule(TRANSITION_RULE, this.rawSheet.cssRules.length);
 
     // Set up clean up and commit after transition duration (+buffer)
     // @see _onTransitionEnd
-    this.window.setTimeout(this._onTransitionEnd.bind(this),
-                           TRANSITION_DURATION_MS + TRANSITION_BUFFER_MS);
+    this.window.clearTimeout(this._transitionTimeout);
+    this._transitionTimeout = this.window.setTimeout(this._onTransitionEnd.bind(this),
+                              TRANSITION_DURATION_MS + TRANSITION_BUFFER_MS);
   },
 
   /**
@@ -769,14 +868,64 @@ let StyleSheetActor = protocol.ActorClass({
    */
   _onTransitionEnd: function()
   {
-    if (--this._transitionRefCount == 0) {
-      this.document.documentElement.classList.remove(TRANSITION_CLASS);
-      this.rawSheet.deleteRule(this.rawSheet.cssRules.length - 1);
+    this.document.documentElement.classList.remove(TRANSITION_CLASS);
+
+    let index = this.rawSheet.cssRules.length - 1;
+    let rule = this.rawSheet.cssRules[index];
+    if (rule.selectorText == TRANSITION_RULE_SELECTOR) {
+      this.rawSheet.deleteRule(index);
     }
 
     events.emit(this, "style-applied");
   }
 })
+
+/**
+ * Find the line/column for a rule.
+ * This is like DOMUtils.getRule[Line|Column] except for inline <style> sheets,
+ * the line number returned here is relative to the <style> tag rather than the
+ * containing HTML document (which is what DOMUtils does).
+ * This is hacky, but we don't know of a better implementation right now.
+ */
+const getRuleLocation = exports.getRuleLocation = function(rule) {
+  let reply = {
+    line: DOMUtils.getRuleLine(rule),
+    column: DOMUtils.getRuleColumn(rule)
+  };
+
+  let sheet = rule.parentStyleSheet;
+  if (sheet.ownerNode && sheet.ownerNode.localName === "style") {
+     // For inline sheets, the line is relative to HTML not the stylesheet, so
+     // Get the location of the first { to know the line num of the first rule,
+     // relative to this sheet, to get the offset
+     let text = sheet.ownerNode.textContent;
+     // Hacky for now, because this will fail if { appears in a comment before
+     // but better than nothing, and faster than parsing the whole text
+     let start = text.substring(0, text.indexOf("{"));
+     let relativeStartLine = start.split("\n").length;
+
+     let absoluteStartLine;
+     let i = 0;
+     while (absoluteStartLine == null) {
+       let irule = sheet.cssRules[i];
+       if (irule instanceof Ci.nsIDOMCSSStyleRule) {
+         absoluteStartLine = DOMUtils.getRuleLine(irule);
+       }
+       else if (irule == null) {
+         break;
+       }
+
+       i++;
+     }
+
+     if (absoluteStartLine != null) {
+       let offset = absoluteStartLine - relativeStartLine;
+       reply.line -= offset;
+     }
+  }
+
+  return reply;
+};
 
 /**
  * StyleSheetFront is the client-side counterpart to a StyleSheetActor.
@@ -791,7 +940,6 @@ var StyleSheetFront = protocol.FrontClass(StyleSheetActor, {
 
   destroy: function() {
     events.off(this, "property-change", this._onPropertyChange);
-
     protocol.Front.prototype.destroy.call(this);
   },
 
@@ -938,20 +1086,27 @@ function fetch(aURL, aOptions={ loadFromCache: true, window: null,
     case "chrome":
     case "resource":
       try {
-        NetUtil.asyncFetch(url, function onFetch(aStream, aStatus, aRequest) {
-          if (!components.isSuccessCode(aStatus)) {
-            deferred.reject(new Error("Request failed with status code = "
-                                      + aStatus
-                                      + " after NetUtil.asyncFetch for url = "
-                                      + url));
-            return;
-          }
+        NetUtil.asyncFetch2(
+          url,
+          function onFetch(aStream, aStatus, aRequest) {
+            if (!components.isSuccessCode(aStatus)) {
+              deferred.reject(new Error("Request failed with status code = "
+                                        + aStatus
+                                        + " after NetUtil.asyncFetch2 for url = "
+                                        + url));
+              return;
+            }
 
-          let source = NetUtil.readInputStreamToString(aStream, aStream.available());
-          contentType = aRequest.contentType;
-          deferred.resolve(source);
-          aStream.close();
-        });
+            let source = NetUtil.readInputStreamToString(aStream, aStream.available());
+            contentType = aRequest.contentType;
+            deferred.resolve(source);
+            aStream.close();
+          },
+          null,      // aLoadingNode
+          Services.scriptSecurityManager.getSystemPrincipal(),
+          null,      // aTriggeringPrincipal
+          Ci.nsILoadInfo.SEC_NORMAL,
+          Ci.nsIContentPolicy.TYPE_STYLESHEET);
       } catch (ex) {
         deferred.reject(ex);
       }
@@ -960,12 +1115,26 @@ function fetch(aURL, aOptions={ loadFromCache: true, window: null,
     default:
       let channel;
       try {
-        channel = Services.io.newChannel(url, null, null);
+        channel = Services.io.newChannel2(url,
+                                          null,
+                                          null,
+                                          null,      // aLoadingNode
+                                          Services.scriptSecurityManager.getSystemPrincipal(),
+                                          null,      // aTriggeringPrincipal
+                                          Ci.nsILoadInfo.SEC_NORMAL,
+                                          Ci.nsIContentPolicy.TYPE_STYLESHEET);
       } catch (e if e.name == "NS_ERROR_UNKNOWN_PROTOCOL") {
         // On Windows xpcshell tests, c:/foo/bar can pass as a valid URL, but
         // newChannel won't be able to handle it.
         url = "file:///" + url;
-        channel = Services.io.newChannel(url, null, null);
+        channel = Services.io.newChannel2(url,
+                                          null,
+                                          null,
+                                          null,      // aLoadingNode
+                                          Services.scriptSecurityManager.getSystemPrincipal(),
+                                          null,      // aTriggeringPrincipal
+                                          Ci.nsILoadInfo.SEC_NORMAL,
+                                          Ci.nsIContentPolicy.TYPE_STYLESHEET);
       }
       let chunks = [];
       let streamListener = {

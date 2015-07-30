@@ -48,7 +48,7 @@ class nsIFile;
  *
  * This function does not modify appDir.
  */
-NS_HIDDEN_(nsresult) ProcessUpdates(nsIFile *greDir, nsIFile *appDir,
+nsresult ProcessUpdates(nsIFile *greDir, nsIFile *appDir,
                                     nsIFile *updRootDir,
                                     int argc, char **argv,
                                     const char *appVersion,
@@ -62,7 +62,7 @@ NS_HIDDEN_(nsresult) ProcessUpdates(nsIFile *greDir, nsIFile *appDir,
 // updater application for staging an update.
 // XXX ehsan this is living in this file in order to make use of the existing
 // stuff here, we might want to move it elsewhere in the future.
-class nsUpdateProcessor MOZ_FINAL : public nsIUpdateProcessor
+class nsUpdateProcessor final : public nsIUpdateProcessor
 {
 public:
   nsUpdateProcessor();
@@ -71,6 +71,8 @@ public:
   NS_DECL_NSIUPDATEPROCESSOR
 
 private:
+  ~nsUpdateProcessor();
+
   struct StagedUpdateInfo {
     StagedUpdateInfo()
       : mArgc(0),
@@ -103,7 +105,6 @@ private:
 private:
   ProcessType mUpdaterPID;
   nsCOMPtr<nsIThread> mProcessWatcher;
-  nsCOMPtr<nsIUpdate> mUpdate;
   StagedUpdateInfo mInfo;
 };
 #endif

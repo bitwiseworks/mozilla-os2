@@ -19,6 +19,8 @@ struct WebRtcCngDecInst;
 
 namespace webrtc {
 
+namespace acm2 {
+
 class ACMCNG: public ACMGenericCodec {
  public:
   explicit ACMCNG(int16_t codec_id);
@@ -33,11 +35,10 @@ class ACMCNG: public ACMGenericCodec {
   int16_t InternalInitEncoder(WebRtcACMCodecParams *codec_params);
 
  protected:
-  void DestructEncoderSafe();
+  void DestructEncoderSafe() OVERRIDE
+      EXCLUSIVE_LOCKS_REQUIRED(codec_wrapper_lock_);
 
   int16_t InternalCreateEncoder();
-
-  void InternalDestructEncoderInst(void* ptr_inst);
 
   int16_t EnableDTX() {
     return -1;
@@ -50,6 +51,8 @@ class ACMCNG: public ACMGenericCodec {
   WebRtcCngEncInst* encoder_inst_ptr_;
   uint16_t samp_freq_hz_;
 };
+
+}  // namespace acm2
 
 }  // namespace webrtc
 

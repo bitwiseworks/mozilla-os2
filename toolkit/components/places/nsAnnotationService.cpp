@@ -66,6 +66,10 @@ AnnotatedResult::AnnotatedResult(const nsCString& aGUID,
 {
 }
 
+AnnotatedResult::~AnnotatedResult()
+{
+}
+
 NS_IMETHODIMP
 AnnotatedResult::GetGuid(nsACString& _guid)
 {
@@ -259,7 +263,9 @@ nsAnnotationService::SetItemAnnotation(int64_t aItemId,
                                        int32_t aFlags,
                                        uint16_t aExpiration)
 {
-  PROFILER_LABEL("AnnotationService", "SetItemAnnotation");
+  PROFILER_LABEL("AnnotationService", "SetItemAnnotation",
+    js::ProfileEntry::Category::OTHER);
+
   NS_ENSURE_ARG_MIN(aItemId, 1);
   NS_ENSURE_ARG(aValue);
 
@@ -1911,7 +1917,7 @@ nsAnnotationService::StartSetAnnotation(nsIURI* aURI,
   else {
     rv = aStatement->BindNullByName(NS_LITERAL_CSTRING("id"));
     NS_ENSURE_SUCCESS(rv, rv);
-    rv = aStatement->BindInt64ByName(NS_LITERAL_CSTRING("date_added"), PR_Now());
+    rv = aStatement->BindInt64ByName(NS_LITERAL_CSTRING("date_added"), RoundedPRNow());
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -1926,7 +1932,7 @@ nsAnnotationService::StartSetAnnotation(nsIURI* aURI,
   NS_ENSURE_SUCCESS(rv, rv);
   rv = aStatement->BindInt32ByName(NS_LITERAL_CSTRING("type"), aType);
   NS_ENSURE_SUCCESS(rv, rv);
-  rv = aStatement->BindInt64ByName(NS_LITERAL_CSTRING("last_modified"), PR_Now());
+  rv = aStatement->BindInt64ByName(NS_LITERAL_CSTRING("last_modified"), RoundedPRNow());
   NS_ENSURE_SUCCESS(rv, rv);
 
   // On success, leave the statement open, the caller will set the value

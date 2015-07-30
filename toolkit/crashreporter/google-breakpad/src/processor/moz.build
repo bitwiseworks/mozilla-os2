@@ -21,10 +21,11 @@ UNIFIED_SOURCES += [
     'tokenize.cc',
 ]
 
-FINAL_LIBRARY = 'xulapp_s'
+FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
     '..',
     '../..',
 ]
 
+include('/toolkit/crashreporter/crashreporter.mozbuild')

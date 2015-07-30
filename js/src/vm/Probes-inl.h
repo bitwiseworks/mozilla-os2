@@ -25,18 +25,14 @@ probes::CallTrackingActive(JSContext* cx)
     if (JAVASCRIPT_FUNCTION_ENTRY_ENABLED() || JAVASCRIPT_FUNCTION_RETURN_ENABLED())
         return true;
 #endif
-#ifdef MOZ_TRACE_JSCALLS
-    if (cx->functionCallback)
-        return true;
-#endif
     return false;
 }
 
 inline bool
 probes::WantNativeAddressInfo(JSContext* cx)
 {
-    return (cx->reportGranularity >= JITREPORT_GRANULARITY_FUNCTION &&
-            JITGranularityRequested(cx) >= JITREPORT_GRANULARITY_FUNCTION);
+    return cx->reportGranularity >= JITREPORT_GRANULARITY_FUNCTION &&
+           JITGranularityRequested(cx) >= JITREPORT_GRANULARITY_FUNCTION;
 }
 
 inline bool
@@ -47,15 +43,12 @@ probes::EnterScript(JSContext* cx, JSScript* script, JSFunction* maybeFun,
     if (JAVASCRIPT_FUNCTION_ENTRY_ENABLED())
         DTraceEnterJSFun(cx, maybeFun, script);
 #endif
-#ifdef MOZ_TRACE_JSCALLS
-    cx->doFunctionCallback(maybeFun, script, 1);
-#endif
 
     JSRuntime* rt = cx->runtime();
     if (rt->spsProfiler.enabled()) {
         if (!rt->spsProfiler.enter(script, maybeFun))
             return false;
-        JS_ASSERT_IF(!fp->isGeneratorFrame(), !fp->hasPushedSPSFrame());
+        MOZ_ASSERT_IF(!fp->script()->isGenerator(), !fp->hasPushedSPSFrame());
         fp->setPushedSPSFrame();
     }
 
@@ -68,9 +61,6 @@ probes::ExitScript(JSContext* cx, JSScript* script, JSFunction* maybeFun, bool p
 #ifdef INCLUDE_MOZILLA_DTRACE
     if (JAVASCRIPT_FUNCTION_RETURN_ENABLED())
         DTraceExitJSFun(cx, maybeFun, script);
-#endif
-#ifdef MOZ_TRACE_JSCALLS
-    cx->doFunctionCallback(maybeFun, script, 0);
 #endif
 
     if (popSPSFrame)

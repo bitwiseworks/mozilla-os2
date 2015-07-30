@@ -21,20 +21,20 @@ namespace layers {
 
 using namespace std;
 
-typedef ProgramProfileOGL::Argument Argument;
-
 #define GAUSSIAN_KERNEL_HALF_WIDTH 11
 #define GAUSSIAN_KERNEL_STEP 0.2
 
 void
 AddUniforms(ProgramProfileOGL& aProfile)
 {
+    // This needs to be kept in sync with the KnownUniformName enum
     static const char *sKnownUniformNames[] = {
         "uLayerTransform",
-        "uMaskQuadTransform",
-        "uLayerQuadTransform",
+        "uMaskTransform",
+        "uLayerRects",
         "uMatrixProj",
         "uTextureTransform",
+        "uTextureRects",
         "uRenderTargetOffset",
         "uLayerOpacity",
         "uTexture",
@@ -47,6 +47,12 @@ AddUniforms(ProgramProfileOGL& aProfile)
         "uRenderColor",
         "uTexCoordMultiplier",
         "uTexturePass2",
+        "uColorMatrix",
+        "uColorMatrixVector",
+        "uBlurRadius",
+        "uBlurOffset",
+        "uBlurAlpha",
+        "uBlurGaussianKernel",
         nullptr
     };
 
@@ -130,6 +136,12 @@ ShaderConfigOGL::SetMask3D(bool aEnabled)
   SetFeature(ENABLE_MASK_3D, aEnabled);
 }
 
+void
+ShaderConfigOGL::SetPremultiply(bool aEnabled)
+{
+  SetFeature(ENABLE_PREMULTIPLY, aEnabled);
+}
+
 /* static */ ProgramProfileOGL
 ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
 {
@@ -139,37 +151,38 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
   AddUniforms(result);
 
   vs << "uniform mat4 uMatrixProj;" << endl;
-  vs << "uniform mat4 uLayerQuadTransform;" << endl;
+  vs << "uniform vec4 uLayerRects[4];" << endl;
   vs << "uniform mat4 uLayerTransform;" << endl;
   vs << "uniform vec4 uRenderTargetOffset;" << endl;
 
-  vs << "attribute vec4 aVertexCoord;" << endl;
+  vs << "attribute vec4 aCoord;" << endl;
 
   if (!(aConfig.mFeatures & ENABLE_RENDER_COLOR)) {
     vs << "uniform mat4 uTextureTransform;" << endl;
-    vs << "attribute vec2 aTexCoord;" << endl;
+    vs << "uniform vec4 uTextureRects[4];" << endl;
     vs << "varying vec2 vTexCoord;" << endl;
   }
 
   if (aConfig.mFeatures & ENABLE_MASK_2D ||
       aConfig.mFeatures & ENABLE_MASK_3D) {
-    vs << "uniform mat4 uMaskQuadTransform;" << endl;
+    vs << "uniform mat4 uMaskTransform;" << endl;
     vs << "varying vec3 vMaskCoord;" << endl;
   }
 
   vs << "void main() {" << endl;
-  vs << "  vec4 finalPosition = aVertexCoord;" << endl;
-  vs << "  finalPosition = uLayerQuadTransform * finalPosition;" << endl;
+  vs << "  int vertexID = int(aCoord.w);" << endl;
+  vs << "  vec4 layerRect = uLayerRects[vertexID];" << endl;
+  vs << "  vec4 finalPosition = vec4(aCoord.xy * layerRect.zw + layerRect.xy, 0.0, 1.0);" << endl;
   vs << "  finalPosition = uLayerTransform * finalPosition;" << endl;
   vs << "  finalPosition.xyz /= finalPosition.w;" << endl;
 
   if (aConfig.mFeatures & ENABLE_MASK_3D) {
-    vs << "  vMaskCoord.xy = (uMaskQuadTransform * vec4(finalPosition.xyz, 1.0)).xy;" << endl;
+    vs << "  vMaskCoord.xy = (uMaskTransform * vec4(finalPosition.xyz, 1.0)).xy;" << endl;
     // correct for perspective correct interpolation, see comment in D3D10 shader
     vs << "  vMaskCoord.z = 1.0;" << endl;
     vs << "  vMaskCoord *= finalPosition.w;" << endl;
   } else if (aConfig.mFeatures & ENABLE_MASK_2D) {
-    vs << "  vMaskCoord.xy = (uMaskQuadTransform * finalPosition).xy;" << endl;
+    vs << "  vMaskCoord.xy = (uMaskTransform * finalPosition).xy;" << endl;
   }
 
   vs << "  finalPosition = finalPosition - uRenderTargetOffset;" << endl;
@@ -177,7 +190,9 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
   vs << "  finalPosition = uMatrixProj * finalPosition;" << endl;
 
   if (!(aConfig.mFeatures & ENABLE_RENDER_COLOR)) {
-    vs << "  vTexCoord = (uTextureTransform * vec4(aTexCoord.x, aTexCoord.y, 0.0, 1.0)).xy;" << endl;
+    vs << "  vec4 textureRect = uTextureRects[vertexID];" << endl;
+    vs << "  vec2 texCoord = aCoord.xy * textureRect.zw + textureRect.xy;" << endl;
+    vs << "  vTexCoord = (uTextureTransform * vec4(texCoord, 0.0, 1.0)).xy;" << endl;
   }
 
   vs << "  gl_Position = finalPosition;" << endl;
@@ -253,12 +268,23 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
       fs << "  COLOR_PRECISION float y = texture2D(uYTexture, coord).r;" << endl;
       fs << "  COLOR_PRECISION float cb = texture2D(uCbTexture, coord).r;" << endl;
       fs << "  COLOR_PRECISION float cr = texture2D(uCrTexture, coord).r;" << endl;
-      fs << "  y = (y - 0.0625) * 1.164;" << endl;
-      fs << "  cb = cb - 0.5;" << endl;
-      fs << "  cr = cr - 0.5;" << endl;
-      fs << "  color.r = y + cr * 1.596;" << endl;
-      fs << "  color.g = y - 0.813 * cr - 0.391 * cb;" << endl;
-      fs << "  color.b = y + cb * 2.018;" << endl;
+
+      /* From Rec601:
+[R]   [1.1643835616438356,  0.0,                 1.5960267857142858]      [ Y -  16]
+[G] = [1.1643835616438358, -0.3917622900949137, -0.8129676472377708]    x [Cb - 128]
+[B]   [1.1643835616438356,  2.017232142857143,   8.862867620416422e-17]   [Cr - 128]
+
+For [0,1] instead of [0,255], and to 5 places:
+[R]   [1.16438,  0.00000,  1.59603]   [ Y - 0.06275]
+[G] = [1.16438, -0.39176, -0.81297] x [Cb - 0.50196]
+[B]   [1.16438,  2.01723,  0.00000]   [Cr - 0.50196]
+       */
+      fs << "  y = (y - 0.06275) * 1.16438;" << endl;
+      fs << "  cb = cb - 0.50196;" << endl;
+      fs << "  cr = cr - 0.50196;" << endl;
+      fs << "  color.r = y + 1.59603*cr;" << endl;
+      fs << "  color.g = y - 0.39176*cb - 0.81297*cr;" << endl;
+      fs << "  color.b = y + 2.01723*cb;" << endl;
       fs << "  color.a = 1.0;" << endl;
     } else if (aConfig.mFeatures & ENABLE_TEXTURE_COMPONENT_ALPHA) {
       fs << "  COLOR_PRECISION vec3 onBlack = texture2D(uBlackTexture, coord).rgb;" << endl;
@@ -290,7 +316,7 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
       fs << "vec4 blur(vec4 color, vec2 coord) {" << endl;
       fs << "  vec4 total = color * uBlurGaussianKernel[0];" << endl;
       fs << "  for (int i = 1; i < " << GAUSSIAN_KERNEL_HALF_WIDTH << "; ++i) {" << endl;
-      fs << "    float r = float(i) * " << GAUSSIAN_KERNEL_STEP << " << endl;" << endl;
+      fs << "    float r = float(i) * " << GAUSSIAN_KERNEL_STEP << ";" << endl;
       fs << "    float k = uBlurGaussianKernel[i];" << endl;
       fs << "    total += sampleAtRadius(coord, r) * k;" << endl;
       fs << "    total += sampleAtRadius(coord, -r) * k;" << endl;
@@ -323,6 +349,9 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
     if (aConfig.mFeatures & ENABLE_OPACITY) {
       fs << "  color *= uLayerOpacity;" << endl;
     }
+    if (aConfig.mFeatures & ENABLE_PREMULTIPLY) {
+      fs << " color.rgb *= color.a;" << endl;
+    }
   }
   if (aConfig.mFeatures & ENABLE_MASK_3D) {
     fs << "  vec2 maskCoords = vMaskCoord.xy / vMaskCoord.z;" << endl;
@@ -341,11 +370,9 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
   result.mVertexShaderString = vs.str();
   result.mFragmentShaderString = fs.str();
 
-  result.mAttributes.AppendElement(Argument("aVertexCoord"));
   if (aConfig.mFeatures & ENABLE_RENDER_COLOR) {
     result.mTextureCount = 0;
   } else {
-    result.mAttributes.AppendElement(Argument("aTexCoord"));
     if (aConfig.mFeatures & ENABLE_TEXTURE_YCBCR) {
       result.mTextureCount = 3;
     } else if (aConfig.mFeatures & ENABLE_TEXTURE_COMPONENT_ALPHA) {
@@ -361,9 +388,6 @@ ProgramProfileOGL::GetProfileFor(ShaderConfigOGL aConfig)
 
   return result;
 }
-
-const char* const ShaderProgramOGL::VertexCoordAttrib = "aVertexCoord";
-const char* const ShaderProgramOGL::TexCoordAttrib = "aTexCoord";
 
 ShaderProgramOGL::ShaderProgramOGL(GLContext* aGL, const ProgramProfileOGL& aProfile)
   : mGL(aGL)
@@ -411,14 +435,6 @@ ShaderProgramOGL::Initialize()
     mProfile.mUniforms[i].mLocation =
       mGL->fGetUniformLocation(mProgram, mProfile.mUniforms[i].mNameString);
   }
-
-  for (uint32_t i = 0; i < mProfile.mAttributes.Length(); ++i) {
-    mProfile.mAttributes[i].mLocation =
-      mGL->fGetAttribLocation(mProgram, mProfile.mAttributes[i].mName);
-    NS_ASSERTION(mProfile.mAttributes[i].mLocation >= 0, "Bad attribute location.");
-  }
-
-  //mProfile.mHasMatrixProj = mProfile.mUniforms[KnownUniform::MatrixProj].mLocation != -1;
 
   return true;
 }
@@ -524,17 +540,36 @@ ShaderProgramOGL::CreateProgram(const char *aVertexShaderString,
   return true;
 }
 
-void
-ShaderProgramOGL::Activate()
+GLuint
+ShaderProgramOGL::GetProgram()
 {
   if (mProgramState == STATE_NEW) {
     if (!Initialize()) {
       NS_WARNING("Shader could not be initialised");
-      return;
     }
   }
-  NS_ASSERTION(HasInitialized(), "Attempting to activate a program that's not in use!");
-  mGL->fUseProgram(mProgram);
+  MOZ_ASSERT(HasInitialized(), "Attempting to get a program that's not been initialized!");
+  return mProgram;
+}
+
+void
+ShaderProgramOGL::SetBlurRadius(float aRX, float aRY)
+{
+  float f[] = {aRX, aRY};
+  SetUniform(KnownUniform::BlurRadius, 2, f);
+
+  float gaussianKernel[GAUSSIAN_KERNEL_HALF_WIDTH];
+  float sum = 0.0f;
+  for (int i = 0; i < GAUSSIAN_KERNEL_HALF_WIDTH; i++) {
+    float x = i * GAUSSIAN_KERNEL_STEP;
+    float sigma = 1.0f;
+    gaussianKernel[i] = exp(-x * x / (2 * sigma * sigma)) / sqrt(2 * M_PI * sigma * sigma);
+    sum += gaussianKernel[i] * (i == 0 ? 1 : 2);
+  }
+  for (int i = 0; i < GAUSSIAN_KERNEL_HALF_WIDTH; i++) {
+    gaussianKernel[i] /= sum;
+  }
+  SetArrayUniform(KnownUniform::BlurGaussianKernel, GAUSSIAN_KERNEL_HALF_WIDTH, gaussianKernel);
 }
 
 } /* layers */

@@ -23,13 +23,13 @@
 #define DEVICESTORAGE_SDCARD     "sdcard"
 #define DEVICESTORAGE_CRASHES    "crashes"
 
-class DeviceStorageFile;
 class nsIInputStream;
+class nsIOutputStream;
 
 namespace mozilla {
 class EventListenerManager;
 namespace dom {
-class DeviceStorageEnumerationParameters;
+struct DeviceStorageEnumerationParameters;
 class DOMCursor;
 class DOMRequest;
 class Promise;
@@ -40,7 +40,7 @@ class FileDescriptor;
 }
 } // namespace mozilla
 
-class DeviceStorageFile MOZ_FINAL
+class DeviceStorageFile final
   : public nsISupports {
 public:
   nsCOMPtr<nsIFile> mFile;
@@ -92,6 +92,9 @@ public:
   nsresult Remove();
   nsresult Write(nsIInputStream* aInputStream);
   nsresult Write(InfallibleTArray<uint8_t>& bits);
+  nsresult Append(nsIInputStream* aInputStream);
+  nsresult Append(nsIInputStream* aInputStream,
+                  nsIOutputStream* aOutputStream);
   void CollectFiles(nsTArray<nsRefPtr<DeviceStorageFile> >& aFiles,
                     PRTime aSince = 0);
   void collectFilesInternal(nsTArray<nsRefPtr<DeviceStorageFile> >& aFiles,
@@ -115,6 +118,7 @@ public:
   nsresult CreateFileDescriptor(mozilla::ipc::FileDescriptor& aFileDescriptor);
 
 private:
+  ~DeviceStorageFile() {}
   void Init();
   void NormalizeFilePath();
   void AppendRelativePath(const nsAString& aPath);
@@ -138,9 +142,11 @@ private:
     * ContentParent::Init (for IPC)
     * nsDOMDeviceStorage::Init (for non-ipc)
 */
-class FileUpdateDispatcher MOZ_FINAL
+class FileUpdateDispatcher final
   : public nsIObserver
 {
+  ~FileUpdateDispatcher() {}
+
  public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
@@ -150,7 +156,7 @@ class FileUpdateDispatcher MOZ_FINAL
   static mozilla::StaticRefPtr<FileUpdateDispatcher> sSingleton;
 };
 
-class nsDOMDeviceStorage MOZ_FINAL
+class nsDOMDeviceStorage final
   : public mozilla::DOMEventTargetHelper
   , public nsIDOMDeviceStorage
   , public nsIObserver
@@ -172,23 +178,23 @@ public:
   NS_DECL_NSIDOMEVENTTARGET
 
   virtual mozilla::EventListenerManager*
-    GetExistingListenerManager() const MOZ_OVERRIDE;
+    GetExistingListenerManager() const override;
   virtual mozilla::EventListenerManager*
-    GetOrCreateListenerManager() MOZ_OVERRIDE;
+    GetOrCreateListenerManager() override;
 
   virtual void
   AddEventListener(const nsAString& aType,
                    mozilla::dom::EventListener* aListener,
                    bool aUseCapture,
                    const mozilla::dom::Nullable<bool>& aWantsUntrusted,
-                   ErrorResult& aRv) MOZ_OVERRIDE;
+                   ErrorResult& aRv) override;
 
   virtual void RemoveEventListener(const nsAString& aType,
                                    mozilla::dom::EventListener* aListener,
                                    bool aUseCapture,
-                                   ErrorResult& aRv) MOZ_OVERRIDE;
+                                   ErrorResult& aRv) override;
 
-  nsDOMDeviceStorage(nsPIDOMWindow* aWindow);
+  explicit nsDOMDeviceStorage(nsPIDOMWindow* aWindow);
 
   nsresult Init(nsPIDOMWindow* aWindow, const nsAString& aType,
                 const nsAString& aVolName);
@@ -209,7 +215,7 @@ public:
     return GetOwner();
   }
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) override;
 
   IMPL_EVENT_HANDLER(change)
 
@@ -217,6 +223,13 @@ public:
   Add(nsIDOMBlob* aBlob, ErrorResult& aRv);
   already_AddRefed<DOMRequest>
   AddNamed(nsIDOMBlob* aBlob, const nsAString& aPath, ErrorResult& aRv);
+
+  already_AddRefed<DOMRequest>
+  AppendNamed(nsIDOMBlob* aBlob, const nsAString& aPath, ErrorResult& aRv);
+
+  already_AddRefed<DOMRequest>
+  AddOrAppendNamed(nsIDOMBlob* aBlob, const nsAString& aPath,
+                   const int32_t aRequestType, ErrorResult& aRv);
 
   already_AddRefed<DOMRequest>
   Get(const nsAString& aPath, ErrorResult& aRv)
@@ -256,12 +269,16 @@ public:
   already_AddRefed<DOMRequest> Mount(ErrorResult& aRv);
   already_AddRefed<DOMRequest> Unmount(ErrorResult& aRv);
 
+  bool CanBeMounted();
+  bool CanBeFormatted();
+  bool CanBeShared();
+  bool IsRemovable();
   bool Default();
 
   // Uses XPCOM GetStorageName
 
   already_AddRefed<Promise>
-  GetRoot();
+  GetRoot(ErrorResult& aRv);
 
   static void
   CreateDeviceStorageFor(nsPIDOMWindow* aWin,
@@ -305,6 +322,8 @@ private:
   nsString mStorageType;
   nsCOMPtr<nsIFile> mRootDirectory;
   nsString mStorageName;
+  bool mIsShareable;
+  bool mIsRemovable;
 
   already_AddRefed<nsDOMDeviceStorage> GetStorage(const nsAString& aFullPath,
                                                   nsAString& aOutStoragePath);
@@ -325,7 +344,9 @@ private:
 
 #ifdef MOZ_WIDGET_GONK
   nsString mLastStatus;
-  void DispatchMountChangeEvent(nsAString& aVolumeStatus);
+  nsString mLastStorageStatus;
+  void DispatchStatusChangeEvent(nsAString& aStatus);
+  void DispatchStorageStatusChangeEvent(nsAString& aStorageStatus);
 #endif
 
   // nsIDOMDeviceStorage.type

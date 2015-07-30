@@ -11,17 +11,17 @@
 // This sub-API supports the following functionalities:
 //  - Effect filters
 //  - Deflickering
-//  - Denoising
 //  - Color enhancement
 
 #ifndef WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_IMAGE_PROCESS_H_
 #define WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_IMAGE_PROCESS_H_
 
 #include "webrtc/common_types.h"
-#include "webrtc/common_video/interface/i420_video_frame.h"
 
 namespace webrtc {
 
+class EncodedImageCallback;
+class I420FrameCallback;
 class VideoEngine;
 
 // This class declares an abstract interface for a user defined effect filter.
@@ -32,8 +32,11 @@ class WEBRTC_DLLEXPORT ViEEffectFilter {
  public:
   // This method is called with an I420 video frame allowing the user to
   // modify the video frame.
-  virtual int Transform(int size, unsigned char* frameBuffer,
-                        unsigned int timeStamp90KHz, unsigned int width,
+  virtual int Transform(int size,
+                        unsigned char* frame_buffer,
+                        int64_t ntp_time_ms,
+                        unsigned int timestamp,
+                        unsigned int width,
                         unsigned int height) = 0;
  protected:
   ViEEffectFilter() {}
@@ -81,14 +84,36 @@ class WEBRTC_DLLEXPORT ViEImageProcess {
   // not all of them succeed. Enabling this function will remove the flicker.
   virtual int EnableDeflickering(const int capture_id, const bool enable) = 0;
 
-  // Some cameras produce very noisy captured images, especially in low‐light
-  // conditions. This functionality will reduce the camera noise.
-  virtual int EnableDenoising(const int capture_id, const bool enable) = 0;
+  // TODO(pbos): Remove this function when removed from fakewebrtcvideoengine.h.
+  virtual int EnableDenoising(const int capture_id, const bool enable) {
+    return -1;
+  }
 
   // This function enhances the colors on the decoded video stream, enabled by
   // default.
   virtual int EnableColorEnhancement(const int video_channel,
                                      const bool enable) = 0;
+
+  // New-style callbacks, used by VideoSendStream/VideoReceiveStream.
+  virtual void RegisterPreEncodeCallback(
+      int video_channel,
+      I420FrameCallback* pre_encode_callback) = 0;
+  virtual void DeRegisterPreEncodeCallback(int video_channel) = 0;
+
+  virtual void RegisterPostEncodeImageCallback(
+      int video_channel,
+      EncodedImageCallback* post_encode_callback) {}
+  virtual void DeRegisterPostEncodeCallback(int video_channel) {}
+
+  virtual void RegisterPreDecodeImageCallback(
+      int video_channel,
+      EncodedImageCallback* pre_decode_callback) {}
+  virtual void DeRegisterPreDecodeCallback(int video_channel) {}
+
+  virtual void RegisterPreRenderCallback(
+      int video_channel,
+      I420FrameCallback* pre_render_callback) = 0;
+  virtual void DeRegisterPreRenderCallback(int video_channel) = 0;
 
  protected:
   ViEImageProcess() {}

@@ -53,8 +53,7 @@ NS_IMPL_ISUPPORTS(nsNSSDialogs, nsITokenPasswordDialogs,
                   nsICertPickDialogs,
                   nsITokenDialogs,
                   nsIDOMCryptoDialogs,
-                  nsIGeneratingKeypairInfoDialogs,
-                  nsISSLCertErrorDialog)
+                  nsIGeneratingKeypairInfoDialogs)
 
 nsresult
 nsNSSDialogs::Init()
@@ -374,38 +373,42 @@ nsNSSDialogs::SetPKCS12FilePassword(nsIInterfaceRequestor *ctx,
   return rv;
 }
 
-NS_IMETHODIMP 
-nsNSSDialogs::GetPKCS12FilePassword(nsIInterfaceRequestor *ctx, 
-                                    nsAString &_password,
-                                    bool *_retval)
+NS_IMETHODIMP
+nsNSSDialogs::GetPKCS12FilePassword(nsIInterfaceRequestor* ctx,
+                                    nsAString& _password,
+                                    bool* _retval)
 {
-  nsresult rv;
-  *_retval = true;
+  *_retval = false;
+
+  nsCOMPtr<nsIPromptService> promptSvc(
+    do_GetService(NS_PROMPTSERVICE_CONTRACTID));
+  if (!promptSvc) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsAutoString msg;
+  nsresult rv = mPIPStringBundle->GetStringFromName(
+    MOZ_UTF16("getPKCS12FilePasswordMessage"), getter_Copies(msg));
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
   // Get the parent window for the dialog
   nsCOMPtr<nsIDOMWindow> parent = do_GetInterface(ctx);
-  nsCOMPtr<nsIDialogParamBlock> block =
-           do_CreateInstance(NS_DIALOGPARAMBLOCK_CONTRACTID);
-  if (!block) return NS_ERROR_FAILURE;
-  // open up the window
-  rv = nsNSSDialogHelper::openDialog(parent,
-                                  "chrome://pippki/content/getp12password.xul",
-                                  block);
-  if (NS_FAILED(rv)) return rv;
-  // see if user canceled
-  int32_t status;
-  rv = block->GetInt(1, &status);
-  if (NS_FAILED(rv)) return rv;
-  *_retval = (status == 0) ? false : true;
-  if (*_retval) {
-    // retrieve the password
-    char16_t *pw;
-    rv = block->GetString(2, &pw);
-    if (NS_SUCCEEDED(rv)) {
-      _password = pw;
-      nsMemory::Free(pw);
-    }
+  bool ignored = false;
+  char16_t* pwTemp = nullptr;
+  rv = promptSvc->PromptPassword(parent, nullptr, msg.get(), &pwTemp, nullptr,
+                                 &ignored, _retval);
+  if (NS_FAILED(rv)) {
+    return rv;
   }
-  return rv;
+
+  if (*_retval) {
+    _password.Assign(pwTemp);
+    nsMemory::Free(pwTemp);
+  }
+
+  return NS_OK;
 }
 
 /* void viewCert (in nsIX509Cert cert); */
@@ -556,43 +559,4 @@ nsNSSDialogs::DisplayProtectedAuth(nsIInterfaceRequestor *aCtx, nsIProtectedAuth
         getter_AddRefs(newWindow));
     
     return rv;
-}
-
-NS_IMETHODIMP
-nsNSSDialogs::ShowCertError(nsIInterfaceRequestor *ctx, 
-                            nsISSLStatus *status, 
-                            nsIX509Cert *cert, 
-                            const nsAString & textErrorMessage, 
-                            const nsAString & htmlErrorMessage, 
-                            const nsACString & hostName, 
-                            uint32_t portNumber)
-{
-  nsCOMPtr<nsIPKIParamBlock> block =
-           do_CreateInstance(NS_PKIPARAMBLOCK_CONTRACTID);
-  if (!block)
-    return NS_ERROR_OUT_OF_MEMORY;
-
-  nsCOMPtr<nsIDialogParamBlock> dialogBlock = do_QueryInterface(block);
-
-  nsresult rv;
-  rv = dialogBlock->SetInt(1, portNumber);
-  if (NS_FAILED(rv))
-    return rv; 
-
-  rv = dialogBlock->SetString(1, NS_ConvertUTF8toUTF16(hostName).get());
-  if (NS_FAILED(rv))
-    return rv;
-  
-  rv = dialogBlock->SetString(2, PromiseFlatString(textErrorMessage).get());
-  if (NS_FAILED(rv))
-    return rv;
-  
-  rv = block->SetISupportAtIndex(1, cert);
-  if (NS_FAILED(rv))
-    return rv;
-
-  rv = nsNSSDialogHelper::openDialog(nullptr, 
-                                     "chrome://pippki/content/certerror.xul",
-                                     block);
-  return rv;
 }

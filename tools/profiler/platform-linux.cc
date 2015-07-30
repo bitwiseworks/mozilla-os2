@@ -67,15 +67,20 @@
 #include "GeckoProfiler.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Atomics.h"
+#include "mozilla/LinuxSignal.h"
 #include "ProfileEntry.h"
 #include "nsThreadUtils.h"
 #include "TableTicker.h"
+#include "ThreadResponsiveness.h"
 #include "UnwinderThread2.h"
 #if defined(__ARM_EABI__) && defined(MOZ_WIDGET_GONK)
  // Should also work on other Android and ARM Linux, but not tested there yet.
 #define USE_EHABI_STACKWALK
 #include "EHABIStackWalk.h"
 #endif
+
+// Memory profile
+#include "nsMemoryReporterManager.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -205,7 +210,10 @@ static void SetSampleContext(TickSample* sample, void* context)
 #else
 #define V8_HOST_ARCH_X64 1
 #endif
-static void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
+
+namespace {
+
+void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
   if (!Sampler::GetActiveSampler()) {
     sem_post(&sSignalHandlingDone);
     return;
@@ -215,14 +223,14 @@ static void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
   TickSample* sample = &sample_obj;
   sample->context = context;
 
-#ifdef ENABLE_SPS_LEAF_DATA
   // If profiling, we extract the current pc and sp.
   if (Sampler::GetActiveSampler()->IsProfiling()) {
     SetSampleContext(sample, context);
   }
-#endif
   sample->threadProfile = sCurrentThreadProfile;
   sample->timestamp = mozilla::TimeStamp::Now();
+  sample->rssMemory = sample->threadProfile->mRssMemory;
+  sample->ussMemory = sample->threadProfile->mUssMemory;
 
   Sampler::GetActiveSampler()->Tick(sample);
 
@@ -230,15 +238,23 @@ static void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
   sem_post(&sSignalHandlingDone);
 }
 
-// If the Nuwa process is enabled, we need to use the wrapper of tgkill() to
-// perform the mapping of thread ID.
-#ifdef MOZ_NUWA_PROCESS
-extern "C" MFBT_API int tgkill(pid_t tgid, pid_t tid, int signalno);
-#else
+} // namespace
+
+static void ProfilerSignalThread(ThreadProfile *profile,
+                                 bool isFirstProfiledThread)
+{
+  if (isFirstProfiledThread && Sampler::GetActiveSampler()->ProfileMemory()) {
+    profile->mRssMemory = nsMemoryReporterManager::ResidentFast();
+    profile->mUssMemory = nsMemoryReporterManager::ResidentUnique();
+  } else {
+    profile->mRssMemory = 0;
+    profile->mUssMemory = 0;
+  }
+}
+
 int tgkill(pid_t tgid, pid_t tid, int signalno) {
   return syscall(SYS_tgkill, tgid, tid, signalno);
 }
-#endif
 
 class PlatformData : public Malloced {
  public:
@@ -278,26 +294,28 @@ static void* SignalSender(void* arg) {
 
   while (SamplerRegistry::sampler->IsActive()) {
     SamplerRegistry::sampler->HandleSaveRequest();
+    SamplerRegistry::sampler->DeleteExpiredMarkers();
 
     if (!SamplerRegistry::sampler->IsPaused()) {
       mozilla::MutexAutoLock lock(*Sampler::sRegisteredThreadsMutex);
       std::vector<ThreadInfo*> threads =
         SamplerRegistry::sampler->GetRegisteredThreads();
 
+      bool isFirstProfiledThread = true;
       for (uint32_t i = 0; i < threads.size(); i++) {
         ThreadInfo* info = threads[i];
 
         // This will be null if we're not interested in profiling this thread.
-        if (!info->Profile())
+        if (!info->Profile() || info->IsPendingDelete())
           continue;
 
         PseudoStack::SleepState sleeping = info->Stack()->observeSleeping();
         if (sleeping == PseudoStack::SLEEPING_AGAIN) {
           info->Profile()->DuplicateLastSample();
-          //XXX: This causes flushes regardless of jank-only mode
-          info->Profile()->flush();
           continue;
         }
+
+        info->Profile()->GetThreadResponsiveness()->Update();
 
         // We use sCurrentThreadProfile the ThreadProfile for the
         // thread we're profiling to the signal handler
@@ -305,6 +323,14 @@ static void* SignalSender(void* arg) {
 
         int threadId = info->ThreadId();
 
+        // Profile from the signal sender for information which is not signal
+        // safe, and will have low variation between the emission of the signal
+        // and the signal handler catch.
+        ProfilerSignalThread(sCurrentThreadProfile, isFirstProfiledThread);
+
+        // Profile from the signal handler for information which is signal safe
+        // and needs to be precise too, such as the stack of the interrupted
+        // thread.
         if (tgkill(vm_tgid_, threadId, SIGPROF) != 0) {
           printf_stderr("profiler failed to signal tid=%d\n", threadId);
 #ifdef DEBUG
@@ -315,6 +341,7 @@ static void* SignalSender(void* arg) {
 
         // Wait for the signal handler to run before moving on to the next one
         sem_wait(&sSignalHandlingDone);
+        isFirstProfiledThread = false;
       }
     }
 
@@ -361,7 +388,7 @@ void Sampler::Start() {
   // Request profiling signals.
   LOG("Request signal");
   struct sigaction sa;
-  sa.sa_sigaction = ProfilerSignalHandler;
+  sa.sa_sigaction = MOZ_SIGNAL_TRAMPOLINE(ProfilerSignalHandler);
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_RESTART | SA_SIGINFO;
   if (sigaction(SIGPROF, &sa, &old_sigprof_signal_handler_) != 0) {
@@ -413,6 +440,18 @@ void Sampler::Stop() {
   }
 }
 
+#ifdef MOZ_NUWA_PROCESS
+static void
+UpdateThreadId(void* aThreadInfo) {
+  ThreadInfo* info = static_cast<ThreadInfo*>(aThreadInfo);
+  // Note that this function is called during thread recreation. Only the thread
+  // calling this method is running. We can't try to acquire
+  // Sampler::sRegisteredThreadsMutex because it could be held by another
+  // thread.
+  info->SetThreadId(gettid());
+}
+#endif
+
 bool Sampler::RegisterCurrentThread(const char* aName,
                                     PseudoStack* aPseudoStack,
                                     bool aIsMainThread, void* stackTop)
@@ -425,7 +464,7 @@ bool Sampler::RegisterCurrentThread(const char* aName,
   int id = gettid();
   for (uint32_t i = 0; i < sRegisteredThreads->size(); i++) {
     ThreadInfo* info = sRegisteredThreads->at(i);
-    if (info->ThreadId() == id) {
+    if (info->ThreadId() == id && !info->IsPendingDelete()) {
       // Thread already registered. This means the first unregister will be
       // too early.
       ASSERT(false);
@@ -435,7 +474,7 @@ bool Sampler::RegisterCurrentThread(const char* aName,
 
   set_tls_stack_top(stackTop);
 
-  ThreadInfo* info = new ThreadInfo(aName, id,
+  ThreadInfo* info = new StackOwningThreadInfo(aName, id,
     aIsMainThread, aPseudoStack, stackTop);
 
   if (sActiveSampler) {
@@ -443,6 +482,20 @@ bool Sampler::RegisterCurrentThread(const char* aName,
   }
 
   sRegisteredThreads->push_back(info);
+
+#ifdef MOZ_NUWA_PROCESS
+  if (IsNuwaProcess()) {
+    if (info->IsMainThread()) {
+      // Main thread isn't a marked thread. Register UpdateThreadId() to
+      // NuwaAddConstructor(), which runs before all other threads are
+      // recreated.
+      NuwaAddConstructor(UpdateThreadId, info);
+    } else {
+      // Register UpdateThreadInfo() to be run when the thread is recreated.
+      NuwaAddThreadConstructor(UpdateThreadId, info);
+    }
+  }
+#endif
 
   uwt__register_thread_for_profiling(stackTop);
   return true;
@@ -461,10 +514,18 @@ void Sampler::UnregisterCurrentThread()
 
   for (uint32_t i = 0; i < sRegisteredThreads->size(); i++) {
     ThreadInfo* info = sRegisteredThreads->at(i);
-    if (info->ThreadId() == id) {
-      delete info;
-      sRegisteredThreads->erase(sRegisteredThreads->begin() + i);
-      break;
+    if (info->ThreadId() == id && !info->IsPendingDelete()) {
+      if (profiler_is_active()) {
+        // We still want to show the results of this thread if you
+        // save the profile shortly after a thread is terminated.
+        // For now we will defer the delete to profile stop.
+        info->SetPendingDelete();
+        break;
+      } else {
+        delete info;
+        sRegisteredThreads->erase(sRegisteredThreads->begin() + i);
+        break;
+      }
     }
   }
 
@@ -597,19 +658,26 @@ void TickSample::PopulateContext(void* aContext)
   }
 }
 
-// WARNING: Works with values up to 1 second
 void OS::SleepMicro(int microseconds)
 {
+  if (MOZ_UNLIKELY(microseconds >= 1000000)) {
+    // Use usleep for larger intervals, because the nanosleep
+    // code below only supports intervals < 1 second.
+    MOZ_ALWAYS_TRUE(!::usleep(microseconds));
+    return;
+  }
+
   struct timespec ts;
   ts.tv_sec  = 0;
   ts.tv_nsec = microseconds * 1000UL;
 
-  while (true) {
-    // in the case of interrupt we keep waiting
-    // nanosleep puts the remaining to back into ts
-    if (!nanosleep(&ts, &ts) || errno != EINTR) {
-      return;
-    }
-  }
-}
+  int rv = ::nanosleep(&ts, &ts);
 
+  while (rv != 0 && errno == EINTR) {
+    // Keep waiting in case of interrupt.
+    // nanosleep puts the remaining time back into ts.
+    rv = ::nanosleep(&ts, &ts);
+  }
+
+  MOZ_ASSERT(!rv, "nanosleep call failed");
+}

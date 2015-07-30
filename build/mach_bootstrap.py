@@ -34,18 +34,26 @@ SEARCH_PATHS = [
     'python/jsmin',
     'python/psutil',
     'python/which',
+    'python/pystache',
+    'python/pyyaml/lib',
     'build/pymake',
     'config',
     'dom/bindings',
     'dom/bindings/parser',
+    'layout/tools/reftest',
     'other-licenses/ply',
     'xpcom/idl-parser',
     'testing',
+    'testing/taskcluster',
     'testing/xpcshell',
+    'testing/web-platform',
+    'testing/web-platform/harness',
     'testing/marionette/client',
     'testing/marionette/client/marionette',
     'testing/marionette/transport',
+    'testing/marionette/driver',
     'testing/mozbase/mozcrash',
+    'testing/mozbase/mozdebug',
     'testing/mozbase/mozdevice',
     'testing/mozbase/mozfile',
     'testing/mozbase/mozhttpd',
@@ -58,7 +66,7 @@ SEARCH_PATHS = [
     'testing/mozbase/mozinfo',
     'testing/mozbase/moztest',
     'testing/mozbase/mozversion',
-    'testing/mozbase/manifestdestiny',
+    'testing/mozbase/manifestparser',
     'xpcom/idl-parser',
 ]
 
@@ -72,16 +80,21 @@ MACH_MODULES = [
     'python/mach/mach/commands/commandinfo.py',
     'python/mozboot/mozboot/mach_commands.py',
     'python/mozbuild/mozbuild/mach_commands.py',
+    'python/mozbuild/mozbuild/backend/mach_commands.py',
     'python/mozbuild/mozbuild/frontend/mach_commands.py',
+    'services/common/tests/mach_commands.py',
     'testing/mach_commands.py',
+    'testing/taskcluster/mach_commands.py',
     'testing/marionette/mach_commands.py',
     'testing/mochitest/mach_commands.py',
     'testing/xpcshell/mach_commands.py',
     'testing/talos/mach_commands.py',
+    'testing/web-platform/mach_commands.py',
     'testing/xpcshell/mach_commands.py',
     'tools/docs/mach_commands.py',
     'tools/mercurial/mach_commands.py',
     'tools/mach_commands.py',
+    'mobile/android/mach_commands.py',
 ]
 
 
@@ -101,6 +114,11 @@ CATEGORIES = {
         'long': 'Run tests.',
         'priority': 60,
     },
+    'ci': {
+        'short': 'CI',
+        'long': 'Taskcluster commands',
+        'priority': 59
+    },
     'devenv': {
         'short': 'Development Environment',
         'long': 'Set up and configure your development environment.',
@@ -118,7 +136,7 @@ CATEGORIES = {
     },
     'disabled': {
         'short': 'Disabled',
-        'long': 'These commands are unavailable for your current context, run "mach <command>" to see why.',
+        'long': 'The disabled commands are hidden by default. Use -v to display them. These commands are unavailable for your current context, run "mach <command>" to see why.',
         'priority': 0,
     }
 }

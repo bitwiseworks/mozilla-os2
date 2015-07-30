@@ -8,13 +8,12 @@
 
 const TAB_URL = EXAMPLE_URL + "doc_pretty-print.html";
 
-let gTab, gDebuggee, gPanel, gDebugger;
+let gTab, gPanel, gDebugger;
 let gEditor, gSources;
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab, aDebuggee, aPanel]) => {
+  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
     gTab = aTab;
-    gDebuggee = aDebuggee;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
     gEditor = gDebugger.DebuggerView.editor;
@@ -38,7 +37,12 @@ function testSourceIsUgly() {
 }
 
 function clickPrettyPrintButton() {
-  gDebugger.document.getElementById("pretty-print").click();
+  // Wait a tick before clicking to make sure the frontend's blackboxchange
+  // handlers have finished.
+  return new Promise(resolve => {
+    gDebugger.document.getElementById("pretty-print").click();
+    resolve();
+  });
 }
 
 function testSourceIsStillUgly() {
@@ -50,7 +54,6 @@ function testSourceIsStillUgly() {
 
 registerCleanupFunction(function() {
   gTab = null;
-  gDebuggee = null;
   gPanel = null;
   gDebugger = null;
   gEditor = null;

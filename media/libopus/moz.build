@@ -19,14 +19,20 @@ DEFINES['OPUS_BUILD'] = True
 DEFINES['OPUS_VERSION'] = '"v1.1-mozilla"'
 DEFINES['USE_ALLOCA'] = True
 
+# We only need to export symbols if we're built into libgkmedias
+# instead of libxul.
+if not CONFIG['GKMEDIAS_SHARED_LIBRARY']:
+    DEFINES['OPUS_EXPORT'] = ''
+
 if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['GNU_AS']:
     DEFINES['OPUS_ARM_ASM'] = True
     DEFINES['OPUS_ARM_EXTERNAL_ASM'] = True
     DEFINES['OPUS_ARM_INLINE_ASM'] = True
-    DEFINES['OPUS_ARM_INLINE_EDSP'] = True
-    DEFINES['OPUS_ARM_MAY_HAVE_EDSP'] = True
-    DEFINES['OPUS_ARM_MAY_HAVE_MEDIA'] = True
-    DEFINES['OPUS_ARM_MAY_HAVE_NEON'] = True
+    if int(CONFIG['ARM_ARCH']) >= 6:
+        DEFINES['OPUS_ARM_INLINE_EDSP'] = True
+        DEFINES['OPUS_ARM_MAY_HAVE_EDSP'] = True
+        DEFINES['OPUS_ARM_MAY_HAVE_MEDIA'] = True
+        DEFINES['OPUS_ARM_MAY_HAVE_NEON'] = True
 
 if CONFIG['MOZ_DEBUG']:
     DEFINES['ENABLE_ASSERTIONS'] = True
@@ -76,6 +82,8 @@ else:
         'silk/fixed',
     ]
     SOURCES += silk_sources_fixed
+# for webrtc
+    SOURCES += opus_sources_float
 
 if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['GNU_AS']:
     SOURCES += celt_sources_arm

@@ -20,10 +20,11 @@ function test() {
       {
         info("disk storage contains " + num + " entries");
       },
-      onCacheEntryInfo: function(entry)
+      onCacheEntryInfo: function(uri)
       {
-        info(entry.key);
-        is(entry.key.contains(filename), false, "web content present in disk cache");
+        var urispec = uri.asciiSpec;
+        info(urispec);
+        is(urispec.contains(filename), false, "web content present in disk cache");
       },
       onCacheEntryVisitCompleted: function()
       {
@@ -91,7 +92,7 @@ function test() {
     }
 
     aWindow.gBrowser.addEventListener("pageshow", function pageShown(event) {
-      // If data: -url PAC file isn't loaded soon enough, we may get about:privatebrowsing loaded
+      // If data: --url PAC file isn't loaded soon enough, we may get about:privatebrowsing loaded
       if (event.target.location == "about:blank" ||
           event.target.location == "about:privatebrowsing") {
         aWindow.gBrowser.selectedBrowser.loadURI(testURI);

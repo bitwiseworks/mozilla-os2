@@ -30,10 +30,16 @@ class nsXBLBinding;
 template<class E> class nsRefPtr;
 typedef nsTArray<nsRefPtr<nsXBLBinding> > nsBindingList;
 class nsIPrincipal;
-class nsCSSStyleSheet;
+class nsITimer;
 
-class nsBindingManager MOZ_FINAL : public nsStubMutationObserver
+namespace mozilla {
+class CSSStyleSheet;
+} // namespace mozilla
+
+class nsBindingManager final : public nsStubMutationObserver
 {
+  ~nsBindingManager();
+
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
@@ -41,8 +47,7 @@ public:
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTINSERTED
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
 
-  nsBindingManager(nsIDocument* aDocument);
-  ~nsBindingManager();
+  explicit nsBindingManager(nsIDocument* aDocument);
 
   nsXBLBinding* GetBindingWithContent(nsIContent* aContent);
 
@@ -116,9 +121,9 @@ public:
   nsresult MediumFeaturesChanged(nsPresContext* aPresContext,
                                  bool* aRulesChanged);
 
-  void AppendAllSheets(nsTArray<nsCSSStyleSheet*>& aArray);
+  void AppendAllSheets(nsTArray<mozilla::CSSStyleSheet*>& aArray);
 
-  NS_HIDDEN_(void) Traverse(nsIContent *aContent,
+  void Traverse(nsIContent *aContent,
                             nsCycleCollectionTraversalCallback &cb);
 
   NS_DECL_CYCLE_COLLECTION_CLASS(nsBindingManager)
@@ -157,6 +162,9 @@ protected:
 
   // Post an event to process the attached queue.
   void PostProcessAttachedQueueEvent();
+
+  // Call PostProcessAttachedQueueEvent() on a timer.
+  static void PostPAQEventCallback(nsITimer* aTimer, void* aClosure);
 
 // MEMBER VARIABLES
 protected:

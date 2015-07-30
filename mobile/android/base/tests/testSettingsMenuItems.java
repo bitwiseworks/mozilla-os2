@@ -9,13 +9,12 @@ import java.util.Map.Entry;
 
 import org.mozilla.gecko.Actions;
 import org.mozilla.gecko.AppConstants;
+import org.mozilla.gecko.util.HardwareUtils;
 
 /** This patch tests the Sections present in the Settings Menu and the
  *  default values for them
  */
 public class testSettingsMenuItems extends PixelTest {
-    String BRAND_NAME = "(Fennec|Nightly|Aurora|Firefox|Firefox Beta)";
-
     /**
      * The following String[][] (arrays) match the menu hierarchy for each section.
      * Each String[] (array) represents the menu items/choices in the following order:
@@ -29,51 +28,63 @@ public class testSettingsMenuItems extends PixelTest {
      */
 
     // Customize menu items.
-    String[] PATH_CUSTOMIZE = { "Customize" };
+    String[] PATH_CUSTOMIZE = { StringHelper.CUSTOMIZE_SECTION_LABEL };
     String[][] OPTIONS_CUSTOMIZE = {
         { "Home" },
         { "Search", "", "Show search suggestions", "Installed search engines"},
-        { "Tabs", "Don't restore after quitting " + BRAND_NAME, "Always restore", "Don't restore after quitting " + BRAND_NAME },
-        { "Import from Android", "", "Bookmarks", "History", "Import" },
+        { StringHelper.TABS_LABEL, "Don't restore after quitting " + StringHelper.BRAND_NAME, "Always restore", "Don't restore after quitting " + StringHelper.BRAND_NAME },
+        { StringHelper.IMPORT_FROM_ANDROID_LABEL, "", "Bookmarks", "History", "Import" },
     };
 
     // Home panel menu items.
-    String[] PATH_HOME = { "Customize", "Home" };
+    String[] PATH_HOME = { StringHelper.CUSTOMIZE_SECTION_LABEL, "Home" };
     String[][] OPTIONS_HOME = {
       { "Panels" },
       { "Automatic updates", "Enabled", "Enabled", "Only over Wi-Fi" },
     };
 
     // Display menu items.
-    String[] PATH_DISPLAY = { "Display" };
+    String[] PATH_DISPLAY = { StringHelper.DISPLAY_SECTION_LABEL };
+    final String[] TITLE_BAR_LABEL_ARR = { StringHelper.TITLE_BAR_LABEL, StringHelper.SHOW_PAGE_ADDRESS_LABEL,
+        StringHelper.SHOW_PAGE_TITLE_LABEL, StringHelper.SHOW_PAGE_ADDRESS_LABEL };
     String[][] OPTIONS_DISPLAY = {
-        { "Text size" },
-        { "Title bar", "Show page title", "Show page title", "Show page address" },
+        { StringHelper.TEXT_SIZE_LABEL },
+        TITLE_BAR_LABEL_ARR,
+        { StringHelper.SCROLL_TITLE_BAR_LABEL, "Hide the " + StringHelper.BRAND_NAME + " title bar when scrolling down a page" },
         { "Advanced" },
-        { "Character encoding", "Don't show menu", "Show menu", "Don't show menu" },
-        { "Plugins", "Tap to play", "Enabled", "Tap to play", "Disabled" },
+        { StringHelper.CHARACTER_ENCODING_LABEL, "Don't show menu", "Show menu", "Don't show menu" },
+        { StringHelper.PLUGINS_LABEL, "Tap to play", "Enabled", "Tap to play", "Disabled" },
     };
 
     // Privacy menu items.
-    String[] PATH_PRIVACY = { "Privacy" };
+    String[] PATH_PRIVACY = { StringHelper.PRIVACY_SECTION_LABEL };
+    final String[] TRACKING_PROTECTION_LABEL_ARR = { StringHelper.TRACKING_PROTECTION_LABEL };
     String[][] OPTIONS_PRIVACY = {
-        { "Tracking", "Do not tell sites anything about my tracking preferences", "Tell sites that I do not want to be tracked", "Tell sites that I want to be tracked", "Do not tell sites anything about my tracking preferences" },
-        { "Cookies", "Enabled", "Enabled, excluding 3rd party", "Disabled" },
-        { "Remember passwords" },
-        { "Use master password" },
-        { "Clear private data", "", "Browsing history", "Downloads", "Form & search history", "Cookies & active logins", "Saved passwords", "Cache", "Offline website data", "Site settings", "Clear data" },
+        TRACKING_PROTECTION_LABEL_ARR,
+        { StringHelper.DNT_LABEL },
+        { StringHelper.COOKIES_LABEL, "Enabled", "Enabled, excluding 3rd party", "Disabled" },
+        { StringHelper.REMEMBER_PASSWORDS_LABEL },
+        { StringHelper.MASTER_PASSWORD_LABEL },
+        { StringHelper.CLEAR_PRIVATE_DATA_LABEL, "", "Browsing history", "Downloads", "Form & search history", "Cookies & active logins", "Saved passwords", "Cache", "Offline website data", "Site settings", "Clear data" },
     };
 
     // Mozilla/vendor menu items.
-    String[] PATH_MOZILLA = { "Mozilla" };
+    String[] PATH_MOZILLA = { StringHelper.MOZILLA_SECTION_LABEL };
     String[][] OPTIONS_MOZILLA = {
-        { "About " + BRAND_NAME },
-        { "FAQs" },
-        { "Give feedback" },
-        { "Show product announcements" },
+        { StringHelper.ABOUT_LABEL },
+        { StringHelper.FAQS_LABEL },
+        { StringHelper.FEEDBACK_LABEL },
         { "Data choices" },
-        { BRAND_NAME + " Health Report", "Shares data with Mozilla about your browser health and helps you understand your browser performance" },
-        { "View my Health Report" },
+        { StringHelper.HEALTH_REPORT_LABEL, "Shares data with Mozilla about your browser health and helps you understand your browser performance" },
+        { StringHelper.MY_HEALTH_REPORT_LABEL },
+    };
+
+    // Developer menu items.
+    String[] PATH_DEVELOPER = { StringHelper.DEVELOPER_TOOLS_SECTION_LABEL };
+    String[][] OPTIONS_DEVELOPER = {
+        { StringHelper.PAINT_FLASHING_LABEL },
+        { StringHelper.REMOTE_DEBUGGING_LABEL },
+        { StringHelper.LEARN_MORE_LABEL },
     };
 
     /*
@@ -94,6 +105,7 @@ public class testSettingsMenuItems extends PixelTest {
         settingsMap.put(PATH_DISPLAY, new ArrayList<String[]>(Arrays.asList(OPTIONS_DISPLAY)));
         settingsMap.put(PATH_PRIVACY, new ArrayList<String[]>(Arrays.asList(OPTIONS_PRIVACY)));
         settingsMap.put(PATH_MOZILLA, new ArrayList<String[]>(Arrays.asList(OPTIONS_MOZILLA)));
+        settingsMap.put(PATH_DEVELOPER, new ArrayList<String[]>(Arrays.asList(OPTIONS_DEVELOPER)));
     }
 
     public void testSettingsMenuItems() {
@@ -103,20 +115,23 @@ public class testSettingsMenuItems extends PixelTest {
         setupSettingsMap(settingsMenuItems);
 
         // Set special handling for Settings items that are conditionally built.
-        addConditionalSettings(settingsMenuItems);
+        updateConditionalSettings(settingsMenuItems);
 
-        selectMenuItem("Settings");
-        waitForText("Settings");
+        selectMenuItem(StringHelper.SETTINGS_LABEL);
+        mAsserter.ok(mSolo.waitForText(StringHelper.SETTINGS_LABEL),
+                "The Settings menu did not load", StringHelper.SETTINGS_LABEL);
 
         // Dismiss the Settings screen and verify that the view is returned to about:home page
         mActions.sendSpecialKey(Actions.SpecialKey.BACK);
 
         // Waiting for page title to appear to be sure that is fully loaded before opening the menu
-        waitForText("Enter Search");
-        verifyUrl("about:home");
+        mAsserter.ok(mSolo.waitForText(StringHelper.TITLE_PLACE_HOLDER), "about:home did not load",
+                StringHelper.TITLE_PLACE_HOLDER);
+        verifyUrl(StringHelper.ABOUT_HOME_URL);
 
-        selectMenuItem("Settings");
-        waitForText("Settings");
+        selectMenuItem(StringHelper.SETTINGS_LABEL);
+        mAsserter.ok(mSolo.waitForText(StringHelper.SETTINGS_LABEL),
+                "The Settings menu did not load", StringHelper.SETTINGS_LABEL);
 
         checkForSync(mDevice);
 
@@ -126,36 +141,37 @@ public class testSettingsMenuItems extends PixelTest {
     /**
      * Check for Sync in settings.
      *
-     * Sync location is a top level menu item on phones, but is under "Customize" on tablets.
-     *
+     * Sync location is a top level menu item on phones and small tablets,
+     * but is under "Customize" on large tablets.
      */
     public void checkForSync(Device device) {
-        if (device.type.equals("tablet")) {
-            // Select "Customize" from settings.
-            String customizeString = "^Customize$";
-            waitForEnabledText(customizeString);
-            mSolo.clickOnText(customizeString);
-        }
-        mAsserter.ok(mSolo.waitForText("Sync"), "Waiting for Sync option", "The Sync option is present");
+        mAsserter.ok(mSolo.waitForText(StringHelper.SYNC_LABEL), "Waiting for Sync option",
+                StringHelper.SYNC_LABEL);
     }
 
     /**
      * Check for conditions for building certain settings, and add them to be tested
      * if they are present.
      */
-    public void addConditionalSettings(Map<String[], List<String[]>> settingsMap) {
+    public void updateConditionalSettings(Map<String[], List<String[]>> settingsMap) {
         // Preferences dependent on RELEASE_BUILD
         if (!AppConstants.RELEASE_BUILD) {
             // Text reflow - only built if *not* release build
-            String[] textReflowUi = { "Text reflow" };
+            String[] textReflowUi = { StringHelper.TEXT_REFLOW_LABEL };
             settingsMap.get(PATH_DISPLAY).add(textReflowUi);
 
-            // Anonymous cell tower/wifi collection - only built if *not* release build
-            String[] networkReportingUi = { "Mozilla Location Service", "Receives Wi-Fi and cellular location data when running in the background and shares it with Mozilla to improve our geolocation service" };
-            settingsMap.get(PATH_MOZILLA).add(networkReportingUi);
+            if (AppConstants.MOZ_STUMBLER_BUILD_TIME_ENABLED) {
+                // Anonymous cell tower/wifi collection
+                String[] networkReportingUi = { "Mozilla Location Service", "Help Mozilla map the world! Share approximate Wi-Fi and cellular location of your device to improve our geolocation service" };
+                settingsMap.get(PATH_MOZILLA).add(networkReportingUi);
 
-            String[] learnMoreUi = { "Learn more" };
-            settingsMap.get(PATH_MOZILLA).add(learnMoreUi);
+                String[] learnMoreUi = { "Learn more" };
+                settingsMap.get(PATH_MOZILLA).add(learnMoreUi);
+            }
+        }
+
+        if (!AppConstants.NIGHTLY_BUILD) {
+            settingsMap.get(PATH_PRIVACY).remove(TRACKING_PROTECTION_LABEL_ARR);
         }
 
         // Automatic updates
@@ -166,14 +182,19 @@ public class testSettingsMenuItems extends PixelTest {
 
         // Crash reporter
         if (AppConstants.MOZ_CRASHREPORTER) {
-            String[] crashReporterUi = { "Crash Reporter", BRAND_NAME + " submits crash reports to help Mozilla make your browser more stable and secure" };
+            String[] crashReporterUi = { "Crash Reporter", StringHelper.BRAND_NAME + " submits crash reports to help Mozilla make your browser more stable and secure" };
             settingsMap.get(PATH_MOZILLA).add(crashReporterUi);
         }
 
         // Telemetry
         if (AppConstants.MOZ_TELEMETRY_REPORTING) {
-            String[] telemetryUi = { "Telemetry", "Shares performance, usage, hardware and customization data about your browser with Mozilla to help us make " + BRAND_NAME + " better" };
+            String[] telemetryUi = { "Telemetry", "Shares performance, usage, hardware and customization data about your browser with Mozilla to help us make " + StringHelper.BRAND_NAME + " better" };
             settingsMap.get(PATH_MOZILLA).add(telemetryUi);
+        }
+
+        // Tablet: we don't allow a page title option.
+        if (HardwareUtils.isTablet()) {
+            settingsMap.get(PATH_DISPLAY).remove(TITLE_BAR_LABEL_ARR);
         }
     }
 

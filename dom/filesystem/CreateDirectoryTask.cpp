@@ -18,7 +18,8 @@ namespace mozilla {
 namespace dom {
 
 CreateDirectoryTask::CreateDirectoryTask(FileSystemBase* aFileSystem,
-                                         const nsAString& aPath)
+                                         const nsAString& aPath,
+                                         ErrorResult& aRv)
   : FileSystemTaskBase(aFileSystem)
   , mTargetRealPath(aPath)
 {
@@ -29,7 +30,7 @@ CreateDirectoryTask::CreateDirectoryTask(FileSystemBase* aFileSystem,
   if (!globalObject) {
     return;
   }
-  mPromise = new Promise(globalObject);
+  mPromise = Promise::Create(globalObject, aRv);
 }
 
 CreateDirectoryTask::CreateDirectoryTask(
@@ -122,7 +123,7 @@ CreateDirectoryTask::HandlerCallback()
   if (HasError()) {
     nsRefPtr<DOMError> domError = new DOMError(mFileSystem->GetWindow(),
       mErrorValue);
-    mPromise->MaybeReject(domError);
+    mPromise->MaybeRejectBrokenly(domError);
     mPromise = nullptr;
     return;
   }

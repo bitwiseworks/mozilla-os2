@@ -5,19 +5,18 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    TEST_DIRS += ['test']
+    MOCHITEST_MANIFESTS += ['test/mochitest.ini']
 
 EXPORTS += [
     'CameraCommon.h',
-    'CameraPreviewMediaStream.h',
+    'CameraPreferences.h',
     'DOMCameraManager.h',
-    'GonkCameraControl.h',
 ]
 
-SOURCES += [
+UNIFIED_SOURCES += [
     'CameraControlImpl.cpp',
+    'CameraPreferences.cpp',
     'CameraPreviewMediaStream.cpp',
-    'CameraRecorderProfiles.cpp',
     'DOMCameraCapabilities.cpp',
     'DOMCameraControl.cpp',
     'DOMCameraControlListener.cpp',
@@ -26,7 +25,7 @@ SOURCES += [
 ]
 
 if CONFIG['MOZ_B2G_CAMERA']:
-    SOURCES += [
+    UNIFIED_SOURCES += [
         'GonkCameraControl.cpp',
         'GonkCameraHwMgr.cpp',
         'GonkCameraManager.cpp',
@@ -34,10 +33,11 @@ if CONFIG['MOZ_B2G_CAMERA']:
         'GonkCameraSource.cpp',
         'GonkRecorder.cpp',
         'GonkRecorderProfiles.cpp',
+        'TestGonkCameraControl.cpp',
         'TestGonkCameraHardware.cpp',
     ]
 else:
-    SOURCES += [
+    UNIFIED_SOURCES += [
         'FallbackCameraControl.cpp',
         'FallbackCameraManager.cpp',
     ]
@@ -50,4 +50,10 @@ LOCAL_INCLUDES += [
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
-FINAL_LIBRARY = 'gklayout'
+# Suppress some GCC warnings being treated as errors:
+#  - about attributes on forward declarations for types that are already
+#    defined, which complains about an important MOZ_EXPORT for android::AString
+if CONFIG['GNU_CC']:
+  CXXFLAGS += ['-Wno-error=attributes']
+
+FINAL_LIBRARY = 'xul'

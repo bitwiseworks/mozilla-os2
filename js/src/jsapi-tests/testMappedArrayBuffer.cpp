@@ -72,8 +72,10 @@ JSObject* CreateNewObject(const int offset, const int length)
     return obj;
 }
 
-bool VerifyObject(JS::HandleObject obj, const int offset, const int length, const bool mapped)
+bool VerifyObject(JS::HandleObject obj, uint32_t offset, uint32_t length, const bool mapped)
 {
+    JS::AutoCheckCannotGC nogc;
+
     CHECK(obj);
     CHECK(JS_IsArrayBufferObject(obj));
     CHECK_EQUAL(JS_GetArrayBufferByteLength(obj), length);
@@ -81,14 +83,14 @@ bool VerifyObject(JS::HandleObject obj, const int offset, const int length, cons
         CHECK(JS_IsMappedArrayBufferObject(obj));
     else
         CHECK(!JS_IsMappedArrayBufferObject(obj));
-    const char* data = reinterpret_cast<const char*>(JS_GetArrayBufferData(obj));
+    const char* data = reinterpret_cast<const char*>(JS_GetArrayBufferData(obj, nogc));
     CHECK(data);
     CHECK(memcmp(data, test_data + offset, length) == 0);
 
     return true;
 }
 
-bool TestCreateObject(const int offset, const int length)
+bool TestCreateObject(uint32_t offset, uint32_t length)
 {
     JS::RootedObject obj(cx, CreateNewObject(offset, length));
     CHECK(VerifyObject(obj, offset, length, true));
@@ -128,7 +130,7 @@ bool TestCloneObject()
     CHECK(cloned_buffer.write(cx, v1, callbacks, nullptr));
     JS::RootedValue v2(cx);
     CHECK(cloned_buffer.read(cx, &v2, callbacks, nullptr));
-    JS::RootedObject obj2(cx, JSVAL_TO_OBJECT(v2));
+    JS::RootedObject obj2(cx, v2.toObjectOrNull());
     CHECK(VerifyObject(obj2, 8, 12, false));
 
     return true;
@@ -164,7 +166,7 @@ bool TestTransferObject()
     CHECK(cloned_buffer.write(cx, v1, transferable, callbacks, nullptr));
     JS::RootedValue v2(cx);
     CHECK(cloned_buffer.read(cx, &v2, callbacks, nullptr));
-    JS::RootedObject obj2(cx, JSVAL_TO_OBJECT(v2));
+    JS::RootedObject obj2(cx, v2.toObjectOrNull());
     CHECK(VerifyObject(obj2, 8, 12, true));
     CHECK(isNeutered(obj1));
 

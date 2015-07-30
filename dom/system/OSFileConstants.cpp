@@ -33,6 +33,9 @@
 #if defined(XP_WIN)
 #include <windows.h>
 #include <accctrl.h>
+
+#define PATH_MAX MAX_PATH
+
 #endif // defined(XP_WIN)
 
 #include "jsapi.h"
@@ -135,6 +138,10 @@ struct Paths {
    * system.
    */
   nsString macLocalApplicationsDir;
+  /**
+   * The user's trash directory.
+   */
+  nsString macTrashDir;
 #endif // defined(XP_MACOSX)
 
   Paths()
@@ -155,6 +162,7 @@ struct Paths {
 #if defined(XP_MACOSX)
     macUserLibDir.SetIsVoid(true);
     macLocalApplicationsDir.SetIsVoid(true);
+    macTrashDir.SetIsVoid(true);
 #endif // defined(XP_MACOSX)
   }
 };
@@ -200,8 +208,10 @@ nsresult GetPathToSpecialDir(const char *aKey, nsString& aOutPath)
  * For this purpose, we register an observer to set |gPaths->profileDir|
  * and |gPaths->localProfileDir| once the profile is setup.
  */
-class DelayedPathSetter MOZ_FINAL: public nsIObserver
+class DelayedPathSetter final: public nsIObserver
 {
+  ~DelayedPathSetter() {}
+
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
 
@@ -301,6 +311,7 @@ nsresult InitOSFileConstants()
 #if defined(XP_MACOSX)
   GetPathToSpecialDir(NS_MAC_USER_LIB_DIR, paths->macUserLibDir);
   GetPathToSpecialDir(NS_OSX_LOCAL_APPLICATIONS_DIR, paths->macLocalApplicationsDir);
+  GetPathToSpecialDir(NS_MAC_TRASH_DIR, paths->macTrashDir);
 #endif // defined(XP_MACOSX)
 
   gPaths = paths.forget();
@@ -469,6 +480,17 @@ static const dom::ConstantSpec gLibcProperties[] =
   INT_CONSTANT(SEEK_END),
   INT_CONSTANT(SEEK_SET),
 
+ // fcntl command values
+#if defined(XP_UNIX)
+  INT_CONSTANT(F_GETLK),
+  INT_CONSTANT(F_SETLK),
+  INT_CONSTANT(F_SETLKW),
+
+ // flock type values
+  INT_CONSTANT(F_RDLCK),
+  INT_CONSTANT(F_WRLCK),
+  INT_CONSTANT(F_UNLCK),
+#endif // defined(XP_UNIX)
   // copyfile
 #if defined(COPYFILE_DATA)
   INT_CONSTANT(COPYFILE_DATA),
@@ -540,6 +562,8 @@ static const dom::ConstantSpec gLibcProperties[] =
   INT_CONSTANT(S_IFSOCK),
 #endif // defined(S_IFIFO)
 
+  INT_CONSTANT(PATH_MAX),
+
   // Constants used to define data structures
   //
   // Many data structures have different fields/sizes/etc. on
@@ -573,6 +597,15 @@ static const dom::ConstantSpec gLibcProperties[] =
   // Size
   { "OSFILE_SIZEOF_DIRENT", INT_TO_JSVAL(sizeof (dirent)) },
 
+  // Defining |flock|.
+#if defined(XP_UNIX)
+  { "OSFILE_SIZEOF_FLOCK", INT_TO_JSVAL(sizeof (struct flock)) },
+  { "OSFILE_OFFSETOF_FLOCK_L_START", INT_TO_JSVAL(offsetof (struct flock, l_start)) },
+  { "OSFILE_OFFSETOF_FLOCK_L_LEN", INT_TO_JSVAL(offsetof (struct flock, l_len)) },
+  { "OSFILE_OFFSETOF_FLOCK_L_PID", INT_TO_JSVAL(offsetof (struct flock, l_pid)) },
+  { "OSFILE_OFFSETOF_FLOCK_L_TYPE", INT_TO_JSVAL(offsetof (struct flock, l_type)) },
+  { "OSFILE_OFFSETOF_FLOCK_L_WHENCE", INT_TO_JSVAL(offsetof (struct flock, l_whence)) },
+#endif // defined(XP_UNIX)
   // Offset of field |d_name|.
   { "OSFILE_OFFSETOF_DIRENT_D_NAME", INT_TO_JSVAL(offsetof (struct dirent, d_name)) },
   // An upper bound to the length of field |d_name| of struct |dirent|.
@@ -694,9 +727,11 @@ static const dom::ConstantSpec gWinProperties[] =
   // CreateFile attributes
   INT_CONSTANT(FILE_ATTRIBUTE_ARCHIVE),
   INT_CONSTANT(FILE_ATTRIBUTE_DIRECTORY),
+  INT_CONSTANT(FILE_ATTRIBUTE_HIDDEN),
   INT_CONSTANT(FILE_ATTRIBUTE_NORMAL),
   INT_CONSTANT(FILE_ATTRIBUTE_READONLY),
   INT_CONSTANT(FILE_ATTRIBUTE_REPARSE_POINT),
+  INT_CONSTANT(FILE_ATTRIBUTE_SYSTEM),
   INT_CONSTANT(FILE_ATTRIBUTE_TEMPORARY),
   INT_CONSTANT(FILE_FLAG_BACKUP_SEMANTICS),
 
@@ -741,6 +776,7 @@ static const dom::ConstantSpec gWinProperties[] =
   INT_CONSTANT(ERROR_NO_MORE_FILES),
   INT_CONSTANT(ERROR_PATH_NOT_FOUND),
   INT_CONSTANT(ERROR_BAD_ARGUMENTS),
+  INT_CONSTANT(ERROR_SHARING_VIOLATION),
   INT_CONSTANT(ERROR_NOT_SUPPORTED),
 
   PROP_END
@@ -770,8 +806,7 @@ JSObject *GetOrCreateObjectProperty(JSContext *cx, JS::Handle<JSObject*> aObject
       JSMSG_UNEXPECTED_TYPE, aProperty, "not an object");
     return nullptr;
   }
-  return JS_DefineObject(cx, aObject, aProperty, nullptr, nullptr,
-                         JSPROP_ENUMERATE);
+  return JS_DefineObject(cx, aObject, aProperty, nullptr, JSPROP_ENUMERATE);
 }
 
 /**
@@ -849,6 +884,16 @@ bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
     return false;
   }
 
+#if defined(MOZ_WIDGET_GONK)
+    JSString* strVersion = JS_NewStringCopyZ(cx, "Gonk");
+    if (!strVersion){
+      return false;
+    }
+    JS::Rooted<JS::Value> valVersion(cx, STRING_TO_JSVAL(strVersion));
+    if (!JS_SetProperty(cx, objSys, "Name", valVersion)) {
+      return false;
+  }
+#else
   nsCOMPtr<nsIXULRuntime> runtime = do_GetService(XULRUNTIME_SERVICE_CONTRACTID);
   if (runtime) {
     nsAutoCString os;
@@ -865,6 +910,7 @@ bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
       return false;
     }
   }
+#endif // defined(MOZ_WIDGET_GONK)
 
 #if defined(DEBUG)
   JS::Rooted<JS::Value> valDebug(cx, JSVAL_TRUE);
@@ -897,14 +943,14 @@ bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
   // and we need to provide the full path.
   nsAutoString libxul;
   libxul.Append(gPaths->libDir);
-  libxul.Append(NS_LITERAL_STRING("/XUL"));
+  libxul.AppendLiteral("/XUL");
 #else
   // On other platforms, libxul is a library "xul" with regular
   // library prefix/suffix.
   nsAutoString libxul;
-  libxul.Append(NS_LITERAL_STRING(DLL_PREFIX));
-  libxul.Append(NS_LITERAL_STRING("xul"));
-  libxul.Append(NS_LITERAL_STRING(DLL_SUFFIX));
+  libxul.AppendLiteral(DLL_PREFIX);
+  libxul.AppendLiteral("xul");
+  libxul.AppendLiteral(DLL_SUFFIX);
 #endif // defined(XP_MACOSX)
 
   if (!SetStringProperty(cx, objPath, "libxul", libxul)) {
@@ -961,20 +1007,24 @@ bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
   if (!SetStringProperty(cx, objPath, "macLocalApplicationsDir", gPaths->macLocalApplicationsDir)) {
     return false;
   }
+
+  if (!SetStringProperty(cx, objPath, "macTrashDir", gPaths->macTrashDir)) {
+    return false;
+  }
 #endif // defined(XP_MACOSX)
 
   // sqlite3 is linked from different places depending on the platform
   nsAutoString libsqlite3;
 #if defined(ANDROID)
   // On Android, we use the system's libsqlite3
-  libsqlite3.Append(NS_LITERAL_STRING(DLL_PREFIX));
-  libsqlite3.Append(NS_LITERAL_STRING("sqlite3"));
-  libsqlite3.Append(NS_LITERAL_STRING(DLL_SUFFIX));
+  libsqlite3.AppendLiteral(DLL_PREFIX);
+  libsqlite3.AppendLiteral("sqlite3");
+  libsqlite3.AppendLiteral(DLL_SUFFIX);
 #elif defined(XP_WIN)
   // On Windows, for some reason, this is part of nss3.dll
-  libsqlite3.Append(NS_LITERAL_STRING(DLL_PREFIX));
-  libsqlite3.Append(NS_LITERAL_STRING("nss3"));
-  libsqlite3.Append(NS_LITERAL_STRING(DLL_SUFFIX));
+  libsqlite3.AppendLiteral(DLL_PREFIX);
+  libsqlite3.AppendLiteral("nss3");
+  libsqlite3.AppendLiteral(DLL_SUFFIX);
 #else
     // On other platforms, we link sqlite3 into libxul
   libsqlite3 = libxul;

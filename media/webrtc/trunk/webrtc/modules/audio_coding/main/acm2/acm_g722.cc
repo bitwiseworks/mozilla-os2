@@ -19,6 +19,8 @@
 
 namespace webrtc {
 
+namespace acm2 {
+
 #ifndef WEBRTC_CODEC_G722
 
 ACMG722::ACMG722(int16_t /* codec_id */)
@@ -49,8 +51,6 @@ ACMGenericCodec* ACMG722::CreateInstance(void) { return NULL; }
 int16_t ACMG722::InternalCreateEncoder() { return -1; }
 
 void ACMG722::DestructEncoderSafe() { return; }
-
-void ACMG722::InternalDestructEncoderInst(void* /* ptr_inst */) { return; }
 
 #else     //===================== Actual Implementation =======================
 
@@ -185,13 +185,8 @@ void ACMG722::DestructEncoderSafe() {
   encoder_initialized_ = false;
 }
 
-void ACMG722::InternalDestructEncoderInst(void* ptr_inst) {
-  if (ptr_inst != NULL) {
-    WebRtcG722_FreeEncoder(static_cast<G722EncInst*>(ptr_inst));
-  }
-  return;
-}
-
 #endif
+
+}  // namespace acm2
 
 }  // namespace webrtc

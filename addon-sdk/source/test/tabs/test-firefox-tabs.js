@@ -6,7 +6,8 @@
 const { Cc, Ci } = require('chrome');
 const { Loader } = require('sdk/test/loader');
 const { setTimeout } = require('sdk/timers');
-const { getOwnerWindow } = require('sdk/private-browsing/window/utils');
+const { viewFor } = require('sdk/view/core');
+const { getOwnerWindow } = require('sdk/tabs/utils');
 const { windows, onFocus, getMostRecentBrowserWindow } = require('sdk/window/utils');
 const { open, focus, close } = require('sdk/window/helpers');
 const tabs = require('sdk/tabs');
@@ -14,6 +15,7 @@ const { browserWindows } = require('sdk/windows');
 const { set: setPref } = require("sdk/preferences/service");
 const DEPRECATE_PREF = "devtools.errorconsole.deprecation_warnings";
 const fixtures = require("../fixtures");
+const { base64jpeg } = fixtures;
 
 // Bug 682681 - tab.title should never be empty
 exports.testBug682681_aboutURI = function(assert, done) {
@@ -165,12 +167,12 @@ exports.testTabPropertiesInNewWindow = function(assert, done) {
   });
 
   let tabs = loader.require('sdk/tabs');
-  let { getOwnerWindow } = loader.require('sdk/private-browsing/window/utils');
+  let { viewFor } = loader.require('sdk/view/core');
 
   let count = 0;
   function onReadyOrLoad (tab) {
     if (count++) {
-      close(getOwnerWindow(tab)).then(done).then(null, assert.fail);
+      close(getOwnerWindow(viewFor(tab))).then(done).then(null, assert.fail);
     }
   }
 
@@ -277,7 +279,7 @@ exports.testTabContentTypeAndReload = function(assert, done) {
 exports.testTabsIteratorAndLength = function(assert, done) {
   open(null, { features: { chrome: true, toolbar: true } }).then(focus).then(function(window) {
     let startCount = 0;
-    for each (let t in tabs) startCount++;
+    for (let t of tabs) startCount++;
     assert.equal(startCount, tabs.length, "length property is correct");
     let url = "data:text/html;charset=utf-8,default";
 
@@ -287,7 +289,7 @@ exports.testTabsIteratorAndLength = function(assert, done) {
       url: url,
       onOpen: function(tab) {
         let count = 0;
-        for each (let t in tabs) count++;
+        for (let t of tabs) count++;
         assert.equal(count, startCount + 3, "iterated tab count matches");
         assert.equal(startCount + 3, tabs.length, "iterated tab count matches length property");
 
@@ -368,6 +370,33 @@ exports.testTabMove = function(assert, done) {
   }).then(null, assert.fail);
 };
 
+exports.testIgnoreClosing = function(assert, done) {
+  let originalWindow = browserWindows.activeWindow;
+  openBrowserWindow(function(window, browser) {
+    let url = "data:text/html;charset=utf-8,foobar";
+
+    assert.equal(tabs.length, 2, "should be two windows open each with one tab");
+
+    tabs.on('ready', function onReady(tab) {
+      tabs.removeListener('ready', onReady);
+
+      let win = tab.window;
+      assert.equal(win.tabs.length, 2, "should be two tabs in the new window");
+      assert.equal(tabs.length, 3, "should be three tabs in total");
+
+      tab.close(function() {
+        assert.equal(win.tabs.length, 1, "should be one tab in the new window");
+        assert.equal(tabs.length, 2, "should be two tabs in total");
+
+        originalWindow.once("activate", done);
+        close(window);
+      });
+    });
+
+    tabs.open(url);
+  });
+};
+
 // TEST: open tab with default options
 exports.testOpen = function(assert, done) {
   let url = "data:text/html;charset=utf-8,default";
@@ -413,6 +442,8 @@ exports.testPinUnpin = function(assert, done) {
 
 // TEST: open tab in background
 exports.testInBackground = function(assert, done) {
+  assert.equal(tabs.length, 1, "Should be one tab");
+
   let window = getMostRecentBrowserWindow();
   let activeUrl = tabs.activeTab.url;
   let url = "data:text/html;charset=utf-8,background";
@@ -441,7 +472,7 @@ exports.testOpenInNewWindow = function(assert, done) {
     url: url,
     inNewWindow: true,
     onReady: function(tab) {
-      let newWindow = getOwnerWindow(tab);
+      let newWindow = getOwnerWindow(viewFor(tab));
       assert.equal(windows().length, startWindowCount + 1, "a new window was opened");
 
       onFocus(newWindow).then(function() {
@@ -466,7 +497,7 @@ exports.testOpenInNewWindowOnOpen = function(assert, done) {
     url: url,
     inNewWindow: true,
     onOpen: function(tab) {
-      let newWindow = getOwnerWindow(tab);
+      let newWindow = getOwnerWindow(viewFor(tab));
 
       onFocus(newWindow).then(function() {
         assert.equal(windows().length, startWindowCount + 1, "a new window was opened");
@@ -887,13 +918,23 @@ exports['test window focus changes active tab'] = function(assert, done) {
       focus(win2).then(function() {
         tabs.on("activate", function onActivate(tab) {
           tabs.removeListener("activate", onActivate);
-          assert.pass("activate was called on windows focus change.");
-          assert.equal(tab.url, url1, 'the activated tab url is correct');
 
-          return close(win2).then(function() {
-            assert.pass('window 2 was closed');
-            return close(win1);
-          }).then(done).then(null, assert.fail);
+          if (tab.readyState === 'uninitialized') {
+            tab.once('ready', whenReady);
+          }
+          else {
+            whenReady(tab);
+          }
+
+          function whenReady(tab) {
+            assert.pass("activate was called on windows focus change.");
+            assert.equal(tab.url, url1, 'the activated tab url is correct');
+
+            return close(win2).then(function() {
+              assert.pass('window 2 was closed');
+              return close(win1);
+            }).then(done).then(null, assert.fail);
+          }
         });
 
         win1.focus();
@@ -942,9 +983,11 @@ exports['test unique tab ids'] = function(assert, done) {
   var one = openWindow(), two = openWindow();
   all([one, two]).then(function(results) {
     assert.notEqual(results[0].id, results[1].id, "tab Ids should not be equal.");
-    results[0].win.close();
-    results[1].win.close();
-    done();
+    results[0].win.close(function() {
+      results[1].win.close(function () {
+        done();
+      });
+    });
   });
 }
 
@@ -977,7 +1020,7 @@ exports.testOnLoadEventWithImage = function(assert, done) {
   let count = 0;
 
   tabs.open({
-    url: fixtures.url('Firefox.jpg'),
+    url: base64jpeg,
     inBackground: true,
     onLoad: function(tab) {
       if (++count > 1) {
@@ -1046,4 +1089,4 @@ function openBrowserWindow(callback, url) {
   return window;
 }
 
-require('sdk/test').run(exports);
+require("sdk/test").run(exports);

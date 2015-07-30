@@ -194,31 +194,41 @@ bool ASessionDescription::findAttribute(
     return true;
 }
 
-void ASessionDescription::getFormatType(
+bool ASessionDescription::getFormatType(
         size_t index, unsigned long *PT,
         AString *desc, AString *params) const {
     AString format;
     getFormat(index, &format);
 
     const char *lastSpacePos = strrchr(format.c_str(), ' ');
-    CHECK(lastSpacePos != NULL);
+    if (!lastSpacePos) {
+        return false;
+    }
 
     char *end;
     unsigned long x = strtoul(lastSpacePos + 1, &end, 10);
-    CHECK_GT(end, lastSpacePos + 1);
-    CHECK_EQ(*end, '\0');
+    if (end <= lastSpacePos + 1 || *end != '\0') {
+        return false;
+    }
 
     *PT = x;
 
     char key[20];
     sprintf(key, "a=rtpmap:%lu", x);
 
-    CHECK(findAttribute(index, key, desc));
+    if (!findAttribute(index, key, desc)) {
+        // We only support dynamic payload type assignment for now.
+        // If SDP description doesn't have the "a=rtpmap:" line, it is static
+        // payload type assignment and we refuse to handle it.
+        return false;
+    }
 
     sprintf(key, "a=fmtp:%lu", x);
     if (!findAttribute(index, key, params)) {
         params->clear();
     }
+
+    return true;
 }
 
 bool ASessionDescription::getDimensions(
@@ -237,13 +247,15 @@ bool ASessionDescription::getDimensions(
     const char *s = value.c_str();
     char *end;
     *width = strtoul(s, &end, 10);
-    CHECK_GT(end, s);
-    CHECK_EQ(*end, '-');
+    if (end <= s || *end != '-') {
+        return false;
+    }
 
     s = end + 1;
     *height = strtoul(s, &end, 10);
-    CHECK_GT(end, s);
-    CHECK_EQ(*end, '\0');
+    if (end <= s || *end != '\0') {
+        return false;
+    }
 
     return true;
 }
@@ -251,7 +263,9 @@ bool ASessionDescription::getDimensions(
 bool ASessionDescription::getDurationUs(int64_t *durationUs) const {
     *durationUs = 0;
 
-    CHECK(mIsValid);
+    if (!mIsValid) {
+        return false;
+    }
 
     AString value;
     if (!findAttribute(0, "a=range", &value)) {
@@ -273,16 +287,22 @@ bool ASessionDescription::getDurationUs(int64_t *durationUs) const {
 }
 
 // static
-void ASessionDescription::ParseFormatDesc(
+bool ASessionDescription::ParseFormatDesc(
         const char *desc, int32_t *timescale, int32_t *numChannels) {
     const char *slash1 = strchr(desc, '/');
-    CHECK(slash1 != NULL);
+    if (!slash1) {
+        return false;
+    }
 
     const char *s = slash1 + 1;
     char *end;
     unsigned long x = strtoul(s, &end, 10);
-    CHECK_GT(end, s);
-    CHECK(*end == '\0' || *end == '/');
+    if (end <= s) {
+        return false;
+    }
+    if (*end != '\0' && *end != '/') {
+        return false;
+    }
 
     *timescale = x;
     *numChannels = 1;
@@ -290,11 +310,13 @@ void ASessionDescription::ParseFormatDesc(
     if (*end == '/') {
         s = end + 1;
         unsigned long x = strtoul(s, &end, 10);
-        CHECK_GT(end, s);
-        CHECK_EQ(*end, '\0');
+        if (end <= s || *end != '\0') {
+            return false;
+        }
 
         *numChannels = x;
     }
+    return true;
 }
 
 // static
@@ -324,7 +346,13 @@ bool ASessionDescription::parseNTPRange(
 
     *npt2 = strtof(s, &end);
 
-    if (end == s || *end != '\0') {
+    if (end == s) {
+        // No end time available. It means to play until the end of the clip.
+        return true;
+    }
+
+    if (*end != '\0') {
+        // Malformed format in NTP description.
         return false;
     }
 

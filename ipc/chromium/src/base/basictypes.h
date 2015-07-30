@@ -46,11 +46,13 @@ const  int64_t kint64max  = (( int64_t) GG_LONGLONG(0x7FFFFFFFFFFFFFFF));
 
 // A macro to disallow the copy constructor and operator= functions
 // This should be used in the private: declarations for a class
+#undef DISALLOW_COPY_AND_ASSIGN
 #define DISALLOW_COPY_AND_ASSIGN(TypeName) \
   TypeName(const TypeName&);               \
   void operator=(const TypeName&)
 
 // An older, deprecated, politically incorrect name for the above.
+#undef DISALLOW_EVIL_CONSTRUCTORS
 #define DISALLOW_EVIL_CONSTRUCTORS(TypeName) DISALLOW_COPY_AND_ASSIGN(TypeName)
 
 // A macro to disallow all the implicit constructors, namely the
@@ -59,6 +61,7 @@ const  int64_t kint64max  = (( int64_t) GG_LONGLONG(0x7FFFFFFFFFFFFFFF));
 // This should be used in the private: declarations for a class
 // that wants to prevent anyone from instantiating it. This is
 // especially useful for classes containing only static methods.
+#undef DISALLOW_IMPLICIT_CONSTRUCTORS
 #define DISALLOW_IMPLICIT_CONSTRUCTORS(TypeName) \
   TypeName();                                    \
   DISALLOW_COPY_AND_ASSIGN(TypeName)
@@ -154,6 +157,15 @@ inline To implicit_cast(From const &f) {
   return f;
 }
 
+// The COMPILE_ASSERT macro (below) creates an otherwise-unused typedef.  This
+// triggers compiler warnings with gcc 4.8 and higher, so mark the typedef
+// as permissibly-unused to disable the warnings.
+#  if defined(__GNUC__)
+#    define COMPILE_ASSERT_UNUSED_ATTRIBUTE __attribute__((unused))
+#  else
+#    define COMPILE_ASSERT_UNUSED_ATTRIBUTE /* nothing */
+#  endif
+
 // The COMPILE_ASSERT macro can be used to verify that a compile time
 // expression is true. For example, you could use it to verify the
 // size of a static array:
@@ -169,13 +181,16 @@ inline To implicit_cast(From const &f) {
 // the expression is false, most compilers will issue a warning/error
 // containing the name of the variable.
 
+// Avoid multiple definitions for webrtc
+#if !defined(COMPILE_ASSERT)
 template <bool>
 struct CompileAssert {
 };
 
-#undef COMPILE_ASSERT
 #define COMPILE_ASSERT(expr, msg) \
-  typedef CompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1]
+  typedef CompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1] \
+  COMPILE_ASSERT_UNUSED_ATTRIBUTE
+#endif
 
 // Implementation details of COMPILE_ASSERT:
 //

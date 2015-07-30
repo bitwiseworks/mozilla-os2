@@ -6,9 +6,7 @@
 #include <initguid.h>
 #include "DrawTargetD2D.h"
 #include "SourceSurfaceD2D.h"
-#ifdef USE_D2D1_1
 #include "SourceSurfaceD2D1.h"
-#endif
 #include "SourceSurfaceD2DTarget.h"
 #include "ShadersD2D.h"
 #include "PathD2D.h"
@@ -21,9 +19,8 @@
 #include "mozilla/Constants.h"
 #include "FilterNodeSoftware.h"
 
-#ifdef USE_D2D1_1
 #include "FilterNodeD2D1.h"
-#endif
+#include "ExtendInputEffectD2D1.h"
 
 #include <dwrite.h>
 
@@ -76,7 +73,8 @@ public:
 
     HRESULT hr = mDT->mDevice->CreateTexture2D(&desc, nullptr, byRef(tmpTexture));
     if (FAILED(hr)) {
-      gfxWarning() << "Failed to create temporary texture to hold surface data.";
+      gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(size))) << "[D2D] 1 CreateTexture2D failure " << size << " Code: " << hexa(hr);
+      return;
     }
     mDT->mDevice->CopyResource(tmpTexture, mDT->mTexture);
 
@@ -90,7 +88,8 @@ public:
                                       &props, byRef(mOldSurfBitmap));
 
     if (FAILED(hr)) {
-      gfxWarning() << "Failed to create shared bitmap for old surface.";
+      gfxCriticalError() << "[D2D] CreateSharedBitmap failure " << size << " Code: " << hexa(hr);
+      return;
     }
 
     IntRect clipBounds;
@@ -235,7 +234,7 @@ DrawTargetD2D::Flush()
   HRESULT hr = mRT->Flush();
 
   if (FAILED(hr)) {
-    gfxWarning() << "Error reported when trying to flush D2D rendertarget. Code: " << hr;
+    gfxWarning() << "Error reported when trying to flush D2D rendertarget. Code: " << hexa(hr);
   }
 
   // We no longer depend on any target.
@@ -321,23 +320,16 @@ DrawTargetD2D::GetBitmapForSurface(SourceSurface *aSurface,
   return bitmap;
 }
 
-#ifdef USE_D2D1_1
 TemporaryRef<ID2D1Image>
 DrawTargetD2D::GetImageForSurface(SourceSurface *aSurface)
 {
   RefPtr<ID2D1Image> image;
 
-  if (aSurface->GetType() == SurfaceType::D2D1_1_IMAGE) {
-    image = static_cast<SourceSurfaceD2D1*>(aSurface)->GetImage();
-    static_cast<SourceSurfaceD2D1*>(aSurface)->EnsureIndependent();
-  } else {
-    Rect r(Point(), Size(aSurface->GetSize()));
-    image = GetBitmapForSurface(aSurface, r);
-  }
+  Rect r(Point(), Size(aSurface->GetSize()));
+  image = GetBitmapForSurface(aSurface, r);
 
   return image;
 }
-#endif
 
 void
 DrawTargetD2D::DrawSurface(SourceSurface *aSurface,
@@ -372,7 +364,6 @@ DrawTargetD2D::DrawFilter(FilterNode *aNode,
                           const Point &aDestPoint,
                           const DrawOptions &aOptions)
 {
-#ifdef USE_D2D1_1
   RefPtr<ID2D1DeviceContext> dc;
   HRESULT hr;
   
@@ -387,7 +378,10 @@ DrawTargetD2D::DrawFilter(FilterNode *aNode,
     hr = rt->QueryInterface((ID2D1DeviceContext**)byRef(dc));
 
     if (SUCCEEDED(hr)) {
-      dc->DrawImage(static_cast<FilterNodeD2D1*>(aNode)->OutputEffect(), D2DPoint(aDestPoint), D2DRect(aSourceRect));
+      FilterNodeD2D1* node = static_cast<FilterNodeD2D1*>(aNode);
+      node->WillDraw(this);
+
+      dc->DrawImage(node->OutputEffect(), D2DPoint(aDestPoint), D2DRect(aSourceRect));
 
       Rect destRect = aSourceRect;
       destRect.MoveBy(aDestPoint);
@@ -395,7 +389,6 @@ DrawTargetD2D::DrawFilter(FilterNode *aNode,
       return;
     }
   }
-#endif
 
   if (aNode->GetBackendType() != FILTER_BACKEND_SOFTWARE) {
     gfxWarning() << "Invalid filter backend passed to DrawTargetD2D!";
@@ -470,7 +463,7 @@ DrawTargetD2D::DrawSurfaceWithShadow(SourceSurface *aSurface,
     HRESULT hr = mDevice->CreateRenderTargetView(mTempTexture, nullptr, byRef(mTempRTView));
 
     if (FAILED(hr)) {
-      gfxWarning() << "Failure to create RenderTargetView. Code: " << hr;
+      gfxWarning() << "Failure to create RenderTargetView. Code: " << hexa(hr);
       return;
     }
   }
@@ -531,8 +524,7 @@ DrawTargetD2D::DrawSurfaceWithShadow(SourceSurface *aSurface,
     hr = mDevice->CreateTexture2D(&desc, nullptr, byRef(mipTexture));
 
     if (FAILED(hr)) {
-      gfxWarning() << "Failure to create temporary texture. Size: " <<
-        aSurface->GetSize() << " Code: " << hr;
+      gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(aSurface->GetSize()))) << "[D2D] 2 CreateTexture2D failure " << aSurface->GetSize() << " Code: " << hexa(hr);
       return;
     }
 
@@ -559,7 +551,7 @@ DrawTargetD2D::DrawSurfaceWithShadow(SourceSurface *aSurface,
     hr = mDevice->CreateTexture2D(&desc, nullptr, byRef(tmpDSTexture));
 
     if (FAILED(hr)) {
-      gfxWarning() << "Failure to create temporary texture. Size: " << dsSize << " Code: " << hr;
+      gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(dsSize))) << "[D2D] 3 CreateTexture2D failure " << dsSize << " Code: " << hexa(hr);
       return;
     }
 
@@ -1198,7 +1190,7 @@ DrawTargetD2D::CreateSourceSurfaceFromData(unsigned char *aData,
     return nullptr;
   }
 
-  return newSurf;
+  return newSurf.forget();
 }
 
 TemporaryRef<SourceSurface> 
@@ -1222,9 +1214,9 @@ DrawTargetD2D::OptimizeSourceSurface(SourceSurface *aSurface) const
   data->Unmap();
 
   if (!success) {
-    return data;
+    return data.forget();
   }
-  return newSurf;
+  return newSurf.forget();
 }
 
 TemporaryRef<SourceSurface>
@@ -1244,7 +1236,7 @@ DrawTargetD2D::CreateSourceSurfaceFromNativeSurface(const NativeSurface &aSurfac
     return nullptr;
   }
 
-  return newSurf;
+  return newSurf.forget();
 }
 
 TemporaryRef<DrawTarget>
@@ -1258,7 +1250,7 @@ DrawTargetD2D::CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aForm
     return nullptr;
   }
 
-  return newTarget;
+  return newTarget.forget();
 }
 
 TemporaryRef<PathBuilder>
@@ -1268,14 +1260,14 @@ DrawTargetD2D::CreatePathBuilder(FillRule aFillRule) const
   HRESULT hr = factory()->CreatePathGeometry(byRef(path));
 
   if (FAILED(hr)) {
-    gfxWarning() << "Failed to create Direct2D Path Geometry. Code: " << hr;
+    gfxWarning() << "Failed to create Direct2D Path Geometry. Code: " << hexa(hr);
     return nullptr;
   }
 
   RefPtr<ID2D1GeometrySink> sink;
   hr = path->Open(byRef(sink));
   if (FAILED(hr)) {
-    gfxWarning() << "Failed to access Direct2D Path Geometry. Code: " << hr;
+    gfxWarning() << "Failed to access Direct2D Path Geometry. Code: " << hexa(hr);
     return nullptr;
   }
 
@@ -1283,7 +1275,7 @@ DrawTargetD2D::CreatePathBuilder(FillRule aFillRule) const
     sink->SetFillMode(D2D1_FILL_MODE_WINDING);
   }
 
-  return new PathBuilderD2D(sink, path, aFillRule);
+  return new PathBuilderD2D(sink, path, aFillRule, BackendType::DIRECT2D);
 }
 
 TemporaryRef<GradientStops>
@@ -1305,24 +1297,22 @@ DrawTargetD2D::CreateGradientStops(GradientStop *rawStops, uint32_t aNumStops, E
   delete [] stops;
 
   if (FAILED(hr)) {
-    gfxWarning() << "Failed to create GradientStopCollection. Code: " << hr;
+    gfxWarning() << "Failed to create GradientStopCollection. Code: " << hexa(hr);
     return nullptr;
   }
 
-  return new GradientStopsD2D(stopCollection);
+  return new GradientStopsD2D(stopCollection, Factory::GetDirect3D11Device());
 }
 
 TemporaryRef<FilterNode>
 DrawTargetD2D::CreateFilter(FilterType aType)
 {
-#ifdef USE_D2D1_1
   RefPtr<ID2D1DeviceContext> dc;
   HRESULT hr = mRT->QueryInterface((ID2D1DeviceContext**)byRef(dc));
 
   if (SUCCEEDED(hr)) {
-    return FilterNodeD2D1::Create(this, dc, aType);
+    return FilterNodeD2D1::Create(dc, aType);
   }
-#endif
   return FilterNodeSoftware::Create(aType);
 }
 
@@ -1348,7 +1338,7 @@ DrawTargetD2D::Init(const IntSize &aSize, SurfaceFormat aFormat)
   mFormat = aFormat;
 
   if (!Factory::GetDirect3D10Device()) {
-    gfxDebug() << "Failed to Init Direct2D DrawTarget (No D3D10 Device set.)";
+    gfxCriticalError() << "Failed to Init Direct2D DrawTarget (No D3D10 Device set.)";
     return false;
   }
   mDevice = Factory::GetDirect3D10Device();
@@ -1362,7 +1352,7 @@ DrawTargetD2D::Init(const IntSize &aSize, SurfaceFormat aFormat)
   hr = mDevice->CreateTexture2D(&desc, nullptr, byRef(mTexture));
 
   if (FAILED(hr)) {
-    gfxDebug() << "Failed to init Direct2D DrawTarget. Size: " << mSize << " Code: " << hr;
+    gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(aSize))) << "Failed to init Direct2D DrawTarget. Size: " << mSize << " Code: " << hexa(hr);
     return false;
   }
 
@@ -1383,7 +1373,7 @@ DrawTargetD2D::Init(ID3D10Texture2D *aTexture, SurfaceFormat aFormat)
   mFormat = aFormat;
 
   if (!mTexture) {
-    gfxDebug() << "No valid texture for Direct2D draw target initialization.";
+    gfxCriticalError() << "No valid texture for Direct2D draw target initialization.";
     return false;
   }
 
@@ -1393,7 +1383,7 @@ DrawTargetD2D::Init(ID3D10Texture2D *aTexture, SurfaceFormat aFormat)
   hr = device->QueryInterface((ID3D10Device1**)byRef(mDevice));
 
   if (FAILED(hr)) {
-    gfxWarning() << "Failed to get D3D10 device from texture.";
+    gfxCriticalError() << "Failed to get D3D10 device from texture.";
     return false;
   }
 
@@ -1432,7 +1422,7 @@ DrawTargetD2D::InitD3D10Data()
   hr = createD3DEffect((void*)d2deffect, sizeof(d2deffect), 0, mDevice, nullptr, byRef(mPrivateData->mEffect));
 
   if (FAILED(hr)) {
-    gfxWarning() << "Failed to initialize Direct2D required effects. Code: " << hr;
+    gfxWarning() << "Failed to initialize Direct2D required effects. Code: " << hexa(hr);
     return false;
   }
 
@@ -1454,7 +1444,7 @@ DrawTargetD2D::InitD3D10Data()
                                   byRef(mPrivateData->mInputLayout));
 
   if (FAILED(hr)) {
-    gfxWarning() << "Failed to initialize Direct2D required InputLayout. Code: " << hr;
+    gfxWarning() << "Failed to initialize Direct2D required InputLayout. Code: " << hexa(hr);
     return false;
   }
 
@@ -1466,7 +1456,7 @@ DrawTargetD2D::InitD3D10Data()
   hr = mDevice->CreateBuffer(&bufferDesc, &data, byRef(mPrivateData->mVB));
 
   if (FAILED(hr)) {
-    gfxWarning() << "Failed to initialize Direct2D required VertexBuffer. Code: " << hr;
+    gfxWarning() << "Failed to initialize Direct2D required VertexBuffer. Code: " << hexa(hr);
     return false;
   }
 
@@ -1498,7 +1488,7 @@ DrawTargetD2D::GetCachedLayer()
   }
 
   mCurrentCachedLayer++;
-  return layer;
+  return layer.forget();
 }
 
 void
@@ -1512,6 +1502,7 @@ bool
 DrawTargetD2D::InitD2DRenderTarget()
 {
   if (!factory()) {
+    gfxCriticalError() << "No valid D2D factory available.";
     return false;
   }
 
@@ -1770,7 +1761,7 @@ DrawTargetD2D::FinalizeRTForOperation(CompositionOp aOperator, const Pattern &aP
 
       mDevice->CopyResource(tmpTexture, mTexture);
       if (FAILED(hr)) {
-        gfxWarning() << *this << "Failed to create shader resource view for temp texture. Code: " << hr;
+        gfxWarning() << *this << "Failed to create shader resource view for temp texture. Code: " << hexa(hr);
         return;
       }
 
@@ -1779,7 +1770,7 @@ DrawTargetD2D::FinalizeRTForOperation(CompositionOp aOperator, const Pattern &aP
       hr = mDevice->CreateShaderResourceView(tmpTexture, nullptr, byRef(mBckSRView));
 
       if (FAILED(hr)) {
-        gfxWarning() << *this << "Failed to create shader resource view for temp texture. Code: " << hr;
+        gfxWarning() << *this << "Failed to create shader resource view for temp texture. Code: " << hexa(hr);
         return;
       }
 
@@ -1960,7 +1951,7 @@ DrawTargetD2D::CreateRTForTexture(ID3D10Texture2D *aTexture, SurfaceFormat aForm
   hr = aTexture->QueryInterface((IDXGISurface**)byRef(surface));
 
   if (FAILED(hr)) {
-    gfxWarning() << "Failed to QI texture to surface.";
+    gfxCriticalError() << "Failed to QI texture to surface. Code: " << hr;
     return nullptr;
   }
 
@@ -1978,11 +1969,11 @@ DrawTargetD2D::CreateRTForTexture(ID3D10Texture2D *aTexture, SurfaceFormat aForm
   hr = factory()->CreateDxgiSurfaceRenderTarget(surface, props, byRef(rt));
 
   if (FAILED(hr)) {
-    gfxWarning() << "Failed to create D2D render target for texture.";
+    gfxCriticalError() << "Failed to create D2D render target for texture. Code:" << hr << " " << mSize << " Format: " << uint32_t(aFormat);
     return nullptr;
   }
 
-  return rt;
+  return rt.forget();
 }
 
 void
@@ -2004,21 +1995,21 @@ DrawTargetD2D::EnsureViews()
 
   if (FAILED(hr)) {
     gfxWarning() << *this << "Failed to create temporary texture for rendertarget. Size: "
-      << mSize << " Code: " << hr;
+      << mSize << " Code: " << hexa(hr);
     return;
   }
 
   hr = mDevice->CreateShaderResourceView(mTempTexture, nullptr, byRef(mSRView));
 
   if (FAILED(hr)) {
-    gfxWarning() << *this << "Failed to create shader resource view for temp texture. Code: " << hr;
+    gfxWarning() << *this << "Failed to create shader resource view for temp texture. Code: " << hexa(hr);
     return;
   }
 
   hr = mDevice->CreateRenderTargetView(mTexture, nullptr, byRef(mRTView));
 
   if (FAILED(hr)) {
-    gfxWarning() << *this << "Failed to create rendertarget view for temp texture. Code: " << hr;
+    gfxWarning() << *this << "Failed to create rendertarget view for temp texture. Code: " << hexa(hr);
   }
 }
 
@@ -2282,7 +2273,7 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
   if (!IsPatternSupportedByD2D(aPattern)) {
     RefPtr<ID2D1SolidColorBrush> colBrush;
     mRT->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f), byRef(colBrush));
-    return colBrush;
+    return colBrush.forget();
   }
 
   if (aPattern.GetType() == PatternType::COLOR) {
@@ -2292,8 +2283,9 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
                                             color.b, color.a),
                                D2D1::BrushProperties(aAlpha),
                                byRef(colBrush));
-    return colBrush;
-  } else if (aPattern.GetType() == PatternType::LINEAR_GRADIENT) {
+    return colBrush.forget();
+  }
+  if (aPattern.GetType() == PatternType::LINEAR_GRADIENT) {
     RefPtr<ID2D1LinearGradientBrush> gradBrush;
     const LinearGradientPattern *pat =
       static_cast<const LinearGradientPattern*>(&aPattern);
@@ -2313,7 +2305,7 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
       mRT->CreateSolidColorBrush(d2dStops.back().color,
                                  D2D1::BrushProperties(aAlpha),
                                  byRef(colBrush));
-      return colBrush;
+      return colBrush.forget();
     }
 
     mRT->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2DPoint(pat->mBegin),
@@ -2321,8 +2313,9 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
                                    D2D1::BrushProperties(aAlpha, D2DMatrix(pat->mMatrix)),
                                    stops->mStopCollection,
                                    byRef(gradBrush));
-    return gradBrush;
-  } else if (aPattern.GetType() == PatternType::RADIAL_GRADIENT) {
+    return gradBrush.forget();
+  }
+  if (aPattern.GetType() == PatternType::RADIAL_GRADIENT) {
     RefPtr<ID2D1RadialGradientBrush> gradBrush;
     const RadialGradientPattern *pat =
       static_cast<const RadialGradientPattern*>(&aPattern);
@@ -2343,8 +2336,9 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
       stops->mStopCollection,
       byRef(gradBrush));
 
-    return gradBrush;
-  } else if (aPattern.GetType() == PatternType::SURFACE) {
+    return gradBrush.forget();
+  }
+  if (aPattern.GetType() == PatternType::SURFACE) {
     RefPtr<ID2D1BitmapBrush> bmBrush;
     const SurfacePattern *pat =
       static_cast<const SurfacePattern*>(&aPattern);
@@ -2357,11 +2351,32 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
     RefPtr<ID2D1Bitmap> bitmap;
 
     Matrix mat = pat->mMatrix;
+
+    RefPtr<SourceSurface> source = pat->mSurface;
+
+    if (!pat->mSamplingRect.IsEmpty() &&
+        (source->GetType() == SurfaceType::D2D1_BITMAP ||
+         source->GetType() == SurfaceType::D2D1_DRAWTARGET)) {
+      IntRect samplingRect = pat->mSamplingRect;
+
+      RefPtr<DrawTargetD2D> dt = new DrawTargetD2D();
+      if (!dt->Init(samplingRect.Size(),
+                    source->GetFormat())) {
+        // FIXME: Uncomment assertion, bug 1068195
+        // MOZ_ASSERT(false, "Invalid sampling rect size!");
+        return nullptr;
+      }
+
+      dt->CopySurface(source, samplingRect, IntPoint());
+      source = dt->Snapshot();
+
+      mat.PreTranslate(samplingRect.x, samplingRect.y);
+    }
     
-    switch (pat->mSurface->GetType()) {
+    switch (source->GetType()) {
     case SurfaceType::D2D1_BITMAP:
       {
-        SourceSurfaceD2D *surf = static_cast<SourceSurfaceD2D*>(pat->mSurface.get());
+        SourceSurfaceD2D *surf = static_cast<SourceSurfaceD2D*>(source.get());
 
         bitmap = surf->mBitmap;
 
@@ -2373,22 +2388,29 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
     case SurfaceType::D2D1_DRAWTARGET:
       {
         SourceSurfaceD2DTarget *surf =
-          static_cast<SourceSurfaceD2DTarget*>(pat->mSurface.get());
+          static_cast<SourceSurfaceD2DTarget*>(source.get());
         bitmap = surf->GetBitmap(mRT);
         AddDependencyOnSource(surf);
       }
       break;
     default:
       {
-        RefPtr<DataSourceSurface> dataSurf = pat->mSurface->GetDataSurface();
+        RefPtr<DataSourceSurface> dataSurf = source->GetDataSurface();
         if (!dataSurf) {
           gfxWarning() << "Invalid surface type.";
           return nullptr;
         }
 
-        bitmap = CreatePartialBitmapForSurface(dataSurf, mTransform, mSize, pat->mExtendMode, mat, mRT); 
+        IntRect sourceRect = pat->mSamplingRect;
+        if (sourceRect.IsEmpty()) {
+          sourceRect = IntRect(0, 0, source->GetSize().width, source->GetSize().height);
+        }
+
+        bitmap = CreatePartialBitmapForSurface(dataSurf, mTransform, mSize, pat->mExtendMode, mat, mRT, &sourceRect);
         if (!bitmap) {
-          return nullptr;
+          RefPtr<ID2D1SolidColorBrush> colBrush;
+          mRT->CreateSolidColorBrush(D2D1::ColorF(0, 0), byRef(colBrush));
+          return colBrush.forget();
         }
       }
       break;
@@ -2401,7 +2423,7 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
                            D2D1::BrushProperties(aAlpha, D2DMatrix(mat)),
                            byRef(bmBrush));
 
-    return bmBrush;
+    return bmBrush.forget();
   }
 
   gfxWarning() << "Invalid pattern type detected.";
@@ -2477,7 +2499,7 @@ DrawTargetD2D::CreateGradientTexture(const GradientStopsD2D *aStops)
   RefPtr<ID3D10Texture2D> tex;
   mDevice->CreateTexture2D(&desc, &data, byRef(tex));
 
-  return tex;
+  return tex.forget();
 }
 
 TemporaryRef<ID3D10Texture2D>
@@ -2542,7 +2564,7 @@ DrawTargetD2D::CreateTextureForAnalysis(IDWriteGlyphRunAnalysis *aAnalysis, cons
     return nullptr;
   }
 
-  return tex;
+  return tex.forget();
 }
 
 void
@@ -2665,6 +2687,7 @@ DrawTargetD2D::factory()
 #else
   options.debugLevel = D2D1_DEBUG_LEVEL_NONE;
 #endif
+  //options.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
 
   HRESULT hr = createD2DFactory(D2D1_FACTORY_TYPE_MULTI_THREADED,
                                 __uuidof(ID2D1Factory),
@@ -2675,6 +2698,12 @@ DrawTargetD2D::factory()
     gfxWarning() << "Failed to create Direct2D factory.";
   }
 
+  RefPtr<ID2D1Factory1> factoryD2D1;
+  hr = mFactory->QueryInterface((ID2D1Factory1**)byRef(factoryD2D1));
+  if (SUCCEEDED(hr)) {
+    ExtendInputEffectD2D1::Register(factoryD2D1);
+  }
+
   return mFactory;
 }
 
@@ -2682,6 +2711,12 @@ void
 DrawTargetD2D::CleanupD2D()
 {
   if (mFactory) {
+    RefPtr<ID2D1Factory1> factoryD2D1;
+    HRESULT hr = mFactory->QueryInterface((ID2D1Factory1**)byRef(factoryD2D1));
+    if (SUCCEEDED(hr)) {
+      ExtendInputEffectD2D1::Unregister(factoryD2D1);
+    }
+
     mFactory->Release();
     mFactory = nullptr;
   }

@@ -35,17 +35,17 @@ public:
   {
   }
 
-  TypedEventHandler(dom::EventHandlerNonNull* aHandler)
+  explicit TypedEventHandler(dom::EventHandlerNonNull* aHandler)
   {
     Assign(aHandler, eNormal);
   }
 
-  TypedEventHandler(dom::OnErrorEventHandlerNonNull* aHandler)
+  explicit TypedEventHandler(dom::OnErrorEventHandlerNonNull* aHandler)
   {
     Assign(aHandler, eOnError);
   }
 
-  TypedEventHandler(dom::OnBeforeUnloadEventHandlerNonNull* aHandler)
+  explicit TypedEventHandler(dom::OnBeforeUnloadEventHandlerNonNull* aHandler)
   {
     Assign(aHandler, eOnBeforeUnload);
   }
@@ -143,7 +143,7 @@ public:
   }
 
 private:
-  void operator=(const TypedEventHandler&) MOZ_DELETE;
+  void operator=(const TypedEventHandler&) = delete;
 
   void ReleaseHandler()
   {
@@ -180,8 +180,6 @@ public:
 
   JSEventHandler(nsISupports* aTarget, nsIAtom* aType,
                  const TypedEventHandler& aTypedHandler);
-
-  virtual ~JSEventHandler();
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
@@ -255,6 +253,8 @@ public:
   bool IsBlackForCC();
 
 protected:
+  virtual ~JSEventHandler();
+
   nsISupports* mTarget;
   nsCOMPtr<nsIAtom> mEventName;
   TypedEventHandler mTypedHandler;

@@ -36,7 +36,7 @@ class nsIThread;
 namespace mozilla {
 namespace storage {
 
-class Connection MOZ_FINAL : public mozIStorageConnection
+class Connection final : public mozIStorageConnection
                            , public nsIInterfaceRequestor
 {
 public:
@@ -118,6 +118,14 @@ public:
   void setCommitHook(int (*aCallbackFn)(void *) , void *aData=nullptr) {
     MOZ_ASSERT(mDBConn, "A connection must exist at this point");
     ::sqlite3_commit_hook(mDBConn, aCallbackFn, aData);
+  };
+
+  /**
+   * Gets autocommit status.
+   */
+  bool getAutocommit() {
+    MOZ_ASSERT(mDBConn, "A connection must exist at this point");
+    return static_cast<bool>(::sqlite3_get_autocommit(mDBConn));
   };
 
   /**
@@ -348,7 +356,7 @@ private:
  * A Runnable designed to call a mozIStorageCompletionCallback on
  * the appropriate thread.
  */
-class CallbackComplete MOZ_FINAL : public nsRunnable
+class CallbackComplete final : public nsRunnable
 {
 public:
   /**

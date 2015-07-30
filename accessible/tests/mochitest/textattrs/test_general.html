@@ -538,9 +538,9 @@
       var attrs = {
         "auto-generated": "true"
       };
-      testTextAttrs(ID, 0, attrs, defAttrs, 0, 2);
-      testTextAttrs(ID, 2, { }, defAttrs, 2, 6);
-      testTextAttrs(ID, 6, attrs, defAttrs, 6, 7);
+      testTextAttrs(ID, 0, attrs, defAttrs, 0, 3);
+      testTextAttrs(ID, 3, { }, defAttrs, 3, 7);
+      testTextAttrs(ID, 7, attrs, defAttrs, 7, 8);
 
        //////////////////////////////////////////////////////////////////////////
       // area19, "HTML5 mark tag" test
@@ -709,12 +709,12 @@
   </p>
 
   <p id="area17">
-    <span style="-moz-text-decoration-line: underline;">underline
-    </span><span style="text-decoration: underline; -moz-text-decoration-color: blue;">blue
-    </span><span style="text-decoration: underline; -moz-text-decoration-style: dotted;">dotted
-    </span><span style="-moz-text-decoration-line: line-through;">linethrough
-    </span><span style="text-decoration: line-through; -moz-text-decoration-color: blue;">blue
-    </span><span style="text-decoration: line-through; -moz-text-decoration-style: wavy;">wavy
+    <span style="text-decoration-line: underline;">underline
+    </span><span style="text-decoration: underline; text-decoration-color: blue;">blue
+    </span><span style="text-decoration: underline; text-decoration-style: dotted;">dotted
+    </span><span style="text-decoration-line: line-through;">linethrough
+    </span><span style="text-decoration: line-through; text-decoration-color: blue;">blue
+    </span><span style="text-decoration: line-through; text-decoration-style: wavy;">wavy
     </span>
   </p>
 

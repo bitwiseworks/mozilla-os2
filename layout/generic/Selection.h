@@ -9,12 +9,13 @@
 
 #include "nsIWeakReference.h"
 
+#include "mozilla/AutoRestore.h"
+#include "mozilla/TextRange.h"
 #include "nsISelection.h"
 #include "nsISelectionController.h"
 #include "nsISelectionPrivate.h"
 #include "nsRange.h"
 #include "nsThreadUtils.h"
-#include "mozilla/TextRange.h"
 #include "nsWrapperCache.h"
 
 struct CachedOffsetForFrame;
@@ -26,11 +27,12 @@ struct SelectionDetails;
 
 namespace mozilla {
 class ErrorResult;
+struct AutoPrepareFocusRange;
 }
 
 struct RangeData
 {
-  RangeData(nsRange* aRange)
+  explicit RangeData(nsRange* aRange)
     : mRange(aRange)
   {}
 
@@ -46,14 +48,16 @@ struct RangeData
 namespace mozilla {
 namespace dom {
 
-class Selection : public nsISelectionPrivate,
-                  public nsWrapperCache,
-                  public nsSupportsWeakReference
+class Selection final : public nsISelectionPrivate,
+                            public nsWrapperCache,
+                            public nsSupportsWeakReference
 {
+protected:
+  virtual ~Selection();
+
 public:
   Selection();
-  Selection(nsFrameSelection *aList);
-  virtual ~Selection();
+  explicit Selection(nsFrameSelection *aList);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(Selection, nsISelectionPrivate)
@@ -98,8 +102,14 @@ public:
                                int32_t aFlags = 0);
   nsresult      SubtractRange(RangeData* aRange, nsRange* aSubtract,
                               nsTArray<RangeData>* aOutput);
-  nsresult      AddItem(nsRange *aRange, int32_t* aOutIndex);
-  nsresult      RemoveItem(nsRange *aRange);
+  /**
+   * AddItem adds aRange to this Selection.  If mApplyUserSelectStyle is true,
+   * then aRange is first scanned for -moz-user-select:none nodes and split up
+   * into multiple ranges to exclude those before adding the resulting ranges
+   * to this Selection.
+   */
+  nsresult      AddItem(nsRange* aRange, int32_t* aOutIndex);
+  nsresult      RemoveItem(nsRange* aRange);
   nsresult      RemoveCollapsedRanges();
   nsresult      Clear(nsPresContext* aPresContext);
   nsresult      Collapse(nsINode* aParentNode, int32_t aOffset);
@@ -132,7 +142,7 @@ public:
 
   nsresult     StopAutoScrollTimer();
 
-  JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  JSObject* WrapObject(JSContext* aCx) override;
 
   // WebIDL methods
   nsINode*     GetAnchorNode();
@@ -161,7 +171,7 @@ public:
 
   void Stringify(nsAString& aResult);
 
-  bool ContainsNode(nsINode* aNode, bool aPartlyContained, mozilla::ErrorResult& aRv);
+  bool ContainsNode(nsINode& aNode, bool aPartlyContained, mozilla::ErrorResult& aRv);
 
   void Modify(const nsAString& aAlter, const nsAString& aDirection,
               const nsAString& aGranularity, mozilla::ErrorResult& aRv);
@@ -203,8 +213,21 @@ public:
 
   nsresult     NotifySelectionListeners();
 
+  friend struct AutoApplyUserSelectStyle;
+  struct MOZ_STACK_CLASS AutoApplyUserSelectStyle
+  {
+    explicit AutoApplyUserSelectStyle(Selection* aSelection
+                             MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : mSavedValue(aSelection->mApplyUserSelectStyle)
+    {
+      MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+      aSelection->mApplyUserSelectStyle = true;
+    }
+    AutoRestore<bool> mSavedValue;
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+  };
 private:
-
+  friend struct mozilla::AutoPrepareFocusRange;
   class ScrollSelectionIntoViewEvent;
   friend class ScrollSelectionIntoViewEvent;
 
@@ -256,6 +279,11 @@ private:
                                  int32_t* aStartIndex, int32_t* aEndIndex);
   RangeData* FindRangeData(nsIDOMRange* aRange);
 
+  /**
+   * Helper method for AddItem.
+   */
+  nsresult AddItemInternal(nsRange* aRange, int32_t* aOutIndex);
+
   // These are the ranges inside this selection. They are kept sorted in order
   // of DOM start position.
   //
@@ -279,6 +307,33 @@ private:
   CachedOffsetForFrame *mCachedOffsetForFrame;
   nsDirection mDirection;
   SelectionType mType;
+  /**
+   * True if the current selection operation was initiated by user action.
+   * It determines whether we exclude -moz-user-select:none nodes or not.
+   */
+  bool mApplyUserSelectStyle;
+};
+
+// Stack-class to turn on/off selection batching.
+class MOZ_STACK_CLASS SelectionBatcher final
+{
+private:
+  nsRefPtr<Selection> mSelection;
+public:
+  explicit SelectionBatcher(Selection* aSelection)
+  {
+    mSelection = aSelection;
+    if (mSelection) {
+      mSelection->StartBatchChanges();
+    }
+  }
+
+  ~SelectionBatcher()
+  {
+    if (mSelection) {
+      mSelection->EndBatchChanges();
+    }
+  }
 };
 
 } // namespace dom

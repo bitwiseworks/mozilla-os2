@@ -13,6 +13,7 @@
 
 #include <vector>
 
+#include "webrtc/base/thread_annotations.h"
 #include "webrtc/common_types.h"
 #include "webrtc/engine_configurations.h"
 #include "webrtc/modules/video_capture/include/video_capture.h"
@@ -21,9 +22,11 @@
 #include "webrtc/modules/video_processing/main/interface/video_processing.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/typedefs.h"
+#include "webrtc/video_engine/include/vie_base.h"
 #include "webrtc/video_engine/include/vie_capture.h"
 #include "webrtc/video_engine/vie_defines.h"
 #include "webrtc/video_engine/vie_frame_provider_base.h"
+#include "webrtc/common.h"
 
 namespace webrtc {
 
@@ -76,6 +79,8 @@ class ViECapturer
   virtual int IncomingFrameI420(const ViEVideoFrameI420& video_frame,
                                 unsigned long long capture_time = 0);  // NOLINT
 
+  virtual void SwapFrame(I420VideoFrame* frame) OVERRIDE;
+
   // Start/Stop.
   int32_t Start(
       const CaptureCapability& capture_capability = CaptureCapability());
@@ -90,7 +95,6 @@ class ViECapturer
 
   // Effect filter.
   int32_t RegisterEffectFilter(ViEEffectFilter* effect_filter);
-  int32_t EnableDenoising(bool enable);
   int32_t EnableDeflickering(bool enable);
   int32_t EnableBrightnessAlarm(bool enable);
 
@@ -103,6 +107,8 @@ class ViECapturer
   const char* CurrentDeviceName() const;
 
   void RegisterCpuOveruseObserver(CpuOveruseObserver* observer);
+  void SetCpuOveruseOptions(const CpuOveruseOptions& options);
+  void GetCpuOveruseMetrics(CpuOveruseMetrics* metrics) const;
 
  protected:
   ViECapturer(int capture_id,
@@ -154,13 +160,17 @@ class ViECapturer
   ProcessThread& module_process_thread_;
   const int capture_id_;
 
+  // Frame used in IncomingFrameI420.
+  scoped_ptr<CriticalSectionWrapper> incoming_frame_cs_;
+  I420VideoFrame incoming_frame_;
+
   // Capture thread.
   ThreadWrapper& capture_thread_;
   EventWrapper& capture_event_;
   EventWrapper& deliver_event_;
 
-  I420VideoFrame captured_frame_;
-  I420VideoFrame deliver_frame_;
+  scoped_ptr<I420VideoFrame> captured_frame_;
+  scoped_ptr<I420VideoFrame> deliver_frame_;
 
   // Image processing.
   ViEEffectFilter* effect_filter_;
@@ -170,17 +180,15 @@ class ViECapturer
   VideoProcessingModule::FrameStats* brightness_frame_stats_;
   Brightness current_brightness_level_;
   Brightness reported_brightness_level_;
-  bool denoising_enabled_;
 
   // Statistics observer.
   scoped_ptr<CriticalSectionWrapper> observer_cs_;
-  ViECaptureObserver* observer_;
+  ViECaptureObserver* observer_ GUARDED_BY(observer_cs_.get());
 
   CaptureCapability requested_capability_;
 
-  I420VideoFrame capture_device_image_;
-
   scoped_ptr<OveruseFrameDetector> overuse_detector_;
+  const Config & config_;
 };
 
 }  // namespace webrtc

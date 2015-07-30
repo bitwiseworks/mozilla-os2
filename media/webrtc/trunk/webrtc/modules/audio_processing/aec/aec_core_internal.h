@@ -11,21 +11,29 @@
 #ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AEC_AEC_CORE_INTERNAL_H_
 #define WEBRTC_MODULES_AUDIO_PROCESSING_AEC_AEC_CORE_INTERNAL_H_
 
-#ifdef WEBRTC_AEC_DEBUG_DUMP
-#include <stdio.h>
-#endif
-
+#include "webrtc/common_audio/wav_file.h"
+#include "webrtc/modules/audio_processing/aec/aec_common.h"
 #include "webrtc/modules/audio_processing/aec/aec_core.h"
 #include "webrtc/modules/audio_processing/utility/ring_buffer.h"
 #include "webrtc/typedefs.h"
 
-#define NR_PART 12  // Number of partitions in filter.
-#define PREF_BAND_SIZE 24
-
 // Number of partitions for the extended filter mode. The first one is an enum
 // to be used in array declarations, as it represents the maximum filter length.
-enum { kExtendedNumPartitions = 32 };
+enum {
+  kExtendedNumPartitions = 32
+};
 static const int kNormalNumPartitions = 12;
+
+// Delay estimator constants, used for logging.
+enum {
+  kMaxDelayBlocks = 60
+};
+enum {
+  kLookaheadBlocks = 15
+};
+enum {
+  kHistorySizeBlocks = kMaxDelayBlocks + kLookaheadBlocks
+};
 
 // Extended filter adaptation parameters.
 // TODO(ajm): No narrowband tuning yet.
@@ -64,7 +72,7 @@ struct AecCore {
   float dPow[PART_LEN1];
   float dMinPow[PART_LEN1];
   float dInitMinPow[PART_LEN1];
-  float *noisePow;
+  float* noisePow;
 
   float xfBuf[2][kExtendedNumPartitions * PART_LEN1];  // farend fft buffer
   float wfBuf[2][kExtendedNumPartitions * PART_LEN1];  // filter fft
@@ -96,7 +104,7 @@ struct AecCore {
   int sampFreq;
   uint32_t seed;
 
-  float normal_mu;  // stepsize
+  float normal_mu;               // stepsize
   float normal_error_threshold;  // error threshold
 
   int noiseEstCtr;
@@ -114,8 +122,8 @@ struct AecCore {
   Stats rerl;
 
   // Quantities to control H band scaling for SWB input
-  int freq_avg_ic;  // initial bin for averaging nlp gain
-  int flag_Hband_cn;  // for comfort noise
+  int freq_avg_ic;       // initial bin for averaging nlp gain
+  int flag_Hband_cn;     // for comfort noise
   float cn_scale_Hband;  // scale for comfort noise in H band
 
   int delay_histogram[kHistorySizeBlocks];
@@ -123,31 +131,58 @@ struct AecCore {
   void* delay_estimator_farend;
   void* delay_estimator;
 
+  int reported_delay_enabled;  // 0 = disabled, otherwise enabled.
   // 1 = extended filter mode enabled, 0 = disabled.
   int extended_filter_enabled;
   // Runtime selection of number of filter partitions.
   int num_partitions;
 
 #ifdef WEBRTC_AEC_DEBUG_DUMP
+  // Sequence number of this AEC instance, so that different instances can
+  // choose different dump file names.
+  int instance_index;
+
+  // Number of times we've restarted dumping; used to pick new dump file names
+  // each time.
+  int debug_dump_count;
+
   RingBuffer* far_time_buf;
-  FILE *farFile;
-  FILE *nearFile;
-  FILE *outFile;
-  FILE *outLinearFile;
+  rtc_WavWriter* farFile;
+  rtc_WavWriter* nearFile;
+  rtc_WavWriter* outFile;
+  rtc_WavWriter* outLinearFile;
+  uint32_t debugWritten;
 #endif
 };
 
 typedef void (*WebRtcAec_FilterFar_t)(AecCore* aec, float yf[2][PART_LEN1]);
 extern WebRtcAec_FilterFar_t WebRtcAec_FilterFar;
-typedef void (*WebRtcAec_ScaleErrorSignal_t)
-    (AecCore* aec, float ef[2][PART_LEN1]);
+typedef void (*WebRtcAec_ScaleErrorSignal_t)(AecCore* aec,
+                                             float ef[2][PART_LEN1]);
 extern WebRtcAec_ScaleErrorSignal_t WebRtcAec_ScaleErrorSignal;
-typedef void (*WebRtcAec_FilterAdaptation_t)
-    (AecCore* aec, float *fft, float ef[2][PART_LEN1]);
+typedef void (*WebRtcAec_FilterAdaptation_t)(AecCore* aec,
+                                             float* fft,
+                                             float ef[2][PART_LEN1]);
 extern WebRtcAec_FilterAdaptation_t WebRtcAec_FilterAdaptation;
-typedef void (*WebRtcAec_OverdriveAndSuppress_t)
-    (AecCore* aec, float hNl[PART_LEN1], const float hNlFb,
-        float efw[2][PART_LEN1]);
+typedef void (*WebRtcAec_OverdriveAndSuppress_t)(AecCore* aec,
+                                                 float hNl[PART_LEN1],
+                                                 const float hNlFb,
+                                                 float efw[2][PART_LEN1]);
 extern WebRtcAec_OverdriveAndSuppress_t WebRtcAec_OverdriveAndSuppress;
+
+typedef void (*WebRtcAec_ComfortNoise_t)(AecCore* aec,
+                                         float efw[2][PART_LEN1],
+                                         complex_t* comfortNoiseHband,
+                                         const float* noisePow,
+                                         const float* lambda);
+extern WebRtcAec_ComfortNoise_t WebRtcAec_ComfortNoise;
+
+typedef void (*WebRtcAec_SubbandCoherence_t)(AecCore* aec,
+                                             float efw[2][PART_LEN1],
+                                             float xfw[2][PART_LEN1],
+                                             float* fft,
+                                             float* cohde,
+                                             float* cohxd);
+extern WebRtcAec_SubbandCoherence_t WebRtcAec_SubbandCoherence;
 
 #endif  // WEBRTC_MODULES_AUDIO_PROCESSING_AEC_AEC_CORE_INTERNAL_H_

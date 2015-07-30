@@ -22,48 +22,49 @@ class ExplicitChildIterator;
 class XBLChildrenElement : public nsXMLElement
 {
 public:
-  friend class mozilla::dom::ExplicitChildIterator;
-  friend class nsAnonymousContentList;
-  XBLChildrenElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  explicit XBLChildrenElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
     : nsXMLElement(aNodeInfo)
   {
   }
-  XBLChildrenElement(already_AddRefed<nsINodeInfo>&& aNodeInfo)
+  explicit XBLChildrenElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
     : nsXMLElement(aNodeInfo)
   {
   }
-  ~XBLChildrenElement();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
   // nsINode interface methods
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
+  virtual nsresult Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) const override;
 
-  virtual nsXPCClassInfo* GetClassInfo() { return nullptr; }
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
+  virtual nsIDOMNode* AsDOMNode() override { return this; }
 
   // nsIContent interface methods
-  virtual nsIAtom *GetIDAttributeName() const;
-  virtual nsIAtom* DoGetID() const;
   virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
-                             bool aNotify);
+                             bool aNotify) override;
   virtual bool ParseAttribute(int32_t aNamespaceID,
                               nsIAtom* aAttribute,
                               const nsAString& aValue,
-                              nsAttrValue& aResult);
+                              nsAttrValue& aResult) override;
 
   void AppendInsertedChild(nsIContent* aChild)
   {
     mInsertedChildren.AppendElement(aChild);
     aChild->SetXBLInsertionParent(GetParent());
+
+    // Appending an inserted child causes the inserted
+    // children to be projected instead of default content.
+    MaybeRemoveDefaultContent();
   }
 
   void InsertInsertedChildAt(nsIContent* aChild, uint32_t aIndex)
   {
     mInsertedChildren.InsertElementAt(aIndex, aChild);
     aChild->SetXBLInsertionParent(GetParent());
+
+    // Inserting an inserted child causes the inserted
+    // children to be projected instead of default content.
+    MaybeRemoveDefaultContent();
   }
 
   void RemoveInsertedChild(nsIContent* aChild)
@@ -73,6 +74,10 @@ public:
     //NS_ASSERTION(mInsertedChildren.Contains(aChild),
     //             "Removing child that's not there");
     mInsertedChildren.RemoveElement(aChild);
+
+    // After removing the inserted child, default content
+    // may be projected into this insertion point.
+    MaybeSetupDefaultContent();
   }
 
   void ClearInsertedChildren()
@@ -81,6 +86,10 @@ public:
       mInsertedChildren[c]->SetXBLInsertionParent(nullptr);
     }
     mInsertedChildren.Clear();
+
+    // After clearing inserted children, default content
+    // will be projected into this insertion point.
+    MaybeSetupDefaultContent();
   }
 
   void MaybeSetupDefaultContent()
@@ -115,10 +124,7 @@ public:
     return !mInsertedChildren.IsEmpty();
   }
 
-  enum {
-    NoIndex = uint32_t(-1)
-  };
-  uint32_t IndexOfInsertedChild(nsIContent* aChild)
+  int32_t IndexOfInsertedChild(nsIContent* aChild)
   {
     return mInsertedChildren.IndexOf(aChild);
   }
@@ -135,9 +141,16 @@ public:
     return mIncludes.IsEmpty();
   }
 
-  nsTArray<nsIContent*> mInsertedChildren;
+  nsIContent* InsertedChild(uint32_t aIndex)
+  {
+    return mInsertedChildren[aIndex];
+  }
+
+protected:
+  ~XBLChildrenElement();
 
 private:
+  nsTArray<nsIContent*> mInsertedChildren; // WEAK
   nsTArray<nsCOMPtr<nsIAtom> > mIncludes;
 };
 
@@ -147,16 +160,10 @@ private:
 class nsAnonymousContentList : public nsINodeList
 {
 public:
-  nsAnonymousContentList(nsIContent* aParent)
+  explicit nsAnonymousContentList(nsIContent* aParent)
     : mParent(aParent)
   {
     MOZ_COUNT_CTOR(nsAnonymousContentList);
-    SetIsDOMBinding();
-  }
-
-  virtual ~nsAnonymousContentList()
-  {
-    MOZ_COUNT_DTOR(nsAnonymousContentList);
   }
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -165,17 +172,22 @@ public:
   NS_DECL_NSIDOMNODELIST
 
   // nsINodeList interface
-  virtual int32_t IndexOf(nsIContent* aContent);
-  virtual nsINode* GetParentObject() { return mParent; }
-  virtual nsIContent* Item(uint32_t aIndex);
+  virtual int32_t IndexOf(nsIContent* aContent) override;
+  virtual nsINode* GetParentObject() override { return mParent; }
+  virtual nsIContent* Item(uint32_t aIndex) override;
 
-  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx) override;
 
   bool IsListFor(nsIContent* aContent) {
     return mParent == aContent;
   }
 
 private:
+  virtual ~nsAnonymousContentList()
+  {
+    MOZ_COUNT_DTOR(nsAnonymousContentList);
+  }
+
   nsCOMPtr<nsIContent> mParent;
 };
 

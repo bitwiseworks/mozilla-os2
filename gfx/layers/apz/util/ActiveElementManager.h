@@ -10,11 +10,14 @@
 #include "nsISupportsImpl.h"
 
 class inIDOMUtils;
-class nsIDOMEventTarget;
-class nsIDOMElement;
 class CancelableTask;
 
 namespace mozilla {
+namespace dom {
+class Element;
+class EventTarget;
+}
+
 namespace layers {
 
 /**
@@ -22,11 +25,11 @@ namespace layers {
  * of touch input.
  */
 class ActiveElementManager {
+  ~ActiveElementManager();
 public:
   NS_INLINE_DECL_REFCOUNTING(ActiveElementManager)
 
   ActiveElementManager();
-  ~ActiveElementManager();
 
   /**
    * Specify the target of a touch. Typically this should be called right
@@ -35,7 +38,7 @@ public:
    * HandleTouchStart().
    * |aTarget| may be nullptr.
    */
-  void SetTargetElement(nsIDOMEventTarget* aTarget);
+  void SetTargetElement(dom::EventTarget* aTarget);
   /**
    * Handle a touch-start event.
    * @param aCanBePan whether the touch can be a pan
@@ -50,12 +53,17 @@ public:
    * @param aWasClick whether the touch was a click
    */
   void HandleTouchEnd(bool aWasClick);
+  /**
+   * @return true iff the currently active element (or one of its ancestors)
+   * actually had a style for the :active pseudo-class. The currently active
+   * element is the root element if no other elements are active.
+   */
+  bool ActiveElementUsesStyle() const;
 private:
-  nsCOMPtr<inIDOMUtils> mDomUtils;
   /**
    * The target of the first touch point in the current touch block.
    */
-  nsCOMPtr<nsIDOMElement> mTarget;
+  nsCOMPtr<dom::Element> mTarget;
   /**
    * Whether the current touch block can be a pan. Set in HandleTouchStart().
    */
@@ -70,12 +78,17 @@ private:
    * A task for calling SetActive() after a timeout.
    */
   CancelableTask* mSetActiveTask;
+  /**
+   * See ActiveElementUsesStyle() documentation.
+   */
+  bool mActiveElementUsesStyle;
 
   // Helpers
   void TriggerElementActivation();
-  void SetActive(nsIDOMElement* aTarget);
+  void SetActive(dom::Element* aTarget);
   void ResetActive();
-  void SetActiveTask(nsIDOMElement* aTarget);
+  void ResetTouchBlockState();
+  void SetActiveTask(dom::Element* aTarget);
   void CancelTask();
 };
 

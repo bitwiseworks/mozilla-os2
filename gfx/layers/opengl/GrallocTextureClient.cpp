@@ -6,11 +6,13 @@
 #ifdef MOZ_WIDGET_GONK
 
 #include "mozilla/gfx/2D.h"
+#include "mozilla/layers/AsyncTransactionTracker.h" // for AsyncTransactionTracker
 #include "mozilla/layers/GrallocTextureClient.h"
 #include "mozilla/layers/CompositableForwarder.h"
 #include "mozilla/layers/ISurfaceAllocator.h"
 #include "mozilla/layers/ShadowLayerUtilsGralloc.h"
 #include "gfx2DGlue.h"
+#include "SharedSurfaceGralloc.h"
 
 namespace mozilla {
 namespace layers {
@@ -18,58 +20,15 @@ namespace layers {
 using namespace mozilla::gfx;
 using namespace android;
 
-class GrallocTextureClientData : public TextureClientData {
-public:
-  GrallocTextureClientData(GrallocBufferActor* aActor)
-    : mGrallocActor(aActor)
-  {
-    MOZ_COUNT_CTOR(GrallocTextureClientData);
-  }
-
-  ~GrallocTextureClientData()
-  {
-    MOZ_COUNT_DTOR(GrallocTextureClientData);
-    MOZ_ASSERT(!mGrallocActor);
-  }
-
-  virtual void DeallocateSharedData(ISurfaceAllocator* allocator) MOZ_OVERRIDE
-  {
-    allocator->DeallocGrallocBuffer(mGrallocActor);
-    mGrallocActor = nullptr;
-  }
-
-private:
-  GrallocBufferActor* mGrallocActor;
-};
-
-TextureClientData*
-GrallocTextureClientOGL::DropTextureData()
-{
-  TextureClientData* result = new GrallocTextureClientData(mGrallocActor);
-  mGrallocActor = nullptr;
-  mGraphicBuffer = nullptr;
-  return result;
-}
-
-GrallocTextureClientOGL::GrallocTextureClientOGL(GrallocBufferActor* aActor,
-                                                 gfx::IntSize aSize,
-                                                 gfx::BackendType aMoz2dBackend,
-                                                 TextureFlags aFlags)
-: BufferTextureClient(nullptr, gfx::SurfaceFormat::UNKNOWN, aMoz2dBackend, aFlags)
-, mMappedBuffer(nullptr)
-, mMediaBuffer(nullptr)
-{
-  InitWith(aActor, aSize);
-  MOZ_COUNT_CTOR(GrallocTextureClientOGL);
-}
-
 GrallocTextureClientOGL::GrallocTextureClientOGL(ISurfaceAllocator* aAllocator,
                                                  gfx::SurfaceFormat aFormat,
                                                  gfx::BackendType aMoz2dBackend,
                                                  TextureFlags aFlags)
 : BufferTextureClient(aAllocator, aFormat, aMoz2dBackend, aFlags)
+, mGrallocHandle(null_t())
 , mMappedBuffer(nullptr)
 , mMediaBuffer(nullptr)
+, mIsOpaque(gfx::IsOpaque(aFormat))
 {
   MOZ_COUNT_CTOR(GrallocTextureClientOGL);
 }
@@ -77,20 +36,36 @@ GrallocTextureClientOGL::GrallocTextureClientOGL(ISurfaceAllocator* aAllocator,
 GrallocTextureClientOGL::~GrallocTextureClientOGL()
 {
   MOZ_COUNT_DTOR(GrallocTextureClientOGL);
-    if (ShouldDeallocateInDestructor()) {
-    ISurfaceAllocator* allocator = GetAllocator();
-    allocator->DeallocGrallocBuffer(mGrallocActor);
+  ISurfaceAllocator* allocator = GetAllocator();
+  if (ShouldDeallocateInDestructor()) {
+    allocator->DeallocGrallocBuffer(&mGrallocHandle);
+  } else {
+    allocator->DropGrallocBuffer(&mGrallocHandle);
   }
 }
 
-void
-GrallocTextureClientOGL::InitWith(GrallocBufferActor* aActor, gfx::IntSize aSize)
+TemporaryRef<TextureClient>
+GrallocTextureClientOGL::CreateSimilar(TextureFlags aFlags,
+                                       TextureAllocationFlags aAllocFlags) const
 {
-  MOZ_ASSERT(aActor);
+  RefPtr<TextureClient> tex = new GrallocTextureClientOGL(
+    mAllocator, mFormat, mBackend, mFlags | aFlags
+  );
+
+  if (!tex->AllocateForSurface(mSize, aAllocFlags)) {
+    return nullptr;
+  }
+
+  return tex;
+}
+
+void
+GrallocTextureClientOGL::InitWith(MaybeMagicGrallocBufferHandle aHandle, gfx::IntSize aSize)
+{
   MOZ_ASSERT(!IsAllocated());
   MOZ_ASSERT(IsValid());
-  mGrallocActor = aActor;
-  mGraphicBuffer = aActor->GetGraphicBuffer();
+  mGrallocHandle = aHandle;
+  mGraphicBuffer = GetGraphicBufferFrom(aHandle);
   mSize = aSize;
 }
 
@@ -102,26 +77,35 @@ GrallocTextureClientOGL::ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor)
     return false;
   }
 
-  aOutDescriptor = NewSurfaceDescriptorGralloc(nullptr, mGrallocActor, mSize);
+  aOutDescriptor = NewSurfaceDescriptorGralloc(mGrallocHandle, mSize, mIsOpaque);
   return true;
 }
 
 void
-GrallocTextureClientOGL::SetReleaseFenceHandle(FenceHandle aReleaseFenceHandle)
+GrallocTextureClientOGL::SetRemoveFromCompositableTracker(AsyncTransactionTracker* aTracker)
 {
-  mReleaseFenceHandle = aReleaseFenceHandle;
+  mRemoveFromCompositableTracker = aTracker;
 }
 
 void
-GrallocTextureClientOGL::WaitReleaseFence()
+GrallocTextureClientOGL::WaitForBufferOwnership(bool aWaitReleaseFence)
 {
+  if (mRemoveFromCompositableTracker) {
+    mRemoveFromCompositableTracker->WaitComplete();
+    mRemoveFromCompositableTracker = nullptr;
+  }
+
+  if (!aWaitReleaseFence) {
+    return;
+  }
+
 #if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
    if (mReleaseFenceHandle.IsValid()) {
      android::sp<Fence> fence = mReleaseFenceHandle.mFence;
 #if ANDROID_VERSION == 17
      fence->waitForever(1000, "GrallocTextureClientOGL::Lock");
-     // 1000 is what Android uses. It is warning timeout ms.
-     // This timeous is removed since ANDROID_VERSION 18. 
+     // 1000 is what Android uses. It is a warning timeout in ms.
+     // This timeout was removed in ANDROID_VERSION 18.
 #else
      fence->waitForever("GrallocTextureClientOGL::Lock");
 #endif
@@ -142,16 +126,32 @@ GrallocTextureClientOGL::Lock(OpenMode aMode)
     return true;
   }
 
-  WaitReleaseFence();
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 21
+  WaitForBufferOwnership(false /* aWaitReleaseFence */);
+#else
+  WaitForBufferOwnership();
+#endif
 
   uint32_t usage = 0;
-  if (aMode & OPEN_READ) {
+  if (aMode & OpenMode::OPEN_READ) {
     usage |= GRALLOC_USAGE_SW_READ_OFTEN;
   }
-  if (aMode & OPEN_WRITE) {
+  if (aMode & OpenMode::OPEN_WRITE) {
     usage |= GRALLOC_USAGE_SW_WRITE_OFTEN;
   }
-  int32_t rv = mGraphicBuffer->lock(usage, reinterpret_cast<void**>(&mMappedBuffer));
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 21
+  android::sp<Fence> fence = android::Fence::NO_FENCE;
+  if (mReleaseFenceHandle.IsValid()) {
+    fence = mReleaseFenceHandle.mFence;
+  }
+  mReleaseFenceHandle = FenceHandle();
+  int32_t rv = mGraphicBuffer->lockAsync(usage,
+                                         reinterpret_cast<void**>(&mMappedBuffer),
+                                         fence->dup());
+#else
+  int32_t rv = mGraphicBuffer->lock(usage,
+                                    reinterpret_cast<void**>(&mMappedBuffer));
+#endif
   if (rv) {
     mMappedBuffer = nullptr;
     NS_WARNING("Couldn't lock graphic buffer");
@@ -191,17 +191,23 @@ SurfaceFormatForPixelFormat(android::PixelFormat aFormat)
     return gfx::SurfaceFormat::R8G8B8X8;
   case PIXEL_FORMAT_RGB_565:
     return gfx::SurfaceFormat::R5G6B5;
+  case HAL_PIXEL_FORMAT_YV12:
+    return gfx::SurfaceFormat::YUV;
   default:
     MOZ_CRASH("Unknown gralloc pixel format");
   }
   return gfx::SurfaceFormat::R8G8B8A8;
 }
 
-TemporaryRef<gfx::DrawTarget>
-GrallocTextureClientOGL::GetAsDrawTarget()
+gfx::DrawTarget*
+GrallocTextureClientOGL::BorrowDrawTarget()
 {
   MOZ_ASSERT(IsValid());
-  MOZ_ASSERT(mMappedBuffer, "Calling TextureClient::GetAsDrawTarget without locking :(");
+  MOZ_ASSERT(mMappedBuffer, "Calling TextureClient::BorrowDrawTarget without locking :(");
+
+  if (!IsValid() || !IsAllocated() || !mMappedBuffer) {
+    return nullptr;
+  }
 
   if (mDrawTarget) {
     return mDrawTarget;
@@ -234,17 +240,20 @@ GrallocTextureClientOGL::AllocateForSurface(gfx::IntSize aSize,
     break;
   case gfx::SurfaceFormat::B8G8R8A8:
      format = android::PIXEL_FORMAT_RGBA_8888;
-     mFlags |= TEXTURE_RB_SWAPPED;
+     mFlags |= TextureFlags::RB_SWAPPED;
     break;
   case gfx::SurfaceFormat::R8G8B8X8:
     format = android::PIXEL_FORMAT_RGBX_8888;
     break;
   case gfx::SurfaceFormat::B8G8R8X8:
      format = android::PIXEL_FORMAT_RGBX_8888;
-     mFlags |= TEXTURE_RB_SWAPPED;
+     mFlags |= TextureFlags::RB_SWAPPED;
     break;
   case gfx::SurfaceFormat::R5G6B5:
     format = android::PIXEL_FORMAT_RGB_565;
+    break;
+  case gfx::SurfaceFormat::YUV:
+    format = HAL_PIXEL_FORMAT_YV12;
     break;
   case gfx::SurfaceFormat::A8:
     NS_WARNING("gralloc does not support gfx::SurfaceFormat::A8");
@@ -305,18 +314,16 @@ GrallocTextureClientOGL::AllocateGralloc(gfx::IntSize aSize,
   ISurfaceAllocator* allocator = GetAllocator();
 
   MaybeMagicGrallocBufferHandle handle;
-  PGrallocBufferChild* actor =
+  bool allocateResult =
     allocator->AllocGrallocBuffer(aSize,
                                   aAndroidFormat,
                                   aUsage,
                                   &handle);
-  if (!actor) {
+  if (!allocateResult) {
     return false;
   }
-  GrallocBufferActor* gba = static_cast<GrallocBufferActor*>(actor);
-  gba->InitFromHandle(handle.get_MagicGrallocBufferHandle());
 
-  sp<GraphicBuffer> graphicBuffer = gba->GetGraphicBuffer();
+  sp<GraphicBuffer> graphicBuffer = GetGraphicBufferFrom(handle);
   if (!graphicBuffer.get()) {
     return false;
   }
@@ -325,7 +332,7 @@ GrallocTextureClientOGL::AllocateGralloc(gfx::IntSize aSize,
     return false;
   }
 
-  mGrallocActor = gba;
+  mGrallocHandle = handle;
   mGraphicBuffer = graphicBuffer;
   mSize = aSize;
   return true;
@@ -351,6 +358,29 @@ GrallocTextureClientOGL::GetBufferSize() const
   // see Bug 908196
   MOZ_CRASH("This method should never be called.");
   return 0;
+}
+
+/*static*/ TemporaryRef<TextureClient>
+GrallocTextureClientOGL::FromSharedSurface(gl::SharedSurface* abstractSurf,
+                                           TextureFlags flags)
+{
+  auto surf = gl::SharedSurface_Gralloc::Cast(abstractSurf);
+
+  RefPtr<TextureClient> ret = surf->GetTextureClient();
+
+  TextureFlags mask = TextureFlags::ORIGIN_BOTTOM_LEFT |
+                      TextureFlags::RB_SWAPPED |
+                      TextureFlags::NON_PREMULTIPLIED;
+  TextureFlags required = flags & mask;
+  TextureFlags present = ret->GetFlags() & mask;
+
+  if (present != required) {
+    printf_stderr("Present flags: 0x%x. Required: 0x%x.\n",
+                  (uint32_t)present,
+                  (uint32_t)required);
+    MOZ_CRASH("Flag requirement mismatch.");
+  }
+  return ret.forget();
 }
 
 } // namesapace layers

@@ -12,6 +12,27 @@ API Usage
 .. automodule:: mozversion
     :members: get_version
 
+Examples
+````````
+
+Firefox::
+
+    import mozversion
+
+    version = mozversion.get_version(binary='/path/to/firefox-bin')
+    for (key, value) in sorted(version.items()):
+        if value:
+            print '%s: %s' % (key, value)
+
+Firefox for Android::
+
+    version = mozversion.get_version(binary='path/to/firefox.apk')
+    print version['application_changeset'] # gets hg revision of build
+
+FirefoxOS::
+
+    version = mozversion.get_version(sources='path/to/sources.xml', dm_type='adb')
+    print version['gaia_changeset'] # gets gaia git revision
 
 Command Line Usage
 ------------------
@@ -29,10 +50,10 @@ Options
 ---binary
 '''''''''
 
-This is the path to the target application binary. If this is omitted then
-the current directory is checked for the existance of an application.ini file.
-If not found, then it is assumed the target application is a remote Firefox OS
-instance.
+This is the path to the target application binary or .apk. If this is omitted
+then the current directory is checked for the existance of an
+application.ini file. If not found, then it is assumed the target
+application is a remote Firefox OS instance.
 
 
 ---sources
@@ -56,6 +77,10 @@ Firefox::
     platform_buildid: 20131205075310
     platform_changeset: 39faf812aaec
     platform_repository: http://hg.mozilla.org/releases/mozilla-release
+
+Firefox for Android::
+
+    $ mozversion --binary=/path/to/firefox.apk
 
 Firefox OS::
 

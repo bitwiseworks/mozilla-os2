@@ -11,17 +11,11 @@
  */
 
 enum PanningModelType {
-  // Hack: Use numbers to support alternate enum values
-  "0", "1",
-
   "equalpower",
   "HRTF"
 };
 
 enum DistanceModelType {
-  // Hack: Use numbers to support alternate enum values
-  "0", "1", "2",
-
   "linear",
   "inverse",
   "exponential"
@@ -29,42 +23,27 @@ enum DistanceModelType {
 
 interface PannerNode : AudioNode {
 
-    // Default for stereo is HRTF 
+    // Default for stereo is equalpower
     attribute PanningModelType panningModel;
 
-    // Uses a 3D cartesian coordinate system 
+    // Uses a 3D cartesian coordinate system
     void setPosition(double x, double y, double z);
     void setOrientation(double x, double y, double z);
     void setVelocity(double x, double y, double z);
 
-    // Distance model and attributes 
+    // Distance model and attributes
     attribute DistanceModelType distanceModel;
     attribute double refDistance;
     attribute double maxDistance;
     attribute double rolloffFactor;
 
-    // Directional sound cone 
+    // Directional sound cone
     attribute double coneInnerAngle;
     attribute double coneOuterAngle;
     attribute double coneOuterGain;
 
 };
 
-/*
- * The origin of this IDL file is
- * https://dvcs.w3.org/hg/audio/raw-file/tip/webaudio/specification.html#AlternateNames
- */
-partial interface PannerNode {
-    [Pref="media.webaudio.legacy.PannerNode"]
-    const unsigned short EQUALPOWER = 0;
-    [Pref="media.webaudio.legacy.PannerNode"]
-    const unsigned short HRTF = 1;
-
-    [Pref="media.webaudio.legacy.PannerNode"]
-    const unsigned short LINEAR_DISTANCE = 0;
-    [Pref="media.webaudio.legacy.PannerNode"]
-    const unsigned short INVERSE_DISTANCE = 1;
-    [Pref="media.webaudio.legacy.PannerNode"]
-    const unsigned short EXPONENTIAL_DISTANCE = 2;
-};
+// Mozilla extension
+PannerNode implements AudioNodePassThrough;
 

@@ -14,6 +14,7 @@
 #include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
 #include "mozilla/Likely.h"
+#include "CounterStyleManager.h"
 
 class nsCounterList;
 struct nsCounterUseNode;
@@ -25,7 +26,7 @@ struct nsCounterNode : public nsGenConNode {
         INCREMENT, // a "counter number" pair in 'counter-increment'
         USE        // counter() or counters() in 'content'
     };
-    
+
     Type mType;
 
     // Counter value after this node
@@ -79,23 +80,35 @@ struct nsCounterUseNode : public nsCounterNode {
     // The same structure passed through the style system:  an array
     // containing the values in the counter() or counters() in the order
     // given in the CSS spec.
-    nsRefPtr<nsCSSValue::Array> mCounterStyle;
+    nsRefPtr<nsCSSValue::Array> mCounterFunction;
+
+    nsPresContext* mPresContext;
+    nsRefPtr<mozilla::CounterStyle> mCounterStyle;
 
     // false for counter(), true for counters()
     bool mAllCounters;
 
     // args go directly to member variables here and of nsGenConNode
-    nsCounterUseNode(nsCSSValue::Array* aCounterStyle,
+    nsCounterUseNode(nsPresContext* aPresContext,
+                     nsCSSValue::Array* aCounterFunction,
                      uint32_t aContentIndex, bool aAllCounters)
         : nsCounterNode(aContentIndex, USE)
-        , mCounterStyle(aCounterStyle)
+        , mCounterFunction(aCounterFunction)
+        , mPresContext(aPresContext)
+        , mCounterStyle(nullptr)
         , mAllCounters(aAllCounters)
     {
         NS_ASSERTION(aContentIndex <= INT32_MAX, "out of range");
     }
-    
+
     virtual bool InitTextFrame(nsGenConList* aList,
-            nsIFrame* aPseudoFrame, nsIFrame* aTextFrame) MOZ_OVERRIDE;
+            nsIFrame* aPseudoFrame, nsIFrame* aTextFrame) override;
+
+    mozilla::CounterStyle* GetCounterStyle();
+    void SetCounterStyleDirty()
+    {
+        mCounterStyle = nullptr;
+    }
 
     // assign the correct |mValueAfter| value to a node that has been inserted
     // Should be called immediately after calling |Insert|.
@@ -190,7 +203,7 @@ public:
 
     // Correctly set |aNode->mScopeStart| and |aNode->mScopePrev|
     void SetScope(nsCounterNode *aNode);
-  
+
     // Recalculate |mScopeStart|, |mScopePrev|, and |mValueAfter| for
     // all nodes and update text in text content nodes.
     void RecalcAll();
@@ -213,11 +226,14 @@ public:
     bool AddCounterResetsAndIncrements(nsIFrame *aFrame);
 
     // Gets the appropriate counter list, creating it if necessary.
-    // Returns null only on out-of-memory.
+    // Guaranteed to return non-null. (Uses an infallible hashtable API.)
     nsCounterList* CounterListFor(const nsSubstring& aCounterName);
 
     // Clean up data in any dirty counter lists.
     void RecalcAll();
+
+    // Set all counter styles dirty
+    void SetAllCounterStylesDirty();
 
     // Destroy nodes for the frame in any lists, and return whether any
     // nodes were destroyed.

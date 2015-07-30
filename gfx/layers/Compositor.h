@@ -13,6 +13,7 @@
 #include "mozilla/gfx/Rect.h"           // for Rect, IntRect
 #include "mozilla/gfx/Types.h"          // for Float
 #include "mozilla/layers/CompositorTypes.h"  // for DiagnosticTypes, etc
+#include "mozilla/layers/FenceUtils.h"  // for FenceHandle
 #include "mozilla/layers/LayersTypes.h"  // for LayersBackend
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsRegion.h"
@@ -99,7 +100,7 @@
  * under gfx/layers/. To add a new backend, implement at least the following
  * interfaces:
  * - Compositor (ex. CompositorOGL)
- * - TextureHost (ex. SharedTextureHostOGL)
+ * - TextureHost (ex. SurfaceTextureHost)
  * Depending on the type of data that needs to be serialized, you may need to
  * add specific TextureClient implementations.
  */
@@ -122,7 +123,7 @@ struct EffectChain;
 class Image;
 class ISurfaceAllocator;
 class Layer;
-class NewTextureSource;
+class TextureSource;
 class DataTextureSource;
 class CompositingRenderTarget;
 class PCompositorParent;
@@ -132,17 +133,6 @@ enum SurfaceInitMode
 {
   INIT_MODE_NONE,
   INIT_MODE_CLEAR
-};
-
-/**
- * A base class for a platform-dependent helper for use by TextureHost.
- */
-class CompositorBackendSpecificData
-{
-  NS_INLINE_DECL_REFCOUNTING(CompositorBackendSpecificData)
-
-protected:
-  virtual ~CompositorBackendSpecificData() {}
 };
 
 /**
@@ -175,8 +165,6 @@ protected:
  *    construct an EffectChain for the quad,
  *    call DrawQuad,
  *  call EndFrame.
- * If the user has to stop compositing at any point before EndFrame, call
- * AbortFrame.
  * If the compositor is usually used for compositing but compositing is
  * temporarily done without the compositor, call EndFrameForExternalComposition
  * after compositing each frame so the compositor can remain internally
@@ -197,15 +185,15 @@ protected:
 public:
   NS_INLINE_DECL_REFCOUNTING(Compositor)
 
-  Compositor(PCompositorParent* aParent = nullptr)
+  explicit Compositor(PCompositorParent* aParent = nullptr)
     : mCompositorID(0)
-    , mDiagnosticTypes(DIAGNOSTIC_NONE)
+    , mDiagnosticTypes(DiagnosticTypes::NO_DIAGNOSTIC)
     , mParent(aParent)
     , mScreenRotation(ROTATION_0)
   {
   }
 
-  virtual TemporaryRef<DataTextureSource> CreateDataTextureSource(TextureFlags aFlags = 0) = 0;
+  virtual TemporaryRef<DataTextureSource> CreateDataTextureSource(TextureFlags aFlags = TextureFlags::NO_FLAGS) = 0;
   virtual bool Initialize() = 0;
   virtual void Destroy() = 0;
 
@@ -238,7 +226,15 @@ public:
    * If this method is not used, or we pass in nullptr, we target the compositor's
    * usual swap chain and render to the screen.
    */
-  virtual void SetTargetContext(gfx::DrawTarget* aTarget) = 0;
+  void SetTargetContext(gfx::DrawTarget* aTarget, const nsIntRect& aRect)
+  {
+    mTarget = aTarget;
+    mTargetBounds = aRect;
+  }
+  void ClearTargetContext()
+  {
+    mTarget = nullptr;
+  }
 
   typedef uint32_t MakeCurrentFlags;
   static const MakeCurrentFlags ForceMakeCurrent = 0x1;
@@ -308,19 +304,10 @@ public:
                         const EffectChain& aEffectChain,
                         gfx::Float aOpacity, const gfx::Matrix4x4 &aTransform) = 0;
 
-  /**
-   * Tell the compositor to draw lines connecting the points. Behaves like
-   * DrawQuad.
-   */
-  virtual void DrawLines(const std::vector<gfx::Point>& aLines, const gfx::Rect& aClipRect,
-                         const gfx::Color& aColor,
-                         gfx::Float aOpacity, const gfx::Matrix4x4 &aTransform)
-  { /* Should turn into pure virtual once implemented in D3D */ }
-
   /*
    * Clear aRect on current render target.
    */
-  virtual void ClearRect(const gfx::Rect& aRect) { }
+  virtual void ClearRect(const gfx::Rect& aRect) = 0;
 
   /**
    * Start a new frame.
@@ -343,7 +330,6 @@ public:
    */
   virtual void BeginFrame(const nsIntRegion& aInvalidRegion,
                           const gfx::Rect* aClipRectIn,
-                          const gfx::Matrix& aTransform,
                           const gfx::Rect& aRenderBounds,
                           gfx::Rect* aClipRectOut = nullptr,
                           gfx::Rect* aRenderBoundsOut = nullptr) = 0;
@@ -355,6 +341,11 @@ public:
 
   virtual void SetFBAcquireFence(Layer* aLayer) {}
 
+  virtual FenceHandle GetReleaseFence()
+  {
+    return FenceHandle();
+  }
+
   /**
    * Post-rendering stuff if the rendering is done outside of this Compositor
    * e.g., by Composer2D.
@@ -363,22 +354,14 @@ public:
   virtual void EndFrameForExternalComposition(const gfx::Matrix& aTransform) = 0;
 
   /**
-   * Tidy up if BeginFrame has been called, but EndFrame won't be.
-   */
-  virtual void AbortFrame() = 0;
-
-  /**
    * Setup the viewport and projection matrix for rendering to a target of the
    * given dimensions. The size and transform here will override those set in
    * BeginFrame. BeginFrame sets a size and transform for the default render
    * target, usually the screen. Calling this method prepares the compositor to
    * render using a different viewport (that is, size and transform), usually
    * associated with a new render target.
-   * aWorldTransform is the transform from user space to the new viewport's
-   * coordinate space.
    */
-  virtual void PrepareViewport(const gfx::IntSize& aSize,
-                               const gfx::Matrix& aWorldTransform) = 0;
+  virtual void PrepareViewport(const gfx::IntSize& aSize) = 0;
 
   /**
    * Whether textures created by this compositor can receive partial updates.
@@ -480,10 +463,6 @@ public:
     return fillRatio;
   }
 
-  virtual CompositorBackendSpecificData* GetCompositorBackendSpecificData() {
-    return nullptr;
-  }
-
   ScreenRotation GetScreenRotation() const {
     return mScreenRotation;
   }
@@ -491,15 +470,6 @@ public:
   void SetScreenRotation(ScreenRotation aRotation) {
     mScreenRotation = aRotation;
   }
-
-  // On b2g the clip rect is in the coordinate space of the physical screen
-  // independently of its rotation, while the coordinate space of the layers,
-  // on the other hand, depends on the screen orientation.
-  // This only applies to b2g as with other platforms, orientation is handled
-  // at the OS level rather than in Gecko.
-  // In addition, the clip rect needs to be offset by the rendering origin.
-  // This becomes important if intermediate surfaces are used.
-  gfx::Rect ClipRectInLayersCoordinates(gfx::Rect aClip) const;
 
 protected:
   void DrawDiagnosticsInternal(DiagnosticFlags aFlags,
@@ -531,10 +501,20 @@ protected:
 
   virtual gfx::IntSize GetWidgetSize() const = 0;
 
+  RefPtr<gfx::DrawTarget> mTarget;
+  nsIntRect mTargetBounds;
+
 private:
   static LayersBackend sBackend;
 
 };
+
+// Returns the number of rects. (Up to 4)
+typedef gfx::Rect decomposedRectArrayT[4];
+size_t DecomposeIntoNoRepeatRects(const gfx::Rect& aRect,
+                                  const gfx::Rect& aTexCoordRect,
+                                  decomposedRectArrayT* aLayerRects,
+                                  decomposedRectArrayT* aTextureRects);
 
 } // namespace layers
 } // namespace mozilla

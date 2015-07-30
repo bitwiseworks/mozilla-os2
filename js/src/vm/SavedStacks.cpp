@@ -4,28 +4,99 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
 #include "vm/SavedStacks.h"
 
-#include "jscompartment.h"
-#include "jsnum.h"
+#include "mozilla/Attributes.h"
 
-#include "vm/GlobalObject.h"
+#include <math.h>
+
+#include "jsapi.h"
+#include "jscompartment.h"
+#include "jsfriendapi.h"
+#include "jshashutil.h"
+#include "jsmath.h"
+#include "jsnum.h"
+#include "jsscript.h"
+#include "prmjtime.h"
+
+#include "gc/Marking.h"
+#include "gc/Rooting.h"
+#include "js/Vector.h"
+#include "vm/Debugger.h"
 #include "vm/StringBuffer.h"
 
-#include "jsobjinlines.h"
+#include "jscntxtinlines.h"
+
+#include "vm/NativeObject-inl.h"
 
 using mozilla::AddToHash;
 using mozilla::HashString;
 
 namespace js {
 
+struct SavedFrame::Lookup {
+    Lookup(JSAtom* source, uint32_t line, uint32_t column, JSAtom* functionDisplayName,
+           SavedFrame* parent, JSPrincipals* principals)
+      : source(source),
+        line(line),
+        column(column),
+        functionDisplayName(functionDisplayName),
+        parent(parent),
+        principals(principals)
+    {
+        MOZ_ASSERT(source);
+    }
+
+    JSAtom*      source;
+    uint32_t     line;
+    uint32_t     column;
+    JSAtom*      functionDisplayName;
+    SavedFrame*  parent;
+    JSPrincipals* principals;
+
+    void trace(JSTracer* trc) {
+        gc::MarkStringUnbarriered(trc, &source, "SavedFrame::Lookup::source");
+        if (functionDisplayName) {
+            gc::MarkStringUnbarriered(trc, &functionDisplayName,
+                                      "SavedFrame::Lookup::functionDisplayName");
+        }
+        if (parent) {
+            gc::MarkObjectUnbarriered(trc, &parent,
+                                      "SavedFrame::Lookup::parent");
+        }
+    }
+};
+
+class MOZ_STACK_CLASS SavedFrame::AutoLookupVector : public JS::CustomAutoRooter {
+  public:
+    explicit AutoLookupVector(JSContext* cx)
+      : JS::CustomAutoRooter(cx),
+        lookups(cx)
+    { }
+
+    typedef Vector<Lookup, 20> LookupVector;
+    inline LookupVector* operator->() { return &lookups; }
+    inline Lookup& operator[](size_t i) { return lookups[i]; }
+
+  private:
+    LookupVector lookups;
+
+    virtual void trace(JSTracer* trc) {
+        for (size_t i = 0; i < lookups.length(); i++)
+            lookups[i].trace(trc);
+    }
+};
+
 /* static */ HashNumber
 SavedFrame::HashPolicy::hash(const Lookup& lookup)
 {
-    return AddToHash(HashString(lookup.source->chars(), lookup.source->length()),
-                     lookup.line,
+    JS::AutoCheckCannotGC nogc;
+    // Assume that we can take line mod 2^32 without losing anything of
+    // interest.  If that assumption changes, we'll just need to start with 0
+    // and add another overload of AddToHash with more arguments.
+    return AddToHash(lookup.line,
                      lookup.column,
+                     lookup.source,
                      lookup.functionDisplayName,
                      SavedFramePtrHasher::hash(lookup.parent),
                      JSPrincipalsPtrHasher::hash(lookup.principals));
@@ -47,22 +118,12 @@ SavedFrame::HashPolicy::match(SavedFrame* existing, const Lookup& lookup)
         return false;
 
     JSAtom* source = existing->getSource();
-    if (source->length() != lookup.source->length())
-        return false;
     if (source != lookup.source)
         return false;
 
     JSAtom* functionDisplayName = existing->getFunctionDisplayName();
-    if (functionDisplayName) {
-        if (!lookup.functionDisplayName)
-            return false;
-        if (functionDisplayName->length() != lookup.functionDisplayName->length())
-            return false;
-        if (0 != CompareAtoms(functionDisplayName, lookup.functionDisplayName))
-            return false;
-    } else if (lookup.functionDisplayName) {
+    if (functionDisplayName != lookup.functionDisplayName)
         return false;
-    }
 
     return true;
 }
@@ -73,20 +134,67 @@ SavedFrame::HashPolicy::rekey(Key& key, const Key& newKey)
     key = newKey;
 }
 
+/* static */ bool
+SavedFrame::finishSavedFrameInit(JSContext* cx, HandleObject ctor, HandleObject proto)
+{
+    // The only object with the SavedFrame::class_ that doesn't have a source
+    // should be the prototype.
+    proto->as<NativeObject>().setReservedSlot(SavedFrame::JSSLOT_SOURCE, NullValue());
+
+    return FreezeObject(cx, proto);
+}
+
 /* static */ const Class SavedFrame::class_ = {
     "SavedFrame",
     JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS |
-    JSCLASS_HAS_RESERVED_SLOTS(SavedFrame::JSSLOT_COUNT),
+    JSCLASS_HAS_RESERVED_SLOTS(SavedFrame::JSSLOT_COUNT) |
+    JSCLASS_HAS_CACHED_PROTO(JSProto_SavedFrame) |
+    JSCLASS_IS_ANONYMOUS,
+    nullptr,                    // addProperty
+    nullptr,                    // delProperty
+    nullptr,                    // getProperty
+    nullptr,                    // setProperty
+    nullptr,                    // enumerate
+    nullptr,                    // resolve
+    nullptr,                    // convert
+    SavedFrame::finalize,       // finalize
+    nullptr,                    // call
+    nullptr,                    // hasInstance
+    nullptr,                    // construct
+    nullptr,                    // trace
 
-    JS_PropertyStub,       // addProperty
-    JS_DeletePropertyStub, // delProperty
-    JS_PropertyStub,       // getProperty
-    JS_StrictPropertyStub, // setProperty
-    JS_EnumerateStub,      // enumerate
-    JS_ResolveStub,        // resolve
-    JS_ConvertStub,        // convert
+    // ClassSpec
+    {
+        GenericCreateConstructor<SavedFrame::construct, 0, JSFunction::FinalizeKind>,
+        GenericCreatePrototype,
+        SavedFrame::staticFunctions,
+        SavedFrame::protoFunctions,
+        SavedFrame::protoAccessors,
+        SavedFrame::finishSavedFrameInit,
+        ClassSpec::DontDefineConstructor
+    }
+};
 
-    SavedFrame::finalize   // finalize
+/* static */ const JSFunctionSpec
+SavedFrame::staticFunctions[] = {
+    JS_FS_END
+};
+
+/* static */ const JSFunctionSpec
+SavedFrame::protoFunctions[] = {
+    JS_FN("constructor", SavedFrame::construct, 0, 0),
+    JS_FN("toString", SavedFrame::toStringMethod, 0, 0),
+    JS_FS_END
+};
+
+/* static */ const JSPropertySpec
+SavedFrame::protoAccessors[] = {
+    JS_PSG("source", SavedFrame::sourceProperty, 0),
+    JS_PSG("line", SavedFrame::lineProperty, 0),
+    JS_PSG("column", SavedFrame::columnProperty, 0),
+    JS_PSG("functionDisplayName", SavedFrame::functionDisplayNameProperty, 0),
+    JS_PSG("parent", SavedFrame::parentProperty, 0),
+    JS_PS_END
 };
 
 /* static */ void
@@ -107,14 +215,14 @@ SavedFrame::getSource()
     return &s->asAtom();
 }
 
-size_t
+uint32_t
 SavedFrame::getLine()
 {
     const Value& v = getReservedSlot(JSSLOT_LINE);
     return v.toInt32();
 }
 
-size_t
+uint32_t
 SavedFrame::getColumn()
 {
     const Value& v = getReservedSlot(JSSLOT_COLUMN);
@@ -148,25 +256,25 @@ SavedFrame::getPrincipals()
 }
 
 void
-SavedFrame::initFromLookup(Lookup& lookup)
+SavedFrame::initFromLookup(SavedFrame::HandleLookup lookup)
 {
-    JS_ASSERT(lookup.source);
-    JS_ASSERT(getReservedSlot(JSSLOT_SOURCE).isUndefined());
-    setReservedSlot(JSSLOT_SOURCE, StringValue(lookup.source));
+    MOZ_ASSERT(lookup->source);
+    MOZ_ASSERT(getReservedSlot(JSSLOT_SOURCE).isUndefined());
+    setReservedSlot(JSSLOT_SOURCE, StringValue(lookup->source));
 
-    setReservedSlot(JSSLOT_LINE, NumberValue(lookup.line));
-    setReservedSlot(JSSLOT_COLUMN, NumberValue(lookup.column));
+    setReservedSlot(JSSLOT_LINE, NumberValue(lookup->line));
+    setReservedSlot(JSSLOT_COLUMN, NumberValue(lookup->column));
     setReservedSlot(JSSLOT_FUNCTIONDISPLAYNAME,
-                    lookup.functionDisplayName
-                        ? StringValue(lookup.functionDisplayName)
+                    lookup->functionDisplayName
+                        ? StringValue(lookup->functionDisplayName)
                         : NullValue());
-    setReservedSlot(JSSLOT_PARENT, ObjectOrNullValue(lookup.parent));
-    setReservedSlot(JSSLOT_PRIVATE_PARENT, PrivateValue(lookup.parent));
+    setReservedSlot(JSSLOT_PARENT, ObjectOrNullValue(lookup->parent));
+    setReservedSlot(JSSLOT_PRIVATE_PARENT, PrivateValue(lookup->parent));
 
-    JS_ASSERT(getReservedSlot(JSSLOT_PRINCIPALS).isUndefined());
-    if (lookup.principals)
-        JS_HoldPrincipals(lookup.principals);
-    setReservedSlot(JSSLOT_PRINCIPALS, PrivateValue(lookup.principals));
+    MOZ_ASSERT(getReservedSlot(JSSLOT_PRINCIPALS).isUndefined());
+    if (lookup->principals)
+        JS_HoldPrincipals(lookup->principals);
+    setReservedSlot(JSSLOT_PRINCIPALS, PrivateValue(lookup->principals));
 }
 
 bool
@@ -198,33 +306,67 @@ SavedFrame::construct(JSContext* cx, unsigned argc, Value* vp)
     return false;
 }
 
-/* static */ SavedFrame*
-SavedFrame::checkThis(JSContext* cx, CallArgs& args, const char* fnName)
+// Return the first SavedFrame in the chain that starts with |frame| whose
+// principals are subsumed by |principals|, according to |subsumes|. If there is
+// no such frame, return nullptr.
+static SavedFrame*
+GetFirstSubsumedFrame(JSContext* cx, HandleSavedFrame frame)
+{
+    JSSubsumesOp subsumes = cx->runtime()->securityCallbacks->subsumes;
+    if (!subsumes)
+        return frame;
+
+    JSPrincipals* principals = cx->compartment()->principals;
+
+    RootedSavedFrame rootedFrame(cx, frame);
+    while (rootedFrame && !subsumes(principals, rootedFrame->getPrincipals()))
+        rootedFrame = rootedFrame->getParent();
+
+    return rootedFrame;
+}
+
+JS_FRIEND_API(JSObject*)
+GetFirstSubsumedSavedFrame(JSContext* cx, HandleObject savedFrame)
+{
+    if (!savedFrame)
+        return nullptr;
+    RootedSavedFrame frame(cx, &savedFrame->as<SavedFrame>());
+    return GetFirstSubsumedFrame(cx, frame);
+}
+
+/* static */ bool
+SavedFrame::checkThis(JSContext* cx, CallArgs& args, const char* fnName,
+                      MutableHandleSavedFrame frame)
 {
     const Value& thisValue = args.thisv();
 
     if (!thisValue.isObject()) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT);
-        return nullptr;
+        return false;
     }
 
-    JSObject& thisObject = thisValue.toObject();
-    if (!thisObject.is<SavedFrame>()) {
+    JSObject* thisObject = CheckedUnwrap(&thisValue.toObject());
+    if (!thisObject || !thisObject->is<SavedFrame>()) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             SavedFrame::class_.name, fnName, thisObject.getClass()->name);
-        return nullptr;
+                             SavedFrame::class_.name, fnName,
+                             thisObject ? thisObject->getClass()->name : "object");
+        return false;
     }
 
     // Check for SavedFrame.prototype, which has the same class as SavedFrame
     // instances, however doesn't actually represent a captured stack frame. It
     // is the only object that is<SavedFrame>() but doesn't have a source.
-    if (thisObject.getReservedSlot(JSSLOT_SOURCE).isNull()) {
+    if (thisObject->as<SavedFrame>().getReservedSlot(JSSLOT_SOURCE).isNull()) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
                              SavedFrame::class_.name, fnName, "prototype object");
-        return nullptr;
+        return false;
     }
 
-    return &thisObject.as<SavedFrame>();
+    // The caller might not have the principals to see this frame's data, so get
+    // the first one they _do_ have access to.
+    RootedSavedFrame rooted(cx, &thisObject->as<SavedFrame>());
+    frame.set(GetFirstSubsumedFrame(cx, rooted));
+    return true;
 }
 
 // Get the SavedFrame * from the current this value and handle any errors that
@@ -235,19 +377,24 @@ SavedFrame::checkThis(JSContext* cx, CallArgs& args, const char* fnName)
 //   - unsigned   argc
 //   - Value*     vp
 //   - const char* fnName
+//   - Value      defaultVal
 // These parameters will be defined after calling this macro:
 //   - CallArgs args
 //   - Rooted<SavedFrame*> frame (will be non-null)
-#define THIS_SAVEDFRAME(cx, argc, vp, fnName, args, frame)         \
-    CallArgs args = CallArgsFromVp(argc, vp);                      \
-    Rooted<SavedFrame*> frame(cx, checkThis(cx, args, fnName));   \
-    if (!frame)                                                    \
-        return false
+#define THIS_SAVEDFRAME(cx, argc, vp, fnName, defaultVal, args, frame) \
+    CallArgs args = CallArgsFromVp(argc, vp);                          \
+    RootedSavedFrame frame(cx);                                        \
+    if (!checkThis(cx, args, fnName, &frame))                          \
+        return false;                                                  \
+    if (!frame) {                                                      \
+        args.rval().set(defaultVal);                                   \
+        return true;                                                   \
+    }
 
 /* static */ bool
 SavedFrame::sourceProperty(JSContext* cx, unsigned argc, Value* vp)
 {
-    THIS_SAVEDFRAME(cx, argc, vp, "(get source)", args, frame);
+    THIS_SAVEDFRAME(cx, argc, vp, "(get source)", NullValue(), args, frame);
     args.rval().setString(frame->getSource());
     return true;
 }
@@ -255,7 +402,7 @@ SavedFrame::sourceProperty(JSContext* cx, unsigned argc, Value* vp)
 /* static */ bool
 SavedFrame::lineProperty(JSContext* cx, unsigned argc, Value* vp)
 {
-    THIS_SAVEDFRAME(cx, argc, vp, "(get line)", args, frame);
+    THIS_SAVEDFRAME(cx, argc, vp, "(get line)", NullValue(), args, frame);
     uint32_t line = frame->getLine();
     args.rval().setNumber(line);
     return true;
@@ -264,7 +411,7 @@ SavedFrame::lineProperty(JSContext* cx, unsigned argc, Value* vp)
 /* static */ bool
 SavedFrame::columnProperty(JSContext* cx, unsigned argc, Value* vp)
 {
-    THIS_SAVEDFRAME(cx, argc, vp, "(get column)", args, frame);
+    THIS_SAVEDFRAME(cx, argc, vp, "(get column)", NullValue(), args, frame);
     uint32_t column = frame->getColumn();
     args.rval().setNumber(column);
     return true;
@@ -273,7 +420,7 @@ SavedFrame::columnProperty(JSContext* cx, unsigned argc, Value* vp)
 /* static */ bool
 SavedFrame::functionDisplayNameProperty(JSContext* cx, unsigned argc, Value* vp)
 {
-    THIS_SAVEDFRAME(cx, argc, vp, "(get functionDisplayName)", args, frame);
+    THIS_SAVEDFRAME(cx, argc, vp, "(get functionDisplayName)", NullValue(), args, frame);
     RootedAtom name(cx, frame->getFunctionDisplayName());
     if (name)
         args.rval().setString(name);
@@ -285,78 +432,70 @@ SavedFrame::functionDisplayNameProperty(JSContext* cx, unsigned argc, Value* vp)
 /* static */ bool
 SavedFrame::parentProperty(JSContext* cx, unsigned argc, Value* vp)
 {
-    THIS_SAVEDFRAME(cx, argc, vp, "(get parent)", args, frame);
-    JSSubsumesOp subsumes = cx->runtime()->securityCallbacks->subsumes;
-    JSPrincipals* principals = cx->compartment()->principals;
-
-    do
-        frame = frame->getParent();
-    while (frame && principals && subsumes &&
-           !subsumes(principals, frame->getPrincipals()));
-
-    args.rval().setObjectOrNull(frame);
+    THIS_SAVEDFRAME(cx, argc, vp, "(get parent)", NullValue(), args, frame);
+    RootedSavedFrame parent(cx, frame->getParent());
+    args.rval().setObjectOrNull(GetFirstSubsumedFrame(cx, parent));
     return true;
 }
-
-/* static */ const JSPropertySpec SavedFrame::properties[] = {
-    JS_PSG("source", SavedFrame::sourceProperty, 0),
-    JS_PSG("line", SavedFrame::lineProperty, 0),
-    JS_PSG("column", SavedFrame::columnProperty, 0),
-    JS_PSG("functionDisplayName", SavedFrame::functionDisplayNameProperty, 0),
-    JS_PSG("parent", SavedFrame::parentProperty, 0),
-    JS_PS_END
-};
 
 /* static */ bool
 SavedFrame::toStringMethod(JSContext* cx, unsigned argc, Value* vp)
 {
-    THIS_SAVEDFRAME(cx, argc, vp, "toString", args, frame);
+    THIS_SAVEDFRAME(cx, argc, vp, "toString", StringValue(cx->runtime()->emptyString), args, frame);
     StringBuffer sb(cx);
-    JSSubsumesOp subsumes = cx->runtime()->securityCallbacks->subsumes;
-    JSPrincipals* principals = cx->compartment()->principals;
+    DebugOnly<JSSubsumesOp> subsumes = cx->runtime()->securityCallbacks->subsumes;
+    DebugOnly<JSPrincipals*> principals = cx->compartment()->principals;
 
+    RootedSavedFrame parent(cx);
     do {
-        if (principals && subsumes && !subsumes(principals, frame->getPrincipals()))
-            continue;
+        MOZ_ASSERT_IF(subsumes, (*subsumes)(principals, frame->getPrincipals()));
         if (frame->isSelfHosted())
-            continue;
+            goto nextIteration;
 
-        RootedAtom name(cx, frame->getFunctionDisplayName());
-        if ((name && !sb.append(name))
-            || !sb.append('@')
-            || !sb.append(frame->getSource())
-            || !sb.append(':')
-            || !NumberValueToStringBuffer(cx, NumberValue(frame->getLine()), sb)
-            || !sb.append(':')
-            || !NumberValueToStringBuffer(cx, NumberValue(frame->getColumn()), sb)
-            || !sb.append('\n')) {
-            return false;
+        {
+            RootedAtom name(cx, frame->getFunctionDisplayName());
+            if ((name && !sb.append(name))
+                || !sb.append('@')
+                || !sb.append(frame->getSource())
+                || !sb.append(':')
+                || !NumberValueToStringBuffer(cx, NumberValue(frame->getLine()), sb)
+                || !sb.append(':')
+                || !NumberValueToStringBuffer(cx, NumberValue(frame->getColumn()), sb)
+                || !sb.append('\n'))
+            {
+                return false;
+            }
         }
-    } while ((frame = frame->getParent()));
 
-    args.rval().setString(sb.finishString());
+    nextIteration:
+        parent = frame->getParent();
+        frame = GetFirstSubsumedFrame(cx, parent);
+    } while (frame);
+
+    JSString* str = sb.finishString();
+    if (!str)
+        return false;
+    args.rval().setString(str);
     return true;
 }
-
-/* static */ const JSFunctionSpec SavedFrame::methods[] = {
-    JS_FN("toString", SavedFrame::toStringMethod, 0, 0),
-    JS_FS_END
-};
 
 bool
 SavedStacks::init()
 {
+    if (!pcLocationMap.init())
+        return false;
+
     return frames.init();
 }
 
 bool
-SavedStacks::saveCurrentStack(JSContext* cx, MutableHandle<SavedFrame*> frame)
+SavedStacks::saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame, unsigned maxFrameCount)
 {
-    JS_ASSERT(initialized());
-    JS_ASSERT(&cx->compartment()->savedStacks() == this);
+    MOZ_ASSERT(initialized());
+    assertSameCompartment(cx, this);
 
-    ScriptFrameIter iter(cx);
-    return insertFrames(cx, iter, frame);
+    FrameIter iter(cx, FrameIter::ALL_CONTEXTS, FrameIter::GO_THROUGH_SAVED);
+    return insertFrames(cx, iter, frame, maxFrameCount);
 }
 
 void
@@ -364,10 +503,10 @@ SavedStacks::sweep(JSRuntime* rt)
 {
     if (frames.initialized()) {
         for (SavedFrame::Set::Enum e(frames); !e.empty(); e.popFront()) {
-            JSObject* obj = static_cast<JSObject*>(e.front());
+            JSObject* obj = e.front().unbarrieredGet();
             JSObject* temp = obj;
 
-            if (IsObjectAboutToBeFinalized(&obj)) {
+            if (IsObjectAboutToBeFinalizedFromAnyThread(&obj)) {
                 e.removeFront();
             } else {
                 SavedFrame* frame = &obj->as<SavedFrame>();
@@ -378,28 +517,38 @@ SavedStacks::sweep(JSRuntime* rt)
                 }
 
                 if (obj != temp || parentMoved) {
-                    Rooted<SavedFrame*> parent(rt, frame->getParent());
                     e.rekeyFront(SavedFrame::Lookup(frame->getSource(),
                                                     frame->getLine(),
                                                     frame->getColumn(),
                                                     frame->getFunctionDisplayName(),
-                                                    parent,
+                                                    frame->getParent(),
                                                     frame->getPrincipals()),
-                                 frame);
+                                 ReadBarriered<SavedFrame*>(frame));
                 }
             }
         }
     }
 
-    if (savedFrameProto && IsObjectAboutToBeFinalized(&savedFrameProto)) {
-        savedFrameProto = nullptr;
+    sweepPCLocationMap();
+}
+
+void
+SavedStacks::trace(JSTracer* trc)
+{
+    if (!pcLocationMap.initialized())
+        return;
+
+    // Mark each of the source strings in our pc to location cache.
+    for (PCLocationMap::Enum e(pcLocationMap); !e.empty(); e.popFront()) {
+        LocationValue& loc = e.front().value();
+        MarkString(trc, &loc.source, "SavedStacks::PCLocationMap's memoized script source name");
     }
 }
 
 uint32_t
 SavedStacks::count()
 {
-    JS_ASSERT(initialized());
+    MOZ_ASSERT(initialized());
     return frames.count();
 }
 
@@ -416,97 +565,284 @@ SavedStacks::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
 }
 
 bool
-SavedStacks::insertFrames(JSContext* cx, ScriptFrameIter& iter, MutableHandle<SavedFrame*> frame)
+SavedStacks::insertFrames(JSContext* cx, FrameIter& iter, MutableHandleSavedFrame frame,
+                          unsigned maxFrameCount)
 {
-    if (iter.done()) {
-        frame.set(nullptr);
-        return true;
+    // In order to lookup a cached SavedFrame object, we need to have its parent
+    // SavedFrame, which means we need to walk the stack from oldest frame to
+    // youngest. However, FrameIter walks the stack from youngest frame to
+    // oldest. The solution is to append stack frames to a vector as we walk the
+    // stack with FrameIter, and then do a second pass through that vector in
+    // reverse order after the traversal has completed and get or create the
+    // SavedFrame objects at that time.
+    //
+    // To avoid making many copies of FrameIter (whose copy constructor is
+    // relatively slow), we use a vector of `SavedFrame::Lookup` objects, which
+    // only contain the FrameIter data we need. The `SavedFrame::Lookup`
+    // objects are partially initialized with everything except their parent
+    // pointers on the first pass, and then we fill in the parent pointers as we
+    // return in the second pass.
+
+    // Accumulate the vector of Lookup objects in |stackChain|.
+    SavedFrame::AutoLookupVector stackChain(cx);
+    while (!iter.done()) {
+        AutoLocationValueRooter location(cx);
+
+        {
+            AutoCompartment ac(cx, iter.compartment());
+            if (!cx->compartment()->savedStacks().getLocation(cx, iter, &location))
+                return false;
+        }
+
+        // Use growByUninitialized and placement-new instead of just append.
+        // We'd ideally like to use an emplace method once Vector supports it.
+        if (!stackChain->growByUninitialized(1))
+            return false;
+        new (&stackChain->back()) SavedFrame::Lookup(
+          location->source,
+          location->line,
+          location->column,
+          iter.isNonEvalFunctionFrame() ? iter.functionDisplayAtom() : nullptr,
+          nullptr,
+          iter.compartment()->principals
+        );
+
+        ++iter;
+
+        if (maxFrameCount == 0) {
+            // If maxFrameCount is zero, then there's no limit on the number of
+            // frames.
+            continue;
+        } else if (maxFrameCount == 1) {
+            // Since we were only asked to save one frame, do not continue
+            // walking the stack and saving frame state.
+            break;
+        } else {
+            maxFrameCount--;
+        }
     }
 
-    ScriptFrameIter thisFrame(iter);
-    Rooted<SavedFrame*> parentFrame(cx);
-    if (!insertFrames(cx, ++iter, &parentFrame))
-        return false;
+    // Iterate through |stackChain| in reverse order and get or create the
+    // actual SavedFrame instances.
+    RootedSavedFrame parentFrame(cx, nullptr);
+    for (size_t i = stackChain->length(); i != 0; i--) {
+        SavedFrame::AutoLookupRooter lookup(cx, &stackChain[i-1]);
+        lookup->parent = parentFrame;
+        parentFrame.set(getOrCreateSavedFrame(cx, lookup));
+        if (!parentFrame)
+            return false;
+    }
 
-    RootedScript script(cx, thisFrame.script());
-    RootedFunction callee(cx, thisFrame.maybeCallee());
-    const char* filename = script->filename();
-    RootedAtom source(cx, Atomize(cx, filename, strlen(filename)));
-    if (!source)
-        return false;
-    uint32_t column;
-    uint32_t line = PCToLineNumber(script, thisFrame.pc(), &column);
-
-    SavedFrame::Lookup lookup(source,
-                              line,
-                              column,
-                              callee ? callee->displayAtom() : nullptr,
-                              parentFrame,
-                              thisFrame.compartment()->principals);
-
-    frame.set(getOrCreateSavedFrame(cx, lookup));
-    return frame.address() != nullptr;
+    frame.set(parentFrame);
+    return true;
 }
 
 SavedFrame*
-SavedStacks::getOrCreateSavedFrame(JSContext* cx, SavedFrame::Lookup& lookup)
+SavedStacks::getOrCreateSavedFrame(JSContext* cx, SavedFrame::HandleLookup lookup)
 {
-    SavedFrame::Set::AddPtr p = frames.lookupForAdd(lookup);
+    const SavedFrame::Lookup& lookupInstance = *lookup;
+    DependentAddPtr<SavedFrame::Set> p(cx, frames, lookupInstance);
     if (p)
         return *p;
 
-    Rooted<SavedFrame*> frame(cx, createFrameFromLookup(cx, lookup));
+    RootedSavedFrame frame(cx, createFrameFromLookup(cx, lookup));
     if (!frame)
         return nullptr;
 
-    if (!frames.relookupOrAdd(p, lookup, frame))
+    if (!p.add(cx, frames, lookupInstance, frame))
         return nullptr;
 
     return frame;
 }
 
-JSObject*
-SavedStacks::getOrCreateSavedFramePrototype(JSContext* cx)
-{
-    if (savedFrameProto)
-        return savedFrameProto;
-
-    Rooted<GlobalObject*> global(cx, cx->compartment()->maybeGlobal());
-    if (!global)
-        return nullptr;
-
-    savedFrameProto = js_InitClass(cx, global, global->getOrCreateObjectPrototype(cx),
-                                   &SavedFrame::class_, SavedFrame::construct, 0,
-                                   SavedFrame::properties, SavedFrame::methods, nullptr, nullptr);
-    // The only object with the SavedFrame::class_ that doesn't have a source
-    // should be the prototype.
-    savedFrameProto->setReservedSlot(SavedFrame::JSSLOT_SOURCE, NullValue());
-    return savedFrameProto;
-}
-
 SavedFrame*
-SavedStacks::createFrameFromLookup(JSContext* cx, SavedFrame::Lookup& lookup)
+SavedStacks::createFrameFromLookup(JSContext* cx, SavedFrame::HandleLookup lookup)
 {
-    RootedObject proto(cx, getOrCreateSavedFramePrototype(cx));
+    RootedGlobalObject global(cx, cx->global());
+    assertSameCompartment(cx, global);
+
+    RootedNativeObject proto(cx, GlobalObject::getOrCreateSavedFramePrototype(cx, global));
     if (!proto)
         return nullptr;
-
-    JS_ASSERT(proto->compartment() == cx->compartment());
-
-    RootedObject global(cx, cx->compartment()->maybeGlobal());
-    if (!global)
-        return nullptr;
-
-    JS_ASSERT(global->compartment() == cx->compartment());
+    assertSameCompartment(cx, proto);
 
     RootedObject frameObj(cx, NewObjectWithGivenProto(cx, &SavedFrame::class_, proto, global));
     if (!frameObj)
         return nullptr;
 
-    SavedFrame& f = frameObj->as<SavedFrame>();
-    f.initFromLookup(lookup);
+    RootedSavedFrame f(cx, &frameObj->as<SavedFrame>());
+    f->initFromLookup(lookup);
 
-    return &f;
+    if (!FreezeObject(cx, frameObj))
+        return nullptr;
+
+    return f.get();
 }
+
+/*
+ * Remove entries from the table whose JSScript is being collected.
+ */
+void
+SavedStacks::sweepPCLocationMap()
+{
+    for (PCLocationMap::Enum e(pcLocationMap); !e.empty(); e.popFront()) {
+        PCKey key = e.front().key();
+        JSScript* script = key.script.get();
+        if (IsScriptAboutToBeFinalizedFromAnyThread(&script)) {
+            e.removeFront();
+        } else if (script != key.script.get()) {
+            key.script = script;
+            e.rekeyFront(key);
+        }
+    }
+}
+
+bool
+SavedStacks::getLocation(JSContext* cx, const FrameIter& iter, MutableHandleLocationValue locationp)
+{
+    // We should only ever be caching location values for scripts in this
+    // compartment. Otherwise, we would get dead cross-compartment scripts in
+    // the cache because our compartment's sweep method isn't called when their
+    // compartment gets collected.
+    assertSameCompartment(cx, this, iter.compartment());
+
+    // When we have a |JSScript| for this frame, use a potentially memoized
+    // location from our PCLocationMap and copy it into |locationp|. When we do
+    // not have a |JSScript| for this frame (asm.js frames), we take a slow path
+    // that doesn't employ memoization, and update |locationp|'s slots directly.
+
+    if (!iter.hasScript()) {
+        if (const char16_t* displayURL = iter.scriptDisplayURL()) {
+            locationp->source = AtomizeChars(cx, displayURL, js_strlen(displayURL));
+        } else {
+            const char* filename = iter.scriptFilename() ? iter.scriptFilename() : "";
+            locationp->source = Atomize(cx, filename, strlen(filename));
+        }
+        if (!locationp->source)
+            return false;
+
+        locationp->line = iter.computeLine(&locationp->column);
+        return true;
+    }
+
+    RootedScript script(cx, iter.script());
+    jsbytecode* pc = iter.pc();
+
+    PCKey key(script, pc);
+    PCLocationMap::AddPtr p = pcLocationMap.lookupForAdd(key);
+
+    if (!p) {
+        RootedAtom source(cx);
+        if (const char16_t* displayURL = iter.scriptDisplayURL()) {
+            source = AtomizeChars(cx, displayURL, js_strlen(displayURL));
+        } else {
+            const char* filename = script->filename() ? script->filename() : "";
+            source = Atomize(cx, filename, strlen(filename));
+        }
+        if (!source)
+            return false;
+
+        uint32_t column;
+        uint32_t line = PCToLineNumber(script, pc, &column);
+
+        LocationValue value(source, line, column);
+        if (!pcLocationMap.add(p, key, value))
+            return false;
+    }
+
+    locationp.set(p->value());
+    return true;
+}
+
+void
+SavedStacks::chooseSamplingProbability(JSContext* cx)
+{
+    GlobalObject::DebuggerVector* dbgs = cx->global()->getDebuggers();
+    if (!dbgs || dbgs->empty())
+        return;
+
+    Debugger* allocationTrackingDbg = nullptr;
+    mozilla::DebugOnly<Debugger**> begin = dbgs->begin();
+
+    for (Debugger** dbgp = dbgs->begin(); dbgp < dbgs->end(); dbgp++) {
+        // The set of debuggers had better not change while we're iterating,
+        // such that the vector gets reallocated.
+        MOZ_ASSERT(dbgs->begin() == begin);
+
+        if ((*dbgp)->trackingAllocationSites && (*dbgp)->enabled)
+            allocationTrackingDbg = *dbgp;
+    }
+
+    if (!allocationTrackingDbg)
+        return;
+
+    allocationSamplingProbability = allocationTrackingDbg->allocationSamplingProbability;
+}
+
+bool
+SavedStacksMetadataCallback(JSContext* cx, JSObject** pmetadata)
+{
+    SavedStacks& stacks = cx->compartment()->savedStacks();
+    if (stacks.allocationSkipCount > 0) {
+        stacks.allocationSkipCount--;
+        return true;
+    }
+
+    stacks.chooseSamplingProbability(cx);
+    if (stacks.allocationSamplingProbability == 0.0)
+        return true;
+
+    // If the sampling probability is set to 1.0, we are always taking a sample
+    // and can therefore leave allocationSkipCount at 0.
+    if (stacks.allocationSamplingProbability != 1.0) {
+        // Rather than generating a random number on every allocation to decide
+        // if we want to sample that particular allocation (which would be
+        // expensive), we calculate the number of allocations to skip before
+        // taking the next sample.
+        //
+        // P = the probability we sample any given event.
+        //
+        // ~P = 1-P, the probability we don't sample a given event.
+        //
+        // (~P)^n = the probability that we skip at least the next n events.
+        //
+        // let X = random between 0 and 1.
+        //
+        // floor(log base ~P of X) = n, aka the number of events we should skip
+        // until we take the next sample. Any value for X less than (~P)^n
+        // yields a skip count greater than n, so the likelihood of a skip count
+        // greater than n is (~P)^n, as required.
+        double notSamplingProb = 1.0 - stacks.allocationSamplingProbability;
+        stacks.allocationSkipCount = std::floor(std::log(random_nextDouble(&stacks.rngState)) /
+                                                std::log(notSamplingProb));
+    }
+
+    RootedSavedFrame frame(cx);
+    if (!stacks.saveCurrentStack(cx, &frame))
+        return false;
+    *pmetadata = frame;
+
+    return Debugger::onLogAllocationSite(cx, frame, PRMJ_Now());
+}
+
+JS_FRIEND_API(JSPrincipals*)
+GetSavedFramePrincipals(HandleObject savedFrame)
+{
+    MOZ_ASSERT(savedFrame);
+    MOZ_ASSERT(savedFrame->is<SavedFrame>());
+    return savedFrame->as<SavedFrame>().getPrincipals();
+}
+
+#ifdef JS_CRASH_DIAGNOSTICS
+void
+CompartmentChecker::check(SavedStacks* stacks)
+{
+    if (&compartment->savedStacks() != stacks) {
+        printf("*** Compartment SavedStacks mismatch: %p vs. %p\n",
+               (void*) &compartment->savedStacks(), stacks);
+        MOZ_CRASH();
+    }
+}
+#endif /* JS_CRASH_DIAGNOSTICS */
 
 } /* namespace js */

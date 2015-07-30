@@ -6,6 +6,5 @@
 
 DIRS += ['public', 'src']
 
-TEST_DIRS += ['test/data']
-
-XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
+XPCSHELL_TESTS_MANIFESTS += ['test/data/xpcshell.ini', 'test/unit/xpcshell.ini']
+BROWSER_CHROME_MANIFESTS += ['test/browser/browser.ini']

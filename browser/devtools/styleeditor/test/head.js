@@ -27,10 +27,38 @@ SimpleTest.registerCleanupFunction(() => {
 });
 
 /**
- * Define an async test based on a generator function
+ * Add a new test tab in the browser and load the given url.
+ * @param {String} url The url to be loaded in the new tab
+ * @return a promise that resolves to the tab object when the url is loaded
  */
-function asyncTest(generator) {
-  return () => Task.spawn(generator).then(null, ok.bind(null, false)).then(finish);
+function addTab(url) {
+  info("Adding a new tab with URL: '" + url + "'");
+  let def = promise.defer();
+
+  let tab = gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.selectedBrowser.addEventListener("load", function onload() {
+    gBrowser.selectedBrowser.removeEventListener("load", onload, true);
+    info("URL '" + url + "' loading complete");
+    def.resolve(tab);
+  }, true);
+  content.location = url;
+
+  return def.promise;
+}
+
+/**
+ * Navigate the currently selected tab to a new URL and wait for it to load.
+ * @param {String} url The url to be loaded in the current tab.
+ * @return a promise that resolves when the page has fully loaded.
+ */
+function navigateTo(url) {
+  let navigating = promise.defer();
+  gBrowser.selectedBrowser.addEventListener("load", function onload() {
+    gBrowser.selectedBrowser.removeEventListener("load", onload, true);
+    navigating.resolve();
+  }, true);
+  content.location = url;
+  return navigating.promise;
 }
 
 function* cleanup()
@@ -48,9 +76,10 @@ function addTabAndOpenStyleEditors(count, callback, uri) {
   let deferred = promise.defer();
   let currentCount = 0;
   let panel;
-  addTabAndCheckOnStyleEditorAdded(p => panel = p, function () {
+  addTabAndCheckOnStyleEditorAdded(p => panel = p, function (editor) {
     currentCount++;
-    info(currentCount + " of " + count + " editors opened");
+    info(currentCount + " of " + count + " editors opened: "
+         + editor.styleSheet.href);
     if (currentCount == count) {
       if (callback) {
         callback(panel);
@@ -102,10 +131,11 @@ function checkDiskCacheFor(host, done)
     {
       info("disk storage contains " + num + " entries");
     },
-    onCacheEntryInfo: function(entry)
+    onCacheEntryInfo: function(uri)
     {
-      info(entry.key);
-      foundPrivateData |= entry.key.contains(host);
+      var urispec = uri.asciiSpec;
+      info(urispec);
+      foundPrivateData |= urispec.contains(host);
     },
     onCacheEntryVisitCompleted: function()
     {

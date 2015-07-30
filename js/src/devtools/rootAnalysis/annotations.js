@@ -1,4 +1,4 @@
-/* -*- Mode: Javascript; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 4 -*- */
 
 "use strict";
 
@@ -7,16 +7,13 @@ var ignoreIndirectCalls = {
     "mallocSizeOf" : true,
     "aMallocSizeOf" : true,
     "_malloc_message" : true,
+    "je_malloc_message" : true,
+    "chunk_dalloc" : true,
+    "chunk_alloc" : true,
     "__conv" : true,
     "__convf" : true,
     "prerrortable.c:callback_newtable" : true,
-    "mozalloc_oom.cpp:void (* gAbortHandler)(size_t)" : true,
-
-    // I don't know why these are getting truncated
-    "nsTraceRefcnt.cpp:void (* leakyLogAddRef)(void*": true,
-    "nsTraceRefcnt.cpp:void (* leakyLogAddRef)(void*, int, int)": true,
-    "nsTraceRefcnt.cpp:void (* leakyLogRelease)(void*": true,
-    "nsTraceRefcnt.cpp:void (* leakyLogRelease)(void*, int, int)": true,
+    "mozalloc_oom.cpp:void (* gAbortHandler)(size_t)" : true
 };
 
 function indirectCallCannotGC(fullCaller, fullVariable)
@@ -41,7 +38,7 @@ function indirectCallCannotGC(fullCaller, fullVariable)
     if (name == "op" && /GetWeakmapKeyDelegate/.test(caller))
         return true;
 
-    var CheckCallArgs = "AsmJS.cpp:uint8 CheckCallArgs(FunctionCompiler*, js::frontend::ParseNode*, (uint8)(FunctionCompiler*,js::frontend::ParseNode*,Type)*, FunctionCompiler::Call*)";
+    var CheckCallArgs = "AsmJSValidate.cpp:uint8 CheckCallArgs(FunctionCompiler*, js::frontend::ParseNode*, (uint8)(FunctionCompiler*,js::frontend::ParseNode*,Type)*, FunctionCompiler::Call*)";
     if (name == "checkArg" && caller == CheckCallArgs)
         return true;
 
@@ -69,6 +66,7 @@ var ignoreClasses = {
     "PRIOMethods": true,
     "XPCOMFunctions" : true, // I'm a little unsure of this one
     "_MD_IOVector" : true,
+    "malloc_table_t": true, // replace_malloc
 };
 
 // Ignore calls through TYPE.FIELD, where TYPE is the class or struct name containing
@@ -82,6 +80,7 @@ var ignoreCallees = {
     "mozilla::CycleCollectedJSRuntime.NoteCustomGCThingXPCOMChildren" : true, // During tracing, cannot GC.
     "PLDHashTableOps.hashKey" : true,
     "z_stream_s.zfree" : true,
+    "GrGLInterface.fCallback" : true,
 };
 
 function fieldCallCannotGC(csu, fullfield)
@@ -100,8 +99,6 @@ function ignoreEdgeUse(edge, variable)
         var callee = edge.Exp[0];
         if (callee.Kind == "Var") {
             var name = callee.Variable.Name[0];
-            if (/~Anchor/.test(name))
-                return true;
             if (/~DebugOnly/.test(name))
                 return true;
             if (/~ScopedThreadSafeStringInspector/.test(name))
@@ -133,11 +130,15 @@ function ignoreEdgeAddressTaken(edge)
 // Ignore calls of these functions (so ignore any stack containing these)
 var ignoreFunctions = {
     "ptio.c:pt_MapError" : true,
+    "je_malloc_printf" : true,
     "PR_ExplodeTime" : true,
     "PR_ErrorInstallTable" : true,
     "PR_SetThreadPrivate" : true,
-    "JSObject* js::GetWeakmapKeyDelegate(JSObject*)" : true, // FIXME: mark with AutoAssertNoGC instead
+    "JSObject* js::GetWeakmapKeyDelegate(JSObject*)" : true, // FIXME: mark with AutoSuppressGCAnalysis instead
     "uint8 NS_IsMainThread()" : true,
+
+    // Bug 1056410 - devirtualization prevents the standard nsISupports::Release heuristic from working
+    "uint32 nsXPConnect::Release()" : true,
 
     // FIXME!
     "NS_LogInit": true,
@@ -159,7 +160,7 @@ var ignoreFunctions = {
 
     // Bug 948646 - the only thing AutoJSContext's constructor calls
     // is an Init() routine whose entire body is covered with an
-    // AutoAssertNoGC. AutoSafeJSContext is the same thing, just with
+    // AutoSuppressGCAnalysis. AutoSafeJSContext is the same thing, just with
     // a different value for the 'aSafe' parameter.
     "void mozilla::AutoJSContext::AutoJSContext(mozilla::detail::GuardObjectNotifier*)" : true,
     "void mozilla::AutoSafeJSContext::~AutoSafeJSContext(int32)" : true,
@@ -194,14 +195,15 @@ function isRootedTypeName(name)
         name == "WrappableJSErrorResult" ||
         name == "js::frontend::TokenStream" ||
         name == "js::frontend::TokenStream::Position" ||
-        name == "ModuleCompiler")
+        name == "ModuleCompiler" ||
+        name == "JSAddonId")
     {
         return true;
     }
     return false;
 }
 
-function isRootedPointerTypeName(name)
+function stripUCSAndNamespace(name)
 {
     if (name.startsWith('struct '))
         name = name.substr(7);
@@ -217,6 +219,15 @@ function isRootedPointerTypeName(name)
         name = name.substr(4);
     if (name.startsWith('mozilla::dom::'))
         name = name.substr(14);
+    if (name.startsWith('mozilla::'))
+        name = name.substr(9);
+
+    return name;
+}
+
+function isRootedPointerTypeName(name)
+{
+    name = stripUCSAndNamespace(name);
 
     if (name.startsWith('MaybeRooted<'))
         return /\(js::AllowGC\)1u>::RootType/.test(name);
@@ -224,11 +235,18 @@ function isRootedPointerTypeName(name)
     return name.startsWith('Rooted') || name.startsWith('PersistentRooted');
 }
 
+function isUnsafeStorage(typeName)
+{
+    typeName = stripUCSAndNamespace(typeName);
+    return typeName.startsWith('UniquePtr<');
+}
+
 function isSuppressConstructor(name)
 {
     return name.indexOf("::AutoSuppressGC") != -1
+        || name.indexOf("::AutoAssertGCCallback") != -1
         || name.indexOf("::AutoEnterAnalysis") != -1
-        || name.indexOf("::AutoAssertNoGC") != -1
+        || name.indexOf("::AutoSuppressGCAnalysis") != -1
         || name.indexOf("::AutoIgnoreRootingHazards") != -1;
 }
 
@@ -251,6 +269,12 @@ function isOverridableField(initialCSU, csu, field)
         return false;
     if (initialCSU == 'nsIXPConnectJSObjectHolder' && field == 'GetJSObject')
         return false;
+    if (initialCSU == 'nsIXPConnect' && field == 'GetSafeJSContext')
+        return false;
+    if (initialCSU == 'nsIScriptContext') {
+        if (field == 'GetWindowProxy' || field == 'GetWindowProxyPreserveColor')
+            return false;
+    }
 
     return true;
 }

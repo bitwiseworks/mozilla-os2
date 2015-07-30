@@ -1,34 +1,34 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- /
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- /
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Cu.import('resource://gre/modules/ContactService.jsm');
-Cu.import('resource://gre/modules/SettingsChangeNotifier.jsm');
 Cu.import('resource://gre/modules/DataStoreChangeNotifier.jsm');
 Cu.import('resource://gre/modules/AlarmService.jsm');
 Cu.import('resource://gre/modules/ActivitiesService.jsm');
-Cu.import('resource://gre/modules/PermissionPromptHelper.jsm');
 Cu.import('resource://gre/modules/NotificationDB.jsm');
 Cu.import('resource://gre/modules/Payment.jsm');
 Cu.import("resource://gre/modules/AppsUtils.jsm");
 Cu.import('resource://gre/modules/UserAgentOverrides.jsm');
 Cu.import('resource://gre/modules/Keyboard.jsm');
 Cu.import('resource://gre/modules/ErrorPage.jsm');
+Cu.import('resource://gre/modules/AlertsHelper.jsm');
+Cu.import('resource://gre/modules/RequestSyncService.jsm');
 #ifdef MOZ_WIDGET_GONK
 Cu.import('resource://gre/modules/NetworkStatsService.jsm');
+Cu.import('resource://gre/modules/ResourceStatsService.jsm');
 #endif
 
 // Identity
 Cu.import('resource://gre/modules/SignInToWebsite.jsm');
 SignInToWebsiteController.init();
 
-#ifdef MOZ_SERVICES_FXACCOUNTS
 Cu.import('resource://gre/modules/FxAccountsMgmtService.jsm');
-#endif
-
 Cu.import('resource://gre/modules/DownloadsAPI.jsm');
+Cu.import('resource://gre/modules/MobileIdentityManager.jsm');
+Cu.import('resource://gre/modules/PresentationDeviceInfoManager.jsm');
 
 XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
                                   "resource://gre/modules/SystemAppProxy.jsm");
@@ -52,11 +52,6 @@ XPCOMUtils.defineLazyServiceGetter(Services, 'fm',
                                    '@mozilla.org/focus-manager;1',
                                    'nsIFocusManager');
 
-XPCOMUtils.defineLazyGetter(this, 'DebuggerServer', function() {
-  Cu.import('resource://gre/modules/devtools/dbg-server.jsm');
-  return DebuggerServer;
-});
-
 XPCOMUtils.defineLazyGetter(this, "ppmm", function() {
   return Cc["@mozilla.org/parentprocessmessagemanager;1"]
          .getService(Ci.nsIMessageListenerManager);
@@ -73,6 +68,11 @@ XPCOMUtils.defineLazyGetter(this, "libcutils", function () {
 XPCOMUtils.defineLazyServiceGetter(Services, 'captivePortalDetector',
                                   '@mozilla.org/toolkit/captive-detector;1',
                                   'nsICaptivePortalDetector');
+#endif
+
+#ifdef MOZ_SAFE_BROWSING
+XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
+              "resource://gre/modules/SafeBrowsing.jsm");
 #endif
 
 function getContentWindow() {
@@ -208,11 +208,6 @@ var shell = {
     }, "network-connection-state-changed", false);
   },
 
-  get contentBrowser() {
-    delete this.contentBrowser;
-    return this.contentBrowser = document.getElementById('systemapp');
-  },
-
   get homeURL() {
     try {
       let homeSrc = Services.env.get('B2G_HOMESCREEN');
@@ -220,16 +215,30 @@ var shell = {
         return homeSrc;
     } catch (e) {}
 
-    return Services.prefs.getCharPref('browser.homescreenURL');
+    return Services.prefs.getCharPref('b2g.system_startup_url');
   },
 
   get manifestURL() {
-    return Services.prefs.getCharPref('browser.manifestURL');
+    return Services.prefs.getCharPref('b2g.system_manifest_url');
   },
 
   _started: false,
   hasStarted: function shell_hasStarted() {
     return this._started;
+  },
+
+  bootstrap: function() {
+    let startManifestURL =
+      Cc['@mozilla.org/commandlinehandler/general-startup;1?type=b2gbootstrap']
+        .getService(Ci.nsISupports).wrappedJSObject.startManifestURL;
+    if (startManifestURL) {
+      Cu.import('resource://gre/modules/Bootstraper.jsm');
+      Bootstraper.ensureSystemAppInstall(startManifestURL)
+                 .then(this.start.bind(this))
+                 .catch(Bootstraper.bailout);
+    } else {
+      this.start();
+    }
   },
 
   start: function shell_start() {
@@ -302,8 +311,7 @@ var shell = {
     systemAppFrame.setAttribute('mozbrowser', 'true');
     systemAppFrame.setAttribute('mozapp', manifestURL);
     systemAppFrame.setAttribute('allowfullscreen', 'true');
-    systemAppFrame.setAttribute('style', "overflow: hidden; height: 100%; width: 100%; border: none;");
-    systemAppFrame.setAttribute('src', "data:text/html;charset=utf-8,%3C!DOCTYPE html>%3Cbody style='background:black;");
+    systemAppFrame.setAttribute('src', 'blank.html');
     let container = document.getElementById('container');
 #ifdef MOZ_WIDGET_COCOA
     // See shell.html
@@ -312,7 +320,7 @@ var shell = {
       container.removeChild(hotfix);
     }
 #endif
-    container.appendChild(systemAppFrame);
+    this.contentBrowser = container.appendChild(systemAppFrame);
 
     systemAppFrame.contentWindow
                   .QueryInterface(Ci.nsIInterfaceRequestor)
@@ -333,7 +341,6 @@ var shell = {
     // if they did, they would use keycodes that conform to DOM 3 Events.
     // See discussion in https://bugzilla.mozilla.org/show_bug.cgi?id=762362
     chromeEventHandler.addEventListener('keydown', this, true);
-    chromeEventHandler.addEventListener('keypress', this, true);
     chromeEventHandler.addEventListener('keyup', this, true);
 
     window.addEventListener('MozApplicationManifest', this);
@@ -342,13 +349,12 @@ var shell = {
     window.addEventListener('sizemodechange', this);
     window.addEventListener('unload', this);
     this.contentBrowser.addEventListener('mozbrowserloadstart', this, true);
-
-    SystemAppProxy.registerFrame(this.contentBrowser);
+    this.contentBrowser.addEventListener('mozbrowserselectionstatechanged', this, true);
+    this.contentBrowser.addEventListener('mozbrowserscrollviewchange', this, true);
 
     CustomEventManager.init();
     WebappsHelper.init();
     UserAgentOverrides.init();
-    IndexedDBPromptHelper.init();
     CaptivePortalLoginHelper.init();
 
     this.contentBrowser.src = homeURL;
@@ -358,131 +364,74 @@ var shell = {
     ppmm.addMessageListener("dial-handler", this);
     ppmm.addMessageListener("sms-handler", this);
     ppmm.addMessageListener("mail-handler", this);
-    ppmm.addMessageListener("app-notification-send", AlertsHelper);
     ppmm.addMessageListener("file-picker", this);
-    ppmm.addMessageListener("getProfD", function(message) {
-      return Services.dirsvc.get("ProfD", Ci.nsIFile).path;
-    });
+#ifdef MOZ_SAFE_BROWSING
+    setTimeout(function() {
+      SafeBrowsing.init();
+    }, 5000);
+#endif
   },
 
   stop: function shell_stop() {
     window.removeEventListener('unload', this);
     window.removeEventListener('keydown', this, true);
-    window.removeEventListener('keypress', this, true);
     window.removeEventListener('keyup', this, true);
     window.removeEventListener('MozApplicationManifest', this);
     window.removeEventListener('mozfullscreenchange', this);
     window.removeEventListener('sizemodechange', this);
     this.contentBrowser.removeEventListener('mozbrowserloadstart', this, true);
+    this.contentBrowser.removeEventListener('mozbrowserselectionstatechanged', this, true);
+    this.contentBrowser.removeEventListener('mozbrowserscrollviewchange', this, true);
     ppmm.removeMessageListener("content-handler", this);
-    if (this.timer) {
-      this.timer.cancel();
-      this.timer = null;
-    }
 
     UserAgentOverrides.uninit();
-    IndexedDBPromptHelper.uninit();
   },
 
-  // If this key event actually represents a hardware button, filter it here
-  // and send a mozChromeEvent with detail.type set to xxx-button-press or
-  // xxx-button-release instead.
-  filterHardwareKeys: function shell_filterHardwareKeys(evt) {
-    var type;
-    switch (evt.keyCode) {
-      case evt.DOM_VK_HOME:         // Home button
-        type = 'home-button';
-        break;
-      case evt.DOM_VK_SLEEP:        // Sleep button
-      case evt.DOM_VK_END:          // On desktop we don't have a sleep button
-        type = 'sleep-button';
-        break;
-      case evt.DOM_VK_PAGE_UP:      // Volume up button
-        type = 'volume-up-button';
-        break;
-      case evt.DOM_VK_PAGE_DOWN:    // Volume down button
-        type = 'volume-down-button';
-        break;
-      case evt.DOM_VK_ESCAPE:       // Back button (should be disabled)
-        type = 'back-button';
-        break;
-      case evt.DOM_VK_CONTEXT_MENU: // Menu button
-        type = 'menu-button';
-        break;
-      case evt.DOM_VK_F1: // headset button
-        type = 'headset-button';
-        break;
-    }
+  // If this key event represents a hardware button which needs to be send as
+  // a message, broadcasts it with the message set to 'xxx-button-press' or
+  // 'xxx-button-release'.
+  broadcastHardwareKeys: function shell_broadcastHardwareKeys(evt) {
+    let type;
+    let message;
 
     let mediaKeys = {
-      'MediaNextTrack': 'media-next-track-button',
-      'MediaPreviousTrack': 'media-previous-track-button',
+      'MediaTrackNext': 'media-next-track-button',
+      'MediaTrackPrevious': 'media-previous-track-button',
       'MediaPause': 'media-pause-button',
       'MediaPlay': 'media-play-button',
       'MediaPlayPause': 'media-play-pause-button',
       'MediaStop': 'media-stop-button',
       'MediaRewind': 'media-rewind-button',
-      'FastFwd': 'media-fast-forward-button'
+      'MediaFastForward': 'media-fast-forward-button'
     };
 
-    let isMediaKey = false;
-    if (mediaKeys[evt.key]) {
-      isMediaKey = true;
-      type = mediaKeys[evt.key];
-    }
-
-    if (!type) {
+    if (evt.keyCode == evt.DOM_VK_F1) {
+      type = 'headset-button';
+      message = 'headset-button';
+    } else if (mediaKeys[evt.key]) {
+      type = 'media-button';
+      message = mediaKeys[evt.key];
+    } else {
       return;
     }
 
-    // If we didn't return, then the key event represents a hardware key
-    // and we need to prevent it from propagating to Gaia
-    evt.stopImmediatePropagation();
-    evt.preventDefault(); // Prevent keypress events (when #501496 is fixed).
-
-    // If it is a key down or key up event, we send a chrome event to Gaia.
-    // If it is a keypress event we just ignore it.
     switch (evt.type) {
       case 'keydown':
-        type = type + '-press';
+        message = message + '-press';
         break;
       case 'keyup':
-        type = type + '-release';
+        message = message + '-release';
         break;
-      case 'keypress':
-        return;
     }
 
-    // Let applications receive the headset button key press/release event.
-    if (evt.keyCode == evt.DOM_VK_F1 && type !== this.lastHardwareButtonEventType) {
-      this.lastHardwareButtonEventType = type;
-      gSystemMessenger.broadcastMessage('headset-button', type);
-      return;
-    }
-
-    if (isMediaKey) {
-      this.lastHardwareButtonEventType = type;
-      gSystemMessenger.broadcastMessage('media-button', type);
-      return;
-    }
-
-    // On my device, the physical hardware buttons (sleep and volume)
-    // send multiple events (press press release release), but the
-    // soft home button just sends one.  This hack is to manually
-    // "debounce" the keys. If the type of this event is the same as
-    // the type of the last one, then don't send it.  We'll never send
-    // two presses or two releases in a row.
-    // FIXME: https://bugzilla.mozilla.org/show_bug.cgi?id=761067
-    if (type !== this.lastHardwareButtonEventType) {
-      this.lastHardwareButtonEventType = type;
-      this.sendChromeEvent({type: type});
+    // Let applications receive the headset button and media key press/release message.
+    if (message !== this.lastHardwareButtonMessage) {
+      this.lastHardwareButtonMessage = message;
+      gSystemMessenger.broadcastMessage(type, message);
     }
   },
 
-  lastHardwareButtonEventType: null, // property for the hack above
-  needBufferOpenAppReq: true,
-  bufferedOpenAppReqs: [],
-  timer: null,
+  lastHardwareButtonMessage: null, // property for the hack above
   visibleNormalAudioActive: false,
 
   handleEvent: function shell_handleEvent(evt) {
@@ -490,8 +439,7 @@ var shell = {
     switch (evt.type) {
       case 'keydown':
       case 'keyup':
-      case 'keypress':
-        this.filterHardwareKeys(evt);
+        this.broadcastHardwareKeys(evt);
         break;
       case 'mozfullscreenchange':
         // When the screen goes fullscreen make sure to set the focus to the
@@ -522,6 +470,35 @@ var shell = {
 
         this.notifyContentStart();
        break;
+      case 'mozbrowserscrollviewchange':
+        this.sendChromeEvent({
+          type: 'scrollviewchange',
+          detail: evt.detail,
+        });
+        break;
+      case 'mozbrowserselectionstatechanged':
+        // The mozbrowserselectionstatechanged event, may have crossed the chrome-content boundary.
+        // This event always dispatch to shell.js. But the offset we got from this event is
+        // based on tab's coordinate. So get the actual offsets between shell and evt.target.
+        let elt = evt.target;
+        let win = elt.ownerDocument.defaultView;
+        let offsetX = win.mozInnerScreenX - window.mozInnerScreenX;
+        let offsetY = win.mozInnerScreenY - window.mozInnerScreenY;
+
+        let rect = elt.getBoundingClientRect();
+        offsetX += rect.left;
+        offsetY += rect.top;
+
+        let data = evt.detail;
+        data.offsetX = offsetX;
+        data.offsetY = offsetY;
+
+        DoCommandHelper.setEvent(evt);
+        shell.sendChromeEvent({
+          type: 'selectionstatechanged',
+          detail: data,
+        });
+        break;
 
       case 'MozApplicationManifest':
         try {
@@ -596,22 +573,7 @@ var shell = {
       return;
     }
 
-    this.sendEvent(getContentWindow(), "mozChromeEvent",
-                   Cu.cloneInto(details, getContentWindow()));
-  },
-
-  openAppForSystemMessage: function shell_openAppForSystemMessage(msg) {
-    let payload = {
-      url: msg.pageURL,
-      manifestURL: msg.manifestURL,
-      isActivity: (msg.type == 'activity'),
-      onlyShowApp: msg.onlyShowApp,
-      showApp: msg.showApp,
-      target: msg.target,
-      expectingSystemMessage: true,
-      extra: msg.extra
-    }
-    this.sendCustomEvent('open-app', payload);
+    this.sendCustomEvent("mozChromeEvent", details);
   },
 
   receiveMessage: function shell_receiveMessage(message) {
@@ -653,6 +615,8 @@ var shell = {
 
     this.reportCrash(true);
 
+    SystemAppProxy.registerFrame(shell.contentBrowser);
+
     this.sendEvent(window, 'ContentStart');
 
     Services.obs.notifyObservers(null, 'content-start', null);
@@ -664,6 +628,10 @@ var shell = {
     content.addEventListener('load', function shell_homeLoaded() {
       content.removeEventListener('load', shell_homeLoaded);
       shell.isHomeLoaded = true;
+
+      if (Services.prefs.getBoolPref('b2g.orientation.animate')) {
+        Cu.import('resource://gre/modules/OrientationChangeHandler.jsm');
+      }
 
 #ifdef MOZ_WIDGET_GONK
       libcutils.property_set('sys.boot_completed', '1');
@@ -679,27 +647,6 @@ var shell = {
     });
   }
 };
-
-// Listen for the request of opening app and relay them to Gaia.
-Services.obs.addObserver(function onSystemMessageOpenApp(subject, topic, data) {
-  let msg = JSON.parse(data);
-  // Buffer non-activity request until content starts to load for 10 seconds.
-  // We'll revisit this later if new kind of requests don't need to be cached.
-  if (shell.needBufferOpenAppReq && msg.type !== 'activity') {
-    shell.bufferedOpenAppReqs.push(msg);
-    return;
-  }
-  shell.openAppForSystemMessage(msg);
-}, 'system-messages-open-app', false);
-
-Services.obs.addObserver(function onInterAppCommConnect(subject, topic, data) {
-  data = JSON.parse(data);
-  shell.sendChromeEvent({ type: "inter-app-comm-permission",
-                          chromeEventID: data.callerID,
-                          manifestURL: data.manifestURL,
-                          keyword: data.keyword,
-                          peers: data.appsToSelect });
-}, 'inter-app-comm-select-app', false);
 
 Services.obs.addObserver(function onFullscreenOriginChange(subject, topic, data) {
   shell.sendChromeEvent({ type: "fullscreenoriginchange",
@@ -729,21 +676,6 @@ var CustomEventManager = {
     window.addEventListener("ContentStart", (function(evt) {
       let content = shell.contentBrowser.contentWindow;
       content.addEventListener("mozContentEvent", this, false, true);
-
-      // After content starts to load for 10 seconds, send and
-      // clean up the buffered open-app requests if there is any.
-      //
-      // TODO: Bug 793420 - Remove the waiting timer for the 'open-app'
-      //                    mozChromeEvents requested by System Message
-      shell.timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-      shell.timer.initWithCallback(function timerCallback() {
-        shell.bufferedOpenAppReqs.forEach(function bufferOpenAppReq(msg) {
-          shell.openAppForSystemMessage(msg);
-        });
-        shell.bufferedOpenAppReqs.length = 0;
-        shell.needBufferOpenAppReq = false;
-        shell.timer = null;
-      }, 10000, Ci.nsITimer.TYPE_ONE_SHOT);
     }).bind(this), false);
   },
 
@@ -752,13 +684,10 @@ var CustomEventManager = {
     dump('XXX FIXME : Got a mozContentEvent: ' + detail.type + "\n");
 
     switch(detail.type) {
-      case 'desktop-notification-show':
-      case 'desktop-notification-click':
-      case 'desktop-notification-close':
-        AlertsHelper.handleEvent(detail);
-        break;
       case 'webapps-install-granted':
       case 'webapps-install-denied':
+      case 'webapps-uninstall-granted':
+      case 'webapps-uninstall-denied':
         WebappsHelper.handleEvent(detail);
         break;
       case 'select-choicechange':
@@ -767,208 +696,34 @@ var CustomEventManager = {
       case 'system-message-listener-ready':
         Services.obs.notifyObservers(null, 'system-message-listener-ready', null);
         break;
-      case 'remote-debugger-prompt':
-        RemoteDebugger.handleEvent(detail);
-        break;
       case 'captive-portal-login-cancel':
         CaptivePortalLoginHelper.handleEvent(detail);
         break;
-      case 'inter-app-comm-permission':
-        Services.obs.notifyObservers(null, 'inter-app-comm-select-app-result',
-          JSON.stringify({ callerID: detail.chromeEventID,
-                           keyword: detail.keyword,
-                           manifestURL: detail.manifestURL,
-                           selectedApps: detail.peers }));
-        break;
       case 'inputmethod-update-layouts':
+      case 'inputregistry-add':
+      case 'inputregistry-remove':
         KeyboardHelper.handleEvent(detail);
+        break;
+      case 'do-command':
+        DoCommandHelper.handleEvent(detail.cmd);
         break;
     }
   }
 }
 
-var AlertsHelper = {
-  _listeners: {},
-  _count: 0,
-
-  handleEvent: function alert_handleEvent(detail) {
-    if (!detail || !detail.id)
-      return;
-
-    let uid = detail.id;
-    let listener = this._listeners[uid];
-    if (!listener)
-     return;
-
-    let topic;
-    if (detail.type == "desktop-notification-click") {
-      topic = "alertclickcallback";
-    } else if (detail.type == "desktop-notification-show") {
-      topic = "alertshow";
-    } else {
-      /* desktop-notification-close */
-      topic = "alertfinished";
-    }
-
-    if (uid.startsWith("alert")) {
-      try {
-        listener.observer.observe(null, topic, listener.cookie);
-      } catch (e) { }
-    } else {
-      try {
-        listener.mm.sendAsyncMessage("app-notification-return", {
-          uid: uid,
-          topic: topic,
-          target: listener.target
-        });
-      } catch (e) {
-        // we get an exception if the app is not launched yet
-        gSystemMessenger.sendMessage("notification", {
-            clicked: (detail.type === "desktop-notification-click"),
-            title: listener.title,
-            body: listener.text,
-            imageURL: listener.imageURL,
-            lang: listener.lang,
-            dir: listener.dir,
-            id: listener.id,
-            tag: listener.tag
-          },
-          Services.io.newURI(listener.target, null, null),
-          Services.io.newURI(listener.manifestURL, null, null)
-        );
-      }
-    }
-
-    // we're done with this notification
-    if (topic === "alertfinished") {
-      delete this._listeners[uid];
-    }
+let DoCommandHelper = {
+  _event: null,
+  setEvent: function docommand_setEvent(evt) {
+    this._event = evt;
   },
 
-  registerListener: function alert_registerListener(alertId, cookie, alertListener) {
-    this._listeners[alertId] = { observer: alertListener, cookie: cookie };
-  },
-
-  registerAppListener: function alert_registerAppListener(uid, listener) {
-    this._listeners[uid] = listener;
-
-    let app = DOMApplicationRegistry.getAppByManifestURL(listener.manifestURL);
-    DOMApplicationRegistry.getManifestFor(app.manifestURL).then((manifest) => {
-      let helper = new ManifestHelper(manifest, app.origin);
-      let getNotificationURLFor = function(messages) {
-        if (!messages)
-          return null;
-
-        for (let i = 0; i < messages.length; i++) {
-          let message = messages[i];
-          if (message === "notification") {
-            return helper.fullLaunchPath();
-          } else if (typeof message == "object" && "notification" in message) {
-            return helper.resolveFromOrigin(message["notification"]);
-          }
-        }
-
-        // No message found...
-        return null;
-      }
-
-      listener.target = getNotificationURLFor(manifest.messages);
-
-      // Bug 816944 - Support notification messages for entry_points.
-    });
-  },
-
-  showNotification: function alert_showNotification(imageURL,
-                                                    title,
-                                                    text,
-                                                    textClickable,
-                                                    cookie,
-                                                    uid,
-                                                    bidi,
-                                                    lang,
-                                                    manifestURL) {
-    function send(appName, appIcon) {
-      shell.sendChromeEvent({
-        type: "desktop-notification",
-        id: uid,
-        icon: imageURL,
-        title: title,
-        text: text,
-        bidi: bidi,
-        lang: lang,
-        appName: appName,
-        appIcon: appIcon,
-        manifestURL: manifestURL
-      });
+  handleEvent: function docommand_handleEvent(cmd) {
+    if (this._event) {
+      Services.obs.notifyObservers({ wrappedJSObject: this._event.target },
+                                   'copypaste-docommand', cmd);
+      this._event = null;
     }
-
-    if (!manifestURL || !manifestURL.length) {
-      send(null, null);
-      return;
-    }
-
-    // If we have a manifest URL, get the icon and title from the manifest
-    // to prevent spoofing.
-    let app = DOMApplicationRegistry.getAppByManifestURL(manifestURL);
-    DOMApplicationRegistry.getManifestFor(manifestURL).then((aManifest) => {
-      let helper = new ManifestHelper(aManifest, app.origin);
-      send(helper.name, helper.iconURLForSize(128));
-    });
-  },
-
-  showAlertNotification: function alert_showAlertNotification(imageURL,
-                                                              title,
-                                                              text,
-                                                              textClickable,
-                                                              cookie,
-                                                              alertListener,
-                                                              name,
-                                                              bidi,
-                                                              lang) {
-    let currentListener = this._listeners[name];
-    if (currentListener) {
-      currentListener.observer.observe(null, "alertfinished", currentListener.cookie);
-    }
-
-    this.registerListener(name, cookie, alertListener);
-    this.showNotification(imageURL, title, text, textClickable, cookie,
-                          name, bidi, lang, null);
-  },
-
-  closeAlert: function alert_closeAlert(name) {
-    shell.sendChromeEvent({
-      type: "desktop-notification-close",
-      id: name
-    });
-  },
-
-  receiveMessage: function alert_receiveMessage(aMessage) {
-    if (!aMessage.target.assertAppHasPermission("desktop-notification")) {
-      Cu.reportError("Desktop-notification message " + aMessage.name +
-                     " from a content process with no desktop-notification privileges.");
-      return;
-    }
-
-    let data = aMessage.data;
-    let details = data.details;
-    let listener = {
-      mm: aMessage.target,
-      title: data.title,
-      text: data.text,
-      manifestURL: details.manifestURL,
-      imageURL: data.imageURL,
-      lang: details.lang || undefined,
-      id: details.id || undefined,
-      dir: details.dir || undefined,
-      tag: details.tag || undefined
-    };
-    this.registerAppListener(data.uid, listener);
-
-    this.showNotification(data.imageURL, data.title, data.text,
-                          details.textClickable, null,
-                          data.uid, details.dir,
-                          details.lang, details.manifestURL);
-  },
+  }
 }
 
 var WebappsHelper = {
@@ -978,6 +733,7 @@ var WebappsHelper = {
   init: function webapps_init() {
     Services.obs.addObserver(this, "webapps-launch", false);
     Services.obs.addObserver(this, "webapps-ask-install", false);
+    Services.obs.addObserver(this, "webapps-ask-uninstall", false);
     Services.obs.addObserver(this, "webapps-close", false);
   },
 
@@ -1000,6 +756,12 @@ var WebappsHelper = {
       case "webapps-install-denied":
         DOMApplicationRegistry.denyInstall(installer);
         break;
+      case "webapps-uninstall-granted":
+        DOMApplicationRegistry.confirmUninstall(installer);
+        break;
+      case "webapps-uninstall-denied":
+        DOMApplicationRegistry.denyUninstall(installer);
+        break;
     }
   },
 
@@ -1007,204 +769,62 @@ var WebappsHelper = {
     let json = JSON.parse(data);
     json.mm = subject;
 
+    let id;
+
     switch(topic) {
       case "webapps-launch":
         DOMApplicationRegistry.getManifestFor(json.manifestURL).then((aManifest) => {
           if (!aManifest)
             return;
 
-          let manifest = new ManifestHelper(aManifest, json.origin);
+          let manifest = new ManifestHelper(aManifest, json.origin,
+                                            json.manifestURL);
           let payload = {
-            __exposedProps__: {
-              timestamp: "r",
-              url: "r",
-              manifestURL: "r"
-            },
             timestamp: json.timestamp,
             url: manifest.fullLaunchPath(json.startPoint),
             manifestURL: json.manifestURL
-          }
-          shell.sendEvent(getContentWindow(), "webapps-launch", payload);
+          };
+          shell.sendCustomEvent("webapps-launch", payload);
         });
         break;
       case "webapps-ask-install":
-        let id = this.registerInstaller(json);
+        id = this.registerInstaller(json);
         shell.sendChromeEvent({
           type: "webapps-ask-install",
           id: id,
           app: json.app
         });
         break;
+      case "webapps-ask-uninstall":
+        id = this.registerInstaller(json);
+        shell.sendChromeEvent({
+          type: "webapps-ask-uninstall",
+          id: id,
+          app: json.app
+        });
+        break;
       case "webapps-close":
-        shell.sendEvent(getContentWindow(), "webapps-close",
-          {
-            __exposedProps__: { "manifestURL": "r" },
-            "manifestURL": json.manifestURL
-          });
+        shell.sendCustomEvent("webapps-close", {
+          "manifestURL": json.manifestURL
+        });
         break;
     }
   }
 }
 
-let IndexedDBPromptHelper = {
-  _quotaPrompt: "indexedDB-quota-prompt",
-  _quotaResponse: "indexedDB-quota-response",
-
-  init:
-  function IndexedDBPromptHelper_init() {
-    Services.obs.addObserver(this, this._quotaPrompt, false);
-  },
-
-  uninit:
-  function IndexedDBPromptHelper_uninit() {
-    Services.obs.removeObserver(this, this._quotaPrompt);
-  },
-
-  observe:
-  function IndexedDBPromptHelper_observe(subject, topic, data) {
-    if (topic != this._quotaPrompt) {
-      throw new Error("Unexpected topic!");
-    }
-
-    let observer = subject.QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIObserver);
-    let responseTopic = this._quotaResponse;
-
-    setTimeout(function() {
-      observer.observe(null, responseTopic,
-                       Ci.nsIPermissionManager.DENY_ACTION);
-    }, 0);
-  }
-}
-
-let RemoteDebugger = {
-  _promptDone: false,
-  _promptAnswer: false,
-  _running: false,
-
-  prompt: function debugger_prompt() {
-    this._promptDone = false;
-
-    shell.sendChromeEvent({
-      "type": "remote-debugger-prompt"
-    });
-
-    while(!this._promptDone) {
-      Services.tm.currentThread.processNextEvent(true);
-    }
-
-    return this._promptAnswer;
-  },
-
-  handleEvent: function debugger_handleEvent(detail) {
-    this._promptAnswer = detail.value;
-    this._promptDone = true;
-  },
-
-  get isDebugging() {
-    if (!this._running) {
-      return false;
-    }
-
-    return DebuggerServer._connections &&
-           Object.keys(DebuggerServer._connections).length > 0;
-  },
-
-  // Start the debugger server.
-  start: function debugger_start() {
-    if (this._running) {
-      return;
-    }
-
-    if (!DebuggerServer.initialized) {
-      // Ask for remote connections.
-      DebuggerServer.init(this.prompt.bind(this));
-
-      // /!\ Be careful when adding a new actor, especially global actors.
-      // Any new global actor will be exposed and returned by the root actor.
-
-      // Add Firefox-specific actors, but prevent tab actors to be loaded in
-      // the parent process, unless we enable certified apps debugging.
-      let restrictPrivileges = Services.prefs.getBoolPref("devtools.debugger.forbid-certified-apps");
-      DebuggerServer.addBrowserActors("navigator:browser", restrictPrivileges);
-
-      /**
-       * Construct a root actor appropriate for use in a server running in B2G.
-       * The returned root actor respects the factories registered with
-       * DebuggerServer.addGlobalActor only if certified apps debugging is on,
-       * otherwise we used an explicit limited list of global actors
-       *
-       * * @param connection DebuggerServerConnection
-       *        The conection to the client.
-       */
-      DebuggerServer.createRootActor = function createRootActor(connection)
-      {
-        let { Promise: promise } = Cu.import("resource://gre/modules/Promise.jsm", {});
-        let parameters = {
-          // We do not expose browser tab actors yet,
-          // but we still have to define tabList.getList(),
-          // otherwise, client won't be able to fetch global actors
-          // from listTabs request!
-          tabList: {
-            getList: function() {
-              return promise.resolve([]);
-            }
-          },
-          // Use an explicit global actor list to prevent exposing
-          // unexpected actors
-          globalActorFactories: restrictPrivileges ? {
-            webappsActor: DebuggerServer.globalActorFactories.webappsActor,
-            deviceActor: DebuggerServer.globalActorFactories.deviceActor,
-          } : DebuggerServer.globalActorFactories
-        };
-        let root = new DebuggerServer.RootActor(connection, parameters);
-        root.applicationType = "operating-system";
-        return root;
-      };
-
-#ifdef MOZ_WIDGET_GONK
-      DebuggerServer.on("connectionchange", function() {
-        AdbController.updateState();
-      });
-#endif
-    }
-
-    let path = Services.prefs.getCharPref("devtools.debugger.unix-domain-socket") ||
-               "/data/local/debugger-socket";
-    try {
-      DebuggerServer.openListener(path);
-      // Temporary event, until bug 942756 lands and offers a way to know
-      // when the server is up and running.
-      Services.obs.notifyObservers(null, 'debugger-server-started', null);
-      this._running = true;
-    } catch (e) {
-      dump('Unable to start debugger server: ' + e + '\n');
-    }
-  },
-
-  stop: function debugger_stop() {
-    if (!this._running) {
-      return;
-    }
-
-    if (!DebuggerServer.initialized) {
-      // Can this really happen if we are running?
-      this._running = false;
-      return;
-    }
-
-    try {
-      DebuggerServer.closeListener();
-    } catch (e) {
-      dump('Unable to stop debugger server: ' + e + '\n');
-    }
-    this._running = false;
-  }
-}
-
 let KeyboardHelper = {
   handleEvent: function keyboard_handleEvent(detail) {
-    Keyboard.setLayouts(detail.layouts);
+    switch (detail.type) {
+      case 'inputmethod-update-layouts':
+        Keyboard.setLayouts(detail.layouts);
+
+        break;
+      case 'inputregistry-add':
+      case 'inputregistry-remove':
+        Keyboard.inputRegistryGlue.returnMessage(detail);
+
+        break;
+    }
   }
 };
 
@@ -1222,11 +842,15 @@ window.addEventListener('ContentStart', function ss_onContentStart() {
     try {
       var canvas = document.createElementNS('http://www.w3.org/1999/xhtml',
                                             'canvas');
-      var width = window.innerWidth;
-      var height = window.innerHeight;
+      var docRect = document.body.getBoundingClientRect();
+      var width = docRect.width;
+      var height = docRect.height;
+
+      // Convert width and height from CSS pixels (potentially fractional)
+      // to device pixels (integer).
       var scale = window.devicePixelRatio;
-      canvas.setAttribute('width', width * scale);
-      canvas.setAttribute('height', height * scale);
+      canvas.setAttribute('width', Math.round(width * scale));
+      canvas.setAttribute('height', Math.round(height * scale));
 
       var context = canvas.getContext('2d');
       var flags =
@@ -1237,11 +861,7 @@ window.addEventListener('ContentStart', function ss_onContentStart() {
       context.drawWindow(window, 0, 0, width, height,
                          'rgb(255,255,255)', flags);
 
-      // I can't use sendChromeEvent() here because it doesn't wrap
-      // the blob in the detail object correctly. So I use __exposedProps__
-      // instead to safely send the chrome detail object to content.
-      shell.sendEvent(getContentWindow(), 'mozChromeEvent', {
-        __exposedProps__: { type: 'r', file: 'r' },
+      shell.sendChromeEvent({
         type: 'take-screenshot-success',
         file: canvas.mozGetAsFile('screenshot', 'image/png')
       });
@@ -1269,6 +889,7 @@ var CaptivePortalLoginHelper = {
   init: function init() {
     Services.obs.addObserver(this, 'captive-portal-login', false);
     Services.obs.addObserver(this, 'captive-portal-login-abort', false);
+    Services.obs.addObserver(this, 'captive-portal-login-success', false);
   },
   handleEvent: function handleEvent(detail) {
     Services.captivePortalDetector.cancelLogin(detail.id);
@@ -1496,54 +1117,7 @@ window.addEventListener('ContentStart', function update_onContentStart() {
   // We must set the size in KB, and keep a bit of free space.
   let size = Math.floor(stats.totalBytes / 1024) - 1024;
   Services.prefs.setIntPref("browser.cache.disk.capacity", size);
-}) ()
-#endif
-
-#ifdef MOZ_WIDGET_GONK
-let SensorsListener = {
-  sensorsListenerDevices: ['crespo'],
-  device: libcutils.property_get("ro.product.device"),
-
-  deviceNeedsWorkaround: function SensorsListener_deviceNeedsWorkaround() {
-    return (this.sensorsListenerDevices.indexOf(this.device) != -1);
-  },
-
-  handleEvent: function SensorsListener_handleEvent(evt) {
-    switch(evt.type) {
-      case 'devicemotion':
-        // Listener that does nothing, we need this to have the sensor being
-        // able to report correct values, as explained in bug 753245, comment 6
-        // and in bug 871916
-        break;
-
-      default:
-        break;
-    }
-  },
-
-  observe: function SensorsListener_observe(subject, topic, data) {
-    // We remove the listener when the screen is off, otherwise sensor will
-    // continue to bother us with data and we won't be able to get the
-    // system into suspend state, thus draining battery.
-    if (data === 'on') {
-      window.addEventListener('devicemotion', this);
-    } else {
-      window.removeEventListener('devicemotion', this);
-    }
-  },
-
-  init: function SensorsListener_init() {
-    if (this.deviceNeedsWorkaround()) {
-      // On boot, enable the listener, screen will be on.
-      window.addEventListener('devicemotion', this);
-
-      // Then listen for further screen state changes
-      Services.obs.addObserver(this, 'screen-state-changed', false);
-    }
-  }
-}
-
-SensorsListener.init();
+})();
 #endif
 
 // Calling this observer will cause a shutdown an a profile reset.
@@ -1598,21 +1172,3 @@ Services.obs.addObserver(function resetProfile(subject, topic, data) {
                      .getService(Ci.nsIAppStartup);
   appStartup.quit(Ci.nsIAppStartup.eForceQuit);
 }, 'b2g-reset-profile', false);
-
-/**
-  * CID of our implementation of nsIDownloadManagerUI.
-  */
-const kTransferCid = Components.ID("{1b4c85df-cbdd-4bb6-b04e-613caece083c}");
-
-/**
-  * Contract ID of the service implementing nsITransfer.
-  */
-const kTransferContractId = "@mozilla.org/transfer;1";
-
-// Override Toolkit's nsITransfer implementation with the one from the
-// JavaScript API for downloads.  This will eventually be removed when
-// nsIDownloadManager will not be available anymore (bug 851471).  The
-// old code in this module will be removed in bug 899110.
-Components.manager.QueryInterface(Ci.nsIComponentRegistrar)
-                  .registerFactory(kTransferCid, "",
-                                   kTransferContractId, null);

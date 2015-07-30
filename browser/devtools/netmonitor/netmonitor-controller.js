@@ -1,4 +1,4 @@
-/* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -8,6 +8,7 @@
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 const NET_STRINGS_URI = "chrome://browser/locale/devtools/netmonitor.properties";
+const PKI_STRINGS_URI = "chrome://pippki/locale/pippki.properties";
 const LISTENERS = [ "NetworkActivity" ];
 const NET_PREFS = { "NetworkMonitor.saveRequestAndResponseBodies": true };
 
@@ -33,6 +34,10 @@ const EVENTS = {
   // When request post data begins and finishes receiving.
   UPDATING_REQUEST_POST_DATA: "NetMonitor:NetworkEventUpdating:RequestPostData",
   RECEIVED_REQUEST_POST_DATA: "NetMonitor:NetworkEventUpdated:RequestPostData",
+
+  // When security information begins and finishes receiving.
+  UPDATING_SECURITY_INFO: "NetMonitor::NetworkEventUpdating:SecurityInfo",
+  RECEIVED_SECURITY_INFO: "NetMonitor::NetworkEventUpdated:SecurityInfo",
 
   // When response headers begin and finish receiving.
   UPDATING_RESPONSE_HEADERS: "NetMonitor:NetworkEventUpdating:ResponseHeaders",
@@ -93,7 +98,8 @@ const ACTIVITY_TYPE = {
   // Forcing the target to reload with cache enabled or disabled.
   RELOAD: {
     WITH_CACHE_ENABLED: 1,
-    WITH_CACHE_DISABLED: 2
+    WITH_CACHE_DISABLED: 2,
+    WITH_CACHE_DEFAULT: 3
   },
 
   // Enabling or disabling the cache without triggering a reload.
@@ -113,6 +119,7 @@ const promise = Cu.import("resource://gre/modules/Promise.jsm", {}).Promise;
 const EventEmitter = require("devtools/toolkit/event-emitter");
 const Editor = require("devtools/sourceeditor/editor");
 const {Tooltip} = require("devtools/shared/widgets/Tooltip");
+const {ToolSidebar} = require("devtools/framework/sidebar");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Chart",
   "resource:///modules/devtools/Chart.jsm");
@@ -134,6 +141,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "DevToolsUtils",
 
 XPCOMUtils.defineLazyServiceGetter(this, "clipboardHelper",
   "@mozilla.org/widget/clipboardhelper;1", "nsIClipboardHelper");
+
+XPCOMUtils.defineLazyServiceGetter(this, "DOMParser",
+  "@mozilla.org/xmlextras/domparser;1", "nsIDOMParser");
 
 Object.defineProperty(this, "NetworkHelper", {
   get: function() {
@@ -221,6 +231,14 @@ let NetMonitorController = {
     this.client = null;
     this.tabClient = null;
     this.webConsoleClient = null;
+  },
+
+  /**
+   * Checks whether the netmonitor connection is active.
+   * @return boolean
+   */
+  isConnected: function() {
+    return !!this.client;
   },
 
   /**
@@ -347,24 +365,26 @@ let NetMonitorController = {
       let navigationFinished = waitForNavigation();
       return reconfigureTab(aOptions).then(() => navigationFinished);
     }
-
+    if (aType == ACTIVITY_TYPE.RELOAD.WITH_CACHE_DEFAULT) {
+      return reconfigureTabAndWaitForNavigation({}).then(standBy);
+    }
     if (aType == ACTIVITY_TYPE.RELOAD.WITH_CACHE_ENABLED) {
       this._currentActivity = ACTIVITY_TYPE.ENABLE_CACHE;
       this._target.once("will-navigate", () => this._currentActivity = aType);
-      return reconfigureTabAndWaitForNavigation({ cacheEnabled: true }).then(standBy);
+      return reconfigureTabAndWaitForNavigation({ cacheDisabled: false, performReload: true }).then(standBy);
     }
     if (aType == ACTIVITY_TYPE.RELOAD.WITH_CACHE_DISABLED) {
       this._currentActivity = ACTIVITY_TYPE.DISABLE_CACHE;
       this._target.once("will-navigate", () => this._currentActivity = aType);
-      return reconfigureTabAndWaitForNavigation({ cacheEnabled: false }).then(standBy);
+      return reconfigureTabAndWaitForNavigation({ cacheDisabled: true, performReload: true }).then(standBy);
     }
     if (aType == ACTIVITY_TYPE.ENABLE_CACHE) {
       this._currentActivity = aType;
-      return reconfigureTab({ cacheEnabled: true, performReload: false }).then(standBy);
+      return reconfigureTab({ cacheDisabled: false, performReload: false }).then(standBy);
     }
     if (aType == ACTIVITY_TYPE.DISABLE_CACHE) {
       this._currentActivity = aType;
-      return reconfigureTab({ cacheEnabled: false, performReload: false }).then(standBy);
+      return reconfigureTab({ cacheDisabled: true, performReload: false }).then(standBy);
     }
     this._currentActivity = ACTIVITY_TYPE.NONE;
     return promise.reject(new Error("Invalid activity type"));
@@ -378,6 +398,16 @@ let NetMonitorController = {
     return this.webConsoleClient &&
            (this.webConsoleClient.traits.customNetworkRequest ||
             !this._target.isApp);
+  },
+
+  /**
+   * Getter that tells if the server includes the transferred (compressed /
+   * encoded) response size.
+   * @type boolean
+   */
+  get supportsTransferredResponseSize() {
+    return this.webConsoleClient &&
+           this.webConsoleClient.traits.transferredResponseSize;
   },
 
   /**
@@ -528,7 +558,7 @@ NetworkEventsHandler.prototype = {
 
     let { actor, startedDateTime, method, url, isXHR } = aPacket.eventActor;
     NetMonitorView.RequestsMenu.addRequest(actor, startedDateTime, method, url, isXHR);
-    window.emit(EVENTS.NETWORK_EVENT);
+    window.emit(EVENTS.NETWORK_EVENT, actor);
   },
 
   /**
@@ -549,23 +579,30 @@ NetworkEventsHandler.prototype = {
     switch (aPacket.updateType) {
       case "requestHeaders":
         this.webConsoleClient.getRequestHeaders(actor, this._onRequestHeaders);
-        window.emit(EVENTS.UPDATING_REQUEST_HEADERS);
+        window.emit(EVENTS.UPDATING_REQUEST_HEADERS, actor);
         break;
       case "requestCookies":
         this.webConsoleClient.getRequestCookies(actor, this._onRequestCookies);
-        window.emit(EVENTS.UPDATING_REQUEST_COOKIES);
+        window.emit(EVENTS.UPDATING_REQUEST_COOKIES, actor);
         break;
       case "requestPostData":
         this.webConsoleClient.getRequestPostData(actor, this._onRequestPostData);
-        window.emit(EVENTS.UPDATING_REQUEST_POST_DATA);
+        window.emit(EVENTS.UPDATING_REQUEST_POST_DATA, actor);
+        break;
+      case "securityInfo":
+        NetMonitorView.RequestsMenu.updateRequest(aPacket.from, {
+          securityState: aPacket.state,
+        });
+        this.webConsoleClient.getSecurityInfo(actor, this._onSecurityInfo);
+        window.emit(EVENTS.UPDATING_SECURITY_INFO, actor);
         break;
       case "responseHeaders":
         this.webConsoleClient.getResponseHeaders(actor, this._onResponseHeaders);
-        window.emit(EVENTS.UPDATING_RESPONSE_HEADERS);
+        window.emit(EVENTS.UPDATING_RESPONSE_HEADERS, actor);
         break;
       case "responseCookies":
         this.webConsoleClient.getResponseCookies(actor, this._onResponseCookies);
-        window.emit(EVENTS.UPDATING_RESPONSE_COOKIES);
+        window.emit(EVENTS.UPDATING_RESPONSE_COOKIES, actor);
         break;
       case "responseStart":
         NetMonitorView.RequestsMenu.updateRequest(aPacket.from, {
@@ -574,22 +611,23 @@ NetworkEventsHandler.prototype = {
           statusText: aPacket.response.statusText,
           headersSize: aPacket.response.headersSize
         });
-        window.emit(EVENTS.STARTED_RECEIVING_RESPONSE);
+        window.emit(EVENTS.STARTED_RECEIVING_RESPONSE, actor);
         break;
       case "responseContent":
         NetMonitorView.RequestsMenu.updateRequest(aPacket.from, {
           contentSize: aPacket.contentSize,
+          transferredSize: aPacket.transferredSize,
           mimeType: aPacket.mimeType
         });
         this.webConsoleClient.getResponseContent(actor, this._onResponseContent);
-        window.emit(EVENTS.UPDATING_RESPONSE_CONTENT);
+        window.emit(EVENTS.UPDATING_RESPONSE_CONTENT, actor);
         break;
       case "eventTimings":
         NetMonitorView.RequestsMenu.updateRequest(aPacket.from, {
           totalTime: aPacket.totalTime
         });
         this.webConsoleClient.getEventTimings(actor, this._onEventTimings);
-        window.emit(EVENTS.UPDATING_EVENT_TIMINGS);
+        window.emit(EVENTS.UPDATING_EVENT_TIMINGS, actor);
         break;
     }
   },
@@ -604,7 +642,7 @@ NetworkEventsHandler.prototype = {
     NetMonitorView.RequestsMenu.updateRequest(aResponse.from, {
       requestHeaders: aResponse
     });
-    window.emit(EVENTS.RECEIVED_REQUEST_HEADERS);
+    window.emit(EVENTS.RECEIVED_REQUEST_HEADERS, aResponse.from);
   },
 
   /**
@@ -617,7 +655,7 @@ NetworkEventsHandler.prototype = {
     NetMonitorView.RequestsMenu.updateRequest(aResponse.from, {
       requestCookies: aResponse
     });
-    window.emit(EVENTS.RECEIVED_REQUEST_COOKIES);
+    window.emit(EVENTS.RECEIVED_REQUEST_COOKIES, aResponse.from);
   },
 
   /**
@@ -630,8 +668,22 @@ NetworkEventsHandler.prototype = {
     NetMonitorView.RequestsMenu.updateRequest(aResponse.from, {
       requestPostData: aResponse
     });
-    window.emit(EVENTS.RECEIVED_REQUEST_POST_DATA);
+    window.emit(EVENTS.RECEIVED_REQUEST_POST_DATA, aResponse.from);
   },
+
+  /**
+   * Handles additional information received for a "securityInfo" packet.
+   *
+   * @param object aResponse
+   *        The message received from the server.
+   */
+   _onSecurityInfo: function(aResponse) {
+     NetMonitorView.RequestsMenu.updateRequest(aResponse.from, {
+       securityInfo: aResponse.securityInfo
+     });
+
+     window.emit(EVENTS.RECEIVED_SECURITY_INFO, aResponse.from);
+   },
 
   /**
    * Handles additional information received for a "responseHeaders" packet.
@@ -643,7 +695,7 @@ NetworkEventsHandler.prototype = {
     NetMonitorView.RequestsMenu.updateRequest(aResponse.from, {
       responseHeaders: aResponse
     });
-    window.emit(EVENTS.RECEIVED_RESPONSE_HEADERS);
+    window.emit(EVENTS.RECEIVED_RESPONSE_HEADERS, aResponse.from);
   },
 
   /**
@@ -656,7 +708,7 @@ NetworkEventsHandler.prototype = {
     NetMonitorView.RequestsMenu.updateRequest(aResponse.from, {
       responseCookies: aResponse
     });
-    window.emit(EVENTS.RECEIVED_RESPONSE_COOKIES);
+    window.emit(EVENTS.RECEIVED_RESPONSE_COOKIES, aResponse.from);
   },
 
   /**
@@ -669,7 +721,7 @@ NetworkEventsHandler.prototype = {
     NetMonitorView.RequestsMenu.updateRequest(aResponse.from, {
       responseContent: aResponse
     });
-    window.emit(EVENTS.RECEIVED_RESPONSE_CONTENT);
+    window.emit(EVENTS.RECEIVED_RESPONSE_CONTENT, aResponse.from);
   },
 
   /**
@@ -682,7 +734,7 @@ NetworkEventsHandler.prototype = {
     NetMonitorView.RequestsMenu.updateRequest(aResponse.from, {
       eventTimings: aResponse
     });
-    window.emit(EVENTS.RECEIVED_EVENT_TIMINGS);
+    window.emit(EVENTS.RECEIVED_EVENT_TIMINGS, aResponse.from);
   },
 
   /**
@@ -727,6 +779,7 @@ NetworkEventsHandler.prototype = {
  * Localization convenience methods.
  */
 let L10N = new ViewHelpers.L10N(NET_STRINGS_URI);
+let PKI_L10N = new ViewHelpers.L10N(PKI_STRINGS_URI);
 
 /**
  * Shortcuts for accessing various network monitor preferences.
@@ -762,7 +815,8 @@ NetMonitorController.NetworkEventsHandler = new NetworkEventsHandler();
  */
 Object.defineProperties(window, {
   "gNetwork": {
-    get: function() NetMonitorController.NetworkEventsHandler
+    get: function() NetMonitorController.NetworkEventsHandler,
+    configurable: true
   }
 });
 
@@ -797,7 +851,12 @@ function whenDataAvailable(aDataStore, aMandatoryFields) {
 };
 
 const WDA_DEFAULT_VERIFY_INTERVAL = 50; // ms
-const WDA_DEFAULT_GIVE_UP_TIMEOUT = 2000; // ms
+
+// Use longer timeout during testing as the tests need this process to succeed
+// and two seconds is quite short on slow debug builds. The timeout here should
+// be at least equal to the general mochitest timeout of 45 seconds so that this
+// never gets hit during testing.
+const WDA_DEFAULT_GIVE_UP_TIMEOUT = gDevTools.testing ? 45000 : 2000; // ms
 
 /**
  * Helper method for debugging.

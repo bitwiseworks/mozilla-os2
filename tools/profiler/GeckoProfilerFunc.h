@@ -6,26 +6,25 @@
 #ifndef PROFILER_FUNCS_H
 #define PROFILER_FUNCS_H
 
-#include "mozilla/NullPtr.h"
 #include "js/TypeDecls.h"
+#include "js/ProfilingStack.h"
 #include <stdint.h>
 
 namespace mozilla {
-class TimeDuration;
 class TimeStamp;
 }
-
-using mozilla::TimeStamp;
-using mozilla::TimeDuration;
 
 class ProfilerBacktrace;
 class ProfilerMarkerPayload;
 
 // Returns a handle to pass on exit. This can check that we are popping the
 // correct callstack.
-inline void* mozilla_sampler_call_enter(const char *aInfo, void *aFrameAddress = nullptr,
-                                        bool aCopy = false, uint32_t line = 0);
+inline void* mozilla_sampler_call_enter(const char *aInfo, js::ProfileEntry::Category aCategory,
+                                        void *aFrameAddress = nullptr, bool aCopy = false,
+                                        uint32_t line = 0);
+
 inline void  mozilla_sampler_call_exit(void* handle);
+
 void  mozilla_sampler_add_marker(const char *aInfo,
                                  ProfilerMarkerPayload *aPayload = nullptr);
 
@@ -43,6 +42,8 @@ ProfilerBacktrace* mozilla_sampler_get_backtrace();
 void mozilla_sampler_free_backtrace(ProfilerBacktrace* aBacktrace);
 
 bool mozilla_sampler_is_active();
+
+bool mozilla_sampler_feature_active(const char* aName);
 
 void mozilla_sampler_responsiveness(const mozilla::TimeStamp& time);
 
@@ -90,6 +91,12 @@ extern bool sps_version2();
 
 void mozilla_sampler_tracing(const char* aCategory, const char* aInfo,
                              TracingMetadata aMetaData);
+
+void mozilla_sampler_tracing(const char* aCategory, const char* aInfo,
+                             ProfilerBacktrace* aCause,
+                             TracingMetadata aMetaData);
+
+void mozilla_sampler_log(const char *fmt, va_list args);
 
 #endif
 

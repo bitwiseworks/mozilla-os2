@@ -18,7 +18,7 @@ browser.jar:
 *       content/browser/aboutDialog.js                (content/aboutDialog.js)
         content/browser/aboutDialog.css               (content/aboutDialog.css)
         content/browser/aboutRobots.xhtml             (content/aboutRobots.xhtml)
-        content/browser/abouthome/aboutHome.xhtml     (content/abouthome/aboutHome.xhtml)
+*       content/browser/abouthome/aboutHome.xhtml     (content/abouthome/aboutHome.xhtml)
         content/browser/abouthome/aboutHome.js        (content/abouthome/aboutHome.js)
 *       content/browser/abouthome/aboutHome.css       (content/abouthome/aboutHome.css)
         content/browser/abouthome/snippet1.png        (content/abouthome/snippet1.png)
@@ -45,6 +45,9 @@ browser.jar:
         content/browser/abouthome/restore@2x.png       (content/abouthome/restore@2x.png)
         content/browser/abouthome/restore-large@2x.png (content/abouthome/restore-large@2x.png)
         content/browser/abouthome/mozilla@2x.png       (content/abouthome/mozilla@2x.png)
+
+        content/browser/aboutNetError.xhtml            (content/aboutNetError.xhtml)
+
 #ifdef MOZ_SERVICES_HEALTHREPORT
         content/browser/abouthealthreport/abouthealth.xhtml   (content/abouthealthreport/abouthealth.xhtml)
         content/browser/abouthealthreport/abouthealth.js      (content/abouthealthreport/abouthealth.js)
@@ -65,6 +68,8 @@ browser.jar:
         content/browser/aboutRobots-icon.png          (content/aboutRobots-icon.png)
         content/browser/aboutRobots-widget-left.png   (content/aboutRobots-widget-left.png)
         content/browser/aboutSocialError.xhtml        (content/aboutSocialError.xhtml)
+        content/browser/aboutProviderDirectory.xhtml  (content/aboutProviderDirectory.xhtml)
+        content/browser/aboutTabCrashed.css           (content/aboutTabCrashed.css)
         content/browser/aboutTabCrashed.js            (content/aboutTabCrashed.js)
         content/browser/aboutTabCrashed.xhtml         (content/aboutTabCrashed.xhtml)
 *       content/browser/browser.css                   (content/browser.css)
@@ -73,13 +78,29 @@ browser.jar:
 *       content/browser/browser-tabPreviews.xml       (content/browser-tabPreviews.xml)
 *       content/browser/chatWindow.xul                (content/chatWindow.xul)
         content/browser/content.js                    (content/content.js)
-        content/browser/fonts/ClearSans-Regular.woff  (content/fonts/ClearSans-Regular.woff)
-        content/browser/fonts/FiraSans-Regular.woff   (content/fonts/FiraSans-Regular.woff)
-        content/browser/fonts/FiraSans-Light.woff     (content/fonts/FiraSans-Light.woff)
+        content/browser/defaultthemes/1.footer.jpg    (content/defaultthemes/1.footer.jpg)
+        content/browser/defaultthemes/1.header.jpg    (content/defaultthemes/1.header.jpg)
+        content/browser/defaultthemes/1.icon.jpg      (content/defaultthemes/1.icon.jpg)
+        content/browser/defaultthemes/1.preview.jpg   (content/defaultthemes/1.preview.jpg)
+        content/browser/defaultthemes/2.footer.jpg    (content/defaultthemes/2.footer.jpg)
+        content/browser/defaultthemes/2.header.jpg    (content/defaultthemes/2.header.jpg)
+        content/browser/defaultthemes/2.icon.jpg      (content/defaultthemes/2.icon.jpg)
+        content/browser/defaultthemes/2.preview.jpg   (content/defaultthemes/2.preview.jpg)
+        content/browser/defaultthemes/3.footer.png    (content/defaultthemes/3.footer.png)
+        content/browser/defaultthemes/3.header.png    (content/defaultthemes/3.header.png)
+        content/browser/defaultthemes/3.icon.png      (content/defaultthemes/3.icon.png)
+        content/browser/defaultthemes/3.preview.png   (content/defaultthemes/3.preview.png)
+        content/browser/defaultthemes/4.footer.png    (content/defaultthemes/4.footer.png)
+        content/browser/defaultthemes/4.header.png    (content/defaultthemes/4.header.png)
+        content/browser/defaultthemes/4.icon.png      (content/defaultthemes/4.icon.png)
+        content/browser/defaultthemes/4.preview.png   (content/defaultthemes/4.preview.png)
+        content/browser/defaultthemes/5.footer.png    (content/defaultthemes/5.footer.png)
+        content/browser/defaultthemes/5.header.png    (content/defaultthemes/5.header.png)
+        content/browser/defaultthemes/5.icon.jpg      (content/defaultthemes/5.icon.jpg)
+        content/browser/defaultthemes/5.preview.jpg   (content/defaultthemes/5.preview.jpg)
         content/browser/newtab/newTab.xul             (content/newtab/newTab.xul)
 *       content/browser/newtab/newTab.js              (content/newtab/newTab.js)
         content/browser/newtab/newTab.css             (content/newtab/newTab.css)
-        content/browser/newtab/preloaderContent.js    (content/newtab/preloaderContent.js)
 *       content/browser/pageinfo/pageInfo.xul         (content/pageinfo/pageInfo.xul)
         content/browser/pageinfo/pageInfo.js          (content/pageinfo/pageInfo.js)
         content/browser/pageinfo/pageInfo.css         (content/pageinfo/pageInfo.css)
@@ -90,7 +111,7 @@ browser.jar:
         content/browser/pageinfo/security.js          (content/pageinfo/security.js)
 #ifdef MOZ_SERVICES_SYNC
         content/browser/sync/aboutSyncTabs.xul        (content/sync/aboutSyncTabs.xul)
-        content/browser/sync/aboutSyncTabs.js         (content/sync/aboutSyncTabs.js)
+*       content/browser/sync/aboutSyncTabs.js         (content/sync/aboutSyncTabs.js)
         content/browser/sync/aboutSyncTabs.css        (content/sync/aboutSyncTabs.css)
         content/browser/sync/aboutSyncTabs-bindings.xml  (content/sync/aboutSyncTabs-bindings.xml)
 *       content/browser/sync/setup.xul                (content/sync/setup.xul)
@@ -117,6 +138,8 @@ browser.jar:
 *       content/browser/sanitize.xul                  (content/sanitize.xul)
 *       content/browser/sanitizeDialog.js             (content/sanitizeDialog.js)
         content/browser/sanitizeDialog.css            (content/sanitizeDialog.css)
+        content/browser/searchSuggestionUI.js         (content/searchSuggestionUI.js)
+        content/browser/searchSuggestionUI.css        (content/searchSuggestionUI.css)
         content/browser/tabbrowser.css                (content/tabbrowser.css)
 *       content/browser/tabbrowser.xml                (content/tabbrowser.xml)
 *       content/browser/urlbarBindings.xml            (content/urlbarBindings.xml)
@@ -134,6 +157,10 @@ browser.jar:
 *       content/browser/softwareUpdateOverlay.xul  (content/softwareUpdateOverlay.xul)
 #endif
 *       content/browser/viewSourceOverlay.xul         (content/viewSourceOverlay.xul)
+#ifndef XP_MACOSX
+*       content/browser/webrtcIndicator.xul           (content/webrtcIndicator.xul)
+        content/browser/webrtcIndicator.js            (content/webrtcIndicator.js)
+#endif
 #ifdef XP_WIN
         content/browser/win6BrowserOverlay.xul        (content/win6BrowserOverlay.xul)
 #endif
@@ -147,3 +174,5 @@ browser.jar:
         content/browser/blockedSite.xhtml               (content/blockedSite.xhtml)
 % overlay chrome://browser/content/browser.xul chrome://browser/content/report-phishing-overlay.xul
 #endif
+
+% override chrome://global/content/netError.xhtml chrome://browser/content/aboutNetError.xhtml

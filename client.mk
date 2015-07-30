@@ -70,7 +70,7 @@ endif
 
 SH := /bin/sh
 PERL ?= perl
-PYTHON ?= python
+PYTHON ?= $(shell which python2.7 > /dev/null 2>&1 && echo python2.7 || echo python)
 
 CONFIG_GUESS_SCRIPT := $(wildcard $(TOPSRCDIR)/build/autoconf/config.guess)
 ifdef CONFIG_GUESS_SCRIPT
@@ -91,6 +91,9 @@ convert it to Unix-style line endings, check \
 "https://developer.mozilla.org/en-US/docs/Developer_Guide/Mozilla_build_FAQ\#Win32-specific_questions" \
 for a workaround of this issue.)
 endif
+
+# Set this for baseconfig.mk
+HOST_OS_ARCH=WINNT
 endif
 
 ####################################
@@ -165,7 +168,10 @@ OBJDIR_TARGETS = install export libs clean realclean distclean maybe_clobber_pro
 
 # The default rule is build
 build::
-	$(MAKE) -f $(TOPSRCDIR)/client.mk $(if $(MOZ_PGO),profiledbuild,realbuild)
+	$(MAKE) -f $(TOPSRCDIR)/client.mk $(if $(MOZ_PGO),profiledbuild,realbuild) CREATE_MOZCONFIG_JSON=
+
+# Include baseconfig.mk for its $(MAKE) validation.
+include $(TOPSRCDIR)/config/baseconfig.mk
 
 # Define mkdir
 include $(TOPSRCDIR)/config/makefiles/makeutils.mk
@@ -195,6 +201,12 @@ $(OBJDIR)/.mozconfig.mk: $(FOUND_MOZCONFIG) $(call mkdir_deps,$(OBJDIR)) $(OBJDI
 include $(OBJDIR)/.mozconfig.mk
 endif
 
+# UPLOAD_EXTRA_FILES is appended to and exported from mozconfig, which makes
+# submakes as well as configure add even more to that, so just unexport it
+# for submakes to pick it from .mozconfig.mk and for configure to pick it
+# from mach environment.
+unexport UPLOAD_EXTRA_FILES
+
 # Print out any options loaded from mozconfig.
 all realbuild clean distclean export libs install realclean::
 ifneq (,$(strip $(MOZCONFIG_OUT_FILTERED)))
@@ -218,12 +230,12 @@ everything: clean build
 #  is usable in multi-pass builds, where you might not have a runnable
 #  application until all the build passes and postflight scripts have run.
 profiledbuild::
-	$(MAKE) -f $(TOPSRCDIR)/client.mk realbuild MOZ_PROFILE_GENERATE=1 MOZ_PGO_INSTRUMENTED=1
+	$(MAKE) -f $(TOPSRCDIR)/client.mk realbuild MOZ_PROFILE_GENERATE=1 MOZ_PGO_INSTRUMENTED=1 CREATE_MOZCONFIG_JSON=
 	$(MAKE) -C $(OBJDIR) package MOZ_PGO_INSTRUMENTED=1 MOZ_INTERNAL_SIGNING_FORMAT= MOZ_EXTERNAL_SIGNING_FORMAT=
 	rm -f $(OBJDIR)/jarlog/en-US.log
 	MOZ_PGO_INSTRUMENTED=1 JARLOG_FILE=jarlog/en-US.log EXTRA_TEST_ARGS=10 $(MAKE) -C $(OBJDIR) pgo-profile-run
-	$(MAKE) -f $(TOPSRCDIR)/client.mk maybe_clobber_profiledbuild
-	$(MAKE) -f $(TOPSRCDIR)/client.mk realbuild MOZ_PROFILE_USE=1
+	$(MAKE) -f $(TOPSRCDIR)/client.mk maybe_clobber_profiledbuild CREATE_MOZCONFIG_JSON=
+	$(MAKE) -f $(TOPSRCDIR)/client.mk realbuild MOZ_PROFILE_USE=1 CREATE_MOZCONFIG_JSON=
 
 #####################################################
 # Build date unification
@@ -333,9 +345,14 @@ configure-preqs = \
   $(OBJDIR)/.mozconfig.json \
   $(NULL)
 
-CREATE_MOZCONFIG_JSON := $(shell $(TOPSRCDIR)/mach environment --format=json -o $(OBJDIR)/.mozconfig.json)
-$(OBJDIR)/.mozconfig.json: $(call mkdir_deps,$(OBJDIR))
-	@$(TOPSRCDIR)/mach environment --format=json -o $@
+CREATE_MOZCONFIG_JSON = $(shell $(TOPSRCDIR)/mach environment --format=json -o $(OBJDIR)/.mozconfig.json)
+# Force CREATE_MOZCONFIG_JSON above to be resolved, without side effects in
+# case the result is non empty, and allowing an override on the make command
+# line not running the command (using := $(shell) still runs the shell command).
+ifneq (,$(CREATE_MOZCONFIG_JSON))
+endif
+
+$(OBJDIR)/.mozconfig.json: $(call mkdir_deps,$(OBJDIR)) ;
 
 save-mozconfig: $(FOUND_MOZCONFIG)
 	-cp $(FOUND_MOZCONFIG) $(OBJDIR)/.mozconfig

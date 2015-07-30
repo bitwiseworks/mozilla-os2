@@ -3,9 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsISupports.idl"
-#include "nsIDOMSmsSegmentInfo.idl"
 
-[scriptable, uuid(41db87b0-b0a1-11e3-a04f-cf487d837ee3)]
+[scriptable, uuid(35279dbc-9f1d-419f-b17a-230fcf49f0c7)]
 interface nsIMobileMessageCallback : nsISupports
 {
   /**
@@ -30,7 +29,7 @@ interface nsIMobileMessageCallback : nsISupports
    * |message| can be nsIDOMMoz{Mms,Sms}Message.
    */
   void notifyMessageSent(in nsISupports message);
-  void notifySendMessageFailed(in long error);
+  void notifySendMessageFailed(in long error, in nsISupports message);
 
   /**
    * |message| can be nsIDOMMoz{Mms,Sms}Message.
@@ -45,7 +44,9 @@ interface nsIMobileMessageCallback : nsISupports
   void notifyMessageMarkedRead(in boolean read);
   void notifyMarkMessageReadFailed(in long error);
 
-  void notifySegmentInfoForTextGot(in nsIDOMMozSmsSegmentInfo info);
+  void notifySegmentInfoForTextGot(in long segments,
+                                   in long charsPerSegment,
+                                   in long charsAvailableInLastSegment);
   void notifyGetSegmentInfoForTextFailed(in long error);
 
   /**

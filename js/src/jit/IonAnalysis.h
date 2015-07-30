@@ -7,11 +7,9 @@
 #ifndef jit_IonAnalysis_h
 #define jit_IonAnalysis_h
 
-#ifdef JS_ION
-
 // This file declares various analysis passes that operate on MIR.
 
-#include "jit/IonAllocPolicy.h"
+#include "jit/JitAllocPolicy.h"
 #include "jit/MIR.h"
 
 namespace js {
@@ -19,6 +17,9 @@ namespace jit {
 
 class MIRGenerator;
 class MIRGraph;
+
+void
+FoldTests(MIRGraph& graph);
 
 bool
 SplitCriticalEdges(MIRGraph& graph);
@@ -30,6 +31,15 @@ enum Observability {
 
 bool
 EliminatePhis(MIRGenerator* mir, MIRGraph& graph, Observability observe);
+
+size_t
+MarkLoopBlocks(MIRGraph& graph, MBasicBlock* header, bool* canOsr);
+
+void
+UnmarkLoopBlocks(MIRGraph& graph, MBasicBlock* header);
+
+bool
+MakeLoopsContiguous(MIRGraph& graph);
 
 bool
 EliminateDeadResumePointOperands(MIRGenerator* mir, MIRGraph& graph);
@@ -45,6 +55,15 @@ MakeMRegExpHoistable(MIRGraph& graph);
 
 bool
 RenumberBlocks(MIRGraph& graph);
+
+bool
+AccountForCFGChanges(MIRGenerator* mir, MIRGraph& graph, bool updateAliasAnalysis);
+
+bool
+RemoveUnmarkedBlocks(MIRGenerator* mir, MIRGraph& graph, uint32_t numMarkedBlocks);
+
+void
+ClearDominatorTree(MIRGraph& graph);
 
 bool
 BuildDominatorTree(MIRGraph& graph);
@@ -66,9 +85,6 @@ EliminateRedundantChecks(MIRGraph& graph);
 
 void
 AddKeepAliveInstructions(MIRGraph& graph);
-
-bool
-UnsplitEdges(LIRGraph* lir);
 
 class MDefinition;
 
@@ -105,7 +121,7 @@ struct LinearTerm
 class LinearSum
 {
   public:
-    LinearSum(TempAllocator& alloc)
+    explicit LinearSum(TempAllocator& alloc)
       : terms_(alloc),
         constant_(0)
     {
@@ -118,35 +134,58 @@ class LinearSum
         terms_.appendAll(other.terms_);
     }
 
+    // These return false on an integer overflow, and afterwards the sum must
+    // not be used.
     bool multiply(int32_t scale);
-    bool add(const LinearSum& other);
+    bool add(const LinearSum& other, int32_t scale = 1);
+    bool add(SimpleLinearSum other, int32_t scale = 1);
     bool add(MDefinition* term, int32_t scale);
     bool add(int32_t constant);
+
+    // Unlike the above function, on failure this leaves the sum unchanged and
+    // it can still be used.
+    bool divide(int32_t scale);
 
     int32_t constant() const { return constant_; }
     size_t numTerms() const { return terms_.length(); }
     LinearTerm term(size_t i) const { return terms_[i]; }
+    void replaceTerm(size_t i, MDefinition* def) { terms_[i].term = def; }
 
     void print(Sprinter& sp) const;
     void dump(FILE*) const;
     void dump() const;
 
   private:
-    Vector<LinearTerm, 2, IonAllocPolicy> terms_;
+    Vector<LinearTerm, 2, JitAllocPolicy> terms_;
     int32_t constant_;
 };
 
+// Convert all components of a linear sum (except, optionally, the constant)
+// and add any new instructions to the end of block.
+MDefinition*
+ConvertLinearSum(TempAllocator& alloc, MBasicBlock* block, const LinearSum& sum,
+                 bool convertConstant = false);
+
+// Convert the test 'sum >= 0' to a comparison, adding any necessary
+// instructions to the end of block.
+MCompare*
+ConvertLinearInequality(TempAllocator& alloc, MBasicBlock* block, const LinearSum& sum);
+
 bool
-AnalyzeNewScriptProperties(JSContext* cx, JSFunction* fun,
-                           types::TypeObject* type, HandleObject baseobj,
-                           Vector<types::TypeNewScript::Initializer>* initializerList);
+AnalyzeNewScriptDefiniteProperties(JSContext* cx, JSFunction* fun,
+                                   ObjectGroup* group, HandlePlainObject baseobj,
+                                   Vector<TypeNewScript::Initializer>* initializerList);
 
 bool
 AnalyzeArgumentsUsage(JSContext* cx, JSScript* script);
 
+bool
+DeadIfUnused(const MDefinition* def);
+
+bool
+IsDiscardable(const MDefinition* def);
+
 } // namespace jit
 } // namespace js
-
-#endif // JS_ION
 
 #endif /* jit_IonAnalysis_h */

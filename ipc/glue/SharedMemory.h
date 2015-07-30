@@ -25,18 +25,23 @@ enum Rights {
 }
 
 namespace mozilla {
+
+namespace ipc {
+class SharedMemory;
+}
+
 namespace ipc {
 
 class SharedMemory
 {
-public:
+protected:
   virtual ~SharedMemory()
   {
-    MOZ_COUNT_DTOR(SharedMemory);
     Unmapped();
     Destroyed();
   }
 
+public:
   enum SharedMemoryType {
     TYPE_BASIC,
     TYPE_SYSV,

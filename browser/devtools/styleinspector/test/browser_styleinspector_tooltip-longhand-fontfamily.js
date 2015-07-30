@@ -17,7 +17,7 @@ const PAGE_CONTENT = [
   '<div id="testElement">test element</div>'
 ].join("\n");
 
-let test = asyncTest(function*() {
+add_task(function*() {
   yield addTab("data:text/html;charset=utf-8,font family longhand tooltip test");
 
   info("Creating the test document");
@@ -29,41 +29,91 @@ let test = asyncTest(function*() {
   info("Selecting the test node");
   yield selectNode("#testElement", inspector);
 
-  yield testRuleView(view);
+  yield testRuleView(view, inspector.selection.nodeFront);
 
   info("Opening the computed view");
-  let {toolbox, inspector, view} = yield openComputedView();
+  let onComputedViewReady = inspector.once("computed-view-refreshed");
+  ({toolbox, inspector, view} = yield openComputedView());
+  yield onComputedViewReady;
 
-  yield testComputedView(view);
+  yield testComputedView(view, inspector.selection.nodeFront);
+
+  yield testExpandedComputedViewProperty(view, inspector.selection.nodeFront);
 });
 
-function* testRuleView(ruleView) {
+function* testRuleView(ruleView, nodeFront) {
   info("Testing font-family tooltips in the rule view");
 
-  let panel = ruleView.previewTooltip.panel;
+  let tooltip = ruleView.tooltips.previewTooltip;
+  let panel = tooltip.panel;
 
   // Check that the rule view has a tooltip and that a XUL panel has been created
-  ok(ruleView.previewTooltip, "Tooltip instance exists");
+  ok(tooltip, "Tooltip instance exists");
   ok(panel, "XUL panel exists");
 
   // Get the font family property inside the rule view
   let {valueSpan} = getRuleViewProperty(ruleView, "#testElement", "font-family");
 
   // And verify that the tooltip gets shown on this property
-  yield assertHoverTooltipOn(ruleView.previewTooltip, valueSpan);
+  yield assertHoverTooltipOn(tooltip, valueSpan);
 
-  let description = panel.getElementsByTagName("description")[0];
-  is(description.style.fontFamily, "cursive", "Tooltips contains correct font-family style");
+  let images = panel.getElementsByTagName("image");
+  is(images.length, 1, "Tooltip contains an image");
+  ok(images[0].getAttribute("src").startsWith("data:"), "Tooltip contains a data-uri image as expected");
+
+  let dataURL = yield getFontFamilyDataURL(valueSpan.textContent, nodeFront);
+  is(images[0].getAttribute("src"), dataURL, "Tooltip contains the correct data-uri image");
 }
 
-function* testComputedView(computedView) {
+function* testComputedView(computedView, nodeFront) {
   info("Testing font-family tooltips in the computed view");
 
-  let panel = computedView.tooltip.panel;
+  let tooltip = computedView.tooltips.previewTooltip;
+  let panel = tooltip.panel;
   let {valueSpan} = getComputedViewProperty(computedView, "font-family");
 
-  yield assertHoverTooltipOn(computedView.tooltip, valueSpan);
+  yield assertHoverTooltipOn(tooltip, valueSpan);
 
-  let description = panel.getElementsByTagName("description")[0];
-  is(description.style.fontFamily, "cursive", "Tooltips contains correct font-family style");
+  let images = panel.getElementsByTagName("image");
+  is(images.length, 1, "Tooltip contains an image");
+  ok(images[0].getAttribute("src").startsWith("data:"), "Tooltip contains a data-uri image as expected");
+
+  let dataURL = yield getFontFamilyDataURL(valueSpan.textContent, nodeFront);
+  is(images[0].getAttribute("src"), dataURL, "Tooltip contains the correct data-uri image");
+}
+
+function* testExpandedComputedViewProperty(computedView, nodeFront) {
+  info("Testing font-family tooltips in expanded properties of the computed view");
+
+  info("Expanding the font-family property to reveal matched selectors");
+  let propertyView = getPropertyView(computedView, "font-family");
+  propertyView.matchedExpanded = true;
+  yield propertyView.refreshMatchedSelectors();
+
+  let valueSpan = propertyView.matchedSelectorsContainer
+    .querySelector(".bestmatch .other-property-value");
+
+  let tooltip = computedView.tooltips.previewTooltip;
+  let panel = tooltip.panel;
+
+  yield assertHoverTooltipOn(tooltip, valueSpan);
+
+  let images = panel.getElementsByTagName("image");
+  is(images.length, 1, "Tooltip contains an image");
+  ok(images[0].getAttribute("src").startsWith("data:"), "Tooltip contains a data-uri image as expected");
+
+  let dataURL = yield getFontFamilyDataURL(valueSpan.textContent, nodeFront);
+  is(images[0].getAttribute("src"), dataURL, "Tooltip contains the correct data-uri image");
+}
+
+function getPropertyView(computedView, name) {
+  let propertyView = null;
+  computedView.propertyViews.some(function(view) {
+    if (view.name == name) {
+      propertyView = view;
+      return true;
+    }
+    return false;
+  });
+  return propertyView;
 }

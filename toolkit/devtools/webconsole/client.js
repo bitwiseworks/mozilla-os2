@@ -1,4 +1,4 @@
-/* -*- js2-basic-offset: 2; indent-tabs-mode: nil; -*- */
+/* -*- js-indent-level: 2; indent-tabs-mode: nil -*- */
 /* vim: set ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -7,6 +7,7 @@
 "use strict";
 
 const {Cc, Ci, Cu} = require("chrome");
+const DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
 
 loader.lazyImporter(this, "LongStringClient", "resource://gre/modules/devtools/dbg-client.jsm");
 
@@ -26,7 +27,14 @@ function WebConsoleClient(aDebuggerClient, aResponse)
   this._client = aDebuggerClient;
   this._longStrings = {};
   this.traits = aResponse.traits || {};
+  this.events = [];
+
+  this.pendingEvaluationResults = new Map();
+  this.onEvaluationResult = this.onEvaluationResult.bind(this);
+
+  this._client.addListener("evaluationResult", this.onEvaluationResult);
 }
+
 exports.WebConsoleClient = WebConsoleClient;
 
 WebConsoleClient.prototype = {
@@ -103,6 +111,11 @@ WebConsoleClient.prototype = {
    *
    *        - url: the url to evaluate the script as. Defaults to
    *        "debugger eval code".
+   *
+   *        - selectedNodeActor: the NodeActor ID of the current selection in the
+   *        Inspector, if such a selection exists. This is used by helper functions
+   *        that can reference the currently selected node in the Inspector, like
+   *        $0.
    */
   evaluateJS: function WCC_evaluateJS(aString, aOnResponse, aOptions = {})
   {
@@ -113,8 +126,53 @@ WebConsoleClient.prototype = {
       bindObjectActor: aOptions.bindObjectActor,
       frameActor: aOptions.frameActor,
       url: aOptions.url,
+      selectedNodeActor: aOptions.selectedNodeActor,
     };
     this._client.request(packet, aOnResponse);
+  },
+
+  /**
+   * Evaluate a JavaScript expression asynchronously.
+   * See evaluateJS for parameter and response information.
+   */
+  evaluateJSAsync: function(aString, aOnResponse, aOptions = {})
+  {
+    // Pre-37 servers don't support async evaluation.
+    if (!this.traits.evaluateJSAsync) {
+      this.evaluateJS(aString, aOnResponse, aOptions);
+      return;
+    }
+
+    let packet = {
+      to: this._actor,
+      type: "evaluateJSAsync",
+      text: aString,
+      bindObjectActor: aOptions.bindObjectActor,
+      frameActor: aOptions.frameActor,
+      url: aOptions.url,
+      selectedNodeActor: aOptions.selectedNodeActor,
+    };
+
+    this._client.request(packet, response => {
+      this.pendingEvaluationResults.set(response.resultID, aOnResponse);
+    });
+  },
+
+  /**
+   * Handler for the actors's unsolicited evaluationResult packet.
+   */
+  onEvaluationResult: function(aNotification, aPacket) {
+    // Find the associated callback based on this ID, and fire it.
+    // In a sync evaluation, this would have already been called in
+    // direct response to the client.request function.
+    let onResponse = this.pendingEvaluationResults.get(aPacket.resultID);
+    if (onResponse) {
+      onResponse(aPacket);
+      this.pendingEvaluationResults.delete(aPacket.resultID);
+    } else {
+      DevToolsUtils.reportException("onEvaluationResult",
+        "No response handler for an evaluateJSAsync result (resultID: " + aPacket.resultID + ")");
+    }
   },
 
   /**
@@ -309,6 +367,23 @@ WebConsoleClient.prototype = {
   },
 
   /**
+   * Retrieve the security information for the given NetworkEventActor.
+   *
+   * @param string aActor
+   *        The NetworkEventActor ID.
+   * @param function aOnResponse
+   *        The function invoked when the response is received.
+   */
+  getSecurityInfo: function WCC_getSecurityInfo(aActor, aOnResponse)
+  {
+    let packet = {
+      to: aActor,
+      type: "getSecurityInfo",
+    };
+    this._client.request(packet, aOnResponse);
+  },
+
+  /**
    * Send a HTTP request with the given data.
    *
    * @param string aData
@@ -391,10 +466,13 @@ WebConsoleClient.prototype = {
    * @param function aOnResponse
    *        Function to invoke when the server response is received.
    */
-  close: function WCC_close(aOnResponse)
+  detach: function WCC_detach(aOnResponse)
   {
+    this._client.removeListener("evaluationResult", this.onEvaluationResult);
     this.stopListeners(null, aOnResponse);
     this._longStrings = null;
     this._client = null;
+    this.pendingEvaluationResults.clear();
+    this.pendingEvaluationResults = null;
   },
 };

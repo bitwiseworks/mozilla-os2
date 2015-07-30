@@ -25,7 +25,6 @@ public:
     : mHotspotX(-1)
     , mHotspotY(-1)
     , mLoopCount(-1)
-    , mIsNonPremultiplied(false)
   {}
 
   // Set the metadata this object represents on an image.
@@ -41,23 +40,21 @@ public:
     mLoopCount = loopcount;
   }
 
-  void SetIsNonPremultiplied(bool nonPremult)
-  {
-    mIsNonPremultiplied = nonPremult;
-  }
-
   void SetSize(int32_t width, int32_t height, Orientation orientation)
   {
-    mSize.construct(nsIntSize(width, height));
-    mOrientation.construct(orientation);
+    if (!HasSize()) {
+      mSize.emplace(nsIntSize(width, height));
+      mOrientation.emplace(orientation);
+    }
   }
 
-  bool HasSize() const { return !mSize.empty(); }
-  bool HasOrientation() const { return !mOrientation.empty(); }
+  bool HasSize() const { return mSize.isSome(); }
+  bool HasOrientation() const { return mOrientation.isSome(); }
 
-  int32_t GetWidth() const { return mSize.ref().width; }
-  int32_t GetHeight() const { return mSize.ref().height; }
-  Orientation GetOrientation() const { return mOrientation.ref(); }
+  int32_t GetWidth() const { return mSize->width; }
+  int32_t GetHeight() const { return mSize->height; }
+  nsIntSize GetSize() const { return *mSize; }
+  Orientation GetOrientation() const { return *mOrientation; }
 
 private:
   // The hotspot found on cursors, or -1 if none was found.
@@ -68,9 +65,7 @@ private:
   int32_t mLoopCount;
 
   Maybe<nsIntSize> mSize;
-  Maybe<Orientation>  mOrientation;
-
-  bool mIsNonPremultiplied;
+  Maybe<Orientation> mOrientation;
 };
 
 } // namespace image

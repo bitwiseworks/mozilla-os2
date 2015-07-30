@@ -41,6 +41,10 @@ ActivitiesDialog.prototype = {
       choices: choices
     };
 
+    if (activity.type) {
+      detail.activityType = activity.type;
+    }
+
     // Listen the resulting choice from the front-end. If there is no choice,
     // let's return -1, which means the user has cancelled the dialog.
     SystemAppProxy.addEventListener("mozContentEvent", function act_getChoice(evt) {
@@ -48,7 +52,8 @@ ActivitiesDialog.prototype = {
         return;
 
       SystemAppProxy.removeEventListener("mozContentEvent", act_getChoice);
-      activity.callback.handleEvent(evt.detail.value !== undefined
+      activity.callback.handleEvent(Ci.nsIActivityUIGlueCallback.WEBAPPS_ACTIVITY,
+                                    evt.detail.value !== undefined
                                       ? evt.detail.value
                                       : -1);
     });
@@ -56,16 +61,28 @@ ActivitiesDialog.prototype = {
     SystemAppProxy.dispatchEvent(detail);
   },
 
-  chooseActivity: function ap_chooseActivity(aName, aActivities, aCallback) {
-    this.activities.push({
-      name: aName,
+  chooseActivity: function ap_chooseActivity(aOptions, aActivities, aCallback) {
+    // B2G does not have an alternate activity system, make no choice and return.
+    if (aActivities.length === 0) {
+      aCallback.handleEvent(Ci.nsIActivityUIGlueCallback.WEBAPPS_ACTIVITY, -1);
+      return;
+    }
+
+    let activity = {
+      name: aOptions.name,
       list: aActivities,
       callback: aCallback
-    });
+    };
+
+    if (aOptions.data && aOptions.data.type) {
+      activity.type = aOptions.data.type;
+    }
+
+    this.activities.push(activity);
     Services.tm.currentThread.dispatch(this, Ci.nsIEventTarget.DISPATCH_NORMAL);
   },
 
-  classID: Components.ID("{70a83123-7467-4389-a309-3e81c74ad002}"),
+  classID: Components.ID("{3a54788b-48cc-4ab4-93d6-0d6a8ef74f8e}"),
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIActivityUIGlue, Ci.nsIRunnable])
 }

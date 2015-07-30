@@ -6,13 +6,14 @@
 #ifndef MOZILLA_GFX_COMPOSITOROGL_H
 #define MOZILLA_GFX_COMPOSITOROGL_H
 
+#include "ContextStateTracker.h"
 #include "gfx2DGlue.h"
 #include "GLContextTypes.h"             // for GLContext, etc
 #include "GLDefs.h"                     // for GLuint, LOCAL_GL_TEXTURE_2D, etc
 #include "OGLShaderProgram.h"           // for ShaderProgramOGL, etc
 #include "Units.h"                      // for ScreenPoint
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
-#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE, MOZ_FINAL
+#include "mozilla/Attributes.h"         // for override, final
 #include "mozilla/RefPtr.h"             // for TemporaryRef, RefPtr
 #include "mozilla/gfx/2D.h"             // for DrawTarget
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
@@ -20,7 +21,7 @@
 #include "mozilla/gfx/Rect.h"           // for Rect, IntRect
 #include "mozilla/gfx/Types.h"          // for Float, SurfaceFormat, etc
 #include "mozilla/layers/Compositor.h"  // for SurfaceInitMode, Compositor, etc
-#include "mozilla/layers/CompositorTypes.h"  // for MaskType::NumMaskTypes, etc
+#include "mozilla/layers/CompositorTypes.h"  // for MaskType::MaskType::NumMaskTypes, etc
 #include "mozilla/layers/LayersTypes.h"
 #include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
@@ -31,12 +32,11 @@
 #include "nsThreadUtils.h"              // for nsRunnable
 #include "nsXULAppAPI.h"                // for XRE_GetProcessType
 #include "nscore.h"                     // for NS_IMETHOD
-#include "VBOArena.h"                   // for gl::VBOArena
 #ifdef MOZ_WIDGET_GONK
 #include <ui/GraphicBuffer.h>
 #endif
+#include "gfxVR.h"
 
-class gfx3DMatrix;
 class nsIWidget;
 
 namespace mozilla {
@@ -55,7 +55,7 @@ class GLManagerCompositor;
 class TextureSource;
 struct Effect;
 struct EffectChain;
-
+class GLBlitTextureImageHelper;
 /**
  * Interface for pools of temporary gl textures for the compositor.
  * The textures are fully owned by the pool, so the latter is responsible
@@ -87,7 +87,7 @@ public:
 class PerUnitTexturePoolOGL : public CompositorTexturePoolOGL
 {
 public:
-  PerUnitTexturePoolOGL(gl::GLContext* aGL)
+  explicit PerUnitTexturePoolOGL(gl::GLContext* aGL)
   : mTextureTarget(0) // zero is never a valid texture target
   , mGL(aGL)
   {}
@@ -97,14 +97,14 @@ public:
     DestroyTextures();
   }
 
-  virtual void Clear() MOZ_OVERRIDE
+  virtual void Clear() override
   {
     DestroyTextures();
   }
 
-  virtual GLuint GetTexture(GLenum aTarget, GLenum aUnit) MOZ_OVERRIDE;
+  virtual GLuint GetTexture(GLenum aTarget, GLenum aUnit) override;
 
-  virtual void EndFrame() MOZ_OVERRIDE {}
+  virtual void EndFrame() override {}
 
 protected:
   void DestroyTextures();
@@ -126,7 +126,7 @@ protected:
 class PerFrameTexturePoolOGL : public CompositorTexturePoolOGL
 {
 public:
-  PerFrameTexturePoolOGL(gl::GLContext* aGL)
+  explicit PerFrameTexturePoolOGL(gl::GLContext* aGL)
   : mTextureTarget(0) // zero is never a valid texture target
   , mGL(aGL)
   {}
@@ -136,14 +136,14 @@ public:
     DestroyTextures();
   }
 
-  virtual void Clear() MOZ_OVERRIDE
+  virtual void Clear() override
   {
     DestroyTextures();
   }
 
-  virtual GLuint GetTexture(GLenum aTarget, GLenum aUnit) MOZ_OVERRIDE;
+  virtual GLuint GetTexture(GLenum aTarget, GLenum aUnit) override;
 
-  virtual void EndFrame() MOZ_OVERRIDE;
+  virtual void EndFrame() override;
 
 protected:
   void DestroyTextures();
@@ -154,7 +154,35 @@ protected:
   nsTArray<GLuint> mUnusedTextures;
 };
 
-class CompositorOGL : public Compositor
+struct CompositorOGLVRObjects {
+  bool mInitialized;
+
+  gfx::VRHMDConfiguration mConfiguration;
+
+  GLuint mDistortionVertices[2];
+  GLuint mDistortionIndices[2];
+  GLuint mDistortionIndexCount[2];
+
+  GLint mAPosition;
+  GLint mATexCoord0;
+  GLint mATexCoord1;
+  GLint mATexCoord2;
+  GLint mAGenericAttribs;
+
+  // The program here implements distortion rendering for VR devices
+  // (in this case Oculus only).  We'll need to extend this to support
+  // other device types in the future.
+
+  // 0 = TEXTURE_2D, 1 = TEXTURE_RECTANGLE for source
+  GLuint mDistortionProgram[2];
+  GLint mUTexture[2];
+  GLint mUVREyeToSource[2];
+  GLint mUVRDestionatinScaleAndOffset[2];
+};
+
+// If you want to make this class not final, first remove calls to virtual
+// methods (Destroy) that are made in the destructor.
+class CompositorOGL final : public Compositor
 {
   typedef mozilla::gl::GLContext GLContext;
 
@@ -162,63 +190,59 @@ class CompositorOGL : public Compositor
 
   std::map<ShaderConfigOGL, ShaderProgramOGL*> mPrograms;
 public:
-  CompositorOGL(nsIWidget *aWidget, int aSurfaceWidth = -1, int aSurfaceHeight = -1,
-                bool aUseExternalSurfaceSize = false);
+  explicit CompositorOGL(nsIWidget *aWidget, int aSurfaceWidth = -1, int aSurfaceHeight = -1,
+                         bool aUseExternalSurfaceSize = false);
 
+protected:
   virtual ~CompositorOGL();
 
+public:
   virtual TemporaryRef<DataTextureSource>
-  CreateDataTextureSource(TextureFlags aFlags = 0) MOZ_OVERRIDE;
+  CreateDataTextureSource(TextureFlags aFlags = TextureFlags::NO_FLAGS) override;
 
-  virtual bool Initialize() MOZ_OVERRIDE;
+  virtual bool Initialize() override;
 
-  virtual void Destroy() MOZ_OVERRIDE;
+  virtual void Destroy() override;
 
-  virtual TextureFactoryIdentifier GetTextureFactoryIdentifier() MOZ_OVERRIDE
+  virtual TextureFactoryIdentifier GetTextureFactoryIdentifier() override
   {
-    return TextureFactoryIdentifier(LayersBackend::LAYERS_OPENGL,
-                                    XRE_GetProcessType(),
-                                    GetMaxTextureSize(),
-                                    mFBOTextureTarget == LOCAL_GL_TEXTURE_2D,
-                                    SupportsPartialTextureUpdate());
+    TextureFactoryIdentifier result =
+      TextureFactoryIdentifier(LayersBackend::LAYERS_OPENGL,
+                               XRE_GetProcessType(),
+                               GetMaxTextureSize(),
+                               mFBOTextureTarget == LOCAL_GL_TEXTURE_2D,
+                               SupportsPartialTextureUpdate());
+    result.mSupportedBlendModes += gfx::CompositionOp::OP_SCREEN;
+    result.mSupportedBlendModes += gfx::CompositionOp::OP_MULTIPLY;
+    result.mSupportedBlendModes += gfx::CompositionOp::OP_SOURCE;
+    return result;
   }
 
   virtual TemporaryRef<CompositingRenderTarget>
-  CreateRenderTarget(const gfx::IntRect &aRect, SurfaceInitMode aInit) MOZ_OVERRIDE;
+  CreateRenderTarget(const gfx::IntRect &aRect, SurfaceInitMode aInit) override;
 
   virtual TemporaryRef<CompositingRenderTarget>
   CreateRenderTargetFromSource(const gfx::IntRect &aRect,
                                const CompositingRenderTarget *aSource,
-                               const gfx::IntPoint &aSourcePoint) MOZ_OVERRIDE;
+                               const gfx::IntPoint &aSourcePoint) override;
 
-  virtual void SetRenderTarget(CompositingRenderTarget *aSurface) MOZ_OVERRIDE;
-  virtual CompositingRenderTarget* GetCurrentRenderTarget() const MOZ_OVERRIDE;
+  virtual void SetRenderTarget(CompositingRenderTarget *aSurface) override;
+  virtual CompositingRenderTarget* GetCurrentRenderTarget() const override;
 
   virtual void DrawQuad(const gfx::Rect& aRect,
                         const gfx::Rect& aClipRect,
                         const EffectChain &aEffectChain,
                         gfx::Float aOpacity,
-                        const gfx::Matrix4x4 &aTransform) MOZ_OVERRIDE
-  {
-    DrawQuadInternal(aRect, aClipRect, aEffectChain,
-                     aOpacity, aTransform, LOCAL_GL_TRIANGLE_STRIP);
-  }
+                        const gfx::Matrix4x4 &aTransform) override;
 
-  virtual void DrawLines(const std::vector<gfx::Point>& aLines,
-                         const gfx::Rect& aClipRect,
-                         const gfx::Color& aColor,
-                         gfx::Float aOpacity,
-                         const gfx::Matrix4x4 &aTransform) MOZ_OVERRIDE;
+  virtual void EndFrame() override;
+  virtual void SetFBAcquireFence(Layer* aLayer) override;
+  virtual FenceHandle GetReleaseFence() override;
+  virtual void EndFrameForExternalComposition(const gfx::Matrix& aTransform) override;
 
+  virtual bool SupportsPartialTextureUpdate() override;
 
-  virtual void EndFrame() MOZ_OVERRIDE;
-  virtual void SetFBAcquireFence(Layer* aLayer) MOZ_OVERRIDE;
-  virtual void EndFrameForExternalComposition(const gfx::Matrix& aTransform) MOZ_OVERRIDE;
-  virtual void AbortFrame() MOZ_OVERRIDE;
-
-  virtual bool SupportsPartialTextureUpdate() MOZ_OVERRIDE;
-
-  virtual bool CanUseCanvasLayerForSize(const gfx::IntSize &aSize) MOZ_OVERRIDE
+  virtual bool CanUseCanvasLayerForSize(const gfx::IntSize &aSize) override
   {
     if (!mGLContext)
       return false;
@@ -226,46 +250,47 @@ public:
     return aSize <= gfx::IntSize(maxSize, maxSize);
   }
 
-  virtual int32_t GetMaxTextureSize() const MOZ_OVERRIDE;
+  virtual int32_t GetMaxTextureSize() const override;
 
   /**
    * Set the size of the EGL surface we're rendering to, if we're rendering to
    * an EGL surface.
    */
-  virtual void SetDestinationSurfaceSize(const gfx::IntSize& aSize) MOZ_OVERRIDE;
+  virtual void SetDestinationSurfaceSize(const gfx::IntSize& aSize) override;
 
-  virtual void SetScreenRenderOffset(const ScreenPoint& aOffset) MOZ_OVERRIDE {
+  virtual void SetScreenRenderOffset(const ScreenPoint& aOffset) override {
     mRenderOffset = aOffset;
   }
 
-  virtual void MakeCurrent(MakeCurrentFlags aFlags = 0) MOZ_OVERRIDE;
+  virtual void MakeCurrent(MakeCurrentFlags aFlags = 0) override;
 
-  virtual void SetTargetContext(gfx::DrawTarget* aTarget) MOZ_OVERRIDE
-  {
-    mTarget = aTarget;
-  }
-
-  virtual void PrepareViewport(const gfx::IntSize& aSize,
-                               const gfx::Matrix& aWorldTransform) MOZ_OVERRIDE;
+  virtual void PrepareViewport(const gfx::IntSize& aSize) override;
 
 
 #ifdef MOZ_DUMP_PAINTING
-  virtual const char* Name() const MOZ_OVERRIDE { return "OGL"; }
+  virtual const char* Name() const override { return "OGL"; }
 #endif // MOZ_DUMP_PAINTING
 
-  virtual LayersBackend GetBackendType() const MOZ_OVERRIDE {
+  virtual LayersBackend GetBackendType() const override {
     return LayersBackend::LAYERS_OPENGL;
   }
 
-  virtual void Pause() MOZ_OVERRIDE;
-  virtual bool Resume() MOZ_OVERRIDE;
+  virtual void Pause() override;
+  virtual bool Resume() override;
 
-  virtual nsIWidget* GetWidget() const MOZ_OVERRIDE { return mWidget; }
+  virtual nsIWidget* GetWidget() const override { return mWidget; }
 
   GLContext* gl() const { return mGLContext; }
+  /**
+   * Clear the program state. This must be called
+   * before operating on the GLContext directly. */
+  void ResetProgram();
+
   gfx::SurfaceFormat GetFBOFormat() const {
     return gfx::SurfaceFormat::R8G8B8A8;
   }
+
+  GLBlitTextureImageHelper* BlitTextureImageHelper();
 
   /**
    * The compositor provides with temporary textures for use with direct
@@ -279,27 +304,25 @@ public:
     return mProjMatrix;
   }
 private:
-  virtual void DrawQuadInternal(const gfx::Rect& aRect,
-                                const gfx::Rect& aClipRect,
-                                const EffectChain &aEffectChain,
-                                gfx::Float aOpacity,
-                                const gfx::Matrix4x4 &aTransformi,
-                                GLuint aDrawMode);
-
-  virtual gfx::IntSize GetWidgetSize() const MOZ_OVERRIDE
+  virtual gfx::IntSize GetWidgetSize() const override
   {
     return gfx::ToIntSize(mWidgetSize);
   }
 
-  /**
-   * Context target, nullptr when drawing directly to our swap chain.
-   */
-  RefPtr<gfx::DrawTarget> mTarget;
+  bool InitializeVR();
+  void DestroyVR(GLContext *gl);
+
+  void DrawVRDistortion(const gfx::Rect& aRect,
+                        const gfx::Rect& aClipRect,
+                        const EffectChain& aEffectChain,
+                        gfx::Float aOpacity,
+                        const gfx::Matrix4x4& aTransform);
 
   /** Widget associated with this compositor */
   nsIWidget *mWidget;
   nsIntSize mWidgetSize;
   nsRefPtr<GLContext> mGLContext;
+  UniquePtr<GLBlitTextureImageHelper> mBlitTextureImageHelper;
   gfx::Matrix4x4 mProjMatrix;
 
   /** The size of the surface we are rendering to */
@@ -324,11 +347,6 @@ private:
    */
   GLuint mQuadVBO;
 
-  /**
-   * When we can't use mQuadVBO, we allocate VBOs from this arena instead.
-   */
-  gl::VBOArena mVBOs;
-
   bool mHasBGRA;
 
   /**
@@ -346,19 +364,21 @@ private:
   /*
    * Clear aRect on current render target.
    */
-  virtual void ClearRect(const gfx::Rect& aRect) MOZ_OVERRIDE;
+  virtual void ClearRect(const gfx::Rect& aRect) override;
 
   /* Start a new frame. If aClipRectIn is null and aClipRectOut is non-null,
    * sets *aClipRectOut to the screen dimensions.
    */
   virtual void BeginFrame(const nsIntRegion& aInvalidRegion,
                           const gfx::Rect *aClipRectIn,
-                          const gfx::Matrix& aTransform,
                           const gfx::Rect& aRenderBounds,
                           gfx::Rect *aClipRectOut = nullptr,
-                          gfx::Rect *aRenderBoundsOut = nullptr) MOZ_OVERRIDE;
+                          gfx::Rect *aRenderBoundsOut = nullptr) override;
 
-  ShaderConfigOGL GetShaderConfigFor(Effect *aEffect, MaskType aMask = MaskNone) const;
+  ShaderConfigOGL GetShaderConfigFor(Effect *aEffect,
+                                     MaskType aMask = MaskType::MaskNone,
+                                     gfx::CompositionOp aOp = gfx::CompositionOp::OP_OVER,
+                                     bool aColorMatrix = false) const;
   ShaderProgramOGL* GetShaderProgramFor(const ShaderConfigOGL &aConfig);
 
   /**
@@ -372,29 +392,32 @@ private:
                             GLuint aSourceFrameBuffer,
                             GLuint *aFBO, GLuint *aTexture);
 
-  GLintptr QuadVBOVertexOffset() { return 0; }
-  GLintptr QuadVBOTexCoordOffset() { return sizeof(float)*4*2; }
-
-  void BindQuadVBO();
-  void QuadVBOVerticesAttrib(GLuint aAttribIndex);
-  void QuadVBOTexCoordsAttrib(GLuint aAttribIndex);
-  void BindAndDrawQuad(GLuint aVertAttribIndex,
-                       GLuint aTexCoordAttribIndex,
-                       GLuint aDrawMode = LOCAL_GL_TRIANGLE_STRIP);
+  void BindAndDrawQuads(ShaderProgramOGL *aProg,
+                        int aQuads,
+                        const gfx::Rect* aLayerRect,
+                        const gfx::Rect* aTextureRect);
   void BindAndDrawQuad(ShaderProgramOGL *aProg,
-                       GLuint aDrawMode = LOCAL_GL_TRIANGLE_STRIP);
+                       const gfx::Rect& aLayerRect,
+                       const gfx::Rect& aTextureRect = gfx::Rect(0.0f, 0.0f, 1.0f, 1.0f)) {
+    gfx::Rect layerRects[4];
+    gfx::Rect textureRects[4];
+    layerRects[0] = aLayerRect;
+    textureRects[0] = aTextureRect;
+    BindAndDrawQuads(aProg, 1, layerRects, textureRects);
+  }
   void BindAndDrawQuadWithTextureRect(ShaderProgramOGL *aProg,
-                                      const gfx3DMatrix& aTextureTransform,
+                                      const gfx::Rect& aRect,
                                       const gfx::Rect& aTexCoordRect,
                                       TextureSource *aTexture);
 
+  void ActivateProgram(ShaderProgramOGL *aProg);
   void CleanupResources();
 
   /**
    * Copies the content of our backbuffer to the set transaction target.
    * Does not restore the target FBO, so only call from EndFrame.
    */
-  void CopyToTarget(gfx::DrawTarget* aTarget, const gfx::Matrix& aWorldMatrix);
+  void CopyToTarget(gfx::DrawTarget* aTarget, const nsIntPoint& aTopLeft, const gfx::Matrix& aWorldMatrix);
 
   /**
    * Implements the flipping of the y-axis to convert from layers/compositor
@@ -409,6 +432,8 @@ private:
 
   RefPtr<CompositorTexturePoolOGL> mTexturePool;
 
+  ContextStateTrackerOGL mContextStateTracker;
+
   bool mDestroyed;
 
   /**
@@ -416,6 +441,11 @@ private:
    * FlipY for the y-flipping calculation.
    */
   GLint mHeight;
+
+  FenceHandle mReleaseFenceHandle;
+  ShaderProgramOGL *mCurrentProgram;
+
+  CompositorOGLVRObjects mVR;
 };
 
 }

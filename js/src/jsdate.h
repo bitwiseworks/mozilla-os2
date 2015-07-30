@@ -38,26 +38,19 @@ extern JS_FRIEND_API(JSObject*)
 js_NewDateObject(JSContext* cx, int year, int mon, int mday,
                  int hour, int min, int sec);
 
-extern JS_FRIEND_API(int)
-js_DateGetYear(JSContext* cx, JSObject* obj);
-
-extern JS_FRIEND_API(int)
-js_DateGetMonth(JSContext* cx, JSObject* obj);
-
-extern JS_FRIEND_API(int)
-js_DateGetDate(JSContext* cx, JSObject* obj);
-
-extern JS_FRIEND_API(int)
-js_DateGetHours(JSContext* cx, JSObject* obj);
-
-extern JS_FRIEND_API(int)
-js_DateGetMinutes(JSContext* cx, JSObject* obj);
-
-extern JS_FRIEND_API(int)
-js_DateGetSeconds(JSObject* obj);
-
 /* Date constructor native. Exposed only so the JIT can know its address. */
 bool
 js_Date(JSContext* cx, unsigned argc, JS::Value* vp);
+
+namespace js {
+
+/* Date methods exposed so they can be installed in the self-hosting global. */
+bool
+date_now(JSContext* cx, unsigned argc, JS::Value* vp);
+
+bool
+date_valueOf(JSContext* cx, unsigned argc, JS::Value* vp);
+
+} /* namespace js */
 
 #endif /* jsdate_h */

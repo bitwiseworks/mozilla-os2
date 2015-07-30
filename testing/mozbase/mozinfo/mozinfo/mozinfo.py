@@ -8,13 +8,10 @@
 # linux) to the information; I certainly wouldn't want anyone parsing this
 # information and having behaviour depend on it
 
-import json
 import os
 import platform
 import re
 import sys
-
-import mozfile
 
 # keep a copy of the os module since updating globals overrides this
 _os = os
@@ -31,7 +28,9 @@ unknown = unknown() # singleton
 info = {'os': unknown,
         'processor': unknown,
         'version': unknown,
-        'bits': unknown }
+        'os_version': unknown,
+        'bits': unknown,
+        'has_sandbox': unknown }
 (system, node, release, version, machine, processor) = platform.uname()
 (bits, linkage) = platform.architecture()
 
@@ -45,28 +44,36 @@ if system in ["Microsoft", "Windows"]:
     else:
         processor = os.environ.get('PROCESSOR_ARCHITECTURE', processor)
     system = os.environ.get("OS", system).replace('_', ' ')
-    service_pack = os.sys.getwindowsversion()[4]
+    (major, minor, _, _, service_pack) = os.sys.getwindowsversion()
     info['service_pack'] = service_pack
+    os_version = "%d.%d" % (major, minor)
 elif system == "Linux":
     if hasattr(platform, "linux_distribution"):
-        (distro, version, codename) = platform.linux_distribution()
+        (distro, os_version, codename) = platform.linux_distribution()
     else:
-        (distro, version, codename) = platform.dist()
-    version = "%s %s" % (distro, version)
+        (distro, os_version, codename) = platform.dist()
     if not processor:
         processor = machine
+    version = "%s %s" % (distro, os_version)
     info['os'] = 'linux'
+    info['linux_distro'] = distro
 elif system in ['DragonFly', 'FreeBSD', 'NetBSD', 'OpenBSD']:
     info['os'] = 'bsd'
-    version = sys.platform
+    version = os_version = sys.platform
 elif system == "Darwin":
     (release, versioninfo, machine) = platform.mac_ver()
     version = "OS X %s" % release
+    versionNums = release.split('.')[:2]
+    os_version = "%s.%s" % (versionNums[0], versionNums[1])
     info['os'] = 'mac'
 elif sys.platform in ('solaris', 'sunos5'):
     info['os'] = 'unix'
-    version = sys.platform
-info['version'] = version # os version
+    os_version = version = sys.platform
+else:
+    os_version = version = unknown
+
+info['version'] = version
+info['os_version'] = os_version
 
 # processor type and bits
 if processor in ["i386", "i686"]:
@@ -83,6 +90,16 @@ bits = re.search('(\d+)bit', bits).group(1)
 info.update({'processor': processor,
              'bits': int(bits),
             })
+
+if info['os'] == 'linux':
+    import ctypes
+    import errno
+    PR_SET_SECCOMP = 22
+    SECCOMP_MODE_FILTER = 2
+    ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, 0)
+    info['has_sandbox'] = ctypes.get_errno() == errno.EFAULT
+else:
+    info['has_sandbox'] = True
 
 # standard value of choices, for easy inspection
 choices = {'os': ['linux', 'bsd', 'win', 'mac', 'unix'],
@@ -112,6 +129,9 @@ def update(new_info):
     """
 
     if isinstance(new_info, basestring):
+        # lazy import
+        import mozfile
+        import json
         f = mozfile.load(new_info)
         new_info = json.loads(f.read())
         f.close()
@@ -140,13 +160,15 @@ def find_and_update_from_json(*dirs):
     """
     # First, see if we're in an objdir
     try:
-        from mozbuild.base import MozbuildObject
+        from mozbuild.base import MozbuildObject, BuildEnvironmentNotFoundException
         build = MozbuildObject.from_environment()
         json_path = _os.path.join(build.topobjdir, "mozinfo.json")
         if _os.path.isfile(json_path):
             update(json_path)
             return json_path
     except ImportError:
+        pass
+    except BuildEnvironmentNotFoundException:
         pass
 
     for d in dirs:
@@ -185,6 +207,8 @@ def main(args=None):
 
     # args are JSON blobs to override info
     if args:
+        # lazy import
+        import json
         for arg in args:
             if _os.path.exists(arg):
                 string = file(arg).read()

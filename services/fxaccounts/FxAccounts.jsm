@@ -23,14 +23,19 @@ XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsClient",
 XPCOMUtils.defineLazyModuleGetter(this, "jwcrypto",
   "resource://gre/modules/identity/jwcrypto.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsOAuthGrantClient",
+  "resource://gre/modules/FxAccountsOAuthGrantClient.jsm");
+
 // All properties exposed by the public FxAccounts API.
 let publicProperties = [
+  "accountStatus",
   "getAccountsClient",
   "getAccountsSignInURI",
   "getAccountsSignUpURI",
   "getAssertion",
   "getKeys",
   "getSignedInUser",
+  "getOAuthToken",
   "loadAndPoll",
   "localtimeOffsetMsec",
   "now",
@@ -60,7 +65,7 @@ let publicProperties = [
 // }
 // If the state has changed between the function being called and the promise
 // being resolved, the .resolve() call will actually be rejected.
-AccountState = function(fxaInternal) {
+let AccountState = function(fxaInternal) {
   this.fxaInternal = fxaInternal;
 };
 
@@ -145,7 +150,11 @@ AccountState.prototype = {
       log.debug(" getCertificate already had one");
       return this.resolve(this.cert.cert);
     }
-    // else get our cert signed
+
+    if (Services.io.offline) {
+      return this.reject(new Error(ERROR_OFFLINE));
+    }
+
     let willBeValidUntil = this.fxaInternal.now() + CERT_LIFETIME;
     return this.fxaInternal.getCertificateSigned(data.sessionToken,
                                                  keyPair.serializedPublicKey,
@@ -162,7 +171,18 @@ AccountState.prototype = {
   },
 
   getKeyPair: function(mustBeValidUntil) {
-    if (this.keyPair && (this.keyPair.validUntil > mustBeValidUntil)) {
+    // If the debugging pref to ignore cached authentication credentials is set for Sync,
+    // then don't use any cached key pair, i.e., generate a new one and get it signed.
+    // The purpose of this pref is to expedite any auth errors as the result of a
+    // expired or revoked FxA session token, e.g., from resetting or changing the FxA
+    // password.
+    let ignoreCachedAuthCredentials = false;
+    try {
+      ignoreCachedAuthCredentials = Services.prefs.getBoolPref("services.sync.debug.ignoreCachedAuthCredentials");
+    } catch(e) {
+      // Pref doesn't exist
+    }
+    if (!ignoreCachedAuthCredentials && this.keyPair && (this.keyPair.validUntil > mustBeValidUntil)) {
       log.debug("getKeyPair: already have a keyPair");
       return this.resolve(this.keyPair.keyPair);
     }
@@ -202,7 +222,7 @@ AccountState.prototype = {
     if (!this.isCurrent) {
       log.info("An accountState promise was rejected, but we are ignoring that" +
                "reason and rejecting it due to a different user being signed in." +
-               "Originally rejected with: " + reason);
+               "Originally rejected with: " + error);
       return Promise.reject(new Error("A different user signed in"));
     }
     return Promise.reject(error);
@@ -281,11 +301,8 @@ this.FxAccounts = function (mockInternal) {
 function FxAccountsInternal() {
   this.version = DATA_FORMAT_VERSION;
 
-  // Make a local copy of these constants so we can mock it in testing
-  this.POLL_STEP = POLL_STEP;
+  // Make a local copy of this constant so we can mock it in testing
   this.POLL_SESSION = POLL_SESSION;
-  // We will create this.pollTimeRemaining below; it will initially be
-  // set to the value of POLL_SESSION.
 
   // We interact with the Firefox Accounts auth server in order to confirm that
   // a user's email has been verified and also to fetch the user's keys from
@@ -302,7 +319,12 @@ function FxAccountsInternal() {
 
   // We don't reference |profileDir| in the top-level module scope
   // as we may be imported before we know where it is.
+  // We only want the fancy new LoginManagerStorage on desktop.
+#if defined(MOZ_B2G)
   this.signedInUserStorage = new JSONStorage({
+#else
+  this.signedInUserStorage = new LoginManagerStorage({
+#endif
     filename: DEFAULT_STORAGE_FILENAME,
     baseDir: OS.Constants.Path.profileDir,
   });
@@ -317,6 +339,11 @@ FxAccountsInternal.prototype = {
    * The current data format's version number.
    */
   version: DATA_FORMAT_VERSION,
+
+  // The timeout (in ms) we use to poll for a verified mail for the first 2 mins.
+  VERIFICATION_POLL_TIMEOUT_INITIAL: 5000, // 5 seconds
+  // And how often we poll after the first 2 mins.
+  VERIFICATION_POLL_TIMEOUT_SUBSEQUENT: 15000, // 15 seconds.
 
   _fxAccountsClient: null,
 
@@ -511,6 +538,15 @@ FxAccountsInternal.prototype = {
     this.currentAccountState = new AccountState(this);
   },
 
+  accountStatus: function accountStatus() {
+    return this.currentAccountState.getUserAccountData().then(data => {
+      if (!data) {
+        return false;
+      }
+      return this.fxAccountsClient.accountStatus(data.uid);
+    });
+  },
+
   signOut: function signOut(localOnly) {
     let currentState = this.currentAccountState;
     let sessionToken;
@@ -639,6 +675,7 @@ FxAccountsInternal.prototype = {
       data.kB = CommonUtils.bytesAsHex(kB_hex);
 
       delete data.keyFetchToken;
+      delete data.unwrapBKey;
 
       log.debug("Keys Obtained: kA=" + !!data.kA + ", kB=" + !!data.kB);
       if (logPII) {
@@ -716,15 +753,25 @@ FxAccountsInternal.prototype = {
   },
 
   startVerifiedCheck: function(data) {
-    log.debug("startVerifiedCheck " + JSON.stringify(data));
+    log.debug("startVerifiedCheck", data && data.verified);
+    if (logPII) {
+      log.debug("startVerifiedCheck with user data", data);
+    }
+
     // Get us to the verified state, then get the keys. This returns a promise
     // that will fire when we are completely ready.
     //
     // Login is truly complete once keys have been fetched, so once getKeys()
     // obtains and stores kA and kB, it will fire the onverified observer
     // notification.
-    return this.whenVerified(data)
-      .then(() => this.getKeys());
+
+    // The callers of startVerifiedCheck never consume a returned promise (ie,
+    // this is simply kicking off a background fetch) so we must add a rejection
+    // handler to avoid runtime warnings about the rejection not being handled.
+    this.whenVerified(data).then(
+      () => this.getKeys(),
+      err => log.info("startVerifiedCheck promise was rejected: " + err)
+    );
   },
 
   whenVerified: function(data) {
@@ -742,9 +789,9 @@ FxAccountsInternal.prototype = {
     );
   },
 
-  notifyObservers: function(topic) {
+  notifyObservers: function(topic, data) {
     log.debug("Notifying observers of " + topic);
-    Services.obs.notifyObservers(null, topic, null);
+    Services.obs.notifyObservers(null, topic, data);
   },
 
   // XXX - pollEmailStatus should maybe be on the AccountState object?
@@ -754,7 +801,7 @@ FxAccountsInternal.prototype = {
       // If we were already polling, stop and start again.  This could happen
       // if the user requested the verification email to be resent while we
       // were already polling for receipt of an earlier email.
-      this.pollTimeRemaining = this.POLL_SESSION;
+      this.pollStartDate = Date.now();
       if (!currentState.whenVerifiedDeferred) {
         currentState.whenVerifiedDeferred = Promise.defer();
         // This deferred might not end up with any handlers (eg, if sync
@@ -771,8 +818,6 @@ FxAccountsInternal.prototype = {
       .then((response) => {
         log.debug("checkEmailStatus -> " + JSON.stringify(response));
         if (response && response.verified) {
-          // Bug 947056 - Server should be able to tell FxAccounts.jsm to back
-          // off or stop polling altogether
           currentState.getUserAccountData()
             .then((data) => {
               data.verified = true;
@@ -784,31 +829,64 @@ FxAccountsInternal.prototype = {
                 currentState.whenVerifiedDeferred.resolve(data);
                 delete currentState.whenVerifiedDeferred;
               }
+              // Tell FxAccountsManager to clear its cache
+              this.notifyObservers(ON_FXA_UPDATE_NOTIFICATION, ONVERIFIED_NOTIFICATION);
             });
         } else {
-          log.debug("polling with step = " + this.POLL_STEP);
-          this.pollTimeRemaining -= this.POLL_STEP;
-          log.debug("time remaining: " + this.pollTimeRemaining);
-          if (this.pollTimeRemaining > 0) {
-            this.currentTimer = setTimeout(() => {
-              this.pollEmailStatus(currentState, sessionToken, "timer")}, this.POLL_STEP);
-            log.debug("started timer " + this.currentTimer);
-          } else {
-            if (currentState.whenVerifiedDeferred) {
-              currentState.whenVerifiedDeferred.reject(
-                new Error("User email verification timed out.")
-              );
-              delete currentState.whenVerifiedDeferred;
-            }
-          }
+          // Poll email status again after a short delay.
+          this.pollEmailStatusAgain(currentState, sessionToken);
+        }
+      }, error => {
+        let timeoutMs = undefined;
+        if (error && error.retryAfter) {
+          // If the server told us to back off, back off the requested amount.
+          timeoutMs = (error.retryAfter + 3) * 1000;
+        }
+        // The server will return 401 if a request parameter is erroneous or
+        // if the session token expired. Let's continue polling otherwise.
+        if (!error || !error.code || error.code != 401) {
+          this.pollEmailStatusAgain(currentState, sessionToken, timeoutMs);
         }
       });
-    },
+  },
+
+  // Poll email status using truncated exponential back-off.
+  pollEmailStatusAgain: function (currentState, sessionToken, timeoutMs) {
+    let ageMs = Date.now() - this.pollStartDate;
+    if (ageMs >= this.POLL_SESSION) {
+      if (currentState.whenVerifiedDeferred) {
+        let error = new Error("User email verification timed out.")
+        currentState.whenVerifiedDeferred.reject(error);
+        delete currentState.whenVerifiedDeferred;
+      }
+      log.debug("polling session exceeded, giving up");
+      return;
+    }
+    if (timeoutMs === undefined) {
+      let currentMinute = Math.ceil(ageMs / 60000);
+      timeoutMs = currentMinute <= 2 ? this.VERIFICATION_POLL_TIMEOUT_INITIAL
+                                     : this.VERIFICATION_POLL_TIMEOUT_SUBSEQUENT;
+    }
+    log.debug("polling with timeout = " + timeoutMs);
+    this.currentTimer = setTimeout(() => {
+      this.pollEmailStatus(currentState, sessionToken, "timer");
+    }, timeoutMs);
+  },
+
+  _requireHttps: function() {
+    let allowHttp = false;
+    try {
+      allowHttp = Services.prefs.getBoolPref("identity.fxaccounts.allowHttp");
+    } catch(e) {
+      // Pref doesn't exist
+    }
+    return allowHttp !== true;
+  },
 
   // Return the URI of the remote UI flows.
   getAccountsSignUpURI: function() {
     let url = Services.urlFormatter.formatURLPref("identity.fxaccounts.remote.signup.uri");
-    if (!/^https:/.test(url)) { // Comment to un-break emacs js-mode highlighting
+    if (this._requireHttps() && !/^https:/.test(url)) { // Comment to un-break emacs js-mode highlighting
       throw new Error("Firefox Accounts server must use HTTPS");
     }
     return url;
@@ -817,7 +895,7 @@ FxAccountsInternal.prototype = {
   // Return the URI of the remote UI flows.
   getAccountsSignInURI: function() {
     let url = Services.urlFormatter.formatURLPref("identity.fxaccounts.remote.signin.uri");
-    if (!/^https:/.test(url)) { // Comment to un-break emacs js-mode highlighting
+    if (this._requireHttps() && !/^https:/.test(url)) { // Comment to un-break emacs js-mode highlighting
       throw new Error("Firefox Accounts server must use HTTPS");
     }
     return url;
@@ -827,7 +905,7 @@ FxAccountsInternal.prototype = {
   // of the current account.
   promiseAccountsForceSigninURI: function() {
     let url = Services.urlFormatter.formatURLPref("identity.fxaccounts.remote.force_auth.uri");
-    if (!/^https:/.test(url)) { // Comment to un-break emacs js-mode highlighting
+    if (this._requireHttps() && !/^https:/.test(url)) { // Comment to un-break emacs js-mode highlighting
       throw new Error("Firefox Accounts server must use HTTPS");
     }
     let currentState = this.currentAccountState;
@@ -840,6 +918,98 @@ FxAccountsInternal.prototype = {
       newQueryPortion += "email=" + encodeURIComponent(accountData.email);
       return url + newQueryPortion;
     }).then(result => currentState.resolve(result));
+  },
+
+  /**
+   * Get an OAuth token for the user
+   *
+   * @param options
+   *        {
+   *          scope: (string) the oauth scope being requested
+   *        }
+   *
+   * @return Promise.<string | Error>
+   *        The promise resolves the oauth token as a string or rejects with
+   *        an error object ({error: ERROR, details: {}}) of the following:
+   *          INVALID_PARAMETER
+   *          NO_ACCOUNT
+   *          UNVERIFIED_ACCOUNT
+   *          NETWORK_ERROR
+   *          AUTH_ERROR
+   *          UNKNOWN_ERROR
+   */
+  getOAuthToken: function (options = {}) {
+    log.debug("getOAuthToken enter");
+
+    if (!options.scope) {
+      return this._error(ERROR_INVALID_PARAMETER, "Missing 'scope' option");
+    }
+
+    let oAuthURL = Services.urlFormatter.formatURLPref("identity.fxaccounts.remote.oauth.uri");
+    let client = options.client;
+
+    if (!client) {
+      try {
+        client = new FxAccountsOAuthGrantClient({
+          serverURL: oAuthURL,
+          client_id: FX_OAUTH_CLIENT_ID
+        });
+      } catch (e) {
+        return this._error(ERROR_INVALID_PARAMETER, e);
+      }
+    }
+
+    return this._getVerifiedAccountOrReject()
+      .then(() => this.getAssertion(oAuthURL))
+      .then(assertion => client.getTokenFromAssertion(assertion, options.scope))
+      .then(result => result.access_token)
+      .then(null, err => this._errorToErrorClass(err));
+  },
+
+  _getVerifiedAccountOrReject: function () {
+    return this.currentAccountState.getUserAccountData().then(data => {
+      if (!data) {
+        // No signed-in user
+        return this._error(ERROR_NO_ACCOUNT);
+      }
+      if (!this.isUserEmailVerified(data)) {
+        // Signed-in user has not verified email
+        return this._error(ERROR_UNVERIFIED_ACCOUNT);
+      }
+    });
+  },
+
+  /*
+   * Coerce an error into one of the general error cases:
+   *          NETWORK_ERROR
+   *          AUTH_ERROR
+   *          UNKNOWN_ERROR
+   *
+   * These errors will pass through:
+   *          INVALID_PARAMETER
+   *          NO_ACCOUNT
+   *          UNVERIFIED_ACCOUNT
+   */
+  _errorToErrorClass: function (aError) {
+    if (aError.errno) {
+      let error = SERVER_ERRNO_TO_ERROR[aError.errno];
+      return this._error(ERROR_TO_GENERAL_ERROR_CLASS[error] || ERROR_UNKNOWN, aError);
+    } else if (aError.message &&
+        aError.message === "INVALID_PARAMETER" ||
+        aError.message === "NO_ACCOUNT" ||
+        aError.message === "UNVERIFIED_ACCOUNT") {
+      return Promise.reject(aError);
+    }
+    return this._error(ERROR_UNKNOWN, aError);
+  },
+
+  _error: function(aError, aDetails) {
+    log.error("FxA rejecting with error ${aError}, details: ${aDetails}", {aError, aDetails});
+    let reason = new Error(aError);
+    if (aDetails) {
+      reason.details = aDetails;
+    }
+    return Promise.reject(reason);
   }
 };
 
@@ -869,6 +1039,194 @@ JSONStorage.prototype = {
     return CommonUtils.readJSON(this.path);
   }
 };
+
+/**
+ * LoginManagerStorage constructor that creates instances that may set/get
+ * from a combination of a clear-text JSON file and stored securely in
+ * the nsILoginManager.
+ *
+ * @param options {
+ *                  filename: of the plain-text file to write to
+ *                  baseDir: directory where the file resides
+ *                }
+ * @return instance
+ */
+
+function LoginManagerStorage(options) {
+  // we reuse the JSONStorage for writing the plain-text stuff.
+  this.jsonStorage = new JSONStorage(options);
+}
+
+LoginManagerStorage.prototype = {
+  // The fields in the credentials JSON object that are stored in plain-text
+  // in the profile directory.  All other fields are stored in the login manager,
+  // and thus are only available when the master-password is unlocked.
+
+  // a hook point for testing.
+  get _isLoggedIn() {
+    return Services.logins.isLoggedIn;
+  },
+
+  // Clear any data from the login manager.  Returns true if the login manager
+  // was unlocked (even if no existing logins existed) or false if it was
+  // locked (meaning we don't even know if it existed or not.)
+  _clearLoginMgrData: Task.async(function* () {
+    try { // Services.logins might be third-party and broken...
+      yield Services.logins.initializationPromise;
+      if (!this._isLoggedIn) {
+        return false;
+      }
+      let logins = Services.logins.findLogins({}, FXA_PWDMGR_HOST, null, FXA_PWDMGR_REALM);
+      for (let login of logins) {
+        Services.logins.removeLogin(login);
+      }
+      return true;
+    } catch (ex) {
+      log.error("Failed to clear login data: ${}", ex);
+      return false;
+    }
+  }),
+
+  set: Task.async(function* (contents) {
+    if (!contents) {
+      // User is signing out - write the null to the json file.
+      yield this.jsonStorage.set(contents);
+
+      // And nuke it from the login manager.
+      let cleared = yield this._clearLoginMgrData();
+      if (!cleared) {
+        // just log a message - we verify that the email address matches when
+        // we reload it, so having a stale entry doesn't really hurt.
+        log.info("not removing credentials from login manager - not logged in");
+      }
+      return;
+    }
+
+    // We are saving actual data.
+    // Split the data into 2 chunks - one to go to the plain-text, and the
+    // other to write to the login manager.
+    let toWriteJSON = {version: contents.version};
+    let accountDataJSON = toWriteJSON.accountData = {};
+    let toWriteLoginMgr = {version: contents.version};
+    let accountDataLoginMgr = toWriteLoginMgr.accountData = {};
+    for (let [name, value] of Iterator(contents.accountData)) {
+      if (FXA_PWDMGR_PLAINTEXT_FIELDS.indexOf(name) >= 0) {
+        accountDataJSON[name] = value;
+      } else {
+        accountDataLoginMgr[name] = value;
+      }
+    }
+    yield this.jsonStorage.set(toWriteJSON);
+
+    try { // Services.logins might be third-party and broken...
+      // and the stuff into the login manager.
+      yield Services.logins.initializationPromise;
+      // If MP is locked we silently fail - the user may need to re-auth
+      // next startup.
+      if (!this._isLoggedIn) {
+        log.info("not saving credentials to login manager - not logged in");
+        return;
+      }
+      // write the rest of the data to the login manager.
+      let loginInfo = new Components.Constructor(
+         "@mozilla.org/login-manager/loginInfo;1", Ci.nsILoginInfo, "init");
+      let login = new loginInfo(FXA_PWDMGR_HOST,
+                                null, // aFormSubmitURL,
+                                FXA_PWDMGR_REALM, // aHttpRealm,
+                                contents.accountData.email, // aUsername
+                                JSON.stringify(toWriteLoginMgr), // aPassword
+                                "", // aUsernameField
+                                "");// aPasswordField
+
+      let existingLogins = Services.logins.findLogins({}, FXA_PWDMGR_HOST, null,
+                                                      FXA_PWDMGR_REALM);
+      if (existingLogins.length) {
+        Services.logins.modifyLogin(existingLogins[0], login);
+      } else {
+        Services.logins.addLogin(login);
+      }
+    } catch (ex) {
+      log.error("Failed to save data to the login manager: ${}", ex);
+    }
+  }),
+
+  get: Task.async(function* () {
+    // we need to suck some data from the .json file in the profile dir and
+    // some other from the login manager.
+    let data = yield this.jsonStorage.get();
+    if (!data) {
+      // no user logged in, nuke the storage data incase we couldn't remove
+      // it previously and then we are done.
+      yield this._clearLoginMgrData();
+      return null;
+    }
+
+    // if we have encryption keys it must have been saved before we
+    // used the login manager, so re-save it.
+    if (data.accountData.kA || data.accountData.kB || data.keyFetchToken) {
+      // We need to migrate, but the MP might be locked (eg, on the first run
+      // with this enabled, we will get here very soon after startup, so will
+      // certainly be locked.)  This means we can't actually store the data in
+      // the login manager (and thus might lose it if we migrated now)
+      // So if the MP is locked, we *don't* migrate, but still just return
+      // the subset of data we now store in the JSON.
+      // This will cause sync to notice the lack of keys, force an unlock then
+      // re-fetch the account data to see if the keys are there.  At *that*
+      // point we will end up back here, but because the MP is now unlocked
+      // we can actually perform the migration.
+      if (!this._isLoggedIn) {
+        // return the "safe" subset but leave the storage alone.
+        log.info("account data needs migration to the login manager but the MP is locked.");
+        let result = {
+          version: data.version,
+          accountData: {},
+        };
+        for (let fieldName of FXA_PWDMGR_PLAINTEXT_FIELDS) {
+          result.accountData[fieldName] = data.accountData[fieldName];
+        }
+        return result;
+      }
+      // actually migrate - just calling .set() will split everything up.
+      log.info("account data is being migrated to the login manager.");
+      yield this.set(data);
+    }
+
+    try { // Services.logins might be third-party and broken...
+      // read the data from the login manager and merge it for return.
+      yield Services.logins.initializationPromise;
+
+      if (!this._isLoggedIn) {
+        log.info("returning partial account data as the login manager is locked.");
+        return data;
+      }
+
+      let logins = Services.logins.findLogins({}, FXA_PWDMGR_HOST, null, FXA_PWDMGR_REALM);
+      if (logins.length == 0) {
+        // This could happen if the MP was locked when we wrote the data.
+        log.info("Can't find the rest of the credentials in the login manager");
+        return data;
+      }
+      let login = logins[0];
+      if (login.username == data.accountData.email) {
+        let lmData = JSON.parse(login.password);
+        if (lmData.version == data.version) {
+          // Merge the login manager data
+          copyObjectProperties(lmData.accountData, data.accountData);
+        } else {
+          log.info("version field in the login manager doesn't match - ignoring it");
+          yield this._clearLoginMgrData();
+        }
+      } else {
+        log.info("username in the login manager doesn't match - ignoring it");
+        yield this._clearLoginMgrData();
+      }
+    } catch (ex) {
+      log.error("Failed to get data from the login manager: ${}", ex);
+    }
+    return data;
+  }),
+
+}
 
 // A getter for the instance to export
 XPCOMUtils.defineLazyGetter(this, "fxAccounts", function() {

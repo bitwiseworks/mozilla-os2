@@ -6,7 +6,6 @@
 #include "ScriptLoader.h"
 
 #include "nsIChannel.h"
-#include "nsIChannelPolicy.h"
 #include "nsIContentPolicy.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIHttpChannel.h"
@@ -17,7 +16,6 @@
 #include "nsIURI.h"
 
 #include "jsapi.h"
-#include "nsChannelPolicy.h"
 #include "nsError.h"
 #include "nsContentPolicyUtils.h"
 #include "nsContentUtils.h"
@@ -31,6 +29,8 @@
 #include "nsXPCOM.h"
 #include "xpcpublic.h"
 
+#include "mozilla/Assertions.h"
+#include "mozilla/LoadContext.h"
 #include "mozilla/dom/Exceptions.h"
 #include "Principal.h"
 #include "WorkerFeature.h"
@@ -104,28 +104,37 @@ ChannelFromScriptURL(nsIPrincipal* principal,
     NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_SECURITY_ERR);
   }
 
-  // Get Content Security Policy from parent document to pass into channel.
-  nsCOMPtr<nsIContentSecurityPolicy> csp;
-  rv = principal->GetCsp(getter_AddRefs(csp));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsIChannelPolicy> channelPolicy;
-  if (csp) {
-    channelPolicy = do_CreateInstance(NSCHANNELPOLICY_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = channelPolicy->SetContentSecurityPolicy(csp);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = channelPolicy->SetLoadType(nsIContentPolicy::TYPE_SCRIPT);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
   uint32_t flags = nsIRequest::LOAD_NORMAL | nsIChannel::LOAD_CLASSIFY_URI;
 
   nsCOMPtr<nsIChannel> channel;
-  rv = NS_NewChannel(getter_AddRefs(channel), uri, ios, loadGroup, nullptr,
-                     flags, channelPolicy);
+  // If we have the document, use it
+  if (parentDoc) {
+    rv = NS_NewChannel(getter_AddRefs(channel),
+                       uri,
+                       parentDoc,
+                       nsILoadInfo::SEC_NORMAL,
+                       nsIContentPolicy::TYPE_SCRIPT,
+                       loadGroup,
+                       nullptr, // aCallbacks
+                       flags,
+                       ios);
+  } else {
+    // We must have a loadGroup with a load context for the principal to
+    // traverse the channel correctly.
+    MOZ_ASSERT(loadGroup);
+    MOZ_ASSERT(NS_LoadGroupMatchesPrincipal(loadGroup, principal));
+
+    rv = NS_NewChannel(getter_AddRefs(channel),
+                       uri,
+                       principal,
+                       nsILoadInfo::SEC_NORMAL,
+                       nsIContentPolicy::TYPE_SCRIPT,
+                       loadGroup,
+                       nullptr, // aCallbacks
+                       flags,
+                       ios);
+  }
+
   NS_ENSURE_SUCCESS(rv, rv);
 
   channel.forget(aChannel);
@@ -156,7 +165,7 @@ struct ScriptLoadInfo
 
   nsString mURL;
   nsCOMPtr<nsIChannel> mChannel;
-  jschar* mScriptTextBuf;
+  char16_t* mScriptTextBuf;
   size_t mScriptTextLength;
 
   nsresult mLoadResult;
@@ -166,7 +175,7 @@ struct ScriptLoadInfo
 
 class ScriptLoaderRunnable;
 
-class ScriptExecutorRunnable MOZ_FINAL : public MainThreadWorkerSyncRunnable
+class ScriptExecutorRunnable final : public MainThreadWorkerSyncRunnable
 {
   ScriptLoaderRunnable& mScriptLoader;
   uint32_t mFirstIndex;
@@ -182,11 +191,11 @@ private:
   { }
 
   virtual bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE;
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override;
 
   virtual void
   PostRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate, bool aRunResult)
-          MOZ_OVERRIDE;
+          override;
 
   NS_DECL_NSICANCELABLERUNNABLE
 
@@ -196,7 +205,7 @@ private:
                        bool aResult);
 };
 
-class ScriptLoaderRunnable MOZ_FINAL : public WorkerFeature,
+class ScriptLoaderRunnable final : public WorkerFeature,
                                        public nsIRunnable,
                                        public nsIStreamLoaderObserver
 {
@@ -232,7 +241,7 @@ private:
   { }
 
   NS_IMETHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     AssertIsOnMainThread();
 
@@ -246,7 +255,7 @@ private:
   NS_IMETHOD
   OnStreamComplete(nsIStreamLoader* aLoader, nsISupports* aContext,
                    nsresult aStatus, uint32_t aStringLen,
-                   const uint8_t* aString) MOZ_OVERRIDE
+                   const uint8_t* aString) override
   {
     AssertIsOnMainThread();
 
@@ -271,7 +280,7 @@ private:
   }
 
   virtual bool
-  Notify(JSContext* aCx, Status aStatus) MOZ_OVERRIDE
+  Notify(JSContext* aCx, Status aStatus) override
   {
     mWorkerPrivate->AssertIsOnWorkerThread();
 
@@ -282,7 +291,7 @@ private:
         NS_NewRunnableMethod(this, &ScriptLoaderRunnable::CancelMainThread);
       NS_ASSERTION(runnable, "This should never fail!");
 
-      if (NS_FAILED(NS_DispatchToMainThread(runnable, NS_DISPATCH_NORMAL))) {
+      if (NS_FAILED(NS_DispatchToMainThread(runnable))) {
         JS_ReportError(aCx, "Failed to cancel script loader!");
         return false;
       }
@@ -326,13 +335,16 @@ private:
 
     // Figure out which principal to use.
     nsIPrincipal* principal = mWorkerPrivate->GetPrincipal();
+    nsCOMPtr<nsILoadGroup> loadGroup = mWorkerPrivate->GetLoadGroup();
     if (!principal) {
       NS_ASSERTION(parentWorker, "Must have a principal!");
       NS_ASSERTION(mIsWorkerScript, "Must have a principal for importScripts!");
 
       principal = parentWorker->GetPrincipal();
+      loadGroup = parentWorker->GetLoadGroup();
     }
     NS_ASSERTION(principal, "This should never be null here!");
+    MOZ_ASSERT(NS_LoadGroupMatchesPrincipal(loadGroup, principal));
 
     // Figure out our base URI.
     nsCOMPtr<nsIURI> baseURI;
@@ -358,13 +370,6 @@ private:
     if (mIsWorkerScript) {
       // May be null.
       channel = mWorkerPrivate->ForgetWorkerChannel();
-    }
-
-    // All of these can potentially be null, but that should be ok. We'll either
-    // succeed without them or fail below.
-    nsCOMPtr<nsILoadGroup> loadGroup;
-    if (parentDoc) {
-      loadGroup = parentDoc->GetDocumentLoadGroup();
     }
 
     nsCOMPtr<nsIIOService> ios(do_GetIOService());
@@ -424,10 +429,6 @@ private:
 
     if (NS_FAILED(aStatus)) {
       return aStatus;
-    }
-
-    if (!aStringLen) {
-      return NS_OK;
     }
 
     NS_ASSERTION(aString, "This should never be null!");
@@ -506,8 +507,13 @@ private:
       NS_ASSERTION(ssm, "Should never be null!");
 
       nsCOMPtr<nsIPrincipal> channelPrincipal;
-      rv = ssm->GetChannelPrincipal(channel, getter_AddRefs(channelPrincipal));
+      rv = ssm->GetChannelResultPrincipal(channel, getter_AddRefs(channelPrincipal));
       NS_ENSURE_SUCCESS(rv, rv);
+
+      nsCOMPtr<nsILoadGroup> channelLoadGroup;
+      rv = channel->GetLoadGroup(getter_AddRefs(channelLoadGroup));
+      NS_ENSURE_SUCCESS(rv, rv);
+      MOZ_ASSERT(channelLoadGroup);
 
       // If the load principal is the system principal then the channel
       // principal must also be the system principal (we do not allow chrome
@@ -542,7 +548,11 @@ private:
         }
       }
 
-      mWorkerPrivate->SetPrincipal(channelPrincipal);
+      // The principal can change, but it should still match the original
+      // load group's appId and browser element flag.
+      MOZ_ASSERT(NS_LoadGroupMatchesPrincipal(channelLoadGroup, channelPrincipal));
+
+      mWorkerPrivate->SetPrincipal(channelPrincipal, channelLoadGroup);
 
       if (parent) {
         // XHR Params Allowed
@@ -608,7 +618,7 @@ private:
 
 NS_IMPL_ISUPPORTS(ScriptLoaderRunnable, nsIRunnable, nsIStreamLoaderObserver)
 
-class ChannelGetterRunnable MOZ_FINAL : public nsRunnable
+class ChannelGetterRunnable final : public nsRunnable
 {
   WorkerPrivate* mParentWorker;
   nsCOMPtr<nsIEventTarget> mSyncLoopTarget;
@@ -624,12 +634,13 @@ public:
   : mParentWorker(aParentWorker), mSyncLoopTarget(aSyncLoopTarget),
     mScriptURL(aScriptURL), mChannel(aChannel), mResult(NS_ERROR_FAILURE)
   {
+    MOZ_ASSERT(mParentWorker);
     aParentWorker->AssertIsOnWorkerThread();
     MOZ_ASSERT(aSyncLoopTarget);
   }
 
   NS_IMETHOD
-  Run() MOZ_OVERRIDE
+  Run() override
   {
     AssertIsOnMainThread();
 
@@ -643,10 +654,13 @@ public:
     // May be null.
     nsCOMPtr<nsIDocument> parentDoc = mParentWorker->GetDocument();
 
+    nsCOMPtr<nsILoadGroup> loadGroup = mParentWorker->GetLoadGroup();
+
     nsCOMPtr<nsIChannel> channel;
     mResult =
       scriptloader::ChannelFromScriptURLMainThread(principal, baseURI,
-                                                   parentDoc, mScriptURL,
+                                                   parentDoc, loadGroup,
+                                                   mScriptURL,
                                                    getter_AddRefs(channel));
     if (NS_SUCCEEDED(mResult)) {
       channel.forget(mChannel);
@@ -719,6 +733,11 @@ ScriptExecutorRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
     JS::CompartmentOptionsRef(global).setDiscardSource(discard);
   }
 
+  // Similar to the above.
+  if (xpc::ExtraWarningsForSystemJS() && aWorkerPrivate->UsesSystemPrincipal()) {
+      JS::CompartmentOptionsRef(global).extraWarningsOverride().set(true);
+  }
+
   for (uint32_t index = mFirstIndex; index <= mLastIndex; index++) {
     ScriptLoadInfo& loadInfo = loadInfos.ElementAt(index);
 
@@ -735,7 +754,8 @@ ScriptExecutorRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
     NS_ConvertUTF16toUTF8 filename(loadInfo.mURL);
 
     JS::CompileOptions options(aCx);
-    options.setFileAndLine(filename.get(), 1);
+    options.setFileAndLine(filename.get(), 1)
+           .setNoScriptRval(true);
 
     JS::SourceBufferHolder srcBuf(loadInfo.mScriptTextBuf,
                                   loadInfo.mScriptTextLength,
@@ -743,7 +763,8 @@ ScriptExecutorRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
     loadInfo.mScriptTextBuf = nullptr;
     loadInfo.mScriptTextLength = 0;
 
-    if (!JS::Evaluate(aCx, global, options, srcBuf)) {
+    JS::Rooted<JS::Value> unused(aCx);
+    if (!JS::Evaluate(aCx, global, options, srcBuf, &unused)) {
       return true;
     }
 
@@ -810,7 +831,7 @@ LoadAllScripts(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
     return false;
   }
 
-  if (NS_FAILED(NS_DispatchToMainThread(loader, NS_DISPATCH_NORMAL))) {
+  if (NS_FAILED(NS_DispatchToMainThread(loader))) {
     NS_ERROR("Failed to dispatch!");
 
     aWorkerPrivate->RemoveFeature(aCx, loader);
@@ -830,22 +851,18 @@ nsresult
 ChannelFromScriptURLMainThread(nsIPrincipal* aPrincipal,
                                nsIURI* aBaseURI,
                                nsIDocument* aParentDoc,
+                               nsILoadGroup* aLoadGroup,
                                const nsAString& aScriptURL,
                                nsIChannel** aChannel)
 {
   AssertIsOnMainThread();
-
-  nsCOMPtr<nsILoadGroup> loadGroup;
-  if (aParentDoc) {
-    loadGroup = aParentDoc->GetDocumentLoadGroup();
-  }
 
   nsCOMPtr<nsIIOService> ios(do_GetIOService());
 
   nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
   NS_ASSERTION(secMan, "This should never be null!");
 
-  return ChannelFromScriptURL(aPrincipal, aBaseURI, aParentDoc, loadGroup,
+  return ChannelFromScriptURL(aPrincipal, aBaseURI, aParentDoc, aLoadGroup,
                               ios, secMan, aScriptURL, true, aChannel);
 }
 
@@ -863,7 +880,7 @@ ChannelFromScriptURLWorkerThread(JSContext* aCx,
     new ChannelGetterRunnable(aParent, syncLoop.EventTarget(), aScriptURL,
                               aChannel);
 
-  if (NS_FAILED(NS_DispatchToMainThread(getter, NS_DISPATCH_NORMAL))) {
+  if (NS_FAILED(NS_DispatchToMainThread(getter))) {
     NS_ERROR("Failed to dispatch!");
     return NS_ERROR_FAILURE;
   }

@@ -15,6 +15,8 @@ const promise = Cu.import("resource://gre/modules/Promise.jsm", {}).Promise;
 const EventEmitter = require("devtools/toolkit/event-emitter");
 const { CallWatcherFront } = require("devtools/server/actors/call-watcher");
 const { CanvasFront } = require("devtools/server/actors/canvas");
+const Telemetry = require("devtools/shared/telemetry");
+const telemetry = new Telemetry();
 
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
   "resource://gre/modules/Task.jsm");
@@ -68,7 +70,8 @@ const EVENTS = {
 };
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
-const STRINGS_URI = "chrome://browser/locale/devtools/canvasdebugger.properties"
+const STRINGS_URI = "chrome://browser/locale/devtools/canvasdebugger.properties";
+const SHARED_STRINGS_URI = "chrome://browser/locale/devtools/shared.properties";
 
 const SNAPSHOT_START_RECORDING_DELAY = 10; // ms
 const SNAPSHOT_DATA_EXPORT_MAX_BLOCK = 1000; // ms
@@ -119,6 +122,7 @@ let EventsHandler = {
    * Listen for events emitted by the current tab target.
    */
   initialize: function() {
+    telemetry.toolOpened("canvasdebugger");
     this._onTabNavigated = this._onTabNavigated.bind(this);
     gTarget.on("will-navigate", this._onTabNavigated);
     gTarget.on("navigate", this._onTabNavigated);
@@ -128,6 +132,7 @@ let EventsHandler = {
    * Remove events emitted by the current tab target.
    */
   destroy: function() {
+    telemetry.toolClosed("canvasdebugger");
     gTarget.off("will-navigate", this._onTabNavigated);
     gTarget.off("navigate", this._onTabNavigated);
   },
@@ -203,8 +208,8 @@ let SnapshotsListView = Heritage.extend(WidgetMethods, {
 
     let thumbnail = document.createElementNS(HTML_NS, "canvas");
     thumbnail.className = "snapshot-item-thumbnail";
-    thumbnail.width = CanvasFront.THUMBNAIL_HEIGHT;
-    thumbnail.height = CanvasFront.THUMBNAIL_HEIGHT;
+    thumbnail.width = CanvasFront.THUMBNAIL_SIZE;
+    thumbnail.height = CanvasFront.THUMBNAIL_SIZE;
 
     let title = document.createElement("label");
     title.className = "plain snapshot-item-title";
@@ -411,10 +416,17 @@ let SnapshotsListView = Heritage.extend(WidgetMethods, {
       return;
     }
 
-    let channel = NetUtil.newChannel(fp.file);
+    let channel = NetUtil.newChannel2(fp.file,
+                                      null,
+                                      null,
+                                      window.document,
+                                      null, // aLoadingPrincipal
+                                      null, // aTriggeringPrincipal
+                                      Ci.nsILoadInfo.SEC_NORMAL,
+                                      Ci.nsIContentPolicy.TYPE_OTHER);
     channel.contentType = "text/plain";
 
-    NetUtil.asyncFetch(channel, (inputStream, status) => {
+    NetUtil.asyncFetch2(channel, (inputStream, status) => {
       if (!Components.isSuccessCode(status)) {
         console.error("Could not import recorded animation frame snapshot file.");
         return;
@@ -436,14 +448,6 @@ let SnapshotsListView = Heritage.extend(WidgetMethods, {
       let snapshotItem = this.addSnapshot();
       snapshotItem.isLoadedFromDisk = true;
       data.calls.forEach(e => e.isLoadedFromDisk = true);
-
-      // Create array buffers from the parsed pixel arrays.
-      for (let thumbnail of data.thumbnails) {
-        let thumbnailPixelsArray = thumbnail.pixels.split(",");
-        thumbnail.pixels = new Uint32Array(thumbnailPixelsArray);
-      }
-      let screenshotPixelsArray = data.screenshot.pixels.split(",");
-      data.screenshot.pixels = new Uint32Array(screenshotPixelsArray);
 
       this.customizeSnapshot(snapshotItem, data.calls, data);
     });
@@ -494,24 +498,12 @@ let SnapshotsListView = Heritage.extend(WidgetMethods, {
       // Prepare all the thumbnails for serialization.
       yield DevToolsUtils.yieldingEach(thumbnails, (thumbnail, i) => {
         let { index, width, height, flipped, pixels } = thumbnail;
-        data.thumbnails.push({
-          index: index,
-          width: width,
-          height: height,
-          flipped: flipped,
-          pixels: Array.join(pixels, ",")
-        });
+        data.thumbnails.push({ index, width, height, flipped, pixels });
       });
 
       // Prepare the screenshot for serialization.
       let { index, width, height, flipped, pixels } = screenshot;
-      data.screenshot = {
-        index: index,
-        width: width,
-        height: height,
-        flipped: flipped,
-        pixels: Array.join(pixels, ",")
-      };
+      data.screenshot = { index, width, height, flipped, pixels };
 
       let string = JSON.stringify(data);
       let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"].
@@ -532,7 +524,7 @@ let SnapshotsListView = Heritage.extend(WidgetMethods, {
 
       // Show a throbber and a "Saving…" label if serializing isn't immediate.
       setNamedTimeout("call-list-save", CALLS_LIST_SLOW_SAVE_DELAY, () => {
-        footer.setAttribute("saving", "");
+        footer.classList.add("devtools-throbber");
         save.setAttribute("disabled", "true");
         save.setAttribute("value", L10N.getStr("snapshotsList.savingLabel"));
       });
@@ -545,7 +537,7 @@ let SnapshotsListView = Heritage.extend(WidgetMethods, {
             console.error("Could not save recorded animation frame snapshot file.");
           }
           clearNamedTimeout("call-list-save");
-          footer.removeAttribute("saving");
+          footer.classList.remove("devtools-throbber");
           save.removeAttribute("disabled");
           save.setAttribute("value", L10N.getStr("snapshotsList.saveLabel"));
         });
@@ -708,14 +700,17 @@ let CallsListView = Heritage.extend(WidgetMethods, {
    *        A single "snapshot-image" instance received from the backend.
    */
   showScreenshot: function(screenshot) {
-    let { index, width, height, flipped, pixels } = screenshot;
+    let { index, width, height, scaling, flipped, pixels } = screenshot;
 
     let screenshotNode = $("#screenshot-image");
     screenshotNode.setAttribute("flipped", flipped);
     drawBackground("screenshot-rendering", width, height, pixels);
 
     let dimensionsNode = $("#screenshot-dimensions");
-    dimensionsNode.setAttribute("value", ~~width + " x " + ~~height);
+    let actualWidth = (width / scaling) | 0;
+    let actualHeight = (height / scaling) | 0;
+    dimensionsNode.setAttribute("value",
+      SHARED_L10N.getFormatStr("dimensions", actualWidth, actualHeight));
 
     window.emit(EVENTS.CALL_SCREENSHOT_DISPLAYED);
   },
@@ -750,8 +745,8 @@ let CallsListView = Heritage.extend(WidgetMethods, {
 
     let thumbnailNode = document.createElementNS(HTML_NS, "canvas");
     thumbnailNode.setAttribute("flipped", flipped);
-    thumbnailNode.width = Math.max(CanvasFront.THUMBNAIL_HEIGHT, width);
-    thumbnailNode.height = Math.max(CanvasFront.THUMBNAIL_HEIGHT, height);
+    thumbnailNode.width = Math.max(CanvasFront.THUMBNAIL_SIZE, width);
+    thumbnailNode.height = Math.max(CanvasFront.THUMBNAIL_SIZE, height);
     drawImage(thumbnailNode, width, height, pixels, { centered: true });
 
     thumbnailNode.className = "filmstrip-thumbnail";
@@ -836,7 +831,7 @@ let CallsListView = Heritage.extend(WidgetMethods, {
       frameSnapshot.generateScreenshotFor(functionCall).then(screenshot => {
         this.showScreenshot(screenshot);
         this.highlightedThumbnail = screenshot.index;
-      });
+      }).catch(Cu.reportError);
     });
   },
 
@@ -1064,6 +1059,7 @@ let CallsListView = Heritage.extend(WidgetMethods, {
  * Localization convenience methods.
  */
 let L10N = new ViewHelpers.L10N(STRINGS_URI);
+let SHARED_L10N = new ViewHelpers.L10N(SHARED_STRINGS_URI);
 
 /**
  * Convenient way of emitting events from the panel window.
@@ -1141,7 +1137,7 @@ getImageDataStorage.cache = null;
  *        The image data width.
  * @param number height
  *        The image data height.
- * @param pixels
+ * @param array pixels
  *        An array buffer view of the image data.
  * @param object options
  *        Additional options supported by this operation:
@@ -1159,9 +1155,8 @@ function drawImage(canvas, width, height, pixels, options = {}) {
     return;
   }
 
-  let arrayBuffer = new Uint8Array(pixels.buffer);
   let imageData = getImageDataStorage(ctx, width, height);
-  imageData.data.set(arrayBuffer);
+  imageData.data.set(pixels);
 
   if (options.centered) {
     let left = (canvas.width - width) / 2;
@@ -1182,7 +1177,7 @@ function drawImage(canvas, width, height, pixels, options = {}) {
  *        The image data width.
  * @param number height
  *        The image data height.
- * @param pixels
+ * @param array pixels
  *        An array buffer view of the image data.
  */
 function drawBackground(id, width, height, pixels) {
@@ -1247,8 +1242,9 @@ function getThumbnailForCall(thumbnails, index) {
  */
 function viewSourceInDebugger(url, line) {
   let showSource = ({ DebuggerView }) => {
-    if (DebuggerView.Sources.containsValue(url)) {
-      DebuggerView.setEditorLocation(url, line, { noDebug: true }).then(() => {
+    let item = DebuggerView.Sources.getItemForAttachment(a => a.source.url === url);
+    if (item) {
+      DebuggerView.setEditorLocation(item.attachment.source.actor, line, { noDebug: true }).then(() => {
         window.emit(EVENTS.SOURCE_SHOWN_IN_JS_DEBUGGER);
       }, () => {
         window.emit(EVENTS.SOURCE_NOT_FOUND_IN_JS_DEBUGGER);

@@ -13,7 +13,11 @@
 #include <sys/socket.h>
 #include <net/if.h>
 #include <net/if_media.h>
+#ifdef __DragonFly__
+#include <netproto/802_11/ieee80211_ioctl.h>
+#else
 #include <net80211/ieee80211_ioctl.h>
+#endif
 
 #include <ifaddrs.h>
 #include <string.h>
@@ -159,7 +163,7 @@ nsWifiMonitor::DoScan()
     LOG(("waiting on monitor\n"));
 
     ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-    mon.Wait(PR_SecondsToInterval(60));
+    mon.Wait(PR_SecondsToInterval(kDefaultWifiScanInterval));
   }
   while (mKeepGoing);
 

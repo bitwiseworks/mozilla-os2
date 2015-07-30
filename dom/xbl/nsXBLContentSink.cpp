@@ -24,7 +24,6 @@
 #include "nsIConsoleService.h"
 #include "nsIScriptError.h"
 #include "nsNodeInfoManager.h"
-#include "nsINodeInfo.h"
 #include "nsIPrincipal.h"
 #include "mozilla/dom/Element.h"
 
@@ -40,7 +39,6 @@ NS_NewXBLContentSink(nsIXMLContentSink** aResult,
   NS_ENSURE_ARG_POINTER(aResult);
 
   nsXBLContentSink* it = new nsXBLContentSink();
-  NS_ENSURE_TRUE(it, NS_ERROR_OUT_OF_MEMORY);
 
   nsCOMPtr<nsIXMLContentSink> kungFuDeathGrip = it;
   nsresult rv = it->Init(aDoc, aURI, aContainer);
@@ -251,10 +249,10 @@ NS_IMETHODIMP
 nsXBLContentSink::HandleStartElement(const char16_t *aName, 
                                      const char16_t **aAtts, 
                                      uint32_t aAttsCount, 
-                                     int32_t aIndex, 
                                      uint32_t aLineNumber)
 {
-  nsresult rv = nsXMLContentSink::HandleStartElement(aName,aAtts,aAttsCount,aIndex,aLineNumber);
+  nsresult rv = nsXMLContentSink::HandleStartElement(aName, aAtts, aAttsCount,
+                                                     aLineNumber);
   if (NS_FAILED(rv))
     return rv;
 
@@ -462,11 +460,9 @@ nsXBLContentSink::OnOpenContainer(const char16_t **aAtts,
     }
     nsXBLProtoImplAnonymousMethod* newMethod =
       new nsXBLProtoImplAnonymousMethod(name.get());
-    if (newMethod) {
-      newMethod->SetLineNumber(aLineNumber);
-      mBinding->SetConstructor(newMethod);
-      AddMember(newMethod);
-    }
+    newMethod->SetLineNumber(aLineNumber);
+    mBinding->SetConstructor(newMethod);
+    AddMember(newMethod);
   }
   else if (aTagName == nsGkAtoms::destructor) {
     ENSURE_XBL_STATE(mState == eXBL_InImplementation &&
@@ -482,11 +478,9 @@ nsXBLContentSink::OnOpenContainer(const char16_t **aAtts,
     }
     nsXBLProtoImplAnonymousMethod* newMethod =
       new nsXBLProtoImplAnonymousMethod(name.get());
-    if (newMethod) {
-      newMethod->SetLineNumber(aLineNumber);
-      mBinding->SetDestructor(newMethod);
-      AddMember(newMethod);
-    }
+    newMethod->SetLineNumber(aLineNumber);
+    mBinding->SetDestructor(newMethod);
+    AddMember(newMethod);
   }
   else if (aTagName == nsGkAtoms::field) {
     ENSURE_XBL_STATE(mState == eXBL_InImplementation &&
@@ -552,9 +546,7 @@ nsXBLContentSink::ConstructBinding(uint32_t aLineNumber)
   // performs this check.
   if (!cid.IsEmpty()) {
     mBinding = new nsXBLPrototypeBinding();
-    if (!mBinding)
-      return NS_ERROR_OUT_OF_MEMORY;
-      
+
     rv = mBinding->Init(cid, mDocInfo, binding, !mFoundFirstBinding);
     if (NS_SUCCEEDED(rv) &&
         NS_SUCCEEDED(mDocInfo->SetPrototypeBinding(cid, mBinding))) {
@@ -676,22 +668,17 @@ nsXBLContentSink::ConstructHandler(const char16_t **aAtts, uint32_t aLineNumber)
                                          clickcount, group, preventdefault,
                                          allowuntrusted, mBinding, aLineNumber);
 
-  if (newHandler) {
-    // Add this handler to our chain of handlers.
-    if (mHandler) {
-      // Already have a chain. Just append to the end.
-      mHandler->SetNextHandler(newHandler);
-    }
-    else {
-      // We're the first handler in the chain.
-      mBinding->SetPrototypeHandlers(newHandler);
-    }
-    // Adjust our mHandler pointer to point to the new last handler in the
-    // chain.
-    mHandler = newHandler;
+  // Add this handler to our chain of handlers.
+  if (mHandler) {
+    // Already have a chain. Just append to the end.
+    mHandler->SetNextHandler(newHandler);
   } else {
-    mState = eXBL_Error;
+    // We're the first handler in the chain.
+    mBinding->SetPrototypeHandlers(newHandler);
   }
+  // Adjust our mHandler pointer to point to the new last handler in the
+  // chain.
+  mHandler = newHandler;
 }
 
 void
@@ -774,10 +761,8 @@ nsXBLContentSink::ConstructField(const char16_t **aAtts, uint32_t aLineNumber)
     // All of our pointers are now filled in. Construct our field with all of
     // these parameters.
     mField = new nsXBLProtoImplField(name, readonly);
-    if (mField) {
-      mField->SetLineNumber(aLineNumber);
-      AddField(mField);
-    }
+    mField->SetLineNumber(aLineNumber);
+    AddField(mField);
   }
 }
 
@@ -866,7 +851,7 @@ nsXBLContentSink::ConstructParameter(const char16_t **aAtts)
 
 nsresult
 nsXBLContentSink::CreateElement(const char16_t** aAtts, uint32_t aAttsCount,
-                                nsINodeInfo* aNodeInfo, uint32_t aLineNumber,
+                                mozilla::dom::NodeInfo* aNodeInfo, uint32_t aLineNumber,
                                 nsIContent** aResult, bool* aAppendContent,
                                 FromParser aFromParser)
 {
@@ -883,8 +868,6 @@ nsXBLContentSink::CreateElement(const char16_t** aAtts, uint32_t aAttsCount,
 
   *aAppendContent = true;
   nsRefPtr<nsXULPrototypeElement> prototype = new nsXULPrototypeElement();
-  if (!prototype)
-    return NS_ERROR_OUT_OF_MEMORY;
 
   prototype->mNodeInfo = aNodeInfo;
 
@@ -920,8 +903,6 @@ nsXBLContentSink::AddAttributesToXULPrototype(const char16_t **aAtts,
   nsXULPrototypeAttribute* attrs = nullptr;
   if (aAttsCount > 0) {
     attrs = new nsXULPrototypeAttribute[aAttsCount];
-    if (!attrs)
-      return NS_ERROR_OUT_OF_MEMORY;
   }
 
   aElement->mAttributes    = attrs;
@@ -940,7 +921,7 @@ nsXBLContentSink::AddAttributesToXULPrototype(const char16_t **aAtts,
       attrs[i].mName.SetTo(localName);
     }
     else {
-      nsCOMPtr<nsINodeInfo> ni;
+      nsRefPtr<NodeInfo> ni;
       ni = mNodeInfoManager->GetNodeInfo(localName, prefix, nameSpaceID,
                                          nsIDOMNode::ATTRIBUTE_NODE);
       attrs[i].mName.SetTo(ni);

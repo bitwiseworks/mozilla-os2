@@ -36,8 +36,11 @@ struct CompareCacheHashEntryPtr : PLDHashEntryHdr {
   CompareCacheHashEntry *entry;
 };
 
-class nsCertAddonInfo MOZ_FINAL : public nsISupports
+class nsCertAddonInfo final : public nsISupports
 {
+private:
+  ~nsCertAddonInfo() {}
+
 public:
   NS_DECL_ISUPPORTS
 
@@ -51,13 +54,15 @@ public:
 
 class nsCertTreeDispInfo : public nsICertTreeItem
 {
+protected:
+  virtual ~nsCertTreeDispInfo();
+
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSICERTTREEITEM
 
   nsCertTreeDispInfo();
   nsCertTreeDispInfo(nsCertTreeDispInfo &other);
-  virtual ~nsCertTreeDispInfo();
 
   mozilla::RefPtr<nsCertAddonInfo> mAddonInfo;
   enum {
@@ -78,12 +83,13 @@ public:
   NS_DECL_NSITREEVIEW
 
   nsCertTree();
-  virtual ~nsCertTree();
 
   enum sortCriterion { sort_IssuerOrg, sort_Org, sort_Token, 
     sort_CommonName, sort_IssuedDateDescending, sort_Email, sort_None };
 
 protected:
+  virtual ~nsCertTree();
+
   nsresult InitCompareHash();
   void ClearCompareHash();
   void RemoveCacheEntry(void *key);

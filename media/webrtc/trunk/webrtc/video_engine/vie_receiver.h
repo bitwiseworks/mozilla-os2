@@ -18,13 +18,14 @@
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/typedefs.h"
+#include "webrtc/video_engine/include/vie_network.h"
 #include "webrtc/video_engine/vie_defines.h"
 
 namespace webrtc {
 
 class CriticalSectionWrapper;
-class Encryption;
 class FecReceiver;
+class RemoteNtpTimeEstimator;
 class ReceiveStatistics;
 class RemoteBitrateEstimator;
 class RtpDump;
@@ -33,6 +34,7 @@ class RTPPayloadRegistry;
 class RtpReceiver;
 class RtpRtcp;
 class VideoCodingModule;
+struct ReceiveBandwidthEstimatorStats;
 
 class ViEReceiver : public RtpData {
  public:
@@ -45,14 +47,11 @@ class ViEReceiver : public RtpData {
   bool RegisterPayload(const VideoCodec& video_codec);
 
   void SetNackStatus(bool enable, int max_nack_reordering_threshold);
-  void SetRtxStatus(bool enable, uint32_t ssrc);
-  void SetRtxPayloadType(uint32_t payload_type);
+  void SetRtxPayloadType(int payload_type);
+  void SetRtxSsrc(uint32_t ssrc);
 
   uint32_t GetRemoteSsrc() const;
   int GetCsrcs(uint32_t* csrcs) const;
-
-  int RegisterExternalDecryption(Encryption* decryption);
-  int DeregisterExternalDecryption();
 
   void SetRtpRtcpModule(RtpRtcp* module);
 
@@ -73,36 +72,43 @@ class ViEReceiver : public RtpData {
   int StopRTPDump();
 
   // Receives packets from external transport.
-  int ReceivedRTPPacket(const void* rtp_packet, int rtp_packet_length);
+  int ReceivedRTPPacket(const void* rtp_packet, int rtp_packet_length,
+                        const PacketTime& packet_time);
   int ReceivedRTCPPacket(const void* rtcp_packet, int rtcp_packet_length);
-  virtual bool OnRecoveredPacket(const uint8_t* packet,
-                                 int packet_length) OVERRIDE;
 
   // Implements RtpData.
   virtual int32_t OnReceivedPayloadData(
       const uint8_t* payload_data,
       const uint16_t payload_size,
-      const WebRtcRTPHeader* rtp_header);
+      const WebRtcRTPHeader* rtp_header) OVERRIDE;
+  virtual bool OnRecoveredPacket(const uint8_t* packet,
+                                 int packet_length) OVERRIDE;
 
-  void EstimatedReceiveBandwidth(unsigned int* available_bandwidth) const;
+  void GetReceiveBandwidthEstimatorStats(
+      ReceiveBandwidthEstimatorStats* output) const;
 
   ReceiveStatistics* GetReceiveStatistics() const;
 
+  void ReceivedBWEPacket(int64_t arrival_time_ms, int payload_size,
+                         const RTPHeader& header);
  private:
-  int InsertRTPPacket(const int8_t* rtp_packet, int rtp_packet_length);
-  bool ReceivePacket(const uint8_t* packet, int packet_length,
-                     const RTPHeader& header, bool in_order);
+  int InsertRTPPacket(const uint8_t* rtp_packet, int rtp_packet_length,
+                      const PacketTime& packet_time);
+  bool ReceivePacket(const uint8_t* packet,
+                     int packet_length,
+                     const RTPHeader& header,
+                     bool in_order);
   // Parses and handles for instance RTX and RED headers.
   // This function assumes that it's being called from only one thread.
   bool ParseAndHandleEncapsulatingHeader(const uint8_t* packet,
                                          int packet_length,
                                          const RTPHeader& header);
-  int InsertRTCPPacket(const int8_t* rtcp_packet, int rtcp_packet_length);
+  int InsertRTCPPacket(const uint8_t* rtcp_packet, int rtcp_packet_length);
   bool IsPacketInOrder(const RTPHeader& header) const;
   bool IsPacketRetransmitted(const RTPHeader& header, bool in_order) const;
 
   scoped_ptr<CriticalSectionWrapper> receive_cs_;
-  const int32_t channel_id_;
+  Clock* clock_;
   scoped_ptr<RtpHeaderParser> rtp_header_parser_;
   scoped_ptr<RTPPayloadRegistry> rtp_payload_registry_;
   scoped_ptr<RtpReceiver> rtp_receiver_;
@@ -113,13 +119,15 @@ class ViEReceiver : public RtpData {
   VideoCodingModule* vcm_;
   RemoteBitrateEstimator* remote_bitrate_estimator_;
 
-  Encryption* external_decryption_;
-  uint8_t* decryption_buffer_;
+  scoped_ptr<RemoteNtpTimeEstimator> ntp_estimator_;
+
   RtpDump* rtp_dump_;
   bool receiving_;
   bool receiving_rtcp_;
   uint8_t restored_packet_[kViEMaxMtu];
   bool restored_packet_in_use_;
+  bool receiving_ast_enabled_;
+  int64_t last_packet_log_ms_;
 };
 
 }  // namespace webrt

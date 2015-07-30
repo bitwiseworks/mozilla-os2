@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -23,8 +24,9 @@ namespace mozilla {
 class TimeStamp;
 }
 
-class TimerThread MOZ_FINAL : public nsIRunnable,
-                              public nsIObserver
+class TimerThread final
+  : public nsIRunnable
+  , public nsIObserver
 {
 public:
   typedef mozilla::Monitor Monitor;
@@ -32,18 +34,18 @@ public:
   typedef mozilla::TimeDuration TimeDuration;
 
   TimerThread();
-  NS_HIDDEN_(nsresult) InitLocks();
+  nsresult InitLocks();
 
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
   NS_DECL_NSIOBSERVER
 
-  NS_HIDDEN_(nsresult) Init();
-  NS_HIDDEN_(nsresult) Shutdown();
+  nsresult Init();
+  nsresult Shutdown();
 
-  nsresult AddTimer(nsTimerImpl *aTimer);
-  nsresult TimerDelayChanged(nsTimerImpl *aTimer);
-  nsresult RemoveTimer(nsTimerImpl *aTimer);
+  nsresult AddTimer(nsTimerImpl* aTimer);
+  nsresult TimerDelayChanged(nsTimerImpl* aTimer);
+  nsresult RemoveTimer(nsTimerImpl* aTimer);
 
   void DoBeforeSleep();
   void DoAfterSleep();
@@ -62,9 +64,9 @@ private:
   // These two internal helper methods must be called while mLock is held.
   // AddTimerInternal returns the position where the timer was added in the
   // list, or -1 if it failed.
-  int32_t AddTimerInternal(nsTimerImpl *aTimer);
-  bool    RemoveTimerInternal(nsTimerImpl *aTimer);
-  void    ReleaseTimerInternal(nsTimerImpl *aTimer);
+  int32_t AddTimerInternal(nsTimerImpl* aTimer);
+  bool    RemoveTimerInternal(nsTimerImpl* aTimer);
+  void    ReleaseTimerInternal(nsTimerImpl* aTimer);
 
   nsCOMPtr<nsIThread> mThread;
   Monitor mMonitor;
@@ -77,31 +79,35 @@ private:
   nsTArray<nsTimerImpl*> mTimers;
 };
 
-struct TimerAdditionComparator {
-  TimerAdditionComparator(const mozilla::TimeStamp &aNow,
-                          nsTimerImpl *aTimerToInsert) :
+struct TimerAdditionComparator
+{
+  TimerAdditionComparator(const mozilla::TimeStamp& aNow,
+                          nsTimerImpl* aTimerToInsert) :
     now(aNow)
 #ifdef DEBUG
     , timerToInsert(aTimerToInsert)
 #endif
-  {}
-
-  bool LessThan(nsTimerImpl *fromArray, nsTimerImpl *newTimer) const {
-    NS_ABORT_IF_FALSE(newTimer == timerToInsert, "Unexpected timer ordering");
-
-    // Skip any overdue timers.
-    return fromArray->mTimeout <= now ||
-           fromArray->mTimeout <= newTimer->mTimeout;
+  {
   }
 
-  bool Equals(nsTimerImpl* fromArray, nsTimerImpl* newTimer) const {
+  bool LessThan(nsTimerImpl* aFromArray, nsTimerImpl* aNewTimer) const
+  {
+    MOZ_ASSERT(aNewTimer == timerToInsert, "Unexpected timer ordering");
+
+    // Skip any overdue timers.
+    return aFromArray->mTimeout <= now ||
+           aFromArray->mTimeout <= aNewTimer->mTimeout;
+  }
+
+  bool Equals(nsTimerImpl* aFromArray, nsTimerImpl* aNewTimer) const
+  {
     return false;
   }
 
 private:
-  const mozilla::TimeStamp &now;
+  const mozilla::TimeStamp& now;
 #ifdef DEBUG
-  const nsTimerImpl * const timerToInsert;
+  const nsTimerImpl* const timerToInsert;
 #endif
 };
 

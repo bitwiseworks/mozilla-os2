@@ -23,6 +23,9 @@
 #include <mach/mach.h>          // mach_task_self()
 #include <sys/sysctl.h>         // sysctlbyname()
 
+#ifdef MOZILLA_INTERNAL_API
+#include <OSXRunLoopSingleton.h>
+#endif
 
 
 namespace webrtc
@@ -97,7 +100,7 @@ void AudioDeviceMac::logCAMsg(const TraceLevel level,
     assert(msg != NULL);
     assert(err != NULL);
 
-#ifdef WEBRTC_BIG_ENDIAN
+#ifdef WEBRTC_ARCH_BIG_ENDIAN
     WEBRTC_TRACE(level, module, id, "%s: %.4s", msg, err);
 #else
     // We need to flip the characters in this case.
@@ -384,10 +387,14 @@ int32_t AudioDeviceMac::Init()
             kAudioHardwarePropertyRunLoop,
             kAudioObjectPropertyScopeGlobal,
             kAudioObjectPropertyElementMaster };
+#ifdef MOZILLA_INTERNAL_API
+    mozilla_set_coreaudio_notification_runloop_if_needed();
+#else
     CFRunLoopRef runLoop = NULL;
     UInt32 size = sizeof(CFRunLoopRef);
     WEBRTC_CA_RETURN_ON_ERR(AudioObjectSetPropertyData(kAudioObjectSystemObject,
             &propertyAddress, 0, NULL, size, &runLoop));
+#endif
 
     // Listen for any device changes.
     propertyAddress.mSelector = kAudioHardwarePropertyDevices;
@@ -570,7 +577,6 @@ int32_t AudioDeviceMac::MicrophoneIsAvailable(bool& available)
 
     return 0;
 }
-
 
 int32_t AudioDeviceMac::InitMicrophone()
 {
@@ -1457,7 +1463,7 @@ int32_t AudioDeviceMac::InitPlayout()
 
     _outDesiredFormat.mFormatFlags = kLinearPCMFormatFlagIsSignedInteger
         | kLinearPCMFormatFlagIsPacked;
-#ifdef WEBRTC_BIG_ENDIAN
+#ifdef WEBRTC_ARCH_BIG_ENDIAN
     _outDesiredFormat.mFormatFlags |= kLinearPCMFormatFlagIsBigEndian;
 #endif
     _outDesiredFormat.mFormatID = kAudioFormatLinearPCM;
@@ -1681,7 +1687,7 @@ int32_t AudioDeviceMac::InitRecording()
 
     _inDesiredFormat.mFormatFlags = kLinearPCMFormatFlagIsSignedInteger
         | kLinearPCMFormatFlagIsPacked;
-#ifdef WEBRTC_BIG_ENDIAN
+#ifdef WEBRTC_ARCH_BIG_ENDIAN
     _inDesiredFormat.mFormatFlags |= kLinearPCMFormatFlagIsBigEndian;
 #endif
     _inDesiredFormat.mFormatID = kAudioFormatLinearPCM;

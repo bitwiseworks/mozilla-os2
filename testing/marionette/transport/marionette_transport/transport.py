@@ -2,9 +2,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import datetime
 import errno
 import json
 import socket
+import time
 
 
 class MarionetteTransport(object):
@@ -18,9 +20,10 @@ class MarionetteTransport(object):
     max_packet_length = 4096
     connection_lost_msg = "Connection to Marionette server is lost. Check gecko.log (desktop firefox) or logcat (b2g) for errors."
 
-    def __init__(self, addr, port):
+    def __init__(self, addr, port, socket_timeout=360.0):
         self.addr = addr
         self.port = port
+        self.socket_timeout = socket_timeout
         self.sock = None
         self.traits = None
         self.applicationType = None
@@ -45,21 +48,23 @@ class MarionetteTransport(object):
         """
         assert(self.sock)
         response = self.sock.recv(10)
+        initial_size = len(response)
         sep = response.find(':')
         length = response[0:sep]
         if length != '':
             response = response[sep + 1:]
-            response += self._recv_n_bytes(int(length) + 1 + len(length) - 10)
+            remaining_size = int(length) + 1 + len(length) - initial_size
+            response += self._recv_n_bytes(remaining_size)
             return json.loads(response)
         else:
             raise IOError(self.connection_lost_msg)
 
-    def connect(self, timeout=360.0):
+    def connect(self):
         """ Connect to the server and process the hello message we expect
             to receive in response.
         """
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.settimeout(timeout)
+        self.sock.settimeout(self.socket_timeout)
         try:
             self.sock.connect((self.addr, self.port))
         except:
@@ -91,7 +96,7 @@ class MarionetteTransport(object):
                 self.sock.send(packet)
             except IOError as e:
                 if e.errno == errno.EPIPE:
-                    raise IOError("%s: %s" % (str(e)), self.connection_lost_msg)
+                    raise IOError("%s: %s" % (str(e), self.connection_lost_msg))
                 else:
                     raise e
 
@@ -104,3 +109,25 @@ class MarionetteTransport(object):
         if self.sock:
             self.sock.close()
         self.sock = None
+
+    @staticmethod
+    def wait_for_port(host, port, timeout=60):
+        """ Wait for the specified Marionette host/port to be available."""
+        starttime = datetime.datetime.now()
+        poll_interval = 0.1
+        while datetime.datetime.now() - starttime < datetime.timedelta(seconds=timeout):
+            sock = None
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.connect((host, port))
+                data = sock.recv(16)
+                sock.close()
+                if ':' in data:
+                    return True
+            except socket.error:
+                pass
+            finally:
+                if sock:
+                    sock.close()
+            time.sleep(poll_interval)
+        return False

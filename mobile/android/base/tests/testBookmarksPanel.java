@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.tests;
 
 import org.json.JSONException;
@@ -5,29 +9,33 @@ import org.json.JSONObject;
 import org.mozilla.gecko.Actions;
 import org.mozilla.gecko.Element;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.util.StringUtils;
 
 public class testBookmarksPanel extends AboutHomeTest {
     public void testBookmarksPanel() {
         final String BOOKMARK_URL = getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_01_URL);
         JSONObject data = null;
 
-        // Add a mobile bookmark
+        // Make sure our default bookmarks are loaded.
+        // Technically this will race with the check below.
+        initializeProfile();
+
+        // Add a mobile bookmark.
         mDatabaseHelper.addOrUpdateMobileBookmark(StringHelper.ROBOCOP_BLANK_PAGE_01_TITLE, BOOKMARK_URL);
 
         openAboutHomeTab(AboutHomeTabs.BOOKMARKS);
 
-        // Check that the default bookmarks are displayed
+        // Check that the default bookmarks are displayed.
+        // We need to wait for the distribution to have been processed
+        // before this will succeed.
         for (String url : StringHelper.DEFAULT_BOOKMARKS_URLS) {
             isBookmarkDisplayed(url);
         }
 
-        // Open the context menu for the first bookmark in the list
-        openBookmarkContextMenu(StringHelper.DEFAULT_BOOKMARKS_URLS[0]);
+        assertAllContextMenuOptionsArePresent(StringHelper.DEFAULT_BOOKMARKS_URLS[1],
+                StringHelper.DEFAULT_BOOKMARKS_URLS[0]);
 
-        // Test that the options are all displayed
-        for (String contextMenuOption : StringHelper.BOOKMARK_CONTEXT_MENU_ITEMS) {
-            mAsserter.ok(mSolo.searchText(contextMenuOption), "Checking that the context menu option is present", contextMenuOption + " is present");
-        }
+        openBookmarkContextMenu(StringHelper.DEFAULT_BOOKMARKS_URLS[0]);
 
         // Test that "Open in New Tab" works
         final Element tabCount = mDriver.findElement(getActivity(), R.id.tabs_counter);
@@ -77,9 +85,53 @@ public class testBookmarksPanel extends AboutHomeTest {
 
         // Test that "Remove" works
         openBookmarkContextMenu(editedBookmarkValues[1]);
-        mSolo.clickOnText(StringHelper.BOOKMARK_CONTEXT_MENU_ITEMS[3]);
-        waitForText("Bookmark removed");
+        mSolo.clickOnText(StringHelper.BOOKMARK_CONTEXT_MENU_ITEMS[5]);
+        waitForText(StringHelper.BOOKMARK_REMOVED_LABEL);
         mAsserter.ok(!mDatabaseHelper.isBookmark(editedBookmarkValues[1]), "Checking that the bookmark was removed", "The bookmark was removed");
+    }
+
+    /**
+     * Asserts that all context menu items are present on the given links. For one link,
+     * the context menu is expected to not have the "Share" context menu item.
+     *
+     * @param shareableURL A URL that is expected to have the "Share" context menu item
+     * @param nonShareableURL A URL that is expected not to have the "Share" context menu item.
+     */
+    private void assertAllContextMenuOptionsArePresent(final String shareableURL,
+            final String nonShareableURL) {
+        mAsserter.ok(StringUtils.isShareableUrl(shareableURL), "Ensuring url is shareable", "");
+        mAsserter.ok(!StringUtils.isShareableUrl(nonShareableURL), "Ensuring url is not shareable", "");
+
+        openBookmarkContextMenu(shareableURL);
+        for (String contextMenuOption : StringHelper.BOOKMARK_CONTEXT_MENU_ITEMS) {
+            mAsserter.ok(mSolo.searchText(contextMenuOption),
+                    "Checking that the context menu option is present",
+                    contextMenuOption + " is present");
+        }
+
+        // Close the menu.
+        mActions.sendSpecialKey(Actions.SpecialKey.BACK);
+
+        openBookmarkContextMenu(nonShareableURL);
+        for (String contextMenuOption : StringHelper.BOOKMARK_CONTEXT_MENU_ITEMS) {
+            // This link is not shareable: skip the "Share" option.
+            if ("Share".equals(contextMenuOption)) {
+                continue;
+            }
+
+            mAsserter.ok(mSolo.searchText(contextMenuOption),
+                    "Checking that the context menu option is present",
+                    contextMenuOption + " is present");
+        }
+
+        // The use of Solo.searchText is potentially fragile as It will only
+        // scroll the most recently drawn view. Works fine for now though.
+        mAsserter.ok(!mSolo.searchText("Share"),
+                "Checking that the Share option is not present",
+                "Share option is not present");
+
+        // Close the menu.
+        mActions.sendSpecialKey(Actions.SpecialKey.BACK);
     }
 
    /**
@@ -88,8 +140,8 @@ public class testBookmarksPanel extends AboutHomeTest {
     */
     private void editBookmark(String bookmarkUrl, String[] values) {
         openBookmarkContextMenu(bookmarkUrl);
-        mSolo.clickOnText("Edit");
-        waitForText("Edit Bookmark");
+        mSolo.clickOnText(StringHelper.CONTEXT_MENU_EDIT);
+        waitForText(StringHelper.EDIT_BOOKMARK);
 
         // Update the fields with the new values
         for (int i = 0; i < values.length; i++) {
@@ -98,8 +150,8 @@ public class testBookmarksPanel extends AboutHomeTest {
             mActions.sendKeys(values[i]);
         }
 
-        mSolo.clickOnButton("OK");
-        waitForText("Bookmark updated");
+        mSolo.clickOnButton(StringHelper.OK);
+        waitForText(StringHelper.BOOKMARK_UPDATED_LABEL);
     }
 
    /**
@@ -108,8 +160,8 @@ public class testBookmarksPanel extends AboutHomeTest {
     */
     private void checkBookmarkEdit(String bookmarkUrl, String[] values) {
         openBookmarkContextMenu(bookmarkUrl);
-        mSolo.clickOnText("Edit");
-        waitForText("Edit Bookmark");
+        mSolo.clickOnText(StringHelper.CONTEXT_MENU_EDIT);
+        waitForText(StringHelper.EDIT_BOOKMARK);
 
         // Check the values of the fields
         for (String value : values) {
@@ -117,6 +169,6 @@ public class testBookmarksPanel extends AboutHomeTest {
         }
 
         mSolo.clickOnButton("Cancel");
-        waitForText("BOOKMARKS");
+        waitForText(StringHelper.BOOKMARKS_LABEL);
     }
 }

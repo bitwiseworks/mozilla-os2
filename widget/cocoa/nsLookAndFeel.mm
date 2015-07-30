@@ -137,6 +137,13 @@ nsLookAndFeel::NativeGetColor(ColorID aID, nscolor &aColor)
       // Thanks to mpt26@student.canterbury.ac.nz for the hardcoded values that form the defaults
       //  if querying the Appearance Manager fails ;)
       //
+    case eColorID__moz_mac_buttonactivetext:
+    case eColorID__moz_mac_defaultbuttontext:
+      if (nsCocoaFeatures::OnYosemiteOrLater()) {
+        aColor = NS_RGB(0xFF,0xFF,0xFF);
+        break;
+      }
+      // Otherwise fall through and return the regular button text:
       
     case eColorID_buttontext:
     case eColorID__moz_buttonhovertext:
@@ -245,7 +252,7 @@ nsLookAndFeel::NativeGetColor(ColorID aID, nscolor &aColor)
       aColor = NS_RGB(0xA3,0xA3,0xA3);
       break;          
     case eColorID__moz_mac_menutextdisable:
-      aColor = NS_RGB(0x88,0x88,0x88);
+      aColor = NS_RGB(0x98,0x98,0x98);
       break;      
     case eColorID__moz_mac_menutextselect:
       aColor = GetColorFromNSColor([NSColor selectedMenuItemTextColor]);
@@ -395,6 +402,9 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
       break;
     case eIntID_MacLionTheme:
       aResult = nsCocoaFeatures::OnLionOrLater();
+      break;
+    case eIntID_MacYosemiteTheme:
+      aResult = nsCocoaFeatures::OnYosemiteOrLater();
       break;
     case eIntID_AlertNotificationOrigin:
       aResult = NS_ALERT_TOP;

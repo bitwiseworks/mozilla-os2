@@ -16,30 +16,24 @@ BEGIN_TEST(testResolveRecursion)
 {
     static const JSClass my_resolve_class = {
         "MyResolve",
-        JSCLASS_NEW_RESOLVE | JSCLASS_HAS_PRIVATE,
-
-        JS_PropertyStub,       // add
-        JS_DeletePropertyStub, // delete
-        JS_PropertyStub,       // get
-        JS_StrictPropertyStub, // set
-        JS_EnumerateStub,
-        (JSResolveOp) my_resolve,
-        JS_ConvertStub
+        JSCLASS_HAS_PRIVATE,
+        nullptr, // add
+        nullptr, // delete
+        nullptr, // get
+        nullptr, // set
+        nullptr, // enumerate
+        my_resolve
     };
 
-    obj1 = obj2 = nullptr;
-    JS::AddObjectRoot(cx, &obj1);
-    JS::AddObjectRoot(cx, &obj2);
-
-    obj1 = JS_NewObject(cx, &my_resolve_class, JS::NullPtr(), JS::NullPtr());
+    obj1.init(cx, JS_NewObject(cx, &my_resolve_class));
     CHECK(obj1);
-    obj2 = JS_NewObject(cx, &my_resolve_class, JS::NullPtr(), JS::NullPtr());
+    obj2.init(cx, JS_NewObject(cx, &my_resolve_class));
     CHECK(obj2);
     JS_SetPrivate(obj1, this);
     JS_SetPrivate(obj2, this);
 
-    JS::RootedValue obj1Val(cx, ObjectValue(*obj1));
-    JS::RootedValue obj2Val(cx, ObjectValue(*obj2));
+    JS::RootedValue obj1Val(cx, JS::ObjectValue(*obj1));
+    JS::RootedValue obj2Val(cx, JS::ObjectValue(*obj2));
     CHECK(JS_DefineProperty(cx, global, "obj1", obj1Val, 0));
     CHECK(JS_DefineProperty(cx, global, "obj2", obj2Val, 0));
 
@@ -55,19 +49,17 @@ BEGIN_TEST(testResolveRecursion)
 
     obj1 = nullptr;
     obj2 = nullptr;
-    JS::RemoveObjectRoot(cx, &obj1);
-    JS::RemoveObjectRoot(cx, &obj2);
     return true;
 }
 
-JS::Heap<JSObject*> obj1;
-JS::Heap<JSObject*> obj2;
-unsigned resolveEntryCount;
-unsigned resolveExitCount;
+JS::PersistentRootedObject obj1;
+JS::PersistentRootedObject obj2;
+int resolveEntryCount;
+int resolveExitCount;
 
 struct AutoIncrCounters {
 
-    AutoIncrCounters(cls_testResolveRecursion* t) : t(t) {
+    explicit AutoIncrCounters(cls_testResolveRecursion* t) : t(t) {
         t->resolveEntryCount++;
     }
 
@@ -79,11 +71,11 @@ struct AutoIncrCounters {
 };
 
 bool
-doResolve(JS::HandleObject obj, JS::HandleId id, JS::MutableHandleObject objp)
+doResolve(JS::HandleObject obj, JS::HandleId id, bool* resolvedp)
 {
     CHECK_EQUAL(resolveExitCount, 0);
     AutoIncrCounters incr(this);
-    CHECK_EQUAL(obj, obj1 || obj == obj2);
+    CHECK(obj == obj1 || obj == obj2);
 
     CHECK(JSID_IS_STRING(id));
 
@@ -96,39 +88,39 @@ doResolve(JS::HandleObject obj, JS::HandleId id, JS::MutableHandleObject objp)
             CHECK_EQUAL(resolveEntryCount, 1);
             EVAL("obj2.y = true", &v);
             CHECK_SAME(v, JSVAL_TRUE);
-            CHECK(JS_DefinePropertyById(cx, obj, id, JSVAL_FALSE, nullptr, nullptr, 0));
-            objp.set(obj);
+            CHECK(JS_DefinePropertyById(cx, obj, id, JS::FalseHandleValue, 0));
+            *resolvedp = true;
             return true;
         }
         if (obj == obj2) {
             CHECK_EQUAL(resolveEntryCount, 4);
-            objp.set(nullptr);
+            *resolvedp = false;
             return true;
         }
     } else if (JS_FlatStringEqualsAscii(str, "y")) {
         if (obj == obj2) {
             CHECK_EQUAL(resolveEntryCount, 2);
-            CHECK(JS_DefinePropertyById(cx, obj, id, JSVAL_NULL, nullptr, nullptr, 0));
+            CHECK(JS_DefinePropertyById(cx, obj, id, JS::NullHandleValue, 0));
             EVAL("obj1.x", &v);
-            CHECK(JSVAL_IS_VOID(v));
+            CHECK(v.isUndefined());
             EVAL("obj1.y", &v);
             CHECK_SAME(v, JSVAL_ZERO);
-            objp.set(obj);
+            *resolvedp = true;
             return true;
         }
         if (obj == obj1) {
             CHECK_EQUAL(resolveEntryCount, 3);
             EVAL("obj1.x", &v);
-            CHECK(JSVAL_IS_VOID(v));
+            CHECK(v.isUndefined());
             EVAL("obj1.y", &v);
-            CHECK(JSVAL_IS_VOID(v));
+            CHECK(v.isUndefined());
             EVAL("obj2.y", &v);
-            CHECK(JSVAL_IS_NULL(v));
+            CHECK(v.isNull());
             EVAL("obj2.x", &v);
-            CHECK(JSVAL_IS_VOID(v));
+            CHECK(v.isUndefined());
             EVAL("obj1.y = 0", &v);
             CHECK_SAME(v, JSVAL_ZERO);
-            objp.set(obj);
+            *resolvedp = true;
             return true;
         }
     }
@@ -137,10 +129,10 @@ doResolve(JS::HandleObject obj, JS::HandleId id, JS::MutableHandleObject objp)
 }
 
 static bool
-my_resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::MutableHandleObject objp)
+my_resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolvedp)
 {
     return static_cast<cls_testResolveRecursion*>(JS_GetPrivate(obj))->
-           doResolve(obj, id, objp);
+           doResolve(obj, id, resolvedp);
 }
 
 END_TEST(testResolveRecursion)

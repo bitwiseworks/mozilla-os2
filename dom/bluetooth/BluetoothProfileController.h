@@ -57,7 +57,7 @@ class BluetoothProfileManagerBase;
 class BluetoothReplyRunnable;
 typedef void (*BluetoothProfileControllerCallback)();
 
-class BluetoothProfileController MOZ_FINAL
+class BluetoothProfileController final
 {
   ~BluetoothProfileController();
 
@@ -122,6 +122,9 @@ private:
   // Connect/Disconnect next profile in the array
   void Next();
 
+  // Is Bluetooth service available for profile connection/disconnection ?
+  bool IsBtServiceAvailable() const;
+
   const bool mConnect;
   nsString mDeviceAddress;
   nsRefPtr<BluetoothReplyRunnable> mRunnable;
@@ -139,7 +142,6 @@ private:
   } mTarget;
 
   nsCOMPtr<nsITimer> mTimer;
-  nsCOMPtr<nsITimerCallback> mCheckProfileStatusCallback;
 };
 
 END_BLUETOOTH_NAMESPACE

@@ -11,7 +11,9 @@ function run_test() {
   gTestFiles[11].originalFile = "partial.png";
   gTestDirs = gTestDirsPartialSuccess;
   setTestFilesAndDirsForFailure();
-  setupUpdaterTest(FILE_PARTIAL_MAR, false, false);
+  setupUpdaterTest(FILE_PARTIAL_MAR);
+
+  createUpdaterINI();
 
   // For Mac OS X set the last modified time for the root directory to a date in
   // the past to test that the last modified time is updated on all updates since
@@ -27,7 +29,16 @@ function run_test() {
   runUpdate((USE_EXECV ? 0 : 1), STATE_FAILED_UNEXPECTED_FILE_OPERATION_ERROR);
 }
 
+/**
+ * Checks if the update has finished and if it has finished performs checks for
+ * the test.
+ */
 function checkUpdateApplied() {
+  if (IS_WIN || IS_MACOSX) {
+    // Check that the post update process was not launched.
+    do_check_false(getPostUpdateFile(".running").exists());
+  }
+
   if (IS_MACOSX) {
     logTestInfo("testing last modified time on the apply to directory has " +
                 "changed after a successful update (bug 600098)");
@@ -37,11 +48,7 @@ function checkUpdateApplied() {
     do_check_true(timeDiff < MAC_MAX_TIME_DIFFERENCE);
   }
 
-  checkFilesAfterUpdateFailure();
-  // Sorting on Linux is different so skip this check for now.
-  if (!IS_UNIX) {
-    checkUpdateLogContents(LOG_PARTIAL_FAILURE);
-  }
-
+  checkFilesAfterUpdateFailure(getApplyDirFile, false, false);
+  checkUpdateLogContents(LOG_PARTIAL_FAILURE);
   checkCallbackAppLog();
 }

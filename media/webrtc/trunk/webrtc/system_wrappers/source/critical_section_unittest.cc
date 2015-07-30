@@ -14,13 +14,10 @@
 #include "webrtc/system_wrappers/interface/sleep.h"
 #include "webrtc/system_wrappers/interface/thread_wrapper.h"
 #include "webrtc/system_wrappers/interface/trace.h"
-#include "webrtc/system_wrappers/source/unittest_utilities.h"
 
 namespace webrtc {
 
 namespace {
-
-const bool kLogTrace = false;  // Set to true to enable debug logging to stdout.
 
 // Cause a process switch. Needed to avoid depending on
 // busy-wait in tests.
@@ -54,8 +51,7 @@ private:
 
 class CritSectTest : public ::testing::Test {
 public:
-  CritSectTest() : trace_(kLogTrace) {
-  }
+  CritSectTest() {}
 
   // Waits a number of cycles for the count to reach a given value.
   // Returns true if the target is reached or passed.
@@ -70,9 +66,6 @@ public:
     }
     return (count->Count() >= target);
   }
-
-private:
-  ScopedTracing trace_;
 };
 
 bool LockUnlockThenStopRunFunction(void* obj) {
@@ -81,7 +74,7 @@ bool LockUnlockThenStopRunFunction(void* obj) {
   return false;
 }
 
-TEST_F(CritSectTest, ThreadWakesOnce) {
+TEST_F(CritSectTest, ThreadWakesOnce) NO_THREAD_SAFETY_ANALYSIS {
   CriticalSectionWrapper* crit_sect =
       CriticalSectionWrapper::CreateCriticalSection();
   ProtectedCount count(crit_sect);
@@ -110,7 +103,7 @@ bool LockUnlockRunFunction(void* obj) {
   return true;
 }
 
-TEST_F(CritSectTest, ThreadWakesTwice) {
+TEST_F(CritSectTest, ThreadWakesTwice) NO_THREAD_SAFETY_ANALYSIS {
   CriticalSectionWrapper* crit_sect =
       CriticalSectionWrapper::CreateCriticalSection();
   ProtectedCount count(crit_sect);

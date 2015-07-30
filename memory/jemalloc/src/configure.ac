@@ -19,7 +19,9 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
 ]], [[
     return 0;
 ]])],
+              [je_cv_cflags_appended=$1]
               AC_MSG_RESULT([yes]),
+              [je_cv_cflags_appended=]
               AC_MSG_RESULT([no])
               [CFLAGS="${TCFLAGS}"]
 )
@@ -42,7 +44,7 @@ AC_CACHE_CHECK([whether $1 is compilable],
 dnl ============================================================================
 
 dnl Library revision.
-rev=1
+rev=2
 AC_SUBST([rev])
 
 srcroot=$srcdir
@@ -86,7 +88,7 @@ MANDIR=`eval echo $MANDIR`
 AC_SUBST([MANDIR])
 
 dnl Support for building documentation.
-AC_PATH_PROG([XSLTPROC], [xsltproc], , [$PATH])
+AC_PATH_PROG([XSLTPROC], [xsltproc], [false], [$PATH])
 if test -d "/usr/share/xml/docbook/stylesheet/docbook-xsl" ; then
   DEFAULT_XSLROOT="/usr/share/xml/docbook/stylesheet/docbook-xsl"
 elif test -d "/usr/share/sgml/docbook/xsl-stylesheets" ; then
@@ -128,6 +130,9 @@ if test "x$CFLAGS" = "x" ; then
   no_CFLAGS="yes"
   if test "x$GCC" = "xyes" ; then
     JE_CFLAGS_APPEND([-std=gnu99])
+    if test "x$je_cv_cflags_appended" = "x-std=gnu99" ; then
+      AC_DEFINE_UNQUOTED([JEMALLOC_HAS_RESTRICT])
+    fi
     JE_CFLAGS_APPEND([-Wall])
     JE_CFLAGS_APPEND([-pipe])
     JE_CFLAGS_APPEND([-g3])
@@ -136,7 +141,8 @@ if test "x$CFLAGS" = "x" ; then
     JE_CFLAGS_APPEND([-Zi])
     JE_CFLAGS_APPEND([-MT])
     JE_CFLAGS_APPEND([-W3])
-    CPPFLAGS="$CPPFLAGS -I${srcroot}/include/msvc_compat"
+    JE_CFLAGS_APPEND([-FS])
+    CPPFLAGS="$CPPFLAGS -I${srcdir}/include/msvc_compat"
   fi
 fi
 dnl Append EXTRA_CFLAGS to CFLAGS, if defined.
@@ -144,6 +150,15 @@ if test "x$EXTRA_CFLAGS" != "x" ; then
   JE_CFLAGS_APPEND([$EXTRA_CFLAGS])
 fi
 AC_PROG_CPP
+
+AC_C_BIGENDIAN([ac_cv_big_endian=1], [ac_cv_big_endian=0])
+if test "x${ac_cv_big_endian}" = "x1" ; then
+  AC_DEFINE_UNQUOTED([JEMALLOC_BIG_ENDIAN], [ ])
+fi
+
+if test "x${je_cv_msvc}" = "xyes" -a "x${ac_cv_header_inttypes_h}" = "xno"; then
+  CPPFLAGS="$CPPFLAGS -I${srcdir}/include/msvc_compat/C99"
+fi
 
 AC_CHECK_SIZEOF([void *])
 if test "x${ac_cv_sizeof_void_p}" = "x8" ; then
@@ -191,21 +206,17 @@ AC_CANONICAL_HOST
 dnl CPU-specific settings.
 CPU_SPINWAIT=""
 case "${host_cpu}" in
-  i[[345]]86)
-	;;
-  i686)
-	JE_COMPILABLE([__asm__], [], [[__asm__ volatile("pause"); return 0;]],
-	              [je_cv_asm])
-	if test "x${je_cv_asm}" = "xyes" ; then
+  i686|x86_64)
+	AC_CACHE_VAL([je_cv_pause],
+	  [JE_COMPILABLE([pause instruction], [],
+	                [[__asm__ volatile("pause"); return 0;]],
+	                [je_cv_pause])])
+	if test "x${je_cv_pause}" = "xyes" ; then
 	    CPU_SPINWAIT='__asm__ volatile("pause")'
 	fi
 	;;
-  x86_64)
-	JE_COMPILABLE([__asm__ syntax], [],
-	              [[__asm__ volatile("pause"); return 0;]], [je_cv_asm])
-	if test "x${je_cv_asm}" = "xyes" ; then
-	    CPU_SPINWAIT='__asm__ volatile("pause")'
-	fi
+  powerpc)
+	AC_DEFINE_UNQUOTED([HAVE_ALTIVEC], [ ])
 	;;
   *)
 	;;
@@ -226,8 +237,14 @@ PIC_CFLAGS='-fPIC -DPIC'
 CTARGET='-o $@'
 LDTARGET='-o $@'
 EXTRA_LDFLAGS=
-MKLIB='ar crus $@'
+ARFLAGS='crus'
+AROUT=' $@'
 CC_MM=1
+
+AN_MAKEVAR([AR], [AC_PROG_AR])
+AN_PROGRAM([ar], [AC_PROG_AR])
+AC_DEFUN([AC_PROG_AR], [AC_CHECK_TOOL(AR, ar, :)])
+AC_PROG_AR
 
 dnl Platform-specific settings.  abi and RPATH can probably be determined
 dnl programmatically, but doing so is error-prone, which makes it generally
@@ -237,9 +254,8 @@ dnl Define cpp macros in CPPFLAGS, rather than doing AC_DEFINE(macro), since the
 dnl definitions need to be seen before any headers are included, which is a pain
 dnl to make happen otherwise.
 default_munmap="1"
-JEMALLOC_USABLE_SIZE_CONST="const"
 case "${host}" in
-  *-*-darwin*)
+  *-*-darwin* | *-*-ios*)
 	CFLAGS="$CFLAGS"
 	abi="macho"
 	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
@@ -250,6 +266,7 @@ case "${host}" in
 	force_tls="0"
 	DSO_LDFLAGS='-shared -Wl,-dylib_install_name,$(@F)'
 	SOREV="${rev}.${so}"
+	sbrk_deprecated="1"
 	;;
   *-*-freebsd*)
 	CFLAGS="$CFLAGS"
@@ -257,13 +274,18 @@ case "${host}" in
 	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
 	force_lazy_lock="1"
 	;;
+  *-*-dragonfly*)
+	CFLAGS="$CFLAGS"
+	abi="elf"
+	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
+	;;
   *-*-linux*)
 	CFLAGS="$CFLAGS"
 	CPPFLAGS="$CPPFLAGS -D_GNU_SOURCE"
 	abi="elf"
+	AC_DEFINE([JEMALLOC_HAS_ALLOCA_H])
 	AC_DEFINE([JEMALLOC_PURGE_MADVISE_DONTNEED], [ ])
 	AC_DEFINE([JEMALLOC_THREADED_INIT], [ ])
-	JEMALLOC_USABLE_SIZE_CONST=""
 	default_munmap="0"
 	;;
   *-*-netbsd*)
@@ -283,6 +305,7 @@ case "${host}" in
   *-*-solaris2*)
 	CFLAGS="$CFLAGS"
 	abi="elf"
+	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
 	RPATH='-Wl,-R,$(1)'
 	dnl Solaris needs this for sigwait().
 	CPPFLAGS="$CPPFLAGS -D_POSIX_PTHREAD_SEMANTICS"
@@ -298,7 +321,7 @@ case "${host}" in
 	fi
 	abi="xcoff"
 	;;
-  *-*-mingw*)
+  *-*-mingw* | *-*-cygwin*)
 	abi="pecoff"
 	force_tls="0"
 	RPATH=""
@@ -309,7 +332,9 @@ case "${host}" in
 	  EXTRA_LDFLAGS="-link -DEBUG"
 	  CTARGET='-Fo$@'
 	  LDTARGET='-Fe$@'
-	  MKLIB='lib -nologo -out:$@'
+	  AR='lib'
+	  ARFLAGS='-nologo -out:'
+	  AROUT='$@'
 	  CC_MM=
         else
 	  importlib="${so}"
@@ -325,6 +350,22 @@ case "${host}" in
 	abi="elf"
 	;;
 esac
+
+JEMALLOC_USABLE_SIZE_CONST=const
+AC_CHECK_HEADERS([malloc.h], [
+  AC_MSG_CHECKING([whether malloc_usable_size definition can use const argument])
+  AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
+    [#include <malloc.h>
+     #include <stddef.h>
+    size_t malloc_usable_size(const void *ptr);
+    ],
+    [])],[
+                AC_MSG_RESULT([yes])
+         ],[
+                JEMALLOC_USABLE_SIZE_CONST=
+                AC_MSG_RESULT([no])
+         ])
+])
 AC_DEFINE_UNQUOTED([JEMALLOC_USABLE_SIZE_CONST], [$JEMALLOC_USABLE_SIZE_CONST])
 AC_SUBST([abi])
 AC_SUBST([RPATH])
@@ -342,12 +383,9 @@ AC_SUBST([PIC_CFLAGS])
 AC_SUBST([CTARGET])
 AC_SUBST([LDTARGET])
 AC_SUBST([MKLIB])
+AC_SUBST([ARFLAGS])
+AC_SUBST([AROUT])
 AC_SUBST([CC_MM])
-
-if test "x$abi" != "xpecoff"; then
-  dnl Heap profiling uses the log(3) function.
-  LIBS="$LIBS -lm"
-fi
 
 JE_COMPILABLE([__attribute__ syntax],
               [static __attribute__((unused)) void foo(void){}],
@@ -364,7 +402,7 @@ SAVED_CFLAGS="${CFLAGS}"
 JE_CFLAGS_APPEND([-Werror])
 JE_COMPILABLE([tls_model attribute], [],
               [static __thread int
-               __attribute__((tls_model("initial-exec"))) foo;
+               __attribute__((tls_model("initial-exec"), unused)) foo;
                foo = 0;],
               [je_cv_tls_model])
 CFLAGS="${SAVED_CFLAGS}"
@@ -402,11 +440,10 @@ AC_SUBST([enable_autogen])
 
 AC_PROG_INSTALL
 AC_PROG_RANLIB
-AC_PATH_PROG([AR], [ar], , [$PATH])
-AC_PATH_PROG([LD], [ld], , [$PATH])
-AC_PATH_PROG([AUTOCONF], [autoconf], , [$PATH])
+AC_PATH_PROG([LD], [ld], [false], [$PATH])
+AC_PATH_PROG([AUTOCONF], [autoconf], [false], [$PATH])
 
-public_syms="malloc_conf malloc_message malloc calloc posix_memalign aligned_alloc realloc free malloc_usable_size malloc_stats_print mallctl mallctlnametomib mallctlbymib"
+public_syms="malloc_conf malloc_message malloc calloc posix_memalign aligned_alloc realloc free mallocx rallocx xallocx sallocx dallocx sdallocx nallocx mallctl mallctlnametomib mallctlbymib malloc_stats_print malloc_usable_size"
 
 dnl Check for allocator-related functions that should be wrapped.
 AC_CHECK_FUNC([memalign],
@@ -416,36 +453,35 @@ AC_CHECK_FUNC([valloc],
 	      [AC_DEFINE([JEMALLOC_OVERRIDE_VALLOC], [ ])
 	       public_syms="${public_syms} valloc"])
 
-dnl Support the experimental API by default.
-AC_ARG_ENABLE([experimental],
-  [AS_HELP_STRING([--disable-experimental],
-   [Disable support for the experimental API])],
-[if test "x$enable_experimental" = "xno" ; then
-  enable_experimental="0"
+dnl Do not compute test code coverage by default.
+GCOV_FLAGS=
+AC_ARG_ENABLE([code-coverage],
+  [AS_HELP_STRING([--enable-code-coverage],
+   [Enable code coverage])],
+[if test "x$enable_code_coverage" = "xno" ; then
+  enable_code_coverage="0"
 else
-  enable_experimental="1"
+  enable_code_coverage="1"
 fi
 ],
-[enable_experimental="1"]
+[enable_code_coverage="0"]
 )
-if test "x$enable_experimental" = "x1" ; then
-  AC_DEFINE([JEMALLOC_EXPERIMENTAL], [ ])
-  public_syms="${public_syms} allocm dallocm nallocm rallocm sallocm"
+if test "x$enable_code_coverage" = "x1" ; then
+  deoptimize="no"
+  echo "$CFLAGS $EXTRA_CFLAGS" | grep '\-O' >/dev/null || deoptimize="yes"
+  if test "x${deoptimize}" = "xyes" ; then
+    JE_CFLAGS_APPEND([-O0])
+  fi
+  JE_CFLAGS_APPEND([-fprofile-arcs -ftest-coverage])
+  EXTRA_LDFLAGS="$EXTRA_LDFLAGS -fprofile-arcs -ftest-coverage"
+  AC_DEFINE([JEMALLOC_CODE_COVERAGE], [ ])
 fi
-AC_SUBST([enable_experimental])
+AC_SUBST([enable_code_coverage])
 
 dnl Perform no name mangling by default.
 AC_ARG_WITH([mangling],
   [AS_HELP_STRING([--with-mangling=<map>], [Mangle symbols in <map>])],
   [mangling_map="$with_mangling"], [mangling_map=""])
-for nm in `echo ${mangling_map} |tr ',' ' '` ; do
-  k="`echo ${nm} |tr ':' ' ' |awk '{print $1}'`"
-  n="je_${k}"
-  m=`echo ${nm} |tr ':' ' ' |awk '{print $2}'`
-  AC_DEFINE_UNQUOTED([${n}], [${m}])
-  dnl Remove key from public_syms so that it isn't redefined later.
-  public_syms=`for sym in ${public_syms}; do echo "${sym}"; done |grep -v "^${k}\$" |tr '\n' ' '`
-done
 
 dnl Do not prefix public APIs by default.
 AC_ARG_WITH([jemalloc_prefix],
@@ -462,34 +498,23 @@ if test "x$JEMALLOC_PREFIX" != "x" ; then
   AC_DEFINE_UNQUOTED([JEMALLOC_PREFIX], ["$JEMALLOC_PREFIX"])
   AC_DEFINE_UNQUOTED([JEMALLOC_CPREFIX], ["$JEMALLOC_CPREFIX"])
 fi
-dnl Generate macros to rename public symbols.  All public symbols are prefixed
-dnl with je_ in the source code, so these macro definitions are needed even if
-dnl --with-jemalloc-prefix wasn't specified.
-for stem in ${public_syms}; do
-  n="je_${stem}"
-  m="${JEMALLOC_PREFIX}${stem}"
-  AC_DEFINE_UNQUOTED([${n}], [${m}])
-done
 
 AC_ARG_WITH([export],
   [AS_HELP_STRING([--without-export], [disable exporting jemalloc public APIs])],
   [if test "x$with_export" = "xno"; then
-  AC_DEFINE([JEMALLOC_EXPORT],[])]
+  AC_DEFINE([JEMALLOC_EXPORT],[])
 fi]
 )
 
-dnl Do not mangle library-private APIs by default.
+dnl Mangle library-private APIs.
 AC_ARG_WITH([private_namespace],
   [AS_HELP_STRING([--with-private-namespace=<prefix>], [Prefix to prepend to all library-private APIs])],
-  [JEMALLOC_PRIVATE_NAMESPACE="$with_private_namespace"],
-  [JEMALLOC_PRIVATE_NAMESPACE=""]
+  [JEMALLOC_PRIVATE_NAMESPACE="${with_private_namespace}je_"],
+  [JEMALLOC_PRIVATE_NAMESPACE="je_"]
 )
-AC_DEFINE_UNQUOTED([JEMALLOC_PRIVATE_NAMESPACE], ["$JEMALLOC_PRIVATE_NAMESPACE"])
-if test "x$JEMALLOC_PRIVATE_NAMESPACE" != "x" ; then
-  AC_DEFINE_UNQUOTED([JEMALLOC_N(string_that_no_one_should_want_to_use_as_a_jemalloc_private_namespace_prefix)], [${JEMALLOC_PRIVATE_NAMESPACE}##string_that_no_one_should_want_to_use_as_a_jemalloc_private_namespace_prefix])
-else
-  AC_DEFINE_UNQUOTED([JEMALLOC_N(string_that_no_one_should_want_to_use_as_a_jemalloc_private_namespace_prefix)], [string_that_no_one_should_want_to_use_as_a_jemalloc_private_namespace_prefix])
-fi
+AC_DEFINE_UNQUOTED([JEMALLOC_PRIVATE_NAMESPACE], [$JEMALLOC_PRIVATE_NAMESPACE])
+private_namespace="$JEMALLOC_PRIVATE_NAMESPACE"
+AC_SUBST([private_namespace])
 
 dnl Do not add suffix to installed files by default.
 AC_ARG_WITH([install_suffix],
@@ -500,50 +525,90 @@ AC_ARG_WITH([install_suffix],
 install_suffix="$INSTALL_SUFFIX"
 AC_SUBST([install_suffix])
 
-cfgoutputs_in="${srcroot}Makefile.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}doc/html.xsl.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}doc/manpages.xsl.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}doc/jemalloc.xml.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}include/jemalloc/jemalloc.h.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}include/jemalloc/internal/jemalloc_internal.h.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}test/jemalloc_test.h.in"
+dnl Substitute @je_@ in jemalloc_protos.h.in, primarily to make generation of
+dnl jemalloc_protos_jet.h easy.
+je_="je_"
+AC_SUBST([je_])
+
+cfgoutputs_in="Makefile.in"
+cfgoutputs_in="${cfgoutputs_in} jemalloc.pc.in"
+cfgoutputs_in="${cfgoutputs_in} doc/html.xsl.in"
+cfgoutputs_in="${cfgoutputs_in} doc/manpages.xsl.in"
+cfgoutputs_in="${cfgoutputs_in} doc/jemalloc.xml.in"
+cfgoutputs_in="${cfgoutputs_in} include/jemalloc/jemalloc_macros.h.in"
+cfgoutputs_in="${cfgoutputs_in} include/jemalloc/jemalloc_protos.h.in"
+cfgoutputs_in="${cfgoutputs_in} include/jemalloc/jemalloc_typedefs.h.in"
+cfgoutputs_in="${cfgoutputs_in} include/jemalloc/internal/jemalloc_internal.h.in"
+cfgoutputs_in="${cfgoutputs_in} test/test.sh.in"
+cfgoutputs_in="${cfgoutputs_in} test/include/test/jemalloc_test.h.in"
 
 cfgoutputs_out="Makefile"
+cfgoutputs_out="${cfgoutputs_out} jemalloc.pc"
 cfgoutputs_out="${cfgoutputs_out} doc/html.xsl"
 cfgoutputs_out="${cfgoutputs_out} doc/manpages.xsl"
-cfgoutputs_out="${cfgoutputs_out} doc/jemalloc${install_suffix}.xml"
-cfgoutputs_out="${cfgoutputs_out} include/jemalloc/jemalloc${install_suffix}.h"
+cfgoutputs_out="${cfgoutputs_out} doc/jemalloc.xml"
+cfgoutputs_out="${cfgoutputs_out} include/jemalloc/jemalloc_macros.h"
+cfgoutputs_out="${cfgoutputs_out} include/jemalloc/jemalloc_protos.h"
+cfgoutputs_out="${cfgoutputs_out} include/jemalloc/jemalloc_typedefs.h"
 cfgoutputs_out="${cfgoutputs_out} include/jemalloc/internal/jemalloc_internal.h"
-cfgoutputs_out="${cfgoutputs_out} test/jemalloc_test.h"
+cfgoutputs_out="${cfgoutputs_out} test/test.sh"
+cfgoutputs_out="${cfgoutputs_out} test/include/test/jemalloc_test.h"
 
 cfgoutputs_tup="Makefile"
+cfgoutputs_tup="${cfgoutputs_tup} jemalloc.pc:jemalloc.pc.in"
 cfgoutputs_tup="${cfgoutputs_tup} doc/html.xsl:doc/html.xsl.in"
 cfgoutputs_tup="${cfgoutputs_tup} doc/manpages.xsl:doc/manpages.xsl.in"
-cfgoutputs_tup="${cfgoutputs_tup} doc/jemalloc${install_suffix}.xml:doc/jemalloc.xml.in"
-cfgoutputs_tup="${cfgoutputs_tup} include/jemalloc/jemalloc${install_suffix}.h:include/jemalloc/jemalloc.h.in"
+cfgoutputs_tup="${cfgoutputs_tup} doc/jemalloc.xml:doc/jemalloc.xml.in"
+cfgoutputs_tup="${cfgoutputs_tup} include/jemalloc/jemalloc_macros.h:include/jemalloc/jemalloc_macros.h.in"
+cfgoutputs_tup="${cfgoutputs_tup} include/jemalloc/jemalloc_protos.h:include/jemalloc/jemalloc_protos.h.in"
+cfgoutputs_tup="${cfgoutputs_tup} include/jemalloc/jemalloc_typedefs.h:include/jemalloc/jemalloc_typedefs.h.in"
 cfgoutputs_tup="${cfgoutputs_tup} include/jemalloc/internal/jemalloc_internal.h"
-cfgoutputs_tup="${cfgoutputs_tup} test/jemalloc_test.h:test/jemalloc_test.h.in"
+cfgoutputs_tup="${cfgoutputs_tup} test/test.sh:test/test.sh.in"
+cfgoutputs_tup="${cfgoutputs_tup} test/include/test/jemalloc_test.h:test/include/test/jemalloc_test.h.in"
 
-cfghdrs_in="${srcroot}include/jemalloc/jemalloc_defs.h.in"
-cfghdrs_in="${cfghdrs_in} ${srcroot}include/jemalloc/internal/size_classes.sh"
+cfghdrs_in="include/jemalloc/jemalloc_defs.h.in"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/jemalloc_internal_defs.h.in"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/private_namespace.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/private_unnamespace.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/private_symbols.txt"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/public_namespace.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/public_unnamespace.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/size_classes.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/jemalloc_rename.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/jemalloc_mangle.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/jemalloc.sh"
+cfghdrs_in="${cfghdrs_in} test/include/test/jemalloc_test_defs.h.in"
 
-cfghdrs_out="include/jemalloc/jemalloc_defs${install_suffix}.h"
+cfghdrs_out="include/jemalloc/jemalloc_defs.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc${install_suffix}.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/private_namespace.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/private_unnamespace.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/public_symbols.txt"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/public_namespace.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/public_unnamespace.h"
 cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/size_classes.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc_protos_jet.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc_rename.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc_mangle.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc_mangle_jet.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/jemalloc_internal_defs.h"
+cfghdrs_out="${cfghdrs_out} test/include/test/jemalloc_test_defs.h"
 
-cfghdrs_tup="include/jemalloc/jemalloc_defs${install_suffix}.h:include/jemalloc/jemalloc_defs.h.in"
+cfghdrs_tup="include/jemalloc/jemalloc_defs.h:include/jemalloc/jemalloc_defs.h.in"
+cfghdrs_tup="${cfghdrs_tup} include/jemalloc/internal/jemalloc_internal_defs.h:include/jemalloc/internal/jemalloc_internal_defs.h.in"
+cfghdrs_tup="${cfghdrs_tup} test/include/test/jemalloc_test_defs.h:test/include/test/jemalloc_test_defs.h.in"
 
-dnl Do not silence irrelevant compiler warnings by default, since enabling this
-dnl option incurs a performance penalty.
+dnl Silence irrelevant compiler warnings by default.
 AC_ARG_ENABLE([cc-silence],
-  [AS_HELP_STRING([--enable-cc-silence],
-                  [Silence irrelevant compiler warnings])],
+  [AS_HELP_STRING([--disable-cc-silence],
+                  [Do not silence irrelevant compiler warnings])],
 [if test "x$enable_cc_silence" = "xno" ; then
   enable_cc_silence="0"
 else
   enable_cc_silence="1"
 fi
 ],
-[enable_cc_silence="0"]
+[enable_cc_silence="1"]
 )
 if test "x$enable_cc_silence" = "x1" ; then
   AC_DEFINE([JEMALLOC_CC_SILENCE], [ ])
@@ -551,7 +616,7 @@ fi
 
 dnl Do not compile with debugging by default.
 AC_ARG_ENABLE([debug],
-  [AS_HELP_STRING([--enable-debug], [Build debugging code])],
+  [AS_HELP_STRING([--enable-debug], [Build debugging code (implies --enable-ivsalloc)])],
 [if test "x$enable_debug" = "xno" ; then
   enable_debug="0"
 else
@@ -562,15 +627,30 @@ fi
 )
 if test "x$enable_debug" = "x1" ; then
   AC_DEFINE([JEMALLOC_DEBUG], [ ])
-  AC_DEFINE([JEMALLOC_IVSALLOC], [ ])
+  enable_ivsalloc="1"
 fi
 AC_SUBST([enable_debug])
+
+dnl Do not validate pointers by default.
+AC_ARG_ENABLE([ivsalloc],
+  [AS_HELP_STRING([--enable-ivsalloc], [Validate pointers passed through the public API])],
+[if test "x$enable_ivsalloc" = "xno" ; then
+  enable_ivsalloc="0"
+else
+  enable_ivsalloc="1"
+fi
+],
+[enable_ivsalloc="0"]
+)
+if test "x$enable_ivsalloc" = "x1" ; then
+  AC_DEFINE([JEMALLOC_IVSALLOC], [ ])
+fi
 
 dnl Only optimize if not debugging.
 if test "x$enable_debug" = "x0" -a "x$no_CFLAGS" = "xyes" ; then
   dnl Make sure that an optimization flag was not specified in EXTRA_CFLAGS.
   optimize="no"
-  echo "$EXTRA_CFLAGS" | grep "\-O" >/dev/null || optimize="yes"
+  echo "$CFLAGS $EXTRA_CFLAGS" | grep '\-O' >/dev/null || optimize="yes"
   if test "x${optimize}" = "xyes" ; then
     if test "x$GCC" = "xyes" ; then
       JE_CFLAGS_APPEND([-O3])
@@ -643,7 +723,7 @@ fi,
 if test "x$backtrace_method" = "x" -a "x$enable_prof_libunwind" = "x1" ; then
   AC_CHECK_HEADERS([libunwind.h], , [enable_prof_libunwind="0"])
   if test "x$LUNWIND" = "x-lunwind" ; then
-    AC_CHECK_LIB([unwind], [backtrace], [LIBS="$LIBS $LUNWIND"],
+    AC_CHECK_LIB([unwind], [unw_backtrace], [LIBS="$LIBS $LUNWIND"],
                  [enable_prof_libunwind="0"])
   else
     LIBS="$LIBS $LUNWIND"
@@ -669,22 +749,6 @@ if test "x$backtrace_method" = "x" -a "x$enable_prof_libgcc" = "x1" \
      -a "x$GCC" = "xyes" ; then
   AC_CHECK_HEADERS([unwind.h], , [enable_prof_libgcc="0"])
   AC_CHECK_LIB([gcc], [_Unwind_Backtrace], [LIBS="$LIBS -lgcc"], [enable_prof_libgcc="0"])
-  dnl The following is conservative, in that it only has entries for CPUs on
-  dnl which jemalloc has been tested.
-  AC_MSG_CHECKING([libgcc-based backtracing reliability on ${host_cpu}])
-  case "${host_cpu}" in
-    i[[3456]]86)
-      AC_MSG_RESULT([unreliable])
-      enable_prof_libgcc="0";
-      ;;
-    x86_64)
-      AC_MSG_RESULT([reliable])
-      ;;
-    *)
-      AC_MSG_RESULT([unreliable])
-      enable_prof_libgcc="0";
-      ;;
-  esac
   if test "x${enable_prof_libgcc}" = "x1" ; then
     backtrace_method="libgcc"
     AC_DEFINE([JEMALLOC_PROF_LIBGCC], [ ])
@@ -706,6 +770,7 @@ fi
 )
 if test "x$backtrace_method" = "x" -a "x$enable_prof_gcc" = "x1" \
      -a "x$GCC" = "xyes" ; then
+  JE_CFLAGS_APPEND([-fno-omit-frame-pointer])
   backtrace_method="gcc intrinsics"
   AC_DEFINE([JEMALLOC_PROF_GCC], [ ])
 else
@@ -719,10 +784,11 @@ fi
 AC_MSG_CHECKING([configured backtracing method])
 AC_MSG_RESULT([$backtrace_method])
 if test "x$enable_prof" = "x1" ; then
-  if test "x${force_tls}" = "x0" ; then
-    AC_MSG_ERROR([Heap profiling requires TLS]);
+  if test "x$abi" != "xpecoff"; then
+    dnl Heap profiling uses the log(3) function.
+    LIBS="$LIBS -lm"
   fi
-  force_tls="1"
+
   AC_DEFINE([JEMALLOC_PROF], [ ])
 fi
 AC_SUBST([enable_prof])
@@ -743,33 +809,6 @@ if test "x$enable_tcache" = "x1" ; then
 fi
 AC_SUBST([enable_tcache])
 
-dnl Disable mremap() for huge realloc() by default.
-AC_ARG_ENABLE([mremap],
-  [AS_HELP_STRING([--enable-mremap], [Enable mremap(2) for huge realloc()])],
-[if test "x$enable_mremap" = "xno" ; then
-  enable_mremap="0"
-else
-  enable_mremap="1"
-fi
-],
-[enable_mremap="0"]
-)
-if test "x$enable_mremap" = "x1" ; then
-  JE_COMPILABLE([mremap(...MREMAP_FIXED...)], [
-#define _GNU_SOURCE
-#include <sys/mman.h>
-], [
-void *p = mremap((void *)0, 0, 0, MREMAP_MAYMOVE|MREMAP_FIXED, (void *)0);
-], [je_cv_mremap_fixed])
-  if test "x${je_cv_mremap_fixed}" = "xno" ; then
-    enable_mremap="0"
-  fi
-fi
-if test "x$enable_mremap" = "x1" ; then
-  AC_DEFINE([JEMALLOC_MREMAP], [ ])
-fi
-AC_SUBST([enable_mremap])
-
 dnl Enable VM deallocation via munmap() by default.
 AC_ARG_ENABLE([munmap],
   [AS_HELP_STRING([--disable-munmap], [Disable VM deallocation via munmap(2)])],
@@ -786,29 +825,22 @@ if test "x$enable_munmap" = "x1" ; then
 fi
 AC_SUBST([enable_munmap])
 
-dnl Do not enable allocation from DSS by default.
-AC_ARG_ENABLE([dss],
-  [AS_HELP_STRING([--enable-dss], [Enable allocation from DSS])],
-[if test "x$enable_dss" = "xno" ; then
-  enable_dss="0"
-else
-  enable_dss="1"
-fi
-],
-[enable_dss="0"]
-)
+dnl Enable allocation from DSS if supported by the OS.
+have_dss="1"
 dnl Check whether the BSD/SUSv1 sbrk() exists.  If not, disable DSS support.
 AC_CHECK_FUNC([sbrk], [have_sbrk="1"], [have_sbrk="0"])
 if test "x$have_sbrk" = "x1" ; then
-  AC_DEFINE([JEMALLOC_HAVE_SBRK], [ ])
+  if test "x$sbrk_deprecated" = "x1" ; then
+    AC_MSG_RESULT([Disabling dss allocation because sbrk is deprecated])
+    have_dss="0"
+  fi
 else
-  enable_dss="0"
+  have_dss="0"
 fi
 
-if test "x$enable_dss" = "x1" ; then
+if test "x$have_dss" = "x1" ; then
   AC_DEFINE([JEMALLOC_DSS], [ ])
 fi
-AC_SUBST([enable_dss])
 
 dnl Support the junk/zero filling option by default.
 AC_ARG_ENABLE([fill],
@@ -900,8 +932,66 @@ if test "x$enable_xmalloc" = "x1" ; then
 fi
 AC_SUBST([enable_xmalloc])
 
-AC_CACHE_CHECK([STATIC_PAGE_SHIFT],
-               [je_cv_static_page_shift],
+dnl ============================================================================
+dnl Check for  __builtin_ffsl(), then ffsl(3), and fail if neither are found.
+dnl One of those two functions should (theoretically) exist on all platforms
+dnl that jemalloc currently has a chance of functioning on without modification.
+dnl We additionally assume ffs() or __builtin_ffs() are defined if
+dnl ffsl() or __builtin_ffsl() are defined, respectively.
+JE_COMPILABLE([a program using __builtin_ffsl], [
+#include <stdio.h>
+#include <strings.h>
+#include <string.h>
+], [
+	{
+		int rv = __builtin_ffsl(0x08);
+		printf("%d\n", rv);
+	}
+], [je_cv_gcc_builtin_ffsl])
+if test "x${je_cv_gcc_builtin_ffsl}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_INTERNAL_FFSL], [__builtin_ffsl])
+  AC_DEFINE([JEMALLOC_INTERNAL_FFS], [__builtin_ffs])
+else
+  JE_COMPILABLE([a program using ffsl], [
+  #include <stdio.h>
+  #include <strings.h>
+  #include <string.h>
+  ], [
+	{
+		int rv = ffsl(0x08);
+		printf("%d\n", rv);
+	}
+  ], [je_cv_function_ffsl])
+  if test "x${je_cv_function_ffsl}" = "xyes" ; then
+    AC_DEFINE([JEMALLOC_INTERNAL_FFSL], [ffsl])
+    AC_DEFINE([JEMALLOC_INTERNAL_FFS], [ffs])
+  else
+    AC_MSG_ERROR([Cannot build without ffsl(3) or __builtin_ffsl()])
+  fi
+fi
+
+AC_ARG_WITH([lg_tiny_min],
+  [AS_HELP_STRING([--with-lg-tiny-min=<lg-tiny-min>],
+   [Base 2 log of minimum tiny size class to support])],
+  [LG_TINY_MIN="$with_lg_tiny_min"],
+  [LG_TINY_MIN="3"])
+AC_DEFINE_UNQUOTED([LG_TINY_MIN], [$LG_TINY_MIN])
+
+AC_ARG_WITH([lg_quantum],
+  [AS_HELP_STRING([--with-lg-quantum=<lg-quantum>],
+   [Base 2 log of minimum allocation alignment])],
+  [LG_QUANTA="$with_lg_quantum"],
+  [LG_QUANTA="3 4"])
+if test "x$with_lg_quantum" != "x" ; then
+  AC_DEFINE_UNQUOTED([LG_QUANTUM], [$with_lg_quantum])
+fi
+
+AC_ARG_WITH([lg_page],
+  [AS_HELP_STRING([--with-lg-page=<lg-page>], [Base 2 log of system page size])],
+  [LG_PAGE="$with_lg_page"], [LG_PAGE="detect"])
+if test "x$LG_PAGE" == "xdetect"; then
+  AC_CACHE_CHECK([LG_PAGE],
+               [je_cv_lg_page],
                AC_RUN_IFELSE([AC_LANG_PROGRAM(
 [[
 #include <strings.h>
@@ -913,7 +1003,7 @@ AC_CACHE_CHECK([STATIC_PAGE_SHIFT],
 #include <stdio.h>
 ]],
 [[
-    long result;
+    int result;
     FILE *f;
 
 #ifdef _WIN32
@@ -926,35 +1016,46 @@ AC_CACHE_CHECK([STATIC_PAGE_SHIFT],
     if (result == -1) {
 	return 1;
     }
-    result = ffsl(result) - 1;
+    result = JEMALLOC_INTERNAL_FFSL(result) - 1;
 
     f = fopen("conftest.out", "w");
     if (f == NULL) {
 	return 1;
     }
-    fprintf(f, "%u\n", result);
+    fprintf(f, "%d\n", result);
     fclose(f);
 
     return 0;
 ]])],
-                             [je_cv_static_page_shift=`cat conftest.out`],
-                             [je_cv_static_page_shift=undefined]))
-
-if test "x$je_cv_static_page_shift" != "xundefined"; then
-   AC_DEFINE_UNQUOTED([STATIC_PAGE_SHIFT], [$je_cv_static_page_shift])
-else
-   AC_MSG_ERROR([cannot determine value for STATIC_PAGE_SHIFT])
+                             [je_cv_lg_page=`cat conftest.out`],
+                             [je_cv_lg_page=undefined],
+                             [je_cv_lg_page=12]))
 fi
+if test "x${je_cv_lg_page}" != "x" ; then
+  LG_PAGE="${je_cv_lg_page}"
+fi
+if test "x${LG_PAGE}" != "xundefined" ; then
+   AC_DEFINE_UNQUOTED([LG_PAGE], [$LG_PAGE])
+else
+   AC_MSG_ERROR([cannot determine value for LG_PAGE])
+fi
+
+AC_ARG_WITH([lg_page_sizes],
+  [AS_HELP_STRING([--with-lg-page-sizes=<lg-page-sizes>],
+   [Base 2 logs of system page sizes to support])],
+  [LG_PAGE_SIZES="$with_lg_page_sizes"], [LG_PAGE_SIZES="$LG_PAGE"])
+
+AC_ARG_WITH([lg_size_class_group],
+  [AS_HELP_STRING([--with-lg-size-class-group=<lg-size-class-group>],
+   [Base 2 log of size classes per doubling])],
+  [LG_SIZE_CLASS_GROUP="$with_lg_size_class_group"],
+  [LG_SIZE_CLASS_GROUP="2"])
 
 dnl ============================================================================
 dnl jemalloc configuration.
 dnl 
 
-dnl Set VERSION if source directory has an embedded git repository.
-if test -d "${srcroot}.git" ; then
-  git describe --long --abbrev=40 > ${srcroot}VERSION
-fi
-jemalloc_version=`cat ${srcroot}VERSION`
+jemalloc_version=`cat "${srcroot}VERSION"`
 jemalloc_version_major=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]1}'`
 jemalloc_version_minor=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]2}'`
 jemalloc_version_bugfix=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]3}'`
@@ -980,6 +1081,24 @@ if test "x$abi" != "xpecoff" ; then
 fi
 
 CPPFLAGS="$CPPFLAGS -D_REENTRANT"
+
+dnl Check if the GNU-specific secure_getenv function exists.
+AC_CHECK_FUNC([secure_getenv],
+              [have_secure_getenv="1"],
+              [have_secure_getenv="0"]
+             )
+if test "x$have_secure_getenv" = "x1" ; then
+  AC_DEFINE([JEMALLOC_HAVE_SECURE_GETENV], [ ])
+fi
+
+dnl Check if the Solaris/BSD issetugid function exists.
+AC_CHECK_FUNC([issetugid],
+              [have_issetugid="1"],
+              [have_issetugid="0"]
+             )
+if test "x$have_issetugid" = "x1" ; then
+  AC_DEFINE([JEMALLOC_HAVE_ISSETUGID], [ ])
+fi
 
 dnl Check whether the BSD-specific _malloc_thread_cleanup() exists.  If so, use
 dnl it rather than pthreads TSD cleanup functions to support cleanup during
@@ -1073,19 +1192,24 @@ elif test "x${force_tls}" = "x1" ; then
 fi
 
 dnl ============================================================================
-dnl Check for ffsl(3), and fail if not found.  This function exists on all
-dnl platforms that jemalloc currently has a chance of functioning on without
-dnl modification.
-JE_COMPILABLE([a program using ffsl], [
-#include <strings.h>
-#include <string.h>
+dnl Check for C11 atomics.
+
+JE_COMPILABLE([C11 atomics], [
+#include <stdint.h>
+#if (__STDC_VERSION__ >= 201112L) && !defined(__STDC_NO_ATOMICS__)
+#include <stdatomic.h>
+#else
+#error Atomics not available
+#endif
 ], [
-	{
-		int rv = ffsl(0x08);
-	}
-], [je_cv_function_ffsl])
-if test "x${je_cv_function_ffsl}" != "xyes" ; then
-   AC_MSG_ERROR([Cannot build without ffsl(3)])
+    uint64_t *p = (uint64_t *)0;
+    uint64_t x = 1;
+    volatile atomic_uint_least64_t *a = (volatile atomic_uint_least64_t *)p;
+    uint64_t r = atomic_fetch_add(a, x) + x;
+    return (r == 0);
+], [je_cv_c11atomics])
+if test "x${je_cv_c11atomics}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_C11ATOMICS])
 fi
 
 dnl ============================================================================
@@ -1134,6 +1258,20 @@ if test "x${je_cv_osatomic}" = "xyes" ; then
 fi
 
 dnl ============================================================================
+dnl Check for madvise(2).
+
+JE_COMPILABLE([madvise(2)], [
+#include <sys/mman.h>
+], [
+	{
+		madvise((void *)0, 0, 0);
+	}
+], [je_cv_madvise])
+if test "x${je_cv_madvise}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_HAVE_MADVISE], [ ])
+fi
+
+dnl ============================================================================
 dnl Check whether __sync_{add,sub}_and_fetch() are available despite
 dnl __GCC_HAVE_SYNC_COMPARE_AND_SWAP_n macros being undefined.
 
@@ -1168,6 +1306,29 @@ if test "x${je_cv_atomic9}" != "xyes" -a "x${je_cv_osatomic}" != "xyes" ; then
 fi
 
 dnl ============================================================================
+dnl Check for __builtin_clz() and __builtin_clzl().
+
+AC_CACHE_CHECK([for __builtin_clz],
+               [je_cv_builtin_clz],
+               [AC_LINK_IFELSE([AC_LANG_PROGRAM([],
+                                                [
+                                                {
+                                                        unsigned x = 0;
+                                                        int y = __builtin_clz(x);
+                                                }
+                                                {
+                                                        unsigned long x = 0;
+                                                        int y = __builtin_clzl(x);
+                                                }
+                                                ])],
+                               [je_cv_builtin_clz=yes],
+                               [je_cv_builtin_clz=no])])
+
+if test "x${je_cv_builtin_clz}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_HAVE_BUILTIN_CLZ], [ ])
+fi
+
+dnl ============================================================================
 dnl Check for spinlock(3) operations as provided on Darwin.
 
 JE_COMPILABLE([Darwin OSSpin*()], [
@@ -1185,7 +1346,26 @@ fi
 dnl ============================================================================
 dnl Darwin-related configuration.
 
-if test "x${abi}" = "xmacho" ; then
+AC_ARG_ENABLE([zone-allocator],
+  [AS_HELP_STRING([--disable-zone-allocator],
+                  [Disable zone allocator for Darwin])],
+[if test "x$enable_zone_allocator" = "xno" ; then
+  enable_zone_allocator="0"
+else
+  enable_zone_allocator="1"
+fi
+],
+[if test "x${abi}" = "xmacho"; then
+  enable_zone_allocator="1"
+fi
+]
+)
+AC_SUBST([enable_zone_allocator])
+
+if test "x${enable_zone_allocator}" = "x1" ; then
+  if test "x${abi}" != "xmacho"; then
+    AC_MSG_ERROR([--enable-zone-allocator is only supported on Darwin])
+  fi
   AC_DEFINE([JEMALLOC_IVSALLOC], [ ])
   AC_DEFINE([JEMALLOC_ZONE], [ ])
 
@@ -1196,7 +1376,7 @@ if test "x${abi}" = "xmacho" ; then
   AC_DEFUN([JE_ZONE_PROGRAM],
     [AC_LANG_PROGRAM(
       [#include <malloc/malloc.h>],
-      [static foo[[sizeof($1) $2 sizeof(void *) * $3 ? 1 : -1]]]
+      [static int foo[[sizeof($1) $2 sizeof(void *) * $3 ? 1 : -1]]]
     )])
 
   AC_COMPILE_IFELSE([JE_ZONE_PROGRAM(malloc_zone_t,==,14)],[JEMALLOC_ZONE_VERSION=3],[
@@ -1222,12 +1402,152 @@ if test "x${abi}" = "xmacho" ; then
 fi
 
 dnl ============================================================================
+dnl Check for glibc malloc hooks
+
+JE_COMPILABLE([glibc malloc hook], [
+#include <stddef.h>
+
+extern void (* __free_hook)(void *ptr);
+extern void *(* __malloc_hook)(size_t size);
+extern void *(* __realloc_hook)(void *ptr, size_t size);
+], [
+  void *ptr = 0L;
+  if (__malloc_hook) ptr = __malloc_hook(1);
+  if (__realloc_hook) ptr = __realloc_hook(ptr, 2);
+  if (__free_hook && ptr) __free_hook(ptr);
+], [je_cv_glibc_malloc_hook])
+if test "x${je_cv_glibc_malloc_hook}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_GLIBC_MALLOC_HOOK], [ ])
+fi
+
+JE_COMPILABLE([glibc memalign hook], [
+#include <stddef.h>
+
+extern void *(* __memalign_hook)(size_t alignment, size_t size);
+], [
+  void *ptr = 0L;
+  if (__memalign_hook) ptr = __memalign_hook(16, 7);
+], [je_cv_glibc_memalign_hook])
+if test "x${je_cv_glibc_memalign_hook}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_GLIBC_MEMALIGN_HOOK], [ ])
+fi
+
+JE_COMPILABLE([pthreads adaptive mutexes], [
+#include <pthread.h>
+], [
+  pthread_mutexattr_t attr;
+  pthread_mutexattr_init(&attr);
+  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ADAPTIVE_NP);
+  pthread_mutexattr_destroy(&attr);
+], [je_cv_pthread_mutex_adaptive_np])
+if test "x${je_cv_pthread_mutex_adaptive_np}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_HAVE_PTHREAD_MUTEX_ADAPTIVE_NP], [ ])
+fi
+
+dnl ============================================================================
 dnl Check for typedefs, structures, and compiler characteristics.
 AC_HEADER_STDBOOL
 
+dnl ============================================================================
+dnl Define commands that generate output files.
+
+AC_CONFIG_COMMANDS([include/jemalloc/internal/private_namespace.h], [
+  mkdir -p "${objroot}include/jemalloc/internal"
+  "${srcdir}/include/jemalloc/internal/private_namespace.sh" "${srcdir}/include/jemalloc/internal/private_symbols.txt" > "${objroot}include/jemalloc/internal/private_namespace.h"
+], [
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+])
+AC_CONFIG_COMMANDS([include/jemalloc/internal/private_unnamespace.h], [
+  mkdir -p "${objroot}include/jemalloc/internal"
+  "${srcdir}/include/jemalloc/internal/private_unnamespace.sh" "${srcdir}/include/jemalloc/internal/private_symbols.txt" > "${objroot}include/jemalloc/internal/private_unnamespace.h"
+], [
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+])
+AC_CONFIG_COMMANDS([include/jemalloc/internal/public_symbols.txt], [
+  f="${objroot}include/jemalloc/internal/public_symbols.txt"
+  mkdir -p "${objroot}include/jemalloc/internal"
+  cp /dev/null "${f}"
+  for nm in `echo ${mangling_map} |tr ',' ' '` ; do
+    n=`echo ${nm} |tr ':' ' ' |awk '{print $[]1}'`
+    m=`echo ${nm} |tr ':' ' ' |awk '{print $[]2}'`
+    echo "${n}:${m}" >> "${f}"
+    dnl Remove name from public_syms so that it isn't redefined later.
+    public_syms=`for sym in ${public_syms}; do echo "${sym}"; done |grep -v "^${n}\$" |tr '\n' ' '`
+  done
+  for sym in ${public_syms} ; do
+    n="${sym}"
+    m="${JEMALLOC_PREFIX}${sym}"
+    echo "${n}:${m}" >> "${f}"
+  done
+], [
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+  mangling_map="${mangling_map}"
+  public_syms="${public_syms}"
+  JEMALLOC_PREFIX="${JEMALLOC_PREFIX}"
+])
+AC_CONFIG_COMMANDS([include/jemalloc/internal/public_namespace.h], [
+  mkdir -p "${objroot}include/jemalloc/internal"
+  "${srcdir}/include/jemalloc/internal/public_namespace.sh" "${objroot}include/jemalloc/internal/public_symbols.txt" > "${objroot}include/jemalloc/internal/public_namespace.h"
+], [
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+])
+AC_CONFIG_COMMANDS([include/jemalloc/internal/public_unnamespace.h], [
+  mkdir -p "${objroot}include/jemalloc/internal"
+  "${srcdir}/include/jemalloc/internal/public_unnamespace.sh" "${objroot}include/jemalloc/internal/public_symbols.txt" > "${objroot}include/jemalloc/internal/public_unnamespace.h"
+], [
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+])
 AC_CONFIG_COMMANDS([include/jemalloc/internal/size_classes.h], [
-  mkdir -p "include/jemalloc/internal"
-  "${srcdir}/include/jemalloc/internal/size_classes.sh" > "${objroot}include/jemalloc/internal/size_classes.h"
+  mkdir -p "${objroot}include/jemalloc/internal"
+  "${srcdir}/include/jemalloc/internal/size_classes.sh" "${LG_QUANTA}" ${LG_TINY_MIN} "${LG_PAGE_SIZES}" ${LG_SIZE_CLASS_GROUP} > "${objroot}include/jemalloc/internal/size_classes.h"
+], [
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+  LG_QUANTA="${LG_QUANTA}"
+  LG_TINY_MIN=${LG_TINY_MIN}
+  LG_PAGE_SIZES="${LG_PAGE_SIZES}"
+  LG_SIZE_CLASS_GROUP=${LG_SIZE_CLASS_GROUP}
+])
+AC_CONFIG_COMMANDS([include/jemalloc/jemalloc_protos_jet.h], [
+  mkdir -p "${objroot}include/jemalloc"
+  cat "${srcdir}/include/jemalloc/jemalloc_protos.h.in" | sed -e 's/@je_@/jet_/g' > "${objroot}include/jemalloc/jemalloc_protos_jet.h"
+], [
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+])
+AC_CONFIG_COMMANDS([include/jemalloc/jemalloc_rename.h], [
+  mkdir -p "${objroot}include/jemalloc"
+  "${srcdir}/include/jemalloc/jemalloc_rename.sh" "${objroot}include/jemalloc/internal/public_symbols.txt" > "${objroot}include/jemalloc/jemalloc_rename.h"
+], [
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+])
+AC_CONFIG_COMMANDS([include/jemalloc/jemalloc_mangle.h], [
+  mkdir -p "${objroot}include/jemalloc"
+  "${srcdir}/include/jemalloc/jemalloc_mangle.sh" "${objroot}include/jemalloc/internal/public_symbols.txt" je_ > "${objroot}include/jemalloc/jemalloc_mangle.h"
+], [
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+])
+AC_CONFIG_COMMANDS([include/jemalloc/jemalloc_mangle_jet.h], [
+  mkdir -p "${objroot}include/jemalloc"
+  "${srcdir}/include/jemalloc/jemalloc_mangle.sh" "${objroot}include/jemalloc/internal/public_symbols.txt" jet_ > "${objroot}include/jemalloc/jemalloc_mangle_jet.h"
+], [
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+])
+AC_CONFIG_COMMANDS([include/jemalloc/jemalloc.h], [
+  mkdir -p "${objroot}include/jemalloc"
+  "${srcdir}/include/jemalloc/jemalloc.sh" "${objroot}" > "${objroot}include/jemalloc/jemalloc${install_suffix}.h"
+], [
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+  install_suffix="${install_suffix}"
 ])
 
 dnl Process .in files.
@@ -1237,6 +1557,7 @@ AC_CONFIG_HEADERS([$cfghdrs_tup])
 
 dnl ============================================================================
 dnl Generate outputs.
+
 AC_CONFIG_FILES([$cfgoutputs_tup config.stamp bin/jemalloc.sh])
 AC_SUBST([cfgoutputs_in])
 AC_SUBST([cfgoutputs_out])
@@ -1252,6 +1573,7 @@ AC_MSG_RESULT([CC                 : ${CC}])
 AC_MSG_RESULT([CPPFLAGS           : ${CPPFLAGS}])
 AC_MSG_RESULT([CFLAGS             : ${CFLAGS}])
 AC_MSG_RESULT([LDFLAGS            : ${LDFLAGS}])
+AC_MSG_RESULT([EXTRA_LDFLAGS      : ${EXTRA_LDFLAGS}])
 AC_MSG_RESULT([LIBS               : ${LIBS}])
 AC_MSG_RESULT([RPATH_EXTRA        : ${RPATH_EXTRA}])
 AC_MSG_RESULT([])
@@ -1275,9 +1597,9 @@ AC_MSG_RESULT([JEMALLOC_PRIVATE_NAMESPACE])
 AC_MSG_RESULT([                   : ${JEMALLOC_PRIVATE_NAMESPACE}])
 AC_MSG_RESULT([install_suffix     : ${install_suffix}])
 AC_MSG_RESULT([autogen            : ${enable_autogen}])
-AC_MSG_RESULT([experimental       : ${enable_experimental}])
 AC_MSG_RESULT([cc-silence         : ${enable_cc_silence}])
 AC_MSG_RESULT([debug              : ${enable_debug}])
+AC_MSG_RESULT([code-coverage      : ${enable_code_coverage}])
 AC_MSG_RESULT([stats              : ${enable_stats}])
 AC_MSG_RESULT([prof               : ${enable_prof}])
 AC_MSG_RESULT([prof-libunwind     : ${enable_prof_libunwind}])
@@ -1288,9 +1610,7 @@ AC_MSG_RESULT([fill               : ${enable_fill}])
 AC_MSG_RESULT([utrace             : ${enable_utrace}])
 AC_MSG_RESULT([valgrind           : ${enable_valgrind}])
 AC_MSG_RESULT([xmalloc            : ${enable_xmalloc}])
-AC_MSG_RESULT([mremap             : ${enable_mremap}])
 AC_MSG_RESULT([munmap             : ${enable_munmap}])
-AC_MSG_RESULT([dss                : ${enable_dss}])
 AC_MSG_RESULT([lazy_lock          : ${enable_lazy_lock}])
 AC_MSG_RESULT([tls                : ${enable_tls}])
 AC_MSG_RESULT([===============================================================================])

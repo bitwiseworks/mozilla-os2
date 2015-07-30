@@ -20,6 +20,8 @@
 
 #include "CameraCommon.h"
 #include "GonkCameraControl.h"
+#include "CameraPreferences.h"
+#include "TestGonkCameraControl.h"
 
 using namespace mozilla;
 
@@ -40,7 +42,7 @@ ICameraControl::GetCameraName(uint32_t aDeviceNum, nsCString& aDeviceName)
   DOM_CAMERA_LOGI("GetCameraName : getNumberOfCameras() returned %d\n", count);
   if (deviceNum < 0 || deviceNum > count) {
     DOM_CAMERA_LOGE("GetCameraName : invalid device number (%u)\n", aDeviceNum);
-    return NS_ERROR_NOT_AVAILABLE;
+    return NS_ERROR_INVALID_ARG;
   }
 
   android::CameraInfo info;
@@ -52,15 +54,15 @@ ICameraControl::GetCameraName(uint32_t aDeviceNum, nsCString& aDeviceName)
 
   switch (info.facing) {
     case CAMERA_FACING_BACK:
-      aDeviceName.Assign("back");
+      aDeviceName.AssignLiteral("back");
       break;
 
     case CAMERA_FACING_FRONT:
-      aDeviceName.Assign("front");
+      aDeviceName.AssignLiteral("front");
       break;
 
     default:
-      aDeviceName.Assign("extra-camera-");
+      aDeviceName.AssignLiteral("extra-camera-");
       aDeviceName.AppendInt(deviceNum);
       break;
   }
@@ -73,6 +75,7 @@ ICameraControl::GetListOfCameras(nsTArray<nsString>& aList)
   int32_t count = android::Camera::getNumberOfCameras();
   DOM_CAMERA_LOGI("getListOfCameras : getNumberOfCameras() returned %d\n", count);
   if (count <= 0) {
+    aList.Clear();
     return NS_OK;
   }
 
@@ -118,6 +121,14 @@ ICameraControl::GetListOfCameras(nsTArray<nsString>& aList)
 already_AddRefed<ICameraControl>
 ICameraControl::Create(uint32_t aCameraId)
 {
-  nsRefPtr<nsGonkCameraControl> control = new nsGonkCameraControl(aCameraId);
+  nsCString test;
+  CameraPreferences::GetPref("camera.control.test.enabled", test);
+  nsRefPtr<nsGonkCameraControl> control;
+  if (test.EqualsASCII("control")) {
+    NS_WARNING("Using test CameraControl layer");
+    control = new TestGonkCameraControl(aCameraId);
+  } else {
+    control = new nsGonkCameraControl(aCameraId);
+  }
   return control.forget();
 }

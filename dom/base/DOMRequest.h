@@ -10,19 +10,27 @@
 #include "nsIDOMDOMRequest.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/DOMRequestBinding.h"
 
 #include "nsCOMPtr.h"
 
 namespace mozilla {
+
+class ErrorResult;
+
 namespace dom {
+
+class AnyCallback;
+class Promise;
 
 class DOMRequest : public DOMEventTargetHelper,
                    public nsIDOMDOMRequest
 {
 protected:
   JS::Heap<JS::Value> mResult;
-  nsCOMPtr<nsISupports> mError;
+  nsRefPtr<DOMError> mError;
+  nsRefPtr<Promise> mPromise;
   bool mDone;
 
 public:
@@ -39,7 +47,7 @@ public:
     return GetOwner();
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) override;
 
   // WebIDL Interface
   DOMRequestReadyState ReadyState() const
@@ -50,13 +58,13 @@ public:
 
   void GetResult(JSContext*, JS::MutableHandle<JS::Value> aRetval) const
   {
-    NS_ASSERTION(mDone || mResult == JSVAL_VOID,
+    NS_ASSERTION(mDone || mResult.isUndefined(),
                  "Result should be undefined when pending");
     JS::ExposeValueToActiveJS(mResult);
     aRetval.set(mResult);
   }
 
-  nsISupports* GetError() const
+  DOMError* GetError() const
   {
     NS_ASSERTION(mDone || !mError,
                  "Error should be null when pending");
@@ -66,28 +74,29 @@ public:
   IMPL_EVENT_HANDLER(success)
   IMPL_EVENT_HANDLER(error)
 
+  already_AddRefed<mozilla::dom::Promise>
+  Then(JSContext* aCx, AnyCallback* aResolveCallback,
+       AnyCallback* aRejectCallback, mozilla::ErrorResult& aRv);
 
   void FireSuccess(JS::Handle<JS::Value> aResult);
   void FireError(const nsAString& aError);
   void FireError(nsresult aError);
-  void FireDetailedError(nsISupports* aError);
+  void FireDetailedError(DOMError* aError);
 
-  DOMRequest(nsPIDOMWindow* aWindow);
-
-  virtual ~DOMRequest()
-  {
-    mResult = JSVAL_VOID;
-    mozilla::DropJSObjects(this);
-  }
+  explicit DOMRequest(nsPIDOMWindow* aWindow);
 
 protected:
+  virtual ~DOMRequest();
+
   void FireEvent(const nsAString& aType, bool aBubble, bool aCancelable);
 
   void RootResultVal();
 };
 
-class DOMRequestService MOZ_FINAL : public nsIDOMRequestService
+class DOMRequestService final : public nsIDOMRequestService
 {
+  ~DOMRequestService() {}
+
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMREQUESTSERVICE

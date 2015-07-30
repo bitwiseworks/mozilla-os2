@@ -199,28 +199,11 @@ class OTSStream {
   unsigned chksum_buffer_offset_;
 };
 
-// -----------------------------------------------------------------------------
-// Process a given OpenType file and write out a sanitised version
-//   output: a pointer to an object implementing the OTSStream interface. The
-//     sanitisied output will be written to this. In the even of a failure,
-//     partial output may have been written.
-//   input: the OpenType file
-//   length: the size, in bytes, of |input|
-// -----------------------------------------------------------------------------
-bool OTS_API Process(OTSStream *output, const uint8_t *input, size_t length);
-
-// Signature of the function to be provided by the client in order to report errors.
-// The return type is a boolean so that it can be used within an expression,
-// but the actual value is ignored. (Suggested convention is to always return 'false'.)
 #ifdef __GCC__
 #define MSGFUNC_FMT_ATTR __attribute__((format(printf, 2, 3)))
 #else
 #define MSGFUNC_FMT_ATTR
 #endif
-typedef bool (*MessageFunc)(void *user_data, const char *format, ...)  MSGFUNC_FMT_ATTR;
-
-// Set a callback function that will be called when OTS is reporting an error.
-void OTS_API SetMessageCallback(MessageFunc func, void *user_data);
 
 enum TableAction {
   TABLE_ACTION_DEFAULT,  // Use OTS's default action for that table
@@ -229,22 +212,42 @@ enum TableAction {
   TABLE_ACTION_DROP      // Drop the table
 };
 
-// Signature of the function to be provided by the client to decide what action
-// to do for a given table.
-typedef TableAction (*TableActionFunc)(uint32_t tag, void *user_data);
+class OTS_API OTSContext {
+  public:
+    OTSContext() {}
+    virtual ~OTSContext() {}
 
-// Set a callback function that will be called when OTS needs to decide what to
-// do for a font table.
-void OTS_API SetTableActionCallback(TableActionFunc func, void *user_data);
+    // Process a given OpenType file and write out a sanitised version
+    //   output: a pointer to an object implementing the OTSStream interface. The
+    //     sanitisied output will be written to this. In the even of a failure,
+    //     partial output may have been written.
+    //   input: the OpenType file
+    //   length: the size, in bytes, of |input|
+    //   context: optional context that holds various OTS settings like user callbacks
+    bool Process(OTSStream *output, const uint8_t *input, size_t length);
+
+    // This function will be called when OTS is reporting an error.
+    //   level: the severity of the generated message:
+    //     0: error messages in case OTS fails to sanitize the font.
+    //     1: warning messages about issue OTS fixed in the sanitized font.
+    virtual void Message(int level, const char *format, ...) MSGFUNC_FMT_ATTR {}
+
+    // This function will be called when OTS needs to decide what to do for a
+    // font table.
+    //   tag: table tag as an integer in big-endian byte order, independent of
+    //   platform endianness
+    virtual TableAction GetTableAction(uint32_t tag) { return ots::TABLE_ACTION_DEFAULT; }
+};
+
+// For backward compatibility - remove once Chrome switches over to the new API.
+bool Process(OTSStream *output, const uint8_t *input, size_t length);
 
 // Force to disable debug output even when the library is compiled with
 // -DOTS_DEBUG.
 void DisableDebugOutput();
 
-#ifdef MOZ_OTS_WOFF2
 // Enable WOFF2 support(experimental).
-void EnableWOFF2();
-#endif
+void OTS_API EnableWOFF2();
 
 }  // namespace ots
 

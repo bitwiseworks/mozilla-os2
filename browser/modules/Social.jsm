@@ -12,8 +12,9 @@ const Ci = Components.interfaces;
 const Cc = Components.classes;
 const Cu = Components.utils;
 
-// The minimum sizes for the auto-resize panel code.
-const PANEL_MIN_HEIGHT = 100;
+// The minimum sizes for the auto-resize panel code, minimum size necessary to
+// properly show the error page in the panel.
+const PANEL_MIN_HEIGHT = 190;
 const PANEL_MIN_WIDTH = 330;
 
 Cu.import("resource://gre/modules/Services.jsm");
@@ -23,6 +24,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "CustomizableUI",
   "resource:///modules/CustomizableUI.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "SocialService",
   "resource://gre/modules/SocialService.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PageMetadata",
+  "resource://gre/modules/PageMetadata.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
@@ -30,9 +33,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
   "resource://gre/modules/Promise.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "unescapeService",
-                                   "@mozilla.org/feed-unescapehtml;1",
-                                   "nsIScriptableUnescapeHTML");
 
 function promiseSetAnnotation(aURI, providerList) {
   let deferred = Promise.defer();
@@ -168,8 +168,8 @@ this.Social = {
     return SocialService.getManifestByOrigin(origin);
   },
 
-  installProvider: function(doc, data, installCallback) {
-    SocialService.installProvider(doc, data, installCallback);
+  installProvider: function(data, installCallback, options={}) {
+    SocialService.installProvider(data, installCallback, options);
   },
 
   uninstallProvider: function(origin, aCallback) {
@@ -178,9 +178,9 @@ this.Social = {
 
   // Activation functionality
   activateFromOrigin: function (origin, callback) {
-    // For now only "builtin" providers can be activated.  It's OK if the
-    // provider has already been activated - we still get called back with it.
-    SocialService.addBuiltinProvider(origin, callback);
+    // It's OK if the provider has already been activated - we still get called
+    // back with it.
+    SocialService.enableProvider(origin, callback);
   },
 
   // Page Marking functionality
@@ -271,8 +271,7 @@ function CreateSocialStatusWidget(aId, aProvider) {
     onBuild: function(aDocument) {
       let node = aDocument.createElement('toolbarbutton');
       node.id = this.id;
-      node.setAttribute('class', 'toolbarbutton-1 chromeclass-toolbar-additional social-status-button');
-      node.setAttribute('type', "badged");
+      node.setAttribute('class', 'toolbarbutton-1 chromeclass-toolbar-additional social-status-button badged-button');
       node.style.listStyleImage = "url(" + (aProvider.icon32URL || aProvider.iconURL) + ")";
       node.setAttribute("origin", aProvider.origin);
       node.setAttribute("label", aProvider.name);
@@ -309,12 +308,12 @@ function CreateSocialMarkWidget(aId, aProvider) {
       node.setAttribute('type', "socialmark");
       node.style.listStyleImage = "url(" + (aProvider.unmarkedIcon || aProvider.icon32URL || aProvider.iconURL) + ")";
       node.setAttribute("origin", aProvider.origin);
-      node.setAttribute("oncommand", "this.markCurrentPage();");
 
       let window = aDocument.defaultView;
       let menuLabel = window.gNavigatorBundle.getFormattedString("social.markpageMenu.label", [aProvider.name]);
       node.setAttribute("label", menuLabel);
       node.setAttribute("tooltiptext", menuLabel);
+      node.setAttribute("observes", "Social:PageShareOrMark");
 
       return node;
     }
@@ -327,6 +326,9 @@ function SocialErrorListener(iframe, errorHandler) {
   this.setErrorMessage = errorHandler;
   this.iframe = iframe;
   iframe.socialErrorListener = this;
+  // Force a layout flush by calling .clientTop so that the docShell of this
+  // frame is created for the error listener
+  iframe.clientTop;
   iframe.docShell.QueryInterface(Ci.nsIInterfaceRequestor)
                                    .getInterface(Ci.nsIWebProgress)
                                    .addProgressListener(this,
@@ -352,10 +354,12 @@ SocialErrorListener.prototype = {
       if (aRequest instanceof Ci.nsIHttpChannel) {
         try {
           // Change the frame to an error page on 4xx (client errors)
-          // and 5xx (server errors)
+          // and 5xx (server errors).  responseStatus throws if it is not set.
           failure = aRequest.responseStatus >= 400 &&
                     aRequest.responseStatus < 600;
-        } catch (e) {}
+        } catch (e) {
+          failure = aStatus == Components.results.NS_ERROR_CONNECTION_REFUSED;
+        }
       }
     }
 
@@ -363,8 +367,11 @@ SocialErrorListener.prototype = {
     // so avoid doing that more than once
     if (failure && aStatus != Components.results.NS_BINDING_ABORTED) {
       aRequest.cancel(Components.results.NS_BINDING_ABORTED);
-      let provider = Social._getProviderFromOrigin(this.iframe.getAttribute("origin"));
-      provider.errorState = "content-error";
+      let origin = this.iframe.getAttribute("origin");
+      if (origin) {
+        let provider = Social._getProviderFromOrigin(origin);
+        provider.errorState = "content-error";
+      }
       this.setErrorMessage(aWebProgress.QueryInterface(Ci.nsIDocShell)
                               .chromeEventHandler);
     }
@@ -373,9 +380,12 @@ SocialErrorListener.prototype = {
   onLocationChange: function SPL_onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {
     if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE) {
       aRequest.cancel(Components.results.NS_BINDING_ABORTED);
-      let provider = Social._getProviderFromOrigin(this.iframe.getAttribute("origin"));
-      if (!provider.errorState)
-        provider.errorState = "content-error";
+      let origin = this.iframe.getAttribute("origin");
+      if (origin) {
+        let provider = Social._getProviderFromOrigin(origin);
+        if (!provider.errorState)
+          provider.errorState = "content-error";
+      }
       schedule(function() {
         this.setErrorMessage(aWebProgress.QueryInterface(Ci.nsIDocShell)
                               .chromeEventHandler);
@@ -389,7 +399,7 @@ SocialErrorListener.prototype = {
 };
 
 
-function sizeSocialPanelToContent(panel, iframe) {
+function sizeSocialPanelToContent(panel, iframe, requestedSize) {
   let doc = iframe.contentDocument;
   if (!doc || !doc.body) {
     return;
@@ -397,14 +407,15 @@ function sizeSocialPanelToContent(panel, iframe) {
   // We need an element to use for sizing our panel.  See if the body defines
   // an id for that element, otherwise use the body itself.
   let body = doc.body;
+  let docEl = doc.documentElement;
   let bodyId = body.getAttribute("contentid");
   if (bodyId) {
     body = doc.getElementById(bodyId) || doc.body;
   }
   // offsetHeight/Width don't include margins, so account for that.
   let cs = doc.defaultView.getComputedStyle(body);
-  let width = PANEL_MIN_WIDTH;
-  let height = PANEL_MIN_HEIGHT;
+  let width = Math.max(PANEL_MIN_WIDTH, docEl.offsetWidth);
+  let height = Math.max(PANEL_MIN_HEIGHT, docEl.offsetHeight);
   // if the panel is preloaded prior to being shown, cs will be null.  in that
   // case use the minimum size for the panel until it is shown.
   if (cs) {
@@ -413,11 +424,34 @@ function sizeSocialPanelToContent(panel, iframe) {
     let computedWidth = parseInt(cs.marginLeft) + body.offsetWidth + parseInt(cs.marginRight);
     width = Math.max(computedWidth, width);
   }
-  iframe.style.width = width + "px";
-  iframe.style.height = height + "px";
-  // since we do not use panel.sizeTo, we need to adjust the arrow ourselves
-  if (panel.state == "open")
-    panel.adjustArrowPosition();
+
+  // if our scrollHeight is still larger than the iframe, the css calculations
+  // above did not work for this site, increase the height. This can happen if
+  // the site increases its height for additional UI.
+  if (docEl.scrollHeight > iframe.boxObject.height)
+    height = docEl.scrollHeight;
+
+  // if a size was defined in the manifest use it as a minimum
+  if (requestedSize) {
+    if (requestedSize.height)
+      height = Math.max(height, requestedSize.height);
+    if (requestedSize.width)
+      width = Math.max(width, requestedSize.width);
+  }
+
+  // add the extra space used by the panel (toolbar, borders, etc) if the iframe
+  // has been loaded
+  if (iframe.boxObject.width && iframe.boxObject.height) {
+    // add extra space the panel needs if any
+    width += panel.boxObject.width - iframe.boxObject.width;
+    height += panel.boxObject.height - iframe.boxObject.height;
+  }
+
+  // using panel.sizeTo will ignore css transitions, set size via style
+  if (Math.abs(panel.boxObject.width - width) >= 2)
+    panel.style.width = width + "px";
+  if (Math.abs(panel.boxObject.height - height) >= 2)
+    panel.style.height = height + "px";
 }
 
 function DynamicResizeWatcher() {
@@ -425,18 +459,18 @@ function DynamicResizeWatcher() {
 }
 
 DynamicResizeWatcher.prototype = {
-  start: function DynamicResizeWatcher_start(panel, iframe) {
+  start: function DynamicResizeWatcher_start(panel, iframe, requestedSize) {
     this.stop(); // just in case...
     let doc = iframe.contentDocument;
-    this._mutationObserver = new iframe.contentWindow.MutationObserver(function(mutations) {
-      sizeSocialPanelToContent(panel, iframe);
+    this._mutationObserver = new iframe.contentWindow.MutationObserver((mutations) => {
+      sizeSocialPanelToContent(panel, iframe, requestedSize);
     });
     // Observe anything that causes the size to change.
     let config = {attributes: true, characterData: true, childList: true, subtree: true};
     this._mutationObserver.observe(doc, config);
     // and since this may be setup after the load event has fired we do an
     // initial resize now.
-    sizeSocialPanelToContent(panel, iframe);
+    sizeSocialPanelToContent(panel, iframe, requestedSize);
   },
   stop: function DynamicResizeWatcher_stop() {
     if (this._mutationObserver) {
@@ -468,7 +502,10 @@ this.OpenGraphBuilder = {
           // preserve non-template query vars
           query[name] = value;
         } else if (pageData[p[1]]) {
-          query[name] = pageData[p[1]];
+          if (p[1] == "previews")
+            query[name] = pageData[p[1]][0];
+          else
+            query[name] = pageData[p[1]];
         } else if (p[1] == "body") {
           // build a body for emailers
           let body = "";
@@ -490,116 +527,4 @@ this.OpenGraphBuilder = {
       endpointURL = endpointURL + "?" + str.join("&");
     return endpointURL;
   },
-
-  getData: function(browser) {
-    let res = {
-      url: this._validateURL(browser, browser.currentURI.spec),
-      title: browser.contentDocument.title,
-      previews: []
-    };
-    this._getMetaData(browser, res);
-    this._getLinkData(browser, res);
-    this._getPageData(browser, res);
-    return res;
-  },
-
-  _getMetaData: function(browser, o) {
-    // query for standardized meta data
-    let els = browser.contentDocument
-                  .querySelectorAll("head > meta[property], head > meta[name]");
-    if (els.length < 1)
-      return;
-    let url;
-    for (let el of els) {
-      let value = el.getAttribute("content")
-      if (!value)
-        continue;
-      value = unescapeService.unescape(value.trim());
-      switch (el.getAttribute("property") || el.getAttribute("name")) {
-        case "title":
-        case "og:title":
-          o.title = value;
-          break;
-        case "description":
-        case "og:description":
-          o.description = value;
-          break;
-        case "og:site_name":
-          o.siteName = value;
-          break;
-        case "medium":
-        case "og:type":
-          o.medium = value;
-          break;
-        case "og:video":
-          url = this._validateURL(browser, value);
-          if (url)
-            o.source = url;
-          break;
-        case "og:url":
-          url = this._validateURL(browser, value);
-          if (url)
-            o.url = url;
-          break;
-        case "og:image":
-          url = this._validateURL(browser, value);
-          if (url)
-            o.previews.push(url);
-          break;
-      }
-    }
-  },
-
-  _getLinkData: function(browser, o) {
-    let els = browser.contentDocument
-                  .querySelectorAll("head > link[rel], head > link[id]");
-    for (let el of els) {
-      let url = el.getAttribute("href");
-      if (!url)
-        continue;
-      url = this._validateURL(browser, unescapeService.unescape(url.trim()));
-      switch (el.getAttribute("rel") || el.getAttribute("id")) {
-        case "shorturl":
-        case "shortlink":
-          o.shortUrl = url;
-          break;
-        case "canonicalurl":
-        case "canonical":
-          o.url = url;
-          break;
-        case "image_src":
-          o.previews.push(url);
-          break;
-      }
-    }
-  },
-
-  // scrape through the page for data we want
-  _getPageData: function(browser, o) {
-    if (o.previews.length < 1)
-      o.previews = this._getImageUrls(browser);
-  },
-
-  _validateURL: function(browser, url) {
-    let uri = Services.io.newURI(browser.currentURI.resolve(url), null, null);
-    if (["http", "https", "ftp", "ftps"].indexOf(uri.scheme) < 0)
-      return null;
-    uri.userPass = "";
-    return uri.spec;
-  },
-
-  _getImageUrls: function(browser) {
-    let l = [];
-    let els = browser.contentDocument.querySelectorAll("img");
-    for (let el of els) {
-      let content = el.getAttribute("src");
-      if (content) {
-        l.push(this._validateURL(browser, unescapeService.unescape(content)));
-        // we don't want a billion images
-        if (l.length > 5)
-          break;
-      }
-    }
-    return l;
-  }
 };

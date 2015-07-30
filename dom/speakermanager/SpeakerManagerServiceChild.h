@@ -19,12 +19,20 @@ namespace dom {
 class SpeakerManagerServiceChild : public SpeakerManagerService
 {
 public:
+  /*
+   * Return null or instance which has been created.
+   */
   static SpeakerManagerService* GetSpeakerManagerService();
+  /*
+   * Return SpeakerManagerServiceChild instance.
+   * If SpeakerManagerServiceChild is not exist, create and return new one.
+   */
+  static SpeakerManagerService* GetOrCreateSpeakerManagerService();
   static void Shutdown();
-  virtual void ForceSpeaker(bool aEnable, bool aVisible) MOZ_OVERRIDE;
-  virtual bool GetSpeakerStatus() MOZ_OVERRIDE;
-  virtual void SetAudioChannelActive(bool aIsActive) MOZ_OVERRIDE;
-  virtual void Notify() MOZ_OVERRIDE;
+  virtual void ForceSpeaker(bool aEnable, bool aVisible) override;
+  virtual bool GetSpeakerStatus() override;
+  virtual void SetAudioChannelActive(bool aIsActive) override;
+  virtual void Notify() override;
 protected:
   SpeakerManagerServiceChild();
   virtual ~SpeakerManagerServiceChild();

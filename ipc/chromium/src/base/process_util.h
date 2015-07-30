@@ -13,6 +13,10 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #include <tlhelp32.h>
+#include <io.h>
+#ifndef STDOUT_FILENO
+#define STDOUT_FILENO 1
+#endif
 #elif defined(OS_LINUX) || defined(__GLIBC__)
 #include <dirent.h>
 #include <limits.h>
@@ -24,6 +28,11 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <stdio.h>
+#include <stdlib.h>
+#ifndef OS_WIN
+#include <unistd.h>
+#endif
 
 #include "base/command_line.h"
 #include "base/process.h"
@@ -213,59 +222,6 @@ bool KillProcess(ProcessHandle process, int exit_code, bool wait);
 // a different manner on POSIX.
 bool DidProcessCrash(bool* child_exited, ProcessHandle handle);
 
-// This class provides a way to iterate through the list of processes
-// on the current machine that were started from the given executable
-// name.  To use, create an instance and then call NextProcessEntry()
-// until it returns false.
-class NamedProcessIterator {
- public:
-  NamedProcessIterator(const std::wstring& executable_name,
-                       const ProcessFilter* filter);
-  ~NamedProcessIterator();
-
-  // If there's another process that matches the given executable name,
-  // returns a const pointer to the corresponding PROCESSENTRY32.
-  // If there are no more matching processes, returns NULL.
-  // The returned pointer will remain valid until NextProcessEntry()
-  // is called again or this NamedProcessIterator goes out of scope.
-  const ProcessEntry* NextProcessEntry();
-
- private:
-#if !defined(OS_BSD) || defined(__GLIBC__)
-  // Determines whether there's another process (regardless of executable)
-  // left in the list of all processes.  Returns true and sets entry_ to
-  // that process's info if there is one, false otherwise.
-  bool CheckForNextProcess();
-
-  bool IncludeEntry();
-
-  // Initializes a PROCESSENTRY32 data structure so that it's ready for
-  // use with Process32First/Process32Next.
-  void InitProcessEntry(ProcessEntry* entry);
-
-  std::wstring executable_name_;
-#endif
-
-#if defined(OS_WIN)
-  HANDLE snapshot_;
-  bool started_iteration_;
-#elif defined(OS_LINUX) || defined(__GLIBC__)
-  DIR *procfs_dir_;
-#elif defined(OS_BSD)
-  std::vector<ProcessEntry> content;
-  size_t nextEntry;
-#elif defined(OS_MACOSX)
-  std::vector<kinfo_proc> kinfo_procs_;
-  size_t index_of_kinfo_proc_;
-#endif
-#if !defined(OS_BSD) || defined(__GLIBC__)
-  ProcessEntry entry_;
-  const ProcessFilter* filter_;
-#endif
-
-  DISALLOW_EVIL_CONSTRUCTORS(NamedProcessIterator);
-};
-
 // Provides performance metrics for a specified process (CPU usage, memory and
 // IO counters). To use it, invoke CreateProcessMetrics() to get an instance
 // for a specific process, then access the information with the different get
@@ -302,12 +258,56 @@ class ProcessMetrics {
 
 }  // namespace base
 
+namespace mozilla {
+
+class EnvironmentLog
+{
+public:
+  explicit EnvironmentLog(const char* varname) {
+    const char *e = getenv(varname);
+    if (e && *e) {
+      fname_ = e;
+    }
+  }
+
+  ~EnvironmentLog() {}
+
+  void print(const char* format, ...) {
+    if (!fname_.size())
+      return;
+
+    FILE* f;
+    if (fname_.compare("-") == 0) {
+      f = fdopen(dup(STDOUT_FILENO), "a");
+    } else {
+      f = fopen(fname_.c_str(), "a");
+    }
+
+    if (!f)
+      return;
+
+    va_list a;
+    va_start(a, format);
+    vfprintf(f, format, a);
+    va_end(a);
+    fclose(f);
+  }
+
+private:
+  std::string fname_;
+
+  DISALLOW_EVIL_CONSTRUCTORS(EnvironmentLog);
+};
+
+} // namespace mozilla
+
 #if defined(OS_WIN)
 // Undo the windows.h damage
 #undef GetMessage
 #undef CreateEvent
 #undef GetClassName
 #undef GetBinaryType
+#undef RemoveDirectory
 #endif
 
 #endif  // BASE_PROCESS_UTIL_H_

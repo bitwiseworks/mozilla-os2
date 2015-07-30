@@ -5,33 +5,26 @@
 
 #include <algorithm>
 
+#include "gfx2DGlue.h"
 #include "gfxDrawable.h"
 #include "gfxPlatform.h"
 #include "gfxUtils.h"
+#include "ImageRegion.h"
+#include "SVGImageContext.h"
 
 #include "OrientedImage.h"
 
-using namespace mozilla::gfx;
-
 using std::swap;
-using mozilla::layers::LayerManager;
-using mozilla::layers::ImageContainer;
 
 namespace mozilla {
+
+using namespace gfx;
+using layers::LayerManager;
+using layers::ImageContainer;
+
 namespace image {
 
-NS_IMPL_ISUPPORTS(OrientedImage, imgIContainer)
-
-nsIntRect
-OrientedImage::FrameRect(uint32_t aWhichFrame)
-{
-  if (mOrientation.SwapsWidthAndHeight()) {
-    nsIntRect innerRect = InnerImage()->FrameRect(aWhichFrame);
-    return nsIntRect(innerRect.x, innerRect.y, innerRect.height, innerRect.width);
-  } else {
-    return InnerImage()->FrameRect(aWhichFrame);
-  }
-}
+NS_IMPL_ISUPPORTS_INHERITED0(OrientedImage, ImageWrapper)
 
 NS_IMETHODIMP
 OrientedImage::GetWidth(int32_t* aWidth)
@@ -88,51 +81,50 @@ OrientedImage::GetFrame(uint32_t aWhichFrame,
   }
 
   // Get the underlying dimensions.
-  int32_t width, height;
-  rv = InnerImage()->GetWidth(&width);
+  gfxIntSize size;
+  rv = InnerImage()->GetWidth(&size.width);
   NS_ENSURE_SUCCESS(rv, nullptr);
-  rv = InnerImage()->GetHeight(&height);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-  if (mOrientation.SwapsWidthAndHeight()) {
-    swap(width, height);
-  }
+  rv = InnerImage()->GetHeight(&size.height);
   NS_ENSURE_SUCCESS(rv, nullptr);
 
   // Determine an appropriate format for the surface.
   gfx::SurfaceFormat surfaceFormat;
-  gfxImageFormat imageFormat;
-  if (InnerImage()->FrameIsOpaque(aWhichFrame)) {
+  if (InnerImage()->IsOpaque()) {
     surfaceFormat = gfx::SurfaceFormat::B8G8R8X8;
-    imageFormat = gfxImageFormat::ARGB32;
   } else {
     surfaceFormat = gfx::SurfaceFormat::B8G8R8A8;
-    imageFormat = gfxImageFormat::ARGB32;
   }
 
   // Create a surface to draw into.
-  mozilla::RefPtr<DrawTarget> target =
+  RefPtr<DrawTarget> target =
     gfxPlatform::GetPlatform()->
-      CreateOffscreenContentDrawTarget(IntSize(width, height), surfaceFormat);
+      CreateOffscreenContentDrawTarget(ToIntSize(size), surfaceFormat);
+  if (!target) {
+    NS_ERROR("Could not create a DrawTarget");
+    return nullptr;
+  }
+
 
   // Create our drawable.
   RefPtr<SourceSurface> innerSurface =
     InnerImage()->GetFrame(aWhichFrame, aFlags);
   NS_ENSURE_TRUE(innerSurface, nullptr);
   nsRefPtr<gfxDrawable> drawable =
-    new gfxSurfaceDrawable(innerSurface, gfxIntSize(width, height));
+    new gfxSurfaceDrawable(innerSurface, size);
 
   // Draw.
   nsRefPtr<gfxContext> ctx = new gfxContext(target);
-  gfxRect imageRect(0, 0, width, height);
-  gfxUtils::DrawPixelSnapped(ctx, drawable, OrientationMatrix(nsIntSize(width, height)),
-                             imageRect, imageRect, imageRect, imageRect,
-                             imageFormat, GraphicsFilter::FILTER_FAST);
-  
+  ctx->Multiply(OrientationMatrix(size));
+  gfxUtils::DrawPixelSnapped(ctx, drawable, size,
+                             ImageRegion::Create(size),
+                             surfaceFormat, GraphicsFilter::FILTER_FAST);
+
   return target->Snapshot();
 }
 
 NS_IMETHODIMP
-OrientedImage::GetImageContainer(LayerManager* aManager, ImageContainer** _retval)
+OrientedImage::GetImageContainer(LayerManager* aManager,
+                                 ImageContainer** _retval)
 {
   // XXX(seth): We currently don't have a way of orienting the result of
   // GetImageContainer. We work around this by always returning null, but if it
@@ -148,104 +140,200 @@ OrientedImage::GetImageContainer(LayerManager* aManager, ImageContainer** _retva
   return NS_OK;
 }
 
-gfxMatrix
-OrientedImage::OrientationMatrix(const nsIntSize& aViewportSize)
+struct MatrixBuilder
 {
-    gfxMatrix matrix;
+  explicit MatrixBuilder(bool aInvert) : mInvert(aInvert) { }
 
-    int32_t width, height;
-    if (InnerImage()->GetType() == imgIContainer::TYPE_VECTOR) {
-      width = mOrientation.SwapsWidthAndHeight() ? aViewportSize.height : aViewportSize.width;
-      height = mOrientation.SwapsWidthAndHeight() ? aViewportSize.width : aViewportSize.height;
+  gfxMatrix Build() { return mMatrix; }
+
+  void Scale(gfxFloat aX, gfxFloat aY)
+  {
+    if (mInvert) {
+      mMatrix *= gfxMatrix::Scaling(1.0 / aX, 1.0 / aY);
     } else {
-      nsresult rv = InnerImage()->GetWidth(&width);
-      rv = NS_FAILED(rv) ? rv : InnerImage()->GetHeight(&height);
-      if (NS_FAILED(rv)) {
-        // Fall back to identity if the width and height aren't available.
-        return matrix;
+      mMatrix.Scale(aX, aY);
+    }
+  }
+
+  void Rotate(gfxFloat aPhi)
+  {
+    if (mInvert) {
+      mMatrix *= gfxMatrix::Rotation(-aPhi);
+    } else {
+      mMatrix.Rotate(aPhi);
+    }
+  }
+
+  void Translate(gfxPoint aDelta)
+  {
+    if (mInvert) {
+      mMatrix *= gfxMatrix::Translation(-aDelta);
+    } else {
+      mMatrix.Translate(aDelta);
+    }
+  }
+
+private:
+  gfxMatrix mMatrix;
+  bool      mInvert;
+};
+
+/*
+ * OrientationMatrix() computes a matrix that applies the rotation and
+ * reflection specified by mOrientation, or that matrix's inverse if aInvert is
+ * true.
+ *
+ * @param aSize The scaled size of the inner image. (When outside code specifies
+ *              the scaled size, as with imgIContainer::Draw and its aSize
+ *              parameter, it's necessary to swap the width and height if
+ *              mOrientation.SwapsWidthAndHeight() is true.)
+ * @param aInvert If true, compute the inverse of the orientation matrix. Prefer
+ *                this approach to OrientationMatrix(..).Invert(), because it's
+ *                more numerically accurate.
+ */
+gfxMatrix
+OrientedImage::OrientationMatrix(const nsIntSize& aSize,
+                                 bool aInvert /* = false */)
+{
+  MatrixBuilder builder(aInvert);
+
+  // Apply reflection, if present. (This logically happens second, but we
+  // apply it first because these transformations are all premultiplied.) A
+  // translation is necessary to place the image back in the first quadrant.
+  switch (mOrientation.flip) {
+    case Flip::Unflipped:
+      break;
+    case Flip::Horizontal:
+      if (mOrientation.SwapsWidthAndHeight()) {
+        builder.Translate(gfxPoint(aSize.height, 0));
+      } else {
+        builder.Translate(gfxPoint(aSize.width, 0));
       }
-    }
+      builder.Scale(-1.0, 1.0);
+      break;
+    default:
+      MOZ_ASSERT(false, "Invalid flip value");
+  }
 
-    // Apply reflection, if present. (This logically happens second, but we
-    // apply it first because these transformations are all premultiplied.) A
-    // translation is necessary to place the image back in the first quadrant.
-    switch (mOrientation.flip) {
-      case Flip::Unflipped:
-        break;
-      case Flip::Horizontal:
-        if (mOrientation.SwapsWidthAndHeight()) {
-          // In the coordinate system after the rotation the reflection we want
-          // is across the x-axis rather than the y-axis.
-          matrix.Translate(gfxPoint(0, height));
-          matrix.Scale(1.0, -1.0);
-        } else {
-          matrix.Translate(gfxPoint(width, 0));
-          matrix.Scale(-1.0, 1.0);
-        }
-        break;
-      default:
-        MOZ_ASSERT(false, "Invalid flip value");
-    }
+  // Apply rotation, if present. Again, a translation is used to place the
+  // image back in the first quadrant.
+  switch (mOrientation.rotation) {
+    case Angle::D0:
+      break;
+    case Angle::D90:
+      builder.Translate(gfxPoint(aSize.height, 0));
+      builder.Rotate(-1.5 * M_PI);
+      break;
+    case Angle::D180:
+      builder.Translate(gfxPoint(aSize.width, aSize.height));
+      builder.Rotate(-1.0 * M_PI);
+      break;
+    case Angle::D270:
+      builder.Translate(gfxPoint(0, aSize.width));
+      builder.Rotate(-0.5 * M_PI);
+      break;
+    default:
+      MOZ_ASSERT(false, "Invalid rotation value");
+  }
 
-    // Apply rotation, if present. Again, a translation is used to place the
-    // image back in the first quadrant.
-    switch (mOrientation.rotation) {
-      case Angle::D0:
-        break;
-      case Angle::D90:
-        matrix.Translate(gfxPoint(0, height));
-        matrix.Rotate(-0.5 * M_PI);
-        break;
-      case Angle::D180:
-        matrix.Translate(gfxPoint(width, height));
-        matrix.Rotate(-1.0 * M_PI);
-        break;
-      case Angle::D270:
-        matrix.Translate(gfxPoint(width, 0));
-        matrix.Rotate(-1.5 * M_PI);
-        break;
-      default:
-        MOZ_ASSERT(false, "Invalid rotation value");
-    }
-
-    return matrix;
+  return builder.Build();
 }
 
-NS_IMETHODIMP
+static SVGImageContext
+OrientViewport(const SVGImageContext& aOldContext,
+               const Orientation& aOrientation)
+{
+  nsIntSize viewportSize(aOldContext.GetViewportSize());
+  if (aOrientation.SwapsWidthAndHeight()) {
+    swap(viewportSize.width, viewportSize.height);
+  }
+  return SVGImageContext(viewportSize,
+                         aOldContext.GetPreserveAspectRatio());
+}
+
+NS_IMETHODIMP_(DrawResult)
 OrientedImage::Draw(gfxContext* aContext,
-                    GraphicsFilter aFilter,
-                    const gfxMatrix& aUserSpaceToImageSpace,
-                    const gfxRect& aFill,
-                    const nsIntRect& aSubimage,
-                    const nsIntSize& aViewportSize,
-                    const SVGImageContext* aSVGContext,
+                    const nsIntSize& aSize,
+                    const ImageRegion& aRegion,
                     uint32_t aWhichFrame,
+                    GraphicsFilter aFilter,
+                    const Maybe<SVGImageContext>& aSVGContext,
                     uint32_t aFlags)
 {
   if (mOrientation.IsIdentity()) {
-    return InnerImage()->Draw(aContext, aFilter, aUserSpaceToImageSpace,
-                              aFill, aSubimage, aViewportSize, aSVGContext,
-                              aWhichFrame, aFlags);
+    return InnerImage()->Draw(aContext, aSize, aRegion,
+                              aWhichFrame, aFilter, aSVGContext, aFlags);
   }
 
-  // Update the matrix to reorient the image.
-  gfxMatrix matrix(OrientationMatrix(aViewportSize));
-  gfxMatrix userSpaceToImageSpace(aUserSpaceToImageSpace * matrix);
-
-  // Update the subimage.
-  gfxRect gfxSubimage(matrix.TransformBounds(gfxRect(aSubimage.x, aSubimage.y, aSubimage.width, aSubimage.height)));
-  nsIntRect subimage(gfxSubimage.x, gfxSubimage.y, gfxSubimage.width, gfxSubimage.height);
-
-  // Update the viewport size. (This could be done using TransformBounds but
-  // since it's only a size a swap is enough.)
-  nsIntSize viewportSize(aViewportSize);
+  // Update the image size to match the image's coordinate system. (This could
+  // be done using TransformBounds but since it's only a size a swap is enough.)
+  nsIntSize size(aSize);
   if (mOrientation.SwapsWidthAndHeight()) {
-    swap(viewportSize.width, viewportSize.height);
+    swap(size.width, size.height);
   }
 
-  return InnerImage()->Draw(aContext, aFilter, userSpaceToImageSpace,
-                            aFill, subimage, viewportSize, aSVGContext,
-                            aWhichFrame, aFlags);
+  // Update the matrix so that we transform the image into the orientation
+  // expected by the caller before drawing.
+  gfxMatrix matrix(OrientationMatrix(size));
+  gfxContextMatrixAutoSaveRestore saveMatrix(aContext);
+  aContext->Multiply(matrix);
+
+  // The region is already in the orientation expected by the caller, but we
+  // need it to be in the image's coordinate system, so we transform it using
+  // the inverse of the orientation matrix.
+  gfxMatrix inverseMatrix(OrientationMatrix(size, /* aInvert = */ true));
+  ImageRegion region(aRegion);
+  region.TransformBoundsBy(inverseMatrix);
+
+  return InnerImage()->Draw(aContext, size, region, aWhichFrame, aFilter,
+                            aSVGContext.map(OrientViewport, mOrientation),
+                            aFlags);
+}
+
+nsIntSize
+OrientedImage::OptimalImageSizeForDest(const gfxSize& aDest,
+                                       uint32_t aWhichFrame,
+                                       GraphicsFilter aFilter, uint32_t aFlags)
+{
+  if (!mOrientation.SwapsWidthAndHeight()) {
+    return InnerImage()->OptimalImageSizeForDest(aDest, aWhichFrame, aFilter,
+                                                 aFlags);
+  }
+
+  // Swap the size for the calculation, then swap it back for the caller.
+  gfxSize destSize(aDest.height, aDest.width);
+  nsIntSize innerImageSize(InnerImage()->OptimalImageSizeForDest(destSize,
+                                                                 aWhichFrame,
+                                                                 aFilter,
+                                                                 aFlags));
+  return nsIntSize(innerImageSize.height, innerImageSize.width);
+}
+
+NS_IMETHODIMP_(nsIntRect)
+OrientedImage::GetImageSpaceInvalidationRect(const nsIntRect& aRect)
+{
+  nsIntRect rect(InnerImage()->GetImageSpaceInvalidationRect(aRect));
+
+  if (mOrientation.IsIdentity()) {
+    return rect;
+  }
+
+  nsIntSize innerSize;
+  nsresult rv = InnerImage()->GetWidth(&innerSize.width);
+  rv = NS_FAILED(rv) ? rv : InnerImage()->GetHeight(&innerSize.height);
+  if (NS_FAILED(rv)) {
+    // Fall back to identity if the width and height aren't available.
+    return rect;
+  }
+
+  // Transform the invalidation rect into the correct orientation.
+  gfxMatrix matrix(OrientationMatrix(innerSize, /* aInvert = */ true));
+  gfxRect invalidRect(matrix.TransformBounds(gfxRect(rect.x, rect.y,
+                                                     rect.width, rect.height)));
+  invalidRect.RoundOut();
+
+  return nsIntRect(invalidRect.x, invalidRect.y,
+                   invalidRect.width, invalidRect.height);
 }
 
 } // namespace image

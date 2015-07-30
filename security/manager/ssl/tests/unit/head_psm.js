@@ -18,11 +18,21 @@ let gIsWindows = ("@mozilla.org/windows-registry-key;1" in Cc);
 const isDebugBuild = Cc["@mozilla.org/xpcom/debug;1"]
                        .getService(Ci.nsIDebug2).isDebugBuild;
 
+// The test EV roots are only enabled in debug builds as a security measure.
+//
+// Bug 1008316: B2G doesn't have EV enabled, so EV is not expected even in debug
+// builds.
+const gEVExpected = isDebugBuild && !("@mozilla.org/b2g-process-global;1" in Cc);
+
+const SSS_STATE_FILE_NAME = "SiteSecurityServiceState.txt";
+
 const SEC_ERROR_BASE = Ci.nsINSSErrorsService.NSS_SEC_ERROR_BASE;
 const SSL_ERROR_BASE = Ci.nsINSSErrorsService.NSS_SSL_ERROR_BASE;
+const MOZILLA_PKIX_ERROR_BASE = Ci.nsINSSErrorsService.MOZILLA_PKIX_ERROR_BASE;
 
 // Sort in numerical order
 const SEC_ERROR_INVALID_ARGS                            = SEC_ERROR_BASE +   5; // -8187
+const SEC_ERROR_INVALID_TIME                            = SEC_ERROR_BASE +   8;
 const SEC_ERROR_BAD_DER                                 = SEC_ERROR_BASE +   9;
 const SEC_ERROR_EXPIRED_CERTIFICATE                     = SEC_ERROR_BASE +  11;
 const SEC_ERROR_REVOKED_CERTIFICATE                     = SEC_ERROR_BASE +  12; // -8180
@@ -34,6 +44,7 @@ const SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE              = SEC_ERROR_BASE +  30; 
 const SEC_ERROR_EXTENSION_VALUE_INVALID                 = SEC_ERROR_BASE +  34; // -8158
 const SEC_ERROR_EXTENSION_NOT_FOUND                     = SEC_ERROR_BASE +  35; // -8157
 const SEC_ERROR_CA_CERT_INVALID                         = SEC_ERROR_BASE +  36;
+const SEC_ERROR_INVALID_KEY                             = SEC_ERROR_BASE +  40; // -8152
 const SEC_ERROR_UNKNOWN_CRITICAL_EXTENSION              = SEC_ERROR_BASE +  41;
 const SEC_ERROR_INADEQUATE_KEY_USAGE                    = SEC_ERROR_BASE +  90; // -8102
 const SEC_ERROR_INADEQUATE_CERT_TYPE                    = SEC_ERROR_BASE +  91; // -8101
@@ -48,12 +59,23 @@ const SEC_ERROR_OCSP_UNKNOWN_CERT                       = SEC_ERROR_BASE + 126; 
 const SEC_ERROR_OCSP_MALFORMED_RESPONSE                 = SEC_ERROR_BASE + 129;
 const SEC_ERROR_OCSP_UNAUTHORIZED_RESPONSE              = SEC_ERROR_BASE + 130;
 const SEC_ERROR_OCSP_OLD_RESPONSE                       = SEC_ERROR_BASE + 132;
+const SEC_ERROR_UNSUPPORTED_ELLIPTIC_CURVE              = SEC_ERROR_BASE + 141; // -8051
 const SEC_ERROR_OCSP_INVALID_SIGNING_CERT               = SEC_ERROR_BASE + 144;
 const SEC_ERROR_POLICY_VALIDATION_FAILED                = SEC_ERROR_BASE + 160; // -8032
 const SEC_ERROR_OCSP_BAD_SIGNATURE                      = SEC_ERROR_BASE + 157;
 const SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED       = SEC_ERROR_BASE + 176;
+const SEC_ERROR_APPLICATION_CALLBACK_ERROR              = SEC_ERROR_BASE + 178;
 
 const SSL_ERROR_BAD_CERT_DOMAIN                         = SSL_ERROR_BASE +  12;
+const SSL_ERROR_BAD_CERT_ALERT                          = SSL_ERROR_BASE +  17;
+const SSL_ERROR_WEAK_SERVER_CERT_KEY                    = SSL_ERROR_BASE + 132;
+
+const MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE            = MOZILLA_PKIX_ERROR_BASE +   0;
+const MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY     = MOZILLA_PKIX_ERROR_BASE +   1;
+const MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE            = MOZILLA_PKIX_ERROR_BASE +   2; // -16382
+const MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA             = MOZILLA_PKIX_ERROR_BASE +   3;
+const MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE      = MOZILLA_PKIX_ERROR_BASE +   5;
+const MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 6;
 
 // Supported Certificate Usages
 const certificateUsageSSLClient              = 0x0001;
@@ -126,7 +148,7 @@ function _getLibraryFunctionWithNoArguments(functionName, libraryName) {
   } catch(e) {
     // In case opening the library without a full path fails,
     // try again with a full path.
-    let file = Services.dirsvc.get("GreD", Ci.nsILocalFile);
+    let file = Services.dirsvc.get("GreBinD", Ci.nsILocalFile);
     file.append(path);
     nsslib = ctypes.open(file.path);
   }
@@ -197,7 +219,8 @@ function run_test() {
   add_connection_test("<test-name-1>.example.com",
                       getXPCOMStatusFromNSS(SEC_ERROR_xxx),
                       function() { ... },
-                      function(aTransportSecurityInfo) { ... });
+                      function(aTransportSecurityInfo) { ... },
+                      function(aTransport) { ... });
   [...]
   add_connection_test("<test-name-n>.example.com", Cr.NS_OK);
 
@@ -218,8 +241,11 @@ function add_tls_server_setup(serverBinName) {
 // called before the connection is attempted.
 // aWithSecurityInfo is a callback function that takes an
 // nsITransportSecurityInfo, which is called after the TLS handshake succeeds.
+// aAfterStreamOpen is a callback function that is called with the
+// nsISocketTransport once the output stream is ready.
 function add_connection_test(aHost, aExpectedResult,
-                             aBeforeConnect, aWithSecurityInfo) {
+                             aBeforeConnect, aWithSecurityInfo,
+                             aAfterStreamOpen) {
   const REMOTE_PORT = 8443;
 
   function Connection(aHost) {
@@ -231,6 +257,9 @@ function add_connection_test(aHost, aExpectedResult,
     let sts = Cc["@mozilla.org/network/socket-transport-service;1"]
                 .getService(Ci.nsISocketTransportService);
     this.transport = sts.createTransport(["ssl"], 1, aHost, REMOTE_PORT, null);
+    // See bug 1129771 - attempting to connect to [::1] when the server is
+    // listening on 127.0.0.1 causes frequent failures on OS X 10.10.
+    this.transport.connectionFlags |= Ci.nsISocketTransport.DISABLE_IPV6;
     this.transport.setEventSink(this, this.thread);
     this.inputStream = null;
     this.outputStream = null;
@@ -263,6 +292,9 @@ function add_connection_test(aHost, aExpectedResult,
 
     // nsIOutputStreamCallback
     onOutputStreamReady: function(aStream) {
+      if (aAfterStreamOpen) {
+        aAfterStreamOpen(this.transport);
+      }
       let sslSocketControl = this.transport.securityInfo
                                .QueryInterface(Ci.nsISSLSocketControl);
       sslSocketControl.proxyStartSSL();
@@ -293,6 +325,7 @@ function add_connection_test(aHost, aExpectedResult,
       aBeforeConnect();
     }
     connectTo(aHost).then(function(conn) {
+      do_print("handling " + aHost);
       do_check_eq(conn.result, aExpectedResult);
       if (aWithSecurityInfo) {
         aWithSecurityInfo(conn.transport.securityInfo
@@ -319,6 +352,11 @@ function _getBinaryUtil(binaryUtilName) {
     utilBin.append("bin");
     utilBin.append(binaryUtilName + (gIsWindows ? ".exe" : ""));
   }
+  // But maybe we're on Android or B2G, where binaries are in /data/local/xpcb.
+  if (!utilBin.exists()) {
+    utilBin.initWithPath("/data/local/xpcb/");
+    utilBin.append(binaryUtilName);
+  }
   do_check_true(utilBin.exists());
   return utilBin;
 }
@@ -337,9 +375,11 @@ function _setupTLSServerTest(serverBinName)
                            .getService(Ci.nsIProperties);
   let envSvc = Cc["@mozilla.org/process/environment;1"]
                  .getService(Ci.nsIEnvironment);
-  let greDir = directoryService.get("GreD", Ci.nsIFile);
-  envSvc.set("DYLD_LIBRARY_PATH", greDir.path);
-  envSvc.set("LD_LIBRARY_PATH", greDir.path);
+  let greBinDir = directoryService.get("GreBinD", Ci.nsIFile);
+  envSvc.set("DYLD_LIBRARY_PATH", greBinDir.path);
+  // Android libraries are in /data/local/xpcb, but "GreBinD" does not return
+  // this path on Android, so hard code it here.
+  envSvc.set("LD_LIBRARY_PATH", greBinDir.path + ":/data/local/xpcb");
   envSvc.set("MOZ_TLS_SERVER_DEBUG_LEVEL", "3");
   envSvc.set("MOZ_TLS_SERVER_CALLBACK_PORT", CALLBACK_PORT);
 
@@ -362,7 +402,8 @@ function _setupTLSServerTest(serverBinName)
   let certDir = directoryService.get("CurWorkD", Ci.nsILocalFile);
   certDir.append("tlsserver");
   do_check_true(certDir.exists());
-  process.run(false, [certDir.path], 1);
+  // Using "sql:" causes the SQL DB to be used so we can run tests on Android.
+  process.run(false, [ "sql:" + certDir.path ], 1);
 
   do_register_cleanup(function() {
     process.kill();
@@ -383,7 +424,8 @@ function generateOCSPResponses(ocspRespArray, nssDBlocation)
     let argArray = new Array();
     let ocspFilepre = do_get_file(i.toString() + ".ocsp", true);
     let filename = ocspFilepre.path;
-    argArray.push(nssDBlocation);
+    // Using "sql:" causes the SQL DB to be used so we can run tests on Android.
+    argArray.push("sql:" + nssDBlocation);
     argArray.push(ocspRespArray[i][0]); // ocsRespType;
     argArray.push(ocspRespArray[i][1]); // nick;
     argArray.push(ocspRespArray[i][2]); // extranickname
@@ -480,6 +522,9 @@ function startOCSPResponder(serverPort, identity, invalidIdentities,
     stop: function(callback) {
       // make sure we consumed each expected response
       do_check_eq(ocspResponses.length, 0);
+      if (expectedMethods) {
+        do_check_eq(expectedMethods.length, 0);
+      }
       if (expectedBasePaths) {
         do_check_eq(expectedBasePaths.length, 0);
       }
@@ -489,4 +534,71 @@ function startOCSPResponder(serverPort, identity, invalidIdentities,
       httpServer.stop(callback);
     }
   };
+}
+
+// A prototype for a fake, error-free sslstatus
+let FakeSSLStatus = function(certificate) {
+  this.serverCert = certificate;
+};
+
+FakeSSLStatus.prototype = {
+  serverCert: null,
+  cipherName: null,
+  keyLength: 2048,
+  isDomainMismatch: false,
+  isNotValidAtThisTime: false,
+  isUntrusted: false,
+  isExtendedValidation: false,
+  getInterface: function(aIID) {
+    return this.QueryInterface(aIID);
+  },
+  QueryInterface: function(aIID) {
+    if (aIID.equals(Ci.nsISSLStatus) ||
+        aIID.equals(Ci.nsISupports)) {
+      return this;
+    }
+    throw Components.results.NS_ERROR_NO_INTERFACE;
+  },
+}
+
+// Utility functions for adding tests relating to certificate error overrides
+
+// Helper function for add_cert_override_test and
+// add_prevented_cert_override_test. Probably doesn't need to be called
+// directly.
+function add_cert_override(aHost, aExpectedBits, aSecurityInfo) {
+  let sslstatus = aSecurityInfo.QueryInterface(Ci.nsISSLStatusProvider)
+                               .SSLStatus;
+  let bits =
+    (sslstatus.isUntrusted ? Ci.nsICertOverrideService.ERROR_UNTRUSTED : 0) |
+    (sslstatus.isDomainMismatch ? Ci.nsICertOverrideService.ERROR_MISMATCH : 0) |
+    (sslstatus.isNotValidAtThisTime ? Ci.nsICertOverrideService.ERROR_TIME : 0);
+  do_check_eq(bits, aExpectedBits);
+  let cert = sslstatus.serverCert;
+  let certOverrideService = Cc["@mozilla.org/security/certoverride;1"]
+                              .getService(Ci.nsICertOverrideService);
+  certOverrideService.rememberValidityOverride(aHost, 8443, cert, aExpectedBits,
+                                               true);
+}
+
+// Given a host, expected error bits (see nsICertOverrideService.idl), and
+// an expected error code, tests that an initial connection to the host fails
+// with the expected errors and that adding an override results in a subsequent
+// connection succeeding.
+function add_cert_override_test(aHost, aExpectedBits, aExpectedError) {
+  add_connection_test(aHost, aExpectedError, null,
+                      add_cert_override.bind(this, aHost, aExpectedBits));
+  add_connection_test(aHost, Cr.NS_OK);
+}
+
+// Given a host, expected error bits (see nsICertOverrideService.idl), and
+// an expected error code, tests that an initial connection to the host fails
+// with the expected errors and that adding an override does not result in a
+// subsequent connection succeeding (i.e. the same error code is encountered).
+// The idea here is that for HSTS hosts or hosts with key pins, no error is
+// overridable, even if an entry is added to the override service.
+function add_prevented_cert_override_test(aHost, aExpectedBits, aExpectedError) {
+  add_connection_test(aHost, aExpectedError, null,
+                      add_cert_override.bind(this, aHost, aExpectedBits));
+  add_connection_test(aHost, aExpectedError);
 }

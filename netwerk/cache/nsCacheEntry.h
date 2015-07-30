@@ -238,16 +238,17 @@ public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSICACHEENTRYINFO
 
-    nsCacheEntryInfo(nsCacheEntry* entry)
+    explicit nsCacheEntryInfo(nsCacheEntry* entry)
         :   mCacheEntry(entry)
     {
     }
 
-    virtual ~nsCacheEntryInfo() {}
     void    DetachEntry() { mCacheEntry = nullptr; }
-    
+
 private:
     nsCacheEntry * mCacheEntry;
+
+    virtual ~nsCacheEntryInfo() {}
 };
 
 

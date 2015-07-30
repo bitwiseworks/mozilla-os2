@@ -36,7 +36,7 @@ public:
                                            const KeyboardEventInit& aParam,
                                            ErrorResult& aRv);
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) override
   {
     return KeyboardEventBinding::Wrap(aCx, this);
   }
@@ -55,8 +55,10 @@ public:
   bool IsComposing();
   uint32_t CharCode();
   uint32_t KeyCode();
-  virtual uint32_t Which() MOZ_OVERRIDE;
+  virtual uint32_t Which() override;
   uint32_t Location();
+
+  void GetCode(nsAString& aCode);
 
   void InitKeyEvent(const nsAString& aType, bool aCanBubble, bool aCancelable,
                     nsIDOMWindow* aView, bool aCtrlKey, bool aAltKey,
@@ -69,13 +71,22 @@ public:
                        aKeyCode, aCharCode);
   }
 
+protected:
+  ~KeyboardEvent() {}
+
+  void InitWithKeyboardEventInit(EventTarget* aOwner,
+                                 const nsAString& aType,
+                                 const KeyboardEventInit& aParam,
+                                 ErrorResult& aRv);
+
 private:
   // True, if the instance is created with Constructor().
   bool mInitializedByCtor;
+
   // If the instance is created with Constructor(), which may have independent
   // value.  mInitializedWhichValue stores it.  I.e., this is invalid when
   // mInitializedByCtor is false.
-  uint32_t mInitialzedWhichValue;
+  uint32_t mInitializedWhichValue;
 };
 
 } // namespace dom

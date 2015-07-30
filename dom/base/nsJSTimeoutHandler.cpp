@@ -26,7 +26,7 @@ using namespace mozilla;
 using namespace mozilla::dom;
 
 // Our JS nsIScriptTimeoutHandler implementation.
-class nsJSScriptTimeoutHandler MOZ_FINAL : public nsIScriptTimeoutHandler
+class nsJSScriptTimeoutHandler final : public nsIScriptTimeoutHandler
 {
 public:
   // nsISupports
@@ -41,20 +41,19 @@ public:
   nsJSScriptTimeoutHandler(JSContext* aCx, nsGlobalWindow *aWindow,
                            const nsAString& aExpression, bool* aAllowEval,
                            ErrorResult& aError);
-  ~nsJSScriptTimeoutHandler();
 
-  virtual const char16_t *GetHandlerText();
-  virtual Function* GetCallback()
+  virtual const char16_t* GetHandlerText() override;
+  virtual Function* GetCallback() override
   {
     return mFunction;
   }
-  virtual void GetLocation(const char **aFileName, uint32_t *aLineNo)
+  virtual void GetLocation(const char** aFileName, uint32_t* aLineNo) override
   {
     *aFileName = mFileName.get();
     *aLineNo = mLineNo;
   }
 
-  virtual const nsTArray<JS::Value>& GetArgs()
+  virtual const nsTArray<JS::Value>& GetArgs() override
   {
     return mArgs;
   }
@@ -65,6 +64,8 @@ public:
   void ReleaseJSObjects();
 
 private:
+  ~nsJSScriptTimeoutHandler();
+
   // filename, line number and JS language version string of the
   // caller of setTimeout()
   nsCString mFileName;
@@ -100,15 +101,15 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsJSScriptTimeoutHandler)
           name.AppendLiteral(" [");
           name.Append(funIdName);
           delete[] funIdName;
-          name.AppendLiteral("]");
+          name.Append(']');
         }
       }
     } else {
       name.AppendLiteral(" [");
       name.Append(tmp->mFileName);
-      name.AppendLiteral(":");
+      name.Append(':');
       name.AppendInt(tmp->mLineNo);
-      name.AppendLiteral("]");
+      name.Append(']');
     }
     cb.DescribeRefCountedNode(tmp->mRefCnt.get(), name.get());
   }
@@ -172,11 +173,8 @@ CheckCSPForEval(JSContext* aCx, nsGlobalWindow* aWindow, ErrorResult& aError)
 
     // Get the calling location.
     uint32_t lineNum = 0;
-    const char *fileName;
     nsAutoString fileNameString;
-    if (nsJSUtils::GetCallingLocation(aCx, &fileName, &lineNum)) {
-      AppendUTF8toUTF16(fileName, fileNameString);
-    } else {
+    if (!nsJSUtils::GetCallingLocation(aCx, fileNameString, &lineNum)) {
       fileNameString.AssignLiteral("unknown");
     }
 
@@ -232,10 +230,7 @@ nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler(JSContext* aCx,
   }
 
   // Get the calling location.
-  const char *filename;
-  if (nsJSUtils::GetCallingLocation(aCx, &filename, &mLineNo)) {
-    mFileName.Assign(filename);
-  }
+  nsJSUtils::GetCallingLocation(aCx, mFileName, &mLineNo);
 }
 
 nsJSScriptTimeoutHandler::~nsJSScriptTimeoutHandler()
@@ -348,14 +343,11 @@ nsJSScriptTimeoutHandler::Init(nsGlobalWindow *aWindow, bool *aIsInterval,
       return error.ErrorCode();
     }
 
-    mExpr.Append(JS_GetFlatStringChars(expr),
-                 JS_GetStringLength(JS_FORGET_STRING_FLATNESS(expr)));
+    MOZ_ASSERT(mExpr.IsEmpty());
+    AssignJSFlatString(mExpr, expr);
 
     // Get the calling location.
-    const char *filename;
-    if (nsJSUtils::GetCallingLocation(cx, &filename, &mLineNo)) {
-      mFileName.Assign(filename);
-    }
+    nsJSUtils::GetCallingLocation(cx, mFileName, &mLineNo);
   } else if (funobj) {
     *aAllowEval = true;
 
@@ -419,7 +411,7 @@ NS_CreateJSTimeoutHandler(nsGlobalWindow *aWindow, Function& aFunction,
   FallibleTArray<JS::Heap<JS::Value> > args;
   if (!args.AppendElements(aArguments)) {
     aError.Throw(NS_ERROR_OUT_OF_MEMORY);
-    return 0;
+    return nullptr;
   }
 
   nsRefPtr<nsJSScriptTimeoutHandler> handler =

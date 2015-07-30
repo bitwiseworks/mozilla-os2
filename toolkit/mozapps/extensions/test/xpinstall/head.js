@@ -7,6 +7,7 @@ const PROMPT_URL = "chrome://global/content/commonDialog.xul";
 const ADDONS_URL = "chrome://mozapps/content/extensions/extensions.xul";
 const PREF_LOGGING_ENABLED = "extensions.logging.enabled";
 const PREF_INSTALL_REQUIREBUILTINCERTS = "extensions.install.requireBuiltInCerts";
+const PREF_INSTALL_REQUIRESECUREORIGIN = "extensions.install.requireSecureOrigin";
 const CHROME_NAME = "mochikit";
 
 function getChromeRoot(path) {
@@ -71,7 +72,11 @@ var Harness = {
   // If set will be called when all triggered items are installed or the install
   // is canceled.
   installsCompletedCallback: null,
+  // If set the harness will wait for this DOM event before calling
+  // installsCompletedCallback
+  finalContentEvent: null,
 
+  waitingForEvent: false,
   pendingCount: null,
   installCount: null,
   runningInstalls: null,
@@ -83,6 +88,8 @@ var Harness = {
     if (!this.waitingForFinish) {
       waitForExplicitFinish();
       this.waitingForFinish = true;
+
+      Services.prefs.setBoolPref(PREF_INSTALL_REQUIRESECUREORIGIN, false);
 
       Services.prefs.setBoolPref(PREF_LOGGING_ENABLED, true);
       Services.obs.addObserver(this, "addon-install-started", false);
@@ -98,6 +105,7 @@ var Harness = {
       var self = this;
       registerCleanupFunction(function() {
         Services.prefs.clearUserPref(PREF_LOGGING_ENABLED);
+        Services.prefs.clearUserPref(PREF_INSTALL_REQUIRESECUREORIGIN);
         Services.obs.removeObserver(self, "addon-install-started");
         Services.obs.removeObserver(self, "addon-install-disabled");
         Services.obs.removeObserver(self, "addon-install-blocked");
@@ -128,35 +136,30 @@ var Harness = {
   },
 
   endTest: function() {
-    // Defer the final notification to allow things like the InstallTrigger
-    // callback to complete
-    var self = this;
-    executeSoon(function() {
-      let callback = self.installsCompletedCallback;
-      let count = self.installCount;
+    let callback = this.installsCompletedCallback;
+    let count = this.installCount;
 
-      is(self.runningInstalls.length, 0, "Should be no running installs left");
-      self.runningInstalls.forEach(function(aInstall) {
-        info("Install for " + aInstall.sourceURI + " is in state " + aInstall.state);
-      });
-
-      self.installBlockedCallback = null;
-      self.authenticationCallback = null;
-      self.installConfirmCallback = null;
-      self.downloadStartedCallback = null;
-      self.downloadProgressCallback = null;
-      self.downloadCancelledCallback = null;
-      self.downloadFailedCallback = null;
-      self.downloadEndedCallback = null;
-      self.installStartedCallback = null;
-      self.installFailedCallback = null;
-      self.installEndedCallback = null;
-      self.installsCompletedCallback = null;
-      self.runningInstalls = null;
-
-      if (callback)
-        callback(count);
+    is(this.runningInstalls.length, 0, "Should be no running installs left");
+    this.runningInstalls.forEach(function(aInstall) {
+      info("Install for " + aInstall.sourceURI + " is in state " + aInstall.state);
     });
+
+    this.installBlockedCallback = null;
+    this.authenticationCallback = null;
+    this.installConfirmCallback = null;
+    this.downloadStartedCallback = null;
+    this.downloadProgressCallback = null;
+    this.downloadCancelledCallback = null;
+    this.downloadFailedCallback = null;
+    this.downloadEndedCallback = null;
+    this.installStartedCallback = null;
+    this.installFailedCallback = null;
+    this.installEndedCallback = null;
+    this.installsCompletedCallback = null;
+    this.runningInstalls = null;
+
+    if (callback)
+      callback(count);
   },
 
   // Window open handling
@@ -274,6 +277,20 @@ var Harness = {
 
   onNewInstall: function(install) {
     this.runningInstalls.push(install);
+
+    if (this.finalContentEvent && !this.waitingForEvent) {
+      this.waitingForEvent = true;
+      info("Waiting for " + this.finalContentEvent);
+      let win = gBrowser.contentWindow;
+      let listener = () => {
+        info("Saw " + this.finalContentEvent);
+        win.removeEventListener(this.finalContentEvent, listener, false);
+        this.waitingForEvent = false;
+        if (this.pendingCount == 0)
+          this.endTest();
+      }
+      win.addEventListener(this.finalContentEvent, listener, false);
+    }
   },
 
   onDownloadStarted: function(install) {
@@ -327,7 +344,7 @@ var Harness = {
   },
 
   checkTestEnded: function() {
-    if (--this.pendingCount == 0)
+    if (--this.pendingCount == 0 && !this.waitingForEvent)
       this.endTest();
   },
 

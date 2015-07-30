@@ -10,7 +10,7 @@
 #include "nsIAtom.h"
 #include "nsNameSpaceManager.h"
 #include "nsGkAtoms.h"
-#include "nsINodeInfo.h"
+#include "nsIContent.h"
 
 using namespace mozilla;
 

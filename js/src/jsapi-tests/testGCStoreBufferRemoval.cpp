@@ -5,8 +5,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef JSGC_GENERATIONAL
-
 #include "gc/Barrier.h"
 #include "jsapi-tests/tests.h"
 
@@ -26,9 +24,9 @@ BEGIN_TEST(testGCStoreBufferRemoval)
     // Sanity check - objects start in the nursery and then become tenured.
     JS_GC(cx->runtime());
     JS::RootedObject obj(cx, NurseryObject());
-    CHECK(js::gc::IsInsideNursery(rt, obj.get()));
+    CHECK(js::gc::IsInsideNursery(obj.get()));
     JS_GC(cx->runtime());
-    CHECK(!js::gc::IsInsideNursery(rt, obj.get()));
+    CHECK(!js::gc::IsInsideNursery(obj.get()));
     JS::RootedObject tenuredObject(cx, obj);
 
     // Hide the horrors herein from the static rooting analysis.
@@ -118,8 +116,6 @@ BEGIN_TEST(testGCStoreBufferRemoval)
 
 JSObject* NurseryObject()
 {
-    return JS_NewObject(cx, nullptr, JS::NullPtr(), JS::NullPtr());
+    return JS_NewPlainObject(cx);
 }
 END_TEST(testGCStoreBufferRemoval)
-
-#endif

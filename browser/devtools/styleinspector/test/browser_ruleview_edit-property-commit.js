@@ -18,13 +18,13 @@ const originalValue = "#00F";
 // }
 const testData = [
   {value: "red", commitKey: "VK_ESCAPE", modifiers: {}, expected: originalValue},
-  {value: "red", commitKey: "VK_RETURN", modifiers: {}, expected: "#F00"},
+  {value: "red", commitKey: "VK_RETURN", modifiers: {}, expected: "red"},
   {value: "invalid", commitKey: "VK_RETURN", modifiers: {}, expected: "invalid"},
   {value: "blue", commitKey: "VK_TAB", modifiers: {shiftKey: true}, expected: "blue"}
 ];
 
-let test = asyncTest(function*() {
-  yield addTab("data:text/html,test escaping property change reverts back to original value");
+add_task(function*() {
+  yield addTab("data:text/html;charset=utf-8,test escaping property change reverts back to original value");
 
   info("Creating the test document");
   createDocument();
@@ -56,14 +56,14 @@ function createDocument() {
 }
 
 function* runTestData(view, {value, commitKey, modifiers, expected}) {
-  let idRuleEditor = view.element.children[1]._ruleEditor;
+  let idRuleEditor = getRuleViewRuleEditor(view, 1);
   let propEditor = idRuleEditor.rule.textProps[0].editor;
 
   info("Focusing the inplace editor field");
   let editor = yield focusEditableField(propEditor.valueSpan);
   is(inplaceEditor(propEditor.valueSpan), editor, "Focused editor should be the value span.");
 
-  info("Entering test data " + value)
+  info("Entering test data " + value);
   for (let ch of value) {
     EventUtils.sendChar(ch, view.doc.defaultView);
   }

@@ -6,17 +6,11 @@
 
 XPCSHELL_TESTS_MANIFESTS += ['unit/xpcshell.ini']
 
-SOURCES += [
-    'NormalizationTest.cpp',
-    'UnicharSelfTest.cpp',
-]
+GeckoSimplePrograms([
+    'NormalizationTest',
+    'UnicharSelfTest',
+], msvcrt='static')
 
-SIMPLE_PROGRAMS += [
-    "%s" % (fyl[0:-4]) for fyl in SOURCES
+USE_LIBS += [
+    'unicharutil_external_s',
 ]
-
-LOCAL_INCLUDES += [
-    '../public',
-]
-
-USE_STATIC_LIBS = True

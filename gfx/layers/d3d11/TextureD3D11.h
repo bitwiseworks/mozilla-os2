@@ -28,46 +28,54 @@ class CompositorD3D11;
 class TextureClientD3D11 : public TextureClient
 {
 public:
-  TextureClientD3D11(gfx::SurfaceFormat aFormat, TextureFlags aFlags);
+  TextureClientD3D11(ISurfaceAllocator* aAllocator,
+                     gfx::SurfaceFormat aFormat,
+                     TextureFlags aFlags);
 
   virtual ~TextureClientD3D11();
 
   // TextureClient
 
-  virtual bool IsAllocated() const MOZ_OVERRIDE { return !!mTexture; }
+  virtual bool IsAllocated() const override { return mTexture || mTexture10; }
 
-  virtual bool Lock(OpenMode aOpenMode) MOZ_OVERRIDE;
+  virtual bool Lock(OpenMode aOpenMode) override;
 
-  virtual void Unlock() MOZ_OVERRIDE;
+  virtual void Unlock() override;
 
-  virtual bool IsLocked() const MOZ_OVERRIDE { return mIsLocked; }
+  virtual bool IsLocked() const override { return mIsLocked; }
 
-  virtual bool ImplementsLocking() const MOZ_OVERRIDE { return true; }
+  virtual bool ImplementsLocking() const override { return true; }
 
-  virtual bool HasInternalBuffer() const MOZ_OVERRIDE { return false; }
+  virtual bool HasInternalBuffer() const override { return false; }
 
-  virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) MOZ_OVERRIDE;
+  virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) override;
 
-  virtual gfx::IntSize GetSize() const MOZ_OVERRIDE { return mSize; }
+  virtual gfx::IntSize GetSize() const override { return mSize; }
 
-  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE { return nullptr; }
+  virtual gfx::SurfaceFormat GetFormat() const override { return mFormat; }
 
-  virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE { return mFormat; }
+  virtual bool CanExposeDrawTarget() const override { return true; }
 
-  virtual bool CanExposeDrawTarget() const MOZ_OVERRIDE { return true; }
-
-  virtual TemporaryRef<gfx::DrawTarget> GetAsDrawTarget() MOZ_OVERRIDE;
+  virtual gfx::DrawTarget* BorrowDrawTarget() override;
 
   virtual bool AllocateForSurface(gfx::IntSize aSize,
-                                  TextureAllocationFlags aFlags = ALLOC_DEFAULT) MOZ_OVERRIDE;
+                                  TextureAllocationFlags aFlags = ALLOC_DEFAULT) override;
+
+  virtual TemporaryRef<TextureClient>
+  CreateSimilar(TextureFlags aFlags = TextureFlags::DEFAULT,
+                TextureAllocationFlags aAllocFlags = ALLOC_DEFAULT) const override;
+
+  virtual void SyncWithObject(SyncObject* aSyncObject) override;
 
 protected:
   gfx::IntSize mSize;
-  RefPtr<ID3D10Texture2D> mTexture;
+  RefPtr<ID3D10Texture2D> mTexture10;
+  RefPtr<ID3D11Texture2D> mTexture;
   RefPtr<gfx::DrawTarget> mDrawTarget;
   gfx::SurfaceFormat mFormat;
   bool mIsLocked;
   bool mNeedsClear;
+  bool mNeedsClearWhite;
 };
 
 /**
@@ -96,7 +104,7 @@ protected:
  */
 class DataTextureSourceD3D11 : public DataTextureSource
                              , public TextureSourceD3D11
-                             , public TileIterator
+                             , public BigImageIterator
 {
 public:
   DataTextureSourceD3D11(gfx::SurfaceFormat aFormat, CompositorD3D11* aCompositor,
@@ -112,37 +120,37 @@ public:
 
   virtual bool Update(gfx::DataSourceSurface* aSurface,
                       nsIntRegion* aDestRegion = nullptr,
-                      gfx::IntPoint* aSrcOffset = nullptr) MOZ_OVERRIDE;
+                      gfx::IntPoint* aSrcOffset = nullptr) override;
 
   // TextureSource
 
-  virtual TextureSourceD3D11* AsSourceD3D11() MOZ_OVERRIDE { return this; }
+  virtual TextureSourceD3D11* AsSourceD3D11() override { return this; }
 
-  virtual ID3D11Texture2D* GetD3D11Texture() const MOZ_OVERRIDE;
+  virtual ID3D11Texture2D* GetD3D11Texture() const override;
 
-  virtual DataTextureSource* AsDataTextureSource() MOZ_OVERRIDE { return this; }
+  virtual DataTextureSource* AsDataTextureSource() override { return this; }
 
-  virtual void DeallocateDeviceData() MOZ_OVERRIDE { mTexture = nullptr; }
+  virtual void DeallocateDeviceData() override { mTexture = nullptr; }
 
-  virtual gfx::IntSize GetSize() const  MOZ_OVERRIDE { return mSize; }
+  virtual gfx::IntSize GetSize() const  override { return mSize; }
 
-  virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE { return mFormat; }
+  virtual gfx::SurfaceFormat GetFormat() const override { return mFormat; }
 
-  virtual void SetCompositor(Compositor* aCompositor) MOZ_OVERRIDE;
+  virtual void SetCompositor(Compositor* aCompositor) override;
 
-  // TileIterator
+  // BigImageIterator
 
-  virtual TileIterator* AsTileIterator() MOZ_OVERRIDE { return mIsTiled ? this : nullptr; }
+  virtual BigImageIterator* AsBigImageIterator() override { return mIsTiled ? this : nullptr; }
 
-  virtual size_t GetTileCount() MOZ_OVERRIDE { return mTileTextures.size(); }
+  virtual size_t GetTileCount() override { return mTileTextures.size(); }
 
-  virtual bool NextTile() MOZ_OVERRIDE { return (++mCurrentTile < mTileTextures.size()); }
+  virtual bool NextTile() override { return (++mCurrentTile < mTileTextures.size()); }
 
-  virtual nsIntRect GetTileRect() MOZ_OVERRIDE;
+  virtual nsIntRect GetTileRect() override;
 
-  virtual void EndTileIteration() MOZ_OVERRIDE { mIterating = false; }
+  virtual void EndBigImageIteration() override { mIterating = false; }
 
-  virtual void BeginTileIteration() MOZ_OVERRIDE
+  virtual void BeginBigImageIteration() override
   {
     mIterating = true;
     mCurrentTile = 0;
@@ -172,21 +180,21 @@ public:
   DXGITextureHostD3D11(TextureFlags aFlags,
                        const SurfaceDescriptorD3D10& aDescriptor);
 
-  virtual NewTextureSource* GetTextureSources() MOZ_OVERRIDE;
+  virtual TextureSource* GetTextureSources() override;
 
-  virtual void DeallocateDeviceData() MOZ_OVERRIDE {}
+  virtual void DeallocateDeviceData() override {}
 
-  virtual void SetCompositor(Compositor* aCompositor) MOZ_OVERRIDE;
+  virtual void SetCompositor(Compositor* aCompositor) override;
 
-  virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE { return mFormat; }
+  virtual gfx::SurfaceFormat GetFormat() const override { return mFormat; }
 
-  virtual bool Lock() MOZ_OVERRIDE;
+  virtual bool Lock() override;
 
-  virtual void Unlock() MOZ_OVERRIDE;
+  virtual void Unlock() override;
 
-  virtual gfx::IntSize GetSize() const MOZ_OVERRIDE { return mSize; }
+  virtual gfx::IntSize GetSize() const override { return mSize; }
 
-  virtual TemporaryRef<gfx::DataSourceSurface> GetAsSurface() MOZ_OVERRIDE
+  virtual TemporaryRef<gfx::DataSourceSurface> GetAsSurface() override
   {
     return nullptr;
   }
@@ -194,6 +202,9 @@ public:
 protected:
   ID3D11Device* GetDevice();
 
+  bool OpenSharedHandle();
+
+  RefPtr<ID3D11Texture2D> mTexture;
   RefPtr<DataTextureSourceD3D11> mTextureSource;
   RefPtr<CompositorD3D11> mCompositor;
   gfx::IntSize mSize;
@@ -209,9 +220,11 @@ public:
   CompositingRenderTargetD3D11(ID3D11Texture2D* aTexture,
                                const gfx::IntPoint& aOrigin);
 
-  virtual TextureSourceD3D11* AsSourceD3D11() MOZ_OVERRIDE { return this; }
+  virtual TextureSourceD3D11* AsSourceD3D11() override { return this; }
 
-  virtual gfx::IntSize GetSize() const MOZ_OVERRIDE;
+  void BindRenderTarget(ID3D11DeviceContext* aContext);
+
+  virtual gfx::IntSize GetSize() const override;
 
   void SetSize(const gfx::IntSize& aSize) { mSize = aSize; }
 
@@ -219,6 +232,25 @@ private:
   friend class CompositorD3D11;
 
   RefPtr<ID3D11RenderTargetView> mRTView;
+};
+
+class SyncObjectD3D11 : public SyncObject
+{
+public:
+  SyncObjectD3D11(SyncHandle aSyncHandle);
+
+  virtual SyncType GetSyncType() { return SyncType::D3D11; }
+  virtual void FinalizeFrame();
+
+  void RegisterTexture(ID3D11Texture2D* aTexture);
+  void RegisterTexture(ID3D10Texture2D* aTexture);
+
+private:
+  RefPtr<ID3D11Texture2D> mD3D11Texture;
+  RefPtr<ID3D10Texture2D> mD3D10Texture;
+  std::vector<ID3D10Texture2D*> mD3D10SyncedTextures;
+  std::vector<ID3D11Texture2D*> mD3D11SyncedTextures;
+  SyncHandle mHandle;
 };
 
 inline uint32_t GetMaxTextureSizeForFeatureLevel(D3D_FEATURE_LEVEL aFeatureLevel)

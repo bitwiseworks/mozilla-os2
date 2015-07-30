@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 12; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -30,20 +31,20 @@ namespace mozilla {
 class SyncRunnable : public nsRunnable
 {
 public:
-  SyncRunnable(nsIRunnable* r)
-    : mRunnable(r)
+  explicit SyncRunnable(nsIRunnable* aRunnable)
+    : mRunnable(aRunnable)
     , mMonitor("SyncRunnable")
     , mDone(false)
-  { }
+  {
+  }
 
-  void DispatchToThread(nsIEventTarget* thread,
-                        bool forceDispatch = false)
+  void DispatchToThread(nsIEventTarget* aThread, bool aForceDispatch = false)
   {
     nsresult rv;
     bool on;
 
-    if (!forceDispatch) {
-      rv = thread->IsOnCurrentThread(&on);
+    if (!aForceDispatch) {
+      rv = aThread->IsOnCurrentThread(&on);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
       if (NS_SUCCEEDED(rv) && on) {
         mRunnable->Run();
@@ -51,7 +52,7 @@ public:
       }
     }
 
-    rv = thread->Dispatch(this, NS_DISPATCH_NORMAL);
+    rv = aThread->Dispatch(this, NS_DISPATCH_NORMAL);
     if (NS_SUCCEEDED(rv)) {
       mozilla::MonitorAutoLock lock(mMonitor);
       while (!mDone) {
@@ -60,12 +61,12 @@ public:
     }
   }
 
-  static void DispatchToThread(nsIEventTarget* thread,
-                               nsIRunnable* r,
-                               bool forceDispatch = false)
+  static void DispatchToThread(nsIEventTarget* aThread,
+                               nsIRunnable* aRunnable,
+                               bool aForceDispatch = false)
   {
-    nsRefPtr<SyncRunnable> s(new SyncRunnable(r));
-    s->DispatchToThread(thread, forceDispatch);
+    nsRefPtr<SyncRunnable> s(new SyncRunnable(aRunnable));
+    s->DispatchToThread(aThread, aForceDispatch);
   }
 
 protected:

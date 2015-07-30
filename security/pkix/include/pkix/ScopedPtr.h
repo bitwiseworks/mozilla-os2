@@ -1,6 +1,13 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
-/* Copyright 2013 Mozilla Foundation
+/* This code is made available to you under your choice of the following sets
+ * of licensing terms:
+ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
+/* Copyright 2013 Mozilla Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,17 +22,17 @@
  * limitations under the License.
  */
 
-#ifndef mozilla_pkix__ScopedPtr_h
-#define mozilla_pkix__ScopedPtr_h
+#ifndef mozilla_pkix_ScopedPtr_h
+#define mozilla_pkix_ScopedPtr_h
 
-#include "pkix/nullptr.h"
+#include "pkix/stdkeywords.h"
 
 namespace mozilla { namespace pkix {
 
 // Similar to boost::scoped_ptr and std::unique_ptr. Does not support copying
 // or assignment.
-template <typename T, void (*Destroyer)(T*)>
-class ScopedPtr
+template <typename T, void (&Destroyer)(T*)>
+class ScopedPtr final
 {
 public:
   explicit ScopedPtr(T* value = nullptr) : mValue(value) { }
@@ -62,32 +69,32 @@ public:
 protected:
   T* mValue;
 
-  ScopedPtr(const ScopedPtr&) /* = delete */;
-  void operator=(const ScopedPtr&) /* = delete */;
+  ScopedPtr(const ScopedPtr&) = delete;
+  void operator=(const ScopedPtr&) = delete;
 };
 
-template <typename T, void(*Destroyer)(T*)>
+template <typename T, void(&Destroyer)(T*)>
 inline bool
 operator==(T* a, const ScopedPtr<T, Destroyer>& b)
 {
   return a == b.get();
 }
 
-template <typename T, void(*Destroyer)(T*)>
+template <typename T, void(&Destroyer)(T*)>
 inline bool
 operator==(const ScopedPtr<T, Destroyer>& a, T* b)
 {
   return a.get() == b;
 }
 
-template <typename T, void(*Destroyer)(T*)>
+template <typename T, void(&Destroyer)(T*)>
 inline bool
 operator!=(T* a, const ScopedPtr<T, Destroyer>& b)
 {
   return a != b.get();
 }
 
-template <typename T, void(*Destroyer)(T*)>
+template <typename T, void(&Destroyer)(T*)>
 inline bool
 operator!=(const ScopedPtr<T, Destroyer>& a, T* b)
 {
@@ -96,4 +103,4 @@ operator!=(const ScopedPtr<T, Destroyer>& a, T* b)
 
 } } // namespace mozilla::pkix
 
-#endif // mozilla_pkix__ScopedPtr_h
+#endif // mozilla_pkix_ScopedPtr_h

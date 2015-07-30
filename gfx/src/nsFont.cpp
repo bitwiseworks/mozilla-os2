@@ -16,46 +16,39 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/gfx/2D.h"
 
-nsFont::nsFont(const char* aName, uint8_t aStyle, uint8_t aVariant,
-               uint16_t aWeight, int16_t aStretch, uint8_t aDecoration,
-               nscoord aSize)
+using namespace mozilla;
+
+nsFont::nsFont(const FontFamilyList& aFontlist, uint8_t aStyle,
+               uint16_t aWeight, int16_t aStretch,
+               uint8_t aDecoration, nscoord aSize)
+  : fontlist(aFontlist)
 {
-  NS_ASSERTION(aName && IsASCII(nsDependentCString(aName)),
-               "Must only pass ASCII names here");
-  name.AssignASCII(aName);
+  Init();
   style = aStyle;
-  systemFont = false;
-  variant = aVariant;
   weight = aWeight;
   stretch = aStretch;
   decorations = aDecoration;
-  smoothing = NS_FONT_SMOOTHING_AUTO;
   size = aSize;
-  sizeAdjust = 0.0;
-  kerning = NS_FONT_KERNING_AUTO;
-  synthesis = NS_FONT_SYNTHESIS_WEIGHT | NS_FONT_SYNTHESIS_STYLE;
-
-  variantAlternates = 0;
-  variantCaps = NS_FONT_VARIANT_CAPS_NORMAL;
-  variantEastAsian = 0;
-  variantLigatures = 0;
-  variantNumeric = 0;
-  variantPosition = NS_FONT_VARIANT_POSITION_NORMAL;
 }
 
-nsFont::nsFont(const nsSubstring& aName, uint8_t aStyle, uint8_t aVariant,
+nsFont::nsFont(FontFamilyType aGenericType, uint8_t aStyle,
                uint16_t aWeight, int16_t aStretch, uint8_t aDecoration,
                nscoord aSize)
-  : name(aName)
+  : fontlist(aGenericType)
 {
+  Init();
   style = aStyle;
-  systemFont = false;
-  variant = aVariant;
   weight = aWeight;
   stretch = aStretch;
   decorations = aDecoration;
-  smoothing = NS_FONT_SMOOTHING_AUTO;
   size = aSize;
+}
+
+void
+nsFont::Init()
+{
+  systemFont = false;
+  smoothing = NS_FONT_SMOOTHING_AUTO;
   sizeAdjust = 0.0;
   kerning = NS_FONT_KERNING_AUTO;
   synthesis = NS_FONT_SYNTHESIS_WEIGHT | NS_FONT_SYNTHESIS_STYLE;
@@ -69,11 +62,10 @@ nsFont::nsFont(const nsSubstring& aName, uint8_t aStyle, uint8_t aVariant,
 }
 
 nsFont::nsFont(const nsFont& aOther)
-  : name(aOther.name)
+  : fontlist(aOther.fontlist)
 {
   style = aOther.style;
   systemFont = aOther.systemFont;
-  variant = aOther.variant;
   weight = aOther.weight;
   stretch = aOther.stretch;
   decorations = aOther.decorations;
@@ -110,7 +102,7 @@ bool nsFont::BaseEquals(const nsFont& aOther) const
       (stretch == aOther.stretch) &&
       (size == aOther.size) &&
       (sizeAdjust == aOther.sizeAdjust) &&
-      name.Equals(aOther.name, nsCaseInsensitiveStringComparator()) &&
+      (fontlist == aOther.fontlist) &&
       (kerning == aOther.kerning) &&
       (synthesis == aOther.synthesis) &&
       (fontFeatureSettings == aOther.fontFeatureSettings) &&
@@ -132,7 +124,6 @@ bool nsFont::BaseEquals(const nsFont& aOther) const
 bool nsFont::Equals(const nsFont& aOther) const
 {
   if (BaseEquals(aOther) &&
-      (variant == aOther.variant) &&
       (decorations == aOther.decorations)) {
     return true;
   }
@@ -141,10 +132,9 @@ bool nsFont::Equals(const nsFont& aOther) const
 
 nsFont& nsFont::operator=(const nsFont& aOther)
 {
-  name = aOther.name;
+  fontlist = aOther.fontlist;
   style = aOther.style;
   systemFont = aOther.systemFont;
-  variant = aOther.variant;
   weight = aOther.weight;
   stretch = aOther.stretch;
   decorations = aOther.decorations;
@@ -172,68 +162,6 @@ nsFont::CopyAlternates(const nsFont& aOther)
   variantAlternates = aOther.variantAlternates;
   alternateValues = aOther.alternateValues;
   featureValueLookup = aOther.featureValueLookup;
-}
-
-static bool IsGenericFontFamily(const nsString& aFamily)
-{
-  uint8_t generic;
-  nsFont::GetGenericID(aFamily, &generic);
-  return generic != kGenericFont_NONE;
-}
-
-const char16_t kSingleQuote  = char16_t('\'');
-const char16_t kDoubleQuote  = char16_t('\"');
-const char16_t kComma        = char16_t(',');
-
-bool nsFont::EnumerateFamilies(nsFontFamilyEnumFunc aFunc, void* aData) const
-{
-  const char16_t *p, *p_end;
-  name.BeginReading(p);
-  name.EndReading(p_end);
-  nsAutoString family;
-
-  while (p < p_end) {
-    while (nsCRT::IsAsciiSpace(*p))
-      if (++p == p_end)
-        return true;
-
-    bool generic;
-    if (*p == kSingleQuote || *p == kDoubleQuote) {
-      // quoted font family
-      char16_t quoteMark = *p;
-      if (++p == p_end)
-        return true;
-      const char16_t *nameStart = p;
-
-      // XXX What about CSS character escapes?
-      while (*p != quoteMark)
-        if (++p == p_end)
-          return true;
-
-      family = Substring(nameStart, p);
-      generic = false;
-
-      while (++p != p_end && *p != kComma)
-        /* nothing */ ;
-
-    } else {
-      // unquoted font family
-      const char16_t *nameStart = p;
-      while (++p != p_end && *p != kComma)
-        /* nothing */ ;
-
-      family = Substring(nameStart, p);
-      family.CompressWhitespace(false, true);
-      generic = IsGenericFontFamily(family);
-    }
-
-    if (!family.IsEmpty() && !(*aFunc)(family, generic, aData))
-      return false;
-
-    ++p; // may advance past p_end
-  }
-
-  return true;
 }
 
 // mapping from bitflag to font feature tag/value pair
@@ -335,46 +263,13 @@ void nsFont::AddFontFeaturesToStyle(gfxFontStyle *aStyle) const
     aStyle->featureSettings.AppendElement(setting);
   }
 
-
   // -- copy font-specific alternate info into style
   //    (this will be resolved after font-matching occurs)
   aStyle->alternateValues.AppendElements(alternateValues);
   aStyle->featureValueLookup = featureValueLookup;
 
   // -- caps
-  setting.mValue = 1;
-  switch (variantCaps) {
-    case NS_FONT_VARIANT_CAPS_ALLSMALL:
-      setting.mTag = TRUETYPE_TAG('c','2','s','c');
-      aStyle->featureSettings.AppendElement(setting);
-      // fall through to the small-caps case
-    case NS_FONT_VARIANT_CAPS_SMALLCAPS:
-      setting.mTag = TRUETYPE_TAG('s','m','c','p');
-      aStyle->featureSettings.AppendElement(setting);
-      break;
-
-    case NS_FONT_VARIANT_CAPS_ALLPETITE:
-      setting.mTag = TRUETYPE_TAG('c','2','p','c');
-      aStyle->featureSettings.AppendElement(setting);
-      // fall through to the petite-caps case
-    case NS_FONT_VARIANT_CAPS_PETITECAPS:
-      setting.mTag = TRUETYPE_TAG('p','c','a','p');
-      aStyle->featureSettings.AppendElement(setting);
-      break;
-
-    case NS_FONT_VARIANT_CAPS_TITLING:
-      setting.mTag = TRUETYPE_TAG('t','i','t','l');
-      aStyle->featureSettings.AppendElement(setting);
-      break;
-
-    case NS_FONT_VARIANT_CAPS_UNICASE:
-      setting.mTag = TRUETYPE_TAG('u','n','i','c');
-      aStyle->featureSettings.AppendElement(setting);
-      break;
-
-    default:
-      break;
-  }
+  aStyle->variantCaps = variantCaps;
 
   // -- east-asian
   if (variantEastAsian) {
@@ -424,22 +319,12 @@ void nsFont::AddFontFeaturesToStyle(gfxFontStyle *aStyle) const
   }
 
   // -- position
-  setting.mTag = 0;
-  setting.mValue = 1;
-  switch (variantPosition) {
-    case NS_FONT_VARIANT_POSITION_SUPER:
-      setting.mTag = TRUETYPE_TAG('s','u','p','s');
-      aStyle->featureSettings.AppendElement(setting);
-      break;
+  aStyle->variantSubSuper = variantPosition;
 
-    case NS_FONT_VARIANT_POSITION_SUB:
-      setting.mTag = TRUETYPE_TAG('s','u','b','s');
-      aStyle->featureSettings.AppendElement(setting);
-      break;
-
-    default:
-      break;
-  }
+  // indicate common-path case when neither variantCaps or variantSubSuper are set
+  aStyle->noFallbackVariantFeatures =
+    (aStyle->variantCaps == NS_FONT_VARIANT_CAPS_NORMAL) &&
+    (variantPosition == NS_FONT_VARIANT_POSITION_NORMAL);
 
   // add in features from font-feature-settings
   aStyle->featureSettings.AppendElements(fontFeatureSettings);
@@ -448,27 +333,4 @@ void nsFont::AddFontFeaturesToStyle(gfxFontStyle *aStyle) const
   if (smoothing == NS_FONT_SMOOTHING_GRAYSCALE) {
     aStyle->useGrayscaleAntialiasing = true;
   }
-}
-
-static bool FontEnumCallback(const nsString& aFamily, bool aGeneric, void *aData)
-{
-  *((nsString*)aData) = aFamily;
-  return false;
-}
-
-void nsFont::GetFirstFamily(nsString& aFamily) const
-{
-  EnumerateFamilies(FontEnumCallback, &aFamily);
-}
-
-/*static*/
-void nsFont::GetGenericID(const nsString& aGeneric, uint8_t* aID)
-{
-  *aID = kGenericFont_NONE;
-  if (aGeneric.LowerCaseEqualsLiteral("-moz-fixed"))      *aID = kGenericFont_moz_fixed;
-  else if (aGeneric.LowerCaseEqualsLiteral("serif"))      *aID = kGenericFont_serif;
-  else if (aGeneric.LowerCaseEqualsLiteral("sans-serif")) *aID = kGenericFont_sans_serif;
-  else if (aGeneric.LowerCaseEqualsLiteral("cursive"))    *aID = kGenericFont_cursive;
-  else if (aGeneric.LowerCaseEqualsLiteral("fantasy"))    *aID = kGenericFont_fantasy;
-  else if (aGeneric.LowerCaseEqualsLiteral("monospace"))  *aID = kGenericFont_monospace;
 }

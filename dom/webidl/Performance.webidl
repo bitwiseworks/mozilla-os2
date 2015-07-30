@@ -13,9 +13,14 @@
 typedef double DOMHighResTimeStamp;
 typedef sequence <PerformanceEntry> PerformanceEntryList;
 
+[Exposed=(Window,Worker)]
 interface Performance {
+  [DependsOn=DeviceState, Affects=Nothing]
   DOMHighResTimeStamp now();
+};
 
+[Exposed=Window]
+partial interface Performance {
   [Constant]
   readonly attribute PerformanceTiming timing;
   [Constant]
@@ -24,7 +29,8 @@ interface Performance {
   jsonifier;
 };
 
-// http://www.w3c-test.org/webperf/specs/PerformanceTimeline/#sec-window.performance-attribute
+// http://www.w3.org/TR/performance-timeline/#sec-window.performance-attribute
+[Exposed=Window]
 partial interface Performance {
   [Pref="dom.enable_resource_timing"]
   PerformanceEntryList getEntries();
@@ -35,10 +41,26 @@ partial interface Performance {
     entryType);
 };
 
-// http://w3c-test.org/webperf/specs/ResourceTiming/#extensions-performance-interface
+// http://www.w3.org/TR/resource-timing/#extensions-performance-interface
+[Exposed=Window]
 partial interface Performance {
   [Pref="dom.enable_resource_timing"]
   void clearResourceTimings();
   [Pref="dom.enable_resource_timing"]
   void setResourceTimingBufferSize(unsigned long maxSize);
+  [Pref="dom.enable_resource_timing"]
+  attribute EventHandler onresourcetimingbufferfull;
+};
+
+// http://www.w3.org/TR/user-timing/
+[Exposed=Window]
+partial interface Performance {
+  [Pref="dom.enable_user_timing", Throws]
+  void mark(DOMString markName);
+  [Pref="dom.enable_user_timing"]
+  void clearMarks(optional DOMString markName);
+  [Pref="dom.enable_user_timing", Throws]
+  void measure(DOMString measureName, optional DOMString startMark, optional DOMString endMark);
+  [Pref="dom.enable_user_timing"]
+  void clearMeasures(optional DOMString measureName);
 };

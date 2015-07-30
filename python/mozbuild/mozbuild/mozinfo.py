@@ -51,7 +51,9 @@ def build_dict(config, env=os.environ):
         d["appname"] = substs["MOZ_APP_NAME"]
 
     # Build app name
-    if 'MOZ_BUILD_APP' in substs:
+    if 'MOZ_MULET' in substs and substs.get('MOZ_MULET') == "1":
+        d["buildapp"] = "mulet"
+    elif 'MOZ_BUILD_APP' in substs:
         d["buildapp"] = substs["MOZ_BUILD_APP"]
 
     # processor
@@ -78,14 +80,17 @@ def build_dict(config, env=os.environ):
     d['debug'] = substs.get('MOZ_DEBUG') == '1'
     d['crashreporter'] = bool(substs.get('MOZ_CRASHREPORTER'))
     d['datareporting'] = bool(substs.get('MOZ_DATA_REPORTING'))
-    d['fxaccounts'] = substs.get('MOZ_SERVICES_FXACCOUNTS') == '1'
     d['healthreport'] = substs.get('MOZ_SERVICES_HEALTHREPORT') == '1'
     d['asan'] = substs.get('MOZ_ASAN') == '1'
+    d['tsan'] = substs.get('MOZ_TSAN') == '1'
+    d['telemetry'] = substs.get('MOZ_TELEMETRY_REPORTING') == '1'
     d['tests_enabled'] = substs.get('ENABLE_TESTS') == "1"
     d['bin_suffix'] = substs.get('BIN_SUFFIX', '')
 
     d['webm'] = bool(substs.get('MOZ_WEBM'))
     d['wave'] = bool(substs.get('MOZ_WAVE'))
+
+    d['official'] = bool(substs.get('MOZILLA_OFFICIAL'))
 
     return d
 

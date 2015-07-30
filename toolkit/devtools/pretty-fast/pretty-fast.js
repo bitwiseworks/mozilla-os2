@@ -1,12 +1,15 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2; fill-column: 80 -*- */
 /*
  * Copyright 2013 Mozilla Foundation and contributors
  * Licensed under the New BSD license. See LICENSE.md or:
  * http://opensource.org/licenses/BSD-2-Clause
  */
 (function (root, factory) {
-  if (typeof define === 'function' && define.amd) {
+  "use strict";
+
+  if (typeof define === "function" && define.amd) {
     define(factory);
-  } else if (typeof exports === 'object') {
+  } else if (typeof exports === "object") {
     module.exports = factory();
   } else {
     root.prettyFast = factory();
@@ -91,7 +94,9 @@
     if (lastToken.type.isAssign) {
       return true;
     }
-    return !!PRE_ARRAY_LITERAL_TOKENS[lastToken.type.keyword || lastToken.type.type];
+    return !!PRE_ARRAY_LITERAL_TOKENS[
+      lastToken.type.keyword || lastToken.type.type
+    ];
   }
 
   // If any of these tokens are followed by a token on a new line, we know that
@@ -208,7 +213,9 @@
     if (token.startLoc.line === lastToken.startLoc.line) {
       return false;
     }
-    if (PREVENT_ASI_AFTER_TOKENS[lastToken.type.type || lastToken.type.keyword]) {
+    if (PREVENT_ASI_AFTER_TOKENS[
+      lastToken.type.type || lastToken.type.keyword
+    ]) {
       return false;
     }
     if (PREVENT_ASI_BEFORE_TOKENS[token.type.type || token.type.keyword]) {
@@ -324,7 +331,7 @@
 
       var ltk = lastToken.type.keyword;
       if (ltk != null) {
-        if (ltk == "break" || ltk == "continue") {
+        if (ltk == "break" || ltk == "continue" || ltk == "return") {
           return token.type.type != ";";
         }
         if (ltk != "debugger"
@@ -340,7 +347,8 @@
       if (ltt == ")" && (token.type.type != ")"
                          && token.type.type != "]"
                          && token.type.type != ";"
-                         && token.type.type != ",")) {
+                         && token.type.type != ","
+                         && token.type.type != ".")) {
         return true;
       }
     }
@@ -488,8 +496,8 @@
   }
 
   /**
-   * Make sure that we output the escaped character combination inside string literals
-   * instead of various problematic characters.
+   * Make sure that we output the escaped character combination inside string
+   * literals instead of various problematic characters.
    */
   var sanitize = (function () {
     var escapeCharacters = {
@@ -518,11 +526,11 @@
       + ")";
     var escapeCharactersRegExp = new RegExp(regExpString, "g");
 
-    return function(str) {
+    return function (str) {
       return str.replace(escapeCharactersRegExp, function (_, c) {
         return escapeCharacters[c];
       });
-    }
+    };
   }());
   /**
    * Add the given token to the pretty printed results.
@@ -531,12 +539,14 @@
    *        The token to add.
    * @param Function write
    *        The function to write pretty printed code to the result SourceNode.
-   * @param Object options
-   *        The options object.
    */
-  function addToken(token, write, options) {
+  function addToken(token, write) {
     if (token.type.type == "string") {
       write("'" + sanitize(token.value) + "'",
+            token.startLoc.line,
+            token.startLoc.column);
+    } else if (token.type.type == "regexp") {
+      write(String(token.value.value),
             token.startLoc.line,
             token.startLoc.column);
     } else {
@@ -557,6 +567,7 @@
       || ttt == "["
       || ttt == "?"
       || ttk == "do"
+      || ttk == "switch"
       || ttk == "case"
       || ttk == "default";
   }
@@ -581,7 +592,7 @@
    */
   function decrementsIndent(tokenType, stack) {
     return tokenType == "}"
-      || (tokenType == "]" && stack[stack.length - 1] == "[\n")
+      || (tokenType == "]" && stack[stack.length - 1] == "[\n");
   }
 
   /**
@@ -589,7 +600,9 @@
    * level.
    */
   function incrementsIndent(token) {
-    return token.type.type == "{" || token.isArrayLiteral;
+    return token.type.type == "{"
+      || token.isArrayLiteral
+      || token.type.keyword == "switch";
   }
 
   /**
@@ -685,12 +698,13 @@
           for (var i = 0, len = buffer.length; i < len; i++) {
             lineStr += buffer[i];
           }
-          result.add(new SourceNode(bufferLine, bufferColumn, options.url, lineStr));
+          result.add(new SourceNode(bufferLine, bufferColumn, options.url,
+                                    lineStr));
           buffer.splice(0, buffer.length);
           bufferLine = -1;
           bufferColumn = -1;
         }
-      }
+      };
     }());
 
     // Whether or not we added a newline on after we added the last token.
@@ -724,6 +738,7 @@
     //   - "[\n"
     //   - "do"
     //   - "?"
+    //   - "switch"
     //   - "case"
     //   - "default"
     //
@@ -756,7 +771,8 @@
             block: block,
             text: text,
             line: startLoc.line,
-            column: startLoc.column
+            column: startLoc.column,
+            trailing: lastToken.endLoc.line == startLoc.line
           });
         } else {
           addComment(write, indentLevel, options, block, text, startLoc.line,
@@ -766,7 +782,7 @@
       }
     });
 
-    while (true) {
+    for (;;) {
       token = getToken();
 
       ttk = token.type.keyword;
@@ -791,15 +807,26 @@
 
       if (decrementsIndent(ttt, stack)) {
         indentLevel--;
+        if (ttt == "}"
+            && stack.length > 1
+            && stack[stack.length - 2] == "switch") {
+          indentLevel--;
+        }
       }
 
       prependWhiteSpace(token, lastToken, addedNewline, write, options,
                         indentLevel, stack);
-      addToken(token, write, options);
-      addedNewline = appendNewline(token, write, stack);
+      addToken(token, write);
+      if (commentQueue.length === 0 || !commentQueue[0].trailing) {
+        addedNewline = appendNewline(token, write, stack);
+      }
 
       if (shouldStackPop(token, stack)) {
         stack.pop();
+        if (token == "}" && stack.length
+            && stack[stack.length - 1] == "switch") {
+          stack.pop();
+        }
       }
 
       if (incrementsIndent(token)) {
@@ -825,13 +852,17 @@
 
       // Apply all the comments that have been queued up.
       if (commentQueue.length) {
-        if (!addedNewline) {
+        if (!addedNewline && !commentQueue[0].trailing) {
           write("\n");
+        }
+        if (commentQueue[0].trailing) {
+          write(" ");
         }
         for (var i = 0, n = commentQueue.length; i < n; i++) {
           var comment = commentQueue[i];
-          addComment(write, indentLevel, options, comment.block, comment.text,
-                     comment.line, comment.column);
+          var commentIndentLevel = commentQueue[i].trailing ? 0 : indentLevel;
+          addComment(write, commentIndentLevel, options, comment.block,
+                     comment.text, comment.line, comment.column);
         }
         addedNewline = true;
         commentQueue.splice(0, commentQueue.length);

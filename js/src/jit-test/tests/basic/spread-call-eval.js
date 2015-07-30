@@ -24,10 +24,10 @@ try {             // line0 + 1
 }
 
 // other iterable objects
-assertEq(eval(...["a + b"][std_iterator]()), 11);
-assertEq(eval(...Set(["a + b"])), 11);
+assertEq(eval(...["a + b"][Symbol.iterator]()), 11);
+assertEq(eval(...new Set(["a + b"])), 11);
 let itr = {};
-itr[std_iterator] = function() {
+itr[Symbol.iterator] = function() {
     return {
         i: 0,
         next: function() {
@@ -48,10 +48,7 @@ assertEq(eval(...gen()), 11);
 let c = ["C"], d = "D";
 assertEq(eval(...c=["c[0] + d"]), "c[0] + dD");
 
-// According to the draft spec, null and undefined are to be treated as empty
-// arrays. However, they are not iterable. If the spec is not changed to be in
-// terms of iterables, these tests should be fixed.
-//assertEq(eval("a + b", ...null), 11);
-//assertEq(eval("a + b", ...undefined), 11);
+// 12.2.4.1.2 Runtime Semantics: ArrayAccumulation
+// If Type(spreadObj) is not Object, then throw a TypeError exception.
 assertThrowsInstanceOf(() => eval("a + b", ...null), TypeError);
 assertThrowsInstanceOf(() => eval("a + b", ...undefined), TypeError);

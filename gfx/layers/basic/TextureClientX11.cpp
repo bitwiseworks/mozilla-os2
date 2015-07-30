@@ -8,6 +8,7 @@
 #include "mozilla/layers/ISurfaceAllocator.h"
 #include "mozilla/layers/ShadowLayerUtilsX11.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/Logging.h"
 #include "gfxXlibSurface.h"
 #include "gfx2DGlue.h"
 
@@ -18,8 +19,10 @@ using namespace mozilla;
 using namespace mozilla::gfx;
 using namespace mozilla::layers;
 
-TextureClientX11::TextureClientX11(SurfaceFormat aFormat, TextureFlags aFlags)
-  : TextureClient(aFlags),
+TextureClientX11::TextureClientX11(ISurfaceAllocator* aAllocator,
+                                   SurfaceFormat aFormat,
+                                   TextureFlags aFlags)
+  : TextureClient(aAllocator, aFlags),
     mFormat(aFormat),
     mLocked(false)
 {
@@ -29,6 +32,21 @@ TextureClientX11::TextureClientX11(SurfaceFormat aFormat, TextureFlags aFlags)
 TextureClientX11::~TextureClientX11()
 {
   MOZ_COUNT_DTOR(TextureClientX11);
+}
+
+TemporaryRef<TextureClient>
+TextureClientX11::CreateSimilar(TextureFlags aFlags,
+                                TextureAllocationFlags aAllocFlags) const
+{
+  RefPtr<TextureClient> tex = new TextureClientX11(mAllocator, mFormat, mFlags);
+
+  // mSize is guaranteed to be non-negative
+  MOZ_ASSERT(mSize.width >= 0 && mSize.height >= 0);
+  if (!tex->AllocateForSurface(mSize, aAllocFlags)) {
+    return nullptr;
+  }
+
+  return tex;
 }
 
 bool
@@ -51,7 +69,18 @@ TextureClientX11::Unlock()
   MOZ_ASSERT(mLocked, "The TextureClient is already Unlocked!");
   mLocked = false;
 
-  if (mSurface) {
+  if (mDrawTarget) {
+    // see the comment on TextureClient::BorrowDrawTarget.
+    // This DrawTarget is internal to the TextureClient and is only exposed to the
+    // outside world between Lock() and Unlock(). This assertion checks that no outside
+    // reference remains by the time Unlock() is called.
+    MOZ_ASSERT(mDrawTarget->refCount() == 1);
+
+    mDrawTarget->Flush();
+    mDrawTarget = nullptr;
+  }
+
+  if (mSurface && !mAllocator->IsSameProcess()) {
     FinishX(DefaultXDisplay());
   }
 }
@@ -64,23 +93,29 @@ TextureClientX11::ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor)
     return false;
   }
 
+  if (!(mFlags & TextureFlags::DEALLOCATE_CLIENT)) {
+    // Pass to the host the responsibility of freeing the pixmap. ReleasePixmap means
+    // the underlying pixmap will not be deallocated in mSurface's destructor.
+    // ToSurfaceDescriptor is at most called once per TextureClient.
+    mSurface->ReleasePixmap();
+  }
+
   aOutDescriptor = SurfaceDescriptorX11(mSurface);
   return true;
-}
-
-TextureClientData*
-TextureClientX11::DropTextureData()
-{
-  MOZ_ASSERT(!(mFlags & TEXTURE_DEALLOCATE_CLIENT));
-  return nullptr;
 }
 
 bool
 TextureClientX11::AllocateForSurface(IntSize aSize, TextureAllocationFlags aTextureFlags)
 {
   MOZ_ASSERT(IsValid());
+  MOZ_ASSERT(!IsAllocated());
   //MOZ_ASSERT(mFormat != gfx::FORMAT_YUV, "This TextureClient cannot use YCbCr data");
 
+  MOZ_ASSERT(aSize.width >= 0 && aSize.height >= 0);
+  if (aSize.width <= 0 || aSize.height <= 0) {
+    gfxDebug() << "Asking for X11 surface of invalid size " << aSize.width << "x" << aSize.height;
+    return false;
+  }
   gfxContentType contentType = ContentForFormat(mFormat);
   nsRefPtr<gfxASurface> surface = gfxPlatform::GetPlatform()->CreateOffscreenSurface(aSize, contentType);
   if (!surface || surface->GetType() != gfxSurfaceType::Xlib) {
@@ -91,19 +126,27 @@ TextureClientX11::AllocateForSurface(IntSize aSize, TextureAllocationFlags aText
   mSize = aSize;
   mSurface = static_cast<gfxXlibSurface*>(surface.get());
 
-  // The host is always responsible for freeing the pixmap.
-  mSurface->ReleasePixmap();
+  if (!mAllocator->IsSameProcess()) {
+    FinishX(DefaultXDisplay());
+  }
+
   return true;
 }
 
-TemporaryRef<DrawTarget>
-TextureClientX11::GetAsDrawTarget()
+DrawTarget*
+TextureClientX11::BorrowDrawTarget()
 {
   MOZ_ASSERT(IsValid());
+  MOZ_ASSERT(mLocked);
+
   if (!mSurface) {
     return nullptr;
   }
 
-  IntSize size = ToIntSize(mSurface->GetSize());
-  return Factory::CreateDrawTargetForCairoSurface(mSurface->CairoSurface(), size);
+  if (!mDrawTarget) {
+    IntSize size = ToIntSize(mSurface->GetSize());
+    mDrawTarget = Factory::CreateDrawTargetForCairoSurface(mSurface->CairoSurface(), size);
+  }
+
+  return mDrawTarget;
 }

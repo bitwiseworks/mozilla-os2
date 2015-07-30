@@ -21,10 +21,12 @@
 
 namespace webrtc {
 
+namespace acm2 {
+
 // Enum for CNG
 enum {
   kMaxPLCParamsCNG = WEBRTC_CNG_MAX_LPC_ORDER,
-  kNewCNGNumPLCParams = 8
+  kNewCNGNumLPCParams = 8
 };
 
 // Interval for sending new CNG parameters (SID frames) is 100 msec.
@@ -54,10 +56,10 @@ ACMGenericCodec::ACMGenericCodec()
       vad_mode_(VADNormal),
       dtx_enabled_(false),
       ptr_dtx_inst_(NULL),
-      num_lpc_params_(kNewCNGNumPLCParams),
+      num_lpc_params_(kNewCNGNumLPCParams),
       sent_cn_previous_(false),
       prev_frame_cng_(0),
-      neteq_decode_lock_(NULL),
+      has_internal_fec_(false),
       codec_wrapper_lock_(*RWLockWrapper::CreateRWLock()),
       last_timestamp_(0xD87F3F9F),
       unique_id_(0) {
@@ -123,7 +125,10 @@ int32_t ACMGenericCodec::Add10MsDataSafe(const uint32_t timestamp,
     if ((in_audio_ix_write_ >= length_smpl * audio_channel) &&
         (in_timestamp_ix_write_ > 0)) {
       in_audio_ix_write_ -= length_smpl * audio_channel;
+      assert(in_timestamp_ix_write_ >= 0);
+
       in_timestamp_ix_write_--;
+      assert(in_audio_ix_write_ >= 0);
       WEBRTC_TRACE(webrtc::kTraceDebug, webrtc::kTraceAudioCoding, unique_id_,
                    "Adding 10ms with previous timestamp, overwriting the "
                    "previous 10ms");
@@ -160,8 +165,11 @@ int32_t ACMGenericCodec::Add10MsDataSafe(const uint32_t timestamp,
     memmove(in_timestamp_, in_timestamp_ + missed_10ms_blocks,
             (in_timestamp_ix_write_ - missed_10ms_blocks) * sizeof(uint32_t));
     in_timestamp_ix_write_ -= missed_10ms_blocks;
+    assert(in_timestamp_ix_write_ >= 0);
+
     in_timestamp_[in_timestamp_ix_write_] = timestamp;
     in_timestamp_ix_write_++;
+    assert(in_timestamp_ix_write_ < TIMESTAMP_BUFFER_SIZE_W32);
 
     // Buffer is full.
     in_audio_ix_write_ = AUDIO_BUFFER_SIZE_W16;
@@ -173,12 +181,11 @@ int32_t ACMGenericCodec::Add10MsDataSafe(const uint32_t timestamp,
   memcpy(in_audio_ + in_audio_ix_write_, data,
          length_smpl * audio_channel * sizeof(int16_t));
   in_audio_ix_write_ += length_smpl * audio_channel;
-
   assert(in_timestamp_ix_write_ < TIMESTAMP_BUFFER_SIZE_W32);
-  assert(in_timestamp_ix_write_ >= 0);
 
   in_timestamp_[in_timestamp_ix_write_] = timestamp;
   in_timestamp_ix_write_++;
+  assert(in_timestamp_ix_write_ < TIMESTAMP_BUFFER_SIZE_W32);
   return 0;
 }
 
@@ -187,6 +194,12 @@ bool ACMGenericCodec::HasFrameToEncode() const {
   if (in_audio_ix_write_ < frame_len_smpl_ * num_channels_)
     return false;
   return true;
+}
+
+int ACMGenericCodec::SetFEC(bool enable_fec) {
+  if (!HasInternalFEC() && enable_fec)
+    return -1;
+  return 0;
 }
 
 int16_t ACMGenericCodec::Encode(uint8_t* bitstream,
@@ -202,7 +215,6 @@ int16_t ACMGenericCodec::Encode(uint8_t* bitstream,
     return 0;
   }
   WriteLockScoped lockCodec(codec_wrapper_lock_);
-  ReadLockScoped lockNetEq(*neteq_decode_lock_);
 
   // Not all codecs accept the whole frame to be pushed into encoder at once.
   // Some codecs needs to be feed with a specific number of samples different
@@ -313,11 +325,7 @@ int16_t ACMGenericCodec::Encode(uint8_t* bitstream,
             // break from the loop
             break;
           }
-
-          // TODO(andrew): This should be multiplied by the number of
-          //               channels, right?
-          // http://code.google.com/p/webrtc/issues/detail?id=714
-          done = in_audio_ix_read_ >= frame_len_smpl_;
+          done = in_audio_ix_read_ >= frame_len_smpl_ * num_channels_;
         }
       }
       if (status >= 0) {
@@ -345,6 +353,7 @@ int16_t ACMGenericCodec::Encode(uint8_t* bitstream,
             (in_timestamp_ix_write_ - num_10ms_blocks) * sizeof(int32_t));
   }
   in_timestamp_ix_write_ -= num_10ms_blocks;
+  assert(in_timestamp_ix_write_ >= 0);
 
   // Remove encoded audio and move next audio to be encoded to the beginning
   // of the buffer. Accordingly, adjust the read and write indices.
@@ -389,7 +398,6 @@ int16_t ACMGenericCodec::EncoderParamsSafe(WebRtcACMCodecParams* enc_params) {
 
 int16_t ACMGenericCodec::ResetEncoder() {
   WriteLockScoped lockCodec(codec_wrapper_lock_);
-  ReadLockScoped lockNetEq(*neteq_decode_lock_);
   return ResetEncoderSafe();
 }
 
@@ -438,7 +446,6 @@ int16_t ACMGenericCodec::InternalResetEncoder() {
 int16_t ACMGenericCodec::InitEncoder(WebRtcACMCodecParams* codec_params,
                                      bool force_initialization) {
   WriteLockScoped lockCodec(codec_wrapper_lock_);
-  ReadLockScoped lockNetEq(*neteq_decode_lock_);
   return InitEncoderSafe(codec_params, force_initialization);
 }
 
@@ -448,11 +455,8 @@ int16_t ACMGenericCodec::InitEncoderSafe(WebRtcACMCodecParams* codec_params,
   int mirrorID;
   int codec_number = ACMCodecDB::CodecNumber(codec_params->codec_inst,
                                              &mirrorID);
-  if (codec_number < 0) {
-    WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceAudioCoding, unique_id_,
-                 "InitEncoderSafe: error, codec number negative");
-    return -1;
-  }
+  assert(codec_number >= 0);
+
   // Check if the parameters are for this codec.
   if ((codec_id_ >= 0) && (codec_id_ != codec_number) &&
       (codec_id_ != mirrorID)) {
@@ -481,7 +485,7 @@ int16_t ACMGenericCodec::InitEncoderSafe(WebRtcACMCodecParams* codec_params,
       encoder_exist_ = true;
     }
   }
-  frame_len_smpl_ = (codec_params->codec_inst).pacsize;
+  frame_len_smpl_ = codec_params->codec_inst.pacsize;
   num_channels_ = codec_params->codec_inst.channels;
   status = InternalInitEncoder(codec_params);
   if (status < 0) {
@@ -490,24 +494,25 @@ int16_t ACMGenericCodec::InitEncoderSafe(WebRtcACMCodecParams* codec_params,
     encoder_initialized_ = false;
     return -1;
   } else {
+    // TODO(turajs): Move these allocations to the constructor issue 2445.
     // Store encoder parameters.
     memcpy(&encoder_params_, codec_params, sizeof(WebRtcACMCodecParams));
     encoder_initialized_ = true;
     if (in_audio_ == NULL) {
       in_audio_ = new int16_t[AUDIO_BUFFER_SIZE_W16];
-      if (in_audio_ == NULL) {
-        return -1;
-      }
-      memset(in_audio_, 0, AUDIO_BUFFER_SIZE_W16 * sizeof(int16_t));
     }
     if (in_timestamp_ == NULL) {
       in_timestamp_ = new uint32_t[TIMESTAMP_BUFFER_SIZE_W32];
-      if (in_timestamp_ == NULL) {
-        return -1;
-      }
-      memset(in_timestamp_, 0, sizeof(uint32_t) * TIMESTAMP_BUFFER_SIZE_W32);
     }
   }
+
+  // Fresh start of audio buffer.
+  memset(in_audio_, 0, sizeof(*in_audio_) * AUDIO_BUFFER_SIZE_W16);
+  memset(in_timestamp_, 0, sizeof(*in_timestamp_) * TIMESTAMP_BUFFER_SIZE_W32);
+  in_audio_ix_write_ = 0;
+  in_audio_ix_read_ = 0;
+  in_timestamp_ix_write_ = 0;
+
   return SetVADSafe(&codec_params->enable_dtx, &codec_params->enable_vad,
                     &codec_params->vad_mode);
 }
@@ -544,7 +549,7 @@ void ACMGenericCodec::DestructEncoder() {
     WebRtcCng_FreeEnc(ptr_dtx_inst_);
     ptr_dtx_inst_ = NULL;
   }
-  num_lpc_params_ = kNewCNGNumPLCParams;
+  num_lpc_params_ = kNewCNGNumLPCParams;
 
   DestructEncoderSafe();
 }
@@ -621,14 +626,6 @@ int16_t ACMGenericCodec::CreateEncoder() {
     encoder_exist_ = true;
   }
   return status;
-}
-
-void ACMGenericCodec::DestructEncoderInst(void* ptr_inst) {
-  if (ptr_inst != NULL) {
-    WriteLockScoped lockCodec(codec_wrapper_lock_);
-    ReadLockScoped lockNetEq(*neteq_decode_lock_);
-    InternalDestructEncoderInst(ptr_inst);
-  }
 }
 
 uint32_t ACMGenericCodec::EarliestTimestamp() const {
@@ -840,7 +837,7 @@ int16_t ACMGenericCodec::ProcessFrameVADDTX(uint8_t* bitstream,
   // Calculate number of samples in 10 ms blocks, and number ms in one frame.
   int16_t samples_in_10ms = static_cast<int16_t>(freq_hz / 100);
   int32_t frame_len_ms = static_cast<int32_t>(frame_len_smpl_) * 1000 / freq_hz;
-  int16_t status;
+  int16_t status = -1;
 
   // Vector for storing maximum 30 ms of mono audio at 48 kHz.
   int16_t audio[1440];
@@ -1001,5 +998,13 @@ int16_t ACMGenericCodec::REDPayloadISAC(const int32_t /* isac_rate */,
                "Error: REDPayloadISAC is an iSAC specific function");
   return -1;
 }
+
+int ACMGenericCodec::SetOpusMaxPlaybackRate(int /* frequency_hz */) {
+  WEBRTC_TRACE(webrtc::kTraceWarning, webrtc::kTraceAudioCoding, unique_id_,
+      "The send-codec is not Opus, failed to set maximum playback rate.");
+  return -1;
+}
+
+}  // namespace acm2
 
 }  // namespace webrtc

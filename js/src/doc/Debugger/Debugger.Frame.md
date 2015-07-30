@@ -63,7 +63,7 @@ JavaScript stack, frames pushed for SpiderMonkey's calls to handler methods
 to report events in the debuggee are never considered visible frames.)
 
 
-## Invocation Functions and "debugger" Frames
+## <span id='invf'>Invocation</span> Functions and "debugger" Frames
 
 An <i>invocation function</i> is any function in this interface that allows
 the debugger to invoke code in the debuggee:
@@ -114,6 +114,16 @@ its prototype:
 
     * `"debugger"`: a frame for a call to user code invoked by the debugger
       (see the `eval` method below).
+
+`implementation`
+:   A string describing which tier of the JavaScript engine this frame is
+    executing in:
+
+    * `"interpreter"`: a frame running in the interpreter.
+
+    * `"baseline"`: a frame running in the unoptimizing, baseline JIT.
+
+    * `"ion"`: a frame running in the optimizing JIT.
 
 `this`
 :   The value of `this` for this frame (a debuggee value).
@@ -247,7 +257,9 @@ the compartment to which the handler method belongs.
     resumption value each handler returns establishes the completion value
     reported to the next handler.
 
-    This property is ignored on `"debugger"` frames.
+    This handler is not called on `"debugger"` frames. It is also not called
+    when unwinding a frame due to an over-recursion or out-of-memory
+    exception.
 
 `onResume`
 :   This property must be either `undefined` or a function. If it is a
@@ -328,41 +340,6 @@ methods of other kinds of objects.
 
     The <i>options</i> argument is as for
     [`Debugger.Frame.prototype.eval`][fr eval], described above.
-
-<code>pop(<i>completion</i>)</code> <i>(future plan)</i>
-:   Pop this frame (and any younger frames) from the stack as if this frame
-    had completed as specified by the completion value <i>completion</i>.
-
-    Note that this does <i>not</i> resume the debuggee's execution; it
-    merely adjusts the debuggee's state to what it would be if this frame's
-    execution had completed. The debuggee will only resume execution when
-    you return from the handler method that brought control to the debugger
-    originally.
-
-    This cannot remove any `"call"` frames for calls to host functions from
-    the stack. (We might be able to make this work eventually, but it will
-    take some cleverness.)
-
-<code>replaceCall(<i>function</i>, <i>this</i>, <i>arguments</i>)</code> <i>(future plan)</i>
-:   Pop any younger frames from the stack, and then change this frame into
-    a frame for a call to <i>function</i>, with the given <i>this</i> value
-    and <i>arguments</i>. <i>This</i> should be a debuggee value, or
-    `{ asConstructor: true }` to invoke <i>function</i> as a constructor,
-    in which case SpiderMonkey provides an appropriate `this` value itself.
-    <i>Arguments</i> should be an array of debuggee values. This frame must
-    be a `"call"` frame.
-
-    This can be used as a primitive in implementing some forms of a "patch
-    and continue" debugger feature.
-
-    Note that this does <i>not</i> resume the debuggee's execution; it
-    merely adjusts the debuggee's state to what it would be if this frame
-    were about to make this call. The debuggee will only resume execution
-    when you return from the handler method that brought control to the
-    debugger originally.
-
-    Like `pop`, this cannot remove `"call"` frames for calls to host
-    functions from the stack.
 
 
 ## Generator Frames

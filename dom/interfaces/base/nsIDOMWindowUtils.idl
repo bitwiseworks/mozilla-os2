@@ -11,12 +11,17 @@
  * elevated privileges; the method implementations should contain the
  * necessary security checks.  Access this interface by calling
  * getInterface on a DOMWindow.
+ *
+ * WARNING: Do not use 'out jsval' parameters in this file.
+ *          SpecialPowers, which is used to access nsIDOMWindowUtils
+ *          in plain mochitests, does not know how to handle them.
+ *          (Use 'jsval' return values instead.)
  */
 
 %{C++
 #include "nsColor.h"
 class gfxContext;
-class nsRect;
+struct nsRect;
 %}
 
 [ref] native nsConstRect(const nsRect);
@@ -30,6 +35,7 @@ interface nsIDOMNodeList;
 interface nsIDOMElement;
 interface nsIDOMHTMLCanvasElement;
 interface nsIDOMEvent;
+interface nsIDOMStyleSheet;
 interface nsITransferable;
 interface nsIQueryContentEventResult;
 interface nsIDOMWindow;
@@ -40,10 +46,11 @@ interface nsIDOMClientRect;
 interface nsIURI;
 interface nsIDOMEventTarget;
 interface nsIRunnable;
-interface nsICompositionStringSynthesizer;
 interface nsITranslationNodeList;
+interface nsIJSRAIIHelper;
+interface nsIContentPermissionRequest;
 
-[scriptable, uuid(d4ed34fc-9c07-4cef-b9e1-623794558db3)]
+[scriptable, uuid(d0461871-31bd-4da1-b22d-24595c27295c)]
 interface nsIDOMWindowUtils : nsISupports {
 
   /**
@@ -94,6 +101,11 @@ interface nsIDOMWindowUtils : nsISupports {
    * or is 0, it is taken to be 1.
    */
   unsigned long redraw([optional] in unsigned long aCount);
+
+  /**
+   * Force a synchronous layer transaction for this window if necessary.
+   */
+  void updateLayerTree();
 
   /**
    * Set the CSS viewport to be |widthPx| x |heightPx| in units of CSS
@@ -168,15 +180,13 @@ interface nsIDOMWindowUtils : nsISupports {
    * that each edge is located at a multiple of the "alignment" value.
    *
    * Note that both the margin values and alignment are treated as values in
-   * LayerPixels. Refer to layout/base/Units.h for a description of this unit.
+   * ScreenPixels. Refer to layout/base/Units.h for a description of this unit.
    * The base rect values are in app units.
    */
   void setDisplayPortMarginsForElement(in float aLeftMargin,
                                        in float aTopMargin,
                                        in float aRightMargin,
                                        in float aBottomMargin,
-                                       in uint32_t aAlignmentX,
-                                       in uint32_t aAlignmentY,
                                        in nsIDOMElement aElement,
                                        in uint32_t aPriority);
 
@@ -187,43 +197,36 @@ interface nsIDOMWindowUtils : nsISupports {
                                     in nsIDOMElement aElement);
 
   /**
-   * When a display port is set, this allows a sub-section of that
-   * display port to be marked as 'critical'. In this scenario, the
-   * area outside of this rectangle may be rendered at a lower
-   * detail (for example, by reducing its resolution), or not rendered
-   * at all under some circumstances.
-   * This call will have no effect if a display port has not been set.
-   */
-  void setCriticalDisplayPortForElement(in float aXPx, in float aYPx,
-                                        in float aWidthPx, in float aHeightPx,
-                                        in nsIDOMElement aElement);
-
-  /**
    * Get/set the resolution at which rescalable web content is drawn.
-   * Currently this is only (some) thebes content.
    *
    * Setting a new resolution does *not* trigger reflow.  This API is
    * entirely separate from textZoom and fullZoom; a resolution scale
    * can be applied together with both textZoom and fullZoom.
    *
-   * The effect of is API for gfx code to allocate more or fewer
+   * The effect of this API is for gfx code to allocate more or fewer
    * pixels for rescalable content by a factor of |resolution| in
-   * either or both dimensions.  setResolution() together with
-   * setDisplayport() can be used to implement a non-reflowing
-   * scale-zoom in concert with another entity that can draw with a
-   * scale.  For example, to scale a content |window| inside a
-   * <browser> by a factor of 2.0
-   *
-   *   window.setDisplayport(x, y, oldW / 2.0, oldH / 2.0);
-   *   window.setResolution(2.0, 2.0);
-   *   // elsewhere
-   *   browser.setViewportScale(2.0, 2.0);
+   * either or both dimensions.  The scale at which the content is
+   * displayed does not change; if that is desired, use
+   * setResolutionAndScaleTo() instead.
    *
    * The caller of this method must have chrome privileges.
    */
   void setResolution(in float aXResolution, in float aYResolution);
 
   void getResolution(out float aXResolution, out float aYResolution);
+
+  /**
+   * Similar to setResolution(), but also scales the content by the
+   * amount of the resolution, so that it is displayed at a
+   * correspondingly larger or smaller size, without the need for
+   * the caller to set an additional transform.
+   *
+   * This can be used to implement a non-reflowing scale-zoom, e.g.
+   * for pinch-zoom on mobile platforms.
+   *
+   * The caller of this method must have chrome privileges.
+   */
+  void setResolutionAndScaleTo(in float aXResolution, in float aYResolution);
 
   /**
    * Whether the resolution has been set by the user.
@@ -258,14 +261,16 @@ interface nsIDOMWindowUtils : nsISupports {
   const long MODIFIER_ALTGRAPH   = 0x0010;
   const long MODIFIER_CAPSLOCK   = 0x0020;
   const long MODIFIER_FN         = 0x0040;
-  const long MODIFIER_NUMLOCK    = 0x0080;
-  const long MODIFIER_SCROLLLOCK = 0x0100;
-  const long MODIFIER_SYMBOLLOCK = 0x0200;
-  const long MODIFIER_OS         = 0x0400;
+  const long MODIFIER_FNLOCK     = 0x0080;
+  const long MODIFIER_NUMLOCK    = 0x0100;
+  const long MODIFIER_SCROLLLOCK = 0x0200;
+  const long MODIFIER_SYMBOL     = 0x0400;
+  const long MODIFIER_SYMBOLLOCK = 0x0800;
+  const long MODIFIER_OS         = 0x1000;
 
   /** Synthesize a mouse event. The event types supported are:
    *    mousedown, mouseup, mousemove, mouseover, mouseout, contextmenu,
-   *    MozMouseHitTest
+   *    MozMouseHittest
    *
    * Events are sent in coordinates offset by aX and aY from the window.
    *
@@ -375,8 +380,8 @@ interface nsIDOMWindowUtils : nsISupports {
                            [optional] in long aPointerId,
                            [optional] in long aWidth,
                            [optional] in long aHeight,
-                           [optional] in long tiltX,
-                           [optional] in long tiltY,
+                           [optional] in long aTiltX,
+                           [optional] in long aTiltY,
                            [optional] in boolean aIsPrimary,
                            [optional] in boolean aIsSynthesized);
 
@@ -433,6 +438,27 @@ interface nsIDOMWindowUtils : nsISupports {
                               [optional] in unsigned short aInputSourceArg,
                               [optional] in boolean aIsSynthesized);
 
+  /** The same as sendPointerEvent but ensures that the event
+   *  is dispatched to this DOM window or one of its children.
+   */
+  [optional_argc]
+  void sendPointerEventToWindow(in AString aType,
+                                in float aX,
+                                in float aY,
+                                in long aButton,
+                                in long aClickCount,
+                                in long aModifiers,
+                                [optional] in boolean aIgnoreRootScrollFrame,
+                                [optional] in float aPressure,
+                                [optional] in unsigned short aInputSourceArg,
+                                [optional] in long aPointerId,
+                                [optional] in long aWidth,
+                                [optional] in long aHeight,
+                                [optional] in long aTiltX,
+                                [optional] in long aTiltY,
+                                [optional] in boolean aIsPrimary,
+                                [optional] in boolean aIsSynthesized);
+
   /** The same as sendTouchEvent but ensures that the event is dispatched to
    *  this DOM window or one of its children.
    */
@@ -475,9 +501,11 @@ interface nsIDOMWindowUtils : nsISupports {
    *                           scroll.
    * @param aOptions           Set following flags.
    */
-   const unsigned long WHEEL_EVENT_CAUSED_BY_PIXEL_ONLY_DEVICE = 0x0001;
-   const unsigned long WHEEL_EVENT_CAUSED_BY_MOMENTUM          = 0x0002;
-   const unsigned long WHEEL_EVENT_CUSTOMIZED_BY_USER_PREFS    = 0x0004;
+   const unsigned long WHEEL_EVENT_CAUSED_BY_NO_LINE_OR_PAGE_DELTA_DEVICE = 0x0001;
+   // @deprecated Use WHEEL_EVENT_CAUSED_BY_NO_LINE_OR_PAGE_DELTA_DEVICE.
+   const unsigned long WHEEL_EVENT_CAUSED_BY_PIXEL_ONLY_DEVICE            = 0x0001;
+   const unsigned long WHEEL_EVENT_CAUSED_BY_MOMENTUM          	          = 0x0002;
+   const unsigned long WHEEL_EVENT_CUSTOMIZED_BY_USER_PREFS               = 0x0004;
    // If any of the following flags is specified this method will throw an
    // exception in case the relevant overflowDelta has an unexpected value.
    const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_X_ZERO      = 0x0010;
@@ -520,14 +548,16 @@ interface nsIDOMWindowUtils : nsISupports {
   // If this is set, preventDefault() the event before dispatch.
   const unsigned long KEY_FLAG_PREVENT_DEFAULT   = 0x0001;
 
+  // If this is set, the mIsSynthesizedForTests flag is set to false
+  // on the key event. Otherwise it is true.
+  const unsigned long KEY_FLAG_NOT_SYNTHESIZED_FOR_TESTS = 0x0002;
+
   // if one of these flags is set, the KeyboardEvent.location will be the value.
   // Otherwise, it will be computed from aKeyCode.
   const unsigned long KEY_FLAG_LOCATION_STANDARD = 0x0010;
   const unsigned long KEY_FLAG_LOCATION_LEFT     = 0x0020;
   const unsigned long KEY_FLAG_LOCATION_RIGHT    = 0x0040;
   const unsigned long KEY_FLAG_LOCATION_NUMPAD   = 0x0080;
-  const unsigned long KEY_FLAG_LOCATION_MOBILE   = 0x0100;
-  const unsigned long KEY_FLAG_LOCATION_JOYSTICK = 0x0200;
 
   boolean sendKeyEvent(in AString aType,
                        in long aKeyCode,
@@ -633,8 +663,8 @@ interface nsIDOMWindowUtils : nsISupports {
    * drag - msg1-n:TOUCH_CONTACT (moving), msgn+1:TOUCH_REMOVE
    * hover drag - msg1-n:TOUCH_HOVER (moving), msgn+1:TOUCH_REMOVE
    *
-   * Widget support: Windows 8.0+, Winrt/Win32. Other widgets will
-   * throw.
+   * Widget support: Windows 8.0+, Winrt/Win32. Gonk supports CONTACT, REMOVE,
+   * and CANCEL but no HOVER. Other widgets will throw.
    *
    * @param aPointerId The touch point id to create or update.
    * @param aTouchState one or more of the touch states listed above
@@ -953,7 +983,7 @@ interface nsIDOMWindowUtils : nsISupports {
 
   /**
    * Get the current zoom factor.
-   * This is _approximately_ the same as nsIMarkupDocumentViewer.fullZoom,
+   * This is _approximately_ the same as nsIContentViewer.fullZoom,
    * but takes into account Gecko's quantization of the zoom factor, which is
    * implemented by adjusting the (integer) number of appUnits per devPixel.
    */
@@ -1003,31 +1033,6 @@ interface nsIDOMWindowUtils : nsISupports {
    */
   void sendContentCommandEvent(in AString aType,
                                [optional] in nsITransferable aTransferable);
-
-  /**
-   * Synthesize a composition event to the window.
-   *
-   * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without chrome privileges.
-   *
-   * @param aType     The event type: "compositionstart", "compositionend" or
-   *                  "compositionupdate".
-   * @param aData     The data property value.  Note that this isn't applied
-   *                  for compositionstart event because its value is the
-   *                  selected text which is automatically computed.
-   * @param aLocale   The locale property value.
-   */
-  void sendCompositionEvent(in AString aType,
-                            in AString aData,
-                            in AString aLocale);
-
-  /**
-   * Creating synthesizer of composition string on the window.
-   *
-   * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without chrome privileges.
-   */
-  nsICompositionStringSynthesizer createCompositionStringSynthesizer();
 
   /**
    * If sendQueryContentEvent()'s aAdditionalFlags argument is
@@ -1392,10 +1397,10 @@ interface nsIDOMWindowUtils : nsISupports {
   void setAsyncScrollOffset(in nsIDOMNode aNode, in int32_t aX, in int32_t aY);
 
   /**
-   * Method for testing nsStyleAnimation::ComputeDistance.
+   * Method for testing StyleAnimationValue::ComputeDistance.
    *
    * Returns the distance between the two values as reported by
-   * nsStyleAnimation::ComputeDistance for the given element and
+   * StyleAnimationValue::ComputeDistance for the given element and
    * property.
    */
   double computeAnimationDistance(in nsIDOMElement element,
@@ -1440,33 +1445,22 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute boolean mayHaveTouchEventListeners;
  
   /**
-   * Check if any ThebesLayer painting has been done for this element,
+   * Check if any PaintedLayer painting has been done for this element,
    * clears the painted flags if they have.
    */
   boolean checkAndClearPaintedState(in nsIDOMElement aElement);
 
   /**
-   * Internal file constructor intended for testing of File objects.
-   * Example of constructor usage:
-   *   getFile("myfile.txt", [b1, "foo"], { type: "text/plain" })
-   */
-  [optional_argc, implicit_jscontext]
-  nsIDOMFile getFile(in DOMString aName, [optional] in jsval aBlobParts,
-                     [optional] in jsval aParameters);
-
-  /**
-   * Internal blob constructor intended for testing of Blob objects.
-   * Example of constructor usage:
-   *   getBlob([b1, "foo"], { type: "text/plain" })
-   */
-  [optional_argc, implicit_jscontext]
-  nsIDOMBlob getBlob([optional] in jsval aBlobParts,
-                     [optional] in jsval aParameters);
-
-  /**
    * Get internal id of the stored blob, file or file handle.
    */
   [implicit_jscontext] long long getFileId(in jsval aFile);
+
+  /**
+   * Get internal file path of the stored file or file handle.
+   *
+   * TODO: File handle objects are actually not supported at the moment.
+   */
+  [implicit_jscontext] AString getFilePath(in jsval aFile);
 
   /**
    * Get file ref count info for given database and file id.
@@ -1584,15 +1578,32 @@ interface nsIDOMWindowUtils : nsISupports {
    *
    * Sheets added via this API take effect immediately on the document.
    */
-  void loadSheet(in nsIURI sheetURI,
-                           in unsigned long type);
+  void loadSheet(in nsIURI sheetURI, in unsigned long type);
+
+  /**
+   * Same as the above method but allows passing the URI as a string.
+   */
+  void loadSheetUsingURIString(in ACString sheetURI, in unsigned long type);
+
+  /**
+   * Adds a style sheet to the list of additional style sheets of the document.
+   *
+   * Style sheets can be preloaded with nsIStyleSheetService.preloadSheet.
+   *
+   * Sheets added via this API take effect immediately on the document.
+   */
+  void addSheet(in nsIDOMStyleSheet sheet, in unsigned long type);
 
   /**
    * Remove the document style sheet at |sheetURI| from the list of additional 
    * style sheets of the document.  The removal takes effect immediately.
    */
-  void removeSheet(in nsIURI sheetURI,
-                                in unsigned long type);
+  void removeSheet(in nsIURI sheetURI, in unsigned long type);
+
+  /**
+   * Same as the above method but allows passing the URI as a string.
+   */
+  void removeSheetUsingURIString(in ACString sheetURI, in unsigned long type);
 
   /**
    * Returns true if a user input is being handled.
@@ -1661,13 +1672,33 @@ interface nsIDOMWindowUtils : nsISupports {
     */
    AString getOMTAStyle(in nsIDOMElement aElement, in AString aProperty);
 
-   /*
-    * Returns the value of a given property.  If the property is animated off
-    * the main thread, this function will fetch the correct value from the
-    * compositor.
+   /**
+    * Special function that gets a property syncronously from the last composite
+    * that occured.
+    *
+    * Supported properties:
+    *   "overdraw": Report a percentage between 0 and 999 indicate how many times
+    *               each pixels on the destination window have been touched.
+    *   "missed_hwc": Report a bool if hardware composer is supported but was
+    *                 not used for the last frame.
     */
-   AString getOMTAOrComputedStyle(in nsIDOMElement aElement,
-                                  in AString aProperty);
+   float requestCompositorProperty(in AString aProperty);
+
+   /**
+    * If aHandlingInput is true, this informs the event state manager that
+    * we're handling user input. Otherwise, this is a no-op (as by default
+    * we're not handling user input).
+    * Remember to call destruct() on the return value!
+    * See also nsIDOMWindowUtils::isHandlingUserInput.
+    */
+   nsIJSRAIIHelper setHandlingUserInput(in boolean aHandlingInput);
+
+   /**
+    * Get the content- and compositor-side APZ test data instances.
+    * The return values are of type APZTestData (see APZTestData.webidl).
+    */
+   [implicit_jscontext] jsval getContentAPZTestData();
+   [implicit_jscontext] jsval getCompositorAPZTestData();
 
    /**
     * With this it's possible to mute all the MediaElements in this window.
@@ -1681,6 +1712,43 @@ interface nsIDOMWindowUtils : nsISupports {
      * volume of all ancestor windows.
      */
     attribute float audioVolume;
+
+    /**
+     * This method doesn't do anything useful.  It was solely added for the
+     * purpose of the test for bug 503926.
+     */
+    void xpconnectArgument(in nsIDOMWindowUtils aThis);
+
+    /**
+     * Helper for JS components that need to send permission requests with
+     * e10s support properly.
+     */
+     void askPermission(in nsIContentPermissionRequest aRequest);
+
+  /**
+   * Number of frames constructed (excluding breaking) for the curent
+   * document.
+   *
+   * May throw NS_ERROR_NOT_AVAILABLE.
+   */
+  readonly attribute unsigned long long framesConstructed;
+
+  /**
+   * Number of frames reflowed for the curent document.
+   *
+   * May throw NS_ERROR_NOT_AVAILABLE.
+   */
+  readonly attribute unsigned long long framesReflowed;
+
+  /**
+   * Controls the amount of chrome that should be visible on each side of
+   * the window. Works like the chromemargin xul:window attribute.
+   * This should only be used with non-XUL windows.
+   */
+  void setChromeMargin(in int32_t aTop,
+                       in int32_t aRight,
+                       in int32_t aBottom,
+                       in int32_t aLeft);
 };
 
 [scriptable, uuid(c694e359-7227-4392-a138-33c0cc1f15a6)]
@@ -1691,4 +1759,13 @@ interface nsITranslationNodeList : nsISupports {
   // A translation root is a block element, or an inline element
   // which its parent is not a translation node.
   boolean isTranslationRootAtIndex(in unsigned long index);
+};
+
+/**
+ * JS doesn't do RAII very well. We can use this interface to make remembering
+ * to destruct an object in a finally clause easier.
+ */
+[scriptable, uuid(52e5a996-d0a9-4efc-a6fa-24489c532b19)]
+interface nsIJSRAIIHelper : nsISupports {
+  void destruct();
 };

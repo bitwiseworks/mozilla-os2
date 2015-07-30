@@ -58,11 +58,15 @@ class AnyContextFlags
     // scope chain.
     bool            hasDebuggerStatement:1;
 
+    // A direct eval occurs in the body of the script.
+    bool            hasDirectEval:1;
+
   public:
     AnyContextFlags()
      :  hasExplicitUseStrict(false),
         bindingsAccessedDynamically(false),
-        hasDebuggerStatement(false)
+        hasDebuggerStatement(false),
+        hasDirectEval(false)
     { }
 };
 
@@ -195,16 +199,22 @@ class SharedContext
     bool hasExplicitUseStrict()        const { return anyCxFlags.hasExplicitUseStrict; }
     bool bindingsAccessedDynamically() const { return anyCxFlags.bindingsAccessedDynamically; }
     bool hasDebuggerStatement()        const { return anyCxFlags.hasDebuggerStatement; }
+    bool hasDirectEval()               const { return anyCxFlags.hasDirectEval; }
 
     void setExplicitUseStrict()           { anyCxFlags.hasExplicitUseStrict        = true; }
     void setBindingsAccessedDynamically() { anyCxFlags.bindingsAccessedDynamically = true; }
     void setHasDebuggerStatement()        { anyCxFlags.hasDebuggerStatement        = true; }
+    void setHasDirectEval()               { anyCxFlags.hasDirectEval               = true; }
 
     inline bool allLocalsAliased();
 
     // JSOPTION_EXTRA_WARNINGS warnings or strict mode errors.
     bool needStrictChecks() {
         return strict || extraWarnings;
+    }
+
+    bool isDotVariable(JSAtom* atom) const {
+        return atom == context->names().dotGenerator || atom == context->names().dotGenRVal;
     }
 };
 
@@ -227,7 +237,7 @@ class GlobalSharedContext : public SharedContext
 inline GlobalSharedContext*
 SharedContext::asGlobalSharedContext()
 {
-    JS_ASSERT(isGlobalSharedContext());
+    MOZ_ASSERT(isGlobalSharedContext());
     return static_cast<GlobalSharedContext*>(this);
 }
 
@@ -245,12 +255,13 @@ class FunctionBox : public ObjectBox, public SharedContext
     bool            inWith:1;               /* some enclosing scope is a with-statement */
     bool            inGenexpLambda:1;       /* lambda from generator expression */
     bool            hasDestructuringArgs:1; /* arguments list contains destructuring expression */
-    bool            useAsm:1;               /* function contains "use asm" directive */
-    bool            insideUseAsm:1;         /* nested function of function of "use asm" directive */
+    bool            useAsm:1;               /* see useAsmOrInsideUseAsm */
+    bool            insideUseAsm:1;         /* see useAsmOrInsideUseAsm */
 
     // Fields for use in heuristics.
     bool            usesArguments:1;  /* contains a free use of 'arguments' */
     bool            usesApply:1;      /* contains an f.apply() call */
+    bool            usesThis:1;       /* contains 'this' */
 
     FunctionContextFlags funCxFlags;
 
@@ -271,7 +282,7 @@ class FunctionBox : public ObjectBox, public SharedContext
         // A generator kind can be set at initialization, or when "yield" is
         // first seen.  In both cases the transition can only happen from
         // NotGenerator.
-        JS_ASSERT(!isGenerator());
+        MOZ_ASSERT(!isGenerator());
         generatorKindBits_ = GeneratorKindAsBits(kind);
     }
 
@@ -285,15 +296,18 @@ class FunctionBox : public ObjectBox, public SharedContext
     void setHasExtensibleScope()           { funCxFlags.hasExtensibleScope       = true; }
     void setNeedsDeclEnvObject()           { funCxFlags.needsDeclEnvObject       = true; }
     void setArgumentsHasLocalBinding()     { funCxFlags.argumentsHasLocalBinding = true; }
-    void setDefinitelyNeedsArgsObj()       { JS_ASSERT(funCxFlags.argumentsHasLocalBinding);
+    void setDefinitelyNeedsArgsObj()       { MOZ_ASSERT(funCxFlags.argumentsHasLocalBinding);
                                              funCxFlags.definitelyNeedsArgsObj   = true; }
 
     bool hasDefaults() const {
         return length != function()->nargs() - function()->hasRest();
     }
 
-    // Return whether this function has either specified "use asm" or is
-    // (transitively) nested inside a function that has.
+    // Return whether this or an enclosing function is being parsed and
+    // validated as asm.js. Note: if asm.js validation fails, this will be false
+    // while the function is being reparsed. This flag can be used to disable
+    // certain parsing features that are necessary in general, but unnecessary
+    // for validated asm.js.
     bool useAsmOrInsideUseAsm() const {
         return useAsm || insideUseAsm;
     }
@@ -317,7 +331,7 @@ class FunctionBox : public ObjectBox, public SharedContext
 inline FunctionBox*
 SharedContext::asFunctionBox()
 {
-    JS_ASSERT(isFunctionBox());
+    MOZ_ASSERT(isFunctionBox());
     return static_cast<FunctionBox*>(this);
 }
 
@@ -359,6 +373,7 @@ enum StmtType {
     STMT_FOR_IN_LOOP,           /* for/in loop statement */
     STMT_FOR_OF_LOOP,           /* for/of loop statement */
     STMT_WHILE_LOOP,            /* while loop statement */
+    STMT_SPREAD,                /* spread operator (pseudo for/of) */
     STMT_LIMIT
 };
 
@@ -410,7 +425,7 @@ struct StmtInfoBase {
     // isNestedScope.
     Rooted<NestedScopeObject*> staticScope;
 
-    StmtInfoBase(ExclusiveContext* cx)
+    explicit StmtInfoBase(ExclusiveContext* cx)
         : isBlockScope(false), isNestedScope(false), isForLetBlock(false),
           label(cx), staticScope(cx)
     {}
@@ -423,9 +438,12 @@ struct StmtInfoBase {
         return isNestedScope;
     }
 
+    void setStaticScope() {
+    }
+
     StaticBlockObject& staticBlock() const {
-        JS_ASSERT(isNestedScope);
-        JS_ASSERT(isBlockScope);
+        MOZ_ASSERT(isNestedScope);
+        MOZ_ASSERT(isBlockScope);
         return staticScope->as<StaticBlockObject>();
     }
 
@@ -482,7 +500,7 @@ FinishPopStatement(ContextT* ct)
     if (stmt->linksScope()) {
         ct->topScopeStmt = stmt->downScope;
         if (stmt->isNestedScope) {
-            JS_ASSERT(stmt->staticScope);
+            MOZ_ASSERT(stmt->staticScope);
             ct->staticScope = stmt->staticScope->enclosingNestedScope();
         }
     }

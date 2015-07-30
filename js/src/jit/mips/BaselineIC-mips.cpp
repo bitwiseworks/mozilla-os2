@@ -10,7 +10,7 @@
 #include "jit/BaselineHelpers.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
-#include "jit/IonLinker.h"
+#include "jit/Linker.h"
 
 #include "jsboolinlines.h"
 
@@ -83,17 +83,18 @@ ICBinaryArith_Int32::Compiler::generateStubCode(MacroAssembler& masm)
     // DIV and MOD need an extra non-volatile ValueOperand to hold R0.
     GeneralRegisterSet savedRegs = availableGeneralRegs(2);
     savedRegs = GeneralRegisterSet::Intersect(GeneralRegisterSet::NonVolatile(), savedRegs);
-    ValueOperand savedValue = savedRegs.takeAnyValue();
 
     Label goodMul, divTest1, divTest2;
     switch(op_) {
       case JSOP_ADD:
         // We know R0.typeReg() already contains the integer tag. No boxing
         // required.
-        masm.ma_addTestOverflow(R0.payloadReg(), R0.payloadReg(), R1.payloadReg(), &failure);
+        masm.ma_addTestOverflow(scratchReg, R0.payloadReg(), R1.payloadReg(), &failure);
+        masm.move32(scratchReg, R0.payloadReg());
         break;
       case JSOP_SUB:
-        masm.ma_subTestOverflow(R0.payloadReg(), R0.payloadReg(), R1.payloadReg(), &failure);
+        masm.ma_subTestOverflow(scratchReg, R0.payloadReg(), R1.payloadReg(), &failure);
+        masm.move32(scratchReg, R0.payloadReg());
         break;
       case JSOP_MUL: {
         masm.ma_mul_branch_overflow(scratchReg, R0.payloadReg(), R1.payloadReg(), &failure);
@@ -178,7 +179,7 @@ ICBinaryArith_Int32::Compiler::generateStubCode(MacroAssembler& masm)
         }
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("Unhandled op for BinaryArith_Int32.");
+        MOZ_CRASH("Unhandled op for BinaryArith_Int32.");
     }
 
     EmitReturnFromIC(masm);
@@ -207,7 +208,7 @@ ICUnaryArith_Int32::Compiler::generateStubCode(MacroAssembler& masm)
         masm.neg32(R0.payloadReg());
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("Unexpected op");
+        MOZ_CRASH("Unexpected op");
         return false;
     }
 

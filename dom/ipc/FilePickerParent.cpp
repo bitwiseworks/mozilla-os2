@@ -6,7 +6,6 @@
 
 #include "FilePickerParent.h"
 #include "nsComponentManagerUtils.h"
-#include "nsDOMFile.h"
 #include "nsNetCID.h"
 #include "nsIDocument.h"
 #include "nsIDOMFile.h"
@@ -14,10 +13,11 @@
 #include "nsIFile.h"
 #include "nsISimpleEnumerator.h"
 #include "mozilla/unused.h"
+#include "mozilla/dom/File.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabParent.h"
-#include "mozilla/dom/ipc/Blob.h"
+#include "mozilla/dom/ipc/BlobParent.h"
 
 using mozilla::unused;
 using namespace mozilla::dom;
@@ -95,7 +95,7 @@ FilePickerParent::FileSizeAndDateRunnable::Run()
   }
 
   // Dispatch ourselves back on the main thread.
-  if (NS_FAILED(NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL))) {
+  if (NS_FAILED(NS_DispatchToMainThread(this))) {
     // It's hard to see how we can recover gracefully in this case. The child
     // process is waiting for an IPC, but that can only happen on the main
     // thread.
@@ -113,11 +113,12 @@ FilePickerParent::FileSizeAndDateRunnable::Destroy()
 void
 FilePickerParent::SendFiles(const nsCOMArray<nsIDOMFile>& aDomfiles)
 {
-  ContentParent* parent = static_cast<ContentParent*>(Manager()->Manager());
+  nsIContentParent* parent = TabParent::GetFrom(Manager())->Manager();
   InfallibleTArray<PBlobParent*> files;
 
   for (unsigned i = 0; i < aDomfiles.Length(); i++) {
-    BlobParent* blob = parent->GetOrCreateActorForBlob(aDomfiles[i]);
+    BlobParent* blob = parent->GetOrCreateActorForBlob(
+      static_cast<File*>(aDomfiles[i]));
     if (blob) {
       files.AppendElement(blob);
     }
@@ -149,7 +150,10 @@ FilePickerParent::Done(int16_t aResult)
       iter->GetNext(getter_AddRefs(supports));
       if (supports) {
         nsCOMPtr<nsIFile> file = do_QueryInterface(supports);
-        nsCOMPtr<nsIDOMFile> domfile = new nsDOMFileFile(file);
+
+        // A null parent is fine because File are not used in this process
+        // but only in the child.
+        nsCOMPtr<nsIDOMFile> domfile = File::CreateFromFile(nullptr, file);
         domfiles.AppendElement(domfile);
       }
     }
@@ -157,7 +161,9 @@ FilePickerParent::Done(int16_t aResult)
     nsCOMPtr<nsIFile> file;
     mFilePicker->GetFile(getter_AddRefs(file));
     if (file) {
-      nsCOMPtr<nsIDOMFile> domfile = new nsDOMFileFile(file);
+      // A null parent is fine because File are not used in this process
+      // but only in the child.
+      nsCOMPtr<nsIDOMFile> domfile = File::CreateFromFile(nullptr, file);
       domfiles.AppendElement(domfile);
     }
   }
@@ -177,7 +183,7 @@ FilePickerParent::CreateFilePicker()
     return false;
   }
 
-  Element* element = static_cast<TabParent*>(Manager())->GetOwnerElement();
+  Element* element = TabParent::GetFrom(Manager())->GetOwnerElement();
   if (!element) {
     return false;
   }
@@ -195,8 +201,9 @@ FilePickerParent::RecvOpen(const int16_t& aSelectedType,
                            const bool& aAddToRecentDocs,
                            const nsString& aDefaultFile,
                            const nsString& aDefaultExtension,
-                           const InfallibleTArray<nsString>& aFilters,
-                           const InfallibleTArray<nsString>& aFilterNames)
+                           InfallibleTArray<nsString>&& aFilters,
+                           InfallibleTArray<nsString>&& aFilterNames,
+                           const nsString& aDisplayDirectory)
 {
   if (!CreateFilePicker()) {
     unused << Send__delete__(this, void_t(), nsIFilePicker::returnCancel);
@@ -212,6 +219,14 @@ FilePickerParent::RecvOpen(const int16_t& aSelectedType,
   mFilePicker->SetDefaultString(aDefaultFile);
   mFilePicker->SetDefaultExtension(aDefaultExtension);
   mFilePicker->SetFilterIndex(aSelectedType);
+
+  if (!aDisplayDirectory.IsEmpty()) {
+    nsCOMPtr<nsIFile> localFile = do_CreateInstance(NS_LOCAL_FILE_CONTRACTID);
+    if (localFile) {
+      localFile->InitWithPath(aDisplayDirectory);
+      mFilePicker->SetDisplayDirectory(localFile);
+    }
+  }
 
   mCallback = new FilePickerShownCallback(this);
 

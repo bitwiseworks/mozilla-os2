@@ -18,6 +18,9 @@
 // like images (e.g. HTML <button> elements)
 #define NS_THEME_BUTTON_BEVEL                              7
 
+// A themed focus outline (for outline:auto)
+#define NS_THEME_FOCUS_OUTLINE                             8
+
 // The toolbox that contains the toolbars.
 #define NS_THEME_TOOLBOX                                   11
 
@@ -279,3 +282,7 @@
 // moz-apperance style used in setting proper glass margins
 #define NS_THEME_WIN_EXCLUDE_GLASS                         242
 
+#define NS_THEME_MAC_VIBRANCY_LIGHT                        243
+#define NS_THEME_MAC_VIBRANCY_DARK                         244
+#define NS_THEME_MAC_DISCLOSURE_BUTTON_OPEN                245
+#define NS_THEME_MAC_DISCLOSURE_BUTTON_CLOSED              246

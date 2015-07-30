@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ts=2 sw=2 sts=2 et: */
 
 /*
@@ -833,6 +833,566 @@ var gFlexboxTestcases =
          "_min-main-size": "120px",
          "_main-size": [ null, "120px" ]
        },
+     ]
+ },
+
+ // Test cases where flex-grow sums to less than 1:
+ // ===============================================
+ // This makes us treat the flexibilities like "fraction of free space"
+ // instead of weights, so that e.g. a single item with "flex-grow: 0.1"
+ // will only get 10% of the free space instead of all of the free space.
+
+ // Basic cases where flex-grow sum is less than 1:
+ {
+   items:
+     [
+       {
+         "flex": "0.1 100px",
+         "_main-size": [ null, "110px" ] // +10% of free space
+       },
+     ]
+ },
+ {
+   items:
+     [
+       {
+         "flex": "0.8 0px",
+         "_main-size": [ null, "160px" ] // +80% of free space
+       },
+     ]
+ },
+
+ // ... and now with two flex items:
+ {
+   items:
+     [
+       {
+         "flex": "0.4 70px",
+         "_main-size": [ null, "110px" ] // +40% of free space
+       },
+       {
+         "flex": "0.2 30px",
+         "_main-size": [ null,  "50px" ] // +20% of free space
+       },
+     ]
+ },
+
+ // ...and now with max-size modifying how much free space one item can take:
+ {
+   items:
+     [
+       {
+         "flex": "0.4 70px",
+         "_main-size": [ null, "110px" ] // +40% of free space
+       },
+       {
+         "flex": "0.2 30px",
+         "_max-main-size": "35px",
+         "_main-size": [ null,  "35px" ] // +20% free space, then clamped
+       },
+     ]
+ },
+ // ...and now with a max-size smaller than our flex-basis:
+ // (This makes us freeze the second item right away, before we compute
+ // the initial free space.)
+ {
+   items:
+     [
+       {
+         "flex": "0.4 70px",
+         "_main-size": [ null, "118px" ] // +40% of 200px-70px-10px
+       },
+       {
+         "flex": "0.2 30px",
+         "_max-main-size": "10px",
+         "_main-size": [ null,  "10px" ] // immediately frozen
+       },
+     ]
+ },
+ // ...and now with a max-size and a huge flex-basis, such that we initially
+ // have negative free space, which makes the "% of [original] free space"
+ // calculations a bit more subtle. We set the "original free space" after
+ // we've clamped the second item (the first time the free space is positive).
+ {
+   items:
+     [
+       {
+         "flex": "0.4 70px",
+         "_main-size": [ null, "118px" ] // +40% of free space _after freezing
+                                         // the other item_
+       },
+       {
+         "flex": "0.2 150px",
+         "_max-main-size": "10px",
+         "_main-size": [ null,  "10px" ] // clamped immediately
+       },
+     ]
+ },
+
+ // Now with min-size modifying how much free space our items take:
+ {
+   items:
+     [
+       {
+         "flex": "0.4 70px",
+         "_main-size": [ null, "110px" ] // +40% of free space
+       },
+       {
+         "flex": "0.2 30px",
+         "_min-main-size": "70px",
+         "_main-size": [ null,  "70px" ] // +20% free space, then clamped
+       },
+     ]
+ },
+
+ // ...and now with a large enough min-size that it prevents the other flex
+ // item from taking its full desired portion of the original free space:
+ {
+   items:
+     [
+       {
+         "flex": "0.4 70px",
+         "_main-size": [ null, "80px" ] // (Can't take my full +40% of
+                                        // free space due to other item's
+                                        // large min-size.)
+       },
+       {
+         "flex": "0.2 30px",
+         "_min-main-size": "120px",
+         "_main-size": [ null,  "120px" ] // +20% free space, then clamped
+       },
+     ]
+ },
+ // ...and now with a large-enough min-size that it pushes the other flex item
+ // to actually shrink a bit (with default "flex-shrink:1"):
+ {
+   items:
+     [
+       {
+         "flex": "0.3 30px",
+         "_main-size": [ null,  "20px" ] // -10px, instead of desired +45px
+       },
+       {
+         "flex": "0.2 20px",
+         "_min-main-size": "180px",
+         "_main-size": [ null,  "180px" ] // +160px, instead of desired +30px
+       },
+     ]
+ },
+
+ // In this case, the items' flexibilities don't initially sum to < 1, but they
+ // do after we freeze the third item for violating its max-size.
+ {
+   items:
+     [
+       {
+         "flex": "0.3 30px",
+         "_main-size": [ null,  "75px" ]
+         // 1st loop: desires (0.3 / 5) * 150px = 9px. Tentatively granted.
+         // 2nd loop: desires 0.3 * 150px = 45px. Tentatively granted.
+         // 3rd loop: desires 0.3 * 150px = 45px. Granted +45px.
+       },
+       {
+         "flex": "0.2 20px",
+         "_max-main-size": "30px",
+         "_main-size": [ null,  "30px" ]
+         // First loop: desires (0.2 / 5) * 150px = 6px. Tentatively granted.
+         // Second loop: desires 0.2 * 150px = 30px. Frozen at +10px.
+       },
+       {
+         "flex": "4.5 0px",
+         "_max-main-size": "20px",
+         "_main-size": [ null,  "20px" ]
+         // First loop: desires (4.5 / 5) * 150px = 135px. Frozen at +20px.
+       },
+     ]
+ },
+
+ // Make sure we calculate "original free space" correctly when one of our
+ // flex items will be clamped right away, due to max-size preventing it from
+ // growing at all:
+ {
+   // Here, the second flex item is effectively inflexible; it's
+   // immediately frozen at 40px since we're growing & this item's max size
+   // trivially prevents it from growing. This leaves us with an "original
+   // free space" of 60px. The first flex item takes half of that, due to
+   // its flex-grow value of 0.5.
+   items:
+     [
+       {
+         "flex": "0.5 100px",
+         "_main-size": [ null,  "130px" ]
+       },
+       {
+         "flex": "1 98px",
+         "_max-main-size": "40px",
+         "_main-size": [ null,  "40px" ]
+       },
+     ]
+ },
+ {
+   // Same as previous example, but with a larger flex-basis on the second
+   // element (which shouldn't ultimately matter, because its max size clamps
+   // its size immediately anyway).
+   items:
+     [
+       {
+         "flex": "0.5 100px",
+         "_main-size": [ null,  "130px" ]
+       },
+       {
+         "flex": "1 101px",
+         "_max-main-size": "40px",
+         "_main-size": [ null,  "40px" ]
+       },
+     ]
+ },
+
+ {
+   // Here, the third flex item is effectively inflexible; it's immediately
+   // frozen at 0px since we're growing & this item's max size trivially
+   // prevents it from growing. This leaves us with an "original free space" of
+   // 100px. The first flex item takes 40px, and the third takes 50px, due to
+   // their flex values of 0.4 and 0.5.
+   items:
+     [
+       {
+         "flex": "0.4 50px",
+         "_main-size": [ null,  "90px" ]
+       },
+       {
+         "flex": "0.5 50px",
+         "_main-size": [ null,  "100px" ]
+       },
+       {
+         "flex": "0 90px",
+         "_max-main-size": "0px",
+         "_main-size": [ null,  "0px" ]
+       },
+     ]
+ },
+ {
+   // Same as previous example, but with slightly larger flex-grow values on
+   // the first and second items, which sum to 1.0 and produce slightly larger
+   // main sizes. This demonstrates that there's no discontinuity between the
+   // "< 1.0 sum" to ">= 1.0 sum" behavior, in this situation at least.
+   items:
+     [
+       {
+         "flex": "0.45 50px",
+         "_main-size": [ null,  "95px" ]
+       },
+       {
+         "flex": "0.55 50px",
+         "_main-size": [ null,  "105px" ]
+       },
+       {
+         "flex": "0 90px",
+         "_max-main-size": "0px",
+         "_main-size": [ null,  "0px" ]
+       },
+     ]
+ },
+
+ // Test cases where flex-shrink sums to less than 1:
+ // =================================================
+ // This makes us treat the flexibilities more like "fraction of (negative)
+ // free space" instead of weights, so that e.g. a single item with
+ // "flex-shrink: 0.1" will only shrink by 10% of amount that it overflows
+ // its container by.
+ //
+ // It gets a bit more complex when there are multiple flex items, because
+ // flex-shrink is scaled by the flex-basis before it's used as a weight. But
+ // even with that scaling, the general principal is that e.g. if the
+ // flex-shrink values *sum* to 0.6, then the items will collectively only
+ // shrink by 60% (and hence will still overflow).
+
+ // Basic cases where flex-grow sum is less than 1:
+ {
+   items:
+     [
+       {
+         "flex": "0 0.1 300px",
+         "_main-size": [ null,  "290px" ] // +10% of (negative) free space
+       },
+     ]
+ },
+ {
+   items:
+     [
+       {
+         "flex": "0 0.8 400px",
+         "_main-size": [ null,  "240px" ] // +80% of (negative) free space
+       },
+     ]
+ },
+
+ // ...now with two flex items, with the same flex-basis value:
+ {
+   items:
+     [
+       {
+         "flex": "0 0.4 150px",
+         "_main-size": [ null,  "110px" ] // +40% of (negative) free space
+       },
+       {
+         "flex": "0 0.2 150px",
+         "_main-size": [ null,  "130px" ] // +20% of (negative) free space
+       },
+     ]
+ },
+
+ // ...now with two flex items, with different flex-basis values (and hence
+ // differently-scaled flex factors):
+ {
+   items:
+     [
+       {
+         "flex": "0 0.3 100px",
+         "_main-size": [ null,  "76px" ]
+       },
+       {
+         "flex": "0 0.1 200px",
+         "_main-size": [ null,  "184px" ]
+       }
+     ]
+     // Notes:
+     //  - Free space: -100px
+     //  - Sum of flex-shrink factors: 0.3 + 0.1 = 0.4
+     //  - Since that sum ^ is < 1, we'll only distribute that fraction of
+     //    the free space. We'll distribute: -100px * 0.4 = -40px
+     //
+     //  - 1st item's scaled flex factor:  0.3 * 100px = 30
+     //  - 2nd item's scaled flex factor:  0.1 * 200px = 20
+     //  - 1st item's share of distributed free space: 30/(30+20) = 60%
+     //  - 2nd item's share of distributed free space: 20/(30+20) = 40%
+     //
+     // SO:
+     //  - 1st item gets 60% * -40px = -24px.  100px-24px = 76px
+     //  - 2nd item gets 40% * -40px = -16px.  200px-16px = 184px
+ },
+
+ // ...now with min-size modifying how much one item can shrink:
+ {
+   items:
+     [
+       {
+         "flex": "0 0.3 100px",
+         "_main-size": [ null,  "70px" ]
+       },
+       {
+         "flex": "0 0.1 200px",
+         "_min-main-size": "190px",
+         "_main-size": [ null,  "190px" ]
+       }
+     ]
+     // Notes:
+     //  - We proceed as in previous testcase, but clamp the second flex item
+     //    at its min main size.
+     //  - After that point, we have a total flex-shrink of = 0.3, so we
+     //    distribute 0.3 * -100px = -30px to the remaining unfrozen flex
+     //    items. Since there's only one unfrozen item left, it gets all of it.
+ },
+
+ // ...now with min-size larger than our flex-basis:
+ // (This makes us freeze the second item right away, before we compute
+ // the initial free space.)
+ {
+   items:
+     [
+       {
+         "flex": "0 0.3 100px",
+         "_main-size": [ null,  "55px" ] // +30% of 200px-100px-250px
+       },
+       {
+         "flex": "0 0.1 200px",
+         "_min-main-size": "250px",
+         "_main-size": [ null,  "250px" ] // immediately frozen
+       }
+     ]
+     // (Same as previous example, except the min-main-size prevents the
+     // second item from shrinking at all)
+ },
+
+ // ...and now with a min-size and a small flex-basis, such that we initially
+ // have positive free space, which makes the "% of [original] free space"
+ // calculations a bit more subtle. We set the "original free space" after
+ // we've clamped the second item (the first time the free space is negative).
+ {
+   items:
+     [
+       {
+         "flex": "0 0.3 100px",
+         "_main-size": [ null,  "70px" ]
+       },
+       {
+         "flex": "0 0.1 50px",
+         "_min-main-size": "200px",
+         "_main-size": [ null,  "200px" ]
+       }
+     ]
+ },
+
+ // Now with max-size making an item shrink more than its flex-shrink value
+ // calls for:
+ {
+   items:
+     [
+       {
+         "flex": "0 0.3 100px",
+         "_main-size": [ null,  "70px" ]
+       },
+       {
+         "flex": "0 0.1 200px",
+         "_max-main-size": "150px",
+         "_main-size": [ null,  "150px" ]
+       }
+     ]
+     // Notes:
+     //  - We proceed as in an earlier testcase, but clamp the second flex item
+     //    at its max main size.
+     //  - After that point, we have a total flex-shrink of = 0.3, so we
+     //    distribute 0.3 * -100px = -30px to the remaining unfrozen flex
+     //    items. Since there's only one unfrozen item left, it gets all of it.
+ },
+
+ // ...and now with a small enough max-size that it prevents the other flex
+ // item from taking its full desired portion of the (negative) original free
+ // space:
+ {
+   items:
+     [
+       {
+         "flex": "0 0.3 100px",
+         "_main-size": [ null,  "90px" ]
+       },
+       {
+         "flex": "0 0.1 200px",
+         "_max-main-size": "110px",
+         "_main-size": [ null,  "110px" ]
+       }
+     ]
+     // Notes:
+     //  - We proceed as in an earlier testcase, but clamp the second flex item
+     //    at its max main size.
+     //  - After that point, we have a total flex-shrink of 0.3, which would
+     //    have us distribute 0.3 * -100px = -30px to the (one) remaining
+     //    unfrozen flex item. But our remaining free space is only -10px at
+     //    that point, so we distribute that instead.
+ },
+
+ // ...and now with a small enough max-size that it pushes the other flex item
+ // to actually grow a bit (with custom "flex-grow: 1" for this testcase):
+ {
+   items:
+     [
+       {
+         "flex": "1 0.3 100px",
+         "_main-size": [ null,  "120px" ]
+       },
+       {
+         "flex": "1 0.1 200px",
+         "_max-main-size": "80px",
+         "_main-size": [ null,  "80px" ]
+       }
+     ]
+ },
+
+ // In this case, the items' flexibilities don't initially sum to < 1, but they
+ // do after we freeze the third item for violating its min-size.
+ {
+   items:
+     [
+       {
+         "flex": "0 0.3 100px",
+         "_main-size": [ null,  "76px" ]
+       },
+       {
+         "flex": "0 0.1 150px",
+         "_main-size": [ null,  "138px" ]
+       },
+       {
+         "flex": "0 0.8 10px",
+         "_min-main-size": "40px",
+         "_main-size": [ null,  "40px" ]
+       }
+     ]
+     // Notes:
+     //  - We immediately freeze the 3rd item, since we're shrinking and its
+     //    min size obviously prevents it from shrinking at all.  This leaves
+     //    200px - 100px - 150px - 40px = -90px of "initial free space".
+     //
+     //  - Our remaining flexible items have a total flex-shrink of 0.4,
+     //    so we can distribute a total of 0.4 * -90px = -36px
+     //
+     //  - We distribute that space using *scaled* flex factors:
+     //    * 1st item's scaled flex factor:  0.3 * 100px = 30
+     //    * 2nd item's scaled flex factor:  0.1 * 150px = 15
+     //   ...which means...
+     //    * 1st item's share of distributed free space: 30/(30+15) = 2/3
+     //    * 2nd item's share of distributed free space: 15/(30+15) = 1/3
+     //
+     // SO:
+     //  - 1st item gets 2/3 * -36px = -24px. 100px - 24px = 76px
+     //  - 2nd item gets 1/3 * -36px = -12px. 150px - 12px = 138px
+ },
+
+ // In this case, the items' flexibilities sum to > 1, in part due to an item
+ // that *can't actually shrink* due to its 0 flex-basis (which gives it a
+ // "scaled flex factor" of 0). This prevents us from triggering the special
+ // behavior for flexibilities that sum to less than 1, and as a result, the
+ // first item ends up absorbing all of the free space.
+ {
+   items:
+     [
+       {
+         "flex": "0 .5 300px",
+         "_main-size": [ null,  "200px" ]
+       },
+       {
+         "flex": "0 5 0px",
+         "_main-size": [ null,  "0px" ]
+       }
+     ]
+ },
+
+ // This case is similar to the one above, but with a *barely* nonzero base
+ // size for the second item. This should produce a result similar to the case
+ // above. (In particular, we should first distribute a very small amount of
+ // negative free space to the second item, getting it to approximately zero,
+ // and distribute the bulk of the negative free space to the first item,
+ // getting it to approximately 200px.)
+ {
+   items:
+     [
+       {
+         "flex": "0 .5 300px",
+         "_main-size": [ null,  "200px" ]
+       },
+       {
+         "flex": "0 1 0.01px",
+         "_main-size": [ null,  "0px" ]
+       }
+     ]
+ },
+ // This case is similar to the ones above, but now we've increased the
+ // flex-shrink value on the second-item so that it claims enough of the
+ // negative free space to go below its min-size (0px). So, it triggers a min
+ // violation & is frozen. For the loop *after* the min violation, the sum of
+ // the remaining flex items' flex-shrink values is less than 1, so we trigger
+ // the special <1 behavior and only distribute half of the remaining
+ // (negative) free space to the first item (instead of all of it).
+ {
+   items:
+     [
+       {
+         "flex": "0 .5 300px",
+         "_main-size": [ null,  "250px" ]
+       },
+       {
+         "flex": "0 5 0.01px",
+         "_main-size": [ null,  "0px" ]
+       }
      ]
  },
 ];

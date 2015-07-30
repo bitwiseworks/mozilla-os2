@@ -1,3 +1,4 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2; fill-column: 80 -*- */
 /* vim:set ts=2 sw=2 sts=2 et tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -8,20 +9,29 @@
 const { Cu, Cc, Ci, components } = require("chrome");
 
 const TAB_SIZE    = "devtools.editor.tabsize";
+const ENABLE_CODE_FOLDING = "devtools.editor.enableCodeFolding";
 const EXPAND_TAB  = "devtools.editor.expandtab";
 const KEYMAP      = "devtools.editor.keymap";
 const AUTO_CLOSE  = "devtools.editor.autoclosebrackets";
+const AUTOCOMPLETE  = "devtools.editor.autocomplete";
 const DETECT_INDENT = "devtools.editor.detectindentation";
 const DETECT_INDENT_MAX_LINES = 500;
 const L10N_BUNDLE = "chrome://browser/locale/devtools/sourceeditor.properties";
 const XUL_NS      = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+const VALID_KEYMAPS = new Set(["emacs", "vim", "sublime"]);
 
 // Maximum allowed margin (in number of lines) from top or bottom of the editor
 // while shifting to a line which was initially out of view.
 const MAX_VERTICAL_OFFSET = 3;
 
+// Match @Scratchpad/N:LINE[:COLUMN] or (LINE[:COLUMN]) anywhere at an end of
+// line in text selection.
+const RE_SCRATCHPAD_ERROR = /(?:@Scratchpad\/\d+:|\()(\d+):?(\d+)?(?:\)|\n)/;
+const RE_JUMP_TO_LINE = /^(\d+):?(\d+)?/;
+
 const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
 const events  = require("devtools/toolkit/event-emitter");
+const { PrefObserver } = require("devtools/styleeditor/utils");
 
 Cu.import("resource://gre/modules/Services.jsm");
 const L10N = Services.strings.createBundle(L10N_BUNDLE);
@@ -92,9 +102,7 @@ const CM_MAPPING = [
   "clearHistory",
   "openDialog",
   "refresh",
-  "getScrollInfo",
-  "getOption",
-  "setOption"
+  "getScrollInfo"
 ];
 
 const { cssProperties, cssValues, cssColors } = getCSSKeywords();
@@ -124,8 +132,8 @@ Editor.modes = {
  * properties go to CodeMirror's documentation (see below).
  *
  * Other than that, it accepts one additional and optional
- * property contextMenu. This property should be an ID of
- * an element we can use as a context menu.
+ * property contextMenu. This property should be an element, or
+ * an ID of an element that we can use as a context menu.
  *
  * This object is also an event emitter.
  *
@@ -134,7 +142,6 @@ Editor.modes = {
 function Editor(config) {
   const tabSize = Services.prefs.getIntPref(TAB_SIZE);
   const useTabs = !Services.prefs.getBoolPref(EXPAND_TAB);
-  const keyMap = Services.prefs.getCharPref(KEYMAP);
   const useAutoClose = Services.prefs.getBoolPref(AUTO_CLOSE);
 
   this.version = null;
@@ -150,7 +157,10 @@ function Editor(config) {
     styleActiveLine:   true,
     autoCloseBrackets: "()[]{}''\"\"",
     autoCloseEnabled:  useAutoClose,
-    theme:             "mozilla"
+    theme:             "mozilla",
+    themeSwitching:    true,
+    autocomplete:      false,
+    autocompleteOpts:  {}
   };
 
   // Additional shortcuts.
@@ -163,9 +173,6 @@ function Editor(config) {
   this.config.extraKeys[Editor.keyFor("indentLess")] = false;
   this.config.extraKeys[Editor.keyFor("indentMore")] = false;
 
-  // If alternative keymap is provided, use it.
-  if (keyMap === "emacs" || keyMap === "vim" || keyMap === "sublime")
-    this.config.keyMap = keyMap;
 
   // Overwrite default config with user-provided, if needed.
   Object.keys(config).forEach((k) => {
@@ -182,19 +189,16 @@ function Editor(config) {
     });
   });
 
-  // Set the code folding gutter, if needed.
-  if (this.config.enableCodeFolding) {
-    this.config.foldGutter = true;
-
-    if (!this.config.gutters) {
-      this.config.gutters = this.config.lineNumbers ? ["CodeMirror-linenumbers"] : [];
-      this.config.gutters.push("CodeMirror-foldgutter");
-    }
+  if (!this.config.gutters) {
+    this.config.gutters = [];
+  }
+  if (this.config.lineNumbers
+      && this.config.gutters.indexOf("CodeMirror-linenumbers") === -1) {
+    this.config.gutters.push("CodeMirror-linenumbers");
   }
 
-  // Configure automatic bracket closing.
-  if (!this.config.autoCloseEnabled)
-    this.config.autoCloseBrackets = false;
+  // Remember the initial value of autoCloseBrackets.
+  this.config.autoCloseBracketsSaved = this.config.autoCloseBrackets;
 
   // Overwrite default tab behavior. If something is selected,
   // indent those lines. If nothing is selected and we're
@@ -251,6 +255,9 @@ Editor.prototype = {
       env.removeEventListener("load", onLoad, true);
       let win = env.contentWindow.wrappedJSObject;
 
+      if (!this.config.themeSwitching)
+        win.document.documentElement.setAttribute("force-theme", "light");
+
       CM_SCRIPTS.forEach((url) =>
         Services.scriptloader.loadSubScript(url, win, "utf8"));
 
@@ -278,7 +285,9 @@ Editor.prototype = {
       cm.getWrapperElement().addEventListener("contextmenu", (ev) => {
         ev.preventDefault();
         if (!this.config.contextMenu) return;
-        let popup = el.ownerDocument.getElementById(this.config.contextMenu);
+        let popup = this.config.contextMenu;
+        if (typeof popup == "string")
+          popup = el.ownerDocument.getElementById(this.config.contextMenu);
         popup.openPopupAtScreen(ev.screenX, ev.screenY, true);
       }, false);
 
@@ -303,7 +312,7 @@ Editor.prototype = {
           return;
         }
 
-        this.emit("gutterClick", line);
+        this.emit("gutterClick", line, ev.button);
       });
 
       win.CodeMirror.defineExtension("l10n", (name) => {
@@ -315,8 +324,17 @@ Editor.prototype = {
       this.container = env;
       editors.set(this, cm);
 
-      this.resetIndentUnit();
+      this.reloadPreferences = this.reloadPreferences.bind(this);
+      this._prefObserver = new PrefObserver("devtools.editor.");
+      this._prefObserver.on(TAB_SIZE, this.reloadPreferences);
+      this._prefObserver.on(EXPAND_TAB, this.reloadPreferences);
+      this._prefObserver.on(KEYMAP, this.reloadPreferences);
+      this._prefObserver.on(AUTO_CLOSE, this.reloadPreferences);
+      this._prefObserver.on(AUTOCOMPLETE, this.reloadPreferences);
+      this._prefObserver.on(DETECT_INDENT, this.reloadPreferences);
+      this._prefObserver.on(ENABLE_CODE_FOLDING, this.reloadPreferences);
 
+      this.reloadPreferences();
       def.resolve();
     };
 
@@ -329,6 +347,14 @@ Editor.prototype = {
   },
 
   /**
+   * Returns a boolean indicating whether the editor is ready to
+   * use.  Use appendTo(el).then(() => {}) for most cases
+   */
+  isAppended: function() {
+    return editors.has(this);
+  },
+
+  /**
    * Returns the currently active highlighting mode.
    * See Editor.modes for the list of all suppoert modes.
    */
@@ -337,11 +363,29 @@ Editor.prototype = {
   },
 
   /**
+   * Load a script into editor's containing window.
+   */
+  loadScript: function (url) {
+    if (!this.container) {
+      throw new Error("Can't load a script until the editor is loaded.")
+    }
+    let win = this.container.contentWindow.wrappedJSObject;
+    Services.scriptloader.loadSubScript(url, win, "utf8");
+  },
+
+  /**
    * Changes the value of a currently used highlighting mode.
-   * See Editor.modes for the list of all suppoert modes.
+   * See Editor.modes for the list of all supported modes.
    */
   setMode: function (value) {
     this.setOption("mode", value);
+
+    // If autocomplete was set up and the mode is changing, then
+    // turn it off and back on again so the proper mode can be used.
+    if (this.config.autocomplete) {
+      this.setOption("autocomplete", false);
+      this.setOption("autocomplete", true);
+    }
   },
 
   /**
@@ -367,6 +411,29 @@ Editor.prototype = {
     cm.setValue(value);
 
     this.resetIndentUnit();
+  },
+
+  /**
+   * Reload the state of the editor based on all current preferences.
+   * This is called automatically when any of the relevant preferences
+   * change.
+   */
+  reloadPreferences: function() {
+    // Restore the saved autoCloseBrackets value if it is preffed on.
+    let useAutoClose = Services.prefs.getBoolPref(AUTO_CLOSE);
+    this.setOption("autoCloseBrackets",
+      useAutoClose ? this.config.autoCloseBracketsSaved : false);
+
+    // If alternative keymap is provided, use it.
+    const keyMap = Services.prefs.getCharPref(KEYMAP);
+    if (VALID_KEYMAPS.has(keyMap))
+      this.setOption("keyMap", keyMap)
+    else
+      this.setOption("keyMap", "default");
+    this.updateCodeFoldingGutter();
+
+    this.resetIndentUnit();
+    this.setupAutoCompletion();
   },
 
   /**
@@ -509,16 +576,7 @@ Editor.prototype = {
    * Returns whether a marker of a specified class exists in a line's gutter.
    */
   hasMarker: function (line, gutterName, markerClass) {
-    let cm = editors.get(this);
-    let info = cm.lineInfo(line);
-    if (!info)
-      return false;
-
-    let gutterMarkers = info.gutterMarkers;
-    if (!gutterMarkers)
-      return false;
-
-    let marker = gutterMarkers[gutterName];
+    let marker = this.getMarker(line, gutterName);
     if (!marker)
       return false;
 
@@ -559,6 +617,45 @@ Editor.prototype = {
 
     let cm = editors.get(this);
     cm.lineInfo(line).gutterMarkers[gutterName].classList.remove(markerClass);
+  },
+
+  /**
+   * Adds a marker with a specified class and an HTML content to a line's
+   * gutter. If another marker exists on that line, it is overwritten by a new
+   * marker.
+   */
+  addContentMarker: function (line, gutterName, markerClass, content) {
+    let cm = editors.get(this);
+    let info = cm.lineInfo(line);
+    if (!info)
+      return;
+
+    let marker = cm.getWrapperElement().ownerDocument.createElement("div");
+    marker.className = markerClass;
+    marker.innerHTML = content;
+    cm.setGutterMarker(info.line, gutterName, marker);
+  },
+
+  /**
+   * The reverse of addContentMarker. Removes any line's markers in the
+   * specified gutter.
+   */
+  removeContentMarker: function (line, gutterName) {
+    let cm = editors.get(this);
+    cm.setGutterMarker(info.line, gutterName, null);
+  },
+
+  getMarker: function(line, gutterName) {
+    let cm = editors.get(this);
+    let info = cm.lineInfo(line);
+    if (!info)
+      return null;
+
+    let gutterMarkers = info.gutterMarkers;
+    if (!gutterMarkers)
+      return null;
+
+    return gutterMarkers[gutterName];
   },
 
   /**
@@ -736,7 +833,28 @@ Editor.prototype = {
     div.appendChild(txt);
     div.appendChild(inp);
 
-    this.openDialog(div, (line) => this.setCursor({ line: line - 1, ch: 0 }));
+    if (!this.hasMultipleSelections()) {
+      let cm = editors.get(this);
+      let sel = cm.getSelection();
+      // Scratchpad inserts and selects a comment after an error happens:
+      // "@Scratchpad/1:10:2". Parse this to get the line and column.
+      // In the string above this is line 10, column 2.
+      let match = sel.match(RE_SCRATCHPAD_ERROR);
+      if (match) {
+        let [ , line, column ] = match;
+        inp.value = column ? line + ":" + column : line;
+        inp.selectionStart = inp.selectionEnd = inp.value.length;
+      }
+    }
+
+    this.openDialog(div, (line) => {
+      // Handle LINE:COLUMN as well as LINE
+      let match = line.toString().match(RE_JUMP_TO_LINE);
+      if (match) {
+        let [ , line, column ] = match;
+        this.setCursor({line: line - 1, ch: column ? column - 1 : 0 });
+      }
+    });
   },
 
   /**
@@ -819,6 +937,70 @@ Editor.prototype = {
   },
 
   /**
+   * Sets an option for the editor.  For most options it just defers to
+   * CodeMirror.setOption, but certain ones are maintained within the editor
+   * instance.
+   */
+  setOption: function(o, v) {
+    let cm = editors.get(this);
+
+    // Save the state of a valid autoCloseBrackets string, so we can reset
+    // it if it gets preffed off and back on.
+    if (o === "autoCloseBrackets" && v) {
+      this.config.autoCloseBracketsSaved = v;
+    }
+
+    if (o === "autocomplete") {
+      this.config.autocomplete = v;
+      this.setupAutoCompletion();
+    } else {
+      cm.setOption(o, v);
+    }
+
+    if (o === "enableCodeFolding") {
+      // The new value maybe explicitly force foldGUtter on or off, ignoring
+      // the prefs service.
+      this.updateCodeFoldingGutter();
+    }
+  },
+
+  /**
+   * Gets an option for the editor.  For most options it just defers to
+   * CodeMirror.getOption, but certain ones are maintained within the editor
+   * instance.
+   */
+  getOption: function(o) {
+    let cm = editors.get(this);
+    if (o === "autocomplete") {
+      return this.config.autocomplete;
+    } else {
+      return cm.getOption(o);
+    }
+  },
+
+  /**
+   * Sets up autocompletion for the editor. Lazily imports the required
+   * dependencies because they vary by editor mode.
+   *
+   * Autocompletion is special, because we don't want to automatically use
+   * it just because it is preffed on (it still needs to be requested by the
+   * editor), but we do want to always disable it if it is preffed off.
+   */
+  setupAutoCompletion: function () {
+    // The autocomplete module will overwrite this.initializeAutoCompletion
+    // with a mode specific autocompletion handler.
+    if (!this.initializeAutoCompletion) {
+      this.extend(require("./autocomplete"));
+    }
+
+    if (this.config.autocomplete && Services.prefs.getBoolPref(AUTOCOMPLETE)) {
+      this.initializeAutoCompletion(this.config.autocompleteOpts);
+    } else {
+      this.destroyAutoCompletion();
+    }
+  },
+
+  /**
    * Extends an instance of the Editor object with additional
    * functions. Each function will be called with context as
    * the first argument. Context is a {ed, cm} object where
@@ -853,7 +1035,54 @@ Editor.prototype = {
     this.container = null;
     this.config = null;
     this.version = null;
+
+    if (this._prefObserver) {
+      this._prefObserver.off(TAB_SIZE, this.reloadPreferences);
+      this._prefObserver.off(EXPAND_TAB, this.reloadPreferences);
+      this._prefObserver.off(KEYMAP, this.reloadPreferences);
+      this._prefObserver.off(AUTO_CLOSE, this.reloadPreferences);
+      this._prefObserver.off(AUTOCOMPLETE, this.reloadPreferences);
+      this._prefObserver.off(DETECT_INDENT, this.reloadPreferences);
+      this._prefObserver.off(ENABLE_CODE_FOLDING, this.reloadPreferences);
+      this._prefObserver.destroy();
+    }
+
     this.emit("destroy");
+  },
+
+  updateCodeFoldingGutter: function () {
+    let shouldFoldGutter = this.config.enableCodeFolding,
+        foldGutterIndex = this.config.gutters.indexOf("CodeMirror-foldgutter"),
+        cm = editors.get(this);
+
+    if (shouldFoldGutter === undefined) {
+      shouldFoldGutter = Services.prefs.getBoolPref(ENABLE_CODE_FOLDING);
+    }
+
+    if (shouldFoldGutter) {
+      // Add the gutter before enabling foldGutter
+      if (foldGutterIndex === -1) {
+        let gutters = this.config.gutters.slice();
+        gutters.push("CodeMirror-foldgutter");
+        this.setOption("gutters", gutters);
+      }
+
+      this.setOption("foldGutter", true);
+    } else {
+      // No code should remain folded when folding is off.
+      if (cm) {
+        cm.execCommand("unfoldAll");
+      }
+
+      // Remove the gutter so it doesn't take up space
+      if (foldGutterIndex !== -1) {
+        let gutters = this.config.gutters.slice();
+        gutters.splice(foldGutterIndex, 1);
+        this.setOption("gutters", gutters);
+      }
+
+      this.setOption("foldGutter", false);
+    }
   }
 };
 

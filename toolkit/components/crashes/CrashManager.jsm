@@ -112,6 +112,10 @@ this.CrashManager = function (options) {
   // The CrashStore currently attached to this object.
   this._store = null;
 
+  // A Task to retrieve the store. This is needed to avoid races when
+  // _getStore() is called multiple times in a short interval.
+  this._getStoreTask = null;
+
   // The timer controlling the expiration of the CrashStore instance.
   this._storeTimer = null;
 
@@ -121,6 +125,28 @@ this.CrashManager = function (options) {
 };
 
 this.CrashManager.prototype = Object.freeze({
+  // A crash in the main process.
+  PROCESS_TYPE_MAIN: "main",
+
+  // A crash in a content process.
+  PROCESS_TYPE_CONTENT: "content",
+
+  // A crash in a plugin process.
+  PROCESS_TYPE_PLUGIN: "plugin",
+
+  // A crash in a Gecko media plugin process.
+  PROCESS_TYPE_GMPLUGIN: "gmplugin",
+
+  // A real crash.
+  CRASH_TYPE_CRASH: "crash",
+
+  // A hang.
+  CRASH_TYPE_HANG: "hang",
+
+  // Submission result values.
+  SUBMISSION_RESULT_OK: "ok",
+  SUBMISSION_RESULT_FAILED: "failed",
+
   DUMP_REGEX: /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.dmp$/i,
   SUBMITTED_REGEX: /^bp-(?:hr-)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.txt$/i,
   ALL_REGEX: /^(.*)$/,
@@ -324,6 +350,100 @@ this.CrashManager.prototype = Object.freeze({
   },
 
   /**
+   * Record the occurrence of a crash.
+   *
+   * This method skips event files altogether and writes directly and
+   * immediately to the manager's data store.
+   *
+   * @param processType (string) One of the PROCESS_TYPE constants.
+   * @param crashType (string) One of the CRASH_TYPE constants.
+   * @param id (string) Crash ID. Likely a UUID.
+   * @param date (Date) When the crash occurred.
+   *
+   * @return promise<null> Resolved when the store has been saved.
+   */
+  addCrash: function (processType, crashType, id, date) {
+    return Task.spawn(function* () {
+      let store = yield this._getStore();
+      if (store.addCrash(processType, crashType, id, date)) {
+        yield store.save();
+      }
+    }.bind(this));
+  },
+
+  /**
+   * Record the remote ID for a crash.
+   *
+   * @param crashID (string) Crash ID. Likely a UUID.
+   * @param remoteID (Date) Server/Breakpad ID.
+   *
+   * @return boolean True if the remote ID was recorded.
+   */
+  setRemoteCrashID: Task.async(function* (crashID, remoteID) {
+    let store = yield this._getStore();
+    if (store.setRemoteCrashID(crashID, remoteID)) {
+      yield store.save();
+    }
+  }),
+
+  /**
+   * Generate a submission ID for use with addSubmission{Attempt,Result}.
+   */
+  generateSubmissionID() {
+    return "sub-" + Cc["@mozilla.org/uuid-generator;1"]
+                      .getService(Ci.nsIUUIDGenerator)
+                      .generateUUID().toString().slice(1, -1);
+  },
+
+  /**
+   * Record the occurrence of a submission attempt for a crash.
+   *
+   * @param crashID (string) Crash ID. Likely a UUID.
+   * @param submissionID (string) Submission ID. Likely a UUID.
+   * @param date (Date) When the attempt occurred.
+   *
+   * @return boolean True if the attempt was recorded and false if not.
+   */
+  addSubmissionAttempt: Task.async(function* (crashID, submissionID, date) {
+    let store = yield this._getStore();
+    if (store.addSubmissionAttempt(crashID, submissionID, date)) {
+      yield store.save();
+    }
+  }),
+
+  /**
+   * Record the occurrence of a submission result for a crash.
+   *
+   * @param crashID (string) Crash ID. Likely a UUID.
+   * @param submissionID (string) Submission ID. Likely a UUID.
+   * @param date (Date) When the submission result was obtained.
+   * @param result (string) One of the SUBMISSION_RESULT constants.
+   *
+   * @return boolean True if the result was recorded and false if not.
+   */
+  addSubmissionResult: Task.async(function* (crashID, submissionID, date, result) {
+    let store = yield this._getStore();
+    if (store.addSubmissionResult(crashID, submissionID, date, result)) {
+      yield store.save();
+    }
+  }),
+
+  /**
+   * Set the classification of a crash.
+   *
+   * @param crashID (string) Crash ID. Likely a UUID.
+   * @param classifications (array) Crash classifications.
+   *
+   * @return boolean True if the data was recorded and false if not.
+   */
+  setCrashClassifications: Task.async(function* (crashID, classifications) {
+    let store = yield this._getStore();
+    if (store.setCrashClassifications(crashID, classifications)) {
+      yield store.save();
+    }
+  }),
+
+  /**
    * Obtain the paths of all unprocessed events files.
    *
    * The promise-resolved array is sorted by file mtime, oldest to newest.
@@ -353,7 +473,7 @@ this.CrashManager.prototype = Object.freeze({
       let decoder = new TextDecoder();
       data = decoder.decode(data);
 
-      let type, time, payload;
+      let type, time;
       let start = 0;
       for (let i = 0; i < 2; i++) {
         let index = data.indexOf("\n", start);
@@ -388,28 +508,47 @@ this.CrashManager.prototype = Object.freeze({
       // The payload types and formats are documented in docs/crash-events.rst.
       // Do not change the format of an existing type. Instead, invent a new
       // type.
+      // DO NOT ADD NEW TYPES WITHOUT DOCUMENTING!
+      let lines = payload.split("\n");
 
-      let eventMap = {
-        "crash.main.1": "addMainProcessCrash",
-        "crash.plugin.1": "addPluginCrash",
-        "hang.plugin.1": "addPluginHang",
-      };
+      switch (type) {
+        case "crash.main.1":
+          if (lines.length > 1) {
+            this._log.warn("Multiple lines unexpected in payload for " +
+                           entry.path);
+            return this.EVENT_FILE_ERROR_MALFORMED;
+          }
 
-      if (type in eventMap) {
-        let lines = payload.split("\n");
-        if (lines.length > 1) {
-          this._log.warn("Multiple lines unexpected in payload for " +
-                         entry.path);
-          return this.EVENT_FILE_ERROR_MALFORMED;
-        }
+          let [crashID] = lines;
+          store.addCrash(this.PROCESS_TYPE_MAIN, this.CRASH_TYPE_CRASH,
+                         crashID, date);
+          break;
 
-        store[eventMap[type]](payload, date);
-        return this.EVENT_FILE_SUCCESS;
+        case "crash.submission.1":
+          if (lines.length == 3) {
+            let [crashID, result, remoteID] = lines;
+            store.addCrash(this.PROCESS_TYPE_MAIN, this.CRASH_TYPE_CRASH,
+                           crashID, date);
+
+            let submissionID = this.generateSubmissionID();
+            let succeeded = result === "true";
+            store.addSubmissionAttempt(crashID, submissionID, date);
+            store.addSubmissionResult(crashID, submissionID, date,
+                                      succeeded ? this.SUBMISSION_RESULT_OK :
+                                                  this.SUBMISSION_RESULT_FAILED);
+            if (succeeded) {
+              store.setRemoteCrashID(crashID, remoteID);
+            }
+          } else {
+            return this.EVENT_FILE_ERROR_MALFORMED;
+          }
+          break;
+
+        default:
+          return this.EVENT_FILE_ERROR_UNKNOWN_EVENT;
       }
 
-      // DO NOT ADD NEW TYPES WITHOUT DOCUMENTING!
-
-      return this.EVENT_FILE_ERROR_UNKNOWN_EVENT;
+      return this.EVENT_FILE_SUCCESS;
   },
 
   /**
@@ -460,47 +599,57 @@ this.CrashManager.prototype = Object.freeze({
   },
 
   _getStore: function () {
-    return Task.spawn(function* () {
-      if (!this._store) {
-        yield OS.File.makeDir(this._storeDir, {
-          ignoreExisting: true,
-          unixMode: OS.Constants.libc.S_IRWXU,
-        });
+    if (this._getStoreTask) {
+      return this._getStoreTask;
+    }
 
-        let store = new CrashStore(this._storeDir, this._telemetryStoreSizeKey);
-        yield store.load();
+    return this._getStoreTask = Task.spawn(function* () {
+      try {
+        if (!this._store) {
+          yield OS.File.makeDir(this._storeDir, {
+            ignoreExisting: true,
+            unixMode: OS.Constants.libc.S_IRWXU,
+          });
 
-        this._store = store;
-        this._storeTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-      }
+          let store = new CrashStore(this._storeDir,
+                                     this._telemetryStoreSizeKey);
+          yield store.load();
 
-      // The application can go long periods without interacting with the
-      // store. Since the store takes up resources, we automatically "free"
-      // the store after inactivity so resources can be returned to the system.
-      // We do this via a timer and a mechanism that tracks when the store
-      // is being accessed.
-      this._storeTimer.cancel();
-
-      // This callback frees resources from the store unless the store
-      // is protected from freeing by some other process.
-      let timerCB = function () {
-        if (this._storeProtectedCount) {
-          this._storeTimer.initWithCallback(timerCB, this.STORE_EXPIRATION_MS,
-                                            this._storeTimer.TYPE_ONE_SHOT);
-          return;
+          this._store = store;
+          this._storeTimer = Cc["@mozilla.org/timer;1"]
+                               .createInstance(Ci.nsITimer);
         }
 
-        // We kill the reference that we hold. GC will kill it later. If
-        // someone else holds a reference, that will prevent GC until that
-        // reference is gone.
-        this._store = null;
-        this._storeTimer = null;
-      }.bind(this);
+        // The application can go long periods without interacting with the
+        // store. Since the store takes up resources, we automatically "free"
+        // the store after inactivity so resources can be returned to the
+        // system. We do this via a timer and a mechanism that tracks when the
+        // store is being accessed.
+        this._storeTimer.cancel();
 
-      this._storeTimer.initWithCallback(timerCB, this.STORE_EXPIRATION_MS,
-                                        this._storeTimer.TYPE_ONE_SHOT);
+        // This callback frees resources from the store unless the store
+        // is protected from freeing by some other process.
+        let timerCB = function () {
+          if (this._storeProtectedCount) {
+            this._storeTimer.initWithCallback(timerCB, this.STORE_EXPIRATION_MS,
+                                              this._storeTimer.TYPE_ONE_SHOT);
+            return;
+          }
 
-      return this._store;
+          // We kill the reference that we hold. GC will kill it later. If
+          // someone else holds a reference, that will prevent GC until that
+          // reference is gone.
+          this._store = null;
+          this._storeTimer = null;
+        }.bind(this);
+
+        this._storeTimer.initWithCallback(timerCB, this.STORE_EXPIRATION_MS,
+                                          this._storeTimer.TYPE_ONE_SHOT);
+
+        return this._store;
+      } finally {
+        this._getStoreTask = null;
+      }
     }.bind(this));
   },
 
@@ -573,18 +722,21 @@ function CrashStore(storeDir, telemetrySizeKey) {
 }
 
 CrashStore.prototype = Object.freeze({
-  // A crash that occurred in the main process.
-  TYPE_MAIN_CRASH: "main-crash",
-
-  // A crash in a plugin process.
-  TYPE_PLUGIN_CRASH: "plugin-crash",
-
-  // A hang in a plugin process.
-  TYPE_PLUGIN_HANG: "plugin-hang",
-
   // Maximum number of events to store per day. This establishes a
   // ceiling on the per-type/per-day records that will be stored.
   HIGH_WATER_DAILY_THRESHOLD: 100,
+
+  /**
+   * Reset all data.
+   */
+  reset() {
+    this._data = {
+      v: 1,
+      crashes: new Map(),
+      corruptDate: null,
+    };
+    this._countsByDay = new Map();
+  },
 
   /**
    * Load data from disk.
@@ -593,13 +745,8 @@ CrashStore.prototype = Object.freeze({
    */
   load: function () {
     return Task.spawn(function* () {
-      // Loading replaces data. So reset data structures.
-      this._data = {
-        v: 1,
-        crashes: new Map(),
-        corruptDate: null,
-      };
-      this._countsByDay = new Map();
+      // Loading replaces data.
+      this.reset();
 
       try {
         let decoder = new TextDecoder();
@@ -614,14 +761,64 @@ CrashStore.prototype = Object.freeze({
         // days stored in the payload matches up to actual data.
         let actualCounts = new Map();
 
+        // In the past, submissions were stored as separate crash records
+        // with an id of e.g. "someID-submission". If we find IDs ending
+        // with "-submission", we will need to convert the data to be stored
+        // as actual submissions.
+        //
+        // TODO: The old way of storing submissions was used from FF33 - FF34.
+        // We should drop the conversion code after a few releases. See bug
+        // 1056157.
+        let hasSubmissionsStoredAsCrashes = false;
+
         for (let id in data.crashes) {
+          if (id.endsWith("-submission")) {
+            hasSubmissionsStoredAsCrashes = true;
+            continue;
+          }
+
           let crash = data.crashes[id];
           let denormalized = this._denormalize(crash);
+
+          denormalized.submissions = new Map();
+          if (crash.submissions) {
+            for (let submissionID in crash.submissions) {
+              let submission = crash.submissions[submissionID];
+              denormalized.submissions.set(submissionID,
+                                           this._denormalize(submission));
+            }
+          }
 
           this._data.crashes.set(id, denormalized);
 
           let key = dateToDays(denormalized.crashDate) + "-" + denormalized.type;
           actualCounts.set(key, (actualCounts.get(key) || 0) + 1);
+        }
+
+        if (hasSubmissionsStoredAsCrashes) {
+          for (let id in data.crashes) {
+            if (!id.endsWith("-submission")) {
+              continue;
+            }
+
+            // This type of record will contain e.g.:
+            // {
+            //   "id": "crash1-submission",
+            //   "type": "main-crash-submission-succeeded",
+            //   "crashDate": "...",
+            // }
+            let submissionData = this._denormalize(data.crashes[id]);
+
+            let crashID = id.replace(/-submission$/, "");
+            let result = submissionData.type.endsWith("-succeeded") ?
+              CrashManager.prototype.SUBMISSION_RESULT_OK :
+              CrashManager.prototype.SUBMISSION_RESULT_FAILED;
+
+            this.addSubmissionAttempt(crashID, "converted",
+                                      submissionData.crashDate);
+            this.addSubmissionResult(crashID, "converted",
+                                     submissionData.crashDate, result);
+          }
         }
 
         // The validation in this loop is arguably not necessary. We perform
@@ -698,6 +895,12 @@ CrashStore.prototype = Object.freeze({
 
       for (let [id, crash] of this._data.crashes) {
         let c = this._normalize(crash);
+
+        c.submissions = {};
+        for (let [submissionID, submission] of crash.submissions) {
+          c.submissions[submissionID] = this._normalize(submission);
+        }
+
         normalized.crashes[id] = c;
       }
 
@@ -841,102 +1044,165 @@ CrashStore.prototype = Object.freeze({
    * Returns the crash record if we're allowed to store it or null
    * if we've hit the high water mark.
    *
+   * @param processType
+   *        (string) One of the PROCESS_TYPE constants.
+   * @param crashType
+   *        (string) One of the CRASH_TYPE constants.
    * @param id
    *        (string) The crash ID.
-   * @param type
-   *        (string) One of the this.TYPE_* constants describing the crash type.
    * @param date
    *        (Date) When this crash occurred.
    *
    * @return null | object crash record
    */
-  _ensureCrashRecord: function (id, type, date) {
-    let day = dateToDays(date);
-    this._ensureCountsForDay(day);
-
-    let count = (this._countsByDay.get(day).get(type) || 0) + 1;
-    this._countsByDay.get(day).set(type, count);
-
-    if (count > this.HIGH_WATER_DAILY_THRESHOLD && type != this.TYPE_MAIN_CRASH) {
+  _ensureCrashRecord: function (processType, crashType, id, date) {
+    if (!id) {
+      // Crashes are keyed on ID, so it's not really helpful to store crashes
+      // without IDs.
       return null;
     }
 
+    let type = processType + "-" + crashType;
+
     if (!this._data.crashes.has(id)) {
+      let day = dateToDays(date);
+      this._ensureCountsForDay(day);
+
+      let count = (this._countsByDay.get(day).get(type) || 0) + 1;
+      this._countsByDay.get(day).set(type, count);
+
+      if (count > this.HIGH_WATER_DAILY_THRESHOLD &&
+          processType != CrashManager.prototype.PROCESS_TYPE_MAIN) {
+        return null;
+      }
+
       this._data.crashes.set(id, {
         id: id,
+        remoteID: null,
         type: type,
         crashDate: date,
+        submissions: new Map(),
+        classifications: [],
       });
     }
 
     let crash = this._data.crashes.get(id);
     crash.type = type;
-    crash.date = date;
+    crash.crashDate = date;
 
     return crash;
   },
 
   /**
-   * Record the occurrence of a crash in the main process.
+   * Record the occurrence of a crash.
    *
+   * @param processType (string) One of the PROCESS_TYPE constants.
+   * @param crashType (string) One of the CRASH_TYPE constants.
    * @param id (string) Crash ID. Likely a UUID.
    * @param date (Date) When the crash occurred.
+   *
+   * @return boolean True if the crash was recorded and false if not.
    */
-  addMainProcessCrash: function (id, date) {
-    this._ensureCrashRecord(id, this.TYPE_MAIN_CRASH, date);
+  addCrash: function (processType, crashType, id, date) {
+    return !!this._ensureCrashRecord(processType, crashType, id, date);
   },
 
   /**
-   * Record the occurrence of a crash in a plugin process.
-   *
-   * @param id (string) Crash ID. Likely a UUID.
-   * @param date (Date) When the crash occurred.
+   * @return boolean True if the remote ID was recorded and false if not.
    */
-  addPluginCrash: function (id, date) {
-    this._ensureCrashRecord(id, this.TYPE_PLUGIN_CRASH, date);
+  setRemoteCrashID: function (crashID, remoteID) {
+    let crash = this._data.crashes.get(crashID);
+    if (!crash || !remoteID) {
+      return false;
+    }
+
+    crash.remoteID = remoteID;
+    return true;
+  },
+
+  getCrashesOfType: function (processType, crashType) {
+    let crashes = [];
+    for (let crash of this.crashes) {
+      if (crash.isOfType(processType, crashType)) {
+        crashes.push(crash);
+      }
+    }
+
+    return crashes;
   },
 
   /**
-   * Record the occurrence of a hang in a plugin process.
+   * Obtain a particular crash submission from its ID.
    *
-   * @param id (string) Crash ID. Likely a UUID.
-   * @param date (Date) When the hang was reported.
+   * @return undefined | submission object
    */
-  addPluginHang: function (id, date) {
-    this._ensureCrashRecord(id, this.TYPE_PLUGIN_HANG, date);
-  },
-
-  get mainProcessCrashes() {
-    let crashes = [];
-    for (let crash of this.crashes) {
-      if (crash.isMainProcessCrash) {
-        crashes.push(crash);
-      }
+  getSubmission: function (crashID, submissionID) {
+    let crash = this._data.crashes.get(crashID);
+    if (!crash || !submissionID) {
+      return undefined;
     }
 
-    return crashes;
+    return crash.submissions.get(submissionID);
   },
 
-  get pluginCrashes() {
-    let crashes = [];
-    for (let crash of this.crashes) {
-      if (crash.isPluginCrash) {
-        crashes.push(crash);
-      }
+  /**
+   * Ensure the submission record is present in storage.
+   */
+  _ensureSubmissionRecord: function (crashID, submissionID) {
+    let crash = this._data.crashes.get(crashID);
+    if (!crash || !submissionID) {
+      return null;
     }
 
-    return crashes;
+    if (!crash.submissions.has(submissionID)) {
+      crash.submissions.set(submissionID, {
+        requestDate: null,
+        responseDate: null,
+        result: null,
+      });
+    }
+
+    return crash.submissions.get(submissionID);
   },
 
-  get pluginHangs() {
-    let crashes = [];
-    for (let crash of this.crashes) {
-      if (crash.isPluginHang) {
-        crashes.push(crash);
-      }
+  /**
+   * @return boolean True if the attempt was recorded.
+   */
+  addSubmissionAttempt: function (crashID, submissionID, date) {
+    let submission = this._ensureSubmissionRecord(crashID, submissionID);
+    if (!submission) {
+      return false;
     }
 
-    return crashes;
+    submission.requestDate = date;
+    return true;
+  },
+
+  /**
+   * @return boolean True if the response was recorded.
+   */
+  addSubmissionResult: function (crashID, submissionID, date, result) {
+    let submission = this.getSubmission(crashID, submissionID);
+    if (!submission) {
+      return false;
+    }
+
+    submission.responseDate = date;
+    submission.result = result;
+    return true;
+  },
+
+  /**
+   * @return boolean True if the classifications were set.
+   */
+  setCrashClassifications: function (crashID, classifications) {
+    let crash = this._data.crashes.get(crashID);
+    if (!crash) {
+      return false;
+    }
+
+    crash.classifications = classifications;
+    return true;
   },
 });
 
@@ -959,6 +1225,10 @@ function CrashRecord(o) {
 CrashRecord.prototype = Object.freeze({
   get id() {
     return this._o.id;
+  },
+
+  get remoteID() {
+    return this._o.remoteID;
   },
 
   get crashDate() {
@@ -984,16 +1254,16 @@ CrashRecord.prototype = Object.freeze({
     return this._o.type;
   },
 
-  get isMainProcessCrash() {
-    return this._o.type == CrashStore.prototype.TYPE_MAIN_CRASH;
+  isOfType: function (processType, crashType) {
+    return processType + "-" + crashType == this.type;
   },
 
-  get isPluginCrash() {
-    return this._o.type == CrashStore.prototype.TYPE_PLUGIN_CRASH;
+  get submissions() {
+    return this._o.submissions;
   },
 
-  get isPluginHang() {
-    return this._o.type == CrashStore.prototype.TYPE_PLUGIN_HANG;
+  get classifications() {
+    return this._o.classifications;
   },
 });
 

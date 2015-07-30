@@ -5,7 +5,7 @@
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-common/utils.js");
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://testing-common/services-common/logging.js");
+Cu.import("resource://testing-common/services/common/logging.js");
 
 let btoa = Cu.import("resource://gre/modules/Log.jsm").btoa;
 let atob = Cu.import("resource://gre/modules/Log.jsm").atob;
@@ -64,7 +64,9 @@ function do_check_throws_message(aFunc, aResult) {
  * @usage _("Hello World") -> prints "Hello World"
  * @usage _(1, 2, 3) -> prints "1 2 3"
  */
-let _ = function(some, debug, text, to) print(Array.slice(arguments).join(" "));
+let _ = function(some, debug, text, to) {
+  print(Array.slice(arguments).join(" "));
+};
 
 function httpd_setup (handlers, port=-1) {
   let server = new HttpServer();

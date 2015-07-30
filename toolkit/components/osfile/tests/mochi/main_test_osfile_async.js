@@ -89,7 +89,8 @@ let reference_fetch_file = function reference_fetch_file(path, test) {
   test.info("Fetching file " + path);
   let promise = Promise.defer();
   let file = new FileUtils.File(path);
-  NetUtil.asyncFetch(file,
+  NetUtil.asyncFetch2(
+    file,
     function(stream, status) {
       if (!Components.isSuccessCode(status)) {
         promise.reject(status);
@@ -107,7 +108,13 @@ let reference_fetch_file = function reference_fetch_file(path, test) {
       } else {
         promise.resolve(result);
       }
-  });
+    },
+    null,      // aLoadingNode
+    Services.scriptSecurityManager.getSystemPrincipal(),
+    null,      // aTriggeringPrincipal
+    Ci.nsILoadInfo.SEC_NORMAL,
+    Ci.nsIContentPolicy.TYPE_OTHER);
+
   return promise.promise;
 };
 
@@ -149,12 +156,9 @@ function toggleDebugTest (pref, consoleListener) {
 let test = maketest("Main", function main(test) {
   return Task.spawn(function() {
     SimpleTest.waitForExplicitFinish();
-    yield test_constants();
-    yield test_path();
     yield test_stat();
     yield test_debug();
     yield test_info_features_detect();
-    yield test_read_write();
     yield test_position();
     yield test_iter();
     yield test_exists();
@@ -169,31 +173,6 @@ let test = maketest("Main", function main(test) {
  */
 let EXISTING_FILE = OS.Path.join("chrome", "toolkit", "components",
   "osfile", "tests", "mochi", "main_test_osfile_async.js");
-
-/**
- * Test that OS.Constants is defined correctly.
- */
-let test_constants = maketest("constants", function constants(test) {
-  return Task.spawn(function() {
-    test.isnot(OS.Constants, null, "OS.Constants exists");
-    test.ok(OS.Constants.Win || OS.Constants.libc, "OS.Constants.Win exists or OS.Constants.Unix exists");
-    test.isnot(OS.Constants.Path, null, "OS.Constants.Path exists");
-    test.isnot(OS.Constants.Sys, null, "OS.Constants.Sys exists");
-  });
-});
-
-/**
- * Test that OS.Constants.Path paths are consistent.
- */
-let test_path = maketest("path",  function path(test) {
-  return Task.spawn(function() {
-    test.ok(OS.Path, "OS.Path exists");
-    test.ok(OS.Constants.Path, "OS.Constants.Path exists");
-    test.is(OS.Constants.Path.tmpDir, Services.dirsvc.get("TmpD", Components.interfaces.nsIFile).path, "OS.Constants.Path.tmpDir is correct");
-    test.is(OS.Constants.Path.profileDir, Services.dirsvc.get("ProfD", Components.interfaces.nsIFile).path, "OS.Constants.Path.profileDir is correct");
-    test.is(OS.Constants.Path.localProfileDir, Services.dirsvc.get("ProfLD", Components.interfaces.nsIFile).path, "OS.Constants.Path.localProfileDir is correct");
-  });
-});
 
 /**
  * Test OS.File.stat and OS.File.prototype.stat
@@ -248,62 +227,6 @@ let test_info_features_detect = maketest("features_detect", function features_de
 });
 
 /**
- * Test OS.File.prototype.{read, readTo, write}
- */
-let test_read_write = maketest("read_write", function read_write(test) {
-  return Task.spawn(function() {
-    // Test readTo/write
-    let currentDir = yield OS.File.getCurrentDirectory();
-    let pathSource = OS.Path.join(currentDir, EXISTING_FILE);
-    let pathDest = OS.Path.join(OS.Constants.Path.tmpDir,
-      "osfile async test.tmp");
-
-    let fileSource = yield OS.File.open(pathSource);
-    test.info("Input file opened");
-    let fileDest = yield OS.File.open(pathDest,
-      { truncate: true, read: true, write: true});
-    test.info("Output file opened");
-
-    let stat = yield fileSource.stat();
-    test.info("Input stat worked");
-    let size = stat.size;
-    let array = new Uint8Array(size);
-
-    try {
-      test.info("Now calling readTo");
-      let readLength = yield fileSource.readTo(array);
-      test.info("ReadTo worked");
-      test.is(readLength, size, "ReadTo got all bytes");
-      let writeLength = yield fileDest.write(array);
-      test.info("Write worked");
-      test.is(writeLength, size, "Write wrote all bytes");
-
-      // Test read
-      yield fileSource.setPosition(0);
-      let readAllResult = yield fileSource.read();
-      test.info("ReadAll worked");
-      test.is(readAllResult.length, size, "ReadAll read all bytes");
-      test.is(Array.prototype.join.call(readAllResult),
-              Array.prototype.join.call(array),
-              "ReadAll result is correct");
-    } finally {
-      // Close stuff
-      yield fileSource.close();
-      yield fileDest.close();
-      test.info("Files are closed");
-    }
-
-    stat = yield OS.File.stat(pathDest);
-    test.is(stat.size, size, "Both files have the same size");
-    yield reference_compare_files(pathSource, pathDest, test);
-
-    // Cleanup.
-    OS.File.remove(pathDest);
-  });
-});
-
-
-/**
  * Test file.{getPosition, setPosition}
  */
 let test_position = maketest("position", function position(test) {
@@ -311,13 +234,8 @@ let test_position = maketest("position", function position(test) {
     let file = yield OS.File.open(EXISTING_FILE);
 
     try {
-      let stat = yield file.stat();
-      test.info("Obtained file length");
-
-      let view = new Uint8Array(stat.size);
-      yield file.readTo(view);
+      let view = yield file.read();
       test.info("First batch of content read");
-
       let CHUNK_SIZE = 178;// An arbitrary number of bytes to read from the file
       let pos = yield file.getPosition();
       test.info("Obtained position");
@@ -326,8 +244,7 @@ let test_position = maketest("position", function position(test) {
       test.info("Changed position");
       test.is(pos, view.byteLength - CHUNK_SIZE, "setPosition returned the correct position");
 
-      let view2 = new Uint8Array(CHUNK_SIZE);
-      yield file.readTo(view2);
+      let view2 = yield file.read();
       test.info("Read the end of the file");
       for (let i = 0; i < CHUNK_SIZE; ++i) {
         if (view2[i] != view[i + view.byteLength - CHUNK_SIZE]) {

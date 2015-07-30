@@ -19,15 +19,14 @@ CounterAdd(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::MutableHand
 static const JSClass CounterClass = {
     "Counter",  /* name */
     0,  /* flags */
-    CounterAdd, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
-    JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub
+    CounterAdd
 };
 
 BEGIN_TEST(testPropCache_bug505798)
 {
     g_counter = 0;
     EXEC("var x = {};");
-    CHECK(JS_DefineObject(cx, global, "y", &CounterClass, nullptr, JSPROP_ENUMERATE));
+    CHECK(JS_DefineObject(cx, global, "y", &CounterClass, JSPROP_ENUMERATE));
     EXEC("var arr = [x, y];\n"
          "for (var i = 0; i < arr.length; i++)\n"
          "    arr[i].p = 1;\n");

@@ -4,6 +4,9 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 #endif
 
+// The amount of time we wait while coalescing updates for hidden pages.
+const SCHEDULE_UPDATE_TIMEOUT_MS = 1000;
+
 /**
  * This singleton represents the whole 'New Tab Page' and takes care of
  * initializing all its components.
@@ -24,36 +27,18 @@ let gPage = {
     // listen from the xul window and filter then delegate
     addEventListener("click", this, false);
 
-    // Initialize sponsored panel
-    this._sponsoredPanel = document.getElementById("sponsored-panel");
-    let link = this._sponsoredPanel.querySelector(".text-link");
-    link.addEventListener("click", () => this._sponsoredPanel.hidePopup());
-    if (UpdateChannel.get().startsWith("release")) {
-      document.getElementById("sponsored-panel-trial-descr").style.display = "none";
-    }
-    else {
-      document.getElementById("sponsored-panel-release-descr").style.display = "none";
-    }
-
     // Check if the new tab feature is enabled.
     let enabled = gAllPages.enabled;
     if (enabled)
       this._init();
 
     this._updateAttributes(enabled);
-  },
 
-  /**
-   * True if the page is allowed to capture thumbnails using the background
-   * thumbnail service.
-   */
-  get allowBackgroundCaptures() {
-    // The preloader is bypassed altogether for private browsing windows, and
-    // therefore allow-background-captures will not be set.  In that case, the
-    // page is not preloaded and so it's visible, so allow background captures.
-    return inPrivateBrowsingMode() ||
-           document.documentElement.getAttribute("allow-background-captures") ==
-           "true";
+    // Initialize customize controls.
+    gCustomize.init();
+
+    // Initialize intro panel.
+    gIntro.init();
   },
 
   /**
@@ -61,8 +46,15 @@ let gPage = {
    */
   observe: function Page_observe(aSubject, aTopic, aData) {
     if (aTopic == "nsPref:changed") {
+      gCustomize.updateSelected();
+
       let enabled = gAllPages.enabled;
       this._updateAttributes(enabled);
+
+      // Update thumbnails to the new enhanced setting
+      if (aData == "browser.newtabpage.enhanced") {
+        this.update();
+      }
 
       // Initialize the whole page if we haven't done that, yet.
       if (enabled) {
@@ -80,31 +72,39 @@ let gPage = {
   },
 
   /**
-   * Updates the whole page and the grid when the storage has changed.
-   * @param aOnlyIfHidden If true, the page is updated only if it's hidden in
-   *                      the preloader.
+   * Updates the page's grid right away for visible pages. If the page is
+   * currently hidden, i.e. in a background tab or in the preloader, then we
+   * batch multiple update requests and refresh the grid once after a short
+   * delay. Accepts a single parameter the specifies the reason for requesting
+   * a page update. The page may decide to delay or prevent a requested updated
+   * based on the given reason.
    */
-  update: function Page_update(aOnlyIfHidden=false) {
-    let skipUpdate = aOnlyIfHidden && this.allowBackgroundCaptures;
-    // The grid might not be ready yet as we initialize it asynchronously.
-    if (gGrid.ready && !skipUpdate) {
-      gGrid.refresh();
-    }
-  },
+  update(reason = "") {
+    // Update immediately if we're visible.
+    if (!document.hidden) {
+      // Ignore updates where reason=links-changed as those signal that the
+      // provider's set of links changed. We don't want to update visible pages
+      // in that case, it is ok to wait until the user opens the next tab.
+      if (reason != "links-changed" && gGrid.ready) {
+        gGrid.refresh();
+      }
 
-  /**
-   * Shows sponsored panel
-   */
-  showSponsoredPanel: function Page_showSponsoredPanel(aTarget) {
-    if (this._sponsoredPanel.state == "closed") {
-      let self = this;
-      this._sponsoredPanel.addEventListener("popuphidden", function onPopupHidden(aEvent) {
-        self._sponsoredPanel.removeEventListener("popuphidden", onPopupHidden, false);
-        aTarget.removeAttribute("panelShown");
-      });
+      return;
     }
-    aTarget.setAttribute("panelShown", "true");
-    this._sponsoredPanel.openPopup(aTarget);
+
+    // Bail out if we scheduled before.
+    if (this._scheduleUpdateTimeout) {
+      return;
+    }
+
+    this._scheduleUpdateTimeout = setTimeout(() => {
+      // Refresh if the grid is ready.
+      if (gGrid.ready) {
+        gGrid.refresh();
+      }
+
+      this._scheduleUpdateTimeout = null;
+    }, SCHEDULE_UPDATE_TIMEOUT_MS);
   },
 
   /**
@@ -117,59 +117,26 @@ let gPage = {
 
     this._initialized = true;
 
+    // Initialize search.
     gSearch.init();
 
-    this._mutationObserver = new MutationObserver(() => {
-      if (this.allowBackgroundCaptures) {
-        Services.telemetry.getHistogramById("NEWTAB_PAGE_SHOWN").add(true);
+    if (document.hidden) {
+      addEventListener("visibilitychange", this);
+    } else {
+      setTimeout(_ => this.onPageFirstVisible());
+    }
 
-        // Initialize type counting with the types we want to count
-        let directoryCount = {};
-        for (let type of DirectoryLinksProvider.linkTypes) {
-          directoryCount[type] = 0;
-        }
+    // Initialize and render the grid.
+    gGrid.init();
 
-        for (let site of gGrid.sites) {
-          if (site) {
-            site.captureIfMissing();
-            let {type} = site.link;
-            if (type in directoryCount) {
-              directoryCount[type]++;
-            }
-          }
-        }
-
-        // Record how many directory sites were shown, but place counts over the
-        // default 9 in the same bucket
-        for (let [type, count] of Iterator(directoryCount)) {
-          let shownId = "NEWTAB_PAGE_DIRECTORY_" + type.toUpperCase() + "_SHOWN";
-          let shownCount = Math.min(10, count);
-          Services.telemetry.getHistogramById(shownId).add(shownCount);
-        }
-
-        // content.js isn't loaded for the page while it's in the preloader,
-        // which is why this is necessary.
-        gSearch.setUpInitialState();
-      }
-    });
-    this._mutationObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["allow-background-captures"],
-    });
-
-    gLinks.populateCache(function () {
-      // Initialize and render the grid.
-      gGrid.init();
-
-      // Initialize the drop target shim.
-      gDropTargetShim.init();
+    // Initialize the drop target shim.
+    gDropTargetShim.init();
 
 #ifdef XP_MACOSX
-      // Workaround to prevent a delay on MacOSX due to a slow drop animation.
-      document.addEventListener("dragover", this, false);
-      document.addEventListener("drop", this, false);
+    // Workaround to prevent a delay on MacOSX due to a slow drop animation.
+    document.addEventListener("dragover", this, false);
+    document.addEventListener("drop", this, false);
 #endif
-    }.bind(this));
   },
 
   /**
@@ -178,7 +145,7 @@ let gPage = {
    */
   _updateAttributes: function Page_updateAttributes(aValue) {
     // Set the nodes' states.
-    let nodeSelector = "#newtab-scrollbox, #newtab-toggle, #newtab-grid, #newtab-search-container";
+    let nodeSelector = "#newtab-scrollbox, #newtab-grid, #newtab-search-container";
     for (let node of document.querySelectorAll(nodeSelector)) {
       if (aValue)
         node.removeAttribute("page-disabled");
@@ -194,10 +161,6 @@ let gPage = {
       else
         input.setAttribute("tabindex", "-1");
     }
-
-    // Update the toggle button's title.
-    let toggle = document.getElementById("newtab-toggle");
-    toggle.setAttribute("title", newTabString(aValue ? "hide" : "show"));
   },
 
   /**
@@ -205,20 +168,14 @@ let gPage = {
    */
   handleEvent: function Page_handleEvent(aEvent) {
     switch (aEvent.type) {
+      case "load":
+        this.onPageVisibleAndLoaded();
+        break;
       case "unload":
-        if (this._mutationObserver)
-          this._mutationObserver.disconnect();
         gAllPages.unregister(this);
         break;
       case "click":
         let {button, target} = aEvent;
-        if (target.id == "newtab-toggle") {
-          if (button == 0) {
-            gAllPages.enabled = !gAllPages.enabled;
-          }
-          break;
-        }
-
         // Go up ancestors until we find a Site or not
         while (target) {
           if (target.hasOwnProperty("_newtabSite")) {
@@ -238,6 +195,67 @@ let gPage = {
           aEvent.stopPropagation();
         }
         break;
+      case "visibilitychange":
+        // Cancel any delayed updates for hidden pages now that we're visible.
+        if (this._scheduleUpdateTimeout) {
+          clearTimeout(this._scheduleUpdateTimeout);
+          this._scheduleUpdateTimeout = null;
+
+          // An update was pending so force an update now.
+          this.update();
+        }
+
+        setTimeout(() => this.onPageFirstVisible());
+        removeEventListener("visibilitychange", this);
+        break;
     }
+  },
+
+  onPageFirstVisible: function () {
+    // Record another page impression.
+    Services.telemetry.getHistogramById("NEWTAB_PAGE_SHOWN").add(true);
+
+    for (let site of gGrid.sites) {
+      if (site) {
+        site.captureIfMissing();
+      }
+    }
+
+    if (document.readyState == "complete") {
+      this.onPageVisibleAndLoaded();
+    } else {
+      addEventListener("load", this);
+    }
+  },
+
+  onPageVisibleAndLoaded() {
+    // Send the index of the last visible tile.
+    this.reportLastVisibleTileIndex();
+
+    // Show the panel now that anchors are sized
+    gIntro.showIfNecessary();
+  },
+
+  reportLastVisibleTileIndex() {
+    let cwu = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                    .getInterface(Ci.nsIDOMWindowUtils);
+
+    let rect = cwu.getBoundsWithoutFlushing(gGrid.node);
+    let nodes = cwu.nodesFromRect(rect.left, rect.top, 0, rect.width,
+                                  rect.height, 0, true, false);
+
+    let i = -1;
+    let lastIndex = -1;
+    let sites = gGrid.sites;
+
+    for (let node of nodes) {
+      if (node.classList && node.classList.contains("newtab-cell")) {
+        if (sites[++i]) {
+          lastIndex = i;
+        }
+      }
+    }
+
+    DirectoryLinksProvider.reportSitesAction(sites, "view", lastIndex);
   }
 };

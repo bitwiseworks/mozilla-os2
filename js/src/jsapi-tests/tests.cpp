@@ -21,32 +21,55 @@ bool JSAPITest::init()
     if (!cx)
         return false;
     JS_BeginRequest(cx);
-    JS::RootedObject global(cx, createGlobal());
+    global.init(rt);
+    createGlobal();
     if (!global)
         return false;
     JS_EnterCompartment(cx, global);
     return true;
 }
 
+void JSAPITest::uninit()
+{
+    if (oldCompartment) {
+        JS_LeaveCompartment(cx, oldCompartment);
+        oldCompartment = nullptr;
+    }
+    if (global) {
+        JS_LeaveCompartment(cx, nullptr);
+        global = nullptr;
+    }
+    if (cx) {
+        JS_EndRequest(cx);
+        JS_DestroyContext(cx);
+        cx = nullptr;
+    }
+    if (rt) {
+        destroyRuntime();
+        rt = nullptr;
+    }
+}
+
 bool JSAPITest::exec(const char* bytes, const char* filename, int lineno)
 {
     JS::RootedValue v(cx);
-    JS::HandleObject global = JS::HandleObject::fromMarkedLocation(this->global.unsafeGet());
-    return JS_EvaluateScript(cx, global, bytes, strlen(bytes), filename, lineno, &v) ||
-        fail(bytes, filename, lineno);
+    JS::CompileOptions opts(cx);
+    opts.setFileAndLine(filename, lineno);
+    return JS::Evaluate(cx, global, opts, bytes, strlen(bytes), &v) ||
+        fail(JSAPITestString(bytes), filename, lineno);
 }
 
 bool JSAPITest::evaluate(const char* bytes, const char* filename, int lineno,
                          JS::MutableHandleValue vp)
 {
-    JS::HandleObject global = JS::HandleObject::fromMarkedLocation(this->global.unsafeGet());
-    return JS_EvaluateScript(cx, global, bytes, strlen(bytes), filename, lineno, vp) ||
-        fail(bytes, filename, lineno);
+    JS::CompileOptions opts(cx);
+    opts.setFileAndLine(filename, lineno);
+    return JS::Evaluate(cx, global, opts, bytes, strlen(bytes), vp) ||
+        fail(JSAPITestString(bytes), filename, lineno);
 }
 
 bool JSAPITest::definePrint()
 {
-    JS::HandleObject global = JS::HandleObject::fromMarkedLocation(this->global.unsafeGet());
     return JS_DefineFunction(cx, global, "print", (JSNative) print, 0, 0);
 }
 
@@ -58,14 +81,14 @@ JSObject * JSAPITest::createGlobal(JSPrincipals* principals)
     global = JS_NewGlobalObject(cx, getGlobalClass(), principals, JS::FireOnNewGlobalHook, options);
     if (!global)
         return nullptr;
-    JS::AddNamedObjectRoot(cx, &global, "test-global");
-    JS::HandleObject globalHandle = JS::HandleObject::fromMarkedLocation(global.unsafeGet());
-    JSAutoCompartment ac(cx, globalHandle);
+
+    JSAutoCompartment ac(cx, global);
 
     /* Populate the global object with the standard globals, like Object and
        Array. */
-    if (!JS_InitStandardClasses(cx, globalHandle))
-        return nullptr;
+    if (!JS_InitStandardClasses(cx, global))
+        global = nullptr;
+
     return global;
 }
 
@@ -91,11 +114,11 @@ int main(int argc, char* argv[])
         if (!test->init()) {
             printf("TEST-UNEXPECTED-FAIL | %s | Failed to initialize.\n", name);
             failures++;
+            test->uninit();
             continue;
         }
 
-        JS::HandleObject global = JS::HandleObject::fromMarkedLocation(test->global.unsafeGet());
-        if (test->run(global)) {
+        if (test->run(test->global)) {
             printf("TEST-PASS | %s | ok\n", name);
         } else {
             JSAPITestString messages = test->messages();

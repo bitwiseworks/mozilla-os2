@@ -8,6 +8,7 @@
 #define jit_shared_CodeGenerator_shared_inl_h
 
 #include "jit/shared/CodeGenerator-shared.h"
+#include "jit/Disassembler.h"
 
 namespace js {
 namespace jit {
@@ -19,8 +20,9 @@ ToInt32(const LAllocation* a)
         return a->toConstant()->toInt32();
     if (a->isConstantIndex())
         return a->toConstantIndex()->index();
-    MOZ_ASSUME_UNREACHABLE("this is not a constant!");
+    MOZ_CRASH("this is not a constant!");
 }
+
 static inline double
 ToDouble(const LAllocation* a)
 {
@@ -30,7 +32,7 @@ ToDouble(const LAllocation* a)
 static inline Register
 ToRegister(const LAllocation& a)
 {
-    JS_ASSERT(a.isGeneralReg());
+    MOZ_ASSERT(a.isGeneralReg());
     return a.toGeneralReg()->reg();
 }
 
@@ -69,7 +71,7 @@ ToRegisterOrInvalid(const LDefinition* a)
 static inline FloatRegister
 ToFloatRegister(const LAllocation& a)
 {
-    JS_ASSERT(a.isFloatReg());
+    MOZ_ASSERT(a.isFloatReg());
     return a.toFloatReg()->reg();
 }
 
@@ -88,7 +90,7 @@ ToFloatRegister(const LDefinition* def)
 static inline AnyRegister
 ToAnyRegister(const LAllocation& a)
 {
-    JS_ASSERT(a.isGeneralReg() || a.isFloatReg());
+    MOZ_ASSERT(a.isGeneralReg() || a.isFloatReg());
     if (a.isGeneralReg())
         return AnyRegister(ToRegister(a));
     return AnyRegister(ToFloatRegister(a));
@@ -128,7 +130,7 @@ GetValueOutput(LInstruction* ins)
 }
 
 static inline ValueOperand
-GetTempValue(const Register& type, const Register& payload)
+GetTempValue(Register type, Register payload)
 {
 #if defined(JS_NUNBOX32)
     return ValueOperand(type, payload);
@@ -143,7 +145,7 @@ GetTempValue(const Register& type, const Register& payload)
 void
 CodeGeneratorShared::saveLive(LInstruction* ins)
 {
-    JS_ASSERT(!ins->isCall());
+    MOZ_ASSERT(!ins->isCall());
     LSafepoint* safepoint = ins->safepoint();
     masm.PushRegsInMask(safepoint->liveRegs());
 }
@@ -151,7 +153,7 @@ CodeGeneratorShared::saveLive(LInstruction* ins)
 void
 CodeGeneratorShared::restoreLive(LInstruction* ins)
 {
-    JS_ASSERT(!ins->isCall());
+    MOZ_ASSERT(!ins->isCall());
     LSafepoint* safepoint = ins->safepoint();
     masm.PopRegsInMask(safepoint->liveRegs());
 }
@@ -159,7 +161,7 @@ CodeGeneratorShared::restoreLive(LInstruction* ins)
 void
 CodeGeneratorShared::restoreLiveIgnore(LInstruction* ins, RegisterSet ignore)
 {
-    JS_ASSERT(!ins->isCall());
+    MOZ_ASSERT(!ins->isCall());
     LSafepoint* safepoint = ins->safepoint();
     masm.PopRegsInMaskIgnore(safepoint->liveRegs(), ignore);
 }
@@ -167,7 +169,7 @@ CodeGeneratorShared::restoreLiveIgnore(LInstruction* ins, RegisterSet ignore)
 void
 CodeGeneratorShared::saveLiveVolatile(LInstruction* ins)
 {
-    JS_ASSERT(!ins->isCall());
+    MOZ_ASSERT(!ins->isCall());
     LSafepoint* safepoint = ins->safepoint();
     RegisterSet regs = RegisterSet::Intersect(safepoint->liveRegs(), RegisterSet::Volatile());
     masm.PushRegsInMask(regs);
@@ -176,10 +178,61 @@ CodeGeneratorShared::saveLiveVolatile(LInstruction* ins)
 void
 CodeGeneratorShared::restoreLiveVolatile(LInstruction* ins)
 {
-    JS_ASSERT(!ins->isCall());
+    MOZ_ASSERT(!ins->isCall());
     LSafepoint* safepoint = ins->safepoint();
     RegisterSet regs = RegisterSet::Intersect(safepoint->liveRegs(), RegisterSet::Volatile());
     masm.PopRegsInMask(regs);
+}
+
+void
+CodeGeneratorShared::verifyHeapAccessDisassembly(uint32_t begin, uint32_t end, bool isLoad,
+                                                 Scalar::Type type, const Operand& mem,
+                                                 LAllocation alloc)
+{
+#ifdef DEBUG
+    using namespace Disassembler;
+
+    OtherOperand op;
+    Disassembler::HeapAccess::Kind kind = isLoad ? HeapAccess::Load : HeapAccess::Store;
+    switch (type) {
+      case Scalar::Int8:
+      case Scalar::Int16:
+        if (kind == HeapAccess::Load)
+            kind = HeapAccess::LoadSext32;
+        // FALL THROUGH
+      case Scalar::Uint8:
+      case Scalar::Uint16:
+      case Scalar::Int32:
+      case Scalar::Uint32:
+        if (!alloc.isConstant()) {
+            op = OtherOperand(ToRegister(alloc).code());
+        } else {
+            int32_t i = ToInt32(&alloc);
+
+            // Sign-extend the immediate value out to 32 bits. We do this even
+            // for unsigned element types so that we match what the disassembly
+            // code does, as it doesn't know about signedness of stores.
+            unsigned shift = 32 - TypedArrayElemSize(type) * 8;
+            i = i << shift >> shift;
+
+            op = OtherOperand(i);
+        }
+        break;
+      case Scalar::Float32:
+      case Scalar::Float64:
+      case Scalar::Float32x4:
+      case Scalar::Int32x4:
+        op = OtherOperand(ToFloatRegister(alloc).code());
+        break;
+      case Scalar::Uint8Clamped:
+      case Scalar::MaxTypedArrayViewType:
+        MOZ_CRASH("Unexpected array type");
+    }
+
+    masm.verifyHeapAccessDisassembly(begin, end,
+                                     HeapAccess(kind, TypedArrayElemSize(type),
+                                     ComplexAddress(mem), op));
+#endif
 }
 
 } // ion

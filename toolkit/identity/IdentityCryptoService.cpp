@@ -16,6 +16,7 @@
 #include "mozilla/ArrayUtils.h" // ArrayLength
 #include "mozilla/Base64.h"
 #include "ScopedNSSTypes.h"
+#include "NSSErrorsService.h"
 
 #include "nss.h"
 #include "pk11pub.h"
@@ -87,7 +88,7 @@ private:
     shutdown(calledFromObject);
   }
 
-  void virtualDestroyNSSReference() MOZ_OVERRIDE
+  void virtualDestroyNSSReference() override
   {
     destructorSafeDestroyNSSReference();
   }
@@ -103,8 +104,8 @@ private:
   SECKEYPrivateKey * mPrivateKey;
   SECKEYPublicKey * mPublicKey;
 
-  KeyPair(const KeyPair &) MOZ_DELETE;
-  void operator=(const KeyPair &) MOZ_DELETE;
+  KeyPair(const KeyPair &) = delete;
+  void operator=(const KeyPair &) = delete;
 };
 
 NS_IMPL_ISUPPORTS(KeyPair, nsIIdentityKeyPair)
@@ -127,7 +128,7 @@ private:
     shutdown(calledFromObject);
   }
 
-  virtual void virtualDestroyNSSReference() MOZ_OVERRIDE
+  virtual void virtualDestroyNSSReference() override
   {
     destructorSafeDestroyNSSReference();
   }
@@ -141,8 +142,8 @@ private:
   nsresult mRv; // out
   nsCOMPtr<nsIIdentityKeyPair> mKeyPair; // out
 
-  KeyGenRunnable(const KeyGenRunnable &) MOZ_DELETE;
-  void operator=(const KeyGenRunnable &) MOZ_DELETE;
+  KeyGenRunnable(const KeyGenRunnable &) = delete;
+  void operator=(const KeyGenRunnable &) = delete;
 };
 
 class SignRunnable : public nsRunnable, public nsNSSShutDownObject
@@ -164,7 +165,7 @@ private:
     shutdown(calledFromObject);
   }
 
-  void virtualDestroyNSSReference() MOZ_OVERRIDE
+  void virtualDestroyNSSReference() override
   {
     destructorSafeDestroyNSSReference();
   }
@@ -182,11 +183,11 @@ private:
   nsCString mSignature; // out
 
 private:
-  SignRunnable(const SignRunnable &) MOZ_DELETE;
-  void operator=(const SignRunnable &) MOZ_DELETE;
+  SignRunnable(const SignRunnable &) = delete;
+  void operator=(const SignRunnable &) = delete;
 };
 
-class IdentityCryptoService MOZ_FINAL : public nsIIdentityCryptoService
+class IdentityCryptoService final : public nsIIdentityCryptoService
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -204,8 +205,9 @@ public:
   }
 
 private:
-  IdentityCryptoService(const KeyPair &) MOZ_DELETE;
-  void operator=(const IdentityCryptoService &) MOZ_DELETE;
+  ~IdentityCryptoService() { }
+  IdentityCryptoService(const KeyPair &) = delete;
+  void operator=(const IdentityCryptoService &) = delete;
 };
 
 NS_IMPL_ISUPPORTS(IdentityCryptoService, nsIIdentityCryptoService)
@@ -353,7 +355,7 @@ GenerateKeyPair(PK11SlotInfo * slot,
                                      nullptr /*&pwdata*/);
   if (!*privateKey) {
     MOZ_ASSERT(!*publicKey);
-    return PRErrorCode_to_nsresult(PR_GetError());
+    return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
   }
   if (!*publicKey) {
 	  SECKEY_DestroyPrivateKey(*privateKey);
@@ -511,9 +513,9 @@ SignRunnable::Run()
       SECItem sig = { siBuffer, nullptr, 0 };
       int sigLength = PK11_SignatureLen(mPrivateKey);
       if (sigLength <= 0) {
-        mRv = PRErrorCode_to_nsresult(PR_GetError());
+        mRv = mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
       } else if (!SECITEM_AllocItem(nullptr, &sig, sigLength)) {
-        mRv = PRErrorCode_to_nsresult(PR_GetError());
+        mRv = mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
       } else {
         uint8_t hash[32]; // big enough for SHA-1 or SHA-256
         SECOidTag hashAlg = mPrivateKey->keyType == dsaKey ? SEC_OID_SHA1

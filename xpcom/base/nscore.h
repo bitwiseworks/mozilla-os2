@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -25,48 +26,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-#  include "mozilla/NullPtr.h"
-#endif
-
 #include "mozilla/RefCountType.h"
 
 /* Core XPCOM declarations. */
 
 /*----------------------------------------------------------------------*/
 /* Import/export defines */
-
-/**
- * Using the visibility("hidden") attribute allows the compiler to use
- * PC-relative addressing to call this function.  If a function does not
- * access any global data, and does not call any methods which are not either
- * file-local or hidden, then on ELF systems we avoid loading the address of
- * the PLT into a register at the start of the function, which reduces code
- * size and frees up a register for general use.
- *
- * As a general rule, this should be used for any non-exported symbol
- * (including virtual method implementations).  NS_IMETHOD uses this by
- * default; if you need to have your NS_IMETHOD functions exported, you can
- * wrap your class as follows:
- *
- * #undef  IMETHOD_VISIBILITY
- * #define IMETHOD_VISIBILITY NS_VISIBILITY_DEFAULT
- *
- * class Foo {
- * ...
- * };
- *
- * #undef  IMETHOD_VISIBILITY
- * #define IMETHOD_VISIBILITY NS_VISIBILITY_HIDDEN
- *
- * Don't forget to change the visibility back to hidden before the end
- * of a header!
- *
- * Other examples:
- *
- * NS_HIDDEN_(int) someMethod();
- * SomeCtor() NS_HIDDEN;
- */
 
 #ifdef HAVE_VISIBILITY_HIDDEN_ATTRIBUTE
 #define NS_VISIBILITY_HIDDEN   __attribute__ ((visibility ("hidden")))
@@ -87,9 +52,6 @@
 
 #define NS_HIDDEN           NS_VISIBILITY_HIDDEN
 #define NS_EXTERNAL_VIS     NS_VISIBILITY_DEFAULT
-
-#undef  IMETHOD_VISIBILITY
-#define IMETHOD_VISIBILITY  NS_VISIBILITY_HIDDEN
 
 /**
  * Mark a function as using a potentially non-standard function calling
@@ -158,7 +120,7 @@
 #define NS_IMPORT_(type) NS_EXTERNAL_VIS_(type)
 #define NS_EXPORT NS_EXTERNAL_VIS
 #define NS_EXPORT_(type) NS_EXTERNAL_VIS_(type)
-#define NS_IMETHOD_(type) virtual IMETHOD_VISIBILITY type
+#define NS_IMETHOD_(type) virtual type
 #define NS_IMETHODIMP_(type) type
 #define NS_METHOD_(type) type
 #define NS_CALLBACK_(_type, _name) _type (* _name)
@@ -208,6 +170,16 @@
 #endif
 
 /**
+ * Printf style formats
+ */
+#ifdef __GNUC__
+#define MOZ_FORMAT_PRINTF(stringIndex, firstToCheck)  \
+    __attribute__ ((format (printf, stringIndex, firstToCheck)))
+#else
+#define MOZ_FORMAT_PRINTF(stringIndex, firstToCheck)
+#endif
+
+/**
  * Generic API modifiers which return the standard XPCOM nsresult type
  */
 #define NS_IMETHOD          NS_IMETHOD_(nsresult)
@@ -238,7 +210,6 @@
 #endif
 
 #ifdef MOZILLA_INTERNAL_API
-#  define NS_COM_GLUE
    /*
      The frozen string API has different definitions of nsAC?String
      classes than the internal API. On systems that explicitly declare
@@ -248,12 +219,6 @@
    */
 #  define nsAString nsAString_internal
 #  define nsACString nsACString_internal
-#else
-#  ifdef HAVE_VISIBILITY_ATTRIBUTE
-#    define NS_COM_GLUE NS_VISIBILITY_HIDDEN
-#  else
-#    define NS_COM_GLUE
-#  endif
 #endif
 
 #if (defined(DEBUG) || defined(FORCE_BUILD_REFCNT_LOGGING))
@@ -273,7 +238,7 @@
  * sense to touch memory pages and free that memory at shutdown,
  * unless we are running leak stats.
  */
-#if defined(NS_TRACE_MALLOC) || defined(NS_BUILD_REFCNT_LOGGING) || defined(MOZ_VALGRIND)
+#if defined(NS_BUILD_REFCNT_LOGGING) || defined(MOZ_VALGRIND)
 #define NS_FREE_PERMANENT_DATA
 #endif
 
@@ -287,7 +252,7 @@
 #ifdef NS_NO_VTABLE
 #undef NS_NO_VTABLE
 #endif
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
 #define NS_NO_VTABLE __declspec(novtable)
 #else
 #define NS_NO_VTABLE
@@ -305,9 +270,9 @@ typedef MozRefCountType nsrefcnt;
  * Use these macros to do 64bit safe pointer conversions.
  */
 
-#define NS_PTR_TO_INT32(x)  ((int32_t)  (intptr_t) (x))
-#define NS_PTR_TO_UINT32(x) ((uint32_t) (intptr_t) (x))
-#define NS_INT32_TO_PTR(x)  ((void *)   (intptr_t) (x))
+#define NS_PTR_TO_INT32(x) ((int32_t)(intptr_t)(x))
+#define NS_PTR_TO_UINT32(x) ((uint32_t)(intptr_t)(x))
+#define NS_INT32_TO_PTR(x) ((void*)(intptr_t)(x))
 
 /*
  * Use NS_STRINGIFY to form a string literal from the value of a macro.
@@ -315,11 +280,11 @@ typedef MozRefCountType nsrefcnt;
 #define NS_STRINGIFY_HELPER(x_) #x_
 #define NS_STRINGIFY(x_) NS_STRINGIFY_HELPER(x_)
 
- /*
-  * If we're being linked as standalone glue, we don't want a dynamic
-  * dependency on NSPR libs, so we skip the debug thread-safety
-  * checks, and we cannot use the THREADSAFE_ISUPPORTS macros.
-  */
+/*
+ * If we're being linked as standalone glue, we don't want a dynamic
+ * dependency on NSPR libs, so we skip the debug thread-safety
+ * checks, and we cannot use the THREADSAFE_ISUPPORTS macros.
+ */
 #if defined(XPCOM_GLUE) && !defined(XPCOM_GLUE_USE_NSPR)
 #define XPCOM_GLUE_AVOID_NSPR
 #endif

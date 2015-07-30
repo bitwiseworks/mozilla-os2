@@ -11,15 +11,16 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/DeviceStorageBinding.h"
+#include "mozilla/dom/DeviceStorageChangeEvent.h"
 #include "mozilla/dom/DeviceStorageFileSystem.h"
 #include "mozilla/dom/devicestorage/PDeviceStorageRequestChild.h"
 #include "mozilla/dom/Directory.h"
 #include "mozilla/dom/FileSystemUtils.h"
-#include "mozilla/dom/ipc/Blob.h"
+#include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/dom/PBrowserChild.h"
-#include "mozilla/dom/PContentPermissionRequestChild.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/LazyIdleThread.h"
@@ -27,32 +28,29 @@
 #include "mozilla/Scoped.h"
 #include "mozilla/Services.h"
 
+#include "nsArrayUtils.h"
 #include "nsAutoPtr.h"
+#include "nsGlobalWindow.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIFile.h"
 #include "nsIDirectoryEnumerator.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryServiceDefs.h"
-#include "nsIDOMFile.h"
-#include "nsDOMBlobBuilder.h"
 #include "nsNetUtil.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIPrincipal.h"
 #include "nsJSUtils.h"
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
 #include "nsXULAppAPI.h"
-#include "TabChild.h"
 #include "DeviceStorageFileDescriptor.h"
 #include "DeviceStorageRequestChild.h"
-#include "nsIDOMDeviceStorageChangeEvent.h"
 #include "nsCRT.h"
 #include "nsIObserverService.h"
-#include "GeneratedEvents.h"
 #include "nsIMIMEService.h"
 #include "nsCExternalHandlerService.h"
 #include "nsIPermissionManager.h"
 #include "nsIStringBundle.h"
+#include "nsISupportsPrimitives.h"
 #include "nsIDocument.h"
 #include "nsPrintfCString.h"
 #include <algorithm>
@@ -63,6 +61,10 @@
 
 // Microsoft's API Name hackery sucks
 #undef CreateEvent
+
+#ifdef MOZ_WIDGET_ANDROID
+#include "AndroidBridge.h"
+#endif
 
 #ifdef MOZ_WIDGET_GONK
 #include "nsIVolume.h"
@@ -79,6 +81,10 @@ using namespace mozilla::dom::devicestorage;
 using namespace mozilla::ipc;
 
 #include "nsDirectoryServiceDefs.h"
+
+const char* kFileWatcherUpdate = "file-watcher-update";
+const char* kFileWatcherNotify = "file-watcher-notify";
+const char *kDownloadWatcherNotify = "download-watcher-notify";
 
 namespace mozilla {
   MOZ_TYPE_SPECIFIC_SCOPED_POINTER_TEMPLATE(ScopedPRFileDesc, PRFileDesc, PR_Close);
@@ -136,10 +142,10 @@ GetFreeBytes(const nsAString& aStorageName)
   // This function makes the assumption that the various types
   // are all stored on the same filesystem. So we use pictures.
 
-  DeviceStorageFile dsf(NS_LITERAL_STRING(DEVICESTORAGE_PICTURES),
-                        aStorageName);
+  nsRefPtr<DeviceStorageFile> dsf(new DeviceStorageFile(NS_LITERAL_STRING(DEVICESTORAGE_PICTURES),
+                                                        aStorageName));
   int64_t freeBytes = 0;
-  dsf.GetDiskFreeSpace(&freeBytes);
+  dsf->GetDiskFreeSpace(&freeBytes);
   return freeBytes;
 }
 
@@ -192,6 +198,8 @@ DeviceStorageUsedSpaceCache::SetUsedSizes(const nsAString& aStorageName,
 
 class GlobalDirs
 {
+private:
+  ~GlobalDirs() {}
 public:
   NS_INLINE_DECL_REFCOUNTING(GlobalDirs)
 #if !defined(MOZ_WIDGET_GONK)
@@ -297,8 +305,19 @@ DeviceStorageTypeChecker::Check(const nsAString& aType, nsIDOMBlob* aBlob)
 bool
 DeviceStorageTypeChecker::Check(const nsAString& aType, nsIFile* aFile)
 {
-  MOZ_ASSERT(aFile);
+  if (!aFile) {
+    return false;
+  }
 
+  nsString path;
+  aFile->GetPath(path);
+
+  return Check(aType, path);
+}
+
+bool
+DeviceStorageTypeChecker::Check(const nsAString& aType, const nsString& aPath)
+{
   if (aType.EqualsLiteral(DEVICESTORAGE_APPS) ||
       aType.EqualsLiteral(DEVICESTORAGE_SDCARD) ||
       aType.EqualsLiteral(DEVICESTORAGE_CRASHES)) {
@@ -306,18 +325,15 @@ DeviceStorageTypeChecker::Check(const nsAString& aType, nsIFile* aFile)
     return true;
   }
 
-  nsString path;
-  aFile->GetPath(path);
-
-  int32_t dotIdx = path.RFindChar(char16_t('.'));
+  int32_t dotIdx = aPath.RFindChar(char16_t('.'));
   if (dotIdx == kNotFound) {
     return false;
   }
 
   nsAutoString extensionMatch;
-  extensionMatch.AssignLiteral("*");
-  extensionMatch.Append(Substring(path, dotIdx));
-  extensionMatch.AppendLiteral(";");
+  extensionMatch.Assign('*');
+  extensionMatch.Append(Substring(aPath, dotIdx));
+  extensionMatch.Append(';');
 
   if (aType.EqualsLiteral(DEVICESTORAGE_PICTURES)) {
     return CaseInsensitiveFindInReadable(extensionMatch, mPicturesExtensions);
@@ -358,9 +374,9 @@ DeviceStorageTypeChecker::GetTypeFromFileName(const nsAString& aFileName,
   }
 
   nsAutoString extensionMatch;
-  extensionMatch.AssignLiteral("*");
+  extensionMatch.Assign('*');
   extensionMatch.Append(Substring(aFileName, dotIdx));
-  extensionMatch.AppendLiteral(";");
+  extensionMatch.Append(';');
 
   if (CaseInsensitiveFindInReadable(extensionMatch, mPicturesExtensions)) {
     aType.AssignLiteral(DEVICESTORAGE_PICTURES);
@@ -406,6 +422,7 @@ DeviceStorageTypeChecker::GetAccessForRequest(
       aAccessResult.AssignLiteral("read");
       break;
     case DEVICE_STORAGE_REQUEST_WRITE:
+    case DEVICE_STORAGE_REQUEST_APPEND:
     case DEVICE_STORAGE_REQUEST_DELETE:
     case DEVICE_STORAGE_REQUEST_FORMAT:
     case DEVICE_STORAGE_REQUEST_MOUNT:
@@ -422,6 +439,14 @@ DeviceStorageTypeChecker::GetAccessForRequest(
   return NS_OK;
 }
 
+static bool IsMediaType(const nsAString& aType)
+{
+  return aType.EqualsLiteral(DEVICESTORAGE_PICTURES) ||
+         aType.EqualsLiteral(DEVICESTORAGE_VIDEOS) ||
+         aType.EqualsLiteral(DEVICESTORAGE_MUSIC) ||
+         aType.EqualsLiteral(DEVICESTORAGE_SDCARD);
+}
+
 //static
 bool
 DeviceStorageTypeChecker::IsVolumeBased(const nsAString& aType)
@@ -431,10 +456,24 @@ DeviceStorageTypeChecker::IsVolumeBased(const nsAString& aType)
   // we only ever return a single apps object, and not an array
   // with one per volume (as is the case for the remaining
   // storage types).
-  return !aType.EqualsLiteral(DEVICESTORAGE_APPS) &&
-         !aType.EqualsLiteral(DEVICESTORAGE_CRASHES);
+  return IsMediaType(aType);
 #else
   return false;
+#endif
+}
+
+//static
+bool
+DeviceStorageTypeChecker::IsSharedMediaRoot(const nsAString& aType)
+{
+  // This function determines if aType shares a root directory with the
+  // other media types (so only applies to music, videos, pictures and sdcard).
+#ifdef MOZ_WIDGET_GONK
+  return IsMediaType(aType);
+#else
+  // For desktop, if the directories have been overridden, then they share
+  // a common root.
+  return IsMediaType(aType) && sDirs->overrideRootDir;
 #endif
 }
 
@@ -451,32 +490,115 @@ FileUpdateDispatcher::GetSingleton()
 
   sSingleton = new FileUpdateDispatcher();
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-  obs->AddObserver(sSingleton, "file-watcher-notify", false);
+  obs->AddObserver(sSingleton, kFileWatcherNotify, false);
+  obs->AddObserver(sSingleton, kDownloadWatcherNotify, false);
   ClearOnShutdown(&sSingleton);
 
   return sSingleton;
 }
 
 NS_IMETHODIMP
-FileUpdateDispatcher::Observe(nsISupports *aSubject,
-                              const char *aTopic,
-                              const char16_t *aData)
+FileUpdateDispatcher::Observe(nsISupports* aSubject,
+                              const char* aTopic,
+                              const char16_t* aData)
 {
-  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+  nsRefPtr<DeviceStorageFile> dsf;
 
-    DeviceStorageFile* file = static_cast<DeviceStorageFile*>(aSubject);
-    if (!file || !file->mFile) {
-      NS_WARNING("Device storage file looks invalid!");
+  if (!strcmp(aTopic, kDownloadWatcherNotify)) {
+    // aSubject will be an nsISupportsString with the native path to the file
+    // in question.
+
+    nsCOMPtr<nsISupportsString> supportsString = do_QueryInterface(aSubject);
+    if (!supportsString) {
       return NS_OK;
     }
-    ContentChild::GetSingleton()
-      ->SendFilePathUpdateNotify(file->mStorageType,
-                                 file->mStorageName,
-                                 file->mPath,
-                                 NS_ConvertUTF16toUTF8(aData));
+    nsString path;
+    nsresult rv = supportsString->GetData(path);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return NS_OK;
+    }
+
+    // The downloader uses the sdcard storage type.
+    nsString volName;
+#ifdef MOZ_WIDGET_GONK
+    if (DeviceStorageTypeChecker::IsVolumeBased(NS_LITERAL_STRING(DEVICESTORAGE_SDCARD))) {
+      nsCOMPtr<nsIVolumeService> vs = do_GetService(NS_VOLUMESERVICE_CONTRACTID);
+      if (NS_WARN_IF(!vs)) {
+        return NS_OK;
+      }
+      nsCOMPtr<nsIVolume> vol;
+      rv = vs->GetVolumeByPath(path, getter_AddRefs(vol));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return NS_OK;
+      }
+      rv = vol->GetName(volName);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return NS_OK;
+      }
+      nsString mountPoint;
+      rv = vol->GetMountPoint(mountPoint);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return NS_OK;
+      }
+      if (!Substring(path, 0, mountPoint.Length()).Equals(mountPoint)) {
+        return NS_OK;
+      }
+      path = Substring(path, mountPoint.Length() + 1);
+    }
+#endif
+    dsf = new DeviceStorageFile(NS_LITERAL_STRING(DEVICESTORAGE_SDCARD), volName, path);
+
+  } else if (!strcmp(aTopic, kFileWatcherNotify)) {
+    dsf = static_cast<DeviceStorageFile*>(aSubject);
   } else {
-    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    obs->NotifyObservers(aSubject, "file-watcher-update", aData);
+    NS_WARNING("FileUpdateDispatcher: Unrecognized topic");
+    return NS_OK;
+  }
+
+  if (!dsf || !dsf->mFile) {
+    NS_WARNING("FileUpdateDispatcher: Device storage file looks invalid!");
+    return NS_OK;
+  }
+
+  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+    // Child process. Forward the notification to the parent.
+    ContentChild::GetSingleton()
+      ->SendFilePathUpdateNotify(dsf->mStorageType,
+                                 dsf->mStorageName,
+                                 dsf->mPath,
+                                 NS_ConvertUTF16toUTF8(aData));
+    return NS_OK;
+  }
+
+  // Multiple storage types may match the same files. So walk through each of
+  // the storage types, and if the extension matches, tell them about it.
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (DeviceStorageTypeChecker::IsSharedMediaRoot(dsf->mStorageType)) {
+    DeviceStorageTypeChecker* typeChecker
+      = DeviceStorageTypeChecker::CreateOrGet();
+    MOZ_ASSERT(typeChecker);
+
+    static const nsLiteralString kMediaTypes[] = {
+      NS_LITERAL_STRING(DEVICESTORAGE_SDCARD),
+      NS_LITERAL_STRING(DEVICESTORAGE_PICTURES),
+      NS_LITERAL_STRING(DEVICESTORAGE_VIDEOS),
+      NS_LITERAL_STRING(DEVICESTORAGE_MUSIC),
+    };
+
+    for (size_t i = 0; i < MOZ_ARRAY_LENGTH(kMediaTypes); i++) {
+      nsRefPtr<DeviceStorageFile> dsf2;
+      if (typeChecker->Check(kMediaTypes[i], dsf->mPath)) {
+        if (dsf->mStorageType.Equals(kMediaTypes[i])) {
+          dsf2 = dsf;
+        } else {
+          dsf2 = new DeviceStorageFile(kMediaTypes[i],
+                                       dsf->mStorageName, dsf->mPath);
+        }
+        obs->NotifyObservers(dsf2, kFileWatcherUpdate, aData);
+      }
+    }
+  } else {
+    obs->NotifyObservers(dsf, kFileWatcherUpdate, aData);
   }
   return NS_OK;
 }
@@ -499,7 +621,7 @@ public:
     CopyASCIItoUTF16(mType, data);
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
 
-    obs->NotifyObservers(mFile, "file-watcher-notify", data.get());
+    obs->NotifyObservers(mFile, kFileWatcherNotify, data.get());
 
     DeviceStorageUsedSpaceCache* usedSpaceCache
       = DeviceStorageUsedSpaceCache::CreateOrGet();
@@ -601,14 +723,15 @@ DeviceStorageFile::Init()
 // device.storage.overrideRootDir preference. The preference is normally
 // only read once during initialization, but since the test environment has
 // no convenient way to restart, we use a pref watcher instead.
-class OverrideRootDir MOZ_FINAL : public nsIObserver
+class OverrideRootDir final : public nsIObserver
 {
+  ~OverrideRootDir();
+
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
 
   static OverrideRootDir* GetSingleton();
-  ~OverrideRootDir();
   void Init();
 private:
   static mozilla::StaticRefPtr<OverrideRootDir> sSingleton;
@@ -631,6 +754,7 @@ OverrideRootDir::GetSingleton()
 
   sSingleton = new OverrideRootDir();
   Preferences::AddStrongObserver(sSingleton, "device.storage.overrideRootDir");
+  Preferences::AddStrongObserver(sSingleton, "device.storage.testing");
   ClearOnShutdown(&sSingleton);
 
   return sSingleton;
@@ -639,6 +763,7 @@ OverrideRootDir::GetSingleton()
 OverrideRootDir::~OverrideRootDir()
 {
   Preferences::RemoveObserver(this, "device.storage.overrideRootDir");
+  Preferences::RemoveObserver(this, "device.storage.testing");
 }
 
 NS_IMETHODIMP
@@ -726,6 +851,8 @@ InitDirs()
 
 #if !defined(MOZ_WIDGET_GONK)
 
+// Keep MOZ_WIDGET_COCOA above XP_UNIX,
+// because both are defined in Darwin builds.
 #if defined (MOZ_WIDGET_COCOA)
   dirService->Get(NS_OSX_PICTURE_DOCUMENTS_DIR,
                   NS_GET_IID(nsIFile),
@@ -736,6 +863,32 @@ InitDirs()
   dirService->Get(NS_OSX_MUSIC_DOCUMENTS_DIR,
                   NS_GET_IID(nsIFile),
                   getter_AddRefs(sDirs->music));
+
+// Keep MOZ_WIDGET_ANDROID above XP_UNIX,
+// because both are defined in Android builds.
+#elif defined (MOZ_WIDGET_ANDROID)
+  nsAutoString path;
+  if (NS_SUCCEEDED(mozilla::AndroidBridge::GetExternalPublicDirectory(
+      NS_LITERAL_STRING(DEVICESTORAGE_PICTURES), path))) {
+    NS_NewLocalFile(path, /* aFollowLinks */ true,
+                    getter_AddRefs(sDirs->pictures));
+  }
+  if (NS_SUCCEEDED(mozilla::AndroidBridge::GetExternalPublicDirectory(
+      NS_LITERAL_STRING(DEVICESTORAGE_VIDEOS), path))) {
+    NS_NewLocalFile(path, /* aFollowLinks */ true,
+                    getter_AddRefs(sDirs->videos));
+  }
+  if (NS_SUCCEEDED(mozilla::AndroidBridge::GetExternalPublicDirectory(
+      NS_LITERAL_STRING(DEVICESTORAGE_MUSIC), path))) {
+    NS_NewLocalFile(path, /* aFollowLinks */ true,
+                    getter_AddRefs(sDirs->music));
+  }
+  if (NS_SUCCEEDED(mozilla::AndroidBridge::GetExternalPublicDirectory(
+      NS_LITERAL_STRING(DEVICESTORAGE_SDCARD), path))) {
+    NS_NewLocalFile(path, /* aFollowLinks */ true,
+                    getter_AddRefs(sDirs->sdcard));
+  }
+
 #elif defined (XP_UNIX)
   dirService->Get(NS_UNIX_XDG_PICTURES_DIR,
                   NS_GET_IID(nsIFile),
@@ -746,6 +899,7 @@ InitDirs()
   dirService->Get(NS_UNIX_XDG_MUSIC_DIR,
                   NS_GET_IID(nsIFile),
                   getter_AddRefs(sDirs->music));
+
 #elif defined (XP_WIN)
   dirService->Get(NS_WIN_PICTURES_DIR,
                   NS_GET_IID(nsIFile),
@@ -758,6 +912,7 @@ InitDirs()
                   getter_AddRefs(sDirs->music));
 #endif
 
+#ifndef MOZ_WIDGET_ANDROID
   // Eventually, on desktop, we want to do something smarter -- for example,
   // detect when an sdcard is inserted, and use that instead of this.
   dirService->Get(NS_APP_USER_PROFILE_50_DIR, NS_GET_IID(nsIFile),
@@ -765,6 +920,7 @@ InitDirs()
   if (sDirs->sdcard) {
     sDirs->sdcard->AppendRelativeNativePath(NS_LITERAL_CSTRING("fake-sdcard"));
   }
+#endif // !MOZ_WIDGET_ANDROID
 #endif // !MOZ_WIDGET_GONK
 
 #ifdef MOZ_WIDGET_GONK
@@ -802,13 +958,13 @@ DeviceStorageFile::GetFullPath(nsAString &aFullPath)
 {
   aFullPath.Truncate();
   if (!mStorageName.EqualsLiteral("")) {
-    aFullPath.AppendLiteral("/");
+    aFullPath.Append('/');
     aFullPath.Append(mStorageName);
-    aFullPath.AppendLiteral("/");
+    aFullPath.Append('/');
   }
   if (!mRootDir.EqualsLiteral("")) {
     aFullPath.Append(mRootDir);
-    aFullPath.AppendLiteral("/");
+    aFullPath.Append('/');
   }
   aFullPath.Append(mPath);
 }
@@ -829,13 +985,17 @@ DeviceStorageFile::GetRootDirectoryForType(const nsAString& aStorageType,
   InitDirs();
 
 #ifdef MOZ_WIDGET_GONK
+  nsresult rv;
   nsString volMountPoint;
   if (DeviceStorageTypeChecker::IsVolumeBased(aStorageType)) {
     nsCOMPtr<nsIVolumeService> vs = do_GetService(NS_VOLUMESERVICE_CONTRACTID);
     NS_ENSURE_TRUE_VOID(vs);
-    nsresult rv;
     nsCOMPtr<nsIVolume> vol;
     rv = vs->GetVolumeByName(aStorageName, getter_AddRefs(vol));
+    if(NS_FAILED(rv)) {
+      printf_stderr("##### DeviceStorage: GetVolumeByName('%s') failed\n",
+                    NS_LossyConvertUTF16toASCII(aStorageName).get());
+    }
     NS_ENSURE_SUCCESS_VOID(rv);
     vol->GetMountPoint(volMountPoint);
   }
@@ -844,7 +1004,12 @@ DeviceStorageFile::GetRootDirectoryForType(const nsAString& aStorageType,
   // Picture directory
   if (aStorageType.EqualsLiteral(DEVICESTORAGE_PICTURES)) {
 #ifdef MOZ_WIDGET_GONK
-    NS_NewLocalFile(volMountPoint, false, getter_AddRefs(f));
+    rv = NS_NewLocalFile(volMountPoint, false, getter_AddRefs(f));
+    if(NS_FAILED(rv)) {
+      printf_stderr("##### DeviceStorage: NS_NewLocalFile failed StorageType: '%s' path '%s'\n",
+                    NS_LossyConvertUTF16toASCII(volMountPoint).get(),
+                    NS_LossyConvertUTF16toASCII(aStorageType).get());
+    }
 #else
     f = sDirs->pictures;
 #endif
@@ -853,7 +1018,12 @@ DeviceStorageFile::GetRootDirectoryForType(const nsAString& aStorageType,
   // Video directory
   else if (aStorageType.EqualsLiteral(DEVICESTORAGE_VIDEOS)) {
 #ifdef MOZ_WIDGET_GONK
-    NS_NewLocalFile(volMountPoint, false, getter_AddRefs(f));
+    rv = NS_NewLocalFile(volMountPoint, false, getter_AddRefs(f));
+    if(NS_FAILED(rv)) {
+      printf_stderr("##### DeviceStorage: NS_NewLocalFile failed StorageType: '%s' path '%s'\n",
+                    NS_LossyConvertUTF16toASCII(volMountPoint).get(),
+                    NS_LossyConvertUTF16toASCII(aStorageType).get());
+    }
 #else
     f = sDirs->videos;
 #endif
@@ -862,7 +1032,12 @@ DeviceStorageFile::GetRootDirectoryForType(const nsAString& aStorageType,
   // Music directory
   else if (aStorageType.EqualsLiteral(DEVICESTORAGE_MUSIC)) {
 #ifdef MOZ_WIDGET_GONK
-    NS_NewLocalFile(volMountPoint, false, getter_AddRefs(f));
+    rv = NS_NewLocalFile(volMountPoint, false, getter_AddRefs(f));
+    if(NS_FAILED(rv)) {
+      printf_stderr("##### DeviceStorage: NS_NewLocalFile failed StorageType: '%s' path '%s'\n",
+                    NS_LossyConvertUTF16toASCII(volMountPoint).get(),
+                    NS_LossyConvertUTF16toASCII(aStorageType).get());
+    }
 #else
     f = sDirs->music;
 #endif
@@ -877,7 +1052,12 @@ DeviceStorageFile::GetRootDirectoryForType(const nsAString& aStorageType,
    // default SDCard
    else if (aStorageType.EqualsLiteral(DEVICESTORAGE_SDCARD)) {
 #ifdef MOZ_WIDGET_GONK
-     NS_NewLocalFile(volMountPoint, false, getter_AddRefs(f));
+     rv = NS_NewLocalFile(volMountPoint, false, getter_AddRefs(f));
+     if(NS_FAILED(rv)) {
+       printf_stderr("##### DeviceStorage: NS_NewLocalFile failed StorageType: '%s' path '%s'\n",
+                     NS_LossyConvertUTF16toASCII(volMountPoint).get(),
+                     NS_LossyConvertUTF16toASCII(aStorageType).get());
+     }
 #else
      f = sDirs->sdcard;
 #endif
@@ -903,6 +1083,12 @@ DeviceStorageFile::GetRootDirectoryForType(const nsAString& aStorageType,
 
   if (f) {
     f->Clone(aFile);
+  } else {
+    // This should never happen unless something is severely wrong. So
+    // scream a little.
+    printf_stderr("##### GetRootDirectoryForType('%s', '%s') failed #####",
+                  NS_LossyConvertUTF16toASCII(aStorageType).get(),
+                  NS_LossyConvertUTF16toASCII(aStorageName).get());
   }
 }
 
@@ -1030,6 +1216,9 @@ DeviceStorageFile::AppendRelativePath(const nsAString& aPath) {
 nsresult
 DeviceStorageFile::CreateFileDescriptor(FileDescriptor& aFileDescriptor)
 {
+  if (!mFile) {
+    return NS_ERROR_FAILURE;
+  }
   ScopedPRFileDesc fd;
   nsresult rv = mFile->OpenNSPRFileDesc(PR_RDWR | PR_CREATE_FILE,
                                         0660, &fd.rwget());
@@ -1038,8 +1227,8 @@ DeviceStorageFile::CreateFileDescriptor(FileDescriptor& aFileDescriptor)
   // NOTE: The FileDescriptor::PlatformHandleType constructor returns a dup of
   //       the file descriptor, so we don't need the original fd after this.
   //       Our scoped file descriptor will automatically close fd.
-  aFileDescriptor =
-    FileDescriptor::PlatformHandleType(PR_FileDesc2NativeHandle(fd));
+  aFileDescriptor = FileDescriptor(
+    FileDescriptor::PlatformHandleType(PR_FileDesc2NativeHandle(fd)));
   return NS_OK;
 }
 
@@ -1061,9 +1250,6 @@ DeviceStorageFile::Write(nsIInputStream* aInputStream)
     return rv;
   }
 
-  uint64_t bufSize = 0;
-  aInputStream->Available(&bufSize);
-
   nsCOMPtr<nsIOutputStream> outputStream;
   NS_NewLocalFileOutputStream(getter_AddRefs(outputStream), mFile);
 
@@ -1071,36 +1257,7 @@ DeviceStorageFile::Write(nsIInputStream* aInputStream)
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsIOutputStream> bufferedOutputStream;
-  rv = NS_NewBufferedOutputStream(getter_AddRefs(bufferedOutputStream),
-                                  outputStream,
-                                  4096*4);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  while (bufSize) {
-    uint32_t wrote;
-    rv = bufferedOutputStream->WriteFrom(
-      aInputStream,
-      static_cast<uint32_t>(std::min<uint64_t>(bufSize, UINT32_MAX)),
-      &wrote);
-    if (NS_FAILED(rv)) {
-      break;
-    }
-    bufSize -= wrote;
-  }
-
-  iocomplete = new IOEventComplete(this, "modified");
-  rv = NS_DispatchToMainThread(iocomplete);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  bufferedOutputStream->Close();
-  outputStream->Close();
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-  return NS_OK;
+  return Append(aInputStream, outputStream);
 }
 
 nsresult
@@ -1145,6 +1302,62 @@ DeviceStorageFile::Write(InfallibleTArray<uint8_t>& aBits)
 }
 
 nsresult
+DeviceStorageFile::Append(nsIInputStream* aInputStream)
+{
+  if (!aInputStream || !mFile) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIOutputStream> outputStream;
+  NS_NewLocalFileOutputStream(getter_AddRefs(outputStream), mFile, PR_WRONLY | PR_CREATE_FILE | PR_APPEND, -1, 0);
+
+  if (!outputStream) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return Append(aInputStream, outputStream);
+}
+
+
+nsresult
+DeviceStorageFile::Append(nsIInputStream* aInputStream, nsIOutputStream* aOutputStream)
+{
+  uint64_t bufSize = 0;
+  aInputStream->Available(&bufSize);
+
+  nsCOMPtr<nsIOutputStream> bufferedOutputStream;
+  nsresult rv = NS_NewBufferedOutputStream(getter_AddRefs(bufferedOutputStream),
+                                  aOutputStream,
+                                  4096*4);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  while (bufSize) {
+    uint32_t wrote;
+    rv = bufferedOutputStream->WriteFrom(
+      aInputStream,
+        static_cast<uint32_t>(std::min<uint64_t>(bufSize, UINT32_MAX)),
+        &wrote);
+    if (NS_FAILED(rv)) {
+      break;
+    }
+    bufSize -= wrote;
+  }
+
+  nsCOMPtr<nsIRunnable> iocomplete = new IOEventComplete(this, "modified");
+  rv = NS_DispatchToMainThread(iocomplete);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  bufferedOutputStream->Close();
+  aOutputStream->Close();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  return NS_OK;
+}
+
+nsresult
 DeviceStorageFile::Remove()
 {
   MOZ_ASSERT(!NS_IsMainThread());
@@ -1177,6 +1390,9 @@ DeviceStorageFile::CalculateMimeType()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  if (!mFile) {
+    return NS_ERROR_FAILURE;
+  }
   nsAutoCString mimeType;
   nsCOMPtr<nsIMIMEService> mimeService =
     do_GetService(NS_MIMESERVICE_CONTRACTID);
@@ -1197,6 +1413,10 @@ DeviceStorageFile::CalculateSizeAndModifiedDate()
 {
   MOZ_ASSERT(!NS_IsMainThread());
 
+  if (!mFile) {
+    return NS_ERROR_FAILURE;
+  }
+
   int64_t fileSize;
   nsresult rv = mFile->GetFileSize(&fileSize);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1215,6 +1435,9 @@ void
 DeviceStorageFile::CollectFiles(nsTArray<nsRefPtr<DeviceStorageFile> > &aFiles,
                                 PRTime aSince)
 {
+  if (!mFile) {
+    return;
+  }
   nsString fullRootPath;
   mFile->GetPath(fullRootPath);
   collectFilesInternal(aFiles, aSince, fullRootPath);
@@ -1242,18 +1465,20 @@ DeviceStorageFile::collectFilesInternal(
 
   while (NS_SUCCEEDED(files->GetNextFile(getter_AddRefs(f))) && f) {
 
-    PRTime msecs;
-    f->GetLastModifiedTime(&msecs);
+    bool isFile;
+    f->IsFile(&isFile);
 
-    if (msecs < aSince) {
-      continue;
+    if (isFile) {
+      PRTime msecs;
+      f->GetLastModifiedTime(&msecs);
+
+      if (msecs < aSince) {
+        continue;
+      }
     }
 
     bool isDir;
     f->IsDirectory(&isDir);
-
-    bool isFile;
-    f->IsFile(&isFile);
 
     nsString fullpath;
     nsresult rv = f->GetPath(fullpath);
@@ -1425,7 +1650,7 @@ DeviceStorageFile::DoFormat(nsAString& aStatus)
 {
   DeviceStorageTypeChecker* typeChecker
     = DeviceStorageTypeChecker::CreateOrGet();
-  if (!typeChecker) {
+  if (!typeChecker || !mFile) {
     return;
   }
   if (!typeChecker->IsVolumeBased(mStorageType)) {
@@ -1455,7 +1680,7 @@ DeviceStorageFile::DoMount(nsAString& aStatus)
 {
   DeviceStorageTypeChecker* typeChecker
     = DeviceStorageTypeChecker::CreateOrGet();
-  if (!typeChecker) {
+  if (!typeChecker || !mFile) {
     return;
   }
   if (!typeChecker->IsVolumeBased(mStorageType)) {
@@ -1485,7 +1710,7 @@ DeviceStorageFile::DoUnmount(nsAString& aStatus)
 {
   DeviceStorageTypeChecker* typeChecker
     = DeviceStorageTypeChecker::CreateOrGet();
-  if (!typeChecker) {
+  if (!typeChecker || !mFile) {
     return;
   }
   if (!typeChecker->IsVolumeBased(mStorageType)) {
@@ -1517,7 +1742,7 @@ DeviceStorageFile::GetStatus(nsAString& aStatus)
 
   DeviceStorageTypeChecker* typeChecker
     = DeviceStorageTypeChecker::CreateOrGet();
-  if (!typeChecker) {
+  if (!typeChecker || !mFile) {
     return;
   }
   if (!typeChecker->IsVolumeBased(mStorageType)) {
@@ -1555,6 +1780,13 @@ DeviceStorageFile::GetStatus(nsAString& aStatus)
     aStatus.AssignLiteral("unavailable");
     return;
   }
+  bool isUnmounting;
+  rv = vol->GetIsUnmounting(&isUnmounting);
+  NS_ENSURE_SUCCESS_VOID(rv);
+  if (isUnmounting) {
+    aStatus.AssignLiteral("unavailable");
+    return;
+  }
   int32_t volState;
   rv = vol->GetState(&volState);
   NS_ENSURE_SUCCESS_VOID(rv);
@@ -1571,7 +1803,7 @@ DeviceStorageFile::GetStorageStatus(nsAString& aStatus)
 
   DeviceStorageTypeChecker* typeChecker
     = DeviceStorageTypeChecker::CreateOrGet();
-  if (!typeChecker) {
+  if (!typeChecker || !mFile) {
     return;
   }
   if (!typeChecker->IsVolumeBased(mStorageType)) {
@@ -1628,7 +1860,7 @@ nsDOMDeviceStorage::SetRootDirectoryForType(const nsAString& aStorageType,
                                              aStorageName,
                                              getter_AddRefs(f));
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-  obs->AddObserver(this, "file-watcher-update", false);
+  obs->AddObserver(this, kFileWatcherUpdate, false);
   obs->AddObserver(this, "disk-space-watcher", false);
   mRootDirectory = f;
   mStorageType = aStorageType;
@@ -1649,12 +1881,11 @@ InterfaceToJsval(nsPIDOMWindow* aWindow,
   NS_ENSURE_TRUE(unrootedScopeObj, JS::NullValue());
   JSRuntime *runtime = JS_GetObjectRuntime(unrootedScopeObj);
   JS::Rooted<JS::Value> someJsVal(runtime);
+  JS::Rooted<JSObject*> scopeObj(runtime, unrootedScopeObj);
   nsresult rv;
 
   { // Protect someJsVal from moving GC in ~JSAutoCompartment
     AutoJSContext cx;
-
-    JS::Rooted<JSObject*> scopeObj(cx, unrootedScopeObj);
     JSAutoCompartment ac(cx, scopeObj);
 
     rv = nsContentUtils::WrapNative(cx, aObject, aIID, &someJsVal);
@@ -1690,43 +1921,35 @@ nsIFileToJsval(nsPIDOMWindow* aWindow, DeviceStorageFile* aFile)
   MOZ_ASSERT(aFile->mLength != UINT64_MAX);
   MOZ_ASSERT(aFile->mLastModifiedDate != UINT64_MAX);
 
-  nsCOMPtr<nsIDOMBlob> blob = new nsDOMFileFile(fullPath, aFile->mMimeType,
-                                                aFile->mLength, aFile->mFile,
-                                                aFile->mLastModifiedDate);
+  nsCOMPtr<nsIDOMBlob> blob = new File(aWindow,
+    new FileImplFile(fullPath, aFile->mMimeType,
+                     aFile->mLength, aFile->mFile,
+                     aFile->mLastModifiedDate));
   return InterfaceToJsval(aWindow, blob, &NS_GET_IID(nsIDOMBlob));
 }
 
-JS::Value StringToJsval(nsPIDOMWindow* aWindow, nsAString& aString)
+bool
+StringToJsval(nsPIDOMWindow* aWindow, nsAString& aString,
+              JS::MutableHandle<JS::Value> result)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aWindow);
 
-  nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(aWindow);
-  if (!sgo) {
-    return JSVAL_NULL;
+  AutoJSAPI jsapi;
+  if (NS_WARN_IF(!jsapi.Init(aWindow))) {
+    return false;
+  }
+  JSContext* cx = jsapi.cx();
+
+  if (!xpc::StringToJsval(cx, aString, result)) {
+    return false;
   }
 
-  nsIScriptContext *scriptContext = sgo->GetScriptContext();
-  if (!scriptContext) {
-    return JSVAL_NULL;
-  }
-
-  AutoPushJSContext cx(scriptContext->GetNativeContext());
-  if (!cx) {
-    return JSVAL_NULL;
-  }
-
-  JS::Rooted<JS::Value> result(cx);
-  if (!xpc::StringToJsval(cx, aString, &result)) {
-    return JSVAL_NULL;
-  }
-
-  return result;
+  return true;
 }
 
-class DeviceStorageCursorRequest MOZ_FINAL
+class DeviceStorageCursorRequest final
   : public nsIContentPermissionRequest
-  , public PCOMContentPermissionRequestChild
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -1735,30 +1958,12 @@ public:
 
   NS_FORWARD_NSICONTENTPERMISSIONREQUEST(mCursor->);
 
-  DeviceStorageCursorRequest(nsDOMDeviceStorageCursor* aCursor)
+  explicit DeviceStorageCursorRequest(nsDOMDeviceStorageCursor* aCursor)
     : mCursor(aCursor) { }
 
+private:
   ~DeviceStorageCursorRequest() {}
 
-  bool Recv__delete__(const bool& allow,
-                      const InfallibleTArray<PermissionChoice>& choices)
-  {
-    MOZ_ASSERT(choices.IsEmpty(), "DeviceStorageCursor doesn't support permission choice");
-    if (allow) {
-      Allow(JS::UndefinedHandleValue);
-    }
-    else {
-      Cancel();
-    }
-    return true;
-  }
-
-  void IPDLRelease()
-  {
-    Release();
-  }
-
-private:
   nsRefPtr<nsDOMDeviceStorageCursor> mCursor;
 };
 
@@ -1990,28 +2195,28 @@ nsDOMDeviceStorageCursor::GetTypes(nsIArray** aTypes)
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsTArray<nsString> emptyOptions;
-  return CreatePermissionArray(type,
-                               NS_LITERAL_CSTRING("read"),
-                               emptyOptions,
-                               aTypes);
+  return nsContentPermissionUtils::CreatePermissionArray(type,
+                                                         NS_LITERAL_CSTRING("read"),
+                                                         emptyOptions,
+                                                         aTypes);
 }
 
 NS_IMETHODIMP
-nsDOMDeviceStorageCursor::GetPrincipal(nsIPrincipal * *aRequestingPrincipal)
+nsDOMDeviceStorageCursor::GetPrincipal(nsIPrincipal** aRequestingPrincipal)
 {
   NS_IF_ADDREF(*aRequestingPrincipal = mPrincipal);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDOMDeviceStorageCursor::GetWindow(nsIDOMWindow * *aRequestingWindow)
+nsDOMDeviceStorageCursor::GetWindow(nsIDOMWindow** aRequestingWindow)
 {
   NS_IF_ADDREF(*aRequestingWindow = GetOwner());
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDOMDeviceStorageCursor::GetElement(nsIDOMElement * *aRequestingElement)
+nsDOMDeviceStorageCursor::GetElement(nsIDOMElement** aRequestingElement)
 {
   *aRequestingElement = nullptr;
   return NS_OK;
@@ -2065,10 +2270,10 @@ nsDOMDeviceStorageCursor::Continue(ErrorResult& aRv)
     return;
   }
 
-  if (mResult != JSVAL_VOID) {
+  if (!mResult.isUndefined()) {
     // We call onsuccess multiple times. Clear the last
     // result.
-    mResult = JSVAL_VOID;
+    mResult.setUndefined();
     mDone = false;
   }
 
@@ -2076,27 +2281,6 @@ nsDOMDeviceStorageCursor::Continue(ErrorResult& aRv)
   event->Continue();
 
   mOkToCallContinue = false;
-}
-
-bool
-nsDOMDeviceStorageCursor::Recv__delete__(const bool& allow,
-                                         const InfallibleTArray<PermissionChoice>& choices)
-{
-  MOZ_ASSERT(choices.IsEmpty(), "DeviceStorageCursor doesn't support permission choice");
-
-  if (allow) {
-    Allow(JS::UndefinedHandleValue);
-  }
-  else {
-    Cancel();
-  }
-  return true;
-}
-
-void
-nsDOMDeviceStorageCursor::IPDLRelease()
-{
-  Release();
 }
 
 void
@@ -2132,7 +2316,8 @@ public:
     }
 
     AutoJSContext cx;
-    JS::Rooted<JS::Value> result(cx, StringToJsval(window, state));
+    JS::Rooted<JS::Value> result(cx);
+    StringToJsval(window, state, &result);
     mRequest->FireSuccess(result);
     mRequest = nullptr;
     return NS_OK;
@@ -2169,7 +2354,8 @@ public:
     }
 
     AutoJSContext cx;
-    JS::Rooted<JS::Value> result(cx, StringToJsval(window, state));
+    JS::Rooted<JS::Value> result(cx);
+    StringToJsval(window, state, &result);
     mRequest->FireSuccess(result);
     mRequest = nullptr;
     return NS_OK;
@@ -2206,7 +2392,8 @@ public:
     }
 
     AutoJSContext cx;
-    JS::Rooted<JS::Value> result(cx, StringToJsval(window, state));
+    JS::Rooted<JS::Value> result(cx);
+    StringToJsval(window, state, &result);
     mRequest->FireSuccess(result);
     mRequest = nullptr;
     return NS_OK;
@@ -2243,7 +2430,8 @@ public:
     }
 
     AutoJSContext cx;
-    JS::Rooted<JS::Value> result(cx, StringToJsval(window, state));
+    JS::Rooted<JS::Value> result(cx);
+    StringToJsval(window, state, &result);
     mRequest->FireSuccess(result);
     mRequest = nullptr;
     return NS_OK;
@@ -2280,7 +2468,8 @@ public:
     }
 
     AutoJSContext cx;
-    JS::Rooted<JS::Value> result(cx, StringToJsval(window, state));
+    JS::Rooted<JS::Value> result(cx);
+    StringToJsval(window, state, &result);
     mRequest->FireSuccess(result);
     mRequest = nullptr;
     return NS_OK;
@@ -2334,7 +2523,7 @@ public:
     if (mFile) {
       result = nsIFileToJsval(window, mFile);
     } else if (mPath.Length()) {
-      result = StringToJsval(window, mPath);
+      StringToJsval(window, mPath, &result);
     }
     else {
       result = JS_NumberValue(double(mValue));
@@ -2361,6 +2550,8 @@ public:
     , mRequest(aRequest)
   {
     MOZ_ASSERT(mDSFileDescriptor);
+    MOZ_ASSERT(mDSFileDescriptor->mDSFile);
+    MOZ_ASSERT(mDSFileDescriptor->mDSFile->mFile);
     MOZ_ASSERT(mRequest);
   }
 
@@ -2369,7 +2560,6 @@ public:
     MOZ_ASSERT(!NS_IsMainThread());
 
     DeviceStorageFile* dsFile = mDSFileDescriptor->mDSFile;
-    MOZ_ASSERT(dsFile);
 
     nsString fullPath;
     dsFile->GetFullPath(fullPath);
@@ -2406,15 +2596,19 @@ private:
 class WriteFileEvent : public nsRunnable
 {
 public:
-  WriteFileEvent(nsIDOMBlob* aBlob,
+  WriteFileEvent(FileImpl* aBlobImpl,
                  DeviceStorageFile *aFile,
-                 already_AddRefed<DOMRequest> aRequest)
-    : mBlob(aBlob)
+                 already_AddRefed<DOMRequest> aRequest,
+                 int32_t aRequestType)
+    : mBlobImpl(aBlobImpl)
     , mFile(aFile)
     , mRequest(aRequest)
+    , mRequestType(aRequestType)
   {
     MOZ_ASSERT(mFile);
+    MOZ_ASSERT(mFile->mFile);
     MOZ_ASSERT(mRequest);
+    MOZ_ASSERT(mRequestType);
   }
 
   ~WriteFileEvent() {}
@@ -2424,21 +2618,37 @@ public:
     MOZ_ASSERT(!NS_IsMainThread());
 
     nsCOMPtr<nsIInputStream> stream;
-    mBlob->GetInternalStream(getter_AddRefs(stream));
+    mBlobImpl->GetInternalStream(getter_AddRefs(stream));
 
     bool check = false;
     mFile->mFile->Exists(&check);
-    if (check) {
+    nsresult rv;
+
+    if (mRequestType == DEVICE_STORAGE_REQUEST_APPEND) {
+      if (!check) {
+        nsCOMPtr<nsIRunnable> event =
+          new PostErrorEvent(mRequest.forget(), POST_ERROR_EVENT_FILE_DOES_NOT_EXIST);
+        return NS_DispatchToMainThread(event);
+      }
+      rv = mFile->Append(stream);
+    }
+    else if (mRequestType == DEVICE_STORAGE_REQUEST_CREATE) {
+      if (check) {
+        nsCOMPtr<nsIRunnable> event =
+          new PostErrorEvent(mRequest.forget(), POST_ERROR_EVENT_FILE_EXISTS);
+        return NS_DispatchToMainThread(event);
+      }
+      rv = mFile->Write(stream);
+      if (NS_FAILED(rv)) {
+        mFile->mFile->Remove(false);
+      }
+    } else {
       nsCOMPtr<nsIRunnable> event =
-        new PostErrorEvent(mRequest.forget(), POST_ERROR_EVENT_FILE_EXISTS);
+        new PostErrorEvent(mRequest.forget(), POST_ERROR_EVENT_UNKNOWN);
       return NS_DispatchToMainThread(event);
     }
 
-    nsresult rv = mFile->Write(stream);
-
     if (NS_FAILED(rv)) {
-      mFile->mFile->Remove(false);
-
       nsCOMPtr<nsIRunnable> event =
         new PostErrorEvent(mRequest.forget(), POST_ERROR_EVENT_UNKNOWN);
       return NS_DispatchToMainThread(event);
@@ -2452,10 +2662,12 @@ public:
   }
 
 private:
-  nsCOMPtr<nsIDOMBlob> mBlob;
+  nsRefPtr<FileImpl> mBlobImpl;
   nsRefPtr<DeviceStorageFile> mFile;
   nsRefPtr<DOMRequest> mRequest;
+  int32_t mRequestType;
 };
+
 
 class ReadFileEvent : public nsRunnable
 {
@@ -2618,10 +2830,9 @@ private:
   nsRefPtr<DOMRequest> mRequest;
 };
 
-class DeviceStorageRequest MOZ_FINAL
+class DeviceStorageRequest final
   : public nsIContentPermissionRequest
   , public nsIRunnable
-  , public PCOMContentPermissionRequestChild
 {
 public:
 
@@ -2689,7 +2900,8 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(DeviceStorageRequest,
                                            nsIContentPermissionRequest)
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override
+  {
     MOZ_ASSERT(NS_IsMainThread());
 
     if (mozilla::Preferences::GetBool("device.storage.prompt.testing", false)) {
@@ -2697,51 +2909,10 @@ public:
       return NS_OK;
     }
 
-    if (XRE_GetProcessType() == GeckoProcessType_Content) {
-
-      // because owner implements nsITabChild, we can assume that it is
-      // the one and only TabChild.
-      TabChild* child = TabChild::GetFrom(mWindow->GetDocShell());
-      if (!child) {
-        return NS_OK;
-      }
-
-      // Retain a reference so the object isn't deleted without IPDL's
-      // knowledge. Corresponding release occurs in
-      // DeallocPContentPermissionRequest.
-      AddRef();
-
-      nsCString type;
-      nsresult rv = DeviceStorageTypeChecker::GetPermissionForType(
-        mFile->mStorageType, type);
-      if (NS_FAILED(rv)) {
-        return rv;
-      }
-      nsCString access;
-      rv = DeviceStorageTypeChecker::GetAccessForRequest(
-        DeviceStorageRequestType(mRequestType), access);
-      if (NS_FAILED(rv)) {
-        return rv;
-      }
-      nsTArray<PermissionRequest> permArray;
-      nsTArray<nsString> emptyOptions;
-      permArray.AppendElement(PermissionRequest(type, access, emptyOptions));
-      child->SendPContentPermissionRequestConstructor(
-        this, permArray, IPC::Principal(mPrincipal));
-
-      Sendprompt();
-      return NS_OK;
-    }
-
-    nsCOMPtr<nsIContentPermissionPrompt> prompt
-      = do_CreateInstance(NS_CONTENT_PERMISSION_PROMPT_CONTRACTID);
-    if (prompt) {
-      prompt->Prompt(this);
-    }
-    return NS_OK;
+    return nsContentPermissionUtils::AskPermission(this, mWindow);
   }
 
-  NS_IMETHODIMP GetTypes(nsIArray** aTypes)
+  NS_IMETHODIMP GetTypes(nsIArray** aTypes) override
   {
     nsCString type;
     nsresult rv =
@@ -2758,28 +2929,28 @@ public:
     }
 
     nsTArray<nsString> emptyOptions;
-    return CreatePermissionArray(type, access, emptyOptions, aTypes);
+    return nsContentPermissionUtils::CreatePermissionArray(type, access, emptyOptions, aTypes);
   }
 
-  NS_IMETHOD GetPrincipal(nsIPrincipal * *aRequestingPrincipal)
+  NS_IMETHOD GetPrincipal(nsIPrincipal * *aRequestingPrincipal) override
   {
     NS_IF_ADDREF(*aRequestingPrincipal = mPrincipal);
     return NS_OK;
   }
 
-  NS_IMETHOD GetWindow(nsIDOMWindow * *aRequestingWindow)
+  NS_IMETHOD GetWindow(nsIDOMWindow * *aRequestingWindow) override
   {
     NS_IF_ADDREF(*aRequestingWindow = mWindow);
     return NS_OK;
   }
 
-  NS_IMETHOD GetElement(nsIDOMElement * *aRequestingElement)
+  NS_IMETHOD GetElement(nsIDOMElement * *aRequestingElement) override
   {
     *aRequestingElement = nullptr;
     return NS_OK;
   }
 
-  NS_IMETHOD Cancel()
+  NS_IMETHOD Cancel() override
   {
     nsCOMPtr<nsIRunnable> event
       = new PostErrorEvent(mRequest.forget(),
@@ -2787,7 +2958,7 @@ public:
     return NS_DispatchToMainThread(event);
   }
 
-  NS_IMETHOD Allow(JS::HandleValue aChoices)
+  NS_IMETHOD Allow(JS::HandleValue aChoices) override
   {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(aChoices.isUndefined());
@@ -2859,7 +3030,8 @@ public:
 
         if (XRE_GetProcessType() != GeckoProcessType_Default) {
           BlobChild* actor
-            = ContentChild::GetSingleton()->GetOrCreateActorForBlob(mBlob);
+            = ContentChild::GetSingleton()->GetOrCreateActorForBlob(
+              static_cast<File*>(mBlob.get()));
           if (!actor) {
             return NS_ERROR_FAILURE;
           }
@@ -2876,7 +3048,56 @@ public:
             ->SendPDeviceStorageRequestConstructor(child, params);
           return NS_OK;
         }
-        r = new WriteFileEvent(mBlob, mFile, mRequest.forget());
+
+        File* blob = static_cast<File*>(mBlob.get());
+        r = new WriteFileEvent(blob->Impl(), mFile, mRequest.forget(),
+                               mRequestType);
+        break;
+      }
+
+      case DEVICE_STORAGE_REQUEST_APPEND:
+      {
+        if (!mBlob || !mFile->mFile) {
+          return NS_ERROR_FAILURE;
+        }
+
+        DeviceStorageTypeChecker* typeChecker
+          = DeviceStorageTypeChecker::CreateOrGet();
+        if (!typeChecker) {
+          return NS_OK;
+        }
+
+        if (!typeChecker->Check(mFile->mStorageType, mFile->mFile) ||
+            !typeChecker->Check(mFile->mStorageType, mBlob)) {
+          r = new PostErrorEvent(mRequest.forget(),
+                                 POST_ERROR_EVENT_ILLEGAL_TYPE);
+          return NS_DispatchToCurrentThread(r);
+        }
+
+        if (XRE_GetProcessType() != GeckoProcessType_Default) {
+          BlobChild* actor
+            = ContentChild::GetSingleton()->GetOrCreateActorForBlob(
+              static_cast<File*>(mBlob.get()));
+          if (!actor) {
+            return NS_ERROR_FAILURE;
+          }
+
+          DeviceStorageAppendParams params;
+          params.blobChild() = actor;
+          params.type() = mFile->mStorageType;
+          params.storageName() = mFile->mStorageName;
+          params.relpath() = mFile->mPath;
+
+          PDeviceStorageRequestChild* child
+            = new DeviceStorageRequestChild(mRequest, mFile);
+          ContentChild::GetSingleton()
+            ->SendPDeviceStorageRequestConstructor(child, params);
+          return NS_OK;
+        }
+
+        File* blob = static_cast<File*>(mBlob.get());
+        r = new WriteFileEvent(blob->Impl(), mFile, mRequest.forget(),
+                               mRequestType);
         break;
       }
 
@@ -3075,26 +3296,9 @@ public:
     return NS_OK;
   }
 
-  bool Recv__delete__(const bool& allow,
-                      const InfallibleTArray<PermissionChoice>& choices)
-  {
-    MOZ_ASSERT(choices.IsEmpty(), "DeviceStorage doesn't support permission choice");
-
-    if (allow) {
-      Allow(JS::UndefinedHandleValue);
-    }
-    else {
-      Cancel();
-    }
-    return true;
-  }
-
-  void IPDLRelease()
-  {
-    Release();
-  }
-
 private:
+  ~DeviceStorageRequest() {}
+
   int32_t mRequestType;
   nsCOMPtr<nsPIDOMWindow> mWindow;
   nsCOMPtr<nsIPrincipal> mPrincipal;
@@ -3132,6 +3336,8 @@ NS_IMPL_RELEASE_INHERITED(nsDOMDeviceStorage, DOMEventTargetHelper)
 
 nsDOMDeviceStorage::nsDOMDeviceStorage(nsPIDOMWindow* aWindow)
   : DOMEventTargetHelper(aWindow)
+  , mIsShareable(false)
+  , mIsRemovable(false)
   , mIsWatchingFile(false)
   , mAllowedToWatchFile(false)
 {
@@ -3159,6 +3365,33 @@ nsDOMDeviceStorage::Init(nsPIDOMWindow* aWindow, const nsAString &aType,
   }
   if (!mStorageName.IsEmpty()) {
     RegisterForSDCardChanges(this);
+
+#ifdef MOZ_WIDGET_GONK
+    if (DeviceStorageTypeChecker::IsVolumeBased(mStorageType)) {
+      nsCOMPtr<nsIVolumeService> vs = do_GetService(NS_VOLUMESERVICE_CONTRACTID);
+      if (NS_WARN_IF(!vs)) {
+        return NS_ERROR_FAILURE;
+      }
+      nsresult rv;
+      nsCOMPtr<nsIVolume> vol;
+      rv = vs->GetVolumeByName(mStorageName, getter_AddRefs(vol));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+      bool isFake;
+      rv = vol->GetIsFake(&isFake);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+      mIsShareable = !isFake;
+      bool isRemovable;
+      rv = vol->GetIsHotSwappable(&isRemovable);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+      mIsRemovable = isRemovable;
+    }
+#endif
   }
 
   // Grab the principal of the document
@@ -3172,7 +3405,7 @@ nsDOMDeviceStorage::Init(nsPIDOMWindow* aWindow, const nsAString &aType,
   // if the caller has the "webapps-manage" permission.
   if (aType.EqualsLiteral(DEVICESTORAGE_APPS)) {
     nsCOMPtr<nsIPermissionManager> permissionManager
-      = do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+      = services::GetPermissionManager();
     NS_ENSURE_TRUE(permissionManager, NS_ERROR_FAILURE);
 
     uint32_t permission;
@@ -3208,7 +3441,7 @@ nsDOMDeviceStorage::Shutdown()
   }
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-  obs->RemoveObserver(this, "file-watcher-update");
+  obs->RemoveObserver(this, kFileWatcherUpdate);
   obs->RemoveObserver(this, "disk-space-watcher");
 }
 
@@ -3226,7 +3459,19 @@ nsDOMDeviceStorage::GetOrderedVolumeNames(
 #ifdef MOZ_WIDGET_GONK
   nsCOMPtr<nsIVolumeService> vs = do_GetService(NS_VOLUMESERVICE_CONTRACTID);
   if (vs) {
-    vs->GetVolumeNames(aVolumeNames);
+    nsCOMPtr<nsIArray> volNames;
+    vs->GetVolumeNames(getter_AddRefs(volNames));
+    uint32_t length = -1;
+    volNames->GetLength(&length);
+    for (uint32_t i = 0; i < length; i++) {
+      nsCOMPtr<nsISupportsString> str = do_QueryElementAt(volNames, i);
+      if (str) {
+        nsAutoString s;
+        if (NS_SUCCEEDED(str->GetData(s)) && !s.IsEmpty()) {
+          aVolumeNames.AppendElement(s);
+        }
+      }
+    }
 
     // If the volume sdcard exists, then we want it to be first.
 
@@ -3405,8 +3650,8 @@ nsDOMDeviceStorage::GetDefaultStorageName(const nsAString& aStorageType,
 bool
 nsDOMDeviceStorage::IsAvailable()
 {
-  DeviceStorageFile dsf(mStorageType, mStorageName);
-  return dsf.IsAvailable();
+  nsRefPtr<DeviceStorageFile> dsf(new DeviceStorageFile(mStorageType, mStorageName));
+  return dsf->IsAvailable();
 }
 
 NS_IMETHODIMP
@@ -3450,7 +3695,7 @@ nsDOMDeviceStorage::Add(nsIDOMBlob* aBlob, ErrorResult& aRv)
 
   nsAutoCString path;
   path.Assign(nsDependentCString(buffer));
-  path.Append(".");
+  path.Append('.');
   path.Append(extension);
 
   return AddNamed(aBlob, NS_ConvertASCIItoUTF16(path), aRv);
@@ -3470,6 +3715,23 @@ nsDOMDeviceStorage::AddNamed(nsIDOMBlob *aBlob,
 already_AddRefed<DOMRequest>
 nsDOMDeviceStorage::AddNamed(nsIDOMBlob* aBlob, const nsAString& aPath,
                              ErrorResult& aRv)
+{
+  return AddOrAppendNamed(aBlob, aPath,
+                          DEVICE_STORAGE_REQUEST_CREATE, aRv);
+}
+
+already_AddRefed<DOMRequest>
+nsDOMDeviceStorage::AppendNamed(nsIDOMBlob* aBlob, const nsAString& aPath,
+                                ErrorResult& aRv)
+{
+  return AddOrAppendNamed(aBlob, aPath,
+                          DEVICE_STORAGE_REQUEST_APPEND, aRv);
+}
+
+
+already_AddRefed<DOMRequest>
+nsDOMDeviceStorage::AddOrAppendNamed(nsIDOMBlob* aBlob, const nsAString& aPath,
+                                     const int32_t aRequestType, ErrorResult& aRv)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -3506,7 +3768,9 @@ nsDOMDeviceStorage::AddNamed(nsIDOMBlob* aBlob, const nsAString& aPath,
       }
       return request.forget();
     }
-    return ds->AddNamed(aBlob, storagePath, aRv);
+
+    return ds->AddOrAppendNamed(aBlob, storagePath,
+                                aRequestType, aRv);
   }
 
   nsRefPtr<DOMRequest> request = new DOMRequest(win);
@@ -3519,9 +3783,13 @@ nsDOMDeviceStorage::AddNamed(nsIDOMBlob* aBlob, const nsAString& aPath,
   } else if (!typeChecker->Check(mStorageType, dsf->mFile) ||
       !typeChecker->Check(mStorageType, aBlob)) {
     r = new PostErrorEvent(request, POST_ERROR_EVENT_ILLEGAL_TYPE);
-  } else {
-    r = new DeviceStorageRequest(DEVICE_STORAGE_REQUEST_CREATE,
+  } else if (aRequestType == DEVICE_STORAGE_REQUEST_APPEND ||
+             aRequestType == DEVICE_STORAGE_REQUEST_CREATE) {
+    r = new DeviceStorageRequest(DeviceStorageRequestType(aRequestType),
                                  win, mPrincipal, dsf, request, aBlob);
+  } else {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
   }
 
   rv = NS_DispatchToCurrentThread(r);
@@ -3945,14 +4213,40 @@ nsDOMDeviceStorage::Default()
   return mStorageName.Equals(defaultStorageName);
 }
 
+bool
+nsDOMDeviceStorage::CanBeFormatted()
+{
+  // Currently, any volume which can be shared can also be formatted.
+  return mIsShareable;
+}
+
+bool
+nsDOMDeviceStorage::CanBeMounted()
+{
+  // Currently, any volume which can be shared can also be mounted/unmounted.
+  return mIsShareable;
+}
+
+bool
+nsDOMDeviceStorage::CanBeShared()
+{
+  return mIsShareable;
+}
+
+bool
+nsDOMDeviceStorage::IsRemovable()
+{
+  return mIsRemovable;
+}
+
 already_AddRefed<Promise>
-nsDOMDeviceStorage::GetRoot()
+nsDOMDeviceStorage::GetRoot(ErrorResult& aRv)
 {
   if (!mFileSystem) {
     mFileSystem = new DeviceStorageFileSystem(mStorageType, mStorageName);
     mFileSystem->Init(this);
   }
-  return mozilla::dom::Directory::GetRoot(mFileSystem);
+  return mozilla::dom::Directory::GetRoot(mFileSystem, aRv);
 }
 
 NS_IMETHODIMP
@@ -4020,71 +4314,58 @@ nsDOMDeviceStorage::EnumerateInternal(const nsAString& aPath,
     return cursor.forget();
   }
 
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
-    // because owner implements nsITabChild, we can assume that it is
-    // the one and only TabChild.
-    TabChild* child = TabChild::GetFrom(win->GetDocShell());
-    if (!child) {
-      return cursor.forget();
-    }
-
-    // Retain a reference so the object isn't deleted without IPDL's knowledge.
-    // Corresponding release occurs in DeallocPContentPermissionRequest.
-    r->AddRef();
-
-    nsCString type;
-    aRv = DeviceStorageTypeChecker::GetPermissionForType(mStorageType, type);
-    if (aRv.Failed()) {
-      return nullptr;
-    }
-    nsTArray<PermissionRequest> permArray;
-    nsTArray<nsString> emptyOptions;
-    permArray.AppendElement(PermissionRequest(type,
-                                              NS_LITERAL_CSTRING("read"),
-                                              emptyOptions));
-    child->SendPContentPermissionRequestConstructor(r,
-                                                    permArray,
-                                                    IPC::Principal(mPrincipal));
-
-    r->Sendprompt();
-
-    return cursor.forget();
-  }
-
-  nsCOMPtr<nsIContentPermissionPrompt> prompt
-    = do_CreateInstance(NS_CONTENT_PERMISSION_PROMPT_CONTRACTID);
-  if (prompt) {
-    prompt->Prompt(r);
-  }
+  nsContentPermissionUtils::AskPermission(r, win);
 
   return cursor.forget();
 }
 
 #ifdef MOZ_WIDGET_GONK
 void
-nsDOMDeviceStorage::DispatchMountChangeEvent(nsAString& aVolumeStatus)
+nsDOMDeviceStorage::DispatchStatusChangeEvent(nsAString& aStatus)
 {
-  if (aVolumeStatus == mLastStatus) {
+  if (aStatus == mLastStatus) {
     // We've already sent this status, don't bother sending it again.
     return;
   }
-  mLastStatus = aVolumeStatus;
+  mLastStatus = aStatus;
 
-  nsCOMPtr<nsIDOMEvent> event;
-  NS_NewDOMDeviceStorageChangeEvent(getter_AddRefs(event), this,
-                                    nullptr, nullptr);
+  DeviceStorageChangeEventInit init;
+  init.mBubbles = true;
+  init.mCancelable = false;
+  init.mPath = mStorageName;
+  init.mReason = aStatus;
 
-  nsCOMPtr<nsIDOMDeviceStorageChangeEvent> ce = do_QueryInterface(event);
-  nsresult rv = ce->InitDeviceStorageChangeEvent(NS_LITERAL_STRING("change"),
-                                                 true, false,
-                                                 mStorageName,
-                                                 aVolumeStatus);
-  if (NS_FAILED(rv)) {
-    return;
-  }
+  nsRefPtr<DeviceStorageChangeEvent> event =
+    DeviceStorageChangeEvent::Constructor(this, NS_LITERAL_STRING("change"),
+                                          init);
+  event->SetTrusted(true);
 
   bool ignore;
-  DispatchEvent(ce, &ignore);
+  DispatchEvent(event, &ignore);
+}
+
+void
+nsDOMDeviceStorage::DispatchStorageStatusChangeEvent(nsAString& aStorageStatus)
+{
+  if (aStorageStatus == mLastStorageStatus) {
+     // We've already sent this status, don't bother sending it again.
+    return;
+  }
+  mLastStorageStatus = aStorageStatus;
+
+  DeviceStorageChangeEventInit init;
+  init.mBubbles = true;
+  init.mCancelable = false;
+  init.mPath = mStorageName;
+  init.mReason = aStorageStatus;
+
+  nsRefPtr<DeviceStorageChangeEvent> event =
+    DeviceStorageChangeEvent::Constructor(this, NS_LITERAL_STRING("storage-state-change"),
+                                          init);
+  event->SetTrusted(true);
+
+  bool ignore;
+  DispatchEvent(event, &ignore);
 }
 #endif
 
@@ -4095,7 +4376,7 @@ nsDOMDeviceStorage::Observe(nsISupports *aSubject,
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (!strcmp(aTopic, "file-watcher-update")) {
+  if (!strcmp(aTopic, kFileWatcherUpdate)) {
 
     DeviceStorageFile* file = static_cast<DeviceStorageFile*>(aSubject);
     Notify(NS_ConvertUTF16toUTF8(aData).get(), file);
@@ -4108,9 +4389,9 @@ nsDOMDeviceStorage::Observe(nsISupports *aSubject,
     // these notifications are specific for apps storage.
     nsRefPtr<DeviceStorageFile> file =
       new DeviceStorageFile(mStorageType, mStorageName);
-    if (!strcmp(NS_ConvertUTF16toUTF8(aData).get(), "full")) {
+    if (!NS_strcmp(aData, MOZ_UTF16("full"))) {
       Notify("low-disk-space", file);
-    } else if (!strcmp(NS_ConvertUTF16toUTF8(aData).get(), "free")) {
+    } else if (!NS_strcmp(aData, MOZ_UTF16("free"))) {
       Notify("available-disk-space", file);
     }
     return NS_OK;
@@ -4137,10 +4418,16 @@ nsDOMDeviceStorage::Observe(nsISupports *aSubject,
       return NS_OK;
     }
 
-    DeviceStorageFile dsf(mStorageType, mStorageName);
-    nsString status;
-    dsf.GetStatus(status);
-    DispatchMountChangeEvent(status);
+    nsRefPtr<DeviceStorageFile> dsf(new DeviceStorageFile(mStorageType, mStorageName));
+    nsString status, storageStatus;
+
+    // Get Status (one of "available, unavailable, shared")
+    dsf->GetStatus(status);
+    DispatchStatusChangeEvent(status);
+
+    // Get real volume status (defined in dom/system/gonk/nsIVolume.idl)
+    dsf->GetStorageStatus(storageStatus);
+    DispatchStorageStatusChangeEvent(storageStatus);
     return NS_OK;
   }
 #endif
@@ -4160,24 +4447,19 @@ nsDOMDeviceStorage::Notify(const char* aReason, DeviceStorageFile* aFile)
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDOMEvent> event;
-  NS_NewDOMDeviceStorageChangeEvent(getter_AddRefs(event), this,
-                                    nullptr, nullptr);
+  DeviceStorageChangeEventInit init;
+  init.mBubbles = true;
+  init.mCancelable = false;
+  aFile->GetFullPath(init.mPath);
+  init.mReason.AssignWithConversion(aReason);
 
-  nsCOMPtr<nsIDOMDeviceStorageChangeEvent> ce = do_QueryInterface(event);
-
-  nsString reason;
-  reason.AssignWithConversion(aReason);
-
-  nsString fullPath;
-  aFile->GetFullPath(fullPath);
-  nsresult rv = ce->InitDeviceStorageChangeEvent(NS_LITERAL_STRING("change"),
-                                                 true, false, fullPath,
-                                                 reason);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsRefPtr<DeviceStorageChangeEvent> event =
+    DeviceStorageChangeEvent::Constructor(this, NS_LITERAL_STRING("change"),
+                                          init);
+  event->SetTrusted(true);
 
   bool ignore;
-  DispatchEvent(ce, &ignore);
+  DispatchEvent(event, &ignore);
   return NS_OK;
 }
 
@@ -4248,7 +4530,7 @@ nsDOMDeviceStorage::AddSystemEventListener(const nsAString & aType,
 {
   if (!mIsWatchingFile) {
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    obs->AddObserver(this, "file-watcher-update", false);
+    obs->AddObserver(this, kFileWatcherUpdate, false);
     mIsWatchingFile = true;
   }
 
@@ -4266,7 +4548,7 @@ nsDOMDeviceStorage::RemoveEventListener(const nsAString & aType,
   if (mIsWatchingFile && !HasListenersFor(nsGkAtoms::onchange)) {
     mIsWatchingFile = false;
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    obs->RemoveObserver(this, "file-watcher-update");
+    obs->RemoveObserver(this, kFileWatcherUpdate);
   }
   return NS_OK;
 }
@@ -4282,7 +4564,7 @@ nsDOMDeviceStorage::RemoveEventListener(const nsAString& aType,
   if (mIsWatchingFile && !HasListenersFor(nsGkAtoms::onchange)) {
     mIsWatchingFile = false;
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    obs->RemoveObserver(this, "file-watcher-update");
+    obs->RemoveObserver(this, kFileWatcherUpdate);
   }
 }
 

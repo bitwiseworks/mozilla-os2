@@ -48,20 +48,16 @@ this.FxAccountsMgmtService = {
   },
 
   init: function() {
-    Services.obs.addObserver(this, "content-start", false);
     Services.obs.addObserver(this, ONLOGIN_NOTIFICATION, false);
     Services.obs.addObserver(this, ONVERIFIED_NOTIFICATION, false);
     Services.obs.addObserver(this, ONLOGOUT_NOTIFICATION, false);
+    SystemAppProxy.addEventListener("mozFxAccountsContentEvent",
+                                    FxAccountsMgmtService);
   },
 
   observe: function(aSubject, aTopic, aData) {
     log.debug("Observed " + aTopic);
     switch (aTopic) {
-      case "content-start":
-        SystemAppProxy.addEventListener("mozFxAccountsContentEvent",
-                                        FxAccountsMgmtService);
-        Services.obs.removeObserver(this, "content-start");
-        break;
       case ONLOGIN_NOTIFICATION:
       case ONVERIFIED_NOTIFICATION:
       case ONLOGOUT_NOTIFICATION:
@@ -75,16 +71,26 @@ this.FxAccountsMgmtService = {
 
   handleEvent: function(aEvent) {
     let msg = aEvent.detail;
-    log.debug("Got content msg " + JSON.stringify(msg));
+    log.debug("MgmtService got content event: " + JSON.stringify(msg));
     let self = FxAccountsMgmtService;
 
     if (!msg.id) {
       return;
     }
 
+    if (msg.error) {
+      self._onReject(msg.id, msg.error);
+      return;
+    }
+
     let data = msg.data;
     if (!data) {
       return;
+    }
+    // Backwards compatibility: handle accountId coming from Gaia
+    if (data.accountId && typeof(data.email === "undefined")) {
+      data.email = data.accountId;
+      delete data.accountId;
     }
 
     switch(data.method) {
@@ -110,9 +116,19 @@ this.FxAccountsMgmtService = {
         ).then(null, Components.utils.reportError);
         break;
       case "queryAccount":
-        FxAccountsManager.queryAccount(data.accountId).then(
+        FxAccountsManager.queryAccount(data.email).then(
           result => {
             self._onFulfill(msg.id, result);
+          },
+          reason => {
+            self._onReject(msg.id, reason);
+          }
+        ).then(null, Components.utils.reportError);
+        break;
+      case "resendVerificationEmail":
+        FxAccountsManager.resendVerificationEmail().then(
+          () => {
+            self._onFulfill(msg.id);
           },
           reason => {
             self._onReject(msg.id, reason);
@@ -122,7 +138,7 @@ this.FxAccountsMgmtService = {
       case "signIn":
       case "signUp":
       case "refreshAuthentication":
-        FxAccountsManager[data.method](data.accountId, data.password).then(
+        FxAccountsManager[data.method](data.email, data.password).then(
           user => {
             self._onFulfill(msg.id, user);
           },

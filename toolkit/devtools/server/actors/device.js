@@ -22,14 +22,7 @@ const APP_MAP = {
   '{a23983c0-fd0e-11dc-95ff-0800200c9a66}': 'mobile/xul'
 }
 
-exports.register = function(handle) {
-  handle.addGlobalActor(DeviceActor, "deviceActor");
-};
-
-exports.unregister = function(handle) {
-};
-
-let DeviceActor = protocol.ActorClass({
+let DeviceActor = exports.DeviceActor = protocol.ActorClass({
   typeName: "device",
 
   _desc: null,
@@ -76,7 +69,6 @@ let DeviceActor = protocol.ActorClass({
 
     let appInfo = Services.appinfo;
     let win = Services.wm.getMostRecentWindow(DebuggerServer.chromeWindowType);
-    let utils = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
 
     desc = {
       appid: appInfo.ID,
@@ -90,19 +82,22 @@ let DeviceActor = protocol.ActorClass({
       geckobuildid: appInfo.platformBuildID,
       geckoversion: appInfo.platformVersion,
       changeset: this._getAppIniString("App", "SourceStamp"),
-      useragent: win.navigator.userAgent,
       locale: Cc["@mozilla.org/chrome/chrome-registry;1"].getService(Ci.nsIXULChromeRegistry).getSelectedLocale("global"),
       os: null,
       hardware: "unknown",
       processor: appInfo.XPCOMABI.split("-")[0],
       compiler: appInfo.XPCOMABI.split("-")[1],
-      dpi: utils.displayDPI,
       brandName: null,
       channel: null,
       profile: null,
-      width: win.screen.width,
-      height: win.screen.height
     };
+    if (win) {
+      let utils = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      desc.dpi = utils.displayDPI;
+      desc.useragent = win.navigator.userAgent;
+      desc.width = win.screen.width;
+      desc.height = win.screen.height;
+    }
 
     // Profile
     let profd = Services.dirsvc.get("ProfD", Ci.nsILocalFile);
@@ -197,7 +192,6 @@ let DeviceFront = protocol.FrontClass(DeviceActor, {
   initialize: function(client, form) {
     protocol.Front.prototype.initialize.call(this, client);
     this.actorID = form.deviceActor;
-    client.addActorPool(this);
     this.manage(this);
   },
 
@@ -225,10 +219,15 @@ let DeviceFront = protocol.FrontClass(DeviceActor, {
 const _knownDeviceFronts = new WeakMap();
 
 exports.getDeviceFront = function(client, form) {
-  if (_knownDeviceFronts.has(client))
+  if (!form.deviceActor) {
+    return null;
+  }
+
+  if (_knownDeviceFronts.has(client)) {
     return _knownDeviceFronts.get(client);
+  }
 
   let front = new DeviceFront(client, form);
   _knownDeviceFronts.set(client, front);
   return front;
-}
+};

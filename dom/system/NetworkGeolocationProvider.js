@@ -2,26 +2,37 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+"use strict";
+
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 
 const Ci = Components.interfaces;
 const Cc = Components.classes;
+const Cu = Components.utils;
 
 const POSITION_UNAVAILABLE = Ci.nsIDOMGeoPositionError.POSITION_UNAVAILABLE;
-const SETTING_DEBUG_ENABLED = "geolocation.debugging.enabled";
-const SETTING_CHANGED_TOPIC = "mozsettings-changed";
+const SETTINGS_DEBUG_ENABLED = "geolocation.debugging.enabled";
+const SETTINGS_CHANGED_TOPIC = "mozsettings-changed";
+const SETTINGS_WIFI_ENABLED = "wifi.enabled";
 
 let gLoggingEnabled = false;
 
-// if we don't see any wifi responses in 5 seconds, send the request.
-let gTimeToWaitBeforeSending = 5000; //ms
+/*
+   The gLocationRequestTimeout controls how long we wait on receiving an update
+   from the Wifi subsystem.  If this timer fires, we believe the Wifi scan has
+   had a problem and we no longer can use Wifi to position the user this time
+   around (we will continue to be hopeful that Wifi will recover).
+
+   This timeout value is also used when Wifi scanning is disabled (see
+   gWifiScanningEnabled).  In this case, we use this timer to collect cell/ip
+   data and xhr it to the location server.
+*/
+
+let gLocationRequestTimeout = 5000;
 
 let gWifiScanningEnabled = true;
-let gWifiResults;
-
 let gCellScanningEnabled = false;
-let gCellResults;
 
 function LOG(aMsg) {
   if (gLoggingEnabled) {
@@ -225,7 +236,7 @@ function WifiGeoPositionProvider() {
   } catch (e) {}
 
   try {
-    gTimeToWaitBeforeSending = Services.prefs.getIntPref("geo.wifi.timeToWaitBeforeSending");
+    gLocationRequestTimeout = Services.prefs.getIntPref("geo.wifi.timeToWaitBeforeSending");
   } catch (e) {}
 
   try {
@@ -237,7 +248,7 @@ function WifiGeoPositionProvider() {
   } catch (e) {}
 
   this.wifiService = null;
-  this.timeoutTimer = null;
+  this.timer = null;
   this.started = false;
 }
 
@@ -250,18 +261,33 @@ WifiGeoPositionProvider.prototype = {
   listener: null,
 
   observe: function(aSubject, aTopic, aData) {
-    if (aTopic != SETTING_CHANGED_TOPIC) {
+    if (aTopic != SETTINGS_CHANGED_TOPIC) {
       return;
     }
 
     try {
-      let setting = JSON.parse(aData);
-      if (setting.key != SETTING_DEBUG_ENABLED) {
-          return;
+      if ("wrappedJSObject" in aSubject) {
+        aSubject = aSubject.wrappedJSObject;
       }
-      gLoggingEnabled = setting.value;
+      if (aSubject.key == SETTINGS_DEBUG_ENABLED) {
+        gLoggingEnabled = aSubject.value;
+      } else if (aSubject.key == SETTINGS_WIFI_ENABLED) {
+        gWifiScanningEnabled = aSubject.value;
+      }
     } catch (e) {
     }
+  },
+
+  resetTimer: function() {
+    if (this.timer) {
+      this.timer.cancel();
+      this.timer = null;
+    }
+    // wifi thread triggers WifiGeoPositionProvider to proceed, with no wifi, do manual timeout
+    this.timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+    this.timer.initWithCallback(this,
+                                gLocationRequestTimeout,
+                                this.timer.TYPE_REPEATING_SLACK);
   },
 
   startup:  function() {
@@ -269,33 +295,48 @@ WifiGeoPositionProvider.prototype = {
       return;
 
     this.started = true;
+    let self = this;
     let settingsCallback = {
       handle: function(name, result) {
-        gLoggingEnabled = result && result.value === true ? true : false;
+        // Stop the B2G UI setting from overriding the js prefs setting, and turning off logging
+        // If gLoggingEnabled is already on during startup, that means it was set in js prefs.
+        if (name == SETTINGS_DEBUG_ENABLED && !gLoggingEnabled) {
+          gLoggingEnabled = result;
+        } else if (name == SETTINGS_WIFI_ENABLED) {
+          gWifiScanningEnabled = result;
+          if (self.wifiService) {
+            self.wifiService.stopWatching(self);
+          }
+          if (gWifiScanningEnabled) {
+            self.wifiService = Cc["@mozilla.org/wifi/monitor;1"].getService(Ci.nsIWifiMonitor);
+            self.wifiService.startWatching(self);
+          }
+        }
       },
-      
+
       handleError: function(message) {
         gLoggingEnabled = false;
         LOG("settings callback threw an exception, dropping");
       }
     };
 
-    try {
-      Services.obs.addObserver(this, SETTING_CHANGED_TOPIC, false);
-      let settings = Cc["@mozilla.org/settingsService;1"].getService(Ci.nsISettingsService);
-      settings.createLock().get(SETTING_DEBUG_ENABLED, settingsCallback);
-    } catch(ex) {
-      // This platform doesn't have the settings interface, and that is just peachy
+    Services.obs.addObserver(this, SETTINGS_CHANGED_TOPIC, false);
+    let settingsService = Cc["@mozilla.org/settingsService;1"];
+    if (settingsService) {
+      let settings = settingsService.getService(Ci.nsISettingsService);
+      settings.createLock().get(SETTINGS_WIFI_ENABLED, settingsCallback);
+      settings.createLock().get(SETTINGS_DEBUG_ENABLED, settingsCallback);
     }
 
-    if (gWifiScanningEnabled) {
-      this.wifiService = Cc["@mozilla.org/wifi/monitor;1"].getService(Components.interfaces.nsIWifiMonitor);
+    if (gWifiScanningEnabled && Cc["@mozilla.org/wifi/monitor;1"]) {
+      if (this.wifiService) {
+        this.wifiService.stopWatching(this);
+      }
+      this.wifiService = Cc["@mozilla.org/wifi/monitor;1"].getService(Ci.nsIWifiMonitor);
       this.wifiService.startWatching(this);
     }
-    this.timeoutTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-    this.timeoutTimer.initWithCallback(this,
-                                       gTimeToWaitBeforeSending,
-                                       this.timeoutTimer.TYPE_REPEATING_SLACK);
+
+    this.resetTimer();
     LOG("startup called.");
   },
 
@@ -313,9 +354,9 @@ WifiGeoPositionProvider.prototype = {
     // TODO: add logic for cache lifespan, for now just be safe and clear it
     gCachedRequest = null;
 
-    if (this.timeoutTimer) {
-      this.timeoutTimer.cancel();
-      this.timeoutTimer = null;
+    if (this.timer) {
+      this.timer.cancel();
+      this.timer = null;
     }
 
     if(this.wifiService) {
@@ -323,7 +364,7 @@ WifiGeoPositionProvider.prototype = {
       this.wifiService = null;
     }
 
-    Services.obs.removeObserver(this, SETTING_CHANGED_TOPIC);
+    Services.obs.removeObserver(this, SETTINGS_CHANGED_TOPIC);
 
     this.listener = null;
     this.started = false;
@@ -333,6 +374,9 @@ WifiGeoPositionProvider.prototype = {
   },
 
   onChange: function(accessPoints) {
+
+    // we got some wifi data, rearm the timer.
+    this.resetTimer();
 
     function isPublic(ap) {
       let mask = "_nomap"
@@ -351,56 +395,83 @@ WifiGeoPositionProvider.prototype = {
       return { 'macAddress': ap.mac, 'signalStrength': ap.signal };
     };
 
+    let wifiData = null;
     if (accessPoints) {
-      gWifiResults = accessPoints.filter(isPublic).sort(sort).map(encode);
-    } else {
-      gWifiResults = null;
+      wifiData = accessPoints.filter(isPublic).sort(sort).map(encode);
     }
+    this.sendLocationRequest(wifiData);
   },
 
   onError: function (code) {
     LOG("wifi error: " + code);
+    this.sendLocationRequest(null);
   },
 
-  updateMobileInfo: function() {
-    LOG("updateMobileInfo called");
+  getMobileInfo: function() {
+    LOG("getMobileInfo called");
     try {
-      let radio = Cc["@mozilla.org/ril;1"]
-            .getService(Ci.nsIRadioInterfaceLayer)
-            .getRadioInterface(0);
+      let radioService = Cc["@mozilla.org/ril;1"]
+                    .getService(Ci.nsIRadioInterfaceLayer);
+      let service = Cc["@mozilla.org/mobileconnection/mobileconnectionservice;1"]
+                    .getService(Ci.nsIMobileConnectionService);
 
-      let iccInfo = radio.rilContext.iccInfo;
-      let cell = radio.rilContext.voice.cell;
+      let result = [];
+      for (let i = 0; i < service.numItems; i++) {
+        LOG("Looking for SIM in slot:" + i + " of " + service.numItems);
+        let connection = service.getItemByServiceId(i);
+        let voice = connection && connection.voice;
+        let cell = voice && voice.cell;
+        let type = voice && voice.type;
+        let network = voice && voice.network;
 
-      LOG("mcc: " + iccInfo.mcc);
-      LOG("mnc: " + iccInfo.mnc);
-      LOG("cid: " + cell.gsmCellId);
-      LOG("lac: " + cell.gsmLocationAreaCode);
-
-      gCellResults = [{
-        "radio": "gsm",
-        "mobileCountryCode": iccInfo.mcc,
-        "mobileNetworkCode": iccInfo.mnc,
-        "locationAreaCode": cell.gsmLocationAreaCode,
-        "cellId": cell.gsmCellId,
-      }];
+        if (network && cell && type) {
+          let radioTechFamily;
+          switch (type) {
+            case "gsm":
+            case "gprs":
+            case "edge":
+              radioTechFamily = "gsm";
+              break;
+            case "umts":
+            case "hsdpa":
+            case "hsupa":
+            case "hspa":
+            case "hspa+":
+              radioTechFamily = "wcdma";
+              break;
+            case "lte":
+              radioTechFamily = "lte";
+              break;
+            // CDMA cases to be handled in bug 1010282
+          };
+          result.push({ radio: radioTechFamily,
+                      mobileCountryCode: voice.network.mcc,
+                      mobileNetworkCode: voice.network.mnc,
+                      locationAreaCode: cell.gsmLocationAreaCode,
+                      cellId: cell.gsmCellId });
+        }
+      }
+      return result;
     } catch (e) {
-      gCellResults = null;
+      return null;
     }
   },
 
-  notify: function (timeoutTimer) {
-    let data = {};
-    if (gWifiResults) {
-      data.wifiAccessPoints = gWifiResults;
+  notify: function (timer) {
+    this.sendLocationRequest(null);
+  },
+
+  sendLocationRequest: function (wifiData) {
+    let data = { cellTowers: undefined, wifiAccessPoints: undefined };
+    if (wifiData && wifiData.length >= 2) {
+      data.wifiAccessPoints = wifiData;
     }
 
     if (gCellScanningEnabled) {
-      this.updateMobileInfo();
-    }
-
-    if (gCellResults && gCellResults.length > 0) {
-      data.cellTowers = gCellResults;
+      let cellData = this.getMobileInfo();
+      if (cellData && cellData.length > 0) {
+        data.cellTowers = cellData;
+      }
     }
 
     let useCached = isCachedRequestMoreAccurateThanServerRequest(data.cellTowers,
@@ -410,38 +481,40 @@ WifiGeoPositionProvider.prototype = {
 
     if (useCached) {
       gCachedRequest.location.timestamp = Date.now();
-      this.listener.update(gCachedRequest.location);
+      this.notifyListener("update", [gCachedRequest.location]);
       return;
     }
 
     // From here on, do a network geolocation request //
     let url = Services.urlFormatter.formatURLPref("geo.wifi.uri");
-    let listener = this.listener;
-    LOG("Sending request: " + url + "\n");
+    LOG("Sending request");
 
     let xhr = Components.classes["@mozilla.org/xmlextras/xmlhttprequest;1"]
                         .createInstance(Ci.nsIXMLHttpRequest);
 
-    listener.locationUpdatePending();
+    this.notifyListener("locationUpdatePending");
 
     try {
       xhr.open("POST", url, true);
     } catch (e) {
-      listener.notifyError(POSITION_UNAVAILABLE);
+      this.notifyListener("notifyError",
+                          [POSITION_UNAVAILABLE]);
       return;
     }
     xhr.setRequestHeader("Content-Type", "application/json; charset=UTF-8");
     xhr.responseType = "json";
     xhr.mozBackgroundRequest = true;
     xhr.channel.loadFlags = Ci.nsIChannel.LOAD_ANONYMOUS;
-    xhr.onerror = function() {
-      listener.notifyError(POSITION_UNAVAILABLE);
-    };
-    xhr.onload = function() {
-      LOG("gls returned status: " + xhr.status + " --> " +  JSON.stringify(xhr.response));
+    xhr.onerror = (function() {
+      this.notifyListener("notifyError",
+                          [POSITION_UNAVAILABLE]);
+    }).bind(this);
+    xhr.onload = (function() {
+      LOG("server returned status: " + xhr.status + " --> " +  JSON.stringify(xhr.response));
       if ((xhr.channel instanceof Ci.nsIHttpChannel && xhr.status != 200) ||
           !xhr.response || !xhr.response.location) {
-        listener.notifyError(POSITION_UNAVAILABLE);
+        this.notifyListener("notifyError",
+                            [POSITION_UNAVAILABLE]);
         return;
       }
 
@@ -449,15 +522,23 @@ WifiGeoPositionProvider.prototype = {
                                                   xhr.response.location.lng,
                                                   xhr.response.accuracy);
 
-      listener.update(newLocation);
+      this.notifyListener("update", [newLocation]);
       gCachedRequest = new CachedRequest(newLocation, data.cellTowers, data.wifiAccessPoints);
-    };
+    }).bind(this);
 
     var requestData = JSON.stringify(data);
-    gWifiResults = gCellResults = null;
     LOG("sending " + requestData);
     xhr.send(requestData);
   },
+
+  notifyListener: function(listenerFunc, args) {
+    args = args || [];
+    try {
+      this.listener[listenerFunc].apply(this.listener, args);
+    } catch(e) {
+      Cu.reportError(e);
+    }
+  }
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([WifiGeoPositionProvider]);

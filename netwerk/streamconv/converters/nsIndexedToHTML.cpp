@@ -18,7 +18,6 @@
 #include "nsIPrefBranch.h"
 #include "nsIPrefLocalizedString.h"
 #include "nsIChromeRegistry.h"
-#include "nsICharsetConverterManager.h"
 #include "nsIDateTimeFormat.h"
 #include "nsIStringBundle.h"
 #include "nsITextToSubURI.h"
@@ -347,6 +346,7 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
                          "<link rel=\"stylesheet\" media=\"screen, projection\" type=\"text/css\""
                          " href=\"chrome://global/skin/dirListing/dirListing.css\">\n"
                          "<script type=\"application/javascript\">\n"
+                         "'use strict';\n"
                          "var gTable, gOrderBy, gTBody, gRows, gUI_showHidden;\n"
                          "document.addEventListener(\"DOMContentLoaded\", function() {\n"
                          "  gTable = document.getElementsByTagName(\"table\")[0];\n"
@@ -371,7 +371,7 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
                          "  }\n"
                          "  if (gUI_showHidden) {\n"
                          "    gRows = Array.slice(gTBody.rows);\n"
-                         "    hiddenObjects = gRows.some(function (row) row.className == \"hidden-object\");\n"
+                         "    hiddenObjects = gRows.some(row => row.className == \"hidden-object\");\n"
                          "  }\n"
                          "  gTable.setAttribute(\"order\", \"\");\n"
                          "  if (hiddenObjects) {\n"
@@ -796,7 +796,7 @@ nsIndexedToHTML::OnIndexAvailable(nsIRequest *aRequest,
     pushBuffer.AppendLiteral("</a></td></tr></tbody></table></td>\n <td");
 
     if (type == nsIDirIndex::TYPE_DIRECTORY || type == nsIDirIndex::TYPE_SYMLINK) {
-        pushBuffer.AppendLiteral(">");
+        pushBuffer.Append('>');
     } else {
         int64_t size;
         aIndex->GetSize(&size);
@@ -809,7 +809,7 @@ nsIndexedToHTML::OnIndexAvailable(nsIRequest *aRequest,
             FormatSizeString(size, sizeString);
             pushBuffer.Append(sizeString);
         } else {
-            pushBuffer.AppendLiteral(">");
+            pushBuffer.Append('>');
         }
     }
     pushBuffer.AppendLiteral("</td>\n <td");

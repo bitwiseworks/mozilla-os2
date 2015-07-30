@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -16,7 +16,7 @@ const SUPP_PROP = "init.svc.wpa_supplicant";
 const WPA_SUPPLICANT = "wpa_supplicant";
 const DEBUG = false;
 
-this.WifiCommand = function(aControlMessage, aInterface) {
+this.WifiCommand = function(aControlMessage, aInterface, aSdkVersion) {
   function debug(msg) {
     if (DEBUG) {
       dump('-------------- WifiCommand: ' + msg);
@@ -24,6 +24,13 @@ this.WifiCommand = function(aControlMessage, aInterface) {
   }
 
   var command = {};
+
+  //-------------------------------------------------
+  // Utilities.
+  //-------------------------------------------------
+  command.getSdkVersion = function() {
+    return aSdkVersion;
+  };
 
   //-------------------------------------------------
   // General commands.
@@ -142,17 +149,36 @@ this.WifiCommand = function(aControlMessage, aInterface) {
     doStringCommand("LOG_LEVEL", callback);
   };
 
-  command.wpsPbc = function (iface, callback) {
-    doBooleanCommand("WPS_PBC" + (iface ? (" interface=" + iface) : ""),
-                     "OK", callback);
+  command.wpsPbc = function (callback, iface) {
+    let cmd = 'WPS_PBC';
+
+    // If the network interface is specified and we are based on JB,
+    // append the argument 'interface=[iface]' to the supplicant command.
+    //
+    // Note: The argument "interface" is only required for wifi p2p on JB.
+    //       For other cases, the argument is useless and even leads error.
+    //       Check the evil work here:
+    //       http://androidxref.com/4.2.2_r1/xref/external/wpa_supplicant_8/wpa_supplicant/ctrl_iface_unix.c#172
+    //
+    if (iface && isJellybean()) {
+      cmd += (' inferface=' + iface);
+    }
+
+    doBooleanCommand(cmd, "OK", callback);
   };
 
   command.wpsPin = function (detail, callback) {
-    doStringCommand("WPS_PIN " +
-                    (detail.bssid === undefined ? "any" : detail.bssid) +
-                    (detail.pin === undefined ? "" : (" " + detail.pin)) +
-                    (detail.iface ? (" interface=" + detail.iface) : ""),
-                    callback);
+    let cmd = 'WPS_PIN ';
+
+    // See the comment above in wpsPbc().
+    if (detail.iface && isJellybean()) {
+      cmd += ('inferface=' + iface + ' ');
+    }
+
+    cmd += (detail.bssid === undefined ? "any" : detail.bssid);
+    cmd += (detail.pin === undefined ? "" : (" " + detail.pin));
+
+    doStringCommand(cmd, callback);
   };
 
   command.wpsCancel = function (callback) {
@@ -221,6 +247,9 @@ this.WifiCommand = function(aControlMessage, aInterface) {
     });
   };
 
+  let infoKeys = [{regexp: /RSSI=/i,      prop: 'rssi'},
+                  {regexp: /LINKSPEED=/i, prop: 'linkspeed'}];
+
   command.getConnectionInfoICS = function (callback) {
     doStringCommand("SIGNAL_POLL", function(reply) {
       if (!reply) {
@@ -228,19 +257,21 @@ this.WifiCommand = function(aControlMessage, aInterface) {
         return;
       }
 
+      // Find any values matching |infoKeys|. This gets executed frequently
+      // enough that we want to avoid creating intermediate strings as much as
+      // possible.
       let rval = {};
-      var lines = reply.split("\n");
-      for (let i = 0; i < lines.length; ++i) {
-        let [key, value] = lines[i].split("=");
-        switch (key.toUpperCase()) {
-          case "RSSI":
-            rval.rssi = value | 0;
-            break;
-          case "LINKSPEED":
-            rval.linkspeed = value | 0;
-            break;
-          default:
-            // Ignore.
+      for (let i = 0; i < infoKeys.length; i++) {
+        let re = infoKeys[i].regexp;
+        let iKeyStart = reply.search(re);
+        if (iKeyStart !== -1) {
+          let prop = infoKeys[i].prop;
+          let iValueStart = reply.indexOf('=', iKeyStart) + 1;
+          let iNewlineAfterValue = reply.indexOf('\n', iValueStart);
+          let iValueEnd = iNewlineAfterValue !== -1
+                        ? iNewlineAfterValue
+                        : reply.length;
+          rval[prop] = reply.substring(iValueStart, iValueEnd) | 0;
         }
       }
 
@@ -254,6 +285,33 @@ this.WifiCommand = function(aControlMessage, aInterface) {
         reply = reply.split(" ")[2]; // Format: Macaddr = XX.XX.XX.XX.XX.XX
       }
       callback(reply);
+    });
+  };
+
+  command.connectToHostapd = function(callback) {
+    voidControlMessage("connect_to_hostapd", callback);
+  };
+
+  command.closeHostapdConnection = function(callback) {
+    voidControlMessage("close_hostapd_connection", callback);
+  };
+
+  command.hostapdCommand = function (callback, request) {
+    var msg = { cmd:     "hostapd_command",
+                request: request,
+                iface:   aInterface };
+
+    aControlMessage(msg, function(data) {
+      callback(data.status ? null : data.reply);
+    });
+  };
+
+  command.hostapdGetStations = function (callback) {
+    var msg = { cmd:     "hostapd_get_stations",
+                iface:   aInterface };
+
+    aControlMessage(msg, function(data) {
+      callback(data.status);
     });
   };
 
@@ -518,6 +576,18 @@ this.WifiCommand = function(aControlMessage, aInterface) {
       ok = false;
     }
     callback(ok);
+  }
+
+  function isJellybean() {
+    // According to http://developer.android.com/guide/topics/manifest/uses-sdk-element.html
+    // ----------------------------------------------------
+    // | Platform Version   | API Level |   VERSION_CODE  |
+    // ----------------------------------------------------
+    // | Android 4.1, 4.1.1 |    16     |  JELLY_BEAN_MR2 |
+    // | Android 4.2, 4.2.2 |    17     |  JELLY_BEAN_MR1 |
+    // | Android 4.3        |    18     |    JELLY_BEAN   |
+    // ----------------------------------------------------
+    return aSdkVersion === 16 || aSdkVersion === 17 || aSdkVersion === 18;
   }
 
   return command;

@@ -3,14 +3,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-ifndef .PYMAKE
 ifeq (,$(MAKE_VERSION))
 $(error GNU Make is required)
 endif
 make_min_ver := 3.81
 ifneq ($(make_min_ver),$(firstword $(sort $(make_min_ver) $(MAKE_VERSION))))
 $(error GNU Make $(make_min_ver) or higher is required)
-endif
 endif
 
 export TOPLEVEL_BUILD := 1
@@ -39,10 +37,10 @@ endif
 ifndef MOZ_PROFILE_USE
 # We need to explicitly put backend.RecursiveMakeBackend here
 # otherwise the rule in rules.mk doesn't run early enough.
-libs binaries export tools:: CLOBBER $(configure_dir)/configure config.status backend.RecursiveMakeBackend
+$(TIERS) binaries:: CLOBBER $(configure_dir)/configure config.status backend.RecursiveMakeBackend
 ifndef JS_STANDALONE
 ifndef LIBXUL_SDK
-libs binaries export tools:: $(topsrcdir)/js/src/configure js/src/config.status
+$(TIERS) binaries:: $(topsrcdir)/js/src/configure js/src/config.status
 endif
 endif
 endif
@@ -94,7 +92,10 @@ include backend.RecursiveMakeBackend.pp
 
 default:: backend.RecursiveMakeBackend
 
-install_manifests := bin idl include public private sdk
+install_manifests := \
+  $(addprefix dist/,bin idl include public private sdk xpi-stage) \
+  _tests \
+  $(NULL)
 install_manifest_depends = \
   CLOBBER \
   $(configure_dir)/configure \
@@ -112,7 +113,7 @@ endif
 endif
 
 .PHONY: install-manifests
-install-manifests: $(addprefix install-dist-,$(install_manifests))
+install-manifests: $(addprefix install-,$(install_manifests))
 
 # process_install_manifest needs to be invoked with --no-remove when building
 # js as standalone because automated builds are building nspr separately and
@@ -123,14 +124,16 @@ ifdef JS_STANDALONE
 NO_REMOVE=1
 endif
 
-.PHONY: $(addprefix install-dist-,$(install_manifests))
-$(addprefix install-dist-,$(install_manifests)): install-dist-%: $(install_manifest_depends)
+.PHONY: $(addprefix install-,$(install_manifests))
+$(addprefix install-,$(filter dist/%,$(install_manifests))): install-dist/%: $(install_manifest_depends)
 	$(call py_action,process_install_manifest,$(if $(NO_REMOVE),--no-remove )$(DIST)/$* _build_manifests/install/dist_$*)
 
-.PHONY: install-tests
-install-manifests: install-tests
-install-tests: $(install_manifest_depends)
+install-_tests: $(install_manifest_depends)
 	$(call py_action,process_install_manifest,$(if $(NO_REMOVE),--no-remove )_tests _build_manifests/install/tests)
+
+# For compatibility
+.PHONY: install-tests
+install-tests: install-_tests
 
 include $(topsrcdir)/build/moz-automation.mk
 
@@ -143,23 +146,25 @@ endif
 # Windows PGO builds don't perform a clean before the 2nd pass. So, we want
 # to preserve content for the 2nd pass on Windows. Everywhere else, we always
 # process the install manifests as part of export.
+# For the binaries rule, not all the install manifests matter, so force only
+# the interesting ones to be done.
 ifdef MOZ_PROFILE_USE
 ifndef NO_PROFILE_GUIDED_OPTIMIZE
 ifneq ($(OS_ARCH)_$(GNU_CC), WINNT_)
 export:: install-manifests
 binaries::
-	@$(MAKE) install-manifests NO_REMOVE=1
+	@$(MAKE) install-manifests NO_REMOVE=1 install_manifests=dist/include
 endif
 endif
 else # !MOZ_PROFILE_USE (normal build)
 export:: install-manifests
 binaries::
-	@$(MAKE) install-manifests NO_REMOVE=1
+	@$(MAKE) install-manifests NO_REMOVE=1 install_manifests=dist/include
 endif
 
 # For historical reasons that are unknown, $(DIST)/sdk is always blown away
 # with no regard for PGO passes. This decision could probably be revisited.
-export:: install-dist-sdk
+export:: install-dist/sdk
 
 ifndef JS_STANDALONE
 ifdef ENABLE_TESTS
@@ -169,7 +174,7 @@ endif
 endif
 
 default all::
-	$(call BUILDSTATUS,TIERS export $(if $(COMPILE_ENVIRONMENT),$(if $(MOZ_PSEUDO_DERECURSE),compile ))libs tools $(if $(MOZ_AUTOMATION),$(MOZ_AUTOMATION_TIERS)))
+	$(call BUILDSTATUS,TIERS $(TIERS) $(if $(MOZ_AUTOMATION),$(MOZ_AUTOMATION_TIERS)))
 
 include $(topsrcdir)/config/rules.mk
 
@@ -202,6 +207,7 @@ MAKE_SYM_STORE_ARGS := -c --vcs-info
 DUMP_SYMS_BIN ?= $(DIST)/host/bin/dump_syms
 MAKE_SYM_STORE_PATH := $(DIST)/bin
 endif
+MAKE_SYM_STORE_ARGS += --install-manifest=$(DEPTH)/_build_manifests/install/dist_include,$(DIST)/include
 
 SYM_STORE_SOURCE_DIRS := $(topsrcdir)
 
@@ -320,12 +326,4 @@ config/export:
 
 endif
 
-ifdef MOZ_PSEUDO_DERECURSE
-# Interdependencies for parallel export.
-js/xpconnect/src/export: dom/bindings/export xpcom/xpidl/export
-accessible/src/xpcom/export: xpcom/xpidl/export
-js/src/export: mfbt/export
-ifdef ENABLE_CLANG_PLUGIN
-js/src/export config/export: build/clang-plugin/export
-endif
-endif
+# There used to be build interdependencies here. They are now in config/recurse.mk

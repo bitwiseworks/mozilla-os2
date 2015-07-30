@@ -1,41 +1,43 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.tests;
 
 import org.mozilla.gecko.Actions;
 import org.mozilla.gecko.Element;
+import org.mozilla.gecko.NewTabletUI;
 import org.mozilla.gecko.R;
+
+import android.app.Activity;
 
 /* Tests related to the about: page:
  *  - check that about: loads from the URL bar
  *  - check that about: loads from Settings/About...
  */
 public class testAboutPage extends PixelTest {
-    private void ensureTitleMatches(final String regex) {
-        Element urlBarTitle = mDriver.findElement(getActivity(), R.id.url_bar_title);
-        mAsserter.isnot(urlBarTitle, null, "Got the URL bar title");
-        assertMatches(urlBarTitle.getText(), regex, "page title match");
-    }
 
     public void testAboutPage() {
         blockForGeckoReady();
 
         // Load the about: page and verify its title.
-        String url = "about:";
+        String url = StringHelper.ABOUT_SCHEME;
         loadAndPaint(url);
 
-        ensureTitleMatches("About (Fennec|Nightly|Aurora|Firefox|Firefox Beta)");
+        verifyUrlBarTitle(url);
 
         // Open a new page to remove the about: page from the current tab.
-        url = getAbsoluteUrl("/robocop/robocop_blank_01.html");
+        url = getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_01_URL);
         inputAndLoadUrl(url);
 
         // At this point the page title should have been set.
-        ensureTitleMatches("Browser Blank Page 01");
+        verifyUrlBarTitle(url);
 
         // Set up listeners to catch the page load we're about to do.
         Actions.EventExpecter tabEventExpecter = mActions.expectGeckoEvent("Tab:Added");
         Actions.EventExpecter contentEventExpecter = mActions.expectGeckoEvent("DOMContentLoaded");
 
-        selectSettingsItem("Mozilla", "About (Fennec|Nightly|Aurora|Firefox|Firefox Beta)");
+        selectSettingsItem(StringHelper.MOZILLA_SECTION_LABEL, StringHelper.ABOUT_LABEL);
 
         // Wait for the new tab and page to load
         tabEventExpecter.blockForEvent();
@@ -44,7 +46,7 @@ public class testAboutPage extends PixelTest {
         tabEventExpecter.unregisterListener();
         contentEventExpecter.unregisterListener();
 
-        // Grab the title to make sure the about: page was loaded.
-        ensureTitleMatches("About (Fennec|Nightly|Aurora|Firefox|Firefox Beta)");
+        // Make sure the about: page was loaded.
+        verifyUrlBarTitle(StringHelper.ABOUT_SCHEME);
     }
 }

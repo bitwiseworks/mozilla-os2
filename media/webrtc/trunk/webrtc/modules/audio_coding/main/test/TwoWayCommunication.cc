@@ -18,12 +18,12 @@
 #include <Windows.h>
 #endif
 
-#include "common_types.h"
-#include "engine_configurations.h"
-#include "gtest/gtest.h"
-#include "PCMFile.h"
-#include "trace.h"
-#include "utility.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/engine_configurations.h"
+#include "webrtc/common_types.h"
+#include "webrtc/modules/audio_coding/main/test/PCMFile.h"
+#include "webrtc/modules/audio_coding/main/test/utility.h"
+#include "webrtc/system_wrappers/interface/trace.h"
 #include "webrtc/test/testsupport/fileutils.h"
 
 namespace webrtc {
@@ -35,8 +35,7 @@ TwoWayCommunication::TwoWayCommunication(int testMode)
       _acmB(AudioCodingModule::Create(2)),
       _acmRefA(AudioCodingModule::Create(3)),
       _acmRefB(AudioCodingModule::Create(4)),
-      _testMode(testMode) {
-}
+      _testMode(testMode) {}
 
 TwoWayCommunication::~TwoWayCommunication() {
   delete _channel_A2B;

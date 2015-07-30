@@ -1,4 +1,5 @@
 Cu.import("resource://testing-common/httpd.js");
+Cu.import("resource://gre/modules/Services.jsm");
 
 var httpserver = null;
 
@@ -11,7 +12,14 @@ const responseBody = [0x1f, 0x8b, 0x08, 0x08, 0xef, 0x70, 0xe6, 0x4c, 0x00, 0x03
 function make_channel(url, callback, ctx) {
   var ios = Cc["@mozilla.org/network/io-service;1"].
             getService(Ci.nsIIOService);
-  return ios.newChannel(url, "", null);
+  return ios.newChannel2(url,
+                         "",
+                         null,
+                         null,      // aLoadingNode
+                         Services.scriptSecurityManager.getSystemPrincipal(),
+                         null,      // aTriggeringPrincipal
+                         Ci.nsILoadInfo.SEC_NORMAL,
+                         Ci.nsIContentPolicy.TYPE_OTHER);
 }
 
 var doRangeResponse = false;
@@ -21,7 +29,6 @@ function cachedHandler(metadata, response) {
   response.setHeader("Content-Encoding", "gzip", false);
   response.setHeader("ETag", "Just testing");
   response.setHeader("Cache-Control", "max-age=3600000"); // avoid validation
-  response.setHeader("Content-Length", "" + responseBody.length);
 
   var body = responseBody;
 
@@ -36,10 +43,13 @@ function cachedHandler(metadata, response) {
       return;
     }
     body = body.slice(from, to + 1);
+    response.setHeader("Content-Length", "" + (to + 1 - from));
     // always respond to successful range requests with 206
     response.setStatusLine(metadata.httpVersion, 206, "Partial Content");
     response.setHeader("Content-Range", from + "-" + to + "/" + responseBody.length, false);
   } else {
+    // This response will get cut off prematurely
+    response.setHeader("Content-Length", "" + responseBody.length);
     response.setHeader("Accept-Ranges", "bytes");
     body = body.slice(0, 17); // slice off a piece to send first
     doRangeResponse = true;
@@ -55,11 +65,13 @@ function cachedHandler(metadata, response) {
 }
 
 function continue_test(request, data) {
-  do_check_true(17 == data.length);
+  do_check_eq(17, data.length);
   var chan = make_channel("http://localhost:" +
                           httpserver.identity.primaryPort + "/cached/test.gz");
   chan.asyncOpen(new ChannelListener(finish_test, null, CL_EXPECT_GZIP), null);
 }
+
+var enforcePref;
 
 function finish_test(request, data, ctx) {
   do_check_eq(request.status, 0);
@@ -67,10 +79,14 @@ function finish_test(request, data, ctx) {
   for (var i = 0; i < data.length; ++i) {
     do_check_eq(data.charCodeAt(i), responseBody[i]);
   }
+  Services.prefs.setBoolPref("network.http.enforce-framing.http1", enforcePref);
   httpserver.stop(do_test_finished);
 }
 
 function run_test() {
+  enforcePref = Services.prefs.getBoolPref("network.http.enforce-framing.http1");
+  Services.prefs.setBoolPref("network.http.enforce-framing.http1", false);
+
   httpserver = new HttpServer();
   httpserver.registerPathHandler("/cached/test.gz", cachedHandler);
   httpserver.start(-1);
@@ -80,6 +96,6 @@ function run_test() {
 
   var chan = make_channel("http://localhost:" +
                           httpserver.identity.primaryPort + "/cached/test.gz");
-  chan.asyncOpen(new ChannelListener(continue_test, null, CL_EXPECT_GZIP), null);
+  chan.asyncOpen(new ChannelListener(continue_test, null, CL_EXPECT_GZIP | CL_IGNORE_CL), null);
   do_test_pending();
 }

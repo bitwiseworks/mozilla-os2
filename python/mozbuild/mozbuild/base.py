@@ -6,7 +6,7 @@ from __future__ import print_function, unicode_literals
 
 import json
 import logging
-import mozpack.path
+import mozpack.path as mozpath
 import multiprocessing
 import os
 import subprocess
@@ -172,29 +172,12 @@ class MozbuildObject(ProcessExecutionMixin):
         # inside an objdir you probably want to perform actions on that objdir,
         # not another one. This prevents accidental usage of the wrong objdir
         # when the current objdir is ambiguous.
-        # However, if the found mozconfig resolves to another objdir that
-        # doesn't exist, we may be in a subtree like when building mozilla/
-        # under c-c, and the objdir was defined as a relative path. Try again
-        # adjusting for that.
-
         if topobjdir and config_topobjdir:
-            if not os.path.exists(config_topobjdir):
-                config_topobjdir = MozbuildObject.resolve_mozconfig_topobjdir(
-                    os.path.dirname(topsrcdir), config)
-                if current_project:
-                    config_topobjdir = os.path.join(config_topobjdir,
-                        current_project)
-                config_topobjdir = os.path.join(config_topobjdir,
-                    os.path.basename(topsrcdir))
-            elif current_project:
+            if current_project:
                 config_topobjdir = os.path.join(config_topobjdir, current_project)
 
             _config_topobjdir = config_topobjdir
-            mozilla_dir = os.path.join(_config_topobjdir, 'mozilla')
-            if not samepath(topobjdir, _config_topobjdir) \
-                and (not os.path.exists(mozilla_dir) or not samepath(topobjdir,
-                mozilla_dir)):
-
+            if not samepath(topobjdir, _config_topobjdir):
                 raise ObjdirMismatchException(topobjdir, _config_topobjdir)
 
         topobjdir = topobjdir or config_topobjdir
@@ -291,6 +274,9 @@ class MozbuildObject(ProcessExecutionMixin):
 
     @property
     def bindir(self):
+        import mozinfo
+        if mozinfo.os == "mac":
+            return os.path.join(self.topobjdir, 'dist', self.substs['MOZ_MACBUNDLE_NAME'], 'Contents', 'Resources')
         return os.path.join(self.topobjdir, 'dist', 'bin')
 
     @property
@@ -339,8 +325,11 @@ class MozbuildObject(ProcessExecutionMixin):
             stem = os.path.join(stem, substs['MOZ_APP_NAME'])
 
         if substs['OS_ARCH'] == 'Darwin':
-            stem = os.path.join(stem, substs['MOZ_MACBUNDLE_NAME'], 'Contents',
-                'MacOS')
+            if substs['MOZ_BUILD_APP'] == 'xulrunner':
+                stem = os.path.join(stem, 'XUL.framework');
+            else:
+                stem = os.path.join(stem, substs['MOZ_MACBUNDLE_NAME'], 'Contents',
+                    'MacOS')
         elif where == 'default':
             stem = os.path.join(stem, 'bin')
 
@@ -412,7 +401,7 @@ class MozbuildObject(ProcessExecutionMixin):
             srcdir=False, allow_parallel=True, line_handler=None,
             append_env=None, explicit_env=None, ignore_errors=False,
             ensure_exit_code=0, silent=True, print_directory=True,
-            pass_thru=False, num_jobs=0, force_pymake=False):
+            pass_thru=False, num_jobs=0):
         """Invoke make.
 
         directory -- Relative directory to look for Makefile in.
@@ -424,17 +413,36 @@ class MozbuildObject(ProcessExecutionMixin):
         silent -- If True (the default), run make in silent mode.
         print_directory -- If True (the default), have make print directories
         while doing traversal.
-        force_pymake -- If True, pymake will be used instead of GNU make.
         """
         self._ensure_objdir_exists()
 
-        args = self._make_path(force_pymake=force_pymake)
+        args = self._make_path()
 
         if directory:
             args.extend(['-C', directory.replace(os.sep, '/')])
 
         if filename:
             args.extend(['-f', filename])
+
+        if num_jobs == 0 and self.mozconfig['make_flags']:
+            flags = iter(self.mozconfig['make_flags'])
+            for flag in flags:
+                if flag == '-j':
+                    try:
+                        flag = flags.next()
+                    except StopIteration:
+                        break
+                    try:
+                        num_jobs = int(flag)
+                    except ValueError:
+                        args.append(flag)
+                elif flag.startswith('-j'):
+                    try:
+                        num_jobs = int(flag[2:])
+                    except (ValueError, IndexError):
+                        break
+                else:
+                    args.append(flag)
 
         if allow_parallel:
             if num_jobs > 0:
@@ -451,9 +459,7 @@ class MozbuildObject(ProcessExecutionMixin):
             args.append('-s')
 
         # Print entering/leaving directory messages. Some consumers look at
-        # these to measure progress. Ideally, we'd do everything with pymake
-        # and use hooks in its API. Unfortunately, it doesn't provide that
-        # feature... yet.
+        # these to measure progress.
         if print_directory:
             args.append('-w')
 
@@ -491,44 +497,45 @@ class MozbuildObject(ProcessExecutionMixin):
 
         return fn(**params)
 
-    def _make_path(self, force_pymake=False):
-        if self._is_windows() and not force_pymake:
-            # Use gnumake if it's available and we can verify it's a working
-            # version.
-            baseconfig = os.path.join(self.topsrcdir, 'config', 'baseconfig.mk')
-            if os.path.exists(baseconfig):
+    def _make_path(self):
+        baseconfig = os.path.join(self.topsrcdir, 'config', 'baseconfig.mk')
+
+        def validate_make(make):
+            if os.path.exists(baseconfig) and os.path.exists(make):
+                cmd = [make, '-f', baseconfig]
+                if self._is_windows():
+                    cmd.append('HOST_OS_ARCH=WINNT')
                 try:
-                    make = which.which('gnumake')
-                    subprocess.check_call([make, '-f', baseconfig, 'HOST_OS_ARCH=WINNT'],
-                        stdout=open(os.devnull, 'wb'), stderr=subprocess.STDOUT)
-                    return [make]
+                    subprocess.check_call(cmd, stdout=open(os.devnull, 'wb'),
+                        stderr=subprocess.STDOUT)
                 except subprocess.CalledProcessError:
-                    pass
-                except which.WhichError:
-                    pass
+                    return False
+                return True
+            return False
 
-            # Use mozmake if it's available.
+        possible_makes = ['gmake', 'make', 'mozmake', 'gnumake']
+
+        if 'MAKE' in os.environ:
+            make = os.environ['MAKE']
+            if os.path.isabs(make):
+                if validate_make(make):
+                    return [make]
+            else:
+                possible_makes.insert(0, make)
+
+        for test in possible_makes:
             try:
-                return [which.which('mozmake')]
-            except which.WhichError:
-                pass
-
-        if self._is_windows() or force_pymake:
-            make_py = os.path.join(self.topsrcdir, 'build', 'pymake',
-                'make.py').replace(os.sep, '/')
-
-            # We might want to consider invoking with the virtualenv's Python
-            # some day. But, there is a chicken-and-egg problem w.r.t. when the
-            # virtualenv is created.
-            return [sys.executable, make_py]
-
-        for test in ['gmake', 'make']:
-            try:
-                return [which.which(test)]
+                make = which.which(test)
             except which.WhichError:
                 continue
+            if validate_make(make):
+                return [make]
 
-        raise Exception('Could not find a suitable make implementation.')
+        if self._is_windows():
+            raise Exception('Could not find a suitable make implementation.\n'
+                'Please use MozillaBuild 1.9 or newer')
+        else:
+            raise Exception('Could not find a suitable make implementation.')
 
     def _run_command_in_srcdir(self, **args):
         return self.run_process(cwd=self.topsrcdir, **args)
@@ -588,6 +595,19 @@ class MachCommandBase(MozbuildObject):
                     e.objdir2))
             sys.exit(1)
 
+        except MozconfigLoadException as e:
+            print('Error loading mozconfig: ' + e.path)
+            print('')
+            print(e.message)
+            if e.output:
+                print('')
+                print('mozconfig output:')
+                print('')
+                for line in e.output:
+                    print(line)
+
+            sys.exit(1)
+
         MozbuildObject.__init__(self, topsrcdir, context.settings,
             context.log_manager, topobjdir=topobjdir)
 
@@ -627,6 +647,19 @@ class MachCommandConditions(object):
         if hasattr(cls, 'substs'):
             return cls.substs.get('MOZ_BUILD_APP') == 'browser'
         return False
+
+    @staticmethod
+    def is_mulet(cls):
+        """Must have a Mulet build."""
+        if hasattr(cls, 'substs'):
+            return cls.substs.get('MOZ_BUILD_APP') == 'b2g/dev'
+        return False
+
+    @staticmethod
+    def is_firefox_or_mulet(cls):
+        """Must have a Firefox or Mulet build."""
+        return (MachCommandConditions.is_firefox(cls) or
+                MachCommandConditions.is_mulet(cls))
 
     @staticmethod
     def is_b2g(cls):
@@ -673,12 +706,12 @@ class PathArgument(object):
         # path relative to that base directory.
         for base_dir in [self.topobjdir, self.topsrcdir]:
             if abspath.startswith(os.path.abspath(base_dir)):
-                return mozpack.path.relpath(abspath, base_dir)
+                return mozpath.relpath(abspath, base_dir)
 
-        return mozpack.path.normsep(self.arg)
+        return mozpath.normsep(self.arg)
 
     def srcdir_path(self):
-        return mozpack.path.join(self.topsrcdir, self.relpath())
+        return mozpath.join(self.topsrcdir, self.relpath())
 
     def objdir_path(self):
-        return mozpack.path.join(self.topobjdir, self.relpath())
+        return mozpath.join(self.topobjdir, self.relpath())

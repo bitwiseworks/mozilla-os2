@@ -8,6 +8,7 @@ Services.scriptloader.loadSubScript("resource://gre/modules/SystemAppProxy.jsm",
 const { SystemAppProxy } = scope;
 
 let frame;
+let customEventTarget;
 
 let index = -1;
 function next() {
@@ -47,6 +48,10 @@ function listener(event) {
   } else if (n == 4) {
     assert.equal(event.type, "mozChromeEvent");
     assert.equal(event.detail.name, "fourth");
+  } else if (n == 5) {
+    assert.equal(event.type, "custom");
+    assert.equal(event.detail.name, "fifth");
+    assert.equal(event.target, customEventTarget);
 
     next(); // call checkEventListening();
   } else {
@@ -79,6 +84,8 @@ let steps = [
     frame = doc.createElement("iframe");
     doc.documentElement.appendChild(frame);
 
+    customEventTarget = frame.contentDocument.body;
+
     // Ensure that events are correctly sent to the frame.
     // `listener` is going to call next()
     frame.contentWindow.addEventListener("mozChromeEvent", listener);
@@ -87,7 +94,7 @@ let steps = [
     // Ensure that listener being registered before the system app is ready
     // are correctly removed from the pending list
     function removedListener() {
-      assert(false, "Listener isn't correctly removed from the pending list");
+      assert.ok(false, "Listener isn't correctly removed from the pending list");
     }
     SystemAppProxy.addEventListener("mozChromeEvent", removedListener);
     SystemAppProxy.removeEventListener("mozChromeEvent", removedListener);
@@ -118,7 +125,8 @@ let steps = [
     // they should be dispatched right away
     SystemAppProxy._sendCustomEvent("custom", { name: "third" });
     SystemAppProxy.dispatchEvent({ name: "fourth" });
-    // Once this 4th event is received, we will run checkEventListening
+    SystemAppProxy._sendCustomEvent("custom", { name: "fifth" }, false, customEventTarget);
+    // Once this 5th event is received, we will run checkEventListening
   },
 
   function checkEventListening() {

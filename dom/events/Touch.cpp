@@ -28,13 +28,12 @@ Touch::Touch(EventTarget* aTarget,
              float aRotationAngle,
              float aForce)
 {
-  SetIsDOMBinding();
   mTarget = aTarget;
   mIdentifier = aIdentifier;
   mPagePoint = CSSIntPoint(aPageX, aPageY);
-  mScreenPoint = nsIntPoint(aScreenX, aScreenY);
+  mScreenPoint = LayoutDeviceIntPoint(aScreenX, aScreenY);
   mClientPoint = CSSIntPoint(aClientX, aClientY);
-  mRefPoint = nsIntPoint(0, 0);
+  mRefPoint = LayoutDeviceIntPoint(0, 0);
   mPointsInitialized = true;
   mRadius.x = aRadiusX;
   mRadius.y = aRadiusY;
@@ -47,15 +46,14 @@ Touch::Touch(EventTarget* aTarget,
 }
 
 Touch::Touch(int32_t aIdentifier,
-             nsIntPoint aPoint,
+             LayoutDeviceIntPoint aPoint,
              nsIntPoint aRadius,
              float aRotationAngle,
              float aForce)
 {
-  SetIsDOMBinding();
   mIdentifier = aIdentifier;
   mPagePoint = CSSIntPoint(0, 0);
-  mScreenPoint = nsIntPoint(0, 0);
+  mScreenPoint = LayoutDeviceIntPoint(0, 0);
   mClientPoint = CSSIntPoint(0, 0);
   mRefPoint = aPoint;
   mPointsInitialized = false;
@@ -79,7 +77,7 @@ Touch::PrefEnabled(JSContext* aCx, JSObject* aGlobal)
   return TouchEvent::PrefEnabled(aCx, aGlobal);
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(Touch, mTarget)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Touch, mTarget)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Touch)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -90,7 +88,7 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(Touch)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Touch)
 
 EventTarget*
-Touch::Target() const
+Touch::GetTarget() const
 {
   nsCOMPtr<nsIContent> content = do_QueryInterface(mTarget);
   if (content && content->ChromeOnlyAccess() &&
@@ -108,13 +106,10 @@ Touch::InitializePoints(nsPresContext* aPresContext, WidgetEvent* aEvent)
     return;
   }
   mClientPoint = Event::GetClientCoords(
-    aPresContext, aEvent, LayoutDeviceIntPoint::FromUntyped(mRefPoint),
-    mClientPoint);
+    aPresContext, aEvent, mRefPoint, mClientPoint);
   mPagePoint = Event::GetPageCoords(
-    aPresContext, aEvent, LayoutDeviceIntPoint::FromUntyped(mRefPoint),
-    mClientPoint);
-  mScreenPoint = Event::GetScreenCoords(aPresContext, aEvent,
-    LayoutDeviceIntPoint::FromUntyped(mRefPoint));
+    aPresContext, aEvent, mRefPoint, mClientPoint);
+  mScreenPoint = Event::GetScreenCoords(aPresContext, aEvent, mRefPoint);
   mPointsInitialized = true;
 }
 

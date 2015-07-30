@@ -101,7 +101,7 @@ private:
   nsRefPtr<nsAppStartup> mService;
 
 public:
-  nsAppExitEvent(nsAppStartup *service) : mService(service) {}
+  explicit nsAppExitEvent(nsAppStartup *service) : mService(service) {}
 
   NS_IMETHOD Run() {
     // Tell the appshell to exit
@@ -143,7 +143,8 @@ nsAppStartup::nsAppStartup() :
   mInterrupted(false),
   mIsSafeModeNecessary(false),
   mStartupCrashTrackingEnded(false),
-  mRestartTouchEnvironment(false)
+  mRestartTouchEnvironment(false),
+  mRestartNotSameProfile(false)
 { }
 
 
@@ -161,12 +162,14 @@ nsAppStartup::Init()
   if (!os)
     return NS_ERROR_FAILURE;
 
+  os->AddObserver(this, "quit-application", true);
   os->AddObserver(this, "quit-application-forced", true);
   os->AddObserver(this, "sessionstore-init-started", true);
   os->AddObserver(this, "sessionstore-windows-restored", true);
   os->AddObserver(this, "profile-change-teardown", true);
   os->AddObserver(this, "xul-window-registered", true);
   os->AddObserver(this, "xul-window-destroyed", true);
+  os->AddObserver(this, "profile-before-change", true);
   os->AddObserver(this, "xpcom-shutdown", true);
 
 #if defined(XP_WIN)
@@ -285,6 +288,8 @@ nsAppStartup::Run(void)
     retval = NS_SUCCESS_RESTART_METRO_APP;
   } else if (mRestart) {
     retval = NS_SUCCESS_RESTART_APP;
+  } else if (mRestartNotSameProfile) {
+    retval = NS_SUCCESS_RESTART_APP_NOT_SAME_PROFILE;
   }
 
   return retval;
@@ -363,6 +368,7 @@ nsAppStartup::Quit(uint32_t aMode)
           windowEnumerator->GetNext(getter_AddRefs(window));
           nsCOMPtr<nsPIDOMWindow> domWindow(do_QueryInterface(window));
           if (domWindow) {
+            MOZ_ASSERT(domWindow->IsOuterWindow());
             if (!domWindow->CanClose())
               return NS_OK;
           }
@@ -383,7 +389,12 @@ nsAppStartup::Quit(uint32_t aMode)
       gRestartMode = (aMode & 0xF0);
     }
 
-    if (mRestart || mRestartTouchEnvironment) {
+    if (!mRestartNotSameProfile) {
+      mRestartNotSameProfile = (aMode & eRestartNotSameProfile) != 0;
+      gRestartMode = (aMode & 0xF0);
+    }
+
+    if (mRestart || mRestartTouchEnvironment || mRestartNotSameProfile) {
       // Mark the next startup as a restart.
       PR_SetEnv("MOZ_APP_RESTART=1");
 
@@ -453,7 +464,7 @@ nsAppStartup::Quit(uint32_t aMode)
       NS_NAMED_LITERAL_STRING(shutdownStr, "shutdown");
       NS_NAMED_LITERAL_STRING(restartStr, "restart");
       obsService->NotifyObservers(nullptr, "quit-application",
-        (mRestart || mRestartTouchEnvironment) ?
+        (mRestart || mRestartTouchEnvironment || mRestartNotSameProfile) ?
          restartStr.get() : shutdownStr.get());
     }
 
@@ -504,8 +515,10 @@ nsAppStartup::CloseAllWindows()
 
     nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(isupports);
     NS_ASSERTION(window, "not an nsPIDOMWindow");
-    if (window)
+    if (window) {
+      MOZ_ASSERT(window->IsOuterWindow());
       window->ForceClose();
+    }
   }
 }
 
@@ -609,7 +622,7 @@ nsAppStartup::CreateChromeWindow(nsIWebBrowserChrome *aParent,
                                  nsIWebBrowserChrome **_retval)
 {
   bool cancel;
-  return CreateChromeWindow2(aParent, aChromeFlags, 0, 0, &cancel, _retval);
+  return CreateChromeWindow2(aParent, aChromeFlags, 0, 0, nullptr, &cancel, _retval);
 }
 
 
@@ -622,6 +635,7 @@ nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome *aParent,
                                   uint32_t aChromeFlags,
                                   uint32_t aContextFlags,
                                   nsIURI *aURI,
+                                  nsITabParent *aOpeningTab,
                                   bool *aCancel,
                                   nsIWebBrowserChrome **_retval)
 {
@@ -641,7 +655,7 @@ nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome *aParent,
     NS_ASSERTION(xulParent, "window created using non-XUL parent. that's unexpected, but may work.");
 
     if (xulParent)
-      xulParent->CreateNewWindow(aChromeFlags, getter_AddRefs(newWindow));
+      xulParent->CreateNewWindow(aChromeFlags, aOpeningTab, getter_AddRefs(newWindow));
     // And if it fails, don't try again without a parent. It could fail
     // intentionally (bug 115969).
   } else { // try using basic methods:
@@ -654,10 +668,11 @@ nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome *aParent,
     nsCOMPtr<nsIAppShellService> appShell(do_GetService(NS_APPSHELLSERVICE_CONTRACTID));
     if (!appShell)
       return NS_ERROR_FAILURE;
-    
+
     appShell->CreateTopLevelWindow(0, 0, aChromeFlags,
                                    nsIAppShellService::SIZE_TO_CONTENT,
                                    nsIAppShellService::SIZE_TO_CONTENT,
+                                   aOpeningTab,
                                    getter_AddRefs(newWindow));
   }
 
@@ -716,6 +731,10 @@ nsAppStartup::Observe(nsISupports *aSubject,
       mXPCOMShutdownProbe->Trigger();
     }
 #endif // defined(XP_WIN)
+  } else if (!strcmp(aTopic, "quit-application")) {
+    StartupTimeline::Record(StartupTimeline::QUIT_APPLICATION);
+  } else if (!strcmp(aTopic, "profile-before-change")) {
+    StartupTimeline::Record(StartupTimeline::PROFILE_BEFORE_CHANGE);
   } else {
     NS_ERROR("Unexpected observer topic.");
   }
@@ -726,7 +745,7 @@ nsAppStartup::Observe(nsISupports *aSubject,
 NS_IMETHODIMP
 nsAppStartup::GetStartupInfo(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval)
 {
-  JS::Rooted<JSObject*> obj(aCx, JS_NewObject(aCx, nullptr, JS::NullPtr(), JS::NullPtr()));
+  JS::Rooted<JSObject*> obj(aCx, JS_NewPlainObject(aCx));
 
   aRetval.setObject(*obj);
 

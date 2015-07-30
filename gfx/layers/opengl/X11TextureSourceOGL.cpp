@@ -6,12 +6,12 @@
 #ifdef GL_PROVIDER_GLX
 
 #include "X11TextureSourceOGL.h"
-#include "mozilla/layers/CompositorOGL.h"
 #include "gfxXlibSurface.h"
 #include "gfx2DGlue.h"
 
-using namespace mozilla;
-using namespace mozilla::layers;
+namespace mozilla {
+namespace layers {
+
 using namespace mozilla::gfx;
 
 X11TextureSourceOGL::X11TextureSourceOGL(CompositorOGL* aCompositor, gfxXlibSurface* aSurface)
@@ -99,6 +99,9 @@ X11TextureSourceOGL::ContentTypeToSurfaceFormat(gfxContentType aType)
     default:
       return SurfaceFormat::UNKNOWN;
   }
+}
+
+}
 }
 
 #endif

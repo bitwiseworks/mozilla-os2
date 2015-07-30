@@ -1,4 +1,5 @@
-// -*- Mode: javascript; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
+// vim: set ts=2 sw=2 sts=2 et tw=80: */
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -11,30 +12,53 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyGetter(this, "GetClipboardSearchString",
+  () => Cu.import("resource://gre/modules/Finder.jsm", {}).GetClipboardSearchString
+);
+
 function RemoteFinder(browser) {
   this._browser = browser;
-  this._listeners = [];
+  this._listeners = new Set();
   this._searchString = null;
 
-  this._browser.messageManager.addMessageListener("Finder:Result", this);
-  this._browser.messageManager.sendAsyncMessage("Finder:Initialize");
+  let mm = this._browser.messageManager;
+  mm.addMessageListener("Finder:Result", this);
+  mm.addMessageListener("Finder:MatchesResult", this);
+  mm.addMessageListener("Finder:CurrentSelectionResult",this);
+  mm.sendAsyncMessage("Finder:Initialize");
 }
 
 RemoteFinder.prototype = {
   addResultListener: function (aListener) {
-    if (this._listeners.indexOf(aListener) === -1)
-      this._listeners.push(aListener);
+    this._listeners.add(aListener);
   },
 
   removeResultListener: function (aListener) {
-    this._listeners = this._listeners.filter(l => l != aListener);
+    this._listeners.delete(aListener);
   },
 
   receiveMessage: function (aMessage) {
-    this._searchString = aMessage.data.searchString;
+    // Only Finder:Result messages have the searchString field.
+    let callback;
+    let params;
+    switch (aMessage.name) {
+      case "Finder:Result":
+        this._searchString = aMessage.data.searchString;
+        callback = "onFindResult";
+        params = [ aMessage.data ];
+        break;
+      case "Finder:MatchesResult":
+        callback = "onMatchesCountResult";
+        params = [ aMessage.data ];
+        break;
+      case "Finder:CurrentSelectionResult":
+        callback = "onCurrentSelection";
+        params = [ aMessage.data.selection, aMessage.data.initial ];
+        break;
+    }
 
     for (let l of this._listeners) {
-      l.onFindResult(aMessage.data);
+      l[callback].apply(l, params);
     }
   },
 
@@ -42,9 +66,21 @@ RemoteFinder.prototype = {
     return this._searchString;
   },
 
+  get clipboardSearchString() {
+    return GetClipboardSearchString(this._browser.loadContext);
+  },
+
+  setSearchStringToSelection() {
+    this._browser.messageManager.sendAsyncMessage("Finder:SetSearchStringToSelection", {});
+  },
+
   set caseSensitive(aSensitive) {
     this._browser.messageManager.sendAsyncMessage("Finder:CaseSensitive",
                                                   { caseSensitive: aSensitive });
+  },
+
+  getInitialSelection: function() {
+    this._browser.messageManager.sendAsyncMessage("Finder:GetInitialSelection", {});
   },
 
   fastFind: function (aSearchString, aLinksOnly) {
@@ -74,6 +110,17 @@ RemoteFinder.prototype = {
   },
 
   focusContent: function () {
+    // Allow Finder listeners to cancel focusing the content.
+    for (let l of this._listeners) {
+      try {
+        if ("shouldFocusContent" in l &&
+            !l.shouldFocusContent())
+          return;
+      } catch (ex) {
+        Cu.reportError(ex);
+      }
+    }
+
     this._browser.messageManager.sendAsyncMessage("Finder:FocusContent");
   },
 
@@ -81,6 +128,13 @@ RemoteFinder.prototype = {
     this._browser.messageManager.sendAsyncMessage("Finder:KeyPress",
                                                   { keyCode: aEvent.keyCode,
                                                     shiftKey: aEvent.shiftKey });
+  },
+
+  requestMatchesCount: function (aSearchString, aMatchLimit, aLinksOnly) {
+    this._browser.messageManager.sendAsyncMessage("Finder:MatchesCount",
+                                                  { searchString: aSearchString,
+                                                    matchLimit: aMatchLimit,
+                                                    linksOnly: aLinksOnly });
   }
 }
 
@@ -100,21 +154,24 @@ RemoteFinderListener.prototype = {
     "Finder:CaseSensitive",
     "Finder:FastFind",
     "Finder:FindAgain",
+    "Finder:SetSearchStringToSelection",
+    "Finder:GetInitialSelection",
     "Finder:Highlight",
     "Finder:EnableSelection",
     "Finder:RemoveSelection",
     "Finder:FocusContent",
-    "Finder:KeyPress"
+    "Finder:KeyPress",
+    "Finder:MatchesCount"
   ],
 
   onFindResult: function (aData) {
     this._global.sendAsyncMessage("Finder:Result", aData);
   },
 
-  //XXXmikedeboer-20131016: implement |shouldFocusContent| here to mitigate
-  //                        issues like bug 921338 and bug 921308.
-  shouldFocusContent: function () {
-    return true;
+  // When the child receives messages with results of requestMatchesCount,
+  // it passes them forward to the parent.
+  onMatchesCountResult: function (aData) {
+    this._global.sendAsyncMessage("Finder:MatchesResult", aData);
   },
 
   receiveMessage: function (aMessage) {
@@ -124,6 +181,22 @@ RemoteFinderListener.prototype = {
       case "Finder:CaseSensitive":
         this._finder.caseSensitive = data.caseSensitive;
         break;
+
+      case "Finder:SetSearchStringToSelection": {
+        let selection = this._finder.setSearchStringToSelection();
+        this._global.sendAsyncMessage("Finder:CurrentSelectionResult",
+                                      { selection: selection,
+                                        initial: false });
+        break;
+      }
+
+      case "Finder:GetInitialSelection": {
+        let selection = this._finder.getActiveSelectionText();
+        this._global.sendAsyncMessage("Finder:CurrentSelectionResult",
+                                      { selection: selection,
+                                        initial: true });
+        break;
+      }
 
       case "Finder:FastFind":
         this._finder.fastFind(data.searchString, data.linksOnly);
@@ -147,6 +220,10 @@ RemoteFinderListener.prototype = {
 
       case "Finder:KeyPress":
         this._finder.keyPress(data);
+        break;
+
+      case "Finder:MatchesCount":
+        this._finder.requestMatchesCount(data.searchString, data.matchLimit, data.linksOnly);
         break;
     }
   }

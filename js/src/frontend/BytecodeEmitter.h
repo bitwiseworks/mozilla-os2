@@ -19,6 +19,9 @@
 #include "frontend/SourceNotes.h"
 
 namespace js {
+
+class StaticEvalObject;
+
 namespace frontend {
 
 class FullParseHandler;
@@ -31,8 +34,8 @@ class TokenStream;
 class CGConstList {
     Vector<Value> list;
   public:
-    CGConstList(ExclusiveContext* cx) : list(cx) {}
-    bool append(Value v) { JS_ASSERT_IF(v.isString(), v.toString()->isAtom()); return list.append(v); }
+    explicit CGConstList(ExclusiveContext* cx) : list(cx) {}
+    bool append(Value v) { MOZ_ASSERT_IF(v.isString(), v.toString()->isAtom()); return list.append(v); }
     size_t length() const { return list.length(); }
     void finish(ConstArray* array);
 };
@@ -51,7 +54,7 @@ struct CGObjectList {
 
 struct CGTryNoteList {
     Vector<JSTryNote> list;
-    CGTryNoteList(ExclusiveContext* cx) : list(cx) {}
+    explicit CGTryNoteList(ExclusiveContext* cx) : list(cx) {}
 
     bool append(JSTryNoteKind kind, uint32_t stackDepth, size_t start, size_t end);
     size_t length() const { return list.length(); }
@@ -60,13 +63,22 @@ struct CGTryNoteList {
 
 struct CGBlockScopeList {
     Vector<BlockScopeNote> list;
-    CGBlockScopeList(ExclusiveContext* cx) : list(cx) {}
+    explicit CGBlockScopeList(ExclusiveContext* cx) : list(cx) {}
 
     bool append(uint32_t scopeObject, uint32_t offset, uint32_t parent);
     uint32_t findEnclosingScope(uint32_t index);
     void recordEnd(uint32_t index, uint32_t offset);
     size_t length() const { return list.length(); }
     void finish(BlockScopeArray* array);
+};
+
+struct CGYieldOffsetList {
+    Vector<uint32_t> list;
+    explicit CGYieldOffsetList(ExclusiveContext* cx) : list(cx) {}
+
+    bool append(uint32_t offset) { return list.append(offset); }
+    size_t length() const { return list.length(); }
+    void finish(YieldOffsetArray& array, uint32_t prologLength);
 };
 
 struct StmtInfoBCE;
@@ -86,6 +98,9 @@ struct BytecodeEmitter
 
     Rooted<JSScript*> script;       /* the JSScript we're ultimately producing */
 
+    Rooted<LazyScript*> lazyScript; /* the lazy script if mode is LazyFunction,
+                                        nullptr otherwise. */
+
     struct EmitSection {
         BytecodeVector code;        /* bytecode */
         SrcNotesVector notes;       /* source notes, see below */
@@ -104,6 +119,8 @@ struct BytecodeEmitter
     Parser<FullParseHandler>* const parser;
 
     HandleScript    evalCaller;     /* scripted caller info for eval and dbgapi */
+    Handle<StaticEvalObject*> evalStaticScope;
+                                   /* compile time scope for eval; does not imply stmt stack */
 
     StmtInfoBCE*    topStmt;       /* top of statement info stack */
     StmtInfoBCE*    topScopeStmt;  /* top lexical scope statement */
@@ -112,6 +129,13 @@ struct BytecodeEmitter
 
     OwnedAtomIndexMapPtr atomIndices; /* literals indexed for mapping */
     unsigned        firstLine;      /* first line, for JSScript::initFromEmitter */
+
+    /*
+     * Only unaliased locals have stack slots assigned to them. This vector is
+     * used to map a local index (which includes unaliased and aliased locals)
+     * to its stack slot index.
+     */
+    Vector<uint32_t, 16> localsToFrameSlots_;
 
     int32_t         stackDepth;     /* current stack depth in script frame */
     uint32_t        maxStackDepth;  /* maximum stack depth so far */
@@ -128,16 +152,22 @@ struct BytecodeEmitter
     CGTryNoteList   tryNoteList;    /* list of emitted try notes */
     CGBlockScopeList blockScopeList;/* list of emitted block scope notes */
 
+    /*
+     * For each yield op, map the yield index (stored as bytecode operand) to
+     * the offset of the next op.
+     */
+    CGYieldOffsetList yieldOffsetList;
+
     uint16_t        typesetCount;   /* Number of JOF_TYPESET opcodes generated */
 
     bool            hasSingletons:1;    /* script contains singleton initializer JSOP_OBJECT */
+
+    bool            hasTryFinally:1;    /* script contains finally block */
 
     bool            emittingForInit:1;  /* true while emitting init expr of for; exclude 'in' */
 
     bool            emittingRunOnceLambda:1; /* true while emitting a lambda which is only
                                                 expected to run once. */
-    bool            lazyRunOnceLambda:1; /* true while lazily emitting a script for
-                                          * a lambda which is only expected to run once. */
 
     bool isRunOnceLambda();
 
@@ -151,8 +181,8 @@ struct BytecodeEmitter
         Normal,
 
         /*
-         * Emit JSOP_GETINTRINSIC instead of JSOP_NAME and assert that
-         * JSOP_NAME and JSOP_*GNAME don't ever get emitted. See the comment
+         * Emit JSOP_GETINTRINSIC instead of JSOP_GETNAME and assert that
+         * JSOP_GETNAME and JSOP_*GNAME don't ever get emitted. See the comment
          * for the field |selfHostingMode| in Parser.h for details.
          */
         SelfHosting,
@@ -173,9 +203,12 @@ struct BytecodeEmitter
      * destruction.
      */
     BytecodeEmitter(BytecodeEmitter* parent, Parser<FullParseHandler>* parser, SharedContext* sc,
-                    HandleScript script, bool insideEval, HandleScript evalCaller,
-                    bool hasGlobalScope, uint32_t lineNum, EmitterMode emitterMode = Normal);
+                    HandleScript script, Handle<LazyScript*> lazyScript,
+                    bool insideEval, HandleScript evalCaller,
+                    Handle<StaticEvalObject*> evalStaticScope, bool hasGlobalScope,
+                    uint32_t lineNum, EmitterMode emitterMode = Normal);
     bool init();
+    bool updateLocalsToFrameSlots();
 
     bool isAliasedName(ParseNode* pn);
 

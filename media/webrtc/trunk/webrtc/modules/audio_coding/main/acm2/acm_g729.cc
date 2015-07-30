@@ -22,6 +22,8 @@
 
 namespace webrtc {
 
+namespace acm2 {
+
 #ifndef WEBRTC_CODEC_G729
 
 ACMG729::ACMG729(int16_t /* codec_id */) : encoder_inst_ptr_(NULL) {}
@@ -54,8 +56,6 @@ ACMGenericCodec* ACMG729::CreateInstance(void) { return NULL; }
 int16_t ACMG729::InternalCreateEncoder() { return -1; }
 
 void ACMG729::DestructEncoderSafe() { return; }
-
-void ACMG729::InternalDestructEncoderInst(void* /* ptr_inst */) { return; }
 
 #else  //===================== Actual Implementation =======================
 ACMG729::ACMG729(int16_t codec_id)
@@ -243,13 +243,8 @@ void ACMG729::DestructEncoderSafe() {
   }
 }
 
-void ACMG729::InternalDestructEncoderInst(void* ptr_inst) {
-  if (ptr_inst != NULL) {
-    WebRtcG729_FreeEnc(static_cast<G729_encinst_t_*>(ptr_inst));
-  }
-  return;
-}
-
 #endif
+
+}  // namespace acm2
 
 }  // namespace webrtc

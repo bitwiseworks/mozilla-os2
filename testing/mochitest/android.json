@@ -1,6 +1,6 @@
 {
 "runtests": {},
 "excludetests": {
-  "robocop": "TIMED_OUT"
+  "dom/canvas/test/webgl-conformance": "bug 865443 - separate suite -- mochitest-gl"
   }
 }

@@ -20,6 +20,8 @@ if CONFIG['OS_ARCH'] == 'WINNT':
 
 XPIDL_MODULE = 'xulapp'
 
+EXPORTS += ['nsAppRunner.h']
+
 if CONFIG['MOZ_INSTRUMENT_EVENT_LOOP']:
     EXPORTS += ['EventTracer.h']
 
@@ -54,6 +56,11 @@ elif CONFIG['MOZ_ENABLE_GTK']:
 else:
     UNIFIED_SOURCES += [
         'nsNativeAppSupportDefault.cpp',
+    ]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gtk3':
+    UNIFIED_SOURCES += [
+        'nsGDKErrorHandler.cpp',
     ]
 
 if CONFIG['MOZ_X11']:
@@ -100,8 +107,6 @@ if CONFIG['MOZ_UPDATER']:
 
 MSVC_ENABLE_PGO = True
 
-LIBRARY_NAME = 'xulapp_s'
-
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
@@ -125,7 +130,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
     DEFINES['ANDROID_PACKAGE_NAME'] = '"%s"' % CONFIG['ANDROID_PACKAGE_NAME']
 
 if CONFIG['TARGET_XPCOM_ABI']:
-    DEFINES['TARGET_XPCOM_ABI'] = '"%s"' % CONFIG['TARGET_XPCOM_ABI']
     DEFINES['TARGET_OS_ABI'] = '"%s_%s"' % (CONFIG['OS_TARGET'],
                                             CONFIG['TARGET_XPCOM_ABI'])
 
@@ -153,8 +157,25 @@ LOCAL_INCLUDES += [
     '/xpcom/build',
 ]
 
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    LOCAL_INCLUDES += [
+        '/widget',
+        '/widget/cocoa',
+    ]
+
 if CONFIG['MOZ_ENABLE_XREMOTE']:
     LOCAL_INCLUDES += [
         '/widget/xremoteclient',
     ]
 
+if CONFIG['MOZ_B2G_LOADER']:
+    DEFINES['OMNIJAR_NAME'] = CONFIG['OMNIJAR_NAME']
+
+CXXFLAGS += CONFIG['TK_CFLAGS']
+CXXFLAGS += CONFIG['MOZ_DBUS_CFLAGS']
+CXXFLAGS += CONFIG['MOZ_DBUS_GLIB_CFLAGS']
+
+if CONFIG['MOZ_WIDGET_GTK']:
+    CXXFLAGS += CONFIG['MOZ_PANGO_CFLAGS']
+
+FAIL_ON_WARNINGS = True

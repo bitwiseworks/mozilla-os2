@@ -21,7 +21,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "notificationStorage",
                                    "@mozilla.org/notificationStorage;1",
                                    "nsINotificationStorage");
 
-
 XPCOMUtils.defineLazyGetter(this, "cpmm", function() {
   return Cc["@mozilla.org/childprocessmessagemanager;1"]
            .getService(Ci.nsIMessageSender);
@@ -35,46 +34,70 @@ function debug(str) {
 // Alerts Service
 // -----------------------------------------------------------------------
 
+const kNotificationSystemMessageName = "notification";
+
+const kMessageAppNotificationSend    = "app-notification-send";
+const kMessageAppNotificationReturn  = "app-notification-return";
+const kMessageAlertNotificationSend  = "alert-notification-send";
+const kMessageAlertNotificationClose = "alert-notification-close";
+
+const kTopicAlertShow          = "alertshow";
+const kTopicAlertFinished      = "alertfinished";
+const kTopicAlertClickCallback = "alertclickcallback";
+
 function AlertsService() {
-  cpmm.addMessageListener("app-notification-return", this);
+  Services.obs.addObserver(this, "xpcom-shutdown", false);
+  cpmm.addMessageListener(kMessageAppNotificationReturn, this);
 }
 
 AlertsService.prototype = {
   classID: Components.ID("{fe33c107-82a4-41d6-8c64-5353267e04c9}"),
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIAlertsService,
-                                         Ci.nsIAppNotificationService]),
+                                         Ci.nsIAppNotificationService,
+                                         Ci.nsIObserver]),
+
+  observe: function(aSubject, aTopic, aData) {
+    switch (aTopic) {
+      case "xpcom-shutdown":
+        Services.obs.removeObserver(this, "xpcom-shutdown");
+        cpmm.removeMessageListener(kMessageAppNotificationReturn, this);
+        break;
+    }
+  },
 
   // nsIAlertsService
-  showAlertNotification: function showAlertNotification(aImageUrl,
-                                                        aTitle,
-                                                        aText,
-                                                        aTextClickable,
-                                                        aCookie,
-                                                        aAlertListener,
-                                                        aName,
-                                                        aBidi,
-                                                        aLang) {
-    let browser = Services.wm.getMostRecentWindow("navigator:browser");
-    browser.AlertsHelper.showAlertNotification(aImageUrl, aTitle, aText,
-                                               aTextClickable, aCookie,
-                                               aAlertListener, aName, aBidi,
-                                               aLang);
+  showAlertNotification: function(aImageUrl, aTitle, aText, aTextClickable,
+                                  aCookie, aAlertListener, aName, aBidi,
+                                  aLang, aDataStr, aPrincipal,
+                                  aInPrivateBrowsing) {
+    cpmm.sendAsyncMessage(kMessageAlertNotificationSend, {
+      imageURL: aImageUrl,
+      title: aTitle,
+      text: aText,
+      clickable: aTextClickable,
+      cookie: aCookie,
+      listener: aAlertListener,
+      id: aName,
+      dir: aBidi,
+      lang: aLang,
+      dataStr: aDataStr,
+      inPrivateBrowsing: aInPrivateBrowsing
+    });
   },
 
   closeAlert: function(aName) {
-    let browser = Services.wm.getMostRecentWindow("navigator:browser");
-    browser.AlertsHelper.closeAlert(aName);
+    cpmm.sendAsyncMessage(kMessageAlertNotificationClose, {
+      name: aName
+    });
   },
 
   // nsIAppNotificationService
-  showAppNotification: function showAppNotification(aImageURL,
-                                                    aTitle,
-                                                    aText,
-                                                    aAlertListener,
-                                                    aDetails) {
+  showAppNotification: function(aImageURL, aTitle, aText, aAlertListener,
+                                aDetails) {
     let uid = (aDetails.id == "") ?
           "app-notif-" + uuidGenerator.generateUUID() : aDetails.id;
 
+    let dataObj = this.deserializeStructuredClone(aDetails.data);
     this._listeners[uid] = {
       observer: aAlertListener,
       title: aTitle,
@@ -85,10 +108,12 @@ AlertsService.prototype = {
       id: aDetails.id || undefined,
       dbId: aDetails.dbId || undefined,
       dir: aDetails.dir || undefined,
-      tag: aDetails.tag || undefined
+      tag: aDetails.tag || undefined,
+      timestamp: aDetails.timestamp || undefined,
+      dataObj: dataObj || undefined
     };
 
-    cpmm.sendAsyncMessage("app-notification-send", {
+    cpmm.sendAsyncMessage(kMessageAppNotificationSend, {
       imageURL: aImageURL,
       title: aTitle,
       text: aText,
@@ -100,10 +125,10 @@ AlertsService.prototype = {
   // AlertsService.js custom implementation
   _listeners: [],
 
-  receiveMessage: function receiveMessage(aMessage) {
+  receiveMessage: function(aMessage) {
     let data = aMessage.data;
     let listener = this._listeners[data.uid];
-    if (aMessage.name !== "app-notification-return" || !listener) {
+    if (aMessage.name !== kMessageAppNotificationReturn || !listener) {
       return;
     }
 
@@ -116,28 +141,61 @@ AlertsService.prototype = {
       // notification via a system message containing the title/text/icon of
       // the notification so the app get a change to react.
       if (data.target) {
-        gSystemMessenger.sendMessage("notification", {
-            title: listener.title,
-            body: listener.text,
-            imageURL: listener.imageURL,
-            lang: listener.lang,
-            dir: listener.dir,
-            id: listener.id,
-            tag: listener.tag,
-            dbId: listener.dbId
-          },
-          Services.io.newURI(data.target, null, null),
-          Services.io.newURI(listener.manifestURL, null, null));
+        if (topic !== kTopicAlertShow) {
+          // excluding the 'show' event: there is no reason a unlaunched app
+          // would want to be notified that a notification is shown. This
+          // happens when a notification is still displayed at reboot time.
+          gSystemMessenger.sendMessage(kNotificationSystemMessageName, {
+              clicked: (topic === kTopicAlertClickCallback),
+              title: listener.title,
+              body: listener.text,
+              imageURL: listener.imageURL,
+              lang: listener.lang,
+              dir: listener.dir,
+              id: listener.id,
+              tag: listener.tag,
+              dbId: listener.dbId,
+              timestamp: listener.timestamp,
+              data: listener.dataObj || undefined,
+            },
+            Services.io.newURI(data.target, null, null),
+            Services.io.newURI(listener.manifestURL, null, null)
+          );
+        }
+      }
+      if (topic === kTopicAlertFinished && listener.dbId) {
+        notificationStorage.delete(listener.manifestURL, listener.dbId);
       }
     }
 
     // we're done with this notification
-    if (topic === "alertfinished") {
-      if (listener.dbId) {
-        notificationStorage.delete(listener.manifestURL, listener.dbId);
-      }
+    if (topic === kTopicAlertFinished) {
       delete this._listeners[data.uid];
     }
+  },
+
+  deserializeStructuredClone: function(dataString) {
+    if (!dataString) {
+      return null;
+    }
+    let scContainer = Cc["@mozilla.org/docshell/structured-clone-container;1"].
+      createInstance(Ci.nsIStructuredCloneContainer);
+
+    // The maximum supported structured-clone serialization format version
+    // as defined in "js/public/StructuredClone.h"
+    let JS_STRUCTURED_CLONE_VERSION = 4;
+    scContainer.initFromBase64(dataString, JS_STRUCTURED_CLONE_VERSION);
+    let dataObj = scContainer.deserializeToVariant();
+
+    // We have to check whether dataObj contains DOM objects (supported by
+    // nsIStructuredCloneContainer, but not by Cu.cloneInto), e.g. ImageData.
+    // After the structured clone callback systems will be unified, we'll not
+    // have to perform this check anymore.
+    try {
+      let data = Cu.cloneInto(dataObj, {});
+    } catch(e) { dataObj = null; }
+
+    return dataObj;
   }
 };
 

@@ -6,9 +6,12 @@ let outOfProcess = __marionetteParams[0]
 let mochitestUrl = __marionetteParams[1]
 let onDevice = __marionetteParams[2]
 let wifiSettings = __marionetteParams[3]
+let chrome = __marionetteParams[4]
 let prefs = Components.classes["@mozilla.org/preferences-service;1"].
                             getService(Components.interfaces.nsIPrefBranch)
 let settings = window.navigator.mozSettings;
+let cm = Components.classes["@mozilla.org/categorymanager;1"].
+                    getService(Components.interfaces.nsICategoryManager);
 
 if (wifiSettings)
   wifiSettings = JSON.parse(wifiSettings);
@@ -20,9 +23,15 @@ const CHILD_LOGGER_SCRIPT = "chrome://specialpowers/content/MozillaLogger.js";
 let homescreen = document.getElementById('systemapp');
 let container = homescreen.contentWindow.document.getElementById('test-container');
 
+// Disable udpate timers which cause failure in b2g permisson prompt tests.
+if (cm) {
+  cm.deleteCategoryEntry("update-timer", "WebappsUpdateTimer", false);
+  cm.deleteCategoryEntry("update-timer", "nsUpdateService", false);
+}
+
 function openWindow(aEvent) {
   var popupIframe = aEvent.detail.frameElement;
-  popupIframe.setAttribute('style', 'position: absolute; left: 0; top: 0px; background: white;');
+  popupIframe.style = 'position: absolute; left: 0; top: 0px; background: white;';
 
   // This is to size the iframe to what is requested in the window.open call,
   // e.g. window.open("", "", "width=600,height=600");
@@ -51,7 +60,7 @@ function openWindow(aEvent) {
     mm.loadFrameScript(CHILD_LOGGER_SCRIPT, true);
     mm.loadFrameScript(CHILD_SCRIPT_API, true);
     mm.loadFrameScript(CHILD_SCRIPT, true);
-    mm.loadFrameScript('data:,attachSpecialPowersToWindow%28content%29%3B', true);
+    mm.loadFrameScript('data:,attachSpecialPowersToWindow(content);', true);
   });
 
   container.parentNode.appendChild(popupIframe);
@@ -67,24 +76,22 @@ if (outOfProcess) {
   let mm = container.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader.messageManager;
   specialPowersObserver.init(mm);
 
-  mm.addMessageListener("SPPrefService", specialPowersObserver);
-  mm.addMessageListener("SPProcessCrashService", specialPowersObserver);
-  mm.addMessageListener("SPPingService", specialPowersObserver);
-  mm.addMessageListener("SpecialPowers.Quit", specialPowersObserver);
-  mm.addMessageListener("SpecialPowers.Focus", specialPowersObserver);
-  mm.addMessageListener("SPPermissionManager", specialPowersObserver);
-  mm.addMessageListener("SPLoadChromeScript", specialPowersObserver);
-  mm.addMessageListener("SPChromeScriptMessage", specialPowersObserver);
-
-  mm.loadFrameScript(CHILD_LOGGER_SCRIPT, true);
-  mm.loadFrameScript(CHILD_SCRIPT_API, true);
-  mm.loadFrameScript(CHILD_SCRIPT, true);
   //Workaround for bug 848411, once that bug is fixed, the following line can be removed
-  mm.loadFrameScript('data:,addEventListener%28%22DOMWindowCreated%22%2C%20function%28e%29%20%7B%0A%20%20removeEventListener%28%22DOMWindowCreated%22%2C%20arguments.callee%2C%20false%29%3B%0A%20%20var%20window%20%3D%20e.target.defaultView%3B%0A%20%20window.wrappedJSObject.SpecialPowers.addPermission%28%22allowXULXBL%22%2C%20true%2C%20window.document%29%3B%0A%7D%0A%29%3B', true);
-
-  specialPowersObserver._isFrameScriptLoaded = true;
+  function contentScript() {
+    addEventListener("DOMWindowCreated", function listener(e) {
+      removeEventListener("DOMWindowCreated", listener, false);
+      var window = e.target.defaultView;
+      window.wrappedJSObject.SpecialPowers.addPermission("allowXULXBL", true, window.document);
+    });
+  }
+  mm.loadFrameScript("data:,(" + encodeURI(contentScript.toSource()) + ")();", true);
 }
 
+if (chrome) {
+  let loader = Cc["@mozilla.org/moz/jssubscript-loader;1"].getService(Ci.mozIJSSubScriptLoader);
+  loader.loadSubScript("chrome://mochikit/content/browser-test.js");
+  b2gStart();
+}
 
 if (onDevice) {
   var cpuLock = Cc["@mozilla.org/power/powermanagerservice;1"]
@@ -106,7 +113,7 @@ if (onDevice) {
             manager.forget(network);
           }
         }
-        manager.associate(wifiSettings);
+        manager.associate(new window.MozWifiNetwork(wifiSettings));
       };
     }
   };
@@ -132,5 +139,7 @@ if (onDevice) {
     };
   }
 } else {
-  container.src = mochitestUrl;
+  if (!chrome) {
+    container.src = mochitestUrl;
+  }
 }

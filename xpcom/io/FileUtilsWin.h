@@ -15,6 +15,40 @@
 namespace mozilla {
 
 inline bool
+EnsureLongPath(nsAString& aDosPath)
+{
+  uint32_t aDosPathOriginalLen = aDosPath.Length();
+  auto inputPath = PromiseFlatString(aDosPath);
+  // Try to get the long path, or else get the required length of the long path
+  DWORD longPathLen = GetLongPathNameW(inputPath.get(),
+                                       reinterpret_cast<wchar_t*>(aDosPath.BeginWriting()),
+                                       aDosPathOriginalLen);
+  if (longPathLen == 0) {
+    return false;
+  }
+  aDosPath.SetLength(longPathLen);
+  if (longPathLen <= aDosPathOriginalLen) {
+    // Our string happened to be long enough for the first call to succeed.
+    return true;
+  }
+  // Now we have a large enough buffer, get the actual string
+  longPathLen = GetLongPathNameW(inputPath.get(),
+                                 reinterpret_cast<wchar_t*>(aDosPath.BeginWriting()), aDosPath.Length());
+  if (longPathLen == 0) {
+    return false;
+  }
+  // This success check should always be less-than because longPathLen excludes
+  // the null terminator on success, but includes it in the first call that
+  // returned the required size.
+  if (longPathLen < aDosPath.Length()) {
+    aDosPath.SetLength(longPathLen);
+    return true;
+  }
+  // We shouldn't reach this, but if we do then it's a failure!
+  return false;
+}
+
+inline bool
 NtPathToDosPath(const nsAString& aNtPath, nsAString& aDosPath)
 {
   aDosPath.Truncate();
@@ -34,8 +68,9 @@ NtPathToDosPath(const nsAString& aNtPath, nsAString& aDosPath)
   }
   nsAutoString logicalDrives;
   DWORD len = 0;
-  while(true) {
-    len = GetLogicalDriveStringsW(len, reinterpret_cast<wchar_t*>(logicalDrives.BeginWriting()));
+  while (true) {
+    len = GetLogicalDriveStringsW(
+      len, reinterpret_cast<wchar_t*>(logicalDrives.BeginWriting()));
     if (!len) {
       return false;
     } else if (len > logicalDrives.Length()) {
@@ -56,7 +91,8 @@ NtPathToDosPath(const nsAString& aNtPath, nsAString& aDosPath)
     DWORD targetPathLen = 0;
     SetLastError(ERROR_SUCCESS);
     while (true) {
-      targetPathLen = QueryDosDeviceW(driveTemplate, reinterpret_cast<wchar_t*>(targetPath.BeginWriting()),
+      targetPathLen = QueryDosDeviceW(driveTemplate,
+                                      reinterpret_cast<wchar_t*>(targetPath.BeginWriting()),
                                       targetPath.Length());
       if (targetPathLen || GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
         break;
@@ -74,21 +110,28 @@ NtPathToDosPath(const nsAString& aNtPath, nsAString& aDosPath)
       if (found) {
         aDosPath = driveTemplate;
         aDosPath += pathComponent;
-        return true;
+        return EnsureLongPath(aDosPath);
       }
     }
     // Advance to the next NUL character in logicalDrives
     while (*cur++);
   } while (cur != end);
-  // Code for handling UNC paths would go here, if eventually required.
-#if defined(DEBUG)
+  // Try to handle UNC paths. NB: This must happen after we've checked drive
+  // mappings in case a UNC path is mapped to a drive!
+  NS_NAMED_LITERAL_STRING(uncPrefix, "\\\\");
   NS_NAMED_LITERAL_STRING(deviceMupPrefix, "\\Device\\Mup\\");
-  uint32_t deviceMupPrefixLen = deviceMupPrefix.Length();
-  if (ntPathLen >= deviceMupPrefixLen &&
-      Substring(aNtPath, 0, deviceMupPrefixLen).Equals(deviceMupPrefix)) {
-    NS_WARNING("UNC paths not yet supported in NtPathToDosPath");
+  if (StringBeginsWith(aNtPath, deviceMupPrefix)) {
+    aDosPath = uncPrefix;
+    aDosPath += Substring(aNtPath, deviceMupPrefix.Length());
+    return true;
   }
-#endif // defined(DEBUG)
+  NS_NAMED_LITERAL_STRING(deviceLanmanRedirectorPrefix,
+                          "\\Device\\LanmanRedirector\\");
+  if (StringBeginsWith(aNtPath, deviceLanmanRedirectorPrefix)) {
+    aDosPath = uncPrefix;
+    aDosPath += Substring(aNtPath, deviceLanmanRedirectorPrefix.Length());
+    return true;
+  }
   return false;
 }
 

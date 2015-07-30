@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ts=2 et sw=2 tw=80 filetype=javascript: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -25,6 +25,8 @@ const Cr = Components.results;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
+                                  "resource://gre/modules/AsyncShutdown.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "DeferredTask",
                                   "resource://gre/modules/DeferredTask.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
@@ -88,23 +90,11 @@ const Timer = Components.Constructor("@mozilla.org/timer;1", "nsITimer",
 
 /**
  * Indicates the delay between a change to the downloads data and the related
- * save operation.  This value is the result of a delicate trade-off, assuming
- * the host application uses the browser history instead of the download store
- * to save completed downloads.
+ * save operation.
  *
- * If a download takes less than this interval to complete (for example, saving
- * a page that is already displayed), then no input/output is triggered by the
- * download store except for an existence check, resulting in the best possible
- * efficiency.
- *
- * Conversely, if the browser is closed before this interval has passed, the
- * download will not be saved.  This prevents it from being restored in the next
- * session, and if there is partial data associated with it, then the ".part"
- * file will not be deleted when the browser starts again.
- *
- * In all cases, for best efficiency, this value should be high enough that the
- * input/output for opening or closing the target file does not overlap with the
- * one for saving the list of downloads.
+ * For best efficiency, this value should be high enough that the input/output
+ * for opening or closing the target file does not overlap with the one for
+ * saving the list of downloads.
  */
 const kSaveDelayMs = 1500;
 
@@ -152,6 +142,7 @@ this.DownloadIntegration = {
   dontCheckApplicationReputation: true,
 #endif
   shouldBlockInTestForApplicationReputation: false,
+  shouldKeepBlockedDataInTest: false,
   dontOpenFileAndFolder: false,
   downloadDoneCalled: false,
   _deferTestOpenFile: null,
@@ -172,6 +163,31 @@ this.DownloadIntegration = {
   set testMode(mode) {
     this._downloadsDirectory = null;
     return (this._testMode = mode);
+  },
+
+  /**
+   * Returns whether data for blocked downloads should be kept on disk.
+   * Implementations which support unblocking downloads may return true to
+   * keep the blocked download on disk until its fate is decided.
+   *
+   * If a download is blocked and the partial data is kept the Download's
+   * 'hasBlockedData' property will be true. In this state Download.unblock()
+   * or Download.confirmBlock() may be used to either unblock the download or
+   * remove the downloaded data respectively.
+   *
+   * Even if shouldKeepBlockedData returns true, if the download did not use a
+   * partFile the blocked data will be removed - preventing the complete
+   * download from existing on disk with its final filename.
+   *
+   * @return boolean True if data should be kept.
+   */
+  shouldKeepBlockedData: function() {
+    if (this.shouldBlockInTestForApplicationReputation) {
+      return this.shouldKeepBlockedDataInTest;
+    }
+
+    const FIREFOX_ID = "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}";
+    return Services.appinfo.ID == FIREFOX_ID;
   },
 
   /**
@@ -276,10 +292,7 @@ this.DownloadIntegration = {
       // Now get the path for this storage area.
       if (preferredStorageName) {
         let volume = volumeService.getVolumeByName(preferredStorageName);
-        if (volume &&
-            volume.isMediaPresent &&
-            !volume.isMountLocked &&
-            !volume.isSharing) {
+        if (volume && volume.state === Ci.nsIVolume.STATE_MOUNTED){
           directoryPath = OS.Path.join(volume.mountPoint, "downloads");
           yield OS.File.makeDir(directoryPath, { ignoreExisting: true });
         }
@@ -317,13 +330,15 @@ this.DownloadIntegration = {
     // progress, as well as stopped downloads for which we retained partially
     // downloaded data.  Stopped downloads for which we don't need to track the
     // presence of a ".part" file are only retained in the browser history.
-    // On b2g, we keep a few days of history.
+    // On b2g, we keep a few days of history. On Android we store all history.
 #ifdef MOZ_B2G
     let maxTime = Date.now() -
       Services.prefs.getIntPref("dom.downloads.max_retention_days") * 24 * 60 * 60 * 1000;
     return (aDownload.startTime > maxTime) ||
            aDownload.hasPartialData ||
            !aDownload.stopped;
+#elif defined(MOZ_WIDGET_ANDROID)
+    return true;
 #else
     return aDownload.hasPartialData || !aDownload.stopped;
 #endif
@@ -503,11 +518,13 @@ this.DownloadIntegration = {
     }
     let hash;
     let sigInfo;
+    let channelRedirects;
     try {
       hash = aDownload.saver.getSha256Hash();
       sigInfo = aDownload.saver.getSignatureInfo();
+      channelRedirects = aDownload.saver.getRedirects();
     } catch (ex) {
-      // Bail if DownloadSaver doesn't have a hash.
+      // Bail if DownloadSaver doesn't have a hash or signature info.
       return Promise.resolve(false);
     }
     if (!hash || !sigInfo) {
@@ -523,7 +540,9 @@ this.DownloadIntegration = {
       referrerURI: aReferrer,
       fileSize: aDownload.currentBytes,
       sha256Hash: hash,
-      signatureInfo: sigInfo },
+      suggestedFileName: OS.Path.basename(aDownload.target.path),
+      signatureInfo: sigInfo,
+      redirects: channelRedirects },
       function onComplete(aShouldBlock, aRv) {
         deferred.resolve(aShouldBlock);
       });
@@ -611,15 +630,40 @@ this.DownloadIntegration = {
       }
 #endif
 
-      // Now that the file is completely downloaded, mark it
-      // accessible by other users on this system, if the user's
-      // global preferences so indicate.  (On Unix, this applies the
-      // umask.  On Windows, currently does nothing.)
-      // Errors should be reported, but are not fatal.
+      // The file with the partially downloaded data has restrictive permissions
+      // that don't allow other users on the system to access it.  Now that the
+      // download is completed, we need to adjust permissions based on whether
+      // this is a permanently downloaded file or a temporary download to be
+      // opened read-only with an external application.
       try {
-        yield OS.File.setPermissions(aDownload.target.path);
+        // The following logic to determine whether this is a temporary download
+        // is due to the fact that "deleteTempFileOnExit" is false on Mac, where
+        // downloads to be opened with external applications are preserved in
+        // the "Downloads" folder like normal downloads.
+        let isTemporaryDownload =
+          aDownload.launchWhenSucceeded && (aDownload.source.isPrivate ||
+          Services.prefs.getBoolPref("browser.helperApps.deleteTempFileOnExit"));
+        // Permanently downloaded files are made accessible by other users on
+        // this system, while temporary downloads are marked as read-only.
+        let options = {};
+        if (isTemporaryDownload) {
+          options.unixMode = 0o400;
+          options.winAttributes = {readOnly: true};
+        } else {
+          options.unixMode = 0o666;
+        }
+        // On Unix, the umask of the process is respected.
+        yield OS.File.setPermissions(aDownload.target.path, options);
       } catch (ex) {
-        Cu.reportError(ex);
+        // We should report errors with making the permissions less restrictive
+        // or marking the file as read-only on Unix and Mac, but this should not
+        // prevent the download from completing.
+        // The setPermissions API error EPERM is expected to occur when working
+        // on a file system that does not support file permissions, like FAT32,
+        // thus we don't report this error.
+        if (!(ex instanceof OS.File.Error) || ex.unixErrno != OS.Constants.libc.EPERM) {
+          Cu.reportError(ex);
+        }
       }
 
       gDownloadPlatform.downloadDone(NetUtil.newURI(aDownload.source.url),
@@ -1173,6 +1217,8 @@ this.DownloadAutoSaveView = function (aList, aStore)
   this._store = aStore;
   this._downloadsMap = new Map();
   this._writer = new DeferredTask(() => this._store.save(), kSaveDelayMs);
+  AsyncShutdown.profileBeforeChange.addBlocker("DownloadAutoSaveView: writing data",
+                                               () => this._writer.finalize());
 }
 
 this.DownloadAutoSaveView.prototype = {

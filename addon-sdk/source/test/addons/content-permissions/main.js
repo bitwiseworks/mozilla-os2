@@ -1,11 +1,11 @@
-﻿/* This Source Code Form is subject to the terms of the Mozilla Public
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
 const { PageMod } = require("sdk/page-mod");
 const tabs = require("sdk/tabs");
-const { startServerAsync } = require("sdk/test/httpd");
+const { startServerAsync } = require("./httpd");
 
 const serverPort = 8099;
 const TEST_TAB_URL = "about:mozilla";

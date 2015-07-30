@@ -19,6 +19,8 @@
 
 namespace webrtc {
 
+namespace acm2 {
+
 #ifndef WEBRTC_CODEC_PCM16
 
 ACMPCM16B::ACMPCM16B(int16_t /* codec_id */) { return; }
@@ -38,8 +40,6 @@ int16_t ACMPCM16B::InternalInitEncoder(
 ACMGenericCodec* ACMPCM16B::CreateInstance(void) { return NULL; }
 
 int16_t ACMPCM16B::InternalCreateEncoder() { return -1; }
-
-void ACMPCM16B::InternalDestructEncoderInst(void* /* ptr_inst */) { return; }
 
 void ACMPCM16B::DestructEncoderSafe() { return; }
 
@@ -75,11 +75,6 @@ int16_t ACMPCM16B::InternalCreateEncoder() {
   return 0;
 }
 
-void ACMPCM16B::InternalDestructEncoderInst(void* /* ptr_inst */) {
-  // PCM has no instance.
-  return;
-}
-
 void ACMPCM16B::DestructEncoderSafe() {
   // PCM has no instance.
   encoder_exist_ = false;
@@ -88,5 +83,7 @@ void ACMPCM16B::DestructEncoderSafe() {
 }
 
 #endif
+
+}  // namespace acm2
 
 }  // namespace webrtc

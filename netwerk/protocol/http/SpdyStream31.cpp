@@ -24,6 +24,7 @@
 #include "SpdyPush31.h"
 #include "SpdySession31.h"
 #include "SpdyStream31.h"
+#include "TunnelUtils.h"
 
 #include <algorithm>
 
@@ -38,36 +39,41 @@ namespace net {
 SpdyStream31::SpdyStream31(nsAHttpTransaction *httpTransaction,
                            SpdySession31 *spdySession,
                            int32_t priority)
-  : mStreamID(0),
-  mSession(spdySession),
-  mUpstreamState(GENERATING_SYN_STREAM),
-  mSynFrameComplete(0),
-  mSentFinOnData(0),
-  mTransaction(httpTransaction),
-  mSocketTransport(spdySession->SocketTransport()),
-  mSegmentReader(nullptr),
-  mSegmentWriter(nullptr),
-  mChunkSize(spdySession->SendingChunkSize()),
-  mRequestBlockedOnRead(0),
-  mRecvdFin(0),
-  mFullyOpen(0),
-  mSentWaitingFor(0),
-  mReceivedData(0),
-  mSetTCPSocketBuffer(0),
-  mTxInlineFrameSize(SpdySession31::kDefaultBufferSize),
-  mTxInlineFrameUsed(0),
-  mTxStreamFrameSize(0),
-  mZlib(spdySession->UpstreamZlib()),
-  mDecompressBufferSize(SpdySession31::kDefaultBufferSize),
-  mDecompressBufferUsed(0),
-  mDecompressedBytes(0),
-  mRequestBodyLenRemaining(0),
-  mPriority(priority),
-  mLocalUnacked(0),
-  mBlockedOnRwin(false),
-  mTotalSent(0),
-  mTotalRead(0),
-  mPushSource(nullptr)
+  : mStreamID(0)
+  , mSession(spdySession)
+  , mUpstreamState(GENERATING_SYN_STREAM)
+  , mRequestHeadersDone(0)
+  , mSynFrameGenerated(0)
+  , mSentFinOnData(0)
+  , mQueued(0)
+  , mTransaction(httpTransaction)
+  , mSocketTransport(spdySession->SocketTransport())
+  , mSegmentReader(nullptr)
+  , mSegmentWriter(nullptr)
+  , mChunkSize(spdySession->SendingChunkSize())
+  , mRequestBlockedOnRead(0)
+  , mRecvdFin(0)
+  , mFullyOpen(0)
+  , mSentWaitingFor(0)
+  , mReceivedData(0)
+  , mSetTCPSocketBuffer(0)
+  , mCountAsActive(0)
+  , mTxInlineFrameSize(SpdySession31::kDefaultBufferSize)
+  , mTxInlineFrameUsed(0)
+  , mTxStreamFrameSize(0)
+  , mZlib(spdySession->UpstreamZlib())
+  , mDecompressBufferSize(SpdySession31::kDefaultBufferSize)
+  , mDecompressBufferUsed(0)
+  , mDecompressedBytes(0)
+  , mRequestBodyLenRemaining(0)
+  , mPriority(priority)
+  , mLocalUnacked(0)
+  , mBlockedOnRwin(false)
+  , mTotalSent(0)
+  , mTotalRead(0)
+  , mPushSource(nullptr)
+  , mIsTunnel(false)
+  , mPlainTextTunnel(false)
 {
   MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
 
@@ -82,6 +88,7 @@ SpdyStream31::SpdyStream31(nsAHttpTransaction *httpTransaction,
 
 SpdyStream31::~SpdyStream31()
 {
+  ClearTransactionsBlockedOnTunnel();
   mStreamID = SpdySession31::kDeadStreamID;
 }
 
@@ -119,12 +126,13 @@ SpdyStream31::ReadSegments(nsAHttpSegmentReader *reader,
     mSegmentReader = reader;
     rv = mTransaction->ReadSegments(this, count, countRead);
     mSegmentReader = nullptr;
-
+    LOG3(("SpdyStream31::ReadSegments %p trans readsegments rv %x read=%d\n",
+          this, rv, *countRead));
     // Check to see if the transaction's request could be written out now.
     // If not, mark the stream for callback when writing can proceed.
     if (NS_SUCCEEDED(rv) &&
         mUpstreamState == GENERATING_SYN_STREAM &&
-        !mSynFrameComplete)
+        !mRequestHeadersDone)
       mSession->TransactionHasDataToWrite(this);
 
     // mTxinlineFrameUsed represents any queued un-sent frame. It might
@@ -139,16 +147,27 @@ SpdyStream31::ReadSegments(nsAHttpSegmentReader *reader,
     if (rv == NS_BASE_STREAM_WOULD_BLOCK && !mTxInlineFrameUsed)
       mRequestBlockedOnRead = 1;
 
+    // A transaction that had already generated its headers before it was
+    // queued at the session level (due to concurrency concerns) may not call
+    // onReadSegment off the ReadSegments() stack above.
+    if (mUpstreamState == GENERATING_SYN_STREAM && NS_SUCCEEDED(rv)) {
+      LOG3(("SpdyStream31 %p ReadSegments forcing OnReadSegment call\n", this));
+      uint32_t wasted = 0;
+      mSegmentReader = reader;
+      OnReadSegment("", 0, &wasted);
+      mSegmentReader = nullptr;
+    }
+
     // If the sending flow control window is open (!mBlockedOnRwin) then
     // continue sending the request
-    if (!mBlockedOnRwin &&
+    if (!mBlockedOnRwin && mSynFrameGenerated &&
         !mTxInlineFrameUsed && NS_SUCCEEDED(rv) && (!*countRead)) {
       LOG3(("SpdyStream31::ReadSegments %p 0x%X: Sending request data complete, "
-            "mUpstreamState=%x",this, mStreamID, mUpstreamState));
+            "mUpstreamState=%x finondata=%d",this, mStreamID,
+            mUpstreamState, mSentFinOnData));
       if (mSentFinOnData) {
         ChangeState(UPSTREAM_COMPLETE);
-      }
-      else {
+      } else {
         GenerateDataFrameHeader(0, true);
         ChangeState(SENDING_FIN_STREAM);
         mSession->TransactionHasDataToWrite(this);
@@ -194,9 +213,8 @@ SpdyStream31::ReadSegments(nsAHttpSegmentReader *reader,
 }
 
 // WriteSegments() is used to read data off the socket. Generally this is
-// just the SPDY frame header and from there the appropriate SPDYStream
-// is identified from the Stream-ID. The http transaction associated with
-// that read then pulls in the data directly.
+// just a call through to the associated nsHttpTransaction for this stream
+// for the remaining data bytes indicated by the current DATA frame.
 
 nsresult
 SpdyStream31::WriteSegments(nsAHttpSegmentWriter *writer,
@@ -237,13 +255,13 @@ SpdyStream31::CreatePushHashKey(const nsCString &scheme,
                                 nsCString &outKey)
 {
   outOrigin = scheme;
-  outOrigin.Append(NS_LITERAL_CSTRING("://"));
+  outOrigin.AppendLiteral("://");
   outOrigin.Append(hostHeader);
 
   outKey = outOrigin;
-  outKey.Append(NS_LITERAL_CSTRING("/[spdy3_1."));
+  outKey.AppendLiteral("/[spdy3_1.");
   outKey.AppendInt(serial);
-  outKey.Append(NS_LITERAL_CSTRING("]"));
+  outKey.Append(']');
   outKey.Append(pathInfo);
 }
 
@@ -254,10 +272,11 @@ SpdyStream31::ParseHttpRequestHeaders(const char *buf,
                                       uint32_t *countUsed)
 {
   // Returns NS_OK even if the headers are incomplete
-  // set mSynFrameComplete flag if they are complete
+  // set mRequestHeadersDone flag if they are complete
 
   MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
   MOZ_ASSERT(mUpstreamState == GENERATING_SYN_STREAM);
+  MOZ_ASSERT(!mRequestHeadersDone);
 
   LOG3(("SpdyStream31::ParseHttpRequestHeaders %p avail=%d state=%x",
         this, avail, mUpstreamState));
@@ -283,13 +302,13 @@ SpdyStream31::ParseHttpRequestHeaders(const char *buf,
   uint32_t oldLen = mFlatHttpRequestHeaders.Length();
   mFlatHttpRequestHeaders.SetLength(endHeader + 2);
   *countUsed = avail - (oldLen - endHeader) + 4;
-  mSynFrameComplete = 1;
+  mRequestHeadersDone = 1;
 
-  nsCString hostHeader;
-  nsCString hashkey;
+  nsAutoCString hostHeader;
+  nsAutoCString hashkey;
   mTransaction->RequestHead()->GetHeader(nsHttp::Host, hostHeader);
 
-  CreatePushHashKey(NS_LITERAL_CSTRING("https"),
+  CreatePushHashKey(nsDependentCString(mTransaction->RequestHead()->IsHTTPS() ? "https" : "http"),
                     hostHeader, mSession->Serial(),
                     mTransaction->RequestHead()->RequestURI(),
                     mOrigin, hashkey);
@@ -325,15 +344,24 @@ SpdyStream31::ParseHttpRequestHeaders(const char *buf,
       // There is probably pushed data buffered so trigger a read manually
       // as we can't rely on future network events to do it
       mSession->ConnectPushedStream(this);
+      mSynFrameGenerated = 1;
       return NS_OK;
     }
   }
+  return NS_OK;
+}
 
+nsresult
+SpdyStream31::GenerateSynFrame()
+{
   // It is now OK to assign a streamID that we are assured will
   // be monotonically increasing amongst syn-streams on this
   // session
   mStreamID = mSession->RegisterStreamID(this);
   MOZ_ASSERT(mStreamID & 1, "Spdy Stream Channel ID must be odd");
+  MOZ_ASSERT(!mSynFrameGenerated);
+
+  mSynFrameGenerated = 1;
 
   if (mStreamID >= 0x80000000) {
     // streamID must fit in 31 bits. This is theoretically possible
@@ -401,7 +429,7 @@ SpdyStream31::ParseHttpRequestHeaders(const char *buf,
   // even though we are parsing the actual text stream because
   // it is legit to append headers.
   nsClassHashtable<nsCStringHashKey, nsCString>
-    hdrHash(1 + (mTransaction->RequestHead()->Headers().Count() * 2));
+    hdrHash(mTransaction->RequestHead()->Headers().Count());
 
   const char *beginBuffer = mFlatHttpRequestHeaders.BeginReading();
 
@@ -427,12 +455,12 @@ SpdyStream31::ParseHttpRequestHeaders(const char *buf,
     ToLowerCase(name);
 
     // exclusions.. mostly from 3.2.1
-    if (name.Equals("connection") ||
-        name.Equals("keep-alive") ||
-        name.Equals("host") ||
-        name.Equals("accept-encoding") ||
-        name.Equals("te") ||
-        name.Equals("transfer-encoding"))
+    if (name.EqualsLiteral("connection") ||
+        name.EqualsLiteral("keep-alive") ||
+        name.EqualsLiteral("host") ||
+        name.EqualsLiteral("accept-encoding") ||
+        name.EqualsLiteral("te") ||
+        name.EqualsLiteral("transfer-encoding"))
       continue;
 
     nsCString *val = hdrHash.Get(name);
@@ -451,7 +479,7 @@ SpdyStream31::ParseHttpRequestHeaders(const char *buf,
       val->Append(static_cast<char>(0));
     val->Append(v);
 
-    if (name.Equals("content-length")) {
+    if (name.EqualsLiteral("content-length")) {
       int64_t len;
       if (nsHttp::ParseInt64(val->get(), nullptr, &len))
         mRequestBodyLenRemaining = len;
@@ -465,24 +493,53 @@ SpdyStream31::ParseHttpRequestHeaders(const char *buf,
   // headers at this same level so it is not necessary to do so here.
 
   const char *methodHeader = mTransaction->RequestHead()->Method().get();
+  LOG3(("Stream method %p 0x%X %s\n", this, mStreamID, methodHeader));
 
   // The header block length
-  uint16_t count = hdrHash.Count() + 5; /* method, path, version, host, scheme */
+  uint16_t count = hdrHash.Count() + 4; /* :method, :path, :version, :host */
+  if (mTransaction->RequestHead()->IsConnect()) {
+    mRequestBodyLenRemaining = 0x0fffffffffffffffULL;
+  } else {
+    ++count; // :scheme used if not connect
+  }
   CompressToFrame(count);
 
   // :method, :path, :version comprise a HTTP/1 request line, so send those first
   // to make life easy for any gateways
   CompressToFrame(NS_LITERAL_CSTRING(":method"));
   CompressToFrame(methodHeader, strlen(methodHeader));
+
   CompressToFrame(NS_LITERAL_CSTRING(":path"));
-  CompressToFrame(mTransaction->RequestHead()->RequestURI());
+  if (!mTransaction->RequestHead()->IsConnect()) {
+    CompressToFrame(mTransaction->RequestHead()->Path());
+  } else {
+    MOZ_ASSERT(mTransaction->QuerySpdyConnectTransaction());
+    mIsTunnel = true;
+    // Connect places host:port in :path. Don't use default port.
+    nsHttpConnectionInfo *ci = mTransaction->ConnectionInfo();
+    if (!ci) {
+      return NS_ERROR_UNEXPECTED;
+    }
+    nsAutoCString route;
+    route = ci->GetHost();
+    route.Append(':');
+    route.AppendInt(ci->Port());
+    CompressToFrame(route);
+  }
+
   CompressToFrame(NS_LITERAL_CSTRING(":version"));
   CompressToFrame(versionHeader);
 
+  nsAutoCString hostHeader;
+  mTransaction->RequestHead()->GetHeader(nsHttp::Host, hostHeader);
   CompressToFrame(NS_LITERAL_CSTRING(":host"));
   CompressToFrame(hostHeader);
-  CompressToFrame(NS_LITERAL_CSTRING(":scheme"));
-  CompressToFrame(NS_LITERAL_CSTRING("https"));
+
+  if (!mTransaction->RequestHead()->IsConnect()) {
+    // no :scheme with connect
+    CompressToFrame(NS_LITERAL_CSTRING(":scheme"));
+    CompressToFrame(nsDependentCString(mTransaction->RequestHead()->IsHTTPS() ? "https" : "http"));
+  }
 
   hdrHash.Enumerate(hdrHashEnumerate, this);
   CompressFlushFrame();
@@ -497,9 +554,8 @@ SpdyStream31::ParseHttpRequestHeaders(const char *buf,
   // to wait for a data packet to put it on.
 
   if (mTransaction->RequestHead()->IsGet() ||
-      mTransaction->RequestHead()->IsConnect() ||
       mTransaction->RequestHead()->IsHead()) {
-    // for GET, CONNECT, and HEAD place the fin bit right on the
+    // for GET and HEAD place the fin bit right on the
     // syn stream packet
 
     mSentFinOnData = 1;
@@ -507,6 +563,7 @@ SpdyStream31::ParseHttpRequestHeaders(const char *buf,
   }
   else if (mTransaction->RequestHead()->IsPost() ||
            mTransaction->RequestHead()->IsPut() ||
+           mTransaction->RequestHead()->IsConnect() ||
            mTransaction->RequestHead()->IsOptions()) {
     // place fin in a data frame even for 0 length messages, I've seen
     // the google gateway be unhappy with fin-on-syn for 0 length POST
@@ -576,10 +633,8 @@ SpdyStream31::AdjustInitialWindow()
     return;
   toack = PR_htonl(toack);
 
-  SpdySession31::EnsureBuffer(mTxInlineFrame,
-                              mTxInlineFrameUsed + 16,
-                              mTxInlineFrameUsed,
-                              mTxInlineFrameSize);
+  EnsureBuffer(mTxInlineFrame, mTxInlineFrameUsed + 16,
+               mTxInlineFrameUsed, mTxInlineFrameSize);
 
   unsigned char *packet = mTxInlineFrame.get() + mTxInlineFrameUsed;
   mTxInlineFrameUsed += 16;
@@ -603,6 +658,9 @@ void
 SpdyStream31::UpdateTransportReadEvents(uint32_t count)
 {
   mTotalRead += count;
+  if (!mSocketTransport) {
+    return;
+  }
 
   mTransaction->OnTransportStatus(mSocketTransport,
                                   NS_NET_STATUS_RECEIVING_FROM,
@@ -788,13 +846,15 @@ SpdyStream31::ChangeState(enum stateType newState)
 void
 SpdyStream31::GenerateDataFrameHeader(uint32_t dataLength, bool lastFrame)
 {
-  LOG3(("SpdyStream31::GenerateDataFrameHeader %p len=%d last=%d",
-        this, dataLength, lastFrame));
+  LOG3(("SpdyStream31::GenerateDataFrameHeader %p len=%d last=%d id=0x%X\n",
+        this, dataLength, lastFrame, mStreamID));
 
   MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
   MOZ_ASSERT(!mTxInlineFrameUsed, "inline frame not empty");
   MOZ_ASSERT(!mTxStreamFrameSize, "stream frame not empty");
   MOZ_ASSERT(!(dataLength & 0xff000000), "datalength > 24 bits");
+  MOZ_ASSERT(mStreamID != 0);
+  MOZ_ASSERT(mStreamID != SpdySession31::kDeadStreamID);
 
   (reinterpret_cast<uint32_t *>(mTxInlineFrame.get()))[0] = PR_htonl(mStreamID);
   (reinterpret_cast<uint32_t *>(mTxInlineFrame.get()))[1] =
@@ -1015,6 +1075,10 @@ SpdyStream31::Uncompress(z_stream *context,
                          char *blockStart,
                          uint32_t blockLen)
 {
+  // ensure the minimum size
+  EnsureBuffer(mDecompressBuffer, SpdySession31::kDefaultBufferSize,
+               mDecompressBufferUsed, mDecompressBufferSize);
+
   mDecompressedBytes += blockLen;
 
   context->avail_in = blockLen;
@@ -1027,22 +1091,23 @@ SpdyStream31::Uncompress(z_stream *context,
       mDecompressBufferUsed;
     context->avail_out = mDecompressBufferSize - mDecompressBufferUsed;
     int zlib_rv = inflate(context, Z_NO_FLUSH);
+    LOG3(("SpdyStream31::Uncompress %p zlib_rv %d\n", this, zlib_rv));
 
     if (zlib_rv == Z_NEED_DICT) {
       if (triedDictionary) {
-        LOG3(("SpdySession31::Uncompress %p Dictionary Error\n", this));
+        LOG3(("SpdyStream31::Uncompress %p Dictionary Error\n", this));
         return NS_ERROR_ILLEGAL_VALUE;
       }
 
       triedDictionary = true;
       inflateSetDictionary(context, kDictionary, sizeof(kDictionary));
-    }
-
-    if (zlib_rv == Z_DATA_ERROR)
+    } else if (zlib_rv == Z_DATA_ERROR) {
+      LOG3(("SpdyStream31::Uncompress %p inflate returned data err\n", this));
       return NS_ERROR_ILLEGAL_VALUE;
-
-    if (zlib_rv == Z_MEM_ERROR)
+    } else  if (zlib_rv < Z_OK) { // probably Z_MEM_ERROR
+      LOG3(("SpdyStream31::Uncompress %p inflate returned %d\n", this, zlib_rv));
       return NS_ERROR_FAILURE;
+    }
 
     // zlib's inflate() decreases context->avail_out by the amount it places
     // in the output buffer
@@ -1056,10 +1121,8 @@ SpdyStream31::Uncompress(z_stream *context,
         !context->avail_out && context->avail_in) {
       LOG3(("SpdyStream31::Uncompress %p Large Headers - so far %d",
             this, mDecompressBufferSize));
-      SpdySession31::EnsureBuffer(mDecompressBuffer,
-                                  mDecompressBufferSize + 4096,
-                                  mDecompressBufferUsed,
-                                  mDecompressBufferSize);
+      EnsureBuffer(mDecompressBuffer, mDecompressBufferSize + 4096,
+                   mDecompressBufferUsed, mDecompressBufferSize);
     }
   }
   while (context->avail_in);
@@ -1149,9 +1212,9 @@ SpdyStream31::ConvertHeaders(nsACString &aHeadersOut)
   // create UI feedback.
 
   aHeadersOut.Append(version);
-  aHeadersOut.Append(NS_LITERAL_CSTRING(" "));
+  aHeadersOut.Append(' ');
   aHeadersOut.Append(status);
-  aHeadersOut.Append(NS_LITERAL_CSTRING("\r\n"));
+  aHeadersOut.AppendLiteral("\r\n");
 
   const unsigned char *nvpair = reinterpret_cast<unsigned char *>
     (mDecompressBuffer.get()) + 4;
@@ -1205,7 +1268,7 @@ SpdyStream31::ConvertHeaders(nsACString &aHeadersOut)
       // to look for chunked specifically because it is the only HTTP
       // allowed default encoding and we did not negotiate further encodings
       // via TE
-      if (nameString.Equals(NS_LITERAL_CSTRING("transfer-encoding"))) {
+      if (nameString.EqualsLiteral("transfer-encoding")) {
         LOG3(("SpdyStream31::ConvertHeaders session=%p stream=%p "
               "transfer-encoding found. Chunked is invalid and no TE sent.",
               mSession, this));
@@ -1222,15 +1285,15 @@ SpdyStream31::ConvertHeaders(nsACString &aHeadersOut)
 
       // spdy transport level headers shouldn't be gatewayed into http/1
       if (!nameString.IsEmpty() && nameString[0] != ':' &&
-          !nameString.Equals(NS_LITERAL_CSTRING("connection")) &&
-          !nameString.Equals(NS_LITERAL_CSTRING("keep-alive"))) {
+          !nameString.EqualsLiteral("connection") &&
+          !nameString.EqualsLiteral("keep-alive")) {
         nsDependentCSubstring valueString =
           Substring(reinterpret_cast<const char *>(nvpair) + 8 + nameLen,
                     reinterpret_cast<const char *>(nvpair) + 8 + nameLen +
                     valueLen);
 
         aHeadersOut.Append(nameString);
-        aHeadersOut.Append(NS_LITERAL_CSTRING(": "));
+        aHeadersOut.AppendLiteral(": ");
 
         // expand NULL bytes in the value string
         for (char *cPtr = valueString.BeginWriting();
@@ -1242,12 +1305,12 @@ SpdyStream31::ConvertHeaders(nsACString &aHeadersOut)
           }
 
           // NULLs are really "\r\nhdr: "
-          aHeadersOut.Append(NS_LITERAL_CSTRING("\r\n"));
+          aHeadersOut.AppendLiteral("\r\n");
           aHeadersOut.Append(nameString);
-          aHeadersOut.Append(NS_LITERAL_CSTRING(": "));
+          aHeadersOut.AppendLiteral(": ");
         }
 
-        aHeadersOut.Append(NS_LITERAL_CSTRING("\r\n"));
+        aHeadersOut.AppendLiteral("\r\n");
       }
       // move to the next name/value pair in this block
       nvpair += 8 + nameLen + valueLen;
@@ -1258,7 +1321,9 @@ SpdyStream31::ConvertHeaders(nsACString &aHeadersOut)
     nvpair += 4;
   } while (lastHeaderByte >= nvpair);
 
-  aHeadersOut.Append(NS_LITERAL_CSTRING("X-Firefox-Spdy: 3.1\r\n\r\n"));
+  // The decoding went ok. Now we can customize and clean up.
+
+  aHeadersOut.AppendLiteral("X-Firefox-Spdy: 3.1\r\n\r\n");
   LOG (("decoded response headers are:\n%s",
         aHeadersOut.BeginReading()));
 
@@ -1266,6 +1331,12 @@ SpdyStream31::ConvertHeaders(nsACString &aHeadersOut)
   mDecompressBuffer = nullptr;
   mDecompressBufferSize = 0;
   mDecompressBufferUsed = 0;
+
+  if (mIsTunnel && !mPlainTextTunnel) {
+    aHeadersOut.Truncate();
+    LOG(("SpdyStream31::ConvertHeaders %p 0x%X headers removed for tunnel\n",
+         this, mStreamID));
+  }
 
   return NS_OK;
 }
@@ -1280,10 +1351,8 @@ SpdyStream31::ExecuteCompress(uint32_t flushMode)
   {
     uint32_t avail = mTxInlineFrameSize - mTxInlineFrameUsed;
     if (avail < 1) {
-      SpdySession31::EnsureBuffer(mTxInlineFrame,
-                                  mTxInlineFrameSize + 2000,
-                                  mTxInlineFrameUsed,
-                                  mTxInlineFrameSize);
+      EnsureBuffer(mTxInlineFrame, mTxInlineFrameSize + 2000,
+                   mTxInlineFrameUsed, mTxInlineFrameSize);
       avail = mTxInlineFrameSize - mTxInlineFrameUsed;
     }
 
@@ -1334,6 +1403,38 @@ SpdyStream31::CompressFlushFrame()
   ExecuteCompress(Z_SYNC_FLUSH);
 }
 
+bool
+SpdyStream31::GetFullyOpen()
+{
+  return mFullyOpen;
+}
+
+nsresult
+SpdyStream31::SetFullyOpen()
+{
+  MOZ_ASSERT(!mFullyOpen);
+  mFullyOpen = 1;
+  if (mIsTunnel) {
+    int32_t code = 0;
+    nsDependentCSubstring statusSubstring;
+    nsresult rv = FindHeader(NS_LITERAL_CSTRING(":status"), statusSubstring);
+    if (NS_SUCCEEDED(rv)) {
+      nsCString status(statusSubstring);
+      nsresult errcode;
+      code = status.ToInteger(&errcode);
+    }
+
+    LOG3(("SpdyStream31::SetFullyOpen %p Tunnel Response code %d", this, code));
+    if ((code / 100) != 2) {
+      MapStreamToPlainText();
+    }
+
+    MapStreamToHttpConnection();
+    ClearTransactionsBlockedOnTunnel();
+  }
+  return NS_OK;
+}
+
 void
 SpdyStream31::Close(nsresult reason)
 {
@@ -1381,12 +1482,26 @@ SpdyStream31::OnReadSegment(const char *buf,
     // the number of those bytes that we consume (i.e. the portion that are
     // header bytes)
 
-    rv = ParseHttpRequestHeaders(buf, count, countRead);
-    if (NS_FAILED(rv))
-      return rv;
-    LOG3(("ParseHttpRequestHeaders %p used %d of %d. complete = %d",
-          this, *countRead, count, mSynFrameComplete));
-    if (mSynFrameComplete) {
+    if (!mRequestHeadersDone) {
+      if (NS_FAILED(rv = ParseHttpRequestHeaders(buf, count, countRead))) {
+        return rv;
+      }
+    }
+
+    if (mRequestHeadersDone && !mSynFrameGenerated) {
+      if (!mSession->TryToActivate(this)) {
+        LOG3(("SpdyStream31::OnReadSegment %p cannot activate now. queued.\n", this));
+        return *countRead ? NS_OK : NS_BASE_STREAM_WOULD_BLOCK;
+      }
+      if (NS_FAILED(rv = GenerateSynFrame())) {
+        return rv;
+      }
+    }
+
+    LOG3(("ParseHttpRequestHeaders %p used %d of %d. "
+          "requestheadersdone = %d mSynFrameGenerated = %d\n",
+          this, *countRead, count, mRequestHeadersDone, mSynFrameGenerated));
+    if (mSynFrameGenerated) {
       AdjustInitialWindow();
       rv = TransmitFrame(nullptr, nullptr, true);
       if (rv == NS_BASE_STREAM_WOULD_BLOCK) {
@@ -1427,11 +1542,15 @@ SpdyStream31::OnReadSegment(const char *buf,
     mRemoteWindow -= dataLength;
     mSession->DecrementRemoteSessionWindow(dataLength);
 
-    LOG3(("SpdyStream31 %p id %x request len remaining %d, "
-          "count avail %d, chunk used %d",
+    LOG3(("SpdyStream31 %p id %x request len remaining %u, "
+          "count avail %u, chunk used %u",
           this, mStreamID, mRequestBodyLenRemaining, count, dataLength));
-    if (dataLength > mRequestBodyLenRemaining)
+    if (!dataLength && mRequestBodyLenRemaining) {
+      return NS_BASE_STREAM_WOULD_BLOCK;
+    }
+    if (dataLength > mRequestBodyLenRemaining) {
       return NS_ERROR_UNEXPECTED;
+    }
     mRequestBodyLenRemaining -= dataLength;
     GenerateDataFrameHeader(dataLength, !mRequestBodyLenRemaining);
     ChangeState(SENDING_REQUEST_BODY);
@@ -1497,6 +1616,36 @@ SpdyStream31::OnWriteSegment(char *buf,
   return NS_OK;
 }
 
+/// connect tunnels
+
+void
+SpdyStream31::ClearTransactionsBlockedOnTunnel()
+{
+  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+
+  if (!mIsTunnel) {
+    return;
+  }
+  gHttpHandler->ConnMgr()->ProcessPendingQ(mTransaction->ConnectionInfo());
+}
+
+void
+SpdyStream31::MapStreamToPlainText()
+{
+  nsRefPtr<SpdyConnectTransaction> qiTrans(mTransaction->QuerySpdyConnectTransaction());
+  MOZ_ASSERT(qiTrans);
+  mPlainTextTunnel = true;
+  qiTrans->ForcePlainText();
+}
+
+void
+SpdyStream31::MapStreamToHttpConnection()
+{
+  nsRefPtr<SpdyConnectTransaction> qiTrans(mTransaction->QuerySpdyConnectTransaction());
+  MOZ_ASSERT(qiTrans);
+  qiTrans->MapStreamToHttpConnection(mSocketTransport,
+                                     mTransaction->ConnectionInfo());
+}
+
 } // namespace mozilla::net
 } // namespace mozilla
-

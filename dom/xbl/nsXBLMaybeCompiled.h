@@ -16,6 +16,9 @@
  * The purpose of abstracting this as a separate class is to allow it to be
  * wrapped in a JS::Heap<T> to correctly handle post-barriering of the JSObject
  * pointer, when present.
+ *
+ * No implementation of rootKind() is provided, which prevents
+ * Root<nsXBLMaybeCompiled<UncompiledT>> from being used.
  */
 template <class UncompiledT>
 class nsXBLMaybeCompiled
@@ -23,10 +26,10 @@ class nsXBLMaybeCompiled
 public:
   nsXBLMaybeCompiled() : mUncompiled(BIT_UNCOMPILED) {}
 
-  nsXBLMaybeCompiled(UncompiledT* uncompiled)
+  explicit nsXBLMaybeCompiled(UncompiledT* uncompiled)
     : mUncompiled(reinterpret_cast<uintptr_t>(uncompiled) | BIT_UNCOMPILED) {}
 
-  nsXBLMaybeCompiled(JSObject* compiled) : mCompiled(compiled) {}
+  explicit nsXBLMaybeCompiled(JSObject* compiled) : mCompiled(compiled) {}
 
   bool IsCompiled() const
   {
@@ -75,14 +78,14 @@ private:
     JSObject* mCompiled;
   };
 
-  friend class js::GCMethods<nsXBLMaybeCompiled<UncompiledT> >;
+  friend struct js::GCMethods<nsXBLMaybeCompiled<UncompiledT>>;
 };
 
 /* Add support for JS::Heap<nsXBLMaybeCompiled>. */
 namespace js {
 
 template <class UncompiledT>
-struct GCMethods<nsXBLMaybeCompiled<UncompiledT> > : public GCMethods<JSObject *>
+struct GCMethods<nsXBLMaybeCompiled<UncompiledT> >
 {
   typedef struct GCMethods<JSObject *> Base;
 
@@ -98,7 +101,6 @@ struct GCMethods<nsXBLMaybeCompiled<UncompiledT> > : public GCMethods<JSObject *
     return function.IsCompiled() && Base::needsPostBarrier(function.GetJSFunction());
   }
 
-#ifdef JSGC_GENERATIONAL
   static void postBarrier(nsXBLMaybeCompiled<UncompiledT>* functionp)
   {
     Base::postBarrier(&functionp->UnsafeGetJSFunction());
@@ -108,7 +110,6 @@ struct GCMethods<nsXBLMaybeCompiled<UncompiledT> > : public GCMethods<JSObject *
   {
     Base::relocate(&functionp->UnsafeGetJSFunction());
   }
-#endif
 };
 
 template <class UncompiledT>
@@ -137,11 +138,11 @@ public:
   JSObject* GetJSFunctionPreserveColor() const { return extract()->GetJSFunctionPreserveColor(); }
 
   void SetUncompiled(UncompiledT* source) {
-    wrapper().set(nsXBLMaybeCompiled<UncompiledT>(source));
+    wrapper() = nsXBLMaybeCompiled<UncompiledT>(source);
   }
 
   void SetJSFunction(JSObject* function) {
-    wrapper().set(nsXBLMaybeCompiled<UncompiledT>(function));
+    wrapper() = nsXBLMaybeCompiled<UncompiledT>(function);
   }
 
   JS::Heap<JSObject*>& AsHeapObject()

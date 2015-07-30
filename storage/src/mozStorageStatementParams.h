@@ -16,13 +16,11 @@ class mozIStorageStatement;
 namespace mozilla {
 namespace storage {
 
-class Statement;
-
-class StatementParams MOZ_FINAL : public mozIStorageStatementParams
+class StatementParams final : public mozIStorageStatementParams
                                 , public nsIXPCScriptable
 {
 public:
-  StatementParams(mozIStorageStatement *aStatement);
+  explicit StatementParams(mozIStorageStatement *aStatement);
 
   // interfaces
   NS_DECL_ISUPPORTS
@@ -30,10 +28,13 @@ public:
   NS_DECL_NSIXPCSCRIPTABLE
 
 protected:
+  ~StatementParams() {}
+
   mozIStorageStatement *mStatement;
   uint32_t mParamCount;
 
-  friend class Statement;
+  friend class StatementParamsHolder;
+  friend class StatementRowHolder;
 };
 
 } // namespace storage

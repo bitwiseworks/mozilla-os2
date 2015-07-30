@@ -21,6 +21,8 @@
 
 namespace webrtc {
 
+namespace acm2 {
+
 #ifndef WEBRTC_CODEC_GSMFR
 
 ACMGSMFR::ACMGSMFR(int16_t /* codec_id */) : encoder_inst_ptr_(NULL) {}
@@ -46,10 +48,6 @@ ACMGenericCodec* ACMGSMFR::CreateInstance(void) { return NULL; }
 int16_t ACMGSMFR::InternalCreateEncoder() { return -1; }
 
 void ACMGSMFR::DestructEncoderSafe() { return; }
-
-void ACMGSMFR::InternalDestructEncoderInst(void* /* ptr_inst */) {
-  return;
-}
 
 #else  //===================== Actual Implementation =======================
 
@@ -145,13 +143,8 @@ void ACMGSMFR::DestructEncoderSafe() {
   encoder_initialized_ = false;
 }
 
-void ACMGSMFR::InternalDestructEncoderInst(void* ptr_inst) {
-  if (ptr_inst != NULL) {
-    WebRtcGSMFR_FreeEnc(static_cast<GSMFR_encinst_t_*>(ptr_inst));
-  }
-  return;
-}
-
 #endif
+
+}  // namespace acm2
 
 }  // namespace webrtc

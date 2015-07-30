@@ -432,6 +432,10 @@ interface WebGLRenderingContext {
     const GLenum VERTEX_ATTRIB_ARRAY_POINTER        = 0x8645;
     const GLenum VERTEX_ATTRIB_ARRAY_BUFFER_BINDING = 0x889F;
 
+    /* Read Format */
+    const GLenum IMPLEMENTATION_COLOR_READ_TYPE   = 0x8B9A;
+    const GLenum IMPLEMENTATION_COLOR_READ_FORMAT = 0x8B9B;
+
     /* Shader Source */
     const GLenum COMPILE_STATUS                 = 0x8B81;
 
@@ -798,10 +802,10 @@ interface WebGLExtensionCompressedTextureETC1
 [NoInterfaceObject]
 interface WebGLExtensionCompressedTexturePVRTC
 {
-    const GLenum COMPRESSED_RGB_PVRTC_4BPPV1  = 0x8C00;
-    const GLenum COMPRESSED_RGB_PVRTC_2BPPV1  = 0x8C01;
-    const GLenum COMPRESSED_RGBA_PVRTC_4BPPV1 = 0x8C02;
-    const GLenum COMPRESSED_RGBA_PVRTC_2BPPV1 = 0x8C03;
+    const GLenum COMPRESSED_RGB_PVRTC_4BPPV1_IMG  = 0x8C00;
+    const GLenum COMPRESSED_RGB_PVRTC_2BPPV1_IMG  = 0x8C01;
+    const GLenum COMPRESSED_RGBA_PVRTC_4BPPV1_IMG = 0x8C02;
+    const GLenum COMPRESSED_RGBA_PVRTC_2BPPV1_IMG = 0x8C03;
 };
 
 [NoInterfaceObject]
@@ -913,6 +917,11 @@ interface WebGLExtensionTextureFloatLinear
 };
 
 [NoInterfaceObject]
+interface WebGLExtensionShaderTextureLod
+{
+};
+
+[NoInterfaceObject]
 interface WebGLExtensionTextureHalfFloat
 {
     const GLenum HALF_FLOAT_OES = 0x8D61;
@@ -958,4 +967,10 @@ interface WebGLExtensionInstancedArrays {
     void drawArraysInstancedANGLE(GLenum mode, GLint first, GLsizei count, GLsizei primcount);
     void drawElementsInstancedANGLE(GLenum mode, GLsizei count, GLenum type, GLintptr offset, GLsizei primcount);
     void vertexAttribDivisorANGLE(GLuint index, GLuint divisor);
+};
+
+[NoInterfaceObject]
+interface WebGLExtensionBlendMinMax {
+    const GLenum MIN_EXT = 0x8007;
+    const GLenum MAX_EXT = 0x8008;
 };

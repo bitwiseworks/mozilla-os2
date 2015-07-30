@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -28,7 +28,7 @@ const UNEXPECTED_NOTIFICATIONS = [
   "xpcom-shutdown"
 ];
 
-const URL = "ftp://localhost/clearHistoryOnShutdown/";
+const FTP_URL = "ftp://localhost/clearHistoryOnShutdown/";
 
 // Send the profile-after-change notification to the form history component to ensure
 // that it has been initialized.
@@ -72,7 +72,7 @@ let notificationsObserver = {
     }
 
     // Check cache.
-    checkCache(URL);
+    checkCache(FTP_URL);
   }
 }
 
@@ -107,11 +107,13 @@ add_task(function test_execute() {
 
   print("Add visits.");
   for (let aUrl of URIS) {
-    yield promiseAddVisits({uri: uri(aUrl), visitDate: timeInMicroseconds++,
-                            transition: PlacesUtils.history.TRANSITION_TYPED})
+    yield PlacesTestUtils.addVisits({
+      uri: uri(aUrl), visitDate: timeInMicroseconds++,
+      transition: PlacesUtils.history.TRANSITION_TYPED
+    });
   }
   print("Add cache.");
-  storeCache(URL, "testData");
+  storeCache(FTP_URL, "testData");
 });
 
 function run_test_continue()

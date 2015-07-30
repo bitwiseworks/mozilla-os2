@@ -140,12 +140,13 @@ exports.items = [
 
       let dirName = prefBranch.getComplexValue(PREF_DIR,
                                               Ci.nsISupportsString).data.trim();
-      return gcli.lookupFormat("cmdStatus2", [ dirName ]);
+      return gcli.lookupFormat("cmdStatus3", [ dirName ]);
     }
   },
   {
     name: "cmd setdir",
     description: gcli.lookup("cmdSetdirDesc"),
+    manual: gcli.lookup("cmdSetdirManual2"),
     params: [
       {
         name: "directory",
@@ -168,7 +169,7 @@ exports.items = [
 
       gcli.load();
 
-      return gcli.lookupFormat("cmdStatus2", [ args.directory ]);
+      return gcli.lookupFormat("cmdStatus3", [ args.directory ]);
     }
   }
 ];

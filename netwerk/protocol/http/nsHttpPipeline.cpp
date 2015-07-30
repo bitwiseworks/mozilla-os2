@@ -62,8 +62,7 @@ private:
 //-----------------------------------------------------------------------------
 
 nsHttpPipeline::nsHttpPipeline()
-    : mConnection(nullptr)
-    , mStatus(NS_OK)
+    : mStatus(NS_OK)
     , mRequestIsPartial(false)
     , mResponseIsPartial(false)
     , mClosed(false)
@@ -82,8 +81,6 @@ nsHttpPipeline::~nsHttpPipeline()
 {
     // make sure we aren't still holding onto any transactions!
     Close(NS_ERROR_ABORT);
-
-    NS_IF_RELEASE(mConnection);
 
     if (mPushBackBuf)
         free(mPushBackBuf);
@@ -408,15 +405,15 @@ nsHttpPipeline::SetConnection(nsAHttpConnection *conn)
     LOG(("nsHttpPipeline::SetConnection [this=%p conn=%x]\n", this, conn));
 
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
-    MOZ_ASSERT(!mConnection, "already have a connection");
+    MOZ_ASSERT(!conn || !mConnection, "already have a connection");
 
-    NS_IF_ADDREF(mConnection = conn);
+    mConnection = conn;
 }
 
 nsAHttpConnection *
 nsHttpPipeline::Connection()
 {
-    LOG(("nsHttpPipeline::Connection [this=%p conn=%x]\n", this, mConnection));
+    LOG(("nsHttpPipeline::Connection [this=%p conn=%x]\n", this, mConnection.get()));
 
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
     return mConnection;
@@ -443,9 +440,9 @@ nsHttpPipeline::GetSecurityCallbacks(nsIInterfaceRequestor **result)
 
 void
 nsHttpPipeline::OnTransportStatus(nsITransport* transport,
-                                  nsresult status, uint64_t progress)
+                                  nsresult status, int64_t progress)
 {
-    LOG(("nsHttpPipeline::OnStatus [this=%p status=%x progress=%llu]\n",
+    LOG(("nsHttpPipeline::OnStatus [this=%p status=%x progress=%lld]\n",
         this, status, progress));
 
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
@@ -527,6 +524,16 @@ nsHttpPipeline::OnTransportStatus(nsITransport* transport,
             Request(i)->OnTransportStatus(transport, status, progress);
         break;
     }
+}
+
+nsHttpConnectionInfo *
+nsHttpPipeline::ConnectionInfo()
+{
+    nsAHttpTransaction *trans = Request(0) ? Request(0) : Response(0);
+    if (!trans) {
+        return nullptr;
+    }
+    return trans->ConnectionInfo();
 }
 
 bool

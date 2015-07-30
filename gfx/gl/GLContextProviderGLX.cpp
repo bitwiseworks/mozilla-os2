@@ -37,10 +37,10 @@
 #include "gfxPlatformGtk.h"
 #endif
 
-using namespace mozilla::gfx;
-
 namespace mozilla {
 namespace gl {
+
+using namespace mozilla::gfx;
 
 GLXLibrary sGLXLibrary;
 
@@ -481,7 +481,7 @@ GLXLibrary::AfterGLXCall()
         if (sErrorEvent.mError.error_code) {
             char buffer[2048];
             XGetErrorText(DefaultXDisplay(), sErrorEvent.mError.error_code, buffer, sizeof(buffer));
-            printf_stderr("X ERROR: %s (%i) - Request: %i.%i, Serial: %i",
+            printf_stderr("X ERROR: %s (%i) - Request: %i.%i, Serial: %lu",
                           buffer,
                           sErrorEvent.mError.error_code,
                           sErrorEvent.mError.request_code,
@@ -834,8 +834,9 @@ GLContextGLX::~GLContextGLX()
     bool success =
 #endif
     mGLX->xMakeCurrent(mDisplay, None, nullptr);
-    NS_ABORT_IF_FALSE(success,
-        "glXMakeCurrent failed to release GL context before we call glXDestroyContext!");
+    MOZ_ASSERT(success,
+               "glXMakeCurrent failed to release GL context before we call "
+               "glXDestroyContext!");
 
     mGLX->xDestroyContext(mDisplay, mContext);
 
@@ -1125,7 +1126,8 @@ CreateOffscreenPixmapContext(const gfxIntSize& size)
     }
 
     MOZ_ASSERT(numConfigs > 0,
-               "glXChooseFBConfig() failed to match our requested format and violated its spec!");
+               "glXChooseFBConfig() failed to match our requested format and "
+               "violated its spec!");
 
     int visid = None;
     int chosenIndex = 0;
@@ -1213,13 +1215,22 @@ DONE_CREATING_PIXMAP:
 }
 
 already_AddRefed<GLContext>
-GLContextProviderGLX::CreateOffscreen(const gfxIntSize& size,
-                                      const SurfaceCaps& caps)
+GLContextProviderGLX::CreateHeadless(bool)
 {
     gfxIntSize dummySize = gfxIntSize(16, 16);
-    nsRefPtr<GLContextGLX> glContext =
-        CreateOffscreenPixmapContext(dummySize);
+    nsRefPtr<GLContext> glContext = CreateOffscreenPixmapContext(dummySize);
+    if (!glContext)
+        return nullptr;
 
+    return glContext.forget();
+}
+
+already_AddRefed<GLContext>
+GLContextProviderGLX::CreateOffscreen(const gfxIntSize& size,
+                                      const SurfaceCaps& caps,
+                                      bool requireCompatProfile)
+{
+    nsRefPtr<GLContext> glContext = CreateHeadless(requireCompatProfile);
     if (!glContext)
         return nullptr;
 

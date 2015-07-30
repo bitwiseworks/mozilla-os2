@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -40,7 +40,7 @@ add_test(function test_keywordRemovedOnUniqueItemRemoval() {
   // remove bookmark
   bmsvc.removeItem(bookmarkId);
 
-  promiseAsyncUpdates().then(function() {
+  PlacesTestUtils.promiseAsyncUpdates().then(() => {
     // Check that keyword has been removed from the database.
     // The removal is asynchronous.
     var sql = "SELECT id FROM moz_keywords WHERE keyword = ?1";
@@ -77,7 +77,7 @@ add_test(function test_keywordNotRemovedOnNonUniqueItemRemoval() {
   // remove first bookmark
   bmsvc.removeItem(bookmarkId1);
 
-  promiseAsyncUpdates().then(function() {
+  PlacesTestUtils.promiseAsyncUpdates().then(() => {
     // check that keyword is still there
     var sql = "SELECT id FROM moz_keywords WHERE keyword = ?1";
     var stmt = mDBConn.createStatement(sql);

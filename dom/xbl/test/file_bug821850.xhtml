@@ -12,7 +12,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
 
           // Wait for both constructors to fire.
           window.constructorCount = (window.constructorCount + 1) || 1;
-          if (window.constructorCount != 2)
+          if (window.constructorCount != 3)
             return;
 
           // Grab some basic infrastructure off the content window.
@@ -37,6 +37,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
           ok(Cu.isXrayWrapper(document), "Document is Xrayed");
 
           var bound = document.getElementById('bound');
+          var bound2 = document.getElementById('bound2');
+          var bound3 = document.getElementById('bound3');
           ok(bound, "bound is non-null");
           is(bound.method('baz'), "method:baz", "Xray methods work");
           is(bound.prop, "propVal", "Property Xrays work");
@@ -68,6 +70,13 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
           is(Object.getPrototypeOf(Function.prototype), Object.getPrototypeOf({foo: 42}),
              "Function constructor is local");
 
+          ok(Object.getPrototypeOf(bound.wrappedJSObject) == Object.getPrototypeOf(bound2.wrappedJSObject),
+             "Div and div should have the same content-side prototype");
+          ok(Object.getPrototypeOf(bound.wrappedJSObject) != Object.getPrototypeOf(bound3.wrappedJSObject),
+             "Div and span should have different content-side prototypes");
+          ok(bound.wrappedJSObject.method == bound3.wrappedJSObject.method,
+             "Methods should be shared");
+
           // This gets invoked by an event handler.
           window.finish = function() {
             // Content messed with stuff. Make sure we still see the right thing.
@@ -96,14 +105,12 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
           <parameter name="arg" />
           <body>
             is(typeof arg.prop, 'undefined', "No properties");
+            is(arg.wrappedJSObject.prop, 2, "Underlying object has properties");
             is(Object.getOwnPropertyNames(arg).length, 0, "Should have no own properties");
-            try {
-              arg.foo = 2;
-              ok(true, "Stuff fails silently");
-            } catch (e) {
-              ok(false, "Stuff should fail silently");
-            }
-            is(typeof arg.foo, 'undefined', "Shouldn't place props");
+            is(Object.getOwnPropertyNames(arg.wrappedJSObject).length, 1, "Underlying object has properties");
+            arg.foo = 2;
+            is(arg.foo, 2, "Should place expandos");
+            is(typeof arg.wrappedJSObject.foo, 'undefined', "Expandos should be invisible to content");
           </body>
         </method>
         <property name="prop" exposeToUntrustedContent="true">
@@ -160,9 +167,14 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
     bound.prop = "someOtherVal";
     is(bound.prop, "set:someOtherVal", "Can set properties from content");
 
-    // Make sure we can't pass JS objects to the XBL scope.
+    // Make sure that XBL scopes get opaque wrappers.
+    //
+    // Note: Now that we have object Xrays, we have to pass in a more obscure
+    // ES type that we don't Xray to test this.
     var proto = bound.__proto__;
-    proto.passMeAJSObject({prop: 2});
+    var nonXrayableObject = new WeakMap();
+    nonXrayableObject.prop = 2;
+    proto.passMeAJSObject(nonXrayableObject);
 
     //
     // Try sticking a bunch of stuff on the prototype object.
@@ -206,59 +218,46 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
     Object.defineProperty(bound, 'prop', {value: "redefined"});
     bound.primitiveField = 321;
 
-    // We need a chrome window to create trusted events. This isn't really doable
-    // in child processes, so let's just skip if that's the case.
-    if (SpecialPowers.isMainProcess()) {
-      var Ci = SpecialPowers.Ci;
-      var chromeWin = SpecialPowers.wrap(window.top)
-                                   .QueryInterface(Ci.nsIInterfaceRequestor)
-                                   .getInterface(Ci.nsIWebNavigation)
-                                   .QueryInterface(Ci.nsIDocShell)
-                                   .chromeEventHandler.ownerDocument.defaultView;
+    // Untrusted events should not trigger event handlers without
+    // exposeToUntrustedContent=true.
+    window.triggeredTrustedHandler = false;
+    var untrustedEvent = new CustomEvent('testtrusted');
+    is(untrustedEvent.type, 'testtrusted', "Constructor should see type");
+    bound.dispatchEvent(untrustedEvent);
+    ok(!window.triggeredTrustedHandler, "untrusted events should not trigger trusted handler");
+    var trustedEvent = new CustomEvent('testtrusted');
+    is(trustedEvent.type, 'testtrusted', "Wrapped constructor should see type");
+    SpecialPowers.wrap(bound).dispatchEvent(trustedEvent); // Dispatch over SpecialPowers to make the event trusted.
+    ok(window.triggeredTrustedHandler, "trusted events should trigger trusted handler");
 
-      // Untrusted events should not trigger event handlers without
-      // exposeToUntrustedContent=true.
-      window.triggeredTrustedHandler = false;
-      var untrustedEvent = new CustomEvent('testtrusted');
-      ok(!untrustedEvent.isTrusted, "Created an untrusted event");
-      is(untrustedEvent.type, 'testtrusted', "Constructor should see type");
-      bound.dispatchEvent(untrustedEvent);
-      ok(!window.triggeredTrustedHandler, "untrusted events should not trigger trusted handler");
-      var trustedEvent = new chromeWin.CustomEvent('testtrusted');
-      ok(trustedEvent.isTrusted, "Created a trusted event");
-      is(trustedEvent.type, 'testtrusted', "Wrapped constructor should see type");
-      SpecialPowers.wrap(bound).dispatchEvent(trustedEvent);
-      ok(window.triggeredTrustedHandler, "trusted events should trigger trusted handler");
+    //
+    // We check key events as well, since they're implemented differently.
+    //
+    // NB: We don't check isTrusted on the events we create here, because
+    // according to smaug, old-style event initialization doesn't mark the
+    // event as trusted until it's dispatched.
+    //
 
-      //
-      // We check key events as well, since they're implemented differently.
-      //
-      // NB: We don't check isTrusted on the events we create here, because
-      // according to smaug, old-style event initialization doesn't mark the
-      // event as trusted until it's dispatched.
-      //
+    window.triggeredUntrustedKeyHandler = false;
+    window.triggeredTrustedKeyHandler = false;
 
-      window.triggeredUntrustedKeyHandler = false;
-      window.triggeredTrustedKeyHandler = false;
+    // Untrusted event, permissive handler.
+    var untrustedKeyEvent = document.createEvent('KeyboardEvent');
+    untrustedKeyEvent.initEvent('keyup', true, true);
+    bound.dispatchEvent(untrustedKeyEvent);
+    ok(window.triggeredUntrustedKeyHandler, "untrusted key events should trigger untrusted handler");
 
-      // Untrusted event, permissive handler.
-      var untrustedKeyEvent = document.createEvent('KeyboardEvent');
-      untrustedKeyEvent.initEvent('keyup', true, true);
-      bound.dispatchEvent(untrustedKeyEvent);
-      ok(window.triggeredUntrustedKeyHandler, "untrusted key events should trigger untrusted handler");
+    // Untrusted event, strict handler.
+    var fakeTrustedKeyEvent = document.createEvent('KeyboardEvent');
+    fakeTrustedKeyEvent.initEvent('keydown', true, true);
+    bound.dispatchEvent(fakeTrustedKeyEvent);
+    ok(!window.triggeredTrustedKeyHandler, "untrusted key events should not trigger trusted handler");
 
-      // Untrusted event, strict handler.
-      var fakeTrustedKeyEvent = document.createEvent('KeyboardEvent');
-      fakeTrustedKeyEvent.initEvent('keydown', true, true);
-      bound.dispatchEvent(fakeTrustedKeyEvent);
-      ok(!window.triggeredTrustedKeyHandler, "untrusted key events should not trigger trusted handler");
-
-      // Trusted event, strict handler.
-      var trustedKeyEvent = chromeWin.document.createEvent('KeyboardEvent');
-      trustedKeyEvent.initEvent('keydown', true, true);
-      SpecialPowers.wrap(bound).dispatchEvent(trustedKeyEvent);
-      ok(window.triggeredTrustedKeyHandler, "trusted key events should trigger trusted handler");
-    }
+    // Trusted event, strict handler. Dispatch using SpecialPowers to make the event trusted.
+    var trustedKeyEvent = document.createEvent('KeyboardEvent');
+    trustedKeyEvent.initEvent('keydown', true, true);
+    SpecialPowers.wrap(bound).dispatchEvent(trustedKeyEvent);
+    ok(window.triggeredTrustedKeyHandler, "trusted key events should trigger trusted handler");
 
     // Hand control back to the XBL scope by dispatching an event on the bound element.
     bound.dispatchEvent(new CustomEvent('testevent'));
@@ -279,6 +278,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
     // test will continue.
     document.getElementById('bound').style.MozBinding = 'url(#testBinding)';
     document.getElementById('bound2').style.MozBinding = 'url(#testBinding)';
+    document.getElementById('bound3').style.MozBinding = 'url(#testBinding)';
   }
 
   ]]>
@@ -290,6 +290,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
 <div id="content">
   <div id="bound">Bound element</div>
   <div id="bound2">Bound element</div>
+  <span id="bound3">Bound element</span>
   <img/>
 </div>
 <pre id="test">

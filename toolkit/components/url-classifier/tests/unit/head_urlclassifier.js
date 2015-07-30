@@ -1,4 +1,4 @@
-//* -*- Mode: Javascript; tab-width: 8; indent-tabs-mode: nil; js-indent-level: 2 -*- *
+//* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- *
 function dumpn(s) {
   dump(s + "\n");
 }
@@ -34,6 +34,9 @@ prefBranch.setBoolPref("browser.safebrowsing.enabled", true);
 // Enable all completions for tests
 prefBranch.setCharPref("urlclassifier.disallow_completions", "");
 
+// Hash completion timeout
+prefBranch.setIntPref("urlclassifier.gethash.timeout_ms", 5000);
+
 function delFile(name) {
   try {
     // Delete a previously created sqlite file
@@ -54,6 +57,8 @@ function cleanUp() {
   delFile("safebrowsing/test-malware-simple.cache");
   delFile("safebrowsing/test-phish-simple.pset");
   delFile("safebrowsing/test-malware-simple.pset");
+  delFile("testLarge.pset");
+  delFile("testNoDelta.pset");
 }
 
 var allTables = "test-phish-simple,test-malware-simple";
@@ -171,12 +176,12 @@ function doErrorUpdate(tables, success, failure) {
 function doStreamUpdate(updateText, success, failure, downloadFailure) {
   var dataUpdate = "data:," + encodeURIComponent(updateText);
 
-  if (!downloadFailure)
+  if (!downloadFailure) {
     downloadFailure = failure;
+  }
 
-  streamUpdater.updateUrl = dataUpdate;
   streamUpdater.downloadUpdates("test-phish-simple,test-malware-simple", "",
-                                success, failure, downloadFailure);
+                                dataUpdate, success, failure, downloadFailure);
 }
 
 var gAssertions = {

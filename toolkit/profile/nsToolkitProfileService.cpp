@@ -43,7 +43,7 @@
 
 using namespace mozilla;
 
-class nsToolkitProfile MOZ_FINAL : public nsIToolkitProfile
+class nsToolkitProfile final : public nsIToolkitProfile
 {
 public:
     NS_DECL_ISUPPORTS
@@ -53,9 +53,9 @@ public:
     nsRefPtr<nsToolkitProfile> mNext;
     nsToolkitProfile          *mPrev;
 
+private:
     ~nsToolkitProfile() { }
 
-private:
     nsToolkitProfile(const nsACString& aName,
                      nsIFile* aRootDir,
                      nsIFile* aLocalDir,
@@ -71,7 +71,7 @@ private:
     bool                       mForExternalApp;
 };
 
-class nsToolkitProfileLock MOZ_FINAL : public nsIProfileLock
+class nsToolkitProfileLock final : public nsIProfileLock
 {
 public:
     NS_DECL_ISUPPORTS
@@ -82,9 +82,10 @@ public:
                   nsIProfileUnlocker* *aUnlocker);
 
     nsToolkitProfileLock() { }
-    ~nsToolkitProfileLock();
 
 private:
+    ~nsToolkitProfileLock();
+
     nsRefPtr<nsToolkitProfile> mProfile;
     nsCOMPtr<nsIFile> mDirectory;
     nsCOMPtr<nsIFile> mLocalDirectory;
@@ -92,14 +93,15 @@ private:
     nsProfileLock mLock;
 };
 
-class nsToolkitProfileFactory MOZ_FINAL : public nsIFactory
+class nsToolkitProfileFactory final : public nsIFactory
 {
+    ~nsToolkitProfileFactory() {}
 public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIFACTORY
 };
 
-class nsToolkitProfileService MOZ_FINAL : public nsIToolkitProfileService
+class nsToolkitProfileService final : public nsIToolkitProfileService
 {
 public:
     NS_DECL_ISUPPORTS
@@ -122,7 +124,7 @@ private:
         gService = nullptr;
     }
 
-    NS_HIDDEN_(nsresult) Init();
+    nsresult Init();
 
     nsresult CreateTimesInternal(nsIFile *profileDir);
 
@@ -137,6 +139,7 @@ private:
 
     nsRefPtr<nsToolkitProfile>  mFirst;
     nsCOMPtr<nsIToolkitProfile> mChosen;
+    nsCOMPtr<nsIToolkitProfile> mDefault;
     nsCOMPtr<nsIFile>           mAppData;
     nsCOMPtr<nsIFile>           mTempData;
     nsCOMPtr<nsIFile>           mListFile;
@@ -146,13 +149,13 @@ private:
 
     static nsToolkitProfileService *gService;
 
-    class ProfileEnumerator MOZ_FINAL : public nsISimpleEnumerator
+    class ProfileEnumerator final : public nsISimpleEnumerator
     {
     public:
         NS_DECL_ISUPPORTS
         NS_DECL_NSISIMPLEENUMERATOR
 
-        ProfileEnumerator(nsToolkitProfile *first)
+        explicit ProfileEnumerator(nsToolkitProfile *first)
           { mCurrent = first; }
     private:
         ~ProfileEnumerator() { }
@@ -421,7 +424,24 @@ nsToolkitProfileService::Init()
 
     nsToolkitProfile* currentProfile = nullptr;
 
+#ifdef MOZ_DEV_EDITION
+    nsCOMPtr<nsIFile> ignoreSeparateProfile;
+    rv = mAppData->Clone(getter_AddRefs(ignoreSeparateProfile));
+    if (NS_FAILED(rv))
+        return rv;
+
+    rv = ignoreSeparateProfile->AppendNative(NS_LITERAL_CSTRING("ignore-dev-edition-profile"));
+    if (NS_FAILED(rv))
+        return rv;
+
+    bool shouldIgnoreSeparateProfile;
+    rv = ignoreSeparateProfile->Exists(&shouldIgnoreSeparateProfile);
+    if (NS_FAILED(rv))
+        return rv;
+#endif
+
     unsigned int c = 0;
+    bool foundAuroraDefault = false;
     for (c = 0; true; ++c) {
         nsAutoCString profileID("Profile");
         profileID.AppendInt(c);
@@ -439,7 +459,9 @@ nsToolkitProfileService::Init()
             continue;
         }
 
-        rv = parser.GetString(profileID.get(), "Name", buffer);
+        nsAutoCString name;
+
+        rv = parser.GetString(profileID.get(), "Name", name);
         if (NS_FAILED(rv)) {
             NS_ERROR("Malformed profiles.ini: Name= not found");
             continue;
@@ -468,15 +490,49 @@ nsToolkitProfileService::Init()
             localDir = rootDir;
         }
 
-        currentProfile = new nsToolkitProfile(buffer,
+        currentProfile = new nsToolkitProfile(name,
                                               rootDir, localDir,
                                               currentProfile, false);
         NS_ENSURE_TRUE(currentProfile, NS_ERROR_OUT_OF_MEMORY);
 
         rv = parser.GetString(profileID.get(), "Default", buffer);
-        if (NS_SUCCEEDED(rv) && buffer.EqualsLiteral("1"))
+        if (NS_SUCCEEDED(rv) && buffer.EqualsLiteral("1") && !foundAuroraDefault) {
             mChosen = currentProfile;
+            this->SetDefaultProfile(currentProfile);
+        }
+#ifdef MOZ_DEV_EDITION
+        // Use the dev-edition-default profile if this is an Aurora build and
+        // ignore-dev-edition-profile is not present.
+        if (name.EqualsLiteral("dev-edition-default") && !shouldIgnoreSeparateProfile) {
+            mChosen = currentProfile;
+            foundAuroraDefault = true;
+        }
+#endif
     }
+
+#ifdef MOZ_DEV_EDITION
+    // Check if we are running Firefox, as we don't want to create a profile
+    // on webapprt.
+    bool isFirefox = strcmp(gAppData->ID,
+                            "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}") == 0;
+    if (!foundAuroraDefault && isFirefox && !shouldIgnoreSeparateProfile) {
+        // If a single profile exists, it may not be already marked as default.
+        // Do it now to avoid problems when we create the dev-edition-default profile.
+        if (!mChosen && mFirst && !mFirst->mNext)
+            this->SetDefaultProfile(mFirst);
+
+        // Create a default profile for aurora, if none was found.
+        nsCOMPtr<nsIToolkitProfile> profile;
+        rv = CreateProfile(nullptr,
+                           NS_LITERAL_CSTRING("dev-edition-default"),
+                           getter_AddRefs(profile));
+        if (NS_FAILED(rv)) return rv;
+        mChosen = profile;
+        rv = Flush();
+        if (NS_FAILED(rv)) return rv;
+    }
+#endif
+
     if (!mChosen && mFirst && !mFirst->mNext) // only one profile
         mChosen = mFirst;
     return NS_OK;
@@ -562,6 +618,25 @@ nsToolkitProfileService::SetSelectedProfile(nsIToolkitProfile* aProfile)
 {
     if (mChosen != aProfile) {
         mChosen = aProfile;
+        mDirty = true;
+    }
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsToolkitProfileService::GetDefaultProfile(nsIToolkitProfile* *aResult)
+{
+    if (!mDefault) return NS_ERROR_FAILURE;
+
+    NS_ADDREF(*aResult = mDefault);
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsToolkitProfileService::SetDefaultProfile(nsIToolkitProfile* aProfile)
+{
+    if (mDefault != aProfile) {
+        mDefault = aProfile;
         mDirty = true;
     }
     return NS_OK;
@@ -745,7 +820,7 @@ nsToolkitProfileService::CreateProfileInternal(nsIFile* aRootDir,
     nsCOMPtr<nsIFile> localDir;
 
     bool isRelative;
-    rv = mAppData->Contains(rootDir, true, &isRelative);
+    rv = mAppData->Contains(rootDir, &isRelative);
     if (NS_SUCCEEDED(rv) && isRelative) {
         nsAutoCString path;
         rv = rootDir->GetRelativeDescriptor(mAppData, path);
@@ -912,7 +987,7 @@ nsToolkitProfileService::Flush()
     while (cur) {
         // if the profile dir is relative to appdir...
         bool isRelative;
-        rv = mAppData->Contains(cur->mRootDir, true, &isRelative);
+        rv = mAppData->Contains(cur->mRootDir, &isRelative);
         if (NS_SUCCEEDED(rv) && isRelative) {
             // we use a relative descriptor
             rv = cur->mRootDir->GetRelativeDescriptor(mAppData, path);
@@ -930,7 +1005,9 @@ nsToolkitProfileService::Flush()
                        pCount, cur->mName.get(),
                        isRelative ? "1" : "0", path.get());
 
-        if (mChosen == cur) {
+        nsCOMPtr<nsIToolkitProfile> profile;
+        rv = this->GetDefaultProfile(getter_AddRefs(profile));
+        if (NS_SUCCEEDED(rv) && profile == cur) {
             end += sprintf(end, "Default=1\n");
         }
 

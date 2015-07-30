@@ -55,11 +55,10 @@ class nsMenuFrame;
  * to it. The callback is delegated to the contained nsMenuFrame as long as
  * the contained nsMenuFrame has not been destroyed.
  */
-class nsMenuTimerMediator MOZ_FINAL : public nsITimerCallback
+class nsMenuTimerMediator final : public nsITimerCallback
 {
 public:
-  nsMenuTimerMediator(nsMenuFrame* aFrame);
-  ~nsMenuTimerMediator();
+  explicit nsMenuTimerMediator(nsMenuFrame* aFrame);
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
@@ -67,66 +66,65 @@ public:
   void ClearFrame();
 
 private:
+  ~nsMenuTimerMediator();
 
   // Pointer to the wrapped frame.
   nsMenuFrame* mFrame;
 };
 
-class nsMenuFrame : public nsBoxFrame
+class nsMenuFrame final : public nsBoxFrame
 {
 public:
-  nsMenuFrame(nsIPresShell* aShell, nsStyleContext* aContext);
+  explicit nsMenuFrame(nsStyleContext* aContext);
 
   NS_DECL_QUERYFRAME_TARGET(nsMenuFrame)
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
-  NS_IMETHOD DoLayout(nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
-  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
-  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
+  NS_IMETHOD DoLayout(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
 
-  virtual void Init(nsIContent*      aContent,
-                    nsIFrame*        aParent,
-                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
+  virtual void Init(nsIContent*       aContent,
+                    nsContainerFrame* aParent,
+                    nsIFrame*         aPrevInFlow) override;
 
 #ifdef DEBUG_LAYOUT
-  virtual nsresult SetDebug(nsBoxLayoutState& aState, bool aDebug) MOZ_OVERRIDE;
+  virtual nsresult SetDebug(nsBoxLayoutState& aState, bool aDebug) override;
 #endif
 
   // The following methods are all overridden so that the menupopup
   // can be stored in a separate list, so that it doesn't impact reflow of the
   // actual menu item at all.
-  virtual const nsFrameList& GetChildList(ChildListID aList) const MOZ_OVERRIDE;
-  virtual void GetChildLists(nsTArray<ChildList>* aLists) const MOZ_OVERRIDE;
-  virtual nsresult SetInitialChildList(ChildListID  aListID,
-                                       nsFrameList& aChildList) MOZ_OVERRIDE;
-  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
+  virtual const nsFrameList& GetChildList(ChildListID aList) const override;
+  virtual void GetChildLists(nsTArray<ChildList>* aLists) const override;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
 
   // Overridden to prevent events from going to children of the menu.
   virtual void BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
                                            const nsRect&           aDirtyRect,
-                                           const nsDisplayListSet& aLists) MOZ_OVERRIDE;
+                                           const nsDisplayListSet& aLists) override;
                                          
   // this method can destroy the frame
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                mozilla::WidgetGUIEvent* aEvent,
-                               nsEventStatus* aEventStatus) MOZ_OVERRIDE;
+                               nsEventStatus* aEventStatus) override;
 
-  virtual nsresult  AppendFrames(ChildListID     aListID,
-                                 nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual void SetInitialChildList(ChildListID  aListID,
+                                   nsFrameList& aChildList) override;
+  virtual void AppendFrames(ChildListID     aListID,
+                            nsFrameList&    aFrameList) override;
+  virtual void InsertFrames(ChildListID     aListID,
+                            nsIFrame*       aPrevFrame,
+                            nsFrameList&    aFrameList) override;
+  virtual void RemoveFrame(ChildListID     aListID,
+                           nsIFrame*       aOldFrame) override;
 
-  virtual nsresult  InsertFrames(ChildListID     aListID,
-                                 nsIFrame*       aPrevFrame,
-                                 nsFrameList&    aFrameList) MOZ_OVERRIDE;
-
-  virtual nsresult  RemoveFrame(ChildListID     aListID,
-                                nsIFrame*       aOldFrame) MOZ_OVERRIDE;
-
-  virtual nsIAtom* GetType() const MOZ_OVERRIDE { return nsGkAtoms::menuFrame; }
+  virtual nsIAtom* GetType() const override { return nsGkAtoms::menuFrame; }
 
   NS_IMETHOD SelectMenu(bool aActivateFlag);
 
-  virtual nsIScrollableFrame* GetScrollTargetFrame() MOZ_OVERRIDE;
+  virtual nsIScrollableFrame* GetScrollTargetFrame() override;
 
   // Retrieve the element that the menu should be anchored to. By default this is
   // the menu itself. However, the anchor attribute may refer to the value of an
@@ -152,9 +150,9 @@ public:
   // otherwise null will be returned.
   nsMenuFrame* Enter(mozilla::WidgetGUIEvent* aEvent);
 
-  virtual void SetParent(nsIFrame* aParent) MOZ_OVERRIDE;
+  // Return the nearest menu bar or menupopup ancestor frame.
+  nsMenuParent* GetMenuParent() const;
 
-  virtual nsMenuParent *GetMenuParent() { return mMenuParent; }
   const nsAString& GetRadioGroupName() { return mGroupName; }
   nsMenuType GetMenuType() { return mType; }
   nsMenuPopupFrame* GetPopup();
@@ -170,8 +168,16 @@ public:
 
   // nsMenuFrame methods 
 
-  bool IsOnMenuBar() { return mMenuParent && mMenuParent->IsMenuBar(); }
-  bool IsOnActiveMenuBar() { return IsOnMenuBar() && mMenuParent->IsActive(); }
+  bool IsOnMenuBar() const
+  {
+    nsMenuParent* menuParent = GetMenuParent();
+    return menuParent && menuParent->IsMenuBar();
+  }
+  bool IsOnActiveMenuBar() const
+  {
+    nsMenuParent* menuParent = GetMenuParent();
+    return menuParent && menuParent->IsMenuBar() && menuParent->IsActive();
+  }
   virtual bool IsOpen();
   virtual bool IsMenu();
   nsMenuListType GetParentMenuListType();
@@ -190,11 +196,15 @@ public:
 
   // returns true if this is a menu on another menu popup. A menu is a submenu
   // if it has a parent popup or menupopup.
-  bool IsOnMenu() { return mMenuParent && mMenuParent->IsMenu(); }
+  bool IsOnMenu() const
+  {
+    nsMenuParent* menuParent = GetMenuParent();
+    return menuParent && menuParent->IsMenu();
+  }
   void SetIsMenu(bool aIsMenu) { mIsMenu = aIsMenu; }
 
 #ifdef DEBUG_FRAME_DUMP
-  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
+  virtual nsresult GetFrameName(nsAString& aResult) const override
   {
       return MakeFrameName(NS_LITERAL_STRING("Menu"), aResult);
   }
@@ -224,11 +234,6 @@ protected:
    */
   void DestroyPopupList();
 
-  // set mMenuParent to the nearest enclosing menu bar or menupopup frame of
-  // aParent (or aParent itself). This is called when initializing the frame,
-  // so aParent should be the expected parent of this frame.
-  void InitMenuParent(nsIFrame* aParent);
-
   // Update the menu's type (normal, checkbox, radio).
   // This method can destroy the frame.
   void UpdateMenuType(nsPresContext* aPresContext);
@@ -245,7 +250,7 @@ protected:
   // This method can destroy the frame
   virtual nsresult AttributeChanged(int32_t aNameSpaceID,
                                     nsIAtom* aAttribute,
-                                    int32_t aModType) MOZ_OVERRIDE;
+                                    int32_t aModType) override;
   virtual ~nsMenuFrame() { }
 
   bool SizeToPopup(nsBoxLayoutState& aState, nsSize& aSize);
@@ -261,14 +266,12 @@ protected:
 #ifdef DEBUG_LAYOUT
   nsresult SetDebug(nsBoxLayoutState& aState, nsIFrame* aList, bool aDebug);
 #endif
-  NS_HIDDEN_(nsresult) Notify(nsITimer* aTimer);
+  nsresult Notify(nsITimer* aTimer);
 
   bool mIsMenu; // Whether or not we can even have children or not.
   bool mChecked;              // are we checked?
   bool mIgnoreAccelTextChange; // temporarily set while determining the accelerator key
   nsMenuType mType;
-
-  nsMenuParent* mMenuParent; // Our parent menu.
 
   // Reference to the mediator which wraps this frame.
   nsRefPtr<nsMenuTimerMediator> mTimerMediator;

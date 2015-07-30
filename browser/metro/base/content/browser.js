@@ -1,4 +1,4 @@
-// -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1079,18 +1079,14 @@ nsBrowserAccess.prototype = {
     return browser ? browser.contentWindow : null;
   },
 
-  openURIInFrame: function browser_openURIInFrame(aURI, aOpener, aWhere, aContext) {
-    let browser = this._getBrowser(aURI, aOpener, aWhere, aContext);
+  openURIInFrame: function browser_openURIInFrame(aURI, aParams, aWhere, aContext) {
+    let browser = this._getBrowser(aURI, null, aWhere, aContext);
     return browser ? browser.QueryInterface(Ci.nsIFrameLoaderOwner) : null;
   },
 
   isTabContentWindow: function(aWindow) {
     return Browser.browsers.some(function (browser) browser.contentWindow == aWindow);
   },
-
-  get contentWindow() {
-    return Browser.selectedBrowser.contentWindow;
-  }
 };
 
 /**
@@ -1455,7 +1451,7 @@ Tab.prototype = {
 
     browser.setAttribute("type", "content-targetable");
 
-    let useRemote = Services.appinfo.browserTabsRemote;
+    let useRemote = Services.appinfo.browserTabsRemoteAutostart;
     let useLocal = Util.isLocalScheme(aURI);
     browser.setAttribute("remote", (!useLocal && useRemote) ? "true" : "false");
 
@@ -1480,9 +1476,6 @@ Tab.prototype = {
 
     // stop about:blank from loading
     browser.stop();
-
-    let fl = browser.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader;
-    fl.renderMode = Ci.nsIFrameLoader.RENDER_MODE_ASYNC_SCROLL;
 
     return browser;
   },

@@ -9,7 +9,6 @@ include LayersSurfaces;
 include LayersMessages;
 include protocol PCompositable;
 include protocol PCompositor;
-include protocol PGrallocBuffer;
 include protocol PLayer;
 include protocol PRenderFrame;
 include protocol PTexture;
@@ -18,6 +17,9 @@ include "mozilla/GfxMessageUtils.h";
 
 using struct mozilla::layers::TextureInfo from "mozilla/layers/CompositorTypes.h";
 using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
+using mozilla::layers::TextureFlags from "mozilla/layers/CompositorTypes.h";
+using class mozilla::layers::APZTestData from "mozilla/layers/APZTestData.h";
+using mozilla::layers::FrameMetrics::ViewID from "FrameMetrics.h";
 
 /**
  * The layers protocol is spoken between thread contexts that manage
@@ -31,55 +33,38 @@ namespace mozilla {
 namespace layers {
 
 union MaybeTransform {
-  gfx3DMatrix;
+  Matrix4x4;
   void_t;
 };
 
 sync protocol PLayerTransaction {
-  manager PRenderFrame or PCompositor;
+  manager PCompositor;
   manages PLayer;
   manages PCompositable;
-  manages PGrallocBuffer;
   manages PTexture;
 
+child:
+  async ParentAsyncMessages(AsyncParentMessageData[] aMessages);
+
 parent:
-  /**
-   * Only the parent side has privileges to allocate the buffer.
-   * Allocation may fail (pmem is a scarce resource), and if so null_t
-   * is returned.
-   *
-   * |format| is an Android PixelFormat (see PixelFormat.h)
-   *
-   * commonly used PixelFormats are:
-   *   PIXEL_FORMAT_RGBA_8888
-   *   PIXEL_FORMAT_RGBX_8888
-   *   PIXEL_FORMAT_BGRA_8888
-   *
-   * Note that SurfaceDescriptorGralloc has a "isRBSwapped" boolean
-   * that can treat the R/B bytes as swapped when they are rendered
-   * to the screen, to help with matching the native pixel format
-   * of other rendering engines.
-   *
-   * |usage| is a USAGE_* mask (see GraphicBuffer.h)
-   *
-   * commonly used USAGE flags are:
-   *   USAGE_SW_READ_OFTEN | USAGE_SW_WRITE_OFTEN | USAGE_HW_TEXTURE
-   *     - used for software rendering to a buffer which the compositor
-   *       treats as a texture
-   *   USAGE_HW_RENDER | USAGE_HW_TEXTURE
-   *     - used for GL rendering to a buffer which the compositor
-   *       treats as a texture
-   */
-  sync PGrallocBuffer(IntSize size, uint32_t format, uint32_t usage)
-    returns (MaybeMagicGrallocBufferHandle handle);
   async PLayer();
   async PCompositable(TextureInfo aTextureInfo);
-  async PTexture(SurfaceDescriptor aSharedData, uint32_t aTextureFlags);
+  async PTexture(SurfaceDescriptor aSharedData, TextureFlags aTextureFlags);
 
   // The isFirstPaint flag can be used to indicate that this is the first update
   // for a particular document.
-  sync Update(Edit[] cset, TargetConfig targetConfig, bool isFirstPaint, bool scheduleComposite)
+  sync Update(Edit[] cset, uint64_t id, TargetConfig targetConfig,
+              PluginWindowData[] plugins, bool isFirstPaint,
+              bool scheduleComposite, uint32_t paintSequenceNumber,
+              bool isRepeatTransaction, TimeStamp transactionStart)
     returns (EditReply[] reply);
+
+  // We don't need to send a sync transaction if
+  // no transaction operate require a swap.
+  async UpdateNoSwap(Edit[] cset, uint64_t id, TargetConfig targetConfig,
+                     PluginWindowData[] plugins, bool isFirstPaint,
+                     bool scheduleComposite, uint32_t paintSequenceNumber,
+                     bool isRepeatTransaction, TimeStamp transactionStart);
 
   // Testing APIs
 
@@ -98,22 +83,29 @@ parent:
   // be void_t.
   sync GetAnimationTransform(PLayer layer) returns (MaybeTransform transform);
 
-  // The next time this layer is composited, add this async scroll offset in
-  // CSS pixels.
+  // The next time the layer tree is composited, add this async scroll offset in
+  // CSS pixels for the given ViewID.
   // Useful for testing rendering of async scrolling.
-  async SetAsyncScrollOffset(PLayer layer, int32_t x, int32_t y);
-
-  // We don't need to send a sync transaction if
-  // no transaction operate require a swap.
-  async UpdateNoSwap(Edit[] cset, TargetConfig targetConfig, bool isFirstPaint, bool scheduleComposite);
+  sync SetAsyncScrollOffset(ViewID id, int32_t x, int32_t y);
 
   // Drop any front buffers that might be retained on the compositor
   // side.
   async ClearCachedResources();
-  
+
   // Schedule a composite if one isn't already scheduled.
   async ForceComposite();
 
+  // Get a copy of the compositor-side APZ test data instance for this
+  // layers id.
+  sync GetAPZTestData() returns (APZTestData data);
+
+  // Query a named property from the last frame
+  sync RequestProperty(nsString property) returns (float value);
+
+  async ChildAsyncMessages(AsyncChildMessageData[] aMessages);
+
+  async Shutdown();
+child:
   async __delete__();
 };
 

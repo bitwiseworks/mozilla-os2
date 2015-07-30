@@ -67,7 +67,6 @@
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
 #include "mozISpellI18NManager.h"
-#include "nsICharsetConverterManager.h"
 #include "nsUnicharUtilCIID.h"
 #include "nsUnicharUtils.h"
 #include "nsCRT.h"
@@ -76,8 +75,11 @@
 #include <stdlib.h>
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
+#include "mozilla/dom/EncodingUtils.h"
+#include "mozilla/dom/ContentParent.h"
 
-static NS_DEFINE_CID(kUnicharUtilCID, NS_UNICHARUTIL_CID);
+using mozilla::dom::ContentParent;
+using mozilla::dom::EncodingUtils;
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(mozHunspell)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(mozHunspell)
@@ -113,7 +115,7 @@ mozHunspell::mozHunspell()
 nsresult
 mozHunspell::Init()
 {
-  LoadDictionaryList();
+  LoadDictionaryList(false);
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
@@ -153,9 +155,9 @@ NS_IMETHODIMP mozHunspell::SetDictionary(const char16_t *aDictionary)
   if (nsDependentString(aDictionary).IsEmpty()) {
     delete mHunspell;
     mHunspell = nullptr;
-    mDictionary.AssignLiteral("");
-    mAffixFileName.AssignLiteral("");
-    mLanguage.AssignLiteral("");
+    mDictionary.Truncate();
+    mAffixFileName.Truncate();
+    mLanguage.Truncate();
     mDecoder = nullptr;
     mEncoder = nullptr;
 
@@ -205,18 +207,13 @@ NS_IMETHODIMP mozHunspell::SetDictionary(const char16_t *aDictionary)
   if (!mHunspell)
     return NS_ERROR_OUT_OF_MEMORY;
 
-  nsCOMPtr<nsICharsetConverterManager> ccm =
-    do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = ccm->GetUnicodeDecoder(mHunspell->get_dic_encoding(),
-                              getter_AddRefs(mDecoder));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = ccm->GetUnicodeEncoder(mHunspell->get_dic_encoding(),
-                              getter_AddRefs(mEncoder));
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  nsDependentCString label(mHunspell->get_dic_encoding());
+  nsAutoCString encoding;
+  if (!EncodingUtils::FindEncodingForLabelNoReplacement(label, encoding)) {
+    return NS_ERROR_UCONV_NOCONV;
+  }
+  mEncoder = EncodingUtils::EncoderForEncoding(encoding);
+  mDecoder = EncodingUtils::DecoderForEncoding(encoding);
 
   if (mEncoder)
     mEncoder->SetOutputErrorBehavior(mEncoder->kOnError_Signal, nullptr, '?');
@@ -349,7 +346,7 @@ NS_IMETHODIMP mozHunspell::GetDictionaryList(char16_t ***aDictionaries,
 }
 
 void
-mozHunspell::LoadDictionaryList()
+mozHunspell::LoadDictionaryList(bool aNotifyChildProcesses)
 {
   mDictionaries.Clear();
 
@@ -429,6 +426,10 @@ mozHunspell::LoadDictionaryList()
   // dictionary and any editors which may use it.
   mozInlineSpellChecker::UpdateCanEnableInlineSpellChecking();
 
+  if (aNotifyChildProcesses) {
+    ContentParent::NotifyUpdatedDictionaries();
+  }
+
   // Check if the current dictionary is still available.
   // If not, try to replace it with another dictionary of the same language.
   if (!mDictionary.IsEmpty()) {
@@ -488,6 +489,9 @@ mozHunspell::LoadDictionariesFromDir(nsIFile* aDir)
 #ifdef DEBUG_bsmedberg
     printf("Adding dictionary: %s\n", NS_ConvertUTF16toUTF8(dict).get());
 #endif
+
+    // Replace '_' separator with '-'
+    dict.ReplaceChar("_", '-');
 
     mDictionaries.Put(dict, file);
   }
@@ -594,7 +598,7 @@ mozHunspell::Observe(nsISupports* aSubj, const char *aTopic,
                || !strcmp(aTopic, "profile-after-change"),
                "Unexpected observer topic");
 
-  LoadDictionaryList();
+  LoadDictionaryList(false);
 
   return NS_OK;
 }
@@ -603,7 +607,7 @@ mozHunspell::Observe(nsISupports* aSubj, const char *aTopic,
 NS_IMETHODIMP mozHunspell::AddDirectory(nsIFile *aDir)
 {
   mDynamicDirectories.AppendObject(aDir);
-  LoadDictionaryList();
+  LoadDictionaryList(true);
   return NS_OK;
 }
 
@@ -611,6 +615,6 @@ NS_IMETHODIMP mozHunspell::AddDirectory(nsIFile *aDir)
 NS_IMETHODIMP mozHunspell::RemoveDirectory(nsIFile *aDir)
 {
   mDynamicDirectories.RemoveObject(aDir);
-  LoadDictionaryList();
+  LoadDictionaryList(true);
   return NS_OK;
 }

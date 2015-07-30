@@ -5,14 +5,13 @@
 
 package org.mozilla.gecko;
 
+import java.nio.ByteBuffer;
+import java.util.concurrent.ArrayBlockingQueue;
+
+import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.gfx.DisplayPortMetrics;
 import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
-import org.mozilla.gecko.mozglue.JNITarget;
-import org.mozilla.gecko.mozglue.generatorannotations.GeneratorOptions;
-import org.mozilla.gecko.mozglue.generatorannotations.WrapEntireClassForJNI;
-import org.mozilla.gecko.mozglue.RobocopTarget;
 
-import android.content.res.Resources;
 import android.graphics.Point;
 import android.graphics.PointF;
 import android.graphics.Rect;
@@ -21,24 +20,18 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorManager;
 import android.location.Address;
 import android.location.Location;
-import android.os.Build;
 import android.os.SystemClock;
-import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.SparseArray;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import org.mozilla.gecko.mozglue.JNITarget;
+import org.mozilla.gecko.mozglue.RobocopTarget;
 
-import java.nio.ByteBuffer;
-import java.util.concurrent.ArrayBlockingQueue;
-
-/* We're not allowed to hold on to most events given to us
+/**
+ * We're not allowed to hold on to most events given to us
  * so we save the parts of the events we want to use in GeckoEvent.
  * Fields have different meanings depending on the event type.
- */
-
-/* This class is referenced by Robocop via reflection; use care when
- * modifying the signature.
  */
 @JNITarget
 public class GeckoEvent {
@@ -47,7 +40,7 @@ public class GeckoEvent {
     private static final int EVENT_FACTORY_SIZE = 5;
 
     // Maybe we're probably better to just make mType non final, and just store GeckoEvents in here...
-    private static SparseArray<ArrayBlockingQueue<GeckoEvent>> mEvents = new SparseArray<ArrayBlockingQueue<GeckoEvent>>();
+    private static final SparseArray<ArrayBlockingQueue<GeckoEvent>> mEvents = new SparseArray<ArrayBlockingQueue<GeckoEvent>>();
 
     public static GeckoEvent get(NativeGeckoEvent type) {
         synchronized (mEvents) {
@@ -80,9 +73,9 @@ public class GeckoEvent {
         KEY_EVENT(1),
         MOTION_EVENT(2),
         SENSOR_EVENT(3),
+        PROCESS_OBJECT(4),
         LOCATION_EVENT(5),
         IME_EVENT(6),
-        DRAW(7),
         SIZE_CHANGED(8),
         APP_BACKGROUNDING(9),
         APP_FOREGROUNDING(10),
@@ -109,32 +102,15 @@ public class GeckoEvent {
         PREFERENCES_REMOVE_OBSERVERS(41),
         TELEMETRY_UI_SESSION_START(42),
         TELEMETRY_UI_SESSION_STOP(43),
-        TELEMETRY_UI_EVENT(44);
+        TELEMETRY_UI_EVENT(44),
+        GAMEPAD_ADDREMOVE(45),
+        GAMEPAD_DATA(46),
+        LONG_PRESS(47),
+        ZOOMEDVIEW(48);
 
         public final int value;
 
         private NativeGeckoEvent(int value) {
-            this.value = value;
-        }
-    }
-
-    /**
-     * The DomKeyLocation enum encapsulates the DOM KeyboardEvent's constants.
-     * @see https://developer.mozilla.org/en-US/docs/DOM/KeyboardEvent#Key_location_constants
-     */
-    @GeneratorOptions(generatedClassName = "JavaDomKeyLocation")
-    @WrapEntireClassForJNI
-    public enum DomKeyLocation {
-        DOM_KEY_LOCATION_STANDARD(0),
-        DOM_KEY_LOCATION_LEFT(1),
-        DOM_KEY_LOCATION_RIGHT(2),
-        DOM_KEY_LOCATION_NUMPAD(3),
-        DOM_KEY_LOCATION_MOBILE(4),
-        DOM_KEY_LOCATION_JOYSTICK(5);
-
-        public final int value;
-
-        private DomKeyLocation(int value) {
             this.value = value;
         }
     }
@@ -148,7 +124,8 @@ public class GeckoEvent {
         IME_ADD_COMPOSITION_RANGE(3),
         IME_UPDATE_COMPOSITION(4),
         IME_REMOVE_COMPOSITION(5),
-        IME_ACKNOWLEDGE_FOCUS(6);
+        IME_ACKNOWLEDGE_FOCUS(6),
+        IME_COMPOSE_TEXT(7);
 
         public final int value;
 
@@ -179,6 +156,14 @@ public class GeckoEvent {
     public static final int ACTION_MAGNIFY = 12;
     public static final int ACTION_MAGNIFY_END = 13;
 
+    public static final int ACTION_GAMEPAD_ADDED = 1;
+    public static final int ACTION_GAMEPAD_REMOVED = 2;
+
+    public static final int ACTION_GAMEPAD_BUTTON = 1;
+    public static final int ACTION_GAMEPAD_AXES = 2;
+
+    public static final int ACTION_OBJECT_LAYER_CLIENT = 1;
+
     private final int mType;
     private int mAction;
     private boolean mAckNeeded;
@@ -188,6 +173,7 @@ public class GeckoEvent {
     private int mPointerIndex; // index of the point that has changed
     private float[] mOrientations;
     private float[] mPressures;
+    private int[] mToolTypes;
     private Point[] mPointRadii;
     private Rect mRect;
     private double mX;
@@ -197,6 +183,7 @@ public class GeckoEvent {
     private int mMetaState;
     private int mFlags;
     private int mKeyCode;
+    private int mScanCode;
     private int mUnicodeChar;
     private int mBaseUnicodeChar; // mUnicodeChar without meta states applied
     private int mDOMPrintableKeyValue;
@@ -216,7 +203,6 @@ public class GeckoEvent {
     private int mRangeLineColor;
     private Location mLocation;
     private Address mAddress;
-    private DomKeyLocation mDomKeyLocation;
 
     private int     mConnectionType;
     private boolean mIsWifi;
@@ -231,7 +217,15 @@ public class GeckoEvent {
     private int mWidth;
     private int mHeight;
 
+    private int mID;
+    private int mGamepadButton;
+    private boolean mGamepadButtonPressed;
+    private float mGamepadButtonValue;
+    private float[] mGamepadValues;
+
     private String[] mPrefNames;
+
+    private Object mObject;
 
     private GeckoEvent(NativeGeckoEvent event) {
         mType = event.value;
@@ -280,6 +274,7 @@ public class GeckoEvent {
         mMetaState = k.getMetaState() | metaState;
         mFlags = k.getFlags();
         mKeyCode = k.getKeyCode();
+        mScanCode = k.getScanCode();
         mUnicodeChar = k.getUnicodeChar(mMetaState);
         // e.g. for Ctrl+A, Android returns 0 for mUnicodeChar,
         // but Gecko expects 'a', so we return that in mBaseUnicodeChar
@@ -297,35 +292,11 @@ public class GeckoEvent {
                 mDOMPrintableKeyValue = k.getUnicodeChar(unmodifiedMetaState);
             }
         }
-        mDomKeyLocation = isJoystickButton(mKeyCode) ? DomKeyLocation.DOM_KEY_LOCATION_JOYSTICK
-                                                     : DomKeyLocation.DOM_KEY_LOCATION_MOBILE;
-    }
-
-    /**
-     * This method tests if a key is one of the described in:
-     * https://bugzilla.mozilla.org/show_bug.cgi?id=756504#c0
-     * @param keyCode int with the key code (Android key constant from KeyEvent)
-     * @return true if the key is one of the listed above, false otherwise.
-     */
-    private static boolean isJoystickButton(int keyCode) {
-        switch (keyCode) {
-            case KeyEvent.KEYCODE_DPAD_CENTER:
-            case KeyEvent.KEYCODE_DPAD_LEFT:
-            case KeyEvent.KEYCODE_DPAD_RIGHT:
-            case KeyEvent.KEYCODE_DPAD_DOWN:
-            case KeyEvent.KEYCODE_DPAD_UP:
-                return true;
-            default:
-                if (Build.VERSION.SDK_INT >= 12) {
-                    return KeyEvent.isGamepadButton(keyCode);
-                }
-                return GeckoEvent.isGamepadButton(keyCode);
-        }
     }
 
     /**
      * This method is a replacement for the the KeyEvent.isGamepadButton method to be
-     * compatible with Build.VERSION.SDK_INT < 12. This is an implementantion of the
+     * compatible with Build.VERSION.SDK_INT < 12. This is an implementation of the
      * same method isGamepadButton available after SDK 12.
      * @param keyCode int with the key code (Android key constant from KeyEvent).
      * @return True if the keycode is a gamepad button, such as {@link #KEYCODE_BUTTON_A}.
@@ -407,6 +378,16 @@ public class GeckoEvent {
         return event;
     }
 
+    /**
+     * Creates a GeckoEvent that contains the data from the LongPressEvent, to be
+     * dispatched in CSS pixels relative to gecko's scroll position.
+     */
+    public static GeckoEvent createLongPressEvent(MotionEvent m) {
+        GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.LONG_PRESS);
+        event.initMotionEvent(m, false);
+        return event;
+    }
+
     private void initMotionEvent(MotionEvent m, boolean keepInViewCoordinates) {
         mAction = m.getActionMasked();
         mTime = (System.currentTimeMillis() - SystemClock.elapsedRealtime()) + m.getEventTime();
@@ -427,6 +408,7 @@ public class GeckoEvent {
                 mPointIndicies = new int[mCount];
                 mOrientations = new float[mCount];
                 mPressures = new float[mCount];
+                mToolTypes = new int[mCount];
                 mPointRadii = new Point[mCount];
                 mPointerIndex = m.getActionIndex();
                 for (int i = 0; i < mCount; i++) {
@@ -441,6 +423,7 @@ public class GeckoEvent {
                 mPointIndicies = new int[mCount];
                 mOrientations = new float[mCount];
                 mPressures = new float[mCount];
+                mToolTypes = new int[mCount];
                 mPointRadii = new Point[mCount];
             }
         }
@@ -455,38 +438,30 @@ public class GeckoEvent {
 
             mPoints[index] = new Point(Math.round(geckoPoint.x), Math.round(geckoPoint.y));
             mPointIndicies[index] = event.getPointerId(eventIndex);
-            // getToolMajor, getToolMinor and getOrientation are API Level 9 features
-            if (Build.VERSION.SDK_INT >= 9) {
-                double radians = event.getOrientation(eventIndex);
-                mOrientations[index] = (float) Math.toDegrees(radians);
-                // w3c touchevents spec does not allow orientations == 90
-                // this shifts it to -90, which will be shifted to zero below
-                if (mOrientations[index] == 90)
-                    mOrientations[index] = -90;
 
-                // w3c touchevent radius are given by an orientation between 0 and 90
-                // the radius is found by removing the orientation and measuring the x and y
-                // radius of the resulting ellipse
-                // for android orientations >= 0 and < 90, the major axis should correspond to
-                // just reporting the y radius as the major one, and x as minor
-                // however, for a radius < 0, we have to shift the orientation by adding 90, and
-                // reverse which radius is major and minor
-                if (mOrientations[index] < 0) {
-                    mOrientations[index] += 90;
-                    mPointRadii[index] = new Point((int)event.getToolMajor(eventIndex)/2,
-                                                   (int)event.getToolMinor(eventIndex)/2);
-                } else {
-                    mPointRadii[index] = new Point((int)event.getToolMinor(eventIndex)/2,
-                                                   (int)event.getToolMajor(eventIndex)/2);
-                }
+            double radians = event.getOrientation(eventIndex);
+            mOrientations[index] = (float) Math.toDegrees(radians);
+            // w3c touchevents spec does not allow orientations == 90
+            // this shifts it to -90, which will be shifted to zero below
+            if (mOrientations[index] == 90)
+                mOrientations[index] = -90;
+
+            // w3c touchevent radius are given by an orientation between 0 and 90
+            // the radius is found by removing the orientation and measuring the x and y
+            // radius of the resulting ellipse
+            // for android orientations >= 0 and < 90, the major axis should correspond to
+            // just reporting the y radius as the major one, and x as minor
+            // however, for a radius < 0, we have to shift the orientation by adding 90, and
+            // reverse which radius is major and minor
+            if (mOrientations[index] < 0) {
+                mOrientations[index] += 90;
+                mPointRadii[index] = new Point((int)event.getToolMajor(eventIndex)/2,
+                                               (int)event.getToolMinor(eventIndex)/2);
             } else {
-                float size = event.getSize(eventIndex);
-                Resources resources = GeckoAppShell.getContext().getResources();
-                DisplayMetrics displaymetrics = resources.getDisplayMetrics();
-                size = size*Math.min(displaymetrics.heightPixels, displaymetrics.widthPixels);
-                mPointRadii[index] = new Point((int)size,(int)size);
-                mOrientations[index] = 0;
+                mPointRadii[index] = new Point((int)event.getToolMinor(eventIndex)/2,
+                                               (int)event.getToolMajor(eventIndex)/2);
             }
+
             if (!keepInViewCoordinates) {
                 // If we are converting to gecko CSS pixels, then we should adjust the
                 // radii as well
@@ -495,6 +470,9 @@ public class GeckoEvent {
                 mPointRadii[index].y /= zoom;
             }
             mPressures[index] = event.getPressure(eventIndex);
+            if (Versions.feature14Plus) {
+                mToolTypes[index] = event.getToolType(index);
+            }
         } catch (Exception ex) {
             Log.e(LOGTAG, "Error creating motion point " + index, ex);
             mPointRadii[index] = new Point(0, 0);
@@ -577,6 +555,13 @@ public class GeckoEvent {
         return event;
     }
 
+    public static GeckoEvent createObjectEvent(final int action, final Object object) {
+        GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.PROCESS_OBJECT);
+        event.mAction = action;
+        event.mObject = object;
+        return event;
+    }
+
     public static GeckoEvent createLocationEvent(Location l) {
         GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.LOCATION_EVENT);
         event.mLocation = l;
@@ -595,10 +580,17 @@ public class GeckoEvent {
         return event;
     }
 
-    public static GeckoEvent createIMEReplaceEvent(int start, int end,
-                                                   String text) {
+    public static GeckoEvent createIMEReplaceEvent(int start, int end, String text) {
+        return createIMETextEvent(false, start, end, text);
+    }
+
+    public static GeckoEvent createIMEComposeEvent(int start, int end, String text) {
+        return createIMETextEvent(true, start, end, text);
+    }
+
+    private static GeckoEvent createIMETextEvent(boolean compose, int start, int end, String text) {
         GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.IME_EVENT);
-        event.mAction = ImeAction.IME_REPLACE_TEXT.value;
+        event.mAction = (compose ? ImeAction.IME_COMPOSE_TEXT : ImeAction.IME_REPLACE_TEXT).value;
         event.mStart = start;
         event.mEnd = end;
         event.mCharacters = text;
@@ -643,12 +635,6 @@ public class GeckoEvent {
         return event;
     }
 
-    public static GeckoEvent createDrawEvent(Rect rect) {
-        GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.DRAW);
-        event.mRect = rect;
-        return event;
-    }
-
     public static GeckoEvent createSizeChangedEvent(int w, int h, int screenw, int screenh) {
         GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.SIZE_CHANGED);
         event.mPoints = new Point[2];
@@ -689,13 +675,6 @@ public class GeckoEvent {
         return event;
     }
 
-    public static GeckoEvent createWebappLoadEvent(String uri) {
-        GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.LOAD_URI);
-        event.mCharacters = uri;
-        event.mCharactersExtra = "-webapp";
-        return event;
-    }
-
     public static GeckoEvent createBookmarkLoadEvent(String uri) {
         GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.LOAD_URI);
         event.mCharacters = uri;
@@ -721,6 +700,17 @@ public class GeckoEvent {
         GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.THUMBNAIL);
         event.mPoints = new Point[1];
         event.mPoints[0] = new Point(bufw, bufh);
+        event.mMetaState = tabId;
+        event.mBuffer = buffer;
+        return event;
+    }
+
+    public static GeckoEvent createZoomedViewEvent(int tabId, int x, int y, int bufw, int bufh, float scaleFactor, ByteBuffer buffer) {
+        GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.ZOOMEDVIEW);
+        event.mPoints = new Point[2];
+        event.mPoints[0] = new Point(x, y);
+        event.mPoints[1] = new Point(bufw, bufh);
+        event.mX = (double) scaleFactor;
         event.mMetaState = tabId;
         event.mBuffer = buffer;
         return event;
@@ -810,6 +800,47 @@ public class GeckoEvent {
         event.mCharacters = method;
         event.mCharactersExtra = extras;
         event.mTime = timestamp;
+        return event;
+    }
+
+    public static GeckoEvent createGamepadAddRemoveEvent(int id, boolean added) {
+        GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.GAMEPAD_ADDREMOVE);
+        event.mID = id;
+        event.mAction = added ? ACTION_GAMEPAD_ADDED : ACTION_GAMEPAD_REMOVED;
+        return event;
+    }
+
+    private static int boolArrayToBitfield(boolean[] array) {
+        int bits = 0;
+        for (int i = 0; i < array.length; i++) {
+            if (array[i]) {
+                bits |= 1<<i;
+            }
+        }
+        return bits;
+    }
+
+    public static GeckoEvent createGamepadButtonEvent(int id,
+                                                      int which,
+                                                      boolean pressed,
+                                                      float value) {
+        GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.GAMEPAD_DATA);
+        event.mID = id;
+        event.mAction = ACTION_GAMEPAD_BUTTON;
+        event.mGamepadButton = which;
+        event.mGamepadButtonPressed = pressed;
+        event.mGamepadButtonValue = value;
+        return event;
+    }
+
+    public static GeckoEvent createGamepadAxisEvent(int id, boolean[] valid,
+                                                    float[] values) {
+        GeckoEvent event = GeckoEvent.get(NativeGeckoEvent.GAMEPAD_DATA);
+        event.mID = id;
+        event.mAction = ACTION_GAMEPAD_AXES;
+        event.mFlags = boolArrayToBitfield(valid);
+        event.mCount = values.length;
+        event.mGamepadValues = values;
         return event;
     }
 

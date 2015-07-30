@@ -7,10 +7,12 @@
 #include "RemoveTask.h"
 
 #include "DOMError.h"
+#include "mozilla/dom/File.h"
 #include "mozilla/dom/FileSystemBase.h"
 #include "mozilla/dom/FileSystemUtils.h"
 #include "mozilla/dom/Promise.h"
-#include "nsIDOMFile.h"
+#include "mozilla/dom/ipc/BlobChild.h"
+#include "mozilla/dom/ipc/BlobParent.h"
 #include "nsIFile.h"
 #include "nsStringGlue.h"
 
@@ -19,12 +21,13 @@ namespace dom {
 
 RemoveTask::RemoveTask(FileSystemBase* aFileSystem,
                        const nsAString& aDirPath,
-                       nsIDOMFile* aTargetFile,
+                       FileImpl* aTargetFile,
                        const nsAString& aTargetPath,
-                       bool aRecursive)
+                       bool aRecursive,
+                       ErrorResult& aRv)
   : FileSystemTaskBase(aFileSystem)
   , mDirRealPath(aDirPath)
-  , mTargetFile(aTargetFile)
+  , mTargetFileImpl(aTargetFile)
   , mTargetRealPath(aTargetPath)
   , mRecursive(aRecursive)
   , mReturnValue(false)
@@ -36,7 +39,7 @@ RemoveTask::RemoveTask(FileSystemBase* aFileSystem,
   if (!globalObject) {
     return;
   }
-  mPromise = new Promise(globalObject);
+  mPromise = Promise::Create(globalObject, aRv);
 }
 
 RemoveTask::RemoveTask(FileSystemBase* aFileSystem,
@@ -63,9 +66,8 @@ RemoveTask::RemoveTask(FileSystemBase* aFileSystem,
   }
 
   BlobParent* bp = static_cast<BlobParent*>(static_cast<PBlobParent*>(target));
-  nsCOMPtr<nsIDOMBlob> blob = bp->GetBlob();
-  mTargetFile = do_QueryInterface(blob);
-  MOZ_ASSERT(mTargetFile, "mTargetFile should not be null.");
+  mTargetFileImpl = bp->GetBlobImpl();
+  MOZ_ASSERT(mTargetFileImpl);
 }
 
 RemoveTask::~RemoveTask()
@@ -89,9 +91,10 @@ RemoveTask::GetRequestParams(const nsString& aFileSystem) const
   param.filesystem() = aFileSystem;
   param.directory() = mDirRealPath;
   param.recursive() = mRecursive;
-  if (mTargetFile) {
+  if (mTargetFileImpl) {
+    nsRefPtr<File> file = new File(mFileSystem->GetWindow(), mTargetFileImpl);
     BlobChild* actor
-      = ContentChild::GetSingleton()->GetOrCreateActorForBlob(mTargetFile);
+      = ContentChild::GetSingleton()->GetOrCreateActorForBlob(file);
     if (actor) {
       param.target() = actor;
     }
@@ -127,9 +130,9 @@ RemoveTask::Work()
     return NS_ERROR_FAILURE;
   }
 
-  // Get the DOM path if a DOMFile is passed as the target.
-  if (mTargetFile) {
-    if (!mFileSystem->GetRealPath(mTargetFile, mTargetRealPath)) {
+  // Get the DOM path if a File is passed as the target.
+  if (mTargetFileImpl) {
+    if (!mFileSystem->GetRealPath(mTargetFileImpl, mTargetRealPath)) {
       return NS_ERROR_DOM_SECURITY_ERR;
     }
     if (!FileSystemUtils::IsDescendantPath(mDirRealPath, mTargetRealPath)) {
@@ -185,7 +188,7 @@ RemoveTask::HandlerCallback()
   if (HasError()) {
     nsRefPtr<DOMError> domError = new DOMError(mFileSystem->GetWindow(),
       mErrorValue);
-    mPromise->MaybeReject(domError);
+    mPromise->MaybeRejectBrokenly(domError);
     mPromise = nullptr;
     return;
   }

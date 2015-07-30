@@ -13,6 +13,8 @@
 #include "nsAutoPtr.h"
 #include "nsString.h"
 
+class nsICacheEntryMetaDataVisitor;
+
 namespace mozilla {
 namespace net {
 
@@ -22,7 +24,7 @@ namespace net {
 // the frecency value to a correct internal representation again.
 // It might not be 100% accurate, but for the purpose it suffice.
 #define FRECENCY2INT(aFrecency) \
-  ((uint32_t)(aFrecency * CacheObserver::HalfLifeSeconds()))
+  ((uint32_t)((aFrecency) * CacheObserver::HalfLifeSeconds()))
 #define INT2FRECENCY(aInt) \
   ((double)(aInt) / (double)CacheObserver::HalfLifeSeconds())
 
@@ -129,32 +131,35 @@ public:
 
   const char * GetElement(const char *aKey);
   nsresult     SetElement(const char *aKey, const char *aValue);
+  nsresult     Visit(nsICacheEntryMetaDataVisitor *aVisitor);
 
   CacheHash::Hash16_t GetHash(uint32_t aIndex);
   nsresult            SetHash(uint32_t aIndex, CacheHash::Hash16_t aHash);
 
   nsresult SetExpirationTime(uint32_t aExpirationTime);
   nsresult GetExpirationTime(uint32_t *_retval);
-  nsresult SetLastModified(uint32_t aLastModified);
-  nsresult GetLastModified(uint32_t *_retval);
   nsresult SetFrecency(uint32_t aFrecency);
   nsresult GetFrecency(uint32_t *_retval);
+  nsresult GetLastModified(uint32_t *_retval);
   nsresult GetLastFetched(uint32_t *_retval);
   nsresult GetFetchCount(uint32_t *_retval);
+  // Called by upper layers to indicate the entry this metadata belongs
+  // with has been fetched, i.e. delivered to the consumer.
+  nsresult OnFetched();
 
   int64_t  Offset() { return mOffset; }
   uint32_t ElementsSize() { return mElementsSize; }
-  void     MarkDirty() { mIsDirty = true; }
+  void     MarkDirty(bool aUpdateLastModified = true);
   bool     IsDirty() { return mIsDirty; }
   uint32_t MemoryUsage() { return sizeof(CacheFileMetadata) + mHashArraySize + mBufSize; }
 
-  NS_IMETHOD OnFileOpened(CacheFileHandle *aHandle, nsresult aResult);
+  NS_IMETHOD OnFileOpened(CacheFileHandle *aHandle, nsresult aResult) override;
   NS_IMETHOD OnDataWritten(CacheFileHandle *aHandle, const char *aBuf,
-                           nsresult aResult);
-  NS_IMETHOD OnDataRead(CacheFileHandle *aHandle, char *aBuf, nsresult aResult);
-  NS_IMETHOD OnFileDoomed(CacheFileHandle *aHandle, nsresult aResult);
-  NS_IMETHOD OnEOFSet(CacheFileHandle *aHandle, nsresult aResult);
-  NS_IMETHOD OnFileRenamed(CacheFileHandle *aHandle, nsresult aResult);
+                           nsresult aResult) override;
+  NS_IMETHOD OnDataRead(CacheFileHandle *aHandle, char *aBuf, nsresult aResult) override;
+  NS_IMETHOD OnFileDoomed(CacheFileHandle *aHandle, nsresult aResult) override;
+  NS_IMETHOD OnEOFSet(CacheFileHandle *aHandle, nsresult aResult) override;
+  NS_IMETHOD OnFileRenamed(CacheFileHandle *aHandle, nsresult aResult) override;
 
   // Memory reporting
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;

@@ -31,7 +31,13 @@ function make_fake_appdir() {
       if (prop == "UAppData") {
         return appD.clone();
       }
-      throw Components.results.NS_ERROR_FAILURE;
+      // Depending on timing we can get requests for other files.
+      // When we threw an exception here, in the world before bug 997440, this got lost
+      // because of the arbitrary JSContext being used in XPCWrappedJSClass::CallMethod.
+      // After bug 997440 this gets reported to our window and causes the tests to fail.
+      // So, we'll just dump out a message to the logs.
+      dump("WARNING: make_fake_appdir - fake nsIDirectoryServiceProvider - Unexpected getFile for: '" + prop + "'\n");
+      return null;
     },
     QueryInterface: function(iid) {
       if (iid.equals(Ci.nsIDirectoryServiceProvider) ||
@@ -123,7 +129,11 @@ function addPendingCrashreport(crD, date, extra) {
     extradata += x + "=" + extra[x] + "\n";
   }
   writeDataToFile(extrafile, extradata);
+  let memoryfile = pendingdir.clone();
+  memoryfile.append(uuid + ".memory.json.gz");
+  writeDataToFile(memoryfile, "Let's pretend this is a memory report");
   dumpfile.lastModifiedTime = date;
   extrafile.lastModifiedTime = date;
+  memoryfile.lastModifiedTime = date;
   return {'id': uuid, 'date': date, 'pending': true, 'extra': extra};
 }

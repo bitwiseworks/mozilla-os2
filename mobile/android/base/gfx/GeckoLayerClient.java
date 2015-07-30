@@ -33,7 +33,7 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
     private LayerRenderer mLayerRenderer;
     private boolean mLayerRendererInitialized;
 
-    private Context mContext;
+    private final Context mContext;
     private IntSize mScreenSize;
     private IntSize mWindowSize;
     private DisplayPortMetrics mDisplayPort;
@@ -59,7 +59,7 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
      */
     private ImmutableViewportMetrics mFrameMetrics;
 
-    private List<DrawListener> mDrawListeners;
+    private final List<DrawListener> mDrawListeners;
 
     /* Used as temporaries by syncViewportInfo */
     private final ViewTransform mCurrentViewTransform;
@@ -81,12 +81,13 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
      * Specifically:
      * 1) reading mViewportMetrics from any thread is fine without synchronization
      * 2) writing to mViewportMetrics requires synchronizing on the layer controller object
-     * 3) whenver reading multiple fields from mViewportMetrics without synchronization (i.e. in
-     *    case 1 above) you should always frist grab a local copy of the reference, and then use
+     * 3) whenever reading multiple fields from mViewportMetrics without synchronization (i.e. in
+     *    case 1 above) you should always first grab a local copy of the reference, and then use
      *    that because mViewportMetrics might get reassigned in between reading the different
      *    fields. */
     private volatile ImmutableViewportMetrics mViewportMetrics;
-    private LayerView.OnMetricsChangedListener mViewportChangeListener;
+    private LayerView.OnMetricsChangedListener mDynamicToolbarViewportChangeListener;
+    private LayerView.OnMetricsChangedListener mZoomedViewViewportChangeListener;
 
     private ZoomConstraints mZoomConstraints;
 
@@ -94,7 +95,7 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
 
     private final PanZoomController mPanZoomController;
     private final LayerMarginsAnimator mMarginsAnimator;
-    private LayerView mView;
+    private final LayerView mView;
 
     /* This flag is true from the time that browser.js detects a first-paint is about to start,
      * to the time that we receive the first-paint composite notification from the compositor.
@@ -118,8 +119,6 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
         mCurrentViewTransformMargins = new RectF();
         mProgressiveUpdateData = new ProgressiveUpdateData();
         mProgressiveUpdateDisplayPort = new DisplayPortMetrics();
-        mLastProgressiveUpdateWasLowPrecision = false;
-        mProgressiveUpdateWasInDanger = false;
 
         mForceRedraw = true;
         DisplayMetrics displayMetrics = context.getResources().getDisplayMetrics();
@@ -653,7 +652,7 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
       * on every frame, it needs to be ultra-fast.
       * It avoids taking any locks or allocating any objects. We keep around a
       * mCurrentViewTransform so we don't need to allocate a new ViewTransform
-      * everytime we're called. NOTE: we might be able to return a ImmutableViewportMetrics
+      * every time we're called. NOTE: we might be able to return a ImmutableViewportMetrics
       * which would avoid the copy into mCurrentViewTransform.
       */
     @WrapElementForJNI(allowMultithread = true)
@@ -682,12 +681,14 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
         mCurrentViewTransform.offsetX = offset.x;
         mCurrentViewTransform.offsetY = offset.y;
 
-        mRootLayer.setPositionAndResolution(
-            Math.round(x + mCurrentViewTransform.offsetX),
-            Math.round(y + mCurrentViewTransform.offsetY),
-            Math.round(x + width + mCurrentViewTransform.offsetX),
-            Math.round(y + height + mCurrentViewTransform.offsetY),
-            resolution);
+        if (mRootLayer != null) {
+            mRootLayer.setPositionAndResolution(
+                Math.round(x + mCurrentViewTransform.offsetX),
+                Math.round(y + mCurrentViewTransform.offsetY),
+                Math.round(x + width + mCurrentViewTransform.offsetX),
+                Math.round(y + height + mCurrentViewTransform.offsetY),
+                resolution);
+        }
 
         if (layersUpdated && mRecordDrawTimes) {
             // If we got a layers update, that means a draw finished. Check to see if the area drawn matches
@@ -729,6 +730,9 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
     public LayerRenderer.Frame createFrame() {
         // Create the shaders and textures if necessary.
         if (!mLayerRendererInitialized) {
+            if (mLayerRenderer == null) {
+                return null;
+            }
             mLayerRenderer.checkMonitoringEnabled();
             mLayerRenderer.createDefaultProgram();
             mLayerRendererInitialized = true;
@@ -748,8 +752,11 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
     }
 
     @WrapElementForJNI(allowMultithread = true)
-    public void deactivateProgram() {
+    public void deactivateProgramAndRestoreState(boolean enableScissor,
+            int scissorX, int scissorY, int scissorW, int scissorH)
+    {
         mLayerRenderer.deactivateDefaultProgram();
+        mLayerRenderer.restoreState(enableScissor, scissorX, scissorY, scissorW, scissorH);
     }
 
     private void geometryChanged(DisplayPortMetrics displayPort) {
@@ -801,8 +808,8 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
 
     /** Implementation of PanZoomTarget */
     @Override
-    public boolean isFullScreen() {
-        return mView.isFullScreen();
+    public FullScreenState getFullScreenState() {
+        return mView.getFullScreenState();
     }
 
     /** Implementation of PanZoomTarget */
@@ -852,8 +859,11 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
      * You must hold the monitor while calling this.
      */
     private void viewportMetricsChanged(boolean notifyGecko) {
-        if (mViewportChangeListener != null) {
-            mViewportChangeListener.onMetricsChanged(mViewportMetrics);
+        if (mDynamicToolbarViewportChangeListener != null) {
+            mDynamicToolbarViewportChangeListener.onMetricsChanged(mViewportMetrics);
+        }
+        if (mZoomedViewViewportChangeListener != null) {
+            mZoomedViewViewportChangeListener.onMetricsChanged(mViewportMetrics);
         }
 
         mView.requestRender();
@@ -909,8 +919,11 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
     /** Implementation of PanZoomTarget */
     @Override
     public void panZoomStopped() {
-        if (mViewportChangeListener != null) {
-            mViewportChangeListener.onPanZoomStopped();
+        if (mDynamicToolbarViewportChangeListener != null) {
+            mDynamicToolbarViewportChangeListener.onPanZoomStopped();
+        }
+        if (mZoomedViewViewportChangeListener != null) {
+            mZoomedViewViewportChangeListener.onPanZoomStopped();
         }
     }
 
@@ -939,13 +952,6 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
     @Override
     public void removeRenderTask(RenderTask task) {
         mView.removeRenderTask(task);
-    }
-
-
-    /** Implementation of PanZoomTarget */
-    @Override
-    public boolean postDelayed(Runnable action, long delayMillis) {
-        return mView.postDelayed(action, delayMillis);
     }
 
     /** Implementation of PanZoomTarget */
@@ -988,8 +994,12 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
         return layerPoint;
     }
 
-    void setOnMetricsChangedListener(LayerView.OnMetricsChangedListener listener) {
-        mViewportChangeListener = listener;
+    void setOnMetricsChangedDynamicToolbarViewportListener(LayerView.OnMetricsChangedListener listener) {
+        mDynamicToolbarViewportChangeListener = listener;
+    }
+
+    void setOnMetricsChangedZoomedViewportListener(LayerView.OnMetricsChangedListener listener) {
+    	mZoomedViewViewportChangeListener = listener;
     }
 
     public void addDrawListener(DrawListener listener) {

@@ -1,4 +1,4 @@
-// -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -95,7 +95,7 @@ var view = {
         pref = gPrefView[index];
 
       var old = document.getElementById(gSortedColumn);
-      old.setAttribute("sortDirection", "");
+      old.removeAttribute("sortDirection");
       gPrefArray.sort(gSortFunction = gSortFunctions[col.id]);
       if (gPrefView != gPrefArray)
         gPrefView.sort(gSortFunction);

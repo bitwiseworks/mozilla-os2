@@ -120,6 +120,17 @@ extern "C" {
 // Implement the nsISupports ref counting
 namespace mozilla {
 
+static TimeStamp nr_socket_short_term_violation_time;
+static TimeStamp nr_socket_long_term_violation_time;
+
+TimeStamp NrSocketBase::short_term_violation_time() {
+  return nr_socket_short_term_violation_time;
+}
+
+TimeStamp NrSocketBase::long_term_violation_time() {
+  return nr_socket_long_term_violation_time;
+}
+
 // NrSocketBase implementation
 // async_event APIs
 int NrSocketBase::async_wait(int how, NR_async_cb cb, void *cb_arg,
@@ -507,20 +518,44 @@ int NrSocket::sendto(const void *msg, size_t len,
     // (see http://tools.ietf.org/html/draft-thomson-mmusic-ice-webrtc)
 
     // Tolerate rate of 8k/sec, for one second.
-    static SimpleTokenBucket burst(8192*1, 8192);
-    // Tolerate rate of 3.6k/sec over twenty seconds.
-    static SimpleTokenBucket sustained(3686*20, 3686);
+    static SimpleTokenBucket burst(16384*1, 16384);
+    // Tolerate rate of 7.2k/sec over twenty seconds.
+    static SimpleTokenBucket sustained(7372*20, 7372);
 
     // Check number of tokens in each bucket.
-    if (burst.getTokens(UINT32_MAX) < len ||
-        sustained.getTokens(UINT32_MAX) < len) {
+    if (burst.getTokens(UINT32_MAX) < len) {
       r_log(LOG_GENERIC, LOG_ERR,
-                 "Global rate limit for STUN requests exceeded.");
-      MOZ_ASSERT(false,
-                 "Global rate limit for STUN requests exceeded. Go bug "
-                 "bcampen@mozilla.com if you weren't intentionally spamming "
-                 "ICE candidates, or don't know what that means.");
+                 "Short term global rate limit for STUN requests exceeded.");
+#ifdef MOZILLA_INTERNAL_API
+      nr_socket_short_term_violation_time = TimeStamp::Now();
+#endif
+
+// Bug 1013007
+#if !EARLY_BETA_OR_EARLIER
       ABORT(R_WOULDBLOCK);
+#else
+      MOZ_ASSERT(false,
+                 "Short term global rate limit for STUN requests exceeded. Go "
+                 "bug bcampen@mozilla.com if you weren't intentionally "
+                 "spamming ICE candidates, or don't know what that means.");
+#endif
+    }
+
+    if (sustained.getTokens(UINT32_MAX) < len) {
+      r_log(LOG_GENERIC, LOG_ERR,
+                 "Long term global rate limit for STUN requests exceeded.");
+#ifdef MOZILLA_INTERNAL_API
+      nr_socket_long_term_violation_time = TimeStamp::Now();
+#endif
+// Bug 1013007
+#if !EARLY_BETA_OR_EARLIER
+      ABORT(R_WOULDBLOCK);
+#else
+      MOZ_ASSERT(false,
+                 "Long term global rate limit for STUN requests exceeded. Go "
+                 "bug bcampen@mozilla.com if you weren't intentionally "
+                 "spamming ICE candidates, or don't know what that means.");
+#endif
     }
 
     // Take len tokens from both buckets.
@@ -554,7 +589,9 @@ int NrSocket::recvfrom(void * buf, size_t maxlen,
 
   status = PR_RecvFrom(fd_, buf, maxlen, flags, &nfrom, PR_INTERVAL_NO_WAIT);
   if (status <= 0) {
-    r_log(LOG_GENERIC,LOG_ERR,"Error in recvfrom");
+    if (PR_GetError() == PR_WOULD_BLOCK_ERROR)
+      ABORT(R_WOULDBLOCK);
+    r_log(LOG_GENERIC, LOG_INFO, "Error in recvfrom");
     ABORT(R_IO_ERROR);
   }
   *len=status;
@@ -656,9 +693,57 @@ abort:
   return(_status);
 }
 
-// NrSocketIpc Implementation
-NS_IMPL_ISUPPORTS(NrSocketIpc, nsIUDPSocketInternal)
+NS_IMPL_ISUPPORTS(NrSocketIpcProxy, nsIUDPSocketInternal)
 
+nsresult
+NrSocketIpcProxy::Init(const nsRefPtr<NrSocketIpc>& socket)
+{
+  nsresult rv;
+  sts_thread_ = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
+  if (NS_FAILED(rv)) {
+    MOZ_ASSERT(false, "Failed to get STS thread");
+    return rv;
+  }
+
+  socket_ = socket;
+  return NS_OK;
+}
+
+NrSocketIpcProxy::~NrSocketIpcProxy()
+{
+  // Send our ref to STS to be released
+  RUN_ON_THREAD(sts_thread_,
+                mozilla::WrapRelease(socket_.forget()),
+                NS_DISPATCH_NORMAL);
+}
+
+// IUDPSocketInternal interfaces
+// callback while error happened in UDP socket operation
+NS_IMETHODIMP NrSocketIpcProxy::CallListenerError(const nsACString &message,
+                                                  const nsACString &filename,
+                                                  uint32_t line_number) {
+  return socket_->CallListenerError(message, filename, line_number);
+}
+
+// callback while receiving UDP packet
+NS_IMETHODIMP NrSocketIpcProxy::CallListenerReceivedData(const nsACString &host,
+                                                         uint16_t port,
+                                                         const uint8_t *data,
+                                                         uint32_t data_length) {
+  return socket_->CallListenerReceivedData(host, port, data, data_length);
+}
+
+// callback while UDP socket is opened
+NS_IMETHODIMP NrSocketIpcProxy::CallListenerOpened() {
+  return socket_->CallListenerOpened();
+}
+
+// callback while UDP socket is closed
+NS_IMETHODIMP NrSocketIpcProxy::CallListenerClosed() {
+  return socket_->CallListenerClosed();
+}
+
+// NrSocketIpc Implementation
 NrSocketIpc::NrSocketIpc(const nsCOMPtr<nsIEventTarget> &main_thread)
     : err_(false),
       state_(NR_INIT),
@@ -668,17 +753,13 @@ NrSocketIpc::NrSocketIpc(const nsCOMPtr<nsIEventTarget> &main_thread)
 
 // IUDPSocketInternal interfaces
 // callback while error happened in UDP socket operation
-NS_IMETHODIMP NrSocketIpc::CallListenerError(const nsACString &type,
-                                             const nsACString &message,
+NS_IMETHODIMP NrSocketIpc::CallListenerError(const nsACString &message,
                                              const nsACString &filename,
-                                             uint32_t line_number,
-                                             uint32_t column_number) {
+                                             uint32_t line_number) {
   ASSERT_ON_THREAD(main_thread_);
-  MOZ_ASSERT(type.EqualsLiteral("onerror"));
 
-  r_log(LOG_GENERIC, LOG_ERR, "UDP socket error:%s at %s:%d:%d",
-        message.BeginReading(), filename.BeginReading(),
-        line_number, column_number);
+  r_log(LOG_GENERIC, LOG_ERR, "UDP socket error:%s at %s:%d",
+        message.BeginReading(), filename.BeginReading(), line_number );
 
   ReentrantMonitorAutoEnter mon(monitor_);
   err_ = true;
@@ -688,12 +769,11 @@ NS_IMETHODIMP NrSocketIpc::CallListenerError(const nsACString &type,
 }
 
 // callback while receiving UDP packet
-NS_IMETHODIMP NrSocketIpc::CallListenerReceivedData(const nsACString &type,
-                                                    const nsACString &host,
-                                                    uint16_t port, uint8_t *data,
+NS_IMETHODIMP NrSocketIpc::CallListenerReceivedData(const nsACString &host,
+                                                    uint16_t port,
+                                                    const uint8_t *data,
                                                     uint32_t data_length) {
   ASSERT_ON_THREAD(main_thread_);
-  MOZ_ASSERT(type.EqualsLiteral("ondata"));
 
   PRNetAddr addr;
   memset(&addr, 0, sizeof(addr));
@@ -726,89 +806,68 @@ NS_IMETHODIMP NrSocketIpc::CallListenerReceivedData(const nsACString &type,
   return NS_OK;
 }
 
-// callback while UDP socket is opened or closed
-NS_IMETHODIMP NrSocketIpc::CallListenerVoid(const nsACString &type) {
+// callback while UDP socket is opened
+NS_IMETHODIMP NrSocketIpc::CallListenerOpened() {
   ASSERT_ON_THREAD(main_thread_);
-  if (type.EqualsLiteral("onopen")) {
-    ReentrantMonitorAutoEnter mon(monitor_);
+  ReentrantMonitorAutoEnter mon(monitor_);
 
-    uint16_t port;
-    if (NS_FAILED(socket_child_->GetLocalPort(&port))) {
-      err_ = true;
-      MOZ_ASSERT(false, "Failed to get local port");
-      return NS_OK;
-    }
-
-    nsAutoCString address;
-    if(NS_FAILED(socket_child_->GetLocalAddress(address))) {
-      err_ = true;
-      MOZ_ASSERT(false, "Failed to get local address");
-      return NS_OK;
-    }
-
-    PRNetAddr praddr;
-    if (PR_SUCCESS != PR_InitializeNetAddr(PR_IpAddrAny, port, &praddr)) {
-      err_ = true;
-      MOZ_ASSERT(false, "Failed to set port in PRNetAddr");
-      return NS_OK;
-    }
-
-    if (PR_SUCCESS != PR_StringToNetAddr(address.BeginReading(), &praddr)) {
-      err_ = true;
-      MOZ_ASSERT(false, "Failed to convert local host to PRNetAddr");
-      return NS_OK;
-    }
-
-    nr_transport_addr expected_addr;
-    if(nr_transport_addr_copy(&expected_addr, &my_addr_)) {
-      err_ = true;
-      MOZ_ASSERT(false, "Failed to copy my_addr_");
-    }
-
-    if (nr_praddr_to_transport_addr(&praddr, &my_addr_, IPPROTO_UDP, 1)) {
-      err_ = true;
-      MOZ_ASSERT(false, "Failed to copy local host to my_addr_");
-    }
-
-    if (nr_transport_addr_cmp(&expected_addr, &my_addr_,
-                              NR_TRANSPORT_ADDR_CMP_MODE_ADDR)) {
-      err_ = true;
-      MOZ_ASSERT(false, "Address of opened socket is not expected");
-    }
-
-    mon.NotifyAll();
-  } else if (type.EqualsLiteral("onclose")) {
-    // Already handled in UpdateReadyState, nothing to do here
-  } else {
-    MOZ_ASSERT(false, "Received unexpected event");
-  }
-
-  return NS_OK;
-}
-
-// callback while UDP packet is sent
-NS_IMETHODIMP NrSocketIpc::CallListenerSent(const nsACString &type,
-                                            nsresult result) {
-  ASSERT_ON_THREAD(main_thread_);
-  MOZ_ASSERT(type.EqualsLiteral("onsent"));
-
-  if (NS_FAILED(result)) {
-    ReentrantMonitorAutoEnter mon(monitor_);
+  uint16_t port;
+  if (NS_FAILED(socket_child_->GetLocalPort(&port))) {
     err_ = true;
+    MOZ_ASSERT(false, "Failed to get local port");
+    return NS_OK;
   }
+
+  nsAutoCString address;
+  if(NS_FAILED(socket_child_->GetLocalAddress(address))) {
+    err_ = true;
+    MOZ_ASSERT(false, "Failed to get local address");
+    return NS_OK;
+  }
+
+  PRNetAddr praddr;
+  if (PR_SUCCESS != PR_InitializeNetAddr(PR_IpAddrAny, port, &praddr)) {
+    err_ = true;
+    MOZ_ASSERT(false, "Failed to set port in PRNetAddr");
+    return NS_OK;
+  }
+
+  if (PR_SUCCESS != PR_StringToNetAddr(address.BeginReading(), &praddr)) {
+    err_ = true;
+    MOZ_ASSERT(false, "Failed to convert local host to PRNetAddr");
+    return NS_OK;
+  }
+
+  nr_transport_addr expected_addr;
+  if(nr_transport_addr_copy(&expected_addr, &my_addr_)) {
+    err_ = true;
+    MOZ_ASSERT(false, "Failed to copy my_addr_");
+  }
+
+  if (nr_praddr_to_transport_addr(&praddr, &my_addr_, IPPROTO_UDP, 1)) {
+    err_ = true;
+    MOZ_ASSERT(false, "Failed to copy local host to my_addr_");
+  }
+
+  if (nr_transport_addr_cmp(&expected_addr, &my_addr_,
+                            NR_TRANSPORT_ADDR_CMP_MODE_ADDR)) {
+    err_ = true;
+    MOZ_ASSERT(false, "Address of opened socket is not expected");
+  }
+
+  mon.NotifyAll();
+
   return NS_OK;
 }
 
-// callback for state update after every socket operation
-NS_IMETHODIMP NrSocketIpc::UpdateReadyState(const nsACString &readyState) {
+// callback while UDP socket is closed
+NS_IMETHODIMP NrSocketIpc::CallListenerClosed() {
   ASSERT_ON_THREAD(main_thread_);
 
   ReentrantMonitorAutoEnter mon(monitor_);
 
-  if (readyState.EqualsLiteral("closed")) {
-    MOZ_ASSERT(state_ == NR_CONNECTED || state_ == NR_CLOSING);
-    state_ = NR_CLOSED;
-  }
+  MOZ_ASSERT(state_ == NR_CONNECTED || state_ == NR_CLOSING);
+  state_ = NR_CLOSED;
 
   return NS_OK;
 }
@@ -825,6 +884,12 @@ int NrSocketIpc::create(nr_transport_addr *addr) {
   ReentrantMonitorAutoEnter mon(monitor_);
 
   if (state_ != NR_INIT) {
+    ABORT(R_INTERNAL);
+  }
+
+  // Bug 950660: Remote TCP socket is not supported yet.
+  if (NS_WARN_IF(addr->protocol != IPPROTO_UDP)) {
+    MOZ_ASSERT(false, "NrSocket over TCP is not e10s ready, see Bug 950660");
     ABORT(R_INTERNAL);
   }
 
@@ -994,17 +1059,32 @@ void NrSocketIpc::create_m(const nsACString &host, const uint16_t port) {
   ReentrantMonitorAutoEnter mon(monitor_);
 
   nsresult rv;
-  socket_child_ = do_CreateInstance("@mozilla.org/udp-socket-child;1", &rv);
+  nsCOMPtr<nsIUDPSocketChild> socketChild = do_CreateInstance("@mozilla.org/udp-socket-child;1", &rv);
   if (NS_FAILED(rv)) {
     err_ = true;
     MOZ_ASSERT(false, "Failed to create UDPSocketChild");
+    mon.NotifyAll();
+    return;
   }
 
+  socket_child_ = new nsMainThreadPtrHolder<nsIUDPSocketChild>(socketChild);
   socket_child_->SetFilterName(nsCString("stun"));
 
-  if (NS_FAILED(socket_child_->Bind(this, host, port))) {
+  nsRefPtr<NrSocketIpcProxy> proxy(new NrSocketIpcProxy);
+  rv = proxy->Init(this);
+  if (NS_FAILED(rv)) {
+    err_ = true;
+    mon.NotifyAll();
+    return;
+  }
+
+  if (NS_FAILED(socket_child_->Bind(proxy, host, port,
+                                    /* reuse = */ false,
+                                    /* loopback = */ false))) {
     err_ = true;
     MOZ_ASSERT(false, "Failed to create UDP socket");
+    mon.NotifyAll();
+    return;
   }
 }
 
@@ -1083,7 +1163,7 @@ static nr_socket_vtbl nr_socket_local_vtbl={
 };
 
 int nr_socket_local_create(nr_transport_addr *addr, nr_socket **sockp) {
-  NrSocketBase *sock = nullptr;
+  RefPtr<NrSocketBase> sock;
 
   // create IPC bridge for content process
   if (XRE_GetProcessType() == GeckoProcessType_Default) {
@@ -1105,15 +1185,16 @@ int nr_socket_local_create(nr_transport_addr *addr, nr_socket **sockp) {
   if (r)
     ABORT(r);
 
-  // Add a reference so that we can delete it in destroy()
-  sock->AddRef();
-
   _status = 0;
 
-abort:
-  if (_status) {
-    delete sock;
+  {
+    // We will release this reference in destroy(), not exactly the normal
+    // ownership model, but it is what it is.
+    NrSocketBase* dummy = sock.forget().take();
+    (void)dummy;
   }
+
+abort:
   return _status;
 }
 

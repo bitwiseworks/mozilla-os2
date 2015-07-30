@@ -8,18 +8,19 @@
 #include "prlink.h"
 #include "plstr.h"
 #include "nsIPluginInstanceOwner.h"
-#include "nsServiceManagerUtils.h"
 #include "nsPluginsDir.h"
 #include "nsPluginHost.h"
 #include "nsIBlocklistService.h"
 #include "nsIUnicodeDecoder.h"
 #include "nsIPlatformCharset.h"
-#include "nsICharsetConverterManager.h"
 #include "nsPluginLogging.h"
 #include "nsNPAPIPlugin.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/unused.h"
 #include <cctype>
+#include "mozilla/dom/EncodingUtils.h"
 
+using mozilla::dom::EncodingUtils;
 using namespace mozilla;
 
 // These legacy flags are used in the plugin registry. The states are now
@@ -65,10 +66,14 @@ GetStatePrefNameForPlugin(nsPluginTag* aTag)
 
 /* nsPluginTag */
 
+uint32_t nsPluginTag::sNextId;
+
 nsPluginTag::nsPluginTag(nsPluginInfo* aPluginInfo,
                          int64_t aLastModifiedTime,
                          bool fromExtension)
-  : mName(aPluginInfo->fName),
+  : mId(sNextId++),
+    mContentProcessRunningCount(0),
+    mName(aPluginInfo->fName),
     mDescription(aPluginInfo->fDescription),
     mLibrary(nullptr),
     mIsJavaPlugin(false),
@@ -102,7 +107,9 @@ nsPluginTag::nsPluginTag(const char* aName,
                          int64_t aLastModifiedTime,
                          bool fromExtension,
                          bool aArgsAreUTF8)
-  : mName(aName),
+  : mId(sNextId++),
+    mContentProcessRunningCount(0),
+    mName(aName),
     mDescription(aDescription),
     mLibrary(nullptr),
     mIsJavaPlugin(false),
@@ -121,6 +128,39 @@ nsPluginTag::nsPluginTag(const char* aName,
   if (!aArgsAreUTF8)
     EnsureMembersAreUTF8();
   FixupVersion();
+}
+
+nsPluginTag::nsPluginTag(uint32_t aId,
+                         const char* aName,
+                         const char* aDescription,
+                         const char* aFileName,
+                         const char* aFullPath,
+                         const char* aVersion,
+                         nsTArray<nsCString> aMimeTypes,
+                         nsTArray<nsCString> aMimeDescriptions,
+                         nsTArray<nsCString> aExtensions,
+                         bool aIsJavaPlugin,
+                         bool aIsFlashPlugin,
+                         int64_t aLastModifiedTime,
+                         bool aFromExtension)
+  : mId(aId),
+    mContentProcessRunningCount(0),
+    mName(aName),
+    mDescription(aDescription),
+    mMimeTypes(aMimeTypes),
+    mMimeDescriptions(aMimeDescriptions),
+    mExtensions(aExtensions),
+    mLibrary(nullptr),
+    mIsJavaPlugin(aIsJavaPlugin),
+    mIsFlashPlugin(aIsFlashPlugin),
+    mFileName(aFileName),
+    mVersion(aVersion),
+    mLastModifiedTime(aLastModifiedTime),
+    mNiceFileName(),
+    mCachedBlocklistState(nsIBlocklistService::STATE_NOT_BLOCKED),
+    mCachedBlocklistStateValid(false),
+    mIsFromExtension(aFromExtension)
+{
 }
 
 nsPluginTag::~nsPluginTag()
@@ -155,10 +195,16 @@ void nsPluginTag::InitMime(const char* const* aMimeTypes,
     }
 
     // Look for certain special plugins.
-    if (nsPluginHost::IsJavaMIMEType(mimeType.get())) {
-      mIsJavaPlugin = true;
-    } else if (mimeType.EqualsLiteral("application/x-shockwave-flash")) {
-      mIsFlashPlugin = true;
+    switch (nsPluginHost::GetSpecialType(mimeType)) {
+      case nsPluginHost::eSpecialType_Java:
+        mIsJavaPlugin = true;
+        break;
+      case nsPluginHost::eSpecialType_Flash:
+        mIsFlashPlugin = true;
+        break;
+      case nsPluginHost::eSpecialType_None:
+      default:
+        break;
     }
 
     // Fill in our MIME type array.
@@ -213,7 +259,7 @@ static nsresult ConvertToUTF8(nsIUnicodeDecoder *aUnicodeDecoder,
   nsresult rv = aUnicodeDecoder->GetMaxLength(aString.get(), numberOfBytes,
                                               &outUnicodeLen);
   NS_ENSURE_SUCCESS(rv, rv);
-  if (!buffer.SetLength(outUnicodeLen, fallible_t()))
+  if (!buffer.SetLength(outUnicodeLen, fallible))
     return NS_ERROR_OUT_OF_MEMORY;
   rv = aUnicodeDecoder->Convert(aString.get(), &numberOfBytes,
                                 buffer.BeginWriting(), &outUnicodeLen);
@@ -236,17 +282,12 @@ nsresult nsPluginTag::EnsureMembersAreUTF8()
   do_GetService(NS_PLATFORMCHARSET_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIUnicodeDecoder> decoder;
-  nsCOMPtr<nsICharsetConverterManager> ccm =
-  do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-  
+
   nsAutoCString charset;
   rv = pcs->GetCharset(kPlatformCharsetSel_FileName, charset);
   NS_ENSURE_SUCCESS(rv, rv);
   if (!charset.LowerCaseEqualsLiteral("utf-8")) {
-    rv = ccm->GetUnicodeDecoderRaw(charset.get(), getter_AddRefs(decoder));
-    NS_ENSURE_SUCCESS(rv, rv);
-    
+    decoder = EncodingUtils::DecoderForEncoding(charset);
     ConvertToUTF8(decoder, mFileName);
     ConvertToUTF8(decoder, mFullPath);
   }
@@ -257,9 +298,7 @@ nsresult nsPluginTag::EnsureMembersAreUTF8()
   rv = pcs->GetCharset(kPlatformCharsetSel_PlainTextInFile, charset);
   NS_ENSURE_SUCCESS(rv, rv);
   if (!charset.LowerCaseEqualsLiteral("utf-8")) {
-    rv = ccm->GetUnicodeDecoderRaw(charset.get(), getter_AddRefs(decoder));
-    NS_ENSURE_SUCCESS(rv, rv);
-    
+    decoder = EncodingUtils::DecoderForEncoding(charset);
     ConvertToUTF8(decoder, mName);
     ConvertToUTF8(decoder, mDescription);
     for (uint32_t i = 0; i < mMimeDescriptions.Length(); ++i) {
@@ -344,6 +383,22 @@ NS_IMETHODIMP
 nsPluginTag::GetBlocklisted(bool* aBlocklisted)
 {
   *aBlocklisted = IsBlocklisted();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPluginTag::GetIsEnabledStateLocked(bool* aIsEnabledStateLocked)
+{
+  *aIsEnabledStateLocked = false;
+  nsCOMPtr<nsIPrefBranch> prefs(do_GetService(NS_PREFSERVICE_CONTRACTID));
+
+  if (NS_WARN_IF(!prefs)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  unused << prefs->PrefIsLocked(GetStatePrefNameForPlugin(this).get(),
+                                aIsEnabledStateLocked);
+
   return NS_OK;
 }
 
@@ -492,11 +547,10 @@ void nsPluginTag::TryUnloadPlugin(bool inShutdown)
 {
   // We never want to send NPP_Shutdown to an in-process plugin unless
   // this process is shutting down.
-  if (mLibrary && !inShutdown) {
+  if (!mPlugin) {
     return;
   }
-
-  if (mPlugin) {
+  if (inShutdown || mPlugin->GetLibrary()->IsOOP()) {
     mPlugin->Shutdown();
     mPlugin = nullptr;
   }
@@ -508,12 +562,12 @@ nsCString nsPluginTag::GetNiceFileName() {
   }
 
   if (mIsFlashPlugin) {
-    mNiceFileName.Assign(NS_LITERAL_CSTRING("flash"));
+    mNiceFileName.AssignLiteral("flash");
     return mNiceFileName;
   }
 
   if (mIsJavaPlugin) {
-    mNiceFileName.Assign(NS_LITERAL_CSTRING("java"));
+    mNiceFileName.AssignLiteral("java");
     return mNiceFileName;
   }
 

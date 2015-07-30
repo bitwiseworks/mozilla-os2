@@ -13,9 +13,7 @@
 
 #include "nsIFrame.h"
 #include "nsStyleStruct.h"
-#include "imgIRequest.h"
-#include "imgIContainer.h"
-#include "nsIContent.h"
+#include "nsIContent.h" // for GetParent()
 
 inline void
 nsStyleImage::SetSubImage(uint8_t aIndex, imgIContainer* aSubImage) const

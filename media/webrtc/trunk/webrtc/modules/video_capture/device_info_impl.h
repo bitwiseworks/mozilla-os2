@@ -11,7 +11,7 @@
 #ifndef WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_DEVICE_INFO_IMPL_H_
 #define WEBRTC_MODULES_VIDEO_CAPTURE_MAIN_SOURCE_DEVICE_INFO_IMPL_H_
 
-#include <map>
+#include <vector>
 
 #include "webrtc/modules/video_capture/include/video_capture.h"
 #include "webrtc/modules/video_capture/video_capture_delay.h"
@@ -44,6 +44,7 @@ protected:
     /* Initialize this object*/
 
     virtual int32_t Init()=0;
+    virtual int32_t Refresh() { return 0; }
     /*
      * Fills the member variable _captureCapabilities with capabilities for the given device name.
      */
@@ -58,8 +59,8 @@ protected:
 protected:
     // Data members
     int32_t _id;
-    typedef std::map<int, VideoCaptureCapability*> VideoCaptureCapabilityMap;
-    VideoCaptureCapabilityMap _captureCapabilities;
+    typedef std::vector<VideoCaptureCapability> VideoCaptureCapabilities;
+    VideoCaptureCapabilities _captureCapabilities;
     RWLockWrapper& _apiLock;
     char* _lastUsedDeviceName;
     uint32_t _lastUsedDeviceNameLength;

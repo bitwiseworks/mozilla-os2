@@ -14,12 +14,10 @@
 #include "nsString.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMWindow.h"
-#include "nsIDOMHTMLFormElement.h"
 #include "nsISecureBrowserUI.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIWebProgressListener.h"
-#include "nsIFormSubmitObserver.h"
 #include "nsIURI.h"
 #include "nsISecurityEventSink.h"
 #include "nsWeakReference.h"
@@ -29,10 +27,7 @@
 #include "nsINetUtil.h"
 
 class nsISSLStatus;
-class nsITransportSecurityInfo;
-class nsISecurityWarningDialogs;
 class nsIChannel;
-class nsIInterfaceRequestor;
 
 #define NS_SECURE_BROWSER_UI_CID \
 { 0xcc75499a, 0x1dd1, 0x11b2, {0x8a, 0x82, 0xca, 0x41, 0x0a, 0xc9, 0x07, 0xb8}}
@@ -40,27 +35,21 @@ class nsIInterfaceRequestor;
 
 class nsSecureBrowserUIImpl : public nsISecureBrowserUI,
                               public nsIWebProgressListener,
-                              public nsIFormSubmitObserver,
                               public nsSupportsWeakReference,
                               public nsISSLStatusProvider
 {
 public:
   
   nsSecureBrowserUIImpl();
-  virtual ~nsSecureBrowserUIImpl();
   
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIWEBPROGRESSLISTENER
   NS_DECL_NSISECUREBROWSERUI
-  
   NS_DECL_NSISSLSTATUSPROVIDER
 
-  NS_IMETHOD Notify(nsIDOMHTMLFormElement* formNode, nsIDOMWindow* window,
-                    nsIURI *actionURL, bool* cancelSubmit);
-  NS_IMETHOD NotifyInvalidSubmit(nsIDOMHTMLFormElement* formNode,
-                                 nsIArray* invalidElements) { return NS_OK; }
-  
 protected:
+  virtual ~nsSecureBrowserUIImpl();
+
   mozilla::ReentrantMonitor mReentrantMonitor;
   
   nsWeakPtr mWindow;
@@ -97,35 +86,19 @@ protected:
 
   static already_AddRefed<nsISupports> ExtractSecurityInfo(nsIRequest* aRequest);
   nsresult MapInternalToExternalState(uint32_t* aState, lockIconState lock, bool ev);
-  nsresult UpdateSecurityState(nsIRequest* aRequest, bool withNewLocation,
-                               bool withUpdateStatus);
-  bool UpdateMyFlags(lockIconState &warnSecurityState);
-  nsresult TellTheWorld(lockIconState warnSecurityState, 
-                        nsIRequest* aRequest);
+  void UpdateSecurityState(nsIRequest* aRequest, bool withNewLocation,
+                           bool withUpdateStatus);
+  void TellTheWorld(nsIRequest* aRequest);
 
-  nsresult EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsISupports *info,
-                                          bool withNewLocation);
-  void UpdateSubrequestMembers(nsISupports *securityInfo);
+  void EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsISupports *info,
+                                      bool withNewLocation, bool withNewSink);
+  void UpdateSubrequestMembers(nsISupports* securityInfo, nsIRequest* request);
 
   void ObtainEventSink(nsIChannel *channel, 
                        nsCOMPtr<nsISecurityEventSink> &sink);
 
   nsCOMPtr<nsISSLStatus> mSSLStatus;
   nsCOMPtr<nsISupports> mCurrentToplevelSecurityInfo;
-
-  nsresult CheckPost(nsIURI *formURI, nsIURI *actionURL, bool *okayToPost);
-  nsresult IsURLHTTPS(nsIURI* aURL, bool *value);
-  nsresult IsURLJavaScript(nsIURI* aURL, bool *value);
-
-  bool ConfirmEnteringSecure();
-  bool ConfirmEnteringWeak();
-  bool ConfirmLeavingSecure();
-  bool ConfirmMixedMode();
-  bool ConfirmPostToInsecure();
-  bool ConfirmPostToInsecureFromSecure();
-
-  bool GetNSSDialogs(nsCOMPtr<nsISecurityWarningDialogs> & dialogs,
-                     nsCOMPtr<nsIInterfaceRequestor> & window);
 
   PLDHashTable mTransferringRequests;
 };

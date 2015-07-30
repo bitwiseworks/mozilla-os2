@@ -203,7 +203,7 @@ ok(!e.cancelable, "Event shouldn't be cancelable!");
 document.dispatchEvent(e);
 is(receivedEvent, e, "Wrong event!");
 
-var blob = Blob();
+var blob = new Blob();
 e = new BlobEvent("hello", { bubbles: true, cancelable: true, data: blob });
 is(e.type, "hello", "Wrong event type!");
 ok(!e.isTrusted, "Event shouldn't be trusted!");
@@ -365,6 +365,7 @@ var keyboardEventProps =
   { view: null },
   { detail: 0 },
   { key: "" },
+  { code: "" },
   { location: 0 },
   { ctrlKey: false },
   { shiftKey: false },
@@ -384,6 +385,7 @@ var testKeyboardProps =
   { view: window },
   { detail: 1 },
   { key: "CustomKey" },
+  { code: "CustomCode" },
   { location: 1 },
   { ctrlKey: true },
   { shiftKey: true },
@@ -400,9 +402,13 @@ var testKeyboardProps =
   { keyCode: 11, charCode: 12, which: 13 },
 ];
 
+var codeEnabled = SpecialPowers.getBoolPref("dom.keyboardevent.code.enabled");
 var defaultKeyboardEventValues = {};
 for (var i = 0; i < keyboardEventProps.length; ++i) {
   for (prop in keyboardEventProps[i]) {
+    if (!codeEnabled && prop == "code") {
+      continue;
+    }
     ok(prop in e, "keyboardEvent: KeyboardEvent doesn't have property " + prop + "!");
     defaultKeyboardEventValues[prop] = keyboardEventProps[i][prop]; 
   }
@@ -412,6 +418,9 @@ while (testKeyboardProps.length) {
   var p = testKeyboardProps.shift();
   e = new KeyboardEvent("foo", p);
   for (var def in defaultKeyboardEventValues) {
+    if (!codeEnabled && def == "code") {
+      continue;
+    }
     if (!(def in p)) {
       is(e[def], defaultKeyboardEventValues[def],
          "KeyboardEvent: Wrong default value for " + def + "!");
@@ -629,9 +638,9 @@ is(e.value, Infinity, "Uninitialized value should be positive infinity");
 e = new DeviceOrientationEvent("hello");
 is(e.type, "hello", "Wrong event type!");
 ok(!e.isTrusted, "Event should not be trusted");
-is(e.alpha, 0);
-is(e.beta, 0);
-is(e.gamma, 0);
+is(e.alpha, null);
+is(e.beta, null);
+is(e.gamma, null);
 is(e.absolute, false);
 
 e = new DeviceOrientationEvent("hello", { alpha: 1, beta: 2, gamma: 3, absolute: true } );
@@ -738,29 +747,6 @@ e = new PopupBlockedEvent("hello",
 is(e.requestingWindow, window);
 is(e.popupWindowFeatures, "features");
 is(e.popupWindowName, "name");
-
-
-// SmartCardEvent
-
-try {
-  e = new SmartCardEvent();
-} catch(exp) {
-  ex = true;
-}
-ok(ex, "SmartCardEvent: First parameter is required!");
-ex = false;
-
-e = new SmartCardEvent("hello");
-is(e.type, "hello", "SmartCardEvent: Wrong event type!");
-ok(!e.isTrusted, "SmartCardEvent: Event shouldn't be trusted!");
-ok(!e.bubbles, "SmartCardEvent: Event shouldn't bubble!");
-ok(!e.cancelable, "SmartCardEvent: Event shouldn't be cancelable!");
-is(e.tokenName, "");
-document.dispatchEvent(e);
-is(receivedEvent, e, "SmartCardEvent: Wrong event!");
-
-e = new SmartCardEvent("hello", { tokenName: "foo" });
-is(e.tokenName, "foo");
 
 // WheelEvent
 

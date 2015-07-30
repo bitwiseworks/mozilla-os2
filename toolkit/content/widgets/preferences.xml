@@ -30,6 +30,25 @@
 
   <binding id="preferences">
     <implementation implements="nsIObserver">
+      <method name="_constructAfterChildren">
+      <body>
+      <![CDATA[
+      // This method will be called after each one of the child
+      // <preference> elements is constructed. Its purpose is to propagate
+      // the values to the associated form elements
+
+      var elements = this.getElementsByTagName("preference");
+      for (let element of elements) {
+        if (!element._constructed) {
+          return;
+        }
+      }
+      for (let element of elements) {
+        element.updateElements();
+      }
+      ]]>
+      </body>
+      </method>
       <method name="observe">
         <parameter name="aSubject"/>
         <parameter name="aTopic"/>
@@ -101,6 +120,8 @@
     <implementation>
       <constructor>
       <![CDATA[
+        this._constructed = true;
+
         // if the element has been inserted without the name attribute set,
         // we have nothing to do here
         if (!this.name)
@@ -111,8 +132,12 @@
         // In non-instant apply mode, we must try and use the last saved state
         // from any previous opens of a child dialog instead of the value from
         // preferences, to pick up any edits a user may have made. 
+
+        var secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
+                    .getService(Components.interfaces.nsIScriptSecurityManager);
         if (this.preferences.type == "child" && 
-            !this.instantApply && window.opener) {
+            !this.instantApply && window.opener &&
+            secMan.isSystemPrincipal(window.opener.document.nodePrincipal)) {
           var pdoc = window.opener.document;
 
           // Try to find a preference element for the same preference.
@@ -126,18 +151,20 @@
                 preference = parentPrefs[l];
             }
           }
-          this._setValue(preference ? preference.value 
-                                    : this.valueFromPreferences, false);
+
+          // Don't use the value setter here, we don't want updateElements to be prematurely fired.
+          this._value = preference ? preference.value : this.valueFromPreferences;
         }
         else
-          this._setValue(this.valueFromPreferences, false);
+          this._value = this.valueFromPreferences;
+        this.preferences._constructAfterChildren();
       ]]>
       </constructor>
       <destructor>
         this.preferences.rootBranchInternal
             .removeObserver(this.name, this.preferences);
       </destructor>
-      
+      <field name="_constructed">false</field>
       <property name="instantApply">
         <getter>
           return this.getAttribute("instantApply") == "true" || this.preferences.instantApply;
@@ -169,24 +196,19 @@
       <field name="_value">null</field>
       <method name="_setValue">
         <parameter name="aValue"/>
-        <parameter name="aUpdate"/>
         <body>
         <![CDATA[
-          if (aUpdate && this.value !== aValue) {
+          if (this.value !== aValue) {
             this._value = aValue;
             if (this.instantApply)
               this.valueFromPreferences = aValue;
             this.preferences.fireChangedEvent(this);
           }
-          else if (!aUpdate) {
-            this._value = aValue;
-            this.updateElements();
-          }
           return aValue;
         ]]>
         </body>
       </method>
-      <property name="value" onget="return this._value" onset="return this._setValue(val, true);"/>
+      <property name="value" onget="return this._value" onset="return this._setValue(val);"/>
       
       <property name="locked">
         <getter>
@@ -1035,11 +1057,14 @@
           return false;
         }
 
-        if (this.type == "child" && window.opener) {
+        var secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
+                    .getService(Components.interfaces.nsIScriptSecurityManager);
+        if (this.type == "child" && window.opener &&
+            secMan.isSystemPrincipal(window.opener.document.nodePrincipal)) {
           var psvc = Components.classes["@mozilla.org/preferences-service;1"]
                                .getService(Components.interfaces.nsIPrefBranch);
-          var instantApply = psvc.getBoolPref("browser.preferences.instantApply");
-          if (instantApply) {
+          var pdocEl = window.opener.document.documentElement;
+          if (pdocEl.instantApply) {
             var panes = this.preferencePanes;
             for (var i = 0; i < panes.length; ++i)
               panes[i].writePreferences(true);

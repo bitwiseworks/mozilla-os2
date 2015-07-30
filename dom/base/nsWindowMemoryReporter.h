@@ -36,7 +36,7 @@ class nsWindowSizes {
   macro(Other, mPropertyTablesSize) \
 
 public:
-  nsWindowSizes(mozilla::MallocSizeOf aMallocSizeOf)
+  explicit nsWindowSizes(mozilla::MallocSizeOf aMallocSizeOf)
     :
       #define ZERO_SIZE(kind, mSize)  mSize(0),
       FOR_EACH_SIZE(ZERO_SIZE)
@@ -52,6 +52,16 @@ public:
     FOR_EACH_SIZE(ADD_TO_TAB_SIZES)
     #undef ADD_TO_TAB_SIZES
     mArenaStats.addToTabSizes(sizes);
+  }
+
+  size_t getTotalSize() const
+  {
+    size_t total = 0;
+    #define ADD_TO_TOTAL_SIZE(kind, mSize) total += mSize;
+    FOR_EACH_SIZE(ADD_TO_TOTAL_SIZE)
+    #undef ADD_TO_TOTAL_SIZE
+    total += mArenaStats.getTotalSize();
+    return total;
   }
 
   #define DECL_SIZE(kind, mSize) size_t mSize;
@@ -129,7 +139,7 @@ public:
  *   the tab.
  *
  */
-class nsWindowMemoryReporter MOZ_FINAL : public nsIMemoryReporter,
+class nsWindowMemoryReporter final : public nsIMemoryReporter,
                                          public nsIObserver,
                                          public nsSupportsWeakReference
 {
@@ -140,8 +150,6 @@ public:
 
   static void Init();
 
-  ~nsWindowMemoryReporter();
-
 #ifdef DEBUG
   /**
    * Unlink all known ghost windows, to enable investigating what caused them
@@ -151,19 +159,23 @@ public:
 #endif
 
 private:
+  ~nsWindowMemoryReporter();
+
   /**
    * nsGhostWindowReporter generates the "ghost-windows" report, which counts
    * the number of ghost windows present.
    */
-  class GhostWindowsReporter MOZ_FINAL : public nsIMemoryReporter
+  class GhostWindowsReporter final : public nsIMemoryReporter
   {
+    ~GhostWindowsReporter() {}
   public:
     NS_DECL_ISUPPORTS
 
     static int64_t DistinguishedAmount();
 
     NS_IMETHOD
-    CollectReports(nsIHandleReportCallback* aHandleReport, nsISupports* aData)
+    CollectReports(nsIHandleReportCallback* aHandleReport, nsISupports* aData,
+                   bool aAnonymize) override
     {
       return MOZ_COLLECT_REPORT(
         "ghost-windows", KIND_OTHER, UNITS_COUNT, DistinguishedAmount(),

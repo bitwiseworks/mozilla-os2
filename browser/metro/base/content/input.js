@@ -1,4 +1,4 @@
-// -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; js2-strict-trailing-comma-warning: nil -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2; js2-strict-trailing-comma-warning: nil -*-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -475,7 +475,7 @@ var ScrollUtils = {
       try {
         if (elem.anonScrollBox) {
           scrollbox = elem.anonScrollBox;
-          qinterface = scrollbox.boxObject.QueryInterface(Ci.nsIScrollBoxObject);
+          qinterface = scrollbox.boxObject;
         } else if (elem.scrollBoxObject) {
           scrollbox = elem;
           qinterface = elem.scrollBoxObject;
@@ -485,7 +485,7 @@ var ScrollUtils = {
           break;
         } else if (elem.boxObject) {
           let qi = (elem._cachedSBO) ? elem._cachedSBO
-                                     : elem.boxObject.QueryInterface(Ci.nsIScrollBoxObject);
+                                     : elem.boxObject;
           if (qi) {
             scrollbox = elem;
             scrollbox._cachedSBO = qinterface = qi;
@@ -512,13 +512,9 @@ var ScrollUtils = {
    */
   _defaultDragger: {
     isDraggable: function isDraggable(target, scroller) {
-      let sX = {}, sY = {},
-          pX = {}, pY = {};
-      scroller.getPosition(pX, pY);
-      scroller.getScrolledSize(sX, sY);
       let rect = target.getBoundingClientRect();
-      return { x: (sX.value > rect.width  || pX.value != 0),
-               y: (sY.value > rect.height || pY.value != 0) };
+      return { x: (scroller.scrolledWidth > rect.width   || scroller.positionX != 0),
+               y: (scroller.scrolledHeight > rect.height || scroller.positionY != 0) };
     },
 
     dragStart: function dragStart(cx, cy, target, scroller) {
@@ -531,21 +527,18 @@ var ScrollUtils = {
     },
 
     dragMove: function dragMove(dx, dy, scroller) {
-      if (scroller.getPosition) {
         try {
-          let oldX = {}, oldY = {};
-          scroller.getPosition(oldX, oldY);
+        let oldX = scroller.positionX,
+            oldY = scroller.positionY;
 
           scroller.scrollBy(dx, dy);
 
-          let newX = {}, newY = {};
-          scroller.getPosition(newX, newY);
+        let newX = scroller.positionX,
+            newY = scroller.positionY;
 
-          return (newX.value != oldX.value) || (newY.value != oldY.value);
+        return (newX != oldX) || (newY != oldY);
 
         } catch (e) { /* we have no time for whiny scrollers! */ }
-      }
-
       return false;
     },
 

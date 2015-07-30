@@ -1,4 +1,4 @@
-// -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -23,6 +23,9 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
  *   2: Add filter column to items table (bug 942295/975841)
  */
 const SCHEMA_VERSION = 2;
+
+// The maximum number of items you can attempt to save at once.
+const MAX_SAVE_COUNT = 100;
 
 XPCOMUtils.defineLazyGetter(this, "DB_PATH", function() {
   return OS.Path.join(OS.Constants.Path.profileDir, "home.sqlite");
@@ -297,7 +300,7 @@ function refreshDataset(datasetId) {
   timer.initWithCallback(function(timer) {
     delete gRefreshTimers[datasetId];
 
-    sendMessageToJava({
+    Messaging.sendRequest({
       type: "HomePanels:RefreshDataset",
       datasetId: datasetId
     });
@@ -327,6 +330,11 @@ HomeStorage.prototype = {
    * @resolves When the operation has completed.
    */
   save: function(data, options) {
+    if (data && data.length > MAX_SAVE_COUNT) {
+      throw "save failed for dataset = " + this.datasetId +
+        ": you cannot save more than " + MAX_SAVE_COUNT + " items at once";
+    }
+
     return Task.spawn(function save_task() {
       let db = yield getDatabaseConnection();
       try {

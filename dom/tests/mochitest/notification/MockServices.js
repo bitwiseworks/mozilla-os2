@@ -12,41 +12,80 @@ var MockServices = (function () {
   var registrar = SpecialPowers.wrap(SpecialPowers.Components).manager
                   .QueryInterface(SpecialPowers.Ci.nsIComponentRegistrar);
 
-  var activeNotifications = Object.create(null);
+  var activeAlertNotifications = Object.create(null);
+
+  var activeAppNotifications = Object.create(null);
+
+  window.addEventListener('mock-notification-close-event', function(e) {
+    for (var alertName in activeAlertNotifications) {
+      var notif = activeAlertNotifications[alertName];
+      if (notif.title === e.detail.title) {
+        notif.listener.observe(null, "alertfinished", null);
+        delete activeAlertNotifications[alertName];
+        delete activeAppNotifications[alertName];
+        return;
+      }
+    }
+  });
 
   var mockAlertsService = {
     showAlertNotification: function(imageUrl, title, text, textClickable,
                                     cookie, alertListener, name) {
       var listener = SpecialPowers.wrap(alertListener);
-      activeNotifications[name] = {
+      activeAlertNotifications[name] = {
         listener: listener,
-        cookie: cookie
+        cookie: cookie,
+        title: title
       };
 
       // fake async alert show event
-      setTimeout(function () {
-        listener.observe(null, "alertshow", cookie);
-      }, 100);
+      if (listener) {
+        setTimeout(function () {
+          listener.observe(null, "alertshow", cookie);
+        }, 100);
+      }
 
       // ?? SpecialPowers.wrap(alertListener).observe(null, "alertclickcallback", cookie);
     },
 
-    showAppNotification: function(imageUrl, title, text, textClickable,
-                                  manifestURL, alertListener, name) {
-      this.showAlertNotification(imageUrl, title, text, textClickable, "", alertListener, name);
+    showAppNotification: function(aImageUrl, aTitle, aText, aAlertListener, aDetails) {
+      var listener = aAlertListener || (activeAlertNotifications[aDetails.id] ? activeAlertNotifications[aDetails.id].listener : undefined);
+      activeAppNotifications[aDetails.id] = {
+        observer: listener,
+        title: aTitle,
+        text: aText,
+        manifestURL: aDetails.manifestURL,
+        imageURL: aImageUrl,
+        lang: aDetails.lang || undefined,
+        id: aDetails.id || undefined,
+        dbId: aDetails.dbId || undefined,
+        dir: aDetails.dir || undefined,
+        tag: aDetails.tag || undefined,
+        timestamp: aDetails.timestamp || undefined,
+        data: aDetails.data || undefined
+      };
+      this.showAlertNotification(aImageUrl, aTitle, aText, true, "", listener, aDetails.id);
     },
 
     closeAlert: function(name) {
-      var notification = activeNotifications[name];
-      if (notification) {
-        notification.listener.observe(null, "alertfinished", notification.cookie);
-        delete activeNotifications[name];
+      var alertNotification = activeAlertNotifications[name];
+      if (alertNotification) {
+        if (alertNotification.listener) {
+          alertNotification.listener.observe(null, "alertfinished", alertNotification.cookie);
+        }
+        delete activeAlertNotifications[name];
+      }
+
+      var appNotification = activeAppNotifications[name];
+      if (appNotification) {
+        delete activeAppNotifications[name];
       }
     },
 
     QueryInterface: function(aIID) {
       if (SpecialPowers.wrap(aIID).equals(SpecialPowers.Ci.nsISupports) ||
-          SpecialPowers.wrap(aIID).equals(SpecialPowers.Ci.nsIAlertsService)) {
+          SpecialPowers.wrap(aIID).equals(SpecialPowers.Ci.nsIAlertsService) ||
+          SpecialPowers.wrap(aIID).equals(SpecialPowers.Ci.nsIAppNotificationService)) {
         return this;
       }
       throw SpecialPowers.Components.results.NS_ERROR_NO_INTERFACE;
@@ -77,5 +116,9 @@ var MockServices = (function () {
       registrar.unregisterFactory(MOCK_ALERTS_CID, mockAlertsService);
       registrar.unregisterFactory(MOCK_SYSTEM_ALERTS_CID, mockAlertsService);
     },
+
+    activeAlertNotifications: activeAlertNotifications,
+
+    activeAppNotifications: activeAppNotifications,
   };
 })();

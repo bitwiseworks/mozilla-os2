@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -24,14 +24,14 @@ NS_GetPendingMemoryPressure()
 }
 
 void
-NS_DispatchEventualMemoryPressure(MemoryPressureState state)
+NS_DispatchEventualMemoryPressure(MemoryPressureState aState)
 {
   /*
    * A new memory pressure event erases an ongoing memory pressure, but an
    * existing "new" memory pressure event takes precedence over a new "ongoing"
    * memory pressure event.
    */
-  switch (state) {
+  switch (aState) {
     case MemPressure_None:
       sMemoryPressurePending = MemPressure_None;
       break;
@@ -39,15 +39,16 @@ NS_DispatchEventualMemoryPressure(MemoryPressureState state)
       sMemoryPressurePending = MemPressure_New;
       break;
     case MemPressure_Ongoing:
-      sMemoryPressurePending.compareExchange(MemPressure_None, MemPressure_Ongoing);
+      sMemoryPressurePending.compareExchange(MemPressure_None,
+                                             MemPressure_Ongoing);
       break;
   }
 }
 
 nsresult
-NS_DispatchMemoryPressure(MemoryPressureState state)
+NS_DispatchMemoryPressure(MemoryPressureState aState)
 {
-  NS_DispatchEventualMemoryPressure(state);
+  NS_DispatchEventualMemoryPressure(aState);
   nsCOMPtr<nsIRunnable> event = new nsRunnable;
   return NS_DispatchToMainThread(event);
 }

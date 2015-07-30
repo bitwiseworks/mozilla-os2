@@ -41,6 +41,10 @@
 #include "stun_udp_socket_filter.h"
 #include "mozilla/net/DNS.h"
 
+#include "ice_ctx.h"
+#include "ice_peer_ctx.h"
+#include "ice_media_stream.h"
+
 #define GTEST_HAS_RTTI 0
 #include "gtest/gtest.h"
 #include "gtest_utils.h"
@@ -50,16 +54,19 @@ MtransportTestUtils *test_utils;
 
 bool stream_added = false;
 
-static int kDefaultTimeout = 7000;
+static unsigned int kDefaultTimeout = 7000;
 
 const std::string kDefaultStunServerAddress((char *)"23.21.150.121");
 const std::string kDefaultStunServerHostname(
-    (char *)"ec2-23-21-150-121.compute-1.amazonaws.com");
+    (char *)"stun.services.mozilla.com");
 const std::string kBogusStunServerHostname(
     (char *)"stun-server-nonexistent.invalid");
 const uint16_t kDefaultStunServerPort=3478;
 const std::string kBogusIceCandidate(
     (char *)"candidate:0 2 UDP 2113601790 192.168.178.20 50769 typ");
+
+const std::string kUnreachableHostIceCandidate(
+    (char *)"candidate:0 1 UDP 2113601790 192.168.178.20 50769 typ host");
 
 std::string g_stun_server_address(kDefaultStunServerAddress);
 std::string g_stun_server_hostname(kDefaultStunServerHostname);
@@ -71,10 +78,33 @@ namespace {
 
 enum TrickleMode { TRICKLE_NONE, TRICKLE_SIMULATE, TRICKLE_REAL };
 
-typedef bool (*CandidateFilter)(const std::string& candidate);
+typedef std::string (*CandidateFilter)(const std::string& candidate);
 
-static bool IsRelayCandidate(const std::string& candidate) {
-  return candidate.find("typ relay") != std::string::npos;
+static std::string IsRelayCandidate(const std::string& candidate) {
+  if (candidate.find("typ relay") != std::string::npos) {
+    return candidate;
+  }
+  return std::string();
+}
+
+static std::string IsLoopbackCandidate(const std::string& candidate) {
+  if (candidate.find("127.0.0.") != std::string::npos) {
+    return candidate;
+  }
+  return std::string();
+}
+
+static std::string SabotageHostCandidateAndDropReflexive(
+    const std::string& candidate) {
+  if (candidate.find("typ srflx") != std::string::npos) {
+    return std::string();
+  }
+
+  if (candidate.find("typ host") != std::string::npos) {
+    return kUnreachableHostIceCandidate;
+  }
+
+  return candidate;
 }
 
 bool ContainsSucceededPair(const std::vector<NrIceCandidatePair>& pairs) {
@@ -124,17 +154,87 @@ class IceCandidatePairCompare {
     }
 };
 
+class IceTestPeer;
+
+class SchedulableTrickleCandidate {
+  public:
+    SchedulableTrickleCandidate(IceTestPeer *peer,
+                                size_t stream,
+                                const std::string &candidate) :
+      peer_(peer),
+      stream_(stream),
+      candidate_(candidate),
+      timer_handle_(nullptr) {
+    }
+
+    ~SchedulableTrickleCandidate() {
+      if (timer_handle_)
+        NR_async_timer_cancel(timer_handle_);
+    }
+
+    void Schedule(unsigned int ms) {
+      test_utils->sts_target()->Dispatch(
+          WrapRunnable(this, &SchedulableTrickleCandidate::Schedule_s, ms),
+          NS_DISPATCH_SYNC);
+    }
+
+    void Schedule_s(unsigned int ms) {
+      MOZ_ASSERT(!timer_handle_);
+      NR_ASYNC_TIMER_SET(ms, Trickle_cb, this, &timer_handle_);
+    }
+
+    static void Trickle_cb(NR_SOCKET s, int how, void *cb_arg) {
+      static_cast<SchedulableTrickleCandidate*>(cb_arg)->Trickle();
+    }
+
+    void Trickle();
+
+    std::string& Candidate() {
+      return candidate_;
+    }
+
+    const std::string& Candidate() const {
+      return candidate_;
+    }
+
+    size_t Stream() const {
+      return stream_;
+    }
+
+    bool IsHost() const {
+      return candidate_.find("typ host") != std::string::npos;
+    }
+
+    bool IsReflexive() const {
+      return candidate_.find("typ srflx") != std::string::npos;
+    }
+
+    bool IsRelay() const {
+      return candidate_.find("typ relay") != std::string::npos;
+    }
+
+  private:
+    IceTestPeer *peer_;
+    size_t stream_;
+    std::string candidate_;
+    void *timer_handle_;
+
+    DISALLOW_COPY_ASSIGN(SchedulableTrickleCandidate);
+};
+
 class IceTestPeer : public sigslot::has_slots<> {
  public:
 
-  IceTestPeer(const std::string& name, bool offerer, bool set_priorities) :
+  IceTestPeer(const std::string& name, bool offerer, bool set_priorities,
+              bool allow_loopback = false) :
       name_(name),
-      ice_ctx_(NrIceCtx::Create(name, offerer, set_priorities)),
+      ice_ctx_(NrIceCtx::Create(name, offerer, set_priorities, allow_loopback)),
       streams_(),
       candidates_(),
       gathering_complete_(false),
       ready_ct_(0),
       ice_complete_(false),
+      ice_reached_checking_(false),
       received_(0),
       sent_(0),
       fake_resolver_(),
@@ -145,7 +245,8 @@ class IceTestPeer : public sigslot::has_slots<> {
       expected_local_transport_(kNrIceTransportUdp),
       expected_remote_type_(NrIceCandidate::ICE_HOST),
       trickle_mode_(TRICKLE_NONE),
-      trickled_(0) {
+      trickled_(0),
+      simulate_ice_lite_(false) {
     ice_ctx_->SignalGatheringStateChange.connect(
         this,
         &IceTestPeer::GatheringStateChange);
@@ -164,7 +265,7 @@ class IceTestPeer : public sigslot::has_slots<> {
     PR_Sleep(1000);
   }
 
-  void AddStream(int components) {
+  void AddStream_s(int components) {
     char name[100];
     snprintf(name, sizeof(name), "%s:stream%d", name_.c_str(),
              (int)streams_.size());
@@ -180,7 +281,20 @@ class IceTestPeer : public sigslot::has_slots<> {
     stream->SignalPacketReceived.connect(this, &IceTestPeer::PacketReceived);
   }
 
+  void AddStream(int components)
+  {
+    test_utils->sts_target()->Dispatch(WrapRunnable(this,
+                                                    &IceTestPeer::AddStream_s,
+                                                    components),
+        NS_DISPATCH_SYNC);
+  }
+
   void SetStunServer(const std::string addr, uint16_t port) {
+    if (addr.empty()) {
+      // Happens when MOZ_DISABLE_NONLOCAL_CONNECTIONS is set
+      return;
+    }
+
     std::vector<NrIceStunServer> stun_servers;
     ScopedDeletePtr<NrIceStunServer> server(NrIceStunServer::Create(addr,
                                                                     port));
@@ -214,12 +328,14 @@ class IceTestPeer : public sigslot::has_slots<> {
 
   void SetFakeResolver() {
     ASSERT_TRUE(NS_SUCCEEDED(dns_resolver_->Init()));
-    PRNetAddr addr;
-    PRStatus status = PR_StringToNetAddr(g_stun_server_address.c_str(),
-                                          &addr);
-    addr.inet.port = kDefaultStunServerPort;
-    ASSERT_EQ(PR_SUCCESS, status);
-    fake_resolver_.SetAddr(g_stun_server_hostname, addr);
+    if (!g_stun_server_address.empty() && !g_stun_server_hostname.empty()) {
+      PRNetAddr addr;
+      PRStatus status = PR_StringToNetAddr(g_stun_server_address.c_str(),
+                                            &addr);
+      addr.inet.port = kDefaultStunServerPort;
+      ASSERT_EQ(PR_SUCCESS, status);
+      fake_resolver_.SetAddr(g_stun_server_hostname, addr);
+    }
     ASSERT_TRUE(NS_SUCCEEDED(ice_ctx_->SetResolver(
         fake_resolver_.AllocateResolver())));
   }
@@ -242,7 +358,11 @@ class IceTestPeer : public sigslot::has_slots<> {
 
   // Get various pieces of state
   std::vector<std::string> GetGlobalAttributes() {
-    return ice_ctx_->GetGlobalAttributes();
+    std::vector<std::string> attrs(ice_ctx_->GetGlobalAttributes());
+    if (simulate_ice_lite_) {
+      attrs.push_back("ice-lite");
+    }
+    return attrs;
   }
 
    std::vector<std::string> GetCandidates(size_t stream) {
@@ -250,10 +370,16 @@ class IceTestPeer : public sigslot::has_slots<> {
 
     RUN_ON_THREAD(
         test_utils->sts_target(),
-        WrapRunnableRet(this, &IceTestPeer::GetCandidates_s, stream, &v),
-        NS_DISPATCH_SYNC);
+        WrapRunnableRet(this, &IceTestPeer::GetCandidates_s, stream, &v));
 
     return v;
+  }
+
+  std::string FilterCandidate(const std::string& candidate) {
+    if (candidate_filter_) {
+      return candidate_filter_(candidate);
+    }
+    return candidate;
   }
 
   std::vector<std::string> GetCandidates_s(size_t stream) {
@@ -267,9 +393,10 @@ class IceTestPeer : public sigslot::has_slots<> {
 
 
     for (size_t i=0; i < candidates_in.size(); i++) {
-      if ((!candidate_filter_) || candidate_filter_(candidates_in[i])) {
-        std::cerr << "Returning candidate: " << candidates_in[i] << std::endl;
-        candidates.push_back(candidates_in[i]);
+      std::string candidate(FilterCandidate(candidates_in[i]));
+      if (!candidate.empty()) {
+        std::cerr << "Returning candidate: " << candidate << std::endl;
+        candidates.push_back(candidate);
       }
     }
 
@@ -284,12 +411,26 @@ class IceTestPeer : public sigslot::has_slots<> {
     expected_remote_type_ = remote;
   }
 
+  void SetExpectedCandidateAddr(const std::string& addr) {
+    expected_local_addr_ = addr;
+    expected_remote_addr_ = addr;
+  }
+
   bool gathering_complete() { return gathering_complete_; }
   int ready_ct() { return ready_ct_; }
-  bool is_ready(size_t stream) {
+  bool is_ready_s(size_t stream) {
     return streams_[stream]->state() == NrIceMediaStream::ICE_OPEN;
   }
+  bool is_ready(size_t stream)
+  {
+    bool result;
+    test_utils->sts_target()->Dispatch(
+        WrapRunnableRet(this, &IceTestPeer::is_ready_s, stream, &result),
+        NS_DISPATCH_SYNC);
+    return result;
+  }
   bool ice_complete() { return ice_complete_; }
+  bool ice_reached_checking() { return ice_reached_checking_; }
   size_t received() { return received_; }
   size_t sent() { return sent_; }
 
@@ -301,12 +442,16 @@ class IceTestPeer : public sigslot::has_slots<> {
     remote_ = remote;
 
     trickle_mode_ = trickle_mode;
+    ice_complete_ = false;
     res = ice_ctx_->ParseGlobalAttributes(remote->GetGlobalAttributes());
     ASSERT_TRUE(NS_SUCCEEDED(res));
 
     if (trickle_mode == TRICKLE_NONE ||
         trickle_mode == TRICKLE_REAL) {
       for (size_t i=0; i<streams_.size(); ++i) {
+        if (streams_[i]->HasParsedAttributes()) {
+          continue;
+        }
         std::vector<std::string> candidates =
             remote->GetCandidates(i);
 
@@ -319,7 +464,11 @@ class IceTestPeer : public sigslot::has_slots<> {
     } else {
       // Parse empty attributes and then trickle them out later
       for (size_t i=0; i<streams_.size(); ++i) {
+        if (streams_[i]->HasParsedAttributes()) {
+          continue;
+        }
         std::vector<std::string> empty_attrs;
+        std::cout << "Calling ParseAttributes on stream " << i << std::endl;
         res = streams_[i]->ParseAttributes(empty_attrs);
         ASSERT_TRUE(NS_SUCCEEDED(res));
       }
@@ -343,28 +492,55 @@ class IceTestPeer : public sigslot::has_slots<> {
   void SimulateTrickle(size_t stream) {
     std::cerr << "Doing trickle for stream " << stream << std::endl;
     // If we are in trickle deferred mode, now trickle in the candidates
-    // for |stream}
-    nsresult res;
+    // for |stream|
 
+    // The size of streams_ is not going to change out from under us, so should
+    // be safe here.
     ASSERT_GT(remote_->streams_.size(), stream);
+
+    std::vector<SchedulableTrickleCandidate*>& candidates =
+      ControlTrickle(stream);
+
+    for (auto i = candidates.begin(); i != candidates.end(); ++i) {
+      (*i)->Schedule(0);
+    }
+  }
+
+  // Allows test case to completely control when/if candidates are trickled
+  // (test could also do things like insert extra trickle candidates, or
+  // change existing ones, or insert duplicates, really anything is fair game)
+  std::vector<SchedulableTrickleCandidate*>& ControlTrickle(size_t stream) {
+    std::cerr << "Doing controlled trickle for stream " << stream << std::endl;
 
     std::vector<std::string> candidates =
       remote_->GetCandidates(stream);
 
     for (size_t j=0; j<candidates.size(); j++) {
-      test_utils->sts_target()->Dispatch(
-        WrapRunnableRet(streams_[stream],
-                        &NrIceMediaStream::ParseTrickleCandidate,
-                        candidates[j],
-                        &res), NS_DISPATCH_SYNC);
-
-      ASSERT_TRUE(NS_SUCCEEDED(res));
+      controlled_trickle_candidates_[stream].push_back(
+          new SchedulableTrickleCandidate(this, stream, candidates[j]));
     }
+
+    return controlled_trickle_candidates_[stream];
+  }
+
+  nsresult TrickleCandidate_s(const std::string &candidate, size_t stream) {
+    return streams_[stream]->ParseTrickleCandidate(candidate);
   }
 
   void DumpCandidate(std::string which, const NrIceCandidate& cand) {
     std::string type;
 
+    std::string addr;
+    int port;
+
+    if (which.find("Remote") != std::string::npos) {
+      addr = cand.cand_addr.host;
+      port = cand.cand_addr.port;
+    }
+    else {
+      addr = cand.local_addr.host;
+      port = cand.local_addr.port;
+    }
     switch(cand.type) {
       case NrIceCandidate::ICE_HOST:
         type = "host";
@@ -385,13 +561,14 @@ class IceTestPeer : public sigslot::has_slots<> {
         FAIL();
     };
 
+
     std::cerr << which
               << " --> "
               << type
               << " "
-              << cand.local_addr.host
+              << addr
               << ":"
-              << cand.local_addr.port
+              << port
               << " codeword="
               << cand.codeword
               << std::endl;
@@ -400,7 +577,7 @@ class IceTestPeer : public sigslot::has_slots<> {
   void DumpAndCheckActiveCandidates_s() {
     std::cerr << "Active candidates:" << std::endl;
     for (size_t i=0; i < streams_.size(); ++i) {
-      for (int j=0; j < streams_[i]->components(); ++j) {
+      for (size_t j=0; j < streams_[i]->components(); ++j) {
         std::cerr << "Stream " << i << " component " << j+1 << std::endl;
 
         NrIceCandidate *local;
@@ -416,6 +593,12 @@ class IceTestPeer : public sigslot::has_slots<> {
           ASSERT_EQ(expected_local_transport_, local->local_addr.transport);
           DumpCandidate("Remote ", *remote);
           ASSERT_EQ(expected_remote_type_, remote->type);
+          if (!expected_local_addr_.empty()) {
+            ASSERT_EQ(expected_local_addr_, local->cand_addr.host);
+          }
+          if (!expected_remote_addr_.empty()) {
+            ASSERT_EQ(expected_remote_addr_, remote->cand_addr.host);
+          }
           delete local;
           delete remote;
         }
@@ -436,7 +619,25 @@ class IceTestPeer : public sigslot::has_slots<> {
   }
 
   void Shutdown() {
+    for (auto s = controlled_trickle_candidates_.begin();
+         s != controlled_trickle_candidates_.end();
+         ++s) {
+      for (auto cand = s->second.begin(); cand != s->second.end(); ++cand) {
+        delete *cand;
+      }
+    }
+
     ice_ctx_ = nullptr;
+
+    if (remote_) {
+      remote_->UnsetRemote();
+      remote_ = nullptr;
+    }
+  }
+
+  void UnsetRemote()
+  {
+    remote_ = nullptr;
   }
 
   void StartChecks() {
@@ -474,13 +675,17 @@ class IceTestPeer : public sigslot::has_slots<> {
 
   }
 
-  void CandidateInitialized(NrIceMediaStream *stream, const std::string &candidate) {
+  void CandidateInitialized(NrIceMediaStream *stream, const std::string &raw_candidate) {
+    std::string candidate(FilterCandidate(raw_candidate));
+    if (candidate.empty()) {
+      return;
+    }
     std::cerr << "Candidate initialized: " << candidate << std::endl;
     candidates_[stream->name()].push_back(candidate);
 
     // If we are connected, then try to trickle to the
     // other side.
-    if (remote_ && remote_->remote_) {
+    if (remote_ && remote_->remote_ && (trickle_mode_ != TRICKLE_SIMULATE)) {
       std::vector<mozilla::RefPtr<NrIceMediaStream> >::iterator it =
           std::find(streams_.begin(), streams_.end(), stream);
       ASSERT_NE(streams_.end(), it);
@@ -494,8 +699,9 @@ class IceTestPeer : public sigslot::has_slots<> {
     }
   }
 
-  nsresult GetCandidatePairs(size_t stream_index,
-                             std::vector<NrIceCandidatePair>* pairs) {
+  nsresult GetCandidatePairs_s(size_t stream_index,
+                               std::vector<NrIceCandidatePair>* pairs)
+  {
     MOZ_ASSERT(pairs);
     if (stream_index >= streams_.size()) {
       // Is there a better error for "no such index"?
@@ -503,14 +709,20 @@ class IceTestPeer : public sigslot::has_slots<> {
       return NS_ERROR_INVALID_ARG;
     }
 
-    nsresult res;
+    return streams_[stream_index]->GetCandidatePairs(pairs);
+  }
+
+  nsresult GetCandidatePairs(size_t stream_index,
+                             std::vector<NrIceCandidatePair>* pairs) {
+    nsresult v;
     test_utils->sts_target()->Dispatch(
-        WrapRunnableRet(streams_[stream_index],
-                        &NrIceMediaStream::GetCandidatePairs,
+        WrapRunnableRet(this,
+                        &IceTestPeer::GetCandidatePairs_s,
+                        stream_index,
                         pairs,
-                        &res),
+                        &v),
         NS_DISPATCH_SYNC);
-    return res;
+    return v;
   }
 
   void DumpCandidatePair(const NrIceCandidatePair& pair) {
@@ -524,7 +736,7 @@ class IceTestPeer : public sigslot::has_slots<> {
                 << " codeword = " << pair.codeword << std::endl;
   }
 
-  void DumpCandidatePairs(NrIceMediaStream *stream) {
+  void DumpCandidatePairs_s(NrIceMediaStream *stream) {
     std::vector<NrIceCandidatePair> pairs;
     nsresult res = stream->GetCandidatePairs(&pairs);
     ASSERT_TRUE(NS_SUCCEEDED(res));
@@ -538,10 +750,10 @@ class IceTestPeer : public sigslot::has_slots<> {
     std::cerr << "]" << std::endl;
   }
 
-  void DumpCandidatePairs() {
+  void DumpCandidatePairs_s() {
     std::cerr << "Dumping candidate pairs for all streams [" << std::endl;
     for (size_t s = 0; s < streams_.size(); ++s) {
-      DumpCandidatePairs(streams_[s]);
+      DumpCandidatePairs_s(streams_[s]);
     }
     std::cerr << "]" << std::endl;
   }
@@ -621,21 +833,30 @@ class IceTestPeer : public sigslot::has_slots<> {
   void StreamReady(NrIceMediaStream *stream) {
     ++ready_ct_;
     std::cerr << "Stream ready " << stream->name() << " ct=" << ready_ct_ << std::endl;
-    DumpCandidatePairs(stream);
+    DumpCandidatePairs_s(stream);
   }
   void StreamFailed(NrIceMediaStream *stream) {
     std::cerr << "Stream failed " << stream->name() << " ct=" << ready_ct_ << std::endl;
-    DumpCandidatePairs(stream);
+    DumpCandidatePairs_s(stream);
   }
 
   void ConnectionStateChange(NrIceCtx* ctx,
                              NrIceCtx::ConnectionState state) {
     (void)ctx;
-    if (state != NrIceCtx::ICE_CTX_OPEN) {
-      return;
+    switch (state) {
+      case NrIceCtx::ICE_CTX_INIT:
+        break;
+      case NrIceCtx::ICE_CTX_CHECKING:
+        std::cerr << "ICE checking " << name_ << std::endl;
+        ice_reached_checking_ = true;
+        break;
+      case NrIceCtx::ICE_CTX_OPEN:
+        std::cerr << "ICE completed " << name_ << std::endl;
+        ice_complete_ = true;
+        break;
+      case NrIceCtx::ICE_CTX_FAILED:
+        break;
     }
-    std::cerr << "ICE completed " << name_ << std::endl;
-    ice_complete_ = true;
   }
 
   void PacketReceived(NrIceMediaStream *stream, int component, const unsigned char *data,
@@ -656,30 +877,81 @@ class IceTestPeer : public sigslot::has_slots<> {
     candidate_filter_ = filter;
   }
 
-  // Allow us to parse candidates directly on the current thread.
-  void ParseCandidate(size_t i, const std::string& candidate) {
+  void ParseCandidate_s(size_t i, const std::string& candidate) {
     std::vector<std::string> attributes;
 
     attributes.push_back(candidate);
     streams_[i]->ParseAttributes(attributes);
   }
 
-  void DisableComponent(size_t stream, int component_id) {
+  void ParseCandidate(size_t i, const std::string& candidate)
+  {
+    test_utils->sts_target()->Dispatch(
+        WrapRunnable(this,
+                        &IceTestPeer::ParseCandidate_s,
+                        i,
+                        candidate),
+        NS_DISPATCH_SYNC);
+  }
+
+  void DisableComponent_s(size_t stream, int component_id) {
     ASSERT_LT(stream, streams_.size());
     nsresult res = streams_[stream]->DisableComponent(component_id);
     ASSERT_TRUE(NS_SUCCEEDED(res));
   }
 
+  void DisableComponent(size_t stream, int component_id)
+  {
+    test_utils->sts_target()->Dispatch(
+        WrapRunnable(this,
+                        &IceTestPeer::DisableComponent_s,
+                        stream,
+                        component_id),
+        NS_DISPATCH_SYNC);
+  }
+
   int trickled() { return trickled_; }
+
+  void SetControlling(NrIceCtx::Controlling controlling) {
+    nsresult res;
+    test_utils->sts_target()->Dispatch(
+        WrapRunnableRet(ice_ctx_,
+                        &NrIceCtx::SetControlling,
+                        controlling,
+                        &res),
+        NS_DISPATCH_SYNC);
+    ASSERT_TRUE(NS_SUCCEEDED(res));
+  }
+
+  void SetTiebreaker(uint64_t tiebreaker) {
+    test_utils->sts_target()->Dispatch(
+        WrapRunnable(this,
+                     &IceTestPeer::SetTiebreaker_s,
+                     tiebreaker),
+        NS_DISPATCH_SYNC);
+  }
+
+  void SetTiebreaker_s(uint64_t tiebreaker) {
+    ice_ctx_->peer()->tiebreaker = tiebreaker;
+  }
+
+  void SimulateIceLite() {
+    simulate_ice_lite_ = true;
+    SetControlling(NrIceCtx::ICE_CONTROLLED);
+  }
 
  private:
   std::string name_;
   nsRefPtr<NrIceCtx> ice_ctx_;
   std::vector<mozilla::RefPtr<NrIceMediaStream> > streams_;
   std::map<std::string, std::vector<std::string> > candidates_;
+  // Maps from stream id to list of remote trickle candidates
+  std::map<size_t, std::vector<SchedulableTrickleCandidate*> >
+    controlled_trickle_candidates_;
   bool gathering_complete_;
   int ready_ct_;
   bool ice_complete_;
+  bool ice_reached_checking_;
   size_t received_;
   size_t sent_;
   NrIceResolverFake fake_resolver_;
@@ -689,9 +961,18 @@ class IceTestPeer : public sigslot::has_slots<> {
   NrIceCandidate::Type expected_local_type_;
   std::string expected_local_transport_;
   NrIceCandidate::Type expected_remote_type_;
+  std::string expected_local_addr_;
+  std::string expected_remote_addr_;
   TrickleMode trickle_mode_;
   int trickled_;
+  bool simulate_ice_lite_;
 };
+
+void SchedulableTrickleCandidate::Trickle() {
+  timer_handle_ = nullptr;
+  nsresult res = peer_->TrickleCandidate_s(candidate_, stream_);
+  ASSERT_TRUE(NS_SUCCEEDED(res));
+}
 
 class IceGatherTest : public ::testing::Test {
  public:
@@ -699,24 +980,43 @@ class IceGatherTest : public ::testing::Test {
     test_utils->sts_target()->Dispatch(WrapRunnable(TestStunServer::GetInstance(),
                                                     &TestStunServer::Reset),
                                        NS_DISPATCH_SYNC);
-    peer_ = new IceTestPeer("P1", true, false);
-    peer_->AddStream(1);
   }
 
-  void Gather(bool wait = true) {
-     peer_->Gather();
+  void TearDown() {
+    peer_ = nullptr;
 
-    if (wait) {
-      WaitForGather();
+    test_utils->sts_target()->Dispatch(WrapRunnable(this,
+                                                    &IceGatherTest::TearDown_s),
+                                       NS_DISPATCH_SYNC);
+  }
+
+  void TearDown_s() {
+    NrIceCtx::internal_DeinitializeGlobal();
+  }
+
+  void EnsurePeer() {
+    if (!peer_) {
+      peer_ = new IceTestPeer("P1", true, false);
+      peer_->AddStream(1);
     }
   }
 
-  void WaitForGather() {
-    ASSERT_TRUE_WAIT(peer_->gathering_complete(), kDefaultTimeout);
+  void Gather(unsigned int waitTime = kDefaultTimeout) {
+    EnsurePeer();
+    peer_->Gather();
+
+    if (waitTime) {
+      WaitForGather(waitTime);
+    }
+  }
+
+  void WaitForGather(unsigned int waitTime = kDefaultTimeout) {
+    ASSERT_TRUE_WAIT(peer_->gathering_complete(), waitTime);
   }
 
   void UseFakeStunServerWithResponse(const std::string& fake_addr,
                                      uint16_t fake_port) {
+    EnsurePeer();
     TestStunServer::GetInstance()->SetResponseAddr(fake_addr, fake_port);
     // Sets an additional stun server
     peer_->SetStunServer(TestStunServer::GetInstance()->addr(),
@@ -750,32 +1050,45 @@ class IceConnectTest : public ::testing::Test {
     ASSERT_TRUE(NS_SUCCEEDED(rv));
   }
 
+  void TearDown() {
+    p1_ = nullptr;
+    p2_ = nullptr;
+
+    test_utils->sts_target()->Dispatch(WrapRunnable(this,
+                                                    &IceConnectTest::TearDown_s),
+                                       NS_DISPATCH_SYNC);
+  }
+
+  void TearDown_s() {
+    NrIceCtx::internal_DeinitializeGlobal();
+  }
+
   void AddStream(const std::string& name, int components) {
-    Init(false);
+    Init(false, false);
     p1_->AddStream(components);
     p2_->AddStream(components);
   }
 
-  void Init(bool set_priorities) {
+  void Init(bool set_priorities, bool allow_loopback) {
     if (!initted_) {
-      p1_ = new IceTestPeer("P1", true, set_priorities);
-      p2_ = new IceTestPeer("P2", false, set_priorities);
+      p1_ = new IceTestPeer("P1", true, set_priorities, allow_loopback);
+      p2_ = new IceTestPeer("P2", false, set_priorities, allow_loopback);
     }
     initted_ = true;
   }
 
-  bool Gather(bool wait) {
-    Init(false);
+  bool Gather(unsigned int waitTime = kDefaultTimeout) {
+    Init(false, false);
     p1_->SetStunServer(g_stun_server_address, kDefaultStunServerPort);
     p2_->SetStunServer(g_stun_server_address, kDefaultStunServerPort);
     p1_->Gather();
     p2_->Gather();
 
-    if (wait) {
-      EXPECT_TRUE_WAIT(p1_->gathering_complete(), kDefaultTimeout);
+    if (waitTime) {
+      EXPECT_TRUE_WAIT(p1_->gathering_complete(), waitTime);
       if (!p1_->gathering_complete())
         return false;
-      EXPECT_TRUE_WAIT(p2_->gathering_complete(), kDefaultTimeout);
+      EXPECT_TRUE_WAIT(p2_->gathering_complete(), waitTime);
       if (!p2_->gathering_complete())
         return false;
     }
@@ -803,13 +1116,18 @@ class IceConnectTest : public ::testing::Test {
   }
 
   void Connect() {
-    p1_->Connect(p2_, TRICKLE_NONE);
+    // IceTestPeer::Connect grabs attributes from the first arg, and gives them
+    // to |this|, meaning that p2_->Connect(p1_, ...) simulates p1 sending an
+    // offer to p2. Order matters here because it determines which peer is
+    // controlling.
     p2_->Connect(p1_, TRICKLE_NONE);
+    p1_->Connect(p2_, TRICKLE_NONE);
 
     ASSERT_TRUE_WAIT(p1_->ready_ct() == 1 && p2_->ready_ct() == 1,
                      kDefaultTimeout);
     ASSERT_TRUE_WAIT(p1_->ice_complete() && p2_->ice_complete(),
                      kDefaultTimeout);
+    AssertCheckingReached();
 
     p1_->DumpAndCheckActiveCandidates();
     p2_->DumpAndCheckActiveCandidates();
@@ -827,6 +1145,11 @@ class IceConnectTest : public ::testing::Test {
     p2_->SetExpectedTypes(local2, remote2);
   }
 
+  void SetExpectedCandidateAddr(const std::string& addr) {
+    p1_->SetExpectedCandidateAddr(addr);
+    p2_->SetExpectedCandidateAddr(addr);
+  }
+
   void ConnectP1(TrickleMode mode = TRICKLE_NONE) {
     p1_->Connect(p2_, mode);
   }
@@ -842,14 +1165,19 @@ class IceConnectTest : public ::testing::Test {
                      kDefaultTimeout);
   }
 
+  void AssertCheckingReached() {
+    ASSERT_TRUE(p1_->ice_reached_checking());
+    ASSERT_TRUE(p2_->ice_reached_checking());
+  }
+
   void WaitForGather() {
     ASSERT_TRUE_WAIT(p1_->gathering_complete(), kDefaultTimeout);
     ASSERT_TRUE_WAIT(p2_->gathering_complete(), kDefaultTimeout);
   }
 
   void ConnectTrickle(TrickleMode trickle = TRICKLE_SIMULATE) {
-    p1_->Connect(p2_, trickle);
     p2_->Connect(p1_, trickle);
+    p1_->Connect(p2_, trickle);
   }
 
   void SimulateTrickle(size_t stream) {
@@ -875,8 +1203,8 @@ class IceConnectTest : public ::testing::Test {
   }
 
   void ConnectThenDelete() {
-    p1_->Connect(p2_, TRICKLE_NONE, true);
     p2_->Connect(p1_, TRICKLE_NONE, false);
+    p1_->Connect(p2_, TRICKLE_NONE, true);
     test_utils->sts_target()->Dispatch(WrapRunnable(this,
                                                     &IceConnectTest::CloseP1),
                                        NS_DISPATCH_SYNC);
@@ -957,9 +1285,22 @@ class PacketFilterTest : public ::testing::Test {
   PacketFilterTest(): filter_(nullptr) {}
 
   void SetUp() {
+    // Set up enough of the ICE ctx to allow the packet filter to work
+    ice_ctx_ = NrIceCtx::Create("test", true);
+
     nsCOMPtr<nsIUDPSocketFilterHandler> handler =
       do_GetService(NS_STUN_UDP_SOCKET_FILTER_HANDLER_CONTRACTID);
     handler->NewFilter(getter_AddRefs(filter_));
+  }
+
+  void TearDown() {
+    test_utils->sts_target()->Dispatch(WrapRunnable(this,
+                                                    &PacketFilterTest::TearDown_s),
+                                       NS_DISPATCH_SYNC);
+  }
+
+  void TearDown_s() {
+    ice_ctx_ = nullptr;
   }
 
   void TestIncoming(const uint8_t* data, uint32_t len,
@@ -997,33 +1338,55 @@ class PacketFilterTest : public ::testing::Test {
   }
 
   nsCOMPtr<nsIUDPSocketFilter> filter_;
+  RefPtr<NrIceCtx> ice_ctx_;
 };
 }  // end namespace
 
 TEST_F(IceGatherTest, TestGatherFakeStunServerHostnameNoResolver) {
+  if (g_stun_server_hostname.empty()) {
+    return;
+  }
+
+  EnsurePeer();
   peer_->SetStunServer(g_stun_server_hostname, kDefaultStunServerPort);
   Gather();
 }
 
 TEST_F(IceGatherTest, TestGatherFakeStunServerIpAddress) {
+  if (g_stun_server_address.empty()) {
+    return;
+  }
+
+  EnsurePeer();
   peer_->SetStunServer(g_stun_server_address, kDefaultStunServerPort);
   peer_->SetFakeResolver();
   Gather();
 }
 
 TEST_F(IceGatherTest, TestGatherFakeStunServerHostname) {
+  if (g_stun_server_hostname.empty()) {
+    return;
+  }
+
+  EnsurePeer();
   peer_->SetStunServer(g_stun_server_hostname, kDefaultStunServerPort);
   peer_->SetFakeResolver();
   Gather();
 }
 
 TEST_F(IceGatherTest, TestGatherFakeStunBogusHostname) {
+  EnsurePeer();
   peer_->SetStunServer(kBogusStunServerHostname, kDefaultStunServerPort);
   peer_->SetFakeResolver();
   Gather();
 }
 
 TEST_F(IceGatherTest, TestGatherDNSStunServerIpAddress) {
+  if (g_stun_server_address.empty()) {
+    return;
+  }
+
+  EnsurePeer();
   peer_->SetStunServer(g_stun_server_address, kDefaultStunServerPort);
   peer_->SetDNSResolver();
   Gather();
@@ -1031,18 +1394,25 @@ TEST_F(IceGatherTest, TestGatherDNSStunServerIpAddress) {
 }
 
 TEST_F(IceGatherTest, TestGatherDNSStunServerHostname) {
+  if (g_stun_server_hostname.empty()) {
+    return;
+  }
+
+  EnsurePeer();
   peer_->SetStunServer(g_stun_server_hostname, kDefaultStunServerPort);
   peer_->SetDNSResolver();
   Gather();
 }
 
 TEST_F(IceGatherTest, TestGatherDNSStunBogusHostname) {
+  EnsurePeer();
   peer_->SetStunServer(kBogusStunServerHostname, kDefaultStunServerPort);
   peer_->SetDNSResolver();
   Gather();
 }
 
 TEST_F(IceGatherTest, TestGatherTurn) {
+  EnsurePeer();
   if (g_turn_server.empty())
     return;
   peer_->SetTurnServer(g_turn_server, kDefaultStunServerPort,
@@ -1051,6 +1421,7 @@ TEST_F(IceGatherTest, TestGatherTurn) {
 }
 
 TEST_F(IceGatherTest, TestGatherTurnTcp) {
+  EnsurePeer();
   if (g_turn_server.empty())
     return;
   peer_->SetTurnServer(g_turn_server, kDefaultStunServerPort,
@@ -1059,7 +1430,12 @@ TEST_F(IceGatherTest, TestGatherTurnTcp) {
 }
 
 TEST_F(IceGatherTest, TestGatherDisableComponent) {
-  peer_->SetStunServer(kDefaultStunServerHostname, kDefaultStunServerPort);
+  if (g_stun_server_hostname.empty()) {
+    return;
+  }
+
+  EnsurePeer();
+  peer_->SetStunServer(g_stun_server_hostname, kDefaultStunServerPort);
   peer_->AddStream(2);
   peer_->DisableComponent(1, 2);
   Gather();
@@ -1072,6 +1448,18 @@ TEST_F(IceGatherTest, TestGatherDisableComponent) {
   }
 }
 
+TEST_F(IceGatherTest, TestGatherVerifyNoLoopback) {
+  Gather();
+  ASSERT_FALSE(StreamHasMatchingCandidate(0, "127.0.0.1"));
+}
+
+TEST_F(IceGatherTest, TestGatherAllowLoopback) {
+  // Set up peer with loopback allowed.
+  peer_ = new IceTestPeer("P1", true, false, true);
+  peer_->AddStream(1);
+  Gather();
+  ASSERT_TRUE(StreamHasMatchingCandidate(0, "127.0.0.1"));
+}
 
 // Verify that a bogus candidate doesn't cause crashes on the
 // main thread. See bug 856433.
@@ -1088,26 +1476,26 @@ TEST_F(IceGatherTest, VerifyTestStunServer) {
 
 TEST_F(IceGatherTest, TestStunServerReturnsWildcardAddr) {
   UseFakeStunServerWithResponse("0.0.0.0", 3333);
-  Gather();
+  Gather(kDefaultTimeout * 3);
   ASSERT_FALSE(StreamHasMatchingCandidate(0, " 0.0.0.0 "));
 }
 
 TEST_F(IceGatherTest, TestStunServerReturnsPort0) {
   UseFakeStunServerWithResponse("192.0.2.133", 0);
-  Gather();
+  Gather(kDefaultTimeout * 3);
   ASSERT_FALSE(StreamHasMatchingCandidate(0, " 192.0.2.133 0 "));
 }
 
 TEST_F(IceGatherTest, TestStunServerReturnsLoopbackAddr) {
   UseFakeStunServerWithResponse("127.0.0.133", 3333);
-  Gather();
+  Gather(kDefaultTimeout * 3);
   ASSERT_FALSE(StreamHasMatchingCandidate(0, " 127.0.0.133 "));
 }
 
 TEST_F(IceGatherTest, TestStunServerTrickle) {
   UseFakeStunServerWithResponse("192.0.2.1", 3333);
   TestStunServer::GetInstance()->SetActive(false);
-  Gather(false);
+  Gather(0);
   ASSERT_FALSE(StreamHasMatchingCandidate(0, "192.0.2.1"));
   TestStunServer::GetInstance()->SetActive(true);
   WaitForGather();
@@ -1116,31 +1504,107 @@ TEST_F(IceGatherTest, TestStunServerTrickle) {
 
 TEST_F(IceConnectTest, TestGather) {
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
 }
 
 TEST_F(IceConnectTest, TestGatherAutoPrioritize) {
-  Init(false);
+  Init(false, false);
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
 }
 
 
 TEST_F(IceConnectTest, TestConnect) {
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   Connect();
+}
+
+TEST_F(IceConnectTest, TestLoopbackOnlySortOf) {
+  Init(false, true);
+  AddStream("first", 1);
+  ASSERT_TRUE(Gather());
+  SetCandidateFilter(IsLoopbackCandidate);
+  SetExpectedCandidateAddr("127.0.0.1");
+  Connect();
+}
+
+
+TEST_F(IceConnectTest, TestConnectBothControllingP1Wins) {
+  AddStream("first", 1);
+  p1_->SetTiebreaker(1);
+  p2_->SetTiebreaker(0);
+  ASSERT_TRUE(Gather());
+  p1_->SetControlling(NrIceCtx::ICE_CONTROLLING);
+  p2_->SetControlling(NrIceCtx::ICE_CONTROLLING);
+  Connect();
+}
+
+TEST_F(IceConnectTest, TestConnectBothControllingP2Wins) {
+  AddStream("first", 1);
+  p1_->SetTiebreaker(0);
+  p2_->SetTiebreaker(1);
+  ASSERT_TRUE(Gather());
+  p1_->SetControlling(NrIceCtx::ICE_CONTROLLING);
+  p2_->SetControlling(NrIceCtx::ICE_CONTROLLING);
+  Connect();
+}
+
+TEST_F(IceConnectTest, TestConnectIceLiteOfferer) {
+  AddStream("first", 1);
+  ASSERT_TRUE(Gather());
+  p1_->SimulateIceLite();
+  Connect();
+}
+
+TEST_F(IceConnectTest, TestTrickleBothControllingP1Wins) {
+  AddStream("first", 1);
+  p1_->SetTiebreaker(1);
+  p2_->SetTiebreaker(0);
+  ASSERT_TRUE(Gather());
+  p1_->SetControlling(NrIceCtx::ICE_CONTROLLING);
+  p2_->SetControlling(NrIceCtx::ICE_CONTROLLING);
+  ConnectTrickle();
+  SimulateTrickle(0);
+  ASSERT_TRUE_WAIT(p1_->ice_complete(), 1000);
+  ASSERT_TRUE_WAIT(p2_->ice_complete(), 1000);
+  AssertCheckingReached();
+}
+
+TEST_F(IceConnectTest, TestTrickleBothControllingP2Wins) {
+  AddStream("first", 1);
+  p1_->SetTiebreaker(0);
+  p2_->SetTiebreaker(1);
+  ASSERT_TRUE(Gather());
+  p1_->SetControlling(NrIceCtx::ICE_CONTROLLING);
+  p2_->SetControlling(NrIceCtx::ICE_CONTROLLING);
+  ConnectTrickle();
+  SimulateTrickle(0);
+  ASSERT_TRUE_WAIT(p1_->ice_complete(), 1000);
+  ASSERT_TRUE_WAIT(p2_->ice_complete(), 1000);
+  AssertCheckingReached();
+}
+
+TEST_F(IceConnectTest, TestTrickleIceLiteOfferer) {
+  AddStream("first", 1);
+  ASSERT_TRUE(Gather());
+  p1_->SimulateIceLite();
+  ConnectTrickle();
+  SimulateTrickle(0);
+  ASSERT_TRUE_WAIT(p1_->ice_complete(), 1000);
+  ASSERT_TRUE_WAIT(p2_->ice_complete(), 1000);
+  AssertCheckingReached();
 }
 
 TEST_F(IceConnectTest, TestConnectTwoComponents) {
   AddStream("first", 2);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   Connect();
 }
 
 TEST_F(IceConnectTest, TestConnectTwoComponentsDisableSecond) {
   AddStream("first", 2);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   p1_->DisableComponent(0, 2);
   p2_->DisableComponent(0, 2);
   Connect();
@@ -1149,7 +1613,7 @@ TEST_F(IceConnectTest, TestConnectTwoComponentsDisableSecond) {
 
 TEST_F(IceConnectTest, TestConnectP2ThenP1) {
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   ConnectP2();
   PR_Sleep(1000);
   ConnectP1();
@@ -1158,7 +1622,7 @@ TEST_F(IceConnectTest, TestConnectP2ThenP1) {
 
 TEST_F(IceConnectTest, TestConnectP2ThenP1Trickle) {
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   ConnectP2();
   PR_Sleep(1000);
   ConnectP1(TRICKLE_SIMULATE);
@@ -1169,7 +1633,7 @@ TEST_F(IceConnectTest, TestConnectP2ThenP1Trickle) {
 TEST_F(IceConnectTest, TestConnectP2ThenP1TrickleTwoComponents) {
   AddStream("first", 1);
   AddStream("second", 2);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   ConnectP2();
   PR_Sleep(1000);
   ConnectP1(TRICKLE_SIMULATE);
@@ -1182,45 +1646,106 @@ TEST_F(IceConnectTest, TestConnectP2ThenP1TrickleTwoComponents) {
 }
 
 TEST_F(IceConnectTest, TestConnectAutoPrioritize) {
-  Init(false);
+  Init(false, false);
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   Connect();
 }
 
 TEST_F(IceConnectTest, TestConnectTrickleOneStreamOneComponent) {
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   ConnectTrickle();
   SimulateTrickle(0);
   ASSERT_TRUE_WAIT(p1_->ice_complete(), 1000);
   ASSERT_TRUE_WAIT(p2_->ice_complete(), 1000);
+  AssertCheckingReached();
 }
 
 TEST_F(IceConnectTest, TestConnectTrickleTwoStreamsOneComponent) {
   AddStream("first", 1);
   AddStream("second", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   ConnectTrickle();
   SimulateTrickle(0);
   SimulateTrickle(1);
   ASSERT_TRUE_WAIT(p1_->ice_complete(), 1000);
   ASSERT_TRUE_WAIT(p2_->ice_complete(), 1000);
+  AssertCheckingReached();
+}
+
+void RealisticTrickleDelay(
+    std::vector<SchedulableTrickleCandidate*>& candidates) {
+  for (size_t i = 0; i < candidates.size(); ++i) {
+    SchedulableTrickleCandidate* cand = candidates[i];
+    if (cand->IsHost()) {
+      cand->Schedule(i*10);
+    } else if (cand->IsReflexive()) {
+      cand->Schedule(i*10 + 100);
+    } else if (cand->IsRelay()) {
+      cand->Schedule(i*10 + 200);
+    }
+  }
+}
+
+void DelayRelayCandidates(
+    std::vector<SchedulableTrickleCandidate*>& candidates,
+    unsigned int ms) {
+  for (auto i = candidates.begin(); i != candidates.end(); ++i) {
+    if ((*i)->IsRelay()) {
+      (*i)->Schedule(ms);
+    } else {
+      (*i)->Schedule(0);
+    }
+  }
+}
+
+TEST_F(IceConnectTest, TestConnectTrickleAddStreamDuringICE) {
+  AddStream("first", 1);
+  ASSERT_TRUE(Gather());
+  ConnectTrickle();
+  RealisticTrickleDelay(p1_->ControlTrickle(0));
+  RealisticTrickleDelay(p2_->ControlTrickle(0));
+  AddStream("second", 1);
+  RealisticTrickleDelay(p1_->ControlTrickle(1));
+  RealisticTrickleDelay(p2_->ControlTrickle(1));
+  ASSERT_TRUE_WAIT(p1_->ice_complete(), 1000);
+  ASSERT_TRUE_WAIT(p2_->ice_complete(), 1000);
+  AssertCheckingReached();
+}
+
+TEST_F(IceConnectTest, TestConnectTrickleAddStreamAfterICE) {
+  AddStream("first", 1);
+  ASSERT_TRUE(Gather());
+  ConnectTrickle();
+  RealisticTrickleDelay(p1_->ControlTrickle(0));
+  RealisticTrickleDelay(p2_->ControlTrickle(0));
+  ASSERT_TRUE_WAIT(p1_->ice_complete(), 1000);
+  ASSERT_TRUE_WAIT(p2_->ice_complete(), 1000);
+  AddStream("second", 1);
+  ASSERT_TRUE(Gather());
+  ConnectTrickle();
+  RealisticTrickleDelay(p1_->ControlTrickle(1));
+  RealisticTrickleDelay(p2_->ControlTrickle(1));
+  ASSERT_TRUE_WAIT(p1_->ice_complete(), 1000);
+  ASSERT_TRUE_WAIT(p2_->ice_complete(), 1000);
+  AssertCheckingReached();
 }
 
 TEST_F(IceConnectTest, TestConnectRealTrickleOneStreamOneComponent) {
   AddStream("first", 1);
   AddStream("second", 1);
-  ASSERT_TRUE(Gather(false));
+  ASSERT_TRUE(Gather(0));
   ConnectTrickle(TRICKLE_REAL);
   ASSERT_TRUE_WAIT(p1_->ice_complete(), kDefaultTimeout);
   ASSERT_TRUE_WAIT(p2_->ice_complete(), kDefaultTimeout);
   WaitForGather();  // ICE can complete before we finish gathering.
+  AssertCheckingReached();
 }
 
 TEST_F(IceConnectTest, TestSendReceive) {
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   Connect();
   SendReceive();
 }
@@ -1232,8 +1757,77 @@ TEST_F(IceConnectTest, TestConnectTurn) {
   AddStream("first", 1);
   SetTurnServer(g_turn_server, kDefaultStunServerPort,
                 g_turn_user, g_turn_password);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   Connect();
+}
+
+TEST_F(IceConnectTest, TestConnectTurnWithDelay) {
+  if (g_turn_server.empty())
+    return;
+
+  AddStream("first", 1);
+  SetTurnServer(g_turn_server, kDefaultStunServerPort,
+                g_turn_user, g_turn_password);
+  SetCandidateFilter(SabotageHostCandidateAndDropReflexive);
+  p1_->Gather();
+  PR_Sleep(500);
+  p2_->Gather();
+  ConnectTrickle(TRICKLE_REAL);
+  WaitForGather();
+  WaitForComplete();
+}
+
+TEST_F(IceConnectTest, TestConnectTurnWithNormalTrickleDelay) {
+  if (g_turn_server.empty())
+    return;
+
+  AddStream("first", 1);
+  SetTurnServer(g_turn_server, kDefaultStunServerPort,
+                g_turn_user, g_turn_password);
+  ASSERT_TRUE(Gather());
+  ConnectTrickle();
+  RealisticTrickleDelay(p1_->ControlTrickle(0));
+  RealisticTrickleDelay(p2_->ControlTrickle(0));
+
+  ASSERT_TRUE_WAIT(p1_->ice_complete(), kDefaultTimeout);
+  ASSERT_TRUE_WAIT(p2_->ice_complete(), kDefaultTimeout);
+  AssertCheckingReached();
+}
+
+TEST_F(IceConnectTest, TestConnectTurnWithNormalTrickleDelayOneSided) {
+  if (g_turn_server.empty())
+    return;
+
+  AddStream("first", 1);
+  SetTurnServer(g_turn_server, kDefaultStunServerPort,
+                g_turn_user, g_turn_password);
+  ASSERT_TRUE(Gather());
+  ConnectTrickle();
+  RealisticTrickleDelay(p1_->ControlTrickle(0));
+  p2_->SimulateTrickle(0);
+
+  ASSERT_TRUE_WAIT(p1_->ice_complete(), kDefaultTimeout);
+  ASSERT_TRUE_WAIT(p2_->ice_complete(), kDefaultTimeout);
+  AssertCheckingReached();
+}
+
+TEST_F(IceConnectTest, TestConnectTurnWithLargeTrickleDelay) {
+  if (g_turn_server.empty())
+    return;
+
+  AddStream("first", 1);
+  SetTurnServer(g_turn_server, kDefaultStunServerPort,
+                g_turn_user, g_turn_password);
+  SetCandidateFilter(SabotageHostCandidateAndDropReflexive);
+  ASSERT_TRUE(Gather());
+  ConnectTrickle();
+  // Trickle host candidates immediately, but delay relay candidates
+  DelayRelayCandidates(p1_->ControlTrickle(0), 3700);
+  DelayRelayCandidates(p2_->ControlTrickle(0), 3700);
+
+  ASSERT_TRUE_WAIT(p1_->ice_complete(), kDefaultTimeout);
+  ASSERT_TRUE_WAIT(p2_->ice_complete(), kDefaultTimeout);
+  AssertCheckingReached();
 }
 
 TEST_F(IceConnectTest, TestConnectTurnTcp) {
@@ -1243,7 +1837,7 @@ TEST_F(IceConnectTest, TestConnectTurnTcp) {
   AddStream("first", 1);
   SetTurnServer(g_turn_server, kDefaultStunServerPort,
                 g_turn_user, g_turn_password, kNrIceTransportTcp);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   Connect();
 }
 
@@ -1254,7 +1848,7 @@ TEST_F(IceConnectTest, TestConnectTurnOnly) {
   AddStream("first", 1);
   SetTurnServer(g_turn_server, kDefaultStunServerPort,
                 g_turn_user, g_turn_password);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   SetCandidateFilter(IsRelayCandidate);
   SetExpectedTypes(NrIceCandidate::Type::ICE_RELAYED,
                    NrIceCandidate::Type::ICE_RELAYED);
@@ -1268,7 +1862,7 @@ TEST_F(IceConnectTest, TestConnectTurnTcpOnly) {
   AddStream("first", 1);
   SetTurnServer(g_turn_server, kDefaultStunServerPort,
                 g_turn_user, g_turn_password, kNrIceTransportTcp);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   SetCandidateFilter(IsRelayCandidate);
   SetExpectedTypes(NrIceCandidate::Type::ICE_RELAYED,
                    NrIceCandidate::Type::ICE_RELAYED,
@@ -1283,7 +1877,7 @@ TEST_F(IceConnectTest, TestSendReceiveTurnOnly) {
   AddStream("first", 1);
   SetTurnServer(g_turn_server, kDefaultStunServerPort,
                 g_turn_user, g_turn_password);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   SetCandidateFilter(IsRelayCandidate);
   SetExpectedTypes(NrIceCandidate::Type::ICE_RELAYED,
                    NrIceCandidate::Type::ICE_RELAYED);
@@ -1298,7 +1892,7 @@ TEST_F(IceConnectTest, TestSendReceiveTurnTcpOnly) {
   AddStream("first", 1);
   SetTurnServer(g_turn_server, kDefaultStunServerPort,
                 g_turn_user, g_turn_password, kNrIceTransportTcp);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   SetCandidateFilter(IsRelayCandidate);
   SetExpectedTypes(NrIceCandidate::Type::ICE_RELAYED,
                    NrIceCandidate::Type::ICE_RELAYED,
@@ -1322,7 +1916,7 @@ TEST_F(IceConnectTest, TestSendReceiveTurnBothOnly) {
                            g_turn_server, kDefaultStunServerPort,
                            g_turn_user, password_vec, kNrIceTransportUdp));
   SetTurnServers(turn_servers);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   SetCandidateFilter(IsRelayCandidate);
   // UDP is preferred.
   SetExpectedTypes(NrIceCandidate::Type::ICE_RELAYED,
@@ -1334,13 +1928,13 @@ TEST_F(IceConnectTest, TestSendReceiveTurnBothOnly) {
 
 TEST_F(IceConnectTest, TestConnectShutdownOneSide) {
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   ConnectThenDelete();
 }
 
 TEST_F(IceConnectTest, TestPollCandPairsBeforeConnect) {
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
 
   std::vector<NrIceCandidatePair> pairs;
   nsresult res = p1_->GetCandidatePairs(0, &pairs);
@@ -1355,7 +1949,7 @@ TEST_F(IceConnectTest, TestPollCandPairsBeforeConnect) {
 
 TEST_F(IceConnectTest, TestPollCandPairsAfterConnect) {
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
   Connect();
 
   std::vector<NrIceCandidatePair> pairs;
@@ -1378,10 +1972,10 @@ TEST_F(IceConnectTest, TestPollCandPairsAfterConnect) {
 
 TEST_F(IceConnectTest, TestPollCandPairsDuringConnect) {
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
 
-  p1_->Connect(p2_, TRICKLE_NONE, false);
   p2_->Connect(p1_, TRICKLE_NONE, false);
+  p1_->Connect(p2_, TRICKLE_NONE, false);
 
   std::vector<NrIceCandidatePair> pairs1;
   std::vector<NrIceCandidatePair> pairs2;
@@ -1402,12 +1996,11 @@ TEST_F(IceConnectTest, TestPollCandPairsDuringConnect) {
 }
 
 TEST_F(IceConnectTest, TestRLogRingBuffer) {
-  RLogRingBuffer::CreateInstance();
   AddStream("first", 1);
-  ASSERT_TRUE(Gather(true));
+  ASSERT_TRUE(Gather());
 
-  p1_->Connect(p2_, TRICKLE_NONE, false);
   p2_->Connect(p1_, TRICKLE_NONE, false);
+  p1_->Connect(p2_, TRICKLE_NONE, false);
 
   std::vector<NrIceCandidatePair> pairs1;
   std::vector<NrIceCandidatePair> pairs2;
@@ -1441,8 +2034,6 @@ TEST_F(IceConnectTest, TestRLogRingBuffer) {
     RLogRingBuffer::GetInstance()->Filter(substring, 0, &logs);
     ASSERT_NE(0U, logs.size());
   }
-
-  RLogRingBuffer::DestroyInstance();
 }
 
 TEST_F(PrioritizerTest, TestPrioritizer) {
@@ -1624,6 +2215,17 @@ int main(int argc, char **argv)
   tmp = get_environment("STUN_SERVER_HOSTNAME");
   if (tmp != "")
     g_stun_server_hostname = tmp;
+
+  tmp = get_environment("MOZ_DISABLE_NONLOCAL_CONNECTIONS");
+
+  if ((tmp != "" && tmp != "0") || getenv("MOZ_UPLOAD_DIR")) {
+    // We're assuming that MOZ_UPLOAD_DIR is only set on tbpl;
+    // MOZ_DISABLE_NONLOCAL_CONNECTIONS probably should be set when running the
+    // cpp unit-tests, but is not presently.
+    g_stun_server_address = "";
+    g_stun_server_hostname = "";
+    g_turn_server = "";
+  }
 
   test_utils = new MtransportTestUtils();
   NSS_NoDB_Init(nullptr);

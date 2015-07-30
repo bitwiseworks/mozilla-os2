@@ -10,15 +10,37 @@ GNU_CC=
 GNU_CXX=
 CC_VERSION='N/A'
 CXX_VERSION='N/A'
-if test "$GCC" = "yes"; then
-    GNU_CC=1
-    CC_VERSION=`$CC -v 2>&1 | grep 'gcc version'`
+cat <<EOF > conftest.c
+#if defined(_MSC_VER)
+#if defined(__clang__)
+COMPILER clang-cl _MSC_VER
+#else
+COMPILER msvc _MSC_FULL_VER
+#endif
+#elif defined(__clang__)
+COMPILER clang __clang_major__.__clang_minor__.__clang_patchlevel__
+#elif defined(__GNUC__)
+COMPILER gcc __GNUC__.__GNUC_MINOR__.__GNUC_PATCHLEVEL__
+#elif defined(__INTEL_COMPILER)
+COMPILER icc __INTEL_COMPILER
+#endif
+EOF
+read dummy compiler CC_VERSION <<EOF
+$($CC -E $CPPFLAGS $CFLAGS conftest.c 2>/dev/null | grep COMPILER)
+EOF
+read dummy cxxcompiler CXX_VERSION <<EOF
+$($CXX -E $CPPFLAGS $CXXFLAGS conftest.c 2>/dev/null | grep COMPILER)
+EOF
+if test "$compiler" != "$cxxcompiler"; then
+    AC_MSG_ERROR([Your C and C++ compilers are different.  You need to use the same compiler.])
 fi
-if test "$GXX" = "yes"; then
+CC_VERSION=`echo "$CC_VERSION" | sed 's/ //g'`
+CXX_VERSION=`echo "$CXX_VERSION" | sed 's/ //g'`
+if test "$compiler" = "gcc"; then
+    GNU_CC=1
     GNU_CXX=1
-    CXX_VERSION=`$CXX -v 2>&1 | grep 'gcc version'`
     changequote(<<,>>)
-    GCC_VERSION_FULL=`echo "$CXX_VERSION" | $PERL -pe 's/^.*gcc version ([^ ]*).*/<<$>>1/'`
+    GCC_VERSION_FULL="$CXX_VERSION"
     GCC_VERSION=`echo "$GCC_VERSION_FULL" | $PERL -pe '(split(/\./))[0]>=4&&s/(^\d*\.\d*).*/<<$>>1/;'`
 
     GCC_MAJOR_VERSION=`echo ${GCC_VERSION} | $AWK -F\. '{ print <<$>>1 }'`
@@ -33,36 +55,57 @@ rm -f conftest.out
 if test "`echo | $LD -v 2>&1 | grep -c GNU`" != "0"; then
     GNU_LD=1
 fi
+
+if test "$compiler" = "msvc"; then
+     MSVC_VERSION_FULL="$CXX_VERSION"
+     CC_VERSION=`echo ${CC_VERSION} | cut -c 1-4`
+     CXX_VERSION=`echo ${CXX_VERSION} | cut -c 1-4`
+fi
+
+INTEL_CC=
+INTEL_CXX=
+if test "$compiler" = "icc"; then
+   INTEL_CC=1
+   INTEL_CXX=1
+fi
+
+CLANG_CC=
+CLANG_CXX=
+CLANG_CL=
+if test "$compiler" = "clang"; then
+    GNU_CC=1
+    GNU_CXX=1
+    CLANG_CC=1
+    CLANG_CXX=1
+fi
+if test "$compiler" = "clang-cl"; then
+    CLANG_CL=1
+    # We force clang-cl to emulate Visual C++ 2013 in configure.in, but that
+    # is based on the CLANG_CL variable defined here, so make sure that we're
+    # getting the right version here manually.
+    CC_VERSION=1800
+    CXX_VERSION=1800
+    MSVC_VERSION_FULL=180030723
+    # Build on clang-cl with MSVC 2013 Update 3 with fallback emulation.
+    CFLAGS="$CFLAGS -fms-compatibility-version=18.00.30723 -fallback"
+    CXXFLAGS="$CXXFLAGS -fms-compatibility-version=18.00.30723 -fallback"
+fi
+
 if test "$GNU_CC"; then
     if `$CC -print-prog-name=ld` -v 2>&1 | grep -c GNU >/dev/null; then
         GCC_USE_GNU_LD=1
     fi
 fi
 
-INTEL_CC=
-INTEL_CXX=
-if test "$GCC" = yes; then
-   if test "`$CC -help 2>&1 | grep -c 'Intel(R) C++ Compiler'`" != "0"; then
-     INTEL_CC=1
-   fi
-fi
-
-if test "$GXX" = yes; then
-   if test "`$CXX -help 2>&1 | grep -c 'Intel(R) C++ Compiler'`" != "0"; then
-     INTEL_CXX=1
-   fi
-fi
-
-CLANG_CC=
-CLANG_CXX=
-if test "`$CC -v 2>&1 | egrep -c '(clang version|Apple.*clang)'`" != "0"; then
-   CLANG_CC=1
-fi
-
-if test "`$CXX -v 2>&1 | egrep -c '(clang version|Apple.*clang)'`" != "0"; then
-   CLANG_CXX=1
-fi
 AC_SUBST(CLANG_CXX)
+AC_SUBST(CLANG_CL)
+
+if test -n "$GNU_CC" -a -z "$CLANG_CC" ; then
+    if test "$GCC_MAJOR_VERSION" -eq 4 -a "$GCC_MINOR_VERSION" -lt 7 ||
+       test "$GCC_MAJOR_VERSION" -lt 4; then
+        AC_MSG_ERROR([Only GCC 4.7 or newer supported])
+    fi
+fi
 ])
 
 AC_DEFUN([MOZ_CROSS_COMPILER],
@@ -129,10 +172,11 @@ AC_PROG_CXX
 
 AC_CHECK_PROGS(RANLIB, "${target_alias}-ranlib" "${target}-ranlib", :)
 AC_CHECK_PROGS(AR, "${target_alias}-ar" "${target}-ar", :)
-MOZ_PATH_PROGS(AS, "${target_alias}-as" "${target}-as", :)
+AC_CHECK_PROGS(AS, "${target_alias}-as" "${target}-as", :)
 AC_CHECK_PROGS(LD, "${target_alias}-ld" "${target}-ld", :)
 AC_CHECK_PROGS(STRIP, "${target_alias}-strip" "${target}-strip", :)
 AC_CHECK_PROGS(WINDRES, "${target_alias}-windres" "${target}-windres", :)
+AC_CHECK_PROGS(OTOOL, "${target_alias}-otool" "${target}-otool", :)
 AC_DEFINE(CROSS_COMPILE)
 CROSS_COMPILE=1
 

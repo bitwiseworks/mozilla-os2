@@ -13,7 +13,7 @@ function testConferenceTwoCalls() {
   let inNumber  = "5555550201";
 
   return Promise.resolve()
-    .then(() => gSetupConferenceTwoCalls(outNumber, inNumber))
+    .then(() => gSetupConference([outNumber, inNumber]))
     .then(calls => {
       [outCall, inCall] = calls;
     })
@@ -23,8 +23,6 @@ function testConferenceTwoCalls() {
 // Start the test
 startTest(function() {
   testConferenceTwoCalls()
-    .then(null, error => {
-      ok(false, 'promise rejects during test.');
-    })
+    .catch(error => ok(false, "Promise reject: " + error))
     .then(finish);
 });

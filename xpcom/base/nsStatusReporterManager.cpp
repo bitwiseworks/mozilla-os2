@@ -32,7 +32,8 @@ class DumpStatusInfoToTempDirRunnable : public nsRunnable
 {
 public:
   DumpStatusInfoToTempDirRunnable()
-  {}
+  {
+  }
 
   NS_IMETHOD Run()
   {
@@ -43,9 +44,10 @@ public:
   }
 };
 
-void doStatusReport(const nsCString& inputStr)
+void
+doStatusReport(const nsCString& aInputStr)
 {
-  LOG("FifoWatcher(%s) dispatching status report runnable.", inputStr.get());
+  LOG("FifoWatcher(%s) dispatching status report runnable.", aInputStr.get());
   nsRefPtr<DumpStatusInfoToTempDirRunnable> runnable =
     new DumpStatusInfoToTempDirRunnable();
   NS_DispatchToMainThread(runnable);
@@ -57,14 +59,15 @@ void doStatusReport(const nsCString& inputStr)
 static bool gStatusReportProgress = 0;
 static int gNumReporters = 0;
 
-nsresult getStatus(nsACString& desc)
+nsresult
+getStatus(nsACString& aDesc)
 {
-  if(!gStatusReportProgress)
-    desc.AssignLiteral("Init");
-  else {
-    desc.AssignLiteral("Running:\nThere are ");
-    desc.AppendInt(gNumReporters);
-    desc.AppendLiteral(" reporters");
+  if (!gStatusReportProgress) {
+    aDesc.AssignLiteral("Init");
+  } else {
+    aDesc.AssignLiteral("Running: There are ");
+    aDesc.AppendInt(gNumReporters);
+    aDesc.AppendLiteral(" reporters");
   }
   return NS_OK;
 }
@@ -72,13 +75,13 @@ nsresult getStatus(nsACString& desc)
 NS_STATUS_REPORTER_IMPLEMENT(StatusReporter, "StatusReporter State", getStatus)
 
 #define DUMP(o, s) \
-    do { \
-        const char* s2 = (s); \
-        uint32_t dummy; \
-        nsresult rv = (o)->Write((s2), strlen(s2), &dummy); \
-        if (NS_WARN_IF(NS_FAILED(rv))) \
-          return rv; \
-    } while (0)
+  do { \
+    const char* s2 = (s); \
+    uint32_t dummy; \
+    nsresult rv = (o)->Write((s2), strlen(s2), &dummy); \
+    if (NS_WARN_IF(NS_FAILED(rv))) \
+      return rv; \
+  } while (0)
 
 static nsresult
 DumpReport(nsIFileOutputStream* aOStream, const nsCString& aProcess,
@@ -88,19 +91,22 @@ DumpReport(nsIFileOutputStream* aOStream, const nsCString& aProcess,
   if (aProcess.IsEmpty()) {
     pid = getpid();
     nsPrintfCString pidStr("PID %u", pid);
-    DUMP(aOStream, "\n    {\"Process\": \"");
+    DUMP(aOStream, "\n  {\n  \"Process\": \"");
     DUMP(aOStream, pidStr.get());
   } else {
     pid = 0;
-    DUMP(aOStream, "\n    {\"Unknown Process\": \"");
+    DUMP(aOStream, "\n  {  \"Unknown Process\": \"");
   }
 
-  DUMP(aOStream, "\", \"Reporter name\": \"");
+  DUMP(aOStream, "\",\n  \"Reporter name\": \"");
   DUMP(aOStream, aName.get());
 
-  DUMP(aOStream, "\", \"Status Description\": \"");
-  DUMP(aOStream, aDescription.get());
-  DUMP(aOStream, "\"}");
+  DUMP(aOStream, "\",\n  \"Status Description\": [\"");
+  nsCString desc = aDescription;
+  desc.ReplaceSubstring("|", "\",\"");
+  DUMP(aOStream, desc.get());
+
+  DUMP(aOStream, "\"]\n  }");
 
   return NS_OK;
 }
@@ -128,7 +134,7 @@ nsStatusReporterManager::Init()
 #ifdef DO_STATUS_REPORT
   if (FifoWatcher::MaybeCreate()) {
     FifoWatcher* fw = FifoWatcher::GetSingleton();
-    fw->RegisterCallback(NS_LITERAL_CSTRING("status report"),doStatusReport);
+    fw->RegisterCallback(NS_LITERAL_CSTRING("status report"), doStatusReport);
   }
 #endif
 
@@ -143,7 +149,7 @@ nsStatusReporterManager::DumpReports()
 
   nsCString filename("status-reports-");
   filename.AppendInt(getpid());
-  filename.AppendLiteral("-");
+  filename.Append('-');
   filename.AppendInt(number++);
   filename.AppendLiteral(".json");
 
@@ -152,24 +158,27 @@ nsStatusReporterManager::DumpReports()
   // begining, it will be rename as "status-reports-pid-number.json" in the end.
   nsCOMPtr<nsIFile> tmpFile;
   rv = nsDumpUtils::OpenTempFile(NS_LITERAL_CSTRING("incomplete-") +
-                    filename,
-                    getter_AddRefs(tmpFile),
-                    NS_LITERAL_CSTRING("status-reports"));
-  if (NS_WARN_IF(NS_FAILED(rv)))
+                                 filename,
+                                 getter_AddRefs(tmpFile),
+                                 NS_LITERAL_CSTRING("status-reports"));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
+  }
 
   nsCOMPtr<nsIFileOutputStream> ostream =
     do_CreateInstance("@mozilla.org/network/file-output-stream;1");
   rv = ostream->Init(tmpFile, -1, -1, 0);
-  if (NS_WARN_IF(NS_FAILED(rv)))
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
+  }
 
   //Write the reports to the file
 
-  DUMP(ostream, "  [Sysdump Report Start]: ");
+  DUMP(ostream, "{\n\"subject\":\"about:service reports\",\n");
+  DUMP(ostream, "\"reporters\": [ ");
 
   nsCOMPtr<nsISimpleEnumerator> e;
-  bool more;
+  bool more, first = true;
   EnumerateReporters(getter_AddRefs(e));
   while (NS_SUCCEEDED(e->HasMoreElements(&more)) && more) {
     nsCOMPtr<nsISupports> supports;
@@ -178,115 +187,136 @@ nsStatusReporterManager::DumpReports()
 
     nsCString process;
     rv = r->GetProcess(process);
-    if (NS_WARN_IF(NS_FAILED(rv)))
+    if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
+    }
 
     nsCString name;
     rv = r->GetName(name);
-    if (NS_WARN_IF(NS_FAILED(rv)))
+    if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
+    }
 
     nsCString description;
     rv = r->GetDescription(description);
-    if (NS_WARN_IF(NS_FAILED(rv)))
+    if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
+    }
+
+    if (first) {
+      first = false;
+    } else {
+      DUMP(ostream, ",");
+    }
 
     rv = DumpReport(ostream, process, name, description);
-    if (NS_WARN_IF(NS_FAILED(rv)))
+    if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
+    }
   }
-
-  DUMP(ostream, "\n  [Sysdump Report End] ");
+  DUMP(ostream, "\n]\n}\n");
 
   rv = ostream->Close();
-  if (NS_WARN_IF(NS_FAILED(rv)))
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
+  }
 
   // Rename the status reports file
   nsCOMPtr<nsIFile> srFinalFile;
   rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(srFinalFile));
-  if (NS_WARN_IF(NS_FAILED(rv)))
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
+  }
 
 #ifdef ANDROID
   rv = srFinalFile->AppendNative(NS_LITERAL_CSTRING("status-reports"));
-  if (NS_WARN_IF(NS_FAILED(rv)))
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
+  }
 #endif
 
   rv = srFinalFile->AppendNative(filename);
-  if (NS_WARN_IF(NS_FAILED(rv)))
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
+  }
 
   rv = srFinalFile->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0600);
-  if (NS_WARN_IF(NS_FAILED(rv)))
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
+  }
 
   nsAutoString srActualFinalFilename;
   rv = srFinalFile->GetLeafName(srActualFinalFilename);
-  if (NS_WARN_IF(NS_FAILED(rv)))
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
+  }
 
   rv = tmpFile->MoveTo(/* directory */ nullptr, srActualFinalFilename);
 
-  if (NS_WARN_IF(NS_FAILED(rv)))
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
+  }
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsStatusReporterManager::EnumerateReporters(nsISimpleEnumerator** result)
+nsStatusReporterManager::EnumerateReporters(nsISimpleEnumerator** aResult)
 {
-  return NS_NewArrayEnumerator(result, mReporters);
+  return NS_NewArrayEnumerator(aResult, mReporters);
 }
 
 NS_IMETHODIMP
-nsStatusReporterManager::RegisterReporter(nsIStatusReporter* reporter)
+nsStatusReporterManager::RegisterReporter(nsIStatusReporter* aReporter)
 {
-  if (mReporters.IndexOf(reporter) != -1)
+  if (mReporters.IndexOf(aReporter) != -1) {
     return NS_ERROR_FAILURE;
+  }
 
-  mReporters.AppendObject(reporter);
+  mReporters.AppendObject(aReporter);
   gNumReporters++;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsStatusReporterManager::UnregisterReporter(nsIStatusReporter* reporter)
+nsStatusReporterManager::UnregisterReporter(nsIStatusReporter* aReporter)
 {
-  if (!mReporters.RemoveObject(reporter))
+  if (!mReporters.RemoveObject(aReporter)) {
     return NS_ERROR_FAILURE;
+  }
   gNumReporters--;
   return NS_OK;
 }
 
 nsresult
-NS_RegisterStatusReporter (nsIStatusReporter* reporter)
+NS_RegisterStatusReporter(nsIStatusReporter* aReporter)
 {
   nsCOMPtr<nsIStatusReporterManager> mgr =
     do_GetService("@mozilla.org/status-reporter-manager;1");
-  if (mgr == nullptr)
+  if (!mgr) {
     return NS_ERROR_FAILURE;
-  return mgr->RegisterReporter(reporter);
+  }
+  return mgr->RegisterReporter(aReporter);
 }
 
 nsresult
-NS_UnregisterStatusReporter (nsIStatusReporter* reporter)
+NS_UnregisterStatusReporter(nsIStatusReporter* aReporter)
 {
   nsCOMPtr<nsIStatusReporterManager> mgr =
     do_GetService("@mozilla.org/status-reporter-manager;1");
-  if (mgr == nullptr)
+  if (!mgr) {
     return NS_ERROR_FAILURE;
-  return mgr->UnregisterReporter(reporter);
+  }
+  return mgr->UnregisterReporter(aReporter);
 }
 
 nsresult
-NS_DumpStatusReporter ()
+NS_DumpStatusReporter()
 {
   nsCOMPtr<nsIStatusReporterManager> mgr =
     do_GetService("@mozilla.org/status-reporter-manager;1");
-  if (mgr == nullptr)
+  if (!mgr) {
     return NS_ERROR_FAILURE;
+  }
   return mgr->DumpReports();
 }

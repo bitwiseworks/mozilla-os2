@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -36,6 +36,15 @@ function fakeUIResponse() {
       do_check_eq(++step, 2);
     }
   }, 'captive-portal-login', false);
+
+  Services.obs.addObserver(function observe(subject, topic, data) {
+    if (topic === 'captive-portal-login-success') {
+      do_check_eq(++step, 4);
+      gServer.stop(function () {
+        gRedirectServer.stop(do_test_finished);
+      });
+    }
+  }, 'captive-portal-login-success', false);
 }
 
 function test_portal_found() {
@@ -50,9 +59,6 @@ function test_portal_found() {
     complete: function complete(success) {
       do_check_eq(++step, 3);
       do_check_true(success);
-      gServer.stop(function () {
-        gRedirectServer.stop(do_test_finished);
-      });
     },
   };
 
@@ -65,12 +71,4 @@ function run_test() {
   gRedirectServerURL = 'http://localhost:' + gRedirectServer.identity.primaryPort;
 
   run_captivedetect_test(xhr_handler, fakeUIResponse, test_portal_found);
-
-  server = new HttpServer();
-  server.registerPathHandler(kCanonicalSitePath, xhr_handler);
-  server.start(4444);
-
-  fakeUIResponse();
-
-  test_portal_found();
 }

@@ -16,6 +16,8 @@
 
 namespace webrtc {
 
+namespace acm2 {
+
 class InitialDelayManager {
  public:
   enum PacketType {
@@ -63,8 +65,9 @@ class InitialDelayManager {
   // sequence of late (or perhaps missing) packets is computed.
   void LatePackets(uint32_t timestamp_now, SyncStream* sync_stream);
 
-  // Playout timestamp, valid when buffering.
-  uint32_t playout_timestamp() { return playout_timestamp_; }
+  // Get playout timestamp.
+  // Returns true if the timestamp is valid (when buffering), otherwise false.
+  bool GetPlayoutTimestamp(uint32_t* playout_timestamp);
 
   // True if buffered audio is less than the given initial delay (specified at
   // the constructor). Buffering might be disabled by the client of this class.
@@ -109,6 +112,8 @@ class InitialDelayManager {
   // specified.
   const int late_packet_threshold_;
 };
+
+}  // namespace acm2
 
 }  // namespace webrtc
 

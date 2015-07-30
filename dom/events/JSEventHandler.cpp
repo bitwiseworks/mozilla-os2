@@ -23,7 +23,6 @@
 #include "mozilla/JSEventHandler.h"
 #include "mozilla/Likely.h"
 #include "mozilla/dom/ErrorEvent.h"
-#include "mozilla/dom/UnionTypes.h"
 
 namespace mozilla {
 
@@ -124,7 +123,7 @@ JSEventHandler::HandleEvent(nsIDOMEvent* aEvent)
   bool isMainThread = event->IsMainThreadEvent();
   bool isChromeHandler =
     isMainThread ?
-      nsContentUtils::GetObjectPrincipal(
+      nsContentUtils::ObjectPrincipal(
         GetTypedEventHandler().Ptr()->CallbackPreserveColor()) ==
         nsContentUtils::GetSystemPrincipal() :
       mozilla::dom::workers::IsCurrentThreadRunningChromeWorker();
@@ -143,7 +142,7 @@ JSEventHandler::HandleEvent(nsIDOMEvent* aEvent)
     ErrorEvent* scriptEvent = aEvent->InternalDOMEvent()->AsErrorEvent();
     if (scriptEvent) {
       scriptEvent->GetMessage(errorMsg);
-      msgOrEvent.SetAsString().SetData(errorMsg.Data(), errorMsg.Length());
+      msgOrEvent.SetAsString().Rebind(errorMsg.Data(), errorMsg.Length());
 
       scriptEvent->GetFilename(file);
       fileName = &file;

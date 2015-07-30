@@ -13,8 +13,12 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(DataStoreCursor, AddRef)
-NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(DataStoreCursor, Release)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(DataStoreCursor)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(DataStoreCursor)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DataStoreCursor)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION(DataStoreCursor, mCursor)
 
@@ -25,10 +29,11 @@ DataStoreCursor::Constructor(GlobalObject& aGlobal, ErrorResult& aRv)
   return cursor.forget();
 }
 
-JSObject*
-DataStoreCursor::WrapObject(JSContext* aCx)
+bool
+DataStoreCursor::WrapObject(JSContext* aCx,
+                            JS::MutableHandle<JSObject*> aReflector)
 {
-  return DataStoreCursorBinding::Wrap(aCx, this);
+  return DataStoreCursorBinding::Wrap(aCx, this, aReflector);
 }
 
 already_AddRefed<DataStore>

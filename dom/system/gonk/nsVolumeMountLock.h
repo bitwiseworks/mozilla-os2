@@ -14,6 +14,8 @@
 #include "nsAutoPtr.h"
 #include "nsWeakReference.h"
 
+class nsIVolume;
+
 namespace mozilla {
 namespace system {
 
@@ -23,7 +25,7 @@ namespace system {
  * shared with the PC.
  */
 
-class nsVolumeMountLock MOZ_FINAL : public nsIVolumeMountLock,
+class nsVolumeMountLock final : public nsIVolumeMountLock,
                                     public nsIObserver,
                                     public nsSupportsWeakReference
 {
@@ -41,6 +43,7 @@ private:
   ~nsVolumeMountLock();
 
   nsresult Init();
+  nsresult Lock(nsIVolume* aVolume);
 
   nsRefPtr<dom::WakeLock>  mWakeLock;
   nsString                 mVolumeName;

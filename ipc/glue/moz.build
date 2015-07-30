@@ -13,9 +13,12 @@ EXPORTS += [
 EXPORTS.mozilla.ipc += [
     'BackgroundChild.h',
     'BackgroundParent.h',
+    'BackgroundUtils.h',
     'BrowserProcessSubThread.h',
     'CrossProcessMutex.h',
     'FileDescriptor.h',
+    'FileDescriptorSetChild.h',
+    'FileDescriptorSetParent.h',
     'FileDescriptorUtils.h',
     'GeckoChildProcessHost.h',
     'InputStreamUtils.h',
@@ -56,7 +59,7 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     SOURCES += [
         'CrossProcessMutex_windows.cpp',
     ]
-elif CONFIG['OS_ARCH'] == 'Linux':
+elif CONFIG['OS_ARCH'] in ('Linux', 'Darwin'):
     UNIFIED_SOURCES += [
         'CrossProcessMutex_posix.cpp',
     ]
@@ -84,6 +87,10 @@ elif CONFIG['OS_ARCH'] in ('DragonFly', 'FreeBSD', 'NetBSD', 'OpenBSD'):
     UNIFIED_SOURCES += [
         'ProcessUtils_bsd.cpp'
     ]
+elif CONFIG['OS_ARCH'] in ('Darwin'):
+    UNIFIED_SOURCES += [
+        'ProcessUtils_mac.mm'
+    ]
 else:
     UNIFIED_SOURCES += [
         'ProcessUtils_none.cpp',
@@ -95,6 +102,7 @@ EXPORTS.ipc += [
 
 UNIFIED_SOURCES += [
     'BackgroundImpl.cpp',
+    'BackgroundUtils.cpp',
     'BrowserProcessSubThread.cpp',
     'FileDescriptor.cpp',
     'FileDescriptorUtils.cpp',
@@ -115,24 +123,32 @@ UNIFIED_SOURCES += [
 SOURCES += [
     'BackgroundChildImpl.cpp',
     'BackgroundParentImpl.cpp',
+    'FileDescriptorSetChild.cpp',
+    'FileDescriptorSetParent.cpp',
     'GeckoChildProcessHost.cpp',
     'URIUtils.cpp',
 ]
 
 LOCAL_INCLUDES += [
+    '/dom/broadcastchannel',
+    '/dom/indexedDB',
     '/xpcom/build',
 ]
 
 IPDL_SOURCES = [
     'InputStreamParams.ipdlh',
     'PBackground.ipdl',
+    'PBackgroundSharedTypes.ipdlh',
     'PBackgroundTest.ipdl',
+    'PFileDescriptorSet.ipdl',
+    'PProcLoader.ipdl',
     'ProtocolTypes.ipdlh',
     'URIParams.ipdlh',
 ]
 
 
 LOCAL_INCLUDES += [
+    '/toolkit/xre',
     '/xpcom/threads',
 ]
 
@@ -140,14 +156,17 @@ include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 
-for var in ('MOZ_CHILD_PROCESS_NAME', 'MOZ_CHILD_PROCESS_BUNDLE'):
+for var in ('MOZ_CHILD_PROCESS_NAME', 'MOZ_CHILD_PROCESS_BUNDLE',
+            'DLL_PREFIX', 'DLL_SUFFIX'):
     DEFINES[var] = '"%s"' % CONFIG[var]
 
 LOCAL_INCLUDES += [
     '/toolkit/crashreporter',
 ]
 
-if CONFIG['MOZ_CONTENT_SANDBOX'] and CONFIG['OS_ARCH'] == 'WINNT':
+if CONFIG['OS_ARCH'] == 'WINNT':
     LOCAL_INCLUDES += [
         '/security/sandbox/win/src/sandboxbroker',
     ]
+
+FAIL_ON_WARNINGS = True

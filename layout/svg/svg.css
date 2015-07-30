@@ -65,7 +65,7 @@ foreignObject {
 }
 
 *[xml|space=preserve] {
-  white-space: -moz-pre-discard-newlines;
+  white-space: -moz-pre-space;
 }
 
 *|*::-moz-svg-marker-anon-child {
@@ -73,4 +73,28 @@ foreignObject {
   filter: inherit;
   mask: inherit;
   opacity: inherit;
+}
+
+/* nsDocumentViewer::CreateStyleSet doesn't load ua.css.
+ * A few styles are common to html and SVG though
+ * so we copy the rules below from that file.
+ */
+
+/* Links */
+
+*|*:-moz-any-link {
+  cursor: pointer;
+}
+
+*|*:-moz-any-link:-moz-focusring {
+  /* Don't specify the outline-color, we should always use initial value. */
+  outline: 1px dotted;
+}
+
+/*
+ * SVG-as-an-image needs this rule
+ */
+*|*::-moz-viewport, *|*::-moz-viewport-scroll, *|*::-moz-canvas, *|*::-moz-scrolled-canvas {
+  display: block !important;
+  background-color: inherit;
 }

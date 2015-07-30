@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef CHANNEL_H
-#define CHANNEL_H
+#ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_CHANNEL_H_
+#define WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_CHANNEL_H_
 
 #include <stdio.h>
 
@@ -24,6 +24,7 @@ class CriticalSectionWrapper;
 #define MAX_NUM_PAYLOADS   50
 #define MAX_NUM_FRAMESIZES  6
 
+// TODO(turajs): Write constructor for this structure.
 struct ACMTestFrameSizeStats {
   uint16_t frameSizeSample;
   int16_t maxPayloadLen;
@@ -34,6 +35,7 @@ struct ACMTestFrameSizeStats {
   double usageLenSec;
 };
 
+// TODO(turajs): Write constructor for this structure.
 struct ACMTestPayloadStats {
   bool newPacket;
   int16_t payloadType;
@@ -48,10 +50,11 @@ class Channel : public AudioPacketizationCallback {
   Channel(int16_t chID = -1);
   ~Channel();
 
-  int32_t SendData(const FrameType frameType, const uint8_t payloadType,
-                   const uint32_t timeStamp, const uint8_t* payloadData,
-                   const uint16_t payloadSize,
-                   const RTPFragmentationHeader* fragmentation);
+  virtual int32_t SendData(
+      const FrameType frameType, const uint8_t payloadType,
+      const uint32_t timeStamp, const uint8_t* payloadData,
+      const uint16_t payloadSize,
+      const RTPFragmentationHeader* fragmentation) OVERRIDE;
 
   void RegisterReceiverACM(AudioCodingModule *acm);
 
@@ -121,4 +124,4 @@ class Channel : public AudioPacketizationCallback {
 
 }  // namespace webrtc
 
-#endif
+#endif  // WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_CHANNEL_H_

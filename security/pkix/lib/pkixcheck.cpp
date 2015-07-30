@@ -1,6 +1,13 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
-/* Copyright 2013 Mozilla Foundation
+/* This code is made available to you under your choice of the following sets
+ * of licensing terms:
+ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
+/* Copyright 2013 Mozilla Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,24 +22,224 @@
  * limitations under the License.
  */
 
-#include <limits>
-
-#include "pkix/pkix.h"
 #include "pkixcheck.h"
+
 #include "pkixder.h"
 #include "pkixutil.h"
-#include "secder.h"
 
 namespace mozilla { namespace pkix {
 
-Result
-CheckTimes(const CERTCertificate* cert, PRTime time)
-{
-  PR_ASSERT(cert);
+// 4.1.2.5 Validity
 
-  SECCertTimeValidity validity = CERT_CheckCertValidTimes(cert, time, false);
-  if (validity != secCertTimeValid) {
-    return Fail(RecoverableError, SEC_ERROR_EXPIRED_CERTIFICATE);
+Result
+CheckValidity(Input encodedValidity, Time time)
+{
+  Reader validity(encodedValidity);
+  Time notBefore(Time::uninitialized);
+  if (der::TimeChoice(validity, notBefore) != Success) {
+    return Result::ERROR_INVALID_DER_TIME;
+  }
+
+  Time notAfter(Time::uninitialized);
+  if (der::TimeChoice(validity, notAfter) != Success) {
+    return Result::ERROR_INVALID_DER_TIME;
+  }
+
+  if (der::End(validity) != Success) {
+    return Result::ERROR_INVALID_DER_TIME;
+  }
+
+  if (notBefore > notAfter) {
+    return Result::ERROR_INVALID_DER_TIME;
+  }
+
+  if (time < notBefore) {
+    return Result::ERROR_NOT_YET_VALID_CERTIFICATE;
+  }
+
+  if (time > notAfter) {
+    return Result::ERROR_EXPIRED_CERTIFICATE;
+  }
+
+  return Success;
+}
+
+// 4.1.2.7 Subject Public Key Info
+
+Result
+CheckSubjectPublicKeyInfo(Reader& input, TrustDomain& trustDomain,
+                          EndEntityOrCA endEntityOrCA)
+{
+  // Here, we validate the syntax and do very basic semantic validation of the
+  // public key of the certificate. The intention here is to filter out the
+  // types of bad inputs that are most likely to trigger non-mathematical
+  // security vulnerabilities in the TrustDomain, like buffer overflows or the
+  // use of unsafe elliptic curves.
+  //
+  // We don't check (all of) the mathematical properties of the public key here
+  // because it is more efficient for the TrustDomain to do it during signature
+  // verification and/or other use of the public key. In particular, we
+  // delegate the arithmetic validation of the public key, as specified in
+  // NIST SP800-56A section 5.6.2, to the TrustDomain, at least for now.
+
+  Reader algorithm;
+  Input subjectPublicKey;
+  Result rv = der::ExpectTagAndGetValue(input, der::SEQUENCE, algorithm);
+  if (rv != Success) {
+    return rv;
+  }
+  rv = der::BitStringWithNoUnusedBits(input, subjectPublicKey);
+  if (rv != Success) {
+    return rv;
+  }
+  rv = der::End(input);
+  if (rv != Success) {
+    return rv;
+  }
+
+  Reader subjectPublicKeyReader(subjectPublicKey);
+
+  Reader algorithmOID;
+  rv = der::ExpectTagAndGetValue(algorithm, der::OIDTag, algorithmOID);
+  if (rv != Success) {
+    return rv;
+  }
+
+  // RFC 3279 Section 2.3.1
+  // python DottedOIDToCode.py rsaEncryption 1.2.840.113549.1.1.1
+  static const uint8_t rsaEncryption[] = {
+    0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01
+  };
+
+  // RFC 3279 Section 2.3.5 and RFC 5480 Section 2.1.1
+  // python DottedOIDToCode.py id-ecPublicKey 1.2.840.10045.2.1
+  static const uint8_t id_ecPublicKey[] = {
+    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01
+  };
+
+  if (algorithmOID.MatchRest(id_ecPublicKey)) {
+    // An id-ecPublicKey AlgorithmIdentifier has a parameter that identifes
+    // the curve being used. Although RFC 5480 specifies multiple forms, we
+    // only supported the NamedCurve form, where the curve is identified by an
+    // OID.
+
+    Reader namedCurveOIDValue;
+    rv = der::ExpectTagAndGetValue(algorithm, der::OIDTag,
+                                   namedCurveOIDValue);
+    if (rv != Success) {
+      return rv;
+    }
+
+    // RFC 5480
+    // python DottedOIDToCode.py secp256r1 1.2.840.10045.3.1.7
+    static const uint8_t secp256r1[] = {
+      0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07
+    };
+
+    // RFC 5480
+    // python DottedOIDToCode.py secp384r1 1.3.132.0.34
+    static const uint8_t secp384r1[] = {
+      0x2b, 0x81, 0x04, 0x00, 0x22
+    };
+
+    // RFC 5480
+    // python DottedOIDToCode.py secp521r1 1.3.132.0.35
+    static const uint8_t secp521r1[] = {
+      0x2b, 0x81, 0x04, 0x00, 0x23
+    };
+
+    // Matching is attempted based on a rough estimate of the commonality of the
+    // elliptic curve, to minimize the number of MatchRest calls.
+    NamedCurve curve;
+    unsigned int bits;
+    if (namedCurveOIDValue.MatchRest(secp256r1)) {
+      curve = NamedCurve::secp256r1;
+      bits = 256;
+    } else if (namedCurveOIDValue.MatchRest(secp384r1)) {
+      curve = NamedCurve::secp384r1;
+      bits = 384;
+    } else if (namedCurveOIDValue.MatchRest(secp521r1)) {
+      curve = NamedCurve::secp521r1;
+      bits = 521;
+    } else {
+      return Result::ERROR_UNSUPPORTED_ELLIPTIC_CURVE;
+    }
+
+    rv = trustDomain.CheckECDSACurveIsAcceptable(endEntityOrCA, curve);
+    if (rv != Success) {
+      return rv;
+    }
+
+    // RFC 5480 Section 2.2 says that the first octet will be 0x04 to indicate
+    // an uncompressed point, which is the only encoding we support.
+    uint8_t compressedOrUncompressed;
+    rv = subjectPublicKeyReader.Read(compressedOrUncompressed);
+    if (rv != Success) {
+      return rv;
+    }
+    if (compressedOrUncompressed != 0x04) {
+      return Result::ERROR_UNSUPPORTED_EC_POINT_FORM;
+    }
+
+    // The point is encoded as two raw (not DER-encoded) integers, each padded
+    // to the bit length (rounded up to the nearest byte).
+    Input point;
+    rv = subjectPublicKeyReader.SkipToEnd(point);
+    if (rv != Success) {
+      return rv;
+    }
+    if (point.GetLength() != ((bits + 7) / 8u) * 2u) {
+      return Result::ERROR_BAD_DER;
+    }
+
+    // XXX: We defer the mathematical verification of the validity of the point
+    // until signature verification. This means that if we never verify a
+    // signature, we'll never fully check whether the public key is valid.
+  } else if (algorithmOID.MatchRest(rsaEncryption)) {
+    // RFC 3279 Section 2.3.1 says "The parameters field MUST have ASN.1 type
+    // NULL for this algorithm identifier."
+    rv = der::ExpectTagAndEmptyValue(algorithm, der::NULLTag);
+    if (rv != Success) {
+      return rv;
+    }
+
+    // RSAPublicKey :: = SEQUENCE{
+    //    modulus            INTEGER,    --n
+    //    publicExponent     INTEGER  }  --e
+    rv = der::Nested(subjectPublicKeyReader, der::SEQUENCE,
+                     [&trustDomain, endEntityOrCA](Reader& r) {
+      Input modulus;
+      Input::size_type modulusSignificantBytes;
+      Result rv = der::PositiveInteger(r, modulus, &modulusSignificantBytes);
+      if (rv != Success) {
+        return rv;
+      }
+      // XXX: Should we do additional checks of the modulus?
+      rv = trustDomain.CheckRSAPublicKeyModulusSizeInBits(
+             endEntityOrCA, modulusSignificantBytes * 8u);
+      if (rv != Success) {
+        return rv;
+      }
+
+      // XXX: We don't allow the TrustDomain to validate the exponent.
+      // XXX: We don't do our own sanity checking of the exponent.
+      Input exponent;
+      return der::PositiveInteger(r, exponent);
+    });
+    if (rv != Success) {
+      return rv;
+    }
+  } else {
+    return Result::ERROR_UNSUPPORTED_KEYALG;
+  }
+
+  rv = der::End(algorithm);
+  if (rv != Success) {
+    return rv;
+  }
+  rv = der::End(subjectPublicKeyReader);
+  if (rv != Success) {
+    return rv;
   }
 
   return Success;
@@ -44,12 +251,12 @@ CheckTimes(const CERTCertificate* cert, PRTime time)
 // bit and bit 7 is the least significant bit.
 inline uint8_t KeyUsageToBitMask(KeyUsage keyUsage)
 {
-  PR_ASSERT(keyUsage != KeyUsage::noParticularKeyUsageRequired);
+  assert(keyUsage != KeyUsage::noParticularKeyUsageRequired);
   return 0x80u >> static_cast<uint8_t>(keyUsage);
 }
 
 Result
-CheckKeyUsage(EndEntityOrCA endEntityOrCA, const SECItem* encodedKeyUsage,
+CheckKeyUsage(EndEntityOrCA endEntityOrCA, const Input* encodedKeyUsage,
               KeyUsage requiredKeyUsageIfPresent)
 {
   if (!encodedKeyUsage) {
@@ -58,7 +265,7 @@ CheckKeyUsage(EndEntityOrCA endEntityOrCA, const SECItem* encodedKeyUsage,
     // reduce the chances of an end-entity certificate being abused as a CA
     // certificate.
     // if (endEntityOrCA == EndEntityOrCA::MustBeCA && !isTrustAnchor) {
-    //   return Fail(RecoverableError, SEC_ERROR_INADEQUATE_KEY_USAGE);
+    //   return Result::ERROR_INADEQUATE_KEY_USAGE;
     // }
     //
     // TODO: Users may configure arbitrary certificates as trust anchors, not
@@ -67,27 +274,24 @@ CheckKeyUsage(EndEntityOrCA endEntityOrCA, const SECItem* encodedKeyUsage,
     return Success;
   }
 
-  der::Input input;
-  if (input.Init(encodedKeyUsage->data, encodedKeyUsage->len) != der::Success) {
-    return Fail(RecoverableError, SEC_ERROR_INADEQUATE_KEY_USAGE);
-  }
-  der::Input value;
-  if (der::ExpectTagAndGetValue(input, der::BIT_STRING, value) != der::Success) {
-    return Fail(RecoverableError, SEC_ERROR_INADEQUATE_KEY_USAGE);
+  Reader input(*encodedKeyUsage);
+  Reader value;
+  if (der::ExpectTagAndGetValue(input, der::BIT_STRING, value) != Success) {
+    return Result::ERROR_INADEQUATE_KEY_USAGE;
   }
 
   uint8_t numberOfPaddingBits;
-  if (value.Read(numberOfPaddingBits) != der::Success) {
-    return Fail(RecoverableError, SEC_ERROR_INADEQUATE_KEY_USAGE);
+  if (value.Read(numberOfPaddingBits) != Success) {
+    return Result::ERROR_INADEQUATE_KEY_USAGE;
   }
   if (numberOfPaddingBits > 7) {
-    return Fail(RecoverableError, SEC_ERROR_INADEQUATE_KEY_USAGE);
+    return Result::ERROR_INADEQUATE_KEY_USAGE;
   }
 
   uint8_t bits;
-  if (value.Read(bits) != der::Success) {
+  if (value.Read(bits) != Success) {
     // Reject empty bit masks.
-    return Fail(RecoverableError, SEC_ERROR_INADEQUATE_KEY_USAGE);
+    return Result::ERROR_INADEQUATE_KEY_USAGE;
   }
 
   // The most significant bit is numbered 0 (digitalSignature) and the least
@@ -128,179 +332,194 @@ CheckKeyUsage(EndEntityOrCA endEntityOrCA, const SECItem* encodedKeyUsage,
   if (requiredKeyUsageIfPresent != KeyUsage::noParticularKeyUsageRequired) {
     // Check that the required key usage bit is set.
     if ((bits & KeyUsageToBitMask(requiredKeyUsageIfPresent)) == 0) {
-      return Fail(RecoverableError, SEC_ERROR_INADEQUATE_KEY_USAGE);
+      return Result::ERROR_INADEQUATE_KEY_USAGE;
     }
   }
 
-  if (endEntityOrCA != EndEntityOrCA::MustBeCA) {
-    // RFC 5280 says "The keyCertSign bit is asserted when the subject public
-    // key is used for verifying signatures on public key certificates. If the
-    // keyCertSign bit is asserted, then the cA bit in the basic constraints
-    // extension (Section 4.2.1.9) MUST also be asserted."
-    if ((bits & KeyUsageToBitMask(KeyUsage::keyCertSign)) != 0) {
-      return Fail(RecoverableError, SEC_ERROR_INADEQUATE_KEY_USAGE);
-    }
+  // RFC 5280 says "The keyCertSign bit is asserted when the subject public
+  // key is used for verifying signatures on public key certificates. If the
+  // keyCertSign bit is asserted, then the cA bit in the basic constraints
+  // extension (Section 4.2.1.9) MUST also be asserted."
+  // However, we allow end-entity certificates (i.e. certificates without
+  // basicConstraints.cA set to TRUE) to claim keyCertSign for compatibility
+  // reasons. This does not compromise security because we only allow
+  // certificates with basicConstraints.cA set to TRUE to act as CAs.
+  if (requiredKeyUsageIfPresent == KeyUsage::keyCertSign &&
+      endEntityOrCA != EndEntityOrCA::MustBeCA) {
+    return Result::ERROR_INADEQUATE_KEY_USAGE;
   }
 
   // The padding applies to the last byte, so skip to the last byte.
   while (!value.AtEnd()) {
-    if (value.Read(bits) != der::Success) {
-      return Fail(RecoverableError, SEC_ERROR_INADEQUATE_KEY_USAGE);
+    if (value.Read(bits) != Success) {
+      return Result::ERROR_INADEQUATE_KEY_USAGE;
     }
   }
 
   // All of the padding bits must be zero, according to DER rules.
   uint8_t paddingMask = static_cast<uint8_t>((1 << numberOfPaddingBits) - 1);
   if ((bits & paddingMask) != 0) {
-    return Fail(RecoverableError, SEC_ERROR_INADEQUATE_KEY_USAGE);
+    return Result::ERROR_INADEQUATE_KEY_USAGE;
   }
 
   return Success;
 }
 
 // RFC5820 4.2.1.4. Certificate Policies
-//
+
 // "The user-initial-policy-set contains the special value any-policy if the
 // user is not concerned about certificate policy."
+//
+// python DottedOIDToCode.py anyPolicy 2.5.29.32.0
+
+static const uint8_t anyPolicy[] = {
+  0x55, 0x1d, 0x20, 0x00
+};
+
+/*static*/ const CertPolicyId CertPolicyId::anyPolicy = {
+  4, { 0x55, 0x1d, 0x20, 0x00 }
+};
+
+bool
+CertPolicyId::IsAnyPolicy() const {
+  if (this == &CertPolicyId::anyPolicy) {
+    return true;
+  }
+  return numBytes == sizeof(::mozilla::pkix::anyPolicy) &&
+         !memcmp(bytes, ::mozilla::pkix::anyPolicy,
+                 sizeof(::mozilla::pkix::anyPolicy));
+}
+
+// certificatePolicies ::= SEQUENCE SIZE (1..MAX) OF PolicyInformation
 Result
-CheckCertificatePolicies(BackCert& cert, EndEntityOrCA endEntityOrCA,
-                         bool isTrustAnchor, SECOidTag requiredPolicy)
+CheckCertificatePolicies(EndEntityOrCA endEntityOrCA,
+                         const Input* encodedCertificatePolicies,
+                         const Input* encodedInhibitAnyPolicy,
+                         TrustLevel trustLevel,
+                         const CertPolicyId& requiredPolicy)
 {
-  if (requiredPolicy == SEC_OID_X509_ANY_POLICY) {
+  if (requiredPolicy.numBytes == 0 ||
+      requiredPolicy.numBytes > sizeof requiredPolicy.bytes) {
+    return Result::FATAL_ERROR_INVALID_ARGS;
+  }
+
+  bool requiredPolicyFound = requiredPolicy.IsAnyPolicy();
+  if (requiredPolicyFound) {
     return Success;
   }
 
-  // It is likely some callers will pass SEC_OID_UNKNOWN when they don't care,
-  // instead of passing SEC_OID_X509_ANY_POLICY. Help them out by failing hard.
-  if (requiredPolicy == SEC_OID_UNKNOWN) {
-    PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
-    return FatalError;
-  }
-
   // Bug 989051. Until we handle inhibitAnyPolicy we will fail close when
-  // inhibitAnyPolicy extension is present and we need to evaluate certificate
-  // policies.
-  if (cert.encodedInhibitAnyPolicy) {
-    PR_SetError(SEC_ERROR_POLICY_VALIDATION_FAILED, 0);
-    return RecoverableError;
+  // inhibitAnyPolicy extension is present and we are validating for a policy.
+  if (!requiredPolicyFound && encodedInhibitAnyPolicy) {
+    return Result::ERROR_POLICY_VALIDATION_FAILED;
   }
 
   // The root CA certificate may omit the policies that it has been
   // trusted for, so we cannot require the policies to be present in those
   // certificates. Instead, the determination of which roots are trusted for
   // which policies is made by the TrustDomain's GetCertTrust method.
-  if (isTrustAnchor && endEntityOrCA == MustBeCA) {
-    return Success;
+  if (trustLevel == TrustLevel::TrustAnchor &&
+      endEntityOrCA == EndEntityOrCA::MustBeCA) {
+    requiredPolicyFound = true;
   }
 
-  if (!cert.encodedCertificatePolicies) {
-    PR_SetError(SEC_ERROR_POLICY_VALIDATION_FAILED, 0);
-    return RecoverableError;
+  Input requiredPolicyDER;
+  if (requiredPolicyDER.Init(requiredPolicy.bytes, requiredPolicy.numBytes)
+        != Success) {
+    return Result::FATAL_ERROR_INVALID_ARGS;
   }
 
-  ScopedPtr<CERTCertificatePolicies, CERT_DestroyCertificatePoliciesExtension>
-    policies(CERT_DecodeCertificatePoliciesExtension(
-                cert.encodedCertificatePolicies));
-  if (!policies) {
-    return MapSECStatus(SECFailure);
-  }
-
-  for (const CERTPolicyInfo* const* policyInfos = policies->policyInfos;
-       *policyInfos; ++policyInfos) {
-    if ((*policyInfos)->oid == requiredPolicy) {
-      return Success;
+  if (encodedCertificatePolicies) {
+    Reader extension(*encodedCertificatePolicies);
+    Reader certificatePolicies;
+    Result rv = der::ExpectTagAndGetValue(extension, der::SEQUENCE,
+                                          certificatePolicies);
+    if (rv != Success) {
+      return Result::ERROR_POLICY_VALIDATION_FAILED;
     }
-    // Intermediate certs are allowed to have the anyPolicy OID
-    if (endEntityOrCA == MustBeCA &&
-        (*policyInfos)->oid == SEC_OID_X509_ANY_POLICY) {
-      return Success;
+    if (!extension.AtEnd()) {
+      return Result::ERROR_POLICY_VALIDATION_FAILED;
     }
+
+    do {
+      // PolicyInformation ::= SEQUENCE {
+      //         policyIdentifier   CertPolicyId,
+      //         policyQualifiers   SEQUENCE SIZE (1..MAX) OF
+      //                                 PolicyQualifierInfo OPTIONAL }
+      Reader policyInformation;
+      rv = der::ExpectTagAndGetValue(certificatePolicies, der::SEQUENCE,
+                                     policyInformation);
+      if (rv != Success) {
+        return Result::ERROR_POLICY_VALIDATION_FAILED;
+      }
+
+      Reader policyIdentifier;
+      rv = der::ExpectTagAndGetValue(policyInformation, der::OIDTag,
+                                     policyIdentifier);
+      if (rv != Success) {
+        return rv;
+      }
+
+      if (policyIdentifier.MatchRest(requiredPolicyDER)) {
+        requiredPolicyFound = true;
+      } else if (endEntityOrCA == EndEntityOrCA::MustBeCA &&
+                 policyIdentifier.MatchRest(anyPolicy)) {
+        requiredPolicyFound = true;
+      }
+
+      // RFC 5280 Section 4.2.1.4 says "Optional qualifiers, which MAY be
+      // present, are not expected to change the definition of the policy." Also,
+      // it seems that Section 6, which defines validation, does not require any
+      // matching of qualifiers. Thus, doing anything with the policy qualifiers
+      // would be a waste of time and a source of potential incompatibilities, so
+      // we just ignore them.
+    } while (!requiredPolicyFound && !certificatePolicies.AtEnd());
   }
 
-  PR_SetError(SEC_ERROR_POLICY_VALIDATION_FAILED, 0);
-  return RecoverableError;
+  if (!requiredPolicyFound) {
+    return Result::ERROR_POLICY_VALIDATION_FAILED;
+  }
+
+  return Success;
 }
+
+static const long UNLIMITED_PATH_LEN = -1; // must be less than zero
 
 //  BasicConstraints ::= SEQUENCE {
 //          cA                      BOOLEAN DEFAULT FALSE,
 //          pathLenConstraint       INTEGER (0..MAX) OPTIONAL }
-der::Result
-DecodeBasicConstraints(const SECItem* encodedBasicConstraints,
-                       CERTBasicConstraints& basicConstraints)
-{
-  PR_ASSERT(encodedBasicConstraints);
-  if (!encodedBasicConstraints) {
-    return der::Fail(SEC_ERROR_INVALID_ARGS);
-  }
-
-  basicConstraints.isCA = false;
-  basicConstraints.pathLenConstraint = 0;
-
-  der::Input input;
-  if (input.Init(encodedBasicConstraints->data, encodedBasicConstraints->len)
-        != der::Success) {
-    return der::Fail(SEC_ERROR_EXTENSION_VALUE_INVALID);
-  }
-
-  if (der::ExpectTagAndIgnoreLength(input, der::SEQUENCE) != der::Success) {
-    return der::Fail(SEC_ERROR_EXTENSION_VALUE_INVALID);
-  }
-
-  bool isCA = false;
-  // TODO(bug 989518): cA is by default false. According to DER, default
-  // values must not be explicitly encoded in a SEQUENCE. So, if this
-  // value is present and false, it is an encoding error. However, Go Daddy
-  // has issued many certificates with this improper encoding, so we can't
-  // enforce this yet (hence passing true for allowInvalidExplicitEncoding
-  // to der::OptionalBoolean).
-  if (der::OptionalBoolean(input, true, isCA) != der::Success) {
-    return der::Fail(SEC_ERROR_EXTENSION_VALUE_INVALID);
-  }
-  basicConstraints.isCA = isCA;
-
-  if (input.Peek(der::INTEGER)) {
-    SECItem pathLenConstraintEncoded;
-    if (der::Integer(input, pathLenConstraintEncoded) != der::Success) {
-      return der::Fail(SEC_ERROR_EXTENSION_VALUE_INVALID);
-    }
-    long pathLenConstraint = DER_GetInteger(&pathLenConstraintEncoded);
-    if (pathLenConstraint >= std::numeric_limits<int>::max() ||
-        pathLenConstraint < 0) {
-      return der::Fail(SEC_ERROR_EXTENSION_VALUE_INVALID);
-    }
-    basicConstraints.pathLenConstraint = static_cast<int>(pathLenConstraint);
-    // TODO(bug 985025): If isCA is false, pathLenConstraint MUST NOT
-    // be included (as per RFC 5280 section 4.2.1.9), but for compatibility
-    // reasons, we don't check this for now.
-  } else if (basicConstraints.isCA) {
-    // If this is a CA but the path length is omitted, it is unlimited.
-    basicConstraints.pathLenConstraint = CERT_UNLIMITED_PATH_CONSTRAINT;
-  }
-
-  if (der::End(input) != der::Success) {
-    return der::Fail(SEC_ERROR_EXTENSION_VALUE_INVALID);
-  }
-  return der::Success;
-}
 
 // RFC5280 4.2.1.9. Basic Constraints (id-ce-basicConstraints)
 Result
-CheckBasicConstraints(const BackCert& cert,
-                      EndEntityOrCA endEntityOrCA,
-                      bool isTrustAnchor,
+CheckBasicConstraints(EndEntityOrCA endEntityOrCA,
+                      const Input* encodedBasicConstraints,
+                      const der::Version version, TrustLevel trustLevel,
                       unsigned int subCACount)
 {
-  CERTBasicConstraints basicConstraints;
-  if (cert.encodedBasicConstraints) {
-    if (DecodeBasicConstraints(cert.encodedBasicConstraints,
-                               basicConstraints) != der::Success) {
-      return RecoverableError;
+  bool isCA = false;
+  long pathLenConstraint = UNLIMITED_PATH_LEN;
+
+  if (encodedBasicConstraints) {
+    Reader input(*encodedBasicConstraints);
+    Result rv = der::Nested(input, der::SEQUENCE,
+                            [&isCA, &pathLenConstraint](Reader& r) {
+      Result rv = der::OptionalBoolean(r, isCA);
+      if (rv != Success) {
+        return rv;
+      }
+      // TODO(bug 985025): If isCA is false, pathLenConstraint
+      // MUST NOT be included (as per RFC 5280 section
+      // 4.2.1.9), but for compatibility reasons, we don't
+      // check this.
+      return der::OptionalInteger(r, UNLIMITED_PATH_LEN, pathLenConstraint);
+    });
+    if (rv != Success) {
+      return Result::ERROR_EXTENSION_VALUE_INVALID;
+    }
+    if (der::End(input) != Success) {
+      return Result::ERROR_EXTENSION_VALUE_INVALID;
     }
   } else {
-    // Synthesize a non-CA basic constraints by default
-    basicConstraints.isCA = false;
-    basicConstraints.pathLenConstraint = 0;
-
     // "If the basic constraints extension is not present in a version 3
     //  certificate, or the extension is present but the cA boolean is not
     //  asserted, then the certified public key MUST NOT be used to verify
@@ -309,246 +528,167 @@ CheckBasicConstraints(const BackCert& cert,
     // For compatibility, we must accept v1 trust anchors without basic
     // constraints as CAs.
     //
+    // There are devices with v1 certificates that are unlikely to be trust
+    // anchors. In order to allow applications to treat this case differently
+    // from other basic constraints violations (e.g. allowing certificate error
+    // overrides for only this case), we return a different error code.
+    //
     // TODO: add check for self-signedness?
-    if (endEntityOrCA == MustBeCA && isTrustAnchor) {
-      const CERTCertificate* nssCert = cert.GetNSSCert();
-      // We only allow trust anchor CA certs to omit the
-      // basicConstraints extension if they are v1. v1 is encoded
-      // implicitly.
-      if (!nssCert->version.data && !nssCert->version.len) {
-        basicConstraints.isCA = true;
-        basicConstraints.pathLenConstraint = CERT_UNLIMITED_PATH_CONSTRAINT;
+    if (endEntityOrCA == EndEntityOrCA::MustBeCA && version == der::Version::v1) {
+      if (trustLevel == TrustLevel::TrustAnchor) {
+        isCA = true;
+      } else {
+        return Result::ERROR_V1_CERT_USED_AS_CA;
       }
     }
   }
 
-  if (endEntityOrCA == MustBeEndEntity) {
+  if (endEntityOrCA == EndEntityOrCA::MustBeEndEntity) {
     // CA certificates are not trusted as EE certs.
 
-    if (basicConstraints.isCA) {
-      // XXX: We use SEC_ERROR_CA_CERT_INVALID here so we can distinguish
-      // this error from other errors, given that NSS does not have a "CA cert
-      // used as end-entity" error code since it doesn't have such a
-      // prohibition. We should add such an error code and stop abusing
-      // SEC_ERROR_CA_CERT_INVALID this way.
-      //
-      // Note, in particular, that this check prevents a delegated OCSP
-      // response signing certificate with the CA bit from successfully
-      // validating when we check it from pkixocsp.cpp, which is a good thing.
-      //
-      return Fail(RecoverableError, SEC_ERROR_CA_CERT_INVALID);
+    if (isCA) {
+      // Note that this check prevents a delegated OCSP response signing
+      // certificate with the CA bit from successfully validating when we check
+      // it from pkixocsp.cpp, which is a good thing.
+      return Result::ERROR_CA_CERT_USED_AS_END_ENTITY;
     }
 
     return Success;
   }
 
-  PORT_Assert(endEntityOrCA == MustBeCA);
+  assert(endEntityOrCA == EndEntityOrCA::MustBeCA);
 
   // End-entity certificates are not allowed to act as CA certs.
-  if (!basicConstraints.isCA) {
-    return Fail(RecoverableError, SEC_ERROR_CA_CERT_INVALID);
+  if (!isCA) {
+    return Result::ERROR_CA_CERT_INVALID;
   }
 
-  if (basicConstraints.pathLenConstraint >= 0) {
-    if (subCACount >
-           static_cast<unsigned int>(basicConstraints.pathLenConstraint)) {
-      return Fail(RecoverableError, SEC_ERROR_PATH_LEN_CONSTRAINT_INVALID);
-    }
-  }
-
-  return Success;
-}
-
-Result
-BackCert::GetConstrainedNames(/*out*/ const CERTGeneralName** result)
-{
-  if (!constrainedNames) {
-    if (!GetArena()) {
-      return FatalError;
-    }
-
-    constrainedNames =
-      CERT_GetConstrainedCertificateNames(nssCert, arena.get(),
-                                          cnOptions == IncludeCN);
-    if (!constrainedNames) {
-      return MapSECStatus(SECFailure);
-    }
-  }
-
-  *result = constrainedNames;
-  return Success;
-}
-
-// 4.2.1.10. Name Constraints
-Result
-CheckNameConstraints(BackCert& cert)
-{
-  static const char constraintFranceGov[] =
-                                     "\x30\x5D" /* sequence len 93*/
-                                     "\xA0\x5B" /* element len 91 */
-                                     "\x30\x05" /* sequence len 5 */
-                                     "\x82\x03" /* entry len 3 */
-                                     ".fr"
-                                     "\x30\x05\x82\x03" /* sequence len 5, entry len 3 */
-                                     ".gp"
-                                     "\x30\x05\x82\x03"
-                                     ".gf"
-                                     "\x30\x05\x82\x03"
-                                     ".mq"
-                                     "\x30\x05\x82\x03"
-                                     ".re"
-                                     "\x30\x05\x82\x03"
-                                     ".yt"
-                                     "\x30\x05\x82\x03"
-                                     ".pm"
-                                     "\x30\x05\x82\x03"
-                                     ".bl"
-                                     "\x30\x05\x82\x03"
-                                     ".mf"
-                                     "\x30\x05\x82\x03"
-                                     ".wf"
-                                     "\x30\x05\x82\x03"
-                                     ".pf"
-                                     "\x30\x05\x82\x03"
-                                     ".nc"
-                                     "\x30\x05\x82\x03"
-                                     ".tf";
-
-  /* The stringified value for the subject is:
-     E=igca@sgdn.pm.gouv.fr,CN=IGC/A,OU=DCSSI,O=PM/SGDN,L=Paris,ST=France,C=FR
-   */
-  static const char rawANSSISubject[] =
-                                 "\x30\x81\x85\x31\x0B\x30\x09\x06\x03\x55\x04"
-                                 "\x06\x13\x02\x46\x52\x31\x0F\x30\x0D\x06\x03"
-                                 "\x55\x04\x08\x13\x06\x46\x72\x61\x6E\x63\x65"
-                                 "\x31\x0E\x30\x0C\x06\x03\x55\x04\x07\x13\x05"
-                                 "\x50\x61\x72\x69\x73\x31\x10\x30\x0E\x06\x03"
-                                 "\x55\x04\x0A\x13\x07\x50\x4D\x2F\x53\x47\x44"
-                                 "\x4E\x31\x0E\x30\x0C\x06\x03\x55\x04\x0B\x13"
-                                 "\x05\x44\x43\x53\x53\x49\x31\x0E\x30\x0C\x06"
-                                 "\x03\x55\x04\x03\x13\x05\x49\x47\x43\x2F\x41"
-                                 "\x31\x23\x30\x21\x06\x09\x2A\x86\x48\x86\xF7"
-                                 "\x0D\x01\x09\x01\x16\x14\x69\x67\x63\x61\x40"
-                                 "\x73\x67\x64\x6E\x2E\x70\x6D\x2E\x67\x6F\x75"
-                                 "\x76\x2E\x66\x72";
-
-  const SECItem ANSSI_SUBJECT = {
-    siBuffer,
-    reinterpret_cast<uint8_t *>(const_cast<char *>(rawANSSISubject)),
-    sizeof(rawANSSISubject) - 1
-  };
-
-  const SECItem PERMIT_FRANCE_GOV_NC = {
-    siBuffer,
-    reinterpret_cast<uint8_t *>(const_cast<char *>(constraintFranceGov)),
-    sizeof(constraintFranceGov) - 1
-  };
-
-  const SECItem* nameConstraintsToUse = cert.encodedNameConstraints;
-
-  if (!nameConstraintsToUse) {
-    if (SECITEM_ItemsAreEqual(&cert.GetNSSCert()->derSubject, &ANSSI_SUBJECT)) {
-      nameConstraintsToUse = &PERMIT_FRANCE_GOV_NC;
-    } else {
-      return Success;
-    }
-  }
-
-  PLArenaPool* arena = cert.GetArena();
-  if (!arena) {
-    return FatalError;
-  }
-
-  // Owned by arena
-  const CERTNameConstraints* constraints =
-    CERT_DecodeNameConstraintsExtension(arena, nameConstraintsToUse);
-  if (!constraints) {
-    return MapSECStatus(SECFailure);
-  }
-
-  for (BackCert* prev = cert.childCert; prev; prev = prev->childCert) {
-    const CERTGeneralName* names = nullptr;
-    Result rv = prev->GetConstrainedNames(&names);
-    if (rv != Success) {
-      return rv;
-    }
-    PORT_Assert(names);
-    CERTGeneralName* currentName = const_cast<CERTGeneralName*>(names);
-    do {
-      if (CERT_CheckNameSpace(arena, constraints, currentName) != SECSuccess) {
-        // XXX: It seems like CERT_CheckNameSpace doesn't always call
-        // PR_SetError when it fails. We set the error code here, though this
-        // may be papering over some fatal errors. NSS's
-        // cert_VerifyCertChainOld does something similar.
-        PR_SetError(SEC_ERROR_CERT_NOT_IN_NAME_SPACE, 0);
-        return RecoverableError;
-      }
-      currentName = CERT_GetNextGeneralName(currentName);
-    } while (currentName != names);
+  if (pathLenConstraint >= 0 &&
+      static_cast<long>(subCACount) > pathLenConstraint) {
+    return Result::ERROR_PATH_LEN_CONSTRAINT_INVALID;
   }
 
   return Success;
 }
 
 // 4.2.1.12. Extended Key Usage (id-ce-extKeyUsage)
-// 4.2.1.12. Extended Key Usage (id-ce-extKeyUsage)
-Result
-CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA, const SECItem* encodedEKUs,
-                      SECOidTag requiredEKU)
-{
-  // TODO: Either do not allow anyExtendedKeyUsage to be passed as requiredEKU,
-  // or require that callers pass anyExtendedKeyUsage instead of
-  // SEC_OID_UNKNWON and disallow SEC_OID_UNKNWON.
 
-  // XXX: We're using SEC_ERROR_INADEQUATE_CERT_TYPE here so that callers can
-  // distinguish EKU mismatch from KU mismatch from basic constraints mismatch.
-  // We should probably add a new error code that is more clear for this type
-  // of problem.
+static Result
+MatchEKU(Reader& value, KeyPurposeId requiredEKU,
+         EndEntityOrCA endEntityOrCA, /*in/out*/ bool& found,
+         /*in/out*/ bool& foundOCSPSigning)
+{
+  // See Section 5.9 of "A Layman's Guide to a Subset of ASN.1, BER, and DER"
+  // for a description of ASN.1 DER encoding of OIDs.
+
+  // id-pkix  OBJECT IDENTIFIER  ::=
+  //            { iso(1) identified-organization(3) dod(6) internet(1)
+  //                    security(5) mechanisms(5) pkix(7) }
+  // id-kp OBJECT IDENTIFIER ::= { id-pkix 3 }
+  // id-kp-serverAuth      OBJECT IDENTIFIER ::= { id-kp 1 }
+  // id-kp-clientAuth      OBJECT IDENTIFIER ::= { id-kp 2 }
+  // id-kp-codeSigning     OBJECT IDENTIFIER ::= { id-kp 3 }
+  // id-kp-emailProtection OBJECT IDENTIFIER ::= { id-kp 4 }
+  // id-kp-OCSPSigning     OBJECT IDENTIFIER ::= { id-kp 9 }
+  static const uint8_t server[] = { (40*1)+3, 6, 1, 5, 5, 7, 3, 1 };
+  static const uint8_t client[] = { (40*1)+3, 6, 1, 5, 5, 7, 3, 2 };
+  static const uint8_t code  [] = { (40*1)+3, 6, 1, 5, 5, 7, 3, 3 };
+  static const uint8_t email [] = { (40*1)+3, 6, 1, 5, 5, 7, 3, 4 };
+  static const uint8_t ocsp  [] = { (40*1)+3, 6, 1, 5, 5, 7, 3, 9 };
+
+  // id-Netscape        OBJECT IDENTIFIER ::= { 2 16 840 1 113730 }
+  // id-Netscape-policy OBJECT IDENTIFIER ::= { id-Netscape 4 }
+  // id-Netscape-stepUp OBJECT IDENTIFIER ::= { id-Netscape-policy 1 }
+  static const uint8_t serverStepUp[] =
+    { (40*2)+16, 128+6,72, 1, 128+6,128+120,66, 4, 1 };
+
+  bool match = false;
+
+  if (!found) {
+    switch (requiredEKU) {
+      case KeyPurposeId::id_kp_serverAuth:
+        // Treat CA certs with step-up OID as also having SSL server type.
+        // Comodo has issued certificates that require this behavior that don't
+        // expire until June 2020! TODO(bug 982932): Limit this exception to
+        // old certificates.
+        match = value.MatchRest(server) ||
+                (endEntityOrCA == EndEntityOrCA::MustBeCA &&
+                 value.MatchRest(serverStepUp));
+        break;
+
+      case KeyPurposeId::id_kp_clientAuth:
+        match = value.MatchRest(client);
+        break;
+
+      case KeyPurposeId::id_kp_codeSigning:
+        match = value.MatchRest(code);
+        break;
+
+      case KeyPurposeId::id_kp_emailProtection:
+        match = value.MatchRest(email);
+        break;
+
+      case KeyPurposeId::id_kp_OCSPSigning:
+        match = value.MatchRest(ocsp);
+        break;
+
+      case KeyPurposeId::anyExtendedKeyUsage:
+        return NotReached("anyExtendedKeyUsage should start with found==true",
+                          Result::FATAL_ERROR_LIBRARY_FAILURE);
+    }
+  }
+
+  if (match) {
+    found = true;
+    if (requiredEKU == KeyPurposeId::id_kp_OCSPSigning) {
+      foundOCSPSigning = true;
+    }
+  } else if (value.MatchRest(ocsp)) {
+    foundOCSPSigning = true;
+  }
+
+  value.SkipToEnd(); // ignore unmatched OIDs.
+
+  return Success;
+}
+
+Result
+CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA,
+                      const Input* encodedExtendedKeyUsage,
+                      KeyPurposeId requiredEKU)
+{
+  // XXX: We're using Result::ERROR_INADEQUATE_CERT_TYPE here so that callers
+  // can distinguish EKU mismatch from KU mismatch from basic constraints
+  // mismatch. We should probably add a new error code that is more clear for
+  // this type of problem.
 
   bool foundOCSPSigning = false;
 
-  if (encodedEKUs) {
-    ScopedPtr<CERTOidSequence, CERT_DestroyOidSequence>
-      seq(CERT_DecodeOidSequence(encodedEKUs));
-    if (!seq) {
-      PR_SetError(SEC_ERROR_INADEQUATE_CERT_TYPE, 0);
-      return RecoverableError;
+  if (encodedExtendedKeyUsage) {
+    bool found = requiredEKU == KeyPurposeId::anyExtendedKeyUsage;
+
+    Reader input(*encodedExtendedKeyUsage);
+    Result rv = der::NestedOf(input, der::SEQUENCE, der::OIDTag,
+                              der::EmptyAllowed::No, [&](Reader& r) {
+      return MatchEKU(r, requiredEKU, endEntityOrCA, found, foundOCSPSigning);
+    });
+    if (rv != Success) {
+      return Result::ERROR_INADEQUATE_CERT_TYPE;
     }
-
-    bool found = false;
-
-    // XXX: We allow duplicate entries.
-    for (const SECItem* const* oids = seq->oids; oids && *oids; ++oids) {
-      SECOidTag oidTag = SECOID_FindOIDTag(*oids);
-      if (requiredEKU != SEC_OID_UNKNOWN && oidTag == requiredEKU) {
-        found = true;
-      } else {
-        // Treat CA certs with step-up OID as also having SSL server type.
-        // COMODO has issued certificates that require this behavior
-        // that don't expire until June 2020!
-        // TODO 982932: Limit this expection to old certificates
-        if (endEntityOrCA == MustBeCA &&
-            requiredEKU == SEC_OID_EXT_KEY_USAGE_SERVER_AUTH &&
-            oidTag == SEC_OID_NS_KEY_USAGE_GOVT_APPROVED) {
-          found = true;
-        }
-      }
-      if (oidTag == SEC_OID_OCSP_RESPONDER) {
-        foundOCSPSigning = true;
-      }
+    if (der::End(input) != Success) {
+      return Result::ERROR_INADEQUATE_CERT_TYPE;
     }
 
     // If the EKU extension was included, then the required EKU must be in the
     // list.
     if (!found) {
-      PR_SetError(SEC_ERROR_INADEQUATE_CERT_TYPE, 0);
-      return RecoverableError;
+      return Result::ERROR_INADEQUATE_CERT_TYPE;
     }
   }
 
   // pkixocsp.cpp depends on the following additional checks.
 
-  if (endEntityOrCA == MustBeEndEntity) {
+  if (endEntityOrCA == EndEntityOrCA::MustBeEndEntity) {
     // When validating anything other than an delegated OCSP signing cert,
     // reject any cert that also claims to be an OCSP responder, because such
     // a cert does not make sense. For example, if an SSL certificate were to
@@ -561,9 +701,8 @@ CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA, const SECItem* encodedEKUs,
     // Allowing this exception does not cause any security issues because we
     // require delegated OCSP response signing certificates to be end-entity
     // certificates.
-    if (foundOCSPSigning && requiredEKU != SEC_OID_OCSP_RESPONDER) {
-      PR_SetError(SEC_ERROR_INADEQUATE_CERT_TYPE, 0);
-      return RecoverableError;
+    if (foundOCSPSigning && requiredEKU != KeyPurposeId::id_kp_OCSPSigning) {
+      return Result::ERROR_INADEQUATE_CERT_TYPE;
     }
     // http://tools.ietf.org/html/rfc6960#section-4.2.2.2:
     // "OCSP signing delegation SHALL be designated by the inclusion of
@@ -574,9 +713,8 @@ CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA, const SECItem* encodedEKUs,
     // EKU extension is missing from an end-entity certificate. However, any CA
     // certificate can issue a delegated OCSP response signing certificate, so
     // we can't require the EKU be explicitly included for CA certificates.
-    if (!foundOCSPSigning && requiredEKU == SEC_OID_OCSP_RESPONDER) {
-      PR_SetError(SEC_ERROR_INADEQUATE_CERT_TYPE, 0);
-      return RecoverableError;
+    if (!foundOCSPSigning && requiredEKU == KeyPurposeId::id_kp_OCSPSigning) {
+      return Result::ERROR_INADEQUATE_CERT_TYPE;
     }
   }
 
@@ -585,45 +723,45 @@ CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA, const SECItem* encodedEKUs,
 
 Result
 CheckIssuerIndependentProperties(TrustDomain& trustDomain,
-                                 BackCert& cert,
-                                 PRTime time,
-                                 EndEntityOrCA endEntityOrCA,
+                                 const BackCert& cert,
+                                 Time time,
                                  KeyUsage requiredKeyUsageIfPresent,
-                                 SECOidTag requiredEKUIfPresent,
-                                 SECOidTag requiredPolicy,
+                                 KeyPurposeId requiredEKUIfPresent,
+                                 const CertPolicyId& requiredPolicy,
                                  unsigned int subCACount,
-                /*optional out*/ TrustDomain::TrustLevel* trustLevelOut)
+                                 /*out*/ TrustLevel& trustLevel)
 {
   Result rv;
 
-  TrustDomain::TrustLevel trustLevel;
-  rv = MapSECStatus(trustDomain.GetCertTrust(endEntityOrCA,
-                                             requiredPolicy,
-                                             cert.GetNSSCert(),
-                                             &trustLevel));
+  const EndEntityOrCA endEntityOrCA = cert.endEntityOrCA;
+
+  rv = trustDomain.GetCertTrust(endEntityOrCA, requiredPolicy, cert.GetDER(),
+                                trustLevel);
   if (rv != Success) {
     return rv;
   }
-  if (trustLevel == TrustDomain::ActivelyDistrusted) {
-    PORT_SetError(SEC_ERROR_UNTRUSTED_CERT);
-    return RecoverableError;
+  if (trustLevel == TrustLevel::ActivelyDistrusted) {
+    return Result::ERROR_UNTRUSTED_CERT;
   }
-  if (trustLevel != TrustDomain::TrustAnchor &&
-      trustLevel != TrustDomain::InheritsTrust) {
+  if (trustLevel != TrustLevel::TrustAnchor &&
+      trustLevel != TrustLevel::InheritsTrust) {
     // The TrustDomain returned a trust level that we weren't expecting.
-    PORT_SetError(PR_INVALID_STATE_ERROR);
-    return FatalError;
-  }
-  if (trustLevelOut) {
-    *trustLevelOut = trustLevel;
+    return Result::FATAL_ERROR_INVALID_STATE;
   }
 
-  bool isTrustAnchor = endEntityOrCA == MustBeCA &&
-                       trustLevel == TrustDomain::TrustAnchor;
-
-  PLArenaPool* arena = cert.GetArena();
-  if (!arena) {
-    return FatalError;
+  // Check the SPKI first, because it is one of the most selective properties
+  // of the certificate due to SHA-1 deprecation and the deprecation of
+  // certificates with keys weaker than RSA 2048.
+  Reader spki(cert.GetSubjectPublicKeyInfo());
+  rv = der::Nested(spki, der::SEQUENCE, [&](Reader& r) {
+    return CheckSubjectPublicKeyInfo(r, trustDomain, endEntityOrCA);
+  });
+  if (rv != Success) {
+    return rv;
+  }
+  rv = der::End(spki);
+  if (rv != Success) {
+    return rv;
   }
 
   // 4.2.1.1. Authority Key Identifier is ignored (see bug 965136).
@@ -631,14 +769,15 @@ CheckIssuerIndependentProperties(TrustDomain& trustDomain,
   // 4.2.1.2. Subject Key Identifier is ignored (see bug 965136).
 
   // 4.2.1.3. Key Usage
-  rv = CheckKeyUsage(endEntityOrCA, cert.encodedKeyUsage,
+  rv = CheckKeyUsage(endEntityOrCA, cert.GetKeyUsage(),
                      requiredKeyUsageIfPresent);
   if (rv != Success) {
     return rv;
   }
 
   // 4.2.1.4. Certificate Policies
-  rv = CheckCertificatePolicies(cert, endEntityOrCA, isTrustAnchor,
+  rv = CheckCertificatePolicies(endEntityOrCA, cert.GetCertificatePolicies(),
+                                cert.GetInhibitAnyPolicy(), trustLevel,
                                 requiredPolicy);
   if (rv != Success) {
     return rv;
@@ -656,7 +795,8 @@ CheckIssuerIndependentProperties(TrustDomain& trustDomain,
   //          checking.
 
   // 4.2.1.9. Basic Constraints.
-  rv = CheckBasicConstraints(cert, endEntityOrCA, isTrustAnchor, subCACount);
+  rv = CheckBasicConstraints(endEntityOrCA, cert.GetBasicConstraints(),
+                             cert.GetVersion(), trustLevel, subCACount);
   if (rv != Success) {
     return rv;
   }
@@ -667,7 +807,7 @@ CheckIssuerIndependentProperties(TrustDomain& trustDomain,
   //           documentation about policy enforcement in pkix.h.
 
   // 4.2.1.12. Extended Key Usage
-  rv = CheckExtendedKeyUsage(endEntityOrCA, cert.encodedExtendedKeyUsage,
+  rv = CheckExtendedKeyUsage(endEntityOrCA, cert.GetExtKeyUsage(),
                              requiredEKUIfPresent);
   if (rv != Success) {
     return rv;
@@ -682,7 +822,7 @@ CheckIssuerIndependentProperties(TrustDomain& trustDomain,
 
   // IMPORTANT: This check must come after the other checks in order for error
   // ranking to work correctly.
-  rv = CheckTimes(cert.GetNSSCert(), time);
+  rv = CheckValidity(cert.GetValidity(), time);
   if (rv != Success) {
     return rv;
   }

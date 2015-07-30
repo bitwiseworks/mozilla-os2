@@ -33,7 +33,7 @@ public:
               const TransitionEventInit& aParam,
               ErrorResult& aRv);
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) override
   {
     return TransitionEventBinding::Wrap(aCx, this);
   }
@@ -43,6 +43,9 @@ public:
   // GetPseudoElement(nsAString& aPreudoElement)
 
   float ElapsedTime();
+
+protected:
+  ~TransitionEvent() {}
 };
 
 } // namespace dom

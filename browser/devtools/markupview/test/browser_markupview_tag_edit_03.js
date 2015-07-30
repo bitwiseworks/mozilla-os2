@@ -6,19 +6,19 @@
 
 // Tests that a node's tagname can be edited in the markup-view
 
-const TEST_URL = "data:text/html,<div id='retag-me'><div id='retag-me-2'></div></div>";
+const TEST_URL = "data:text/html;charset=utf-8,<div id='retag-me'><div id='retag-me-2'></div></div>";
 
-let test = asyncTest(function*() {
+add_task(function*() {
   let {toolbox, inspector} = yield addTab(TEST_URL).then(openInspector);
 
   yield inspector.markup.expandAll();
 
   info("Selecting the test node");
-  let node = content.document.getElementById("retag-me");
+  let node = content.document.querySelector("#retag-me");
   let child = content.document.querySelector("#retag-me-2");
-  yield selectNode(node, inspector);
+  yield selectNode("#retag-me", inspector);
 
-  let container = getContainerForRawNode(node, inspector);
+  let container = yield getContainerForSelector("#retag-me", inspector);
   is(node.tagName, "DIV", "We've got #retag-me element, it's a DIV");
   ok(container.expanded, "It is expanded");
   is(child.parentNode, node, "Child #retag-me-2 is inside #retag-me");
@@ -30,8 +30,8 @@ let test = asyncTest(function*() {
   yield mutated;
 
   info("Checking that the tagname change was done");
-  let node = content.document.getElementById("retag-me");
-  let container = getContainerForRawNode(node, inspector);
+  node = content.document.querySelector("#retag-me");
+  container = yield getContainerForSelector("#retag-me", inspector);
   is(node.tagName, "P", "We've got #retag-me, it should now be a P");
   ok(container.expanded, "It is still expanded");
   ok(container.selected, "It is still selected");

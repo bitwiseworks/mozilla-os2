@@ -24,6 +24,7 @@ function throwStmt(expr) Pattern({ type: "ThrowStatement", argument: expr })
 function returnStmt(expr) Pattern({ type: "ReturnStatement", argument: expr })
 function yieldExpr(expr) Pattern({ type: "YieldExpression", argument: expr })
 function lit(val) Pattern({ type: "Literal", value: val })
+function comp(name) Pattern({ type: "ComputedName", name: name })
 function spread(val) Pattern({ type: "SpreadExpression", expression: val})
 var thisExpr = Pattern({ type: "ThisExpression" });
 function funDecl(id, params, body, defaults=[], rest=null) Pattern(
@@ -53,6 +54,7 @@ function forEachInStmt(lhs, rhs, body) Pattern({ type: "ForInStatement", left: l
 function breakStmt(lab) Pattern({ type: "BreakStatement", label: lab })
 function continueStmt(lab) Pattern({ type: "ContinueStatement", label: lab })
 function blockStmt(body) Pattern({ type: "BlockStatement", body: body })
+function literal(val) Pattern({ type: "Literal",  value: val })
 var emptyStmt = Pattern({ type: "EmptyStatement" })
 function ifStmt(test, cons, alt) Pattern({ type: "IfStatement", test: test, alternate: alt, consequent: cons })
 function labStmt(lab, stmt) Pattern({ type: "LabeledStatement", label: lab, body: stmt })
@@ -91,8 +93,24 @@ function newExpr(callee, args) Pattern({ type: "NewExpression", callee: callee, 
 function callExpr(callee, args) Pattern({ type: "CallExpression", callee: callee, arguments: args })
 function arrExpr(elts) Pattern({ type: "ArrayExpression", elements: elts })
 function objExpr(elts) Pattern({ type: "ObjectExpression", properties: elts })
-function compExpr(body, blocks, filter) Pattern({ type: "ComprehensionExpression", body: body, blocks: blocks, filter: filter })
-function genExpr(body, blocks, filter) Pattern({ type: "GeneratorExpression", body: body, blocks: blocks, filter: filter })
+function computedName(elts) Pattern({ type: "ComputedName", name: elts })
+function templateLit(elts) Pattern({ type: "TemplateLiteral", elements: elts })
+function taggedTemplate(tagPart, templatePart) Pattern({ type: "TaggedTemplate", callee: tagPart,
+                arguments : templatePart })
+function template(raw, cooked, ...args) Pattern([{ type: "CallSiteObject", raw: raw, cooked:
+cooked}, ...args])
+function compExpr(body, blocks, filter, style) {
+  if (style == "legacy" || !filter)
+    return Pattern({ type: "ComprehensionExpression", body, blocks, filter, style });
+  else
+    return Pattern({ type: "ComprehensionExpression", body, blocks: blocks.concat(compIf(filter)), filter: null, style });
+}
+function genExpr(body, blocks, filter, style) {
+  if (style == "legacy" || !filter)
+    return Pattern({ type: "GeneratorExpression", body, blocks, filter, style });
+  else
+    return Pattern({ type: "GeneratorExpression", body, blocks: blocks.concat(compIf(filter)), filter: null, style });
+}
 function graphExpr(idx, body) Pattern({ type: "GraphExpression", index: idx, expression: body })
 function letExpr(head, body) Pattern({ type: "LetExpression", head: head, body: body })
 function idxExpr(idx) Pattern({ type: "GraphIndexExpression", index: idx })
@@ -100,9 +118,15 @@ function idxExpr(idx) Pattern({ type: "GraphIndexExpression", index: idx })
 function compBlock(left, right) Pattern({ type: "ComprehensionBlock", left: left, right: right, each: false, of: false })
 function compEachBlock(left, right) Pattern({ type: "ComprehensionBlock", left: left, right: right, each: true, of: false })
 function compOfBlock(left, right) Pattern({ type: "ComprehensionBlock", left: left, right: right, each: false, of: true })
+function compIf(test) Pattern({ type: "ComprehensionIf", test: test })
 
 function arrPatt(elts) Pattern({ type: "ArrayPattern", elements: elts })
 function objPatt(elts) Pattern({ type: "ObjectPattern", properties: elts })
+
+function assignElem(target, defaultExpr = null, targetIdent = typeof target == 'string' ? ident(target) : target) defaultExpr ? aExpr('=', targetIdent, defaultExpr) : targetIdent
+function assignProp(property, target, defaultExpr = null, shorthand = !target, targetProp = target || ident(property)) Pattern({
+    type: "Property", key: ident(property), shorthand,
+    value: defaultExpr ? aExpr('=', targetProp, defaultExpr) : targetProp })
 
 function localSrc(src) "(function(){ " + src + " })"
 function localPatt(patt) program([exprStmt(funExpr(null, [], blockStmt([patt])))])
@@ -135,6 +159,10 @@ function assertLocalDecl(src, patt) {
 
 function assertGlobalStmt(src, patt, builder) {
     program([patt]).assert(Reflect.parse(src, {builder: builder}));
+}
+
+function assertStringExpr(src, patt) {
+    program([exprStmt(patt)]).assert(Reflect.parse(src));
 }
 
 function assertGlobalExpr(src, patt, builder) {
@@ -213,7 +241,7 @@ assertDecl("function foo(a, b=4, ...rest) { }",
            funDecl(ident("foo"), [ident("a"), ident("b")], blockStmt([]), [lit(4)], ident("rest")));
 assertDecl("function foo(a=(function () {})) { function a() {} }",
            funDecl(ident("foo"), [ident("a")], blockStmt([funDecl(ident("a"), [], blockStmt([]))]),
-                   [funExpr(ident("a"), [], blockStmt([]))]));
+                   [funExpr(null, [], blockStmt([]))]));
 
 
 // Bug 591437: rebound args have their defs turned into uses
@@ -223,7 +251,7 @@ assertDecl("function f(a,b,c) { function b() { } }",
            funDecl(ident("f"), [ident("a"),ident("b"),ident("c")], blockStmt([funDecl(ident("b"), [], blockStmt([]))])));
 assertDecl("function f(a,[x,y]) { function a() { } }",
            funDecl(ident("f"),
-                   [ident("a"), arrPatt([ident("x"), ident("y")])],
+                   [ident("a"), arrPatt([assignElem("x"), assignElem("y")])],
                    blockStmt([funDecl(ident("a"), [], blockStmt([]))])));
 
 // Bug 632027: array holes should reflect as null
@@ -257,7 +285,7 @@ assertExpr("a => b => a", arrowExpr([ident("a")], arrowExpr([ident("b")], ident(
 assertExpr("a => {}", arrowExpr([ident("a")], blockStmt([])));
 assertExpr("a => ({})", arrowExpr([ident("a")], objExpr([])));
 assertExpr("(a, b, c) => {}", arrowExpr([ident("a"), ident("b"), ident("c")], blockStmt([])));
-assertExpr("([a, b]) => {}", arrowExpr([arrPatt([ident("a"), ident("b")])], blockStmt([])));
+assertExpr("([a, b]) => {}", arrowExpr([arrPatt([assignElem("a"), assignElem("b")])], blockStmt([])));
 assertExpr("(++x)", updExpr("++", ident("x"), true));
 assertExpr("(x++)", updExpr("++", ident("x"), false));
 assertExpr("(+x)", unExpr("+", ident("x")));
@@ -337,6 +365,8 @@ assertExpr("[1,(2,3)]", arrExpr([lit(1),seqExpr([lit(2),lit(3)])]));
 assertExpr("[,(2,3)]", arrExpr([null,seqExpr([lit(2),lit(3)])]));
 assertExpr("({})", objExpr([]));
 assertExpr("({x:1})", objExpr([{ key: ident("x"), value: lit(1) }]));
+assertExpr("({x:x, y})", objExpr([{ key: ident("x"), value: ident("x"), shorthand: false },
+                                  { key: ident("y"), value: ident("y"), shorthand: true }]));
 assertExpr("({x:1, y:2})", objExpr([{ key: ident("x"), value: lit(1) },
                                     { key: ident("y"), value: lit(2) } ]));
 assertExpr("({x:1, y:2, z:3})", objExpr([{ key: ident("x"), value: lit(1) },
@@ -351,6 +381,13 @@ assertExpr("({'x':1, 'y':2, z:3})", objExpr([{ key: lit("x"), value: lit(1) },
 assertExpr("({'x':1, 'y':2, 3:3})", objExpr([{ key: lit("x"), value: lit(1) },
                                              { key: lit("y"), value: lit(2) },
                                              { key: lit(3), value: lit(3) } ]));
+assertExpr("({__proto__:x})", objExpr([{ type: "PrototypeMutation", value: ident("x") }]));
+assertExpr("({'__proto__':x})", objExpr([{ type: "PrototypeMutation", value: ident("x") }]));
+assertExpr("({['__proto__']:x})", objExpr([{ type: "Property", key: comp(lit("__proto__")), value: ident("x") }]));
+assertExpr("({['__proto__']:q, __proto__() {}, __proto__: null })",
+           objExpr([{ type: "Property", key: comp(lit("__proto__")), value: ident("q") },
+                    { type: "Property", key: ident("__proto__"), method: true },
+                    { type: "PrototypeMutation", value: lit(null) }]));
 
 // Bug 571617: eliminate constant-folding
 assertExpr("2 + 3", binExpr("+", lit(2), lit(3)));
@@ -359,7 +396,7 @@ assertExpr("2 + 3", binExpr("+", lit(2), lit(3)));
 assertExpr("typeof(0?0:a)", unExpr("typeof", condExpr(lit(0), lit(0), ident("a"))));
 
 // Bug 632029: constant-folding
-assertExpr("[x for each (x in y) if (false)]", compExpr(ident("x"), [compEachBlock(ident("x"), ident("y"))], lit(false)));
+assertExpr("[x for each (x in y) if (false)]", compExpr(ident("x"), [compEachBlock(ident("x"), ident("y"))], lit(false), "legacy"));
 
 // Bug 632056: constant-folding
 program([exprStmt(ident("f")),
@@ -367,6 +404,55 @@ program([exprStmt(ident("f")),
                 funDecl(ident("f"), [], blockStmt([])),
                 null)]).assert(Reflect.parse("f; if (1) function f(){}"));
 
+// Bug 924688: computed property names
+assertExpr('a= {[field1]: "a", [field2=1]: "b"}',
+          aExpr("=", ident("a"),
+                objExpr([{ key: computedName(ident("field1")), value: lit("a")},
+                         { key: computedName(aExpr("=", ident("field2"), lit(1))),
+                           value: lit("b")}])));
+
+assertExpr('a= {["field1"]: "a", field2 : "b"}',
+          aExpr("=", ident("a"),
+                objExpr([{ key: computedName(lit("field1")), value: lit("a") },
+                         { key: ident("field2"), value: lit("b") }])));
+
+assertExpr('a= {[1]: 1, 2 : 2}',
+          aExpr("=", ident("a"),
+                objExpr([{ key: computedName(lit(1)), value: lit(1) },
+                         { key: lit(2), value: lit(2) }])));
+
+// Bug 924688: computed property names - location information
+var node = Reflect.parse("a = {[field1]: 5}");
+Pattern({ body: [ { expression: { right: { properties: [ {key: { loc:
+    { start: { line: 1, column: 5 }, end: { line: 1, column: 13 }}}}]}}}]}).match(node);
+
+// Bug 1048384 - Getter/setter syntax with computed names
+assertExpr("b = { get [meth]() { } }", aExpr("=", ident("b"),
+              objExpr([{ key: computedName(ident("meth")), value: funExpr(null, [], blockStmt([])),
+                method: false, kind: "get"}])));
+assertExpr("b = { set [meth](a) { } }", aExpr("=", ident("b"),
+              objExpr([{ key: computedName(ident("meth")), value: funExpr(null, [ident("a")],
+                blockStmt([])), method: false, kind: "set"}])));
+
+// Bug 1073809 - Getter/setter syntax with generators
+assertExpr("({*get() { }})", objExpr([{ type: "Property", key: ident("get"), method: true,
+                                        value: genFunExpr(ident("get"), [], blockStmt([]))}]));
+assertExpr("({*set() { }})", objExpr([{ type: "Property", key: ident("set"), method: true,
+                                        value: genFunExpr(ident("set"), [], blockStmt([]))}]));
+assertError("({*get foo() { }})", SyntaxError);
+assertError("({*set foo() { }})", SyntaxError);
+
+assertError("({ *get 1() {} })", SyntaxError);
+assertError("({ *get \"\"() {} })", SyntaxError);
+assertError("({ *get foo() {} })", SyntaxError);
+assertError("({ *get []() {} })", SyntaxError);
+assertError("({ *get [1]() {} })", SyntaxError);
+
+assertError("({ *set 1() {} })", SyntaxError);
+assertError("({ *set \"\"() {} })", SyntaxError);
+assertError("({ *set foo() {} })", SyntaxError);
+assertError("({ *set []() {} })", SyntaxError);
+assertError("({ *set [1]() {} })", SyntaxError);
 // statements
 
 assertStmt("throw 42", throwStmt(lit(42)));
@@ -395,6 +481,41 @@ assertStmt("if (foo) { throw 1; throw 2; throw 3; } else true;",
            ifStmt(ident("foo"),
                   blockStmt([throwStmt(lit(1)), throwStmt(lit(2)), throwStmt(lit(3))]),
                   exprStmt(lit(true))));
+
+// template strings
+assertStringExpr("`hey there`", literal("hey there"));
+assertStringExpr("`hey\nthere`", literal("hey\nthere"));
+assertExpr("`hey${\"there\"}`", templateLit([lit("hey"), lit("there"), lit("")]));
+assertExpr("`hey${\"there\"}mine`", templateLit([lit("hey"), lit("there"), lit("mine")]));
+assertExpr("`hey${a == 5}mine`", templateLit([lit("hey"), binExpr("==", ident("a"), lit(5)), lit("mine")]));
+assertExpr("`hey${`there${\"how\"}`}mine`", templateLit([lit("hey"),
+           templateLit([lit("there"), lit("how"), lit("")]), lit("mine")]));
+assertExpr("func`hey`", taggedTemplate(ident("func"), template(["hey"], ["hey"])));
+assertExpr("func`hey${\"4\"}there`", taggedTemplate(ident("func"),
+           template(["hey", "there"], ["hey", "there"], lit("4"))));
+assertExpr("func`hey${\"4\"}there${5}`", taggedTemplate(ident("func"),
+           template(["hey", "there", ""], ["hey", "there", ""],
+                  lit("4"), lit(5))));
+assertExpr("func`hey\r\n`", taggedTemplate(ident("func"), template(["hey\n"], ["hey\n"])));
+assertExpr("func`hey${4}``${5}there``mine`",
+           taggedTemplate(taggedTemplate(taggedTemplate(
+               ident("func"), template(["hey", ""], ["hey", ""], lit(4))),
+               template(["", "there"], ["", "there"], lit(5))),
+               template(["mine"], ["mine"])));
+
+// multi-line template string - line numbers
+var node = Reflect.parse("`\n\n   ${2}\n\n\n`");
+Pattern({loc:{start:{line:1, column:0}, end:{line:6, column:1}, source:null}, type:"Program",
+body:[{loc:{start:{line:1, column:0}, end:{line:6, column:1}, source:null},
+type:"ExpressionStatement", expression:{loc:{start:{line:1, column:0}, end:{line:6, column:1},
+source:null}, type:"TemplateLiteral", elements:[{loc:{start:{line:1, column:0}, end:{line:3,
+column:5}, source:null}, type:"Literal", value:"\n\n   "}, {loc:{start:{line:3, column:5},
+end:{line:3, column:6}, source:null}, type:"Literal", value:2}, {loc:{start:{line:3, column:6},
+end:{line:6, column:1}, source:null}, type:"Literal", value:"\n\n\n"}]}}]}).match(node);
+
+
+assertStringExpr("\"hey there\"", literal("hey there"));
+
 assertStmt("foo: for(;;) break foo;", labStmt(ident("foo"), forStmt(null, null, null, breakStmt(ident("foo")))));
 assertStmt("foo: for(;;) continue foo;", labStmt(ident("foo"), forStmt(null, null, null, continueStmt(ident("foo")))));
 assertStmt("with (obj) { }", withStmt(ident("obj"), blockStmt([])));
@@ -442,6 +563,16 @@ assertStmt("try { } catch (e if foo) { } catch (e if bar) { } catch (e) { } fina
                    catchClause(ident("e"), null, blockStmt([])),
                    blockStmt([])));
 
+
+// Bug 924672: Method definitions
+assertExpr("b = { a() { } }", aExpr("=", ident("b"),
+              objExpr([{ key: ident("a"), value: funExpr(ident("a"), [], blockStmt([])), method:
+              true}])));
+
+assertExpr("b = { *a() { } }", aExpr("=", ident("b"),
+              objExpr([{ key: ident("a"), value: genFunExpr(ident("a"), [], blockStmt([])), method:
+              true}])));
+
 // Bug 632028: yield outside of a function should throw
 (function() {
     var threw = false;
@@ -469,8 +600,10 @@ assertStmt("function f() { var x = 42; var x = 43; }",
                                               varDecl([{ id: ident("x"), init: lit(43) }])])));
 
 
-assertDecl("var {x:y} = foo;", varDecl([{ id: objPatt([{ key: ident("x"), value: ident("y") }]),
+assertDecl("var {x:y} = foo;", varDecl([{ id: objPatt([assignProp("x", ident("y"))]),
                                           init: ident("foo") }]));
+assertDecl("var {x} = foo;", varDecl([{ id: objPatt([assignProp("x")]),
+                                        init: ident("foo") }]));
 
 // Bug 632030: redeclarations between var and funargs, var and function
 assertStmt("function g(x) { var x }",
@@ -482,16 +615,16 @@ assertProg("f.p = 1; var f; f.p; function f(){}",
             funDecl(ident("f"), [], blockStmt([]))]);
 
 // global let is var
-assertGlobalDecl("let {x:y} = foo;", varDecl([{ id: objPatt([{ key: ident("x"), value: ident("y") }]),
+assertGlobalDecl("let {x:y} = foo;", varDecl([{ id: objPatt([assignProp("x", ident("y"))]),
                                                 init: ident("foo") }]));
-// function-global let is var
-assertLocalDecl("let {x:y} = foo;", varDecl([{ id: objPatt([{ key: ident("x"), value: ident("y") }]),
+// function-global let is let
+assertLocalDecl("let {x:y} = foo;", letDecl([{ id: objPatt([assignProp("x", ident("y"))]),
                                                init: ident("foo") }]));
 // block-local let is let
-assertBlockDecl("let {x:y} = foo;", letDecl([{ id: objPatt([{ key: ident("x"), value: ident("y") }]),
+assertBlockDecl("let {x:y} = foo;", letDecl([{ id: objPatt([assignProp("x", ident("y"))]),
                                                init: ident("foo") }]));
 
-assertDecl("const {x:y} = foo;", constDecl([{ id: objPatt([{ key: ident("x"), value: ident("y") }]),
+assertDecl("const {x:y} = foo;", constDecl([{ id: objPatt([assignProp("x", ident("y"))]),
                                               init: ident("foo") }]));
 
 
@@ -571,50 +704,77 @@ function testParamPatternCombinations(makePattSrc, makePattPatt) {
 }
 
 testParamPatternCombinations(function(n) ("{a" + n + ":x" + n + "," + "b" + n + ":y" + n + "," + "c" + n + ":z" + n + "}"),
-                             function(n) (objPatt([{ key: ident("a" + n), value: ident("x" + n) },
-                                                   { key: ident("b" + n), value: ident("y" + n) },
-                                                   { key: ident("c" + n), value: ident("z" + n) }])));
+                             function(n) (objPatt([assignProp("a" + n, ident("x" + n)),
+                                                   assignProp("b" + n, ident("y" + n)),
+                                                   assignProp("c" + n, ident("z" + n))])));
+
+testParamPatternCombinations(function(n) ("{a" + n + ":x" + n + " = 10," + "b" + n + ":y" + n + " = 10," + "c" + n + ":z" + n + " = 10}"),
+                             function(n) (objPatt([assignProp("a" + n, ident("x" + n), lit(10)),
+                                                   assignProp("b" + n, ident("y" + n), lit(10)),
+                                                   assignProp("c" + n, ident("z" + n), lit(10))])));
 
 testParamPatternCombinations(function(n) ("[x" + n + "," + "y" + n + "," + "z" + n + "]"),
-                             function(n) (arrPatt([ident("x" + n), ident("y" + n), ident("z" + n)])));
+                             function(n) (arrPatt([assignElem("x" + n), assignElem("y" + n), assignElem("z" + n)])));
 
+testParamPatternCombinations(function(n) ("[a" + n + ", ..." + "b" + n + "]"),
+                             function(n) (arrPatt([assignElem("a" + n), spread(ident("b" + n))])));
+
+testParamPatternCombinations(function(n) ("[a" + n + ", " + "b" + n + " = 10]"),
+                             function(n) (arrPatt([assignElem("a" + n), assignElem("b" + n, lit(10))])));
 
 // destructuring variable declarations
 
 function testVarPatternCombinations(makePattSrc, makePattPatt) {
     var pattSrcs = makePatternCombinations(function(n) ("x" + n), makePattSrc);
     var pattPatts = makePatternCombinations(function(n) ({ id: ident("x" + n), init: null }), makePattPatt);
+    // It's illegal to have uninitialized const declarations, so we need a
+    // separate set of patterns and sources.
+    var constSrcs = makePatternCombinations(function(n) ("x" + n + " = undefined"), makePattSrc);
+    var constPatts = makePatternCombinations(function(n) ({ id: ident("x" + n), init: ident("undefined") }), makePattPatt);
 
     for (var i = 0; i < pattSrcs.length; i++) {
         // variable declarations in blocks
         assertDecl("var " + pattSrcs[i].join(",") + ";", varDecl(pattPatts[i]));
 
         assertGlobalDecl("let " + pattSrcs[i].join(",") + ";", varDecl(pattPatts[i]));
-        assertLocalDecl("let " + pattSrcs[i].join(",") + ";", varDecl(pattPatts[i]));
+        assertLocalDecl("let " + pattSrcs[i].join(",") + ";", letDecl(pattPatts[i]));
         assertBlockDecl("let " + pattSrcs[i].join(",") + ";", letDecl(pattPatts[i]));
 
-        assertDecl("const " + pattSrcs[i].join(",") + ";", constDecl(pattPatts[i]));
+        assertDecl("const " + constSrcs[i].join(",") + ";", constDecl(constPatts[i]));
 
         // variable declarations in for-loop heads
         assertStmt("for (var " + pattSrcs[i].join(",") + "; foo; bar);",
                    forStmt(varDecl(pattPatts[i]), ident("foo"), ident("bar"), emptyStmt));
         assertStmt("for (let " + pattSrcs[i].join(",") + "; foo; bar);",
                    letStmt(pattPatts[i], forStmt(null, ident("foo"), ident("bar"), emptyStmt)));
-        assertStmt("for (const " + pattSrcs[i].join(",") + "; foo; bar);",
-                   forStmt(constDecl(pattPatts[i]), ident("foo"), ident("bar"), emptyStmt));
+        assertStmt("for (const " + constSrcs[i].join(",") + "; foo; bar);",
+                   letStmt(constPatts[i], forStmt(null, ident("foo"), ident("bar"), emptyStmt)));
     }
 }
 
 testVarPatternCombinations(function (n) ("{a" + n + ":x" + n + "," + "b" + n + ":y" + n + "," + "c" + n + ":z" + n + "} = 0"),
-                           function (n) ({ id: objPatt([{ key: ident("a" + n), value: ident("x" + n) },
-                                                        { key: ident("b" + n), value: ident("y" + n) },
-                                                        { key: ident("c" + n), value: ident("z" + n) }]),
+                           function (n) ({ id: objPatt([assignProp("a" + n, ident("x" + n)),
+                                                        assignProp("b" + n, ident("y" + n)),
+                                                        assignProp("c" + n, ident("z" + n))]),
+                                           init: lit(0) }));
+
+testVarPatternCombinations(function (n) ("{a" + n + ":x" + n + " = 10," + "b" + n + ":y" + n + " = 10," + "c" + n + ":z" + n + " = 10} = 0"),
+                           function (n) ({ id: objPatt([assignProp("a" + n, ident("x" + n), lit(10)),
+                                                        assignProp("b" + n, ident("y" + n), lit(10)),
+                                                        assignProp("c" + n, ident("z" + n), lit(10))]),
                                            init: lit(0) }));
 
 testVarPatternCombinations(function(n) ("[x" + n + "," + "y" + n + "," + "z" + n + "] = 0"),
-                           function(n) ({ id: arrPatt([ident("x" + n), ident("y" + n), ident("z" + n)]),
+                           function(n) ({ id: arrPatt([assignElem("x" + n), assignElem("y" + n), assignElem("z" + n)]),
                                           init: lit(0) }));
 
+testVarPatternCombinations(function(n) ("[a" + n + ", ..." + "b" + n + "] = 0"),
+                           function(n) ({ id: arrPatt([assignElem("a" + n), spread(ident("b" + n))]),
+                                          init: lit(0) }));
+
+testVarPatternCombinations(function(n) ("[a" + n + ", " + "b" + n + " = 10] = 0"),
+                           function(n) ({ id: arrPatt([assignElem("a" + n), assignElem("b" + n, lit(10))]),
+                                          init: lit(0) }));
 // destructuring assignment
 
 function testAssignmentCombinations(makePattSrc, makePattPatt) {
@@ -636,18 +796,18 @@ function testAssignmentCombinations(makePattSrc, makePattPatt) {
 
 testAssignmentCombinations(function (n) ("{a" + n + ":x" + n + "," + "b" + n + ":y" + n + "," + "c" + n + ":z" + n + "} = 0"),
                            function (n) (aExpr("=",
-                                               objPatt([{ key: ident("a" + n), value: ident("x" + n) },
-                                                        { key: ident("b" + n), value: ident("y" + n) },
-                                                        { key: ident("c" + n), value: ident("z" + n) }]),
+                                               objPatt([assignProp("a" + n, ident("x" + n)),
+                                                        assignProp("b" + n, ident("y" + n)),
+                                                        assignProp("c" + n, ident("z" + n))]),
                                                lit(0))));
 
 
 // destructuring in for-in and for-each-in loop heads
 
-var axbycz = objPatt([{ key: ident("a"), value: ident("x") },
-                      { key: ident("b"), value: ident("y") },
-                      { key: ident("c"), value: ident("z") }]);
-var xyz = arrPatt([ident("x"), ident("y"), ident("z")]);
+var axbycz = objPatt([assignProp("a", ident("x")),
+                      assignProp("b", ident("y")),
+                      assignProp("c", ident("z"))]);
+var xyz = arrPatt([assignElem("x"), assignElem("y"), assignElem("z")]);
 
 assertStmt("for (var {a:x,b:y,c:z} in foo);", forInStmt(varDecl([{ id: axbycz, init: null }]), ident("foo"), emptyStmt));
 assertStmt("for (let {a:x,b:y,c:z} in foo);", forInStmt(letDecl([{ id: axbycz, init: null }]), ident("foo"), emptyStmt));
@@ -719,114 +879,204 @@ assertExpr("({ set x(v) { return 42 } })",
 // comprehensions
 
 assertExpr("[ x         for (x in foo)]",
-           compExpr(ident("x"), [compBlock(ident("x"), ident("foo"))], null));
+           compExpr(ident("x"), [compBlock(ident("x"), ident("foo"))], null, "legacy"));
 assertExpr("[ [x,y]     for (x in foo) for (y in bar)]",
-           compExpr(arrExpr([ident("x"), ident("y")]), [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar"))], null));
+           compExpr(arrExpr([ident("x"), ident("y")]), [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar"))], null, "legacy"));
 assertExpr("[ [x,y,z] for (x in foo) for (y in bar) for (z in baz)]",
            compExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
                     [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar")), compBlock(ident("z"), ident("baz"))],
-                    null));
+                    null,
+                    "legacy"));
 
 assertExpr("[ x         for (x in foo) if (p)]",
-           compExpr(ident("x"), [compBlock(ident("x"), ident("foo"))], ident("p")));
+           compExpr(ident("x"), [compBlock(ident("x"), ident("foo"))], ident("p"), "legacy"));
 assertExpr("[ [x,y]     for (x in foo) for (y in bar) if (p)]",
-           compExpr(arrExpr([ident("x"), ident("y")]), [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar"))], ident("p")));
+           compExpr(arrExpr([ident("x"), ident("y")]), [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar"))], ident("p"), "legacy"));
 assertExpr("[ [x,y,z] for (x in foo) for (y in bar) for (z in baz) if (p) ]",
            compExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
                     [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar")), compBlock(ident("z"), ident("baz"))],
-                    ident("p")));
+                    ident("p"),
+                    "legacy"));
 
 assertExpr("[ x         for each (x in foo)]",
-           compExpr(ident("x"), [compEachBlock(ident("x"), ident("foo"))], null));
+           compExpr(ident("x"), [compEachBlock(ident("x"), ident("foo"))], null, "legacy"));
 assertExpr("[ [x,y]     for each (x in foo) for each (y in bar)]",
-           compExpr(arrExpr([ident("x"), ident("y")]), [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar"))], null));
+           compExpr(arrExpr([ident("x"), ident("y")]), [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar"))], null, "legacy"));
 assertExpr("[ [x,y,z] for each (x in foo) for each (y in bar) for each (z in baz)]",
            compExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
                     [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar")), compEachBlock(ident("z"), ident("baz"))],
-                    null));
+                    null,
+                    "legacy"));
 
 assertExpr("[ x         for each (x in foo) if (p)]",
-           compExpr(ident("x"), [compEachBlock(ident("x"), ident("foo"))], ident("p")));
+           compExpr(ident("x"), [compEachBlock(ident("x"), ident("foo"))], ident("p"), "legacy"));
 assertExpr("[ [x,y]     for each (x in foo) for each (y in bar) if (p)]",
-           compExpr(arrExpr([ident("x"), ident("y")]), [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar"))], ident("p")));
+           compExpr(arrExpr([ident("x"), ident("y")]), [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar"))], ident("p"), "legacy"));
 assertExpr("[ [x,y,z] for each (x in foo) for each (y in bar) for each (z in baz) if (p) ]",
            compExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
                     [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar")), compEachBlock(ident("z"), ident("baz"))],
-                    ident("p")));
+                    ident("p"),
+                    "legacy"));
 
-assertExpr("[ x         for (x of foo)]",
-           compExpr(ident("x"), [compOfBlock(ident("x"), ident("foo"))], null));
-assertExpr("[ [x,y]     for (x of foo) for (y of bar)]",
-           compExpr(arrExpr([ident("x"), ident("y")]), [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar"))], null));
-assertExpr("[ [x,y,z] for (x of foo) for (y of bar) for (z of baz)]",
-           compExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
-                    [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar")), compOfBlock(ident("z"), ident("baz"))],
-                    null));
+// Comprehension expressions using for-of can be written in two different styles.
+function assertLegacyAndModernArrayComp(expr, body, blocks, filter) {
+    assertExpr(expr, compExpr(body, blocks, filter, "legacy"));
 
-assertExpr("[ x         for (x of foo) if (p)]",
-           compExpr(ident("x"), [compOfBlock(ident("x"), ident("foo"))], ident("p")));
-assertExpr("[ [x,y]     for (x of foo) for (y of bar) if (p)]",
-           compExpr(arrExpr([ident("x"), ident("y")]), [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar"))], ident("p")));
-assertExpr("[ [x,y,z] for (x of foo) for (y of bar) for (z of baz) if (p) ]",
-           compExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
-                    [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar")), compOfBlock(ident("z"), ident("baz"))],
-                    ident("p")));
+    // Transform the legacy comprehension to a modern comprehension and test it
+    // that way too.
+    let match = expr.match(/^\[(.*?) for (.*)\]$/);
+    assertEq(match !== null, true);
+    let expr2 = "[for " + match[2] + " " + match[1] + "]";
+    assertExpr(expr2, compExpr(body, blocks, filter, "modern"));
+}
+
+assertLegacyAndModernArrayComp("[ x         for (x of foo)]",
+                               ident("x"), [compOfBlock(ident("x"), ident("foo"))], null);
+assertLegacyAndModernArrayComp("[ [x,y]     for (x of foo) for (y of bar)]",
+                               arrExpr([ident("x"), ident("y")]), [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar"))], null);
+assertLegacyAndModernArrayComp("[ [x,y,z] for (x of foo) for (y of bar) for (z of baz)]",
+                               arrExpr([ident("x"), ident("y"), ident("z")]),
+                               [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar")), compOfBlock(ident("z"), ident("baz"))],
+                               null);
+
+assertLegacyAndModernArrayComp("[ x         for (x of foo) if (p)]",
+                               ident("x"), [compOfBlock(ident("x"), ident("foo"))], ident("p"));
+assertLegacyAndModernArrayComp("[ [x,y]     for (x of foo) for (y of bar) if (p)]",
+                               arrExpr([ident("x"), ident("y")]), [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar"))], ident("p"));
+assertLegacyAndModernArrayComp("[ [x,y,z] for (x of foo) for (y of bar) for (z of baz) if (p) ]",
+                               arrExpr([ident("x"), ident("y"), ident("z")]),
+                               [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar")), compOfBlock(ident("z"), ident("baz"))],
+                               ident("p"));
+
+// Modern comprehensions with multiple ComprehensionIf.
+
+assertExpr("[for (x of foo) x]",
+           compExpr(ident("x"), [compOfBlock(ident("x"), ident("foo"))], null, "modern"));
+assertExpr("[for (x of foo) if (c1) x]",
+           compExpr(ident("x"), [compOfBlock(ident("x"), ident("foo")),
+                                 compIf(ident("c1"))], null, "modern"));
+assertExpr("[for (x of foo) if (c1) if (c2) x]",
+           compExpr(ident("x"), [compOfBlock(ident("x"), ident("foo")),
+                                 compIf(ident("c1")), compIf(ident("c2"))], null, "modern"));
+
+assertExpr("[for (x of foo) if (c1) for (y of bar) x]",
+           compExpr(ident("x"), [compOfBlock(ident("x"), ident("foo")),
+                                 compIf(ident("c1")),
+                                 compOfBlock(ident("y"), ident("bar"))], null, "modern"));
+assertExpr("[for (x of foo) if (c1) for (y of bar) if (c2) x]",
+           compExpr(ident("x"), [compOfBlock(ident("x"), ident("foo")),
+                                 compIf(ident("c1")),
+                                 compOfBlock(ident("y"), ident("bar")),
+                                 compIf(ident("c2"))], null, "modern"));
+assertExpr("[for (x of foo) if (c1) if (c2) for (y of bar) if (c3) if (c4) x]",
+           compExpr(ident("x"), [compOfBlock(ident("x"), ident("foo")),
+                                 compIf(ident("c1")), compIf(ident("c2")),
+                                 compOfBlock(ident("y"), ident("bar")),
+                                 compIf(ident("c3")), compIf(ident("c4"))], null, "modern"));
+
+assertExpr("[for (x of y) if (false) for (z of w) if (0) x]",
+           compExpr(ident("x"), [compOfBlock(ident("x"), ident("y")),
+                                 compIf(lit(false)),
+                                 compOfBlock(ident("z"), ident("w")),
+                                 compIf(lit(0))], null, "modern"));
 
 // generator expressions
 
 assertExpr("( x         for (x in foo))",
-           genExpr(ident("x"), [compBlock(ident("x"), ident("foo"))], null));
+           genExpr(ident("x"), [compBlock(ident("x"), ident("foo"))], null, "legacy"));
 assertExpr("( [x,y]     for (x in foo) for (y in bar))",
-           genExpr(arrExpr([ident("x"), ident("y")]), [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar"))], null));
+           genExpr(arrExpr([ident("x"), ident("y")]), [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar"))], null, "legacy"));
 assertExpr("( [x,y,z] for (x in foo) for (y in bar) for (z in baz))",
            genExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
                    [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar")), compBlock(ident("z"), ident("baz"))],
-                   null));
+                   null,
+                   "legacy"));
 
 assertExpr("( x         for (x in foo) if (p))",
-           genExpr(ident("x"), [compBlock(ident("x"), ident("foo"))], ident("p")));
+           genExpr(ident("x"), [compBlock(ident("x"), ident("foo"))], ident("p"), "legacy"));
 assertExpr("( [x,y]     for (x in foo) for (y in bar) if (p))",
-           genExpr(arrExpr([ident("x"), ident("y")]), [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar"))], ident("p")));
+           genExpr(arrExpr([ident("x"), ident("y")]), [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar"))], ident("p"), "legacy"));
 assertExpr("( [x,y,z] for (x in foo) for (y in bar) for (z in baz) if (p) )",
            genExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
                    [compBlock(ident("x"), ident("foo")), compBlock(ident("y"), ident("bar")), compBlock(ident("z"), ident("baz"))],
-                   ident("p")));
+                   ident("p"),
+                   "legacy"));
 
 assertExpr("( x         for each (x in foo))",
-           genExpr(ident("x"), [compEachBlock(ident("x"), ident("foo"))], null));
+           genExpr(ident("x"), [compEachBlock(ident("x"), ident("foo"))], null, "legacy"));
 assertExpr("( [x,y]     for each (x in foo) for each (y in bar))",
-           genExpr(arrExpr([ident("x"), ident("y")]), [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar"))], null));
+           genExpr(arrExpr([ident("x"), ident("y")]), [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar"))], null, "legacy"));
 assertExpr("( [x,y,z] for each (x in foo) for each (y in bar) for each (z in baz))",
            genExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
                    [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar")), compEachBlock(ident("z"), ident("baz"))],
-                   null));
+                   null,
+                   "legacy"));
 
 assertExpr("( x         for each (x in foo) if (p))",
-           genExpr(ident("x"), [compEachBlock(ident("x"), ident("foo"))], ident("p")));
+           genExpr(ident("x"), [compEachBlock(ident("x"), ident("foo"))], ident("p"), "legacy"));
 assertExpr("( [x,y]     for each (x in foo) for each (y in bar) if (p))",
-           genExpr(arrExpr([ident("x"), ident("y")]), [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar"))], ident("p")));
+           genExpr(arrExpr([ident("x"), ident("y")]), [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar"))], ident("p"), "legacy"));
 assertExpr("( [x,y,z] for each (x in foo) for each (y in bar) for each (z in baz) if (p) )",
            genExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
                    [compEachBlock(ident("x"), ident("foo")), compEachBlock(ident("y"), ident("bar")), compEachBlock(ident("z"), ident("baz"))],
-                   ident("p")));
+                   ident("p"),
+                   "legacy"));
 
-assertExpr("( x         for (x of foo))",
-           genExpr(ident("x"), [compOfBlock(ident("x"), ident("foo"))], null));
-assertExpr("( [x,y]     for (x of foo) for (y of bar))",
-           genExpr(arrExpr([ident("x"), ident("y")]), [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar"))], null));
-assertExpr("( [x,y,z] for (x of foo) for (y of bar) for (z of baz))",
-           genExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
-                   [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar")), compOfBlock(ident("z"), ident("baz"))],
-                   null));
+// Generator expressions using for-of can be written in two different styles.
+function assertLegacyAndModernGenExpr(expr, body, blocks, filter) {
+    assertExpr(expr, genExpr(body, blocks, filter, "legacy"));
 
-assertExpr("( x         for (x of foo) if (p))",
-           genExpr(ident("x"), [compOfBlock(ident("x"), ident("foo"))], ident("p")));
-assertExpr("( [x,y]     for (x of foo) for (y of bar) if (p))",
-           genExpr(arrExpr([ident("x"), ident("y")]), [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar"))], ident("p")));
-assertExpr("( [x,y,z] for (x of foo) for (y of bar) for (z of baz) if (p) )",
-           genExpr(arrExpr([ident("x"), ident("y"), ident("z")]),
-                   [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar")), compOfBlock(ident("z"), ident("baz"))],
-                   ident("p")));
+    // Transform the legacy genexpr to a modern genexpr and test it that way
+    // too.
+    let match = expr.match(/^\((.*?) for (.*)\)$/);
+    assertEq(match !== null, true);
+    let expr2 = "(for " + match[2] + " " + match[1] + ")";
+    assertExpr(expr2, genExpr(body, blocks, filter, "modern"));
+}
+
+assertLegacyAndModernGenExpr("( x         for (x of foo))",
+                             ident("x"), [compOfBlock(ident("x"), ident("foo"))], null);
+assertLegacyAndModernGenExpr("( [x,y]     for (x of foo) for (y of bar))",
+                             arrExpr([ident("x"), ident("y")]), [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar"))], null);
+assertLegacyAndModernGenExpr("( [x,y,z] for (x of foo) for (y of bar) for (z of baz))",
+                             arrExpr([ident("x"), ident("y"), ident("z")]),
+                             [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar")), compOfBlock(ident("z"), ident("baz"))],
+                             null);
+
+assertLegacyAndModernGenExpr("( x         for (x of foo) if (p))",
+                             ident("x"), [compOfBlock(ident("x"), ident("foo"))], ident("p"));
+assertLegacyAndModernGenExpr("( [x,y]     for (x of foo) for (y of bar) if (p))",
+                             arrExpr([ident("x"), ident("y")]), [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar"))], ident("p"));
+assertLegacyAndModernGenExpr("( [x,y,z] for (x of foo) for (y of bar) for (z of baz) if (p) )",
+                             arrExpr([ident("x"), ident("y"), ident("z")]),
+                             [compOfBlock(ident("x"), ident("foo")), compOfBlock(ident("y"), ident("bar")), compOfBlock(ident("z"), ident("baz"))],
+                             ident("p"));
+
+// Modern generator comprehension with multiple ComprehensionIf.
+
+assertExpr("(for (x of foo) x)",
+           genExpr(ident("x"), [compOfBlock(ident("x"), ident("foo"))], null, "modern"));
+assertExpr("(for (x of foo) if (c1) x)",
+           genExpr(ident("x"), [compOfBlock(ident("x"), ident("foo")),
+                                compIf(ident("c1"))], null, "modern"));
+assertExpr("(for (x of foo) if (c1) if (c2) x)",
+           genExpr(ident("x"), [compOfBlock(ident("x"), ident("foo")),
+                                compIf(ident("c1")), compIf(ident("c2"))], null, "modern"));
+
+assertExpr("(for (x of foo) if (c1) for (y of bar) x)",
+           genExpr(ident("x"), [compOfBlock(ident("x"), ident("foo")),
+                                compIf(ident("c1")),
+                                compOfBlock(ident("y"), ident("bar"))], null, "modern"));
+assertExpr("(for (x of foo) if (c1) for (y of bar) if (c2) x)",
+           genExpr(ident("x"), [compOfBlock(ident("x"), ident("foo")),
+                                compIf(ident("c1")),
+                                compOfBlock(ident("y"), ident("bar")),
+                                compIf(ident("c2"))], null, "modern"));
+assertExpr("(for (x of foo) if (c1) if (c2) for (y of bar) if (c3) if (c4) x)",
+           genExpr(ident("x"), [compOfBlock(ident("x"), ident("foo")),
+                                compIf(ident("c1")), compIf(ident("c2")),
+                                compOfBlock(ident("y"), ident("bar")),
+                                compIf(ident("c3")), compIf(ident("c4"))], null, "modern"));
 
 // NOTE: it would be good to test generator expressions both with and without upvars, just like functions above.
 
@@ -937,7 +1187,7 @@ assertGlobalStmt("for (;;) continue", forStmt(null, null, null, 15), { continueS
 
 assertBlockDecl("var x", "var", { variableDeclaration: function(kind) kind });
 assertBlockDecl("let x", "let", { variableDeclaration: function(kind) kind });
-assertBlockDecl("const x", "const", { variableDeclaration: function(kind) kind });
+assertBlockDecl("const x = undefined", "const", { variableDeclaration: function(kind) kind });
 assertBlockDecl("function f() { }", "function", { functionDeclaration: function() "function" });
 
 assertGlobalExpr("(x,y,z)", 1, { sequenceExpression: function() 1 });
@@ -966,7 +1216,9 @@ assertGlobalStmt("try { } catch (e) { }", tryStmt(blockStmt([]), [], 2, null), {
 assertGlobalStmt("try { } catch (e if e instanceof A) { } catch (e if e instanceof B) { }",
                  tryStmt(blockStmt([]), [2, 2], null, null),
                  { catchClause: function() 2 });
-assertGlobalExpr("[x for (y in z) for (x in y)]", compExpr(ident("x"), [3, 3], null), { comprehensionBlock: function() 3 });
+assertGlobalExpr("[x for (y in z) for (x in y)]",
+                 compExpr(ident("x"), [3, 3], null, "legacy"),
+                 { comprehensionBlock: function() 3 });
 
 assertGlobalExpr("({ x: y } = z)", aExpr("=", 1, ident("z")), { objectPattern: function() 1 });
 assertGlobalExpr("({ x: y } = z)", aExpr("=", objPatt([2]), ident("z")), { propertyPattern: function() 2 });
@@ -981,13 +1233,6 @@ try {
 }
 if (!thrown)
     throw new Error("builder exception not propagated");
-
-// Missing property RHS's in an object literal should throw.
-try {
-    Reflect.parse("({foo})");
-    throw new Error("object literal missing property RHS didn't throw");
-} catch (e if e instanceof SyntaxError) { }
-
 
 // A simple proof-of-concept that the builder API can be used to generate other
 // formats, such as JsonMLAst:
@@ -1111,6 +1356,14 @@ return {
     },
     thisExpression: function() {
         return ["ThisExpr", {}];
+    },
+    templateLiteral: function(elts) {
+        for (var i = 0; i < elts.length; i++) {
+            if (!elts[i])
+                elts[i] = ["Empty"];
+        }
+        elts.unshift("TemplateLit", {});
+        return elts;
     },
 
     graphExpression: reject,

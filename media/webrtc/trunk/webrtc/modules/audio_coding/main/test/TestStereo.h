@@ -8,15 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TEST_STEREO_H_
-#define WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TEST_STEREO_H_
+#ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TESTSTEREO_H_
+#define WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TESTSTEREO_H_
 
 #include <math.h>
 
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
-#include "ACMTest.h"
-#include "Channel.h"
-#include "PCMFile.h"
+#include "webrtc/modules/audio_coding/main/test/ACMTest.h"
+#include "webrtc/modules/audio_coding/main/test/Channel.h"
+#include "webrtc/modules/audio_coding/main/test/PCMFile.h"
 
 namespace webrtc {
 
@@ -33,12 +33,13 @@ class TestPackStereo : public AudioPacketizationCallback {
 
   void RegisterReceiverACM(AudioCodingModule* acm);
 
-  virtual int32_t SendData(const FrameType frame_type,
-                           const uint8_t payload_type,
-                           const uint32_t timestamp,
-                           const uint8_t* payload_data,
-                           const uint16_t payload_size,
-                           const RTPFragmentationHeader* fragmentation);
+  virtual int32_t SendData(
+      const FrameType frame_type,
+      const uint8_t payload_type,
+      const uint32_t timestamp,
+      const uint8_t* payload_data,
+      const uint16_t payload_size,
+      const RTPFragmentationHeader* fragmentation) OVERRIDE;
 
   uint16_t payload_size();
   uint32_t timestamp_diff();
@@ -52,7 +53,7 @@ class TestPackStereo : public AudioPacketizationCallback {
   uint32_t timestamp_diff_;
   uint32_t last_in_timestamp_;
   uint64_t total_bytes_;
-  uint16_t payload_size_;
+  int payload_size_;
   StereoMonoMode codec_mode_;
   // Simulate packet losses
   bool lost_packet_;
@@ -60,10 +61,10 @@ class TestPackStereo : public AudioPacketizationCallback {
 
 class TestStereo : public ACMTest {
  public:
-  TestStereo(int test_mode);
+  explicit TestStereo(int test_mode);
   ~TestStereo();
 
-  void Perform();
+  virtual void Perform() OVERRIDE;
  private:
   // The default value of '-1' indicates that the registration is based only on
   // codec name and a sampling frequncy matching is not required. This is useful
@@ -114,4 +115,4 @@ class TestStereo : public ACMTest {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TEST_STEREO_H_
+#endif  // WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TESTSTEREO_H_

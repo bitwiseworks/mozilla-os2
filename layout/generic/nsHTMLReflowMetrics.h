@@ -14,7 +14,7 @@
 
 //----------------------------------------------------------------------
 
-class nsHTMLReflowState;
+struct nsHTMLReflowState;
 
 // Option flags
 #define NS_REFLOW_CALC_BOUNDING_METRICS  0x0001
@@ -204,7 +204,7 @@ public:
   // XXX width/height/ascent are OUT parameters and so they shouldn't
   // have to be initialized, but there are some bad frame classes that
   // aren't properly setting them when returning from Reflow()...
-  nsHTMLReflowMetrics(mozilla::WritingMode aWritingMode, uint32_t aFlags = 0)
+  explicit nsHTMLReflowMetrics(mozilla::WritingMode aWritingMode, uint32_t aFlags = 0)
     : mISize(0)
     , mBSize(0)
     , mBlockStartAscent(ASK_FOR_BASELINE)
@@ -212,17 +212,48 @@ public:
     , mWritingMode(aWritingMode)
   {}
 
-  nsHTMLReflowMetrics(const nsHTMLReflowState& aState, uint32_t aFlags = 0);
+  explicit nsHTMLReflowMetrics(const nsHTMLReflowState& aState, uint32_t aFlags = 0);
 
   // ISize and BSize are logical-coordinate dimensions:
   // ISize is the size in the writing mode's inline direction (which equates to
   // width in horizontal writing modes, height in vertical ones), and BSize is
   // the size in the block-progression direction.
-  nscoord ISize() const { return mISize; }
-  nscoord BSize() const { return mBSize; }
+  nscoord ISize(mozilla::WritingMode aWritingMode) const {
+    CHECK_WRITING_MODE(aWritingMode);
+    return mISize;
+  }
+  nscoord BSize(mozilla::WritingMode aWritingMode) const {
+    CHECK_WRITING_MODE(aWritingMode);
+    return mBSize;
+  }
+  mozilla::LogicalSize Size(mozilla::WritingMode aWritingMode) const {
+    CHECK_WRITING_MODE(aWritingMode);
+    return mozilla::LogicalSize(aWritingMode, mISize, mBSize);
+  }
 
-  nscoord& ISize() { return mISize; }
-  nscoord& BSize() { return mBSize; }
+  nscoord& ISize(mozilla::WritingMode aWritingMode) {
+    CHECK_WRITING_MODE(aWritingMode);
+    return mISize;
+  }
+  nscoord& BSize(mozilla::WritingMode aWritingMode) {
+    CHECK_WRITING_MODE(aWritingMode);
+    return mBSize;
+  }
+
+  // Set inline and block size from a LogicalSize, converting to our
+  // writing mode as necessary.
+  void SetSize(mozilla::WritingMode aWM, mozilla::LogicalSize aSize)
+  {
+    mozilla::LogicalSize convertedSize = aSize.ConvertTo(mWritingMode, aWM);
+    mBSize = convertedSize.BSize(mWritingMode);
+    mISize = convertedSize.ISize(mWritingMode);
+  }
+
+  // Set both inline and block size to zero -- no need for a writing mode!
+  void ClearSize()
+  {
+    mISize = mBSize = 0;
+  }
 
   // Width and Height are physical dimensions, independent of writing mode.
   // Accessing these is slightly more expensive than accessing the logical
@@ -232,49 +263,17 @@ public:
   nscoord Height() const { return mWritingMode.IsVertical() ? mISize : mBSize; }
 
   // It's only meaningful to consider "ascent" on the block-start side of the
-  // frame; asking for the "ascent" on any other side will just return zero.
-  nscoord TopAscent() const
+  // frame, so no need to pass a writing mode argument
+  nscoord BlockStartAscent() const
   {
-    return mWritingMode.IsVertical() ? 0 : mBlockStartAscent;
-  }
-  nscoord LeftAscent() const
-  {
-    return mWritingMode.IsVertical() && mWritingMode.IsVerticalLR() ?
-           mBlockStartAscent : 0;
-  }
-  nscoord RightAscent() const
-  {
-    return mWritingMode.IsVertical() && !mWritingMode.IsVerticalLR() ?
-           mBlockStartAscent : 0;
+    return mBlockStartAscent;
   }
 
   nscoord& Width() { return mWritingMode.IsVertical() ? mBSize : mISize; }
   nscoord& Height() { return mWritingMode.IsVertical() ? mISize : mBSize; }
 
-  // To set the ascent value, we must be sure we're working with the correct
-  // writing mode, so either pass it to the logical setter...
-  void SetBlockStartAscent(mozilla::WritingMode aWritingMode, nscoord aAscent)
+  void SetBlockStartAscent(nscoord aAscent)
   {
-    NS_ASSERTION(aWritingMode == mWritingMode, "writing mode mismatch");
-    mBlockStartAscent = aAscent;
-  }
-  // ...or call the appropriate physical setter (these will probably be removed
-  // eventually).
-  void SetTopAscent(nscoord aAscent)
-  {
-    NS_ASSERTION(!mWritingMode.IsVertical(), "writing mode mismatch");
-    mBlockStartAscent = aAscent;
-  }
-  void SetLeftAscent(nscoord aAscent)
-  {
-    NS_ASSERTION(mWritingMode.IsVertical() && mWritingMode.IsVerticalLR(),
-                 "writing mode mismatch");
-    mBlockStartAscent = aAscent;
-  }
-  void SetRightAscent(nscoord aAscent)
-  {
-    NS_ASSERTION(mWritingMode.IsVertical() && !mWritingMode.IsVerticalLR(),
-                 "writing mode mismatch");
     mBlockStartAscent = aAscent;
   }
 
@@ -288,9 +287,9 @@ public:
   // of the base and the text of the superscript.
   nsBoundingMetrics mBoundingMetrics;  // [OUT]
 
-  // Carried out bottom margin values. This is the collapsed
-  // (generational) bottom margin value.
-  nsCollapsingMargin mCarriedOutBottomMargin;
+  // Carried out block-end margin values. This is the collapsed
+  // (generational) block-end margin value.
+  nsCollapsingMargin mCarriedOutBEndMargin;
 
   // For frames that have content that overflow their content area
   // (HasOverflowAreas() is true) these rectangles represent the total

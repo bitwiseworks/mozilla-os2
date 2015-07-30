@@ -10,6 +10,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.concurrent.SynchronousQueue;
 
+import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.gfx.InputConnectionHandler;
 import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.GamepadUtils;
@@ -18,7 +19,6 @@ import org.mozilla.gecko.util.ThreadUtils.AssertBehavior;
 
 import android.R;
 import android.content.Context;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -250,7 +250,7 @@ class GeckoInputConnection
     @Override
     public synchronized boolean beginBatchEdit() {
         mBatchEditCount++;
-        mEditableClient.setUpdateGecko(false);
+        mEditableClient.setUpdateGecko(false, false);
         return true;
     }
 
@@ -259,6 +259,10 @@ class GeckoInputConnection
         if (mBatchEditCount > 0) {
             mBatchEditCount--;
             if (mBatchEditCount == 0) {
+                // Force Gecko update for cancelled auto-correction of single-
+                // character words to prevent character duplication. (bug 1133802)
+                boolean forceUpdate = !mBatchTextChanged && !mBatchSelectionChanged;
+
                 if (mBatchTextChanged) {
                     notifyTextChange();
                     mBatchTextChanged = false;
@@ -269,7 +273,7 @@ class GeckoInputConnection
                                            Selection.getSelectionEnd(editable));
                     mBatchSelectionChanged = false;
                 }
-                mEditableClient.setUpdateGecko(true);
+                mEditableClient.setUpdateGecko(true, forceUpdate);
             }
         } else {
             Log.w(LOGTAG, "endBatchEdit() called, but mBatchEditCount == 0?!");
@@ -430,7 +434,7 @@ class GeckoInputConnection
     }
 
     @Override
-    public void onTextChange(String text, int start, int oldEnd, int newEnd) {
+    public void onTextChange(CharSequence text, int start, int oldEnd, int newEnd) {
 
         if (mUpdateRequest == null) {
             // Android always expects selection updates when not in extracted mode;
@@ -517,7 +521,8 @@ class GeckoInputConnection
                     GeckoInputConnection.class.notify();
                 }
                 Looper.loop();
-                sBackgroundHandler = null;
+                // We should never be exiting the thread loop.
+                throw new IllegalThreadStateException("unreachable code");
             }
         }, LOGTAG);
         backgroundThread.setDaemon(true);
@@ -562,11 +567,7 @@ class GeckoInputConnection
         if (!canReturnCustomHandler()) {
             return defHandler;
         }
-        // getBackgroundHandler() is synchronized and requires locking,
-        // but if we already have our handler, we don't have to lock
-        final Handler newHandler = sBackgroundHandler != null
-                                 ? sBackgroundHandler
-                                 : getBackgroundHandler();
+        final Handler newHandler = getBackgroundHandler();
         if (mEditableClient.setInputConnectionHandler(newHandler)) {
             return newHandler;
         }
@@ -625,9 +626,12 @@ class GeckoInputConnection
                 outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS;
             else if (mIMEModeHint.equalsIgnoreCase("titlecase"))
                 outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_WORDS;
+            else if (mIMETypeHint.equalsIgnoreCase("text") &&
+                    !mIMEModeHint.equalsIgnoreCase("autocapitalized"))
+                outAttrs.inputType |= InputType.TYPE_TEXT_VARIATION_NORMAL;
             else if (!mIMEModeHint.equalsIgnoreCase("lowercase"))
                 outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
-            // auto-capitalized mode is the default
+            // auto-capitalized mode is the default for types other than text
         }
 
         if (mIMEActionHint.equalsIgnoreCase("go"))
@@ -953,10 +957,10 @@ class GeckoInputConnection
         if (typeHint != null &&
             (typeHint.equalsIgnoreCase("date") ||
              typeHint.equalsIgnoreCase("time") ||
-             (Build.VERSION.SDK_INT >= 11 && (typeHint.equalsIgnoreCase("datetime") ||
-                                              typeHint.equalsIgnoreCase("month") ||
-                                              typeHint.equalsIgnoreCase("week") ||
-                                              typeHint.equalsIgnoreCase("datetime-local"))))) {
+             (Versions.feature11Plus && (typeHint.equalsIgnoreCase("datetime") ||
+                                         typeHint.equalsIgnoreCase("month") ||
+                                         typeHint.equalsIgnoreCase("week") ||
+                                         typeHint.equalsIgnoreCase("datetime-local"))))) {
             state = IME_STATE_DISABLED;
         }
 
@@ -1000,7 +1004,7 @@ final class DebugGeckoInputConnection
         implements InvocationHandler {
 
     private InputConnection mProxy;
-    private StringBuilder mCallLevel;
+    private final StringBuilder mCallLevel;
 
     private DebugGeckoInputConnection(View targetView,
                                       GeckoEditableClient editable) {
@@ -1010,7 +1014,7 @@ final class DebugGeckoInputConnection
 
     public static GeckoEditableListener create(View targetView,
                                                GeckoEditableClient editable) {
-        final Class[] PROXY_INTERFACES = { InputConnection.class,
+        final Class<?>[] PROXY_INTERFACES = { InputConnection.class,
                 InputConnectionHandler.class,
                 GeckoEditableListener.class };
         DebugGeckoInputConnection dgic =
@@ -1027,21 +1031,23 @@ final class DebugGeckoInputConnection
 
         StringBuilder log = new StringBuilder(mCallLevel);
         log.append("> ").append(method.getName()).append("(");
-        for (Object arg : args) {
-            // translate argument values to constant names
-            if ("notifyIME".equals(method.getName()) && arg == args[0]) {
-                log.append(GeckoEditable.getConstantName(
-                    GeckoEditableListener.class, "NOTIFY_IME_", arg));
-            } else if ("notifyIMEContext".equals(method.getName()) && arg == args[0]) {
-                log.append(GeckoEditable.getConstantName(
-                    GeckoEditableListener.class, "IME_STATE_", arg));
-            } else {
-                GeckoEditable.debugAppend(log, arg);
+        if (args != null) {
+            for (Object arg : args) {
+                // translate argument values to constant names
+                if ("notifyIME".equals(method.getName()) && arg == args[0]) {
+                    log.append(GeckoEditable.getConstantName(
+                        GeckoEditableListener.class, "NOTIFY_IME_", arg));
+                } else if ("notifyIMEContext".equals(method.getName()) && arg == args[0]) {
+                    log.append(GeckoEditable.getConstantName(
+                        GeckoEditableListener.class, "IME_STATE_", arg));
+                } else {
+                    GeckoEditable.debugAppend(log, arg);
+                }
+                log.append(", ");
             }
-            log.append(", ");
-        }
-        if (args.length > 0) {
-            log.setLength(log.length() - 2);
+            if (args.length > 0) {
+                log.setLength(log.length() - 2);
+            }
         }
         log.append(")");
         Log.d(LOGTAG, log.toString());

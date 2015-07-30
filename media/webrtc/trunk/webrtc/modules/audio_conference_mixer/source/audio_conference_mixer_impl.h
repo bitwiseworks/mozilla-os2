@@ -11,6 +11,7 @@
 #ifndef WEBRTC_MODULES_AUDIO_CONFERENCE_MIXER_SOURCE_AUDIO_CONFERENCE_MIXER_IMPL_H_
 #define WEBRTC_MODULES_AUDIO_CONFERENCE_MIXER_SOURCE_AUDIO_CONFERENCE_MIXER_IMPL_H_
 
+#include <list>
 #include <map>
 
 #include "webrtc/engine_configurations.h"
@@ -19,12 +20,14 @@
 #include "webrtc/modules/audio_conference_mixer/source/memory_pool.h"
 #include "webrtc/modules/audio_conference_mixer/source/time_scheduler.h"
 #include "webrtc/modules/interface/module_common_types.h"
-#include "webrtc/system_wrappers/interface/list_wrapper.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 class AudioProcessing;
 class CriticalSectionWrapper;
+
+typedef std::list<AudioFrame*> AudioFrameList;
+typedef std::list<MixerParticipant*> MixerParticipantList;
 
 // Cheshire cat implementation of MixerParticipant's non virtual functions.
 class MixHistory
@@ -61,37 +64,33 @@ public:
     bool Init();
 
     // Module functions
-    virtual int32_t ChangeUniqueId(const int32_t id);
-    virtual int32_t TimeUntilNextProcess();
-    virtual int32_t Process();
+    virtual int32_t ChangeUniqueId(const int32_t id) OVERRIDE;
+    virtual int32_t TimeUntilNextProcess() OVERRIDE;
+    virtual int32_t Process() OVERRIDE;
 
     // AudioConferenceMixer functions
     virtual int32_t RegisterMixedStreamCallback(
-        AudioMixerOutputReceiver& mixReceiver);
-    virtual int32_t UnRegisterMixedStreamCallback();
+        AudioMixerOutputReceiver& mixReceiver) OVERRIDE;
+    virtual int32_t UnRegisterMixedStreamCallback() OVERRIDE;
     virtual int32_t RegisterMixerStatusCallback(
         AudioMixerStatusReceiver& mixerStatusCallback,
-        const uint32_t amountOf10MsBetweenCallbacks);
-    virtual int32_t UnRegisterMixerStatusCallback();
+        const uint32_t amountOf10MsBetweenCallbacks) OVERRIDE;
+    virtual int32_t UnRegisterMixerStatusCallback() OVERRIDE;
     virtual int32_t SetMixabilityStatus(MixerParticipant& participant,
-                                        const bool mixable);
+                                        bool mixable) OVERRIDE;
     virtual int32_t MixabilityStatus(MixerParticipant& participant,
-                                     bool& mixable);
-    virtual int32_t SetMinimumMixingFrequency(Frequency freq);
+                                     bool& mixable) OVERRIDE;
+    virtual int32_t SetMinimumMixingFrequency(Frequency freq) OVERRIDE;
     virtual int32_t SetAnonymousMixabilityStatus(
-        MixerParticipant& participant, const bool mixable);
+        MixerParticipant& participant, const bool mixable) OVERRIDE;
     virtual int32_t AnonymousMixabilityStatus(
-        MixerParticipant& participant, bool& mixable);
+        MixerParticipant& participant, bool& mixable) OVERRIDE;
 private:
     enum{DEFAULT_AUDIO_FRAME_POOLSIZE = 50};
 
     // Set/get mix frequency
     int32_t SetOutputFrequency(const Frequency frequency);
     Frequency OutputFrequency() const;
-
-    // Must be called whenever an audio frame indicates the number of channels
-    // has changed.
-    bool SetNumLimiterChannels(int numChannels);
 
     // Fills mixList with the AudioFrames pointers that should be used when
     // mixing. Fills mixParticipantList with ParticipantStatistics for the
@@ -102,18 +101,18 @@ private:
     // used to be mixed but shouldn't be mixed any longer. These AudioFrames
     // should be ramped out over this AudioFrame to avoid audio discontinuities.
     void UpdateToMix(
-        ListWrapper& mixList,
-        ListWrapper& rampOutList,
+        AudioFrameList* mixList,
+        AudioFrameList* rampOutList,
         std::map<int, MixerParticipant*>* mixParticipantList,
-        uint32_t& maxAudioFrameCounter);
+        size_t& maxAudioFrameCounter);
 
     // Return the lowest mixing frequency that can be used without having to
     // downsample any audio.
     int32_t GetLowestMixingFrequency();
-    int32_t GetLowestMixingFrequencyFromList(ListWrapper& mixList);
+    int32_t GetLowestMixingFrequencyFromList(MixerParticipantList* mixList);
 
     // Return the AudioFrames that should be mixed anonymously.
-    void GetAdditionalAudio(ListWrapper& additionalFramesList);
+    void GetAdditionalAudio(AudioFrameList* additionalFramesList);
 
     // Update the MixHistory of all MixerParticipants. mixedParticipantsList
     // should contain a map of MixerParticipants that have been mixed.
@@ -121,44 +120,44 @@ private:
         std::map<int, MixerParticipant*>& mixedParticipantsList);
 
     // Clears audioFrameList and reclaims all memory associated with it.
-    void ClearAudioFrameList(ListWrapper& audioFrameList);
+    void ClearAudioFrameList(AudioFrameList* audioFrameList);
 
     // Update the list of MixerParticipants who have a positive VAD. mixList
     // should be a list of AudioFrames
     void UpdateVADPositiveParticipants(
-        ListWrapper& mixList);
+        AudioFrameList* mixList);
 
     // This function returns true if it finds the MixerParticipant in the
     // specified list of MixerParticipants.
     bool IsParticipantInList(
         MixerParticipant& participant,
-        ListWrapper& participantList);
+        MixerParticipantList* participantList) const;
 
     // Add/remove the MixerParticipant to the specified
     // MixerParticipant list.
     bool AddParticipantToList(
         MixerParticipant& participant,
-        ListWrapper& participantList);
+        MixerParticipantList* participantList);
     bool RemoveParticipantFromList(
         MixerParticipant& removeParticipant,
-        ListWrapper& participantList);
+        MixerParticipantList* participantList);
 
     // Mix the AudioFrames stored in audioFrameList into mixedAudio.
     int32_t MixFromList(
         AudioFrame& mixedAudio,
-        const ListWrapper& audioFrameList);
+        const AudioFrameList* audioFrameList);
     // Mix the AudioFrames stored in audioFrameList into mixedAudio. No
     // record will be kept of this mix (e.g. the corresponding MixerParticipants
     // will not be marked as IsMixed()
     int32_t MixAnonomouslyFromList(AudioFrame& mixedAudio,
-                                   const ListWrapper& audioFrameList);
+                                   const AudioFrameList* audioFrameList);
 
     bool LimitMixedAudio(AudioFrame& mixedAudio);
 
     // Scratch memory
     // Note that the scratch memory may only be touched in the scope of
     // Process().
-    uint32_t         _scratchParticipantsToMixAmount;
+    size_t         _scratchParticipantsToMixAmount;
     ParticipantStatistics  _scratchMixedParticipants[
         kMaximumAmountOfMixedParticipants];
     uint32_t         _scratchVadPositiveParticipantsAmount;
@@ -176,9 +175,9 @@ private:
     AudioMixerOutputReceiver* _mixReceiver;
 
     AudioMixerStatusReceiver* _mixerStatusCallback;
-    uint32_t            _amountOf10MsBetweenCallbacks;
-    uint32_t            _amountOf10MsUntilNextCallback;
-    bool                      _mixerStatusCb;
+    uint32_t _amountOf10MsBetweenCallbacks;
+    uint32_t _amountOf10MsUntilNextCallback;
+    bool _mixerStatusCb;
 
     // The current sample frequency and sample size when mixing.
     Frequency _outputFrequency;
@@ -188,10 +187,14 @@ private:
     MemoryPool<AudioFrame>* _audioFramePool;
 
     // List of all participants. Note all lists are disjunct
-    ListWrapper _participantList;              // May be mixed.
-    ListWrapper _additionalParticipantList;    // Always mixed, anonomously.
+    MixerParticipantList _participantList;              // May be mixed.
+    // Always mixed, anonomously.
+    MixerParticipantList _additionalParticipantList;
 
-    uint32_t _numMixedParticipants;
+    size_t _numMixedParticipants;
+    // Determines if we will use a limiter for clipping protection during
+    // mixing.
+    bool use_limiter_;
 
     uint32_t _timeStamp;
 

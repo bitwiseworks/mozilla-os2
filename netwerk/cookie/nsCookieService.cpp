@@ -8,11 +8,6 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Likely.h"
 
-#ifdef MOZ_LOGGING
-// this next define has to appear before the include of prlog.h
-#define FORCE_PR_LOG // Allow logging in the release build
-#endif
-
 #include "mozilla/net/CookieServiceChild.h"
 #include "mozilla/net/NeckoCommon.h"
 
@@ -357,12 +352,12 @@ LogSuccess(bool aSetCookie, nsIURI *aHostURI, const nsAFlatCString &aCookieStrin
 class DBListenerErrorHandler : public mozIStorageStatementCallback
 {
 protected:
-  DBListenerErrorHandler(DBState* dbState) : mDBState(dbState) { }
+  explicit DBListenerErrorHandler(DBState* dbState) : mDBState(dbState) { }
   nsRefPtr<DBState> mDBState;
   virtual const char *GetOpType() = 0;
 
 public:
-  NS_IMETHOD HandleError(mozIStorageError* aError)
+  NS_IMETHOD HandleError(mozIStorageError* aError) override
   {
     int32_t result = -1;
     aError->GetResult(&result);
@@ -387,21 +382,23 @@ public:
  * InsertCookieDBListener impl:
  * mozIStorageStatementCallback used to track asynchronous insertion operations.
  ******************************************************************************/
-class InsertCookieDBListener MOZ_FINAL : public DBListenerErrorHandler
+class InsertCookieDBListener final : public DBListenerErrorHandler
 {
-protected:
-  virtual const char *GetOpType() { return "INSERT"; }
+private:
+  virtual const char *GetOpType() override { return "INSERT"; }
+
+  ~InsertCookieDBListener() {}
 
 public:
   NS_DECL_ISUPPORTS
 
-  InsertCookieDBListener(DBState* dbState) : DBListenerErrorHandler(dbState) { }
-  NS_IMETHOD HandleResult(mozIStorageResultSet*)
+  explicit InsertCookieDBListener(DBState* dbState) : DBListenerErrorHandler(dbState) { }
+  NS_IMETHOD HandleResult(mozIStorageResultSet*) override
   {
     NS_NOTREACHED("Unexpected call to InsertCookieDBListener::HandleResult");
     return NS_OK;
   }
-  NS_IMETHOD HandleCompletion(uint16_t aReason)
+  NS_IMETHOD HandleCompletion(uint16_t aReason) override
   {
     // If we were rebuilding the db and we succeeded, make our corruptFlag say
     // so.
@@ -421,21 +418,23 @@ NS_IMPL_ISUPPORTS(InsertCookieDBListener, mozIStorageStatementCallback)
  * UpdateCookieDBListener impl:
  * mozIStorageStatementCallback used to track asynchronous update operations.
  ******************************************************************************/
-class UpdateCookieDBListener MOZ_FINAL : public DBListenerErrorHandler
+class UpdateCookieDBListener final : public DBListenerErrorHandler
 {
-protected:
-  virtual const char *GetOpType() { return "UPDATE"; }
+private:
+  virtual const char *GetOpType() override { return "UPDATE"; }
+
+  ~UpdateCookieDBListener() {}
 
 public:
   NS_DECL_ISUPPORTS
 
-  UpdateCookieDBListener(DBState* dbState) : DBListenerErrorHandler(dbState) { }
-  NS_IMETHOD HandleResult(mozIStorageResultSet*)
+  explicit UpdateCookieDBListener(DBState* dbState) : DBListenerErrorHandler(dbState) { }
+  NS_IMETHOD HandleResult(mozIStorageResultSet*) override
   {
     NS_NOTREACHED("Unexpected call to UpdateCookieDBListener::HandleResult");
     return NS_OK;
   }
-  NS_IMETHOD HandleCompletion(uint16_t aReason)
+  NS_IMETHOD HandleCompletion(uint16_t aReason) override
   {
     return NS_OK;
   }
@@ -447,21 +446,23 @@ NS_IMPL_ISUPPORTS(UpdateCookieDBListener, mozIStorageStatementCallback)
  * RemoveCookieDBListener impl:
  * mozIStorageStatementCallback used to track asynchronous removal operations.
  ******************************************************************************/
-class RemoveCookieDBListener MOZ_FINAL : public DBListenerErrorHandler
+class RemoveCookieDBListener final : public DBListenerErrorHandler
 {
-protected:
-  virtual const char *GetOpType() { return "REMOVE"; }
+private:
+  virtual const char *GetOpType() override { return "REMOVE"; }
+
+  ~RemoveCookieDBListener() {}
 
 public:
   NS_DECL_ISUPPORTS
 
-  RemoveCookieDBListener(DBState* dbState) : DBListenerErrorHandler(dbState) { }
-  NS_IMETHOD HandleResult(mozIStorageResultSet*)
+  explicit RemoveCookieDBListener(DBState* dbState) : DBListenerErrorHandler(dbState) { }
+  NS_IMETHOD HandleResult(mozIStorageResultSet*) override
   {
     NS_NOTREACHED("Unexpected call to RemoveCookieDBListener::HandleResult");
     return NS_OK;
   }
-  NS_IMETHOD HandleCompletion(uint16_t aReason)
+  NS_IMETHOD HandleCompletion(uint16_t aReason) override
   {
     return NS_OK;
   }
@@ -473,16 +474,18 @@ NS_IMPL_ISUPPORTS(RemoveCookieDBListener, mozIStorageStatementCallback)
  * ReadCookieDBListener impl:
  * mozIStorageStatementCallback used to track asynchronous removal operations.
  ******************************************************************************/
-class ReadCookieDBListener MOZ_FINAL : public DBListenerErrorHandler
+class ReadCookieDBListener final : public DBListenerErrorHandler
 {
-protected:
-  virtual const char *GetOpType() { return "READ"; }
+private:
+  virtual const char *GetOpType() override { return "READ"; }
   bool mCanceled;
+
+  ~ReadCookieDBListener() {}
 
 public:
   NS_DECL_ISUPPORTS
 
-  ReadCookieDBListener(DBState* dbState)
+  explicit ReadCookieDBListener(DBState* dbState)
     : DBListenerErrorHandler(dbState)
     , mCanceled(false)
   {
@@ -490,7 +493,7 @@ public:
 
   void Cancel() { mCanceled = true; }
 
-  NS_IMETHOD HandleResult(mozIStorageResultSet *aResult)
+  NS_IMETHOD HandleResult(mozIStorageResultSet *aResult) override
   {
     nsCOMPtr<mozIStorageRow> row;
 
@@ -510,7 +513,7 @@ public:
 
     return NS_OK;
   }
-  NS_IMETHOD HandleCompletion(uint16_t aReason)
+  NS_IMETHOD HandleCompletion(uint16_t aReason) override
   {
     // Process the completion of the read operation. If we have been canceled,
     // we cannot assume that the cookieservice still has an open connection
@@ -553,14 +556,16 @@ NS_IMPL_ISUPPORTS(ReadCookieDBListener, mozIStorageStatementCallback)
  * Static mozIStorageCompletionCallback used to notify when the database is
  * successfully closed.
  ******************************************************************************/
-class CloseCookieDBListener MOZ_FINAL :  public mozIStorageCompletionCallback
+class CloseCookieDBListener final :  public mozIStorageCompletionCallback
 {
+  ~CloseCookieDBListener() {}
+
 public:
-  CloseCookieDBListener(DBState* dbState) : mDBState(dbState) { }
+  explicit CloseCookieDBListener(DBState* dbState) : mDBState(dbState) { }
   nsRefPtr<DBState> mDBState;
   NS_DECL_ISUPPORTS
 
-  NS_IMETHOD Complete(nsresult, nsISupports*)
+  NS_IMETHOD Complete(nsresult, nsISupports*) override
   {
     gCookieService->HandleDBClosed(mDBState);
     return NS_OK;
@@ -571,13 +576,16 @@ NS_IMPL_ISUPPORTS(CloseCookieDBListener, mozIStorageCompletionCallback)
 
 namespace {
 
-class AppClearDataObserver MOZ_FINAL : public nsIObserver {
+class AppClearDataObserver final : public nsIObserver {
+
+  ~AppClearDataObserver() {}
+
 public:
   NS_DECL_ISUPPORTS
 
   // nsIObserver implementation.
   NS_IMETHODIMP
-  Observe(nsISupports *aSubject, const char *aTopic, const char16_t *data)
+  Observe(nsISupports *aSubject, const char *aTopic, const char16_t *data) override
   {
     MOZ_ASSERT(!nsCRT::strcmp(aTopic, TOPIC_WEB_APP_CLEAR_DATA));
 
@@ -617,14 +625,6 @@ nsCookieEntry::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
   return amount;
 }
 
-static size_t
-HostTableEntrySizeOfExcludingThis(nsCookieEntry *aEntry,
-                                  MallocSizeOf aMallocSizeOf,
-                                  void *arg)
-{
-  return aEntry->SizeOfExcludingThis(aMallocSizeOf);
-}
-
 size_t
 CookieDomainTuple::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
@@ -636,28 +636,18 @@ CookieDomainTuple::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
   return amount;
 }
 
-static size_t
-ReadSetEntrySizeOfExcludingThis(nsCookieKey *aEntry,
-                                MallocSizeOf aMallocSizeOf,
-                                void *)
-{
-  return aEntry->SizeOfExcludingThis(aMallocSizeOf);
-}
-
 size_t
 DBState::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t amount = 0;
 
   amount += aMallocSizeOf(this);
-  amount += hostTable.SizeOfExcludingThis(HostTableEntrySizeOfExcludingThis,
-                                          aMallocSizeOf);
+  amount += hostTable.SizeOfExcludingThis(aMallocSizeOf);
   amount += hostArray.SizeOfExcludingThis(aMallocSizeOf);
   for (uint32_t i = 0; i < hostArray.Length(); ++i) {
     amount += hostArray[i].SizeOfExcludingThis(aMallocSizeOf);
   }
-  amount += readSet.SizeOfExcludingThis(ReadSetEntrySizeOfExcludingThis,
-                                        aMallocSizeOf);
+  amount += readSet.SizeOfExcludingThis(aMallocSizeOf);
 
   return amount;
 }
@@ -1471,7 +1461,7 @@ RebuildDBCallback(nsCookieEntry *aEntry,
     nsCookie* cookie = cookies[i];
 
     if (!cookie->IsSession()) {
-      bindCookieParameters(paramsArray, aEntry, cookie);
+      bindCookieParameters(paramsArray, nsCookieKey(aEntry), cookie);
     }
   }
 
@@ -1561,11 +1551,6 @@ nsCookieService::Observe(nsISupports     *aSubject,
   if (!strcmp(aTopic, "profile-before-change")) {
     // The profile is about to change,
     // or is going away because the application is shutting down.
-    if (mDBState && mDBState->dbConn &&
-        !nsCRT::strcmp(aData, MOZ_UTF16("shutdown-cleanse"))) {
-      // Clear the cookie db if we're in the default DBState.
-      RemoveAll();
-    }
 
     // Close the default DB connection and null out our DBStates before
     // changing.
@@ -4010,7 +3995,7 @@ struct GetCookiesForAppStruct {
   bool                  onlyBrowserElement;
   nsCOMArray<nsICookie> cookies;
 
-  GetCookiesForAppStruct() MOZ_DELETE;
+  GetCookiesForAppStruct() = delete;
   GetCookiesForAppStruct(uint32_t aAppId, bool aOnlyBrowserElement)
     : appId(aAppId)
     , onlyBrowserElement(aOnlyBrowserElement)
@@ -4360,7 +4345,7 @@ MOZ_DEFINE_MALLOC_SIZE_OF(CookieServiceMallocSizeOf)
 
 NS_IMETHODIMP
 nsCookieService::CollectReports(nsIHandleReportCallback* aHandleReport,
-                                nsISupports* aData)
+                                nsISupports* aData, bool aAnonymize)
 {
   return MOZ_COLLECT_REPORT(
     "explicit/cookie-service", KIND_HEAP, UNITS_BYTES,

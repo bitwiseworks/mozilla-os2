@@ -31,7 +31,7 @@ fuzzy-if(azureQuartz,2,8000) fuzzy-if(d2d,1,8000) fuzzy-if(azureSkia||gtk2Widget
 pref(layout.css.background-blend-mode.enabled,true) == background-blending-multiply.html background-blending-multiply-ref.svg
 pref(layout.css.background-blend-mode.enabled,true) == background-blending-normal.html background-blending-normal-ref.svg
 fuzzy-if(azureSkia||gtk2Widget,1,1600) pref(layout.css.background-blend-mode.enabled,true) == background-blending-overlay.html background-blending-overlay-ref.svg
-fuzzy-if(d2d,1,1600) fuzzy-if(azureSkia||gtk2Widget,2,12800) fuzzy-if(OSX==10.6,1,1600) pref(layout.css.background-blend-mode.enabled,true) == background-blending-saturation.html background-blending-saturation-ref.svg
+fuzzy-if(d2d,1,1600) fuzzy-if(azureSkia||gtk2Widget,2,12800) fuzzy-if(OSX==1006,1,1600) pref(layout.css.background-blend-mode.enabled,true) == background-blending-saturation.html background-blending-saturation-ref.svg
 fuzzy-if(d2d||azureSkia||gtk2Widget,1,1600) pref(layout.css.background-blend-mode.enabled,true) == background-blending-screen.html background-blending-screen-ref.svg
 fuzzy-if(azureQuartz,1,1600) fuzzy-if(d2d||azureSkia||gtk2Widget,10,4800) pref(layout.css.background-blend-mode.enabled,true) == background-blending-soft-light.html background-blending-soft-light-ref.svg
 
@@ -39,6 +39,9 @@ fuzzy-if(azureQuartz,2,40000) fuzzy-if(azureSkia||d2d||gtk2Widget,1,40000) pref(
 
 #fuzzy due to inconsistencies in rounded rect cliping between parent and child; may be related to antialiasing. Between platforms, the max difference is the same, and the number of different pixels is either 36 or 37. (Win, Mac and Lin)
 fuzzy(64,37) pref(layout.css.mix-blend-mode.enabled,true) == mix-blend-mode-952051.html mix-blend-mode-952051-ref.html
+
+pref(layout.css.mix-blend-mode.enabled,true) pref(layout.css.filters.enabled,true) == mix-blend-mode-and-filter.html mix-blend-mode-and-filter-ref.html
+pref(layout.css.mix-blend-mode.enabled,true) pref(layout.css.filters.enabled,true) == mix-blend-mode-and-filter.svg mix-blend-mode-and-filter-ref.svg
 
 pref(layout.css.mix-blend-mode.enabled,true) == mix-blend-mode-child-of-blended-has-opacity.html mix-blend-mode-child-of-blended-has-opacity-ref.html
 
@@ -79,3 +82,11 @@ pref(layout.css.background-blend-mode.enabled,true) == background-blending-backg
 # Test plan 5.3.11 background-blend-mode for an element with background-attachement
 pref(layout.css.background-blend-mode.enabled,true) == background-blending-background-attachement-fixed.html background-blending-background-attachement-fixed-ref.html
 pref(layout.css.background-blend-mode.enabled,true) == background-blending-background-attachement-fixed-scroll.html background-blending-background-attachement-fixed-scroll-ref.html
+
+pref(layout.css.background-blend-mode.enabled,true) == background-blend-mode-body-image.html background-blend-mode-body-image-ref.html
+pref(layout.css.background-blend-mode.enabled,true) == background-blend-mode-body-transparent-image.html background-blend-mode-body-transparent-image-ref.html
+
+pref(layout.css.background-blend-mode.enabled,true) == background-blending-moz-element.html background-blending-moz-element-ref.html
+
+# Test plan 4.4.2 element with isolation:isolate creates an isolated group for blended children
+pref(layout.css.isolation.enabled,true) == blend-isolation.html blend-isolation-ref.html

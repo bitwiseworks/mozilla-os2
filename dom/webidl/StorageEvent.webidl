@@ -9,9 +9,8 @@
  *
  * Event sent to a window when a storage area changes.
  */
-interface Storage;
 
-[Constructor(DOMString type, optional StorageEventInit eventInitDict), HeaderFile="GeneratedEventClasses.h"]
+[Constructor(DOMString type, optional StorageEventInit eventInitDict)]
 interface StorageEvent : Event
 {
   readonly attribute DOMString? key;
@@ -20,7 +19,7 @@ interface StorageEvent : Event
   readonly attribute DOMString? url;
   readonly attribute Storage? storageArea;
 
-  // initStorageEvent is a Gecko specific deprecated method.
+  // Bug 1016053 - This is not spec compliant.
   [Throws]
   void initStorageEvent(DOMString type,
                         boolean canBubble,

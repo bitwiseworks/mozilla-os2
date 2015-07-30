@@ -11,12 +11,13 @@
 #include "nsTArray.h"
 
 class nsMIMEInfoWin : public nsMIMEInfoBase, public nsIPropertyBag {
+    virtual ~nsMIMEInfoWin();
+
   public:
     nsMIMEInfoWin(const char* aType = "") : nsMIMEInfoBase(aType) {}
     nsMIMEInfoWin(const nsACString& aMIMEType) : nsMIMEInfoBase(aMIMEType) {}
     nsMIMEInfoWin(const nsACString& aType, HandlerClass aClass) :
       nsMIMEInfoBase(aType, aClass) {}
-    virtual ~nsMIMEInfoWin();
 
     NS_IMETHOD LaunchWithFile(nsIFile* aFile);
     NS_IMETHOD GetHasDefaultHandler(bool * _retval);
@@ -31,7 +32,7 @@ class nsMIMEInfoWin : public nsMIMEInfoBase, public nsIPropertyBag {
     }
 
   protected:
-    virtual NS_HIDDEN_(nsresult) LoadUriInternal(nsIURI *aURI);
+    virtual nsresult LoadUriInternal(nsIURI *aURI);
     virtual nsresult LaunchDefaultWithFile(nsIFile* aFile);
 
   private:

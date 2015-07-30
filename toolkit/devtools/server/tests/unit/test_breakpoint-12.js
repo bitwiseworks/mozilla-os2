@@ -10,36 +10,47 @@ const NUM_BREAKPOINTS = 10;
 var gDebuggee;
 var gClient;
 var gThreadClient;
-var gPath = getFilePath('test_breakpoint-12.js');
 var gBpActor;
-var gCount = 1;
+var gCount;
+var gCallback;
 
 function run_test()
 {
-  initTestDebuggerServer();
-  gDebuggee = addTestGlobal("test-stack");
-  gClient = new DebuggerClient(DebuggerServer.connectPipe());
+  run_test_with_server(DebuggerServer, function () {
+    run_test_with_server(WorkerDebuggerServer, do_test_finished);
+  });
+  do_test_pending();
+};
+
+function run_test_with_server(aServer, aCallback)
+{
+  gCallback = aCallback;
+  gCount = 1;
+  initTestDebuggerServer(aServer);
+  gDebuggee = addTestGlobal("test-stack", aServer);
+  gClient = new DebuggerClient(aServer.connectPipe());
   gClient.connect(function () {
     attachTestTabAndResume(gClient, "test-stack", function (aResponse, aTabClient, aThreadClient) {
       gThreadClient = aThreadClient;
       test_child_skip_breakpoint();
     });
   });
-  do_test_pending();
 }
 
 function test_child_skip_breakpoint()
 {
   gThreadClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-    let location = { url: gPath, line: gDebuggee.line0 + 3};
-    gThreadClient.setBreakpoint(location, function (aResponse, bpClient) {
+    let source = gThreadClient.source(aPacket.frame.where.source);
+    let location = { line: gDebuggee.line0 + 3};
+
+    source.setBreakpoint(location, function (aResponse, bpClient) {
       // Check that the breakpoint has properly skipped forward one line.
-      do_check_eq(aResponse.actualLocation.url, location.url);
+      do_check_eq(aResponse.actualLocation.source.actor, source.actor);
       do_check_eq(aResponse.actualLocation.line, location.line + 1);
       gBpActor = aResponse.actor;
 
       // Set more breakpoints at the same location.
-      set_breakpoints(location);
+      set_breakpoints(source, location);
     });
 
   });
@@ -55,17 +66,17 @@ function test_child_skip_breakpoint()
 }
 
 // Set many breakpoints at the same location.
-function set_breakpoints(location) {
+function set_breakpoints(source, location) {
   do_check_neq(gCount, NUM_BREAKPOINTS);
-  gThreadClient.setBreakpoint(location, function (aResponse, bpClient) {
+  source.setBreakpoint(location, function (aResponse, bpClient) {
     // Check that the breakpoint has properly skipped forward one line.
-    do_check_eq(aResponse.actualLocation.url, location.url);
+    do_check_eq(aResponse.actualLocation.source.actor, source.actor);
     do_check_eq(aResponse.actualLocation.line, location.line + 1);
     // Check that the same breakpoint actor was returned.
     do_check_eq(aResponse.actor, gBpActor);
 
     if (++gCount < NUM_BREAKPOINTS) {
-      set_breakpoints(location);
+      set_breakpoints(source, location);
       return;
     }
 
@@ -74,7 +85,7 @@ function set_breakpoints(location) {
     gThreadClient.addOneTimeListener("paused", function (aEvent, aPacket) {
       // Check the return value.
       do_check_eq(aPacket.type, "paused");
-      do_check_eq(aPacket.frame.where.url, gPath);
+      do_check_eq(aPacket.frame.where.source.actor, source.actor);
       do_check_eq(aPacket.frame.where.line, location.line + 1);
       do_check_eq(aPacket.why.type, "breakpoint");
       do_check_eq(aPacket.why.actors[0], bpClient.actor);
@@ -88,7 +99,9 @@ function set_breakpoints(location) {
       });
       gThreadClient.resume(function () {
         // Give any remaining breakpoints a chance to trigger.
-        do_timeout(1000, finishClient.bind(null, gClient));
+        do_timeout(1000, function () {
+          gClient.close(gCallback);
+        });
       });
 
     });

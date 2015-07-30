@@ -15,6 +15,7 @@
 #include "nsContentUtils.h"
 #include "nsIContent.h"
 #include "nsIInterfaceRequestorUtils.h"
+#include "nsIDocShell.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMNode.h"
 #include "nsIFrame.h"
@@ -45,15 +46,14 @@ UIEvent::UIEvent(EventTarget* aOwner,
   
   // Fill mDetail and mView according to the mEvent (widget-generated
   // event) we've got
-  switch(mEvent->eventStructType)
-  {
-    case NS_UI_EVENT:
+  switch(mEvent->mClass) {
+    case eUIEventClass:
     {
       mDetail = mEvent->AsUIEvent()->detail;
       break;
     }
 
-    case NS_SCROLLPORT_EVENT:
+    case eScrollPortEventClass:
     {
       InternalScrollPortEvent* scrollEvent = mEvent->AsScrollPortEvent();
       mDetail = (int32_t)scrollEvent->orient;
@@ -68,12 +68,10 @@ UIEvent::UIEvent(EventTarget* aOwner,
   mView = nullptr;
   if (mPresContext)
   {
-    nsISupports* container = mPresContext->GetContainerWeak();
-    if (container)
+    nsIDocShell* docShell = mPresContext->GetDocShell();
+    if (docShell)
     {
-       nsCOMPtr<nsIDOMWindow> window = do_GetInterface(container);
-       if (window)
-          mView = do_QueryInterface(window);
+       mView = docShell->GetWindow();
     }
   }
 }
@@ -120,12 +118,12 @@ UIEvent::GetMovementPoint()
   }
 
   if (!mEvent ||
-      (mEvent->eventStructType != NS_MOUSE_EVENT &&
-       mEvent->eventStructType != NS_MOUSE_SCROLL_EVENT &&
-       mEvent->eventStructType != NS_WHEEL_EVENT &&
-       mEvent->eventStructType != NS_DRAG_EVENT &&
-       mEvent->eventStructType != NS_POINTER_EVENT &&
-       mEvent->eventStructType != NS_SIMPLE_GESTURE_EVENT) ||
+      (mEvent->mClass != eMouseEventClass &&
+       mEvent->mClass != eMouseScrollEventClass &&
+       mEvent->mClass != eWheelEventClass &&
+       mEvent->mClass != eDragEventClass &&
+       mEvent->mClass != ePointerEventClass &&
+       mEvent->mClass != eSimpleGestureEventClass) ||
        !mEvent->AsGUIEvent()->widget) {
     return nsIntPoint(0, 0);
   }
@@ -298,13 +296,13 @@ nsIntPoint
 UIEvent::GetLayerPoint() const
 {
   if (!mEvent ||
-      (mEvent->eventStructType != NS_MOUSE_EVENT &&
-       mEvent->eventStructType != NS_MOUSE_SCROLL_EVENT &&
-       mEvent->eventStructType != NS_WHEEL_EVENT &&
-       mEvent->eventStructType != NS_POINTER_EVENT &&
-       mEvent->eventStructType != NS_TOUCH_EVENT &&
-       mEvent->eventStructType != NS_DRAG_EVENT &&
-       mEvent->eventStructType != NS_SIMPLE_GESTURE_EVENT) ||
+      (mEvent->mClass != eMouseEventClass &&
+       mEvent->mClass != eMouseScrollEventClass &&
+       mEvent->mClass != eWheelEventClass &&
+       mEvent->mClass != ePointerEventClass &&
+       mEvent->mClass != eTouchEventClass &&
+       mEvent->mClass != eDragEventClass &&
+       mEvent->mClass != eSimpleGestureEventClass) ||
       !mPresContext ||
       mEventIsInternal) {
     return mLayerPoint;
@@ -346,11 +344,7 @@ bool
 UIEvent::IsChar() const
 {
   WidgetKeyboardEvent* keyEvent = mEvent->AsKeyboardEvent();
-  if (keyEvent) {
-    return keyEvent->isChar;
-  }
-  WidgetTextEvent* textEvent = mEvent->AsTextEvent();
-  return textEvent ? textEvent->isChar : false;
+  return keyEvent ? keyEvent->isChar : false;
 }
 
 NS_IMETHODIMP
@@ -364,11 +358,11 @@ UIEvent::DuplicatePrivateData()
   mPagePoint =
     Event::GetPageCoords(mPresContext, mEvent, mEvent->refPoint, mClientPoint);
   // GetScreenPoint converts mEvent->refPoint to right coordinates.
-  nsIntPoint screenPoint =
+  LayoutDeviceIntPoint screenPoint =
     Event::GetScreenCoords(mPresContext, mEvent, mEvent->refPoint);
   nsresult rv = Event::DuplicatePrivateData();
   if (NS_SUCCEEDED(rv)) {
-    mEvent->refPoint = LayoutDeviceIntPoint::FromUntyped(screenPoint);
+    mEvent->refPoint = screenPoint;
   }
   return rv;
 }
@@ -409,10 +403,12 @@ static const ModifierPair kPairs[] = {
   { MODIFIER_CAPSLOCK,   NS_DOM_KEYNAME_CAPSLOCK },
   { MODIFIER_CONTROL,    NS_DOM_KEYNAME_CONTROL },
   { MODIFIER_FN,         NS_DOM_KEYNAME_FN },
+  { MODIFIER_FNLOCK,     NS_DOM_KEYNAME_FNLOCK },
   { MODIFIER_META,       NS_DOM_KEYNAME_META },
   { MODIFIER_NUMLOCK,    NS_DOM_KEYNAME_NUMLOCK },
   { MODIFIER_SCROLLLOCK, NS_DOM_KEYNAME_SCROLLLOCK },
   { MODIFIER_SHIFT,      NS_DOM_KEYNAME_SHIFT },
+  { MODIFIER_SYMBOL,     NS_DOM_KEYNAME_SYMBOL },
   { MODIFIER_SYMBOLLOCK, NS_DOM_KEYNAME_SYMBOLLOCK },
   { MODIFIER_OS,         NS_DOM_KEYNAME_OS }
 };
@@ -456,43 +452,7 @@ UIEvent::GetModifierStateInternal(const nsAString& aKey)
 {
   WidgetInputEvent* inputEvent = mEvent->AsInputEvent();
   MOZ_ASSERT(inputEvent, "mEvent must be WidgetInputEvent or derived class");
-  if (aKey.EqualsLiteral(NS_DOM_KEYNAME_SHIFT)) {
-    return inputEvent->IsShift();
-  }
-  if (aKey.EqualsLiteral(NS_DOM_KEYNAME_CONTROL)) {
-    return inputEvent->IsControl();
-  }
-  if (aKey.EqualsLiteral(NS_DOM_KEYNAME_META)) {
-    return inputEvent->IsMeta();
-  }
-  if (aKey.EqualsLiteral(NS_DOM_KEYNAME_ALT)) {
-    return inputEvent->IsAlt();
-  }
-
-  if (aKey.EqualsLiteral(NS_DOM_KEYNAME_ALTGRAPH)) {
-    return inputEvent->IsAltGraph();
-  }
-  if (aKey.EqualsLiteral(NS_DOM_KEYNAME_OS)) {
-    return inputEvent->IsOS();
-  }
-
-  if (aKey.EqualsLiteral(NS_DOM_KEYNAME_CAPSLOCK)) {
-    return inputEvent->IsCapsLocked();
-  }
-  if (aKey.EqualsLiteral(NS_DOM_KEYNAME_NUMLOCK)) {
-    return inputEvent->IsNumLocked();
-  }
-
-  if (aKey.EqualsLiteral(NS_DOM_KEYNAME_FN)) {
-    return inputEvent->IsFn();
-  }
-  if (aKey.EqualsLiteral(NS_DOM_KEYNAME_SCROLLLOCK)) {
-    return inputEvent->IsScrollLocked();
-  }
-  if (aKey.EqualsLiteral(NS_DOM_KEYNAME_SYMBOLLOCK)) {
-    return inputEvent->IsSymbolLocked();
-  }
-  return false;
+  return ((inputEvent->modifiers & WidgetInputEvent::GetModifier(aKey)) != 0);
 }
 
 } // namespace dom

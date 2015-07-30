@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const ContentWorker = Object.freeze({
+Object.freeze({
   // TODO: Bug 727854 Use same implementation than common JS modules,
   // i.e. EventEmitter module
 
@@ -41,20 +41,14 @@ const ContentWorker = Object.freeze({
         return [];
       let args = Array.slice(arguments, 1);
       let results = [];
-      for each (let callback in listeners[name]) {
+      for (let callback of listeners[name]) {
         results.push(callback.apply(null, args));
       }
       return results;
     }
-    function hasListenerFor(name) {
-      if (!(name in listeners))
-        return false;
-      return listeners[name].length > 0;
-    }
     return {
       eventEmitter: eventEmitter,
-      emit: onEvent,
-      hasListenerFor: hasListenerFor
+      emit: onEvent
     };
   },
 
@@ -70,6 +64,7 @@ const ContentWorker = Object.freeze({
    *              onChromeEvent --> callback registered through pipe.on
    */
   createPipe: function createPipe(emitToChrome) {
+    let ContentWorker = this;
     function onEvent(type, ...args) {
       // JSON.stringify is buggy with cross-sandbox values,
       // it may return "{}" on functions. Use a replacer to match them correctly.
@@ -82,7 +77,7 @@ const ContentWorker = Object.freeze({
       emitToChrome(str);
     }
 
-    let { eventEmitter, emit, hasListenerFor } =
+    let { eventEmitter, emit } =
       ContentWorker.createEventEmitter(onEvent);
 
     return {
@@ -94,8 +89,7 @@ const ContentWorker = Object.freeze({
         // and modules (only used for context-menu API)
         let args = typeof array == "string" ? JSON.parse(array) : array;
         return emit.apply(null, args);
-      },
-      hasListenerFor: hasListenerFor
+      }
     };
   },
 
@@ -271,6 +265,7 @@ const ContentWorker = Object.freeze({
 
   injectMessageAPI: function injectMessageAPI(exports, pipe, console) {
 
+    let ContentWorker = this;
     let { eventEmitter: port, emit : portEmit } =
       ContentWorker.createEventEmitter(pipe.emit.bind(null, "event"));
     pipe.on("event", portEmit);
@@ -285,36 +280,6 @@ const ContentWorker = Object.freeze({
     Object.defineProperty(exports, "self", {
       value: self
     });
-
-    exports.on = function deprecatedOn() {
-      console.error("DEPRECATED: The global `on()` function in content " +
-                    "scripts is deprecated in favor of the `self.on()` " +
-                    "function, which works the same. Replace calls to `on()` " +
-                    "with calls to `self.on()`" +
-                    "For more info on `self.on`, see " +
-                    "<https://addons.mozilla.org/en-US/developers/docs/sdk/latest/dev-guide/addon-development/web-content.html>.");
-      return self.on.apply(null, arguments);
-    };
-
-    // Deprecated use of `onMessage` from globals
-    let onMessage = null;
-    Object.defineProperty(exports, "onMessage", {
-      get: function () onMessage,
-      set: function (v) {
-        if (onMessage)
-          self.removeListener("message", onMessage);
-        console.error("DEPRECATED: The global `onMessage` function in content" +
-                      "scripts is deprecated in favor of the `self.on()` " +
-                      "function. Replace `onMessage = function (data){}` " +
-                      "definitions with calls to `self.on('message', " +
-                      "function (data){})`. " +
-                      "For more info on `self.on`, see " +
-                      "<https://addons.mozilla.org/en-US/developers/docs/sdk/latest/dev-guide/addon-development/web-content.html>.");
-        onMessage = v;
-        if (typeof onMessage == "function")
-          self.on("message", onMessage);
-      }
-    });
   },
 
   injectOptions: function (exports, options) {
@@ -322,7 +287,8 @@ const ContentWorker = Object.freeze({
   },
 
   inject: function (exports, chromeAPI, emitToChrome, options) {
-    let { pipe, onChromeEvent, hasListenerFor } =
+    let ContentWorker = this;
+    let { pipe, onChromeEvent } =
       ContentWorker.createPipe(emitToChrome);
 
     ContentWorker.injectConsole(exports, pipe);
@@ -334,9 +300,6 @@ const ContentWorker = Object.freeze({
 
     Object.freeze( exports.self );
 
-    return {
-      emitToContent: onChromeEvent,
-      hasListenerFor: hasListenerFor
-    };
+    return onChromeEvent;
   }
 });

@@ -32,11 +32,12 @@ EXTRA_JS_MODULES += [
     'TelemetryLog.jsm',
     'TelemetryStopwatch.jsm',
     'ThirdPartyCookieProbe.jsm',
+    'UITelemetry.jsm',
 ]
 
 EXTRA_PP_JS_MODULES += [
     'TelemetryPing.jsm',
-    'UITelemetry.jsm',
+    'TelemetrySession.jsm',
 ]
 
 FAIL_ON_WARNINGS = True
@@ -59,3 +60,4 @@ LOCAL_INCLUDES += [
     '/xpcom/threads',
 ]
 
+SPHINX_TREES['telemetry'] = 'docs'

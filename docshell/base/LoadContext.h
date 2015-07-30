@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=2 ts=8 et tw=80 : */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -31,8 +31,9 @@ namespace mozilla {
  * to separate the safebrowsing cookie.
  */
 
-class LoadContext MOZ_FINAL : public nsILoadContext,
-                              public nsIInterfaceRequestor
+class LoadContext final
+  : public nsILoadContext
+  , public nsIInterfaceRequestor
 {
 public:
   NS_DECL_ISUPPORTS
@@ -45,6 +46,24 @@ public:
               dom::Element* aTopFrameElement,
               uint32_t aAppId, bool aInBrowser)
     : mTopFrameElement(do_GetWeakReference(aTopFrameElement))
+    , mNestedFrameId(0)
+    , mAppId(aAppId)
+    , mIsContent(aToCopy.mIsContent)
+    , mUsePrivateBrowsing(aToCopy.mUsePrivateBrowsing)
+    , mUseRemoteTabs(aToCopy.mUseRemoteTabs)
+    , mIsInBrowserElement(aInBrowser)
+#ifdef DEBUG
+    , mIsNotNull(aToCopy.mIsNotNull)
+#endif
+  {}
+
+  // AppId/inBrowser arguments override those in SerializedLoadContext provided
+  // by child process.
+  LoadContext(const IPC::SerializedLoadContext& aToCopy,
+              uint64_t aNestedFrameId,
+              uint32_t aAppId, bool aInBrowser)
+    : mTopFrameElement(nullptr)
+    , mNestedFrameId(aNestedFrameId)
     , mAppId(aAppId)
     , mIsContent(aToCopy.mIsContent)
     , mUsePrivateBrowsing(aToCopy.mUsePrivateBrowsing)
@@ -62,6 +81,7 @@ public:
               bool aUseRemoteTabs,
               bool aIsInBrowserElement)
     : mTopFrameElement(do_GetWeakReference(aTopFrameElement))
+    , mNestedFrameId(0)
     , mAppId(aAppId)
     , mIsContent(aIsContent)
     , mUsePrivateBrowsing(aUsePrivateBrowsing)
@@ -73,8 +93,9 @@ public:
   {}
 
   // Constructor taking reserved appId for the safebrowsing cookie.
-  LoadContext(uint32_t aAppId)
+  explicit LoadContext(uint32_t aAppId)
     : mTopFrameElement(nullptr)
+    , mNestedFrameId(0)
     , mAppId(aAppId)
     , mIsContent(false)
     , mUsePrivateBrowsing(false)
@@ -85,15 +106,23 @@ public:
 #endif
   {}
 
+  // Constructor for creating a LoadContext with a given principal's appId and
+  // browser flag.
+  explicit LoadContext(nsIPrincipal* aPrincipal,
+                       nsILoadContext* aOptionalBase = nullptr);
+
 private:
-  nsWeakPtr     mTopFrameElement;
-  uint32_t      mAppId;
-  bool          mIsContent;
-  bool          mUsePrivateBrowsing;
-  bool          mUseRemoteTabs;
-  bool          mIsInBrowserElement;
+  ~LoadContext() {}
+
+  nsWeakPtr mTopFrameElement;
+  uint64_t mNestedFrameId;
+  uint32_t mAppId;
+  bool mIsContent;
+  bool mUsePrivateBrowsing;
+  bool mUseRemoteTabs;
+  bool mIsInBrowserElement;
 #ifdef DEBUG
-  bool          mIsNotNull;
+  bool mIsNotNull;
 #endif
 };
 

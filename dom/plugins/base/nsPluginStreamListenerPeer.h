@@ -30,7 +30,7 @@ class nsIChannel;
 class CachedFileHolder
 {
 public:
-  CachedFileHolder(nsIFile* cacheFile);
+  explicit CachedFileHolder(nsIFile* cacheFile);
   ~CachedFileHolder();
 
   void AddRef();
@@ -50,9 +50,10 @@ public nsSupportsWeakReference,
 public nsIInterfaceRequestor,
 public nsIChannelEventSink
 {
+  virtual ~nsPluginStreamListenerPeer();
+
 public:
   nsPluginStreamListenerPeer();
-  virtual ~nsPluginStreamListenerPeer();
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPROGRESSEVENTSINK
@@ -127,6 +128,11 @@ public:
       requestsCopy[i]->Resume();
   }
 
+  // Called by nsNPAPIPluginStreamListener
+  void OnStreamTypeSet(const int32_t aStreamType);
+
+  static const int32_t STREAM_TYPE_UNKNOWN;
+
 private:
   nsresult SetUpStreamListener(nsIRequest* request, nsIURI* aURL);
   nsresult SetupPluginCacheFile(nsIChannel* channel);
@@ -158,6 +164,8 @@ private:
   nsDataHashtable<nsUint32HashKey, uint32_t>* mDataForwardToRequest;
 
   nsCString mContentType;
+  bool mUseLocalCache;
+  nsCOMPtr<nsIRequest> mRequest;
   bool mSeekable;
   uint32_t mModified;
   nsRefPtr<nsNPAPIPluginInstance> mPluginInstance;

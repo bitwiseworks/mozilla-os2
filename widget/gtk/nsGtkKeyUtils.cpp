@@ -646,12 +646,12 @@ KeymapWrapper::InitInputEvent(WidgetInputEvent& aInputEvent,
          GetBoolName(aInputEvent.modifiers & MODIFIER_NUMLOCK),
          GetBoolName(aInputEvent.modifiers & MODIFIER_SCROLLLOCK)));
 
-    switch(aInputEvent.eventStructType) {
-        case NS_MOUSE_EVENT:
-        case NS_MOUSE_SCROLL_EVENT:
-        case NS_WHEEL_EVENT:
-        case NS_DRAG_EVENT:
-        case NS_SIMPLE_GESTURE_EVENT:
+    switch(aInputEvent.mClass) {
+        case eMouseEventClass:
+        case eMouseScrollEventClass:
+        case eWheelEventClass:
+        case eDragEventClass:
+        case eSimpleGestureEventClass:
             break;
         default:
             return;
@@ -846,12 +846,33 @@ KeymapWrapper::ComputeDOMKeyNameIndex(const GdkEventKey* aGdkKeyEvent)
     return KEY_NAME_INDEX_Unidentified;
 }
 
+/* static */ CodeNameIndex
+KeymapWrapper::ComputeDOMCodeNameIndex(const GdkEventKey* aGdkKeyEvent)
+{
+    switch (aGdkKeyEvent->hardware_keycode) {
+
+#define NS_NATIVE_KEY_TO_DOM_CODE_NAME_INDEX(aNativeKey, aCodeNameIndex) \
+        case aNativeKey: return aCodeNameIndex;
+
+#include "NativeKeyToDOMCodeName.h"
+
+#undef NS_NATIVE_KEY_TO_DOM_CODE_NAME_INDEX
+
+        default:
+            break;
+    }
+
+    return CODE_NAME_INDEX_UNKNOWN;
+}
+
 /* static */ void
 KeymapWrapper::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
                             GdkEventKey* aGdkKeyEvent)
 {
     KeymapWrapper* keymapWrapper = GetInstance();
 
+    aKeyEvent.mCodeNameIndex = ComputeDOMCodeNameIndex(aGdkKeyEvent);
+    MOZ_ASSERT(aKeyEvent.mCodeNameIndex != CODE_NAME_INDEX_USE_STRING);
     aKeyEvent.mKeyNameIndex =
         keymapWrapper->ComputeDOMKeyNameIndex(aGdkKeyEvent);
     if (aKeyEvent.mKeyNameIndex == KEY_NAME_INDEX_Unidentified) {
@@ -984,7 +1005,7 @@ KeymapWrapper::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
     // so link to the GdkEvent (which will vanish soon after return from the
     // event callback) to give plugins access to hardware_keycode and state.
     // (An XEvent would be nice but the GdkEvent is good enough.)
-    aKeyEvent.pluginEvent = (void *)aGdkKeyEvent;
+    aKeyEvent.mPluginEvent.Copy(*aGdkKeyEvent);
     aKeyEvent.time = aGdkKeyEvent->time;
     aKeyEvent.mNativeKeyEvent = static_cast<void*>(aGdkKeyEvent);
     aKeyEvent.mIsRepeat = sRepeatState == REPEATING &&

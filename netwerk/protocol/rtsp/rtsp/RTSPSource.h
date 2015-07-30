@@ -18,6 +18,7 @@
 
 #define RTSP_SOURCE_H_
 
+#include "mozilla/Types.h"
 #include <utils/RefBase.h>
 #include <media/stagefright/foundation/AString.h>
 #include <media/stagefright/foundation/AHandlerReflector.h>
@@ -29,10 +30,10 @@
 
 namespace android {
 
-struct MetaData;
+struct MOZ_EXPORT MetaData;
 struct ABuffer;
 struct ALooper;
-struct AnotherPacketSource;
+struct MOZ_EXPORT AnotherPacketSource;
 struct RtspConnectionHandler;
 
 class RTSPSource : public RefBase
@@ -42,6 +43,7 @@ public:
     RTSPSource(
             nsIStreamingProtocolListener *aListener,
             const char *url,
+            const char *userAgent,
             bool uidValid = false,
             uid_t uid = 0);
 
@@ -53,6 +55,7 @@ public:
     void seek(uint64_t timeUs);
     void resume();
     void suspend();
+    void playbackEnded();
 
     status_t feedMoreTSData();
 
@@ -70,13 +73,14 @@ protected:
 
 private:
     enum {
-        kWhatNotify          = 'noti',
-        kWhatDisconnect      = 'disc',
-        kWhatPerformSeek     = 'seek',
-        kWhatPerformPlay     = 'play',
-        kWhatPerformPause    = 'paus',
-        kWhatPerformResume   = 'resu',
-        kWhatPerformSuspend  = 'susp',
+        kWhatNotify = 1,
+        kWhatDisconnect,
+        kWhatPerformSeek,
+        kWhatPerformPlay,
+        kWhatPerformPause,
+        kWhatPerformResume,
+        kWhatPerformSuspend,
+        kWhatPerformPlaybackEnded,
     };
 
     enum State {
@@ -85,6 +89,7 @@ private:
         CONNECTED,
         SEEKING,
         PAUSING,
+        PAUSED,
         PLAYING,
     };
 
@@ -106,12 +111,14 @@ private:
     };
 
     AString mURL;
+    AString mUserAgent;
     bool mUIDValid;
     uid_t mUID;
     State mState;
     status_t mFinalResult;
     uint32_t mDisconnectReplyID;
     uint64_t mLatestPausedUnit;
+    bool mPlayPending;
 
     sp<ALooper> mLooper;
     sp<AHandlerReflector<RTSPSource> > mReflector;
@@ -139,7 +146,23 @@ private:
 
     void performSuspend();
 
+    void performPlaybackEnded();
+
     void onTrackDataAvailable(size_t trackIndex);
+
+    void onTrackEndOfStream(size_t trackIndex);
+
+    bool isLiveStream();
+
+    // This flag is set if we have just disconnected
+    // in order to pretend pausing a live stream.
+    bool mDisconnectedToPauseLiveStream;
+
+    // While performing a play operation, if the current state of RTSP connection
+    // is disconnected, we will start over establishing connection to the server.
+    // In this case (mPlayOnConnected = true), we have to perform play again when
+    // onConnected, to ensure we complete the play operation.
+    bool mPlayOnConnected;
 
     nsMainThreadPtrHandle<nsIStreamingProtocolListener> mListener;
     int mPrintCount;

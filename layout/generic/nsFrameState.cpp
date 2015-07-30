@@ -17,6 +17,8 @@
 #include "nsImageFrame.h"
 #include "nsInlineFrame.h"
 #include "nsPlaceholderFrame.h"
+#include "nsRubyTextFrame.h"
+#include "nsRubyTextContainerFrame.h"
 #include "nsSVGContainerFrame.h"
 #include "nsTableCellFrame.h"
 #include "nsTableRowFrame.h"
@@ -35,7 +37,7 @@ GetFrameState(nsIFrame* aFrame)
   nsFrameState state = aFrame->GetStateBits();
 
   if (state == nsFrameState(0)) {
-    result.AssignLiteral("0");
+    result.Assign('0');
     return result;
   }
 

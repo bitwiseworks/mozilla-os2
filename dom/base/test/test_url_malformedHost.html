@@ -30,7 +30,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1020041
     { host: 'aa#bb' , expected: 'aa' },
     { host: 'a/b' , expected: 'a' },
     { host: 'a\\b', expected: 'a' },
-    { host: 'abcd#bla:10', expected: 'abcd'}
+    { host: '[2001::1]#bla:10', expected: '[2001::1]'}
   ];
 
   for (var i = 0; i < tests.length; ++i) {

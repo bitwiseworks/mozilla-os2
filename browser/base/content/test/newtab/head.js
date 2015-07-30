@@ -2,19 +2,20 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 const PREF_NEWTAB_ENABLED = "browser.newtabpage.enabled";
-const PREF_NEWTAB_DIRECTORYSOURCE = "browser.newtabpage.directorySource";
+const PREF_NEWTAB_DIRECTORYSOURCE = "browser.newtabpage.directory.source";
 
 Services.prefs.setBoolPref(PREF_NEWTAB_ENABLED, true);
-// start with no directory links by default
-Services.prefs.setCharPref(PREF_NEWTAB_DIRECTORYSOURCE, "data:application/json,{}");
 
 let tmp = {};
 Cu.import("resource://gre/modules/Promise.jsm", tmp);
 Cu.import("resource://gre/modules/NewTabUtils.jsm", tmp);
+Cu.import("resource:///modules/DirectoryLinksProvider.jsm", tmp);
+Cu.import("resource://testing-common/PlacesTestUtils.jsm", tmp);
 Cc["@mozilla.org/moz/jssubscript-loader;1"]
   .getService(Ci.mozIJSSubScriptLoader)
   .loadSubScript("chrome://browser/content/sanitize.js", tmp);
-let {Promise, NewTabUtils, Sanitizer} = tmp;
+Cu.import("resource://gre/modules/Timer.jsm", tmp);
+let {Promise, NewTabUtils, Sanitizer, clearTimeout, setTimeout, DirectoryLinksProvider, PlacesTestUtils} = tmp;
 
 let uri = Services.io.newURI("about:newtab", null, null);
 let principal = Services.scriptSecurityManager.getNoAppCodebasePrincipal(uri);
@@ -24,50 +25,109 @@ let isLinux = ("@mozilla.org/gnome-gconf-service;1" in Cc);
 let isWindows = ("@mozilla.org/windows-registry-key;1" in Cc);
 let gWindow = window;
 
-// The tests assume all three rows of sites are shown, but the window may be too
-// short to actually show three rows.  Resize it if necessary.
-let requiredInnerHeight =
+// Default to dummy/empty directory links
+let gDirectorySource = 'data:application/json,{"test":1}';
+let gOrigDirectorySource;
+
+// The tests assume all 3 rows and all 3 columns of sites are shown, but the
+// window may be too small to actually show everything.  Resize it if necessary.
+let requiredSize = {};
+requiredSize.innerHeight =
   40 + 32 + // undo container + bottom margin
   44 + 32 + // search bar + bottom margin
-  (3 * (150 + 32)) + // 3 rows * (tile height + title and bottom margin)
+  (3 * (180 + 32)) + // 3 rows * (tile height + title and bottom margin)
+  100; // breathing room
+requiredSize.innerWidth =
+  (3 * (290 + 20)) + // 3 cols * (tile width + side margins)
   100; // breathing room
 
-let oldInnerHeight = null;
-if (gBrowser.contentWindow.innerHeight < requiredInnerHeight) {
-  oldInnerHeight = gBrowser.contentWindow.innerHeight;
-  info("Changing browser inner height from " + oldInnerHeight + " to " +
-       requiredInnerHeight);
-  gBrowser.contentWindow.innerHeight = requiredInnerHeight;
-  let screenHeight = {};
-  Cc["@mozilla.org/gfx/screenmanager;1"].
-    getService(Ci.nsIScreenManager).
-    primaryScreen.
-    GetAvailRectDisplayPix({}, {}, {}, screenHeight);
-  screenHeight = screenHeight.value;
-  if (screenHeight < gBrowser.contentWindow.outerHeight) {
-    info("Warning: Browser outer height is now " +
-         gBrowser.contentWindow.outerHeight + ", which is larger than the " +
-         "available screen height, " + screenHeight +
-         ". That may cause problems.");
+let oldSize = {};
+Object.keys(requiredSize).forEach(prop => {
+  info([prop, gBrowser.contentWindow[prop], requiredSize[prop]]);
+  if (gBrowser.contentWindow[prop] < requiredSize[prop]) {
+    oldSize[prop] = gBrowser.contentWindow[prop];
+    info("Changing browser " + prop + " from " + oldSize[prop] + " to " +
+         requiredSize[prop]);
+    gBrowser.contentWindow[prop] = requiredSize[prop];
   }
+});
+
+let screenHeight = {};
+let screenWidth = {};
+Cc["@mozilla.org/gfx/screenmanager;1"].
+  getService(Ci.nsIScreenManager).
+  primaryScreen.
+  GetAvailRectDisplayPix({}, {}, screenWidth, screenHeight);
+screenHeight = screenHeight.value;
+screenWidth = screenWidth.value;
+
+if (screenHeight < gBrowser.contentWindow.outerHeight) {
+  info("Warning: Browser outer height is now " +
+       gBrowser.contentWindow.outerHeight + ", which is larger than the " +
+       "available screen height, " + screenHeight +
+       ". That may cause problems.");
+}
+
+if (screenWidth < gBrowser.contentWindow.outerWidth) {
+  info("Warning: Browser outer width is now " +
+       gBrowser.contentWindow.outerWidth + ", which is larger than the " +
+       "available screen width, " + screenWidth +
+       ". That may cause problems.");
 }
 
 registerCleanupFunction(function () {
   while (gWindow.gBrowser.tabs.length > 1)
     gWindow.gBrowser.removeTab(gWindow.gBrowser.tabs[1]);
 
-  if (oldInnerHeight)
-    gBrowser.contentWindow.innerHeight = oldInnerHeight;
+  Object.keys(oldSize).forEach(prop => {
+    if (oldSize[prop]) {
+      gBrowser.contentWindow[prop] = oldSize[prop];
+    }
+  });
+
+  // Stop any update timers to prevent unexpected updates in later tests
+  let timer = NewTabUtils.allPages._scheduleUpdateTimeout;
+  if (timer) {
+    clearTimeout(timer);
+    delete NewTabUtils.allPages._scheduleUpdateTimeout;
+  }
 
   Services.prefs.clearUserPref(PREF_NEWTAB_ENABLED);
-  Services.prefs.clearUserPref(PREF_NEWTAB_DIRECTORYSOURCE);
+  Services.prefs.setCharPref(PREF_NEWTAB_DIRECTORYSOURCE, gOrigDirectorySource);
+
+  return watchLinksChangeOnce();
 });
+
+/**
+ * Resolves promise when directory links are downloaded and written to disk
+ */
+function watchLinksChangeOnce() {
+  let deferred = Promise.defer();
+  let observer = {
+    onManyLinksChanged: () => {
+      DirectoryLinksProvider.removeObserver(observer);
+      deferred.resolve();
+    }
+  };
+  observer.onDownloadFail = observer.onManyLinksChanged;
+  DirectoryLinksProvider.addObserver(observer);
+  return deferred.promise;
+};
 
 /**
  * Provide the default test function to start our test runner.
  */
 function test() {
-  TestRunner.run();
+  waitForExplicitFinish();
+  // start TestRunner.run() after directory links is downloaded and written to disk
+  watchLinksChangeOnce().then(() => {
+    // Wait for hidden page to update with the desired links
+    whenPagesUpdated(() => TestRunner.run(), true);
+  });
+
+  // Save the original directory source (which is set globally for tests)
+  gOrigDirectorySource = Services.prefs.getCharPref(PREF_NEWTAB_DIRECTORYSOURCE);
+  Services.prefs.setCharPref(PREF_NEWTAB_DIRECTORYSOURCE, gDirectorySource);
 }
 
 /**
@@ -78,8 +138,6 @@ let TestRunner = {
    * Starts the test runner.
    */
   run: function () {
-    waitForExplicitFinish();
-
     this._iter = runTests();
     this.next();
   },
@@ -100,7 +158,7 @@ let TestRunner = {
    */
   finish: function () {
     function cleanupAndFinish() {
-      clearHistory(function () {
+      PlacesTestUtils.clearHistory().then(() => {
         whenPagesUpdated(finish);
         NewTabUtils.restore();
       });
@@ -153,17 +211,20 @@ function getCell(aIndex) {
  * Allows to provide a list of links that is used to construct the grid.
  * @param aLinksPattern the pattern (see below)
  *
- * Example: setLinks("1,2,3")
- * Result: [{url: "http://example.com/#1", title: "site#1"},
- *          {url: "http://example.com/#2", title: "site#2"}
- *          {url: "http://example.com/#3", title: "site#3"}]
+ * Example: setLinks("-1,0,1,2,3")
+ * Result: [{url: "http://example.com/", title: "site#-1"},
+ *          {url: "http://example0.com/", title: "site#0"},
+ *          {url: "http://example1.com/", title: "site#1"},
+ *          {url: "http://example2.com/", title: "site#2"},
+ *          {url: "http://example3.com/", title: "site#3"}]
  */
-function setLinks(aLinks) {
+function setLinks(aLinks, aCallback = TestRunner.next) {
   let links = aLinks;
 
   if (typeof links == "string") {
     links = aLinks.split(/\s*,\s*/).map(function (id) {
-      return {url: "http://example.com/#" + id, title: "site#" + id};
+      return {url: "http://example" + (id != "-1" ? id : "") + ".com/",
+              title: "site#" + id};
     });
   }
 
@@ -172,27 +233,18 @@ function setLinks(aLinks) {
   // given entries and call populateCache() now again to make sure the cache
   // has the desired contents.
   NewTabUtils.links.populateCache(function () {
-    clearHistory(function () {
+    PlacesTestUtils.clearHistory().then(() => {
       fillHistory(links, function () {
         NewTabUtils.links.populateCache(function () {
           NewTabUtils.allPages.update();
-          TestRunner.next();
+          aCallback();
         }, true);
       });
     });
   });
 }
 
-function clearHistory(aCallback) {
-  Services.obs.addObserver(function observe(aSubject, aTopic, aData) {
-    Services.obs.removeObserver(observe, aTopic);
-    executeSoon(aCallback);
-  }, PlacesUtils.TOPIC_EXPIRATION_FINISHED, false);
-
-  PlacesUtils.history.removeAllPages();
-}
-
-function fillHistory(aLinks, aCallback) {
+function fillHistory(aLinks, aCallback = TestRunner.next) {
   let numLinks = aLinks.length;
   if (!numLinks) {
     if (aCallback)
@@ -234,7 +286,7 @@ function fillHistory(aLinks, aCallback) {
  * @param aLinksPattern the pattern (see below)
  *
  * Example: setPinnedLinks("3,,1")
- * Result: 'http://example.com/#3' is pinned in the first cell. 'http://example.com/#1' is
+ * Result: 'http://example3.com/' is pinned in the first cell. 'http://example1.com/' is
  *         pinned in the third cell.
  */
 function setPinnedLinks(aLinks) {
@@ -243,7 +295,8 @@ function setPinnedLinks(aLinks) {
   if (typeof links == "string") {
     links = aLinks.split(/\s*,\s*/).map(function (id) {
       if (id)
-        return {url: "http://example.com/#" + id, title: "site#" + id};
+        return {url: "http://example" + (id != "-1" ? id : "") + ".com/",
+                title: "site#" + id};
     });
   }
 
@@ -266,9 +319,42 @@ function restore() {
 }
 
 /**
+ * Wait until a given condition becomes true.
+ */
+function waitForCondition(aConditionFn, aMaxTries=50, aCheckInterval=100) {
+  return new Promise((resolve, reject) => {
+    let tries = 0;
+
+    function tryNow() {
+      tries++;
+
+      if (aConditionFn()) {
+        resolve();
+      } else if (tries < aMaxTries) {
+        tryAgain();
+      } else {
+        reject("Condition timed out: " + aConditionFn.toSource());
+      }
+    }
+
+    function tryAgain() {
+      setTimeout(tryNow, aCheckInterval);
+    }
+
+    tryAgain();
+  });
+}
+
+/**
  * Creates a new tab containing 'about:newtab'.
  */
 function addNewTabPageTab() {
+  addNewTabPageTabPromise().then(TestRunner.next);
+}
+
+function addNewTabPageTabPromise() {
+  let deferred = Promise.defer();
+
   let tab = gWindow.gBrowser.selectedTab = gWindow.gBrowser.addTab("about:newtab");
   let browser = tab.linkedBrowser;
 
@@ -276,26 +362,31 @@ function addNewTabPageTab() {
     if (NewTabUtils.allPages.enabled) {
       // Continue when the link cache has been populated.
       NewTabUtils.links.populateCache(function () {
-        executeSoon(TestRunner.next);
+        deferred.resolve(whenSearchInitDone());
       });
     } else {
-      // It's important that we call next() asynchronously.
-      // 'yield addNewTabPageTab()' would fail if next() is called
-      // synchronously because the iterator is already executing.
-      executeSoon(TestRunner.next);
+      deferred.resolve();
     }
   }
 
-  // The new tab page might have been preloaded in the background.
+  // Wait for the new tab page to be loaded.
+  waitForBrowserLoad(browser, function () {
+    // Wait for the document to become visible in case it was preloaded.
+    waitForCondition(() => !browser.contentDocument.hidden).then(whenNewTabLoaded);
+  });
+
+  return deferred.promise;
+}
+
+function waitForBrowserLoad(browser, callback = TestRunner.next) {
   if (browser.contentDocument.readyState == "complete") {
-    whenNewTabLoaded();
+    executeSoon(callback);
     return;
   }
 
-  // Wait for the new tab page to be loaded.
   browser.addEventListener("load", function onLoad() {
     browser.removeEventListener("load", onLoad, true);
-    whenNewTabLoaded();
+    executeSoon(callback);
   }, true);
 }
 
@@ -305,9 +396,9 @@ function addNewTabPageTab() {
  * @param the array of sites to compare with (optional)
  *
  * Example: checkGrid("3p,2,,1p")
- * Result: We expect the first cell to contain the pinned site 'http://example.com/#3'.
- *         The second cell contains 'http://example.com/#2'. The third cell is empty.
- *         The fourth cell contains the pinned site 'http://example.com/#4'.
+ * Result: We expect the first cell to contain the pinned site 'http://example3.com/'.
+ *         The second cell contains 'http://example2.com/'. The third cell is empty.
+ *         The fourth cell contains the pinned site 'http://example4.com/'.
  */
 function checkGrid(aSitesPattern, aSites) {
   let length = aSitesPattern.split(",").length;
@@ -317,13 +408,12 @@ function checkGrid(aSitesPattern, aSites) {
       return "";
 
     let pinned = aSite.isPinned();
-    let pinButton = aSite.node.querySelector(".newtab-control-pin");
-    let hasPinnedAttr = pinButton.hasAttribute("pinned");
+    let hasPinnedAttr = aSite.node.hasAttribute("pinned");
 
     if (pinned != hasPinnedAttr)
       ok(false, "invalid state (site.isPinned() != site[pinned])");
 
-    return aSite.url.replace(/^http:\/\/example\.com\/#(\d+)$/, "$1") + (pinned ? "p" : "");
+    return aSite.url.replace(/^http:\/\/example(\d+)\.com\/$/, "$1") + (pinned ? "p" : "");
   });
 
   is(current, aSitesPattern, "grid status = " + aSitesPattern);
@@ -440,7 +530,7 @@ function startAndCompleteDragOperation(aSource, aDest, aCallback) {
  */
 function createExternalDropIframe() {
   const url = "data:text/html;charset=utf-8," +
-              "<a id='link' href='http://example.com/%2399'>link</a>";
+              "<a id='link' href='http://example99.com/'>link</a>";
 
   let deferred = Promise.defer();
   let doc = getContentDocument();
@@ -448,6 +538,8 @@ function createExternalDropIframe() {
   iframe.setAttribute("src", url);
   iframe.style.width = "50px";
   iframe.style.height = "50px";
+  iframe.style.position = "absolute";
+  iframe.style.zIndex = 50;
 
   let margin = doc.getElementById("newtab-margin-top");
   margin.appendChild(iframe);
@@ -553,17 +645,14 @@ function createDragEvent(aEventType, aData) {
 /**
  * Resumes testing when all pages have been updated.
  * @param aCallback Called when done. If not specified, TestRunner.next is used.
- * @param aOnlyIfHidden If true, this resumes testing only when an update that
- *                      applies to pre-loaded, hidden pages is observed.  If
- *                      false, this resumes testing when any update is observed.
  */
-function whenPagesUpdated(aCallback, aOnlyIfHidden=false) {
+function whenPagesUpdated(aCallback = TestRunner.next) {
   let page = {
-    update: function (onlyIfHidden=false) {
-      if (onlyIfHidden == aOnlyIfHidden) {
-        NewTabUtils.allPages.unregister(this);
-        executeSoon(aCallback || TestRunner.next);
-      }
+    observe: _ => _,
+
+    update() {
+      NewTabUtils.allPages.unregister(this);
+      executeSoon(aCallback);
     }
   };
 
@@ -574,33 +663,50 @@ function whenPagesUpdated(aCallback, aOnlyIfHidden=false) {
 }
 
 /**
- * Waits a small amount of time for search events to stop occurring in the
- * newtab page.
- *
- * newtab pages receive some search events around load time that are difficult
- * to predict.  There are two categories of such events: (1) "State" events
- * triggered by engine notifications like engine-changed, due to the search
- * service initializing itself on app startup.  This can happen when a test is
- * the first test to run.  (2) "State" events triggered by the newtab page
- * itself when gSearch first sets itself up.  newtab preloading makes these a
- * pain to predict.
+ * Waits for the response to the page's initial search state request.
  */
 function whenSearchInitDone() {
-  info("Waiting for initial search events...");
-  let numTicks = 0;
-  function reset(event) {
-    info("Got initial search event " + event.detail.type +
-         ", waiting for more...");
-    numTicks = 0;
+  let deferred = Promise.defer();
+  if (getContentWindow().gSearch._initialStateReceived) {
+    return Promise.resolve();
   }
   let eventName = "ContentSearchService";
-  getContentWindow().addEventListener(eventName, reset);
-  let interval = window.setInterval(() => {
-    if (++numTicks >= 100) {
-      info("Done waiting for initial search events");
-      window.clearInterval(interval);
-      getContentWindow().removeEventListener(eventName, reset);
-      TestRunner.next();
+  getContentWindow().addEventListener(eventName, function onEvent(event) {
+    if (event.detail.type == "State") {
+      getContentWindow().removeEventListener(eventName, onEvent);
+      deferred.resolve();
     }
-  }, 0);
+  });
+  return deferred.promise;
+}
+
+/**
+ * Changes the newtab customization option and waits for the panel to open and close
+ *
+ * @param {string} aTheme
+ *        Can be any of("blank"|"classic"|"enhanced")
+ */
+function customizeNewTabPage(aTheme) {
+  let document = getContentDocument();
+  let panel = document.getElementById("newtab-customize-panel");
+  let customizeButton = document.getElementById("newtab-customize-button");
+
+  // Attache onShown the listener on panel
+  panel.addEventListener("popupshown", function onShown() {
+    panel.removeEventListener("popupshown", onShown);
+
+    // Get the element for the specific option and click on it,
+    // then trigger an escape to close the panel
+    document.getElementById("newtab-customize-" + aTheme).click();
+    executeSoon(() => { panel.hidePopup(); });
+  });
+
+  // Attache the listener for panel closing, this will resolve the promise
+  panel.addEventListener("popuphidden", function onHidden() {
+    panel.removeEventListener("popuphidden", onHidden);
+    executeSoon(TestRunner.next);
+  });
+
+  // Click on the customize button to display the panel
+  customizeButton.click();
 }

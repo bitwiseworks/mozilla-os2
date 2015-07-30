@@ -11,22 +11,27 @@
 
 #include "gc/Zone.h"
 
+#include "vm/Symbol.h"
+
 namespace js {
 
-#ifdef DEBUG
-
-bool
-HeapValue::preconditionForSet(Zone* zone)
+void
+ValueReadBarrier(const Value& value)
 {
-    if (!value.isMarkable())
-        return true;
-
-    return ZoneOfValue(value) == zone ||
-           zone->runtimeFromAnyThread()->isAtomsZone(ZoneOfValue(value));
+    MOZ_ASSERT(!CurrentThreadIsIonCompiling());
+    if (value.isObject())
+        JSObject::readBarrier(&value.toObject());
+    else if (value.isString())
+        JSString::readBarrier(value.toString());
+    else if (value.isSymbol())
+        JS::Symbol::readBarrier(value.toSymbol());
+    else
+        MOZ_ASSERT(!value.isMarkable());
 }
 
+#ifdef DEBUG
 bool
-HeapSlot::preconditionForSet(JSObject* owner, Kind kind, uint32_t slot)
+HeapSlot::preconditionForSet(NativeObject* owner, Kind kind, uint32_t slot)
 {
     return kind == Slot
          ? &owner->getSlotRef(slot) == this
@@ -34,7 +39,7 @@ HeapSlot::preconditionForSet(JSObject* owner, Kind kind, uint32_t slot)
 }
 
 bool
-HeapSlot::preconditionForSet(Zone* zone, JSObject* owner, Kind kind, uint32_t slot)
+HeapSlot::preconditionForSet(Zone* zone, NativeObject* owner, Kind kind, uint32_t slot)
 {
     bool ok = kind == Slot
             ? &owner->getSlotRef(slot) == this
@@ -42,12 +47,12 @@ HeapSlot::preconditionForSet(Zone* zone, JSObject* owner, Kind kind, uint32_t sl
     return ok && owner->zone() == zone;
 }
 
-void
-HeapSlot::preconditionForWriteBarrierPost(JSObject* obj, Kind kind, uint32_t slot, Value target)
+bool
+HeapSlot::preconditionForWriteBarrierPost(NativeObject* obj, Kind kind, uint32_t slot, Value target) const
 {
-    JS_ASSERT_IF(kind == Slot, obj->getSlotAddressUnchecked(slot)->get() == target);
-    JS_ASSERT_IF(kind == Element,
-                 static_cast<HeapSlot*>(obj->getDenseElements() + slot)->get() == target);
+    return kind == Slot
+         ? obj->getSlotAddressUnchecked(slot)->get() == target
+         : static_cast<HeapSlot*>(obj->getDenseElements() + slot)->get() == target;
 }
 
 bool
@@ -55,12 +60,31 @@ RuntimeFromMainThreadIsHeapMajorCollecting(JS::shadow::Zone* shadowZone)
 {
     return shadowZone->runtimeFromMainThread()->isHeapMajorCollecting();
 }
+
+bool
+CurrentThreadIsIonCompiling()
+{
+    return TlsPerThreadData.get()->ionCompiling;
+}
+
+bool
+CurrentThreadIsGCSweeping()
+{
+    return js::TlsPerThreadData.get()->gcSweeping;
+}
+
 #endif // DEBUG
 
 bool
 StringIsPermanentAtom(JSString* str)
 {
     return str->isPermanentAtom();
+}
+
+bool
+SymbolIsWellKnown(JS::Symbol* sym)
+{
+    return sym->isWellKnownSymbol();
 }
 
 } // namespace js

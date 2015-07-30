@@ -58,8 +58,33 @@ this.TabCrashReporter = {
     if (!dumpID)
       return
 
-    if (CrashSubmit.submit(dumpID)) {
+    if (CrashSubmit.submit(dumpID, { recordSubmission: true })) {
       this.childMap.set(childID, null); // Avoid resubmission.
+      this.removeSubmitCheckboxesForSameCrash(childID);
+    }
+  },
+
+  removeSubmitCheckboxesForSameCrash: function(childID) {
+    let enumerator = Services.wm.getEnumerator("navigator:browser");
+    while (enumerator.hasMoreElements()) {
+      let window = enumerator.getNext();
+      if (!window.gMultiProcessBrowser)
+        continue;
+
+      for (let browser of window.gBrowser.browsers) {
+        if (browser.isRemoteBrowser)
+          continue;
+
+        let doc = browser.contentDocument;
+        if (!doc.documentURI.startsWith("about:tabcrashed"))
+          continue;
+
+        if (this.browserMap.get(browser) == childID) {
+          this.browserMap.delete(browser);
+          browser.contentDocument.documentElement.classList.remove("crashDumpAvailable");
+          browser.contentDocument.documentElement.classList.add("crashDumpSubmitted");
+        }
+      }
     }
   },
 
@@ -71,6 +96,6 @@ this.TabCrashReporter = {
     if (!dumpID)
       return;
 
-    aBrowser.contentDocument.documentElement.classList.add("crashDumpAvaible");
+    aBrowser.contentDocument.documentElement.classList.add("crashDumpAvailable");
   }
 }

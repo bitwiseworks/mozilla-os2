@@ -75,29 +75,18 @@ this.AutoCompleteE10S = {
     messageManager.addMessageListener("FormAutoComplete:ClosePopup", this);
   },
 
-  search: function(message) {
-    let browserWindow = message.target.ownerDocument.defaultView;
+  _initPopup: function(browserWindow, rect) {
     this.browser = browserWindow.gBrowser.selectedBrowser;
     this.popup = this.browser.autoCompletePopup;
     this.popup.hidden = false;
-    this.popup.setAttribute("width", message.data.width);
+    this.popup.setAttribute("width", rect.width);
 
-    let rect = message.data;
     let {x, y} = this.browser.mapScreenCoordinatesFromContent(rect.left, rect.top + rect.height);
     this.x = x;
     this.y = y;
-
-    let formAutoComplete = Cc["@mozilla.org/satchel/form-autocomplete;1"]
-                             .getService(Ci.nsIFormAutoComplete);
-
-    formAutoComplete.autoCompleteSearchAsync(message.data.inputName,
-                                             message.data.untrimmedSearchString,
-                                             null,
-                                             null,
-                                             this.onSearchComplete.bind(this));
   },
 
-  onSearchComplete: function(results) {
+  _showPopup: function(results) {
     AutoCompleteE10SView.clearResults();
 
     let resultsArray = [];
@@ -110,24 +99,58 @@ this.AutoCompleteE10S = {
 
     this.popup.view = AutoCompleteE10SView;
 
-    this.browser.messageManager.sendAsyncMessage(
-      "FormAutoComplete:AutoCompleteSearchAsyncResult",
-      {results: resultsArray}
-    );
-
     this.popup.selectedIndex = -1;
     this.popup.invalidate();
 
     if (count > 0) {
+      // Reset fields that were set from the last time the search popup was open
+      this.popup.mInput = null;
+      this.popup.showCommentColumn = false;
+      this.popup.showImageColumn = false;
       this.popup.openPopupAtScreen(this.x, this.y, true);
-      // Bug 947503 - This openPopup call is not triggering the "popupshowing"
-      // event, which autocomplete.xml uses to track the openness of the popup
-      // by setting its mPopupOpen flag. This flag needs to be properly set
-      // for closePopup to work. For now, we set it manually.
-      this.popup.mPopupOpen = true;
     } else {
       this.popup.closePopup();
     }
+
+    return resultsArray;
+  },
+
+  // This function is used by the login manager, which uses a single message
+  // to fill in the autocomplete results. See
+  // "RemoteLogins:autoCompleteLogins".
+  showPopupWithResults: function(browserWindow, rect, results) {
+    this._initPopup(browserWindow, rect);
+    this._showPopup(results);
+  },
+
+  // This function is called in response to AutoComplete requests from the
+  // child (received via the message manager, see
+  // "FormHistory:AutoCompleteSearchAsync").
+  search: function(message) {
+    let browserWindow = message.target.ownerDocument.defaultView;
+    let rect = message.data;
+
+    this._initPopup(browserWindow, rect);
+
+    let formAutoComplete = Cc["@mozilla.org/satchel/form-autocomplete;1"]
+                             .getService(Ci.nsIFormAutoComplete);
+
+    formAutoComplete.autoCompleteSearchAsync(message.data.inputName,
+                                             message.data.untrimmedSearchString,
+                                             null,
+                                             null,
+                                             this.onSearchComplete.bind(this));
+  },
+
+  // The second half of search, this fills in the popup and returns the
+  // results to the child.
+  onSearchComplete: function(results) {
+    let resultsArray = this._showPopup(results);
+
+    this.browser.messageManager.sendAsyncMessage(
+      "FormAutoComplete:AutoCompleteSearchAsyncResult",
+      {results: resultsArray}
+    );
   },
 
   receiveMessage: function(message) {

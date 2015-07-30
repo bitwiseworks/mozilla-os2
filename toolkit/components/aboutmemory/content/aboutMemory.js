@@ -1,4 +1,4 @@
-/* -*- Mode: js2; tab-width: 8; indent-tabs-mode: nil; js2-basic-offset: 2 -*-*/
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*-*/
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -26,6 +26,7 @@ const CC = Components.Constructor;
 const KIND_NONHEAP           = Ci.nsIMemoryReporter.KIND_NONHEAP;
 const KIND_HEAP              = Ci.nsIMemoryReporter.KIND_HEAP;
 const KIND_OTHER             = Ci.nsIMemoryReporter.KIND_OTHER;
+
 const UNITS_BYTES            = Ci.nsIMemoryReporter.UNITS_BYTES;
 const UNITS_COUNT            = Ci.nsIMemoryReporter.UNITS_COUNT;
 const UNITS_COUNT_CUMULATIVE = Ci.nsIMemoryReporter.UNITS_COUNT_CUMULATIVE;
@@ -48,7 +49,10 @@ XPCOMUtils.defineLazyGetter(this, "nsGzipConverter",
 let gMgr = Cc["@mozilla.org/memory-reporter-manager;1"]
              .getService(Ci.nsIMemoryReporterManager);
 
-let gUnnamedProcessStr = "Main Process";
+const gPageName = 'about:memory';
+document.title = gPageName;
+
+const gUnnamedProcessStr = "Main Process";
 
 let gIsDiff = false;
 
@@ -129,12 +133,20 @@ let gFooter;
 // The "verbose" checkbox.
 let gVerbose;
 
-// Values for the second argument to updateMainAndFooter.
+// The "anonymize" checkbox.
+let gAnonymize;
+
+// Values for the |aFooterAction| argument to updateTitleMainAndFooter.
 let HIDE_FOOTER = 0;
 let SHOW_FOOTER = 1;
 
-function updateMainAndFooter(aMsg, aFooterAction, aClassName)
+function updateTitleMainAndFooter(aTitleNote, aMsg, aFooterAction, aClassName)
 {
+  document.title = gPageName;
+  if (aTitleNote) {
+    document.title += " (" + aTitleNote + ")";
+  }
+
   // Clear gMain by replacing it with an empty node.
   let tmp = gMain.cloneNode(false);
   gMain.parentNode.replaceChild(tmp, gMain);
@@ -147,19 +159,26 @@ function updateMainAndFooter(aMsg, aFooterAction, aClassName)
     gMain.classList.add(gVerbose.checked ? 'verbose' : 'non-verbose');
   }
 
+  let msgElement;
   if (aMsg) {
     let className = "section"
     if (aClassName) {
       className = className + " " + aClassName;
     }
-    appendElementWithText(gMain, 'div', className, aMsg);
+    msgElement = appendElementWithText(gMain, 'div', className, aMsg);
   }
 
   switch (aFooterAction) {
    case HIDE_FOOTER:   gFooter.classList.add('hidden');    break;
    case SHOW_FOOTER:   gFooter.classList.remove('hidden'); break;
-   default: assertInput(false, "bad footer action in updateMainAndFooter");
+   default: assertInput(false, "bad footer action in updateTitleMainAndFooter");
   }
+  return msgElement;
+}
+
+function updateMainAndFooter(aMsg, aFooterAction, aClassName)
+{
+  return updateTitleMainAndFooter("", aMsg, aFooterAction, aClassName);
 }
 
 function appendTextNode(aP, aText)
@@ -271,7 +290,6 @@ function onLoad()
   const LdDesc = "Load memory reports from file and show.";
   const DfDesc = "Load memory report data from two files and show the " +
                  "difference.";
-  const RdDesc = "Read memory reports from the clipboard and show.";
 
   const SvDesc = "Save memory reports to file.";
 
@@ -290,18 +308,23 @@ function onLoad()
                             "collection log.\n" +
                             "WARNING: These logs may be large (>1GB).";
 
+  const DMDEnabledDesc = "Analyze memory reports coverage and save the " +
+                         "output to the temp directory.\n";
+  const DMDDisabledDesc = "DMD is not running. Please re-start with $DMD and " +
+                          "the other relevant environment variables set " +
+                          "appropriately.";
+
   let ops = appendElement(header, "div", "");
 
   let row1 = appendElement(ops, "div", "opsRow");
 
-  let labelDiv =
+  let labelDiv1 =
    appendElementWithText(row1, "div", "opsRowLabel", "Show memory reports");
-  let label = appendElementWithText(labelDiv, "label", "");
-  gVerbose = appendElement(label, "input", "");
+  let label1 = appendElementWithText(labelDiv1, "label", "");
+  gVerbose = appendElement(label1, "input", "");
   gVerbose.type = "checkbox";
   gVerbose.id = "verbose";   // used for testing
-
-  appendTextNode(label, "verbose");
+  appendTextNode(label1, "verbose");
 
   const kEllipsis = "\u2026";
 
@@ -310,13 +333,19 @@ function onLoad()
   appendButton(row1, LdDesc, () => fileInput1.click(), "Load" + kEllipsis);
   appendButton(row1, DfDesc, () => fileInput2.click(),
                "Load and diff" + kEllipsis);
-  appendButton(row1, RdDesc, updateAboutMemoryFromClipboard,
-               "Read from clipboard");
 
   let row2 = appendElement(ops, "div", "opsRow");
 
-  appendElementWithText(row2, "div", "opsRowLabel", "Save memory reports");
+  let labelDiv2 =
+    appendElementWithText(row2, "div", "opsRowLabel", "Save memory reports");
   appendButton(row2, SvDesc, saveReportsToFile, "Measure and save" + kEllipsis);
+
+  // XXX: this isn't a great place for this checkbox, but I can't think of
+  // anywhere better.
+  let label2 = appendElementWithText(labelDiv2, "label", "");
+  gAnonymize = appendElement(label2, "input", "");
+  gAnonymize.type = "checkbox";
+  appendTextNode(label2, "anonymize");
 
   let row3 = appendElement(ops, "div", "opsRow");
 
@@ -332,6 +361,22 @@ function onLoad()
                saveGCLogAndConciseCCLog, "Save concise", 'saveLogsConcise');
   appendButton(row4, GCAndCCAllLogDesc,
                saveGCLogAndVerboseCCLog, "Save verbose", 'saveLogsVerbose');
+
+  // Three cases here:
+  // - DMD is disabled (i.e. not built): don't show the button.
+  // - DMD is enabled but is not running: show the button, but disable it.
+  // - DMD is enabled and is running: show the button and enable it.
+  if (gMgr.isDMDEnabled) {
+    let row5 = appendElement(ops, "div", "opsRow");
+
+    appendElementWithText(row5, "div", "opsRowLabel", "Save DMD output");
+    let enableButtons = gMgr.isDMDRunning;
+
+    let dmdButton =
+      appendButton(row5, enableButtons ? DMDEnabledDesc : DMDDisabledDesc,
+                   doDMD, "Save");
+    dmdButton.disabled = !enableButtons;
+  }
 
   // Generate the main div, where content ("section" divs) will go.  It's
   // hidden at first.
@@ -411,27 +456,47 @@ function saveGCLogAndVerboseCCLog()
   dumpGCLogAndCCLog(true);
 }
 
+function doDMD()
+{
+  updateMainAndFooter("Saving memory reports and DMD output...", HIDE_FOOTER);
+  try {
+    let dumper = Cc["@mozilla.org/memory-info-dumper;1"]
+                   .getService(Ci.nsIMemoryInfoDumper);
+
+    dumper.dumpMemoryInfoToTempDir(/* identifier = */ "",
+                                   gAnonymize.checked,
+                                   /* minimize = */ false);
+    updateMainAndFooter("Saved memory reports and DMD reports analysis " +
+                        "to the temp directory",
+                        HIDE_FOOTER);
+  } catch (ex) {
+    updateMainAndFooter(ex.toString(), HIDE_FOOTER);
+  }
+}
+
 function dumpGCLogAndCCLog(aVerbose)
 {
-  let gcLogPath = {};
-  let ccLogPath = {};
-
   let dumper = Cc["@mozilla.org/memory-info-dumper;1"]
                 .getService(Ci.nsIMemoryInfoDumper);
 
-  updateMainAndFooter("Saving logs...", HIDE_FOOTER);
-
-  dumper.dumpGCAndCCLogsToFile("", aVerbose, /* dumpChildProcesses = */ false,
-                               gcLogPath, ccLogPath);
-
-  updateMainAndFooter("", HIDE_FOOTER);
+  let inProgress = updateMainAndFooter("Saving logs...", HIDE_FOOTER);
   let section = appendElement(gMain, 'div', "section");
-  appendElementWithText(section, 'div', "",
-                        "Saved GC log to " + gcLogPath.value);
 
-  let ccLogType = aVerbose ? "verbose" : "concise";
-  appendElementWithText(section, 'div', "",
-                        "Saved " + ccLogType + " CC log to " + ccLogPath.value);
+  function displayInfo(gcLog, ccLog, isParent) {
+    appendElementWithText(section, 'div', "",
+                          "Saved GC log to " + gcLog.path);
+
+    let ccLogType = aVerbose ? "verbose" : "concise";
+    appendElementWithText(section, 'div', "",
+                          "Saved " + ccLogType + " CC log to " + ccLog.path);
+  }
+
+  dumper.dumpGCAndCCLogsToFile("", aVerbose, /* dumpChildProcesses = */ true,
+                               { onDump: displayInfo,
+                                 onFinish: function() {
+                                   inProgress.remove();
+                                 }
+                               });
 }
 
 /**
@@ -452,12 +517,12 @@ function updateAboutMemoryFromReporters()
       }
 
       let displayReportsAndFooter = function() {
-        updateMainAndFooter("", SHOW_FOOTER);
+        updateTitleMainAndFooter("live measurement", "", SHOW_FOOTER);
         aDisplayReports();
       }
 
-      gMgr.getReports(handleReport, null,
-                      displayReportsAndFooter, null);
+      gMgr.getReports(handleReport, null, displayReportsAndFooter, null,
+                      gAnonymize.checked);
     }
 
     // Process the reports from the live memory reporters.
@@ -473,12 +538,31 @@ function updateAboutMemoryFromReporters()
 //
 var gCurrentFileFormatVersion = 1;
 
+
+/**
+ * Parse a string as JSON and extract the |memory_report| property if it has
+ * one, which indicates the string is from a crash dump.
+ *
+ * @param aStr
+ *        The string.
+ * @return The extracted object.
+ */
+function parseAndUnwrapIfCrashDump(aStr) {
+  let obj = JSON.parse(aStr);
+  if (obj.memory_report !== undefined) {
+    // It looks like a crash dump. The memory reports should be in the
+    // |memory_report| property.
+    obj = obj.memory_report;
+  }
+  return obj;
+}
+
 /**
  * Populate about:memory using the data in the given JSON object.
  *
  * @param aObj
- *        An object containing JSON data that (hopefully!) conforms to the
- *        schema used by nsIMemoryInfoDumper.
+ *        An object that (hopefully!) conforms to the JSON schema used by
+ *        nsIMemoryInfoDumper.
  */
 function updateAboutMemoryFromJSONObject(aObj)
 {
@@ -527,7 +611,7 @@ function updateAboutMemoryFromJSONObject(aObj)
 function updateAboutMemoryFromJSONString(aStr)
 {
   try {
-    let obj = JSON.parse(aStr);
+    let obj = parseAndUnwrapIfCrashDump(aStr);
     updateAboutMemoryFromJSONObject(obj);
   } catch (ex) {
     handleException(ex);
@@ -539,10 +623,12 @@ function updateAboutMemoryFromJSONString(aStr)
  *
  * @param aFilename
  *        The name of the file being read from.
+ * @param aTitleNote
+ *        A description to put in the page title upon completion.
  * @param aFn
  *        The function to call and pass the read string to upon completion.
  */
-function loadMemoryReportsFromFile(aFilename, aFn)
+function loadMemoryReportsFromFile(aFilename, aTitleNote, aFn)
 {
   updateMainAndFooter("Loading...", HIDE_FOOTER);
 
@@ -551,7 +637,8 @@ function loadMemoryReportsFromFile(aFilename, aFn)
     reader.onerror = () => { throw "FileReader.onerror"; };
     reader.onabort = () => { throw "FileReader.onabort"; };
     reader.onload = (aEvent) => {
-      updateMainAndFooter("", SHOW_FOOTER);  // Clear "Loading..." from above.
+      // Clear "Loading..." from above.
+      updateTitleMainAndFooter(aTitleNote, "", SHOW_FOOTER);
       aFn(aEvent.target.result);
     };
 
@@ -583,7 +670,12 @@ function loadMemoryReportsFromFile(aFilename, aFn)
     }, null);
 
     let file = new nsFile(aFilename);
-    let fileChan = Services.io.newChannelFromURI(Services.io.newFileURI(file));
+    let fileChan = Services.io.newChannelFromURI2(Services.io.newFileURI(file),
+                                                  null,      // aLoadingNode
+                                                  Services.scriptSecurityManager.getSystemPrincipal(),
+                                                  null,      // aTriggeringPrincipal
+                                                  Ci.nsILoadInfo.SEC_NORMAL,
+                                                  Ci.nsIContentPolicy.TYPE_OTHER);
     fileChan.asyncOpen(converter, null);
 
   } catch (ex) {
@@ -601,7 +693,7 @@ function loadMemoryReportsFromFile(aFilename, aFn)
  */
 function updateAboutMemoryFromFile(aFilename)
 {
-  loadMemoryReportsFromFile(aFilename,
+  loadMemoryReportsFromFile(aFilename, /* title note */ aFilename,
                             updateAboutMemoryFromJSONString);
 }
 
@@ -616,11 +708,12 @@ function updateAboutMemoryFromFile(aFilename)
  */
 function updateAboutMemoryFromTwoFiles(aFilename1, aFilename2)
 {
-  loadMemoryReportsFromFile(aFilename1, function(aStr1) {
-    loadMemoryReportsFromFile(aFilename2, function f2(aStr2) {
+  let titleNote = "diff of " + aFilename1 + " and " + aFilename2;
+  loadMemoryReportsFromFile(aFilename1, titleNote, function(aStr1) {
+    loadMemoryReportsFromFile(aFilename2, titleNote, function(aStr2) {
       try {
-        let obj1 = JSON.parse(aStr1);
-        let obj2 = JSON.parse(aStr2);
+        let obj1 = parseAndUnwrapIfCrashDump(aStr1);
+        let obj2 = parseAndUnwrapIfCrashDump(aStr2);
         gIsDiff = true;
         updateAboutMemoryFromJSONObject(diffJSONObjects(obj1, obj2));
         gIsDiff = false;
@@ -629,36 +722,6 @@ function updateAboutMemoryFromTwoFiles(aFilename1, aFilename2)
       }
     });
   });
-}
-
-/**
- * Like updateAboutMemoryFromFile(), but gets its data from the clipboard
- * instead of a file.
- */
-function updateAboutMemoryFromClipboard()
-{
-  // Get the clipboard's contents.
-  let transferable = Cc["@mozilla.org/widget/transferable;1"]
-                       .createInstance(Ci.nsITransferable);
-  let loadContext = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIWebNavigation)
-                          .QueryInterface(Ci.nsILoadContext);
-  transferable.init(loadContext);
-  transferable.addDataFlavor('text/unicode');
-  Services.clipboard.getData(transferable, Ci.nsIClipboard.kGlobalClipboard);
-
-  var cbData = {};
-  try {
-    transferable.getTransferData('text/unicode', cbData,
-                                 /* out dataLen (ignored) */ {});
-    let cbString = cbData.value.QueryInterface(Ci.nsISupportsString).data;
-
-    // Success!  Now use the string to generate about:memory.
-    updateAboutMemoryFromJSONString(cbString);
-
-  } catch (ex) {
-    handleException(ex);
-  }
 }
 
 //---------------------------------------------------------------------------
@@ -747,12 +810,41 @@ function makeDReportMap(aJSONReports)
     assert(jr.amount      !== undefined, "Missing amount");
     assert(jr.description !== undefined, "Missing description");
 
-    // Strip out some non-deterministic stuff that prevents clean diffs --
-    // e.g. PIDs, addresses.
-    let strippedProcess = jr.process.replace(/pid \d+/, "pid NNN");
-    let strippedPath = jr.path.replace(/0x[0-9A-Fa-f]+/, "0xNNN");
-    let processPath = strippedProcess + kProcessPathSep + strippedPath;
+    // Strip out some non-deterministic stuff that prevents clean diffs.
+    // Ideally the memory reports themselves would contain information about
+    // which parts of the the process and path need to be stripped -- saving us
+    // from hardwiring knowledge of specific reporters here -- but we have no
+    // mechanism for that. (Any future redesign of how memory reporters work
+    // should include such a mechanism.)
 
+    // Strip PIDs:
+    // - pid 123
+    // - pid=123
+    let pidRegex = /pid([ =])\d+/g;
+    let pidSubst = "pid$1NNN";
+    let process = jr.process.replace(pidRegex, pidSubst);
+    let path = jr.path.replace(pidRegex, pidSubst);
+
+    // Strip addresses:
+    // - .../js-zone(0x12345678)/...
+    // - .../zone(0x12345678)/...
+    // - .../worker(<URL>, 0x12345678)/...
+    path = path.replace(/zone\(0x[0-9A-Fa-f]+\)\//, "zone(0xNNN)/");
+    path = path.replace(/\/worker\((.+), 0x[0-9A-Fa-f]+\)\//,
+                        "/worker($1, 0xNNN)/");
+
+    // Strip top window IDs:
+    // - explicit/window-objects/top(<URL>, id=123)/...
+    path = path.replace(/^(explicit\/window-objects\/top\(.*, id=)\d+\)/,
+                        "$1NNN)");
+
+    // Strip null principal UUIDs (but not other UUIDs, because they may be
+    // deterministic, such as those used by add-ons).
+    path = path.replace(
+      /moz-nullprincipal:{........-....-....-....-............}/g,
+      "moz-nullprincipal:{NNNNNNNN-NNNN-NNNN-NNNN-NNNNNNNNNNNN}");
+
+    let processPath = process + kProcessPathSep + path;
     let rOld = dreportMap[processPath];
     if (rOld === undefined) {
       dreportMap[processPath] =
@@ -824,7 +916,6 @@ function makeJSONReports(aDReportMap)
 
   return reports;
 }
-
 
 // Diff two JSON objects holding memory reports.
 function diffJSONObjects(aJson1, aJson2)
@@ -1024,6 +1115,7 @@ function TreeNode(aUnsafeName, aUnits, aIsDegenerate)
   // - _amount
   // - _description
   // - _hideKids (only defined if true)
+  // - _maxAbsDescendant (on-demand, only when gIsDiff is set)
 }
 
 TreeNode.prototype = {
@@ -1038,6 +1130,32 @@ TreeNode.prototype = {
     return undefined;
   },
 
+  // When gIsDiff is false, tree operations -- sorting and determining if a
+  // sub-tree is significant -- are straightforward. But when gIsDiff is true,
+  // the combination of positive and negative values within a tree complicates
+  // things. So for a non-leaf node, instead of just looking at _amount, we
+  // instead look at the maximum absolute value of the node and all of its
+  // descendants.
+  maxAbsDescendant: function() {
+    if (!this._kids) {
+      // No kids? Just return the absolute value of the amount.
+      return Math.abs(this._amount);
+    }
+
+    if ('_maxAbsDescendant' in this) {
+      // We've computed this before? Return the saved value.
+      return this._maxAbsDescendant;
+    }
+
+    // Compute the maximum absolute value of all descendants.
+    let max = Math.abs(this._amount);
+    for (let i = 0; i < this._kids.length; i++) {
+      max = Math.max(max, this._kids[i].maxAbsDescendant());
+    }
+    this._maxAbsDescendant = max;
+    return max;
+  },
+
   toString: function() {
     switch (this._units) {
       case UNITS_BYTES:            return formatBytes(this._amount);
@@ -1050,14 +1168,14 @@ TreeNode.prototype = {
   }
 };
 
-// Sort TreeNodes first by size, then by name.  This is particularly important
-// for the about:memory tests, which need a predictable ordering of reporters
-// which have the same amount.
+// Sort TreeNodes first by size, then by name.  The latter is important for the
+// about:memory tests, which need a predictable ordering of reporters which
+// have the same amount.
 TreeNode.compareAmounts = function(aA, aB) {
   let a, b;
   if (gIsDiff) {
-    a = Math.abs(aA._amount);
-    b = Math.abs(aB._amount);
+    a = aA.maxAbsDescendant();
+    b = aB.maxAbsDescendant();
   } else {
     a = aA._amount;
     b = aB._amount;
@@ -1164,6 +1282,12 @@ function addHeapUnclassifiedNode(aT, aHeapAllocatedNode, aHeapTotal)
   if (aHeapAllocatedNode === undefined)
     return false;
 
+  if (aT.findKid("heap-unclassified")) {
+    // heap-unclassified was already calculated, there's nothing left to do.
+    // This can happen when memory reports are exported from areweslimyet.com.
+    return true;
+  }
+
   assert(aHeapAllocatedNode._isDegenerate, "heap-allocated is not degenerate");
   let heapAllocatedBytes = aHeapAllocatedNode._amount;
   let heapUnclassifiedT = new TreeNode("heap-unclassified", UNITS_BYTES);
@@ -1192,8 +1316,13 @@ function sortTreeAndInsertAggregateNodes(aTotalBytes, aT)
 
   function isInsignificant(aT)
   {
-    return !gVerbose.checked &&
-           (100 * aT._amount / aTotalBytes) < kSignificanceThresholdPerc;
+    if (gVerbose.checked)
+      return false;
+
+    let perc = gIsDiff
+             ? 100 * aT.maxAbsDescendant() / Math.abs(aTotalBytes)
+             : 100 * aT._amount / aTotalBytes;
+    return perc < kSignificanceThresholdPerc;
   }
 
   if (!aT._kids) {
@@ -1877,12 +2006,11 @@ function saveReportsToFile()
   let fpFinish = function(file) {
     let dumper = Cc["@mozilla.org/memory-info-dumper;1"]
                    .getService(Ci.nsIMemoryInfoDumper);
-
     let finishDumping = () => {
-      updateMainAndFooter("Saved reports to " + file.path, HIDE_FOOTER);
+      updateMainAndFooter("Saved memory reports to " + file.path, HIDE_FOOTER);
     }
-
-    dumper.dumpMemoryReportsToNamedFile(file.path, finishDumping, null);
+    dumper.dumpMemoryReportsToNamedFile(file.path, finishDumping, null,
+                                        gAnonymize.checked);
   }
 
   let fpCallback = function(aResult) {

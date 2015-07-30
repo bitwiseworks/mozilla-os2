@@ -89,7 +89,7 @@ protected:
   class TimeReferenceElement : public nsReferencedElement
   {
   public:
-    TimeReferenceElement(nsSMILTimeValueSpec* aOwner) : mSpec(aOwner) { }
+    explicit TimeReferenceElement(nsSMILTimeValueSpec* aOwner) : mSpec(aOwner) { }
     void ResetWithElement(Element* aTo) {
       nsRefPtr<Element> from = get();
       Unlink();
@@ -97,22 +97,23 @@ protected:
     }
 
   protected:
-    virtual void ElementChanged(Element* aFrom, Element* aTo) MOZ_OVERRIDE
+    virtual void ElementChanged(Element* aFrom, Element* aTo) override
     {
       nsReferencedElement::ElementChanged(aFrom, aTo);
       mSpec->UpdateReferencedElement(aFrom, aTo);
     }
-    virtual bool IsPersistent() MOZ_OVERRIDE { return true; }
+    virtual bool IsPersistent() override { return true; }
   private:
     nsSMILTimeValueSpec* mSpec;
   };
 
   TimeReferenceElement mReferencedElement;
 
-  class EventListener MOZ_FINAL : public nsIDOMEventListener
+  class EventListener final : public nsIDOMEventListener
   {
+    ~EventListener() {}
   public:
-    EventListener(nsSMILTimeValueSpec* aOwner) : mSpec(aOwner) { }
+    explicit EventListener(nsSMILTimeValueSpec* aOwner) : mSpec(aOwner) { }
     void Disconnect()
     {
       mSpec = nullptr;

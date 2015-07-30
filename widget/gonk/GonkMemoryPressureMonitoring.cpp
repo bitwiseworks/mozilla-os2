@@ -127,6 +127,8 @@ public:
     }
 #endif
 
+    NS_SetIgnoreStatusOfCurrentThread();
+
     int lowMemFd = open("/sys/kernel/mm/lowmemkiller/notify_trigger_active",
                         O_RDONLY | O_CLOEXEC);
     NS_ENSURE_STATE(lowMemFd != -1);
@@ -284,7 +286,8 @@ InitGonkMemoryPressureMonitoring()
   NS_ENSURE_SUCCESS_VOID(memoryPressureWatcher->Init());
 
   nsCOMPtr<nsIThread> thread;
-  NS_NewThread(getter_AddRefs(thread), memoryPressureWatcher);
+  NS_NewNamedThread("MemoryPressure", getter_AddRefs(thread),
+                    memoryPressureWatcher);
 }
 
 } // namespace mozilla

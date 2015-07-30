@@ -6,56 +6,58 @@
 #ifndef mozilla_dom_telephony_TelephonyChild_h
 #define mozilla_dom_telephony_TelephonyChild_h
 
-#include "mozilla/dom/telephony/TelephonyCommon.h"
 #include "mozilla/dom/telephony/PTelephonyChild.h"
 #include "mozilla/dom/telephony/PTelephonyRequestChild.h"
-#include "nsITelephonyProvider.h"
+#include "mozilla/dom/telephony/TelephonyCommon.h"
+#include "nsITelephonyCallInfo.h"
+#include "nsITelephonyService.h"
 
 BEGIN_TELEPHONY_NAMESPACE
+
+class TelephonyIPCService;
 
 class TelephonyChild : public PTelephonyChild
 {
 public:
-  TelephonyChild(nsITelephonyListener* aListener);
+  explicit TelephonyChild(TelephonyIPCService* aService);
 
 protected:
-  virtual ~TelephonyChild() {}
+  virtual ~TelephonyChild();
 
   virtual void
-  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+  ActorDestroy(ActorDestroyReason aWhy) override;
 
   virtual PTelephonyRequestChild*
-  AllocPTelephonyRequestChild(const IPCTelephonyRequest& aRequest) MOZ_OVERRIDE;
+  AllocPTelephonyRequestChild(const IPCTelephonyRequest& aRequest) override;
 
   virtual bool
-  DeallocPTelephonyRequestChild(PTelephonyRequestChild* aActor) MOZ_OVERRIDE;
+  DeallocPTelephonyRequestChild(PTelephonyRequestChild* aActor) override;
 
   virtual bool
   RecvNotifyCallError(const uint32_t& aClientId, const int32_t& aCallIndex,
-                      const nsString& aError) MOZ_OVERRIDE;
+                      const nsString& aError) override;
 
   virtual bool
-  RecvNotifyCallStateChanged(const uint32_t& aClientId,
-                             const IPCCallStateData& aData) MOZ_OVERRIDE;
+  RecvNotifyCallStateChanged(nsITelephonyCallInfo* const& aInfo) override;
 
   virtual bool
   RecvNotifyCdmaCallWaiting(const uint32_t& aClientId,
-                            const nsString& aNumber) MOZ_OVERRIDE;
+                            const IPCCdmaWaitingCallData& aData) override;
 
   virtual bool
-  RecvNotifyConferenceCallStateChanged(const uint16_t& aCallState) MOZ_OVERRIDE;
+  RecvNotifyConferenceCallStateChanged(const uint16_t& aCallState) override;
 
   virtual bool
   RecvNotifyConferenceError(const nsString& aName,
-                            const nsString& aMessage) MOZ_OVERRIDE;
+                            const nsString& aMessage) override;
 
   virtual bool
   RecvNotifySupplementaryService(const uint32_t& aClientId,
                                  const int32_t& aCallIndex,
-                                 const uint16_t& aNotification) MOZ_OVERRIDE;
+                                 const uint16_t& aNotification) override;
 
 private:
-  nsCOMPtr<nsITelephonyListener> mListener;
+  nsRefPtr<TelephonyIPCService> mService;
 };
 
 class TelephonyRequestChild : public PTelephonyRequestChild
@@ -68,22 +70,33 @@ protected:
   virtual ~TelephonyRequestChild() {}
 
   virtual void
-  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+  ActorDestroy(ActorDestroyReason aWhy) override;
 
   virtual bool
-  Recv__delete__(const IPCTelephonyResponse& aResponse) MOZ_OVERRIDE;
+  Recv__delete__(const IPCTelephonyResponse& aResponse) override;
 
   virtual bool
-  RecvNotifyEnumerateCallState(const uint32_t& aClientId,
-                               const IPCCallStateData& aData) MOZ_OVERRIDE;
+  RecvNotifyEnumerateCallState(nsITelephonyCallInfo* const& aInfo) override;
 
   virtual bool
-  RecvNotifyDialError(const nsString& aError) MOZ_OVERRIDE;
-
-  virtual bool
-  RecvNotifyDialSuccess() MOZ_OVERRIDE;
+  RecvNotifyDialMMI(const nsString& aServiceCode) override;
 
 private:
+  bool
+  DoResponse(const SuccessResponse& aResponse);
+
+  bool
+  DoResponse(const ErrorResponse& aResponse);
+
+  bool
+  DoResponse(const DialResponseCallSuccess& aResponse);
+
+  bool
+  DoResponse(const DialResponseMMISuccess& aResponse);
+
+  bool
+  DoResponse(const DialResponseMMIError& aResponse);
+
   nsCOMPtr<nsITelephonyListener> mListener;
   nsCOMPtr<nsITelephonyCallback> mCallback;
 };

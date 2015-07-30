@@ -9,14 +9,18 @@
  */
 
 
-#ifndef __INC_BLOCK_H
-#define __INC_BLOCK_H
+#ifndef VP8_ENCODER_BLOCK_H_
+#define VP8_ENCODER_BLOCK_H_
 
 #include "vp8/common/onyx.h"
 #include "vp8/common/blockd.h"
 #include "vp8/common/entropymv.h"
 #include "vp8/common/entropy.h"
 #include "vpx_ports/mem.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define MAX_MODES 20
 #define MAX_ERROR_BINS 1024
@@ -94,7 +98,8 @@ typedef struct macroblock
     signed int last_act_zbin_adj;
 
     int *mvcost[2];
-    int *mvsadcost[2];
+    /* MSVC generates code that thinks this is 16-byte aligned */
+    DECLARE_ALIGNED(16, int*, mvsadcost[2]);
     int (*mbmode_cost)[MB_MODE_COUNT];
     int (*intra_uv_mode_cost)[MB_MODE_COUNT];
     int (*bmode_costs)[10][10];
@@ -123,6 +128,7 @@ typedef struct macroblock
     int q_index;
 
 #if CONFIG_TEMPORAL_DENOISING
+    int increase_denoising;
     MB_PREDICTION_MODE best_sse_inter_mode;
     int_mv best_sse_mv;
     MV_REFERENCE_FRAME best_reference_frame;
@@ -160,4 +166,8 @@ typedef struct macroblock
 } MACROBLOCK;
 
 
+#ifdef __cplusplus
+}  // extern "C"
 #endif
+
+#endif  // VP8_ENCODER_BLOCK_H_

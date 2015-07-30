@@ -46,20 +46,32 @@ if test -z "$BUILDING_JS" -o -n "$JS_STANDALONE"; then
       # autotools can't quite handle an MSVC build environment yet.
       LDFLAGS=
       CFLAGS=
-      ac_configure_args="$ac_configure_args LD=link CPP=\"cl -nologo -EP\" SHELL=sh.exe"
+      ac_configure_args="$ac_configure_args LD=link CPP=\"$CC -nologo -EP\" \
+                         CXXCPP=\"$CXX -nologo -EP\" SHELL=sh.exe"
+      flags=
+      if test -z "$MOZ_NO_DEBUG_RTL" -a -n "$MOZ_DEBUG"; then
+        flags=" -DUSE_DEBUG_RTL"
+      fi
+      if test -n "$CLANG_CL"; then
+        flags="$flags -clang-cl"
+      fi
       case "${target_cpu}" in
       x86_64)
         # Need target since MSYS tools into mozilla-build may be 32bit
-        ac_configure_args="$ac_configure_args CC=\"$_topsrcdir/js/src/ctypes/libffi/msvcc.sh -m64\""
+        ac_configure_args="$ac_configure_args \
+                           CC=\"$_topsrcdir/js/src/ctypes/libffi/msvcc.sh -m64$flags\" \
+                           CXX=\"$_topsrcdir/js/src/ctypes/libffi/msvcc.sh -m64$flags\""
         ;;
       *)
-        ac_configure_args="$ac_configure_args CC=$_topsrcdir/js/src/ctypes/libffi/msvcc.sh"
+        ac_configure_args="$ac_configure_args \
+                           CC=\"$_topsrcdir/js/src/ctypes/libffi/msvcc.sh$flags\" \
+                           CXX=\"$_topsrcdir/js/src/ctypes/libffi/msvcc.sh$flags\""
         ;;
       esac
     fi
     if test "$SOLARIS_SUNPRO_CC"; then
       # Always use gcc for libffi on Solaris
-      if test ! "$HAVE_64BIT_OS"; then
+      if test ! "$HAVE_64BIT_BUILD"; then
         ac_configure_args="$ac_configure_args CC=gcc CFLAGS=-m32 LD= LDFLAGS="
       else
         ac_configure_args="$ac_configure_args CC=gcc CFLAGS=-m64 LD= LDFLAGS="
@@ -67,7 +79,7 @@ if test -z "$BUILDING_JS" -o -n "$JS_STANDALONE"; then
     fi
     if test "$AIX_IBM_XLC"; then
       # Always use gcc for libffi on IBM AIX5/AIX6
-      if test ! "$HAVE_64BIT_OS"; then
+      if test ! "$HAVE_64BIT_BUILD"; then
         ac_configure_args="$ac_configure_args CC=gcc CFLAGS=-maix32"
       else
         ac_configure_args="$ac_configure_args CC=gcc CFLAGS=-maix64"
@@ -76,13 +88,9 @@ if test -z "$BUILDING_JS" -o -n "$JS_STANDALONE"; then
 
     # Use a separate cache file for libffi, since it does things differently
     # from our configure.
-    mkdir -p $_objdir/js/src/ctypes/libffi
-    old_cache_file=$cache_file
-    cache_file=$_objdir/js/src/ctypes/libffi/config.cache
     old_config_files=$CONFIG_FILES
     unset CONFIG_FILES
     AC_OUTPUT_SUBDIRS(js/src/ctypes/libffi)
-    cache_file=$old_cache_file
     ac_configure_args="$_SUBDIR_CONFIG_ARGS"
     CONFIG_FILES=$old_config_files
   fi

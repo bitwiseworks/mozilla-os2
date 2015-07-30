@@ -9,11 +9,13 @@
 
 #include "jscntxt.h"
 
+#include "gc/Zone.h"
+
 namespace js {
 
 /*
  * Used to add entries to a js::HashMap or HashSet where the key depends on a GC
- * thing that may be moved by generational collection between the call to
+ * thing that may be moved by generational or compacting GC between the call to
  * lookupForAdd() and relookupOrAdd().
  */
 template <class T>
@@ -25,38 +27,30 @@ struct DependentAddPtr
     template <class Lookup>
     DependentAddPtr(const ExclusiveContext* cx, const T& table, const Lookup& lookup)
       : addPtr(table.lookupForAdd(lookup))
-#ifdef JSGC_GENERATIONAL
       , originalGcNumber(cx->zone()->gcNumber())
-#endif
-        {}
+    {}
 
     template <class KeyInput, class ValueInput>
     bool add(const ExclusiveContext* cx, T& table, const KeyInput& key, const ValueInput& value) {
-#ifdef JSGC_GENERATIONAL
         bool gcHappened = originalGcNumber != cx->zone()->gcNumber();
         if (gcHappened)
             addPtr = table.lookupForAdd(key);
-#endif
         return table.relookupOrAdd(addPtr, key, value);
     }
 
-    typedef void (DependentAddPtr::* ConvertibleToBool)();
-    void nonNull() {}
 
     bool found() const                 { return addPtr.found(); }
-    operator ConvertibleToBool() const { return found() ? &DependentAddPtr::nonNull : 0; }
+    explicit operator bool() const     { return found(); }
     const Entry& operator*() const     { return *addPtr; }
     const Entry* operator->() const    { return &*addPtr; }
 
   private:
     AddPtr addPtr ;
-#ifdef JSGC_GENERATIONAL
     const uint64_t originalGcNumber;
-#endif
 
-    DependentAddPtr() MOZ_DELETE;
-    DependentAddPtr(const DependentAddPtr&) MOZ_DELETE;
-    DependentAddPtr& operator=(const DependentAddPtr&) MOZ_DELETE;
+    DependentAddPtr() = delete;
+    DependentAddPtr(const DependentAddPtr&) = delete;
+    DependentAddPtr& operator=(const DependentAddPtr&) = delete;
 };
 
 } // namespace js

@@ -16,11 +16,10 @@ class GamepadButton : public nsISupports,
                       public nsWrapperCache
 {
 public:
-  GamepadButton(nsISupports* aParent) : mParent(aParent),
-                                        mPressed(false),
-                                        mValue(0)
+  explicit GamepadButton(nsISupports* aParent) : mParent(aParent),
+                                                 mPressed(false),
+                                                 mValue(0)
   {
-    SetIsDOMBinding();
   }
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -31,7 +30,7 @@ public:
     return mParent;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) override;
 
   void SetPressed(bool aPressed)
   {

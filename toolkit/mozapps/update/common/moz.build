@@ -18,10 +18,10 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
         'updatehelper.h',
     ]
 
-LIBRARY_NAME = 'updatecommon'
+Library('updatecommon')
 
 srcdir = '.'
 
 include('sources.mozbuild')
 
-FINAL_LIBRARY = 'xulapp_s'
+FINAL_LIBRARY = 'xul'

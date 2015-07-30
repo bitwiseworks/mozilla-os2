@@ -69,14 +69,14 @@ public:
     gfxImageSurface(const gfxIntSize& aSize, gfxImageFormat aFormat,
                     long aStride, int32_t aMinimalAllocation, bool aClear);
 
-    gfxImageSurface(cairo_surface_t *csurf);
+    explicit gfxImageSurface(cairo_surface_t *csurf);
 
     virtual ~gfxImageSurface();
 
     // ImageSurface methods
     gfxImageFormat Format() const { return mFormat; }
 
-    virtual const gfxIntSize GetSize() const { return mSize; }
+    virtual const gfxIntSize GetSize() const override { return mSize; }
     int32_t Width() const { return mSize.width; }
     int32_t Height() const { return mSize.height; }
 
@@ -121,19 +121,16 @@ public:
      */
     already_AddRefed<gfxSubimageSurface> GetSubimage(const gfxRect& aRect);
 
-    virtual already_AddRefed<gfxImageSurface> GetAsImageSurface();
+    virtual already_AddRefed<gfxImageSurface> GetAsImageSurface() override;
 
     /** See gfxASurface.h. */
-    virtual void MovePixels(const nsIntRect& aSourceRect,
-                            const nsIntPoint& aDestTopLeft) MOZ_OVERRIDE;
-
     static long ComputeStride(const gfxIntSize&, gfxImageFormat);
 
     virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
-        MOZ_OVERRIDE;
+        override;
     virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
-        MOZ_OVERRIDE;
-    virtual bool SizeOfIsMeasured() const MOZ_OVERRIDE;
+        override;
+    virtual bool SizeOfIsMeasured() const override;
 
 protected:
     gfxImageSurface();

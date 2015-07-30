@@ -97,8 +97,6 @@ public:
     AudioDeviceLinuxPulse(const int32_t id);
     virtual ~AudioDeviceLinuxPulse();
 
-    static bool PulseAudioIsSupported();
-
     // Retrieve the currently utilized audio layer
     virtual int32_t ActiveAudioLayer(
         AudioDeviceModule::AudioLayer& audioLayer) const OVERRIDE;
@@ -155,10 +153,8 @@ public:
                                   uint16_t& volumeRight) const OVERRIDE;
 
     // Audio mixer initialization
-    virtual int32_t SpeakerIsAvailable(bool& available) OVERRIDE;
     virtual int32_t InitSpeaker() OVERRIDE;
     virtual bool SpeakerIsInitialized() const OVERRIDE;
-    virtual int32_t MicrophoneIsAvailable(bool& available) OVERRIDE;
     virtual int32_t InitMicrophone() OVERRIDE;
     virtual bool MicrophoneIsInitialized() const OVERRIDE;
 
@@ -228,16 +224,12 @@ public:
     virtual void AttachAudioBuffer(AudioDeviceBuffer* audioBuffer) OVERRIDE;
 
 private:
-    void Lock()
-    {
+    void Lock() EXCLUSIVE_LOCK_FUNCTION(_critSect) {
         _critSect.Enter();
     }
-    ;
-    void UnLock()
-    {
+    void UnLock() UNLOCK_FUNCTION(_critSect) {
         _critSect.Leave();
     }
-    ;
     void WaitForOperationCompletion(pa_operation* paOperation) const;
     void WaitForSuccess(pa_operation* paOperation) const;
 

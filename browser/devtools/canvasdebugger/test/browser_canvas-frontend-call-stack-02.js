@@ -7,7 +7,7 @@
  */
 
 function ifTestingSupported() {
-  let [target, debuggee, panel] = yield initCanavsDebuggerFrontend(SIMPLE_CANVAS_DEEP_STACK_URL);
+  let { target, panel } = yield initCanvasDebuggerFrontend(SIMPLE_CANVAS_DEEP_STACK_URL);
   let { window, $, $all, EVENTS, SnapshotsListView, CallsListView } = panel.panelWin;
 
   yield reload(target);
@@ -39,7 +39,7 @@ function ifTestingSupported() {
   let toolbox = yield gDevTools.getToolbox(target);
   let { panelWin: { DebuggerView: view } } = toolbox.getPanel("jsdebugger");
 
-  is(view.Sources.selectedValue, SIMPLE_CANVAS_DEEP_STACK_URL,
+  is(view.Sources.selectedValue, getSourceActor(view.Sources, SIMPLE_CANVAS_DEEP_STACK_URL),
     "The expected source was shown in the debugger.");
   is(view.editor.getCursor().line, 23,
     "The expected source line is highlighted in the debugger.");

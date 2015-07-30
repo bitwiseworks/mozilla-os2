@@ -26,6 +26,7 @@ class WindowCapturerNull : public WindowCapturer {
   // WindowCapturer interface.
   virtual bool GetWindowList(WindowList* windows) OVERRIDE;
   virtual bool SelectWindow(WindowId id) OVERRIDE;
+  virtual bool BringSelectedWindowToFront() OVERRIDE;
 
   // DesktopCapturer interface.
   virtual void Start(Callback* callback) OVERRIDE;
@@ -54,6 +55,11 @@ bool WindowCapturerNull::SelectWindow(WindowId id) {
   return false;
 }
 
+bool WindowCapturerNull::BringSelectedWindowToFront() {
+  // Not implemented yet.
+  return false;
+}
+
 void WindowCapturerNull::Start(Callback* callback) {
   assert(!callback_);
   assert(callback);
@@ -69,7 +75,7 @@ void WindowCapturerNull::Capture(const DesktopRegion& region) {
 }  // namespace
 
 // static
-WindowCapturer* WindowCapturer::Create() {
+WindowCapturer* WindowCapturer::Create(const DesktopCaptureOptions& options) {
   return new WindowCapturerNull();
 }
 

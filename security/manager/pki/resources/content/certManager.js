@@ -16,6 +16,11 @@ const nsPKIParamBlock    = "@mozilla.org/security/pkiparamblock;1";
 const nsINSSCertCache = Components.interfaces.nsINSSCertCache;
 const nsNSSCertCache = "@mozilla.org/security/nsscertcache;1";
 
+const gCertFileTypes = "*.p7b; *.crt; *.cert; *.cer; *.pem; *.der";
+
+let { NetUtil } = Components.utils.import("resource://gre/modules/NetUtil.jsm", {});
+let { Services } = Components.utils.import("resource://gre/modules/Services.jsm", {});
+
 var key;
 
 var selected_certs = [];
@@ -29,11 +34,22 @@ var emailTreeView;
 var userTreeView;
 var orphanTreeView;
 
+var smartCardObserver = {
+  observe: function() {
+    onSmartCardChange();
+  }
+};
+
+function DeregisterSmartCardObservers()
+{
+  Services.obs.removeObserver(smartCardObserver, "smartcard-insert");
+  Services.obs.removeObserver(smartCardObserver, "smartcard-remove");
+}
+
 function LoadCerts()
 {
-  window.crypto.enableSmartCardEvents = true;
-  document.addEventListener("smartcard-insert", onSmartCardChange, false);
-  document.addEventListener("smartcard-remove", onSmartCardChange, false);
+  Services.obs.addObserver(smartCardObserver, "smartcard-insert", false);
+  Services.obs.addObserver(smartCardObserver, "smartcard-remove", false);
 
   certdb = Components.classes[nsX509CertDB].getService(nsIX509CertDB);
   var certcache = Components.classes[nsNSSCertCache].createInstance(nsINSSCertCache);
@@ -43,32 +59,27 @@ function LoadCerts()
   caTreeView = Components.classes[nsCertTree]
                     .createInstance(nsICertTree);
   caTreeView.loadCertsFromCache(certcache, nsIX509Cert.CA_CERT);
-  document.getElementById('ca-tree')
-   .treeBoxObject.view = caTreeView;
+  document.getElementById('ca-tree').view = caTreeView;
 
   serverTreeView = Components.classes[nsCertTree]
                         .createInstance(nsICertTree);
   serverTreeView.loadCertsFromCache(certcache, nsIX509Cert.SERVER_CERT);
-  document.getElementById('server-tree')
-   .treeBoxObject.view = serverTreeView;
+  document.getElementById('server-tree').view = serverTreeView;
 
   emailTreeView = Components.classes[nsCertTree]
                        .createInstance(nsICertTree);
   emailTreeView.loadCertsFromCache(certcache, nsIX509Cert.EMAIL_CERT);
-  document.getElementById('email-tree')
-   .treeBoxObject.view = emailTreeView; 
+  document.getElementById('email-tree').view = emailTreeView;
 
   userTreeView = Components.classes[nsCertTree]
                       .createInstance(nsICertTree);
   userTreeView.loadCertsFromCache(certcache, nsIX509Cert.USER_CERT);
-  document.getElementById('user-tree')
-   .treeBoxObject.view = userTreeView;
+  document.getElementById('user-tree').view = userTreeView;
 
   orphanTreeView = Components.classes[nsCertTree]
                       .createInstance(nsICertTree);
   orphanTreeView.loadCertsFromCache(certcache, nsIX509Cert.UNKNOWN_CERT);
-  document.getElementById('orphan-tree')
-   .treeBoxObject.view = orphanTreeView;
+  document.getElementById('orphan-tree').view = orphanTreeView;
 
   enableBackupAllButton();
 }
@@ -186,130 +197,100 @@ function getSelectedTreeItems()
   }
 }
 
+/**
+ * Returns true if nothing in the given cert tree is selected or if the
+ * selection includes a container. Returns false otherwise.
+ *
+ * @param {nsICertTree} certTree
+ * @returns {Boolean}
+ */
+function nothingOrContainerSelected(certTree)
+{
+  var certTreeSelection = certTree.selection;
+  var numSelectionRanges = certTreeSelection.getRangeCount();
+
+  if (numSelectionRanges == 0) {
+    return true;
+  }
+
+  for (var i = 0; i < numSelectionRanges; i++) {
+    var o1 = {};
+    var o2 = {};
+    certTreeSelection.getRangeAt(i, o1, o2);
+    var minIndex = o1.value;
+    var maxIndex = o2.value;
+    for (var j = minIndex; j <= maxIndex; j++) {
+      if (certTree.isContainer(j)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function ca_enableButtons()
 {
-  var items = caTreeView.selection;
-  var nr = items.getRangeCount();
-  var toggle="false";
-  if (nr == 0) {
-    toggle="true";
-  }
-  var edit_toggle=toggle;
-/*
-  var edit_toggle="true";
-  if (nr > 0) {
-    for (var i=0; i<nr; i++) {
-      var o1 = {};
-      var o2 = {};
-      items.getRangeAt(i, o1, o2);
-      var min = o1.value;
-      var max = o2.value;
-      var stop = false;
-      for (var j=min; j<=max; j++) {
-        var tokenName = items.tree.view.getCellText(j, "tokencol");
-	if (tokenName == "Builtin Object Token") { stop = true; } break;
-      }
-      if (stop) break;
-    }
-    if (i == nr) {
-      edit_toggle="false";
-    }
-  }
-*/
+  var disableButtons = nothingOrContainerSelected(caTreeView);
+
   var enableViewButton=document.getElementById('ca_viewButton');
-  enableViewButton.setAttribute("disabled",toggle);
+  enableViewButton.setAttribute("disabled", disableButtons);
   var enableEditButton=document.getElementById('ca_editButton');
-  enableEditButton.setAttribute("disabled",edit_toggle);
+  enableEditButton.setAttribute("disabled", disableButtons);
   var enableExportButton=document.getElementById('ca_exportButton');
-  enableExportButton.setAttribute("disabled",toggle);
+  enableExportButton.setAttribute("disabled", disableButtons);
   var enableDeleteButton=document.getElementById('ca_deleteButton');
-  enableDeleteButton.setAttribute("disabled",toggle);
+  enableDeleteButton.setAttribute("disabled", disableButtons);
 }
 
 function mine_enableButtons()
 {
-  var items = userTreeView.selection;
-  var toggle="false";
-  if (items.getRangeCount() == 0) {
-    toggle="true";
-  }
+  var disableButtons = nothingOrContainerSelected(userTreeView);
+
   var enableViewButton=document.getElementById('mine_viewButton');
-  enableViewButton.setAttribute("disabled",toggle);
+  enableViewButton.setAttribute("disabled", disableButtons);
   var enableBackupButton=document.getElementById('mine_backupButton');
-  enableBackupButton.setAttribute("disabled",toggle);
+  enableBackupButton.setAttribute("disabled", disableButtons);
   var enableDeleteButton=document.getElementById('mine_deleteButton');
-  enableDeleteButton.setAttribute("disabled",toggle);
+  enableDeleteButton.setAttribute("disabled", disableButtons);
 }
 
 function websites_enableButtons()
 {
-  var items = serverTreeView.selection;
-  var count_ranges = items.getRangeCount();
-
-  var enable_delete = false;
-  var enable_view = false;
-
-  if (count_ranges > 0) {
-    enable_delete = true;
-  }
-
-  if (count_ranges == 1) {
-    var o1 = {};
-    var o2 = {};
-    items.getRangeAt(0, o1, o2); // the first range
-    if (o1.value == o2.value) {
-      // only a single item is selected
-      try {
-        var ti = serverTreeView.getTreeItem(o1.value);
-        if (ti) {
-          if (ti.cert) {
-            enable_view = true;
-          }
-        }
-      }
-      catch (e) {
-      }
-    }
-  }
+  var disableButtons = nothingOrContainerSelected(serverTreeView);
 
   var enableViewButton=document.getElementById('websites_viewButton');
-  enableViewButton.setAttribute("disabled", !enable_view);
+  enableViewButton.setAttribute("disabled", disableButtons);
   var enableExportButton=document.getElementById('websites_exportButton');
-  enableExportButton.setAttribute("disabled", !enable_view);
+  enableExportButton.setAttribute("disabled", disableButtons);
   var enableDeleteButton=document.getElementById('websites_deleteButton');
-  enableDeleteButton.setAttribute("disabled", !enable_delete);
+  enableDeleteButton.setAttribute("disabled", disableButtons);
 }
 
 function email_enableButtons()
 {
-  var items = emailTreeView.selection;
-  var toggle="false";
-  if (items.getRangeCount() == 0) {
-    toggle="true";
-  }
+  var disableButtons = nothingOrContainerSelected(emailTreeView);
+
   var enableViewButton=document.getElementById('email_viewButton');
-  enableViewButton.setAttribute("disabled",toggle);
+  enableViewButton.setAttribute("disabled", disableButtons);
   var enableEditButton=document.getElementById('email_editButton');
-  enableEditButton.setAttribute("disabled",toggle);
+  enableEditButton.setAttribute("disabled", disableButtons);
   var enableExportButton=document.getElementById('email_exportButton');
-  enableExportButton.setAttribute("disabled",toggle);
+  enableExportButton.setAttribute("disabled", disableButtons);
   var enableDeleteButton=document.getElementById('email_deleteButton');
-  enableDeleteButton.setAttribute("disabled",toggle);
+  enableDeleteButton.setAttribute("disabled", disableButtons);
 }
 
 function orphan_enableButtons()
 {
-  var items = orphanTreeView.selection;
-  var toggle="false";
-  if (items.getRangeCount() == 0) {
-    toggle="true";
-  }
+  var disableButtons = nothingOrContainerSelected(orphanTreeView);
+
   var enableViewButton=document.getElementById('orphan_viewButton');
-  enableViewButton.setAttribute("disabled",toggle);
+  enableViewButton.setAttribute("disabled", disableButtons);
   var enableExportButton=document.getElementById('orphan_exportButton');
-  enableExportButton.setAttribute("disabled",toggle);
+  enableExportButton.setAttribute("disabled", disableButtons);
   var enableDeleteButton=document.getElementById('orphan_deleteButton');
-  enableDeleteButton.setAttribute("disabled",toggle);
+  enableDeleteButton.setAttribute("disabled", disableButtons);
 }
 
 function backupCerts()
@@ -368,9 +349,42 @@ function restoreCerts()
           nsIFilePicker.modeOpen);
   fp.appendFilter(bundle.getString("file_browse_PKCS12_spec"),
                   "*.p12; *.pfx");
+  fp.appendFilter(bundle.getString("file_browse_Certificate_spec"),
+                  gCertFileTypes);
   fp.appendFilters(nsIFilePicker.filterAll);
   if (fp.show() == nsIFilePicker.returnOK) {
-    certdb.importPKCS12File(null, fp.file);
+    // If this is an X509 user certificate, import it as one.
+
+    var isX509FileType = false;
+    var fileTypesList = gCertFileTypes.slice(1).split('; *');
+    for (var type of fileTypesList) {
+      if (fp.file.path.endsWith(type)) {
+        isX509FileType = true;
+        break;
+      }
+    }
+
+    if (isX509FileType) {
+      let fstream = Components.classes["@mozilla.org/network/file-input-stream;1"]
+                      .createInstance(Components.interfaces.nsIFileInputStream);
+      fstream.init(fp.file, -1, 0, 0);
+      let dataString = NetUtil.readInputStreamToString(fstream, fstream.available());
+      let dataArray = [];
+      for (let i = 0; i < dataString.length; i++) {
+        dataArray.push(dataString.charCodeAt(i));
+      }
+      fstream.close();
+      let prompter = Services.ww.getNewPrompter(window);
+      let interfaceRequestor = {
+        getInterface: function() {
+          return prompter;
+        }
+      };
+      certdb.importUserCertificate(dataArray, dataArray.length, interfaceRequestor);
+    } else {
+      // Otherwise, assume it's a PKCS12 file and import it that way.
+      certdb.importPKCS12File(null, fp.file);
+    }
 
     var certcache = Components.classes[nsNSSCertCache].createInstance(nsINSSCertCache);
     certcache.cacheAllCerts();
@@ -504,7 +518,7 @@ function addCACerts()
           bundle.getString("importCACertsPrompt"),
           nsIFilePicker.modeOpen);
   fp.appendFilter(bundle.getString("file_browse_Certificate_spec"),
-                  "*.crt; *.cert; *.cer; *.pem; *.der");
+                  gCertFileTypes);
   fp.appendFilters(nsIFilePicker.filterAll);
   if (fp.show() == nsIFilePicker.returnOK) {
     certdb.importCertsFromFile(null, fp.file, nsIX509Cert.CA_CERT);
@@ -539,7 +553,7 @@ function addEmailCert()
           bundle.getString("importEmailCertPrompt"),
           nsIFilePicker.modeOpen);
   fp.appendFilter(bundle.getString("file_browse_Certificate_spec"),
-                  "*.crt; *.cert; *.cer; *.pem; *.der");
+                  gCertFileTypes);
   fp.appendFilters(nsIFilePicker.filterAll);
   if (fp.show() == nsIFilePicker.returnOK) {
     certdb.importCertsFromFile(null, fp.file, nsIX509Cert.EMAIL_CERT);
@@ -560,7 +574,7 @@ function addWebSiteCert()
           bundle.getString("importServerCertPrompt"),
           nsIFilePicker.modeOpen);
   fp.appendFilter(bundle.getString("file_browse_Certificate_spec"),
-                  "*.crt; *.cert; *.cer; *.pem; *.der");
+                  gCertFileTypes);
   fp.appendFilters(nsIFilePicker.filterAll);
   if (fp.show() == nsIFilePicker.returnOK) {
     certdb.importCertsFromFile(null, fp.file, nsIX509Cert.SERVER_CERT);
@@ -585,4 +599,3 @@ function addException()
   orphanTreeView.loadCertsFromCache(certcache, nsIX509Cert.UNKNOWN_CERT);
   orphanTreeView.selection.clearSelection();
 }
-

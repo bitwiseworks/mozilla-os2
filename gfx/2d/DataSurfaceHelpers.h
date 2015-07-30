@@ -12,7 +12,7 @@ namespace mozilla {
 namespace gfx {
 
 void
-ConvertBGRXToBGRA(uint8_t* aData, const IntSize &aSize, int32_t aStride);
+ConvertBGRXToBGRA(uint8_t* aData, const IntSize &aSize, const int32_t aStride);
 
 /**
  * Copy the pixel data from aSrc and pack it into aDst. aSrcSize, aSrcStride
@@ -46,6 +46,15 @@ uint8_t*
 SurfaceToPackedBGR(DataSourceSurface *aSurface);
 
 /**
+ * Clears all the bytes in a DataSourceSurface's data array to zero (so to
+ * transparent black for SurfaceFormat::B8G8R8A8, for example).
+ * Note that DataSourceSurfaces can be initialized to zero, which is
+ * more efficient than zeroing the surface after initialization.
+ */
+void
+ClearDataSourceSurface(DataSourceSurface *aSurface);
+
+/**
  * Multiplies aStride and aHeight and makes sure the result is limited to
  * something sane. To keep things consistent, this should always be used
  * wherever we allocate a buffer based on surface stride and height.
@@ -60,6 +69,36 @@ size_t
 BufferSizeFromStrideAndHeight(int32_t aStride,
                               int32_t aHeight,
                               int32_t aExtraBytes = 0);
+
+/**
+ * Copy aSrcRect from aSrc to aDest starting at aDestPoint.
+ */
+void
+CopyRect(DataSourceSurface* aSrc, DataSourceSurface* aDest,
+         IntRect aSrcRect, IntPoint aDestPoint);
+
+/**
+ * Create a non aliasing copy of aSource. This creates a new DataSourceSurface
+ * using the factory and copies the bits.
+ *
+ * @return a dss allocated by Factory that contains a copy a aSource.
+ */
+TemporaryRef<DataSourceSurface>
+CreateDataSourceSurfaceByCloning(DataSourceSurface* aSource);
+
+/**
+ * Return the byte at aPoint.
+ */
+uint8_t*
+DataAtOffset(DataSourceSurface* aSurface, IntPoint aPoint);
+
+/**
+ * Check if aPoint is contained by the surface.
+ *
+ * @returns true if and only if aPoint is inside the surface.
+ */
+bool
+SurfaceContainsPoint(SourceSurface* aSurface, const IntPoint& aPoint);
 
 }
 }

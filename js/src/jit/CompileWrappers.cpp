@@ -30,32 +30,44 @@ CompileRuntime::onMainThread()
 js::PerThreadData*
 CompileRuntime::mainThread()
 {
-    JS_ASSERT(onMainThread());
+    MOZ_ASSERT(onMainThread());
     return &runtime()->mainThread;
 }
 
 const void*
-CompileRuntime::addressOfIonTop()
+CompileRuntime::addressOfJitTop()
 {
-    return &runtime()->mainThread.ionTop;
+    return &runtime()->jitTop;
+}
+
+const void*
+CompileRuntime::addressOfJitActivation()
+{
+    return &runtime()->jitActivation;
+}
+
+const void*
+CompileRuntime::addressOfProfilingActivation()
+{
+    return (const void*) &runtime()->profilingActivation_;
 }
 
 const void*
 CompileRuntime::addressOfJitStackLimit()
 {
-    return &runtime()->mainThread.jitStackLimit;
+    return runtime()->addressOfJitStackLimit();
 }
 
 const void*
 CompileRuntime::addressOfJSContext()
 {
-    return &runtime()->mainThread.jitJSContext;
+    return &runtime()->jitJSContext;
 }
 
 const void*
 CompileRuntime::addressOfActivation()
 {
-    return runtime()->mainThread.addressOfActivation();
+    return runtime()->addressOfActivation();
 }
 
 const void*
@@ -68,28 +80,14 @@ CompileRuntime::addressOfLastCachedNativeIterator()
 const void*
 CompileRuntime::addressOfGCZeal()
 {
-    return &runtime()->gcZeal_;
+    return runtime()->gc.addressOfZealMode();
 }
 #endif
 
 const void*
-CompileRuntime::addressOfInterrupt()
+CompileRuntime::addressOfInterruptUint32()
 {
-    return &runtime()->interrupt;
-}
-
-#ifdef JS_THREADSAFE
-const void*
-CompileRuntime::addressOfInterruptPar()
-{
-    return &runtime()->interruptPar;
-}
-#endif
-
-const void*
-CompileRuntime::addressOfThreadPool()
-{
-    return &runtime()->threadPool;
+    return runtime()->addressOfInterruptUint32();
 }
 
 const JitRuntime*
@@ -105,9 +103,9 @@ CompileRuntime::spsProfiler()
 }
 
 bool
-CompileRuntime::signalHandlersInstalled()
+CompileRuntime::canUseSignalHandlers()
 {
-    return runtime()->signalHandlersInstalled();
+    return runtime()->canUseSignalHandlers();
 }
 
 bool
@@ -122,10 +120,22 @@ CompileRuntime::hadOutOfMemory()
     return runtime()->hadOutOfMemory;
 }
 
+bool
+CompileRuntime::profilingScripts()
+{
+    return runtime()->profilingScripts;
+}
+
 const JSAtomState&
 CompileRuntime::names()
 {
     return *runtime()->commonNames;
+}
+
+const PropertyName*
+CompileRuntime::emptyString()
+{
+    return runtime()->emptyString;
 }
 
 const StaticStrings&
@@ -146,11 +156,18 @@ CompileRuntime::positiveInfinityValue()
     return runtime()->positiveInfinityValue;
 }
 
+const WellKnownSymbols&
+CompileRuntime::wellKnownSymbols()
+{
+    MOZ_ASSERT(onMainThread());
+    return *runtime()->wellKnownSymbols;
+}
+
 #ifdef DEBUG
 bool
 CompileRuntime::isInsideNursery(gc::Cell* cell)
 {
-    return UninlinedIsInsideNursery(runtime(), cell);
+    return UninlinedIsInsideNursery(cell);
 }
 #endif
 
@@ -166,13 +183,11 @@ CompileRuntime::maybeGetMathCache()
     return runtime()->maybeGetMathCache();
 }
 
-#ifdef JSGC_GENERATIONAL
 const Nursery&
 CompileRuntime::gcNursery()
 {
-    return runtime()->gcNursery;
+    return runtime()->gc.nursery;
 }
-#endif
 
 Zone*
 CompileZone::zone()
@@ -187,21 +202,21 @@ CompileZone::get(Zone* zone)
 }
 
 const void*
-CompileZone::addressOfNeedsBarrier()
+CompileZone::addressOfNeedsIncrementalBarrier()
 {
-    return zone()->addressOfNeedsBarrier();
+    return zone()->addressOfNeedsIncrementalBarrier();
 }
 
 const void*
 CompileZone::addressOfFreeListFirst(gc::AllocKind allocKind)
 {
-    return &zone()->allocator.arenas.getFreeList(allocKind)->first;
+    return zone()->arenas.getFreeList(allocKind)->addressOfFirst();
 }
 
 const void*
 CompileZone::addressOfFreeListLast(gc::AllocKind allocKind)
 {
-    return &zone()->allocator.arenas.getFreeList(allocKind)->last;
+    return zone()->arenas.getFreeList(allocKind)->addressOfLast();
 }
 
 JSCompartment*
@@ -232,12 +247,6 @@ const void*
 CompileCompartment::addressOfEnumerators()
 {
     return &compartment()->enumerators;
-}
-
-const CallsiteCloneTable&
-CompileCompartment::callsiteClones()
-{
-    return compartment()->callsiteClones;
 }
 
 const JitCompartment*
@@ -274,7 +283,7 @@ JitCompileOptions::JitCompileOptions()
 JitCompileOptions::JitCompileOptions(JSContext* cx)
 {
     JS::CompartmentOptions& options = cx->compartment()->options();
-    cloneSingletons_ = options.cloneSingletons(cx);
+    cloneSingletons_ = options.cloneSingletons();
     spsSlowAssertionsEnabled_ = cx->runtime()->spsProfiler.enabled() &&
                                 cx->runtime()->spsProfiler.slowAssertionsEnabled();
 }

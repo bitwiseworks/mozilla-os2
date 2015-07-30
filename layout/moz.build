@@ -4,7 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-PARALLEL_DIRS += [
+DIRS += [
     'style',
     'base',
     'generic',
@@ -19,9 +19,9 @@ PARALLEL_DIRS += [
 ]
 
 if CONFIG['NS_PRINTING']:
-    PARALLEL_DIRS += ['printing']
+    DIRS += ['printing']
 
-TEST_TOOL_DIRS += [
+TEST_DIRS += [
     'tools/reftest',
 ]
 
@@ -31,6 +31,10 @@ if CONFIG['MOZ_DEBUG']:
     TEST_DIRS += ['tools/layout-debug']
 
 MOCHITEST_MANIFESTS += [
+    'reftests/fonts/math/mochitest.ini',
     'reftests/fonts/mochitest.ini',
-    'reftests/fonts/mplus/mochitest.ini',
+    'reftests/fonts/mplus/mochitest.ini'
 ]
+
+REFTEST_MANIFESTS += ['reftests/reftest.list']
+CRASHTEST_MANIFESTS += ['../testing/crashtest/crashtests.list']

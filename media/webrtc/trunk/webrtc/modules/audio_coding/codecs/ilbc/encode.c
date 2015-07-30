@@ -16,6 +16,8 @@
 
 ******************************************************************/
 
+#include <string.h>
+
 #include "defines.h"
 #include "lpc_encode.h"
 #include "frame_classify.h"
@@ -32,7 +34,7 @@
 #include "unpack_bits.h"
 #include "index_conv_dec.h"
 #endif
-#ifndef WEBRTC_BIG_ENDIAN
+#ifndef WEBRTC_ARCH_BIG_ENDIAN
 #include "swap_bytes.h"
 #endif
 
@@ -352,7 +354,7 @@ void WebRtcIlbcfix_EncodeImpl(
 
       /* update memory */
 
-      WEBRTC_SPL_MEMMOVE_W16(mem, mem+SUBL, (CB_MEML-SUBL));
+      memmove(mem, mem + SUBL, (CB_MEML - SUBL) * sizeof(*mem));
       WEBRTC_SPL_MEMCPY_W16(mem+CB_MEML-SUBL,
                             &decresidual[(iLBCbits_inst->startIdx+1+subframe)*SUBL], SUBL);
 
@@ -457,8 +459,7 @@ void WebRtcIlbcfix_EncodeImpl(
                                 );
 
       /* update memory */
-
-      WEBRTC_SPL_MEMMOVE_W16(mem, mem+SUBL, (CB_MEML-SUBL));
+      memmove(mem, mem + SUBL, (CB_MEML - SUBL) * sizeof(*mem));
       WEBRTC_SPL_MEMCPY_W16(mem+CB_MEML-SUBL,
                             &reverseDecresidual[subframe*SUBL], SUBL);
 
@@ -489,7 +490,7 @@ void WebRtcIlbcfix_EncodeImpl(
   WebRtcIlbcfix_PackBits(bytes, iLBCbits_inst, iLBCenc_inst->mode);
 #endif
 
-#ifndef WEBRTC_BIG_ENDIAN
+#ifndef WEBRTC_ARCH_BIG_ENDIAN
   /* Swap bytes for LITTLE ENDIAN since the packbits()
      function assumes BIG_ENDIAN machine */
 #ifdef SPLIT_10MS

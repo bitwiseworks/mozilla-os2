@@ -33,6 +33,7 @@ UNIFIED_SOURCES += [
     'nsDragService.cpp',
     'nsIdleServiceWin.cpp',
     'nsImageClipboard.cpp',
+    'nsIMM32Handler.cpp',
     'nsLookAndFeel.cpp',
     'nsNativeDragSource.cpp',
     'nsNativeDragTarget.cpp',
@@ -55,12 +56,6 @@ UNIFIED_SOURCES += [
     'WindowHook.cpp',
     'WinIMEHandler.cpp',
     'WinTaskbar.cpp',
-]
-
-# The following files cannot be built in unified mode because they force NSPR logging.
-SOURCES += [
-    'nsIMM32Handler.cpp',
-    'WinMouseScrollHandler.cpp',
     'WinUtils.cpp',
 ]
 
@@ -70,6 +65,7 @@ SOURCES += [
     'nsBidiKeyboard.cpp',
     'nsFilePicker.cpp',
     'nsWidgetFactory.cpp',
+    'WinMouseScrollHandler.cpp',
 ]
 
 if CONFIG['MOZ_CRASHREPORTER']:
@@ -89,27 +85,28 @@ if CONFIG['NS_ENABLE_TSF']:
         'nsTextStore.cpp',
     ]
 
-MSVC_ENABLE_PGO = True
+FAIL_ON_WARNINGS = True
 
-LIBRARY_NAME = 'widget_windows'
+MSVC_ENABLE_PGO = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
-    '../shared',
-    '../xpwidgets',
     '/layout/generic',
     '/layout/xul',
     '/toolkit/xre',
+    '/widget',
     '/xpcom/base',
 ]
 
 DEFINES['MOZ_UNICODE'] = True
 
-for var in ('MOZ_ENABLE_D3D9_LAYER', 'MOZ_ENABLE_D3D10_LAYER'):
+for var in ('MOZ_ENABLE_D3D10_LAYER'):
     if CONFIG[var]:
         DEFINES[var] = True
 
 RESFILE = 'widget.res'
+
+CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']

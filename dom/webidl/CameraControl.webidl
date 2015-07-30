@@ -89,14 +89,17 @@ dictionary CameraPictureOptions
    'maxVideoLengthMs' is the maximum length in milliseconds to which the
    recorded video will be allowed to grow.
 
-   if either 'maxFileSizeBytes' or 'maxVideoLengthMs' is missing, zero,
-   or negative, that limit will be disabled.
+   if either 'maxFileSizeBytes' or 'maxVideoLengthMs' is missing or zero,
+   that limit will be disabled; if either value is out of range, it will
+   be clamped from 0 to the upper limit for an 'unsigned long long'.
 */
 dictionary CameraStartRecordingOptions
 {
-  long      rotation = 0;
-  long long maxFileSizeBytes = 0;
-  long long maxVideoLengthMs = 0;
+  long rotation = 0;
+  [Clamp]
+  unsigned long long maxFileSizeBytes = 0;
+  [Clamp]
+  unsigned long long maxVideoLengthMs = 0;
 
   /* If startRecording() is called with flashMode set to "auto" and the
      camera has determined that the scene is poorly lit, the flash mode
@@ -107,17 +110,6 @@ dictionary CameraStartRecordingOptions
      support this setting, it will be ignored. */
   boolean autoEnableLowLightTorch = false;
 };
-
-callback CameraSetConfigurationCallback = void (CameraConfiguration configuration);
-callback CameraAutoFocusCallback = void (boolean focused);
-callback CameraTakePictureCallback = void (Blob picture);
-callback CameraStartRecordingCallback = void ();
-callback CameraShutterCallback = void ();
-callback CameraClosedCallback = void ();
-callback CameraReleaseCallback = void ();
-callback CameraRecorderStateChange = void (DOMString newState);
-callback CameraPreviewStateChange = void (DOMString newState);
-callback CameraAutoFocusMovingCallback = void (boolean isMoving);
 
 /*
     attributes here affect the preview, any pictures taken, and/or
@@ -170,18 +162,20 @@ interface CameraControl : MediaStream
           weight: 1000
       }
 
-      'top', 'left', 'bottom', and 'right' all range from -1000 at
-      the top-/leftmost of the sensor to 1000 at the bottom-/rightmost
-      of the sensor.
+     'top', 'left', 'bottom', and 'right' all range from -1000 at
+     the top-/leftmost of the sensor to 1000 at the bottom-/rightmost
+     of the sensor.
 
-      objects missing one or more of these properties will be ignored;
-      if the array contains more than capabilities.maxMeteringAreas,
-      extra areas will be ignored.
+     objects missing one or more of these properties will be ignored;
+     if the array contains more than capabilities.maxMeteringAreas,
+     extra areas will be ignored.
 
-      this attribute can be set to null to allow the camera to determine
-      where to perform light metering. */
+     if this setter is called with no arguments, the camera will
+     determine metering areas on its own. */
   [Throws]
-  attribute any             meteringAreas;
+  sequence<CameraRegion> getMeteringAreas();
+  [Throws]
+  void setMeteringAreas(optional sequence<CameraRegion> meteringAreas);
 
   /* an array of one or more objects that define where the camera will
      perform auto-focusing, with the same definition as meteringAreas.
@@ -189,10 +183,12 @@ interface CameraControl : MediaStream
      if the array contains more than capabilities.maxFocusAreas, extra
      areas will be ignored.
 
-     this attribute can be set to null to allow the camera to determine
-     where to focus. */
+     if this setter is called with no arguments, the camera will
+     determine focus areas on its own. */
   [Throws]
-  attribute any             focusAreas;
+  sequence<CameraRegion> getFocusAreas();
+  [Throws]
+  void setFocusAreas(optional sequence<CameraRegion> focusAreas);
 
   /* focal length in millimetres */
   [Throws]
@@ -211,45 +207,72 @@ interface CameraControl : MediaStream
   [Throws]
   readonly attribute unrestricted double focusDistanceFar;
 
-  /* 'compensation' is optional, and if missing, will
-     set the camera to use automatic exposure compensation.
-
-     acceptable values must range from minExposureCompensation
-     to maxExposureCompensation in steps of stepExposureCompensation;
-     invalid values will be rounded to the nearest valid value. */
+  /* over- or under-expose the image; acceptable values must range from
+     minExposureCompensation to maxExposureCompensation in steps of
+     stepExposureCompensation. Invalid values will be rounded to the nearest
+     valid value; out-of-bounds values will be limited to the range
+     supported by the camera. */
   [Throws]
-  void setExposureCompensation(optional double compensation);
-  [Throws]
-  readonly attribute unrestricted double exposureCompensation;
+  attribute double          exposureCompensation;
 
   /* one of the values chosen from capabilities.isoModes; default
      value is "auto" if supported. */
   [Throws]
   attribute DOMString       isoMode;
 
-  /* the function to call on the camera's shutter event, to trigger
-     a shutter sound and/or a visual shutter indicator. */
-  attribute CameraShutterCallback? onShutter;
+  /* the event dispatched on the camera's shutter event, to trigger
+     a shutter sound and/or a visual shutter indicator.
 
-  /* the function to call when the camera hardware is closed
-     by the underlying framework, e.g. when another app makes a more
-     recent call to get the camera. */
-  attribute CameraClosedCallback? onClosed;
+     contains no event-specific data. */
+  attribute EventHandler    onshutter;
 
-  /* the function to call when the recorder changes state, either because
+  /* the event dispatched when the camera hardware is closed; this may
+     be due to a system failure, another process taking over the camera,
+     or a call to release().
+
+     The event has a 'reason' attribute that will be one of the following
+     string values:
+       - SystemFailure    : the camera subsystem failed and was closed;
+       - HardwareReleased : a call to release() was successful;
+       - NotAvailable     : the camera hardware is in use by another process.
+  */
+  attribute EventHandler    onclose;
+
+  /* the event dispatched when the recorder changes state, either because
      the recording process encountered an error, or because one of the
-     recording limits (see CameraStartRecordingOptions) was reached. */
-  attribute CameraRecorderStateChange? onRecorderStateChange;
+     recording limits (see CameraStartRecordingOptions) was reached.
 
-  /* the function to call when the viewfinder stops or starts,
-     useful for synchronizing other UI elements. */
-  attribute CameraPreviewStateChange? onPreviewStateChange;
+     event type is CameraStateChangeEvent where:
+         'newState' is the new recorder state */
+  attribute EventHandler    onrecorderstatechange;
+
+  /* the event dispatched when the viewfinder stops or starts,
+     useful for synchronizing other UI elements.
+
+     event type is CameraStateChangeEvent where:
+         'newState' is the new preview state */
+  attribute EventHandler    onpreviewstatechange;
 
   /* the size of the picture to be returned by a call to takePicture();
      an object with 'height' and 'width' properties that corresponds to
-     one of the options returned by capabilities.pictureSizes. */
+     one of the options returned by capabilities.pictureSizes.
+
+     note that unlike when one uses setConfiguration instead to update the
+     picture size, this will not recalculate the ideal preview size. */
   [Throws]
-  attribute any              pictureSize;
+  CameraSize getPictureSize();
+  [Throws]
+  void setPictureSize(optional CameraSize size);
+
+  /* if the image blob to be returned by takePicture() supports lossy
+     compression, this setting controls the quality-size trade-off;
+     valid values range from 0.0 for smallest size/worst quality to 1.0
+     for largest size/best quality. Note that depending on the range of
+     values supported by the underlying platform, this attribute may not
+     'get' the exact value that was previously 'set'. If this setting is
+     not supported, it is ignored. */
+  [Throws]
+  attribute double          pictureQuality;
 
   /* the size of the thumbnail to be included in the picture returned
      by a call to takePicture(), assuming the chosen fileFormat supports
@@ -259,46 +282,63 @@ interface CameraControl : MediaStream
      this setting should be considered a hint: the implementation will
      respect it when possible, and override it if necessary. */
   [Throws]
-  attribute any             thumbnailSize;
+  CameraSize getThumbnailSize();
+  [Throws]
+  void setThumbnailSize(optional CameraSize size);
 
   /* the angle, in degrees, that the image sensor is mounted relative
      to the display; e.g. if 'sensorAngle' is 270 degrees (or -90 degrees),
      then the preview stream needs to be rotated +90 degrees to have the
      same orientation as the real world. */
+  [Constant, Cached]
   readonly attribute long   sensorAngle;
+
+  /* the mode the camera will use to determine the correct exposure of
+     the scene; supported modes are exposed by capabilities.meteringModes. */
+  [Throws]
+  attribute DOMString       meteringMode;
 
   /* tell the camera to attempt to focus the image */
   [Throws]
-  void autoFocus(CameraAutoFocusCallback onSuccess, optional CameraErrorCallback onError);
+  Promise<boolean> autoFocus();
 
-  /* if continuous autofocus is supported and focusMode is set to enable it,
-     then this function is called whenever the camera decides to start and
+  /* the event dispatched whenever the focus state changes due to calling
+     autoFocus or due to continuous autofocus.
+
+     if continuous autofocus is supported and focusMode is set to enable it,
+     then this event is dispatched whenever the camera decides to start and
      stop moving the focus position; it can be used to update a UI element to
      indicate that the camera is still trying to focus, or has finished. Some
      platforms do not support this event, in which case the callback is never
-     invoked. */
-  [Pref="camera.control.autofocus_moving_callback.enabled"]
-  attribute CameraAutoFocusMovingCallback? onAutoFocusMoving;
+     invoked.
+
+     event type is CameraStateChangeEvent where:
+         'newState' is one of the following states:
+             'focused' if the focus is now set
+             'focusing' if the focus is moving
+             'unfocused' if last attempt to focus failed */
+  attribute EventHandler    onfocus;
 
   /* capture an image and return it as a blob to the 'onSuccess' callback;
      if the camera supports it, this may be invoked while the camera is
      already recording video.
 
      invoking this function will stop the preview stream, which must be
-     manually restarted (e.g. by calling .play() on it). */
+     manually restarted by calling resumePreview(). */
   [Throws]
-  void takePicture(CameraPictureOptions aOptions,
-                   CameraTakePictureCallback onSuccess,
-                   optional CameraErrorCallback onError);
+  Promise<Blob> takePicture(optional CameraPictureOptions options);
 
-  /* start recording video; 'aOptions' is a
-     CameraStartRecordingOptions object. */
+  /* the event dispatched when a picture is successfully taken; it is of the
+     type BlobEvent, where the data attribute contains the picture. */
+  attribute EventHandler    onpicture;
+
+  /* start recording video; 'options' is a CameraStartRecordingOptions object.
+     If the success/error callbacks are not used, one may determine success by
+     waiting for the recorderstatechange event. */
   [Throws]
-  void startRecording(CameraStartRecordingOptions aOptions,
-                      DeviceStorage storageArea,
-                      DOMString filename,
-                      CameraStartRecordingCallback onSuccess,
-                      optional CameraErrorCallback onError);
+  Promise<void> startRecording(CameraStartRecordingOptions options,
+                               DeviceStorage storageArea,
+                               DOMString filename);
 
   /* stop precording video. */
   [Throws]
@@ -313,27 +353,20 @@ interface CameraControl : MediaStream
      probably call this whenever the camera is not longer in the foreground
      (depending on your usage model).
 
-     the callbacks are optional, unless you really need to know when
-     the hardware is ultimately released.
-
      once this is called, the camera control object is to be considered
      defunct; a new instance will need to be created to access the camera. */
   [Throws]
-  void release(optional CameraReleaseCallback onSuccess,
-               optional CameraErrorCallback onError);
+  Promise<void> release();
 
-  /* changes the camera configuration on the fly;
-     'configuration' is of type CameraConfiguration.
-
-     XXXmikeh the 'configuration' argument needs to be optional, else
-     the WebIDL compiler throws: "WebIDL.WebIDLError: error: Dictionary
-     argument or union argument containing a dictionary not followed by
-     a required argument must be optional"
-  */
+  /* changes the camera configuration on the fly. */
   [Throws]
-  void setConfiguration(optional CameraConfiguration configuration,
-                        optional CameraSetConfigurationCallback onSuccess,
-                        optional CameraErrorCallback onError);
+  Promise<CameraConfiguration> setConfiguration(optional CameraConfiguration configuration);
+
+  /* the event dispatched when the camera is successfully configured.
+
+     event type is CameraConfigurationEvent which has the same members as
+     CameraConfiguration. */
+  attribute EventHandler onconfigurationchange;
 
   /* if focusMode is set to either 'continuous-picture' or 'continuous-video',
      then calling autoFocus() will trigger its onSuccess callback immediately
@@ -348,19 +381,6 @@ interface CameraControl : MediaStream
   */
   [Throws]
   void resumeContinuousFocus();
-};
-
-/* The coordinates of a point, relative to the camera sensor, of the center of
-   detected facial features. As with CameraRegions:
-     { x: -1000, y: -1000 } is the top-left corner
-     { x:  1000, y:  1000 } is the bottom-right corner
-   x and y can range from -1000 to 1000.
-*/
-[Pref="camera.control.face_detection.enabled", Func="DOMCameraPoint::HasSupport"]
-interface CameraPoint
-{
-  attribute long x;
-  attribute long y;
 };
 
 /* The information of the each face detected by a camera device, e.g.
@@ -392,13 +412,16 @@ interface CameraPoint
    'leftEye' is the coordinates of the centre of the left eye. The coordinates
    are in the same space as the ones for 'bounds'. This is an optional field
    and may not be supported on all devices. If it is not supported or detected,
-   the value will be set to null.
+   the value will be set to null. The x and y coordinates are bounded by the
+   range (-1000, 1000) where:
+       { x: -1000, y: -1000 } is the top-left corner
+       { x:  1000, y:  1000 } is the bottom-right corner
 
    'rightEye' is the coordinates of the detected right eye; null if not
-   supported or detected.
+   supported or detected. Same boundary conditions as 'leftEye'.
 
    'mouth' is the coordinates of the detected mouth; null if not supported or
-   detected.
+   detected. Same boundary conditions as 'leftEye'.
 */
 [Pref="camera.control.face_detection.enabled", Func="DOMCameraDetectedFace::HasSupport"]
 interface CameraDetectedFace
@@ -410,13 +433,13 @@ interface CameraDetectedFace
   readonly attribute DOMRect bounds;
 
   readonly attribute boolean hasLeftEye;
-  readonly attribute CameraPoint? leftEye;
+  readonly attribute DOMPoint? leftEye;
 
   readonly attribute boolean hasRightEye;
-  readonly attribute CameraPoint? rightEye;
+  readonly attribute DOMPoint? rightEye;
 
   readonly attribute boolean hasMouth;
-  readonly attribute CameraPoint? mouth;
+  readonly attribute DOMPoint? mouth;
 };
 
 callback CameraFaceDetectionCallback = void (sequence<CameraDetectedFace> faces);
@@ -441,8 +464,7 @@ partial interface CameraControl
   [Throws, Pref="camera.control.face_detection.enabled"]
   void stopFaceDetection();
 
-  /* Callback for faces detected in the preview frame. If no faces are
-     detected, the callback is invoked with an empty sequence. */
+  /* CameraFacesDetectedEvent */
   [Pref="camera.control.face_detection.enabled"]
-  attribute CameraFaceDetectionCallback? onFacesDetected;
+  attribute EventHandler    onfacesdetected;
 };

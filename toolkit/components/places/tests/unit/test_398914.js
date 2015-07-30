@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -97,7 +97,7 @@ function run_test() {
   // that the modified date of bm2, otherwise in case of a "tie"
   // bm2 will win, as it has a bigger item id
   if (bm1lm == bm2lm) 
-    bmsvc.setItemLastModified(bm1, bm2lm + 1);
+    bmsvc.setItemLastModified(bm1, bm2lm + 1000);
 
   [url, postdata] = PlacesUtils.getURLAndPostDataForKeyword("foo");
   do_check_eq(testURI.spec, url);

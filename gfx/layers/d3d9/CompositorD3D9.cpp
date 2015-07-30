@@ -16,11 +16,12 @@
 #include "mozilla/layers/PCompositorParent.h"
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "gfxPrefs.h"
-
-using namespace mozilla::gfx;
+#include "gfxCrashReporterUtils.h"
 
 namespace mozilla {
 namespace layers {
+
+using namespace mozilla::gfx;
 
 CompositorD3D9::CompositorD3D9(PCompositorParent* aParent, nsIWidget *aWidget)
   : Compositor(aParent)
@@ -39,6 +40,10 @@ CompositorD3D9::~CompositorD3D9()
 bool
 CompositorD3D9::Initialize()
 {
+  bool force = gfxPrefs::LayersAccelerationForceEnabled();
+
+  ScopedGfxFeatureReporter reporter("D3D9 Layers", force);
+
   if (!gfxPlatform::CanUseDirect3D9()) {
     NS_WARNING("Direct3D 9-accelerated layers are not supported on this system.");
     return false;
@@ -56,6 +61,7 @@ CompositorD3D9::Initialize()
     return false;
   }
 
+  reporter.SetSuccessful();
   return true;
 }
 
@@ -97,6 +103,12 @@ TemporaryRef<CompositingRenderTarget>
 CompositorD3D9::CreateRenderTarget(const gfx::IntRect &aRect,
                                    SurfaceInitMode aInit)
 {
+  MOZ_ASSERT(aRect.width != 0 && aRect.height != 0, "Trying to create a render target of invalid size");
+
+  if (aRect.width * aRect.height == 0) {
+    return nullptr;
+  }
+
   if (!mDeviceManager) {
     return nullptr;
   }
@@ -123,6 +135,12 @@ CompositorD3D9::CreateRenderTargetFromSource(const gfx::IntRect &aRect,
                                              const CompositingRenderTarget *aSource,
                                              const gfx::IntPoint &aSourcePoint)
 {
+  MOZ_ASSERT(aRect.width != 0 && aRect.height != 0, "Trying to create a render target of invalid size");
+
+  if (aRect.width * aRect.height == 0) {
+    return nullptr;
+  }
+
   if (!mDeviceManager) {
     return nullptr;
   }
@@ -188,22 +206,22 @@ CompositorD3D9::SetRenderTarget(CompositingRenderTarget *aRenderTarget)
   RefPtr<CompositingRenderTargetD3D9> oldRT = mCurrentRT;
   mCurrentRT = static_cast<CompositingRenderTargetD3D9*>(aRenderTarget);
   mCurrentRT->BindRenderTarget(device());
-  PrepareViewport(mCurrentRT->GetSize(), Matrix());
+  PrepareViewport(mCurrentRT->GetSize());
 }
 
 static DeviceManagerD3D9::ShaderMode
 ShaderModeForEffectType(EffectTypes aEffectType, gfx::SurfaceFormat aFormat)
 {
   switch (aEffectType) {
-  case EFFECT_SOLID_COLOR:
+  case EffectTypes::SOLID_COLOR:
     return DeviceManagerD3D9::SOLIDCOLORLAYER;
-  case EFFECT_RENDER_TARGET:
+  case EffectTypes::RENDER_TARGET:
     return DeviceManagerD3D9::RGBALAYER;
-  case EFFECT_RGB:
+  case EffectTypes::RGB:
     if (aFormat == SurfaceFormat::B8G8R8A8 || aFormat == SurfaceFormat::R8G8B8A8)
       return DeviceManagerD3D9::RGBALAYER;
     return DeviceManagerD3D9::RGBLAYER;
-  case EFFECT_YCBCR:
+  case EffectTypes::YCBCR:
     return DeviceManagerD3D9::YCBCRLAYER;
   }
 
@@ -253,7 +271,7 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
                                        1);
   bool target = false;
 
-  if (aEffectChain.mPrimaryEffect->mType != EFFECT_SOLID_COLOR) {
+  if (aEffectChain.mPrimaryEffect->mType != EffectTypes::SOLID_COLOR) {
     float opacity[4];
     /*
      * We always upload a 4 component float, but the shader will use only the
@@ -265,13 +283,13 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
 
   bool isPremultiplied = true;
 
-  MaskType maskType = MaskNone;
+  MaskType maskType = MaskType::MaskNone;
 
-  if (aEffectChain.mSecondaryEffects[EFFECT_MASK]) {
+  if (aEffectChain.mSecondaryEffects[EffectTypes::MASK]) {
     if (aTransform.Is2D()) {
-      maskType = Mask2d;
+      maskType = MaskType::Mask2d;
     } else {
-      maskType = Mask3d;
+      maskType = MaskType::Mask3d;
     }
   }
 
@@ -284,7 +302,7 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
 
   uint32_t maskTexture = 0;
   switch (aEffectChain.mPrimaryEffect->mType) {
-  case EFFECT_SOLID_COLOR:
+  case EffectTypes::SOLID_COLOR:
     {
       // output color is premultiplied, so we need to adjust all channels.
       Color layerColor =
@@ -301,8 +319,8 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
         ->SetShaderMode(DeviceManagerD3D9::SOLIDCOLORLAYER, maskType);
     }
     break;
-  case EFFECT_RENDER_TARGET:
-  case EFFECT_RGB:
+  case EffectTypes::RENDER_TARGET:
+  case EffectTypes::RGB:
     {
       TexturedEffect* texturedEffect =
         static_cast<TexturedEffect*>(aEffectChain.mPrimaryEffect.get());
@@ -329,7 +347,7 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
       isPremultiplied = texturedEffect->mPremultiplied;
     }
     break;
-  case EFFECT_YCBCR:
+  case EffectTypes::YCBCR:
     {
       EffectYCbCr* ycbcrEffect =
         static_cast<EffectYCbCr*>(aEffectChain.mPrimaryEffect.get());
@@ -415,7 +433,7 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
       maskTexture = mDeviceManager->SetShaderMode(DeviceManagerD3D9::YCBCRLAYER, maskType);
     }
     break;
-  case EFFECT_COMPONENT_ALPHA:
+  case EffectTypes::COMPONENT_ALPHA:
     {
       MOZ_ASSERT(gfxPrefs::ComponentAlphaEnabled());
       EffectComponentAlpha* effectComponentAlpha =
@@ -476,14 +494,13 @@ void
 CompositorD3D9::SetMask(const EffectChain &aEffectChain, uint32_t aMaskTexture)
 {
   EffectMask *maskEffect =
-    static_cast<EffectMask*>(aEffectChain.mSecondaryEffects[EFFECT_MASK].get());
+    static_cast<EffectMask*>(aEffectChain.mSecondaryEffects[EffectTypes::MASK].get());
   if (!maskEffect) {
     return;
   }
 
   TextureSourceD3D9 *source = maskEffect->mMaskTexture->AsSourceD3D9();
 
-  MOZ_ASSERT(aMaskTexture >= 0);
   device()->SetTexture(aMaskTexture, source->GetD3D9Texture());
 
   const gfx::Matrix4x4& maskTransform = maskEffect->mMaskTransform;
@@ -591,18 +608,9 @@ CompositorD3D9::Ready()
   return false;
 }
 
-static void
-CancelCompositing(Rect* aRenderBoundsOut)
-{
-  if (aRenderBoundsOut) {
-    *aRenderBoundsOut = Rect(0, 0, 0, 0);
-  }
-}
-
 void
 CompositorD3D9::BeginFrame(const nsIntRegion& aInvalidRegion,
                            const Rect *aClipRectIn,
-                           const gfx::Matrix& aTransform,
                            const Rect& aRenderBounds,
                            Rect *aClipRectOut,
                            Rect *aRenderBoundsOut)
@@ -665,8 +673,7 @@ CompositorD3D9::EndFrame()
 }
 
 void
-CompositorD3D9::PrepareViewport(const gfx::IntSize& aSize,
-                                const Matrix &aWorldTransform)
+CompositorD3D9::PrepareViewport(const gfx::IntSize& aSize)
 {
   Matrix4x4 viewMatrix;
   /*
@@ -677,8 +684,6 @@ CompositorD3D9::PrepareViewport(const gfx::IntSize& aSize,
   viewMatrix._22 = -2.0f / aSize.height;
   viewMatrix._41 = -1.0f;
   viewMatrix._42 = 1.0f;
-
-  viewMatrix = Matrix4x4::From2D(aWorldTransform) * viewMatrix;
 
   HRESULT hr = device()->SetVertexShaderConstantF(CBmProjection, &viewMatrix._11, 4);
 
@@ -735,7 +740,11 @@ CompositorD3D9::PaintToTarget()
   device()->GetRenderTargetData(backBuff, destSurf);
 
   D3DLOCKED_RECT rect;
-  destSurf->LockRect(&rect, nullptr, D3DLOCK_READONLY);
+  HRESULT hr = destSurf->LockRect(&rect, nullptr, D3DLOCK_READONLY);
+  if (FAILED(hr) || !rect.pBits) {
+    gfxCriticalError() << "Failed to lock rect in paint to target D3D9 " << hexa(hr);
+    return;
+  }
   RefPtr<DataSourceSurface> sourceSurface =
     Factory::CreateWrappingDataSourceSurface((uint8_t*)rect.pBits,
                                              rect.Pitch,
@@ -743,7 +752,7 @@ CompositorD3D9::PaintToTarget()
                                              SurfaceFormat::B8G8R8A8);
   mTarget->CopySurface(sourceSurface,
                        IntRect(0, 0, desc.Width, desc.Height),
-                       IntPoint());
+                       IntPoint(-mTargetBounds.x, -mTargetBounds.y));
   mTarget->Flush();
   destSurf->UnlockRect();
 }

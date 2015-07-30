@@ -13,7 +13,6 @@
 #include "nsAutoPtr.h"
 #include "nsXBLEventHandler.h"
 #include "nsIWeakReference.h"
-#include "nsIScriptGlobalObject.h"
 #include "nsCycleCollectionParticipant.h"
 #include "js/TypeDecls.h"
 
@@ -28,6 +27,7 @@ class nsXBLPrototypeBinding;
 
 namespace mozilla {
 namespace dom {
+class AutoJSAPI;
 class EventTarget;
 }
 }
@@ -45,8 +45,30 @@ class EventTarget;
 #define NS_PHASE_TARGET             2
 #define NS_PHASE_BUBBLING           3
 
+namespace mozilla {
+namespace dom {
+
+struct IgnoreModifierState
+{
+  // When mShift is true, Shift key state will be ignored.
+  bool mShift;
+  // When mOS is true, OS key state will be ignored.
+  bool mOS;
+
+  IgnoreModifierState()
+    : mShift(false)
+    , mOS(false)
+  {
+  }
+};
+
+} // namespace dom
+} // namespace mozilla
+
 class nsXBLPrototypeHandler
 {
+  typedef mozilla::dom::IgnoreModifierState IgnoreModifierState;
+
 public:
   // This constructor is used by XBL handlers (both the JS and command shorthand variety)
   nsXBLPrototypeHandler(const char16_t* aEvent, const char16_t* aPhase,
@@ -60,26 +82,26 @@ public:
                         uint32_t aLineNumber);
 
   // This constructor is used only by XUL key handlers (e.g., <key>)
-  nsXBLPrototypeHandler(nsIContent* aKeyElement);
+  explicit nsXBLPrototypeHandler(nsIContent* aKeyElement);
 
   // This constructor is used for handlers loaded from the cache
-  nsXBLPrototypeHandler(nsXBLPrototypeBinding* aBinding);
+  explicit nsXBLPrototypeHandler(nsXBLPrototypeBinding* aBinding);
 
   ~nsXBLPrototypeHandler();
 
   // if aCharCode is not zero, it is used instead of the charCode of aKeyEvent.
   bool KeyEventMatched(nsIDOMKeyEvent* aKeyEvent,
-                         uint32_t aCharCode = 0,
-                         bool aIgnoreShiftKey = false);
+                       uint32_t aCharCode,
+                       const IgnoreModifierState& aIgnoreModifierState);
   inline bool KeyEventMatched(nsIAtom* aEventType,
-                                nsIDOMKeyEvent* aEvent,
-                                uint32_t aCharCode = 0,
-                                bool aIgnoreShiftKey = false)
+                              nsIDOMKeyEvent* aEvent,
+                              uint32_t aCharCode,
+                              const IgnoreModifierState& aIgnoreModifierState)
   {
     if (aEventType != mEventName)
       return false;
 
-    return KeyEventMatched(aEvent, aCharCode, aIgnoreShiftKey);
+    return KeyEventMatched(aEvent, aCharCode, aIgnoreModifierState);
   }
 
   bool MouseEventMatched(nsIDOMMouseEvent* aMouseEvent);
@@ -110,8 +132,7 @@ public:
   nsXBLEventHandler* GetEventHandler()
   {
     if (!mHandler) {
-      NS_NewXBLEventHandler(this, mEventName, getter_AddRefs(mHandler));
-      // XXX Need to signal out of memory?
+      mHandler = NS_NewXBLEventHandler(this, mEventName);
     }
 
     return mHandler;
@@ -163,15 +184,14 @@ protected:
   void ReportKeyConflict(const char16_t* aKey, const char16_t* aModifiers, nsIContent* aElement, const char *aMessageName);
   void GetEventType(nsAString& type);
   bool ModifiersMatchMask(nsIDOMUIEvent* aEvent,
-                            bool aIgnoreShiftKey = false);
+                          const IgnoreModifierState& aIgnoreModifierState);
   nsresult DispatchXBLCommand(mozilla::dom::EventTarget* aTarget, nsIDOMEvent* aEvent);
   nsresult DispatchXULKeyCommand(nsIDOMEvent* aEvent);
-  nsresult EnsureEventHandler(nsIScriptGlobalObject* aGlobal,
-                              nsIScriptContext *aBoundContext, nsIAtom *aName,
+  nsresult EnsureEventHandler(mozilla::dom::AutoJSAPI& jsapi, nsIAtom* aName,
                               JS::MutableHandle<JSObject*> aHandler);
   static int32_t KeyToMask(int32_t key);
-  
-  static int32_t kAccelKey;
+  static int32_t AccelKeyMask();
+
   static int32_t kMenuAccessKey;
   static void InitAccessKeys();
 

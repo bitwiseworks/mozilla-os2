@@ -29,7 +29,7 @@ public:
   // Forward to base class
   NS_FORWARD_TO_MOUSEEVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) override
   {
     return MouseScrollEventBinding::Wrap(aCx, this);
   }
@@ -50,6 +50,9 @@ public:
                                aCtrlKey, aAltKey, aShiftKey, aMetaKey, aButton,
                                aRelatedTarget, aAxis);
   }
+
+protected:
+  ~MouseScrollEvent() {}
 };
 
 } // namespace dom

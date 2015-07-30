@@ -9,7 +9,7 @@ UNIFIED_SOURCES += [
     'crash_generation_server.cc',
 ]
 
-FINAL_LIBRARY = 'xulapp_s'
+FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
     '/toolkit/crashreporter/google-breakpad/src',
@@ -19,3 +19,5 @@ if CONFIG['OS_TARGET'] == 'Android':
     LOCAL_INCLUDES += [
         '/toolkit/crashreporter/google-breakpad/src/common/android/include',
     ]
+
+include('/toolkit/crashreporter/crashreporter.mozbuild')

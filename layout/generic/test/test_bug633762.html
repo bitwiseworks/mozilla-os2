@@ -35,21 +35,21 @@ function runTests() {
   scrollTopBefore = doc.body.scrollTop;
   // send up arrow key event
   sendKey("UP");
-
-  setTimeout("finish();", 20);
+  
+  window.requestAnimationFrame(finish);
 }
 
 function finish() {
   // assert that scroll top is now less than before
   ok(scrollTopBefore > doc.body.scrollTop, "pressing up arrow should scroll up");
-  SpecialPowers.clearUserPref(smoothScrollPref);
   SimpleTest.finish();
 }
 
 var smoothScrollPref = "general.smoothScroll";
-SpecialPowers.setBoolPref(smoothScrollPref, false);
 SimpleTest.waitForExplicitFinish();
-SimpleTest.waitForFocus(runTests);
+SimpleTest.waitForFocus(function() {
+  SpecialPowers.pushPrefEnv({"set":[[smoothScrollPref, false]]}, runTests);
+});
 </script>
 </pre>
 

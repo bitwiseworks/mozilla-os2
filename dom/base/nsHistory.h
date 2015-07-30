@@ -21,7 +21,7 @@ class nsIWeakReference;
 class nsPIDOMWindow;
 
 // Script "History" object
-class nsHistory MOZ_FINAL : public nsIDOMHistory, // Empty, needed for extension
+class nsHistory final : public nsIDOMHistory, // Empty, needed for extension
                                                   // backwards compat
                             public nsWrapperCache
 {
@@ -30,11 +30,10 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsHistory)
 
 public:
-  nsHistory(nsPIDOMWindow* aInnerWindow);
-  virtual ~nsHistory();
+  explicit nsHistory(nsPIDOMWindow* aInnerWindow);
 
   nsPIDOMWindow* GetParentObject() const;
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) override;
 
   uint32_t GetLength(mozilla::ErrorResult& aRv) const;
   void GetState(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
@@ -50,6 +49,8 @@ public:
                     mozilla::ErrorResult& aRv);
 
 protected:
+  virtual ~nsHistory();
+
   nsIDocShell* GetDocShell() const;
 
   void PushOrReplaceState(JSContext* aCx, JS::Handle<JS::Value> aData,

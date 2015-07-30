@@ -12,17 +12,15 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/sleep.h"
 
 namespace webrtc {
 
 // Function that does nothing, and reports success.
 bool NullRunFunction(void* obj) {
+  SleepMs(0);  // Hand over timeslice, prevents busy looping.
   return true;
 }
-
-// Disable for TSan v2, see
-// https://code.google.com/p/webrtc/issues/detail?id=2259 for details.
-#if !defined(THREAD_SANITIZER)
 
 TEST(ThreadTest, StartStop) {
   ThreadWrapper* thread = ThreadWrapper::CreateThread(&NullRunFunction, NULL);
@@ -36,6 +34,7 @@ TEST(ThreadTest, StartStop) {
 bool SetFlagRunFunction(void* obj) {
   bool* obj_as_bool = static_cast<bool*>(obj);
   *obj_as_bool = true;
+  SleepMs(0);  // Hand over timeslice, prevents busy looping.
   return true;
 }
 
@@ -53,7 +52,5 @@ TEST(ThreadTest, RunFunctionIsCalled) {
   EXPECT_TRUE(flag);
   delete thread;
 }
-
-#endif // if !defined(THREAD_SANITIZER)
 
 }  // namespace webrtc

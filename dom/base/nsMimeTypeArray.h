@@ -16,18 +16,17 @@
 class nsMimeType;
 class nsPluginElement;
 
-class nsMimeTypeArray MOZ_FINAL : public nsISupports,
+class nsMimeTypeArray final : public nsISupports,
                                   public nsWrapperCache
 {
 public:
-  nsMimeTypeArray(nsPIDOMWindow* aWindow);
-  virtual ~nsMimeTypeArray();
+  explicit nsMimeTypeArray(nsPIDOMWindow* aWindow);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsMimeTypeArray)
 
   nsPIDOMWindow* GetParentObject() const;
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) override;
 
   void Refresh();
 
@@ -41,6 +40,8 @@ public:
   void GetSupportedNames(unsigned, nsTArray< nsString >& retval);
 
 protected:
+  virtual ~nsMimeTypeArray();
+
   void EnsurePluginMimeTypes();
   void Clear();
 
@@ -58,7 +59,7 @@ protected:
   nsTArray<nsRefPtr<nsMimeType> > mHiddenMimeTypes;
 };
 
-class nsMimeType MOZ_FINAL : public nsWrapperCache
+class nsMimeType final : public nsWrapperCache
 {
 public:
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(nsMimeType)
@@ -67,10 +68,8 @@ public:
   nsMimeType(nsPIDOMWindow* aWindow, nsPluginElement* aPluginElement,
              uint32_t aPluginTagMimeIndex, const nsAString& aMimeType);
   nsMimeType(nsPIDOMWindow* aWindow, const nsAString& aMimeType);
-  virtual ~nsMimeType();
-
   nsPIDOMWindow* GetParentObject() const;
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) override;
 
   const nsString& Type() const
   {
@@ -84,6 +83,8 @@ public:
   void GetType(nsString& retval) const;
 
 protected:
+  virtual ~nsMimeType();
+
   nsCOMPtr<nsPIDOMWindow> mWindow;
 
   // Strong reference to the active plugin, if any. Note that this

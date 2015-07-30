@@ -138,7 +138,7 @@
 
       /////////////////////////////////////////////////////////////////////////
       // table4 (display: table-row)
-      accTree = 
+      accTree =
         { TABLE: [
           { ROW: [
             { CELL: [
@@ -147,6 +147,32 @@
           ] } ]
         };
       testAccessibleTree("table4", accTree);
+
+      /////////////////////////////////////////////////////////////////////////
+      // table5 (intermediate accessible for tbody)
+      accTree =
+        { TABLE: [
+          { TEXT_CONTAINER: [
+            { ROW: [
+              { CELL: [
+                { TEXT_LEAF: [ ] }
+              ] }
+            ] }
+          ] } ]
+        };
+      testAccessibleTree("table5", accTree);
+
+      /////////////////////////////////////////////////////////////////////////
+      // log table
+      accTree =
+        { TABLE: [
+          { ROW: [
+            { CELL: [
+              { TEXT_LEAF: [ ] }
+            ] }
+          ] }
+        ] };
+      testAccessibleTree("logtable", accTree);
 
       SimpleTest.finish();
     }
@@ -242,5 +268,15 @@
       <td>cell1</td>
     </div>
   </table>
+
+  <table id="table5">
+    <tbody style="display:block;overflow:auto;">
+      <tr>
+        <td>bla</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table id="logtable" role="log"><tr><td>blah</td></tr></table>
 </body>
 </html>

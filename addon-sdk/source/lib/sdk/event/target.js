@@ -1,7 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
 'use strict';
 
 module.metadata = {
@@ -9,7 +8,7 @@ module.metadata = {
 };
 
 const { on, once, off, setListeners } = require('./core');
-const { method, chainable } = require('../lang/functional');
+const { method, chainable } = require('../lang/functional/core');
 const { Class } = require('../core/heritage');
 
 /**
@@ -68,9 +67,8 @@ const EventTarget = Class({
     off(this, type, listener);
     return this;
   },
-  off: function(type, listener) {
-    off(this, type, listener);
-    return this;
-  }
+  // but we can wrap `off` here, as the semantics are the same
+  off: chainable(method(off))
+
 });
 exports.EventTarget = EventTarget;

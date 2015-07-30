@@ -18,7 +18,7 @@ function test()
     gBrowser.selectedBrowser.removeEventListener("load", onload, true);
     doc = content.document;
     node = doc.querySelector("h1");
-    waitForFocus(setupKeyBindingsTest, content);
+    waitForFocus(setupKeyBindingsTest);
   }, true);
 
   content.location = "data:text/html,<html><head><title>Test for the " +
@@ -58,7 +58,7 @@ function test()
     }
 
     gDevTools.once("toolbox-ready", (e, toolbox) => {
-      inspectorShouldBeOpenAndHighlighting(toolbox.getCurrentPanel(), toolbox)
+      inspectorShouldBeOpenAndHighlighting(toolbox.getCurrentPanel(), toolbox);
     });
 
     keysetMap.inspector.synthesizeKey();
@@ -74,30 +74,30 @@ function test()
 
       aToolbox.once("picker-stopped", () => {
         ok(true, "picker-stopped event received, highlighter stopped");
-        aToolbox.once("webconsole-ready", (e, panel) => {
-          webconsoleShouldBeSelected(aToolbox, panel);
+        gDevTools.once("select-tool-command", () => {
+          webconsoleShouldBeSelected(aToolbox);
         });
         keysetMap.webconsole.synthesizeKey();
       });
     });
   }
 
-  function webconsoleShouldBeSelected(aToolbox, panel)
+  function webconsoleShouldBeSelected(aToolbox)
   {
-      is (aToolbox.currentToolId, "webconsole");
+      is (aToolbox.currentToolId, "webconsole", "webconsole should be selected.");
 
-      aToolbox.once("jsdebugger-ready", (e, panel) => {
-        jsdebuggerShouldBeSelected(aToolbox, panel);
+      gDevTools.once("select-tool-command", () => {
+        jsdebuggerShouldBeSelected(aToolbox);
       });
       keysetMap.jsdebugger.synthesizeKey();
   }
 
-  function jsdebuggerShouldBeSelected(aToolbox, panel)
+  function jsdebuggerShouldBeSelected(aToolbox)
   {
-      is (aToolbox.currentToolId, "jsdebugger");
+      is (aToolbox.currentToolId, "jsdebugger", "jsdebugger should be selected.");
 
-      aToolbox.once("netmonitor-ready", (e, panel) => {
-        netmonitorShouldBeSelected(aToolbox, panel);
+      gDevTools.once("select-tool-command", () => {
+        netmonitorShouldBeSelected(aToolbox);
       });
 
       keysetMap.netmonitor.synthesizeKey();
@@ -105,7 +105,7 @@ function test()
 
   function netmonitorShouldBeSelected(aToolbox, panel)
   {
-      is (aToolbox.currentToolId, "netmonitor");
+      is (aToolbox.currentToolId, "netmonitor", "netmonitor should be selected.");
       finishUp();
   }
 

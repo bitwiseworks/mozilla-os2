@@ -5,6 +5,9 @@
 const TEST_BASE_HTTP = "http://example.com/browser/browser/devtools/commandline/test/";
 const TEST_BASE_HTTPS = "https://example.com/browser/browser/devtools/commandline/test/";
 
+var require = Cu.import("resource://gre/modules/devtools/Loader.jsm", {}).devtools.require;
+var console = require("resource://gre/modules/devtools/Console.jsm").console;
+
 // Import the GCLI test helper
 let testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
 Services.scriptloader.loadSubScript(testDir + "/helpers.js", this);

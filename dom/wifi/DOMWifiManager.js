@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -62,11 +62,25 @@ MozWifiConnectionInfo.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports])
 }
 
+function MozWifiCapabilities(obj) {
+  this.security = obj.security;
+  this.eapMethod = obj.eapMethod;
+  this.eapPhase2 = obj.eapPhase2;
+  this.certificate = obj.certificate;
+}
+
+MozWifiCapabilities.prototype = {
+  classID: Components.ID("08c88ece-8092-481b-863b-5515a52e411a"),
+  contractID: "@mozilla.org/mozwificapabilities;1",
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports])
+}
+
 function DOMWifiManager() {
   this.defineEventHandlerGetterSetter("onstatuschange");
-  this.defineEventHandlerGetterSetter("onconnectionInfoUpdate");
+  this.defineEventHandlerGetterSetter("onconnectioninfoupdate");
   this.defineEventHandlerGetterSetter("onenabled");
   this.defineEventHandlerGetterSetter("ondisabled");
+  this.defineEventHandlerGetterSetter("onstationinfoupdate");
 }
 
 DOMWifiManager.prototype = {
@@ -85,6 +99,8 @@ DOMWifiManager.prototype = {
     this._connectionStatus = "disconnected";
     this._enabled = false;
     this._lastConnectionInfo = null;
+    this._capabilities = null;
+    this._stationNumber = 0;
 
     const messages = ["WifiManager:getNetworks:Return:OK", "WifiManager:getNetworks:Return:NO",
                       "WifiManager:getKnownNetworks:Return:OK", "WifiManager:getKnownNetworks:Return:NO",
@@ -94,12 +110,17 @@ DOMWifiManager.prototype = {
                       "WifiManager:setPowerSavingMode:Return:OK", "WifiManager:setPowerSavingMode:Return:NO",
                       "WifiManager:setHttpProxy:Return:OK", "WifiManager:setHttpProxy:Return:NO",
                       "WifiManager:setStaticIpMode:Return:OK", "WifiManager:setStaticIpMode:Return:NO",
+                      "WifiManager:importCert:Return:OK", "WifiManager:importCert:Return:NO",
+                      "WifiManager:getImportedCerts:Return:OK", "WifiManager:getImportedCerts:Return:NO",
+                      "WifiManager:deleteCert:Return:OK", "WifiManager:deleteCert:Return:NO",
+                      "WifiManager:setWifiEnabled:Return:OK", "WifiManager:setWifiEnabled:Return:NO",
                       "WifiManager:wifiDown", "WifiManager:wifiUp",
                       "WifiManager:onconnecting", "WifiManager:onassociate",
                       "WifiManager:onconnect", "WifiManager:ondisconnect",
                       "WifiManager:onwpstimeout", "WifiManager:onwpsfail",
-                      "WifiManager:onwpsoverlap", "WifiManager:connectionInfoUpdate",
-                      "WifiManager:onconnectingfailed"];
+                      "WifiManager:onwpsoverlap", "WifiManager:connectioninfoupdate",
+                      "WifiManager:onauthenticating", "WifiManager:onconnectingfailed",
+                      "WifiManager:stationinfoupdate"];
     this.initDOMRequestHelper(aWindow, messages);
     this._mm = Cc["@mozilla.org/childprocessmessagemanager;1"].getService(Ci.nsISyncMessageSender);
 
@@ -110,6 +131,7 @@ DOMWifiManager.prototype = {
       this._enabled = state.enabled;
       this._connectionStatus = state.status;
       this._macAddress = state.macAddress;
+      this._capabilities = this._convertWifiCapabilities(state.capabilities);
     } else {
       this._currentNetwork = null;
       this._lastConnectionInfo = null;
@@ -138,7 +160,7 @@ DOMWifiManager.prototype = {
   },
 
   _convertWifiNetworks: function(aNetworks) {
-    let networks = [];
+    let networks = new this._window.Array();
     for (let i in aNetworks) {
       networks.push(this._convertWifiNetwork(aNetworks[i]));
     }
@@ -153,6 +175,12 @@ DOMWifiManager.prototype = {
   _convertConnectionInfo: function(aInfo) {
     let info = aInfo ? new MozWifiConnectionInfo(aInfo) : null;
     return info;
+  },
+
+  _convertWifiCapabilities: function(aCapabilities) {
+    let capabilities = aCapabilities ?
+                         new MozWifiCapabilities(aCapabilities) : null;
+    return capabilities;
   },
 
   _sendMessageForRequest: function(name, data, request) {
@@ -174,6 +202,14 @@ DOMWifiManager.prototype = {
     }
 
     switch (aMessage.name) {
+      case "WifiManager:setWifiEnabled:Return:OK":
+        Services.DOMRequest.fireSuccess(request, msg.data);
+        break;
+
+      case "WifiManager:setWifiEnabled:Return:NO":
+        Services.DOMRequest.fireError(request, "Unable to enable/disable Wifi");
+        break;
+
       case "WifiManager:getNetworks:Return:OK":
         Services.DOMRequest.fireSuccess(request, this._convertWifiNetworks(msg.data));
         break;
@@ -238,6 +274,30 @@ DOMWifiManager.prototype = {
         Services.DOMRequest.fireError(request, msg.data);
         break;
 
+      case "WifiManager:importCert:Return:OK":
+        Services.DOMRequest.fireSuccess(request, Cu.cloneInto(msg.data, this._window));
+        break;
+
+      case "WifiManager:importCert:Return:NO":
+        Services.DOMRequest.fireError(request, msg.data);
+        break;
+
+      case "WifiManager:getImportedCerts:Return:OK":
+        Services.DOMRequest.fireSuccess(request, Cu.cloneInto(msg.data, this._window));
+        break;
+
+      case "WifiManager:getImportedCerts:Return:NO":
+        Services.DOMRequest.fireError(request, msg.data);
+        break;
+
+      case "WifiManager:deleteCert:Return:OK":
+        Services.DOMRequest.fireSuccess(request, msg.data);
+        break;
+
+      case "WifiManager:deleteCert:Return:NO":
+        Services.DOMRequest.fireError(request, msg.data);
+        break;
+
       case "WifiManager:wifiDown":
         this._enabled = false;
         this._currentNetwork = null;
@@ -253,50 +313,50 @@ DOMWifiManager.prototype = {
       case "WifiManager:onconnecting":
         this._currentNetwork = this._convertWifiNetwork(msg.network);
         this._connectionStatus = "connecting";
-        this._fireStatusChangeEvent();
+        this._fireStatusChangeEvent(msg.network);
         break;
 
       case "WifiManager:onassociate":
         this._currentNetwork = this._convertWifiNetwork(msg.network);
         this._connectionStatus = "associated";
-        this._fireStatusChangeEvent();
+        this._fireStatusChangeEvent(msg.network);
         break;
 
       case "WifiManager:onconnect":
         this._currentNetwork = this._convertWifiNetwork(msg.network);
         this._connectionStatus = "connected";
-        this._fireStatusChangeEvent();
+        this._fireStatusChangeEvent(msg.network);
         break;
 
       case "WifiManager:ondisconnect":
         this._currentNetwork = null;
         this._connectionStatus = "disconnected";
         this._lastConnectionInfo = null;
-        this._fireStatusChangeEvent();
+        this._fireStatusChangeEvent(msg.network);
         break;
 
       case "WifiManager:onwpstimeout":
         this._currentNetwork = null;
         this._connectionStatus = "wps-timedout";
         this._lastConnectionInfo = null;
-        this._fireStatusChangeEvent();
+        this._fireStatusChangeEvent(msg.network);
         break;
 
       case "WifiManager:onwpsfail":
         this._currentNetwork = null;
         this._connectionStatus = "wps-failed";
         this._lastConnectionInfo = null;
-        this._fireStatusChangeEvent();
+        this._fireStatusChangeEvent(msg.network);
         break;
 
       case "WifiManager:onwpsoverlap":
         this._currentNetwork = null;
         this._connectionStatus = "wps-overlapped";
         this._lastConnectionInfo = null;
-        this._fireStatusChangeEvent();
+        this._fireStatusChangeEvent(msg.network);
         break;
 
-      case "WifiManager:connectionInfoUpdate":
+      case "WifiManager:connectioninfoupdate":
         this._lastConnectionInfo = this._convertConnectionInfo(msg);
         this._fireConnectionInfoUpdate(msg);
         break;
@@ -304,14 +364,23 @@ DOMWifiManager.prototype = {
         this._currentNetwork = null;
         this._connectionStatus = "connectingfailed";
         this._lastConnectionInfo = null;
-        this._fireStatusChangeEvent();
+        this._fireStatusChangeEvent(msg.network);
+        break;
+      case "WifiManager:onauthenticating":
+        this._currentNetwork = this._convertWifiNetwork(msg.network);
+        this._connectionStatus = "authenticating";
+        this._fireStatusChangeEvent(msg.network);
+        break;
+      case "WifiManager:stationinfoupdate":
+        this._stationNumber = msg.station;
+        this._fireStationInfoUpdate(msg);
         break;
     }
   },
 
-  _fireStatusChangeEvent: function StatusChangeEvent() {
+  _fireStatusChangeEvent: function StatusChangeEvent(aNetwork) {
     var event = new this._window.MozWifiStatusChangeEvent("statuschange",
-                                                          { network: this._currentNetwork,
+                                                          { network: this._convertWifiNetwork(aNetwork),
                                                             status: this._connectionStatus
                                                           });
     this.__DOM_IMPL__.dispatchEvent(event);
@@ -331,6 +400,19 @@ DOMWifiManager.prototype = {
   _fireEnabledOrDisabled: function enabledDisabled(enabled) {
     var evt = new this._window.Event(enabled ? "enabled" : "disabled");
     this.__DOM_IMPL__.dispatchEvent(evt);
+  },
+
+  _fireStationInfoUpdate: function onStationInfoUpdate(info) {
+    var evt = new this._window.MozWifiStationInfoEvent("stationinfoupdate",
+                                                       { station: this._stationNumber}
+                                                      );
+    this.__DOM_IMPL__.dispatchEvent(evt);
+  },
+
+  setWifiEnabled: function setWifiEnabled(enabled) {
+    var request = this.createRequest();
+    this._sendMessageForRequest("WifiManager:setWifiEnabled", enabled, request);
+    return request;
   },
 
   getNetworks: function getNetworks() {
@@ -385,6 +467,32 @@ DOMWifiManager.prototype = {
     return request;
   },
 
+  importCert: function nsIDOMWifiManager_importCert(certBlob, certPassword, certNickname) {
+    var request = this.createRequest();
+    this._sendMessageForRequest("WifiManager:importCert",
+                                {
+                                  certBlob: certBlob,
+                                  certPassword: certPassword,
+                                  certNickname: certNickname
+                                }, request);
+    return request;
+  },
+
+  getImportedCerts: function nsIDOMWifiManager_getImportedCerts() {
+    var request = this.createRequest();
+    this._sendMessageForRequest("WifiManager:getImportedCerts", null, request);
+    return request;
+  },
+
+  deleteCert: function nsIDOMWifiManager_deleteCert(certNickname) {
+    var request = this.createRequest();
+    this._sendMessageForRequest("WifiManager:deleteCert",
+                                {
+                                  certNickname: certNickname
+                                }, request);
+    return request;
+  },
+
   get enabled() {
     return this._enabled;
   },
@@ -404,6 +512,10 @@ DOMWifiManager.prototype = {
     return this._lastConnectionInfo;
   },
 
+  get capabilities() {
+    return this._capabilities;
+  },
+
   defineEventHandlerGetterSetter: function(name) {
     Object.defineProperty(this, name, {
       get: function() {
@@ -417,7 +529,8 @@ DOMWifiManager.prototype = {
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([
-  DOMWifiManager, MozWifiNetwork, MozWifiConnection, MozWifiConnectionInfo
+  DOMWifiManager, MozWifiNetwork, MozWifiConnection, MozWifiCapabilities,
+  MozWifiConnectionInfo
 ]);
 
 let debug;

@@ -12,8 +12,9 @@
 
 #include "mozilla/Atomics.h"
 #include "nsISupportsImpl.h"
+#include "nsThreadUtils.h" /* nsRunnable */
 
-class JSContext;
+struct JSContext;
 class nsIEventTarget;
 
 BEGIN_WORKERS_NAMESPACE
@@ -150,7 +151,7 @@ protected:
 
 private:
   virtual bool
-  DispatchInternal() MOZ_OVERRIDE;
+  DispatchInternal() override;
 };
 
 // This runnable is identical to WorkerSyncRunnable except it is meant to be
@@ -179,7 +180,7 @@ protected:
 
 private:
   virtual bool
-  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
+  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     AssertIsOnMainThread();
     return true;
@@ -187,7 +188,7 @@ private:
 
   virtual void
   PostDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
-               bool aDispatchResult) MOZ_OVERRIDE;
+               bool aDispatchResult) override;
 };
 
 // This runnable is used to stop a sync loop . As sync loops keep the busy count
@@ -219,10 +220,10 @@ protected:
 
 private:
   virtual bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE;
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override;
 
   virtual bool
-  DispatchInternal() MOZ_OVERRIDE;
+  DispatchInternal() override;
 };
 
 // This runnable is identical to StopSyncLoopRunnable except it is meant to be
@@ -246,7 +247,7 @@ protected:
 
 private:
   virtual bool
-  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
+  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     AssertIsOnMainThread();
     return true;
@@ -254,7 +255,7 @@ private:
 
   virtual void
   PostDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
-               bool aDispatchResult) MOZ_OVERRIDE;
+               bool aDispatchResult) override;
 };
 
 // This runnable is processed as soon as it is received by the worker,
@@ -284,7 +285,7 @@ public:
 
 private:
   virtual bool
-  DispatchInternal() MOZ_OVERRIDE;
+  DispatchInternal() override;
 
   // Should only be called by WorkerPrivate::DoRunLoop.
   using WorkerRunnable::Cancel;
@@ -295,7 +296,7 @@ private:
 class MainThreadWorkerControlRunnable : public WorkerControlRunnable
 {
 protected:
-  MainThreadWorkerControlRunnable(WorkerPrivate* aWorkerPrivate)
+  explicit MainThreadWorkerControlRunnable(WorkerPrivate* aWorkerPrivate)
   : WorkerControlRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount)
   { }
 
@@ -303,7 +304,7 @@ protected:
   { }
 
   virtual bool
-  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
+  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     AssertIsOnMainThread();
     return true;
@@ -311,7 +312,7 @@ protected:
 
   virtual void
   PostDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
-               bool aDispatchResult) MOZ_OVERRIDE;
+               bool aDispatchResult) override;
 };
 
 // A WorkerRunnable that should be dispatched from the worker to itself for
@@ -323,7 +324,7 @@ protected:
 class WorkerSameThreadRunnable : public WorkerRunnable
 {
 protected:
-  WorkerSameThreadRunnable(WorkerPrivate* aWorkerPrivate)
+  explicit WorkerSameThreadRunnable(WorkerPrivate* aWorkerPrivate)
   : WorkerRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount)
   { }
 
@@ -331,15 +332,37 @@ protected:
   { }
 
   virtual bool
-  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE;
+  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override;
 
   virtual void
   PostDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
-               bool aDispatchResult) MOZ_OVERRIDE;
+               bool aDispatchResult) override;
 
   virtual void
   PostRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
-          bool aRunResult) MOZ_OVERRIDE;
+          bool aRunResult) override;
+};
+
+// Base class for the runnable objects, which makes a synchronous call to
+// dispatch the tasks from the worker thread to the main thread.
+//
+// Note that the derived class must override MainThreadRun.
+class WorkerMainThreadRunnable : public nsRunnable
+{
+protected:
+  WorkerPrivate* mWorkerPrivate;
+  nsCOMPtr<nsIEventTarget> mSyncLoopTarget;
+
+  explicit WorkerMainThreadRunnable(WorkerPrivate* aWorkerPrivate);
+  ~WorkerMainThreadRunnable() {}
+
+  virtual bool MainThreadRun() = 0;
+
+public:
+  bool Dispatch(JSContext* aCx);
+
+private:
+  NS_IMETHOD Run() override;  
 };
 
 END_WORKERS_NAMESPACE

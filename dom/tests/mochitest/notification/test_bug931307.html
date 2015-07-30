@@ -13,17 +13,20 @@
 <script type="application/javascript"><!--
 
 SimpleTest.waitForExplicitFinish();
-new Notification("");
+var notification = new Notification("");
 var promise = Notification.get();
 promise.then(
   function onSuccess() {
-    ok(true, "No crash!");
-    SimpleTest.finish();
+    ok(true, "No error when creating a notification without title");
   },
   function onFailure() {
-    ok(false, "Should not get an error in promise callback");
+    ok(false, "Should not throw error when creating a notification without title");
   }
-);
+).then(() => {
+  notification.close();
+}).then(() => {
+  SimpleTest.finish();
+});
 
 </script>
 </pre>

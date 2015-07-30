@@ -1,18 +1,24 @@
-// -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 "use strict";
 
+Cu.import("resource://gre/modules/TelemetrySession.jsm", this);
+
 function test() {
   runTests();
 }
 
 function getTelemetryPayload() {
-  return Cu.import("resource://gre/modules/TelemetryPing.jsm", {}).
-    TelemetryPing.getPayload();
+  return TelemetrySession.getPayload();
 }
+
+gTests.push({
+  desc: "Setup",
+  run: () => { yield TelemetrySession.setup(); }
+});
 
 gTests.push({
   desc: "Test browser-ui telemetry",
@@ -63,4 +69,9 @@ gTests.push({
     is(simpleMeasurements.UITelemetry["metro-tabs"]["currTabCount"], 1);
     is(simpleMeasurements.UITelemetry["metro-tabs"]["maxTabCount"], 3);
   }
+});
+
+gTests.push({
+  desc: "Shutdown",
+  run: () => { yield TelemetrySession.shutdown(); }
 });

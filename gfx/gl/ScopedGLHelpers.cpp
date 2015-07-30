@@ -3,11 +3,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/UniquePtr.h"
+
 #include "GLContext.h"
 #include "ScopedGLHelpers.h"
 
 namespace mozilla {
 namespace gl {
+
+#ifdef DEBUG
+bool
+IsContextCurrent(GLContext* gl)
+{
+    return gl->IsCurrent();
+}
+#endif
 
 /* ScopedGLState - Wraps glEnable/glDisable. **********************************/
 
@@ -52,7 +62,12 @@ ScopedGLState::UnwrapImpl()
 void
 ScopedBindFramebuffer::Init()
 {
-    mOldFB = mGL->GetFB();
+    if (mGL->IsSupported(GLFeature::framebuffer_blit)) {
+        mOldReadFB = mGL->GetReadFB();
+        mOldDrawFB = mGL->GetDrawFB();
+    } else {
+        mOldReadFB = mOldDrawFB = mGL->GetFB();
+    }
 }
 
 ScopedBindFramebuffer::ScopedBindFramebuffer(GLContext* aGL)
@@ -74,7 +89,12 @@ ScopedBindFramebuffer::UnwrapImpl()
     // Check that we're not falling out of scope after the current context changed.
     MOZ_ASSERT(mGL->IsCurrent());
 
-    mGL->BindFB(mOldFB);
+    if (mOldReadFB == mOldDrawFB) {
+        mGL->BindFB(mOldDrawFB);
+    } else {
+        mGL->BindDrawFB(mOldDrawFB);
+        mGL->BindReadFB(mOldReadFB);
+    }
 }
 
 
@@ -102,6 +122,7 @@ ScopedBindTextureUnit::UnwrapImpl() {
 ScopedTexture::ScopedTexture(GLContext* aGL)
     : ScopedGLWrapper<ScopedTexture>(aGL)
 {
+    MOZ_ASSERT(mGL->IsCurrent());
     mGL->fGenTextures(1, &mTexture);
 }
 
@@ -111,8 +132,45 @@ ScopedTexture::UnwrapImpl()
     // Check that we're not falling out of scope after
     // the current context changed.
     MOZ_ASSERT(mGL->IsCurrent());
-
     mGL->fDeleteTextures(1, &mTexture);
+}
+
+
+/* ScopedFramebuffer **************************************************************/
+
+ScopedFramebuffer::ScopedFramebuffer(GLContext* aGL)
+    : ScopedGLWrapper<ScopedFramebuffer>(aGL)
+{
+    MOZ_ASSERT(mGL->IsCurrent());
+    mGL->fGenFramebuffers(1, &mFB);
+}
+
+void
+ScopedFramebuffer::UnwrapImpl()
+{
+    // Check that we're not falling out of scope after
+    // the current context changed.
+    MOZ_ASSERT(mGL->IsCurrent());
+    mGL->fDeleteFramebuffers(1, &mFB);
+}
+
+
+/* ScopedRenderbuffer **************************************************************/
+
+ScopedRenderbuffer::ScopedRenderbuffer(GLContext* aGL)
+    : ScopedGLWrapper<ScopedRenderbuffer>(aGL)
+{
+    MOZ_ASSERT(mGL->IsCurrent());
+    mGL->fGenRenderbuffers(1, &mRB);
+}
+
+void
+ScopedRenderbuffer::UnwrapImpl()
+{
+    // Check that we're not falling out of scope after
+    // the current context changed.
+    MOZ_ASSERT(mGL->IsCurrent());
+    mGL->fDeleteRenderbuffers(1, &mRB);
 }
 
 /* ScopedBindTexture **********************************************************/
@@ -122,6 +180,7 @@ ScopedBindTexture::Init(GLenum aTarget)
     mTarget = aTarget;
     mOldTex = 0;
     GLenum bindingTarget = (aTarget == LOCAL_GL_TEXTURE_2D) ? LOCAL_GL_TEXTURE_BINDING_2D
+                         : (aTarget == LOCAL_GL_TEXTURE_3D) ? LOCAL_GL_TEXTURE_BINDING_3D
                          : (aTarget == LOCAL_GL_TEXTURE_RECTANGLE_ARB) ? LOCAL_GL_TEXTURE_BINDING_RECTANGLE_ARB
                          : (aTarget == LOCAL_GL_TEXTURE_CUBE_MAP) ? LOCAL_GL_TEXTURE_BINDING_CUBE_MAP
                          : (aTarget == LOCAL_GL_TEXTURE_EXTERNAL) ? LOCAL_GL_TEXTURE_BINDING_EXTERNAL
@@ -290,6 +349,179 @@ void ScopedScissorRect::UnwrapImpl()
                 mSavedScissorRect[1],
                 mSavedScissorRect[2],
                 mSavedScissorRect[3]);
+}
+
+/* ScopedVertexAttribPointer **************************************************/
+
+ScopedVertexAttribPointer::ScopedVertexAttribPointer(GLContext* aGL,
+                                                     GLuint index,
+                                                     GLint size,
+                                                     GLenum type,
+                                                     realGLboolean normalized,
+                                                     GLsizei stride,
+                                                     GLuint buffer,
+                                                     const GLvoid* pointer)
+    : ScopedGLWrapper<ScopedVertexAttribPointer>(aGL)
+{
+    WrapImpl(index);
+    mGL->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, buffer);
+    mGL->fVertexAttribPointer(index, size, type, normalized, stride, pointer);
+    mGL->fEnableVertexAttribArray(index);
+}
+
+ScopedVertexAttribPointer::ScopedVertexAttribPointer(GLContext* aGL,
+                                                     GLuint index)
+    : ScopedGLWrapper<ScopedVertexAttribPointer>(aGL)
+{
+    WrapImpl(index);
+}
+
+void
+ScopedVertexAttribPointer::WrapImpl(GLuint index)
+{
+    mAttribIndex = index;
+
+    /*
+     * mGL->fGetVertexAttribiv takes:
+     *  VERTEX_ATTRIB_ARRAY_ENABLED
+     *  VERTEX_ATTRIB_ARRAY_SIZE,
+     *  VERTEX_ATTRIB_ARRAY_STRIDE,
+     *  VERTEX_ATTRIB_ARRAY_TYPE,
+     *  VERTEX_ATTRIB_ARRAY_NORMALIZED,
+     *  VERTEX_ATTRIB_ARRAY_BUFFER_BINDING,
+     *  CURRENT_VERTEX_ATTRIB
+     *
+     * CURRENT_VERTEX_ATTRIB is vertex shader state. \o/
+     * Others appear to be vertex array state,
+     * or alternatively in the internal vertex array state
+     * for a buffer object.
+    */
+
+    mGL->fGetVertexAttribiv(mAttribIndex, LOCAL_GL_VERTEX_ATTRIB_ARRAY_ENABLED, &mAttribEnabled);
+    mGL->fGetVertexAttribiv(mAttribIndex, LOCAL_GL_VERTEX_ATTRIB_ARRAY_SIZE, &mAttribSize);
+    mGL->fGetVertexAttribiv(mAttribIndex, LOCAL_GL_VERTEX_ATTRIB_ARRAY_STRIDE, &mAttribStride);
+    mGL->fGetVertexAttribiv(mAttribIndex, LOCAL_GL_VERTEX_ATTRIB_ARRAY_TYPE, &mAttribType);
+    mGL->fGetVertexAttribiv(mAttribIndex, LOCAL_GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, &mAttribNormalized);
+    mGL->fGetVertexAttribiv(mAttribIndex, LOCAL_GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &mAttribBufferBinding);
+    mGL->fGetVertexAttribPointerv(mAttribIndex, LOCAL_GL_VERTEX_ATTRIB_ARRAY_POINTER, &mAttribPointer);
+
+    // Note that uniform values are program state, so we don't need to rebind those.
+
+    mGL->GetUIntegerv(LOCAL_GL_ARRAY_BUFFER_BINDING, &mBoundBuffer);
+}
+
+void
+ScopedVertexAttribPointer::UnwrapImpl()
+{
+    mGL->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, mAttribBufferBinding);
+    mGL->fVertexAttribPointer(mAttribIndex, mAttribSize, mAttribType, mAttribNormalized, mAttribStride, mAttribPointer);
+    if (mAttribEnabled)
+        mGL->fEnableVertexAttribArray(mAttribIndex);
+    else
+        mGL->fDisableVertexAttribArray(mAttribIndex);
+    mGL->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, mBoundBuffer);
+}
+
+ScopedGLDrawState::ScopedGLDrawState(GLContext* aGL)
+    : blend       (aGL, LOCAL_GL_BLEND,      false)
+    , cullFace    (aGL, LOCAL_GL_CULL_FACE,  false)
+    , depthTest   (aGL, LOCAL_GL_DEPTH_TEST, false)
+    , dither      (aGL, LOCAL_GL_DITHER,     false)
+    , polyOffsFill(aGL, LOCAL_GL_POLYGON_OFFSET_FILL,      false)
+    , sampleAToC  (aGL, LOCAL_GL_SAMPLE_ALPHA_TO_COVERAGE, false)
+    , sampleCover (aGL, LOCAL_GL_SAMPLE_COVERAGE, false)
+    , scissor     (aGL, LOCAL_GL_SCISSOR_TEST,    false)
+    , stencil     (aGL, LOCAL_GL_STENCIL_TEST,    false)
+    , mGL(aGL)
+    , packAlign(4)
+{
+    mGL->GetUIntegerv(LOCAL_GL_UNPACK_ALIGNMENT, &packAlign);
+    mGL->GetUIntegerv(LOCAL_GL_CURRENT_PROGRAM, &boundProgram);
+    mGL->GetUIntegerv(LOCAL_GL_ARRAY_BUFFER_BINDING, &boundBuffer);
+    mGL->GetUIntegerv(LOCAL_GL_MAX_VERTEX_ATTRIBS, &maxAttrib);
+    attrib_enabled = MakeUnique<GLint[]>(maxAttrib);
+
+    for (unsigned int i = 0; i < maxAttrib; i++) {
+        mGL->fGetVertexAttribiv(i, LOCAL_GL_VERTEX_ATTRIB_ARRAY_ENABLED, &attrib_enabled[i]);
+        mGL->fDisableVertexAttribArray(i);
+    }
+    // Only Attrib0's client side state affected
+    mGL->fGetVertexAttribiv(0, LOCAL_GL_VERTEX_ATTRIB_ARRAY_SIZE, &attrib0_size);
+    mGL->fGetVertexAttribiv(0, LOCAL_GL_VERTEX_ATTRIB_ARRAY_STRIDE, &attrib0_stride);
+    mGL->fGetVertexAttribiv(0, LOCAL_GL_VERTEX_ATTRIB_ARRAY_TYPE, &attrib0_type);
+    mGL->fGetVertexAttribiv(0, LOCAL_GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, &attrib0_normalized);
+    mGL->fGetVertexAttribiv(0, LOCAL_GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &attrib0_bufferBinding);
+    mGL->fGetVertexAttribPointerv(0, LOCAL_GL_VERTEX_ATTRIB_ARRAY_POINTER, &attrib0_pointer);
+    mGL->fGetBooleanv(LOCAL_GL_COLOR_WRITEMASK, colorMask);
+    mGL->fGetIntegerv(LOCAL_GL_VIEWPORT, viewport);
+    mGL->fGetIntegerv(LOCAL_GL_SCISSOR_BOX, scissorBox);
+}
+
+ScopedGLDrawState::~ScopedGLDrawState()
+{
+    mGL->fScissor(scissorBox[0], scissorBox[1],
+                  scissorBox[2], scissorBox[3]);
+
+    mGL->fViewport(viewport[0], viewport[1],
+                   viewport[2], viewport[3]);
+
+    mGL->fColorMask(colorMask[0],
+                    colorMask[1],
+                    colorMask[2],
+                    colorMask[3]);
+
+    mGL->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, packAlign);
+
+    for (unsigned int i = 0; i < maxAttrib; i++) {
+        if (attrib_enabled[i])
+            mGL->fEnableVertexAttribArray(i);
+        else
+            mGL->fDisableVertexAttribArray(i);
+    }
+
+
+    mGL->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, attrib0_bufferBinding);
+    mGL->fVertexAttribPointer(0,
+                              attrib0_size,
+                              attrib0_type,
+                              attrib0_normalized,
+                              attrib0_stride,
+                              attrib0_pointer);
+
+    mGL->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, boundBuffer);
+
+    mGL->fUseProgram(boundProgram);
+}
+
+////////////////////////////////////////////////////////////////////////
+// ScopedPackAlignment
+
+ScopedPackAlignment::ScopedPackAlignment(GLContext* gl, GLint scopedVal)
+    : ScopedGLWrapper<ScopedPackAlignment>(gl)
+{
+    MOZ_ASSERT(scopedVal == 1 ||
+               scopedVal == 2 ||
+               scopedVal == 4 ||
+               scopedVal == 8);
+
+    gl->fGetIntegerv(LOCAL_GL_PACK_ALIGNMENT, &mOldVal);
+
+    if (scopedVal != mOldVal) {
+        gl->fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, scopedVal);
+    } else {
+      // Don't try to re-set it during unwrap.
+        mOldVal = 0;
+    }
+}
+
+void
+ScopedPackAlignment::UnwrapImpl() {
+    // Check that we're not falling out of scope after the current context changed.
+    MOZ_ASSERT(mGL->IsCurrent());
+
+    if (mOldVal) {
+        mGL->fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, mOldVal);
+    }
 }
 
 } /* namespace gl */

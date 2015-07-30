@@ -29,16 +29,6 @@ function PermissionSettings()
 }
 
 XPCOMUtils.defineLazyServiceGetter(this,
-                                   "permissionManager",
-                                   "@mozilla.org/permissionmanager;1",
-                                   "nsIPermissionManager");
-
-XPCOMUtils.defineLazyServiceGetter(this,
-                                   "secMan",
-                                   "@mozilla.org/scriptsecuritymanager;1",
-                                   "nsIScriptSecurityManager");
-
-XPCOMUtils.defineLazyServiceGetter(this,
                                    "appsService",
                                    "@mozilla.org/AppsService;1",
                                    "nsIAppsService");
@@ -48,8 +38,8 @@ PermissionSettings.prototype = {
     debug("Get called with: " + aPermName + ", " + aManifestURL + ", " + aOrigin + ", " + aBrowserFlag);
     let uri = Services.io.newURI(aOrigin, null, null);
     let appID = appsService.getAppLocalIdByManifestURL(aManifestURL);
-    let principal = secMan.getAppCodebasePrincipal(uri, appID, aBrowserFlag);
-    let result = permissionManager.testExactPermanentPermission(principal, aPermName);
+    let principal = Services.scriptSecurityManager.getAppCodebasePrincipal(uri, appID, aBrowserFlag);
+    let result = Services.perms.testExactPermanentPermission(principal, aPermName);
 
     switch (result)
     {
@@ -71,10 +61,13 @@ PermissionSettings.prototype = {
                                   aBrowserFlag) {
     debug("isExplicit: " + aPermName + ", " + aManifestURL + ", " + aOrigin);
     let uri = Services.io.newURI(aOrigin, null, null);
-    let appID = appsService.getAppLocalIdByManifestURL(aManifestURL);
-    let principal = secMan.getAppCodebasePrincipal(uri, appID, aBrowserFlag);
+    let app = appsService.getAppByManifestURL(aManifestURL);
+    let principal = Services.scriptSecurityManager
+      .getAppCodebasePrincipal(uri, app.localId, aBrowserFlag);
 
-    return isExplicitInPermissionsTable(aPermName, principal.appStatus);
+    return isExplicitInPermissionsTable(aPermName,
+                                        principal.appStatus,
+                                        app.kind);
   },
 
   set: function set(aPermName, aPermValue, aManifestURL, aOrigin,
@@ -108,7 +101,7 @@ PermissionSettings.prototype = {
   remove: function remove(aPermName, aManifestURL, aOrigin) {
     let uri = Services.io.newURI(aOrigin, null, null);
     let appID = appsService.getAppLocalIdByManifestURL(aManifestURL);
-    let principal = secMan.getAppCodebasePrincipal(uri, appID, true);
+    let principal = Services.scriptSecurityManager.getAppCodebasePrincipal(uri, appID, true);
 
     if (principal.appStatus !== Ci.nsIPrincipal.APP_STATUS_NOT_INSTALLED) {
       let errorMsg = "PermissionSettings.js: '" + aOrigin + "'" +

@@ -8,6 +8,8 @@
 #include "nsCSSProperty.h"
 
 class nsIFrame;
+class nsIContent;
+class nsDisplayListBuilder;
 
 namespace mozilla {
 
@@ -56,14 +58,32 @@ public:
   static void NotifyInlineStyleRuleModified(nsIFrame* aFrame, nsCSSProperty aProperty);
   /**
    * Return true if aFrame's aProperty style should be considered as being animated
+   * for pre-rendering.
+   */
+  static bool IsStyleMaybeAnimated(nsIFrame* aFrame, nsCSSProperty aProperty);
+  /**
+   * Return true if aFrame's aProperty style should be considered as being animated
    * for constructing active layers.
    */
-  static bool IsStyleAnimated(nsIFrame* aFrame, nsCSSProperty aProperty);
+  static bool IsStyleAnimated(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                              nsCSSProperty aProperty);
   /**
    * Return true if any of aFrame's offset property styles should be considered
    * as being animated for constructing active layers.
    */
   static bool IsOffsetOrMarginStyleAnimated(nsIFrame* aFrame);
+  /**
+   * Transfer the LayerActivity property to the frame's content node when the
+   * frame is about to be destroyed so that layer activity can be tracked
+   * throughout reframes of an element. Only call this when aFrame is the
+   * primary frame of aContent.
+   */
+  static void TransferActivityToContent(nsIFrame* aFrame, nsIContent* aContent);
+  /**
+   * Transfer the LayerActivity property back to the content node's primary
+   * frame after the frame has been created.
+   */
+  static void TransferActivityToFrame(nsIContent* aContent, nsIFrame* aFrame);
 
   /*
    * We track modifications to the content of certain frames (i.e. canvas frames)

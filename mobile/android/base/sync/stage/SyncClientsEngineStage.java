@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
-import org.mozilla.gecko.background.common.GlobalConstants;
+import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.sync.CommandProcessor;
 import org.mozilla.gecko.sync.CommandProcessor.Command;
@@ -319,7 +319,9 @@ public class SyncClientsEngineStage extends AbstractSessionManagingSyncStage {
     // We can be disabled just for this sync.
     boolean enabledThisSync = session.isEngineLocallyEnabled(STAGE_NAME);
     if (!enabledThisSync) {
+      // These log messages look best when they match the messages in ServerSyncStage.
       Logger.debug(LOG_TAG, "Stage " + STAGE_NAME + " disabled just for this sync.");
+      Logger.info(LOG_TAG, "Skipping stage " + STAGE_NAME + ".");
       session.advance();
       return;
     }
@@ -357,7 +359,7 @@ public class SyncClientsEngineStage extends AbstractSessionManagingSyncStage {
   }
 
   protected String getLocalClientVersion() {
-    return GlobalConstants.MOZ_APP_VERSION;
+    return AppConstants.MOZ_APP_VERSION;
   }
 
   @SuppressWarnings("unchecked")
@@ -376,6 +378,13 @@ public class SyncClientsEngineStage extends AbstractSessionManagingSyncStage {
     r.name = ourName;
     r.version = getLocalClientVersion();
     r.protocols = getLocalClientProtocols();
+
+    r.os = "Android";
+    r.application = AppConstants.MOZ_APP_DISPLAYNAME;
+    r.appPackage = AppConstants.ANDROID_PACKAGE_NAME;
+    r.device = android.os.Build.MODEL;
+    r.formfactor = delegate.getFormFactor();
+
     return r;
   }
 
@@ -392,6 +401,11 @@ public class SyncClientsEngineStage extends AbstractSessionManagingSyncStage {
 
     long lastUpload = session.config.getPersistedServerClientRecordTimestamp();   // Defaults to 0.
     if (lastUpload == 0) {
+      return true;
+    }
+
+    if (session.getClientsDelegate().getLastModifiedTimestamp() > lastUpload) {
+      // Something's changed locally since we last uploaded.
       return true;
     }
 

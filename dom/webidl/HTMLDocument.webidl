@@ -6,7 +6,7 @@
 
 [OverrideBuiltins]
 interface HTMLDocument : Document {
-           [Throws]
+           [SetterThrows]
            attribute DOMString? domain;
            [Throws]
            attribute DOMString cookie;
@@ -72,8 +72,7 @@ interface HTMLDocument : Document {
 
   void clear();
 
-  [Throws]
-  readonly attribute object all;
+  readonly attribute HTMLAllCollection all;
 
   // https://dvcs.w3.org/hg/editing/raw-file/tip/editing.html#selections
   [Throws]
@@ -84,4 +83,20 @@ interface HTMLDocument : Document {
   // XXXbz do we actually need these anymore?
   void                      captureEvents();
   void                      releaseEvents();
+};
+
+partial interface HTMLDocument {
+  /*
+   * Number of nodes that have been blocked by
+   * the Safebrowsing API to prevent tracking.
+   */
+  [ChromeOnly, Pure]
+  readonly attribute long blockedTrackingNodeCount;
+
+  /*
+   * List of nodes that have been blocked by
+   * the Safebrowsing API to prevent tracking.
+   */
+  [ChromeOnly, Pure]
+  readonly attribute NodeList blockedTrackingNodes;
 };

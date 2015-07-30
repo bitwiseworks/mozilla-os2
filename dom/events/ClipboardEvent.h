@@ -30,7 +30,7 @@ public:
   // Forward to base class
   NS_FORWARD_TO_EVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) override
   {
     return ClipboardEventBinding::Wrap(aCx, this);
   }
@@ -47,6 +47,9 @@ public:
                           bool aCancelable,
                           DataTransfer* aClipboardData,
                           ErrorResult& aError);
+
+protected:
+  ~ClipboardEvent() {}
 };
 
 } // namespace dom

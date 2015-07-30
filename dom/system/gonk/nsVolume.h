@@ -30,16 +30,21 @@ public:
   nsVolume(const nsAString& aName, const nsAString& aMountPoint,
            const int32_t& aState, const int32_t& aMountGeneration,
            const bool& aIsMediaPresent, const bool& aIsSharing,
-           const bool& aIsFormatting)
+           const bool& aIsFormatting, const bool& aIsFake,
+           const bool& aIsUnmounting, const bool& aIsRemovable,
+           const bool& aIsHotSwappable)
     : mName(aName),
       mMountPoint(aMountPoint),
       mState(aState),
       mMountGeneration(aMountGeneration),
       mMountLocked(false),
-      mIsFake(false),
+      mIsFake(aIsFake),
       mIsMediaPresent(aIsMediaPresent),
       mIsSharing(aIsSharing),
-      mIsFormatting(aIsFormatting)
+      mIsFormatting(aIsFormatting),
+      mIsUnmounting(aIsUnmounting),
+      mIsRemovable(aIsRemovable),
+      mIsHotSwappable(aIsHotSwappable)
   {
   }
 
@@ -53,7 +58,10 @@ public:
       mIsFake(false),
       mIsMediaPresent(false),
       mIsSharing(false),
-      mIsFormatting(false)
+      mIsFormatting(false),
+      mIsUnmounting(false),
+      mIsRemovable(false),
+      mIsHotSwappable(false)
   {
   }
 
@@ -78,17 +86,22 @@ public:
   bool IsMediaPresent() const         { return mIsMediaPresent; }
   bool IsSharing() const              { return mIsSharing; }
   bool IsFormatting() const           { return mIsFormatting; }
+  bool IsUnmounting() const           { return mIsUnmounting; }
+  bool IsRemovable() const            { return mIsRemovable; }
+  bool IsHotSwappable() const         { return mIsHotSwappable; }
 
   typedef nsTArray<nsRefPtr<nsVolume> > Array;
 
 private:
-  ~nsVolume() {}
+  virtual ~nsVolume() {}  // MozExternalRefCountType complains if this is non-virtual
 
   friend class nsVolumeService; // Calls the following XxxMountLock functions
   void UpdateMountLock(const nsAString& aMountLockState);
   void UpdateMountLock(bool aMountLocked);
 
   void SetIsFake(bool aIsFake);
+  void SetIsRemovable(bool aIsRemovable);
+  void SetIsHotSwappable(bool aIsHotSwappble);
   void SetState(int32_t aState);
   static void FormatVolumeIOThread(const nsCString& aVolume);
   static void MountVolumeIOThread(const nsCString& aVolume);
@@ -103,6 +116,9 @@ private:
   bool     mIsMediaPresent;
   bool     mIsSharing;
   bool     mIsFormatting;
+  bool     mIsUnmounting;
+  bool     mIsRemovable;
+  bool     mIsHotSwappable;
 };
 
 } // system

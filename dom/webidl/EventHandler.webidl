@@ -75,6 +75,7 @@ interface GlobalEventHandlers {
            attribute EventHandler onprogress;
            attribute EventHandler onratechange;
            attribute EventHandler onreset;
+           attribute EventHandler onresize;
            attribute EventHandler onscroll;
            attribute EventHandler onseeked;
            attribute EventHandler onseeking;
@@ -123,13 +124,13 @@ interface WindowEventHandlers {
            attribute EventHandler onbeforeprint;
            attribute OnBeforeUnloadEventHandler onbeforeunload;
            attribute EventHandler onhashchange;
+           attribute EventHandler onlanguagechange;
            attribute EventHandler onmessage;
            attribute EventHandler onoffline;
            attribute EventHandler ononline;
            attribute EventHandler onpagehide;
            attribute EventHandler onpageshow;
            attribute EventHandler onpopstate;
-           attribute EventHandler onresize;
            //(Not implemented)attribute EventHandler onstorage;
            attribute EventHandler onunload;
 };

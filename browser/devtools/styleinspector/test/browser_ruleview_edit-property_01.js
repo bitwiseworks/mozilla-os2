@@ -21,8 +21,8 @@ let PAGE_CONTENT = [
   '<div id="testid" class="testclass">Styled Node</div>'
 ].join("\n");
 
-let test = asyncTest(function*() {
-  yield addTab("data:text/html,test rule view user changes");
+add_task(function*() {
+  let tab = yield addTab("data:text/html;charset=utf-8,test rule view user changes");
 
   info("Creating the test document");
   content.document.body.innerHTML = PAGE_CONTENT;
@@ -33,14 +33,14 @@ let test = asyncTest(function*() {
   info("Selecting the test element");
   yield selectNode("#testid", inspector);
 
-  yield testEditProperty(view, "border-color", "red");
-  yield testEditProperty(view, "background-image", TEST_URL);
+  yield testEditProperty(view, "border-color", "red", tab.linkedBrowser);
+  yield testEditProperty(view, "background-image", TEST_URL, tab.linkedBrowser);
 });
 
-function* testEditProperty(view, name, value) {
+function* testEditProperty(view, name, value, browser) {
   info("Test editing existing property name/value fields");
 
-  let idRuleEditor = view.element.children[1]._ruleEditor;
+  let idRuleEditor = getRuleViewRuleEditor(view, 1);
   let propEditor = idRuleEditor.rule.textProps[0].editor;
 
   info("Focusing an existing property name in the rule-view");
@@ -65,14 +65,20 @@ function* testEditProperty(view, name, value) {
 
   info("Entering a new value, including ; to commit and blur the value");
   let onBlur = once(input, "blur");
-  let onModifications = idRuleEditor.rule._applyingModifications;
+  onModifications = idRuleEditor.rule._applyingModifications;
   for (let ch of value + ";") {
     EventUtils.sendChar(ch, view.doc.defaultView);
   }
   yield onBlur;
   yield onModifications;
 
-  let propValue = idRuleEditor.rule.domRule._rawStyle().getPropertyValue(name);
+  is(propEditor.isValid(), true, value + " is a valid entry");
+
+  info("Checking that the style property was changed on the content page");
+  let propValue = yield executeInContent("Test:GetRulePropertyValue", {
+    styleSheetIndex: 0,
+    ruleIndex: 0,
+    name
+  });
   is(propValue, value, name + " should have been set.");
-  is(propEditor.isValid(), true, value + " should be a valid entry");
 }

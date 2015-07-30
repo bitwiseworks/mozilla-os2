@@ -37,18 +37,15 @@ add_task(function test_nested_about_sessionrestore() {
   yield promiseBrowserLoaded(browser);
 
   // test 1
-  ss.setTabState(tab, JSON.stringify(STATE));
-  yield promiseTabRestored(tab);
+  yield promiseTabState(tab, STATE);
   checkState("test1", tab);
 
   // test 2
-  ss.setTabState(tab, JSON.stringify(STATE2));
-  yield promiseTabRestored(tab);
+  yield promiseTabState(tab, STATE2);
   checkState("test2", tab);
 
   // test 3
-  ss.setTabState(tab, JSON.stringify(STATE3));
-  yield promiseTabRestored(tab);
+  yield promiseTabState(tab, STATE3);
   checkState("test3", tab);
 
   // Cleanup.
@@ -57,7 +54,7 @@ add_task(function test_nested_about_sessionrestore() {
 
 function checkState(prefix, tab) {
   // Flush and query tab state.
-  SyncHandlers.get(tab.linkedBrowser).flush();
+  TabState.flush(tab.linkedBrowser);
   let {formdata} = JSON.parse(ss.getTabState(tab));
 
   ok(formdata.id["sessionData"], prefix + ": we have form data for about:sessionrestore");

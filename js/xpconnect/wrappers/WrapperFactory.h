@@ -31,41 +31,30 @@ class WrapperFactory {
         return HasWrapperFlag(wrapper, WAIVE_XRAY_WRAPPER_FLAG);
     }
 
-    static bool IsSecurityWrapper(JSObject* obj) {
-        return !js::CheckedUnwrap(obj);
-    }
-
     static bool IsCOW(JSObject* wrapper);
 
     static JSObject* GetXrayWaiver(JS::HandleObject obj);
     static JSObject* CreateXrayWaiver(JSContext* cx, JS::HandleObject obj);
     static JSObject* WaiveXray(JSContext* cx, JSObject* obj);
 
-    static JSObject* DoubleWrap(JSContext* cx, JS::HandleObject obj, unsigned flags);
-
     // Prepare a given object for wrapping in a new compartment.
     static JSObject* PrepareForWrapping(JSContext* cx,
                                         JS::HandleObject scope,
                                         JS::HandleObject obj,
-                                        unsigned flags);
+                                        JS::HandleObject objectPassedToWrap);
 
     // Rewrap an object that is about to cross compartment boundaries.
     static JSObject* Rewrap(JSContext* cx,
                             JS::HandleObject existing,
                             JS::HandleObject obj,
-                            JS::HandleObject wrappedProto,
-                            JS::HandleObject parent,
-                            unsigned flags);
+                            JS::HandleObject parent);
 
     // Wrap wrapped object into a waiver wrapper and then re-wrap it.
     static bool WaiveXrayAndWrap(JSContext* cx, JS::MutableHandleValue vp);
     static bool WaiveXrayAndWrap(JSContext* cx, JS::MutableHandleObject object);
-
-    // Returns true if the wrapper is in not shadowing mode for the id.
-    static bool XrayWrapperNotShadowing(JSObject* wrapper, jsid id);
 };
 
-extern js::Wrapper XrayWaiver;
+extern const js::Wrapper XrayWaiver;
 
 }
 

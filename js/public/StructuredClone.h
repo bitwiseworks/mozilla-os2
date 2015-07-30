@@ -7,8 +7,6 @@
 #ifndef js_StructuredClone_h
 #define js_StructuredClone_h
 
-#include "mozilla/NullPtr.h"
-
 #include <stdint.h>
 
 #include "jstypes.h"
@@ -63,12 +61,13 @@ typedef JSObject* (*ReadStructuredCloneOp)(JSContext* cx, JSStructuredCloneReade
                                            uint32_t tag, uint32_t data, void* closure);
 
 // Structured data serialization hook. The engine can write primitive values,
-// Objects, Arrays, Dates, RegExps, TypedArrays, and ArrayBuffers. Any other
-// type of object requires application support. This callback must first use
-// the JS_WriteUint32Pair API to write an object header, passing a value
-// greater than JS_SCTAG_USER to the tag parameter. Then it can use the
-// JS_Write* APIs to write any other relevant parts of the value v to the
-// writer w. closure is any value passed to the JS_WriteStructuredCLone function.
+// Objects, Arrays, Dates, RegExps, TypedArrays, ArrayBuffers, Sets, Maps,
+// and SharedTypedArrays. Any other type of object requires application support.
+// This callback must first use the JS_WriteUint32Pair API to write an object
+// header, passing a value greater than JS_SCTAG_USER to the tag parameter.
+// Then it can use the JS_Write* APIs to write any other relevant parts of
+// the value v to the writer w. closure is any value passed to the
+// JS_WriteStructuredClone function.
 //
 // Return true on success, false on error/exception.
 typedef bool (*WriteStructuredCloneOp)(JSContext* cx, JSStructuredCloneWriter* w,
@@ -118,10 +117,11 @@ typedef bool (*TransferStructuredCloneOp)(JSContext* cx,
 typedef void (*FreeTransferStructuredCloneOp)(uint32_t tag, JS::TransferableOwnership ownership,
                                               void* content, uint64_t extraData, void* closure);
 
-// The maximum supported structured-clone serialization format version. Note
-// that this does not need to be bumped for Transferable-only changes, since
-// they are never saved to persistent storage.
-#define JS_STRUCTURED_CLONE_VERSION 2
+// The maximum supported structured-clone serialization format version.
+// Increment this when anything at all changes in the serialization format.
+// (Note that this does not need to be bumped for Transferable-only changes,
+// since they are never saved to persistent storage.)
+#define JS_STRUCTURED_CLONE_VERSION 5
 
 struct JSStructuredCloneCallbacks {
     ReadStructuredCloneOp read;
@@ -210,8 +210,8 @@ class JS_PUBLIC_API(JSAutoStructuredCloneBuffer) {
 
   private:
     // Copy and assignment are not supported.
-    JSAutoStructuredCloneBuffer(const JSAutoStructuredCloneBuffer& other) MOZ_DELETE;
-    JSAutoStructuredCloneBuffer& operator=(const JSAutoStructuredCloneBuffer& other) MOZ_DELETE;
+    JSAutoStructuredCloneBuffer(const JSAutoStructuredCloneBuffer& other) = delete;
+    JSAutoStructuredCloneBuffer& operator=(const JSAutoStructuredCloneBuffer& other) = delete;
 };
 
 // The range of tag values the application may use for its own custom object types.
@@ -238,6 +238,9 @@ JS_WriteUint32Pair(JSStructuredCloneWriter* w, uint32_t tag, uint32_t data);
 
 JS_PUBLIC_API(bool)
 JS_WriteBytes(JSStructuredCloneWriter* w, const void* p, size_t len);
+
+JS_PUBLIC_API(bool)
+JS_WriteString(JSStructuredCloneWriter* w, JS::HandleString str);
 
 JS_PUBLIC_API(bool)
 JS_WriteTypedArray(JSStructuredCloneWriter* w, JS::HandleValue v);

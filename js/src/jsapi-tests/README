@@ -7,16 +7,18 @@ The tests in this directory exercise the JSAPI.
 
 If you built JS, you already built the tests.
 
-If you did `make check` in your JS objdir, you already ran them.
-
 The tests are built by default when you build JS. All the tests are compiled
 into a single binary named jsapi-tests. They all run in a single process.
 
+To run the tests:
+
+    cd $OBJDIR/dist/bin
+    ./jsapi-tests
+
 To run the tests in a debugger:
 
-    cd $OBJDIR/jsapi-tests
+    cd $OBJDIR/dist/bin
     gdb ./jsapi-tests
-
 
 --- Creating new tests
 
@@ -35,12 +37,12 @@ Here is a sample test:
 
     BEGIN_TEST(testIntString_bug515273)
     {
-        jsval v;
-        EVAL("'42';", &v);
+        RootedValue v(cx);
 
-        JSString *str = JSVAL_TO_STRING(v);
-        const char *bytes = JS_GetStringBytes(str);
-        CHECK(strcmp(bytes, "42") == 0);
+        EVAL("'42';", &v);
+        JSString *str = v.toString();
+        CHECK(JS_StringHasBeenInterned(cx, str));
+        CHECK(JS_FlatStringEqualsAscii(JS_ASSERT_STRING_IS_FLAT(str), "42"));
         return true;
     }
     END_TEST(testIntString_bug515273)
@@ -70,7 +72,7 @@ tests.h:
 
     EXEC(const char *code);
 
-        Execute some JS code in global scope, using JS_EvaluateScript. Return
+        Execute some JS code in global scope, using JS::Evaluate. Return
         false if that fails. (This means that if the code throws an uncaught JS
         exception, the test fails.)
 
@@ -89,7 +91,19 @@ tests.h:
         false, failing the test.
 
         This is like CHECK(sameValue(a, b)) but with a more detailed error
-        message. See sameValue below.
+        message on failure. See sameValue below.
+
+    CHECK_EQUAL(const T &a, const U &b);
+
+        CHECK(a == b), but with a more detailed error message.
+
+    CHECK_NULL(const T *ptr);
+
+        CHECK(ptr == nullptr), but with a more detailed error message.
+
+        (This is here because CHECK_EQUAL(ptr, nullptr) fails to compile on GCC
+        2.5 and before.)
+
 
     bool knownFail;
 

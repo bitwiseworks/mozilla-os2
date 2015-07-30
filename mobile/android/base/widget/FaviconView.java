@@ -9,6 +9,7 @@ import org.mozilla.gecko.R;
 import org.mozilla.gecko.favicons.Favicons;
 
 import android.content.Context;
+import android.content.res.TypedArray;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -45,16 +46,22 @@ public class FaviconView extends ImageView {
     private static float sStrokeWidth;
 
     // Paint for drawing the stroke.
-    private static Paint sStrokePaint;
+    private static final Paint sStrokePaint;
 
     // Paint for drawing the background.
-    private static Paint sBackgroundPaint;
+    private static final Paint sBackgroundPaint;
 
     // Size of the stroke rectangle.
     private final RectF mStrokeRect;
 
     // Size of the background rectangle.
     private final RectF mBackgroundRect;
+
+    // Type of the border whose value is defined in attrs.xml .
+    private final boolean isDominantBorderEnabled;
+
+    // boolean switch for overriding scaletype, whose value is defined in attrs.xml .
+    private final boolean isOverrideScaleTypeEnabled;
 
     // Initializing the static paints.
     static {
@@ -67,7 +74,18 @@ public class FaviconView extends ImageView {
 
     public FaviconView(Context context, AttributeSet attrs) {
         super(context, attrs);
-        setScaleType(ImageView.ScaleType.CENTER);
+        TypedArray a = context.getTheme().obtainStyledAttributes(attrs, R.styleable.FaviconView, 0, 0);
+
+        try {
+            isDominantBorderEnabled = a.getBoolean(R.styleable.FaviconView_dominantBorderEnabled, true);
+            isOverrideScaleTypeEnabled = a.getBoolean(R.styleable.FaviconView_overrideScaleType, true);
+        } finally {
+            a.recycle();
+        }
+
+        if (isOverrideScaleTypeEnabled) {
+            setScaleType(ImageView.ScaleType.CENTER);
+        }
 
         mStrokeRect = new RectF();
         mBackgroundRect = new RectF();
@@ -105,12 +123,14 @@ public class FaviconView extends ImageView {
     public void onDraw(Canvas canvas) {
         super.onDraw(canvas);
 
-        // 27.5% transparent dominant color.
-        sBackgroundPaint.setColor(mDominantColor & 0x46FFFFFF);
-        canvas.drawRect(mStrokeRect, sBackgroundPaint);
+        if (isDominantBorderEnabled) {
+            // 27.5% transparent dominant color.
+            sBackgroundPaint.setColor(mDominantColor & 0x46FFFFFF);
+            canvas.drawRect(mStrokeRect, sBackgroundPaint);
 
-        sStrokePaint.setColor(mDominantColor);
-        canvas.drawRoundRect(mStrokeRect, sStrokeWidth, sStrokeWidth, sStrokePaint);
+            sStrokePaint.setColor(mDominantColor);
+            canvas.drawRoundRect(mStrokeRect, sStrokeWidth, sStrokeWidth, sStrokePaint);
+        }
     }
 
     /**
@@ -194,7 +214,7 @@ public class FaviconView extends ImageView {
     }
 
     public void showDefaultFavicon() {
-        setImageResource(R.drawable.favicon);
+        setImageResource(R.drawable.favicon_globe);
         mDominantColor = 0;
     }
 

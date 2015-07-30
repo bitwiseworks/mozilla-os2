@@ -23,7 +23,9 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPKCS11SLOT
 
-  nsPKCS11Slot(PK11SlotInfo *slot);
+  explicit nsPKCS11Slot(PK11SlotInfo *slot);
+
+protected:
   virtual ~nsPKCS11Slot();
 
 private:
@@ -32,7 +34,7 @@ private:
   nsString mSlotDesc, mSlotManID, mSlotHWVersion, mSlotFWVersion;
   int mSeries;
 
-  virtual void virtualDestroyNSSReference();
+  virtual void virtualDestroyNSSReference() override;
   void destructorSafeDestroyNSSReference();
   void refreshSlotInfo();
 };
@@ -44,13 +46,15 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPKCS11MODULE
 
-  nsPKCS11Module(SECMODModule *module);
+  explicit nsPKCS11Module(SECMODModule *module);
+
+protected:
   virtual ~nsPKCS11Module();
 
 private:
   SECMODModule *mModule;
 
-  virtual void virtualDestroyNSSReference();
+  virtual void virtualDestroyNSSReference() override;
   void destructorSafeDestroyNSSReference();
 };
 
@@ -63,6 +67,8 @@ public:
   NS_DECL_NSICRYPTOFIPSINFO
 
   nsPKCS11ModuleDB();
+
+protected:
   virtual ~nsPKCS11ModuleDB();
   /* additional members */
 };

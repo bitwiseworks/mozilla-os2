@@ -4,6 +4,7 @@
   <title>Test for bug 975472</title>
   <script type="text/javascript" src="/MochiKit/MochiKit.js"></script>
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script type="text/javascript" src="camera_common.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
@@ -11,13 +12,15 @@
 <img src="#" alt="This image is going to load" id="testimage"/>
 <script class="testbody" type="text/javascript;version=1.7">
 
+const Cr = Components.results;
+
 var whichCamera = navigator.mozCameras.getListOfCameras()[0];
 var config = {
   mode: 'picture',
-  recorderProfile: 'cif',
+  recorderProfile: 'high',
   previewSize: {
-    width: 352,
-    height: 288
+    width: 320,
+    height: 240
   }
 };
 var options = {
@@ -30,7 +33,7 @@ var options = {
 };
 
 function onError(e) {
-  ok(false, "Error" + JSON.stringify(e));
+  ok(false, "Error " + e);
 }
 function next() {
   Camera.nextTest();
@@ -48,21 +51,31 @@ var tests = [
       function onError(error) {
         ok(false, "release() failed with: " + error);
       }
-      camera.release(onSuccess, onError);
+      camera.release().then(onSuccess, onError);
     }
   },
   {
     key: "set-picture-size-after-release",
     func: function testSetPictureSize(camera) {
-      camera.pictureSize = { width: 0, height: 0 };
-      next();
+      try {
+        camera.setPictureSize({ width: 0, height: 0 });
+      } catch(e) {
+        ok(e.result === SpecialPowers.Cr.NS_ERROR_NOT_AVAILABLE,
+          "setPictureSize() failed with: " + e.name);
+        next();
+      }
     }
   },
   {
     key: "set-thumbnail-size-after-release",
     func: function testSetThumbnailSize(camera) {
-      camera.thumbnailSize = { width: 0, height: 0 };
-      next();
+      try {
+        camera.setThumbnailSize({ width: 0, height: 0 });
+      } catch(e) {
+        ok(e.result === SpecialPowers.Cr.NS_ERROR_NOT_AVAILABLE,
+          "setThumbnailSize() failed with: " + e.name);
+        next();
+      }
     }
   },
   {
@@ -75,8 +88,13 @@ var tests = [
   {
     key: "resume-preview-after-release",
     func: function testResumePreview(camera) {
-      camera.resumePreview();
-      next();
+      try {
+        camera.resumePreview();
+      } catch(e) {
+        ok(e.result === SpecialPowers.Cr.NS_ERROR_NOT_AVAILABLE,
+          "resumePreview() failed with: " + e.name);
+        next();
+      }
     }
   },
   {
@@ -86,10 +104,11 @@ var tests = [
         ok(false, "autoFocus() succeeded incorrectly");
       }
       function onError(error) {
-        ok(true, "autoFocus() failed correctly with: " + error);
+        ok(error.name === "NS_ERROR_NOT_AVAILABLE",
+          "autoFocus() failed with: " + error.name);
         next();
       }
-      camera.autoFocus(onSuccess, onError);
+      camera.autoFocus().then(onSuccess, onError);
     }
   },
   {
@@ -99,10 +118,11 @@ var tests = [
         ok(false, "takePicture() succeeded incorrectly");
       }
       function onError(error) {
-        ok(true, "takePicture() failed correctly with: " + error);
+        ok(error.name === "NS_ERROR_NOT_AVAILABLE",
+          "takePicture() failed with: " + error.name);
         next();
       }
-      camera.takePicture(null, onSuccess, onError);
+      camera.takePicture(null).then(onSuccess, onError);
     }
   },
   {
@@ -112,24 +132,29 @@ var tests = [
         ok(false, "startRecording() process succeeded incorrectly");
       }
       function onError(error) {
-        ok(true, "startRecording() process failed correctly with: " + error);
+        ok(error.name === "NS_ERROR_NOT_AVAILABLE",
+          "startRecording() failed with: " + error.name);
         next();
       }
       var recordingOptions = {
-        profile: 'cif',
+        profile: 'high',
         rotation: 0
       };
       camera.startRecording(recordingOptions,
                             navigator.getDeviceStorage('videos'),
-                            'bug975472.mp4',
-                            onSuccess, onError);
+                            'bug975472.mp4').then(onSuccess, onError);
     }
   },
   {
     key: "stop-recording-after-release",
     func: function testStopRecording(camera) {
-      camera.stopRecording();
-      next();
+      try {
+        camera.stopRecording();
+      } catch(e) {
+        ok(e.result === SpecialPowers.Cr.NS_ERROR_NOT_AVAILABLE,
+          "stopRecording() failed with: " + e.name);
+        next();
+      }
     }
   },
   {
@@ -139,10 +164,11 @@ var tests = [
         ok(false, "setConfiguration() process succeeded incorrectly");
       }
       function onError(error) {
-        ok(true, "setConfiguration() process failed correctly with: " + error);
+        ok(error.name === "NS_ERROR_NOT_AVAILABLE",
+          "setConfiguration() failed with: " + error.name);
         next();
       }
-      camera.setConfiguration(config, onSuccess, onError);
+      camera.setConfiguration(config).then(onSuccess, onError);
     }
   },
 ];
@@ -167,7 +193,7 @@ var Camera = {
         t.func(Camera.cameraObj);
       } catch(e) {
         if (e instanceof StopIteration) {
-          SimpleTest.finish();
+          CameraTest.end();
         } else {
           throw e;
         }
@@ -182,27 +208,29 @@ var Camera = {
     cameraObj = null;
   },
   start: function run_test() {
-    function onSuccess(camera, config) {
+    function onSuccess(d) {
+      var camera = d.camera;
       Camera.cameraObj = camera;
+      var onPreviewStateChange = function(e) {
+        if (e.newState === 'started') {
+          info("viewfinder is ready and playing");
+          Camera.cameraObj.removeEventListener('previewstatechange', onPreviewStateChange);
+          Camera.onCameraReady();
+        }
+      };
+      camera.addEventListener('previewstatechange', onPreviewStateChange);
       Camera.viewfinder.mozSrcObject = camera;
       Camera.viewfinder.play();
       ok(camera.capabilities.pictureSizes.length > 0,
         "capabilities.pictureSizes.length = " +
         camera.capabilities.pictureSizes.length);
       Camera._otherPictureSize = camera.capabilities.pictureSizes.slice(-1)[0];
-      camera.pictureSize = camera.capabilities.pictureSizes[0];
+      camera.setPictureSize(camera.capabilities.pictureSizes[0]);
       options.pictureSize = Camera._otherPictureSize;
       options.fileFormat = camera.capabilities.fileFormats[0];
       info("getCamera callback, setting pictureSize = " + options.pictureSize.toSource());
-      Camera.cameraObj.onPreviewStateChange = function(state) {
-        if (state === 'started') {
-          info("viewfinder is ready and playing");
-          Camera.cameraObj.onPreviewStateChange = null;
-          Camera.onCameraReady();
-        }
-      };
     };
-    navigator.mozCameras.getCamera(whichCamera, config, onSuccess, onError);
+    navigator.mozCameras.getCamera(whichCamera, config).then(onSuccess, onError);
   }
 }
 

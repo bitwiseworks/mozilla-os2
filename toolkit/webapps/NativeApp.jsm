@@ -18,6 +18,8 @@ Cu.import("resource://gre/modules/AppsUtils.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
 
+const DEFAULT_ICON_URL = "chrome://global/skin/icons/webapps-64.png";
+
 const ERR_NOT_INSTALLED = "The application isn't installed";
 const ERR_UPDATES_UNSUPPORTED_OLD_NAMING_SCHEME =
   "Updates for apps installed with the old naming scheme unsupported";
@@ -50,13 +52,16 @@ const TMP_DIR = OS.Constants.Path.tmpDir;
  *
  */
 function CommonNativeApp(aApp, aManifest, aCategories, aRegistryDir) {
-  let manifest = new ManifestHelper(aManifest, aApp.origin);
-
-  aApp.name = manifest.name;
+  // Set the name property of the app object, otherwise
+  // WebappOSUtils::getUniqueName won't work.
+  aApp.name = aManifest.name;
   this.uniqueName = WebappOSUtils.getUniqueName(aApp);
 
-  this.appName = sanitize(manifest.name);
-  this.appNameAsFilename = stripStringForFilename(this.appName);
+  let localeManifest =
+    new ManifestHelper(aManifest, aApp.origin, aApp.manifestURL);
+
+  this.appLocalizedName = localeManifest.name;
+  this.appNameAsFilename = stripStringForFilename(aApp.name);
 
   if (aApp.updateManifest) {
     this.isPackaged = true;
@@ -65,8 +70,6 @@ function CommonNativeApp(aApp, aManifest, aCategories, aRegistryDir) {
   this.categories = aCategories.slice(0);
 
   this.registryDir = aRegistryDir || OS.Constants.Path.profileDir;
-
-  this.app = aApp;
 
   this._dryRun = false;
   try {
@@ -78,7 +81,7 @@ function CommonNativeApp(aApp, aManifest, aCategories, aRegistryDir) {
 
 CommonNativeApp.prototype = {
   uniqueName: null,
-  appName: null,
+  appLocalizedName: null,
   appNameAsFilename: null,
   iconURI: null,
   developerName: null,
@@ -96,28 +99,16 @@ CommonNativeApp.prototype = {
    * @param aManifest {Object} the manifest data provided by the web app
    *
    */
-  _setData: function(aManifest) {
-    let manifest = new ManifestHelper(aManifest, this.app.origin);
-    let origin = Services.io.newURI(this.app.origin, null, null);
+  _setData: function(aApp, aManifest) {
+    let manifest = new ManifestHelper(aManifest, aApp.origin, aApp.manifestURL);
+    let origin = Services.io.newURI(aApp.origin, null, null);
 
-    let biggestIcon = getBiggestIconURL(manifest.icons);
-    try {
-      let iconURI = Services.io.newURI(biggestIcon, null, null);
-      if (iconURI.scheme == "data") {
-        this.iconURI = iconURI;
-      }
-    } catch (ex) {}
-
-    if (!this.iconURI) {
-      try {
-        this.iconURI = Services.io.newURI(origin.resolve(biggestIcon), null, null);
-      }
-      catch (ex) {}
-    }
+    this.iconURI = Services.io.newURI(manifest.biggestIconURL || DEFAULT_ICON_URL,
+                                      null, null);
 
     if (manifest.developer) {
       if (manifest.developer.name) {
-        let devName = sanitize(manifest.developer.name.substr(0, 128));
+        let devName = manifest.developer.name.substr(0, 128);
         if (devName) {
           this.developerName = devName;
         }
@@ -133,9 +124,9 @@ CommonNativeApp.prototype = {
       let shortDesc = firstLine.length <= 256
                       ? firstLine
                       : firstLine.substr(0, 253) + "…";
-      this.shortDescription = sanitize(shortDesc);
+      this.shortDescription = shortDesc;
     } else {
-      this.shortDescription = this.appName;
+      this.shortDescription = this.appLocalizedName;
     }
 
     if (manifest.version) {
@@ -148,25 +139,25 @@ CommonNativeApp.prototype = {
       "registryDir": this.registryDir,
       "app": {
         "manifest": aManifest,
-        "origin": this.app.origin,
-        "manifestURL": this.app.manifestURL,
-        "installOrigin": this.app.installOrigin,
+        "origin": aApp.origin,
+        "manifestURL": aApp.manifestURL,
+        "installOrigin": aApp.installOrigin,
         "categories": this.categories,
-        "receipts": this.app.receipts,
-        "installTime": this.app.installTime,
+        "receipts": aApp.receipts,
+        "installTime": aApp.installTime,
       }
     };
 
-    if (this.app.etag) {
-      this.webappJson.app.etag = this.app.etag;
+    if (aApp.etag) {
+      this.webappJson.app.etag = aApp.etag;
     }
 
-    if (this.app.packageEtag) {
-      this.webappJson.app.packageEtag = this.app.packageEtag;
+    if (aApp.packageEtag) {
+      this.webappJson.app.packageEtag = aApp.packageEtag;
     }
 
-    if (this.app.updateManifest) {
-      this.webappJson.app.updateManifest = this.app.updateManifest;
+    if (aApp.updateManifest) {
+      this.webappJson.app.updateManifest = aApp.updateManifest;
     }
 
     this.runtimeFolder = OS.Constants.Path.libDir;
@@ -265,14 +256,6 @@ function writeToFile(aPath, aData) {
       yield file.close();
     }
   });
-}
-
-/**
- * Removes unprintable characters from a string.
- */
-function sanitize(aStr) {
-  let unprintableRE = new RegExp("[\\x00-\\x1F\\x7F]" ,"gi");
-  return aStr.replace(unprintableRE, "");
 }
 
 /**
@@ -406,5 +389,89 @@ function getFile() {
   return file;
 }
 
-/* More helpers for handling the app icon */
-#include WebappsIconHelpers.js
+// Download an icon using either a temp file or a pipe.
+function downloadIcon(aIconURI) {
+  let deferred = Promise.defer();
+
+  let mimeService = Cc["@mozilla.org/mime;1"].getService(Ci.nsIMIMEService);
+  let mimeType;
+  try {
+    let tIndex = aIconURI.path.indexOf(";");
+    if("data" == aIconURI.scheme && tIndex != -1) {
+      mimeType = aIconURI.path.substring(0, tIndex);
+    } else {
+      mimeType = mimeService.getTypeFromURI(aIconURI);
+     }
+  } catch(e) {
+    deferred.reject("Failed to determine icon MIME type: " + e);
+    return deferred.promise;
+  }
+
+  function onIconDownloaded(aStatusCode, aIcon) {
+    if (Components.isSuccessCode(aStatusCode)) {
+      deferred.resolve([ mimeType, aIcon ]);
+    } else {
+      deferred.reject("Failure downloading icon: " + aStatusCode);
+    }
+  }
+
+  try {
+#ifdef XP_MACOSX
+    let downloadObserver = {
+      onDownloadComplete: function(downloader, request, cx, aStatus, file) {
+        onIconDownloaded(aStatus, file);
+      }
+    };
+
+    let tmpIcon = Services.dirsvc.get("TmpD", Ci.nsIFile);
+    tmpIcon.append("tmpicon." + mimeService.getPrimaryExtension(mimeType, ""));
+    tmpIcon.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, parseInt("666", 8));
+
+    let listener = Cc["@mozilla.org/network/downloader;1"]
+                     .createInstance(Ci.nsIDownloader);
+    listener.init(downloadObserver, tmpIcon);
+#else
+    let pipe = Cc["@mozilla.org/pipe;1"]
+                 .createInstance(Ci.nsIPipe);
+    pipe.init(true, true, 0, 0xffffffff, null);
+
+    let listener = Cc["@mozilla.org/network/simple-stream-listener;1"]
+                     .createInstance(Ci.nsISimpleStreamListener);
+    listener.init(pipe.outputStream, {
+        onStartRequest: function() {},
+        onStopRequest: function(aRequest, aContext, aStatusCode) {
+          pipe.outputStream.close();
+          onIconDownloaded(aStatusCode, pipe.inputStream);
+       }
+    });
+#endif
+
+    // If not fetching an icon from chrome:// then we should create a
+    // NoAppCodeBasePrincipal. Note, that we are still in the process of
+    // installing the app, hence app.origin is not available yet and
+    // therefore we can not call getAppCodebasePrincipal.
+    let principal =
+      aIconURI.schemeIs("chrome") ? Services.scriptSecurityManager
+                                            .getSystemPrincipal()
+                                  : Services.scriptSecurityManager
+                                            .getNoAppCodebasePrincipal(aIconURI);
+
+    let channel = NetUtil.newChannel2(aIconURI,
+                                      null,
+                                      null,
+                                      null,      // aLoadingNode
+                                      principal,
+                                      null,      // aTriggeringPrincipal
+                                      Ci.nsILoadInfo.SEC_NORMAL,
+                                      Ci.nsIContentPolicy.TYPE_IMAGE);
+    let { BadCertHandler } = Cu.import("resource://gre/modules/CertUtils.jsm", {});
+    // Pass true to avoid optional redirect-cert-checking behavior.
+    channel.notificationCallbacks = new BadCertHandler(true);
+
+    channel.asyncOpen(listener, null);
+  } catch(e) {
+    deferred.reject("Failure initiating download of icon: " + e);
+  }
+
+  return deferred.promise;
+}

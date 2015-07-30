@@ -10,6 +10,8 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/FileUtils.jsm");
 
+Cu.importGlobalProperties(['File']);
+
 function FilePicker() {
 }
 
@@ -24,10 +26,12 @@ FilePicker.prototype = {
   _promptActive: false,
   _filterIndex: 0,
   _addToRecentDocs: false,
+  _title: "",
 
   init: function(aParent, aTitle, aMode) {
     this._domWin = aParent;
     this._mode = aMode;
+    this._title = aTitle;
     Services.obs.addObserver(this, "FilePicker:Result", false);
 
     let idService = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator); 
@@ -141,12 +145,25 @@ FilePicker.prototype = {
     if (!f) {
         return null;
     }
-    return File(f);
+
+    let win = this._domWin;
+    if (win) {
+      let utils = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      return utils.wrapDOMFile(f);
+    }
+
+    return new File(f);
   },
 
   get domfiles() {
+    let win = this._domWin;
     return this.getEnumerator([this.file], function(file) {
-      return File(file);
+      if (win) {
+        let utils = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+        return utils.wrapDOMFile(file);
+      }
+
+      return new File(file);
     });
   },
 
@@ -198,6 +215,7 @@ FilePicker.prototype = {
     let msg = {
       type: "FilePicker:Show",
       guid: this.guid,
+      title: this._title,
     };
 
     // Knowing the window lets us destroy any temp files when the tab is closed

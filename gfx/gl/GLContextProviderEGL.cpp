@@ -25,7 +25,6 @@
 /* from widget */
 #if defined(MOZ_WIDGET_ANDROID)
 #include "AndroidBridge.h"
-#include "nsSurfaceTexture.h"
 #endif
 
 #include <android/log.h>
@@ -116,10 +115,6 @@ public:
 
 using namespace mozilla::gfx;
 
-#ifdef MOZ_WIDGET_GONK
-extern nsIntRect gScreenBounds;
-#endif
-
 namespace mozilla {
 namespace gl {
 
@@ -196,7 +191,7 @@ static EGLSurface
 CreateSurfaceForWindow(nsIWidget* widget, const EGLConfig& config) {
     EGLSurface newSurface = EGL_NO_SURFACE;
 
-    #ifdef MOZ_ANDROID_OMTC
+    #ifdef MOZ_WIDGET_ANDROID
         mozilla::AndroidBridge::Bridge()->RegisterCompositor();
         newSurface = mozilla::AndroidBridge::Bridge()->CreateEGLSurfaceForCompositor();
         if (newSurface == EGL_NO_SURFACE) {
@@ -205,12 +200,6 @@ CreateSurfaceForWindow(nsIWidget* widget, const EGLConfig& config) {
     #else
         MOZ_ASSERT(widget != nullptr);
         newSurface = sEGLLibrary.fCreateWindowSurface(EGL_DISPLAY(), config, GET_NATIVE_WINDOW(widget), 0);
-        #ifdef MOZ_WIDGET_GONK
-            gScreenBounds.x = 0;
-            gScreenBounds.y = 0;
-            sEGLLibrary.fQuerySurface(EGL_DISPLAY(), newSurface, LOCAL_EGL_WIDTH, &gScreenBounds.width);
-            sEGLLibrary.fQuerySurface(EGL_DISPLAY(), newSurface, LOCAL_EGL_HEIGHT, &gScreenBounds.height);
-        #endif
     #endif
     return newSurface;
 }
@@ -246,7 +235,7 @@ GLContextEGL::GLContextEGL(
         mHwc = HwcComposer2D::GetInstance();
         MOZ_ASSERT(!mHwc->Initialized());
 
-        if (mHwc->Init(EGL_DISPLAY(), mSurface)) {
+        if (mHwc->Init(EGL_DISPLAY(), mSurface, this)) {
             NS_WARNING("HWComposer initialization failed!");
             mHwc = nullptr;
         }
@@ -268,6 +257,7 @@ GLContextEGL::~GLContextEGL()
 #endif
 
     sEGLLibrary.fDestroyContext(EGL_DISPLAY(), mContext);
+    sEGLLibrary.UnsetCachedCurrentContext();
 
 #if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION < 17
     if (!mIsOffscreen) {
@@ -381,7 +371,18 @@ GLContextEGL::MakeCurrentImpl(bool aForce) {
     // Assume that EGL has the same problem as WGL does,
     // where MakeCurrent with an already-current context is
     // still expensive.
-    if (aForce || sEGLLibrary.fGetCurrentContext() != mContext) {
+    bool hasDifferentContext = false;
+    if (sEGLLibrary.CachedCurrentContext() != mContext) {
+        // even if the cached context doesn't match the current one
+        // might still
+        if (sEGLLibrary.fGetCurrentContext() != mContext) {
+            hasDifferentContext = true;
+        } else {
+            sEGLLibrary.SetCachedCurrentContext(mContext);
+        }
+    }
+
+    if (aForce || hasDifferentContext) {
         EGLSurface surface = mSurfaceOverride != EGL_NO_SURFACE
                               ? mSurfaceOverride
                               : mSurface;
@@ -402,7 +403,11 @@ GLContextEGL::MakeCurrentImpl(bool aForce) {
                 printf_stderr("EGL Error: 0x%04x\n", eglError);
 #endif
             }
+        } else {
+            sEGLLibrary.SetCachedCurrentContext(mContext);
         }
+    } else {
+        MOZ_ASSERT(sEGLLibrary.CachedCurrentContextMatches());
     }
 
     return succeeded;
@@ -641,10 +646,31 @@ CreateConfig(EGLConfig* aConfig, int32_t depth)
         return false;
     }
 
+#ifdef MOZ_WIDGET_GONK
+    // On gonk, it's important to select a configuration with the
+    // the correct order as well as bits per channel.
+    // EGL_NATIVE_VISUAL_ID gives us the Android pixel format which
+    // is an enum that tells us both order and bits per channel.
+    // For example -
+    //  HAL_PIXEL_FORMAT_RGBX_8888
+    //  HAL_PIXEL_FORMAT_BGRA_8888
+    //  HAL_PIXEL_FORMAT_RGB_565
+    for (int j = 0; j < ncfg; ++j) {
+        EGLConfig config = configs[j];
+        EGLint format;
+        if (sEGLLibrary.fGetConfigAttrib(EGL_DISPLAY(), config,
+                                         LOCAL_EGL_NATIVE_VISUAL_ID, &format) &&
+            format == GetGonkDisplay()->surfaceformat)
+        {
+            *aConfig = config;
+            return true;
+        }
+    }
+#endif
+
     for (int j = 0; j < ncfg; ++j) {
         EGLConfig config = configs[j];
         EGLint r, g, b, a;
-
         if (sEGLLibrary.fGetConfigAttrib(EGL_DISPLAY(), config,
                                          LOCAL_EGL_RED_SIZE, &r) &&
             sEGLLibrary.fGetConfigAttrib(EGL_DISPLAY(), config,
@@ -779,7 +805,7 @@ GLContextEGL::CreateEGLPBufferOffscreenContext(const gfxIntSize& size)
 
     // We absolutely don't care, so just pick the first one.
     config = configs[0];
-    if (GLContext::DebugMode())
+    if (GLContext::ShouldSpew())
         sEGLLibrary.DumpEGLConfig(config);
 
     gfxIntSize pbSize(size);
@@ -851,20 +877,30 @@ GLContextEGL::CreateEGLPixmapOffscreenContext(const gfxIntSize& size)
     return glContext.forget();
 }
 
-// Under EGL, on Android, pbuffers are supported fine, though
-// often without the ability to texture from them directly.
 already_AddRefed<GLContext>
-GLContextProviderEGL::CreateOffscreen(const gfxIntSize& size,
-                                      const SurfaceCaps& caps)
+GLContextProviderEGL::CreateHeadless(bool)
 {
     if (!sEGLLibrary.EnsureInitialized()) {
         return nullptr;
     }
 
     gfxIntSize dummySize = gfxIntSize(16, 16);
-    nsRefPtr<GLContextEGL> glContext;
+    nsRefPtr<GLContext> glContext;
     glContext = GLContextEGL::CreateEGLPBufferOffscreenContext(dummySize);
+    if (!glContext)
+        return nullptr;
 
+    return glContext.forget();
+}
+
+// Under EGL, on Android, pbuffers are supported fine, though
+// often without the ability to texture from them directly.
+already_AddRefed<GLContext>
+GLContextProviderEGL::CreateOffscreen(const gfxIntSize& size,
+                                      const SurfaceCaps& caps,
+                                      bool requireCompatProfile)
+{
+    nsRefPtr<GLContext> glContext = CreateHeadless(requireCompatProfile);
     if (!glContext)
         return nullptr;
 
@@ -877,7 +913,7 @@ GLContextProviderEGL::CreateOffscreen(const gfxIntSize& size,
 // Don't want a global context on Android as 1) share groups across 2 threads fail on many Tegra drivers (bug 759225)
 // and 2) some mobile devices have a very strict limit on global number of GL contexts (bug 754257)
 // and 3) each EGL context eats 750k on B2G (bug 813783)
-GLContext *
+GLContext*
 GLContextProviderEGL::GetGlobalContext()
 {
     return nullptr;

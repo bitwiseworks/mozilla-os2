@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Move.h"
 
 #include "txStylesheetCompiler.h"
 #include "txStylesheetCompileHandlers.h"
@@ -23,21 +24,25 @@
 #include "nsTArray.h"
 
 using namespace mozilla;
+using mozilla::net::ReferrerPolicy;
 
 txStylesheetCompiler::txStylesheetCompiler(const nsAString& aStylesheetURI,
+                                           ReferrerPolicy aReferrerPolicy,
                                            txACompileObserver* aObserver)
     : txStylesheetCompilerState(aObserver)
 {
-    mStatus = init(aStylesheetURI, nullptr, nullptr);
+    mStatus = init(aStylesheetURI, aReferrerPolicy, nullptr, nullptr);
 }
 
 txStylesheetCompiler::txStylesheetCompiler(const nsAString& aStylesheetURI,
                                            txStylesheet* aStylesheet,
                                            txListIterator* aInsertPosition,
+                                           ReferrerPolicy aReferrerPolicy,
                                            txACompileObserver* aObserver)
     : txStylesheetCompilerState(aObserver)
 {
-    mStatus = init(aStylesheetURI, aStylesheet, aInsertPosition);
+    mStatus = init(aStylesheetURI, aReferrerPolicy, aStylesheet,
+                   aInsertPosition);
 }
 
 void
@@ -102,7 +107,7 @@ txStylesheetCompiler::startElement(int32_t aNamespaceID, nsIAtom* aLocalName,
 nsresult
 txStylesheetCompiler::startElement(const char16_t *aName,
                                    const char16_t **aAttrs,
-                                   int32_t aAttrCount, int32_t aIDOffset)
+                                   int32_t aAttrCount)
 {
     if (NS_FAILED(mStatus)) {
         // ignore content after failure
@@ -161,12 +166,8 @@ txStylesheetCompiler::startElement(const char16_t *aName,
                                   getter_AddRefs(localname), &namespaceID);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    int32_t idOffset = aIDOffset;
-    if (idOffset > 0) {
-        idOffset /= 2;
-    }
     return startElementInternal(namespaceID, localname, prefix, atts,
-                                aAttrCount, idOffset);
+                                aAttrCount);
 }
 
 nsresult
@@ -174,8 +175,7 @@ txStylesheetCompiler::startElementInternal(int32_t aNamespaceID,
                                            nsIAtom* aLocalName,
                                            nsIAtom* aPrefix,
                                            txStylesheetAttr* aAttributes,
-                                           int32_t aAttrCount,
-                                           int32_t aIDOffset)
+                                           int32_t aAttrCount)
 {
     nsresult rv = NS_OK;
     int32_t i;
@@ -186,6 +186,16 @@ txStylesheetCompiler::startElementInternal(int32_t aNamespaceID,
     // Update the elementcontext if we have special attributes
     for (i = 0; i < aAttrCount; ++i) {
         txStylesheetAttr* attr = aAttributes + i;
+
+        // id
+        if (mEmbedStatus == eNeedEmbed &&
+            attr->mLocalName == nsGkAtoms::id &&
+            attr->mNamespaceID == kNameSpaceID_None &&
+            attr->mValue.Equals(mTarget)) {
+            // We found the right ID, signal to compile the
+            // embedded stylesheet.
+            mEmbedStatus = eInEmbed;
+        }
 
         // xml:space
         if (attr->mNamespaceID == kNameSpaceID_XML &&
@@ -276,14 +286,6 @@ txStylesheetCompiler::startElementInternal(int32_t aNamespaceID,
         }
     }
 
-    if (mEmbedStatus == eNeedEmbed) {
-        // handle embedded stylesheets
-        if (aIDOffset >= 0 && aAttributes[aIDOffset].mValue.Equals(mTarget)) {
-            // We found the right ID, signal to compile the 
-            // embedded stylesheet.
-            mEmbedStatus = eInEmbed;
-        }
-    }
     const txElementHandler* handler;
     do {
         handler = isInstruction ?
@@ -336,7 +338,7 @@ txStylesheetCompiler::endElement()
             nsAutoPtr<txInstruction> instr(new txRemoveVariable(var->mName));
             NS_ENSURE_TRUE(instr, NS_ERROR_OUT_OF_MEMORY);
 
-            rv = addInstruction(instr);
+            rv = addInstruction(Move(instr));
             NS_ENSURE_SUCCESS(rv, rv);
             
             mInScopeVariables.RemoveElementAt(i);
@@ -417,6 +419,7 @@ txStylesheetCompiler::getStylesheet()
 nsresult
 txStylesheetCompiler::loadURI(const nsAString& aUri,
                               const nsAString& aReferrerUri,
+                              ReferrerPolicy aReferrerPolicy,
                               txStylesheetCompiler* aCompiler)
 {
     PR_LOG(txLog::xslt, PR_LOG_ALWAYS,
@@ -426,8 +429,9 @@ txStylesheetCompiler::loadURI(const nsAString& aUri,
     if (mStylesheetURI.Equals(aUri)) {
         return NS_ERROR_XSLT_LOAD_RECURSION;
     }
-    return mObserver ? mObserver->loadURI(aUri, aReferrerUri, aCompiler) :
-                       NS_ERROR_FAILURE;
+    return mObserver ?
+        mObserver->loadURI(aUri, aReferrerUri, aReferrerPolicy, aCompiler) :
+        NS_ERROR_FAILURE;
 }
 
 void
@@ -484,7 +488,7 @@ txStylesheetCompiler::ensureNewElementContext()
     NS_ENSURE_SUCCESS(rv, rv);
 
     mElementContext.forget();
-    mElementContext = context;
+    mElementContext = Move(context);
 
     return NS_OK;
 }
@@ -538,12 +542,14 @@ txStylesheetCompilerState::txStylesheetCompilerState(txACompileObserver* aObserv
 
 nsresult
 txStylesheetCompilerState::init(const nsAString& aStylesheetURI,
+                                ReferrerPolicy aReferrerPolicy,
                                 txStylesheet* aStylesheet,
                                 txListIterator* aInsertPosition)
 {
     NS_ASSERTION(!aStylesheet || aInsertPosition,
                  "must provide insertposition if loading subsheet");
     mStylesheetURI = aStylesheetURI;
+    mReferrerPolicy = aReferrerPolicy;
     // Check for fragment identifier of an embedded stylesheet.
     int32_t fragment = aStylesheetURI.FindChar('#') + 1;
     if (fragment > 0) {
@@ -723,7 +729,7 @@ txStylesheetCompilerState::closeInstructionContainer()
 }
 
 nsresult
-txStylesheetCompilerState::addInstruction(nsAutoPtr<txInstruction> aInstruction)
+txStylesheetCompilerState::addInstruction(nsAutoPtr<txInstruction>&& aInstruction)
 {
     NS_PRECONDITION(mNextInstrPtr, "adding instruction outside container");
 
@@ -767,7 +773,7 @@ txStylesheetCompilerState::loadIncludedStylesheet(const nsAString& aURI)
 
     nsRefPtr<txStylesheetCompiler> compiler =
         new txStylesheetCompiler(aURI, mStylesheet, &mToplevelIterator,
-                                 observer);
+                                 mReferrerPolicy, observer);
     NS_ENSURE_TRUE(compiler, NS_ERROR_OUT_OF_MEMORY);
 
     // step forward before calling the observer in case of syncronous loading
@@ -777,7 +783,7 @@ txStylesheetCompilerState::loadIncludedStylesheet(const nsAString& aURI)
         return NS_ERROR_OUT_OF_MEMORY;
     }
 
-    rv = mObserver->loadURI(aURI, mStylesheetURI, compiler);
+    rv = mObserver->loadURI(aURI, mStylesheetURI, mReferrerPolicy, compiler);
     if (NS_FAILED(rv)) {
         mChildCompilerList.RemoveElement(compiler);
     }
@@ -803,14 +809,16 @@ txStylesheetCompilerState::loadImportedStylesheet(const nsAString& aURI,
     txACompileObserver* observer = static_cast<txStylesheetCompiler*>(this);
 
     nsRefPtr<txStylesheetCompiler> compiler =
-        new txStylesheetCompiler(aURI, mStylesheet, &iter, observer);
+        new txStylesheetCompiler(aURI, mStylesheet, &iter, mReferrerPolicy,
+                                 observer);
     NS_ENSURE_TRUE(compiler, NS_ERROR_OUT_OF_MEMORY);
 
     if (mChildCompilerList.AppendElement(compiler) == nullptr) {
         return NS_ERROR_OUT_OF_MEMORY;
     }
 
-    nsresult rv = mObserver->loadURI(aURI, mStylesheetURI, compiler);
+    nsresult rv = mObserver->loadURI(aURI, mStylesheetURI, mReferrerPolicy,
+                                     compiler);
     if (NS_FAILED(rv)) {
         mChildCompilerList.RemoveElement(compiler);
     }
@@ -859,7 +867,7 @@ txStylesheetCompilerState::resolveNamespacePrefix(nsIAtom* aPrefix,
 class txErrorFunctionCall : public FunctionCall
 {
 public:
-    txErrorFunctionCall(nsIAtom* aName)
+    explicit txErrorFunctionCall(nsIAtom* aName)
       : mName(aName)
     {
     }
@@ -1072,7 +1080,8 @@ extern bool
 TX_XSLTFunctionAvailable(nsIAtom* aName, int32_t aNameSpaceID)
 {
     nsRefPtr<txStylesheetCompiler> compiler =
-        new txStylesheetCompiler(EmptyString(), nullptr);
+        new txStylesheetCompiler(EmptyString(),
+                                 mozilla::net::RP_Default, nullptr);
     NS_ENSURE_TRUE(compiler, false);
 
     nsAutoPtr<FunctionCall> fnCall;

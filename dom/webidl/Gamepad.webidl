@@ -9,6 +9,11 @@ interface GamepadButton {
   readonly    attribute double  value;
 };
 
+enum GamepadMappingType {
+  "",
+  "standard"
+};
+
 [Pref="dom.gamepad.enabled"]
 interface Gamepad {
   /**
@@ -26,7 +31,7 @@ interface Gamepad {
    * The mapping in use for this device. The empty string
    * indicates that no mapping is in use.
    */
-  readonly attribute DOMString mapping;
+  readonly attribute GamepadMappingType mapping;
 
   /**
    * true if this gamepad is currently connected to the system.
@@ -46,4 +51,9 @@ interface Gamepad {
    */
   [Pure, Cached, Frozen]
   readonly attribute sequence<double> axes;
+
+  /**
+   * Timestamp from when the data of this device was last updated.
+   */
+  readonly attribute DOMHighResTimeStamp timestamp;
 };

@@ -16,7 +16,7 @@
 #include <set>
 
 namespace webrtc {
-class RTPHeader;
+struct RTPHeader;
 }
 
 namespace mozilla {
@@ -69,7 +69,7 @@ class MediaPipelineFilter {
   void AddUniquePT(uint8_t payload_type);
   void SetCorrelator(uint32_t correlator);
 
-  void IncorporateRemoteDescription(const MediaPipelineFilter& remote_filter);
+  void Update(const MediaPipelineFilter& filter_update);
 
   // Some payload types
   static const uint8_t SENDER_REPORT_T = 200;

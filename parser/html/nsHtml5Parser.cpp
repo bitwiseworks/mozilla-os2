@@ -70,7 +70,7 @@ nsHtml5Parser::GetContentSink()
 NS_IMETHODIMP_(void)
 nsHtml5Parser::GetCommand(nsCString& aCommand)
 {
-  aCommand.Assign("view");
+  aCommand.AssignLiteral("view");
 }
 
 NS_IMETHODIMP_(void)
@@ -79,6 +79,7 @@ nsHtml5Parser::SetCommand(const char* aCommand)
   NS_ASSERTION(!strcmp(aCommand, "view") ||
                !strcmp(aCommand, "view-source") ||
                !strcmp(aCommand, "external-resource") ||
+               !strcmp(aCommand, "import") ||
                !strcmp(aCommand, kLoadAsData),
                "Unsupported parser command");
 }
@@ -187,7 +188,7 @@ nsHtml5Parser::Parse(nsIURI* aURL,
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsHtml5Parser::Parse(const nsAString& aSourceBuffer,
                      void* aKey,
                      const nsACString& aContentType,
@@ -535,14 +536,6 @@ nsHtml5Parser::Reset()
 }
 
 bool
-nsHtml5Parser::CanInterrupt()
-{
-  // nsContentSink needs this to let nsContentSink::DidProcessATokenImpl
-  // interrupt.
-  return true;
-}
-
-bool
 nsHtml5Parser::IsInsertionPointDefined()
 {
   return !mExecutor->IsFlushing() &&
@@ -580,7 +573,8 @@ nsHtml5Parser::MarkAsNotScriptCreated(const char* aCommand)
 #ifdef DEBUG
   else {
     NS_ASSERTION(!nsCRT::strcmp(aCommand, "view") ||
-                 !nsCRT::strcmp(aCommand, "external-resource"),
+                 !nsCRT::strcmp(aCommand, "external-resource") ||
+                 !nsCRT::strcmp(aCommand, "import"),
                  "Unsupported parser command!");
   }
 #endif

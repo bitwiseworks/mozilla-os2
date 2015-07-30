@@ -17,7 +17,8 @@ const PROMISE_URI = 'resource://gre/modules/Promise.jsm';
 
 getEnvironment.call(this, function ({ require, exports, module, Cu }) {
 
-const { defer, resolve, all, reject, race } = Cu.import(PROMISE_URI, {}).Promise;
+const Promise = Cu.import(PROMISE_URI, {}).Promise;
+const { Debugging, defer, resolve, all, reject, race } = Promise;
 
 module.metadata = {
   'stability': 'unstable'
@@ -57,9 +58,9 @@ let promised = (function() {
     promise.then(console.log) // => [ 1, 2, 3 ]
     **/
 
-    return function promised() {
+    return function promised(...args) {
       // create array of [ f, this, args... ]
-      return concat.apply([ f, this ], arguments).
+      return [f, this, ...args].
         // reduce it via `promisedConcat` to get promised array of fulfillments
         reduce(promisedConcat, resolve([], prototype)).
         // finally map that to promise of `f.apply(this, args...)`
@@ -75,7 +76,7 @@ exports.resolve = resolve;
 exports.reject = reject;
 exports.race = race;
 exports.Promise = Promise;
-
+exports.Debugging = Debugging;
 });
 
 function getEnvironment (callback) {

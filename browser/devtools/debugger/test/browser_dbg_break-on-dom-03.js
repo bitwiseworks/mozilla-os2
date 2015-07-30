@@ -8,7 +8,7 @@
 const TAB_URL = EXAMPLE_URL + "doc_event-listeners-02.html";
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab, aDebuggee, aPanel]) => {
+  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
     let gDebugger = aPanel.panelWin;
     let gView = gDebugger.DebuggerView;
     let gEvents = gView.EventListeners;
@@ -30,16 +30,16 @@ function test() {
       is(gEvents.widget._parent.querySelectorAll(".side-menu-widget-item-checkbox").length, 4,
         "There should be a checkbox for each item shown in the view.");
 
-      testEventItem(0, "doc_event-listeners-02.html", "keydown", ["window", "body"], false);
+      testEventItem(0, "doc_event-listeners-02.html", "change", ["body > input:nth-child(2)"], false);
       testEventItem(1, "doc_event-listeners-02.html", "click", ["body > button:nth-child(1)"], false);
-      testEventItem(2, "doc_event-listeners-02.html", "change", ["body > input:nth-child(2)"], false);
+      testEventItem(2, "doc_event-listeners-02.html", "keydown", ["window", "body"], false);
       testEventItem(3, "doc_event-listeners-02.html", "keyup", ["body > input:nth-child(2)"], false);
 
       testEventGroup("interactionEvents", false);
       testEventGroup("keyboardEvents", false);
       testEventGroup("mouseEvents", false);
 
-      is(gEvents.getAllEvents().toString(), "keydown,click,change,keyup",
+      is(gEvents.getAllEvents().toString(), "change,click,keydown,keyup",
         "The getAllEvents() method returns the correct stuff.");
       is(gEvents.getCheckedEvents().toString(), "",
         "The getCheckedEvents() method returns the correct stuff.");

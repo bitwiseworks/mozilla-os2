@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,7 +9,7 @@
 /**
  * The event tracer code is by default disabled in both build and run time.
  *
- * To enable this code at build time, add --enable-visual-profiling to your 
+ * To enable this code at build time, add --enable-visual-profiling to your
  * configure options.
  *
  * To enable this code at run time, export MOZ_TRACE_FILE env var with a
@@ -15,8 +17,8 @@
  * the log of all events instrumentation in the mozilla code. Check
  * MOZ_EVENT_TRACER_* macros below to add your own.
  *
- * To let the event tracer log only some events to save disk space, export 
- * MOZ_PROFILING_EVENTS with comma separated list of event names you want 
+ * To let the event tracer log only some events to save disk space, export
+ * MOZ_PROFILING_EVENTS with comma separated list of event names you want
  * to record in the log.
  */
 
@@ -30,8 +32,8 @@
 #ifdef MOZ_VISUAL_EVENT_TRACER
 #include "nsIVisualEventTracer.h"
 
-// Bind an object instance, usually |this|, to a name, usually URL or 
-// host name, the instance deals with for its lifetime.  The name string 
+// Bind an object instance, usually |this|, to a name, usually URL or
+// host name, the instance deals with for its lifetime.  The name string
 // is duplicated.
 // IMPORTANT: it is up to the caller to pass the correct static_cast
 // of the |instance| pointer to all these macros ; otherwise the linking
@@ -47,19 +49,19 @@
   mozilla::eventtracer::Mark(mozilla::eventtracer::eName, instance, name, name2)
 
 
-// Call the followings with the same |instance| reference as you have 
+// Call the followings with the same |instance| reference as you have
 // previously called MOZ_EVENT_TRACER_NAME_OBJECT.
-// Let |name| be the name of the event happening, like "resolving", 
+// Let |name| be the name of the event happening, like "resolving",
 // "connecting", "loading" etc.
 
-// This will crate a single-point-in-time event marked with an arrow 
+// This will crate a single-point-in-time event marked with an arrow
 // on the timeline, this is a way to indicate an event without a duration.
 #define MOZ_EVENT_TRACER_MARK(instance, name) \
   mozilla::eventtracer::Mark(mozilla::eventtracer::eShot, instance, name)
 
 // Following macros are used to log events with duration.
-// There always has to be complete WAIT,EXEC,DONE or EXEC,DONE 
-// uninterrupted and non-interferring tuple(s) for an event to be correctly 
+// There always has to be complete WAIT,EXEC,DONE or EXEC,DONE
+// uninterrupted and non-interferring tuple(s) for an event to be correctly
 // shown on the timeline.  Each can be called on any thread, the event tape is
 // finally displayed on the thread where it has been EXECuted.
 
@@ -71,7 +73,7 @@
 // DONE: we've just got OnStopRequest call that indicates the content
 //       has been completely delivered and the request is now finished
 
-// Indicate an event pending start, on the timeline this will 
+// Indicate an event pending start, on the timeline this will
 // start the event's interval tape with a pale color, the time will
 // show in details.  Usually used when an event is being posted or
 // we wait for a lock acquisition.
@@ -79,7 +81,7 @@
 #define MOZ_EVENT_TRACER_WAIT(instance, name) \
   mozilla::eventtracer::Mark(mozilla::eventtracer::eWait, instance, name)
 
-// Indicate start of an event actual execution, on the timeline this will 
+// Indicate start of an event actual execution, on the timeline this will
 // change the event's tape to a deeper color, the time will show in details.
 #define MOZ_EVENT_TRACER_EXEC(instance, name) \
   mozilla::eventtracer::Mark(mozilla::eventtracer::eExec, instance, name)
@@ -94,7 +96,7 @@
 
 // The same meaning as the above macros, just for concurent events.
 // Concurent event means it can happen for the same instance on more
-// then just a single thread, e.g. a service method call, a global lock 
+// then just a single thread, e.g. a service method call, a global lock
 // acquisition, enter and release.
 #define MOZ_EVENT_TRACER_WAIT_THREADSAFE(instance, name) \
   mozilla::eventtracer::Mark(mozilla::eventtracer::eWait | mozilla::eventtracer::eThreadConcurrent, instance, name)
@@ -103,7 +105,7 @@
 #define MOZ_EVENT_TRACER_DONE_THREASAFE(instance, name) \
   mozilla::eventtracer::Mark(mozilla::eventtracer::eDone | mozilla::eventtracer::eThreadConcurrent, instance, name)
 
-#else 
+#else
 
 // MOZ_VISUAL_EVENT_TRACER disabled
 
@@ -126,7 +128,7 @@ namespace eventtracer {
 // Initialize the event tracer engine, called automatically on XPCOM startup.
 void Init();
 
-// Shuts the event tracer engine down and closes the log file, called 
+// Shuts the event tracer engine down and closes the log file, called
 // automatically during XPCOM shutdown.
 void Shutdown();
 
@@ -146,8 +148,8 @@ enum MarkType {
   eThreadConcurrent = 0x10000
 };
 
-// Records an event on the calling thread. 
-// @param aType 
+// Records an event on the calling thread.
+// @param aType
 //    One of MarkType fields, can be bitwise or'ed with the flags.
 // @param aItem
 //    Reference to the object we want to bind a name to or the event is
@@ -159,8 +161,8 @@ enum MarkType {
 // @param aText2
 //    Optional second part of the instnace name, or event name.
 //    Event filtering does apply only to the first part (aText).
-void Mark(uint32_t aType, void * aItem, 
-          const char * aText, const char * aText2 = 0);
+void Mark(uint32_t aType, void* aItem,
+          const char* aText, const char* aText2 = 0);
 
 
 // Helper guard object.  Use to mark an event in the constructor and a different
@@ -176,12 +178,12 @@ void Mark(uint32_t aType, void * aItem,
 class MOZ_STACK_CLASS AutoEventTracer
 {
 public:
-  AutoEventTracer(void * aInstance, 
-               uint32_t aTypeOn, // MarkType marked in constructor
-               uint32_t aTypeOff, // MarkType marked in destructor
-               const char * aName, 
-               const char * aName2 = 0 
-               MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  AutoEventTracer(void* aInstance,
+                  uint32_t aTypeOn, // MarkType marked in constructor
+                  uint32_t aTypeOff, // MarkType marked in destructor
+                  const char* aName,
+                  const char* aName2 = 0
+                  MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     : mInstance(aInstance)
     , mName(aName)
     , mName2(aName2)
@@ -199,9 +201,9 @@ public:
   }
 
 private:
-  void * mInstance;
-  const char * mName;
-  const char * mName2;
+  void* mInstance;
+  const char* mName;
+  const char* mName2;
   uint32_t mTypeOn;
   uint32_t mTypeOff;
 
@@ -212,10 +214,12 @@ private:
 
 // The scriptable class that drives the event tracer
 
-class VisualEventTracer : public nsIVisualEventTracer
+class VisualEventTracer final: public nsIVisualEventTracer
 {
   NS_DECL_ISUPPORTS
   NS_DECL_NSIVISUALEVENTTRACER
+private:
+  ~VisualEventTracer() {}
 };
 
 #define NS_VISUALEVENTTRACER_CID \

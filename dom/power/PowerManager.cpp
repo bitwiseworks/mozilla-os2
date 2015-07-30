@@ -17,6 +17,7 @@
 #include "nsServiceManagerUtils.h"
 #include "nsError.h"
 #include "mozilla/dom/MozPowerManagerBinding.h"
+#include "mozilla/Services.h"
 
 namespace mozilla {
 namespace dom {
@@ -27,7 +28,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(PowerManager)
   NS_INTERFACE_MAP_ENTRY(nsIDOMMozWakeLockListener)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(PowerManager, mListeners, mWindow)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(PowerManager, mListeners, mWindow)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(PowerManager)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(PowerManager)
@@ -77,9 +78,9 @@ PowerManager::Reboot(ErrorResult& aRv)
 }
 
 void
-PowerManager::FactoryReset()
+PowerManager::FactoryReset(mozilla::dom::FactoryResetReason& aReason)
 {
-  hal::FactoryReset();
+  hal::FactoryReset(aReason);
 }
 
 void
@@ -153,6 +154,18 @@ PowerManager::SetScreenEnabled(bool aEnabled)
   hal::SetScreenEnabled(aEnabled);
 }
 
+bool
+PowerManager::KeyLightEnabled()
+{
+  return hal::GetKeyLightEnabled();
+}
+
+void
+PowerManager::SetKeyLightEnabled(bool aEnabled)
+{
+  hal::SetKeyLightEnabled(aEnabled);
+}
+
 double
 PowerManager::ScreenBrightness()
 {
@@ -179,19 +192,6 @@ void
 PowerManager::SetCpuSleepAllowed(bool aAllowed)
 {
   hal::SetCpuSleepAllowed(aAllowed);
-}
-
-bool
-PowerManager::CheckPermission(nsPIDOMWindow* aWindow)
-{
-  nsCOMPtr<nsIPermissionManager> permMgr =
-    do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
-  NS_ENSURE_TRUE(permMgr, false);
-
-  uint32_t permission = nsIPermissionManager::DENY_ACTION;
-  permMgr->TestPermissionFromWindow(aWindow, "power", &permission);
-
-  return permission == nsIPermissionManager::ALLOW_ACTION;
 }
 
 already_AddRefed<PowerManager>

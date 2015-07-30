@@ -21,7 +21,7 @@ namespace dom {
 
 class ContentParent;
 
-class WakeLock MOZ_FINAL
+class WakeLock final
   : public nsIDOMEventListener
   , public nsWrapperCache
   , public nsIObserver
@@ -40,7 +40,6 @@ public:
   // doesn't unlock the 'cpu' resource.
 
   WakeLock();
-  virtual ~WakeLock();
 
   // Initialize this wake lock on behalf of the given window.  Null windows are
   // allowed; a lock without an associated window is always considered
@@ -57,13 +56,15 @@ public:
   nsISupports* GetParentObject() const;
 
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) override;
 
   void GetTopic(nsAString& aTopic);
 
   void Unlock(ErrorResult& aRv);
 
 private:
+  virtual ~WakeLock();
+
   void     DoUnlock();
   void     DoLock();
   void     AttachEventListener();

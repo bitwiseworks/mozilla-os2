@@ -49,10 +49,15 @@ inline Color ToColor(const gfxRGBA &aRGBA)
                Float(aRGBA.b), Float(aRGBA.a));
 }
 
+inline gfxRGBA ThebesColor(Color &aColor)
+{
+  return gfxRGBA(aColor.r, aColor.g, aColor.b, aColor.a);
+}
+
 inline Matrix ToMatrix(const gfxMatrix &aMatrix)
 {
-  return Matrix(Float(aMatrix.xx), Float(aMatrix.yx), Float(aMatrix.xy),
-                Float(aMatrix.yy), Float(aMatrix.x0), Float(aMatrix.y0));
+  return Matrix(Float(aMatrix._11), Float(aMatrix._12), Float(aMatrix._21),
+                Float(aMatrix._22), Float(aMatrix._31), Float(aMatrix._32));
 }
 
 inline gfxMatrix ThebesMatrix(const Matrix &aMatrix)
@@ -115,6 +120,21 @@ inline ExtendMode ToExtendMode(gfxPattern::GraphicsExtend aExtend)
   }
 }
 
+inline gfxPattern::GraphicsPatternType
+ThebesPatternType(PatternType aType)
+{
+  switch (aType) {
+  case PatternType::SURFACE:
+    return gfxPattern::PATTERN_SURFACE;
+  case PatternType::LINEAR_GRADIENT:
+    return gfxPattern::PATTERN_LINEAR;
+  case PatternType::RADIAL_GRADIENT:
+    return gfxPattern::PATTERN_RADIAL;
+  default:
+    return gfxPattern::PATTERN_SOLID;
+  }
+}
+
 inline gfxPattern::GraphicsExtend ThebesExtend(ExtendMode aExtend)
 {
   switch (aExtend) {
@@ -155,59 +175,6 @@ inline nsIntRect ThebesIntRect(const IntRect &aRect)
 inline gfxRGBA ThebesRGBA(const Color &aColor)
 {
   return gfxRGBA(aColor.r, aColor.g, aColor.b, aColor.a);
-}
-
-inline gfxContext::GraphicsLineCap ThebesLineCap(CapStyle aStyle)
-{
-  switch (aStyle) {
-  case CapStyle::BUTT:
-    return gfxContext::LINE_CAP_BUTT;
-  case CapStyle::ROUND:
-    return gfxContext::LINE_CAP_ROUND;
-  case CapStyle::SQUARE:
-    return gfxContext::LINE_CAP_SQUARE;
-  }
-  MOZ_CRASH("Incomplete switch");
-}
-
-inline CapStyle ToCapStyle(gfxContext::GraphicsLineCap aStyle)
-{
-  switch (aStyle) {
-  case gfxContext::LINE_CAP_BUTT:
-    return CapStyle::BUTT;
-  case gfxContext::LINE_CAP_ROUND:
-    return CapStyle::ROUND;
-  case gfxContext::LINE_CAP_SQUARE:
-    return CapStyle::SQUARE;
-  }
-  MOZ_CRASH("Incomplete switch");
-}
-
-inline gfxContext::GraphicsLineJoin ThebesLineJoin(JoinStyle aStyle)
-{
-  switch (aStyle) {
-  case JoinStyle::MITER:
-    return gfxContext::LINE_JOIN_MITER;
-  case JoinStyle::BEVEL:
-    return gfxContext::LINE_JOIN_BEVEL;
-  case JoinStyle::ROUND:
-    return gfxContext::LINE_JOIN_ROUND;
-  default:
-    return gfxContext::LINE_JOIN_MITER;
-  }
-}
-
-inline JoinStyle ToJoinStyle(gfxContext::GraphicsLineJoin aStyle)
-{
-  switch (aStyle) {
-  case gfxContext::LINE_JOIN_MITER:
-    return JoinStyle::MITER;
-  case gfxContext::LINE_JOIN_BEVEL:
-    return JoinStyle::BEVEL;
-  case gfxContext::LINE_JOIN_ROUND:
-    return JoinStyle::ROUND;
-  }
-  MOZ_CRASH("Incomplete switch");
 }
 
 inline gfxImageFormat SurfaceFormatToImageFormat(SurfaceFormat aFormat)
@@ -371,46 +338,50 @@ inline gfxContext::GraphicsOperator ThebesOp(CompositionOp aOp)
   }
 }
 
-inline void
-ToMatrix4x4(const gfx3DMatrix& aIn, Matrix4x4& aOut)
+inline Matrix4x4
+ToMatrix4x4(const gfx3DMatrix& aIn)
 {
-  aOut._11 = aIn._11;
-  aOut._12 = aIn._12;
-  aOut._13 = aIn._13;
-  aOut._14 = aIn._14;
-  aOut._21 = aIn._21;
-  aOut._22 = aIn._22;
-  aOut._23 = aIn._23;
-  aOut._24 = aIn._24;
-  aOut._31 = aIn._31;
-  aOut._32 = aIn._32;
-  aOut._33 = aIn._33;
-  aOut._34 = aIn._34;
-  aOut._41 = aIn._41;
-  aOut._42 = aIn._42;
-  aOut._43 = aIn._43;
-  aOut._44 = aIn._44;
+  Matrix4x4 m;
+  m._11 = aIn._11;
+  m._12 = aIn._12;
+  m._13 = aIn._13;
+  m._14 = aIn._14;
+  m._21 = aIn._21;
+  m._22 = aIn._22;
+  m._23 = aIn._23;
+  m._24 = aIn._24;
+  m._31 = aIn._31;
+  m._32 = aIn._32;
+  m._33 = aIn._33;
+  m._34 = aIn._34;
+  m._41 = aIn._41;
+  m._42 = aIn._42;
+  m._43 = aIn._43;
+  m._44 = aIn._44;
+  return m;
 }
 
-inline void
-To3DMatrix(const Matrix4x4& aIn, gfx3DMatrix& aOut)
+inline gfx3DMatrix
+To3DMatrix(const Matrix4x4& aIn)
 {
-  aOut._11 = aIn._11;
-  aOut._12 = aIn._12;
-  aOut._13 = aIn._13;
-  aOut._14 = aIn._14;
-  aOut._21 = aIn._21;
-  aOut._22 = aIn._22;
-  aOut._23 = aIn._23;
-  aOut._24 = aIn._24;
-  aOut._31 = aIn._31;
-  aOut._32 = aIn._32;
-  aOut._33 = aIn._33;
-  aOut._34 = aIn._34;
-  aOut._41 = aIn._41;
-  aOut._42 = aIn._42;
-  aOut._43 = aIn._43;
-  aOut._44 = aIn._44;
+  gfx3DMatrix m;
+  m._11 = aIn._11;
+  m._12 = aIn._12;
+  m._13 = aIn._13;
+  m._14 = aIn._14;
+  m._21 = aIn._21;
+  m._22 = aIn._22;
+  m._23 = aIn._23;
+  m._24 = aIn._24;
+  m._31 = aIn._31;
+  m._32 = aIn._32;
+  m._33 = aIn._33;
+  m._34 = aIn._34;
+  m._41 = aIn._41;
+  m._42 = aIn._42;
+  m._43 = aIn._43;
+  m._44 = aIn._44;
+  return m;
 }
 
 }

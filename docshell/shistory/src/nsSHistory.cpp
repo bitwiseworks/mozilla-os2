@@ -19,7 +19,6 @@
 #include "nsIDocShellTreeItem.h"
 #include "nsIURI.h"
 #include "nsIContentViewer.h"
-#include "nsICacheService.h"
 #include "nsIObserverService.h"
 #include "prclist.h"
 #include "mozilla/Services.h"
@@ -166,7 +165,7 @@ enum HistCmd{
 //***      nsSHistoryObserver
 //*****************************************************************************
 
-class nsSHistoryObserver MOZ_FINAL : public nsIObserver
+class nsSHistoryObserver final : public nsIObserver
 {
 
 public:
@@ -190,7 +189,7 @@ nsSHistoryObserver::Observe(nsISupports *aSubject, const char *aTopic,
   if (!strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
     nsSHistory::UpdatePrefs();
     nsSHistory::GloballyEvictContentViewers();
-  } else if (!strcmp(aTopic, NS_CACHESERVICE_EMPTYCACHE_TOPIC_ID) ||
+  } else if (!strcmp(aTopic, "cacheservice:empty-cache") ||
              !strcmp(aTopic, "memory-pressure")) {
     nsSHistory::GloballyEvictAllContentViewers();
   }
@@ -370,7 +369,7 @@ nsSHistory::Startup()
       // Observe empty-cache notifications so tahat clearing the disk/memory
       // cache will also evict all content viewers.
       obsSvc->AddObserver(gObserver,
-                          NS_CACHESERVICE_EMPTYCACHE_TOPIC_ID, false);
+                          "cacheservice:empty-cache", false);
 
       // Same for memory-pressure notifications
       obsSvc->AddObserver(gObserver, "memory-pressure", false);
@@ -391,7 +390,7 @@ nsSHistory::Shutdown()
     nsCOMPtr<nsIObserverService> obsSvc =
       mozilla::services::GetObserverService();
     if (obsSvc) {
-      obsSvc->RemoveObserver(gObserver, NS_CACHESERVICE_EMPTYCACHE_TOPIC_ID);
+      obsSvc->RemoveObserver(gObserver, "cacheservice:empty-cache");
       obsSvc->RemoveObserver(gObserver, "memory-pressure");
     }
     NS_RELEASE(gObserver);
@@ -1083,8 +1082,9 @@ nsSHistory::GloballyEvictContentViewers()
 
   nsTArray<TransactionAndDistance> transactions;
 
-  nsSHistory *shist = static_cast<nsSHistory*>(PR_LIST_HEAD(&gSHistoryList));
-  while (shist != &gSHistoryList) {
+  PRCList* listEntry = PR_LIST_HEAD(&gSHistoryList);
+  while (listEntry != &gSHistoryList) {
+    nsSHistory* shist = static_cast<nsSHistory*>(listEntry);
 
     // Maintain a list of the transactions which have viewers and belong to
     // this particular shist object.  We'll add this list to the global list,
@@ -1143,7 +1143,7 @@ nsSHistory::GloballyEvictContentViewers()
     // We've found all the transactions belonging to shist which have viewers.
     // Add those transactions to our global list and move on.
     transactions.AppendElements(shTransactions);
-    shist = static_cast<nsSHistory*>(PR_NEXT_LINK(shist));
+    listEntry = PR_NEXT_LINK(shist);
   }
 
   // We now have collected all cached content viewers.  First check that we
@@ -1513,12 +1513,13 @@ nsSHistory::GetSessionHistory(nsISHistory** aSessionHistory)
 }
 
 NS_IMETHODIMP
-nsSHistory::LoadURIWithBase(const char16_t* aURI,
-                            uint32_t aLoadFlags,
-                            nsIURI* aReferringURI,
-                            nsIInputStream* aPostStream,
-                            nsIInputStream* aExtraHeaderStream,
-                            nsIURI* aBaseURI)
+nsSHistory::LoadURIWithOptions(const char16_t* aURI,
+                               uint32_t aLoadFlags,
+                               nsIURI* aReferringURI,
+                               uint32_t aReferrerPolicy,
+                               nsIInputStream* aPostStream,
+                               nsIInputStream* aExtraHeaderStream,
+                               nsIURI* aBaseURI)
 {
   return NS_OK;
 }

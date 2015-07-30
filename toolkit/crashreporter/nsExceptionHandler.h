@@ -36,11 +36,21 @@ nsresult UnsetExceptionHandler();
 
 /**
  * Tell the crash reporter to recalculate where crash events files should go.
+ * SetCrashEventsDir is used before XPCOM is initialized from the startup
+ * code.
  *
- * This should be called during crash reporter initialization and when a
- * profile is activated or deactivated.
+ * UpdateCrashEventsDir uses the directory service to re-set the
+ * crash event directory based on the current profile.
+ *
+ * 1. If environment variable is present, use it. We don't expect
+ *    the environment variable except for tests and other atypical setups.
+ * 2. <profile>/crashes/events
+ * 3. <UAppData>/Crash Reports/events
  */
+void SetUserAppDataDirectory(nsIFile* aDir);
+void SetProfileDirectory(nsIFile* aDir);
 void UpdateCrashEventsDir();
+void SetMemoryReportFile(nsIFile* aFile);
 
 /**
  * Get the path where crash event files should be written.
@@ -54,10 +64,11 @@ bool     GetMinidumpPath(nsAString& aPath);
 nsresult SetMinidumpPath(const nsAString& aPath);
 
 
-// AnnotateCrashReport and AppendAppNotesToCrashReport may be called from any
-// thread in a chrome process, but may only be called from the main thread in
-// a content process.
+// AnnotateCrashReport, RemoveCrashReportAnnotation and
+// AppendAppNotesToCrashReport may be called from any thread in a chrome
+// process, but may only be called from the main thread in a content process.
 nsresult AnnotateCrashReport(const nsACString& key, const nsACString& data);
+nsresult RemoveCrashReportAnnotation(const nsACString& key);
 nsresult AppendAppNotesToCrashReport(const nsACString& data);
 
 void AnnotateOOMAllocationSize(size_t size);
@@ -100,7 +111,9 @@ nsresult SetSubmitReports(bool aSubmitReport);
 // Out-of-process crash reporter API.
 
 // Initializes out-of-process crash reporting. This method must be called
-// before the platform-specifi notificationpipe APIs are called.
+// before the platform-specific notification pipe APIs are called. If called
+// from off the main thread, this method will synchronously proxy to the main
+// thread.
 void OOPInit();
 
 // Return true if a dump was found for |childPid|, and return the

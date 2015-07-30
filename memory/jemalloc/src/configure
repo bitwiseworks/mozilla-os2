@@ -625,6 +625,7 @@ cfgoutputs_out
 cfgoutputs_in
 cfghdrs_out
 cfghdrs_in
+enable_zone_allocator
 enable_tls
 enable_lazy_lock
 jemalloc_version_gid
@@ -637,18 +638,17 @@ enable_xmalloc
 enable_valgrind
 enable_utrace
 enable_fill
-enable_dss
 enable_munmap
-enable_mremap
 enable_tcache
 enable_prof
 enable_stats
 enable_debug
+je_
 install_suffix
-enable_experimental
+private_namespace
+enable_code_coverage
 AUTOCONF
 LD
-AR
 RANLIB
 INSTALL_DATA
 INSTALL_SCRIPT
@@ -656,6 +656,8 @@ INSTALL_PROGRAM
 enable_autogen
 RPATH_EXTRA
 CC_MM
+AROUT
+ARFLAGS
 MKLIB
 LDTARGET
 CTARGET
@@ -672,6 +674,7 @@ so
 LD_PRELOAD_VAR
 RPATH
 abi
+AR
 host_os
 host_vendor
 host_cpu
@@ -747,7 +750,7 @@ enable_option_checking
 with_xslroot
 with_rpath
 enable_autogen
-enable_experimental
+enable_code_coverage
 with_mangling
 with_jemalloc_prefix
 with_export
@@ -755,6 +758,7 @@ with_private_namespace
 with_install_suffix
 enable_cc_silence
 enable_debug
+enable_ivsalloc
 enable_stats
 enable_prof
 enable_prof_libunwind
@@ -762,15 +766,19 @@ with_static_libunwind
 enable_prof_libgcc
 enable_prof_gcc
 enable_tcache
-enable_mremap
 enable_munmap
-enable_dss
 enable_fill
 enable_utrace
 enable_valgrind
 enable_xmalloc
+with_lg_tiny_min
+with_lg_quantum
+with_lg_page
+with_lg_page_sizes
+with_lg_size_class_group
 enable_lazy_lock
 enable_tls
+enable_zone_allocator
 '
       ac_precious_vars='build_alias
 host_alias
@@ -1393,18 +1401,17 @@ Optional Features:
   --disable-FEATURE       do not include FEATURE (same as --enable-FEATURE=no)
   --enable-FEATURE[=ARG]  include FEATURE [ARG=yes]
   --enable-autogen        Automatically regenerate configure output
-  --disable-experimental  Disable support for the experimental API
-  --enable-cc-silence     Silence irrelevant compiler warnings
-  --enable-debug          Build debugging code
+  --enable-code-coverage  Enable code coverage
+  --disable-cc-silence    Do not silence irrelevant compiler warnings
+  --enable-debug          Build debugging code (implies --enable-ivsalloc)
+  --enable-ivsalloc       Validate pointers passed through the public API
   --disable-stats         Disable statistics calculation/reporting
   --enable-prof           Enable allocation profiling
   --enable-prof-libunwind Use libunwind for backtracing
   --disable-prof-libgcc   Do not use libgcc for backtracing
   --disable-prof-gcc      Do not use gcc intrinsics for backtracing
   --disable-tcache        Disable per thread caches
-  --enable-mremap         Enable mremap(2) for huge realloc()
   --disable-munmap        Disable VM deallocation via munmap(2)
-  --enable-dss            Enable allocation from DSS
   --disable-fill          Disable support for junk/zero filling, quarantine,
                           and redzones
   --enable-utrace         Enable utrace(2)-based tracing
@@ -1412,6 +1419,8 @@ Optional Features:
   --enable-xmalloc        Support xmalloc option
   --enable-lazy-lock      Enable lazy locking (only lock when multi-threaded)
   --disable-tls           Disable thread-local storage (__thread keyword)
+  --disable-zone-allocator
+                          Disable zone allocator for Darwin
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
@@ -1429,6 +1438,16 @@ Optional Packages:
   --with-static-libunwind=<libunwind.a>
                           Path to static libunwind library; use rather than
                           dynamically linking
+  --with-lg-tiny-min=<lg-tiny-min>
+                          Base 2 log of minimum tiny size class to support
+  --with-lg-quantum=<lg-quantum>
+                          Base 2 log of minimum allocation alignment
+  --with-lg-page=<lg-page>
+                          Base 2 log of system page size
+  --with-lg-page-sizes=<lg-page-sizes>
+                          Base 2 logs of system page sizes to support
+  --with-lg-size-class-group=<lg-size-class-group>
+                          Base 2 log of size classes per doubling
 
 Some influential environment variables:
   CC          C compiler command
@@ -1637,6 +1656,37 @@ fi
 
 } # ac_fn_c_try_run
 
+# ac_fn_c_check_header_compile LINENO HEADER VAR INCLUDES
+# -------------------------------------------------------
+# Tests whether HEADER exists and can be compiled using the include files in
+# INCLUDES, setting the cache variable VAR accordingly.
+ac_fn_c_check_header_compile ()
+{
+  as_lineno=${as_lineno-"$1"} as_lineno_stack=as_lineno_stack=$as_lineno_stack
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $2" >&5
+$as_echo_n "checking for $2... " >&6; }
+if eval \${$3+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+$4
+#include <$2>
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  eval "$3=yes"
+else
+  eval "$3=no"
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+eval ac_res=\$$3
+	       { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_res" >&5
+$as_echo "$ac_res" >&6; }
+  eval $as_lineno_stack; ${as_lineno_stack:+:} unset as_lineno
+
+} # ac_fn_c_check_header_compile
+
 # ac_fn_c_compute_int LINENO EXPR VAR INCLUDES
 # --------------------------------------------
 # Tries to find the compile-time value of EXPR in a program that includes
@@ -1820,37 +1870,6 @@ rm -f conftest.val
 
 } # ac_fn_c_compute_int
 
-# ac_fn_c_check_header_compile LINENO HEADER VAR INCLUDES
-# -------------------------------------------------------
-# Tests whether HEADER exists and can be compiled using the include files in
-# INCLUDES, setting the cache variable VAR accordingly.
-ac_fn_c_check_header_compile ()
-{
-  as_lineno=${as_lineno-"$1"} as_lineno_stack=as_lineno_stack=$as_lineno_stack
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $2" >&5
-$as_echo_n "checking for $2... " >&6; }
-if eval \${$3+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-$4
-#include <$2>
-_ACEOF
-if ac_fn_c_try_compile "$LINENO"; then :
-  eval "$3=yes"
-else
-  eval "$3=no"
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
-fi
-eval ac_res=\$$3
-	       { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_res" >&5
-$as_echo "$ac_res" >&6; }
-  eval $as_lineno_stack; ${as_lineno_stack:+:} unset as_lineno
-
-} # ac_fn_c_check_header_compile
-
 # ac_fn_c_try_link LINENO
 # -----------------------
 # Try to link conftest.$ac_ext, and return whether this succeeded.
@@ -1896,73 +1915,6 @@ fi
   as_fn_set_status $ac_retval
 
 } # ac_fn_c_try_link
-
-# ac_fn_c_check_func LINENO FUNC VAR
-# ----------------------------------
-# Tests whether FUNC exists, setting the cache variable VAR accordingly
-ac_fn_c_check_func ()
-{
-  as_lineno=${as_lineno-"$1"} as_lineno_stack=as_lineno_stack=$as_lineno_stack
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $2" >&5
-$as_echo_n "checking for $2... " >&6; }
-if eval \${$3+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-/* Define $2 to an innocuous variant, in case <limits.h> declares $2.
-   For example, HP-UX 11i <limits.h> declares gettimeofday.  */
-#define $2 innocuous_$2
-
-/* System header to define __stub macros and hopefully few prototypes,
-    which can conflict with char $2 (); below.
-    Prefer <limits.h> to <assert.h> if __STDC__ is defined, since
-    <limits.h> exists even on freestanding compilers.  */
-
-#ifdef __STDC__
-# include <limits.h>
-#else
-# include <assert.h>
-#endif
-
-#undef $2
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-#ifdef __cplusplus
-extern "C"
-#endif
-char $2 ();
-/* The GNU C library defines this for functions which it implements
-    to always fail with ENOSYS.  Some functions are actually named
-    something starting with __ and the normal name is an alias.  */
-#if defined __stub_$2 || defined __stub___$2
-choke me
-#endif
-
-int
-main ()
-{
-return $2 ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"; then :
-  eval "$3=yes"
-else
-  eval "$3=no"
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-fi
-eval ac_res=\$$3
-	       { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_res" >&5
-$as_echo "$ac_res" >&6; }
-  eval $as_lineno_stack; ${as_lineno_stack:+:} unset as_lineno
-
-} # ac_fn_c_check_func
 
 # ac_fn_c_check_header_mongrel LINENO HEADER VAR INCLUDES
 # -------------------------------------------------------
@@ -2050,6 +2002,73 @@ fi
   eval $as_lineno_stack; ${as_lineno_stack:+:} unset as_lineno
 
 } # ac_fn_c_check_header_mongrel
+
+# ac_fn_c_check_func LINENO FUNC VAR
+# ----------------------------------
+# Tests whether FUNC exists, setting the cache variable VAR accordingly
+ac_fn_c_check_func ()
+{
+  as_lineno=${as_lineno-"$1"} as_lineno_stack=as_lineno_stack=$as_lineno_stack
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $2" >&5
+$as_echo_n "checking for $2... " >&6; }
+if eval \${$3+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+/* Define $2 to an innocuous variant, in case <limits.h> declares $2.
+   For example, HP-UX 11i <limits.h> declares gettimeofday.  */
+#define $2 innocuous_$2
+
+/* System header to define __stub macros and hopefully few prototypes,
+    which can conflict with char $2 (); below.
+    Prefer <limits.h> to <assert.h> if __STDC__ is defined, since
+    <limits.h> exists even on freestanding compilers.  */
+
+#ifdef __STDC__
+# include <limits.h>
+#else
+# include <assert.h>
+#endif
+
+#undef $2
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char $2 ();
+/* The GNU C library defines this for functions which it implements
+    to always fail with ENOSYS.  Some functions are actually named
+    something starting with __ and the normal name is an alias.  */
+#if defined __stub_$2 || defined __stub___$2
+choke me
+#endif
+
+int
+main ()
+{
+return $2 ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  eval "$3=yes"
+else
+  eval "$3=no"
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+eval ac_res=\$$3
+	       { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_res" >&5
+$as_echo "$ac_res" >&6; }
+  eval $as_lineno_stack; ${as_lineno_stack:+:} unset as_lineno
+
+} # ac_fn_c_check_func
 
 # ac_fn_c_check_type LINENO TYPE VAR INCLUDES
 # -------------------------------------------
@@ -2463,7 +2482,7 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
 
-rev=1
+rev=2
 
 
 srcroot=$srcdir
@@ -2532,6 +2551,7 @@ done
   done
 IFS=$as_save_IFS
 
+  test -z "$ac_cv_path_XSLTPROC" && ac_cv_path_XSLTPROC="false"
   ;;
 esac
 fi
@@ -3419,16 +3439,24 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-std=gnu99
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 
+    if test "x$je_cv_cflags_appended" = "x-std=gnu99" ; then
+      cat >>confdefs.h <<_ACEOF
+#define JEMALLOC_HAS_RESTRICT 1
+_ACEOF
+
+    fi
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether compiler supports -Wall" >&5
 $as_echo_n "checking whether compiler supports -Wall... " >&6; }
@@ -3453,10 +3481,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-Wall
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -3487,10 +3517,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-pipe
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -3521,10 +3553,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-g3
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -3557,10 +3591,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-Zi
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -3591,10 +3627,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-MT
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -3625,17 +3663,55 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-W3
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 
-    CPPFLAGS="$CPPFLAGS -I${srcroot}/include/msvc_compat"
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether compiler supports -FS" >&5
+$as_echo_n "checking whether compiler supports -FS... " >&6; }
+TCFLAGS="${CFLAGS}"
+if test "x${CFLAGS}" = "x" ; then
+  CFLAGS="-FS"
+else
+  CFLAGS="${CFLAGS} -FS"
+fi
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+
+int
+main ()
+{
+
+    return 0;
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  je_cv_cflags_appended=-FS
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+else
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+              CFLAGS="${TCFLAGS}"
+
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+
+    CPPFLAGS="$CPPFLAGS -I${srcdir}/include/msvc_compat"
   fi
 fi
 if test "x$EXTRA_CFLAGS" != "x" ; then
@@ -3663,10 +3739,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=$EXTRA_CFLAGS
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -4072,6 +4150,240 @@ fi
 done
 
 
+ { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether byte ordering is bigendian" >&5
+$as_echo_n "checking whether byte ordering is bigendian... " >&6; }
+if ${ac_cv_c_bigendian+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_cv_c_bigendian=unknown
+    # See if we're dealing with a universal compiler.
+    cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#ifndef __APPLE_CC__
+	       not a universal capable compiler
+	     #endif
+	     typedef int dummy;
+
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+
+	# Check for potential -arch flags.  It is not universal unless
+	# there are at least two -arch flags with different values.
+	ac_arch=
+	ac_prev=
+	for ac_word in $CC $CFLAGS $CPPFLAGS $LDFLAGS; do
+	 if test -n "$ac_prev"; then
+	   case $ac_word in
+	     i?86 | x86_64 | ppc | ppc64)
+	       if test -z "$ac_arch" || test "$ac_arch" = "$ac_word"; then
+		 ac_arch=$ac_word
+	       else
+		 ac_cv_c_bigendian=universal
+		 break
+	       fi
+	       ;;
+	   esac
+	   ac_prev=
+	 elif test "x$ac_word" = "x-arch"; then
+	   ac_prev=arch
+	 fi
+       done
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+    if test $ac_cv_c_bigendian = unknown; then
+      # See if sys/param.h defines the BYTE_ORDER macro.
+      cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <sys/types.h>
+	     #include <sys/param.h>
+
+int
+main ()
+{
+#if ! (defined BYTE_ORDER && defined BIG_ENDIAN \
+		     && defined LITTLE_ENDIAN && BYTE_ORDER && BIG_ENDIAN \
+		     && LITTLE_ENDIAN)
+	      bogus endian macros
+	     #endif
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  # It does; now see whether it defined to BIG_ENDIAN or not.
+	 cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <sys/types.h>
+		#include <sys/param.h>
+
+int
+main ()
+{
+#if BYTE_ORDER != BIG_ENDIAN
+		 not big endian
+		#endif
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  ac_cv_c_bigendian=yes
+else
+  ac_cv_c_bigendian=no
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+    fi
+    if test $ac_cv_c_bigendian = unknown; then
+      # See if <limits.h> defines _LITTLE_ENDIAN or _BIG_ENDIAN (e.g., Solaris).
+      cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <limits.h>
+
+int
+main ()
+{
+#if ! (defined _LITTLE_ENDIAN || defined _BIG_ENDIAN)
+	      bogus endian macros
+	     #endif
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  # It does; now see whether it defined to _BIG_ENDIAN or not.
+	 cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <limits.h>
+
+int
+main ()
+{
+#ifndef _BIG_ENDIAN
+		 not big endian
+		#endif
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  ac_cv_c_bigendian=yes
+else
+  ac_cv_c_bigendian=no
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+    fi
+    if test $ac_cv_c_bigendian = unknown; then
+      # Compile a test program.
+      if test "$cross_compiling" = yes; then :
+  # Try to guess by grepping values from an object file.
+	 cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+short int ascii_mm[] =
+		  { 0x4249, 0x4765, 0x6E44, 0x6961, 0x6E53, 0x7953, 0 };
+		short int ascii_ii[] =
+		  { 0x694C, 0x5454, 0x656C, 0x6E45, 0x6944, 0x6E61, 0 };
+		int use_ascii (int i) {
+		  return ascii_mm[i] + ascii_ii[i];
+		}
+		short int ebcdic_ii[] =
+		  { 0x89D3, 0xE3E3, 0x8593, 0x95C5, 0x89C4, 0x9581, 0 };
+		short int ebcdic_mm[] =
+		  { 0xC2C9, 0xC785, 0x95C4, 0x8981, 0x95E2, 0xA8E2, 0 };
+		int use_ebcdic (int i) {
+		  return ebcdic_mm[i] + ebcdic_ii[i];
+		}
+		extern int foo;
+
+int
+main ()
+{
+return use_ascii (foo) == use_ebcdic (foo);
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  if grep BIGenDianSyS conftest.$ac_objext >/dev/null; then
+	      ac_cv_c_bigendian=yes
+	    fi
+	    if grep LiTTleEnDian conftest.$ac_objext >/dev/null ; then
+	      if test "$ac_cv_c_bigendian" = unknown; then
+		ac_cv_c_bigendian=no
+	      else
+		# finding both strings is unlikely to happen, but who knows?
+		ac_cv_c_bigendian=unknown
+	      fi
+	    fi
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+$ac_includes_default
+int
+main ()
+{
+
+	     /* Are we little or big endian?  From Harbison&Steele.  */
+	     union
+	     {
+	       long int l;
+	       char c[sizeof (long int)];
+	     } u;
+	     u.l = 1;
+	     return u.c[sizeof (long int) - 1] == 1;
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_run "$LINENO"; then :
+  ac_cv_c_bigendian=no
+else
+  ac_cv_c_bigendian=yes
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
+  conftest.$ac_objext conftest.beam conftest.$ac_ext
+fi
+
+    fi
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_c_bigendian" >&5
+$as_echo "$ac_cv_c_bigendian" >&6; }
+ case $ac_cv_c_bigendian in #(
+   yes)
+     ac_cv_big_endian=1;; #(
+   no)
+     ac_cv_big_endian=0 ;; #(
+   universal)
+
+$as_echo "#define AC_APPLE_UNIVERSAL_BUILD 1" >>confdefs.h
+
+     ;; #(
+   *)
+     as_fn_error $? "unknown endianness
+ presetting ac_cv_c_bigendian=no (or yes) will help" "$LINENO" 5 ;;
+ esac
+
+if test "x${ac_cv_big_endian}" = "x1" ; then
+  cat >>confdefs.h <<_ACEOF
+#define JEMALLOC_BIG_ENDIAN
+_ACEOF
+
+fi
+
+if test "x${je_cv_msvc}" = "xyes" -a "x${ac_cv_header_inttypes_h}" = "xno"; then
+  CPPFLAGS="$CPPFLAGS -I${srcdir}/include/msvc_compat/C99"
+fi
+
 # The cast to long int works around a bug in the HP C Compiler
 # version HP92453-01 B.11.11.23709.GP, which incorrectly rejects
 # declarations like `int a3[[(sizeof (unsigned char)) >= 0]];'.
@@ -4356,13 +4668,14 @@ case $host_os in *\ *) host_os=`echo "$host_os" | sed 's/ /-/g'`;; esac
 
 CPU_SPINWAIT=""
 case "${host_cpu}" in
-  i[345]86)
-	;;
-  i686)
+  i686|x86_64)
+	if ${je_cv_pause+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether __asm__ is compilable" >&5
-$as_echo_n "checking whether __asm__ is compilable... " >&6; }
-if ${je_cv_asm+:} false; then :
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether pause instruction is compilable" >&5
+$as_echo_n "checking whether pause instruction is compilable... " >&6; }
+if ${je_cv_pause+:} false; then :
   $as_echo_n "(cached) " >&6
 else
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -4377,52 +4690,27 @@ __asm__ volatile("pause"); return 0;
 }
 _ACEOF
 if ac_fn_c_try_link "$LINENO"; then :
-  je_cv_asm=yes
+  je_cv_pause=yes
 else
-  je_cv_asm=no
+  je_cv_pause=no
 fi
 rm -f core conftest.err conftest.$ac_objext \
     conftest$ac_exeext conftest.$ac_ext
 fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_asm" >&5
-$as_echo "$je_cv_asm" >&6; }
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_pause" >&5
+$as_echo "$je_cv_pause" >&6; }
 
-	if test "x${je_cv_asm}" = "xyes" ; then
+fi
+
+	if test "x${je_cv_pause}" = "xyes" ; then
 	    CPU_SPINWAIT='__asm__ volatile("pause")'
 	fi
 	;;
-  x86_64)
-
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether __asm__ syntax is compilable" >&5
-$as_echo_n "checking whether __asm__ syntax is compilable... " >&6; }
-if ${je_cv_asm+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-int
-main ()
-{
-__asm__ volatile("pause"); return 0;
-  ;
-  return 0;
-}
+  powerpc)
+	cat >>confdefs.h <<_ACEOF
+#define HAVE_ALTIVEC
 _ACEOF
-if ac_fn_c_try_link "$LINENO"; then :
-  je_cv_asm=yes
-else
-  je_cv_asm=no
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_asm" >&5
-$as_echo "$je_cv_asm" >&6; }
 
-	if test "x${je_cv_asm}" = "xyes" ; then
-	    CPU_SPINWAIT='__asm__ volatile("pause")'
-	fi
 	;;
   *)
 	;;
@@ -4446,13 +4734,109 @@ PIC_CFLAGS='-fPIC -DPIC'
 CTARGET='-o $@'
 LDTARGET='-o $@'
 EXTRA_LDFLAGS=
-MKLIB='ar crus $@'
+ARFLAGS='crus'
+AROUT=' $@'
 CC_MM=1
 
+
+
+
+if test -n "$ac_tool_prefix"; then
+  # Extract the first word of "${ac_tool_prefix}ar", so it can be a program name with args.
+set dummy ${ac_tool_prefix}ar; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_prog_AR+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  if test -n "$AR"; then
+  ac_cv_prog_AR="$AR" # Let the user override the test.
+else
+as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_prog_AR="${ac_tool_prefix}ar"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+fi
+fi
+AR=$ac_cv_prog_AR
+if test -n "$AR"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $AR" >&5
+$as_echo "$AR" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+fi
+if test -z "$ac_cv_prog_AR"; then
+  ac_ct_AR=$AR
+  # Extract the first word of "ar", so it can be a program name with args.
+set dummy ar; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_prog_ac_ct_AR+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  if test -n "$ac_ct_AR"; then
+  ac_cv_prog_ac_ct_AR="$ac_ct_AR" # Let the user override the test.
+else
+as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_prog_ac_ct_AR="ar"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+fi
+fi
+ac_ct_AR=$ac_cv_prog_ac_ct_AR
+if test -n "$ac_ct_AR"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_ct_AR" >&5
+$as_echo "$ac_ct_AR" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+  if test "x$ac_ct_AR" = x; then
+    AR=":"
+  else
+    case $cross_compiling:$ac_tool_warned in
+yes:)
+{ $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: using cross tools not prefixed with host triplet" >&5
+$as_echo "$as_me: WARNING: using cross tools not prefixed with host triplet" >&2;}
+ac_tool_warned=yes ;;
+esac
+    AR=$ac_ct_AR
+  fi
+else
+  AR="$ac_cv_prog_AR"
+fi
+
+
 default_munmap="1"
-JEMALLOC_USABLE_SIZE_CONST="const"
 case "${host}" in
-  *-*-darwin*)
+  *-*-darwin* | *-*-ios*)
 	CFLAGS="$CFLAGS"
 	abi="macho"
 	$as_echo "#define JEMALLOC_PURGE_MADVISE_FREE  " >>confdefs.h
@@ -4464,6 +4848,7 @@ case "${host}" in
 	force_tls="0"
 	DSO_LDFLAGS='-shared -Wl,-dylib_install_name,$(@F)'
 	SOREV="${rev}.${so}"
+	sbrk_deprecated="1"
 	;;
   *-*-freebsd*)
 	CFLAGS="$CFLAGS"
@@ -4472,15 +4857,22 @@ case "${host}" in
 
 	force_lazy_lock="1"
 	;;
+  *-*-dragonfly*)
+	CFLAGS="$CFLAGS"
+	abi="elf"
+	$as_echo "#define JEMALLOC_PURGE_MADVISE_FREE  " >>confdefs.h
+
+	;;
   *-*-linux*)
 	CFLAGS="$CFLAGS"
 	CPPFLAGS="$CPPFLAGS -D_GNU_SOURCE"
 	abi="elf"
+	$as_echo "#define JEMALLOC_HAS_ALLOCA_H 1" >>confdefs.h
+
 	$as_echo "#define JEMALLOC_PURGE_MADVISE_DONTNEED  " >>confdefs.h
 
 	$as_echo "#define JEMALLOC_THREADED_INIT  " >>confdefs.h
 
-	JEMALLOC_USABLE_SIZE_CONST=""
 	default_munmap="0"
 	;;
   *-*-netbsd*)
@@ -4516,6 +4908,8 @@ $as_echo "$abi" >&6; }
   *-*-solaris2*)
 	CFLAGS="$CFLAGS"
 	abi="elf"
+	$as_echo "#define JEMALLOC_PURGE_MADVISE_FREE  " >>confdefs.h
+
 	RPATH='-Wl,-R,$(1)'
 		CPPFLAGS="$CPPFLAGS -D_POSIX_PTHREAD_SEMANTICS"
 	LIBS="$LIBS -lposix4 -lsocket -lnsl"
@@ -4528,7 +4922,7 @@ $as_echo "$abi" >&6; }
 	fi
 	abi="xcoff"
 	;;
-  *-*-mingw*)
+  *-*-mingw* | *-*-cygwin*)
 	abi="pecoff"
 	force_tls="0"
 	RPATH=""
@@ -4539,7 +4933,9 @@ $as_echo "$abi" >&6; }
 	  EXTRA_LDFLAGS="-link -DEBUG"
 	  CTARGET='-Fo$@'
 	  LDTARGET='-Fe$@'
-	  MKLIB='lib -nologo -out:$@'
+	  AR='lib'
+	  ARFLAGS='-nologo -out:'
+	  AROUT='$@'
 	  CC_MM=
         else
 	  importlib="${so}"
@@ -4556,6 +4952,50 @@ $as_echo "Unsupported operating system: ${host}" >&6; }
 	abi="elf"
 	;;
 esac
+
+JEMALLOC_USABLE_SIZE_CONST=const
+for ac_header in malloc.h
+do :
+  ac_fn_c_check_header_mongrel "$LINENO" "malloc.h" "ac_cv_header_malloc_h" "$ac_includes_default"
+if test "x$ac_cv_header_malloc_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_MALLOC_H 1
+_ACEOF
+
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether malloc_usable_size definition can use const argument" >&5
+$as_echo_n "checking whether malloc_usable_size definition can use const argument... " >&6; }
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <malloc.h>
+     #include <stddef.h>
+    size_t malloc_usable_size(const void *ptr);
+
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+
+                { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+
+else
+
+                JEMALLOC_USABLE_SIZE_CONST=
+                { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+
+fi
+
+done
+
 cat >>confdefs.h <<_ACEOF
 #define JEMALLOC_USABLE_SIZE_CONST $JEMALLOC_USABLE_SIZE_CONST
 _ACEOF
@@ -4578,9 +5018,7 @@ _ACEOF
 
 
 
-if test "x$abi" != "xpecoff"; then
-    LIBS="$LIBS -lm"
-fi
+
 
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether __attribute__ syntax is compilable" >&5
@@ -4638,10 +5076,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-fvisibility=hidden
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -4675,10 +5115,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-Werror
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -4698,7 +5140,7 @@ int
 main ()
 {
 static __thread int
-               __attribute__((tls_model("initial-exec"))) foo;
+               __attribute__((tls_model("initial-exec"), unused)) foo;
                foo = 0;
   ;
   return 0;
@@ -4939,46 +5381,6 @@ else
   RANLIB="$ac_cv_prog_RANLIB"
 fi
 
-# Extract the first word of "ar", so it can be a program name with args.
-set dummy ar; ac_word=$2
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
-$as_echo_n "checking for $ac_word... " >&6; }
-if ${ac_cv_path_AR+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  case $AR in
-  [\\/]* | ?:[\\/]*)
-  ac_cv_path_AR="$AR" # Let the user override the test with a path.
-  ;;
-  *)
-  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in $PATH
-do
-  IFS=$as_save_IFS
-  test -z "$as_dir" && as_dir=.
-    for ac_exec_ext in '' $ac_executable_extensions; do
-  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
-    ac_cv_path_AR="$as_dir/$ac_word$ac_exec_ext"
-    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
-    break 2
-  fi
-done
-  done
-IFS=$as_save_IFS
-
-  ;;
-esac
-fi
-AR=$ac_cv_path_AR
-if test -n "$AR"; then
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $AR" >&5
-$as_echo "$AR" >&6; }
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }
-fi
-
-
 # Extract the first word of "ld", so it can be a program name with args.
 set dummy ld; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
@@ -5006,6 +5408,7 @@ done
   done
 IFS=$as_save_IFS
 
+  test -z "$ac_cv_path_LD" && ac_cv_path_LD="false"
   ;;
 esac
 fi
@@ -5046,6 +5449,7 @@ done
   done
 IFS=$as_save_IFS
 
+  test -z "$ac_cv_path_AUTOCONF" && ac_cv_path_AUTOCONF="false"
   ;;
 esac
 fi
@@ -5060,7 +5464,7 @@ fi
 
 
 
-public_syms="malloc_conf malloc_message malloc calloc posix_memalign aligned_alloc realloc free malloc_usable_size malloc_stats_print mallctl mallctlnametomib mallctlbymib"
+public_syms="malloc_conf malloc_message malloc calloc posix_memalign aligned_alloc realloc free mallocx rallocx xallocx sallocx dallocx sdallocx nallocx mallctl mallctlnametomib mallctlbymib malloc_stats_print malloc_usable_size"
 
 ac_fn_c_check_func "$LINENO" "memalign" "ac_cv_func_memalign"
 if test "x$ac_cv_func_memalign" = xyes; then :
@@ -5077,23 +5481,100 @@ if test "x$ac_cv_func_valloc" = xyes; then :
 fi
 
 
-# Check whether --enable-experimental was given.
-if test "${enable_experimental+set}" = set; then :
-  enableval=$enable_experimental; if test "x$enable_experimental" = "xno" ; then
-  enable_experimental="0"
+GCOV_FLAGS=
+# Check whether --enable-code-coverage was given.
+if test "${enable_code_coverage+set}" = set; then :
+  enableval=$enable_code_coverage; if test "x$enable_code_coverage" = "xno" ; then
+  enable_code_coverage="0"
 else
-  enable_experimental="1"
+  enable_code_coverage="1"
 fi
 
 else
-  enable_experimental="1"
+  enable_code_coverage="0"
 
 fi
 
-if test "x$enable_experimental" = "x1" ; then
-  $as_echo "#define JEMALLOC_EXPERIMENTAL  " >>confdefs.h
+if test "x$enable_code_coverage" = "x1" ; then
+  deoptimize="no"
+  echo "$CFLAGS $EXTRA_CFLAGS" | grep '\-O' >/dev/null || deoptimize="yes"
+  if test "x${deoptimize}" = "xyes" ; then
 
-  public_syms="${public_syms} allocm dallocm nallocm rallocm sallocm"
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether compiler supports -O0" >&5
+$as_echo_n "checking whether compiler supports -O0... " >&6; }
+TCFLAGS="${CFLAGS}"
+if test "x${CFLAGS}" = "x" ; then
+  CFLAGS="-O0"
+else
+  CFLAGS="${CFLAGS} -O0"
+fi
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+
+int
+main ()
+{
+
+    return 0;
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  je_cv_cflags_appended=-O0
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+else
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+              CFLAGS="${TCFLAGS}"
+
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+
+  fi
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether compiler supports -fprofile-arcs -ftest-coverage" >&5
+$as_echo_n "checking whether compiler supports -fprofile-arcs -ftest-coverage... " >&6; }
+TCFLAGS="${CFLAGS}"
+if test "x${CFLAGS}" = "x" ; then
+  CFLAGS="-fprofile-arcs -ftest-coverage"
+else
+  CFLAGS="${CFLAGS} -fprofile-arcs -ftest-coverage"
+fi
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+
+int
+main ()
+{
+
+    return 0;
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  je_cv_cflags_appended=-fprofile-arcs -ftest-coverage
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+else
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+              CFLAGS="${TCFLAGS}"
+
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+
+  EXTRA_LDFLAGS="$EXTRA_LDFLAGS -fprofile-arcs -ftest-coverage"
+  $as_echo "#define JEMALLOC_CODE_COVERAGE  " >>confdefs.h
+
 fi
 
 
@@ -5105,16 +5586,6 @@ else
   mangling_map=""
 fi
 
-for nm in `echo ${mangling_map} |tr ',' ' '` ; do
-  k="`echo ${nm} |tr ':' ' ' |awk '{print $1}'`"
-  n="je_${k}"
-  m=`echo ${nm} |tr ':' ' ' |awk '{print $2}'`
-  cat >>confdefs.h <<_ACEOF
-#define ${n} ${m}
-_ACEOF
-
-    public_syms=`for sym in ${public_syms}; do echo "${sym}"; done |grep -v "^${k}\$" |tr '\n' ' '`
-done
 
 
 # Check whether --with-jemalloc_prefix was given.
@@ -5140,14 +5611,6 @@ _ACEOF
 _ACEOF
 
 fi
-for stem in ${public_syms}; do
-  n="je_${stem}"
-  m="${JEMALLOC_PREFIX}${stem}"
-  cat >>confdefs.h <<_ACEOF
-#define ${n} ${m}
-_ACEOF
-
-done
 
 
 # Check whether --with-export was given.
@@ -5156,34 +5619,25 @@ if test "${with_export+set}" = set; then :
   $as_echo "#define JEMALLOC_EXPORT /**/" >>confdefs.h
 
 fi
-]
+
 fi
 
 
 
 # Check whether --with-private_namespace was given.
 if test "${with_private_namespace+set}" = set; then :
-  withval=$with_private_namespace; JEMALLOC_PRIVATE_NAMESPACE="$with_private_namespace"
+  withval=$with_private_namespace; JEMALLOC_PRIVATE_NAMESPACE="${with_private_namespace}je_"
 else
-  JEMALLOC_PRIVATE_NAMESPACE=""
+  JEMALLOC_PRIVATE_NAMESPACE="je_"
 
 fi
 
 cat >>confdefs.h <<_ACEOF
-#define JEMALLOC_PRIVATE_NAMESPACE "$JEMALLOC_PRIVATE_NAMESPACE"
+#define JEMALLOC_PRIVATE_NAMESPACE $JEMALLOC_PRIVATE_NAMESPACE
 _ACEOF
 
-if test "x$JEMALLOC_PRIVATE_NAMESPACE" != "x" ; then
-  cat >>confdefs.h <<_ACEOF
-#define JEMALLOC_N(string_that_no_one_should_want_to_use_as_a_jemalloc_private_namespace_prefix) ${JEMALLOC_PRIVATE_NAMESPACE}##string_that_no_one_should_want_to_use_as_a_jemalloc_private_namespace_prefix
-_ACEOF
+private_namespace="$JEMALLOC_PRIVATE_NAMESPACE"
 
-else
-  cat >>confdefs.h <<_ACEOF
-#define JEMALLOC_N(string_that_no_one_should_want_to_use_as_a_jemalloc_private_namespace_prefix) string_that_no_one_should_want_to_use_as_a_jemalloc_private_namespace_prefix
-_ACEOF
-
-fi
 
 
 # Check whether --with-install_suffix was given.
@@ -5197,37 +5651,76 @@ fi
 install_suffix="$INSTALL_SUFFIX"
 
 
-cfgoutputs_in="${srcroot}Makefile.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}doc/html.xsl.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}doc/manpages.xsl.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}doc/jemalloc.xml.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}include/jemalloc/jemalloc.h.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}include/jemalloc/internal/jemalloc_internal.h.in"
-cfgoutputs_in="${cfgoutputs_in} ${srcroot}test/jemalloc_test.h.in"
+je_="je_"
+
+
+cfgoutputs_in="Makefile.in"
+cfgoutputs_in="${cfgoutputs_in} jemalloc.pc.in"
+cfgoutputs_in="${cfgoutputs_in} doc/html.xsl.in"
+cfgoutputs_in="${cfgoutputs_in} doc/manpages.xsl.in"
+cfgoutputs_in="${cfgoutputs_in} doc/jemalloc.xml.in"
+cfgoutputs_in="${cfgoutputs_in} include/jemalloc/jemalloc_macros.h.in"
+cfgoutputs_in="${cfgoutputs_in} include/jemalloc/jemalloc_protos.h.in"
+cfgoutputs_in="${cfgoutputs_in} include/jemalloc/jemalloc_typedefs.h.in"
+cfgoutputs_in="${cfgoutputs_in} include/jemalloc/internal/jemalloc_internal.h.in"
+cfgoutputs_in="${cfgoutputs_in} test/test.sh.in"
+cfgoutputs_in="${cfgoutputs_in} test/include/test/jemalloc_test.h.in"
 
 cfgoutputs_out="Makefile"
+cfgoutputs_out="${cfgoutputs_out} jemalloc.pc"
 cfgoutputs_out="${cfgoutputs_out} doc/html.xsl"
 cfgoutputs_out="${cfgoutputs_out} doc/manpages.xsl"
-cfgoutputs_out="${cfgoutputs_out} doc/jemalloc${install_suffix}.xml"
-cfgoutputs_out="${cfgoutputs_out} include/jemalloc/jemalloc${install_suffix}.h"
+cfgoutputs_out="${cfgoutputs_out} doc/jemalloc.xml"
+cfgoutputs_out="${cfgoutputs_out} include/jemalloc/jemalloc_macros.h"
+cfgoutputs_out="${cfgoutputs_out} include/jemalloc/jemalloc_protos.h"
+cfgoutputs_out="${cfgoutputs_out} include/jemalloc/jemalloc_typedefs.h"
 cfgoutputs_out="${cfgoutputs_out} include/jemalloc/internal/jemalloc_internal.h"
-cfgoutputs_out="${cfgoutputs_out} test/jemalloc_test.h"
+cfgoutputs_out="${cfgoutputs_out} test/test.sh"
+cfgoutputs_out="${cfgoutputs_out} test/include/test/jemalloc_test.h"
 
 cfgoutputs_tup="Makefile"
+cfgoutputs_tup="${cfgoutputs_tup} jemalloc.pc:jemalloc.pc.in"
 cfgoutputs_tup="${cfgoutputs_tup} doc/html.xsl:doc/html.xsl.in"
 cfgoutputs_tup="${cfgoutputs_tup} doc/manpages.xsl:doc/manpages.xsl.in"
-cfgoutputs_tup="${cfgoutputs_tup} doc/jemalloc${install_suffix}.xml:doc/jemalloc.xml.in"
-cfgoutputs_tup="${cfgoutputs_tup} include/jemalloc/jemalloc${install_suffix}.h:include/jemalloc/jemalloc.h.in"
+cfgoutputs_tup="${cfgoutputs_tup} doc/jemalloc.xml:doc/jemalloc.xml.in"
+cfgoutputs_tup="${cfgoutputs_tup} include/jemalloc/jemalloc_macros.h:include/jemalloc/jemalloc_macros.h.in"
+cfgoutputs_tup="${cfgoutputs_tup} include/jemalloc/jemalloc_protos.h:include/jemalloc/jemalloc_protos.h.in"
+cfgoutputs_tup="${cfgoutputs_tup} include/jemalloc/jemalloc_typedefs.h:include/jemalloc/jemalloc_typedefs.h.in"
 cfgoutputs_tup="${cfgoutputs_tup} include/jemalloc/internal/jemalloc_internal.h"
-cfgoutputs_tup="${cfgoutputs_tup} test/jemalloc_test.h:test/jemalloc_test.h.in"
+cfgoutputs_tup="${cfgoutputs_tup} test/test.sh:test/test.sh.in"
+cfgoutputs_tup="${cfgoutputs_tup} test/include/test/jemalloc_test.h:test/include/test/jemalloc_test.h.in"
 
-cfghdrs_in="${srcroot}include/jemalloc/jemalloc_defs.h.in"
-cfghdrs_in="${cfghdrs_in} ${srcroot}include/jemalloc/internal/size_classes.sh"
+cfghdrs_in="include/jemalloc/jemalloc_defs.h.in"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/jemalloc_internal_defs.h.in"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/private_namespace.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/private_unnamespace.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/private_symbols.txt"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/public_namespace.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/public_unnamespace.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/size_classes.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/jemalloc_rename.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/jemalloc_mangle.sh"
+cfghdrs_in="${cfghdrs_in} include/jemalloc/jemalloc.sh"
+cfghdrs_in="${cfghdrs_in} test/include/test/jemalloc_test_defs.h.in"
 
-cfghdrs_out="include/jemalloc/jemalloc_defs${install_suffix}.h"
+cfghdrs_out="include/jemalloc/jemalloc_defs.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc${install_suffix}.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/private_namespace.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/private_unnamespace.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/public_symbols.txt"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/public_namespace.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/public_unnamespace.h"
 cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/size_classes.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc_protos_jet.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc_rename.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc_mangle.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc_mangle_jet.h"
+cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/jemalloc_internal_defs.h"
+cfghdrs_out="${cfghdrs_out} test/include/test/jemalloc_test_defs.h"
 
-cfghdrs_tup="include/jemalloc/jemalloc_defs${install_suffix}.h:include/jemalloc/jemalloc_defs.h.in"
+cfghdrs_tup="include/jemalloc/jemalloc_defs.h:include/jemalloc/jemalloc_defs.h.in"
+cfghdrs_tup="${cfghdrs_tup} include/jemalloc/internal/jemalloc_internal_defs.h:include/jemalloc/internal/jemalloc_internal_defs.h.in"
+cfghdrs_tup="${cfghdrs_tup} test/include/test/jemalloc_test_defs.h:test/include/test/jemalloc_test_defs.h.in"
 
 # Check whether --enable-cc-silence was given.
 if test "${enable_cc_silence+set}" = set; then :
@@ -5238,7 +5731,7 @@ else
 fi
 
 else
-  enable_cc_silence="0"
+  enable_cc_silence="1"
 
 fi
 
@@ -5263,14 +5756,31 @@ fi
 if test "x$enable_debug" = "x1" ; then
   $as_echo "#define JEMALLOC_DEBUG  " >>confdefs.h
 
+  enable_ivsalloc="1"
+fi
+
+
+# Check whether --enable-ivsalloc was given.
+if test "${enable_ivsalloc+set}" = set; then :
+  enableval=$enable_ivsalloc; if test "x$enable_ivsalloc" = "xno" ; then
+  enable_ivsalloc="0"
+else
+  enable_ivsalloc="1"
+fi
+
+else
+  enable_ivsalloc="0"
+
+fi
+
+if test "x$enable_ivsalloc" = "x1" ; then
   $as_echo "#define JEMALLOC_IVSALLOC  " >>confdefs.h
 
 fi
 
-
 if test "x$enable_debug" = "x0" -a "x$no_CFLAGS" = "xyes" ; then
     optimize="no"
-  echo "$EXTRA_CFLAGS" | grep "\-O" >/dev/null || optimize="yes"
+  echo "$CFLAGS $EXTRA_CFLAGS" | grep '\-O' >/dev/null || optimize="yes"
   if test "x${optimize}" = "xyes" ; then
     if test "x$GCC" = "xyes" ; then
 
@@ -5297,10 +5807,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-O3
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -5331,10 +5843,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-funroll-loops
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -5366,10 +5880,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-O2
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -5401,10 +5917,12 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+  je_cv_cflags_appended=-O
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
               CFLAGS="${TCFLAGS}"
 
@@ -5498,9 +6016,9 @@ fi
 done
 
   if test "x$LUNWIND" = "x-lunwind" ; then
-    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for backtrace in -lunwind" >&5
-$as_echo_n "checking for backtrace in -lunwind... " >&6; }
-if ${ac_cv_lib_unwind_backtrace+:} false; then :
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for unw_backtrace in -lunwind" >&5
+$as_echo_n "checking for unw_backtrace in -lunwind... " >&6; }
+if ${ac_cv_lib_unwind_unw_backtrace+:} false; then :
   $as_echo_n "(cached) " >&6
 else
   ac_check_lib_save_LIBS=$LIBS
@@ -5514,27 +6032,27 @@ cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 #ifdef __cplusplus
 extern "C"
 #endif
-char backtrace ();
+char unw_backtrace ();
 int
 main ()
 {
-return backtrace ();
+return unw_backtrace ();
   ;
   return 0;
 }
 _ACEOF
 if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_lib_unwind_backtrace=yes
+  ac_cv_lib_unwind_unw_backtrace=yes
 else
-  ac_cv_lib_unwind_backtrace=no
+  ac_cv_lib_unwind_unw_backtrace=no
 fi
 rm -f core conftest.err conftest.$ac_objext \
     conftest$ac_exeext conftest.$ac_ext
 LIBS=$ac_check_lib_save_LIBS
 fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_unwind_backtrace" >&5
-$as_echo "$ac_cv_lib_unwind_backtrace" >&6; }
-if test "x$ac_cv_lib_unwind_backtrace" = xyes; then :
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_unwind_unw_backtrace" >&5
+$as_echo "$ac_cv_lib_unwind_unw_backtrace" >&6; }
+if test "x$ac_cv_lib_unwind_unw_backtrace" = xyes; then :
   LIBS="$LIBS $LUNWIND"
 else
   enable_prof_libunwind="0"
@@ -5621,24 +6139,6 @@ else
   enable_prof_libgcc="0"
 fi
 
-      { $as_echo "$as_me:${as_lineno-$LINENO}: checking libgcc-based backtracing reliability on ${host_cpu}" >&5
-$as_echo_n "checking libgcc-based backtracing reliability on ${host_cpu}... " >&6; }
-  case "${host_cpu}" in
-    i[3456]86)
-      { $as_echo "$as_me:${as_lineno-$LINENO}: result: unreliable" >&5
-$as_echo "unreliable" >&6; }
-      enable_prof_libgcc="0";
-      ;;
-    x86_64)
-      { $as_echo "$as_me:${as_lineno-$LINENO}: result: reliable" >&5
-$as_echo "reliable" >&6; }
-      ;;
-    *)
-      { $as_echo "$as_me:${as_lineno-$LINENO}: result: unreliable" >&5
-$as_echo "unreliable" >&6; }
-      enable_prof_libgcc="0";
-      ;;
-  esac
   if test "x${enable_prof_libgcc}" = "x1" ; then
     backtrace_method="libgcc"
     $as_echo "#define JEMALLOC_PROF_LIBGCC  " >>confdefs.h
@@ -5663,6 +6163,42 @@ fi
 
 if test "x$backtrace_method" = "x" -a "x$enable_prof_gcc" = "x1" \
      -a "x$GCC" = "xyes" ; then
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether compiler supports -fno-omit-frame-pointer" >&5
+$as_echo_n "checking whether compiler supports -fno-omit-frame-pointer... " >&6; }
+TCFLAGS="${CFLAGS}"
+if test "x${CFLAGS}" = "x" ; then
+  CFLAGS="-fno-omit-frame-pointer"
+else
+  CFLAGS="${CFLAGS} -fno-omit-frame-pointer"
+fi
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+
+int
+main ()
+{
+
+    return 0;
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  je_cv_cflags_appended=-fno-omit-frame-pointer
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+else
+  je_cv_cflags_appended=
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+              CFLAGS="${TCFLAGS}"
+
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+
   backtrace_method="gcc intrinsics"
   $as_echo "#define JEMALLOC_PROF_GCC  " >>confdefs.h
 
@@ -5679,10 +6215,10 @@ $as_echo_n "checking configured backtracing method... " >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $backtrace_method" >&5
 $as_echo "$backtrace_method" >&6; }
 if test "x$enable_prof" = "x1" ; then
-  if test "x${force_tls}" = "x0" ; then
-    as_fn_error $? "Heap profiling requires TLS" "$LINENO" 5;
+  if test "x$abi" != "xpecoff"; then
+        LIBS="$LIBS -lm"
   fi
-  force_tls="1"
+
   $as_echo "#define JEMALLOC_PROF  " >>confdefs.h
 
 fi
@@ -5707,63 +6243,6 @@ if test "x$enable_tcache" = "x1" ; then
 fi
 
 
-# Check whether --enable-mremap was given.
-if test "${enable_mremap+set}" = set; then :
-  enableval=$enable_mremap; if test "x$enable_mremap" = "xno" ; then
-  enable_mremap="0"
-else
-  enable_mremap="1"
-fi
-
-else
-  enable_mremap="0"
-
-fi
-
-if test "x$enable_mremap" = "x1" ; then
-
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether mremap(...MREMAP_FIXED...) is compilable" >&5
-$as_echo_n "checking whether mremap(...MREMAP_FIXED...) is compilable... " >&6; }
-if ${je_cv_mremap_fixed+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-#define _GNU_SOURCE
-#include <sys/mman.h>
-
-int
-main ()
-{
-
-void *p = mremap((void *)0, 0, 0, MREMAP_MAYMOVE|MREMAP_FIXED, (void *)0);
-
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"; then :
-  je_cv_mremap_fixed=yes
-else
-  je_cv_mremap_fixed=no
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_mremap_fixed" >&5
-$as_echo "$je_cv_mremap_fixed" >&6; }
-
-  if test "x${je_cv_mremap_fixed}" = "xno" ; then
-    enable_mremap="0"
-  fi
-fi
-if test "x$enable_mremap" = "x1" ; then
-  $as_echo "#define JEMALLOC_MREMAP  " >>confdefs.h
-
-fi
-
-
 # Check whether --enable-munmap was given.
 if test "${enable_munmap+set}" = set; then :
   enableval=$enable_munmap; if test "x$enable_munmap" = "xno" ; then
@@ -5783,19 +6262,7 @@ if test "x$enable_munmap" = "x1" ; then
 fi
 
 
-# Check whether --enable-dss was given.
-if test "${enable_dss+set}" = set; then :
-  enableval=$enable_dss; if test "x$enable_dss" = "xno" ; then
-  enable_dss="0"
-else
-  enable_dss="1"
-fi
-
-else
-  enable_dss="0"
-
-fi
-
+have_dss="1"
 ac_fn_c_check_func "$LINENO" "sbrk" "ac_cv_func_sbrk"
 if test "x$ac_cv_func_sbrk" = xyes; then :
   have_sbrk="1"
@@ -5804,17 +6271,19 @@ else
 fi
 
 if test "x$have_sbrk" = "x1" ; then
-  $as_echo "#define JEMALLOC_HAVE_SBRK  " >>confdefs.h
-
+  if test "x$sbrk_deprecated" = "x1" ; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: Disabling dss allocation because sbrk is deprecated" >&5
+$as_echo "Disabling dss allocation because sbrk is deprecated" >&6; }
+    have_dss="0"
+  fi
 else
-  enable_dss="0"
+  have_dss="0"
 fi
 
-if test "x$enable_dss" = "x1" ; then
+if test "x$have_dss" = "x1" ; then
   $as_echo "#define JEMALLOC_DSS  " >>confdefs.h
 
 fi
-
 
 # Check whether --enable-fill was given.
 if test "${enable_fill+set}" = set; then :
@@ -5971,16 +6440,140 @@ if test "x$enable_xmalloc" = "x1" ; then
 fi
 
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking STATIC_PAGE_SHIFT" >&5
-$as_echo_n "checking STATIC_PAGE_SHIFT... " >&6; }
-if ${je_cv_static_page_shift+:} false; then :
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether a program using __builtin_ffsl is compilable" >&5
+$as_echo_n "checking whether a program using __builtin_ffsl is compilable... " >&6; }
+if ${je_cv_gcc_builtin_ffsl+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+#include <stdio.h>
+#include <strings.h>
+#include <string.h>
+
+int
+main ()
+{
+
+	{
+		int rv = __builtin_ffsl(0x08);
+		printf("%d\n", rv);
+	}
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  je_cv_gcc_builtin_ffsl=yes
+else
+  je_cv_gcc_builtin_ffsl=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_gcc_builtin_ffsl" >&5
+$as_echo "$je_cv_gcc_builtin_ffsl" >&6; }
+
+if test "x${je_cv_gcc_builtin_ffsl}" = "xyes" ; then
+  $as_echo "#define JEMALLOC_INTERNAL_FFSL __builtin_ffsl" >>confdefs.h
+
+  $as_echo "#define JEMALLOC_INTERNAL_FFS __builtin_ffs" >>confdefs.h
+
+else
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether a program using ffsl is compilable" >&5
+$as_echo_n "checking whether a program using ffsl is compilable... " >&6; }
+if ${je_cv_function_ffsl+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+  #include <stdio.h>
+  #include <strings.h>
+  #include <string.h>
+
+int
+main ()
+{
+
+	{
+		int rv = ffsl(0x08);
+		printf("%d\n", rv);
+	}
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  je_cv_function_ffsl=yes
+else
+  je_cv_function_ffsl=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_function_ffsl" >&5
+$as_echo "$je_cv_function_ffsl" >&6; }
+
+  if test "x${je_cv_function_ffsl}" = "xyes" ; then
+    $as_echo "#define JEMALLOC_INTERNAL_FFSL ffsl" >>confdefs.h
+
+    $as_echo "#define JEMALLOC_INTERNAL_FFS ffs" >>confdefs.h
+
+  else
+    as_fn_error $? "Cannot build without ffsl(3) or __builtin_ffsl()" "$LINENO" 5
+  fi
+fi
+
+
+# Check whether --with-lg_tiny_min was given.
+if test "${with_lg_tiny_min+set}" = set; then :
+  withval=$with_lg_tiny_min; LG_TINY_MIN="$with_lg_tiny_min"
+else
+  LG_TINY_MIN="3"
+fi
+
+cat >>confdefs.h <<_ACEOF
+#define LG_TINY_MIN $LG_TINY_MIN
+_ACEOF
+
+
+
+# Check whether --with-lg_quantum was given.
+if test "${with_lg_quantum+set}" = set; then :
+  withval=$with_lg_quantum; LG_QUANTA="$with_lg_quantum"
+else
+  LG_QUANTA="3 4"
+fi
+
+if test "x$with_lg_quantum" != "x" ; then
+  cat >>confdefs.h <<_ACEOF
+#define LG_QUANTUM $with_lg_quantum
+_ACEOF
+
+fi
+
+
+# Check whether --with-lg_page was given.
+if test "${with_lg_page+set}" = set; then :
+  withval=$with_lg_page; LG_PAGE="$with_lg_page"
+else
+  LG_PAGE="detect"
+fi
+
+if test "x$LG_PAGE" == "xdetect"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking LG_PAGE" >&5
+$as_echo_n "checking LG_PAGE... " >&6; }
+if ${je_cv_lg_page+:} false; then :
   $as_echo_n "(cached) " >&6
 else
   if test "$cross_compiling" = yes; then :
-  { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
-$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
-as_fn_error $? "cannot run test program while cross compiling
-See \`config.log' for more details" "$LINENO" 5; }
+  je_cv_lg_page=12
 else
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
@@ -5997,7 +6590,7 @@ int
 main ()
 {
 
-    long result;
+    int result;
     FILE *f;
 
 #ifdef _WIN32
@@ -6010,13 +6603,13 @@ main ()
     if (result == -1) {
 	return 1;
     }
-    result = ffsl(result) - 1;
+    result = JEMALLOC_INTERNAL_FFSL(result) - 1;
 
     f = fopen("conftest.out", "w");
     if (f == NULL) {
 	return 1;
     }
-    fprintf(f, "%u\n", result);
+    fprintf(f, "%d\n", result);
     fclose(f);
 
     return 0;
@@ -6026,32 +6619,50 @@ main ()
 }
 _ACEOF
 if ac_fn_c_try_run "$LINENO"; then :
-  je_cv_static_page_shift=`cat conftest.out`
+  je_cv_lg_page=`cat conftest.out`
 else
-  je_cv_static_page_shift=undefined
+  je_cv_lg_page=undefined
 fi
 rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
   conftest.$ac_objext conftest.beam conftest.$ac_ext
 fi
 
 fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_static_page_shift" >&5
-$as_echo "$je_cv_static_page_shift" >&6; }
-
-if test "x$je_cv_static_page_shift" != "xundefined"; then
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_lg_page" >&5
+$as_echo "$je_cv_lg_page" >&6; }
+fi
+if test "x${je_cv_lg_page}" != "x" ; then
+  LG_PAGE="${je_cv_lg_page}"
+fi
+if test "x${LG_PAGE}" != "xundefined" ; then
    cat >>confdefs.h <<_ACEOF
-#define STATIC_PAGE_SHIFT $je_cv_static_page_shift
+#define LG_PAGE $LG_PAGE
 _ACEOF
 
 else
-   as_fn_error $? "cannot determine value for STATIC_PAGE_SHIFT" "$LINENO" 5
+   as_fn_error $? "cannot determine value for LG_PAGE" "$LINENO" 5
 fi
 
 
-if test -d "${srcroot}.git" ; then
-  git describe --long --abbrev=40 > ${srcroot}VERSION
+# Check whether --with-lg_page_sizes was given.
+if test "${with_lg_page_sizes+set}" = set; then :
+  withval=$with_lg_page_sizes; LG_PAGE_SIZES="$with_lg_page_sizes"
+else
+  LG_PAGE_SIZES="$LG_PAGE"
 fi
-jemalloc_version=`cat ${srcroot}VERSION`
+
+
+
+# Check whether --with-lg_size_class_group was given.
+if test "${with_lg_size_class_group+set}" = set; then :
+  withval=$with_lg_size_class_group; LG_SIZE_CLASS_GROUP="$with_lg_size_class_group"
+else
+  LG_SIZE_CLASS_GROUP="2"
+fi
+
+
+
+jemalloc_version=`cat "${srcroot}VERSION"`
 jemalloc_version_major=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print $1}'`
 jemalloc_version_minor=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print $2}'`
 jemalloc_version_bugfix=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print $3}'`
@@ -6182,6 +6793,32 @@ fi
 fi
 
 CPPFLAGS="$CPPFLAGS -D_REENTRANT"
+
+ac_fn_c_check_func "$LINENO" "secure_getenv" "ac_cv_func_secure_getenv"
+if test "x$ac_cv_func_secure_getenv" = xyes; then :
+  have_secure_getenv="1"
+else
+  have_secure_getenv="0"
+
+fi
+
+if test "x$have_secure_getenv" = "x1" ; then
+  $as_echo "#define JEMALLOC_HAVE_SECURE_GETENV  " >>confdefs.h
+
+fi
+
+ac_fn_c_check_func "$LINENO" "issetugid" "ac_cv_func_issetugid"
+if test "x$ac_cv_func_issetugid" = xyes; then :
+  have_issetugid="1"
+else
+  have_issetugid="0"
+
+fi
+
+if test "x$have_issetugid" = "x1" ; then
+  $as_echo "#define JEMALLOC_HAVE_ISSETUGID  " >>confdefs.h
+
+fi
 
 ac_fn_c_check_func "$LINENO" "_malloc_thread_cleanup" "ac_cv_func__malloc_thread_cleanup"
 if test "x$ac_cv_func__malloc_thread_cleanup" = xyes; then :
@@ -6363,42 +7000,50 @@ elif test "x${force_tls}" = "x1" ; then
 fi
 
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether a program using ffsl is compilable" >&5
-$as_echo_n "checking whether a program using ffsl is compilable... " >&6; }
-if ${je_cv_function_ffsl+:} false; then :
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether C11 atomics is compilable" >&5
+$as_echo_n "checking whether C11 atomics is compilable... " >&6; }
+if ${je_cv_c11atomics+:} false; then :
   $as_echo_n "(cached) " >&6
 else
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
-#include <strings.h>
-#include <string.h>
+#include <stdint.h>
+#if (__STDC_VERSION__ >= 201112L) && !defined(__STDC_NO_ATOMICS__)
+#include <stdatomic.h>
+#else
+#error Atomics not available
+#endif
 
 int
 main ()
 {
 
-	{
-		int rv = ffsl(0x08);
-	}
+    uint64_t *p = (uint64_t *)0;
+    uint64_t x = 1;
+    volatile atomic_uint_least64_t *a = (volatile atomic_uint_least64_t *)p;
+    uint64_t r = atomic_fetch_add(a, x) + x;
+    return (r == 0);
 
   ;
   return 0;
 }
 _ACEOF
 if ac_fn_c_try_link "$LINENO"; then :
-  je_cv_function_ffsl=yes
+  je_cv_c11atomics=yes
 else
-  je_cv_function_ffsl=no
+  je_cv_c11atomics=no
 fi
 rm -f core conftest.err conftest.$ac_objext \
     conftest$ac_exeext conftest.$ac_ext
 fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_function_ffsl" >&5
-$as_echo "$je_cv_function_ffsl" >&6; }
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_c11atomics" >&5
+$as_echo "$je_cv_c11atomics" >&6; }
 
-if test "x${je_cv_function_ffsl}" != "xyes" ; then
-   as_fn_error $? "Cannot build without ffsl(3)" "$LINENO" 5
+if test "x${je_cv_c11atomics}" = "xyes" ; then
+  $as_echo "#define JEMALLOC_C11ATOMICS 1" >>confdefs.h
+
 fi
 
 
@@ -6500,6 +7145,46 @@ fi
 
 
 
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether madvise(2) is compilable" >&5
+$as_echo_n "checking whether madvise(2) is compilable... " >&6; }
+if ${je_cv_madvise+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+#include <sys/mman.h>
+
+int
+main ()
+{
+
+	{
+		madvise((void *)0, 0, 0);
+	}
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  je_cv_madvise=yes
+else
+  je_cv_madvise=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_madvise" >&5
+$as_echo "$je_cv_madvise" >&6; }
+
+if test "x${je_cv_madvise}" = "xyes" ; then
+  $as_echo "#define JEMALLOC_HAVE_MADVISE  " >>confdefs.h
+
+fi
+
+
+
 
 if test "x${je_cv_atomic9}" != "xyes" -a "x${je_cv_osatomic}" != "xyes" ; then
 
@@ -6595,6 +7280,48 @@ $as_echo "$je_cv_sync_compare_and_swap_8" >&6; }
 fi
 
 
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for __builtin_clz" >&5
+$as_echo_n "checking for __builtin_clz... " >&6; }
+if ${je_cv_builtin_clz+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main ()
+{
+
+                                                {
+                                                        unsigned x = 0;
+                                                        int y = __builtin_clz(x);
+                                                }
+                                                {
+                                                        unsigned long x = 0;
+                                                        int y = __builtin_clzl(x);
+                                                }
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  je_cv_builtin_clz=yes
+else
+  je_cv_builtin_clz=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_builtin_clz" >&5
+$as_echo "$je_cv_builtin_clz" >&6; }
+
+if test "x${je_cv_builtin_clz}" = "xyes" ; then
+  $as_echo "#define JEMALLOC_HAVE_BUILTIN_CLZ  " >>confdefs.h
+
+fi
+
+
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether Darwin OSSpin*() is compilable" >&5
 $as_echo_n "checking whether Darwin OSSpin*() is compilable... " >&6; }
@@ -6636,7 +7363,28 @@ if test "x${je_cv_osspin}" = "xyes" ; then
 fi
 
 
-if test "x${abi}" = "xmacho" ; then
+# Check whether --enable-zone-allocator was given.
+if test "${enable_zone_allocator+set}" = set; then :
+  enableval=$enable_zone_allocator; if test "x$enable_zone_allocator" = "xno" ; then
+  enable_zone_allocator="0"
+else
+  enable_zone_allocator="1"
+fi
+
+else
+  if test "x${abi}" = "xmacho"; then
+  enable_zone_allocator="1"
+fi
+
+
+fi
+
+
+
+if test "x${enable_zone_allocator}" = "x1" ; then
+  if test "x${abi}" != "xmacho"; then
+    as_fn_error $? "--enable-zone-allocator is only supported on Darwin" "$LINENO" 5
+  fi
   $as_echo "#define JEMALLOC_IVSALLOC  " >>confdefs.h
 
   $as_echo "#define JEMALLOC_ZONE  " >>confdefs.h
@@ -6652,7 +7400,7 @@ $as_echo_n "checking malloc zone version... " >&6; }
 int
 main ()
 {
-static foo[sizeof(malloc_zone_t) == sizeof(void *) * 14 ? 1 : -1]
+static int foo[sizeof(malloc_zone_t) == sizeof(void *) * 14 ? 1 : -1]
 
   ;
   return 0;
@@ -6668,7 +7416,7 @@ else
 int
 main ()
 {
-static foo[sizeof(malloc_zone_t) == sizeof(void *) * 15 ? 1 : -1]
+static int foo[sizeof(malloc_zone_t) == sizeof(void *) * 15 ? 1 : -1]
 
   ;
   return 0;
@@ -6684,7 +7432,7 @@ else
 int
 main ()
 {
-static foo[sizeof(malloc_zone_t) == sizeof(void *) * 16 ? 1 : -1]
+static int foo[sizeof(malloc_zone_t) == sizeof(void *) * 16 ? 1 : -1]
 
   ;
   return 0;
@@ -6698,7 +7446,7 @@ if ac_fn_c_try_compile "$LINENO"; then :
 int
 main ()
 {
-static foo[sizeof(malloc_introspection_t) == sizeof(void *) * 9 ? 1 : -1]
+static int foo[sizeof(malloc_introspection_t) == sizeof(void *) * 9 ? 1 : -1]
 
   ;
   return 0;
@@ -6714,7 +7462,7 @@ else
 int
 main ()
 {
-static foo[sizeof(malloc_introspection_t) == sizeof(void *) * 13 ? 1 : -1]
+static int foo[sizeof(malloc_introspection_t) == sizeof(void *) * 13 ? 1 : -1]
 
   ;
   return 0;
@@ -6737,7 +7485,7 @@ else
 int
 main ()
 {
-static foo[sizeof(malloc_zone_t) == sizeof(void *) * 17 ? 1 : -1]
+static int foo[sizeof(malloc_zone_t) == sizeof(void *) * 17 ? 1 : -1]
 
   ;
   return 0;
@@ -6753,7 +7501,7 @@ else
 int
 main ()
 {
-static foo[sizeof(malloc_zone_t) > sizeof(void *) * 17 ? 1 : -1]
+static int foo[sizeof(malloc_zone_t) > sizeof(void *) * 17 ? 1 : -1]
 
   ;
   return 0;
@@ -6790,6 +7538,131 @@ $as_echo "$JEMALLOC_ZONE_VERSION" >&6; }
   cat >>confdefs.h <<_ACEOF
 #define JEMALLOC_ZONE_VERSION $JEMALLOC_ZONE_VERSION
 _ACEOF
+
+fi
+
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether glibc malloc hook is compilable" >&5
+$as_echo_n "checking whether glibc malloc hook is compilable... " >&6; }
+if ${je_cv_glibc_malloc_hook+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+#include <stddef.h>
+
+extern void (* __free_hook)(void *ptr);
+extern void *(* __malloc_hook)(size_t size);
+extern void *(* __realloc_hook)(void *ptr, size_t size);
+
+int
+main ()
+{
+
+  void *ptr = 0L;
+  if (__malloc_hook) ptr = __malloc_hook(1);
+  if (__realloc_hook) ptr = __realloc_hook(ptr, 2);
+  if (__free_hook && ptr) __free_hook(ptr);
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  je_cv_glibc_malloc_hook=yes
+else
+  je_cv_glibc_malloc_hook=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_glibc_malloc_hook" >&5
+$as_echo "$je_cv_glibc_malloc_hook" >&6; }
+
+if test "x${je_cv_glibc_malloc_hook}" = "xyes" ; then
+  $as_echo "#define JEMALLOC_GLIBC_MALLOC_HOOK  " >>confdefs.h
+
+fi
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether glibc memalign hook is compilable" >&5
+$as_echo_n "checking whether glibc memalign hook is compilable... " >&6; }
+if ${je_cv_glibc_memalign_hook+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+#include <stddef.h>
+
+extern void *(* __memalign_hook)(size_t alignment, size_t size);
+
+int
+main ()
+{
+
+  void *ptr = 0L;
+  if (__memalign_hook) ptr = __memalign_hook(16, 7);
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  je_cv_glibc_memalign_hook=yes
+else
+  je_cv_glibc_memalign_hook=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_glibc_memalign_hook" >&5
+$as_echo "$je_cv_glibc_memalign_hook" >&6; }
+
+if test "x${je_cv_glibc_memalign_hook}" = "xyes" ; then
+  $as_echo "#define JEMALLOC_GLIBC_MEMALIGN_HOOK  " >>confdefs.h
+
+fi
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether pthreads adaptive mutexes is compilable" >&5
+$as_echo_n "checking whether pthreads adaptive mutexes is compilable... " >&6; }
+if ${je_cv_pthread_mutex_adaptive_np+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+#include <pthread.h>
+
+int
+main ()
+{
+
+  pthread_mutexattr_t attr;
+  pthread_mutexattr_init(&attr);
+  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ADAPTIVE_NP);
+  pthread_mutexattr_destroy(&attr);
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  je_cv_pthread_mutex_adaptive_np=yes
+else
+  je_cv_pthread_mutex_adaptive_np=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $je_cv_pthread_mutex_adaptive_np" >&5
+$as_echo "$je_cv_pthread_mutex_adaptive_np" >&6; }
+
+if test "x${je_cv_pthread_mutex_adaptive_np}" = "xyes" ; then
+  $as_echo "#define JEMALLOC_HAVE_PTHREAD_MUTEX_ADAPTIVE_NP  " >>confdefs.h
 
 fi
 
@@ -6887,12 +7760,34 @@ $as_echo "#define HAVE_STDBOOL_H 1" >>confdefs.h
 fi
 
 
+
+ac_config_commands="$ac_config_commands include/jemalloc/internal/private_namespace.h"
+
+ac_config_commands="$ac_config_commands include/jemalloc/internal/private_unnamespace.h"
+
+ac_config_commands="$ac_config_commands include/jemalloc/internal/public_symbols.txt"
+
+ac_config_commands="$ac_config_commands include/jemalloc/internal/public_namespace.h"
+
+ac_config_commands="$ac_config_commands include/jemalloc/internal/public_unnamespace.h"
+
 ac_config_commands="$ac_config_commands include/jemalloc/internal/size_classes.h"
+
+ac_config_commands="$ac_config_commands include/jemalloc/jemalloc_protos_jet.h"
+
+ac_config_commands="$ac_config_commands include/jemalloc/jemalloc_rename.h"
+
+ac_config_commands="$ac_config_commands include/jemalloc/jemalloc_mangle.h"
+
+ac_config_commands="$ac_config_commands include/jemalloc/jemalloc_mangle_jet.h"
+
+ac_config_commands="$ac_config_commands include/jemalloc/jemalloc.h"
 
 
 
 
 ac_config_headers="$ac_config_headers $cfghdrs_tup"
+
 
 
 ac_config_files="$ac_config_files $cfgoutputs_tup config.stamp bin/jemalloc.sh"
@@ -7006,6 +7901,7 @@ done
 LIBOBJS=$ac_libobjs
 
 LTLIBOBJS=$ac_ltlibobjs
+
 
 
 
@@ -7585,6 +8481,62 @@ _ASBOX
 
 _ACEOF
 cat >>$CONFIG_STATUS <<_ACEOF || ac_write_fail=1
+#
+# INIT-COMMANDS
+#
+
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+
+
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+
+
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+  mangling_map="${mangling_map}"
+  public_syms="${public_syms}"
+  JEMALLOC_PREFIX="${JEMALLOC_PREFIX}"
+
+
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+
+
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+
+
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+  LG_QUANTA="${LG_QUANTA}"
+  LG_TINY_MIN=${LG_TINY_MIN}
+  LG_PAGE_SIZES="${LG_PAGE_SIZES}"
+  LG_SIZE_CLASS_GROUP=${LG_SIZE_CLASS_GROUP}
+
+
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+
+
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+
+
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+
+
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+
+
+  srcdir="${srcdir}"
+  objroot="${objroot}"
+  install_suffix="${install_suffix}"
+
+
 _ACEOF
 
 cat >>$CONFIG_STATUS <<\_ACEOF || ac_write_fail=1
@@ -7593,7 +8545,17 @@ cat >>$CONFIG_STATUS <<\_ACEOF || ac_write_fail=1
 for ac_config_target in $ac_config_targets
 do
   case $ac_config_target in
+    "include/jemalloc/internal/private_namespace.h") CONFIG_COMMANDS="$CONFIG_COMMANDS include/jemalloc/internal/private_namespace.h" ;;
+    "include/jemalloc/internal/private_unnamespace.h") CONFIG_COMMANDS="$CONFIG_COMMANDS include/jemalloc/internal/private_unnamespace.h" ;;
+    "include/jemalloc/internal/public_symbols.txt") CONFIG_COMMANDS="$CONFIG_COMMANDS include/jemalloc/internal/public_symbols.txt" ;;
+    "include/jemalloc/internal/public_namespace.h") CONFIG_COMMANDS="$CONFIG_COMMANDS include/jemalloc/internal/public_namespace.h" ;;
+    "include/jemalloc/internal/public_unnamespace.h") CONFIG_COMMANDS="$CONFIG_COMMANDS include/jemalloc/internal/public_unnamespace.h" ;;
     "include/jemalloc/internal/size_classes.h") CONFIG_COMMANDS="$CONFIG_COMMANDS include/jemalloc/internal/size_classes.h" ;;
+    "include/jemalloc/jemalloc_protos_jet.h") CONFIG_COMMANDS="$CONFIG_COMMANDS include/jemalloc/jemalloc_protos_jet.h" ;;
+    "include/jemalloc/jemalloc_rename.h") CONFIG_COMMANDS="$CONFIG_COMMANDS include/jemalloc/jemalloc_rename.h" ;;
+    "include/jemalloc/jemalloc_mangle.h") CONFIG_COMMANDS="$CONFIG_COMMANDS include/jemalloc/jemalloc_mangle.h" ;;
+    "include/jemalloc/jemalloc_mangle_jet.h") CONFIG_COMMANDS="$CONFIG_COMMANDS include/jemalloc/jemalloc_mangle_jet.h" ;;
+    "include/jemalloc/jemalloc.h") CONFIG_COMMANDS="$CONFIG_COMMANDS include/jemalloc/jemalloc.h" ;;
     "$cfghdrs_tup") CONFIG_HEADERS="$CONFIG_HEADERS $cfghdrs_tup" ;;
     "$cfgoutputs_tup") CONFIG_FILES="$CONFIG_FILES $cfgoutputs_tup" ;;
     "config.stamp") CONFIG_FILES="$CONFIG_FILES config.stamp" ;;
@@ -8153,9 +9115,61 @@ $as_echo "$as_me: executing $ac_file commands" >&6;}
 
 
   case $ac_file$ac_mode in
+    "include/jemalloc/internal/private_namespace.h":C)
+  mkdir -p "${objroot}include/jemalloc/internal"
+  "${srcdir}/include/jemalloc/internal/private_namespace.sh" "${srcdir}/include/jemalloc/internal/private_symbols.txt" > "${objroot}include/jemalloc/internal/private_namespace.h"
+ ;;
+    "include/jemalloc/internal/private_unnamespace.h":C)
+  mkdir -p "${objroot}include/jemalloc/internal"
+  "${srcdir}/include/jemalloc/internal/private_unnamespace.sh" "${srcdir}/include/jemalloc/internal/private_symbols.txt" > "${objroot}include/jemalloc/internal/private_unnamespace.h"
+ ;;
+    "include/jemalloc/internal/public_symbols.txt":C)
+  f="${objroot}include/jemalloc/internal/public_symbols.txt"
+  mkdir -p "${objroot}include/jemalloc/internal"
+  cp /dev/null "${f}"
+  for nm in `echo ${mangling_map} |tr ',' ' '` ; do
+    n=`echo ${nm} |tr ':' ' ' |awk '{print $1}'`
+    m=`echo ${nm} |tr ':' ' ' |awk '{print $2}'`
+    echo "${n}:${m}" >> "${f}"
+        public_syms=`for sym in ${public_syms}; do echo "${sym}"; done |grep -v "^${n}\$" |tr '\n' ' '`
+  done
+  for sym in ${public_syms} ; do
+    n="${sym}"
+    m="${JEMALLOC_PREFIX}${sym}"
+    echo "${n}:${m}" >> "${f}"
+  done
+ ;;
+    "include/jemalloc/internal/public_namespace.h":C)
+  mkdir -p "${objroot}include/jemalloc/internal"
+  "${srcdir}/include/jemalloc/internal/public_namespace.sh" "${objroot}include/jemalloc/internal/public_symbols.txt" > "${objroot}include/jemalloc/internal/public_namespace.h"
+ ;;
+    "include/jemalloc/internal/public_unnamespace.h":C)
+  mkdir -p "${objroot}include/jemalloc/internal"
+  "${srcdir}/include/jemalloc/internal/public_unnamespace.sh" "${objroot}include/jemalloc/internal/public_symbols.txt" > "${objroot}include/jemalloc/internal/public_unnamespace.h"
+ ;;
     "include/jemalloc/internal/size_classes.h":C)
-  mkdir -p "include/jemalloc/internal"
-  "${srcdir}/include/jemalloc/internal/size_classes.sh" > "${objroot}include/jemalloc/internal/size_classes.h"
+  mkdir -p "${objroot}include/jemalloc/internal"
+  "${srcdir}/include/jemalloc/internal/size_classes.sh" "${LG_QUANTA}" ${LG_TINY_MIN} "${LG_PAGE_SIZES}" ${LG_SIZE_CLASS_GROUP} > "${objroot}include/jemalloc/internal/size_classes.h"
+ ;;
+    "include/jemalloc/jemalloc_protos_jet.h":C)
+  mkdir -p "${objroot}include/jemalloc"
+  cat "${srcdir}/include/jemalloc/jemalloc_protos.h.in" | sed -e 's/@je_@/jet_/g' > "${objroot}include/jemalloc/jemalloc_protos_jet.h"
+ ;;
+    "include/jemalloc/jemalloc_rename.h":C)
+  mkdir -p "${objroot}include/jemalloc"
+  "${srcdir}/include/jemalloc/jemalloc_rename.sh" "${objroot}include/jemalloc/internal/public_symbols.txt" > "${objroot}include/jemalloc/jemalloc_rename.h"
+ ;;
+    "include/jemalloc/jemalloc_mangle.h":C)
+  mkdir -p "${objroot}include/jemalloc"
+  "${srcdir}/include/jemalloc/jemalloc_mangle.sh" "${objroot}include/jemalloc/internal/public_symbols.txt" je_ > "${objroot}include/jemalloc/jemalloc_mangle.h"
+ ;;
+    "include/jemalloc/jemalloc_mangle_jet.h":C)
+  mkdir -p "${objroot}include/jemalloc"
+  "${srcdir}/include/jemalloc/jemalloc_mangle.sh" "${objroot}include/jemalloc/internal/public_symbols.txt" jet_ > "${objroot}include/jemalloc/jemalloc_mangle_jet.h"
+ ;;
+    "include/jemalloc/jemalloc.h":C)
+  mkdir -p "${objroot}include/jemalloc"
+  "${srcdir}/include/jemalloc/jemalloc.sh" "${objroot}" > "${objroot}include/jemalloc/jemalloc${install_suffix}.h"
  ;;
 
   esac
@@ -8212,6 +9226,8 @@ $as_echo "CPPFLAGS           : ${CPPFLAGS}" >&6; }
 $as_echo "CFLAGS             : ${CFLAGS}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: LDFLAGS            : ${LDFLAGS}" >&5
 $as_echo "LDFLAGS            : ${LDFLAGS}" >&6; }
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: EXTRA_LDFLAGS      : ${EXTRA_LDFLAGS}" >&5
+$as_echo "EXTRA_LDFLAGS      : ${EXTRA_LDFLAGS}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: LIBS               : ${LIBS}" >&5
 $as_echo "LIBS               : ${LIBS}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: RPATH_EXTRA        : ${RPATH_EXTRA}" >&5
@@ -8258,12 +9274,12 @@ $as_echo "                   : ${JEMALLOC_PRIVATE_NAMESPACE}" >&6; }
 $as_echo "install_suffix     : ${install_suffix}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: autogen            : ${enable_autogen}" >&5
 $as_echo "autogen            : ${enable_autogen}" >&6; }
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: experimental       : ${enable_experimental}" >&5
-$as_echo "experimental       : ${enable_experimental}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: cc-silence         : ${enable_cc_silence}" >&5
 $as_echo "cc-silence         : ${enable_cc_silence}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: debug              : ${enable_debug}" >&5
 $as_echo "debug              : ${enable_debug}" >&6; }
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: code-coverage      : ${enable_code_coverage}" >&5
+$as_echo "code-coverage      : ${enable_code_coverage}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: stats              : ${enable_stats}" >&5
 $as_echo "stats              : ${enable_stats}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: prof               : ${enable_prof}" >&5
@@ -8284,12 +9300,8 @@ $as_echo "utrace             : ${enable_utrace}" >&6; }
 $as_echo "valgrind           : ${enable_valgrind}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: xmalloc            : ${enable_xmalloc}" >&5
 $as_echo "xmalloc            : ${enable_xmalloc}" >&6; }
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: mremap             : ${enable_mremap}" >&5
-$as_echo "mremap             : ${enable_mremap}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: munmap             : ${enable_munmap}" >&5
 $as_echo "munmap             : ${enable_munmap}" >&6; }
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: dss                : ${enable_dss}" >&5
-$as_echo "dss                : ${enable_dss}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: lazy_lock          : ${enable_lazy_lock}" >&5
 $as_echo "lazy_lock          : ${enable_lazy_lock}" >&6; }
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: tls                : ${enable_tls}" >&5

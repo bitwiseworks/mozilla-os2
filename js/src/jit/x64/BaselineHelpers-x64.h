@@ -7,11 +7,10 @@
 #ifndef jit_x64_BaselineHelpers_x64_h
 #define jit_x64_BaselineHelpers_x64_h
 
-#ifdef JS_ION
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineRegisters.h"
-#include "jit/IonMacroAssembler.h"
+#include "jit/MacroAssembler.h"
 
 namespace js {
 namespace jit {
@@ -141,7 +140,7 @@ EmitEnterStubFrame(MacroAssembler& masm, Register)
 }
 
 inline void
-EmitLeaveStubFrameHead(MacroAssembler& masm, bool calledIntoIon = false)
+EmitLeaveStubFrame(MacroAssembler& masm, bool calledIntoIon = false)
 {
     // Ion frames do not save and restore the frame pointer. If we called
     // into Ion, we have to restore the stack pointer from the frame descriptor.
@@ -154,11 +153,7 @@ EmitLeaveStubFrameHead(MacroAssembler& masm, bool calledIntoIon = false)
     } else {
         masm.mov(BaselineFrameReg, BaselineStackReg);
     }
-}
 
-inline void
-EmitLeaveStubFrameCommonTail(MacroAssembler& masm)
-{
     masm.pop(BaselineFrameReg);
     masm.pop(BaselineStubReg);
 
@@ -171,16 +166,9 @@ EmitLeaveStubFrameCommonTail(MacroAssembler& masm)
 }
 
 inline void
-EmitLeaveStubFrame(MacroAssembler& masm, bool calledIntoIon = false)
-{
-    EmitLeaveStubFrameHead(masm, calledIntoIon);
-    EmitLeaveStubFrameCommonTail(masm);
-}
-
-inline void
 EmitStowICValues(MacroAssembler& masm, int values)
 {
-    JS_ASSERT(values >= 0 && values <= 2);
+    MOZ_ASSERT(values >= 0 && values <= 2);
     switch(values) {
       case 1:
         // Stow R0
@@ -201,7 +189,7 @@ EmitStowICValues(MacroAssembler& masm, int values)
 inline void
 EmitUnstowICValues(MacroAssembler& masm, int values, bool discard = false)
 {
-    JS_ASSERT(values >= 0 && values <= 2);
+    MOZ_ASSERT(values >= 0 && values <= 2);
     switch(values) {
       case 1:
         // Unstow R0
@@ -295,10 +283,7 @@ EmitStubGuardFailure(MacroAssembler& masm)
     masm.jmp(Operand(BaselineStubReg, ICStub::offsetOfStubCode()));
 }
 
-
 } // namespace jit
 } // namespace js
-
-#endif // JS_ION
 
 #endif /* jit_x64_BaselineHelpers_x64_h */

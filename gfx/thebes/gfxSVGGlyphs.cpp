@@ -20,6 +20,7 @@
 #include "nsStreamUtils.h"
 #include "nsIPrincipal.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/LoadInfo.h"
 #include "nsSVGUtils.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsHostObjectProtocolHandler.h"
@@ -341,6 +342,7 @@ gfxSVGGlyphsDocument::ParseDocument(const uint8_t *aBuffer, uint32_t aBufLen)
 
     nsCOMPtr<nsIURI> uri;
     nsHostObjectProtocolHandler::GenerateURIString(NS_LITERAL_CSTRING(FONTTABLEURI_SCHEME),
+                                                   nullptr,
                                                    mSVGGlyphsDocumentURI);
  
     rv = NS_NewURI(getter_AddRefs(uri), mSVGGlyphsDocumentURI);
@@ -367,11 +369,15 @@ gfxSVGGlyphsDocument::ParseDocument(const uint8_t *aBuffer, uint32_t aBufLen)
     }
 
     nsCOMPtr<nsIChannel> channel;
-    rv = NS_NewInputStreamChannel(getter_AddRefs(channel), uri, nullptr /* stream */,
-                                  SVG_CONTENT_TYPE, UTF8_CHARSET);
+    rv = NS_NewInputStreamChannel(getter_AddRefs(channel),
+                                  uri,
+                                  nullptr, //aStream
+                                  principal,
+                                  nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL,
+                                  nsIContentPolicy::TYPE_OTHER,
+                                  SVG_CONTENT_TYPE,
+                                  UTF8_CHARSET);
     NS_ENSURE_SUCCESS(rv, rv);
-
-    channel->SetOwner(principal);
 
     // Set this early because various decisions during page-load depend on it.
     document->SetIsBeingUsedAsImage();

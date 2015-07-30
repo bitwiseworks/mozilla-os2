@@ -18,6 +18,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
                                   "resource://gre/modules/Promise.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Deprecated",
                                   "resource://gre/modules/Deprecated.jsm");
 
@@ -58,7 +60,8 @@ function LivemarkService()
   PlacesUtils.addLazyBookmarkObserver(this, true);
 
   // Asynchronously build the livemarks cache.
-  this._ensureAsynchronousCache();
+  this._cacheReadyPromise =
+    this._ensureAsynchronousCache().then(null, Cu.reportError);
 }
 
 LivemarkService.prototype = {
@@ -70,89 +73,51 @@ LivemarkService.prototype = {
   get _populateCacheSQL()
   {
     function getAnnoSQLFragment(aAnnoParam) {
-      return "SELECT a.content "
-           + "FROM moz_items_annos a "
-           + "JOIN moz_anno_attributes n ON n.id = a.anno_attribute_id "
-           + "WHERE a.item_id = b.id "
-           +   "AND n.name = " + aAnnoParam;
+      return `SELECT a.content
+              FROM moz_items_annos a
+              JOIN moz_anno_attributes n ON n.id = a.anno_attribute_id
+              WHERE a.item_id = b.id
+                AND n.name = ${aAnnoParam}`;
     }
 
-    return "SELECT b.id, b.title, b.parent, b.position, b.guid, b.lastModified, "
-         +        "(" + getAnnoSQLFragment(":feedURI_anno") + ") AS feedURI, "
-         +        "(" + getAnnoSQLFragment(":siteURI_anno") + ") AS siteURI "
-         + "FROM moz_bookmarks b "
-         + "JOIN moz_items_annos a ON a.item_id = b.id "
-         + "JOIN moz_anno_attributes n ON a.anno_attribute_id = n.id "
-         + "WHERE b.type = :folder_type "
-         +   "AND n.name = :feedURI_anno ";
+    return `SELECT b.id, b.title, b.parent, b.position, b.guid,
+                   b.dateAdded, b.lastModified,
+                   ( ${getAnnoSQLFragment(":feedURI_anno")} ) AS feedURI,
+                   ( ${getAnnoSQLFragment(":siteURI_anno")} ) AS siteURI
+            FROM moz_bookmarks b
+            JOIN moz_items_annos a ON a.item_id = b.id
+            JOIN moz_anno_attributes n ON a.anno_attribute_id = n.id
+            WHERE b.type = :folder_type
+              AND n.name = :feedURI_anno`;
   },
 
-  _ensureAsynchronousCache: function LS__ensureAsynchronousCache()
-  {
-    let db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase)
-                                .DBConnection;
-    let stmt = db.createAsyncStatement(this._populateCacheSQL);
-    stmt.params.folder_type = Ci.nsINavBookmarksService.TYPE_FOLDER;
-    stmt.params.feedURI_anno = PlacesUtils.LMANNO_FEEDURI;
-    stmt.params.siteURI_anno = PlacesUtils.LMANNO_SITEURI;
-
-    let livemarkSvc = this;
-    this._pendingStmt = stmt.executeAsync({
-      handleResult: function LS_handleResult(aResults)
-      {
-        for (let row = aResults.getNextRow(); row; row = aResults.getNextRow()) {
-          let id = row.getResultByName("id");
-          let siteURL = row.getResultByName("siteURI");
-          let guid = row.getResultByName("guid");
-          livemarkSvc._livemarks[id] =
-            new Livemark({ id: id,
-                           guid: guid,
-                           title: row.getResultByName("title"),
-                           parentId: row.getResultByName("parent"),
-                           index: row.getResultByName("position"),
-                           lastModified: row.getResultByName("lastModified"),
-                           feedURI: NetUtil.newURI(row.getResultByName("feedURI")),
-                           siteURI: siteURL ? NetUtil.newURI(siteURL) : null,
-            });
-          livemarkSvc._guids[guid] = id;
-        }
-      },
-      handleError: function LS_handleError(aErr)
-      {
-        Cu.reportError("AsyncStmt error (" + aErr.result + "): '" + aErr.message);
-      },
-      handleCompletion: function LS_handleCompletion() {
-        livemarkSvc._pendingStmt = null;
-      }
-    });
-    stmt.finalize();
-  },
+  _ensureAsynchronousCache: Task.async(function* () {
+    let conn = yield PlacesUtils.promiseDBConnection();
+    yield conn.executeCached(this._populateCacheSQL,
+      { folder_type: Ci.nsINavBookmarksService.TYPE_FOLDER,
+        feedURI_anno: PlacesUtils.LMANNO_FEEDURI,
+        siteURI_anno: PlacesUtils.LMANNO_SITEURI },
+      row => {
+        let id = row.getResultByName("id");
+        let guid = row.getResultByName("guid");
+        let siteURL = row.getResultByName("siteURI");
+        this._livemarks[id] =
+          new Livemark({ id: id,
+                         guid: guid,
+                         title: row.getResultByName("title"),
+                         parentId: row.getResultByName("parent"),
+                         index: row.getResultByName("position"),
+                         dateAdded: row.getResultByName("dateAdded"),
+                         lastModified: row.getResultByName("lastModified"),
+                         feedURI: NetUtil.newURI(row.getResultByName("feedURI")),
+                         siteURI: siteURL ? NetUtil.newURI(siteURL) : null });
+        this._guids[guid] = id;
+      });
+  }),
 
   _onCacheReady: function LS__onCacheReady(aCallback)
   {
-    if (this._pendingStmt) {
-      // The cache is still being populated, so enqueue the job to the Storage
-      // async thread.  Ideally this should just dispatch a runnable to it,
-      // that would call back on the main thread, but bug 608142 made that
-      // impossible.  Thus just enqueue the cheapest query possible.
-      let db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase)
-                                  .DBConnection;
-      let stmt = db.createAsyncStatement("PRAGMA encoding");
-      stmt.executeAsync({
-        handleError: function () {},
-        handleResult: function () {},
-        handleCompletion: function ETAT_handleCompletion()
-        {
-          aCallback();
-        }
-      });
-      stmt.finalize();
-    }
-    else {
-      // The callbacks should always be enqueued per the interface.
-      // Just enque on the main thread.
-      Services.tm.mainThread.dispatch(aCallback, Ci.nsIThread.DISPATCH_NORMAL);
-    }
+    this._cacheReadyPromise.then(aCallback);
   },
 
   _reloading: false,
@@ -239,11 +204,15 @@ LivemarkService.prototype = {
                               , feedURI:      aLivemarkInfo.feedURI
                               , siteURI:      aLivemarkInfo.siteURI
                               , guid:         aLivemarkInfo.guid
+                              , dateAdded:    aLivemarkInfo.dateAdded
                               , lastModified: aLivemarkInfo.lastModified
                               });
       if (this._itemAdded && this._itemAdded.id == livemark.id) {
         livemark.index = this._itemAdded.index;
         livemark.guid = this._itemAdded.guid;
+        if (!aLivemarkInfo.dateAdded) {
+          livemark.dateAdded = this._itemAdded.dateAdded;
+        }
         if (!aLivemarkInfo.lastModified) {
           livemark.lastModified = this._itemAdded.lastModified;
         }
@@ -448,6 +417,7 @@ LivemarkService.prototype = {
       this._itemAdded = { id: aItemId
                         , guid: aGUID
                         , index: aIndex
+                        , dateAdded: aDateAdded
                         , lastModified: aDateAdded
                         };
     }
@@ -459,11 +429,15 @@ LivemarkService.prototype = {
     if (aItemType == Ci.nsINavBookmarksService.TYPE_FOLDER) {
       if (this._itemAdded && this._itemAdded.id == aItemId) {
         this._itemAdded.lastModified = aLastModified;
-     }
+      }
       if (aItemId in this._livemarks) {
         if (aProperty == "title") {
           this._livemarks[aItemId].title = aValue;
         }
+        else if (aProperty == "dateAdded") {
+          this._livemark[aItemId].dateAdded = parseInt(aValue, 10);
+        }
+
         this._livemarks[aItemId].lastModified = aLastModified;
       }
     }
@@ -563,8 +537,8 @@ function Livemark(aLivemarkInfo)
   this._nodes = new Map();
 
   this._guid = "";
+  this._dateAdded = 0;
   this._lastModified = 0;
-
   this.loadGroup = null;
   this.feedURI = null;
   this.siteURI = null;
@@ -576,6 +550,7 @@ function Livemark(aLivemarkInfo)
     this.guid = aLivemarkInfo.guid;
     this.feedURI = aLivemarkInfo.feedURI;
     this.siteURI = aLivemarkInfo.siteURI;
+    this.dateAdded = aLivemarkInfo.dateAdded;
     this.lastModified = aLivemarkInfo.lastModified;
   }
   else {
@@ -584,10 +559,13 @@ function Livemark(aLivemarkInfo)
                                                  aLivemarkInfo.title,
                                                  aLivemarkInfo.index,
                                                  aLivemarkInfo.guid);
-    PlacesUtils.bookmarks.setFolderReadonly(this.id, true);
     this.writeFeedURI(aLivemarkInfo.feedURI);
     if (aLivemarkInfo.siteURI) {
       this.writeSiteURI(aLivemarkInfo.siteURI);
+    }
+    if (aLivemarkInfo.dateAdded) {
+      this.dateAdded = aLivemarkInfo.dateAdded;
+      PlacesUtils.bookmarks.setItemDateAdded(this.id, this.dateAdded);
     }
     // Last modified time must be the last change.
     if (aLivemarkInfo.lastModified) {
@@ -652,16 +630,13 @@ Livemark.prototype = {
     this.siteURI = aSiteURI;
   },
 
-  set guid(aGUID) {
-    this._guid = aGUID;
-    return aGUID;
-  },
+  set guid(aGUID) this._guid = aGUID,
   get guid() this._guid,
 
-  set lastModified(aLastModified) {
-    this._lastModified = aLastModified;
-    return aLastModified;
-  },
+  set dateAdded(aDateAdded) this._dateAdded = aDateAdded,
+  get dateAdded() this._dateAdded,
+
+  set lastModified(aLastModified) this._lastModified = aLastModified,
   get lastModified() this._lastModified,
 
   /**
@@ -695,7 +670,16 @@ Livemark.prototype = {
       // cancel the channel.
       let loadgroup = Cc["@mozilla.org/network/load-group;1"].
                       createInstance(Ci.nsILoadGroup);
-      let channel = NetUtil.newChannel(this.feedURI.spec).
+      let feedPrincipal =
+        secMan.getNoAppCodebasePrincipal(this.feedURI);
+      let channel = NetUtil.newChannel2(this.feedURI.spec,
+                                        null,
+                                        null,
+                                        null,      // aLoadingNode
+                                        feedPrincipal,
+                                        null,      // aTriggeringPrincipal
+                                        Ci.nsILoadInfo.SEC_NORMAL,
+                                        Ci.nsIContentPolicy.TYPE_DATAREQUEST).
                     QueryInterface(Ci.nsIHttpChannel);
       channel.loadGroup = loadgroup;
       channel.loadFlags |= Ci.nsIRequest.LOAD_BACKGROUND |

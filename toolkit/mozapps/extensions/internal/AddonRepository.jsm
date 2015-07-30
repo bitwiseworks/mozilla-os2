@@ -13,8 +13,6 @@ Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/AddonManager.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
-                                  "resource://gre/modules/FileUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "OS",
@@ -25,6 +23,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository_SQLiteMigrator",
                                   "resource://gre/modules/addons/AddonRepository_SQLiteMigrator.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
                                   "resource://gre/modules/Promise.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
+
 
 this.EXPORTED_SYMBOLS = [ "AddonRepository" ];
 
@@ -39,6 +40,10 @@ const PREF_GETADDONS_GETRECOMMENDED      = "extensions.getAddons.recommended.url
 const PREF_GETADDONS_BROWSESEARCHRESULTS = "extensions.getAddons.search.browseURL";
 const PREF_GETADDONS_GETSEARCHRESULTS    = "extensions.getAddons.search.url";
 const PREF_GETADDONS_DB_SCHEMA           = "extensions.getAddons.databaseSchema"
+
+const PREF_METADATA_LASTUPDATE           = "extensions.getAddons.cache.lastUpdate";
+const PREF_METADATA_UPDATETHRESHOLD_SEC  = "extensions.getAddons.cache.updateThreshold";
+const DEFAULT_METADATA_UPDATETHRESHOLD_SEC = 172800;  // two days
 
 const XMLURI_PARSE_ERROR  = "http://www.mozilla.org/newlayout/xml/parsererror.xml";
 
@@ -492,15 +497,6 @@ this.AddonRepository = {
   // A cache of the add-ons stored in the database
   _addons: null,
 
-  // An array of callbacks pending the retrieval of add-ons from AddonDatabase
-  _pendingCallbacks: null,
-
-  // Whether a migration in currently in progress
-  _migrationInProgress: false,
-
-  // A callback to be called when migration finishes
-  _postMigrationCallback: null,
-
   // Whether a search is currently in progress
   _searching: false,
 
@@ -528,7 +524,7 @@ this.AddonRepository = {
 
   // Maximum number of results to return
   _maxResults: null,
-  
+
   /**
    * Shut down AddonRepository
    * return: promise{integer} resolves with the result of flushing
@@ -538,8 +534,30 @@ this.AddonRepository = {
     this.cancelSearch();
 
     this._addons = null;
-    this._pendingCallbacks = null;
     return AddonDatabase.shutdown(false);
+  },
+
+  metadataAge: function() {
+    let now = Math.round(Date.now() / 1000);
+
+    let lastUpdate = 0;
+    try {
+      lastUpdate = Services.prefs.getIntPref(PREF_METADATA_LASTUPDATE);
+    } catch (e) {}
+
+    // Handle clock jumps
+    if (now < lastUpdate) {
+      return now;
+    }
+    return now - lastUpdate;
+  },
+
+  isMetadataStale: function AddonRepo_isMetadataStale() {
+    let threshold = DEFAULT_METADATA_UPDATETHRESHOLD_SEC;
+    try {
+      threshold = Services.prefs.getIntPref(PREF_METADATA_UPDATETHRESHOLD_SEC);
+    } catch (e) {}
+    return (this.metadataAge() > threshold);
   },
 
   /**
@@ -552,106 +570,100 @@ this.AddonRepository = {
    * @param  aCallback
    *         The callback to pass the result back to
    */
-  getCachedAddonByID: function AddonRepo_getCachedAddonByID(aId, aCallback) {
+  getCachedAddonByID: Task.async(function* (aId, aCallback) {
     if (!aId || !this.cacheEnabled) {
       aCallback(null);
       return;
     }
 
-    let self = this;
     function getAddon(aAddons) {
-      aCallback((aId in aAddons) ? aAddons[aId] : null);
+      aCallback(aAddons.get(aId) || null);
     }
 
     if (this._addons == null) {
-      if (this._pendingCallbacks == null) {
-        // Data has not been retrieved from the database, so retrieve it
-        this._pendingCallbacks = [];
-        this._pendingCallbacks.push(getAddon);
-        AddonDatabase.retrieveStoredData(function getCachedAddonByID_retrieveData(aAddons) {
-          let pendingCallbacks = self._pendingCallbacks;
+      AddonDatabase.retrieveStoredData().then(aAddons => {
+        this._addons = aAddons;
+        getAddon(aAddons);
+      });
 
-          // Check if cache was shutdown or deleted before callback was called
-          if (pendingCallbacks == null)
-            return;
-
-          // Callbacks may want to trigger a other caching operations that may
-          // affect _addons and _pendingCallbacks, so set to final values early
-          self._pendingCallbacks = null;
-          self._addons = aAddons;
-
-          pendingCallbacks.forEach(function(aCallback) aCallback(aAddons));
-        });
-
-        return;
-      }
-
-      // Data is being retrieved from the database, so wait
-      this._pendingCallbacks.push(getAddon);
       return;
     }
 
-    // Data has been retrieved, so immediately return result
     getAddon(this._addons);
-  },
+  }),
 
   /**
    * Asynchronously repopulate cache so it only contains the add-ons
    * corresponding to the specified ids. If caching is disabled,
    * the cache is completely removed.
    *
-   * @param  aIds
-   *         The array of add-on ids to repopulate the cache with
-   * @param  aCallback
-   *         The optional callback to call once complete
    * @param  aTimeout
    *         (Optional) timeout in milliseconds to abandon the XHR request
    *         if we have not received a response from the server.
+   * @return Promise{null}
+   *         Resolves when the metadata ping is complete
    */
-  repopulateCache: function(aIds, aCallback, aTimeout) {
-    this._repopulateCacheInternal(aIds, aCallback, false, aTimeout);
+  repopulateCache: function(aTimeout) {
+    return this._repopulateCacheInternal(false, aTimeout);
   },
 
-  _repopulateCacheInternal: function (aIds, aCallback, aSendPerformance, aTimeout) {
-    // Always call AddonManager updateAddonRepositoryData after we refill the cache
-    function repopulateAddonManager() {
-      AddonManagerPrivate.updateAddonRepositoryData(aCallback);
-    }
+  /*
+   * Clear and delete the AddonRepository database
+   * @return Promise{null} resolves when the database is deleted
+   */
+  _clearCache: function () {
+    this._addons = null;
+    return AddonDatabase.delete().then(() =>
+      new Promise((resolve, reject) =>
+        AddonManagerPrivate.updateAddonRepositoryData(resolve))
+    );
+  },
 
-    logger.debug("Repopulate add-on cache with " + aIds.toSource());
+  _repopulateCacheInternal: Task.async(function* (aSendPerformance, aTimeout) {
+    let allAddons = yield new Promise((resolve, reject) =>
+      AddonManager.getAllAddons(resolve));
+
+    // Filter the hotfix out of our list of add-ons
+    allAddons = [a for (a of allAddons) if (a.id != AddonManager.hotfixID)];
+
     // Completely remove cache if caching is not enabled
     if (!this.cacheEnabled) {
       logger.debug("Clearing cache because it is disabled");
-      this._addons = null;
-      this._pendingCallbacks = null;
-      AddonDatabase.delete(repopulateAddonManager);
-      return;
+      return this._clearCache();
     }
 
-    let self = this;
-    getAddonsToCache(aIds, function repopulateCache_getAddonsToCache(aAddons) {
-      // Completely remove cache if there are no add-ons to cache
-      if (aAddons.length == 0) {
-        logger.debug("Clearing cache because 0 add-ons were requested");
-        self._addons = null;
-        self._pendingCallbacks = null;
-        AddonDatabase.delete(repopulateAddonManager);
-        return;
-      }
+    let ids = [a.id for (a of allAddons)];
+    logger.debug("Repopulate add-on cache with " + ids.toSource());
 
-      self._beginGetAddons(aAddons, {
+    let self = this;
+    let addonsToCache = yield new Promise((resolve, reject) =>
+      getAddonsToCache(ids, resolve));
+
+    // Completely remove cache if there are no add-ons to cache
+    if (addonsToCache.length == 0) {
+      logger.debug("Clearing cache because 0 add-ons were requested");
+      return this._clearCache();
+    }
+
+    yield new Promise((resolve, reject) =>
+      self._beginGetAddons(addonsToCache, {
         searchSucceeded: function repopulateCacheInternal_searchSucceeded(aAddons) {
-          self._addons = {};
-          aAddons.forEach(function(aAddon) { self._addons[aAddon.id] = aAddon; });
-          AddonDatabase.repopulate(aAddons, repopulateAddonManager);
+          self._addons = new Map();
+          for (let addon of aAddons) {
+            self._addons.set(addon.id, addon);
+          }
+          AddonDatabase.repopulate(aAddons, resolve);
         },
         searchFailed: function repopulateCacheInternal_searchFailed() {
           logger.warn("Search failed when repopulating cache");
-          repopulateAddonManager();
+          resolve();
         }
-      }, aSendPerformance, aTimeout);
-    });
-  },
+      }, aSendPerformance, aTimeout));
+
+    // Always call AddonManager updateAddonRepositoryData after we refill the cache
+    yield new Promise((resolve, reject) =>
+      AddonManagerPrivate.updateAddonRepositoryData(resolve));
+  }),
 
   /**
    * Asynchronously add add-ons to the cache corresponding to the specified
@@ -682,7 +694,9 @@ this.AddonRepository = {
 
       self.getAddonsByIDs(aAddons, {
         searchSucceeded: function cacheAddons_searchSucceeded(aAddons) {
-          aAddons.forEach(function(aAddon) { self._addons[aAddon.id] = aAddon; });
+          for (let addon of aAddons) {
+            self._addons.set(addon.id, addon);
+          }
           AddonDatabase.insertAddons(aAddons, aCallback);
         },
         searchFailed: function cacheAddons_searchFailed() {
@@ -830,6 +844,11 @@ this.AddonRepository = {
         if (idIndex == -1)
           continue;
 
+        // Ignore add-on if the add-on manager doesn't know about its type:
+        if (!(result.addon.type in AddonManager.addonTypes)) {
+          continue;
+        }
+
         results.push(result);
         // Ignore this add-on from now on
         ids.splice(idIndex, 1);
@@ -867,14 +886,10 @@ this.AddonRepository = {
    * data. It is meant to be called as part of the daily update ping. It should
    * not be used for any other purpose. Use repopulateCache instead.
    *
-   * @param  aIDs
-   *         Array of add-on IDs to repopulate the cache with.
-   * @param  aCallback
-   *         Function to call when data is received. Function must be an object
-   *         with the keys searchSucceeded and searchFailed.
+   * @return Promise{null} Resolves when the metadata update is complete.
    */
-  backgroundUpdateCheck: function AddonRepo_backgroundUpdateCheck(aIDs, aCallback) {
-    this._repopulateCacheInternal(aIDs, aCallback, true);
+  backgroundUpdateCheck: function () {
+    return this._repopulateCacheInternal(true);
   },
 
   /**
@@ -1062,6 +1077,8 @@ this.AddonRepository = {
       switch (localName) {
         case "type":
           // Map AMO's type id to corresponding string
+          // https://github.com/mozilla/olympia/blob/master/apps/constants/base.py#L127
+          // These definitions need to be updated whenever AMO adds a new type.
           let id = parseInt(node.getAttribute("id"));
           switch (id) {
             case 1:
@@ -1073,8 +1090,27 @@ this.AddonRepository = {
             case 3:
               addon.type = "dictionary";
               break;
+            case 4:
+              addon.type = "search";
+              break;
+            case 5:
+            case 6:
+              addon.type = "locale";
+              break;
+            case 7:
+              addon.type = "plugin";
+              break;
+            case 8:
+              addon.type = "api";
+              break;
+            case 9:
+              addon.type = "lightweight-theme";
+              break;
+            case 11:
+              addon.type = "webapp";
+              break;
             default:
-              logger.warn("Unknown type id when parsing addon: " + id);
+              logger.info("Unknown type id " + id + " found when parsing response for GUID " + guid);
           }
           break;
         case "authors":
@@ -1270,6 +1306,10 @@ this.AddonRepository = {
       if (requiredAttributes.some(function parseAddons_attributeFilter(aAttribute) !result.addon[aAttribute]))
         continue;
 
+      // Ignore add-on with a type AddonManager doesn't understand:
+      if (!(result.addon.type in AddonManager.addonTypes))
+        continue;
+
       // Add only if the add-on is compatible with the platform
       if (!result.addon.isPlatformCompatible)
         continue;
@@ -1294,7 +1334,6 @@ this.AddonRepository = {
     }
 
     // Create an AddonInstall for each result
-    let self = this;
     results.forEach(function(aResult) {
       let addon = aResult.addon;
       let callback = function addonInstallCallback(aInstall) {
@@ -1526,114 +1565,96 @@ this.AddonRepository = {
 };
 
 var AddonDatabase = {
-  // true if the database connection has been opened
-  initialized: false,
-  // false if there was an unrecoverable error openning the database
+  // false if there was an unrecoverable error opening the database
   databaseOk: true,
 
+  connectionPromise: null,
   // the in-memory database
   DB: BLANK_DB(),
 
   /**
-   * A getter to retrieve an nsIFile pointer to the DB
+   * A getter to retrieve the path to the DB
    */
   get jsonFile() {
-    delete this.jsonFile;
-    return this.jsonFile = FileUtils.getFile(KEY_PROFILEDIR, [FILE_DATABASE], true);
-  },
+    return OS.Path.join(OS.Constants.Path.profileDir, FILE_DATABASE);
+ },
 
   /**
-   * Synchronously opens a new connection to the database file.
+   * Asynchronously opens a new connection to the database file.
+   *
+   * @return {Promise} a promise that resolves to the database.
    */
   openConnection: function() {
-    this.DB = BLANK_DB();
-    this.initialized = true;
-    delete this.connection;
+    if (!this.connectionPromise) {
+     this.connectionPromise = Task.spawn(function*() {
+       this.DB = BLANK_DB();
 
-    let inputDB, fstream, cstream, schema;
+       let inputDB, schema;
 
-    try {
-     let data = "";
-     fstream = Cc["@mozilla.org/network/file-input-stream;1"]
-                 .createInstance(Ci.nsIFileInputStream);
-     cstream = Cc["@mozilla.org/intl/converter-input-stream;1"]
-                 .createInstance(Ci.nsIConverterInputStream);
+       try {
+         let data = yield OS.File.read(this.jsonFile, { encoding: "utf-8"})
+         inputDB = JSON.parse(data);
 
-     fstream.init(this.jsonFile, -1, 0, 0);
-     cstream.init(fstream, "UTF-8", 0, 0);
-     let (str = {}) {
-       let read = 0;
-       do {
-         read = cstream.readString(0xffffffff, str); // read as much as we can and put it in str.value
-         data += str.value;
-       } while (read != 0);
-     }
+         if (!inputDB.hasOwnProperty("addons") ||
+             !Array.isArray(inputDB.addons)) {
+           throw new Error("No addons array.");
+         }
 
-     inputDB = JSON.parse(data);
+         if (!inputDB.hasOwnProperty("schema")) {
+           throw new Error("No schema specified.");
+         }
 
-     if (!inputDB.hasOwnProperty("addons") ||
-         !Array.isArray(inputDB.addons)) {
-       throw new Error("No addons array.");
-     }
+         schema = parseInt(inputDB.schema, 10);
 
-     if (!inputDB.hasOwnProperty("schema")) {
-       throw new Error("No schema specified.");
-     }
+         if (!Number.isInteger(schema) ||
+             schema < DB_MIN_JSON_SCHEMA) {
+           throw new Error("Invalid schema value.");
+         }
+       } catch (e if e instanceof OS.File.Error && e.becauseNoSuchFile) {
+         logger.debug("No " + FILE_DATABASE + " found.");
 
-     schema = parseInt(inputDB.schema, 10);
+         // Create a blank addons.json file
+         this._saveDBToDisk();
 
-     if (!Number.isInteger(schema) ||
-         schema < DB_MIN_JSON_SCHEMA) {
-       throw new Error("Invalid schema value.");
-     }
+         let dbSchema = 0;
+         try {
+           dbSchema = Services.prefs.getIntPref(PREF_GETADDONS_DB_SCHEMA);
+         } catch (e) {}
 
-    } catch (e if e.result == Cr.NS_ERROR_FILE_NOT_FOUND) {
-      logger.debug("No " + FILE_DATABASE + " found.");
+         if (dbSchema < DB_MIN_JSON_SCHEMA) {
+           let results = yield new Promise((resolve, reject) => {
+             AddonRepository_SQLiteMigrator.migrate(resolve);
+           });
 
-      // Create a blank addons.json file
-      this._saveDBToDisk();
+           if (results.length) {
+             yield this._insertAddons(results);
+           }
 
-      let dbSchema = 0;
-      try {
-        dbSchema = Services.prefs.getIntPref(PREF_GETADDONS_DB_SCHEMA);
-      } catch (e) {}
+           Services.prefs.setIntPref(PREF_GETADDONS_DB_SCHEMA, DB_SCHEMA);
+         }
 
-      if (dbSchema < DB_MIN_JSON_SCHEMA) {
-        this._migrationInProgress = AddonRepository_SQLiteMigrator.migrate((results) => {
-          if (results.length)
-            this.insertAddons(results);
+         return this.DB;
+       } catch (e) {
+         logger.error("Malformed " + FILE_DATABASE + ": " + e);
+         this.databaseOk = false;
 
-          if (this._postMigrationCallback) {
-            this._postMigrationCallback();
-            this._postMigrationCallback = null;
-          }
+         return this.DB;
+       }
 
-          this._migrationInProgress = false;
-        });
+       Services.prefs.setIntPref(PREF_GETADDONS_DB_SCHEMA, DB_SCHEMA);
 
-        Services.prefs.setIntPref(PREF_GETADDONS_DB_SCHEMA, DB_SCHEMA);
-      }
+       // We use _insertAddon manually instead of calling
+       // insertAddons to avoid the write to disk which would
+       // be a waste since this is the data that was just read.
+       for (let addon of inputDB.addons) {
+         this._insertAddon(addon);
+       }
 
-      return;
-
-    } catch (e) {
-      logger.error("Malformed " + FILE_DATABASE + ": " + e);
-      this.databaseOk = false;
-      return;
-
-    } finally {
-     cstream.close();
-     fstream.close();
+       return this.DB;
+     }.bind(this));
     }
 
-    Services.prefs.setIntPref(PREF_GETADDONS_DB_SCHEMA, DB_SCHEMA);
-
-    // We use _insertAddon manually instead of calling
-    // insertAddons to avoid the write to disk which would
-    // be a waste since this is the data that was just read.
-    for (let addon of inputDB.addons) {
-      this._insertAddon(addon);
-    }
+    return this.connectionPromise;
   },
 
   /**
@@ -1656,18 +1677,14 @@ var AddonDatabase = {
   shutdown: function AD_shutdown(aSkipFlush) {
     this.databaseOk = true;
 
-    if (!this.initialized) {
-      return Promise.resolve(0);
+    if (!this.connectionPromise) {
+      return Promise.resolve();
     }
 
-    this.initialized = false;
-
-    this.__defineGetter__("connection", function shutdown_connectionGetter() {
-      return this.openConnection();
-    });
+    this.connectionPromise = null;
 
     if (aSkipFlush) {
-      return Promise.resolve(0);
+      return Promise.resolve();
     } else {
       return this.Writer.flush();
     }
@@ -1679,6 +1696,7 @@ var AddonDatabase = {
    *
    * @param  aCallback
    *         An optional callback to call once complete
+   * @return Promise{null} resolves when the database has been deleted
    */
   delete: function AD_delete(aCallback) {
     this.DB = BLANK_DB();
@@ -1687,11 +1705,12 @@ var AddonDatabase = {
       .then(null, () => {})
       // shutdown(true) never rejects
       .then(() => this.shutdown(true))
-      .then(() => OS.File.remove(this.jsonFile.path, {}))
+      .then(() => OS.File.remove(this.jsonFile, {}))
       .then(null, error => logger.error("Unable to delete Addon Repository file " +
-                                 this.jsonFile.path, error))
+                                 this.jsonFile, error))
       .then(() => this._deleting = null)
       .then(aCallback);
+    return this._deleting;
   },
 
   toJSON: function AD_toJSON() {
@@ -1714,7 +1733,7 @@ var AddonDatabase = {
   get Writer() {
     delete this.Writer;
     this.Writer = new DeferredSave(
-      this.jsonFile.path,
+      this.jsonFile,
       () => { return JSON.stringify(this); },
       DB_BATCH_TIMEOUT_MS
     );
@@ -1735,28 +1754,12 @@ var AddonDatabase = {
   },
 
   /**
-   * Asynchronously retrieve all add-ons from the database, and pass it
-   * to the specified callback
-   *
-   * @param  aCallback
-   *         The callback to pass the add-ons back to
+   * Asynchronously retrieve all add-ons from the database
+   * @return: Promise{Map}
+   *          Resolves when the add-ons are retrieved from the database
    */
-  retrieveStoredData: function AD_retrieveStoredData(aCallback) {
-    if (!this.initialized)
-      this.openConnection();
-
-    let gatherResults = () => {
-      let result = {};
-      for (let [key, value] of this.DB.addons)
-        result[key] = value;
-
-      executeSoon(function() aCallback(result));
-    };
-
-    if (this._migrationInProgress)
-      this._postMigrationCallback = gatherResults;
-    else
-      gatherResults();
+  retrieveStoredData: function (){
+    return this.openConnection().then(db => db.addons);
   },
 
   /**
@@ -1770,7 +1773,13 @@ var AddonDatabase = {
    */
   repopulate: function AD_repopulate(aAddons, aCallback) {
     this.DB.addons.clear();
-    this.insertAddons(aAddons, aCallback);
+    this.insertAddons(aAddons, function repopulate_insertAddons() {
+      let now = Math.round(Date.now() / 1000);
+      logger.debug("Cache repopulated, setting " + PREF_METADATA_LASTUPDATE + " to " + now);
+      Services.prefs.setIntPref(PREF_METADATA_LASTUPDATE, now);
+      if (aCallback)
+        aCallback();
+    });
   },
 
   /**
@@ -1781,19 +1790,19 @@ var AddonDatabase = {
    * @param  aCallback
    *         An optional callback to call once complete
    */
-  insertAddons: function AD_insertAddons(aAddons, aCallback) {
-    if (!this.initialized)
-      this.openConnection();
+  insertAddons: Task.async(function* (aAddons, aCallback) {
+    yield this.openConnection();
+    yield this._insertAddons(aAddons, aCallback);
+  }),
 
+  _insertAddons: Task.async(function* (aAddons, aCallback) {
     for (let addon of aAddons) {
       this._insertAddon(addon);
     }
 
-    this._saveDBToDisk();
-
-    if (aCallback)
-      executeSoon(aCallback);
-  },
+    yield this._saveDBToDisk();
+    aCallback && aCallback();
+  }),
 
   /**
    * Inserts an individual add-on into the database. If the add-on already
@@ -1997,7 +2006,3 @@ var AddonDatabase = {
                                                               appMaxVersion);
   },
 };
-
-function executeSoon(aCallback) {
-  Services.tm.mainThread.dispatch(aCallback, Ci.nsIThread.DISPATCH_NORMAL);
-}

@@ -5,13 +5,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef JSGC_GENERATIONAL
-
 #include "js/RootingAPI.h"
 #include "jsapi-tests/tests.h"
 
 BEGIN_TEST(testGCHeapPostBarriers)
 {
+#ifdef JS_GC_ZEAL
+    AutoLeaveZeal nozeal(cx);
+#endif /* JS_GC_ZEAL */
+
     /* Sanity check - objects start in the nursery and then become tenured. */
     JS_GC(cx->runtime());
     JS::RootedObject obj(cx, NurseryObject());
@@ -27,6 +29,13 @@ BEGIN_TEST(testGCHeapPostBarriers)
     return true;
 }
 
+MOZ_NEVER_INLINE bool
+Passthrough(bool value)
+{
+    /* Work around a Win64 optimization bug in VS2010. (Bug 1033146) */
+    return value;
+}
+
 template <typename T>
 bool
 TestHeapPostBarriers(T initialObj)
@@ -37,14 +46,14 @@ TestHeapPostBarriers(T initialObj)
     /* Construct Heap<> wrapper. */
     JS::Heap<T>* heapData = new JS::Heap<T>();
     CHECK(heapData);
-    CHECK(heapData->get() == nullptr);
-    heapData->set(initialObj);
+    CHECK(Passthrough(heapData->get() == nullptr));
+    *heapData = initialObj;
 
     /* Store the pointer as an integer so that the hazard analysis will miss it. */
     uintptr_t initialObjAsInt = uintptr_t(initialObj);
 
     /* Perform minor GC and check heap wrapper is udated with new pointer. */
-    js::MinorGC(cx, JS::gcreason::API);
+    cx->minorGC(JS::gcreason::API);
     CHECK(uintptr_t(heapData->get()) != initialObjAsInt);
     CHECK(!js::gc::IsInsideNursery(heapData->get()));
 
@@ -61,7 +70,7 @@ TestHeapPostBarriers(T initialObj)
 
 JSObject* NurseryObject()
 {
-    JS::RootedObject obj(cx, JS_NewObject(cx, nullptr, JS::NullPtr(), JS::NullPtr()));
+    JS::RootedObject obj(cx, JS_NewPlainObject(cx));
     if (!obj)
         return nullptr;
     JS_DefineProperty(cx, obj, "x", 42, 0);
@@ -78,5 +87,3 @@ JSFunction* NurseryFunction()
 }
 
 END_TEST(testGCHeapPostBarriers)
-
-#endif

@@ -27,8 +27,7 @@ import org.mozilla.gecko.sync.repositories.NullCursorException;
 import org.mozilla.gecko.sync.repositories.android.ClientsDatabaseAccessor;
 import org.mozilla.gecko.sync.repositories.domain.ClientRecord;
 import org.mozilla.gecko.sync.setup.SyncAccounts;
-import org.mozilla.gecko.sync.setup.activities.LocaleAware.LocaleAwareActivity;
-import org.mozilla.gecko.sync.stage.SyncClientsEngineStage;
+import org.mozilla.gecko.Locales.LocaleAwareActivity;
 import org.mozilla.gecko.sync.syncadapter.SyncAdapter;
 
 import android.accounts.Account;
@@ -46,7 +45,7 @@ import android.widget.Toast;
 
 public class SendTabActivity extends LocaleAwareActivity {
   private interface TabSender {
-    static final String[] CLIENTS_STAGE = new String[] { SyncClientsEngineStage.COLLECTION_NAME };
+    public static final String[] STAGES_TO_SYNC = new String[] { "clients", "tabs" };
 
     /**
      * @return Return null if the account isn't correctly initialized. Return
@@ -55,9 +54,9 @@ public class SendTabActivity extends LocaleAwareActivity {
     String getAccountGUID();
 
     /**
-     * Sync this account, specifying only clients as the engine to sync.
+     * Sync this account, specifying only clients and tabs as the engines to sync.
      */
-    void syncClientsStage();
+    void sync();
   }
 
   private static class FxAccountTabSender implements TabSender {
@@ -79,8 +78,8 @@ public class SendTabActivity extends LocaleAwareActivity {
     }
 
     @Override
-    public void syncClientsStage() {
-      fxAccount.requestSync(FirefoxAccounts.FORCE, CLIENTS_STAGE, null);
+    public void sync() {
+      fxAccount.requestSync(FirefoxAccounts.FORCE, STAGES_TO_SYNC, null);
     }
   }
 
@@ -107,8 +106,8 @@ public class SendTabActivity extends LocaleAwareActivity {
     }
 
     @Override
-    public void syncClientsStage() {
-      SyncAdapter.requestImmediateSync(this.account, CLIENTS_STAGE);
+    public void sync() {
+      SyncAdapter.requestImmediateSync(this.account, STAGES_TO_SYNC);
     }
   }
 
@@ -147,8 +146,7 @@ public class SendTabActivity extends LocaleAwareActivity {
 
     enableSend(false);
 
-    // will enableSend if appropriate.
-    updateClientList();
+    // Sending will be enabled in onResume, if appropriate.
   }
 
   protected static SendTabData getSendTabData(Intent intent) throws IllegalArgumentException {
@@ -185,14 +183,14 @@ public class SendTabActivity extends LocaleAwareActivity {
    * Ensure that the view's list of clients is backed by a recently populated
    * array adapter.
    */
-  protected synchronized void updateClientList() {
+  protected synchronized void updateClientList(final TabSender sender, final ClientRecordArrayAdapter adapter) {
     // Fetching the client list hits the clients database, so we spin this onto
     // a background task.
     new AsyncTask<Void, Void, Collection<ClientRecord>>() {
 
       @Override
       protected Collection<ClientRecord> doInBackground(Void... params) {
-        return getOtherClients();
+        return getOtherClients(sender);
       }
 
       @Override
@@ -200,12 +198,12 @@ public class SendTabActivity extends LocaleAwareActivity {
         // We're allowed to update the UI from here.
 
         Logger.debug(LOG_TAG, "Got " + clientArray.size() + " clients.");
-        arrayAdapter.setClientRecordList(clientArray);
+        adapter.setClientRecordList(clientArray);
         if (clientArray.size() == 1) {
-          arrayAdapter.checkItem(0, true);
+          adapter.checkItem(0, true);
         }
 
-        enableSend(arrayAdapter.getNumCheckedGUIDs() > 0);
+        enableSend(adapter.getNumCheckedGUIDs() > 0);
       }
     }.execute();
   }
@@ -236,6 +234,9 @@ public class SendTabActivity extends LocaleAwareActivity {
 
       this.tabSender = new FxAccountTabSender(applicationContext, fxAccount);
 
+      // will enableSend if appropriate.
+      updateClientList(tabSender, this.arrayAdapter);
+
       Logger.info(LOG_TAG, "Allowing tab send for Firefox Account.");
       registerDisplayURICommand();
       return;
@@ -244,6 +245,9 @@ public class SendTabActivity extends LocaleAwareActivity {
     final Account[] syncAccounts = accountManager.getAccountsByType(SyncConstants.ACCOUNTTYPE_SYNC);
     if (syncAccounts.length > 0) {
       this.tabSender = new Sync11TabSender(applicationContext, syncAccounts[0], accountManager);
+
+      // will enableSend if appropriate.
+      updateClientList(tabSender, this.arrayAdapter);
 
       Logger.info(LOG_TAG, "Allowing tab send for Sync account.");
       registerDisplayURICommand();
@@ -302,7 +306,7 @@ public class SendTabActivity extends LocaleAwareActivity {
         }
 
         Logger.info(LOG_TAG, "Requesting immediate clients stage sync.");
-        sender.syncClientsStage();
+        sender.sync();
 
         return true;
       }
@@ -310,7 +314,7 @@ public class SendTabActivity extends LocaleAwareActivity {
       @Override
       protected void onPostExecute(final Boolean success) {
         // We're allowed to update the UI from here.
-        notifyAndFinish(success.booleanValue());
+        notifyAndFinish(success);
       }
     }.execute();
   }
@@ -361,18 +365,18 @@ public class SendTabActivity extends LocaleAwareActivity {
   /**
    * @return a collection of client records, excluding our own.
    */
-  protected Collection<ClientRecord> getOtherClients() {
+  protected Collection<ClientRecord> getOtherClients(final TabSender sender) {
+    if (sender == null) {
+      Logger.warn(LOG_TAG, "No tab sender when fetching other client IDs.");
+      return new ArrayList<ClientRecord>(0);
+    }
+
     final Map<String, ClientRecord> all = getAllClients();
     if (all == null) {
       return new ArrayList<ClientRecord>(0);
     }
 
-    if (this.tabSender == null) {
-      Logger.warn(LOG_TAG, "No tab sender when fetching other client IDs.");
-      return new ArrayList<ClientRecord>(0);
-    }
-
-    final String ourGUID = this.tabSender.getAccountGUID();
+    final String ourGUID = sender.getAccountGUID();
     if (ourGUID == null) {
       return all.values();
     }

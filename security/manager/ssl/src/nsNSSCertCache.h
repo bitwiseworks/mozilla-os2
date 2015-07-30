@@ -20,12 +20,14 @@ public:
   NS_DECL_NSINSSCERTCACHE
 
   nsNSSCertCache();
+
+protected:
   virtual ~nsNSSCertCache();
 
 private:
   mozilla::Mutex mutex;
   nsCOMPtr<nsIX509CertList> mCertList;
-  virtual void virtualDestroyNSSReference();
+  virtual void virtualDestroyNSSReference() override;
   void destructorSafeDestroyNSSReference();
 };
 

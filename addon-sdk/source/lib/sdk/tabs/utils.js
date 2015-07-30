@@ -15,10 +15,9 @@ const { Ci } = require('chrome');
 const { defer } = require("../lang/functional");
 const { windows, isBrowser } = require('../window/utils');
 const { isPrivateBrowsingSupported } = require('../self');
-const { isGlobalPBSupported } = require('../private-browsing/utils');
 
 // Bug 834961: ignore private windows when they are not supported
-function getWindows() windows(null, { includePrivate: isPrivateBrowsingSupported || isGlobalPBSupported });
+function getWindows() windows(null, { includePrivate: isPrivateBrowsingSupported });
 
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
@@ -61,7 +60,8 @@ function activateTab(tab, window) {
 exports.activateTab = activateTab;
 
 function getTabBrowser(window) {
-  return window.gBrowser;
+  // bug 1009938 - may be null in SeaMonkey
+  return window.gBrowser || window.getBrowser();
 }
 exports.getTabBrowser = getTabBrowser;
 
@@ -81,9 +81,9 @@ exports.getTabContainer = getTabContainer;
  */
 function getTabs(window) {
   if (arguments.length === 0) {
-    return getWindows().filter(isBrowser).reduce(function(tabs, window) {
-      return tabs.concat(getTabs(window))
-    }, []);
+    return getWindows().
+               filter(isBrowser).
+               reduce((tabs, window) => tabs.concat(getTabs(window)), []);
   }
 
   // fennec
@@ -91,7 +91,7 @@ function getTabs(window) {
     return window.BrowserApp.tabs;
 
   // firefox - default
-  return Array.slice(getTabContainer(window).children);
+  return Array.filter(getTabContainer(window).children, function(t) !t.closing);
 }
 exports.getTabs = getTabs;
 
@@ -112,13 +112,13 @@ exports.getOwnerWindow = getOwnerWindow;
 
 // fennec
 function getWindowHoldingTab(rawTab) {
-  for each (let window in getWindows()) {
+  for (let window of getWindows()) {
     // this function may be called when not using fennec,
     // but BrowserApp is only defined on Fennec
     if (!window.BrowserApp)
       continue;
 
-    for each (let tab in window.BrowserApp.tabs) {
+    for (let tab of window.BrowserApp.tabs) {
       if (tab === rawTab)
         return window;
     }
@@ -225,6 +225,11 @@ function setTabTitle(tab, title) {
 }
 exports.setTabTitle = setTabTitle;
 
+function getTabContentDocument(tab) {
+  return getBrowserForTab(tab).contentDocument;
+}
+exports.getTabContentDocument = getTabContentDocument;
+
 function getTabContentWindow(tab) {
   return getBrowserForTab(tab).contentWindow;
 }
@@ -240,62 +245,9 @@ exports.getAllTabContentWindows = getAllTabContentWindows;
 
 // gets the tab containing the provided window
 function getTabForContentWindow(window) {
-  // Retrieve the topmost frame container. It can be either <xul:browser>,
-  // <xul:iframe/> or <html:iframe/>. But in our case, it should be xul:browser.
-  let browser;
-  try {
-    browser = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIWebNavigation)
-                    .QueryInterface(Ci.nsIDocShell)
-                    .chromeEventHandler;
-  } catch(e) {
-    // Bug 699450: The tab may already have been detached so that `window` is
-    // in a almost destroyed state and can't be queryinterfaced anymore.
-  }
-
-  // Is null for toplevel documents
-  if (!browser) {
-    return null;
-  }
-
-  // Retrieve the owner window, should be browser.xul one
-  let chromeWindow = browser.ownerDocument.defaultView;
-
-  // Ensure that it is top-level browser window.
-  // We need extra checks because of Mac hidden window that has a broken
-  // `gBrowser` global attribute.
-  if ('gBrowser' in chromeWindow && chromeWindow.gBrowser &&
-      'browsers' in chromeWindow.gBrowser) {
-    // Looks like we are on Firefox Desktop
-    // Then search for the position in tabbrowser in order to get the tab object
-    let browsers = chromeWindow.gBrowser.browsers;
-    let i = browsers.indexOf(browser);
-    if (i !== -1)
-      return chromeWindow.gBrowser.tabs[i];
-    return null;
-  }
-  // Fennec
-  else if ('BrowserApp' in chromeWindow) {
-    return getTabForWindow(window);
-  }
-
-  return null;
+  return getTabs().find(tab => getTabContentWindow(tab) === window.top) || null;
 }
 exports.getTabForContentWindow = getTabForContentWindow;
-
-// used on fennec
-function getTabForWindow(window) {
-  for each (let { BrowserApp } in getWindows()) {
-    if (!BrowserApp)
-      continue;
-
-    for each (let tab in BrowserApp.tabs) {
-      if (tab.browser.contentWindow == window.top)
-        return tab;
-    }
-  }
-  return null;
-}
 
 function getTabURL(tab) {
   if (tab.browser) // fennec
@@ -332,12 +284,12 @@ exports.getSelectedTab = getSelectedTab;
 
 
 function getTabForBrowser(browser) {
-  for each (let window in getWindows()) {
+  for (let window of getWindows()) {
     // this function may be called when not using fennec
     if (!window.BrowserApp)
       continue;
 
-    for each (let tab in window.BrowserApp.tabs) {
+    for  (let tab of window.BrowserApp.tabs) {
       if (tab.browser === browser)
         return tab;
     }

@@ -8,12 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#if !defined(WEBRTC_GONK)
-#if defined(WEBRTC_ANDROID_OPENSLES)
-#include "webrtc/modules/audio_device/android/audio_manager_jni.h"
-#endif
 #if defined(WEBRTC_ANDROID)
-#include "webrtc/modules/audio_device/android/audio_device_jni_android.h"
+#include "webrtc/modules/audio_device/android/audio_device_template.h"
+#if !defined(WEBRTC_GONK)
+#include "webrtc/modules/audio_device/android/audio_record_jni.h"
+#include "webrtc/modules/audio_device/android/audio_track_jni.h"
+#endif
+#if !defined(WEBRTC_CHROMIUM_BUILD)
+#include "webrtc/modules/audio_device/android/opensles_input.h"
+#include "webrtc/modules/audio_device/android/opensles_output.h"
 #endif
 #endif
 
@@ -71,6 +74,12 @@ int VoiceEngineImpl::Release() {
                  "VoiceEngineImpl self deleting (voiceEngine=0x%p)",
                  this);
 
+    // Clear any pointers before starting destruction. Otherwise worker-
+    // threads will still have pointers to a partially destructed object.
+    // Example: AudioDeviceBuffer::RequestPlayoutData() can access a
+    // partially deconstructed |_ptrCbAudioTransport| during destruction
+    // if we don't call Terminate here.
+    Terminate();
     delete this;
   }
 
@@ -79,8 +88,6 @@ int VoiceEngineImpl::Release() {
 
 VoiceEngine* VoiceEngine::Create() {
   Config* config = new Config();
-  config->Set<AudioCodingModuleFactory>(new AudioCodingModuleFactory());
-
   return GetVoiceEngine(config, true);
 }
 
@@ -146,19 +153,34 @@ bool VoiceEngine::Delete(VoiceEngine*& voiceEngine)
     return true;
 }
 
+#if !defined(WEBRTC_CHROMIUM_BUILD)
 int VoiceEngine::SetAndroidObjects(void* javaVM, void* env, void* context)
 {
-#if !defined(WEBRTC_GONK) && defined(ANDROID)
-#if defined(WEBRTC_ANDROID_OPENSLES)
-    // Initialize both backends. The OpenSLES one will fall back
-    // to JNI if some failure happens.
-    AudioManagerJni::SetAndroidAudioDeviceObjects(javaVM, env, context);
+#ifdef WEBRTC_ANDROID
+#ifdef WEBRTC_ANDROID_OPENSLES
+  typedef AudioDeviceTemplate<OpenSlesInput, OpenSlesOutput>
+      AudioDeviceInstance;
 #endif
-    return AudioDeviceAndroidJni::SetAndroidAudioDeviceObjects(
-         javaVM, env, context);
+#if !defined(WEBRTC_GONK) && defined(ANDROID)
+  typedef AudioDeviceTemplate<AudioRecordJni, AudioTrackJni>
+      AudioDeviceInstanceJni;
+#endif
+  if (javaVM && env && context) {
+#if !defined(WEBRTC_GONK) && defined(ANDROID)
+    AudioDeviceInstanceJni::SetAndroidAudioDeviceObjects(javaVM, env, context);
+#endif
+    AudioDeviceInstance::SetAndroidAudioDeviceObjects(javaVM, env, context);
+  } else {
+#if !defined(WEBRTC_GONK) && defined(ANDROID)
+    AudioDeviceInstanceJni::ClearAndroidAudioDeviceObjects();
+#endif
+    AudioDeviceInstance::ClearAndroidAudioDeviceObjects();
+  }
+  return 0;
 #else
-    return -1;
+  return -1;
 #endif
 }
+#endif
 
 }  // namespace webrtc

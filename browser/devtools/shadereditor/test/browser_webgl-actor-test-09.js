@@ -7,7 +7,7 @@
  */
 
 function ifWebGLSupported() {
-  let [target, debuggee, front] = yield initBackend(SIMPLE_CANVAS_URL);
+  let { target, front } = yield initBackend(SIMPLE_CANVAS_URL);
   front.setup({ reload: true });
 
   let programActor = yield once(front, "program-linked");
@@ -23,20 +23,22 @@ function ifWebGLSupported() {
   } catch (error) {
     ok(error,
       "The new vertex shader source was compiled with errors.");
-    is(error.compile, "",
-      "The compilation status should be empty.");
-    isnot(error.link, "",
-      "The linkage status should not be empty.");
-    is(error.link.split("ERROR").length - 1, 2,
-      "The linkage status contains two errors.");
-    ok(error.link.contains("ERROR: 0:8: 'constructor'"),
-      "A constructor error is contained in the linkage status.");
-    ok(error.link.contains("ERROR: 0:8: 'assign'"),
-      "An assignment error is contained in the linkage status.");
+
+    // The implementation has the choice to defer all compile-time errors to link time.
+    let infoLog = (error.compile != "") ? error.compile : error.link;
+
+    isnot(infoLog, "",
+      "The one of the compile or link info logs should not be empty.");
+    is(infoLog.split("ERROR").length - 1, 2,
+      "The info log contains two errors.");
+    ok(infoLog.contains("ERROR: 0:8: 'constructor'"),
+      "A constructor error is contained in the info log.");
+    ok(infoLog.contains("ERROR: 0:8: 'assign'"),
+      "An assignment error is contained in the info log.");
   }
 
-  yield ensurePixelIs(debuggee, { x: 0, y: 0 }, { r: 255, g: 0, b: 0, a: 255 }, true);
-  yield ensurePixelIs(debuggee, { x: 511, y: 511 }, { r: 0, g: 255, b: 0, a: 255 }, true);
+  yield ensurePixelIs(front, { x: 0, y: 0 }, { r: 255, g: 0, b: 0, a: 255 }, true);
+  yield ensurePixelIs(front, { x: 511, y: 511 }, { r: 0, g: 255, b: 0, a: 255 }, true);
   ok(true, "The shader was reverted to the old source.");
 
   let vertSource = yield vertexShader.getText();
@@ -52,18 +54,20 @@ function ifWebGLSupported() {
   } catch (error) {
     ok(error,
       "The new fragment shader source was compiled with errors.");
-    is(error.compile, "",
-      "The compilation status should be empty.");
-    isnot(error.link, "",
-      "The linkage status should not be empty.");
-    is(error.link.split("ERROR").length - 1, 1,
-      "The linkage status contains one error.");
-    ok(error.link.contains("ERROR: 0:6: 'constructor'"),
-      "A constructor error is contained in the linkage status.");
+
+    // The implementation has the choice to defer all compile-time errors to link time.
+    let infoLog = (error.compile != "") ? error.compile : error.link;
+
+    isnot(infoLog, "",
+      "The one of the compile or link info logs should not be empty.");
+    is(infoLog.split("ERROR").length - 1, 1,
+      "The info log contains one error.");
+    ok(infoLog.contains("ERROR: 0:6: 'constructor'"),
+      "A constructor error is contained in the info log.");
   }
 
-  yield ensurePixelIs(debuggee, { x: 0, y: 0 }, { r: 255, g: 0, b: 0, a: 255 }, true);
-  yield ensurePixelIs(debuggee, { x: 511, y: 511 }, { r: 0, g: 255, b: 0, a: 255 }, true);
+  yield ensurePixelIs(front, { x: 0, y: 0 }, { r: 255, g: 0, b: 0, a: 255 }, true);
+  yield ensurePixelIs(front, { x: 511, y: 511 }, { r: 0, g: 255, b: 0, a: 255 }, true);
   ok(true, "The shader was reverted to the old source.");
 
   let fragSource = yield fragmentShader.getText();
@@ -71,13 +75,13 @@ function ifWebGLSupported() {
     "The previous correct fragment shader source was preserved.");
 
   yield programActor.highlight([0, 1, 0, 1]);
-  yield ensurePixelIs(debuggee, { x: 0, y: 0 }, { r: 0, g: 0, b: 0, a: 255 }, true);
-  yield ensurePixelIs(debuggee, { x: 511, y: 511 }, { r: 0, g: 255, b: 0, a: 255 }, true);
+  yield ensurePixelIs(front, { x: 0, y: 0 }, { r: 0, g: 0, b: 0, a: 255 }, true);
+  yield ensurePixelIs(front, { x: 511, y: 511 }, { r: 0, g: 255, b: 0, a: 255 }, true);
   ok(true, "Highlighting worked after setting a defective fragment source.");
 
   yield programActor.unhighlight();
-  yield ensurePixelIs(debuggee, { x: 0, y: 0 }, { r: 255, g: 0, b: 0, a: 255 }, true);
-  yield ensurePixelIs(debuggee, { x: 511, y: 511 }, { r: 0, g: 255, b: 0, a: 255 }, true);
+  yield ensurePixelIs(front, { x: 0, y: 0 }, { r: 255, g: 0, b: 0, a: 255 }, true);
+  yield ensurePixelIs(front, { x: 511, y: 511 }, { r: 0, g: 255, b: 0, a: 255 }, true);
   ok(true, "Unhighlighting worked after setting a defective vertex source.");
 
   yield removeTab(target.tab);

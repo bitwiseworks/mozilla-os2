@@ -56,7 +56,7 @@ public:
 class txAttributeSetItem : public txInstructionContainer
 {
 public:
-    txAttributeSetItem(const txExpandedName aName) : mName(aName)
+    explicit txAttributeSetItem(const txExpandedName aName) : mName(aName)
     {
     }
 
@@ -107,7 +107,7 @@ public:
 class txTemplateItem : public txInstructionContainer
 {
 public:
-    txTemplateItem(nsAutoPtr<txPattern> aMatch, const txExpandedName& aName,
+    txTemplateItem(nsAutoPtr<txPattern>&& aMatch, const txExpandedName& aName,
                    const txExpandedName& aMode, double aPrio);
 
     TX_DECL_TOPLEVELITEM
@@ -122,7 +122,7 @@ public:
 class txVariableItem : public txInstructionContainer
 {
 public:
-    txVariableItem(const txExpandedName& aName, nsAutoPtr<Expr> aValue,
+    txVariableItem(const txExpandedName& aName, nsAutoPtr<Expr>&& aValue,
                    bool aIsParam);
     
     TX_DECL_TOPLEVELITEM

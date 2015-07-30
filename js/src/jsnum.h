@@ -8,10 +8,11 @@
 #define jsnum_h
 
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/Range.h"
 
 #include "NamespaceImports.h"
 
-#include "vm/NumericConversions.h"
+#include "js/Conversions.h"
 
 namespace js {
 
@@ -48,16 +49,16 @@ namespace js {
  * ECMA-262-5 section 9.8.1; but note that it handles integers specially for
  * performance.  See also js::NumberToCString().
  */
-template <js::AllowGC allowGC>
+template <AllowGC allowGC>
 extern JSString*
-NumberToString(js::ThreadSafeContext* cx, double d);
+NumberToString(ExclusiveContext* cx, double d);
 
 extern JSAtom*
-NumberToAtom(js::ExclusiveContext* cx, double d);
+NumberToAtom(ExclusiveContext* cx, double d);
 
 template <AllowGC allowGC>
 extern JSFlatString*
-Int32ToString(ThreadSafeContext* cx, int32_t i);
+Int32ToString(ExclusiveContext* cx, int32_t i);
 
 extern JSAtom*
 Int32ToAtom(ExclusiveContext* cx, int32_t si);
@@ -117,8 +118,9 @@ const double DOUBLE_INTEGRAL_PRECISION_LIMIT = uint64_t(1) << 53;
  * the double type -- that is, the number will be smaller than
  * DOUBLE_INTEGRAL_PRECISION_LIMIT
  */
+template <typename CharT>
 extern double
-ParseDecimalNumber(const JS::TwoByteChars chars);
+ParseDecimalNumber(const mozilla::Range<const CharT> chars);
 
 /*
  * Compute the positive integer of the given base described immediately at the
@@ -132,20 +134,21 @@ ParseDecimalNumber(const JS::TwoByteChars chars);
  * If [start, end) does not begin with a number with the specified base,
  * *dp == 0 and *endp == start upon return.
  */
+template <typename CharT>
 extern bool
-GetPrefixInteger(ThreadSafeContext* cx, const jschar* start, const jschar* end, int base,
-                 const jschar** endp, double* dp);
+GetPrefixInteger(ExclusiveContext* cx, const CharT* start, const CharT* end, int base,
+                 const CharT** endp, double* dp);
 
 /*
  * This is like GetPrefixInteger, but only deals with base 10, and doesn't have
- * and |endp| outparam.  It should only be used when the jschars are known to
+ * and |endp| outparam.  It should only be used when the characters are known to
  * only contain digits.
  */
 extern bool
-GetDecimalInteger(ExclusiveContext* cx, const jschar* start, const jschar* end, double* dp);
+GetDecimalInteger(ExclusiveContext* cx, const char16_t* start, const char16_t* end, double* dp);
 
 extern bool
-StringToNumber(ThreadSafeContext* cx, JSString* str, double* result);
+StringToNumber(ExclusiveContext* cx, JSString* str, double* result);
 
 /* ES5 9.3 ToNumber, overwriting *vp with the appropriate number value. */
 MOZ_ALWAYS_INLINE bool
@@ -174,12 +177,15 @@ num_parseInt(JSContext* cx, unsigned argc, Value* vp);
  *
  * Also allows inputs of the form [+|-]Infinity, which produce an infinity of
  * the appropriate sign.  The case of the "Infinity" string must match exactly.
- * If the string does not contain a number, set *ep to s and return 0.0 in dp.
+ * If the string does not contain a number, set *dEnd to begin and return 0.0
+ * in *d.
+ *
  * Return false if out of memory.
  */
+template <typename CharT>
 extern bool
-js_strtod(js::ThreadSafeContext* cx, const jschar* s, const jschar* send,
-          const jschar** ep, double* dp);
+js_strtod(js::ExclusiveContext* cx, const CharT* begin, const CharT* end,
+          const CharT** dEnd, double* d);
 
 extern bool
 js_num_toString(JSContext* cx, unsigned argc, js::Value* vp);
@@ -240,9 +246,18 @@ ToInteger(JSContext* cx, HandleValue v, double* dp)
         if (!ToNumberSlow(cx, v, dp))
             return false;
     }
-    *dp = ToInteger(*dp);
+    *dp = JS::ToInteger(*dp);
     return true;
 }
+
+/* ES6 7.1.15 ToLength, but clamped to the [0,2^32-2] range.  If the
+ * return value is false then *overflow will be true iff the value was
+ * not clampable to uint32_t range.
+ *
+ * For JSContext and ExclusiveContext.
+ */
+template<typename T>
+bool ToLengthClamped(T* cx, HandleValue v, uint32_t* out, bool* overflow);
 
 inline bool
 SafeAdd(int32_t one, int32_t two, int32_t* res)
@@ -285,48 +300,7 @@ ToNumber(ExclusiveContext* cx, const Value& v, double* out)
     return ToNumberSlow(cx, v, out);
 }
 
-/*
- * Thread safe variants of number conversion functions.
- */
-
-bool
-NonObjectToNumberSlow(ThreadSafeContext* cx, Value v, double* out);
-
-inline bool
-NonObjectToNumber(ThreadSafeContext* cx, const Value& v, double* out)
-{
-    if (v.isNumber()) {
-        *out = v.toNumber();
-        return true;
-    }
-    return NonObjectToNumberSlow(cx, v, out);
-}
-
-bool
-NonObjectToInt32Slow(ThreadSafeContext* cx, const Value& v, int32_t* out);
-
-inline bool
-NonObjectToInt32(ThreadSafeContext* cx, const Value& v, int32_t* out)
-{
-    if (v.isInt32()) {
-        *out = v.toInt32();
-        return true;
-    }
-    return NonObjectToInt32Slow(cx, v, out);
-}
-
-bool
-NonObjectToUint32Slow(ThreadSafeContext* cx, const Value& v, uint32_t* out);
-
-MOZ_ALWAYS_INLINE bool
-NonObjectToUint32(ThreadSafeContext* cx, const Value& v, uint32_t* out)
-{
-    if (v.isInt32()) {
-        *out = uint32_t(v.toInt32());
-        return true;
-    }
-    return NonObjectToUint32Slow(cx, v, out);
-}
+void FIX_FPU();
 
 } /* namespace js */
 

@@ -28,7 +28,7 @@ JSONSpewer::indent()
 {
     if (!fp_)
         return;
-    JS_ASSERT(indentLevel_ >= 0);
+    MOZ_ASSERT(indentLevel_ >= 0);
     fprintf(fp_, "\n");
     for (int i = 0; i < indentLevel_; i++)
         fprintf(fp_, "  ");
@@ -228,6 +228,8 @@ JSONSpewer::spewMResumePoint(MResumePoint* rp)
     for (MResumePoint* iter = rp; iter; iter = iter->caller()) {
         for (int i = iter->numOperands() - 1; i >= 0; i--)
             integerValue(iter->getOperand(i)->id());
+        if (iter->caller())
+            stringValue("|");
     }
     endList();
 
@@ -262,12 +264,19 @@ JSONSpewer::spewMDef(MDefinition* def)
         integerValue(use.def()->id());
     endList();
 
+    if (!def->isLowered()) {
+        beginListProperty("memInputs");
+        if (def->dependency())
+            integerValue(def->dependency()->id());
+        endList();
+    }
+
     bool isTruncated = false;
     if (def->isAdd() || def->isSub() || def->isMod() || def->isMul() || def->isDiv())
         isTruncated = static_cast<MBinaryArithInstruction*>(def)->isTruncated();
 
     if (def->type() != MIRType_None && def->range()) {
-        Sprinter sp(GetIonContext()->cx);
+        Sprinter sp(GetJitContext()->cx);
         sp.init();
         def->range()->print(sp);
         stringProperty("type", "%s : %s%s", sp.string(), StringFromMIRType(def->type()), (isTruncated ? " (t)" : ""));
@@ -333,7 +342,7 @@ JSONSpewer::spewMIR(MIRGraph* mir)
 }
 
 void
-JSONSpewer::spewLIns(LInstruction* ins)
+JSONSpewer::spewLIns(LNode* ins)
 {
     if (!fp_)
         return;
@@ -421,8 +430,8 @@ JSONSpewer::spewIntervals(LinearScanAllocator* regalloc)
 
                         for (size_t j = 0; j < live->numRanges(); j++) {
                             beginObject();
-                            integerProperty("start", live->getRange(j)->from.pos());
-                            integerProperty("end", live->getRange(j)->to.pos());
+                            integerProperty("start", live->getRange(j)->from.bits());
+                            integerProperty("end", live->getRange(j)->to.bits());
                             endObject();
                         }
 
@@ -454,7 +463,7 @@ JSONSpewer::endPass()
 void
 JSONSpewer::endFunction()
 {
-    JS_ASSERT(inFunction_);
+    MOZ_ASSERT(inFunction_);
     endList();
     endObject();
     fflush(fp_);

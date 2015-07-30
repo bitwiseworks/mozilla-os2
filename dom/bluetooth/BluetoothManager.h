@@ -36,10 +36,9 @@ public:
     Create(nsPIDOMWindow* aWindow);
   static bool CheckPermission(nsPIDOMWindow* aWindow);
   void Notify(const BluetoothSignal& aData);
-  virtual void SetPropertyByValue(const BluetoothNamedValue& aValue) MOZ_OVERRIDE;
+  virtual void SetPropertyByValue(const BluetoothNamedValue& aValue) override;
 
   bool GetEnabled(ErrorResult& aRv);
-  bool IsConnected(uint16_t aProfileId, ErrorResult& aRv);
 
   already_AddRefed<DOMRequest> GetDefaultAdapter(ErrorResult& aRv);
 
@@ -53,9 +52,9 @@ public:
   }
 
   virtual JSObject*
-    WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+    WrapObject(JSContext* aCx) override;
 
-  virtual void DisconnectFromOwner() MOZ_OVERRIDE;
+  virtual void DisconnectFromOwner() override;
 
 private:
   BluetoothManager(nsPIDOMWindow* aWindow);

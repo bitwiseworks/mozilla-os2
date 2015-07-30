@@ -60,6 +60,11 @@ Each subsection documents the different types of crash events that may be
 produced. Each section name corresponds to the first line of the crash
 event file.
 
+Currently only main process crashes produce event files. Because crashes and
+hangs in child processes can be easily recorded by the main process, we do not
+foresee the need for writing event files for child processes, design
+considerations below notwithstanding.
+
 crash.main.1
 ^^^^^^^^^^^^
 
@@ -69,19 +74,17 @@ The payload of this event is the string crash ID, very likely a UUID.
 There should be ``UUID.dmp`` and ``UUID.extra`` files on disk, saved by
 Breakpad.
 
-crash.plugin.1
-^^^^^^^^^^^^^^
+crash.submission.1
+^^^^^^^^^^^^
 
-This event is produced when a plugin process crashes.
+This event is produced when a crash is submitted.
 
-The payload is identical to ``crash.main.1``'s.
+The payload of this event is delimited by UNIX newlines (*\n*) and contains the
+following fields:
 
-hang.plugin.1
-^^^^^^^^^^^^^
-
-This event is produced when a plugin process hangs.
-
-The payload is identical to ``crash.main.1``'s.
+* The crash ID string
+* "true" if the submission succeeded or "false" otherwise
+* The remote crash ID string if the submission succeeded
 
 Aggregated Event Log
 ====================

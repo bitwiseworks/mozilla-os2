@@ -6,6 +6,7 @@
 
 #include "nsNSSComponent.h"
 #include "nsServiceManagerUtils.h"
+#include "pkix/pkixnss.h"
 #include "secerr.h"
 #include "sslerr.h"
 
@@ -15,7 +16,25 @@
 namespace mozilla {
 namespace psm {
 
+static_assert(mozilla::pkix::ERROR_BASE ==
+                nsINSSErrorsService::MOZILLA_PKIX_ERROR_BASE,
+              "MOZILLA_PKIX_ERROR_BASE and "
+                "nsINSSErrorsService::MOZILLA_PKIX_ERROR_BASE do not match.");
+static_assert(mozilla::pkix::ERROR_LIMIT ==
+                nsINSSErrorsService::MOZILLA_PKIX_ERROR_LIMIT,
+              "MOZILLA_PKIX_ERROR_LIMIT and "
+                "nsINSSErrorsService::MOZILLA_PKIX_ERROR_LIMIT do not match.");
+
+static bool
+IsPSMError(PRErrorCode error)
+{
+  return (error >= mozilla::pkix::ERROR_BASE &&
+          error < mozilla::pkix::ERROR_LIMIT);
+}
+
 NS_IMPL_ISUPPORTS(NSSErrorsService, nsINSSErrorsService)
+
+NSSErrorsService::~NSSErrorsService() { }
 
 nsresult
 NSSErrorsService::Init()
@@ -50,32 +69,49 @@ NSSErrorsService::Init()
  */
 #endif
 
+bool
+IsNSSErrorCode(PRErrorCode code)
+{
+  return IS_SEC_ERROR(code) || IS_SSL_ERROR(code) || IsPSMError(code);
+}
+
+nsresult
+GetXPCOMFromNSSError(PRErrorCode code)
+{
+  if (!code) {
+    MOZ_CRASH("Function failed without calling PR_GetError");
+  }
+
+  // The error codes within each module must be a 16 bit value.
+  // For simplicity we use the positive value of the NSS code.
+  return (nsresult)NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_SECURITY,
+                                             -1 * code);
+}
+
 NS_IMETHODIMP
 NSSErrorsService::IsNSSErrorCode(int32_t aNSPRCode, bool *_retval)
 {
-  if (!_retval)
-    return NS_ERROR_FAILURE;
+  if (!_retval) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
-  *_retval = IS_SEC_ERROR(aNSPRCode) || IS_SSL_ERROR(aNSPRCode);
+  *_retval = mozilla::psm::IsNSSErrorCode(aNSPRCode);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 NSSErrorsService::GetXPCOMFromNSSError(int32_t aNSPRCode, nsresult *aXPCOMErrorCode)
 {
-  if (!IS_SEC_ERROR(aNSPRCode) && !IS_SSL_ERROR(aNSPRCode))
-    return NS_ERROR_FAILURE;
-
-  if (!aXPCOMErrorCode)
+  if (!aXPCOMErrorCode) {
     return NS_ERROR_INVALID_ARG;
+  }
 
-  // The error codes within each module may be a 16 bit value.
-  // For simplicity let's use the positive value of the NSS code.
-  // XXX Don't make up nsresults, it's supposed to be an enum (bug 778113)
+  if (!mozilla::psm::IsNSSErrorCode(aNSPRCode)) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
-  *aXPCOMErrorCode =
-    (nsresult)NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_SECURITY,
-                                        -1 * aNSPRCode);
+  *aXPCOMErrorCode = mozilla::psm::GetXPCOMFromNSSError(aNSPRCode);
+
   return NS_OK;
 }
 
@@ -84,47 +120,64 @@ NSSErrorsService::GetErrorClass(nsresult aXPCOMErrorCode, uint32_t *aErrorClass)
 {
   NS_ENSURE_ARG(aErrorClass);
 
-  if (NS_ERROR_GET_MODULE(aXPCOMErrorCode) != NS_ERROR_MODULE_SECURITY
-      || NS_ERROR_GET_SEVERITY(aXPCOMErrorCode) != NS_ERROR_SEVERITY_ERROR)
+  if (NS_ERROR_GET_MODULE(aXPCOMErrorCode) != NS_ERROR_MODULE_SECURITY ||
+      NS_ERROR_GET_SEVERITY(aXPCOMErrorCode) != NS_ERROR_SEVERITY_ERROR) {
     return NS_ERROR_FAILURE;
+  }
   
   int32_t aNSPRCode = -1 * NS_ERROR_GET_CODE(aXPCOMErrorCode);
 
-  if (!IS_SEC_ERROR(aNSPRCode) && !IS_SSL_ERROR(aNSPRCode))
+  if (!mozilla::psm::IsNSSErrorCode(aNSPRCode)) {
     return NS_ERROR_FAILURE;
+  }
 
-  switch (aNSPRCode)
+  if (mozilla::psm::ErrorIsOverridable(aNSPRCode)) {
+    *aErrorClass = ERROR_CLASS_BAD_CERT;
+  } else {
+    *aErrorClass = ERROR_CLASS_SSL_PROTOCOL;
+  }
+
+  return NS_OK;
+}
+
+bool
+ErrorIsOverridable(PRErrorCode code)
+{
+  switch (code)
   {
     // Overridable errors.
-    case SEC_ERROR_UNKNOWN_ISSUER:
-    case SEC_ERROR_UNTRUSTED_ISSUER:
-    case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
-    case SEC_ERROR_UNTRUSTED_CERT:
-    case SSL_ERROR_BAD_CERT_DOMAIN:
-    case SEC_ERROR_EXPIRED_CERTIFICATE:
-    case SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED:
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY:
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE:
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE:
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE:
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA:
     case SEC_ERROR_CA_CERT_INVALID:
-      *aErrorClass = ERROR_CLASS_BAD_CERT;
-      break;
+    case SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED:
+    case SEC_ERROR_EXPIRED_CERTIFICATE:
+    case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
+    case SEC_ERROR_INVALID_TIME:
+    case SEC_ERROR_UNKNOWN_ISSUER:
+    case SSL_ERROR_BAD_CERT_DOMAIN:
+      return true;
     // Non-overridable errors.
     default:
-      *aErrorClass = ERROR_CLASS_SSL_PROTOCOL;
-      break;
+      return false;
   }
-  return NS_OK;
 }
 
 NS_IMETHODIMP
 NSSErrorsService::GetErrorMessage(nsresult aXPCOMErrorCode, nsAString &aErrorMessage)
 {
-  if (NS_ERROR_GET_MODULE(aXPCOMErrorCode) != NS_ERROR_MODULE_SECURITY
-      || NS_ERROR_GET_SEVERITY(aXPCOMErrorCode) != NS_ERROR_SEVERITY_ERROR)
+  if (NS_ERROR_GET_MODULE(aXPCOMErrorCode) != NS_ERROR_MODULE_SECURITY ||
+      NS_ERROR_GET_SEVERITY(aXPCOMErrorCode) != NS_ERROR_SEVERITY_ERROR) {
     return NS_ERROR_FAILURE;
+  }
   
   int32_t aNSPRCode = -1 * NS_ERROR_GET_CODE(aXPCOMErrorCode);
 
-  if (!IS_SEC_ERROR(aNSPRCode) && !IS_SSL_ERROR(aNSPRCode))
+  if (!mozilla::psm::IsNSSErrorCode(aNSPRCode)) {
     return NS_ERROR_FAILURE;
+  }
 
   nsCOMPtr<nsIStringBundle> theBundle = mPIPNSSBundle;
   const char *id_str = nsNSSErrors::getOverrideErrorStringName(aNSPRCode);
@@ -134,8 +187,9 @@ NSSErrorsService::GetErrorMessage(nsresult aXPCOMErrorCode, nsAString &aErrorMes
     theBundle = mNSSErrorsBundle;
   }
 
-  if (!id_str || !theBundle)
+  if (!id_str || !theBundle) {
     return NS_ERROR_FAILURE;
+  }
 
   nsAutoString msg;
   nsresult rv =

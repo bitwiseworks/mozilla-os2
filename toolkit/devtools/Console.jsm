@@ -163,7 +163,7 @@ function stringify(aThing, aAllowNewLines) {
 function debugElement(aElement) {
   return "<" + aElement.tagName +
       (aElement.id ? "#" + aElement.id : "") +
-      (aElement.className ?
+      (aElement.className && aElement.className.split ?
           "." + aElement.className.split(" ").join(" .") :
           "") +
       ">";
@@ -526,6 +526,7 @@ function sendConsoleAPIMessage(aConsole, aLevel, aFrame, aArgs, aOptions = {})
   let consoleEvent = {
     ID: "jsm",
     innerID: aConsole.innerID || aFrame.filename,
+    consoleID: aConsole.consoleID,
     level: aLevel,
     filename: aFrame.filename,
     lineNumber: aFrame.lineNumber,
@@ -558,10 +559,11 @@ function sendConsoleAPIMessage(aConsole, aLevel, aFrame, aArgs, aOptions = {})
       break;
   }
 
-  Services.obs.notifyObservers(consoleEvent, "console-api-log-event", null);
   let ConsoleAPIStorage = Cc["@mozilla.org/consoleAPI-storage;1"]
                             .getService(Ci.nsIConsoleAPIStorage);
-  ConsoleAPIStorage.recordEvent("jsm", consoleEvent);
+  if (ConsoleAPIStorage) {
+    ConsoleAPIStorage.recordEvent("jsm", null, consoleEvent);
+  }
 }
 
 /**
@@ -582,6 +584,8 @@ function sendConsoleAPIMessage(aConsole, aLevel, aFrame, aArgs, aOptions = {})
  *                            written to stdout
  *        - innerID {string}: An ID representing the source of the message.
  *                            Normally the inner ID of a DOM window.
+ *        - consoleID {string} : String identified for the console, this will
+ *                            be passed through the console notifications
  * @return {object}
  *        A console API instance object
  */
@@ -592,6 +596,7 @@ function ConsoleAPI(aConsoleOptions = {}) {
   this.prefix = aConsoleOptions.prefix || "";
   this.maxLogLevel = aConsoleOptions.maxLogLevel || "all";
   this.innerID = aConsoleOptions.innerID || null;
+  this.consoleID = aConsoleOptions.consoleID || "";
 
   // Bind all the functions to this object.
   for (let prop in this) {

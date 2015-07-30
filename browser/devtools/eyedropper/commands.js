@@ -38,13 +38,15 @@ exports.items = [{
     let chromeWindow = context.environment.chromeWindow;
     let target = context.environment.target;
 
-    let dropper = EyedropperManager.createInstance(chromeWindow);
+    let dropper = EyedropperManager.createInstance(chromeWindow,
+                                                   { context: "command",
+                                                     copyOnSelect: true });
     dropper.open();
 
-    eventEmitter.emit("changed", target.tab);
+    eventEmitter.emit("changed", { target: target });
 
     dropper.once("destroy", () => {
-      eventEmitter.emit("changed", target.tab);
+      eventEmitter.emit("changed", { target: target });
     });
   }
 }];

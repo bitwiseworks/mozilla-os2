@@ -32,6 +32,7 @@ dictionary MediaPlayStatus
   DOMString   playStatus = "";
 };
 
+[CheckPermissions="bluetooth"]
 interface BluetoothAdapter : EventTarget {
   readonly attribute DOMString      address;
   readonly attribute unsigned long  class;
@@ -49,6 +50,9 @@ interface BluetoothAdapter : EventTarget {
   readonly attribute any            uuids;
 
            attribute EventHandler   ondevicefound;
+
+  // Fired when discovery process has been done or has started
+           attribute EventHandler   ondiscoverystatechanged;
 
   // Fired when pairing process is completed
            attribute EventHandler   onpairedstatuschanged;
@@ -112,6 +116,9 @@ interface BluetoothAdapter : EventTarget {
 
   [NewObject, Throws]
   DOMRequest disconnect(BluetoothDevice device, optional unsigned short serviceUuid);
+
+  [NewObject, Throws]
+  DOMRequest isConnected(unsigned short serviceUuid);
 
   // One device can only send one file at a time
   [NewObject, Throws]

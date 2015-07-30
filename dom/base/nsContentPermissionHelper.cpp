@@ -13,15 +13,17 @@
 #include "mozilla/dom/PContentPermission.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/PContentPermissionRequestParent.h"
+#include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/unused.h"
 #include "nsComponentManagerUtils.h"
 #include "nsArrayUtils.h"
 #include "nsIMutableArray.h"
 #include "nsContentPermissionHelper.h"
-#include "nsCxPusher.h"
 #include "nsJSUtils.h"
 #include "nsISupportsPrimitives.h"
+#include "nsServiceManagerUtils.h"
 
 using mozilla::unused;          // <snicker>
 using namespace mozilla::dom;
@@ -90,7 +92,7 @@ ContentPermissionRequestParent::IsBeingDestroyed()
 {
   // When TabParent::Destroy() is called, we are being destroyed. It's unsafe
   // to send out any message now.
-  TabParent* tabParent = static_cast<TabParent*>(Manager());
+  TabParent* tabParent = TabParent::GetFrom(Manager());
   return tabParent->IsDestroyed();
 }
 
@@ -152,9 +154,11 @@ ContentPermissionType::GetOptions(nsIArray** aOptions)
   return NS_OK;
 }
 
-uint32_t
-ConvertPermissionRequestToArray(nsTArray<PermissionRequest>& aSrcArray,
-                                nsIMutableArray* aDesArray)
+// nsContentPermissionUtils
+
+/* static */ uint32_t
+nsContentPermissionUtils::ConvertPermissionRequestToArray(nsTArray<PermissionRequest>& aSrcArray,
+                                                          nsIMutableArray* aDesArray)
 {
   uint32_t len = aSrcArray.Length();
   for (uint32_t i = 0; i < len; i++) {
@@ -167,11 +171,46 @@ ConvertPermissionRequestToArray(nsTArray<PermissionRequest>& aSrcArray,
   return len;
 }
 
-nsresult
-CreatePermissionArray(const nsACString& aType,
-                      const nsACString& aAccess,
-                      const nsTArray<nsString>& aOptions,
-                      nsIArray** aTypesArray)
+/* static */ uint32_t
+nsContentPermissionUtils::ConvertArrayToPermissionRequest(nsIArray* aSrcArray,
+                                                          nsTArray<PermissionRequest>& aDesArray)
+{
+  uint32_t len = 0;
+  aSrcArray->GetLength(&len);
+  for (uint32_t i = 0; i < len; i++) {
+    nsCOMPtr<nsIContentPermissionType> cpt = do_QueryElementAt(aSrcArray, i);
+    nsAutoCString type;
+    nsAutoCString access;
+    cpt->GetType(type);
+    cpt->GetAccess(access);
+
+    nsCOMPtr<nsIArray> optionArray;
+    cpt->GetOptions(getter_AddRefs(optionArray));
+    uint32_t optionsLength = 0;
+    if (optionArray) {
+      optionArray->GetLength(&optionsLength);
+    }
+    nsTArray<nsString> options;
+    for (uint32_t j = 0; j < optionsLength; ++j) {
+      nsCOMPtr<nsISupportsString> isupportsString = do_QueryElementAt(optionArray, j);
+      if (isupportsString) {
+        nsString option;
+        isupportsString->GetData(option);
+        options.AppendElement(option);
+      }
+    }
+
+    aDesArray.AppendElement(PermissionRequest(type, access, options));
+  }
+  return len;
+}
+
+
+/* static */ nsresult
+nsContentPermissionUtils::CreatePermissionArray(const nsACString& aType,
+                                                const nsACString& aAccess,
+                                                const nsTArray<nsString>& aOptions,
+                                                nsIArray** aTypesArray)
 {
   nsCOMPtr<nsIMutableArray> types = do_CreateInstance(NS_ARRAY_CONTRACTID);
   nsRefPtr<ContentPermissionType> permType = new ContentPermissionType(aType,
@@ -183,12 +222,58 @@ CreatePermissionArray(const nsACString& aType,
   return NS_OK;
 }
 
-PContentPermissionRequestParent*
-CreateContentPermissionRequestParent(const nsTArray<PermissionRequest>& aRequests,
-                                     Element* element,
-                                     const IPC::Principal& principal)
+/* static */ PContentPermissionRequestParent*
+nsContentPermissionUtils::CreateContentPermissionRequestParent(const nsTArray<PermissionRequest>& aRequests,
+                                                               Element* element,
+                                                               const IPC::Principal& principal)
 {
   return new ContentPermissionRequestParent(aRequests, element, principal);
+}
+
+/* static */ nsresult
+nsContentPermissionUtils::AskPermission(nsIContentPermissionRequest* aRequest, nsPIDOMWindow* aWindow)
+{
+  MOZ_ASSERT(!aWindow || aWindow->IsInnerWindow());
+  NS_ENSURE_STATE(aWindow && aWindow->IsCurrentInnerWindow());
+
+  // for content process
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+
+    nsRefPtr<RemotePermissionRequest> req =
+      new RemotePermissionRequest(aRequest, aWindow);
+
+    MOZ_ASSERT(NS_IsMainThread()); // IPC can only be execute on main thread.
+
+    TabChild* child = TabChild::GetFrom(aWindow->GetDocShell());
+    NS_ENSURE_TRUE(child, NS_ERROR_FAILURE);
+
+    nsCOMPtr<nsIArray> typeArray;
+    nsresult rv = aRequest->GetTypes(getter_AddRefs(typeArray));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    nsTArray<PermissionRequest> permArray;
+    ConvertArrayToPermissionRequest(typeArray, permArray);
+
+    nsCOMPtr<nsIPrincipal> principal;
+    rv = aRequest->GetPrincipal(getter_AddRefs(principal));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    req->IPDLAddRef();
+    child->SendPContentPermissionRequestConstructor(req,
+                                                    permArray,
+                                                    IPC::Principal(principal));
+
+    req->Sendprompt();
+    return NS_OK;
+  }
+
+  // for chrome process
+  nsCOMPtr<nsIContentPermissionPrompt> prompt =
+    do_GetService(NS_CONTENT_PERMISSION_PROMPT_CONTRACTID);
+  if (prompt) {
+    prompt->Prompt(aRequest);
+  }
+  return NS_OK;
 }
 
 } // namespace dom
@@ -212,7 +297,7 @@ nsContentPermissionRequestProxy::Init(const nsTArray<PermissionRequest>& request
   mParent = parent;
   mPermissionRequests = requests;
 
-  nsCOMPtr<nsIContentPermissionPrompt> prompt = do_CreateInstance(NS_CONTENT_PERMISSION_PROMPT_CONTRACTID);
+  nsCOMPtr<nsIContentPermissionPrompt> prompt = do_GetService(NS_CONTENT_PERMISSION_PROMPT_CONTRACTID);
   if (!prompt) {
     return NS_ERROR_FAILURE;
   }
@@ -233,7 +318,7 @@ NS_IMETHODIMP
 nsContentPermissionRequestProxy::GetTypes(nsIArray** aTypes)
 {
   nsCOMPtr<nsIMutableArray> types = do_CreateInstance(NS_ARRAY_CONTRACTID);
-  if (ConvertPermissionRequestToArray(mPermissionRequests, types)) {
+  if (mozilla::dom::nsContentPermissionUtils::ConvertPermissionRequestToArray(mPermissionRequests, types)) {
     types.forget(aTypes);
     return NS_OK;
   }
@@ -309,15 +394,15 @@ nsContentPermissionRequestProxy::Allow(JS::HandleValue aChoices)
 #ifdef MOZ_WIDGET_GONK
   uint32_t len = mPermissionRequests.Length();
   for (uint32_t i = 0; i < len; i++) {
-    if (mPermissionRequests[i].type().Equals("audio-capture")) {
+    if (mPermissionRequests[i].type().EqualsLiteral("audio-capture")) {
       GonkPermissionService::GetInstance()->addGrantInfo(
         "android.permission.RECORD_AUDIO",
-        static_cast<TabParent*>(mParent->Manager())->Manager()->Pid());
+        TabParent::GetFrom(mParent->Manager())->Manager()->AsContentParent()->Pid());
     }
-    if (mPermissionRequests[i].type().Equals("video-capture")) {
+    if (mPermissionRequests[i].type().EqualsLiteral("video-capture")) {
       GonkPermissionService::GetInstance()->addGrantInfo(
         "android.permission.CAMERA",
-        static_cast<TabParent*>(mParent->Manager())->Manager()->Pid());
+        TabParent::GetFrom(mParent->Manager())->Manager()->AsContentParent()->Pid());
     }
   }
 #endif
@@ -340,7 +425,7 @@ nsContentPermissionRequestProxy::Allow(JS::HandleValue aChoices)
           !val.isString()) {
         // no setting for the permission type, skip it
       } else {
-        nsDependentJSString choice;
+        nsAutoJSString choice;
         if (!choice.init(cx, val)) {
           return NS_ERROR_FAILURE;
         }
@@ -355,4 +440,70 @@ nsContentPermissionRequestProxy::Allow(JS::HandleValue aChoices)
   unused << ContentPermissionRequestParent::Send__delete__(mParent, true, choices);
   mParent = nullptr;
   return NS_OK;
+}
+
+// RemotePermissionRequest
+
+NS_IMPL_ISUPPORTS0(RemotePermissionRequest)
+
+RemotePermissionRequest::RemotePermissionRequest(
+  nsIContentPermissionRequest* aRequest,
+  nsPIDOMWindow* aWindow)
+  : mRequest(aRequest)
+  , mWindow(aWindow)
+  , mIPCOpen(false)
+{
+}
+
+void
+RemotePermissionRequest::DoCancel()
+{
+  NS_ASSERTION(mRequest, "We need a request");
+  mRequest->Cancel();
+}
+
+void
+RemotePermissionRequest::DoAllow(JS::HandleValue aChoices)
+{
+  NS_ASSERTION(mRequest, "We need a request");
+  mRequest->Allow(aChoices);
+}
+
+// PContentPermissionRequestChild
+bool
+RemotePermissionRequest::Recv__delete__(const bool& aAllow,
+                                        InfallibleTArray<PermissionChoice>&& aChoices)
+{
+  if (aAllow && mWindow->IsCurrentInnerWindow()) {
+    // Use 'undefined' if no choice is provided.
+    if (aChoices.IsEmpty()) {
+      DoAllow(JS::UndefinedHandleValue);
+      return true;
+    }
+
+    // Convert choices to a JS val if any.
+    // {"type1": "choice1", "type2": "choiceA"}
+    AutoJSAPI jsapi;
+    if (NS_WARN_IF(!jsapi.Init(mWindow))) {
+      return true; // This is not an IPC error.
+    }
+
+    JSContext* cx = jsapi.cx();
+    JS::Rooted<JSObject*> obj(cx);
+    obj = JS_NewPlainObject(cx);
+    for (uint32_t i = 0; i < aChoices.Length(); ++i) {
+      const nsString& choice = aChoices[i].choice();
+      const nsCString& type = aChoices[i].type();
+      JS::Rooted<JSString*> jChoice(cx, JS_NewUCStringCopyN(cx, choice.get(), choice.Length()));
+      JS::Rooted<JS::Value> vChoice(cx, StringValue(jChoice));
+      if (!JS_SetProperty(cx, obj, type.get(), vChoice)) {
+        return false;
+      }
+    }
+    JS::RootedValue val(cx, JS::ObjectValue(*obj));
+    DoAllow(val);
+  } else {
+    DoCancel();
+  }
+  return true;
 }

@@ -37,9 +37,9 @@ MSVC_ENABLE_PGO = True
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
-FINAL_LIBRARY = 'necko'
+FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
-    '../../base/src',
-    '/content/base/src',
+    '/dom/base',
+    '/netwerk/base',
 ]

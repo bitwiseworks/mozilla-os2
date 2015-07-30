@@ -4,44 +4,40 @@
 MARIONETTE_TIMEOUT = 30000;
 MARIONETTE_HEAD_JS = 'head.js';
 
-let nfc = window.navigator.mozNfc;
 function testEnableNFC() {
   log('Running \'testEnableNFC\'');
-  let req = nfc.startPoll();
-  req.onsuccess = function () {
+  let promise = nfc.startPoll();
+  promise.then(() => {
     ok(true);
     runNextTest();
-  };
-  req.onerror = function () {
+  }).catch(() => {
     ok(false, "startPoll failed");
     runNextTest();
-  };
+  });
 }
 
 function testDisableNFC() {
   log('Running \'testDisableNFC\'');
-  let req = nfc.powerOff();
-  req.onsuccess = function () {
+  let promise = nfc.powerOff();
+  promise.then(() => {
     ok(true);
     runNextTest();
-  };
-  req.onerror = function () {
+  }).catch(() => {
     ok(false, "powerOff failed");
     runNextTest();
-  };
+  });
 }
 
 function testStopPollNFC() {
   log('Running \'testStopPollNFC\'');
-  let req = nfc.stopPoll();
-  req.onsuccess = function () {
+  let promise = nfc.stopPoll();
+  promise.then(() => {
     ok(true);
     runNextTest();
-  };
-  req.onerror = function () {
+  }).catch(() => {
     ok(false, "stopPoll failed");
     runNextTest();
-  };
+  });
 }
 
 let tests = [

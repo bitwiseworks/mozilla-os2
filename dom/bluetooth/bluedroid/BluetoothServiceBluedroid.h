@@ -7,18 +7,31 @@
 #ifndef mozilla_dom_bluetooth_bluetoothservicebluedroid_h__
 #define mozilla_dom_bluetooth_bluetoothservicebluedroid_h__
 
-#include <hardware/bluetooth.h>
-
 #include "BluetoothCommon.h"
+#include "BluetoothInterface.h"
 #include "BluetoothService.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
 
 class BluetoothServiceBluedroid : public BluetoothService
+                                , public BluetoothNotificationHandler
 {
-public:
-  static const bt_interface_t* GetBluetoothInterface();
+  class CancelDiscoveryResultHandler;
+  class CreateBondResultHandler;
+  class DisableResultHandler;
+  class EnableResultHandler;
+  class GetRemoteDevicePropertiesResultHandler;
+  class InitResultHandler;
+  class PinReplyResultHandler;
+  class ProfileDeinitResultHandler;
+  class ProfileInitResultHandler;
+  class RemoveBondResultHandler;
+  class SetAdapterPropertyDiscoverableResultHandler;
+  class SetAdapterPropertyResultHandler;
+  class SspReplyResultHandler;
+  class StartDiscoveryResultHandler;
 
+public:
   BluetoothServiceBluedroid();
   ~BluetoothServiceBluedroid();
 
@@ -86,12 +99,13 @@ public:
           uint16_t aServiceUuid,
           BluetoothReplyRunnable* aRunnable);
 
-  virtual bool
-  IsConnected(uint16_t aProfileId);
-
   virtual void
   Disconnect(const nsAString& aDeviceAddress, uint16_t aServiceUuid,
              BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  IsConnected(const uint16_t aServiceUuid,
+              BluetoothReplyRunnable* aRunnable) override;
 
   virtual void
   SendFile(const nsAString& aDeviceAddress,
@@ -137,26 +151,81 @@ public:
                int64_t aMediaNumber,
                int64_t aTotalMediaCount,
                int64_t aDuration,
-               BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+               BluetoothReplyRunnable* aRunnable) override;
 
   virtual void
   SendPlayStatus(int64_t aDuration,
                  int64_t aPosition,
                  const nsAString& aPlayStatus,
-                 BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+                 BluetoothReplyRunnable* aRunnable) override;
 
   virtual void
   UpdatePlayStatus(uint32_t aDuration,
                    uint32_t aPosition,
-                   ControlPlayStatus aPlayStatus) MOZ_OVERRIDE;
+                   ControlPlayStatus aPlayStatus) override;
 
   virtual nsresult
   SendSinkMessage(const nsAString& aDeviceAddresses,
-                  const nsAString& aMessage) MOZ_OVERRIDE;
+                  const nsAString& aMessage) override;
 
   virtual nsresult
   SendInputMessage(const nsAString& aDeviceAddresses,
-                   const nsAString& aMessage) MOZ_OVERRIDE;
+                   const nsAString& aMessage) override;
+
+  //
+  // Bluetooth notifications
+  //
+
+  virtual void AdapterStateChangedNotification(bool aState) override;
+  virtual void AdapterPropertiesNotification(
+    BluetoothStatus aStatus, int aNumProperties,
+    const BluetoothProperty* aProperties) override;
+
+  virtual void RemoteDevicePropertiesNotification(
+    BluetoothStatus aStatus, const nsAString& aBdAddr,
+    int aNumProperties, const BluetoothProperty* aProperties) override;
+
+  virtual void DeviceFoundNotification(
+    int aNumProperties, const BluetoothProperty* aProperties) override;
+
+  virtual void DiscoveryStateChangedNotification(bool aState) override;
+
+  virtual void PinRequestNotification(const nsAString& aRemoteBdAddr,
+                                      const nsAString& aBdName,
+                                      uint32_t aCod) override;
+  virtual void SspRequestNotification(const nsAString& aRemoteBdAddr,
+                                      const nsAString& aBdName,
+                                      uint32_t aCod,
+                                      const nsAString& aPairingaVariant,
+                                      uint32_t aPassKey) override;
+
+  virtual void BondStateChangedNotification(
+    BluetoothStatus aStatus, const nsAString& aRemoteBdAddr,
+    BluetoothBondState aState) override;
+  virtual void AclStateChangedNotification(BluetoothStatus aStatus,
+                                           const nsAString& aRemoteBdAddr,
+                                           bool aState) override;
+
+  virtual void DutModeRecvNotification(uint16_t aOpcode,
+                                       const uint8_t* aBuf,
+                                       uint8_t aLen) override;
+  virtual void LeTestModeNotification(BluetoothStatus aStatus,
+                                      uint16_t aNumPackets) override;
+
+  virtual void EnergyInfoNotification(
+    const BluetoothActivityEnergyInfo& aInfo) override;
+
+protected:
+  static nsresult StartGonkBluetooth();
+  static nsresult StopGonkBluetooth();
+  static bool EnsureBluetoothHalLoad();
+
+  static void ClassToIcon(uint32_t aClass, nsAString& aRetIcon);
+
+  static ControlPlayStatus PlayStatusStringToControlPlayStatus(
+    const nsAString& aPlayStatus);
+
+  uint16_t UuidToServiceClassInt(const BluetoothUuid& mUuid);
 };
 
 END_BLUETOOTH_NAMESPACE

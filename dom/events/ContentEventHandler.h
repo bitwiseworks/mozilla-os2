@@ -34,7 +34,7 @@ enum LineBreakType
 class MOZ_STACK_CLASS ContentEventHandler
 {
 public:
-  ContentEventHandler(nsPresContext* aPresContext);
+  explicit ContentEventHandler(nsPresContext* aPresContext);
 
   // NS_QUERY_SELECTED_TEXT event handler
   nsresult OnQuerySelectedText(WidgetQueryContentEvent* aEvent);
@@ -85,9 +85,21 @@ public:
                                            nsRange* aRange,
                                            uint32_t* aOffset,
                                            LineBreakType aLineBreakType);
+  // Computes the native text length between aStartOffset and aEndOffset of
+  // aContent.  Currently, this method supports only text node or br element
+  // for aContent.
+  static uint32_t GetNativeTextLength(nsIContent* aContent,
+                                      uint32_t aStartOffset,
+                                      uint32_t aEndOffset);
   // Get the native text length of a content node excluding any children
   static uint32_t GetNativeTextLength(nsIContent* aContent,
                                       uint32_t aMaxLength = UINT32_MAX);
+  // Get the text length of a given range of a content node in
+  // the given line break type.
+  static uint32_t GetTextLengthInRange(nsIContent* aContent,
+                                       uint32_t aXPStartOffset,
+                                       uint32_t aXPEndOffset,
+                                       LineBreakType aLineBreakType);
 protected:
   static uint32_t GetTextLength(nsIContent* aContent,
                                 LineBreakType aLineBreakType,
@@ -123,6 +135,18 @@ protected:
   // true, it is expanded to forward.
   nsresult ExpandToClusterBoundary(nsIContent* aContent, bool aForward,
                                    uint32_t* aXPOffset);
+
+  typedef nsTArray<mozilla::FontRange> FontRangeArray;
+  static void AppendFontRanges(FontRangeArray& aFontRanges,
+                               nsIContent* aContent,
+                               int32_t aBaseOffset,
+                               int32_t aXPStartOffset,
+                               int32_t aXPEndOffset,
+                               LineBreakType aLineBreakType);
+  static nsresult GenerateFlatFontRanges(nsRange* aRange,
+                                         FontRangeArray& aFontRanges,
+                                         uint32_t& aLength,
+                                         LineBreakType aLineBreakType);
 };
 
 } // namespace mozilla

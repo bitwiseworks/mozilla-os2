@@ -234,7 +234,9 @@ let RootFront = protocol.FrontClass(RootActor, {
 
   getTemporaryChild: protocol.custom(function(id) {
     if (!this._temporaryHolder) {
-      this._temporaryHolder = this.manage(new protocol.Front(this.conn, {actor: this.actorID + "_temp"}));
+      this._temporaryHolder = protocol.Front(this.conn);
+      this._temporaryHolder.actorID = this.actorID + "_temp";
+      this._temporaryHolder = this.manage(this._temporaryHolder);
     }
     return this._getTemporaryChild(id);
   },{
@@ -258,7 +260,7 @@ function run_test()
   DebuggerServer.createRootActor = (conn => {
     return RootActor(conn);
   });
-  DebuggerServer.init(() => true);
+  DebuggerServer.init();
 
   let trace = connectPipeTracing();
   let client = new DebuggerClient(trace);

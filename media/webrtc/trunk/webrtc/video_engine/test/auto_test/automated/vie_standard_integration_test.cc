@@ -43,10 +43,6 @@ TEST_F(ViEStandardIntegrationTest, RunsCaptureTestWithoutErrors)  {
   tests_->ViECaptureStandardTest();
 }
 
-TEST_F(ViEStandardIntegrationTest, RunsEncryptionTestWithoutErrors)  {
-  tests_->ViEEncryptionStandardTest();
-}
-
 TEST_F(ViEStandardIntegrationTest, RunsImageProcessTestWithoutErrors)  {
   tests_->ViEImageProcessStandardTest();
 }
@@ -55,13 +51,8 @@ TEST_F(ViEStandardIntegrationTest, RunsRenderTestWithoutErrors)  {
   tests_->ViERenderStandardTest();
 }
 
-// Fails on Mac, see https://code.google.com/p/webrtc/issues/detail?id=1790
-#if defined(WEBRTC_MAC)
-#define MAYBE_RunsRtpRtcpTestWithoutErrors DISABLED_RunsRtpRtcpTestWithoutErrors
-#else
-#define MAYBE_RunsRtpRtcpTestWithoutErrors RunsRtpRtcpTestWithoutErrors
-#endif
-TEST_F(ViEStandardIntegrationTest, MAYBE_RunsRtpRtcpTestWithoutErrors)  {
+// Flaky, see webrtc:1790.
+TEST_F(ViEStandardIntegrationTest, DISABLED_RunsRtpRtcpTestWithoutErrors)  {
   tests_->ViERtpRtcpStandardTest();
 }
 

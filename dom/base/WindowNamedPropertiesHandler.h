@@ -15,56 +15,57 @@ namespace dom {
 class WindowNamedPropertiesHandler : public BaseDOMProxyHandler
 {
 public:
-  WindowNamedPropertiesHandler() : BaseDOMProxyHandler(nullptr)
+  MOZ_CONSTEXPR WindowNamedPropertiesHandler()
+    : BaseDOMProxyHandler(nullptr, /* hasPrototype = */ true)
   {
-    setHasPrototype(true);
-  }
-  virtual bool
-  preventExtensions(JSContext* aCx, JS::Handle<JSObject*> aProxy) MOZ_OVERRIDE
-  {
-    // Throw a TypeError, per WebIDL.
-    JS_ReportErrorNumber(aCx, js_GetErrorMessage, nullptr,
-                         JSMSG_CANT_CHANGE_EXTENSIBILITY);
-    return false;
   }
   virtual bool
   getOwnPropDescriptor(JSContext* aCx, JS::Handle<JSObject*> aProxy,
                        JS::Handle<jsid> aId,
                        bool /* unused */,
-                       JS::MutableHandle<JSPropertyDescriptor> aDesc) MOZ_OVERRIDE;
+                       JS::MutableHandle<JSPropertyDescriptor> aDesc)
+                       const override;
   virtual bool
   defineProperty(JSContext* aCx, JS::Handle<JSObject*> aProxy,
                  JS::Handle<jsid> aId,
-                 JS::MutableHandle<JSPropertyDescriptor> aDesc) MOZ_OVERRIDE;
+                 JS::MutableHandle<JSPropertyDescriptor> aDesc) const override;
   virtual bool
   ownPropNames(JSContext* aCx, JS::Handle<JSObject*> aProxy, unsigned flags,
-               JS::AutoIdVector& aProps) MOZ_OVERRIDE;
+               JS::AutoIdVector& aProps) const override;
   virtual bool
   delete_(JSContext* aCx, JS::Handle<JSObject*> aProxy, JS::Handle<jsid> aId,
-          bool* aBp) MOZ_OVERRIDE;
+          bool* aBp) const override;
+  virtual bool
+  preventExtensions(JSContext* aCx, JS::Handle<JSObject*> aProxy,
+                    bool *succeeded) const override
+  {
+    *succeeded = false;
+    return true;
+  }
   virtual bool
   isExtensible(JSContext* aCx, JS::Handle<JSObject*> aProxy,
-               bool* aIsExtensible) MOZ_OVERRIDE
+               bool* aIsExtensible) const override
   {
     *aIsExtensible = true;
     return true;
   }
   virtual const char*
-  className(JSContext *aCx, JS::Handle<JSObject*> aProxy) MOZ_OVERRIDE
+  className(JSContext *aCx, JS::Handle<JSObject*> aProxy) const override
   {
     return "WindowProperties";
   }
 
-  static WindowNamedPropertiesHandler*
+  static const WindowNamedPropertiesHandler*
   getInstance()
   {
-    static WindowNamedPropertiesHandler instance;
+    static const WindowNamedPropertiesHandler instance;
     return &instance;
   }
 
-  // For Install, aProto is the proto of the Window we're associated with.
-  static void
-  Install(JSContext *aCx, JS::Handle<JSObject*> aProto);
+  // For Create, aProto is the parent of the interface prototype object of the
+  // Window we're associated with.
+  static JSObject*
+  Create(JSContext *aCx, JS::Handle<JSObject*> aProto);
 };
 
 } // namespace dom

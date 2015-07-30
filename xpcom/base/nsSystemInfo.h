@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 50; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,27 +8,44 @@
 #define _NSSYSTEMINFO_H_
 
 #include "nsHashPropertyBag.h"
+#if defined(XP_WIN)
+#include "nsIObserver.h"
+#endif // defined(XP_WIN)
 
-class nsSystemInfo : public nsHashPropertyBag {
+class nsSystemInfo final
+  : public nsHashPropertyBag
+#if defined(XP_WIN)
+  , public nsIObserver
+#endif // defined(XP_WIN)
+{
 public:
-    nsSystemInfo();
+#if defined(XP_WIN)
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIOBSERVER
+#endif // defined(XP_WIN)
 
-    nsresult Init();
+  nsSystemInfo();
 
-    // Slot for NS_InitXPCOM2 to pass information to nsSystemInfo::Init.
-    // See comments above the variable definition and in NS_InitXPCOM2.
-    static uint32_t gUserUmask;
+  nsresult Init();
+
+  // Slot for NS_InitXPCOM2 to pass information to nsSystemInfo::Init.
+  // See comments above the variable definition and in NS_InitXPCOM2.
+  static uint32_t gUserUmask;
 
 protected:
-    void SetInt32Property(const nsAString &aPropertyName,
-                          const int32_t aValue);
-    void SetUint32Property(const nsAString &aPropertyName,
-                           const uint32_t aValue);
-    void SetUint64Property(const nsAString &aPropertyName,
-                           const uint64_t aValue);
+  void SetInt32Property(const nsAString& aPropertyName,
+                        const int32_t aValue);
+  void SetUint32Property(const nsAString& aPropertyName,
+                         const uint32_t aValue);
+  void SetUint64Property(const nsAString& aPropertyName,
+                         const uint64_t aValue);
 
 private:
-    ~nsSystemInfo();
+  ~nsSystemInfo();
+
+#if defined(XP_WIN)
+  nsresult GetProfileHDDInfo();
+#endif // defined(XP_WIN)
 };
 
 #define NS_SYSTEMINFO_CONTRACTID "@mozilla.org/system-info;1"

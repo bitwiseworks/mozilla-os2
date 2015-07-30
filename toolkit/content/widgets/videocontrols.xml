@@ -325,6 +325,7 @@
                 controlsSpacer : null,
                 clickToPlay    : null,
                 stats          : {},
+                controlsOverlay : null,
                 fullscreenButton : null,
 
                 randomID : 0,
@@ -342,12 +343,7 @@
                 get isAudioOnly() { return this._isAudioOnly; },
                 set isAudioOnly(val) {
                     this._isAudioOnly = val;
-                    if (this._isAudioOnly) {
-                        this.controlBar.setAttribute("audio-only", true);
-                    } else {
-                        this.controlBar.removeAttribute("audio-only");
-                    }
-                    this.adjustControlSize();
+                    this.setFullscreenButtonState();
 
                     if (!this.isTopLevelSyntheticDocument)
                         return;
@@ -408,7 +404,7 @@
                     this.videocontrols.randomID = this.randomID;
 
                     this.setPlayButtonState(this.video.paused);
-                    this.setMuteButtonState(this.video.muted);
+                    this.updateMuteButtonState();
 
                     this.setFullscreenButtonState();
 
@@ -564,7 +560,7 @@
                         case "volumechange":
                             var volume = this.video.muted ? 0 : this.video.volume;
                             var volumePercentage = Math.round(volume * 100);
-                            this.setMuteButtonState(this.video.muted);
+                            this.updateMuteButtonState();
                             this.volumeControl.value = volumePercentage;
                             this.volumeForeground.style.paddingRight = (1 - volume) * this._volumeControlWidth + "px";
                             break;
@@ -875,7 +871,7 @@
                 _showControlsTimeout : 0,
                 SHOW_CONTROLS_TIMEOUT_MS: 500,
                 _showControlsFn : function () {
-                    if (Utils.video.mozMatchesSelector("video:hover")) {
+                    if (Utils.video.matches("video:hover")) {
                         Utils.startFadeIn(Utils.controlBar, false);
                         Utils._showControlsTimeout = 0;
                         Utils._controlsHiddenByTimeout = false;
@@ -936,8 +932,11 @@
 
                     var isMouseOver = (event.type == "mouseover");
 
-                    var isMouseInControls = event.clientY > this.controlBar.getBoundingClientRect().top &&
-                                            event.clientY < this.controlBar.getBoundingClientRect().bottom;
+                    var controlRect = this.controlBar.getBoundingClientRect();
+                    var isMouseInControls = event.clientY > controlRect.top &&
+                                            event.clientY < controlRect.bottom &&
+                                            event.clientX > controlRect.left &&
+                                            event.clientX < controlRect.right;
 
                     // Suppress fading out the controls until the video has rendered
                     // its first frame. But since autoplay videos start off with no
@@ -1039,7 +1038,10 @@
                     if (this.isVideoWithoutAudioTrack()) {
                         return;
                     }
-                    this.video.muted = !this.video.muted;
+                    this.video.muted = !this.isEffectivelyMuted();
+                    if (this.video.volume === 0) {
+                      this.video.volume = 0.5;
+                    }
 
                     // We'll handle style changes in the event listener for
                     // the "volumechange" event, same as if content script was
@@ -1058,9 +1060,12 @@
 
                 setFullscreenButtonState : function () {
                     if (this.isAudioOnly || !document.mozFullScreenEnabled) {
-                        this.fullscreenButton.hidden = true;
+                        this.controlBar.setAttribute("fullscreen-unavailable", true);
+                        this.adjustControlSize();
                         return;
                     }
+                    this.controlBar.removeAttribute("fullscreen-unavailable");
+                    this.adjustControlSize();
 
                     var attrName = this.isVideoInFullScreen() ? "exitfullscreenlabel" : "enterfullscreenlabel";
                     var value = this.fullscreenButton.getAttribute(attrName);
@@ -1129,13 +1134,19 @@
                   this.playButton.setAttribute("aria-label", value);
                 },
 
-                setMuteButtonState : function(aMuted) {
-                  if (aMuted)
+                isEffectivelyMuted : function() {
+                  return this.video.muted || !this.video.volume;
+                },
+
+                updateMuteButtonState : function() {
+                  var muted = this.isEffectivelyMuted();
+
+                  if (muted)
                       this.muteButton.setAttribute("muted", "true");
                   else
                       this.muteButton.removeAttribute("muted");
 
-                  var attrName = aMuted ? "unmutelabel" : "mutelabel";
+                  var attrName = muted ? "unmutelabel" : "mutelabel";
                   var value = this.muteButton.getAttribute(attrName);
                   this.muteButton.setAttribute("aria-label", value);
                 },
@@ -1379,8 +1390,8 @@
                                               this._volumeControlWidth +
                                               this._fullscreenButtonWidth;
 
-                    let isAudioOnly = this.isAudioOnly;
-                    if (isAudioOnly) {
+                    let isFullscreenUnavailable = this.controlBar.hasAttribute("fullscreen-unavailable");
+                    if (isFullscreenUnavailable) {
                         // When the fullscreen button is hidden we add margin-end to the volume stack.
                         minWidthAllControls -= this._fullscreenButtonWidth - this._volumeStackMarginEnd;
                     }
@@ -1388,8 +1399,29 @@
                     let minHeightForControlBar = this._controlBarHeight;
                     let minWidthOnlyPlayPause = this._playButtonWidth + this._muteButtonWidth;
 
+                    let isAudioOnly = this.isAudioOnly;
                     let videoHeight = isAudioOnly ? minHeightForControlBar : this.video.clientHeight;
                     let videoWidth = isAudioOnly ? minWidthAllControls : this.video.clientWidth;
+
+                    // Adapt the size of the controls to the size of the video
+                    if (this.video.readyState >= this.video.HAVE_METADATA) {
+                      if (!this.isAudioOnly && this.video.videoWidth && this.video.videoHeight) {
+                        var rect = this.video.getBoundingClientRect();
+                        var widthRatio = rect.width / this.video.videoWidth;
+                        var heightRatio = rect.height / this.video.videoHeight;
+                        var width = this.video.videoWidth * Math.min(widthRatio, heightRatio);
+
+                        this.controlsOverlay.setAttribute("scaled", true);
+                        this.controlsOverlay.style.width = width + "px";
+                        this.controlsSpacer.style.width = width + "px";
+                        this.controlBar.style.width = width + "px";
+                      } else {
+                        this.controlsOverlay.removeAttribute("scaled");
+                        this.controlsOverlay.style.width = "";
+                        this.controlsSpacer.style.width = "";
+                        this.controlBar.style.width = "";
+                      }
+                    }
 
                     if ((this._overlayPlayButtonHeight + this._controlBarHeight) > videoHeight ||
                         this._overlayPlayButtonWidth > videoWidth) {
@@ -1429,6 +1461,7 @@
                     this.positionLabel = document.getAnonymousElementByAttribute(binding, "class", "positionLabel");
                     this.statusOverlay = document.getAnonymousElementByAttribute(binding, "class", "statusOverlay");
                     this.statsOverlay  = document.getAnonymousElementByAttribute(binding, "class", "statsOverlay");
+                    this.controlsOverlay = document.getAnonymousElementByAttribute(binding, "class", "controlsOverlay");
                     this.controlsSpacer     = document.getAnonymousElementByAttribute(binding, "class", "controlsSpacer");
                     this.clickToPlay        = document.getAnonymousElementByAttribute(binding, "class", "clickToPlay");
                     this.fullscreenButton   = document.getAnonymousElementByAttribute(binding, "class", "fullscreenButton");
@@ -1478,6 +1511,10 @@
                     addListener(this.videocontrols, "transitionend", this.onTransitionEnd);
                     addListener(this.video.ownerDocument, "mozfullscreenchange", this.onFullscreenChange);
                     addListener(this.video, "keypress", this.keyHandler);
+
+                    addListener(this.videocontrols, "dragstart", function(event) {
+                        event.preventDefault(); //prevent dragging of controls image (bug 517114)
+                    });
 
                     this.log("--- videocontrols initialized ---");
                 }

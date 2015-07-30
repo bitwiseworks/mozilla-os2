@@ -7,7 +7,7 @@ typedef enum {
 	dss_prec_secondary = 2,
 
 	dss_prec_limit     = 3
-} dss_prec_t ;
+} dss_prec_t;
 #define	DSS_PREC_DEFAULT	dss_prec_secondary
 #define	DSS_DEFAULT		"secondary"
 
@@ -23,7 +23,8 @@ extern const char *dss_prec_names[];
 
 dss_prec_t	chunk_dss_prec_get(void);
 bool	chunk_dss_prec_set(dss_prec_t dss_prec);
-void	*chunk_alloc_dss(size_t size, size_t alignment, bool *zero);
+void	*chunk_alloc_dss(void *new_addr, size_t size, size_t alignment,
+    bool *zero);
 bool	chunk_in_dss(void *chunk);
 bool	chunk_dss_boot(void);
 void	chunk_dss_prefork(void);

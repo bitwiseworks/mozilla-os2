@@ -32,6 +32,7 @@ var gTestInstallListener = {
 
   onInstallFailed: function(aInstall) {
     ok(false, "Did not expect onInstallFailed");
+    run_next_test();
   }
 };
 

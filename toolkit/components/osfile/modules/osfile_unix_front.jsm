@@ -112,7 +112,7 @@
      /**
       * Write some bytes to a file.
       *
-      * @param {C pointer} buffer A buffer holding the data that must be
+      * @param {Typed array} buffer A buffer holding the data that must be
       * written.
       * @param {number} nbytes The number of bytes to write. It must not
       * exceed the size of |buffer| in bytes.
@@ -174,12 +174,7 @@
      };
 
      /**
-      * Set the file's access permissions.  Without any options, the
-      * permissions are set to an approximation of what they would
-      * have been if the file had been created in its current
-      * directory in the "most typical" fashion for the operating
-      * system.  In the current implementation, this means we set
-      * the POSIX file mode to (0666 & ~umask).
+      * Set the file's access permissions.
       *
       * This operation is likely to fail if applied to a file that was
       * not created by the currently running program (more precisely,
@@ -187,12 +182,16 @@
       * user account).  It may also fail, or silently do nothing, if the
       * filesystem containing the file does not support access permissions.
       *
-      * @param {*=} options
-      * - {number} unixMode     If present, the POSIX file mode is set to
-      *                         exactly this value, unless |unixHonorUmask| is
-      *                         also present.
-      * - {bool} unixHonorUmask If true, any |unixMode| value is modified by
-      *                         the process umask, as open() would have done.
+      * @param {*=} options Object specifying the requested permissions:
+      *
+      * - {number} unixMode The POSIX file mode to set on the file.  If omitted,
+      *  the POSIX file mode is reset to the default used by |OS.file.open|.  If
+      *  specified, the permissions will respect the process umask as if they
+      *  had been specified as arguments of |OS.File.open|, unless the
+      *  |unixHonorUmask| parameter tells otherwise.
+      * - {bool} unixHonorUmask If omitted or true, any |unixMode| value is
+      *  modified by the process umask, as |OS.File.open| would have done.  If
+      *  false, the exact value of |unixMode| will be applied.
       */
      File.prototype.setPermissions = function setPermissions(options = {}) {
        throw_on_negative("setPermissions",
@@ -205,6 +204,9 @@
       * The time stamp resolution is 1 second at best, but might be worse
       * depending on the platform.
       *
+      * WARNING: This method is not implemented on Android/B2G. On Android/B2G,
+      * you should use File.setDates instead.
+      *
       * @param {Date,number=} accessDate The last access date. If numeric,
       * milliseconds since epoch. If omitted or null, then the current date
       * will be used.
@@ -215,18 +217,14 @@
       * @throws {TypeError} In case of invalid parameters.
       * @throws {OS.File.Error} In case of I/O error.
       */
-     File.prototype.setDates = function setDates(accessDate, modificationDate) {
-       accessDate = normalizeDate("File.prototype.setDates", accessDate);
-       modificationDate = normalizeDate("File.prototype.setDates",
-                                        modificationDate);
-       gTimevals[0].tv_sec = (accessDate / 1000) | 0;
-       gTimevals[0].tv_usec = 0;
-       gTimevals[1].tv_sec = (modificationDate / 1000) | 0;
-       gTimevals[1].tv_usec = 0;
-       throw_on_negative("setDates",
-                         UnixFile.futimes(this.fd, gTimevalsPtr),
-                         this._path);
-     };
+     if (SharedAll.Constants.Sys.Name != "Android") {
+       File.prototype.setDates = function(accessDate, modificationDate) {
+         let {value, ptr} = datesToTimevals(accessDate, modificationDate);
+         throw_on_negative("setDates",
+           UnixFile.futimes(this.fd, ptr),
+           this._path);
+       };
+     }
 
      /**
       * Flushes the file's buffers and causes all buffered data
@@ -293,6 +291,7 @@
       * @throws {OS.File.Error} If the file could not be opened.
       */
      File.open = function Unix_open(path, mode, options = {}) {
+       // We don't need to filter for the umask because "open" does this for us.
        let omode = options.unixMode !== undefined ?
                      options.unixMode : DEFAULT_UNIX_MODE;
        let flags;
@@ -387,7 +386,7 @@
      /**
       * Gets the number of bytes available on disk to the current user.
       *
-      * @param {string} sourcePath Platform-specific path to a directory on 
+      * @param {string} sourcePath Platform-specific path to a directory on
       * the disk to query for free available bytes.
       *
       * @return {number} The number of bytes available for the current user.
@@ -397,7 +396,7 @@
        let fileSystemInfo = new Type.statvfs.implementation();
        let fileSystemInfoPtr = fileSystemInfo.address();
 
-       throw_on_negative("statvfs",  UnixFile.statvfs(sourcePath, fileSystemInfoPtr));
+       throw_on_negative("statvfs",  (UnixFile.statvfs || UnixFile.statfs)(sourcePath, fileSystemInfoPtr));
 
        let bytes = new Type.uint64_t.implementation(
                         fileSystemInfo.f_bsize * fileSystemInfo.f_bavail);
@@ -853,8 +852,7 @@
 
      let gStatData = new Type.stat.implementation();
      let gStatDataPtr = gStatData.address();
-     let gTimevals = new Type.timevals.implementation();
-     let gTimevalsPtr = gTimevals.address();
+
      let MODE_MASK = 4095 /*= 07777*/;
      File.Info = function Info(stat, path) {
        let isDir = (stat.st_mode & Const.S_IFMT) == Const.S_IFDIR;
@@ -939,12 +937,7 @@
      };
 
      /**
-      * Set the file's access permissions.  Without any options, the
-      * permissions are set to an approximation of what they would
-      * have been if the file had been created in its current
-      * directory in the "most typical" fashion for the operating
-      * system.  In the current implementation, this means we set
-      * the POSIX file mode to (0666 & ~umask).
+      * Set the file's access permissions.
       *
       * This operation is likely to fail if applied to a file that was
       * not created by the currently running program (more precisely,
@@ -952,19 +945,42 @@
       * user account).  It may also fail, or silently do nothing, if the
       * filesystem containing the file does not support access permissions.
       *
-      * @param {string} path   The name of the file to reset the permissions of.
-      * @param {*=} options
-      * - {number} unixMode     If present, the POSIX file mode is set to
-      *                         exactly this value, unless |unixHonorUmask| is
-      *                         also present.
-      * - {bool} unixHonorUmask If true, any |unixMode| value is modified by
-      *                         the process umask, as open() would have done.
+      * @param {string} path The name of the file to reset the permissions of.
+      * @param {*=} options Object specifying the requested permissions:
+      *
+      * - {number} unixMode The POSIX file mode to set on the file.  If omitted,
+      *  the POSIX file mode is reset to the default used by |OS.file.open|.  If
+      *  specified, the permissions will respect the process umask as if they
+      *  had been specified as arguments of |OS.File.open|, unless the
+      *  |unixHonorUmask| parameter tells otherwise.
+      * - {bool} unixHonorUmask If omitted or true, any |unixMode| value is
+      *  modified by the process umask, as |OS.File.open| would have done.  If
+      *  false, the exact value of |unixMode| will be applied.
       */
      File.setPermissions = function setPermissions(path, options = {}) {
        throw_on_negative("setPermissions",
                          UnixFile.chmod(path, unixMode(options)),
                          path);
      };
+
+     /**
+      * Convert an access date and a modification date to an array
+      * of two |timeval|.
+      */
+     function datesToTimevals(accessDate, modificationDate) {
+       accessDate = normalizeDate("File.setDates", accessDate);
+       modificationDate = normalizeDate("File.setDates", modificationDate);
+
+       let timevals = new Type.timevals.implementation();
+       let timevalsPtr = timevals.address();
+
+       timevals[0].tv_sec = (accessDate / 1000) | 0;
+       timevals[0].tv_usec = 0;
+       timevals[1].tv_sec = (modificationDate / 1000) | 0;
+       timevals[1].tv_usec = 0;
+
+       return { value: timevals, ptr: timevalsPtr };
+     }
 
      /**
       * Set the last access and modification date of the file.
@@ -983,14 +999,9 @@
       * @throws {OS.File.Error} In case of I/O error.
       */
      File.setDates = function setDates(path, accessDate, modificationDate) {
-       accessDate = normalizeDate("File.setDates", accessDate);
-       modificationDate = normalizeDate("File.setDates", modificationDate);
-       gTimevals[0].tv_sec = (accessDate / 1000) | 0;
-       gTimevals[0].tv_usec = 0;
-       gTimevals[1].tv_sec = (modificationDate / 1000) | 0;
-       gTimevals[1].tv_usec = 0;
+       let {value, ptr} = datesToTimevals(accessDate, modificationDate);
        throw_on_negative("setDates",
-                         UnixFile.utimes(path, gTimevalsPtr),
+                         UnixFile.utimes(path, ptr),
                          path);
      };
 
@@ -1014,7 +1025,7 @@
       *
       * Note: This function will remove a symlink even if it points a directory.
       */
-     File.removeDir = function(path, options) {
+     File.removeDir = function(path, options = {}) {
        let isSymLink;
        try {
          let info = File.stat(path, {unixNoFollowingLinks: true});
@@ -1039,8 +1050,17 @@
       * Get the current directory by getCurrentDirectory.
       */
      File.getCurrentDirectory = function getCurrentDirectory() {
-       let path = UnixFile.get_current_dir_name?UnixFile.get_current_dir_name():
-         UnixFile.getwd_auto(null);
+       let path, buf;
+       if (UnixFile.get_current_dir_name) {
+	 path = UnixFile.get_current_dir_name();
+       } else if (UnixFile.getwd_auto) {
+         path = UnixFile.getwd_auto(null);
+       } else {
+	 for (let length = Const.PATH_MAX; !path; length *= 2) {
+	   buf = new (ctypes.char.array(length));
+	   path = UnixFile.getcwd(buf, length);
+	 };
+       }
        throw_on_null("getCurrentDirectory", path);
        return path.readString();
      };
@@ -1149,12 +1169,9 @@
       * Helper used by both versions of setPermissions.
       */
      function unixMode(options) {
-       let mode = 438; /* 0666 */
+       let mode = options.unixMode !== undefined ?
+                    options.unixMode : DEFAULT_UNIX_MODE;
        let unixHonorUmask = true;
-       if ("unixMode" in options) {
-         unixHonorUmask = false;
-         mode = options.unixMode;
-       }
        if ("unixHonorUmask" in options) {
          unixHonorUmask = options.unixHonorUmask;
        }

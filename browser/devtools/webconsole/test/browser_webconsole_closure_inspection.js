@@ -16,10 +16,8 @@ function test()
     gWebConsole = gJSTerm = gVariablesView = null;
   });
 
-  addTab(TEST_URI);
-  browser.addEventListener("load", function onLoad() {
-    browser.removeEventListener("load", onLoad, true);
-    openConsole(null, (hud) => {
+  loadTab(TEST_URI).then(() => {
+    openConsole().then((hud) => {
       openDebugger().then(({ toolbox, panelWin }) => {
         let deferred = promise.defer();
         panelWin.gThreadClient.addOneTimeListener("resumed", (aEvent, aPacket) => {
@@ -37,12 +35,12 @@ function test()
 
         let button = content.document.querySelector("button");
         ok(button, "button element found");
-        button.click();
+        EventUtils.synthesizeMouseAtCenter(button, {}, content);
 
         return deferred.promise;
       });
-    });
-  }, true);
+    })
+  });
 }
 
 function consoleOpened(hud)
@@ -67,7 +65,7 @@ function onExecuteGetName(aResults)
   ok(clickable, "clickable object found");
 
   gJSTerm.once("variablesview-fetched", onGetNameFetch);
-  EventUtils.synthesizeMouse(clickable, 2, 2, {}, gWebConsole.iframeWindow)
+  EventUtils.synthesizeMouse(clickable, 2, 2, {}, gWebConsole.iframeWindow);
 }
 
 function onGetNameFetch(aEvent, aVar)
@@ -87,5 +85,5 @@ function onExpandClosure(aResults)
 
   gVariablesView.window.focus();
   gJSTerm.once("sidebar-closed", finishTest);
-  EventUtils.synthesizeKey("VK_ESCAPE", {}, gVariablesView.window);
+  EventUtils.synthesizeKey("VK_ESCAPE", {});
 }

@@ -37,8 +37,15 @@
 
 #ifdef XP_WIN
 // we want a wmain entry point
+#ifdef MOZ_ASAN
+// ASAN requires firefox.exe to be built with -MD, and it's OK if we don't
+// support Windows XP SP2 in ASAN builds.
+#define XRE_DONT_SUPPORT_XPSP2
+#endif
 #include "nsWindowsWMain.cpp"
+#if defined(_MSC_VER) && (_MSC_VER < 1900)
 #define snprintf _snprintf
+#endif
 #define strcasecmp _stricmp
 #endif
 #include "BinaryPath.h"
@@ -50,6 +57,9 @@
 
 using namespace mozilla;
 
+#ifdef XP_MACOSX
+#define kOSXResourcesFolder "Resources"
+#endif
 #define kDesktopFolder "browser"
 #define kMetroFolder "metro"
 #define kMetroAppIniFilename "metroapp.ini"
@@ -118,7 +128,7 @@ static bool IsArg(const char* arg, const char* s)
   return false;
 }
 
-#ifdef XP_WIN
+#if defined(XP_WIN) && defined(MOZ_METRO)
 /*
  * AttachToTestHarness - Windows helper for when we are running
  * in the immersive environment. Firefox is launched by Windows in
@@ -270,7 +280,9 @@ static int do_main(int argc, char* argv[], nsIFile *xreDirectory)
 
     nsCOMPtr<nsIFile> greDir;
     exeFile->GetParent(getter_AddRefs(greDir));
-
+#ifdef XP_MACOSX
+    greDir->SetNativeLeafName(NS_LITERAL_CSTRING(kOSXResourcesFolder));
+#endif
     nsCOMPtr<nsIFile> appSubdir;
     greDir->Clone(getter_AddRefs(appSubdir));
     appSubdir->Append(NS_LITERAL_STRING(kDesktopFolder));
@@ -560,10 +572,18 @@ InitXPCOMGlue(const char *argv0, nsIFile **xreDirectory)
     return rv;
   }
 
+#ifndef MOZ_METRO
+  // This will set this thread as the main thread, which in metro land is
+  // wrong. We initialize this later from the right thread in nsAppRunner.
   NS_LogInit();
+#endif
 
   // chop XPCOM_DLL off exePath
   *lastSlash = '\0';
+#ifdef XP_MACOSX
+  lastSlash = strrchr(exePath, XPCOM_FILE_PATH_SEPARATOR[0]);
+  strcpy(lastSlash + 1, kOSXResourcesFolder);
+#endif
 #ifdef XP_WIN
   rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(exePath), false,
                        xreDirectory);
@@ -593,6 +613,8 @@ int main(int argc, char* argv[])
 #elif defined(XP_WIN)
   IO_COUNTERS ioCounters;
   gotCounters = GetProcessIoCounters(GetCurrentProcess(), &ioCounters);
+#else
+  #error "Unknown platform"  // having this here keeps cppcheck happy
 #endif
 
   nsIFile *xreDirectory;
@@ -637,6 +659,8 @@ int main(int argc, char* argv[])
       XRE_TelemetryAccumulate(mozilla::Telemetry::GLUESTARTUP_HARD_FAULTS,
                               int(newRUsage.ru_majflt - initialRUsage.ru_majflt));
     }
+#else
+  #error "Unknown platform"  // having this here keeps cppcheck happy
 #endif
   }
 

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.tests;
 
 import java.io.File;
@@ -45,8 +49,8 @@ public abstract class SessionTest extends BaseTest {
     }
 
     protected class PageInfo {
-        private String url;
-        private String title;
+        private final String url;
+        private final String title;
 
         public PageInfo(String key) {
             if (key.startsWith("about:")) {
@@ -132,7 +136,7 @@ public abstract class SessionTest extends BaseTest {
     protected void loadSessionTabs(Session session) {
         // Verify initial about:home tab
         verifyTabCount(1);
-        verifyUrl("about:home");
+        verifyUrl(StringHelper.ABOUT_HOME_URL);
 
         SessionTab[] tabs = session.getItems();
         for (int i = 0; i < tabs.length; i++) {
@@ -141,7 +145,8 @@ public abstract class SessionTest extends BaseTest {
 
             // New tabs always start with about:home, so make sure about:home
             // is always the first entry.
-            mAsserter.is(pages[0].url, "about:home", "first page in tab is about:home");
+            mAsserter.is(pages[0].url, StringHelper.ABOUT_HOME_URL, "first page in tab is " +
+                    StringHelper.ABOUT_HOME_URL);
 
             // If this is the first tab, the tab already exists, so no need to
             // create a new one. Otherwise, create a new tab if we're loading
@@ -191,13 +196,17 @@ public abstract class SessionTest extends BaseTest {
                 (new NavigationWalker<PageInfo>(tab) {
                     @Override
                     public void onItem(PageInfo page, int currentIndex) {
-                        if (page.url.equals("about:home")) {
-                            waitForText("Enter Search or Address");
-                            verifyUrl(page.url);
+                        final String text;
+                        if (StringHelper.ABOUT_HOME_URL.equals(page.url)) {
+                            text = StringHelper.TITLE_PLACE_HOLDER;
+                        } else if (page.url.startsWith(URL_HTTP_PREFIX)) {
+                            text = page.url.substring(URL_HTTP_PREFIX.length());
                         } else {
-                            waitForText(page.title);
-                            verifyPageTitle(page.title);
+                            text = page.url;
                         }
+                        waitForText(text);
+
+                        verifyUrlBarTitle(page.url);
                     }
 
                     @Override

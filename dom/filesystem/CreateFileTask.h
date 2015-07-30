@@ -9,24 +9,27 @@
 
 #include "mozilla/dom/FileSystemTaskBase.h"
 #include "nsAutoPtr.h"
+#include "mozilla/ErrorResult.h"
 
-class nsIDOMBlob;
 class nsIInputStream;
 
 namespace mozilla {
 namespace dom {
 
+class File;
+class FileImpl;
 class Promise;
 
-class CreateFileTask MOZ_FINAL
+class CreateFileTask final
   : public FileSystemTaskBase
 {
 public:
   CreateFileTask(FileSystemBase* aFileSystem,
                  const nsAString& aPath,
-                 nsIDOMBlob* aBlobData,
+                 File* aBlobData,
                  InfallibleTArray<uint8_t>& aArrayData,
-                 bool replace);
+                 bool replace,
+                 ErrorResult& aRv);
   CreateFileTask(FileSystemBase* aFileSystem,
                  const FileSystemCreateFileParams& aParam,
                  FileSystemRequestParent* aParent);
@@ -38,23 +41,23 @@ public:
   GetPromise();
 
   virtual void
-  GetPermissionAccessType(nsCString& aAccess) const MOZ_OVERRIDE;
+  GetPermissionAccessType(nsCString& aAccess) const override;
 
 protected:
   virtual FileSystemParams
-  GetRequestParams(const nsString& aFileSystem) const MOZ_OVERRIDE;
+  GetRequestParams(const nsString& aFileSystem) const override;
 
   virtual FileSystemResponseValue
-  GetSuccessRequestResult() const MOZ_OVERRIDE;
+  GetSuccessRequestResult() const override;
 
   virtual void
-  SetSuccessRequestResult(const FileSystemResponseValue& aValue) MOZ_OVERRIDE;
+  SetSuccessRequestResult(const FileSystemResponseValue& aValue) override;
 
   virtual nsresult
-  Work() MOZ_OVERRIDE;
+  Work() override;
 
   virtual void
-  HandlerCallback() MOZ_OVERRIDE;
+  HandlerCallback() override;
 
 private:
   void
@@ -63,11 +66,17 @@ private:
   static uint32_t sOutputBufferSize;
   nsRefPtr<Promise> mPromise;
   nsString mTargetRealPath;
-  nsCOMPtr<nsIDOMBlob> mBlobData;
+
+  // Not thread-safe and should be released on main thread.
+  nsRefPtr<File> mBlobData;
+
   nsCOMPtr<nsIInputStream> mBlobStream;
   InfallibleTArray<uint8_t> mArrayData;
   bool mReplace;
-  nsCOMPtr<nsIDOMFile> mTargetFile;
+
+  // This cannot be a File because this object is created on a different
+  // thread and File is not thread-safe. Let's use the FileImpl instead.
+  nsRefPtr<FileImpl> mTargetFileImpl;
 };
 
 } // namespace dom

@@ -22,7 +22,7 @@ nsGfxButtonControlFrame::nsGfxButtonControlFrame(nsStyleContext* aContext):
 {
 }
 
-nsIFrame*
+nsContainerFrame*
 NS_NewGfxButtonControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsGfxButtonControlFrame(aContext);
@@ -69,10 +69,12 @@ nsGfxButtonControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements
 }
 
 void
-nsGfxButtonControlFrame::AppendAnonymousContentTo(nsBaseContentList& aElements,
+nsGfxButtonControlFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                                   uint32_t aFilter)
 {
-  aElements.MaybeAppendElement(mTextContent);
+  if (mTextContent) {
+    aElements.AppendElement(mTextContent);
+  }
 }
 
 // Create the text content used as label for the button.
@@ -83,7 +85,7 @@ nsGfxButtonControlFrame::CreateFrameFor(nsIContent*      aContent)
   nsIFrame * newFrame = nullptr;
 
   if (aContent == mTextContent) {
-    nsIFrame * parentFrame = mFrames.FirstChild();
+    nsContainerFrame* parentFrame = do_QueryFrame(mFrames.FirstChild());
 
     nsPresContext* presContext = PresContext();
     nsRefPtr<nsStyleContext> textStyleContext;
@@ -210,7 +212,7 @@ nsGfxButtonControlFrame::IsLeaf() const
   return true;
 }
 
-nsIFrame*
+nsContainerFrame*
 nsGfxButtonControlFrame::GetContentInsertionFrame()
 {
   return this;

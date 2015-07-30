@@ -4,16 +4,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "EventListenerService.h"
-#ifdef MOZ_JSDEBUGGER
-#include "jsdIDebuggerService.h"
-#endif
 #include "mozilla/BasicEvents.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/JSEventHandler.h"
 #include "mozilla/Maybe.h"
 #include "nsCOMArray.h"
-#include "nsCxPusher.h"
 #include "nsDOMClassInfoID.h"
 #include "nsIXPConnect.h"
 #include "nsJSUtils.h"
@@ -93,7 +89,7 @@ EventListenerInfo::GetJSVal(JSContext* aCx,
     if (!object) {
       return false;
     }
-    aAc.construct(aCx, object);
+    aAc.emplace(aCx, object);
     aJSVal.setObject(*object);
     return true;
   }
@@ -103,7 +99,7 @@ EventListenerInfo::GetJSVal(JSContext* aCx,
     JS::Handle<JSObject*> handler =
       jsHandler->GetTypedEventHandler().Ptr()->Callable();
     if (handler) {
-      aAc.construct(aCx, handler);
+      aAc.emplace(aCx, handler);
       aJSVal.setObject(*handler);
       return true;
     }
@@ -122,41 +118,12 @@ EventListenerInfo::ToSource(nsAString& aResult)
   if (GetJSVal(cx, ac, &v)) {
     JSString* str = JS_ValueToSource(cx, v);
     if (str) {
-      nsDependentJSString depStr;
-      if (depStr.init(cx, str)) {
-        aResult.Assign(depStr);
+      nsAutoJSString autoStr;
+      if (autoStr.init(cx, str)) {
+        aResult.Assign(autoStr);
       }
     }
   }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-EventListenerInfo::GetDebugObject(nsISupports** aRetVal)
-{
-  *aRetVal = nullptr;
-
-#ifdef MOZ_JSDEBUGGER
-  nsresult rv = NS_OK;
-  nsCOMPtr<jsdIDebuggerService> jsd =
-    do_GetService("@mozilla.org/js/jsd/debugger-service;1", &rv);
-  NS_ENSURE_SUCCESS(rv, NS_OK);
-
-  bool isOn = false;
-  jsd->GetIsOn(&isOn);
-  NS_ENSURE_TRUE(isOn, NS_OK);
-
-  AutoSafeJSContext cx;
-  Maybe<JSAutoCompartment> ac;
-  JS::Rooted<JS::Value> v(cx);
-  if (GetJSVal(cx, ac, &v)) {
-    nsCOMPtr<jsdIValue> jsdValue;
-    rv = jsd->WrapValue(v, getter_AddRefs(jsdValue));
-    NS_ENSURE_SUCCESS(rv, rv);
-    jsdValue.forget(aRetVal);
-  }
-#endif
-
   return NS_OK;
 }
 
@@ -204,11 +171,11 @@ EventListenerService::GetEventTargetChainFor(nsIDOMEventTarget* aEventTarget,
   *aOutArray = nullptr;
   NS_ENSURE_ARG(aEventTarget);
   WidgetEvent event(true, NS_EVENT_NULL);
-  nsCOMArray<EventTarget> targets;
+  nsTArray<EventTarget*> targets;
   nsresult rv = EventDispatcher::Dispatch(aEventTarget, nullptr, &event,
                                           nullptr, nullptr, nullptr, &targets);
   NS_ENSURE_SUCCESS(rv, rv);
-  int32_t count = targets.Count();
+  int32_t count = targets.Length();
   if (count == 0) {
     return NS_OK;
   }

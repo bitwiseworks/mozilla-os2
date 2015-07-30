@@ -47,7 +47,8 @@ interface CanvasRenderingContext2D {
   void transform(double a, double b, double c, double d, double e, double f);
   [Throws, LenientFloat]
   void setTransform(double a, double b, double c, double d, double e, double f);
-// NOT IMPLEMENTED  void resetTransform();
+  [Throws]
+  void resetTransform();
 
   // compositing
            attribute unrestricted double globalAlpha; // (default 1.0)
@@ -72,6 +73,9 @@ interface CanvasRenderingContext2D {
            [LenientFloat]
            attribute double shadowBlur; // (default 0)
            attribute DOMString shadowColor; // (default transparent black)
+
+  [Pref="canvas.filters.enabled", SetterThrows]
+  attribute DOMString filter; // (default empty string = no filter)
 
   // rects
   [LenientFloat]
@@ -121,6 +125,7 @@ interface CanvasRenderingContext2D {
   // hit regions
   [Pref="canvas.hitregions.enabled", Throws] void addHitRegion(optional HitRegionOptions options);
   [Pref="canvas.hitregions.enabled"] void removeHitRegion(DOMString id);
+  [Pref="canvas.hitregions.enabled"] void clearHitRegions();
 
   // pixel manipulation
   [NewObject, Throws]
@@ -286,7 +291,11 @@ interface CanvasGradient {
 
 interface CanvasPattern {
   // opaque object
-  // void setTransform(SVGMatrix transform);
+  // [Throws, LenientFloat] - could not do this overload because of bug 1020975
+  // void setTransform(double a, double b, double c, double d, double e, double f);
+
+  // No throw necessary here - SVGMatrix is always good.
+  void setTransform(SVGMatrix matrix);
 };
 
 interface TextMetrics {
@@ -319,5 +328,7 @@ interface TextMetrics {
  Constructor(Path2D other),
  Constructor(DOMString pathString)]
 interface Path2D
-{};
+{
+  void addPath(Path2D path, optional SVGMatrix transformation);
+};
 Path2D implements CanvasPathMethods;

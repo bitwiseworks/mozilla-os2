@@ -136,6 +136,28 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=435442
     to   { margin-top: 150px !important; /* ignored */
            margin-bottom: 50px; }
   }
+
+  @keyframes empty { }
+  @keyframes nearlyempty { to { margin-left: 100px; } }
+
+  @keyframes lowerpriority {
+    0% {
+      top: 0px;
+      left: 0px;
+    }
+    100% {
+      top: 100px;
+      left: 100px;
+    }
+  }
+
+  @keyframes overrideleft {
+    0%, 100% { left: 0px }
+  }
+
+  @keyframes overridetop {
+    0%, 100% { top: 0px }
+  }
   </style>
 </head>
 <body>
@@ -162,73 +184,12 @@ is(e.elapsedTime, 0.5);
 is(e.pseudoElement, "pseudo");
 is(e.isTrusted, false)
 
-function advance_clock(milliseconds) {
-  SpecialPowers.DOMWindowUtils.advanceTimeAndRefresh(milliseconds);
-}
-
-var display = document.getElementById("display");
-var div = null;
-var cs = null;
-var events_received = [];
-function new_div(style) {
-  return new_element("div", style);
-}
-function new_element(tagname, style) {
-  if (div != null || cs != null) {
-    ok(false, "test author forgot to call done_div");
-  }
-  if (typeof(style) != "string") {
-    ok(false, "test author forgot to pass argument");
-  }
-  div = document.createElement(tagname);
-  div.setAttribute("style", style);
-  display.appendChild(div);
-  cs = getComputedStyle(div, "");
-}
-function listen() {
-  events_received = [];
-  function listener(event) {
-    events_received.push(event);
-  }
-  div.addEventListener("animationstart", listener, false);
-  div.addEventListener("animationiteration", listener, false);
-  div.addEventListener("animationend", listener, false);
-}
-function check_events(events_expected, desc) {
-  // This function checks that the list of events_expected matches
-  // the received events -- but it only checks the properties that
-  // are present on events_expected.
-  is(events_received.length, events_expected.length,
-     "number of events received for " + desc);
-  for (var i = 0,
-       i_end = Math.min(events_expected.length, events_received.length);
-       i != i_end; ++i) {
-    var exp = events_expected[i];
-    var rec = events_received[i];
-    for (var prop in exp) {
-      if (prop == "elapsedTime") {
-        // Allow floating point error.
-        ok(Math.abs(rec.elapsedTime - exp.elapsedTime) < 0.000002,
-           "events[" + i + "]." + prop + " for " + desc +
-           " received=" + rec.elapsedTime + " expected=" + exp.elapsedTime);
-      } else {
-        is(rec[prop], exp[prop], "events[" + i + "]." + prop + " for " + desc);
-      }
-    }
-  }
-  for (var i = events_expected.length; i < events_received.length; ++i) {
-    ok(false, "unexpected " + events_received[i].type + " event for " + desc);
-  }
-  events_received = [];
-}
-function done_div() {
-  display.removeChild(div);
-  div = null;
-  cs = null;
-  if (events_received.length) {
-    ok(false, "caller should have called check_events");
-  }
-}
+// Shortcut new_div to update div, cs
+var div, cs;
+var originalNewDiv = window.new_div;
+window.new_div = function(style) {
+  [ div, cs ] = originalNewDiv(style);
+};
 
 // take over the refresh driver right from the start.
 advance_clock(0);
@@ -677,13 +638,13 @@ is_approx(px_to_num(cs.paddingBottom), 60 + 100 * gTF.ease_in(0.6), 0.01,
 advance_clock(1000);
 is(cs.paddingBottom, "160px",
    "keyframe timing functions test at 5s");
-advance_clock(1010); // avoid floating point error
+advance_clock(1001); // avoid floating-point error
 is_approx(px_to_num(cs.paddingBottom), 160 - 40 * step_end(5)(0.4), 0.01,
           "keyframe timing functions test at 6s");
 advance_clock(1000);
 is_approx(px_to_num(cs.paddingBottom), 160 - 40 * step_end(5)(0.8), 0.01,
           "keyframe timing functions test at 7s");
-advance_clock(990);
+advance_clock(999);
 is_approx(px_to_num(cs.paddingBottom), 120 - 100 * gTF.linear(0.2), 0.01,
           "keyframe timing functions test at 8s");
 advance_clock(1000);
@@ -701,13 +662,13 @@ is_approx(px_to_num(cs.paddingBottom), 120 - 100 * gTF.linear(0.6), 0.01,
 advance_clock(1000);
 is_approx(px_to_num(cs.paddingBottom), 120 - 100 * gTF.linear(0.2), 0.01,
           "keyframe timing functions test at 32s");
-advance_clock(1000);
+advance_clock(999); // avoid floating-point error
 is_approx(px_to_num(cs.paddingBottom), 160 - 40 * step_end(5)(0.8), 0.01,
           "keyframe timing functions test at 33s");
 advance_clock(1000);
 is_approx(px_to_num(cs.paddingBottom), 160 - 40 * step_end(5)(0.4), 0.01,
           "keyframe timing functions test at 34s");
-advance_clock(1000);
+advance_clock(1001);
 is(cs.paddingBottom, "160px",
    "keyframe timing functions test at 35s");
 advance_clock(1000);
@@ -737,10 +698,10 @@ is_approx(px_to_num(cs.paddingBottom), 20 + 40 * gTF.ease(0.4), 0.01,
 advance_clock(3000);
 is_approx(px_to_num(cs.paddingBottom), 60 + 100 * gTF.ease_in(0.6), 0.01,
           "keyframe timing functions test at 14s");
-advance_clock(2000);
+advance_clock(2001); // avoid floating-point error
 is_approx(px_to_num(cs.paddingBottom), 160 - 40 * step_end(5)(0.4), 0.01,
           "keyframe timing functions test at 16s");
-advance_clock(2000);
+advance_clock(1999);
 is_approx(px_to_num(cs.paddingBottom), 120 - 100 * gTF.linear(0.2), 0.01,
           "keyframe timing functions test at 18s");
 done_div();
@@ -817,7 +778,9 @@ is_approx(px_to_num(cs.marginRight), 100 * gTF.ease_in(0.3), 0.01,
           "animation-iteration-count test 1 at 8.1s");
 done_div();
 
-new_div("animation: anim2 ease-in 10s 0.3, anim3 ease-out 20s 1.2 alternate forwards, anim4 ease-in-out 5s 1.6 forwards");
+new_div("animation: anim2 ease-in 10s 0.3"
+        + ", anim3 ease-out 20s 1.2 alternate forwards"
+        + ", anim4 ease-in-out 5s 1.6 forwards");
 is(cs.marginRight, "0px", "animation-iteration-count test 2 at 0s");
 is(cs.marginTop, "0px", "animation-iteration-count test 3 at 0s");
 is(cs.marginBottom, "0px", "animation-iteration-count test 4 at 0s");
@@ -1128,6 +1091,19 @@ is_approx(px_to_num(cs.marginBottom), 100 * gTF.ease_in_out(0.8), 0.01,
           "animation-play-state test 4 at 10050ms");
 done_div();
 
+// an initially paused animation (bug 1063992)
+new_div("animation: anim1 1s paused both");
+is(cs.marginLeft, "0px", "animation-play-state test 5, at 0s");
+advance_clock(500);
+is(cs.marginLeft, "0px", "animation-play-state test 5, at 0.5s");
+div.style.animationPlayState = "running";
+is(cs.marginLeft, "0px",
+   "animation-play-state test 5, at 0.5s after unpausing");
+advance_clock(500);
+is(cs.marginLeft, "80px",
+   "animation-play-state test 5, at 1s after unpaused");
+done_div();
+
 /*
  * css3-animations:  3.8. The 'animation-delay' Property
  * http://dev.w3.org/csswg/css3-animations/#the-animation-delay-property-
@@ -1270,7 +1246,7 @@ advance_clock(300);
 is(cs_before.marginRight, "30px", ":before test at 2300ms");
 advance_clock(700);
 check_events([ { type: "animationstart", animationName: "anim2", elapsedTime: 0, pseudoElement: "::before" },
-               { type: "animationiteration", animationName: "anim2", elapsedTime: 1.2, pseudoElement: "::before" },
+               { type: "animationiteration", animationName: "anim2", elapsedTime: 1, pseudoElement: "::before" },
                { type: "animationiteration", animationName: "anim2", elapsedTime: 2, pseudoElement: "::before" },
                { type: "animationend", animationName: "anim2", elapsedTime: 3, pseudoElement: "::before" }]);
 done_div();
@@ -1291,7 +1267,7 @@ advance_clock(300);
 is(cs_after.marginRight, "30px", ":after test at 2300ms");
 advance_clock(700);
 check_events([ { type: "animationstart", animationName: "anim2", elapsedTime: 0, pseudoElement: "::after" },
-               { type: "animationiteration", animationName: "anim2", elapsedTime: 1.2, pseudoElement: "::after" },
+               { type: "animationiteration", animationName: "anim2", elapsedTime: 1, pseudoElement: "::after" },
                { type: "animationiteration", animationName: "anim2", elapsedTime: 2, pseudoElement: "::after" },
                { type: "animationend", animationName: "anim2", elapsedTime: 3, pseudoElement: "::after" }]);
 done_div();
@@ -1362,10 +1338,12 @@ done_div();
 // This test depends on forms.css having a rule
 //   select { line-height: !important }
 // If that rule changes, we should rewrite it to depend on a different rule.
-new_element("select", "");
+var select;
+[ select, cs ] = new_element("select", "");
 var default_line_height = cs.lineHeight;
-done_div();
-new_element("select", "animation: uaoverride 2s linear infinite");
+done_element();
+[ select, cs ] = new_element("select",
+                             "animation: uaoverride 2s linear infinite");
 is(cs.lineHeight, default_line_height,
    "animations should not override UA !important at 0ms");
 is(cs.marginTop, "20px",
@@ -1375,14 +1353,15 @@ is(cs.lineHeight, default_line_height,
    "animations should not override UA !important at 200ms");
 is(cs.marginTop, "40px",
    "rest of animation should still work when UA !important present at 200ms");
-done_div();
+done_element();
 
 // Test that author !important rules override animations, but
 // that animations override regular author rules.
 new_div("animation: always_fifty 1s linear infinite; margin-left: 200px");
 is(cs.marginLeft, "50px", "animations override regular author rules");
 done_div();
-new_div("animation: always_fifty 1s linear infinite; margin-left: 200px ! important;");
+new_div("animation: always_fifty 1s linear infinite;"
+        + " margin-left: 200px ! important;");
 is(cs.marginLeft, "200px", "important author rules override animations");
 done_div();
 
@@ -1499,11 +1478,17 @@ done_div();
 // start animations.
 // note: anim2 animates margin-right from 0 to 100px
 // note: anim3 animates margin-top from 0 to 100px
-new_div("animation-name: anim2, anim3; animation-duration: 1s; animation-timing-function: linear; animation-delay: -250ms, -250ms, -750ms, -500ms;");
+new_div("animation-name: anim2, anim3;"
+        + " animation-duration: 1s;"
+        + " animation-timing-function: linear;"
+        + " animation-delay: -250ms, -250ms, -750ms, -500ms;");
 is(cs.marginRight, "25px", "animation-name list length is the length that matters");
 is(cs.marginTop, "25px", "animation-name list length is the length that matters");
 done_div();
-new_div("animation-name: anim2, anim3, anim2; animation-duration: 1s; animation-timing-function: linear; animation-delay: -250ms, -250ms, -750ms, -500ms;");
+new_div("animation-name: anim2, anim3, anim2;"
+        + " animation-duration: 1s;"
+        + " animation-timing-function: linear;"
+        + " animation-delay: -250ms, -250ms, -750ms, -500ms;");
 is(cs.marginRight, "75px", "animation-name list length is the length that matters, and the last occurrence of a name wins");
 is(cs.marginTop, "25px", "animation-name list length is the length that matters");
 done_div();
@@ -1525,8 +1510,7 @@ dyn2.appendRule("50% { margin-left: 0px }");
 is(cs.marginLeft, "50px", "dynamic rule change test, @keyframes appendRule");
 var dyn2_kf1 = dyn2.cssRules[0]; // currently 0% { margin-left: 100px }
 dyn2_kf1.style.marginLeft = "-100px";
-// FIXME: Bug 978833 (keyframe rules used as nsIStyleRule but doesn't follow immutability contract)
-todo_is(cs.marginLeft, "-50px", "dynamic rule change test, keyframe style set");
+is(cs.marginLeft, "-50px", "dynamic rule change test, keyframe style set");
 dyn2.name = "dyn2";
 is(cs.marginLeft, "25px", "dynamic rule change test, change in @keyframes name applies (second time)");
 var dyn1_kf2 = dyn1.cssRules[1]; // currently 50% { margin-left: 50px }
@@ -1538,6 +1522,452 @@ done_div();
 dyn_sheet_elt.parentNode.removeChild(dyn_sheet_elt);
 dyn_sheet_elt = null;
 dyn_sheet = null;
+
+/*
+ * Bug 1004361 - CSS animations with short duration sometimes don't dispatch
+ * a start event
+ */
+new_div("animation: anim2 1s 0.1s");
+listen();
+advance_clock(0); // Trigger animation
+advance_clock(1200); // Skip past end of animation's entire active duration
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" },
+              { type: 'animationend', target: div,
+                animationName: 'anim2', elapsedTime: 1,
+                pseudoElement: "" }],
+             "events after skipping over animation interval");
+done_div();
+
+/*
+ * Bug 1007513 - AnimationEvent.elapsedTime should be animation time
+ */
+new_div("animation: anim2 1s 2");
+listen();
+advance_clock(0); // Trigger animation
+advance_clock(500); // Jump to middle of first interval
+advance_clock(1000); // Jump to middle of second interval
+advance_clock(1000); // Jump past end of last interval
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" },
+              { type: 'animationiteration', target: div,
+                animationName: 'anim2', elapsedTime: 1,
+                pseudoElement: "" },
+              { type: 'animationend', target: div,
+                animationName: 'anim2', elapsedTime: 2,
+                pseudoElement: "" }],
+             "events after skipping past event moments");
+done_div();
+
+new_div("animation: anim2 1s -2s");
+listen();
+advance_clock(0);
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'anim2', elapsedTime: 1,
+                pseudoElement: "" },
+              { type: 'animationend', target: div,
+                animationName: 'anim2', elapsedTime: 1,
+                pseudoElement: "" }],
+             "events after skipping over animation with negative delay");
+done_div();
+
+/*
+ * Bug 1004365 - zero-duration animations
+ */
+
+new_div("margin-right: 200px; animation: anim2 0s 1s both");
+listen();
+advance_clock(0);
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right during backwards fill of zero-duration animation");
+advance_clock(2000); // Skip over animation
+is(cs.getPropertyValue("margin-right"), "100px",
+   "margin-right during forwards fill of zero-duration animation");
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" },
+              { type: 'animationend', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" }],
+             "events after skipping over zero-duration animation");
+done_div();
+
+new_div("margin-right: 200px; animation: anim2 0s 1s both");
+listen();
+advance_clock(0);
+// Seek to just before the animation starts and stops
+advance_clock(999);
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right at exact end of zero-duration animation");
+check_events([]);
+// Seek to exactly the point where the animation starts and stops
+advance_clock(1);
+is(cs.getPropertyValue("margin-right"), "100px",
+   "margin-right at exact end of zero-duration animation");
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" },
+              { type: 'animationend', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" }],
+             "events after seeking to end of zero-duration animation");
+// Check no further events are dispatched
+advance_clock(0);
+advance_clock(100);
+check_events([]);
+done_div();
+
+// Test with animation-direction reverse
+new_div("margin-right: 200px;"
+                      + " animation: anim2 0s 1s both reverse");
+advance_clock(0);
+is(cs.getPropertyValue("margin-right"), "100px",
+   "margin-right during backwards fill of reversed zero-duration animation");
+advance_clock(2000);
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right during forwards fill of reversed zero-duration animation");
+done_div();
+
+// Test with animation-direction alternate
+new_div("margin-right: 200px; animation: anim2 0s 1s both alternate 2");
+listen();
+advance_clock(0);
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right during backwards fill of alternating zero-duration animation");
+advance_clock(2000);
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right during forwards fill of alternating zero-duration animation");
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" },
+              { type: 'animationend', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" }],
+             "events after seeking to end of zero-duration animation"
+             + " that repeats twice");
+done_div();
+
+// Test with animation-direction alternate and odd number of iterations
+new_div("margin-right: 200px; animation: anim2 0s 1s both alternate 3");
+advance_clock(0);
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right during backwards fill of alternating zero-duration " +
+   "animation with odd number of iterations");
+advance_clock(2000);
+is(cs.getPropertyValue("margin-right"), "100px",
+   "margin-right during forwards fill of alternating zero-duration " +
+   "animation with odd number of iterations");
+done_div();
+
+// Test with animation-direction alternate and non-integral number of iterations
+new_div("margin-right: 200px;"
+        + " animation: anim2 0s 1s both alternate 7.3 linear");
+advance_clock(0);
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right during backwards fill of alternating zero-duration " +
+   "animation with non-integral number of iterations");
+advance_clock(2000);
+is(cs.getPropertyValue("margin-right"), "70px",
+   "margin-right during forwards fill of alternating zero-duration " +
+   "animation with non-integral number of iterations");
+done_div();
+
+// Test with infinite iteration count
+// CSS Animations doesn't actually define what the behavior is in this case
+// (and many many other similar cases) so we follow the behavior defined in Web
+// Animations which is that the zero-duration "wins".
+new_div("margin-right: 200px; animation: anim2 0s 1s both infinite");
+listen();
+advance_clock(0);
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right during backwards fill of infinitely repeating " +
+   "zero-duration animation");
+advance_clock(2000);
+is(cs.getPropertyValue("margin-right"), "100px",
+   "margin-right during forwards fill of infinitely repeating " +
+   "zero-duration animation");
+// Check we don't get infinite iteration events :)
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" },
+              { type: 'animationend', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" }],
+             "events after seeking to end of infinitely repeating " +
+             "zero-duration animation");
+done_div();
+
+// Test with infinite iteration count and alternating direction
+new_div("margin-right: 200px; animation: anim2 0s 1s alternate both infinite");
+advance_clock(0);
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right during backwards fill of infinitely repeating and " +
+   "alternating zero-duration animation");
+advance_clock(2000);
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right during forwards fill of infinitely repeating and " +
+   "alternating zero-duration animation");
+done_div();
+
+// Test with infinite iteration count and alternate-reverse direction
+new_div("margin-right: 200px;"
+        + " animation: anim2 0s 1s alternate-reverse infinite both");
+advance_clock(0);
+is(cs.getPropertyValue("margin-right"), "100px",
+   "margin-right during backwards fill of infinitely repeating and " +
+   "alternate-reverse zero-duration animation");
+advance_clock(2000);
+is(cs.getPropertyValue("margin-right"), "100px",
+   "margin-right during forwards fill of infinitely repeating and " +
+   "alternate-reverse zero-duration animation");
+done_div();
+
+// Test with negative delay
+new_div("margin-right: 200px;"
+        + " animation: anim2 0s -1s both reverse 12.7 linear");
+listen();
+advance_clock(0);
+is(cs.getPropertyValue("margin-right"), "30px",
+   "margin-right during forwards fill of reversed and repeated " +
+   "zero-duration animation with negative delay");
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" },
+              { type: 'animationend', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" }],
+             "events after skipping over zero-duration animation " +
+             "with negative delay");
+done_div();
+
+// Test zero duration with zero iteration count
+new_div("margin-right: 200px; animation: anim2 0s 1s both 0");
+listen();
+advance_clock(0);
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right during backwards fill of zero-duration animation");
+advance_clock(2000); // Skip over animation
+is(cs.getPropertyValue("margin-right"), "0px",
+   "margin-right during forwards fill of zero-duration animation");
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" },
+              { type: 'animationend', target: div,
+                animationName: 'anim2', elapsedTime: 0,
+                pseudoElement: "" }],
+             "events after skipping over zero-duration, zero iteration count"
+             + " animation");
+done_div();
+
+/*
+ * Bug 1004377 - Animations with empty keyframes rule
+ */
+
+new_div("margin-right: 200px; animation: empty 2s 1s both");
+listen();
+advance_clock(0);
+check_events([], "events during delay");
+advance_clock(2000); // Skip to middle of animation
+div.clientTop; // Trigger events
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'empty', elapsedTime: 0,
+                pseudoElement: "" }],
+             "middle of animation with empty keyframes rule");
+advance_clock(1000); // Skip to end of animation
+div.clientTop; // Trigger events
+check_events([{ type: 'animationend', target: div,
+                animationName: 'empty', elapsedTime: 2,
+                pseudoElement: "" }],
+             "end of animation with empty keyframes rule");
+done_div();
+
+// Test with a zero-duration animation and empty @keyframes rule
+new_div("margin-right: 200px; animation: empty 0s 1s both");
+listen();
+advance_clock(0);
+advance_clock(1000);
+div.clientTop; // Trigger events
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'empty', elapsedTime: 0,
+                pseudoElement: "" },
+              { type: 'animationend', target: div,
+                animationName: 'empty', elapsedTime: 0,
+                pseudoElement: "" }],
+             "end of zero-duration animation with empty keyframes rule");
+done_div();
+
+// Test with a keyframes rule that becomes empty
+new_div("animation: nearlyempty 1s both linear");
+advance_clock(0);
+advance_clock(500);
+is(cs.getPropertyValue("margin-left"), "50px",
+   "margin-left for animation that is about to be emptied");
+listen();
+findKeyframesRule("nearlyempty").deleteRule("to");
+is(cs.getPropertyValue("margin-left"), "0px",
+   "margin-left for animation with (now) empty keyframes rule");
+check_events([], "events after emptying keyframes rule");
+advance_clock(500);
+div.clientTop; // Trigger events
+check_events([{ type: 'animationend', target: div,
+                animationName: 'nearlyempty', elapsedTime: 1,
+                pseudoElement: "" }],
+             "events at end of animation with newly " +
+             "empty keyframes rule");
+done_div();
+
+// Test when we update to point to an empty animation
+new_div("animation: always_fifty 1s both linear");
+advance_clock(0);
+advance_clock(500);
+is(cs.getPropertyValue("margin-left"), "50px",
+   "margin-left for animation that will soon point to an empty keyframes rule");
+listen();
+div.style.animationName = "empty";
+is(cs.getPropertyValue("margin-left"), "0px",
+   "margin-left for animation now points to empty keyframes rule");
+advance_clock(500);
+div.clientTop; // Trigger events
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'empty', elapsedTime: 0,
+                pseudoElement: "" }],
+             "events at start of animation updated to use " +
+             "empty keyframes rule");
+done_div();
+
+/*
+ * Bug 1031319 - 'none' animations
+ *
+ * The code under test here is run entirely on the main thread so there is no
+ * OMTA version of these tests in test_animations_omta.html.
+ */
+
+// Setting "animation: none" after animations have finished should not trigger
+// animation events
+new_div("animation: always_fifty 1s");
+listen();
+advance_clock(0);
+advance_clock(1000);
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'always_fifty', elapsedTime: 0,
+                pseudoElement: '' },
+              { type: 'animationend', target: div,
+                animationName: 'always_fifty', elapsedTime: 1,
+                pseudoElement: '' }],
+             "events after running initial animation");
+div.style.animation = "none";
+div.clientTop; // Trigger events
+check_events([], "events after setting animation to 'none'");
+done_div();
+
+// Setting "animation: " after animations have finished should not trigger
+// animation events
+new_div("animation: always_fifty 1s");
+listen();
+advance_clock(0);
+advance_clock(1000);
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'always_fifty', elapsedTime: 0,
+                pseudoElement: '' },
+              { type: 'animationend', target: div,
+                animationName: 'always_fifty', elapsedTime: 1,
+                pseudoElement: '' }],
+             "events after running initial animation");
+div.style.animation = "";
+div.clientTop; // Trigger events
+check_events([], "events after setting animation to ''");
+done_div();
+
+// Setting "animation: none 1s" should not trigger events
+new_div("animation: none 1s");
+listen();
+advance_clock(0);
+advance_clock(1000);
+check_events([], "events after setting animation to 'none 1s'");
+done_div();
+
+// Setting "animation: 1s" should not trigger events
+new_div("animation: 1s");
+listen();
+advance_clock(0);
+advance_clock(1000);
+check_events([], "events after setting animation to '1s'");
+done_div();
+
+// Setting animation-name: none among other animations should cause only that
+// animation to be skipped
+new_div("animation-name: always_fifty, none, always_fifty;"
+        + " animation-duration: 1s");
+listen();
+advance_clock(0);
+advance_clock(500);
+advance_clock(500);
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'always_fifty', elapsedTime: 0,
+                pseudoElement: '' },
+              { type: 'animationstart', target: div,
+                animationName: 'always_fifty', elapsedTime: 0,
+                pseudoElement: '' },
+              { type: 'animationend', target: div,
+                animationName: 'always_fifty', elapsedTime: 1,
+                pseudoElement: '' },
+              { type: 'animationend', target: div,
+                animationName: 'always_fifty', elapsedTime: 1,
+                pseudoElement: '' }],
+             "events for animation-name: a, none, a");
+done_div();
+
+/*
+ * Bug 1033881 - Non-matching animation-name
+ *
+ * The code under test here is run entirely on the main thread so there is no
+ * OMTA version of these tests in test_animations_omta.html.
+ */
+
+new_div("animation-name: non_existent, always_fifty; animation-duration: 1s");
+listen();
+advance_clock(0);
+advance_clock(500);
+advance_clock(500);
+check_events([{ type: 'animationstart', target: div,
+                animationName: 'always_fifty', elapsedTime: 0,
+                pseudoElement: '' },
+              { type: 'animationend', target: div,
+                animationName: 'always_fifty', elapsedTime: 1,
+                pseudoElement: '' }],
+             "events for animation-name: non_existent, always_fifty");
+done_div();
+
+/*
+ * Bug 1038032 - Infinite repetition and delay causes overflow
+ */
+new_div("animation: always_fifty 10s 1s infinite");
+advance_clock(0);
+advance_clock(2000);
+is(cs.marginLeft, "50px",
+   "infinitely repeating animation with positive delay takes effect"
+   + " (does not overflow)");
+done_div();
+
+/*
+ * Bug 1140134 - A property in a CSS animation being overridden by later
+ * animation causes later properties in that animation to be skipped
+ */
+new_div("position: relative; animation: lowerpriority 1s linear infinite alternate, overridetop 1s linear infinite alternate");
+advance_clock(0);
+advance_clock(500);
+is(cs.getPropertyValue("left"), "50px", "left is animating");
+is(cs.getPropertyValue("top"), "0px", "top is not animating");
+done_div();
+
+new_div("position: relative; animation: lowerpriority 1s linear infinite alternate, overrideleft 1s linear infinite alternate");
+advance_clock(0);
+advance_clock(500);
+is(cs.getPropertyValue("left"), "0px", "left is not animating");
+is(cs.getPropertyValue("top"), "50px", "top is animating");
+done_div();
 
 SpecialPowers.DOMWindowUtils.restoreNormalRefresh();
 

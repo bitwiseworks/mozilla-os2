@@ -27,6 +27,7 @@
           flex="1">
       <button id="requests-menu-reload-notice-button"
               class="devtools-toolbarbutton"
+              standalone="true"
               label="&shaderEditorUI.reloadNotice1;"
               oncommand="gFront.setup({ reload: true });"/>
       <label id="requests-menu-reload-notice-label"
@@ -34,7 +35,7 @@
              value="&shaderEditorUI.reloadNotice2;"/>
     </hbox>
     <hbox id="waiting-notice"
-          class="notice-container"
+          class="notice-container devtools-throbber"
           align="center"
           pack="center"
           flex="1"

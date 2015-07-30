@@ -6,6 +6,7 @@
 // Test infrastructure
 
 Cu.import("resource://testing-common/httpd.js");
+Cu.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "URL", function() {
   return "http://localhost:" + httpserver.identity.primaryPort;
@@ -39,7 +40,14 @@ function setupChannel(url)
 {
   var ios = Components.classes["@mozilla.org/network/io-service;1"].
                        getService(Ci.nsIIOService);
-  var chan = ios.newChannel(URL + url, "", null);
+  var chan = ios.newChannel2(URL + url,
+                             "",
+                             null,
+                             null,      // aLoadingNode
+                             Services.scriptSecurityManager.getSystemPrincipal(),
+                             null,      // aTriggeringPrincipal
+                             Ci.nsILoadInfo.SEC_NORMAL,
+                             Ci.nsIContentPolicy.TYPE_OTHER);
   var httpChan = chan.QueryInterface(Components.interfaces.nsIHttpChannel);
   return httpChan;
 }
@@ -105,7 +113,7 @@ test_flags[3] = CL_ALLOW_UNKNOWN_CL;
 
 function handler3(metadata, response)
 {
-  var body = "c junkafter\r\ndata reached";
+  var body = "c junkafter\r\ndata reached\r\n0\r\n\r\n";
 
   response.seizePower();
   response.write("HTTP/1.1 200 OK\r\n");
@@ -129,7 +137,7 @@ test_flags[4] = CL_ALLOW_UNKNOWN_CL;
 
 function handler4(metadata, response)
 {
-  var body = "c\r\ndata reached\r\n\0\r\n\r\n";
+  var body = "c\r\ndata reached\r\n3\r\nhej\r\n0\r\n\r\n";
 
   response.seizePower();
   response.write("HTTP/1.1 200 OK\r\n");

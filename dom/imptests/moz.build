@@ -14,7 +14,6 @@ MOCHITEST_MANIFESTS += [
 MOCHITEST_MANIFESTS += [
     'failures/editing/conformancetest/mochitest.ini',
     'failures/editing/selecttest/mochitest.ini',
-    'failures/html/dom/collections/mochitest.ini',
     'failures/html/dom/errors/mochitest.ini',
     'failures/html/dom/lists/mochitest.ini',
     'failures/html/dom/mochitest.ini',
@@ -24,7 +23,6 @@ MOCHITEST_MANIFESTS += [
     'failures/html/html/dom/documents/dta/doc.gEBN/mochitest.ini',
     'failures/html/html/dom/documents/dta/mochitest.ini',
     'failures/html/html/obsolete/implreq/oeaaa/mochitest.ini',
-    'failures/html/html/semantics/forms/the-form-element/mochitest.ini',
     'failures/html/html/semantics/forms/the-option-element/mochitest.ini',
     'failures/html/html/semantics/forms/the-select-element/mochitest.ini',
     'failures/html/html/semantics/scripting-1/the-script-element/mochitest.ini',
@@ -34,6 +32,5 @@ MOCHITEST_MANIFESTS += [
     'failures/html/microdata/microdata-dom-api/mochitest.ini',
     'failures/html/typedarrays/mochitest.ini',
     'failures/webapps/WebStorage/tests/submissions/Infraware/mochitest.ini',
-    'failures/webapps/WebStorage/tests/submissions/Ms2ger/mochitest.ini',
     'failures/webapps/XMLHttpRequest/tests/submissions/Ms2ger/mochitest.ini',
 ]

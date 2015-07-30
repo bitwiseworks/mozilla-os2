@@ -110,6 +110,41 @@ function checkOpenWindows(aWindowID) {
     ok(false, "Found unexpected " + aWindowID + " window still open");
 }
 
+// Tools to disable and re-enable the background update and blocklist timers
+// so that tests can protect themselves from unwanted timer events.
+let gCatMan = Components.classes["@mozilla.org/categorymanager;1"]
+                           .getService(Components.interfaces.nsICategoryManager);
+// Default values from toolkit/mozapps/extensions/extensions.manifest, but disable*UpdateTimer()
+// records the actual value so we can put it back in enable*UpdateTimer()
+let backgroundUpdateConfig = "@mozilla.org/addons/integration;1,getService,addon-background-update-timer,extensions.update.interval,86400";
+let blocklistUpdateConfig = "@mozilla.org/extensions/blocklist;1,getService,blocklist-background-update-timer,extensions.blocklist.interval,86400";
+
+let UTIMER = "update-timer";
+let AMANAGER = "addonManager";
+let BLOCKLIST = "nsBlocklistService";
+
+function disableBackgroundUpdateTimer() {
+  info("Disabling " + UTIMER + " " + AMANAGER);
+  backgroundUpdateConfig = gCatMan.getCategoryEntry(UTIMER, AMANAGER);
+  gCatMan.deleteCategoryEntry(UTIMER, AMANAGER, true);
+}
+
+function enableBackgroundUpdateTimer() {
+  info("Enabling " + UTIMER + " " + AMANAGER);
+  gCatMan.addCategoryEntry(UTIMER, AMANAGER, backgroundUpdateConfig, false, true);
+}
+
+function disableBlocklistUpdateTimer() {
+  info("Disabling " + UTIMER + " " + BLOCKLIST);
+  blocklistUpdateConfig = gCatMan.getCategoryEntry(UTIMER, BLOCKLIST);
+  gCatMan.deleteCategoryEntry(UTIMER, BLOCKLIST, true);
+}
+
+function enableBlocklistUpdateTimer() {
+  info("Enabling " + UTIMER + " " + BLOCKLIST);
+  gCatMan.addCategoryEntry(UTIMER, BLOCKLIST, blocklistUpdateConfig, false, true);
+}
+
 registerCleanupFunction(function() {
   // Restore prefs
   for (let pref of gRestorePrefs) {
@@ -161,11 +196,18 @@ function add_test(test) {
 }
 
 function run_next_test() {
+  // Make sure we're not calling run_next_test from inside an add_task() test
+  // We're inside the browser_test.js 'testScope' here
+  if (this.__tasks) {
+    throw new Error("run_next_test() called from an add_task() test function. " +
+                    "run_next_test() should not be called from inside add_task() " +
+                    "under any circumstances!");
+  }
   if (gTestsRun > 0)
     info("Test " + gTestsRun + " took " + (Date.now() - gTestStart) + "ms");
 
   if (gPendingTests.length == 0) {
-    end_test();
+    executeSoon(end_test);
     return;
   }
 
@@ -177,7 +219,7 @@ function run_next_test() {
     info("Running test " + gTestsRun);
 
   gTestStart = Date.now();
-  log_exceptions(test);
+  executeSoon(() => log_exceptions(test));
 }
 
 function get_addon_file_url(aFilename) {
@@ -352,7 +394,7 @@ function close_manager(aManagerWindow, aCallback, aLongerTimeout) {
 
     aManagerWindow.addEventListener("unload", function() {
       try {
-        dump("Manager window unload handler");
+        dump("Manager window unload handler\n");
         this.removeEventListener("unload", arguments.callee, false);
         resolve();
       } catch(e) {
@@ -434,12 +476,12 @@ function is_hidden(aElement) {
 
 function is_element_visible(aElement, aMsg) {
   isnot(aElement, null, "Element should not be null, when checking visibility");
-  ok(!is_hidden(aElement), aMsg);
+  ok(!is_hidden(aElement), aMsg || (aElement + " should be visible"));
 }
 
 function is_element_hidden(aElement, aMsg) {
   isnot(aElement, null, "Element should not be null, when checking visibility");
-  ok(is_hidden(aElement), aMsg);
+  ok(is_hidden(aElement), aMsg || (aElement + " should be hidden"));
 }
 
 /**
@@ -620,6 +662,7 @@ MockProvider.prototype = {
    * Register this provider with the AddonManager
    */
   register: function MP_register() {
+    info("Registering mock add-on provider");
     AddonManagerPrivate.registerProvider(this, this.types);
   },
 
@@ -627,6 +670,7 @@ MockProvider.prototype = {
    * Unregister this provider with the AddonManager
    */
   unregister: function MP_unregister() {
+    info("Unregistering mock add-on provider");
     AddonManagerPrivate.unregisterProvider(this);
   },
 
@@ -1096,7 +1140,7 @@ MockAddon.prototype = {
   get applyBackgroundUpdates() {
     return this._applyBackgroundUpdates;
   },
-  
+
   set applyBackgroundUpdates(val) {
     if (val != AddonManager.AUTOUPDATE_DEFAULT &&
         val != AddonManager.AUTOUPDATE_DISABLE &&

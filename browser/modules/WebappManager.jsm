@@ -14,6 +14,7 @@ Cu.import("resource://gre/modules/Webapps.jsm");
 Cu.import("resource://gre/modules/AppsUtils.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
+Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "NativeApp",
   "resource://gre/modules/NativeApp.jsm");
@@ -31,6 +32,7 @@ this.WebappManager = {
 
   init: function() {
     Services.obs.addObserver(this, "webapps-ask-install", false);
+    Services.obs.addObserver(this, "webapps-ask-uninstall", false);
     Services.obs.addObserver(this, "webapps-launch", false);
     Services.obs.addObserver(this, "webapps-uninstall", false);
     cpmm.addMessageListener("Webapps:Install:Return:OK", this);
@@ -40,6 +42,7 @@ this.WebappManager = {
 
   uninit: function() {
     Services.obs.removeObserver(this, "webapps-ask-install");
+    Services.obs.removeObserver(this, "webapps-ask-uninstall");
     Services.obs.removeObserver(this, "webapps-launch");
     Services.obs.removeObserver(this, "webapps-uninstall");
     cpmm.removeMessageListener("Webapps:Install:Return:OK", this);
@@ -66,7 +69,9 @@ this.WebappManager = {
       }
     } else if (aMessage.name == "Webapps:Install:Return:OK" &&
                !data.isPackage) {
-      let manifest = new ManifestHelper(data.app.manifest, data.app.origin);
+      let manifest = new ManifestHelper(data.app.manifest,
+                                        data.app.origin,
+                                        data.app.manifestURL);
       if (!manifest.appcache_path) {
         this.installations[manifestURL].resolve();
       }
@@ -79,11 +84,18 @@ this.WebappManager = {
     let data = JSON.parse(aData);
     data.mm = aSubject;
 
+    let win;
     switch(aTopic) {
       case "webapps-ask-install":
-        let win = this._getWindowForId(data.oid);
+        win = this._getWindowForId(data.oid);
         if (win && win.location.href == data.from) {
           this.doInstall(data, win);
+        }
+        break;
+      case "webapps-ask-uninstall":
+        win = this._getWindowForId(data.windowId);
+        if (win && win.location.href == data.from) {
+          this.doUninstall(data, win);
         }
         break;
       case "webapps-launch":
@@ -134,51 +146,47 @@ this.WebappManager = {
 
         let manifestURL = aData.app.manifestURL;
 
-        let cleanup = () => {
+        let nativeApp = new NativeApp(aData.app, jsonManifest,
+                                      aData.app.categories);
+
+        this.installations[manifestURL] = Promise.defer();
+        this.installations[manifestURL].promise.then(() => {
+          notifyInstallSuccess(aData.app, nativeApp, bundle,
+                               PrivateBrowsingUtils.isWindowPrivate(aWindow));
+        }, (error) => {
+          Cu.reportError("Error installing webapp: " + error);
+        }).then(() => {
           popupProgressContent.removeChild(progressMeter);
           delete this.installations[manifestURL];
           if (Object.getOwnPropertyNames(this.installations).length == 0) {
             notification.remove();
           }
-        };
-
-        this.installations[manifestURL] = Promise.defer();
-        this.installations[manifestURL].promise.then(null, (error) => {
-          Cu.reportError("Error installing webapp: " + error);
-          cleanup();
         });
 
-        let nativeApp = new NativeApp(aData.app, jsonManifest,
-                                      aData.app.categories);
         let localDir;
         try {
           localDir = nativeApp.createProfile();
         } catch (ex) {
-          Cu.reportError("Error installing webapp: " + ex);
           DOMApplicationRegistry.denyInstall(aData);
-          cleanup();
           return;
         }
 
         DOMApplicationRegistry.confirmInstall(aData, localDir,
-          (aManifest, aZipPath) => Task.spawn((function*() {
+          Task.async(function*(aApp, aManifest, aZipPath) {
             try {
-              yield nativeApp.install(aManifest, aZipPath);
-              yield this.installations[manifestURL].promise;
-              notifyInstallSuccess(aData.app, nativeApp, bundle);
+              yield nativeApp.install(aApp, aManifest, aZipPath);
             } catch (ex) {
               Cu.reportError("Error installing webapp: " + ex);
-              // TODO: Notify user that the installation has failed
-            } finally {
-              cleanup();
+              throw ex;
             }
-          }).bind(this))
+          })
         );
       }
     };
 
     let requestingURI = chromeWin.makeURI(aData.from);
-    let manifest = new ManifestHelper(jsonManifest, aData.app.origin);
+    let app = aData.app;
+    let manifest = new ManifestHelper(jsonManifest, app.origin, app.manifestURL);
 
     let host;
     try {
@@ -196,10 +204,53 @@ this.WebappManager = {
                                                      "webapps-notification-icon",
                                                      mainAction);
 
+  },
+
+  doUninstall: function(aData, aWindow) {
+    let browser = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                         .getInterface(Ci.nsIWebNavigation)
+                         .QueryInterface(Ci.nsIDocShell)
+                         .chromeEventHandler;
+    let chromeDoc = browser.ownerDocument;
+    let chromeWin = chromeDoc.defaultView;
+
+    let bundle = chromeWin.gNavigatorBundle;
+    let jsonManifest = aData.app.manifest;
+
+    let notification;
+
+    let mainAction = {
+      label: bundle.getString("webapps.uninstall"),
+      accessKey: bundle.getString("webapps.uninstall.accesskey"),
+      callback: () => {
+        notification.remove();
+        DOMApplicationRegistry.confirmUninstall(aData);
+      }
+    };
+
+    let secondaryAction = {
+      label: bundle.getString("webapps.doNotUninstall"),
+      accessKey: bundle.getString("webapps.doNotUninstall.accesskey"),
+      callback: () => {
+        notification.remove();
+        DOMApplicationRegistry.denyUninstall(aData, "USER_DECLINED");
+      }
+    };
+
+    let manifest = new ManifestHelper(jsonManifest, aData.app.origin,
+                                      aData.app.manifestURL);
+
+    let message = bundle.getFormattedString("webapps.requestUninstall",
+                                            [manifest.name]);
+
+    notification = chromeWin.PopupNotifications.show(
+                     browser, "webapps-uninstall", message,
+                     "webapps-notification-icon",
+                     mainAction, [secondaryAction]);
   }
 }
 
-function notifyInstallSuccess(aApp, aNativeApp, aBundle) {
+function notifyInstallSuccess(aApp, aNativeApp, aBundle, aInPrivateBrowsing) {
   let launcher = {
     observe: function(aSubject, aTopic) {
       if (aTopic == "alertclickcallback") {
@@ -215,6 +266,7 @@ function notifyInstallSuccess(aApp, aNativeApp, aBundle) {
     notifier.showAlertNotification(aNativeApp.iconURI.spec,
                                    aBundle.getString("webapps.install.success"),
                                    aNativeApp.appNameAsFilename,
-                                   true, null, launcher);
+                                   true, null, launcher, "", "", "", "", null,
+                                   aInPrivateBrowsing);
   } catch (ex) {}
 }

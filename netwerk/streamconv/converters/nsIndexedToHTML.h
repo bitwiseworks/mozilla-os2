@@ -17,7 +17,6 @@
 class nsIDateTimeFormat;
 class nsIStringBundle;
 class nsITextToSubURI;
-class nsIUnicodeEncoder;
 
 class nsIndexedToHTML : public nsIStreamConverter,
                         public nsIDirIndexListener
@@ -30,7 +29,6 @@ public:
     NS_DECL_NSIDIRINDEXLISTENER
 
     nsIndexedToHTML();
-    virtual ~nsIndexedToHTML();
 
     nsresult Init(nsIStreamListener *aListener);
 
@@ -53,11 +51,12 @@ protected:
     nsCOMPtr<nsIStringBundle> mBundle;
 
     nsCOMPtr<nsITextToSubURI> mTextToSubURI;
-    nsCOMPtr<nsIUnicodeEncoder> mUnicodeEncoder;
 
 private:
     // Expecting absolute locations, given by 201 lines.
     bool mExpectAbsLoc;
+
+    virtual ~nsIndexedToHTML();
 };
 
 #endif

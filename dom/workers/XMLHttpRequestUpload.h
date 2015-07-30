@@ -12,17 +12,17 @@ BEGIN_WORKERS_NAMESPACE
 
 class XMLHttpRequest;
 
-class XMLHttpRequestUpload MOZ_FINAL : public nsXHREventTarget
+class XMLHttpRequestUpload final : public nsXHREventTarget
 {
   nsRefPtr<XMLHttpRequest> mXHR;
 
-  XMLHttpRequestUpload(XMLHttpRequest* aXHR);
+  explicit XMLHttpRequestUpload(XMLHttpRequest* aXHR);
 
   ~XMLHttpRequestUpload();
 
 public:
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) override;
 
   static already_AddRefed<XMLHttpRequestUpload>
   Create(XMLHttpRequest* aXHR);

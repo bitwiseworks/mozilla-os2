@@ -12,6 +12,7 @@
 #include "nsWeakReference.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
+#include "mozilla/dom/MozPowerManagerBinding.h"
 
 class nsPIDOMWindow;
 
@@ -20,7 +21,7 @@ class ErrorResult;
 
 namespace dom {
 
-class PowerManager MOZ_FINAL : public nsIDOMMozWakeLockListener
+class PowerManager final : public nsIDOMMozWakeLockListener
                              , public nsWrapperCache
 {
 public:
@@ -28,15 +29,8 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(PowerManager)
   NS_DECL_NSIDOMMOZWAKELOCKLISTENER
 
-  PowerManager()
-  {
-    SetIsDOMBinding();
-  }
-
   nsresult Init(nsIDOMWindow *aWindow);
   nsresult Shutdown();
-
-  static bool CheckPermission(nsPIDOMWindow*);
 
   static already_AddRefed<PowerManager> CreateInstance(nsPIDOMWindow*);
 
@@ -45,9 +39,9 @@ public:
   {
     return mWindow;
   }
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) override;
   void Reboot(ErrorResult& aRv);
-  void FactoryReset();
+  void FactoryReset(mozilla::dom::FactoryResetReason& aReason);
   void PowerOff(ErrorResult& aRv);
   void AddWakeLockListener(nsIDOMMozWakeLockListener* aListener);
   void RemoveWakeLockListener(nsIDOMMozWakeLockListener* aListener);
@@ -55,12 +49,16 @@ public:
                         ErrorResult& aRv);
   bool ScreenEnabled();
   void SetScreenEnabled(bool aEnabled);
+  bool KeyLightEnabled();
+  void SetKeyLightEnabled(bool aEnabled);
   double ScreenBrightness();
   void SetScreenBrightness(double aBrightness, ErrorResult& aRv);
   bool CpuSleepAllowed();
   void SetCpuSleepAllowed(bool aAllowed);
 
 private:
+  ~PowerManager() {}
+
   nsCOMPtr<nsIDOMWindow> mWindow;
   nsTArray<nsCOMPtr<nsIDOMMozWakeLockListener> > mListeners;
 };

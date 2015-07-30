@@ -29,7 +29,8 @@ NS_IMPL_ISUPPORTS_INHERITED(nsFtpChannel,
                             nsIUploadChannel,
                             nsIResumableChannel,
                             nsIFTPChannel,
-                            nsIProxiedChannel)
+                            nsIProxiedChannel,
+                            nsIForcePendingChannel)
 
 //-----------------------------------------------------------------------------
 
@@ -130,10 +131,12 @@ nsFtpChannel::OnCallbacksChanged()
 
 namespace {
 
-class FTPEventSinkProxy MOZ_FINAL : public nsIFTPEventSink
+class FTPEventSinkProxy final : public nsIFTPEventSink
 {
+    ~FTPEventSinkProxy() {}
+
 public:
-    FTPEventSinkProxy(nsIFTPEventSink* aTarget)
+    explicit FTPEventSinkProxy(nsIFTPEventSink* aTarget)
         : mTarget(aTarget)
         , mTargetThread(do_GetCurrentThread())
     { }
@@ -197,7 +200,7 @@ nsFtpChannel::GetFTPEventSink(nsCOMPtr<nsIFTPEventSink> &aResult)
     aResult = mFTPEventSink;
 }
 
-void
+NS_IMETHODIMP
 nsFtpChannel::ForcePending(bool aForcePending)
 {
     // Set true here so IsPending will return true.
@@ -205,6 +208,8 @@ nsFtpChannel::ForcePending(bool aForcePending)
     // OnStopRequest can be called in the parent before callbacks are diverted
     // back from the child to the listener in the parent.
     mForcePending = aForcePending;
+
+    return NS_OK;
 }
 
 NS_IMETHODIMP

@@ -3,23 +3,106 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+const { Cu } = require("chrome");
 const cssAutoCompleter = require("devtools/sourceeditor/css-autocompleter");
 const { AutocompletePopup } = require("devtools/shared/autocomplete-popup");
 
-const privates = new WeakMap();
+const CM_TERN_SCRIPTS = [
+  "chrome://browser/content/devtools/codemirror/tern.js",
+  "chrome://browser/content/devtools/codemirror/show-hint.js"
+];
+
+const autocompleteMap = new WeakMap();
 
 /**
- * Prepares an editor instance for autocompletion, setting up the popup and the
- * CSS completer instance.
+ * Prepares an editor instance for autocompletion.
  */
-function setupAutoCompletion(ctx, walker) {
+function initializeAutoCompletion(ctx, options = {}) {
   let { cm, ed, Editor } = ctx;
+  if (autocompleteMap.has(ed)) {
+    return;
+  }
 
   let win = ed.container.contentWindow.wrappedJSObject;
+  let { CodeMirror, document } = win;
 
   let completer = null;
-  if (ed.config.mode == Editor.modes.css)
-    completer = new cssAutoCompleter({walker: walker});
+  let autocompleteKey = "Ctrl-" +
+                        Editor.keyFor("autocompletion", { noaccel: true });
+  if (ed.config.mode == Editor.modes.js) {
+    let defs = [
+      "tern/browser",
+      "tern/ecma5",
+    ].map(require);
+
+    CM_TERN_SCRIPTS.forEach(ed.loadScript, ed);
+    win.tern = require("tern/tern");
+    cm.tern = new CodeMirror.TernServer({
+      defs: defs,
+      typeTip: function(data) {
+        let tip = document.createElement("span");
+        tip.className = "CodeMirror-Tern-information";
+        let tipType = document.createElement("strong");
+        tipType.appendChild(document.createTextNode(data.type || cm.l10n("autocompletion.notFound")));
+        tip.appendChild(tipType);
+
+        if (data.doc) {
+          tip.appendChild(document.createTextNode(" — " + data.doc));
+        }
+
+        if (data.url) {
+          tip.appendChild(document.createTextNode(" "));
+          let docLink = document.createElement("a");
+          docLink.textContent = "[" + cm.l10n("autocompletion.docsLink") + "]";
+          docLink.href = data.url;
+          docLink.className = "theme-link";
+          docLink.setAttribute("target", "_blank");
+          tip.appendChild(docLink);
+        }
+
+        return tip;
+      }
+    });
+
+    let keyMap = {};
+    let updateArgHintsCallback = cm.tern.updateArgHints.bind(cm.tern, cm);
+    cm.on("cursorActivity", updateArgHintsCallback);
+
+    keyMap[autocompleteKey] = (cm) => {
+      cm.tern.getHint(cm, (data) => {
+        CodeMirror.on(data, "shown", () => ed.emit("before-suggest"));
+        CodeMirror.on(data, "close", () => ed.emit("after-suggest"));
+        CodeMirror.on(data, "select", () => ed.emit("suggestion-entered"));
+        CodeMirror.showHint(cm, (cm, cb) => cb(data), { async: true });
+      });
+    };
+
+    keyMap[Editor.keyFor("showInformation2", { noaccel: true })] = (cm) => {
+      cm.tern.showType(cm, null, () => {
+        ed.emit("show-information");
+      });
+    };
+    cm.addKeyMap(keyMap);
+
+    let destroyTern = function() {
+      ed.off("destroy", destroyTern);
+      cm.off("cursorActivity", updateArgHintsCallback);
+      cm.removeKeyMap(keyMap);
+      win.tern = cm.tern = null;
+      autocompleteMap.delete(ed);
+    };
+
+    ed.on("destroy", destroyTern);
+
+    autocompleteMap.set(ed, {
+      destroy: destroyTern
+    });
+
+    // TODO: Integrate tern autocompletion with this autocomplete API.
+    return;
+  } else if (ed.config.mode == Editor.modes.css) {
+    completer = new cssAutoCompleter({walker: options.walker});
+  }
 
   let popup = new AutocompletePopup(win.parent.document, {
     position: "after_start",
@@ -34,18 +117,18 @@ function setupAutoCompletion(ctx, walker) {
       return;
     }
 
-    return win.CodeMirror.Pass;
+    return CodeMirror.Pass;
   };
 
   let keyMap = {
     "Tab": cycle,
     "Down": cycle,
-    "Shift-Tab": cycle.bind(this, true),
-    "Up": cycle.bind(this, true),
+    "Shift-Tab": cycle.bind(null, true),
+    "Up": cycle.bind(null, true),
     "Enter": () => {
       if (popup && popup.isOpen) {
-        if (!privates.get(ed).suggestionInsertedOnce) {
-          privates.get(ed).insertingSuggestion = true;
+        if (!autocompleteMap.get(ed).suggestionInsertedOnce) {
+          autocompleteMap.get(ed).insertingSuggestion = true;
           let {label, preLabel, text} = popup.getItemAtIndex(0);
           let cur = ed.getCursor();
           ed.replaceText(text.slice(preLabel.length), cur, cur);
@@ -56,35 +139,56 @@ function setupAutoCompletion(ctx, walker) {
         return;
       }
 
-      return win.CodeMirror.Pass;
+      return CodeMirror.Pass;
     }
   };
-  keyMap[Editor.accel("Space")] = cm => autoComplete(ctx);
+  let autoCompleteCallback = autoComplete.bind(null, ctx);
+  let keypressCallback = onEditorKeypress.bind(null, ctx);
+  keyMap[autocompleteKey] = autoCompleteCallback;
   cm.addKeyMap(keyMap);
 
-  cm.on("keydown", (cm, e) => onEditorKeypress(ctx, e));
-  ed.on("change", () => autoComplete(ctx));
-  ed.on("destroy", () => {
-    cm.off("keydown", (cm, e) => onEditorKeypress(ctx, e));
-    ed.off("change", () => autoComplete(ctx));
-    popup.destroy();
-    popup = null;
-    completer = null;
-  });
+  cm.on("keydown", keypressCallback);
+  ed.on("change", autoCompleteCallback);
+  ed.on("destroy", destroy);
 
-  privates.set(ed, {
+  function destroy() {
+    ed.off("destroy", destroy);
+    cm.off("keydown", keypressCallback);
+    ed.off("change", autoCompleteCallback);
+    cm.removeKeyMap(keyMap);
+    popup.destroy();
+    keyMap = popup = completer = null;
+    autocompleteMap.delete(ed);
+  }
+
+  autocompleteMap.set(ed, {
     popup: popup,
     completer: completer,
+    keyMap: keyMap,
+    destroy: destroy,
     insertingSuggestion: false,
     suggestionInsertedOnce: false
   });
 }
 
 /**
+ * Destroy autocompletion on an editor instance.
+ */
+function destroyAutoCompletion(ctx) {
+  let { ed } = ctx;
+  if (!autocompleteMap.has(ed)) {
+    return;
+  }
+
+  let {destroy} = autocompleteMap.get(ed);
+  destroy();
+}
+
+/**
  * Provides suggestions to autocomplete the current token/word being typed.
  */
 function autoComplete({ ed, cm }) {
-  let private = privates.get(ed);
+  let private = autocompleteMap.get(ed);
   let { completer, popup } = private;
   if (!completer || private.insertingSuggestion || private.doNotAutocomplete) {
     private.insertingSuggestion = false;
@@ -112,7 +216,7 @@ function autoComplete({ ed, cm }) {
     private.suggestionInsertedOnce = false;
     // This event is used in tests.
     ed.emit("after-suggest");
-  });
+  }).then(null, Cu.reportError);
 }
 
 /**
@@ -120,7 +224,7 @@ function autoComplete({ ed, cm }) {
  * when `reverse` is not true. Opposite otherwise.
  */
 function cycleSuggestions(ed, reverse) {
-  let private = privates.get(ed);
+  let private = autocompleteMap.get(ed);
   let { popup, completer } = private;
   let cur = ed.getCursor();
   private.insertingSuggestion = true;
@@ -159,8 +263,8 @@ function cycleSuggestions(ed, reverse) {
  * onkeydown handler for the editor instance to prevent autocompleting on some
  * keypresses.
  */
-function onEditorKeypress({ ed, Editor }, event) {
-  let private = privates.get(ed);
+function onEditorKeypress({ ed, Editor }, cm, event) {
+  let private = autocompleteMap.get(ed);
 
   // Do not try to autocomplete with multiple selections.
   if (ed.hasMultipleSelections()) {
@@ -216,7 +320,10 @@ function onEditorKeypress({ ed, Editor }, event) {
  * Returns the private popup. This method is used by tests to test the feature.
  */
 function getPopup({ ed }) {
-  return privates.get(ed).popup;
+  if (autocompleteMap.has(ed))
+    return autocompleteMap.get(ed).popup;
+
+  return null;
 }
 
 /**
@@ -224,15 +331,25 @@ function getPopup({ ed }) {
  * implementation of completer supports it.
  */
 function getInfoAt({ ed }, caret) {
-  let completer = privates.get(ed).completer;
+  let completer = autocompleteMap.get(ed).completer;
   if (completer && completer.getInfoAt)
     return completer.getInfoAt(ed.getText(), caret);
 
   return null;
 }
 
+/**
+ * Returns whether autocompletion is enabled for this editor.
+ * Used for testing
+ */
+function isAutocompletionEnabled({ ed }) {
+  return autocompleteMap.has(ed);
+}
+
 // Export functions
 
-module.exports.setupAutoCompletion = setupAutoCompletion;
+module.exports.initializeAutoCompletion = initializeAutoCompletion;
+module.exports.destroyAutoCompletion = destroyAutoCompletion;
 module.exports.getAutocompletionPopup = getPopup;
 module.exports.getInfoAt = getInfoAt;
+module.exports.isAutocompletionEnabled = isAutocompletionEnabled;

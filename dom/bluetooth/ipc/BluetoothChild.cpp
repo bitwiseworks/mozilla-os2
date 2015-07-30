@@ -9,6 +9,8 @@
 #include "BluetoothChild.h"
 
 #include "mozilla/Assertions.h"
+#include "mozilla/ClearOnShutdown.h"
+#include "mozilla/StaticPtr.h"
 #include "nsDebug.h"
 #include "nsISupportsImpl.h"
 #include "nsThreadUtils.h"
@@ -17,11 +19,12 @@
 #include "BluetoothService.h"
 #include "BluetoothServiceChildProcess.h"
 
+using namespace mozilla;
 USING_BLUETOOTH_NAMESPACE
 
 namespace {
 
-BluetoothServiceChildProcess* sBluetoothService;
+StaticRefPtr<BluetoothServiceChildProcess> sBluetoothService;
 
 } // anonymous namespace
 
@@ -37,6 +40,7 @@ BluetoothChild::BluetoothChild(BluetoothServiceChildProcess* aBluetoothService)
   MOZ_ASSERT(aBluetoothService);
 
   sBluetoothService = aBluetoothService;
+  ClearOnShutdown(&sBluetoothService);
 }
 
 BluetoothChild::~BluetoothChild()
@@ -75,7 +79,9 @@ BluetoothChild::RecvNotify(const BluetoothSignal& aSignal)
 {
   MOZ_ASSERT(sBluetoothService);
 
-  sBluetoothService->DistributeSignal(aSignal);
+  if (sBluetoothService) {
+    sBluetoothService->DistributeSignal(aSignal);
+  }
   return true;
 }
 
@@ -84,7 +90,9 @@ BluetoothChild::RecvEnabled(const bool& aEnabled)
 {
   MOZ_ASSERT(sBluetoothService);
 
-  sBluetoothService->SetEnabled(aEnabled);
+  if (sBluetoothService) {
+    sBluetoothService->SetEnabled(aEnabled);
+  }
   return true;
 }
 

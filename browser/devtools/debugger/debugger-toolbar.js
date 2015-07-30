@@ -1,4 +1,4 @@
-/* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -120,11 +120,16 @@ ToolbarView.prototype = {
    * Listener handling the pause/resume button click event.
    */
   _onResumePressed: function() {
+    if (DebuggerController.StackFrames._currentFrameDescription != FRAME_TYPE.NORMAL) {
+      return;
+    }
+
     if (DebuggerController.activeThread.paused) {
       let warn = DebuggerController._ensureResumptionOrder;
       DebuggerController.StackFrames.currentFrameDepth = -1;
       DebuggerController.activeThread.resume(warn);
     } else {
+      DebuggerController.ThreadState.interruptedByResumeButton = true;
       DebuggerController.activeThread.interrupt();
     }
   },
@@ -144,6 +149,10 @@ ToolbarView.prototype = {
    * Listener handling the step in button click event.
    */
   _onStepInPressed: function() {
+    if (DebuggerController.StackFrames._currentFrameDescription != FRAME_TYPE.NORMAL) {
+      return;
+    }
+
     if (DebuggerController.activeThread.paused) {
       DebuggerController.StackFrames.currentFrameDepth = -1;
       let warn = DebuggerController._ensureResumptionOrder;
@@ -188,6 +197,7 @@ function OptionsView() {
   this._toggleShowVariablesOnlyEnum = this._toggleShowVariablesOnlyEnum.bind(this);
   this._toggleShowVariablesFilterBox = this._toggleShowVariablesFilterBox.bind(this);
   this._toggleShowOriginalSource = this._toggleShowOriginalSource.bind(this);
+  this._toggleAutoBlackBox = this._toggleAutoBlackBox.bind(this);
 }
 
 OptionsView.prototype = {
@@ -205,6 +215,7 @@ OptionsView.prototype = {
     this._showVariablesOnlyEnumItem = document.getElementById("show-vars-only-enum");
     this._showVariablesFilterBoxItem = document.getElementById("show-vars-filter-box");
     this._showOriginalSourceItem = document.getElementById("show-original-source");
+    this._autoBlackBoxItem = document.getElementById("auto-black-box");
 
     this._autoPrettyPrint.setAttribute("checked", Prefs.autoPrettyPrint);
     this._pauseOnExceptionsItem.setAttribute("checked", Prefs.pauseOnExceptions);
@@ -213,7 +224,9 @@ OptionsView.prototype = {
     this._showVariablesOnlyEnumItem.setAttribute("checked", Prefs.variablesOnlyEnumVisible);
     this._showVariablesFilterBoxItem.setAttribute("checked", Prefs.variablesSearchboxVisible);
     this._showOriginalSourceItem.setAttribute("checked", Prefs.sourceMapsEnabled);
+    this._autoBlackBoxItem.setAttribute("checked", Prefs.autoBlackBox);
   },
+
 
   /**
    * Destruction function, called when the debugger is closed.
@@ -313,9 +326,32 @@ OptionsView.prototype = {
     window.once(EVENTS.OPTIONS_POPUP_HIDDEN, () => {
       // The popup panel needs more time to hide after triggering onpopuphidden.
       window.setTimeout(() => {
-        DebuggerController.reconfigureThread(pref);
+        DebuggerController.reconfigureThread({
+          useSourceMaps: pref,
+          autoBlackBox: Prefs.autoBlackBox
+        });
       }, POPUP_HIDDEN_DELAY);
-    }, false);
+    });
+  },
+
+  /**
+   * Listener handling the 'automatically black box minified sources' menuitem
+   * command.
+   */
+  _toggleAutoBlackBox: function() {
+    let pref = Prefs.autoBlackBox =
+      this._autoBlackBoxItem.getAttribute("checked") == "true";
+
+    // Don't block the UI while reconfiguring the server.
+    window.once(EVENTS.OPTIONS_POPUP_HIDDEN, () => {
+      // The popup panel needs more time to hide after triggering onpopuphidden.
+      window.setTimeout(() => {
+        DebuggerController.reconfigureThread({
+          useSourceMaps: Prefs.sourceMapsEnabled,
+          autoBlackBox: pref
+        });
+      }, POPUP_HIDDEN_DELAY);
+    });
   },
 
   _button: null,
@@ -323,7 +359,8 @@ OptionsView.prototype = {
   _showPanesOnStartupItem: null,
   _showVariablesOnlyEnumItem: null,
   _showVariablesFilterBoxItem: null,
-  _showOriginalSourceItem: null
+  _showOriginalSourceItem: null,
+  _autoBlackBoxItem: null
 };
 
 /**
@@ -491,7 +528,7 @@ StackFramesView.prototype = Heritage.extend(WidgetMethods, {
    *        The corresponding item.
    */
   _onStackframeRemoved: function(aItem) {
-    dumpn("Finalizing stackframe item: " + aItem);
+    dumpn("Finalizing stackframe item: " + aItem.stringify());
 
     // Remove the mirrored item in the classic list.
     let depth = aItem.attachment.depth;
@@ -509,12 +546,13 @@ StackFramesView.prototype = Heritage.extend(WidgetMethods, {
     if (stackframeItem) {
       // The container is not empty and an actual item was selected.
       let depth = stackframeItem.attachment.depth;
-      DebuggerController.StackFrames.selectFrame(depth);
 
       // Mirror the selected item in the classic list.
       this.suppressSelectionEvents = true;
       this._mirror.selectedItem = e => e.attachment.depth == depth;
       this.suppressSelectionEvents = false;
+
+      DebuggerController.StackFrames.selectFrame(depth);
     }
   },
 
@@ -898,7 +936,7 @@ FilterView.prototype = {
         DebuggerView.GlobalSearch.scheduleSearch(this.searchArguments[0]);
         break;
       case SEARCH_FUNCTION_FLAG:
-        // Schedule a function search for when the user stops typing.
+      // Schedule a function search for when the user stops typing.
         DebuggerView.FilteredFunctions.scheduleSearch(this.searchArguments[0]);
         break;
       case SEARCH_VARIABLE_FLAG:
@@ -1079,7 +1117,7 @@ FilterView.prototype = {
     if (SEARCH_AUTOFILL.indexOf(aOperator) != -1) {
       let cursor = DebuggerView.editor.getCursor();
       let content = DebuggerView.editor.getText();
-      let location = DebuggerView.Sources.selectedValue;
+      let location = DebuggerView.Sources.selectedItem.attachment.source.url;
       let source = DebuggerController.Parser.get(content, location);
       let identifier = source.getIdentifierAt({ line: cursor.line+1, column: cursor.ch });
 
@@ -1268,19 +1306,23 @@ FilteredSourcesView.prototype = Heritage.extend(ResultsPanelContainer.prototype,
     }
 
     for (let item of aSearchResults) {
-      // Create the element node for the location item.
-      let itemView = this._createItemView(
-        SourceUtils.trimUrlLength(item.attachment.label),
-        SourceUtils.trimUrlLength(item.value, 0, "start")
-      );
+      let url = item.attachment.source.url;
 
-      // Append a location item to this container for each match.
-      this.push([itemView], {
-        index: -1, /* specifies on which position should the item be appended */
-        attachment: {
-          url: item.value
-        }
-      });
+      if (url) {
+        // Create the element node for the location item.
+        let itemView = this._createItemView(
+          SourceUtils.trimUrlLength(item.attachment.label),
+          SourceUtils.trimUrlLength(url, 0, "start")
+        );
+
+        // Append a location item to this container for each match.
+        this.push([itemView], {
+          index: -1, /* specifies on which position should the item be appended */
+          attachment: {
+            url: url
+          }
+        });
+      }
     }
 
     // There's at least one item displayed in this container. Don't select it
@@ -1313,7 +1355,8 @@ FilteredSourcesView.prototype = Heritage.extend(ResultsPanelContainer.prototype,
    */
   _onSelect: function({ detail: locationItem }) {
     if (locationItem) {
-      DebuggerView.setEditorLocation(locationItem.attachment.url, undefined, {
+      let actor = DebuggerView.Sources.getActorForLocation({ url: locationItem.attachment.url });
+      DebuggerView.setEditorLocation(actor, undefined, {
         noCaret: true,
         noDebug: true
       });
@@ -1370,8 +1413,8 @@ FilteredFunctionsView.prototype = Heritage.extend(ResultsPanelContainer.prototyp
     // Allow requests to settle down first.
     setNamedTimeout("function-search", delay, () => {
       // Start fetching as many sources as possible, then perform the search.
-      let urls = DebuggerView.Sources.values;
-      let sourcesFetched = DebuggerController.SourceScripts.getTextForSources(urls);
+      let actors = DebuggerView.Sources.values;
+      let sourcesFetched = DebuggerController.SourceScripts.getTextForSources(actors);
       sourcesFetched.then(aSources => this._doSearch(aToken, aSources));
     });
   },
@@ -1391,8 +1434,8 @@ FilteredFunctionsView.prototype = Heritage.extend(ResultsPanelContainer.prototyp
 
     // Make sure the currently displayed source is parsed first. Once the
     // maximum allowed number of results are found, parsing will be halted.
-    let currentUrl = DebuggerView.Sources.selectedValue;
-    let currentSource = aSources.filter(([sourceUrl]) => sourceUrl == currentUrl)[0];
+    let currentActor = DebuggerView.Sources.selectedValue;
+    let currentSource = aSources.filter(([actor]) => actor == currentActor)[0];
     aSources.splice(aSources.indexOf(currentSource), 1);
     aSources.unshift(currentSource);
 
@@ -1402,8 +1445,14 @@ FilteredFunctionsView.prototype = Heritage.extend(ResultsPanelContainer.prototyp
       aSources.splice(1);
     }
 
-    for (let [location, contents] of aSources) {
-      let parsedSource = DebuggerController.Parser.get(contents, location);
+    for (let [actor, contents] of aSources) {
+      let item = DebuggerView.Sources.getItemByValue(actor);
+      let url = item.attachment.source.url;
+      if (!url) {
+        continue;
+      }
+
+      let parsedSource = DebuggerController.Parser.get(contents, url);
       let sourceResults = parsedSource.getNamedFunctionDefinitions(aToken);
 
       for (let scriptResult of sourceResults) {
@@ -1515,10 +1564,11 @@ FilteredFunctionsView.prototype = Heritage.extend(ResultsPanelContainer.prototyp
   _onSelect: function({ detail: functionItem }) {
     if (functionItem) {
       let sourceUrl = functionItem.attachment.sourceUrl;
+      let actor = DebuggerView.Sources.getActorForLocation({ url: sourceUrl });
       let scriptOffset = functionItem.attachment.scriptOffset;
       let actualLocation = functionItem.attachment.actualLocation;
 
-      DebuggerView.setEditorLocation(sourceUrl, actualLocation.start.line, {
+      DebuggerView.setEditorLocation(actor, actualLocation.start.line, {
         charOffset: scriptOffset,
         columnOffset: actualLocation.start.column,
         align: "center",

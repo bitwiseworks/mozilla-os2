@@ -28,7 +28,7 @@ class EventTarget;
 }
 }
 
-class nsXBLService MOZ_FINAL : public nsSupportsWeakReference
+class nsXBLService final : public nsSupportsWeakReference
 {
   NS_DECL_ISUPPORTS
 
@@ -78,7 +78,8 @@ protected:
   // This method synchronously loads and parses an XBL file.
   nsresult FetchBindingDocument(nsIContent* aBoundElement, nsIDocument* aBoundDocument,
                                 nsIURI* aDocumentURI, nsIURI* aBindingURI,
-                                bool aForceSyncLoad, nsIDocument** aResult);
+                                nsIPrincipal* aOriginPrincipal, bool aForceSyncLoad,
+                                nsIDocument** aResult);
 
   /**
    * This method calls the one below with an empty |aDontExtendURIs| array.

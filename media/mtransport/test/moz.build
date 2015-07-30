@@ -5,28 +5,24 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 if CONFIG['OS_TARGET'] != 'WINNT' and CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk':
-    CPP_UNIT_TESTS += [
-        'buffered_stun_socket_unittest.cpp',
-        'nrappkit_unittest.cpp',
-        'rlogringbuffer_unittest.cpp',
-        'runnable_utils_unittest.cpp',
-        'simpletokenbucket_unittest.cpp',
-        'sockettransportservice_unittest.cpp',
-        'TestSyncRunnable.cpp',
-        'transport_unittests.cpp',
-        'turn_unittest.cpp',
-    ]
-
-    # Bug 1037618 - Cross-tree (network related?) failures on OSX
-    if CONFIG['OS_TARGET'] != 'Darwin':
-        CPP_UNIT_TESTS += [
-            'ice_unittest.cpp',
-        ]
+    GeckoCppUnitTests([
+        'buffered_stun_socket_unittest',
+        'ice_unittest',
+        'nrappkit_unittest',
+        'proxy_tunnel_socket_unittest',
+        'rlogringbuffer_unittest',
+        'runnable_utils_unittest',
+        'simpletokenbucket_unittest',
+        'sockettransportservice_unittest',
+        'TestSyncRunnable',
+        'transport_unittests',
+        'turn_unittest',
+    ])
 
     if CONFIG['MOZ_SCTP']:
-        CPP_UNIT_TESTS += [
-            'sctp_unittest.cpp',
-        ]
+        GeckoCppUnitTests([
+            'sctp_unittest',
+        ])
 
 FAIL_ON_WARNINGS = True
 
@@ -86,3 +82,21 @@ LOCAL_INCLUDES += [
     '/netwerk/sctp/src/',
 ]
 
+USE_LIBS += [
+    '/media/webrtc/trunk/testing/gtest_gtest/gtest',
+    'mtransport_s',
+    'nicer',
+    'nrappkit',
+    'nss',
+]
+
+if not CONFIG['MOZ_NATIVE_NSS'] and not CONFIG['MOZ_FOLD_LIBS']:
+    USE_LIBS += [
+        # Statically linking NSS libssl ensures that we can debug NSS too
+        'static:/security/nss/lib/ssl/ssl',
+    ]
+
+if CONFIG['MOZ_SCTP']:
+    USE_LIBS += [
+        'nksctp_s',
+    ]

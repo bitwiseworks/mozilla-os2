@@ -10,9 +10,6 @@
 #define SET_PRINTER_FEATURES_VIA_PREFS 1
 #define PRINTERFEATURES_PREF "print.tmp.printerfeatures"
 
-#ifdef MOZ_LOGGING
-#define FORCE_PR_LOG 1 /* Allow logging in the release build */
-#endif /* MOZ_LOGGING */
 #include "prlog.h"
 
 #include "plstr.h"
@@ -127,7 +124,7 @@ NS_IMETHODIMP nsDeviceContextSpecQt::GetSurfaceForPrinter(
         return NS_ERROR_NOT_IMPLEMENTED;
     }
 
-    NS_ABORT_IF_FALSE(surface, "valid address expected");
+    MOZ_ASSERT(surface, "valid address expected");
 
     surface.swap(*aSurface);
     return NS_OK;
@@ -151,12 +148,6 @@ NS_IMETHODIMP nsDeviceContextSpecQt::Init(nsIWidget* aWidget,
     nsCOMPtr<nsPrintSettingsQt> printSettingsQt(do_QueryInterface(aPS));
     if (!printSettingsQt)
         return NS_ERROR_NO_INTERFACE;
-    return NS_OK;
-}
-
-NS_IMETHODIMP nsDeviceContextSpecQt::GetPath(const char** aPath)
-{
-    *aPath = mPath;
     return NS_OK;
 }
 
@@ -211,6 +202,10 @@ NS_IMETHODIMP nsDeviceContextSpecQt::EndDocument()
 
 //  Printer Enumerator
 nsPrinterEnumeratorQt::nsPrinterEnumeratorQt()
+{
+}
+
+nsPrinterEnumeratorQt::~nsPrinterEnumeratorQt()
 {
 }
 

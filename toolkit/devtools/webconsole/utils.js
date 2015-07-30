@@ -1,4 +1,4 @@
-/* -*- js2-basic-offset: 2; indent-tabs-mode: nil; -*- */
+/* -*- js-indent-level: 2; indent-tabs-mode: nil -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -30,6 +30,17 @@ const REGEX_MATCH_FUNCTION_NAME = /^\(?function\s+([^(\s]+)\s*\(/;
 
 // Match the function arguments from the result of toString() or toSource().
 const REGEX_MATCH_FUNCTION_ARGS = /^\(?function\s*[^\s(]*\s*\((.+?)\)/;
+
+// Number of terminal entries for the self-xss prevention to go away
+const CONSOLE_ENTRY_THRESHOLD = 5
+
+// Provide an easy way to bail out of even attempting an autocompletion
+// if an object has way too many properties. Protects against large objects
+// with numeric values that wouldn't be tallied towards MAX_AUTOCOMPLETIONS.
+const MAX_AUTOCOMPLETE_ATTEMPTS = exports.MAX_AUTOCOMPLETE_ATTEMPTS = 100000;
+
+// Prevent iterating over too many properties during autocomplete suggestions.
+const MAX_AUTOCOMPLETIONS = exports.MAX_AUTOCOMPLETIONS = 1500;
 
 let WebConsoleUtils = {
   /**
@@ -530,7 +541,78 @@ let WebConsoleUtils = {
   {
     return aGrip && typeof(aGrip) == "object" && aGrip.actor;
   },
+  /**
+   * Value of devtools.selfxss.count preference
+   *
+   * @type number
+   * @private
+   */
+  _usageCount: 0,
+  get usageCount() {
+    if (WebConsoleUtils._usageCount < CONSOLE_ENTRY_THRESHOLD) {
+      WebConsoleUtils._usageCount = Services.prefs.getIntPref("devtools.selfxss.count")
+      if (Services.prefs.getBoolPref("devtools.chrome.enabled")) {
+        WebConsoleUtils.usageCount = CONSOLE_ENTRY_THRESHOLD;
+      }
+    }
+    return WebConsoleUtils._usageCount;
+  },
+  set usageCount(newUC) {
+    if (newUC <= CONSOLE_ENTRY_THRESHOLD) {
+      WebConsoleUtils._usageCount = newUC;
+      Services.prefs.setIntPref("devtools.selfxss.count", newUC);
+    }
+  },
+  /**
+   * The inputNode "paste" event handler generator. Helps prevent self-xss attacks
+   *
+   * @param nsIDOMElement inputField
+   * @param nsIDOMElement notificationBox
+   * @returns A function to be added as a handler to 'paste' and 'drop' events on the input field
+   */
+  pasteHandlerGen: function WCU_pasteHandlerGen(inputField, notificationBox, msg, okstring) {
+    let handler = function WCU_pasteHandler(aEvent) {
+      if (WebConsoleUtils.usageCount >= CONSOLE_ENTRY_THRESHOLD) {
+        inputField.removeEventListener("paste", handler);
+        inputField.removeEventListener("drop", handler);
+        return true;
+      }
+      if (notificationBox.getNotificationWithValue("selfxss-notification")) {
+        aEvent.preventDefault();
+        aEvent.stopPropagation();
+        return false;
+      }
+
+
+      let notification = notificationBox.appendNotification(msg,
+        "selfxss-notification", null, notificationBox.PRIORITY_WARNING_HIGH, null,
+        function(eventType) {
+          // Cleanup function if notification is dismissed
+          if (eventType == "removed") {
+            inputField.removeEventListener("keyup", pasteKeyUpHandler);
+          }
+        });
+
+      function pasteKeyUpHandler(aEvent2) {
+        let value = inputField.value || inputField.textContent;
+        if (value.contains(okstring)) {
+          notificationBox.removeNotification(notification);
+          inputField.removeEventListener("keyup", pasteKeyUpHandler);
+          WebConsoleUtils.usageCount = CONSOLE_ENTRY_THRESHOLD;
+        }
+      }
+      inputField.addEventListener("keyup", pasteKeyUpHandler);
+
+      aEvent.preventDefault();
+      aEvent.stopPropagation();
+      return false;
+    };
+    return handler;
+  },
+
+
 };
+
 exports.Utils = WebConsoleUtils;
 
 //////////////////////////////////////////////////////////////////////////
@@ -634,8 +716,6 @@ const OPEN_CLOSE_BODY = {
   "[": "]",
   "(": ")",
 };
-
-const MAX_COMPLETIONS = 1500;
 
 /**
  * Analyses a given string to find the last statement that is interesting for
@@ -969,12 +1049,24 @@ function getMatchedProps(aObj, aMatch)
 function getMatchedProps_impl(aObj, aMatch, {chainIterator, getProperties})
 {
   let matches = new Set();
+  let numProps = 0;
 
   // We need to go up the prototype chain.
   let iter = chainIterator(aObj);
   for (let obj of iter) {
     let props = getProperties(obj);
-    for (let prop of props) {
+    numProps += props.length;
+
+    // If there are too many properties to event attempt autocompletion,
+    // or if we have already added the max number, then stop looping
+    // and return the partial set that has already been discovered.
+    if (numProps >= MAX_AUTOCOMPLETE_ATTEMPTS ||
+        matches.size >= MAX_AUTOCOMPLETIONS) {
+      break;
+    }
+
+    for (let i = 0; i < props.length; i++) {
+      let prop = props[i];
       if (prop.indexOf(aMatch) != 0) {
         continue;
       }
@@ -986,13 +1078,9 @@ function getMatchedProps_impl(aObj, aMatch, {chainIterator, getProperties})
         matches.add(prop);
       }
 
-      if (matches.size > MAX_COMPLETIONS) {
+      if (matches.size >= MAX_AUTOCOMPLETIONS) {
         break;
       }
-    }
-
-    if (matches.size > MAX_COMPLETIONS) {
-      break;
     }
   }
 
@@ -1089,10 +1177,10 @@ let DebuggerEnvironmentSupport = {
     // TODO: we should use getVariableDescriptor() here - bug 725815.
     let result = aObj.getVariable(aName);
     // FIXME: Need actual UI, bug 941287.
-    if (result.optimizedOut || result.missingArguments) {
+    if (result === undefined || result.optimizedOut || result.missingArguments) {
       return null;
     }
-    return result === undefined ? null : { value: result };
+    return { value: result };
   },
 };
 
@@ -1290,11 +1378,14 @@ ConsoleServiceListener.prototype =
  *        - onConsoleAPICall(). This method is invoked with one argument, the
  *        Console API message that comes from the observer service, whenever
  *        a relevant console API call is received.
+ * @param string aConsoleID
+ *        Options - The consoleID that this listener should listen to
  */
-function ConsoleAPIListener(aWindow, aOwner)
+function ConsoleAPIListener(aWindow, aOwner, aConsoleID)
 {
   this.window = aWindow;
   this.owner = aOwner;
+  this.consoleID = aConsoleID;
   if (this.window) {
     this.layoutHelpers = new LayoutHelpers(this.window);
   }
@@ -1320,6 +1411,12 @@ ConsoleAPIListener.prototype =
    * @see WebConsoleActor
    */
   owner: null,
+
+  /**
+   * The consoleID that we listen for. If not null then only messages from this
+   * console will be returned.
+   */
+  consoleID: null,
 
   /**
    * Initialize the window.console API observer.
@@ -1354,6 +1451,9 @@ ConsoleAPIListener.prototype =
         return;
       }
     }
+    if (this.consoleID && apiMessage.consoleID != this.consoleID) {
+      return;
+    }
 
     this.owner.onConsoleAPICall(apiMessage);
   },
@@ -1382,6 +1482,10 @@ ConsoleAPIListener.prototype =
       ids.forEach((id) => {
         messages = messages.concat(ConsoleAPIStorage.getEvents(id));
       });
+    }
+
+    if (this.consoleID) {
+      messages = messages.filter((m) => m.consoleID == this.consoleID);
     }
 
     if (aIncludePrivate) {
@@ -1471,41 +1575,15 @@ function JSTermHelpers(aOwner)
   /**
    * Returns the currently selected object in the highlighter.
    *
-   * TODO: this implementation crosses the client/server boundaries! This is not
-   * usable within a remote browser. To implement this feature correctly we need
-   * support for remote inspection capabilities within the Inspector as well.
-   * See bug 787975.
-   *
-   * @return nsIDOMElement|null
-   *         The DOM element currently selected in the highlighter.
+   * @return Object representing the current selection in the
+   *         Inspector, or null if no selection exists.
    */
-   Object.defineProperty(aOwner.sandbox, "$0", {
+  Object.defineProperty(aOwner.sandbox, "$0", {
     get: function() {
-      let window = aOwner.chromeWindow();
-      if (!window) {
-        return null;
-      }
-
-      let target = null;
-      try {
-        target = devtools.TargetFactory.forTab(window.gBrowser.selectedTab);
-      }
-      catch (ex) {
-        // If we report this exception the user will get it in the Browser
-        // Console every time when she evaluates any string.
-      }
-
-      if (!target) {
-        return null;
-      }
-
-      let toolbox = gDevTools.getToolbox(target);
-      let node = toolbox && toolbox.selection ? toolbox.selection.node : null;
-
-      return node ? aOwner.makeDebuggeeValue(node) : null;
+      return aOwner.makeDebuggeeValue(aOwner.selectedNode)
     },
     enumerable: true,
-    configurable: false
+    configurable: true
   });
 
   /**
@@ -1656,16 +1734,50 @@ function JSTermHelpers(aOwner)
   };
 
   /**
-   * Print a string to the output, as-is.
+   * Print the String representation of a value to the output, as-is.
    *
-   * @param string aString
-   *        A string you want to output.
+   * @param any aValue
+   *        A value you want to output as a string.
    * @return void
    */
-  aOwner.sandbox.print = function JSTH_print(aString)
+  aOwner.sandbox.print = function JSTH_print(aValue)
   {
     aOwner.helperResult = { rawOutput: true };
-    return String(aString);
+    if (typeof aValue === "symbol") {
+      return Symbol.prototype.toString.call(aValue);
+    }
+    // Waiving Xrays here allows us to see a closer representation of the
+    // underlying object. This may execute arbitrary content code, but that
+    // code will run with content privileges, and the result will be rendered
+    // inert by coercing it to a String.
+    return String(Cu.waiveXrays(aValue));
+  };
+
+  /**
+   * Copy the String representation of a value to the clipboard.
+   *
+   * @param any aValue
+   *        A value you want to copy as a string.
+   * @return void
+   */
+  aOwner.sandbox.copy = function JSTH_copy(aValue)
+  {
+    let payload;
+    try {
+      if (aValue instanceof Ci.nsIDOMElement) {
+        payload = aValue.outerHTML;
+      } else if (typeof aValue == "string") {
+        payload = aValue;
+      } else {
+        payload = JSON.stringify(aValue, null, "  ");
+      }
+    } catch (ex) {
+      payload = "/* " + ex  + " */";
+    }
+    aOwner.helperResult = {
+      type: "copyValueToClipboard",
+      value: payload,
+    };
   };
 }
 exports.JSTermHelpers = JSTermHelpers;

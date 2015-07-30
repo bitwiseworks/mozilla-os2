@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set sw=2 ts=2 autoindent cindent expandtab: */
 // Copyright (c) 2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -5,7 +7,6 @@
 #include "base/process_util.h"
 
 #include <ctype.h>
-#include <dirent.h>
 #include <fcntl.h>
 #include <memory>
 #include <unistd.h>
@@ -13,12 +14,19 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include "base/debug_util.h"
 #include "base/eintr_wrapper.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
+#include "nsLiteralString.h"
+#include "mozilla/UniquePtr.h"
+
+#ifdef MOZ_B2G_LOADER
+#include "ProcessUtils.h"
+
+using namespace mozilla::ipc;
+#endif	// MOZ_B2G_LOADER
 
 #ifdef MOZ_WIDGET_GONK
 /*
@@ -189,13 +197,72 @@ bool LaunchApp(const std::vector<std::string>& argv,
                    wait, process_handle);
 }
 
+#ifdef MOZ_B2G_LOADER
+/**
+ * Launch an app using B2g Loader.
+ */
+static bool
+LaunchAppProcLoader(const std::vector<std::string>& argv,
+                    const file_handle_mapping_vector& fds_to_remap,
+                    const environment_map& env_vars_to_set,
+                    ChildPrivileges privs,
+                    ProcessHandle* process_handle) {
+  size_t i;
+  mozilla::UniquePtr<char*[]> argv_cstr(new char*[argv.size() + 1]);
+  for (i = 0; i < argv.size(); i++) {
+    argv_cstr[i] = const_cast<char*>(argv[i].c_str());
+  }
+  argv_cstr[argv.size()] = nullptr;
+
+  mozilla::UniquePtr<char*[]> env_cstr(new char*[env_vars_to_set.size() + 1]);
+  i = 0;
+  for (environment_map::const_iterator it = env_vars_to_set.begin();
+       it != env_vars_to_set.end(); ++it) {
+    env_cstr[i++] = strdup((it->first + "=" + it->second).c_str());
+  }
+  env_cstr[env_vars_to_set.size()] = nullptr;
+
+  bool ok = ProcLoaderLoad((const char **)argv_cstr.get(),
+                           (const char **)env_cstr.get(),
+                           fds_to_remap, privs,
+                           process_handle);
+  MOZ_ASSERT(ok, "ProcLoaderLoad() failed");
+
+  for (size_t i = 0; i < env_vars_to_set.size(); i++) {
+    free(env_cstr[i]);
+  }
+
+  return ok;
+}
+
+static bool
+IsLaunchingNuwa(const std::vector<std::string>& argv) {
+  std::vector<std::string>::const_iterator it;
+  for (it = argv.begin(); it != argv.end(); ++it) {
+    if (*it == std::string("-nuwa")) {
+      return true;
+    }
+  }
+  return false;
+}
+#endif // MOZ_B2G_LOADER
+
 bool LaunchApp(const std::vector<std::string>& argv,
                const file_handle_mapping_vector& fds_to_remap,
                const environment_map& env_vars_to_set,
                ChildPrivileges privs,
                bool wait, ProcessHandle* process_handle,
                ProcessArchitecture arch) {
-  scoped_array<char*> argv_cstr(new char*[argv.size() + 1]);
+#ifdef MOZ_B2G_LOADER
+  static bool beforeFirstNuwaLaunch = true;
+  if (!wait && beforeFirstNuwaLaunch && IsLaunchingNuwa(argv)) {
+    beforeFirstNuwaLaunch = false;
+    return LaunchAppProcLoader(argv, fds_to_remap, env_vars_to_set,
+                               privs, process_handle);
+  }
+#endif // MOZ_B2G_LOADER
+
+  mozilla::UniquePtr<char*[]> argv_cstr(new char*[argv.size() + 1]);
   // Illegal to allocate memory after fork and before execvp
   InjectiveMultimap fd_shuffle1, fd_shuffle2;
   fd_shuffle1.reserve(fds_to_remap.size());
@@ -313,121 +380,6 @@ void SetCurrentProcessPrivileges(ChildPrivileges privs) {
   }
   if (chdir("/") != 0)
     gProcessLog.print("==> could not chdir()\n");
-}
-
-NamedProcessIterator::NamedProcessIterator(const std::wstring& executable_name,
-                                           const ProcessFilter* filter)
-    : executable_name_(executable_name), filter_(filter) {
-  procfs_dir_ = opendir("/proc");
-}
-
-NamedProcessIterator::~NamedProcessIterator() {
-  if (procfs_dir_) {
-    closedir(procfs_dir_);
-    procfs_dir_ = NULL;
-  }
-}
-
-const ProcessEntry* NamedProcessIterator::NextProcessEntry() {
-  bool result = false;
-  do {
-    result = CheckForNextProcess();
-  } while (result && !IncludeEntry());
-
-  if (result)
-    return &entry_;
-
-  return NULL;
-}
-
-bool NamedProcessIterator::CheckForNextProcess() {
-  // TODO(port): skip processes owned by different UID
-
-  dirent* slot = 0;
-  const char* openparen;
-  const char* closeparen;
-
-  // Arbitrarily guess that there will never be more than 200 non-process
-  // files in /proc.  Hardy has 53.
-  int skipped = 0;
-  const int kSkipLimit = 200;
-  while (skipped < kSkipLimit) {
-    slot = readdir(procfs_dir_);
-    // all done looking through /proc?
-    if (!slot)
-      return false;
-
-    // If not a process, keep looking for one.
-    bool notprocess = false;
-    int i;
-    for (i = 0; i < NAME_MAX && slot->d_name[i]; ++i) {
-       if (!isdigit(slot->d_name[i])) {
-         notprocess = true;
-         break;
-       }
-    }
-    if (i == NAME_MAX || notprocess) {
-      skipped++;
-      continue;
-    }
-
-    // Read the process's status.
-    char buf[NAME_MAX + 12];
-    sprintf(buf, "/proc/%s/stat", slot->d_name);
-    FILE *fp = fopen(buf, "r");
-    if (!fp)
-      return false;
-    const char* result = fgets(buf, sizeof(buf), fp);
-    fclose(fp);
-    if (!result)
-      return false;
-
-    // Parse the status.  It is formatted like this:
-    // %d (%s) %c %d ...
-    // pid (name) runstate ppid
-    // To avoid being fooled by names containing a closing paren, scan
-    // backwards.
-    openparen = strchr(buf, '(');
-    closeparen = strrchr(buf, ')');
-    if (!openparen || !closeparen)
-      return false;
-    char runstate = closeparen[2];
-
-    // Is the process in 'Zombie' state, i.e. dead but waiting to be reaped?
-    // Allowed values: D R S T Z
-    if (runstate != 'Z')
-      break;
-
-    // Nope, it's a zombie; somebody isn't cleaning up after their children.
-    // (e.g. WaitForProcessesToExit doesn't clean up after dead children yet.)
-    // There could be a lot of zombies, can't really decrement i here.
-  }
-  if (skipped >= kSkipLimit) {
-    NOTREACHED();
-    return false;
-  }
-
-  entry_.pid = atoi(slot->d_name);
-  entry_.ppid = atoi(closeparen + 3);
-
-  // TODO(port): read pid's commandline's $0, like killall does.  Using the
-  // short name between openparen and closeparen won't work for long names!
-  int len = closeparen - openparen - 1;
-  if (len > NAME_MAX)
-    len = NAME_MAX;
-  memcpy(entry_.szExeFile, openparen + 1, len);
-  entry_.szExeFile[len] = 0;
-
-  return true;
-}
-
-bool NamedProcessIterator::IncludeEntry() {
-  // TODO(port): make this also work for non-ASCII filenames
-  if (WideToASCII(executable_name_) != entry_.szExeFile)
-    return false;
-  if (!filter_)
-    return true;
-  return filter_->Includes(entry_.pid, entry_.ppid);
 }
 
 }  // namespace base

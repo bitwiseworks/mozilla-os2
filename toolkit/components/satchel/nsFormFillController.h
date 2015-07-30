@@ -21,6 +21,7 @@
 #include "nsILoginManager.h"
 #include "nsIMutationObserver.h"
 #include "nsTArray.h"
+#include "nsCycleCollectionParticipant.h"
 
 // X.h defines KeyPress
 #ifdef KeyPress
@@ -30,15 +31,15 @@
 class nsFormHistory;
 class nsINode;
 
-class nsFormFillController : public nsIFormFillController,
-                             public nsIAutoCompleteInput,
-                             public nsIAutoCompleteSearch,
-                             public nsIDOMEventListener,
-                             public nsIFormAutoCompleteObserver,
-                             public nsIMutationObserver
+class nsFormFillController final : public nsIFormFillController,
+                                       public nsIAutoCompleteInput,
+                                       public nsIAutoCompleteSearch,
+                                       public nsIDOMEventListener,
+                                       public nsIFormAutoCompleteObserver,
+                                       public nsIMutationObserver
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_NSIFORMFILLCONTROLLER
   NS_DECL_NSIAUTOCOMPLETESEARCH
   NS_DECL_NSIAUTOCOMPLETEINPUT
@@ -46,14 +47,17 @@ public:
   NS_DECL_NSIDOMEVENTLISTENER
   NS_DECL_NSIMUTATIONOBSERVER
 
+  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsFormFillController, nsIFormFillController)
+
   nsresult Focus(nsIDOMEvent* aEvent);
   nsresult KeyPress(nsIDOMEvent* aKeyEvent);
   nsresult MouseDown(nsIDOMEvent* aMouseEvent);
 
   nsFormFillController();
-  virtual ~nsFormFillController();
 
 protected:
+  virtual ~nsFormFillController();
+
   void AddWindowListeners(nsIDOMWindow *aWindow);
   void RemoveWindowListeners(nsIDOMWindow *aWindow);
 

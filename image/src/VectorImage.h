@@ -26,8 +26,8 @@ class  SVGRootRenderingObserver;
 class  SVGLoadEventListener;
 class  SVGParseCompleteListener;
 
-class VectorImage : public ImageResource,
-                    public nsIStreamListener
+class VectorImage final : public ImageResource,
+                              public nsIStreamListener
 {
 public:
   NS_DECL_ISUPPORTS
@@ -36,28 +36,24 @@ public:
   NS_DECL_IMGICONTAINER
 
   // (no public constructor - use ImageFactory)
-  virtual ~VectorImage();
 
   // Methods inherited from Image
   nsresult Init(const char* aMimeType,
-                uint32_t aFlags);
-  virtual nsIntRect FrameRect(uint32_t aWhichFrame) MOZ_OVERRIDE;
+                uint32_t aFlags) override;
 
-  virtual size_t HeapSizeOfSourceWithComputedFallback(mozilla::MallocSizeOf aMallocSizeOf) const;
-  virtual size_t HeapSizeOfDecodedWithComputedFallback(mozilla::MallocSizeOf aMallocSizeOf) const;
-  virtual size_t NonHeapSizeOfDecoded() const;
-  virtual size_t OutOfProcessSizeOfDecoded() const;
+  virtual size_t SizeOfSourceWithComputedFallback(MallocSizeOf aMallocSizeOf) const override;
+  virtual size_t SizeOfDecoded(gfxMemoryLocation aLocation,
+                               MallocSizeOf aMallocSizeOf) const override;
 
   virtual nsresult OnImageDataAvailable(nsIRequest* aRequest,
                                         nsISupports* aContext,
                                         nsIInputStream* aInStr,
                                         uint64_t aSourceOffset,
-                                        uint32_t aCount) MOZ_OVERRIDE;
+                                        uint32_t aCount) override;
   virtual nsresult OnImageDataComplete(nsIRequest* aRequest,
                                        nsISupports* aContext,
                                        nsresult aResult,
-                                       bool aLastPart) MOZ_OVERRIDE;
-  virtual nsresult OnNewSourceData() MOZ_OVERRIDE;
+                                       bool aLastPart) override;
 
   /**
    * Callback for SVGRootRenderingObserver.
@@ -77,17 +73,25 @@ public:
   void OnSVGDocumentError();
 
 protected:
-  VectorImage(imgStatusTracker* aStatusTracker = nullptr,
-              ImageURL* aURI = nullptr);
+  explicit VectorImage(ProgressTracker* aProgressTracker = nullptr,
+                       ImageURL* aURI = nullptr);
+  virtual ~VectorImage();
 
-  virtual nsresult StartAnimation();
-  virtual nsresult StopAnimation();
-  virtual bool     ShouldAnimate();
+  virtual nsresult StartAnimation() override;
+  virtual nsresult StopAnimation() override;
+  virtual bool     ShouldAnimate() override;
 
-  void CreateDrawableAndShow(const SVGDrawingParameters& aParams);
+  void CreateSurfaceAndShow(const SVGDrawingParameters& aParams);
   void Show(gfxDrawable* aDrawable, const SVGDrawingParameters& aParams);
 
 private:
+  /**
+   * In catastrophic circumstances like a GPU driver crash, we may lose our
+   * surfaces even if they're locked. RecoverFromLossOfSurfaces discards all
+   * existing surfaces, allowing us to recover.
+   */
+  void RecoverFromLossOfSurfaces();
+
   void CancelAllListeners();
   void SendInvalidationNotifications();
 
@@ -104,8 +108,8 @@ private:
   bool           mHasPendingInvalidation; // Invalidate observers next refresh
                                           // driver tick.
 
-  // Initializes imgStatusTracker and resets it on RasterImage destruction.
-  nsAutoPtr<imgStatusTrackerInit> mStatusTrackerInit;
+  // Initializes ProgressTracker and resets it on RasterImage destruction.
+  nsAutoPtr<ProgressTrackerInit> mProgressTrackerInit;
 
   friend class ImageFactory;
 };

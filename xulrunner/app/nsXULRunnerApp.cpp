@@ -8,7 +8,9 @@
 #include <stdlib.h>
 #ifdef XP_WIN
 #include <windows.h>
+#if defined(_MSC_VER) && _MSC_VER < 1900
 #define snprintf _snprintf
+#endif
 #define strcasecmp _stricmp
 #endif
 
@@ -25,6 +27,7 @@
 #include "nsINIParser.h"
 
 #ifdef XP_WIN
+#define XRE_DONT_SUPPORT_XPSP2 // See https://bugzil.la/1023941#c32
 #include "nsWindowsWMain.cpp"
 #endif
 
@@ -49,7 +52,7 @@ static void Output(bool isError, const char *fmt, ... )
   va_start(ap, fmt);
 
 #if (defined(XP_WIN) && !MOZ_WINCONSOLE)
-  char16_t msg[2048];
+  wchar_t msg[2048];
   _vsnwprintf(msg, sizeof(msg)/sizeof(msg[0]), NS_ConvertUTF8toUTF16(fmt).get(), ap);
 
   UINT flags = MB_OK;
@@ -92,9 +95,9 @@ GetGREVersion(const char *argv0,
               nsACString *aVersion)
 {
   if (aMilestone)
-    aMilestone->Assign("<Error>");
+    aMilestone->AssignLiteral("<Error>");
   if (aVersion)
-    aVersion->Assign("<Error>");
+    aVersion->AssignLiteral("<Error>");
 
   nsCOMPtr<nsIFile> iniFile;
   nsresult rv = BinaryPath::GetFile(argv0, getter_AddRefs(iniFile));

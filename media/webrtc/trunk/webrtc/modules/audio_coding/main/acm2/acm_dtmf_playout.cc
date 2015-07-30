@@ -18,6 +18,8 @@
 
 namespace webrtc {
 
+namespace acm2 {
+
 #ifndef WEBRTC_CODEC_AVT
 
 ACMDTMFPlayout::ACMDTMFPlayout(int16_t /* codec_id */) { return; }
@@ -37,10 +39,6 @@ int16_t ACMDTMFPlayout::InternalInitEncoder(
 ACMGenericCodec* ACMDTMFPlayout::CreateInstance(void) { return NULL; }
 
 int16_t ACMDTMFPlayout::InternalCreateEncoder() { return -1; }
-
-void ACMDTMFPlayout::InternalDestructEncoderInst(void* /* ptr_inst */) {
-  return;
-}
 
 void ACMDTMFPlayout::DestructEncoderSafe() {
   return;
@@ -71,16 +69,13 @@ int16_t ACMDTMFPlayout::InternalCreateEncoder() {
   return 0;
 }
 
-void ACMDTMFPlayout::InternalDestructEncoderInst(void* /* ptr_inst */) {
-  // DTMFPlayout has no instance
-  return;
-}
-
 void ACMDTMFPlayout::DestructEncoderSafe() {
   // DTMFPlayout has no instance
   return;
 }
 
 #endif
+
+}  // namespace acm2
 
 }  // namespace webrtc

@@ -28,9 +28,11 @@ public:
   NS_DECL_ISUPPORTS
 
   nsNativeMenuServiceX() {}
-  virtual ~nsNativeMenuServiceX() {}
 
-  NS_IMETHOD CreateNativeMenuBar(nsIWidget* aParent, nsIContent* aMenuBarNode);
+  NS_IMETHOD CreateNativeMenuBar(nsIWidget* aParent, nsIContent* aMenuBarNode) override;
+
+protected:
+  virtual ~nsNativeMenuServiceX() {}
 };
 
 @interface NSMenu (Undocumented)
@@ -101,7 +103,6 @@ public:
   // The following content nodes have been removed from the menu system.
   // We save them here for use in command handling.
   nsCOMPtr<nsIContent> mAboutItemContent;
-  nsCOMPtr<nsIContent> mUpdateItemContent;
   nsCOMPtr<nsIContent> mPrefItemContent;
   nsCOMPtr<nsIContent> mQuitItemContent;
 
@@ -109,8 +110,8 @@ public:
   NS_DECL_CHANGEOBSERVER
 
   // nsMenuObjectX
-  void*             NativeData()     {return (void*)mNativeMenu;}
-  nsMenuObjectTypeX MenuObjectType() {return eMenuBarObjectType;}
+  void*             NativeData() override {return (void*)mNativeMenu;}
+  nsMenuObjectTypeX MenuObjectType() override {return eMenuBarObjectType;}
 
   // nsMenuBarX
   nsresult          Create(nsIWidget* aParent, nsIContent* aContent);
@@ -129,6 +130,7 @@ public:
 
 protected:
   void              ConstructNativeMenus();
+  void              ConstructFallbackNativeMenus();
   nsresult          InsertMenuAtIndex(nsMenuX* aMenu, uint32_t aIndex);
   void              RemoveMenuAtIndex(uint32_t aIndex);
   void              HideItem(nsIDOMDocument* inDoc, const nsAString & inID, nsIContent** outHiddenNode);

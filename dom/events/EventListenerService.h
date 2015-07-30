@@ -19,7 +19,7 @@ namespace mozilla {
 template<typename T>
 class Maybe;
 
-class EventListenerInfo MOZ_FINAL : public nsIEventListenerInfo
+class EventListenerInfo final : public nsIEventListenerInfo
 {
 public:
   EventListenerInfo(const nsAString& aType,
@@ -35,13 +35,13 @@ public:
   {
   }
 
-  virtual ~EventListenerInfo() {}
-
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS(EventListenerInfo)
   NS_DECL_NSIEVENTLISTENERINFO
 
 protected:
+  virtual ~EventListenerInfo() {}
+
   bool GetJSVal(JSContext* aCx,
                 Maybe<JSAutoCompartment>& aAc,
                 JS::MutableHandle<JS::Value> aJSVal);
@@ -54,8 +54,9 @@ protected:
   bool mInSystemEventGroup;
 };
 
-class EventListenerService MOZ_FINAL : public nsIEventListenerService
+class EventListenerService final : public nsIEventListenerService
 {
+  ~EventListenerService() {}
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIEVENTLISTENERSERVICE

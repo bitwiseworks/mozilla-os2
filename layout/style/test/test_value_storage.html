@@ -81,20 +81,8 @@ function xfail_compute(property, value)
   return false;
 }
 
-var gBadSerialize = {
-  // Font-families which include quotes don't get those escaped when
-  //serializing: see bug 660397
-  "font-family": ["\\\"Times New Roman", "Times, \\\"Times New Roman"],
-};
-
-function xfail_serialize(property, value)
-{
-  if (property in gBadSerialize &&
-      gBadSerialize[property].indexOf(value) != -1)
-    return true;
-
-  return false;
-}
+// constructed to map longhands ==> list of containing shorthands
+var gPropertyShorthands = {};
 
 var gElement = document.getElementById("testnode");
 var gDeclaration = gElement.style;
@@ -105,7 +93,6 @@ var gPrereqDeclaration =
 
 function test_property(property)
 {
-  ok(SpecialPowers.getBoolPref("layout.css.variables.enabled"), "pref not set #2");
   var info = gCSSProperties[property];
 
   var test_computed = !("backend_only" in info);
@@ -118,6 +105,17 @@ function test_property(property)
     var errstr = "when setting property " + property + " to " + value;
     is(gDeclaration.length, 0, "unremovable properties " + errstr);
     is(gDeclaration.cssText, "", "non-empty serialization after removing all properties " + errstr);
+  }
+
+  function test_other_shorthands_empty(value, subprop) {
+    if (!(subprop in gPropertyShorthands)) return;
+    var shorthands = gPropertyShorthands[subprop];
+    for (idx in shorthands) {
+      var sh = shorthands[idx];
+      if (sh.replace("-moz-","") == property.replace("-moz-","")) continue;
+      is(gDeclaration.getPropertyValue(sh), "",
+         "setting '" + value + "' on '" + property + "' (for shorthand '" + sh + "')");
+    }
   }
 
   function test_value(value, resolved_value) {
@@ -149,6 +147,7 @@ function test_property(property)
             (!info.alias_for || info.type == CSS_TYPE_TRUE_SHORTHAND)) {
           is(gDeclaration.getPropertyValue(subprop), "",
              "setting '" + value + "' on '" + property + "' (for '" + subprop + "')");
+          test_other_shorthands_empty(value, subprop);
         } else {
           isnot(gDeclaration.getPropertyValue(subprop), "",
                 "setting '" + value + "' on '" + property + "' (for '" + subprop + "')");
@@ -171,14 +170,11 @@ function test_property(property)
     gDeclaration.removeProperty(property);
     gDeclaration.setProperty(property, step1val, "");
 
-    var serialize_func = xfail_serialize(property, value) &&
-                         !value_has_variable_reference ? todo_is : is;
-
-    serialize_func(gDeclaration.getPropertyValue(property), step1val,
+    is(gDeclaration.getPropertyValue(property), step1val,
        "parse+serialize should be idempotent for '" +
          property + ": " + value + "'");
     if (test_computed && info.type != CSS_TYPE_TRUE_SHORTHAND) {
-      serialize_func(gComputedStyle.getPropertyValue(property), step1comp,
+      is(gComputedStyle.getPropertyValue(property), step1comp,
          "serialize+parse should be identity transform for '" +
          property + ": " + value + "'");
     }
@@ -215,8 +211,7 @@ function test_property(property)
     if (test_computed && info.type != CSS_TYPE_TRUE_SHORTHAND) {
       gDeclaration.removeProperty(property);
       gDeclaration.setProperty(property, step1comp, "");
-      var func = (xfail_compute(property, value) ||
-        xfail_serialize(property, resolved_value || value)) ? todo_is : is;
+      var func = xfail_compute(property, value) ? todo_is : is;
       func(gComputedStyle.getPropertyValue(property), step1comp,
            "parse+compute+serialize should be idempotent for '" +
            property + ": " + value + "'");
@@ -292,8 +287,19 @@ function runTest() {
   // property at a time.
   ok(SpecialPowers.getBoolPref("layout.css.variables.enabled"), "pref not set #1");
   var props = [];
-  for (var prop in gCSSProperties)
+  for (var prop in gCSSProperties) {
+    var info = gCSSProperties[prop];
+    if ("subproperties" in info) {
+      for (var idx in info.subproperties) {
+        var subprop = info.subproperties[idx];
+        if (!(subprop in gPropertyShorthands)) {
+          gPropertyShorthands[subprop] = [];
+        }
+        gPropertyShorthands[subprop].push(prop);
+      }
+    }
     props.push(prop);
+  }
   props = props.reverse();
   function do_one() {
     if (props.length == 0) {
@@ -307,7 +313,7 @@ function runTest() {
 }
 
 SimpleTest.waitForExplicitFinish();
-SimpleTest.requestLongerTimeout(2);
+SimpleTest.requestLongerTimeout(4);
 
 SpecialPowers.pushPrefEnv({ set: [["layout.css.variables.enabled", true]] },
                           runTest);

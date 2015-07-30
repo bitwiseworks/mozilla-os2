@@ -4,6 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Types.h"
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <gtk/gtk.h>
 
@@ -70,6 +73,7 @@ UpdateFilePreviewWidget(GtkFileChooser *file_chooser,
 {
   GtkImage *preview_widget = GTK_IMAGE(preview_widget_voidptr);
   char *image_filename = gtk_file_chooser_get_preview_filename(file_chooser);
+  struct stat st_buf;
 
   if (!image_filename) {
     gtk_file_chooser_set_preview_widget_active(file_chooser, FALSE);
@@ -78,6 +82,16 @@ UpdateFilePreviewWidget(GtkFileChooser *file_chooser,
 
   gint preview_width = 0;
   gint preview_height = 0;
+  /* check type of file
+   * if file is named pipe, Open is blocking which may lead to UI
+   *  nonresponsiveness; if file is directory/socket, it also isn't
+   *  likely to get preview */
+  if (stat(image_filename, &st_buf) || (!S_ISREG(st_buf.st_mode))) {
+    g_free(image_filename);
+    gtk_file_chooser_set_preview_widget_active(file_chooser, FALSE);
+    return; /* stat failed or file is not regular */
+  }
+
   GdkPixbufFormat *preview_format = gdk_pixbuf_get_file_info(image_filename,
                                                              &preview_width,
                                                              &preview_height);
@@ -106,11 +120,9 @@ UpdateFilePreviewWidget(GtkFileChooser *file_chooser,
     return;
   }
 
-#if GTK_CHECK_VERSION(2,12,0)
   GdkPixbuf *preview_pixbuf_temp = preview_pixbuf;
   preview_pixbuf = gdk_pixbuf_apply_embedded_orientation(preview_pixbuf_temp);
   g_object_unref(preview_pixbuf_temp);
-#endif
 
   // This is the easiest way to do center alignment without worrying about containers
   // Minimum 3px padding each side (hence the 6) just to make things nice

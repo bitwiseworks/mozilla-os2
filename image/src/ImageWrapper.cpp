@@ -10,12 +10,13 @@
 
 #include "mozilla/MemoryReporting.h"
 
-using mozilla::gfx::DataSourceSurface;
-using mozilla::gfx::SourceSurface;
-using mozilla::layers::LayerManager;
-using mozilla::layers::ImageContainer;
-
 namespace mozilla {
+
+using gfx::DataSourceSurface;
+using gfx::SourceSurface;
+using layers::LayerManager;
+using layers::ImageContainer;
+
 namespace image {
 
 // Inherited methods from Image.
@@ -26,46 +27,23 @@ ImageWrapper::Init(const char* aMimeType, uint32_t aFlags)
   return mInnerImage->Init(aMimeType, aFlags);
 }
 
-already_AddRefed<imgStatusTracker>
-ImageWrapper::GetStatusTracker()
+already_AddRefed<ProgressTracker>
+ImageWrapper::GetProgressTracker()
 {
-  return mInnerImage->GetStatusTracker();
-}
-
-nsIntRect
-ImageWrapper::FrameRect(uint32_t aWhichFrame)
-{
-  return mInnerImage->FrameRect(aWhichFrame);
-}
-
-uint32_t
-ImageWrapper::SizeOfData()
-{
-  return mInnerImage->SizeOfData();
+  return mInnerImage->GetProgressTracker();
 }
 
 size_t
-ImageWrapper::HeapSizeOfSourceWithComputedFallback(mozilla::MallocSizeOf aMallocSizeOf) const
+ImageWrapper::SizeOfSourceWithComputedFallback(MallocSizeOf aMallocSizeOf) const
 {
-  return mInnerImage->HeapSizeOfSourceWithComputedFallback(aMallocSizeOf);
+  return mInnerImage->SizeOfSourceWithComputedFallback(aMallocSizeOf);
 }
 
 size_t
-ImageWrapper::HeapSizeOfDecodedWithComputedFallback(mozilla::MallocSizeOf aMallocSizeOf) const
+ImageWrapper::SizeOfDecoded(gfxMemoryLocation aLocation,
+                            MallocSizeOf aMallocSizeOf) const
 {
-  return mInnerImage->HeapSizeOfDecodedWithComputedFallback(aMallocSizeOf);
-}
-
-size_t
-ImageWrapper::NonHeapSizeOfDecoded() const
-{
-  return mInnerImage->NonHeapSizeOfDecoded();
-}
-
-size_t
-ImageWrapper::OutOfProcessSizeOfDecoded() const
-{
-  return mInnerImage->OutOfProcessSizeOfDecoded();
+  return mInnerImage->SizeOfDecoded(aLocation, aMallocSizeOf);
 }
 
 void
@@ -109,13 +87,14 @@ ImageWrapper::OnImageDataComplete(nsIRequest* aRequest,
                                   nsresult aStatus,
                                   bool aLastPart)
 {
-  return mInnerImage->OnImageDataComplete(aRequest, aContext, aStatus, aLastPart);
+  return mInnerImage->OnImageDataComplete(aRequest, aContext, aStatus,
+                                          aLastPart);
 }
 
-nsresult
-ImageWrapper::OnNewSourceData()
+void
+ImageWrapper::OnSurfaceDiscarded()
 {
-  return mInnerImage->OnNewSourceData();
+  return mInnerImage->OnSurfaceDiscarded();
 }
 
 void
@@ -208,31 +187,29 @@ ImageWrapper::GetFrame(uint32_t aWhichFrame,
 }
 
 NS_IMETHODIMP_(bool)
-ImageWrapper::FrameIsOpaque(uint32_t aWhichFrame)
+ImageWrapper::IsOpaque()
 {
-  return mInnerImage->FrameIsOpaque(aWhichFrame);
+  return mInnerImage->IsOpaque();
 }
 
 NS_IMETHODIMP
-ImageWrapper::GetImageContainer(LayerManager* aManager, ImageContainer** _retval)
+ImageWrapper::GetImageContainer(LayerManager* aManager,
+                                ImageContainer** _retval)
 {
   return mInnerImage->GetImageContainer(aManager, _retval);
 }
 
-NS_IMETHODIMP
+NS_IMETHODIMP_(DrawResult)
 ImageWrapper::Draw(gfxContext* aContext,
-                   GraphicsFilter aFilter,
-                   const gfxMatrix& aUserSpaceToImageSpace,
-                   const gfxRect& aFill,
-                   const nsIntRect& aSubimage,
-                   const nsIntSize& aViewportSize,
-                   const SVGImageContext* aSVGContext,
+                   const nsIntSize& aSize,
+                   const ImageRegion& aRegion,
                    uint32_t aWhichFrame,
+                   GraphicsFilter aFilter,
+                   const Maybe<SVGImageContext>& aSVGContext,
                    uint32_t aFlags)
 {
-  return mInnerImage->Draw(aContext, aFilter, aUserSpaceToImageSpace, aFill,
-                           aSubimage, aViewportSize, aSVGContext, aWhichFrame,
-                           aFlags);
+  return mInnerImage->Draw(aContext, aSize, aRegion, aWhichFrame,
+                           aFilter, aSVGContext, aFlags);
 }
 
 NS_IMETHODIMP
@@ -247,10 +224,10 @@ ImageWrapper::StartDecoding()
   return mInnerImage->StartDecoding();
 }
 
-bool
-ImageWrapper::IsDecoded()
+NS_IMETHODIMP
+ImageWrapper::RequestDecodeForSize(const nsIntSize& aSize, uint32_t aFlags)
 {
-  return mInnerImage->IsDecoded();
+  return mInnerImage->RequestDecodeForSize(aSize, aFlags);
 }
 
 NS_IMETHODIMP
@@ -276,7 +253,7 @@ ImageWrapper::RequestDiscard()
 }
 
 NS_IMETHODIMP_(void)
-ImageWrapper::RequestRefresh(const mozilla::TimeStamp& aTime)
+ImageWrapper::RequestRefresh(const TimeStamp& aTime)
 {
   return mInnerImage->RequestRefresh(aTime);
 }
@@ -312,9 +289,30 @@ ImageWrapper::GetFirstFrameDelay()
 }
 
 NS_IMETHODIMP_(void)
-ImageWrapper::SetAnimationStartTime(const mozilla::TimeStamp& aTime)
+ImageWrapper::SetAnimationStartTime(const TimeStamp& aTime)
 {
   mInnerImage->SetAnimationStartTime(aTime);
+}
+
+nsIntSize
+ImageWrapper::OptimalImageSizeForDest(const gfxSize& aDest,
+                                      uint32_t aWhichFrame,
+                                      GraphicsFilter aFilter, uint32_t aFlags)
+{
+  return mInnerImage->OptimalImageSizeForDest(aDest, aWhichFrame, aFilter,
+                                              aFlags);
+}
+
+NS_IMETHODIMP_(nsIntRect)
+ImageWrapper::GetImageSpaceInvalidationRect(const nsIntRect& aRect)
+{
+  return mInnerImage->GetImageSpaceInvalidationRect(aRect);
+}
+
+already_AddRefed<imgIContainer>
+ImageWrapper::Unwrap()
+{
+  return mInnerImage->Unwrap();
 }
 
 } // namespace image

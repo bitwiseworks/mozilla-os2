@@ -4,8 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-interface MozMobileConnection;
-
+[Pref="dom.mobileconnection.enabled"]
 interface MozMobileConnectionArray {
   getter MozMobileConnection? item(unsigned long index);
   readonly attribute unsigned long length;

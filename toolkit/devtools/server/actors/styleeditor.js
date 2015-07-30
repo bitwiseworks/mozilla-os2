@@ -32,23 +32,13 @@ transition-property: all !important;\
 
 let LOAD_ERROR = "error-load";
 
-exports.register = function(handle) {
-  handle.addTabActor(StyleEditorActor, "styleEditorActor");
-  handle.addGlobalActor(StyleEditorActor, "styleEditorActor");
-};
-
-exports.unregister = function(handle) {
-  handle.removeTabActor(StyleEditorActor);
-  handle.removeGlobalActor(StyleEditorActor);
-};
-
 types.addActorType("old-stylesheet");
 
 /**
  * Creates a StyleEditorActor. StyleEditorActor provides remote access to the
  * stylesheets of a document.
  */
-let StyleEditorActor = protocol.ActorClass({
+let StyleEditorActor = exports.StyleEditorActor = protocol.ActorClass({
   typeName: "styleeditor",
 
   /**
@@ -254,8 +244,6 @@ let StyleEditorFront = protocol.FrontClass(StyleEditorActor, {
   initialize: function(client, tabForm) {
     protocol.Front.prototype.initialize.call(this, client);
     this.actorID = tabForm.styleEditorActor;
-
-    client.addActorPool(this);
     this.manage(this);
   },
 
@@ -351,10 +339,10 @@ let OldStyleSheetActor = protocol.ActorClass({
     // if this sheet has an @import, then it's rules are loaded async
     let ownerNode = this.rawSheet.ownerNode;
     if (ownerNode) {
-      let onSheetLoaded = function(event) {
+      let onSheetLoaded = (event) => {
         ownerNode.removeEventListener("load", onSheetLoaded, false);
         this._notifyPropertyChanged("ruleCount");
-      }.bind(this);
+      };
 
       ownerNode.addEventListener("load", onSheetLoaded, false);
     }
@@ -679,20 +667,27 @@ function fetch(aURL, aOptions={ loadFromCache: true, window: null,
     case "chrome":
     case "resource":
       try {
-        NetUtil.asyncFetch(url, function onFetch(aStream, aStatus, aRequest) {
-          if (!components.isSuccessCode(aStatus)) {
-            deferred.reject(new Error("Request failed with status code = "
-                                      + aStatus
-                                      + " after NetUtil.asyncFetch for url = "
-                                      + url));
-            return;
-          }
+        NetUtil.asyncFetch2(
+          url,
+          function onFetch(aStream, aStatus, aRequest) {
+            if (!components.isSuccessCode(aStatus)) {
+              deferred.reject(new Error("Request failed with status code = "
+                                        + aStatus
+                                        + " after NetUtil.asyncFetch2 for url = "
+                                        + url));
+              return;
+            }
 
-          let source = NetUtil.readInputStreamToString(aStream, aStream.available());
-          contentType = aRequest.contentType;
-          deferred.resolve(source);
-          aStream.close();
-        });
+            let source = NetUtil.readInputStreamToString(aStream, aStream.available());
+            contentType = aRequest.contentType;
+            deferred.resolve(source);
+            aStream.close();
+          },
+          null,      // aLoadingNode
+          Services.scriptSecurityManager.getSystemPrincipal(),
+          null,      // aTriggeringPrincipal
+          Ci.nsILoadInfo.SEC_NORMAL,
+          Ci.nsIContentPolicy.TYPE_STYLESHEET);
       } catch (ex) {
         deferred.reject(ex);
       }
@@ -701,12 +696,26 @@ function fetch(aURL, aOptions={ loadFromCache: true, window: null,
     default:
       let channel;
       try {
-        channel = Services.io.newChannel(url, null, null);
+        channel = Services.io.newChannel2(url,
+                                          null,
+                                          null,
+                                          null,      // aLoadingNode
+                                          Services.scriptSecurityManager.getSystemPrincipal(),
+                                          null,      // aTriggeringPrincipal
+                                          Ci.nsILoadInfo.SEC_NORMAL,
+                                          Ci.nsIContentPolicy.TYPE_STYLESHEET);
       } catch (e if e.name == "NS_ERROR_UNKNOWN_PROTOCOL") {
         // On Windows xpcshell tests, c:/foo/bar can pass as a valid URL, but
         // newChannel won't be able to handle it.
         url = "file:///" + url;
-        channel = Services.io.newChannel(url, null, null);
+        channel = Services.io.newChannel2(url,
+                                          null,
+                                          null,
+                                          null,      // aLoadingNode
+                                          Services.scriptSecurityManager.getSystemPrincipal(),
+                                          null,      // aTriggeringPrincipal
+                                          Ci.nsILoadInfo.SEC_NORMAL,
+                                          Ci.nsIContentPolicy.TYPE_STYLESHEET);
       }
       let chunks = [];
       let streamListener = {

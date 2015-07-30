@@ -16,9 +16,7 @@ class nsHtml5StateSnapshot;
 class nsHtml5DocumentBuilder;
 
 enum eHtml5TreeOperation {
-#ifdef DEBUG
   eTreeOpUninitialized,
-#endif
   // main HTML5 ops
   eTreeOpAppend,
   eTreeOpDetach,
@@ -37,6 +35,7 @@ enum eHtml5TreeOperation {
   eTreeOpAppendCommentToDocument,
   eTreeOpAppendDoctypeToDocument,
   eTreeOpGetDocumentFragmentForTemplate,
+  eTreeOpGetFosterParent,
   // Gecko-specific on-pop ops
   eTreeOpMarkAsBroken,
   eTreeOpRunScript,
@@ -44,7 +43,6 @@ enum eHtml5TreeOperation {
   eTreeOpPreventScriptExecution,
   eTreeOpDoneAddingChildren,
   eTreeOpDoneCreatingElement,
-  eTreeOpFlushPendingAppendNotifications,
   eTreeOpSetDocumentCharset,
   eTreeOpNeedsCharsetSwitchTo,
   eTreeOpUpdateStyleSheet,
@@ -58,6 +56,7 @@ enum eHtml5TreeOperation {
   eTreeOpMaybeComplainAboutCharset,
   eTreeOpAddClass,
   eTreeOpAddViewSourceHref,
+  eTreeOpAddViewSourceBase,
   eTreeOpAddError,
   eTreeOpAddLineNumberId,
   eTreeOpAddErrorAtom,
@@ -151,6 +150,7 @@ class nsHtml5TreeOperation {
                                      nsIAtom* aName,
                                      nsHtml5HtmlAttributes* aAttributes,
                                      mozilla::dom::FromParser aFromParser,
+                                     nsNodeInfoManager* aNodeInfoManager,
                                      nsHtml5DocumentBuilder* aBuilder);
 
     static void SetFormElement(nsIContent* aNode, nsIContent* aParent);
@@ -180,10 +180,11 @@ class nsHtml5TreeOperation {
 
     static nsIContent* GetDocumentFragmentForTemplate(nsIContent* aNode);
 
+    static nsIContent* GetFosterParent(nsIContent* aTable, nsIContent* aStackParent);
+
     static void PreventScriptExecution(nsIContent* aNode);
 
-    static void DoneAddingChildren(nsIContent* aNode,
-                                   nsHtml5DocumentBuilder* aBuilder);
+    static void DoneAddingChildren(nsIContent* aNode);
 
     static void DoneCreatingElement(nsIContent* aNode);
 
@@ -291,6 +292,7 @@ class nsHtml5TreeOperation {
                      nsIAtom* aName, 
                      nsHtml5HtmlAttributes* aAttributes,
                      nsIContentHandle* aTarget,
+                     nsIContentHandle* aIntendedParent,
                      bool aFromNetwork)
     {
       NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
@@ -301,6 +303,7 @@ class nsHtml5TreeOperation {
                 eTreeOpCreateElementNetwork :
                 eTreeOpCreateElementNotNetwork;
       mFour.integer = aNamespace;
+      mFive.node = static_cast<nsIContent**>(aIntendedParent);
       mOne.node = static_cast<nsIContent**>(aTarget);
       mTwo.atom = aName;
       if (aAttributes == nsHtml5HtmlAttributes::EMPTY_ATTRIBUTES) {
@@ -502,7 +505,7 @@ class nsHtml5TreeOperation {
       nsAHtml5TreeBuilderState*       state;
       int32_t                         integer;
       nsresult                        result;
-    }                   mOne, mTwo, mThree, mFour;
+    } mOne, mTwo, mThree, mFour, mFive;
 };
 
 #endif // nsHtml5TreeOperation_h

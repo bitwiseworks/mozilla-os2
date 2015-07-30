@@ -18,6 +18,7 @@
 #include "nsClassHashtable.h"
 #include "mozilla/dom/AudioChannelBinding.h"
 
+class nsIRunnable;
 class nsPIDOMWindow;
 
 namespace mozilla {
@@ -35,12 +36,17 @@ public:
   NS_DECL_NSITIMERCALLBACK
 
   /**
-   * Returns the AudioChannelServce singleton. Only to be called from main
-   * thread.
-   *
-   * @return NS_OK on proper assignment, NS_ERROR_FAILURE otherwise.
+   * Returns the AudioChannelServce singleton or null if the process havn't create it before.
+   * Only to be called from main thread.
    */
   static AudioChannelService* GetAudioChannelService();
+
+  /**
+   * Returns the AudioChannelServce singleton.
+   * If AudioChannelServce is not exist, create and return new one.
+   * Only to be called from main thread.
+   */
+  static AudioChannelService* GetOrCreateAudioChannelService();
 
   /**
    * Shutdown the singleton.
@@ -73,6 +79,12 @@ public:
    * or one of its subprocesses.
    */
   virtual bool ContentOrNormalChannelIsActive();
+
+  /**
+   * Return true if there is a telephony channel active in this process
+   * or one of its subprocesses.
+   */
+  virtual bool TelephonyChannelIsActive();
 
   /**
    * Return true if a normal or content channel is active for the given
@@ -113,8 +125,10 @@ public:
   static void GetAudioChannelString(AudioChannel aChannel, nsAString& aString);
   static void GetDefaultAudioChannelString(nsAString& aString);
 
-protected:
   void Notify();
+
+protected:
+  void SendNotification();
 
   /**
    * Send the audio-channel-changed notification for the given process ID if
@@ -140,6 +154,11 @@ protected:
   /* Send the default-volume-channel-changed notification */
   void SetDefaultVolumeControlChannelInternal(int32_t aChannel,
                                               bool aHidden, uint64_t aChildID);
+
+  AudioChannelState CheckTelephonyPolicy(AudioChannel aChannel,
+                                         uint64_t aChildID);
+  void RegisterTelephonyChild(uint64_t aChildID);
+  void UnregisterTelephonyChild(uint64_t aChildID);
 
   AudioChannelService();
   virtual ~AudioChannelService();
@@ -202,6 +221,11 @@ protected:
                         AudioChannelAgentData* aUnused,
                         void *aPtr);
 
+  static PLDHashOperator
+  WindowDestroyedEnumerator(AudioChannelAgent* aAgent,
+                            nsAutoPtr<AudioChannelAgentData>& aData,
+                            void *aPtr);
+
   // This returns the number of agents from this aWindow.
   uint32_t CountWindow(nsIDOMWindow* aWindow);
 
@@ -215,6 +239,19 @@ protected:
   int32_t mCurrentVisibleHigherChannel;
 
   nsTArray<uint64_t> mWithVideoChildIDs;
+
+  // Telephony Channel policy is "LIFO", the last app to require the resource is
+  // allowed to play. The others are muted.
+  struct TelephonyChild {
+    uint64_t mChildID;
+    uint32_t mInstances;
+
+    explicit TelephonyChild(uint64_t aChildID)
+      : mChildID(aChildID)
+      , mInstances(1)
+    {}
+  };
+  nsTArray<TelephonyChild> mTelephonyChildren;
 
   // mPlayableHiddenContentChildID stores the ChildID of the process which can
   // play content channel(s) in the background.
@@ -236,6 +273,8 @@ protected:
   uint64_t mPlayableHiddenContentChildID;
 
   bool mDisabled;
+
+  nsCOMPtr<nsIRunnable> mRunnable;
 
   nsCOMPtr<nsITimer> mDeferTelChannelTimer;
   bool mTimerElementHidden;

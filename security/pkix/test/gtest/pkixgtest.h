@@ -21,77 +21,67 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef mozilla_pkix__pkixgtest_h
-#define mozilla_pkix__pkixgtest_h
+#ifndef mozilla_pkix_pkixgtest_h
+#define mozilla_pkix_pkixgtest_h
 
 #include <ostream>
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated"
+#pragma clang diagnostic ignored "-Wmissing-noreturn"
+#pragma clang diagnostic ignored "-Wshift-sign-overflow"
+#pragma clang diagnostic ignored "-Wsign-conversion"
+#pragma clang diagnostic ignored "-Wundef"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wextra"
+#elif defined(_MSC_VER)
+#pragma warning(push, 3)
+// C4224: Nonstandard extension used: formal parameter 'X' was previously
+//        defined as a type.
+#pragma warning(disable: 4224)
+// C4826: Conversion from 'type1 ' to 'type_2' is sign - extended. This may
+//        cause unexpected runtime behavior.
+#pragma warning(disable: 4826)
+#endif
+
 #include "gtest/gtest.h"
-#include "pkixutil.h"
-#include "prerror.h"
-#include "stdint.h"
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+
+#include "pkix/Result.h"
+
+// PrintTo must be in the same namespace as the type we're overloading it for.
+namespace mozilla { namespace pkix {
+
+inline void
+PrintTo(const Result& result, ::std::ostream* os)
+{
+  const char* stringified = MapResultToName(result);
+  if (stringified) {
+    *os << stringified;
+  } else {
+    *os << "mozilla::pkix::Result(" << static_cast<unsigned int>(result) << ")";
+  }
+}
+
+} } // namespace mozilla::pkix
 
 namespace mozilla { namespace pkix { namespace test {
 
-class ResultWithPRErrorCode
-{
-public:
-  ResultWithPRErrorCode(Result rv, PRErrorCode errorCode)
-    : mRv(rv)
-    , mErrorCode(errorCode)
-  {
-  }
+extern const std::time_t ONE_DAY_IN_SECONDS_AS_TIME_T;
 
-  explicit ResultWithPRErrorCode(Result rv)
-    : mRv(rv)
-    , mErrorCode(rv == Success ? 0 : PR_GetError())
-  {
-  }
-
-  bool operator==(const ResultWithPRErrorCode& other) const
-  {
-    return mRv == other.mRv && mErrorCode == other.mErrorCode;
-  }
-
-private:
-  const Result mRv;
-  const PRErrorCode mErrorCode;
-
-  friend std::ostream& operator<<(std::ostream& os,
-                                  const ResultWithPRErrorCode & value);
-
-  void operator=(const ResultWithPRErrorCode&) /*= delete*/;
-};
-
-::std::ostream& operator<<(::std::ostream&, const ResultWithPRErrorCode &);
-
-#define ASSERT_Success(rv) \
-  ASSERT_EQ(::mozilla::pkix::test::ResultWithPRErrorCode( \
-                ::mozilla::pkix::Success, 0), \
-            ::mozilla::pkix::test::ResultWithPRErrorCode(rv))
-#define EXPECT_Success(rv) \
-  EXPECT_EQ(::mozilla::pkix::test::ResultWithPRErrorCode( \
-                ::mozilla::pkix::Success, 0), \
-            ::mozilla::pkix::test::ResultWithPRErrorCode(rv))
-
-#define ASSERT_RecoverableError(expectedError, rv) \
-  ASSERT_EQ(::mozilla::pkix::test::ResultWithPRErrorCode( \
-                 ::mozilla::pkix::RecoverableError, expectedError), \
-            ::mozilla::pkix::test::ResultWithPRErrorCode(rv))
-#define EXPECT_RecoverableError(expectedError, rv) \
-  EXPECT_EQ(::mozilla::pkix::test::ResultWithPRErrorCode( \
-                 ::mozilla::pkix::RecoverableError, expectedError), \
-            ::mozilla::pkix::test::ResultWithPRErrorCode(rv))
-
-#define ASSERT_FatalError(expectedError, rv) \
-  ASSERT_EQ(::mozilla::pkix::test::ResultWithPRErrorCode( \
-                 ::mozilla::pkix::FatalError, expectedError), \
-            ::mozilla::pkix::test::ResultWithPRErrorCode(rv))
-#define EXPECT_FatalError(expectedError, rv) \
-  EXPECT_EQ(::mozilla::pkix::test::ResultWithPRErrorCode( \
-                 ::mozilla::pkix::FatalError, expectedError), \
-            ::mozilla::pkix::test::ResultWithPRErrorCode(rv))
+extern const std::time_t now;
+extern const std::time_t oneDayBeforeNow;
+extern const std::time_t oneDayAfterNow;
 
 } } } // namespace mozilla::pkix::test
 
-#endif // mozilla_pkix__pkixgtest_h
+#endif // mozilla_pkix_pkixgtest_h

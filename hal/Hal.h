@@ -13,7 +13,7 @@
 #include "mozilla/Observer.h"
 #include "mozilla/Types.h"
 #include "nsTArray.h"
-#include "prlog.h"
+#include "mozilla/dom/MozPowerManagerBinding.h"
 #include "mozilla/dom/battery/Types.h"
 #include "mozilla/dom/network/Types.h"
 #include "mozilla/dom/power/Types.h"
@@ -45,9 +45,6 @@ namespace hal {
 typedef Observer<void_t> AlarmObserver;
 
 class WindowIdentifier;
-
-extern PRLogModuleInfo *GetHalLog();
-#define HAL_LOG(msg) PR_LOG(mozilla::hal::GetHalLog(), PR_LOG_DEBUG, msg)
 
 typedef Observer<int64_t> SystemClockChangeObserver;
 typedef Observer<SystemTimezoneChangeInformation> SystemTimezoneChangeObserver;
@@ -124,7 +121,17 @@ bool GetScreenEnabled();
  *
  * Note that it may take a few seconds for the screen to turn on or off.
  */
-void SetScreenEnabled(bool enabled);
+void SetScreenEnabled(bool aEnabled);
+
+/**
+ * Determine whether the device's keypad/button backlight is currently enabled.
+ */
+bool GetKeyLightEnabled();
+
+/**
+ * Enable or disable the device's keypad/button backlight.
+ */
+void SetKeyLightEnabled(bool aEnabled);
 
 /**
  * Get the brightness of the device's screen's backlight, on a scale from 0
@@ -145,7 +152,7 @@ double GetScreenBrightness();
  * followed by GetScreenBrightness(), the value returned by
  * GetScreenBrightness() may not be exactly x.
  */
-void SetScreenBrightness(double brightness);
+void SetScreenBrightness(double aBrightness);
 
 /**
  * Determine whether the device is allowed to sleep.
@@ -156,25 +163,7 @@ bool GetCpuSleepAllowed();
  * Set whether the device is allowed to suspend automatically after
  * the screen is disabled.
  */
-void SetCpuSleepAllowed(bool allowed);
-
-/**
- * Set the value of a light to a particular color, with a specific flash pattern.
- * light specifices which light.  See Hal.idl for the list of constants
- * mode specifies user set or based on ambient light sensor
- * flash specifies whether or how to flash the light
- * flashOnMS and flashOffMS specify the pattern for XXX flash mode
- * color specifies the color.  If the light doesn't support color, the given color is
- * transformed into a brightness, or just an on/off if that is all the light is capable of.
- * returns true if successful and false if failed.
- */
-bool SetLight(hal::LightType light, const hal::LightConfiguration& aConfig);
-/**
- * GET the value of a light returning a particular color, with a specific flash pattern.
- * returns true if successful and false if failed.
- */
-bool GetLight(hal::LightType light, hal::LightConfiguration* aConfig);
-
+void SetCpuSleepAllowed(bool aAllowed);
 
 /**
  * Register an observer for the sensor of given type.
@@ -496,6 +485,14 @@ void SetProcessPriority(int aPid,
                         hal::ProcessCPUPriority aCPUPriority,
                         uint32_t aLRU = 0);
 
+
+/**
+ * Set the current thread's priority to appropriate platform-specific value for
+ * given functionality. Instead of providing arbitrary priority numbers you
+ * must specify a type of function like THREAD_PRIORITY_COMPOSITOR.
+ */
+void SetCurrentThreadPriority(hal::ThreadPriority aThreadPriority);
+
 /**
  * Register an observer for the FM radio.
  */
@@ -507,10 +504,26 @@ void RegisterFMRadioObserver(hal::FMRadioObserver* aRadioObserver);
 void UnregisterFMRadioObserver(hal::FMRadioObserver* aRadioObserver);
 
 /**
+ * Register an observer for the FM radio.
+ */
+void RegisterFMRadioRDSObserver(hal::FMRadioRDSObserver* aRDSObserver);
+
+/**
+ * Unregister the observer for the FM radio.
+ */
+void UnregisterFMRadioRDSObserver(hal::FMRadioRDSObserver* aRDSObserver);
+
+/**
  * Notify observers that a call to EnableFMRadio, DisableFMRadio, or FMRadioSeek
  * has completed, and indicate what the call returned.
  */
 void NotifyFMRadioStatus(const hal::FMRadioOperationInformation& aRadioState);
+
+/**
+ * Notify observers of new RDS data
+ * This can be called on any thread.
+ */
+void NotifyFMRadioRDSGroup(const hal::FMRadioRDSGroup& aRDSGroup);
 
 /**
  * Enable the FM radio and configure it according to the settings in aInfo.
@@ -525,6 +538,8 @@ void DisableFMRadio();
 /**
  * Seek to an available FM radio station.
  *
+ * This can be called off main thread, but all calls must be completed
+ * before calling DisableFMRadio.
  */
 void FMRadioSeek(const hal::FMRadioSeekDirection& aDirection);
 
@@ -535,6 +550,9 @@ void GetFMRadioSettings(hal::FMRadioSettings* aInfo);
 
 /**
  * Set the FM radio's frequency.
+ *
+ * This can be called off main thread, but all calls must be completed
+ * before calling DisableFMRadio.
  */
 void SetFMRadioFrequency(const uint32_t frequency);
 
@@ -564,6 +582,16 @@ void CancelFMRadioSeek();
 hal::FMRadioSettings GetFMBandSettings(hal::FMRadioCountry aCountry);
 
 /**
+ * Enable RDS data reception
+ */
+bool EnableRDS(uint32_t aMask);
+
+/**
+ * Disable RDS data reception
+ */
+void DisableRDS();
+
+/**
  * Start a watchdog to compulsively shutdown the system if it hangs.
  * @param aMode Specify how to shutdown the system.
  * @param aTimeoutSecs Specify the delayed seconds to shutdown the system.
@@ -575,7 +603,7 @@ void StartForceQuitWatchdog(hal::ShutdownMode aMode, int32_t aTimeoutSecs);
 /**
  * Perform Factory Reset to wipe out all user data.
  */
-void FactoryReset();
+void FactoryReset(mozilla::dom::FactoryResetReason& aReason);
 
 /**
  * Start monitoring the status of gamepads attached to the system.
@@ -607,6 +635,19 @@ void StopDiskSpaceWatcher();
  * Returns 0 if we are unable to determine this information from /proc/meminfo.
  */
 uint32_t GetTotalSystemMemory();
+
+/**
+ * Get the level of total system memory on device in MiB.
+ * (round the value up to the next power of two)
+ *
+ * Returns 0 if we are unable to determine this information from /proc/meminfo.
+ */
+uint32_t GetTotalSystemMemoryLevel();
+
+/**
+ * Determine whether the headphone switch event is from input device
+ */
+bool IsHeadphoneEventFromInputDev();
 
 } // namespace MOZ_HAL_NAMESPACE
 } // namespace mozilla

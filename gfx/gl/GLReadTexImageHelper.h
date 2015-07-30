@@ -14,8 +14,6 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/gfx/Types.h"
 
-class gfxImageSurface;
-
 namespace mozilla {
 
 namespace gfx {
@@ -24,13 +22,19 @@ class DataSourceSurface;
 
 namespace gl {
 
-void ReadPixelsIntoImageSurface(GLContext* aGL, gfxImageSurface* aSurface);
-void ReadScreenIntoImageSurface(GLContext* aGL, gfxImageSurface* aSurface);
+// Returns true if the `dest{Format,Type}` are the same as the
+// `read{Format,Type}`.
+bool GetActualReadFormats(GLContext* gl,
+                          GLenum destFormat, GLenum destType,
+                          GLenum* out_readFormat, GLenum* out_readType);
+
+void ReadPixelsIntoDataSurface(GLContext* aGL,
+                               gfx::DataSourceSurface* aSurface);
 
 TemporaryRef<gfx::DataSourceSurface>
 ReadBackSurface(GLContext* gl, GLuint aTexture, bool aYInvert, gfx::SurfaceFormat aFormat);
 
-class GLReadTexImageHelper MOZ_FINAL
+class GLReadTexImageHelper final
 {
     // The GLContext is the sole owner of the GLBlitHelper.
     GLContext* mGL;
@@ -43,7 +47,7 @@ class GLReadTexImageHelper MOZ_FINAL
 
 public:
 
-    GLReadTexImageHelper(GLContext* gl);
+    explicit GLReadTexImageHelper(GLContext* gl);
     ~GLReadTexImageHelper();
 
     /**

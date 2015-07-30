@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,6 +15,7 @@
 # include "nsExceptionHandler.h"
 #endif
 #include "nsString.h"
+#include "nsXULAppAPI.h"
 #include "prprf.h"
 #include "prlog.h"
 #include "nsError.h"
@@ -44,22 +46,53 @@
 #endif
 #endif
 
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined(__DragonFly__) || defined(__FreeBSD__) \
+ || defined(__NetBSD__) || defined(__OpenBSD__)
 #include <stdbool.h>
 #include <unistd.h>
+#include <sys/param.h>
 #include <sys/sysctl.h>
+#endif
+
+#if defined(__OpenBSD__)
+#include <sys/proc.h>
+#endif
+
+#if defined(__DragonFly__) || defined(__FreeBSD__)
+#include <sys/user.h>
+#endif
+
+#if defined(__NetBSD__)
+#undef KERN_PROC
+#define KERN_PROC KERN_PROC2
+#define KINFO_PROC struct kinfo_proc2
+#else
+#define KINFO_PROC struct kinfo_proc
+#endif
+
+#if defined(XP_MACOSX)
+#define KP_FLAGS kp_proc.p_flag
+#elif defined(__DragonFly__)
+#define KP_FLAGS kp_flags
+#elif defined(__FreeBSD__)
+#define KP_FLAGS ki_flag
+#elif defined(__OpenBSD__) && !defined(_P_TRACED)
+#define KP_FLAGS p_psflags
+#define P_TRACED PS_TRACED
+#else
+#define KP_FLAGS p_flag
 #endif
 
 #include "mozilla/mozalloc_abort.h"
 
 static void
-Abort(const char *aMsg);
+Abort(const char* aMsg);
 
 static void
 RealBreak();
 
 static void
-Break(const char *aMsg);
+Break(const char* aMsg);
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -71,7 +104,7 @@ Break(const char *aMsg);
 
 using namespace mozilla;
 
-static const char *sMultiprocessDescription = nullptr;
+static const char* sMultiprocessDescription = nullptr;
 
 static Atomic<int32_t> gAssertionCount;
 
@@ -90,29 +123,29 @@ nsDebugImpl::Release()
 }
 
 NS_IMETHODIMP
-nsDebugImpl::Assertion(const char *aStr, const char *aExpr,
-                       const char *aFile, int32_t aLine)
+nsDebugImpl::Assertion(const char* aStr, const char* aExpr,
+                       const char* aFile, int32_t aLine)
 {
   NS_DebugBreak(NS_DEBUG_ASSERTION, aStr, aExpr, aFile, aLine);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDebugImpl::Warning(const char *aStr, const char *aFile, int32_t aLine)
+nsDebugImpl::Warning(const char* aStr, const char* aFile, int32_t aLine)
 {
   NS_DebugBreak(NS_DEBUG_WARNING, aStr, nullptr, aFile, aLine);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDebugImpl::Break(const char *aFile, int32_t aLine)
+nsDebugImpl::Break(const char* aFile, int32_t aLine)
 {
   NS_DebugBreak(NS_DEBUG_BREAK, nullptr, nullptr, aFile, aLine);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDebugImpl::Abort(const char *aFile, int32_t aLine)
+nsDebugImpl::Abort(const char* aFile, int32_t aLine)
 {
   NS_DebugBreak(NS_DEBUG_ABORT, nullptr, nullptr, aFile, aLine);
   return NS_OK;
@@ -143,16 +176,22 @@ nsDebugImpl::GetIsDebuggerAttached(bool* aResult)
 
 #if defined(XP_WIN)
   *aResult = ::IsDebuggerPresent();
-#elif defined(XP_MACOSX)
+#elif defined(XP_MACOSX) || defined(__DragonFly__) || defined(__FreeBSD__) \
+   || defined(__NetBSD__) || defined(__OpenBSD__)
   // Specify the info we're looking for
-  int mib[4];
-  mib[0] = CTL_KERN;
-  mib[1] = KERN_PROC;
-  mib[2] = KERN_PROC_PID;
-  mib[3] = getpid();
-  size_t mibSize = sizeof(mib) / sizeof(int);
+  int mib[] = {
+    CTL_KERN,
+    KERN_PROC,
+    KERN_PROC_PID,
+    getpid(),
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+    sizeof(KINFO_PROC),
+    1,
+#endif
+  };
+  u_int mibSize = sizeof(mib) / sizeof(int);
 
-  struct kinfo_proc info;
+  KINFO_PROC info;
   size_t infoSize = sizeof(info);
   memset(&info, 0, infoSize);
 
@@ -162,7 +201,7 @@ nsDebugImpl::GetIsDebuggerAttached(bool* aResult)
     return NS_OK;
   }
 
-  if (info.kp_proc.p_flag & P_TRACED) {
+  if (info.KP_FLAGS & P_TRACED) {
     *aResult = true;
   }
 #endif
@@ -171,7 +210,7 @@ nsDebugImpl::GetIsDebuggerAttached(bool* aResult)
 }
 
 /* static */ void
-nsDebugImpl::SetMultiprocessMode(const char *aDesc)
+nsDebugImpl::SetMultiprocessMode(const char* aDesc)
 {
   sMultiprocessDescription = aDesc;
 }
@@ -183,14 +222,16 @@ nsDebugImpl::SetMultiprocessMode(const char *aDesc)
  */
 static PRLogModuleInfo* gDebugLog;
 
-static void InitLog(void)
+static void
+InitLog()
 {
   if (0 == gDebugLog) {
     gDebugLog = PR_NewLogModule("nsDebug");
   }
 }
 
-enum nsAssertBehavior {
+enum nsAssertBehavior
+{
   NS_ASSERT_UNINITIALIZED,
   NS_ASSERT_WARN,
   NS_ASSERT_SUSPEND,
@@ -200,194 +241,201 @@ enum nsAssertBehavior {
   NS_ASSERT_STACK_AND_ABORT
 };
 
-static nsAssertBehavior GetAssertBehavior()
+static nsAssertBehavior
+GetAssertBehavior()
 {
   static nsAssertBehavior gAssertBehavior = NS_ASSERT_UNINITIALIZED;
-  if (gAssertBehavior != NS_ASSERT_UNINITIALIZED)
+  if (gAssertBehavior != NS_ASSERT_UNINITIALIZED) {
     return gAssertBehavior;
+  }
 
-#if defined(XP_WIN) && defined(MOZ_METRO)
-  if (IsRunningInWindowsMetro())
-    gAssertBehavior = NS_ASSERT_WARN;
-  else
-    gAssertBehavior = NS_ASSERT_TRAP;
-#elif defined(XP_WIN)
-  gAssertBehavior = NS_ASSERT_TRAP;
-#else
   gAssertBehavior = NS_ASSERT_WARN;
-#endif
 
-  const char *assertString = PR_GetEnv("XPCOM_DEBUG_BREAK");
-  if (!assertString || !*assertString)
+  const char* assertString = PR_GetEnv("XPCOM_DEBUG_BREAK");
+  if (!assertString || !*assertString) {
     return gAssertBehavior;
+  }
+  if (!strcmp(assertString, "warn")) {
+    return gAssertBehavior = NS_ASSERT_WARN;
+  }
+  if (!strcmp(assertString, "suspend")) {
+    return gAssertBehavior = NS_ASSERT_SUSPEND;
+  }
+  if (!strcmp(assertString, "stack")) {
+    return gAssertBehavior = NS_ASSERT_STACK;
+  }
+  if (!strcmp(assertString, "abort")) {
+    return gAssertBehavior = NS_ASSERT_ABORT;
+  }
+  if (!strcmp(assertString, "trap") || !strcmp(assertString, "break")) {
+    return gAssertBehavior = NS_ASSERT_TRAP;
+  }
+  if (!strcmp(assertString, "stack-and-abort")) {
+    return gAssertBehavior = NS_ASSERT_STACK_AND_ABORT;
+  }
 
-   if (!strcmp(assertString, "warn"))
-     return gAssertBehavior = NS_ASSERT_WARN;
-
-   if (!strcmp(assertString, "suspend"))
-     return gAssertBehavior = NS_ASSERT_SUSPEND;
-
-   if (!strcmp(assertString, "stack"))
-     return gAssertBehavior = NS_ASSERT_STACK;
-
-   if (!strcmp(assertString, "abort"))
-     return gAssertBehavior = NS_ASSERT_ABORT;
-
-   if (!strcmp(assertString, "trap") || !strcmp(assertString, "break"))
-     return gAssertBehavior = NS_ASSERT_TRAP;
-
-   if (!strcmp(assertString, "stack-and-abort"))
-     return gAssertBehavior = NS_ASSERT_STACK_AND_ABORT;
-
-   fprintf(stderr, "Unrecognized value of XPCOM_DEBUG_BREAK\n");
-   return gAssertBehavior;
+  fprintf(stderr, "Unrecognized value of XPCOM_DEBUG_BREAK\n");
+  return gAssertBehavior;
 }
 
 struct FixedBuffer
 {
-  FixedBuffer() : curlen(0) { buffer[0] = '\0'; }
+  FixedBuffer() : curlen(0)
+  {
+    buffer[0] = '\0';
+  }
 
   char buffer[1000];
   uint32_t curlen;
 };
 
 static int
-StuffFixedBuffer(void *closure, const char *buf, uint32_t len)
+StuffFixedBuffer(void* aClosure, const char* aBuf, uint32_t aLen)
 {
-  if (!len)
+  if (!aLen) {
     return 0;
-  
-  FixedBuffer *fb = (FixedBuffer*) closure;
+  }
+
+  FixedBuffer* fb = (FixedBuffer*)aClosure;
 
   // strip the trailing null, we add it again later
-  if (buf[len - 1] == '\0')
-    --len;
+  if (aBuf[aLen - 1] == '\0') {
+    --aLen;
+  }
 
-  if (fb->curlen + len >= sizeof(fb->buffer))
-    len = sizeof(fb->buffer) - fb->curlen - 1;
+  if (fb->curlen + aLen >= sizeof(fb->buffer)) {
+    aLen = sizeof(fb->buffer) - fb->curlen - 1;
+  }
 
-  if (len) {
-    memcpy(fb->buffer + fb->curlen, buf, len);
-    fb->curlen += len;
+  if (aLen) {
+    memcpy(fb->buffer + fb->curlen, aBuf, aLen);
+    fb->curlen += aLen;
     fb->buffer[fb->curlen] = '\0';
   }
 
-  return len;
+  return aLen;
 }
 
 EXPORT_XPCOM_API(void)
-NS_DebugBreak(uint32_t aSeverity, const char *aStr, const char *aExpr,
-              const char *aFile, int32_t aLine)
+NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
+              const char* aFile, int32_t aLine)
 {
-   InitLog();
+  InitLog();
 
-   FixedBuffer buf;
-   PRLogModuleLevel ll = PR_LOG_WARNING;
-   const char *sevString = "WARNING";
+  FixedBuffer buf;
+  PRLogModuleLevel ll = PR_LOG_WARNING;
+  const char* sevString = "WARNING";
 
-   switch (aSeverity) {
-   case NS_DEBUG_ASSERTION:
-     sevString = "###!!! ASSERTION";
-     ll = PR_LOG_ERROR;
-     break;
+  switch (aSeverity) {
+    case NS_DEBUG_ASSERTION:
+      sevString = "###!!! ASSERTION";
+      ll = PR_LOG_ERROR;
+      break;
 
-   case NS_DEBUG_BREAK:
-     sevString = "###!!! BREAK";
-     ll = PR_LOG_ALWAYS;
-     break;
+    case NS_DEBUG_BREAK:
+      sevString = "###!!! BREAK";
+      ll = PR_LOG_ALWAYS;
+      break;
 
-   case NS_DEBUG_ABORT:
-     sevString = "###!!! ABORT";
-     ll = PR_LOG_ALWAYS;
-     break;
+    case NS_DEBUG_ABORT:
+      sevString = "###!!! ABORT";
+      ll = PR_LOG_ALWAYS;
+      break;
 
-   default:
-     aSeverity = NS_DEBUG_WARNING;
-   };
+    default:
+      aSeverity = NS_DEBUG_WARNING;
+  };
 
 #  define PrintToBuffer(...) PR_sxprintf(StuffFixedBuffer, &buf, __VA_ARGS__)
 
-   // Print "[PID]" or "[Desc PID]" at the beginning of the message.
-   PrintToBuffer("[");
-   if (sMultiprocessDescription) {
-     PrintToBuffer("%s ", sMultiprocessDescription);
-   }
-   PrintToBuffer("%d] ", base::GetCurrentProcId());
+  // Print "[PID]" or "[Desc PID]" at the beginning of the message.
+  PrintToBuffer("[");
+  if (sMultiprocessDescription) {
+    PrintToBuffer("%s ", sMultiprocessDescription);
+  }
+  PrintToBuffer("%d] ", base::GetCurrentProcId());
 
-   PrintToBuffer("%s: ", sevString);
+  PrintToBuffer("%s: ", sevString);
 
-   if (aStr)
-     PrintToBuffer("%s: ", aStr);
-
-   if (aExpr)
-     PrintToBuffer("'%s', ", aExpr);
-
-   if (aFile)
-     PrintToBuffer("file %s, ", aFile);
-
-   if (aLine != -1)
-     PrintToBuffer("line %d", aLine);
+  if (aStr) {
+    PrintToBuffer("%s: ", aStr);
+  }
+  if (aExpr) {
+    PrintToBuffer("'%s', ", aExpr);
+  }
+  if (aFile) {
+    PrintToBuffer("file %s, ", aFile);
+  }
+  if (aLine != -1) {
+    PrintToBuffer("line %d", aLine);
+  }
 
 #  undef PrintToBuffer
 
-   // Write out the message to the debug log
-   PR_LOG(gDebugLog, ll, ("%s", buf.buffer));
-   PR_LogFlush();
+  // Write out the message to the debug log
+  PR_LOG(gDebugLog, ll, ("%s", buf.buffer));
+  PR_LogFlush();
 
-   // errors on platforms without a debugdlg ring a bell on stderr
+  // errors on platforms without a debugdlg ring a bell on stderr
 #if !defined(XP_WIN)
-   if (ll != PR_LOG_WARNING)
-     fprintf(stderr, "\07");
+  if (ll != PR_LOG_WARNING) {
+    fprintf(stderr, "\07");
+  }
 #endif
 
 #ifdef ANDROID
-   __android_log_print(ANDROID_LOG_INFO, "Gecko", "%s", buf.buffer);
+  __android_log_print(ANDROID_LOG_INFO, "Gecko", "%s", buf.buffer);
 #endif
 
-   // Write the message to stderr unless it's a warning and MOZ_IGNORE_WARNINGS
-   // is set.
-   if (!(PR_GetEnv("MOZ_IGNORE_WARNINGS") && aSeverity == NS_DEBUG_WARNING)) {
-     fprintf(stderr, "%s\n", buf.buffer);
-     fflush(stderr);
-   }
+  // Write the message to stderr unless it's a warning and MOZ_IGNORE_WARNINGS
+  // is set.
+  if (!(PR_GetEnv("MOZ_IGNORE_WARNINGS") && aSeverity == NS_DEBUG_WARNING)) {
+    fprintf(stderr, "%s\n", buf.buffer);
+    fflush(stderr);
+  }
 
-   switch (aSeverity) {
-   case NS_DEBUG_WARNING:
-     return;
+  switch (aSeverity) {
+    case NS_DEBUG_WARNING:
+      return;
 
-   case NS_DEBUG_BREAK:
-     Break(buf.buffer);
-     return;
+    case NS_DEBUG_BREAK:
+      Break(buf.buffer);
+      return;
 
-   case NS_DEBUG_ABORT: {
+    case NS_DEBUG_ABORT: {
 #if defined(MOZ_CRASHREPORTER)
-     nsCString note("xpcom_runtime_abort(");
-     note += buf.buffer;
-     note += ")";
-     CrashReporter::AppendAppNotesToCrashReport(note);
-     CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AbortMessage"),
-                                        nsDependentCString(buf.buffer));
+      // Updating crash annotations in the child causes us to do IPC. This can
+      // really cause trouble if we're asserting from within IPC code. So we
+      // have to do without the annotations in that case.
+      if (XRE_GetProcessType() == GeckoProcessType_Default) {
+        nsCString note("xpcom_runtime_abort(");
+        note += buf.buffer;
+        note += ")";
+        CrashReporter::AppendAppNotesToCrashReport(note);
+        CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AbortMessage"),
+                                           nsDependentCString(buf.buffer));
+      }
 #endif  // MOZ_CRASHREPORTER
 
 #if defined(DEBUG) && defined(_WIN32)
-     RealBreak();
+      RealBreak();
 #endif
 #ifdef DEBUG
-     nsTraceRefcnt::WalkTheStack(stderr);
+      nsTraceRefcnt::WalkTheStack(stderr);
 #endif
-     Abort(buf.buffer);
-     return;
-   }
-   }
+      Abort(buf.buffer);
+      return;
+    }
+  }
 
-   // Now we deal with assertions
-   gAssertionCount++;
+  // Now we deal with assertions
+  gAssertionCount++;
 
-   switch (GetAssertBehavior()) {
-   case NS_ASSERT_WARN:
-     return;
+  switch (GetAssertBehavior()) {
+    case NS_ASSERT_WARN:
+      return;
 
-   case NS_ASSERT_SUSPEND:
+    case NS_ASSERT_SUSPEND:
 #ifdef XP_UNIX
       fprintf(stderr, "Suspending process; attach with the debugger.\n");
       kill(0, SIGSTOP);
@@ -396,27 +444,27 @@ NS_DebugBreak(uint32_t aSeverity, const char *aStr, const char *aExpr,
 #endif
       return;
 
-   case NS_ASSERT_STACK:
-     nsTraceRefcnt::WalkTheStack(stderr);
-     return;
+    case NS_ASSERT_STACK:
+      nsTraceRefcnt::WalkTheStack(stderr);
+      return;
 
-   case NS_ASSERT_STACK_AND_ABORT:
-     nsTraceRefcnt::WalkTheStack(stderr);
-     // Fall through to abort
+    case NS_ASSERT_STACK_AND_ABORT:
+      nsTraceRefcnt::WalkTheStack(stderr);
+      // Fall through to abort
 
-   case NS_ASSERT_ABORT:
-     Abort(buf.buffer);
-     return;
+    case NS_ASSERT_ABORT:
+      Abort(buf.buffer);
+      return;
 
-   case NS_ASSERT_TRAP:
-   case NS_ASSERT_UNINITIALIZED: // Default to "trap" behavior
-     Break(buf.buffer);
-     return;
-   }   
+    case NS_ASSERT_TRAP:
+    case NS_ASSERT_UNINITIALIZED: // Default to "trap" behavior
+      Break(buf.buffer);
+      return;
+  }
 }
 
 static void
-Abort(const char *aMsg)
+Abort(const char* aMsg)
 {
   mozalloc_abort(aMsg);
 }
@@ -427,25 +475,25 @@ RealBreak()
 #if defined(_WIN32)
   ::DebugBreak();
 #elif defined(XP_MACOSX)
-   raise(SIGTRAP);
+  raise(SIGTRAP);
 #elif defined(__GNUC__) && (defined(__i386__) || defined(__i386) || defined(__x86_64__))
-   asm("int $3");
+  asm("int $3");
 #elif defined(__arm__)
-   asm(
+  asm(
 #ifdef __ARM_ARCH_4T__
-/* ARMv4T doesn't support the BKPT instruction, so if the compiler target
- * is ARMv4T, we want to ensure the assembler will understand that ARMv5T
- * instruction, while keeping the resulting object tagged as ARMv4T.
- */
-       ".arch armv5t\n"
-       ".object_arch armv4t\n"
+    /* ARMv4T doesn't support the BKPT instruction, so if the compiler target
+     * is ARMv4T, we want to ensure the assembler will understand that ARMv5T
+     * instruction, while keeping the resulting object tagged as ARMv4T.
+     */
+    ".arch armv5t\n"
+    ".object_arch armv4t\n"
 #endif
-       "BKPT #0");
+    "BKPT #0");
 #elif defined(SOLARIS)
 #if defined(__i386__) || defined(__i386) || defined(__x86_64__)
-   asm("int $3");
+  asm("int $3");
 #else
-   raise(SIGTRAP);
+  raise(SIGTRAP);
 #endif
 #else
 #warning do not know how to break on this platform
@@ -454,18 +502,19 @@ RealBreak()
 
 // Abort() calls this function, don't call it!
 static void
-Break(const char *aMsg)
+Break(const char* aMsg)
 {
 #if defined(_WIN32)
   static int ignoreDebugger;
   if (!ignoreDebugger) {
-    const char *shouldIgnoreDebugger = getenv("XPCOM_DEBUG_DLG");
-    ignoreDebugger = 1 + (shouldIgnoreDebugger && !strcmp(shouldIgnoreDebugger, "1"));
+    const char* shouldIgnoreDebugger = getenv("XPCOM_DEBUG_DLG");
+    ignoreDebugger =
+      1 + (shouldIgnoreDebugger && !strcmp(shouldIgnoreDebugger, "1"));
   }
   if ((ignoreDebugger == 2) || !::IsDebuggerPresent()) {
     DWORD code = IDRETRY;
 
-    /* Create the debug dialog out of process to avoid the crashes caused by 
+    /* Create the debug dialog out of process to avoid the crashes caused by
      * Windows events leaking into our event loop from an in process dialog.
      * We do this by launching windbgdlg.exe (built in xpcom/windbgdlg).
      * See http://bugzilla.mozilla.org/show_bug.cgi?id=54792
@@ -482,46 +531,46 @@ Break(const char *aMsg)
     si.wShowWindow = SW_SHOW;
 
     // 2nd arg of CreateProcess is in/out
-    wchar_t *msgCopy = (wchar_t*) _alloca((strlen(aMsg) + 1)*sizeof(wchar_t));
+    wchar_t* msgCopy = (wchar_t*)_alloca((strlen(aMsg) + 1) * sizeof(wchar_t));
     wcscpy(msgCopy, NS_ConvertUTF8toUTF16(aMsg).get());
 
-    if(GetModuleFileNameW(GetModuleHandleW(L"xpcom.dll"), executable, MAX_PATH) &&
-       nullptr != (pName = wcsrchr(executable, '\\')) &&
-       nullptr != wcscpy(pName + 1, L"windbgdlg.exe") &&
-       CreateProcessW(executable, msgCopy, nullptr, nullptr,
-                      false, DETACHED_PROCESS | NORMAL_PRIORITY_CLASS,
-                      nullptr, nullptr, &si, &pi)) {
+    if (GetModuleFileNameW(GetModuleHandleW(L"xpcom.dll"), executable, MAX_PATH) &&
+        (pName = wcsrchr(executable, '\\')) != nullptr &&
+        wcscpy(pName + 1, L"windbgdlg.exe") &&
+        CreateProcessW(executable, msgCopy, nullptr, nullptr,
+                       false, DETACHED_PROCESS | NORMAL_PRIORITY_CLASS,
+                       nullptr, nullptr, &si, &pi)) {
       WaitForSingleObject(pi.hProcess, INFINITE);
       GetExitCodeProcess(pi.hProcess, &code);
       CloseHandle(pi.hProcess);
       CloseHandle(pi.hThread);
     }
 
-    switch(code) {
-    case IDABORT:
-      //This should exit us
-      raise(SIGABRT);
-      //If we are ignored exit this way..
-      _exit(3);
-         
-    case IDIGNORE:
-      return;
+    switch (code) {
+      case IDABORT:
+        //This should exit us
+        raise(SIGABRT);
+        //If we are ignored exit this way..
+        _exit(3);
+
+      case IDIGNORE:
+        return;
     }
   }
 
   RealBreak();
 #elif defined(XP_MACOSX)
-   /* Note that we put this Mac OS X test above the GNUC/x86 test because the
-    * GNUC/x86 test is also true on Intel Mac OS X and we want the PPC/x86
-    * impls to be the same.
-    */
-   RealBreak();
+  /* Note that we put this Mac OS X test above the GNUC/x86 test because the
+   * GNUC/x86 test is also true on Intel Mac OS X and we want the PPC/x86
+   * impls to be the same.
+   */
+  RealBreak();
 #elif defined(__GNUC__) && (defined(__i386__) || defined(__i386) || defined(__x86_64__))
-   RealBreak();
+  RealBreak();
 #elif defined(__arm__)
-   RealBreak();
+  RealBreak();
 #elif defined(SOLARIS)
-   RealBreak();
+  RealBreak();
 #else
 #warning do not know how to break on this platform
 #endif
@@ -530,13 +579,13 @@ Break(const char *aMsg)
 static const nsDebugImpl kImpl;
 
 nsresult
-nsDebugImpl::Create(nsISupports* outer, const nsIID& aIID, void* *aInstancePtr)
+nsDebugImpl::Create(nsISupports* aOuter, const nsIID& aIID, void** aInstancePtr)
 {
-  if (NS_WARN_IF(outer))
+  if (NS_WARN_IF(aOuter)) {
     return NS_ERROR_NO_AGGREGATION;
+  }
 
-  return const_cast<nsDebugImpl*>(&kImpl)->
-    QueryInterface(aIID, aInstancePtr);
+  return const_cast<nsDebugImpl*>(&kImpl)->QueryInterface(aIID, aInstancePtr);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -544,31 +593,31 @@ nsDebugImpl::Create(nsISupports* outer, const nsIID& aIID, void* *aInstancePtr)
 nsresult
 NS_ErrorAccordingToNSPR()
 {
-    PRErrorCode err = PR_GetError();
-    switch (err) {
-      case PR_OUT_OF_MEMORY_ERROR:              return NS_ERROR_OUT_OF_MEMORY;
-      case PR_WOULD_BLOCK_ERROR:                return NS_BASE_STREAM_WOULD_BLOCK;
-      case PR_FILE_NOT_FOUND_ERROR:             return NS_ERROR_FILE_NOT_FOUND;
-      case PR_READ_ONLY_FILESYSTEM_ERROR:       return NS_ERROR_FILE_READ_ONLY;
-      case PR_NOT_DIRECTORY_ERROR:              return NS_ERROR_FILE_NOT_DIRECTORY;
-      case PR_IS_DIRECTORY_ERROR:               return NS_ERROR_FILE_IS_DIRECTORY;
-      case PR_LOOP_ERROR:                       return NS_ERROR_FILE_UNRESOLVABLE_SYMLINK;
-      case PR_FILE_EXISTS_ERROR:                return NS_ERROR_FILE_ALREADY_EXISTS;
-      case PR_FILE_IS_LOCKED_ERROR:             return NS_ERROR_FILE_IS_LOCKED;
-      case PR_FILE_TOO_BIG_ERROR:               return NS_ERROR_FILE_TOO_BIG;
-      case PR_NO_DEVICE_SPACE_ERROR:            return NS_ERROR_FILE_NO_DEVICE_SPACE;
-      case PR_NAME_TOO_LONG_ERROR:              return NS_ERROR_FILE_NAME_TOO_LONG;
-      case PR_DIRECTORY_NOT_EMPTY_ERROR:        return NS_ERROR_FILE_DIR_NOT_EMPTY;
-      case PR_NO_ACCESS_RIGHTS_ERROR:           return NS_ERROR_FILE_ACCESS_DENIED;
-      default:                                  return NS_ERROR_FAILURE;
-    }
+  PRErrorCode err = PR_GetError();
+  switch (err) {
+    case PR_OUT_OF_MEMORY_ERROR:         return NS_ERROR_OUT_OF_MEMORY;
+    case PR_WOULD_BLOCK_ERROR:           return NS_BASE_STREAM_WOULD_BLOCK;
+    case PR_FILE_NOT_FOUND_ERROR:        return NS_ERROR_FILE_NOT_FOUND;
+    case PR_READ_ONLY_FILESYSTEM_ERROR:  return NS_ERROR_FILE_READ_ONLY;
+    case PR_NOT_DIRECTORY_ERROR:         return NS_ERROR_FILE_NOT_DIRECTORY;
+    case PR_IS_DIRECTORY_ERROR:          return NS_ERROR_FILE_IS_DIRECTORY;
+    case PR_LOOP_ERROR:                  return NS_ERROR_FILE_UNRESOLVABLE_SYMLINK;
+    case PR_FILE_EXISTS_ERROR:           return NS_ERROR_FILE_ALREADY_EXISTS;
+    case PR_FILE_IS_LOCKED_ERROR:        return NS_ERROR_FILE_IS_LOCKED;
+    case PR_FILE_TOO_BIG_ERROR:          return NS_ERROR_FILE_TOO_BIG;
+    case PR_NO_DEVICE_SPACE_ERROR:       return NS_ERROR_FILE_NO_DEVICE_SPACE;
+    case PR_NAME_TOO_LONG_ERROR:         return NS_ERROR_FILE_NAME_TOO_LONG;
+    case PR_DIRECTORY_NOT_EMPTY_ERROR:   return NS_ERROR_FILE_DIR_NOT_EMPTY;
+    case PR_NO_ACCESS_RIGHTS_ERROR:      return NS_ERROR_FILE_ACCESS_DENIED;
+    default:                             return NS_ERROR_FAILURE;
+  }
 }
 
 void
-NS_ABORT_OOM(size_t size)
+NS_ABORT_OOM(size_t aSize)
 {
 #ifdef MOZ_CRASHREPORTER
-  CrashReporter::AnnotateOOMAllocationSize(size);
+  CrashReporter::AnnotateOOMAllocationSize(aSize);
 #endif
   MOZ_CRASH();
 }

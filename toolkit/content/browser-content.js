@@ -1,4 +1,4 @@
-/* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6,8 +6,10 @@
 let Cc = Components.classes;
 let Ci = Components.interfaces;
 let Cu = Components.utils;
+let Cr = Components.results;
 
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 var global = this;
 
@@ -53,13 +55,13 @@ let ClickEventHandler = {
     return false;
   },
 
-  startScroll: function(event) {
+  findNearestScrollableElement: function(aNode) {
     // this is a list of overflow property values that allow scrolling
     const scrollingAllowed = ['scroll', 'auto'];
 
     // go upward in the DOM and find any parent element that has a overflow
     // area and can therefore be scrolled
-    for (this._scrollable = event.originalTarget; this._scrollable;
+    for (this._scrollable = aNode; this._scrollable;
          this._scrollable = this._scrollable.parentNode) {
       // do not use overflow based autoscroll for <html> and <body>
       // Elements or non-html elements such as svg or Document nodes
@@ -96,16 +98,25 @@ let ClickEventHandler = {
     }
 
     if (!this._scrollable) {
-      this._scrollable = event.originalTarget.ownerDocument.defaultView;
+      this._scrollable = aNode.ownerDocument.defaultView;
       if (this._scrollable.scrollMaxX > 0) {
         this._scrolldir = this._scrollable.scrollMaxY > 0 ? "NSEW" : "EW";
       } else if (this._scrollable.scrollMaxY > 0) {
         this._scrolldir = "NS";
+      } else if (this._scrollable.frameElement) {
+        this.findNearestScrollableElement(this._scrollable.frameElement);
       } else {
         this._scrollable = null; // abort scrolling
-        return;
       }
     }
+  },
+
+  startScroll: function(event) {
+
+    this.findNearestScrollableElement(event.originalTarget);
+
+    if (!this._scrollable)
+      return;
 
     let [enabled] = sendSyncMessage("Autoscroll:Start",
                                     {scrolldir: this._scrolldir,
@@ -340,3 +351,160 @@ let PopupBlocking = {
   },
 };
 PopupBlocking.init();
+
+// Set up console.* for frame scripts.
+let Console = Components.utils.import("resource://gre/modules/devtools/Console.jsm", {});
+this.console = new Console.ConsoleAPI();
+
+let Printing = {
+  // Bug 1088061: nsPrintEngine's DoCommonPrint currently expects the
+  // progress listener passed to it to QI to an nsIPrintingPromptService
+  // in order to know that a printing progress dialog has been shown. That's
+  // really all the interface is used for, hence the fact that I don't actually
+  // implement the interface here. Bug 1088061 has been filed to remove
+  // this hackery.
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
+                                         Ci.nsIPrintingPromptService]),
+
+  MESSAGES: [
+    "Printing:Preview:Enter",
+    "Printing:Preview:Exit",
+    "Printing:Preview:Navigate",
+    "Printing:Preview:UpdatePageCount",
+    "Printing:Print",
+  ],
+
+  init() {
+    this.MESSAGES.forEach(msgName => addMessageListener(msgName, this));
+  },
+
+  receiveMessage(message) {
+    let objects = message.objects;
+    let data = message.data;
+    switch(message.name) {
+      case "Printing:Preview:Enter": {
+        this.enterPrintPreview(objects.printSettings, objects.contentWindow);
+        break;
+      }
+
+      case "Printing:Preview:Exit": {
+        this.exitPrintPreview();
+        break;
+      }
+
+      case "Printing:Preview:Navigate": {
+        this.navigate(data.navType, data.pageNum);
+        break;
+      }
+
+      case "Printing:Preview:UpdatePageCount": {
+        this.updatePageCount();
+        break;
+      }
+
+      case "Printing:Print": {
+        this.print(objects.printSettings, objects.contentWindow);
+        break;
+      }
+    }
+  },
+
+  enterPrintPreview(printSettings, contentWindow) {
+    // Bug 1088070 - we should instantiate nsIPrintSettings here in the
+    // content script instead of passing it down as a CPOW.
+    if (Cu.isCrossProcessWrapper(printSettings)) {
+      printSettings = null;
+    }
+
+    // We'll call this whenever we've finished reflowing the document, or if
+    // we errored out while attempting to print preview (in which case, we'll
+    // notify the parent that we've failed).
+    let notifyEntered = (error) => {
+      removeEventListener("printPreviewUpdate", onPrintPreviewReady);
+      sendAsyncMessage("Printing:Preview:Entered", {
+        failed: !!error,
+      });
+    };
+
+    let onPrintPreviewReady = () => {
+      notifyEntered();
+    };
+
+    // We have to wait for the print engine to finish reflowing all of the
+    // documents and subdocuments before we can tell the parent to flip to
+    // the print preview UI - otherwise, the print preview UI might ask for
+    // information (like the number of pages in the document) before we have
+    // our PresShells set up.
+    addEventListener("printPreviewUpdate", onPrintPreviewReady);
+
+    try {
+      docShell.printPreview.printPreview(printSettings, contentWindow, this);
+    } catch(error) {
+      // This might fail if we, for example, attempt to print a XUL document.
+      // In that case, we inform the parent to bail out of print preview.
+      Components.utils.reportError(error);
+      notifyEntered(error);
+    }
+  },
+
+  exitPrintPreview() {
+    docShell.printPreview.exitPrintPreview();
+  },
+
+  print(printSettings, contentWindow) {
+    // Bug 1088070 - we should instantiate nsIPrintSettings here in the
+    // content script instead of passing it down as a CPOW.
+    if (Cu.isCrossProcessWrapper(printSettings)) {
+      printSettings = null;
+    }
+
+    let rv = Cr.NS_OK;
+    try {
+      let print = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                               .getInterface(Ci.nsIWebBrowserPrint);
+      print.print(printSettings, null);
+    } catch(e) {
+      // Pressing cancel is expressed as an NS_ERROR_ABORT return value,
+      // causing an exception to be thrown which we catch here.
+      rv = e.result;
+    }
+    sendAsyncMessage("Printing:Print:Done", { rv }, { printSettings });
+  },
+
+  updatePageCount() {
+    let numPages = docShell.printPreview.printPreviewNumPages;
+    sendAsyncMessage("Printing:Preview:UpdatePageCount", {
+      numPages: numPages,
+    });
+  },
+
+  navigate(navType, pageNum) {
+    docShell.printPreview.printPreviewNavigate(navType, pageNum);
+  },
+
+  /* nsIWebProgressListener for print preview */
+
+  onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
+    sendAsyncMessage("Printing:Preview:StateChange", {
+      stateFlags: aStateFlags,
+      status: aStatus,
+    });
+  },
+
+  onProgressChange(aWebProgress, aRequest, aCurSelfProgress,
+                   aMaxSelfProgress, aCurTotalProgress,
+                   aMaxTotalProgress) {
+    sendAsyncMessage("Printing:Preview:ProgressChange", {
+      curSelfProgress: aCurSelfProgress,
+      maxSelfProgress: aMaxSelfProgress,
+      curTotalProgress: aCurTotalProgress,
+      maxTotalProgress: aMaxTotalProgress,
+    });
+  },
+
+  onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {},
+  onStatusChange(aWebProgress, aRequest, aStatus, aMessage) {},
+  onSecurityChange(aWebProgress, aRequest, aState) {},
+}
+Printing.init();
+

@@ -18,6 +18,7 @@
 
 #define A_H263_ASSEMBLER_H_
 
+#include "mozilla/Types.h"
 #include "ARTPAssembler.h"
 
 #include <utils/List.h>
@@ -26,7 +27,7 @@
 
 namespace android {
 
-struct AMessage;
+struct MOZ_EXPORT AMessage;
 
 struct AH263Assembler : public ARTPAssembler {
     AH263Assembler(const sp<AMessage> &notify);
@@ -47,7 +48,7 @@ private:
     List<sp<ABuffer> > mPackets;
 
     AssemblyStatus addPacket(const sp<ARTPSource> &source);
-    void submitAccessUnit();
+    bool submitAccessUnit();
 
     DISALLOW_EVIL_CONSTRUCTORS(AH263Assembler);
 };

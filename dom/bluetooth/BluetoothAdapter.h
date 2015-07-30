@@ -15,6 +15,7 @@
 
 namespace mozilla {
 namespace dom {
+class File;
 class DOMRequest;
 struct MediaMetaData;
 struct MediaPlayStatus;
@@ -44,9 +45,9 @@ public:
   void Notify(const BluetoothSignal& aParam);
 
   void Unroot();
-  virtual void SetPropertyByValue(const BluetoothNamedValue& aValue) MOZ_OVERRIDE;
+  virtual void SetPropertyByValue(const BluetoothNamedValue& aValue) override;
 
-  virtual void DisconnectFromOwner() MOZ_OVERRIDE;
+  virtual void DisconnectFromOwner() override;
 
   void GetAddress(nsString& aAddress) const
   {
@@ -119,16 +120,21 @@ public:
 
   already_AddRefed<DOMRequest>
     Connect(BluetoothDevice& aDevice,
-            const Optional<short unsigned int>& aServiceUuid, ErrorResult& aRv);
+            const Optional<uint16_t>& aServiceUuid, ErrorResult& aRv);
   already_AddRefed<DOMRequest>
     Disconnect(BluetoothDevice& aDevice,
-               const Optional<short unsigned int>& aServiceUuid,
+               const Optional<uint16_t>& aServiceUuid,
                ErrorResult& aRv);
+
+  already_AddRefed<DOMRequest>
+    IsConnected(const uint16_t aServiceUuid,
+                ErrorResult& aRv);
+
   already_AddRefed<DOMRequest>
     GetConnectedDevices(uint16_t aServiceUuid, ErrorResult& aRv);
 
   already_AddRefed<DOMRequest>
-    SendFile(const nsAString& aDeviceAddress, nsIDOMBlob* aBlob,
+    SendFile(const nsAString& aDeviceAddress, File& aBlob,
              ErrorResult& aRv);
   already_AddRefed<DOMRequest>
     StopSendingFile(const nsAString& aDeviceAddress, ErrorResult& aRv);
@@ -150,6 +156,7 @@ public:
     SendMediaPlayStatus(const MediaPlayStatus& aMediaPlayStatus, ErrorResult& aRv);
 
   IMPL_EVENT_HANDLER(devicefound);
+  IMPL_EVENT_HANDLER(discoverystatechanged);
   IMPL_EVENT_HANDLER(a2dpstatuschanged);
   IMPL_EVENT_HANDLER(hfpstatuschanged);
   IMPL_EVENT_HANDLER(pairedstatuschanged);
@@ -162,7 +169,7 @@ public:
   }
 
   virtual JSObject*
-    WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+    WrapObject(JSContext* aCx) override;
 
 private:
   BluetoothAdapter(nsPIDOMWindow* aOwner, const BluetoothValue& aValue);

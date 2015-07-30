@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.tests;
 
 import static org.mozilla.gecko.tests.helpers.AssertionHelper.fAssertEquals;
@@ -24,8 +28,9 @@ public class testInputConnection extends UITest {
     public void testInputConnection() throws InterruptedException {
         GeckoHelper.blockForReady();
 
-        NavigationHelper.enterAndLoadUrl(StringHelper.ROBOCOP_INPUT_URL + "#" + INITIAL_TEXT);
-        mToolbar.assertTitle(StringHelper.ROBOCOP_INPUT_TITLE);
+        final String url = StringHelper.ROBOCOP_INPUT_URL + "#" + INITIAL_TEXT;
+        NavigationHelper.enterAndLoadUrl(url);
+        mToolbar.assertTitle(url);
 
         mGeckoView.mTextInput
             .waitForInputConnection()

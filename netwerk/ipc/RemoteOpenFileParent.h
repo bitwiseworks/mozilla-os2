@@ -18,9 +18,11 @@ namespace net {
 class RemoteOpenFileParent : public PRemoteOpenFileParent
 {
 public:
-  RemoteOpenFileParent(nsIFileURL* aURI)
+  explicit RemoteOpenFileParent(nsIFileURL* aURI)
   : mURI(aURI)
   {}
+
+  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
   bool OpenSendCloseDelete();
 

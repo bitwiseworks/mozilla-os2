@@ -157,9 +157,16 @@ int main(int argc, char* argv[])
   }
   // base case
   nsAutoString testPath(cDrive);
-  testPath.Append(L"\\Foo");
-  if (!TestNtPathToDosPath(testPath.get(), L"C:\\Foo")) {
+  testPath.Append(L"\\Program Files");
+  if (!TestNtPathToDosPath(testPath.get(), L"C:\\Program Files")) {
     fail("Base case");
+    result = 1;
+  }
+  // short filename
+  nsAutoString ntShortName(cDrive);
+  ntShortName.Append(L"\\progra~1");
+  if (!TestNtPathToDosPath(ntShortName.get(), L"C:\\Program Files")) {
+    fail("Short file name");
     result = 1;
   }
   // drive letters as symbolic links (NtCreateFile uses these)
@@ -177,10 +184,16 @@ int main(int argc, char* argv[])
     fail("Socket");
     result = 1;
   }
-  // currently UNC paths that are not mapped to drive letters are unsupported,
-  // so this should fail
-  if (TestNtPathToDosPath(L"\\Device\\Mup\\127.0.0.1\\C$", nullptr)) {
-    fail("Unmapped UNC path");
+  // UNC path (using MUP)
+  if (!TestNtPathToDosPath(L"\\Device\\Mup\\127.0.0.1\\C$",
+                           L"\\\\127.0.0.1\\C$")) {
+    fail("Unmapped UNC path (\\Device\\Mup\\)");
+    result = 1;
+  }
+  // UNC path (using LanmanRedirector)
+  if (!TestNtPathToDosPath(L"\\Device\\LanmanRedirector\\127.0.0.1\\C$",
+                           L"\\\\127.0.0.1\\C$")) {
+    fail("Unmapped UNC path (\\Device\\LanmanRedirector\\)");
     result = 1;
   }
   DriveMapping drvMapping(NS_LITERAL_STRING("\\\\127.0.0.1\\C$"));

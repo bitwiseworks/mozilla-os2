@@ -13,19 +13,21 @@
 #include "nsCSSProperty.h"
 #include "nsCSSScanner.h"
 #include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 #include "nsStringFwd.h"
 #include "nsTArrayForwardDeclare.h"
 
-class nsCSSStyleSheet;
 class nsIPrincipal;
 class nsIURI;
 struct nsCSSSelectorList;
 class nsMediaList;
+class nsMediaQuery;
 class nsCSSKeyframeRule;
 class nsCSSValue;
-class nsRuleData;
+struct nsRuleData;
 
 namespace mozilla {
+class CSSStyleSheet;
 class CSSVariableValues;
 namespace css {
 class Rule;
@@ -39,21 +41,21 @@ class StyleRule;
 
 class MOZ_STACK_CLASS nsCSSParser {
 public:
-  nsCSSParser(mozilla::css::Loader* aLoader = nullptr,
-              nsCSSStyleSheet* aSheet = nullptr);
+  explicit nsCSSParser(mozilla::css::Loader* aLoader = nullptr,
+                       mozilla::CSSStyleSheet* aSheet = nullptr);
   ~nsCSSParser();
 
   static void Shutdown();
 
 private:
-  nsCSSParser(nsCSSParser const&) MOZ_DELETE;
-  nsCSSParser& operator=(nsCSSParser const&) MOZ_DELETE;
+  nsCSSParser(nsCSSParser const&) = delete;
+  nsCSSParser& operator=(nsCSSParser const&) = delete;
 
 public:
   // Set a style sheet for the parser to fill in. The style sheet must
-  // implement the nsCSSStyleSheet interface.  Null can be passed in to clear
+  // implement the CSSStyleSheet interface.  Null can be passed in to clear
   // out an existing stylesheet reference.
-  nsresult SetStyleSheet(nsCSSStyleSheet* aSheet);
+  nsresult SetStyleSheet(mozilla::CSSStyleSheet* aSheet);
 
   // Set whether or not to emulate Nav quirks
   nsresult SetQuirkMode(bool aQuirkMode);
@@ -152,6 +154,34 @@ public:
                       nsMediaList*       aMediaList,
                       bool               aHTMLMode);
 
+  /*
+   * Parse aBuffer into a list of media queries and their associated values,
+   * according to grammar:
+   *    <source-size-list> = <source-size>#?
+   *    <source-size> = <media-condition>? <length>
+   *
+   * Note that this grammar is top-level: The function expects to consume the
+   * entire input buffer.
+   *
+   * Output arrays overwritten (not appended) and are cleared in case of parse
+   * failure.
+   */
+  bool ParseSourceSizeList(const nsAString& aBuffer,
+                           nsIURI* aURI, // for error reporting
+                           uint32_t aLineNumber, // for error reporting
+                           InfallibleTArray< nsAutoPtr<nsMediaQuery> >& aQueries,
+                           InfallibleTArray<nsCSSValue>& aValues,
+                           bool aHTMLMode);
+
+  /**
+   * Parse aBuffer into a nsCSSValue |aValue|. Will return false
+   * if aBuffer is not a valid font family list.
+   */
+  bool ParseFontFamilyListString(const nsSubstring& aBuffer,
+                                 nsIURI*            aURL,
+                                 uint32_t           aLineNumber,
+                                 nsCSSValue&        aValue);
+
   /**
    * Parse aBuffer into a nsCSSValue |aValue|. Will return false
    * if aBuffer is not a valid CSS color specification.
@@ -161,7 +191,8 @@ public:
   bool ParseColorString(const nsSubstring& aBuffer,
                         nsIURI*            aURL,
                         uint32_t           aLineNumber,
-                        nsCSSValue&        aValue);
+                        nsCSSValue&        aValue,
+                        bool               aSuppressErrors = false);
 
   /**
    * Parse aBuffer into a selector list.  On success, caller must
@@ -251,9 +282,31 @@ public:
                                    nsIURI* aDocURL,
                                    nsIURI* aBaseURL,
                                    nsIPrincipal* aDocPrincipal,
-                                   nsCSSStyleSheet* aSheet,
+                                   mozilla::CSSStyleSheet* aSheet,
                                    uint32_t aLineNumber,
                                    uint32_t aLineOffset);
+
+  bool ParseCounterStyleName(const nsAString& aBuffer,
+                             nsIURI* aURL,
+                             nsAString& aName);
+
+  bool ParseCounterDescriptor(nsCSSCounterDesc aDescID,
+                              const nsAString& aBuffer,
+                              nsIURI* aSheetURL,
+                              nsIURI* aBaseURL,
+                              nsIPrincipal* aSheetPrincipal,
+                              nsCSSValue& aValue);
+
+  bool ParseFontFaceDescriptor(nsCSSFontDesc aDescID,
+                               const nsAString& aBuffer,
+                               nsIURI* aSheetURL,
+                               nsIURI* aBaseURL,
+                               nsIPrincipal* aSheetPrincipal,
+                               nsCSSValue& aValue);
+
+  // Check whether a given value can be applied to a property.
+  bool IsValueValidForProperty(const nsCSSProperty aPropID,
+                               const nsAString&    aPropValue);
 
 protected:
   // This is a CSSParserImpl*, but if we expose that type name in this

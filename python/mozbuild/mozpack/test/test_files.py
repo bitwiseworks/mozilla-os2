@@ -4,9 +4,13 @@
 
 from mozbuild.util import ensureParentDir
 
-from mozpack.errors import ErrorMessage
+from mozpack.errors import (
+    ErrorMessage,
+    errors,
+)
 from mozpack.files import (
     AbsoluteSymlinkFile,
+    ComposedFinder,
     DeflatedFile,
     Dest,
     ExistingFile,
@@ -37,9 +41,10 @@ import os
 import random
 import string
 import sys
-import mozpack.path
+import mozpack.path as mozpath
 from tempfile import mkdtemp
 from io import BytesIO
+from StringIO import StringIO
 from xpt import Typelib
 
 
@@ -647,10 +652,14 @@ class TestManifestFile(TestWithTmpDir):
 
 # Compiled typelib for the following IDL:
 #     interface foo;
-#     [uuid(5f70da76-519c-4858-b71e-e3c92333e2d6)]
+#     [scriptable, uuid(5f70da76-519c-4858-b71e-e3c92333e2d6)]
 #     interface bar {
 #         void bar(in foo f);
 #     };
+# We need to make this [scriptable] so it doesn't get deleted from the
+# typelib.  We don't need to make the foo interfaces below [scriptable],
+# because they will be automatically included by virtue of being an
+# argument to a method of |bar|.
 bar_xpt = GeneratedFile(
     b'\x58\x50\x43\x4F\x4D\x0A\x54\x79\x70\x65\x4C\x69\x62\x0D\x0A\x1A' +
     b'\x01\x02\x00\x02\x00\x00\x00\x7B\x00\x00\x00\x24\x00\x00\x00\x5C' +
@@ -659,7 +668,7 @@ bar_xpt = GeneratedFile(
     b'\x70\xDA\x76\x51\x9C\x48\x58\xB7\x1E\xE3\xC9\x23\x33\xE2\xD6\x00' +
     b'\x00\x00\x05\x00\x00\x00\x00\x00\x00\x00\x0D\x00\x66\x6F\x6F\x00' +
     b'\x62\x61\x72\x00\x62\x61\x72\x00\x00\x00\x00\x01\x00\x00\x00\x00' +
-    b'\x09\x01\x80\x92\x00\x01\x80\x06\x00\x00\x00'
+    b'\x09\x01\x80\x92\x00\x01\x80\x06\x00\x00\x80'
 )
 
 # Compiled typelib for the following IDL:
@@ -791,10 +800,16 @@ class TestMinifiedJavaScript(TestWithTmpDir):
 
     def test_minified_verify_failure(self):
         orig_f = GeneratedFile('\n'.join(self.orig_lines))
+        errors.out = StringIO()
         min_f = MinifiedJavaScript(orig_f,
             verify_command=self._verify_command('1'))
 
         mini_lines = min_f.open().readlines()
+        output = errors.out.getvalue()
+        errors.out = sys.stderr
+        self.assertEqual(output,
+            'Warning: JS minification verification failed for <unknown>:\n'
+            'Warning: Error message\n')
         self.assertEqual(mini_lines, orig_f.open().readlines())
 
 
@@ -838,6 +853,10 @@ class MatchTestTemplate(object):
         self.do_check('foo/*/2/test*', ['foo/qux/2/test', 'foo/qux/2/test2'])
         self.do_check('**/bar', ['bar', 'foo/bar', 'foo/qux/bar'])
         self.do_check('foo/**/test', ['foo/qux/2/test'])
+        self.do_check('foo', [
+            'foo/bar', 'foo/baz', 'foo/qux/1', 'foo/qux/bar',
+            'foo/qux/2/test', 'foo/qux/2/test2'
+        ])
         self.do_check('foo/**', [
             'foo/bar', 'foo/baz', 'foo/qux/1', 'foo/qux/bar',
             'foo/qux/2/test', 'foo/qux/2/test2'
@@ -866,7 +885,7 @@ class MatchTestTemplate(object):
                                                 finder.find(pattern)])
             self.assertEqual(sorted([f for f, c in finder.find(pattern)]),
                              sorted([f for f, c in finder
-                                     if mozpack.path.match(f, pattern)]))
+                                     if mozpath.match(f, pattern)]))
 
 
 def do_check(test, finder, pattern, result):
@@ -948,6 +967,37 @@ class TestJarFinder(MatchTestTemplate, TestWithTmpDir):
         self.jar.finish()
         reader = JarReader(file=self.tmppath('test.jar'))
         self.finder = JarFinder(self.tmppath('test.jar'), reader)
+        self.do_match_test()
+
+
+class TestComposedFinder(MatchTestTemplate, TestWithTmpDir):
+    def add(self, path, content=None):
+        # Put foo/qux files under $tmp/b.
+        if path.startswith('foo/qux/'):
+            real_path = mozpath.join('b', path[8:])
+        else:
+            real_path = mozpath.join('a', path)
+        ensureParentDir(self.tmppath(real_path))
+        if not content:
+            content = path
+        open(self.tmppath(real_path), 'wb').write(content)
+
+    def do_check(self, pattern, result):
+        if '*' in pattern:
+            return
+        do_check(self, self.finder, pattern, result)
+
+    def test_composed_finder(self):
+        self.prepare_match_test()
+        # Also add files in $tmp/a/foo/qux because ComposedFinder is
+        # expected to mask foo/qux entirely with content from $tmp/b.
+        ensureParentDir(self.tmppath('a/foo/qux/hoge'))
+        open(self.tmppath('a/foo/qux/hoge'), 'wb').write('hoge')
+        open(self.tmppath('a/foo/qux/bar'), 'wb').write('not the right content')
+        self.finder = ComposedFinder({
+            '': FileFinder(self.tmppath('a')),
+            'foo/qux': FileFinder(self.tmppath('b')),
+        })
         self.do_match_test()
 
 

@@ -4,18 +4,14 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+# We don't import all modules at the top for performance reasons. See Bug 1008943
+
 from contextlib import contextmanager
 import errno
 import os
-import shutil
 import stat
-import tarfile
-import tempfile
 import time
-import urlparse
-import urllib2
 import warnings
-import zipfile
 
 __all__ = ['extract_tarball',
            'extract_zip',
@@ -28,11 +24,12 @@ __all__ = ['extract_tarball',
            'NamedTemporaryFile',
            'TemporaryDirectory']
 
-
 ### utilities for extracting archives
 
 def extract_tarball(src, dest):
     """extract a .tar file"""
+
+    import tarfile
 
     bundle = tarfile.open(src)
     namelist = bundle.getnames()
@@ -46,12 +43,14 @@ def extract_tarball(src, dest):
 def extract_zip(src, dest):
     """extract a zip file"""
 
+    import zipfile
+
     if isinstance(src, zipfile.ZipFile):
         bundle = src
     else:
         try:
             bundle = zipfile.ZipFile(src)
-        except Exception, e:
+        except Exception:
             print "src: %s" % src
             raise
 
@@ -83,6 +82,9 @@ def extract(src, dest=None):
 
     Returns the list of top level files that were extracted
     """
+
+    import zipfile
+    import tarfile
 
     assert os.path.exists(src), "'%s' does not exist" % src
 
@@ -131,13 +133,24 @@ def rmtree(dir):
 
 
 def remove(path):
-    """Removes the specified file, link, or directory tree
+    """Removes the specified file, link, or directory tree.
 
     This is a replacement for shutil.rmtree that works better under
-    windows.
+    windows. It does the following things:
+
+     - check path access for the current user before trying to remove
+     - retry operations on some known errors due to various things keeping
+       a handle on file paths - like explorer, virus scanners, etc. The
+       known errors are errno.EACCES and errno.ENOTEMPTY, and it will
+       retry up to 5 five times with a delay of 0.5 seconds between each
+       attempt.
+
+    Note that no error will be raised if the given path does not exists.
 
     :param path: path to be removed
     """
+
+    import shutil
 
     def _call_with_windows_retry(func, args=(), retry_max=5, retry_delay=0.5):
         """
@@ -261,9 +274,6 @@ def tree(directory,
         for resource in (dirnames, filenames):
             resource[:] = sorted(resource, key=sort_key)
 
-        files_end =  item_marker
-        dirpath_marker = item_marker
-
         if level > len(indent):
             indent.append(vertical_line)
         indent = indent[:level]
@@ -322,6 +332,7 @@ class NamedTemporaryFile(object):
     def __init__(self, mode='w+b', bufsize=-1, suffix='', prefix='tmp',
                  dir=None, delete=True):
 
+        import tempfile
         fd, path = tempfile.mkstemp(suffix, prefix, dir, 't' in mode)
         os.close(fd)
 
@@ -364,6 +375,10 @@ def TemporaryDirectory():
        open(os.path.join(tmp, "a_temp_file"), "w").write("data")
 
     """
+
+    import tempfile
+    import shutil
+
     tempdir = tempfile.mkdtemp()
     try:
         yield tempdir
@@ -378,6 +393,8 @@ def is_url(thing):
     Return True if thing looks like a URL.
     """
 
+    import urlparse
+
     parsed = urlparse.urlparse(thing)
     if 'scheme' in parsed:
         return len(parsed.scheme) >= 2
@@ -390,6 +407,8 @@ def load(resource):
     or begins with 'file://', return a ``file``.  Otherwise, return the
     result of urllib2.urlopen()
     """
+
+    import urllib2
 
     # handle file URLs separately due to python stdlib limitations
     if resource.startswith('file://'):

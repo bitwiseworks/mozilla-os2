@@ -4,7 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TOOL_DIRS += ['app']
+DIRS += ['app']
 
 EXPORTS.mozilla._ipdltest += [
     'IPDLUnitTestProcessChild.h',
@@ -22,6 +22,7 @@ SOURCES += [
     'TestDesc.cpp',
     'TestFailedCtor.cpp',
     'TestHangs.cpp',
+    'TestHighestPrio.cpp',
     'TestInterruptErrorCleanup.cpp',
     'TestInterruptRaces.cpp',
     'TestInterruptShutdownRace.cpp',
@@ -45,6 +46,7 @@ SOURCES += [
     'TestSyncHang.cpp',
     'TestSyncWakeup.cpp',
     'TestUrgency.cpp',
+    'TestUrgentHangs.cpp',
 ]
 
 if CONFIG['OS_ARCH'] == 'Linux':
@@ -82,6 +84,7 @@ IPDL_SOURCES += [
     'PTestFailedCtorSubsub.ipdl',
     'PTestHandle.ipdl',
     'PTestHangs.ipdl',
+    'PTestHighestPrio.ipdl',
     'PTestIndirectProtocolParam.ipdlh',
     'PTestIndirectProtocolParamFirst.ipdl',
     'PTestIndirectProtocolParamManage.ipdl',
@@ -118,6 +121,7 @@ IPDL_SOURCES += [
     'PTestSyncWakeup.ipdl',
     'PTestSysVShmem.ipdl',
     'PTestUrgency.ipdl',
+    'PTestUrgentHangs.ipdl',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')

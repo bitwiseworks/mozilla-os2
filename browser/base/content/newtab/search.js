@@ -8,41 +8,65 @@ let gSearch = {
 
   currentEngineName: null,
 
+  get useNewUI() {
+    let newUI = Services.prefs.getBoolPref("browser.search.showOneOffButtons");
+    delete this.useNewUI;
+    this.useNewUI = newUI;
+    return newUI;
+  },
+
   init: function () {
     for (let idSuffix of this._nodeIDSuffixes) {
       this._nodes[idSuffix] =
         document.getElementById("newtab-search-" + idSuffix);
     }
 
-    window.addEventListener("ContentSearchService", this);
-    this.setUpInitialState();
-  },
+    if (this.useNewUI) {
+      this._nodes.logo.classList.add("magnifier");
+    }
 
-  setUpInitialState: function () {
+    window.addEventListener("ContentSearchService", this);
     this._send("GetState");
   },
 
   showPanel: function () {
     let panel = this._nodes.panel;
     let logo = this._nodes.logo;
+    panel.hidden = false;
     panel.openPopup(logo);
     logo.setAttribute("active", "true");
     panel.addEventListener("popuphidden", function onHidden() {
       panel.removeEventListener("popuphidden", onHidden);
+      panel.hidden = true;
       logo.removeAttribute("active");
     });
   },
 
   search: function (event) {
-    event.preventDefault();
-    let searchStr = this._nodes.text.value;
+    if (event) {
+      event.preventDefault();
+    }
+    let searchText = this._nodes.text;
+    let searchStr = searchText.value;
     if (this.currentEngineName && searchStr.length) {
-      this._send("Search", {
+      let useNewTab = event && event.button == 1;
+      let eventData = {
         engineName: this.currentEngineName,
         searchString: searchStr,
         whence: "newtab",
-      });
+        useNewTab: useNewTab,
+      }
+
+      if (searchText.hasAttribute("selection-index")) {
+        eventData.selection = {
+          index: searchText.getAttribute("selection-index"),
+          kind: searchText.getAttribute("selection-kind")
+        };
+      }
+
+      this._send("Search", eventData);
     }
+    this._suggestionController.addInputValueToFormHistory();
   },
 
   manageEngines: function () {
@@ -50,23 +74,35 @@ let gSearch = {
     this._send("ManageEngines");
   },
 
-  setWidth: function (width) {
-    this._nodes.form.style.width = width + "px";
-    this._nodes.form.style.maxWidth = width + "px";
-  },
-
   handleEvent: function (event) {
-    this["on" + event.detail.type](event.detail.data);
+    let methodName = "on" + event.detail.type;
+    if (this.hasOwnProperty(methodName)) {
+      this[methodName](event.detail.data);
+    }
   },
 
   onState: function (data) {
-    this._makePanel(data.engines);
+    this._newEngines = data.engines;
     this._setCurrentEngine(data.currentEngine);
     this._initWhenInitalStateReceived();
   },
 
+  onCurrentState: function (data) {
+    if (this._initialStateReceived) {
+      this._newEngines = data.engines;
+      this._setCurrentEngine(data.currentEngine);
+    }
+  },
+
   onCurrentEngine: function (engineName) {
-    this._setCurrentEngine(engineName);
+    if (this._initialStateReceived) {
+      this._nodes.panel.hidePopup();
+      this._setCurrentEngine(engineName);
+    }
+  },
+
+  onFocusInput: function () {
+    this._nodes.text.focus();
   },
 
   _nodeIDSuffixes: [
@@ -83,6 +119,8 @@ let gSearch = {
     this._nodes.form.addEventListener("submit", e => this.search(e));
     this._nodes.logo.addEventListener("click", e => this.showPanel());
     this._nodes.manage.addEventListener("click", e => this.manageEngines());
+    this._nodes.panel.addEventListener("popupshowing", e => this._setUpPanel());
+    this._initialStateReceived = true;
     this._initWhenInitalStateReceived = function () {};
   },
 
@@ -95,7 +133,31 @@ let gSearch = {
     }));
   },
 
-  _makePanel: function (engines) {
+  _setUpPanel: function () {
+    // The new search UI only contains the "manage" engine entry in the panel
+    if (this.useNewUI) {
+      return;
+    }
+
+    // Build the panel if necessary.
+    if (this._newEngines) {
+      this._buildPanel(this._newEngines);
+      delete this._newEngines;
+    }
+
+    // Set the selected states of the engines.
+    let panel = this._nodes.panel;
+    for (let box of panel.childNodes) {
+      if (box.getAttribute("engine") == this.currentEngineName) {
+        box.setAttribute("selected", "true");
+      }
+      else {
+        box.removeAttribute("selected");
+      }
+    }
+  },
+
+  _buildPanel: function (engines) {
     let panel = this._nodes.panel;
 
     // Empty the panel except for the Manage Engines row.
@@ -117,6 +179,14 @@ let gSearch = {
     }
   },
 
+  // Converts favicon array buffer into data URI of the right size and dpi.
+  _getFaviconURIFromBuffer: function (buffer) {
+    let blob = new Blob([buffer]);
+    let dpiSize = Math.round(16 * window.devicePixelRatio);
+    let sizeStr = dpiSize + "," + dpiSize;
+    return URL.createObjectURL(blob) + "#-moz-resolution=" + sizeStr;
+  },
+
   _makePanelEngine: function (panel, engine) {
     let box = document.createElementNS(XUL_NAMESPACE, "hbox");
     box.className = "newtab-search-panel-engine";
@@ -129,8 +199,9 @@ let gSearch = {
     });
 
     let image = document.createElementNS(XUL_NAMESPACE, "image");
-    if (engine.iconURI) {
-      image.setAttribute("src", engine.iconURI);
+    if (engine.iconBuffer) {
+      let uri = this._getFaviconURIFromBuffer(engine.iconBuffer);
+      image.setAttribute("src", uri);
     }
     box.appendChild(image);
 
@@ -144,27 +215,38 @@ let gSearch = {
   _setCurrentEngine: function (engine) {
     this.currentEngineName = engine.name;
 
-    // Set the logo.
-    let logoURI = window.devicePixelRatio == 2 ? engine.logo2xURI :
-                  engine.logoURI;
-    if (logoURI) {
-      this._nodes.logo.hidden = false;
-      this._nodes.logo.style.backgroundImage = "url(" + logoURI + ")";
-      this._nodes.text.placeholder = "";
-    }
-    else {
-      this._nodes.logo.hidden = true;
-      this._nodes.text.placeholder = engine.name;
-    }
+    if (!this.useNewUI) {
+      let type = "";
+      let uri;
+      let logoBuf = window.devicePixelRatio >= 2 ?
+                    engine.logo2xBuffer || engine.logoBuffer :
+                    engine.logoBuffer || engine.logo2xBuffer;
+      if (logoBuf) {
+        uri = URL.createObjectURL(new Blob([logoBuf]));
+        type = "logo";
+      }
+      else if (engine.iconBuffer) {
+        uri = this._getFaviconURIFromBuffer(engine.iconBuffer);
+        type = "favicon";
+      }
+      this._nodes.logo.setAttribute("type", type);
 
-    // Set the selected state of all the engines in the panel.
-    for (let box of this._nodes.panel.childNodes) {
-      if (box.getAttribute("engine") == engine.name) {
-        box.setAttribute("selected", "true");
+      if (uri) {
+        this._nodes.logo.style.backgroundImage = "url(" + uri + ")";
       }
       else {
-        box.removeAttribute("selected");
+        this._nodes.logo.style.backgroundImage = "";
       }
+      this._nodes.text.placeholder = engine.placeholder;
     }
+
+    // Set up the suggestion controller.
+    if (!this._suggestionController) {
+      let parent = document.getElementById("newtab-scrollbox");
+      this._suggestionController =
+        new SearchSuggestionUIController(this._nodes.text, parent,
+                                         event => this.search(event));
+    }
+    this._suggestionController.engineName = engine.name;
   },
 };

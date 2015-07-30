@@ -1,4 +1,4 @@
-// -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+// -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -323,7 +323,7 @@ function ViewSourceReload()
 // Strips the |view-source:| for internalSave()
 function ViewSourceSavePage()
 {
-  internalSave(window.content.location.href.substring(12), 
+  internalSave(window.content.location.href.replace(/^view-source:/i, ""),
                null, null, null, null, null, "SaveLinkTitle",
                null, null, window.content.document, null, gPageLoader);
 }
@@ -335,9 +335,11 @@ var PrintPreviewListener = {
       browser = document.createElement("browser");
       browser.setAttribute("id", "ppBrowser");
       browser.setAttribute("flex", "1");
+      browser.setAttribute("type", "content");
       document.getElementById("appcontent").
         insertBefore(browser, document.getElementById("FindToolbar"));
     }
+
     return browser;
   },
   getSourceBrowser: function () {

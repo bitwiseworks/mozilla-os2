@@ -10,8 +10,8 @@ XPCOMUtils.defineLazyGetter(this, "osString", function() {
   return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
 });
 
-let test = asyncTest(function*() {
-  yield addTab("data:text/html,<p>rule view context menu test</p>");
+add_task(function*() {
+  yield addTab("data:text/html;charset=utf-8,<p>rule view context menu test</p>");
 
   info("Creating the test document");
   content.document.body.innerHTML = '<style type="text/css"> ' +

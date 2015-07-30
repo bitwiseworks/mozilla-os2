@@ -339,43 +339,22 @@ nsresult NrIceMediaStream::GetCandidatePairs(std::vector<NrIceCandidatePair>*
   return NS_OK;
 }
 
-nsresult NrIceMediaStream::GetDefaultCandidate(int component,
-                                               std::string *addrp,
-                                               int *portp) {
+nsresult NrIceMediaStream::GetDefaultCandidate(
+    NrIceCandidate* candidate) const {
+
   nr_ice_candidate *cand;
-  int r;
 
-  r = nr_ice_media_stream_get_default_candidate(stream_,
-                                                component, &cand);
+  int r = nr_ice_media_stream_get_default_candidate(stream_, 1, &cand);
   if (r) {
-    if (ctx_->generating_trickle()) {
-      // Generate default trickle candidates.
-      // draft-ivov-mmusic-trickle-ice-01.txt says to use port 9
-      // but "::" instead of "0.0.0.0". Since we don't do any
-      // IPv6 we are ignoring that for now.
-      *addrp = "0.0.0.0";
-      *portp = 9;
-    }
-    else {
-      MOZ_MTLOG(ML_ERROR, "Couldn't get default ICE candidate for '"
-                << name_ << "'");
-
-      return NS_ERROR_NOT_AVAILABLE;
-    }
+    MOZ_MTLOG(ML_ERROR, "Couldn't get default ICE candidate for '"
+              << name_ << "'");
+    return NS_ERROR_FAILURE;
   }
-  else {
-    char addr[64];  // Enough for IPv6 with colons.
-    r = nr_transport_addr_get_addrstring(&cand->addr,addr,sizeof(addr));
-    if (r)
-      return NS_ERROR_FAILURE;
 
-    int port;
-    r=nr_transport_addr_get_port(&cand->addr,&port);
-    if (r)
-      return NS_ERROR_FAILURE;
-
-    *addrp = addr;
-    *portp = port;
+  if (!ToNrIceCandidate(*cand, candidate)) {
+    MOZ_MTLOG(ML_ERROR, "Failed to convert default ICE candidate for '"
+              << name_ << "'");
+    return NS_ERROR_FAILURE;
   }
 
   return NS_OK;

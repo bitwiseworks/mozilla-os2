@@ -10,7 +10,7 @@
 
 #include "jsprf.h"
 
-#include "jit/IonSpewer.h"
+#include "jit/JitSpewer.h"
 #include "jit/MIR.h"
 #include "jit/MIRGenerator.h"
 
@@ -18,7 +18,7 @@ using namespace js;
 using namespace js::jit;
 
 LIRGraph::LIRGraph(MIRGraph* mir)
-  : blocks_(mir->alloc()),
+  : blocks_(),
     constantPool_(mir->alloc()),
     constantPoolMap_(mir->alloc()),
     safepoints_(mir->alloc()),
@@ -28,7 +28,6 @@ LIRGraph::LIRGraph(MIRGraph* mir)
     localSlotCount_(0),
     argumentSlotCount_(0),
     entrySnapshot_(nullptr),
-    osrBlock_(nullptr),
     mir_(*mir)
 {
 }
@@ -36,7 +35,7 @@ LIRGraph::LIRGraph(MIRGraph* mir)
 bool
 LIRGraph::addConstantToPool(const Value& v, uint32_t* index)
 {
-    JS_ASSERT(constantPoolMap_.initialized());
+    MOZ_ASSERT(constantPoolMap_.initialized());
 
     ConstantPoolMap::AddPtr p = constantPoolMap_.lookupForAdd(v);
     if (p) {
@@ -51,40 +50,83 @@ bool
 LIRGraph::noteNeedsSafepoint(LInstruction* ins)
 {
     // Instructions with safepoints must be in linear order.
-    JS_ASSERT_IF(!safepoints_.empty(), safepoints_.back()->id() < ins->id());
+    MOZ_ASSERT_IF(!safepoints_.empty(), safepoints_.back()->id() < ins->id());
     if (!ins->isCall() && !nonCallSafepoints_.append(ins))
         return false;
     return safepoints_.append(ins);
 }
 
 void
-LIRGraph::removeBlock(size_t i)
+LIRGraph::dump(FILE* fp)
 {
-    blocks_.erase(blocks_.begin() + i);
+    for (size_t i = 0; i < numBlocks(); i++) {
+        getBlock(i)->dump(fp);
+        fprintf(fp, "\n");
+    }
 }
 
-uint32_t
-LBlock::firstId()
+void
+LIRGraph::dump()
 {
-    if (phis_.length()) {
-        return phis_[0]->id();
-    } else {
-        for (LInstructionIterator i(instructions_.begin()); i != instructions_.end(); i++) {
-            if (i->id())
-                return i->id();
+    dump(stderr);
+}
+
+LBlock::LBlock(MBasicBlock* from)
+  : block_(from),
+    phis_(),
+    entryMoveGroup_(nullptr),
+    exitMoveGroup_(nullptr)
+{
+    from->assignLir(this);
+}
+
+bool
+LBlock::init(TempAllocator& alloc)
+{
+    // Count the number of LPhis we'll need.
+    size_t numLPhis = 0;
+    for (MPhiIterator i(block_->phisBegin()), e(block_->phisEnd()); i != e; ++i) {
+        MPhi* phi = *i;
+        numLPhis += (phi->type() == MIRType_Value) ? BOX_PIECES : 1;
+    }
+
+    // Allocate space for the LPhis.
+    if (!phis_.init(alloc, numLPhis))
+        return false;
+
+    // For each MIR phi, set up LIR phis as appropriate. We'll fill in their
+    // operands on each incoming edge, and set their definitions at the start of
+    // their defining block.
+    size_t phiIndex = 0;
+    size_t numPreds = block_->numPredecessors();
+    for (MPhiIterator i(block_->phisBegin()), e(block_->phisEnd()); i != e; ++i) {
+        MPhi* phi = *i;
+        MOZ_ASSERT(phi->numOperands() == numPreds);
+
+        int numPhis = (phi->type() == MIRType_Value) ? BOX_PIECES : 1;
+        for (int i = 0; i < numPhis; i++) {
+            void* array = alloc.allocateArray<sizeof(LAllocation)>(numPreds);
+            LAllocation* inputs = static_cast<LAllocation*>(array);
+            if (!inputs)
+                return false;
+
+            // MSVC 2015 cannot handle "new (&phis_[phiIndex++])"
+            void* addr = &phis_[phiIndex++];
+            LPhi* lphi = new (addr) LPhi(phi, inputs);
+            lphi->setBlock(this);
         }
     }
-    return 0;
+    return true;
 }
-uint32_t
-LBlock::lastId()
+
+const LInstruction*
+LBlock::firstInstructionWithId() const
 {
-    LInstruction* last = *instructions_.rbegin();
-    JS_ASSERT(last->id());
-    // The last instruction is a control flow instruction which does not have
-    // any output.
-    JS_ASSERT(last->numDefs() == 0);
-    return last->id();
+    for (LInstructionIterator i(instructions_.begin()); i != instructions_.end(); ++i) {
+        if (i->id())
+            return *i;
+    }
+    return 0;
 }
 
 LMoveGroup*
@@ -110,12 +152,34 @@ LBlock::getExitMoveGroup(TempAllocator& alloc)
     return exitMoveGroup_;
 }
 
-static size_t
-TotalOperandCount(MResumePoint* mir)
+void
+LBlock::dump(FILE* fp)
 {
-    size_t accum = mir->numOperands();
-    while ((mir = mir->caller()))
-        accum += mir->numOperands();
+    fprintf(fp, "block%u:\n", mir()->id());
+    for (size_t i = 0; i < numPhis(); ++i) {
+        getPhi(i)->dump(fp);
+        fprintf(fp, "\n");
+    }
+    for (LInstructionIterator iter = begin(); iter != end(); iter++) {
+        iter->dump(fp);
+        fprintf(fp, "\n");
+    }
+}
+
+void
+LBlock::dump()
+{
+    dump(stderr);
+}
+
+static size_t
+TotalOperandCount(LRecoverInfo* recoverInfo)
+{
+    size_t accum = 0;
+    for (LRecoverInfo::OperandIter it(recoverInfo); !it; ++it) {
+        if (!it->isRecoveredOnBailout())
+            accum++;
+    }
     return accum;
 }
 
@@ -131,34 +195,84 @@ LRecoverInfo::New(MIRGenerator* gen, MResumePoint* mir)
     if (!recoverInfo || !recoverInfo->init(mir))
         return nullptr;
 
-    IonSpew(IonSpew_Snapshots, "Generating LIR recover info %p from MIR (%p)",
+    JitSpew(JitSpew_IonSnapshots, "Generating LIR recover info %p from MIR (%p)",
             (void*)recoverInfo, (void*)mir);
 
     return recoverInfo;
 }
 
 bool
+LRecoverInfo::appendOperands(MNode* ins)
+{
+    for (size_t i = 0, end = ins->numOperands(); i < end; i++) {
+        MDefinition* def = ins->getOperand(i);
+
+        // As there is no cycle in the data-flow (without MPhi), checking for
+        // isInWorkList implies that the definition is already in the
+        // instruction vector, and not processed by a caller of the current
+        // function.
+        if (def->isRecoveredOnBailout() && !def->isInWorklist()) {
+            if (!appendDefinition(def))
+                return false;
+        }
+    }
+
+    return true;
+}
+
+bool
+LRecoverInfo::appendDefinition(MDefinition* def)
+{
+    MOZ_ASSERT(def->isRecoveredOnBailout());
+    def->setInWorklist();
+
+    if (!appendOperands(def))
+        return false;
+    return instructions_.append(def);
+}
+
+bool
+LRecoverInfo::appendResumePoint(MResumePoint* rp)
+{
+    // Stores should be recovered first.
+    for (auto iter(rp->storesBegin()), end(rp->storesEnd()); iter != end; ++iter) {
+        if (!appendDefinition(iter->operand))
+            return false;
+    }
+
+    if (rp->caller() && !appendResumePoint(rp->caller()))
+        return false;
+
+    if (!appendOperands(rp))
+        return false;
+
+    return instructions_.append(rp);
+}
+
+bool
 LRecoverInfo::init(MResumePoint* rp)
 {
-    MResumePoint* it = rp;
-
     // Sort operations in the order in which we need to restore the stack. This
     // implies that outer frames, as well as operations needed to recover the
     // current frame, are located before the current frame. The inner-most
     // resume point should be the last element in the list.
-    do {
-        if (!instructions_.append(it))
-            return false;
-        it = it->caller();
-    } while (it);
+    if (!appendResumePoint(rp))
+        return false;
 
-    Reverse(instructions_.begin(), instructions_.end());
+    // Remove temporary flags from all definitions.
+    for (MNode** it = begin(); it != end(); it++) {
+        if (!(*it)->isDefinition())
+            continue;
+
+        (*it)->toDefinition()->setNotInWorklist();
+    }
+
     MOZ_ASSERT(mir() == rp);
     return true;
 }
 
 LSnapshot::LSnapshot(LRecoverInfo* recoverInfo, BailoutKind kind)
-  : numSlots_(TotalOperandCount(recoverInfo->mir()) * BOX_PIECES),
+  : numSlots_(TotalOperandCount(recoverInfo) * BOX_PIECES),
     slots_(nullptr),
     recoverInfo_(recoverInfo),
     snapshotOffset_(INVALID_SNAPSHOT_OFFSET),
@@ -180,7 +294,7 @@ LSnapshot::New(MIRGenerator* gen, LRecoverInfo* recover, BailoutKind kind)
     if (!snapshot || !snapshot->init(gen))
         return nullptr;
 
-    IonSpew(IonSpew_Snapshots, "Generating LIR snapshot %p from recover (%p)",
+    JitSpew(JitSpew_IonSnapshots, "Generating LIR snapshot %p from recover (%p)",
             (void*)snapshot, (void*)recover);
 
     return snapshot;
@@ -197,21 +311,8 @@ LSnapshot::rewriteRecoveredInput(LUse input)
     }
 }
 
-LPhi*
-LPhi::New(MIRGenerator* gen, MPhi* ins)
-{
-    LPhi* phi = new (gen->alloc()) LPhi();
-    LAllocation* inputs = gen->allocate<LAllocation>(ins->numOperands());
-    if (!inputs)
-        return nullptr;
-
-    phi->inputs_ = inputs;
-    phi->setMir(ins);
-    return phi;
-}
-
 void
-LInstruction::printName(FILE* fp, Opcode op)
+LNode::printName(FILE* fp, Opcode op)
 {
     static const char * const names[] =
     {
@@ -226,11 +327,20 @@ LInstruction::printName(FILE* fp, Opcode op)
 }
 
 void
-LInstruction::printName(FILE* fp)
+LNode::printName(FILE* fp)
 {
     printName(fp, op());
 }
 
+bool
+LAllocation::aliases(const LAllocation& other) const
+{
+    if (isFloatReg() && other.isFloatReg())
+        return toFloatReg()->reg().aliases(other.toFloatReg()->reg());
+    return *this == other;
+}
+
+#ifdef DEBUG
 static const char * const TypeChars[] =
 {
     "g",            // GENERAL
@@ -239,6 +349,8 @@ static const char * const TypeChars[] =
     "s",            // SLOTS
     "f",            // FLOAT32
     "d",            // DOUBLE
+    "i32x4",        // INT32X4
+    "f32x4",        // FLOAT32X4
 #ifdef JS_NUNBOX32
     "t",            // TYPE
     "p"             // PAYLOAD
@@ -248,22 +360,33 @@ static const char * const TypeChars[] =
 };
 
 static void
-PrintDefinition(FILE* fp, const LDefinition& def)
+PrintDefinition(char* buf, size_t size, const LDefinition& def)
 {
-    fprintf(fp, "[%s", TypeChars[def.type()]);
-    if (def.virtualRegister())
-        fprintf(fp, ":%d", def.virtualRegister());
-    if (def.policy() == LDefinition::PRESET) {
-        fprintf(fp, " (%s)", def.output()->toString());
-    } else if (def.policy() == LDefinition::MUST_REUSE_INPUT) {
-        fprintf(fp, " (!)");
-    } else if (def.policy() == LDefinition::PASSTHROUGH) {
-        fprintf(fp, " (-)");
-    }
-    fprintf(fp, "]");
+    char* cursor = buf;
+    char* end = buf + size;
+
+    cursor += JS_snprintf(cursor, end - cursor, "v%u", def.virtualRegister());
+    cursor += JS_snprintf(cursor, end - cursor, "<%s>", TypeChars[def.type()]);
+
+    if (def.policy() == LDefinition::FIXED)
+        cursor += JS_snprintf(cursor, end - cursor, ":%s", def.output()->toString());
+    else if (def.policy() == LDefinition::MUST_REUSE_INPUT)
+        cursor += JS_snprintf(cursor, end - cursor, ":tied(%u)", def.getReusedInput());
 }
 
-#ifdef DEBUG
+const char*
+LDefinition::toString() const
+{
+    // Not reentrant!
+    static char buf[40];
+
+    if (isBogusTemp())
+        return "bogus";
+
+    PrintDefinition(buf, sizeof(buf), *this);
+    return buf;
+}
+
 static void
 PrintUse(char* buf, size_t size, const LUse* use)
 {
@@ -288,7 +411,7 @@ PrintUse(char* buf, size_t size, const LUse* use)
         JS_snprintf(buf, size, "v%d:**", use->virtualRegister());
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("invalid use policy");
+        MOZ_CRASH("invalid use policy");
     }
 }
 
@@ -298,15 +421,18 @@ LAllocation::toString() const
     // Not reentrant!
     static char buf[40];
 
+    if (isBogus())
+        return "bogus";
+
     switch (kind()) {
       case LAllocation::CONSTANT_VALUE:
       case LAllocation::CONSTANT_INDEX:
         return "c";
       case LAllocation::GPR:
-        JS_snprintf(buf, sizeof(buf), "=%s", toGeneralReg()->reg().name());
+        JS_snprintf(buf, sizeof(buf), "%s", toGeneralReg()->reg().name());
         return buf;
       case LAllocation::FPU:
-        JS_snprintf(buf, sizeof(buf), "=%s", toFloatReg()->reg().name());
+        JS_snprintf(buf, sizeof(buf), "%s", toFloatReg()->reg().name());
         return buf;
       case LAllocation::STACK_SLOT:
         JS_snprintf(buf, sizeof(buf), "stack:%d", toStackSlot()->slot());
@@ -318,7 +444,7 @@ LAllocation::toString() const
         PrintUse(buf, sizeof(buf), toUse());
         return buf;
       default:
-        MOZ_ASSUME_UNREACHABLE("what?");
+        MOZ_CRASH("what?");
     }
 }
 #endif // DEBUG
@@ -330,7 +456,13 @@ LAllocation::dump() const
 }
 
 void
-LInstruction::printOperands(FILE* fp)
+LDefinition::dump() const
+{
+    fprintf(stderr, "%s\n", toString());
+}
+
+void
+LNode::printOperands(FILE* fp)
 {
     for (size_t i = 0, e = numOperands(); i < e; i++) {
         fprintf(fp, " (%s)", getOperand(i)->toString());
@@ -342,69 +474,95 @@ LInstruction::printOperands(FILE* fp)
 void
 LInstruction::assignSnapshot(LSnapshot* snapshot)
 {
-    JS_ASSERT(!snapshot_);
+    MOZ_ASSERT(!snapshot_);
     snapshot_ = snapshot;
 
 #ifdef DEBUG
-    if (IonSpewEnabled(IonSpew_Snapshots)) {
-        IonSpewHeader(IonSpew_Snapshots);
-        fprintf(IonSpewFile, "Assigning snapshot %p to instruction %p (",
+    if (JitSpewEnabled(JitSpew_IonSnapshots)) {
+        JitSpewHeader(JitSpew_IonSnapshots);
+        fprintf(JitSpewFile, "Assigning snapshot %p to instruction %p (",
                 (void*)snapshot, (void*)this);
-        printName(IonSpewFile);
-        fprintf(IonSpewFile, ")\n");
+        printName(JitSpewFile);
+        fprintf(JitSpewFile, ")\n");
     }
 #endif
 }
 
 void
-LInstruction::dump(FILE* fp)
+LNode::dump(FILE* fp)
 {
-    fprintf(fp, "{");
-    for (size_t i = 0; i < numDefs(); i++) {
-        PrintDefinition(fp, *getDef(i));
-        if (i != numDefs() - 1)
-            fprintf(fp, ", ");
+    if (numDefs() != 0) {
+        fprintf(fp, "{");
+        for (size_t i = 0; i < numDefs(); i++) {
+            fprintf(fp, "%s", getDef(i)->toString());
+            if (i != numDefs() - 1)
+                fprintf(fp, ", ");
+        }
+        fprintf(fp, "} <- ");
     }
-    fprintf(fp, "} <- ");
 
     printName(fp);
-
-
-    printInfo(fp);
+    printOperands(fp);
 
     if (numTemps()) {
         fprintf(fp, " t=(");
         for (size_t i = 0; i < numTemps(); i++) {
-            PrintDefinition(fp, *getTemp(i));
+            fprintf(fp, "%s", getTemp(i)->toString());
             if (i != numTemps() - 1)
                 fprintf(fp, ", ");
         }
         fprintf(fp, ")");
     }
-    fprintf(fp, "\n");
+
+    if (numSuccessors()) {
+        fprintf(fp, " s=(");
+        for (size_t i = 0; i < numSuccessors(); i++) {
+            fprintf(fp, "block%u", getSuccessor(i)->id());
+            if (i != numSuccessors() - 1)
+                fprintf(fp, ", ");
+        }
+        fprintf(fp, ")");
+    }
 }
 
 void
-LInstruction::dump()
+LNode::dump()
 {
-    return dump(stderr);
+    dump(stderr);
+    fprintf(stderr, "\n");
 }
 
 void
 LInstruction::initSafepoint(TempAllocator& alloc)
 {
-    JS_ASSERT(!safepoint_);
+    MOZ_ASSERT(!safepoint_);
     safepoint_ = new(alloc) LSafepoint(alloc);
-    JS_ASSERT(safepoint_);
+    MOZ_ASSERT(safepoint_);
 }
 
 bool
 LMoveGroup::add(LAllocation* from, LAllocation* to, LDefinition::Type type)
 {
 #ifdef DEBUG
-    JS_ASSERT(*from != *to);
+    MOZ_ASSERT(*from != *to);
     for (size_t i = 0; i < moves_.length(); i++)
-        JS_ASSERT(*to != *moves_[i].to());
+        MOZ_ASSERT(*to != *moves_[i].to());
+
+    // Check that SIMD moves are aligned according to ABI requirements.
+    if (LDefinition(type).isSimdType()) {
+        if (from->isMemory()) {
+            if (from->isArgument())
+                MOZ_ASSERT(from->toArgument()->index() % SimdMemoryAlignment == 0);
+            else
+                MOZ_ASSERT(from->toStackSlot()->slot() % SimdMemoryAlignment == 0);
+        }
+        if (to->isMemory()) {
+            if (to->isArgument())
+                MOZ_ASSERT(to->toArgument()->index() % SimdMemoryAlignment == 0);
+            else
+                MOZ_ASSERT(to->toStackSlot()->slot() % SimdMemoryAlignment == 0);
+        }
+    }
 #endif
     return moves_.append(LMove(from, to, type));
 }
@@ -442,9 +600,13 @@ LMoveGroup::printOperands(FILE* fp)
     for (size_t i = 0; i < numMoves(); i++) {
         const LMove& move = getMove(i);
         // Use two printfs, as LAllocation::toString is not reentrant.
-        fprintf(fp, "[%s", move.from()->toString());
-        fprintf(fp, " -> %s]", move.to()->toString());
+        fprintf(fp, " [%s", move.from()->toString());
+        fprintf(fp, " -> %s", move.to()->toString());
+#ifdef DEBUG
+        fprintf(fp, ", %s", TypeChars[move.type()]);
+#endif
+        fprintf(fp, "]");
         if (i != numMoves() - 1)
-            fprintf(fp, ", ");
+            fprintf(fp, ",");
     }
 }

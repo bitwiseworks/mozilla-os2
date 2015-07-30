@@ -10,9 +10,11 @@
 #include "mozilla/Services.h"
 #include "nsIObserverService.h"
 #include "mozilla/unused.h"
+#include "mozilla/SyncRunnable.h"
 
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
+#include "jsfriendapi.h"
 
 #if defined(XP_WIN32)
 #ifdef WIN32_LEAN_AND_MEAN
@@ -51,8 +53,10 @@
 #include "client/linux/crash_generation/client_info.h"
 #include "client/linux/crash_generation/crash_generation_server.h"
 #include "client/linux/handler/exception_handler.h"
+#include "common/linux/eintr_wrapper.h"
 #include <fcntl.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #elif defined(XP_SOLARIS)
 #include "client/solaris/handler/exception_handler.h"
@@ -106,6 +110,7 @@ namespace CrashReporter {
 #ifdef XP_WIN32
 typedef wchar_t XP_CHAR;
 typedef std::wstring xpstring;
+#define XP_TEXT(x) L##x
 #define CONVERT_XP_CHAR_TO_UTF16(x) x
 #define XP_STRLEN(x) wcslen(x)
 #define my_strlen strlen
@@ -125,6 +130,7 @@ typedef std::wstring xpstring;
 #else
 typedef char XP_CHAR;
 typedef std::string xpstring;
+#define XP_TEXT(x) x
 #define CONVERT_XP_CHAR_TO_UTF16(x) NS_ConvertUTF8toUTF16(x)
 #define CRASH_REPORTER_FILENAME "crashreporter"
 #define PATH_SEPARATOR "/"
@@ -142,14 +148,17 @@ typedef std::string xpstring;
 #define sys_close close
 #define sys_fork fork
 #define sys_open open
+#define sys_read read
 #define sys_write write
 #endif
 #endif // XP_WIN32
 
-static const XP_CHAR dumpFileExtension[] = {'.', 'd', 'm', 'p',
-                                            '\0'}; // .dmp
-static const XP_CHAR extraFileExtension[] = {'.', 'e', 'x', 't',
-                                             'r', 'a', '\0'}; // .extra
+#ifndef XP_LINUX
+static const XP_CHAR dumpFileExtension[] = XP_TEXT(".dmp");
+#endif
+
+static const XP_CHAR extraFileExtension[] = XP_TEXT(".extra");
+static const XP_CHAR memoryReportExtension[] = XP_TEXT(".memory.json.gz");
 
 static const char kCrashMainID[] = "crash.main.1\n";
 
@@ -157,9 +166,11 @@ static google_breakpad::ExceptionHandler* gExceptionHandler = nullptr;
 
 static XP_CHAR* pendingDirectory;
 static XP_CHAR* crashReporterPath;
+static XP_CHAR* memoryReportPath;
 
 // Where crash events should go.
 static XP_CHAR* eventsDirectory;
+static char* eventsEnv = nullptr;
 
 // If this is false, we don't launch the crash reporter
 static bool doReport = true;
@@ -199,6 +210,11 @@ static const char kTimeSinceLastCrashParameter[] = "SecondsSinceLastCrash=";
 static const int kTimeSinceLastCrashParameterLen =
                                      sizeof(kTimeSinceLastCrashParameter)-1;
 
+static const char kOOMAllocationSizeParameter[] = "OOMAllocationSize=";
+static const int kOOMAllocationSizeParameterLen =
+  sizeof(kOOMAllocationSizeParameter)-1;
+
+#ifdef XP_WIN32
 static const char kSysMemoryParameter[] = "SystemMemoryUsePercentage=";
 static const int kSysMemoryParameterLen = sizeof(kSysMemoryParameter)-1;
 
@@ -209,10 +225,6 @@ static const int kTotalVirtualMemoryParameterLen =
 static const char kAvailableVirtualMemoryParameter[] = "AvailableVirtualMemory=";
 static const int kAvailableVirtualMemoryParameterLen =
   sizeof(kAvailableVirtualMemoryParameter)-1;
-
-static const char kOOMAllocationSizeParameter[] = "OOMAllocationSize=";
-static const int kOOMAllocationSizeParameterLen =
-  sizeof(kOOMAllocationSizeParameter)-1;
 
 static const char kTotalPageFileParameter[] = "TotalPageFile=";
 static const int kTotalPageFileParameterLen =
@@ -229,6 +241,7 @@ static const int kTotalPhysicalMemoryParameterLen =
 static const char kAvailablePhysicalMemoryParameter[] = "AvailablePhysicalMemory=";
 static const int kAvailablePhysicalMemoryParameterLen =
   sizeof(kAvailablePhysicalMemoryParameter)-1;
+#endif
 
 static const char kIsGarbageCollectingParameter[] = "IsGarbageCollecting=";
 static const int kIsGarbageCollectingParameterLen =
@@ -247,6 +260,10 @@ static const char kBreakpadReserveSizeParameter[] = "BreakpadReserveSize=";
 static const int kBreakpadReserveSizeParameterLen =
   sizeof(kBreakpadReserveSizeParameter)-1;
 #endif
+
+static const char kMemoryReportParameter[] = "ContainsMemoryReport=1\n";
+static const int kMemoryReportParameterLen =
+  sizeof(kMemoryReportParameter)-1;
 
 // this holds additional data sent via the API
 static Mutex* crashReporterAPILock;
@@ -281,7 +298,7 @@ static const int kMagicChildCrashReportFd = 4;
 static Mutex* dumpMapLock;
 struct ChildProcessData : public nsUint32HashKey
 {
-  ChildProcessData(KeyTypePointer aKey)
+  explicit ChildProcessData(KeyTypePointer aKey)
     : nsUint32HashKey(aKey)
     , sequence(0)
 #ifdef MOZ_CRASHREPORTER_INJECTOR
@@ -309,7 +326,7 @@ static nsIThread* sInjectorThread;
 class ReportInjectedCrash : public nsRunnable
 {
 public:
-  ReportInjectedCrash(uint32_t pid) : mPID(pid) { }
+  explicit ReportInjectedCrash(uint32_t pid) : mPID(pid) { }
 
   NS_IMETHOD Run();
 
@@ -344,11 +361,12 @@ static LPTOP_LEVEL_EXCEPTION_FILTER previousUnhandledExceptionFilter = nullptr;
 static WindowsDllInterceptor gKernel32Intercept;
 static bool gBlockUnhandledExceptionFilter = true;
 
-static void NotePreviousUnhandledExceptionFilter()
+static LPTOP_LEVEL_EXCEPTION_FILTER GetUnhandledExceptionFilter()
 {
-  // Set a dummy value to get the previous filter, then restore
-  previousUnhandledExceptionFilter = SetUnhandledExceptionFilter(nullptr);
-  SetUnhandledExceptionFilter(previousUnhandledExceptionFilter);
+  // Set a dummy value to get the current filter, then restore
+  LPTOP_LEVEL_EXCEPTION_FILTER current = SetUnhandledExceptionFilter(nullptr);
+  SetUnhandledExceptionFilter(current);
+  return current;
 }
 
 static LPTOP_LEVEL_EXCEPTION_FILTER WINAPI
@@ -370,6 +388,18 @@ patched_SetUnhandledExceptionFilter (LPTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExce
   return nullptr;
 }
 
+static LPTOP_LEVEL_EXCEPTION_FILTER sUnhandledExceptionFilter = nullptr;
+
+static long
+JitExceptionHandler(void *exceptionRecord, void *context)
+{
+    EXCEPTION_POINTERS pointers = {
+        (PEXCEPTION_RECORD)exceptionRecord,
+        (PCONTEXT)context
+    };
+    return sUnhandledExceptionFilter(&pointers);
+}
+
 /**
  * Reserve some VM space. In the event that we crash because VM space is
  * being leaked without leaking memory, freeing this space before taking
@@ -378,7 +408,7 @@ patched_SetUnhandledExceptionFilter (LPTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExce
  * This size is bigger than xul.dll plus some extra for MinidumpWriteDump
  * allocations.
  */
-static const SIZE_T kReserveSize = 0x2800000; // 40 MB
+static const SIZE_T kReserveSize = 0x4000000; // 64 MB
 static void* gBreakpadReservedVM;
 #endif
 
@@ -454,6 +484,56 @@ void AnnotateOOMAllocationSize(size_t size)
   gOOMAllocationSize = size;
 }
 
+#ifndef XP_WIN
+// Like Windows CopyFile for *nix
+bool copy_file(const char* from, const char* to)
+{
+  const int kBufSize = 4096;
+  int fdfrom = sys_open(from, O_RDONLY, 0);
+  if (fdfrom < 0) {
+    return false;
+  }
+
+  bool ok = false;
+
+  int fdto = sys_open(to, O_WRONLY | O_CREAT, 0666);
+  if (fdto < 0) {
+    sys_close(fdfrom);
+    return false;
+  }
+
+  char buf[kBufSize];
+  while (true) {
+    int r = sys_read(fdfrom, buf, kBufSize);
+    if (r == 0) {
+      ok = true;
+      break;
+    }
+    if (r < 0) {
+      break;
+    }
+    char* wbuf = buf;
+    while (r) {
+      int w = sys_write(fdto, wbuf, r);
+      if (w > 0) {
+        r -= w;
+        wbuf += w;
+      } else if (errno != EINTR) {
+        break;
+      }
+    }
+    if (r) {
+      break;
+    }
+  }
+
+  sys_close(fdfrom);
+  sys_close(fdto);
+
+  return ok;
+}
+#endif
+
 bool MinidumpCallback(
 #ifdef XP_LINUX
                       const MinidumpDescriptor& descriptor,
@@ -494,6 +574,27 @@ bool MinidumpCallback(
   p -= 4;
 #endif
   Concat(p, extraFileExtension, &size);
+
+  static XP_CHAR memoryReportLocalPath[XP_PATH_MAX];
+  size = XP_PATH_MAX;
+#ifndef XP_LINUX
+  p = Concat(memoryReportLocalPath, dump_path, &size);
+  p = Concat(p, XP_PATH_SEPARATOR, &size);
+  p = Concat(p, minidump_id, &size);
+#else
+  p = Concat(memoryReportLocalPath, descriptor.path(), &size);
+  // Skip back past the .dmp extension
+  p -= 4;
+#endif
+  Concat(p, memoryReportExtension, &size);
+
+  if (memoryReportPath) {
+#ifdef XP_WIN
+    CopyFile(memoryReportPath, memoryReportLocalPath, false);
+#else
+    copy_file(memoryReportPath, memoryReportLocalPath);
+#endif
+  }
 
   if (headlessClient) {
     // Leave a marker indicating that there was a crash.
@@ -712,11 +813,17 @@ bool MinidumpCallback(
                   &nBytes, nullptr);
         WriteFile(hFile, "\n", 1, &nBytes, nullptr);
       }
+
+      if (memoryReportPath) {
+        WriteFile(hFile, kMemoryReportParameter,
+                  kMemoryReportParameterLen, &nBytes, nullptr);
+      }
       CloseHandle(hFile);
     }
   }
 
   if (!doReport) {
+    TerminateProcess(GetCurrentProcess(), 1);
     return returnValue;
   }
 
@@ -773,7 +880,7 @@ bool MinidumpCallback(
       if (eventloopNestingLevel > 0) {
         unused << sys_write(fd, kEventLoopNestingLevelParameter, kEventLoopNestingLevelParameterLen);
         char buffer[16];
-        XP_TTOA(eventloopNestingLevel, buffer, 10);
+        XP_TTOA(static_cast<time_t>(eventloopNestingLevel), buffer, 10);
         unused << sys_write(fd, buffer, my_strlen(buffer));
         unused << sys_write(fd, "\n", 1);
       }
@@ -783,6 +890,10 @@ bool MinidumpCallback(
         unused << sys_write(fd, oomAllocationSizeBuffer,
                             oomAllocationSizeBufferLen);
         unused << sys_write(fd, "\n", 1);
+      }
+      if (memoryReportPath) {
+        unused << sys_write(fd, kMemoryReportParameter,
+                            kMemoryReportParameterLen);
       }
       sys_close(fd);
     }
@@ -847,6 +958,13 @@ bool MinidumpCallback(
     }
 #endif
     _exit(1);
+#ifdef MOZ_WIDGET_ANDROID
+  } else {
+    // We need to wait on the 'am start' command above to finish, otherwise everything will
+    // be killed by the ActivityManager as soon as the signal handler exits
+    int status;
+    unused << HANDLE_EINTR(sys_waitpid(pid, &status, __WALL));
+#endif
   }
 #endif // XP_MACOSX
 #endif // XP_UNIX
@@ -992,6 +1110,7 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
     NS_ENSURE_SUCCESS(rv, rv);
 
 #if defined(XP_MACOSX)
+    exePath->SetNativeLeafName(NS_LITERAL_CSTRING("MacOS"));
     exePath->Append(NS_LITERAL_STRING("crashreporter.app"));
     exePath->Append(NS_LITERAL_STRING("Contents"));
     exePath->Append(NS_LITERAL_STRING("MacOS"));
@@ -1128,7 +1247,7 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
 #endif
 
 #ifdef XP_WIN
-  NotePreviousUnhandledExceptionFilter();
+  previousUnhandledExceptionFilter = GetUnhandledExceptionFilter();
 #endif
 
   gExceptionHandler = new google_breakpad::
@@ -1168,6 +1287,13 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
 #ifdef XP_WIN
   gExceptionHandler->set_handle_debug_exceptions(true);
   
+#ifdef _WIN64
+  // Tell JS about the new filter before we disable SetUnhandledExceptionFilter
+  sUnhandledExceptionFilter = GetUnhandledExceptionFilter();
+  if (sUnhandledExceptionFilter)
+      js::SetJitExceptionHandler(JitExceptionHandler);
+#endif
+
   // protect the crash reporter from being unloaded
   gBlockUnhandledExceptionFilter = true;
   gKernel32Intercept.Init("kernel32.dll");
@@ -1352,7 +1478,7 @@ EnsureDirectoryExists(nsIFile* dir)
   nsresult rv = dir->Create(nsIFile::DIRECTORY_TYPE, 0700);
 
   if (NS_WARN_IF(NS_FAILED(rv) && rv != NS_ERROR_FILE_ALREADY_EXISTS)) {
-	return rv;
+    return rv;
   }
 
   return NS_OK;
@@ -1524,6 +1650,11 @@ nsresult UnsetExceptionHandler()
     eventsDirectory = nullptr;
   }
 
+  if (memoryReportPath) {
+    NS_Free(memoryReportPath);
+    memoryReportPath = nullptr;
+  }
+
 #ifdef XP_MACOSX
   posix_spawnattr_destroy(&spawnattr);
 #endif
@@ -1572,8 +1703,10 @@ static PLDHashOperator EnumerateEntries(const nsACString& key,
                                         nsCString entry,
                                         void* userData)
 {
-  crashReporterAPIData->Append(key + NS_LITERAL_CSTRING("=") + entry +
-                               NS_LITERAL_CSTRING("\n"));
+  if (!entry.IsEmpty()) {
+    crashReporterAPIData->Append(key + NS_LITERAL_CSTRING("=") + entry +
+                                 NS_LITERAL_CSTRING("\n"));
+  }
   return PL_DHASH_NEXT;
 }
 
@@ -1611,7 +1744,7 @@ class DelayedNote
   DelayedNote(const nsACString& aKey, const nsACString& aData)
   : mKey(aKey), mData(aData), mType(Annotation) {}
 
-  DelayedNote(const nsACString& aData)
+  explicit DelayedNote(const nsACString& aData)
   : mData(aData), mType(AppNote) {}
 
   void Run()
@@ -1673,6 +1806,11 @@ nsresult AnnotateCrashReport(const nsACString& key, const nsACString& data)
                                            crashReporterAPIData);
 
   return NS_OK;
+}
+
+nsresult RemoveCrashReportAnnotation(const nsACString& key)
+{
+  return AnnotateCrashReport(key, NS_LITERAL_CSTRING(""));
 }
 
 nsresult SetGarbageCollecting(bool collecting)
@@ -1852,6 +1990,10 @@ nsresult WriteMinidumpForException(EXCEPTION_POINTERS* aExceptionInfo)
 #ifdef XP_LINUX
 bool WriteMinidumpForSigInfo(int signo, siginfo_t* info, void* uc)
 {
+  if (!gExceptionHandler) {
+    // Crash reporting is disabled.
+    return false;
+  }
   return gExceptionHandler->HandleSignal(signo, info, uc);
 }
 #endif
@@ -1905,7 +2047,7 @@ static nsresult PrefSubmitReports(bool* aSubmitReports, bool writePref)
     regKey->Create(nsIWindowsRegKey::ROOT_KEY_CURRENT_USER,
                    NS_ConvertUTF8toUTF16(regPath),
                    nsIWindowsRegKey::ACCESS_SET_VALUE);
-    regPath.AppendLiteral("\\");
+    regPath.Append('\\');
   }
 
   // Create appName key
@@ -1913,7 +2055,7 @@ static nsresult PrefSubmitReports(bool* aSubmitReports, bool writePref)
   regKey->Create(nsIWindowsRegKey::ROOT_KEY_CURRENT_USER,
                  NS_ConvertUTF8toUTF16(regPath),
                  nsIWindowsRegKey::ACCESS_SET_VALUE);
-  regPath.AppendLiteral("\\");
+  regPath.Append('\\');
 
   // Create Crash Reporter key
   regPath.AppendLiteral("Crash Reporter");
@@ -2081,56 +2223,100 @@ nsresult SetSubmitReports(bool aSubmitReports)
     return NS_OK;
 }
 
-void
-UpdateCrashEventsDir()
+static void
+SetCrashEventsDir(nsIFile* aDir)
 {
-  nsCOMPtr<nsIFile> eventsDir;
+  nsCOMPtr<nsIFile> eventsDir = aDir;
 
-  // We prefer the following locations in order:
-  //
-  // 1. If environment variable is present, use it. We don't expect
-  //    the environment variable except for tests and other atypical setups.
-  // 2. Inside the profile directory.
-  // 3. Inside the user application data directory (no profile available).
-  // 4. A temporary directory (setup likely is invalid / application is buggy).
   const char *env = PR_GetEnv("CRASHES_EVENTS_DIR");
-  if (env) {
-    eventsDir = do_CreateInstance(NS_LOCAL_FILE_CONTRACTID);
-    if (!eventsDir) {
-      return;
-    }
-    eventsDir->InitWithNativePath(nsDependentCString(env));
+  if (env && *env) {
+    NS_NewNativeLocalFile(nsDependentCString(env),
+                          false, getter_AddRefs(eventsDir));
     EnsureDirectoryExists(eventsDir);
-  } else {
-    nsresult rv = NS_GetSpecialDirectory("ProfD", getter_AddRefs(eventsDir));
-    if (NS_SUCCEEDED(rv)) {
-      eventsDir->Append(NS_LITERAL_STRING("crashes"));
-      EnsureDirectoryExists(eventsDir);
-      eventsDir->Append(NS_LITERAL_STRING("events"));
-      EnsureDirectoryExists(eventsDir);
-    } else {
-      rv = NS_GetSpecialDirectory("UAppData", getter_AddRefs(eventsDir));
-      if (NS_SUCCEEDED(rv)) {
-        eventsDir->Append(NS_LITERAL_STRING("Crash Reports"));
-        EnsureDirectoryExists(eventsDir);
-        eventsDir->Append(NS_LITERAL_STRING("events"));
-        EnsureDirectoryExists(eventsDir);
-      } else {
-        NS_WARNING("Couldn't get the user appdata directory. Crash events may not be produced.");
-        return;
-      }
-    }
+  }
+
+  if (eventsDirectory) {
+    NS_Free(eventsDirectory);
   }
 
 #ifdef XP_WIN
   nsString path;
   eventsDir->GetPath(path);
   eventsDirectory = reinterpret_cast<wchar_t*>(ToNewUnicode(path));
+
+  // Save the path in the environment for the crash reporter application.
+  nsAutoString eventsDirEnv(NS_LITERAL_STRING("MOZ_CRASHREPORTER_EVENTS_DIRECTORY="));
+  eventsDirEnv.Append(path);
+  _wputenv(eventsDirEnv.get());
 #else
   nsCString path;
   eventsDir->GetNativePath(path);
   eventsDirectory = ToNewCString(path);
+
+  // Save the path in the environment for the crash reporter application.
+  nsAutoCString eventsDirEnv("MOZ_CRASHREPORTER_EVENTS_DIRECTORY=");
+  eventsDirEnv.Append(path);
+
+  // PR_SetEnv() wants the string to be available for the lifetime
+  // of the app, so dup it here.
+  char* oldEventsEnv = eventsEnv;
+  eventsEnv = ToNewCString(eventsDirEnv);
+  PR_SetEnv(eventsEnv);
+
+  if (oldEventsEnv) {
+    NS_Free(oldEventsEnv);
+  }
 #endif
+}
+
+void
+SetProfileDirectory(nsIFile* aDir)
+{
+  nsCOMPtr<nsIFile> dir;
+  aDir->Clone(getter_AddRefs(dir));
+
+  dir->Append(NS_LITERAL_STRING("crashes"));
+  EnsureDirectoryExists(dir);
+  dir->Append(NS_LITERAL_STRING("events"));
+  EnsureDirectoryExists(dir);
+  SetCrashEventsDir(dir);
+}
+
+void
+SetUserAppDataDirectory(nsIFile* aDir)
+{
+  nsCOMPtr<nsIFile> dir;
+  aDir->Clone(getter_AddRefs(dir));
+
+  dir->Append(NS_LITERAL_STRING("Crash Reports"));
+  EnsureDirectoryExists(dir);
+  dir->Append(NS_LITERAL_STRING("events"));
+  EnsureDirectoryExists(dir);
+  SetCrashEventsDir(dir);
+}
+
+void
+UpdateCrashEventsDir()
+{
+  const char *env = PR_GetEnv("CRASHES_EVENTS_DIR");
+  if (env && *env) {
+    SetCrashEventsDir(nullptr);
+  }
+
+  nsCOMPtr<nsIFile> eventsDir;
+  nsresult rv = NS_GetSpecialDirectory("ProfD", getter_AddRefs(eventsDir));
+  if (NS_SUCCEEDED(rv)) {
+    SetProfileDirectory(eventsDir);
+    return;
+  }
+
+  rv = NS_GetSpecialDirectory("UAppData", getter_AddRefs(eventsDir));
+  if (NS_SUCCEEDED(rv)) {
+    SetUserAppDataDirectory(eventsDir);
+    return;
+  }
+
+  NS_WARNING("Couldn't get the user appdata directory. Crash events may not be produced.");
 }
 
 bool GetCrashEventsDir(nsAString& aPath)
@@ -2141,6 +2327,23 @@ bool GetCrashEventsDir(nsAString& aPath)
 
   aPath = CONVERT_XP_CHAR_TO_UTF16(eventsDirectory);
   return true;
+}
+
+void
+SetMemoryReportFile(nsIFile* aFile)
+{
+  if (!gExceptionHandler) {
+    return;
+  }
+#ifdef XP_WIN
+  nsString path;
+  aFile->GetPath(path);
+  memoryReportPath = reinterpret_cast<wchar_t*>(ToNewUnicode(path));
+#else
+  nsCString path;
+  aFile->GetNativePath(path);
+  memoryReportPath = ToNewCString(path);
+#endif
 }
 
 static void
@@ -2176,7 +2379,7 @@ FindPendingDir()
 static bool
 GetPendingDir(nsIFile** dir)
 {
-  MOZ_ASSERT(OOPInitialized());
+  // MOZ_ASSERT(OOPInitialized());
   if (!pendingDirectory) {
     return false;
   }
@@ -2491,13 +2694,28 @@ static bool ChildFilter(void *context) {
 void
 OOPInit()
 {
+  class ProxyToMainThread : public nsRunnable
+  {
+  public:
+    NS_IMETHOD Run() {
+      OOPInit();
+      return NS_OK;
+    }
+  };
+  if (!NS_IsMainThread()) {
+    // This logic needs to run on the main thread
+    nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
+    mozilla::SyncRunnable::DispatchToThread(mainThread, new ProxyToMainThread());
+    return;
+  }
+
   if (OOPInitialized())
     return;
 
   MOZ_ASSERT(NS_IsMainThread());
 
-  NS_ABORT_IF_FALSE(gExceptionHandler != nullptr,
-                    "attempt to initialize OOP crash reporter before in-process crashreporter!");
+  MOZ_ASSERT(gExceptionHandler != nullptr,
+             "attempt to initialize OOP crash reporter before in-process crashreporter!");
 
 #if defined(XP_WIN)
   childCrashNotifyPipe =
@@ -2741,7 +2959,7 @@ SetRemoteExceptionHandler(const nsACString& crashPipe)
   if (crashPipe.Equals(kNullNotifyPipe))
     return true;
 
-  NS_ABORT_IF_FALSE(!gExceptionHandler, "crash client already init'd");
+  MOZ_ASSERT(!gExceptionHandler, "crash client already init'd");
 
   gExceptionHandler = new google_breakpad::
     ExceptionHandler(L"",
@@ -2785,7 +3003,7 @@ CreateNotificationPipeForChild(int* childCrashFd, int* childCrashRemapFd)
 bool
 SetRemoteExceptionHandler()
 {
-  NS_ABORT_IF_FALSE(!gExceptionHandler, "crash client already init'd");
+  MOZ_ASSERT(!gExceptionHandler, "crash client already init'd");
 
 #ifndef XP_LINUX
   xpstring path = "";
@@ -2822,7 +3040,7 @@ SetRemoteExceptionHandler(const nsACString& crashPipe)
   if (crashPipe.Equals(kNullNotifyPipe))
     return true;
 
-  NS_ABORT_IF_FALSE(!gExceptionHandler, "crash client already init'd");
+  MOZ_ASSERT(!gExceptionHandler, "crash client already init'd");
 
   gExceptionHandler = new google_breakpad::
     ExceptionHandler("",

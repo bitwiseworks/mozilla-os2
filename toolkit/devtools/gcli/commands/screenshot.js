@@ -27,6 +27,9 @@ exports.items = [
     description: gcli.lookup("screenshotDesc"),
     manual: gcli.lookup("screenshotManual"),
     returnType: "dom",
+    buttonId: "command-button-screenshot",
+    buttonClass: "command-button command-button-invertable",
+    tooltipText: gcli.lookup("screenshotTooltip"),
     params: [
       {
         name: "filename",
@@ -103,31 +106,46 @@ exports.items = [
         let width;
         let height;
         let div = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+        let currentX = window.scrollX;
+        let currentY = window.scrollY;
 
-        if (!fullpage) {
-          if (!node) {
-            left = window.scrollX;
-            top = window.scrollY;
-            width = window.innerWidth;
-            height = window.innerHeight;
-          } else {
-            let lh = new LayoutHelpers(window);
-            let rect = lh.getRect(node, window);
-            top = rect.top;
-            left = rect.left;
-            width = rect.width;
-            height = rect.height;
-          }
-        } else {
+        if (fullpage) {
+          // Bug 961832: GCLI screenshot shows fixed position element in wrong
+          // position if we don't scroll to top
+          window.scrollTo(0,0);
           width = window.innerWidth + window.scrollMaxX;
           height = window.innerHeight + window.scrollMaxY;
+        } else if (node) {
+          let lh = new LayoutHelpers(window);
+          let rect = lh.getRect(node, window);
+          top = rect.top;
+          left = rect.left;
+          width = rect.width;
+          height = rect.height;
+        } else {
+          left = window.scrollX;
+          top = window.scrollY;
+          width = window.innerWidth;
+          height = window.innerHeight;
         }
+
+        let winUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                             .getInterface(Ci.nsIDOMWindowUtils);
+        let scrollbarHeight = {};
+        let scrollbarWidth = {};
+        winUtils.getScrollbarSize(false, scrollbarWidth, scrollbarHeight);
+        width -= scrollbarWidth.value;
+        height -= scrollbarHeight.value;
+
         canvas.width = width;
         canvas.height = height;
-
         let ctx = canvas.getContext("2d");
         ctx.drawWindow(window, left, top, width, height, "#fff");
         let data = canvas.toDataURL("image/png", "");
+
+        if(fullpage) {
+          window.scrollTo(currentX, currentY);
+        }
 
         let loadContext = document.defaultView
                                   .QueryInterface(Ci.nsIInterfaceRequestor)
@@ -138,7 +156,14 @@ exports.items = [
           try {
             let io = Cc["@mozilla.org/network/io-service;1"]
                       .getService(Ci.nsIIOService);
-            let channel = io.newChannel(data, null, null);
+            let channel = io.newChannel2(data,
+                                         null,
+                                         null,
+                                         null,      // aLoadingNode
+                                         Services.scriptSecurityManager.getSystemPrincipal(),
+                                         null,      // aTriggeringPrincipal
+                                         Ci.nsILoadInfo.SEC_NORMAL,
+                                         Ci.nsIContentPolicy.TYPE_IMAGE);
             let input = channel.open();
             let imgTools = Cc["@mozilla.org/image/tools;1"]
                             .getService(Ci.imgITools);
@@ -211,7 +236,7 @@ exports.items = [
                                Persist.PERSIST_FLAGS_AUTODETECT_APPLY_CONVERSION;
 
         let source = ioService.newURI(data, "UTF8", null);
-        persist.saveURI(source, null, null, null, null, file, loadContext);
+        persist.saveURI(source, null, null, 0, null, null, file, loadContext);
 
         div.textContent = gcli.lookup("screenshotSavedToFile") + " \"" + filename +
                           "\"";

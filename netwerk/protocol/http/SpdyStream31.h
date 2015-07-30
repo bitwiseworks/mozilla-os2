@@ -34,13 +34,10 @@ public:
     return static_cast<bool>(mRequestBlockedOnRead);
   }
 
-  // returns false if called more than once
-  bool GetFullyOpen() {return mFullyOpen;}
-  void SetFullyOpen()
-  {
-    MOZ_ASSERT(!mFullyOpen);
-    mFullyOpen = 1;
-  }
+  bool GetFullyOpen();
+  // returns failure if stream cannot be made ready and stream
+  // should be canceled
+  nsresult SetFullyOpen();
 
   bool HasRegisteredID() { return mStreamID != 0; }
 
@@ -57,6 +54,12 @@ public:
 
   void SetRecvdData(bool aStatus) { mReceivedData = aStatus ? 1 : 0; }
   bool RecvdData() { return mReceivedData; }
+
+  void SetQueued(bool aStatus) { mQueued = aStatus ? 1 : 0; }
+  bool Queued() { return mQueued; }
+
+  void SetCountAsActive(bool aStatus) { mCountAsActive = aStatus ? 1 : 0; }
+  bool CountAsActive() { return mCountAsActive; }
 
   void UpdateTransportSendEvents(uint32_t count);
   void UpdateTransportReadEvents(uint32_t count);
@@ -121,12 +124,19 @@ protected:
   // sending_request_body for each SPDY chunk in the upload.
   enum stateType mUpstreamState;
 
-  // Flag is set when all http request headers have been read and ID is stable
-  uint32_t                     mSynFrameComplete     : 1;
+  // Flag is set when all http request headers have been read
+  uint32_t                     mRequestHeadersDone   : 1;
+
+  // Flag is set when stream ID is stable
+  uint32_t                     mSynFrameGenerated    : 1;
 
   // Flag is set when a FIN has been placed on a data or syn packet
   // (i.e after the client has closed)
   uint32_t                     mSentFinOnData        : 1;
+
+  // Flag is set when stream is queued inside the session due to
+  // concurrency limits being exceeded
+  uint32_t                     mQueued               : 1;
 
   void     ChangeState(enum stateType);
 
@@ -138,6 +148,8 @@ private:
                                           void *);
 
   nsresult ParseHttpRequestHeaders(const char *, uint32_t, uint32_t *);
+  nsresult GenerateSynFrame();
+
   void     AdjustInitialWindow();
   nsresult TransmitFrame(const char *, uint32_t *, bool forceCommitment);
   void     GenerateDataFrameHeader(uint32_t, bool);
@@ -188,6 +200,9 @@ private:
   // Flag is set after TCP send autotuning has been disabled
   uint32_t                     mSetTCPSocketBuffer   : 1;
 
+  // Flag is set when stream is counted towards MAX_CONCURRENT streams in session
+  uint32_t                     mCountAsActive        : 1;
+
   // The InlineFrame and associated data is used for composing control
   // frames and data frame headers.
   nsAutoArrayPtr<uint8_t>      mTxInlineFrame;
@@ -215,7 +230,8 @@ private:
   // place the fin flag on the last data packet instead of waiting
   // for a stream closed indication. Relying on stream close results
   // in an extra 0-length runt packet and seems to have some interop
-  // problems with the google servers.
+  // problems with the google servers. Connect does rely on stream
+  // close by setting this to the max value.
   int64_t                      mRequestBodyLenRemaining;
 
   // based on nsISupportsPriority definitions
@@ -248,6 +264,17 @@ private:
 
   // For SpdyPush
   SpdyPushedStream31 *mPushSource;
+
+/// connect tunnels
+public:
+  bool IsTunnel() { return mIsTunnel; }
+private:
+  void ClearTransactionsBlockedOnTunnel();
+  void MapStreamToPlainText();
+  void MapStreamToHttpConnection();
+
+  bool mIsTunnel;
+  bool mPlainTextTunnel;
 };
 
 }} // namespace mozilla::net

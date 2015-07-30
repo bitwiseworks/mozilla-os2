@@ -13,7 +13,7 @@
 #include "nsRefreshDriver.h"
 
 class nsIContent;
-class nsIScrollbarOwner;
+class nsIScrollbarMediator;
 class nsITimer;
 class nsIAtom;
 
@@ -55,10 +55,10 @@ namespace layout {
  * ActivityStarted().
  */
 
-class ScrollbarActivity : public nsIDOMEventListener,
-                          public nsARefreshObserver {
+class ScrollbarActivity final : public nsIDOMEventListener,
+                                    public nsARefreshObserver {
 public:
-  ScrollbarActivity(nsIScrollbarOwner* aScrollableFrame)
+  explicit ScrollbarActivity(nsIScrollbarMediator* aScrollableFrame)
    : mScrollableFrame(aScrollableFrame)
    , mNestedActivityCounter(0)
    , mIsActive(false)
@@ -77,15 +77,13 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMEVENTLISTENER
 
-  virtual ~ScrollbarActivity() {}
-
   void Destroy();
 
   void ActivityOccurred();
   void ActivityStarted();
   void ActivityStopped();
 
-  virtual void WillRefresh(TimeStamp aTime) MOZ_OVERRIDE;
+  virtual void WillRefresh(TimeStamp aTime) override;
 
   static void FadeBeginTimerFired(nsITimer* aTimer, void* aSelf) {
     nsRefPtr<ScrollbarActivity> scrollbarActivity(
@@ -94,6 +92,7 @@ public:
   }
 
 protected:
+  virtual ~ScrollbarActivity() {}
 
   bool IsActivityOngoing()
   { return mNestedActivityCounter > 0; }
@@ -136,7 +135,7 @@ protected:
     return TimeDuration::FromMilliseconds(mScrollbarFadeDuration);
   }
 
-  nsIScrollbarOwner* mScrollableFrame;
+  nsIScrollbarMediator* mScrollableFrame;
   TimeStamp mFadeBeginTime;
   nsCOMPtr<nsITimer> mFadeBeginTimer;
   nsCOMPtr<nsIDOMEventTarget> mHorizontalScrollbar; // null while inactive

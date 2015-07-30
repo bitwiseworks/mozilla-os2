@@ -11,10 +11,10 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
 
-function waitForCondition(condition, nextTest, errorMsg) {
+function waitForCondition(condition, nextTest, errorMsg, numTries = 30) {
   var tries = 0;
   var interval = setInterval(function() {
-    if (tries >= 30) {
+    if (tries >= numTries) {
       ok(false, errorMsg);
       moveOn();
     }
@@ -31,6 +31,16 @@ function waitForCondition(condition, nextTest, errorMsg) {
     tries++;
   }, 100);
   var moveOn = function() { clearInterval(interval); nextTest(); };
+}
+
+
+function promiseObserverNotified(aTopic) {
+  let deferred = Promise.defer();
+  Services.obs.addObserver(function onNotification(aSubject, aTopic, aData) {
+    Services.obs.removeObserver(onNotification, aTopic);
+      deferred.resolve({subject: aSubject, data: aData});
+    }, aTopic, false);
+  return deferred.promise;
 }
 
 // Check that a specified (string) URL hasn't been "remembered" (ie, is not
@@ -68,6 +78,7 @@ function defaultFinishChecks() {
 }
 
 function runSocialTestWithProvider(manifest, callback, finishcallback) {
+
   let SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
 
   let manifests = Array.isArray(manifest) ? manifest : [manifest];
@@ -78,7 +89,7 @@ function runSocialTestWithProvider(manifest, callback, finishcallback) {
     SessionStore.setWindowValue(window, "socialSidebar", "");
     for (let i = 0; i < manifests.length; i++) {
       let m = manifests[i];
-      for (let what of ['sidebarURL', 'workerURL', 'iconURL']) {
+      for (let what of ['sidebarURL', 'workerURL', 'iconURL', 'shareURL', 'markURL']) {
         if (m[what]) {
           yield promiseSocialUrlNotRemembered(m[what]);
         }
@@ -103,14 +114,14 @@ function runSocialTestWithProvider(manifest, callback, finishcallback) {
       // If we're "cleaning up", don't call finish when done.
       let callback = cleanup ? function () {} : finishIfDone;
       // Similarly, if we're cleaning up, catch exceptions from removeProvider
-      let removeProvider = SocialService.removeProvider.bind(SocialService);
+      let removeProvider = SocialService.disableProvider.bind(SocialService);
       if (cleanup) {
         removeProvider = function (origin, cb) {
           try {
-            SocialService.removeProvider(origin, cb);
+            SocialService.disableProvider(origin, cb);
           } catch (ex) {
             // Ignore "provider doesn't exist" errors.
-            if (ex.message.indexOf("SocialService.removeProvider: no provider with origin") == 0)
+            if (ex.message.indexOf("SocialService.disableProvider: no provider with origin") == 0)
               return;
             info("Failed to clean up provider " + origin + ": " + ex);
           }
@@ -154,9 +165,17 @@ function runSocialTestWithProvider(manifest, callback, finishcallback) {
 }
 
 function runSocialTests(tests, cbPreTest, cbPostTest, cbFinish) {
-  let testIter = Iterator(tests);
+  let testIter = (function*() {
+    for (let name in tests) {
+      if (tests.hasOwnProperty(name)) {
+        yield [name, tests[name]];
+      }
+    }
+  })();
   let providersAtStart = Social.providers.length;
   info("runSocialTests: start test run with " + providersAtStart + " providers");
+  window.focus();
+
 
   if (cbPreTest === undefined) {
     cbPreTest = function(cb) {cb()};
@@ -166,16 +185,15 @@ function runSocialTests(tests, cbPreTest, cbPostTest, cbFinish) {
   }
 
   function runNextTest() {
-    let name, func;
-    try {
-      [name, func] = testIter.next();
-    } catch (err if err instanceof StopIteration) {
+    let result = testIter.next();
+    if (result.done) {
       // out of items:
       (cbFinish || defaultFinishChecks)();
       is(providersAtStart, Social.providers.length,
          "runSocialTests: finish test run with " + Social.providers.length + " providers");
       return;
     }
+    let [name, func] = result.value;
     // We run on a timeout as the frameworker also makes use of timeouts, so
     // this helps keep the debug messages sane.
     executeSoon(function() {
@@ -237,8 +255,6 @@ function checkSocialUI(win) {
     _is(!!a, !!b, msg);
   }
   isbool(win.SocialSidebar.canShow, sidebarEnabled, "social sidebar active?");
-  isbool(win.SocialChatBar.isAvailable, enabled, "chatbar available?");
-  isbool(!win.SocialChatBar.chatbar.hidden, enabled, "chatbar visible?");
 
   let contextMenus = [
     {
@@ -279,8 +295,6 @@ function checkSocialUI(win) {
   // and for good measure, check all the social commands.
   isbool(!doc.getElementById("Social:ToggleSidebar").hidden, sidebarEnabled, "Social:ToggleSidebar visible?");
   isbool(!doc.getElementById("Social:ToggleNotifications").hidden, enabled, "Social:ToggleNotifications visible?");
-  isbool(!doc.getElementById("Social:FocusChat").hidden, enabled, "Social:FocusChat visible?");
-  isbool(doc.getElementById("Social:FocusChat").getAttribute("disabled"), enabled ? "false" : "true", "Social:FocusChat disabled?");
 
   // and report on overall success of failure of the various checks here.
   is(numGoodTests, numTests, "The Social UI tests succeeded.")
@@ -383,6 +397,15 @@ function selectBrowserTab(tab, callback) {
   gBrowser.selectedTab = tab;
 }
 
+function ensureEventFired(elem, event) {
+  let deferred = Promise.defer();
+  elem.addEventListener(event, function handler() {
+    elem.removeEventListener(event, handler, true);
+    deferred.resolve()
+  }, true);
+  return deferred.promise;
+}
+
 function loadIntoTab(tab, url, callback) {
   tab.linkedBrowser.addEventListener("load", function tabLoad(event) {
     tab.linkedBrowser.removeEventListener("load", tabLoad, true);
@@ -391,6 +414,24 @@ function loadIntoTab(tab, url, callback) {
   tab.linkedBrowser.loadURI(url);
 }
 
+function ensureBrowserTabClosed(tab) {
+  let promise = ensureEventFired(gBrowser.tabContainer, "TabClose");
+  gBrowser.removeTab(tab);
+  return promise;
+}
+
+function ensureFrameLoaded(frame) {
+  let deferred = Promise.defer();
+  if (frame.contentDocument && frame.contentDocument.readyState == "complete") {
+    deferred.resolve();
+  } else {
+    frame.addEventListener("load", function handler() {
+      frame.removeEventListener("load", handler, true);
+      deferred.resolve()
+    }, true);
+  }
+  return deferred.promise;
+}
 
 // chat test help functions
 
@@ -403,7 +444,7 @@ function get3ChatsForCollapsing(mode, cb) {
   // To make our life easier we don't go via the worker and ports so we get
   // more control over creation *and* to make the code much simpler.  We
   // assume the worker/port stuff is individually tested above.
-  let chatbar = window.SocialChatBar.chatbar;
+  let chatbar = getChatBar();
   let chatWidth = undefined;
   let num = 0;
   is(chatbar.childNodes.length, 0, "chatbar starting empty");
@@ -447,23 +488,21 @@ function makeChat(mode, uniqueid, cb) {
   info("making a chat window '" + uniqueid +"'");
   let provider = SocialSidebar.provider;
   const chatUrl = provider.origin + "/browser/browser/base/content/test/social/social_chat.html";
-  let isOpened = window.SocialChatBar.openChat(provider, chatUrl + "?id=" + uniqueid, function(chat) {
+  // Note that we use promiseChatLoaded instead of the callback to ensure the
+  // content has started loading.
+  let chatbox = getChatBar().openChat(provider.origin, provider.name,
+                                      chatUrl + "?id=" + uniqueid, mode);
+  chatbox.promiseChatLoaded.then(
+    () => {
     info("chat window has opened");
-    // we can't callback immediately or we might close the chat during
-    // this event which upsets the implementation - it is only 1/2 way through
-    // handling the load event.
-    chat.document.title = uniqueid;
-    executeSoon(cb);
-  }, mode);
-  if (!isOpened) {
-    ok(false, "unable to open chat window, no provider? more failures to come");
-    executeSoon(cb);
-  }
+    chatbox.contentDocument.title = uniqueid;
+    cb();
+  });
 }
 
 function checkPopup() {
   // popup only showing if any collapsed popup children.
-  let chatbar = window.SocialChatBar.chatbar;
+  let chatbar = getChatBar();
   let numCollapsed = 0;
   for (let chat of chatbar.childNodes) {
     if (chat.collapsed) {
@@ -482,7 +521,7 @@ function checkPopup() {
 // Does a callback passing |true| if the window is now big enough or false
 // if we couldn't resize large enough to satisfy the test requirement.
 function resizeWindowToChatAreaWidth(desired, cb, count = 0) {
-  let current = window.SocialChatBar.chatbar.getBoundingClientRect().width;
+  let current = getChatBar().getBoundingClientRect().width;
   let delta = desired - current;
   info(count + ": resizing window so chat area is " + desired + " wide, currently it is "
        + current + ".  Screen avail is " + window.screen.availWidth
@@ -515,7 +554,7 @@ function resizeWindowToChatAreaWidth(desired, cb, count = 0) {
   }
   function resize_handler(event) {
     // we did resize - but did we get far enough to be able to continue?
-    let newSize = window.SocialChatBar.chatbar.getBoundingClientRect().width;
+    let newSize = getChatBar().getBoundingClientRect().width;
     let sizedOk = widthDeltaCloseEnough(newSize - desired);
     if (!sizedOk)
       return;
@@ -564,8 +603,15 @@ function resizeAndCheckWidths(first, second, third, checks, cb) {
   }, count);
 }
 
+function getChatBar() {
+  let cb = document.getElementById("pinnedchats");
+  cb.hidden = false;
+  return cb;
+}
+
 function getPopupWidth() {
-  let popup = window.SocialChatBar.chatbar.menupopup;
+  let chatbar = getChatBar();
+  let popup = chatbar.menupopup;
   ok(!popup.parentNode.collapsed, "asking for popup width when it is visible");
   let cs = document.defaultView.getComputedStyle(popup.parentNode);
   let margins = parseInt(cs.marginLeft) + parseInt(cs.marginRight);
@@ -573,6 +619,50 @@ function getPopupWidth() {
 }
 
 function closeAllChats() {
-  let chatbar = window.SocialChatBar.chatbar;
-  chatbar.removeAll();
+  let chatbar = getChatBar();
+  while (chatbar.selectedChat) {
+    chatbar.selectedChat.close();
+  }
+}
+
+
+// Support for going on and offline.
+// (via browser/base/content/test/browser_bookmark_titles.js)
+let origProxyType = Services.prefs.getIntPref('network.proxy.type');
+
+function toggleOfflineStatus(goOffline) {
+  // Bug 968887 fix.  when going on/offline, wait for notification before continuing
+  let deferred = Promise.defer();
+  if (!goOffline) {
+    Services.prefs.setIntPref('network.proxy.type', origProxyType);
+  }
+  if (goOffline != Services.io.offline) {
+    info("initial offline state " + Services.io.offline);
+    let expect = !Services.io.offline;
+    Services.obs.addObserver(function offlineChange(subject, topic, data) {
+      Services.obs.removeObserver(offlineChange, "network:offline-status-changed");
+      info("offline state changed to " + Services.io.offline);
+      is(expect, Services.io.offline, "network:offline-status-changed successful toggle");
+      deferred.resolve();
+    }, "network:offline-status-changed", false);
+    BrowserOffline.toggleOfflineStatus();
+  } else {
+    deferred.resolve();
+  }
+  if (goOffline) {
+    Services.prefs.setIntPref('network.proxy.type', 0);
+    // LOAD_FLAGS_BYPASS_CACHE isn't good enough. So clear the cache.
+    Services.cache2.clear();
+  }
+  return deferred.promise;
+}
+
+function goOffline() {
+  // Simulate a network outage with offline mode. (Localhost is still
+  // accessible in offline mode, so disable the test proxy as well.)
+  return toggleOfflineStatus(true);
+}
+
+function goOnline(callback) {
+  return toggleOfflineStatus(false);
 }

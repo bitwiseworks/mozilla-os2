@@ -1,4 +1,4 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -26,9 +26,9 @@ let bookmarksObserver = {
 
     // Ensure that we've created a guid for this item.
     let stmt = DBConn().createStatement(
-      "SELECT guid "
-    + "FROM moz_bookmarks "
-    + "WHERE id = :item_id "
+      `SELECT guid
+       FROM moz_bookmarks
+       WHERE id = :item_id`
     );
     stmt.params.item_id = id;
     do_check_true(stmt.executeStep());
@@ -149,8 +149,10 @@ add_task(function test_bookmarks() {
 
   // Workaround possible VM timers issues moving lastModified and dateAdded
   // to the past.
-  bs.setItemLastModified(newId, --lastModified);
-  bs.setItemDateAdded(newId, --dateAdded);
+  lastModified -= 1000;
+  bs.setItemLastModified(newId, lastModified);
+  dateAdded -= 1000;
+  bs.setItemDateAdded(newId, dateAdded);
 
   // set bookmark title
   bs.setItemTitle(newId, "Google");
@@ -327,8 +329,10 @@ add_task(function test_bookmarks() {
 
     // Workaround possible VM timers issues moving lastModified and dateAdded
     // to the past.
+    lastModified -= 1000;
     bs.setItemLastModified(kwTestItemId, --lastModified);
-    bs.setItemDateAdded(kwTestItemId, --dateAdded);
+    dateAdded -= 1000;
+    bs.setItemDateAdded(kwTestItemId, dateAdded);
 
     bs.setKeywordForBookmark(kwTestItemId, "bar");
 
@@ -348,18 +352,14 @@ add_task(function test_bookmarks() {
   let k = bs.getKeywordForBookmark(kwTestItemId);
   do_check_eq("bar", k);
 
-  // test getKeywordForURI
-  let k = bs.getKeywordForURI(uri("http://keywordtest.com/"));
-  do_check_eq("bar", k);
-
   // test getURIForKeyword
   let u = bs.getURIForKeyword("bar");
   do_check_eq("http://keywordtest.com/", u.spec);
 
   // test removeFolderChildren
   // 1) add/remove each child type (bookmark, separator, folder)
-  let tmpFolder = bs.createFolder(testRoot, "removeFolderChildren",
-                                  bs.DEFAULT_INDEX);
+  tmpFolder = bs.createFolder(testRoot, "removeFolderChildren",
+                              bs.DEFAULT_INDEX);
   bs.insertBookmark(tmpFolder, uri("http://foo9.com/"), bs.DEFAULT_INDEX, "");
   bs.createFolder(tmpFolder, "subfolder", bs.DEFAULT_INDEX);
   bs.insertSeparator(tmpFolder, bs.DEFAULT_INDEX);
@@ -451,20 +451,22 @@ add_task(function test_bookmarks() {
   // test change bookmark uri
   let newId10 = bs.insertBookmark(testRoot, uri("http://foo10.com/"),
                                   bs.DEFAULT_INDEX, "");
-  let dateAdded = bs.getItemDateAdded(newId10);
+  dateAdded = bs.getItemDateAdded(newId10);
   // after just inserting, modified should not be set
-  let lastModified = bs.getItemLastModified(newId10);
+  lastModified = bs.getItemLastModified(newId10);
   do_check_eq(lastModified, dateAdded);
 
   // Workaround possible VM timers issues moving lastModified and dateAdded
   // to the past.
-  bs.setItemLastModified(newId10, --lastModified);
-  bs.setItemDateAdded(newId10, --dateAdded);
+  lastModified -= 1000;
+  bs.setItemLastModified(newId10, lastModified);
+  dateAdded -= 1000;
+  bs.setItemDateAdded(newId10, dateAdded);
 
   bs.changeBookmarkURI(newId10, uri("http://foo11.com/"));
 
   // check that lastModified is set after we change the bookmark uri
-  let lastModified2 = bs.getItemLastModified(newId10);
+  lastModified2 = bs.getItemLastModified(newId10);
   LOG("test changeBookmarkURI");
   LOG("dateAdded = " + dateAdded);
   LOG("lastModified = " + lastModified);
@@ -597,15 +599,15 @@ add_task(function test_bookmarks() {
   // check setItemLastModified() and setItemDateAdded()
   let newId14 = bs.insertBookmark(testRoot, uri("http://bar.tld/"),
                                   bs.DEFAULT_INDEX, "");
-  let dateAdded = bs.getItemDateAdded(newId14);
-  let lastModified = bs.getItemLastModified(newId14);
+  dateAdded = bs.getItemDateAdded(newId14);
+  lastModified = bs.getItemLastModified(newId14);
   do_check_eq(lastModified, dateAdded);
-  bs.setItemLastModified(newId14, 1234);
+  bs.setItemLastModified(newId14, 1234000000000000);
   let fakeLastModified = bs.getItemLastModified(newId14);
-  do_check_eq(fakeLastModified, 1234);
-  bs.setItemDateAdded(newId14, 4321);
+  do_check_eq(fakeLastModified, 1234000000000000);
+  bs.setItemDateAdded(newId14, 4321000000000000);
   let fakeDateAdded = bs.getItemDateAdded(newId14);
-  do_check_eq(fakeDateAdded, 4321);
+  do_check_eq(fakeDateAdded, 4321000000000000);
   
   // ensure that removing an item removes its annotations
   do_check_true(anno.itemHasAnnotation(newId3, "test-annotation"));
@@ -615,7 +617,7 @@ add_task(function test_bookmarks() {
   // bug 378820
   let uri1 = uri("http://foo.tld/a");
   bs.insertBookmark(testRoot, uri1, bs.DEFAULT_INDEX, "");
-  yield promiseAddVisits(uri1);
+  yield PlacesTestUtils.addVisits(uri1);
 
   // bug 646993 - test bookmark titles longer than the maximum allowed length
   let title15 = Array(TITLE_LENGTH_MAX + 5).join("X");

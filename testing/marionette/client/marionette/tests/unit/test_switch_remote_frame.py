@@ -27,6 +27,14 @@ class TestSwitchRemoteFrame(MarionetteTestCase):
             SpecialPowers.setBoolPref('dom.mozBrowserFramesEnabled', true);
             """)
 
+        with self.marionette.using_context('chrome'):
+            self.multi_process_browser = self.marionette.execute_script("""
+                try {
+                  return Services.appinfo.browserTabsRemoteAutostart;
+                } catch (e) {
+                  return false;
+                }""")
+
     def test_remote_frame(self):
         self.marionette.navigate(self.marionette.absolute_url("test.html"))
         self.marionette.execute_script("SpecialPowers.addPermission('browser', true, document)")
@@ -40,7 +48,8 @@ class TestSwitchRemoteFrame(MarionetteTestCase):
             iframe.src = "%s";
             document.body.appendChild(iframe);
             """ % self.marionette.absolute_url("test.html"))
-        self.marionette.switch_to_frame("remote_iframe")
+        remote_iframe = self.marionette.find_element("id", "remote_iframe")
+        self.marionette.switch_to_frame(remote_iframe)
         main_process = self.marionette.execute_script("""
             return SpecialPowers.isMainProcess();
             """)
@@ -60,7 +69,8 @@ class TestSwitchRemoteFrame(MarionetteTestCase):
             iframe.src = "%s";
             document.body.appendChild(iframe);
             """ % self.marionette.absolute_url("test.html"))
-        self.marionette.switch_to_frame("remote_iframe")
+        self.marionette.switch_to_frame(self.marionette.find_element("id",
+                                                                     "remote_iframe"))
         main_process = self.marionette.execute_script("""
             return SpecialPowers.isMainProcess();
             """)
@@ -69,8 +79,41 @@ class TestSwitchRemoteFrame(MarionetteTestCase):
         main_process = self.marionette.execute_script("""
             return SpecialPowers.isMainProcess();
             """)
-        self.assertTrue(main_process)
-        self.marionette.switch_to_frame("remote_iframe")
+        should_be_main_process = not self.multi_process_browser
+        self.assertEqual(main_process, should_be_main_process)
+        self.marionette.switch_to_frame(self.marionette.find_element("id",
+                                                                     "remote_iframe"))
+        main_process = self.marionette.execute_script("""
+            return SpecialPowers.isMainProcess();
+            """)
+        self.assertFalse(main_process)
+
+    def test_we_can_switch_to_a_remote_frame_by_index(self):
+        # test if we can revisit a remote frame (this takes a different codepath)
+        self.marionette.navigate(self.marionette.absolute_url("test.html"))
+        self.marionette.execute_script("SpecialPowers.addPermission('browser', true, document)")
+        self.marionette.execute_script("""
+            let iframe = document.createElement("iframe");
+            SpecialPowers.wrap(iframe).mozbrowser = true;
+            SpecialPowers.wrap(iframe).remote = true;
+            iframe.id = "remote_iframe";
+            iframe.style.height = "100px";
+            iframe.style.width = "100%%";
+            iframe.src = "%s";
+            document.body.appendChild(iframe);
+            """ % self.marionette.absolute_url("test.html"))
+        self.marionette.switch_to_frame(0)
+        main_process = self.marionette.execute_script("""
+            return SpecialPowers.isMainProcess();
+            """)
+        self.assertFalse(main_process)
+        self.marionette.switch_to_frame()
+        main_process = self.marionette.execute_script("""
+            return SpecialPowers.isMainProcess();
+            """)
+        should_be_main_process = not self.multi_process_browser
+        self.assertEqual(main_process, should_be_main_process)
+        self.marionette.switch_to_frame(0)
         main_process = self.marionette.execute_script("""
             return SpecialPowers.isMainProcess();
             """)

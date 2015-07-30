@@ -11,9 +11,8 @@
 #ifndef nsRuleProcessorData_h_
 #define nsRuleProcessorData_h_
 
-#include "nsPresContext.h" // for nsCompatibility
-#include "nsString.h"
 #include "nsChangeHint.h"
+#include "nsCompatibility.h"
 #include "nsCSSPseudoElements.h"
 #include "nsRuleWalker.h"
 #include "nsNthIndexCache.h"
@@ -181,16 +180,7 @@ struct MOZ_STACK_CLASS TreeMatchContext {
   }
 
 #ifdef DEBUG
-  void AssertHasAllStyleScopes(mozilla::dom::Element* aElement)
-  {
-    nsINode* cur = aElement->GetParentNode();
-    while (cur) {
-      if (cur->IsScopedStyleRoot()) {
-        MOZ_ASSERT(mStyleScopes.Contains(cur));
-      }
-      cur = cur->GetParentNode();
-    }
-  }
+  void AssertHasAllStyleScopes(mozilla::dom::Element* aElement) const;
 #endif
 
   bool SetStyleScopeForSelectorMatching(mozilla::dom::Element* aSubject,
@@ -239,8 +229,8 @@ struct MOZ_STACK_CLASS TreeMatchContext {
   /* Helper class for maintaining the ancestor state */
   class MOZ_STACK_CLASS AutoAncestorPusher {
   public:
-    AutoAncestorPusher(TreeMatchContext& aTreeMatchContext
-                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    explicit AutoAncestorPusher(TreeMatchContext& aTreeMatchContext
+                                MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : mPushedAncestor(false)
       , mPushedStyleScope(false)
       , mTreeMatchContext(aTreeMatchContext)
@@ -299,23 +289,24 @@ struct MOZ_STACK_CLASS TreeMatchContext {
   };
 
   /* Helper class for tracking whether we're skipping the ApplyStyleFixups
-   * code for flex items.
+   * code for special cases where child element style is modified based on
+   * parent display value.
    *
-   * The optional second parameter aSkipFlexItemStyleFixup allows this
-   * class to be instantiated but only conditionally activated (e.g.
-   * in cases where we may or may not want to be skipping flex-item
+   * The optional second parameter aSkipParentDisplayBasedStyleFixup allows
+   * this class to be instantiated but only conditionally activated (e.g.
+   * in cases where we may or may not want to be skipping flex/grid-item
    * style fixup for a particular chunk of code).
    */
-  class MOZ_STACK_CLASS AutoFlexItemStyleFixupSkipper {
+  class MOZ_STACK_CLASS AutoParentDisplayBasedStyleFixupSkipper {
   public:
-    AutoFlexItemStyleFixupSkipper(TreeMatchContext& aTreeMatchContext,
-                                  bool aSkipFlexItemStyleFixup = true
-                                  MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : mAutoRestorer(aTreeMatchContext.mSkippingFlexItemStyleFixup)
+    explicit AutoParentDisplayBasedStyleFixupSkipper(TreeMatchContext& aTreeMatchContext,
+                                                     bool aSkipParentDisplayBasedStyleFixup = true
+                                                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : mAutoRestorer(aTreeMatchContext.mSkippingParentDisplayBasedStyleFixup)
     {
       MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-      if (aSkipFlexItemStyleFixup) {
-        aTreeMatchContext.mSkippingFlexItemStyleFixup = true;
+      if (aSkipParentDisplayBasedStyleFixup) {
+        aTreeMatchContext.mSkippingParentDisplayBasedStyleFixup = true;
       }
     }
 
@@ -373,10 +364,11 @@ struct MOZ_STACK_CLASS TreeMatchContext {
   // Whether this document is using PB mode
   bool mUsingPrivateBrowsing;
 
-  // Whether we're currently skipping the flex item chunk of ApplyStyleFixups
-  // when resolving style (e.g. for children of elements that have a mandatory
-  // frame-type and can't be flex containers despite having "display:flex").
-  bool mSkippingFlexItemStyleFixup;
+  // Whether we're currently skipping the part of ApplyStyleFixups that changes
+  // style of child elements based on their parent's display value
+  // (e.g. for children of elements that have a mandatory frame-type for which
+  // we ignore "display:flex/grid").
+  bool mSkippingParentDisplayBasedStyleFixup;
 
   // Whether this TreeMatchContext is being used with an nsCSSRuleProcessor
   // for an HTML5 scoped style sheet.
@@ -408,7 +400,7 @@ struct MOZ_STACK_CLASS TreeMatchContext {
     , mIsHTMLDocument(aDocument->IsHTML())
     , mCompatMode(aDocument->GetCompatibilityMode())
     , mUsingPrivateBrowsing(false)
-    , mSkippingFlexItemStyleFixup(false)
+    , mSkippingParentDisplayBasedStyleFixup(false)
     , mForScopedStyle(false)
     , mCurrentStyleScope(nullptr)
   {

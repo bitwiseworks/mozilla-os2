@@ -16,21 +16,19 @@
 #include "GeckoProfiler.h"
 #include "mozilla/gfx/MacIOSurface.h"
 
-using namespace mozilla::gfx;
-
 namespace mozilla {
 namespace gl {
 
-static bool gUseDoubleBufferedWindows = true;
+using namespace mozilla::gfx;
 
 class CGLLibrary
 {
 public:
     CGLLibrary()
-      : mInitialized(false),
-        mOGLLibrary(nullptr),
-        mPixelFormat(nullptr)
-    { }
+        : mInitialized(false)
+        , mUseDoubleBufferedWindows(true)
+        , mOGLLibrary(nullptr)
+    {}
 
     bool EnsureInitialized()
     {
@@ -46,48 +44,33 @@ public:
         }
 
         const char* db = PR_GetEnv("MOZ_CGL_DB");
-        gUseDoubleBufferedWindows = (!db || *db != '0');
+        if (db) {
+            mUseDoubleBufferedWindows = *db != '0';
+        }
 
         mInitialized = true;
         return true;
     }
 
-    NSOpenGLPixelFormat *PixelFormat()
-    {
-        if (mPixelFormat == nullptr) {
-            NSOpenGLPixelFormatAttribute attribs[] = {
-                NSOpenGLPFAAccelerated,
-                NSOpenGLPFAAllowOfflineRenderers,
-                NSOpenGLPFADoubleBuffer,
-                0
-            };
-
-            if (!gUseDoubleBufferedWindows) {
-              attribs[2] = 0;
-            }
-
-            mPixelFormat = [[NSOpenGLPixelFormat alloc] initWithAttributes:attribs];
-        }
-
-        return mPixelFormat;
+    bool UseDoubleBufferedWindows() const {
+        MOZ_ASSERT(mInitialized);
+        return mUseDoubleBufferedWindows;
     }
+
 private:
     bool mInitialized;
+    bool mUseDoubleBufferedWindows;
     PRLibrary *mOGLLibrary;
-    NSOpenGLPixelFormat *mPixelFormat;
 };
 
 CGLLibrary sCGLLibrary;
 
-GLContextCGL::GLContextCGL(
-                  const SurfaceCaps& caps,
-                  GLContext *shareContext,
-                  NSOpenGLContext *context,
-                  bool isOffscreen)
-    : GLContext(caps, shareContext, isOffscreen),
-      mContext(context)
+GLContextCGL::GLContextCGL(const SurfaceCaps& caps, NSOpenGLContext* context,
+                           bool isOffscreen, ContextProfile profile)
+    : GLContext(caps, nullptr, isOffscreen)
+    , mContext(context)
 {
-    SetProfileVersion(ContextProfile::OpenGLCompatibility, 210);
+    SetProfileVersion(profile, 210);
 }
 
 GLContextCGL::~GLContextCGL()
@@ -162,7 +145,7 @@ GLContextCGL::SetupLookupFunction()
 bool
 GLContextCGL::IsDoubleBuffered() const
 {
-  return gUseDoubleBufferedWindows;
+  return sCGLLibrary.UseDoubleBufferedWindows();
 }
 
 bool
@@ -174,17 +157,13 @@ GLContextCGL::SupportsRobustness() const
 bool
 GLContextCGL::SwapBuffers()
 {
-  PROFILER_LABEL("GLContext", "SwapBuffers");
+  PROFILER_LABEL("GLContextCGL", "SwapBuffers",
+    js::ProfileEntry::Category::GRAPHICS);
+
   [mContext flushBuffer];
   return true;
 }
 
-
-static GLContextCGL *
-GetGlobalContextCGL()
-{
-    return static_cast<GLContextCGL*>(GLContextProviderCGL::GetGlobalContext());
-}
 
 already_AddRefed<GLContext>
 GLContextProviderCGL::CreateWrappingExisting(void*, void*)
@@ -192,14 +171,60 @@ GLContextProviderCGL::CreateWrappingExisting(void*, void*)
     return nullptr;
 }
 
+static const NSOpenGLPixelFormatAttribute kAttribs_singleBuffered[] = {
+    NSOpenGLPFAAccelerated,
+    NSOpenGLPFAAllowOfflineRenderers,
+    0
+};
+
+static const NSOpenGLPixelFormatAttribute kAttribs_doubleBuffered[] = {
+    NSOpenGLPFAAccelerated,
+    NSOpenGLPFAAllowOfflineRenderers,
+    NSOpenGLPFADoubleBuffer,
+    0
+};
+
+static const NSOpenGLPixelFormatAttribute kAttribs_offscreen[] = {
+    NSOpenGLPFAPixelBuffer,
+    0
+};
+
+static const NSOpenGLPixelFormatAttribute kAttribs_offscreen_coreProfile[] = {
+    NSOpenGLPFAAccelerated,
+    NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersion3_2Core,
+    0
+};
+
+static NSOpenGLContext*
+CreateWithFormat(const NSOpenGLPixelFormatAttribute* attribs)
+{
+    NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc]
+                                   initWithAttributes:attribs];
+    if (!format)
+        return nullptr;
+
+    NSOpenGLContext* context = [[NSOpenGLContext alloc] initWithFormat:format
+                                shareContext:nullptr];
+
+    [format release];
+
+    return context;
+}
+
 already_AddRefed<GLContext>
 GLContextProviderCGL::CreateForWindow(nsIWidget *aWidget)
 {
-    GLContextCGL *shareContext = GetGlobalContextCGL();
+    if (!sCGLLibrary.EnsureInitialized()) {
+        return nullptr;
+    }
 
-    NSOpenGLContext *context = [[NSOpenGLContext alloc]
-                                initWithFormat:sCGLLibrary.PixelFormat()
-                                shareContext:(shareContext ? shareContext->mContext : NULL)];
+    const NSOpenGLPixelFormatAttribute* attribs;
+    if (sCGLLibrary.UseDoubleBufferedWindows()) {
+        attribs = kAttribs_doubleBuffered;
+    } else {
+        attribs = kAttribs_singleBuffered;
+    }
+    NSOpenGLContext* context = CreateWithFormat(attribs);
     if (!context) {
         return nullptr;
     }
@@ -209,10 +234,13 @@ GLContextProviderCGL::CreateForWindow(nsIWidget *aWidget)
     [context setValues:&opaque forParameter:NSOpenGLCPSurfaceOpacity];
 
     SurfaceCaps caps = SurfaceCaps::ForRGBA();
-    nsRefPtr<GLContextCGL> glContext = new GLContextCGL(caps,
-                                                        shareContext,
-                                                        context);
+    ContextProfile profile = ContextProfile::OpenGLCompatibility;
+    nsRefPtr<GLContextCGL> glContext = new GLContextCGL(caps, context, false,
+                                                        profile);
+
     if (!glContext->Init()) {
+        glContext = nullptr;
+        [context release];
         return nullptr;
     }
 
@@ -220,50 +248,63 @@ GLContextProviderCGL::CreateForWindow(nsIWidget *aWidget)
 }
 
 static already_AddRefed<GLContextCGL>
-CreateOffscreenFBOContext(bool aShare = true)
+CreateOffscreenFBOContext(bool requireCompatProfile)
 {
     if (!sCGLLibrary.EnsureInitialized()) {
         return nullptr;
     }
 
-    GLContextCGL *shareContext = aShare ? GetGlobalContextCGL() : nullptr;
-    if (aShare && !shareContext) {
-        // if there is no share context, then we can't use FBOs.
-        return nullptr;
-    }
+    ContextProfile profile;
+    NSOpenGLContext* context = nullptr;
 
-    NSOpenGLContext *context = [[NSOpenGLContext alloc]
-                                initWithFormat:sCGLLibrary.PixelFormat()
-                                shareContext:shareContext ? shareContext->GetNSOpenGLContext() : NULL];
+    if (!requireCompatProfile) {
+        profile = ContextProfile::OpenGLCore;
+        context = CreateWithFormat(kAttribs_offscreen_coreProfile);
+    }
+    if (!context) {
+        profile = ContextProfile::OpenGLCompatibility;
+        context = CreateWithFormat(kAttribs_offscreen);
+    }
     if (!context) {
         return nullptr;
     }
 
     SurfaceCaps dummyCaps = SurfaceCaps::Any();
-    nsRefPtr<GLContextCGL> glContext = new GLContextCGL(dummyCaps, shareContext, context, true);
+    nsRefPtr<GLContextCGL> glContext = new GLContextCGL(dummyCaps, context,
+                                                        true, profile);
 
     return glContext.forget();
 }
 
 already_AddRefed<GLContext>
-GLContextProviderCGL::CreateOffscreen(const gfxIntSize& size,
-                                      const SurfaceCaps& caps)
+GLContextProviderCGL::CreateHeadless(bool requireCompatProfile)
 {
-    nsRefPtr<GLContextCGL> glContext = CreateOffscreenFBOContext();
-    if (glContext &&
-        glContext->Init() &&
-        glContext->InitOffscreen(ToIntSize(size), caps))
-    {
-        return glContext.forget();
-    }
+    nsRefPtr<GLContextCGL> gl;
+    gl = CreateOffscreenFBOContext(requireCompatProfile);
+    if (!gl)
+        return nullptr;
 
-    // everything failed
-    return nullptr;
+    if (!gl->Init())
+        return nullptr;
+
+    return gl.forget();
+}
+
+already_AddRefed<GLContext>
+GLContextProviderCGL::CreateOffscreen(const gfxIntSize& size,
+                                      const SurfaceCaps& caps,
+                                      bool requireCompatProfile)
+{
+    nsRefPtr<GLContext> glContext = CreateHeadless(requireCompatProfile);
+    if (!glContext->InitOffscreen(ToIntSize(size), caps))
+        return nullptr;
+
+    return glContext.forget();
 }
 
 static nsRefPtr<GLContext> gGlobalContext;
 
-GLContext *
+GLContext*
 GLContextProviderCGL::GetGlobalContext()
 {
     if (!sCGLLibrary.EnsureInitialized()) {
@@ -289,7 +330,7 @@ GLContextProviderCGL::GetGlobalContext()
 void
 GLContextProviderCGL::Shutdown()
 {
-  gGlobalContext = nullptr;
+    gGlobalContext = nullptr;
 }
 
 } /* namespace gl */

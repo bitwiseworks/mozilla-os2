@@ -16,10 +16,12 @@ function handleConferenceAddError(callToAdd) {
     is(evt.name, 'addError', 'conference addError');
 
     deferred.resolve();
-  }
-  conference.add(callToAdd);
+  };
 
-  return deferred.promise;
+  return conference.add(callToAdd)
+    .then(() => ok(false, "|conference.add| should be rejected"),
+          () => log("|conference.add| is rejected as expected"))
+    .then(() => deferred.promise);
 }
 
 function testConferenceAddError() {
@@ -40,8 +42,8 @@ function testConferenceAddError() {
   let inInfo5 = gInCallStrPool(inNumber5);
 
   return Promise.resolve()
-    .then(() => gSetupConferenceFiveCalls(outNumber, inNumber, inNumber2,
-                                          inNumber3, inNumber4))
+    .then(() => gSetupConference([outNumber, inNumber, inNumber2, inNumber3,
+                                 inNumber4]))
     .then(calls => {
       [outCall, inCall, inCall2, inCall3, inCall4] = calls;
     })
@@ -64,8 +66,6 @@ function testConferenceAddError() {
 // Start the test
 startTest(function() {
   testConferenceAddError()
-    .then(null, error => {
-      ok(false, 'promise rejects during test.');
-    })
+    .catch(error => ok(false, "Promise reject: " + error))
     .then(finish);
 });

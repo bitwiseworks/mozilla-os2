@@ -18,22 +18,24 @@
  * It asks Android for an icon, and creates a new channel for
  * that file to which all calls will be proxied.
  */
-class nsIconChannel MOZ_FINAL : public nsIChannel {
+class nsIconChannel final : public nsIChannel {
   public:
     NS_DECL_ISUPPORTS
     NS_FORWARD_NSIREQUEST(mRealChannel->)
     NS_FORWARD_NSICHANNEL(mRealChannel->)
 
-    nsIconChannel() {}
-    ~nsIconChannel() {}
+    nsIconChannel() { }
 
     /**
      * Called by nsIconProtocolHandler after it creates this channel.
      * Must be called before calling any other function on this object.
      * If this method fails, no other function must be called on this object.
      */
-    NS_HIDDEN_(nsresult) Init(nsIURI* aURI);
+    nsresult Init(nsIURI* aURI);
+
   private:
+    ~nsIconChannel() { }
+
     /**
      * The channel to the temp icon file (e.g. to /tmp/2qy9wjqw.html).
      * Will always be non-null after a successful Init.

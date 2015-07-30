@@ -23,78 +23,72 @@ public:
   CompositorD3D9(PCompositorParent* aParent, nsIWidget *aWidget);
   ~CompositorD3D9();
 
-  virtual bool Initialize() MOZ_OVERRIDE;
-  virtual void Destroy() MOZ_OVERRIDE {}
+  virtual bool Initialize() override;
+  virtual void Destroy() override {}
 
   virtual TextureFactoryIdentifier
-    GetTextureFactoryIdentifier() MOZ_OVERRIDE;
+    GetTextureFactoryIdentifier() override;
 
-  virtual bool CanUseCanvasLayerForSize(const gfx::IntSize &aSize) MOZ_OVERRIDE;
-  virtual int32_t GetMaxTextureSize() const MOZ_FINAL;
+  virtual bool CanUseCanvasLayerForSize(const gfx::IntSize &aSize) override;
+  virtual int32_t GetMaxTextureSize() const final;
 
-  virtual void SetTargetContext(gfx::DrawTarget *aTarget) MOZ_OVERRIDE
-  {
-    mTarget = aTarget;
-  }
-
-  virtual void MakeCurrent(MakeCurrentFlags aFlags = 0) MOZ_OVERRIDE {}
+  virtual void MakeCurrent(MakeCurrentFlags aFlags = 0) override {}
 
   virtual TemporaryRef<CompositingRenderTarget>
     CreateRenderTarget(const gfx::IntRect &aRect,
-                       SurfaceInitMode aInit) MOZ_OVERRIDE;
+                       SurfaceInitMode aInit) override;
 
   virtual TemporaryRef<CompositingRenderTarget>
     CreateRenderTargetFromSource(const gfx::IntRect &aRect,
                                  const CompositingRenderTarget *aSource,
-                                 const gfx::IntPoint &aSourcePoint) MOZ_OVERRIDE;
+                                 const gfx::IntPoint &aSourcePoint) override;
 
   virtual void SetRenderTarget(CompositingRenderTarget *aSurface);
-  virtual CompositingRenderTarget* GetCurrentRenderTarget() const MOZ_OVERRIDE
+  virtual CompositingRenderTarget* GetCurrentRenderTarget() const override
   {
     return mCurrentRT;
   }
 
-  virtual void SetDestinationSurfaceSize(const gfx::IntSize& aSize) MOZ_OVERRIDE {}
+  virtual void SetDestinationSurfaceSize(const gfx::IntSize& aSize) override {}
 
-  virtual void ClearRect(const gfx::Rect& aRect) MOZ_OVERRIDE;
+  virtual void ClearRect(const gfx::Rect& aRect) override;
 
   virtual void DrawQuad(const gfx::Rect &aRect,
                         const gfx::Rect &aClipRect,
                         const EffectChain &aEffectChain,
                         gfx::Float aOpacity,
-                        const gfx::Matrix4x4 &aTransform) MOZ_OVERRIDE;
+                        const gfx::Matrix4x4 &aTransform) override;
 
   virtual void BeginFrame(const nsIntRegion& aInvalidRegion,
                           const gfx::Rect *aClipRectIn,
-                          const gfx::Matrix& aTransform,
                           const gfx::Rect& aRenderBounds,
                           gfx::Rect *aClipRectOut = nullptr,
-                          gfx::Rect *aRenderBoundsOut = nullptr) MOZ_OVERRIDE;
+                          gfx::Rect *aRenderBoundsOut = nullptr) override;
 
-  virtual void EndFrame() MOZ_OVERRIDE;
+  virtual void EndFrame() override;
 
-  virtual void EndFrameForExternalComposition(const gfx::Matrix& aTransform) MOZ_OVERRIDE {}
+  virtual void EndFrameForExternalComposition(const gfx::Matrix& aTransform) override {}
 
-  virtual void AbortFrame() MOZ_OVERRIDE {}
+  virtual void PrepareViewport(const gfx::IntSize& aSize) override;
 
-  virtual void PrepareViewport(const gfx::IntSize& aSize,
-                               const gfx::Matrix& aWorldTransform) MOZ_OVERRIDE;
-
-  virtual bool SupportsPartialTextureUpdate() MOZ_OVERRIDE{ return true; }
+  virtual bool SupportsPartialTextureUpdate() override{ return true; }
 
 #ifdef MOZ_DUMP_PAINTING
-  virtual const char* Name() const MOZ_OVERRIDE { return "Direct3D9"; }
+  virtual const char* Name() const override { return "Direct3D9"; }
 #endif
 
-  virtual LayersBackend GetBackendType() const MOZ_OVERRIDE {
+  virtual LayersBackend GetBackendType() const override {
     return LayersBackend::LAYERS_D3D9;
   }
 
-  virtual nsIWidget* GetWidget() const MOZ_OVERRIDE { return mWidget; }
+  virtual nsIWidget* GetWidget() const override { return mWidget; }
 
   IDirect3DDevice9* device() const
   {
-    return mDeviceManager
+    // If the reset counts don't match it means the device was lost and we are
+    // in the process of recreating a new one or will be soon.
+    // cf. comment in EnsureSwapChain.
+    return mDeviceManager && mDeviceResetCount == mDeviceManager->GetDeviceResetCount()
            ? mDeviceManager->device()
            : nullptr;
   }
@@ -108,13 +102,13 @@ public:
    * schedule another composite so we get another go at rendering, thus we shouldn't
    * miss a composite due to re-creating a device.
    */
-  virtual bool Ready() MOZ_OVERRIDE;
+  virtual bool Ready() override;
 
   /**
    * Declare an offset to use when rendering layers. This will be ignored when
    * rendering to a target instead of the screen.
    */
-  virtual void SetScreenRenderOffset(const ScreenPoint& aOffset) MOZ_OVERRIDE
+  virtual void SetScreenRenderOffset(const ScreenPoint& aOffset) override
   {
     if (aOffset.x || aOffset.y) {
       NS_RUNTIMEABORT("SetScreenRenderOffset not supported by CompositorD3D9.");
@@ -123,7 +117,7 @@ public:
   }
 
   virtual TemporaryRef<DataTextureSource>
-    CreateDataTextureSource(TextureFlags aFlags = 0) MOZ_OVERRIDE;
+    CreateDataTextureSource(TextureFlags aFlags = TextureFlags::NO_FLAGS) override;
 private:
   // ensure mSize is up to date with respect to mWidget
   void EnsureSize();
@@ -154,7 +148,7 @@ private:
 
   void ReportFailure(const nsACString &aMsg, HRESULT aCode);
 
-  virtual gfx::IntSize GetWidgetSize() const MOZ_OVERRIDE
+  virtual gfx::IntSize GetWidgetSize() const override
   {
     return gfx::ToIntSize(mSize);
   }
@@ -167,11 +161,6 @@ private:
 
   /* Widget associated with this layer manager */
   nsIWidget *mWidget;
-
-  /*
-   * Context target, nullptr when drawing directly to our swap chain.
-   */
-  RefPtr<gfx::DrawTarget> mTarget;
 
   RefPtr<CompositingRenderTargetD3D9> mDefaultRT;
   RefPtr<CompositingRenderTargetD3D9> mCurrentRT;

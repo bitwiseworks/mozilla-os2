@@ -1,11 +1,7 @@
-﻿<!DOCTYPE HTML>
+<!DOCTYPE HTML>
 <html>
 <head>
-  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="application/javascript" src="head.js"></script>
   <script type="application/javascript" src="pc.js"></script>
-  <script type="application/javascript" src="templates.js"></script>
 </head>
 <body>
 <pre id="test">
@@ -15,14 +11,10 @@
     title: "Simple offer media constraint test with video/audio"
   });
 
-  runTest(function() {
+  runNetworkTest(function() {
     var test = new PeerConnectionTest();
-    test.chain.remove('PC_LOCAL_CHECK_STATS');
-    test.chain.remove('PC_REMOTE_CHECK_STATS');
-    test.setOfferConstraints({ mandatory: {
-      OfferToReceiveVideo: true,
-      OfferToReceiveAudio: true
-    }});
+    test.setMediaConstraints([], [{audio: true, video: true}]);
+    test.setOfferOptions({ offerToReceiveVideo: true, offerToReceiveAudio: true });
     test.run();
   });
 </script>

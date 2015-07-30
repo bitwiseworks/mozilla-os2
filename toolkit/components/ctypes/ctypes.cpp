@@ -24,7 +24,7 @@ namespace mozilla {
 namespace ctypes {
 
 static char*
-UnicodeToNative(JSContext *cx, const jschar *source, size_t slen)
+UnicodeToNative(JSContext *cx, const char16_t *source, size_t slen)
 {
   nsAutoCString native;
   nsDependentString unicode(reinterpret_cast<const char16_t*>(source), slen);
@@ -96,7 +96,7 @@ InitAndSealCTypesClass(JSContext* cx, JS::Handle<JSObject*> global)
   if (!JS_GetProperty(cx, global, "ctypes", &ctypes))
     return false;
 
-  JS_SetCTypesCallbacks(JSVAL_TO_OBJECT(ctypes), &sCallbacks);
+  JS_SetCTypesCallbacks(ctypes.toObjectOrNull(), &sCallbacks);
 
   // Seal up Object, Function, Array and Error and their prototypes.  (This
   // single object instance is shared amongst everyone who imports the ctypes

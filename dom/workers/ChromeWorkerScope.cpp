@@ -21,7 +21,7 @@ namespace {
 #ifdef BUILD_CTYPES
 
 char*
-UnicodeToNative(JSContext* aCx, const jschar* aSource, size_t aSourceLen)
+UnicodeToNative(JSContext* aCx, const char16_t* aSource, size_t aSourceLen)
 {
   nsDependentString unicode(aSource, aSourceLen);
 
@@ -59,11 +59,11 @@ DefineChromeWorkerFunctions(JSContext* aCx, JS::Handle<JSObject*> aGlobal)
       return false;
     }
 
-    static JSCTypesCallbacks callbacks = {
+    static const JSCTypesCallbacks callbacks = {
       UnicodeToNative
     };
 
-    JS_SetCTypesCallbacks(JSVAL_TO_OBJECT(ctypes), &callbacks);
+    JS_SetCTypesCallbacks(ctypes.toObjectOrNull(), &callbacks);
   }
 #endif // BUILD_CTYPES
 

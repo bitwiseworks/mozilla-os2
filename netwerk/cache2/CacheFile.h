@@ -14,6 +14,7 @@
 
 class nsIInputStream;
 class nsIOutputStream;
+class nsICacheEntryMetaDataVisitor;
 
 namespace mozilla {
 namespace net {
@@ -58,22 +59,22 @@ public:
                 bool aPriority,
                 CacheFileListener *aCallback);
 
-  NS_IMETHOD OnChunkRead(nsresult aResult, CacheFileChunk *aChunk);
-  NS_IMETHOD OnChunkWritten(nsresult aResult, CacheFileChunk *aChunk);
+  NS_IMETHOD OnChunkRead(nsresult aResult, CacheFileChunk *aChunk) override;
+  NS_IMETHOD OnChunkWritten(nsresult aResult, CacheFileChunk *aChunk) override;
   NS_IMETHOD OnChunkAvailable(nsresult aResult, uint32_t aChunkIdx,
-                              CacheFileChunk *aChunk);
-  NS_IMETHOD OnChunkUpdated(CacheFileChunk *aChunk);
+                              CacheFileChunk *aChunk) override;
+  NS_IMETHOD OnChunkUpdated(CacheFileChunk *aChunk) override;
 
-  NS_IMETHOD OnFileOpened(CacheFileHandle *aHandle, nsresult aResult);
+  NS_IMETHOD OnFileOpened(CacheFileHandle *aHandle, nsresult aResult) override;
   NS_IMETHOD OnDataWritten(CacheFileHandle *aHandle, const char *aBuf,
-                           nsresult aResult);
-  NS_IMETHOD OnDataRead(CacheFileHandle *aHandle, char *aBuf, nsresult aResult);
-  NS_IMETHOD OnFileDoomed(CacheFileHandle *aHandle, nsresult aResult);
-  NS_IMETHOD OnEOFSet(CacheFileHandle *aHandle, nsresult aResult);
-  NS_IMETHOD OnFileRenamed(CacheFileHandle *aHandle, nsresult aResult);
+                           nsresult aResult) override;
+  NS_IMETHOD OnDataRead(CacheFileHandle *aHandle, char *aBuf, nsresult aResult) override;
+  NS_IMETHOD OnFileDoomed(CacheFileHandle *aHandle, nsresult aResult) override;
+  NS_IMETHOD OnEOFSet(CacheFileHandle *aHandle, nsresult aResult) override;
+  NS_IMETHOD OnFileRenamed(CacheFileHandle *aHandle, nsresult aResult) override;
 
-  NS_IMETHOD OnMetadataRead(nsresult aResult);
-  NS_IMETHOD OnMetadataWritten(nsresult aResult);
+  NS_IMETHOD OnMetadataRead(nsresult aResult) override;
+  NS_IMETHOD OnMetadataWritten(nsresult aResult) override;
 
   NS_IMETHOD OpenInputStream(nsIInputStream **_retval);
   NS_IMETHOD OpenOutputStream(CacheOutputCloseListener *aCloseListener, nsIOutputStream **_retval);
@@ -85,15 +86,18 @@ public:
   // metadata forwarders
   nsresult GetElement(const char *aKey, char **_retval);
   nsresult SetElement(const char *aKey, const char *aValue);
+  nsresult VisitMetaData(nsICacheEntryMetaDataVisitor *aVisitor);
   nsresult ElementsSize(uint32_t *_retval);
   nsresult SetExpirationTime(uint32_t aExpirationTime);
   nsresult GetExpirationTime(uint32_t *_retval);
-  nsresult SetLastModified(uint32_t aLastModified);
-  nsresult GetLastModified(uint32_t *_retval);
   nsresult SetFrecency(uint32_t aFrecency);
   nsresult GetFrecency(uint32_t *_retval);
+  nsresult GetLastModified(uint32_t *_retval);
   nsresult GetLastFetched(uint32_t *_retval);
   nsresult GetFetchCount(uint32_t *_retval);
+  // Called by upper layers to indicated the entry has been fetched,
+  // i.e. delivered to the consumer.
+  nsresult OnFetched();
 
   bool DataSize(int64_t* aSize);
   void Key(nsACString& aKey) { aKey = mKey; }
@@ -117,19 +121,34 @@ private:
   void     Lock();
   void     Unlock();
   void     AssertOwnsLock() const;
-  void     ReleaseOutsideLock(nsISupports *aObject);
+  void     ReleaseOutsideLock(nsRefPtr<nsISupports> aObject);
 
-  nsresult GetChunk(uint32_t aIndex, bool aWriter,
+  enum ECallerType {
+    READER    = 0,
+    WRITER    = 1,
+    PRELOADER = 2
+  };
+
+  nsresult DoomLocked(CacheFileListener *aCallback);
+
+  nsresult GetChunk(uint32_t aIndex, ECallerType aCaller,
                     CacheFileChunkListener *aCallback,
                     CacheFileChunk **_retval);
-  nsresult GetChunkLocked(uint32_t aIndex, bool aWriter,
+  nsresult GetChunkLocked(uint32_t aIndex, ECallerType aCaller,
                           CacheFileChunkListener *aCallback,
                           CacheFileChunk **_retval);
-  nsresult RemoveChunk(CacheFileChunk *aChunk);
+
+  void     PreloadChunks(uint32_t aIndex);
+  bool     ShouldCacheChunk(uint32_t aIndex);
+  bool     MustKeepCachedChunk(uint32_t aIndex);
+
+  nsresult DeactivateChunk(CacheFileChunk *aChunk);
   void     RemoveChunkInternal(CacheFileChunk *aChunk, bool aCacheChunk);
 
-  nsresult RemoveInput(CacheFileInputStream *aInput);
-  nsresult RemoveOutput(CacheFileOutputStream *aOutput);
+  int64_t  BytesFromChunk(uint32_t aIndex);
+
+  nsresult RemoveInput(CacheFileInputStream *aInput, nsresult aStatus);
+  nsresult RemoveOutput(CacheFileOutputStream *aOutput, nsresult aStatus);
   nsresult NotifyChunkListener(CacheFileChunkListener *aCallback,
                                nsIEventTarget *aTarget,
                                nsresult aResult,
@@ -160,6 +179,10 @@ private:
                                              nsRefPtr<CacheFileChunk>& aChunk,
                                              void* aClosure);
 
+  static PLDHashOperator CleanUpCachedChunks(const uint32_t& aIdx,
+                                             nsRefPtr<CacheFileChunk>& aChunk,
+                                             void* aClosure);
+
   nsresult PadChunkWithZeroes(uint32_t aChunkIdx);
 
   void SetError(nsresult aStatus);
@@ -171,9 +194,12 @@ private:
   bool           mReady;
   bool           mMemoryOnly;
   bool           mOpenAsMemoryOnly;
+  bool           mPriority;
   bool           mDataAccessed;
   bool           mDataIsDirty;
   bool           mWritingMetadata;
+  bool           mPreloadWithoutInputStreams;
+  uint32_t       mPreloadChunkCount;
   nsresult       mStatus;
   int64_t        mDataSize;
   nsCString      mKey;
@@ -190,12 +216,12 @@ private:
   nsTArray<CacheFileInputStream*> mInputs;
   CacheFileOutputStream          *mOutput;
 
-  nsTArray<nsISupports*>          mObjsToRelease;
+  nsTArray<nsRefPtr<nsISupports>> mObjsToRelease;
 };
 
 class CacheFileAutoLock {
 public:
-  CacheFileAutoLock(CacheFile *aFile)
+  explicit CacheFileAutoLock(CacheFile *aFile)
     : mFile(aFile)
     , mLocked(true)
   {

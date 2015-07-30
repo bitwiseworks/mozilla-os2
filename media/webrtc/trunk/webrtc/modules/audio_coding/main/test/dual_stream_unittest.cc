@@ -8,29 +8,38 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "../acm2/acm_common_defs.h"
-#include "gtest/gtest.h"
-#include "audio_coding_module.h"
-#include "PCMFile.h"
-#include "module_common_types.h"
-#include "scoped_ptr.h"
-#include "typedefs.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/modules/audio_coding/main/acm2/acm_common_defs.h"
+#include "webrtc/modules/audio_coding/main/interface/audio_coding_module.h"
+#include "webrtc/modules/audio_coding/main/test/PCMFile.h"
+#include "webrtc/modules/audio_coding/main/test/utility.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/typedefs.h"
 #include "webrtc/test/testsupport/fileutils.h"
 #include "webrtc/test/testsupport/gtest_disable.h"
 
 namespace webrtc {
 
-class DualStreamTest :
-    public AudioPacketizationCallback,
-    public ::testing::Test {
+class DualStreamTest : public AudioPacketizationCallback,
+                       public ::testing::Test {
  protected:
   DualStreamTest();
   ~DualStreamTest();
 
-  int32_t SendData(FrameType frameType, uint8_t payload_type,
-                   uint32_t timestamp, const uint8_t* payload_data,
-                   uint16_t payload_size,
-                   const RTPFragmentationHeader* fragmentation);
+  void RunTest(int frame_size_primary_samples,
+               int num_channels_primary,
+               int sampling_rate,
+               bool start_in_sync,
+               int num_channels_input);
+
+  void ApiTest();
+
+  virtual int32_t SendData(
+      FrameType frameType, uint8_t payload_type,
+      uint32_t timestamp, const uint8_t* payload_data,
+      uint16_t payload_size,
+      const RTPFragmentationHeader* fragmentation) OVERRIDE;
 
   void Perform(bool start_in_sync, int num_channels_input);
 
@@ -94,11 +103,9 @@ DualStreamTest::DualStreamTest()
       num_received_payloads_ref_(),
       num_compared_payloads_(),
       last_timestamp_(),
-      received_payload_() {
-}
+      received_payload_() {}
 
-DualStreamTest::~DualStreamTest() {
-}
+DualStreamTest::~DualStreamTest() {}
 
 void DualStreamTest::PopulateCodecInstances(int frame_size_primary_ms,
                                             int num_channels_primary,
@@ -530,5 +537,4 @@ TEST_F(DualStreamTest, DISABLED_ON_ANDROID(Api)) {
   EXPECT_EQ(VADVeryAggr, vad_mode);
 }
 
-}
-  // namespace webrtc
+}  // namespace webrtc

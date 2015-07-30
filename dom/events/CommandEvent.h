@@ -29,7 +29,7 @@ public:
   // Forward to base class
   NS_FORWARD_TO_EVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObjectInternal(JSContext* aCx) override
   {
     return CommandEventBinding::Wrap(aCx, this);
   }
@@ -42,6 +42,9 @@ public:
   {
     aRv = InitCommandEvent(aType, aCanBubble, aCancelable, aCommand);
   }
+
+protected:
+  ~CommandEvent() {}
 };
 
 } // namespace dom

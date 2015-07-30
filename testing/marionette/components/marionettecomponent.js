@@ -6,6 +6,7 @@ this.CC = Components.Constructor;
 this.Cc = Components.classes;
 this.Ci = Components.interfaces;
 this.Cu = Components.utils;
+this.Cr = Components.results;
 
 const MARIONETTE_CONTRACTID = "@mozilla.org/marionette;1";
 const MARIONETTE_CID = Components.ID("{786a1369-dca5-4adc-8486-33d23c88010a}");
@@ -168,7 +169,8 @@ MarionetteComponent.prototype = {
         this.logger.info("Marionette server ready");
       }
       catch(e) {
-        this.logger.error('exception: ' + e.name + ', ' + e.message);
+        this.logger.error('exception: ' + e.name + ', ' + e.message + ': ' +
+                          e.fileName + " :: " + e.lineNumber);
       }
     }
   },

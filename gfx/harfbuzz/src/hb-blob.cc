@@ -25,7 +25,9 @@
  */
 
 /* http://www.oracle.com/technetwork/articles/servers-storage-dev/standardheaderfiles-453865.html */
+#ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 199309L
+#endif
 
 #include "hb-private.hh"
 
@@ -100,7 +102,10 @@ hb_blob_create (const char        *data,
 {
   hb_blob_t *blob;
 
-  if (!length || !(blob = hb_object_create<hb_blob_t> ())) {
+  if (!length ||
+      length >= 1u << 31 ||
+      data + length < data /* overflows */ ||
+      !(blob = hb_object_create<hb_blob_t> ())) {
     if (destroy)
       destroy (user_data);
     return hb_blob_get_empty ();

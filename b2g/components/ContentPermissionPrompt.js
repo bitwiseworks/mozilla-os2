@@ -35,12 +35,45 @@ var secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].getService(Ci.nsIScriptS
 let permissionSpecificChecker = {};
 
 XPCOMUtils.defineLazyServiceGetter(this,
-                                   "AudioManager",
-                                   "@mozilla.org/telephony/audiomanager;1",
-                                   "nsIAudioManager");
+                                   "TelephonyService",
+                                   "@mozilla.org/telephony/telephonyservice;1",
+                                   "nsITelephonyService");
 
 XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
                                   "resource://gre/modules/SystemAppProxy.jsm");
+
+/**
+ * Determine if a permission should be prompt to user or not.
+ *
+ * @param aPerm requested permission
+ * @param aAction the action according to principal
+ * @return true if prompt is required
+ */
+function shouldPrompt(aPerm, aAction) {
+  return ((aAction == Ci.nsIPermissionManager.PROMPT_ACTION) ||
+          (aAction == Ci.nsIPermissionManager.UNKNOWN_ACTION &&
+           PROMPT_FOR_UNKNOWN.indexOf(aPerm) >= 0));
+}
+
+/**
+ * Create the default choices for the requested permissions
+ *
+ * @param aTypesInfo requested permissions
+ * @return the default choices for permissions with options, return
+ *         undefined if no option in all requested permissions.
+ */
+function buildDefaultChoices(aTypesInfo) {
+  let choices;
+  for (let type of aTypesInfo) {
+    if (type.options.length > 0) {
+      if (!choices) {
+        choices = {};
+      }
+      choices[type.access] = type.options[0];
+    }
+  }
+  return choices;
+}
 
 /**
  * aTypesInfo is an array of {permission, access, action, deny} which keeps
@@ -62,9 +95,7 @@ function rememberPermission(aTypesInfo, aPrincipal, aSession)
   {
     let type =
       permissionManager.testExactPermissionFromPrincipal(aPrincipal, aPerm);
-    if (type == Ci.nsIPermissionManager.PROMPT_ACTION ||
-        (type == Ci.nsIPermissionManager.UNKNOWN_ACTION &&
-        PROMPT_FOR_UNKNOWN.indexOf(aPerm) >= 0)) {
+    if (shouldPrompt(aPerm, type)) {
       debug("add " + aPerm + " to permission manager with ALLOW_ACTION");
       if (!aSession) {
         permissionManager.addFromPrincipal(aPrincipal,
@@ -104,22 +135,23 @@ ContentPermissionPrompt.prototype = {
       type.action =
         Services.perms.testExactPermissionFromPrincipal(request.principal,
                                                         type.access);
-      if (type.action == Ci.nsIPermissionManager.UNKNOWN_ACTION &&
-          PROMPT_FOR_UNKNOWN.indexOf(type.access) >= 0) {
+      if (shouldPrompt(type.access, type.action)) {
         type.action = Ci.nsIPermissionManager.PROMPT_ACTION;
       }
     });
 
-    // If all permissions are allowed already, call allow() without prompting.
+    // If all permissions are allowed already and no more than one option,
+    // call allow() without prompting.
     let checkAllowPermission = function(type) {
-      if (type.action == Ci.nsIPermissionManager.ALLOW_ACTION) {
+      if (type.action == Ci.nsIPermissionManager.ALLOW_ACTION &&
+          type.options.length <= 1) {
         return true;
       }
       return false;
     }
     if (typesInfo.every(checkAllowPermission)) {
       debug("all permission requests are allowed");
-      request.allow();
+      request.allow(buildDefaultChoices(typesInfo));
       return true;
     }
 
@@ -185,7 +217,8 @@ ContentPermissionPrompt.prototype = {
       }
       return !type.deny;
     }
-    if (typesInfo.filter(notDenyAppPrincipal).length === 0) {
+    // Cancel the entire request if one of the requested permissions is denied
+    if (!typesInfo.every(notDenyAppPrincipal)) {
       request.cancel();
       return true;
     }
@@ -204,13 +237,7 @@ ContentPermissionPrompt.prototype = {
     return false;
   },
 
-  _id: 0,
   prompt: function(request) {
-    if (secMan.isSystemPrincipal(request.principal)) {
-      request.allow();
-      return;
-    }
-
     // Initialize the typesInfo and set the default value.
     let typesInfo = [];
     let perms = request.types.QueryInterface(Ci.nsIArray);
@@ -234,6 +261,12 @@ ContentPermissionPrompt.prototype = {
       typesInfo.push(tmp);
     }
 
+    if (secMan.isSystemPrincipal(request.principal)) {
+      request.allow(buildDefaultChoices(typesInfo));
+      return;
+    }
+
+
     if (typesInfo.length == 0) {
       request.cancel();
       return;
@@ -254,18 +287,15 @@ ContentPermissionPrompt.prototype = {
        return;
     }
 
-    // prompt PROMPT_ACTION request only.
-    typesInfo.forEach(function(aType, aIndex) {
-      if (aType.action != Ci.nsIPermissionManager.PROMPT_ACTION || aType.deny) {
-        typesInfo.splice(aIndex);
-      }
+    // prompt PROMPT_ACTION request or request with options.
+    typesInfo = typesInfo.filter(function(type) {
+      return !type.deny && (type.action == Ci.nsIPermissionManager.PROMPT_ACTION || type.options.length > 0) ;
     });
 
     let frame = request.element;
-    let requestId = this._id++;
 
     if (!frame) {
-      this.delegatePrompt(request, requestId, typesInfo);
+      this.delegatePrompt(request, typesInfo);
       return;
     }
 
@@ -280,7 +310,7 @@ ContentPermissionPrompt.prototype = {
       if (evt.detail.visible === true)
         return;
 
-      self.cancelPrompt(request, requestId, typesInfo);
+      self.cancelPrompt(request, typesInfo);
       cancelRequest();
     }
 
@@ -297,7 +327,7 @@ ContentPermissionPrompt.prototype = {
       // away but the request is still here.
       frame.addEventListener("mozbrowservisibilitychange", onVisibilityChange);
 
-      self.delegatePrompt(request, requestId, typesInfo, function onCallback() {
+      self.delegatePrompt(request, typesInfo, function onCallback() {
         frame.removeEventListener("mozbrowservisibilitychange", onVisibilityChange);
       });
     };
@@ -308,14 +338,13 @@ ContentPermissionPrompt.prototype = {
     }
   },
 
-  cancelPrompt: function(request, requestId, typesInfo) {
-    this.sendToBrowserWindow("cancel-permission-prompt", request, requestId,
+  cancelPrompt: function(request, typesInfo) {
+    this.sendToBrowserWindow("cancel-permission-prompt", request,
                              typesInfo);
   },
 
-  delegatePrompt: function(request, requestId, typesInfo, callback) {
-
-    this.sendToBrowserWindow("permission-prompt", request, requestId, typesInfo,
+  delegatePrompt: function(request, typesInfo, callback) {
+    this.sendToBrowserWindow("permission-prompt", request, typesInfo,
                              function(type, remember, choices) {
       if (type == "permission-allow") {
         rememberPermission(typesInfo, request.principal, !remember);
@@ -339,16 +368,26 @@ ContentPermissionPrompt.prototype = {
                                           0);
         }
       }
-      typesInfo.forEach(addDenyPermission);
+      try {
+        // This will trow if we are canceling because the remote process died.
+        // Just eat the exception and call the callback that will cleanup the
+        // visibility event listener.
+        typesInfo.forEach(addDenyPermission);
+      } catch(e) { }
 
       if (callback) {
         callback();
       }
-      request.cancel();
+
+      try {
+        request.cancel();
+      } catch(e) { }
     });
   },
 
-  sendToBrowserWindow: function(type, request, requestId, typesInfo, callback) {
+  sendToBrowserWindow: function(type, request, typesInfo, callback) {
+    let requestId = Cc["@mozilla.org/uuid-generator;1"]
+                  .getService(Ci.nsIUUIDGenerator).generateUUID().toString();
     if (callback) {
       SystemAppProxy.addEventListener("mozContentEvent", function contentEvent(evt) {
         let detail = evt.detail;
@@ -366,6 +405,9 @@ ContentPermissionPrompt.prototype = {
                     principal.appStatus == Ci.nsIPrincipal.APP_STATUS_CERTIFIED)
                     ? true
                     : request.remember;
+    let isGranted = typesInfo.every(function(type) {
+      return type.action == Ci.nsIPermissionManager.ALLOW_ACTION;
+    });
     let permissions = {};
     for (let i in typesInfo) {
       debug("prompt " + typesInfo[i].permission);
@@ -378,13 +420,31 @@ ContentPermissionPrompt.prototype = {
       id: requestId,
       origin: principal.origin,
       isApp: isApp,
-      remember: remember
+      remember: remember,
+      isGranted: isGranted,
     };
 
     if (isApp) {
       details.manifestURL = DOMApplicationRegistry.getManifestURLByLocalId(principal.appId);
     }
-    SystemAppProxy.dispatchEvent(details);
+
+    // request.element is defined for OOP content, while request.window
+    // is defined for In-Process content.
+    // In both cases the message needs to be dispatched to the top-level
+    // <iframe mozbrowser> container in the system app.
+    // So the above code iterates over window.realFrameElement in order
+    // to crosss mozbrowser iframes boundaries and find the top-level
+    // one in the system app.
+    // window.realFrameElement will be |null| if the code try to cross
+    // content -> chrome boundaries.
+    let targetElement = request.element;
+    let targetWindow = request.window || targetElement.ownerDocument.defaultView;
+    while (targetWindow.realFrameElement) {
+      targetElement = targetWindow.realFrameElement;
+      targetWindow = targetElement.ownerDocument.defaultView;
+    }
+
+    SystemAppProxy.dispatchEvent(details, targetElement);
   },
 
   classID: Components.ID("{8c719f03-afe0-4aac-91ff-6c215895d467}"),
@@ -395,12 +455,29 @@ ContentPermissionPrompt.prototype = {
 (function() {
   // Do not allow GetUserMedia while in call.
   permissionSpecificChecker["audio-capture"] = function(request) {
-    if (AudioManager.phoneState === Ci.nsIAudioManager.PHONE_STATE_IN_CALL) {
-      request.cancel();
-      return true;
-    } else {
+    let forbid = false;
+
+    try {
+      // nsITelephonyService.enumerateCalls is synchronous.
+      TelephonyService.enumerateCalls({
+        QueryInterface: XPCOMUtils.generateQI([Ci.nsITelephonyListener]),
+        enumerateCallStateComplete: function() {},
+        enumerateCallState: function(callInfo) {
+          if (callInfo.callState == Ci.nsITelephonyService.CALL_STATE_CONNECTED) {
+            forbid = true;
+          }
+        },
+      });
+    } catch (e) {
+      // No restriction if Telephony service doesn't exist.
       return false;
     }
+
+    if (forbid) {
+      request.cancel();
+    }
+
+    return forbid;
   };
 })();
 

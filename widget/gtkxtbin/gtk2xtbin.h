@@ -9,18 +9,15 @@
 #define __GTK_XTBIN_H__
 
 #include <gtk/gtk.h>
-#if (MOZ_WIDGET_GTK == 3)
-#include <gtk/gtkx.h>
-#endif
 #include <X11/Intrinsic.h>
 #include <X11/Xutil.h>
 #include <X11/Xlib.h>
 #ifdef MOZILLA_CLIENT
-#include "nscore.h"
+#include "mozilla/Types.h"
 #ifdef _IMPL_GTKXTBIN_API
-#define GTKXTBIN_API(type) NS_EXPORT_(type)
+#define GTKXTBIN_API(type) MOZ_EXPORT type
 #else
-#define GTKXTBIN_API(type) NS_IMPORT_(type)
+#define GTKXTBIN_API(type) MOZ_IMPORT_API type
 #endif
 #else
 #define GTKXTBIN_API(type) type
@@ -30,6 +27,19 @@
 extern "C" {
 #endif /* __cplusplus */
 
+typedef struct _XtClient XtClient;
+
+struct _XtClient {
+  Display	*xtdisplay;
+  Widget	top_widget;    /* The toplevel widget */
+  Widget	child_widget;  /* The embedded widget */
+  Visual	*xtvisual;
+  int		xtdepth;
+  Colormap	xtcolormap;
+  Window	oldwindow;
+};
+
+#if (GTK_MAJOR_VERSION == 2)
 typedef struct _GtkXtBin GtkXtBin;
 typedef struct _GtkXtBinClass GtkXtBinClass;
 
@@ -42,17 +52,6 @@ typedef struct _GtkXtBinClass GtkXtBinClass;
                                          GTK_TYPE_XTBIN))
 #define GTK_IS_XTBIN_CLASS(klass)       (G_TYPE_CHECK_CLASS_TYPE ((klass), \
                                          GTK_TYPE_XTBIN))
-typedef struct _XtClient XtClient;
-
-struct _XtClient {
-  Display	*xtdisplay;
-  Widget	top_widget;    /* The toplevel widget */
-  Widget	child_widget;  /* The embedded widget */
-  Visual	*xtvisual;
-  int		xtdepth;
-  Colormap	xtcolormap;
-  Window	oldwindow;
-};
 
 struct _GtkXtBin
 {
@@ -71,6 +70,7 @@ struct _GtkXtBinClass
 
 GTKXTBIN_API(GType)       gtk_xtbin_get_type (void);
 GTKXTBIN_API(GtkWidget *) gtk_xtbin_new (GdkWindow *parent_window, String *f);
+#endif
 
 typedef struct _XtTMRec {
     XtTranslations  translations;       /* private to Translation Manager    */

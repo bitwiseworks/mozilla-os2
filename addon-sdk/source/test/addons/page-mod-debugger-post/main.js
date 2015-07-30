@@ -6,6 +6,7 @@
 const { Cu } = require('chrome');
 const { PageMod } = require('sdk/page-mod');
 const tabs = require('sdk/tabs');
+const { closeTab } = require('sdk/tabs/utils');
 const promise = require('sdk/core/promise')
 const { getMostRecentBrowserWindow } = require('sdk/window/utils');
 const { data } = require('sdk/self');
@@ -28,7 +29,7 @@ exports.testDebugger = function(assert, done) {
   set('devtools.debugger.log', true);
 
   if (!DebuggerServer.initialized) {
-    DebuggerServer.init(() => true);
+    DebuggerServer.init();
     DebuggerServer.addBrowserActors();
   }
 
@@ -47,6 +48,7 @@ exports.testDebugger = function(assert, done) {
           then(_ => { assert.pass('testDebuggerStatement called') }).
           then(closeConnection).
           then(_ => { assert.pass('closeConnection called') }).
+          then(_ => { tab.close() }).
           then(done).
           then(null, aError => {
             ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
@@ -90,7 +92,7 @@ function testDebuggerStatement([aGrip, aResponse]) {
       ok(true, 'the page-mod was attached to ' + mod.tab.url);
 
       require('sdk/timers').setTimeout(function() {
-        let debuggee = getMostRecentBrowserWindow().gBrowser.selectedTab.linkedBrowser.contentWindow.wrappedJSObject;
+        let debuggee = getMostRecentBrowserWindow().gBrowser.selectedBrowser.contentWindow.wrappedJSObject;
         debuggee.runDebuggerStatement();
         ok(true, 'called runDebuggerStatement');
       }, 500)

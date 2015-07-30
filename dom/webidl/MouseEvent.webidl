@@ -22,12 +22,13 @@ interface MouseEvent : UIEvent {
   readonly attribute short          button;
   readonly attribute unsigned short buttons;
   readonly attribute EventTarget?   relatedTarget;
+  readonly attribute DOMString?     region;
   // Deprecated in DOM Level 3:
   [Throws]
   void                              initMouseEvent(DOMString typeArg, 
                                                    boolean canBubbleArg, 
                                                    boolean cancelableArg, 
-                                                   WindowProxy? viewArg, 
+                                                   Window? viewArg,
                                                    long detailArg, 
                                                    long screenXArg, 
                                                    long screenYArg, 
@@ -51,15 +52,7 @@ partial interface MouseEvent
 };
 
 // Suggested initMouseEvent replacement initializer:
-dictionary MouseEventInit {
-  // Attributes from Event:
-  boolean        bubbles       = false;
-  boolean        cancelable    = false;
-
-  // Attributes from UIEvent:
-  WindowProxy?   view          = null;
-  long           detail        = 0;
-
+dictionary MouseEventInit : UIEventInit {
   // Attributes for MouseEvent:
   long           screenX       = 0;
   long           screenY       = 0;
@@ -99,7 +92,7 @@ partial interface MouseEvent
   void                initNSMouseEvent(DOMString typeArg,
                                        boolean canBubbleArg,
                                        boolean cancelableArg,
-                                       WindowProxy? viewArg,
+                                       Window? viewArg,
                                        long detailArg,
                                        long screenXArg,
                                        long screenYArg,
@@ -113,6 +106,8 @@ partial interface MouseEvent
                                        EventTarget? relatedTargetArg,
                                        float pressure,
                                        unsigned short inputSourceArg);
+  [ChromeOnly]
+  readonly attribute boolean hitCluster; // True when touch occurs in a cluster of links
 
 };
 

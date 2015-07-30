@@ -12,18 +12,18 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(DOMError, mWindow)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DOMError, mWindow)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMError)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMError)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMError)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+  NS_INTERFACE_MAP_ENTRY(DOMError)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
 DOMError::DOMError(nsPIDOMWindow* aWindow)
   : mWindow(aWindow)
 {
-  SetIsDOMBinding();
 }
 
 DOMError::DOMError(nsPIDOMWindow* aWindow, nsresult aValue)
@@ -34,15 +34,12 @@ DOMError::DOMError(nsPIDOMWindow* aWindow, nsresult aValue)
 
   CopyUTF8toUTF16(name, mName);
   CopyUTF8toUTF16(message, mMessage);
-
-  SetIsDOMBinding();
 }
 
 DOMError::DOMError(nsPIDOMWindow* aWindow, const nsAString& aName)
   : mWindow(aWindow)
   , mName(aName)
 {
-  SetIsDOMBinding();
 }
 
 DOMError::DOMError(nsPIDOMWindow* aWindow, const nsAString& aName,
@@ -51,7 +48,6 @@ DOMError::DOMError(nsPIDOMWindow* aWindow, const nsAString& aName,
   , mName(aName)
   , mMessage(aMessage)
 {
-  SetIsDOMBinding();
 }
 
 DOMError::~DOMError()

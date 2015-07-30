@@ -83,7 +83,6 @@ DataTransfer::DataTransfer(nsISupports* aParent, uint32_t aEventType,
     mDragImageY(0)
 {
   MOZ_ASSERT(mParent);
-  SetIsDOMBinding();
   // For these events, we want to be able to add data to the data transfer, so
   // clear the readonly state. Otherwise, the data is already present. For
   // external usage, cache the data from the native clipboard or drag.
@@ -129,7 +128,6 @@ DataTransfer::DataTransfer(nsISupports* aParent,
     mDragImageY(aDragImageY)
 {
   MOZ_ASSERT(mParent);
-  SetIsDOMBinding();
   // The items are copied from aItems into mItems. There is no need to copy
   // the actual data in the items as the data transfer will be read only. The
   // draggesture and dragstart events are the only times when items are
@@ -271,7 +269,7 @@ DataTransfer::GetMozUserCancelled(bool* aUserCancelled)
   return NS_OK;
 }
 
-nsDOMFileList*
+FileList*
 DataTransfer::GetFiles(ErrorResult& aRv)
 {
   if (mEventType != NS_DRAGDROP_DROP && mEventType != NS_DRAGDROP_DRAGDROP &&
@@ -280,7 +278,7 @@ DataTransfer::GetFiles(ErrorResult& aRv)
   }
 
   if (!mFiles) {
-    mFiles = new nsDOMFileList(static_cast<nsIDOMDataTransfer*>(this));
+    mFiles = new FileList(static_cast<nsIDOMDataTransfer*>(this));
 
     uint32_t count = mItems.Length();
 
@@ -305,7 +303,7 @@ DataTransfer::GetFiles(ErrorResult& aRv)
       if (!file)
         continue;
 
-      nsRefPtr<nsDOMFileFile> domFile = new nsDOMFileFile(file);
+      nsRefPtr<File> domFile = File::CreateFromFile(GetParentObject(), file);
 
       if (!mFiles->Append(domFile)) {
         aRv.Throw(NS_ERROR_FAILURE);
@@ -381,10 +379,7 @@ DataTransfer::GetData(const nsAString& aFormat, nsAString& aData,
     // for the URL type, parse out the first URI from the list. The URIs are
     // separated by newlines
     nsAutoString lowercaseFormat;
-    aRv = nsContentUtils::ASCIIToLower(aFormat, lowercaseFormat);
-    if (aRv.Failed()) {
-      return;
-    }
+    nsContentUtils::ASCIIToLower(aFormat, lowercaseFormat);
 
     if (lowercaseFormat.EqualsLiteral("url")) {
       int32_t lastidx = 0, idx;
@@ -594,9 +589,7 @@ DataTransfer::MozGetDataAt(const nsAString& aFormat, uint32_t aIndex,
       (mEventType != NS_DRAGDROP_DROP && mEventType != NS_DRAGDROP_DRAGDROP &&
        mEventType != NS_PASTE &&
        !nsContentUtils::IsCallerChrome())) {
-    nsresult rv = NS_OK;
-    principal = GetCurrentPrincipal(&rv);
-    NS_ENSURE_SUCCESS(rv, rv);
+    principal = nsContentUtils::SubjectPrincipal();
   }
 
   uint32_t count = item.Length();
@@ -625,9 +618,9 @@ DataTransfer::MozGetDataAt(const nsAString& aFormat, uint32_t aIndex,
           MOZ_ASSERT(sp, "This cannot fail on the main thread.");
           nsIPrincipal* dataPrincipal = sp->GetPrincipal();
           NS_ENSURE_TRUE(dataPrincipal, NS_ERROR_DOM_SECURITY_ERR);
-          NS_ENSURE_TRUE(principal || (principal = GetCurrentPrincipal(&rv)),
-                         NS_ERROR_DOM_SECURITY_ERR);
-          NS_ENSURE_SUCCESS(rv, rv);
+          if (!principal) {
+            principal = nsContentUtils::SubjectPrincipal();
+          }
           bool equals = false;
           NS_ENSURE_TRUE(NS_SUCCEEDED(principal->Equals(dataPrincipal, &equals)) && equals,
                          NS_ERROR_DOM_SECURITY_ERR);
@@ -697,11 +690,8 @@ DataTransfer::MozSetDataAt(const nsAString& aFormat, nsIVariant* aData,
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
-  nsresult rv = NS_OK;
-  nsIPrincipal* principal = GetCurrentPrincipal(&rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return SetDataWithPrincipal(aFormat, aData, aIndex, principal);
+  return SetDataWithPrincipal(aFormat, aData, aIndex,
+                              nsContentUtils::SubjectPrincipal());
 }
 
 void
@@ -754,12 +744,7 @@ DataTransfer::MozClearDataAtHelper(const nsAString& aFormat, uint32_t aIndex,
   nsAutoString format;
   GetRealFormat(aFormat, format);
 
-  nsresult rv = NS_OK;
-  nsIPrincipal* principal = GetCurrentPrincipal(&rv);
-  if (NS_FAILED(rv)) {
-    aRv = rv;
-    return;
-  }
+  nsIPrincipal* principal = nsContentUtils::SubjectPrincipal();
 
   // if the format is empty, clear all formats
   bool clearall = format.IsEmpty();
@@ -1087,21 +1072,6 @@ DataTransfer::SetDataWithPrincipal(const nsAString& aFormat,
   formatitem->mData = aData;
 
   return NS_OK;
-}
-
-nsIPrincipal*
-DataTransfer::GetCurrentPrincipal(nsresult* rv)
-{
-  nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-
-  nsCOMPtr<nsIPrincipal> currentPrincipal;
-  *rv = ssm->GetSubjectPrincipal(getter_AddRefs(currentPrincipal));
-  NS_ENSURE_SUCCESS(*rv, nullptr);
-
-  if (!currentPrincipal)
-    ssm->GetSystemPrincipal(getter_AddRefs(currentPrincipal));
-
-  return currentPrincipal.get();
 }
 
 void

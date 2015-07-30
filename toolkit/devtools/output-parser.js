@@ -14,7 +14,13 @@ const MAX_ITERATIONS = 100;
 const REGEX_QUOTES = /^".*?"|^".*|^'.*?'|^'.*/;
 const REGEX_WHITESPACE = /^\s+/;
 const REGEX_FIRST_WORD_OR_CHAR = /^\w+|^./;
-const REGEX_CSS_PROPERTY_VALUE = /(^[^;]+)/;
+const REGEX_CUBIC_BEZIER = /^linear|^ease-in-out|^ease-in|^ease-out|^ease|^cubic-bezier\(([0-9.\- ]+,){3}[0-9.\- ]+\)/;
+
+// CSS variable names are identifiers which the spec defines as follows:
+//   In CSS, identifiers (including element names, classes, and IDs in
+//   selectors) can contain only the characters [a-zA-Z0-9] and ISO 10646
+//   characters U+00A0 and higher, plus the hyphen (-) and the underscore (_).
+const REGEX_CSS_VAR = /\bvar\(\s*--[-_a-zA-Z0-9\u00A0-\u10FFFF]+\s*\)/;
 
 /**
  * This regex matches:
@@ -91,6 +97,11 @@ OutputParser.prototype = {
    */
   parseCssProperty: function(name, value, options={}) {
     options = this._mergeOptions(options);
+
+    // XXX: This is a quick fix that should stay until bug 977063 gets fixed.
+    // It avoids parsing "linear" as a timing-function in "linear-gradient(...)"
+    options.expectCubicBezier = ["transition", "transition-timing-function",
+      "animation", "animation-timing-function"].indexOf(name) !== -1;
 
     if (this._cssPropertySupportsValue(name, value)) {
       return this._parse(value, options);
@@ -182,6 +193,15 @@ OutputParser.prototype = {
         continue;
       }
 
+      matched = text.match(REGEX_CSS_VAR);
+      if (matched) {
+        let match = matched[0];
+
+        text = this._trimMatchFromStart(text, match);
+        this._appendTextNode(match);
+        continue;
+      }
+
       matched = text.match(REGEX_WHITESPACE);
       if (matched) {
         let match = matched[0];
@@ -198,6 +218,17 @@ OutputParser.prototype = {
 
         this._appendURL(match, url, options);
         continue;
+      }
+
+      if (options.expectCubicBezier) {
+        matched = text.match(REGEX_CUBIC_BEZIER);
+        if (matched) {
+          let match = matched[0];
+          text = this._trimMatchFromStart(text, match);
+
+          this._appendCubicBezier(match, options);
+          continue;
+        }
       }
 
       matched = text.match(REGEX_ALL_CSS_PROPERTIES);
@@ -283,6 +314,35 @@ OutputParser.prototype = {
   },
 
   /**
+   * Append a cubic-bezier timing function value to the output
+   *
+   * @param {String} bezier
+   *        The cubic-bezier timing function
+   * @param {Object} options
+   *        Options object. For valid options and default values see
+   *        _mergeOptions()
+   */
+  _appendCubicBezier: function(bezier, options) {
+    let container = this._createNode("span", {
+       "data-bezier": bezier
+    });
+
+    if (options.bezierSwatchClass) {
+      let swatch = this._createNode("span", {
+        class: options.bezierSwatchClass
+      });
+      container.appendChild(swatch);
+    }
+
+    let value = this._createNode("span", {
+      class: options.bezierClass
+    }, bezier);
+
+    container.appendChild(value);
+    this.parsed.push(container);
+  },
+
+  /**
    * Check if a CSS property supports a specific value.
    *
    * @param  {String} name
@@ -291,19 +351,7 @@ OutputParser.prototype = {
    *         CSS Property value to check
    */
   _cssPropertySupportsValue: function(name, value) {
-    let win = Services.appShell.hiddenDOMWindow;
-    let doc = win.document;
-
-    name = name.replace(/-\w{1}/g, function(match) {
-      return match.charAt(1).toUpperCase();
-    });
-
-    value = value.replace("!important", "");
-
-    let div = doc.createElement("div");
-    div.style[name] = value;
-
-    return !!div.style[name];
+    return DOMUtils.cssPropertyIsValid(name, value);
   },
 
   /**
@@ -332,18 +380,29 @@ OutputParser.prototype = {
     let colorObj = new colorUtils.CssColor(color);
 
     if (this._isValidColor(colorObj)) {
+      let container = this._createNode("span", {
+         "data-color": color
+      });
+
       if (options.colorSwatchClass) {
-        this._appendNode("span", {
+        let swatch = this._createNode("span", {
           class: options.colorSwatchClass,
           style: "background-color:" + color
         });
+        container.appendChild(swatch);
       }
+
       if (options.defaultColorType) {
         color = colorObj.toString();
+        container.dataset["color"] = color;
       }
-      this._appendNode("span", {
+
+      let value = this._createNode("span", {
         class: options.colorClass
       }, color);
+
+      container.appendChild(value);
+      this.parsed.push(container);
       return true;
     }
     return false;
@@ -362,9 +421,7 @@ OutputParser.prototype = {
     */
   _appendURL: function(match, url, options={}) {
     if (options.urlClass) {
-      // We use single quotes as this works inside html attributes (e.g. the
-      // markup view).
-      this._appendTextNode("url('");
+      this._appendTextNode("url(\"");
 
       let href = url;
       if (options.baseURI) {
@@ -377,14 +434,14 @@ OutputParser.prototype = {
         href: href
       }, url);
 
-      this._appendTextNode("')");
+      this._appendTextNode("\")");
     } else {
-      this._appendTextNode("url('" + url + "')");
+      this._appendTextNode("url(\"" + url + "\")");
     }
   },
 
   /**
-   * Append a node to the output.
+   * Create a node.
    *
    * @param  {String} tagName
    *         Tag type e.g. "div"
@@ -393,8 +450,9 @@ OutputParser.prototype = {
    * @param  {String} [value]
    *         If a value is included it will be appended as a text node inside
    *         the tag. This is useful e.g. for span tags.
+   * @return {Node} Newly created Node.
    */
-  _appendNode: function(tagName, attributes, value="") {
+  _createNode: function(tagName, attributes, value="") {
     let win = Services.appShell.hiddenDOMWindow;
     let doc = win.document;
     let node = doc.createElementNS(HTML_NS, tagName);
@@ -411,6 +469,22 @@ OutputParser.prototype = {
       node.appendChild(textNode);
     }
 
+    return node;
+  },
+
+  /**
+   * Append a node to the output.
+   *
+   * @param  {String} tagName
+   *         Tag type e.g. "div"
+   * @param  {Object} attributes
+   *         e.g. {class: "someClass", style: "cursor:pointer"};
+   * @param  {String} [value]
+   *         If a value is included it will be appended as a text node inside
+   *         the tag. This is useful e.g. for span tags.
+   */
+  _appendNode: function(tagName, attributes, value="") {
+    let node = this._createNode(tagName, attributes, value);
     this.parsed.push(node);
   },
 
@@ -465,6 +539,9 @@ OutputParser.prototype = {
    *           - colorSwatchClass: ""   // The class to use for color swatches.
    *           - colorClass: ""         // The class to use for the color value
    *                                    // that follows the swatch.
+   *           - bezierSwatchClass: ""  // The class to use for bezier swatches.
+   *           - bezierClass: ""        // The class to use for the bezier value
+   *                                    // that follows the swatch.
    *           - isHTMLAttribute: false // This property indicates whether we
    *                                    // are parsing an HTML attribute value.
    *                                    // When the value is passed in from an
@@ -483,6 +560,8 @@ OutputParser.prototype = {
       defaultColorType: true,
       colorSwatchClass: "",
       colorClass: "",
+      bezierSwatchClass: "",
+      bezierClass: "",
       isHTMLAttribute: false,
       urlClass: "",
       baseURI: ""

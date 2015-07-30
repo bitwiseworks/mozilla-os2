@@ -8,7 +8,7 @@
 # verify the tests work
 include reftest-sanity/reftest.list
 
-# images (if libpr0n is busted, could result in weird failures in other tests)
+# images (if ImageLib is busted, could result in weird failures in other tests)
 include ../../image/test/reftest/reftest.list
 
 # CSSWG tests
@@ -17,6 +17,7 @@ include w3c-css/received/reftest.list
 
 # relative and absolute positioning
 include abs-pos/reftest.list
+include position-relative/reftest.list
 
 include async-scrolling/reftest.list
 
@@ -47,14 +48,18 @@ include box-shadow/reftest.list
 # bugs/
 include bugs/reftest.list
 
-# canvas 2D
+# canvas
 include canvas/reftest.list
+include ../../dom/canvas/test/reftest/reftest.list
 
 # css animations
 include css-animations/reftest.list
 
 # blending/
 include css-blending/reftest.list
+
+# Tests for the css-break spec
+include css-break/reftest.list
 
 # css calc() tests
 include css-calc/reftest.list
@@ -64,6 +69,9 @@ include css-charset/reftest.list
 
 # css default pseudo class tests
 include css-default/reftest.list
+
+# css-display spec tests
+include css-display/reftest.list
 
 # css :disable tests
 include css-disabled/reftest.list
@@ -85,6 +93,9 @@ include css-parsing/reftest.list
 
 # css placeholder
 include css-placeholder/reftest.list
+
+# css ruby
+include css-ruby/reftest.list
 
 # css required
 include css-required/reftest.list
@@ -137,6 +148,9 @@ include ../../content/test/reftest/reftest.list
 # counters/
 include counters/reftest.list
 
+# counter-style/
+include counter-style/reftest.list
+
 # datalist
 include datalist/reftest.list
 
@@ -155,6 +169,9 @@ include first-line/reftest.list
 # flexbox (display: flex, display: inline-flex)
 include flexbox/reftest.list
 
+# CSS Grid (display: grid, display: inline-grid)
+include css-grid/reftest.list
+
 # floats/
 include floats/reftest.list
 
@@ -165,7 +182,10 @@ include font-face/reftest.list
 include font-features/reftest.list
 
 # mobile font size inflation
-include font-inflation/reftest.list
+skip-if(B2G&&browserIsRemote) include font-inflation/reftest.list # Bug 972697
+
+# CSS Font Loading API
+include font-loading-api/reftest.list
 
 # font matching
 include font-matching/reftest.list
@@ -231,10 +251,10 @@ include outline/reftest.list
 include object/reftest.list
 
 # ogg-video/
-include ogg-video/reftest.list
+skip-if(!B2G&&browserIsRemote) include ogg-video/reftest.list
 
 # webm-video/
-include webm-video/reftest.list
+skip-if(!B2G&&browserIsRemote) include webm-video/reftest.list
 
 # parser/
 include ../../parser/htmlparser/tests/reftest/reftest.list
@@ -258,7 +278,7 @@ include pagination/reftest.list
 # <style scoped>
 include scoped-style/reftest.list
 
-# scrolling 
+# scrolling
 include scrolling/reftest.list
 
 # selection
@@ -289,6 +309,8 @@ include table-overflow/reftest.list
 
 # table-width/
 include table-width/reftest.list
+
+include ../tables/reftests/reftest.list
 
 # text/
 include text/reftest.list
@@ -349,8 +371,7 @@ include ../xul/grid/reftests/reftest.list
 include z-index/reftest.list
 
 # reftest(s) to verify content bugfixes
-include ../../content/html/document/reftests/reftests.list
-include ../../content/html/content/reftests/reftest.list
+include ../../dom/html/reftests/reftest.list
 include ../../dom/imptests/reftest.list
 
 # editor/

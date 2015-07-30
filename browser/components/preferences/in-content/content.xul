@@ -1,8 +1,15 @@
-<!-- This Source Code Form is subject to the terms of the Mozilla Public
-   - License, v. 2.0. If a copy of the MPL was not distributed with this file,
-   - You can obtain one at http://mozilla.org/MPL/2.0/.  -->
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-<preferences id="contentPreferences">
+<!-- Content panel -->
+
+<preferences id="contentPreferences" hidden="true" data-category="paneContent">
+
+  <!-- DRM content -->
+  <preference id="media.eme.enabled"
+              name="media.eme.enabled"
+              type="bool"/>
 
   <!-- Popups -->
   <preference id="dom.disable_open_during_load"
@@ -12,27 +19,49 @@
   <!-- Fonts -->
   <preference id="font.language.group"
               name="font.language.group"
-              type="wstring"
-              onchange="gContentPane._rebuildFonts();"/>
+              type="wstring"/>
+
+  <!-- Languages -->
+  <preference id="browser.translation.detectLanguage"
+              name="browser.translation.detectLanguage"
+              type="bool"/>
 </preferences>
 
-<script type="application/javascript" 
+<script type="application/javascript"
         src="chrome://mozapps/content/preferences/fontbuilder.js"/>
-<script type="application/javascript" 
+<script type="application/javascript"
         src="chrome://browser/content/preferences/in-content/content.js"/>
 
 <hbox id="header-content"
       class="header"
       hidden="true"
       data-category="paneContent">
-  <image class="header-icon"/>
-  <label class="header-name"
-         value="&paneContent.title;"/>
+  <label class="header-name">&paneContent.title;</label>
 </hbox>
 
-<groupbox id="miscGroup" data-category="paneContent" hidden="true">
-  <caption label="&popups.label;"/>
+<groupbox id="drmGroup" data-category="paneContent" hidden="true">
+  <caption><label>&drmContent.label;</label></caption>
+  <grid id="contentGrid2">
+    <columns>
+      <column flex="1"/>
+      <column/>
+    </columns>
+    <rows id="contentRows-2">
+      <row id="playDRMContentRow">
+        <vbox align="start">
+          <checkbox id="playDRMContent" preference="media.eme.enabled"
+                    label="&playDRMContent.label;" accesskey="&playDRMContent.accesskey;"/>
+        </vbox>
+        <hbox pack="end" align="center">
+          <label id="playDRMContentLink" class="text-link" value="&playDRMContent.learnMore.label;"/>
+        </hbox>
+      </row>
+    </rows>
+  </grid>
+</groupbox>
 
+<groupbox id="miscGroup" data-category="paneContent" hidden="true">
+  <caption><label>&popups.label;</label></caption>
   <grid id="contentGrid">
     <columns>
       <column flex="1"/>
@@ -46,9 +75,10 @@
                     onsyncfrompreference="return gContentPane.updateButtons('popupPolicyButton',
                                                                         'dom.disable_open_during_load');"/>
         </vbox>
-        <button id="popupPolicyButton" label="&popupExceptions.label;"
-                oncommand="gContentPane.showPopupExceptions();"
-                accesskey="&popupExceptions.accesskey;"/>
+        <hbox pack="end">
+          <button id="popupPolicyButton" label="&popupExceptions.label;"
+                  accesskey="&popupExceptions.accesskey;"/>
+        </hbox>
       </row>
     </rows>
   </grid>
@@ -56,7 +86,7 @@
 
 <!-- Fonts and Colors -->
 <groupbox id="fontsGroup" data-category="paneContent" hidden="true">
-  <caption label="&fontsAndColors.label;"/>
+  <caption><label>&fontsAndColors.label;</label></caption>
 
   <grid id="fontsGrid">
     <columns>
@@ -101,15 +131,13 @@
         </hbox>
         <button id="advancedFonts" icon="select-font"
                 label="&advancedFonts.label;"
-                accesskey="&advancedFonts.accesskey;"
-                oncommand="gContentPane.configureFonts();"/>
+                accesskey="&advancedFonts.accesskey;"/>
       </row>
       <row id="colorsRow">
         <hbox/>
         <button id="colors" icon="select-color"
                 label="&colors.label;"
-                accesskey="&colors.accesskey;"
-                oncommand="gContentPane.configureColors();"/>
+                accesskey="&colors.accesskey;"/>
       </row>
     </rows>
   </grid>
@@ -117,13 +145,29 @@
 
 <!-- Languages -->
 <groupbox id="languagesGroup" data-category="paneContent" hidden="true">
-  <caption label="&languages.label;"/>
+  <caption><label>&languages.label;</label></caption>
 
   <hbox id="languagesBox" align="center">
     <description flex="1" control="chooseLanguage">&chooseLanguage.label;</description>
     <button id="chooseLanguage"
             label="&chooseButton.label;"
-            accesskey="&chooseButton.accesskey;"
-            oncommand="gContentPane.showLanguages();"/>
+            accesskey="&chooseButton.accesskey;"/>
+  </hbox>
+
+  <hbox id="translationBox" hidden="true">
+    <hbox align="center" flex="1">
+      <checkbox id="translate" preference="browser.translation.detectLanguage"
+                label="&translateWebPages.label;." accesskey="&translateWebPages.accesskey;"
+                onsyncfrompreference="return gContentPane.updateButtons('translateButton',
+                                              'browser.translation.detectLanguage');"/>
+      <label>&translation.options.attribution.beforeLogo;</label>
+      <separator orient="vertical" class="thin"/>
+      <image id="translationAttributionImage" aria-label="Microsoft Translator"
+             src="chrome://browser/content/microsoft-translator-attribution.png"/>
+      <separator orient="vertical" class="thin"/>
+      <label>&translation.options.attribution.afterLogo;</label>
+    </hbox>
+    <button id="translateButton" label="&translateExceptions.label;"
+            accesskey="&translateExceptions.accesskey;"/>
   </hbox>
 </groupbox>

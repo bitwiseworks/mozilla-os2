@@ -17,10 +17,16 @@ Cu.import("resource://gre/modules/services/datareporting/policy.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://testing-common/services-common/bagheeraserver.js");
+Cu.import("resource://testing-common/services/common/bagheeraserver.js");
 Cu.import("resource://testing-common/services/metrics/mocks.jsm");
 Cu.import("resource://testing-common/services/healthreport/utils.jsm");
 Cu.import("resource://testing-common/AppData.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyGetter(this, "gDatareportingService",
+  () => Cc["@mozilla.org/datareporting/service;1"]
+          .getService(Ci.nsISupports)
+          .wrappedJSObject);
 
 
 const DUMMY_URI = "http://localhost:62013/";
@@ -92,7 +98,29 @@ function getHealthReportProviderValues(reporter, day=null) {
   });
 }
 
+/*
+ * Ensure that the notification has been displayed to the user therefore having
+ * reporter._policy.userNotifiedOfCurrentPolicy === true, which will allow for a
+ * successful data upload.
+ * @param  {HealthReporter} reporter
+ * @return {Promise}
+ */
+function ensureUserNotified (reporter) {
+  return Task.spawn(function* ensureUserNotified () {
+    reporter._policy.ensureUserNotified();
+    yield reporter._policy._listener.lastNotifyRequest.deferred.promise;
+    do_check_true(reporter._policy.userNotifiedOfCurrentPolicy);
+  });
+}
+
 function run_test() {
+  do_get_profile();
+
+  // Send the needed startup notifications to the datareporting service
+  // to ensure that it has been initialized.
+  gDatareportingService.observe(null, "app-startup", null);
+  gDatareportingService.observe(null, "profile-after-change", null);
+
   run_next_test();
 }
 
@@ -103,7 +131,6 @@ add_task(function test_init() {
 
 add_task(function test_constructor() {
   let reporter = yield getReporter("constructor");
-
   try {
     do_check_eq(reporter.lastPingDate.getTime(), 0);
     do_check_null(reporter.lastSubmitID);
@@ -124,7 +151,7 @@ add_task(function test_constructor() {
       failed = false;
     }
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -134,7 +161,7 @@ add_task(function test_shutdown_normal() {
   // We can't send "quit-application" notification because the xpcshell runner
   // will shut down!
   reporter._initiateShutdown();
-  reporter._waitForShutdown();
+  yield reporter._promiseShutdown;
 });
 
 add_task(function test_shutdown_storage_in_progress() {
@@ -147,7 +174,7 @@ add_task(function test_shutdown_storage_in_progress() {
 
   reporter.init();
 
-  reporter._waitForShutdown();
+  yield reporter._promiseShutdown;
   do_check_eq(reporter.providerManagerShutdownCount, 0);
   do_check_eq(reporter.storageCloseCount, 1);
 });
@@ -166,7 +193,7 @@ add_task(function test_shutdown_provider_manager_in_progress() {
   reporter.init();
 
   // This will hang if shutdown logic is busted.
-  reporter._waitForShutdown();
+  yield reporter._promiseShutdown;
   do_check_eq(reporter.providerManagerShutdownCount, 1);
   do_check_eq(reporter.storageCloseCount, 1);
 });
@@ -176,15 +203,21 @@ add_task(function test_shutdown_when_provider_manager_errors() {
   let reporter = yield getHealthReporter("shutdown_when_provider_manager_errors",
                                        DUMMY_URI, true);
 
+  let error = new Error("Fake error during provider manager initialization.");
   reporter.onInitializeProviderManagerFinished = function () {
     print("Throwing fake error.");
-    throw new Error("Fake error during provider manager initialization.");
+    throw error;
   };
 
-  reporter.init();
+  try {
+    yield reporter.init();
+    do_throw("The error was not reported by init()");
+  } catch (ex if ex == error) {
+    do_print("The error was reported by init()");
+  }
 
   // This will hang if shutdown logic is busted.
-  reporter._waitForShutdown();
+  yield reporter._promiseShutdown;
   do_check_eq(reporter.providerManagerShutdownCount, 1);
   do_check_eq(reporter.storageCloseCount, 1);
 });
@@ -221,7 +254,7 @@ add_task(function test_pull_only_providers() {
     let values = yield reporter._storage.getMeasurementValues(mID);
     do_check_true(values.singular.size > 0);
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -252,7 +285,7 @@ add_task(function test_collect_daily() {
     yield reporter.collectMeasurements();
     do_check_eq(provider.collectDailyCount, 3);
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -276,7 +309,7 @@ add_task(function test_remove_old_lastpayload() {
       do_check_false(yield OS.File.exists(path));
     }
     yield reporter._state.save();
-    reporter._shutdown();
+    yield reporter._shutdown();
 
     let o = yield CommonUtils.readJSON(reporter._state._filename);
     do_check_true(o.removedOutdatedLastpayload);
@@ -288,7 +321,7 @@ add_task(function test_remove_old_lastpayload() {
       do_check_true(yield OS.File.exists(path));
     }
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -327,7 +360,7 @@ add_task(function test_json_payload_simple() {
     payload = yield reporter.getJSONPayload(true);
     do_check_eq(typeof payload, "object");
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -346,7 +379,7 @@ add_task(function test_json_payload_dummy_provider() {
     do_check_true(name in o.data.last);
     do_check_eq(o.data.last[name]._v, 1);
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -364,7 +397,7 @@ add_task(function test_collect_and_obtain_json_payload() {
     payload = yield reporter.collectAndObtainJSONPayload(true);
     do_check_eq(typeof payload, "object");
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -420,7 +453,7 @@ add_task(function test_constant_only_providers_in_json_payload() {
 
     yield deferred.promise;
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -455,7 +488,7 @@ add_task(function test_json_payload_multiple_days() {
     let today = reporter._formatDate(now);
     do_check_true(today in o.data.days);
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -532,7 +565,7 @@ add_task(function test_json_payload_newer_version_overwrites() {
     do_check_eq(o.data.days[day]["MultiMeasurementProvider.DummyMeasurement"]._v, highestVersion);
 
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -557,7 +590,7 @@ add_task(function test_idle_daily() {
     values = yield m.getValues();
     do_check_eq(values.days.size, 180);
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -647,7 +680,7 @@ add_task(function test_data_submission_success() {
     let id = reporter.lastSubmitID;
     let clientID = reporter._state.clientID;
 
-    reporter._shutdown();
+    yield reporter._shutdown();
 
     // Ensure reloading state works.
     reporter = yield getReporter("data_submission_success");
@@ -655,7 +688,7 @@ add_task(function test_data_submission_success() {
     do_check_eq(reporter.lastPingDate.getTime(), d.getTime());
     do_check_eq(reporter._state.clientID, clientID);
 
-    reporter._shutdown();
+    yield reporter._shutdown();
   } finally {
     yield shutdownServer(server);
   }
@@ -668,9 +701,8 @@ add_task(function test_recurring_daily_pings() {
 
     let policy = reporter._policy;
 
-    defineNow(policy, policy._futureDate(-24 * 60 * 68 * 1000));
-    policy.recordUserAcceptance();
     defineNow(policy, policy.nextDataSubmissionDate);
+    yield ensureUserNotified(reporter);
     let promise = policy.checkStateAndTrigger();
     do_check_neq(promise, null);
     yield promise;
@@ -707,8 +739,8 @@ add_task(function test_request_remote_data_deletion() {
   try {
     let policy = reporter._policy;
     defineNow(policy, policy._futureDate(-24 * 60 * 60 * 1000));
-    policy.recordUserAcceptance();
     defineNow(policy, policy.nextDataSubmissionDate);
+    yield ensureUserNotified(reporter);
     yield policy.checkStateAndTrigger();
     let id = reporter.lastSubmitID;
     do_check_neq(id, null);
@@ -726,7 +758,7 @@ add_task(function test_request_remote_data_deletion() {
     do_check_false(reporter.haveRemoteData());
     do_check_false(server.hasDocument(reporter.serverNamespace, id));
 
-    // Client ID should be updated.
+     // Client ID should be updated.
     do_check_neq(reporter._state.clientID, null);
     do_check_neq(reporter._state.clientID, clientID);
     do_check_eq(reporter._state.clientIDVersion, 1);
@@ -795,18 +827,14 @@ add_task(function test_policy_accept_reject() {
   try {
     let policy = reporter._policy;
 
-    do_check_false(policy.dataSubmissionPolicyAccepted);
+    do_check_eq(policy.dataSubmissionPolicyNotifiedDate.getTime(), 0);
+    do_check_true(policy.dataSubmissionPolicyAcceptedVersion < DATAREPORTING_POLICY_VERSION);
     do_check_false(reporter.willUploadData);
 
-    policy.recordUserAcceptance();
-    do_check_true(policy.dataSubmissionPolicyAccepted);
+    yield ensureUserNotified(reporter);
     do_check_true(reporter.willUploadData);
-
-    policy.recordUserRejection();
-    do_check_false(policy.dataSubmissionPolicyAccepted);
-    do_check_false(reporter.willUploadData);
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
     yield shutdownServer(server);
   }
 });
@@ -829,7 +857,7 @@ add_task(function test_error_message_scrubbing() {
     reporter._recordError("Foo " + uri.spec);
     do_check_eq(reporter._errors[0], "Foo <AppDataURI>");
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -855,7 +883,7 @@ add_task(function test_basic_appinfo() {
     do_check_eq(payload["version"], 2);
     verify(payload["geckoAppInfo"]);
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -876,13 +904,13 @@ add_task(function test_collect_when_upload_disabled() {
     // We would ideally ensure the timer fires and does the right thing.
     // However, testing the update timer manager is quite involved.
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
 add_task(function test_failure_if_not_initialized() {
   let reporter = yield getReporter("failure_if_not_initialized");
-  reporter._shutdown();
+  yield reporter._shutdown();
 
   let error = false;
   try {
@@ -910,13 +938,15 @@ add_task(function test_failure_if_not_initialized() {
 });
 
 add_task(function test_upload_on_init_failure() {
+  let MESSAGE = "Fake error during provider manager initialization." + Math.random();
+
   let server = new BagheeraServer();
   server.start();
   let reporter = yield getHealthReporter("upload_on_init_failure", server.serverURI, true);
   server.createNamespace(reporter.serverNamespace);
 
   reporter.onInitializeProviderManagerFinished = function () {
-    throw new Error("Fake error during provider manager initialization.");
+    throw new Error(MESSAGE);
   };
 
   let deferred = Promise.defer();
@@ -933,9 +963,9 @@ add_task(function test_upload_on_init_failure() {
     },
   });
 
-  reporter._policy.recordUserAcceptance();
   let error = false;
   try {
+    yield ensureUserNotified(reporter);
     yield reporter.init();
   } catch (ex) {
     error = true;
@@ -954,10 +984,43 @@ add_task(function test_upload_on_init_failure() {
   do_check_eq(doc.notInitialized, 1);
   do_check_true("errors" in doc);
   do_check_eq(doc.errors.length, 1);
-  do_check_true(doc.errors[0].contains("Fake error during provider manager initialization"));
+  do_check_true(doc.errors[0].contains(MESSAGE));
 
-  reporter._shutdown();
+  yield reporter._shutdown();
   yield shutdownServer(server);
+});
+
+// Simulate a SQLite write error during upload.
+add_task(function* test_upload_with_provider_record_failure() {
+  let [reporter, server] = yield getReporterAndServer("upload_with_provider_record_failure");
+  try {
+    // Poison the FHR provider to simulate database error or some other
+    // catastrophic failure. We do this because this provider is written to
+    // during upload and failure to catch errors would result in upload not
+    // occurring.
+    let provider = reporter.getProvider("org.mozilla.healthreport");
+
+    let wrappedProto = {
+      __proto__: HealthReportProvider.prototype,
+
+      recordEvent: function (event, date=new Date()) {
+        this._log.warn("Simulating error during write");
+        throw new Error("Fake error during recordEvent.");
+      },
+    };
+    provider.__proto__ = wrappedProto;
+
+    let deferred = Promise.defer();
+    let now = new Date();
+    let request = new DataSubmissionRequest(deferred, now);
+    reporter._state.addRemoteID("foo");
+    reporter.requestDataUpload(request);
+    yield deferred.promise;
+    do_check_eq(request.state, request.SUBMISSION_SUCCESS);
+  } finally {
+    yield reporter._shutdown();
+    yield shutdownServer(server);
+  }
 });
 
 add_task(function test_state_prefs_conversion_simple() {
@@ -982,7 +1045,7 @@ add_task(function test_state_prefs_conversion_simple() {
     do_check_false(prefs.isSet("lastSubmitID"));
     do_check_false(prefs.isSet("lastPingTime"));
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -1004,7 +1067,7 @@ add_task(function test_state_no_json_object() {
     do_check_eq(o.lastPingTime, 0);
     do_check_eq(o.remoteIDs.length, 0);
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -1025,7 +1088,7 @@ add_task(function test_state_future_version() {
     do_check_eq(o.lastPingTime, 2412);
     do_check_eq(o.remoteIDs.length, 1);
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -1044,7 +1107,7 @@ add_task(function test_state_invalid_json() {
     do_check_eq(reporter.lastPingDate.getTime(), 0);
     do_check_null(reporter.lastSubmitID);
   } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -1085,7 +1148,7 @@ add_task(function test_state_multiple_remote_ids() {
     do_check_eq(o.lastPingTime, reporter.lastPingDate.getTime());
   } finally {
     yield shutdownServer(server);
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -1117,39 +1180,7 @@ add_task(function test_state_downgrade_upgrade() {
     do_check_eq(o.remoteIDs.length, 3);
     do_check_eq(o.lastPingTime, now.getTime() + 1000);
   } finally {
-    reporter._shutdown();
-  }
-});
-
-// Missing client ID in state should be created on state load.
-add_task(function* test_state_create_client_id() {
-  let reporter = getHealthReporter("state_create_client_id");
-
-  yield CommonUtils.writeJSON({
-    v: 1,
-    remoteIDs: ["id1", "id2"],
-    lastPingTime: Date.now(),
-    removeOutdatedLastPayload: true,
-  }, reporter._state._filename);
-
-  try {
-    yield reporter.init();
-
-    do_check_eq(reporter.lastSubmitID, "id1");
-    do_check_neq(reporter._state.clientID, null);
-    do_check_eq(reporter._state.clientID.length, 36);
-    do_check_eq(reporter._state.clientIDVersion, 1);
-
-    let clientID = reporter._state.clientID;
-
-    // The client ID should be persisted as soon as it is created.
-    reporter._shutdown();
-
-    reporter = getHealthReporter("state_create_client_id");
-    yield reporter.init();
-    do_check_eq(reporter._state.clientID, clientID);
-  } finally {
-    reporter._shutdown();
+    yield reporter._shutdown();
   }
 });
 
@@ -1192,6 +1223,62 @@ add_task(function* test_nonstring_client_id() {
     do_check_neq(reporter._state.clientID, null);
     do_check_eq(reporter._state.clientID.length, 36);
   } finally {
+    reporter._shutdown();
+  }
+});
+
+function UnicodeMeasurement() {
+  Metrics.Measurement.call(this);
+}
+
+UnicodeMeasurement.prototype = {
+  __proto__: Metrics.Measurement.prototype,
+
+  name: "unicode",
+  version: 1,
+
+  fields: {
+    "last-text": {type: Metrics.Storage.FIELD_LAST_TEXT},
+  },
+};
+
+function UnicodeProvider() {
+  Metrics.Provider.call(this);
+}
+
+UnicodeProvider.prototype = {
+  __proto__: Metrics.Provider.prototype,
+
+  name: "unicode",
+
+  measurementTypes: [UnicodeMeasurement],
+
+  collectConstantData: function () {
+    return this.enqueueStorageOperation(() => {
+      let m = this.getMeasurement("unicode", 1);
+      return m.setLastText("last-text", "ᄃᄄᄅ");
+    });
+  },
+};
+
+// Check for proper handling of Unicode in payload.
+add_task(function* test_unicode_payload() {
+  let [reporter, server] = yield getReporterAndServer("unicode_payload");
+  try {
+    yield reporter._providerManager.registerProviderFromType(UnicodeProvider);
+
+    let deferred = Promise.defer();
+    let request = new DataSubmissionRequest(deferred, new Date());
+    reporter.requestDataUpload(request);
+    yield deferred.promise;
+    Assert.equal(request.state, request.SUBMISSION_SUCCESS);
+    Assert.ok(server.hasDocument(reporter.serverNamespace, reporter.lastSubmitID));
+
+    let p = server.getDocument(reporter.serverNamespace, reporter.lastSubmitID);
+    let v = p.data.last['unicode.unicode']['last-text'];
+    Assert.equal(v, "ᄃᄄᄅ");
+  } finally {
+    yield shutdownServer(server);
     reporter._shutdown();
   }
 });

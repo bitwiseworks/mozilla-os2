@@ -16,6 +16,14 @@
 #include "nsSetDllDirectory.h"
 #endif
 
+#if defined(MOZ_METRO) || defined(__GNUC__)
+#define XRE_DONT_SUPPORT_XPSP2
+#endif
+
+#ifndef XRE_DONT_SUPPORT_XPSP2
+#include "WindowsCrtPatch.h"
+#endif
+
 #ifdef __MINGW32__
 
 /* MingW currently does not implement a wide version of the
@@ -76,6 +84,10 @@ FreeAllocStrings(int argc, char **argv)
 
 int wmain(int argc, WCHAR **argv)
 {
+#if !defined(XRE_DONT_SUPPORT_XPSP2)
+  WindowsCrtPatch::Init();
+#endif
+
 #ifndef XRE_DONT_PROTECT_DLL_LOAD
   mozilla::SanitizeEnvironmentVariables();
   SetDllDirectoryW(L"");

@@ -36,10 +36,11 @@ using namespace mozilla::layers;
 
 namespace android {
 
-GonkNativeWindow::GonkNativeWindow() :
-    GonkConsumerBase(new GonkBufferQueue(true) )
+GonkNativeWindow::GonkNativeWindow(int bufferCount) :
+    GonkConsumerBase(new GonkBufferQueue(true) ),
+    mNewFrameCallback(nullptr)
 {
-    mBufferQueue->setMaxAcquiredBufferCount(GonkBufferQueue::MIN_UNDEQUEUED_BUFFERS);
+    mBufferQueue->setMaxAcquiredBufferCount(bufferCount);
 }
 
 GonkNativeWindow::~GonkNativeWindow() {
@@ -150,10 +151,9 @@ void GonkNativeWindow::returnBuffer(TextureClient* client) {
       fence = Fence::NO_FENCE;
     }
 
-    status_t err;
-    err = addReleaseFenceLocked(index, fence);
+    addReleaseFenceLocked(index, fence);
 
-    err = releaseBufferLocked(index);
+    releaseBufferLocked(index);
 }
 
 TemporaryRef<TextureClient>

@@ -17,6 +17,8 @@
 
 namespace webrtc {
 
+namespace acm2 {
+
 #ifndef WEBRTC_CODEC_ILBC
 
 ACMILBC::ACMILBC(int16_t /* codec_id */) : encoder_inst_ptr_(NULL) {}
@@ -37,8 +39,6 @@ ACMGenericCodec* ACMILBC::CreateInstance(void) { return NULL; }
 int16_t ACMILBC::InternalCreateEncoder() { return -1; }
 
 void ACMILBC::DestructEncoderSafe() { return; }
-
-void ACMILBC::InternalDestructEncoderInst(void* /* ptr_inst */) { return; }
 
 int16_t ACMILBC::SetBitRateSafe(const int32_t /* rate */) { return -1; }
 
@@ -115,13 +115,6 @@ void ACMILBC::DestructEncoderSafe() {
   }
 }
 
-void ACMILBC::InternalDestructEncoderInst(void* ptr_inst) {
-  if (ptr_inst != NULL) {
-    WebRtcIlbcfix_EncoderFree(static_cast<iLBC_encinst_t_*>(ptr_inst));
-  }
-  return;
-}
-
 int16_t ACMILBC::SetBitRateSafe(const int32_t rate) {
   // Check that rate is valid. No need to store the value
   if (rate == 13300) {
@@ -137,5 +130,7 @@ int16_t ACMILBC::SetBitRateSafe(const int32_t rate) {
 }
 
 #endif
+
+}  // namespace acm2
 
 }  // namespace webrtc

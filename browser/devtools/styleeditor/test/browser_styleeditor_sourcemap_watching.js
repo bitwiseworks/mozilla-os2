@@ -6,15 +6,13 @@ Components.utils.import("resource://gre/modules/Task.jsm");
 let {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
 let {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
 
-const TESTCASE_URI_HTML = TEST_BASE + "sourcemaps.html";
+const TESTCASE_URI_HTML = TEST_BASE + "sourcemaps-watching.html";
 const TESTCASE_URI_CSS = TEST_BASE + "sourcemap-css/sourcemaps.css";
-const TESTCASE_URI_CSS2 = TEST_BASE + "sourcemap-css/contained.css";
 const TESTCASE_URI_REG_CSS = TEST_BASE + "simple.css";
 const TESTCASE_URI_SCSS = TEST_BASE + "sourcemap-sass/sourcemaps.scss";
 const TESTCASE_URI_MAP = TEST_BASE + "sourcemap-css/sourcemaps.css.map";
 const TESTCASE_SCSS_NAME = "sourcemaps.scss";
 
-const SOURCE_MAP_PREF = "devtools.styleeditor.source-maps-enabled";
 const TRANSITIONS_PREF = "devtools.styleeditor.transitions";
 
 const CSS_TEXT = "* { color: blue }";
@@ -32,14 +30,12 @@ function test()
 {
   waitForExplicitFinish();
 
-  Services.prefs.setBoolPref(SOURCE_MAP_PREF, true);
   Services.prefs.setBoolPref(TRANSITIONS_PREF, false);
 
   Task.spawn(function() {
     // copy all our files over so we don't screw them up for other tests
     let HTMLFile = yield copy(TESTCASE_URI_HTML, ["sourcemaps.html"]);
     let CSSFile = yield copy(TESTCASE_URI_CSS, ["sourcemap-css", "sourcemaps.css"]);
-    let CSSFile2 = yield copy(TESTCASE_URI_CSS2, ["sourcemap-css", "contained.css"]);
     yield copy(TESTCASE_URI_SCSS, ["sourcemap-sass", "sourcemaps.scss"]);
     yield copy(TESTCASE_URI_MAP, ["sourcemap-css", "sourcemaps.css.map"]);
     yield copy(TESTCASE_URI_REG_CSS, ["simple.css"]);
@@ -76,7 +72,7 @@ function test()
 function openEditor(testcaseURI) {
   let deferred = promise.defer();
 
-  addTabAndOpenStyleEditors(5, panel => {
+  addTabAndOpenStyleEditors(3, panel => {
     let UI = panel.UI;
 
     // wait for 5 editors - 1 for first style sheet, 2 for the
@@ -128,7 +124,6 @@ function pauseForTimeChange() {
 }
 
 function finishUp() {
-  Services.prefs.clearUserPref(SOURCE_MAP_PREF);
   Services.prefs.clearUserPref(TRANSITIONS_PREF);
   finish();
 }
@@ -155,7 +150,14 @@ function read(aSrcChromeURL)
   let scriptableStream = Cc["@mozilla.org/scriptableinputstream;1"]
     .getService(Ci.nsIScriptableInputStream);
 
-  let channel = Services.io.newChannel(aSrcChromeURL, null, null);
+  let channel = Services.io.newChannel2(aSrcChromeURL,
+                                        null,
+                                        null,
+                                        null,      // aLoadingNode
+                                        Services.scriptSecurityManager.getSystemPrincipal(),
+                                        null,      // aTriggeringPrincipal
+                                        Ci.nsILoadInfo.SEC_NORMAL,
+                                        Ci.nsIContentPolicy.TYPE_OTHER);
   let input = channel.open();
   scriptableStream.init(input);
 

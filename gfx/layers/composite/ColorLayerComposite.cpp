@@ -11,7 +11,7 @@
 #include "mozilla/gfx/Rect.h"           // for Rect
 #include "mozilla/gfx/Types.h"          // for Color
 #include "mozilla/layers/Compositor.h"  // for Compositor
-#include "mozilla/layers/CompositorTypes.h"  // for DIAGNOSTIC_COLOR
+#include "mozilla/layers/CompositorTypes.h"  // for DiagnosticFlags::COLOR
 #include "mozilla/layers/Effects.h"     // for Effect, EffectChain, etc
 #include "mozilla/mozalloc.h"           // for operator delete, etc
 #include "nsPoint.h"                    // for nsIntPoint
@@ -24,11 +24,9 @@ void
 ColorLayerComposite::RenderLayer(const nsIntRect& aClipRect)
 {
   EffectChain effects(this);
-  gfxRGBA color(GetColor());
-  effects.mPrimaryEffect = new EffectSolidColor(gfx::Color(color.r,
-                                                           color.g,
-                                                           color.b,
-                                                           color.a));
+
+  GenEffectChain(effects);
+
   nsIntRect boundRect = GetBounds();
 
   LayerManagerComposite::AutoAddMaskEffect autoMaskEffect(GetMaskLayer(),
@@ -41,11 +39,24 @@ ColorLayerComposite::RenderLayer(const nsIntRect& aClipRect)
 
   float opacity = GetEffectiveOpacity();
 
+  AddBlendModeEffect(effects);
+
   const gfx::Matrix4x4& transform = GetEffectiveTransform();
   mCompositor->DrawQuad(rect, clipRect, effects, opacity, transform);
-  mCompositor->DrawDiagnostics(DIAGNOSTIC_COLOR,
+  mCompositor->DrawDiagnostics(DiagnosticFlags::COLOR,
                                rect, clipRect,
                                transform);
+}
+
+void
+ColorLayerComposite::GenEffectChain(EffectChain& aEffect)
+{
+  aEffect.mLayerRef = this;
+  gfxRGBA color(GetColor());
+  aEffect.mPrimaryEffect = new EffectSolidColor(gfx::Color(color.r,
+                                                           color.g,
+                                                           color.b,
+                                                           color.a));
 }
 
 } /* layers */
